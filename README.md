@@ -448,22 +448,51 @@ hook error never blocks work:
     data. **Why wasn't a result compressed?**
     set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one
     JSONL line per call records the `decision` (`compressed` / `stubbed` / `passthrough`) and, on a
-    passthrough, the `reason` (`size-gate`, `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`,
+    passthrough, the `reason` (`error-shape`, `non-json`, `unrecognized-shape`, `no-gain`,
     `marker-overhead` (the win was smaller than the `full=` recovery handle, so the original was handed
     back), `platform-overflow` — the platform's own over-limit notice, whose `spill` field holds the
-    file it saved the whale to). On a `stubbed` line the
+    file it saved the whale to; plus `size-gate` for a result under the 4 KB gate, which is *sub-gate
+    noise* — three quarters of a real week's lines — and is therefore recorded only at
+    `FND_MCP_SLIM_DEBUG=2`, the everything level). `no-gain` — the most common one — means the pipeline
+    ran and produced byte-identical output, most often on a uniform array of **unique entities**: same
+    keys on every row, per-row distinct ids / handles / URLs / titles, no error row, no low-cardinality
+    status column, no numeric outlier or change-point. Sampling such an array is refused *by design*
+    (`unique_entities_no_signal`, the same gate the upstream crusher ships): every row a 15-row sample
+    dropped would be unique content, so the sample would misrepresent the result — and nothing else is
+    compressible without re-encoding the table. The identical shape *does* crush once a signal appears
+    (an error row, a status enum, a numeric column with an outlier), which is why one dump can report
+    0 % and its next page 99 %. Above `FND_MCP_SLIM_STUB_BYTES` the spill-and-stub guard is what
+    protects context here — and because a second whole-file run would only print the same bytes back, that
+    stub names the narrowing command (`--jq <dot.path>`) instead of a bare re-run; below the threshold the
+    result lands in full and `--jq` narrows it. On a `stubbed` line the
     `reason` instead names the branch the stub replaced (`non-json`, `no-gain`, `weak-gain` — the last
-    one is a compression that stayed over the threshold). **What did it all add
+    one is a compression that stayed over the threshold). Lines that wrote files also list them in
+    `spills` — the call's own `full=` copy plus the crush / node-id-map spills written inside it, and on
+    a CLI run (which has no `full=` copy) Gate A's `fnd-slim-out-*` body
+    (`spills_n` when that list is capped at 8); a line with **no** `spills` key left nothing on disk.
+    Together that makes an orphan visible in the log rather than only on disk. Spill filenames are content
+    hashes, so the same payload passing through twice reuses one file instead of adding another. Each line
+    also records the `lvl` it was collected at (see `FND_MCP_SLIM_DEBUG`). **What did it all add
     up to?** `node scripts/json-slim.cjs --report [logfile] [--since <ISO>]` (default: the log above)
     prints totals, counts per decision/reason/stage, the top hook tools by bytes saved (CLI runs, keyed
-    by file path rather than tool name, get one aggregate line), per-project subtotals,
+    by file path rather than tool name, get one aggregate line — with the whole-file runs that reduced
+    *nothing* counted separately, since those read a file into context for no gain; a `--jq` run is
+    excluded, it answered a sub-path), per-project subtotals, how many
+    DISTINCT spill files the window left behind (paths are deduped across events, so the content-hash
+    reuse above shows up as one file, not one per call),
     and the **missed whales** — `platform-overflow` results no later `json-slim` run ever compressed.
     Results that were **stubbed** (above) get their own line and count as bytes saved, never as missed
-    whales. A `non-json` line also carries a
+    whales; a stub whose follow-up run gained nothing is called out there too. Totals collected at level 1
+    are labelled as such (the sub-gate lines are missing from them, which inflates the %), and a log that
+    straddles a switch between levels is flagged as not comparable instead of averaged — missed whales,
+    stubs and stage counts are complete at every level. A `non-json` line also carries a
     `format` tag (`html` / `xml` / `broken-json` / `text`) so you can see WHAT slipped past the
     JSON-only pipeline (`grep '"format":"xml"' fnd-mcp-slim-debug.log`); every line carries a
-    `project` tag (the cwd basename) since the log is shared per-user across projects
-    (`grep '"project":"my-repo"'`). *Coexistence:* if you also run
+    `project` tag — the nearest `.git` ancestor of the call's own cwd, else `CLAUDE_PROJECT_DIR`, else that
+    cwd's basename — since the log is shared per-user across projects
+    (`grep '"project":"my-repo"'`). The `.git` walk leads because Claude Code exports
+    `CLAUDE_PROJECT_DIR` to hooks but not to the Bash tool, so it is the one rule both the hook and the CLI
+    can follow; a CLI run from a scratch dir outside any repo still tags that dir. *Coexistence:* if you also run
     [`squeez`](https://github.com/claudioemmanuel/squeez), both its PostToolUse hook and `mcp-slim`
     fire on `mcp__*` results — expect them to stack.
 
@@ -484,11 +513,12 @@ added to this table.
 | `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a spill file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume); `0` disables the sweep; any invalid value falls back to `24` |
-| `FND_MCP_SLIM_DEBUG` | off | opt-in (`1`/`true`): append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, decision, reason, `format` on non-json, bytes, %, stages — never any payload); rotates one generation at ~5 MB. Unset ⇒ no file written |
+| `FND_MCP_SLIM_DEBUG` | off | opt-in: append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, `lvl`, decision, reason, `format` on non-json, `narrowed` on a `--jq` CLI run, bytes, %, stages, `spills` — never any payload); rotates one generation at ~5 MB. `1` (or `true`/`yes`/`on`) = **key events**: everything except the sub-gate `size-gate` lines for results under the 4 KB gate, which were ~76 % of a real week's log. `2` (any integer ≥ 2) = **everything**, sub-gate lines included. Unset / `0` / `false` / an unrecognized value ⇒ no file written. The level rides on each line as `lvl`, so `--report` can say which of its numbers cover a partial event set — a `1` window's totals % is not comparable with a `2` window's |
 | `FND_MCP_SLIM_STUB` | `1` | `0` disables the spill-and-stub guard: a result the compressor cannot bring under the threshold is then handed to the model raw again, instead of as a ~1 KB stub + spill |
 | `FND_MCP_SLIM_STUB_BYTES` | `32768` | bytes above which the `mcp-slim` hook spills-and-stubs instead of passing a whale through (also applies to a compressed body that is still this large); any invalid value falls back to `32768`, never to `0`, and any value below the stub's own ~1.2 KB is raised to it (a smaller gate could emit a stub bigger than the text it replaces) |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` hook) — node never spawns |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
+| `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |
 
 ## Lean-code convention
 

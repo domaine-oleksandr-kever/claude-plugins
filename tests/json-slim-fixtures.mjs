@@ -9,7 +9,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync, rmSync, mkdtempSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync, existsSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -300,6 +300,7 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
 
 // ---------------------------------------------------------------- debug log (M6) --
 // debugEnabled(): only 1/true/yes/on turns it on; unset / 0 / false → off (zero side effects).
+// debugLevel() (B4.10c) splits that into 1 = key events, ≥2 = everything incl. sub-gate lines.
 {
   const prev = process.env.FND_MCP_SLIM_DEBUG;
   const set = (v) => { if (v === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = v; };
@@ -308,6 +309,16 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
   set('true');    check('dbg-enabled-true', J.debugEnabled() === true, 'true → on');
   set('0');       check('dbg-enabled-0', J.debugEnabled() === false, '0 → off');
   set('false');   check('dbg-enabled-false', J.debugEnabled() === false, 'false → off');
+  // Any integer ≥ 2 must mean the full feed — never off.
+  set(undefined); check('b4.10c-level-unset', J.debugLevel() === 0, 'unset → level 0');
+  set('0');       check('b4.10c-level-0', J.debugLevel() === 0, '0 → level 0');
+  set('1');       check('b4.10c-level-1', J.debugLevel() === 1, '1 → level 1');
+  set('true');    check('b4.10c-level-true', J.debugLevel() === 1, 'true → level 1');
+  set('on');      check('b4.10c-level-on', J.debugLevel() === 1, 'on → level 1');
+  set('2');       check('b4.10c-level-2', J.debugLevel() === 2 && J.debugEnabled() === true, '2 → level 2 (and still enabled)');
+  set(' 2 ');     check('b4.10c-level-2-padded', J.debugLevel() === 2, 'whitespace-padded 2 → level 2');
+  set('3');       check('b4.10c-level-3', J.debugLevel() === 2, 'any integer ≥2 → the full feed, never off');
+  set('verbose'); check('b4.10c-level-junk', J.debugLevel() === 0, 'an unknown value → off (never a partial feed)');
   set(prev);
 }
 
@@ -321,12 +332,61 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
   check('dbg-off-no-file', !existsSync(logp), 'disabled debugLog must not create a file');
   process.env.FND_MCP_SLIM_DEBUG = '1';
   J.debugLog({ entry: 'cli', decision: 'compressed', bytes_in: 100, bytes_out: 40 }, dir);
-  J.debugLog({ entry: 'cli', decision: 'passthrough', reason: 'size-gate' }, dir);
+  // NOT a `size-gate` record: at level 1 that sub-gate reason is filtered out (B4.10c).
+  J.debugLog({ entry: 'cli', decision: 'passthrough', reason: 'no-gain' }, dir);
   if (prev === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = prev;
   const lines = readFileSync(logp, 'utf8').trim().split('\n');
   check('dbg-two-lines', lines.length === 2, `got ${lines.length} lines`);
   const first = JSON.parse(lines[0]);
   check('dbg-line-shape', first.entry === 'cli' && first.decision === 'compressed' && typeof first.ts === 'string', `line ${lines[0]}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// B4.10c: the verbosity split, decided on the FINAL `reason` — never on the emitting branch. The
+// platform-overflow (missed-whale) event comes out of the very same sub-gate branch in the hook, and
+// it is the one number the MAX_MCP_OUTPUT_TOKENS decision rests on, so it must always be logged.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-subgate-'));
+  const logp = path.join(dir, 'fnd-mcp-slim-debug.log');
+  const prev = process.env.FND_MCP_SLIM_DEBUG;
+  process.env.FND_MCP_SLIM_DEBUG = '1';
+  J.debugLog({ entry: 'hook', decision: 'passthrough', reason: 'size-gate', bytes_in: 900, bytes_out: 900 }, dir);
+  check('b4.10c-subgate-quiet-at-1', !existsSync(logp), 'a size-gate record at level 1 must not even create the log');
+  J.debugLog({ entry: 'hook', decision: 'passthrough', reason: 'platform-overflow', spill: '/p/tool-results/w.txt' }, dir);
+  J.debugLog({ entry: 'hook', decision: 'compressed', bytes_in: 900, bytes_out: 100 }, dir);
+  J.debugLog({ entry: 'hook', decision: 'stubbed', reason: 'weak-gain' }, dir);
+  const at1 = readFileSync(logp, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  check('b4.10c-key-events-at-1', at1.length === 3 && at1[0].reason === 'platform-overflow' && at1[0].spill === '/p/tool-results/w.txt',
+    `level 1 must keep every key event: ${JSON.stringify(at1.map((l) => l.reason))}`);
+  process.env.FND_MCP_SLIM_DEBUG = '2';
+  J.debugLog({ entry: 'hook', decision: 'passthrough', reason: 'size-gate', bytes_in: 900, bytes_out: 900 }, dir);
+  if (prev === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = prev;
+  const at2 = readFileSync(logp, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  check('b4.10c-subgate-at-2', at2.length === 4 && at2[3].reason === 'size-gate', `level 2 must log the sub-gate line: ${at2.length} lines`);
+  // B4.11: each line carries the level it was COLLECTED at, so a file that straddles the switch — the
+  // documented "flip to 2, investigate, flip back" workflow — can still be read apart. Inferring it from
+  // the reasons present cannot: a =2 log whose results all exceeded the gate holds no size-gate line.
+  check('b4.11-lvl-per-line', at2.slice(0, 3).every((l) => l.lvl === 1) && at2[3].lvl === 2,
+    `each line must carry its collection level: ${JSON.stringify(at2.map((l) => l.lvl))}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// B4.10a: `spills` is deduped and CAPPED in debugLog — a payload with many crushable arrays writes one
+// spill per array, and an uncapped list would grow a single line toward the rotation threshold. An
+// EMPTY list is dropped: "this run left nothing on disk" is the absence of the field.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-spilllog-'));
+  const prev = process.env.FND_MCP_SLIM_DEBUG;
+  process.env.FND_MCP_SLIM_DEBUG = '1';
+  const many = Array.from({ length: 12 }, (_, i) => `/tmp/fnd-crush-${i}.json`);
+  J.debugLog({ entry: 'hook', decision: 'compressed', spills: many }, dir);
+  J.debugLog({ entry: 'hook', decision: 'compressed', spills: ['/tmp/fnd-crush-a.json', '/tmp/fnd-crush-a.json'] }, dir);
+  J.debugLog({ entry: 'hook', decision: 'passthrough', reason: 'no-gain', spills: [] }, dir);
+  if (prev === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = prev;
+  const lines = readFileSync(path.join(dir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  check('b4.10a-spills-capped', lines[0].spills.length === 8 && lines[0].spills_n === 12, `capped list + total: ${JSON.stringify(lines[0].spills)} n=${lines[0].spills_n}`);
+  check('b4.10a-spills-deduped', lines[1].spills.length === 1 && lines[1].spills_n === undefined, `one path twice must log once: ${JSON.stringify(lines[1])}`);
+  check('b4.10a-spills-empty-dropped', lines[2].spills === undefined && lines[2].spills_n === undefined, `an empty list must not be logged: ${JSON.stringify(lines[2])}`);
   rmSync(dir, { recursive: true, force: true });
 }
 
@@ -373,8 +433,12 @@ eq('m8-format-text', J.slim('plain prose, not markup at all').format, 'text');
 check('m8-format-absent-on-json', J.slim(JSON.stringify({ a: 1 })).format === undefined, 'a compressible JSON result must carry no format tag');
 check('m8-format-absent-on-error', J.slim(JSON.stringify({ errors: [{ message: 'boom' }] })).format === undefined, 'an error-shape result must carry no format tag');
 
-// `project` on EVERY debug line (M8): basename(cwd), added centrally in debugLog(); `format` rides
-// through from the caller's record and lands verbatim in the JSONL line.
+// `project` on EVERY debug line (M8), added centrally in debugLog(); `format` rides through from the
+// caller's record and lands verbatim in the JSONL line. The expectation is the LITERAL repo name: this
+// suite always runs against the repo it lives in, so the B4.10b walk must resolve to it whatever the
+// cwd or an ambient CLAUDE_PROJECT_DIR says. (Re-deriving it from the resolver's own algorithm would
+// pass under any resolver, including the basename(cwd) one B4.10b replaced — the resolver's branches are
+// pinned in the `b4.10b-*` block below.)
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m8proj-'));
   const prev = process.env.FND_MCP_SLIM_DEBUG;
@@ -383,10 +447,167 @@ check('m8-format-absent-on-error', J.slim(JSON.stringify({ errors: [{ message: '
   J.debugLog({ entry: 'cli', decision: 'passthrough', reason: 'non-json', format: 'xml' }, dir);
   if (prev === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = prev;
   const lines = readFileSync(path.join(dir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  const proj = path.basename(process.cwd());
+  const proj = path.basename(ROOT);
   check('m8-project-every-line', lines.length === 2 && lines.every((l) => l.project === proj), `project missing/wrong: ${JSON.stringify(lines.map((l) => l.project))}`);
+  // B4.11: the collection level rides on every line too — `--report` reads it instead of guessing from
+  // the reasons it happens to see.
+  check('b4.11-lvl-on-every-line', lines.every((l) => l.lvl === 1), `lvl missing/wrong: ${JSON.stringify(lines.map((l) => l.lvl))}`);
   check('m8-format-in-line', lines[1].format === 'xml', `format not carried into the JSONL line: ${JSON.stringify(lines[1])}`);
   check('m8-format-absent-when-omitted', lines[0].format === undefined, `compressed line must carry no format: ${JSON.stringify(lines[0])}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// B4.10b: the `project` tag resolver — the nearest `.git` ANCESTOR walking up from the cwd wins, else
+// CLAUDE_PROJECT_DIR, else the cwd's own basename. Live logs attributed 154 of 476 events to
+// `scratchpad`/`tmp` because the tag was basename(cwd) alone. The WALK leads because it is the only rule
+// both entry points can run: Claude Code exports CLAUDE_PROJECT_DIR to hooks but not to the Bash tool, so
+// env-first tagged one session's hook and CLI lines differently. Every case runs in a CHILD with an
+// explicit cwd + env (an ambient CLAUDE_PROJECT_DIR would mask the walk, and a child also proves the
+// in-process memo cannot leak between cases).
+{
+  const base = mkdtempSync(path.join(tmpdir(), 'jslim-proj-'));
+  const gitFileRepo = path.join(base, 'worktree-repo');   // `.git` as a FILE (worktree/submodule form)
+  const gitDirRepo = path.join(base, 'plain-repo');       // `.git` as a directory
+  // The cwd-basename fallback needs a cwd with NO `.git` above it, which a shared tmpdir cannot promise
+  // (a TMPDIR inside a dotfiles/$HOME repo would resolve to that repo and the case could never be
+  // established — it went red on exactly that setup). Nesting deeper than PROJECT_WALK_MAX ends the walk
+  // by exhaustion instead, which is the same branch and depends on nothing above `base`.
+  const orphan = path.join(base, 'no-repo-here', ...Array(65).fill('n'), 'deep');
+  mkdirSync(path.join(gitFileRepo, 'a', 'scratchpad'), { recursive: true });
+  mkdirSync(path.join(gitDirRepo, '.git'), { recursive: true });
+  mkdirSync(path.join(gitDirRepo, 'sub'), { recursive: true });
+  mkdirSync(orphan, { recursive: true });
+  writeFileSync(path.join(gitFileRepo, '.git'), 'gitdir: /elsewhere/.git/worktrees/w\n');
+  const tagFrom = (cwd, env) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'jslim-projlog-'));
+    const childEnv = { ...process.env, FND_MCP_SLIM_DEBUG: '1' };
+    delete childEnv.CLAUDE_PROJECT_DIR; // ambient value would mask every walk case
+    Object.assign(childEnv, env || {});
+    execFileSync('node', ['-e',
+      `require(${JSON.stringify(SLIM)}).debugLog({entry:'cli',decision:'passthrough',reason:'no-gain'},${JSON.stringify(dir)})`],
+      { cwd, env: childEnv, encoding: 'utf8' });
+    const tag = JSON.parse(readFileSync(path.join(dir, 'fnd-mcp-slim-debug.log'), 'utf8').trim()).project;
+    rmSync(dir, { recursive: true, force: true });
+    return tag;
+  };
+  // The repo the cwd sits in beats the env var: the CLI never receives CLAUDE_PROJECT_DIR, so a hook that
+  // preferred it tagged the same session's lines with a different name (a monorepo launched in a subdir
+  // logged `web` from the hook and `myrepo` from the CLI — up to three buckets for one repo).
+  eq('b4.10b-git-beats-env', tagFrom(path.join(gitFileRepo, 'a', 'scratchpad'), { CLAUDE_PROJECT_DIR: path.join(base, 'chosen-project') }), 'worktree-repo');
+  eq('b4.10b-env-fallback-no-git', tagFrom(orphan, { CLAUDE_PROJECT_DIR: path.join(base, 'chosen-project') }), 'chosen-project');
+  eq('b4.10b-env-trailing-slash', tagFrom(orphan, { CLAUDE_PROJECT_DIR: `${path.join(base, 'chosen-project')}${path.sep}` }), 'chosen-project');
+  eq('b4.10b-env-blank-ignored', tagFrom(path.join(gitDirRepo, 'sub'), { CLAUDE_PROJECT_DIR: '   ' }), 'plain-repo');
+  eq('b4.10b-git-file-ancestor', tagFrom(path.join(gitFileRepo, 'a', 'scratchpad')), 'worktree-repo');
+  eq('b4.10b-git-dir-ancestor', tagFrom(path.join(gitDirRepo, 'sub')), 'plain-repo');
+  eq('b4.10b-git-root-itself', tagFrom(gitDirRepo), 'plain-repo');
+  eq('b4.10b-no-git-cwd-basename', tagFrom(orphan), 'deep');
+  rmSync(base, { recursive: true, force: true });
+}
+
+// ============================================ B4.10a — content-addressed spills + spill sink ==
+// Two telemetry defects, both measured on the live debug log: (1) the crush / jsx-id-map spill paths
+// were never logged, so "did this run orphan a file?" was unanswerable; (2) UUID names meant 23
+// distinct payloads produced 1030 files / 307 MB per TTL window.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-wsp-'));
+  const a = J.writeSpill(dir, 'fnd-crush-', 'hello');
+  const b = J.writeSpill(dir, 'fnd-crush-', 'hello');
+  check('b4.10a-writespill-name', !!a && /^fnd-crush-[0-9a-f]{16}\.json$/.test(path.basename(a.path)) && path.dirname(a.path) === dir,
+    `content-hash name: ${a && a.path}`);
+  check('b4.10a-writespill-dedup', !!a && !!b && a.path === b.path && a.created === true && b.created === false && readdirSync(dir).length === 1,
+    `identical content must reuse one file: ${JSON.stringify(readdirSync(dir))}`);
+  // The sweep prunes by MTIME, so a reused spill must be touched or it can expire while a fresh
+  // `full=` handle names it.
+  const old = Date.now() / 1000 - 3 * 24 * 3600;
+  utimesSync(a.path, old, old);
+  J.writeSpill(dir, 'fnd-crush-', 'hello');
+  check('b4.10a-writespill-mtime-refresh', statSync(a.path).mtimeMs > Date.now() - 60000,
+    `a reused spill must be re-dated: mtime ${new Date(statSync(a.path).mtimeMs).toISOString()}`);
+  // A same-name file of a DIFFERENT size (a hash collision, or the 0-byte truncation this repo
+  // already hit once) is never overwritten and never handed back as if it were ours.
+  writeFileSync(a.path, 'hello world');
+  const c = J.writeSpill(dir, 'fnd-crush-', 'hello');
+  check('b4.10a-writespill-collision', !!c && c.path !== a.path && c.created === true &&
+    readFileSync(a.path, 'utf8') === 'hello world' && readFileSync(c.path, 'utf8') === 'hello',
+    `a size mismatch must take a distinct name: ${c && c.path}`);
+  // …and the RETRY name is content-addressed too, so a poisoned base name (the 0-byte truncation above is
+  // the real-world trigger) does not silently restore the one-file-per-call regression for that payload's
+  // whole TTL window: five more calls must all land on the same second name.
+  const retries = new Set();
+  for (let i = 0; i < 5; i++) { const r = J.writeSpill(dir, 'fnd-crush-', 'hello'); retries.add(r && r.path); }
+  check('b4.11-writespill-retry-dedups', retries.size === 1 && retries.has(c.path) &&
+    readdirSync(dir).filter((f) => f.startsWith('fnd-crush-')).length === 2,
+    `a poisoned base name must still dedup on the retry name: ${JSON.stringify([...retries])} / ${JSON.stringify(readdirSync(dir))}`);
+  // A same-name/same-size file this user cannot READ is never deduped: statSync needs no read
+  // permission (a shared-tmpdir neighbour's 0600 spill), so handing it back would put an unreadable
+  // path behind a live handle — while the EPERM'd mtime refresh silently lets the sweep prune it.
+  // Root reads through 000 modes, so the case only asserts for a non-root uid.
+  if (typeof process.getuid !== 'function' || process.getuid() !== 0) {
+    const locked = J.writeSpill(dir, 'fnd-mcp-slim-', 'locked');
+    chmodSync(locked.path, 0o000);
+    const l2 = J.writeSpill(dir, 'fnd-mcp-slim-', 'locked');
+    check('b4.10a-writespill-unreadable-not-deduped', !!l2 && l2.created === true && l2.path !== locked.path,
+      `an unreadable same-name/same-size file must not be handed back: ${JSON.stringify(l2)}`);
+    chmodSync(locked.path, 0o600);
+    check('b4.10a-writespill-unreadable-untouched', readFileSync(locked.path, 'utf8') === 'locked',
+      'the foreign file is never modified');
+  }
+  check('b4.10a-writespill-no-tmp', readdirSync(dir).every((f) => !f.includes('.tmp-')), `a tmp file leaked: ${JSON.stringify(readdirSync(dir))}`);
+  const notDir = path.join(mkdtempSync(path.join(tmpdir(), 'jslim-wspf-')), 'a-file');
+  writeFileSync(notDir, 'x');
+  check('b4.10a-writespill-failure-null', J.writeSpill(path.join(notDir, 'sub'), 'fnd-crush-', 'hello') === null,
+    'an unwritable spill dir must return null (the callers depend on the failure path)');
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// Dedup end-to-end: three identical slim() runs leave ONE spill file (pre-fix: three) and the
+// `<<full=…>>` handle is byte-identical across them.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-dedup-'));
+  const payload = JSON.stringify({ rows: errArray });
+  const markers = [];
+  for (let i = 0; i < 3; i++) {
+    const out = J.slim(payload, { spillDir: dir }).output;
+    markers.push(/<<full=[^>]+>>/.exec(out)[0]);
+  }
+  const files = () => readdirSync(dir).filter((f) => f.startsWith('fnd-crush-'));
+  check('b4.10a-dedup-one-file', files().length === 1, `3 identical runs left ${files().length} spill files`);
+  check('b4.10a-dedup-marker-stable', markers[0] === markers[1] && markers[1] === markers[2], `handles differ across runs: ${JSON.stringify(markers)}`);
+  J.slim(JSON.stringify({ rows: errArray.map((r) => ({ ...r, msg: `${r.msg} v2` })) }), { spillDir: dir });
+  check('b4.10a-dedup-distinct-payload', files().length === 2, `a different payload must add a file: ${JSON.stringify(files())}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// The spill SINK: a caller-supplied array that collects every file this call wrote, so the hook/CLI
+// debug line can name them. Not a DEFAULTS key on purpose — `{...DEFAULTS}` copies the array
+// reference, so a default sink would accumulate paths for the whole process lifetime.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-sink-'));
+  const sink = [];
+  const r = J.slim(JSON.stringify({ rows: errArray }), { spillDir: dir, spillSink: sink });
+  check('b4.10a-sink-crush', sink.length === 1 && existsSync(sink[0]) && path.basename(sink[0]).startsWith('fnd-crush-') &&
+    r.output.includes(`full=${sink[0]}`), `the crush spill must reach the sink: ${JSON.stringify(sink)}`);
+  check('b4.10a-sink-not-in-defaults', J.DEFAULTS.spillSink === undefined, 'spillSink must never be a DEFAULTS key (shared array reference)');
+  // A fenced body's inner slim() gets `{...cfg, fence:false}` — the sink must survive that spread
+  // (and every other one), or the fence path silently loses its spill paths. The subject is the SINK, so
+  // the fence's byte WIN is deliberately not part of the assertion: this fixture wins by ~114 B, and the
+  // `<<full=…>>` marker embeds the spill path, so a spill dir longer than 117 chars (a long TMPDIR on a
+  // CI runner) flips wasModified while the sink stays correct. The fence win is pinned by the M11 cases.
+  const fenceSink = [];
+  const fenced = `Script ran on page and returned:\n\`\`\`json\n${JSON.stringify({ rows: errArray })}\n\`\`\``;
+  J.slim(fenced, { spillDir: dir, spillSink: fenceSink });
+  check('b4.10a-sink-through-fence', fenceSink.length === 1 && existsSync(fenceSink[0]) &&
+    path.basename(fenceSink[0]).startsWith('fnd-crush-'), `a fenced body's inner crush spill must reach the caller's sink: ${JSON.stringify(fenceSink)}`);
+  // Gate A's own spill lands there too (the CLI's exit line then names every file it wrote).
+  const capSink = [];
+  const cap = J.capOutput({ output: JSON.stringify({ a: 'x'.repeat(200) }), bytesIn: 1000, bytesOut: 300, ratio: 0.7 },
+    path.join(dir, 'src.json'), { cliOutCap: 50, spillDir: dir, spillSink: capSink });
+  check('b4.10a-sink-gate-a', !!cap && capSink.length === 1 && capSink[0] === cap.spillOut, `Gate A's spill must reach the sink: ${JSON.stringify(capSink)}`);
+  // A passthrough writes nothing, so the sink stays empty (an empty sink is what makes an ORPHAN
+  // claim in the log meaningful).
+  const quiet = [];
+  J.slim('plain prose, not json at all', { spillDir: dir, spillSink: quiet });
+  eq('b4.10a-sink-empty-on-passthrough', quiet, []);
   rmSync(dir, { recursive: true, force: true });
 }
 
@@ -1147,8 +1368,14 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // fixture folds siblings, so this holds only while the ids= clause stays LAST.
   const idFile = /ids=(\S+)/.exec(head[0]);
   check('m13-idmap-named', !!idFile && existsSync(idFile[1]) && path.dirname(idFile[1]) === dir, `the node-id map is spilled beside the other spills: ${idFile && idFile[1]}`);
-  check('b4.3-ids-naive-read-with-fold', head[0].includes('×N more') && !!idFile && /fnd-jsx-ids-[0-9a-f-]+\.json$/.test(idFile[1]) && existsSync(idFile[1]),
+  check('b4.3-ids-naive-read-with-fold', head[0].includes('×N more') && !!idFile && /fnd-jsx-ids-[0-9a-f]{16}\.json$/.test(idFile[1]) && existsSync(idFile[1]),
     `with the fold clause present the naive ids= token must still be a real file: ${JSON.stringify(idFile && idFile[1])}`);
+  // B4.10a: the map's path reaches the caller's spill sink, so a debug line can name it.
+  const jsxSink = [];
+  const jr = J.slim(jsxFixture, { spillDir: dir, spillSink: jsxSink });
+  check('b4.10a-sink-jsx-ids', jsxSink.length === 1 && existsSync(jsxSink[0]) &&
+    path.basename(jsxSink[0]).startsWith('fnd-jsx-ids-') && jr.output.includes(`ids=${jsxSink[0]}`),
+    `the node-id map must reach the sink: ${JSON.stringify(jsxSink)}`);
   check('m13-no-full-token', !r.output.includes('full='), 'the compacted body never spends the `full=` handle on anything but the original result');
   const map = idFile && existsSync(idFile[1]) ? JSON.parse(readFileSync(idFile[1], 'utf8')) : {};
   const origIds = [...new Set([...jsxFixture.matchAll(/data-node-id="([^"]*)"/g)].map((m) => m[1]))];
@@ -1158,15 +1385,37 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('m13-idrefs-resolve', idRefs.length > 0 && idRefs.every((x) => typeof map[x.slice(1)] === 'string'), 'every #nN reference resolves in the map');
   check('m13-ids-out-of-band', !r.output.includes('data-node-id="'), 'no data-node-id attribute survives inline');
 
-  // --- no byte win → whole original, and no orphan map left on disk ---
+  // --- no byte win → whole original; the already-written map is LEFT for the TTL sweep: its name is
+  // content-addressed, so an identical map may be behind a CONCURRENT process's live `ids=` handle, and
+  // an unlink here could break that handle mid-flight ---
   const winDir = mkdtempSync(path.join(tmpdir(), 'jslim-m13w-'));
   const tiny = ['<div className="a1" data-node-id="1:1" style={{ c: "var(--x,#fff)" }}>one</div>',
     '<div className="b2" data-node-id="1:2" style={{ c: "var(--y,#000)" }}>two</div>',
     '<div className="c3" data-node-id="1:3" style={{ c: "var(--z,#111)" }}>three</div>'].join('\n');
-  const tr = J.slim(tiny, { spillDir: winDir });
+  const winSink = [];
+  const tr = J.slim(tiny, { spillDir: winDir, spillSink: winSink });
   check('m13-nowin-passthrough', !tr.wasModified && tr.output === tiny && tr.reason === 'non-json', 'unique-only classNames, no byte win → byte-identical passthrough');
-  check('m13-nowin-no-orphan', readdirSync(winDir).filter((f) => f.startsWith('fnd-jsx-ids-')).length === 0, 'a losing run leaves no orphan node-id map on disk');
+  const nowinMaps = readdirSync(winDir).filter((f) => f.startsWith('fnd-jsx-ids-'));
+  check('m13-nowin-map-kept', nowinMaps.length === 1, `a declined run leaves its map to the TTL sweep, never unlinks: ${JSON.stringify(nowinMaps)}`);
+  // …and the sink names the file the run left on disk (B4.10a: the log's spills inventory is complete).
+  check('b4.10a-sink-nowin-names-map', winSink.length === 1 && existsSync(winSink[0]) &&
+    path.basename(winSink[0]).startsWith('fnd-jsx-ids-'),
+    `the declined run's map must reach the sink: ${JSON.stringify(winSink)}`);
   rmSync(winDir, { recursive: true, force: true });
+
+  // B4.10a: content-addressed names make an id map SHARED across calls — a written map is never
+  // unlinked. Same three node ids in the same order ⇒ same map bytes ⇒ same file: the winning
+  // payload's live `ids=` handle must survive the declining payload that follows it.
+  const shareDir = mkdtempSync(path.join(tmpdir(), 'jslim-m13s-'));
+  const sharedIds = ['1:1', '1:2', '1:3']; // the same three ids `tiny` uses → byte-identical map
+  const winner = Array.from({ length: 12 }, (_, i) =>
+    `<div className="content-stretch flex flex-col gap-[var(--space\\/sm,16px)] items-center relative shrink-0 w-full" data-node-id="${sharedIds[i % 3]}" data-name="Card ${i}">card ${i}</div>`).join('\n');
+  const wr = J.slim(winner, { spillDir: shareDir });
+  const sharedMap = /ids=(\S+)/.exec(wr.output.split('\n')[0]);
+  const decl = J.slim(tiny, { spillDir: shareDir });
+  check('b4.10a-shared-idmap-kept', !!sharedMap && existsSync(sharedMap[1]) && !decl.wasModified,
+    `a map an earlier live ids= handle names must survive a later declining run: ${sharedMap && sharedMap[1]}`);
+  rmSync(shareDir, { recursive: true, force: true });
 
   // --- ×N sibling fold ---
   const card = (id, txt) => [`      <div class=C1 #n${id} data-name="Column">`, '        <p class=C2>', `          ${txt}`, '        </p>', '      </div>'];
@@ -1495,6 +1744,94 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   rmSync(bomCliDir, { recursive: true, force: true });
 
   rmSync(dir, { recursive: true, force: true });
+}
+
+// ------------------------------------------- B4.11: the intentional decline (verdict: by design) --
+// A uniform array of UNIQUE ENTITIES — same keys on every row, per-row distinct strings, no error row,
+// no rare enum value, no numeric outlier or change-point — is REFUSED by the crushability gate: every
+// row that a 15-row sample would drop is unique content, so sampling would misrepresent the result.
+// Upstream ships the identical gate and asserts the refusal in its own unit test
+// (smart_crusher/analyzer.rs `crushability_unique_entities_no_signal_skips`), so the 0 % these payloads
+// report is honest, not a missed win. Pinned in BOTH directions: a change that starts sampling unique
+// entities fails the skip cases, and a change that simply stops crushing fails the contrast cases.
+{
+  const N = 60;
+  const uniqueEntities = Array.from({ length: N }, (_, i) => ({
+    id: `gid://shopify/Product/${7000000000 + i}`,
+    handle: `product-handle-${i}`,
+    title: `Product Title Number ${i}`,
+    url: `https://shop.example.com/products/product-handle-${i}`,
+  }));
+  const uq = J.analyseDictArray(uniqueEntities, J.DEFAULTS);
+  eq('b4.11-skip-unique-entities', [uq.crushable, uq.strategy, uq.reason], [false, 'skip', 'unique_entities_no_signal']);
+  const rawUnique = JSON.stringify({ products: uniqueEntities });
+  const rUnique = J.slim(rawUnique, { markerMode: 'ccr' });
+  check('b4.11-skip-byte-identical',
+    !rUnique.wasModified && rUnique.output === rawUnique && rUnique.bytesOut === rUnique.bytesIn && rUnique.ratio === 0,
+    `a skipped array must pass through untouched (no re-serialization): ${JSON.stringify({ mod: rUnique.wasModified, same: rUnique.output === rawUnique, bytesIn: rUnique.bytesIn, bytesOut: rUnique.bytesOut })}`);
+
+  // The sibling gate, for rows with no id-like field: every column sits at uniqueRatio 0.9 (54 distinct
+  // of 60 — the last 6 rows repeat the first 6), which keeps idConfidence at 0 (its hard gate needs
+  // >0.95 for a string field) while maxUniqueness stays above the 0.8 branch.
+  const noIdField = Array.from({ length: N }, (_, i) => {
+    const j = i < 54 ? i : i - 54;
+    return { handle: `handle-${j}`, title: `Title Number ${j}`, vendor: `Vendor ${j} Inc` };
+  });
+  const nq = J.analyseDictArray(noIdField, J.DEFAULTS);
+  eq('b4.11-skip-no-id-field', [nq.crushable, nq.strategy, nq.reason], [false, 'skip', 'medium_uniqueness_no_signal']);
+  const rawNoId = JSON.stringify({ items: noIdField });
+  check('b4.11-skip-no-id-byte-identical', J.slim(rawNoId, { markerMode: 'ccr' }).output === rawNoId, 'the id-less skip branch also passes through untouched');
+
+  // Second declining path, one gate later: errorItems substring-scans the whole serialized row, KEY
+  // NAMES included, so `hasError:false` on every row reads as N error rows → crushable:true. Over
+  // budget, prioritizeIndices keeps ALL signal indices, so the crush drops nothing, writes no sentinel
+  // and no spill — the same 0 %, but from a `crushable:true` analysis (upstream behaves identically).
+  const falseErrorFlag = Array.from({ length: N }, (_, i) => ({
+    id: `req-${1000 + i}`,
+    url: `https://api.example.com/v1/items/${i}`,
+    hasError: false,
+    label: `Request number ${i} label`,
+  }));
+  const fq = J.analyseDictArray(falseErrorFlag, J.DEFAULTS);
+  check('b4.11-crushable-error-keyword-in-key-name',
+    fq.crushable === true && fq.reason === 'unique_entities_with_signal' && fq.sig.errors.size === N,
+    `a key name carrying "error" flags every row: ${JSON.stringify({ crushable: fq.crushable, reason: fq.reason, errors: fq.sig.errors.size })}`);
+  const flagOut = J.crushValue({ requests: falseErrorFlag }, { markerMode: 'ccr' });
+  check('b4.11-crushable-zero-drop',
+    flagOut.requests.length === N && !flagOut.requests.some((x) => x && x._ccr_dropped)
+      && JSON.stringify(flagOut.requests) === JSON.stringify(falseErrorFlag),
+    `all-signal rows must survive whole, with no drop sentinel: ${JSON.stringify({ len: flagOut.requests.length, sentinel: flagOut.requests.some((x) => x && x._ccr_dropped) })}`);
+  const rawFlag = JSON.stringify({ requests: falseErrorFlag });
+  check('b4.11-zero-drop-byte-identical', J.slim(rawFlag, { markerMode: 'ccr' }).output === rawFlag, 'a zero-drop crush must not report a gain');
+
+  // Contrast — the three pins above must not be satisfiable by breaking the crush. The SAME entity
+  // shape crushes once a signal appears, and low-uniqueness rows crush without one.
+  const ratioOf = (items, key) => J.slim(JSON.stringify({ [key]: items }), { markerMode: 'ccr' }).ratio;
+  const withErrorRow = uniqueEntities.map((r, i) => (i === 41 ? { ...r, note: 'sync failed' } : r));
+  const withOutlier = uniqueEntities.map((r, i) => ({ ...r, inventory: i === 17 ? 99999 : 3 + (i % 4) }));
+  const repetitive = Array.from({ length: N }, (_, i) => ({ id: i, status: i % 2 ? 'ok' : 'pending', kind: 'widget' }));
+  check('b4.11-flip-error-row-crushes', J.analyseDictArray(withErrorRow, J.DEFAULTS).crushable === true && ratioOf(withErrorRow, 'products') > 0.5,
+    `one error row must flip the same shape to crushable: ${(ratioOf(withErrorRow, 'products') * 100).toFixed(1)} %`);
+  check('b4.11-flip-numeric-outlier-crushes', J.analyseDictArray(withOutlier, J.DEFAULTS).crushable === true && ratioOf(withOutlier, 'products') > 0.5,
+    `a 2σ numeric outlier must flip the same shape to crushable: ${(ratioOf(withOutlier, 'products') * 100).toFixed(1)} %`);
+  check('b4.11-contrast-repetitive-crushes', ratioOf(repetitive, 'rows') > 0.5,
+    `low-uniqueness rows must still crush: ${(ratioOf(repetitive, 'rows') * 100).toFixed(1)} %`);
+
+  // …and this shape is what a `no-gain` debug line means: the CLI prints the payload verbatim and logs
+  // the decline, so `--report`'s top passthrough reason can be read as "unique entities", not "broken".
+  // Printing it IS the contract for an explicit CLI run under the inline cap (over it, Gate A spills and
+  // summarizes) — the context hazard was the STUB telling the model to make that run on a payload it had
+  // just declined to show, which is why a `no-gain` stub now names `--jq` instead (hooks-sim M67).
+  {
+    const dir = mkdtempSync(path.join(tmpdir(), 'jslim-b411-'));
+    const p = path.join(dir, 'unique-entities.json');
+    writeFileSync(p, rawUnique);
+    const stdout = execFileSync('node', [SLIM, p], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, FND_MCP_SLIM_DEBUG: '1' } });
+    check('b4.11-cli-prints-verbatim', stdout === `${rawUnique}\n`, `a declined payload is handed back byte-identical: ${stdout.length} vs ${rawUnique.length + 1} B`);
+    const line = JSON.parse(readFileSync(path.join(dir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n')[0]);
+    eq('b4.11-cli-logs-no-gain', [line.decision, line.reason, line.pct, line.stages], ['passthrough', 'no-gain', 0, []]);
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);

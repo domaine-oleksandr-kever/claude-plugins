@@ -795,11 +795,11 @@ else bad X5-mixed-siblings "rc=$rc kept=$x5kept/59 err=$(head -c 200 "$E")"; fi
 RPD="$TMP/report"; mkdir -p "$RPD"
 RPLOG="$RPD/fnd-mcp-slim-debug.log"
 cat > "$RPLOG" <<'RPEOF'
-{"ts":"2026-07-24T10:00:00.000Z","project":"elc","entry":"hook","tool":"mcp__a__getJiraIssue","decision":"compressed","reason":null,"bytes_in":9062,"bytes_out":5318,"pct":41.3,"stages":["adf","noise","crush"],"spill":"/tmp/fnd-mcp-slim-a.json","ms":7}
-{"ts":"2026-07-24T10:05:00.000Z","project":"elc","entry":"hook","tool":"mcp__a__listFiles","decision":"passthrough","reason":"non-json","format":"text","bytes_in":52518,"bytes_out":52518,"pct":0,"stages":[],"spill":null,"ms":2}
-{"ts":"2026-07-24T11:00:00.000Z","project":"elc","entry":"hook","tool":"mcp__x__evaluate_script","decision":"passthrough","reason":"platform-overflow","bytes_in":1463,"bytes_out":1463,"pct":0,"stages":[],"spill":"/p/tool-results/paired-whale.txt","ms":1}
-{"ts":"2026-07-24T11:02:00.000Z","project":"elc","entry":"cli","tool":"/p/tool-results/paired-whale.txt","decision":"compressed","reason":null,"bytes_in":764124,"bytes_out":123048,"pct":83.9,"stages":["noise","crush"],"spill":null,"spill_out":"/tmp/fnd-slim-out-b.json","ms":36}
-{"ts":"2026-07-24T12:00:00.000Z","project":"other","entry":"hook","tool":"mcp__x__list_network_requests","decision":"passthrough","reason":"platform-overflow","bytes_in":1400,"bytes_out":1400,"pct":0,"stages":[],"spill":"/p/tool-results/lonely-whale.txt","ms":1}
+{"ts":"2026-07-24T10:00:00.000Z","project":"elc","lvl":1,"entry":"hook","tool":"mcp__a__getJiraIssue","decision":"compressed","reason":null,"bytes_in":9062,"bytes_out":5318,"pct":41.3,"stages":["adf","noise","crush"],"spill":"/tmp/fnd-mcp-slim-a.json","ms":7}
+{"ts":"2026-07-24T10:05:00.000Z","project":"elc","lvl":1,"entry":"hook","tool":"mcp__a__listFiles","decision":"passthrough","reason":"non-json","format":"text","bytes_in":52518,"bytes_out":52518,"pct":0,"stages":[],"spill":null,"ms":2}
+{"ts":"2026-07-24T11:00:00.000Z","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__evaluate_script","decision":"passthrough","reason":"platform-overflow","bytes_in":1463,"bytes_out":1463,"pct":0,"stages":[],"spill":"/p/tool-results/paired-whale.txt","ms":1}
+{"ts":"2026-07-24T11:02:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/p/tool-results/paired-whale.txt","decision":"compressed","reason":null,"bytes_in":764124,"bytes_out":123048,"pct":83.9,"stages":["noise","crush"],"spill":null,"spill_out":"/tmp/fnd-slim-out-b.json","ms":36}
+{"ts":"2026-07-24T12:00:00.000Z","project":"other","lvl":1,"entry":"hook","tool":"mcp__x__list_network_requests","decision":"passthrough","reason":"platform-overflow","bytes_in":1400,"bytes_out":1400,"pct":0,"stages":[],"spill":"/p/tool-results/lonely-whale.txt","ms":1}
 not json at all
 RPEOF
 rc=0; node "$SLIM" --report "$RPLOG" >"$O" 2>"$E" || rc=$?
@@ -889,6 +889,139 @@ if [ "$rc" -eq 0 ] && grep -Fq 'passthrough reasons: marker-overhead 1' "$O" \
    && grep -Fq 'totals: 22399 → 18655 B (16.7% saved)' "$O" \
    && grep -Fq 'no later json-slim run): 0 of 0' "$O"; then ok
 else bad R7-report-marker-overhead "rc=$rc out=$(head -c 500 "$O") err=$(head -c 120 "$E")"; fi
+
+# R8 (B4.10c/B4.11): at FND_MCP_SLIM_DEBUG=1 sub-gate (`size-gate`) lines are not recorded, so the totals
+# % and the per-tool/per-project call counts cover LOGGED events only. The report says so in one footnote
+# line AND labels the totals — read off the `lvl` each line carries, never guessed from the reasons
+# present (one foreign `size-gate` line used to delete the caveat from a report missing 74 % of its
+# events, and a =2 log whose results all exceeded the gate used to print it falsely).
+rc=0; node "$SLIM" --report "$RPLOG" >"$O" 2>"$E" || rc=$?
+lines=$(wc -l < "$O" | tr -d ' ')
+if [ "$rc" -eq 0 ] && [ "$lines" -le 40 ] && grep -Fq 'sub-gate results' "$O" && grep -Fq 'FND_MCP_SLIM_DEBUG=2' "$O" \
+   && grep -Fq '[level 1 — sub-gate results not logged' "$O"; then ok
+else bad R8-subgate-footnote "rc=$rc lines=$lines out=$(head -c 300 "$O")"; fi
+# a level-1 log with a stale `size-gate` line from an earlier =2 session keeps the caveat: the level is a
+# fact on the line, not an inference from the vocabulary
+RPMIX="$RPD/stale-subgate.log"
+head -1 "$RPLOG" > "$RPMIX"
+printf '%s\n' '{"ts":"2026-07-24T09:00:00.000Z","project":"elc","lvl":2,"entry":"hook","tool":"mcp__a__z","decision":"passthrough","reason":"size-gate","bytes_in":900,"bytes_out":900,"pct":0,"stages":[],"spill":null,"ms":1}' >> "$RPMIX"
+rc=0; node "$SLIM" --report "$RPMIX" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq 'sub-gate results' "$O" && grep -Fq '[MIXED levels: 1 at =1' "$O" \
+   && grep -Fq 'not comparable' "$O"; then ok
+else bad R8c-mixed-levels "rc=$rc out=$(head -c 500 "$O")"; fi
+# a PRE-B4.11 log carries no `lvl` at all, and at that time level 1 did record the sub-gate lines — so its
+# totals are complete and must get neither the label nor the footnote (RPLOG4 is such a log)
+rc=0; node "$SLIM" --report "$RPLOG4" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -Fq 'sub-gate results' "$O" && ! grep -Fq 'level 1' "$O"; then ok
+else bad R8d-legacy-log-uncaveated "rc=$rc out=$(head -c 400 "$O")"; fi
+RPLOG5="$RPD/with-subgate.log"
+cat > "$RPLOG5" <<'RPEOF'
+{"ts":"2026-07-25T21:00:00.000Z","project":"elc","lvl":2,"entry":"hook","tool":"mcp__a__x","decision":"passthrough","reason":"size-gate","bytes_in":800,"bytes_out":800,"pct":0,"stages":[],"spill":null,"ms":1}
+{"ts":"2026-07-25T21:01:00.000Z","project":"elc","lvl":2,"entry":"hook","tool":"mcp__a__y","decision":"compressed","reason":null,"bytes_in":9062,"bytes_out":5318,"pct":41.3,"stages":["crush"],"spill":"/tmp/fnd-mcp-slim-d.json","spills":["/tmp/fnd-mcp-slim-d.json","/tmp/fnd-crush-aa.json"],"ms":6}
+{"ts":"2026-07-25T21:02:00.000Z","project":"elc","lvl":2,"entry":"hook","tool":"mcp__a__y","decision":"compressed","reason":null,"bytes_in":9062,"bytes_out":5318,"pct":41.3,"stages":["crush"],"spill":"/tmp/fnd-mcp-slim-d.json","spills":["/tmp/fnd-mcp-slim-d.json","/tmp/fnd-crush-aa.json"],"ms":6}
+{"ts":"2026-07-25T21:03:00.000Z","project":"elc","lvl":2,"entry":"hook","tool":"mcp__a__w","decision":"compressed","reason":null,"bytes_in":90620,"bytes_out":5318,"pct":94.1,"stages":["crush"],"spill":"/tmp/fnd-mcp-slim-e.json","spills":["/tmp/fnd-mcp-slim-e.json","/tmp/fnd-crush-b1.json","/tmp/fnd-crush-b2.json","/tmp/fnd-crush-b3.json","/tmp/fnd-crush-b4.json","/tmp/fnd-crush-b5.json","/tmp/fnd-crush-b6.json","/tmp/fnd-crush-b7.json"],"spills_n":12,"ms":9}
+RPEOF
+# R8b: a =2 log needs no caveat, and `spill files` counts FILES, not references. The two identical events
+# name the same two content-addressed paths (summing the per-event lists reported the dedup factor as a
+# file count: 1030 names for 23 payloads in the live week that motivated content addressing), and the
+# capped line contributes the 8 paths it still names plus an upper bound for the 4 it dropped. The
+# ≤40-line budget is asserted HERE, on the log that produces every optional section.
+rc=0; node "$SLIM" --report "$RPLOG5" >"$O" 2>"$E" || rc=$?
+lines=$(wc -l < "$O" | tr -d ' ')
+if [ "$rc" -eq 0 ] && [ "$lines" -le 40 ] && ! grep -Fq 'sub-gate results' "$O" \
+   && grep -Fq 'spill files: 10 named by 3 events (+ up to 4 more the capped lines did not name)' "$O"; then ok
+else bad R8b-subgate-present "rc=$rc lines=$lines out=$(head -c 500 "$O")"; fi
+# R8e: a stub whose json-slim follow-up reduced NOTHING is not compliance — the payload went into context
+# anyway. Counted on the stubbed line and on the cli aggregate, instead of reading as "0 unfollowed".
+RPLOG6="$RPD/flat-followup.log"
+cat > "$RPLOG6" <<'RPEOF'
+{"ts":"2026-07-25T22:00:00.000Z","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__products","decision":"stubbed","reason":"no-gain","format":"json","bytes_in":47565,"bytes_out":795,"pct":98.3,"stages":[],"spill":"/tmp/fnd-mcp-slim-f.json","spills":["/tmp/fnd-mcp-slim-f.json"],"ms":5}
+{"ts":"2026-07-25T22:01:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/fnd-mcp-slim-f.json","decision":"passthrough","reason":"no-gain","bytes_in":43364,"bytes_out":43364,"pct":0,"stages":[],"spill":null,"ms":4}
+RPEOF
+rc=0; node "$SLIM" --report "$RPLOG6" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq '0 with no later json-slim run, 1 whose run gained nothing' "$O" \
+   && grep -Fq 'cli runs: 1 · saved 0 B (0.0%) · 1 gained nothing' "$O"; then ok
+else bad R8e-flat-followup "rc=$rc out=$(head -c 500 "$O")"; fi
+# …but a `--jq` run that reduced nothing ANSWERED a sub-path (it printed one field, not the file) — that is
+# the recovery the stub now names, so it must not be counted as the re-dump this line exists to expose.
+RPLOG7="$RPD/narrowed-followup.log"
+head -1 "$RPLOG6" > "$RPLOG7"
+printf '%s\n' '{"ts":"2026-07-25T22:02:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/fnd-mcp-slim-f.json","decision":"passthrough","reason":"no-gain","narrowed":true,"bytes_in":160,"bytes_out":160,"pct":0,"stages":[],"spill":null,"ms":2}' >> "$RPLOG7"
+rc=0; node "$SLIM" --report "$RPLOG7" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq '0 with no later json-slim run' "$O" \
+   && ! grep -Fq 'gained nothing' "$O"; then ok
+else bad R8f-narrowed-followup "rc=$rc out=$(head -c 500 "$O")"; fi
+# R8g: the designed low-context recoveries are NOT re-dumps, whatever their saved-bytes delta says: a
+# JSONL profile (`profile`), a path handback (`non-json` — its line even logs bytes_out == bytes_in,
+# though only a ~120 B path line was printed), a Gate-A capped summary (`spill_out`), and the stream
+# refusals (`stream-jq-refused` / `big-nonjsonl`). Only a run that printed the whole file back counts
+# (R8e pins that true positive) — the stubbed line's follow-up column obeys the same rule.
+RPLOG8="$RPD/low-context-recoveries.log"
+cat > "$RPLOG8" <<'RPEOF'
+{"ts":"2026-07-25T23:00:00.000Z","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__dump","decision":"stubbed","reason":"non-json","bytes_in":900000,"bytes_out":900,"pct":99.9,"stages":[],"spill":"/tmp/fnd-mcp-slim-g.json","spills":["/tmp/fnd-mcp-slim-g.json"],"ms":5}
+{"ts":"2026-07-25T23:01:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/fnd-mcp-slim-g.json","decision":"passthrough","reason":"stream-profile","profile":true,"bytes_in":900000,"bytes_out":3000,"pct":0,"stages":[],"spill":null,"ms":40}
+{"ts":"2026-07-25T23:02:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/page.html","decision":"passthrough","reason":"non-json","format":"html","bytes_in":60013,"bytes_out":60013,"pct":0,"stages":[],"spill":null,"ms":3}
+{"ts":"2026-07-25T23:03:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/huge-doc.json","decision":"passthrough","reason":"no-gain","bytes_in":150884,"bytes_out":150884,"pct":0,"stages":[],"spill":null,"spill_out":"/tmp/fnd-slim-out-h.json","ms":12}
+{"ts":"2026-07-25T23:04:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/bulk.jsonl","decision":"passthrough","reason":"stream-jq-refused","bytes_in":9000000,"bytes_out":0,"pct":0,"stages":[],"spill":null,"ms":1}
+{"ts":"2026-07-25T23:05:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/blob.bin","decision":"passthrough","reason":"big-nonjsonl","bytes_in":9000000,"bytes_out":400,"pct":0,"stages":[],"spill":null,"ms":1}
+RPEOF
+rc=0; node "$SLIM" --report "$RPLOG8" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -Fq 'gained nothing' "$O" \
+   && grep -Fq '0 with no later json-slim run' "$O"; then ok
+else bad R8g-recoveries-not-flat "rc=$rc out=$(head -c 600 "$O")"; fi
+
+# ---------------------------------------------- json-slim.cjs: CLI telemetry (B4.10a/b) --
+# Y1: a CLI run over a crushable file records every spill it wrote in `spills` (the crush file the
+# marker points at), keeps `spill_out` for the Gate-A file, and leaves `spill` null (the CLI hands the
+# ORIGINAL path back in stdout, it never spills it).
+YD="$TMP/cli-telemetry"; mkdir -p "$YD"
+YF="$YD/crushable.json"
+node -e '
+  const rows=Array.from({length:400},(_,i)=>({id:i,status:i%7?"ok":"error",note:"padding-padding-padding-"+i}));
+  require("fs").writeFileSync(process.argv[1], JSON.stringify({rows}));
+' "$YF"
+Y1OUT="$YD/y1"; mkdir -p "$Y1OUT"
+rc=0; FND_MCP_SLIM_DIR="$Y1OUT" FND_MCP_SLIM_DEBUG=1 node "$SLIM" "$YF" >"$O" 2>"$E" || rc=$?
+Y1LOG="$Y1OUT/fnd-mcp-slim-debug.log"
+y1spill="$(jq -r '.spills[]?' "$Y1LOG" 2>/dev/null | head -1)"
+if [ "$rc" -eq 0 ] && [ -n "$y1spill" ] && [ -f "$y1spill" ] \
+   && printf '%s' "$y1spill" | grep -q 'fnd-crush-' \
+   && grep -Fq "full=$y1spill" "$O" \
+   && [ "$(jq -r '.spill' "$Y1LOG" 2>/dev/null)" = "null" ]; then ok
+else bad Y1-cli-spills "rc=$rc spills=$(jq -c '.spills' "$Y1LOG" 2>/dev/null) out=$(head -c 120 "$O")"; fi
+
+# Y2: Gate A's own spill rides on the same field (so one line answers "what did this run leave on
+# disk?"), and `spill_out` keeps naming it for log-schema compatibility.
+Y2OUT="$YD/y2"; mkdir -p "$Y2OUT"
+rc=0; FND_MCP_SLIM_DIR="$Y2OUT" FND_MCP_SLIM_DEBUG=1 node "$SLIM" "$BIGDOC" >"$O" 2>"$E" || rc=$?
+Y2LOG="$Y2OUT/fnd-mcp-slim-debug.log"
+y2out="$(jq -r '.spill_out' "$Y2LOG" 2>/dev/null)"
+if [ "$rc" -eq 0 ] && [ -n "$y2out" ] && [ "$y2out" != "null" ] \
+   && jq -e --arg p "$y2out" '.spills | index($p)' "$Y2LOG" >/dev/null 2>&1; then ok
+else bad Y2-gatea-spills "rc=$rc spill_out=$y2out spills=$(jq -c '.spills' "$Y2LOG" 2>/dev/null)"; fi
+
+# Y4 (B4.11): a `--jq` run is flagged `narrowed` on its line. It answered a SUB-PATH, so a zero-reduction
+# `--jq` run is a followed recovery, not the whole-file re-dump `--report` counts on the `cli runs:` line;
+# a plain run carries no flag (absence is the signal, as with `spills`).
+Y4OUT="$YD/y4"; mkdir -p "$Y4OUT"
+rc=0; FND_MCP_SLIM_DIR="$Y4OUT" FND_MCP_SLIM_DEBUG=1 node "$SLIM" --jq rows.0.id "$YF" >"$O" 2>"$E" || rc=$?
+Y4LOG="$Y4OUT/fnd-mcp-slim-debug.log"
+rc2=0; FND_MCP_SLIM_DIR="$Y4OUT" FND_MCP_SLIM_DEBUG=1 node "$SLIM" "$YF" >/dev/null 2>&1 || rc2=$?
+y4jq="$(sed -n '1p' "$Y4LOG" | jq -r '.narrowed' 2>/dev/null)"
+y4plain="$(sed -n '2p' "$Y4LOG" | jq -r 'has("narrowed")' 2>/dev/null)"
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$y4jq" = "true" ] && [ "$y4plain" = "false" ]; then ok
+else bad Y4-cli-narrowed "rc=$rc/$rc2 jq-run=$y4jq plain-run-has-field=$y4plain"; fi
+
+# Y3 (B4.10b): a CLI run from a subdirectory of a repo tags the log line with the REPO's basename, not
+# the leaf directory it happened to run in (`scratchpad`/`tmp` in 154 of 476 live events).
+Y3REPO="$YD/my-repo"; mkdir -p "$Y3REPO/.git" "$Y3REPO/sub/scratchpad"
+Y3OUT="$YD/y3"; mkdir -p "$Y3OUT"
+cp "$YF" "$Y3REPO/sub/scratchpad/data.json"
+rc=0; (cd "$Y3REPO/sub/scratchpad" && env -u CLAUDE_PROJECT_DIR FND_MCP_SLIM_DIR="$Y3OUT" FND_MCP_SLIM_DEBUG=1 \
+  node "$SLIM" data.json) >"$O" 2>"$E" || rc=$?
+y3proj="$(jq -r '.project' "$Y3OUT/fnd-mcp-slim-debug.log" 2>/dev/null)"
+if [ "$rc" -eq 0 ] && [ "$y3proj" = "my-repo" ]; then ok
+else bad Y3-cli-project "rc=$rc project=$y3proj"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

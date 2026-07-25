@@ -67,6 +67,9 @@ const DEFAULTS = {
   markerMode: 'spill', // 'spill' → write dropped rows to a file, handle = full=<path>;
   //                       'ccr'   → reproduce Headroom's content hash (byte-parity tests only)
   spillDir: null, // override the spill directory (else FND_MCP_SLIM_DIR, else os.tmpdir())
+  // spillSink — CALLER-SUPPLIED ONLY, deliberately absent from these defaults: an array here would be
+  // copied by REFERENCE through every `{...DEFAULTS}` spread and accumulate paths for the process
+  // lifetime. Pass one in and every spill this call writes is pushed onto it (see noteSpill).
   // --- fnd pipeline stages (slim only, not crush) ---
   adf: true, // stage 1: ADF doc nodes → markdown
   noise: true, // stage 3: drop nulls / empty containers / avatar-class keys
@@ -169,8 +172,12 @@ function percentile(sorted, p) {
   return sorted[lo] + (rank - lo) * (sorted[hi] - sorted[lo]);
 }
 
+function sha256hex(str, n) {
+  return crypto.createHash('sha256').update(str, 'utf8').digest('hex').slice(0, n);
+}
+// 12 hex is Headroom's ccr-marker width — byte-parity fixtures depend on it, so it keeps its own name.
 function sha256hex12(str) {
-  return crypto.createHash('sha256').update(str, 'utf8').digest('hex').slice(0, 12);
+  return sha256hex(str, 12);
 }
 
 // Format a stat for the number-path strategy string: round to 2 decimals, strip trailing zeros.
@@ -571,10 +578,77 @@ function spillRoot(dir) {
   return dir || process.env.FND_MCP_SLIM_DIR || os.tmpdir();
 }
 
-function spillPath(cfg) {
-  const dir = spillRoot(cfg.spillDir);
-  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
-  return path.join(dir, `fnd-crush-${crypto.randomUUID()}.json`);
+// 64 bits of content address. Names are CONTENT-addressed so re-running the same tool call reuses one
+// file instead of adding another (a live week: 23 distinct payloads → 1030 files / 307 MB per TTL
+// window). Not 12 hex like the ccr marker: a collision here hands the WRONG payload back behind a live
+// `full=` handle, so the margin is the whole point. A same-name/different-SIZE file is treated as a
+// collision below; a same-size collision is accepted (~2⁻⁶⁴ per pair).
+const SPILL_HASH_HEX = 16;
+
+// The ONE spill writer for the four compressor prefixes (fnd-crush-, fnd-slim-out-, fnd-jsx-ids-,
+// fnd-mcp-slim-), so dedup, the atomic write and the mtime discipline are decided once —
+// fnd-prompt-json- deliberately stays outside it (see SPILL_PREFIXES). Returns { path, created } or
+// null when nothing could be written (buildMarker, spillOriginal, the jsx id map and capOutput's
+// Gate A all depend on that failure path).
+function writeSpill(dir, prefix, text) {
+  try {
+    const root = spillRoot(dir);
+    fs.mkdirSync(root, { recursive: true });
+    const bytes = Buffer.byteLength(text, 'utf8');
+    const hash = sha256hex(text, SPILL_HASH_HEX);
+    // Two candidates, BOTH content-addressed. A base name holding foreign bytes — a hash collision or a
+    // truncated leftover (this repo has seen a 0-byte truncation) — must never be overwritten and never
+    // be handed back as ours, but a RANDOM retry name would then mint one file per call for as long as
+    // that leftover sits in the dir: the 1030-files-for-23-payloads regression, silently restored for one
+    // payload. The retry name hashes content+size instead, so every later call for the same payload lands
+    // on the same second name and dedups there.
+    const names = [`${prefix}${hash}.json`, `${prefix}${hash}-${sha256hex(`${hash}:${bytes}`, 8)}.json`];
+    let p = null;
+    for (const name of names) {
+      const cand = path.join(root, name);
+      let st;
+      try { st = fs.statSync(cand); } catch (_) { p = cand; break; } // nothing there → write it
+      if (st.isFile() && st.size === bytes && dedupSafe(cand, st)) {
+        // Same bytes already on disk. Re-date it: the TTL sweep prunes by mtime, so a REUSED spill
+        // would otherwise expire while the handle this call just handed out still names it.
+        try { const now = new Date(); fs.utimesSync(cand, now, now); } catch (_) {}
+        return { path: cand, created: false };
+      }
+    }
+    // Both content names occupied by foreign bytes: a random name is the only safe write left. It does
+    // not dedup, but nothing is overwritten and no foreign file is handed back behind a live handle.
+    if (!p) p = path.join(root, `${prefix}${hash}-${crypto.randomUUID().slice(0, 8)}.json`);
+    // tmp + rename, so two processes spilling identical content race safely and no reader can ever see
+    // a half-written file behind a handle. The tmp keeps the fnd- prefix, so a leaked one is swept.
+    const tmp = `${p}.tmp-${process.pid}`;
+    try {
+      fs.writeFileSync(tmp, text);
+      fs.renameSync(tmp, p);
+    } catch (e) {
+      try { fs.unlinkSync(tmp); } catch (_) {}
+      throw e;
+    }
+    return { path: p, created: true };
+  } catch (_) {
+    return null;
+  }
+}
+
+// A same-name/same-size candidate may only be deduped when this user can actually READ it and OWNS
+// it (statSync needs neither — in a shared tmpdir it happily returns a neighbour's 0600 spill, and
+// utimesSync on a foreign file is a silent EPERM, so the sweep-protecting re-date would never happen).
+// A failed gate falls through to the content-addressed retry name: never hand a foreign or unreadable
+// file back behind a live handle.
+function dedupSafe(cand, st) {
+  try { fs.accessSync(cand, fs.constants.R_OK); } catch (_) { return false; }
+  return typeof process.getuid !== 'function' || st.uid === process.getuid();
+}
+
+// Report a written spill to the caller's `cfg.spillSink` (an array it supplied — see the config
+// comment on spillDir). The channel the mcp-slim hook and the CLI use to name, on their one debug
+// line, every file the invocation left on disk — the orphan question the log could not answer.
+function noteSpill(cfg, p) {
+  if (p && cfg && Array.isArray(cfg.spillSink)) cfg.spillSink.push(p);
 }
 
 // Build the {_ccr_dropped:…} sentinel. 'ccr' reproduces Headroom's content hash (byte-parity
@@ -584,22 +658,25 @@ function buildMarker(originalItems, droppedItems, droppedCount, cfg) {
     const hash = sha256hex12(compact(originalItems));
     return `<<ccr:${hash} ${droppedCount}_rows_offloaded>>`;
   }
-  const p = spillPath(cfg);
   // If the spill can't be written the dropped rows would be unrecoverable — signal failure so the
   // caller keeps the array uncrushed rather than emit a handle to a file that does not exist.
-  try { fs.writeFileSync(p, compact(droppedItems)); } catch (_) { return null; }
-  return `<<full=${p} ${droppedCount}_rows_offloaded>>`;
+  const s = writeSpill(cfg.spillDir, 'fnd-crush-', compact(droppedItems));
+  if (!s) return null;
+  noteSpill(cfg, s.path);
+  return `<<full=${s.path} ${droppedCount}_rows_offloaded>>`;
 }
 
 // ------------------------------------------------------------------------- spill hygiene --
 
-// The only file prefixes the sweep will ever delete. Keep in sync with the writers' filenames:
-// `spillPath` here (fnd-crush-), `capOutput`'s Gate-A spill here (fnd-slim-out-), the jsx stage's
-// node-id map here (fnd-jsx-ids-), `spillOriginal`
-// in hooks/mcp-slim.cjs (fnd-mcp-slim-), and `spillBlob` in hooks/prompt-json-guard.cjs
-// (fnd-prompt-json-, swept only when it lands in the sweep dir). The literals are duplicated on
-// purpose — importing this module into a per-prompt hook just for a string would drag the whole
-// compressor into every UserPromptSubmit.
+// The only file prefixes the sweep will ever delete. Keep in sync with the writers' filenames: the crush
+// marker here (fnd-crush-), `capOutput`'s Gate-A spill here (fnd-slim-out-), the jsx stage's node-id map
+// here (fnd-jsx-ids-), `spillOriginal` in hooks/mcp-slim.cjs (fnd-mcp-slim-) — all four go through
+// writeSpill, which appends a content hash — and `spillBlob` in hooks/prompt-json-guard.cjs
+// (fnd-prompt-json-), the ONE exception: it still mints a `<uuid>` name with a plain writeFileSync, so it
+// neither dedups nor appears in any `spills` telemetry, and it writes to the task workspace or a bare
+// os.tmpdir() (this sweep reaches it only when that tmpdir IS the sweep dir). Prefix matching identifies
+// all five either way. The literals are duplicated on purpose — importing this module into a per-prompt
+// hook just for a string would drag the whole compressor into every UserPromptSubmit.
 const SPILL_PREFIXES = ['fnd-crush-', 'fnd-slim-out-', 'fnd-jsx-ids-', 'fnd-mcp-slim-', 'fnd-prompt-json-'];
 // One directory scan per throttle window, gated by this marker's mtime — the hook's hot path
 // pays one stat, not a readdir of the whole tmpdir on every MCP call. A dotfile, so it matches
@@ -669,33 +746,104 @@ function sweepSpills(dir) {
 // payload content. The M5 sweep excludes this file and its rotation by exact name (SWEEP_KEEP, where
 // DEBUG_LOG is defined). Single home: the mcp-slim hook and this module's CLI both call debugLog().
 const DEBUG_LOG_MAX = 5 * 1024 * 1024; // rotate one generation past ~5 MB (bounded, keeps the recent window)
+// A payload with many crushable arrays writes one spill per array; cap how many a single line may name
+// so a debug line can never grow toward DEBUG_LOG_MAX (the total still rides along as `spills_n`).
+const SPILL_LOG_MAX = 8;
 
-// On only when FND_MCP_SLIM_DEBUG is explicitly enabled (1/true/yes/on). Unset / 0 / false → off,
-// so the default really is zero side effects: debugLog opens nothing and creates no file.
-function debugEnabled() {
+// Verbosity (B4.10c). 1/true/yes/on = KEY events; any integer ≥ 2 = everything, including the sub-gate
+// lines that were 76 % of a live week's log. Anything else (unset / 0 / false / junk) → off, so the
+// default really is zero side effects: debugLog opens nothing and creates no file.
+function debugLevel() {
   const raw = process.env.FND_MCP_SLIM_DEBUG;
-  return !!raw && /^(1|true|yes|on)$/i.test(raw.trim());
+  if (!raw) return 0;
+  const v = String(raw).trim();
+  if (/^\d+$/.test(v) && Number(v) >= 2) return 2;
+  return /^(1|true|yes|on)$/i.test(v) ? 1 : 0;
+}
+function debugEnabled() {
+  return debugLevel() > 0;
+}
+
+// Passthrough reasons that carry no signal about compression — nothing was compressible either way, so
+// level 1 omits them. Keyed on the FINAL `reason`, never on the emitting branch: the hook's
+// platform-overflow (missed-whale) event comes out of the very same sub-gate branch, and it is the one
+// number the MAX_MCP_OUTPUT_TOKENS decision rests on. A `compressed`/`stubbed` record can never carry
+// one of these reasons, so no savings event is ever dropped.
+const SUBGATE_REASONS = new Set(['size-gate']);
+
+// The `project` tag's resolver: the nearest ancestor of the event's own cwd holding `.git` (existsSync
+// matches the directory AND the worktree/submodule FILE form) → else CLAUDE_PROJECT_DIR → else the cwd
+// itself. basename only, never a full path. Live logs attributed 154 of 476 events to `scratchpad`/`tmp`
+// when this was basename(cwd) alone.
+// The WALK comes first because it is the only rail BOTH entry points can run: Claude Code exports
+// CLAUDE_PROJECT_DIR to hook commands but not to the Bash tool, so preferring it split one session in one
+// monorepo into `web` (the hook, reading the launch subdir) and `myrepo` (the CLI, walking) — the log is
+// per-user and shared, so the per-project grep the README documents then matched a subset. The env var
+// stays as the fallback for a cwd with no repo above it. Known floor: a CLI run from a scratch dir OUTSIDE
+// any repo still tags that dir's basename — no env var reaches it, so nothing local can recover the
+// project name there. Memoized per env+cwd: a hook pays the walk once, and the key keeps repeated
+// in-process calls (tests) honest.
+const PROJECT_WALK_MAX = 64;
+const projectMemo = new Map();
+function projectName(cwd) {
+  let name = null;
+  try {
+    const env = String(process.env.CLAUDE_PROJECT_DIR || '').trim();
+    const from = cwd || process.cwd();
+    const key = `${env}|${from}`;
+    if (projectMemo.has(key)) return projectMemo.get(key);
+    let root = '';
+    let d = path.resolve(from);
+    for (let i = 0; i < PROJECT_WALK_MAX; i++) {
+      if (fs.existsSync(path.join(d, '.git'))) { root = d; break; }
+      const up = path.dirname(d);
+      if (up === d) break; // filesystem root — no repo above the cwd
+      d = up;
+    }
+    if (!root) root = env || from;
+    name = path.basename(path.resolve(root)) || null;
+    projectMemo.set(key, name);
+  } catch (_) {} // any failure → omit the field (--report buckets it as `(unknown)`)
+  return name;
 }
 
 // Append one JSONL trace line (`ts` stamped here, insertion order preserved after it). Best-effort:
 // disabled → no-op; every error swallowed so logging NEVER touches the hook's emitted result or the
 // CLI's stdout / exit code. Rotates the log to `.log.1` (overwrite) once it passes DEBUG_LOG_MAX.
-// `dir` shares the spill root so the log lives beside the spills it describes.
-function debugLog(record, dir) {
+// `dir` shares the spill root so the log lives beside the spills it describes; `cwd` is the event's own
+// working directory (the hook reads it off the PostToolUse payload), defaulting to this process's.
+function debugLog(record, dir, cwd) {
   try {
-    if (!debugEnabled()) return;
+    const level = debugLevel();
+    if (!level) return;
+    if (level < 2 && record && SUBGATE_REASONS.has(record.reason)) return;
     const root = spillRoot(dir);
     try { fs.mkdirSync(root, { recursive: true }); } catch (_) {}
     const logPath = path.join(root, DEBUG_LOG);
     try {
       if (fs.statSync(logPath).size >= DEBUG_LOG_MAX) fs.renameSync(logPath, path.join(root, `${DEBUG_LOG}.1`));
     } catch (_) {} // no log yet, or rotate failed → just append below
+    // `spills` (B4.10a) — every file the invocation wrote, deduped and capped here so no caller has to.
+    // An empty list is dropped: "this run left nothing on disk" is the ABSENCE of the field.
+    let rec = record;
+    if (rec && Array.isArray(rec.spills)) {
+      const uniq = [...new Set(rec.spills)];
+      rec = { ...rec, spills: uniq.slice(0, SPILL_LOG_MAX) };
+      if (uniq.length > SPILL_LOG_MAX) rec.spills_n = uniq.length;
+      if (!uniq.length) delete rec.spills;
+    }
     // `project` on EVERY line (M8): the spill dir — and so this log — is per-USER, so sessions from
-    // different projects share one file. basename(cwd) makes it filterable per project. Metadata only
-    // (basename, never the full path); best-effort — a cwd failure just omits the field.
-    let project;
-    try { project = path.basename(process.cwd()); } catch (_) {}
-    fs.appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...(project ? { project } : {}), ...record })}\n`);
+    // different projects share one file. The tag makes it filterable per project; metadata only (a
+    // basename, never the full path), and any failure just omits the field.
+    const project = projectName(cwd);
+    // `lvl` — the level this line was COLLECTED at. Level 1 drops the sub-gate lines above, i.e. the
+    // in==out ballast, so a =1 window's totals % reads far higher than the same traffic at =2 (measured:
+    // 93.6 % vs 43.4 %). The log is append-only and one file per user, and the documented workflow is to
+    // flip to 2 and back, so one file straddles both. Stamping the level lets `--report` state which
+    // events it is speaking about instead of inferring it from whether a `size-gate` reason happens to be
+    // present — one foreign line silenced that guess, and a pre-B4.11 log (no `lvl`) recorded the sub-gate
+    // events even at =1, so for those the totals ARE complete.
+    fs.appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...(project ? { project } : {}), lvl: level, ...rec })}\n`);
   } catch (_) {}
 }
 
@@ -1424,21 +1572,23 @@ function foldSiblings(code) {
 function compressJsx(content, config) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
   const text = String(content);
-  const rmIdFile = (p) => { if (p) { try { fs.unlinkSync(p); } catch (_) {} } };
   let idFile = null;
   try {
     const win = compactJsx(text, cfg, (p) => { idFile = p; });
-    if (win) return win;
+    if (win) { noteSpill(cfg, idFile); return win; }
   } catch (_) {
     // A shape the transforms cannot handle degrades to passthrough — never a thrown stage. The CLI's
     // whale-recovery command and the hook both run this on payloads nothing else has validated.
   }
-  rmIdFile(idFile); // a throw or a declined compaction → no orphan map on disk
+  // A throw or a declined compaction leaves the map to the TTL sweep: its name is content-addressed,
+  // so an identical map may be behind a CONCURRENT process's live `ids=` handle — an unlink here could
+  // break that handle mid-flight. Still reported in the sink: the file IS on disk.
+  noteSpill(cfg, idFile);
   return { compressed: text, idFile: null, classes: 0, nodeIds: 0, folded: 0 };
 }
 
 // The compaction itself: the win object, or null when there is nothing to reference or the compacted
-// body is not smaller. The caller owns both the passthrough result and the id map's cleanup.
+// body is not smaller. The caller owns the passthrough result; a written map is never unlinked.
 function compactJsx(text, cfg, keepIdFile) {
   const cls = scanAttr(text, 'className="');
   const ids = scanAttr(text, 'data-node-id="');
@@ -1456,15 +1606,11 @@ function compactJsx(text, cfg, keepIdFile) {
   let idFile = null;
   if (ids.length) {
     for (const o of ids) if (!idMap.has(o.value)) idMap.set(o.value, `n${idMap.size + 1}`);
-    const dir = spillRoot(cfg.spillDir);
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      const p = path.join(dir, `fnd-jsx-ids-${crypto.randomUUID()}.json`);
-      const map = {};
-      for (const [full, ref] of idMap) map[ref] = full;
-      fs.writeFileSync(p, compact(map));
-      idFile = p; keepIdFile(p); // the wrapper unlinks it on a throw or a declined compaction
-    } catch (_) { idMap.clear(); }
+    const map = {};
+    for (const [full, ref] of idMap) map[ref] = full;
+    const s = writeSpill(cfg.spillDir, 'fnd-jsx-ids-', compact(map));
+    if (s) { idFile = s.path; keepIdFile(s.path); } // on a throw or a decline the wrapper leaves it to the TTL sweep
+    else idMap.clear();
   }
   if (!dict.size && !idMap.size) return null;
 
@@ -1731,16 +1877,16 @@ function isErrorShape(v) {
 function capOutput(res, fileArg, config) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
   if (!fileArg || typeof res.output !== 'string' || res.bytesOut <= cfg.cliOutCap) return null;
-  const dir = spillRoot(cfg.spillDir);
-  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
   // M11: a fenced result's output is "preamble\n<json>\ntrailer"; spill ONLY the pure JSON body so the
   // fnd-slim-out-* spill is valid JSON — the advertised `--jq <spill>` recovery parses, and the shape
   // sampler below sees a real row instead of choking on the prose preamble. The preamble/trailer prose
   // rides on the handback text so the tool's message is preserved on top. A non-fenced result has no
   // `fenceBody` → the spilled body IS res.output, byte-for-byte as before this fix.
   const jsonBody = typeof res.fenceBody === 'string' ? res.fenceBody : res.output;
-  const outPath = path.join(dir, `fnd-slim-out-${crypto.randomUUID()}.json`);
-  try { fs.writeFileSync(outPath, jsonBody); } catch (_) { return null; }
+  const spilled = writeSpill(cfg.spillDir, 'fnd-slim-out-', jsonBody);
+  if (!spilled) return null;
+  const outPath = spilled.path;
+  noteSpill(cfg, outPath);
   // Shape sample: the first REAL row (skipping the crush sentinel) if the body is an array, else the
   // object itself. Truncated so one fat row can't blow the handback back past the very cap we enforce.
   let rowsKept = null, sample = null, isArr = false, isJson = false;
@@ -2035,13 +2181,15 @@ function jqAvailable(v) {
 
 // ================================================================ debug-log report (M12) ==
 
-// Aggregate the FND_MCP_SLIM_DEBUG JSONL log (M6/M8) into a ≤ ~40-line plain-text summary: totals,
-// counts per decision / reason / stage, the top HOOK tools by bytes saved (CLI runs are keyed by
-// file path, not tool name — they get one aggregate line), per-project subtotals, and the
-// MISSED-WHALE list — `platform-overflow` events (the hook's tag for a result the platform spilled to
-// a tool-results file before the hook could see it) with NO later `entry:"cli"` run over that spill
-// path, i.e. the whale nobody ever compressed. Pure over an array of raw lines (`opts.file`/`bytes`
-// only decorate the header), so tests feed a synthetic log and the CLI feeds a real one.
+// Aggregate the FND_MCP_SLIM_DEBUG JSONL log (M6/M8) into a ≤ 40-line plain-text summary (32 lines with
+// every optional section populated): totals — labelled with the collection level, which decides what they
+// can be compared to — counts per decision / reason / stage, the top HOOK tools by bytes saved (CLI runs
+// are keyed by file path, not tool name — they get one aggregate line), per-project subtotals, the count
+// of DISTINCT spill files left on disk, and the MISSED-WHALE list — `platform-overflow` events (the hook's
+// tag for a result the platform spilled to a tool-results file before the hook could see it) with NO later
+// `entry:"cli"` run over that spill path, i.e. the whale nobody ever compressed. Pure over an array of raw
+// lines (`opts.file`/`bytes` only decorate the header), so tests feed a synthetic log and the CLI feeds a
+// real one.
 const REPORT_TOP_TOOLS = 5;
 const REPORT_TOP_PROJECTS = 5;
 const REPORT_MISSED = 8;
@@ -2073,36 +2221,76 @@ function buildReport(lines, opts) {
 
   const decisions = new Map(), reasons = new Map(), stages = new Map(), tools = new Map(), projects = new Map();
   const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+  // What an event actually saved — only a `compressed`/`stubbed` decision shrank anything, whatever a
+  // passthrough happened to log as bytes_out. One `shrunkOf` predicate, shared by the totals and
+  // `savedOf`; `savedOf` feeds the per-tool/project/cli aggregates and the recovery pairing below.
+  const shrunkOf = (e) => e.decision === 'compressed' || e.decision === 'stubbed';
+  const savedOf = (e) => (shrunkOf(e)
+    ? Math.max(0, (Number(e.bytes_in) || 0) - (Number(e.bytes_out) || 0)) : 0);
+  // A whole-file re-dump: the run printed the file back into context with no reduction. The designed
+  // low-context recoveries are excluded by the marks their lines carry — a `--jq` narrowing, a JSONL
+  // profile (`profile`), a Gate-A capped summary (`spill_out`), the path handbacks and the stream
+  // refusals (by `reason`) — none of which put the payload back, whatever bytes_out they logged (a
+  // handback line records bytes_out == bytes_in although it printed a ~120 B path line).
+  const NOT_A_DUMP = new Set(['non-json', 'transform-error', 'error-shape', 'big-nonjsonl', 'stream-jq-refused']);
+  const flatOf = (e) => !savedOf(e) && !e.narrowed && !e.profile && !e.spill_out && !NOT_A_DUMP.has(e.reason);
   let bytesIn = 0, bytesOut = 0;
-  const cli = { n: 0, in: 0, saved: 0 };
+  const cli = { n: 0, in: 0, saved: 0, flat: 0 };
+  const spills = { paths: new Set(), events: 0, capped: 0 };
+  // Collection level (B4.11), read off the line rather than guessed: 1 = sub-gate events were dropped,
+  // so this event's siblings are missing from the totals; ≥2 or absent (a pre-B4.11 line, which recorded
+  // them even at 1) = the window is complete.
+  let lvl1 = 0, lvlFull = 0;
   for (const e of events) {
     const bi = Number(e.bytes_in) || 0;
     const bo = Number(e.bytes_out) || 0;
     // A `stubbed` event (M12b) shrank the payload as surely as a compressed one — the model got a
     // ~1 KB stub instead of the whale — so it counts toward the savings, and its `reason` names the
     // branch it replaced, not a passthrough (it is listed on its own line below).
-    const shrunk = e.decision === 'compressed' || e.decision === 'stubbed';
+    const shrunk = shrunkOf(e);
     bytesIn += bi;
     bytesOut += shrunk ? bo : bi; // a passthrough saved nothing, whatever it logged as bytes_out
+    if (Number(e.lvl) === 1) lvl1++; else lvlFull++;
     bump(decisions, e.decision || 'unknown');
     if (!shrunk) bump(reasons, e.reason || 'unknown');
     for (const s of Array.isArray(e.stages) ? e.stages : []) bump(stages, s);
-    const saved = shrunk ? Math.max(0, bi - bo) : 0;
+    const saved = savedOf(e);
     // A CLI event's `tool` is the FILE it ran on, not an MCP tool name — ranking those together
     // would let a handful of whale files crowd every MCP tool out of the top-5 and would double-count
     // the notice and the CLI run of the same whale. CLI work is aggregated on its own line instead.
-    if (e.entry === 'cli') { cli.n++; cli.in += bi; cli.saved += saved; } else {
+    // `flat` (flatOf above) — counted so a followed-but-useless recovery is visible instead of reading
+    // as savings-neutral work.
+    if (e.entry === 'cli') { cli.n++; cli.in += bi; cli.saved += saved; if (flatOf(e)) cli.flat++; } else {
       const tk = e.tool || '(stdin)';
       const t = tools.get(tk) || { saved: 0, n: 0 };
       t.saved += saved; t.n++; tools.set(tk, t);
     }
     const p = projects.get(e.project || '(unknown)') || { saved: 0, n: 0 };
     p.saved += saved; p.n++; projects.set(e.project || '(unknown)', p);
+    // B4.10a: which files the run left on disk — the anchor for the orphan question, since a
+    // stubbed/passed-through event's crush spills are exactly the files nobody will ever read. Paths are
+    // DEDUPED across events: names are content-addressed, so repeat traffic names the same file from many
+    // events, and summing the per-event lists would report the dedup factor as a file count (the live
+    // week that motivated the change: 1030 names for 23 payloads). A capped line contributes the paths it
+    // still names plus an upper bound (`spills_n`) for the ones it dropped.
+    const listed = Array.isArray(e.spills) ? e.spills.filter((s) => typeof s === 'string' && s) : [];
+    if (listed.length) {
+      spills.events++;
+      for (const s of listed) spills.paths.add(s);
+      const total = Number(e.spills_n) || 0;
+      if (total > listed.length) spills.capped += total - listed.length;
+    }
   }
   const pct = bytesIn ? (100 * (1 - bytesOut / bytesIn)).toFixed(1) : '0.0';
+  // The totals % changes MEANING with the collection level — level 1 omits the sub-gate lines, which are
+  // the in==out ballast — so the level it came from is stated on the line itself, and a log that straddles
+  // the switch is called out rather than averaged into one number nobody can compare.
+  const levelTag = lvl1 && lvlFull
+    ? `  [MIXED levels: ${lvl1} at =1 (sub-gate omitted) + ${lvlFull} complete — this % is not comparable]`
+    : lvl1 ? '  [level 1 — sub-gate results not logged, so this % covers logged events only]' : '';
   // Totals and the per-project subtotals deliberately span BOTH entries — they answer "what did the
   // plugin save", hook and CLI alike. Only the RANKING is hook-only, because a cli `tool` is a path.
-  out.push(`  totals: ${bytesIn} → ${bytesOut} B (${pct}% saved)`);
+  out.push(`  totals: ${bytesIn} → ${bytesOut} B (${pct}% saved)${levelTag}`);
   out.push(`  decisions: ${fmtCounts(decisions)}`);
   if (reasons.size) out.push(`  passthrough reasons: ${fmtCounts(reasons)}`);
   if (stages.size) out.push(`  stages: ${fmtCounts(stages)}`);
@@ -2111,7 +2299,8 @@ function buildReport(lines, opts) {
   out.push('  top tools by bytes saved (hook):');
   if (!topTools.length) out.push('    (no hook compressions)');
   for (const [name, t] of topTools) out.push(`    ${t.saved} B over ${t.n} call${t.n === 1 ? '' : 's'} — ${name}`);
-  if (cli.n) out.push(`  cli runs: ${cli.n} · saved ${cli.saved} B (${cli.in ? (100 * cli.saved / cli.in).toFixed(1) : '0.0'}%)`);
+  if (cli.n) out.push(`  cli runs: ${cli.n} · saved ${cli.saved} B (${cli.in ? (100 * cli.saved / cli.in).toFixed(1) : '0.0'}%)` +
+    `${cli.flat ? ` · ${cli.flat} gained nothing (the file went into context for no reduction)` : ''}`);
   const topProjects = [...projects.entries()].sort((a, b) => b[1].saved - a[1].saved).slice(0, REPORT_TOP_PROJECTS);
   out.push('  projects:');
   for (const [name, p] of topProjects) out.push(`    ${name}: ${p.n} event${p.n === 1 ? '' : 's'}, ${p.saved} B saved`);
@@ -2119,13 +2308,19 @@ function buildReport(lines, opts) {
   // Missed whales: pair each platform-overflow event with a LATER cli run over the same spill path
   // (the M7 instruction being followed). Basenames are compared too, so an equivalent path spelling
   // still pairs. Unpaired = the compressor never ran on that whale — the two-lever evidence number.
-  const cliRuns = events.filter((e) => e.entry === 'cli' && e.tool).map((e) => ({ at: Date.parse(e.ts) || 0, tool: String(e.tool) }));
-  const unpaired = (e) => {
+  // Content addressing does NOT reach this count: a platform-overflow `spill` is the PLATFORM's own
+  // tool-results file, not one of our hash names, so no two of these events share a path.
+  const cliRuns = events.filter((e) => e.entry === 'cli' && e.tool)
+    .map((e) => ({ at: Date.parse(e.ts) || 0, tool: String(e.tool), flat: flatOf(e) }));
+  // The cli runs that could be the recovery for this event: same spill path, not earlier. Empty = nobody
+  // ran the compressor on it (an event whose path we could not extract is not provably handled either).
+  const recoveries = (e) => {
     const spill = e.spill ? String(e.spill) : null;
-    if (!spill) return true; // an event whose path we could not extract is not provably handled
+    if (!spill) return [];
     const at = Date.parse(e.ts) || 0;
-    return !cliRuns.some((c) => c.at >= at && (c.tool === spill || path.basename(c.tool) === path.basename(spill)));
+    return cliRuns.filter((c) => c.at >= at && (c.tool === spill || path.basename(c.tool) === path.basename(spill)));
   };
+  const unpaired = (e) => recoveries(e).length === 0;
   const overflows = events.filter((e) => e.reason === 'platform-overflow');
   const missed = overflows.filter(unpaired);
   out.push(`  missed whales (platform-overflow with no later json-slim run): ${missed.length} of ${overflows.length}`);
@@ -2133,12 +2328,29 @@ function buildReport(lines, opts) {
   if (missed.length > REPORT_MISSED) out.push(`    …(+${missed.length - REPORT_MISSED} more)`);
   // M12b: stubbed results are NOT missed whales — the hook already replaced the payload with a stub
   // carrying the spill path and the CLI command, so an unused stub is a model choice (shown for
-  // curiosity), not a gap in the pipeline.
+  // curiosity), not a gap in the pipeline. A FOLLOWED stub is not automatically a win either: a stub's
+  // `spill` IS one of our content-addressed names, so two identical stubbed payloads name the same file
+  // and one CLI run pairs both (that much optimism is real here), and a run that reduced nothing put the
+  // payload into context anyway — reported separately, or "0 unfollowed" would read as full compliance.
   const stubbed = events.filter((e) => e.decision === 'stubbed');
   if (stubbed.length) {
     const stubReasons = new Map();
     for (const e of stubbed) bump(stubReasons, e.reason || 'unknown');
-    out.push(`  stubbed (spill-and-stub guard): ${stubbed.length} (${fmtCounts(stubReasons)}), ${stubbed.filter(unpaired).length} with no later json-slim run`);
+    const flatFollowUp = stubbed.filter((e) => recoveries(e).some((c) => c.flat)).length;
+    out.push(`  stubbed (spill-and-stub guard): ${stubbed.length} (${fmtCounts(stubReasons)}), ${stubbed.filter(unpaired).length} with no later json-slim run` +
+      `${flatFollowUp ? `, ${flatFollowUp} whose run gained nothing` : ''}`);
+  }
+  if (spills.events) {
+    out.push(`  spill files: ${spills.paths.size} named by ${spills.events} event${spills.events === 1 ? '' : 's'}` +
+      `${spills.capped ? ` (+ up to ${spills.capped} more the capped lines did not name)` : ''}`);
+  }
+  // Honesty, not a fix: at level 1 the sub-gate lines are never recorded, so `totals` and the call
+  // counts speak about LOGGED events. Missed whales, stubbed and the per-stage counts are unaffected —
+  // those events are logged at every level. Read off `lvl`, so a =2 log gets no caveat and a level-1 log
+  // keeps it even when a foreign `size-gate` line from another project shares the file.
+  if (lvl1) {
+    out.push('  note: sub-gate results (≤4 KB, reason size-gate) are logged only at FND_MCP_SLIM_DEBUG=2 — ' +
+      `${lvl1} of ${events.length} events here came from level 1, so totals and call counts cover logged events.`);
   }
   return out.join('\n');
 }
@@ -2149,8 +2361,8 @@ module.exports = {
   normalizeJqPath, jqAvailable, buildReport, shapeHint,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
-  sweepSpills, spillTtlHours, spillRoot,
-  debugLog, debugEnabled,
+  sweepSpills, spillTtlHours, spillRoot, writeSpill,
+  debugLog, debugEnabled, debugLevel,
   capOutput, streamProfile, profileLines,
   detectLog, compressLog, // M10: re-exported from log-slim.cjs for callers/tests
   DEFAULTS,
@@ -2194,6 +2406,11 @@ if (require.main === module) {
   const cfg = {};
   if (has('--toon')) cfg.toon = true;
   if (has('--no-spill')) cfg.enableMarker = false;
+  // Every spill this run writes lands here (crush markers, the jsx id map, Gate A's body) and rides on
+  // the exit line. Passed IN rather than returned: the catch around slim() below builds a synthetic
+  // result and would otherwise lose the paths of files already written before the throw.
+  const spills = [];
+  cfg.spillSink = spills;
 
   // Gate B (M9b) — a file past the stream gate is PROFILED line-by-line, never loaded whole; a
   // readFileSync + per-row JSON.parse of a multi-GB JSONL would OOM. CLI-only: MCP results never
@@ -2350,12 +2567,17 @@ if (require.main === module) {
     decision: compressed ? 'compressed' : 'passthrough',
     reason: compressed ? null : (res.reason || 'no-gain'),
     ...(res.format ? { format: res.format } : {}), // M8: set only on the non-json branch
+    // B4.11: this run answered a SUB-PATH, so "reduced nothing" says nothing about context cost — it
+    // printed one field, not the file. Without the flag `--report` counts a followed narrowing recovery
+    // as the re-dump it exists to discourage.
+    ...(narrowed ? { narrowed: true } : {}),
     bytes_in: res.bytesIn,
     bytes_out: res.bytesOut,
     pct: Math.round((res.ratio || 0) * 1000) / 10,
     stages: res.stages || [],
     spill: null,
     spill_out: capped ? capped.spillOut : null, // M9b Gate A: the fnd-slim-out-* spill (non-JSONL huge doc)
+    spills, // B4.10a: every file this run wrote — deduped/capped in debugLog
     ms: Date.now() - t0,
   }, cfg.spillDir);
   // Spill hygiene at exit — prune stale spills (best-effort; never affects output or exit code).

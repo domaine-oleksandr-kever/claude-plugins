@@ -407,10 +407,17 @@ assert_eq M18-passthrough "$(run_dbg "$DBG" "$in")" ""
 assert_eq M18-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
 assert_eq M18-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "error-shape"
 
-# M19: small result → passthrough logged as size-gate
+# M19 (B4.10c): a small result is a SUB-GATE event — 76 % of the production log was these lines, and
+# nothing is compressed either way, so FND_MCP_SLIM_DEBUG=1 must not log it at all (no file created);
+# =2 is the everything level and brings it back as reason:"size-gate".
 DBG="$TMP/dbg-m19"; mkdir -p "$DBG"
-run_dbg "$DBG" '{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"{\"a\":1,\"b\":2}"}]}}' >/dev/null
-assert_eq M19-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "size-gate"
+smallin='{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"{\"a\":1,\"b\":2}"}]}}'
+run_dbg "$DBG" "$smallin" >/dev/null
+if [ ! -f "$DBG/$DBGLOG" ]; then ok; else bad M19-subgate-quiet "level 1 logged a sub-gate line: $(cat "$DBG/$DBGLOG")"; fi
+DBG="$TMP/dbg-m19b"; mkdir -p "$DBG"
+printf '%s' "$smallin" | env FND_MCP_SLIM_DIR="$DBG" FND_MCP_SLIM_DEBUG=2 node "$SLIM" >/dev/null 2>&1
+assert_eq M19b-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "size-gate"
+assert_eq M19b-one-line "$(wc -l < "$DBG/$DBGLOG" 2>/dev/null | tr -d ' ')" 1
 
 # M20: DEBUG unset → no log file created at all (zero side effects).
 # env -u clears any ambient FND_MCP_SLIM_DEBUG (a developer may export it to observe the log live).
@@ -432,8 +439,11 @@ in="$(jq -n --arg t "$bignon" '{tool_name:"mcp__x__y",tool_response:{content:[{t
 run_dbg "$DBG" "$in" >/dev/null
 assert_eq M22-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "non-json"
 assert_eq M22-format "$(jq -r '.format' "$DBG/$DBGLOG" 2>/dev/null)" "text"
-m22proj="$(jq -r '.project' "$DBG/$DBGLOG" 2>/dev/null)"
-if [ -n "$m22proj" ] && [ "$m22proj" != "null" ]; then ok; else bad M22-project "project tag missing on debug line"; fi
+# the tag names the nearest `.git` ancestor of the cwd (B4.10b), so running the suite from any
+# subdirectory still says this repo; env -u puts the WALK under test, not an ambient project dir
+DBG="$TMP/dbg-m22b"; mkdir -p "$DBG"
+printf '%s' "$in" | (cd "$ROOT" && env -u CLAUDE_PROJECT_DIR FND_MCP_SLIM_DIR="$DBG" FND_MCP_SLIM_DEBUG=1 node "$SLIM") >/dev/null 2>&1
+assert_eq M22-project "$(jq -r '.project' "$DBG/$DBGLOG" 2>/dev/null)" "$(basename "$ROOT")"
 
 # M23: unrecognized object shape (no text/content) → passthrough logged as unrecognized-shape
 DBG="$TMP/dbg-m23"; mkdir -p "$DBG"
@@ -931,6 +941,149 @@ run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
 assert_eq M59-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
 assert_eq M59-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "marker-overhead"
 assert_eq M59-no-negative-pct "$(jq -r '.bytes_out <= .bytes_in' "$DBG/$DBGLOG" 2>/dev/null)" "true"
+# …and the LINE must not claim the file this branch just unlinked: the spill is spliced out of `spills`,
+# so the log agrees with the M59-no-orphan check above. Asserted on every path the line names (`[]?`
+# tolerates the absent field), which is the invariant every decision's `spills` list owes the reader.
+m59missing=0
+while IFS= read -r f; do [ -f "$f" ] || m59missing=$((m59missing+1)); done < <(jq -r '.spills[]?' "$DBG/$DBGLOG" 2>/dev/null)
+assert_eq M59-spills-on-disk "$m59missing" 0
+
+# ── M60–M67: spill telemetry + content-hash names + project tag (B4.10a/b) + the B4.11 decline ───
+# The debug log named only the hook's OWN whole-original spill, never the crush / node-id-map files
+# json-slim writes inside the same invocation — so "did this run leave an orphan?" was unanswerable
+# from the log. Every write now rides on the line in `spills`, and spill names are content-addressed
+# so identical payloads share ONE file instead of one per invocation.
+
+# M60: a crushable >4 KB result → the compressed line's `spills` names the hook's own spill AND the
+# crush spill json-slim wrote inside it, both existing on disk.
+DBG="$TMP/dbg-m60"; mkdir -p "$DBG"
+run_dbg "$DBG" "$msin" >/dev/null
+if jq -e '.spills | length >= 2' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok
+else bad M60-spills-listed "spills=$(jq -c '.spills' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+if jq -r '.spills[]' "$DBG/$DBGLOG" 2>/dev/null | grep -q 'fnd-crush-'; then ok
+else bad M60-crush-named "no crush spill on the line: $(jq -c '.spills' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+m60missing=0
+while IFS= read -r f; do [ -f "$f" ] || m60missing=$((m60missing+1)); done < <(jq -r '.spills[]' "$DBG/$DBGLOG" 2>/dev/null)
+assert_eq M60-spills-exist "$m60missing" 0
+# the handback path stays a single string in `spill` (`--report` pairs missed whales on it)
+if jq -e '.spill | type == "string"' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok
+else bad M60-spill-scalar "spill=$(jq -c '.spill' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+
+# M61: the STUBBED weak-gain line lists the crush spills the discarded compression left behind — the
+# orphan audit DR2/B4.5 needs (the stub's own spill is in `spill`, those files are extra).
+DBG="$TMP/dbg-m61"; mkdir -p "$DBG"
+run_stub "$DBG" "$msin" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M61-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
+if jq -r '.spills[]?' "$DBG/$DBGLOG" 2>/dev/null | grep -q 'fnd-crush-'; then ok
+else bad M61-orphans-visible "a stubbed line hides its crush spills: $(jq -c '.spills' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+# The stub's OWN spill — the file it hands the model in `spill` — must be part of the same `spills`
+# inventory (README: "its own `full=` copy plus the crush / node-id-map spills").
+if jq -e '.spill as $p | .spills | index($p)' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok
+else bad M61-own-spill-listed "the handback file is missing from the inventory: $(jq -c '{spill,spills}' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+
+# M62: content-addressed names — the same result twice in one dir writes ONE spill of each kind, both
+# runs hand back the same path, and the file is still there after run 2 (the `created` rail: a run
+# must never unlink a file an earlier live handle names).
+DDUP="$TMP/dedup"; mkdir -p "$DDUP"
+d1="$(printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$DDUP" node "$SLIM" 2>/dev/null)"
+p1="$(printf '%s' "$d1" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | grep -o '<<full=[^ >]*' | tail -1 | sed 's/^<<full=//')"
+c1="$(ls "$DDUP" | grep -c '^fnd-crush-')"
+d2="$(printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$DDUP" node "$SLIM" 2>/dev/null)"
+p2="$(printf '%s' "$d2" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | grep -o '<<full=[^ >]*' | tail -1 | sed 's/^<<full=//')"
+assert_eq M62-same-handle "$p1" "$p2"
+assert_eq M62-one-original "$(ls "$DDUP" | grep -c '^fnd-mcp-slim-')" 1
+if [ "$c1" -ge 1 ] && [ "$(ls "$DDUP" | grep -c '^fnd-crush-')" -eq "$c1" ]; then ok
+else bad M62-crush-dedup "crush spills grew on the second identical run: $c1 → $(ls "$DDUP" | grep -c '^fnd-crush-')"; fi
+if [ -n "$p2" ] && [ -f "$p2" ]; then ok; else bad M62-handle-alive "run 2's handle points at nothing (p2='$p2')"; fi
+if [ -z "$(ls "$DDUP" | grep '\.tmp-')" ]; then ok; else bad M62-no-tmp "a tmp spill leaked: $(ls "$DDUP")"; fi
+
+# M63: a REUSED spill must survive the sweep. The sweep prunes by mtime, so a hash-named file that is
+# not rewritten would expire under a live `full=` handle — writeSpill re-dates it instead.
+SWR="$TMP/sweep-reuse"; mkdir -p "$SWR"
+printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWR" node "$SLIM" >/dev/null 2>&1
+for f in "$SWR"/fnd-*; do touch -t 200001010000 "$f"; done
+rm -f "$SWR/.fnd-mcp-slim-sweep"   # un-throttle: the sweep must really run on this invocation
+d3="$(printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWR" node "$SLIM" 2>/dev/null)"
+p3="$(printf '%s' "$d3" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | grep -o '<<full=[^ >]*' | tail -1 | sed 's/^<<full=//')"
+if [ -n "$p3" ] && [ -f "$p3" ]; then ok; else bad M63-reused-swept "the sweep pruned the spill this run handed back (p3='$p3')"; fi
+
+# M64 (B4.10b): the `project` tag resolves from the event's OWN cwd — Claude Code sends it in the
+# PostToolUse payload, and a subagent/CLI cwd used to tag 154 of 476 live events `scratchpad`/`tmp`.
+# The nearest `.git` ancestor of that cwd wins over CLAUDE_PROJECT_DIR, because the CLI entry never
+# receives that variable (Claude Code exports it to hooks only) and the two entries must agree on one
+# name; the env var is the fallback for a cwd with no repo above it.
+FAKEREPO="$TMP/fake-repo"; mkdir -p "$FAKEREPO/.git" "$FAKEREPO/sub/scratchpad"
+in="$(jq -n --rawfile t "$JIRA" --arg c "$FAKEREPO/sub/scratchpad" \
+  '{tool_name:"mcp__x__y",cwd:$c,tool_response:{content:[{type:"text",text:$t}]}}')"
+DBG="$TMP/dbg-m64"; mkdir -p "$DBG"
+printf '%s' "$in" | env -u CLAUDE_PROJECT_DIR FND_MCP_SLIM_DIR="$DBG" FND_MCP_SLIM_DEBUG=1 node "$SLIM" >/dev/null 2>&1
+assert_eq M64-git-ancestor "$(jq -r '.project' "$DBG/$DBGLOG" 2>/dev/null)" "fake-repo"
+DBG="$TMP/dbg-m64b"; mkdir -p "$DBG"
+mkdir -p "$TMP/chosen-project"
+printf '%s' "$in" | env CLAUDE_PROJECT_DIR="$TMP/chosen-project" FND_MCP_SLIM_DIR="$DBG" FND_MCP_SLIM_DEBUG=1 node "$SLIM" >/dev/null 2>&1
+assert_eq M64-git-beats-env "$(jq -r '.project' "$DBG/$DBGLOG" 2>/dev/null)" "fake-repo"
+# The env fallback, for a cwd with no repo above it. `.git`-free ancestors cannot be promised inside
+# $TMPDIR (it may itself live in a repo), so the cwd is nested past the resolver's 64-level walk bound,
+# which reaches the same fallback branch and depends on nothing above $TMP.
+DEEPCWD="$TMP/no-repo-here"; for _i in $(seq 1 65); do DEEPCWD="$DEEPCWD/n"; done
+mkdir -p "$DEEPCWD"
+inD="$(jq -n --rawfile t "$JIRA" --arg c "$DEEPCWD" '{tool_name:"mcp__x__y",cwd:$c,tool_response:{content:[{type:"text",text:$t}]}}')"
+DBG="$TMP/dbg-m64c"; mkdir -p "$DBG"
+printf '%s' "$inD" | env CLAUDE_PROJECT_DIR="$TMP/chosen-project" FND_MCP_SLIM_DIR="$DBG" FND_MCP_SLIM_DEBUG=1 node "$SLIM" >/dev/null 2>&1
+assert_eq M64-env-fallback "$(jq -r '.project' "$DBG/$DBGLOG" 2>/dev/null)" "chosen-project"
+
+# M65: content-addressed names make a spill SHARED between invocations, so the marker-overhead
+# self-cleanup may only delete what it wrote itself. Run 1 stubs a raw-string result (its spill IS the
+# payload, byte-identical to what run 2 would spill) and the model now holds that path; run 2 sees the
+# same bytes, computes a marker-overhead passthrough and must NOT unlink the file run 1's stub names.
+SHR="$TMP/shared-spill"; mkdir -p "$SHR"
+sharedin="$(jq -n --rawfile t "$MOF" '{tool_name:"mcp__x__y",tool_response:$t}')"
+s1="$(run_stub "$SHR" "$sharedin" FND_MCP_SLIM_STUB_BYTES=1000)"
+shp="$(printf '%s' "$s1" | jq -r '.hookSpecificOutput.updatedToolOutput' 2>/dev/null | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$shp" ] && [ -f "$shp" ]; then ok; else bad M65-stub-spill "run 1 wrote no stub spill (shp='$shp')"; fi
+assert_eq M65-run2-passthrough "$(run_stub "$SHR" "$sharedin" FND_MCP_SLIM_STUB=0)" ""
+if [ -f "$shp" ]; then ok; else bad M65-live-handle-kept "run 2 deleted the spill run 1's live stub handle names"; fi
+
+# M66 (B4.11): a uniform array of UNIQUE ENTITIES (same keys, per-row distinct strings, no error row,
+# no rare enum, no numeric outlier) is refused by the crushability gate BY DESIGN — sampling it would
+# drop unique content. The hook must hand it back untouched and log the decline as `no-gain`, the top
+# passthrough reason in the live logs. Sized into the window where the decline is the only outcome:
+# over the 4 KB gate (else `size-gate`) and under the 32 KB stub threshold (else `stubbed`) — run through
+# run_stub, which clears the suite-level FND_MCP_SLIM_STUB=0 pin, or the guard could not fire at any size
+# and the upper half of that window would assert nothing.
+UNIQ="$TMP/unique-entities.json"
+node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({products:Array.from({length:60},(_,i)=>({id:"gid://shopify/Product/"+(7000000000+i),handle:"product-handle-"+i,title:"Product Title Number "+i,url:"https://shop.example.com/products/product-handle-"+i}))}))' "$UNIQ"
+ub=$(wc -c < "$UNIQ" | tr -d ' ')
+if [ "$ub" -gt 4096 ] && [ "$ub" -lt 32768 ]; then ok; else bad M66-window "payload $ub B is outside the gate/stub window"; fi
+in="$(jq -n --rawfile t "$UNIQ" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+MUD="$TMP/m66"; mkdir -p "$MUD"
+assert_eq M66-passthrough "$(run_stub "$MUD" "$in")" ""
+DBG="$TMP/dbg-m66"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M66-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+assert_eq M66-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "no-gain"
+assert_eq M66-pct      "$(jq -r '.pct'      "$DBG/$DBGLOG" 2>/dev/null)" "0"
+
+# M67 (B4.11): the stub a DECLINED JSON payload carries must not send the model back into a whole-file
+# run — json-slim would put the identical pipeline over the identical bytes and print the payload straight
+# back (a 43 KB decline re-dumped as 43,365 B, since the CLI's inline cap sits above the stub threshold),
+# so following the stub would cost MORE context than no guard at all. That stub names the narrowing
+# command instead. A `weak-gain` stub keeps the plain CLI line: there the run hands back the compressed
+# body the stub replaced.
+UNIQBIG="$TMP/unique-entities-big.json"
+node -e 'require("fs").writeFileSync(process.argv[1],JSON.stringify({products:Array.from({length:260},(_,i)=>({id:"gid://shopify/Product/"+(7000000000+i),handle:"product-handle-"+i,title:"Product Title Number "+i,url:"https://shop.example.com/products/product-handle-"+i}))}))' "$UNIQBIG"
+in="$(jq -n --rawfile t "$UNIQBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+SBU="$TMP/stub-nogain"; mkdir -p "$SBU"
+textU="$(run_stub "$SBU" "$in" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M67-nogain-stub      "$textU" "<<fnd-mcp-slim stub>>"
+assert_contains M67-nogain-narrows   "$textU" "--jq <dot.path>"
+assert_contains M67-nogain-says-ran  "$textU" "already ran on it and gained nothing"
+assert_absent   M67-nogain-no-rerun  "$textU" "Compress or inspect it"
+# the weak-gain stub (the 260 KB Jira fixture compresses, stays over the threshold) still points at the
+# CLI, because running it there really does hand back a smaller body
+textW2="$(run_stub "$TMP/stub-weak2" "$msin" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M67-weakgain-cli "$textW2" "Compress or inspect it"
+assert_absent   M67-weakgain-no-jq "$textW2" "--jq <dot.path>"
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping
