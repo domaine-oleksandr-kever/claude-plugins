@@ -117,6 +117,10 @@ function jsonType(v) {
 // json.dumps(x, separators=(',',':'), ensure_ascii=False) for the payloads we handle.
 const compact = (v) => JSON.stringify(v);
 
+// JSON.parse is the ONE reader here that rejects a leading BOM (shapeHint, parseJsonl, unwrapFence and
+// sniffFormat all strip one), so every JSON.parse of caller-supplied text goes through this.
+const stripBom = (s) => (s.charCodeAt(0) === 0xFEFF ? s.slice(1) : s);
+
 // Banker's rounding (round-half-to-even) — the number/string split uses it.
 function roundHalfEven(x) {
   const f = Math.floor(x);
@@ -917,17 +921,19 @@ function processValue(value, depth, cfg) {
 function crush(content, config) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
   if (typeof content !== 'string') return { compressed: content, wasModified: false, strategy: 'passthrough' };
+  const original = content; // handed back on every non-modifying return, BOM included (see slim())
+  content = stripBom(content);
   let parsed;
   try { parsed = JSON.parse(content); } catch (_) {
-    return { compressed: content, wasModified: false, strategy: 'passthrough' };
+    return { compressed: original, wasModified: false, strategy: 'passthrough' };
   }
   try {
     const [crushed, info] = processValue(parsed, 0, cfg);
     const compressed = compact(crushed);
     const wasModified = compressed !== content.trim();
-    return { compressed, wasModified, strategy: info !== '' ? info : 'passthrough' };
+    return { compressed: wasModified ? compressed : original, wasModified, strategy: info !== '' ? info : 'passthrough' };
   } catch (_) {
-    return { compressed: content, wasModified: false, strategy: 'passthrough' };
+    return { compressed: original, wasModified: false, strategy: 'passthrough' };
   }
 }
 
@@ -1517,11 +1523,13 @@ function compactJsx(text, cfg, keepIdFile) {
   const legend = entries.map((e, i) => `C${i + 1}: ${e}`);
   const clauses = [];
   if (dict.size) clauses.push(`class=CN → the CN: legend line below${varLines.length ? ' ($N → the $N: line)' : ''}`);
-  if (idMap.size) clauses.push(`#nN → a data-node-id, the full ids are in ids=${idFile}`);
   if (fold.folded) clauses.push('{/* ×N more … */} folds identical repeated siblings and lists what differed per repeat');
-  // A clause ending in the map's PATH takes no closing period: a naive read of the `ids=` token stops
-  // at whitespace and would carry the period into the filename (ENOENT, an unusable map). Same rail as
-  // the hook's overflowSpill, which strips exactly that punctuation off a spill path.
+  // The map's path ends the header, ALWAYS — and then takes no closing period. A naive read of the
+  // `ids=` token stops at whitespace (the way a model or a shell one-liner reads it), so any clause
+  // AFTER it glues the joining '; ' onto the filename and a period would glue itself on: both ENOENT
+  // on the documented node-id recovery. Same rail as the hook's overflowSpill, which strips exactly
+  // that punctuation off a spill path.
+  if (idMap.size) clauses.push(`#nN → a data-node-id, the full ids are in ids=${idFile}`);
   const tail = clauses.length ? ` ${clauses.join('; ')}` : '';
   const header = `${JSX_HEADER} Figma design context, compacted losslessly — nothing dropped.` +
     tail + (tail && !(idFile && tail.endsWith(idFile)) ? '.' : '');
@@ -1577,7 +1585,15 @@ function jsxResult(text, cfg, content = text) {
 function slim(content, config) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
   if (typeof content !== 'string') return { output: content, wasModified: false, bytesIn: 0, bytesOut: 0, ratio: 0, stages: [] };
-  const bytesIn = Buffer.byteLength(content, 'utf8');
+  // A BOM-prefixed JSON payload used to misroute to `non-json` — and, over the hook's stub threshold,
+  // leave context for a file. Stripped ONCE here, so every stage below sees the same string.
+  // `original` keeps the exact argument: a `wasModified:false` result hands THAT back, never the
+  // stripped string — the CLI prints a passthrough verbatim, so it must be byte-identical to what
+  // arrived. bytesIn/bytesOut speak about the argument too.
+  const original = content;
+  content = stripBom(content);
+  const bytesIn = Buffer.byteLength(original, 'utf8');
+  const pass = (reason, extra) => ({ output: original, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason, stages: [], ...extra });
   let parsed;
   let fromJsonl = false;
   try { parsed = JSON.parse(content); } catch (_) {
@@ -1601,6 +1617,11 @@ function slim(content, config) {
             return { output, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['fence', ...inner.stages] : [], preamble: f.preamble, fenceBody: inner.output, fenceTrailer: f.trailer, ...(inner.logCompressed ? { logCompressed: true } : {}), ...(inner.jsxCompressed ? { jsxCompressed: true } : {}) };
           }
         }
+        // A fenced ERROR envelope (a tool wraps its failures the way it wraps its payloads) declines
+        // every stage, so without this it reached the generic `non-json` return below — where the hook's
+        // stub guard, seeing no error, replaced the failure with a stub. `inner.error` IS isErrorShape
+        // over the unwrapped body; the WHOLE original is handed back, fence and preamble included.
+        if (inner.error) return pass('error-shape', { error: true });
       }
     }
     // A JSONL line stream (bulk-operation dump) is a same-shape array — route it through the
@@ -1634,14 +1655,12 @@ function slim(content, config) {
       }
       // `format` sniffs the head so the debug log can tell WHAT the non-JSON payload was (M8) — a
       // pure diagnostic tag; it never changes the passthrough. Set on this branch only.
-      return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'non-json', format: sniffFormat(content), stages: [] };
+      return pass('non-json', { format: sniffFormat(content) });
     }
   }
   // Never touch error envelopes — write-gating elsewhere depends on seeing them verbatim. (An
   // array — including a JSONL row stream — is object-only-false here, so bulk data flows through.)
-  if (isErrorShape(parsed)) {
-    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, error: true, reason: 'error-shape', stages: [] };
-  }
+  if (isErrorShape(parsed)) return pass('error-shape', { error: true });
   // M13: a Figma design-context result also reaches the CLI still inside its MCP block envelope
   // (`[{"type":"text","text":"<the JSX>"}]` — the platform overflow spill), which parses as JSON and
   // would otherwise never meet the jsx stage in the non-JSON branch above. Unwrap a pure text-block
@@ -1672,17 +1691,20 @@ function slim(content, config) {
     runStage('crush', crushValue(value, cfg));
     if (cfg.toon) runStage('toon', toonStage(value));
     const output = compact(value);
-    const bytesOut = Buffer.byteLength(output, 'utf8');
+    const wasModified = output !== content.trim();
+    // Not modified ⇒ the argument itself is the result (same rail as the passthrough returns above):
+    // re-serializing would otherwise report a phantom gain for stripped surrounding whitespace / a BOM.
+    const bytesOut = wasModified ? Buffer.byteLength(output, 'utf8') : bytesIn;
     return {
-      output,
-      wasModified: output !== content.trim(),
+      output: wasModified ? output : original,
+      wasModified,
       bytesIn,
       bytesOut,
       ratio: bytesIn ? 1 - bytesOut / bytesIn : 0,
       stages,
     };
   } catch (_) {
-    return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, reason: 'transform-error', stages: [] };
+    return pass('transform-error');
   }
 }
 
@@ -1723,7 +1745,7 @@ function capOutput(res, fileArg, config) {
   // object itself. Truncated so one fat row can't blow the handback back past the very cap we enforce.
   let rowsKept = null, sample = null, isArr = false, isJson = false;
   try {
-    const parsed = JSON.parse(jsonBody);
+    const parsed = JSON.parse(stripBom(jsonBody));
     isJson = true;
     if (Array.isArray(parsed)) {
       isArr = true;
@@ -2240,7 +2262,7 @@ if (require.main === module) {
   // --jq <dot.path>: narrow to a sub-path before slimming (simple key/index walk, no jq dependency).
   if (jq) {
     let v;
-    try { v = JSON.parse(raw); } catch (e) {
+    try { v = JSON.parse(stripBom(raw)); } catch (e) {
       // A JSONL file is a same-shape array — let `--jq 0.handle` address a row directly (M9).
       const rows = parseJsonl(raw);
       if (rows) v = rows;
@@ -2288,7 +2310,16 @@ if (require.main === module) {
   // declined it above, so it was not profiled). A non-JSON STDIN stream has no path to return, so it
   // still passes through below.
   // `transform-error` joins it: a stage that faulted compressed nothing, so the file is the answer.
-  const handback = fileArg && (res.reason === 'non-json' || res.reason === 'transform-error');
+  // `error-shape` too, but ONLY above the inline cap: an error envelope is a verbatim passthrough by
+  // contract, so a whale-sized one pours the whole file back into context and Gate A would write a
+  // full-size DUPLICATE of the file the caller already named, labelled `slimmed output`. Under the cap
+  // the envelope IS the answer the caller came for — a 133 B "PERMISSION DENIED" hidden behind a path
+  // costs a second Read to learn the run failed. Both carve out a narrowing `--jq`: that selects a
+  // sub-value the file path does not answer (same test as the JSONL profile gate above).
+  const narrowed = jq != null && !jqIdentity;
+  const handback = fileArg && (res.reason === 'non-json'
+    || (res.reason === 'transform-error' && !narrowed)
+    || (res.reason === 'error-shape' && res.bytesIn > DEFAULTS.cliOutCap && !narrowed));
   // M10 — a compressed LOG file: print the selected body (its own `[N lines omitted…]` trailer
   // included) + one line naming the on-disk original, which IS the recovery (profile-philosophy
   // consistent). Skips capOutput below — that gate is JSON-document-shaped, not log text.
@@ -2300,7 +2331,8 @@ if (require.main === module) {
   // so name the on-disk original the way the log stage does. Over the cap, Gate A already names it.
   const jsxOut = res.jsxCompressed && fileArg && !capped;
   if (handback) {
-    process.stdout.write(`json-slim: nothing to compress; read the file directly: ${fileArg}\n`);
+    const why = { 'error-shape': 'error envelope', 'non-json': 'not JSON', 'transform-error': 'transform error' }[res.reason];
+    process.stdout.write(`json-slim: nothing to compress (${why}); read the file directly: ${fileArg}\n`);
   } else if (logOut || jsxOut) {
     process.stdout.write(`${res.output}\noriginal: ${fileArg}\n`);
   } else if (capped) {

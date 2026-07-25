@@ -729,9 +729,10 @@ if [ "$rc" -eq 0 ] && head -1 "$O" | grep -Fq '<<fnd-jsx-slim>>' && [ "$idmaps" 
    && node -e '
      const fs=require("fs"),path=require("path");
      const body=fs.readFileSync(process.argv[1],"utf8");
-     const m=/ids=(\S*fnd-jsx-ids-[^ ;]*)/.exec(body.split("\n")[0]);
+     const m=/ids=(\S+)/.exec(body.split("\n")[0]);   // naive, exactly like the model reading this header
      if(!m) process.exit(1);
-     const map=JSON.parse(fs.readFileSync(m[1],"utf8"));
+     let map;
+     try{ map=JSON.parse(fs.readFileSync(m[1],"utf8")); }catch(_){ process.exit(1); } // an unreadable path is the failure, not a stack trace
      const refs=[...new Set(body.match(/#n\d+/g)||[])];
      process.exit(refs.length && refs.every((r)=>typeof map[r.slice(1)]==="string") ? 0 : 1);
    ' "$O"; then ok
@@ -874,6 +875,20 @@ if [ "$rc" -eq 0 ] \
    && [ "$(grep -c 'cli runs:' "$O")" -eq 1 ] \
    && grep -Fq 'cli runs: 6 · saved 4800000 B (88.9%)' "$O"; then ok
 else bad R6-report-cli-vs-hook "rc=$rc out=$(head -c 600 "$O") err=$(head -c 120 "$E")"; fi
+
+# R7 (B4.7): the report's reason vocabulary is data-driven, so the new `marker-overhead` passthrough —
+# a compression whose win was smaller than the `full=` handle, handed back as the original — is counted
+# like any other passthrough: named under `passthrough reasons`, saving nothing, never a missed whale.
+RPLOG4="$RPD/marker-overhead.log"
+cat > "$RPLOG4" <<'RPEOF'
+{"ts":"2026-07-25T20:00:00.000Z","project":"elc","entry":"hook","tool":"mcp__a__getSettings","decision":"passthrough","reason":"marker-overhead","bytes_in":13337,"bytes_out":13337,"pct":0,"stages":["noise"],"spill":null,"ms":4}
+{"ts":"2026-07-25T20:01:00.000Z","project":"elc","entry":"hook","tool":"mcp__a__getJiraIssue","decision":"compressed","reason":null,"bytes_in":9062,"bytes_out":5318,"pct":41.3,"stages":["adf","crush"],"spill":"/tmp/fnd-mcp-slim-c.json","ms":6}
+RPEOF
+rc=0; node "$SLIM" --report "$RPLOG4" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq 'passthrough reasons: marker-overhead 1' "$O" \
+   && grep -Fq 'totals: 22399 → 18655 B (16.7% saved)' "$O" \
+   && grep -Fq 'no later json-slim run): 0 of 0' "$O"; then ok
+else bad R7-report-marker-overhead "rc=$rc out=$(head -c 500 "$O") err=$(head -c 120 "$E")"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

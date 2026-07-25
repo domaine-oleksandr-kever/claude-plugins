@@ -827,8 +827,9 @@ if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M53-fullfile "no existing full=
 
 # M54: the node-id map spill exists and every #nN the body still shows resolves in it. The map is
 # named `ids=`, never `full=` — that handle stays reserved for the original result the hook appends,
-# so a loose `full=` scan (the model's, or M1/M25/M27 above) can never grab the id map instead.
-idf="$(printf '%s' "$text" | head -1 | grep -o 'ids=[^ ;]*fnd-jsx-ids-[^ ;]*' | sed 's/^ids=//')"
+# so a loose `full=` scan (the model's, or M1/M25/M27 above) can never grab the id map instead. The
+# path is read NAIVELY (up to whitespace): a clause after `ids=` would glue a `;` on and ENOENT.
+idf="$(printf '%s' "$text" | head -1 | grep -o 'ids=[^ ]*' | sed 's/^ids=//')"
 if [ "$(printf '%s' "$text" | grep -c 'full=')" -eq 1 ]; then ok; else bad M54-full-token-unique "the body carries more than one full= handle"; fi
 if [ -n "$idf" ] && [ -f "$idf" ]; then ok; else bad M54-idmap "no node-id map file (idf='$idf')"; fi
 printf '%s' "$text" > "$TMP/m54-body.txt"
@@ -863,6 +864,73 @@ assert_contains M56-updated "$out56" "updatedToolOutput"
 t56="$(printf '%s' "$out56" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
 n56="$(printf '%s' "$t56" | grep -o 'Product variant' | wc -l | tr -d ' ')"
 if [ "$n56" -eq 59 ]; then ok; else bad M56-no-loss "only $n56 of 59 product names survived the fold"; fi
+
+# ── M57–M59: data-loss rails (B1.2 / B4.1 / B4.7) ────────────────────────────
+# Three ways the pipeline used to drop what the model needed, all seen in live debug-log traffic.
+
+# M57 (B1.2): a FENCED error envelope is never stubbed. A tool that wraps its payload in prose +
+# ```json (chrome-devtools evaluate_script) wraps its FAILURES the same way; that body declines every
+# stage, so the result reached the generic `non-json` branch, the guard saw no error and replaced a
+# 57 KB permission failure with a ~1 KB stub. Error results pass through at ANY size.
+FERR="$TMP/m57.txt"
+node -e '
+  const errs=Array.from({length:300},(_,i)=>({message:`PERMISSION DENIED on field ${i} — the app is missing the read_products scope`,locations:[{line:i,column:7}],extensions:{code:"ACCESS_DENIED"}}));
+  require("fs").writeFileSync(process.argv[1], "Script ran on page and returned:\n```json\n"+JSON.stringify({errors:errs})+"\n```");
+' "$FERR"
+if [ "$(wc -c < "$FERR" | tr -d ' ')" -gt 32768 ]; then ok; else bad M57-fixture "the fenced envelope is not over the 32 KB stub threshold"; fi
+in="$(jq -n --rawfile t "$FERR" '{tool_name:"mcp__plugin_fnd_chrome-devtools-mcp__evaluate_script",tool_response:{content:[{type:"text",text:$t}]}}')"
+SBE="$TMP/stub-fenced-error"; mkdir -p "$SBE"
+assert_eq M57-passthrough "$(run_stub "$SBE" "$in")" ""
+if ! ls "$SBE"/fnd-mcp-slim-* >/dev/null 2>&1; then ok; else bad M57-no-spill "a passed-through error envelope left a spill: $(ls "$SBE")"; fi
+DBG="$TMP/dbg-m57"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M57-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+assert_eq M57-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "error-shape"
+
+# M58 (B4.1): a UTF-8 BOM must not misroute a compressible result into a stub. JSON.parse rejects a
+# leading BOM while every other reader in json-slim strips one, so a 99 %-compressible payload read as
+# `non-json` and — over the threshold — left context for a file, for one invisible character. The BOM is
+# written as an ESCAPE and the fixture's first three bytes are asserted: an invisible literal that some
+# editor or filter drops would turn every M58 check into a duplicate of the plain-payload baseline —
+# green with the rail entirely absent.
+BOMF="$TMP/m58.json"
+node -e '
+  const o={rows:Array.from({length:2000},(_,i)=>({id:i,note:"padding-padding-padding"}))};
+  require("fs").writeFileSync(process.argv[1], "\uFEFF"+JSON.stringify(o));
+' "$BOMF"
+if [ "$(wc -c < "$BOMF" | tr -d ' ')" -gt 32768 ] \
+   && node -e 'const b=require("fs").readFileSync(process.argv[1]);process.exit(b[0]===0xEF&&b[1]===0xBB&&b[2]===0xBF?0:1)' "$BOMF"; then ok
+else bad M58-fixture "the fixture must be a >32 KB payload starting with a 3-byte BOM: $(wc -c < "$BOMF") B, head=$(node -e 'const b=require("fs").readFileSync(process.argv[1]);console.log([...b.subarray(0,3)].join(","))' "$BOMF")"; fi
+in="$(jq -n --rawfile t "$BOMF" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+SBB="$TMP/stub-bom"; mkdir -p "$SBB"
+outB="$(run_stub "$SBB" "$in")"
+assert_contains M58-compressed  "$outB" "<<full="
+assert_absent   M58-not-stubbed "$outB" "<<fnd-mcp-slim stub>>"
+DBG="$TMP/dbg-m58"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M58-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
+
+# M59 (B4.7): a win smaller than the recovery marker is never emitted. The per-block gain gate measures
+# the block BEFORE the ~130 B `<<full=… original_result>>` handle and the JSON re-escaping around it, so
+# a thin win (here one dropped null in a 12 KB object) came out NET BIGGER than the original — four
+# production events logged decision:"compressed" with bytes_out > bytes_in. The original is handed back
+# instead, and the spill the discarded marker named is dropped rather than orphaned.
+MOF="$TMP/m59.json"
+node -e '
+  const o={};
+  for(let i=0;i<300;i++) o["field_"+i]="value-"+i+"-abcdefghijklmnop";
+  o.nullish=null;   // the only thing the pipeline can drop here → a 15 B win, ~8× less than the marker
+  require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+' "$MOF"
+in="$(jq -n --rawfile t "$MOF" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+MOD="$TMP/marker-overhead"; mkdir -p "$MOD"
+assert_eq M59-passthrough "$(run_stub "$MOD" "$in")" ""
+if ! ls "$MOD"/fnd-mcp-slim-* >/dev/null 2>&1; then ok; else bad M59-no-orphan "the discarded marker's spill was left on disk: $(ls "$MOD")"; fi
+DBG="$TMP/dbg-m59"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M59-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+assert_eq M59-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "marker-overhead"
+assert_eq M59-no-negative-pct "$(jq -r '.bytes_out <= .bytes_in' "$DBG/$DBGLOG" 2>/dev/null)" "true"
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping

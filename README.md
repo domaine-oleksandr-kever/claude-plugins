@@ -396,9 +396,11 @@ hook error never blocks work:
     disables it; `FND_MCP_SLIM_DIR` sets the spill directory. A result **over** the platform limit
     (`MAX_MCP_OUTPUT_TOKENS`, ~25k tokens) bypasses this hook — Claude Code spills it to a file and
     hands over the path; the session convention and the reader agents route that file through the
-    same compressor on demand (`node scripts/json-slim.cjs <path>`, `--stats` to see the cut). If
-    that file isn't JSON the CLI hands the path back instead of re-dumping it, so the caller reads
-    it directly. A payload a tool **wrapped in a markdown fence** (prose preamble + ```` ```json ````
+    same compressor on demand (`node scripts/json-slim.cjs <path>`, `--stats` to see the cut). If that
+    file isn't JSON — or holds an error envelope (never compressed) too big to print inline — the CLI
+    hands the path back instead of re-dumping it, so the caller reads it directly; a smaller error
+    envelope prints, and a narrowing `--jq` always prints (the file path does not answer a sub-value).
+    A payload a tool **wrapped in a markdown fence** (prose preamble + ```` ```json ````
     … ```` ``` ````, e.g. chrome-devtools `evaluate_script`) is unwrapped first when the fenced body
     is the dominant content (≥ 80 % of bytes) and its body re-run through the pipeline with the
     preamble kept on top; a real doc with a small code block stays below that bar and passes through
@@ -446,9 +448,10 @@ hook error never blocks work:
     data. **Why wasn't a result compressed?**
     set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one
     JSONL line per call records the `decision` (`compressed` / `stubbed` / `passthrough`) and, on a
-    passthrough, the `reason` (`size-gate`,
-    `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`, `platform-overflow` — the platform's own
-    over-limit notice, whose `spill` field holds the file it saved the whale to). On a `stubbed` line the
+    passthrough, the `reason` (`size-gate`, `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`,
+    `marker-overhead` (the win was smaller than the `full=` recovery handle, so the original was handed
+    back), `platform-overflow` — the platform's own over-limit notice, whose `spill` field holds the
+    file it saved the whale to). On a `stubbed` line the
     `reason` instead names the branch the stub replaced (`non-json`, `no-gain`, `weak-gain` — the last
     one is a compression that stayed over the threshold). **What did it all add
     up to?** `node scripts/json-slim.cjs --report [logfile] [--since <ISO>]` (default: the log above)

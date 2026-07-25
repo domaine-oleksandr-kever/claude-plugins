@@ -411,8 +411,21 @@ function run(raw) {
   const value = attachMarker(slimmed, `\n\n<<full=${fullPath} original_result>>`);
   if (value === null) { trace('passthrough', 'transform-error', bytesIn, bytesIn, [], null); return; } // could not attach a handle safely → passthrough (no orphan)
 
+  // Final net check: every gain gate upstream measures the BLOCK, before this ~130 B recovery handle and
+  // the re-escaping the envelope adds around it, so a thin win (one dropped null in a big object) can
+  // come out NET BIGGER than what arrived — context grown, logged as a `compressed` event with
+  // bytes_out > bytes_in. The spill is unlinked because the marker naming it is being discarded (best
+  // effort, and only the file this branch itself just wrote — a jsx id-map spill written inside slim()
+  // is not ours to remove here and expires with the TTL sweep).
+  const outBytes = bytesOf(value);
+  if (outBytes >= bytesIn) {
+    try { fs.unlinkSync(fullPath); } catch (_) {}
+    trace('passthrough', 'marker-overhead', bytesIn, bytesIn, slimmed.stages, null);
+    return;
+  }
+
   emit(value);
-  if (dbg) trace('compressed', null, bytesIn, bytesOf(value), slimmed.stages, fullPath);
+  if (dbg) trace('compressed', null, bytesIn, outBytes, slimmed.stages, fullPath);
 }
 
 // Collect the whole stdin as bytes, then decode once — decoding per Buffer chunk would

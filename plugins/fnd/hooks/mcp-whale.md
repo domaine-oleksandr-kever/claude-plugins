@@ -10,5 +10,7 @@ json-slim returns a PROFILE (row + parse-failure counts, per-key stats, sample r
 of the data. Never raw-`Read` a big JSONL — query the ORIGINAL file by line with a `readline`
 filter or `sed -n '<N>p' <path>` / `grep`, not `--jq` (which would re-read the whole file). The
 sample rows exist so you can write that filter correctly — they reveal gotchas like a sub-field
-being a JSON-encoded string, not an array. A NON-JSONL file that isn't JSON at all gets the path
-handed back — then read it directly with a windowed `Read` (offset/limit).
+being a JSON-encoded string, not an array. A NON-JSONL file gets its path handed back in two cases,
+each with its own recovery: not JSON at all — read it with a windowed `Read` (offset/limit), `--jq`
+does not apply; a big error envelope, never compressed — read it directly, and `--jq <dot.path>` can
+narrow into it.

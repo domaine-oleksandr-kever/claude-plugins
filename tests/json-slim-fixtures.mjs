@@ -1142,10 +1142,15 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // --- node-id map: written to a spill, complete, byte-exact ---
   // `ids=`, never `full=`: that token means "the original result" everywhere else (the hook marker,
   // the crush marker, the README), and a loose scan must not pick the id map out of this header.
-  const idFile = /ids=(\S*fnd-jsx-ids-[^ ;]*)/.exec(head[0]);
+  // Read NAIVELY — a whitespace-delimited token, the way a model or a shell one-liner reads it: any
+  // clause after `ids=` glues a `; ` onto the path and the documented recovery ENOENTs. The real
+  // fixture folds siblings, so this holds only while the ids= clause stays LAST.
+  const idFile = /ids=(\S+)/.exec(head[0]);
   check('m13-idmap-named', !!idFile && existsSync(idFile[1]) && path.dirname(idFile[1]) === dir, `the node-id map is spilled beside the other spills: ${idFile && idFile[1]}`);
+  check('b4.3-ids-naive-read-with-fold', head[0].includes('×N more') && !!idFile && /fnd-jsx-ids-[0-9a-f-]+\.json$/.test(idFile[1]) && existsSync(idFile[1]),
+    `with the fold clause present the naive ids= token must still be a real file: ${JSON.stringify(idFile && idFile[1])}`);
   check('m13-no-full-token', !r.output.includes('full='), 'the compacted body never spends the `full=` handle on anything but the original result');
-  const map = idFile ? JSON.parse(readFileSync(idFile[1], 'utf8')) : {};
+  const map = idFile && existsSync(idFile[1]) ? JSON.parse(readFileSync(idFile[1], 'utf8')) : {};
   const origIds = [...new Set([...jsxFixture.matchAll(/data-node-id="([^"]*)"/g)].map((m) => m[1]))];
   check('m13-idmap-complete', Object.keys(map).length === origIds.length && origIds.every((v, i) => map[`n${i + 1}`] === v),
     `the map holds every node id byte-exact: ${Object.keys(map).length} of ${origIds.length}`);
@@ -1329,6 +1334,165 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const deepRes = J.slim(deepText, { spillDir: dir });
   check('m13-deep-nesting-bounded', deepRes.wasModified && Date.now() - t14 < 1000,
     `${Buffer.byteLength(deepText, 'utf8')} B at depth 800 took ${Date.now() - t14} ms`);
+
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ==================================== data-loss rails: fenced error shape + BOM routing ==
+// Two entry-path bugs, both reproduced in live debug-log traffic, both ending in a LOST result:
+//   B1.2 — a fenced ERROR envelope declines every stage, so it used to reach the generic `non-json`
+//          return; the hook's stub guard then saw no error and replaced the failure with a ~1 KB stub;
+//   B4.1 — the entry JSON.parse is the only reader here that does NOT strip a leading BOM, so one
+//          invisible character misrouted a 99 %-compressible payload to `non-json` (→ stubbed).
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-rails-'));
+
+  // --- B1.2: a fenced error envelope reports error-shape, whole result verbatim ---
+  const errBody = JSON.stringify({
+    errors: Array.from({ length: 300 }, (_, i) => ({
+      message: `PERMISSION DENIED on field ${i} — the app is missing the read_products scope`,
+      locations: [{ line: i, column: 7 }], extensions: { code: 'ACCESS_DENIED' },
+    })),
+  });
+  const fencedErr = `Script ran on page and returned:\n\`\`\`json\n${errBody}\n\`\`\``;
+  check('b1.2-fixture-over-stub-threshold', Buffer.byteLength(fencedErr, 'utf8') > 32768,
+    `the fenced envelope must exceed the hook's 32 KB stub threshold: ${Buffer.byteLength(fencedErr, 'utf8')} B`);
+  const fe = J.slim(fencedErr, { spillDir: dir });
+  check('b1.2-fenced-error-shape', fe.error === true && fe.reason === 'error-shape' && !fe.wasModified && fe.output === fencedErr,
+    `a fenced error envelope must be flagged error-shape, verbatim: ${JSON.stringify({ error: fe.error, reason: fe.reason, same: fe.output === fencedErr })}`);
+  // a fenced NON-error body that simply does not compress keeps the old vocabulary
+  const fencedPlain = `Script ran on page and returned:\n\`\`\`json\n${JSON.stringify({ note: 'lorem ipsum dolor sit amet '.repeat(200) })}\n\`\`\``;
+  const fp = J.slim(fencedPlain, { spillDir: dir });
+  check('b1.2-fenced-plain-still-non-json', !fp.error && fp.reason === 'non-json' && fp.output === fencedPlain,
+    `an incompressible non-error fenced body stays a non-json passthrough: ${JSON.stringify({ error: fp.error, reason: fp.reason })}`);
+  // the same envelope UNFENCED already reported error-shape — the fence path must not be the odd one out
+  const ue = J.slim(errBody, { spillDir: dir });
+  check('b1.2-unfenced-parity', ue.error === true && ue.reason === fe.reason, `unfenced reason ${ue.reason} vs fenced ${fe.reason}`);
+
+  // …and the CLI answers an OVER-CAP error FILE with its path, never the envelope: `json-slim.cjs <path>`
+  // IS the documented whale recovery (hooks/mcp-whale.md), so printing a verbatim passthrough pours the
+  // whale back into context — and Gate A would spill a full-size DUPLICATE of the file the caller already
+  // named and label it `slimmed output`. Fenced and plain.
+  const cliDir = mkdtempSync(path.join(tmpdir(), 'jslim-rails-cli-'));
+  const cliEnv = { ...process.env, FND_MCP_SLIM_DIR: cliDir };
+  for (const [name, body] of Object.entries({ fencedOverCap: fencedErr, plainOverCap: errBody })) {
+    const p = path.join(cliDir, `err-${name}.txt`);
+    writeFileSync(p, body);
+    const out = execFileSync('node', [SLIM, p], { encoding: 'utf8', env: cliEnv });
+    check(`b1.2-cli-handback-${name}`, out.includes(p) && out.includes('nothing to compress (error envelope)') && !out.includes('ACCESS_DENIED') && out.length < p.length + 120,
+      `an over-cap error file must be answered with its path (${Buffer.byteLength(body, 'utf8')} B in, ${out.length} B out): ${out.slice(0, 200)}`);
+  }
+  // UNDER the inline cap the envelope IS the answer the reader came for — a path costs a second Read just
+  // to learn the run failed, and a 133 B "PERMISSION DENIED" is no whale. Fenced and bare.
+  const smallFencedErr = `Script ran on page and returned:\n\`\`\`json\n${JSON.stringify({ errors: Array.from({ length: 100 }, (_, i) => ({ message: `PERMISSION DENIED on field ${i}`, extensions: { code: 'ACCESS_DENIED' } })) })}\n\`\`\``;
+  const tinyErr = JSON.stringify({ isError: true, message: 'PERMISSION DENIED: the app is missing read_products' });
+  check('b1.2-inline-fixtures-under-cap', Buffer.byteLength(smallFencedErr, 'utf8') < 49152 && Buffer.byteLength(tinyErr, 'utf8') < 49152,
+    `the inline fixtures must sit below the 49152 B cap: ${Buffer.byteLength(smallFencedErr, 'utf8')} / ${Buffer.byteLength(tinyErr, 'utf8')} B`);
+  for (const [name, body] of Object.entries({ fencedSmall: smallFencedErr, tiny: tinyErr })) {
+    const p = path.join(cliDir, `err-inline-${name}.txt`);
+    writeFileSync(p, body);
+    const out = execFileSync('node', [SLIM, p], { encoding: 'utf8', env: cliEnv });
+    check(`b1.2-cli-inline-${name}`, out.includes('PERMISSION DENIED') && !out.includes('nothing to compress'),
+      `an under-cap error envelope must print, not hand back a path (${Buffer.byteLength(body, 'utf8')} B in): ${out.slice(0, 200)}`);
+  }
+  check('b1.2-cli-no-duplicate-spill', readdirSync(cliDir).filter((f) => f.startsWith('fnd-slim-out-')).length === 0,
+    `Gate A must not duplicate an error file it did not compress: ${readdirSync(cliDir).join(', ')}`);
+  // A `--jq` selection is a sub-value the file path does NOT answer, so a narrowed error still prints.
+  const jqErrPath = path.join(cliDir, 'jq-err.json');
+  writeFileSync(jqErrPath, JSON.stringify({ payload: { errors: [{ message: 'boom' }] } }));
+  const jqErrOut = execFileSync('node', [SLIM, '--jq', 'payload', jqErrPath], { encoding: 'utf8', env: cliEnv });
+  check('b1.2-cli-jq-narrowed-error-prints', !jqErrOut.includes('nothing to compress') && JSON.parse(jqErrOut).errors[0].message === 'boom',
+    `a narrowed error value must still be printed: ${jqErrOut.slice(0, 200)}`);
+  rmSync(cliDir, { recursive: true, force: true });
+
+  // --- B4.1: a leading BOM is stripped once at the entry, like every other reader here ---
+  // Written as an ESCAPE, never as a literal U+FEFF: an invisible fixture character survives on editor
+  // luck, and if it is ever dropped every check below silently degrades into a restatement of the
+  // plain-payload baseline — green with the rail entirely absent. The fixture guard pins it too.
+  const BOM = '\uFEFF';
+  const rowsJson = JSON.stringify({ rows: Array.from({ length: 2000 }, (_, i) => ({ id: i, note: 'padding-padding-padding' })) });
+  const bomJson = BOM + rowsJson;
+  check('b4.1-fixture-bom-present', bomJson.charCodeAt(0) === 0xFEFF && Buffer.byteLength(bomJson, 'utf8') === Buffer.byteLength(rowsJson, 'utf8') + 3,
+    `the BOM fixtures must actually carry a 3-byte U+FEFF: ${JSON.stringify({ first: bomJson.charCodeAt(0), delta: Buffer.byteLength(bomJson, 'utf8') - Buffer.byteLength(rowsJson, 'utf8') })}`);
+  const plainRes = J.slim(rowsJson, { spillDir: dir });
+  const bomRes = J.slim(bomJson, { spillDir: dir });
+  check('b4.1-plain-baseline', plainRes.wasModified && plainRes.ratio > 0.9, `baseline ratio ${plainRes.ratio.toFixed(3)}`);
+  check('b4.1-bom-json-compresses', bomRes.wasModified && bomRes.reason === undefined && Math.abs(bomRes.ratio - plainRes.ratio) < 0.001,
+    `BOM+JSON must compress like the same payload without it: ${JSON.stringify({ reason: bomRes.reason, bom: bomRes.ratio, plain: plainRes.ratio })}`);
+  // bytesIn counts the ARGUMENT (BOM included) — the caller's byte, not the stripped string's
+  check('b4.1-bom-bytes-accounted', bomRes.bytesIn === plainRes.bytesIn + 3 && bomRes.bytesOut === plainRes.bytesOut,
+    `accounting runs on the argument: ${bomRes.bytesIn}/${bomRes.bytesOut} vs ${plainRes.bytesIn}/${plainRes.bytesOut}`);
+  // BOM + a dominant fence — the two strippers compose (unwrapFence has always stripped its own leading
+  // BOM, so this pins the composition, not the entry rail)
+  const bf = J.slim(`${BOM}Script ran on page and returned:\n\`\`\`json\n${rowsJson}\n\`\`\``, { trace: true, spillDir: dir });
+  check('b4.1-bom-fenced-compresses', bf.wasModified && bf.stages[0] === 'fence' && bf.ratio > 0.9,
+    `BOM+fenced JSON compresses through the fence branch: ${JSON.stringify({ stages: bf.stages, ratio: bf.ratio })}`);
+  // crush() parses independently of slim() — same rail there
+  check('b4.1-bom-crush', J.crush(bomJson, { spillDir: dir }).wasModified, 'crush() strips a leading BOM too');
+  // A passthrough hands back the EXACT argument, BOM and all: the CLI prints res.output verbatim on the
+  // never-lose-the-result branch, so a `wasModified:false` result that differs from its input is a
+  // silent mutation — and bytesIn/bytesOut must describe that same argument (no phantom gain).
+  const btIn = `${BOM}Build failed\n  at line 4\n`;
+  const bt = J.slim(btIn, { spillDir: dir });
+  check('b4.1-bom-nonjson-passthrough', !bt.wasModified && bt.reason === 'non-json' && bt.output === btIn && bt.bytesOut === bt.bytesIn,
+    `BOM+prose stays a byte-identical passthrough: ${JSON.stringify({ reason: bt.reason, same: bt.output === btIn, bytesIn: bt.bytesIn, bytesOut: bt.bytesOut })}`);
+  const tinyIn = `${BOM}{"a":1}`; // JSON the stages cannot improve — the pipeline branch's own passthrough
+  const tiny = J.slim(tinyIn, { spillDir: dir });
+  check('b4.1-unimprovable-json-passthrough', !tiny.wasModified && tiny.output === tinyIn && tiny.bytesOut === tiny.bytesIn,
+    `an unimprovable payload passes through byte-identical: ${JSON.stringify({ wasModified: tiny.wasModified, out: tiny.output, bytesIn: tiny.bytesIn, bytesOut: tiny.bytesOut })}`);
+  const bcIn = `${BOM}not json at all`;
+  const bc = J.crush(bcIn, { spillDir: dir });
+  check('b4.1-crush-passthrough-verbatim', !bc.wasModified && bc.compressed === bcIn, 'crush() hands back its exact argument on a passthrough');
+  // a BOM-prefixed error envelope must reach the error rail, not the non-json branch
+  const bomErr = BOM + errBody;
+  const be = J.slim(bomErr, { spillDir: dir });
+  check('b4.1-bom-error-shape', be.error === true && be.reason === 'error-shape' && be.output === bomErr,
+    `BOM+error envelope: ${JSON.stringify({ error: be.error, reason: be.reason, same: be.output === bomErr })}`);
+
+  // Gate A parses the body it spills to sample its shape — a BOM'd passthrough body used to fail that
+  // parse, so the handback said "not JSON", dropped the shape sample and withheld the `--jq` recovery
+  // hint for a payload `--jq` handles fine. Fixture: >48 KB of already-minimal JSON, so the body Gate A
+  // spills IS the argument, BOM and all.
+  const bomCliDir = mkdtempSync(path.join(tmpdir(), 'jslim-bom-cli-'));
+  const bomCliEnv = { ...process.env, FND_MCP_SLIM_DIR: bomCliDir };
+  const flat = {};
+  for (let i = 0; i < 1400; i++) flat[`field_${i}`] = `value-${i}-abcdefghijklmnop`;
+  const flatJson = JSON.stringify(flat);
+  check('b4.1-cap-fixture', Buffer.byteLength(flatJson, 'utf8') > 49152 && !J.slim(flatJson, { spillDir: dir }).wasModified,
+    `Gate A needs an over-cap payload no stage can improve: ${Buffer.byteLength(flatJson, 'utf8')} B, modified=${J.slim(flatJson, { spillDir: dir }).wasModified}`);
+  const capOut = {};
+  for (const [name, body] of Object.entries({ plain: flatJson, bom: BOM + flatJson })) {
+    const p = path.join(bomCliDir, `cap-${name}.json`);
+    writeFileSync(p, body);
+    capOut[name] = execFileSync('node', [SLIM, p], { encoding: 'utf8', env: bomCliEnv });
+  }
+  const shapeOf = (s) => (/\n {2}shape: (.*)/.exec(s) || [])[1];
+  check('b4.1-cap-bom-sampled-as-json', !capOut.bom.includes('not JSON') && capOut.bom.includes('(e.g. --jq field_0)')
+    && shapeOf(capOut.bom) !== undefined && shapeOf(capOut.bom) === shapeOf(capOut.plain),
+    `a BOM'd spill body must sample and advertise --jq like its non-BOM twin: ${capOut.bom.slice(0, 300)}`);
+  // …and the pre-slim `--jq` narrowing parses the file itself, so `--jq k0 <bom-file>` must not exit 1
+  const jqBomPath = path.join(bomCliDir, 'jq-bom.json');
+  writeFileSync(jqBomPath, `${BOM}${JSON.stringify({ k0: { handle: 'alpha', qty: 3 } })}`);
+  const jqBomOut = execFileSync('node', [SLIM, '--jq', 'k0', jqBomPath], { encoding: 'utf8', env: bomCliEnv });
+  check('b4.1-cli-jq-bom-narrows', JSON.parse(jqBomOut).handle === 'alpha',
+    `--jq must narrow into a BOM-prefixed file: ${jqBomOut.slice(0, 200)}`);
+
+  // A faulted transform gets the same carve-out as an error envelope: bare, the file IS the answer, but a
+  // `--jq` selection is a sub-value the path does not point at, so discarding it would lose the selection.
+  // `marks` as a STRING is the deterministic fault (adf-to-md maps over it) — the guard keeps a future
+  // tolerant converter from turning both checks below into vacuous passes.
+  const badAdfJson = JSON.stringify({ payload: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'boom', marks: 'bold' }] }] } });
+  check('cli-transform-error-fixture', J.slim(badAdfJson, { spillDir: dir }).reason === 'transform-error',
+    `the fixture must actually fault a stage: reason=${J.slim(badAdfJson, { spillDir: dir }).reason}`);
+  const taPath = path.join(bomCliDir, 'bad-adf.json');
+  writeFileSync(taPath, badAdfJson);
+  const taBare = execFileSync('node', [SLIM, taPath], { encoding: 'utf8', env: bomCliEnv });
+  const taJq = execFileSync('node', [SLIM, '--jq', 'payload', taPath], { encoding: 'utf8', env: bomCliEnv });
+  check('cli-transform-error-handback', taBare.includes('nothing to compress (transform error)') && taBare.includes(taPath),
+    `a bare transform-error run names the file: ${taBare.slice(0, 200)}`);
+  check('cli-transform-error-jq-prints', !taJq.includes('nothing to compress') && JSON.parse(taJq).content[0].content[0].text === 'boom',
+    `a narrowed transform-error run must still print the selection: ${taJq.slice(0, 200)}`);
+  rmSync(bomCliDir, { recursive: true, force: true });
 
   rmSync(dir, { recursive: true, force: true });
 }
