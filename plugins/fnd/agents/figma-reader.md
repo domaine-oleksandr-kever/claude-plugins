@@ -26,17 +26,22 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
    **all** of them.
 3. **Per-element measurements — `get_design_context`, processed in FULL.** This holds the exact
    px dimensions, padding, gaps, and font assignments per element, plus the hierarchy. It spills
-   to a tool-result file (over the platform limit → the compression hook never sees it). Figma
-   dev-mode context is **XML-ish, not JSON**, so `json-slim.cjs` can't compress it — it hands the
-   path back. A bare `Read`/`cat` of the whole file **fails** at the ~25k cap — so **page through
-   the ENTIRE file**, never stop at the first chunk:
+   to a tool-result file (over the platform limit → the compression hook never sees it). **First
+   run `node ${CLAUDE_PLUGIN_ROOT}/scripts/json-slim.cjs <file>`** — a Figma design context gets
+   a lossless jsx compaction (repeated classNames become a `C<N>:` legend, `data-node-id`s become
+   `#nN` refs whose full-id map is in the `ids=<path>` file, repeated sibling subtrees fold to
+   one exemplar), typically 55–77 % smaller, so the compacted output usually fits in one or two
+   `Read`s. Work from the compacted output — nothing is dropped; resolve a `#nN` via the `ids=`
+   map when you need a real node-id (e.g. for `get_screenshot`). If json-slim only hands the
+   path back (no byte win), page through the ORIGINAL file instead — never stop at the first
+   chunk:
    - `wc -l <file>` to get its length, then
    - `Read` it in **sequential** chunks from `offset` 0 to EOF, each with `limit` (~400–500
      lines, under 25k tokens), extracting every element's measurements as you go — **or** walk
      the same ranges with `sed -n '<start>,<end>p' <file>` via Bash.
    - `grep -nE` is only a **navigation aid** (jump to a named component / find a section) — it is
      **not** a substitute for covering the whole file.
-   Cover all pages before you write the spec.
+   Cover the whole compacted output (or all pages of the original) before you write the spec.
 4. **Cross-check** the assembled spec against the screenshot. If a measurement is missing or a
    region wouldn't parse, put that in `needs_clarification` — never silently drop it.
 5. **Distil, don't echo.** Build the compact spec from what you extracted; never paste raw
