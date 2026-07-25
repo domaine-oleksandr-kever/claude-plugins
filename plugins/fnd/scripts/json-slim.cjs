@@ -10,8 +10,9 @@
  *       node json-slim.cjs --report [logfile] [--since <ISO>]   (aggregate the FND_MCP_SLIM_DEBUG log)
  *     A JSONL file is PROFILED, never compressed (stats + sample rows + line-scripting
  *     guidance, streamed above 8 MB); log-shaped text is signal-compressed (log-slim.cjs) with
- *     an `original: <path>` recovery line; other non-JSONL JSON output is capped at 48 KB
- *     (spill + handback).
+ *     an `original: <path>` recovery line; a Figma design-context JSX payload is compacted in place
+ *     with that same `original: <path>` line (its node-id map spilled beside it); other non-JSONL
+ *     JSON output is capped at 48 KB (spill + handback).
  *
  * The pipeline is shape-driven (each stage independent, all generic — no per-tool registry),
  * applied by slim() in this order:
@@ -23,8 +24,9 @@
  * is lost — the detail is one `Read`/`jq` away.
  * Non-JSON input takes a sibling branch instead: a DOMINANT markdown fence (a tool's prose preamble
  * + ```json…``` wrapping the real payload) is unwrapped and its body re-run through this same
- * pipeline with the preamble kept on top; JSONL rows re-enter as one array; log-shaped text goes to
- * log-slim.cjs's signal selection; anything else passes through.
+ * pipeline with the preamble kept on top; JSONL rows re-enter as one array; Figma design-context JSX
+ * is compacted losslessly (className dictionary + node-id legend + ×N sibling fold); log-shaped text
+ * goes to log-slim.cjs's signal selection; anything else passes through.
  *
  * Pure Node built-ins only (repo policy): fs, os, path, crypto + the local adf and log-slim
  * siblings.
@@ -74,6 +76,7 @@ const DEFAULTS = {
   toon: false, // optional lossless tabular re-serialization of uniform arrays (behind a flag)
   jsonl: true, // detect a JSONL line stream (bulk-operation dump) → crush it as the same-shape array it is
   log: true, // M10: detect log/build-output TEXT → signal-select (errors/traces/summaries kept, spam deduped)
+  jsx: true, // M13: detect Figma design-context JSX → className dictionary + node-id legend + ×N sibling fold
   fence: true, // M11: unwrap a DOMINANT markdown fence (tool prose + ```json…```) and re-run the pipeline on its body
   fenceDominance: 0.8, // M11: the fenced body must be ≥ this fraction of total bytes (else a doc with a small code block → untouched)
   fencePreambleMax: 3, // M11: the opening fence must appear within this many leading lines (a short prose preamble)
@@ -587,12 +590,13 @@ function buildMarker(originalItems, droppedItems, droppedCount, cfg) {
 // ------------------------------------------------------------------------- spill hygiene --
 
 // The only file prefixes the sweep will ever delete. Keep in sync with the writers' filenames:
-// `spillPath` here (fnd-crush-), `capOutput`'s Gate-A spill here (fnd-slim-out-), `spillOriginal`
+// `spillPath` here (fnd-crush-), `capOutput`'s Gate-A spill here (fnd-slim-out-), the jsx stage's
+// node-id map here (fnd-jsx-ids-), `spillOriginal`
 // in hooks/mcp-slim.cjs (fnd-mcp-slim-), and `spillBlob` in hooks/prompt-json-guard.cjs
 // (fnd-prompt-json-, swept only when it lands in the sweep dir). The literals are duplicated on
 // purpose — importing this module into a per-prompt hook just for a string would drag the whole
 // compressor into every UserPromptSubmit.
-const SPILL_PREFIXES = ['fnd-crush-', 'fnd-slim-out-', 'fnd-mcp-slim-', 'fnd-prompt-json-'];
+const SPILL_PREFIXES = ['fnd-crush-', 'fnd-slim-out-', 'fnd-jsx-ids-', 'fnd-mcp-slim-', 'fnd-prompt-json-'];
 // One directory scan per throttle window, gated by this marker's mtime — the hook's hot path
 // pays one stat, not a readdir of the whole tmpdir on every MCP call. A dotfile, so it matches
 // no SPILL_PREFIX (it is excluded for good measure anyway).
@@ -1148,6 +1152,421 @@ function unwrapFence(content, config) {
   return { preamble: lines.slice(0, oi).join('\n'), body, trailer: trailerLines.join('\n'), offset: oi + 1 };
 }
 
+// ==================================================== M13 — jsx-slim (Figma design context) ==
+//
+// A lossless compactor for Figma dev-mode `get_design_context` payloads (generated React/Tailwind
+// JSX). Measured on a real 211 KB desktop section: `className="…"` strings are 57 % of the payload
+// with 98 unique values across 804 occurrences, `data-node-id` another 33 KB across 593 attrs, and
+// whole sibling subtrees repeat verbatim. Three line-oriented transforms, no JSX parser:
+//   1. className dictionary — repeated values move to a `C17: …` legend on top, occurrences become
+//      `class=C17`; inside the legend a second pass shortens repeated `var(--…)` tokens to `$N`;
+//   2. node-id legend — `data-node-id="I13920:240400;…"` becomes `#n17`, and the `n17 → full id`
+//      map goes to a SPILL FILE so the ids stay usable for follow-up Figma calls;
+//   3. ×N sibling fold — adjacent sibling subtrees that are identical apart from a small set of
+//      value slots collapse to one exemplar plus a `{/* ×3 more … */}` line that LISTS what differed
+//      per repeat, so nothing is dropped in band either.
+// Scope is ONLY this machine-generated grammar (see detectJsx) — generic HTML/XML/Liquid is never
+// touched, so a Liquid file that merely uses `var(--…)` passes through byte-identical.
+
+const JSX_HEADER = '<<fnd-jsx-slim>>';
+const JSX_MIN_HITS = 3; // each signature must appear at least this often before the stage engages
+
+// Occurrence counter with an early exit at `cap`. indexOf, never a regex: a payload can be 200 KB on
+// ONE physical line, where a counting regex backtracks quadratically.
+function countUpTo(hay, needle, cap) {
+  let n = 0, i = 0;
+  while (n < cap) {
+    const j = hay.indexOf(needle, i);
+    if (j === -1) break;
+    n++; i = j + needle.length;
+  }
+  return n;
+}
+
+// Figma-generated JSX only: React `className=` AND Figma's `data-node-id=` AND design-token
+// `var(--…)`, each at least JSX_MIN_HITS times. All three together are what no hand-written HTML,
+// XML or Liquid template carries — the corruption rail behind this stage.
+function detectJsx(content) {
+  const s = typeof content === 'string' ? content : '';
+  if (s.includes(JSX_HEADER)) return false; // already compacted — never compact twice
+  return countUpTo(s, 'data-node-id="', JSX_MIN_HITS) >= JSX_MIN_HITS &&
+    countUpTo(s, 'className="', JSX_MIN_HITS) >= JSX_MIN_HITS &&
+    countUpTo(s, 'var(--', JSX_MIN_HITS) >= JSX_MIN_HITS;
+}
+
+// Every `<prefix>value"` occurrence as { start, end, value }. Attribute values in this grammar are
+// double-quoted and never contain an escaped quote, so the next `"` closes the value.
+function scanAttr(text, prefix) {
+  const out = [];
+  let i = 0;
+  for (;;) {
+    const a = text.indexOf(prefix, i);
+    if (a === -1) break;
+    const vs = a + prefix.length;
+    const ve = text.indexOf('"', vs);
+    if (ve === -1) break; // unterminated → stop scanning, the tail stays verbatim
+    out.push({ start: a, end: ve + 1, value: text.slice(vs, ve) });
+    i = ve + 1;
+  }
+  return out;
+}
+
+// `var(--token,fallback)` spans, first `)` closing. A nested fallback (`var(--x, rgba(0,0,0,.5))`)
+// simply tokenizes short; the leftover stays inline, so the legend still reconstructs byte-exactly.
+function varTokens(s) {
+  const out = [];
+  let i = 0;
+  for (;;) {
+    const a = s.indexOf('var(--', i);
+    if (a === -1) break;
+    const b = s.indexOf(')', a);
+    if (b === -1) break;
+    out.push(s.slice(a, b + 1));
+    i = b + 1;
+  }
+  return out;
+}
+
+// ---- transform 3: ×N sibling fold ----
+
+const indentOf = (l) => { let i = 0; while (i < l.length && (l[i] === ' ' || l[i] === '\t')) i++; return i; };
+const isDigit = (c) => c >= 48 && c <= 57;
+
+// The value-carrying slots a repeated sibling may differ in. Everything else — tag names, class
+// refs, structure, indentation — must match exactly, which is the conservative gate: an unequal
+// class ref means a different appearance, so those siblings are kept in full.
+const SLOT_ATTRS = [['data-node-id="', 'node-id'], ['data-name="', 'name'], ['alt="', 'alt'], ['src="', 'src']];
+
+// Every slot leaves a MARK in the skeleton, so slot presence is part of the canon: `>text<` can
+// never match `><`, and an own-line text node can never match a whitespace-only line at the same
+// indent. That is what keeps a value-bearing line from folding into an empty one — two lines
+// canonicalizing equal with different slot COUNTS would let the exemplar's list either hide the
+// duplicates' extra values (silent loss under a "nothing dropped" header) or index past the end.
+const SLOT_MARK = '\u0000';
+
+// Split one line into a canonical skeleton (slot values replaced by their mark) + the slot values in
+// document order. Two subtrees fold only when their skeletons are byte-equal.
+function lineSlots(line, canon, slots) {
+  // A Figma text node sits on its own line, so a whole prose-only line is one text slot — that is
+  // what lets siblings differing ONLY in their copy fold with the copy listed. Anything carrying
+  // markup or code punctuation stays structural. The slot value keeps the TRAILING whitespace too
+  // (only the indent is canon), so repeats differing there are listed rather than silently equal.
+  const t = line.trim();
+  if (t && !/[<>{}=]/.test(t)) {
+    const lead = line.length - line.trimStart().length;
+    slots.push({ kind: 'text', value: line.slice(lead) });
+    canon.push(line.slice(0, lead), SLOT_MARK, 'text', '\n');
+    return;
+  }
+  const n = line.length;
+  let i = 0;
+  while (i < n) {
+    const c = line[i];
+    if (c === '#' && line[i + 1] === 'n' && isDigit(line.charCodeAt(i + 2))) {
+      let j = i + 2;
+      while (j < n && isDigit(line.charCodeAt(j))) j++;
+      slots.push({ kind: 'node-id', value: line.slice(i, j) });
+      canon.push(SLOT_MARK, 'node-id'); i = j; continue;
+    }
+    let matched = false;
+    for (const [pre, kind] of SLOT_ATTRS) {
+      if (!line.startsWith(pre, i)) continue;
+      const ve = line.indexOf('"', i + pre.length);
+      if (ve !== -1) { slots.push({ kind, value: line.slice(i + pre.length, ve) }); canon.push(pre, SLOT_MARK, kind, '"'); i = ve + 1; matched = true; }
+      break;
+    }
+    if (matched) continue;
+    // element text content (`>Finish<`) — the one slot that is not an attribute
+    if (c === '>' && line[i + 1] !== '<') {
+      const lt = line.indexOf('<', i + 1);
+      if (lt > i + 1) {
+        const txt = line.slice(i + 1, lt);
+        if (txt.trim()) { slots.push({ kind: 'text', value: txt }); canon.push('>', SLOT_MARK, 'text'); i = lt; continue; }
+      }
+    }
+    canon.push(c); i++;
+  }
+  canon.push('\n');
+}
+
+// Node-id refs are handed out in first-appearance order, so a folded subtree's ids are contiguous —
+// collapse those runs to `#n120–#n158` instead of listing 39 refs. A slot carrying a `label` (a kind
+// the subtree holds more than once) prints qualified, so `name#2:"B"` cannot be read as the outer
+// `data-name`; node-id refs need no ordinal — each resolves to exactly one id in the map.
+function fmtSlots(g) {
+  const out = [];
+  const num = (v) => (v.kind === 'node-id' && v.value[0] === '#' ? Number(v.value.slice(2)) : NaN);
+  for (let i = 0; i < g.length; i++) {
+    let j = i;
+    while (j + 1 < g.length && Number.isFinite(num(g[j + 1])) && num(g[j + 1]) === num(g[j]) + 1) j++;
+    if (j > i && Number.isFinite(num(g[i]))) { out.push(`${g[i].value}–${g[j].value}`); i = j; continue; }
+    const v = g[i].kind === 'node-id' ? g[i].value : JSON.stringify(g[i].value);
+    out.push(g[i].label ? `${g[i].label}:${v}` : v);
+  }
+  return out.join(', ');
+}
+
+// Fold adjacent same-shape siblings into the first one. Indentation is the tree: a node owns every
+// following line indented deeper, plus its own closing tag. Only real elements fold (a line opening
+// with `<`), only when the fold line is genuinely smaller than the lines it replaces, and the
+// recursion never descends into a subtree that was folded away.
+function foldSiblings(code) {
+  const lines = code.split('\n');
+  const drop = new Uint8Array(lines.length);
+  const inject = new Map();
+  let folded = 0;
+
+  // Per-line skeleton and slots are built ONCE, and a line's skeleton is interned to an integer so a
+  // subtree comparison is an id-array compare. Rebuilding a subtree's skeleton character by character
+  // at every nesting level would instead cost bytes × depth — a deep tree stalls the hook.
+  const canonId = new Int32Array(lines.length);
+  const indent = new Int32Array(lines.length);
+  const kind = new Uint8Array(lines.length); // 0 blank, 1 opening `<`, 2 closing `</`, 3 other
+  const lineSlotList = new Array(lines.length);
+  const intern = new Map();
+  for (let i = 0; i < lines.length; i++) {
+    const canon = [], slots = [];
+    lineSlots(lines[i], canon, slots);
+    const key = canon.join('');
+    let id = intern.get(key);
+    if (id === undefined) { id = intern.size + 1; intern.set(key, id); }
+    canonId[i] = id;
+    lineSlotList[i] = slots;
+    indent[i] = indentOf(lines[i]);
+    const t = lines[i].trim();
+    kind[i] = !t ? 0 : (t.startsWith('</') ? 2 : (t[0] === '<' ? 1 : 3));
+  }
+  const sameShape = (a, b) => {
+    const len = a[1] - a[0];
+    if (len !== b[1] - b[0]) return false;
+    for (let k = 0; k < len; k++) if (canonId[a[0] + k] !== canonId[b[0] + k]) return false;
+    return true;
+  };
+  const nodeSlots = (r) => { const out = []; for (let i = r[0]; i < r[1]; i++) for (const s of lineSlotList[i]) out.push(s); return out; };
+
+  const walk = (from, to) => {
+    let d = -1;
+    for (let i = from; i < to; i++) if (kind[i]) { d = indent[i]; break; }
+    if (d === -1) return;
+    const nodes = [];
+    let i = from;
+    while (i < to) {
+      if (!kind[i] || indent[i] !== d) { i++; continue; }
+      let j = i + 1;
+      while (j < to && (!kind[j] || indent[j] > d)) j++;
+      if (j < to && indent[j] === d && kind[j] === 2) j++;
+      nodes.push([i, j]);
+      i = j;
+    }
+    for (let g = 0; g < nodes.length;) {
+      let h = g + 1;
+      while (h < nodes.length && sameShape(nodes[g], nodes[h])) h++;
+      if (h > g + 1 && kind[nodes[g][0]] === 1) {
+        const base = nodeSlots(nodes[g]);
+        const dups = [];
+        for (let x = g + 1; x < h; x++) dups.push({ range: nodes[x], slots: nodeSlots(nodes[x]) });
+        // Belt and braces on top of the slot marks: any residual skeleton ambiguity degrades to
+        // "keep both siblings", never to a value that is neither listed nor emitted.
+        if (dups.every((dd) => dd.slots.length === base.length)) {
+          // A kind the subtree carries more than once is ambiguous unqualified — label those slots
+          // with their ordinal so a listed value names the slot it came from.
+          const seen = new Map();
+          const ord = base.map((s) => { const k = (seen.get(s.kind) || 0) + 1; seen.set(s.kind, k); return k; });
+          const varying = [];
+          const kinds = [];
+          for (let k = 0; k < base.length; k++) {
+            if (!dups.some((dd) => dd.slots[k].value !== base[k].value)) continue;
+            varying.push(k);
+            if (!kinds.includes(base[k].kind)) kinds.push(base[k].kind);
+          }
+          const label = (k) => (base[k].kind !== 'node-id' && seen.get(base[k].kind) > 1 ? `${base[k].kind}#${ord[k]}` : null);
+          const per = dups.map((dd) => `[${fmtSlots(varying.map((k) => ({ ...dd.slots[k], label: label(k) })))}]`).join(' ');
+          const fold = `${' '.repeat(d)}{/* ×${dups.length} more, identical${kinds.length ? ` except (${kinds.join(', ')}): ${per}` : ''} */}`;
+          let dropped = 0;
+          for (const dd of dups) for (let x = dd.range[0]; x < dd.range[1]; x++) dropped += Buffer.byteLength(lines[x], 'utf8') + 1;
+          if (Buffer.byteLength(fold, 'utf8') + 1 < dropped) {
+            for (const dd of dups) for (let x = dd.range[0]; x < dd.range[1]; x++) drop[x] = 1;
+            const at = nodes[g][1] - 1;
+            inject.set(at, [...(inject.get(at) || []), fold]);
+            folded += dups.length;
+          }
+        }
+      }
+      g = h;
+    }
+    for (const [s, e] of nodes) {
+      if (drop[s]) continue; // a folded-away subtree has no surviving interior to fold
+      const inner = (e - 1 > s && indent[e - 1] === d && kind[e - 1] === 2) ? e - 1 : e;
+      if (inner > s + 1) walk(s + 1, inner);
+    }
+  };
+  walk(0, lines.length);
+  if (!folded) return { code, folded: 0 };
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!drop[i]) out.push(lines[i]);
+    if (inject.has(i)) for (const f of inject.get(i)) out.push(f);
+  }
+  return { code: out.join('\n'), folded };
+}
+
+// ---- the stage ----
+
+// Compact a Figma design-context payload. Returns `{ compressed, idFile, classes, nodeIds, folded }`
+// — `compressed` is the original and `idFile` null unless the transforms produced a REAL byte win
+// (same contract as the log/crush stages; the whole original lives in the caller's spill).
+function compressJsx(content, config) {
+  const cfg = { ...DEFAULTS, ...(config || {}) };
+  const text = String(content);
+  const rmIdFile = (p) => { if (p) { try { fs.unlinkSync(p); } catch (_) {} } };
+  let idFile = null;
+  try {
+    const win = compactJsx(text, cfg, (p) => { idFile = p; });
+    if (win) return win;
+  } catch (_) {
+    // A shape the transforms cannot handle degrades to passthrough — never a thrown stage. The CLI's
+    // whale-recovery command and the hook both run this on payloads nothing else has validated.
+  }
+  rmIdFile(idFile); // a throw or a declined compaction → no orphan map on disk
+  return { compressed: text, idFile: null, classes: 0, nodeIds: 0, folded: 0 };
+}
+
+// The compaction itself: the win object, or null when there is nothing to reference or the compacted
+// body is not smaller. The caller owns both the passthrough result and the id map's cleanup.
+function compactJsx(text, cfg, keepIdFile) {
+  const cls = scanAttr(text, 'className="');
+  const ids = scanAttr(text, 'data-node-id="');
+
+  // Only values used more than once pay for themselves: a singleton would cost a legend line plus a
+  // reference where the inline attribute was already shorter.
+  const counts = new Map();
+  for (const o of cls) counts.set(o.value, (counts.get(o.value) || 0) + 1);
+  const dict = new Map();
+  for (const o of cls) if (counts.get(o.value) >= 2 && !dict.has(o.value)) dict.set(o.value, `C${dict.size + 1}`);
+
+  // The node-id map is only worth taking out of the tree if it can be handed back: write the spill
+  // FIRST, and keep the ids inline when that write fails (never an unresolvable `#n17`).
+  const idMap = new Map();
+  let idFile = null;
+  if (ids.length) {
+    for (const o of ids) if (!idMap.has(o.value)) idMap.set(o.value, `n${idMap.size + 1}`);
+    const dir = spillRoot(cfg.spillDir);
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const p = path.join(dir, `fnd-jsx-ids-${crypto.randomUUID()}.json`);
+      const map = {};
+      for (const [full, ref] of idMap) map[ref] = full;
+      fs.writeFileSync(p, compact(map));
+      idFile = p; keepIdFile(p); // the wrapper unlinks it on a throw or a declined compaction
+    } catch (_) { idMap.clear(); }
+  }
+  if (!dict.size && !idMap.size) return null;
+
+  // One left-to-right rewrite over both occurrence lists (they cannot overlap in this grammar, but
+  // an occurrence starting inside a previous one is skipped rather than trusted).
+  const occ = [];
+  for (const o of cls) if (dict.has(o.value)) occ.push({ start: o.start, end: o.end, rep: `class=${dict.get(o.value)}` });
+  if (idMap.size) for (const o of ids) occ.push({ start: o.start, end: o.end, rep: `#${idMap.get(o.value)}` });
+  occ.sort((a, b) => a.start - b.start);
+  const parts = [];
+  let cursor = 0;
+  for (const o of occ) {
+    if (o.start < cursor) continue;
+    parts.push(text.slice(cursor, o.start), o.rep);
+    cursor = o.end;
+  }
+  parts.push(text.slice(cursor));
+
+  const fold = foldSiblings(parts.join(''));
+
+  // Legend pass 2: `var(--…)` tokens repeated ACROSS legend entries become `$N`. Skipped whole when
+  // any entry already contains a `$`, so a `$N` reference can never be ambiguous.
+  let entries = [...dict.keys()];
+  const varLines = [];
+  if (entries.length && !entries.some((e) => e.includes('$'))) {
+    const tokCount = new Map();
+    for (const e of entries) for (const t of varTokens(e)) tokCount.set(t, (tokCount.get(t) || 0) + 1);
+    const chosen = new Map();
+    for (const e of entries) for (const t of varTokens(e)) {
+      if (chosen.has(t)) continue;
+      const ref = `$${chosen.size + 1}`;
+      // uses × saved-per-use must beat the legend line the token costs
+      if (tokCount.get(t) * (t.length - ref.length) > t.length + ref.length + 3) chosen.set(t, ref);
+    }
+    if (chosen.size) {
+      entries = entries.map((e) => {
+        let out = '', i = 0;
+        for (;;) {
+          const a = e.indexOf('var(--', i);
+          const b = a === -1 ? -1 : e.indexOf(')', a);
+          if (b === -1) { out += e.slice(i); break; }
+          const tok = e.slice(a, b + 1);
+          out += e.slice(i, a) + (chosen.get(tok) || tok);
+          i = b + 1;
+        }
+        return out;
+      });
+      for (const [t, ref] of chosen) varLines.push(`${ref}: ${t}`);
+    }
+  }
+
+  // `ids=` and not `full=`: `full=<path>` is the plugin's established handle for the ORIGINAL result
+  // (the hook's marker, the crush marker, the README), and a body carrying two `full=` paths would
+  // let a loose scan hand back the id map instead of the payload. The original is named by whoever
+  // emits this body — the hook's `<<full=… original_result>>`, the CLI's `original:` line.
+  const legend = entries.map((e, i) => `C${i + 1}: ${e}`);
+  const clauses = [];
+  if (dict.size) clauses.push(`class=CN → the CN: legend line below${varLines.length ? ' ($N → the $N: line)' : ''}`);
+  if (idMap.size) clauses.push(`#nN → a data-node-id, the full ids are in ids=${idFile}`);
+  if (fold.folded) clauses.push('{/* ×N more … */} folds identical repeated siblings and lists what differed per repeat');
+  // A clause ending in the map's PATH takes no closing period: a naive read of the `ids=` token stops
+  // at whitespace and would carry the period into the filename (ENOENT, an unusable map). Same rail as
+  // the hook's overflowSpill, which strips exactly that punctuation off a spill path.
+  const tail = clauses.length ? ` ${clauses.join('; ')}` : '';
+  const header = `${JSX_HEADER} Figma design context, compacted losslessly — nothing dropped.` +
+    tail + (tail && !(idFile && tail.endsWith(idFile)) ? '.' : '');
+  const compressed = [header, ...varLines, ...legend, '', fold.code].join('\n');
+  if (Buffer.byteLength(compressed, 'utf8') >= Buffer.byteLength(text, 'utf8')) return null;
+  return { compressed, idFile, classes: dict.size, nodeIds: idMap.size, folded: fold.folded };
+}
+
+// A PLAIN text block — `type:'text'` plus `text`, nothing else. Unwrapping keeps only the text, so a
+// block carrying `annotations` or a per-block `_meta` cursor would lose it while the compacted body
+// claims nothing was dropped. Same rail, same reason as the hook's STUB_BLOCK_KEYS.
+const JSX_BLOCK_KEYS = new Set(['type', 'text']);
+const isPlainBlock = (b) => !!b && typeof b === 'object' && !Array.isArray(b) && b.type === 'text' &&
+  typeof b.text === 'string' && Object.keys(b).every((k) => JSX_BLOCK_KEYS.has(k));
+
+// The joined text of a PURE text-block envelope (`[{type:'text',text}]`, `{content:[…]}`, or a lone
+// `{type:'text',text}`) — the shape an MCP result keeps when it is spilled to disk whole. null unless
+// the envelope carries NOTHING but those blocks: an envelope sibling (`structuredContent`, `_meta`
+// with its `nextCursor`, `isError`) survives only if the whole value stays with the JSON pipeline,
+// which compresses it without discarding fields.
+function blockText(v) {
+  if (isPlainBlock(v)) return v.text;
+  const arr = Array.isArray(v) ? v
+    : (v && typeof v === 'object' && Array.isArray(v.content) && Object.keys(v).every((k) => k === 'content') ? v.content : null);
+  if (!arr || !arr.length) return null;
+  const parts = [];
+  for (const b of arr) {
+    if (!isPlainBlock(b)) return null;
+    parts.push(b.text);
+  }
+  return parts.join('\n');
+}
+
+// Run the jsx stage over `text` and shape the slim() result, or null when the payload is not Figma
+// JSX / the transforms produced no byte win against the ORIGINAL input (`content` — the text itself
+// unless it arrived wrapped in a block envelope, which is what the win has to beat).
+function jsxResult(text, cfg, content = text) {
+  if (!detectJsx(text)) return null;
+  const bytesIn = Buffer.byteLength(content, 'utf8');
+  const j = compressJsx(text, cfg);
+  const bytesOut = Buffer.byteLength(j.compressed, 'utf8');
+  if (j.compressed === text || bytesOut >= bytesIn) return null;
+  return { output: j.compressed, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['jsx'] : [], jsxCompressed: true, jsxIdFile: j.idFile };
+}
+
 // slim a JSON *string* through the full pipeline →
 //   { output, wasModified, bytesIn, bytesOut, ratio, stages, reason?, format? }.
 // `stages` names the pipeline stages that actually changed the serialized bytes (adf / noise /
@@ -1179,7 +1598,7 @@ function slim(content, config) {
           const output = [f.preamble, inner.output, f.trailer].filter((s) => s !== '').join('\n');
           const bytesOut = Buffer.byteLength(output, 'utf8');
           if (bytesOut < bytesIn) {
-            return { output, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['fence', ...inner.stages] : [], preamble: f.preamble, fenceBody: inner.output, fenceTrailer: f.trailer, ...(inner.logCompressed ? { logCompressed: true } : {}) };
+            return { output, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['fence', ...inner.stages] : [], preamble: f.preamble, fenceBody: inner.output, fenceTrailer: f.trailer, ...(inner.logCompressed ? { logCompressed: true } : {}), ...(inner.jsxCompressed ? { jsxCompressed: true } : {}) };
           }
         }
       }
@@ -1191,6 +1610,15 @@ function slim(content, config) {
     const rows = cfg.jsonl ? parseJsonl(content) : null;
     if (rows) { parsed = rows; fromJsonl = true; }
     else {
+      // M13: a Figma design-context payload (generated React/Tailwind JSX) is compacted losslessly —
+      // className dictionary + node-id legend + ×N sibling fold. Before the log detector because its
+      // own detector is the far narrower one (all three Figma-JSX signatures, see detectJsx), and it
+      // only emits on a real byte win. Recovery is the same net as the log stage — the hook spills
+      // the whole original, the CLI names the on-disk file — plus the node-id map's own spill.
+      if (cfg.jsx) {
+        const j = jsxResult(content, cfg);
+        if (j) return j;
+      }
       // M10: log-shaped TEXT (build/test output, console spam) is signal-selected, not sampled —
       // errors/traces/summaries kept, INFO/WARN spam deduped ×N. Order: parseJsonl (above) →
       // log-detect (here) → passthrough. The detector must clear conf ≥ 0.5, so prose / markdown /
@@ -1213,6 +1641,18 @@ function slim(content, config) {
   // array — including a JSONL row stream — is object-only-false here, so bulk data flows through.)
   if (isErrorShape(parsed)) {
     return { output: content, wasModified: false, bytesIn, bytesOut: bytesIn, ratio: 0, error: true, reason: 'error-shape', stages: [] };
+  }
+  // M13: a Figma design-context result also reaches the CLI still inside its MCP block envelope
+  // (`[{"type":"text","text":"<the JSX>"}]` — the platform overflow spill), which parses as JSON and
+  // would otherwise never meet the jsx stage in the non-JSON branch above. Unwrap a pure text-block
+  // envelope and compact the text; detectJsx is narrow enough that no other JSON shape gets here,
+  // and a non-win falls straight through to the normal pipeline.
+  if (cfg.jsx) {
+    const inner = blockText(parsed);
+    if (inner !== null) {
+      const j = jsxResult(inner, cfg, content);
+      if (j) return j;
+    }
   }
   let value = parsed;
   const stages = [];
@@ -1281,9 +1721,10 @@ function capOutput(res, fileArg, config) {
   try { fs.writeFileSync(outPath, jsonBody); } catch (_) { return null; }
   // Shape sample: the first REAL row (skipping the crush sentinel) if the body is an array, else the
   // object itself. Truncated so one fat row can't blow the handback back past the very cap we enforce.
-  let rowsKept = null, sample = null, isArr = false;
+  let rowsKept = null, sample = null, isArr = false, isJson = false;
   try {
     const parsed = JSON.parse(jsonBody);
+    isJson = true;
     if (Array.isArray(parsed)) {
       isArr = true;
       const real = parsed.filter((r) => !(r && typeof r === 'object' && !Array.isArray(r) && r._ccr_dropped));
@@ -1305,13 +1746,18 @@ function capOutput(res, fileArg, config) {
   const spilledBytes = Buffer.byteLength(jsonBody, 'utf8'); // the JSON body actually written to the spill
   const pre = res.preamble ? res.preamble + '\n' : ''; // fenced tool prose, kept on top of the handback
   const post = res.fenceTrailer ? '\n' + res.fenceTrailer : ''; // fenced trailer (e.g. a truncation note)
+  // A slimmed body is not always JSON since M13 — a compacted Figma design-context payload is JSX.
+  // Sampling a "first row" and advertising `--jq` would then be nonsense, so the non-JSON case names
+  // the shape honestly and points at line-windowed reading instead.
   const handback = pre +
     `json-slim: slimmed output ${res.bytesOut} B exceeds the ${cfg.cliOutCap} B inline cap — spilled, not printed.\n` +
     `  ${res.bytesIn} → ${res.bytesOut} bytes (${pct}% reduction)${rowsKept != null ? `, ${rowsKept} rows kept` : ''}\n` +
-    `  ${isArr ? 'first row' : 'shape'}: ${sampleStr}\n` +
+    (isJson ? `  ${isArr ? 'first row' : 'shape'}: ${sampleStr}\n` : '') +
     `  slimmed output: ${outPath} (${spilledBytes} B)\n` +
     `  original file:  ${fileArg}\n` +
-    `  narrow with: node json-slim.cjs --jq <dot.path> ${outPath}${jqExample ? `  (e.g. --jq ${jqExample})` : ''}` + post;
+    (isJson
+      ? `  narrow with: node json-slim.cjs --jq <dot.path> ${outPath}${jqExample ? `  (e.g. --jq ${jqExample})` : ''}`
+      : `  not JSON — read the slimmed body windowed: sed -n '1,80p' ${shq(outPath)}  (--jq does not apply)`) + post;
   return { handback, spillOut: outPath };
 }
 
@@ -1677,6 +2123,7 @@ function buildReport(lines, opts) {
 
 module.exports = {
   slim, crush, crushValue, parseJsonl, unwrapFence, findOpeningFence,
+  detectJsx, compressJsx, foldSiblings, // M13: the Figma design-context (jsx) stage
   normalizeJqPath, jqAvailable, buildReport, shapeHint,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
@@ -1827,13 +2274,21 @@ if (require.main === module) {
     raw = JSON.stringify(v === undefined ? null : v); // a missed path yields null, never a crash
   }
 
-  const res = slim(raw, { ...cfg, trace: debugEnabled() }); // trace only when the debug log will consume `stages`
+  // The same rail slimText gives the hook: a stage fault degrades to the path handback below instead
+  // of killing the process — this IS the whale-recovery command the stub hands the model.
+  let res;
+  try { res = slim(raw, { ...cfg, trace: debugEnabled() }); } // trace only when the debug log will consume `stages`
+  catch (_) {
+    const b = Buffer.byteLength(raw, 'utf8');
+    res = { output: raw, wasModified: false, bytesIn: b, bytesOut: b, ratio: 0, reason: 'transform-error', stages: [] };
+  }
   const compressed = res.wasModified && res.bytesOut < res.bytesIn;
   // Hand the file path back — instead of re-dumping the whole (possibly whale-sized) file — for a
   // non-JSON file: never compressible, and a truncated/broken JSONL lands here too (parseJsonl already
   // declined it above, so it was not profiled). A non-JSON STDIN stream has no path to return, so it
   // still passes through below.
-  const handback = fileArg && res.reason === 'non-json';
+  // `transform-error` joins it: a stage that faulted compressed nothing, so the file is the answer.
+  const handback = fileArg && (res.reason === 'non-json' || res.reason === 'transform-error');
   // M10 — a compressed LOG file: print the selected body (its own `[N lines omitted…]` trailer
   // included) + one line naming the on-disk original, which IS the recovery (profile-philosophy
   // consistent). Skips capOutput below — that gate is JSON-document-shaped, not log text.
@@ -1841,9 +2296,12 @@ if (require.main === module) {
   // Gate A (M9b) — a slimmed body over the inline cap is spilled + summarized, not dumped: one huge JSON
   // document (JSONL files never reach here — they profiled upstream).
   const capped = (handback || logOut) ? null : capOutput(res, fileArg, cfg);
+  // M13 — a compacted Figma body printed INLINE has no spill of the ORIGINAL (only its node-id map),
+  // so name the on-disk original the way the log stage does. Over the cap, Gate A already names it.
+  const jsxOut = res.jsxCompressed && fileArg && !capped;
   if (handback) {
     process.stdout.write(`json-slim: nothing to compress; read the file directly: ${fileArg}\n`);
-  } else if (logOut) {
+  } else if (logOut || jsxOut) {
     process.stdout.write(`${res.output}\noriginal: ${fileArg}\n`);
   } else if (capped) {
     process.stdout.write(capped.handback + '\n');

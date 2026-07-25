@@ -410,7 +410,14 @@ hook error never blocks work:
     stack traces) is compressed by signal selection instead — errors, stack-trace heads, and summary
     lines are kept while repeated INFO/WARN spam is deduped `×N` and everything else is dropped to a
     `[N lines omitted: …]` trailer (on a file the CLI names the on-disk original for recovery); prose,
-    markdown, and XML fall below the log detector's threshold and pass through unchanged. A **non-JSONL**
+    markdown, and XML fall below the log detector's threshold and pass through unchanged. A **Figma
+    design-context** payload (dev-mode `get_design_context` — generated React/Tailwind JSX) is compacted
+    losslessly instead: repeated `className` strings move to a legend on top (`class=C17` at the use
+    sites), `data-node-id` attributes become `#n17` refs whose full-id map is spilled to its own file so
+    the ids stay usable for follow-up Figma calls, and identical repeated sibling subtrees fold to one
+    exemplar plus a list of what differed per repeat (~77 % on a real 211 KB section — 219 KB as the
+    captured envelope → 77.3 %) — the original is
+    in the spill, and generic HTML/XML/Liquid never matches the detector. A **non-JSONL**
     JSON document keeps the normal slim behavior, plus a guard: if its slimmed body still exceeds ~48 KB it is spilled to a `fnd-slim-out-*`
     file and handed back as a one-line summary + the first element + both paths (`--jq <dot.path>` to narrow),
     never dumped inline. A result the pipeline **cannot** shrink under ~32 KB — incompressible text/HTML,

@@ -25,7 +25,10 @@
 #             a weak-gain compression stubs too and writes exactly ONE spill — its own, the
 #             compressed body's `full=` spill is never written — and the rails — error shapes at ANY
 #             size, blocks carrying anything beyond type/text, overflow notices, sub-threshold,
-#             spill failure, FND_MCP_SLIM_STUB=0, threshold parsing — never stub)
+#             spill failure, FND_MCP_SLIM_STUB=0, threshold parsing — never stub);
+#             M53–M56 the M13 jsx stage (a Figma get_design_context result is compacted with a
+#             legend header, a resolvable node-id map spill and a `jsx` stage tag, never stubbed;
+#             mixed sibling shapes compress without losing copy)
 #   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
 #             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact, below-gate / no-json / small prompts
@@ -804,6 +807,62 @@ outA="$(run_stub "$SBA" "$in")"
 assert_contains M52-compressed "$outA" "<<full="
 assert_absent   M52-not-stubbed "$outA" "<<fnd-mcp-slim stub>>"
 assert_eq M52-annotations-kept "$(printf '%s' "$outA" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].annotations.audience[0]' 2>/dev/null)" "user"
+
+# ── M53–M55: Figma design-context JSX (M13) ──────────────────────────────────
+# A get_design_context result (generated React/Tailwind JSX) is compacted losslessly — className
+# dictionary + node-id legend + ×N sibling fold. The trimmed real fixture compresses to well under
+# the stub threshold, so it must flow through the NORMAL compressed path: updatedToolOutput + a
+# full= recovery spill, never a stub.
+FGX="$FIX/figma-design-context.jsx"
+in="$(jq -n --rawfile t "$FGX" '{tool_name:"mcp__plugin_fnd_figma-dev-mode__get_design_context",tool_response:{content:[{type:"text",text:$t}]}}')"
+
+# M53: compressed, with a full= spill on disk and the legend header on top
+out="$(run_slim "$in")"
+assert_contains M53-updated "$out" "updatedToolOutput"
+text="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_absent   M53-not-stubbed "$out" "<<fnd-mcp-slim stub>>"
+if printf '%s' "$text" | head -1 | grep -Fq "<<fnd-jsx-slim>>"; then ok; else bad M53-header "legend header not on top: $(printf '%s' "$text" | head -c 60)"; fi
+p="$(printf '%s' "$text" | grep -o '<<full=[^ >]*' | head -1 | sed 's/^<<full=//')"
+if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M53-fullfile "no existing full= file (p='$p')"; fi
+
+# M54: the node-id map spill exists and every #nN the body still shows resolves in it. The map is
+# named `ids=`, never `full=` — that handle stays reserved for the original result the hook appends,
+# so a loose `full=` scan (the model's, or M1/M25/M27 above) can never grab the id map instead.
+idf="$(printf '%s' "$text" | head -1 | grep -o 'ids=[^ ;]*fnd-jsx-ids-[^ ;]*' | sed 's/^ids=//')"
+if [ "$(printf '%s' "$text" | grep -c 'full=')" -eq 1 ]; then ok; else bad M54-full-token-unique "the body carries more than one full= handle"; fi
+if [ -n "$idf" ] && [ -f "$idf" ]; then ok; else bad M54-idmap "no node-id map file (idf='$idf')"; fi
+printf '%s' "$text" > "$TMP/m54-body.txt"
+if node -e '
+  const fs=require("fs");
+  const body=fs.readFileSync(process.argv[1],"utf8");
+  const map=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));
+  const refs=[...new Set(body.match(/#n\d+/g)||[])];
+  process.exit(refs.length && refs.every((r)=>typeof map[r.slice(1)]==="string") ? 0 : 1);
+' "$TMP/m54-body.txt" "$idf"; then ok; else bad M54-refs-resolve "a #nN reference is missing from the node-id map"; fi
+
+# M55: DEBUG on → the emitted line is `compressed` and its stages include `jsx`
+DBG="$TMP/dbg-m55"; mkdir -p "$DBG"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M55-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
+if jq -e '.stages | index("jsx")' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok; else bad M55-jsx-stage "stages=$(jq -c '.stages' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+
+# M56: mixed sibling shapes (an empty element beside text-bearing ones) — the fold used to index past
+# its slot list and throw, which the hook swallows: the whale then passed through RAW and every
+# folded-away product name went missing from the body. Compressed, and all 59 names still readable.
+M56F="$TMP/m56.jsx"
+node -e '
+  const l=["<div className=\"root bg-[var(--c-bg,#fff)]\" data-node-id=\"1:0\" data-name=\"Root\">"];
+  l.push("  <p className=\"lbl bg-[var(--c-fg,#000)]\" data-node-id=\"1:1\" data-name=\"L\"></p>");
+  for(let i=2;i<=60;i++) l.push(`  <p className="lbl bg-[var(--c-fg,#000)]" data-node-id="1:${i}" data-name="L">Product variant ${i}</p>`);
+  l.push("</div>");
+  require("fs").writeFileSync(process.argv[1], l.join("\n"));
+' "$M56F"
+in56="$(jq -n --rawfile t "$M56F" '{tool_name:"mcp__plugin_fnd_figma-dev-mode__get_design_context",tool_response:{content:[{type:"text",text:$t}]}}')"
+out56="$(run_slim "$in56")"
+assert_contains M56-updated "$out56" "updatedToolOutput"
+t56="$(printf '%s' "$out56" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+n56="$(printf '%s' "$t56" | grep -o 'Product variant' | wc -l | tr -d ' ')"
+if [ "$n56" -eq 59 ]; then ok; else bad M56-no-loss "only $n56 of 59 product names survived the fold"; fi
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping

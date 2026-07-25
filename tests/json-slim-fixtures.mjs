@@ -1076,5 +1076,262 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   eq('m12b-hint-nonstring', J.shapeHint(undefined), { format: 'text', hint: 'starts with: ' });
 }
 
+// ================================ M13 — jsx-slim (Figma design-context compactor) ==
+// A generated React/Tailwind payload from Figma dev-mode `get_design_context` is compacted
+// losslessly: a className dictionary (legend on top, `class=C17` at the use sites), a node-id
+// legend whose `n17 → full id` map goes to a SPILL FILE, and a ×N fold of identical repeated
+// sibling subtrees. The detector is deliberately narrow — generic HTML/XML/Liquid must pass
+// through byte-identical (the corruption rail), and the whole stage only ever emits a real
+// byte win.
+{
+  const jsxFixture = readFileSync(path.join(FIX, 'figma-design-context.jsx'), 'utf8');
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m13-'));
+
+  // --- detector: only Figma-generated JSX (data-node-id + className + var(--), each ≥3) ---
+  check('m13-detect-fixture', J.detectJsx(jsxFixture), 'the real design-context fixture detects as Figma JSX');
+  const liquid = Array.from({ length: 200 }, (_, i) =>
+    `{% if section.settings.show_${i} %}\n  <div class="card" style="color: var(--color-text-${i}, #000);">{{ product.title }}</div>\n{% endif %}`).join('\n');
+  check('m13-detect-liquid-not', !J.detectJsx(liquid), 'a Liquid section using var(--…) must NOT detect');
+  const lr = J.slim(liquid, { spillDir: dir });
+  check('m13-liquid-passthrough', !lr.wasModified && lr.output === liquid && lr.reason === 'non-json', 'Liquid passes through byte-identical');
+  const plainJsx = Array.from({ length: 200 }, (_, i) =>
+    `  <div className="flex items-center gap-2" style={{ color: "var(--x, #fff)" }}>Item ${i}</div>`).join('\n');
+  check('m13-detect-plain-jsx-not', !J.detectJsx(plainJsx), 'hand-written JSX without data-node-id must NOT detect');
+  check('m13-plain-jsx-passthrough', J.slim(plainJsx, { spillDir: dir }).output === plainJsx, 'non-Figma JSX passes through byte-identical');
+  check('m13-detect-html-not', !J.detectJsx(`<!doctype html><html><body>${'<div class="a" style="color:var(--x)">hi</div>'.repeat(500)}</body></html>`), 'plain HTML must NOT detect');
+  // two hits of each signature is below the threshold
+  const thin = ['<div className="a" data-node-id="1:1" style={{ c: "var(--x)" }} />',
+    '<div className="b" data-node-id="1:2" style={{ c: "var(--y)" }} />'].join('\n');
+  check('m13-detect-threshold', !J.detectJsx(thin), '2 hits of each signature is below JSX_MIN_HITS');
+
+  // --- slim() integration ---
+  const r = J.slim(jsxFixture, { trace: true, spillDir: dir });
+  check('m13-slim-compresses', r.wasModified && r.bytesOut < r.bytesIn, `fixture compresses: ${r.bytesIn}→${r.bytesOut}`);
+  eq('m13-slim-stages', r.stages, ['jsx']);
+  check('m13-trace-off-empty', J.slim(jsxFixture, { spillDir: dir }).stages.length === 0, 'trace off → compressed but stages stays empty');
+  const off = J.slim(jsxFixture, { jsx: false, spillDir: dir });
+  check('m13-jsx-off', !off.wasModified && off.reason === 'non-json' && off.output === jsxFixture, 'jsx:false → byte-identical non-json passthrough');
+  check('m13-header-on-top', r.output.startsWith('<<fnd-jsx-slim>>'), 'the legend header leads the compacted body');
+  check('m13-detect-idempotent', !J.detectJsx(r.output), 'an already-compacted payload never compacts twice');
+  check('reduction:figma-jsx≥0.60', r.ratio >= 0.60, `figma design-context ratio ${r.ratio.toFixed(3)}`);
+
+  // --- className legend: complete, and every entry reconstructs BYTE-EXACTLY ---
+  const head = r.output.split('\n');
+  const vars = {}, classes = {};
+  for (const line of head.slice(1)) {
+    if (line === '') break;
+    const v = /^\$(\d+): (.*)$/.exec(line);
+    if (v) { vars[v[1]] = v[2]; continue; }
+    const c = /^C(\d+): (.*)$/.exec(line);
+    if (c) classes[c[1]] = c[2];
+  }
+  const expand = (s) => s.replace(/\$(\d+)/g, (_, n) => vars[n]);
+  const originals = [...jsxFixture.matchAll(/className="([^"]*)"/g)].map((m) => m[1]);
+  const counts = new Map();
+  for (const v of originals) counts.set(v, (counts.get(v) || 0) + 1);
+  const repeated = [...new Set(originals.filter((v) => counts.get(v) >= 2))];
+  check('m13-legend-complete', Object.keys(classes).length === repeated.length && repeated.length > 5,
+    `legend holds every repeated className: ${Object.keys(classes).length} entries vs ${repeated.length} repeated values`);
+  check('m13-legend-byte-parity', repeated.every((v, i) => expand(classes[String(i + 1)]) === v),
+    'every legend entry expands to the byte-exact original className string');
+  check('m13-legend-vars-used', Object.keys(vars).length > 0 && Object.values(classes).some((c) => c.includes('$')),
+    `the var(--…) second pass fired: ${Object.keys(vars).length} tokens`);
+  const refs = [...new Set((r.output.match(/class=C(\d+)/g) || []).map((s) => s.slice(7)))];
+  check('m13-refs-resolve', refs.length > 0 && refs.every((n) => classes[n] !== undefined), 'every class=CN reference resolves in the legend');
+
+  // --- node-id map: written to a spill, complete, byte-exact ---
+  // `ids=`, never `full=`: that token means "the original result" everywhere else (the hook marker,
+  // the crush marker, the README), and a loose scan must not pick the id map out of this header.
+  const idFile = /ids=(\S*fnd-jsx-ids-[^ ;]*)/.exec(head[0]);
+  check('m13-idmap-named', !!idFile && existsSync(idFile[1]) && path.dirname(idFile[1]) === dir, `the node-id map is spilled beside the other spills: ${idFile && idFile[1]}`);
+  check('m13-no-full-token', !r.output.includes('full='), 'the compacted body never spends the `full=` handle on anything but the original result');
+  const map = idFile ? JSON.parse(readFileSync(idFile[1], 'utf8')) : {};
+  const origIds = [...new Set([...jsxFixture.matchAll(/data-node-id="([^"]*)"/g)].map((m) => m[1]))];
+  check('m13-idmap-complete', Object.keys(map).length === origIds.length && origIds.every((v, i) => map[`n${i + 1}`] === v),
+    `the map holds every node id byte-exact: ${Object.keys(map).length} of ${origIds.length}`);
+  const idRefs = [...new Set((r.output.match(/#n\d+/g) || []))];
+  check('m13-idrefs-resolve', idRefs.length > 0 && idRefs.every((x) => typeof map[x.slice(1)] === 'string'), 'every #nN reference resolves in the map');
+  check('m13-ids-out-of-band', !r.output.includes('data-node-id="'), 'no data-node-id attribute survives inline');
+
+  // --- no byte win → whole original, and no orphan map left on disk ---
+  const winDir = mkdtempSync(path.join(tmpdir(), 'jslim-m13w-'));
+  const tiny = ['<div className="a1" data-node-id="1:1" style={{ c: "var(--x,#fff)" }}>one</div>',
+    '<div className="b2" data-node-id="1:2" style={{ c: "var(--y,#000)" }}>two</div>',
+    '<div className="c3" data-node-id="1:3" style={{ c: "var(--z,#111)" }}>three</div>'].join('\n');
+  const tr = J.slim(tiny, { spillDir: winDir });
+  check('m13-nowin-passthrough', !tr.wasModified && tr.output === tiny && tr.reason === 'non-json', 'unique-only classNames, no byte win → byte-identical passthrough');
+  check('m13-nowin-no-orphan', readdirSync(winDir).filter((f) => f.startsWith('fnd-jsx-ids-')).length === 0, 'a losing run leaves no orphan node-id map on disk');
+  rmSync(winDir, { recursive: true, force: true });
+
+  // --- ×N sibling fold ---
+  const card = (id, txt) => [`      <div class=C1 #n${id} data-name="Column">`, '        <p class=C2>', `          ${txt}`, '        </p>', '      </div>'];
+  const same = ['  <div class=C0>', ...card(1, 'Copy'), ...card(2, 'Copy'), ...card(3, 'Copy'), '  </div>'].join('\n');
+  const fSame = J.foldSiblings(same);
+  check('m13-fold-node-id-only', fSame.folded === 2 && fSame.code.includes('×2 more, identical except (node-id): [#n2] [#n3]'),
+    `identical-but-for-the-id siblings fold: ${fSame.code.split('\n').find((l) => l.includes('×'))}`);
+  const diff = ['  <div class=C0>', ...card(1, 'Hydrating Serum'), ...card(2, 'Firming Cream'), ...card(3, 'Brightening Oil'), '  </div>'].join('\n');
+  const fDiff = J.foldSiblings(diff);
+  check('m13-fold-text-listed', fDiff.folded === 2 &&
+    fDiff.code.includes('×2 more, identical except (node-id, text): [#n2, "Firming Cream"] [#n3, "Brightening Oil"]'),
+    `siblings with real diffs fold WITH the diffs listed: ${fDiff.code.split('\n').find((l) => l.includes('×'))}`);
+  const styled = ['  <div class=C0>', ...card(1, 'A'), ...card(2, 'B').map((l) => l.replace('class=C1', 'class=C9')), '  </div>'].join('\n');
+  check('m13-fold-class-differs-kept', J.foldSiblings(styled).folded === 0, 'a differing class ref keeps both siblings in full (conservative gate)');
+  const runs = ['  <div class=C0>',
+    ...Array.from({ length: 3 }, (_, i) => [`    <div class=C1 #n${i * 3 + 1}>`, `      <span class=C2 #n${i * 3 + 2}>`, `      <span class=C2 #n${i * 3 + 3}>`, '    </div>']).flat(),
+    '  </div>'].join('\n');
+  check('m13-fold-id-range', J.foldSiblings(runs).code.includes('[#n4–#n6] [#n7–#n9]'),
+    `contiguous node-id runs collapse to a range: ${J.foldSiblings(runs).code.split('\n').find((l) => l.includes('×'))}`);
+  check('m13-fold-none', J.foldSiblings('  <a class=C1 #n1>\n  <b class=C2 #n2>').folded === 0, 'nothing to fold → the code comes back unchanged');
+
+  // Slot PRESENCE is part of the skeleton, so a sibling carrying a value can never fold into one
+  // that carries none. Without that mark `>text<` canonicalized like `><` (and an own-line text node
+  // like a whitespace-only line) with a different slot COUNT: the exemplar's list then either hid the
+  // duplicates' values under a "nothing dropped" header, or indexed past the end and threw.
+  const inline = (id, txt) => `    <p class=C1 #n${id} data-name="L">${txt}</p>`;
+  const emptyFirst = ['  <div class=C0>', '    <p class=C1 #n1 data-name="L"></p>', inline(2, 'Hydrating Serum'), inline(3, 'Firming Cream'), '  </div>'].join('\n');
+  const fEmptyFirst = J.foldSiblings(emptyFirst);
+  check('m13-fold-empty-vs-text-nofold', !fEmptyFirst.code.includes('×1 more, identical */}') &&
+    fEmptyFirst.code.includes('Hydrating Serum') && fEmptyFirst.code.includes('Firming Cream'),
+    `an empty element never folds a text-bearing sibling away: ${JSON.stringify(fEmptyFirst.code)}`);
+  const emptyLast = ['  <div class=C0>', inline(1, 'Hydrating Serum'), '    <p class=C1 #n2 data-name="L"></p>', '  </div>'].join('\n');
+  check('m13-fold-text-vs-empty-nothrow', J.foldSiblings(emptyLast).folded === 0 && J.foldSiblings(emptyLast).code === emptyLast,
+    'the reverse order does not throw either — the shapes simply differ');
+  const blankLine = ['  <div class=C0>', '    <p class=C1 #n1>', '      ', '    </p>',
+    '    <p class=C1 #n2>', '      Hello there', '    </p>', '    <p class=C1 #n3>', '      Hello there', '    </p>', '  </div>'].join('\n');
+  const fBlank = J.foldSiblings(blankLine);
+  check('m13-fold-blank-vs-textline', (fBlank.code.match(/Hello there/g) || []).length === 2 || fBlank.code.includes('"Hello there"'),
+    `a whitespace-only line never folds an own-line text node away: ${JSON.stringify(fBlank.code)}`);
+  // Trailing whitespace lives in the slot value, not the skeleton, so a repeat that differs only
+  // there is listed rather than dropped under an "identical" claim.
+  const trailing = ['  <div class=C0>', '    <p class=C1 #n1>', '      Copy', '    </p>',
+    '    <p class=C1 #n2>', '      Copy   ', '    </p>', '  </div>'].join('\n');
+  const fTrail = J.foldSiblings(trailing);
+  check('m13-fold-trailing-ws-listed', fTrail.folded === 0 || fTrail.code.includes('"Copy   "'),
+    `a trailing-whitespace-only difference is never silently identical: ${JSON.stringify(fTrail.code)}`);
+  // Two slots of the SAME kind in one subtree — the listed value names which one it came from.
+  const twoNames = (inner) => ['    <div class=C1 data-name="Fixed">', `      <span class=C2 data-name="${inner}">`, '    </div>'];
+  const fTwo = J.foldSiblings(['  <div class=C0>', ...twoNames('A'), ...twoNames('B'), ...twoNames('C'), '  </div>'].join('\n'));
+  check('m13-fold-same-kind-qualified', fTwo.folded === 2 && fTwo.code.includes('[name#2:"B"] [name#2:"C"]'),
+    `a repeated kind is listed with its ordinal: ${fTwo.code.split('\n').find((l) => l.includes('×'))}`);
+
+  // --- legend collision safety: a `$` anywhere in a className disables the $N pass entirely ---
+  const dollarBody = Array.from({ length: 40 }, (_, i) =>
+    `  <div className="w-[var(--space\\/lg,40px)] cost-[$${'x'}] pad-${i % 2}" data-node-id="9:${i}" data-name="N${i}">t${i}</div>`).join('\n');
+  const dr = J.slim(dollarBody, { spillDir: dir });
+  check('m13-dollar-no-var-pass', dr.wasModified && !/\n\$\d+: /.test(dr.output) && dr.output.includes('var(--space\\/lg,40px)'),
+    'a `$` in a className value skips the $N pass; entries stay verbatim');
+
+  // --- Gate A on a compacted body that is NOT JSON (the first shape that can reach it) ---
+  const cap = J.capOutput(r, path.join(dir, 'design-context.jsx'), { cliOutCap: 50, spillDir: dir });
+  check('m13-cap-nonjson-handback', !!cap && cap.handback.includes('not JSON — read the slimmed body windowed') &&
+    !cap.handback.includes('--jq <dot.path>') && !/\n {2}(first row|shape): /.test(cap.handback),
+    `a non-JSON slimmed body must not sample a row or advertise --jq:\n${cap && cap.handback}`);
+  check('m13-cap-spill-byte-exact', !!cap && readFileSync(cap.spillOut, 'utf8') === r.output, 'the Gate-A spill holds the compacted body verbatim');
+
+  // --- the MCP block envelope: the shape a design-context result keeps when spilled whole ---
+  // `[{type:'text',text:'<the JSX>'}]` parses as JSON, so it never reaches the non-JSON branch; the
+  // stage unwraps a PURE text-block envelope instead of leaving the whale to the JSON pipeline.
+  const envelope = JSON.stringify([{ type: 'text', text: jsxFixture }]);
+  const er = J.slim(envelope, { trace: true, spillDir: dir });
+  eq('m13-envelope-stages', er.stages, ['jsx']);
+  check('m13-envelope-compresses', er.wasModified && er.ratio >= 0.60 && er.output.startsWith('<<fnd-jsx-slim>>'),
+    `a text-block envelope compacts through the jsx stage: ${er.bytesIn}→${er.bytesOut} (${(er.ratio * 100).toFixed(1)}%)`);
+  const mixed = JSON.stringify([{ type: 'text', text: jsxFixture }, { type: 'image', data: 'x' }]);
+  check('m13-envelope-mixed-not', !J.slim(mixed, { trace: true, spillDir: dir }).stages.includes('jsx'),
+    'a mixed-block envelope is left to the JSON pipeline (only a pure text envelope unwraps)');
+  const jsonArr = JSON.stringify(Array.from({ length: 30 }, (_, i) => ({ id: i, name: `row ${i}`, type: 'text' })));
+  check('m13-envelope-plain-json-untouched', !J.slim(jsonArr, { trace: true, spillDir: dir }).stages.includes('jsx'),
+    'a plain JSON array of records never reaches the jsx stage');
+  // The lone-block shape an MCP result also arrives in — same purity rail, same compaction.
+  const single = JSON.stringify({ type: 'text', text: jsxFixture });
+  const sr = J.slim(single, { trace: true, spillDir: dir });
+  eq('m13-single-block-stages', sr.stages, ['jsx']);
+  check('m13-single-block-compresses', sr.wasModified && sr.ratio >= 0.60 && sr.output.startsWith('<<fnd-jsx-slim>>'),
+    `a lone {type,text} block compacts too: ${sr.bytesIn}→${sr.bytesOut} (${(sr.ratio * 100).toFixed(1)}%)`);
+
+  // --- only a PURE envelope unwraps: unwrapping keeps the text alone, so anything beside it would be
+  // dropped under a "nothing dropped" header. A sibling field or a rich block declines the stage and
+  // the value goes to the JSON pipeline instead, which compresses it with every field intact.
+  const cursored = J.slim(JSON.stringify({ content: [{ type: 'text', text: jsxFixture }], _meta: { nextCursor: 'c-42' } }), { trace: true, spillDir: dir });
+  check('m13-envelope-sibling-not', !cursored.stages.includes('jsx') && JSON.parse(cursored.output)._meta.nextCursor === 'c-42',
+    'an envelope sibling (_meta.nextCursor) declines the unwrap and survives the JSON pipeline');
+  const annotated = J.slim(JSON.stringify([{ type: 'text', text: jsxFixture, annotations: { audience: ['user'] } }]), { trace: true, spillDir: dir });
+  check('m13-block-annotations-not', !annotated.stages.includes('jsx') && JSON.parse(annotated.output)[0].annotations.audience[0] === 'user',
+    'a block-level field (annotations) declines the unwrap and survives too');
+  const rich = J.slim(JSON.stringify({
+    content: [{ type: 'text', text: jsxFixture, annotations: { audience: ['user'] } }],
+    _meta: { nextCursor: 'c-42' },
+    structuredContent: { nodeId: '13920:240398' },
+  }), { trace: true, spillDir: dir });
+  const richOut = JSON.parse(rich.output);
+  check('m13-envelope-rich-fields-kept', !rich.stages.includes('jsx') && !rich.output.startsWith('<<fnd-jsx-slim>>') &&
+    richOut._meta.nextCursor === 'c-42' && richOut.structuredContent.nodeId === '13920:240398' &&
+    richOut.content[0].annotations.audience[0] === 'user',
+    'all three fields survive a full MCP envelope — the jsx stage never eats them');
+
+  // --- the ids= path is the LAST clause when nothing else fired (no className dictionary, no fold);
+  // a sentence period glued to it would make the naive read (token up to whitespace) an ENOENT.
+  const idsDir = mkdtempSync(path.join(tmpdir(), 'jslim-m13i-'));
+  const uniqueCards = Array.from({ length: 60 }, (_, i) =>
+    `  <div className="unique-card-${i} gap-[var(--space\\/sm,16px)]" data-node-id="I13920:2404${i};19010:8137" data-name="Card ${i}">card ${i}</div>`).join('\n');
+  const ur = J.slim(uniqueCards, { spillDir: idsDir });
+  const uhead = ur.output.split('\n')[0];
+  const naive = /ids=(\S+)/.exec(uhead);
+  check('m13-ids-clause-last', ur.wasModified && !/class=C/.test(ur.output) && !uhead.includes('×N more'),
+    `unique classNames and no folds leave the ids= clause last: ${uhead.slice(0, 80)}`);
+  check('m13-ids-path-readable', !!naive && existsSync(naive[1]),
+    `the ids= token read naively (up to whitespace) is a real file: ${naive && naive[1]}`);
+  rmSync(idsDir, { recursive: true, force: true });
+
+  // --- fuzz: mixed line kinds must never throw and never drop a value ---
+  // Own-line text, inline text, empty elements and self-closing images in one tree are what made the
+  // skeleton ambiguous; the rail is that every copy string survives either in the body or in a fold's
+  // diff list. Seeded LCG so a failure is reproducible.
+  let seed = 20260725;
+  const rnd = (n) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n);
+  let fuzzThrew = null, fuzzLost = null;
+  for (let c = 0; c < 400 && !fuzzThrew && !fuzzLost; c++) {
+    const texts = [];
+    const body = ['<div className="root bg-[var(--c-bg,#fff)]" data-node-id="0:0" data-name="Root">'];
+    const kids = 2 + rnd(4);
+    for (let k = 0; k < kids; k++) {
+      const open = `  <div className="card gap-[var(--space,8px)]" data-node-id="0:${k}" data-name="Card">`;
+      const t = `copy-${c}-${k}`;
+      switch (rnd(4)) {
+        case 0: body.push(open, `    ${t}`, '  </div>'); texts.push(t); break;
+        case 1: body.push(`  <p className="card gap-[var(--space,8px)]" data-node-id="0:${k}">${t}</p>`); texts.push(t); break;
+        case 2: body.push(`  <p className="card gap-[var(--space,8px)]" data-node-id="0:${k}"></p>`); break;
+        default: body.push(open, '    ', '  </div>'); break;
+      }
+    }
+    body.push('</div>');
+    const src = body.join('\n');
+    let out;
+    try { out = J.slim(src, { spillDir: dir }).output; } catch (e) { fuzzThrew = `${e.message} on\n${src}`; break; }
+    for (const t of texts) if (!out.includes(t)) { fuzzLost = `${t} missing from\n${out}`; break; }
+  }
+  check('m13-fuzz-no-throw', !fuzzThrew, `mixed-shape siblings never throw: ${fuzzThrew}`);
+  check('m13-fuzz-no-loss', !fuzzLost, `mixed-shape siblings never lose copy: ${fuzzLost}`);
+
+  // --- a 200 KB payload on ONE physical line stays linear-time (no regex backtracking) ---
+  const oneLine = jsxFixture.replace(/\n/g, ' ').repeat(4);
+  const t13 = Date.now();
+  const big = J.slim(oneLine, { spillDir: dir });
+  check('m13-single-line-bounded', big.wasModified && Date.now() - t13 < 1000,
+    `${Buffer.byteLength(oneLine, 'utf8')} B on one line took ${Date.now() - t13} ms`);
+  // …and so does a DEEPLY nested one: the fold walk used to rebuild every subtree's skeleton
+  // character by character at each level, which cost bytes × nesting depth.
+  const deep = [];
+  for (let i = 0; i < 800; i++) deep.push(`${' '.repeat(i)}<div className="lvl-${i} bg-[var(--c-${i},#fff)]" data-node-id="9:${i}" data-name="L${i}">`);
+  for (let i = 799; i >= 0; i--) deep.push(`${' '.repeat(i)}</div>`);
+  const deepText = deep.join('\n');
+  const t14 = Date.now();
+  const deepRes = J.slim(deepText, { spillDir: dir });
+  check('m13-deep-nesting-bounded', deepRes.wasModified && Date.now() - t14 < 1000,
+    `${Buffer.byteLength(deepText, 'utf8')} B at depth 800 took ${Date.now() - t14} ms`);
+
+  rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);
 if (fail) { console.log(failures.join('\n')); process.exit(1); }

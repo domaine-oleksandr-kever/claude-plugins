@@ -687,6 +687,103 @@ if [ "$rc" -eq 0 ] && grep -q '"profile":true' "$O" && grep -q 'inside a ```' "$
    && printf '%s' "$nout" | grep -q 'product-0' && printf '%s' "$nout" | grep -q 'product-19'; then ok
 else bad F4-fenced-jsonl-profile "rc=$rc spills=$spills nout=[$(printf '%s' "$nout" | head -c 40)] head=$(head -c 200 "$O")"; fi
 
+# ---------------------------------------------- json-slim.cjs: Figma design-context JSX (M13) --
+# A Figma dev-mode get_design_context payload (generated React/Tailwind JSX) is compacted losslessly:
+# className dictionary + node-id legend + ×N sibling fold. Every entry shape is covered — a fenced
+# whale over the inline cap (Gate A), the bare trimmed fixture under it, the MCP block envelope a
+# spilled result keeps — plus the corruption rail (a Liquid file that merely uses `var(--…)` must pass
+# through byte-identical) and the mixed-sibling shape that used to kill the process.
+JSXD="$TMP/jsxslim"; mkdir -p "$JSXD"
+
+# X1: a FENCED Figma whale whose compacted body still exceeds the 48 KB inline cap → Gate A spill +
+# handback ≤ ~1 KB, stages ["fence","jsx"] in the debug log. classNames are unique here, so the win
+# comes from the node-id legend alone — the compacted body stays over the cap on purpose.
+X1F="$JSXD/whale.txt"
+node -e '
+  const el=[];
+  for(let i=0;i<1400;i++) el.push(`    <div className="unique-card-${i} content-stretch flex flex-col gap-[var(--space\\/sm,16px)] items-center relative shrink-0 w-full" data-node-id="I13920:2404${i};19010:8137" data-name="Card ${i}">card ${i}</div>`);
+  require("fs").writeFileSync(process.argv[1], "Design context:\n```jsx\nexport default function Section() {\n  return (\n" + el.join("\n") + "\n  );\n}\n```");
+' "$X1F"
+X1OUT="$JSXD/x1out"; mkdir -p "$X1OUT"
+rc=0; FND_MCP_SLIM_DIR="$X1OUT" FND_MCP_SLIM_DEBUG=1 node "$SLIM" "$X1F" >"$O" 2>"$E" || rc=$?
+outb=$(wc -c < "$O" | tr -d ' ')
+x1stages=$(node -e 'const fs=require("fs");const l=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").pop();process.stdout.write(JSON.stringify(JSON.parse(l).stages))' "$X1OUT/fnd-mcp-slim-debug.log" 2>/dev/null || true)
+if [ "$rc" -eq 0 ] && [ "$outb" -le 1200 ] && grep -q 'spilled, not printed' "$O" && grep -q "$X1F" "$O" \
+   && [ "$x1stages" = '["fence","jsx"]' ] \
+   && grep -q 'not JSON — read the slimmed body windowed' "$O" && ! grep -q 'narrow with' "$O"; then ok
+else bad X1-fenced-jsx-gateA "rc=$rc outb=$outb stages=$x1stages head=$(head -c 200 "$O")"; fi
+
+# X2: the trimmed REAL fixture (under the cap) → the compacted body prints inline with the legend
+# header on top, one `original:` line naming the file (nothing was spilled, so the header must not be
+# the only thing pointing anywhere), and the node-id map named in that header — under `ids=`, never
+# `full=`, which stays the handle for the original result — resolvable for every #nN.
+X2OUT="$JSXD/x2out"; mkdir -p "$X2OUT"
+rc=0; FND_MCP_SLIM_DIR="$X2OUT" node "$SLIM" "$ROOT/tests/fixtures/figma-design-context.jsx" >"$O" 2>"$E" || rc=$?
+inb=$(wc -c < "$ROOT/tests/fixtures/figma-design-context.jsx" | tr -d ' ')
+outb=$(wc -c < "$O" | tr -d ' ')
+idmaps=$(ls "$X2OUT" 2>/dev/null | grep -c '^fnd-jsx-ids-' || true)
+if [ "$rc" -eq 0 ] && head -1 "$O" | grep -Fq '<<fnd-jsx-slim>>' && [ "$idmaps" -eq 1 ] \
+   && node -e "process.exit($outb/$inb < 0.45 ? 0 : 1)" \
+   && grep -Fq "original: $ROOT/tests/fixtures/figma-design-context.jsx" "$O" \
+   && ! grep -Fq 'full=' "$O" \
+   && node -e '
+     const fs=require("fs"),path=require("path");
+     const body=fs.readFileSync(process.argv[1],"utf8");
+     const m=/ids=(\S*fnd-jsx-ids-[^ ;]*)/.exec(body.split("\n")[0]);
+     if(!m) process.exit(1);
+     const map=JSON.parse(fs.readFileSync(m[1],"utf8"));
+     const refs=[...new Set(body.match(/#n\d+/g)||[])];
+     process.exit(refs.length && refs.every((r)=>typeof map[r.slice(1)]==="string") ? 0 : 1);
+   ' "$O"; then ok
+else bad X2-fixture-inline "rc=$rc inb=$inb outb=$outb idmaps=$idmaps head=$(head -c 200 "$O")"; fi
+
+# X3: a Liquid section that merely uses `var(--…)` is NOT Figma JSX — the CLI hands the path back and
+# writes no spill of any kind (the corruption rail: generic markup is never touched).
+X3F="$JSXD/section.liquid"
+node -e '
+  const l=[];
+  for(let i=0;i<200;i++) l.push(`{% if section.settings.show_${i} %}\n  <div class="card" style="color: var(--color-text-${i}, #000);">{{ product.title }}</div>\n{% endif %}`);
+  require("fs").writeFileSync(process.argv[1], l.join("\n"));
+' "$X3F"
+X3OUT="$JSXD/x3out"; mkdir -p "$X3OUT"
+rc=0; FND_MCP_SLIM_DIR="$X3OUT" node "$SLIM" "$X3F" >"$O" 2>"$E" || rc=$?
+x3spills=$(ls "$X3OUT" 2>/dev/null | grep -c '^fnd-' || true)
+if [ "$rc" -eq 0 ] && grep -Fq "read the file directly: $X3F" "$O" && [ "$x3spills" -eq 0 ]; then ok
+else bad X3-liquid-passthrough "rc=$rc spills=$x3spills head=$(head -c 160 "$O")"; fi
+
+# X4: the MCP block envelope — the shape a design-context result keeps when the platform spills the
+# whole result to disk ([{"type":"text","text":"<the JSX>"}]). It parses as JSON, so the jsx stage has
+# to unwrap it here or the whale reaches the model uncompacted.
+X4F="$JSXD/envelope.json"
+node -e '
+  const fs=require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify([{type:"text",text:fs.readFileSync(process.argv[2],"utf8")}]));
+' "$X4F" "$ROOT/tests/fixtures/figma-design-context.jsx"
+X4OUT="$JSXD/x4out"; mkdir -p "$X4OUT"
+rc=0; FND_MCP_SLIM_DIR="$X4OUT" FND_MCP_SLIM_DEBUG=1 node "$SLIM" "$X4F" >"$O" 2>"$E" || rc=$?
+x4stages=$(node -e 'const fs=require("fs");const l=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").pop();process.stdout.write(JSON.stringify(JSON.parse(l).stages))' "$X4OUT/fnd-mcp-slim-debug.log" 2>/dev/null || true)
+inb=$(wc -c < "$X4F" | tr -d ' '); outb=$(wc -c < "$O" | tr -d ' ')
+if [ "$rc" -eq 0 ] && [ "$x4stages" = '["jsx"]' ] && head -1 "$O" | grep -Fq '<<fnd-jsx-slim>>' \
+   && node -e "process.exit($outb/$inb < 0.45 ? 0 : 1)"; then ok
+else bad X4-envelope-jsx "rc=$rc stages=$x4stages inb=$inb outb=$outb head=$(head -c 160 "$O")"; fi
+
+# X5: mixed sibling shapes (an empty element next to text-bearing ones) used to make the fold index
+# past its slot list — an unhandled TypeError that exited 1 with NOTHING on stdout, on exactly the
+# `node json-slim.cjs <spill>` command the whale stub hands the model. The CLI always answers.
+X5F="$JSXD/mixed.jsx"
+node -e '
+  const l=["<div className=\"root bg-[var(--c-bg,#fff)]\" data-node-id=\"1:0\" data-name=\"Root\">"];
+  l.push("  <p className=\"lbl bg-[var(--c-fg,#000)]\" data-node-id=\"1:1\" data-name=\"L\"></p>");
+  for(let i=2;i<=60;i++) l.push(`  <p className="lbl bg-[var(--c-fg,#000)]" data-node-id="1:${i}" data-name="L">Product variant ${i}</p>`);
+  l.push("</div>");
+  require("fs").writeFileSync(process.argv[1], l.join("\n"));
+' "$X5F"
+X5OUT="$JSXD/x5out"; mkdir -p "$X5OUT"
+rc=0; FND_MCP_SLIM_DIR="$X5OUT" node "$SLIM" "$X5F" >"$O" 2>"$E" || rc=$?
+x5kept=$(grep -o 'Product variant' "$O" | wc -l | tr -d ' ')
+if [ "$rc" -eq 0 ] && [ -s "$O" ] && [ "$x5kept" -eq 59 ]; then ok
+else bad X5-mixed-siblings "rc=$rc kept=$x5kept/59 err=$(head -c 200 "$E")"; fi
+
 # ---------------------------------------------- json-slim.cjs: --report over the debug log (M12) --
 # `--report [logfile] [--since <ISO>]` aggregates the FND_MCP_SLIM_DEBUG JSONL log. The synthetic log
 # below covers every family the report must speak about: a compressed hook event, a passthrough, a
