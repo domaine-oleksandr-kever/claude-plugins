@@ -1066,7 +1066,7 @@ assert_contains T2-unknown   "$(run_subc '{"agent_type":"some-new-writer"}')" "M
 assert_contains T2-malformed "$(run_subc 'not json')"                          "MARK-comment-discipline"
 
 # T3: non-code agents are skipped (no conventions) — jira-writer joins the readers/reviewers
-for a in jira-reader jira-writer bug-hunter change-reviewer figma-reader theme-explorer; do
+for a in jira-reader jira-writer bug-hunter change-reviewer figma-reader doc-reader theme-explorer; do
   assert_eq "T3-$a-skip" "$(run_subc "{\"agent_type\":\"$a\"}")" ""
 done
 # a scoped plugin agent_type (e.g. fnd:jira-writer) is still matched by the *…* globs

@@ -84,15 +84,20 @@ report and the Jira hand-off comment are distilled from these entries.
 ## Phase-agent models
 
 Phase agents never inherit the session model — the conductor passes `model` on every
-spawn (this section is the single home of the assignments): `opus` for reasoning-heavy
+spawn (this section is the single home of the **Step 4 phase-agent** assignments):
+`opus` for reasoning-heavy
 phases (implement, qa, and the fix agents in the qa loop and aftercare), `sonnet` for
 mechanical ones (finalize, create-pr, steps-to-test, and the aftercare poll/triage
 agent — its fix agents stay `opus`). The inline conductor step (jira-hand-off) delegates its
 one Jira write to the `jira-writer` subagent (so the ADF comment blob never enters the
 conductor context); `jira-writer` pins its own model via frontmatter (`sonnet`), so the
-conductor passes none. The
+conductor passes none.
+Pre-gate helpers (the Step 1 store-data audit, the Step 3 research pressure-test) are
+pinned inline where ship spawns them; the reader agents pin via frontmatter. The
 conductor itself stays on the session model — planning, decomposition, and synthesis are
-where it earns its price. Gotcha: a `CLAUDE_CODE_SUBAGENT_MODEL` env var silently
+where it earns its price — so run ship on the **strongest session model available: Fable
+recommended**, Opus acceptable; anything lighter weakens the one context that makes every
+judgment call. Gotcha: a `CLAUDE_CODE_SUBAGENT_MODEL` env var silently
 overrides every pin, including the bundled agents' frontmatter models — it must be unset
 or `inherit`.
 

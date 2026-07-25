@@ -27,6 +27,7 @@ in its own subfolder under `plugins/`:
 │       │   ├── jira-reader.md       #  reads a ticket → structured fields
 │       │   ├── jira-writer.md       #  writes one approved field/comment (ADF) → Jira
 │       │   ├── figma-reader.md      #  reads one Figma frame → build spec
+│       │   ├── doc-reader.md        #  reads one linked doc (Notion/Confluence/web) → extract
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
 │       ├── hooks/                # injected conventions + git guards + context monitor
 │       │   ├── comment-discipline.md
@@ -225,8 +226,9 @@ Agents differ from skills: a **skill** runs inline in the main conversation and
 steers *your* Claude; an **agent** is a *separate* Claude you hand a task to,
 with its own context — ideal for parallel, sandboxed, or token-heavy subtasks.
 
-**Shipped agents.** This plugin ships five read-only subagents, all used to keep
-heavy/noisy work out of the main context:
+**Shipped agents.** This plugin ships six subagents that are read-only toward their
+sources (`doc-reader` writes only its own workspace extract), plus the write-side
+`jira-writer` — all used to keep heavy/noisy work out of the main context:
 
 - **`change-reviewer`** — reviews a diff (stale comments, refactors, project-rules
   conformance). The review flow fans it out one agent per file-group on large diffs.
@@ -243,6 +245,10 @@ heavy/noisy work out of the main context:
   **after** the ✋ approval (the gate stays in the skill; the agent never authorizes).
 - **`figma-reader`** — reads **one** Figma frame via the Figma Dev Mode MCP and returns a
   compact build spec. Spawned **one per URL, in parallel** when a ticket has several.
+- **`doc-reader`** — reads **one** linked doc (Notion with sub-page follow-through,
+  Confluence, or any web URL) and returns a task-focused extract, saving it to the
+  workspace `doc-<slug>-<hash>.md` itself. Spawned **one per link, in parallel** — the raw pages
+  never enter the main context (`references/reading-linked-docs.md`).
 - **`theme-explorer`** — a planning scout: reads the project's `.claude/rules` + theme
   layout and returns an impact map (relevant files, patterns, new files, rule constraints).
   Finds breadth; the main loop reads the load-bearing files itself.
@@ -287,10 +293,13 @@ growth beyond the ticket, QA failures that survive the fix cap). The contract li
 
 The conductor session stays thin: the heavy phases run in **fresh-context subagents**
 that re-read the per-ticket workspace, so long runs never depend on what survives context
-compaction. Ship writes the same workspace artifacts and
-ticks the same `progress.md` rows as the solo skills — an interrupted run continues with
-the solo series, no unwinding; re-running `/fnd:ship` reconciles against ground truth
-(git, `gh pr view`, Jira) and resumes.
+compaction. Run ship with the **strongest session model available (Fable recommended)** —
+the conductor deliberately stays on the session model while every phase agent is pinned
+(`references/pipeline-mode.md` → Phase-agent models), so the model you pick upgrades the
+planning/synthesis context without raising phase-agent cost. Ship writes the same
+workspace artifacts and ticks the same `progress.md` rows as the solo skills — an
+interrupted run continues with the solo series, no unwinding; re-running `/fnd:ship`
+reconciles against ground truth (git, `gh pr view`, Jira) and resumes.
 
 **When to use which:** the solo series when you want to steer each step (checkpoints,
 offer-next); `/fnd:ship` when the ticket is well-specified (Description + AC + approved
@@ -301,7 +310,7 @@ end-to-end.
 flowchart TD
     A["/fnd:ship &lt;ticket&gt;"] --> B{"Step 0 — preflight<br/>MCP · CLI · dev server · permissions ·<br/>store-access probe · clean context"}
     B -- fail --> B0["stop: fix environment<br/>(nothing half-started)"]
-    B -- pass --> C["ingest in parallel<br/>jira-reader · figma-reader · theme-explorer"]
+    B -- pass --> C["ingest in parallel<br/>jira-reader · figma-reader ·<br/>doc-reader · theme-explorer"]
     C --> D["interview (AskUserQuestion)<br/>ticket-specific + policy set"]
     D --> E["pipeline.md (status: draft)<br/>decisions + escalation contract"]
     E --> F{"✋ the only gate<br/>plan + QA checklist"}

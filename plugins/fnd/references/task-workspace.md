@@ -20,7 +20,7 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 |---|---|---|
 | `ticket.md` — in a batch, `ticket-<KEY>.md` each | `jira-reader` structured output, **verbatim** (Description, AC, Assumptions, TA, Steps to Test, links) | the skill that ran the fetch |
 | `figma-<node-id>.md` | one `figma-reader` build spec, **verbatim** — one file per node | same |
-| `doc-<slug>.md` | one linked doc's **extracted** content (data models, copy, field lists — never the raw page); slug from the page title | the skill that read it |
+| `doc-<slug>-<hash>.md` | one linked doc's **extracted** content (data models, copy, field lists — never the raw page); slug from the page title + a short URL hash (`doc-data-mapping-9f3c.md`), so same-titled docs don't collide | `doc-reader` (the calling skill only on the inline fallback) |
 | `plan.md` | the **approved implementation plan**, verbatim | `develop-feature-or-fix`, at its ✋ checkpoint |
 | `qa.md` | the **approved QA checklist**, then the pass/fail report + confirmed findings with their repro values | `qa-feature-or-fix` |
 | `steps-to-test.md` | the **approved Steps to Test** (local copy of what went to Jira) | `write-steps-to-test` |
@@ -65,8 +65,9 @@ is a log; it doesn't go stale.
 
 - Immediately after a reader returns, write its structured output **verbatim** — don't
   re-summarize; later skills need the full fields. Overwrite on re-fetch.
-- `doc-*.md` holds the **extract** (what the task needs), not the page — write it right after
-  reading the source, while the content is at hand.
+- `doc-*.md` holds the **extract** (what the task needs), not the page — `doc-reader` writes
+  it right after reading, before composing its return; on the inline fallback the skill
+  writes it, while the content is at hand.
 - Append to `notes.md` at natural boundaries — approved-plan decisions, provisioned data
   (gids), preview theme, test URLs, confirmed bugs + the hostile values that triggered them.
   One dated `##` entry per event, newest last.

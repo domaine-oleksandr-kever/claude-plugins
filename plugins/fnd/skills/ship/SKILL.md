@@ -34,6 +34,9 @@ Inputs (ask if missing): **Jira ticket** (`jira_ticket`); designs from the ticke
 link or `figma_url`.
 Operating mode: Steps 0–3 interactive (plan-mode discipline — read, align, ask; the only
 writes are the workspace cache and `pipeline.md`); Step 4 autonomous.
+Session model: strongest available as the conductor — **Fable recommended**, Opus
+acceptable; the conductor stays on the session model while every phase agent is pinned —
+rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 
 ## Global rules
 
@@ -94,9 +97,11 @@ writes are the workspace cache and `pipeline.md`); Step 4 autonomous.
 As develop's Phase 1: context-first, then workspace, then fetch — saving fresh output
 back. Spawn concurrently: **`jira-reader`** (Description, AC, TA, Steps to Test, links,
 `figma_urls`), one **`figma-reader`** per Figma URL, **`theme-explorer`** seeded with the
-task intent. Read every linked doc per
-`${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` (Notion mandatory — stop and
-tell the developer if that MCP is missing). Then **validate readiness**: Description, AC,
+task intent. Once `jira-reader` returns the links, spawn one **`doc-reader`** per
+remaining doc link, in parallel, per
+`${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` (reuse-before-fetch; pass the
+workspace path; Notion mandatory — a reader naming a missing MCP → stop and tell the
+developer). Then **validate readiness**: Description, AC,
 approved **Technical Approach**, Figma node — any missing → **stop** and point at the gap
 (`/fnd:write-technical-approach` for a missing TA). If the ticket/docs define metafields
 or metaobjects, plan the provisioning per
@@ -106,20 +111,29 @@ material). Read the
 load-bearing files `theme-explorer` points to yourself — the plan is built from real
 understanding, not the scout's summary.
 
-**Store-data audit** — from the ticket + TA + the theme code the change touches, list
+**Store-data audit** — you (the conductor) derive the dependency list; a subagent runs
+the probes. From the ticket + TA + the theme code the change touches, list
 every store-data dependency needed to **build and to QA**: metafield/metaobject
 definitions AND actual values, selling plan groups
 (subscriptions), bundle configuration, target products/collections/pages, template
-assignments, app-owned records. Probe each with read-only queries via
-`${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` — targeted queries, not a full
-catalog scan; anything big goes through `--out` into the workspace `tmp/` + `jq` — and
-write the map to `notes.md` as `store-data:` entries: requirement →
+assignments, app-owned records. Then spawn one **general-purpose subagent**
+(`model: sonnet`) briefed with that list, the store-access level from Step 0, the
+workspace path (`.claude/fnd/<work-id>/`, so `--out` dumps land in its `tmp/`, never the
+project root), and the probe rules — **strictly read-only**: GraphQL queries only (no
+mutations) via `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh`, targeted, not a full
+catalog scan, and `theme-json.sh` **`get` only, never `set`** — it probes, it never mutates
+store or theme state (that right belongs to the post-✋ phases, under snapshot→restore);
+anything big goes through `--out` into the workspace `tmp/` + `jq`; never `Read` `.env` or
+`shopify.theme.toml` — the bundled runners consume secrets without exposing them, and an
+auth failure is a result (mark the row **unverified**), never a reason to hunt for
+credentials; no/partial admin access → probe what it still can (theme code,
+`theme-json.sh` state, public storefront endpoints: `/products/<handle>.js` exposes `selling_plan_groups`, while metafield-driven
+markup shows only in the rendered page HTML, not in that payload) and mark the rest
+**unverified**. It returns only the compact map: requirement →
 **present** (+ the concrete product/entity handle that carries it — that's the QA
-target), **definition-only** (schema exists, no values), or **missing**. No/partial
-admin access → audit what you still can (theme code, `theme-json.sh` state, public
-storefront endpoints: `/products/<handle>.js` exposes `selling_plan_groups`, while
-metafield-driven markup shows only in the rendered page HTML, not in that payload) and
-mark the rest **unverified**. Every gap
+target), **definition-only** (schema exists, no values), **missing**, or **unverified**.
+Write that map to `notes.md` as `store-data:` entries — the probe payloads stay in the
+subagent. Every gap
 or unverified entry becomes a Step 2 interview question — never a mid-run escalation.
 
 ## Step 2 — Interview (batched, once)
@@ -154,7 +168,8 @@ recommended answer. Explore the codebase instead of asking whenever the code can
   applies the end state last, phase 6); Jira write-backs via
   MCP — Steps to Test field / PR link / hand-off comment (each yes/no); PR bots to await
   (names — before recommending "none", probe recent repo PRs for bot reviewers via
-  `gh api`) + timebox in minutes; deep-research pressure-test of the plan (default no).
+  `gh api`) + timebox in minutes; research pressure-test of the plan — an external
+  cross-check subagent, token-heavy (default no; runs in Step 3).
   QA depth is **not** a question (`break-it-qa.md` → No reduced mode — that rule's
   single home).
 
@@ -178,6 +193,9 @@ Draft **two artifacts** and present them together:
   specs; accessibility; performance; viewport & cross-browser — the same dimensions
   solo QA covers.
 
+**Policy said yes to the pressure-test** → **before presenting**, run it on the draft plan
+per `${CLAUDE_PLUGIN_ROOT}/references/research-pressure-test.md`, pinning `model: opus`.
+
 ✋ Wait for explicit approval (edits welcome). Then save `plan.md` + the checklist into
 `qa.md`, finalize `pipeline.md` and flip `status: draft` → `active` — only this approval
 makes the record executable; the autonomy rule takes over from here.
@@ -189,7 +207,10 @@ general-purpose subagent**
 whose brief contains the workspace paths (`pipeline.md`, `progress.md`, the artifacts
 this phase consumes), the phase's reference list, its mission, and the standing rules —
 *"follow the phase-start re-read protocol; never ask the user — return
-`ESCALATE(question, context, options)` instead; log judgment calls to `notes.md` as dated
+`ESCALATE(question, context, options)` instead; never `Read` `.env` or
+`shopify.theme.toml` — the bundled runners consume secrets without exposing them, and an
+auth failure is a result to `ESCALATE`, never a reason to hunt for credentials; log
+judgment calls to `notes.md` as dated
 `pipeline:` entries; on completion write your artifact and tick your `progress.md` row
 (aftercare: `pipeline.md` only); your final message is a compact report
 (≤ ~20 lines), never file dumps."*
