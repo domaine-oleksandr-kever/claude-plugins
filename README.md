@@ -379,45 +379,74 @@ hook error never blocks work:
   and the developer is shown that path to resubmit against — so the JSON is read with
   jq/Read on demand instead of sitting in context every turn. `FND_PROMPT_JSON=0` disables
   it.
-- **PostToolUse (`mcp__.*`)** — `mcp-slim.cjs` compresses large MCP tool results before they
-  enter context (`scripts/json-slim.cjs`: ADF→markdown, noise-drop, long-string truncate,
-  same-shape-array crush). Results ≤ 4 KB and error envelopes (`isError` / `errors[]`) pass
-  through untouched; the original is spilled to a file and referenced by a `<<full=…>>` handle
-  so nothing is lost. Stale spills are swept by an mtime TTL (`FND_MCP_SLIM_TTL`). `FND_MCP_SLIM=0`
-  disables it; `FND_MCP_SLIM_DIR` sets the spill directory. A result **over** the platform limit
-  (`MAX_MCP_OUTPUT_TOKENS`, ~25k tokens) bypasses this hook — Claude Code spills it to a file and
-  hands over the path; the session convention and the reader agents route that file through the
-  same compressor on demand (`node scripts/json-slim.cjs <path>`, `--stats` to see the cut). If
-  that file isn't JSON the CLI hands the path back instead of re-dumping it, so the caller reads
-  it directly. A payload a tool **wrapped in a markdown fence** (prose preamble + ```` ```json ````
-  … ```` ``` ````, e.g. chrome-devtools `evaluate_script`) is unwrapped first when the fenced body
-  is the dominant content (≥ 80 % of bytes) and its body re-run through the pipeline with the
-  preamble kept on top; a real doc with a small code block stays below that bar and passes through
-  byte-identical. A **JSONL** file (one JSON object per line, e.g. a Shopify bulk-operation dump) is
-  handled apart: the CLI never compresses it and never prints its rows — at ANY size it returns a
-  **PROFILE** (row + parse-failure counts, per-key `{present, null, type, distinct}`, and head/tail/
-  reservoir sample rows) plus guidance to query the ORIGINAL file by line — a `readline` filter (the
-  sample rows show the shape to write it against) or `sed -n '<N>p'` / `grep`. Never raw-`Read` a big
-  JSONL: a sampled subset can't answer analytical questions whose answers live in rows the sample skips.
-  Files ≤ 8 MB profile the parsed rows; larger ones stream via `readline` (never loaded whole) — the
-  same PROFILE either way. `--jq <path>` extracts a single value from a ≤ 8 MB JSONL; on a larger one it
-  is refused (it would re-read the whole file). **Log-shaped text** (build/test output, console spam,
-  stack traces) is compressed by signal selection instead — errors, stack-trace heads, and summary
-  lines are kept while repeated INFO/WARN spam is deduped `×N` and everything else is dropped to a
-  `[N lines omitted: …]` trailer (on a file the CLI names the on-disk original for recovery); prose,
-  markdown, and XML fall below the log detector's threshold and pass through unchanged. A **non-JSONL**
-  JSON document keeps the normal slim behavior, plus a guard: if its slimmed body still exceeds ~48 KB it is spilled to a `fnd-slim-out-*`
-  file and handed back as a one-line summary + the first element + both paths (`--jq <path>` to narrow),
-  never dumped inline. **Why wasn't a result compressed?**
-  set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one
-  JSONL line per call records the `decision` and, on a passthrough, the `reason` (`size-gate`,
-  `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`, …). A `non-json` line also carries a
-  `format` tag (`html` / `xml` / `broken-json` / `text`) so you can see WHAT slipped past the
-  JSON-only pipeline (`grep '"format":"xml"' fnd-mcp-slim-debug.log`); every line carries a
-  `project` tag (the cwd basename) since the log is shared per-user across projects
-  (`grep '"project":"my-repo"'`). *Coexistence:* if you also run
-  [`squeez`](https://github.com/claudioemmanuel/squeez), both its PostToolUse hook and `mcp-slim`
-  fire on `mcp__*` results — expect them to stack.
+  - **PostToolUse (`mcp__.*`)** — `mcp-slim.cjs` compresses large MCP tool results before they
+    enter context (`scripts/json-slim.cjs`: ADF→markdown, noise-drop, long-string truncate,
+    same-shape-array crush). Results ≤ 4 KB and error envelopes (`isError` / `errors[]`) pass
+    through untouched; the original is spilled to a file and referenced by a `<<full=…>>` handle
+    so nothing is lost. Stale spills are swept by an mtime TTL (`FND_MCP_SLIM_TTL`). `FND_MCP_SLIM=0`
+    disables it; `FND_MCP_SLIM_DIR` sets the spill directory. A result **over** the platform limit
+    (`MAX_MCP_OUTPUT_TOKENS`, ~25k tokens) bypasses this hook — Claude Code spills it to a file and
+    hands over the path; the session convention and the reader agents route that file through the
+    same compressor on demand (`node scripts/json-slim.cjs <path>`, `--stats` to see the cut). If
+    that file isn't JSON the CLI hands the path back instead of re-dumping it, so the caller reads
+    it directly. A payload a tool **wrapped in a markdown fence** (prose preamble + ```` ```json ````
+    … ```` ``` ````, e.g. chrome-devtools `evaluate_script`) is unwrapped first when the fenced body
+    is the dominant content (≥ 80 % of bytes) and its body re-run through the pipeline with the
+    preamble kept on top; a real doc with a small code block stays below that bar and passes through
+    byte-identical. A **JSONL** file (one JSON object per line, e.g. a Shopify bulk-operation dump) is
+    handled apart: the CLI never compresses it and never prints its rows — at ANY size it returns a
+    **PROFILE** (row + parse-failure counts, per-key `{present, null, type, distinct}`, and head/tail/
+    reservoir sample rows) plus guidance to query the ORIGINAL file by line — a `readline` filter (the
+    sample rows show the shape to write it against) or `sed -n '<N>p'` / `grep`. Never raw-`Read` a big
+    JSONL: a sampled subset can't answer analytical questions whose answers live in rows the sample skips.
+    Files ≤ 8 MB profile the parsed rows; larger ones stream via `readline` (never loaded whole) — the
+    same PROFILE either way. `--jq <dot.path>` extracts a single value from a ≤ 8 MB JSONL; on a larger one it
+    is refused (it would re-read the whole file). The path is a **plain dot walk** (`products.0.title`);
+    a leading `.` and `[N]` indices are accepted as the same thing (`.products[0].title`), while quoted
+    keys and real jq filters are not supported. A path that doesn't resolve still prints `null` on stdout,
+    but names the failing segment on stderr with what WAS addressable there
+    (`--jq: 'produtcs' not found at top level; keys: products`) — a value that is genuinely `null` stays
+    silent. **Log-shaped text** (build/test output, console spam,
+    stack traces) is compressed by signal selection instead — errors, stack-trace heads, and summary
+    lines are kept while repeated INFO/WARN spam is deduped `×N` and everything else is dropped to a
+    `[N lines omitted: …]` trailer (on a file the CLI names the on-disk original for recovery); prose,
+    markdown, and XML fall below the log detector's threshold and pass through unchanged. A **non-JSONL**
+    JSON document keeps the normal slim behavior, plus a guard: if its slimmed body still exceeds ~48 KB it is spilled to a `fnd-slim-out-*`
+    file and handed back as a one-line summary + the first element + both paths (`--jq <dot.path>` to narrow),
+    never dumped inline. A result the pipeline **cannot** shrink under ~32 KB — incompressible text/HTML,
+    already-minimal JSON, or a compressed body that is still huge — is not handed to the model raw: it is
+    **spilled and stubbed**, i.e. replaced by a ~1 KB note naming the file, its format and shape, and the
+    `node scripts/json-slim.cjs <path>` line to run on it (the same contract the session convention states
+    for platform-spilled whales). The spill holds the payload itself, so that command really works on it.
+    Never stubbed — these pass through as before: error results (including an error envelope sitting
+    anywhere in a content array, at any size); content arrays holding a non-text block (an image must
+    still render) or a block carrying anything beyond `type`/`text` (an `annotations` or per-block
+    `_meta` field would survive neither the stub nor the spill); the platform's own overflow notices;
+    shapes the compressor did not understand; a failed spill. `FND_MCP_SLIM_STUB=0`
+    turns the guard off; `FND_MCP_SLIM_STUB_BYTES` moves the threshold (never below the stub's own size).
+    With this guard in place, raising
+    `MAX_MCP_OUTPUT_TOKENS` in your own `settings.json` `env` (so bigger results reach this hook instead of
+    the platform's file spill) is safe — but it stays *your* decision, ideally after a week of `--report`
+    data. **Why wasn't a result compressed?**
+    set `FND_MCP_SLIM_DEBUG=1`, re-run, and read `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` — one
+    JSONL line per call records the `decision` (`compressed` / `stubbed` / `passthrough`) and, on a
+    passthrough, the `reason` (`size-gate`,
+    `error-shape`, `non-json`, `unrecognized-shape`, `no-gain`, `platform-overflow` — the platform's own
+    over-limit notice, whose `spill` field holds the file it saved the whale to). On a `stubbed` line the
+    `reason` instead names the branch the stub replaced (`non-json`, `no-gain`, `weak-gain` — the last
+    one is a compression that stayed over the threshold). **What did it all add
+    up to?** `node scripts/json-slim.cjs --report [logfile] [--since <ISO>]` (default: the log above)
+    prints totals, counts per decision/reason/stage, the top hook tools by bytes saved (CLI runs, keyed
+    by file path rather than tool name, get one aggregate line), per-project subtotals,
+    and the **missed whales** — `platform-overflow` results no later `json-slim` run ever compressed.
+    Results that were **stubbed** (above) get their own line and count as bytes saved, never as missed
+    whales. A `non-json` line also carries a
+    `format` tag (`html` / `xml` / `broken-json` / `text`) so you can see WHAT slipped past the
+    JSON-only pipeline (`grep '"format":"xml"' fnd-mcp-slim-debug.log`); every line carries a
+    `project` tag (the cwd basename) since the log is shared per-user across projects
+    (`grep '"project":"my-repo"'`). *Coexistence:* if you also run
+    [`squeez`](https://github.com/claudioemmanuel/squeez), both its PostToolUse hook and `mcp-slim`
+    fire on `mcp__*` results — expect them to stack.
 
 ### Environment switches
 
@@ -437,6 +466,8 @@ added to this table.
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a spill file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume); `0` disables the sweep; any invalid value falls back to `24` |
 | `FND_MCP_SLIM_DEBUG` | off | opt-in (`1`/`true`): append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, decision, reason, `format` on non-json, bytes, %, stages — never any payload); rotates one generation at ~5 MB. Unset ⇒ no file written |
+| `FND_MCP_SLIM_STUB` | `1` | `0` disables the spill-and-stub guard: a result the compressor cannot bring under the threshold is then handed to the model raw again, instead of as a ~1 KB stub + spill |
+| `FND_MCP_SLIM_STUB_BYTES` | `32768` | bytes above which the `mcp-slim` hook spills-and-stubs instead of passing a whale through (also applies to a compressed body that is still this large); any invalid value falls back to `32768`, never to `0`, and any value below the stub's own ~1.2 KB is raised to it (a smaller gate could emit a stub bigger than the text it replaces) |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` hook) — node never spawns |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 

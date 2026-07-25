@@ -16,7 +16,16 @@
 #             log (one JSONL line per invocation: compressed / size-gate / error-shape /
 #             non-json / unrecognized reasons, no file when off, rotation at ~5 MB, plus
 #             the M8 non-json format tag + per-project project field); M25–M26 the M9
-#             JSONL path (a bulk-operation line stream compresses like an array, `jsonl` stage)
+#             JSONL path (a bulk-operation line stream compresses like an array, `jsonl` stage);
+#             M31–M36 the M12 platform-overflow tag (the platform's own overflow notice is logged
+#             as reason:"platform-overflow" + the saved whale's path — above the size gate too — a
+#             mere quote is not, a big result quoting it is still compressed, and the path probe
+#             only scans a 4 KB window after the phrase); M37–M52 the M12b spill-and-stub guard
+#             (a whale the pipeline can't shrink is replaced by a ~1 KB stub + byte-exact spill,
+#             a weak-gain compression stubs too and writes exactly ONE spill — its own, the
+#             compressed body's `full=` spill is never written — and the rails — error shapes at ANY
+#             size, blocks carrying anything beyond type/text, overflow notices, sub-threshold,
+#             spill failure, FND_MCP_SLIM_STUB=0, threshold parsing — never stub)
 #   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
 #             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact, below-gate / no-json / small prompts
@@ -28,6 +37,11 @@
 # Commands under test are extracted from plugin.json, not duplicated here.
 # Exit 0 = all green.
 set -u
+
+# Hermetic env: an exported FND_MCP_SLIM_DEBUG / FND_MCP_SLIM_DIR (a developer watching the log live)
+# must not leak into the cases — the debug ones set both switches on the invocation themselves, and
+# the rest would otherwise append fixture noise to the developer's real log.
+unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/plugins/fnd/.claude-plugin/plugin.json"
@@ -213,6 +227,11 @@ FIX="$ROOT/tests/fixtures"
 JIRA="$FIX/jira-issue-ELC-104.json"
 PTU_CMD="$(jq -r '.hooks.PostToolUse[0].hooks[0].command' "$MANIFEST")"
 MSD="$TMP/slim-spill"; mkdir -p "$MSD"
+# M1–M36 exercise the COMPRESSOR, so the M12b spill-and-stub guard is pinned off for them: the Jira
+# fixture is 260 KB and still ~58 KB after a 77 % cut, i.e. over the guard's 32 KB threshold — a size
+# no real MCP result reaches (the platform spills anything past ~25k tokens before this hook runs).
+# The guard's own cases (M37–M52) clear the switch again with `env -u`, so the DEFAULT is under test.
+export FND_MCP_SLIM_STUB=0
 
 run_slim() { # input-json [VAR=val…] — pipe input to the hook, echo its stdout
   local in="$1"; shift
@@ -509,6 +528,282 @@ DBG="$TMP/dbg-m30"; mkdir -p "$DBG"
 run_dbg "$DBG" "$in" >/dev/null
 assert_eq M30-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
 if jq -e '.stages | index("fence")' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok; else bad M30-fence-stage "stages=$(jq -c '.stages' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+
+# ── M31–M36: platform-overflow tagging (M12) ─────────────────────────────────
+# A result over MAX_MCP_OUTPUT_TOKENS never reaches this hook: the platform saves it to a
+# `tool-results/` file and swaps in a short notice, which used to be logged as a plain `size-gate`
+# passthrough (live 2026-07-24: bytes_in 1463 — the notice, not the 764 KB whale). The hook must now
+# tag that notice `platform-overflow` and record the saved whale's path in `spill`, so `--report` can
+# pair it with a later json-slim run. Still a passthrough — nothing here is compressible.
+OVFP="/Users/dev/.claude/projects/p/sess/tool-results/mcp-plugin_fnd_chrome-devtools-mcp-evaluate_script-1784908372707.txt"
+ovfmsg="Error: result (307,533 characters) exceeds maximum allowed tokens. Output has been saved to $OVFP.
+Format: Plain text
+Use offset and limit parameters to read it."
+in="$(jq -n --arg t "$ovfmsg" '{tool_name:"mcp__plugin_fnd_chrome-devtools-mcp__evaluate_script",tool_response:{content:[{type:"text",text:$t}]}}')"
+
+# M31: the notice passes through untouched (no updatedToolOutput) …
+assert_eq M31-passthrough "$(run_slim "$in")" ""
+
+# M32: … and DEBUG on logs reason:"platform-overflow" with the extracted spill path (sentence period
+# stripped), not the generic size-gate line.
+DBG="$TMP/dbg-m32"; mkdir -p "$DBG"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M32-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "platform-overflow"
+assert_eq M32-spill  "$(jq -r '.spill'  "$DBG/$DBGLOG" 2>/dev/null)" "$OVFP"
+assert_eq M32-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+
+# M33: additive vocabulary only — a payload that merely QUOTES the phrase, with no tool-results path,
+# is not an overflow (it stays whatever it was: here a big non-JSON text → non-json).
+DBG="$TMP/dbg-m33"; mkdir -p "$DBG"
+quote="The docs say a result that exceeds maximum allowed tokens is spilled by the platform. $(printf 'x%.0s' $(seq 1 5000))"
+in="$(jq -n --arg t "$quote" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M33-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "non-json"
+
+# M34: the tag must never COST a compression. The probe runs only where the result is passing through
+# anyway (the size gate, and the no-gain `non-json` branch — see M35); a big compressible result that
+# happens to contain the phrase AND a tool-results path (a tool reporting on someone else's overflow, a
+# transcript excerpt…) is still compressed exactly as before — and no phantom overflow event is logged
+# for `--report` to count as a missed whale.
+DBG="$TMP/dbg-m34"; mkdir -p "$DBG"
+quoted="$(jq -cn --arg f "$OVFP" '{msg:"exceeds maximum allowed tokens", file:$f, note:("y"*6000)}')"
+in="$(jq -n --arg t "$quoted" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_contains M34-still-compressed "$(run_slim "$in")" "updatedToolOutput"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M34-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
+assert_eq M34-not-overflow "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "null"
+
+# M35: the notice is normally ~1.5 KB (under the gate), but the trigger is size-INDEPENDENT — a fatter
+# notice (a long quoted preamble, a verbose Format block) must still be tagged, not hidden among the
+# generic `non-json` lines, or `--report`'s missed-whale count silently undercounts. That branch is
+# already a passthrough (nothing compressed either way), so the re-label costs no compression.
+DBG="$TMP/dbg-m35"; mkdir -p "$DBG"
+fat="$ovfmsg
+$(printf 'x%.0s' $(seq 1 6000))"
+in="$(jq -n --arg t "$fat" '{tool_name:"mcp__plugin_fnd_chrome-devtools-mcp__evaluate_script",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_eq M35-passthrough "$(run_slim "$in")" ""
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M35-over-gate "$(jq -r '.bytes_in > 4096' "$DBG/$DBGLOG" 2>/dev/null)" "true"
+assert_eq M35-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "platform-overflow"
+assert_eq M35-spill  "$(jq -r '.spill'  "$DBG/$DBGLOG" 2>/dev/null)" "$OVFP"
+assert_eq M35-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+
+# M36: the path probe scans only a 4 KB window after the phrase — the backtracking regex must never
+# walk a whale-sized payload (quadratic on URL-dense text: 43 s on 1 MB pre-fix). A tool-results path
+# that far from the phrase cannot belong to a real notice (~1.5 KB total), so the text stays a quote.
+DBG="$TMP/dbg-m36"; mkdir -p "$DBG"
+far="A result that exceeds maximum allowed tokens was mentioned here.
+$(printf 'x%.0s' $(seq 1 5000)) $OVFP"
+in="$(jq -n --arg t "$far" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+run_dbg "$DBG" "$in" >/dev/null
+assert_eq M36-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "non-json"
+assert_eq M36-spill "$(jq -r '.spill' "$DBG/$DBGLOG" 2>/dev/null)" "null"
+
+# ── M37–M52: spill-and-stub guard (M12b) ─────────────────────────────────────
+# A result the pipeline cannot shrink under FND_MCP_SLIM_STUB_BYTES (default 32 KB) used to land in
+# context RAW. The hook now replaces it with a ~1 KB stub naming the spill + the json-slim command,
+# with hard rails: error shapes, non-text blocks (images must render), platform-overflow notices,
+# sub-threshold results and a failed spill are NEVER stubbed. `env -u FND_MCP_SLIM_STUB` clears the
+# suite-level pin above, so these cases run against the shipped DEFAULT (guard on).
+run_stub() { # spill-dir input-json [VAR=val…]
+  local dir="$1" in="$2"; shift 2
+  printf '%s' "$in" | env -u FND_MCP_SLIM_STUB FND_MCP_SLIM_DIR="$dir" "$@" node "$SLIM" 2>/dev/null
+}
+STUBBIG="$(printf 'x%.0s' $(seq 1 40000))"   # 40 KB of non-JSON, over the default threshold
+SBD="$TMP/stub"; mkdir -p "$SBD"
+
+# M37: big non-JSON content-array result → ONE text block carrying the stub: the spill path (a file on
+# disk), the ready-to-run CLI line, the M8 format tag and a shape hint — all inside the ~1 KB cap.
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__plugin_fnd_chrome-devtools-mcp__evaluate_script",tool_response:{content:[{type:"text",text:$t}]}}')"
+out="$(run_stub "$SBD" "$in")"
+assert_contains M37-updated "$out" "updatedToolOutput"
+text="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M37-marker "$text" "<<fnd-mcp-slim stub>>"
+assert_contains M37-tool   "$text" "evaluate_script"
+assert_contains M37-cmd    "$text" "scripts/json-slim.cjs"
+assert_contains M37-format "$text" "format=text"
+assert_contains M37-shape  "$text" "shape — starts with:"
+p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M37-fullfile "no existing full= file (p='$p')"; fi
+stublen=$(printf '%s' "$text" | wc -c | tr -d ' ')
+if [ "$stublen" -le 1200 ]; then ok; else bad M37-cap "stub is $stublen B, over the ~1 KB cap"; fi
+assert_eq M37-oneblock "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput.content | length' 2>/dev/null)" 1
+# the spill holds the PAYLOAD, not the MCP envelope — json-slim on it must see the whale itself
+printf '%s' "$STUBBIG" > "$TMP/stub-payload.txt"
+if [ -n "$p" ] && cmp -s "$p" "$TMP/stub-payload.txt"; then ok; else bad M37-byte-exact "spill is not the byte-exact payload (p='$p')"; fi
+
+# M38: the arriving SHAPE is mirrored — a raw-string result stubs as a string, not as a content array
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:$t}')"
+text="$(run_stub "$SBD" "$in" | jq -r '.hookSpecificOutput.updatedToolOutput' 2>/dev/null)"
+assert_contains M38-string-stub "$text" "<<fnd-mcp-slim stub>>"
+p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$p" ] && cmp -s "$p" "$TMP/stub-payload.txt"; then ok; else bad M38-byte-exact "spill is not the byte-exact original (p='$p')"; fi
+
+# M39: DEBUG on → decision:"stubbed" carrying the reason of the branch it replaced, the M8 format tag,
+# the spill path, and bytes_out (the stub) far below bytes_in (the whale)
+DBG="$TMP/dbg-m39"; mkdir -p "$DBG"
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M39-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
+assert_eq M39-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "non-json"
+assert_eq M39-format   "$(jq -r '.format'   "$DBG/$DBGLOG" 2>/dev/null)" "text"
+assert_eq M39-shrunk   "$(jq -r '.bytes_out < 1500 and .bytes_in > 32768' "$DBG/$DBGLOG" 2>/dev/null)" "true"
+sp="$(jq -r '.spill' "$DBG/$DBGLOG" 2>/dev/null)"
+if [ -n "$sp" ] && [ -f "$sp" ]; then ok; else bad M39-spill "stubbed line has no existing spill (sp='$sp')"; fi
+
+# M40: a COMPRESSED result whose body is still over the threshold is stubbed too (a 77 % cut of the
+# 260 KB Jira fixture still leaves ~58 KB — no win for context), the payload is on disk exactly ONCE
+# (the stub's spill; the compressed body and its `full=` handle are never written), and the debug line
+# names the branch `weak-gain` with the stages that did run.
+SBW="$TMP/stub-weak"; mkdir -p "$SBW"
+textW="$(run_stub "$SBW" "$msin" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M40-stub "$textW" "<<fnd-mcp-slim stub>>"
+assert_contains M40-json-hint "$textW" "format=json"
+assert_eq M40-one-spill "$(ls "$SBW" | grep -c '^fnd-mcp-slim-')" 1
+DBG="$TMP/dbg-m40"; mkdir -p "$DBG"
+run_stub "$DBG" "$msin" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M40-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
+assert_eq M40-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "weak-gain"
+# the weak-gain line carries the format tag too (the shape hint's, since the payload compressed)
+assert_eq M40-format   "$(jq -r '.format'   "$DBG/$DBGLOG" 2>/dev/null)" "json"
+if jq -e '.stages | length > 0' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok; else bad M40-stages "stubbed weak-gain line lost its stages"; fi
+
+# M41: never-stub rails — an error result, a content array holding a NON-text block (an image must
+# still render) or an error ENVELOPE block (one stub would swallow the failure the write-gating reads
+# verbatim), and a platform-overflow notice fatter than the threshold all pass through RAW.
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}],isError:true}}')"
+assert_eq M41-iserror "$(run_stub "$SBD" "$in")" ""
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t},{type:"image",data:"iVBORw0KGgo=",mimeType:"image/png"}]}}')"
+assert_eq M41-image-block "$(run_stub "$SBD" "$in")" ""
+in="$(jq -n --arg t "$STUBBIG" --arg e "$errb" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t},{type:"text",text:$e}]}}')"
+assert_eq M41-error-block "$(run_stub "$SBD" "$in")" ""
+# same rail on the weak-gain branch: the M10 mixed result (compressible block + error envelope) with a
+# threshold it cannot meet still compresses normally, error block byte-identical, no stub
+outE="$(run_stub "$SBD" "$(jq -n --arg c "$comp" --arg e "$errb" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$c},{type:"text",text:$e}]}}')" FND_MCP_SLIM_STUB_BYTES=1000)"
+assert_absent M41-weak-error-block "$outE" "<<fnd-mcp-slim stub>>"
+assert_eq M41-weak-errblock-verbatim "$(printf '%s' "$outE" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)" "$errb"
+fatovf="$ovfmsg
+$(printf 'x%.0s' $(seq 1 40000))"
+in="$(jq -n --arg t "$fatovf" '{tool_name:"mcp__plugin_fnd_chrome-devtools-mcp__evaluate_script",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_eq M41-overflow-notice "$(run_stub "$SBD" "$in")" ""
+DBG="$TMP/dbg-m41"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M41-overflow-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "platform-overflow"
+assert_eq M41-overflow-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+
+# M42: a result under the threshold keeps the old behavior, and FND_MCP_SLIM_STUB=0 turns the guard
+# off entirely — the pre-M12b hook, byte-identical, on both branches.
+in="$(jq -n --arg t "$bignon" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_eq M42-sub-threshold "$(run_stub "$SBD" "$in")" ""
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_eq M42-stub-off "$(run_stub "$SBD" "$in" FND_MCP_SLIM_STUB=0)" ""
+assert_eq M42-off-body-identical "$(sweep_body "$(run_stub "$SBD" "$msin" FND_MCP_SLIM_STUB=0)")" "$(sweep_body "$(run_slim "$msin")")"
+
+# M43: that spill is the only copy of the whale — if it cannot be written the result passes through
+# RAW, never as a stub pointing at a file that does not exist (FND_MCP_SLIM_DIR is a FILE here).
+NOTDIR="$TMP/stub-notadir"; : > "$NOTDIR"
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_eq M43-spill-failure "$(run_stub "$NOTDIR" "$in")" ""
+
+# M44: FND_MCP_SLIM_STUB_BYTES is honored; any invalid value falls back to the 32 KB default and never
+# to 0, which would stub everything above the 4 KB size gate.
+in="$(jq -n --arg t "$bignon" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_contains M44-threshold-honored "$(run_stub "$SBD" "$in" FND_MCP_SLIM_STUB_BYTES=1000)" "<<fnd-mcp-slim stub>>"
+assert_eq M44-invalid-default "$(run_stub "$SBD" "$in" FND_MCP_SLIM_STUB_BYTES=abc)" ""
+assert_eq M44-zero-default    "$(run_stub "$SBD" "$in" FND_MCP_SLIM_STUB_BYTES=0)" ""
+
+# M45: an unrecognized shape has no text payload to replace — the guard declines (same scope boundary
+# as the compressor), and the debug line stays a plain passthrough.
+DBG="$TMP/dbg-m45"; mkdir -p "$DBG"
+in="$(jq -cn '{tool_name:"mcp__x__y",tool_response:{stuff:[range(0;1200)|{id:.,v:"padpadpadpadpadpadpadpadpadpad"}]}}')"
+assert_eq M45-unrecognized "$(run_stub "$SBD" "$in")" ""
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M45-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "unrecognized-shape"
+
+# M46: the error rail is SIZE-INDEPENDENT. A real GraphQL failure (many field errors, a stack, an
+# embedded response body) is routinely tens of KB — bigger than any per-block probe would parse — and
+# `reason` names only the FIRST non-modifying block, so [whale, error envelope] must be caught by the
+# whole-result `anyError` signal instead. Both branches, with the envelope AFTER the whale.
+bigerrb="$(jq -cn '{errors:[range(0;300)|{message:("Field \(.) doesn'"'"'t exist on type Product — check the schema and the API version before retrying"),locations:[{line:.,column:7}],extensions:{code:"undefinedField"}}]}')"
+if [ "$(printf '%s' "$bigerrb" | wc -c | tr -d ' ')" -gt 8192 ]; then ok; else bad M46-fixture "big error envelope is not over 8 KB"; fi
+# (a) not-modified branch: the non-JSON whale reads as `non-json`, but the envelope must still survive
+in="$(jq -n --arg t "$STUBBIG" --arg e "$bigerrb" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t},{type:"text",text:$e}]}}')"
+assert_eq M46-big-error-block "$(run_stub "$SBD" "$in")" ""
+# (b) weak-gain branch: one block compresses, the fat envelope rides along verbatim, no stub
+outBE="$(run_stub "$SBD" "$(jq -n --arg c "$comp" --arg e "$bigerrb" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$c},{type:"text",text:$e}]}}')" FND_MCP_SLIM_STUB_BYTES=1000)"
+assert_absent M46-weak-big-error "$outBE" "<<fnd-mcp-slim stub>>"
+assert_eq M46-weak-big-verbatim "$(printf '%s' "$outBE" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)" "$bigerrb"
+assert_eq M46-weak-blocks "$(printf '%s' "$outBE" | jq -r '.hookSpecificOutput.updatedToolOutput.content | length' 2>/dev/null)" 2
+# and the string/single shapes keep their own rail: a fat envelope alone is never stubbed
+in="$(jq -n --arg e "$bigerrb" '{tool_name:"mcp__x__y",tool_response:$e}')"
+assert_eq M46-string-envelope "$(run_stub "$SBD" "$in")" ""
+in="$(jq -n --arg e "$bigerrb" '{tool_name:"mcp__x__y",tool_response:{type:"text",text:$e}}')"
+assert_eq M46-single-envelope "$(run_stub "$SBD" "$in")" ""
+
+# M47: the stub gate must measure the text PAYLOAD, not the envelope. A CallToolResult can carry the
+# bulk in a sibling field (`structuredContent`, MCP spec 2025-06-18; `_meta`) that a stub neither
+# replaces nor spills — stubbing there would evict the one text the model needed, point at a
+# near-empty spill, and emit MORE bytes than it replaces. Small-payload + fat-sibling → passthrough,
+# and the decline is pre-spill (no new file).
+SBS="$TMP/stub-sibling"; mkdir -p "$SBS"
+in="$(jq -cn '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:"Fetched 4000 rows"}],structuredContent:{rows:[range(0;2000)|{id:.,v:"padpadpadpadpadpadpadpad"}]}}}')"
+assert_eq M47-fat-sibling "$(run_stub "$SBS" "$in")" ""
+in="$(jq -cn '{tool_name:"mcp__x__y",tool_response:{content:[],structuredContent:{blob:("y"*60000)}}}')"
+assert_eq M47-empty-content "$(run_stub "$SBS" "$in")" ""
+in="$(jq -cn '{tool_name:"mcp__x__y",tool_response:{type:"text",text:"ok",meta:{blob:("z"*60000)}}}')"
+assert_eq M47-single-sibling "$(run_stub "$SBS" "$in")" ""
+# (the exit-time sweep drops its .fnd-mcp-slim-sweep marker in the dir — only spill files count)
+if ! ls "$SBS"/fnd-mcp-slim-* >/dev/null 2>&1; then ok; else bad M47-no-spill "declined stub left a spill: $(ls "$SBS")"; fi
+
+# M48: …and a big text payload still stubs when a MODEST sibling rides along — the payload gate must
+# not require the payload to be the whole envelope. The sibling survives in the emitted value.
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}],_meta:{cursor:"abc123"}}}')"
+outS="$(run_stub "$SBS" "$in")"
+assert_contains M48-still-stubs "$outS" "<<fnd-mcp-slim stub>>"
+assert_eq M48-sibling-kept "$(printf '%s' "$outS" | jq -r '.hookSpecificOutput.updatedToolOutput._meta.cursor' 2>/dev/null)" "abc123"
+
+# M49: a stub collapses a block array into ONE joined text — lossless only for plain {type,text}
+# blocks. A block carrying anything more (annotations, a per-block `_meta` pagination cursor) would
+# lose that field in BOTH the stub and the spill, while the stub promises the full original on disk:
+# such an array is NOT stubbable and passes through raw. A pure-text array of the same size still stubs.
+SBR="$TMP/stub-rich"; mkdir -p "$SBR"
+half="$(printf 'x%.0s' $(seq 1 46000))"
+in="$(jq -n --arg t "$half" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t,annotations:{audience:["user"],priority:1}},{type:"text",text:$t,_meta:{cursor:"nextPage=abc123"}}]}}')"
+assert_eq M49-rich-block "$(run_stub "$SBR" "$in")" ""
+if ! ls "$SBR"/fnd-mcp-slim-* >/dev/null 2>&1; then ok; else bad M49-no-spill "declined stub left a spill: $(ls "$SBR")"; fi
+in="$(jq -n --arg t "$half" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t},{type:"text",text:$t}]}}')"
+assert_contains M49-plain-blocks-stub "$(run_stub "$SBR" "$in")" "<<fnd-mcp-slim stub>>"
+
+# M50: the weak-gain gate measures the COMPRESSED BODY, not the envelope. A payload that compresses
+# to a few hundred bytes beside a fat `structuredContent` sibling must be handed back COMPRESSED —
+# stubbing there would emit more bytes than the compressed result it replaces.
+SBG="$TMP/stub-weakgate"; mkdir -p "$SBG"
+in="$(jq -cn '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:({rows:[range(0;2600)|{id:.,note:"padding-padding-padding"}]}|tostring)}],structuredContent:{rows:[range(0;1200)|{id:.,v:"padpadpadpadpadpadpadpadpad"}]}}}')"
+outG="$(run_stub "$SBG" "$in")"
+assert_contains M50-compressed "$outG" "<<full="
+assert_absent   M50-not-stubbed "$outG" "<<fnd-mcp-slim stub>>"
+assert_eq M50-sibling-kept "$(printf '%s' "$outG" | jq -r '.hookSpecificOutput.updatedToolOutput.structuredContent.rows | length' 2>/dev/null)" 1200
+
+# M51: FND_MCP_SLIM_STUB_BYTES is floored at the stub's own ~1.2 KB size. Below that floor a small
+# text beside a fat envelope sibling would be evicted for a stub BIGGER than the text it replaced —
+# the guard would add context instead of saving it. Above the floor the switch still moves the gate.
+SBF="$TMP/stub-floor"; mkdir -p "$SBF"
+in="$(jq -cn --arg t "$(printf 'x%.0s' $(seq 1 300))" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}],structuredContent:{rows:[range(0;250)|{id:.,v:"padpadpadpadpadpadpadpadpad"}]}}}')"
+assert_eq M51-below-floor "$(run_stub "$SBF" "$in" FND_MCP_SLIM_STUB_BYTES=200)" ""
+if ! ls "$SBF"/fnd-mcp-slim-* >/dev/null 2>&1; then ok; else bad M51-no-spill "floored decline left a spill: $(ls "$SBF")"; fi
+in="$(jq -n --arg t "$bignon" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_contains M51-above-floor "$(run_stub "$SBF" "$in" FND_MCP_SLIM_STUB_BYTES=200)" "<<fnd-mcp-slim stub>>"
+
+# M52: the plain-block rail holds on the WEAK-GAIN branch too — a compressed body whose block still
+# carries annotations/_meta cannot be stubbed (payloadOf runs the same stubValue probe): the result
+# is handed back COMPRESSED, block fields intact. The Jira fixture compresses to ~58 KB, over the
+# default threshold, so only the rich block keeps this out of the stub path.
+SBA="$TMP/stub-rich-weak"; mkdir -p "$SBA"
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t,annotations:{audience:["user"],priority:1}}]}}')"
+outA="$(run_stub "$SBA" "$in")"
+assert_contains M52-compressed "$outA" "<<full="
+assert_absent   M52-not-stubbed "$outA" "<<fnd-mcp-slim stub>>"
+assert_eq M52-annotations-kept "$(printf '%s' "$outA" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].annotations.audience[0]' 2>/dev/null)" "user"
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping

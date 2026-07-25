@@ -6,13 +6,19 @@
 //   unit tests — each pipeline stage, the crush gates, markers, safety rails, the spill-TTL
 //                sweep (M5: TTL parsing, prefix/exclude filtering, throttle), CLI;
 //   reduction:* — the M1 exit gate: ≥70% byte reduction on the real Jira + Figma fixtures.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { readFileSync, readdirSync, rmSync, mkdtempSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+
+// Hermetic env: a developer watching the debug log live (FND_MCP_SLIM_DEBUG=1 + FND_MCP_SLIM_DIR
+// exported) would otherwise have this suite's CLI runs append fixture noise to the REAL log that
+// `--report` aggregates. Cases that need either switch set it on the invocation itself.
+delete process.env.FND_MCP_SLIM_DEBUG;
+delete process.env.FND_MCP_SLIM_DIR;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SLIM = path.join(ROOT, 'plugins/fnd/scripts/json-slim.cjs');
@@ -204,8 +210,10 @@ check('reduction:figma≥0.70', ratio('figma-node-rest.json') >= 0.70, `figma ra
   check('cli-file', outFile.length < inp.length, 'CLI over a file compresses');
   const jqOut = execFileSync('node', [SLIM, '--jq', 'nodes', path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8' });
   check('cli-jq', JSON.parse(jqOut)['3326:39542'] !== undefined, '--jq narrows to a sub-path');
-  const jqMiss = execFileSync('node', [SLIM, '--jq', 'no.such.path', path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8' });
-  check('cli-jq-missing', jqMiss.trim() === 'null', '--jq missing path → null, no crash');
+  // spawnSync (not execFileSync): the missing path now also writes an M12 stderr diagnostic, which we
+  // capture here instead of letting it leak into the suite's own output.
+  const jqMiss = spawnSync('node', [SLIM, '--jq', 'no.such.path', path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8' });
+  check('cli-jq-missing', jqMiss.stdout.trim() === 'null', '--jq missing path → null, no crash');
 
   // Non-JSON FILE → hand the path back instead of re-dumping the (whale-sized) content to stdout.
   const xmlPath = path.join(FIX, 'figma-metadata-3326-39542.xml');
@@ -464,7 +472,9 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   check('m9b-capA-stats-line', /→ .*bytes/.test(cap.handback) && cap.handback.includes('30 rows kept'), `stats line / rows-kept missing:\n${cap.handback}`);
   check('m9b-capA-first-row', cap.handback.includes('first row') && cap.handback.includes('"id":0'), 'first-row shape sample missing');
   check('m9b-capA-both-paths', cap.handback.includes(cap.spillOut) && cap.handback.includes('/some/bulk.jsonl'), 'slimmed-spill + original path must both appear');
-  check('m9b-capA-jq-hint', cap.handback.includes('--jq'), '--jq narrow hint missing');
+  // M12: the hint spells the SYNTAX (`<dot.path>`, not `<path>` — which read like a file path) and
+  // carries a one-token example taken from the data (an array body → index `0`).
+  check('m9b-capA-jq-hint', cap.handback.includes('--jq <dot.path>') && cap.handback.includes('(e.g. --jq 0)'), `--jq narrow hint missing/unreworded:\n${cap.handback}`);
   check('m9b-capA-spill-roundtrips', existsSync(cap.spillOut) && readFileSync(cap.spillOut, 'utf8') === output, 'spill must hold the exact slimmed output');
   check('m9b-capA-undercap-null', J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10_000_000, spillDir: dir }) === null, '≤ cap → null (caller prints the body unchanged)');
   check('m9b-capA-stdin-null', J.capOutput(res, null, { cliOutCap: 100, spillDir: dir }) === null, 'no fileArg (stdin) → null even over cap (no path to point at)');
@@ -477,6 +487,32 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   const output = JSON.stringify(Array.from({ length: 10 }, (_, i) => ({ id: i })));
   const res = { output, bytesIn: 999999, bytesOut: Buffer.byteLength(output), ratio: 0.9 };
   check('m9b-capA-spill-fail-null', J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10, spillDir: path.join(badParent, 'sub') }) === null, 'a spill-write failure returns null → CLI prints the body (never lose the result)');
+}
+// M12: the one-token example is only emitted when the CLI's own dot-walk can actually address that
+// key. A key holding a dot/bracket splits or normalizes into something else (`weird.key` → two
+// segments, `a[0]` → `a.0`), and a key holding a SPACE would split the pasted command line — the file
+// argument silently becomes the key fragment and the run dies on ENOENT. Unaddressable → the syntax
+// hint stands alone, no misleading example.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-capAkey-'));
+  const capFor = (obj) => {
+    const output = JSON.stringify(obj);
+    return J.capOutput({ output, bytesIn: 500000, bytesOut: Buffer.byteLength(output), ratio: 0.9 }, '/some/in.json', { cliOutCap: 2, spillDir: dir });
+  };
+  for (const [label, obj] of [
+    ['dotted', { 'weird.key': 1, b: 2 }],
+    ['bracketed', { 'a[0]': 1, b: 2 }],
+    ['spaced', { 'my key': 1 }],
+    ['empty-key', { '': 1 }],
+  ]) {
+    const h = capFor(obj).handback;
+    check(`m12-capA-no-bogus-example:${label}`, h.includes('--jq <dot.path>') && !h.includes('(e.g. --jq '),
+      `an unaddressable first key must not be advertised as an example:\n${h}`);
+  }
+  // …while a plain key still gets its example (the ergonomics win the guard must not eat)
+  check('m12-capA-plain-key-example', capFor({ product_id: 1, b: 2 }).handback.includes('(e.g. --jq product_id)'),
+    'a dot-walkable first key must still be shown as the example');
+  rmSync(dir, { recursive: true, force: true });
 }
 
 // NB a JSONL FILE via the CLI never reaches capOutput at all — it profiles upstream (the CLI
@@ -943,6 +979,101 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const bomProf = await J.streamProfile(bomFile, {}, { skipLeading: bomSkip, fenceAware: true });
   check('m11-bom-gateb-profiles-clean', bomSkip === 1 && bomProf.parseFailures === 0 && bomProf.rows === 6, `BOM+fence Gate B: skip=${bomSkip} failures=${bomProf.parseFailures} rows=${bomProf.rows}`);
   rmSync(bomDir, { recursive: true, force: true });
+}
+
+// ================================================================ M12 — --jq path ergonomics ==
+// The dot-walk now accepts the jq-ish spellings a human actually types (a leading `.`, `[N]` indices)
+// and a MISSING path says so on stderr while stdout keeps printing `null`; a value that really IS null
+// stays silent. Full jq is out of scope — quoted keys are documented as unsupported.
+{
+  // path-normalization table: jq-ish spelling → the plain dot-walk segments
+  const norm = [
+    ['.a[0].b', 'a.0.b'],
+    ['a.0.b', 'a.0.b'],
+    ['.products[0].title', 'products.0.title'],
+    ['[1]', '1'],
+    ['[10][2]', '10.2'],
+    ['.', ''],
+    ['..', ''],
+    ['.a.', 'a.'], // a trailing dot survives normalization; the segment filter drops it at walk time
+    ['["a.b"]', '["a.b"]'], // quoted keys are NOT supported (only [N] is rewritten) — documented, not a feature
+  ];
+  for (const [input, want] of norm) eq(`m12-normjq:${input}`, J.normalizeJqPath(input), want);
+  // …and the unsupported quoted key really does walk as two plain segments, not one key with a dot
+  eq('m12-normjq-quoted-segments', J.normalizeJqPath('["a.b"]').split('.').filter(Boolean), ['["a', 'b"]']);
+
+  const arrDir = mkdtempSync(path.join(tmpdir(), 'jslim-m12-'));
+  const runJq = (p, file) => spawnSync('node', [SLIM, '--jq', p, file], { encoding: 'utf8' });
+  // `.a[0].b` ≡ `a.0.b` — byte-identical stdout for both spellings of the same path
+  const nestFile = path.join(arrDir, 'nest.json');
+  writeFileSync(nestFile, JSON.stringify({ a: [{ b: 'hit' }] }));
+  const dotted = runJq('a.0.b', nestFile);
+  const jqish = runJq('.a[0].b', nestFile);
+  check('m12-jq-equivalent-spellings', dotted.stdout === jqish.stdout && dotted.stdout.trim() === '"hit"',
+    `'.a[0].b' must resolve exactly like 'a.0.b': ${JSON.stringify(dotted.stdout)} vs ${JSON.stringify(jqish.stdout)}`);
+
+  const arrFile = path.join(arrDir, 'arr.json');
+  writeFileSync(arrFile, JSON.stringify([{ title: 'zero' }, { title: 'one', tags: null }]));
+  eq('m12-jq-bracket-index', runJq('[1].title', arrFile).stdout.trim(), '"one"');
+  eq('m12-jq-leading-dot-index', runJq('.[0].title', arrFile).stdout.trim(), '"zero"');
+  // bare `.` = identity: the WHOLE document (still slimmed, never narrowed) and no diagnostic
+  const ident = runJq('.', nestFile);
+  check('m12-jq-identity', ident.stdout.trim() === JSON.stringify({ a: [{ b: 'hit' }] }) && ident.stderr === '',
+    `bare '.' selects the whole value silently: ${JSON.stringify(ident.stdout)} / ${JSON.stringify(ident.stderr)}`);
+
+  // MISSING path → stdout null + ONE stderr diagnostic naming the failing segment, where the walk got
+  // to, and what was addressable there
+  const miss = runJq('produtcs.0', arrFile);
+  eq('m12-jq-missing-stdout', miss.stdout.trim(), 'null');
+  check('m12-jq-missing-diag', /--jq: 'produtcs' not found at top level; length: 2/.test(miss.stderr),
+    `stderr diagnostic missing/wrong: ${JSON.stringify(miss.stderr)}`);
+  const missDeep = runJq('1.titel', arrFile);
+  check('m12-jq-missing-deep-diag', /--jq: 'titel' not found at '1'; keys: title, tags/.test(missDeep.stderr),
+    `deep diagnostic must name the resolved prefix + keys: ${JSON.stringify(missDeep.stderr)}`);
+  // NULL-VALUED path → stdout null too, but SILENT (a real value, not a typo)
+  const nul = runJq('1.tags', arrFile);
+  eq('m12-jq-null-stdout', nul.stdout.trim(), 'null');
+  eq('m12-jq-null-silent', nul.stderr, '');
+  rmSync(arrDir, { recursive: true, force: true });
+}
+
+// ============================================ M12b — shapeHint (the stub's "what is in that file") ==
+// One line telling the model what the spilled whale IS before it decides to open it: parseable JSON →
+// `array of N` / its top-level keys; anything else → a collapsed preview of the head. `format` doubles
+// as the M8 tag so the stub can name the payload honestly.
+{
+  eq('m12b-hint-array', J.shapeHint(JSON.stringify([{ a: 1 }, { a: 2 }, { a: 3 }])), { format: 'json', hint: 'array of 3' });
+  eq('m12b-hint-keys', J.shapeHint(JSON.stringify({ products: [], pageInfo: {} })), { format: 'json', hint: 'keys: products, pageInfo' });
+  // more than 8 top-level keys → the first 8 + an honest overflow count
+  const wide = {};
+  for (let i = 0; i < 11; i++) wide[`k${i}`] = i;
+  eq('m12b-hint-keys-capped', J.shapeHint(JSON.stringify(wide)),
+    { format: 'json', hint: 'keys: k0, k1, k2, k3, k4, k5, k6, k7 …(+3)' });
+  eq('m12b-hint-empty-object', J.shapeHint('{}'), { format: 'json', hint: 'object with no keys' });
+  // a leading BOM / whitespace must not hide the JSON
+  eq('m12b-hint-bom', J.shapeHint('﻿\n  {"a":1}'), { format: 'json', hint: 'keys: a' });
+  // non-JSON → preview + the M8 format tag, whitespace collapsed to one line
+  eq('m12b-hint-text', J.shapeHint('Build failed\n  at line 4\n'), { format: 'text', hint: 'starts with: Build failed at line 4' });
+  eq('m12b-hint-html', J.shapeHint('<!doctype html><html><body>hi</body></html>').format, 'html');
+  // looks like JSON but does not parse → `broken-json` (the upstream-truncation gem), preview not keys
+  const broken = J.shapeHint(`{"rows":[${'{"id":1},'.repeat(50)}`);
+  check('m12b-hint-broken-json', broken.format === 'broken-json' && broken.hint.startsWith('starts with: {"rows"'), JSON.stringify(broken));
+  // the preview is capped at ~200 chars and marked as cut — a whale must never inline itself here
+  const long = J.shapeHint('a'.repeat(50000));
+  check('m12b-hint-preview-capped', long.hint.length <= 215 && long.hint.endsWith('…'), `preview ${long.hint.length} chars: ${long.hint.slice(0, 60)}`);
+  // …and a NON-JSON whale is head-only work: no regex ever runs over the whole payload
+  const t0 = Date.now();
+  J.shapeHint(`https://cdn.example.com/a/b/c?x=1&y=2#z`.repeat(30000)); // ~1.2 MB, URL-dense, no spaces
+  check('m12b-hint-bounded', Date.now() - t0 < 100, `shapeHint took ${Date.now() - t0} ms on a 1 MB non-JSON payload`);
+  // a JSON whale DOES pay one full-payload JSON.parse (the hint is worthless without it) — it must
+  // stay a linear scan that yields the real shape, not a stall
+  const bigJson = JSON.stringify({ products: Array.from({ length: 14000 }, (_, i) => ({ id: i, handle: `product-${i}`, url: `https://cdn.example.com/p/${i}?v=1` })), pageInfo: { hasNextPage: true } });
+  check('m12b-hint-json-whale-size', bigJson.length > 1000000, `fixture is ${bigJson.length} B, wanted > 1 MB`);
+  const t1 = Date.now();
+  const bigHint = J.shapeHint(bigJson);
+  check('m12b-hint-json-whale', bigHint.format === 'json' && bigHint.hint === 'keys: products, pageInfo' && Date.now() - t1 < 500,
+    `${JSON.stringify(bigHint)} in ${Date.now() - t1} ms`);
+  eq('m12b-hint-nonstring', J.shapeHint(undefined), { format: 'text', hint: 'starts with: ' });
 }
 
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);

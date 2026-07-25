@@ -4,6 +4,12 @@
 # against PATH shims of `shopify` and `curl`. Exit 0 = all green.
 set -u
 
+# Hermetic env: a developer who exports FND_MCP_SLIM_DEBUG=1 / FND_MCP_SLIM_DIR to watch the log live
+# would otherwise have json-slim drop a debug log into each case's spill directory, which the
+# before/after directory diffs below read as an unexpected spill. Every case that needs either switch
+# sets it explicitly on the invocation.
+unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GQL="$ROOT/plugins/fnd/scripts/shopify-admin-gql.sh"
 TJ="$ROOT/plugins/fnd/scripts/theme-json.sh"
@@ -680,6 +686,97 @@ if [ "$rc" -eq 0 ] && grep -q '"profile":true' "$O" && grep -q 'inside a ```' "$
    && [ "$spills" -eq 0 ] && [ "$before" = "$after" ] \
    && printf '%s' "$nout" | grep -q 'product-0' && printf '%s' "$nout" | grep -q 'product-19'; then ok
 else bad F4-fenced-jsonl-profile "rc=$rc spills=$spills nout=[$(printf '%s' "$nout" | head -c 40)] head=$(head -c 200 "$O")"; fi
+
+# ---------------------------------------------- json-slim.cjs: --report over the debug log (M12) --
+# `--report [logfile] [--since <ISO>]` aggregates the FND_MCP_SLIM_DEBUG JSONL log. The synthetic log
+# below covers every family the report must speak about: a compressed hook event, a passthrough, a
+# platform-overflow PAIRED with a later CLI run over the same spill path, and an UNPAIRED overflow —
+# the missed whale, the one number the two-lever decision hangs on. It must surface, the paired one
+# must not, and the output must stay short enough to read (≤ 40 lines). The CLI run's savings ride on
+# the `cli runs:` aggregate line, never in the (MCP-tool) top-tools ranking — see R6.
+RPD="$TMP/report"; mkdir -p "$RPD"
+RPLOG="$RPD/fnd-mcp-slim-debug.log"
+cat > "$RPLOG" <<'RPEOF'
+{"ts":"2026-07-24T10:00:00.000Z","project":"elc","entry":"hook","tool":"mcp__a__getJiraIssue","decision":"compressed","reason":null,"bytes_in":9062,"bytes_out":5318,"pct":41.3,"stages":["adf","noise","crush"],"spill":"/tmp/fnd-mcp-slim-a.json","ms":7}
+{"ts":"2026-07-24T10:05:00.000Z","project":"elc","entry":"hook","tool":"mcp__a__listFiles","decision":"passthrough","reason":"non-json","format":"text","bytes_in":52518,"bytes_out":52518,"pct":0,"stages":[],"spill":null,"ms":2}
+{"ts":"2026-07-24T11:00:00.000Z","project":"elc","entry":"hook","tool":"mcp__x__evaluate_script","decision":"passthrough","reason":"platform-overflow","bytes_in":1463,"bytes_out":1463,"pct":0,"stages":[],"spill":"/p/tool-results/paired-whale.txt","ms":1}
+{"ts":"2026-07-24T11:02:00.000Z","project":"elc","entry":"cli","tool":"/p/tool-results/paired-whale.txt","decision":"compressed","reason":null,"bytes_in":764124,"bytes_out":123048,"pct":83.9,"stages":["noise","crush"],"spill":null,"spill_out":"/tmp/fnd-slim-out-b.json","ms":36}
+{"ts":"2026-07-24T12:00:00.000Z","project":"other","entry":"hook","tool":"mcp__x__list_network_requests","decision":"passthrough","reason":"platform-overflow","bytes_in":1400,"bytes_out":1400,"pct":0,"stages":[],"spill":"/p/tool-results/lonely-whale.txt","ms":1}
+not json at all
+RPEOF
+rc=0; node "$SLIM" --report "$RPLOG" >"$O" 2>"$E" || rc=$?
+lines=$(wc -l < "$O" | tr -d ' ')
+# the missed-whale SECTION only (the paired whale still shows up above it as a top tool by bytes saved)
+missed="$(sed -n '/missed whales/,$p' "$O")"
+if [ "$rc" -eq 0 ] && [ "$lines" -le 40 ] && grep -Fq "$RPLOG" "$O" \
+   && grep -Fq '5 events' "$O" && grep -Fq '(+1 unparseable)' "$O" \
+   && grep -Fq 'compressed 2' "$O" && grep -Fq 'platform-overflow 2' "$O" \
+   && grep -Fq 'no later json-slim run): 1 of 2' "$O" \
+   && printf '%s' "$missed" | grep -Fq 'lonely-whale.txt' \
+   && ! printf '%s' "$missed" | grep -Fq 'paired-whale.txt' \
+   && grep -Fq 'elc:' "$O" && grep -Fq 'other:' "$O" \
+   && grep -Fq 'cli runs: 1 · saved 641076 B (83.9%)' "$O"; then ok
+else bad R1-report "rc=$rc lines=$lines out=$(head -c 400 "$O") err=$(head -c 120 "$E")"; fi
+
+# R2: --since filters by timestamp (only the last event survives) and the header states the cutoff.
+rc=0; node "$SLIM" --report "$RPLOG" --since 2026-07-24T11:30:00Z >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq '1 events' "$O" && grep -Fq '[since 2026-07-24T11:30:00Z]' "$O" \
+   && grep -Fq 'lonely-whale.txt' "$O" && ! grep -Fq 'getJiraIssue' "$O"; then ok
+else bad R2-report-since "rc=$rc out=$(head -c 300 "$O")"; fi
+
+# R3: a missing log / an unparseable --since are hard errors on stderr (exit 1), never a fake report.
+rc=0; node "$SLIM" --report "$RPD/nope.log" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 1 ] && grep -Fq 'no debug log at' "$E"; then ok
+else bad R3-report-missing-log "rc=$rc err=$(head -c 160 "$E")"; fi
+rc=0; node "$SLIM" --report "$RPLOG" --since yesterday >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 1 ] && grep -Fq 'not a parseable date' "$E"; then ok
+else bad R3b-report-bad-since "rc=$rc err=$(head -c 160 "$E")"; fi
+
+# R4: bare `--report` (no path) defaults to <FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log — the same file
+# the hook and the CLI write, so the documented one-liner works with no argument.
+rc=0; FND_MCP_SLIM_DIR="$RPD" node "$SLIM" --report >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq '5 events' "$O"; then ok
+else bad R4-report-default-path "rc=$rc out=$(head -c 200 "$O") err=$(head -c 120 "$E")"; fi
+
+# R5 (M12b): `stubbed` is its own decision — the hook replaced a whale with a ~1 KB stub, so it counts
+# toward the bytes saved (not as a passthrough that saved nothing) and gets its own line broken down by
+# the branch it replaced. A stub nobody followed up on is a MODEL choice, reported for curiosity — never
+# a missed whale (the instruction was inline, unlike a platform-overflow file).
+RPLOG2="$RPD/stubbed.log"
+cat > "$RPLOG2" <<'RPEOF'
+{"ts":"2026-07-25T09:00:00.000Z","project":"elc","entry":"hook","tool":"mcp__x__evaluate_script","decision":"stubbed","reason":"non-json","format":"text","bytes_in":812000,"bytes_out":890,"pct":99.9,"stages":[],"spill":"/tmp/fnd-mcp-slim-followed.json","ms":24}
+{"ts":"2026-07-25T09:01:00.000Z","project":"elc","entry":"cli","tool":"/tmp/fnd-mcp-slim-followed.json","decision":"compressed","reason":null,"bytes_in":812000,"bytes_out":91000,"pct":88.8,"stages":["noise","crush"],"spill":null,"ms":41}
+{"ts":"2026-07-25T09:10:00.000Z","project":"elc","entry":"hook","tool":"mcp__a__getJiraIssue","decision":"stubbed","reason":"weak-gain","bytes_in":260000,"bytes_out":910,"pct":99.6,"stages":["adf","noise","crush"],"spill":"/tmp/fnd-mcp-slim-ignored.json","ms":33}
+RPEOF
+rc=0; node "$SLIM" --report "$RPLOG2" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq 'stubbed 2' "$O" \
+   && grep -Fq 'stubbed (spill-and-stub guard): 2 (non-json 1 · weak-gain 1), 1 with no later json-slim run' "$O" \
+   && grep -Fq 'no later json-slim run): 0 of 0' "$O" \
+   && ! grep -q 'passthrough reasons' "$O" \
+   && grep -Fq '95.1% saved' "$O"; then ok
+else bad R5-report-stubbed "rc=$rc out=$(head -c 500 "$O") err=$(head -c 120 "$E")"; fi
+
+# R6: a CLI event's `tool` is the FILE it ran on, not an MCP tool name. Ranking the two together let a
+# handful of whale files push every MCP tool out of the top-5 (and double-counted the notice + the CLI
+# run of the same whale). Top tools is HOOK-only; CLI work gets one aggregate line.
+RPLOG3="$RPD/cli-vs-hook.log"
+: > "$RPLOG3"
+for i in 1 2 3 4 5 6; do
+  printf '{"ts":"2026-07-25T1%s:00:00.000Z","project":"elc","entry":"cli","tool":"/tmp/fnd-mcp-slim-%s.json","decision":"compressed","reason":null,"bytes_in":900000,"bytes_out":100000,"pct":88.9,"stages":["crush"],"spill":null,"ms":40}\n' "$i" "$i" >> "$RPLOG3"
+done
+cat >> "$RPLOG3" <<'RPEOF'
+{"ts":"2026-07-25T17:00:00.000Z","project":"elc","entry":"hook","tool":"mcp__a__x","decision":"compressed","reason":null,"bytes_in":50000,"bytes_out":20000,"pct":60,"stages":["crush"],"spill":"/tmp/fnd-mcp-slim-h1.json","ms":5}
+{"ts":"2026-07-25T18:00:00.000Z","project":"elc","entry":"hook","tool":"mcp__b__y","decision":"compressed","reason":null,"bytes_in":40000,"bytes_out":25000,"pct":37.5,"stages":["crush"],"spill":"/tmp/fnd-mcp-slim-h2.json","ms":5}
+RPEOF
+rc=0; node "$SLIM" --report "$RPLOG3" >"$O" 2>"$E" || rc=$?
+# the ranking rows only (indent 4), so the slice does not depend on the optional `cli runs:` line
+tops="$(awk '/top tools by bytes saved/{f=1;next} f && !/^    /{exit} f' "$O")"
+if [ "$rc" -eq 0 ] \
+   && printf '%s' "$tops" | grep -Fq 'mcp__a__x' && printf '%s' "$tops" | grep -Fq 'mcp__b__y' \
+   && ! printf '%s' "$tops" | grep -Fq '/tmp/fnd-mcp-slim-' \
+   && [ "$(grep -c 'cli runs:' "$O")" -eq 1 ] \
+   && grep -Fq 'cli runs: 6 · saved 4800000 B (88.9%)' "$O"; then ok
+else bad R6-report-cli-vs-hook "rc=$rc out=$(head -c 600 "$O") err=$(head -c 120 "$E")"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

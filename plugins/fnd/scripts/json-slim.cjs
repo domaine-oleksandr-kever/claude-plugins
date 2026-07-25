@@ -5,8 +5,9 @@
  * Dual entry point (one home for the transform):
  *   - require()d as a module by the mcp-slim PostToolUse hook (M2) — { slim, crush, crushValue };
  *   - a standalone CLI to compress an already-saved dump on demand:
- *       node json-slim.cjs <file.json> [--jq <path>] [--toon] [--no-spill] [--stats]
+ *       node json-slim.cjs <file.json> [--jq <dot.path>] [--toon] [--no-spill] [--stats]
  *       cat big.json | node json-slim.cjs
+ *       node json-slim.cjs --report [logfile] [--since <ISO>]   (aggregate the FND_MCP_SLIM_DEBUG log)
  *     A JSONL file is PROFILED, never compressed (stats + sample rows + line-scripting
  *     guidance, streamed above 8 MB); log-shaped text is signal-compressed (log-slim.cjs) with
  *     an `original: <path>` recovery line; other non-JSONL JSON output is capped at 48 KB
@@ -1056,6 +1057,33 @@ function sniffFormat(content) {
   return 'text';
 }
 
+// M12b — the one-line "what is in that file" hint the mcp-slim hook's spill-and-stub guard prints
+// beside the spill path. Parseable JSON → `array of N` or its top-level keys; anything else → a
+// whitespace-collapsed preview of the head. `format` rides along as the M8 tag ('json' when it
+// parsed, else sniffFormat's html/xml/broken-json/text) so the stub names the payload honestly.
+// Only the head is ever sliced, regexed and previewed — the first STUB_HINT_SCAN bytes. The one
+// full-payload pass is JSON.parse, and only when the head actually opens an object/array (a linear
+// scan, and the hint is worthless without it). Hard constraint: never run a REGEX over the full
+// payload — its backtracking is quadratic on whale-sized strings, see OVERFLOW_WINDOW in
+// hooks/mcp-slim.cjs.
+const STUB_HINT_KEYS = 8;
+const STUB_HINT_PREVIEW = 200;
+const STUB_HINT_SCAN = 4096;
+function shapeHint(text) {
+  const head = (typeof text === 'string' ? text : '').slice(0, STUB_HINT_SCAN).replace(/^\uFEFF/, '').replace(/^\s+/, '');
+  let parsed;
+  // JSON.parse tolerates leading whitespace but NOT a BOM — strip that one char, nothing else.
+  if (head[0] === '{' || head[0] === '[') { try { parsed = JSON.parse(text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text); } catch (_) {} }
+  if (Array.isArray(parsed)) return { format: 'json', hint: `array of ${parsed.length}` };
+  if (parsed && typeof parsed === 'object') {
+    const ks = Object.keys(parsed);
+    if (!ks.length) return { format: 'json', hint: 'object with no keys' };
+    return { format: 'json', hint: `keys: ${ks.slice(0, STUB_HINT_KEYS).join(', ')}${ks.length > STUB_HINT_KEYS ? ` …(+${ks.length - STUB_HINT_KEYS})` : ''}` };
+  }
+  const preview = head.replace(/\s+/g, ' ').trim().slice(0, STUB_HINT_PREVIEW);
+  return { format: sniffFormat(head), hint: `starts with: ${preview}${preview.length >= STUB_HINT_PREVIEW ? '…' : ''}` };
+}
+
 // Parse a JSONL line stream (one JSON value per line — a Shopify bulk-operation dump, a saved
 // log-of-objects) into an array of rows, so `slim()` can crush it as the same-shape array it is.
 // Strict gate, because a whole-payload JSON.parse has ALREADY failed by the time we get here:
@@ -1263,6 +1291,14 @@ function capOutput(res, fileArg, config) {
       sample = real.length ? real[0] : null;
     } else { sample = parsed; }
   } catch (_) {}
+  // A one-token example built from the data itself — `<path>` alone reads like a FILE path, so the
+  // hint spells the syntax AND shows a segment that really resolves.
+  const firstKey = sample && typeof sample === 'object' && !Array.isArray(sample) ? Object.keys(sample)[0] : null;
+  // …but ONLY when that segment survives the round trip: a key holding a dot, a bracket or a space is
+  // unreachable by this dot-walk (`weird.key` splits, `a[0]` normalizes to `a.0`) and a space would
+  // even split the pasted command line, silently retargeting the file argument. Unaddressable key →
+  // no example (the ternary below drops the parenthetical); the `<dot.path>` syntax hint still shows.
+  const jqExample = isArr ? '0' : (firstKey && /^[\w$-]+$/.test(firstKey) ? firstKey : null);
   let sampleStr = sample === null ? '(none)' : compact(sample);
   if (sampleStr.length > 200) sampleStr = `${sampleStr.slice(0, 200)}…`;
   const pct = ((res.ratio || 0) * 100).toFixed(1);
@@ -1275,7 +1311,7 @@ function capOutput(res, fileArg, config) {
     `  ${isArr ? 'first row' : 'shape'}: ${sampleStr}\n` +
     `  slimmed output: ${outPath} (${spilledBytes} B)\n` +
     `  original file:  ${fileArg}\n` +
-    `  narrow with: node json-slim.cjs --jq <path> ${outPath}` + post;
+    `  narrow with: node json-slim.cjs --jq <dot.path> ${outPath}${jqExample ? `  (e.g. --jq ${jqExample})` : ''}` + post;
   return { handback, spillOut: outPath };
 }
 
@@ -1504,8 +1540,144 @@ function emitProfile(profile, file, bytes, t0, cfg, offset) {
   sweepSpills(cfg.spillDir);
 }
 
+// ==================================================================== --jq ergonomics (M12) ==
+
+// Normalize a --jq path to the plain dot-walk this CLI understands: a leading `.` is stripped and
+// `[N]` numeric indices are rewritten to `.N`, so `.products[0].title` ≡ `products.0.title`. Full jq
+// stays out of scope on purpose — quoted keys (`["a.b"]`), slices, pipes and filters are NOT parsed
+// (a `["a.b"]` spelling survives verbatim and then splits on its dot, so a key literally
+// containing a dot stays unreachable). `.` / `..` still normalize to the empty identity selector.
+function normalizeJqPath(p) {
+  return String(p).replace(/\[(\d+)\]/g, '.$1').replace(/^\.+/, '');
+}
+
+// What a --jq walk could have addressed at the point it died — the second half of the stderr
+// diagnostic (`keys: products` / `length: 250` / `value is string`). Keys are capped so a wide
+// object can't turn one diagnostic line into a dump.
+const JQ_KEYS_SHOWN = 8;
+function jqAvailable(v) {
+  if (Array.isArray(v)) return `length: ${v.length}`;
+  if (v && typeof v === 'object') {
+    const ks = Object.keys(v);
+    if (!ks.length) return 'no keys (empty object)';
+    return `keys: ${ks.slice(0, JQ_KEYS_SHOWN).join(', ')}${ks.length > JQ_KEYS_SHOWN ? `, …(+${ks.length - JQ_KEYS_SHOWN})` : ''}`;
+  }
+  return `value is ${v === null ? 'null' : typeof v}`;
+}
+
+// ================================================================ debug-log report (M12) ==
+
+// Aggregate the FND_MCP_SLIM_DEBUG JSONL log (M6/M8) into a ≤ ~40-line plain-text summary: totals,
+// counts per decision / reason / stage, the top HOOK tools by bytes saved (CLI runs are keyed by
+// file path, not tool name — they get one aggregate line), per-project subtotals, and the
+// MISSED-WHALE list — `platform-overflow` events (the hook's tag for a result the platform spilled to
+// a tool-results file before the hook could see it) with NO later `entry:"cli"` run over that spill
+// path, i.e. the whale nobody ever compressed. Pure over an array of raw lines (`opts.file`/`bytes`
+// only decorate the header), so tests feed a synthetic log and the CLI feeds a real one.
+const REPORT_TOP_TOOLS = 5;
+const REPORT_TOP_PROJECTS = 5;
+const REPORT_MISSED = 8;
+
+function fmtCounts(map) {
+  return [...map.entries()].sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k} ${v}`).join(' · ');
+}
+
+function buildReport(lines, opts) {
+  const o = opts || {};
+  const since = o.since ? Date.parse(o.since) : null;
+  const events = [];
+  let skipped = 0;
+  for (const line of lines) {
+    if (!String(line).trim()) continue;
+    let r;
+    try { r = JSON.parse(line); } catch (_) { skipped++; continue; }
+    if (!r || typeof r !== 'object' || Array.isArray(r)) { skipped++; continue; }
+    if (since != null && !(Date.parse(r.ts) >= since)) continue;
+    events.push(r);
+  }
+  const out = [`json-slim: debug-log report — ${o.file || '(stdin)'}`];
+  const stamps = events.map((e) => e.ts).filter(Boolean).sort();
+  out.push(`  log: ${o.bytes != null ? `${o.bytes} B, ` : ''}${events.length} events` +
+    `${skipped ? ` (+${skipped} unparseable)` : ''}` +
+    `${stamps.length ? `, ${stamps[0]} → ${stamps[stamps.length - 1]}` : ''}` +
+    `${o.since ? `  [since ${o.since}]` : ''}`);
+  if (!events.length) { out.push('  no events in range.'); return out.join('\n'); }
+
+  const decisions = new Map(), reasons = new Map(), stages = new Map(), tools = new Map(), projects = new Map();
+  const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+  let bytesIn = 0, bytesOut = 0;
+  const cli = { n: 0, in: 0, saved: 0 };
+  for (const e of events) {
+    const bi = Number(e.bytes_in) || 0;
+    const bo = Number(e.bytes_out) || 0;
+    // A `stubbed` event (M12b) shrank the payload as surely as a compressed one — the model got a
+    // ~1 KB stub instead of the whale — so it counts toward the savings, and its `reason` names the
+    // branch it replaced, not a passthrough (it is listed on its own line below).
+    const shrunk = e.decision === 'compressed' || e.decision === 'stubbed';
+    bytesIn += bi;
+    bytesOut += shrunk ? bo : bi; // a passthrough saved nothing, whatever it logged as bytes_out
+    bump(decisions, e.decision || 'unknown');
+    if (!shrunk) bump(reasons, e.reason || 'unknown');
+    for (const s of Array.isArray(e.stages) ? e.stages : []) bump(stages, s);
+    const saved = shrunk ? Math.max(0, bi - bo) : 0;
+    // A CLI event's `tool` is the FILE it ran on, not an MCP tool name — ranking those together
+    // would let a handful of whale files crowd every MCP tool out of the top-5 and would double-count
+    // the notice and the CLI run of the same whale. CLI work is aggregated on its own line instead.
+    if (e.entry === 'cli') { cli.n++; cli.in += bi; cli.saved += saved; } else {
+      const tk = e.tool || '(stdin)';
+      const t = tools.get(tk) || { saved: 0, n: 0 };
+      t.saved += saved; t.n++; tools.set(tk, t);
+    }
+    const p = projects.get(e.project || '(unknown)') || { saved: 0, n: 0 };
+    p.saved += saved; p.n++; projects.set(e.project || '(unknown)', p);
+  }
+  const pct = bytesIn ? (100 * (1 - bytesOut / bytesIn)).toFixed(1) : '0.0';
+  // Totals and the per-project subtotals deliberately span BOTH entries — they answer "what did the
+  // plugin save", hook and CLI alike. Only the RANKING is hook-only, because a cli `tool` is a path.
+  out.push(`  totals: ${bytesIn} → ${bytesOut} B (${pct}% saved)`);
+  out.push(`  decisions: ${fmtCounts(decisions)}`);
+  if (reasons.size) out.push(`  passthrough reasons: ${fmtCounts(reasons)}`);
+  if (stages.size) out.push(`  stages: ${fmtCounts(stages)}`);
+
+  const topTools = [...tools.entries()].filter(([, t]) => t.saved > 0).sort((a, b) => b[1].saved - a[1].saved).slice(0, REPORT_TOP_TOOLS);
+  out.push('  top tools by bytes saved (hook):');
+  if (!topTools.length) out.push('    (no hook compressions)');
+  for (const [name, t] of topTools) out.push(`    ${t.saved} B over ${t.n} call${t.n === 1 ? '' : 's'} — ${name}`);
+  if (cli.n) out.push(`  cli runs: ${cli.n} · saved ${cli.saved} B (${cli.in ? (100 * cli.saved / cli.in).toFixed(1) : '0.0'}%)`);
+  const topProjects = [...projects.entries()].sort((a, b) => b[1].saved - a[1].saved).slice(0, REPORT_TOP_PROJECTS);
+  out.push('  projects:');
+  for (const [name, p] of topProjects) out.push(`    ${name}: ${p.n} event${p.n === 1 ? '' : 's'}, ${p.saved} B saved`);
+
+  // Missed whales: pair each platform-overflow event with a LATER cli run over the same spill path
+  // (the M7 instruction being followed). Basenames are compared too, so an equivalent path spelling
+  // still pairs. Unpaired = the compressor never ran on that whale — the two-lever evidence number.
+  const cliRuns = events.filter((e) => e.entry === 'cli' && e.tool).map((e) => ({ at: Date.parse(e.ts) || 0, tool: String(e.tool) }));
+  const unpaired = (e) => {
+    const spill = e.spill ? String(e.spill) : null;
+    if (!spill) return true; // an event whose path we could not extract is not provably handled
+    const at = Date.parse(e.ts) || 0;
+    return !cliRuns.some((c) => c.at >= at && (c.tool === spill || path.basename(c.tool) === path.basename(spill)));
+  };
+  const overflows = events.filter((e) => e.reason === 'platform-overflow');
+  const missed = overflows.filter(unpaired);
+  out.push(`  missed whales (platform-overflow with no later json-slim run): ${missed.length} of ${overflows.length}`);
+  for (const e of missed.slice(0, REPORT_MISSED)) out.push(`    ${e.ts || '(no ts)'}  ${e.tool || '(unknown tool)'}  →  ${e.spill || '(no path)'}`);
+  if (missed.length > REPORT_MISSED) out.push(`    …(+${missed.length - REPORT_MISSED} more)`);
+  // M12b: stubbed results are NOT missed whales — the hook already replaced the payload with a stub
+  // carrying the spill path and the CLI command, so an unused stub is a model choice (shown for
+  // curiosity), not a gap in the pipeline.
+  const stubbed = events.filter((e) => e.decision === 'stubbed');
+  if (stubbed.length) {
+    const stubReasons = new Map();
+    for (const e of stubbed) bump(stubReasons, e.reason || 'unknown');
+    out.push(`  stubbed (spill-and-stub guard): ${stubbed.length} (${fmtCounts(stubReasons)}), ${stubbed.filter(unpaired).length} with no later json-slim run`);
+  }
+  return out.join('\n');
+}
+
 module.exports = {
   slim, crush, crushValue, parseJsonl, unwrapFence, findOpeningFence,
+  normalizeJqPath, jqAvailable, buildReport, shapeHint,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
   sweepSpills, spillTtlHours, spillRoot,
@@ -1522,13 +1694,33 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const has = (f) => args.includes(f);
   const opt = (f) => { const i = args.indexOf(f); return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null; };
-  const fileArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--jq');
+  const fileArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--jq' && args[i - 1] !== '--report' && args[i - 1] !== '--since');
   const jq = opt('--jq');
-  // Segments of the --jq path (simple dot-walk). An empty result — `.` / `..` / leading/trailing dots —
-  // is the IDENTITY selector: it addresses the WHOLE value, not a single row/field. On a JSONL file
-  // that means "the whole file", which must PROFILE like a no-jq run, never crush the reshaped array.
-  const jqSegs = jq != null ? jq.split('.').filter(Boolean) : null;
+  // Segments of the --jq path (simple dot-walk, jq-ish spellings normalized — M12). An empty result —
+  // `.` / `..` / leading/trailing dots — is the IDENTITY selector: it addresses the WHOLE value, not a
+  // single row/field. On a JSONL file that means "the whole file", which must PROFILE like a no-jq run,
+  // never crush the reshaped array.
+  const jqSegs = jq != null ? normalizeJqPath(jq).split('.').filter(Boolean) : null;
   const jqIdentity = jq != null && jqSegs.length === 0;
+
+  // --report [logfile] [--since <ISO>] (M12): aggregate the FND_MCP_SLIM_DEBUG log instead of
+  // compressing anything. Runs before every input path — it reads the log, not a payload — and logs
+  // nothing itself, so reading the report never becomes an event in the report.
+  if (has('--report')) {
+    const logPath = opt('--report') || path.join(spillRoot(null), DEBUG_LOG);
+    const since = opt('--since');
+    if (since && Number.isNaN(Date.parse(since))) {
+      process.stderr.write(`json-slim: --since: not a parseable date: ${since}\n`);
+      process.exit(1);
+    }
+    let text, bytes = null;
+    try { text = fs.readFileSync(logPath, 'utf8'); bytes = fs.statSync(logPath).size; } catch (e) {
+      process.stderr.write(`json-slim: no debug log at ${logPath} (set FND_MCP_SLIM_DEBUG=1 to record one): ${e.message}\n`);
+      process.exit(1);
+    }
+    process.stdout.write(buildReport(text.split('\n'), { file: logPath, bytes, since }) + '\n');
+    return;
+  }
 
   const cfg = {};
   if (has('--toon')) cfg.toon = true;
@@ -1607,7 +1799,7 @@ if (require.main === module) {
       if (rows) v = rows;
       else {
         // M11: a fenced JSON/JSONL payload (tool prose + ```json…```) — unwrap the dominant fence and
-        // narrow into its body so `--jq <path>` works on the ORIGINAL wrapper file too, not only the
+        // narrow into its body so `--jq <dot.path>` works on the ORIGINAL wrapper file too, not only the
         // Gate-A spill. Without this, `--jq` on a fenced whale errored on the prose line.
         const f = DEFAULTS.fence ? unwrapFence(raw, cfg) : null;
         let fv;
@@ -1616,9 +1808,21 @@ if (require.main === module) {
         else { process.stderr.write('json-slim: input is not valid JSON: ' + e.message + '\n'); process.exit(1); }
       }
     }
+    // Walk the normalized segments. stdout stays `null` for a path that doesn't resolve (machine-
+    // friendly, unchanged), but a MISSING segment now says so on stderr — the deepest location that
+    // did resolve plus what is addressable there, so a typo is distinguishable from a real null (M12).
+    // A value that genuinely IS null prints nothing.
+    const walked = [];
     for (const seg of jqSegs) {
-      if (v == null) break;
-      v = Array.isArray(v) && /^\d+$/.test(seg) ? v[Number(seg)] : v[seg];
+      const next = v == null ? undefined : (Array.isArray(v) && /^\d+$/.test(seg) ? v[Number(seg)] : v[seg]);
+      if (next === undefined) {
+        const where = walked.length ? `at '${walked.join('.')}'` : 'at top level';
+        process.stderr.write(`json-slim: --jq: '${seg}' not found ${where}; ${jqAvailable(v)}\n`);
+        v = undefined;
+        break;
+      }
+      walked.push(seg);
+      v = next;
     }
     raw = JSON.stringify(v === undefined ? null : v); // a missed path yields null, never a crash
   }
