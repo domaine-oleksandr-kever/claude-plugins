@@ -54,8 +54,60 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { slim, sweepSpills, writeSpill, debugLog, debugEnabled, shapeHint } = require('../scripts/json-slim.cjs');
+
+// json-slim brings ~210 KB of module graph (the compressor plus the ADF and log converters), and most
+// invocations never need a line of it: a small result, an unrecognized shape, a payload the platform
+// already spilled. So it is required on first USE — the first branch that compresses, spills, hints or
+// logs — and the two switches that decide whether any of that happens are read here instead. Literal
+// duplication on purpose, the same trade json-slim's SPILL_PREFIXES comment documents: a hot path must
+// not drag the compressor in just to parse an env var.
+// Deferral also moves WHERE a broken json-slim shows up: a require that throws (a truncated file — this
+// repo has had one) used to crash the hook loudly with a stack; now it lands inside run()'s own guard
+// and the result simply passes through untouched. Same data, no signal — the debug log is the place to
+// look if the compressor ever goes quiet.
+let jsonSlimMod = null;
+function jsonSlim() {
+  if (!jsonSlimMod) jsonSlimMod = require('../scripts/json-slim.cjs');
+  return jsonSlimMod;
+}
+
+// FND_MCP_SLIM_DEBUG, mirroring json-slim's debugLevel: `1|true|yes|on` = key events, any integer ≥ 2 =
+// everything. Anything else (unset / 0 / junk) is off, which is what keeps the default side-effect-free.
+// The LEVEL, not just on/off: json-slim drops a sub-gate `size-gate` record below 2, so a level-1 run
+// that traced one would load the whole graph to write nothing (below-gate calls are ~76 % of a real
+// week's events, and this developer's live config is exactly level 1).
+// The two deciding lines are a VERBATIM copy of the original's, not a re-derivation — the same env var
+// read twice in one process has to mean the same thing both times, down to what an odd value like `01`
+// resolves to (0 on both sides, because only a bare `1` is the word).
+function debugLevel() {
+  const raw = process.env.FND_MCP_SLIM_DEBUG;
+  if (!raw) return 0;
+  const v = String(raw).trim();
+  if (/^\d+$/.test(v) && Number(v) >= 2) return 2;
+  return /^(1|true|yes|on)$/i.test(v) ? 1 : 0;
+}
+
+// The TTL sweep's own gates, read without loading json-slim: the disable switch (parsed exactly like
+// spillTtlHours — only a real 0 disables, a negative/garbage value falls back to the default) and one
+// stat of the throttle marker, which is the cost the throttle exists to keep on the hot path. Both are
+// re-checked inside sweepSpills(), so a race here costs one extra stat and nothing else.
+const SWEEP_MARKER = '.fnd-mcp-slim-sweep';
+const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
+function sweepDue() {
+  const raw = process.env.FND_MCP_SLIM_TTL;
+  if (raw !== undefined && raw !== null && raw !== '') {
+    const n = parseFloat(raw);
+    if (Number.isFinite(n) && n === 0) return false;
+  }
+  const root = process.env.FND_MCP_SLIM_DIR || os.tmpdir();
+  try {
+    return Date.now() - fs.statSync(path.join(root, SWEEP_MARKER)).mtimeMs >= SWEEP_THROTTLE_MS;
+  } catch (_) {
+    return true; // no marker yet → first sweep in this dir
+  }
+}
 
 const GATE_BYTES = 4096; // only results larger than this are worth compressing
 
@@ -69,7 +121,7 @@ const GATE_BYTES = 4096; // only results larger than this are worth compressing
 function slimText(text, trace, sink, deadline) {
   let res;
   try {
-    res = slim(text, { trace, spillSink: sink.all, spillCreatedSink: sink.created, deadline });
+    res = jsonSlim().slim(text, { trace, spillSink: sink.all, spillCreatedSink: sink.created, deadline });
   } catch (_) {
     return { text, modified: false, reason: 'transform-error', stages: [] };
   }
@@ -161,7 +213,7 @@ function attachMarker(res, suffix) {
 
 // The hook's own whole-original copy; `created` gates the marker-overhead self-cleanup below.
 function spillOriginal(text) {
-  return writeSpill(null, 'fnd-mcp-slim-', text);
+  return jsonSlim().writeSpill(null, 'fnd-mcp-slim-', text);
 }
 
 // The platform's own overflow path pre-empts this hook: a result over MAX_MCP_OUTPUT_TOKENS is saved
@@ -373,7 +425,7 @@ function buildStub(result, tool, format, stubLimit, reason) {
   if (p === null || p.bytes <= stubLimit) return null;
   const s = spillOriginal(p.payload);
   if (!s) return null; // no recovery copy → RAW passthrough (never lose the only copy)
-  const h = shapeHint(p.payload);
+  const h = jsonSlim().shapeHint(p.payload);
   const fmt = format || h.format;
   return { value: stubValue(result, stubText(tool, p.bytes, fmt, h.hint, s.path, reason)), spill: s.path, format: fmt };
 }
@@ -414,7 +466,7 @@ function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, kee
     const s = spillOriginal(text);
     if (!s) return b; // no recovery copy for this block → handled with the kept blocks below
     keep(s.path);
-    const h = shapeHint(text);
+    const h = jsonSlim().shapeHint(text);
     const fmt = format || h.format;
     // `spill` is the ONE path the debug line reports (`--report` pairs a later CLI run on it), so it
     // names the biggest block replaced — the whale the model is most likely to go after.
@@ -476,7 +528,8 @@ function stillNamed(strings, p) {
 
 function run(raw) {
   const t0 = Date.now();
-  const dbg = debugEnabled(); // cache: disabled → every trace() is a no-op and the metrics below are skipped
+  const dbgLevel = debugLevel();
+  const dbg = dbgLevel > 0; // cache: disabled → every trace() is a no-op and the metrics below are skipped
   const input = JSON.parse(raw);
   const tool = typeof input.tool_name === 'string' ? input.tool_name : null;
   const result = input.tool_response !== undefined ? input.tool_response : input.tool_output;
@@ -520,7 +573,7 @@ function run(raw) {
   // `spills` is the full inventory, which is what makes an orphaned crush spill visible in the log.
   const trace = (decision, reason, bytesIn, bytesOut, stages, spill, format) => {
     if (!dbg) return;
-    debugLog({
+    jsonSlim().debugLog({
       entry: 'hook', tool, decision, reason: reason || null,
       ...(format ? { format } : {}), // M8: only the non-json passthrough carries a format tag
       ...(budgetPartial ? { budget_partial: true } : {}), // B4.8: a mid-array expiry, invisible otherwise
@@ -551,7 +604,11 @@ function run(raw) {
     // platform overflow notice is named `platform-overflow` and carries the saved whale's path in
     // `spill`, instead of hiding among the generic `size-gate` lines.
     const overflow = dbg ? overflowSpill(serialized) : null; // probe's only consumer is the debug log
-    trace('passthrough', overflow ? 'platform-overflow' : 'size-gate', bytesIn, bytesIn, [], overflow);
+    // A plain `size-gate` record is the one json-slim discards below level 2 — writing it there would
+    // load the compressor to produce nothing. The overflow line survives at every level, so it still goes.
+    if (overflow || dbgLevel >= 2) {
+      trace('passthrough', overflow ? 'platform-overflow' : 'size-gate', bytesIn, bytesIn, [], overflow);
+    }
     return;
   }
 
@@ -692,5 +749,5 @@ process.stdin.on('end', () => {
   }
   // Spill hygiene runs AFTER the result is emitted (or passed through) so it never delays what
   // the model sees; throttled and self-guarding, so it costs one stat on the hot path.
-  try { sweepSpills(); } catch (_) {}
+  try { if (sweepDue()) jsonSlim().sweepSpills(); } catch (_) {}
 });

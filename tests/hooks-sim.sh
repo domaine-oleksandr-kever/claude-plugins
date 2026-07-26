@@ -3,8 +3,9 @@
 #   S cases — plugin.json SessionStart command: per-file tolerance (one broken
 #             md must not discard the rest), FND_LEAN gate, always exit 0, and the
 #             real plugin root emitting the json-slim whale-routing instruction
-#   G cases — plugin.json UserPromptSubmit gate: FND_CTX_MONITOR semantics
-#             (only literal "0" disables), node failure never fails the hook
+#   G cases — plugin.json UserPromptSubmit gate: FND_CTX_MONITOR / FND_PROMPT_JSON
+#             semantics (only literal "0" disables, and only BOTH at 0 keeps node from
+#             spawning — one command serves both halves), node failure never fails the hook
 #   C cases — hooks/context-stats.cjs against transcript fixtures: synthetic
 #             (API-error) entries skipped, FND_CTX_WARN=0 honored, >100%
 #             window-override hint
@@ -34,12 +35,21 @@
 #             included), binary/base64 payloads are never stubbed, the wall-clock budget hands the
 #             original back as `budget-exceeded` (a mid-array expiry as `budget_partial`, and an
 #             overflow notice caught by it is still re-labelled, never stubbed), and a block array that
-#             cannot be collapsed gets one stub PER over-limit block — each recoverable, never net bigger
-#   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
-#             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
+#             cannot be collapsed gets one stub PER over-limit block — each recoverable, never net bigger;
+#             M87–M95 the deferred json-slim require (a below-gate call never loads the ~210 KB module
+#             graph, at the debug level this developer actually runs either, while the whole stdout of the
+#             three emitting shapes stays byte-for-byte pinned and the inlined sweep gates keep agreeing
+#             with json-slim's own)
+#   P cases — hooks/prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact, below-gate / no-json / small prompts
 #             pass through, string-aware + conservative extraction, workspace placement,
-#             spill-failure never blocks, node never spawns when disabled
+#             spill-failure never blocks, and FND_PROMPT_JSON=0 disables the guard
+#             in-process (P5) — the spawn gate itself is a G case, since one node
+#             process now serves both prompt halves
+#   U cases — hooks/user-prompt.cjs, the merged UserPromptSubmit entry point: a guard
+#             block is the whole output and stops the monitor dead (no band state
+#             recorded for a prompt that never ran), each half rides its own switch,
+#             one half throwing neither silences nor forges the other, always exit 0
 #   T cases — hooks/subagent-conventions.sh: code-writing / unknown agents get the
 #             conventions, read-only readers AND jira-writer are skipped, FND_LEAN=0
 #             drops lean-code, the hook always exits 0
@@ -57,7 +67,10 @@ MANIFEST="$ROOT/plugins/fnd/.claude-plugin/plugin.json"
 CTX="$ROOT/plugins/fnd/hooks/context-stats.cjs"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# A failing byte-for-byte pin (M90–M92) points at the stdout it captured under $TMP, so the
+# cleanup stands down whenever one of them names a file the developer still has to read.
+KEEP_TMP=0
+trap '[ "$KEEP_TMP" = 1 ] || rm -rf "$TMP"' EXIT
 
 pass=0; fail=0; failures=""
 ok()  { pass=$((pass+1)); }
@@ -131,9 +144,18 @@ run_gate() { # [VAR=val…] — extra env for the gate command
     bash -c "$UPS_CMD" >/dev/null 2>&1
 }
 
+# One command runs both prompt hooks, so a single switch at 0 still spawns node for the
+# other half — only BOTH at 0 short-circuits the process away.
 run_gate FND_CTX_MONITOR=0; ec=$?
-assert_eq G1-off-exit "$ec" 0
-if [ -s "$TMP/node.log" ]; then bad G1-off "node ran with FND_CTX_MONITOR=0"; else ok; fi
+assert_eq G1-ctx-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then ok; else bad G1-ctx-off "node did not run with only the monitor off"; fi
+
+run_gate FND_PROMPT_JSON=0
+if [ -s "$TMP/node.log" ]; then ok; else bad G1b-json-off "node did not run with only the guard off"; fi
+
+run_gate FND_CTX_MONITOR=0 FND_PROMPT_JSON=0; ec=$?
+assert_eq G1c-both-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad G1c-both-off "node ran with both switches off"; else ok; fi
 
 run_gate; ec=$?
 assert_eq G2-default-exit "$ec" 0
@@ -227,6 +249,12 @@ out="$(run_ctx "$TMP/t3.jsonl" "c9-$$" FND_CTX_WARN=80)"   # 77% < 80 → silent
 assert_absent   C9-below-warn "$out" "additionalContext"
 out="$(run_ctx "$TMP/t4.jsonl" "c9-$$" FND_CTX_WARN=80)"   # 85% ≥ 80 → warn entry emits
 assert_contains C9-warn-entry "$out" "additionalContext"
+
+# C10: FND_CTX_MONITOR=0 silences the monitor in-process too (the belt behind the entry-point
+# gate) — it shares its node process with the prompt-JSON guard, so the switch can no longer
+# stop the spawn. C0 is the positive control: the same input speaks when the switch is unset.
+assert_eq       C10-off-in-process "$(run_ctx "$TMP/t0.jsonl" "c10-$$" FND_CTX_MONITOR=0)" ""
+assert_contains C10-on-speaks      "$(run_ctx "$TMP/t0.jsonl" "c10b-$$")" "Context"
 
 # ═══ M — PostToolUse mcp-slim (result compressor) ═══════════════════════════
 # Gate (FND_MCP_SLIM) tested via the extracted plugin.json command + node shim;
@@ -1513,11 +1541,109 @@ run_stub "$DBG" "$(cat "$NETIN")" FND_MCP_SLIM_DEBUG=1 >/dev/null
 assert_eq     M86-never-grows  "$(jq -r '.bytes_out < .bytes_in' "$DBG/$DBGLOG" 2>/dev/null)" "true"
 assert_absent M86-not-stubbed  "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
 
+# M87–M93: json-slim is required on first USE, so a below-gate call never loads the ~210 KB
+# module graph. M87–M89 observe the require itself (a --require probe reports every load of the
+# module); M90–M92 pin the WHOLE stdout of the three emitting shapes byte-for-byte (spill dir
+# normalized away, spill names are content-addressed) so the deferral cannot change one byte.
+LAZY="$TMP/lazy-probe.cjs"
+cat > "$LAZY" <<'JS'
+const Module = require('module');
+const load = Module._load;
+Module._load = function (request) {
+  if (/json-slim\.cjs$/.test(request)) process.stderr.write('LOADED-JSON-SLIM\n');
+  return load.apply(this, arguments);
+};
+JS
+run_lazy() { # spill-dir input-json [VAR=val…] — echoes the probe's stderr
+  local dir="$1" in="$2"; shift 2
+  printf '%s' "$in" | env -u FND_MCP_SLIM_DEBUG -u FND_MCP_SLIM_STUB FND_MCP_SLIM_DIR="$dir" "$@" \
+    node --require "$LAZY" "$SLIM" 2>&1 >/dev/null
+}
+# A fresh dir has no throttle marker, so the first call there owes a sweep (which needs the module);
+# the marker is what every steady-state call stats instead.
+LZD="$TMP/lazy"; mkdir -p "$LZD"; : > "$LZD/.fnd-mcp-slim-sweep"
+smallin87='{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"{\"a\":1,\"b\":2}"}]}}'
+assert_eq M87-below-gate-no-load "$(run_lazy "$LZD" "$smallin87")" ""
+# an unrecognized shape and a null result stop even earlier
+assert_eq M88-noshape-no-load "$(run_lazy "$LZD" '{"tool_name":"mcp__x__y","tool_response":42}')" ""
+# above the gate the module must actually arrive (else the probe proves nothing)
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_contains M89-above-gate-loads "$(run_lazy "$LZD" "$in" FND_MCP_SLIM_STUB=0)" "LOADED-JSON-SLIM"
+
+pin_sha() { # id spill-dir input-json [VAR=val…] — sha of the hook's whole stdout, absolute paths masked
+  # BOTH roots go: a stub names the json-slim CLI by absolute path, so an unmasked digest would only
+  # hold for one clone location, and this plugin installs by git clone anywhere. What masking cannot
+  # normalize is the stub's BYTE cap — a several-hundred-character install path pushes the text over it
+  # and drops the trailing `shape —` line, a real content change these digests should surface.
+  # The PHYSICAL root too: node resolves the CLI path through symlinks (/tmp → /private/tmp on macOS),
+  # so masking only the logical one leaves the difference in the digest.
+  # The normalized text is kept beside the digest: a bare "want X, got Y" on a whole-stdout pin says
+  # nothing about WHAT moved, and the answer is only reproducible while this run's spill dir exists.
+  local id="$1" dir="$2" root_p; root_p="$(cd "$ROOT" && pwd -P)"; shift 2
+  run_stub "$dir" "$@" | sed -e "s|$dir/|<D>/|g" -e "s|$root_p|<R>|g" -e "s|$ROOT|<R>|g" \
+    > "$TMP/pin-$id.actual"
+  shasum -a 256 < "$TMP/pin-$id.actual" | cut -d' ' -f1
+}
+assert_pin() { # id want-sha got-sha — on a mismatch, name the file holding what was actually emitted
+  if [ "$3" = "$2" ]; then ok; else
+    KEEP_TMP=1
+    bad "$1" "stdout digest $3, want $2 — normalized stdout kept at $TMP/pin-$1.actual"
+  fi
+}
+PIN="$TMP/pin-a"; mkdir -p "$PIN"
+assert_pin M90-pin-compressed "f2c243554e3a58cd25e107124f5aaef92fb951cd1721e9b08e2c9dfb7f342226" \
+  "$(pin_sha M90-pin-compressed "$PIN" "$in" FND_MCP_SLIM_STUB=0)"
+PIN="$TMP/pin-b"; mkdir -p "$PIN"
+pinstub="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_pin M91-pin-stubbed "466d527cc4ac10815eb3a02aea8a2dca8881258be05a250e24514907d609a993" \
+  "$(pin_sha M91-pin-stubbed "$PIN" "$pinstub")"
+PIN="$TMP/pin-c"; mkdir -p "$PIN"
+pinraw="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:$t}')"
+assert_pin M92-pin-rawstring "ff9aa87b886c85ce52b184c90591f60d6113be21ddb5ae6c8adfdb117c2a7656" \
+  "$(pin_sha M92-pin-rawstring "$PIN" "$pinraw" FND_MCP_SLIM_STUB=0)"
+# M93: the inlined sweep gates decide only WHETHER sweepSpills runs — a stale spill in a dir with no
+# throttle marker is still pruned, and FND_MCP_SLIM_TTL=0 still disables the sweep entirely.
+SWD="$TMP/lazy-sweep"; mkdir -p "$SWD"
+: > "$SWD/fnd-mcp-slim-stale"; touch -t 200001010000 "$SWD/fnd-mcp-slim-stale"
+run_stub "$SWD" "$smallin87" >/dev/null
+if [ ! -f "$SWD/fnd-mcp-slim-stale" ]; then ok; else bad M93-sweep-runs "stale spill survived a due sweep"; fi
+SWD="$TMP/lazy-sweep-off"; mkdir -p "$SWD"
+: > "$SWD/fnd-mcp-slim-stale"; touch -t 200001010000 "$SWD/fnd-mcp-slim-stale"
+run_stub "$SWD" "$smallin87" FND_MCP_SLIM_TTL=0 >/dev/null
+if [ -f "$SWD/fnd-mcp-slim-stale" ]; then ok; else bad M93b-ttl0-disabled "TTL=0 still swept"; fi
+
+# M94: the deferral has to survive the DEBUG level this developer actually runs. json-slim discards a
+# sub-gate `size-gate` record below level 2, so tracing one at level 1 would load the whole graph to
+# write nothing — the below-gate no-load property must hold there too, and level 2 must still load
+# (else the skip would be silently swallowing the record instead of the wasted require).
+LZ1="$TMP/lazy-dbg"; mkdir -p "$LZ1"; : > "$LZ1/.fnd-mcp-slim-sweep"
+run_lazy1() { printf '%s' "$2" | env -u FND_MCP_SLIM_STUB FND_MCP_SLIM_DIR="$1" FND_MCP_SLIM_DEBUG="$3" \
+  node --require "$LAZY" "$SLIM" 2>&1 >/dev/null; }
+assert_eq       M94-below-gate-lvl1-no-load "$(run_lazy1 "$LZ1" "$smallin87" 1)" ""
+assert_eq       M94-below-gate-on-no-load   "$(run_lazy1 "$LZ1" "$smallin87" true)" ""
+assert_eq       M94-lvl1-log-empty "$(cat "$LZ1/$DBGLOG" 2>/dev/null)" ""
+LZ1B="$TMP/lazy-dbg2"; mkdir -p "$LZ1B"; : > "$LZ1B/.fnd-mcp-slim-sweep"
+assert_contains M94-below-gate-lvl2-loads   "$(run_lazy1 "$LZ1B" "$smallin87" 2)" "LOADED-JSON-SLIM"
+assert_contains M94-lvl2-logs-size-gate "$(jq -r '.reason' "$LZ1B/$DBGLOG" 2>/dev/null)" "size-gate"
+# the overflow notice is NOT a sub-gate record: it survives at level 1, module load and all
+LZ2="$TMP/lazy-dbg-ovf"; mkdir -p "$LZ2"; : > "$LZ2/.fnd-mcp-slim-sweep"
+ovin94='{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"Result exceeds maximum allowed tokens; saved to /tmp/tool-results/x.txt for review."}]}}'
+run_stub "$LZ2" "$ovin94" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M94-overflow-lvl1-logged "$(jq -r '.reason' "$LZ2/$DBGLOG" 2>/dev/null)" "platform-overflow"
+
+# M95: the hook's sweep gates are a literal COPY of json-slim's marker + throttle, read without loading
+# it. A rename on one side alone would make every call "sweep due" — the module loads and a full readdir
+# runs on every MCP call, with no test noticing. Pin the agreement instead of trusting the comment.
+JSLIM_SRC="$ROOT/plugins/fnd/scripts/json-slim.cjs"
+assert_eq M95-sweep-marker-agrees "$(grep -o "SWEEP_MARKER = '[^']*'" "$SLIM")" \
+  "$(grep -o "SWEEP_MARKER = '[^']*'" "$JSLIM_SRC")"
+assert_eq M95-sweep-throttle-agrees "$(grep -o 'SWEEP_THROTTLE_MS = [^;]*' "$SLIM")" \
+  "$(grep -o 'SWEEP_THROTTLE_MS = [^;]*' "$JSLIM_SRC")"
+
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
-# Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping
-# UserPromptSubmit-shaped input to the hook. $shim/$fake come from the G/M scaffolding.
+# Behavior by piping UserPromptSubmit-shaped input to the hook; the FND_PROMPT_JSON gate itself
+# is a G case now (the merged command) plus P5 for the in-process half.
 GUARD="$ROOT/plugins/fnd/hooks/prompt-json-guard.cjs"
-PJ_GATE="$(jq -r '.hooks.UserPromptSubmit[0].hooks[1].command' "$MANIFEST")"
 PJD="$TMP/pj-spill"; mkdir -p "$PJD"
 
 # Build a UserPromptSubmit input: a JSON blob of ~blobBytes wrapped in prose padded so the
@@ -1560,15 +1686,11 @@ big="$(printf 'z%.0s' $(seq 1 12000)) and a { broken [ json"
 in="$(jq -n --arg p "$big" --arg c "$PJD" '{prompt:$p,cwd:$c}')"
 assert_eq P4-no-json "$(run_guard "$in")" ""
 
-# P5: FND_PROMPT_JSON gate — 0 means node never spawns; unset means it runs
-run_pj_gate() { : > "$TMP/node.log"; env "$@" NODE_LOG="$TMP/node.log" PATH="$shim:$PATH" \
-  CLAUDE_PLUGIN_ROOT="$fake" bash -c "$PJ_GATE" >/dev/null 2>&1; }
-run_pj_gate FND_PROMPT_JSON=0; ec=$?
-assert_eq P5-off-exit "$ec" 0
-if [ -s "$TMP/node.log" ]; then bad P5-off "node ran with FND_PROMPT_JSON=0"; else ok; fi
-run_pj_gate; ec=$?
-assert_eq P5-default-exit "$ec" 0
-if [ -s "$TMP/node.log" ]; then ok; else bad P5-default "node did not run by default"; fi
+# P5: FND_PROMPT_JSON=0 disables the guard in-process too (the belt behind the entry-point gate) —
+# it shares its node process with the context monitor, so the switch can no longer stop the spawn
+in="$(mk 20000 25000 "$PJD" "$PJD/p5.json")"
+assert_eq P5-off-in-process "$(run_guard "$in" FND_PROMPT_JSON=0)" ""
+assert_contains P5-on-blocks "$(run_guard "$in")" '"decision":"block"'
 
 # P6: braces / brackets / escaped quotes INSIDE string values must not break extraction
 EXP6="$PJD/p6.json"
@@ -1698,6 +1820,91 @@ out="$(run_guard "$in")"
 assert_contains P16-block "$out" '"decision":"block"'
 p="$(reason_path "$out")"
 if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP16"; then ok; else bad P16-stray-closer "flat array after a stray closer not blocked/saved (p='$p')"; fi
+
+# ═══ U — UserPromptSubmit merged entry point (hooks/user-prompt.cjs) ════════
+# One node process runs both halves. The contract under test: a guard BLOCK is the whole
+# output and stops the monitor dead (a blocked prompt never reaches the model, so its band
+# state must not advance), each half is gated by its own switch, and one half throwing can
+# neither silence nor forge the other. Exit is always 0.
+MERGED="$ROOT/plugins/fnd/hooks/user-prompt.cjs"
+UPD="$TMP/up"; mkdir -p "$UPD"
+UPCWD="$TMP/up-cwd"; mkdir -p "$UPCWD"    # no .claude/fnd → blobs spill to TMPDIR
+
+up_in() { # session-id prompt-bytes — one event carrying BOTH a transcript and a prompt
+  node -e '
+    const fs=require("fs");
+    const [t,sid,pb,cwd]=process.argv.slice(1);
+    let prompt="ask me";
+    if (+pb) {
+      const items=Array.from({length:600},(_,i)=>({id:i,pad:"x".repeat(40)}));
+      prompt="here is the dump:\n"+JSON.stringify({items})+"\ndone";
+    }
+    process.stdout.write(JSON.stringify({transcript_path:t,session_id:sid,effort:{level:"high"},cwd,prompt}));
+  ' "$TMP/t0.jsonl" "$1" "$2" "$UPCWD"
+}
+run_up() { # input-json [VAR=val…]
+  printf '%s' "$1" | env TMPDIR="$UPD" "${@:2}" node "$MERGED" 2>/dev/null
+}
+band_files() { ls "$UPD" 2>/dev/null | grep -c '^fnd-ctx-band-'; }
+
+# U1: nothing to block → the monitor's object goes out exactly as it does on its own
+in="$(up_in "u1a-$$" 0)"
+out="$(run_up "$in" FND_CTX_WARN=10)"
+in2="$(up_in "u1b-$$" 0)"
+assert_eq U1-identical-to-standalone "$out" "$(printf '%s' "$in2" | env TMPDIR="$UPD" FND_CTX_WARN=10 node "$CTX" 2>/dev/null)"
+assert_contains U1-systemmessage "$out" "systemMessage"
+assert_contains U1-additionalctx "$out" "additionalContext"
+assert_absent   U1-no-decision   "$out" "decision"
+
+# U2: the guard blocks → that object is the WHOLE output, and the monitor never ran (no
+# systemMessage the developer can't act on, and no band state recorded for a dead prompt)
+rm -f "$UPD"/fnd-ctx-band-*
+in="$(up_in "u2-$$" 1)"
+out="$(run_up "$in" FND_CTX_WARN=10)"; ec=$?
+assert_eq       U2-exit          "$ec" 0
+assert_contains U2-block         "$out" '"decision":"block"'
+assert_absent   U2-no-sysmsg     "$out" "systemMessage"
+assert_absent   U2-no-additional "$out" "additionalContext"
+assert_eq       U2-band-untouched "$(band_files)" 0
+
+# U3: same input with the guard off → no block, the monitor speaks and DOES record its band
+# (the positive control for U2's band assertion)
+rm -f "$UPD"/fnd-ctx-band-*
+out="$(run_up "$in" FND_CTX_WARN=10 FND_PROMPT_JSON=0)"
+assert_absent   U3-no-block   "$out" "decision"
+assert_contains U3-sysmsg     "$out" "systemMessage"
+assert_eq       U3-band-written "$(band_files)" 1
+
+# U4: monitor off → only the guard speaks (block on a blob prompt, silence otherwise)
+assert_contains U4-guard-only-block "$(run_up "$in" FND_CTX_MONITOR=0)" '"decision":"block"'
+assert_eq       U4-guard-only-quiet "$(run_up "$(up_in "u4-$$" 0)" FND_CTX_MONITOR=0)" ""
+
+# U5: both off (a direct invocation past the plugin.json short-circuit) → nothing at all
+assert_eq U5-both-off "$(run_up "$in" FND_CTX_MONITOR=0 FND_PROMPT_JSON=0)" ""
+
+# U6/U7: one half throwing must not affect the other — the halves are independently isolated
+cat > "$TMP/up-throw-guard.cjs" <<JS
+require('$ROOT/plugins/fnd/hooks/prompt-json-guard.cjs').promptJsonDecision = () => { throw new Error('boom'); };
+JS
+cat > "$TMP/up-throw-ctx.cjs" <<JS
+require('$ROOT/plugins/fnd/hooks/context-stats.cjs').contextNotice = () => { throw new Error('boom'); };
+JS
+run_up_probe() { printf '%s' "$2" | env TMPDIR="$UPD" "${@:3}" node --require "$1" "$MERGED" 2>/dev/null; }
+out="$(run_up_probe "$TMP/up-throw-guard.cjs" "$in" FND_CTX_WARN=10)"; ec=$?
+assert_eq       U6-exit         "$ec" 0
+assert_absent   U6-no-block     "$out" "decision"
+assert_contains U6-monitor-runs "$out" "systemMessage"
+out="$(run_up_probe "$TMP/up-throw-ctx.cjs" "$in" FND_CTX_WARN=10)"; ec=$?
+assert_eq       U7-exit        "$ec" 0
+assert_contains U7-block-wins  "$out" '"decision":"block"'
+out="$(run_up_probe "$TMP/up-throw-ctx.cjs" "$(up_in "u7-$$" 0)" FND_CTX_WARN=10)"; ec=$?
+assert_eq U7b-quiet-exit "$ec" 0
+assert_eq U7b-quiet-out  "$out" ""
+
+# U8: malformed stdin → nothing, exit 0 (never break a prompt)
+out="$(printf 'not json' | env TMPDIR="$UPD" node "$MERGED" 2>/dev/null)"; ec=$?
+assert_eq U8-malformed-out  "$out" ""
+assert_eq U8-malformed-exit "$ec" 0
 
 # ═══ T — SubagentStart subagent-conventions (code-convention injection) ══════
 # Reuses $fake (CLAUDE_PLUGIN_ROOT with hooks/comment-discipline.md + lean-code.md

@@ -373,11 +373,14 @@ hook error never blocks work:
 - **SubagentStart** — `subagent-conventions.sh` re-injects comment discipline + lean code
   into code-writing subagents; read-only readers are skipped.
 - **PreToolUse (Bash) — two deterministic git guards.** `no-verify-bypass.sh` blocks
-  hook-bypassing commits (`--no-verify` / `-n` in any form, plus `core.hooksPath` /
-  `GIT_CONFIG_*` redirects; its FP/FN contract lives in
-  `tests/no-verify-bypass-matrix.sh`). `no-ai-attribution.sh` blocks AI-attribution
-  trailers in commit messages.
-- **UserPromptSubmit** — two independent hooks. `context-stats.cjs` monitors
+  every way of getting past the repo's git hooks: `--no-verify` on a commit, push,
+  merge, `am` or pull (plus `-n`, which is that flag on a commit only), `core.hooksPath`
+  and `GIT_CONFIG_*` redirects (read-only config *reads* stay allowed), and disabling the
+  hook files themselves — `rm` / `mv` / `chmod -x` / truncate / in-place edit / redirect,
+  and `HUSKY=0`. Its FP/FN contract lives in `tests/no-verify-bypass-matrix.sh`.
+  `no-ai-attribution.sh` blocks AI-attribution trailers in commit messages.
+- **UserPromptSubmit** — one node process (`user-prompt.cjs`) running two independently
+  gated halves; a block from the guard wins over the monitor's notice. `context-stats.cjs` monitors
   context-window usage and warns (recommending `/compact`) past a threshold. Knobs, set
   like `FND_LEAN` in `settings.json` → `env`: `FND_CTX_MONITOR=0` turns it off,
   `FND_CTX_WARN` sets the warn threshold in % (default 40), `FND_CTX_WINDOW` overrides the
@@ -531,7 +534,7 @@ added to this table.
 | Variable | Default | Effect |
 |---|---|---|
 | `FND_LEAN` | `1` | `0` disables the lean-code session convention |
-| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor |
+| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process) |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens) |
 | `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns |
@@ -541,7 +544,7 @@ added to this table.
 | `FND_MCP_SLIM_STUB` | `1` | `0` disables the spill-and-stub guard: a result the compressor cannot bring under the threshold is then handed to the model raw again, instead of as a ~1 KB stub + spill |
 | `FND_MCP_SLIM_STUB_BYTES` | `32768` | bytes above which the `mcp-slim` hook spills-and-stubs instead of passing a whale through (also applies to a compressed body that is still this large); any invalid value falls back to `32768`, never to `0`, and any value below the stub's own ~1.2 KB is raised to it (a smaller gate could emit a stub bigger than the text it replaces) |
 | `FND_MCP_SLIM_BUDGET_MS` | `5000` | wall-clock ceiling for one `mcp-slim` compression run (shared across every block of a result). An expiry hands the ORIGINAL back — per block, so a partly-slimmed content array is logged `compressed` + `budget_partial`, and a whole-result expiry `budget-exceeded` (stubbed above the stub threshold); `0` disables the ceiling; any invalid value falls back to `5000`, never to `0`. The default is ~22× a 1 MB-class payload on this pipeline and well inside Claude Code's PostToolUse timeout — headroom, not a guarantee: a genuinely huge result (tens of MB, or several fat blocks sharing the one deadline) can still reach it, and is then handed back uncompressed rather than half-compressed |
-| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` hook) — node never spawns |
+| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor unless `FND_CTX_MONITOR=0` too — with both at `0` no node process runs at all |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 | `FND_GQL_PROBE_CACHE` | `21600` | seconds the gql runner reuses its two sticky machine facts — the `shopify version` probe (~1.5 s, also invalidated whenever the CLI binary is newer than the cache) and "`store execute` is unavailable for this store", which lets a later call skip the doomed probe entirely. `0` re-probes on every call — the escape hatch right after a `shopify store auth`; any invalid value falls back to `21600`. Both caches live in a 0700 per-user dir under `$TMPDIR`; `--engine store` ignores the second one and always attempts |
 | `FND_CPT_THROTTLE_WAITS` | `20 60` | pause(s), in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled` — the store+token rate limit is shared with a running `shopify theme dev`, so a bulk push can 429 while everything else is healthy. One retry per listed value; empty disables retrying (tests pass `0 0`) |

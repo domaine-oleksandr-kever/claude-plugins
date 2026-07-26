@@ -21,7 +21,12 @@
 //     unsaved blob would lose the developer's paste) — pass through instead;
 //   - any parse/scan/IO failure → pass through.
 //
-// Env: FND_PROMPT_JSON (gated in plugin.json — node never spawns when 0).
+// Runs inside hooks/user-prompt.cjs (the one node process the UserPromptSubmit event pays for),
+// which calls promptJsonDecision() and prints what it returns; invoked directly, this file does
+// the same for one event on stdin.
+//
+// Env: FND_PROMPT_JSON — 0 disables the guard (checked by that entry point AND here; node still
+// spawns for the context monitor unless it is off too).
 'use strict';
 
 const fs = require('fs');
@@ -105,14 +110,14 @@ function spillBlob(blob, cwd) {
   }
 }
 
-function run(raw) {
-  const input = JSON.parse(raw);
-  if (process.env.FND_PROMPT_JSON === '0') return; // belt-and-suspenders vs the plugin.json gate
+// The block decision for one UserPromptSubmit event, or null when the prompt proceeds untouched.
+function promptJsonDecision(input) {
+  if (process.env.FND_PROMPT_JSON === '0') return null; // belt-and-suspenders vs the entry-point gate
   const prompt = input.prompt;
-  if (typeof prompt !== 'string' || Buffer.byteLength(prompt, 'utf8') < PROMPT_MIN) return;
+  if (typeof prompt !== 'string' || Buffer.byteLength(prompt, 'utf8') < PROMPT_MIN) return null;
 
   const blobs = collectJsonBlobs(prompt);
-  if (!blobs.length) return;
+  if (!blobs.length) return null;
 
   // The block erases the whole prompt, so spill EVERY offloadable blob first — if any
   // spill fails, don't block (never lose a paste): pass through instead.
@@ -120,7 +125,7 @@ function run(raw) {
   const paths = [];
   for (const b of blobs) {
     const p = spillBlob(b.blob, cwd);
-    if (!p) return;
+    if (!p) return null;
     paths.push(p);
   }
 
@@ -133,17 +138,22 @@ function run(raw) {
     `That JSON was NOT sent to the model. Resubmit your question and mention ${single ? 'this path' : 'these paths'}; ` +
     `it'll be read with jq/Read instead of carrying ~${kb} KB of JSON in context every turn.\n\n` +
     `(To send JSON inline instead, set FND_PROMPT_JSON=0.)`;
-  process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+  return { decision: 'block', reason };
 }
 
-// Collect stdin as bytes, decode once — decoding per chunk would mangle a multibyte char
-// split across a read boundary, corrupting the spilled blob (U+FFFD).
-const chunks = [];
-process.stdin.on('data', (d) => chunks.push(d));
-process.stdin.on('end', () => {
-  try {
-    run(Buffer.concat(chunks).toString('utf8'));
-  } catch (_) {
-    // Any failure → emit nothing, the prompt proceeds untouched.
-  }
-});
+module.exports = { promptJsonDecision };
+
+if (require.main === module) {
+  // Collect stdin as bytes, decode once — decoding per chunk would mangle a multibyte char
+  // split across a read boundary, corrupting the spilled blob (U+FFFD).
+  const chunks = [];
+  process.stdin.on('data', (d) => chunks.push(d));
+  process.stdin.on('end', () => {
+    try {
+      const decision = promptJsonDecision(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      if (decision) process.stdout.write(JSON.stringify(decision));
+    } catch (_) {
+      // Any failure → emit nothing, the prompt proceeds untouched.
+    }
+  });
+}

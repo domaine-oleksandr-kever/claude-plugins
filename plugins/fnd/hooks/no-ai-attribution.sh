@@ -22,6 +22,20 @@ set -u
 
 input="$(cat 2>/dev/null || true)"
 
+# Fast reject, before the jq/sed/grep pipeline this hook pays on EVERY Bash call: a
+# block needs BOTH a `git … commit` segment and one of the trailer words the matcher
+# below keys on, and neither can appear in the command without appearing in stdin
+# (this hook scans the command verbatim — no dequoting). `claude` is deliberately not
+# a trigger on its own: it sits in half the paths of a Claude Code session, and every
+# matched alternative carries one of these three words anyway. The trailer phrase is
+# matched loosely (`*generated*with*`, not the literal pair) because the matcher below
+# reads the message with newlines flattened to spaces: a wrapped `Generated⏎with` is one
+# phrase to it and two words here. A `\u`-escaped keyword only appears after the jq
+# decode, so anything carrying one stays in.
+shopt -s nocasematch 2>/dev/null || true
+case "$input" in *commit*|*\\u*) ;; *) exit 0 ;; esac
+case "$input" in *co-authored-by*|*anthropic*|*generated*with*|*\\u*) ;; *) exit 0 ;; esac
+
 cmd=""
 if command -v jq >/dev/null 2>&1; then
   cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
@@ -49,7 +63,10 @@ segs="$(printf '%s' "$cmd" | tr '\n' ' ' \
 # Claude/Anthropic attributions only — human Co-Authored-By trailers pass.
 # Scoped to the commit segments so trailer text elsewhere in a compound
 # command (`grep -r "Co-Authored-By: Claude" … && git commit`) doesn't trip.
-if printf '%s' "$segs" | grep -qiE 'co-authored-by:[^<>]*(claude|anthropic)|noreply@anthropic\.com|generated with \[?claude'; then
+# The display-name span stops at `<`, so an @anthropic.com address (any agent
+# identity, any subdomain) needs its own alternative; a look-alike host
+# (jane@anthropic.example.com, jane@notanthropic.community) still passes.
+if printf '%s' "$segs" | grep -qiE 'co-authored-by:[^<>]*(claude|anthropic|<[^<>]*@([[:alnum:]-]+\.)*anthropic\.com)|noreply@anthropic\.com|generated with \[?claude'; then
   echo "Domaine convention (references/commit-message-format.md): commit messages carry no AI attribution. Re-run the same git commit without the Co-Authored-By / Generated-with-Claude trailer." >&2
   exit 2
 fi

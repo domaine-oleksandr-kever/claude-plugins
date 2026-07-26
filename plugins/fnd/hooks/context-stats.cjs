@@ -8,10 +8,13 @@
 // threshold the notice adds a /compact-or-/clear call-to-action on every prompt
 // (UI-only, free); the additionalContext flag for skills is emitted ONLY when the
 // usage BAND changes (ok → warn → 75 → 90, and back), tracked in a per-session
-// tmpdir state file — steady-state prompts inject zero model context. Tunables:
-//   FND_CTX_MONITOR on by default; set to 0 to disable (gated in plugin.json's
-//                   UserPromptSubmit command, so a disabled monitor never even
-//                   spawns node)
+// tmpdir state file — steady-state prompts inject zero model context.
+//
+// Runs inside hooks/user-prompt.cjs (the one node process the UserPromptSubmit event pays
+// for), which calls contextNotice() and prints what it returns; invoked directly, this file
+// does the same for one event on stdin. Tunables:
+//   FND_CTX_MONITOR on by default; set to 0 to disable (checked by that entry point AND here;
+//                   node still spawns for the prompt-JSON guard unless it is off too)
 //   FND_CTX_WINDOW  context window in tokens (default: resolved from the session model,
 //                   200000 when the model is unknown)
 //   FND_CTX_WARN    warn-from percentage (default 40; 0 = warn on every prompt)
@@ -34,14 +37,14 @@ function windowFor(model) {
     : 200000;
 }
 
-let raw = '';
-process.stdin.on('data', (d) => (raw += d));
-process.stdin.on('end', () => {
+// The notice for one UserPromptSubmit event, or null when there is nothing to say (no
+// transcript, no usage entry yet). Never throws for a caller: any failure is a null.
+function contextNotice(input) {
   try {
-    const input = JSON.parse(raw);
+    if (process.env.FND_CTX_MONITOR === '0') return null; // belt-and-suspenders vs the entry-point gate
     const effort = (input.effort && input.effort.level) || '';
     const transcript = input.transcript_path;
-    if (!transcript || !fs.existsSync(transcript)) return;
+    if (!transcript || !fs.existsSync(transcript)) return null;
 
     // Read only the tail — transcripts grow to tens of MB.
     const size = fs.statSync(transcript).size;
@@ -73,7 +76,7 @@ process.stdin.on('end', () => {
         }
       } catch (_) {}
     }
-    if (!usage) return;
+    if (!usage) return null;
 
     const WINDOW = ENV_WINDOW || windowFor(model);
 
@@ -144,6 +147,21 @@ process.stdin.on('end', () => {
         };
       }
     }
-    console.log(JSON.stringify(out));
-  } catch (_) {}
-});
+    return out;
+  } catch (_) {
+    return null;
+  }
+}
+
+module.exports = { contextNotice };
+
+if (require.main === module) {
+  let raw = '';
+  process.stdin.on('data', (d) => (raw += d));
+  process.stdin.on('end', () => {
+    try {
+      const out = contextNotice(JSON.parse(raw));
+      if (out) console.log(JSON.stringify(out));
+    } catch (_) {}
+  });
+}
