@@ -204,7 +204,9 @@ check('reduction:figma≥0.70', ratio('figma-node-rest.json') >= 0.70, `figma ra
 // ---------------------------------------------------------------- CLI dual entry --
 {
   const inp = readFileSync(path.join(FIX, 'figma-node-rest.json'), 'utf8');
-  const out = execFileSync('node', [SLIM], { input: inp, encoding: 'utf8' });
+  // spawnSync for the stdin runs: a lossy stdin body also names its recovery copy on stderr, captured
+  // here rather than leaked into the suite's own output.
+  const out = spawnSync('node', [SLIM], { input: inp, encoding: 'utf8' }).stdout;
   check('cli-stdin', out.length < inp.length && JSON.parse(out), 'CLI over stdin compresses to valid JSON');
   const outFile = execFileSync('node', [SLIM, path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8' });
   check('cli-file', outFile.length < inp.length, 'CLI over a file compresses');
@@ -225,6 +227,69 @@ check('reduction:figma≥0.70', ratio('figma-node-rest.json') >= 0.70, `figma ra
   const stdinEcho = execFileSync('node', [SLIM], { input: 'plain text, not json', encoding: 'utf8' });
   check('cli-nonjson-stdin-echo', stdinEcho.trim() === 'plain text, not json',
     'non-JSON stdin → verbatim passthrough (no file to point at)');
+}
+
+// ------------------------------------------------------- CLI stdin recovery net --
+// A FILE run needs no recovery copy — the caller already holds the path, and every lossy branch names
+// it. STDIN had none: `noise` dropped fields and `truncate` clipped strings, and the handed-back body
+// was the only copy left (the crush spill holds the DROPPED ROWS, not the original). A lossy stdin body
+// now rides on the same content-addressed original-spill the hook gives every compressed MCP result.
+{
+  const lossy = JSON.stringify({ rows: Array.from({ length: 300 }, (_, i) => ({ id: i, empty: null, big: 'y'.repeat(1500) })) });
+  const dirs = [];
+  const run = (input, args, env) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'jslim-stdin-'));
+    dirs.push(dir);
+    const r = spawnSync('node', [SLIM, ...(args || [])], { input, encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, ...(env || {}) } });
+    const originals = readdirSync(dir).filter((f) => /^fnd-mcp-slim-[0-9a-f]{16}.*\.json$/.test(f)); // not the debug log, which shares the prefix
+    return { ...r, dir, originals, read: (f) => readFileSync(path.join(dir, f), 'utf8') };
+  };
+  const r = run(lossy);
+  check('b4.4-stdin-original-spilled', r.originals.length === 1 && r.read(r.originals[0]) === lossy,
+    `a lossy stdin body must leave the original on disk: ${JSON.stringify(r.originals)}`);
+  check('b4.4-stdin-original-named', r.originals.length === 1 && r.stderr.includes(path.join(r.dir, r.originals[0])),
+    `the run must NAME the recovery copy: stderr=${JSON.stringify(r.stderr)}`);
+  check('b4.4-stdin-stdout-still-json', (() => { try { return !!JSON.parse(r.stdout); } catch { return false; } })(),
+    `stdout stays the machine-readable body — the pointer belongs on the side channel: ${r.stdout.slice(0, 80)}`);
+  // The debug line's ONE handback path (`spill`) is what --report pairs recoveries on, and `spills` is
+  // the on-disk inventory: both must name the copy this run handed the model.
+  const d = run(lossy, [], { FND_MCP_SLIM_DEBUG: '1' });
+  const line = JSON.parse(d.read('fnd-mcp-slim-debug.log').trim().split('\n').pop());
+  check('b4.4-stdin-debug-spill', d.originals.length === 1 && line.spill === path.join(d.dir, d.originals[0]) && line.spills.includes(line.spill),
+    `debug line must name the original: spill=${line.spill} spills=${JSON.stringify(line.spills)}`);
+  // A passthrough loses nothing, so it must NOT start littering the spill dir.
+  const pass = run('plain text, not json');
+  check('b4.4-stdin-passthrough-no-spill', pass.originals.length === 0 && pass.stdout.trim() === 'plain text, not json',
+    `a lossless passthrough must write no original: ${JSON.stringify(pass.originals)}`);
+  // --no-spill is the explicit opt-out (it already disables the crush marker's spill).
+  const off = run(lossy, ['--no-spill']);
+  check('b4.4-stdin-nospill-flag', off.originals.length === 0, `--no-spill must not write an original: ${JSON.stringify(off.originals)}`);
+  // Under `--jq` the copy holds the NARROWED subtree the stages consumed, not the piped stream — it is
+  // still the complete undo for the body being printed, but calling it "the original" sends a caller
+  // that reads it looking for a stream it will not find.
+  const nq = run(lossy, ['--jq', 'rows']);
+  check('dr2-stdin-narrowed-named', nq.originals.length === 1 && nq.stderr.includes('narrowed input spilled to') && !nq.stderr.includes('original spilled to'),
+    `a --jq run must not call its subtree copy the original: stderr=${JSON.stringify(nq.stderr)}`);
+  // An IDENTITY selector (`--jq .` / `..` / a trailing dot) narrows nothing, so the copy is labelled
+  // "the original" — and it must BE the piped bytes. The narrowing walk re-serializes its result into
+  // `raw`, which collapsed a piped JSONL stream into one JSON array line: the spill lost every line
+  // boundary the `sed -n`/`readline` guidance addresses, under a label promising the stream itself.
+  const jsonl = Array.from({ length: 40 }, (_, i) => JSON.stringify({ id: i, empty: null, big: 'y'.repeat(400) })).join('\n');
+  const idq = run(jsonl, ['--jq', '.']);
+  check('dr2-stdin-identity-jq-byte-exact', idq.originals.length === 1 && idq.read(idq.originals[0]) === jsonl,
+    `an identity --jq must spill the piped bytes, not a re-serialization: ${idq.originals.length === 1 ? JSON.stringify(idq.read(idq.originals[0]).slice(0, 90)) : JSON.stringify(idq.originals)}`);
+  check('dr2-stdin-identity-jq-labelled-original', idq.stderr.includes('original spilled to') && !idq.stderr.includes('narrowed input'),
+    `an identity selector narrows nothing, so the copy is the original: stderr=${JSON.stringify(idq.stderr)}`);
+  // Spill dir unwritable (a FILE where the dir belongs) → no recovery copy exists, so the ORIGINAL is
+  // the only honest answer; a lossy body with no net must never be emitted.
+  const blocked = mkdtempSync(path.join(tmpdir(), 'jslim-stdinx-'));
+  const asFile = path.join(blocked, 'not-a-dir');
+  writeFileSync(asFile, 'x');
+  const fail = spawnSync('node', [SLIM], { input: lossy, encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: asFile } });
+  check('b4.4-stdin-spill-failure-passthrough', fail.stdout.trim() === lossy,
+    `unspillable original → verbatim passthrough, not an unrecoverable slim: ${fail.stdout.length} B out of ${lossy.length}`);
+  rmSync(blocked, { recursive: true, force: true });
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------- spill-TTL sweep (M5) --
@@ -277,7 +342,7 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-cli-sweep-'));
   const stale = path.join(dir, 'fnd-crush-STALE.json'); writeFileSync(stale, '[]'); utimesSync(stale, 1000, 1000);
   const inp = readFileSync(path.join(FIX, 'figma-node-rest.json'), 'utf8');
-  const out = execFileSync('node', [SLIM], { input: inp, encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir } });
+  const out = spawnSync('node', [SLIM], { input: inp, encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir } }).stdout;
   check('cli-sweeps-stale', !existsSync(stale), 'the CLI exit sweep must prune a stale spill');
   check('cli-sweep-output-intact', out.length < inp.length && JSON.parse(out), 'CLI output stays valid + compressed despite the sweep');
   rmSync(dir, { recursive: true, force: true });
@@ -799,6 +864,49 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   const p = await J.streamProfile(f);
   check('m9b-streamprofile', p.profile === true && p.rows === 12 && p.file === f && p.bytes > 0, `streamProfile: ${JSON.stringify({ rows: p.rows, file: p.file, bytes: p.bytes })}`);
   rmSync(dir, { recursive: true, force: true });
+}
+// The accumulator must be bounded in KEY COUNT and in per-key distinct BYTES, not just in what it
+// EMITS. A JSONL whose rows each carry a fresh key name (an id-keyed map dumped row per line) built one
+// Set per key name for the whole stream, and PROFILE_DISTINCT_CAP counted 1000 values without weighing
+// them, so 1000 × 100 KB was retained whole. Both were OOMs on a real whale — the very file Gate B
+// exists to make tractable.
+{
+  function* uniqueKeyRows(n) { for (let i = 0; i < n; i++) yield JSON.stringify({ ['k' + i]: `v${i}`, id: i }); }
+  const p = J.profileLines(uniqueKeyRows(20000), { file: '/x/idmap.jsonl' });
+  check('b4.2-prof-key-build-cap',
+    p.rows === 20000 && Object.keys(p.keys).length <= 200 && p.keysTruncatedAtLeast > 0 && p.keysCapped === true,
+    `unbounded key set: rows=${p.rows} shown=${Object.keys(p.keys).length} trunc=${p.keysTruncatedAtLeast} capped=${p.keysCapped}`);
+  // Past the build cap the dropped-key count saturates at (build cap − shown), so the exact field would
+  // tell a reader of a 20,000-key dump that 266 keys were dropped. The profile is the ONLY artifact a
+  // JSONL whale ever puts in context, so the number has to name itself as a floor.
+  check('dr2-prof-key-floor-named', p.keysTruncated === undefined && p.keysTruncatedAtLeast === 400 - Object.keys(p.keys).length,
+    `a capped count must be emitted as a floor, never as an exact total: ${JSON.stringify({ exact: p.keysTruncated, floor: p.keysTruncatedAtLeast })}`);
+  // Below the build cap the key set is EXACT, so a wide-but-finite row keeps reporting an exact count.
+  const wide = {}; for (let i = 0; i < 200; i++) wide[`key_${i}`] = i;
+  const pw = J.profileLines([JSON.stringify(wide)], {});
+  check('b4.2-prof-key-cap-exact-below-build', pw.keysCapped === undefined,
+    `a 200-key row is under the build cap — no floor flag: ${JSON.stringify(pw.keysCapped)}`);
+}
+// 50 distinct 4 KB values are 200 KB of retained strings under a count cap of 1000 — the byte budget
+// must cap them and SAY it did (distinct then reads as a floor, like keysTruncated).
+{
+  const p = J.profileLines(Array.from({ length: 50 }, (_, i) => JSON.stringify({ v: `${'x'.repeat(4096)}${i}` })), {});
+  check('b4.2-prof-distinct-bytes', p.keys.v.distinct < 50 && p.keys.v.distinctCapped === true,
+    `fat values must byte-cap the distinct set: ${JSON.stringify({ distinct: p.keys.v.distinct, capped: p.keys.v.distinctCapped })}`);
+}
+// The memory envelope itself, asserted the only non-flaky way: a CHILD with a 64 MB heap ceiling, where
+// the unbounded accumulator aborts (exit 134, "heap out of memory") instead of profiling. Rows are
+// generated lazily so the OOM can only come from the accumulator, never from the input array.
+{
+  const boundedProfile = (gen, n) => spawnSync('node', ['--max-old-space-size=64', '-e',
+    `const J=require(${JSON.stringify(SLIM)});function*g(){${gen}}` +
+    `const p=J.profileLines(g(),{});process.stdout.write(String(p.rows))`], { encoding: 'utf8', maxBuffer: 1 << 20 });
+  const keys = boundedProfile(`for(let i=0;i<${20e4};i++)yield JSON.stringify({['k'+i]:'v'+i,id:i});`);
+  check('b4.2-prof-mem-keys', keys.status === 0 && keys.stdout === '200000',
+    `200k unique-key rows must profile in 64 MB: status=${keys.status} ${String(keys.stderr).split('\n')[0]}`);
+  const fat = boundedProfile(`const s='x'.repeat(1e5);for(let i=0;i<1000;i++)yield JSON.stringify({v:s+i});`);
+  check('b4.2-prof-mem-distinct', fat.status === 0 && fat.stdout === '1000',
+    `1000 × 100 KB distinct values must profile in 64 MB: status=${fat.status} ${String(fat.stderr).split('\n')[0]}`);
 }
 // Gate-A output spill (fnd-slim-out-*) is swept by the same mtime TTL — stale gone, fresh kept.
 {
@@ -1832,6 +1940,140 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     eq('b4.11-cli-logs-no-gain', [line.decision, line.reason, line.pct, line.stages], ['passthrough', 'no-gain', 0, []]);
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// ------------------------------------------- B4.6/B4.8: superlinear scans + the wall-clock budget --
+// Two reproduced stalls and the ceiling that bounds whatever the next one is. A PostToolUse hook that
+// runs for 37 s is worse than no compression: the tool result waits on it.
+{
+  // The .NET PDB frame detector was `/^\s*at .+\) in .+:line \d+/`. Two unpinned `.+` before a literal
+  // that a long non-matching line never satisfies = catastrophic backtracking: measured 593 ms at
+  // 125 KB, 2.3 s at 250 KB, 9.3 s at 500 KB, 37.7 s at 998 KB — a clean 4× per doubling. Pinning the
+  // FIRST quantifier to `[^)]+` removes it (the tail `.+` has a single start position, so it stays
+  // linear). detectLog is the observable seam: a lone frame line scores ratio 1.0 → confidence 0.8.
+  const t0 = Date.now();
+  const evil = '   at F' + ') in :line '.repeat(90728); // 998,007 B, one line, dense in `) in `, never matches
+  const evilIsLog = J.detectLog(evil).isLog;
+  const evilMs = Date.now() - t0;
+  check('b4.6-dotnet-frame-linear', evilMs < 500, `detectLog over a 998 KB adversarial frame line took ${evilMs} ms (was ~37,700 ms)`);
+  check('b4.6-dotnet-frame-no-false-log', evilIsLog === false, 'the adversarial line matches no pattern, so it is not a log');
+  // Match equivalence on real frames. `[T]` in the method name is deliberate: it keeps the generic
+  // JS/Java frame pattern (`at [\w.$/]+\(`) from matching, so `isLog` speaks for the .NET pattern alone.
+  const frame = (l) => J.detectLog(l).isLog;
+  check('b4.6-dotnet-frame-windows-path',
+    frame('   at MyApp.Service.Run[T](Int32 id) in C:\\Program Files\\App\\Service.cs:line 42'),
+    'a PDB path containing SPACES must still match (the reason the tail stays `.+` instead of `\\S+`)');
+  check('b4.6-dotnet-frame-plain', frame('   at Foo.Bar[T](String s) in /src/Foo.cs:line 7'), 'an ordinary .NET PDB frame matches');
+  check('b4.6-dotnet-frame-minimal', frame('   at F[T](x) in x y:line 3'), 'the minimal shape matches');
+  check('b4.6-dotnet-frame-needs-line-number', !frame('   at F[T](x) in x y:line'), 'no line NUMBER → no match');
+  // Documented narrowing: `[^)]+` cannot span a nested `)`, so a frame whose ARGUMENT list contains
+  // parentheses no longer matches. .NET method signatures do not nest them; the linearity is worth it.
+  check('b4.6-dotnet-frame-nested-parens-narrowed',
+    !frame('   at A.B[T](Nested(x)) in /src/A.cs:line 7'),
+    'a nested-paren argument list is outside the pinned pattern (documented narrowing)');
+  // …and the narrowing costs nothing on a real trace, which is what bounds it: an ordinary dotted
+  // frame is also caught by the JS/Java pattern (`at <dotted>(`), and the compressor's own .NET
+  // recognition is substring-based (isDotnetFrame), not this regex. So a nested-paren trace still
+  // detects and still marks every frame — identically to its nested-paren-free twin.
+  const dotnetTrace = (arg) => ['Unhandled exception. System.InvalidOperationException: boom',
+    ...Array.from({ length: 60 }, (_, i) => `   at MyApp.Svc.Run(${arg(i)}) in /src/Svc.cs:line ${i + 1}`)].join('\n');
+  // Byte ratio is NOT the invariant here (the two argument texts differ in length) — the structure is.
+  const traceShape = (s) => [J.detectLog(s).isLog, L.parseLogLines(s.split('\n'), {}).filter((e) => e.isStackTrace).length,
+    J.compressLog(s, {}).compressed_line_count];
+  eq('b4.6-nested-parens-trace-still-compresses', traceShape(dotnetTrace((i) => `Nested(${i})`)), traceShape(dotnetTrace((i) => `Int32 i${i}`)));
+
+  // `analyseDictArray` runs ~7 passes over rows × unionKeys. With per-row-unique key names that union
+  // is rows × keys, so the cost is quadratic in bytes: 151 KB → 577 ms, 618 KB → 10.2 s, 1.28 MB →
+  // 45.2 s (28.4 s of it inside the hook). Measured throughput is 1.3–2.9e6 row×key ops/s, so the
+  // shipped 4e6 pre-gate caps one (uninterruptible) call at ~2–3 s; 2e6 was rejected because an
+  // ordinary 300k × 7 dump is already 2.1e6 ops. Real payloads with this shape exist (per-row-aliased
+  // GraphQL fields, metafield-keyed maps), which is why it declines instead of crashing.
+  const wide = Array.from({ length: 2000 }, (_, r) => {
+    const o = {};
+    for (let k = 0; k < 40; k++) o[`k${r}_${k}`] = `v${r}-${k}`;
+    return o;
+  });
+  const w0 = Date.now();
+  const wq = J.analyseDictArray(wide, J.DEFAULTS);
+  const wms = Date.now() - w0;
+  eq('b4.8-analyse-ops-gate', [wq.crushable, wq.strategy, wq.reason], [false, 'skip', 'analysis_too_wide']);
+  check('b4.8-analyse-ops-gate-fast', wms < 1000, `a 2000×40 unique-key array must decline fast, took ${wms} ms (was ~45,000 ms)`);
+  // …and the gate must sit far above every parity-sized array: the same shapes still analyse normally.
+  const normal = Array.from({ length: 200 }, (_, i) => ({ id: i, status: i % 2 ? 'ok' : 'pending', kind: 'widget' }));
+  check('b4.8-analyse-gate-clears-normal', J.analyseDictArray(normal, J.DEFAULTS).crushable === true,
+    'an ordinary array is nowhere near the ops cap');
+  // The ops PRODUCT on its own, which nothing above reaches: the case above trips the union cap first
+  // (per-row key names), and the tall-narrow dump below sits under the product. A SHARED but very wide
+  // schema hits only the backstop — union 2000 is exactly at the cap (the check is `>`), 2100 × 2000 =
+  // 4.2e6 is over it. Measured with the backstop removed: 2190 ms, versus ~70 ms declined.
+  const shapedWide = Array.from({ length: 2100 }, (_, r) => {
+    const o = {};
+    for (let k = 0; k < 2000; k++) o[`k${k}`] = (r + k) % 97;
+    return o;
+  });
+  const s0 = Date.now();
+  const sq = J.analyseDictArray(shapedWide, J.DEFAULTS);
+  const sms = Date.now() - s0;
+  eq('dr2-analyse-ops-backstop', [sq.crushable, sq.strategy, sq.reason], [false, 'skip', 'analysis_too_wide']);
+  check('dr2-analyse-ops-backstop-fast', sms < 700, `the ops backstop must decline before the passes, took ${sms} ms (ungated: ~2190 ms)`);
+
+  // The budget itself: `cfg.deadline` is an absolute ms timestamp threaded from the hook. An expiry
+  // hands the ORIGINAL back — never a half-transformed value — and reports its own reason so the
+  // debug log and `--report` can tell it apart from a genuine decline. Absent ⇒ no budget at all,
+  // which is what keeps the CLI and every other fixture in this file on today's behavior.
+  const raw = JSON.stringify({ rows: Array.from({ length: 600 }, (_, i) => ({ id: i, note: 'padding-padding-padding' })) });
+  const spent = J.slim(raw, { deadline: Date.now() - 1, markerMode: 'ccr' });
+  check('b4.8-deadline-passthrough',
+    !spent.wasModified && spent.output === raw && spent.reason === 'budget-exceeded' && spent.bytesOut === spent.bytesIn,
+    `an expired deadline must hand the original back verbatim: ${JSON.stringify({ mod: spent.wasModified, reason: spent.reason, same: spent.output === raw })}`);
+  const roomy = J.slim(raw, { deadline: Date.now() + 60000, markerMode: 'ccr' });
+  const none = J.slim(raw, { markerMode: 'ccr' });
+  check('b4.8-deadline-roomy-compresses', roomy.wasModified && roomy.output === none.output,
+    'a deadline in the future must not change the output by one byte');
+  check('b4.8-no-deadline-unchanged', none.wasModified && none.bytesOut < none.bytesIn, 'no deadline ⇒ no budget');
+  // An error envelope is verbatim by contract, and the hook's stub gate reads that fact off the slim
+  // result — so the parse + envelope rails must run BEFORE any deadline is consulted, or an expired
+  // budget would report a failure as a plain passthrough the guard is allowed to stub away.
+  const envelope = JSON.stringify({ errors: Array.from({ length: 20 }, (_, i) => ({ message: `insufficient permissions for field ${i}` })), data: null });
+  const spentErr = J.slim(envelope, { deadline: Date.now() - 1 });
+  eq('b4.8-deadline-error-rail-first', [spentErr.reason, spentErr.error === true, spentErr.output === envelope], ['error-shape', true, true]);
+  // …including a FENCED envelope, whose rail lives one recursion deeper (M11/B1.2).
+  const fencedErr = `Tool output:\n\`\`\`json\n${envelope}\n\`\`\``;
+  const spentFenced = J.slim(fencedErr, { deadline: Date.now() - 1 });
+  eq('b4.8-deadline-fenced-error-rail', [spentFenced.reason, spentFenced.output === fencedErr], ['error-shape', true]);
+
+  // Every fixture above expires the deadline BEFORE the pipeline starts, so it only ever exercises the
+  // top-of-route gate. The signal has to survive the walk too: the catch-alls between processValue and
+  // slim() must not swallow it into "skip the crush stage", which reports a clean compression over a
+  // HALF-transformed body and leaves the aborted walk's crush spills behind unnamed.
+  // `deadline` is compared with `>`, so an object with a valueOf() counter expires on an exact tick —
+  // a wall-clock budget calibrated against a measured run would land wherever the machine is that day.
+  const walkDoc = { dead: null, blocks: [] };
+  for (let b = 0; b < 40; b++) {
+    walkDoc.blocks.push(Array.from({ length: 60 }, (_, r) => ({ id: `${b}-${r}`, name: `row ${r}`, status: r % 5 ? 'ok' : 'err', qty: r })));
+  }
+  const walkRaw = JSON.stringify(walkDoc);
+  const walkDir = mkdtempSync(path.join(tmpdir(), 'jslim-walkbudget-'));
+  const created = [];
+  let ticks = 0;
+  const expiresOnTick = (n) => ({ valueOf: () => (++ticks > n ? -Infinity : Infinity) });
+  const mid = J.slim(walkRaw, { spillDir: walkDir, spillCreatedSink: created, deadline: expiresOnTick(12) });
+  eq('dr2-budget-inside-walk', [mid.reason, mid.wasModified, mid.output === walkRaw], ['budget-exceeded', false, true]);
+  check('dr2-budget-inside-walk-reached', created.length > 0,
+    `the fixture must expire INSIDE the crush walk (spills written: ${created.length}) or it re-tests the top-of-route gate`);
+  rmSync(walkDir, { recursive: true, force: true });
+
+  // The ops product alone is not the quadratic signal: an ordinary fixed-schema bulk dump reaches it on
+  // row count alone (a 7-key JSONL dump lost ALL compression past ~285k rows), while the shape the gate
+  // exists for blows the union itself up. Gate on the union, keep the product as the runtime backstop.
+  const tall = Array.from({ length: 300000 }, (_, i) => ({
+    id: `gid://shopify/ProductVariant/${i}`, sku: `SKU-${i % 900}`, qty: i % 50,
+    status: i % 7 ? 'ACTIVE' : 'DRAFT', price: `${(i % 90) + 1}.00`, title: `Variant ${i % 900}`, vendor: 'acme',
+  }));
+  const t0tall = Date.now();
+  const tq = J.analyseDictArray(tall, J.DEFAULTS);
+  check('dr2-analyse-tall-narrow-crushes', tq.crushable === true,
+    `a 300k×7 fixed-schema dump must still analyse: ${tq.strategy}/${tq.reason} in ${Date.now() - t0tall} ms`);
 }
 
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);

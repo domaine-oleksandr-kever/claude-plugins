@@ -28,7 +28,13 @@
 #             spill failure, FND_MCP_SLIM_STUB=0, threshold parsing — never stub);
 #             M53–M56 the M13 jsx stage (a Figma get_design_context result is compacted with a
 #             legend header, a resolvable node-id map spill and a `jsx` stage tag, never stubbed;
-#             mixed sibling shapes compress without losing copy)
+#             mixed sibling shapes compress without losing copy);
+#             M68–M86 the DR2 robustness set: every branch that discards the compressed body deletes
+#             the spills it created for it (and only those — a path holding a space or a backslash
+#             included), binary/base64 payloads are never stubbed, the wall-clock budget hands the
+#             original back as `budget-exceeded` (a mid-array expiry as `budget_partial`, and an
+#             overflow notice caught by it is still re-labelled, never stubbed), and a block array that
+#             cannot be collapsed gets one stub PER over-limit block — each recoverable, never net bigger
 #   P cases — plugin.json UserPromptSubmit gate (FND_PROMPT_JSON) + hooks/
 #             prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact, below-gate / no-json / small prompts
@@ -777,15 +783,26 @@ assert_eq M48-sibling-kept "$(printf '%s' "$outS" | jq -r '.hookSpecificOutput.u
 
 # M49: a stub collapses a block array into ONE joined text — lossless only for plain {type,text}
 # blocks. A block carrying anything more (annotations, a per-block `_meta` pagination cursor) would
-# lose that field in BOTH the stub and the spill, while the stub promises the full original on disk:
-# such an array is NOT stubbable and passes through raw. A pure-text array of the same size still stubs.
+# lose that field in BOTH the stub and the spill, while the stub promises the full original on disk, so
+# the COLLAPSE is declined; each over-limit block is replaced on its own instead (B4.8), which keeps
+# every field. A pure-text array of the same size still collapses into one block.
 SBR="$TMP/stub-rich"; mkdir -p "$SBR"
 half="$(printf 'x%.0s' $(seq 1 46000))"
 in="$(jq -n --arg t "$half" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t,annotations:{audience:["user"],priority:1}},{type:"text",text:$t,_meta:{cursor:"nextPage=abc123"}}]}}')"
-assert_eq M49-rich-block "$(run_stub "$SBR" "$in")" ""
-if ! ls "$SBR"/fnd-mcp-slim-* >/dev/null 2>&1; then ok; else bad M49-no-spill "declined stub left a spill: $(ls "$SBR")"; fi
+outR0="$(run_stub "$SBR" "$in")"
+assert_eq       M49-rich-not-collapsed "$(printf '%s' "$outR0" | jq -r '.hookSpecificOutput.updatedToolOutput.content | length' 2>/dev/null)" 2
+assert_eq       M49-rich-annotations   "$(printf '%s' "$outR0" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].annotations.priority' 2>/dev/null)" "1"
+assert_eq       M49-rich-meta          "$(printf '%s' "$outR0" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1]._meta.cursor' 2>/dev/null)" "nextPage=abc123"
+assert_contains M49-rich-block-stubbed "$(printf '%s' "$outR0" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)" "<<fnd-mcp-slim stub>>"
+# the per-block stub speaks for its OWN block, not for the whole result the spill does not hold
+assert_contains M49-rich-wording "$(printf '%s' "$outR0" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)" "this block's FULL text was written"
+# identical blocks share ONE content-addressed spill, so both stubs name the same file
+assert_eq M49-rich-one-spill "$(ls "$SBR" | grep -c '^fnd-mcp-slim-[0-9a-f]*\.json$')" 1
 in="$(jq -n --arg t "$half" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t},{type:"text",text:$t}]}}')"
-assert_contains M49-plain-blocks-stub "$(run_stub "$SBR" "$in")" "<<fnd-mcp-slim stub>>"
+outP0="$(run_stub "$SBR" "$in")"
+assert_contains M49-plain-blocks-stub "$outP0" "<<fnd-mcp-slim stub>>"
+assert_eq M49-plain-collapsed "$(printf '%s' "$outP0" | jq -r '.hookSpecificOutput.updatedToolOutput.content | length' 2>/dev/null)" 1
+assert_contains M49-plain-wording "$(printf '%s' "$outP0" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)" "the FULL original was written"
 
 # M50: the weak-gain gate measures the COMPRESSED BODY, not the envelope. A payload that compresses
 # to a few hundred bytes beside a fat `structuredContent` sibling must be handed back COMPRESSED —
@@ -807,16 +824,19 @@ if ! ls "$SBF"/fnd-mcp-slim-* >/dev/null 2>&1; then ok; else bad M51-no-spill "f
 in="$(jq -n --arg t "$bignon" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
 assert_contains M51-above-floor "$(run_stub "$SBF" "$in" FND_MCP_SLIM_STUB_BYTES=200)" "<<fnd-mcp-slim stub>>"
 
-# M52: the plain-block rail holds on the WEAK-GAIN branch too — a compressed body whose block still
-# carries annotations/_meta cannot be stubbed (payloadOf runs the same stubValue probe): the result
-# is handed back COMPRESSED, block fields intact. The Jira fixture compresses to ~58 KB, over the
-# default threshold, so only the rich block keeps this out of the stub path.
+# M52: a compressed body whose block still carries annotations/_meta cannot be COLLAPSED into one stub
+# (that would drop those fields), so the block is replaced on its own instead — the array keeps its
+# length, `annotations` survives, and the whale leaves context. The Jira fixture compresses to ~58 KB,
+# over the default threshold, so only the rich block keeps this off the collapse path.
 SBA="$TMP/stub-rich-weak"; mkdir -p "$SBA"
 in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t,annotations:{audience:["user"],priority:1}}]}}')"
 outA="$(run_stub "$SBA" "$in")"
-assert_contains M52-compressed "$outA" "<<full="
-assert_absent   M52-not-stubbed "$outA" "<<fnd-mcp-slim stub>>"
+assert_contains M52-block-stubbed "$outA" "<<fnd-mcp-slim stub>>"
 assert_eq M52-annotations-kept "$(printf '%s' "$outA" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].annotations.audience[0]' 2>/dev/null)" "user"
+assert_eq M52-priority-kept "$(printf '%s' "$outA" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].annotations.priority' 2>/dev/null)" "1"
+# the spill it names holds that block's ORIGINAL text, so the CLI line the stub prints really compresses
+pA="$(printf '%s' "$outA" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$pA" ] && cmp -s "$pA" "$JIRA"; then ok; else bad M52-spill-original "the per-block spill is not the block's original text (pA='$pA')"; fi
 
 # ── M53–M55: Figma design-context JSX (M13) ──────────────────────────────────
 # A get_design_context result (generated React/Tailwind JSX) is compacted losslessly — className
@@ -969,13 +989,15 @@ assert_eq M60-spills-exist "$m60missing" 0
 if jq -e '.spill | type == "string"' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok
 else bad M60-spill-scalar "spill=$(jq -c '.spill' "$DBG/$DBGLOG" 2>/dev/null)"; fi
 
-# M61: the STUBBED weak-gain line lists the crush spills the discarded compression left behind — the
-# orphan audit DR2/B4.5 needs (the stub's own spill is in `spill`, those files are extra).
+# M61: a STUBBED line names only files the model can still reach. The crush spills the discarded
+# compression wrote are named by no emitted handle, so the run that created them removes them and the
+# `spills` inventory stays truthful — the stub's own spill (in `spill`) is what remains.
 DBG="$TMP/dbg-m61"; mkdir -p "$DBG"
 run_stub "$DBG" "$msin" FND_MCP_SLIM_DEBUG=1 >/dev/null
 assert_eq M61-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
-if jq -r '.spills[]?' "$DBG/$DBGLOG" 2>/dev/null | grep -q 'fnd-crush-'; then ok
-else bad M61-orphans-visible "a stubbed line hides its crush spills: $(jq -c '.spills' "$DBG/$DBGLOG" 2>/dev/null)"; fi
+if jq -r '.spills[]?' "$DBG/$DBGLOG" 2>/dev/null | grep -q 'fnd-crush-'; then
+  bad M61-no-orphans-listed "a stubbed line still names the crush spills nobody will read: $(jq -c '.spills' "$DBG/$DBGLOG" 2>/dev/null)"
+else ok; fi
 # The stub's OWN spill — the file it hands the model in `spill` — must be part of the same `spills`
 # inventory (README: "its own `full=` copy plus the crush / node-id-map spills").
 if jq -e '.spill as $p | .spills | index($p)' "$DBG/$DBGLOG" >/dev/null 2>&1; then ok
@@ -1084,6 +1106,412 @@ assert_absent   M67-nogain-no-rerun  "$textU" "Compress or inspect it"
 textW2="$(run_stub "$TMP/stub-weak2" "$msin" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
 assert_contains M67-weakgain-cli "$textW2" "Compress or inspect it"
 assert_absent   M67-weakgain-no-jq "$textW2" "--jq <dot.path>"
+
+# ── M68–M70: discarded-work spill cleanup (B4.5) ──────────────────────────────
+# Every branch that throws the compressed body away — the stub, the no-gain passthrough, the
+# marker-overhead passthrough — used to leave the crush spills that body's markers named on disk. No
+# emitted handle points at them, so they were pure orphans until the 24 h sweep. The run now removes
+# the ones it CREATED itself; a spill that already existed (content-addressed, so an earlier live
+# handle may name it) is left alone.
+
+# M68: a payload of 60 crushable arrays (60 distinct crush spills) that stubs on weak-gain → the only
+# file left is the stub's own spill, and every path the debug line names is still on disk.
+ORPH="$TMP/orphans.json"
+node -e '
+  const o={};
+  for (let a=0;a<60;a++) o["arr"+a]=Array.from({length:40},(_,i)=>({id:a*1000+i,status:i===7?"error":"ok",note:"row padding padding padding a"+a+"-"+i}));
+  require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+' "$ORPH"
+in="$(jq -n --rawfile t "$ORPH" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+DBG="$TMP/dbg-m68"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M68-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
+assert_eq M68-no-crush-orphans "$(ls "$DBG" | grep -c '^fnd-crush-')" 0
+assert_eq M68-own-spill-kept   "$(ls "$DBG" | grep -c '^fnd-mcp-slim-[0-9a-f]*\.json$')" 1
+m68missing=0
+while IFS= read -r f; do [ -f "$f" ] || m68missing=$((m68missing+1)); done < <(jq -r '.spills[]?' "$DBG/$DBGLOG" 2>/dev/null)
+assert_eq M68-spills-on-disk "$m68missing" 0
+
+# M69: the cleanup may only remove what THIS run created. Run 1 compresses (guard off) and hands the
+# model a body whose crush markers name those spills; run 2 stubs the same payload, so writeSpill
+# dedups onto the same files (created:false) — they must survive for run 1's handles.
+SHC="$TMP/shared-crush"; mkdir -p "$SHC"
+c1="$(printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SHC" FND_MCP_SLIM_STUB=0 node "$SLIM" 2>/dev/null)"
+crush1="$(ls "$SHC" | grep '^fnd-crush-' | sort | tr '\n' ' ')"
+if [ -n "$crush1" ]; then ok; else bad M69-fixture "run 1 wrote no crush spill: $(ls "$SHC")"; fi
+if printf '%s' "$c1" | grep -q '_rows_offloaded'; then ok; else bad M69-handle "run 1's body names no crush spill"; fi
+run_stub "$SHC" "$msin" >/dev/null
+assert_eq M69-shared-crush-kept "$(ls "$SHC" | grep '^fnd-crush-' | sort | tr '\n' ' ')" "$crush1"
+
+# M70: the same cleanup on the two PASSTHROUGH branches that also discard a compressed body — a
+# no-gain result (the crush marker cost more than the rows it replaced) and a marker-overhead result
+# (the win was smaller than the `full=` handle). Both leave the original in context, so nothing names
+# the crush spill either wrote.
+NGF="$TMP/m70-nogain.json"
+node -e '
+  const o={};
+  for (let i=0;i<300;i++) o["field_"+i]="value-"+i+"-abcdefghijklmnop";
+  o.dupes=Array.from({length:16},()=>({i:0})); // 1 dropped row (9 B) for a ~90 B marker → slim loses bytes
+  require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+' "$NGF"
+in="$(jq -n --rawfile t "$NGF" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+DBG="$TMP/dbg-m70a"; mkdir -p "$DBG"
+assert_eq M70-nogain-passthrough "$(run_stub "$DBG" "$in")" ""
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M70-nogain-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "no-gain"
+assert_eq M70-nogain-no-orphans "$(ls "$DBG" | grep -c '^fnd-crush-')" 0
+MOF2="$TMP/m70-marker.json"
+node -e '
+  const o={};
+  for (let i=0;i<300;i++) o["field_"+i]="value-"+i+"-abcdefghijklmnop";
+  o.nullish=null;                              // the 15 B win the noise stage finds
+  o.dupes=Array.from({length:20},()=>({i:0}));  // crushes (a spill is written) but not enough to pay for the handle
+  require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+' "$MOF2"
+in="$(jq -n --rawfile t "$MOF2" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+DBG="$TMP/dbg-m70b"; mkdir -p "$DBG"
+assert_eq M70-marker-passthrough "$(run_stub "$DBG" "$in")" ""
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M70-marker-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "marker-overhead"
+assert_eq M70-marker-no-orphans "$(ls "$DBG" | grep -c '^fnd-crush-')" 0
+m70missing=0
+while IFS= read -r f; do [ -f "$f" ] || m70missing=$((m70missing+1)); done < <(jq -r '.spills[]?' "$DBG/$DBGLOG" 2>/dev/null)
+assert_eq M70-spills-on-disk "$m70missing" 0
+
+# ── M71–M72: binary/base64 payload rails (B4.9) ───────────────────────────────
+# A screenshot / audio / embedded-resource block must never be evicted by the stub guard: the spill
+# holds the TEXT payload, so a stub claiming "the FULL original was written to disk" over a result
+# carrying binary siblings hands the model a file that does not contain them.
+
+# M71: the `single` shape — `{type:"image",data,mimeType,text:<caption>}`. Only `.text` is replaced
+# there, so a fat caption used to stub while the base64 rode along untouched: 525 KB still landed in
+# context AND the stub promised a full original the spill did not hold.
+IMGB="$TMP/img-b64.txt"
+node -e 'require("fs").writeFileSync(process.argv[1],"iVBORw0KGgoAAAANSUhEUg"+"A".repeat(60000))' "$IMGB"
+CAP="$(printf 'C%.0s' $(seq 1 40000))"
+in="$(jq -n --arg c "$CAP" --rawfile d "$IMGB" '{tool_name:"mcp__x__take_screenshot",tool_response:{type:"image",data:($d|rtrimstr("\n")),mimeType:"image/png",text:$c}}')"
+SBB="$TMP/stub-binary"; mkdir -p "$SBB"
+assert_eq M71-single-binary-passthrough "$(run_stub "$SBB" "$in")" ""
+if ! ls "$SBB"/fnd-mcp-slim-[0-9a-f]* >/dev/null 2>&1; then ok; else bad M71-no-spill "a declined binary result left a spill: $(ls "$SBB")"; fi
+# Empty stdout + no spill is also what a hook that never ran produces (run_stub swallows stderr and the
+# top-level handler emits nothing on a throw), so the debug line is what separates a deliberate decline
+# from a crash — the same discriminator M41's overflow rail carries.
+DBG="$TMP/dbg-m71"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M71-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+assert_eq M71-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "non-json"
+
+# M72: the block-array rails hold for every binary block shape, and a MIXED array still compresses —
+# the text block gets the recovery handle, the image block comes back byte-identical (the guard must
+# not over-bail and forfeit the compression a playwright snapshot+screenshot result gets today).
+in="$(jq -n --arg t "$STUBBIG" --rawfile d "$IMGB" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t},{type:"audio",data:($d|rtrimstr("\n")),mimeType:"audio/wav"}]}}')"
+assert_eq M72-audio-block "$(run_stub "$SBB" "$in")" ""
+DBG="$TMP/dbg-m72a"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M72-audio-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+in="$(jq -n --arg t "$STUBBIG" --rawfile d "$IMGB" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t},{type:"resource",resource:{uri:"x://y",blob:($d|rtrimstr("\n")),mimeType:"application/octet-stream"}}]}}')"
+assert_eq M72-resource-block "$(run_stub "$SBB" "$in")" ""
+DBG="$TMP/dbg-m72b"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M72-resource-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+in="$(jq -n --arg c "$comp" --rawfile d "$IMGB" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$c},{type:"image",data:($d|rtrimstr("\n")),mimeType:"image/png"}]}}')"
+outM="$(run_stub "$SBB" "$in" FND_MCP_SLIM_STUB_BYTES=1000)"
+assert_contains M72-mixed-compressed "$outM" "<<full="
+assert_absent   M72-mixed-not-stubbed "$outM" "<<fnd-mcp-slim stub>>"
+printf '%s' "$outM" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].data' > "$TMP/m72-out-b64.txt"
+if [ "$(node -e 'const fs=require("fs");const a=fs.readFileSync(process.argv[1],"utf8").trim();const b=fs.readFileSync(process.argv[2],"utf8").trim();console.log(a===b?"same":"DIFF")' "$TMP/m72-out-b64.txt" "$IMGB")" = "same" ]; then ok
+else bad M72-image-byte-exact "the image block's base64 did not survive the compression"; fi
+
+# ── M73–M74: wall-clock budget (B4.8) ─────────────────────────────────────────
+# One adversarial line inside a whale used to burn 37 s of pipeline time in a single uninterruptible
+# scan, and the accumulated cost across stages/blocks had no ceiling at all. `slim()` now carries a
+# deadline: every stage boundary checks it and an expiry hands the ORIGINAL back (`budget-exceeded`),
+# never a half-transformed value. The default (5000 ms) is ~22× the worst legitimate payload measured
+# on this pipeline (~230 ms end-to-end at 1 MB) and well inside Claude Code's PostToolUse timeout.
+BUD="$TMP/budget"; mkdir -p "$BUD"
+# A ~1.1 MB payload takes ~200 ms end-to-end through slim(), two orders of magnitude over the 1 ms
+# budget these cases set, so SOME stage gate always trips — the first one clears by about one Date.now()
+# tick (JSON.parse alone is only ~2 ms here), the margin comes from total pipeline time. Payloads under
+# ~50 KB are NOT deterministic at 1 ms; shrink this fixture and use the `cfg.deadline` library seam
+# instead (b4.8-deadline-passthrough).
+BIGA="$TMP/budget-big.json"
+node -e '
+  const o={};
+  for (let a=0;a<400;a++) o["arr"+a]=Array.from({length:40},(_,i)=>({id:a*1000+i,status:i===7?"error":"ok",note:"row padding padding padding a"+a+"-"+i}));
+  require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+' "$BIGA"
+in="$(jq -n --rawfile t "$BIGA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+# M73: the budget bail hands the ORIGINAL back — with the guard off it is a plain passthrough, and the
+# debug line names the branch so `--report` can tell it from a genuine decline.
+assert_eq M73-passthrough "$(run_stub "$BUD" "$in" FND_MCP_SLIM_BUDGET_MS=1 FND_MCP_SLIM_STUB=0)" ""
+DBG="$TMP/dbg-m73"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_BUDGET_MS=1 FND_MCP_SLIM_STUB=0 >/dev/null
+assert_eq M73-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+assert_eq M73-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "budget-exceeded"
+assert_eq M73-flat     "$(jq -r '.bytes_out == .bytes_in' "$DBG/$DBGLOG" 2>/dev/null)" "true"
+assert_eq M73-no-partial-spills "$(ls "$DBG" | grep -c '^fnd-crush-')" 0
+# with the guard on, the same bail is stubbed rather than dropped raw into context — the whale is
+# exactly the payload the budget exists to keep out, and the CLI (which carries no budget) recovers it
+DBG="$TMP/dbg-m73b"; mkdir -p "$DBG"
+textB="$(run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_BUDGET_MS=1 | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M73-whale-stubbed "$textB" "<<fnd-mcp-slim stub>>"
+assert_eq M73-whale-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
+assert_eq M73-whale-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "budget-exceeded"
+pB="$(printf '%s' "$textB" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$pB" ] && cmp -s "$pB" "$BIGA"; then ok; else bad M73-spill-byte-exact "the budget stub's spill is not the byte-exact payload (pB='$pB')"; fi
+# an error envelope over the threshold is STILL verbatim under an expired budget: the parse + envelope
+# rails run BEFORE any deadline is consulted, so `anyError` never degrades into a stubbable passthrough
+in="$(jq -n --arg e "$bigerrb" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$e}]}}')"
+assert_eq M73-error-rail "$(run_stub "$BUD" "$in" FND_MCP_SLIM_BUDGET_MS=1)" ""
+# M74: an unparseable budget falls back to the default and a literal 0 disables the deadline — both
+# compress normally (never a 0 ms budget that would passthrough everything).
+in="$(jq -n --arg t "$comp" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_contains M74-invalid-default "$(run_stub "$BUD" "$in" FND_MCP_SLIM_BUDGET_MS=5s)" "<<full="
+assert_contains M74-zero-disabled   "$(run_stub "$BUD" "$in" FND_MCP_SLIM_BUDGET_MS=0)"  "<<full="
+assert_contains M74-unset-default   "$(run_stub "$BUD" "$in")"                            "<<full="
+
+# ── M75: per-block stub handback for RICH blocks (B4.8) ───────────────────────
+# A block carrying one extra key (`annotations`, a per-block `_meta` cursor) cannot be collapsed into
+# a single stub without losing it, so the whole whale went to context raw at any size. Each over-limit
+# TEXT block is now replaced individually: the array keeps its length, every block keeps its own
+# fields, and each replaced block names the spill holding ITS text.
+RICH="$TMP/rich-whale"; mkdir -p "$RICH"
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t,annotations:{audience:["user"]},_meta:{cursor:"abc"}}]}}')"
+outR="$(run_stub "$RICH" "$in")"
+textR="$(printf '%s' "$outR" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M75-stubbed     "$textR" "<<fnd-mcp-slim stub>>"
+assert_eq       M75-len         "$(printf '%s' "$outR" | jq -r '.hookSpecificOutput.updatedToolOutput.content | length' 2>/dev/null)" 1
+assert_eq       M75-annotations "$(printf '%s' "$outR" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].annotations.audience[0]' 2>/dev/null)" "user"
+assert_eq       M75-meta        "$(printf '%s' "$outR" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0]._meta.cursor' 2>/dev/null)" "abc"
+assert_eq       M75-type        "$(printf '%s' "$outR" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].type' 2>/dev/null)" "text"
+pR="$(printf '%s' "$textR" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
+if [ -n "$pR" ] && cmp -s "$pR" "$TMP/stub-payload.txt"; then ok; else bad M75-byte-exact "the per-block spill is not that block's byte-exact text (pR='$pR')"; fi
+DBG="$TMP/dbg-m75"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M75-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
+assert_eq M75-shrunk   "$(jq -r '.bytes_out < 2000 and .bytes_in > 32768' "$DBG/$DBGLOG" 2>/dev/null)" "true"
+# a rich block UNDER the threshold beside an over-limit one keeps its text verbatim
+small="$(jq -cn '{keep:"this block is small enough to stay"}')"
+in="$(jq -n --arg t "$STUBBIG" --arg s "$small" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$s,annotations:{audience:["user"]}},{type:"text",text:$t,annotations:{audience:["assistant"]}}]}}')"
+outR2="$(run_stub "$RICH" "$in")"
+assert_eq M75-small-block-verbatim "$(printf '%s' "$outR2" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)" "$small"
+assert_contains M75-big-block-stubbed "$(printf '%s' "$outR2" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)" "<<fnd-mcp-slim stub>>"
+# and the rail stays: a rich block that COMPRESSES is never stubbed (M52's payload, guard threshold low)
+in="$(jq -n --arg c "$comp" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$c,annotations:{audience:["user"]}}]}}')"
+outR3="$(run_stub "$RICH" "$in" FND_MCP_SLIM_STUB_BYTES=1000)"
+assert_contains M75-rich-compressed "$outR3" "<<full="
+assert_absent   M75-rich-not-stubbed "$outR3" "<<fnd-mcp-slim stub>>"
+
+# M76 (B4.5 ∩ B4.8): the two halves interact. A per-block stub replaces only the OVER-LIMIT blocks, so
+# a block that came back COMPRESSED carries its crush marker into context — that spill is still named
+# and must survive the cleanup, even though this run created it.
+MIX="$TMP/mixed-blocks"; mkdir -p "$MIX"
+in="$(jq -cn --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[
+  {type:"text",text:({rows:[range(0;600)|{id:.,status:(if .==3 then "error" else "ok" end),note:"pad pad pad"}]}|tostring),annotations:{audience:["user"]}},
+  {type:"text",text:$t,annotations:{audience:["user"]}}]}}')"
+outX="$(run_stub "$MIX" "$in")"
+b0X="$(printf '%s' "$outX" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M76-block0-compressed "$b0X" "full="
+assert_contains M76-block1-stubbed "$(printf '%s' "$outX" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)" "<<fnd-mcp-slim stub>>"
+m76missing=0
+while IFS= read -r f; do [ -f "$f" ] || m76missing=$((m76missing+1)); done < <(printf '%s' "$b0X" | grep -o 'full=[^ >]*' | sed 's/^full=//')
+assert_eq M76-kept-handles-alive "$m76missing" 0
+
+# ── M77–M81: the per-block route's own recovery + cleanup rails ───────────────
+# M77: a rich array can straddle the threshold AFTER compression — one block shrinks under it, another
+# stays over. The per-block route returns before the hook writes its own `full=` spill, so the block it
+# KEEPS is emitted lossy (noise-dropped fields, clipped strings) and its original has to be handed back
+# here or it exists nowhere at all.
+STR="$TMP/straddle"; mkdir -p "$STR"
+SMALLB="$TMP/straddle-small.json"; BIGB="$TMP/straddle-big.json"
+node -e '
+  const fs=require("fs");
+  fs.writeFileSync(process.argv[1], JSON.stringify({
+    ticket:"ZEBRA-1", attachment_b64:"ZEBRAPAYLOAD"+"A".repeat(9000),
+    avatarUrl:"https://cdn.example.com/ZEBRA-avatar-48x48.png",
+    self:"https://x.atlassian.net/rest/api/2/issue/ZEBRA-1", note:"keep me"}));
+  const big={dead:null};
+  for (let i=0;i<500;i++) big["f"+i]="x".repeat(200);   // noise-drops the null, stays far over the threshold
+  fs.writeFileSync(process.argv[2], JSON.stringify(big));
+' "$SMALLB" "$BIGB"
+in="$(jq -n --rawfile s "$SMALLB" --rawfile b "$BIGB" '{tool_name:"mcp__x__y",tool_response:{content:[
+  {type:"text",text:$s,annotations:{audience:["user"]}},
+  {type:"text",text:$b,annotations:{audience:["user"]}}]}}')"
+outS="$(run_stub "$STR" "$in")"
+b0S="$(printf '%s' "$outS" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M77-big-block-stubbed "$(printf '%s' "$outS" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)" "<<fnd-mcp-slim stub>>"
+assert_contains M77-kept-block-has-handle "$b0S" "full="
+pS="$(printf '%s' "$b0S" | grep -o 'full=[^ >]*' | tail -1 | sed 's/^full=//')"
+if [ -n "$pS" ] && cmp -s "$pS" "$SMALLB"; then ok; else bad M77-kept-block-recoverable "the kept block was emitted lossy with no byte-exact original on disk (pS='$pS')"; fi
+DBG="$TMP/dbg-m77"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M77-reason "$(jq -r '.reason' "$DBG/$DBGLOG" 2>/dev/null)" "weak-gain"
+
+# M78: the cleanup decides "is this file still named in what we emitted?" — it must read the handles out
+# of the emitted VALUE, not scan the JSON-escaped wire, where a spill path holding a backslash (every
+# path on Windows) can never match and a live handle's file gets unlinked.
+BSD="$TMP/we\\ird"; mkdir -p "$BSD"
+in="$(jq -cn --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[
+  {type:"text",text:({rows:[range(0;600)|{id:.,status:(if .==3 then "error" else "ok" end),note:"pad pad pad"}]}|tostring),annotations:{audience:["user"]}},
+  {type:"text",text:$t,annotations:{audience:["user"]}}]}}')"
+outB="$(run_stub "$BSD" "$in")"
+b0B="$(printf '%s' "$outB" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M78-block0-compressed "$b0B" "full="
+# The kept block's marker names a crush spill; the path is checked on DISK rather than read out of the
+# marker, which sits one JSON level down and carries the doubled backslash.
+if ls "$BSD"/fnd-crush-* >/dev/null 2>&1; then ok; else bad M78-backslash-handle-kept "the crush spill a live handle names was unlinked: $(ls -b "$BSD")"; fi
+
+# M79: one crushable array REPEATED dedups onto a single spill, so the sink holds that path N times
+# while only one of them was created. Removing one copy leaves the debug line naming a file the same
+# run just deleted — the exact claim `--report` unions into its spill inventory.
+DUP="$TMP/dup-crush"; mkdir -p "$DUP"
+DUPF="$TMP/dup-crush.json"
+node -e '
+  const arr=Array.from({length:60},(_,i)=>({id:"same-"+i,name:"row "+i,status:i%7?"ok":"error",qty:i,note:"n".repeat(30)}));
+  const o={}; for (let i=0;i<60;i++) o["a"+i]=arr;   // identical content ⇒ one content-addressed spill, 60 notes
+  require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+' "$DUPF"
+in="$(jq -n --rawfile t "$DUPF" '{tool_name:"mcp__x__y",tool_response:[{type:"text",text:$t}]}')"
+DBG="$TMP/dbg-m79"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
+m79missing=0
+while IFS= read -r f; do [ -f "$f" ] || m79missing=$((m79missing+1)); done < <(jq -r '.spills[]?' "$DBG/$DBGLOG" 2>/dev/null)
+assert_eq M79-no-broken-spill-claims "$m79missing" 0
+
+# M80: the binary rail keys on the BLOCK TYPE. A `type:"text"` result carrying an unrelated string
+# field (`data`, `blob`) is not binary, and bailing on it sent the whale to context raw — the failure
+# the guard exists to prevent.
+BND="$TMP/text-with-data"; mkdir -p "$BND"
+in="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{type:"text",text:$t,data:"ok"}}')"
+outT="$(run_stub "$BND" "$in")"
+assert_contains M80-text-with-data-stubbed "$(printf '%s' "$outT" | jq -r '.hookSpecificOutput.updatedToolOutput.text' 2>/dev/null)" "<<fnd-mcp-slim stub>>"
+assert_eq M80-data-sibling-kept "$(printf '%s' "$outT" | jq -r '.hookSpecificOutput.updatedToolOutput.data' 2>/dev/null)" "ok"
+
+# M81: the jsx node-id map is the other spill slim() writes, and both halves of the cleanup contract
+# apply to it — a map whose body was thrown away is removed, a map whose `ids=` handle rode into
+# context stays. Neither half was pinned by anything.
+JXD="$TMP/jsx-drop"; mkdir -p "$JXD"
+in="$(jq -n --rawfile t "$FGX" '{tool_name:"mcp__plugin_fnd_figma-dev-mode__get_design_context",tool_response:{content:[{type:"text",text:$t}]}}')"
+DBG="$TMP/dbg-m81"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_STUB_BYTES=2000 >/dev/null
+assert_eq M81-discarded-map-dropped "$(ls "$DBG" | grep -c '^fnd-jsx-ids-')" 0
+m81missing=0
+while IFS= read -r f; do [ -f "$f" ] || m81missing=$((m81missing+1)); done < <(jq -r '.spills[]?' "$DBG/$DBGLOG" 2>/dev/null)
+assert_eq M81-spills-on-disk "$m81missing" 0
+in="$(jq -n --rawfile j "$FGX" --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[
+  {type:"text",text:$j,annotations:{audience:["user"]}},
+  {type:"text",text:$t,annotations:{audience:["user"]}}]}}')"
+outJ="$(run_stub "$JXD" "$in")"
+b0J="$(printf '%s' "$outJ" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+idJ="$(printf '%s' "$b0J" | head -1 | grep -o 'ids=[^ ]*' | sed 's/^ids=//')"
+if [ -n "$idJ" ] && [ -f "$idJ" ]; then ok; else bad M81-kept-map-alive "the emitted ids= map was unlinked (idJ='$idJ')"; fi
+
+# M82: the other half of M78's lesson — a spill path may contain a SPACE (FND_MCP_SLIM_DIR under
+# "Application Support", a macOS volume name). Deciding liveness by PARSING handles out of the emitted
+# text truncated such a path at the space, so the crush spill an emitted marker still names read as
+# unreferenced and was deleted: ENOENT on the very recovery the model was handed. Liveness is an
+# OCCURRENCE test on the emitted strings, not a handle parse.
+SPD="$TMP/sp ace"; mkdir -p "$SPD"
+outSP="$(run_stub "$SPD" "$in")"
+b0SP="$(printf '%s' "$outSP" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M82-block0-compressed "$b0SP" "ids="
+idSP="$(printf '%s' "$b0SP" | head -1 | sed -n 's/.*ids=\(.*fnd-jsx-ids-[0-9a-f]*\.json\).*/\1/p')"
+if [ -n "$idSP" ] && [ -f "$idSP" ]; then ok; else bad M82-space-handle-kept "the emitted ids= map under a spill dir with a space was unlinked (idSP='$idSP')"; fi
+# …and the same for a crush marker, which sits one JSON level down inside the compressed body
+SPC="$TMP/sp ace crush"; mkdir -p "$SPC"
+in="$(jq -cn --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[
+  {type:"text",text:({rows:[range(0;600)|{id:.,status:(if .==3 then "error" else "ok" end),note:"pad pad pad"}]}|tostring),annotations:{audience:["user"]}},
+  {type:"text",text:$t,annotations:{audience:["user"]}}]}}')"
+outSC="$(run_stub "$SPC" "$in")"
+b0SC="$(printf '%s' "$outSC" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M82-crush-marker "$b0SC" "_rows_offloaded"
+pSC="$(printf '%s' "$b0SC" | sed -n 's/.*<<full=\(.*fnd-crush-[0-9a-f]*\.json\) [0-9]*_rows_offloaded>>.*/\1/p')"
+if [ -n "$pSC" ] && [ -f "$pSC" ]; then ok; else bad M82-space-crush-kept "the crush spill an emitted marker names was unlinked (pSC='$pSC')"; fi
+
+# M83: the per-block stub route decided "is this block text?" on `type:"text"`, while the COMPRESSION
+# path treats any object with a string `.text` as text (an MCP result whose blocks carry no type, a
+# structured sibling next to one). Such a block was compressed LOSSILY and then skipped by both the
+# stub map and the original_block pass, and this route returns before the caller's whole-result spill —
+# so it reached context with dropped fields and no copy anywhere.
+UNT="$TMP/untyped-block"; mkdir -p "$UNT"
+U_BIG="$TMP/untyped-big.json"; U_SMALL="$TMP/untyped-small.json"
+node -e '
+  const fs=require("fs");
+  const big={dead:null}; for (let i=0;i<500;i++) big["f"+i]="x".repeat(200); // stays far over the threshold
+  const small={keep:"value"}; for (let i=0;i<30;i++) small["n"+i]=null;      // the noise stage drops all 30
+  fs.writeFileSync(process.argv[1], JSON.stringify(big));
+  fs.writeFileSync(process.argv[2], JSON.stringify(small));
+' "$U_BIG" "$U_SMALL"
+in="$(jq -n --rawfile b "$U_BIG" --rawfile s "$U_SMALL" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$b},{text:$s,foo:1}]}}')"
+outU="$(run_stub "$UNT" "$in")"
+b1U="$(printf '%s' "$outU" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)"
+assert_eq M83-sibling-kept "$(printf '%s' "$outU" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].foo' 2>/dev/null)" "1"
+# either the block rides back byte-identical, or it is recoverable — never lossy with nothing on disk
+if [ "$b1U" = "$(cat "$U_SMALL")" ]; then ok
+else
+  pU="$(printf '%s' "$b1U" | grep -o 'full=[^ >]*' | tail -1 | sed 's/^full=//')"
+  if [ -n "$pU" ] && cmp -s "$pU" "$U_SMALL"; then ok
+  else bad M83-untyped-block-recoverable "an untyped text block was emitted lossy with no byte-exact original on disk (pU='$pU')"; fi
+fi
+# …and an OVER-limit untyped block is stubbed like any other text block, keeping its own fields
+in="$(jq -n --rawfile b "$U_BIG" --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$b},{text:$t,foo:1}]}}')"
+outU2="$(run_stub "$UNT" "$in")"
+assert_contains M83-untyped-over-limit-stubbed "$(printf '%s' "$outU2" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)" "<<fnd-mcp-slim stub>>"
+assert_eq       M83-untyped-fields-kept        "$(printf '%s' "$outU2" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].foo' 2>/dev/null)" "1"
+assert_eq       M83-untyped-len                "$(printf '%s' "$outU2" | jq -r '.hookSpecificOutput.updatedToolOutput.content | length' 2>/dev/null)" 2
+
+# M84: the deadline is per BLOCK by design — each block is either its byte-identical original or fully
+# compressed WITH recovery, so a mid-array expiry is safe. It was also INVISIBLE: the blocks that made
+# it rode out as a plain `compressed` / `reason:null` line, so `--report` could not see the ceiling
+# tripping at all. A partial expiry now says so on the line.
+# Deterministic by MARGIN, not by luck: block 0 (a 40-null object) slims in ~0.06 ms and block 1
+# (~1.1 MB, $BIGA) needs ~110 ms, so a 15 ms budget always clears the first and always trips the second.
+P_SMALL="$TMP/partial-small.json"
+node -e '
+  const o={a:1}; for (let i=0;i<40;i++) o["n"+i]=null;   // 430 B of noise — well over the ~130 B handle
+  require("fs").writeFileSync(process.argv[1], JSON.stringify(o));
+' "$P_SMALL"
+in="$(jq -n --rawfile s "$P_SMALL" --rawfile b "$BIGA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$s},{type:"text",text:$b}]}}')"
+DBG="$TMP/dbg-m84"; mkdir -p "$DBG"
+outPB="$(run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_BUDGET_MS=15 FND_MCP_SLIM_STUB=0)"
+assert_eq     M84-decision        "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "compressed"
+assert_eq     M84-partial-flag    "$(jq -r '.budget_partial' "$DBG/$DBGLOG" 2>/dev/null)" "true"
+assert_eq     M84-block1-verbatim "$(printf '%s' "$outPB" | jq -r '.hookSpecificOutput.updatedToolOutput.content[1].text' 2>/dev/null)" "$(cat "$BIGA")"
+assert_absent M84-block0-slimmed  "$(printf '%s' "$outPB" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)" "null"
+# a run that never touches the ceiling must not carry the field at all (it is the exception, not a column)
+DBG="$TMP/dbg-m84b"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_BUDGET_MS=0 FND_MCP_SLIM_STUB=0 >/dev/null
+assert_eq M84-no-flag-when-clear "$(jq -r '.budget_partial // "absent"' "$DBG/$DBGLOG" 2>/dev/null)" "absent"
+
+# M85: a budget bail is stubbable, so the platform-overflow re-label has to run for it too. A notice
+# sitting beside a whale in the same content array shares the deadline and comes back as
+# `budget-exceeded`; probing only `non-json` stubbed the pair — collapsing the notice, and with it the
+# `tool-results/` path `--report` counts missed whales on, out of context entirely.
+OVB="$TMP/ovf-budget"; mkdir -p "$OVB"
+in="$(jq -n --arg o "$ovfmsg" --rawfile b "$BIGA" '{tool_name:"mcp__plugin_fnd_chrome-devtools-mcp__evaluate_script",tool_response:{content:[{type:"text",text:$b},{type:"text",text:$o}]}}')"
+assert_eq M85-passthrough "$(run_stub "$OVB" "$in" FND_MCP_SLIM_BUDGET_MS=1)" ""
+DBG="$TMP/dbg-m85"; mkdir -p "$DBG"
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_BUDGET_MS=1 >/dev/null
+assert_eq M85-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "platform-overflow"
+assert_eq M85-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
+assert_eq M85-spill    "$(jq -r '.spill'    "$DBG/$DBGLOG" 2>/dev/null)" "$OVFP"
+
+# M86: the per-block route had no net-bytes gate of its own — on the weak-gain branch every KEPT block
+# pays a ~130 B `original_block` handle, so an array of many thin blocks beside one over-limit block
+# emitted MORE bytes than arrived and still logged `stubbed`. The guard exists to protect context; it
+# must never grow it.
+NETIN="$TMP/stub-netgate-in.json"
+node -e '
+  const blocks=[];
+  const thin=JSON.stringify({keep:"vvvv",dead:null});                                 // 11 B of gain per block
+  for (let i=0;i<500;i++) blocks.push({type:"text",text:thin,annotations:{audience:["user"]}});
+  blocks.push({type:"text",text:"x".repeat(40000),annotations:{audience:["user"]}});   // the one over-limit block
+  require("fs").writeFileSync(process.argv[1], JSON.stringify({tool_name:"mcp__x__y",tool_response:{content:blocks}}));
+' "$NETIN"
+DBG="$TMP/dbg-m86"; mkdir -p "$DBG"
+run_stub "$DBG" "$(cat "$NETIN")" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq     M86-never-grows  "$(jq -r '.bytes_out < .bytes_in' "$DBG/$DBGLOG" 2>/dev/null)" "true"
+assert_absent M86-not-stubbed  "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Gate (FND_PROMPT_JSON) via the extracted plugin.json command[1]; behavior by piping

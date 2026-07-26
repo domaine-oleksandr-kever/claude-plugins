@@ -406,10 +406,14 @@ hook error never blocks work:
     preamble kept on top; a real doc with a small code block stays below that bar and passes through
     byte-identical. A **JSONL** file (one JSON object per line, e.g. a Shopify bulk-operation dump) is
     handled apart: the CLI never compresses it and never prints its rows — at ANY size it returns a
-    **PROFILE** (row + parse-failure counts, per-key `{present, null, type, distinct}`, and head/tail/
-    reservoir sample rows) plus guidance to query the ORIGINAL file by line — a `readline` filter (the
+    **PROFILE** (row + parse-failure counts, per-key `{present, null, type, distinct}` — plus
+    `distinctCapped` once a key's value set hits the retention cap, so `distinct` reads as a floor — and
+    head/tail/reservoir sample rows) plus guidance to query the ORIGINAL file by line — a `readline` filter (the
     sample rows show the shape to write it against) or `sed -n '<N>p'` / `grep`. Never raw-`Read` a big
     JSONL: a sampled subset can't answer analytical questions whose answers live in rows the sample skips.
+    On a file with a fresh key name on every row (an id-keyed map dumped one row per line) the profiler
+    stops tracking new keys past a build cap and says so: `keysCapped: true`, and the dropped-key count
+    comes back as `keysTruncatedAtLeast` (a FLOOR) instead of the exact `keysTruncated`.
     Files ≤ 8 MB profile the parsed rows; larger ones stream via `readline` (never loaded whole) — the
     same PROFILE either way. `--jq <dot.path>` extracts a single value from a ≤ 8 MB JSONL; on a larger one it
     is refused (it would re-read the whole file). The path is a **plain dot walk** (`products.0.title`);
@@ -436,12 +440,25 @@ hook error never blocks work:
     **spilled and stubbed**, i.e. replaced by a ~1 KB note naming the file, its format and shape, and the
     `node scripts/json-slim.cjs <path>` line to run on it (the same contract the session convention states
     for platform-spilled whales). The spill holds the payload itself, so that command really works on it.
+    A content array whose blocks carry anything beyond `type`/`text` (an `annotations` or per-block
+    `_meta` cursor) cannot be collapsed into one stub without losing those fields, so each **over-limit
+    block is replaced on its own** instead: the array keeps its length, every block keeps its own fields,
+    and each replacement names the spill holding *that block's* text. A block in that array that came back
+    *compressed* and under the threshold rides along with its own `full=` handle, so nothing there reaches
+    context lossy without a copy on disk.
     Never stubbed — these pass through as before: error results (including an error envelope sitting
-    anywhere in a content array, at any size); content arrays holding a non-text block (an image must
-    still render) or a block carrying anything beyond `type`/`text` (an `annotations` or per-block
-    `_meta` field would survive neither the stub nor the spill); the platform's own overflow notices;
+    anywhere in a content array, at any size); anything carrying **binary** bytes — an image, audio or
+    embedded-resource block, or any block *not* typed `text` that carries a `data`/`blob` string (a
+    screenshot must still render, and a text spill would not hold it; a `type:"text"` block with an
+    unrelated `data` sibling is still text and still stubs); the platform's own overflow notices;
     shapes the compressor did not understand; a failed spill. `FND_MCP_SLIM_STUB=0`
     turns the guard off; `FND_MCP_SLIM_STUB_BYTES` moves the threshold (never below the stub's own size).
+    The whole flow also runs under a wall-clock ceiling (`FND_MCP_SLIM_BUDGET_MS`, default 5 s), and an
+    expiry hands the ORIGINAL back — never a half-transformed value — **per block**: on a content array
+    the blocks already slimmed keep their compression *and* their recovery handle while the rest ride
+    verbatim, logged as `compressed` plus `budget_partial: true`. Only a whole-result expiry (a single
+    text payload, or an array where nothing got through) is logged `budget-exceeded` — and above the stub
+    threshold that bail is stubbed like any other whale, unless it turns out to be an overflow notice.
     With this guard in place, raising
     `MAX_MCP_OUTPUT_TOKENS` in your own `settings.json` `env` (so bigger results reach this hook instead of
     the platform's file spill) is safe — but it stays *your* decision, ideally after a week of `--report`
@@ -450,7 +467,8 @@ hook error never blocks work:
     JSONL line per call records the `decision` (`compressed` / `stubbed` / `passthrough`) and, on a
     passthrough, the `reason` (`error-shape`, `non-json`, `unrecognized-shape`, `no-gain`,
     `marker-overhead` (the win was smaller than the `full=` recovery handle, so the original was handed
-    back), `platform-overflow` — the platform's own over-limit notice, whose `spill` field holds the
+    back), `budget-exceeded` (the wall-clock ceiling above),
+    `platform-overflow` — the platform's own over-limit notice, whose `spill` field holds the
     file it saved the whale to; plus `size-gate` for a result under the 4 KB gate, which is *sub-gate
     noise* — three quarters of a real week's lines — and is therefore recorded only at
     `FND_MCP_SLIM_DEBUG=2`, the everything level). `no-gain` — the most common one — means the pipeline
@@ -465,12 +483,18 @@ hook error never blocks work:
     protects context here — and because a second whole-file run would only print the same bytes back, that
     stub names the narrowing command (`--jq <dot.path>`) instead of a bare re-run; below the threshold the
     result lands in full and `--jq` narrows it. On a `stubbed` line the
-    `reason` instead names the branch the stub replaced (`non-json`, `no-gain`, `weak-gain` — the last
-    one is a compression that stayed over the threshold). Lines that wrote files also list them in
+    `reason` instead names the branch the stub replaced (`non-json`, `no-gain`, `weak-gain` — a
+    compression that stayed over the threshold — or `budget-exceeded`). Lines that wrote files also list them in
     `spills` — the call's own `full=` copy plus the crush / node-id-map spills written inside it, and on
-    a CLI run (which has no `full=` copy) Gate A's `fnd-slim-out-*` body
+    a CLI run Gate A's `fnd-slim-out-*` body plus, for a **stdin** run that came back lossy, the copy of
+    the original it spilled and named on stderr (a file run hands the file itself back instead)
     (`spills_n` when that list is capped at 8); a line with **no** `spills` key left nothing on disk.
-    Together that makes an orphan visible in the log rather than only on disk. Spill filenames are content
+    In the **hook**, every branch that *discards* the compressed body (a stub, a `no-gain` or
+    `marker-overhead` passthrough) also deletes the spills it created for that body — nothing names them
+    any more — and splices them out of `spills`, so the list only ever holds files that are still on disk;
+    a spill that already existed is left alone, since an earlier call's live handle may name it. A CLI run
+    does no such cleanup: what a declined branch there left behind (a crush spill written before the run
+    degraded to a passthrough) waits for the TTL sweep. Spill filenames are content
     hashes, so the same payload passing through twice reuses one file instead of adding another. Each line
     also records the `lvl` it was collected at (see `FND_MCP_SLIM_DEBUG`). **What did it all add
     up to?** `node scripts/json-slim.cjs --report [logfile] [--since <ISO>]` (default: the log above)
@@ -513,9 +537,10 @@ added to this table.
 | `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a spill file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume); `0` disables the sweep; any invalid value falls back to `24` |
-| `FND_MCP_SLIM_DEBUG` | off | opt-in: append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, `lvl`, decision, reason, `format` on non-json, `narrowed` on a `--jq` CLI run, bytes, %, stages, `spills` — never any payload); rotates one generation at ~5 MB. `1` (or `true`/`yes`/`on`) = **key events**: everything except the sub-gate `size-gate` lines for results under the 4 KB gate, which were ~76 % of a real week's log. `2` (any integer ≥ 2) = **everything**, sub-gate lines included. Unset / `0` / `false` / an unrecognized value ⇒ no file written. The level rides on each line as `lvl`, so `--report` can say which of its numbers cover a partial event set — a `1` window's totals % is not comparable with a `2` window's |
+| `FND_MCP_SLIM_DEBUG` | off | opt-in: append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, `lvl`, decision, reason, `format` on non-json, `narrowed` on a `--jq` CLI run, `budget_partial` on a mid-array wall-clock expiry, bytes, %, stages, `spills` — never any payload); rotates one generation at ~5 MB. `1` (or `true`/`yes`/`on`) = **key events**: everything except the sub-gate `size-gate` lines for results under the 4 KB gate, which were ~76 % of a real week's log. `2` (any integer ≥ 2) = **everything**, sub-gate lines included. Unset / `0` / `false` / an unrecognized value ⇒ no file written. The level rides on each line as `lvl`, so `--report` can say which of its numbers cover a partial event set — a `1` window's totals % is not comparable with a `2` window's |
 | `FND_MCP_SLIM_STUB` | `1` | `0` disables the spill-and-stub guard: a result the compressor cannot bring under the threshold is then handed to the model raw again, instead of as a ~1 KB stub + spill |
 | `FND_MCP_SLIM_STUB_BYTES` | `32768` | bytes above which the `mcp-slim` hook spills-and-stubs instead of passing a whale through (also applies to a compressed body that is still this large); any invalid value falls back to `32768`, never to `0`, and any value below the stub's own ~1.2 KB is raised to it (a smaller gate could emit a stub bigger than the text it replaces) |
+| `FND_MCP_SLIM_BUDGET_MS` | `5000` | wall-clock ceiling for one `mcp-slim` compression run (shared across every block of a result). An expiry hands the ORIGINAL back — per block, so a partly-slimmed content array is logged `compressed` + `budget_partial`, and a whole-result expiry `budget-exceeded` (stubbed above the stub threshold); `0` disables the ceiling; any invalid value falls back to `5000`, never to `0`. The default is ~22× a 1 MB-class payload on this pipeline and well inside Claude Code's PostToolUse timeout — headroom, not a guarantee: a genuinely huge result (tens of MB, or several fat blocks sharing the one deadline) can still reach it, and is then handed back uncompressed rather than half-compressed |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` hook) — node never spawns |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |

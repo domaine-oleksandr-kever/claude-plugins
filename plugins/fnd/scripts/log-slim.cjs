@@ -116,7 +116,11 @@ const LOG_TAIL_PATTERNS = [
   /^\s+\d+: \S/, // Rust numbered frame
   /^\s+at \S+:\d+:\d+$/, // bare path frame sub-line
   /^Unhandled exception\./, // .NET
-  /^\s*at .+\) in .+:line \d+/, // .NET frame with PDB info
+  // .NET frame with PDB info. The first quantifier is PINNED to `[^)]+`: with `.+` there, a long line
+  // dense in `) in ` that never reaches `:line <n>` backtracks catastrophically (37.7 s on 998 KB,
+  // exactly 4× per doubling). The tail stays `.+` so a Windows PDB path containing spaces still
+  // matches; the cost is that an argument list with NESTED parens no longer does (.NET does not nest).
+  /^\s*at [^)]+\) in .+:line \d+/,
   /^Caused by: /, // Java chain head
   /^\s*\.\.\. \d+ more$/, // Java elided-frames summary
 ];

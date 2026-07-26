@@ -12,7 +12,10 @@
  *     guidance, streamed above 8 MB); log-shaped text is signal-compressed (log-slim.cjs) with
  *     an `original: <path>` recovery line; a Figma design-context JSX payload is compacted in place
  *     with that same `original: <path>` line (its node-id map spilled beside it); other non-JSONL
- *     JSON output is capped at 48 KB (spill + handback).
+ *     JSON output is capped at 48 KB (spill + handback). A STDIN run names no input file, so a lossy
+ *     body comes with a spilled copy of what the stages consumed (the whole stream, or the `--jq`
+ *     subtree), reported on stderr — `--no-spill` opts out of that copy (and of the crush marker's),
+ *     accepting an unrecoverable body.
  *
  * The pipeline is shape-driven (each stage independent, all generic — no per-tool registry),
  * applied by slim() in this order:
@@ -67,9 +70,13 @@ const DEFAULTS = {
   markerMode: 'spill', // 'spill' → write dropped rows to a file, handle = full=<path>;
   //                       'ccr'   → reproduce Headroom's content hash (byte-parity tests only)
   spillDir: null, // override the spill directory (else FND_MCP_SLIM_DIR, else os.tmpdir())
-  // spillSink — CALLER-SUPPLIED ONLY, deliberately absent from these defaults: an array here would be
-  // copied by REFERENCE through every `{...DEFAULTS}` spread and accumulate paths for the process
-  // lifetime. Pass one in and every spill this call writes is pushed onto it (see noteSpill).
+  // spillSink / spillCreatedSink — CALLER-SUPPLIED ONLY, deliberately absent from these defaults: an
+  // array here would be copied by REFERENCE through every `{...DEFAULTS}` spread and accumulate paths
+  // for the process lifetime. Pass one in and every spill this call writes is pushed onto it (see
+  // noteSpill); the second sink takes only the subset this call actually CREATED, which is the only
+  // subset a caller discarding its result may unlink.
+  deadline: null, // absolute ms timestamp (Date.now() scale) after which the pipeline stops and hands
+  //                 the ORIGINAL back as `budget-exceeded`; null ⇒ no budget (CLI default)
   // --- fnd pipeline stages (slim only, not crush) ---
   adf: true, // stage 1: ADF doc nodes → markdown
   noise: true, // stage 3: drop nulls / empty containers / avatar-class keys
@@ -399,11 +406,32 @@ function dictChangePoints(items, keys, cfg) {
 
 // ------------------------------------------------------------------ dict-array analysis --
 
+// Every per-key pass below walks all n rows, so the analysis costs rows × unionKeys. That union is
+// bounded by a fixed schema in real traffic, but a shape with per-ROW key names (per-row-aliased
+// GraphQL fields, metafield-keyed maps) makes it rows × keys and the whole analysis quadratic in
+// bytes: measured 0.6 s at 151 KB, 10 s at 618 KB, 45 s at 1.28 MB.
+// The UNION SIZE is that signal and the primary gate — an order above any real schema (a wide
+// analytics row is ~200 keys) and far below the 80,000 the adversarial shape reaches at 2000 rows.
+// The product is only the runtime backstop, and it has to sit well above the fixed-schema bulk dumps
+// this compressor exists for: they cost rows × keys too, but that product is linear in bytes, and a 2e6
+// cap declined an ordinary 300k-row × 7-key JSONL dump (2.1e6 ops) outright.
+// Measured throughput is 1.3–2.9e6 row×key ops/s (the low end is the wide schemas this cap governs), so
+// 4e6 bounds ONE call at ~2–3 s. That cost is uninterruptible and lands ON TOP of cfg.deadline, which
+// can only stop the next unit of work — which is why the union cap, not this, is the primary gate.
+const ANALYSE_KEYS_CAP = 2000;
+const ANALYSE_OPS_CAP = 4e6;
+
 // Decide whether a dict array is worth crushing and which generic strategy applies.
-// Returns { crushable, strategy, reason, signals:{errors,structural,anomalies,changePoints} }.
+// Returns { crushable, strategy, reason, sig:{errors,structural,anomalies,changePoints,errorCount} }
+// (the four are Sets of item indexes; errorCount is a count).
 function analyseDictArray(items, cfg) {
   const n = items.length;
   const keys = unionKeys(items);
+  if (keys.length > ANALYSE_KEYS_CAP || keys.length * n > ANALYSE_OPS_CAP) {
+    // Declining keeps the array whole — the same outcome as any other skip, reached before the work
+    // instead of after it.
+    return { crushable: false, strategy: 'skip', reason: 'analysis_too_wide', sig: { errors: new Set(), structural: new Set(), anomalies: new Set(), changePoints: new Set(), errorCount: 0 } };
+  }
 
   // id field = the max-confidence id-like field (first in sorted order wins ties)
   let idKey = null, bestConf = 0;
@@ -647,8 +675,15 @@ function dedupSafe(cand, st) {
 // Report a written spill to the caller's `cfg.spillSink` (an array it supplied — see the config
 // comment on spillDir). The channel the mcp-slim hook and the CLI use to name, on their one debug
 // line, every file the invocation left on disk — the orphan question the log could not answer.
-function noteSpill(cfg, p) {
-  if (p && cfg && Array.isArray(cfg.spillSink)) cfg.spillSink.push(p);
+// `created` (writeSpill's second return field) additionally rides on `cfg.spillCreatedSink`: only a
+// file THIS call brought into existence may be cleaned up when the handle naming it is discarded — a
+// deduped one may still be the target of an earlier invocation's live handle. It BOUNDS orphans, it
+// does not prove sole ownership: the names are content-addressed, so two processes spilling identical
+// bytes at the same moment both mint one, and a caller's cleanup is best-effort against that race.
+function noteSpill(cfg, p, created) {
+  if (!p || !cfg) return;
+  if (Array.isArray(cfg.spillSink)) cfg.spillSink.push(p);
+  if (created && Array.isArray(cfg.spillCreatedSink)) cfg.spillCreatedSink.push(p);
 }
 
 // Build the {_ccr_dropped:…} sentinel. 'ccr' reproduces Headroom's content hash (byte-parity
@@ -662,7 +697,7 @@ function buildMarker(originalItems, droppedItems, droppedCount, cfg) {
   // caller keeps the array uncrushed rather than emit a handle to a file that does not exist.
   const s = writeSpill(cfg.spillDir, 'fnd-crush-', compact(droppedItems));
   if (!s) return null;
-  noteSpill(cfg, s.path);
+  noteSpill(cfg, s.path, s.created);
   return `<<full=${s.path} ${droppedCount}_rows_offloaded>>`;
 }
 
@@ -1020,6 +1055,21 @@ function sampleMixedArray(arr, cfg) {
   return { value, info };
 }
 
+// ---------------------------------------------------------------- wall-clock budget --
+
+// A single V8 regex or one analyseDictArray call is uninterruptible, so `cfg.deadline` cannot pre-empt
+// work already running — it bounds ACCUMULATION: the walk and every stage boundary stop between units.
+// Signalled by a throw so the deep recursion below needs no return-shape change; slim()'s own catch
+// turns it into the `budget-exceeded` passthrough (the ORIGINAL, never a half-transformed value).
+function budgetExpired(cfg) {
+  return cfg.deadline != null && Date.now() > cfg.deadline;
+}
+function budgetStop() {
+  const e = new Error('budget exceeded');
+  e.fndBudget = true;
+  return e;
+}
+
 // ---------------------------------------------------------------- recursive crush walk --
 
 const MAX_DEPTH = 50;
@@ -1028,6 +1078,7 @@ const MAX_DEPTH = 50;
 // Returns [value, info] where info is a comma-join of child strategy fragments.
 function processValue(value, depth, cfg) {
   if (depth >= MAX_DEPTH) return [value, ''];
+  if (budgetExpired(cfg)) throw budgetStop(); // between nodes: a 600-array object stops mid-walk
   const t = jsonType(value);
   if (t === 'list') {
     const arr = value;
@@ -1089,7 +1140,13 @@ function crush(content, config) {
 // A transform failure returns the value unchanged (crash-safety parity with crush()).
 function crushValue(value, config) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
-  try { return processValue(value, 0, cfg)[0]; } catch (_) { return value; }
+  try { return processValue(value, 0, cfg)[0]; } catch (e) {
+    // The budget signal belongs to slim(): swallowing it here degrades an expiry into "skip the crush
+    // stage", which reports a clean compression over a half-transformed body and strands every crush
+    // spill the aborted walk wrote.
+    if (e && e.fndBudget) throw e;
+    return value;
+  }
 }
 
 // ============================================================ fnd pipeline stages (slim) ==
@@ -1573,17 +1630,19 @@ function compressJsx(content, config) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
   const text = String(content);
   let idFile = null;
+  let idCreated = false;
   try {
-    const win = compactJsx(text, cfg, (p) => { idFile = p; });
-    if (win) { noteSpill(cfg, idFile); return win; }
+    const win = compactJsx(text, cfg, (p, c) => { idFile = p; idCreated = c; });
+    if (win) { noteSpill(cfg, idFile, idCreated); return win; }
   } catch (_) {
     // A shape the transforms cannot handle degrades to passthrough — never a thrown stage. The CLI's
     // whale-recovery command and the hook both run this on payloads nothing else has validated.
   }
-  // A throw or a declined compaction leaves the map to the TTL sweep: its name is content-addressed,
-  // so an identical map may be behind a CONCURRENT process's live `ids=` handle — an unlink here could
-  // break that handle mid-flight. Still reported in the sink: the file IS on disk.
-  noteSpill(cfg, idFile);
+  // A throw or a declined compaction never unlinks the map HERE: its name is content-addressed, so an
+  // identical map may be behind another process's live `ids=` handle. Reported in the sink either way
+  // (the file IS on disk), with `created` deciding whether the CALLER may drop it once it knows nothing
+  // it emitted names the file — the hook does exactly that; everyone else leaves it to the TTL sweep.
+  noteSpill(cfg, idFile, idCreated);
   return { compressed: text, idFile: null, classes: 0, nodeIds: 0, folded: 0 };
 }
 
@@ -1609,7 +1668,7 @@ function compactJsx(text, cfg, keepIdFile) {
     const map = {};
     for (const [full, ref] of idMap) map[ref] = full;
     const s = writeSpill(cfg.spillDir, 'fnd-jsx-ids-', compact(map));
-    if (s) { idFile = s.path; keepIdFile(s.path); } // on a throw or a decline the wrapper leaves it to the TTL sweep
+    if (s) { idFile = s.path; keepIdFile(s.path, s.created); } // on a throw or a decline the wrapper leaves it to the TTL sweep
     else idMap.clear();
   }
   if (!dict.size && !idMap.size) return null;
@@ -1770,6 +1829,13 @@ function slim(content, config) {
         if (inner.error) return pass('error-shape', { error: true });
       }
     }
+    // The FIRST place the budget may speak on this route, and deliberately not before the fence
+    // branch above: `inner.error` is how a fenced error envelope is recognized, and an envelope is
+    // verbatim by contract — a bail that skipped that probe would report a failure as an ordinary
+    // passthrough the hook's stub guard is then allowed to replace. The fence branch needs no gate of
+    // its own: its cost is the recursive slim(), which carries the same deadline. Everything below is
+    // a non-JSON, non-fenced payload, which isErrorShape can never match.
+    if (budgetExpired(cfg)) return pass('budget-exceeded');
     // A JSONL line stream (bulk-operation dump) is a same-shape array — route it through the
     // normal pipeline instead of the non-json handback (M9). parseJsonl returns null unless every
     // non-blank line is an object/array with ≥2 rows, so a truncated/prose file still falls to the
@@ -1807,6 +1873,9 @@ function slim(content, config) {
   // Never touch error envelopes — write-gating elsewhere depends on seeing them verbatim. (An
   // array — including a JSONL row stream — is object-only-false here, so bulk data flows through.)
   if (isErrorShape(parsed)) return pass('error-shape', { error: true });
+  // Budget gate for the JSON route — after the parse + envelope rails, for the reason stated on the
+  // non-JSON one above.
+  if (budgetExpired(cfg)) return pass('budget-exceeded');
   // M13: a Figma design-context result also reaches the CLI still inside its MCP block envelope
   // (`[{"type":"text","text":"<the JSX>"}]` — the platform overflow spill), which parses as JSON and
   // would otherwise never meet the jsx stage in the non-JSON branch above. Unwrap a pure text-block
@@ -1827,15 +1896,16 @@ function slim(content, config) {
     // set by the FND_MCP_SLIM_DEBUG feed). Off ⇒ the hot path serializes exactly ONCE (the final
     // compact below) — no per-stage cost for a disabled feature, and `stages` stays empty.
     let prev = cfg.trace ? compact(value) : '';
-    const runStage = (name, next) => {
-      value = next;
+    const runStage = (name, nextFn) => {
+      if (budgetExpired(cfg)) throw budgetStop(); // stages accumulate; a bail here discards the whole run
+      value = nextFn();
       if (cfg.trace) { const cur = compact(value); if (cur !== prev) { stages.push(name); prev = cur; } }
     };
-    if (cfg.adf) runStage('adf', adfStage(value, cfg));
-    if (cfg.noise) runStage('noise', noiseStage(value, cfg));
-    if (cfg.truncate) runStage('truncate', truncateStage(value, cfg));
-    runStage('crush', crushValue(value, cfg));
-    if (cfg.toon) runStage('toon', toonStage(value));
+    if (cfg.adf) runStage('adf', () => adfStage(value, cfg));
+    if (cfg.noise) runStage('noise', () => noiseStage(value, cfg));
+    if (cfg.truncate) runStage('truncate', () => truncateStage(value, cfg));
+    runStage('crush', () => crushValue(value, cfg));
+    if (cfg.toon) runStage('toon', () => toonStage(value));
     const output = compact(value);
     const wasModified = output !== content.trim();
     // Not modified ⇒ the argument itself is the result (same rail as the passthrough returns above):
@@ -1849,8 +1919,8 @@ function slim(content, config) {
       ratio: bytesIn ? 1 - bytesOut / bytesIn : 0,
       stages,
     };
-  } catch (_) {
-    return pass('transform-error');
+  } catch (e) {
+    return pass(e && e.fndBudget ? 'budget-exceeded' : 'transform-error');
   }
 }
 
@@ -1886,7 +1956,7 @@ function capOutput(res, fileArg, config) {
   const spilled = writeSpill(cfg.spillDir, 'fnd-slim-out-', jsonBody);
   if (!spilled) return null;
   const outPath = spilled.path;
-  noteSpill(cfg, outPath);
+  noteSpill(cfg, outPath, spilled.created);
   // Shape sample: the first REAL row (skipping the crush sentinel) if the body is an array, else the
   // object itself. Truncated so one fat row can't blow the handback back past the very cap we enforce.
   let rowsKept = null, sample = null, isArr = false, isJson = false;
@@ -1939,13 +2009,17 @@ const PROFILE_HEAD = 5;
 const PROFILE_TAIL = 5;
 const PROFILE_RESERVOIR = 10;
 const PROFILE_DISTINCT_CAP = 1000;
+// A count cap alone does not bound the distinct set: 1000 × 100 KB values is 100 MB of retained
+// strings, and a GB-scale whale is exactly where those live. Cap the retained BYTES per key too.
+const PROFILE_DISTINCT_BYTES = 65536;
 const PROFILE_BYTE_CAP = 8000; // the emitted profile stays ≤ ~8 KB (exit target: stdout ≤ 10 KB)
 
 function makeProfileAccumulator(config) {
   return {
     cfg: { ...DEFAULTS, ...(config || {}) },
     lines: 0, parsed: 0, parseFailures: 0,
-    keys: new Map(), // key → { present, null, type, distinct:Set, capped }
+    keys: new Map(), // key → { present, null, type, distinct:Set, distinctBytes, capped }
+    keyCapHit: false,
     head: [], tail: [], reservoir: [], seen: 0,
   };
 }
@@ -1966,12 +2040,26 @@ function profileFeed(st, rawLine) {
   st.parsed++;
   for (const k of Object.keys(v)) {
     let s = st.keys.get(k);
-    if (!s) { s = { present: 0, null: 0, type: null, distinct: new Set(), capped: false }; st.keys.set(k, s); }
+    if (!s) {
+      // An id-keyed map dumped one row per line carries a FRESH key name every row — one distinct-Set
+      // per name, held for the whole stream (2.2M keys ≈ 1.1 GB, an OOM on a file Gate B exists to make
+      // tractable). Past the build cap the key is dropped: stats for a key the emit cap can never show
+      // are dead weight, and profileFinalize flags the count as a floor.
+      if (st.keys.size >= PROFILE_KEY_BUILD_CAP) { st.keyCapHit = true; continue; }
+      s = { present: 0, null: 0, type: null, distinct: new Set(), distinctBytes: 0, capped: false };
+      st.keys.set(k, s);
+    }
     s.present++;
     const val = v[k];
     if (val === null) s.null++;
     else if (s.type === null) s.type = jsonType(val);
-    if (!s.capped) { s.distinct.add(compact(val)); if (s.distinct.size >= PROFILE_DISTINCT_CAP) s.capped = true; }
+    if (!s.capped) {
+      const c = compact(val);
+      const before = s.distinct.size;
+      s.distinct.add(c);
+      if (s.distinct.size !== before) s.distinctBytes += c.length;
+      if (s.distinct.size >= PROFILE_DISTINCT_CAP || s.distinctBytes >= PROFILE_DISTINCT_BYTES) s.capped = true;
+    }
   }
   if (st.head.length < PROFILE_HEAD) st.head.push(v);
   st.tail.push(v); if (st.tail.length > PROFILE_TAIL) st.tail.shift();
@@ -1989,12 +2077,15 @@ function capSampleRow(v) {
 // Collapse the accumulator into ONE compact profile object, then trim samples AND keys until it fits
 // the cap. A count cap alone does NOT bound bytes — 200 keys with long names (a wide row) serialize
 // far past PROFILE_BYTE_CAP — so after the samples ladder we shrink the emitted key set by bytes too.
-const PROFILE_KEY_CAP = 200; // cheap pre-limit before the byte ladder (a 300k-key doc never builds them all)
+const PROFILE_KEY_CAP = 200; // cheap pre-limit before the byte ladder
+// What the ACCUMULATOR will build, headroom over the emit cap so the byte ladder still has candidates
+// to trim: an emit cap bounds the output, only this bounds memory.
+const PROFILE_KEY_BUILD_CAP = 2 * PROFILE_KEY_CAP;
 function profileFinalize(st, meta) {
   const keyEntries = [];
   for (const [k, s] of st.keys) {
     if (keyEntries.length >= PROFILE_KEY_CAP) break;
-    keyEntries.push([k, { present: s.present, null: s.null, type: s.type || 'null', distinct: s.capped ? PROFILE_DISTINCT_CAP : s.distinct.size, ...(s.capped ? { distinctCapped: true } : {}) }]);
+    keyEntries.push([k, { present: s.present, null: s.null, type: s.type || 'null', distinct: s.distinct.size, ...(s.capped ? { distinctCapped: true } : {}) }]);
   }
   const totalKeys = st.keys.size;
   const profile = {
@@ -2011,13 +2102,23 @@ function profileFinalize(st, meta) {
       reservoir: st.reservoir.map(capSampleRow),
     },
   };
+  // Set before the byte ladder runs so its size() sees this field. Past the build cap the accumulator
+  // stopped tracking key names, so the dropped count saturates and the exact number of distinct keys
+  // the file holds is not knowable from here.
+  if (st.keyCapHit) profile.keysCapped = true;
   // Emit `limit` keys and record how many were dropped (from either the pre-limit or the byte ladder).
+  // The count is named for what it is: an exact total, or — once the build cap capped the key set — a
+  // FLOOR. The profile is the only artifact a JSONL whale ever puts in context, so a saturated 266 must
+  // not read as "this file has 400 fields".
   const setKeys = (limit) => {
     profile.keys = {};
     const shown = Math.min(limit, keyEntries.length);
     for (let i = 0; i < shown; i++) profile.keys[keyEntries[i][0]] = keyEntries[i][1];
     const dropped = totalKeys - shown;
-    if (dropped > 0) profile.keysTruncated = dropped; else delete profile.keysTruncated;
+    const field = st.keyCapHit ? 'keysTruncatedAtLeast' : 'keysTruncated';
+    delete profile.keysTruncated;
+    delete profile.keysTruncatedAtLeast;
+    if (dropped > 0) profile[field] = dropped;
   };
   setKeys(keyEntries.length);
   const size = () => Buffer.byteLength(compact(profile), 'utf8');
@@ -2449,6 +2550,12 @@ if (require.main === module) {
     process.stderr.write('json-slim: cannot read input: ' + e.message + '\n');
     process.exit(1);
   }
+  // What arrived, kept because the `--jq` walk below REPLACES `raw` with a re-serialization of the
+  // selected value. For a real narrowing that re-serialization IS what the stages consume, so it is the
+  // right recovery copy — but an IDENTITY selector narrows nothing while still re-serializing, and a
+  // piped JSONL stream then collapses into one array line: the copy the run calls "the original" would
+  // hold none of the line boundaries its own guidance tells the reader to address.
+  const stdinBytes = raw;
 
   // A JSONL FILE (≤ the stream gate, no --jq) is NEVER compressed — it PROFILES, exactly like Gate B.
   // parseJsonl is the strict detector (≥2 lines, each a JSON object/array): a regular JSON document
@@ -2521,6 +2628,26 @@ if (require.main === module) {
     const b = Buffer.byteLength(raw, 'utf8');
     res = { output: raw, wasModified: false, bytesIn: b, bytesOut: b, ratio: 0, reason: 'transform-error', stages: [] };
   }
+  // The recovery net for STDIN. Every lossy branch below names the on-disk original, which a FILE
+  // run already has; a stdin run had none, so `noise` (dropped fields) and `truncate` (clipped strings)
+  // handed back the ONLY remaining copy of the input — the crush spill holds the dropped ROWS, not the
+  // original. Spill it here, before anything is printed: content-addressed, so a re-run of the same
+  // payload reuses one file. Under a NARROWING `--jq` the "original" is the narrowed value the stages
+  // consumed — that is the complete undo for the body being printed, and a far smaller one than the whole
+  // stream; an identity selector narrowed nothing, so the piped bytes are the copy (see stdinBytes).
+  // A passthrough loses nothing and must never spill. `--no-spill` is the explicit opt-out.
+  let stdinOriginal = null;
+  if (!fileArg && res.wasModified && res.bytesOut < res.bytesIn && cfg.enableMarker !== false) {
+    const s = writeSpill(cfg.spillDir, 'fnd-mcp-slim-', jqIdentity ? stdinBytes : raw);
+    if (s) { noteSpill(cfg, s.path, s.created); stdinOriginal = s.path; }
+    else {
+      // No recovery copy → hand the original back verbatim rather than a lossy body nothing can undo
+      // (the rail hooks/mcp-slim.cjs takes on the same failure). Shaped like the transform-error
+      // degrade above, so every branch below reports what was actually printed.
+      const b = Buffer.byteLength(raw, 'utf8');
+      res = { output: raw, wasModified: false, bytesIn: b, bytesOut: b, ratio: 0, reason: 'spill-write-failure', stages: res.stages || [] };
+    }
+  }
   const compressed = res.wasModified && res.bytesOut < res.bytesIn;
   // Hand the file path back — instead of re-dumping the whole (possibly whale-sized) file — for a
   // non-JSON file: never compressible, and a truncated/broken JSONL lands here too (parseJsonl already
@@ -2557,6 +2684,13 @@ if (require.main === module) {
   } else {
     process.stdout.write(res.output + '\n');
   }
+  // On stderr, not appended to stdout: a stdin run's stdout is the machine-readable body a caller can
+  // pipe (a fixture parses it), while both streams reach the model that invoked the CLI.
+  // Under `--jq` that copy holds the NARROWED subtree the stages consumed — the complete undo for the
+  // body being printed, but not the stream that was piped in; a caller told "the original" would read
+  // it looking for one.
+  if (stdinOriginal) process.stderr.write(`json-slim: ${narrowed ? 'narrowed input' : 'original'} spilled to ${stdinOriginal}\n`);
+  else if (res.reason === 'spill-write-failure') process.stderr.write('json-slim: cannot write a recovery copy — passing the original through uncompressed\n');
   if (has('--stats')) {
     process.stderr.write(`json-slim: ${res.bytesIn} → ${res.bytesOut} bytes (${(res.ratio * 100).toFixed(1)}% reduction)${res.error ? ' [error-shape passthrough]' : ''}\n`);
   }
@@ -2575,7 +2709,7 @@ if (require.main === module) {
     bytes_out: res.bytesOut,
     pct: Math.round((res.ratio || 0) * 1000) / 10,
     stages: res.stages || [],
-    spill: null,
+    spill: stdinOriginal, // the stdin recovery copy IS the handback this run gave the model (null for a file run, which hands back its own path)
     spill_out: capped ? capped.spillOut : null, // M9b Gate A: the fnd-slim-out-* spill (non-JSONL huge doc)
     spills, // B4.10a: every file this run wrote — deduped/capped in debugLog
     ms: Date.now() - t0,

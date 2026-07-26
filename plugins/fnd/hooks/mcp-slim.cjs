@@ -30,7 +30,18 @@
 // or `--jq <dot.path>` for a payload the compressor already declined), instead of landing in context
 // raw. Same contract as the M7 CLI path-handback, moved into the hook; the stub never appears where
 // a rail says passthrough (an error envelope ANYWHERE in the result — at any size, see `anyError` —
-// a block carrying anything beyond `type`/`text`, platform-overflow notices, spill failure).
+// a binary/base64 block, platform-overflow notices, spill failure). A block array that cannot be
+// COLLAPSED into one stub (a block carrying anything beyond `type`/`text`) gets one stub PER
+// over-limit block instead — see blockStubs.
+//
+// Wall-clock budget (B4.8): the whole slim flow shares one deadline (FND_MCP_SLIM_BUDGET_MS). It
+// bounds accumulation across stages and blocks — a single regex or analysis pass is uninterruptible,
+// so the two reproduced superlinear scans are fixed at the source (log-slim's .NET frame pattern,
+// json-slim's ANALYSE_OPS_CAP) and this is the ceiling for whatever the next one is.
+// An expiry hands back the ORIGINAL, never a half-transformed value — PER BLOCK on a content array:
+// blocks already slimmed keep their compression (with their recovery handle) and the rest ride verbatim,
+// which the debug line reports as `compressed` + `budget_partial:true`. Only a whole-result expiry (a
+// string/single-text shape, or an array where nothing got through) is logged `budget-exceeded`.
 //
 // Env: FND_MCP_SLIM (gated in plugin.json — node never spawns when 0);
 //      FND_MCP_SLIM_DIR (spill directory, shared with json-slim; default os.tmpdir());
@@ -38,7 +49,8 @@
 //      FND_MCP_SLIM_DEBUG (opt-in: one JSONL trace line per invocation to fnd-mcp-slim-debug.log —
 //      `1` = key events, `2` = everything, sub-gate size-gate lines included);
 //      FND_MCP_SLIM_STUB (0 disables the spill-and-stub guard) + FND_MCP_SLIM_STUB_BYTES (its
-//      threshold; default 32768).
+//      threshold; default 32768);
+//      FND_MCP_SLIM_BUDGET_MS (wall-clock ceiling for the pipeline; default 5000, 0 disables).
 'use strict';
 
 const fs = require('fs');
@@ -51,11 +63,13 @@ const GATE_BYTES = 4096; // only results larger than this are worth compressing
 // (null when modified) names the passthrough branch for the debug log; `stages` = the slim stages
 // that changed bytes (only populated when `trace`, i.e. FND_MCP_SLIM_DEBUG is on). `sink` collects the
 // spills json-slim writes inside this call (crush markers, the jsx node-id map) so the debug line can
-// name every file the invocation left on disk.
-function slimText(text, trace, sink) {
+// name every file the invocation left on disk; `sink.created` is the subset this run brought into
+// existence — the only files a discarding branch may clean up. `deadline` is the shared wall-clock
+// budget: one per invocation, so N blocks share it instead of each getting a fresh one.
+function slimText(text, trace, sink, deadline) {
   let res;
   try {
-    res = slim(text, { trace, spillSink: sink });
+    res = slim(text, { trace, spillSink: sink.all, spillCreatedSink: sink.created, deadline });
   } catch (_) {
     return { text, modified: false, reason: 'transform-error', stages: [] };
   }
@@ -73,16 +87,17 @@ function slimText(text, trace, sink) {
 // the first non-modifying block reason; `stages` is the union across compressed blocks. `anyError`
 // is true when ANY block is an error envelope — `reason` only names the FIRST non-modifying block,
 // so it cannot carry that fact (the M12b stub gate needs it for every block, at any size).
-function slimBlocks(blocks, trace, sink) {
+function slimBlocks(blocks, trace, sink, deadline) {
   let modified = false;
   let markIndex = -1;
   let reason = null;
   let anyError = false;
+  let budgetBailed = 0; // blocks the shared deadline stopped — see the `budget_partial` trace field
   let format; // (M8) the format tag of the first non-modifying block — meaningful only when non-json
   const stages = [];
   const out = blocks.map((b, i) => {
     if (b && typeof b === 'object' && typeof b.text === 'string') {
-      const r = slimText(b.text, trace, sink);
+      const r = slimText(b.text, trace, sink, deadline);
       if (r.modified) {
         modified = true;
         markIndex = i;
@@ -90,11 +105,12 @@ function slimBlocks(blocks, trace, sink) {
         return { ...b, text: r.text };
       }
       if (r.reason === 'error-shape') anyError = true;
+      if (r.reason === 'budget-exceeded') budgetBailed++;
       if (reason === null) { reason = r.reason; format = r.format; }
     }
     return b; // non-text or unchanged → untouched
   });
-  return { blocks: out, modified, markIndex, anyError, reason: modified ? null : (reason || 'no-gain'), stages, format: modified ? undefined : format };
+  return { blocks: out, modified, markIndex, anyError, budgetBailed, reason: modified ? null : (reason || 'no-gain'), stages, format: modified ? undefined : format };
 }
 
 // Slim a tool result, mirroring its shape. Returns a descriptor for attachMarker (+ reason/stages
@@ -102,22 +118,25 @@ function slimBlocks(blocks, trace, sink) {
 // `anyError` rides out to the M12b stub gate on EVERY shape: `reason` names only the first
 // non-modifying block, so a content array of [whale, error envelope] would otherwise look
 // stubbable and swallow the envelope into the spill file.
-function slimResult(result, trace, sink) {
+// `budgetBailed` only exists on the block-array shapes: on a single text the deadline IS the result's
+// own `reason`, while an array can have some blocks compressed and the rest handed back verbatim — a
+// truthful `compressed` line that nothing else would show the ceiling behind (the `budget_partial` field).
+function slimResult(result, trace, sink, deadline) {
   if (typeof result === 'string') {
-    const r = slimText(result, trace, sink);
+    const r = slimText(result, trace, sink, deadline);
     return { value: r.text, modified: r.modified, kind: 'string', reason: r.reason, anyError: r.reason === 'error-shape', stages: r.stages, format: r.format };
   }
   if (Array.isArray(result)) {
-    const r = slimBlocks(result, trace, sink);
-    return { value: r.blocks, modified: r.modified, kind: 'array', markIndex: r.markIndex, reason: r.reason, anyError: r.anyError, stages: r.stages, format: r.format };
+    const r = slimBlocks(result, trace, sink, deadline);
+    return { value: r.blocks, modified: r.modified, kind: 'array', markIndex: r.markIndex, reason: r.reason, anyError: r.anyError, budgetBailed: r.budgetBailed, stages: r.stages, format: r.format };
   }
   if (result && typeof result === 'object') {
     if (Array.isArray(result.content)) {
-      const r = slimBlocks(result.content, trace, sink);
-      return { value: { ...result, content: r.blocks }, modified: r.modified, kind: 'content', markIndex: r.markIndex, reason: r.reason, anyError: r.anyError, stages: r.stages, format: r.format };
+      const r = slimBlocks(result.content, trace, sink, deadline);
+      return { value: { ...result, content: r.blocks }, modified: r.modified, kind: 'content', markIndex: r.markIndex, reason: r.reason, anyError: r.anyError, budgetBailed: r.budgetBailed, stages: r.stages, format: r.format };
     }
     if (typeof result.text === 'string') {
-      const r = slimText(result.text, trace, sink);
+      const r = slimText(result.text, trace, sink, deadline);
       return { value: { ...result, text: r.text }, modified: r.modified, kind: 'single', reason: r.reason, anyError: r.reason === 'error-shape', stages: r.stages, format: r.format };
     }
   }
@@ -184,11 +203,36 @@ const pctOf = (inB, outB) => (inB ? Math.round((1 - outB / inB) * 1000) / 10 : 0
 const STUB_BYTES_DEFAULT = 32768;
 const STUB_CAP = 1200; // the stub must never become the next context problem
 const STUB_TOOL_MAX = 80;
-// Only these two passthrough reasons stub. `error-shape` is verbatim by contract, `platform-overflow`
+// Only these passthrough reasons stub. `error-shape` is verbatim by contract, `platform-overflow`
 // is already a tiny platform-spilled notice, and `transform-error` / `unrecognized-shape` mean we did
 // not understand the payload — hand those back untouched rather than invent a shape for them.
-const STUB_REASONS = new Set(['non-json', 'no-gain']);
+// `budget-exceeded` qualifies because slim() only reports it AFTER the parse + error-envelope rails
+// have run, so `anyError` still speaks for every block; the whale is exactly the payload that must
+// not land raw, and the CLI (which carries no budget) is a real recovery for it.
+const STUB_REASONS = new Set(['non-json', 'no-gain', 'budget-exceeded']);
+// Passthrough reasons whose payload can BE a platform-overflow notice, i.e. where the re-label probe
+// runs. `no-gain` cannot: the payload parsed as JSON, and the platform's replacement text is prose.
+// `budget-exceeded` can — a notice sitting beside a whale in one content array shares the deadline —
+// and it STUBS, so leaving it out collapsed the notice and its `tool-results/` path out of context and
+// out of `--report`'s missed-whale count. The cost of including it: a budget-tripped payload that
+// merely quotes the phrase with a tool-results path within 4 KB is re-labelled and rides back raw
+// instead of stubbed (the M34 trade-off, on a branch that already reached the ceiling).
+const OVERFLOW_PROBE_REASONS = new Set(['non-json', 'budget-exceeded']);
 const SLIM_CLI = path.resolve(__dirname, '..', 'scripts', 'json-slim.cjs');
+
+// Wall-clock ceiling for the whole slim flow (B4.8). Parsed like stubBytes (whole-string `Number`, so
+// `5s`/`5 000` fall back to the default instead of to 5 ms), with a literal `0` disabling it. The
+// default is ~22× a 1 MB-class payload (~230 ms end-to-end here; 201 ms for an 8 MB JSON array) and an
+// order of magnitude inside Claude Code's PostToolUse timeout. It is HEADROOM, not proof: a legitimate
+// tens-of-MB dump, or several fat blocks sharing the one deadline, can reach it — and then the result
+// rides back uncompressed or stubbed, which is the safe degrade, not a failure.
+const BUDGET_MS_DEFAULT = 5000;
+function budgetMs() {
+  const raw = String(process.env.FND_MCP_SLIM_BUDGET_MS ?? '').trim();
+  if (raw === '0') return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : BUDGET_MS_DEFAULT;
+}
 
 function stubEnabled() {
   const raw = process.env.FND_MCP_SLIM_STUB;
@@ -218,18 +262,21 @@ function stubBytes() {
 // `weak-gain` hands back the compressed body the stub replaced, and a non-JSON payload goes through the
 // CLI's own shape router (JSONL profiles instead of dumping rows, logs compress, anything else hands the
 // path back) — a JSONL whale is `format`-tagged broken-json/text, never `json`.
-function stubText(tool, bytes, format, hint, file, reason) {
+function stubText(tool, bytes, format, hint, file, reason, perBlock) {
   const who = String(tool || 'MCP tool').slice(0, STUB_TOOL_MAX);
   const reRunRedumps = reason === 'no-gain' && format === 'json';
+  // The per-block route spills ONE block's text, not the joined payload, so it must not promise the
+  // whole result — the other blocks came back in place and are still in context.
+  const what = perBlock ? "this block's FULL text was written" : 'the FULL original was written';
   const lines = reRunRedumps ? [
-    `<<fnd-mcp-slim stub>> ${who} returned ${bytes} B (format=${format}) — too large for context, and the compressor already ran on it and gained nothing, so the FULL original was written to disk instead of being shown:`,
+    `<<fnd-mcp-slim stub>> ${who} returned ${bytes} B (format=${format}) — too large for context, and the compressor already ran on it and gained nothing, so ${what} to disk instead of being shown:`,
     `full=${file}`,
     'Do NOT re-run the compressor over the whole file (it would print the same bytes back) and never raw-Read it. Narrow instead:',
     `  node ${SLIM_CLI} ${file} --jq <dot.path>`,
     'For anything a sub-path cannot answer: grep the file, or Read it windowed (offset/limit).',
     `shape — ${hint}`,
   ] : [
-    `<<fnd-mcp-slim stub>> ${who} returned ${bytes} B (format=${format}) — too large for context and not compressible here, so the FULL original was written to disk instead of being shown:`,
+    `<<fnd-mcp-slim stub>> ${who} returned ${bytes} B (format=${format}) — too large for context and not compressible here, so ${what} to disk instead of being shown:`,
     `full=${file}`,
     'Compress or inspect it — never raw-Read a whale:',
     `  node ${SLIM_CLI} ${file}`,
@@ -256,16 +303,35 @@ function stubbableBlocks(blocks) {
     Object.keys(b).every((k) => STUB_BLOCK_KEYS.has(k)));
 }
 
+// A block/result whose bytes are BINARY — a screenshot, an audio clip, an embedded resource. Every
+// stub spill holds TEXT, so a stub over one of these would evict a caption or a snapshot while
+// promising a file that does not contain the binary at all (`data`/`blob` ride along in the envelope).
+// Kept as an explicit rail rather than relying on the plain-block predicate above, which excludes them
+// only incidentally. Deliberately NOT consulted before slim(): a mixed [snapshot-text, screenshot]
+// result legitimately compresses its text block and attaches the recovery handle there (attachMarker's
+// markIndex), and bailing on the whole result would forfeit that.
+const BINARY_BLOCK_TYPES = new Set(['image', 'audio', 'resource', 'resource_link']);
+function isBinaryBlock(b) {
+  if (!b || typeof b !== 'object') return false;
+  // A declared text block is text, whatever else rides beside it: the `data`/`blob` probes below are for
+  // the UNTYPED shapes, and letting them speak here sent a whale carrying any unrelated string sibling
+  // straight to context raw.
+  if (b.type === 'text') return false;
+  if (BINARY_BLOCK_TYPES.has(b.type) || typeof b.data === 'string' || typeof b.blob === 'string') return true;
+  return !!b.resource && typeof b.resource === 'object' && typeof b.resource.blob === 'string'; // an untyped embedded resource
+}
+
 // Replace the whole result with one stub text payload, mirroring the arriving shape. null = this
-// shape cannot safely carry a stub (see stubbableBlocks), or we do not recognize it at all. The
-// `single`/`string` shapes stay stubbable: only `.text` is replaced (and spilled whole), so every
-// envelope sibling survives the spread.
+// shape cannot safely carry a stub (see stubbableBlocks / isBinaryBlock), or we do not recognize it at
+// all. The `single`/`string` shapes stay stubbable: only `.text` is replaced (and spilled whole), so
+// every envelope sibling survives the spread — unless one of those siblings is the binary payload, in
+// which case only a caption would be evicted and the stub's promise would be false.
 function stubValue(result, text) {
   if (typeof result === 'string') return text;
   if (Array.isArray(result)) return stubbableBlocks(result) ? [{ type: 'text', text }] : null;
   if (result && typeof result === 'object') {
     if (Array.isArray(result.content)) return stubbableBlocks(result.content) ? { ...result, content: [{ type: 'text', text }] } : null;
-    if (typeof result.text === 'string') return { ...result, text };
+    if (typeof result.text === 'string') return isBinaryBlock(result) ? null : { ...result, text };
   }
   return null;
 }
@@ -312,12 +378,100 @@ function buildStub(result, tool, format, stubLimit, reason) {
   return { value: stubValue(result, stubText(tool, p.bytes, fmt, h.hint, s.path, reason)), spill: s.path, format: fmt };
 }
 
+// The content array inside either block-array shape — a bare array of blocks, or `{content:[…]}` —
+// or null for every other shape.
+const blocksOf = (x) => (Array.isArray(x) ? x : (x && Array.isArray(x.content) ? x.content : null));
+
+// The fallback for a block array that cannot be COLLAPSED into one stub: any block carrying a field
+// beyond `type`/`text` (`annotations`, a per-block `_meta` cursor) declines stubbableBlocks, which used
+// to send the whole whale to context raw at any size. Replace each over-limit block on its own instead
+// — the array keeps its length, every block keeps its own fields, and each replacement names the spill
+// holding THAT block's text, so the CLI line the stub prints really operates on the bytes it replaced.
+// `blocks` are the ones about to be emitted (compressed on the weak-gain branch, the originals on the
+// incompressible one) and decide WHICH blocks are over the limit; the spill always holds the ORIGINAL
+// block's text, which is what makes a re-run a genuine recovery. null = nothing was worth replacing
+// (the bulk lives in an envelope sibling) → the caller passes through as before.
+function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, keep) {
+  if (blocks.some(isBinaryBlock)) return null;
+  // The SAME predicate slimBlocks compresses on — a string `.text`, whatever the block's declared type.
+  // Requiring `type:'text'` here let an untyped block be compressed lossily by the pipeline and then be
+  // skipped by both passes below, and this route returns before the caller's whole-result spill: the
+  // block reached context with its fields dropped and no copy anywhere. The binary rail above already
+  // spoke for the shapes whose bytes a text spill cannot hold.
+  const isText = (b) => !!b && typeof b === 'object' && typeof b.text === 'string';
+  const sourceText = (b, i) => {
+    const src = originalBlocks[i];
+    return src && typeof src.text === 'string' ? src.text : b.text;
+  };
+  let spill = null;
+  let spillBytes = 0;
+  let spillFormat = format;
+  const out = blocks.map((b, i) => {
+    if (!isText(b)) return b;
+    const bytes = Buffer.byteLength(b.text, 'utf8');
+    if (bytes <= stubLimit) return b;
+    const text = sourceText(b, i);
+    const s = spillOriginal(text);
+    if (!s) return b; // no recovery copy for this block → handled with the kept blocks below
+    keep(s.path);
+    const h = shapeHint(text);
+    const fmt = format || h.format;
+    // `spill` is the ONE path the debug line reports (`--report` pairs a later CLI run on it), so it
+    // names the biggest block replaced — the whale the model is most likely to go after.
+    if (bytes > spillBytes) { spill = s.path; spillBytes = bytes; spillFormat = fmt; }
+    return { ...b, text: stubText(tool, Buffer.byteLength(text, 'utf8'), fmt, h.hint, s.path, reason, true) };
+  });
+  if (!spill) return null;
+  // On the weak-gain branch `blocks` are the COMPRESSED bodies, so a block that landed under the
+  // threshold is emitted lossy — and this route returns before the caller writes its own `full=` spill,
+  // so nothing else would hold that block's original. Hand it back per block, same contract as the
+  // stubs above. A LOSSY block that cannot be spilled (here, or one the pass above failed to stub)
+  // declines the whole route — the caller's compressed path still spills the result whole and marks it.
+  // On the incompressible branch there is nothing to undo: an unspillable block simply rides back
+  // VERBATIM, which is the same thing a passthrough would have handed over.
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] !== blocks[i] || !isText(out[i])) continue; // stubbed / non-text
+    const text = sourceText(blocks[i], i);
+    if (blocks[i].text === text) continue; // came back verbatim → nothing to recover
+    const s = spillOriginal(text);
+    if (!s) return null;
+    keep(s.path);
+    out[i] = { ...out[i], text: `${out[i].text}\n\n<<full=${s.path} original_block>>` };
+  }
+  return { blocks: out, spill, format: spillFormat };
+}
+
 function emit(value) {
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: value },
-    }),
-  );
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: value },
+  }));
+}
+
+// Every string the emitted result carries, read out of the VALUE rather than out of the serialized
+// wire: a substring scan of the wire can never match a path holding a backslash (every path on
+// Windows), and the cleanup below would then unlink a file behind a live handle.
+function emittedStrings(value) {
+  const out = [];
+  const walk = (v) => {
+    if (typeof v === 'string') { out.push(v); return; }
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (v && typeof v === 'object') for (const k of Object.keys(v)) walk(v[k]);
+  };
+  walk(value);
+  return out;
+}
+
+// Is this spill path still named by something we emitted? An OCCURRENCE test, deliberately not a parse
+// of the `full=`/`ids=` handle tokens: a handle is delimited by whitespace, so any path holding a SPACE
+// ("Application Support", a macOS volume name) parsed as a truncated prefix, missed its own file, and
+// the cleanup deleted a spill a live handle points at. Over-matching only ever KEEPS a file;
+// under-matching loses the offloaded rows. A crush marker sits INSIDE the JSON document json-slim
+// serialized, so its path arrives escaped one level deep — the file on disk answers to the unescaped
+// reading, so both spellings count.
+function stillNamed(strings, p) {
+  const esc = JSON.stringify(p).slice(1, -1);
+  for (const s of strings) if (s.includes(p) || (esc !== p && s.includes(esc))) return true;
+  return false;
 }
 
 function run(raw) {
@@ -333,6 +487,32 @@ function run(raw) {
   // transform error, the size gate) report an empty list without having to say so.
   const spills = [];
   const own = (p) => { if (p) spills.push(p); return p; };
+  // The subset json-slim actually CREATED (vs. deduped onto an existing content-addressed file). Every
+  // branch that discards the compressed body discards the markers naming these, so they become files
+  // nobody will ever read — dropCreated removes them, and only them: a deduped path may still be the
+  // target of an EARLIER invocation's live handle. (`created` bounds the orphans, it cannot PROVE sole
+  // ownership: two invocations racing on identical content both mint the same content-addressed name.)
+  // `emitted` = the value that actually went out (absent on a passthrough): a per-block stub replaces
+  // only the over-limit blocks, so a block that came back COMPRESSED can still carry a `full=`/`ids=`
+  // handle into context, and that file has to stay.
+  const created = [];
+  const sink = { all: spills, created };
+  const dropCreated = (emitted) => {
+    const live = emitted === undefined ? null : emittedStrings(emitted);
+    for (const p of created) {
+      if (live && stillNamed(live, p)) continue;
+      try { fs.unlinkSync(p); } catch (_) {}
+      // EVERY copy: noteSpill pushes a path on each write, dedup hits included, so one removed file can
+      // sit in the list many times — and the debug line must not claim a file it just removed.
+      for (let at = spills.indexOf(p); at !== -1; at = spills.indexOf(p)) spills.splice(at, 1);
+    }
+    created.length = 0;
+  };
+
+  // Set once slimResult has run: the deadline stopped SOME blocks of a result that still emits, so the
+  // line's own `reason` cannot say so (it is `null` for a compression, or the branch a stub replaced).
+  // Declared out here because `trace` closes over it and fires before slimResult on three paths.
+  let budgetPartial = false;
 
   // One debug line per invocation (opt-in). Never touches stdout; the emitting paths call it AFTER
   // writing the result. `decision` is `compressed` or `stubbed` iff we emitted updatedToolOutput.
@@ -343,6 +523,7 @@ function run(raw) {
     debugLog({
       entry: 'hook', tool, decision, reason: reason || null,
       ...(format ? { format } : {}), // M8: only the non-json passthrough carries a format tag
+      ...(budgetPartial ? { budget_partial: true } : {}), // B4.8: a mid-array expiry, invisible otherwise
       bytes_in: bytesIn, bytes_out: bytesOut, pct: pctOf(bytesIn, bytesOut),
       stages: stages || [], spill: spill || null, spills, ms: Date.now() - t0,
     }, undefined, input.cwd); // the event's own cwd names the project (B4.10b)
@@ -377,36 +558,75 @@ function run(raw) {
   const stubOn = stubEnabled();
   const stubLimit = stubBytes();
 
-  const slimmed = slimResult(result, dbg, spills); // dbg gates slim()'s per-stage `stages` bookkeeping
+  // One deadline for the whole flow, so N blocks share the ceiling instead of each getting a fresh one.
+  // 0 (FND_MCP_SLIM_BUDGET_MS=0) ⇒ null ⇒ no budget, json-slim's own default.
+  const budget = budgetMs();
+  const deadline = budget ? Date.now() + budget : null;
+  const slimmed = slimResult(result, dbg, sink, deadline); // dbg gates slim()'s per-stage `stages` bookkeeping
+  // The bail is PER BLOCK by design: each block is either its byte-identical original or fully
+  // compressed WITH a recovery handle, so stopping mid-array is safe and keeps the work already done.
+  // It just has to be VISIBLE — without this the blocks that made it report a clean `compressed` line
+  // and `--report` cannot see the ceiling tripping at all. Only when the result still emits: a bail that
+  // became the result's own `reason` already says so.
+  budgetPartial = slimmed.modified && slimmed.budgetBailed > 0;
 
   // Emit the stub for `reason` if this result can carry one; false = declined, caller continues on
   // the path it was already taking. `stages` are the slim stages that ran before the stub replaced
   // the body (none on the incompressible branch). `slimmed.format` is the M8 tag of a non-json
   // passthrough (undefined once anything compressed → buildStub falls back to the shape hint's).
+  // The stub's own spill is the ONE file the model is handed here, so everything json-slim wrote for
+  // the body being thrown away is dropped first — before trace(), so the line never names a removed
+  // file, and after emit(), so cleanup never delays what the model sees.
   const tryStub = (reason, stages) => {
     const s = buildStub(result, tool, slimmed.format, stubLimit, reason);
     if (!s) return false;
     own(s.spill);
     emit(s.value);
+    dropCreated(s.value);
     if (dbg) trace('stubbed', reason, bytesIn, bytesOf(s.value), stages, s.spill, s.format);
+    return true;
+  };
+
+  // The per-block fallback (see blockStubs) — same gates, same cleanup, one stub per over-limit block.
+  // `blocks` is what would have been emitted; the spills hold the ORIGINAL blocks' text.
+  const tryBlockStubs = (reason, stages, value) => {
+    const blocks = blocksOf(value);
+    const originals = blocksOf(result);
+    if (!blocks || !originals) return false;
+    const s = blockStubs(originals, blocks, tool, slimmed.format, stubLimit, reason, own);
+    if (!s) return false;
+    const out = Array.isArray(value) ? s.blocks : { ...value, content: s.blocks };
+    // The net gate the compressed path has, which this route lacked: on the weak-gain branch every KEPT
+    // block pays a ~130 B `original_block` handle, so a long array of thin blocks can come out BIGGER
+    // than what arrived while still logging `stubbed`. Passthrough (or the caller's compressed path)
+    // wins there — the guard exists to protect context, never to grow it. The per-block spills already
+    // written stay on disk for the TTL sweep; they are content-addressed, so unlinking them could break
+    // another invocation's live handle.
+    if (bytesOf(out) >= bytesIn) return false;
+    emit(out);
+    dropCreated(out);
+    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(out), stages, s.spill, s.format);
     return true;
   };
 
   if (!slimmed.modified) {
     // Same re-label as the size gate, for an overflow notice that happens to exceed GATE_BYTES: the
     // branch is a passthrough either way (nothing was compressed), so naming it costs no compression
-    // and keeps the event visible to `--report`'s missed-whale count. Only the `non-json` reason can
-    // be an overflow notice — the platform's replacement text is prose, never a JSON result. The
-    // probe also gates the stub below (an overflow notice is never stubbed), so it runs when either
-    // consumer needs it — still only on a branch that is already passing through.
+    // and keeps the event visible to `--report`'s missed-whale count. The probe also gates the stub
+    // below (an overflow notice is never stubbed), so it runs when either consumer needs it — still
+    // only on a branch that is already passing through.
     // `!anyError` is the error rail for the blocks `reason` cannot speak for: it names only the FIRST
     // non-modifying block, so [whale, error envelope] would read as a plain `non-json` passthrough.
     const stubbable = stubOn && bytesIn > stubLimit && STUB_REASONS.has(slimmed.reason) && !slimmed.anyError;
-    const overflow = (dbg || stubbable) && slimmed.reason === 'non-json' ? overflowSpill(serialized) : null;
+    const overflow = (dbg || stubbable) && OVERFLOW_PROBE_REASONS.has(slimmed.reason) ? overflowSpill(serialized) : null;
     // M12b: without this, a whale the pipeline cannot shrink (non-JSON text, HTML, already-minimal
     // JSON) lands in context RAW. Hand back the stub + spill instead; the model decides what to do
     // with the file. Any decline falls through to the passthrough that was happening anyway.
-    if (stubbable && !overflow && tryStub(slimmed.reason, [])) return;
+    if (stubbable && !overflow &&
+      (tryStub(slimmed.reason, []) || tryBlockStubs(slimmed.reason, [], slimmed.value))) return;
+    // The original is what goes to context here, so nothing names the spills the declined compression
+    // wrote (a crush marker whose array came back whole, a jsx id map for a body that was not emitted).
+    dropCreated();
     trace('passthrough', overflow ? 'platform-overflow' : (slimmed.reason || 'no-gain'), bytesIn, bytesIn, [], overflow, slimmed.format);
     return;
   }
@@ -422,32 +642,35 @@ function run(raw) {
   // there would swallow the failure the write-gating reads.
   if (stubOn && !slimmed.anyError && bytesOf(slimmed.value) > stubLimit) {
     const body = payloadOf(slimmed.value); // the COMPRESSED body, not the whale — buildStub re-reads the original
-    if (body !== null && body.bytes > stubLimit && tryStub('weak-gain', slimmed.stages)) return;
+    if (body !== null) {
+      if (body.bytes > stubLimit && tryStub('weak-gain', slimmed.stages)) return;
+    } else if (tryBlockStubs('weak-gain', slimmed.stages, slimmed.value)) return; // rich blocks: one stub each
   }
 
   // Recovery net: spill the original before handing back a lossy result. No spill → passthrough.
   const full = spillOriginal(serialized);
-  if (!full) { trace('passthrough', 'spill-write-failure', bytesIn, bytesIn, [], null); return; }
+  if (!full) { dropCreated(); trace('passthrough', 'spill-write-failure', bytesIn, bytesIn, [], null); return; }
   const fullPath = own(full.path);
 
   const value = attachMarker(slimmed, `\n\n<<full=${fullPath} original_result>>`);
-  if (value === null) { trace('passthrough', 'transform-error', bytesIn, bytesIn, [], null); return; } // could not attach a handle safely → passthrough (no orphan)
+  if (value === null) { // could not attach a handle safely → passthrough (no orphan)
+    if (full.created) created.push(fullPath);
+    dropCreated();
+    trace('passthrough', 'transform-error', bytesIn, bytesIn, [], null);
+    return;
+  }
 
   // Final net check: every gain gate upstream measures the BLOCK, before this ~130 B recovery handle and
   // the re-escaping the envelope adds around it, so a thin win (one dropped null in a big object) can
   // come out NET BIGGER than what arrived — context grown, logged as a `compressed` event with
-  // bytes_out > bytes_in. The spill is unlinked because the marker naming it is being discarded (best
-  // effort, and only the file this branch itself just wrote — a jsx id-map spill written inside slim()
-  // is not ours to remove here and expires with the TTL sweep). `full.created` is the second half of
-  // that rule: spill names are content-addressed, so this exact file may still be the target of an
-  // EARLIER invocation's live `full=` handle, and deleting it would break that recovery.
+  // bytes_out > bytes_in. The whole body is discarded, so every file this run created for it goes with
+  // it — including the crush spills inside slim(), whose markers left with the body. `full.created` is
+  // the rule's second half: spill names are content-addressed, so a file this run merely REUSED may
+  // still be the target of an EARLIER invocation's live handle, and deleting it would break that.
   const outBytes = bytesOf(value);
   if (outBytes >= bytesIn) {
-    if (full.created) {
-      try { fs.unlinkSync(fullPath); } catch (_) {}
-      const at = spills.indexOf(fullPath);
-      if (at !== -1) spills.splice(at, 1); // the debug line must not claim a file it just removed
-    }
+    if (full.created) created.push(fullPath);
+    dropCreated();
     trace('passthrough', 'marker-overhead', bytesIn, bytesIn, slimmed.stages, null);
     return;
   }
