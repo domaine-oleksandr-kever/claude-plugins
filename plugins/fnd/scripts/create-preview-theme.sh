@@ -45,6 +45,8 @@
 #       through to `shopify theme push`, for a file inside a theme dir that must not ship.
 #
 # Output is `key=value` lines on stdout. Errors print `error=<reason>` and exit non-zero.
+# Pushes retry on a Shopify `Throttled` answer (pauses: $FND_CPT_THROTTLE_WAITS, default "20 60");
+# a throttle that holds is reported as `cause=throttled`.
 # Requires: shopify CLI, jq; npm for the default build.
 
 set -euo pipefail
@@ -276,12 +278,59 @@ json_field() { printf '%s' "$1" | jq -r --arg f "$2" '.. | objects | .[$f]? // e
 # stderr log (in $ERR) and points to it, plus shows the last 25 lines inline. Shopify
 # crashes ("undefined method 'dig' for nil") when an invalid asset is rejected — the
 # offending file is named a few lines above the ruby trace, so show enough context.
-push_fail() {
+push_fail() { # $1 = error code; $2 (create only) = theme name to scan for a this-run-created orphan
   printf 'error=%s\n' "$1"
+  # A throttle that held through the retries is an actionable state of its own: the fix is outside
+  # this run (stop the competing consumer or wait), not "check the asset the trace names".
+  if grep -qi 'throttled' "$ERR"; then
+    printf 'cause=throttled — the store+token rate limit held through the retries; a `shopify theme dev` running against this store draws on the same budget — stop it (or wait a minute) and re-run\n'
+  fi
+  [ -z "${2:-}" ] || reap_created_orphan "$2"
   printf 'log=%s\n' "$ERR"
   printf -- '--- last 25 lines of shopify stderr ---\n'
   tail -n 25 "$ERR"
   exit 1
+}
+
+# Shopify rate-limits per store+token, and a running `shopify theme dev` against the same store
+# draws on the SAME budget — so a bulk push can land a 429 `Throttled` (observed live at 0% upload)
+# while every other call is healthy. Two spaced retries absorb the transient case;
+# FND_CPT_THROTTLE_WAITS overrides the pauses (tests pass "0 0"; an empty value disables retrying).
+push_retry() { # $1 = stderr log; rest = the push argv. 0 → $PUSH_OUT holds stdout; 1 → $1 holds the last stderr
+  local err="$1" w; shift
+  PUSH_OUT="$("$@" 2>"$err")" && return 0
+  for w in ${FND_CPT_THROTTLE_WAITS-20 60}; do
+    grep -qi 'throttled' "$err" || return 1
+    sleep "$w"
+    PUSH_OUT="$("$@" 2>"$err")" && return 0
+  done
+  return 1
+}
+
+# After a failed `--unpublished` push: the CLI creates the theme server-side FIRST and uploads
+# second, so a mid-upload failure (a held throttle above all) leaves a code-less theme this run
+# created and nobody can name — burning a slot toward the 20/100 cap with no `created_theme=` line.
+# Attribution is the pre-push snapshot: an id wearing the name NOW that was not there BEFORE the
+# push is ours. Exactly one — zero means the server-side create never happened, and two or more
+# means a concurrent run, where deleting on a guess could take someone else's theme.
+PRE_NAME_IDS=""
+reap_created_orphan() { # $1 = the create's theme name; prints created_theme= lines when attributable
+  # the snapshot must not be answered from the cache — reset and re-list
+  THEME_LIST_LOADED=0; THEME_LIST_OK=0; THEME_LIST_SILENT=1; THEME_LIST=""
+  load_theme_list
+  [ "$THEME_LIST_OK" -eq 1 ] || return 0   # silent/unreadable fresh listing — cannot attribute, leave it
+  local post id new n deleted
+  post="$(theme_ids_by_name "$1" | grep '^[0-9][0-9]*$' || true)"
+  new=""; n=0
+  for id in $post; do
+    case " $PRE_NAME_IDS " in *" $id "*) ;; *) new="$id"; n=$((n + 1)) ;; esac
+  done
+  [ "$n" -eq 1 ] || return 0
+  deleted="no"
+  if shopify theme delete --store "$STORE" --theme "$new" --force >/dev/null 2>&1; then deleted="yes"; else deleted="failed"; fi
+  printf 'created_theme=%s\n' "$new"
+  printf 'created_theme_deleted=%s\n' "$deleted"
+  return 0
 }
 
 # The settings pull needs only the dev theme id, which is known before the build — so run it in the
@@ -358,7 +407,7 @@ overlay_settings() {
     [ -n "$reason" ] || reason="$(first_line "$perr")"
     overlay_fail overlay_pull_failed "$target" "$reused" "$perr" "$reason"
   fi
-  if shopify theme push --store "$STORE" --theme "$target" --path "$tmp" --nodelete "${ONLY[@]}" >/dev/null 2>"$perr"; then
+  if push_retry "$perr" shopify theme push --store "$STORE" --theme "$target" --path "$tmp" --nodelete "${ONLY[@]}"; then
     rm -f "$perr"; return 0   # no drift — settings applied
   fi
   # Only real DRIFT (Shopify rejecting a setting whose code is missing from this branch) justifies the
@@ -369,6 +418,11 @@ overlay_settings() {
   reason="$(grep -iE 'must be defined|invalid value|invalid setting|could not be synced|invalid (section|block|schema|type)|(section|block|schema|type) [^ ]+ does not exist' "$perr" | head -1 | sed -E 's/^[[:space:]]*//' || true)"
   if [ -n "$reason" ]; then
     overlay_fail settings_drift "$target" "$reused" "$perr" "$reason"
+  fi
+  # A held throttle gets its own cause: the generic grep below would fish the CLI's box-drawing
+  # frame line out of the 429 output, burying the one hint that is actually actionable.
+  if grep -qi 'throttled' "$perr"; then
+    overlay_fail overlay_push_failed "$target" "$reused" "$perr" "throttled — a \`shopify theme dev\` running against this store draws on the token's rate limit; stop it (or wait a minute) and retry"
   fi
   # cause= is the machine-readable field the caller acts on — it must never stay a placeholder while
   # the real diagnostic sits in the log, so an unrecognized wording falls back to the first line
@@ -442,15 +496,22 @@ case "$MODE" in
     ERR="$(mk_tmpf)"
     # ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} expands to nothing when empty (bash-3.2 set -u safe).
     if [ -n "$EXISTING" ]; then
-      OUT="$(shopify theme push --store "$STORE" --theme "$EXISTING" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")" \
+      push_retry "$ERR" shopify theme push --store "$STORE" --theme "$EXISTING" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json \
         || push_fail push_code_failed_reuse
+      OUT="$PUSH_OUT"
       REUSED=true
     else
-      if ! OUT="$(shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
+      # Snapshot the ids already wearing this name BEFORE the push: `--unpublished` creates the
+      # theme server-side before uploading, so a failed upload needs to know which id APPEARED to
+      # reap it — and must never touch a same-named theme that pre-existed.
+      load_theme_list
+      PRE_NAME_IDS="$(theme_ids_by_name "$NAME" | grep '^[0-9][0-9]*$' | tr '\n' ' ' || true)"
+      if ! push_retry "$ERR" shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json; then
         grep -qiE 'theme limit|maximum number of themes|too many themes' "$ERR" \
           && { rm -f "$ERR"; fail "theme_limit — store is at its theme cap (20 non-Plus / 100 Plus). Delete an old theme or re-run with --reuse."; }
-        push_fail push_code_failed
+        push_fail push_code_failed "$NAME"
       fi
+      OUT="$PUSH_OUT"
     fi
     rm -f "$ERR"
 
@@ -497,9 +558,10 @@ case "$MODE" in
     TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
 
     ERR="$(mk_tmpf)"
-    if ! OUT="$(shopify theme push --store "$STORE" --theme "$TARGET" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json 2>"$ERR")"; then
+    if ! push_retry "$ERR" shopify theme push --store "$STORE" --theme "$TARGET" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json; then
       push_fail refresh_push_failed
     fi
+    OUT="$PUSH_OUT"
     rm -f "$ERR"
 
     printf 'theme_id=%s\n' "$(json_field "$OUT" id)"

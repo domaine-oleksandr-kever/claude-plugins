@@ -74,7 +74,11 @@ canonical theme dirs and pushes that, so non-theme repo paths can't leak into th
 the CLI. For a file living *inside* a theme dir that still shouldn't ship, pass
 `--ignore-extra "<glob>"` (both `create` and `refresh` accept it, repeatable). On a push failure
 the script prints the real cause plus a `log=<path>` to the full `shopify` stderr — read that,
-don't guess.
+don't guess. Pushes already retry a Shopify `Throttled` answer twice (the store+token rate limit
+is shared with a running `shopify theme dev`); a throttle that holds is reported as
+`cause=throttled`, and a create that had already made the theme server-side reports reaping it
+(`created_theme=` + `created_theme_deleted=`) — the fix is stopping the competing consumer or
+waiting, then re-running.
 
 > **Security:** the access token lives in `shopify.theme.toml`. **Never `Read` that file** —
 > it would pull the token into context. The script consumes the token inside the `shopify`

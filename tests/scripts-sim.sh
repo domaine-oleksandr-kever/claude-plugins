@@ -950,7 +950,13 @@ done
 case "$1 ${2:-}" in
   "theme list")
     [ -n "${FAKE_LIST_FAIL:-}" ] && { echo "Error: could not reach the Admin API" >&2; exit 1; }
-    if [ -n "${FAKE_LIST:-}" ]; then printf '%s\n' "$FAKE_LIST"; else cat <<'J'
+    # FAKE_LIST2 + FAKE_LIST_MARK: the FIRST list call answers FAKE_LIST (and drops the mark file);
+    # every later call answers FAKE_LIST2 — how a test shows a theme "appearing" mid-run.
+    if [ -n "${FAKE_LIST2:-}" ] && [ -f "${FAKE_LIST_MARK:-/dev/null}" ]; then printf '%s\n' "$FAKE_LIST2"
+    elif [ -n "${FAKE_LIST:-}" ]; then
+      [ -n "${FAKE_LIST_MARK:-}" ] && : > "$FAKE_LIST_MARK"
+      printf '%s\n' "$FAKE_LIST"
+    else cat <<'J'
 [{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"}]
 J
     fi ;;
@@ -965,6 +971,15 @@ J
     p=""; prev=""; for a in "$@"; do [ "$prev" = "--path" ] && p="$a"; prev="$a"; done
     mkdir -p "$p/config"; printf '{"current":{"pulled":1}}\n' > "$p/config/settings_data.json" ;;
   "theme push")
+    # FAKE_PUSH_THROTTLE_N throttles the first N CODE pushes (429-style stderr) then succeeds —
+    # the retry loop's counterpart; FAKE_PUSH_COUNT is its cross-invocation counter file.
+    if [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_THROTTLE_N:-}" ]; then
+      n=0; [ -f "${FAKE_PUSH_COUNT:?}" ] && n="$(cat "$FAKE_PUSH_COUNT")"
+      if [ "$n" -lt "$FAKE_PUSH_THROTTLE_N" ]; then
+        echo $((n + 1)) > "$FAKE_PUSH_COUNT"
+        printf '│  Throttled\n' >&2; exit 1
+      fi
+    fi
     [ "$is_only" -eq 1 ] && [ -n "${FAKE_PUSH_ONLY_FAIL:-}" ] && { printf '%s\n' "$FAKE_PUSH_ONLY_FAIL" >&2; exit 1; }
     [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_CODE_FAIL:-}" ] && { printf '%s\n' "$FAKE_PUSH_CODE_FAIL" >&2; exit 1; }
     printf '{"theme":{"id":%s,"preview_url":"https://acme-dev.myshopify.com/?preview_theme_id=%s","editor_url":"https://admin.shopify.com/store/acme-dev/themes/%s/editor"}}\n' "$nid" "$nid" "$nid" ;;
@@ -1362,6 +1377,71 @@ rc=0; L="$TMP/cpt23b"; : > "$L"
 run_cpt "$L" FAKE_LIST='[{"id":222,"name":"Other","role":"unpublished"}]' -- refresh --theme 111 --no-build || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O"; then ok
 else bad P23b-absent-id-proceeds "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# ------------------------------ create-preview-theme.sh throttle retry + orphan reap --
+# Shopify rate-limits per store+token (a running `shopify theme dev` draws on the SAME budget), so
+# a bulk push can land `Throttled` while every other call is healthy — seen live on a real store
+# 2026-07-26, twice, at 0% upload. FND_CPT_THROTTLE_WAITS="0 0" makes the retry pauses instant.
+
+# P24 (bug): a code push that throttles twice then clears must succeed via the retry loop —
+# without it the run dies on the FIRST 429 and (on create) orphans the server-side theme
+rc=0; L="$TMP/cpt24"; : > "$L"; CNT="$TMP/cpt24.count"; rm -f "$CNT"
+run_cpt "$L" FND_CPT_THROTTLE_WAITS="0 0" FAKE_PUSH_THROTTLE_N=2 FAKE_PUSH_COUNT="$CNT" \
+  -- create --name "PREVIEW-T" --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" \
+   && [ "$(grep -c 'argv=theme push.*--unpublished' "$L")" -eq 3 ]; then ok
+else bad P24-throttle-retry-succeeds "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') pushes=$(grep -c 'argv=theme push' "$L")"; fi
+
+# P25 (bug): a throttle that HOLDS through the retries, after the CLI already created the theme
+# server-side (`--unpublished` creates first, uploads second) — the run must name the throttle as
+# the cause, find the theme it created (fresh list vs the pre-push snapshot) and delete it, or a
+# slot burns toward the 20/100 cap with no `created_theme=` line
+rc=0; L="$TMP/cpt25"; : > "$L"; MK="$TMP/cpt25.mark"; rm -f "$MK"
+run_cpt "$L" FND_CPT_THROTTLE_WAITS="0" FAKE_PUSH_CODE_FAIL='│  Throttled' FAKE_LIST_MARK="$MK" \
+  FAKE_LIST='[{"id":999,"name":"Live Theme","role":"live"}]' \
+  FAKE_LIST2='[{"id":999,"name":"Live Theme","role":"live"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
+  -- create --name "PREVIEW-T" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=push_code_failed' "$O" && grep -q 'cause=throttled' "$O" \
+   && grep -q '^created_theme=777$' "$O" && grep -q '^created_theme_deleted=yes$' "$O" \
+   && grep -q 'argv=theme delete.*777' "$L"; then ok
+else bad P25-throttled-orphan-reaped "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P25b (pin): only the id that APPEARED across the push is this run's — a pre-existing theme wearing
+# the same name is never deleted (Shopify allows duplicate names)
+rc=0; L="$TMP/cpt25b"; : > "$L"; MK="$TMP/cpt25b.mark"; rm -f "$MK"
+run_cpt "$L" FND_CPT_THROTTLE_WAITS="0" FAKE_PUSH_CODE_FAIL='│  Throttled' FAKE_LIST_MARK="$MK" \
+  FAKE_LIST='[{"id":600,"name":"PREVIEW-T","role":"unpublished"}]' \
+  FAKE_LIST2='[{"id":600,"name":"PREVIEW-T","role":"unpublished"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
+  -- create --name "PREVIEW-T" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^created_theme=777$' "$O" \
+   && grep -q 'argv=theme delete.*777' "$L" && ! grep -q 'argv=theme delete.*600' "$L"; then ok
+else bad P25b-preexisting-name-kept "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P26 (pin): a throttle that fired BEFORE the server-side create (no new id in the fresh list) must
+# not invent a `created_theme=` claim or delete anything
+rc=0; L="$TMP/cpt26"; : > "$L"
+run_cpt "$L" FND_CPT_THROTTLE_WAITS="0" FAKE_PUSH_CODE_FAIL='│  Throttled' \
+  -- create --name "PREVIEW-T" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=push_code_failed' "$O" && grep -q 'cause=throttled' "$O" \
+   && ! grep -q 'created_theme=' "$O" && [ "$(cpt_calls 'theme delete' "$L")" -eq 0 ]; then ok
+else bad P26-no-create-no-reap "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P27 (bug): the overlay push throttling through its retries reports cause=throttled (the actionable
+# hint), not the box-drawing frame line the generic `error|fail` grep fishes out of the CLI's output
+rc=0; L="$TMP/cpt27"; : > "$L"
+run_cpt "$L" FND_CPT_THROTTLE_WAITS="0" FAKE_PUSH_ONLY_FAIL='│  Throttled' \
+  -- create --name "PREVIEW-T" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=overlay_push_failed' "$O" && grep -q 'cause=throttled' "$O" \
+   && grep -q '^created_theme_deleted=yes$' "$O"; then ok
+else bad P27-overlay-throttle-cause "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P28 (pin): refresh shares the retry loop — one throttled 429, then success on the second attempt
+rc=0; L="$TMP/cpt28"; : > "$L"; CNT="$TMP/cpt28.count"; rm -f "$CNT"
+run_cpt "$L" FND_CPT_THROTTLE_WAITS="0 0" FAKE_PUSH_THROTTLE_N=1 FAKE_PUSH_COUNT="$CNT" \
+  -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 2 ]; then ok
+else bad P28-refresh-throttle-retry "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
 
 # ------------------------------------------- fix-breaking-changes banner handling --
 FB="$TMP/fb"; mkdir -p "$FB/templates/customers" "$FB/config" "$FB/scripts"

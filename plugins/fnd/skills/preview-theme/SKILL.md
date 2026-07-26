@@ -94,6 +94,10 @@ is pushed, so the content a reviewer configured stays put. Full contract:
    - On **`error=cli_list_unreadable`** / **`error=live_role_unreadable`** nothing was pushed —
      the store listing came back unreadable, so the live-theme guard could not clear the target;
      check `shopify theme list` by hand, then re-run.
+   - **`cause=throttled`** on any push failure: the store+token rate limit held through the
+     script's built-in retries — a running `shopify theme dev` against the same store draws on
+     that budget. Have the developer stop it (or wait a minute), then re-run; on a create the
+     script already deleted the theme it managed to create (`created_theme_deleted=yes`).
 
 ## Steps — refresh
 
