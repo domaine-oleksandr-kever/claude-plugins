@@ -56,8 +56,15 @@ branch. The script reads the store / dev-theme-id / Theme Access token from `sho
 > schema lives only in another feature branch. Shopify rejects pushing that template onto a preview
 > built from this branch's code. A partial overlay would give a misleading preview, so the script
 > **stops**: it reports the real `cause=`, deletes the code-only theme it just created
-> (`created_theme_deleted=yes` — unless it was a `--reuse` of a pre-existing theme), and exits
-> `error=settings_drift`. **The fix is manual:** the developer duplicates the dev theme in the
+> (`created_theme=<id>` + `created_theme_deleted=yes` — or `=failed` when the cleanup delete itself
+> failed, in which case that theme is still on the store burning a slot), and exits
+> `error=settings_drift`. A
+> `--reuse` of a pre-existing theme is never deleted — that run reports `theme=<id>`, `reused=true`
+> and a `mixed_state=` line instead (this branch's code now sits on it with unmatched settings), and
+> no `created_theme` key at all. A transient/auth failure is NOT drift: it exits
+> `error=overlay_push_failed` (or `error=overlay_pull_failed` when the settings pull half died) with
+> the same keys and is worth retrying. **The fix is manual:** for
+> real drift the developer duplicates the dev theme in the
 > Shopify admin (a server-side copy preserves every setting, drifted or not), renames it to the
 > `[ELC-…]` name, and re-runs `create-pull-request` with `theme_name` + `theme_url` +
 > `theme_admin_url` — which makes the skill use that theme and skip auto-creation.

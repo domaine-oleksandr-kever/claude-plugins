@@ -83,6 +83,17 @@ is pushed, so the content a reviewer configured stays put. Full contract:
      and rename it to the `[ELC-…]` name (click-path and why a server-side copy works:
      `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md → Preview theme`);
      the preview URL is then `…/?preview_theme_id=<the new id>`.
+   - On **`error=overlay_push_failed`** / **`error=overlay_pull_failed`** the failure is
+     transient or auth (`cause=` names it) — this one IS worth retrying. On a `--reuse`
+     target nothing was deleted: the run reports `theme=<id> reused=true mixed_state=…`,
+     i.e. that theme now carries this branch's code with unmatched settings.
+   - On **`error=ambiguous_name`** / **`error=unusable_theme_id`** nothing was pushed —
+     pass `refresh --theme <id>` naming the one theme you mean.
+   - On **`error=live_theme_write_refused`** nothing was pushed — the target IS the published
+     theme; pick an unpublished/preview theme (different id or name), never that one.
+   - On **`error=cli_list_unreadable`** / **`error=live_role_unreadable`** nothing was pushed —
+     the store listing came back unreadable, so the live-theme guard could not clear the target;
+     check `shopify theme list` by hand, then re-run.
 
 ## Steps — refresh
 

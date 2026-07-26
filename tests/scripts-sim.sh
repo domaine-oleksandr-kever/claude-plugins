@@ -7,8 +7,14 @@ set -u
 # Hermetic env: a developer who exports FND_MCP_SLIM_DEBUG=1 / FND_MCP_SLIM_DIR to watch the log live
 # would otherwise have json-slim drop a debug log into each case's spill directory, which the
 # before/after directory diffs below read as an unexpected spill. Every case that needs either switch
-# sets it explicitly on the invocation.
-unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR
+# sets it explicitly on the invocation. The store/token vars are unset for the same reason and one
+# more: both are read as an escape hatch by the scripts under test, so an exported real token would
+# reach the fake CLI (and the case's argv log) instead of the fixture value. Same for the two switches
+# README tells developers to keep in settings.json → "env" (which Claude Code exports to the Bash
+# tool): FND_GQL_PROBE_CACHE=0 turns the probe-cache cases red, and an ambient TOML_PATH re-targets
+# every case that relies on the repo fixture toml.
+unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR SHOPIFY_CLI_THEME_TOKEN SHOPIFY_STORE \
+      FND_GQL_PROBE_CACHE TOML_PATH
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GQL="$ROOT/plugins/fnd/scripts/shopify-admin-gql.sh"
@@ -47,9 +53,21 @@ set -u
 case "${FAKE_RUNNER_MODE:-ok}" in
   mutfail) echo "error=store_execute_failed_mutation (stub)" >&2; exit 3 ;;
   nocreds) echo "error=no_admin_token" >&2; exit 3 ;;
+  # the runner's OTHER exit-3 credential refusal: a token that cannot be an admin token at all
+  badtoken) echo "error=invalid_admin_token source=.env (not an Admin API access token)" >&2; exit 3 ;;
+  # two concatenated envelopes: valid JSON documents, but not ONE envelope
+  twodocs) for _ in 1 2; do
+             printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[{"filename":"templates/product.json","updatedAt":"now","body":{"content":"{}"}}],"userErrors":[]}}}}\n' "${FAKE_ROLE:-DEVELOPMENT}"
+           done; exit 0 ;;
   errenv)  big=$(printf 'p%.0s' $(seq 1 9000))
            printf '{"errors":[{"message":"boom"}],"data":{"theme":{"pad":"%s"}}}\n' "$big"; exit 0 ;;
   notjson) echo "<<<not json>>>"; exit 0 ;;
+  denied)  printf '{"errors":[{"message":"ACCESS_DENIED: read_themes is required"}]}\n'; exit 0 ;;
+  # valid JSON that is not an object: the errors probe cannot apply and the shape checks decide
+  array)   printf '[1,2]\n'; exit 0 ;;
+  scalar)  printf 'null\n'; exit 0 ;;
+  # exit 0 with NO output — parses fine, yields no value
+  empty)   exit 0 ;;
 esac
 Q=""
 while [ $# -gt 0 ]; do case "$1" in --query) Q="$2"; shift 2 ;; *) shift ;; esac; done
@@ -57,7 +75,15 @@ role="${FAKE_ROLE:-DEVELOPMENT}"
 if grep -q FndThemesList "$Q"; then
   printf '{"data":{"themes":{"nodes":[{"id":"gid://shopify/OnlineStoreTheme/1","name":"Live","role":"MAIN"},{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"DEVELOPMENT"}]}}}\n'
 elif grep -q FndThemeFileGet "$Q"; then
-  if [ -n "${FAKE_BIG:-}" ]; then
+  case "${FAKE_GET_MODE:-}" in
+    notheme) printf '{"data":{"theme":null}}\n'; exit 0 ;;
+    ue) printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[],"userErrors":[{"filename":"templates/product.json","code":"NOT_FOUND"}]}}}}\n' "$role"; exit 0 ;;
+    nobody) printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[{"filename":"templates/product.json","updatedAt":"now","body":{}}],"userErrors":[]}}}}\n' "$role"; exit 0 ;;
+  esac
+  if [ -n "${FAKE_BODY_FILE:-}" ]; then
+    jq -nc --arg role "$role" --rawfile b "$FAKE_BODY_FILE" \
+      '{data:{theme:{id:"gid://shopify/OnlineStoreTheme/2",name:"Dev",role:$role,files:{nodes:[{filename:"templates/product.json",updatedAt:"now",body:{content:$b}}],userErrors:[]}}}}'
+  elif [ -n "${FAKE_BIG:-}" ]; then
     big=$(printf 'x%.0s' $(seq 1 9000))
     printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[{"filename":"templates/product.json","updatedAt":"now","body":{"content":"%s"}}],"userErrors":[]}}}}\n' "$role" "$big"
   else
@@ -120,6 +146,12 @@ TJSHIM="$TMP/tjshim"; mkdir -p "$TJSHIM"
 cat > "$TJSHIM/shopify" <<'FAKE'
 #!/usr/bin/env bash
 touch "${TJ_CLI_MARKER:-/dev/null}"
+# TJ_CLI_LOG records argv + the token the script exported, so the toml-extractor cases can
+# assert what actually reached the CLI (the token value is a fixture, never a real secret)
+if [ -n "${TJ_CLI_LOG:-}" ]; then
+  printf 'argv=%s\n' "$*" >> "$TJ_CLI_LOG"
+  printf 'token=%s\n' "${SHOPIFY_CLI_THEME_TOKEN:-}" >> "$TJ_CLI_LOG"
+fi
 case "$*" in
   *"theme list"*) printf '[{"id":2,"name":"Dev","role":"development"}]\n' ;;
   *"theme push"*) printf '{}\n' ;;
@@ -186,6 +218,189 @@ rc=0; FAKE_RUNNER_MODE=notjson "$BASH_BIN" "$TJDIR/theme-json.sh" themes >"$O" 2
 assert T16-notjson-exit 5 "$rc" "$E" "error=non_json_response"
 if grep -q 'log=' "$E" && [ ! -s "$O" ]; then ok; else bad T16b-log-and-clean-stdout "out=$(head -c 100 "$O")"; fi
 
+# T17 (bug): --strip-comments is JSON-aware. A `/*` inside a custom_css string plus a `*/`
+# inside a LATER value used to delete every key between them and still emit valid JSON, so
+# the `set --from` guard passed and the corrupted settings were uploaded.
+BF="$TMP/strip"; mkdir -p "$BF"
+printf '%s' '/* banner
+   do not edit */
+{ "current": {
+  "logo_width": 120,
+  "custom_css": ".hero{color:red} /* TODO finish",
+  "keep_me_a": "a",
+  "keep_me_b": "b",
+  "aspect_note": "never 4:3 */ ok",
+  "footer_text": "Free over $50" } }' > "$BF/corrupt.json"
+rc=0; FAKE_BODY_FILE="$BF/corrupt.json" "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file config/settings_data.json --strip-comments --out "$BF/stripped.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && jq empty "$BF/stripped.json" >/dev/null 2>&1 \
+   && [ "$(jq -r '.current | keys_unsorted | length' "$BF/stripped.json" 2>/dev/null)" = 6 ] \
+   && [ "$(jq -r '.current.custom_css' "$BF/stripped.json" 2>/dev/null)" = '.hero{color:red} /* TODO finish' ] \
+   && [ "$(jq -r '.current.aspect_note' "$BF/stripped.json" 2>/dev/null)" = 'never 4:3 */ ok' ] \
+   && ! grep -q 'do not edit' "$BF/stripped.json"; then ok
+else bad T17-strip-json-aware "rc=$rc keys=$(jq -r '.current|keys_unsorted|join(",")' "$BF/stripped.json" 2>/dev/null) css=$(jq -r '.current.custom_css' "$BF/stripped.json" 2>/dev/null)"; fi
+
+# T17b: the milder always-on case — a BALANCED css comment inside a string value is content,
+# not a banner; only comments outside strings may go
+printf '%s' '/* banner */
+{"current":{"custom_css":".x{} /* agency override — do not remove */ .y{}"}}' > "$BF/inline.json"
+rc=0; FAKE_BODY_FILE="$BF/inline.json" "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file config/settings_data.json --strip-comments --out "$BF/inline.out" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(jq -r '.current.custom_css' "$BF/inline.out" 2>/dev/null)" = '.x{} /* agency override — do not remove */ .y{}' ] \
+   && [ "$(head -c 1 "$BF/inline.out")" = '{' ]; then ok
+else bad T17b-strip-keeps-inline-comment "rc=$rc css=$(jq -r '.current.custom_css' "$BF/inline.out" 2>/dev/null)"; fi
+
+# T18 (bug): the `set --from` json guard strips comments the same JSON-aware way — a file that
+# only LOOKS valid after a naive /*…*/ removal must still be refused before any upload
+printf '%s' '{"a":"/* oops","bogus" ,,, "b":"*/","c":1}' > "$BF/fake-valid.json"
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+  --from "$BF/fake-valid.json" >"$O" 2>"$E" || rc=$?
+assert T18-from-guard-json-aware 2 "$rc" "$E" "error=from_file_invalid_json"
+
+# T18b (pin): a genuinely banner-commented body is still accepted by that guard
+printf '%s' '/* auto-generated */
+{"current":{"a":1}}' > "$BF/bannered.json"
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+  --from "$BF/bannered.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":"upserted"' "$O"; then ok; else bad T18b-banner-accepted "rc=$rc err=$(head -c 150 "$E" | tr '\n' ' ')"; fi
+
+# --- toml scalar extraction (bug): single-quoted / bare / commented values ----------------
+TT="$TMP/tjtoml"; mkdir -p "$TT"
+# T19: a single-quoted store= used to reach the CLI as `store = 'x'` (whole line)
+printf "[environments.development]\nstore = 'acme-dev'\npassword = 'shptka_fixture1234'\n" > "$TT/single.toml"
+rc=0; L="$TMP/tjl19"; : > "$L"
+TOML_PATH="$TT/single.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store acme-dev\.myshopify\.com ' "$L"; then ok
+else bad T19-toml-single-quoted-store "rc=$rc log=$(tr '\n' ';' < "$L") err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+
+# T20: the same line shape for password= used to export the whole line as the Theme Access token,
+# which also skipped the shp*_ fallback
+if grep -q 'token=shptka_fixture1234$' "$L"; then ok; else bad T20-toml-single-quoted-token "log=$(tr '\n' ';' < "$L")"; fi
+
+# T21: a bare value with a trailing comment
+printf '[environments.development]\nstore = acme-bare.myshopify.com   # legacy\npassword = "shptka_fixture1234"\n' > "$TT/bare.toml"
+rc=0; L="$TMP/tjl21"; : > "$L"
+TOML_PATH="$TT/bare.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store acme-bare\.myshopify\.com ' "$L"; then ok
+else bad T21-toml-bare-store "rc=$rc log=$(tr '\n' ';' < "$L")"; fi
+
+# T22 (bug): a store value that cannot be a shop handle fails loudly instead of being handed
+# to the CLI (a garbage --store is an opaque CLI error at best, the wrong store at worst)
+printf '[environments.development]\nstore = acme dev\npassword = "shptka_fixture1234"\n' > "$TT/broken.toml"
+rc=0; L="$TMP/tjl22"; : > "$L"
+TOML_PATH="$TT/broken.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+assert T22-bad-store-refused 2 "$rc" "$E" "error=invalid_store"
+if [ ! -s "$L" ]; then ok; else bad T22b-no-cli-call "the CLI ran with a garbage store :: $(tr '\n' ';' < "$L")"; fi
+
+# --- envelope status pass (F7 pin): one jq pass, identical messages and ORDER --------------
+# T23: theme missing
+rc=0; FAKE_GET_MODE=notheme "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T23-theme-not-found 5 "$rc" "$E" "error=theme_not_found theme=gid://shopify/OnlineStoreTheme/2"
+
+# T24: file userErrors win over the missing body, and the compact array is echoed verbatim
+rc=0; FAKE_GET_MODE=ue "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T24-file-user-errors 5 "$rc" "$E" "error=file_user_errors file=templates/product.json"
+if grep -qF 'file=templates/product.json [{"filename":"templates/product.json","code":"NOT_FOUND"}]' "$E"; then ok
+else bad T24b-ue-array-verbatim "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# T25: no text body
+rc=0; FAKE_GET_MODE=nobody "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T25-no-text-body 5 "$rc" "$E" "error=file_not_found_or_not_text file=templates/product.json theme=gid://shopify/OnlineStoreTheme/2"
+
+# T26 (pin): a VALID but non-object envelope is not a json error — the errors probe cannot
+# apply to it and the shape check reports theme_not_found (pre-existing behavior). The merged
+# probe short-circuits on the type instead of letting jq print a raw diagnostic first.
+rc=0; FAKE_RUNNER_MODE=array "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T26-non-object-envelope 5 "$rc" "$E" "error=theme_not_found"
+if ! grep -q 'jq: error' "$E"; then ok; else bad T26b-no-jq-noise "err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T26c (pin): a scalar envelope takes the same fall-through
+rc=0; FAKE_RUNNER_MODE=scalar "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T26c-scalar-envelope 5 "$rc" "$E" "error=theme_not_found"
+
+# T26e (pin): a response that PARSES but yields no value at all is not non_json_response —
+# the merged probe keys "not JSON" on jq's exit status, not on its (absent) output
+rc=0; FAKE_RUNNER_MODE=empty "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T26e-empty-envelope 5 "$rc" "$E" "error=theme_not_found"
+if ! grep -q 'error=non_json_response' "$E"; then ok; else bad T26f-empty-not-nonjson "err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T27 (pin): the errors check must stay ABLE to hand control back — an ACCESS_DENIED envelope
+# in auto mode falls back to themecli, it does not exit
+rc=0; M27="$TMP/tj27"; TJ_CLI_MARKER="$M27" FAKE_RUNNER_MODE=denied SHOPIFY_CLI_THEME_TOKEN=fake \
+  PATH="$TJSHIM:$PATH" "$BASH_BIN" "$TJDIR/theme-json.sh" themes --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ -f "$M27" ] && grep -q 'lacks read_themes' "$E"; then ok
+else bad T27-denied-fallback "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T27b (pin): the same envelope with no Theme Access token available reports the scope hint
+rc=0; FAKE_RUNNER_MODE=denied "$BASH_BIN" "$TJDIR/theme-json.sh" themes >"$O" 2>"$E" || rc=$?
+assert T27b-denied-no-token 5 "$rc" "$E" "error=gql_errors"
+if grep -q 'hint=the credential lacks read_themes' "$E"; then ok; else bad T27c-scope-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# T28 (bug): the merged status pass prints one line PER DOCUMENT, so a response carrying two
+# envelopes is not one envelope — every check downstream would read the first document's answer
+# glued to the rest, including `set`'s live-theme refusal (`.data.theme.role` stops matching MAIN)
+rc=0; FAKE_RUNNER_MODE=twodocs "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T28-multi-document 5 "$rc" "$E" "error=non_json_response"
+rc=0; M28="$TMP/tj28"; TJ_CLI_MARKER="$M28" FAKE_RUNNER_MODE=twodocs FAKE_ROLE=MAIN \
+  PATH="$TJSHIM:$PATH" "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+  --from "$TMP/snap.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && [ ! -f "$M28" ]; then ok
+else bad T28b-multi-document-no-write "rc=$rc cli-invoked=$([ -f "$M28" ] && echo yes || echo no)"; fi
+
+# T29 (contract): theme-json decides its themecli fallback by grepping the runner's stderr for
+# `error=no_admin_token`. The runner's OTHER credential refusal (a token that cannot be one) must
+# stay a hard stop — renaming it to no_admin_token would silently swap engines on a typo'd token.
+rc=0; M29="$TMP/tj29"; TJ_CLI_MARKER="$M29" FAKE_RUNNER_MODE=badtoken SHOPIFY_CLI_THEME_TOKEN=fake \
+  PATH="$TJSHIM:$PATH" "$BASH_BIN" "$TJDIR/theme-json.sh" themes --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && [ ! -f "$M29" ] && grep -q 'error=invalid_admin_token' "$E"; then ok
+else bad T29-invalid-token-no-cli-fallback "rc=$rc cli-invoked=$([ -f "$M29" ] && echo yes || echo no) err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T30 (bug): `shopify --store` documents the https:// URL form as valid — it is normalized, not
+# refused, and the CLI sees the bare domain
+rc=0; L="$TMP/tjl30"; : > "$L"
+TOML_PATH="$TT/single.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store "https://acme-dev.myshopify.com" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store acme-dev\.myshopify\.com ' "$L"; then ok
+else bad T30-store-url-form "rc=$rc log=$(tr '\n' ';' < "$L") err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+
+# T31 (drift guard): the toml scalar reader is copied byte-for-byte into three scripts because the
+# plugin installs by git clone and each must stand alone — an edit to one copy would make them
+# disagree about which store/theme/token a toml resolves to, which is the class of bug they fix
+tv_a="$TMP/tv-a"; tv_b="$TMP/tv-b"; tv_c="$TMP/tv-c"
+awk '/^toml_value\(\) \{/,/^\}/' "$TJ" > "$tv_a"
+awk '/^toml_value\(\) \{/,/^\}/' "$CPT" > "$tv_b"
+awk '/^toml_value\(\) \{/,/^\}/' "$GQL" > "$tv_c"
+if [ -s "$tv_a" ] && cmp -s "$tv_a" "$tv_b" && cmp -s "$tv_a" "$tv_c"; then ok
+else bad T31-toml-reader-in-sync "the three toml_value copies have drifted apart"; fi
+
+# T32 (pin): --strip-comments removes bytes and appends none — the stripped body is the base a jq
+# edit and then `set --from` upload, so a trailing newline would be a byte the theme did not have
+printf '%s' '/* b */{"current":{"a":1}}' > "$BF/nonl.json"
+rc=0; FAKE_BODY_FILE="$BF/nonl.json" "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file config/settings_data.json --strip-comments --out "$BF/nonl.out" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$BF/nonl.out")" = '{"current":{"a":1}}' ] \
+   && [ "$(wc -c < "$BF/nonl.out" | tr -d ' ')" -eq 19 ]; then ok
+else bad T32-strip-appends-nothing "rc=$rc bytes=$(wc -c < "$BF/nonl.out" | tr -d ' ') body=$(cat "$BF/nonl.out")"; fi
+
+# T33 (bug): a toml that EXISTS but cannot be opened (mode 000 — a shared checkout, another uid)
+# degrades to error=no_store like an absent file, never a bare awk error with no error= line —
+# the `|| true` on the toml_value call site is what keeps set -euo pipefail out of it
+UT33="$TMP/unreadable-t.toml"; printf 'store = "acme-dev"\n' > "$UT33"; chmod 000 "$UT33"
+rc=0; TOML_PATH="$UT33" "$BASH_BIN" "$TJ" themes --engine themecli >"$O" 2>"$E" || rc=$?
+chmod 644 "$UT33"
+if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && ! grep -qi "awk: can't open" "$E"; then ok
+else bad T33-unreadable-toml-no-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
 # ------------------------------------- shopify-admin-gql.sh against PATH shims --
 SHIM="$TMP/shim"; mkdir -p "$SHIM"
 GQLDIR="$TMP/gqlwork"; mkdir -p "$GQLDIR"
@@ -195,7 +410,12 @@ printf '{"k":"v"}\n' > "$GQLDIR/vars.json"
 
 cat > "$SHIM/shopify" <<'FAKE'
 #!/usr/bin/env bash
-if [ "${1:-}" = "version" ]; then echo "4.5.2"; exit 0; fi
+# $SHOPIFY_LOG counts invocations (one argv line each) — the only way to assert that the
+# version probe and the doomed `store execute` were NOT paid a second time.
+[ -n "${SHOPIFY_LOG:-}" ] && printf '%s\n' "$*" >> "$SHOPIFY_LOG"
+# FAKE_VERSION set-but-EMPTY is its own fixture (a CLI that prints nothing), so the default only
+# applies when the variable is unset
+if [ "${1:-}" = "version" ]; then echo "${FAKE_VERSION-4.5.2}"; exit 0; fi
 case "${FAKE_EXEC_MODE:-garbage}" in
   garbage) echo "unexpected CLI crash output" >&2; exit 1 ;;
   noauth)  echo "No stored app authentication found" >&2; exit 1 ;;
@@ -204,28 +424,48 @@ esac
 FAKE
 cat > "$SHIM/curl" <<'FAKE'
 #!/usr/bin/env bash
-# emulates the exact flags the runner uses: -o <file>, -w '%{http_code}', --data @file
+# emulates the exact flags the runner uses: -o <file>, -w '%{http_code}', --data @file, -K <cfg>
 touch "${CURL_MARKER:-/dev/null}"
-out=""; data=""
+out=""; data=""; cfg=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
     -w) shift 2 ;;
     --data) data="$2"; shift 2 ;;
-    -K|-H|-X) shift 2 ;;
+    -K) cfg="$2"; shift 2 ;;
+    -H|-X) shift 2 ;;
     *) shift ;;
   esac
 done
 case "$data" in @*) cp "${data#@}" "${CURL_MARKER:-/dev/null}.body" 2>/dev/null || true ;; esac
+# the token rides a private config file, never the argv — copy it out so a case can assert the
+# header line is exactly the token (a stray comment/CR/quote there is the opaque-401 bug)
+[ -n "$cfg" ] && cp "$cfg" "${CURL_MARKER:-/dev/null}.hdr" 2>/dev/null || true
 body="${FAKE_HTTP_BODY:-}"; [ -n "$body" ] || body='{"data":{"ok":true}}'
 printf '%s' "$body" > "${out:-/dev/null}"
 printf '%s' "${FAKE_HTTP:-200}"
 FAKE
 chmod +x "$SHIM/shopify" "$SHIM/curl"
 
-run_gql() { # runs the real script with shims; args pass through
-  (cd "$GQLDIR" && PATH="$SHIM:$PATH" SHOPIFY_ADMIN_TOKEN=test-token "$BASH_BIN" "$GQL" --store test-store "$@")
+GQL_RUNS=0
+gql_run_at() { # gql_run_at <cwd> <args…> — no implicit --store (store-resolution cases)
+  # TMPDIR is pinned to a FRESH dir per call: the runner's state dir (fallback note, store-engine
+  # skip mark, CLI-version cache) lives under it, and an ambient TMPDIR would carry that state
+  # across cases and across suite runs — G1 only proves anything while an execute is still tried.
+  # Cases that need shared state pass GQL_TMPDIR; GQL_LOG collects the shopify argv log,
+  # GQL_TOKEN="" drops the env token so the --env file is read. All three are one-shot
+  # (bash restores an assignment prefix when the function returns).
+  GQL_RUNS=$((GQL_RUNS + 1))
+  local cwd="$1"; shift
+  local td="${GQL_TMPDIR:-}"
+  if [ -z "$td" ]; then td="$TMP/gqltmp-$GQL_RUNS"; mkdir -p "$td"; fi
+  (cd "$cwd" && PATH="$SHIM:$PATH" TMPDIR="$td" SHOPIFY_LOG="${GQL_LOG:-/dev/null}" \
+     SHOPIFY_ADMIN_TOKEN="${GQL_TOKEN-test-token}" "$BASH_BIN" "$GQL" "$@")
 }
+run_gql() { # runs the real script with shims; args pass through
+  gql_run_at "$GQLDIR" --store test-store "$@"
+}
+gql_state() { printf '%s/fnd-gql-%s' "$1" "$(id -u)"; }   # the runner's per-user state dir
 
 # G1 (bug): a mutation whose execute was attempted and failed must NOT fall back
 rc=0; M="$TMP/m1"; CURL_MARKER="$M" FAKE_EXEC_MODE=garbage \
@@ -283,27 +523,386 @@ else bad G10-store-out "rc=$rc out=$(cat "$O") file=$(cat "$TMP/env10.json" 2>/d
 
 # G11: the fallback note prints in full once per store, then shortens to note=engine=token
 QT="$TMP/quiet-tmpdir"; mkdir -p "$QT"
-rc=0; TMPDIR="$QT" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+rc=0; GQL_TMPDIR="$QT" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
 assert G11-first-run-full 0 "$rc" "$E" "store_execute unavailable"
-rc=0; TMPDIR="$QT" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+rc=0; GQL_TMPDIR="$QT" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -q 'note=engine=token' "$E" && ! grep -q 'store_execute unavailable' "$E"; then ok
 else bad G11b-second-run-short "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
 # G12: SHOPIFY_ADMIN_GQL_QUIET forces the short note even on a first run
 QT2="$TMP/quiet-tmpdir2"; mkdir -p "$QT2"
-rc=0; TMPDIR="$QT2" SHOPIFY_ADMIN_GQL_QUIET=1 run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+rc=0; GQL_TMPDIR="$QT2" SHOPIFY_ADMIN_GQL_QUIET=1 run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -q 'note=engine=token' "$E" && ! grep -q 'store_execute unavailable' "$E"; then ok
 else bad G12-quiet-env "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
 # G12b: QUIET=0 means OFF — the first-run full note (with the store-auth remediation) prints
 QT3="$TMP/quiet-tmpdir3"; mkdir -p "$QT3"
-rc=0; TMPDIR="$QT3" SHOPIFY_ADMIN_GQL_QUIET=0 run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+rc=0; GQL_TMPDIR="$QT3" SHOPIFY_ADMIN_GQL_QUIET=0 run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
 assert G12b-quiet-zero-off 0 "$rc" "$E" "store_execute unavailable"
 
 # G13: --out pointing at an existing directory is a clean hard stop, not a stray cp + wc abort
 mkdir -p "$TMP/outdir"
 rc=0; run_gql --engine token --query query.graphql --out "$TMP/outdir" >"$O" 2>"$E" || rc=$?
 assert G13-out-is-dir 5 "$rc" "$E" "error=out_write_failed"
+
+# ---- 2026-07 deep review: dotenv token hygiene, private state dir, probe caching ----
+
+ENVD="$TMP/gqlenv"; mkdir -p "$ENVD"
+printf 'OTHER=1\nSHOPIFY_ADMIN_TOKEN=shpat_clean123 # prod admin api, read_themes\n' > "$ENVD/comment.env"
+printf 'SHOPIFY_ADMIN_TOKEN="shpat_clean123"\r\n' > "$ENVD/crlf.env"
+printf 'export SHOPIFY_ADMIN_TOKEN="shpat_clean123"\n' > "$ENVD/export.env"
+printf 'SHOPIFY_ADMIN_TOKEN=notatoken\n' > "$ENVD/shape.env"
+printf '# SHOPIFY_ADMIN_TOKEN=shpat_commented\nSHOPIFY_ADMIN_TOKEN=shpat_first\nSHOPIFY_ADMIN_TOKEN=shpat_last\n' > "$ENVD/dupe.env"
+# the token reaches curl only through the private config file — assert on that exact line
+hdr_is() { grep -qx "header = \"X-Shopify-Access-Token: $1\"" "$2" 2>/dev/null; }
+
+# G14 (bug): a trailing dotenv comment rode into the auth header and came back as an opaque 401
+rc=0; M="$TMP/m14"; CURL_MARKER="$M" GQL_TOKEN="" \
+  run_gql --engine token --query query.graphql --env "$ENVD/comment.env" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is shpat_clean123 "$M.hdr"; then ok
+else bad G14-token-inline-comment "rc=$rc hdr=$(head -c 160 "$M.hdr" 2>/dev/null)"; fi
+
+# G15 (bug): a CRLF file defeated `s/"$//`, so the CR *and* the closing quote reached the header
+rc=0; M="$TMP/m15"; CURL_MARKER="$M" GQL_TOKEN="" \
+  run_gql --engine token --query query.graphql --env "$ENVD/crlf.env" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is shpat_clean123 "$M.hdr"; then ok
+else bad G15-token-crlf-quoted "rc=$rc hdr=$(od -c "$M.hdr" 2>/dev/null | head -2 | tr '\n' ' ')"; fi
+
+# G16 (bug): `export KEY=` is a legal dotenv line the anchored matcher missed entirely
+rc=0; M="$TMP/m16"; CURL_MARKER="$M" GQL_TOKEN="" \
+  run_gql --engine token --query query.graphql --env "$ENVD/export.env" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is shpat_clean123 "$M.hdr"; then ok
+else bad G16-token-export-prefix "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# G17: a dotenv value that is not shpat_/shpca_ fails loudly instead of buying a 401 round trip
+rc=0; M="$TMP/m17"; CURL_MARKER="$M" GQL_TOKEN="" \
+  run_gql --engine token --query query.graphql --env "$ENVD/shape.env" >"$O" 2>"$E" || rc=$?
+assert G17-token-bad-shape 3 "$rc" "$E" "error=invalid_admin_token"
+if [ ! -f "$M" ]; then ok; else bad G17b-no-request "a malformed token still hit the network"; fi
+
+# G18: $SHOPIFY_ADMIN_TOKEN stays the escape hatch — no shape gate on an explicit export
+rc=0; M="$TMP/m18"; CURL_MARKER="$M" \
+  run_gql --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is test-token "$M.hdr"; then ok
+else bad G18-env-token-escape-hatch "rc=$rc hdr=$(head -c 160 "$M.hdr" 2>/dev/null)"; fi
+
+# G18b: a newline in the token would inject a second curl directive — refused before curl runs
+rc=0; M="$TMP/m18b"; CURL_MARKER="$M" GQL_TOKEN="$(printf 'shpat_x\nheader = "X-Evil: 1"')" \
+  run_gql --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+assert G18b-token-injection-refused 3 "$rc" "$E" "error=invalid_admin_token"
+if [ ! -f "$M" ]; then ok; else bad G18c-injection-no-request "curl ran with an injected config"; fi
+
+# G18d: last assignment wins, a commented-out line never does
+rc=0; M="$TMP/m18d"; CURL_MARKER="$M" GQL_TOKEN="" \
+  run_gql --engine token --query query.graphql --env "$ENVD/dupe.env" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is shpat_last "$M.hdr"; then ok
+else bad G18d-token-last-wins "rc=$rc hdr=$(head -c 160 "$M.hdr" 2>/dev/null)"; fi
+
+# G19 (bug): the marker is a guessable path in a shared /tmp — state moves into a 0700 per-user dir
+QT4="$TMP/state-tmpdir"; mkdir -p "$QT4"
+rc=0; GQL_TMPDIR="$QT4" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+SD="$(gql_state "$QT4")"
+if [ "$rc" -eq 0 ] && [ -d "$SD" ] && [ "$(ls -ld "$SD" | cut -c1-10)" = "drwx------" ]; then ok
+else bad G19-state-dir-0700 "rc=$rc mode=$(ls -ld "$SD" 2>&1 | cut -c1-10)"; fi
+stray="$(find "$QT4" -maxdepth 1 -type f 2>/dev/null | head -3)"
+if [ -z "$stray" ]; then ok; else bad G19b-no-flat-marker "loose state in TMPDIR: $stray"; fi
+
+# G20: a DANGLING symlink at the state-dir path — pins the weaker half only: no write lands through
+# the link and the run still succeeds uncached rather than dying (on BSD `mkdir -p` fails on the
+# dangling target before the guard is even consulted; G36's existing-dir variant exercises the guard)
+QT5="$TMP/state-symlink"; mkdir -p "$QT5"
+ln -s "$TMP/evil-target" "$(gql_state "$QT5")"
+rc=0; GQL_TMPDIR="$QT5" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ ! -e "$TMP/evil-target" ]; then ok
+else bad G20-symlinked-state-dir "rc=$rc target=$([ -e "$TMP/evil-target" ] && echo created || echo absent)"; fi
+
+# G21 (perf pin): once the store engine is known-unavailable here via a STICKY verdict (no stored
+# store auth — an unrecognized execute crash is NOT sticky, see G40), the second call skips the
+# whole probe (`shopify version` ~1.5 s + a doomed `store execute`) with byte-identical output
+QT6="$TMP/probe-tmpdir"; mkdir -p "$QT6"; L1="$TMP/sl1"; L2="$TMP/sl2"; : > "$L1"; : > "$L2"
+cold_rc=0; GQL_TMPDIR="$QT6" GQL_LOG="$L1" FAKE_EXEC_MODE=noauth run_gql --query query.graphql >"$TMP/cold.out" 2>"$E" || cold_rc=$?
+rc=0; GQL_TMPDIR="$QT6" GQL_LOG="$L2" FAKE_EXEC_MODE=noauth run_gql --query query.graphql >"$TMP/warm.out" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$cold_rc" -eq 0 ] && cmp -s "$TMP/cold.out" "$TMP/warm.out"; then ok
+else bad G21-warm-cache-same-output "cold_rc=$cold_rc warm_rc=$rc"; fi
+if [ "$(grep -c . "$L1")" -eq 2 ] && [ "$(grep -c . "$L2")" -eq 0 ]; then ok
+else bad G21b-warm-cache-no-probe "cold=[$(tr '\n' ';' < "$L1")] warm=[$(tr '\n' ';' < "$L2")]"; fi
+
+# G22: --engine store must ignore the skip mark (still attempt + report) while reusing the
+# cached version probe
+QT7="$TMP/probe-store"; mkdir -p "$QT7"
+rc=0; GQL_TMPDIR="$QT7" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+L4="$TMP/sl4"; : > "$L4"
+rc=0; GQL_TMPDIR="$QT7" GQL_LOG="$L4" run_gql --engine store --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && grep -q 'error=store_execute_failed ' "$E" \
+   && [ "$(grep -c 'store execute' "$L4")" -eq 1 ] && [ "$(grep -c '^version' "$L4")" -eq 0 ]; then ok
+else bad G22-engine-store-ignores-skip "rc=$rc err=$(head -c 120 "$E" | tr '\n' ' ') calls=[$(tr '\n' ';' < "$L4")]"; fi
+
+# G23: a CLI upgraded in place (binary newer than the cache) re-probes the version
+QT8="$TMP/probe-stale"; mkdir -p "$QT8"
+rc=0; GQL_TMPDIR="$QT8" run_gql --engine store --query query.graphql >"$O" 2>"$E" || rc=$?
+touch -t 203001010101 "$SHIM/shopify"
+L5="$TMP/sl5"; : > "$L5"
+rc=0; GQL_TMPDIR="$QT8" GQL_LOG="$L5" run_gql --engine store --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && [ "$(grep -c '^version' "$L5")" -eq 1 ]; then ok
+else bad G23-stale-cache-reprobes "rc=$rc calls=[$(tr '\n' ';' < "$L5")]"; fi
+touch "$SHIM/shopify"
+
+# G24: FND_GQL_PROBE_CACHE=0 is the escape hatch — warm state is ignored, everything is re-probed
+QT9="$TMP/probe-off"; mkdir -p "$QT9"
+rc=0; GQL_TMPDIR="$QT9" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+L6="$TMP/sl6"; : > "$L6"
+rc=0; GQL_TMPDIR="$QT9" GQL_LOG="$L6" FND_GQL_PROBE_CACHE=0 \
+  run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c '^version' "$L6")" -eq 1 ] && [ "$(grep -c 'store execute' "$L6")" -eq 1 ]; then ok
+else bad G24-cache-disabled "rc=$rc calls=[$(tr '\n' ';' < "$L6")]"; fi
+
+# G24b: an expired window re-probes; a corrupt state file is treated as absent, never as fatal
+QT9b="$TMP/probe-expired"; mkdir -p "$QT9b"
+rc=0; GQL_TMPDIR="$QT9b" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+SD9="$(gql_state "$QT9b")"
+printf '1\nstale reason\n' > "$SD9/store-skip-test-store.myshopify.com"   # epoch 1970
+printf '1 4.5.2\n%s\n' "$SHIM/shopify" > "$SD9/cli-version"
+L6b="$TMP/sl6b"; : > "$L6b"
+rc=0; GQL_TMPDIR="$QT9b" GQL_LOG="$L6b" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c '^version' "$L6b")" -eq 1 ] && [ "$(grep -c 'store execute' "$L6b")" -eq 1 ]; then ok
+else bad G24b-ttl-expiry-reprobes "rc=$rc calls=[$(tr '\n' ';' < "$L6b")]"; fi
+printf 'not-a-timestamp\n' > "$SD9/store-skip-test-store.myshopify.com"
+printf 'garbage\n' > "$SD9/cli-version"
+L6c="$TMP/sl6c"; : > "$L6c"
+rc=0; GQL_TMPDIR="$QT9b" GQL_LOG="$L6c" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ "$(grep -c '^version' "$L6c")" -eq 1 ]; then ok
+else bad G24c-corrupt-state-ignored "rc=$rc out=$(head -c 80 "$O") calls=[$(tr '\n' ';' < "$L6c")]"; fi
+
+# G25: a mutation whose execute was SKIPPED (never attempted) may fall back — the
+# double-execution hazard of G1 only exists for an execute that actually ran. The mark comes
+# from a sticky no-stored-auth verdict (an unrecognized crash writes no mark, G40)
+QT10="$TMP/probe-mutation"; mkdir -p "$QT10"
+rc=0; GQL_TMPDIR="$QT10" FAKE_EXEC_MODE=noauth run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+M="$TMP/m25"; L7="$TMP/sl7"; : > "$L7"
+rc=0; GQL_TMPDIR="$QT10" GQL_LOG="$L7" CURL_MARKER="$M" \
+  run_gql --query mutation.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ -f "$M" ] \
+   && [ "$(grep -c 'store execute' "$L7")" -eq 0 ]; then ok
+else bad G25-skipped-mutation-falls-back "rc=$rc out=$(head -c 80 "$O") calls=[$(tr '\n' ';' < "$L7")]"; fi
+
+# G26: the skip mark carries the original reason, so a first full note still explains itself
+# even when the probe was skipped
+QT11="$TMP/probe-reason"; mkdir -p "$QT11"
+rc=0; GQL_TMPDIR="$QT11" FAKE_EXEC_MODE=noauth run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+rm -f "$(gql_state "$QT11")"/note-*
+L8="$TMP/sl8"; : > "$L8"
+rc=0; GQL_TMPDIR="$QT11" GQL_LOG="$L8" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'store_execute unavailable' "$E" \
+   && grep -q 'no stored store auth' "$E" && [ "$(grep -c . "$L8")" -eq 0 ]; then ok
+else bad G26-cached-reason-in-note "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# G27 (pin): caching must not change the unparseable-version verdict, warm or cold
+QT12="$TMP/probe-badver"; mkdir -p "$QT12"
+rc=0; GQL_TMPDIR="$QT12" FAKE_VERSION=banana \
+  run_gql --engine store --query query.graphql >"$O" 2>"$TMP/e27a" || rc=$?
+a_rc=$rc; L9="$TMP/sl9"; : > "$L9"
+rc=0; GQL_TMPDIR="$QT12" GQL_LOG="$L9" FAKE_VERSION=banana \
+  run_gql --engine store --query query.graphql >"$O" 2>"$TMP/e27b" || rc=$?
+if [ "$a_rc" -eq 3 ] && [ "$rc" -eq 3 ] && cmp -s "$TMP/e27a" "$TMP/e27b" \
+   && grep -q "unparseable shopify CLI version 'banana'" "$TMP/e27b" \
+   && [ "$(grep -c '^version' "$L9")" -eq 0 ]; then ok
+else bad G27-unparseable-version-cached "a_rc=$a_rc b_rc=$rc err=$(head -c 160 "$TMP/e27b" | tr '\n' ' ')"; fi
+
+# G28 (bug): a single-quoted store= in the toml became the literal domain `'acme-dev'.myshopify.com`
+TD1="$TMP/gqltoml1"; mkdir -p "$TD1"; cp "$GQLDIR/query.graphql" "$TD1/"
+printf "[environments.development]\nstore = 'acme-dev'\n" > "$TD1/shopify.theme.toml"
+rc=0; FAKE_HTTP=401 gql_run_at "$TD1" --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'url=https://acme-dev.myshopify.com/admin/' "$E"; then ok
+else bad G28-toml-single-quoted-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# G29 (pin): bare and double-quoted values keep working, trailing comment dropped either way
+TD2="$TMP/gqltoml2"; mkdir -p "$TD2"; cp "$GQLDIR/query.graphql" "$TD2/"
+printf '[environments.development]\nstore = acme-dev.myshopify.com   # was "acme-legacy"\n' > "$TD2/shopify.theme.toml"
+rc=0; FAKE_HTTP=401 gql_run_at "$TD2" --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'url=https://acme-dev.myshopify.com/admin/' "$E"; then ok
+else bad G29-toml-bare-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+printf '[environments.development]\nstore = "acme-dev"  # keep\n' > "$TD2/shopify.theme.toml"
+rc=0; FAKE_HTTP=401 gql_run_at "$TD2" --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'url=https://acme-dev.myshopify.com/admin/' "$E"; then ok
+else bad G29b-toml-quoted-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# G30: a store value that cannot be a myshopify handle is refused before any request
+rc=0; M="$TMP/m30"; CURL_MARKER="$M" \
+  gql_run_at "$GQLDIR" --engine token --store "store = 'x'" --query query.graphql >"$O" 2>"$E" || rc=$?
+assert G30-bad-store-refused 2 "$rc" "$E" "error=invalid_store"
+if [ ! -f "$M" ]; then ok; else bad G30b-no-request "a garbage store still hit the network"; fi
+
+# G31 (bug): `shopify --store` documents the https:// URL form as valid, and real tomls carry it —
+# the handle gate must normalize it, not refuse a supported config
+rc=0; gql_run_at "$GQLDIR" --engine token --store "https://acme-dev.myshopify.com/" \
+  --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O"; then ok
+else bad G31-store-url-form "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+rc=0; FAKE_HTTP=401 gql_run_at "$GQLDIR" --engine token --store "https://acme-dev.myshopify.com" \
+  --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'url=https://acme-dev.myshopify.com/admin/' "$E"; then ok
+else bad G31b-store-url-domain "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# G32 (bug): the skip mark records a MACHINE verdict. A per-CALL skip — here an oversized variables
+# payload, which every `theme-json.sh set` of a real settings_data.json triggers — must not pin the
+# store engine for later calls: that call said nothing about the store, and the engine still works.
+QT13="$TMP/probe-percall"; mkdir -p "$QT13"
+BIGV="$TMP/bigvars.json"
+node -e 'const o={};for(let i=0;i<3000;i++)o["k"+i]="v".repeat(40);require("fs").writeFileSync(process.argv[1],JSON.stringify(o))' "$BIGV"
+rc=0; GQL_TMPDIR="$QT13" FAKE_EXEC_MODE=ok \
+  run_gql --query query.graphql --variables-file "$BIGV" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'variables too large' "$E" \
+   && [ ! -f "$(gql_state "$QT13")/store-skip-test-store.myshopify.com" ]; then ok
+else bad G32-percall-skip-not-recorded "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ') mark=$(ls "$(gql_state "$QT13")" | tr '\n' ' ')"; fi
+L10="$TMP/sl10"; : > "$L10"
+rc=0; GQL_TMPDIR="$QT13" GQL_LOG="$L10" FAKE_EXEC_MODE=ok \
+  run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"data":{"ok":true}' "$O" && [ "$(grep -c 'store execute' "$L10")" -eq 1 ]; then ok
+else bad G32b-store-engine-still-used "rc=$rc out=$(head -c 100 "$O") calls=[$(tr '\n' ';' < "$L10")]"; fi
+
+# G33 (bug): the TTL is an expiry, not a sliding window — a call SERVED FROM the mark must not
+# re-stamp it, or the verdict never ages out on a machine that runs the runner at least once per TTL
+# (and the stored reason grows one "(cached — …)" suffix per call, which the next full note prints).
+QT14="$TMP/probe-slide"; mkdir -p "$QT14"
+rc=0; GQL_TMPDIR="$QT14" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+SD14="$(gql_state "$QT14")/store-skip-test-store.myshopify.com"
+planted=$(( $(date +%s) - 21300 ))
+printf '%s\nunexpected CLI crash output\n' "$planted" > "$SD14"
+for _ in 1 2 3; do GQL_TMPDIR="$QT14" run_gql --query query.graphql >"$O" 2>"$E" || true; done
+if [ "$(head -1 "$SD14")" = "$planted" ]; then ok
+else bad G33-skip-mark-not-slid "ts moved $planted -> $(head -1 "$SD14")"; fi
+if [ "$(grep -c 'cached — ' "$SD14")" -eq 0 ]; then ok
+else bad G33b-reason-accretion "stored reason: $(sed -n 2p "$SD14" | head -c 200)"; fi
+
+# G34: a legacy private-app admin password (shppa_) is a valid X-Shopify-Access-Token — the file
+# shape gate catches a typo/placeholder (G17), not a token vintage
+printf 'SHOPIFY_ADMIN_TOKEN=shppa_legacyprivateapp\n' > "$ENVD/legacy.env"
+rc=0; M="$TMP/m34"; CURL_MARKER="$M" GQL_TOKEN="" \
+  run_gql --engine token --query query.graphql --env "$ENVD/legacy.env" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is shppa_legacyprivateapp "$M.hdr"; then ok
+else bad G34-legacy-token-shape "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# G34b: the charset gate exists to stop a quote/newline breaking out into a second curl directive
+# (G18b) — base64-ish characters cannot, and $SHOPIFY_ADMIN_TOKEN is documented as the escape hatch
+# for a non-standard credential, so they must reach the header
+rc=0; M="$TMP/m34b"; CURL_MARKER="$M" GQL_TOKEN='abcd+/==' \
+  run_gql --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is 'abcd+/==' "$M.hdr"; then ok
+else bad G34b-base64-token "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# G35: the state dir must be 0700 and this uid's before a single byte of state is read or written —
+# a pre-existing world-writable dir at the (predictable) path is tightened first. The cross-uid half
+# of the guard (`[ -O ]`) cannot be simulated with one uid.
+QT15="$TMP/state-loose"; mkdir -p "$QT15"
+mkdir -p -m 777 "$(gql_state "$QT15")"
+rc=0; GQL_TMPDIR="$QT15" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(ls -ld "$(gql_state "$QT15")" | cut -c1-10)" = "drwx------" ]; then ok
+else bad G35-loose-state-dir-tightened "rc=$rc mode=$(ls -ld "$(gql_state "$QT15")" | cut -c1-10)"; fi
+
+# G36 (bug): the state-dir symlink guard, pointed at an EXISTING directory — the shape that actually
+# reaches the `[ -L ]` guard. (A dangling target never gets there: `mkdir -p` fails on it first on
+# BSD, which is why G20 can only pin the weaker no-write/no-crash half.)
+QT16="$TMP/state-symlink-dir"; mkdir -p "$QT16" "$TMP/symlink-target"
+ln -s "$TMP/symlink-target" "$(gql_state "$QT16")"
+rc=0; GQL_TMPDIR="$QT16" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ -z "$(ls -A "$TMP/symlink-target")" ] \
+   && [ "$(ls -ld "$TMP/symlink-target" | cut -c1-10)" != "drwx------" ]; then ok
+else bad G36-symlink-to-dir "rc=$rc left=$(ls -A "$TMP/symlink-target" | tr '\n' ' ') mode=$(ls -ld "$TMP/symlink-target" | cut -c1-10)"; fi
+
+# G37 (bug): a planted fifo at a state path blocks the run forever when the write is a plain
+# redirect and the read is unguarded — with the 2>/dev/null swallowing the reason. The atomic
+# temp+`mv` write and the `[ ! -L ]` read guards are what keep this bounded. The harness runs the
+# case under a wall-clock cap (gql_bounded) and kill_tree kills
+# the whole descendant tree, so a REGRESSION here fails the case instead of leaving a process blocked
+# on the fifo forever — which would hang this suite (and anything reading its output) rather than
+# report anything
+kill_tree() { local p="$1" c
+  for c in $(pgrep -P "$p" 2>/dev/null); do kill_tree "$c"; done
+  kill -9 "$p" 2>/dev/null || true
+}
+gql_bounded() { # gql_bounded <seconds> <args…> — 0 = finished in time, 1 = still running
+  local limit="$1"; shift
+  ( run_gql "$@" >"$O" 2>"$E" ) & local p=$! i=0
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt $((limit * 10)) ]; do sleep 0.1; i=$((i + 1)); done
+  if kill -0 "$p" 2>/dev/null; then kill_tree "$p"; wait "$p" 2>/dev/null; return 1; fi
+  wait "$p" 2>/dev/null; return 0
+}
+QT17="$TMP/state-fifo"; mkdir -p "$(gql_state "$QT17")"
+mkfifo "$(gql_state "$QT17")/note-test-store.myshopify.com"
+if GQL_TMPDIR="$QT17" gql_bounded 6 --query query.graphql; then ok
+else bad G37-fifo-no-hang "the run blocked on a planted fifo"; fi
+# A symlink at a state FILE path is never followed: not read THROUGH (a file someone else controls
+# would otherwise dictate this run's engine verdict and CLI version) and not written through (a
+# dangling one would create a file wherever it points).
+QT18="$TMP/state-file-symlink"; mkdir -p "$(gql_state "$QT18")"
+printf '%s\nplanted verdict\n' "$(date +%s)" > "$TMP/planted-verdict"
+printf '%s 9.9.9\n%s\n' "$(date +%s)" "$SHIM/shopify" > "$TMP/planted-version"
+ln -s "$TMP/planted-verdict" "$(gql_state "$QT18")/store-skip-test-store.myshopify.com"
+ln -s "$TMP/planted-version" "$(gql_state "$QT18")/cli-version"
+ln -s "$TMP/planted-target" "$(gql_state "$QT18")/note-test-store.myshopify.com"
+L11="$TMP/sl11"; : > "$L11"
+rc=0; GQL_TMPDIR="$QT18" GQL_LOG="$L11" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$TMP/planted-target" ] \
+   && [ "$(grep -c '^version' "$L11")" -eq 1 ] && [ "$(grep -c 'store execute' "$L11")" -eq 1 ] \
+   && ! grep -q 'planted verdict' "$E" && [ "$(sed -n 2p "$TMP/planted-verdict")" = "planted verdict" ]; then ok
+else bad G37b-state-file-symlink "rc=$rc planted=$([ -e "$TMP/planted-target" ] && echo created || echo absent) calls=[$(tr '\n' ';' < "$L11")] err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+
+# G38 (pin): the version cache round-trips through `read`, which strips whitespace — so the live
+# probe is trimmed the same way and a padded `shopify version` cannot make the warm call report a
+# different reason than the cold one
+QT19="$TMP/probe-padded"; mkdir -p "$QT19"
+rc=0; GQL_TMPDIR="$QT19" FAKE_VERSION='  3.66.1' \
+  run_gql --engine store --query query.graphql >"$O" 2>"$TMP/e38a" || rc=$?
+a_rc=$rc
+rc=0; GQL_TMPDIR="$QT19" FAKE_VERSION='  3.66.1' \
+  run_gql --engine store --query query.graphql >"$O" 2>"$TMP/e38b" || rc=$?
+if [ "$a_rc" -eq 3 ] && [ "$rc" -eq 3 ] && cmp -s "$TMP/e38a" "$TMP/e38b" \
+   && grep -q 'has no `store execute`' "$TMP/e38a"; then ok
+else bad G38-padded-version-cold-warm "a_rc=$a_rc b_rc=$rc cold=$(head -c 120 "$TMP/e38a") warm=$(head -c 120 "$TMP/e38b")"; fi
+
+# G39 (pin): an empty version probe is never cached — not in cli-version AND not laundered into a
+# sticky skip mark: a CLI that prints nothing today may print a version tomorrow, and either cache
+# would pin the unparseable-version verdict for the TTL. Runs under --engine auto because
+# --engine store exits before the mark-write and cannot catch the skip-mark half.
+QT20="$TMP/probe-empty"; mkdir -p "$QT20"
+rc=0; GQL_TMPDIR="$QT20" FAKE_VERSION= run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+cold_ver_cached=$([ -f "$(gql_state "$QT20")/cli-version" ] && echo yes || echo no)
+cold_skip_cached=$([ -f "$(gql_state "$QT20")/store-skip-test-store.myshopify.com" ] && echo yes || echo no)
+L39="$TMP/sl39"; : > "$L39"
+rc2=0; GQL_TMPDIR="$QT20" GQL_LOG="$L39" run_gql --query query.graphql >"$O" 2>"$TMP/e39b" || rc2=$?
+if [ "$rc" -eq 0 ] && grep -q "unparseable shopify CLI version ''" "$E" \
+   && [ "$cold_ver_cached" = no ] && [ "$cold_skip_cached" = no ] \
+   && [ "$(grep -c '^version' "$L39")" -eq 1 ]; then ok
+else bad G39-empty-version-not-cached "rc=$rc rc2=$rc2 ver_cached=$cold_ver_cached skip_cached=$cold_skip_cached warm_calls=[$(tr '\n' ';' < "$L39")]"; fi
+
+# G40 (bug): an execute that ran and failed for an UNRECOGNIZED reason (network drop, 5xx, crash)
+# must NOT pin the store engine — the next call re-attempts and succeeds once the transient clears
+QT21="$TMP/probe-transient"; mkdir -p "$QT21"
+rc=0; GQL_TMPDIR="$QT21" FAKE_EXEC_MODE=garbage run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+L40="$TMP/sl40"; : > "$L40"
+rc2=0; GQL_TMPDIR="$QT21" GQL_LOG="$L40" FAKE_EXEC_MODE=ok run_gql --query query.graphql >"$O" 2>"$TMP/e40b" || rc2=$?
+if [ "$rc" -eq 0 ] \
+   && [ ! -f "$(gql_state "$QT21")/store-skip-test-store.myshopify.com" ] \
+   && [ "$rc2" -eq 0 ] && grep -q '"data":{"ok":true}' "$O" \
+   && [ "$(grep -c 'store execute' "$L40")" -eq 1 ]; then ok
+else bad G40-transient-execute-not-sticky "rc=$rc rc2=$rc2 mark=$([ -f "$(gql_state "$QT21")/store-skip-test-store.myshopify.com" ] && echo yes || echo no) out=$(head -c 80 "$O")"; fi
+
+# G41: a warm call SERVED FROM the skip mark still names its escape hatch in the short note —
+# the full note printed once long ago, and without the suffix FND_GQL_PROBE_CACHE=0 is unreachable
+QT22="$TMP/probe-shortnote"; mkdir -p "$QT22"
+rc=0; GQL_TMPDIR="$QT22" FAKE_EXEC_MODE=noauth run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+rc2=0; GQL_TMPDIR="$QT22" run_gql --query query.graphql >"$O" 2>"$TMP/e41" || rc2=$?
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] \
+   && grep -q 'note=engine=token (store-skip cached — FND_GQL_PROBE_CACHE=0 re-probes)' "$TMP/e41"; then ok
+else bad G41-cached-short-note-hint "rc=$rc rc2=$rc2 err=$(head -c 160 "$TMP/e41" | tr '\n' ' ')"; fi
+
+# G42 (bug): the runner's own toml read — an unreadable-but-present toml is error=no_store, never
+# raw awk noise killing the script under set -e with no error= line (same shape as T33)
+UT42="$TMP/unreadable-g.toml"; printf 'store = "acme-dev"\n' > "$UT42"; chmod 000 "$UT42"
+rc=0; TOML_PATH="$UT42" gql_run_at "$GQLDIR" --query query.graphql >"$O" 2>"$E" || rc=$?
+chmod 644 "$UT42"
+if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && ! grep -qi "awk: can't open" "$E"; then ok
+else bad G42-unreadable-toml-no-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 
 # ---------------------------------------- create-preview-theme.sh cap classifier --
 CAP_RE='theme limit|maximum number of themes|too many themes'
@@ -313,6 +912,456 @@ if printf 'The maximum number of themes has been reached\n' | grep -qiE "$CAP_RE
 if printf 'Error pushing theme: rate limit exceeded, too many requests\n' | grep -qiE "$CAP_RE"; then
   bad C4-rate-limit-fp "rate-limit stderr still classified as theme cap"
 else ok; fi
+
+# -------------------------------------- create-preview-theme.sh against a stub CLI --
+# The script is driven with a PATH shim for `shopify` that appends every argv line (and the
+# Theme Access token it was handed) to $CPT_LOG, so "the push never ran" / "the orphan was
+# deleted" are assertable, not inferred from the report.
+# NB create-preview-theme.sh prints error= on STDOUT, not stderr — every case greps $O.
+CPTD="$TMP/cpt"; mkdir -p "$CPTD/shim" "$CPTD/repo/assets" "$CPTD/toml"
+cp "$CPT" "$CPTD/cpt.sh"
+printf 'x{}\n' > "$CPTD/repo/assets/app.css"
+cat > "$CPTD/repo/shopify.theme.toml" <<'EOF'
+[environments.development]
+store = "acme-dev"
+theme = "111"
+password = "shptka_fixture1234"
+EOF
+printf "[environments.development]\nstore = 'acme-dev'\ntheme = '111'\npassword = 'shptka_fixture1234'\n" > "$CPTD/toml/single.toml"
+printf '[environments.development]\nstore = acme-dev   # legacy handle\ntheme = 111  # dev\npassword = "shptka_fixture1234"\n' > "$CPTD/toml/bare.toml"
+printf "[environments.development]\nstore = 'acme-dev'\ntheme = 'theme = 111'\npassword = 'shptka_fixture1234'\n" > "$CPTD/toml/badid.toml"
+printf "[environments.development]\nstore = 'acme dev'\ntheme = '111'\npassword = 'shptka_fixture1234'\n" > "$CPTD/toml/badstore.toml"
+
+# fake shopify CLI. GOTCHA: never put brace-JSON inside ${VAR:-default} — the first `}` closes the
+# expansion, which mangles the list JSON into an EMPTY theme name and looks exactly like a script bug.
+cat > "$CPTD/shim/shopify" <<'FAKE'
+#!/usr/bin/env bash
+if [ -n "${CPT_LOG:-}" ]; then
+  printf 'argv=%s\n' "$*" >> "$CPT_LOG"
+  printf 'token=%s\n' "${SHOPIFY_CLI_THEME_TOKEN:-}" >> "$CPT_LOG"
+fi
+is_only=0; case "$*" in *"--only"*) is_only=1 ;; esac
+# a push at an EXISTING theme reports that theme back; a new (--unpublished) one gets a fresh id
+nid=""; prev=""; for a in "$@"; do
+  if [ "$prev" = "--theme" ]; then case "$a" in ''|*[!0-9]*) ;; *) nid="$a" ;; esac; fi
+  prev="$a"
+done
+[ -n "$nid" ] || nid="${FAKE_NEW_ID:-222}"
+case "$1 ${2:-}" in
+  "theme list")
+    [ -n "${FAKE_LIST_FAIL:-}" ] && { echo "Error: could not reach the Admin API" >&2; exit 1; }
+    if [ -n "${FAKE_LIST:-}" ]; then printf '%s\n' "$FAKE_LIST"; else cat <<'J'
+[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"}]
+J
+    fi ;;
+  "theme pull")
+    # FAKE_PULL_STUBBORN = a CLI that traps SIGTERM (oclif does), so an unbounded `wait` in the
+    # script's cleanup would hold the whole process for the rest of the pull
+    [ -n "${FAKE_PULL_STUBBORN:-}" ] && trap '' TERM INT
+    [ -n "${CPT_PULL_MARK:-}" ] && : > "$CPT_PULL_MARK"
+    [ -n "${FAKE_PULL_SLEEP:-}" ] && sleep "$FAKE_PULL_SLEEP"
+    [ -n "${CPT_PULL_DONE:-}" ] && : > "$CPT_PULL_DONE"
+    [ -n "${FAKE_PULL_FAIL:-}" ] && { echo "Error: could not pull settings (503)" >&2; exit 1; }
+    p=""; prev=""; for a in "$@"; do [ "$prev" = "--path" ] && p="$a"; prev="$a"; done
+    mkdir -p "$p/config"; printf '{"current":{"pulled":1}}\n' > "$p/config/settings_data.json" ;;
+  "theme push")
+    [ "$is_only" -eq 1 ] && [ -n "${FAKE_PUSH_ONLY_FAIL:-}" ] && { printf '%s\n' "$FAKE_PUSH_ONLY_FAIL" >&2; exit 1; }
+    [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_CODE_FAIL:-}" ] && { printf '%s\n' "$FAKE_PUSH_CODE_FAIL" >&2; exit 1; }
+    printf '{"theme":{"id":%s,"preview_url":"https://acme-dev.myshopify.com/?preview_theme_id=%s","editor_url":"https://admin.shopify.com/store/acme-dev/themes/%s/editor"}}\n' "$nid" "$nid" "$nid" ;;
+  "theme delete") [ -n "${FAKE_DELETE_FAIL:-}" ] && exit 1; exit 0 ;;
+  "version") echo "4.5.2" ;;
+  *) echo "shim: unhandled: $*" >&2; exit 1 ;;
+esac
+exit 0
+FAKE
+# a build that only succeeds while the settings pull is already in flight (F3 concurrency probe)
+cat > "$CPTD/waitpull.sh" <<'W'
+#!/usr/bin/env bash
+i=0
+while [ "$i" -lt 60 ]; do
+  [ -f "${CPT_PULL_MARK:-/dev/null}" ] && exit 0
+  sleep 0.1; i=$((i + 1))
+done
+echo "the settings pull had not started by the end of the build" >&2; exit 1
+W
+# the same probe, one step stricter: the pull must still be RUNNING when the build ends, which is
+# the overlap F3 exists to create — waiting for the start mark alone cannot tell a concurrent pull
+# from one that ran to completion before the build began
+cat > "$CPTD/overlap.sh" <<'W'
+#!/usr/bin/env bash
+i=0
+while [ "$i" -lt 60 ]; do
+  [ -f "${CPT_PULL_MARK:-/dev/null}" ] && break
+  sleep 0.1; i=$((i + 1))
+done
+[ -f "${CPT_PULL_MARK:-/dev/null}" ] || { echo "the settings pull never started" >&2; exit 1; }
+[ -f "${CPT_PULL_DONE:-/dev/null}" ] && { echo "the settings pull had already finished" >&2; exit 1; }
+exit 0
+W
+# records that it ran, so a case can assert a refusal landed BEFORE the build
+cat > "$CPTD/markbuild.sh" <<'W'
+#!/usr/bin/env bash
+: > "${CPT_BUILD_MARK:-/dev/null}"
+exit 0
+W
+chmod +x "$CPTD/shim/shopify" "$CPTD/waitpull.sh" "$CPTD/overlap.sh" "$CPTD/markbuild.sh"
+
+run_cpt() { # run_cpt <log-file> <env=val…> -- <args…>   ; stdout -> $O, stderr -> $E
+  local log="$1"; shift
+  local envs=(); while [ "$1" != "--" ]; do envs+=("$1"); shift; done; shift
+  (cd "$CPTD/repo" && PATH="$CPTD/shim:$PATH" CPT_LOG="$log" env "${envs[@]}" \
+     "$BASH_BIN" "$CPTD/cpt.sh" "$@") >"$O" 2>"$E"
+}
+cpt_calls() { grep -c "argv=$1" "$2" 2>/dev/null || true; }
+
+# P1 (bug): `refresh --theme <live id>` must be refused BEFORE any push — a mistyped id
+# otherwise ships branch code onto the storefront
+rc=0; L="$TMP/cpt1"; : > "$L"; run_cpt "$L" NO=1 -- refresh --theme 999 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=live_theme_write_refused' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P1-refresh-live-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P1b (bug): the same guard on the name path — `create --reuse` whose name collides with the
+# live theme overlays the storefront with the dev theme's settings
+rc=0; L="$TMP/cpt1b"; : > "$L"; run_cpt "$L" NO=1 -- create --name "Live Theme" --reuse --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=live_theme_write_refused' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P1b-reuse-live-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P1c (pin): a non-live reuse target still goes through
+rc=0; L="$TMP/cpt1c"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":555,"name":"PREVIEW-X","role":"unpublished"}]' \
+  -- create --name "PREVIEW-X" --reuse --no-build || rc=$?
+# the name lookup, the ambiguity count and the role guard share ONE `theme list` call
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && grep -q '^reused=true$' "$O" \
+   && [ "$(cpt_calls 'theme list' "$L")" -eq 1 ]; then ok
+else bad P1c-reuse-allowed "rc=$rc out=$(tr '\n' ';' < "$O") lists=$(cpt_calls 'theme list' "$L")"; fi
+
+# P2 (bug): single-quoted TOML values used to yield the WHOLE LINE — `--store "store = 'acme-dev'"`
+# reached the CLI and `info` still exited 0, which the skill reads as success
+rc=0; L="$TMP/cpt2"; : > "$L"
+run_cpt "$L" TOML_PATH="$CPTD/toml/single.toml" -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-dev$' "$O" && grep -q '^dev_theme_id=111$' "$O" \
+   && grep -q '^dev_theme_name=\[DEV\] Kever$' "$O" \
+   && grep -q 'argv=theme list --store acme-dev --json' "$L"; then ok
+else bad P2-toml-single-quoted "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P2b: the same shape for password= used to export the whole line as the Theme Access token,
+# which also skipped the shp*_ fallback (fixture token, never a real secret)
+if grep -q '^token=shptka_fixture1234$' "$L"; then ok
+else bad P2b-toml-single-quoted-token "log=$(tr '\n' ';' < "$L")"; fi
+
+# P2c: bare values with a trailing comment
+rc=0; L="$TMP/cpt2c"; : > "$L"
+run_cpt "$L" TOML_PATH="$CPTD/toml/bare.toml" -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-dev$' "$O" && grep -q '^dev_theme_id=111$' "$O"; then ok
+else bad P2c-toml-bare "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P3 (bug): a dev theme id that is not digits is a mis-parse or a typo — it must fail loudly
+# instead of becoming `--theme "theme = 111"` on a pull that then orphans the pushed theme
+rc=0; L="$TMP/cpt3"; : > "$L"
+run_cpt "$L" TOML_PATH="$CPTD/toml/badid.toml" -- info || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=invalid_dev_theme_id' "$O" && [ ! -s "$L" ]; then ok
+else bad P3-bad-theme-id "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P3b: a store value that cannot be a shop handle is refused before any CLI call
+rc=0; L="$TMP/cpt3b"; : > "$L"
+run_cpt "$L" TOML_PATH="$CPTD/toml/badstore.toml" -- info || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=invalid_store' "$O" && [ ! -s "$L" ]; then ok
+else bad P3b-bad-store "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P4 (bug): a failed settings PULL used to orphan the just-created theme — no delete, and not
+# even a created_theme= line, so the caller could not name the theme burning a slot
+rc=0; L="$TMP/cpt4"; : > "$L"
+run_cpt "$L" FAKE_PULL_FAIL=1 -- create --name "PREVIEW-A" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=overlay_pull_failed' "$O" \
+   && grep -q '^created_theme=222$' "$O" && grep -q '^created_theme_deleted=yes$' "$O" \
+   && grep -q 'argv=theme delete --store acme-dev --theme 222 --force' "$L"; then ok
+else bad P4-pull-fail-cleanup "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P5 (bug): a transient/auth overlay-push failure is NOT settings drift — the drift verdict sends
+# the developer to manual duplication, so it must be gated on the drift wording
+rc=0; L="$TMP/cpt5"; : > "$L"
+run_cpt "$L" FAKE_PUSH_ONLY_FAIL='Error: Request failed with status code 503 (Service Unavailable)' \
+  -- create --name "PREVIEW-B" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=overlay_push_failed' "$O" && ! grep -q 'settings_drift' "$O" \
+   && grep -q '503' "$O" && grep -q '^created_theme_deleted=yes$' "$O"; then ok
+else bad P5-overlay-push-failed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P5b (bug): an auth rejection contains the word "invalid" — it used to match the drift pattern
+# directly, which is the highest-confidence wrong verdict of the three
+rc=0; L="$TMP/cpt5b"; : > "$L"
+run_cpt "$L" FAKE_PUSH_ONLY_FAIL='ERROR: [API] Invalid API key or access token' \
+  -- create --name "PREVIEW-C" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=overlay_push_failed' "$O" && ! grep -q 'settings_drift' "$O"; then ok
+else bad P5b-auth-not-drift "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P5c (pin): a REAL drift message still reports settings_drift + the manual-duplication path
+rc=0; L="$TMP/cpt5c"; : > "$L"
+run_cpt "$L" FAKE_PUSH_ONLY_FAIL='sections.custom-hero: Invalid value for "type"; blocks must be defined' \
+  -- create --name "PREVIEW-D" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=settings_drift' "$O" && grep -q '^created_theme_deleted=yes$' "$O"; then ok
+else bad P5c-real-drift-kept "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P5d (bug): with --reuse nothing is deleted, so the theme is left with this branch's code and
+# half-applied settings — that mixed state must be stated, not left for the developer to discover.
+# The theme pre-existed this run, so it is reported as `theme=`: `created_theme=` +
+# `created_theme_deleted=no` reads as "an orphan I created is still on the store, clean it up".
+rc=0; L="$TMP/cpt5d"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":555,"name":"PREVIEW-X","role":"unpublished"}]' FAKE_PUSH_ONLY_FAIL='Error: socket hang up' \
+  -- create --name "PREVIEW-X" --reuse --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=overlay_push_failed' "$O" && grep -q '^theme=555$' "$O" \
+   && ! grep -q '^created_theme' "$O" \
+   && grep -q '^reused=true$' "$O" && grep -q '^mixed_state=' "$O" \
+   && [ "$(cpt_calls 'theme delete' "$L")" -eq 0 ]; then ok
+else bad P5d-reuse-mixed-state "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P6 (bug): Shopify allows duplicate theme names — `--reuse` used to pick whichever came first in
+# the API's list order, so the target silently flipped between runs
+rc=0; L="$TMP/cpt6"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":301,"name":"PREVIEW-DUP","role":"unpublished"},{"id":302,"name":"PREVIEW-DUP","role":"unpublished"}]' \
+  -- create --name "PREVIEW-DUP" --reuse --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=ambiguous_name' "$O" && grep -q -- '--theme' "$O" \
+   && grep -q '301' "$O" && grep -q '302' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P6-ambiguous-name "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P7 (F3): the settings pull runs CONCURRENTLY with the build — the build command here only
+# succeeds once the pull has started, so a serial script fails this case
+rc=0; L="$TMP/cpt7"; : > "$L"; PM="$TMP/cpt7.pull"; rm -f "$PM"
+run_cpt "$L" CPT_PULL_MARK="$PM" -- create --name "PREVIEW-E" --build-cmd "$CPTD/waitpull.sh" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^built=yes$' "$O" \
+   && grep -q '^preview_url=https://' "$O" && [ -f "$PM" ]; then ok
+else bad P7-pull-concurrent-with-build "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# P7b (F3): a backgrounded pull that FAILS must never become a silent success, even when the
+# build outlives it (the `wait` status is the only evidence left by then)
+rc=0; L="$TMP/cpt7b"; : > "$L"; PM="$TMP/cpt7b.pull"; rm -f "$PM"
+run_cpt "$L" CPT_PULL_MARK="$PM" FAKE_PULL_FAIL=1 -- create --name "PREVIEW-F" --build-cmd "$CPTD/waitpull.sh" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=overlay_pull_failed' "$O" && grep -q '^created_theme_deleted=yes$' "$O"; then ok
+else bad P7b-background-pull-failure-propagates "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P7c (F3 pin): error PRECEDENCE is caller-visible — a code-push failure still reports
+# push_code_failed even though the settings pull already failed in the background
+rc=0; L="$TMP/cpt7c"; : > "$L"
+run_cpt "$L" FAKE_PULL_FAIL=1 FAKE_PUSH_CODE_FAIL='Error: asset rejected' \
+  -- create --name "PREVIEW-G" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=push_code_failed' "$O" && ! grep -q 'overlay_pull_failed' "$O" \
+   && [ "$(cpt_calls 'theme delete' "$L")" -eq 0 ]; then ok
+else bad P7c-error-precedence "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P8 (pin): the happy path — code push ignores settings, the overlay pushes settings only
+# (temp-dir cleanup is P14/P14b's job)
+rc=0; L="$TMP/cpt8"; : > "$L"
+run_cpt "$L" NO=1 -- create --name "PREVIEW-H" --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^reused=false$' "$O" \
+   && grep -q '^built=skipped$' "$O" \
+   && grep -q 'argv=theme push --store acme-dev --unpublished --theme PREVIEW-H .*--ignore config/settings_data.json' "$L" \
+   && grep -q 'argv=theme push --store acme-dev --theme 222 .*--only config/settings_data.json' "$L" \
+   && [ "$(cpt_calls 'theme delete' "$L")" -eq 0 ]; then ok
+else bad P8-happy-path "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P9 (pin): the theme-cap classifier still short-circuits before push_code_failed
+rc=0; L="$TMP/cpt9"; : > "$L"
+run_cpt "$L" FAKE_PUSH_CODE_FAIL='You have reached your theme limit.' \
+  -- create --name "PREVIEW-I" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=theme_limit' "$O" && ! grep -q 'push_code_failed' "$O"; then ok
+else bad P9-theme-limit "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P10 (pin): refresh onto a non-live theme pushes CODE only and never touches settings
+rc=0; L="$TMP/cpt10"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O" \
+   && [ "$(cpt_calls 'theme pull' "$L")" -eq 0 ] \
+   && ! grep -q -- '--only' "$L"; then ok
+else bad P10-refresh-code-only "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P13 (pin): `--reuse` with NO name match creates a new unpublished theme (the ambiguity count and
+# the id filter must not abort the run on the empty set under `set -euo pipefail`)
+rc=0; L="$TMP/cpt13"; : > "$L"
+run_cpt "$L" NO=1 -- create --name "PREVIEW-NEW" --reuse --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^reused=false$' "$O" \
+   && grep -q 'argv=theme push --store acme-dev --unpublished --theme PREVIEW-NEW ' "$L"; then ok
+else bad P13-reuse-no-match "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P11 (pin): the live guard is a POSITIVE match — when `theme list` itself fails the role is
+# unknown and the refresh proceeds, so a listing outage cannot brick every preview refresh
+rc=0; L="$TMP/cpt11"; : > "$L"
+run_cpt "$L" FAKE_LIST_FAIL=1 -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O" && ! grep -q 'error=' "$O"; then ok
+else bad P11-list-outage-not-fatal "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P12 (pin): a CRLF toml — the quoted value stops at the closing quote and a bare one drops the CR,
+# so the digits assertion cannot turn a Windows-edited config into a hard failure
+printf '[environments.development]\r\nstore = "acme-dev"\r\ntheme = 111\r\npassword = "shptka_fixture1234"\r\n' > "$CPTD/toml/crlf.toml"
+rc=0; L="$TMP/cpt12"; : > "$L"
+run_cpt "$L" TOML_PATH="$CPTD/toml/crlf.toml" -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-dev$' "$O" && grep -q '^dev_theme_id=111$' "$O"; then ok
+else bad P12-toml-crlf "rc=$rc out=$(tr '\n' ';' < "$O" | tr -d '\r')"; fi
+
+# P14 (F3): an early exit kills the in-flight pull WITHOUT leaking the shell's own "Terminated: 15"
+# job report into the script's output, and leaves nothing behind in $TMPDIR. The leftover check only
+# means something because every temp path is built from an explicit $TMPDIR template — BSD mktemp
+# ignores the variable otherwise, and the assertion would pass with cleanup deleted.
+CPTT="$TMP/cpt-tmpdir"; mkdir -p "$CPTT"
+rc=0; L="$TMP/cpt14"; : > "$L"
+run_cpt "$L" TMPDIR="$CPTT" FAKE_PULL_SLEEP=3 -- create --name "PREVIEW-J" --build-cmd "exit 1" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=build_failed' "$O" \
+   && ! grep -qi 'terminated' "$O" "$E" \
+   && [ "$(ls -A "$CPTT" | wc -l | tr -d ' ')" -eq 0 ]; then ok
+else bad P14-early-exit-clean "rc=$rc out=$(tr '\n' ';' < "$O") err=$(tr '\n' ';' < "$E") left=$(ls -A "$CPTT" | tr '\n' ' ')"; fi
+
+# P14b (bug): the same early exit against a CLI that IGNORES SIGTERM. `kill` + an unbounded `wait`
+# holds the process for the rest of the pull — the report is already on stdout, but the caller
+# blocks on process exit, so a 1 s failure reads as a multi-minute one.
+CPTT2="$TMP/cpt-tmpdir2"; mkdir -p "$CPTT2"
+rc=0; L="$TMP/cpt14b"; : > "$L"
+t0=$(date +%s)
+run_cpt "$L" TMPDIR="$CPTT2" FAKE_PULL_STUBBORN=1 FAKE_PULL_SLEEP=8 -- create --name "PREVIEW-K" --build-cmd "exit 1" || rc=$?
+elapsed=$(( $(date +%s) - t0 ))
+if [ "$rc" -ne 0 ] && grep -q 'error=build_failed' "$O" && [ "$elapsed" -le 3 ] \
+   && [ "$(ls -A "$CPTT2" | wc -l | tr -d ' ')" -eq 0 ]; then ok
+else bad P14b-stubborn-pull-bounded "rc=$rc elapsed=${elapsed}s left=$(ls -A "$CPTT2" | tr '\n' ' ')"; fi
+
+# P15 (F3 pin): the pull must still be RUNNING when the build ends — that overlap IS the speedup, and
+# nothing else in the suite can tell it apart from a pull that completed before the build started
+rc=0; L="$TMP/cpt15"; : > "$L"; PM="$TMP/cpt15.start"; PD="$TMP/cpt15.done"; rm -f "$PM" "$PD"
+run_cpt "$L" CPT_PULL_MARK="$PM" CPT_PULL_DONE="$PD" FAKE_PULL_SLEEP=2 \
+  -- create --name "PREVIEW-L" --build-cmd "$CPTD/overlap.sh" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^built=yes$' "$O" && [ -f "$PD" ]; then ok
+else bad P15-pull-still-running-at-build-end "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# P16 (bug): a `theme list` that comes back UNREADABLE (the CLI prints a deprecation/upgrade banner
+# before the JSON — the shape json_field is written tolerantly for) must not disarm the live-theme
+# guard. A positive match is impossible on a document jq cannot parse, so "no role" means UNKNOWN.
+BANNER_LIST='Upgrade available: run `npm i -g @shopify/cli`
+[{"id":999,"name":"Live Theme","role":"live"},{"id":111,"name":"[DEV] Kever","role":"development"}]'
+rc=0; L="$TMP/cpt16"; : > "$L"
+run_cpt "$L" FAKE_LIST="$BANNER_LIST" -- refresh --theme 999 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=live_theme_write_refused' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P16-banner-live-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P16b: the banner does not break the ordinary lookups either
+rc=0; L="$TMP/cpt16b"; : > "$L"
+run_cpt "$L" FAKE_LIST="$BANNER_LIST" -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O"; then ok
+else bad P16b-banner-nonlive-ok "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P16d (bug): noise glued to the JSON's OWN line (an oclif spinner artifact `⠋ Fetching themes\r[…`,
+# stray ANSI under FORCE_COLOR) — the salvage is byte-anchored, so this parses instead of turning
+# into a cli_list_unreadable lockout on a perfectly healthy store
+rc=0; L="$TMP/cpt16d"; : > "$L"
+run_cpt "$L" FAKE_LIST='Fetching themes... [{"id":999,"name":"Live Theme","role":"live"},{"id":111,"name":"[DEV] Kever","role":"development"}]' \
+  -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O"; then ok
+else bad P16d-sameline-noise-salvaged "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P16c: a listing that came back and is not JSON at all is refused, not waved through — unlike an
+# EMPTY listing (P11: the call failed, role unknown, proceed) this one is output we cannot read
+rc=0; L="$TMP/cpt16c"; : > "$L"
+run_cpt "$L" FAKE_LIST='<html>503 Service Unavailable</html>' -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=cli_list_unreadable' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P16c-unreadable-list-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P17 (bug): the same unreadable listing on the --reuse path. "No match" out of a document we cannot
+# parse is not "the theme does not exist" — creating here adds a SECOND theme with that name, which
+# the ambiguity guard then blocks on every later run until a human deletes one in the admin.
+rc=0; L="$TMP/cpt17"; : > "$L"
+run_cpt "$L" FAKE_LIST='<html>503</html>' -- create --name "PREVIEW-M" --reuse --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=cli_list_unreadable' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P17-reuse-unreadable-list "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P17b (bug): a name that DOES match, listed with a non-numeric id — the digit filter drops it, and
+# a silent "no match" would again create a duplicate. Fail loudly instead.
+rc=0; L="$TMP/cpt17b"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":"gid://shopify/OnlineStoreTheme/700","name":"PREVIEW-N","role":"unpublished"}]' \
+  -- create --name "PREVIEW-N" --reuse --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=unusable_theme_id' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P17b-nonnumeric-id "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P18 (pin): every alternative of the drift pattern has its own fixture, so the pattern cannot be
+# narrowed back without a red case; and a non-drift failure still reports a REAL cause= line, never
+# the placeholder — that field is what the caller acts on
+drift_case() { # drift_case <label> <stderr line> <expected error code>
+  local lrc=0
+  run_cpt "$TMP/cptdrift" FAKE_PUSH_ONLY_FAIL="$2" -- create --name "PREVIEW-DR" --no-build || lrc=$?
+  if [ "$lrc" -ne 0 ] && grep -q "^error=$3\$" "$O" && grep -qF "cause=$2" "$O"; then ok
+  else bad "$1" "rc=$lrc want=$3 out=$(head -2 "$O" | tr '\n' ';')"; fi
+}
+drift_case P18a-drift-must-be-defined 'sections.hero: the setting "x" must be defined' settings_drift
+drift_case P18b-drift-invalid-value   'Invalid value for setting "layout"' settings_drift
+drift_case P18c-drift-not-synced      'templates/product.json could not be synced' settings_drift
+drift_case P18d-drift-invalid-section 'Invalid section type "custom-hero" in templates/product.json' settings_drift
+drift_case P18e-drift-missing-type    "Section type 'hero' does not exist in this theme" settings_drift
+drift_case P18f-drift-invalid-setting "Invalid setting 'foo' in config/settings_data.json" settings_drift
+drift_case P18g-transient-real-cause  'Error: socket hang up' overlay_push_failed
+drift_case P18h-auth-real-cause       'ERROR: [API] Invalid API key or access token' overlay_push_failed
+drift_case P18i-unworded-real-cause   'Request rejected by the upstream proxy' overlay_push_failed
+
+# P19 (pin): a refusal must land BEFORE the build — a refusal a developer waited several minutes of
+# npm for is the whole reason the reuse/live block was moved above run_build
+rc=0; L="$TMP/cpt19"; : > "$L"; BM="$TMP/cpt19.build"; rm -f "$BM"
+run_cpt "$L" CPT_BUILD_MARK="$BM" -- create --name "Live Theme" --reuse --build-cmd "$CPTD/markbuild.sh" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=live_theme_write_refused' "$O" && [ ! -f "$BM" ]; then ok
+else bad P19-refusal-before-build "rc=$rc built=$([ -f "$BM" ] && echo yes || echo no) out=$(head -c 120 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt19b"; : > "$L"; rm -f "$BM"
+run_cpt "$L" CPT_BUILD_MARK="$BM" FAKE_LIST='[{"id":301,"name":"PREVIEW-DUP","role":"unpublished"},{"id":302,"name":"PREVIEW-DUP","role":"unpublished"}]' \
+  -- create --name "PREVIEW-DUP" --reuse --build-cmd "$CPTD/markbuild.sh" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=ambiguous_name' "$O" && [ ! -f "$BM" ]; then ok
+else bad P19b-ambiguous-before-build "rc=$rc built=$([ -f "$BM" ] && echo yes || echo no)"; fi
+
+# P20 (bug): the project's own credential wins over an ambient $SHOPIFY_CLI_THEME_TOKEN — a token
+# exported for another project would otherwise authenticate this repo's pushes against that store
+rc=0; L="$TMP/cpt20"; : > "$L"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_STALE_OTHER_PROJECT -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^token=shptka_fixture1234$' "$L"; then ok
+else bad P20-toml-token-wins "rc=$rc log=$(tr '\n' ';' < "$L")"; fi
+
+# P20b: with no token in the toml at all the env var is the escape hatch (a credential this file
+# cannot supply), so the run still authenticates instead of hard-stopping
+printf "[environments.development]\nstore = 'acme-dev'\ntheme = '111'\n" > "$CPTD/toml/notoken.toml"
+rc=0; L="$TMP/cpt20b"; : > "$L"
+run_cpt "$L" TOML_PATH="$CPTD/toml/notoken.toml" SHOPIFY_CLI_THEME_TOKEN=shptka_from_env -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^token=shptka_from_env$' "$L"; then ok
+else bad P20b-env-token-fallback "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P21 (bug): `shopify --store` documents the https:// URL form as valid and real tomls carry it —
+# it is normalized, not refused
+printf '[environments.development]\nstore = "https://acme-dev.myshopify.com"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$CPTD/toml/url.toml"
+rc=0; L="$TMP/cpt21"; : > "$L"
+run_cpt "$L" TOML_PATH="$CPTD/toml/url.toml" -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-dev\.myshopify\.com$' "$O" \
+   && grep -q 'argv=theme list --store acme-dev\.myshopify\.com --json' "$L"; then ok
+else bad P21-store-url-form "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P22 (bug): `refresh --theme <NAME>` is refused before any CLI call — the CLI would resolve a name
+# to ANY theme (the published one included), but assert_not_live vets by id, so a name target would
+# sail past the guard with role="" and push branch code onto the storefront
+rc=0; L="$TMP/cpt22"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme "Live Theme" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=invalid_theme_id' "$O" \
+   && [ "$(grep -c 'argv=' "$L")" -eq 0 ]; then ok
+else bad P22-refresh-name-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P23 (bug): an object that matches the id but carries NO role must refuse, not clear — jq's literal
+# `null` (or a role key renamed by list-shape drift) would otherwise satisfy neither guard branch
+# and wave through every target, the published theme included
+rc=0; L="$TMP/cpt23"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":111,"name":"[DEV] Kever"}]' -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=live_role_unreadable' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P23-roleless-id-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P23b (pin): an id ABSENT from a readable listing still proceeds — absence is what a fresh or
+# paginated-away theme looks like, and only found-but-roleless is the drift shape P23 refuses
+rc=0; L="$TMP/cpt23b"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":222,"name":"Other","role":"unpublished"}]' -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O"; then ok
+else bad P23b-absent-id-proceeds "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
 
 # ------------------------------------------- fix-breaking-changes banner handling --
 FB="$TMP/fb"; mkdir -p "$FB/templates/customers" "$FB/config" "$FB/scripts"

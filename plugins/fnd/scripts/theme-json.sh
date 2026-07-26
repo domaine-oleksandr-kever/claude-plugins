@@ -40,9 +40,10 @@
 # Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
 #          [--api-version <v>]   (store domain defaults from shopify.theme.toml)
 #
-# --strip-comments removes /*…*/ blocks (Shopify's auto-generated banner) so the result is plain
-# JSON a jq edit can consume; lossless — Shopify re-stamps the banner on every write. Snapshot
-# WITHOUT it (raw bytes restore byte-exact); strip only the working base you'll edit.
+# --strip-comments removes /*…*/ blocks that sit OUTSIDE JSON strings (Shopify's auto-generated
+# banner) so the result is plain JSON a jq edit can consume; a `/*` inside a value (custom_css) is
+# content and survives. Lossless — Shopify re-stamps the banner on every write. Snapshot WITHOUT it
+# (raw bytes restore byte-exact); strip only the working base you'll edit.
 #
 # Output: `themes` prints one {"id","name","role"} JSON per line (gid + UPPERCASE role on every
 # engine); `get` prints the raw file body (--out preserves exact bytes) — an inline body over
@@ -117,12 +118,36 @@ num_of() {
   esac
 }
 
+# /*…*/ removal that tracks JSON string state. A plain `s{/\*.*?\*/}{}gs` CANNOT do this job: a `/*`
+# inside a custom_css value plus a `*/` in any later value makes it delete every key in between and
+# still emit VALID JSON, so the `set` guard passes and corrupted settings upload silently. Escapes
+# (\" \\) are honored; an UNTERMINATED comment stays in place so the json guard fails loudly instead
+# of eating the tail. Leading whitespace goes (the result starts at `{`); no byte is ever appended.
+# The file rides a shell redirect, not @ARGV — perl's <> would treat a path with `>` or a trailing
+# space as an open() expression.
+strip_json_comments() { # $1 = file, body to stdout
+  perl -0777 -e '
+    my $s = <>; my $n = length $s; my @o;
+    pos($s) = 0;
+    while (pos($s) < $n) {
+      if ($s =~ /\G([^"\/]+)/gsc)           { push @o, $1; next }   # neutral run
+      if ($s =~ /\G("(?:[^"\\]|\\.)*")/gsc) { push @o, $1; next }   # whole string verbatim
+      if ($s =~ m{\G/\*.*?\*/}gsc)          { next }                # comment
+      if ($s =~ /\G(.)/gsc)                 { push @o, $1; next }   # lone " or /
+      last;
+    }
+    my $out = join "", @o;
+    $out =~ s/\A\s+//;
+    print $out;
+  ' < "$1"
+}
+
 # shared output path for `get` — $1 is a file holding the raw body
 emit_file() {
   filter() {
     if [ "$STRIP" -eq 1 ]; then
       command -v perl >/dev/null 2>&1 || { echo "error=strip_needs_perl" >&2; exit 2; }
-      perl -0777 -pe 's{/\*.*?\*/}{}gs; s/\A\s+//' "$1"
+      strip_json_comments "$1"
     else
       cat "$1"
     fi
@@ -168,8 +193,10 @@ gql() {
   printf '%s' "$2" > "$vf"
   RESP="$("$RUNNER" --query "$qf" --variables-file "$vf" ${RUNNER_ARGS[@]+"${RUNNER_ARGS[@]}"} 2>"$rerr")" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    # fall back only on "neither admin engine set up" — the runner also exits 3 for
-    # store_execute_failed_mutation, where a themecli re-push could double-apply
+    # fall back only on "neither admin engine set up" (error=no_admin_token) — the runner also
+    # exits 3 for store_execute_failed_mutation, where a themecli re-push could double-apply, and
+    # for error=invalid_admin_token, which is DELIBERATELY fatal here: a malformed token is a broken
+    # config someone tried to set up, and a silent themecli fallback would mask it indefinitely
     if [ "$ENGINE" = "auto" ] && [ "$rc" -eq 3 ] && grep -q 'error=no_admin_token' "$rerr" \
         && cli_token_ready; then
       GQL_NOTE="admin credentials not set up"
@@ -179,12 +206,23 @@ gql() {
     [ "$rc" -eq 3 ] && echo "hint=the theme-CLI engine is a third option — put the Theme Access password in $TOML or export SHOPIFY_CLI_THEME_TOKEN" >&2
     exit "$rc"
   fi
-  printf '%s' "$RESP" | jq empty >/dev/null 2>&1 || {
+  # ONE pass over the envelope answers both "is it JSON" (jq's exit status) and "is it an error
+  # envelope" (the printed token) — a settings_data.json response is 100s of KB and each extra jq
+  # walk costs ~10 ms. Only a NON-ZERO jq exit means "not JSON": a valid non-object envelope and a
+  # response yielding no value at all must both fall through to the shape checks.
+  local status="" jrc=0
+  status="$(printf '%s' "$RESP" | jq -r 'if type == "object" and has("errors") then "errors" else "ok" end' 2>/dev/null)" || jrc=$?
+  # one line per input document, so a second line means this is not ONE envelope. Every check below
+  # would then read the first document's answer glued to the rest — including `set`'s live-theme
+  # refusal, whose `.data.theme.role` comparison would silently stop matching MAIN.
+  case "$status" in *$'\n'*) jrc=1 ;; esac
+  if [ "$jrc" -ne 0 ]; then
     local lf; lf="$(mktemp)"; printf '%s\n' "$RESP" > "$lf"
     echo "error=non_json_response log=$lf" >&2
     head -c 600 "$lf" >&2; echo >&2
-    exit 5; }
-  if [ "$(printf '%s' "$RESP" | jq 'has("errors")')" = "true" ]; then
+    exit 5
+  fi
+  if [ "$status" = "errors" ]; then
     if printf '%s' "$RESP" | grep -qi 'ACCESS_DENIED\|access denied'; then
       if [ "$ENGINE" = "auto" ] && cli_token_ready; then
         GQL_NOTE="admin credential lacks read_themes/write_themes"
@@ -231,11 +269,23 @@ gql_get() {
       }
     }
   }' "$(jq -n --arg id "$gid" --arg f "$FILE" '{id: $id, filenames: [$f]}')" || return 1
-  printf '%s' "$RESP" | jq -e '.data.theme' >/dev/null 2>&1 || { echo "error=theme_not_found theme=$gid" >&2; exit 5; }
-  local ue; ue="$(printf '%s' "$RESP" | jq -c '.data.theme.files.userErrors // []')"
-  [ "$ue" = "[]" ] || { echo "error=file_user_errors file=$FILE $ue" >&2; exit 5; }
-  printf '%s' "$RESP" | jq -e '.data.theme.files.nodes[0].body.content != null' >/dev/null 2>&1 \
-    || { echo "error=file_not_found_or_not_text file=$FILE theme=$gid" >&2; exit 5; }
+  # ONE status pass, deciding in the caller-visible order: theme missing → file userErrors → body
+  # missing (callers branch on which error comes first, so the order is a contract). The body stays
+  # its own `jq -rj` pass — that trailing-newline-free write IS the byte-exact restore promise.
+  local st=""
+  st="$(printf '%s' "$RESP" | jq -r '
+    . as $r
+    | (try $r.data.theme.files.userErrors catch null) // [] | tojson as $ue
+    | if ((try $r.data.theme catch null) // null) == null then "no_theme"
+      elif $ue != "[]" then "ue " + $ue
+      elif ((try $r.data.theme.files.nodes[0].body.content catch null) // null) == null then "no_body"
+      else "ok" end' 2>/dev/null)" || st=""
+  case "$st" in
+    ok) ;;
+    "ue "*)  echo "error=file_user_errors file=$FILE ${st#ue }" >&2; exit 5 ;;
+    no_body) echo "error=file_not_found_or_not_text file=$FILE theme=$gid" >&2; exit 5 ;;
+    *)       echo "error=theme_not_found theme=$gid" >&2; exit 5 ;;
+  esac
   local raw; raw="$(mktemp)"; CLEAN+=("$raw")
   printf '%s' "$RESP" | jq -rj '.data.theme.files.nodes[0].body.content' > "$raw"
   emit_file "$raw"
@@ -265,14 +315,48 @@ gql_set() {
 }
 
 # ----------------------------------------------------------- themecli engine --
+# TOML scalar reader: handles "…" / '…' / bare values, drops a trailing comment only OUTSIDE quotes,
+# tolerates CRLF. All three shapes occur in real shopify.theme.toml files, and a `"`-only sed
+# (`s/^[^"]*"([^"]*)".*/\1/`) silently returns the WHOLE LINE for the other two — `store = 'x'`
+# becomes the domain `store = 'x'.myshopify.com` and a single-quoted password= is exported as the
+# Theme Access token. Byte-identical copies live in create-preview-theme.sh and
+# shopify-admin-gql.sh — the plugin installs by git clone, so every script stands alone; keep the
+# three in sync.
+toml_value() { # $1 = key, first uncommented value to stdout (empty when absent)
+  [ -f "$TOML" ] || return 0
+  awk -v k="$1" '
+    BEGIN { SQ = "\047" }
+    /^[ \t]*#/ { next }
+    $0 ~ "^[ \t]*" k "[ \t]*=" {
+      v = $0
+      sub("^[ \t]*" k "[ \t]*=[ \t]*", "", v)
+      q = substr(v, 1, 1)
+      if (q == "\"" || q == SQ) {
+        v = substr(v, 2)
+        p = index(v, q)
+        if (p > 0) v = substr(v, 1, p - 1)
+      } else {
+        h = index(v, "#"); if (h > 0) v = substr(v, 1, h - 1)
+        sub(/[ \t\r]+$/, "", v)
+      }
+      print v; exit
+    }
+  ' "$TOML" 2>/dev/null
+}
+
 DOMAIN=""
 resolve_domain() {
   local s="$STORE_ARG"
   [ -z "$s" ] && s="${SHOPIFY_STORE:-}"
-  if [ -z "$s" ] && [ -f "$TOML" ]; then
-    s="$(grep -E '^[[:space:]]*store[[:space:]]*=' "$TOML" | grep -v '^[[:space:]]*#' | head -1 | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*#.*$//; s/^"//; s/"$//')" || true
-  fi
+  if [ -z "$s" ]; then s="$(toml_value store)" || true; fi
   [ -n "$s" ] || { echo "error=no_store (pass --store or set store= in $TOML)" >&2; exit 2; }
+  # `shopify --store` documents the full URL form as valid, so the scheme is stripped, not refused;
+  # what is left must be a shop handle, because a mis-parse handed to the CLI is an opaque error at
+  # best and the wrong store at worst
+  s="${s#http://}"; s="${s#https://}"; s="${s%/}"
+  case "$s" in ''|*[!A-Za-z0-9.-]*)
+    echo "error=invalid_store store='$s' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL)" >&2; exit 2 ;;
+  esac
   case "$s" in *.myshopify.com) DOMAIN="$s" ;; *) DOMAIN="${s}.myshopify.com" ;; esac
 }
 
@@ -282,7 +366,10 @@ cli_token_ready() {
   [ -n "${SHOPIFY_CLI_THEME_TOKEN:-}" ] && return 0
   [ -f "$TOML" ] || return 1
   local t
-  t="$(grep -E '^[[:space:]]*password[[:space:]]*=' "$TOML" | grep -v '^[[:space:]]*#' | head -1 | sed -E 's/^[^"]*"([^"]*)".*/\1/')" || true
+  t="$(toml_value password)"
+  # a password= that is not token-shaped is not a token — fall through to the file-wide scan
+  # instead of exporting it (a garbage token surfaces as an opaque CLI 401)
+  case "$t" in shp[a-z]*_[A-Za-z0-9]*) ;; *) t="" ;; esac
   [ -n "$t" ] || t="$(grep -oE 'shp[a-z]+_[A-Za-z0-9]+' "$TOML" | head -1)" || true
   [ -n "$t" ] || return 1
   export SHOPIFY_CLI_THEME_TOKEN="$t"
@@ -372,7 +459,7 @@ case "$CMD" in
         # templates) — Shopify strips them, so validate the stripped variant before refusing
         if ! jq empty "$FROM" >/dev/null 2>&1; then
           if command -v perl >/dev/null 2>&1; then
-            perl -0777 -pe 's{/\*.*?\*/}{}gs' "$FROM" 2>/dev/null | jq empty >/dev/null 2>&1 \
+            strip_json_comments "$FROM" 2>/dev/null | jq empty >/dev/null 2>&1 \
               || { echo "error=from_file_invalid_json file=$FROM" >&2; exit 2; }
           else
             echo "note=json_validation_skipped (no perl to strip /*…*/ comments)" >&2
