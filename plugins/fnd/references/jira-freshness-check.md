@@ -5,10 +5,11 @@ Jira bumps `updated` on sprint moves, rank, status/assignee flips, estimates, co
 none of which touch the content fields the reader reports. Classify before re-reading the
 whole ticket:
 
-1. `getJiraIssue` with `fields: ["updated", "status"]`, `expand: "changelog"` — history
-   only, no content. Entries come **newest first**. The response is often huge; when the
-   harness saves it to a file, extract with `jq` — never pull the raw changelog into
-   context (a small inline response you can read as-is):
+1. `getJiraIssue` with `cloudId: "meetdomaine.atlassian.net"`,
+   `fields: ["updated", "status"]`, `expand: "changelog"` — history only, no content.
+   Entries come **newest first**. The response is often huge; when the harness saves it to
+   a file, extract with `jq` — never pull the raw changelog into context (a small inline
+   response you can read as-is):
 
    ```bash
    jq -r --arg since "<stored jira_updated>" \

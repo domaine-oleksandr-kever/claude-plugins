@@ -39,8 +39,8 @@ So the decision rule:
 - ID **missing from the `names` map** → the ID is wrong / not on this site → fall through to
   **Step B** to rediscover it.
 
-> ⚠️ Note: an earlier version of the playbook mapped `customfield_10037` to Acceptance Criteria —
-> that was wrong. `10037` is **Assumptions**; Acceptance Criteria is `customfield_10036`.
+> ⚠️ Note: an earlier version of the playbook mis-mapped Acceptance Criteria onto the Assumptions
+> field id. Take both ids from the `jira-field-ids.md` table, never from memory.
 
 ### Are these IDs the same in every project?
 
@@ -59,17 +59,19 @@ In both cases, fall through to Step B to resolve the live IDs.
 
 This was verified working — it's the source of the `jira-field-ids.md` table.
 
-1. Call `getJiraIssue` on a representative ticket with **`expand: "names"`** and either
-   `fields: ["*all"]` or a broad custom-field range:
+1. Call `getJiraIssue` on a representative ticket with the required **`cloudId`** (the site
+   host, e.g. `meetdomaine.atlassian.net` — cloudId resolution: `jira-field-ids.md`),
+   **`expand: "names"`**, and either `fields: ["*all"]` or a broad custom-field range:
 
    ```
+   cloudId: "<site host or UUID>", issueIdOrKey: "<KEY>",
    fields: ["*all"], expand: "names"
    // or, to keep the response smaller:
    fields: ["customfield_10030", ..., "customfield_10060"], expand: "names"
    ```
 
-2. The response includes a **`names` map** of `fieldId → human-readable label`, e.g.
-   `"customfield_10036": "Acceptance Criteria"`. Scan it for the labels you need
+2. The response includes a **`names` map** of `fieldId → human-readable label` (e.g.
+   `"customfield_XXXXX": "Acceptance Criteria"`). Scan it for the labels you need
    ("Acceptance Criteria", "Assumptions", "Technical Approach", "Documentation Links",
    "Steps to test") to resolve the live IDs.
 

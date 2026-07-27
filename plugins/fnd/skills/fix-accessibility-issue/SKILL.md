@@ -8,12 +8,14 @@ argument-hint: "<component-name | GitHub issue #>"
 arguments:
   - name: target
     description: The component to fix (e.g. mega-menu, cart-drawer) or a GitHub accessibility issue number.
-allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npx playwright test*), Bash(git status*), Bash(git diff*), Bash(git checkout*), Bash(git add*), Bash(git commit*), Bash(git log*)
+allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npx playwright test*), Bash(git status*), Bash(git diff*), Bash(git checkout*), Bash(git add*), Bash(git log*)
 ---
 
 # Fix Accessibility Issue
 
-Fix accessibility issues in theme components. Follow the standard issue-fix workflow (branch → implement → test → commit), with the a11y-specific rules below.
+Fix accessibility issues in theme components. Follow the standard issue-fix workflow (branch → implement → test → hand off the commit), with the a11y-specific rules below.
+
+**The commit is not pre-approved here.** Staging (`git add`) is; `git commit` is not — hand the commit to `/fnd:commit` (repo rule: never `git commit` without explicit per-commit permission).
 
 ## Component ARIA patterns
 

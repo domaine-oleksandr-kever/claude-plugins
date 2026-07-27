@@ -13,10 +13,19 @@ server** item as their browser-validation prerequisite.
 | npm         | `npm -v`           | build / scripts |
 | Git         | `git --version`    | all |
 | GitHub CLI  | `gh --version`     | `create-pull-request` |
+| jq          | `jq --version`     | all three bundled runners — `shopify-admin-gql.sh`, `theme-json.sh`, `create-preview-theme.sh` |
+| perl        | `perl -v`          | `theme-json.sh --strip-comments` |
 
-Report version numbers; flag anything missing or below known team minimums. The version commands
-above are read-only (the `preflight-checks` skill pre-approves exactly these); any other shell
-command still needs the developer's go-ahead.
+Report version numbers; flag anything missing or below known team minimums. Two severities worth
+getting right: **jq missing is a 🔴** — all three runners exit immediately with an `error=` line
+naming jq (`error=jq_not_found` from the gql and theme-JSON runners, `error=jq not found on
+PATH …` from `create-preview-theme.sh`), so store access and preview themes are dead; **perl
+missing is a 🟡** — only `theme-json.sh get --strip-comments` hard-fails
+(`error=strip_needs_perl`), while a `set` whose `--from` JSON carries `/*…*/` comments skips
+validation with `note=json_validation_skipped` instead of refusing the push. The version
+commands above are read-only (the
+`preflight-checks` skill pre-approves exactly these); any other shell command still needs the
+developer's go-ahead.
 
 Shopify CLI **≥ 4.x** additionally provides `shopify store execute` — the preferred engine for
 Admin GraphQL work (`metafield-metaobject-setup.md`) and for theme-JSON/customizer state
@@ -28,7 +37,10 @@ Admin GraphQL work (`metafield-metaobject-setup.md`) and for theme-JSON/customiz
 For each, confirm it is installed, connected, and authenticated — **report real outcomes, never
 fabricate a green check**:
 
-- **Figma MCP** — design extraction (Dev Mode bridge running).
+- **Figma MCP** — design extraction. **Either path counts** (`figma-reader` prefers the first):
+  a remote/connector Figma server attached at user/project scope (tool names `mcp__figma__…`,
+  no desktop app needed), or the plugin's local `figma-dev-mode` bridge with the Figma desktop
+  app open in Dev Mode. 🔴 only when **neither** is reachable — a connector-only setup is 🟢.
 - **Chrome DevTools MCP** — attaches to a running browser for in-browser validation.
 - **Atlassian MCP** — Jira (and Confluence) auth; optionally verify read access with a known ticket key.
 - **Notion MCP** — linked-doc ingestion (`reading-linked-docs.md`); the TA / develop / QA /

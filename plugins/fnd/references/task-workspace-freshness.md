@@ -6,9 +6,10 @@ resuming an interrupted conversation.
 
 ## Ticket files (`ticket*.md`)
 
-- **Cheap probe from the main loop** — `getJiraIssue` with `fields: ["updated"]` only
-  (tiny response, no subagent): match → stamp `verified_at` and trust the cache (probe at
-  most once per session unless hinted).
+- **Cheap probe from the main loop** — `getJiraIssue` with
+  `cloudId: "meetdomaine.atlassian.net"`, `fields: ["updated"]` only (tiny response, no
+  subagent): match → stamp `verified_at` and trust the cache (probe at most once per
+  session unless hinted).
 - **Probe mismatch ≠ stale.** Jira bumps `updated` on sprint moves, rank, priority,
   status/assignee flips, estimates, comments — none of which touch what the cache stores.
   Don't re-fetch blindly: spawn `jira-reader` **passing the stored `jira_updated`** — it

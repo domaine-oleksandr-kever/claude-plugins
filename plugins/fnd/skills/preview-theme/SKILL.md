@@ -21,7 +21,7 @@ arguments:
     description: Storefront path to deep-link the preview to (e.g. /products/group-lipglass). Optional.
   - name: build_overrides
     description: --no-build (developer already built) / --build-cmd "<cmd>" (non-default build). Optional.
-allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*)
+allowed-tools: Read, Glob, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*)
 ---
 
 # Preview theme (create / refresh)

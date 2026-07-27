@@ -42,9 +42,6 @@ mb=$(git merge-base "$base" HEAD)
 diff_hash=$(git diff "$mb" | git hash-object --stdin)
 ```
 
-> Markers written by plugin ≤ 0.18 used a different hash formula, so the first run after
-> upgrading reports "changed since last review" once — expected; pick re-review or skip as usual.
-
 Read it:
 
 ```bash

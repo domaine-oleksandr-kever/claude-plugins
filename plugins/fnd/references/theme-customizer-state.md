@@ -40,7 +40,7 @@ The whole JSON content layer is in `.shopifyignore` deliberately. Two consequenc
 ## The tool
 
 ```bash
-theme-json.sh themes [--role main|development|unpublished|live]
+theme-json.sh themes [--role main|development|unpublished|live|demo]
 theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--strip-comments] [--out <file>]
 theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
 # common: --store <domain> · --engine auto|store|token|themecli · --env <path> · --api-version <v>

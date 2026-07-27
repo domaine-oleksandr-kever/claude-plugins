@@ -25,7 +25,7 @@ in its own subfolder under `plugins/`:
 │       │   ├── change-reviewer.md   #  reviews a diff (hygiene + conformance)
 │       │   ├── bug-hunter.md        #  adversarial bug hunt on a diff (correctness)
 │       │   ├── jira-reader.md       #  reads a ticket → structured fields
-│       │   ├── jira-writer.md       #  writes one approved field/comment (ADF) → Jira
+│       │   ├── jira-writer.md       #  writes one approved field (ADF) / comment (md) → Jira
 │       │   ├── figma-reader.md      #  reads one Figma frame → build spec
 │       │   ├── doc-reader.md        #  reads one linked doc (Notion/Confluence/web) → extract
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
@@ -47,7 +47,10 @@ in its own subfolder under `plugins/`:
 │   ├── no-verify-bypass-matrix.sh   #  FP/FN contract of the two commit guards
 │   ├── hooks-sim.sh                 #  SessionStart / monitor-gate / context-stats sims
 │   ├── scripts-sim.sh               #  runner + theme-json + converter-caller sims
-│   └── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
+│   ├── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
+│   ├── json-slim-fixtures.mjs       #  mcp-slim pipeline + CLI + hook fixtures
+│   ├── fixtures/                    #  real captured payloads (secrets scrubbed)
+│   └── parity/                      #  upstream-port parity fixtures + license NOTICE
 ├── LICENSE
 └── README.md
 ```
@@ -239,12 +242,15 @@ sources (`doc-reader` writes only its own workspace extract), plus the write-sid
   backstop, and alongside live QA in the ship pipeline.
 - **`jira-reader`** — fetches a Jira ticket via the Atlassian MCP and returns clean
   structured fields (keeps raw ADF out of context).
-- **`jira-writer`** — the write-side mirror: converts one **approved** markdown value to
-  ADF and makes the single `editJiraIssue`/`addCommentToJiraIssue` call, so the large ADF
-  blob stays in its disposable context, not the main loop. Writer skills delegate here
-  **after** the ✋ approval (the gate stays in the skill; the agent never authorizes).
-- **`figma-reader`** — reads **one** Figma frame via the Figma Dev Mode MCP and returns a
-  compact build spec. Spawned **one per URL, in parallel** when a ticket has several.
+- **`jira-writer`** — the write-side mirror: writes one **approved** value with a single
+  call — a rich-text custom field via `editJiraIssue` (markdown converted to ADF first), a
+  comment via `addCommentToJiraIssue` (markdown verbatim, `contentFormat: "markdown"`) — so
+  the large payload stays in its disposable context, not the main loop. Writer skills
+  delegate here **after** the ✋ approval (the gate stays in the skill; the agent never
+  authorizes).
+- **`figma-reader`** — reads **one** Figma frame via a Figma MCP (the remote/connector
+  server when one is attached, else the local Dev Mode bridge) and returns a compact build
+  spec. Spawned **one per URL, in parallel** when a ticket has several.
 - **`doc-reader`** — reads **one** linked doc (Notion with sub-page follow-through,
   Confluence, or any web URL) and returns a task-focused extract, saving it to the
   workspace `doc-<slug>-<hash>.md` itself. Spawned **one per link, in parallel** — the raw pages
@@ -342,7 +348,9 @@ The plugin declares the MCP servers the skills/agents use (`plugin.json` →
   **once** via `/mcp`; it persists across projects and sessions — no re-auth when you
   switch repos.
 - `figma-dev-mode` is the local Dev Mode SSE server — it works whenever the Figma desktop
-  app is open in Dev Mode (no auth).
+  app is open in Dev Mode (no auth). It is the **fallback**, not the only path: `figma-reader`
+  prefers a remote/connector Figma server (`mcp__figma__…`, URL-driven, no desktop app) when
+  one is attached at user/project scope, so either setup alone is enough.
 - If you already have any of these configured at user/project scope, that scope wins; the
   plugin's declaration is harmlessly ignored.
 
@@ -574,18 +582,22 @@ Two deliberate decisions, recorded so they don't read as omissions:
 
 - **The big workflow skills ship without `allowed-tools`.** `write-technical-approach`,
   `develop-feature-or-fix`, `qa-feature-or-fix`, `write-steps-to-test`, `pre-commit-review`,
-  and `create-pull-request` orchestrate open-ended
+  `create-pull-request`, `ship`, and `save-task-context` orchestrate open-ended
   work (editing, store runners, browser MCPs, subagents), so they run under the session's
   normal permission
   flow instead of a frozen allowlist — a frozen list that misses one instructed tool blocks
-  the skill's own workflow. The narrow utility skills (translations,
-  breaking-changes, preview themes, commit, a11y fixes) do declare tight allowlists.
-- **The Jira/Figma agents ship without a `tools:` restriction.** `jira-reader`,
-  `jira-writer`, and `figma-reader` must work whether the Atlassian/Figma MCP comes from this
-  plugin or from the user's own config (the MCP tool names differ per install scope), so they
-  inherit the full toolset and enforce their contract in the prompt instead — `jira-reader` /
-  `figma-reader` stay read-only, `jira-writer` makes exactly one approved write and nothing
-  else. A wrong hardcoded MCP tool name would break them silently.
+  the skill's own workflow. The other eight are narrow utilities (translations,
+  breaking-changes ×2, preview themes, commit, a11y fixes, preflight checks, issue reports)
+  and do declare tight allowlists.
+- **The reader/writer agents ship without a `tools:` restriction.** `jira-reader`,
+  `jira-writer`, `figma-reader`, and `doc-reader` must work whether the Atlassian / Figma /
+  Notion MCP comes from this plugin or from the user's own config (the MCP tool names differ
+  per install scope), so they inherit the full toolset and enforce their contract in the
+  prompt instead — the three readers stay read-only toward their sources (`doc-reader` writes
+  only its own workspace extract), `jira-writer` makes exactly one approved write and nothing
+  else. A wrong hardcoded MCP tool name would break them silently. The
+  code-reading agents (`bug-hunter`, `change-reviewer`, `theme-explorer`) name no MCP, so they
+  are pinned to `Read, Grep, Glob, Bash`.
 
 ## Reporting plugin issues
 

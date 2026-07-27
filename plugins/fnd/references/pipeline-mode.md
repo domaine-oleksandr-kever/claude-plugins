@@ -89,7 +89,7 @@ spawn (this section is the single home of the **Step 4 phase-agent** assignments
 phases (implement, qa, and the fix agents in the qa loop and aftercare), `sonnet` for
 mechanical ones (finalize, create-pr, steps-to-test, and the aftercare poll/triage
 agent — its fix agents stay `opus`). The inline conductor step (jira-hand-off) delegates its
-one Jira write to the `jira-writer` subagent (so the ADF comment blob never enters the
+one Jira write to the `jira-writer` subagent (so the comment body never enters the
 conductor context); `jira-writer` pins its own model via frontmatter (`sonnet`), so the
 conductor passes none.
 Pre-gate helpers (the Step 1 store-data audit, the Step 3 research pressure-test) are

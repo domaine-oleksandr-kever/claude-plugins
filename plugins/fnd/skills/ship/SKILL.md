@@ -225,7 +225,8 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    `plan.md`, the AC, `figma-<node>.md` specs, the `store-data:` map + interview answers
    from `notes.md` (provision the approved mock data first — the audit already named the
    products and values); references:
-   `metafield-metaobject-setup.md` (provision first when planned),
+   `metafield-metaobject-setup.md` (provision first when planned; every query/mutation
+   you wrote passes `validate_graphql_codeblocks` before it runs),
    `section-css-variables-pattern.md`, `eslint-no-restricted-syntax.md`,
    `theme-customizer-state.md`. In-browser validation vs design + AC (Chrome DevTools
    MCP), data/customizer state walks via the runners, `git add` every new file, test
@@ -263,8 +264,13 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    report and hand-off. **F-class (correctness) findings never land in that log-only
    bucket**: an F row from the reviewer → fix it when that fits the qa cap and is
    AC-compatible; justify → `ceiling:` entry + PR body; else ESCALATE.
-   Stamp `.git/.fnd-review` **including `correctness_hash`** — the bug hunt ran in the
-   qa phase; recompute the hash after any finalize edits. Commit
+   Stamp `.git/.fnd-review`; `diff_hash` is always the post-finalize diff. The hunt ran in
+   the **qa** phase, over the pre-finalize diff, so `correctness_hash` follows
+   `review-flow.md`'s rule (check F handled *for that exact diff*): finalize touched no
+   correctness surface → stamp the post-finalize hash; finalize changed **code** the hunt
+   never saw (an F-class fix, a logic edit) → **omit the `correctness_hash` line** and say so
+   in the report: the conductor then spawns `bug-hunter` over the final diff and stamps, or
+   leaves the missing pass to phase 4's backstop. Never recompute it blindly. Commit
    per `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md` (scope per policy;
    body from plan + notes), then push the working branch. Tick **both**
    `pre-commit-review` and `commit` rows.
@@ -277,7 +283,12 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    `--reuse`). Escalations, verbatim in the brief: `error=build_failed` → ESCALATE with
    the build output; `error=settings_drift` → the reference's manual recovery;
    conformance pass (`change-reviewer`, `conformance` emphasis) — a `protected-core`
-   blocker → ESCALATE. `gh pr create --base <target> --body-file <tmp>` — **never
+   blocker → ESCALATE; **correctness backstop** per
+   `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §3's create-pull-request entry —
+   `correctness_hash` absent or ≠ the current diff hash → the conductor applies the gate and
+   spawns `bug-hunter` over the diff **before** spawning this phase, refreshing the marker
+   after; a blocking finding ESCALATEs like `protected-core`, so the agent drafts only once
+   the pass is clean. `gh pr create --base <target> --body-file <tmp>` — **never
    `--draft`** (the end state is aftercare's to apply). **Crash-safe, verbatim in the
    brief: the moment the PR exists, record its URL to `progress.md` + `notes.md` and
    tick the `create-pull-request` row — before any remaining work.** Return: PR URL,
@@ -308,7 +319,7 @@ row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pi
    `gh pr ready --undo <pr>` flips the now-reviewed PR to draft (log to `notes.md`);
    `ready` → leave as-is.
 7. **jira-hand-off** — inline in the conductor (no phase subagent, so no model to pin), but
-   delegate its one Jira write to the `jira-writer` subagent so the comment's ADF blob
+   delegate its one Jira write to the `jira-writer` subagent so the comment body
    never lands in the conductor context. Policy allows → write the approved
    comment to a temp file (a **clickable PR link** + the distilled judgment calls from
    `notes.md`: accepted edge cases, anything not implemented and why, open questions),

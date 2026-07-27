@@ -122,6 +122,15 @@ extracts the named operation itself). If it exits with `error=no_admin_token`, *
 is set up — its hint line names both fixes (add the token to `.env`, or the one-time
 `shopify store auth`); relay them to the developer, or fall back to **Mode 2**.
 
+**Validate before you run.** Every query or mutation you wrote goes through
+`validate_graphql_codeblocks` (Shopify Dev MCP, `api: "admin"`, `version` = the version the
+runner requests — `SHOPIFY_ADMIN_API_VERSION`, default `2026-04`; omit it and the MCP
+validates against the latest stable instead) first: pass the raw GraphQL text (not a fenced
+block) plus the `conversationId` from `learn_shopify_api` — it checks fields, arguments, and
+input shapes against that Admin schema. Fix and re-validate (same `artifactId`, `revision` +
+1) until it passes. The schema server is already loaded, so this is one cheap call; a
+hallucinated field costs a round-trip, and a bad **mutation** may not be undoable.
+
 ## Step skeleton (dependency order)
 
 Derived from the ELC-257 worked example (`pdp_split_view_block` → `pdp_editorial_content` wrapper →
@@ -186,7 +195,9 @@ ticket-scoped working files never ship with the branch
 Never paste a GraphQL operation into the chat for the developer to copy — terminal wrapping
 mangles it and copying from chat is awkward. Write the current step as a **standalone
 ready-to-run file** in `.claude/fnd/<work-id>/tmp/step-<n>-<short-name>.graphql`: exactly one
-operation, every `REPLACE_WITH_*` placeholder already filled from prior results, runnable as-is.
+operation, every `REPLACE_WITH_*` placeholder already filled from prior results, runnable as-is —
+and **`validate_graphql_codeblocks`-clean before you hand it over** (a hand-off you can't run
+yourself is exactly where a hallucinated field wastes the developer's round-trip).
 In chat give only the **file path**, one line on what the step does, and the scope it needs; the
 developer copies it from the file (or the IDE), runs it in GraphiQL, and pastes the JSON result
 back. This applies to **every** query or mutation handed to the developer to run manually —

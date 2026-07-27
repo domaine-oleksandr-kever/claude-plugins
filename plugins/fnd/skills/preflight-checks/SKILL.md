@@ -9,7 +9,7 @@ argument-hint: "(no args — validates the current workspace)"
 arguments:
   - name: workspace
     description: Project root to validate. Defaults to the current workspace; confirm it is the intended one.
-allowed-tools: Read, Glob, Bash(shopify version), Bash(node -v), Bash(npm -v), Bash(git --version), Bash(gh --version)
+allowed-tools: Read, Glob, Bash(shopify version), Bash(node -v), Bash(npm -v), Bash(git --version), Bash(gh --version), Bash(jq --version), Bash(perl -v)
 ---
 
 # Preflight Checks

@@ -1,17 +1,25 @@
-# Writing to Jira rich-text fields — emit ADF, via the converter
+# Writing to Jira — ADF for rich-text fields, markdown for comments
 
-The rich-text fields — **Description, Acceptance Criteria, Assumptions, Technical
-Approach, Steps to test, Documentation Links** (and issue **comments**) — store
-**Atlassian Document Format**, not markdown. When a workflow updates one via
-`editJiraIssue` (or `addCommentToJiraIssue`), **convert the approved content to an ADF
-document first** and pass that object as the field value. A bare markdown/plain string
-sent to a rich-text field is rejected or stored literally. This applies to every skill
-that writes back: `write-technical-approach` (Technical Approach), `write-steps-to-test`
-(Steps to test), and any `qa-feature-or-fix` write.
+The rich-text **custom** fields — **Acceptance Criteria, Assumptions, Technical Approach,
+Steps to test, Documentation Links** — store **Atlassian Document Format**, not markdown: a
+bare markdown/plain string sent to one is rejected or stored literally. So when a workflow
+updates one via `editJiraIssue`, **convert the approved content to an ADF document first**
+and pass that object as the field value. This applies to every skill that writes back:
+`write-technical-approach` (Technical Approach), `write-steps-to-test` (Steps to test), and
+any `qa-feature-or-fix` write. **Description** is a *standard* field and may accept markdown,
+but we send it as ADF too — one path, one converter.
+
+**Comments are the exception — no conversion.** `addCommentToJiraIssue` declares
+`commentBody` as a *string*, so post the approved **markdown verbatim** with
+`contentFormat: "markdown"`; an ADF object in `commentBody` is schema-invalid. Nothing
+below (converter, size rules, `--no-tables`) applies to a comment.
+
+Both write calls also require **`cloudId`** — pass the site host
+`meetdomaine.atlassian.net` (cloudId resolution: `jira-field-ids.md`).
 
 ## Preferred path from the main loop — delegate to the `jira-writer` subagent
 
-A converted field/comment is a large ADF blob (~3.4k tokens for a real Technical
+A converted field is a large ADF blob (~3.4k tokens for a real Technical
 Approach). Running the converter and typing that object into an `editJiraIssue` call
 **inline** pays for it twice in the main-loop context — the converter's stdout copy and
 the model-typed argument copy — and leaves it in history forever. So from a main-loop
@@ -24,15 +32,17 @@ Brief (one writer per field; parallel writers for several fields):
 > **jira-writer** — ticket `<KEY>` · target `<customfield_id>` (or `comment`) · source
 > `<path to the approved .md>`. (Add `tables: keep` only if tables must be preserved.)
 
-It returns one line: `ok: <KEY> <target> written (<n> bytes ADF)` or `error: <reason>`.
-The approval gate stays in the calling skill — `jira-writer` only inflates and writes, it
-never authorizes or decides content. Resolve the field id yourself (`jira-field-ids.md`)
-and pass it in; a manual-update path (developer edits Jira) needs no writer at all.
+It returns one line: `ok: <KEY> <target> written (<n> bytes)` or `error: <reason>`.
+The approval gate stays in the calling skill — `jira-writer` only converts-if-needed and
+writes, it never authorizes or decides content. Resolve the field id yourself
+(`jira-field-ids.md`) and pass it in; a manual-update path (developer edits Jira) needs no
+writer at all.
 
 One case keeps the write **inline** (no `jira-writer` spawn): you are **already inside a
-subagent** (subagents can't nest — the ADF is already off the main loop, so convert and
-write directly with the mechanics below). A **manual** update is different again: the
-developer edits Jira themselves, so no converter runs and no writer is spawned at all.
+subagent** — subagents can't nest, and the ADF is already off the main loop, so convert
+first (field targets only) and write directly with the mechanics below. A **manual** update
+is different again: the developer edits Jira themselves, so no converter runs and no writer
+is spawned at all.
 
 ## The mechanics — use the converter, don't hand-build ADF
 
@@ -54,9 +64,8 @@ to a temp `.md`, convert, capture the JSON, then `editJiraIssue` with
 
 A large ADF object is fragile to inline into one `editJiraIssue` call — one slip breaks
 the JSON, which tempts "shortcutting" to a raw **markdown string**. Don't: Jira rich-text
-**custom** fields reject it (`Operation value must be an Atlassian Document…`; the MCP's
-auto-conversion for comments/description does **not** extend to custom fields). Keep the
-ADF small instead:
+**custom** fields reject it (`Operation value must be an Atlassian Document…`); the markdown
+path is the comment path, not a field-write fallback. Keep the ADF small instead:
 
 - **Output is minified by default** — use `--pretty` only to eyeball it.
 - **Pass `--no-tables`** — ADF `table` nodes are the heaviest construct; `--no-tables`
@@ -72,9 +81,10 @@ ADF small instead:
 { "type": "doc", "version": 1, "content": [ /* block nodes */ ] }
 ```
 
-**Call shape:** `editJiraIssue` with `fields: { "<customfield_id>": <ADF doc object> }` —
-field IDs live in `jira-field-ids.md` (their single home; an ID missing from the `names`
-map → Step B in `jira-custom-fields.md`).
+**Call shape:** `editJiraIssue` with `cloudId: "meetdomaine.atlassian.net"`,
+`issueIdOrKey: "<KEY>"`, `fields: { "<customfield_id>": <ADF doc object> }` — field IDs
+live in `jira-field-ids.md` (their single home; an ID missing from the `names` map → Step B
+in `jira-custom-fields.md`).
 
 > Honour the TA rule: **no internal repo file links** — reference in-repo files with an
 > inline-`code` mark, never a `link` mark. External links (Jira, Figma, public docs) use
