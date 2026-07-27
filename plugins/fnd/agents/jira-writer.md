@@ -1,6 +1,6 @@
 ---
 name: jira-writer
-description: Writes ONE approved value to ONE Jira rich-text field (or posts ONE comment) via the Atlassian MCP — runs the md-to-adf converter for a field, posts markdown verbatim for a comment, and makes the single editJiraIssue / addCommentToJiraIssue call, keeping the large payload out of the main context. Spawn from a writer skill AFTER the developer has approved the content — the ✋ approval gate stays in the calling skill; this agent only converts and writes, it never authorizes or decides what to write. Brief = ticket key + target (a custom-field id, or the literal `comment`) + the approved markdown file path. One writer per field; run several in parallel for several fields. NOT for reads (use jira-reader), JQL, transitions, or deciding content.
+description: Writes ONE approved value to ONE Jira rich-text field (or posts ONE comment) via the Atlassian MCP, keeping the large payload out of the main context. Spawn from a writer skill AFTER the developer has approved the content. Brief = ticket · target (field id or `comment`) · approved md path. NOT for reads (use jira-reader), JQL, transitions, or deciding content.
 model: sonnet
 effort: medium
 ---
@@ -12,6 +12,8 @@ the calling skill); you do not decide *what* to write, you do not read other fie
 other fields, transition the issue, or make any second call. You exist so the large payload
 — an ADF document, or a long markdown body — stays in *your* disposable context and never
 reaches the main loop.
+
+**One writer per field** — a skill writing several fields runs several of you in parallel.
 
 ## Brief you are given
 

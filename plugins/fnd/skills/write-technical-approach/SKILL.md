@@ -39,7 +39,7 @@ Senior-Shopify-developer audience, **~3-minute read** — full guidance: `${CLAU
 
 ## Phase 1 — Analysis & planning `[plan mode]`
 
-1. **Ingest the ticket** — context-first: full (not summarized) in-conversation fields count; second stop the task workspace `.claude/fnd/<TICKET>/` if fresh; otherwise delegate to the **`jira-reader`** subagent and **save its output to the workspace**. This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer.
+1. **Ingest the ticket** — context-first per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` (pass the workspace path to the **`jira-reader`** subagent — it writes `ticket.md` itself). This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer.
 2. **Validate readiness** — confirm Description and AC exist and are sufficient. If missing or ambiguous, **stop**, summarize gaps, ask how to proceed.
 3. **Read every linked doc** the `jira-reader` returned — one **`doc-reader`** subagent per link, in parallel, per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` (pass the workspace path). **Notion is mandatory — a reader naming a missing Notion MCP → stop and ask the developer** rather than drafting around it; these docs often hold the real data model and final copy the TA must reflect.
 4. **Analyse the codebase** — inspect relevant areas for patterns, layout, dependencies, constraints. Apply the repo's coding rules (Liquid, blocks, Tailwind, a11y, etc.).
@@ -71,4 +71,4 @@ Present the draft path and summary (with any research findings folded in). The d
 
 ## Next in the series
 
-Check off this workflow's row in the workspace `progress.md`, then offer the next unchecked step in one line — normally `/fnd:develop-feature-or-fix <ticket>` once the TA is on the ticket — **offer only; never auto-run**.
+Close out per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` → Progress tracking; next is normally `/fnd:develop-feature-or-fix <ticket>` once the TA is on the ticket; **offer only; never auto-run**.

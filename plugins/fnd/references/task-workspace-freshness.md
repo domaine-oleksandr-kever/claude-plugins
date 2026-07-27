@@ -12,13 +12,13 @@ resuming an interrupted conversation.
   session unless hinted).
 - **Probe mismatch ≠ stale.** Jira bumps `updated` on sprint moves, rank, priority,
   status/assignee flips, estimates, comments — none of which touch what the cache stores.
-  Don't re-fetch blindly: spawn `jira-reader` **passing the stored `jira_updated`** — it
-  checks the changelog first (its freshness mode) and returns either `no_content_change`
-  (→ keep the cache: overwrite `jira_updated` with the new value, fix the `status:` line
-  if it moved, stamp `verified_at` — so the same noise never re-triggers — and tell the
-  developer in one line, e.g. "ticket bump was Sprint ×1, comments — cache still valid")
-  or, when a cached field really changed, the full re-read in the same spawn → rewrite
-  the file.
+  Don't re-fetch blindly: spawn `jira-reader` **passing the stored `jira_updated`** (and the
+  workspace path) — it checks the changelog first (its freshness mode) and returns either
+  `no_content_change` (→ keep the cache: overwrite `jira_updated` with the new value, fix the
+  `status:` line if it moved, stamp `verified_at` — so the same noise never re-triggers — and
+  tell the developer in one line, e.g. "ticket bump was Sprint ×1, comments — cache still
+  valid") or, when a cached field really changed, the full re-read in the same spawn, which
+  **rewrites the file itself** and hands back `saved_to:`.
 - **Probe unavailable** (Atlassian MCP not connected)? Don't trust silently — tell the
   developer the cache age ("ticket cached N h ago — use it, or refresh?") and let them
   decide.

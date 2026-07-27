@@ -23,7 +23,8 @@ whole ticket:
    `Documentation Links`. Match the FULL name, case-insensitively — `Acceptance Criteria
    Status` is a different, workflow-tracking field, not content.
 3. **None changed** → the bump was noise. An empty list means comment-only: comments never
-   create changelog entries. Return ONLY:
+   create changelog entries. Nothing is written (the cached file still holds the content —
+   its `jira_updated` / `verified_at` stamps are the caller's to refresh). Return ONLY:
 
    ```
    no_content_change: true
@@ -32,4 +33,5 @@ whole ticket:
    changed:            # the noise, e.g. "Sprint ×1, assignee ×4" — or "comments only"
    ```
 4. **A content field changed** — or the changelog page doesn't reach back to the stored
-   timestamp (100+ entries since) → do the normal full read per your prompt.
+   timestamp (100+ entries since) → do the normal full read per your prompt, including the
+   workspace save (it overwrites the cached file).

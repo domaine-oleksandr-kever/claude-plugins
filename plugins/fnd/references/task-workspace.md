@@ -18,8 +18,8 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 
 | File | Holds | Written by |
 |---|---|---|
-| `ticket.md` — in a batch, `ticket-<KEY>.md` each | `jira-reader` structured output, **verbatim** (Description, AC, Assumptions, TA, Steps to Test, links) | the skill that ran the fetch |
-| `figma-<node-id>.md` | one `figma-reader` build spec, **verbatim** — one file per node | same |
+| `ticket.md` — in a batch, `ticket-<KEY>.md` each | `jira-reader` structured output, **verbatim** (Description, AC, Assumptions, TA, Steps to Test, links) | `jira-reader` (the calling skill only on an inline fetch or a failed save) |
+| `figma-<node-id>.md` | one `figma-reader` build spec, **verbatim** — one file per node | `figma-reader` (the calling skill only on an inline fetch or a failed save) |
 | `doc-<slug>-<hash>.md` | one linked doc's **extracted** content (data models, copy, field lists — never the raw page); slug from the page title + a short URL hash (`doc-data-mapping-9f3c.md`), so same-titled docs don't collide | `doc-reader` (the calling skill only on the inline fallback) |
 | `plan.md` | the **approved implementation plan**, verbatim | `develop-feature-or-fix`, at its ✋ checkpoint |
 | `qa.md` | the **approved QA checklist**, then the pass/fail report + confirmed findings with their repro values | `qa-feature-or-fix` |
@@ -50,8 +50,9 @@ A team that prefers a committed rule can put the line in `.gitignore` instead.
 
 1. **This conversation** — the fields are already in context, in full (not summarized): use them.
 2. **The workspace files** — present and fresh (below): read them; don't spawn a reader.
-3. **Fetch** — spawn `jira-reader` / `figma-reader`, or read the linked doc, then save the
-   output (write rule).
+3. **Fetch** — spawn `jira-reader` / `figma-reader` **with this workspace path** (they write their
+   own file; what they return and what they placehold is the write rule below), or read the linked
+   doc; anything fetched inline is yours to save (write rule).
 
 ### Freshness
 
@@ -63,11 +64,25 @@ is a log; it doesn't go stale.
 
 ## Write rule
 
-- Immediately after a reader returns, write its structured output **verbatim** — don't
-  re-summarize; later skills need the full fields. Overwrite on re-fetch.
-- `doc-*.md` holds the **extract** (what the task needs), not the page — `doc-reader` writes
-  it right after reading, before composing its return; on the inline fallback the skill
-  writes it, while the content is at hand.
+- **The reader writes its own file.** Pass the workspace path in the brief and `jira-reader` /
+  `figma-reader` / `doc-reader` each write theirs right after reading, before composing a return
+  — then return `saved_to:` plus the fields you asked for. Never re-write those bytes from the
+  return: that pays for the same payload twice in the main context. What comes back short:
+  `jira-reader` placeholds the **body** fields you didn't name as `<in ticket.md>`
+  (`<in ticket-<KEY>.md>` in a batch) — never the link lists, see its output contract;
+  `figma-reader` returns `spec` **and** `assets` in full unless your brief says you are only
+  **caching** the node, and then placeholds both as `<in figma-<node-id>.md>`;
+  `doc-reader` always returns its extract. Read the file when you need a placeheld field.
+- **Check every `saved_to`.** Empty while you *did* pass a workspace path means the save never
+  landed (a denied `Write` in plan mode, say) — the reader then returns every field, so write its
+  structured output to the workspace **yourself** before moving on, or the cache silently never
+  materializes and the next skill re-spawns the reader. A `no_content_change` return is NOT a
+  failed save — there is nothing to write; just refresh `jira_updated` / `verified_at` per
+  `task-workspace-freshness.md`.
+- A reader that got **no** workspace path (or a source you fetched inline) is yours to save:
+  write its structured output **verbatim** — don't re-summarize; later skills need the full
+  fields. Overwrite on re-fetch.
+- `doc-*.md` holds the **extract** (what the task needs), not the page.
 - Append to `notes.md` at natural boundaries — approved-plan decisions, provisioned data
   (gids), preview theme, test URLs, confirmed bugs + the hostile values that triggered them.
   One dated `##` entry per event, newest last.
@@ -105,10 +120,10 @@ cause: `- [x] ELC-301 — 2026-07-11, fixed: self-reference skipped in bundle re
   checks off its row and appends `— <date>, <one-line status>` (branch, PR URL, "QA: 2 blocking
   bugs", …). Re-runs update the row in place; stamp `updated` and `session` (from
   `$CLAUDE_CODE_SESSION_ID`; skip if unset) on every write.
-- **Offering the next step:** offer the first unchecked row (QA failures branch back to the
-  implementation flow first). In a fresh session, reading this file replaces the lost
-  conversation state — when the developer brings up a ticket that has a workspace, report where
-  the series stands and offer the next unchecked step.
+- **Offering the next step:** offer the first unchecked row **in one line — offer only, never
+  auto-run** (QA failures branch back to the implementation flow first). In a fresh session,
+  reading this file replaces the lost conversation state — when the developer brings up a
+  ticket that has a workspace, report where the series stands and offer the next unchecked step.
 - **Resuming a conversation:** `session` names the conversation that last wrote here —
   answer "where did we leave off?" from `progress.md` + `notes.md`; recovery mechanics
   (`claude --resume`, transcript tail): `task-workspace-freshness.md` → Resuming.

@@ -1,6 +1,6 @@
 ---
 name: doc-reader
-description: Reads ONE linked doc (Notion, Confluence, or a web URL) and returns a task-focused extract, keeping the raw page out of the main context. Spawned per `reading-linked-docs.md` — one reader per link, in parallel; skip links already extracted in the conversation or fresh in the task workspace. Writes the extract to the workspace `doc-<slug>-<hash>.md` itself when given the workspace path. NOT for Figma (figma-reader) or Jira tickets (jira-reader). Read-only toward the source.
+description: Reads ONE linked doc (Notion, Confluence, or a web URL) and returns a task-focused extract, keeping the raw page out of the main context. Spawned per `reading-linked-docs.md` (one per link, in parallel; skip links already extracted or fresh in the workspace). Writes `doc-<slug>-<hash>.md` itself when given the workspace path. NOT for Figma (figma-reader) or Jira tickets (jira-reader). Read-only toward the source.
 model: sonnet
 effort: medium
 ---

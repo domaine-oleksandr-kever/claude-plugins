@@ -3,11 +3,12 @@
  * md-to-adf.cjs — convert Markdown to Atlassian Document Format (ADF) JSON.
  *
  * Jira rich-text custom fields (Technical Approach, Steps to test, Acceptance Criteria,
- * Assumptions, Documentation Links) and comments store ADF, not Markdown. The fnd
- * write-back skills run the APPROVED markdown through this script and pass the resulting
- * ADF object to editJiraIssue — so content renders correctly instead of showing literal
- * `#`/`*`/`|`. Dependency-free (Node only); deterministic, so the model never hand-builds
- * ADF JSON.
+ * Assumptions, Documentation Links) store ADF, not Markdown. The fnd write-back skills
+ * run the APPROVED markdown through this script and pass the resulting ADF object to
+ * editJiraIssue — so content renders correctly instead of showing literal `#`/`*`/`|`.
+ * Comments are NOT a target: addCommentToJiraIssue takes markdown as a string, so the
+ * comment path skips this converter. Dependency-free (Node only); deterministic, so the
+ * model never hand-builds ADF JSON.
  *
  * Usage:
  *   node md-to-adf.cjs <file.md>         # read from a file

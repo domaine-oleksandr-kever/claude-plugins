@@ -47,4 +47,4 @@ Present the report. Once the developer confirms issues are resolved or accepted,
 
 ## Next in the series
 
-Environment cleared → offer the ticket's entry point in one line — the first unchecked step in `.claude/fnd/<TICKET>/progress.md` when a workspace exists; else `/fnd:write-technical-approach <ticket>` (no approved TA) or `/fnd:develop-feature-or-fix <ticket>` (TA approved) — **offer only; never auto-run**.
+Environment cleared → offer the ticket's entry point per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` → Progress tracking; no workspace → `/fnd:write-technical-approach <ticket>` (no approved TA) or `/fnd:develop-feature-or-fix <ticket>` (TA approved); **offer only; never auto-run**.

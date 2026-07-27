@@ -718,6 +718,12 @@ const SPILL_PREFIXES = ['fnd-crush-', 'fnd-slim-out-', 'fnd-jsx-ids-', 'fnd-mcp-
 // no SPILL_PREFIX (it is excluded for good measure anyway).
 const SWEEP_MARKER = '.fnd-mcp-slim-sweep';
 const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
+// R6: the whale-guidance one-shot state files (one per session × profiled file, see
+// whaleGuideStatePath). Also dotfiles — same reason as SWEEP_MARKER: they must match no SPILL_PREFIX so
+// they are never mistaken for a payload spill, and they must stay invisible to a plain `ls` because the
+// suites assert a profile run adds NO listed file to the spill dir. The sweep prunes them by this prefix
+// on age (they are pure hints — losing one only reprints the full guidance block once).
+const WHALE_GUIDE_PREFIX = '.fnd-whale-guide-';
 // The FND_MCP_SLIM_DEBUG log basename (its writer + rotation live in the debug-log section below);
 // defined here so SWEEP_KEEP is the single source of truth — the sweep must never prune it.
 const DEBUG_LOG = 'fnd-mcp-slim-debug.log';
@@ -737,7 +743,8 @@ function spillTtlHours(raw) {
 
 // Age-based TTL sweep of the shared spill dir. Best-effort and fully self-contained: every error
 // is swallowed so a sweep NEVER affects the hook's emitted result or the CLI's output/exit code.
-// Deletes only our-prefixed files whose mtime is older than the TTL — files written by the current
+// Deletes only our-prefixed files (payload spills + the WHALE_GUIDE_PREFIX hint files) whose mtime is
+// older than the TTL — files written by the current
 // process are always fresh, so an in-flight `full=<path>` handle survives up to the TTL (a day
 // covers same-day conversation resume; an older, expired handle is an already-tolerated re-fetch).
 // Called by BOTH entry points (the mcp-slim hook after it writes stdout, the CLI at exit) so one
@@ -763,7 +770,7 @@ function sweepSpills(dir) {
     try { names = fs.readdirSync(root); } catch (_) { return summary; }
     for (const name of names) {
       if (SWEEP_KEEP.has(name)) continue;
-      if (!SPILL_PREFIXES.some((p) => name.startsWith(p))) continue;
+      if (!SPILL_PREFIXES.some((p) => name.startsWith(p)) && !name.startsWith(WHALE_GUIDE_PREFIX)) continue;
       try {
         const p = path.join(root, name);
         const st = fs.statSync(p);
@@ -2195,7 +2202,8 @@ function streamProfile(file, cfg, opts) {
 // tractable. The samples in the profile exist precisely so the model can write the filter correctly
 // (they reveal gotchas like a `children.value` sub-field being a JSON-encoded STRING, not an array).
 // This is the intended interface for analytical questions over data files: query the original by line,
-// don't pull the data into context.
+// don't pull the data into context. Emitted in FULL on the first profile of a given file per session and
+// replaced by whaleReminder() afterwards — see the one-shot state below.
 // Wrap a path as a single POSIX shell token (single-quoted, embedded ' → '\'') so the copy-paste
 // recovery commands survive spaces, quotes, `$`, etc. in the path.
 function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
@@ -2215,6 +2223,92 @@ function whaleGuidance(file, rows, offset) {
     `  filter rows (adapt the /* … */ predicate from the sample rows above):\n` +
     `    node -e ${shq(script)}\n` +
     `  single rows: sed -n '<N>p' ${qf}  ·  grep <pattern> ${qf}  (--jq would re-read the whole file)`;
+}
+// R6 — the full block above is ~530-900 B (the path is interpolated 4×) and is IDENTICAL every time the
+// same file is profiled again in one session, so repeats are pure context tax. After the first emission
+// per session × file the profile carries this one-liner instead: it still names the file and the row
+// count (the profile is worthless without knowing which file it describes) and it stays SELF-SUFFICIENT
+// — the single-row `sed`/`grep` forms and the fence offset are per-file FACTS, not prose, and the reader
+// of a repeat profile may not hold the first block at all (a spawned subagent shares the session id, a
+// `/compact` drops the earlier transcript, concurrent runs race the state file). Only the long
+// readline-filter template is dropped, and the switch that brings it back is named. NEVER changes WHAT
+// is profiled — only how much guidance prose rides along.
+function whaleReminder(file, rows, offset) {
+  const qf = shq(file);
+  const fenceNote = offset ? ` rows are inside a \`\`\` fence and start at line ${offset + 1}, so a sed line number is the row number + ${offset};` : '';
+  return `json-slim: profile only — ${file}${rows != null ? ` (${rows} rows)` : ''} — query the ORIGINAL by line, never pull the file into context;${fenceNote} single rows: sed -n '<N>p' ${qf} · grep <pattern> ${qf} (--jq would re-read the whole file); the readline-filter template was printed for this file earlier this session — FND_WHALE_GUIDE=0 re-prints the full block.`;
+}
+// Suppression is opt-out: anything falsey-looking in FND_WHALE_GUIDE (0/false/no/off) means "always
+// print the full block", which is also the escape hatch a model is told about in the reminder itself.
+function whaleGuideEnabled() {
+  const raw = process.env.FND_WHALE_GUIDE;
+  if (raw === undefined || raw === null || raw === '') return true;
+  return !/^(0|false|no|off)$/i.test(String(raw).trim());
+}
+// One state file per (session, profiled file) — keyed on the FILE PATH so a different whale always gets
+// its own full block (the commands differ per path, and the suites profile several files through one
+// spill dir), and on the session so a fresh conversation starts over. The path is RESOLVED first: two
+// different files invoked under the same relative spelling from different cwds (`./data.jsonl`) would
+// otherwise share one entry — and the `st.p` collision guard would pass on the identical string, so the
+// second file would be suppressed without ever having printed its own commands or fence offset.
+// CLAUDE_CODE_SESSION_ID is what the harness exports to tool subprocesses; when it is absent (a bare
+// shell) the key degrades to path-only and the TTL alone bounds the suppression. Lives in spillRoot(),
+// so FND_MCP_SLIM_DIR isolates it exactly like every other file this module writes.
+function whaleGuideKey(file) { return path.resolve(String(file)); }
+function whaleGuideStatePath(dir, file) {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+  const sid = String(process.env.CLAUDE_CODE_SESSION_ID || '');
+  const key = crypto.createHash('sha256').update(`${sid}\n${whaleGuideKey(file)}`).digest('hex').slice(0, 16);
+  return path.join(spillRoot(dir), `${WHALE_GUIDE_PREFIX}${uid}-${key}`);
+}
+// Fixed (not sliding) window: the stamp is written only when the FULL block is printed, so the full block
+// comes back every WHALE_GUIDE_TTL_MS even in a session that keeps re-profiling the same whale.
+const WHALE_GUIDE_TTL_MS = 2 * 60 * 60 * 1000;
+// True when the caller should print the full block. Every fs error and every unexpected file content
+// (truncated, corrupt, another path behind a hash collision, an expired stamp, a stamp from the FUTURE —
+// a clock stepped backwards by an NTP correction or a VM resume, which an unbounded `now - t < TTL`
+// would let suppress forever) falls back to the full block: over-explaining costs tokens,
+// under-explaining strands the model without recovery commands. DECISION ONLY — the stamp is written
+// by whaleGuideStamp() after the block actually reached stdout (see emitProfile), so a run killed
+// mid-pipe (`| head -1` → EPIPE) never records a block it did not deliver.
+function whaleGuideFullBlock(dir, file) {
+  if (!whaleGuideEnabled()) return true;
+  const abs = whaleGuideKey(file);
+  const state = whaleGuideStatePath(dir, file);
+  let fd;
+  try {
+    // O_NOFOLLOW + a size cap: with CLAUDE_CODE_SESSION_ID absent the state name is fully
+    // predictable and the spill root may be a shared tmpdir — never follow a planted symlink,
+    // never slurp a planted large file; both fall through to the full block.
+    fd = fs.openSync(state, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const meta = fs.fstatSync(fd);
+    if (meta.isFile() && meta.size <= 4096) {
+      const buf = Buffer.alloc(Number(meta.size));
+      fs.readSync(fd, buf, 0, buf.length, 0);
+      const st = JSON.parse(buf.toString('utf8'));
+      const age = st && Number.isFinite(st.t) ? Date.now() - st.t : NaN;
+      if (st && st.p === abs && age >= 0 && age < WHALE_GUIDE_TTL_MS) return false;
+    }
+  } catch (_) {
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} }
+  }
+  return true;
+}
+// The stamp, written only AFTER the full block reached stdout. tmp + rename replaces a planted
+// symlink itself (never its target) and `wx` refuses a pre-existing tmp; the .tmp name keeps
+// WHALE_GUIDE_PREFIX so an orphan is swept with the hints. A profile run never CREATES the spill
+// tree — at HEAD it created nothing there, and a typo'd FND_MCP_SLIM_DIR must not silently
+// materialize directories: no root → no stamp → full block every run, the safe direction.
+function whaleGuideStamp(dir, file) {
+  const abs = whaleGuideKey(file);
+  const state = whaleGuideStatePath(dir, file);
+  try {
+    if (!fs.existsSync(spillRoot(dir))) return;
+    const tmp = `${state}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ p: abs, t: Date.now() }), { flag: 'wx' });
+    fs.renameSync(tmp, state);
+  } catch (_) {} // unwritable dir → every run prints the full block, which is the safe direction
 }
 function streamJqRefusal(file, bytes) {
   const qf = shq(file);
@@ -2250,8 +2344,17 @@ function emitProfile(profile, file, bytes, t0, cfg, offset) {
   }
   const body = compact(profile);
   process.stdout.write(body + '\n');
-  process.stdout.write(whaleGuidance(file, profile.rows, offset) + '\n');
-  debugLog({ entry: 'cli', tool: file, decision: 'passthrough', reason: 'stream-profile', bytes_in: bytes, bytes_out: Buffer.byteLength(body, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, profile: true, ms: Date.now() - t0 }, cfg.spillDir);
+  // `guide` rides on the debug line so --report can measure how often the one-shot rule fires (the
+  // TTL/N tuning evidence) and an always-suppress regression is visible in the field, not only in tests.
+  const full = whaleGuideFullBlock(cfg.spillDir, file);
+  // Stamp only once stdout CONFIRMS the flush: with a piped stdout the write is async and an
+  // EPIPE surfaces on a later tick, so stamping synchronously after write() would still record
+  // a block that `| head -1` never delivered. The callback gets err on a broken pipe → no stamp.
+  process.stdout.write((full
+    ? whaleGuidance(file, profile.rows, offset)
+    : whaleReminder(file, profile.rows, offset)) + '\n',
+  (err) => { if (!err && full) whaleGuideStamp(cfg.spillDir, file); });
+  debugLog({ entry: 'cli', tool: file, decision: 'passthrough', reason: 'stream-profile', bytes_in: bytes, bytes_out: Buffer.byteLength(body, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, profile: true, guide: full ? 'full' : 'reminder', ms: Date.now() - t0 }, cfg.spillDir);
   sweepSpills(cfg.spillDir);
 }
 
@@ -2463,6 +2566,7 @@ module.exports = {
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
   sweepSpills, spillTtlHours, spillRoot, writeSpill,
+  whaleGuidance, whaleReminder, whaleGuideEnabled, whaleGuideFullBlock, whaleGuideStamp, whaleGuideStatePath,
   debugLog, debugEnabled, debugLevel,
   capOutput, streamProfile, profileLines,
   detectLog, compressLog, // M10: re-exported from log-slim.cjs for callers/tests

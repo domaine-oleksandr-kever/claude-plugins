@@ -90,22 +90,14 @@ Decision flow (step 4 of the skill):
 2. **`info`** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh info`) detects `store`, `dev_theme_id`, `dev_theme_name`.
    - **`error=…`** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config) → **manual path**: ask the developer for the theme name + Preview / Admin URLs.
    - **success** → propose the new name (swap the role prefix for the Jira key: `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`; **multiple tickets** → one bracket, prefix once, slash-separated numbers: `[ELC-299/307/309/315/382] Kever | Domaine`) and **ask before mutating**: `create the preview theme now? [ yes / no ]`. One PR = one preview theme regardless of how many tickets it carries — the preview overlays the dev theme's **current** customizer settings, so it reflects the content configured right now, not one ticket in isolation.
-3. **`create`** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create --name "<name>" [--reuse]`) builds the branch, assembles the built code into a clean temp dir (working tree untouched), pushes it to a new unpublished theme, then overlays the dev theme's customizer settings. It prints `theme_id`, `preview_url`, `editor_url`, `reused`. The skill passes `--reuse` **by default — deliberate**: one PR = one preview theme, so a re-run refreshes the same `[ELC-…]` theme instead of stacking duplicates. Note it will overwrite a pre-existing theme that happens to carry the same name (the bracketed ticket naming keeps collisions ticket-scoped). On `error=theme_limit` the store is at its cap (20 / 100) — `--reuse` already avoids stacking; delete an old theme.
+3. **`create`** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create --name "<name>" [--reuse]`) builds the branch, assembles the built code into a clean temp dir (working tree untouched), pushes it to a new unpublished theme, then overlays the dev theme's customizer settings. It prints `theme_id`, `preview_url`, `editor_url`, `reused`. The skill passes `--reuse` **by default — deliberate**: one PR = one preview theme, so a re-run refreshes the same `[ELC-…]` theme instead of stacking duplicates. Note it will overwrite a pre-existing theme that happens to carry the same name (the bracketed ticket naming keeps collisions ticket-scoped). Any `error=` → `${CLAUDE_PLUGIN_ROOT}/references/preview-theme-errors.md`.
 
-### Page deep-links
+### `error=` outcomes · page deep-links
 
-When the change is reviewed on a specific storefront path (`preview_path`, or inferable from
-context — e.g. you developed/QA'd on `/products/group-lipglass`), deep-link the rows instead of
-sending the reviewer to the home page:
-
-- **Preview** → `https://<store>/<path>?preview_theme_id=<id>` (append the path to the base `preview_url`).
-- **Admin** → the theme editor on that template: `https://<store>/admin/themes/<id>/editor?previewPath=<url-encoded path>`, or `?template=<name>` when the developer names the template (e.g. `product`, `product.lipglass`).
-
-If the path or template is unknown or ambiguous, **ask the developer — never guess.**
-
-**Several pages / several tickets:** when the bugs live on different pages, list one deep-link per
-page in the Preview row (e.g. `[PDP](…/products/x?preview_theme_id=ID) · [Cart](…/cart?preview_theme_id=ID)`),
-ideally labelled by ticket. Same preview theme ID throughout — only the path differs.
+Both live in `${CLAUDE_PLUGIN_ROOT}/references/preview-theme-errors.md` — the single home for
+every caller (this skill's step 4, the `preview-theme` skill). Read it whenever an `error=` line
+appears (it names, per code, whether anything was pushed, whether retrying is right, and the
+recovery) or a page deep-link is wanted.
 
 ## Theme-preview table — conditional construction
 

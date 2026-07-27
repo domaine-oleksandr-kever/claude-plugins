@@ -9,16 +9,20 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync, rmSync, mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync, existsSync, chmodSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync, existsSync, chmodSync, symlinkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 // Hermetic env: a developer watching the debug log live (FND_MCP_SLIM_DEBUG=1 + FND_MCP_SLIM_DIR
 // exported) would otherwise have this suite's CLI runs append fixture noise to the REAL log that
-// `--report` aggregates. Cases that need either switch set it on the invocation itself.
+// `--report` aggregates. FND_WHALE_GUIDE is scrubbed for the same reason on the other side: the R6
+// cases assert the one-shot rule, and the reminder itself advertises `FND_WHALE_GUIDE=0` to the
+// model — the switch a developer is most likely to have exported while debugging must not turn this
+// suite red. Cases that need any of the three set it on the invocation itself.
 delete process.env.FND_MCP_SLIM_DEBUG;
 delete process.env.FND_MCP_SLIM_DIR;
+delete process.env.FND_WHALE_GUIDE;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SLIM = path.join(ROOT, 'plugins/fnd/scripts/json-slim.cjs');
@@ -2074,6 +2078,208 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const tq = J.analyseDictArray(tall, J.DEFAULTS);
   check('dr2-analyse-tall-narrow-crushes', tq.crushable === true,
     `a 300k×7 fixed-schema dump must still analyse: ${tq.strategy}/${tq.reason} in ${Date.now() - t0tall} ms`);
+}
+
+// ------------------------------------------- R6: the whale-guidance block is one-shot per session --
+// The full recovery block is identical on every re-profile of the same file, so only the FIRST profile
+// per (session, path) prints it; later ones get a one-line reminder. The profile itself must never
+// change — the switch governs guidance prose only.
+{
+  const rows = (n, tag) => Array.from({ length: n }, (_, i) => JSON.stringify({ id: i, handle: `${tag}-${i}`, ok: i % 2 === 0 })).join('\n') + '\n';
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-whaleguide-'));
+  const fileA = path.join(dir, 'feed-a.jsonl');
+  const fileB = path.join(dir, 'feed-b.jsonl');
+  writeFileSync(fileA, rows(40, 'a'));
+  writeFileSync(fileB, rows(40, 'b'));
+  const profile = (file, env) => spawnSync('node', [SLIM, file], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, ...(env || {}) } }).stdout;
+  // the full block is recognizable by its copy-paste templates, the reminder by its own opening
+  const isFull = (out) => out.includes('node -e ') && out.includes('filter rows (adapt');
+  const isReminder = (out) => out.includes('json-slim: profile only —') && !out.includes('node -e ');
+  // the profile JSON minus its RANDOM reservoir sample, which differs run to run by design
+  const bodyOf = (out) => {
+    const p = JSON.parse(out.split('\n').find((l) => l.startsWith('{')));
+    delete p.samples.reservoir;
+    return JSON.stringify(p);
+  };
+
+  const first = profile(fileA);
+  check('r6-first-run-full-block', isFull(first) && first.includes(fileA), `the first profile of a file must carry the full guidance:\n${first}`);
+  const second = profile(fileA);
+  check('r6-second-run-reminder', isReminder(second), `a repeat profile of the same file must collapse to the one-liner:\n${second}`);
+  check('r6-reminder-keeps-identity', second.includes(fileA) && second.includes('40 rows'),
+    `the reminder must still name the file and the row count (a profile without them is unusable):\n${second}`);
+  check('r6-reminder-is-one-line', second.trimEnd().split('\n').pop().length > 0 && /json-slim: profile only —[^\n]*$/.test(second.trimEnd()),
+    `the reminder must be a single trailing line:\n${second}`);
+  check('r6-profile-body-unchanged', bodyOf(first) === bodyOf(second) && bodyOf(first).includes('"profile":true'),
+    'suppressing guidance must not change WHAT is profiled (the profile JSON must be byte-identical)');
+  check('r6-reminder-is-smaller', Buffer.byteLength(J.whaleReminder(fileA, 40)) < Buffer.byteLength(J.whaleGuidance(fileA, 40, 0)),
+    'the reminder must be shorter than the block it replaces');
+
+  // a DIFFERENT whale in the same dir/session gets its own full block (the commands are path-specific)
+  check('r6-new-path-full-block', isFull(profile(fileB)) && isReminder(profile(fileB)),
+    'a new file path must print the full block once, then collapse for that path too');
+  check('r6-per-path-isolation', isReminder(profile(fileA)), 'profiling another file must not re-arm the first file');
+
+  // TTL: the stamp is a fixed window, so an old stamp re-prints the full block
+  const stateA = J.whaleGuideStatePath(dir, fileA);
+  check('r6-state-file-is-a-dotfile', path.basename(stateA).startsWith('.') && readdirSync(dir).filter((f) => !f.startsWith('.') && !f.endsWith('.jsonl')).length === 0,
+    `the state file must be a dotfile and the spill dir must gain no listed entry: ${JSON.stringify(readdirSync(dir))}`);
+  writeFileSync(stateA, JSON.stringify({ p: fileA, t: Date.now() - 3 * 60 * 60 * 1000 }));
+  check('r6-ttl-expiry-full-block', isFull(profile(fileA)), 'a stamp older than the TTL must re-print the full block');
+  check('r6-ttl-rearmed', isReminder(profile(fileA)), 'and the fresh stamp must suppress again');
+
+  // corruption / a foreign path behind the same name → full block (never strand the model)
+  for (const [label, body] of [['truncated', '{"p":"'], ['garbage', 'not json at all'], ['empty', ''], ['other-path', JSON.stringify({ p: '/somewhere/else.jsonl', t: Date.now() })], ['no-stamp', JSON.stringify({ p: fileA })]]) {
+    writeFileSync(stateA, body);
+    check(`r6-corrupt-state-full-block:${label}`, isFull(profile(fileA)), `an unusable state file must fall back to the full block (${label})`);
+  }
+
+  // the switch: 0/false/no/off disable the suppression entirely
+  check('r6-switch-off-always-full', isFull(profile(fileA, { FND_WHALE_GUIDE: '0' })) && isFull(profile(fileA, { FND_WHALE_GUIDE: '0' })),
+    'FND_WHALE_GUIDE=0 must print the full block every time');
+  check('r6-switch-on-still-suppresses', isReminder(profile(fileA, { FND_WHALE_GUIDE: '1' })),
+    'FND_WHALE_GUIDE=1 (or unset) keeps the one-shot behavior');
+  {
+    const prev = process.env.FND_WHALE_GUIDE;
+    const states = {};
+    for (const v of ['0', 'false', 'NO', 'off', ' 0 ']) { process.env.FND_WHALE_GUIDE = v; states[v] = J.whaleGuideEnabled(); }
+    for (const v of ['1', 'true', 'on', '', 'junk']) { process.env.FND_WHALE_GUIDE = v; states[`+${v}`] = J.whaleGuideEnabled(); }
+    delete process.env.FND_WHALE_GUIDE;
+    states['+unset'] = J.whaleGuideEnabled();
+    if (prev === undefined) delete process.env.FND_WHALE_GUIDE; else process.env.FND_WHALE_GUIDE = prev;
+    eq('r6-switch-parsing', Object.entries(states).map(([k, v]) => `${k}=${v}`).join(' '),
+      '0=false false=false NO=false off=false  0 =false +1=true +true=true +on=true +=true +junk=true +unset=true');
+  }
+
+  // an unwritable state location must not break the profile — it just always prints the full block
+  {
+    const roDir = path.join(mkdtempSync(path.join(tmpdir(), 'jslim-whalero-')), 'not-a-dir');
+    writeFileSync(roDir, 'x'); // a FILE used as the spill dir → mkdir/write both fail
+    check('r6-unwritable-state-full-block', J.whaleGuideFullBlock(path.join(roDir, 'sub'), fileA) === true,
+      'a state file that cannot be written falls back to the full block, never to silence');
+  }
+
+  // the sweep prunes stale hint files (they are pure hints) while keeping fresh ones
+  {
+    const swDir = mkdtempSync(path.join(tmpdir(), 'jslim-whalesweep-'));
+    const stale = J.whaleGuideStatePath(swDir, '/tmp/stale.jsonl');
+    const fresh = J.whaleGuideStatePath(swDir, '/tmp/fresh.jsonl');
+    writeFileSync(stale, '{}'); writeFileSync(fresh, '{}');
+    const old = Date.now() / 1000 - 40 * 3600;
+    utimesSync(stale, old, old);
+    J.sweepSpills(swDir);
+    check('r6-stale-state-swept', !existsSync(stale) && existsSync(fresh),
+      'the TTL sweep must prune stale whale-guide hints and keep fresh ones');
+    rmSync(swDir, { recursive: true, force: true });
+  }
+
+  // The reminder must stand ALONE: the reader of a repeat profile may not hold the first block (a
+  // spawned subagent inherits the session id, a /compact drops the earlier transcript, concurrent
+  // runs race the stamp), so the per-file FACTS — path, rows, sed/grep forms — ride on every one.
+  check('r6-reminder-self-sufficient',
+    ["sed -n '<N>p'", 'grep <pattern>', 'FND_WHALE_GUIDE=0', 'never pull the file into context'].every((s) => J.whaleReminder(fileA, 40, 0).includes(s)),
+    `the reminder must carry the single-row commands, the don't-read-it imperative, and the switch on its own:\n${J.whaleReminder(fileA, 40, 0)}`);
+
+  // A fenced JSONL spill (the M11 shape) — the fence OFFSET is a per-file fact, not guidance prose:
+  // dropping it on the repeat would make every `sed -n '<row>p'` off by the wrapper lines, silently.
+  {
+    const fdir = mkdtempSync(path.join(tmpdir(), 'jslim-whalefence-'));
+    const fenced = path.join(fdir, 'fenced.jsonl');
+    writeFileSync(fenced, `Script ran on page and returned:\n\`\`\`json\n${rows(40, 'f').trimEnd()}\n\`\`\`\n`);
+    const one = profile(fenced, { FND_MCP_SLIM_DIR: fdir });
+    const two = profile(fenced, { FND_MCP_SLIM_DIR: fdir });
+    check('r6-fence-first-run-offset', isFull(one) && /row number \+ 2/.test(one), `the fenced first run must state the offset:\n${one}`);
+    check('r6-fence-reminder-keeps-offset', isReminder(two) && /row number \+ 2/.test(two) && two.includes("sed -n '<N>p'"),
+      `the reminder must repeat the fence offset — a sed line number is unusable without it:\n${two}`);
+    check('r6-reminder-single-line', two.trimEnd().split('\n').filter((l) => l.startsWith('json-slim: profile only')).length === 1 &&
+      /json-slim: profile only —[^\n]*$/.test(two.trimEnd()), `the reminder must stay one line:\n${two}`);
+    rmSync(fdir, { recursive: true, force: true });
+  }
+
+  // The state key is the RESOLVED path: two different files spelled the same relatively (`data.jsonl`
+  // in two cwds) must each get their own block — sharing one entry also defeats the `st.p` guard,
+  // because both strings are identical.
+  {
+    const cdir = mkdtempSync(path.join(tmpdir(), 'jslim-whalecwd-'));
+    const state = path.join(cdir, 'state');
+    mkdirSync(state); // a profile run never creates the spill tree itself
+    mkdirSync(path.join(cdir, 'a')); mkdirSync(path.join(cdir, 'b'));
+    writeFileSync(path.join(cdir, 'a', 'data.jsonl'), rows(30, 'a'));
+    writeFileSync(path.join(cdir, 'b', 'data.jsonl'), rows(30, 'b'));
+    const rel = (sub) => spawnSync('node', [SLIM, 'data.jsonl'],
+      { cwd: path.join(cdir, sub), encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: state } }).stdout;
+    check('r6-relative-path-not-shared', isFull(rel('a')) && isFull(rel('b')) && isReminder(rel('a')),
+      'two different files spelled `data.jsonl` from different cwds must not share one suppression entry');
+    rmSync(cdir, { recursive: true, force: true });
+  }
+
+  // A stamp from the FUTURE (clock stepped back by an NTP correction / VM resume) must not suppress
+  // until the sweep happens to prune it: a negative age is unexpected content, so → full block.
+  writeFileSync(stateA, JSON.stringify({ p: fileA, t: Date.now() + 10 * 24 * 60 * 60 * 1000 }));
+  check('r6-future-stamp-full-block', isFull(profile(fileA)), 'a future-dated stamp must fall back to the full block, not suppress forever');
+
+  // The DECISION never writes the stamp — it lands only after the block reached stdout
+  // (emitProfile order). A regression that re-merges the stamp into the decision would record
+  // blocks a broken pipe (`| head -1`) never delivered.
+  {
+    const sdir = mkdtempSync(path.join(tmpdir(), 'jslim-whalestamp-'));
+    const sfile = path.join(sdir, 'stamp.jsonl');
+    writeFileSync(sfile, rows(30, 's'));
+    const sstate = J.whaleGuideStatePath(sdir, sfile);
+    check('r6-decision-does-not-stamp', J.whaleGuideFullBlock(sdir, sfile) === true && !existsSync(sstate),
+      'whaleGuideFullBlock must decide only — no state file may appear before the block is delivered');
+    J.whaleGuideStamp(sdir, sfile);
+    check('r6-stamp-then-suppresses', existsSync(sstate) && J.whaleGuideFullBlock(sdir, sfile) === false,
+      'whaleGuideStamp must write the state that the next decision honors');
+    rmSync(sdir, { recursive: true, force: true });
+  }
+
+  // A profile run must not MATERIALIZE the spill tree (a typo'd FND_MCP_SLIM_DIR would silently
+  // create directories; at HEAD a profile run created nothing). No root → no stamp → always full.
+  {
+    const missing = path.join(mkdtempSync(path.join(tmpdir(), 'jslim-whalemiss-')), 'nx', 'a', 'b');
+    const mfile = path.join(tmpdir(), `jslim-whalemiss-feed-${process.pid}.jsonl`);
+    writeFileSync(mfile, rows(30, 'm'));
+    const m1 = profile(mfile, { FND_MCP_SLIM_DIR: missing });
+    const m2 = profile(mfile, { FND_MCP_SLIM_DIR: missing });
+    check('r6-missing-dir-not-created', !existsSync(missing) && isFull(m1) && isFull(m2),
+      'a profile run must never create the spill tree; without it every run prints the full block');
+    rmSync(mfile, { force: true });
+  }
+
+  // A planted symlink at the (predictable) state name must be neither READ through nor WRITTEN
+  // through: the read opens O_NOFOLLOW (→ full block), the stamp's rename replaces the LINK
+  // itself, and the link's target survives byte-identical.
+  {
+    const ldir = mkdtempSync(path.join(tmpdir(), 'jslim-whalelink-'));
+    const lfile = path.join(ldir, 'link.jsonl');
+    writeFileSync(lfile, rows(30, 'l'));
+    const victim = path.join(ldir, 'victim.txt');
+    writeFileSync(victim, 'IMPORTANT VICTIM CONTENT');
+    const lstate = J.whaleGuideStatePath(ldir, lfile);
+    symlinkSync(victim, lstate);
+    const l1 = profile(lfile, { FND_MCP_SLIM_DIR: ldir });
+    check('r6-symlink-state-not-followed',
+      isFull(l1) && readFileSync(victim, 'utf8') === 'IMPORTANT VICTIM CONTENT' && !lstatSync(lstate).isSymbolicLink(),
+      'a planted symlink must not be read through or overwritten through; the stamp replaces the link itself');
+    check('r6-symlink-replaced-then-suppresses', isReminder(profile(lfile, { FND_MCP_SLIM_DIR: ldir })),
+      'after the link is replaced by a real stamp the suppression works normally');
+    rmSync(ldir, { recursive: true, force: true });
+  }
+
+  // `guide` on the debug line — the field --report needs to measure how often suppression fires and
+  // to catch an always-suppress regression in the field.
+  {
+    const ddir = mkdtempSync(path.join(tmpdir(), 'jslim-whaledbg-'));
+    const dfile = path.join(ddir, 'dbg.jsonl');
+    writeFileSync(dfile, rows(40, 'd'));
+    profile(dfile, { FND_MCP_SLIM_DIR: ddir, FND_MCP_SLIM_DEBUG: '2' });
+    profile(dfile, { FND_MCP_SLIM_DIR: ddir, FND_MCP_SLIM_DEBUG: '2' });
+    const lines = readFileSync(path.join(ddir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    eq('r6-debug-guide-field', lines.filter((l) => l.profile).map((l) => l.guide).join(','), 'full,reminder');
+    rmSync(ddir, { recursive: true, force: true });
+  }
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);

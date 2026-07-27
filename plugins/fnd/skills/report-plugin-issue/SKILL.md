@@ -3,9 +3,8 @@ name: report-plugin-issue
 description: >
   File a GitHub issue on the fnd plugin repo when a plugin component misbehaves — a bundled
   script, converter, skill, reference, agent, or hook fails or contradicts actual behavior.
-  Collects sanitized debug info (never secrets), checks duplicates, posts only after the
-  developer approves the draft. Use when an fnd script / skill / agent fails or behaves
-  incorrectly, or the user reports a plugin bug.
+  Use when an fnd script / skill / agent fails or behaves incorrectly, or the user reports a
+  plugin bug.
 argument-hint: "[one-line summary of the defect — inferred from the conversation if omitted]"
 arguments:
   - name: problem

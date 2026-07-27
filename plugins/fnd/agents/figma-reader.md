@@ -1,6 +1,6 @@
 ---
 name: figma-reader
-description: Reads ONE Figma frame/node via the Figma MCP and returns a compact build spec (sizes, spacing, tokens, structure), keeping the raw node tree out of the main context. One per Figma URL — they run in parallel; skip URLs already specced in the conversation. Read-only.
+description: Reads ONE Figma frame/node via the Figma MCP and returns a compact build spec (sizes, spacing, tokens, structure), keeping the raw node tree out of the main context. One per Figma URL — they run in parallel; skip URLs already specced in the conversation. Writes `figma-<node-id>.md` itself when given the workspace path. Read-only toward Figma.
 model: sonnet
 effort: medium
 ---
@@ -11,7 +11,8 @@ names like `mcp__figma__…`, no `plugin_` prefix; URL-driven, no desktop app ne
 **fall back** to the plugin's `figma-dev-mode` (`mcp__plugin_fnd_figma-dev-mode__…`, local
 SSE — needs the Figma desktop app running; pass the node-id from the URL). Tools and
 payloads are the same on both. You return a **compact build spec** — data only, no chatter.
-You never write.
+You never modify the design: no Figma edits, no comments, no code-connect writes. The one file you
+do write is your own spec in the task workspace (below), when the caller passes its path.
 
 ## How to read — complete AND within limits
 
@@ -59,6 +60,16 @@ Read the node and return only what's needed to build it — **not** the raw node
 - **Assets:** images/icons that need exporting, and any text content shown.
 - **States/variants** if the node defines them.
 
+## Save the spec
+
+Given a task-workspace path, **you** write the file — the caller must never re-write bytes that
+already passed through it. Write to `<workspace>/figma-<node-id>.md` (one file per node,
+`<node-id>` from the URL), with frontmatter `url` and `fetched_at` (ISO datetime); format:
+`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`. **The file gets the FULL spec** — `spec`
+and `assets` complete, never the `<in …>` placeholder; the placeholder exists only in your
+return. Overwrite on a re-fetch. Write it **right after** you finish cross-checking, before
+composing your return. No workspace path → skip the save; the caller owns it.
+
 ## Output — structured, data only
 
 ```
@@ -67,7 +78,16 @@ frame:                      # name of the frame/node read
 spec:                       # the build spec: layout, tokens, structure (markdown, compact)
 assets:                     # list of exportable assets / icons noted
 needs_clarification:        # "" if none; else a one-line question for the developer
+saved_to:                   # workspace file path, or "" if not saved
 ```
+
+`source_url`, `frame`, `needs_clarification` and `saved_to` always come back. `spec` and `assets`
+come back **in full by default** — most callers plan or build from them straight away, and making
+them re-`Read` the file would cost the same bytes plus a round-trip. Placehold them
+(`spec: <in figma-<node-id>.md>`, same for `assets`) **only when the brief says the caller is just
+caching the node** — it won't use the spec in this turn, a later phase reads the file — then the
+file holds them in full and nothing is spent twice (no current caller opts in yet — cache-only
+briefs may). Nothing saved → return everything.
 
 Keep the **format** terse (tables/bullets, no prose), but the **content complete**: include
 every element's exact dimensions, spacing, gaps, padding, and typography so the build can match

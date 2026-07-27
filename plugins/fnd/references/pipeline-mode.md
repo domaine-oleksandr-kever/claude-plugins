@@ -84,7 +84,9 @@ report and the Jira hand-off comment are distilled from these entries.
 ## Phase-agent models
 
 Phase agents never inherit the session model — the conductor passes `model` on every
-spawn (this section is the single home of the **Step 4 phase-agent** assignments):
+spawn (this section is the single home of the **Step 4 phase-agent** assignments; the briefs
+those agents get live in `pipeline-phases.md` — **read only at the start of Step 4**, never
+before the gate):
 `opus` for reasoning-heavy
 phases (implement, qa, and the fix agents in the qa loop and aftercare), `sonnet` for
 mechanical ones (finalize, create-pr, steps-to-test, and the aftercare poll/triage

@@ -28,7 +28,7 @@ Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context
 
 ## Phase 1 — Analysis `[plan mode]`
 
-1. **Ingest the ticket** — context-first per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`; the workspace `.claude/fnd/<TICKET>/` also holds QA repro values in `notes.md`. This skill needs: Description, AC, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy **via `doc-reader`**, per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`; if the Notion MCP isn't connected, tell the developer rather than writing steps blind.
+1. **Ingest the ticket** — context-first per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` (pass the workspace path to the **`jira-reader`** subagent — it writes `ticket.md` itself); the workspace `.claude/fnd/<TICKET>/` also holds QA repro values in `notes.md`. This skill needs: Description, AC, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy **via `doc-reader`**, per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`; if the Notion MCP isn't connected, tell the developer rather than writing steps blind.
 2. **Analyse the implementation** — from the diff or developer summary: what shipped, which settings/metafields/templates matter, and merchant-visible paths (Online Store editor, templates, URLs).
 3. **Identify test scenarios** — map each AC to one or more scenarios; include edge cases, negative paths, and data/setup prerequisites (collections, tags, markets, customer state, inventory, etc.).
 
@@ -55,4 +55,4 @@ coverage; deterministic steps; theme-agnostic navigation.
 
 ## Next in the series
 
-Check off this workflow's row in the workspace `progress.md`, then offer the next unchecked step in one line — `/fnd:create-pull-request <ticket>` if the branch has no PR yet, else the series is complete (reviewers, QA hand-off, ticket transition stay with the developer) — **offer only; never auto-run**.
+Close out per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` → Progress tracking; next is `/fnd:create-pull-request <ticket>` if the branch has no PR yet, else the series is complete (reviewers, QA hand-off, ticket transition stay with the developer); **offer only; never auto-run**.

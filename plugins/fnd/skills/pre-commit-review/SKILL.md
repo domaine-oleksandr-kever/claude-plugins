@@ -1,6 +1,6 @@
 ---
 name: pre-commit-review
-description: Review the branch's changed files before committing — comment accuracy, stripping ticket references from comments (ELC-123, "(AC 1a)"), refactor opportunities, and a bug-hunter pass on the diff; produces a plan the developer approves before any edit. Use when the user is about to commit, says "before commit", asks to tidy / clean a branch, check for stale comments or leftover ticket numbers, or review the changes for bugs.
+description: Review the branch's changed files before committing — hygiene plus a bug-hunter correctness pass. Use when the user is about to commit, says "before commit", asks to tidy / clean a branch, check for stale comments or leftover ticket numbers, or review the changes for bugs.
 ---
 
 # Pre-commit review

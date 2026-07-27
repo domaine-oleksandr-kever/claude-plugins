@@ -55,4 +55,4 @@ are unclear:
 
 ## Next in the series
 
-When the commit belongs to a ticket with a task workspace, tick `commit` in its `progress.md`, then offer the next unchecked step in one line — normally `/fnd:write-steps-to-test <ticket>` (or `/fnd:create-pull-request <ticket>` when steps-to-test is already ticked or not applicable and the branch has no open PR) — **offer only; never auto-run**.
+Ticket with a task workspace → close out its `commit` row per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` → Progress tracking; next is normally `/fnd:write-steps-to-test <ticket>`, or `/fnd:create-pull-request <ticket>` when steps-to-test is already ticked or N/A and the branch has no open PR; **offer only; never auto-run**.

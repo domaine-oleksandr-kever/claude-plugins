@@ -4,20 +4,20 @@ description: >
   Open a GitHub Pull Request with a Domaine-standard description built from the Jira ticket,
   Technical Approach, and branch diff, including the theme-preview table — Workflow 6.
   Use when the user asks to open / create / draft a pull request or PR.
-argument-hint: "<jira-url-or-key> [target-branch] [theme-name theme-url theme-admin-url — preview theme is auto-created if you omit these; pass them to use a theme you made yourself]"
+argument-hint: "<jira-url-or-key> [target-branch] [theme-name theme-url theme-admin-url] [preview-path]"
 arguments:
   - name: jira_ticket
-    description: One or more Jira ticket URLs/keys (e.g. ELC-206, or "ELC-126 ELC-130" for a PR that closes several bugs). If absent, infer from the conversation context; ask only if it can't be inferred.
+    description: One or more Jira ticket URLs/keys (e.g. ELC-206, or "ELC-126 ELC-130" for a PR closing several bugs).
   - name: target_branch
-    description: Merge base. Defaults to Domaine Git Flow (usually `develop`, sometimes `main`); confirm if not obvious.
+    description: Merge base — usually `develop`.
   - name: theme_name
-    description: Preview theme name. OPTIONAL. Leave it (and theme_url/admin_url) empty and the skill auto-creates the preview theme for you (step 4). Provide them and the skill SKIPS auto-creation entirely and uses exactly what you pass — e.g. a theme you duplicated manually. Omitted from the PR body if neither provided nor created.
+    description: Preview theme name. OPTIONAL manual triplet with theme_url + theme_admin_url.
   - name: theme_url
-    description: Public theme preview URL / THEME_URL. OPTIONAL — part of the manual triplet (theme-name + theme-url + admin-url). Provided → no auto-creation; auto-filled when the skill creates the preview theme itself.
+    description: Public theme preview URL / THEME_URL. OPTIONAL.
   - name: theme_admin_url
-    description: Shopify admin theme URL / THEME_ADMIN_URL. OPTIONAL — part of the manual triplet. Provided → no auto-creation; auto-filled when the skill creates the preview theme itself.
+    description: Shopify admin theme URL / THEME_ADMIN_URL. OPTIONAL.
   - name: preview_path
-    description: Storefront path the change should be reviewed on (e.g. /products/group-lipglass). Used to deep-link the Preview + Admin (template) rows. Infer from context; ask if unsure.
+    description: Storefront path the change should be reviewed on (e.g. /products/group-lipglass).
 ---
 
 # Create PR (GitHub + Jira)
@@ -25,7 +25,7 @@ arguments:
 Open a Pull Request with a Domaine-standard description pulled from the Jira ticket, the approved Technical Approach, and the branch diff.
 
 Series position: Workflow 6 — the final step, after `develop-feature-or-fix` and `qa-feature-or-fix`.
-Inputs (ask if missing): **Jira ticket(s)** (`jira_ticket` — one key or several); **target branch** (usually `develop` — confirm against Git Flow); optional theme name / preview URL / admin URL (omit their rows if absent).
+Inputs — infer from the conversation first, ask only what can't be inferred: **Jira ticket(s)** (`jira_ticket` — one key or several); **target branch** (usually `develop` — confirm against Git Flow); optional `preview_path`; optional theme triplet `theme_name` / `theme_url` / `theme_admin_url` — passing all three skips auto-creation (REFERENCE.md → Preview theme, "Args win"), omitting them auto-creates in step 4, and their rows are omitted from the body when neither provided nor created.
 Operating mode: **Phase 1 in plan mode** (ingest, diff, draft title + body); leave plan mode after the developer approves the draft.
 
 ## Global rules
@@ -40,12 +40,12 @@ Operating mode: **Phase 1 in plan mode** (ingest, diff, draft title + body); lea
 
 ## Phase 1 — Analysis & preparation `[plan mode]`
 
-1. **Ingest the Jira ticket(s)** — context-first: full (not summarized) in-conversation fields count; second stop the task workspace if fresh (`.claude/fnd/<TICKET>/`, or `.claude/fnd/<branch-slug>/` with `ticket-<KEY>.md` files for a multi-ticket PR; `notes.md` holds per-bug root causes and preview-theme breadcrumbs); otherwise delegate to **`jira-reader`** — **several tickets → one reader per key, in parallel**, merge their fields — and **save fresh output(s) to the workspace**. This skill needs: Description, AC, **Technical Approach**, **Steps to Test**, links. `needs_clarification` → ask the developer.
+1. **Ingest the Jira ticket(s)** — context-first per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`; a multi-ticket PR uses the branch-slug workspace with one `ticket-<KEY>.md` per ticket (`notes.md` holds per-bug root causes and preview-theme breadcrumbs). Fetching → **one `jira-reader` per key, in parallel**, each passed the workspace path so it writes its own file; merge the returned fields. This skill needs: Description, AC, **Technical Approach**, **Steps to Test**, links. `needs_clarification` → ask the developer.
 2. **Analyse the implementation** — after the developer approves shell usage, inspect read-only: `git status`, `git log --oneline`, `git diff <target>...HEAD --stat` and `--name-status` (the review agents below read the full diff in their own contexts — pull specific hunks here only where the body draft needs detail the TA/notes don't carry). List files created / modified / deleted. Cross-reference against the TA and AC; note gaps, intentional deviations, out-of-scope items.
 
    **Review gate** — run the fnd review flow (`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`, read it now; its §3 create-pull-request entry governs) with **`conformance`** emphasis: first review on this branch → spawn `change-reviewer` over the diff (small → one agent; large → one per file-group, in parallel) and surface its findings table; already reviewed → the §3 ask. A `protected-core` blocker **stops the PR** until resolved or explicitly waived. **Correctness backstop — NOT subject to the skip ask:** marker `correctness_hash` absent or ≠ the current diff hash → spawn **`bug-hunter`** over the diff (in parallel; pass the `base` + the workspace `notes.md` `ceiling:` entries) and disposition every finding per `review-flow.md → Correctness findings` — a **blocker** stops the PR like `protected-core`; current → say so in one line. Refresh the marker (incl. `correctness_hash`) after.
 3. **PR metadata** — propose a title per **REFERENCE.md → Title convention** (`[ELC-XX][Type] …`; multiple tickets → one bracket, slash-separated). Confirm the target branch. Capture linked tickets / blocks / related PRs.
-4. **Preview theme** — populate the theme-preview table by **following `create-pull-request/REFERENCE.md` → Preview theme** (read it now — it owns the decision flow, naming, `--reuse` default, and page deep-links). Two escalation deltas: `error=build_failed` → surface the build output and **stop** (fix the branch, don't enter theme URLs); `error=settings_drift` → **don't retry auto-creation**, follow the reference's duplicate-manually recovery. Deep-links when a storefront path is known (`preview_path` or inferable); unsure → **ask — don't guess**. To redeploy after a later fix: the `preview-theme` skill (refresh).
+4. **Preview theme** — populate the theme-preview table by **following `create-pull-request/REFERENCE.md` → Preview theme** (read it now — it owns the decision flow, naming, and the `--reuse` default; `error=` meanings + page deep-link formulas live in `${CLAUDE_PLUGIN_ROOT}/references/preview-theme-errors.md`). Two escalation deltas: `error=build_failed` → surface the build output and **stop** (fix the branch, don't enter theme URLs); `error=settings_drift` → **don't retry auto-creation**, follow the errors reference's duplicate-manually recovery. Deep-links when a storefront path is known (`preview_path` or inferable); unsure → **ask — don't guess**. To redeploy after a later fix: the `preview-theme` skill (refresh).
 5. **Draft the PR description** — build all body sections and the conditional theme-preview table per **`create-pull-request/REFERENCE.md`**. Fold the **named ceilings** into Dependencies — the workspace `notes.md` `ceiling:` entries plus any justified correctness findings (an unnamed intentional simplification reads as a bug to reviewers and bots). **Body order per the reference's fixed top three: Summary → Jira ticket(s) → Theme preview table in the top third** — this holds even when merging into an existing repo PR template.
 
 ### ✋ Checkpoint — Phase 1
@@ -70,4 +70,4 @@ Present the **draft title**, **target branch**, proposed **reviewers/labels**, a
 
 ## Next in the series
 
-After sharing the PR URL, check off this workflow's row in the workspace `progress.md` (+ the PR URL), then offer the next unchecked step in one line — `/fnd:write-steps-to-test <ticket>` if the ticket's Steps to Test field is still empty, else the series is complete — **offer only; never auto-run**.
+Close out per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` → Progress tracking (status: the PR URL); next is `/fnd:write-steps-to-test <ticket>` if the ticket's Steps to Test field is still empty, else the series is complete; **offer only; never auto-run**.
