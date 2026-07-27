@@ -2269,8 +2269,8 @@ const WHALE_GUIDE_TTL_MS = 2 * 60 * 60 * 1000;
 // a clock stepped backwards by an NTP correction or a VM resume, which an unbounded `now - t < TTL`
 // would let suppress forever) falls back to the full block: over-explaining costs tokens,
 // under-explaining strands the model without recovery commands. DECISION ONLY — the stamp is written
-// by whaleGuideStamp() after the block actually reached stdout (see emitProfile), so a run killed
-// mid-pipe (`| head -1` → EPIPE) never records a block it did not deliver.
+// by whaleGuideStamp() after the block actually reached stdout (see emitProfile), so a run cut off
+// mid-pipe (`| head -1` → EPIPE, now a quiet exit 0) never records a block it did not deliver.
 function whaleGuideFullBlock(dir, file) {
   if (!whaleGuideEnabled()) return true;
   const abs = whaleGuideKey(file);
@@ -2576,6 +2576,14 @@ module.exports = {
 // -------------------------------------------------------------------------------- CLI --
 
 if (require.main === module) {
+  // A downstream `| head` closes stdout mid-write; the EPIPE (Windows: `code: 'EOF'`)
+  // surfaces async and would crash the process AFTER the consumer got its bytes.
+  // Reader-side truncation is success — exit quietly; other stream errors still throw.
+  // The pending stamp callback keeps the loop alive long enough for the error to be
+  // delivered at all — hence this guard; the stamp itself is safe (see emitProfile).
+  const quietOnEpipe = (s) => s.on('error', (e) => { if (e && (e.code === 'EPIPE' || e.code === 'EOF')) process.exit(0); throw e; });
+  quietOnEpipe(process.stdout);
+  quietOnEpipe(process.stderr);
   const t0 = Date.now();
   const args = process.argv.slice(2);
   const has = (f) => args.includes(f);

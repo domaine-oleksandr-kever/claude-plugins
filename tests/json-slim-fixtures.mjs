@@ -2267,6 +2267,25 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     rmSync(ldir, { recursive: true, force: true });
   }
 
+  // A consumer that stops reading (`| head -1`) closes the pipe while the guidance write is
+  // still queued; the EPIPE surfaces on a later tick, and with the stamp callback keeping the
+  // event loop alive it crashed the CLI (unhandled 'error' on stdout) after the consumer had
+  // its bytes. Truncation by the reader must be a quiet success: exit 0, no stack on stderr.
+  // (When the race resolves the other way the write just succeeds — same observable result.)
+  // Spawns bash (the suite's only shell dependency) — a real pipe and PIPESTATUS are the point.
+  {
+    const pdir = mkdtempSync(path.join(tmpdir(), 'jslim-whalepipe-'));
+    const pfile = path.join(pdir, 'pipe.jsonl');
+    writeFileSync(pfile, rows(500, 'p'));
+    const r = spawnSync('bash', ['-c', `node "$1" "$2" | head -1; echo "\${PIPESTATUS[0]}"`, '--', SLIM, pfile],
+      { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: pdir } });
+    const plines = r.stdout.trim().split('\n');
+    check('r6-broken-pipe-no-crash',
+      plines.pop() === '0' && /"profile":true/.test(plines[0] || '') && !/EPIPE|Unhandled 'error'/.test(r.stderr),
+      `a broken pipe must exit 0 AFTER the consumer got its line, with a quiet stderr, got stdout:\n${r.stdout}\nstderr:\n${r.stderr}`);
+    rmSync(pdir, { recursive: true, force: true });
+  }
+
   // `guide` on the debug line — the field --report needs to measure how often suppression fires and
   // to catch an always-suppress regression in the field.
   {
