@@ -67,6 +67,38 @@ when check F was handled this pass):
 echo "correctness_hash=$diff_hash" >> .git/.fnd-review
 ```
 
+**Re-stamp after a commit whose hooks rewrote the tree** (`commit` only). Project commit
+hooks (husky / lint-staged running prettier, `eslint --fix`) rewrite files *during*
+`git commit`, so the committed tree ≠ the reviewed one and `diff_hash` drifts — which makes
+`create-pull-request`'s correctness backstop re-run `bug-hunter` over semantically
+identical code. Mechanical rule: re-stamp **only** when the tree being committed *is* the
+reviewed tree; the sole delta is then what the project's own hooks did, inside the same
+commit, and the review covered exactly that pre-hook state. Pre-commit hash ≠ the marker's
+(the developer edited after the review) → do **not** re-stamp; the PR-time backstop is
+legitimate.
+
+```bash
+# BEFORE `git commit` — is the tree about to be committed the reviewed one?
+pre_hash=$(git diff "$(git merge-base "$base" HEAD)" | git hash-object --stdin)
+restamp=no; keep_correctness=no
+if [ -f "$marker" ] && grep -qx "branch=$branch" "$marker" && grep -qx "diff_hash=$pre_hash" "$marker"; then
+  restamp=yes
+  # carry correctness forward ONLY if it was current; absent or stale → do NOT add the line
+  if grep -qx "correctness_hash=$pre_hash" "$marker"; then keep_correctness=yes; fi
+fi
+
+# AFTER a successful `git commit` — did the hooks rewrite files?
+post_hash=$(git diff "$(git merge-base "$base" HEAD)" | git hash-object --stdin)
+if [ "$restamp" = yes ] && [ "$post_hash" != "$pre_hash" ]; then
+  { echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$post_hash"; \
+    echo "reviewed_at_head=$(git rev-parse HEAD)"; } > "$marker"
+  if [ "$keep_correctness" = yes ]; then echo "correctness_hash=$post_hash" >> "$marker"; fi
+fi
+```
+
+A caller whose `allowed-tools` bars shell redirection may instead rewrite those lines in
+place with `Edit` — on this path the marker exists by construction.
+
 ## 2. How the checks run
 
 The cost is **reading the changed files**, which checks A and C (and E) share. So split by
@@ -156,6 +188,7 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
 - **`commit`** — does **not** itself run the hygiene review. On entry: if
   `reviewed_before == no`, offer to run `/fnd:pre-commit-review` first (proceed if the dev
   declines); if `yes`, continue to the commit. (Its own untracked-file check still runs.)
+  Around the commit itself it applies §1's **re-stamp** rule.
 - **`create-pull-request`** — final gate; emphasis **`conformance`** (lead E;
   `protected-core` = blocker): first time on branch → full; else ask. Independently of
   that choice, the **correctness backstop**: `correctness_hash` absent or ≠ the current

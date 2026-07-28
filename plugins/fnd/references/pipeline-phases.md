@@ -54,15 +54,17 @@ its brief says otherwise.
    report and hand-off. **F-class (correctness) findings never land in that log-only
    bucket**: an F row from the reviewer → fix it when that fits the qa cap and is
    AC-compatible; justify → `ceiling:` entry + PR body; else ESCALATE.
-   Stamp `.git/.fnd-review`; `diff_hash` is always the post-finalize diff. The hunt ran in
-   the **qa** phase, over the pre-finalize diff, so `correctness_hash` follows
-   `review-flow.md`'s rule (check F handled *for that exact diff*): finalize touched no
-   correctness surface → stamp the post-finalize hash; finalize changed **code** the hunt
-   never saw (an F-class fix, a logic edit) → **omit the `correctness_hash` line** and say so
-   in the report: the conductor then spawns `bug-hunter` over the final diff and stamps, or
-   leaves the missing pass to phase 4's backstop. Never recompute it blindly. Commit
-   per `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md` (scope per policy;
-   body from plan + notes), then push the working branch. Tick **both**
+   Commit per `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md` (scope per
+   policy; body from plan + notes), **then** stamp `.git/.fnd-review` — after the commit
+   succeeds, never before, so the hash covers whatever the project's commit hooks rewrote
+   inside it (`review-flow.md` §1 → re-stamp rationale); `diff_hash` is always that
+   post-commit diff. The hunt ran in the **qa** phase, over the pre-finalize diff, so
+   `correctness_hash` follows `review-flow.md`'s rule (check F handled *for that exact
+   diff*): finalize touched no correctness surface → stamp the same post-commit hash;
+   finalize changed **code** the hunt never saw (an F-class fix, a logic edit) → **omit the
+   `correctness_hash` line** and say so in the report: the conductor then spawns
+   `bug-hunter` over the final diff and stamps, or leaves the missing pass to phase 4's
+   backstop. Never recompute it blindly. Then push the working branch. Tick **both**
    `pre-commit-review` and `commit` rows.
 4. **create-pr** — agent. Brief: the policy answers (preview theme / target branch /
    storefront path), the `notes.md` `ceiling:` entries (+ the preview-theme id if qa

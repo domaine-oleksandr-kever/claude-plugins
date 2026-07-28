@@ -1,7 +1,7 @@
 ---
 name: commit
 description: Create git commits per the Conventional Commits spec. Use when the user asks to commit changes, write a commit message, or run git commit.
-allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(git log*), Bash(git ls-files*), Read, Glob, Grep, Edit
+allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(git log*), Bash(git ls-files*), Bash(git rev-parse*), Bash(git merge-base*), Bash(git show-ref*), Bash(git hash-object*), Bash(grep*), Read, Glob, Grep, Edit
 ---
 
 # Commit
@@ -26,6 +26,12 @@ are unclear:
 - Read `.git/.fnd-review`. **No marker for this branch** → offer to run
   `/fnd:pre-commit-review` first; proceed if the developer declines.
 - **Marker exists** → continue; don't re-run a review unprompted.
+- **Re-stamp around the commit** — before step 7 compute the current `diff_hash`; if it
+  equals the marker's, refresh the marker after the commit succeeds, per review-flow.md §1
+  → *Re-stamp after a commit whose hooks rewrote the tree* (that block is the full rule).
+  Why: husky / lint-staged reformat files during `git commit`, drifting the hash so
+  `create-pull-request`'s correctness backstop re-runs `bug-hunter` over identical code.
+  Hashes differ **before** the commit → no re-stamp.
 
 (Your own untracked-file check in step 2 still runs regardless.)
 
