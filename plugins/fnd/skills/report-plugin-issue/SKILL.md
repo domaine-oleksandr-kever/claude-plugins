@@ -15,7 +15,7 @@ allowed-tools: Read, Grep, Glob, Write, Bash(gh auth status), Bash(gh --version)
 # Report a plugin issue
 
 File a defect against the **fnd plugin itself** on
-`https://github.com/domaine-oleksandr-kever/claude-plagins`. **Do not skip the ✋
+`https://github.com/domaine-oleksandr-kever/claude-plugins`. **Do not skip the ✋
 checkpoint — never post without explicit approval.**
 
 ## Step 0 — Is it actually a plugin bug?
@@ -65,11 +65,11 @@ Gather what applies (skip the rest):
 ## Step 3 — Check for duplicates
 
 ```bash
-gh issue list --repo domaine-oleksandr-kever/claude-plagins --state all --search "<component or symptom keywords>"
+gh issue list --repo domaine-oleksandr-kever/claude-plugins --state all --search "<component or symptom keywords>"
 ```
 
 If an existing issue covers it, show it and ask whether to **add a comment** with the new debug
-info (`gh issue comment <n> --repo domaine-oleksandr-kever/claude-plagins --body-file <file>`)
+info (`gh issue comment <n> --repo domaine-oleksandr-kever/claude-plugins --body-file <file>`)
 or skip. Never open a duplicate.
 
 ## Step 4 — Draft the issue
@@ -104,17 +104,17 @@ plugin fnd <version> · claude <version> · <uname -srm> · <node / shopify / jq
 ### ✋ Checkpoint
 
 Show the developer the full **title + body** and where it will be posted
-(`domaine-oleksandr-kever/claude-plagins`). **Post only after explicit approval.**
+(`domaine-oleksandr-kever/claude-plugins`). **Post only after explicit approval.**
 
 ## Step 5 — Create it
 
 ```bash
-gh issue create --repo domaine-oleksandr-kever/claude-plagins --title "<title>" --body-file <file>
+gh issue create --repo domaine-oleksandr-kever/claude-plugins --title "<title>" --body-file <file>
 ```
 
 Report the issue URL back. If `gh` is missing, unauthenticated (`gh auth status`), or lacks
 access to the repo, print the finished title + body in a fenced block and hand over the manual
-link: `https://github.com/domaine-oleksandr-kever/claude-plagins/issues/new`.
+link: `https://github.com/domaine-oleksandr-kever/claude-plugins/issues/new`.
 
 ## Quality bar
 

@@ -96,7 +96,7 @@ slash command.
 
 ```text
 # 1. Add the marketplace (you'll get a trust prompt — confirm it)
-/plugin marketplace add domaine-oleksandr-kever/claude-plagins
+/plugin marketplace add domaine-oleksandr-kever/claude-plugins
 
 # 2. Install the plugin from it
 /plugin install fnd@domaine
@@ -114,7 +114,7 @@ predeclare it in managed settings under `extraKnownMarketplaces`.
 ### Local development (from this folder on disk)
 
 ```text
-/plugin marketplace add /path/to/claude-plagins
+/plugin marketplace add /path/to/claude-plugins
 /plugin install fnd@domaine
 /reload-plugins
 ```
