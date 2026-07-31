@@ -20,7 +20,7 @@ session: <$CLAUDE_CODE_SESSION_ID>
 - commit scope: <ticket key? yes|no> · PR end state: <draft|ready> (created ready; applied by aftercare — rationale: ship Step 2)
 - preview theme: <auto|manual triplet> · storefront path: </products/…>
 - Jira write-backs via MCP: steps-to-test <yes|no> · PR link <yes|no> · hand-off comment <yes|no>
-- bots: <names> · bot timebox: <min>
+- bots: <names> · bot timebox: <min> (cap on active bot work; silence by ~10 min after PR creation → early exit)
 - store data: <gap → resolution: existing on <product> | mock on <product> | Mode 2 (.graphql, dev-run pre-gate) | static-only> (one per audit gap)
 ## Ticket answers
 - <question> → <accepted answer> (recommended: <what ship suggested>)

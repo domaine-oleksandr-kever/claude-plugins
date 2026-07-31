@@ -168,7 +168,8 @@ recommended answer. Explore the codebase instead of asking whenever the code can
   applies the end state last, phase 6); Jira write-backs via
   MCP — Steps to Test field / PR link / hand-off comment (each yes/no); PR bots to await
   (names — before recommending "none", probe recent repo PRs for bot reviewers via
-  `gh api`) + timebox in minutes; research pressure-test of the plan — an external
+  `gh api`) + timebox in minutes (a cap on active bot work — silent bots exit early,
+  pipeline-phases §6); research pressure-test of the plan — an external
   cross-check subagent, token-heavy (default no; runs in Step 3).
   QA depth is **not** a question (`break-it-qa.md` → No reduced mode — that rule's
   single home).

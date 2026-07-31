@@ -93,15 +93,22 @@ its brief says otherwise.
    (`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`).
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent →
    commit + push (counts toward the aftercare-rounds cap). Then poll the policy bots' review threads via
-   `gh api` (~90 s interval, up to the timebox). Per finding: triage vs AC/TA —
+   `gh api` (~90 s interval; the timebox is a **cap on active bot work, not a wait
+   target** — see the silence early-exit below). Per finding: triage vs AC/TA —
    AC-compatible → fix; contradicts AC or out of scope → don't, and say why. After any
    fixes: refresh the preview theme code
    (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh refresh --theme <id from
    notes.md>` — settings
    untouched), re-verify the touched flow in the browser, commit + push. Reply to
    **every** thread (what was done / why not) and resolve it (`gh api graphql`,
-   `resolveReviewThread`). **Cap 2 rounds** → ESCALATE survivors. Timebox expiry with
-   silent bots → "bots pending" in the report; move on. **Final thread sweep —
+   `resolveReviewThread`). **Cap 2 rounds** → ESCALATE survivors. **Silence
+   early-exit:** with checks green, if by ~10 min after PR creation there is no bot
+   activity — no bot review (`gh api .../pulls/<n>/reviews`), no review threads, no
+   queued/in-progress bot check-run — run the final thread sweep now and exit
+   ("bots silent — early exit" in the report); never sit out the timebox on silence.
+   The full timebox applies only while bot work is visibly in progress (open threads,
+   or a bot review/check-run pending); expiry with threads still unresolved →
+   "bots pending" in the report; move on. **Final thread sweep —
    unconditional**, even when the policy says no bots / timebox 0: no earlier than
    ~5 min after PR creation, re-poll the review threads once — bots post minutes after
    the PR opens, and a `skipping`/absent check is not proof of no review. New threads →
