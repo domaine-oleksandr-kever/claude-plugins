@@ -6,8 +6,11 @@
 #
 # MODEL: code is isolated, the task workspace is SHARED. The worktree gets its own branch,
 # its own directory, its own node_modules and its own copies of the gitignored config a fresh
-# checkout cannot have — shopify.theme.toml (the preview script writes the new theme id into
-# that copy) and .env (the Admin API token every store read needs). But
+# checkout cannot have — shopify.theme.toml (the preview script's `pin` / `--pin-toml` rewrites
+# the `theme =` line in that copy, so this worktree's session preview theme is the one its dev
+# server syncs into; a pin the SOURCE checkout had made is undone in the copy, so this stream
+# starts from the shared dev theme rather than inheriting another one's) and .env (the Admin API
+# token every store read needs). But
 # `<worktree>/.claude/fnd` is a SYMLINK to `<main>/.claude/fnd`, so both sessions read and
 # write one cache — and removing the worktree cannot take the cache with it (the link is
 # dropped before the removal, so nothing walking the tree can reach the shared workspaces
@@ -65,6 +68,65 @@ shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}"
 mk_tmpf() { mktemp "$TMPROOT/fnd-wt.XXXXXX" 2>/dev/null || mktemp -t fnd-wt; }
+
+# Undo EVERY session-theme pin in a freshly copied shopify.theme.toml (see the copy site below) —
+# block-agnostic, because a multi-environment toml can carry one pin per block.
+# create-preview-theme.sh's pin leaves one of two shapes behind:
+#   - a REWRITE keeps the value it replaced on the line directly ABOVE the pinned one, commented
+#     and marked `# fnd:superseded` — the restore is purely local: uncomment that line (dropping
+#     the marker) and comment out the session id under it. Value-preserving both ways, so nothing
+#     is lost whichever theme the developer wants back. Only a real marker line (`# theme = …`
+#     carrying the string) counts — a stray comment merely mentioning fnd:superseded is not one.
+#   - an APPEND (the block had no `theme =` line) tags the inserted line `# fnd:session-theme` —
+#     the line is session-owned and the original state had no `theme =` at all, so the restore is
+#     DELETION of that line.
+# A copy with neither shape (never pinned) is left exactly as it came.
+# Returns 0 only when a pin was actually reverted. Never prints a line of the file: it holds the
+# Theme Access token.
+unpin_toml() { # $1 = the copied toml
+  local f="$1" tmp endnl
+  [ -f "$f" ] || return 1
+  grep -Eq 'fnd:(superseded|session-theme)' "$f" 2>/dev/null || return 1
+  endnl=1
+  if [ -s "$f" ] && [ -n "$(tail -c 1 "$f" 2>/dev/null)" ]; then endnl=0; fi
+  tmp="$(mk_tmpf)" || return 1
+  if ! awk -v endnl="$endnl" '
+    function emit(t) { if (started) printf "\n"; printf "%s", t; started = 1 }
+    { line[++n] = $0 }
+    END {
+      changed = 0
+      for (i = 1; i <= n; i++) {
+        s = line[i]; sub(/\r$/, "", s)
+        if (s ~ /^[ \t]*#?[ \t]*theme[ \t]*=/ && s ~ /#[ \t]*fnd:session-theme[ \t]*$/) {
+          del[i] = 1; changed = 1; continue
+        }
+        if (i == n || s !~ /fnd:superseded/ || s !~ /^[ \t]*#[ \t]*theme[ \t]*=/) continue
+        t = line[i + 1]; u = t; sub(/\r$/, "", u)
+        if (u ~ /^[ \t]*#/ || u !~ /^[ \t]*theme[ \t]*=/) continue
+        r = line[i]; cr = ""
+        if (r ~ /\r$/) { cr = "\r"; sub(/\r$/, "", r) }
+        sub(/[ \t]*#[ \t]*fnd:superseded[ \t]*$/, "", r)
+        sub(/^#[ \t]?/, "", r)
+        line[i] = r cr
+        line[i + 1] = "# " t
+        changed = 1
+        i++   # the pinned line is handled — do not re-read it as a marker candidate
+      }
+      if (changed == 0) exit 1
+      started = 0
+      for (i = 1; i <= n; i++) if (!(i in del)) emit(line[i])
+      if (started && endnl == 1) printf "\n"
+    }
+  ' "$f" > "$tmp" 2>/dev/null; then
+    rm -f "$tmp"; return 1
+  fi
+  [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
+  # cat->, never mv: mktemp lives in $TMPDIR (a rename could cross filesystems) and the in-place
+  # copy keeps the destination file's own inode and mode
+  cat "$tmp" > "$f" || { rm -f "$tmp"; return 1; }
+  rm -f "$tmp"
+  return 0
+}
 
 # --- args --------------------------------------------------------------------
 MODE="create"; WORK_ID=""; BASE=""; FORCE=0; POS=0
@@ -439,11 +501,19 @@ if [ "$REUSED" = "false" ] && [ -f "$WT/package.json" ]; then
 fi
 
 TOML=missing
+TOML_UNPINNED=no
 if [ -f "$WT/shopify.theme.toml" ]; then TOML=kept
 elif [ -f "$MAIN/shopify.theme.toml" ]; then
-  # A COPY, never a link: the preview script writes the new theme id into the worktree's
-  # file and must not repoint the main checkout's dev environment.
+  # A COPY, never a link: the preview script pins this worktree's session theme id into this
+  # file (`pin` / `--pin-toml`) and must not repoint the main checkout's dev environment.
   cp "$MAIN/shopify.theme.toml" "$WT/shopify.theme.toml"; TOML=copied
+  # …and the source is routinely a pinned config itself (the main checkout ran its own ship).
+  # Inheriting THAT stream's session theme is worse than inheriting nothing: it is what this
+  # worktree's first `create` would pull customizer settings from, so another ticket's
+  # half-edited preview would land on this one's theme (and a `create` after that theme was
+  # deleted fails naming an id nobody here has heard of). The pin left the superseded line
+  # behind for exactly this — restore it and re-comment the session id.
+  if unpin_toml "$WT/shopify.theme.toml"; then TOML_UNPINNED=yes; fi
 else
   warn "no_shopify_theme_toml — the worktree has no store config; copy one in before pushing a preview theme"
 fi
@@ -508,6 +578,7 @@ printf 'branch_source=%s\n' "$BRANCH_SOURCE"
 printf 'reused=%s\n' "$REUSED"
 printf 'npm=%s\n' "$NPM"
 printf 'toml=%s\n' "$TOML"
+printf 'toml_unpinned=%s\n' "$TOML_UNPINNED"
 printf 'env=%s\n' "$ENV_STATE"
 printf 'settings=%s\n' "$SETTINGS"
 printf 'workspace=%s\n' "$WORKSPACE"
@@ -516,8 +587,12 @@ printf 'dev_port=%s\n' "$PORT"
 printf '\nnext:\n'
 printf '  cd %s && claude\n' "$(shq "$WT")"
 if [ "$KIND" = "ticket" ]; then
-  printf '  # then inside that session:  /fnd:ship %s   (dev server: --port %s)\n' "$WORK_ID" "$PORT"
+  printf '  # then inside that session:  /fnd:ship %s\n' "$WORK_ID"
 else
-  printf '  # then inside that session: start the work there (dev server: --port %s)\n' "$PORT"
+  printf '  # then inside that session: start the work there\n'
 fi
+# The port alone is half the isolation — a dev server started without --theme syncs this branch
+# into the SHARED dev theme the copied config names. The skill fills the id in once the session
+# theme is settled; naming the flag here keeps the verbatim block from advertising the unsafe form.
+printf '  # dev server:  npm run dev -- --theme <session-theme-id> --port %s\n' "$PORT"
 printf '  # this checkout (%s) stays free — the worktree needs its OWN terminal and session\n' "$MAIN"

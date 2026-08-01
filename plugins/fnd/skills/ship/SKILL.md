@@ -55,9 +55,11 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 1. **Resume?** Workspace `pipeline.md` with `status: active` **and** the ✋ artifacts on
    disk (`plan.md` + `qa.md` — `active` without them is a half-written record: treat as
    `draft`) → reconcile the phase ledger against ground truth per `pipeline-mode.md` →
-   Decision record, re-run items 2–6 below compactly (a resume often lands in a new
+   Decision record, re-run items 2–6 and 8 below compactly (a resume often lands in a new
    terminal; item 7 is a fresh-run gate only — a resume stays in the checkout the work
-   already lives in), then continue from the first genuinely-undone phase (jump to Step 4).
+   already lives in, and item 8 on a resume is a silent lookup + re-pin, never a question),
+   then continue from the
+   first genuinely-undone phase (jump to Step 4).
    `status: draft` — interviewed, never approved: keep the recorded answers, redo
    Steps 1–3 compactly from the workspace cache and re-present the ✋ — approval never
    comes from a resume. `done` / `aborted` / absent → fresh run.
@@ -68,9 +70,15 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    not mid-run): Atlassian MCP up; Figma MCP when designs are involved; Chrome DevTools
    MCP; the **local dev server** running (`npm run dev` — Turbo: `shopify theme dev -e dev`
    + Vite — or `npm run theme:shopify`); not running → ask the developer to start it —
-   a long-lived interactive process the developer owns; never start or kill it yourself;
-   port 9292 taken by another checkout, or the workspace's `notes.md` recording a
-   `dev-port:` line → the start command to give them is `npm run dev -- --port <N>`;
+   a long-lived interactive process the developer owns; never start or kill it yourself.
+   The start command to give them is `npm run dev -- --theme <id> [--port <N>]`: `<id>` is
+   the session theme (never the shared dev theme), and `--port <N>` is added when port 9292
+   is taken by another checkout or the workspace's `notes.md` records a `dev-port:` line.
+   **A server that isn't running does not stop the run here** — it needs an id item 8 has
+   not settled yet, and item 7 can end the run before that. Note it as pending, finish
+   items 4–8, then hand the full command over once item 8 has the id (a server already
+   running on a different theme has to be restarted on this one — ask, never do it yourself).
+   Everything else in item 3 keeps its stop semantics.
    `gh auth status`; Shopify CLI present; **store access** — one cheap read through
    `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` (probe `.graphql` → scratch),
    then classify: read failed → `none`; read ok → probe
@@ -105,6 +113,27 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    re-runs `/fnd:ship <ticket>` there. **Continue here** → proceed, no further mention.
    Script absent (older plugin install) → offer the one-line fallback instead:
    `git worktree add -b feat/<KEY> ../<repo>-<KEY> origin/develop`.
+8. **Session theme** — one preview theme per work stream, so the dev server, the QA rows
+   that can't run locally, and the PR all point at the same unpublished theme instead of
+   the shared dev theme two checkouts would fight over. The flow is
+   `${CLAUDE_PLUGIN_ROOT}/references/session-theme.md` (read it whenever the gate runs).
+   Workspace `notes.md` already records a `session-theme: <id>` line → no question: run
+   `…/create-preview-theme.sh pin --theme <id>` silently to re-assert it in **this**
+   checkout (the workspace is shared across checkouts, so recorded ≠ pinned here;
+   re-pinning the same id is a no-op) and say so in one line. That line is the only
+   silent-reuse trigger — never infer one from the config, which you may not read and
+   whose `dev_theme_id` cannot tell a session pin from the shared dev theme.
+   Otherwise one AskUserQuestion, never a block, both resolved commands in the question
+   text: **create one now** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create
+   --name "<name>" --reuse --pin-toml`, `<name>` derived as the PR's is — `info`'s
+   `dev_theme_name` with the role prefix swapped for the key: `[ELC-206] Kever | Domaine`)
+   vs **use an existing theme id** the developer supplies (`…/create-preview-theme.sh pin
+   --theme <id>` — validates it against the store, refuses the live theme, pushes nothing).
+   Record the id as a dated `session-theme: <id>` bullet in `notes.md` the instant the
+   script returns it (crash-safe ordering), with the name/`preview_url` only if the script
+   returned them and `superseded: <id>` when it reported `superseded_theme_id=`. Then hand
+   over item 3's start command with `--theme <id>` filled in. Never read or echo
+   `shopify.theme.toml`.
 
 ## Step 1 — Ingest (parallel reads, workspace-first)
 
@@ -174,12 +203,14 @@ recommended answer. Explore the codebase instead of asking whenever the code can
   run can't pause for manual execution) vs static-only validation for those
   QA rows (named in the checklist, never silently skipped).
   **AC touching a logged-in customer, checkout, or account pages** can't run on the
-  local dev server — decide here: mark those rows `preview-theme` (the qa phase builds
-  the `[ELC-…]` preview theme and tests them on its preview URL) or
+  local dev server — decide here: mark those rows `preview-theme` (the qa phase runs them
+  on the session theme's preview URL, refreshing it first — it builds an `[ELC-…]` theme
+  only when none is recorded) or
   `not-executable: access`; never simulate a logged-in state locally.
 - **Policy set:** working branch (stay vs create + name) and PR target branch (default
-  `develop`); commit scope (ticket key?); preview theme (auto-create `--reuse` vs manual
-  triplet) + storefront path for deep-links; PR **end state — draft vs ready**
+  `develop`); commit scope (ticket key?); preview theme — the Step 0 item 8 session theme
+  is it; ask only when none was settled (auto-create `--reuse` vs manual triplet) — plus
+  the storefront path for deep-links; PR **end state — draft vs ready**
   (recommend `draft`; the PR is always *created* ready so review bots see it — aftercare
   applies the end state last, phase 6); Jira write-backs via
   MCP — Steps to Test field / PR link / hand-off comment (each yes/no); PR bots to await

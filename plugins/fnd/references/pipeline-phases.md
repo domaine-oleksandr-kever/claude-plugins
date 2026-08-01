@@ -34,9 +34,16 @@ its brief says otherwise.
    `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` /
    `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh` (snapshot → mutate → verify →
    **restore**); rows marked `preview-theme` (logged-in customer / checkout / account
-   pages) → first build the `[ELC-…]` preview theme
-   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create --name "<name>" --reuse`,
-   id + links → `notes.md`) and run them against its preview URL — never simulate a
+   pages) → run them against the **session theme** `notes.md` records as
+   `session-theme: <id>`, refreshed to this branch's code
+   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh refresh --theme <id>` — settings
+   preserved); no line recorded → build the `[ELC-…]` theme
+   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create --name "<name>" --reuse`)
+   and record it as `session-theme: <id>` + links in `notes.md`, so create
+   happens at most once per work stream. **No `--pin-toml` here** — this phase is past the ✋
+   and rewriting the developer's `shopify.theme.toml` unasked (possibly the choice they
+   declined at Step 0) is not an autonomous phase's call; the pin is re-asserted by the Step 0
+   gate on the next entry. Never simulate a
    logged-in state on the dev server; evidence per row; append the pass/fail report + findings with exact
    repro values to `qa.md`, blocking vs non-blocking. Merge the `bug-hunter` findings
    into the same triage — every one **dispositioned** (fix / justify → `ceiling:` entry +
@@ -69,8 +76,9 @@ its brief says otherwise.
    backstop. Never recompute it blindly. Then push the working branch. Tick **both**
    `pre-commit-review` and `commit` rows.
 4. **create-pr** — agent. Brief: the policy answers (preview theme / target branch /
-   storefront path), the `notes.md` `ceiling:` entries (+ the preview-theme id if qa
-   already created it), and
+   storefront path), the `notes.md` `ceiling:` entries **and its `session-theme: <id>`
+   line — that theme is the PR's preview theme, so the agent refreshes it instead of
+   auto-creating another** (REFERENCE.md → Preview theme, precedence step 2), and
    `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md` — it owns the title
    convention, the body order (Summary → Jira → theme-preview table in the top third;
    ceilings → Dependencies) and the preview-theme decision flow (`[ELC-…]` naming,
@@ -98,10 +106,11 @@ its brief says otherwise.
    `gh api` (~90 s interval; the timebox is a **cap on active bot work, not a wait
    target** — see the silence early-exit below). Per finding: triage vs AC/TA —
    AC-compatible → fix; contradicts AC or out of scope → don't, and say why. After any
-   fixes: refresh the preview theme code
-   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh refresh --theme <id from
-   notes.md>` — settings
-   untouched), re-verify the touched flow in the browser, commit + push. Reply to
+   fixes: refresh the session theme's code
+   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh refresh --theme <the
+   session-theme id from notes.md>` — settings
+   untouched, and it is the same theme the PR table links to), re-verify the touched flow
+   in the browser, commit + push. Reply to
    **every** thread (what was done / why not) and resolve it (`gh api graphql`,
    `resolveReviewThread`). **Cap 2 rounds** → ESCALATE survivors. **Silence
    early-exit:** with checks green, if by ~10 min after PR creation there is no bot

@@ -50,12 +50,44 @@ key. Flow context (decision flow, drift blockquote, push-root mechanics) stays i
   code** — say so, and tell the reviewer the preview is mid-update until a push succeeds. Fix the
   named cause, then re-run the same command (a re-push is idempotent — it overwrites, it never
   stacks).
-- **`error=invalid_theme_id`** → nothing ran: `refresh --theme` takes a **numeric** id; a gid
-  (`gid://shopify/OnlineStoreTheme/…`) or a name is refused — strip it to the digits, or use
-  `create --name "<name>" --reuse`, which resolves and vets a name.
+- **`error=invalid_theme_id`** → nothing ran: `refresh --theme` and `pin --theme` take a
+  **numeric** id; a gid (`gid://shopify/OnlineStoreTheme/…`) or a name is refused — strip it to
+  the digits, or use `create --name "<name>" --reuse`, which resolves and vets a name.
 - **`error=invalid_dev_theme_id`** / **`error=invalid_store`** → nothing ran: the toml's `theme =` /
   `store =` line is unusable (non-numeric id, or a store that isn't a myshopify handle/URL). Take the
-  manual path and have the developer fix that line — never read the toml to "check".
+  manual path and have the developer fix that line — never read the toml to "check". The one
+  exception is `pin`, which is deliberately allowed to run on a config in that state: it exists
+  to repair the `theme =` line, so `pin --theme <id>` is the fix for `invalid_dev_theme_id`.
+- **Session-theme pin outcomes** (`pin`, and `create` / `refresh` with `--pin-toml` —
+  `${CLAUDE_PLUGIN_ROOT}/references/session-theme.md`):
+  - **`error=theme_not_found theme=<id> store=<store>`** → nothing was written: no theme with
+    that id is listed on the store. Check the id (a preview URL's `?preview_theme_id=…`) or
+    create one. Note `error=live_theme_write_refused` guards pin-only mode too — pinning the
+    published theme would point `shopify theme dev` at the storefront.
+  - **`error=theme_unverifiable`** → nothing was written: the store listing was unavailable, so
+    the id could not be vetted, and a standalone `pin` refuses rather than persist an unvetted
+    pin. Retry when the store answers. On `create`/`refresh --pin-toml` the same outage is
+    non-blocking: the pin proceeds, flagged by a `warn=pin_unvetted` line before the pin keys
+    (the id was just pushed to, so it exists) — a warning, not an error.
+  - **`error=ambiguous_env envs='<a b>'`** → the toml's `[environments.*]` blocks include none
+    named `dev`/`development` (a lone block with another name is refused, never auto-picked),
+    so which one the dev server reads cannot be guessed. Nothing
+    was written. Ask the developer which environment `npm run dev` uses and re-run with
+    `--env <name>`.
+  - **`error=env_not_found env='<name>'`** → that `[environments.<name>]` block isn't in the
+    file (the message lists the ones that are). Nothing was written.
+  - **`error=pin_toml_failed toml=<path>`** → the rewrite itself failed (permissions, disk).
+    Nothing was written; the file is untouched.
+  - On `create` / `refresh` those same failures are **non-fatal** and arrive as
+    `pin=failed` + `pin_error=…` *after* a normal `theme_id=` line: the theme exists, only the
+    config wasn't changed. Record the id, say the pin didn't land, and keep handing the
+    developer the explicit `npm run dev -- --theme <id>` form. A `pin_error=` naming a
+    **non-numeric theme id** means the push reported a gid — the theme is real, the config was
+    correctly left alone.
+  - **Restoring a pin by hand:** the superseded value sits on the `# theme = "…" #
+    fnd:superseded` line directly above the pinned one — the developer uncomments it and
+    deletes the session line (an appended session line is tagged `# fnd:session-theme` — just
+    delete it). Same edit `worktree-setup.sh`'s unpin makes.
 - **`cause=throttled`** on any push failure → the rate limit held through the script's own retries
   (the store+token limit is shared with a running `shopify theme dev`) — stop the competing
   consumer, or wait, then re-run.

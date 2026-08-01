@@ -29,20 +29,50 @@
 #   NB: the FIRST uncommented match wins — in a multi-environment toml ([environments.*])
 #   that is the first environment listed; point TOML_PATH at a single-env file to override.
 #
+# SESSION THEME (`pin` / `--pin-toml`): one preview theme per work stream. Pinning rewrites the
+# `theme =` line of ONE environment block — the block `shopify theme dev -e <name>` actually reads
+# (see `pin` below) — so the session theme is what the dev server syncs into. In the usual
+# single-environment toml that is also the line THIS script reads, so a later `create` copies the
+# customizer settings from the SESSION theme rather than the shared dev theme: that is the point
+# (the session theme was seeded from the dev theme when it was created), and it is why the pin
+# belongs to a work stream, not to the repo. In a MULTI-environment toml the two can differ — the
+# CLI resolves per environment, this script still resolves the first uncommented line — so pin the
+# environment the dev server uses and pass a single-env $TOML_PATH if the settings source matters.
+#
 # Subcommands:
 #   info
 #       → store=… dev_theme_id=… dev_theme_name=…                       (no mutation)
-#   create --name "<NAME>" [--reuse] [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"]
+#   create --name "<NAME>" [--reuse] [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #       → build repo → push code (settings ignored) to a new unpublished theme
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
 #       → theme_id=… name=… store=… preview_url=… editor_url=… reused=… built=…
-#   refresh --theme <ID> [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"]
+#   refresh --theme <ID> [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
 #       → theme_id=… store=… preview_url=… editor_url=… built=…
+#   pin --theme <ID> [--env <name>]
+#       → vet <ID> against the store (must exist, must not be the live theme) and pin it into
+#         the toml. No build, no push, no theme is created or changed on the store. A `theme list`
+#         that gave no readable answer leaves the id unverifiable and the pin is REFUSED
+#         (`error=theme_unverifiable`): a pin persists in the config, so fail-open is not an
+#         option here — retry when the store answers.
+#       → theme_id=… store=… pinned_toml=… pin=… pin_env=… commented_dupes=… [superseded_theme_id=…]
 #
 #   --ignore-extra "<glob>"  (create & refresh, repeatable) — extra `--ignore` pattern passed
 #       through to `shopify theme push`, for a file inside a theme dir that must not ship.
+#   --pin-toml  (create & refresh) — after the push succeeds, pin the resulting theme id into
+#       the toml (see `pin`) and add `pinned_toml=… pin=… pin_env=… commented_dupes=…
+#       [superseded_theme_id=…]` to the output; on failure only `pinned_toml=`, `pin=failed`,
+#       `pin_error=…` are printed. A pin failure here is reported but never fails the run: the
+#       theme exists by then and a caller that lost its id cannot clean it up. When `theme list`
+#       gave no readable answer the pin still proceeds (unlike standalone `pin` — the theme is
+#       real by now and its id must reach the config) but `warn=pin_unvetted` precedes the pin keys.
+#   --env <name>  (pin, and create/refresh WITH --pin-toml — without it the flag would be a silent
+#       no-op, so it is refused: `--env requires --pin-toml`) — the `[environments.<name>]` block
+#       to pin. Default: `dev`, else `development` — by NAME, never by count (a single block under
+#       any other name is not auto-picked) — else the top-level keys when an uncommented top-level
+#       `theme =`/`store =` precedes the first block (reported as `pin_env=-`), else refuse
+#       (`error=ambiguous_env`, pass --env <name>) rather than guess which one the dev server reads.
 #
 # Output is `key=value` lines on stdout. Errors print `error=<reason>` and exit non-zero.
 # Pushes retry on a Shopify `Throttled` answer (pauses: $FND_CPT_THROTTLE_WAITS, default "20 60");
@@ -78,6 +108,11 @@ need_val() { [ "$1" -ge 2 ] || fail "missing value for $2"; }
 command -v shopify >/dev/null 2>&1 || fail "shopify CLI not found on PATH"
 command -v jq >/dev/null 2>&1 || fail "jq not found on PATH (install: brew install jq)"
 [ -f "$TOML" ] || fail "config not found: $TOML (run from the project root, or set TOML_PATH)"
+
+# The subcommand is resolved BEFORE the config is parsed. `pin` is the one mode that WRITES the
+# toml, and a missing or malformed `theme =` line is exactly the state it exists to repair — so
+# the two hard stops on that value below must not kill it before it runs.
+MODE="${1:-}"; shift || true
 
 # --- parse shopify.theme.toml (token is read but NEVER printed) ---------------
 # TOML scalar reader: handles "…" / '…' / bare values, drops a trailing comment only OUTSIDE quotes,
@@ -120,7 +155,7 @@ case "$TOKEN" in shp[a-z]*_[A-Za-z0-9]*) ;; *) TOKEN="" ;; esac
 [ -n "$TOKEN" ] || TOKEN="$(grep -oE 'shp[a-z]+_[A-Za-z0-9]+' "$TOML" | head -1 || true)"
 [ -n "$TOKEN" ] || TOKEN="${SHOPIFY_CLI_THEME_TOKEN:-}"
 
-[ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML"
+[ "$MODE" = pin ] || [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML"
 [ -n "${STORE:-}" ]        || fail "no uncommented \`store = \"...\"\` line in $TOML"
 [ -n "${TOKEN:-}" ]        || fail "no access token (password / shp*_… in $TOML, or \$SHOPIFY_CLI_THEME_TOKEN)"
 
@@ -132,9 +167,11 @@ STORE="${STORE#http://}"; STORE="${STORE#https://}"; STORE="${STORE%/}"
 # an opaque failure at best and the WRONG STORE at worst. A malformed dev theme id is the nastier
 # one: the code push does not use it, so a theme IS created, and only the settings pull fails —
 # which is how a run ends up reporting a pull error while an orphan theme burns a slot on the store.
-case "$DEV_THEME_ID" in *[!0-9]*)
-  fail "invalid_dev_theme_id id='$DEV_THEME_ID' (expected digits — check the \`theme =\` line in $TOML)" ;;
-esac
+if [ "$MODE" != pin ]; then
+  case "$DEV_THEME_ID" in *[!0-9]*)
+    fail "invalid_dev_theme_id id='$DEV_THEME_ID' (expected digits — check the \`theme =\` line in $TOML)" ;;
+  esac
+fi
 case "$STORE" in ''|*[!A-Za-z0-9.-]*)
   fail "invalid_store store='$STORE' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL — check the \`store =\` line in $TOML)" ;;
 esac
@@ -173,6 +210,10 @@ cleanup() {
     rm -f "${PULL_ERR:-}"
   fi
   for d in ${CLEAN_DIRS[@]+"${CLEAN_DIRS[@]}"}; do rm -rf "$d"; done
+  # A half-written pin temp lives NEXT TO the developer's toml (same dir = atomic rename), so an
+  # interrupted run must not leave a dot-file behind in the repo root.
+  [ -z "${PIN_TMP:-}" ] || rm -f "$PIN_TMP"
+  [ -z "${PIN_META:-}" ] || rm -f "$PIN_META"
   return 0
 }
 trap cleanup EXIT
@@ -431,6 +472,273 @@ overlay_settings() {
   overlay_fail overlay_push_failed "$target" "$reused" "$perr" "$reason"
 }
 
+# --- session-theme pin --------------------------------------------------------
+# Pin $1 as the session theme — scoped to ONE environment block, because that is how the Shopify
+# CLI reads this file: `shopify theme dev -e dev` takes `theme =` from `[environments.dev]`, NOT
+# from the first one in the file. A file-order pin would drop the session id into whichever block
+# happens to be listed first (`[environments.production]` in a real multi-env config, whose id is
+# usually the LIVE theme) and leave the block the dev server reads with no theme at all.
+# Which block:
+#   --env <name>          → [environments.<name>]         (absent → env_not_found)
+#   no [environments.*]   → the top-level keys before the first section header (reported as pin_env=-)
+#   any blocks            → `dev`, else `development` — by NAME, never by count (a single block
+#                           under any other name, e.g. production, is NOT auto-picked); else the
+#                           top-level keys, when an uncommented top-level `theme =`/`store =`
+#                           precedes the first header (pin_env=-); else ambiguous_env — refuse,
+#                           never guess
+# Inside that block the FIRST uncommented `theme =` line takes the new id and every LATER
+# uncommented `theme =` line in the SAME block is prefixed with `# ` (value intact, uncomment to
+# restore; their count is reported as `commented_dupes=`). Blocks the pin does not target are
+# never touched.
+# The value being replaced is not lost either: the original line is kept, commented, directly
+# above the pinned one and marked `# fnd:superseded` — this file is gitignored, so once the shared
+# dev theme id is overwritten it exists nowhere else. A block that ALREADY carries a real marker
+# line (`# theme = … # fnd:superseded` — a stray comment merely containing the string is not one)
+# keeps it untouched: the first pin's value is the one worth restoring, and re-pins must neither
+# stack markers nor lose the original.
+# With no uncommented `theme =` in the block, one is inserted after its `store =` line, else right
+# under the block header — carrying a trailing `# fnd:session-theme` tag: the block had no
+# `theme =` of its own, so there is nothing to supersede, and the tag is what lets
+# worktree-setup.sh's unpin DELETE the line and restore the original no-theme state. A re-pin of a
+# different id on a tagged line swaps the value, keeps the tag and writes no marker (the line is
+# session-owned).
+# Indentation, quoting style, trailing comments, CRLF endings and a missing final newline are
+# all preserved, so re-pinning the same id is a byte-for-byte no-op — which is what lets a skill
+# re-enter a session and pin again without asking.
+# The file holds the Theme Access token: nothing here prints a line, a diff or a byte of it.
+PIN_ACTION=""; PIN_DUPES=0; PIN_OLD=""; PIN_ENV_USED=""; PIN_PATH=""; PIN_TMP=""; PIN_META=""
+PIN_ERR_KEY=""; PIN_ERR_MSG=""
+resolve_pin_path() {
+  local d b
+  d="$(dirname "$TOML")"; b="$(basename "$TOML")"
+  PIN_PATH="$(cd "$d" 2>/dev/null && pwd)/$b" || PIN_PATH="$TOML"
+}
+pin_toml() { # $1 = theme id → 0 + PIN_ACTION=rewritten|appended|unchanged; 1 + PIN_ERR_KEY/_MSG
+  local id="$1" target link hops dir tmp meta endnl mode had status envs
+  resolve_pin_path
+  PIN_ERR_KEY="pin_toml_failed"
+  PIN_ERR_MSG="toml=$PIN_PATH — could not rewrite the \`theme =\` line (check the file's permissions and its directory's, and free disk space)"
+
+  # Follow a symlinked config to its target: the rename below would otherwise REPLACE the link
+  # with a regular file and silently unpin whatever the developer pointed it at. Bounded, so a
+  # symlink cycle is a failure and not a hang.
+  target="$TOML"; hops=0
+  while [ -L "$target" ] && [ "$hops" -lt 16 ]; do
+    link="$(readlink "$target")" || return 1
+    case "$link" in /*) target="$link" ;; *) target="$(dirname "$target")/$link" ;; esac
+    hops=$((hops + 1))
+  done
+  [ -f "$target" ] || return 1
+  dir="$(dirname "$target")"
+
+  # A file whose last byte is not a newline must not gain one — that alone would make a re-pin a
+  # "change" and cost idempotence. Command substitution strips trailing newlines, so an empty
+  # result means the last byte IS one.
+  endnl=1
+  if [ -s "$target" ] && [ -n "$(tail -c 1 "$target" 2>/dev/null)" ]; then endnl=0; fi
+
+  # awk writes the new file to stdout and its findings (which block it chose, what it replaced) to
+  # a side file: one pass owns the block resolution, so the report can never describe a different
+  # rewrite than the one on disk. Nothing in it is secret — an env name, a theme id, two counts.
+  meta="$(mk_tmpf)" || return 1
+  PIN_META="$meta"
+  # Same-directory temp + rename: rename(2) is atomic and never crosses a filesystem, so a kill
+  # mid-write cannot leave the developer with a truncated (token-less) config.
+  tmp="$(mktemp "$dir/.fnd-pin.XXXXXX" 2>/dev/null)" || { rm -f "$meta"; PIN_META=""; return 1; }
+  PIN_TMP="$tmp"
+  if ! awk -v id="$id" -v want="$PIN_ENV" -v endnl="$endnl" -v meta="$meta" '
+    function emit(t) { if (started) printf "\n"; printf "%s", t; started = 1 }
+    function nocr(s) { sub(/\r$/, "", s); return s }
+    function valof(orig,   v, q, p, h) {
+      v = nocr(orig)
+      sub(/^[ \t]*theme[ \t]*=[ \t]*/, "", v)
+      q = substr(v, 1, 1)
+      if (q == "\"" || q == SQ) {
+        v = substr(v, 2); p = index(v, q)
+        if (p > 0) v = substr(v, 1, p - 1)
+      } else {
+        h = index(v, "#"); if (h > 0) v = substr(v, 1, h - 1)
+        sub(/[ \t]+$/, "", v)
+      }
+      return v
+    }
+    function repin(orig, newid,   s, cr, pre, rest, q, p, tail) {
+      s = orig; cr = ""
+      if (s ~ /\r$/) { cr = "\r"; sub(/\r$/, "", s) }
+      if (!match(s, /^[ \t]*theme[ \t]*=[ \t]*/)) return orig
+      pre = substr(s, 1, RLENGTH); rest = substr(s, RLENGTH + 1)
+      q = substr(rest, 1, 1)
+      if (q == "\"" || q == SQ) {
+        p = index(substr(rest, 2), q)
+        tail = (p > 0) ? substr(rest, p + 2) : ""
+      } else {
+        match(rest, /^[^ \t#]*/)
+        if (RLENGTH > 0) { q = ""; tail = substr(rest, RLENGTH + 1) }
+        else { q = "\""; tail = rest }
+      }
+      return pre q newid q tail cr
+    }
+    BEGIN { SQ = "\047"; n = 0 }
+    { line[++n] = $0 }
+    END {
+      # 1. map the uncommented section headers and the environment blocks among them
+      nenv = 0; nh = 0; firsthdr = 0; envs = ""
+      for (i = 1; i <= n; i++) {
+        s = nocr(line[i])
+        if (s ~ /^[ \t]*#/) continue
+        if (s ~ /^[ \t]*\[/) {
+          if (firsthdr == 0) firsthdr = i
+          hline[++nh] = i
+          nm = s; sub(/^[ \t]*\[[ \t]*/, "", nm); sub(/[ \t]*\].*$/, "", nm)
+          if (index(nm, "environments.") == 1) {
+            nenv++; ename[nenv] = substr(nm, 14); eline[nenv] = i
+            envs = (envs == "") ? ename[nenv] : envs " " ename[nenv]
+          }
+        }
+      }
+      # 2. choose the block (hdr = its header line; 0 = the top-level keys). By NAME only —
+      # `shopify theme dev -e <name>` resolves by name, so "there happens to be exactly one
+      # block" proves nothing about which environment the dev server reads and a lone
+      # [environments.production] must not be auto-picked. The top-level keys are the fallback
+      # when the file actually HAS them (an uncommented theme=/store= before the first header).
+      toplevel = 0
+      toplim = (firsthdr > 0) ? firsthdr - 1 : n
+      for (i = 1; i <= toplim; i++) {
+        s = nocr(line[i])
+        if (s ~ /^[ \t]*#/) continue
+        if (s ~ /^[ \t]*(theme|store)[ \t]*=/) { toplevel = 1; break }
+      }
+      hdr = -1; used = "-"
+      if (want != "") {
+        for (j = 1; j <= nenv; j++) if (ename[j] == want) { hdr = eline[j]; used = want }
+        if (hdr < 0) { print "status=env_not_found" > meta; print "envs=" envs > meta; exit 1 }
+      } else if (nenv == 0) {
+        hdr = 0
+      } else {
+        for (j = 1; j <= nenv; j++) if (ename[j] == "dev") { hdr = eline[j]; used = "dev" }
+        if (hdr < 0) for (j = 1; j <= nenv; j++) if (ename[j] == "development") { hdr = eline[j]; used = "development" }
+        if (hdr < 0 && toplevel) hdr = 0
+        if (hdr < 0) { print "status=ambiguous_env" > meta; print "envs=" envs > meta; exit 1 }
+      }
+      if (hdr > 0) {
+        rstart = hdr + 1; rend = n
+        for (j = 1; j <= nh; j++) if (hline[j] > hdr) { rend = hline[j] - 1; break }
+      } else {
+        rstart = 1; rend = (firsthdr > 0) ? firsthdr - 1 : n
+      }
+      # 3. what is in that block. `marked` matches only a REAL marker line — a commented
+      # `theme =` carrying the string — because a stray comment that merely mentions
+      # fnd:superseded must not suppress the marker a real pin still owes the file. `tagged`
+      # means the first uncommented `theme =` line is a session-owned append (trailing
+      # `# fnd:session-theme`): re-pinning it swaps the value and keeps the tag, and no marker
+      # is ever written for it — the original state had no `theme =` line to restore.
+      first = 0; extra = 0; anchor = 0; marked = 0; tagged = 0
+      for (i = rstart; i <= rend; i++) {
+        s = nocr(line[i])
+        if (s ~ /^[ \t]*#/) { if (s ~ /^[ \t]*#[ \t]*theme[ \t]*=.*fnd:superseded/) marked = 1; continue }
+        if (s ~ /^[ \t]*theme[ \t]*=/) {
+          if (first == 0) { first = i; if (s ~ /#[ \t]*fnd:session-theme[ \t]*$/) tagged = 1 }
+          else extra++
+          continue
+        }
+        if (anchor == 0 && s ~ /^[ \t]*store[ \t]*=/) anchor = i
+      }
+      old = ""; mark = ""; ins = ""; at = -1
+      if (first > 0) {
+        old = valof(line[first])
+        if (old != id && marked == 0 && tagged == 0) {
+          mo = line[first]; mcr = ""
+          if (mo ~ /\r$/) { mcr = "\r"; sub(/\r$/, "", mo) }
+          mark = "# " mo "  # fnd:superseded" mcr
+        }
+        line[first] = repin(line[first], id)
+        for (i = first + 1; i <= rend; i++) {
+          s = nocr(line[i])
+          if (s ~ /^[ \t]*#/) continue
+          if (s ~ /^[ \t]*theme[ \t]*=/) line[i] = "# " line[i]
+        }
+      } else {
+        ref = (anchor > 0) ? anchor : hdr
+        at = (ref > 0) ? ref : rend
+        ind = ""; cr = ""
+        if (ref > 0) {
+          if (line[ref] ~ /\r$/) cr = "\r"
+          match(line[ref], /^[ \t]*/); ind = substr(line[ref], 1, RLENGTH)
+        }
+        ins = ind "theme = \"" id "\" # fnd:session-theme" cr
+      }
+      print "status=ok" > meta
+      print "env=" used > meta
+      print "had=" (first > 0 ? 1 : 0) > meta
+      print "commented_dupes=" extra > meta
+      print "old=" old > meta
+      started = 0
+      if (ins != "" && at == 0) emit(ins)
+      for (i = 1; i <= n; i++) {
+        if (mark != "" && i == first) emit(mark)
+        emit(line[i])
+        if (ins != "" && i == at) emit(ins)
+      }
+      if (started && endnl == 1) printf "\n"
+    }
+  ' "$target" > "$tmp" 2>/dev/null; then
+    status="$(grep '^status=' "$meta" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+    envs="$(grep '^envs=' "$meta" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+    case "$status" in
+      env_not_found)
+        PIN_ERR_KEY="env_not_found"
+        PIN_ERR_MSG="env='$PIN_ENV' toml=$PIN_PATH — no \`[environments.$PIN_ENV]\` block in it (present: ${envs:-none})" ;;
+      ambiguous_env)
+        PIN_ERR_KEY="ambiguous_env"
+        PIN_ERR_MSG="envs='$envs' toml=$PIN_PATH — no environment block named \`dev\`/\`development\` and no top-level \`theme =\`/\`store =\` keys, so which block \`shopify theme dev\` reads cannot be guessed; re-run with --env <name>" ;;
+    esac
+    rm -f "$tmp" "$meta"; PIN_TMP=""; PIN_META=""; return 1
+  fi
+  [ -s "$tmp" ] || { rm -f "$tmp" "$meta"; PIN_TMP=""; PIN_META=""; return 1; }
+
+  PIN_ENV_USED="$(grep '^env=' "$meta" | head -1 | cut -d= -f2- || true)"
+  had="$(grep '^had=' "$meta" | head -1 | cut -d= -f2- || true)"
+  PIN_DUPES="$(grep '^commented_dupes=' "$meta" | head -1 | cut -d= -f2- || true)"
+  PIN_OLD="$(grep '^old=' "$meta" | head -1 | cut -d= -f2- || true)"
+  rm -f "$meta"; PIN_META=""
+  case "$PIN_DUPES" in ''|*[!0-9]*) PIN_DUPES=0 ;; esac
+  # only a value that actually went away is worth reporting — the caller records it so the
+  # environment can be restored without hunting the id down in the Shopify admin
+  [ "$PIN_OLD" != "$id" ] || PIN_OLD=""
+
+  if cmp -s "$tmp" "$target"; then
+    rm -f "$tmp"; PIN_TMP=""; PIN_ACTION="unchanged"; return 0
+  fi
+  # mktemp creates 0600; a config the developer keeps at 0644 must not silently change mode.
+  mode="$(stat -f '%Lp' "$target" 2>/dev/null || stat -c '%a' "$target" 2>/dev/null || true)"
+  case "$mode" in ''|*[!0-7]*) ;; *) chmod "$mode" "$tmp" 2>/dev/null || true ;; esac
+  mv -f "$tmp" "$target" 2>/dev/null || { rm -f "$tmp"; PIN_TMP=""; return 1; }
+  PIN_TMP=""
+  if [ "$had" = "1" ]; then PIN_ACTION="rewritten"; else PIN_ACTION="appended"; fi
+  return 0
+}
+
+# The pin keys, printed AFTER the theme keys on create/refresh: a caller reading the stream must
+# have the theme id in hand before it learns anything about the toml.
+PIN=0; PIN_ENV=""; PIN_FAIL=""
+print_pin_keys() {
+  [ -n "$PIN_PATH" ] || resolve_pin_path
+  # `theme list` never gave a readable answer, so the pinned id could not be vetted against the
+  # store — said BEFORE the pin keys, so a caller acting on pin= has already seen it. Standalone
+  # `pin` refuses that state outright (error=theme_unverifiable) and never reaches this line.
+  [ "$THEME_LIST_OK" -eq 1 ] || printf 'warn=pin_unvetted\n'
+  printf 'pinned_toml=%s\n' "$PIN_PATH"
+  if [ -n "$PIN_FAIL" ]; then
+    printf 'pin=failed\n'
+    printf 'pin_error=%s\n' "$PIN_FAIL"
+    return 0
+  fi
+  printf 'pin=%s\n' "$PIN_ACTION"
+  printf 'pin_env=%s\n' "$PIN_ENV_USED"
+  printf 'commented_dupes=%s\n' "$PIN_DUPES"
+  [ -z "$PIN_OLD" ] || printf 'superseded_theme_id=%s\n' "$PIN_OLD"
+}
+
 NO_BUILD=0
 BUILD_CMD="npm run build"
 BUILT="no"
@@ -444,14 +752,49 @@ run_build() {
   fi
 }
 
-MODE="${1:-}"; shift || true
-
 case "$MODE" in
   info)
     load_theme_list
     printf 'store=%s\n' "$STORE"
     printf 'dev_theme_id=%s\n' "$DEV_THEME_ID"
     printf 'dev_theme_name=%s\n' "$(theme_name_by_id "$DEV_THEME_ID")"
+    ;;
+
+  pin)
+    TARGET=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --theme) need_val $# "$1"; TARGET="$2"; shift 2 ;;
+        --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
+        *) fail "unknown arg: $1" ;;
+      esac
+    done
+    [ -n "$TARGET" ] || fail "pin requires --theme <existing theme id>"
+    # Numeric ids only, for the same reason refresh insists: assert_not_live vets by id, so a NAME
+    # would sail past the guard with role="" — and here it would then be written into the config
+    # every later run and `shopify theme dev` resolve against.
+    case "$TARGET" in *[!0-9]*)
+      fail "invalid_theme_id theme='$TARGET' (pin takes a numeric theme id — the id of an existing unpublished/preview theme; to create one use \`create --name \"<name>\" --reuse --pin-toml\`)" ;;
+    esac
+    load_theme_list
+    # A pin PERSISTS in the config and a wrong one poisons every later run — so unlike
+    # create/refresh, where a listing outage only risks one push, standalone `pin` must not
+    # fail open: no readable listing, no vetting, no pin. (create/refresh --pin-toml still
+    # proceed under an outage — their theme is real by pin time and the caller must not lose
+    # its id — but say so with warn=pin_unvetted.)
+    [ "$THEME_LIST_OK" -eq 1 ] || \
+      fail "theme_unverifiable theme=$TARGET store=$STORE — \`shopify theme list --json\` gave no readable answer, so the id cannot be vetted, and a pin persists in the config; re-run when the store answers — nothing was changed"
+    assert_not_live "$TARGET"
+    # Pinning an id that is not on the store poisons every later run (the settings pull, `info`
+    # and `shopify theme dev` all resolve it) with an error naming the config, not the typo. Only
+    # a listing we could actually READ can make that claim — and by here it always was.
+    if [ "$THEME_LIST_OK" -eq 1 ] && ! theme_found_by_id "$TARGET"; then
+      fail "theme_not_found theme=$TARGET store=$STORE — no theme with that id is listed on the store; check the id (a preview URL's \`?preview_theme_id=…\`) or create one with \`create --name \"<name>\"\`"
+    fi
+    pin_toml "$TARGET" || fail "$PIN_ERR_KEY $PIN_ERR_MSG; nothing was changed"
+    printf 'theme_id=%s\n' "$TARGET"
+    printf 'store=%s\n' "$STORE"
+    print_pin_keys
     ;;
 
   create)
@@ -463,10 +806,15 @@ case "$MODE" in
         --no-build) NO_BUILD=1; shift ;;
         --build-cmd) need_val $# "$1"; BUILD_CMD="$2"; shift 2 ;;
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
+        --pin-toml) PIN=1; shift ;;
+        --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
     [ -n "$NAME" ] || fail "create requires --name \"<new theme name>\""
+    # --env only ever feeds pin_toml — accepted without --pin-toml it would be a silent no-op
+    # the caller reads as "the block I named was pinned"
+    [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
 
     # Resolve (and vet) the --reuse target BEFORE the build: a refusal after a several-minute npm
     # build is a refusal the developer waited for, and the live-theme guard must land before the push.
@@ -524,6 +872,20 @@ case "$MODE" in
     #    On drift this exits error=settings_drift (and removes the just-created theme).
     overlay_settings "$THEME_ID" "$REUSED"
 
+    # 3) pin, non-fatally: the theme is real by now, and a config hiccup that took the run
+    #    non-zero would cost the caller the id it needs to reuse (or delete) it.
+    #    The id is re-vetted first — it came out of `--json`, and a gid
+    #    (`gid://shopify/OnlineStoreTheme/…`, a shape this CLI really does emit) written into the
+    #    config would make every later run of this script die on `invalid_dev_theme_id` inside a
+    #    gitignored file only a hand edit can repair. `refresh --pin-toml` pins its own vetted
+    #    $TARGET for the same reason.
+    if [ "$PIN" -eq 1 ]; then
+      case "$THEME_ID" in
+        *[!0-9]*) PIN_FAIL="the push reported a non-numeric theme id ('$THEME_ID'), which \`shopify theme dev\` cannot resolve; the theme was created, the config was NOT changed" ;;
+        *) pin_toml "$THEME_ID" || PIN_FAIL="$PIN_ERR_KEY $PIN_ERR_MSG; the theme was created, the config was NOT changed" ;;
+      esac
+    fi
+
     printf 'theme_id=%s\n' "$THEME_ID"
     printf 'name=%s\n' "$NAME"
     printf 'store=%s\n' "$STORE"
@@ -531,6 +893,7 @@ case "$MODE" in
     printf 'editor_url=%s\n' "$EDITOR"
     printf 'reused=%s\n' "$REUSED"
     printf 'built=%s\n' "$BUILT"
+    [ "$PIN" -eq 0 ] || print_pin_keys
     ;;
 
   refresh)
@@ -541,10 +904,14 @@ case "$MODE" in
         --no-build) NO_BUILD=1; shift ;;
         --build-cmd) need_val $# "$1"; BUILD_CMD="$2"; shift 2 ;;
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
+        --pin-toml) PIN=1; shift ;;
+        --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
     [ -n "$TARGET" ] || fail "refresh requires --theme <existing theme id>"
+    # same guard as create: --env without --pin-toml would be a silent no-op
+    [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
     # Numeric ids only: the CLI resolves a NAME here too, but assert_not_live vets by id — a name
     # target would sail past the guard with role="" and let the CLI resolve it to any theme,
     # the published one included. Names go through create --reuse, which resolves and vets them.
@@ -564,14 +931,21 @@ case "$MODE" in
     OUT="$PUSH_OUT"
     rm -f "$ERR"
 
+    # $TARGET, not the pushed-back id: it is the vetted numeric id this run targeted, and a
+    # --json shape the parser missed must never silently pin an empty value.
+    if [ "$PIN" -eq 1 ]; then
+      pin_toml "$TARGET" || PIN_FAIL="$PIN_ERR_KEY $PIN_ERR_MSG; the refresh landed, the config was NOT changed"
+    fi
+
     printf 'theme_id=%s\n' "$(json_field "$OUT" id)"
     printf 'store=%s\n' "$STORE"
     printf 'preview_url=%s\n' "$(json_field "$OUT" preview_url)"
     printf 'editor_url=%s\n' "$(json_field "$OUT" editor_url)"
     printf 'built=%s\n' "$BUILT"
+    [ "$PIN" -eq 0 ] || print_pin_keys
     ;;
 
   *)
-    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-cmd \"<cmd>\"] [--ignore-extra \"<glob>\"] | refresh --theme <id> [--no-build] [--build-cmd \"<cmd>\"] [--ignore-extra \"<glob>\"]"
+    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-cmd \"<cmd>\"] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] | refresh --theme <id> [--no-build] [--build-cmd \"<cmd>\"] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] | pin --theme <id> [--env <name>]"
     ;;
 esac

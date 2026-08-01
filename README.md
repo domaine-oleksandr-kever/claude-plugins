@@ -342,10 +342,10 @@ flowchart TD
 ## Parallel ship via git worktree
 
 A ship run owns the repo it starts in — a dirty tree, the dev server on port 9292, the
-`shopify.theme.toml` the preview script rewrites — and it owns the session for the whole
-run. `plugins/fnd/scripts/worktree-setup.sh` moves the run into a **linked git worktree**
-(shared `.git`, no clone, instant setup) so the main checkout and the main session stay
-free for everything else:
+`theme =` line in `shopify.theme.toml` that the session-theme pin rewrites — and it owns
+the session for the whole run. `plugins/fnd/scripts/worktree-setup.sh` moves the run into
+a **linked git worktree** (shared `.git`, no clone, instant setup) so the main checkout and
+the main session stay free for everything else:
 
 ```text
 worktree-setup.sh <WORK-ID> [<base-branch>]     # default base: develop
@@ -361,17 +361,27 @@ Create mode does the whole setup in one pass: the worktree as a **sibling** dire
 when no remote-tracking ref exists) — an existing local
 or remote branch of that name is checked out, never duplicated; `npm ci` when the repo has
 a `package.json`; **copies** of the gitignored config a fresh checkout cannot have —
-`shopify.theme.toml`, so the preview theme id that later gets written lands in the worktree
-and leaves the main checkout's config alone, and `.env`, without which every Admin API read
-from the worktree would fail on a missing token; the worktree's `.claude/fnd` **symlinked**
-to the main repo's, so the task workspace is shared between the two checkouts and survives
-the worktree's removal (and git-excluded, so the link never reaches a commit);
+`shopify.theme.toml`, so the session preview theme id the pin step later writes into it
+lands in the worktree and leaves the main checkout's dev environment alone (and a pin the
+source checkout already carried is undone in the copy — `toml_unpinned=yes` — so this stream
+starts from the shared dev theme rather than inheriting another stream's preview), and `.env`,
+without which every Admin API read from the worktree would fail on a missing token; the
+worktree's `.claude/fnd` **symlinked** to the main repo's, so the task workspace is shared
+between the two checkouts and survives the worktree's removal (and git-excluded, so the
+link never reaches a commit);
 `.claude/settings.local.json` copied rather than shared (two sessions approving permissions
 into one file would race); and a free dev port from 9293 upward, recorded as a `dev-port:`
 line in the shared workspace so the ship session finds it — a port counts as taken when
 something is listening on it **or** another work-id's workspace already recorded it, because
 the dev servers only start later, by hand, in the new sessions. Re-running for the same
 work-id is idempotent — an existing worktree just re-prints the hand-off block.
+
+Its own port is half the isolation; the other half is its own **session preview theme**,
+offered once at setup and used by the dev server, QA and the PR table alike — without it
+both sessions would sync their branches into the single theme id the copied
+`shopify.theme.toml` points at, and each would clobber the other's preview. See
+[Session preview theme](#session-preview-theme). A theme per stream does not raise the
+≈2-runs-per-store ceiling below: Shopify's rate limit is per store + token, not per theme.
 
 `--remove` refuses a dirty worktree or a detached HEAD unless you pass `--force`
 (the detached case prints the HEAD sha for recovery), and deliberately touches
@@ -385,7 +395,8 @@ The launch flow is three steps, and only the first happens in the session you're
 in:
 
 ```text
-# 1. in the main checkout
+# 1. in the main checkout — the hand-off block it prints includes
+#    the session theme id and the dev-server line, ready to paste
 /fnd:worktree ELC-206
 
 # 2. a NEW terminal
@@ -393,10 +404,13 @@ cd ../my-theme-ELC-206 && claude
 
 # 3. inside that session
 /fnd:ship ELC-206
+npm run dev -- --theme <session-theme-id> --port 9293   # from step 1's hand-off
 ```
 
 Step 2 is illustrative — paste the `cd` line the script prints (an absolute, quoted path)
-rather than retyping it.
+rather than retyping it. The dev-server line is the one step 1's hand-off gave you, with the
+id and port filled in: without `--theme` the server syncs the branch into the shared dev
+theme the copied config still names.
 
 A session cannot relocate itself into another directory, so the second terminal is yours
 to open — nothing is auto-spawned. `/fnd:ship` knows about the split: started **in a
@@ -415,6 +429,76 @@ an answer.
 - **Different stores don't contend** — there, parallelism is bounded only by your machine.
 - **Usage limits are shared.** Every parallel session bills the same Claude subscription,
   so N ships burn the plan's limit ≈N× as fast. Worktrees buy isolation, not extra quota.
+
+## Session preview theme
+
+One work stream, one theme. `shopify theme dev -e dev` targets the theme id in
+`shopify.theme.toml`, which is shared config — so two sessions on one repo push two
+branches into the *same* remote theme and each overwrites the other's preview. `/fnd:ship`
+and `/fnd:worktree` therefore ask once, up front, which theme the stream owns: create one
+now (`create --name "[ELC-206] Kever | Domaine" --reuse`, the same naming convention the PR
+table uses) or hand over an existing theme id. The answer is **pinned** into that session's
+`shopify.theme.toml` and recorded as a `session-theme: <id>` line in the shared task
+workspace's `notes.md`, next to the `dev-port:` line — a later `/fnd:ship` or
+`/fnd:worktree` finds that line, stops asking, and silently re-runs `pin --theme <id>` so the
+checkout it is standing in is pinned too (the workspace is shared between checkouts, so a
+recorded id is not by itself a pinned one; re-pinning is a byte-level no-op).
+
+From then on everything targets that one theme: the start command the skills hand you
+becomes `npm run dev -- --theme <id> [--port <N>]` (explicit flag *and* pinned toml — belt
+and braces), the qa phase **refreshes** the session theme for its `preview-theme` rows
+instead of building a second one, and `create-pull-request` puts it in the theme-preview
+table rather than auto-creating (a recorded session theme now outranks auto-creation in the
+"Args win" precedence).
+
+Pinning is a `create-preview-theme.sh` job; both forms validate the id against the store
+and refuse the **live** theme. When the store listing is unavailable, the standalone `pin`
+refuses outright (`error=theme_unverifiable`, config untouched — a pin persists, so it is
+never applied unvetted; retry), while `create` / `refresh --pin-toml` proceed and flag it
+with `warn=pin_unvetted`:
+
+```text
+create-preview-theme.sh pin --theme <ID> [--env <name>]           # pin only, no push
+create-preview-theme.sh create --name "<NAME>" --reuse --pin-toml
+create-preview-theme.sh refresh --theme <ID> --pin-toml
+```
+
+The rewrite is **scoped to one environment block**, because that is how the Shopify CLI
+reads this file: `shopify theme dev -e dev` resolves `theme =` inside `[environments.dev]`,
+not the first one in the file. The script pins the block named `dev`, else `development` —
+by name only, so even a lone block with any other name is refused (`error=ambiguous_env`)
+rather than guessed at, since writing a preview id over `[environments.production]` would
+both lose that theme's id and leave the dev server unpinned. `--env <name>` says which one.
+A toml with no `[environments.*]` blocks at all but uncommented top-level `theme =` /
+`store =` keys is pinned at the top level (reported as `pin_env=-`). Blocks it doesn't
+target are never touched.
+
+Inside the chosen block the first uncommented `theme =` line takes the session id and the
+value it replaced is kept right above it on a commented `# … # fnd:superseded` line (and
+reported as `superseded_theme_id=`) — this file is gitignored, so an overwritten dev theme
+id would otherwise be recorded nowhere. Duplicate `theme =` lines in the same block are
+commented out with their values intact (their count reported as `commented_dupes=`), a block
+with none gets one appended tagged `# fnd:session-theme` — session-owned, so a later pin
+just replaces its value and unpinning deletes it — and re-pinning
+the same id leaves the file byte-identical. Nothing else moves — the `password =` Theme
+Access token included, which the script never prints or hands back. On `create` / `refresh`
+the pin runs last, after the push succeeded, the id is re-vetted before it is written, and a
+pin that fails is reported (`pin=failed`) rather than allowed to swallow the id of a theme
+that now exists on the store.
+
+Two consequences worth knowing. `create` takes the **customizer settings** from whatever
+theme the toml points at (code always comes from your branch), so once the session theme is
+pinned a later `create` reads its settings from the session theme itself rather than from
+the shared dev theme — which is why the flow creates once and **refreshes** from then on,
+and a refresh pushes code only, leaving the settings untouched. And a new worktree
+deliberately starts **unpinned**: `worktree-setup.sh` copies the source checkout's config and
+reverts every pin it finds there, both shapes — `fnd:superseded` markers restored,
+`fnd:session-theme` lines deleted (`toml_unpinned=yes`; `=no` means the source was never
+pinned) — so a second work stream inherits the shared dev theme instead of the first
+stream's in-progress preview. (A hand-written theme id that `pin` reported `pin=unchanged`
+on carries no tag and is not reverted.) Restoring a pin by hand is that same edit: uncomment
+the `# … # fnd:superseded` line and drop the pinned line below it — an appended line tagged
+`# fnd:session-theme` is simply deleted.
 
 ## Bundled MCP servers
 
@@ -639,7 +723,7 @@ added to this table.
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 | `FND_GQL_PROBE_CACHE` | `21600` | seconds the gql runner reuses its two sticky machine facts — the `shopify version` probe (~1.5 s, also invalidated whenever the CLI binary is newer than the cache) and "`store execute` is unavailable for this store", which lets a later call skip the doomed probe entirely. `0` re-probes on every call — the escape hatch right after a `shopify store auth`; any invalid value falls back to `21600`. Both caches live in a 0700 per-user dir under `$TMPDIR`; `--engine store` ignores the second one and always attempts |
 | `FND_CPT_THROTTLE_WAITS` | `20 60` | pause(s), in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled` — the store+token rate limit is shared with a running `shopify theme dev`, so a bulk push can 429 while everything else is healthy. One retry per listed value; empty disables retrying (tests pass `0 0`) |
-| `TOML_PATH` | `shopify.theme.toml` | path the theme scripts read their config from — `store =` (all three), the dev-theme id `theme =` (`create-preview-theme.sh` only; must resolve to a NUMERIC id — a theme name is refused, since names are not unique on a store and a mis-parse would orphan a created theme), the Theme Access token (`create-preview-theme.sh`, `theme-json.sh --engine themecli`). Point it at a single-environment file when a multi-environment toml would otherwise resolve to the first `[environments.*]` block listed |
+| `TOML_PATH` | `shopify.theme.toml` | path the theme scripts read their config from — `store =` (all three), the dev-theme id `theme =` (`create-preview-theme.sh` only; must resolve to a NUMERIC id — a theme name is refused, since names are not unique on a store and a mis-parse would orphan a created theme; the `pin` subcommand is the exception, deliberately allowed to run on an absent or malformed `theme =` line precisely to repair it), the Theme Access token (`create-preview-theme.sh`, `theme-json.sh --engine themecli`). Point it at a single-environment file when a multi-environment toml would otherwise resolve to the first `[environments.*]` block listed. Also the **write** target of `create-preview-theme.sh`'s session-theme pin (`pin` / `--pin-toml`), which rewrites the `theme =` line of one environment block via an atomic same-directory replace — permissions and the symlink target are preserved, the inode is not — so point it at a copy when the real config must not be touched |
 | `SHOPIFY_CLI_THEME_TOKEN` | unset | Theme Access token for the `shopify` CLI. `create-preview-theme.sh` reads it as a LAST resort (the repo's own `password =` wins, so a token exported for another project cannot authenticate this repo's pushes against that store); `theme-json.sh --engine themecli` prefers it over the toml. Both export it into the CLI subprocess and never print it |
 | `SHOPIFY_STORE` | unset | store handle/domain used by `theme-json.sh` and `shopify-admin-gql.sh` when `--store` is not passed, ahead of the toml's `store =` |
 | `SHOPIFY_ADMIN_TOKEN` | unset | Admin API access token for the gql runner's token engine, ahead of the `--env` dotenv file — and the escape hatch for a credential that is not shp*_-shaped (only the file value is shape-gated) |

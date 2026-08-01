@@ -2,7 +2,7 @@
 name: worktree
 description: >
   Set up — or tear down — an isolated `git worktree` so a run gets its own checkout, branch,
-  and dev port instead of occupying the main repo. Use when the user asks to create / set up
+  dev port, and preview theme instead of occupying the main repo. Use when the user asks to create / set up
   a worktree (for a ticket key or a slug), to work on something in parallel without tying up
   the main checkout, or to remove / clean up a worktree.
 argument-hint: "<WORK-ID> [base-branch] | --remove <WORK-ID> [--force]"
@@ -13,7 +13,7 @@ arguments:
     description: Branch the worktree's `feat/<WORK-ID>` starts from. Optional — the script's default is `develop`.
   - name: remove
     description: --remove tears the worktree down; --force additionally discards a dirty tree. Optional.
-allowed-tools: Read, Glob, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh*)
+allowed-tools: Read, Glob, Edit, AskUserQuestion, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*), Bash(cd:*)
 ---
 
 # Worktree (create / remove)
@@ -21,11 +21,15 @@ allowed-tools: Read, Glob, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh*
 A thin wrapper over `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh`, run from the client
 theme repo root. The script owns every decision — worktree directory, branch reuse, `npm ci`,
 the gitignored config copies (`shopify.theme.toml`, `.env`), the `.claude/fnd` symlink back to
-the main repo, the free dev port, the hand-off block. This skill resolves the work-id, runs the script, and relays what it printed.
+the main repo, the free dev port, the hand-off block. This skill resolves the work-id, runs the
+script, relays what it printed, and — once the worktree exists — settles its **session theme**
+(step 4) so the new checkout's dev server never syncs into the shared dev theme.
 
 > **This session stays in the main checkout.** A Claude session cannot relocate itself into a
 > new worktree — it needs its own terminal and its own `claude`. Never `cd` into the worktree
-> and keep working here; hand the developer the launch block instead.
+> and keep working here; hand the developer the launch block instead. (Step 4's one-shot
+> `cd <worktree> && <script>` inside a single Bash call is fine — the subshell exits with the
+> command and the session's own cwd never moves.)
 
 ## Steps
 
@@ -37,18 +41,47 @@ the main repo, the free dev port, the hand-off block. This skill resolves the wo
    idempotent — re-running on an existing worktree just re-prints the hand-off.
 3. **Relay verbatim.** Print the script's output, above all the hand-off block (the `cd … &&
    claude` line, the follow-up slash command, and the dev port) — the developer pastes it, so
-   do not paraphrase, re-wrap, or "improve" the paths. Close with the reminder above: new
-   terminal, new session.
-4. **Remove:** `worktree-setup.sh --remove <WORK-ID>`. A refusal on a dirty tree is a real
-   answer — report it and ask before re-running with `--force`. The task workspace
-   (`.claude/fnd/<WORK-ID>/`) lives in the main repo and survives removal; a preview theme
-   created from the worktree is not the script's business.
+   do not paraphrase, re-wrap, or "improve" the paths.
+4. **Session theme** (create only). The flow — including the exact question — is
+   `${CLAUDE_PLUGIN_ROOT}/references/session-theme.md`, **the same single AskUserQuestion
+   `ship` Step 0 makes**:
+   - The shared workspace `notes.md` already records a `session-theme: <id>` line → don't ask;
+     run `…/create-preview-theme.sh pin --theme <id>` (a freshly copied toml is never pinned;
+     an idempotent re-run's `toml=kept` copy may already be — either way re-pinning is
+     byte-idempotent) and say so in one line.
+   - Otherwise offer: **create one now** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh
+     create --name "<name>" --reuse --pin-toml` — `<name>` is the derivation the PR uses,
+     `info`'s `dev_theme_name` with the role prefix swapped for the key
+     (`[ELC-206] Kever | Domaine`; a slug work-id is bracketed verbatim —
+     `[header-refactor] Kever | Domaine` — so a later `--reuse` still matches), never a
+     free-text description, or a later `--reuse` misses
+     it and stacks a second theme) vs **pin an existing theme id** the developer supplies
+     (`…/create-preview-theme.sh pin --theme <id>`). Record the id as a dated
+     `session-theme: <id>` bullet in the shared `.claude/fnd/<WORK-ID>/notes.md` the instant
+     the script returns it.
 
-Any `error=` line → report it plainly and stop. Do not work around it with raw
+   Either way, run the script **with the new worktree as the working directory** — a one-shot
+   `cd <worktree> && …` inside a single Bash call, whose subshell exits when the command does,
+   so the session's own cwd never moves — the build must come from that branch and the pin
+   must land on the
+   worktree's own `shopify.theme.toml`, never the main checkout's. Then, on **both** paths,
+   extend the hand-off you just relayed with the theme id, its preview/editor links when the
+   script returned them, and the dev-server line `npm run dev -- --theme <id> --port <N>` with
+   the id filled in — the script's own block deliberately leaves it as a placeholder. Any
+   `error=` → report it, leave the worktree in place; it is usable, just unpinned. Never read
+   or echo `shopify.theme.toml`. Close with the reminder above: new terminal, new session.
+5. **Remove:** `worktree-setup.sh --remove <WORK-ID>`. A refusal on a dirty tree is a real
+   answer — report it and ask before re-running with `--force`. The task workspace
+   (`.claude/fnd/<WORK-ID>/`) lives in the main repo and survives removal; the session theme
+   it recorded is not the script's business — deleting it is the developer's call.
+
+Any `error=` line from `worktree-setup.sh` → report it plainly and stop. Do not work around it with raw
 `git worktree` commands — the guards exist because the failure they name is real.
 
 ## Quality bar
 
 - The hand-off block reaches the developer character-for-character.
-- No behavior reimplemented here: one script call per request, nothing else mutates the repo.
+- No behavior reimplemented here: the worktree script, plus the preview-theme script when the
+  developer accepts the session-theme offer, are the only things that mutate anything — this
+  skill only sequences them and records the id.
 - Never suggest continuing the current session inside the new worktree.

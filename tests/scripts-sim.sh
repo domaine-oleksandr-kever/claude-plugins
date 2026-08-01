@@ -986,6 +986,9 @@ J
     fi
     [ "$is_only" -eq 1 ] && [ -n "${FAKE_PUSH_ONLY_FAIL:-}" ] && { printf '%s\n' "$FAKE_PUSH_ONLY_FAIL" >&2; exit 1; }
     [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_CODE_FAIL:-}" ] && { printf '%s\n' "$FAKE_PUSH_CODE_FAIL" >&2; exit 1; }
+    # FAKE_PUSH_JSON: the whole --json answer, verbatim — for a payload the default printf cannot
+    # express (a gid-shaped theme id above all). Same gotcha: the value is never a ${…:-default}.
+    [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_JSON:-}" ] && { printf '%s\n' "$FAKE_PUSH_JSON"; exit 0; }
     printf '{"theme":{"id":%s,"preview_url":"https://acme-dev.myshopify.com/?preview_theme_id=%s","editor_url":"https://admin.shopify.com/store/acme-dev/themes/%s/editor"}}\n' "$nid" "$nid" "$nid" ;;
   "theme delete") [ -n "${FAKE_DELETE_FAIL:-}" ] && exit 1; exit 0 ;;
   "version") echo "4.5.2" ;;
@@ -1446,6 +1449,453 @@ run_cpt "$L" FND_CPT_THROTTLE_WAITS="0 0" FAKE_PUSH_THROTTLE_N=1 FAKE_PUSH_COUNT
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O" \
    && [ "$(cpt_calls 'theme push' "$L")" -eq 2 ]; then ok
 else bad P28-refresh-throttle-retry "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# ------------------------------------- create-preview-theme.sh session-theme pin --
+# `pin` (and `--pin-toml`) REWRITE the developer's shopify.theme.toml, so every case below gets
+# its OWN copy: $CPTD/repo/shopify.theme.toml is the config every other cpt case runs against and
+# a rewrite in place would silently poison the ones asserting dev_theme_id=111 (P46 proves it did
+# not happen). The pinned id has to be a theme the store actually lists, so these run against a
+# listing carrying 222 next to the live theme.
+PIN_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":222,"name":"[ELC-1] session","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]'
+fhash() { cksum < "$1"; }
+
+# P29 (pin): the FIRST uncommented `theme =` line takes the session id — the VALUE only, with the
+# line's spacing and trailing comment intact — and nothing is pushed. The file two lines down
+# holds the Theme Access token: it must survive untouched and never reach the output.
+F="$CPTD/toml/pin-basic.toml"
+printf '# session config\n[environments.development]\nstore = "acme-dev"\ntheme = "111"   # dev theme\npassword = "shptka_fixture1234"\n' > "$F"
+rc=0; L="$TMP/cpt29"; : > "$L"
+run_cpt "$L" TOML_PATH="$F" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^pin=rewritten$' "$O" \
+   && grep -q '^pin_env=development$' "$O" \
+   && grep -q '^commented_dupes=0$' "$O" && grep -q '^pinned_toml=/.*pin-basic\.toml$' "$O" \
+   && grep -qx 'theme = "222"   # dev theme' "$F" \
+   && [ "$(grep -c 'shptka_fixture1234' "$F")" -eq 1 ] && ! grep -q 'shptka' "$O" "$E" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ] && [ "$(cpt_calls 'theme pull' "$L")" -eq 0 ]; then ok
+else bad P29-pin-rewrites-first "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F" | tr '\n' ';')"; fi
+
+# P29b (bug): the id the pin REPLACED is preserved, commented and tagged, right above the pinned
+# line — this file is gitignored, so overwriting the shared dev theme id in place would leave it
+# recorded nowhere and a mis-pin unrecoverable without hunting it down in the Shopify admin. The
+# id is reported too (`superseded_theme_id=`), so the caller can note it.
+if grep -qx '# theme = "111"   # dev theme  # fnd:superseded' "$F" \
+   && grep -q '^superseded_theme_id=111$' "$O"; then ok
+else bad P29b-pin-preserves-old-id "out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F" | tr '\n' ';')"; fi
+
+# P30 (blocker): a multi-environment toml. `shopify theme dev -e dev` reads `[environments.dev]`,
+# NOT the first block in the file — a file-order pin dropped the session id into
+# `[environments.production]` (usually the LIVE theme's id, gone for good) and commented out the
+# line the dev server actually resolves. The pin is block-scoped: `dev` wins, production is not
+# touched at all, and only duplicates INSIDE the target block are commented out.
+FM="$CPTD/toml/pin-multi.toml"
+printf '[environments.production]\nstore = "acme-dev"\ntheme = "999001"\npassword = "shptka_fixture1234"\n\n[environments.dev]\nstore = "acme-dev"\n# theme = "333"\ntheme = "111"\ntheme = "444"\n' > "$FM"
+rc=0; L="$TMP/cpt30"; : > "$L"
+run_cpt "$L" TOML_PATH="$FM" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^pin=rewritten$' "$O" && grep -q '^pin_env=dev$' "$O" \
+   && grep -q '^commented_dupes=1$' "$O" && grep -q '^superseded_theme_id=111$' "$O" \
+   && grep -qx 'theme = "999001"' "$FM" && grep -qx 'theme = "222"' "$FM" \
+   && [ "$(grep -c '^theme = ' "$FM")" -eq 2 ] \
+   && grep -qx '# theme = "111"  # fnd:superseded' "$FM" \
+   && grep -qx '# theme = "444"' "$FM" && grep -qx '# theme = "333"' "$FM"; then ok
+else bad P30-pin-scoped-to-env "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FM" | tr '\n' ';')"; fi
+
+# P30b (blocker): several environment blocks and none named dev/development — there is no way to
+# know which one the dev server reads, and guessing writes a preview id over a real environment's
+# theme. Refuse by name, change nothing, and say what the escape hatch is.
+FAM="$CPTD/toml/pin-ambig.toml"
+printf '[environments.production]\nstore = "acme-dev"\ntheme = "999001"\npassword = "shptka_fixture1234"\n\n[environments.staging]\nstore = "acme-dev"\ntheme = "444"\n' > "$FAM"
+HAM="$(fhash "$FAM")"
+rc=0; L="$TMP/cpt30b"; : > "$L"
+run_cpt "$L" TOML_PATH="$FAM" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=ambiguous_env' "$O" && grep -q -- '--env' "$O" \
+   && [ "$(fhash "$FAM")" = "$HAM" ]; then ok
+else bad P30b-pin-ambiguous-env "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P30c (blocker): …and `--env <name>` is that escape hatch — it pins the named block and only it
+rc=0; L="$TMP/cpt30c"; : > "$L"
+run_cpt "$L" TOML_PATH="$FAM" FAKE_LIST="$PIN_LIST" -- pin --theme 222 --env staging || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^pin_env=staging$' "$O" && grep -qx 'theme = "999001"' "$FAM" \
+   && grep -qx 'theme = "222"' "$FAM" && grep -qx '# theme = "444"  # fnd:superseded' "$FAM"; then ok
+else bad P30c-pin-explicit-env "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FAM" | tr '\n' ';')"; fi
+
+# P30d (blocker): a typo in --env must not fall back to "some other block" — nothing is written
+HAM2="$(fhash "$FAM")"
+rc=0; L="$TMP/cpt30d"; : > "$L"
+run_cpt "$L" TOML_PATH="$FAM" FAKE_LIST="$PIN_LIST" -- pin --theme 222 --env nope || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=env_not_found' "$O" && grep -q "production staging" "$O" \
+   && [ "$(fhash "$FAM")" = "$HAM2" ]; then ok
+else bad P30d-pin-env-not-found "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P31 (pin): no uncommented `theme =` line at all — the id is INSERTED after the first
+# uncommented `store =` (the environment block the CLI resolves), never at the top of the file
+# where it would land outside every block and be ignored. The inserted line carries the
+# `# fnd:session-theme` tag: it is session-owned (nothing was superseded), and the tag is what
+# lets worktree-setup.sh's unpin delete it and restore the original no-theme state.
+FA="$CPTD/toml/pin-append.toml"
+printf '[environments.development]\nstore = "acme-dev"\n# theme = "111"\npassword = "shptka_fixture1234"\n' > "$FA"
+rc=0; L="$TMP/cpt31"; : > "$L"
+run_cpt "$L" TOML_PATH="$FA" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+WANT31='[environments.development]
+store = "acme-dev"
+theme = "222" # fnd:session-theme
+# theme = "111"
+password = "shptka_fixture1234"'
+if [ "$rc" -eq 0 ] && grep -q '^pin=appended$' "$O" && grep -q '^commented_dupes=0$' "$O" \
+   && ! grep -q '^superseded_theme_id=' "$O" \
+   && [ "$(cat "$FA")" = "$WANT31" ]; then ok
+else bad P31-pin-append "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FA" | tr '\n' ';')"; fi
+
+# P31a (blocker): the mirror of P30 for the append path — `store =` at TOP level and the only
+# `theme =` commented out inside `[environments.dev]`. Anchoring on the file's first `store =`
+# inserted the line at top level, where `-e dev` never reads it: a pin that is a silent no-op for
+# the dev server. The block owns the insert; the top-level anchor is not its anchor.
+FAT="$CPTD/toml/pin-append-env.toml"
+printf 'store = "acme-dev"\npassword = "shptka_fixture1234"\n\n[environments.dev]\n# theme = "111"\n' > "$FAT"
+rc=0; L="$TMP/cpt31a"; : > "$L"
+run_cpt "$L" TOML_PATH="$FAT" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+WANT31A='store = "acme-dev"
+password = "shptka_fixture1234"
+
+[environments.dev]
+theme = "222" # fnd:session-theme
+# theme = "111"'
+if [ "$rc" -eq 0 ] && grep -q '^pin=appended$' "$O" && grep -q '^pin_env=dev$' "$O" \
+   && [ "$(cat "$FAT")" = "$WANT31A" ]; then ok
+else bad P31a-pin-append-in-block "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FAT" | tr '\n' ';')"; fi
+
+# P31b (bug): a config with no `theme` key ANYWHERE. The dev-theme-id guard runs before the
+# subcommand dispatch, so pin — the one mode whose job is to repair that exact state — used to
+# die on `no uncommented theme = line` before it ever ran.
+FA2="$CPTD/toml/pin-notheme.toml"
+printf '[environments.development]\nstore = "acme-dev"\npassword = "shptka_fixture1234"\n' > "$FA2"
+rc=0; L="$TMP/cpt31b"; : > "$L"
+run_cpt "$L" TOML_PATH="$FA2" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+WANT31B='[environments.development]
+store = "acme-dev"
+theme = "222" # fnd:session-theme
+password = "shptka_fixture1234"'
+if [ "$rc" -eq 0 ] && grep -q '^pin=appended$' "$O" && [ "$(cat "$FA2")" = "$WANT31B" ]; then ok
+else bad P31b-pin-no-theme-key "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FA2" | tr '\n' ';')"; fi
+
+# P31c (bug): the same relaxation for a MALFORMED value — `invalid_dev_theme_id` is also a
+# pre-dispatch hard stop, and refusing to pin over garbage leaves the developer hand-editing the
+# very file the pin exists to fix
+FA3="$CPTD/toml/pin-badid.toml"
+printf "[environments.development]\nstore = 'acme-dev'\ntheme = 'theme = 111'\npassword = 'shptka_fixture1234'\n" > "$FA3"
+rc=0; L="$TMP/cpt31c"; : > "$L"
+run_cpt "$L" TOML_PATH="$FA3" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^pin=rewritten$' "$O" && grep -qx "theme = '222'" "$FA3"; then ok
+else bad P31c-pin-repairs-bad-id "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FA3" | tr '\n' ';')"; fi
+
+# P31d (bug): and the relaxation is scoped to `pin` — every OTHER mode still hard-stops on a
+# config with no dev theme id, because the settings pull has nothing to pull from
+FA4="$CPTD/toml/pin-notheme2.toml"
+printf '[environments.development]\nstore = "acme-dev"\npassword = "shptka_fixture1234"\n' > "$FA4"
+rc=0; L="$TMP/cpt31d"; : > "$L"
+run_cpt "$L" TOML_PATH="$FA4" FAKE_LIST="$PIN_LIST" -- info || rc=$?
+OUT31D="$(cat "$O")"
+rc2=0; run_cpt "$L" TOML_PATH="$CPTD/toml/badid.toml" -- create --name "PREVIEW-X" --no-build || rc2=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$OUT31D" | grep -q 'no uncommented' \
+   && [ "$rc2" -ne 0 ] && grep -q 'error=invalid_dev_theme_id' "$O"; then ok
+else bad P31d-guards-kept-off-pin "rc=$rc rc2=$rc2 out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P32 (pin): re-pinning the SAME id is a byte-for-byte no-op — a skill re-entering a session
+# re-pins silently, and a "changed" file there would churn the developer's git status forever.
+# A no-op supersedes nothing, so `superseded_theme_id=` must not appear (not even empty-valued):
+# the caller records that key as "an id went away" and would note a lie.
+H32="$(fhash "$FM")"
+rc=0; L="$TMP/cpt32"; : > "$L"
+run_cpt "$L" TOML_PATH="$FM" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^pin=unchanged$' "$O" && [ "$(fhash "$FM")" = "$H32" ] \
+   && ! grep -q '^superseded_theme_id=' "$O"; then ok
+else bad P32-pin-idempotent "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FM" | tr '\n' ';')"; fi
+
+# P33 (pin): re-pinning a DIFFERENT id swaps cleanly — one uncommented line per block still, the
+# other environment is still untouched, and the lines pin #1 commented out stay commented (they
+# are not re-commented into `# # theme`)
+rc=0; L="$TMP/cpt33"; : > "$L"
+run_cpt "$L" TOML_PATH="$FM" FAKE_LIST="$PIN_LIST" -- pin --theme 111 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^pin=rewritten$' "$O" && grep -q '^commented_dupes=0$' "$O" \
+   && [ "$(grep -c '^theme = ' "$FM")" -eq 2 ] && grep -qx 'theme = "111"' "$FM" \
+   && grep -qx 'theme = "999001"' "$FM" \
+   && grep -qx '# theme = "444"' "$FM" && ! grep -q '# # theme' "$FM"; then ok
+else bad P33-pin-repin-new-id "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FM" | tr '\n' ';')"; fi
+
+# P33b (bug): the superseded marker records the ORIGINAL value and is never stacked — a second
+# re-pin must not push the shared dev theme id out of the file behind a chain of session ids, and
+# a second marker line would also cost the byte-idempotence P32 leans on
+if [ "$(grep -c 'fnd:superseded' "$FM")" -eq 1 ] \
+   && grep -qx '# theme = "111"  # fnd:superseded' "$FM"; then ok
+else bad P33b-marker-not-stacked "toml=$(grep -v password "$FM" | tr '\n' ';')"; fi
+
+# P34 (pin): a non-numeric id is refused before any CLI call — the CLI resolves a NAME to any
+# theme, and a name written into the config would be re-resolved on every later run
+H34="$(fhash "$FM")"
+rc=0; L="$TMP/cpt34"; : > "$L"
+run_cpt "$L" TOML_PATH="$FM" FAKE_LIST="$PIN_LIST" -- pin --theme "Live Theme" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=invalid_theme_id' "$O" \
+   && [ "$(grep -c 'argv=' "$L")" -eq 0 ] && [ "$(fhash "$FM")" = "$H34" ]; then ok
+else bad P34-pin-name-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P35 (pin): the live-theme guard covers pin-only mode too — pinning the PUBLISHED theme would
+# point `shopify theme dev` at the storefront and sync every save onto it
+rc=0; L="$TMP/cpt35"; : > "$L"
+run_cpt "$L" TOML_PATH="$FM" FAKE_LIST="$PIN_LIST" -- pin --theme 999 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=live_theme_write_refused' "$O" \
+   && [ "$(fhash "$FM")" = "$H34" ]; then ok
+else bad P35-pin-live-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P36 (pin): an id absent from a READABLE listing is a typo, and pinning it would break every
+# later run (settings pull, info, `theme dev`) with an error naming the config, not the typo
+rc=0; L="$TMP/cpt36"; : > "$L"
+run_cpt "$L" TOML_PATH="$FM" FAKE_LIST="$PIN_LIST" -- pin --theme 888 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=theme_not_found' "$O" && [ "$(fhash "$FM")" = "$H34" ]; then ok
+else bad P36-pin-unknown-id "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P37 (blocker): a `theme list` that never answered leaves the id UNVERIFIABLE — and unlike a
+# refresh (one push, P11 lets it through), a pin PERSISTS in the config, so fail-open would
+# leave a typo pinned until a human notices. Standalone `pin` refuses and changes nothing;
+# retry when the store answers.
+FO="$CPTD/toml/pin-outage.toml"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FO"
+H37="$(fhash "$FO")"
+rc=0; L="$TMP/cpt37"; : > "$L"
+run_cpt "$L" TOML_PATH="$FO" FAKE_LIST_FAIL=1 -- pin --theme 888 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=theme_unverifiable' "$O" \
+   && ! grep -q '^pin=' "$O" && [ "$(fhash "$FO")" = "$H37" ]; then ok
+else bad P37-pin-outage-refused "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FO" | tr '\n' ';')"; fi
+
+# P37b: create/refresh --pin-toml hold a REAL theme by pin time, so the same outage must not
+# cost the caller the pin (or the id) — the pin lands, but `warn=pin_unvetted` says it was
+# never checked against the store, printed BEFORE the pin keys so a caller acting on pin=
+# has already seen it
+rc=0; L="$TMP/cpt37b"; : > "$L"
+run_cpt "$L" TOML_PATH="$FO" FAKE_LIST_FAIL=1 -- refresh --theme 222 --no-build --pin-toml || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^warn=pin_unvetted$' "$O" \
+   && grep -q '^pin=rewritten$' "$O" && grep -qx 'theme = "222"' "$FO" \
+   && [ "$(grep -n '^warn=pin_unvetted$' "$O" | cut -d: -f1)" -lt "$(grep -n '^pinned_toml=' "$O" | cut -d: -f1)" ]; then ok
+else bad P37b-pin-toml-outage-unvetted "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FO" | tr '\n' ';')"; fi
+
+# P38 (pin): a Windows-edited config keeps its CRLF endings — a rewrite that dropped the CR on
+# one line only would leave a mixed-ending file the developer's diff cannot explain
+FC="$CPTD/toml/pin-crlf.toml"
+printf '[environments.development]\r\nstore = "acme-dev"\r\ntheme = "111"\r\npassword = "shptka_fixture1234"\r\n' > "$FC"
+rc=0; L="$TMP/cpt38"; : > "$L"
+run_cpt "$L" TOML_PATH="$FC" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+CR38="$(tr -cd '\r' < "$FC" | wc -c | tr -d ' ')"; LF38="$(tr -cd '\n' < "$FC" | wc -c | tr -d ' ')"
+# 5 lines now: the superseded marker the rewrite inserts carries the file's endings too
+if [ "$rc" -eq 0 ] && [ "$CR38" -eq 5 ] && [ "$LF38" -eq 5 ] \
+   && grep -q 'theme = "222"' "$FC" && grep -q '# theme = "111"  # fnd:superseded' "$FC"; then ok
+else bad P38-pin-crlf "rc=$rc cr=$CR38 lf=$LF38 out=$(tr '\n' ';' < "$O")"; fi
+
+# P39 (pin): the quoting style is the developer's — a single-quoted value stays single-quoted,
+# so a re-pin of the same id can stay a byte-for-byte no-op (P32) whatever the file looks like
+FQ="$CPTD/toml/pin-quote.toml"
+printf "[environments.development]\nstore = 'acme-dev'\ntheme = '111'\npassword = 'shptka_fixture1234'\n" > "$FQ"
+rc=0; L="$TMP/cpt39"; : > "$L"
+run_cpt "$L" TOML_PATH="$FQ" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx "theme = '222'" "$FQ" \
+   && grep -qx "# theme = '111'  # fnd:superseded" "$FQ"; then ok
+else bad P39-pin-single-quote "rc=$rc toml=$(grep -v password "$FQ" | tr '\n' ';')"; fi
+
+# P39b (pin): and a BARE value stays bare, with its trailing comment where it was
+FB2="$CPTD/toml/pin-bare.toml"
+printf '[environments.development]\nstore = acme-dev\ntheme = 111  # dev\npassword = "shptka_fixture1234"\n' > "$FB2"
+rc=0; L="$TMP/cpt39b"; : > "$L"
+run_cpt "$L" TOML_PATH="$FB2" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'theme = 222  # dev' "$FB2" \
+   && grep -qx '# theme = 111  # dev  # fnd:superseded' "$FB2"; then ok
+else bad P39b-pin-bare "rc=$rc toml=$(grep -v password "$FB2" | tr '\n' ';')"; fi
+
+# P40 (pin): a file whose last byte is not a newline must not gain one — that alone would make
+# the next re-pin a "change" and break the idempotence the re-entry rule leans on
+FN="$CPTD/toml/pin-nonl.toml"
+printf '[environments.development]\nstore = "acme-dev"\npassword = "shptka_fixture1234"\ntheme = "111"' > "$FN"
+rc=0; L="$TMP/cpt40"; : > "$L"
+run_cpt "$L" TOML_PATH="$FN" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+H40="$(fhash "$FN")"
+rc2=0; run_cpt "$L" TOML_PATH="$FN" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc2=$?
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && grep -q '^pin=unchanged$' "$O" \
+   && [ -n "$(tail -c 1 "$FN")" ] && grep -qx 'theme = "222"' "$FN" \
+   && [ "$(fhash "$FN")" = "$H40" ]; then ok
+else bad P40-pin-no-trailing-newline "rc=$rc rc2=$rc2 toml=$(grep -v password "$FN" | tr '\n' ';')"; fi
+
+# P41 (pin): `create --pin-toml` end to end — the theme keys still come first (a caller that
+# lost the id could not clean the theme up), then the pin keys, and the config now holds it
+FCR="$CPTD/toml/pin-create.toml"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FCR"
+rc=0; L="$TMP/cpt41"; : > "$L"
+run_cpt "$L" TOML_PATH="$FCR" -- create --name "PREVIEW-PIN" --no-build --pin-toml || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^pin=rewritten$' "$O" \
+   && grep -qx 'theme = "222"' "$FCR" \
+   && [ "$(grep -n '^theme_id=' "$O" | cut -d: -f1)" -lt "$(grep -n '^pin=' "$O" | cut -d: -f1)" ]; then ok
+else bad P41-create-pin-toml "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FCR" | tr '\n' ';')"; fi
+
+# P41b (bug): `create --pin-toml` used to pin whatever `--json` handed back, unvetted. A
+# gid-shaped id (a shape this store's listings really do use — see the unusable_theme_id case)
+# written into the config bricks every later run of the script with `invalid_dev_theme_id`, in a
+# gitignored file only a hand edit repairs. The id is re-vetted first, and a non-numeric one is a
+# reported pin FAILURE — the run still succeeds and still prints the theme id, since the theme is
+# real by then and a caller that lost it cannot clean it up.
+FGID="$CPTD/toml/pin-gid.toml"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FGID"
+HGID="$(fhash "$FGID")"
+rc=0; L="$TMP/cpt41b"; : > "$L"
+run_cpt "$L" TOML_PATH="$FGID" \
+  FAKE_PUSH_JSON='{"theme":{"id":"gid://shopify/OnlineStoreTheme/700","preview_url":"https://x","editor_url":"https://y"}}' \
+  -- create --name "PREVIEW-GID" --no-build --pin-toml || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=gid://shopify/OnlineStoreTheme/700$' "$O" \
+   && grep -q '^pin=failed$' "$O" && grep -q '^pin_error=.*non-numeric theme id' "$O" \
+   && [ "$(fhash "$FGID")" = "$HGID" ]; then ok
+else bad P41b-create-pin-rejects-gid "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FGID" | tr '\n' ';')"; fi
+
+# P42 (pin): `refresh --pin-toml` pins the id it was pointed at, so a QA refresh of the session
+# theme re-asserts the pin instead of leaving the config on whatever was there before
+FRF="$CPTD/toml/pin-refresh.toml"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FRF"
+rc=0; L="$TMP/cpt42"; : > "$L"
+run_cpt "$L" TOML_PATH="$FRF" FAKE_LIST="$PIN_LIST" -- refresh --theme 222 --no-build --pin-toml || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^pin=rewritten$' "$O" \
+   && grep -q '^commented_dupes=0$' "$O" && grep -qx 'theme = "222"' "$FRF"; then ok
+else bad P42-refresh-pin-toml "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FRF" | tr '\n' ';')"; fi
+
+# P48 (blocker): the appended pin line is exactly `theme = "<id>" # fnd:session-theme` — and a
+# same-id re-pin on the tagged line stays a byte-for-byte no-op (the tag must not break the
+# idempotence P32 established for the rewrite path)
+F48="$CPTD/toml/pin-tag.toml"
+printf '[environments.development]\nstore = "acme-dev"\npassword = "shptka_fixture1234"\n' > "$F48"
+rc=0; L="$TMP/cpt48"; : > "$L"
+run_cpt "$L" TOML_PATH="$F48" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+H48="$(fhash "$F48")"
+rc2=0; run_cpt "$L" TOML_PATH="$F48" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc2=$?
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && grep -q '^pin=unchanged$' "$O" \
+   && grep -qx 'theme = "222" # fnd:session-theme' "$F48" \
+   && ! grep -q 'fnd:superseded' "$F48" && [ "$(fhash "$F48")" = "$H48" ]; then ok
+else bad P48-append-session-tag "rc=$rc rc2=$rc2 out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F48" | tr '\n' ';')"; fi
+
+# P48b (blocker): re-pinning a DIFFERENT id onto a tagged line swaps the value, KEEPS the tag and
+# writes NO fnd:superseded marker — the line is session-owned, the block's original state had no
+# `theme =` at all, so there is nothing to supersede and unpin must still simply delete the line
+rc=0; L="$TMP/cpt48b"; : > "$L"
+run_cpt "$L" TOML_PATH="$F48" FAKE_LIST="$PIN_LIST" -- pin --theme 111 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^pin=rewritten$' "$O" \
+   && grep -qx 'theme = "111" # fnd:session-theme' "$F48" \
+   && ! grep -q 'fnd:superseded' "$F48"; then ok
+else bad P48b-repin-keeps-tag-no-marker "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F48" | tr '\n' ';')"; fi
+
+# P49 (bug): only a REAL marker line (`# theme = … # fnd:superseded`) counts as "this block is
+# already pinned" — a stray comment merely containing the string used to suppress the marker, so
+# a real pin overwrote the dev theme id with NO commented copy left to restore
+F49="$CPTD/toml/pin-stray.toml"
+printf '[environments.development]\nstore = "acme-dev"\n# NB fnd:superseded markers are plugin-managed\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$F49"
+rc=0; L="$TMP/cpt49"; : > "$L"
+run_cpt "$L" TOML_PATH="$F49" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^superseded_theme_id=111$' "$O" \
+   && grep -qx '# theme = "111"  # fnd:superseded' "$F49" \
+   && grep -qx '# NB fnd:superseded markers are plugin-managed' "$F49" \
+   && grep -qx 'theme = "222"' "$F49"; then ok
+else bad P49-stray-marker-comment "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F49" | tr '\n' ';')"; fi
+
+# P50 (blocker): a SINGLE block not named dev/development is no longer auto-picked — the count
+# proves nothing about which environment `shopify theme dev -e <name>` reads, and a lone
+# [environments.production] usually names the LIVE theme's id. Refused without --env, nothing
+# written; --env production is the explicit escape hatch.
+F50="$CPTD/toml/pin-single-prod.toml"
+printf '[environments.production]\nstore = "acme-dev"\ntheme = "999001"\npassword = "shptka_fixture1234"\n' > "$F50"
+H50="$(fhash "$F50")"
+rc=0; L="$TMP/cpt50"; : > "$L"
+run_cpt "$L" TOML_PATH="$F50" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+OUT50="$(cat "$O")"; UNTOUCHED50=no; [ "$(fhash "$F50")" = "$H50" ] && UNTOUCHED50=yes
+rc2=0; run_cpt "$L" TOML_PATH="$F50" FAKE_LIST="$PIN_LIST" -- pin --theme 222 --env production || rc2=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$OUT50" | grep -q 'error=ambiguous_env' \
+   && printf '%s' "$OUT50" | grep -q -- '--env' \
+   && [ "$UNTOUCHED50" = "yes" ] \
+   && [ "$rc2" -eq 0 ] && grep -q '^pin_env=production$' "$O" \
+   && grep -qx 'theme = "222"' "$F50" \
+   && grep -qx '# theme = "999001"  # fnd:superseded' "$F50"; then ok
+else bad P50-single-nondev-block "rc=$rc rc2=$rc2 untouched=$UNTOUCHED50 out=$(printf '%s' "$OUT50" | head -c 160 | tr '\n' ' ') toml=$(grep -v password "$F50" | tr '\n' ';')"; fi
+
+# P51 (pin): a toml with no [environments.*] at all pins the top-level keys and says so —
+# pin_env=- is the sentinel a caller can trust (no block name can ever be `-`)
+F51="$CPTD/toml/pin-toplevel.toml"
+printf 'store = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$F51"
+rc=0; L="$TMP/cpt51"; : > "$L"
+run_cpt "$L" TOML_PATH="$F51" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^pin=rewritten$' "$O" && grep -q '^pin_env=-$' "$O" \
+   && grep -qx 'theme = "222"' "$F51" \
+   && grep -qx '# theme = "111"  # fnd:superseded' "$F51"; then ok
+else bad P51-pin-toplevel "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F51" | tr '\n' ';')"; fi
+
+# P51b (pin): …and when blocks exist but none is named dev/development, an uncommented top-level
+# `theme =` BEFORE the first header is the fallback the ambiguity check yields to — the top-level
+# line is what a bare `shopify theme dev` reads, and the named blocks stay untouched
+F51B="$CPTD/toml/pin-toplevel-fb.toml"
+printf 'theme = "111"\n\n[environments.production]\nstore = "acme-dev"\ntheme = "999001"\npassword = "shptka_fixture1234"\n' > "$F51B"
+rc=0; L="$TMP/cpt51b"; : > "$L"
+run_cpt "$L" TOML_PATH="$F51B" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^pin=rewritten$' "$O" && grep -q '^pin_env=-$' "$O" \
+   && grep -qx 'theme = "222"' "$F51B" && grep -qx 'theme = "999001"' "$F51B" \
+   && grep -qx '# theme = "111"  # fnd:superseded' "$F51B"; then ok
+else bad P51b-toplevel-fallback "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F51B" | tr '\n' ';')"; fi
+
+# P52 (bug): --env only ever feeds the pin — accepted without --pin-toml it would be a silent
+# no-op the caller reads as "the block I named was pinned". Refused on create and refresh alike,
+# before any CLI call.
+rc=0; L="$TMP/cpt52"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme 111 --no-build --env dev || rc=$?
+OUT52="$(cat "$O")"
+rc2=0; run_cpt "$L" NO=1 -- create --name "PREVIEW-ENV" --no-build --env dev || rc2=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$OUT52" | grep -q 'error=--env requires --pin-toml' \
+   && [ "$rc2" -ne 0 ] && grep -q 'error=--env requires --pin-toml' "$O" \
+   && [ ! -s "$L" ]; then ok
+else bad P52-env-requires-pin-toml "rc=$rc rc2=$rc2 out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P43 (bug): a pin that CANNOT be written after a real theme was created must not take the run
+# non-zero — the theme exists on the store by then, and a caller that never got `theme_id=`
+# cannot reuse or delete it. Read-only directory = mktemp fails = the config is left alone.
+PRO="$TMP/pin-ro"; mkdir -p "$PRO"; FRO="$PRO/shopify.theme.toml"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FRO"
+HRO="$(fhash "$FRO")"; chmod 555 "$PRO"
+rc=0; L="$TMP/cpt43"; : > "$L"
+run_cpt "$L" TOML_PATH="$FRO" -- create --name "PREVIEW-PIN2" --no-build --pin-toml || rc=$?
+chmod 755 "$PRO"
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^pin=failed$' "$O" \
+   && grep -q '^pin_error=' "$O" && [ "$(fhash "$FRO")" = "$HRO" ] \
+   && [ "$(ls -a "$PRO" | grep -c 'fnd-pin')" -eq 0 ]; then ok
+else bad P43-create-pin-failure-nonfatal "rc=$rc out=$(tr '\n' ';' < "$O") left=$(ls -a "$PRO" | tr '\n' ' ')"; fi
+
+# P44 (pin): standalone `pin` has nothing else to report, so the same write failure IS the
+# result — it exits non-zero with error=pin_toml_failed and leaves the config untouched
+chmod 555 "$PRO"
+rc=0; L="$TMP/cpt44"; : > "$L"
+run_cpt "$L" TOML_PATH="$FRO" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+chmod 755 "$PRO"
+if [ "$rc" -ne 0 ] && grep -q 'error=pin_toml_failed' "$O" && [ "$(fhash "$FRO")" = "$HRO" ] \
+   && [ "$(ls -a "$PRO" | grep -c 'fnd-pin')" -eq 0 ]; then ok
+else bad P44-pin-write-failure "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') left=$(ls -a "$PRO" | tr '\n' ' ')"; fi
+
+# P45 (pin): the rewrite stages its temp file NEXT TO the config (same dir = an atomic rename
+# that cannot cross a filesystem), so every run must take that dot-file away with it
+if [ "$(ls -a "$CPTD/toml" | grep -c 'fnd-pin')" -eq 0 ]; then ok
+else bad P45-pin-no-temp-leftovers "left=$(ls -a "$CPTD/toml" | tr '\n' ' ')"; fi
+
+# P46 (pin): TOML_PATH is the only file any of the cases above touched — the repo's own config
+# still resolves to the fixture dev theme
+rc=0; L="$TMP/cpt46"; : > "$L"; run_cpt "$L" NO=1 -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^dev_theme_id=111$' "$O"; then ok
+else bad P46-repo-toml-untouched "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P47 (bug): a SYMLINKED config is followed to its target — the atomic rename would otherwise
+# replace the link with a regular file and unpin whatever the developer pointed it at. Its mode
+# survives too: the file holds the Theme Access token and mktemp hands out 0600.
+PSD="$TMP/pin-link"; mkdir -p "$PSD"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$PSD/real.toml"
+chmod 640 "$PSD/real.toml"; ln -sf real.toml "$PSD/link.toml"
+rc=0; L="$TMP/cpt47"; : > "$L"
+run_cpt "$L" TOML_PATH="$PSD/link.toml" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && [ -L "$PSD/link.toml" ] && grep -qx 'theme = "222"' "$PSD/real.toml" \
+   && [ "$(ls -l "$PSD/real.toml" | cut -c1-10)" = "-rw-r-----" ]; then ok
+else bad P47-pin-symlinked-toml "rc=$rc link=$(ls -l "$PSD" | tr '\n' ';')"; fi
 
 # ------------------------------------------- fix-breaking-changes banner handling --
 FB="$TMP/fb"; mkdir -p "$FB/templates/customers" "$FB/config" "$FB/scripts"
@@ -2596,6 +3046,98 @@ rc=0; (cd "$WTR/sep/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/
 if [ "$rc" -eq 1 ] && grep -q '^error=unsupported_layout' "$O" \
    && [ ! -e "$WTR/sep-SEP-1" ] && [ ! -e "$WTR/sep/realgit/.claude" ]; then ok
 else bad W27-separate-git-dir "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# W28 (bug): the main checkout's shopify.theme.toml is routinely a PINNED session config by the
+# time a second work stream starts (ship pins it whenever the developer stays in the main
+# checkout). Copying that verbatim hands the new worktree another stream's session theme as its
+# dev theme — which is where its first `create --reuse --pin-toml` would pull customizer settings
+# from, so ticket A's half-edited preview lands on ticket B's theme. The copy is un-pinned instead:
+# the superseded line is restored and the session id is commented out, value intact.
+printf '[environments.development]\nstore = "acme-dev"\n# theme = "111"  # fnd:superseded\ntheme = "777"\n' > "$WTR/theme/shopify.theme.toml"
+rc=0; wt_run PIN-1 || rc=$?
+W28DIR="$WTR/theme-PIN-1"; W28T="$W28DIR/shopify.theme.toml"
+WANT28='[environments.development]
+store = "acme-dev"
+theme = "111"
+# theme = "777"'
+if [ "$rc" -eq 0 ] && grep -q '^toml=copied$' "$O" && grep -q '^toml_unpinned=yes$' "$O" \
+   && [ "$(cat "$W28T")" = "$WANT28" ] \
+   && grep -qx '# theme = "111"  # fnd:superseded' "$WTR/theme/shopify.theme.toml"; then ok
+else bad W28-worktree-unpins-copy "rc=$rc out=$(grep -E '^toml' "$O" | tr '\n' ';') copy=$(tr '\n' ';' < "$W28T" 2>&1)"; fi
+
+# W28b: an UNPINNED main config (no marker) is copied byte-for-byte — the un-pin must never be a
+# rewrite of a file it did not recognise
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\n' > "$WTR/theme/shopify.theme.toml"
+rc=0; wt_run PIN-2 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^toml_unpinned=no$' "$O" \
+   && cmp -s "$WTR/theme/shopify.theme.toml" "$WTR/theme-PIN-2/shopify.theme.toml"; then ok
+else bad W28b-worktree-copy-untouched "rc=$rc out=$(grep -E '^toml' "$O" | tr '\n' ';')"; fi
+
+# W28c (bug): a multi-environment source toml can carry ONE PIN PER BLOCK (each block pinned by
+# its own stream) — the un-pin used to stop at the first marker it restored, silently handing the
+# new worktree the second block's session theme. Every marker pair is reverted, block-agnostic.
+printf '[environments.dev]\nstore = "acme-dev"\n# theme = "111"  # fnd:superseded\ntheme = "777"\n\n[environments.staging]\nstore = "acme-dev"\n# theme = "222"  # fnd:superseded\ntheme = "888"\n' > "$WTR/theme/shopify.theme.toml"
+rc=0; wt_run PIN-3 || rc=$?
+W28CT="$WTR/theme-PIN-3/shopify.theme.toml"
+WANT28C='[environments.dev]
+store = "acme-dev"
+theme = "111"
+# theme = "777"
+
+[environments.staging]
+store = "acme-dev"
+theme = "222"
+# theme = "888"'
+if [ "$rc" -eq 0 ] && grep -q '^toml_unpinned=yes$' "$O" \
+   && [ "$(cat "$W28CT")" = "$WANT28C" ]; then ok
+else bad W28c-unpin-every-block "rc=$rc out=$(grep -E '^toml' "$O" | tr '\n' ';') copy=$(grep -v password "$W28CT" 2>/dev/null | tr '\n' ';')"; fi
+
+# W28d (bug): a Windows-edited (CRLF) source toml round-trips through the un-pin with its line
+# endings intact — a restore that dropped the CR on the touched lines only would leave the copy
+# mixed-ending, a diff the developer cannot explain
+printf '[environments.development]\r\nstore = "acme-dev"\r\n# theme = "111"  # fnd:superseded\r\ntheme = "777"\r\n' > "$WTR/theme/shopify.theme.toml"
+rc=0; wt_run PIN-4 || rc=$?
+W28DT="$WTR/theme-PIN-4/shopify.theme.toml"
+printf '[environments.development]\r\nstore = "acme-dev"\r\ntheme = "111"\r\n# theme = "777"\r\n' > "$WTR/w28d.want"
+if [ "$rc" -eq 0 ] && grep -q '^toml_unpinned=yes$' "$O" && cmp -s "$W28DT" "$WTR/w28d.want"; then ok
+else bad W28d-unpin-crlf "rc=$rc out=$(grep -E '^toml' "$O" | tr '\n' ';') copy=$(od -c "$W28DT" 2>&1 | head -4 | tr '\n' ';')"; fi
+
+# W28e (blocker): the APPEND round trip — a source toml whose block had no `theme =` line was
+# pinned (the line create-preview-theme.sh appended carries `# fnd:session-theme`), and the
+# worktree copy must come out BYTE-IDENTICAL to the pre-pin original: the tag names the one line
+# the un-pin may delete, because there is no superseded line to restore. The pin is the real one,
+# not a hand-written fixture.
+printf '[environments.development]\nstore = "acme-dev"\npassword = "shptka_fixture1234"\n' > "$WTR/theme/shopify.theme.toml"
+cp "$WTR/theme/shopify.theme.toml" "$WTR/w28e.orig"
+rc=0; L="$TMP/cptw28e"; : > "$L"
+run_cpt "$L" TOML_PATH="$WTR/theme/shopify.theme.toml" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
+TAGGED28E=no; grep -q 'fnd:session-theme' "$WTR/theme/shopify.theme.toml" && TAGGED28E=yes
+rc2=0; wt_run PIN-5 || rc2=$?
+W28ET="$WTR/theme-PIN-5/shopify.theme.toml"
+if [ "$rc" -eq 0 ] && [ "$TAGGED28E" = "yes" ] && [ "$rc2" -eq 0 ] \
+   && grep -q '^toml_unpinned=yes$' "$O" && cmp -s "$W28ET" "$WTR/w28e.orig" \
+   && grep -q 'fnd:session-theme' "$WTR/theme/shopify.theme.toml"; then ok
+else bad W28e-append-roundtrip "rc=$rc rc2=$rc2 tagged=$TAGGED28E out=$(grep -E '^toml' "$O" | tr '\n' ';') copy=$(grep -v password "$W28ET" 2>/dev/null | tr '\n' ';')"; fi
+
+# W28f (bug): a stray comment mentioning fnd:superseded is NOT a marker — the un-pin must leave
+# it alone and still find the real marker pair below it (the pin side of this is P49)
+printf '[environments.development]\nstore = "acme-dev"\n# NB fnd:superseded markers are plugin-managed\n# theme = "111"  # fnd:superseded\ntheme = "777"\n' > "$WTR/theme/shopify.theme.toml"
+rc=0; wt_run PIN-6 || rc=$?
+W28FT="$WTR/theme-PIN-6/shopify.theme.toml"
+WANT28F='[environments.development]
+store = "acme-dev"
+# NB fnd:superseded markers are plugin-managed
+theme = "111"
+# theme = "777"'
+if [ "$rc" -eq 0 ] && grep -q '^toml_unpinned=yes$' "$O" \
+   && [ "$(cat "$W28FT")" = "$WANT28F" ]; then ok
+else bad W28f-unpin-stray-comment "rc=$rc out=$(grep -E '^toml' "$O" | tr '\n' ';') copy=$(grep -v password "$W28FT" 2>/dev/null | tr '\n' ';')"; fi
+
+# W29 (bug): the hand-off block the skill relays VERBATIM must not advertise a dev-server command
+# without `--theme` — that is the one that syncs the branch into the shared dev theme
+if grep -q 'npm run dev -- --theme <session-theme-id> --port' "$O" \
+   && ! grep -q '(dev server: --port' "$O"; then ok
+else bad W29-handoff-names-theme "out=$(grep -n 'dev server' "$O" | tr '\n' ';')"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

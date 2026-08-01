@@ -37,8 +37,10 @@ errors reference — `${CLAUDE_PLUGIN_ROOT}/references/preview-theme-errors.md` 
 when a run fails or a deep-link is needed).
 
 When this checkout is a `git worktree` — or anything else already holds port 9292 — its dev
-server has to start on the port the workspace's `notes.md` records as `dev-port:`
-(`npm run dev -- --port <N>`), otherwise it silently collides with the main checkout's.
+server has to start on the theme the workspace's `notes.md` records as `session-theme:` and
+the port it records as `dev-port:` (`npm run dev -- --theme <id> --port <N>`), otherwise it
+silently collides with the main checkout's server or overwrites the shared dev theme
+(`${CLAUDE_PLUGIN_ROOT}/references/session-theme.md`).
 
 > **Security:** the Theme Access token lives in `shopify.theme.toml`. **Never `Read` that
 > file** — the script consumes the token inside the `shopify` subprocess and never prints
@@ -48,9 +50,11 @@ server has to start on the port the workspace's `notes.md` records as `dev-port:
 
 - Explicit `create` / `refresh` → that mode.
 - A bare **theme id** → **refresh** that theme.
-- Neither: a preview-theme id for this ticket is already known (conversation, the PR
-  preview table, workspace `notes.md`, a preview URL's `?preview_theme_id=<id>`, an admin
-  `/themes/<id>` URL) → **refresh** it; otherwise → **create**. The
+- Neither: a preview-theme id for this ticket is already known (the workspace `notes.md`
+  `session-theme: <id>` line **wins** — that is this work stream's theme, refresh it rather
+  than creating a second one; then the conversation, the PR preview table, a preview URL's
+  `?preview_theme_id=<id>`, an admin `/themes/<id>` URL) → **refresh** it; otherwise →
+  **create**. The
   developer's wording wins over the default ("update/refresh/push the fix" → refresh —
   ask for the id if unknown, pointing at the sources above; never guess an id).
 - The modes are NOT interchangeable: `create --reuse` re-overlays the dev theme's
@@ -82,6 +86,12 @@ server has to start on the port the workspace's `notes.md` records as `dev-port:
    `built`. If a `preview_path` is known, also give the page-deep-linked preview and the
    editor-on-template link (formulas: the errors reference's **Page deep-links**); path or
    template unknown → **ask, never guess**.
+6. **Record it as the work stream's session theme.** When a task workspace for this work-id
+   exists, append the id to its `notes.md` as a dated `session-theme: <id> (<name>)
+   <preview_url>` bullet — otherwise the next `/fnd:ship`, qa phase or PR run finds no line
+   and creates a *second* theme for the same stream. Do **not** pass `--pin-toml` here: the
+   pin rewrites the developer's `shopify.theme.toml` and is the session-theme offer's call
+   (`${CLAUDE_PLUGIN_ROOT}/references/session-theme.md`), not this skill's.
 
 ## Steps — refresh
 
@@ -94,6 +104,10 @@ server has to start on the port the workspace's `notes.md` records as `dev-port:
    errors reference's **`error=` outcomes**; don't read the toml yourself.
 4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`.
    Remind the developer that customizer settings were intentionally left as-is.
+5. **Record it when the workspace hasn't.** When a task workspace for this work-id exists
+   and its `notes.md` has no `session-theme:` line, append the refreshed id the same way as
+   create's step 6 (dated bullet, only the parts the script returned — refresh hands back no
+   name) — and, for the same reason as there, **without** `--pin-toml`.
 
 ## Quality bar
 
