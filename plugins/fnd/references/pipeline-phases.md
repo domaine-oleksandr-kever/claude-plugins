@@ -55,7 +55,9 @@ its brief says otherwise.
    bucket**: an F row from the reviewer → fix it when that fits the qa cap and is
    AC-compatible; justify → `ceiling:` entry + PR body; else ESCALATE.
    Commit per `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md` (scope per
-   policy; body from plan + notes), **then** stamp `.git/.fnd-review` — after the commit
+   policy; body from plan + notes), **then** stamp the marker at
+   `"$(git rev-parse --git-dir)/.fnd-review"` (resolved, never the literal `.git/` path —
+   a linked worktree's `.git` is a file) — after the commit
    succeeds, never before, so the hash covers whatever the project's commit hooks rewrote
    inside it (`review-flow.md` §1 → re-stamp rationale); `diff_hash` is always that
    post-commit diff. The hunt ran in the **qa** phase, over the pre-finalize diff, so

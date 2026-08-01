@@ -23,7 +23,9 @@ rule below is complete — the full flow lives in
 `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`; read it only if the marker semantics
 are unclear:
 
-- Read `.git/.fnd-review`. **No marker for this branch** → offer to run
+- Read the marker at `"$(git rev-parse --git-dir)/.fnd-review"` (resolved, never the
+  literal `.git/` path — a linked worktree's `.git` is a file). **No marker for this
+  branch** → offer to run
   `/fnd:pre-commit-review` first; proceed if the developer declines.
 - **Marker exists** → continue; don't re-run a review unprompted.
 - **Re-stamp around the commit** — before step 7 compute the current `diff_hash`; if it

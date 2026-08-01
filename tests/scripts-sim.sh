@@ -24,7 +24,11 @@ FBC="$ROOT/plugins/fnd/skills/fix-breaking-changes/scripts/fix-breaking-changes.
 BASH_BIN="$(command -v bash)"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# WPID is the port-probe listener the worktree cases start (see wt_listen). An interrupt between
+# `wt_listen` and `wt_unlisten` would otherwise leak a node process holding a 929x port on the
+# developer's machine — and the next run of this suite would then be testing around it.
+WPID=""
+trap 'if [ -n "$WPID" ]; then kill "$WPID" 2>/dev/null; fi; rm -rf "$TMP"' EXIT
 
 pass=0; fail=0; failures=""
 ok() { pass=$((pass + 1)); }
@@ -2151,6 +2155,447 @@ rc=0; (cd "$Y3REPO/sub/scratchpad" && env -u CLAUDE_PROJECT_DIR FND_MCP_SLIM_DIR
 y3proj="$(jq -r '.project' "$Y3OUT/fnd-mcp-slim-debug.log" 2>/dev/null)"
 if [ "$rc" -eq 0 ] && [ "$y3proj" = "my-repo" ]; then ok
 else bad Y3-cli-project "rc=$rc project=$y3proj"; fi
+
+# ---------------------------------------------- worktree-setup.sh against a scratch git repo --
+# Hermetic git: the developer's ~/.gitconfig (user.*, commit.gpgsign, core.hooksPath,
+# init.templateDir) must never reach these fixtures, so every git call — the harness's and the
+# script's own — runs with HOME pinned inside $TMP and an explicit identity. `origin` is a second
+# LOCAL bare repo, so nothing here touches the network.
+# NB worktree-setup.sh prints error= on STDOUT, not stderr — every case greps $O.
+WTS="$ROOT/plugins/fnd/scripts/worktree-setup.sh"
+WTR="$TMP/wt"; mkdir -p "$WTR/home" "$WTR/shim"
+wt_git() { HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 git \
+             -c init.defaultBranch=develop -c user.name=fnd -c user.email=fnd@example.com \
+             -c commit.gpgsign=false "$@"; }
+wt_run() { # wt_run <args…>   ; stdout -> $O, stderr -> $E
+  (cd "$WTR/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+     "$BASH_BIN" "$WTS" "$@") >"$O" 2>"$E"
+}
+wt_branch() { wt_git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null || true; }
+wt_key() { grep "^$1=" "$O" | head -1 | cut -d= -f2- ; }
+
+# A REAL listener on 127.0.0.1:$1, polled until it accepts — the port probe under test talks to
+# the loopback stack, so nothing short of an open socket exercises it.
+wt_listen() {
+  node -e 'require("net").createServer().listen(Number(process.argv[1]),"127.0.0.1")' "$1" &
+  WPID=$!
+  local i=0
+  while [ "$i" -lt 50 ] && ! node -e '
+    const s=require("net").connect(Number(process.argv[1]),"127.0.0.1");
+    s.on("connect",()=>process.exit(0)); s.on("error",()=>process.exit(1));' "$1" 2>/dev/null; do
+    sleep 0.1; i=$((i + 1))
+  done
+}
+wt_unlisten() {
+  [ -n "$WPID" ] || return 0
+  kill "$WPID" 2>/dev/null; wait "$WPID" 2>/dev/null; WPID=""
+}
+# The port the script would pick next: the lowest in its range no workspace has recorded yet. A
+# case that wants the live probe tested has to occupy a port the recorded-port bookkeeping does
+# NOT already exclude, or it proves nothing.
+wt_next_port() {
+  local p=9293
+  while [ "$p" -le 9312 ] && grep -rqE "dev-port: $p\$" "$WTR/theme/.claude/fnd" 2>/dev/null; do
+    p=$((p + 1))
+  done
+  printf '%s' "$p"
+}
+
+wt_git init --bare -q "$WTR/origin.git"
+wt_git init -q "$WTR/theme"
+printf 'x\n' > "$WTR/theme/README.md"
+wt_git -C "$WTR/theme" add -A
+wt_git -C "$WTR/theme" commit -qm init
+wt_git -C "$WTR/theme" remote add origin "$WTR/origin.git"
+wt_git -C "$WTR/theme" push -qu origin develop
+# Untracked on purpose, and NOT hidden in .git/info/exclude: a real repo gitignores the toml
+# (it carries the Theme Access token) and the `.claude` wiring, so both land in the worktree as
+# untracked paths — which is exactly what the remove-mode dirty check has to look past.
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\n' > "$WTR/theme/shopify.theme.toml"
+printf 'SHOPIFY_ADMIN_TOKEN=shpat_fixture\n' > "$WTR/theme/.env"
+mkdir -p "$WTR/theme/.claude"
+printf '{"permissions":{"allow":["Bash(ls:*)"]}}\n' > "$WTR/theme/.claude/settings.local.json"
+# npm must never really run (no network, and the fixture deliberately has no package.json);
+# the shim logs every call so "npm never ran" is assertable rather than inferred.
+cat > "$WTR/shim/npm" <<'FAKE'
+#!/usr/bin/env bash
+printf 'argv=%s\n' "$*" >> "${WT_NPM_LOG:-/dev/null}"
+exit 0
+FAKE
+chmod +x "$WTR/shim/npm"
+WT_NPM_LOG="$WTR/npm.log"; : > "$WT_NPM_LOG"; export WT_NPM_LOG
+# The script reports git's PHYSICAL paths, and $TMP under /var/folders reaches them through the
+# /var → /private/var symlink — comparing against $WTR verbatim would fail on every macOS run.
+WTMAIN="$(cd "$WTR/theme" && pwd -P)"
+
+# W1: a fresh ticket-key run creates the sibling worktree on feat/<KEY> off origin/develop and
+# copies (never links) the store config into it
+rc=0; wt_run ABC-123 || rc=$?
+W1DIR="$WTR/theme-ABC-123"
+if [ "$rc" -eq 0 ] && [ -d "$W1DIR" ] && [ "$(wt_branch "$W1DIR")" = "feat/ABC-123" ] \
+   && [ -f "$W1DIR/shopify.theme.toml" ] && [ ! -L "$W1DIR/shopify.theme.toml" ] \
+   && [ "$(wt_key worktree)" = "$(cd "$W1DIR" && pwd -P)" ] \
+   && grep -q '^branch_source=created$' "$O" && grep -q '^reused=false$' "$O" \
+   && grep -q '^toml=copied$' "$O"; then ok
+else bad W1-fresh-create "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# W2: the hand-off block is part of the output — the skill relays it verbatim, so a run that
+# creates the worktree but prints no launch line leaves the developer stranded
+W1PORT="$(wt_key dev_port)"; W1DIRP="$(cd "$W1DIR" && pwd -P)"
+if grep -qF "cd '$W1DIRP' && claude" "$O" && grep -q '/fnd:ship ABC-123' "$O" \
+   && printf '%s' "$W1PORT" | grep -qE '^9[0-9]+$'; then ok
+else bad W2-handoff-block "port=$W1PORT out=$(tr '\n' ';' < "$O")"; fi
+
+# W3: `.claude/fnd` is a symlink INTO the main checkout (one shared task workspace for both
+# sessions), while settings.local.json is a real copy — sharing it live would let two sessions
+# overwrite each other's permission approvals
+if [ -L "$W1DIR/.claude/fnd" ] \
+   && [ "$(cd "$W1DIR/.claude/fnd" && pwd -P)" = "$(cd "$WTR/theme/.claude/fnd" && pwd -P)" ] \
+   && [ -f "$W1DIR/.claude/settings.local.json" ] && [ ! -L "$W1DIR/.claude/settings.local.json" ]; then ok
+else bad W3-claude-wiring "link=$(ls -l "$W1DIR/.claude" 2>&1 | tr '\n' ';')"; fi
+
+# W3b: `.env` is copied too — it is gitignored for the same reason the toml is, and without it
+# every Admin API read from the worktree fails with no_admin_token while the identical ticket
+# would have had full store access in the main checkout
+if grep -q '^env=copied$' "$O" && [ -f "$W1DIR/.env" ] && [ ! -L "$W1DIR/.env" ] \
+   && grep -q '^SHOPIFY_ADMIN_TOKEN=shpat_fixture$' "$W1DIR/.env"; then ok
+else bad W3b-env-copied "out=$(grep '^env=' "$O") env=$(cat "$W1DIR/.env" 2>&1 | tr '\n' ';')"; fi
+
+# W3c: the symlink is stamped into the shared `.git/info/exclude`, so git never sees it. The
+# documented `.claude/fnd/` line matches directories only — unstamped, the ship run inside the
+# worktree would `git add` a link holding an absolute path from one developer's machine.
+if ! wt_git -C "$W1DIR" status --porcelain -uall | grep -q '\.claude/fnd' \
+   && wt_git -C "$W1DIR" status --porcelain -uall | grep -q '\.claude/settings.local.json' \
+   && grep -qx '\.claude/fnd' "$WTR/theme/.git/info/exclude"; then ok
+else bad W3c-fnd-link-excluded "status=$(wt_git -C "$W1DIR" status --porcelain -uall | tr '\n' ';')"; fi
+
+# W4: the chosen dev port is recorded in the SHARED workspace (the worktree session finds it
+# through the symlink), and it is not the main checkout's 9292
+if grep -qE "dev-port: $W1PORT\$" "$WTR/theme/.claude/fnd/ABC-123/notes.md" 2>/dev/null \
+   && [ -f "$W1DIR/.claude/fnd/ABC-123/notes.md" ] && [ "$W1PORT" != "9292" ]; then ok
+else bad W4-dev-port-recorded "port=$W1PORT notes=$(tr '\n' ';' < "$WTR/theme/.claude/fnd/ABC-123/notes.md" 2>&1)"; fi
+
+# W5 (pin): no package.json in the fixture ⇒ `npm ci` is skipped entirely, not attempted
+if grep -q '^npm=skipped$' "$O" && [ ! -s "$WT_NPM_LOG" ]; then ok
+else bad W5-npm-skipped "out=$(grep '^npm=' "$O") log=$(tr '\n' ';' < "$WT_NPM_LOG")"; fi
+
+# W6: re-running on an existing worktree is the re-entry path, not an error — same port, and the
+# worktree's own shopify.theme.toml is left alone (the preview script writes the new theme id
+# into it, so a blind re-copy would throw that away)
+printf '# local edit\n' >> "$W1DIR/shopify.theme.toml"
+printf 'EXTRA=1\n' >> "$W1DIR/.env"
+rc=0; wt_run ABC-123 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^reused=true$' "$O" && grep -q '^toml=kept$' "$O" \
+   && grep -q '^env=kept$' "$O" && grep -q '^EXTRA=1$' "$W1DIR/.env" \
+   && [ "$(wt_key dev_port)" = "$W1PORT" ] && grep -q '# local edit' "$W1DIR/shopify.theme.toml" \
+   && [ "$(grep -c 'dev-port:' "$WTR/theme/.claude/fnd/ABC-123/notes.md")" -eq 1 ]; then ok
+else bad W6-idempotent-rerun "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# W7: a kebab-case slug is a valid work-id too — not every worktree is ticket-shaped
+rc=0; wt_run header-refactor || rc=$?
+if [ "$rc" -eq 0 ] && [ -d "$WTR/theme-header-refactor" ] \
+   && [ "$(wt_branch "$WTR/theme-header-refactor")" = "feat/header-refactor" ] \
+   && [ -d "$WTR/theme/.claude/fnd/header-refactor" ] \
+   && ! grep -q '/fnd:ship' "$O"; then ok
+else bad W7-slug-create "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# W8: anything that is neither a ticket key nor a clean slug is refused BEFORE any git write —
+# the work-id becomes a branch name, a directory name and a workspace name
+for badid in Bad_ID ABC-12a abc--x trail- "sp ace" ../escape; do
+  rc=0; wt_run "$badid" || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q '^error=invalid_work_id' "$O" \
+     && [ ! -e "$WTR/theme-$badid" ]; then ok
+  else bad "W8-invalid-id[$badid]" "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+done
+
+# W8b: a leading dash is a flag as far as any shell parser is concerned — it must be refused
+# there, before it can be mistaken for a positional work-id
+rc=0; wt_run -lead || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=unknown arg: -lead' "$O"; then ok
+else bad W8b-dash-id "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# W9: an existing LOCAL feat/<KEY> is checked out into the worktree, never duplicated
+wt_git -C "$WTR/theme" branch -q feat/REU-7 develop
+rc=0; wt_run REU-7 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^branch_source=local$' "$O" \
+   && [ "$(wt_branch "$WTR/theme-REU-7")" = "feat/REU-7" ] \
+   && [ "$(wt_git -C "$WTR/theme" branch --list 'feat/REU-7' | wc -l | tr -d ' ')" = "1" ]; then ok
+else bad W9-local-branch-reuse "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# W9b: a branch that exists only on origin is fetched and tracked, not forked off the base
+wt_git -C "$WTR/theme" branch -q feat/REM-8 develop
+wt_git -C "$WTR/theme" push -q origin feat/REM-8
+wt_git -C "$WTR/theme" branch -qD feat/REM-8
+wt_git -C "$WTR/theme" update-ref -d refs/remotes/origin/feat/REM-8
+rc=0; wt_run REM-8 || rc=$?
+wt_up="$(wt_git -C "$WTR/theme-REM-8" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
+if [ "$rc" -eq 0 ] && grep -q '^branch_source=remote$' "$O" \
+   && [ "$(wt_branch "$WTR/theme-REM-8")" = "feat/REM-8" ] \
+   && [ "$wt_up" = "origin/feat/REM-8" ]; then ok
+else bad W9b-remote-branch-reuse "rc=$rc upstream=$wt_up out=$(tr '\n' ';' < "$O")"; fi
+
+# W9c: with origin unreachable (offline, VPN down, dead credential helper) the live `ls-remote`
+# is the only check that fails — the remote-tracking ref is still on disk, and treating its
+# branch as new would fork a fresh feat/<KEY> off the base and orphan the pushed commits
+wt_git -C "$WTR/theme" checkout -q -b feat/OFF-3
+printf 'colleague work\n' > "$WTR/theme/work.txt"
+wt_git -C "$WTR/theme" add work.txt
+wt_git -C "$WTR/theme" commit -qm colleague
+wt_git -C "$WTR/theme" push -q origin feat/OFF-3
+wt_git -C "$WTR/theme" checkout -q develop
+wt_git -C "$WTR/theme" branch -qD feat/OFF-3
+wt_git -C "$WTR/theme" fetch -q origin '+refs/heads/feat/OFF-3:refs/remotes/origin/feat/OFF-3'
+wt_git -C "$WTR/theme" remote set-url origin "$WTR/unreachable.git"
+rc=0; wt_run OFF-3 || rc=$?
+wt_git -C "$WTR/theme" remote set-url origin "$WTR/origin.git"
+if [ "$rc" -eq 0 ] && grep -q '^branch_source=remote$' "$O" \
+   && [ -f "$WTR/theme-OFF-3/work.txt" ]; then ok
+else bad W9c-offline-remote-ref "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# W10: no store config in the repo is a WARNING — the worktree is still usable for code work
+mv "$WTR/theme/shopify.theme.toml" "$WTR/toml.bak"
+rc=0; wt_run NOT-1 || rc=$?
+mv "$WTR/toml.bak" "$WTR/theme/shopify.theme.toml"
+if [ "$rc" -eq 0 ] && grep -q '^warn=no_shopify_theme_toml' "$O" && grep -q '^toml=missing$' "$O" \
+   && [ -d "$WTR/theme-NOT-1" ]; then ok
+else bad W10-missing-toml-warns "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# W11: the port probe steps over a port that is already listening. The occupied port is the one
+# the scan would otherwise hand out next — an already-recorded port (9293 by now) would be
+# skipped by the recorded-port bookkeeping alone and the live probe would go untested.
+wt_probe_port="$(wt_next_port)"
+wt_listen "$wt_probe_port"
+rc=0; wt_run PORT-2 || rc=$?
+wt_port2="$(wt_key dev_port)"
+wt_unlisten
+if [ "$rc" -eq 0 ] && [ -n "$wt_port2" ] && [ "$wt_port2" != "$wt_probe_port" ] \
+   && [ "$wt_port2" -gt "$wt_probe_port" ]; then ok
+else bad W11-port-probe "rc=$rc port=$wt_port2 occupied=$wt_probe_port out=$(tr '\n' ';' < "$O")"; fi
+
+# W11b (bug): "nothing is listening" is not enough. The dev servers are started later, by hand,
+# in the new sessions — so at setup time NOTHING listens and two worktrees created a minute
+# apart were both handed 9293, which is exactly the parallel case the feature exists for.
+rc=0; wt_run PAR-3 || rc=$?; wt_par1="$(wt_key dev_port)"
+rc2=0; wt_run PAR-4 || rc2=$?; wt_par2="$(wt_key dev_port)"
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ -n "$wt_par1" ] && [ -n "$wt_par2" ] \
+   && [ "$wt_par1" != "$wt_par2" ]; then ok
+else bad W11b-port-per-worktree "rc=$rc/$rc2 ports=$wt_par1/$wt_par2 out=$(tr '\n' ';' < "$O")"; fi
+
+# W12: --remove refuses a worktree with real uncommitted work and removes nothing
+printf 'edited in the worktree\n' >> "$W1DIR/README.md"
+rc=0; wt_run --remove ABC-123 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=worktree_dirty' "$O" && grep -q '^dirty=.*README.md' "$O" \
+   && [ -d "$W1DIR" ]; then ok
+else bad W12-remove-dirty-refused "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# W13: --force is the override, and it takes the worktree with it
+rc=0; wt_run --remove ABC-123 --force || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^removed=' "$O" && [ ! -d "$W1DIR" ] \
+   && grep -q '^branch_kept=true$' "$O" \
+   && wt_git -C "$WTR/theme" show-ref --verify --quiet refs/heads/feat/ABC-123; then ok
+else bad W13-remove-force "rc=$rc out=$(tr '\n' ';' < "$O") dir=$([ -d "$W1DIR" ] && echo present)"; fi
+
+# W14 (the data-loss guard): a CLEAN worktree removes without --force even though the `.claude`
+# wiring and the copied toml are untracked (git's own `worktree remove` refuses on those), and
+# the shared task workspace in the MAIN checkout survives — the symlink is dropped before the
+# removal, so nothing follows it back into `<main>/.claude/fnd`.
+printf 'the approved plan\n' > "$WTR/theme/.claude/fnd/header-refactor/plan.md"
+rc=0; wt_run --remove header-refactor || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -d "$WTR/theme-header-refactor" ] \
+   && [ -d "$WTR/theme/.claude/fnd/header-refactor" ] \
+   && [ "$(cat "$WTR/theme/.claude/fnd/header-refactor/plan.md" 2>/dev/null)" = "the approved plan" ] \
+   && [ -f "$WTR/theme/.claude/fnd/ABC-123/notes.md" ] \
+   && grep -q "^workspace_kept=$WTMAIN/.claude/fnd/header-refactor$" "$O"; then ok
+else bad W14-remove-clean-keeps-workspace "rc=$rc out=$(tr '\n' ';' < "$O") left=$(ls "$WTR/theme/.claude/fnd" 2>&1 | tr '\n' ' ')"; fi
+
+# W14b: the workspace outlives the worktree by design, so its `dev-port:` line is still there on
+# a re-create — sticky is right for a re-entry (the dev server is already on that port) but a
+# fresh worktree must re-probe rather than hand back a number something else took meanwhile
+wt_listen "$W1PORT"
+rc=0; wt_run ABC-123 || rc=$?
+wt_port3="$(wt_key dev_port)"
+wt_unlisten
+if [ "$rc" -eq 0 ] && grep -q '^reused=false$' "$O" && [ -n "$wt_port3" ] \
+   && [ "$wt_port3" != "$W1PORT" ]; then ok
+else bad W14b-stale-port-reprobed "rc=$rc port=$wt_port3 was=$W1PORT out=$(tr '\n' ';' < "$O")"; fi
+
+# W15: removing something that is not a registered worktree is a named refusal, not a `rm -rf`
+rc=0; wt_run --remove NOPE-9 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=worktree_not_found' "$O"; then ok
+else bad W15-remove-unknown "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# W16: a directory already sitting at the worktree path is a hard stop — git does not know it,
+# and `worktree add` would fail late with the developer's files half-consumed
+mkdir -p "$WTR/theme-TAKEN-1"; printf 'mine\n' > "$WTR/theme-TAKEN-1/keep.txt"
+rc=0; wt_run TAKEN-1 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=worktree_path_taken' "$O" \
+   && [ -f "$WTR/theme-TAKEN-1/keep.txt" ]; then ok
+else bad W16-path-taken "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# W17: outside a git repo the script says so instead of resolving a worktree path from $0 — it
+# ships inside the installed plugin, far from any client repo, so the leak to rule out is a
+# worktree hanging off THIS repo (the only checkout $0 could reach) or off the fixture root
+rc=0; (cd "$WTR" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 GIT_CEILING_DIRECTORIES="$WTR" \
+  "$BASH_BIN" "$WTS" OUT-1) >"$O" 2>"$E" || rc=$?
+wt_leak="$(ls -d "$WTR"/*OUT-1 "$(dirname "$ROOT")"/*OUT-1 2>/dev/null | tr '\n' ' ')"
+wt_plug_leak="$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | grep -c 'OUT-1' || true)"
+if [ "$rc" -eq 1 ] && grep -q '^error=not_a_git_repo' "$O" \
+   && [ -z "$wt_leak" ] && [ "$wt_plug_leak" -eq 0 ]; then ok
+else bad W17-outside-repo "rc=$rc leak='$wt_leak' plug=$wt_plug_leak out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# W18: a bare invocation prints the usage line instead of dying under `set -u`
+rc=0; wt_run || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=usage: worktree-setup.sh' "$O"; then ok
+else bad W18-usage "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# W19 (bug): the hand-off line is pasted into a shell verbatim. Unquoted, a repo under a path
+# with a space makes `cd` a three-argument call — it errors, `claude` then starts in whatever
+# directory the developer was in (the main checkout), which is what the feature exists to
+# prevent. Asserted by actually running the printed line and checking where it lands.
+mkdir -p "$WTR/sp ace"
+wt_git init --bare -q "$WTR/sp ace/origin.git"
+wt_git init -q "$WTR/sp ace/theme"
+printf 'x\n' > "$WTR/sp ace/theme/README.md"
+wt_git -C "$WTR/sp ace/theme" add -A
+wt_git -C "$WTR/sp ace/theme" commit -qm init
+wt_git -C "$WTR/sp ace/theme" remote add origin "$WTR/sp ace/origin.git"
+wt_git -C "$WTR/sp ace/theme" push -qu origin develop
+rc=0; (cd "$WTR/sp ace/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+  "$BASH_BIN" "$WTS" SPC-1) >"$O" 2>"$E" || rc=$?
+wt_spdir="$(cd "$WTR/sp ace/theme-SPC-1" 2>/dev/null && pwd -P || true)"
+wt_cdline="$(grep '^  cd .* && claude$' "$O" | head -1 | sed 's/^  //; s/ && claude$//')"
+wt_land="$( (eval "$wt_cdline" >/dev/null 2>&1; pwd -P) 2>/dev/null || true )"
+if [ "$rc" -eq 0 ] && [ -n "$wt_spdir" ] && [ "$wt_land" = "$wt_spdir" ]; then ok
+else bad W19-handoff-quoted "rc=$rc land=$wt_land want=$wt_spdir line=$wt_cdline"; fi
+
+# W20: the report names the branch the worktree is REALLY on. A developer who switched branches
+# inside it must not be told the run continues on feat/<WORK-ID>, nor — on removal — that
+# feat/<WORK-ID> was "kept" while the branch actually holding the work goes unmentioned.
+rc=0; wt_run DIF-5 || rc=$?
+wt_git -C "$WTR/theme-DIF-5" checkout -q -b hotfix/other
+rc=0; wt_run DIF-5 || rc=$?
+wt_dif_create="$(wt_key branch)"
+wt_dif_warn=0; grep -q '^warn=branch_switched expected=feat/DIF-5 actual=hotfix/other' "$O" && wt_dif_warn=1
+rc2=0; wt_run --remove DIF-5 --force || rc2=$?
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$wt_dif_create" = "hotfix/other" ] \
+   && [ "$wt_dif_warn" -eq 1 ] && [ "$(wt_key branch)" = "hotfix/other" ]; then ok
+else bad W20-actual-branch-reported "rc=$rc/$rc2 create=$wt_dif_create warn=$wt_dif_warn remove=$(wt_key branch)"; fi
+
+# W21 (bug): the dirty check has to see INSIDE `.claude/`. Without `-uall` git collapses an
+# untracked directory to one `?? .claude/` line, which the skip list swallowed whole — so
+# --remove deleted a developer's QA notes without ever listing them on a `dirty=` line.
+rc=0; wt_run QAN-1 || rc=$?
+mkdir -p "$WTR/theme-QAN-1/.claude/notes"
+printf 'qa checklist\n' > "$WTR/theme-QAN-1/.claude/notes/qa.md"
+rc2=0; wt_run --remove QAN-1 || rc2=$?
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 1 ] && grep -q '^error=worktree_dirty' "$O" \
+   && grep -q '^dirty=.*\.claude/notes/qa\.md' "$O" \
+   && [ -f "$WTR/theme-QAN-1/.claude/notes/qa.md" ]; then ok
+else bad W21-dirty-sees-into-claude "rc=$rc/$rc2 out=$(tr '\n' ';' < "$O")"; fi
+wt_run --remove QAN-1 --force >/dev/null 2>&1 || true
+
+# W22 (data loss): a detached HEAD is held by nothing but the worktree's own HEAD/reflog, both
+# of which `git worktree remove` deletes — a mid-rebase commit made there becomes unreachable.
+# The removal must refuse, and under --force must print the sha instead of claiming a branch.
+rc=0; wt_run DET-6 || rc=$?
+wt_git -C "$WTR/theme-DET-6" checkout -q --detach
+printf 'mid-rebase work\n' > "$WTR/theme-DET-6/detached.txt"
+wt_git -C "$WTR/theme-DET-6" add detached.txt
+wt_git -C "$WTR/theme-DET-6" commit -qm 'only this HEAD holds it'
+wt_det_sha="$(wt_git -C "$WTR/theme-DET-6" rev-parse HEAD)"
+rc2=0; wt_run --remove DET-6 || rc2=$?
+wt_det_refused=0
+if grep -q '^error=worktree_detached' "$O" && grep -qF "$wt_det_sha" "$O" \
+   && [ -d "$WTR/theme-DET-6" ]; then wt_det_refused=1; fi
+rc3=0; wt_run --remove DET-6 --force || rc3=$?
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 1 ] && [ "$wt_det_refused" -eq 1 ] && [ "$rc3" -eq 0 ] \
+   && [ ! -d "$WTR/theme-DET-6" ] && grep -qF "warn=detached_head_removed head=$wt_det_sha" "$O" \
+   && ! grep -q '^branch_kept=true$' "$O"; then ok
+else bad W22-remove-detached "rc=$rc/$rc2/$rc3 refused=$wt_det_refused sha=$wt_det_sha out=$(tr '\n' ';' < "$O")"; fi
+
+# W23 (bug): the workspace outlives the worktree by design, so the port it recorded has to be
+# RELEASED when the worktree goes — held forever, every finished ticket burned one of the 20.
+rc=0; wt_run REL-9 || rc=$?; wt_rel1="$(wt_key dev_port)"
+rc2=0; wt_run --remove REL-9 || rc2=$?
+rc3=0; wt_run REL-10 || rc3=$?; wt_rel2="$(wt_key dev_port)"
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$rc3" -eq 0 ] \
+   && [ -f "$WTR/theme/.claude/fnd/REL-9/notes.md" ] && [ -n "$wt_rel1" ] \
+   && [ "$wt_rel2" = "$wt_rel1" ]; then ok
+else bad W23-port-released-on-remove "rc=$rc/$rc2/$rc3 ports=$wt_rel1/$wt_rel2 out=$(tr '\n' ';' < "$O")"; fi
+wt_run --remove REL-10 --force >/dev/null 2>&1 || true
+
+# W24 (bug): twenty work-ids whose worktrees are long gone used to exhaust the range for good —
+# and the refusal fired at the END, after `worktree add`, leaving a registered worktree behind
+# that made the re-run fail with worktree_path_taken. Nothing is listening on any of them.
+i=9293
+while [ "$i" -le 9312 ]; do
+  mkdir -p "$WTR/theme/.claude/fnd/OLD-$i"
+  printf -- '- 2026-01-01 worktree `gone` on branch `feat/OLD-%s`, dev-port: %s\n' "$i" "$i" \
+    > "$WTR/theme/.claude/fnd/OLD-$i/notes.md"
+  i=$((i + 1))
+done
+rc=0; wt_run EXH-1 || rc=$?
+wt_exh_port="$(wt_key dev_port)"
+rm -rf "$WTR"/theme/.claude/fnd/OLD-*
+if [ "$rc" -eq 0 ] && [ -d "$WTR/theme-EXH-1" ] && ! grep -q '^error=' "$O" \
+   && printf '%s' "$wt_exh_port" | grep -qE '^9[0-9]+$'; then ok
+else bad W24-stale-ports-released "rc=$rc port=$wt_exh_port out=$(tr '\n' ';' < "$O")"; fi
+wt_run --remove EXH-1 --force >/dev/null 2>&1 || true
+
+# W25 (bug): the exclude stamp appends to a file the DEVELOPER owns. One whose last byte is not
+# a newline — hand-edited ones often are — used to get `.claude/fnd` glued onto the last
+# pattern, which breaks that pattern and leaves the symlink unexcluded. Fresh repo: the main
+# fixture's exclude was already stamped (and already ends in a newline).
+mkdir -p "$WTR/nonl"
+wt_git init --bare -q "$WTR/nonl/origin.git"
+wt_git init -q "$WTR/nonl/theme"
+printf 'x\n' > "$WTR/nonl/theme/README.md"
+wt_git -C "$WTR/nonl/theme" add -A
+wt_git -C "$WTR/nonl/theme" commit -qm init
+wt_git -C "$WTR/nonl/theme" remote add origin "$WTR/nonl/origin.git"
+wt_git -C "$WTR/nonl/theme" push -qu origin develop
+printf 'secret.txt' > "$WTR/nonl/theme/.git/info/exclude"
+rc=0; (cd "$WTR/nonl/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+  "$BASH_BIN" "$WTS" NL-1) >"$O" 2>"$E" || rc=$?
+WT_NL_EXCL="$WTR/nonl/theme/.git/info/exclude"
+if [ "$rc" -eq 0 ] && grep -qx 'secret.txt' "$WT_NL_EXCL" && grep -qx '\.claude/fnd' "$WT_NL_EXCL" \
+   && ! grep -q 'secret.txt\.claude' "$WT_NL_EXCL"; then ok
+else bad W25-exclude-trailing-newline "rc=$rc exclude=$(tr '\n' ';' < "$WT_NL_EXCL" 2>&1)"; fi
+
+# W26: with no /dev/tcp and no usable `nc` there is no way to ask whether a port is free — the
+# run must still hand one out and SAY it was unchecked, naming the dev server's own --port (the
+# script has no --port flag of its own). A bash built without net redirections cannot be
+# conjured here, so the copy under test has the probe's verdict line replaced by the message
+# such a bash prints, and a shim `nc` rejects -z the way ncat builds do.
+WTS_NP="$WTR/worktree-setup-noprobe.sh"
+sed 's#^DEVTCP_MSG=.*#DEVTCP_MSG="fnd-sim: No such file or directory"#' "$WTS" > "$WTS_NP"
+mkdir -p "$WTR/ncshim"
+cat > "$WTR/ncshim/nc" <<'FAKE'
+#!/usr/bin/env bash
+printf 'usage: nc [-46CDdFhklNnrStUuvZz]\n' >&2
+exit 1
+FAKE
+chmod +x "$WTR/ncshim/nc"
+rc=0; (cd "$WTR/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/ncshim:$WTR/shim:$PATH" \
+  "$BASH_BIN" "$WTS_NP" NOP-1) >"$O" 2>"$E" || rc=$?
+wt_nop_port="$(wt_key dev_port)"
+if [ "$rc" -eq 0 ] && grep -q '^DEVTCP_MSG="fnd-sim' "$WTS_NP" \
+   && grep -q '^warn=port_probe_unavailable' "$O" \
+   && grep -qF 'shopify theme dev --port' "$O" \
+   && printf '%s' "$wt_nop_port" | grep -qE '^9[0-9]+$' && [ -d "$WTR/theme-NOP-1" ]; then ok
+else bad W26-port-probe-unavailable "rc=$rc port=$wt_nop_port out=$(tr '\n' ';' < "$O")"; fi
+wt_run --remove NOP-1 --force >/dev/null 2>&1 || true
+
+# W27: in a submodule (or a `--separate-git-dir` checkout) the common git dir is not inside the
+# working tree, so dirname(common dir) is not a checkout — the sibling worktree and the shared
+# `.claude/fnd` would be created inside git's own plumbing. Named refusal, nothing created.
+mkdir -p "$WTR/sep"
+wt_git init -q --separate-git-dir "$WTR/sep/realgit" "$WTR/sep/theme"
+rc=0; (cd "$WTR/sep/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+  "$BASH_BIN" "$WTS" SEP-1) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=unsupported_layout' "$O" \
+   && [ ! -e "$WTR/sep-SEP-1" ] && [ ! -e "$WTR/sep/realgit/.claude" ]; then ok
+else bad W27-separate-git-dir "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

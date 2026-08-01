@@ -56,7 +56,8 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    disk (`plan.md` + `qa.md` — `active` without them is a half-written record: treat as
    `draft`) → reconcile the phase ledger against ground truth per `pipeline-mode.md` →
    Decision record, re-run items 2–6 below compactly (a resume often lands in a new
-   terminal), then continue from the first genuinely-undone phase (jump to Step 4).
+   terminal; item 7 is a fresh-run gate only — a resume stays in the checkout the work
+   already lives in), then continue from the first genuinely-undone phase (jump to Step 4).
    `status: draft` — interviewed, never approved: keep the recorded answers, redo
    Steps 1–3 compactly from the workspace cache and re-present the ✋ — approval never
    comes from a resume. `done` / `aborted` / absent → fresh run.
@@ -68,6 +69,8 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    MCP; the **local dev server** running (`npm run dev` — Turbo: `shopify theme dev -e dev`
    + Vite — or `npm run theme:shopify`); not running → ask the developer to start it —
    a long-lived interactive process the developer owns; never start or kill it yourself;
+   port 9292 taken by another checkout, or the workspace's `notes.md` recording a
+   `dev-port:` line → the start command to give them is `npm run dev -- --port <N>`;
    `gh auth status`; Shopify CLI present; **store access** — one cheap read through
    `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` (probe `.graphql` → scratch),
    then classify: read failed → `none`; read ok → probe
@@ -89,6 +92,19 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`, incl. the git-exclude line).
 6. **Branch.** Working tree clean (or only this ticket's work in it); note the current
    branch for the interview.
+7. **Isolation offer** — compare the two dirs in **absolute** form, or a subdirectory of a
+   plain checkout looks like a worktree:
+   `test "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)"`
+   — differing paths ⇒ already a linked worktree → say nothing, proceed. Same path = the main checkout → one
+   AskUserQuestion, never a block: this run occupies the repo and this session end to end.
+   Put the resolved command — `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh <ticket-key>`,
+   plugin root expanded — in the question itself, so "Continue here" still leaves it in front
+   of the developer. **Isolate** → run that command, print
+   its hand-off block **verbatim**, and **stop** — a session cannot relocate itself, so the
+   developer opens a new terminal, `cd`s into the printed worktree, launches `claude`, and
+   re-runs `/fnd:ship <ticket>` there. **Continue here** → proceed, no further mention.
+   Script absent (older plugin install) → offer the one-line fallback instead:
+   `git worktree add -b feat/<KEY> ../<repo>-<KEY> origin/develop`.
 
 ## Step 1 — Ingest (parallel reads, workspace-first)
 

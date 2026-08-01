@@ -13,7 +13,9 @@ run** (cheap ones inline, expensive ones delegated to the `change-reviewer` and
 A tiny, branch-keyed record that answers one question: *has this branch been reviewed
 before?* It lives inside `.git/`, so it is **never committed**, is local per-clone, and
 survives context compaction and new sessions. It is **overwritten** each time (never
-appended) → constant size, no cleanup.
+appended) → constant size, no cleanup. Always resolve the path with
+`git rev-parse --git-dir` — in a linked worktree `.git` is a *file*, not a directory, so
+the literal path fails; the resolved one gives each worktree its own marker.
 
 Format (plain `key=value` lines, no `jq` needed):
 
@@ -45,7 +47,7 @@ diff_hash=$(git diff "$mb" | git hash-object --stdin)
 Read it:
 
 ```bash
-marker=.git/.fnd-review
+marker="$(git rev-parse --git-dir)/.fnd-review"
 if [ -f "$marker" ] && grep -qx "branch=$branch" "$marker"; then
   reviewed_before=yes
   prev_hash=$(sed -n 's/^diff_hash=//p' "$marker")
@@ -61,10 +63,11 @@ are applied, so it records the final reviewed state; add the `correctness_hash` 
 when check F was handled this pass):
 
 ```bash
+marker="$(git rev-parse --git-dir)/.fnd-review"
 { echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$diff_hash"; \
-  echo "reviewed_at_head=$(git rev-parse HEAD)"; } > .git/.fnd-review
+  echo "reviewed_at_head=$(git rev-parse HEAD)"; } > "$marker"
 # ONLY when check F was handled this pass (bug-hunter ran, or gate: not applicable):
-echo "correctness_hash=$diff_hash" >> .git/.fnd-review
+echo "correctness_hash=$diff_hash" >> "$marker"
 ```
 
 **Re-stamp after a commit whose hooks rewrote the tree** (`commit` only). Project commit
@@ -79,6 +82,7 @@ legitimate.
 
 ```bash
 # BEFORE `git commit` — is the tree about to be committed the reviewed one?
+marker="$(git rev-parse --git-dir)/.fnd-review"
 pre_hash=$(git diff "$(git merge-base "$base" HEAD)" | git hash-object --stdin)
 restamp=no; keep_correctness=no
 if [ -f "$marker" ] && grep -qx "branch=$branch" "$marker" && grep -qx "diff_hash=$pre_hash" "$marker"; then

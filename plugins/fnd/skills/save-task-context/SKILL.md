@@ -22,7 +22,8 @@ already known; missing data is reported as a gap, not fetched.
 1. **Resolve `<work-id>`** — one ticket → its key; several tickets shipping as one PR on one
    branch → the branch slug (with one `ticket-<KEY>.md` per ticket inside). State the resolved
    id in one line if it was inferred rather than passed.
-2. **Ensure the folder** — `git check-ignore -q .claude/fnd || echo '.claude/fnd/' >> .git/info/exclude`,
+2. **Ensure the folder** — `git check-ignore -q .claude/fnd || echo '.claude/fnd/' >> "$(git rev-parse --git-common-dir)/info/exclude"`
+   (the common dir, not `.git/`: the exclude file is shared and a linked worktree's `.git` is a file),
    then create `.claude/fnd/<work-id>/` if absent. Merge into existing files — don't blow away
    earlier entries.
 3. **Write what the conversation holds** (verbatim, per the reference):

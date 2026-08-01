@@ -14,7 +14,9 @@ a written plan → developer approves/corrects → apply. **Never commits** (rep
 This skill is the primary home of the fnd review flow. Follow the shared contract in
 `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`:
 
-- Compute `branch` / `base` / `diff_hash` per §1 and read `.git/.fnd-review`; **first
+- Compute `branch` / `base` / `diff_hash` per §1 and read the marker at
+  `"$(git rev-parse --git-dir)/.fnd-review"` (resolved, never the literal `.git/` path —
+  a linked worktree's `.git` is a file); **first
   review on this branch** → run the full pass below; **already reviewed** → the §3 ask
   (`[ full re-review / only the changed files / skip ]`) — honour the choice.
 

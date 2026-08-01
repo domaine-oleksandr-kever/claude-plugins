@@ -18,7 +18,7 @@ in its own subfolder under `plugins/`:
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # plugin manifest (+ bundled mcpServers)
-│       ├── skills/               # 16 workflow skills (see table below)
+│       ├── skills/               # 17 workflow skills (see table below)
 │       │   ├── develop-feature-or-fix/SKILL.md
 │       │   └── ...
 │       ├── agents/               # subagents the skills delegate to
@@ -76,6 +76,7 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `create-pull-request`             | `/fnd:create-pull-request` |
 | `ship`                            | `/fnd:ship` |
 | `preview-theme`                   | `/fnd:preview-theme` |
+| `worktree`                        | `/fnd:worktree` |
 | `pre-commit-review`               | `/fnd:pre-commit-review` |
 | `commit`                          | `/fnd:commit` |
 | `preflight-checks`                | `/fnd:preflight-checks` |
@@ -278,7 +279,8 @@ codebase reads at once) when the task scope is already clear. The block above is
   `create-pull-request` is the backstop (runs it only if the marker shows the pass is
   missing or stale). Every correctness finding is dispositioned — fixed, justified as a
   named ceiling in the PR body, or explicitly waived — never silently dropped.
-- **Once per branch.** A tiny branch-keyed marker at `.git/.fnd-review` (never
+- **Once per branch.** A tiny branch-keyed marker at `<git-dir>/.fnd-review`
+  (resolved via `git rev-parse --git-dir`, so linked worktrees work too; never
   committed, auto-overwritten) records that a branch was reviewed. The **first**
   review on a branch runs in full; **later** runs ask the developer
   `[ full / only changed files / skip ]`, so `commit` and PR creation don't
@@ -336,6 +338,83 @@ flowchart TD
     O --> P["final report<br/>pipeline.md → done"]
     AUTO -. "blocker classes only" .-> Q(["escalate via AskUserQuestion<br/>answer → continue"])
 ```
+
+## Parallel ship via git worktree
+
+A ship run owns the repo it starts in — a dirty tree, the dev server on port 9292, the
+`shopify.theme.toml` the preview script rewrites — and it owns the session for the whole
+run. `plugins/fnd/scripts/worktree-setup.sh` moves the run into a **linked git worktree**
+(shared `.git`, no clone, instant setup) so the main checkout and the main session stay
+free for everything else:
+
+```text
+worktree-setup.sh <WORK-ID> [<base-branch>]     # default base: develop
+worktree-setup.sh --remove <WORK-ID> [--force]
+```
+
+`<WORK-ID>` is a Jira ticket key (`ELC-206`) **or** a kebab-case slug
+(`header-refactor`) — the same work-id the task workspace uses, because not every
+worktree is ticket-shaped.
+
+Create mode does the whole setup in one pass: the worktree as a **sibling** directory
+(`../<repo>-<WORK-ID>`) on branch `feat/<WORK-ID>` off `origin/<base>` (a local `<base>`
+when no remote-tracking ref exists) — an existing local
+or remote branch of that name is checked out, never duplicated; `npm ci` when the repo has
+a `package.json`; **copies** of the gitignored config a fresh checkout cannot have —
+`shopify.theme.toml`, so the preview theme id that later gets written lands in the worktree
+and leaves the main checkout's config alone, and `.env`, without which every Admin API read
+from the worktree would fail on a missing token; the worktree's `.claude/fnd` **symlinked**
+to the main repo's, so the task workspace is shared between the two checkouts and survives
+the worktree's removal (and git-excluded, so the link never reaches a commit);
+`.claude/settings.local.json` copied rather than shared (two sessions approving permissions
+into one file would race); and a free dev port from 9293 upward, recorded as a `dev-port:`
+line in the shared workspace so the ship session finds it — a port counts as taken when
+something is listening on it **or** another work-id's workspace already recorded it, because
+the dev servers only start later, by hand, in the new sessions. Re-running for the same
+work-id is idempotent — an existing worktree just re-prints the hand-off block.
+
+`--remove` refuses a dirty worktree or a detached HEAD unless you pass `--force`
+(the detached case prints the HEAD sha for recovery), and deliberately touches
+neither the shared task workspace nor the preview theme (`create-preview-theme.sh` reaps
+its own orphans).
+
+`/fnd:worktree` is the thin skill in front of all this — it resolves the work-id from your
+message or the conversation, runs the script, and relays its output verbatim.
+
+The launch flow is three steps, and only the first happens in the session you're already
+in:
+
+```text
+# 1. in the main checkout
+/fnd:worktree ELC-206
+
+# 2. a NEW terminal
+cd ../my-theme-ELC-206 && claude
+
+# 3. inside that session
+/fnd:ship ELC-206
+```
+
+Step 2 is illustrative — paste the `cd` line the script prints (an absolute, quoted path)
+rather than retyping it.
+
+A session cannot relocate itself into another directory, so the second terminal is yours
+to open — nothing is auto-spawned. `/fnd:ship` knows about the split: started **in a
+worktree** it says nothing, started **in the main checkout** it offers the isolation once
+(and can run the setup script for you, then stops so you can move over) and takes "no" for
+an answer.
+
+**How many at once:**
+
+- **≈2 ships per store.** Shopify's theme rate limit is per store + token, and a running
+  `shopify theme dev` draws on the same budget as every preview-theme push — that
+  contention is what produces half-broken previews. Two concurrent runs on one store is
+  the practical cap, and it helps to stagger the preview-theme phase rather than starting
+  both runs the same minute. Nothing new guards this: the preview script's throttle
+  retries and its created-theme orphan reap remain the mitigation, and they already run.
+- **Different stores don't contend** — there, parallelism is bounded only by your machine.
+- **Usage limits are shared.** Every parallel session bills the same Claude subscription,
+  so N ships burn the plan's limit ≈N× as fast. Worktrees buy isolation, not extra quota.
 
 ## Bundled MCP servers
 

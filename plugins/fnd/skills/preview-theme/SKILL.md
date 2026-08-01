@@ -36,6 +36,10 @@ is pushed, so the content a reviewer configured stays put. Full contract:
 errors reference — `${CLAUDE_PLUGIN_ROOT}/references/preview-theme-errors.md` (read it
 when a run fails or a deep-link is needed).
 
+When this checkout is a `git worktree` — or anything else already holds port 9292 — its dev
+server has to start on the port the workspace's `notes.md` records as `dev-port:`
+(`npm run dev -- --port <N>`), otherwise it silently collides with the main checkout's.
+
 > **Security:** the Theme Access token lives in `shopify.theme.toml`. **Never `Read` that
 > file** — the script consumes the token inside the `shopify` subprocess and never prints
 > it. Pass nothing secret on the command line.

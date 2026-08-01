@@ -41,7 +41,8 @@ itself isn't duplicated here — it already lives in
 ships in a diff):
 
 ```bash
-git check-ignore -q .claude/fnd || echo '.claude/fnd/' >> .git/info/exclude
+# --git-common-dir, not --git-dir: info/exclude is shared, and a linked worktree's .git is a file
+git check-ignore -q .claude/fnd || echo '.claude/fnd/' >> "$(git rev-parse --git-common-dir)/info/exclude"
 ```
 
 A team that prefers a committed rule can put the line in `.gitignore` instead.
