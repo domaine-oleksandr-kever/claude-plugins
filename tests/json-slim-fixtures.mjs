@@ -16,13 +16,15 @@ import path from 'node:path';
 
 // Hermetic env: a developer watching the debug log live (FND_MCP_SLIM_DEBUG=1 + FND_MCP_SLIM_DIR
 // exported) would otherwise have this suite's CLI runs append fixture noise to the REAL log that
-// `--report` aggregates. FND_WHALE_GUIDE is scrubbed for the same reason on the other side: the R6
-// cases assert the one-shot rule, and the reminder itself advertises `FND_WHALE_GUIDE=0` to the
-// model — the switch a developer is most likely to have exported while debugging must not turn this
-// suite red. Cases that need any of the three set it on the invocation itself.
+// `--report` aggregates. FND_WHALE_GUIDE and FND_NOGAIN_MEMO are scrubbed for the same reason on the
+// other side: the R6 and B2 cases assert the one-shot / no-gain-memo rules, and both refusals advertise
+// their own `=0` switch to the model — the switches a developer is most likely to have exported while
+// debugging must not turn this suite red. Cases that need any of the four set it on the invocation
+// itself.
 delete process.env.FND_MCP_SLIM_DEBUG;
 delete process.env.FND_MCP_SLIM_DIR;
 delete process.env.FND_WHALE_GUIDE;
+delete process.env.FND_NOGAIN_MEMO;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SLIM = path.join(ROOT, 'plugins/fnd/scripts/json-slim.cjs');
@@ -1349,10 +1351,12 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   writeFileSync(arrFile, JSON.stringify([{ title: 'zero' }, { title: 'one', tags: null }]));
   eq('m12-jq-bracket-index', runJq('[1].title', arrFile).stdout.trim(), '"one"');
   eq('m12-jq-leading-dot-index', runJq('.[0].title', arrFile).stdout.trim(), '"zero"');
-  // bare `.` = identity: the WHOLE document (still slimmed, never narrowed) and no diagnostic
+  // bare `.` = identity: the WHOLE document (still slimmed, never narrowed) and no --jq diagnostic.
+  // stderr is not asserted EMPTY here: identity narrows nothing, so this run re-dumps the document and
+  // the B2 decline notice rides along on stderr, exactly as it would without `--jq`.
   const ident = runJq('.', nestFile);
-  check('m12-jq-identity', ident.stdout.trim() === JSON.stringify({ a: [{ b: 'hit' }] }) && ident.stderr === '',
-    `bare '.' selects the whole value silently: ${JSON.stringify(ident.stdout)} / ${JSON.stringify(ident.stderr)}`);
+  check('m12-jq-identity', ident.stdout.trim() === JSON.stringify({ a: [{ b: 'hit' }] }) && !ident.stderr.includes('--jq:'),
+    `bare '.' selects the whole value with no path diagnostic: ${JSON.stringify(ident.stdout)} / ${JSON.stringify(ident.stderr)}`);
 
   // MISSING path → stdout null + ONE stderr diagnostic naming the failing segment, where the walk got
   // to, and what was addressable there
@@ -1752,7 +1756,9 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   for (const [name, body] of Object.entries({ fencedSmall: smallFencedErr, tiny: tinyErr })) {
     const p = path.join(cliDir, `err-inline-${name}.txt`);
     writeFileSync(p, body);
-    const out = execFileSync('node', [SLIM, p], { encoding: 'utf8', env: cliEnv });
+    // spawnSync: an envelope printed inline is also a body handed back UNCHANGED, so the B2 decline
+    // notice rides on stderr — inherited, it would print into this suite's own output.
+    const out = spawnSync('node', [SLIM, p], { encoding: 'utf8', env: cliEnv }).stdout;
     check(`b1.2-cli-inline-${name}`, out.includes('PERMISSION DENIED') && !out.includes('nothing to compress'),
       `an under-cap error envelope must print, not hand back a path (${Buffer.byteLength(body, 'utf8')} B in): ${out.slice(0, 200)}`);
   }
@@ -1938,8 +1944,13 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     const dir = mkdtempSync(path.join(tmpdir(), 'jslim-b411-'));
     const p = path.join(dir, 'unique-entities.json');
     writeFileSync(p, rawUnique);
-    const stdout = execFileSync('node', [SLIM, p], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, FND_MCP_SLIM_DEBUG: '1' } });
+    // spawnSync, not execFileSync: the decline now also states itself on stderr (B2 Layer 3), and an
+    // inherited stderr would print that notice into this suite's own output.
+    const r = spawnSync('node', [SLIM, p], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, FND_MCP_SLIM_DEBUG: '1' } });
+    const stdout = r.stdout;
     check('b4.11-cli-prints-verbatim', stdout === `${rawUnique}\n`, `a declined payload is handed back byte-identical: ${stdout.length} vs ${rawUnique.length + 1} B`);
+    check('b4.11-cli-names-the-decline', /deliberate decline, not an error/.test(r.stderr),
+      `the 0 % result must say it is a decision, not a failure: ${JSON.stringify(r.stderr)}`);
     const line = JSON.parse(readFileSync(path.join(dir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n')[0]);
     eq('b4.11-cli-logs-no-gain', [line.decision, line.reason, line.pct, line.stages], ['passthrough', 'no-gain', 0, []]);
     rmSync(dir, { recursive: true, force: true });
@@ -2298,6 +2309,281 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     eq('r6-debug-guide-field', lines.filter((l) => l.profile).map((l) => l.guide).join(','), 'full,reminder');
     rmSync(ddir, { recursive: true, force: true });
   }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------- B2: the CLI's no-gain re-run guards (slim-out + memo) --
+// A live week: 22 CLI runs re-slimmed files that could not shrink — json-slim's own Gate-A output spills
+// and files a previous run had already declined — each re-printing the WHOLE file for 0 gain. The guards
+// answer those in one line. Pinned in both directions: the refusals must fire on a repeat, and they must
+// NEVER fire on a narrowing `--jq` (the documented recovery), on a changed file, or on a first run.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-b2-'));
+  // The unique-entities shape the crushability gate skips by design (see b4.11) — the one payload this
+  // suite knows json-slim declines, at any size, without a stage running.
+  const entities = (n) => JSON.stringify({
+    products: Array.from({ length: n }, (_, i) => ({
+      id: `gid://shopify/Product/${7000000000 + i}`,
+      handle: `product-handle-${i}`,
+      title: `Product Title Number ${i}`,
+      url: `https://shop.example.com/products/product-handle-${i}`,
+    })),
+  });
+  // One pinned session id for the whole block, set on THIS process so the children inherit it and
+  // J.nogainStatePath() computes the same key the CLI does — a developer's real session id would
+  // otherwise make every planted-state case address a file the CLI never reads.
+  const prevSid = process.env.CLAUDE_CODE_SESSION_ID;
+  process.env.CLAUDE_CODE_SESSION_ID = 'b2-fixture-session';
+  const run = (args, env) => spawnSync('node', [SLIM, ...args],
+    { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, ...(env || {}) } });
+  const isRefusal = (r) => r.status === 0 && /^json-slim: /.test(r.stdout) && r.stdout.trimEnd().split('\n').length === 1;
+  const debugLines = (d) => readFileSync(path.join(d, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+
+  // 1 — json-slim's OWN Gate-A output spill: already slimmed, so the run is refused before the body is
+  // ever read. Only this prefix; a spilled ORIGINAL (fnd-mcp-slim-) is exactly what the CLI is for.
+  {
+    const sdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2out-'));
+    const body = entities(60);
+    const slimOut = path.join(sdir, 'fnd-slim-out-deadbeefdeadbeef.json');
+    const original = path.join(sdir, 'fnd-mcp-slim-deadbeefdeadbeef.json');
+    writeFileSync(slimOut, body); writeFileSync(original, body);
+    const r = run([slimOut], { FND_MCP_SLIM_DIR: sdir, FND_MCP_SLIM_DEBUG: '2' });
+    check('b2-slim-out-refused', isRefusal(r) && r.stdout.includes("IS json-slim's own slimmed output")
+      && r.stdout.includes(`${Buffer.byteLength(body)} B`) && !r.stdout.includes('gid://'),
+      `a fnd-slim-out-* file must be refused in one line, never re-printed:\n${r.stdout.slice(0, 300)}`);
+    const orig = run([original], { FND_MCP_SLIM_DIR: sdir, FND_MCP_SLIM_DEBUG: '2' });
+    check('b2-spilled-original-not-refused', orig.stdout === `${body}\n`,
+      'a spilled ORIGINAL (fnd-mcp-slim-) is the intended CLI input and must never be refused');
+    // …and the narrowing recovery the refusal itself advertises still works on the same file
+    const nq = run(['--jq', 'products.0.handle', slimOut], { FND_MCP_SLIM_DIR: sdir, FND_MCP_SLIM_DEBUG: '2' });
+    eq('b2-slim-out-jq-bypasses', nq.stdout.trim(), '"product-handle-0"');
+    eq('b2-slim-out-debug', debugLines(sdir).map((l) => `${l.reason}${l.narrowed ? '+narrowed' : ''}`),
+      ['already-slim-out', 'no-gain', 'no-gain+narrowed']);
+    // …and the off switch reaches this refusal too — it names FND_NOGAIN_MEMO=0, so that must WORK
+    const forced = run([slimOut], { FND_MCP_SLIM_DIR: sdir, FND_NOGAIN_MEMO: '0' });
+    check('b2-slim-out-switch-forces-run', forced.stdout === `${body}\n` && r.stdout.includes('FND_NOGAIN_MEMO=0'),
+      'the slim-out refusal must advertise the switch that overrides it, and the switch must run the file');
+    rmSync(sdir, { recursive: true, force: true });
+  }
+
+  // 1b — Layer 1 stops at the stream gate: past it the file belongs to Gate B, whose big-document
+  // guidance (`head -c`, split into rows) is the only usable advice for a file json-slim will not load
+  // whole. The refusal's `--jq` hint would send the reader into streamJqRefusal instead.
+  {
+    const gdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2gate-'));
+    const huge = path.join(gdir, 'fnd-slim-out-cafebabecafebabe.json');
+    // one line, > 8 MB, NOT a JSONL row stream — the shape Gate B answers with bigDocNotice
+    writeFileSync(huge, `[${Array.from({ length: 150000 }, (_, i) => `{"id":${i},"handle":"product-handle-${i}","vendor":"MAC"}`).join(',')}]`);
+    const r = run([huge], { FND_MCP_SLIM_DIR: gdir });
+    check('b2-slim-out-over-stream-gate', statSync(huge).size > 8 * 1024 * 1024
+      && r.stdout.includes('is NOT a JSONL row stream') && !r.stdout.includes("IS json-slim's own slimmed output"),
+      `a fnd-slim-out-* spill past the stream gate must keep Gate B's answer:\n${r.stdout.slice(0, 300)}`);
+    rmSync(gdir, { recursive: true, force: true });
+  }
+
+  // 2 — the memo lifecycle on a ≥4 KB incompressible file: body + the loud decline, then a one-line
+  // refusal, then the body again once the file itself changes (the stamp pins size+mtime).
+  const big = path.join(dir, 'unique-entities.json');
+  const bigBody = entities(60);
+  writeFileSync(big, bigBody);
+  const first = run([big], { FND_MCP_SLIM_DEBUG: '2' });
+  check('b2-first-run-prints-body', first.stdout === `${bigBody}\n`, 'the first run still hands the declined payload back byte-identical');
+  check('b2-first-run-says-decline', /deliberate decline, not an error/.test(first.stderr) && /Do NOT re-run json-slim/.test(first.stderr)
+    && first.stderr.includes(`${Buffer.byteLength(bigBody)} B printed unchanged`),
+    `the decline must be stated on stderr — the field pattern was "decline → immediate re-run":\n${JSON.stringify(first.stderr)}`);
+  const second = run([big], { FND_MCP_SLIM_DEBUG: '2' });
+  check('b2-second-run-refused', isRefusal(second) && second.stdout.includes('already passed through uncompressed this session')
+    && second.stdout.includes('FND_NOGAIN_MEMO=0') && !second.stdout.includes('gid://'),
+    `a repeat run must answer in one line, naming the recoveries and the off switch:\n${second.stdout.slice(0, 300)}`);
+  const memoState = J.nogainStatePath(dir, big);
+  check('b2-state-is-a-dotfile', path.basename(memoState).startsWith('.')
+    && readdirSync(dir).filter((f) => !f.startsWith('.') && f !== 'unique-entities.json' && f !== 'fnd-mcp-slim-debug.log').length === 0,
+    `the memo state must be a dotfile and add no listed entry: ${JSON.stringify(readdirSync(dir))}`);
+  // A file rewritten between runs may well compress — the stamp's size+mtime pin must let it through
+  const touched = Date.now() / 1000 + 5;
+  utimesSync(big, touched, touched);
+  const third = run([big], { FND_MCP_SLIM_DEBUG: '2' });
+  check('b2-changed-file-invalidates', third.stdout === `${bigBody}\n`, 'a changed mtime must invalidate the memo, not refuse the new bytes');
+  eq('b2-memo-debug-reasons', debugLines(dir).map((l) => l.reason), ['no-gain', 'no-gain-memo', 'no-gain']);
+  const memoLine = debugLines(dir)[1];
+  check('b2-memo-debug-bytes', memoLine.bytes_in === Buffer.byteLength(bigBody) && memoLine.bytes_out < 400 && memoLine.decision === 'passthrough',
+    `the refusal must log the file it did NOT print and the few bytes it did: ${JSON.stringify(memoLine)}`);
+
+  // 3 — the off switch: with FND_NOGAIN_MEMO=0 both runs print the body, whatever state exists on disk
+  {
+    const odir = mkdtempSync(path.join(tmpdir(), 'jslim-b2off-'));
+    const f = path.join(odir, 'off.json');
+    writeFileSync(f, bigBody);
+    const a = run([f], { FND_MCP_SLIM_DIR: odir, FND_NOGAIN_MEMO: '0' });
+    const b = run([f], { FND_MCP_SLIM_DIR: odir, FND_NOGAIN_MEMO: '0' });
+    check('b2-switch-off-never-refuses', a.stdout === `${bigBody}\n` && b.stdout === `${bigBody}\n`,
+      'FND_NOGAIN_MEMO=0 must keep both runs printing the body');
+    // …and the switch parses like FND_WHALE_GUIDE's (the shared falsey vocabulary)
+    const prev = process.env.FND_NOGAIN_MEMO;
+    const states = {};
+    for (const v of ['0', 'false', 'NO', 'off', ' 0 ']) { process.env.FND_NOGAIN_MEMO = v; states[v] = J.nogainMemoEnabled(); }
+    for (const v of ['1', 'true', 'on', '', 'junk']) { process.env.FND_NOGAIN_MEMO = v; states[`+${v}`] = J.nogainMemoEnabled(); }
+    delete process.env.FND_NOGAIN_MEMO;
+    states['+unset'] = J.nogainMemoEnabled();
+    if (prev === undefined) delete process.env.FND_NOGAIN_MEMO; else process.env.FND_NOGAIN_MEMO = prev;
+    eq('b2-switch-parsing', Object.entries(states).map(([k, v]) => `${k}=${v}`).join(' '),
+      '0=false false=false NO=false off=false  0 =false +1=true +true=true +on=true +=true +junk=true +unset=true');
+    rmSync(odir, { recursive: true, force: true });
+  }
+
+  // 4 — a narrowing `--jq` with a LIVE memo: narrowing is the recovery the refusal advertises, so it
+  // must answer the sub-path. The identity selector is NOT narrowing — it re-dumps, so it is refused.
+  {
+    const jdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2jq-'));
+    const f = path.join(jdir, 'memo-jq.json');
+    writeFileSync(f, bigBody);
+    run([f], { FND_MCP_SLIM_DIR: jdir }); // arm the memo
+    const narrow = run(['--jq', 'products.1.handle', f], { FND_MCP_SLIM_DIR: jdir });
+    eq('b2-jq-bypasses-memo', narrow.stdout.trim(), '"product-handle-1"');
+    check('b2-jq-quiet-under-memo', narrow.stderr === '', `a narrowed run answers a sub-path — no decline notice: ${JSON.stringify(narrow.stderr)}`);
+    check('b2-identity-jq-still-refused', isRefusal(run(['--jq', '.', f], { FND_MCP_SLIM_DIR: jdir })),
+      "`--jq .` narrows nothing and re-dumps the whole file, so the memo must still answer it");
+    rmSync(jdir, { recursive: true, force: true });
+  }
+
+  // 4b — the bypasses that are not `--jq`. A PIPELINE flag changes what slim() can produce: `--toon`
+  // re-serializes uniform arrays (16.6 % on this very payload — a real win the memo would have hidden)
+  // and `--no-spill` takes the crush's row offload away. `--stats` is a MEASUREMENT run that
+  // hooks/mcp-whale.md promises will report the 0.0 %; a refusal answers it with no measurement at all.
+  {
+    const fdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2flags-'));
+    const f = path.join(fdir, 'flags.json');
+    writeFileSync(f, bigBody);
+    run([f], { FND_MCP_SLIM_DIR: fdir }); // arm the memo with a PLAIN decline
+    const toon = run(['--toon', f], { FND_MCP_SLIM_DIR: fdir });
+    check('b2-toon-bypasses-memo', !isRefusal(toon) && Buffer.byteLength(toon.stdout) < Buffer.byteLength(bigBody),
+      `--toon squeezes what the plain pipeline declined, so the memo must not answer it: ${toon.stdout.slice(0, 160)}`);
+    check('b2-no-spill-bypasses-memo', !isRefusal(run(['--no-spill', f], { FND_MCP_SLIM_DIR: fdir })),
+      '--no-spill is a different pipeline; a plain decline says nothing about it');
+    const stats = run(['--stats', f], { FND_MCP_SLIM_DIR: fdir });
+    check('b2-stats-bypasses-memo', stats.stdout === `${bigBody}\n` && /0\.0% reduction/.test(stats.stderr),
+      `--stats must still measure the decline it is asked about: ${JSON.stringify(stats.stderr)}`);
+    // …and the reverse: a decline UNDER a pipeline flag must not arm the memo for the plain run
+    const pdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2flagstamp-'));
+    const pf = path.join(pdir, 'toon-first.json');
+    writeFileSync(pf, JSON.stringify({ rows: Array.from({ length: 60 }, (_, i) => ({ k: `unique-value-${i}-${(i * 2654435761 >>> 0).toString(36)}`, n: i })) }));
+    run(['--toon', pf], { FND_MCP_SLIM_DIR: pdir });
+    check('b2-pipeline-decline-does-not-stamp', readdirSync(pdir).every((n) => !n.startsWith('.fnd-nogain-')),
+      `a --toon decline must not record a memo the plain pipeline would then be refused by: ${JSON.stringify(readdirSync(pdir))}`);
+    rmSync(pdir, { recursive: true, force: true });
+    rmSync(fdir, { recursive: true, force: true });
+  }
+
+  // 4c — an identity `--jq .` prints a RE-SERIALIZED value, not the file's bytes: a pretty-printed file
+  // re-serializes 20.4 % smaller, so that run reports 0 % while a PLAIN run on the same file would have
+  // saved exactly those bytes. Stamping it blocked the win it measured against different input.
+  {
+    const rdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2reser-'));
+    const pretty = path.join(rdir, 'pretty.json');
+    const prettyBody = JSON.stringify(JSON.parse(bigBody), null, 2);
+    writeFileSync(pretty, prettyBody);
+    const ident = run(['--jq', '.', pretty], { FND_MCP_SLIM_DIR: rdir });
+    check('b2-identity-jq-declines-reserialized', ident.stdout === `${bigBody}\n`,
+      'the identity selector re-serializes: it prints the compact value, not the pretty file');
+    check('b2-identity-jq-does-not-stamp', readdirSync(rdir).every((n) => !n.startsWith('.fnd-nogain-')),
+      `a re-serialized decline must not speak for the file's own bytes: ${JSON.stringify(readdirSync(rdir))}`);
+    const plain = run([pretty], { FND_MCP_SLIM_DIR: rdir });
+    check('b2-plain-run-after-identity-jq-compresses',
+      !isRefusal(plain) && plain.stdout === `${bigBody}\n` && Buffer.byteLength(plain.stdout) < Buffer.byteLength(prettyBody),
+      `the plain run must still deliver its 20.4 %: ${plain.stdout.slice(0, 160)}`);
+    check('b2-compressing-run-does-not-stamp', readdirSync(rdir).every((n) => !n.startsWith('.fnd-nogain-')),
+      'a run that COMPRESSED is not a decline and must leave no memo');
+    rmSync(rdir, { recursive: true, force: true });
+  }
+
+  // 5 — under the floor a refusal saves nothing, so a small decline is never remembered
+  {
+    const tdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2small-'));
+    const f = path.join(tdir, 'small.json');
+    const small = entities(15); // 2,459 B — below NOGAIN_FLOOR_BYTES
+    writeFileSync(f, small);
+    const a = run([f], { FND_MCP_SLIM_DIR: tdir });
+    const b = run([f], { FND_MCP_SLIM_DIR: tdir });
+    check('b2-below-floor-no-memo', Buffer.byteLength(small) < 4096 && a.stdout === `${small}\n` && b.stdout === `${small}\n`
+      && readdirSync(tdir).every((n) => !n.startsWith('.fnd-nogain-')),
+      `a sub-4 KB decline must neither refuse nor leave state: ${JSON.stringify(readdirSync(tdir))}`);
+    check('b2-below-floor-still-loud', /deliberate decline/.test(b.stderr), 'the stderr notice is not floored — it is what stops the re-run');
+    rmSync(tdir, { recursive: true, force: true });
+  }
+
+  // 6 — unusable state → do the WORK (a wrong refusal hides the file; a wrong run only costs what it
+  // cost the first time). Corruption, a foreign path behind the hash name, a stale stamp, a stamp from
+  // the FUTURE (clock stepped back by NTP / a VM resume), and a stat that no longer matches.
+  {
+    const cdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2corrupt-'));
+    const f = path.join(cdir, 'corrupt.json');
+    writeFileSync(f, bigBody);
+    const st = statSync(f);
+    const state = J.nogainStatePath(cdir, f);
+    const stamps = {
+      truncated: '{"p":"',
+      garbage: 'not json at all',
+      empty: '',
+      'other-path': JSON.stringify({ p: '/somewhere/else.json', t: Date.now(), size: st.size, mtimeMs: st.mtimeMs }),
+      'no-stamp': JSON.stringify({ p: f, size: st.size, mtimeMs: st.mtimeMs }),
+      expired: JSON.stringify({ p: f, t: Date.now() - 3 * 60 * 60 * 1000, size: st.size, mtimeMs: st.mtimeMs }),
+      future: JSON.stringify({ p: f, t: Date.now() + 10 * 24 * 60 * 60 * 1000, size: st.size, mtimeMs: st.mtimeMs }),
+      'stale-size': JSON.stringify({ p: f, t: Date.now(), size: st.size - 1, mtimeMs: st.mtimeMs }),
+      'stale-mtime': JSON.stringify({ p: f, t: Date.now(), size: st.size, mtimeMs: st.mtimeMs + 1000 }),
+    };
+    for (const [label, body] of Object.entries(stamps)) {
+      writeFileSync(state, body);
+      check(`b2-unusable-state-runs:${label}`, run([f], { FND_MCP_SLIM_DIR: cdir }).stdout === `${bigBody}\n`,
+        `an unusable memo must fall back to the normal run (${label})`);
+    }
+    // the same state written HONESTLY does refuse — otherwise every case above passes on a broken key
+    writeFileSync(state, JSON.stringify({ p: f, t: Date.now(), size: st.size, mtimeMs: st.mtimeMs }));
+    check('b2-valid-state-refuses', isRefusal(run([f], { FND_MCP_SLIM_DIR: cdir })),
+      'a valid stamp for the unchanged file must refuse — the control for the fallback cases above');
+    // a planted symlink at the (predictable) state name is neither read through nor written through
+    const victim = path.join(cdir, 'victim.txt');
+    writeFileSync(victim, 'IMPORTANT VICTIM CONTENT');
+    rmSync(state, { force: true });
+    symlinkSync(victim, state);
+    const linked = run([f], { FND_MCP_SLIM_DIR: cdir });
+    check('b2-symlink-state-not-followed',
+      linked.stdout === `${bigBody}\n` && readFileSync(victim, 'utf8') === 'IMPORTANT VICTIM CONTENT' && !lstatSync(state).isSymbolicLink(),
+      'the O_NOFOLLOW read falls through to the work, and the stamp replaces the LINK, never its target');
+    rmSync(cdir, { recursive: true, force: true });
+  }
+
+  // 7 — the sweep prunes aged memo dotfiles (they are pure hints) and keeps fresh ones
+  {
+    const swDir = mkdtempSync(path.join(tmpdir(), 'jslim-b2sweep-'));
+    const stale = J.nogainStatePath(swDir, '/tmp/stale-nogain.json');
+    const fresh = J.nogainStatePath(swDir, '/tmp/fresh-nogain.json');
+    writeFileSync(stale, '{}'); writeFileSync(fresh, '{}');
+    const old = Date.now() / 1000 - 40 * 3600;
+    utimesSync(stale, old, old);
+    J.sweepSpills(swDir);
+    check('b2-stale-memo-swept', !existsSync(stale) && existsSync(fresh),
+      'the TTL sweep must prune stale no-gain memos and keep fresh ones');
+    rmSync(swDir, { recursive: true, force: true });
+  }
+
+  // 8 — `--report`: a refusal printed ONE line, so it is not a context dump ("gained nothing" must not
+  // count it) — and it gets its own count, since "how often did the guard fire" is the tax it removed.
+  {
+    const ev = (extra) => JSON.stringify({ ts: '2026-08-01T10:00:00.000Z', project: 'elc', lvl: 2, entry: 'cli', decision: 'passthrough', bytes_in: 40000, bytes_out: 40000, pct: 0, stages: [], spill: null, ...extra });
+    const rep = J.buildReport([
+      ev({ tool: '/tmp/a.json', reason: 'no-gain' }),
+      ev({ tool: '/tmp/b.json', reason: 'no-gain-memo', bytes_out: 318 }),
+      ev({ tool: '/tmp/fnd-slim-out-c.json', reason: 'already-slim-out', bytes_out: 214 }),
+    ], { file: '/tmp/x.log' });
+    check('b2-report-counts-refusals', rep.includes('1 gained nothing') && rep.includes('2 refused by the no-gain/slim-out guard (no body printed)'),
+      `only the real re-dump may count as "gained nothing", and both refusals must be counted:\n${rep}`);
+    check('b2-report-lists-reasons', /passthrough reasons:.*no-gain-memo/.test(rep) && /passthrough reasons:.*already-slim-out/.test(rep),
+      `the refusal reasons ride on the reasons map with no extra work:\n${rep}`);
+    const clean = J.buildReport([ev({ tool: '/tmp/a.json', reason: 'no-gain' })], { file: '/tmp/x.log' });
+    check('b2-report-omits-fragment-when-zero', !clean.includes('refused by the no-gain/slim-out guard'),
+      `a log with no refusals must not grow the cli line:\n${clean}`);
+  }
+  if (prevSid === undefined) delete process.env.CLAUDE_CODE_SESSION_ID; else process.env.CLAUDE_CODE_SESSION_ID = prevSid;
   rmSync(dir, { recursive: true, force: true });
 }
 

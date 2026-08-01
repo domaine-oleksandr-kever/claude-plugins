@@ -724,6 +724,17 @@ const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
 // suites assert a profile run adds NO listed file to the spill dir. The sweep prunes them by this prefix
 // on age (they are pure hints — losing one only reprints the full guidance block once).
 const WHALE_GUIDE_PREFIX = '.fnd-whale-guide-';
+// B2: the per-file no-gain memo (one per session × DECLINED file, see nogainStatePath). A dotfile for
+// exactly the WHALE_GUIDE_PREFIX reasons — it must match no SPILL_PREFIX, and it must stay invisible to
+// a plain `ls` because the suites assert a run adds NO listed file to the spill dir. Swept by age below:
+// losing one only costs one re-printed body.
+const NOGAIN_PREFIX = '.fnd-nogain-';
+// Fixed (not sliding) window, like WHALE_GUIDE_TTL_MS: the stamp is written at the decline, so a session
+// that keeps re-running one declined file gets the body back once every 2 h instead of once per run.
+const NOGAIN_TTL_MS = 2 * 60 * 60 * 1000;
+// Below this a refusal saves less context than the state file is worth reasoning about — the same scale
+// as the hook's sub-gate, where a result this small is not worth compressing either.
+const NOGAIN_FLOOR_BYTES = 4096;
 // The FND_MCP_SLIM_DEBUG log basename (its writer + rotation live in the debug-log section below);
 // defined here so SWEEP_KEEP is the single source of truth — the sweep must never prune it.
 const DEBUG_LOG = 'fnd-mcp-slim-debug.log';
@@ -743,8 +754,8 @@ function spillTtlHours(raw) {
 
 // Age-based TTL sweep of the shared spill dir. Best-effort and fully self-contained: every error
 // is swallowed so a sweep NEVER affects the hook's emitted result or the CLI's output/exit code.
-// Deletes only our-prefixed files (payload spills + the WHALE_GUIDE_PREFIX hint files) whose mtime is
-// older than the TTL — files written by the current
+// Deletes only our-prefixed files (payload spills + the WHALE_GUIDE_PREFIX / NOGAIN_PREFIX hint files)
+// whose mtime is older than the TTL — files written by the current
 // process are always fresh, so an in-flight `full=<path>` handle survives up to the TTL (a day
 // covers same-day conversation resume; an older, expired handle is an already-tolerated re-fetch).
 // Called by BOTH entry points (the mcp-slim hook after it writes stdout, the CLI at exit) so one
@@ -770,7 +781,7 @@ function sweepSpills(dir) {
     try { names = fs.readdirSync(root); } catch (_) { return summary; }
     for (const name of names) {
       if (SWEEP_KEEP.has(name)) continue;
-      if (!SPILL_PREFIXES.some((p) => name.startsWith(p)) && !name.startsWith(WHALE_GUIDE_PREFIX)) continue;
+      if (!SPILL_PREFIXES.some((p) => name.startsWith(p)) && !name.startsWith(WHALE_GUIDE_PREFIX) && !name.startsWith(NOGAIN_PREFIX)) continue;
       try {
         const p = path.join(root, name);
         const st = fs.statSync(p);
@@ -2310,6 +2321,108 @@ function whaleGuideStamp(dir, file) {
     fs.renameSync(tmp, state);
   } catch (_) {} // unwritable dir → every run prints the full block, which is the safe direction
 }
+
+// B2 — the per-file no-gain memo. A live week showed 22 CLI runs that re-slimmed files which could not
+// shrink, each re-printing the whole file for 0 gain, and the dominant pattern was "decline → immediate
+// re-run": a 0 % result reads like a failed attempt unless something says otherwise. So a FILE run that
+// printed its body back unchanged records that fact, and the next run of the same file answers in one
+// line. The machinery mirrors the whale guide above (state under spillRoot, session × RESOLVED path key,
+// fixed TTL, O_NOFOLLOW read, stamp only after delivery) but is a SEPARATE implementation on purpose:
+// that one suppresses guidance PROSE while this one suppresses the whole run, and folding them together
+// would put a "print less text" edit one line away from a "print nothing at all" decision.
+// Opt-out with the same falsey semantics as FND_WHALE_GUIDE (0/false/no/off) — the escape hatch the
+// refusal itself names, so the model that hits it is never stranded.
+function nogainMemoEnabled() {
+  const raw = process.env.FND_NOGAIN_MEMO;
+  if (raw === undefined || raw === null || raw === '') return true;
+  return !/^(0|false|no|off)$/i.test(String(raw).trim());
+}
+// One state file per (session, declined file). The path is RESOLVED first for whaleGuideStatePath's
+// reason: two different files spelled `./data.json` from different cwds would otherwise share one entry,
+// and the `st.p` collision guard passes on the identical string — the second file would be refused
+// without ever having been printed. CLAUDE_CODE_SESSION_ID scopes it to the conversation (absent → the
+// key degrades to path-only and the TTL alone bounds it); the uid is in the name because with the
+// session id absent the name is fully predictable in a shared tmpdir. Lives in spillRoot(), so
+// FND_MCP_SLIM_DIR isolates it exactly like every other file this module writes.
+function nogainStatePath(dir, file) {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+  const sid = String(process.env.CLAUDE_CODE_SESSION_ID || '');
+  const key = crypto.createHash('sha256').update(`${sid}\n${path.resolve(String(file))}`).digest('hex').slice(0, 16);
+  return path.join(spillRoot(dir), `${NOGAIN_PREFIX}${uid}-${key}`);
+}
+// The current size when a refusal is warranted, else null. Every fs error, unusable content, a foreign
+// path behind a hash collision, an expired stamp, a stamp from the FUTURE (a clock stepped back by an
+// NTP correction or a VM resume, which an unbounded `now - t < TTL` would let refuse forever) and every
+// size/mtime mismatch answers null: a wrong refusal HIDES the file from the model, while doing the work
+// again only costs what it cost the first time — refusing is the risky direction. The size+mtime pin is
+// what makes the memo safe on a file that is REWRITTEN between runs (a re-fetched spill, a regenerated
+// dump): different bytes may well compress, so the memo must not speak for them.
+// Caveat by design: overlapping runs that all start before the first stamp lands are NOT guarded — the
+// stamp is post-delivery, and the tax this removes is the rerun-after-decline tail, not the burst.
+function nogainMemoHit(dir, file) {
+  if (!nogainMemoEnabled()) return null;
+  const abs = path.resolve(String(file));
+  const state = nogainStatePath(dir, file);
+  let fd;
+  try {
+    // O_NOFOLLOW + a size cap, for whaleGuideFullBlock's reason: the name is predictable when the
+    // session id is absent and the spill root may be a shared tmpdir — never follow a planted symlink,
+    // never slurp a planted large file; both fall through to doing the work.
+    fd = fs.openSync(state, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    const meta = fs.fstatSync(fd);
+    if (meta.isFile() && meta.size <= 4096) {
+      const buf = Buffer.alloc(Number(meta.size));
+      fs.readSync(fd, buf, 0, buf.length, 0);
+      const st = JSON.parse(buf.toString('utf8'));
+      const age = st && Number.isFinite(st.t) ? Date.now() - st.t : NaN;
+      // NB the 4096 read cap above is the STATE-FILE size limit (never slurp a planted large file) —
+      // the same number as NOGAIN_FLOOR_BYTES by coincidence of scale, not by meaning; that one decides
+      // which declines are worth remembering. They move independently.
+      if (st && st.p === abs && age >= 0 && age < NOGAIN_TTL_MS) {
+        const now = fs.statSync(file);
+        if (now.size === st.size && now.mtimeMs === st.mtimeMs) return now.size;
+      }
+    }
+  } catch (_) {
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} }
+  }
+  return null;
+}
+// The stamp, written only AFTER the unchanged body reached stdout (the whaleGuideStamp rule: a run cut
+// off mid-pipe never records a delivery it did not make). tmp + rename replaces a planted symlink itself
+// (never its target) and `wx` refuses a pre-existing tmp; the .tmp name keeps NOGAIN_PREFIX so an orphan
+// is swept with the hints. Never CREATES the spill tree — a typo'd FND_MCP_SLIM_DIR must not silently
+// materialize directories: no root → no stamp → the body every run, the safe direction.
+function nogainStamp(dir, file) {
+  const abs = path.resolve(String(file));
+  const state = nogainStatePath(dir, file);
+  try {
+    if (!fs.existsSync(spillRoot(dir))) return;
+    const s = fs.statSync(file); // the identity the next run re-checks: same bytes, or no refusal
+    const tmp = `${state}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ p: abs, t: Date.now(), size: s.size, mtimeMs: s.mtimeMs }), { flag: 'wx' });
+    fs.renameSync(tmp, state);
+  } catch (_) {} // unwritable dir → every run prints the body, which is the safe direction
+}
+// The one-line answer a memo hit gives instead of the body. Self-sufficient like whaleReminder(): the
+// reader of the refusal may not hold the first decline at all (a subagent shares the session id, a
+// /compact drops the earlier transcript), so it carries the size, both recoveries and the off switch.
+function nogainRefusal(file, bytes) {
+  return `json-slim: ${file} already passed through uncompressed this session (${bytes} B — nothing to shrink). ` +
+    `Do NOT re-run json-slim on it: read it directly (Read/head/sed -n '<K>p') or extract a sub-path: --jq <dot.path>. ` +
+    `FND_NOGAIN_MEMO=0 disables this memo.`;
+}
+// B2 Layer 1 — json-slim's OWN Gate-A output spill (capOutput writes it as fnd-slim-out-*) holds an
+// ALREADY SLIMMED body: re-slimming re-prints up to the 48 KB inline cap for ~0 gain. ONLY this prefix
+// is refused. `fnd-mcp-slim-` and `fnd-prompt-json-` are spilled ORIGINALS — precisely the input the CLI
+// exists to run on; `fnd-crush-` holds the rows a crush dropped (a legitimate analysis target); and
+// `fnd-jsx-ids-` is a small id map. Refusing any of those would break a documented recovery.
+const SLIM_OUT_PREFIX = 'fnd-slim-out-';
+function slimOutRefusal(file, bytes) {
+  return `json-slim: ${file} IS json-slim's own slimmed output (already compressed, ${bytes} B) — re-slimming cannot shrink it. ` +
+    `Read it directly (Read/head/sed) or extract a sub-path: --jq <dot.path>. FND_NOGAIN_MEMO=0 forces the run.`;
+}
 function streamJqRefusal(file, bytes) {
   const qf = shq(file);
   return `json-slim: --jq re-reads the whole file, but ${file} is ${bytes} B (> ${DEFAULTS.streamGateBytes} B) — refusing to load it. ` +
@@ -2436,10 +2549,14 @@ function buildReport(lines, opts) {
   // profile (`profile`), a Gate-A capped summary (`spill_out`), the path handbacks and the stream
   // refusals (by `reason`) — none of which put the payload back, whatever bytes_out they logged (a
   // handback line records bytes_out == bytes_in although it printed a ~120 B path line).
-  const NOT_A_DUMP = new Set(['non-json', 'transform-error', 'error-shape', 'big-nonjsonl', 'stream-jq-refused']);
+  // B2: the two re-run guards answer with ONE line and never print the body, so they are not dumps
+  // either — and they are counted on the cli line, because "how often did the guard fire" is the measure
+  // of the re-run tax it exists to remove.
+  const REFUSED_RERUN = new Set(['already-slim-out', 'no-gain-memo']);
+  const NOT_A_DUMP = new Set(['non-json', 'transform-error', 'error-shape', 'big-nonjsonl', 'stream-jq-refused', ...REFUSED_RERUN]);
   const flatOf = (e) => !savedOf(e) && !e.narrowed && !e.profile && !e.spill_out && !NOT_A_DUMP.has(e.reason);
   let bytesIn = 0, bytesOut = 0;
-  const cli = { n: 0, in: 0, saved: 0, flat: 0 };
+  const cli = { n: 0, in: 0, saved: 0, flat: 0, memo: 0 };
   const spills = { paths: new Set(), events: 0, capped: 0 };
   // Collection level (B4.11), read off the line rather than guessed: 1 = sub-gate events were dropped,
   // so this event's siblings are missing from the totals; ≥2 or absent (a pre-B4.11 line, which recorded
@@ -2464,7 +2581,7 @@ function buildReport(lines, opts) {
     // the notice and the CLI run of the same whale. CLI work is aggregated on its own line instead.
     // `flat` (flatOf above) — counted so a followed-but-useless recovery is visible instead of reading
     // as savings-neutral work.
-    if (e.entry === 'cli') { cli.n++; cli.in += bi; cli.saved += saved; if (flatOf(e)) cli.flat++; } else {
+    if (e.entry === 'cli') { cli.n++; cli.in += bi; cli.saved += saved; if (flatOf(e)) cli.flat++; if (REFUSED_RERUN.has(e.reason)) cli.memo++; } else {
       const tk = e.tool || '(stdin)';
       const t = tools.get(tk) || { saved: 0, n: 0 };
       t.saved += saved; t.n++; tools.set(tk, t);
@@ -2504,7 +2621,8 @@ function buildReport(lines, opts) {
   if (!topTools.length) out.push('    (no hook compressions)');
   for (const [name, t] of topTools) out.push(`    ${t.saved} B over ${t.n} call${t.n === 1 ? '' : 's'} — ${name}`);
   if (cli.n) out.push(`  cli runs: ${cli.n} · saved ${cli.saved} B (${cli.in ? (100 * cli.saved / cli.in).toFixed(1) : '0.0'}%)` +
-    `${cli.flat ? ` · ${cli.flat} gained nothing (the file went into context for no reduction)` : ''}`);
+    `${cli.flat ? ` · ${cli.flat} gained nothing (the file went into context for no reduction)` : ''}` +
+    `${cli.memo ? ` · ${cli.memo} refused by the no-gain/slim-out guard (no body printed)` : ''}`);
   const topProjects = [...projects.entries()].sort((a, b) => b[1].saved - a[1].saved).slice(0, REPORT_TOP_PROJECTS);
   out.push('  projects:');
   for (const [name, p] of topProjects) out.push(`    ${name}: ${p.n} event${p.n === 1 ? '' : 's'}, ${p.saved} B saved`);
@@ -2567,6 +2685,7 @@ module.exports = {
   adfStage, noiseStage, truncateStage, toonStage,
   sweepSpills, spillTtlHours, spillRoot, writeSpill,
   whaleGuidance, whaleReminder, whaleGuideEnabled, whaleGuideFullBlock, whaleGuideStamp, whaleGuideStatePath,
+  nogainMemoEnabled, nogainMemoHit, nogainStamp, nogainStatePath, nogainRefusal, // B2: the re-run guards' state
   debugLog, debugEnabled, debugLevel,
   capOutput, streamProfile, profileLines,
   detectLog, compressLog, // M10: re-exported from log-slim.cjs for callers/tests
@@ -2596,6 +2715,11 @@ if (require.main === module) {
   // never crush the reshaped array.
   const jqSegs = jq != null ? normalizeJqPath(jq).split('.').filter(Boolean) : null;
   const jqIdentity = jq != null && jqSegs.length === 0;
+  // A real NARROWING (`--jq <dot.path>`, not the identity selector, which re-dumps the whole value):
+  // the run answers a sub-path instead of the file. Hoisted above the guards below because narrowing is
+  // the documented recovery AFTER a decline — the one thing they must never refuse. Read further down by
+  // the handback gates and the debug line.
+  const narrowed = jq != null && !jqIdentity;
 
   // --report [logfile] [--since <ISO>] (M12): aggregate the FND_MCP_SLIM_DEBUG log instead of
   // compressing anything. Runs before every input path — it reads the log, not a payload — and logs
@@ -2619,11 +2743,50 @@ if (require.main === module) {
   const cfg = {};
   if (has('--toon')) cfg.toon = true;
   if (has('--no-spill')) cfg.enableMarker = false;
+  // Flags that change what the pipeline can PRODUCE: `--toon` is the squeeze-harder re-serialization,
+  // `--no-spill` takes the crush's row offload away. A decline under one pipeline says nothing about
+  // another, in either direction — so no B2 refusal may speak for such a run, and such a run may not
+  // record a memo for the plain one. Derived from cfg, so a new pipeline flag is caught by adding it
+  // above rather than by remembering a second list.
+  const pipelineFlags = cfg.toon === true || cfg.enableMarker === false;
   // Every spill this run writes lands here (crush markers, the jsx id map, Gate A's body) and rides on
   // the exit line. Passed IN rather than returned: the catch around slim() below builds a synthetic
   // result and would otherwise lose the paths of files already written before the throw.
   const spills = [];
   cfg.spillSink = spills;
+
+  // B2 — the two re-run guards, before ANY body is read (a refusal that first slurps the file has
+  // already paid the cost it exists to avoid). FILE runs only: a stdin stream has no identity to
+  // recognize or remember, so those paths are untouched. A NARROWING `--jq` bypasses both — it is the
+  // documented recovery after a decline and answers a sub-path, not the file. So does `--stats`: that
+  // is a MEASUREMENT run, and mcp-whale.md promises it reports the 0.0 % — a refusal would answer it
+  // with no measurement at all. So do the pipeline flags (see pipelineFlags). FND_NOGAIN_MEMO=0 turns
+  // BOTH refusals off, which is the escape hatch each of them names. Both print ONE line and exit 0:
+  // a refusal is not an error, and a non-zero exit would read as "json-slim broke".
+  if (fileArg && !narrowed && nogainMemoEnabled() && !pipelineFlags && !has('--stats')) {
+    let sz = -1;
+    try { sz = fs.statSync(fileArg).size; } catch (_) {} // unreadable → no guard; the normal read below reports it
+    // Layer 1 — our own Gate-A output spill (see SLIM_OUT_PREFIX for why no other prefix qualifies).
+    // Bounded by the stream gate: past it the file belongs to Gate B, whose big-doc/profile guidance
+    // (`head -c`, split into rows) is the only usable advice for a file json-slim will not load whole —
+    // this refusal's `--jq` hint would send the reader straight into streamJqRefusal.
+    if (sz >= 0 && sz <= DEFAULTS.streamGateBytes && path.basename(fileArg).startsWith(SLIM_OUT_PREFIX)) {
+      const notice = slimOutRefusal(fileArg, sz) + '\n';
+      process.stdout.write(notice);
+      debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'already-slim-out', bytes_in: sz, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
+      sweepSpills(cfg.spillDir);
+      return;
+    }
+    // Layer 2 — this session already printed THIS file back unchanged and it has not changed since.
+    const memoBytes = sz >= 0 ? nogainMemoHit(cfg.spillDir, fileArg) : null;
+    if (memoBytes !== null) {
+      const notice = nogainRefusal(fileArg, memoBytes) + '\n';
+      process.stdout.write(notice);
+      debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'no-gain-memo', bytes_in: memoBytes, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
+      sweepSpills(cfg.spillDir);
+      return;
+    }
+  }
 
   // Gate B (M9b) — a file past the stream gate is PROFILED line-by-line, never loaded whole; a
   // readFileSync + per-row JSON.parse of a multi-GB JSONL would OOM. CLI-only: MCP results never
@@ -2770,9 +2933,9 @@ if (require.main === module) {
   // contract, so a whale-sized one pours the whole file back into context and Gate A would write a
   // full-size DUPLICATE of the file the caller already named, labelled `slimmed output`. Under the cap
   // the envelope IS the answer the caller came for — a 133 B "PERMISSION DENIED" hidden behind a path
-  // costs a second Read to learn the run failed. Both carve out a narrowing `--jq`: that selects a
-  // sub-value the file path does not answer (same test as the JSONL profile gate above).
-  const narrowed = jq != null && !jqIdentity;
+  // costs a second Read to learn the run failed. Both carve out a narrowing `--jq` (`narrowed`, decided
+  // with the args at the top of the CLI): that selects a sub-value the file path does not answer (same
+  // test as the JSONL profile gate above).
   const handback = fileArg && (res.reason === 'non-json'
     || (res.reason === 'transform-error' && !narrowed)
     || (res.reason === 'error-shape' && res.bytesIn > DEFAULTS.cliOutCap && !narrowed));
@@ -2795,6 +2958,26 @@ if (require.main === module) {
     process.stdout.write(capped.handback + '\n');
   } else {
     process.stdout.write(res.output + '\n');
+    // B2 Layer 3 — this FILE run printed the file's own bytes back UNCHANGED, which is a deliberate
+    // decline; in the field it read as a failed attempt and was immediately re-run on the same file. Say
+    // it out loud, on stderr only: stdout stays the parseable body a caller can pipe, and both streams
+    // reach the model. The predicate is literal, not merely "gained nothing": ANY `--jq` (including the
+    // IDENTITY selector) prints a RE-SERIALIZED value — a pretty-printed file re-serializes smaller, so
+    // `--jq .` can decline on bytes that a plain run would have shrunk by 20 % — and `wasModified` with
+    // bytesOut ≥ bytesIn is a CHANGED body, not the file. Neither may claim "printed unchanged", and
+    // neither may arm the memo for a run whose pipeline it never describes.
+    // An `error-shape` envelope under the inline cap does stamp, deliberately: it is a verbatim
+    // passthrough by contract, so a re-run has nothing to shrink either.
+    if (fileArg && !compressed && jq == null && !res.wasModified) {
+      process.stderr.write(`json-slim: no reduction possible — ${res.bytesIn} B printed unchanged; this is a deliberate decline, not an error. ` +
+        `Do NOT re-run json-slim on this file; read it directly or narrow with --jq <dot.path>.\n`);
+      // …and remember it, so the NEXT run answers in one line instead of re-printing this body. Stamped
+      // here, after the delivery (the whaleGuideStamp rule), never at the decision. Under the floor a
+      // refusal would save too little to be worth remembering; under a pipeline flag the decline belongs
+      // to that pipeline, not to the plain run the memo would refuse. (`--stats` DOES stamp — it is the
+      // same pipeline, measured.)
+      if (nogainMemoEnabled() && !pipelineFlags && res.bytesIn >= NOGAIN_FLOOR_BYTES) nogainStamp(cfg.spillDir, fileArg);
+    }
   }
   // On stderr, not appended to stdout: a stdin run's stdout is the machine-readable body a caller can
   // pipe (a fixture parses it), while both streams reach the model that invoked the CLI.

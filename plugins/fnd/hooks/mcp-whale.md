@@ -13,6 +13,8 @@ directly` = json-slim printed nothing of its own; the parenthetical says why —
 (prose / markdown / HTML / XML, or a log / Figma-JSX payload already minimal: those two shapes
 *do* compress when there is a gain), an error envelope, or a transform error; recover with a
 windowed `Read` (`offset`/`limit`), or `--jq <dot.path>` into an envelope. A body printed back
-**unchanged** is a deliberate decline (only `--stats` reports the 0.0 %) — don't re-run it;
-narrow with `--jq <dot.path>` or query the file (`grep`, `sed -n '<N>p'`). A
+**unchanged** is a deliberate decline (stderr says so; `--stats` reports the 0.0 %) — don't
+re-run it: a repeat, or any run on a `fnd-slim-out-*` spill, answers with a one-line refusal
+instead. Narrow with `--jq <dot.path>` (the guards never refuse it) or query the file (`grep`,
+`sed -n '<N>p'`). A
 `<<fnd-mcp-slim stub>>` saying the compressor already gained nothing prints that `--jq` line.
