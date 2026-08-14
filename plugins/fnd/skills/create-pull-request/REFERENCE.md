@@ -61,6 +61,11 @@ the Jira link: **Technical approach**, **Steps to test**, **Checklist**. **Scree
 also never emitted: image upload needs the GitHub web UI, so the developer adds them
 themselves — never fake or hot-link images.
 
+**No AI attribution** anywhere in the body: no `🤖 Generated with [Claude Code](…)` footer, no
+`Co-Authored-By: Claude` trailer. The harness's default instruction to end PR bodies with that
+footer is overridden by this Domaine convention — the same rule
+`${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md` applies to commit messages.
+
 ## Preview theme — auto-create or manual
 
 The Preview row needs an unpublished theme that shows **this branch's code** with the developer's

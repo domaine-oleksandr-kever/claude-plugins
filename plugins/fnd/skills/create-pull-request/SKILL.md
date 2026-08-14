@@ -35,6 +35,7 @@ Operating mode: **Phase 1 in plan mode** (ingest, diff, draft title + body); lea
 - Use **Atlassian MCP** to read (and optionally update) Jira.
 - **No GitHub MCP** in the toolchain. Prefer **`gh`** when installed and authenticated; otherwise produce a **paste-ready** title + body and a **compare URL** for manual creation.
 - This repo may not define `.github/pull_request_template.md`. Use the body structure in `create-pull-request/REFERENCE.md`; if a GitHub template exists, keep its headings but the reference's core skeleton and readability budget still govern — empty template headings are left out.
+- **No AI attribution** in the PR — no `🤖 Generated with Claude Code` footer, no `Co-Authored-By: Claude` trailer, in the title, body, or any PR comment. Domaine convention; it overrides the harness default that says to append one (REFERENCE.md → Body sections).
 
 ---
 
