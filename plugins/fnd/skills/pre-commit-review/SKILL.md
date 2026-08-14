@@ -6,8 +6,8 @@ description: Review the branch's changed files before committing — hygiene plu
 # Pre-commit review
 
 Hygiene **+ correctness** pass over the changed files **before a commit**. Five checks →
-a written plan → developer approves/corrects → apply. **Never commits** (repo rule: never
-`git commit` without explicit per-commit permission).
+a written plan → developer approves/corrects → apply. **Never commits** — committing is
+`/fnd:commit`'s job, and the developer invokes it themselves.
 
 ## 0. Review-flow gate
 
@@ -110,8 +110,9 @@ becomes a named ceiling — record it as a `ceiling:` entry in the workspace `no
 After the developer approves (with their corrections), make exactly the agreed edits — nothing
 more. For approved check-D rows, run the agreed `git add <path>` so the referenced files are
 tracked. Then **stop**: report what changed and hand the commit back to the developer — stage
-the files and suggest `/fnd:commit` (it always shows the message and asks permission before
-committing). Never run `git commit` from this skill. If the branch's ticket has a task
+the files and suggest `/fnd:commit` (invoking it authorizes the commit — it commits
+directly with a Conventional-Commits message and reports the result). Never run
+`git commit` from this skill. If the branch's ticket has a task
 workspace, tick `pre-commit-review` in its `progress.md`.
 
 **Write the marker.** After the edits are applied, record the review for this branch so

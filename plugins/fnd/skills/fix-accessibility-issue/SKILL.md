@@ -15,7 +15,7 @@ allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npx playwright test*), Bash(g
 
 Fix accessibility issues in theme components. Follow the standard issue-fix workflow (branch → implement → test → hand off the commit), with the a11y-specific rules below.
 
-**The commit is not pre-approved here.** Staging (`git add`) is; `git commit` is not — hand the commit to `/fnd:commit` (repo rule: never `git commit` without explicit per-commit permission).
+**The commit is not pre-approved here.** Staging (`git add`) is; `git commit` is not — hand the commit to `/fnd:commit` (committing is that skill's job; the developer invokes it themselves).
 
 ## Component ARIA patterns
 

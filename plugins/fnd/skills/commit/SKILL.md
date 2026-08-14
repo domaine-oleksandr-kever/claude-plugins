@@ -14,7 +14,11 @@ Read it before drafting.
 
 ## Rules
 
-- **Always ask for permission before running `git commit`.** Show the proposed message first and wait for explicit confirmation.
+- **Commit directly — no preview, no permission ask.** Invoking `/fnd:commit` *is* the
+  authorization: draft the message and run `git commit` immediately, then report the
+  created commit (hash + full message) so the developer can `git commit --amend` if the
+  wording needs a tweak. The only question that may still block is step 4's ticket-scope
+  ask.
 
 ## Review gate (before committing)
 
@@ -28,7 +32,7 @@ are unclear:
   branch** → offer to run
   `/fnd:pre-commit-review` first; proceed if the developer declines.
 - **Marker exists** → continue; don't re-run a review unprompted.
-- **Re-stamp around the commit** — before step 7 compute the current `diff_hash`; if it
+- **Re-stamp around the commit** — before step 6 compute the current `diff_hash`; if it
   equals the marker's, refresh the marker after the commit succeeds, per review-flow.md §1
   → *Re-stamp after a commit whose hooks rewrote the tree* (that block is the full rule).
   Why: husky / lint-staged reformat files during `git commit`, drifting the hash so
@@ -48,8 +52,8 @@ are unclear:
    > "Add the task as scope — e.g. `feat(ELC-61): <message>`? Or commit without it?"
    Only use the ticket as scope after the user confirms.
 5. Draft the message per the format reference. Include a body unless the change is trivial.
-6. Show the full message to the user and ask for permission to commit.
-7. On approval, commit. Use a HEREDOC for multi-line messages:
+6. Commit immediately with that message — no preview, no confirmation. Use a HEREDOC for
+   multi-line messages, then report the result (`git log --oneline -1` + the full message):
 
    ```bash
    git commit -m "$(cat <<'EOF'
