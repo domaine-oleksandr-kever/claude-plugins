@@ -80,9 +80,10 @@ its brief says otherwise.
    line — that theme is the PR's preview theme, so the agent refreshes it instead of
    auto-creating another** (REFERENCE.md → Preview theme, precedence step 2), and
    `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md` — it owns the title
-   convention, the body order (Summary → Jira → theme-preview table in the top third;
-   ceilings → Dependencies) and the preview-theme decision flow (`[ELC-…]` naming,
-   `--reuse`). Escalations, verbatim in the brief: `error=build_failed` → ESCALATE with
+   convention, the body structure (core skeleton Summary → Jira → theme-preview table →
+   Changes; conditional sections only with real content; ceilings one line each) and the
+   preview-theme decision flow (`[ELC-…]` naming, `--reuse`). Escalations, verbatim in
+   the brief: `error=build_failed` → ESCALATE with
    the build output; `error=settings_drift` → the reference's manual recovery;
    conformance pass (`change-reviewer`, `conformance` emphasis) — a `protected-core`
    blocker → ESCALATE; **correctness backstop** per

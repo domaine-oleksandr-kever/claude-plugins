@@ -150,7 +150,9 @@ Merge the agent findings with the inline B/D hits into one plan/table for the de
 A finding tagged correctness (check F from `bug-hunter`, or stumbled on by
 `change-reviewer` while reading) is **never "observation only"**. The calling skill must
 close every one explicitly — **fix** it, **justify** it (the justification travels to the
-PR body → Dependencies as a named ceiling), or have the developer **explicitly waive**
+PR body as a **one-line named ceiling**, placement per
+`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md` → Body sections; the full
+reasoning stays in `notes.md`), or have the developer **explicitly waive**
 it — and record the disposition (workspace `notes.md` when one exists). A **blocking**
 correctness finding stops a PR the same way a `protected-core` blocker does.
 

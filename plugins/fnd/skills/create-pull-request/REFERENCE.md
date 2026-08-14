@@ -1,7 +1,9 @@
 # PR body — Domaine structure reference
 
 The body structure and theme-preview table rules for `create-pull-request` (Workflow 6). If a
-GitHub PR template exists in the repo, merge these sections into it rather than dropping any.
+GitHub PR template exists in the repo, keep its headings but apply the rules below to them: the
+core skeleton stays mandatory, and a template heading with nothing real to say is left out —
+the readability budget wins over template completeness.
 
 ## Title convention
 
@@ -17,27 +19,47 @@ Examples:
 
 ## Body sections
 
-**The first three sections are FIXED and ordered — emit them in exactly this order at the very top of the body, before anything else:**
+**Readability budget — governs every section:** the whole body must be readable in under a
+minute. The description tells the reviewer why the PR exists and where to look; the diff shows
+the what. Evidence (measurement tables, per-file prose walkthroughs, full verification lists) lives in
+the Jira ticket, the task workspace, or a PR *comment* — never in the body. The body scales with
+content, not with a section count: **a section with nothing real to say is omitted entirely — no
+"None", no "N/A" placeholders.**
 
-1. **Summary** — what was implemented and why (short, reviewer-friendly).
+**Core skeleton — always present, in exactly this order, before anything else:**
+
+1. **Summary** — 3–5 sentences: why this PR exists, what was broken (or what the feature is),
+   and why this approach. End with one **review-guide line** when the diff isn't uniform:
+   which file carries the key change, which files are mechanical (e.g. "review
+   `snippets/core-section.liquid`; the other 6 files only add a class"). A **single**
+   `ceiling:` entry closes the Summary with one line — lean-code requires each ceiling named
+   in the body, not in an inline comment, and one line is enough for reviewers and bots; two
+   or more ceilings, and any merge/post-merge note, go to Conditional sections → Dependencies.
 2. **Jira ticket** — key + URL (list every ticket when the PR closes more than one).
-3. **Theme preview** — the conditional table below, in the **top third of the body — never
-   at the bottom** among the trailing sections: a reviewer must hit the preview link
-   without scrolling. Do not reorder or rename these three.
+3. **Theme preview** — the conditional table below, **directly under the Jira link, above
+   Changes — never at the bottom**: a reviewer must hit the preview link without scrolling.
+4. **Changes** — one line per file, half a line of substance each ("what changed", not prose);
+   uniform mechanical edits collapse to one line for the whole group
+   ("`core-video`, `card-group`, +3 more — added `core-media-block`"), and beyond ~10 files
+   group by area — one line per group. No tables.
 
-Then the remaining sections (adapt headings if a team template exists; their relative order is flexible, but they all come **after** the fixed three):
+Do not reorder or rename these four.
 
-- **Technical approach** — summary of the approved TA; call out deviations or additions made during implementation and why.
-- **Changes made** — grouped by area (sections/blocks/snippets, styles, schemas/locales, config, scripts).
-- **Steps to test** — paste from Jira, or summarise with a pointer to the ticket field if long.
-- **Screenshots / visual evidence** — captures, Figma frames, or DevTools validation notes. If none, say "N/A — non-visual change" or state what was verified.
-- **Accessibility** — WCAG-oriented notes (keyboard, semantics, contrast), or "None".
-- **Performance** — rendering, assets, LCP/CLS touchpoints, or "None".
-- **Dependencies** — other PRs, env vars, merchant setup, post-merge steps, and **named
-  ceilings**: every intentional simplification with a known ceiling (workspace `notes.md`
-  `ceiling:` entries, justified correctness findings) with its upgrade path — lean-code
-  requires the ceiling named here, not in an inline comment.
-- **Checklist** — self-review complete, tested locally, no console errors in happy path, a11y spot-check if UI changed.
+**Conditional sections — emit ONLY when there is real content; 1–2 lines each, after the skeleton:**
+
+- **Dependencies** — merge-order constraints ("merge after #392") and post-merge steps
+  (env vars, merchant/admin setup). Two or more **named ceilings** (workspace `notes.md`
+  `ceiling:` entries, justified correctness findings) are listed here — **one line per
+  ceiling**, the full upgrade path stays in `notes.md`; a single ceiling lives as the
+  Summary's closing line instead (the naming rule itself is in the Summary bullet above).
+- **Accessibility** — only when the change actually touches keyboard, semantics, focus, or
+  contrast; state what changed and what was checked.
+- **Performance** — only when the change affects rendering, assets, or LCP/CLS; state the impact.
+
+Sections that never appear in the body — their content lives in the ticket, one click away via
+the Jira link: **Technical approach**, **Steps to test**, **Checklist**. **Screenshots** are
+also never emitted: image upload needs the GitHub web UI, so the developer adds them
+themselves — never fake or hot-link images.
 
 ## Preview theme — auto-create or manual
 
