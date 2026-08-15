@@ -98,8 +98,9 @@ its brief says otherwise.
    theme id + preview/editor links, ≤10-line report. The conductor verifies the tick
    and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
-   `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` from the AC + `qa.md` +
-   `notes.md` repro values; save `steps-to-test.md`; policy allows → write the field via
+   `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` from the AC + the branch
+   diff (the format's setup inventory — sections/blocks/settings/metafields the tester
+   must configure) + `qa.md` + `notes.md` repro values; save `steps-to-test.md`; policy allows → write the field via
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables` + `editJiraIssue`
    (`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`).
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent →
