@@ -2,7 +2,7 @@
 name: write-steps-to-test
 description: >
   Write Steps to Test for a Jira ticket in Domaine's standard format — maps each AC to
-  reproducible scenarios for a tester unfamiliar with the implementation; updates the Jira
+  reproducible scenarios for a QA engineer unfamiliar with the implementation; updates the Jira
   field after approval — Workflow 5. Use when the user asks to write / draft Steps to Test or
   QA steps for a Jira ticket.
 argument-hint: "<jira-url-or-key> [feature|bug]"
@@ -29,7 +29,7 @@ Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context
 ## Phase 1 — Analysis `[plan mode]`
 
 1. **Ingest the ticket** — context-first per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` (pass the workspace path to the **`jira-reader`** subagent — it writes `ticket.md` itself); the workspace `.claude/fnd/<TICKET>/` also holds QA repro values in `notes.md`. This skill needs: Description, AC, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy **via `doc-reader`**, per `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`; if the Notion MCP isn't connected, tell the developer rather than writing steps blind.
-2. **Analyse the implementation and build the setup inventory** — from the diff or developer summary, list everything a tester on a **fresh theme** must configure before anything renders; the authoritative item-class list lives in `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` → Setup (sections + template placement, blocks, app embeds, theme settings, metafields with `namespace.key` + example values, metaobjects, alternate templates, fixtures). Tag each item store-wide vs per-theme. This inventory becomes the Setup section — anything a scenario touches but the inventory misses is a guaranteed clarifying question from QA.
+2. **Analyse the implementation and build the setup inventory** — from the diff or developer summary, list everything a QA engineer on a **fresh theme** must configure before anything renders; the authoritative item-class list lives in `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` → Setup (sections + template placement, blocks, app embeds, theme settings, metafields with `namespace.key` + example values, metaobjects, alternate templates, fixtures). Tag each item store-wide vs per-theme. This inventory becomes the Setup section — anything a scenario touches but the inventory misses is a guaranteed clarifying question from QA.
 3. **Identify test scenarios** — one per AC (plus at most one cross-cutting flow); note edge cases, negative paths, and the named fixtures (handles, customer emails, exact values) each scenario needs — sourced from the workspace `notes.md` repro values or the developer, never left as "any product that…".
 
 ---
@@ -38,7 +38,7 @@ Operating mode: **Phase 1 in plan mode** (ingest ticket + implementation context
 
 1. **Write Steps to Test** following the Domaine format — read
    `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` now (it owns the writing
-   rules: the tester-on-their-own-fresh-theme premise, the numbered Setup section built
+   rules: the QA-engineer-on-their-own-fresh-theme premise, the numbered Setup section built
    from the setup inventory, environment bans, step shape, size budget, and the
    **General** vs **Bug** template choice per `ticket_type`). Run its **Self-check** and
    fix violations before presenting.

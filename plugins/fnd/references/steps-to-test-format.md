@@ -1,18 +1,20 @@
 # Steps to Test — Domaine format
 
 The output standard shared by `/fnd:write-steps-to-test` and the pipeline steps-to-test
-phase. The reader is a QA tester who deploys the branch code to **their own unpublished
-theme** and configures everything **from scratch**. They know the Shopify admin but not
+phase. The reader is a QA engineer whose **own unpublished theme** carries the branch code
+(GitHub Actions deploys it — the QA engineer never deploys anything) and who configures
+everything **from scratch**. They know the Shopify admin but not
 this implementation. Bar: **zero clarifying questions** — every fact a step needs lives in
-this document, and two different testers following it get identical results.
+this document, and two different QA engineers following it get identical results.
 
 ## Environment rules (hard bans)
 
-- **No preview themes that aren't the tester's own.** The PR's preview theme is for
-  reviewers — QA deploys the branch to their own unpublished theme. Never cite someone
+- **No preview themes that aren't the QA engineer's own.** The PR's preview theme is for
+  reviewers — QA works on their own unpublished theme, which GitHub Actions keeps on the
+  branch code. Never cite someone
   else's environment: no `?preview_theme_id=…` ids, theme names, or links from the
   ticket/PR, no "preview theme linked in the ticket comment", no storefront passwords, no
-  release tags, no PR references. The tester opens their own theme via
+  release tags, no PR references. The QA engineer opens their own theme via
   **Online Store > Themes > … > Preview** (or the theme editor) and stays in that preview
   session — relative paths resolve against it; Setup line 1 states this.
 - **No absolute hosts** (`https://<store>.myshopify.com/…`) — relative paths only
@@ -36,10 +38,11 @@ feature needs; tag every data/config subsection **(store-wide)** or **(per-theme
 
 Order and content:
 
-1. **Theme (per-theme).** `Deploy the branch to your own unpublished theme, then open it
-   in the theme editor (Online Store > Themes > Customize).` If a dev re-push can wipe
-   editor config (`templates/*.json`, `settings_data.json`), say "redo the per-theme steps
-   after any re-deploy".
+1. **Theme (per-theme).** `Open your own unpublished theme in the theme editor
+   (Online Store > Themes > Customize) — GitHub Actions has already deployed the branch to
+   it; you deploy nothing.` If a dev re-push can wipe editor config (`templates/*.json`,
+   `settings_data.json`), say "redo the per-theme steps after any re-push (Actions
+   re-deploys automatically)".
 2. **Store-wide data** — shared with the live theme, so point at dedicated QA fixtures,
    never live merchandising. In order: metafield definitions → metaobject definitions →
    metaobject entries → metafield values. For each definition give owner resource,
@@ -56,7 +59,7 @@ Order and content:
    email + tag/state. "Any product that…" is banned — if a fixture doesn't exist, Setup
    says how to create it.
 4. **Theme settings (per-theme).** Exact path with labels verbatim:
-   `Theme settings > Cart > Cart type → Drawer → Save`. Note the default so the tester can
+   `Theme settings > Cart > Cart type → Drawer → Save`. Note the default so the QA engineer can
    restore it.
 5. **Template / section / block config (per-theme).** The exact editor route: template
    dropdown (top bar) → template; sidebar **Add section** → section name → placement
@@ -71,9 +74,9 @@ Order and content:
    or the preview bar "View as", not the storefront country selector), customer state
    (log in as the named fixture), incognito window, viewport.
 
-Close with: `✅ Checkpoint: <what the tester sees now, e.g. "the PDP for
+Close with: `✅ Checkpoint: <what the QA engineer sees now, e.g. "the PDP for
 /products/studio-fix-fluid shows a Comparison table with 7 rows">. If not, stop — recheck
-step <n> / re-deploy the branch.`
+step <n> / confirm the branch's GitHub Actions deploy to your theme finished.`
 
 ## Scenario rules
 
@@ -115,7 +118,7 @@ ADF write path flattens tables anyway.
 
 ```markdown
 **Setup** — do all of this once, before the scenarios.
-1. Deploy the branch to your own unpublished theme; open it in the theme editor.
+1. Open your own unpublished theme in the theme editor (GitHub Actions has deployed the branch to it).
 2. (store-wide) <data / fixtures — named handles, metafield defs + example values>
 3. (per-theme) <theme settings → template > Add section > … > Save>
 ✅ Checkpoint: <observable result>. If not, stop and recheck step <n>.
@@ -127,7 +130,7 @@ ADF write path flattens tables anyway.
 1. <Reachable boundary / empty / error state>. **Expected:** <behaviour>.
 ```
 
-**Bug (defect fix):** same Setup + scenario rules. The tester's theme already carries the
+**Bug (defect fix):** same Setup + scenario rules. The QA engineer's theme already carries the
 fix, so **never instruct reproducing on an unfixed theme** — annotate instead:
 
 ```markdown
@@ -136,7 +139,7 @@ fix, so **never instruct reproducing on an unfixed theme** — annotate instead:
 
 ### Verify the fix
 1. <The action that used to fail>. **Expected:** <correct behaviour>.
-   *Before the fix:* <what used to happen — so the tester recognizes a regression>.
+   *Before the fix:* <what used to happen — so the QA engineer recognizes a regression>.
 
 ### Regression sweep
 1. <Adjacent flow the fix could disturb — scoped to the change's blast radius, not a
@@ -151,4 +154,4 @@ fix, so **never instruct reproducing on an unfixed theme** — annotate instead:
 - Within the size budget and step caps — prose trimmed, coverage intact.
 - No banned content: preview themes, absolute hosts, passwords, per-store forks, titles,
   summaries, essays, "or similar", conditional steps, generic a11y/responsive sections.
-- A tester with only this document and admin access can finish without asking anything.
+- A QA engineer with only this document and admin access can finish without asking anything.
