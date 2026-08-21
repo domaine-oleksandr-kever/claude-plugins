@@ -39,10 +39,11 @@ feature needs; tag every data/config subsection **(store-wide)** or **(per-theme
 Order and content:
 
 1. **Theme (per-theme).** `Open your own unpublished theme in the theme editor
-   (Online Store > Themes > Customize) — GitHub Actions has already deployed the branch to
-   it; you deploy nothing.` If a dev re-push can wipe editor config (`templates/*.json`,
-   `settings_data.json`), say "redo the per-theme steps after any re-push (Actions
-   re-deploys automatically)".
+   (Online Store > Themes > Customize).` Deploy mechanics (GitHub Actions, branches,
+   pushes, "you deploy nothing") never appear in the document — that's writer-side
+   context; the QA engineer's theme simply already carries the code. If a dev re-push can
+   wipe editor config (`templates/*.json`, `settings_data.json`), say "if the theme's
+   code is updated again, redo the per-theme steps".
 2. **Store-wide data** — shared with the live theme, so point at dedicated QA fixtures,
    never live merchandising. In order: metafield definitions → metaobject definitions →
    metaobject entries → metafield values. For each definition give owner resource,
@@ -75,8 +76,8 @@ Order and content:
    (log in as the named fixture), incognito window, viewport.
 
 Close with: `✅ Checkpoint: <what the QA engineer sees now, e.g. "the PDP for
-/products/studio-fix-fluid shows a Comparison table with 7 rows">. If not, stop — recheck
-step <n> / confirm the branch's GitHub Actions deploy to your theme finished.`
+/products/studio-fix-fluid shows a Comparison table with 7 rows">. If not, stop and
+recheck step <n>.`
 
 ## Scenario rules
 
@@ -118,7 +119,7 @@ ADF write path flattens tables anyway.
 
 ```markdown
 **Setup** — do all of this once, before the scenarios.
-1. Open your own unpublished theme in the theme editor (GitHub Actions has deployed the branch to it).
+1. Open your own unpublished theme in the theme editor (Online Store > Themes > Customize).
 2. (store-wide) <data / fixtures — named handles, metafield defs + example values>
 3. (per-theme) <theme settings → template > Add section > … > Save>
 ✅ Checkpoint: <observable result>. If not, stop and recheck step <n>.
@@ -153,5 +154,6 @@ fix, so **never instruct reproducing on an unfixed theme** — annotate instead:
 - Setup ends with a ✅ Checkpoint that its own steps actually produce.
 - Within the size budget and step caps — prose trimmed, coverage intact.
 - No banned content: preview themes, absolute hosts, passwords, per-store forks, titles,
-  summaries, essays, "or similar", conditional steps, generic a11y/responsive sections.
+  summaries, essays, "or similar", conditional steps, generic a11y/responsive sections,
+  deploy/CI mechanics (GitHub Actions, branches, pushes).
 - A QA engineer with only this document and admin access can finish without asking anything.
