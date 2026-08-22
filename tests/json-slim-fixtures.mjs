@@ -2587,5 +2587,248 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   rmSync(dir, { recursive: true, force: true });
 }
 
+// ==================================== M14 — the MCP text-block envelope rail (the CLI blind spot) ==
+// The mcp-slim hook spills a whale ORIGINAL as the MCP content-block envelope, so the payload is a
+// JSON-encoded STRING in `[0].text`. The hook unwraps that structurally (it slims each block's text);
+// the CLI — the recovery path the stub guidance points the model at — did not: a plain run found
+// nothing to compress in a 1-element array and printed the whole file back at 0 %, and no `--jq` path
+// could reach the payload (the walk cannot descend into an escaped string). These cases pin the rail
+// that unwraps it, and the three places it must NOT fire: an impure envelope, an incompressible inner,
+// and the identity selector.
+{
+  const ENV_FIX = path.join(FIX, 'mcp-envelope-jira.json');
+  const envRaw = readFileSync(ENV_FIX, 'utf8');
+  const innerRaw = JSON.parse(envRaw)[0].text;
+  const wrap = (text) => JSON.stringify([{ type: 'text', text }]);
+  // Tolerant, so a rail that regresses into a DECLINE (stdout = the file back, or a memo refusal line)
+  // reports a named failure here instead of throwing out of the suite.
+  const parseOut = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };
+
+  // ---- envelopeInner: the purity gate and what counts as an inner payload
+  eq('m14-inner-array-shape', J.envelopeInner(JSON.parse(wrap('{"a":1}'))), { text: '{"a":1}', value: { a: 1 } });
+  eq('m14-inner-lone-block', J.envelopeInner({ type: 'text', text: '{"a":1}' }), { text: '{"a":1}', value: { a: 1 } });
+  eq('m14-inner-content-shape', J.envelopeInner({ content: [{ type: 'text', text: '{"a":1}' }] }), { text: '{"a":1}', value: { a: 1 } });
+  // …and the shapes that are NOT an envelope for this purpose: unwrapping them would DROP a field
+  // while the printed body claims to be the whole payload (the DR/M49 rule blockText already owns).
+  eq('m14-inner-meta-refused', J.envelopeInner([{ type: 'text', text: '{"a":1}', _meta: { nextCursor: 'c1' } }]), null);
+  eq('m14-inner-annotations-refused', J.envelopeInner([{ type: 'text', text: '{"a":1}', annotations: { audience: ['user'] } }]), null);
+  eq('m14-inner-structured-refused', J.envelopeInner({ content: [{ type: 'text', text: '{"a":1}' }], structuredContent: { a: 1 } }), null);
+  eq('m14-inner-mixed-blocks-refused', J.envelopeInner([{ type: 'text', text: '{"a":1}' }, { type: 'image', data: 'x' }]), null);
+  // …and a MULTI-block PURE text envelope, which blockText would happily JOIN: an envelope's blocks
+  // are independent results, so the join is not a document. Two compact JSON blocks read as two JSONL
+  // rows and a prose+fence pair reads as one fenced payload — both describe something nobody sent.
+  eq('m14-inner-two-json-blocks-refused', J.envelopeInner([{ type: 'text', text: '{"a":1}' }, { type: 'text', text: '{"b":2}' }]), null);
+  eq('m14-inner-two-fence-halves-refused',
+    J.envelopeInner([{ type: 'text', text: 'Script returned:\n```json' }, { type: 'text', text: `{"rows":[1,2,3]}\n\`\`\`` }]), null);
+  // the sole-block gate itself, and the join blockText keeps for the jsx stage (whose detector accepts
+  // a joined text only when every signature of ONE Figma payload is in it)
+  eq('m14-sole-block-lone', J.soleBlockText({ type: 'text', text: 'a' }), 'a');
+  eq('m14-sole-block-one-element', J.soleBlockText([{ type: 'text', text: 'a' }]), 'a');
+  eq('m14-sole-block-content-shape', J.soleBlockText({ content: [{ type: 'text', text: 'a' }] }), 'a');
+  eq('m14-sole-block-two-refused', J.soleBlockText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]), null);
+  eq('m14-sole-block-impure-refused', J.soleBlockText([{ type: 'text', text: 'a', _meta: { nextCursor: 'c' } }]), null);
+  eq('m14-blocktext-still-joins', J.blockText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]), 'a\nb');
+  eq('m14-inner-prose-refused', J.envelopeInner(JSON.parse(wrap('PERMISSION DENIED: the token cannot read this issue'))), null);
+  // a JSONL inner is deliberately outside the rail — its rows must PROFILE, and a profile's line
+  // recipes cannot address lines that only exist inside an escaped string (see the M1.5 case below)
+  eq('m14-inner-jsonl-refused', J.envelopeInner(JSON.parse(wrap('{"id":1}\n{"id":2}\n{"id":3}'))), null);
+  // an M11-fenced inner IS a payload — the fence is the tool's prose wrapper, not the data
+  const fencedBody = JSON.stringify({ rows: Array.from({ length: 12 }, (_, i) => ({ id: i, name: `row-${i}` })) });
+  eq('m14-inner-fenced', J.envelopeInner(JSON.parse(wrap(`Script ran on page and returned:\n\`\`\`json\n${fencedBody}\n\`\`\``))).value,
+    JSON.parse(fencedBody));
+
+  // ---- slim(): the win is the INNER body, measured against the ENVELOPE's bytes
+  {
+    const env = J.slim(envRaw, { trace: true });
+    const inner = J.slim(innerRaw, { trace: true });
+    check('m14-slim-unwraps', env.wasModified && env.envelopeUnwrapped === true && env.output === inner.output,
+      `the printed body must be the slimmed INNER payload, never rewrapped: ${JSON.stringify(env.output.slice(0, 80))}`);
+    check('m14-slim-bytes-are-the-envelope', env.bytesIn === Buffer.byteLength(envRaw, 'utf8') && env.bytesOut === inner.bytesOut,
+      `bytesIn is the envelope file (what the caller would otherwise have paid): ${env.bytesIn} / ${env.bytesOut}`);
+    check('m14-slim-ratio', env.ratio > 0.7, `the jira-envelope fixture must gain like the hook does: ${(env.ratio * 100).toFixed(1)} %`);
+    eq('m14-slim-stage-tag', env.stages.slice(0, 2), ['envelope', 'adf']);
+    eq('m14-slim-stages-off-empty', J.slim(envRaw).stages, []); // trace off ⇒ no bookkeeping, like every other stage
+    // the rail is a pipeline knob like fence/jsx/log — off ⇒ exactly the pre-M14 result
+    const off = J.slim(envRaw, { envelope: false });
+    check('m14-slim-knob-off', off.wasModified === false && off.output === envRaw,
+      'envelope:false must reproduce the old decline (the whole original, untouched)');
+  }
+  // an inner that does NOT slim leaves the WHOLE original envelope untouched — never a bare unwrapped
+  // body, which is the :1827 decline rule the fence rail already obeys
+  {
+    const tiny = wrap('{"a":1}');
+    const r = J.slim(tiny);
+    check('m14-slim-incompressible-inner-declines', r.wasModified === false && r.output === tiny,
+      `an incompressible inner keeps today's decline of the whole envelope: ${JSON.stringify(r.output)}`);
+  }
+  // an ERROR payload inside the envelope is handed back verbatim (write-gating reads these) — the
+  // fenced-error rail's reason, one level further in
+  {
+    const err = wrap(JSON.stringify({ isError: true, errors: [{ message: 'permission denied' }], detail: 'x'.repeat(400) }));
+    const r = J.slim(err);
+    check('m14-slim-inner-error-verbatim', r.wasModified === false && r.error === true && r.reason === 'error-shape' && r.output === err,
+      `an inner error envelope must not be compressed: ${JSON.stringify(r).slice(0, 160)}`);
+  }
+  // …and on an EXPIRED budget too: the JSON-route gate probes the envelope's inner before it may say
+  // `budget-exceeded` — a reason the hook's stub guard is allowed to replace, while an error envelope
+  // is verbatim by contract (b4.8-deadline-error-rail-first, one wrapping level further in).
+  {
+    const err = wrap(JSON.stringify({ isError: true, errors: [{ message: 'permission denied' }], detail: 'x'.repeat(400) }));
+    const r = J.slim(err, { deadline: Date.now() - 1 });
+    eq('m14-slim-inner-error-outlives-budget', [r.reason, r.error === true, r.output === err], ['error-shape', true, true]);
+  }
+
+  // ---- CLI
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m14-'));
+  const run = (args, env) => spawnSync('node', [SLIM, ...args], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, ...(env || {}) } });
+  const NOTE = /unwrapped MCP text envelope \(\[0\]\.text\)/;
+  {
+    const r = run(['--stats', ENV_FIX]);
+    const printed = r.stdout.trim();
+    check('m14-cli-prints-inner', printed === J.slim(innerRaw).output,
+      `stdout must be the slimmed inner payload: ${printed.slice(0, 80)}`);
+    check('m14-cli-notes-the-unwrap', NOTE.test(r.stderr) && /the original stays at/.test(r.stderr),
+      `one stderr line must say the body is not the file's shape: ${JSON.stringify(r.stderr)}`);
+    check('m14-cli-no-decline-notice', !/deliberate decline/.test(r.stderr),
+      `the run that used to decline must no longer claim one: ${JSON.stringify(r.stderr)}`);
+    // --stats speaks about the envelope FILE in → the printed body out (M1 step 2)
+    const m = /json-slim: (\d+) → (\d+) bytes \(([\d.]+)% reduction\)/.exec(r.stderr);
+    check('m14-cli-stats-envelope-bytes', !!m && Number(m[1]) === statSync(ENV_FIX).size && Number(m[3]) > 70,
+      `--stats must measure the envelope file, not the inner: ${JSON.stringify(r.stderr)}`);
+  }
+  // the debug line carries the `envelope` stage, so --report can count the rail in the field
+  {
+    const ddir = mkdtempSync(path.join(tmpdir(), 'jslim-m14dbg-'));
+    const r = spawnSync('node', [SLIM, ENV_FIX], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: ddir, FND_MCP_SLIM_DEBUG: '1' } });
+    const line = JSON.parse(readFileSync(path.join(ddir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').pop());
+    check('m14-cli-debug-line', line.decision === 'compressed' && line.stages[0] === 'envelope' && line.bytes_in === statSync(ENV_FIX).size,
+      `${JSON.stringify(line)} / ${r.stderr}`);
+    rmSync(ddir, { recursive: true, force: true });
+  }
+  // --jq resolves THROUGH the envelope: the live failure was `null` + "'fields' not found at top
+  // level; length: 1" on every path a model could guess
+  {
+    const hit = run(['--jq', '.fields.summary', ENV_FIX]);
+    eq('m14-jq-through-envelope', hit.stdout.trim(), JSON.stringify(JSON.parse(innerRaw).fields.summary));
+    check('m14-jq-notes-the-unwrap', NOTE.test(hit.stderr) && !/--jq:/.test(hit.stderr),
+      `a resolved path notes the unwrap once and raises no diagnostic: ${JSON.stringify(hit.stderr)}`);
+    // back-compat: `0.text` addresses the TRANSPORT on purpose and must keep resolving on the envelope
+    const bc = run(['--jq', '0.text', ENV_FIX]);
+    check('m14-jq-0text-backcompat', bc.stdout.trim() === JSON.stringify(innerRaw) && !NOTE.test(bc.stderr),
+      `'--jq 0.text' must resolve on the envelope, with no unwrap: ${bc.stdout.slice(0, 60)} / ${JSON.stringify(bc.stderr)}`);
+    // `0` is the SAME selector one field shallower — it names the block, and the rail must not answer
+    // it with the noise-stripped payload while `0.text` comes back verbatim (one spelling, two
+    // meanings). A path that RESOLVED on the envelope has had the rail's one turn already.
+    const zero = run(['--jq', '0', ENV_FIX]);
+    const block = parseOut(zero.stdout);
+    check('m14-jq-0-keeps-the-block',
+      !!block && block.type === 'text' && block.text === innerRaw && !NOTE.test(zero.stderr),
+      `'--jq 0' must print the block it addressed, unwrapped by nobody: ${zero.stdout.slice(0, 80)} / ${JSON.stringify(zero.stderr)}`);
+    // identity is the "re-dump everything" spelling — it keeps dumping the document it was given
+    const ident = run(['--jq', '.', ENV_FIX]);
+    const dumped = parseOut(ident.stdout);
+    check('m14-jq-identity-keeps-envelope', Array.isArray(dumped) && dumped.length === 1 && dumped[0].text === innerRaw && !NOTE.test(ident.stderr),
+      `'--jq .' must not silently start answering with the payload: ${ident.stdout.slice(0, 60)} / ${JSON.stringify(ident.stderr)}`);
+    // a miss at BOTH levels reports the INNER location: `length: 1` describes a wrapper nobody asked
+    // about, while the payload's keys are what name the spelling to try next
+    const missTop = run(['--jq', '.nosuch', ENV_FIX]);
+    eq('m14-jq-double-miss-stdout', missTop.stdout.trim(), 'null');
+    check('m14-jq-double-miss-inner-keys',
+      /--jq: 'nosuch' not found at top level; keys: expand, id, self, key, fields/.test(missTop.stderr) && !/length: 1/.test(missTop.stderr),
+      `the diagnostic must describe the payload, not the envelope: ${JSON.stringify(missTop.stderr)}`);
+    const missDeep = run(['--jq', '.fields.nosuch', ENV_FIX]);
+    check('m14-jq-double-miss-deep', /--jq: 'nosuch' not found at 'fields'; keys: summary, description/.test(missDeep.stderr),
+      `a deep inner miss reports where it got to inside the payload: ${JSON.stringify(missDeep.stderr)}`);
+  }
+  // the two shapes that must keep declining, byte-for-byte
+  {
+    const prose = path.join(dir, 'prose-envelope.json');
+    writeFileSync(prose, wrap('PERMISSION DENIED — the API token cannot read this issue. '.repeat(40)));
+    const r = run([prose]);
+    check('m14-cli-prose-inner-declines', r.stdout === `${readFileSync(prose, 'utf8')}\n` && !NOTE.test(r.stderr) && /deliberate decline/.test(r.stderr),
+      `a prose inner keeps today's decline of the WHOLE original: ${r.stdout.length} B / ${JSON.stringify(r.stderr)}`);
+    const impure = path.join(dir, 'impure-envelope.json');
+    writeFileSync(impure, JSON.stringify([{ type: 'text', text: JSON.parse(envRaw)[0].text, _meta: { nextCursor: 'page-2' } }]));
+    const r2 = run([impure, '--stats']);
+    const kept = parseOut(r2.stdout);
+    check('m14-cli-impure-envelope-not-unwrapped', !NOTE.test(r2.stderr) && !!kept && kept[0]._meta.nextCursor === 'page-2',
+      `a block carrying _meta must stay with the JSON pipeline, cursor intact: ${JSON.stringify(r2.stderr)}`);
+  }
+  // M1.5 — a JSONL inner still PROFILES (JSONL is never crushed), but the recipes cannot point at the
+  // envelope: its "lines" are one escaped string. The unwrapped body is spilled and the profile speaks
+  // about THAT file, while the debug line keeps naming the argument (--report pairs whales by path).
+  {
+    const jdir = mkdtempSync(path.join(tmpdir(), 'jslim-m14jsonl-'));
+    const rows = Array.from({ length: 40 }, (_, i) => JSON.stringify({ id: i, handle: `product-${i}`, status: i % 3 ? 'active' : 'draft' })).join('\n');
+    const jfile = path.join(jdir, 'jsonl-envelope.json');
+    writeFileSync(jfile, wrap(rows));
+    const r = spawnSync('node', [SLIM, jfile], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: jdir, FND_MCP_SLIM_DEBUG: '1' } });
+    const profile = parseOut(r.stdout.split('\n')[0]) || {};
+    const spill = profile.file;
+    check('m14-jsonl-profiles-the-spill',
+      profile.profile === true && profile.rows === 40 && typeof spill === 'string' && path.basename(spill).startsWith('fnd-mcp-slim-'),
+      `the profile must describe a spill of the unwrapped body: ${JSON.stringify(profile).slice(0, 200)}`);
+    check('m14-jsonl-spill-is-the-inner-body', typeof spill === 'string' && existsSync(spill) && readFileSync(spill, 'utf8') === rows,
+      'the spilled body must be the inner payload byte-for-byte — every sed/grep recipe addresses it');
+    check('m14-jsonl-guidance-points-at-the-spill', typeof spill === 'string' && r.stdout.includes(`sed -n '<N>p' '${spill}'`) && !r.stdout.includes(jfile),
+      `the recipes must address the spill, never the envelope: ${r.stdout.slice(-400)}`);
+    check('m14-jsonl-notes-the-unwrap', NOTE.test(r.stderr) && typeof spill === 'string' && r.stderr.includes(spill),
+      `stderr must name both files: ${JSON.stringify(r.stderr)}`);
+    const line = JSON.parse(readFileSync(path.join(jdir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').pop());
+    check('m14-jsonl-debug-names-the-argument', line.tool === jfile && line.reason === 'stream-profile' && line.profile === true,
+      `--report pairs a whale with the run over ITS path: ${JSON.stringify(line)}`);
+    // …and it names the file this run WROTE. B4.10a's inventory is what makes a stray recovery spill
+    // visible; a new writer that logs `spills: []` is exactly the orphan the field exists to catch.
+    check('m14-jsonl-debug-names-the-spill',
+      Array.isArray(line.spills) && line.spills.includes(spill) && line.spill === spill && line.stages[0] === 'envelope',
+      `the diverted run must log its own spill and the rail that made it: ${JSON.stringify(line)}`);
+    // --report must SEE both: the rail in the stage tally, the file in the spill inventory
+    const rep = spawnSync('node', [SLIM, '--report', path.join(jdir, 'fnd-mcp-slim-debug.log')],
+      { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: jdir } }).stdout;
+    check('m14-jsonl-report-counts-the-rail', /stages:[^\n]*envelope 1/.test(rep) && /spill files: 1 named by 1 event/.test(rep),
+      `--report must account for the diverted run: ${rep}`);
+    rmSync(jdir, { recursive: true, force: true });
+  }
+  // the `--jq` twin of that divert: a dot-walk cannot answer for a row stream (the contract forbids
+  // `--jq` on JSONL — rows must profile), so a first-segment miss on a JSONL-inner envelope profiles
+  // against the spill of the unwrapped body instead of printing the wrapper's `null`
+  {
+    const jdir = mkdtempSync(path.join(tmpdir(), 'jslim-m14jq-'));
+    const rows = Array.from({ length: 12 }, (_, i) => JSON.stringify({ id: i, handle: `h-${i}` })).join('\n');
+    const jfile = path.join(jdir, 'jsonl-envelope.json');
+    writeFileSync(jfile, wrap(rows));
+    const r = spawnSync('node', [SLIM, jfile, '--jq', '.handle'], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: jdir } });
+    const profile = parseOut(r.stdout.split('\n')[0]) || {};
+    check('m14-jq-jsonl-diverts-to-profile',
+      profile.profile === true && profile.rows === 12 && r.stdout.trim() !== 'null'
+        && typeof profile.file === 'string' && readFileSync(profile.file, 'utf8') === rows && NOTE.test(r.stderr),
+      `--jq on a JSONL-inner envelope must profile, not print null: ${r.stdout.slice(0, 120)} / ${JSON.stringify(r.stderr)}`);
+    rmSync(jdir, { recursive: true, force: true });
+  }
+  // …and the multi-block twin of that same shape must NOT divert: `blockText` would join two compact
+  // JSON blocks into something `parseJsonl` calls two rows, so the run would spill an envelope, print a
+  // row profile of the caller's own BLOCKS, and hand back `sed -n '1p'` recipes that pull an entire
+  // uncompressed block into context. Pre-M14 it declined; it still declines.
+  {
+    const mdir = mkdtempSync(path.join(tmpdir(), 'jslim-m14multi-'));
+    const mfile = path.join(mdir, 'two-block-envelope.json');
+    const blocks = [1, 2].map((i) => JSON.stringify({ id: i, name: `alpha-${i}`, desc: 'x'.repeat(50) }));
+    writeFileSync(mfile, JSON.stringify(blocks.map((text) => ({ type: 'text', text }))));
+    const r = spawnSync('node', [SLIM, mfile, '--stats'], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: mdir } });
+    check('m14-multi-block-declines', r.stdout === `${readFileSync(mfile, 'utf8')}\n` && !NOTE.test(r.stderr) && /deliberate decline/.test(r.stderr),
+      `a 2-block envelope keeps the whole original: ${r.stdout.slice(0, 120)} / ${JSON.stringify(r.stderr)}`);
+    check('m14-multi-block-writes-nothing', !readdirSync(mdir).some((f) => f.startsWith('fnd-mcp-slim-') && f.endsWith('.json')),
+      `a 243 B decline must not leave a spill behind: ${readdirSync(mdir).join(', ')}`);
+    // the same lesson one level up: a multi-block envelope of REAL payloads is not one document either,
+    // so the plain rail leaves it alone rather than printing one block's slimmed body for all three
+    const three = JSON.stringify({ content: [innerRaw, innerRaw, innerRaw].map((text) => ({ type: 'text', text })) });
+    const rr = J.slim(three);
+    check('m14-multi-block-payloads-decline', rr.wasModified === false && rr.output === three,
+      'three payload blocks are three results — the rail is single-block by construction');
+    rmSync(mdir, { recursive: true, force: true });
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);
 if (fail) { console.log(failures.join('\n')); process.exit(1); }

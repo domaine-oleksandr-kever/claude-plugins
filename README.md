@@ -579,7 +579,19 @@ hook error never blocks work:
     … ```` ``` ````, e.g. chrome-devtools `evaluate_script`) is unwrapped first when the fenced body
     is the dominant content (≥ 80 % of bytes) and its body re-run through the pipeline with the
     preamble kept on top; a real doc with a small code block stays below that bar and passes through
-    byte-identical. A **JSONL** file (one JSON object per line, e.g. a Shopify bulk-operation dump) is
+    byte-identical. A spilled MCP result keeps its **content-block envelope**
+    (`[{"type":"text","text":"<the payload, JSON-encoded>"}]`) — a one-element array whose single
+    escaped string no pipeline stage and no `--jq` walk can descend into. The CLI
+    unwraps a **pure, single-block** text envelope (a block carrying `_meta` / `structuredContent` /
+    `annotations` is left alone — unwrapping would drop it; so is a MULTI-block envelope, whose blocks are
+    independent results, not one document) whose inner payload is JSON, slims that, and
+    prints the INNER body with one stderr line saying so; an inner that does not slim declines with
+    the whole original. `--jq` walks the envelope FIRST (`--jq 0` / `--jq 0.text` still resolve
+    to the block) and re-runs the walk inside the payload only when the first segment misses — a miss at
+    both levels reports the payload's keys, not `length: 1`. `--jq .` (identity) still dumps the document
+    it was given. A JSONL payload inside an envelope profiles like any JSONL, against a spill of the
+    unwrapped body — the line recipes must address rows that really exist as lines.
+    A **JSONL** file (one JSON object per line, e.g. a Shopify bulk-operation dump) is
     handled apart: the CLI never compresses it and never prints its rows — at ANY size it returns a
     **PROFILE** (row + parse-failure counts, per-key `{present, null, type, distinct}` — plus
     `distinctCapped` once a key's value set hits the retention cap, so `distinct` reads as a floor — and

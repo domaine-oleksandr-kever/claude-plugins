@@ -88,6 +88,7 @@ const DEFAULTS = {
   log: true, // M10: detect log/build-output TEXT → signal-select (errors/traces/summaries kept, spam deduped)
   jsx: true, // M13: detect Figma design-context JSX → className dictionary + node-id legend + ×N sibling fold
   fence: true, // M11: unwrap a DOMINANT markdown fence (tool prose + ```json…```) and re-run the pipeline on its body
+  envelope: true, // M14: unwrap a PURE MCP text-block envelope ([{type:'text',text:'<json>'}]) and slim the inner payload
   fenceDominance: 0.8, // M11: the fenced body must be ≥ this fraction of total bytes (else a doc with a small code block → untouched)
   fencePreambleMax: 3, // M11: the opening fence must appear within this many leading lines (a short prose preamble)
   fenceTrailerMax: 3, // M11: at most this many lines may follow the closing fence
@@ -1768,22 +1769,71 @@ const JSX_BLOCK_KEYS = new Set(['type', 'text']);
 const isPlainBlock = (b) => !!b && typeof b === 'object' && !Array.isArray(b) && b.type === 'text' &&
   typeof b.text === 'string' && Object.keys(b).every((k) => JSX_BLOCK_KEYS.has(k));
 
-// The joined text of a PURE text-block envelope (`[{type:'text',text}]`, `{content:[…]}`, or a lone
+// The block LIST of a PURE text-block envelope (`[{type:'text',text}]`, `{content:[…]}`, or a lone
 // `{type:'text',text}`) — the shape an MCP result keeps when it is spilled to disk whole. null unless
 // the envelope carries NOTHING but those blocks: an envelope sibling (`structuredContent`, `_meta`
 // with its `nextCursor`, `isError`) survives only if the whole value stays with the JSON pipeline,
 // which compresses it without discarding fields.
-function blockText(v) {
-  if (isPlainBlock(v)) return v.text;
+function blockList(v) {
+  if (isPlainBlock(v)) return [v];
   const arr = Array.isArray(v) ? v
     : (v && typeof v === 'object' && Array.isArray(v.content) && Object.keys(v).every((k) => k === 'content') ? v.content : null);
   if (!arr || !arr.length) return null;
-  const parts = [];
-  for (const b of arr) {
-    if (!isPlainBlock(b)) return null;
-    parts.push(b.text);
+  for (const b of arr) if (!isPlainBlock(b)) return null;
+  return arr;
+}
+
+// The blocks joined with '\n' — a JOIN, not a document; see soleBlockText for why that matters.
+function blockText(v) {
+  const blocks = blockList(v);
+  return blocks ? blocks.map((b) => b.text).join('\n') : null;
+}
+
+// The text of a SOLE plain text block — the M14 rail's stricter gate. blockText JOINS a multi-block
+// envelope, and a join is not a document: two blocks each holding one compact JSON object read as two
+// JSONL ROWS, and a prose block followed by a fenced one reads as one dominant fence. An envelope's
+// blocks are independent results, not lines of a stream, so answering either shape with a row profile
+// (or with one unwrapped payload) describes something the caller never sent. Multi-block envelopes
+// are therefore handed back whole — the named ceiling of this rail. The jsx stage keeps blockText on
+// purpose: detectJsx accepts the joined text only when
+// every signature of ONE Figma payload is present in it.
+function soleBlockText(v) {
+  const blocks = blockList(v);
+  return blocks && blocks.length === 1 ? blocks[0].text : null;
+}
+
+// The one wording every M14 unwrap notice opens with — the CLI states the unwrap on stderr (stdout
+// stays the body a caller pipes), and a reader who greps for it finds the plain run, the --jq run and
+// the JSONL profile alike.
+const ENVELOPE_NOTE = 'json-slim: unwrapped MCP text envelope ([0].text)';
+
+// Can these bytes OPEN a content-block envelope? A cheap gate in front of a full JSON.parse whose
+// only purpose is envelope detection — `[{`, a lone block or a `{content:[…]}` wrapper, first key
+// one of the block's own. Whitespace-tolerant (a spill may be pretty-printed); key ORDER is not
+// guaranteed, hence `text` next to `type`.
+const ENVELOPE_HEAD_SNIFF = /^\s*\[?\s*\{\s*"(type|text|content)"\s*:/;
+
+// M14 — the PARSED payload hiding inside a pure text-block envelope, or null. The spill of an MCP
+// result keeps the payload as a JSON-encoded STRING in `[0].text`, so every dot-walk and every
+// pipeline stage sees a 1-element array of one long string and finds nothing to do. Two acceptance
+// rails, both deliberate: purity is soleBlockText's (an envelope carrying `_meta` /
+// `structuredContent` / `annotations` is NOT an envelope for this purpose — unwrapping would drop
+// those fields — and neither is a MULTI-block one, see soleBlockText), and the inner must be ONE JSON
+// document (bare, or inside a dominant M11 fence). A JSONL inner is excluded HERE on purpose: its rows
+// must profile, not slim, and the profile's `sed -n '<N>p'` recipes cannot address lines that only
+// exist inside an escaped string — the CLI diverts that case to a spill of the unwrapped body before
+// slim() ever runs.
+function envelopeInner(v, config) {
+  const text = soleBlockText(v);
+  if (text === null) return null;
+  const cfg = { ...DEFAULTS, ...(config || {}) };
+  const s = stripBom(text);
+  try { return { text, value: JSON.parse(s) }; } catch (_) {}
+  if (cfg.fence) {
+    const f = unwrapFence(s, cfg);
+    if (f) { try { return { text, value: JSON.parse(stripBom(f.body)) }; } catch (_) {} }
   }
-  return parts.join('\n');
+  return null;
 }
 
 // Run the jsx stage over `text` and shape the slim() result, or null when the payload is not Figma
@@ -1891,9 +1941,17 @@ function slim(content, config) {
   // Never touch error envelopes — write-gating elsewhere depends on seeing them verbatim. (An
   // array — including a JSONL row stream — is object-only-false here, so bulk data flows through.)
   if (isErrorShape(parsed)) return pass('error-shape', { error: true });
-  // Budget gate for the JSON route — after the parse + envelope rails, for the reason stated on the
-  // non-JSON one above.
-  if (budgetExpired(cfg)) return pass('budget-exceeded');
+  // Budget gate for the JSON route. An envelope-wrapped ERROR must still leave as `error-shape`, for
+  // the reason the fence branch states: an error envelope is verbatim by contract, and
+  // `budget-exceeded` is a reason the hook's stub guard is allowed to replace. Probed only once the
+  // budget HAS expired, so the hot path pays nothing for it.
+  if (budgetExpired(cfg)) {
+    if (cfg.envelope) {
+      const env = envelopeInner(parsed, cfg);
+      if (env && isErrorShape(env.value)) return pass('error-shape', { error: true });
+    }
+    return pass('budget-exceeded');
+  }
   // M13: a Figma design-context result also reaches the CLI still inside its MCP block envelope
   // (`[{"type":"text","text":"<the JSX>"}]` — the platform overflow spill), which parses as JSON and
   // would otherwise never meet the jsx stage in the non-JSON branch above. Unwrap a pure text-block
@@ -1904,6 +1962,41 @@ function slim(content, config) {
     if (inner !== null) {
       const j = jsxResult(inner, cfg, content);
       if (j) return j;
+    }
+  }
+  // M14 — the same envelope, but around a JSON payload: the shape the mcp-slim hook spills a whale
+  // ORIGINAL in, and therefore the shape the CLI recovery path is pointed at. A 1-element array whose
+  // single string no stage and no dot-walk can descend into yields no win on its own, so the INNER
+  // payload is slimmed and THAT body handed back: rewrapping it would re-escape the win away, and the
+  // reader wants the payload, not the transport. The RATIO is measured against the ENVELOPE's bytes —
+  // that is what the caller would otherwise have paid; a win against the inner implies one against
+  // the envelope, whose escaping and wrapper only ever add bytes.
+  // A non-winning inner falls through to the normal pipeline, so an incompressible envelope still
+  // leaves with the WHOLE original untouched (the decline rule above); an inner ERROR envelope is
+  // handed back verbatim for the reason the fence branch states (on an expired budget too — the
+  // probe inside the gate above).
+  if (cfg.envelope) {
+    const env = envelopeInner(parsed, cfg);
+    if (env) {
+      const inner = slim(env.text, { ...cfg, envelope: false });
+      if (inner.error) return pass('error-shape', { error: true });
+      if (inner.wasModified && inner.bytesOut < inner.bytesIn) {
+        return {
+          output: inner.output,
+          wasModified: true,
+          bytesIn,
+          bytesOut: inner.bytesOut,
+          ratio: bytesIn ? 1 - inner.bytesOut / bytesIn : 0,
+          stages: cfg.trace ? ['envelope', ...inner.stages] : [],
+          envelopeUnwrapped: true,
+          // The fenced-body handles ride along so Gate A still spills PURE JSON (capOutput's rule) and
+          // the tool's prose still frames the handback, exactly as on an unwrapped fenced payload.
+          ...(typeof inner.fenceBody === 'string' ? { preamble: inner.preamble, fenceBody: inner.fenceBody, fenceTrailer: inner.fenceTrailer } : {}),
+          // No `logCompressed` twin: the inner parsed as JSON by construction, so the log stage — a
+          // NON-JSON text detector — cannot have run on it. A nested envelope of Figma JSX can.
+          ...(inner.jsxCompressed ? { jsxCompressed: true } : {}),
+        };
+      }
     }
   }
   let value = parsed;
@@ -2442,7 +2535,18 @@ function bigDocNotice(file, bytes) {
 // (passthrough-family + `profile:true`, reusing the existing `stream-profile` reason — no new value),
 // then the exit sweep. `bytes` is the original file size so the debug line's bytes_in matches the file
 // regardless of how the profile was fed.
-function emitProfile(profile, file, bytes, t0, cfg, offset) {
+// `extra` re-points the parts of that line this emitter cannot know, for the ONE caller whose profile
+// is not about the file it was handed (M14's envelope-JSONL case profiles a spill of the unwrapped
+// body): `tool` keeps naming the ARGUMENT — `--report` pairs a platform-overflow spill with the cli
+// run that recovered it BY PATH — while `stages`/`spills`/`spill` carry the rail that fired and the
+// file this invocation left on disk, without which the B4.10a inventory under-reports exactly the
+// spills a new writer creates. Every other call site passes nothing and logs the line it always did.
+function emitProfile(profile, file, bytes, t0, cfg, offset, extra) {
+  const x = extra || {};
+  const logTool = x.tool || file;
+  const logStages = x.stages || [];
+  const logSpill = x.spill || null;
+  const logSpills = Array.isArray(x.spills) ? x.spills : undefined;
   // Gate B fires on SIZE alone, before any JSONL detection, so a >8 MB NON-JSONL document (a single
   // minified JSON array/object, a pretty-printed doc whose lines are fragments) reaches here too and
   // profiles as rows:0/1 with all-parseFailures — a row profile + row guidance is misleading for it.
@@ -2451,7 +2555,7 @@ function emitProfile(profile, file, bytes, t0, cfg, offset) {
   if (profile.rows < 2) {
     const notice = bigDocNotice(file, bytes);
     process.stdout.write(notice + '\n');
-    debugLog({ entry: 'cli', tool: file, decision: 'passthrough', reason: 'big-nonjsonl', bytes_in: bytes, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
+    debugLog({ entry: 'cli', tool: logTool, decision: 'passthrough', reason: 'big-nonjsonl', bytes_in: bytes, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: logStages, spill: logSpill, spill_out: null, ...(logSpills ? { spills: logSpills } : {}), ms: Date.now() - t0 }, cfg.spillDir);
     sweepSpills(cfg.spillDir);
     return;
   }
@@ -2467,7 +2571,7 @@ function emitProfile(profile, file, bytes, t0, cfg, offset) {
     ? whaleGuidance(file, profile.rows, offset)
     : whaleReminder(file, profile.rows, offset)) + '\n',
   (err) => { if (!err && full) whaleGuideStamp(cfg.spillDir, file); });
-  debugLog({ entry: 'cli', tool: file, decision: 'passthrough', reason: 'stream-profile', bytes_in: bytes, bytes_out: Buffer.byteLength(body, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, profile: true, guide: full ? 'full' : 'reminder', ms: Date.now() - t0 }, cfg.spillDir);
+  debugLog({ entry: 'cli', tool: logTool, decision: 'passthrough', reason: 'stream-profile', bytes_in: bytes, bytes_out: Buffer.byteLength(body, 'utf8'), pct: 0, stages: logStages, spill: logSpill, spill_out: null, ...(logSpills ? { spills: logSpills } : {}), profile: true, guide: full ? 'full' : 'reminder', ms: Date.now() - t0 }, cfg.spillDir);
   sweepSpills(cfg.spillDir);
 }
 
@@ -2679,6 +2783,7 @@ function buildReport(lines, opts) {
 
 module.exports = {
   slim, crush, crushValue, parseJsonl, unwrapFence, findOpeningFence,
+  blockText, soleBlockText, envelopeInner, // M14: the pure text-block envelope rail (purity gate + inner payload)
   detectJsx, compressJsx, foldSiblings, // M13: the Figma design-context (jsx) stage
   normalizeJqPath, jqAvailable, buildReport, shapeHint,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
@@ -2743,6 +2848,16 @@ if (require.main === module) {
   const cfg = {};
   if (has('--toon')) cfg.toon = true;
   if (has('--no-spill')) cfg.enableMarker = false;
+  // M14 — the envelope rail's CLI switch, decided ONCE for the three places it acts (slim()'s unwrap,
+  // the `--jq` fallback, the JSONL diversion): the pipeline default, minus the IDENTITY selector.
+  // `--jq .` is the "re-dump everything" spelling, so it keeps dumping the document it was given,
+  // envelope and all — answering it with the payload instead would make identity mean two different
+  // things depending on the file's shape. Mirrored into cfg so slim() reads the same decision; a
+  // NARROWING `--jq` keeps the rail for its own fallback walk and then clears cfg (see the walk below),
+  // because a value the caller addressed by path must not be unwrapped a second time underneath them.
+  const envelopeRail = DEFAULTS.envelope && !jqIdentity;
+  if (!envelopeRail) cfg.envelope = false;
+
   // Flags that change what the pipeline can PRODUCE: `--toon` is the squeeze-harder re-serialization,
   // `--no-spill` takes the crush's row offload away. A decline under one pipeline says nothing about
   // another, in either direction — so no B2 refusal may speak for such a run, and such a run may not
@@ -2832,6 +2947,21 @@ if (require.main === module) {
   // hold none of the line boundaries its own guidance tells the reader to address.
   const stdinBytes = raw;
 
+  // M14 §M1.5's emit, shared by the plain run and the `--jq` divert below — ONE spelling of the
+  // spill + stderr note + profile, so the two entry points cannot drift. Returns false on a failed
+  // spill write, and the caller falls through to its normal path (recipes that cannot run are worse
+  // than a decline). `envBytes` is the ENVELOPE's size — the debug line speaks about the argument.
+  const envelopeJsonlProfile = (innerText, envBytes) => {
+    const s = writeSpill(cfg.spillDir, 'fnd-mcp-slim-', innerText);
+    if (!s) return false;
+    noteSpill(cfg, s.path, s.created);
+    const innerBytes = Buffer.byteLength(innerText, 'utf8');
+    process.stderr.write(`${ENVELOPE_NOTE} — the rows profiled below are the inner payload, spilled to ${s.path} (${innerBytes} B); ${fileArg} is the envelope.\n`);
+    emitProfile(profileLines(innerText.split('\n'), { file: s.path, bytes: innerBytes }, cfg), s.path, envBytes, t0, cfg, 0,
+      { tool: fileArg, stages: ['envelope'], spills, spill: s.path });
+    return true;
+  };
+
   // A JSONL FILE (≤ the stream gate, no --jq) is NEVER compressed — it PROFILES, exactly like Gate B.
   // parseJsonl is the strict detector (≥2 lines, each a JSON object/array): a regular JSON document
   // fails it on line 1 and slims below; a truncated/prose file also declines and falls to the non-json
@@ -2856,6 +2986,27 @@ if (require.main === module) {
       emitProfile(profileLines(feed, { file: fileArg, bytes }, cfg), fileArg, bytes, t0, cfg, offset);
       return;
     }
+    // M14 §M1.5 — the spill of an MCP text-block envelope whose payload is a JSONL row stream. It
+    // still PROFILES (JSONL is never crushed), but the envelope file cannot be the file the recipes
+    // address: its "lines" are one escaped string, so `sed -n '<N>p'` on it returns the whole payload
+    // or nothing. Spill the unwrapped body and point the profile at THAT (the Gate-A precedent) — the
+    // debug line keeps naming the argument, so `--report`'s whale pairing is unaffected, and carries
+    // both the `envelope` stage tag and the file just written — the spill inventory (B4.10a) is what
+    // makes a stray recovery spill visible, and this branch is a writer. Gated on a SOLE text block:
+    // the "rows" of a joined multi-block envelope are its blocks, not a stream (see soleBlockText). A
+    // failed spill write falls through to the normal path rather than printing recipes that cannot run.
+    // Unconditional on `--no-spill` for capOutput's reason: without the file there is nothing the
+    // sed/grep recipes could address, so the flag would buy silence at the price of the answer.
+    // The head sniff keeps the second full JSON.parse off every ordinary document: only a payload
+    // whose first bytes can open a content-block envelope pays for the probe, and slim() parses the
+    // rest ~30 lines later anyway. Permissive on purpose — a false positive costs one parse, while a
+    // false negative would cost the divert itself.
+    if (envelopeRail && ENVELOPE_HEAD_SNIFF.test(stripBom(raw).slice(0, 64))) {
+      let doc = null;
+      try { doc = JSON.parse(stripBom(raw)); } catch (_) {}
+      const innerText = doc === null ? null : soleBlockText(doc);
+      if (innerText !== null && parseJsonl(innerText) && envelopeJsonlProfile(innerText, bytes)) return;
+    }
   }
 
   // --jq <dot.path>: narrow to a sub-path before slimming (simple key/index walk, no jq dependency).
@@ -2879,20 +3030,55 @@ if (require.main === module) {
     // Walk the normalized segments. stdout stays `null` for a path that doesn't resolve (machine-
     // friendly, unchanged), but a MISSING segment now says so on stderr — the deepest location that
     // did resolve plus what is addressable there, so a typo is distinguishable from a real null (M12).
-    // A value that genuinely IS null prints nothing.
-    const walked = [];
-    for (const seg of jqSegs) {
-      const next = v == null ? undefined : (Array.isArray(v) && /^\d+$/.test(seg) ? v[Number(seg)] : v[seg]);
-      if (next === undefined) {
-        const where = walked.length ? `at '${walked.join('.')}'` : 'at top level';
-        process.stderr.write(`json-slim: --jq: '${seg}' not found ${where}; ${jqAvailable(v)}\n`);
-        v = undefined;
-        break;
+    // A value that genuinely IS null prints nothing. The diagnostic is BUILT here and written by the
+    // caller: which of the two documents (envelope or inner payload) the reader needs to hear about is
+    // only known after the fallback below has had its turn.
+    const walk = (root) => {
+      let cur = root;
+      const walked = [];
+      for (const seg of jqSegs) {
+        const next = cur == null ? undefined : (Array.isArray(cur) && /^\d+$/.test(seg) ? cur[Number(seg)] : cur[seg]);
+        if (next === undefined) {
+          const where = walked.length ? `at '${walked.join('.')}'` : 'at top level';
+          return { ok: false, depth: walked.length, diag: `json-slim: --jq: '${seg}' not found ${where}; ${jqAvailable(cur)}\n` };
+        }
+        walked.push(seg);
+        cur = next;
       }
-      walked.push(seg);
-      v = next;
+      return { ok: true, value: cur };
+    };
+    // M14 — the ENVELOPE is walked first, always: `--jq 0.text` addresses the transport on purpose and
+    // must keep working. Only a miss on the FIRST segment says the path was never about this document
+    // (a deeper miss IS about it — the prefix resolved here), and only then is the pure text-block
+    // envelope reopened and the WHOLE walk re-run against the payload inside it. A double miss reports
+    // the INNER location: `length: 1` describes the wrapper the reader did not ask about, while the
+    // payload's key list is what tells them which spelling to try next.
+    let r = walk(v);
+    if (!r.ok && r.depth === 0 && envelopeRail) {
+      const env = envelopeInner(v, cfg);
+      if (env) {
+        const innerWalk = walk(env.value);
+        process.stderr.write(`${ENVELOPE_NOTE} — the path ${innerWalk.ok ? 'resolved inside' : 'was re-tried against'} the inner payload.\n`);
+        r = innerWalk;
+      } else if (fileArg) {
+        // envelopeInner refuses a JSONL inner BY DESIGN (rows must profile, never slim), and a
+        // dot-walk cannot answer for a row stream either — the contract forbids `--jq` on JSONL. So
+        // the plain run's divert is the answer here too: line-addressable recipes against a spill of
+        // the unwrapped body, instead of a `null` that describes the wrapper. Stdin keeps the miss
+        // diagnostic below — a profile needs an on-disk argument for its recipes to name.
+        const innerText = soleBlockText(v);
+        if (innerText !== null && parseJsonl(innerText) && envelopeJsonlProfile(innerText, Buffer.byteLength(raw, 'utf8'))) return;
+      }
     }
-    raw = JSON.stringify(v === undefined ? null : v); // a missed path yields null, never a crash
+    if (!r.ok) process.stderr.write(r.diag);
+    raw = JSON.stringify(r.ok && r.value !== undefined ? r.value : null); // a missed path yields null, never a crash
+    // The rail has had its ONE turn on this run — slim() must not take a second. A narrowed value is
+    // the answer to a path the caller wrote, and the two spellings that address the TRANSPORT resolve
+    // on the envelope itself: without this, `--jq 0` (the block) came back as the unwrapped, noise-
+    // stripped payload while `--jq 0.text` (the same block, one field deeper) came back verbatim — one
+    // selector meaning two things depending on the shape underneath. A path that resolved through the
+    // fallback above is already INSIDE the payload, so there is nothing left for the rail to unwrap.
+    cfg.envelope = false;
   }
 
   // The same rail slimText gives the hook: a stage fault degrades to the path handback below instead
@@ -2978,6 +3164,13 @@ if (require.main === module) {
       // same pipeline, measured.)
       if (nogainMemoEnabled() && !pipelineFlags && res.bytesIn >= NOGAIN_FLOOR_BYTES) nogainStamp(cfg.spillDir, fileArg);
     }
+  }
+  // M14 — the body just printed is NOT this file's shape: the envelope and its escaping are gone, so a
+  // reader diffing the two, or writing a `--jq` path from what they see, has to be told once. stderr,
+  // like every other CLI notice; the ORIGINAL is named because the unwrapped body is not on disk.
+  if (res.envelopeUnwrapped) {
+    process.stderr.write(`${ENVELOPE_NOTE} — the slimmed body is the INNER payload, not the envelope` +
+      `${fileArg ? `; the original stays at ${fileArg}` : ''}.\n`);
   }
   // On stderr, not appended to stdout: a stdin run's stdout is the machine-readable body a caller can
   // pipe (a fixture parses it), while both streams reach the model that invoked the CLI.

@@ -1640,6 +1640,58 @@ assert_eq M95-sweep-marker-agrees "$(grep -o "SWEEP_MARKER = '[^']*'" "$SLIM")" 
 assert_eq M95-sweep-throttle-agrees "$(grep -o 'SWEEP_THROTTLE_MS = [^;]*' "$SLIM")" \
   "$(grep -o 'SWEEP_THROTTLE_MS = [^;]*' "$JSLIM_SRC")"
 
+# M96–M98: the M14 envelope rail is a slim() DEFAULT, so the hook inherits it through slimText(b.text)
+# — a result whose block text is ITSELF an MCP content-block envelope (a spill read back through a
+# tool, a proxied result) is unwrapped before the stages run. That is a change to what the hook hands
+# the model on those shapes, so it is pinned HERE and not only in the CLI fixtures: the rail and the
+# purity gate it shares are edited as one, and nothing else would notice.
+ENVD="$TMP/slim-envelope"; mkdir -p "$ENVD"
+# extra KEY=VALUE args override the pinned pair — env(1) keeps the LAST assignment (M98 relies on it)
+run_env() { printf '%s' "$1" | env FND_MCP_SLIM_DIR="$ENVD" FND_MCP_SLIM_STUB=0 "${@:2}" node "$SLIM" 2>/dev/null; }
+# the SAME payload, once as the hook normally sees it and once nested one envelope deeper
+plainin="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+nestin="$(jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:([{type:"text",text:$t}]|tostring)}]}}')"
+
+# M96: the nested envelope compresses to the very same body as the un-nested payload — the transport
+# is gone, the payload is what the model reads. Spill paths are content-addressed off the ORIGINAL, so
+# they legitimately differ; sweep_body strips every full=… marker before the comparison.
+outN="$(run_env "$nestin")"
+assert_contains M96-nested-updated "$outN" "updatedToolOutput"
+assert_eq M96-nested-body-is-the-payload "$(sweep_body "$outN")" "$(sweep_body "$(run_env "$plainin")")"
+# …and the recovery copy is the ORIGINAL RESULT the hook was handed — its block text is still the
+# envelope, escaping and all. An undo that held only the unwrapped payload would have quietly dropped
+# the transport it claims to restore.
+textN="$(printf '%s' "$outN" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+origN="$(printf '%s' "$textN" | grep -o 'full=[^ >]*[[:space:]]original_result' | sed 's/^full=//; s/[[:space:]]*original_result$//')"
+printf '%s' "$nestin" | jq -j '.tool_response.content[0].text' > "$TMP/env-original.json"
+if [ -n "$origN" ] && [ -f "$origN" ] && jq -j '.content[0].text' "$origN" 2>/dev/null | cmp -s - "$TMP/env-original.json"; then ok
+else bad M96-original-spill "original_result spill missing or != the envelope the hook was given (p='$origN')"; fi
+
+# M97: one key apart from M96 and the rail must NOT fire — a block carrying `_meta` (the paging cursor)
+# or an envelope carrying `structuredContent` loses those fields the moment the text is unwrapped, so
+# the whole value stays with the JSON pipeline, which finds nothing to do in a single escaped string
+# and passes through. The empty output IS the assertion: the identical payload one key lighter (M96)
+# comes back as a compressed body.
+metain="$(jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:([{type:"text",text:$t,_meta:{nextCursor:"page-2"}}]|tostring)}]}}')"
+assert_eq M97-meta-block-not-unwrapped "$(run_env "$metain")" ""
+structin="$(jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:({content:[{type:"text",text:$t}],structuredContent:{key:"ELC-104"}}|tostring)}]}}')"
+assert_eq M97b-structured-not-unwrapped "$(run_env "$structin")" ""
+# a MULTI-block inner envelope is not one document either — its blocks are independent results, and a
+# join would read two compact JSON blocks as two JSONL rows (see soleBlockText)
+multiin="$(jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:([{type:"text",text:$t},{type:"text",text:"{\"other\":1}"}]|tostring)}]}}')"
+assert_eq M97c-multi-block-not-unwrapped "$(run_env "$multiin")" ""
+
+# M98: the hook's own debug line carries the `envelope` stage, so --report counts the rail where it
+# actually fires most — inside the hook, on every MCP result.
+ENVDBG="$TMP/slim-envelope-dbg"; mkdir -p "$ENVDBG"
+run_env "$nestin" FND_MCP_SLIM_DIR="$ENVDBG" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M98-hook-debug-stage "$(jq -r '.stages[0]' "$ENVDBG/$DBGLOG" 2>/dev/null)" "envelope"
+assert_eq M98-hook-debug-decision "$(jq -r '.decision' "$ENVDBG/$DBGLOG" 2>/dev/null)" "compressed"
+
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Behavior by piping UserPromptSubmit-shaped input to the hook; the FND_PROMPT_JSON gate itself
 # is a G case now (the merged command) plus P5 for the in-process half.
