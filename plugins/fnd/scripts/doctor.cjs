@@ -62,8 +62,16 @@ const GENERATOR_REL = 'scripts/gen-host-adapters.cjs';
 // Codex is a HALF-cache host: skills, hooks and MCP come from its marketplace cache, but the TOML
 // subagents have no verified plugin-level channel (M1b), so scripts/install.sh links them locally —
 // and an install without those links spawns nothing, which is what this row exists to say.
+// `cacheRoot` marks a host whose marketplace clones the plugin into its own cache: a doctor
+// running from inside that cache IS the install (live-verified on Cursor 2026-08-22 —
+// ~/.cursor/plugins/cache/<marketplace>/fnd/<commit>), so no local record is expected. Codex
+// stays without one: its cache carries skills/hooks/MCP but the subagent links are still local.
 const HOST_INSTALLS = {
-  cursor: { root: (home) => path.join(home, '.cursor', 'plugins', 'local'), probe: ['fnd'] },
+  cursor: {
+    root: (home) => path.join(home, '.cursor', 'plugins', 'local'),
+    probe: ['fnd'],
+    cacheRoot: (home) => path.join(home, '.cursor', 'plugins', 'cache'),
+  },
   opencode: { root: (home, xdg) => path.join(xdg || path.join(home, '.config'), 'opencode'), probe: [] },
   codex: {
     root: (home) => path.join(home, '.codex'),
@@ -410,6 +418,14 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
 
   const host = HOST_INSTALLS[target];
   const note = host.note ? ' [' + host.note + ']' : '';
+  if (host.cacheRoot) {
+    const cacheReal = realpath(host.cacheRoot(homeDir));
+    const plugReal = realpath(pluginRoot);
+    if (plugReal === cacheReal || plugReal.startsWith(cacheReal + path.sep)) {
+      pass(label, 'marketplace cache install (root: ' + plugReal + ')' + note);
+      return;
+    }
+  }
   const root = host.root(homeDir, xdgConfigHome);
   const modeFile = path.join(root, INSTALL_MODE_FILE);
   const repoReal = realpath(repoRoot);

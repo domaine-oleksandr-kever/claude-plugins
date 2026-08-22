@@ -331,6 +331,20 @@ record "$H9" "$CUR_REL" symlink "$TMP/other-clone" 0.59.0 "$H9/$CUR_REL/fnd"
 run --root "$G" --home "$H9" --target cursor
 expect D29-record-other-checkout 1 "FAIL  install:cursor" "records a different checkout"
 
+# D29b (live smoke 2026-08-22): a Cursor MARKETPLACE install runs the doctor from inside
+# ~/.cursor/plugins/cache — that cache IS the install, so no local record or symlink is expected
+# and the row must pass, not send the user to install.sh.
+HC="$TMP/home-cache"; CACHE_PLUG="$HC/.cursor/plugins/cache/domaine/fnd/742b0c1"
+mkroot "$CACHE_PLUG" "${ALL3[@]}"
+run --root "$CACHE_PLUG" --home "$HC" --target cursor
+expect D29b-cursor-marketplace-cache 0 "PASS  install:cursor" "marketplace cache install" "!FAIL"
+
+# D29c: the cache pass is keyed to the plugin root actually being IN the cache — a doctor run
+# from a normal checkout on a machine that also has a cache dir still checks the local install.
+mkdir -p "$HC/.cursor/plugins/cache"
+run --root "$G" --home "$HC" --target cursor
+expect D29c-checkout-beside-cache 1 "FAIL  install:cursor" "not installed" "!marketplace cache"
+
 # D30: a record with no entries at all (interrupted install).
 H10="$TMP/home10"
 record "$H10" "$CUR_REL" symlink "$G" 0.59.0

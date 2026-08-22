@@ -137,7 +137,7 @@ sections below the table are the same story compressed for someone who has done 
 | Host | Install | Verify | Details |
 |---|---|---|---|
 | Claude Code | `/plugin marketplace add …` + `/plugin install fnd@domaine` | `/fnd:smoke-test` | below |
-| Cursor | `./scripts/install.sh --target cursor` | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
+| Cursor | Customize → Add Marketplace (or `./scripts/install.sh --target cursor`) | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
 | Codex CLI | `codex plugin marketplace add …` **+** `./scripts/install.sh --target codex` | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
 | OpenCode | `./scripts/install.sh --target opencode` | `/smoke-test` (command shim) | [docs/README.opencode.md](docs/README.opencode.md) |
 
@@ -182,6 +182,10 @@ Edits to skill files in a local marketplace are picked up on the next session
 
 ### Cursor
 
+To **use** the plugin, no clone is needed: in Cursor, **Customize → Plugins → Add Marketplace**
+with this repo's URL, then **Add** on the **fnd** card — Cursor installs into its own cache and
+follows GitHub for updates (live-verified 2026-08-22). To **develop** it, or run unpushed work:
+
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins
@@ -189,9 +193,9 @@ cd claude-plugins
 ```
 
 The installer pulls, links, and runs `doctor.cjs --target cursor` at the end — read those rows.
-Then reload the Cursor window (*Developer: Reload Window*) so the manifest, hooks and `mcp.json`
-load, and run `/smoke-test` once in a chat. Full walkthrough, update path and host deltas:
-[docs/README.cursor.md](docs/README.cursor.md).
+On either route, reload the Cursor window (*Developer: Reload Window*) so the manifest, hooks
+and `mcp.json` load, and run `/smoke-test` once in a chat. Full walkthrough, update path and
+host deltas: [docs/README.cursor.md](docs/README.cursor.md).
 
 ### Codex CLI
 
@@ -273,9 +277,10 @@ orchestration fallback.
 - **Codex CLI** — this repo *is* a Codex marketplace: `codex plugin marketplace add <repo>` reads
   the same `.claude-plugin/marketplace.json` as a legacy-compatible location, so nothing separate
   is published.
-- **Cursor** — the local-symlink route above (`~/.cursor/plugins/local/fnd`). A root
-  `.cursor-plugin/marketplace.json` is committed and mirrors the Claude one's identity; a Domaine
-  team marketplace is the follow-up, after the live-smoke phase.
+- **Cursor** — this repo imports as a Cursor marketplace (Customize → Add Marketplace;
+  live-verified 2026-08-22, installs into `~/.cursor/plugins/cache/…`); a root
+  `.cursor-plugin/marketplace.json` is committed and mirrors the Claude one's identity. The
+  local-symlink route (`~/.cursor/plugins/local/fnd`) stays as the development channel.
 - **OpenCode** — no marketplace primitive exists; `install.sh` is the whole distribution channel.
 
 ### Plugin layer vs project layer

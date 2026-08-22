@@ -6,9 +6,15 @@ checkout Claude Code uses — only the wiring differs. Start at the
 
 ## Install
 
-Four steps from a clean machine to a proven install. The clone **is** the install: Cursor reads
-a symlink into `~/.cursor/plugins/local/fnd`, so the files it loads are the ones in this
-checkout. There is no separate "plugin cache" and no per-user copy to keep in sync.
+Two routes from a clean machine to a proven install; both end at the same reload + smoke test:
+
+- **Marketplace — no clone** (live-verified 2026-08-22). Cursor imports this repo as a
+  marketplace and installs fnd into its own cache
+  (`~/.cursor/plugins/cache/<marketplace>/fnd/<commit>`), tracking GitHub for updates. Take this
+  route to *use* the plugin.
+- **Local checkout — steps 1–2 below.** The clone **is** the install: Cursor reads a symlink
+  into `~/.cursor/plugins/local/fnd`, so the files it loads are the ones in this checkout. Take
+  this route to develop plugin content or to run local, unpushed work.
 
 ### 0. Prerequisites
 
@@ -17,6 +23,20 @@ checkout. There is no separate "plugin cache" and no per-user copy to keep in sy
   the app before blaming the install). Sign in so chat works. No Cursor CLI is needed.
 - **Node.js** (any current LTS) and **git** on your PATH — every fnd script and hook runs on
   bare `node`, no npm installs.
+
+### Marketplace route — no clone
+
+In Cursor: **Customize → Plugins → Add Marketplace** (or `/add-plugin` in chat), paste
+
+```text
+https://github.com/domaine-oleksandr-kever/claude-plugins
+```
+
+then press **Add** on the **fnd** card that appears under the marketplace's name. Cursor clones
+the plugin into its own cache and keeps it updated by re-indexing the marketplace from GitHub —
+which also means **unpushed commits are invisible** on this route, exactly as on Codex.
+`node plugins/fnd/scripts/doctor.cjs --target cursor` recognizes the result as
+`marketplace cache install`. Skip to step 3 (reload) and step 4 (smoke test).
 
 ### 1. Clone this repo
 
@@ -76,6 +96,12 @@ it. `./scripts/install.sh --target cursor --uninstall` removes only the entries 
 created.
 
 ## Update
+
+On the **marketplace route** there is nothing to run: Cursor re-indexes the marketplace from
+GitHub on its own (batching pushes, roughly every 10 minutes), or press **Refresh** on the
+marketplace in Customize → Plugins. Only pushed commits arrive.
+
+On the **local-checkout route**:
 
 ```bash
 cd /path/to/claude-plugins
