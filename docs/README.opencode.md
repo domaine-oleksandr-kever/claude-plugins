@@ -33,6 +33,10 @@ Skip anything you already have:
 
 ### 1. Clone this repo
 
+The clone is not a temporary download — step 2 symlinks the host config into it, so this
+folder **is** the installed plugin and deleting it uninstalls everything. Put it somewhere
+permanent (`~/tools/`, not `~/Downloads/`):
+
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins

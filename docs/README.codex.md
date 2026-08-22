@@ -79,6 +79,9 @@ git checkout harness-port   # only while the port is unreleased — the branch t
 ./scripts/install.sh --target codex
 ```
 
+Keep this clone somewhere permanent — the links below point into it, so deleting the folder
+removes the subagents (the marketplace half is unaffected; Codex keeps its own cache).
+
 This links `plugins/fnd/agents-codex/*.toml` into `~/.codex/agents/` and nothing else — skills,
 hooks and MCP stay with the marketplace install. `--copy` and `--uninstall` work as on every
 target; a `--copy` install does not follow `git pull`, so re-run the installer to refresh it.

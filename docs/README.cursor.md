@@ -20,6 +20,10 @@ checkout. There is no separate "plugin cache" and no per-user copy to keep in sy
 
 ### 1. Clone this repo
 
+The clone is not a temporary download — step 2 symlinks Cursor's plugin dir into it, so this
+folder **is** the installed plugin and deleting it uninstalls everything. Put it somewhere
+permanent (`~/tools/`, not `~/Downloads/`):
+
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins
