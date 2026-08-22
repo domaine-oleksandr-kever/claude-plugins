@@ -121,6 +121,12 @@ unless your filesystem forbids it.
 - **The context-usage monitor is inert.** It reads the session transcript, which
   `beforeSubmitPrompt` does not hand a hook; the prompt-JSON guard half of the same hook works
   normally.
+- **Cloud Agents run without your plugins.** A Cursor Cloud/background agent executes on a
+  remote VM whose plugin cache is empty (live-verified 2026-08-22: `.cloud-plugin-manifest.json`
+  carries `plugins: []`) — no fnd skills, hooks, MCP or subagents ride along, and in particular
+  the `--no-verify` commit guard is **absent** there. Everything in this document describes local
+  desktop sessions; run `/smoke-test` in a regular local chat, not a Cloud Agent, or it reports
+  on an empty host.
 - **Hook path resolution.** Cursor sets both `CURSOR_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` and
   has a staff-acknowledged leak between concurrent plugins' hooks, so the wiring probes a chain
   (`CURSOR_PLUGIN_ROOT` → `CLAUDE_PLUGIN_ROOT` → `~/.cursor/plugins/local/fnd`) and the guard
