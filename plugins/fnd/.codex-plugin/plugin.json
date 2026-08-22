@@ -10,7 +10,7 @@
   "keywords": ["shopify", "foundation", "domaine", "skills"],
   "skills": "./skills/",
   "hooks": "./hooks/hooks-codex.json",
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./mcp-codex.json",
   "interface": {
     "displayName": "fnd — Domaine Foundation workflows",
     "defaultPrompts": [

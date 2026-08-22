@@ -320,7 +320,13 @@ EOF
   case "$TARGET" in
     cursor) echo "next: reload the Cursor window (Developer: Reload Window) so manifest, hook and MCP changes load" ;;
     opencode) echo "next: start a new OpenCode session so skills, agents and the plugin adapter load" ;;
-    codex) echo "next: start a new Codex session so the subagents load, and approve the plugin's hooks via /hooks" ;;
+    codex)
+      echo "next: start a new Codex session so the subagents load"
+      # Both steps are the user's to take, and skipping either leaves the guard layer dormant while
+      # skills and MCP look healthy — so they are printed, not implied.
+      echo "      then: set [features] hooks = true in ~/.codex/config.toml (the default varies by CLI version)"
+      echo "      then: approve the plugin's hooks via /hooks (per-content-hash review, repeat after every update)"
+      ;;
   esac
   if [ "$MODE" = "copy" ]; then
     echo "note: --copy installs do not follow git pull — re-run this script to refresh them"

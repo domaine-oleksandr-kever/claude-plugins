@@ -53,7 +53,11 @@ in its own subfolder under `plugins/`:
 │       ├── agents-codex/         #   change agents/ (or the generator) and re-run
 │       ├── agents-opencode/      #   scripts/gen-host-adapters.cjs
 │       ├── commands-opencode/    # GENERATED /name shims (OpenCode invokes skills by model only)
+│       ├── mcp.json              # GENERATED Cursor MCP config (+ mcp.pruned.json profile)
+│       ├── mcp-codex.json        # GENERATED Codex MCP config (not `.mcp.json` — that
+│       │                         #   name is a Claude Code plugin component)
 │       └── opencode/             # OpenCode adapter + GENERATED model-profile examples
+│                                 #   and mcp-fragment.json
 ├── scripts/
 │   └── install.sh                # Cursor / OpenCode / Codex-subagent installer
 ├── tests/                        # committed test suites for the hooks + scripts
@@ -154,6 +158,54 @@ On **Codex**, `codex plugin marketplace add domaine/claude-plugins` (then
 no verified `agents:` pointer yet, so the TOML subagents are linked separately by
 `install.sh --target codex`. Without that step every skill that delegates hits an
 unknown agent — `doctor.cjs --target codex` reports it.
+
+**Codex hooks need two extra steps, and nothing warns you if you skip them** —
+skills and MCP load either way, so the install *looks* complete while the whole
+guard layer sits disarmed (session conventions, the prompt-JSON guard, mcp-slim's
+spill-and-stub, and **both git guards**, including the `--no-verify` block):
+
+1. **Turn the hooks feature on.** Its default varies by CLI version, so set it
+   explicitly in `~/.codex/config.toml`:
+
+   ```toml
+   [features]
+   hooks = true
+   ```
+
+2. **Trust-review the plugin's hooks.** Non-managed hooks run only after an
+   explicit per-content-hash review: run `/hooks` in Codex, read fnd's entries
+   (they are the commands in `plugins/fnd/hooks/hooks-codex.json`) and approve
+   them. Every plugin update that changes a hook command needs the review again —
+   that is the point of the content hash, not a bug.
+
+   Verify with a throwaway commit attempt: `git commit --no-verify -m probe` in a
+   repo with git hooks must be blocked. If it runs, the hooks are not armed.
+   `node plugins/fnd/scripts/doctor.cjs --target codex` reads the gate back and
+   prints both steps as `codex:hooks-gate` / `codex:hooks-trust` rows.
+
+   `hooks/no-verify.rules` is an optional second, declarative layer (Codex
+   execpolicy Starlark) for the same block — opt-in, see the file's header.
+   Codex hooks do not exist on Windows at all.
+
+On **OpenCode**, the hooks arrive as one JS adapter
+(`plugins/fnd/opencode/fnd-plugin.js`, linked by the installer): it spawns the same
+`hooks/*.cjs|sh` scripts, blocks a bash call the git guards reject, rewrites an
+oversized MCP result in place, and injects the detection-gated live-store block on a
+session's first message. The Foundation *static* conventions are not injected per
+message there — point OpenCode's `instructions` config (or an `AGENTS.md`) at
+`plugins/fnd/hooks/*.md` instead. `plugins/fnd/opencode/permission-fragment.example.json`
+is the declarative backstop: merge its `permission.bash` deny globs into your
+`opencode.json` and the coarse forms of the no-verify bypass stay blocked even in
+`--auto` runs, where a hook adapter failure would otherwise pass a command through.
+The globs are deliberately blunt (the adapter is the precise layer), so the fragment
+re-allows a few documented false positives — read-only `git config --get
+core.hooksPath`, `chmod +x` on a hook file, `git push --no-verify-signatures`.
+Those re-allows are **exact** command strings, never `prefix*` patterns: a trailing
+`*` swallows the rest of the line, and under last-match-wins an allow like
+`chmod +x*` would re-permit `chmod +x .husky/pre-commit && git commit --no-verify`
+that the deny rules above it had just blocked. The cost of exactness is that a
+variant spelling (another hook name, extra `git push` arguments) stays denied —
+run those yourself rather than widening the pattern.
 
 ### Managing it
 
@@ -589,6 +641,39 @@ The plugin declares the MCP servers the skills/agents use (`plugin.json` →
 > OAuth servers need a browser sign-in, so they're unavailable in headless/non-interactive
 > runs.
 
+### The same list on the other hosts
+
+`plugin.json` → `mcpServers` is the **only** hand-maintained server list. Each other host
+reads a generated translation of it, written by `scripts/gen-host-adapters.cjs` and committed
+alongside the rest of the generated adapters — never hand-edit one, add the server to
+`plugin.json` and re-run the generator:
+
+| File | Host | Shape |
+|---|---|---|
+| `plugins/fnd/mcp.json` | Cursor | auto-discovered at the plugin root; `type: "stdio"` spelled out |
+| `plugins/fnd/mcp.pruned.json` | Cursor | the priority profile below — a reference file, not loaded |
+| `plugins/fnd/mcp-codex.json` | Codex CLI | `mcpServers`, carried as-is; the manifest points at it. Deliberately **not** `.mcp.json`: Claude Code reads that name as a plugin MCP component, so a Codex-only edit would change what Claude Code loads |
+| `plugins/fnd/opencode/mcp-fragment.json` | OpenCode | argv-array `command`, `environment`, `type: local\|remote` — paste the `mcp` block into your own `opencode.json` |
+
+**Cursor tool cap.** Cursor is community-reported to stop exposing tools past ~40 across all
+connected servers; the six bundled servers are roughly three times that. `mcp.json` still
+ships all six — the cap is unmeasured (an M1a spike item), and a cap we haven't seen is no
+reason to hand you a smaller plugin. If you do hit it, `mcp.pruned.json` is the priority
+list to fall back to: **atlassian** (every workflow starts at a ticket) → **shopify-dev-mcp**
+(five tools for the whole Shopify docs + validator surface) → **chrome-devtools-mcp** (one
+browser stack, picked over `playwright` for console/network/performance access) → **figma-dev-mode**;
+`playwright` and `notion-mcp` are the two it drops. Applying it is a per-server toggle in
+**Cursor Settings → MCP** — nothing in the checkout changes, and re-enabling a dropped server
+is the same toggle back. (Overwriting `mcp.json` with the pruned copy works too, but it is
+deliberate local drift: `doctor.cjs` and `gen-host-adapters.cjs --check` both report it, and
+re-running the generator undoes it.) To change the cut for everyone, move `CURSOR_KEEP_RANKS`
+in the generator and re-run.
+
+Codex and OpenCode document no tool-count limit, so both get the full list. Two transports
+are unverified until the host spikes and say so in their own files: the Figma **SSE** server
+on Codex (fallback: drop it from `mcp-codex.json` and `codex mcp add` it per-user) and on OpenCode
+(carried as a plain `remote` url).
+
 ## Live store access
 
 Skills that need real store data call two bundled runners (`plugins/fnd/scripts/`):
@@ -787,11 +872,11 @@ added to this table.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `FND_LEAN` | `1` | `0` disables the lean-code session convention. Hook-gated, so it applies where the convention arrives through a hook (Claude Code, Codex). On Cursor the convention ships as an always-applied rule instead — turn `rules/fnd-lean-code.mdc` off there, or say "normal mode" in the session |
-| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process) |
+| `FND_LEAN` | `1` | `0` disables the lean-code session convention. Hook-gated, so it applies where the convention arrives through a hook (Claude Code and Codex at session start; every host's subagent conventions on Claude Code, Cursor and Codex). On Cursor the SESSION copy ships as an always-applied rule instead — turn `rules/fnd-lean-code.mdc` off there — and on OpenCode the statics live in your own `instructions` config, which this switch cannot reach; either way, "normal mode" in the session still works |
+| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens) |
-| `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns |
+| `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns. **Host divergence:** Claude Code, Cursor and OpenCode all rewrite the result in place, so compression AND spill-and-stub both land. Codex cannot rewrite a tool result, so `hooks/codex-mcp-shim.cjs` drops every compressed body (adding it would only grow context) and forwards the spill-and-stub half as `additionalContext` — with `1` you get whale offloading there, never compression |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a spill file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume); `0` disables the sweep; any invalid value falls back to `24` |
 | `FND_MCP_SLIM_DEBUG` | off | opt-in: append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, `lvl`, decision, reason, `format` on non-json, `narrowed` on a `--jq` CLI run, `guide` (`full`/`reminder`) on a JSONL profile, `budget_partial` on a mid-array wall-clock expiry, bytes, %, stages, `spills` — never any payload); rotates one generation at ~5 MB. `1` (or `true`/`yes`/`on`) = **key events**: everything except the sub-gate `size-gate` lines for results under the 4 KB gate, which were ~76 % of a real week's log. `2` (any integer ≥ 2) = **everything**, sub-gate lines included. Unset / `0` / `false` / an unrecognized value ⇒ no file written. The level rides on each line as `lvl`, so `--report` can say which of its numbers cover a partial event set — a `1` window's totals % is not comparable with a `2` window's |
@@ -811,6 +896,7 @@ added to this table.
 | `SHOPIFY_ADMIN_API_VERSION` | `2026-04` | Admin API version the gql runner requests when `--api-version` is not passed |
 | `CLAUDE_CODE_SESSION_ID` | set by Claude Code | *read, not set by fnd*: scopes `FND_WHALE_GUIDE`'s one-shot state and `FND_NOGAIN_MEMO`'s no-gain memo to the conversation, so a new session sees the full guidance block — and the declined body — again. Absent (a bare shell) ⇒ both are keyed on the file path alone and the 2 h expiry bounds them |
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |
+| `CLAUDE_PLUGIN_ROOT` / `PLUGIN_ROOT` | set by the host | *read, not set by fnd*: where a hook **wiring** file finds the bundled scripts and session-convention markdown. Claude Code and Cursor set `CLAUDE_PLUGIN_ROOT`; Codex sets `PLUGIN_ROOT` plus `CLAUDE_PLUGIN_ROOT` as a compatibility alias, and `hooks/hooks-codex.json` prefers the alias with a fallback to `PLUGIN_ROOT`. Hook **scripts** never trust either one for guard logic — they resolve their own bundled paths from `__dirname` / their own `dirname`, because Cursor leaks the variable between concurrent plugins' hooks and Claude Code has a source-vs-cache inconsistency |
 
 ## Lean-code convention
 

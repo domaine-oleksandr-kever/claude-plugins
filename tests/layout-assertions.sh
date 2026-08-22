@@ -162,7 +162,7 @@ fi
 if [ -f "$CODEX_MANIFEST" ]; then
   # Codex loads skills, hook wiring and MCP servers through path pointers; the wiring and
   # MCP files themselves are generated in M5/M6, so only the paths are asserted today.
-  for pair in "skills:./skills/" "hooks:./hooks/hooks-codex.json" "mcpServers:./.mcp.json"; do
+  for pair in "skills:./skills/" "hooks:./hooks/hooks-codex.json" "mcpServers:./mcp-codex.json"; do
     key="${pair%%:*}"; want="${pair#*:}"
     got="$(jval "$CODEX_MANIFEST" "$key")"
     if [ "$got" = "$want" ]; then ok; else bad "codex-$key" "'$got' != '$want'"; fi
@@ -180,6 +180,12 @@ if [ -f "$CODEX_MANIFEST" ]; then
     esac
   done
   if [ -d "$PLUGIN_DIR/skills" ]; then ok; else bad codex-skills-dir "plugins/fnd/skills missing"; fi
+  # A per-host generated file may not squat on a CLAUDE CODE component path. `.mcp.json` at the
+  # plugin root is one: Claude Code's loader reads it in addition to the canonical manifest's
+  # mcpServers block, so a Codex-targeted file would quietly change what Claude Code loads.
+  if [ -e "$PLUGIN_DIR/.mcp.json" ]; then
+    bad codex-mcp-collision "plugins/fnd/.mcp.json collides with Claude Code's own plugin MCP component"
+  else ok; fi
 
   if [ -n "$(jval "$CODEX_MANIFEST" description)" ]; then ok; else bad codex-description "empty or absent"; fi
   for k in author.name author.email license; do

@@ -174,6 +174,13 @@ printf '{"hooks":{}}\n' > "$HJ/hooks/hooks-cursor.json"
 run --root "$HJ"
 expect D10b-wiring-json-not-a-script 0 "PASS  hooks" "1 executable + 1 node-invoked script(s)" "!FAIL"
 
+# D10c (M5): hooks/no-verify.rules is Codex execpolicy Starlark — a declarative rule set the host
+# READS. Same class as the wiring JSON: never chmod +x, and never a reason to fail an install.
+HR="$TMP/hookrules"; mkroot "$HR" "${ALL3[@]}"
+printf 'prefix_rule(pattern = ["git", "commit", "-n"], decision = "forbidden")\n' > "$HR/hooks/no-verify.rules"
+run --root "$HR"
+expect D10c-rules-not-a-script 0 "PASS  hooks" "1 executable + 1 node-invoked script(s)" "!FAIL"
+
 # D11: hooks/ missing entirely.
 NH="$TMP/nohooks"; mkroot "$NH" "${ALL3[@]}"; rm -rf "$NH/hooks"
 run --root "$NH"
@@ -424,6 +431,31 @@ H17="$TMP/home17"; mkdir -p "$H17/$CX_REL/agents"
 ln -s "$G/agents-codex/jira-reader.toml" "$H17/$CX_REL/agents/jira-reader.toml"
 run --root "$G" --home "$H17" --target codex
 expect D37f-codex-handmade 0 "PASS  install:codex" "(no installer record)" "!FAIL"
+
+# D37g–D37k: Codex arms hooks behind two user actions the installer cannot take. Linked subagents
+# are what "installed" means on this host, so without these rows a doctor run goes green while
+# every guard — the commit guards included — is dormant.
+run --root "$G" --home "$H16" --target codex
+expect D37g-hooks-gate-absent 0 "SKIP  codex:hooks-gate" "config.toml absent" "[features] hooks = true" "!FAIL"
+expect D37h-hooks-trust-row 0 "SKIP  codex:hooks-trust" "/hooks" "git commit --no-verify -m probe"
+
+printf '[features]\nhooks = true\n' > "$H16/$CX_REL/config.toml"
+run --root "$G" --home "$H16" --target codex
+expect D37i-hooks-gate-on 0 "PASS  codex:hooks-gate" "[features] hooks = true" "!FAIL"
+# an explicit off is the silent-degradation case, and a commented-out line is not an entry
+printf '[features]\nhooks = false\n' > "$H16/$CX_REL/config.toml"
+run --root "$G" --home "$H16" --target codex
+expect D37j-hooks-gate-off 0 "SKIP  codex:hooks-gate" "every fnd hook is off" "!FAIL"
+# a `hooks` key under ANOTHER table says nothing about the feature gate
+printf '[features]\n# hooks = true\n\n[mcp_servers.x]\nhooks = true\n' > "$H16/$CX_REL/config.toml"
+run --root "$G" --home "$H16" --target codex
+expect D37k-hooks-gate-other-table 0 "SKIP  codex:hooks-gate" "no [features] hooks entry" "!FAIL"
+rm -f "$H16/$CX_REL/config.toml"
+
+# the rows are Codex-only: another target must not print them (this home has no Cursor install,
+# hence the FAILing install row and exit 1 — the point here is the two absent codex rows)
+run --root "$G" --home "$H1" --target cursor
+expect D37l-hooks-gate-codex-only 1 "!codex:hooks-gate" "!codex:hooks-trust"
 
 # ------------------------------------------------------------------------------ CLI surface --
 # D38: usage errors exit 2 — distinct from a FAILing check (1), so install.sh can tell them apart.

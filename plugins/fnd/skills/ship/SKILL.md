@@ -282,6 +282,10 @@ judgment calls to `notes.md` as dated
 `pipeline:` entries; on completion write your artifact and tick your `progress.md` row
 (aftercare: `pipeline.md` only); your final message is a compact report
 (≤ ~20 lines), never file dumps."*
+**Spawning shape:** where a subagent may spawn subagents of its own (on Claude Code, always)
+the briefs run as written. Where it may not — one-level nesting — `pipeline-phases.md` →
+Orchestration governs: you spawn every helper at your own level and hand its findings into the
+phase brief. Read that section with the file; it names what the degraded shape costs.
 **Model tiering:** phase agents never inherit the session model — pass `model` explicitly
 on every spawn; the assignments live in `pipeline-mode.md` → Phase-agent models (their
 single home).

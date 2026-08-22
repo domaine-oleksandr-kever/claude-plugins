@@ -110,5 +110,74 @@ done
 
 if [ "$found" -gt 0 ]; then ok; else bad reference-count "no reference files under $PLUGIN_DIR"; fi
 
+# ---------------------------------------------------------------------------
+# M7 — orchestration degradation contract
+# No new scanning rule is warranted: rule 2 already fails an unguarded `Workflow(`/`ultracode`
+# (self-tested below). What needs asserting is that the ONE host-conditional fallback exists,
+# is single-homed in pipeline-phases.md, is honest about the loss, and is reachable from the
+# files that need it — while the Claude Code path keeps every brief it always had.
+# ---------------------------------------------------------------------------
+
+PHASES="$REF_DIR/pipeline-phases.md"
+FLOW="$REF_DIR/review-flow.md"
+RESEARCH="$REF_DIR/research-pressure-test.md"
+SHIP="$PLUGIN_DIR/skills/ship/SKILL.md"
+
+# has <file> <label> <extended-regex> <what-is-missing>
+has() {
+  if [ -f "$1" ] && grep -qEi "$3" "$1"; then ok; else bad "m7-$2" "$2: $4"; fi
+}
+
+# the Orchestration section only — from its heading to the next `## `
+orch="$(awk '/^## Orchestration/ { on = 1; print; next } on && /^## / { exit } on { print }' "$PHASES" 2>/dev/null)"
+if [ -n "$orch" ]; then ok; else bad m7-orchestration "pipeline-phases.md has no '## Orchestration' section"; fi
+
+# the fallback is described once, for every non-Claude host, and names Claude Code as the unchanged path
+for host in "Claude Code" "Cursor" "OpenCode" "Codex"; do
+  case "$orch" in
+    *"$host"*) ok ;;
+    *) bad m7-orchestration-host "pipeline-phases.md → Orchestration never names $host" ;;
+  esac
+done
+# ONE fallback, not three: the hoisted shape is stated as the single branch
+case "$orch" in
+  *"One fallback, not a variant per host"*) ok ;;
+  *) bad m7-one-fallback "pipeline-phases.md → Orchestration does not state the single-fallback rule" ;;
+esac
+# per-host mechanics that must stay documented
+case "$orch" in *subagent_depth*) ok ;; *) bad m7-opencode "Orchestration omits OpenCode's subagent_depth" ;; esac
+case "$orch" in *max_concurrent_threads_per_session*) ok ;; *) bad m7-codex "Orchestration omits Codex's concurrency lever" ;; esac
+# honest loss accounting
+case "$orch" in *"adversarial verify fan-out"*) ok ;; *) bad m7-loss "Orchestration does not name the lost adversarial verify fan-out" ;; esac
+case "$orch" in *telemetry*) ok ;; *) bad m7-loss "Orchestration does not name the lost phase telemetry" ;; esac
+
+# the callers that need the branch point at it — single home, no second copy
+has "$FLOW" review-flow 'pipeline-phases\.md.*Orchestration' \
+  "review-flow.md §2 does not point at pipeline-phases.md → Orchestration"
+has "$SHIP" ship-skill 'pipeline-phases\.md.*Orchestration|Orchestration governs' \
+  "ship/SKILL.md Step 4 does not point at the Orchestration section"
+has "$RESEARCH" research 'top-level session' \
+  "research-pressure-test.md does not pin the sweep to the top-level session"
+
+# Claude Code path preserved: every phase brief still reachable, review-flow keeps its three parts
+for phase in implement qa finalize create-pr steps-to-test aftercare jira-hand-off; do
+  if grep -qE "^[0-9]+\. \*\*$phase\*\*" "$PHASES"; then ok
+  else bad m7-phase-brief "pipeline-phases.md lost the '$phase' brief heading"; fi
+done
+for part in "## 1\. The marker" "## 2\. How the checks run" "## 3\. On entry"; do
+  if grep -qE "^$part" "$FLOW"; then ok; else bad m7-review-part "review-flow.md lost section '$part'"; fi
+done
+
+# self-test of rule 2's guard on the phrasing the M7 prose uses — proves the new lines are
+# clean because they are guarded, not because the rule stopped matching
+tmp="$(mktemp -d 2>/dev/null || mktemp -d -t refneutral)"
+printf 'On Claude Code, the host scripted Workflow (ultracode) layer stays out of it.\n' > "$tmp/guarded.md"
+printf 'The conductor calls Workflow(step) through the ultracode layer.\n' > "$tmp/unguarded.md"
+if [ -z "$(violations "$tmp/guarded.md" claude-only)" ]; then ok
+else bad m7-selftest "guard self-test: a guarded 'On Claude Code …ultracode' line was flagged"; fi
+if [ "$(violations "$tmp/unguarded.md" claude-only | wc -l | tr -d ' ')" = 1 ]; then ok
+else bad m7-selftest "guard self-test: an unguarded ultracode/Workflow( line was NOT flagged"; fi
+rm -rf "$tmp"
+
 echo "reference-neutral-lint: $pass passed, $fail failed ($found files)"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

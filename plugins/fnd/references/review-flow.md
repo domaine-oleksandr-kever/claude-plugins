@@ -143,6 +143,16 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
 
 - **Emphasis by caller** — assigned per skill in §3 → Per-skill entry behaviour.
 
+- **Who spawns these agents, per host.** In a solo run the caller *is* the session, so it
+  spawns them directly everywhere. Inside a `ship` run the caller is a phase agent: where a
+  subagent may spawn subagents (on Claude Code, always) it spawns them itself, exactly as
+  above; where it may not — one-level nesting, see
+  `<plugin root>/references/pipeline-phases.md` → Orchestration — the conductor runs the pass
+  at its own level and hands the findings into the phase brief. Same agents, same emphases,
+  same blocking semantics; only the spawner moves. A caller that can neither spawn nor was
+  handed findings does not skip the pass: it `ESCALATE`s (pipeline) or tells the developer
+  (solo).
+
 Merge the agent findings with the inline B/D hits into one plan/table for the developer.
 
 ### Correctness findings — disposition is mandatory

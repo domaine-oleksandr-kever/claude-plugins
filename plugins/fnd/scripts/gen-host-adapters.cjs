@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /*
- * gen-host-adapters.cjs — per-host agent + command adapters for the multi-harness port (M4).
+ * gen-host-adapters.cjs — per-host agent, command and MCP adapters for the multi-harness port (M4, M6).
  *
- * Canonical Claude Code content (`agents/*.md`, `skills/<name>/SKILL.md`) is the ONLY input and is
- * never written to. Every other host gets a committed, generated adapter so a `git pull` ships the
- * same agent bodies everywhere and no install step needs Node beyond this script:
+ * Canonical Claude Code content (`agents/*.md`, `skills/<name>/SKILL.md`, `.claude-plugin/plugin.json`
+ * → `mcpServers`) is the ONLY input and is never written to. Every other host gets a committed,
+ * generated adapter so a `git pull` ships the same agent bodies and the same server list everywhere,
+ * and no install step needs Node beyond this script:
  *
  *   agents-cursor/<name>.md      Cursor subagent (md + YAML)
  *   agents-codex/<name>.toml     Codex CLI subagent (TOML, `developer_instructions`)
@@ -12,6 +13,10 @@
  *   commands-opencode/<name>.md  OpenCode `/name` shim per skill (OpenCode invokes skills by model only)
  *   opencode/model-profile.{cloud,local}.example.json   optional, user-editable tiering fragments
  *   references/host-model-map.md tier → model per host, printed from the one tier table below
+ *   mcp.json                     Cursor MCP config (all servers, `type: "stdio"` made explicit)
+ *   mcp.pruned.json              Cursor reference profile for the reported ~40-tool cap
+ *   mcp-codex.json               Codex plugin MCP config (`mcpServers`, carried as-is)
+ *   opencode/mcp-fragment.json   OpenCode `mcp` block (array `command`, `environment`, local/remote)
  *
  * Usage:
  *   node gen-host-adapters.cjs            # write the adapters (idempotent)
@@ -28,6 +33,9 @@ const path = require('path');
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
 const AGENTS_DIR = path.join(PLUGIN_ROOT, 'agents');
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
+// The canonical manifest: its `mcpServers` block is the one server list every host config is
+// translated from. Read-only here, like every other canonical input.
+const MANIFEST_REL = '.claude-plugin/plugin.json';
 
 const DIR_CURSOR = 'agents-cursor';
 const DIR_CODEX = 'agents-codex';
@@ -37,6 +45,18 @@ const DIR_PROFILES = 'opencode';
 // The one generated file that lives among hand-written references — the tier table as prose, so
 // skills and references can name a tier instead of repeating an id.
 const REF_MAP_REL = 'references/host-model-map.md';
+
+// Generated MCP configs. Each sits where its host looks for it: Cursor auto-discovers `mcp.json` at
+// the plugin root, the Codex manifest points at `./mcp-codex.json`, and the OpenCode fragment is
+// merged into the user's own opencode.json (no host reads it in place).
+// The Codex file is NOT called `.mcp.json`: that name is a Claude Code plugin component, read by
+// its loader on top of the manifest's own `mcpServers` block, so a Codex-only transport tweak would
+// silently change what Claude Code loads — and Claude Code behavior is frozen for this port. The
+// Codex manifest points at the file by name, so any name works there.
+const MCP_CURSOR_REL = 'mcp.json';
+const MCP_CURSOR_PRUNED_REL = 'mcp.pruned.json';
+const MCP_CODEX_REL = 'mcp-codex.json';
+const MCP_OPENCODE_REL = 'opencode/mcp-fragment.json';
 
 // Dirs this generator owns completely: a file here that it did not produce is stale and gets
 // removed (and reported by --check). `opencode/` is deliberately absent — it also holds
@@ -178,7 +198,66 @@ const PROFILE_COMMENT =
   'actually exposes. Caveat: the fnd review bar (bug-hunter, pre-commit-review) was calibrated on ' +
   'frontier models — a small local model will run, but finding quality is the model choice.';
 
+/*
+ * Cursor MCP pruning (M6). Cursor is community-reported to stop exposing tools past ~40 across all
+ * connected servers; the plugin bundles six servers whose tool counts add up to roughly three times
+ * that. The full list still ships as `mcp.json` — a cap we have not measured is no reason to hand
+ * users a smaller plugin — and this ranking drives `mcp.pruned.json`, the profile to fall back to
+ * when the cap turns out to bite.
+ *
+ * The order is the plan's (M6): atlassian > shopify-dev > ONE of chrome-devtools/playwright >
+ * figma > notion. `keep` is the cut: everything ranked above it stays, everything below is dropped.
+ * Moving the cut is a one-number edit plus a regeneration.
+ *
+ * M1A-VERIFY: both the cap and these tool counts are unmeasured on Cursor. The counts were observed
+ * on 2026-08-22 from the servers as a live Claude Code session exposed them and move with server
+ * versions — they are here to show WHY the cut sits where it does, and nothing asserts them.
+ */
+const CURSOR_TOOL_CAP = 40;
+const CURSOR_KEEP_RANKS = 4;
+const CURSOR_PRIORITY = [
+  {
+    server: 'atlassian',
+    tools: 31,
+    why: 'Jira is the spine of every workflow — ticket read, TA, steps to test, comments, transitions',
+  },
+  {
+    server: 'shopify-dev-mcp',
+    tools: 5,
+    why: 'the whole Shopify docs + validator surface for five tools — the cheapest server on the list',
+  },
+  {
+    server: 'chrome-devtools-mcp',
+    tools: 29,
+    why: 'in-browser validation; chosen over playwright for console/network/performance access',
+  },
+  {
+    server: 'figma-dev-mode',
+    tools: 10,
+    why: 'design context for develop + QA; local Dev Mode server, no auth, small tool surface',
+  },
+  {
+    server: 'playwright',
+    tools: 24,
+    why: 'DROPPED — second browser stack, capability overlaps chrome-devtools; the plan picks one',
+  },
+  {
+    server: 'notion-mcp',
+    tools: 29,
+    why: 'DROPPED — doc-reader reaches a shared Notion page over the web when the server is absent',
+  },
+];
+
 const GEN_NOTE = 'GENERATED by scripts/gen-host-adapters.cjs — do not edit; change the source and re-run.';
+
+// Every generated MCP config carries this instead of the comments JSON cannot hold. M1A/M1B-VERIFY:
+// the `_comment` key sits beside `mcpServers`/`mcp`, never inside a server definition, so the worst
+// a strict host loader can do is ignore it — a spawn config is never handed an invented key.
+const MCP_GEN_NOTE =
+  GEN_NOTE +
+  ' Source: the canonical Claude Code manifest (' +
+  MANIFEST_REL +
+  ' -> mcpServers) — the one server list all hosts translate from.';
 
 // `${CLAUDE_PLUGIN_ROOT}` is expanded by Claude Code and by nothing else, so the canonical agents
 // keep it (they are the Claude Code copy) and every generated body gets the host-neutral form the
@@ -348,6 +427,71 @@ function collectSkills() {
     }
     if (!parsed.data.description) die(dir + '/SKILL.md: frontmatter has no `description`');
     return { name: dir, description: parsed.data.description };
+  });
+}
+
+/*
+ * collectMcpServers — the canonical `mcpServers` block as an ordered list, one entry per server,
+ * classified by transport so each host emitter can translate rather than guess. Canonical key order
+ * is preserved (it is deterministic and it is the order a reviewer sees in the manifest).
+ *
+ * Everything here is a hard stop rather than a skip: a server this script does not understand would
+ * otherwise be silently missing from three host configs, which shows up as "the tool just isn't
+ * there" in a live session and nowhere else.
+ */
+function collectMcpServers() {
+  const abs = path.join(PLUGIN_ROOT, MANIFEST_REL);
+  let manifest;
+  try {
+    manifest = JSON.parse(readText(abs));
+  } catch (e) {
+    die('cannot read ' + MANIFEST_REL + ': ' + e.message);
+  }
+  const canonical = manifest.mcpServers;
+  if (!canonical || typeof canonical !== 'object') die(MANIFEST_REL + ': no mcpServers block');
+  const names = Object.keys(canonical);
+  if (!names.length) die(MANIFEST_REL + ': mcpServers is empty');
+
+  const ranked = new Map(CURSOR_PRIORITY.map((p, i) => [p.server, i]));
+  for (const p of CURSOR_PRIORITY) {
+    if (!Object.prototype.hasOwnProperty.call(canonical, p.server)) {
+      die('CURSOR_PRIORITY ranks "' + p.server + '", absent from ' + MANIFEST_REL);
+    }
+  }
+
+  return names.map((name) => {
+    const def = canonical[name];
+    if (!def || typeof def !== 'object') die(name + ': server definition is not an object');
+    if (!ranked.has(name)) {
+      die(name + ': missing from CURSOR_PRIORITY — rank the server before generating');
+    }
+    let transport;
+    if (def.command) {
+      if (typeof def.command !== 'string') die(name + ': `command` must be a string');
+      if (def.type && def.type !== 'stdio') die(name + ': has a `command` but type "' + def.type + '"');
+      transport = 'stdio';
+    } else if (def.url) {
+      transport = def.type || 'http';
+      if (transport !== 'http' && transport !== 'sse') die(name + ': unsupported remote type "' + transport + '"');
+    } else {
+      die(name + ': server has neither `command` nor `url`');
+    }
+    const args = def.args || [];
+    if (!Array.isArray(args)) die(name + ': `args` must be an array');
+    return {
+      name,
+      transport,
+      rank: ranked.get(name),
+      keep: ranked.get(name) < CURSOR_KEEP_RANKS,
+      command: def.command,
+      args,
+      url: def.url,
+      // env/headers are carried through verbatim — the canonical list holds no literal secret, only
+      // plain switches and whatever passthrough form a server needs, and re-typing either shape here
+      // is how a config quietly stops authenticating.
+      env: def.env,
+      headers: def.headers,
+    };
   });
 }
 
@@ -524,11 +668,186 @@ function opencodeProfile(variant, agents) {
   return jsonFile({ _comment: PROFILE_COMMENT, agent });
 }
 
+// --------------------------------------------------------------------------- MCP configs --
+
+/*
+ * Cursor. Its config is the Claude shape with the transport spelled out: `type: "stdio"` is implicit
+ * in the canonical manifest (Claude Code infers it from `command`) and explicit here, because a
+ * remote entry in the same file makes the omission look like an oversight rather than a default.
+ * env/args/headers are carried verbatim.
+ */
+function cursorEntry(s) {
+  if (s.transport === 'stdio') {
+    const e = { type: 'stdio', command: s.command, args: s.args };
+    if (s.env) e.env = s.env;
+    return e;
+  }
+  const e = { type: s.transport, url: s.url };
+  if (s.headers) e.headers = s.headers;
+  return e;
+}
+
+function cursorMcp(servers) {
+  const mcpServers = {};
+  for (const s of servers) mcpServers[s.name] = cursorEntry(s);
+  const dropped = servers.filter((s) => !s.keep).map((s) => s.name);
+  return jsonFile({
+    _comment:
+      MCP_GEN_NOTE +
+      ' All ' +
+      servers.length +
+      ' bundled servers, which is what a Cursor install gets by default. Cursor is community-reported' +
+      ' to stop exposing tools past ~' +
+      CURSOR_TOOL_CAP +
+      ' across all connected servers (unmeasured — M1A-VERIFY). If you hit that, switch to the' +
+      ' priority profile in mcp.pruned.json, which keeps ' +
+      (servers.length - dropped.length) +
+      ' servers and drops ' +
+      dropped.join(', ') +
+      '. Re-enabling a dropped server is a per-server toggle in Cursor Settings -> MCP, or a' +
+      ' regeneration of this file; see the README section "Bundled MCP servers".',
+    mcpServers,
+  });
+}
+
+/*
+ * The pruned Cursor profile. Emitted in priority-rank order so the file reads as the ranking it is,
+ * with each kept server's reason and each dropped one named in the header. No host loads it: it is
+ * the reference for which servers to keep, and the paste source for anyone who prefers to prune by
+ * file rather than by Cursor's per-server toggles.
+ */
+function cursorMcpPruned(servers) {
+  const byRank = servers.slice().sort((a, b) => a.rank - b.rank);
+  const mcpServers = {};
+  let running = 0;
+  const ladder = [];
+  for (const s of byRank) {
+    const meta = CURSOR_PRIORITY[s.rank];
+    if (s.keep) {
+      mcpServers[s.name] = cursorEntry(s);
+      running += meta.tools;
+    }
+    ladder.push(
+      (s.rank + 1) +
+        '. ' +
+        s.name +
+        ' (~' +
+        meta.tools +
+        ' tools' +
+        (s.keep ? ', running total ~' + running : '') +
+        ') — ' +
+        (s.keep ? 'KEPT' : 'dropped') +
+        ': ' +
+        meta.why.replace(/^DROPPED — /, '')
+    );
+  }
+  return jsonFile({
+    _comment:
+      MCP_GEN_NOTE +
+      ' PRIORITY PROFILE for Cursor, not loaded by any host — the fallback list for the reported' +
+      ' ~' +
+      CURSOR_TOOL_CAP +
+      '-tool cap (M1A-VERIFY: neither the cap nor the counts below are measured; they show why the' +
+      ' cut sits where it does). Two ways to apply it: (a) leave mcp.json alone and turn the dropped' +
+      ' servers off in Cursor Settings -> MCP — nothing in the checkout changes; (b) copy this' +
+      ' block over mcp.json in your clone, which is deliberate local drift that doctor.cjs and' +
+      ' gen-host-adapters.cjs --check will both report, and `node scripts/gen-host-adapters.cjs`' +
+      ' undoes. To change the cut for everyone, move CURSOR_KEEP_RANKS in the generator and re-run —' +
+      ' note that if ~' +
+      CURSOR_TOOL_CAP +
+      ' turns out to be a hard ceiling the running totals below say only ranks 1-2 fit. The cut sits' +
+      ' at ' +
+      CURSOR_KEEP_RANKS +
+      " because the plan's ranking keeps one browser server and figma usable; the measured cap" +
+      ' behaviour (M1a) decides which of the two wins.',
+    _priority: ladder,
+    mcpServers,
+  });
+}
+
+/*
+ * Codex. A plugin bundles JSON in the Claude `mcpServers` shape, so this is a plain translation and
+ * the entries are carried as-is — including figma-dev-mode's `type: "sse"`, whose support is the one
+ * open question (M1B-VERIFY) and whose fallback is a manual `codex mcp add`, spelled out in the
+ * header because JSON has nowhere else to put it.
+ */
+function codexEntry(s) {
+  if (s.transport === 'stdio') {
+    const e = { command: s.command, args: s.args };
+    if (s.env) e.env = s.env;
+    return e;
+  }
+  const e = { type: s.transport, url: s.url };
+  if (s.headers) e.headers = s.headers;
+  return e;
+}
+
+function codexMcp(servers) {
+  const mcpServers = {};
+  for (const s of servers) mcpServers[s.name] = codexEntry(s);
+  const sse = servers.filter((s) => s.transport === 'sse').map((s) => s.name);
+  return jsonFile({
+    _comment:
+      MCP_GEN_NOTE +
+      ' Loaded through the ' +
+      '.codex-plugin/plugin.json' +
+      ' `mcpServers` pointer — deliberately NOT named .mcp.json, which Claude Code reads as a plugin' +
+      ' MCP component of its own, on top of the mcpServers block its own manifest already declares.' +
+      ' stdio and streamable-HTTP servers are documented Codex transports and' +
+      ' are carried as-is. M1B-VERIFY: SSE support is unconfirmed — if ' +
+      (sse.join(', ') || 'an SSE server') +
+      ' does not connect, remove it from this file and add it per-user instead' +
+      ' (`codex mcp add figma-dev-mode --url http://127.0.0.1:3845/sse`, adjusting for the syntax the' +
+      ' installed CLI accepts); everything else keeps working. Codex documents no tool-count cap, so' +
+      ' no pruning is applied here — per-server `enabled_tools`/`disabled_tools` is the lever if one' +
+      ' appears. Codex has no per-tool trust prompt for MCP config, but hook wiring is trust-reviewed' +
+      ' separately (`/hooks`).',
+    mcpServers,
+  });
+}
+
+/*
+ * OpenCode. The one host with a different shape: `command` is an argv ARRAY (no shell splitting),
+ * `environment` rather than `env`, and transport is `type: local | remote` with the wire protocol
+ * inferred from the URL rather than declared.
+ */
+function opencodeEntry(s) {
+  if (s.transport === 'stdio') {
+    const e = { type: 'local', command: [s.command].concat(s.args) };
+    if (s.env) e.environment = s.env;
+    return e;
+  }
+  const e = { type: 'remote', url: s.url };
+  if (s.headers) e.headers = s.headers;
+  return e;
+}
+
+function opencodeMcp(servers) {
+  const mcp = {};
+  for (const s of servers) mcp[s.name] = opencodeEntry(s);
+  const sse = servers.filter((s) => s.transport === 'sse').map((s) => s.name);
+  return jsonFile({
+    _comment:
+      MCP_GEN_NOTE +
+      ' FRAGMENT, not a config: merge the `mcp` block into your own opencode.json (~/.config/opencode/' +
+      'opencode.json or the project one) and drop this `_comment` key. OpenCode shapes differ from the' +
+      ' other hosts — `command` is an argv array, `environment` replaces `env`, and a server is' +
+      ' `type: "local"` or `type: "remote"`. M1C-VERIFY: ' +
+      (sse.join(', ') || 'no server') +
+      ' is an SSE endpoint carried as a plain `remote` url because OpenCode documents no separate SSE' +
+      ' type; if the transport is not negotiated, that server needs a host-side answer, and the rest' +
+      ' are unaffected. No tool-count cap is documented for OpenCode, so all servers ship; per-tool' +
+      ' pruning, if you want it, is a `"tools": {"<server>_*": false}` glob in your own config.',
+    mcp,
+  });
+}
+
 // ------------------------------------------------------------------------------ output --
 
 function buildOutputs() {
   const agents = collectAgents();
   const skills = collectSkills();
+  const servers = collectMcpServers();
   const files = new Map();
   for (const a of agents) {
     files.set(path.join(DIR_CURSOR, a.name + '.md'), cursorAgent(a));
@@ -540,7 +859,11 @@ function buildOutputs() {
     files.set(path.join(DIR_PROFILES, 'model-profile.' + variant + '.example.json'), opencodeProfile(variant, agents));
   }
   files.set(REF_MAP_REL, hostModelMap(agents));
-  return { files, agents, skills };
+  files.set(MCP_CURSOR_REL, cursorMcp(servers));
+  files.set(MCP_CURSOR_PRUNED_REL, cursorMcpPruned(servers));
+  files.set(MCP_CODEX_REL, codexMcp(servers));
+  files.set(MCP_OPENCODE_REL, opencodeMcp(servers));
+  return { files, agents, skills, servers };
 }
 
 function ownedOnDisk() {
@@ -608,7 +931,7 @@ function main(argv) {
   for (const a of argv) {
     if (a !== '--check') die('unknown argument ' + a + ' (usage: gen-host-adapters.cjs [--check])');
   }
-  const { files, agents, skills } = buildOutputs();
+  const { files, agents, skills, servers } = buildOutputs();
   if (checkOnly) {
     const problems = check(files);
     if (problems.length) {
@@ -620,8 +943,8 @@ function main(argv) {
   }
   const { written, removed } = write(files);
   process.stdout.write(
-    'agents: ' + agents.length + ', skills: ' + skills.length + ', files: ' + files.size +
-      ' (' + written + ' written, ' + removed + ' stale removed)\n'
+    'agents: ' + agents.length + ', skills: ' + skills.length + ', mcp servers: ' + servers.length +
+      ', files: ' + files.size + ' (' + written + ' written, ' + removed + ' stale removed)\n'
   );
 }
 

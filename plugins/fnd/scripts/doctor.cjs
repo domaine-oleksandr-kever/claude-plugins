@@ -278,9 +278,11 @@ function checkHooks(pluginRoot) {
       continue;
     }
     if (!st.isFile()) continue;
-    // static content, not something a host executes: prose and the per-host wiring files
-    // (hooks/hooks-cursor.json, hooks/hooks-codex.json) that M5 lands in this same dir
-    if (entry.endsWith('.md') || entry.endsWith('.json')) continue;
+    // static content, not something a host executes: prose, the per-host wiring files
+    // (hooks/hooks-cursor.json, hooks/hooks-codex.json) and the declarative rule sets a host
+    // reads rather than runs (hooks/no-verify.rules — Codex execpolicy Starlark) that M5 lands
+    // in this same dir
+    if (entry.endsWith('.md') || entry.endsWith('.json') || entry.endsWith('.rules')) continue;
     if (entry.endsWith('.cjs')) {
       node++;
       continue; // node-invoked by every wiring — the exec bit is irrelevant
@@ -461,6 +463,49 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
   pass(label, mode + ' install, ' + record.entries.length + ' entry(ies) live (root: ' + root + ')' + note);
 }
 
+/*
+ * Codex arms plugin hooks behind TWO user actions the install cannot perform: the `[features]
+ * hooks` gate (its default varies by CLI version) and a per-content-hash trust review in `/hooks`.
+ * Skills and MCP load without either, so an install with the whole guard layer dormant — session
+ * conventions, the prompt-JSON guard, mcp-slim, BOTH git guards — looks identical to a healthy one.
+ * The gate is a file this script can read; the trust review is host state it cannot, so that row is
+ * an always-printed reminder with the one command that proves the answer either way.
+ */
+function checkCodexHooks(homeDir) {
+  const cfg = path.join(homeDir, '.codex', 'config.toml');
+  let text = null;
+  try {
+    text = fs.readFileSync(cfg, 'utf8');
+  } catch (_) {}
+  if (text === null) {
+    skip('codex:hooks-gate', cfg + ' absent — add [features] hooks = true (the default varies by CLI version)');
+  } else {
+    // Section-scoped on purpose: a `hooks = true` under some other table says nothing about the
+    // feature gate. Table headers are the only thing that has to be parsed to find the right one.
+    const lines = text.split(/\r?\n/);
+    let section = '';
+    let value = null;
+    for (const raw of lines) {
+      const line = raw.replace(/#.*$/, '').trim();
+      const header = /^\[([^\]]+)\]$/.exec(line);
+      if (header) {
+        section = header[1].trim();
+        continue;
+      }
+      const kv = /^hooks\s*=\s*(true|false)\b/.exec(line);
+      if (kv && section === 'features') value = kv[1];
+    }
+    if (value === 'true') pass('codex:hooks-gate', '[features] hooks = true in ' + cfg);
+    else if (value === 'false') skip('codex:hooks-gate', '[features] hooks = false in ' + cfg + ' — every fnd hook is off, including the commit guards');
+    else skip('codex:hooks-gate', 'no [features] hooks entry in ' + cfg + ' — set it to true (the default varies by CLI version)');
+  }
+  skip(
+    'codex:hooks-trust',
+    'not inspectable — non-managed hooks run only after a per-content-hash review in /hooks; prove it with ' +
+      '`git commit --no-verify -m probe` in a repo with git hooks (it must be blocked)'
+  );
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const pluginRoot = path.resolve(opts.root || path.join(__dirname, '..'));
@@ -475,6 +520,7 @@ function main() {
   checkHooks(pluginRoot);
   checkGenerated(pluginRoot, repoRoot);
   checkHost(opts.target, homeDir, xdgConfigHome, pluginRoot, repoRoot);
+  if (opts.target === 'codex') checkCodexHooks(homeDir);
 
   const width = rows.reduce((w, r) => Math.max(w, r.name.length), 0);
   out('fnd doctor — plugin root: ' + pluginRoot);
