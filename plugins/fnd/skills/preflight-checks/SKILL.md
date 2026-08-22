@@ -9,7 +9,7 @@ argument-hint: "(no args — validates the current workspace)"
 arguments:
   - name: workspace
     description: Project root to validate. Defaults to the current workspace; confirm it is the intended one.
-allowed-tools: Read, Glob, Bash(shopify version), Bash(node -v), Bash(npm -v), Bash(git --version), Bash(gh --version), Bash(jq --version), Bash(perl -v)
+allowed-tools: Read, Glob, Bash(shopify version), Bash(node -v), Bash(npm -v), Bash(git --version), Bash(gh --version), Bash(jq --version), Bash(perl -v), Bash(git ls-remote*), Bash(timeout 8 git ls-remote*)
 ---
 
 # Preflight Checks
@@ -29,7 +29,7 @@ Operating mode: **read-only validation** — the checks below inspect, they neve
 
 ## Phase 1 — Environment validation `[plan mode]`
 
-Run the full checklist in `../../references/preflight-checklist.md` (paths like this are relative to this skill's directory) — read it now; it owns the per-check items, commands, and remediation: **CLI tools → MCP servers → project skills & rules → local dev server**. Three skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; second, report the detected host in that same group and run the host-dependent items against it — **project skills & rules** live in the host's own project dirs (`.claude/` on Claude Code, exactly as the checklist states; `.cursor/` on Cursor; `.agents/` + `.codex/` on Codex; `.opencode/` on OpenCode) and MCP checks cover whichever of the servers that host actually has configured; and if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation.
+Run the full checklist in `../../references/preflight-checklist.md` (paths like this are relative to this skill's directory) — read it now; it owns the per-check items, commands, and remediation: **CLI tools → MCP servers → project skills & rules → local dev server → plugin update → model pins**. Four skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; second, report the detected host in that same group and run the host-dependent items against it — **project skills & rules** live in the host's own project dirs (`.claude/` on Claude Code, exactly as the checklist states; `.cursor/` on Cursor; `.agents/` + `.codex/` on Codex; `.opencode/` on OpenCode) and MCP checks cover whichever of the servers that host actually has configured; third, if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation; fourth, the last two groups are about the **plugin itself** rather than the project — an update nudge (installed version vs. what the host could install — one `git ls-remote` against the clone the install points at, never a host cache that only installs write to) and, on Cursor and Codex, whether the model ids pinned in that host's generated agents still resolve. Both are advisory: they never gate the workflows, they report 🟡 with the reason rather than guessing, and a stale pin on an already-latest plugin is offered to the fnd report-plugin-issue skill instead of being patched locally.
 
 ---
 

@@ -9,7 +9,7 @@ argument-hint: "[one-line summary of the defect — inferred from the conversati
 arguments:
   - name: problem
     description: One-line summary of the defect. If omitted, infer it from the failure just observed in the conversation.
-allowed-tools: Read, Grep, Glob, Write, Bash(gh auth status), Bash(gh --version), Bash(gh issue list*), Bash(gh issue view*), Bash(gh issue create*), Bash(gh issue comment*), Bash(claude --version), Bash(node -v), Bash(jq --version), Bash(shopify version), Bash(uname -srm)
+allowed-tools: Read, Grep, Glob, Write, Bash(gh auth status), Bash(gh --version), Bash(gh issue list*), Bash(gh issue view*), Bash(gh issue create*), Bash(gh issue comment*), Bash(claude --version), Bash(cursor-agent --version), Bash(codex --version), Bash(opencode --version), Bash(node -v), Bash(jq --version), Bash(shopify version), Bash(uname -srm)
 ---
 
 # Report a plugin issue
@@ -28,7 +28,9 @@ File an issue only when the **plugin** is at fault:
 - a converter mangles content (broken tables/lists/marks, wrong field extracted);
 - a SKILL.md / REFERENCE.md / agent instruction is wrong, self-contradictory, or doesn't match
   what the tooling actually does;
-- an `allowed-tools` rule blocks a command the same skill instructs you to run.
+- an `allowed-tools` rule blocks a command the same skill instructs you to run;
+- a model id pinned in a generated per-host agent no longer resolves on that host, while the
+  installed plugin is already the latest version (the `preflight-checks` model-pin row).
 
 **Not** plugin bugs — don't file these: missing CLIs, unauthenticated MCP/`gh`, network
 problems, bugs in the user's theme/repo, Shopify/Jira service errors. *Exception:* the plugin
@@ -43,9 +45,15 @@ Gather what applies (skip the rest):
   `skill:create-pull-request step 4`.
 - **Plugin version** — from this skill's own base directory path (`…/fnd/<version>/…`) or
   `Read` `../../.claude-plugin/plugin.json` (relative to this skill's directory).
-- **Environment** — the host CLI's version (on Claude Code: `claude --version`) and
-  `uname -srm`; plus `node -v` for the converters/Node scripts, `shopify version` +
-  `jq --version` for the theme scripts, `gh --version` for PR/issue flows.
+- **Host + host version** — name the host this session runs on (`claude-code`, `cursor`,
+  `codex-cli`, `opencode`) from signals already in the session: how this skill was invoked, which
+  tools and MCP servers are exposed, which host config directory the workspace carries. Ambiguous
+  signals → report the host as `unknown`; never guess, since the same component behaves differently
+  per host. Its version comes from that host's own CLI — `claude --version`, `cursor-agent
+  --version`, `codex --version`, `opencode --version` — and a host installed without its CLI on
+  PATH reports the version as `unknown` rather than an invented number.
+- **Environment** — `uname -srm`; plus `node -v` for the converters/Node scripts, `shopify version`
+  + `jq --version` for the theme scripts, `gh --version` for PR/issue flows.
 - **Exact command** as run (sanitized — Step 2) and its **exit code** if known.
 - **Full output** — the `error=` / `cause=` lines and stderr; for theme-script push failures
   include the tail of the `log=<path>` file the script printed.
@@ -76,7 +84,8 @@ or skip. Never open a duplicate.
 
 - **Title:** `[<component>] <symptom>` — e.g.
   `[create-preview-theme.sh] refresh dies silently when --theme is the last arg`,
-  `[skill:write-steps-to-test] instructs a command its allowed-tools blocks`.
+  `[skill:write-steps-to-test] instructs a command its allowed-tools blocks`,
+  `[agents-cursor] pinned model <id> no longer resolves on Cursor`.
 - **Body** (write it to a temp file for `--body-file`):
 
 ````markdown
@@ -95,7 +104,7 @@ or skip. Never open a duplicate.
 ```
 
 ## Environment
-plugin fnd <version> · <host cli> <version> · <uname -srm> · <node / shopify / jq / gh versions if relevant>
+plugin fnd <version> · host <host name> <host version> · <uname -srm> · <node / shopify / jq / gh versions if relevant>
 
 ## Repro / context
 <minimal sanitized repro; which skill/step invoked the component>
