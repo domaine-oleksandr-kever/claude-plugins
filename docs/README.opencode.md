@@ -98,14 +98,38 @@ copy its `mcp` object — the whole `"mcp": { … }` block, six servers — into
 `opencode.json`, next to `$schema`. Do not copy the `_comment` key. If your config already has
 an `mcp` block, add the six fnd entries inside it rather than replacing yours.
 
-The end state looks like:
+The end state, in full (this is the fragment's `mcp` block as generated today — if it differs
+from your copy of `plugins/fnd/opencode/mcp-fragment.json`, the file wins):
 
-```jsonc
+```json
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "chrome-devtools-mcp": { "type": "local", "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--isolated"] },
-    "atlassian": { "…": "the other five entries, verbatim from the fragment" }
+    "chrome-devtools-mcp": {
+      "type": "local",
+      "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--isolated"]
+    },
+    "atlassian": {
+      "type": "local",
+      "command": ["npx", "-y", "mcp-remote", "https://mcp.atlassian.com/v1/mcp"]
+    },
+    "shopify-dev-mcp": {
+      "type": "local",
+      "command": ["npx", "-y", "@shopify/dev-mcp@latest"],
+      "environment": { "LIQUID": "true" }
+    },
+    "figma-dev-mode": {
+      "type": "remote",
+      "url": "http://127.0.0.1:3845/sse"
+    },
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "@playwright/mcp@latest"]
+    },
+    "notion-mcp": {
+      "type": "remote",
+      "url": "https://mcp.notion.com/mcp"
+    }
   }
 }
 ```
