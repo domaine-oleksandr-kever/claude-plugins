@@ -72,6 +72,11 @@ has "$ROOT/docs/README.cursor.md" './scripts/install.sh --target cursor' cursor-
 has "$ROOT/docs/README.cursor.md" '/smoke-test' cursor-doc-verify
 has "$ROOT/docs/README.opencode.md" './scripts/install.sh --target opencode' opencode-doc-install
 has "$ROOT/docs/README.opencode.md" '/smoke-test' opencode-doc-verify
+# The statics paste is the step a fresh install cannot infer (live-smoke 2026-08-22 found the
+# walkthrough without it → smoke row 6 red); the reference must send an OpenCode red to that
+# paste, not to an issue filing.
+has "$ROOT/docs/README.opencode.md" 'plugins/fnd/hooks/comment-discipline.md' opencode-doc-statics-paste
+has "$ROOT/plugins/fnd/references/smoke-test-checks.md" 'docs/README.opencode.md' smoke-row6-opencode-remediation
 has "$ROOT/docs/README.codex.md" "codex plugin marketplace add $SLUG" codex-doc-marketplace
 has "$ROOT/docs/README.codex.md" '--ref harness-port' codex-doc-branch-ref
 has "$ROOT/docs/README.codex.md" '/plugins' codex-doc-plugins-browser

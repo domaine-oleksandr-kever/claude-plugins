@@ -145,6 +145,13 @@ configured; task workspace where a ticket is in play), so a subset is normal —
 the ungated conventions are visible, 🔴 when none are (the injection path is not wired), 🟡 when
 you cannot tell them apart from project-level rules with the same content.
 
+A 🔴 names a wiring gap; whose gap depends on the host. Where the plugin owns the injection
+(Claude Code's session hook, Cursor's always-applied rules, the Codex hook) it is a plugin-side
+defect — offer `report-plugin-issue`. On OpenCode the adapter injects only the gated store-access
+block **by design**: the static conventions arrive through the user's own `instructions` config,
+so none-visible means that install step was skipped — the remediation is the paste in
+`docs/README.opencode.md` (Install step 5), not a plugin fix.
+
 ## Row 7 — MCP compression (best effort)
 
 Two halves, reported separately and never inferred from each other:

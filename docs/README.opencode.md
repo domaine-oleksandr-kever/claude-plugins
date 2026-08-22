@@ -5,14 +5,14 @@ Claude Code uses — only the wiring differs. Start at the
 [README](../README.md#install--four-hosts) for the cross-host picture.
 
 OpenCode has no plugin marketplace primitive, so the installer is the whole distribution
-channel, and two pieces of configuration stay yours to paste: the MCP block and the static
-conventions.
+channel, and three pieces of configuration stay yours to paste: the MCP block, the commit-guard
+backstop and the static conventions.
 
 ## Install
 
-Six steps take a machine that has never seen OpenCode to a proven install: 0 installs the host
-itself, 1–2 clone and link the plugin, 3–4 are two pastes into a config file you own, 5 is
-optional, 6 proves the whole thing in a live session.
+Seven steps take a machine that has never seen OpenCode to a proven install: 0 installs the host
+itself, 1–2 clone and link the plugin, 3–5 are three pastes into a config file you own, 6 is
+optional, 7 proves the whole thing in a live session.
 
 ### 0. Prerequisites — the host and the runtime
 
@@ -81,7 +81,7 @@ PASS  install:opencode       symlink install, 44 entry(ies) live (root: ~/.confi
 
 Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target opencode`.
 
-The next two steps are pastes into **your own** `opencode.json` — the installer never links or
+The next three steps are pastes into **your own** `opencode.json` — the installer never links or
 edits that file, because it is yours. The global one lives at
 `~/.config/opencode/opencode.json`; if it does not exist yet, create it as:
 
@@ -150,14 +150,41 @@ that the deny rules above it had just blocked. The cost of exactness is that a v
 spelling (another hook name, extra `git push` arguments) stays denied — run those yourself
 rather than widening the pattern.
 
-### 5. Optional: model tiering
+### 5. Paste the static conventions
+
+The session conventions that other hosts inject for you — comment discipline, lean code, task
+workspace, whale routing, plugin feedback — are wired by you on OpenCode: the plugin adapter
+injects only the detection-gated live-store block. Without this paste **no fnd convention
+reaches your sessions** (the smoke test's context-injection row goes red on exactly this).
+
+Same file, third block: an `instructions` array at the top level, next to `mcp` and
+`permission`, naming the five static files with the absolute path of your clone:
+
+```json
+"instructions": [
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/comment-discipline.md",
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/lean-code.md",
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/task-workspace.md",
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/mcp-whale.md",
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/plugin-feedback.md"
+]
+```
+
+If your config already has `instructions`, append these entries to it. List the five files
+explicitly — a `hooks/*.md` glob would also pull in `store-access.md`, which the adapter
+injects dynamically only where store credentials exist, so a static copy would double it. (An
+`AGENTS.md` referencing the same five files works too, if that is how you organize global
+instructions.) Because the paths point into the clone, `git pull` updates the content with no
+further pasting — only a renamed or added convention file comes back to this step.
+
+### 6. Optional: model tiering
 
 Generated agents carry no `model:` pin (see below); to opt in, copy
 the `agent` block from `plugins/fnd/opencode/model-profile.cloud.example.json` or
 `model-profile.local.example.json` into your `opencode.json` and replace the ids with ones your
 provider config actually exposes.
 
-### 6. Run the smoke test once
+### 7. Run the smoke test once
 
 Start a **new OpenCode session** (config edits load at startup) and run: `/smoke-test` (the command
 shim; OpenCode itself invokes skills by model choice only). It proves MCP connectivity, subagent
@@ -199,10 +226,10 @@ after an update that touched them.
   a small local model will run, but finding quality is the model choice's responsibility.
 - **Static conventions are yours to wire.** The adapter injects only the dynamic,
   detection-gated live-store block, once per session. The static conventions (comment
-  discipline, lean code, task workspace, whale routing, plugin feedback) belong in your
-  `instructions` config or an `AGENTS.md` pointed at `plugins/fnd/hooks/*.md` — which costs
-  nothing per message and survives compaction. Consequence: `FND_LEAN=0` cannot reach them here;
-  remove the file from `instructions` instead.
+  discipline, lean code, task workspace, whale routing, plugin feedback) arrive through your
+  `instructions` config — install step 5 is that paste — which costs nothing per message and
+  survives compaction. Consequence: `FND_LEAN=0` cannot reach them here; remove the lean-code
+  file from `instructions` instead.
 - **MCP output is rewritten in place.** `tool.execute.after` exposes a mutable `output.output`,
   so `mcp-slim` both compresses and spills-and-stubs, as on Claude Code and Cursor.
 - **A blocked prompt is rewritten, not erased.** Nothing can erase a message on this host, so
