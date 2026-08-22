@@ -18,17 +18,21 @@ allowed-tools: Read, Glob, Edit, AskUserQuestion, Bash(${CLAUDE_PLUGIN_ROOT}/scr
 
 # Worktree (create / remove)
 
-A thin wrapper over `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh`, run from the client
+A thin wrapper over `<plugin root>/scripts/worktree-setup.sh`, where **plugin root** = the
+plugin's own directory — `../../` relative to this skill's directory — and every
+`<plugin root>/…` path below resolves the same way. On Claude Code, write plugin root as the
+literal `${CLAUDE_PLUGIN_ROOT}` in every command: the host expands it, and this skill's
+pre-approved Bash prefixes match that exact form. Run it from the client
 theme repo root. The script owns every decision — worktree directory, branch reuse, `npm ci`,
 the gitignored config copies (`shopify.theme.toml`, `.env`), the `.claude/fnd` symlink back to
 the main repo, the free dev port, the hand-off block. This skill resolves the work-id, runs the
 script, relays what it printed, and — once the worktree exists — settles its **session theme**
 (step 4) so the new checkout's dev server never syncs into the shared dev theme.
 
-> **This session stays in the main checkout.** A Claude session cannot relocate itself into a
-> new worktree — it needs its own terminal and its own `claude`. Never `cd` into the worktree
-> and keep working here; hand the developer the launch block instead. (Step 4's one-shot
-> `cd <worktree> && <script>` inside a single Bash call is fine — the subshell exits with the
+> **This session stays in the main checkout.** An agent session cannot relocate itself into a
+> new worktree — it needs its own terminal and its own session (`claude` on Claude Code).
+> Never `cd` into the worktree and keep working here; hand the developer the launch block
+> instead. (Step 4's one-shot `cd <worktree> && <script>` inside a single Bash call is fine — the subshell exits with the
 > command and the session's own cwd never moves.)
 
 ## Steps
@@ -37,19 +41,19 @@ script, relays what it printed, and — once the worktree exists — settles its
    current branch); otherwise a kebab-case slug for the work (`header-refactor`). State the
    resolved id in one line when it was inferred rather than passed. Ambiguous → ask; never
    invent a key.
-2. **Run** `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh <WORK-ID> [<base-branch>]`. It is
+2. **Run** `<plugin root>/scripts/worktree-setup.sh <WORK-ID> [<base-branch>]`. It is
    idempotent — re-running on an existing worktree just re-prints the hand-off.
 3. **Relay verbatim.** Print the script's output, above all the hand-off block (the `cd … &&
    claude` line, the follow-up slash command, and the dev port) — the developer pastes it, so
    do not paraphrase, re-wrap, or "improve" the paths.
 4. **Session theme** (create only). The flow — including the exact question — is
-   `${CLAUDE_PLUGIN_ROOT}/references/session-theme.md`, **the same single AskUserQuestion
-   `ship` Step 0 makes**:
+   `<plugin root>/references/session-theme.md`, **the same single question
+   `ship` Step 0 asks** (on Claude Code: one AskUserQuestion):
    - The shared workspace `notes.md` already records a `session-theme: <id>` line → don't ask;
      run `…/create-preview-theme.sh pin --theme <id>` (a freshly copied toml is never pinned;
      an idempotent re-run's `toml=kept` copy may already be — either way re-pinning is
      byte-idempotent) and say so in one line.
-   - Otherwise offer: **create one now** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh
+   - Otherwise offer: **create one now** (`<plugin root>/scripts/create-preview-theme.sh
      create --name "<name>" --reuse --pin-toml` — `<name>` is the derivation the PR uses,
      `info`'s `dev_theme_name` with the role prefix swapped for the key
      (`[ELC-206] Kever | Domaine`; a slug work-id is bracketed verbatim —

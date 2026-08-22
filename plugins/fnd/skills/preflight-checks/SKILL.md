@@ -16,8 +16,11 @@ allowed-tools: Read, Glob, Bash(shopify version), Bash(node -v), Bash(npm -v), B
 
 Confirm required tooling is installed, configured, and authenticated so you don't hit failures mid-workflow. After this passes, the environment is cleared for Workflows 2–6.
 
+Operating mode: **read-only validation** — the checks below inspect, they never write. On Claude Code: run Phase 1 in plan mode — that is what the `[plan mode]` marker below means.
+
 ## Global rules
 
+- **Name the host first.** State which agent host this session runs on — Claude Code, Cursor, Codex CLI, or OpenCode — from signals already in this session: how this skill was invoked, which tools and MCP servers are exposed, and which host config directory the workspace carries. Run no extra commands for it (the allow-list below is the budget). Ambiguous signals → report the host as unknown and ask the developer; never guess.
 - **Never proceed past the ✋ checkpoint** without explicit developer confirmation.
 - For MCP checks, use the available MCP tools and **report real connection/auth outcomes — do not fabricate success**.
 - The CLI version commands in this skill's allow-list are read-only and pre-approved — run them directly. Anything beyond them still needs the developer's go-ahead.
@@ -26,7 +29,7 @@ Confirm required tooling is installed, configured, and authenticated so you don'
 
 ## Phase 1 — Environment validation `[plan mode]`
 
-Run the full checklist in `${CLAUDE_PLUGIN_ROOT}/references/preflight-checklist.md` (read it now — it owns the per-check items, commands, and remediation): **CLI tools → MCP servers → project skills & rules → local dev server**. Two skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; and if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation.
+Run the full checklist in `../../references/preflight-checklist.md` (paths like this are relative to this skill's directory) — read it now; it owns the per-check items, commands, and remediation: **CLI tools → MCP servers → project skills & rules → local dev server**. Three skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; second, report the detected host in that same group and run the host-dependent items against it — **project skills & rules** live in the host's own project dirs (`.claude/` on Claude Code, exactly as the checklist states; `.cursor/` on Cursor; `.agents/` + `.codex/` on Codex; `.opencode/` on OpenCode) and MCP checks cover whichever of the servers that host actually has configured; and if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation.
 
 ---
 
@@ -47,4 +50,4 @@ Present the report. Once the developer confirms issues are resolved or accepted,
 
 ## Next in the series
 
-Environment cleared → offer the ticket's entry point per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` → Progress tracking; no workspace → `/fnd:write-technical-approach <ticket>` (no approved TA) or `/fnd:develop-feature-or-fix <ticket>` (TA approved); **offer only; never auto-run**.
+Environment cleared → offer the ticket's entry point per `../../references/task-workspace.md` → Progress tracking; no workspace → the fnd write-technical-approach skill (no approved TA) or develop-feature-or-fix (TA approved) — on Claude Code, `/fnd:write-technical-approach <ticket>` / `/fnd:develop-feature-or-fix <ticket>`; **offer only; never auto-run**.

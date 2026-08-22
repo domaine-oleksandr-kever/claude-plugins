@@ -42,10 +42,10 @@ Gather what applies (skip the rest):
 - **Component + mode** — e.g. `create-preview-theme.sh create`, `md-to-adf.cjs --no-tables`,
   `skill:create-pull-request step 4`.
 - **Plugin version** — from this skill's own base directory path (`…/fnd/<version>/…`) or
-  `Read` `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
-- **Environment** — `claude --version`, `uname -srm`; plus `node -v` for the converters/Node
-  scripts, `shopify version` + `jq --version` for the theme scripts, `gh --version` for
-  PR/issue flows.
+  `Read` `../../.claude-plugin/plugin.json` (relative to this skill's directory).
+- **Environment** — the host CLI's version (on Claude Code: `claude --version`) and
+  `uname -srm`; plus `node -v` for the converters/Node scripts, `shopify version` +
+  `jq --version` for the theme scripts, `gh --version` for PR/issue flows.
 - **Exact command** as run (sanitized — Step 2) and its **exit code** if known.
 - **Full output** — the `error=` / `cause=` lines and stderr; for theme-script push failures
   include the tail of the `log=<path>` file the script printed.
@@ -95,7 +95,7 @@ or skip. Never open a duplicate.
 ```
 
 ## Environment
-plugin fnd <version> · claude <version> · <uname -srm> · <node / shopify / jq / gh versions if relevant>
+plugin fnd <version> · <host cli> <version> · <uname -srm> · <node / shopify / jq / gh versions if relevant>
 
 ## Repro / context
 <minimal sanitized repro; which skill/step invoked the component>

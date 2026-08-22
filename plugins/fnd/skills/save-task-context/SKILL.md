@@ -13,8 +13,9 @@ arguments:
 
 # Save Task Context
 
-Persist the current working context into the task workspace so it survives `/compact` and new
-sessions. Layout, freshness, and write rules: `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`.
+Persist the current working context into the task workspace so it survives context compaction
+and new sessions. Layout, freshness, and write rules: `../../references/task-workspace.md`
+(relative to this skill's directory).
 
 **Source of truth is this conversation — spawn no readers.** This skill writes down what is
 already known; missing data is reported as a gap, not fetched.

@@ -7,12 +7,14 @@ description: Review the branch's changed files before committing — hygiene plu
 
 Hygiene **+ correctness** pass over the changed files **before a commit**. Five checks →
 a written plan → developer approves/corrects → apply. **Never commits** — committing is
-`/fnd:commit`'s job, and the developer invokes it themselves.
+the fnd `commit` skill's job (`/fnd:commit` on Claude Code), and the developer invokes it
+themselves.
 
 ## 0. Review-flow gate
 
 This skill is the primary home of the fnd review flow. Follow the shared contract in
-`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`:
+`../../references/review-flow.md` (paths in this skill are relative to this skill's
+directory):
 
 - Compute `branch` / `base` / `diff_hash` per §1 and read the marker at
   `"$(git rev-parse --git-dir)/.fnd-review"` (resolved, never the literal `.git/` path —
@@ -110,14 +112,14 @@ becomes a named ceiling — record it as a `ceiling:` entry in the workspace `no
 After the developer approves (with their corrections), make exactly the agreed edits — nothing
 more. For approved check-D rows, run the agreed `git add <path>` so the referenced files are
 tracked. Then **stop**: report what changed and hand the commit back to the developer — stage
-the files and suggest `/fnd:commit` (invoking it authorizes the commit — it commits
+the files and suggest the fnd `commit` skill (invoking it authorizes the commit — it commits
 directly with a Conventional-Commits message and reports the result). Never run
 `git commit` from this skill. If the branch's ticket has a task
 workspace, tick `pre-commit-review` in its `progress.md`.
 
 **Write the marker.** After the edits are applied, record the review for this branch so
 `commit` / `create-pull-request` don't redundantly re-review (recompute `diff_hash` so it
-reflects the post-edit state — see `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §1).
+reflects the post-edit state — see `../../references/review-flow.md` §1).
 Include the `correctness_hash` line when check F was handled this pass (bug-hunter ran,
 or the gate said not applicable):
 

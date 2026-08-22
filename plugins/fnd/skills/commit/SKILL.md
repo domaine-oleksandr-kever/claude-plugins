@@ -9,28 +9,28 @@ allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git comm
 Create commits that follow [Conventional Commits](https://www.conventionalcommits.org/).
 
 **Message format** — the rules, types table, subject/body guidance, examples, and
-breaking-change syntax live in `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md`.
-Read it before drafting.
+breaking-change syntax live in `../../references/commit-message-format.md` (paths in this
+skill are relative to this skill's directory). Read it before drafting.
 
 ## Rules
 
-- **Commit directly — no preview, no permission ask.** Invoking `/fnd:commit` *is* the
-  authorization: draft the message and run `git commit` immediately, then report the
-  created commit (hash + full message) so the developer can `git commit --amend` if the
-  wording needs a tweak. The only question that may still block is step 4's ticket-scope
+- **Commit directly — no preview, no permission ask.** Invoking this skill
+  (`/fnd:commit` on Claude Code) *is* the authorization: draft the message and run
+  `git commit` immediately, then report the created commit (hash + full message) so the
+  developer can `git commit --amend` if the wording needs a tweak. The only question that may still block is step 4's ticket-scope
   ask.
 
 ## Review gate (before committing)
 
 `commit` does **not** run the hygiene review itself — it only ensures one happened. The
 rule below is complete — the full flow lives in
-`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`; read it only if the marker semantics
+`../../references/review-flow.md`; read it only if the marker semantics
 are unclear:
 
 - Read the marker at `"$(git rev-parse --git-dir)/.fnd-review"` (resolved, never the
   literal `.git/` path — a linked worktree's `.git` is a file). **No marker for this
-  branch** → offer to run
-  `/fnd:pre-commit-review` first; proceed if the developer declines.
+  branch** → offer to run the fnd
+  `pre-commit-review` skill first; proceed if the developer declines.
 - **Marker exists** → continue; don't re-run a review unprompted.
 - **Re-stamp around the commit** — before step 6 compute the current `diff_hash`; if it
   equals the marker's, refresh the marker after the commit succeeds, per review-flow.md §1
@@ -67,4 +67,4 @@ are unclear:
 
 ## Next in the series
 
-Ticket with a task workspace → close out its `commit` row per `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md` → Progress tracking; next is normally `/fnd:write-steps-to-test <ticket>`, or `/fnd:create-pull-request <ticket>` when steps-to-test is already ticked or N/A and the branch has no open PR; **offer only; never auto-run**.
+Ticket with a task workspace → close out its `commit` row per `../../references/task-workspace.md` → Progress tracking; next is normally the fnd `write-steps-to-test` skill for that ticket, or `create-pull-request` when steps-to-test is already ticked or N/A and the branch has no open PR; **offer only; never auto-run**.

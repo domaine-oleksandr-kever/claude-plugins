@@ -43,7 +43,7 @@ Create `scripts/translation-data.json` with two top-level keys:
 }
 ```
 
-Get the target language codes with **Glob**, per scope:
+Get the target language codes by globbing the locale files, per scope:
 
 - **storefront** — `locales/*.json`: take each basename, drop the `.json` suffix, skip
   `en.default.json` plus every `*.schema.json`.
