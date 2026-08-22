@@ -6,13 +6,36 @@ checkout Claude Code uses — only the wiring differs. Start at the
 
 ## Install
 
-The clone **is** the install: Cursor reads a symlink into `~/.cursor/plugins/local/fnd`, so the
-files it loads are the ones in this checkout. There is no separate "plugin cache" and no
-per-user copy to keep in sync.
+Four steps from a clean machine to a proven install. The clone **is** the install: Cursor reads
+a symlink into `~/.cursor/plugins/local/fnd`, so the files it loads are the ones in this
+checkout. There is no separate "plugin cache" and no per-user copy to keep in sync.
+
+### 0. Prerequisites
+
+- **Cursor itself** — the desktop app from [cursor.com](https://cursor.com), on a current
+  version (the plugin layer — `plugin.json`, hooks, `mcp.json` — is a recent addition; update
+  the app before blaming the install). Sign in so chat works. No Cursor CLI is needed.
+- **Node.js** (any current LTS) and **git** on your PATH — every fnd script and hook runs on
+  bare `node`, no npm installs.
+
+### 1. Clone this repo
 
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins
+```
+
+While the multi-harness port is unreleased, its content lives on the `harness-port` branch —
+check it out before installing (once the port merges, `main` is the branch and this step
+disappears):
+
+```bash
+git checkout harness-port
+```
+
+### 2. Run the installer
+
+```bash
 ./scripts/install.sh --target cursor
 ```
 
@@ -29,14 +52,19 @@ PASS  install:cursor         symlink install, 1 entry(ies) live (root: ~/.cursor
 
 Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target cursor`.
 
-Then, in Cursor:
+### 3. Reload the Cursor window
 
-1. **Reload the window** (Command Palette → *Developer: Reload Window*) — the manifest, the
-   hooks wiring and `mcp.json` are read at startup, so a fresh install is not live until you do.
-2. **Run the smoke test once**: `/smoke-test` in a Cursor chat. It proves the layers a script
-   cannot reach — MCP connectivity, subagent spawning, the commit guards firing, the session
-   conventions arriving. Run it after installing or updating, not every session
-   (`/preflight-checks` owns the recurring per-project role).
+Command Palette (`Cmd+Shift+P`) → *Developer: Reload Window*. The manifest, the hooks wiring
+and `mcp.json` are read at startup, so a fresh install is not live until you do. First load
+also brings MCP auth prompts for the remote servers (Atlassian, Notion) — approve the ones you
+use.
+
+### 4. Run the smoke test once
+
+`/smoke-test` in a Cursor chat. It proves the layers a script cannot reach — MCP connectivity,
+subagent spawning, the commit guards firing, the session conventions arriving. Run it after
+installing or updating, not every session (`/preflight-checks` owns the recurring per-project
+role).
 
 `--copy` installs a real copy instead of the symlink (no-symlink environments); such an install
 does **not** follow `git pull` — re-run `./scripts/install.sh --target cursor --copy` to refresh

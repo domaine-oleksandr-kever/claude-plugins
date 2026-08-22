@@ -11,6 +11,23 @@ every delegating skill hitting an unknown agent.
 
 ## Install
 
+### 0. Prerequisites — the host and the runtime
+
+Skip anything you already have:
+
+- **Codex CLI itself:**
+
+  ```bash
+  npm install -g @openai/codex
+  ```
+
+  (Homebrew ships it too; see the [Codex docs](https://developers.openai.com/codex/cli/) for
+  the current channels.) Then run `codex` once and sign in — with a ChatGPT plan, or an API key
+  if that is how your org runs it. Codex must start and answer a prompt before the plugin is
+  worth installing.
+- **Node.js** (any current LTS) and **git** on your PATH — every fnd script and hook runs on
+  bare `node`, no npm installs.
+
 ### 1. Add the marketplace and install the plugin
 
 ```text
@@ -58,6 +75,7 @@ prompt-JSON guard, mcp-slim's spill-and-stub, and **both git guards**, including
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins
+git checkout harness-port   # only while the port is unreleased — the branch the --ref above named
 ./scripts/install.sh --target codex
 ```
 

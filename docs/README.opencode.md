@@ -10,9 +10,45 @@ conventions.
 
 ## Install
 
+Six steps take a machine that has never seen OpenCode to a proven install: 0 installs the host
+itself, 1–2 clone and link the plugin, 3–4 are two pastes into a config file you own, 5 is
+optional, 6 proves the whole thing in a live session.
+
+### 0. Prerequisites — the host and the runtime
+
+Skip anything you already have:
+
+- **OpenCode itself.** The official installer:
+
+  ```bash
+  curl -fsSL https://opencode.ai/install | bash
+  ```
+
+  (`npm i -g opencode-ai` and `brew install sst/tap/opencode` are the upstream alternatives —
+  see [opencode.ai/docs](https://opencode.ai/docs/) for the current list.) Then connect a model
+  provider: run `opencode auth login` and follow the prompts, or wire a local provider in your
+  config. `opencode` must start and answer a prompt before the plugin is worth installing.
+- **Node.js** (any current LTS) and **git** on the PATH OpenCode inherits — every fnd script and
+  hook runs on bare `node`, no npm installs.
+
+### 1. Clone this repo
+
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins
+```
+
+While the multi-harness port is unreleased, its content lives on the `harness-port` branch —
+check it out before installing (once the port merges, `main` is the branch and this step
+disappears):
+
+```bash
+git checkout harness-port
+```
+
+### 2. Run the installer
+
+```bash
 ./scripts/install.sh --target opencode
 ```
 
@@ -31,32 +67,8 @@ live. The installer links, never replaces a directory of yours:
 > these symlinks, `OPENCODE_CONFIG_DIR` and a global `opencode.json` fragment. Exactly one route
 > will remain — mixing two would duplicate the content.
 
-Then merge two fragments into your own `opencode.json` (nothing links these — they change a
-file you own):
-
-1. **MCP servers** — paste the `mcp` block from `plugins/fnd/opencode/mcp-fragment.json`.
-2. **The commit-guard backstop** — merge the `permission.bash` deny globs from
-   `plugins/fnd/opencode/permission-fragment.example.json`. The JS adapter is the precise layer;
-   these globs are the blunt one that still holds in `--auto` runs and when the adapter never
-   loaded.
-
-   Because they are blunt, the fragment re-allows a few documented false positives — read-only
-   `git config --get core.hooksPath`, `chmod +x` on a hook file,
-   `git push --no-verify-signatures`. Those re-allows are **exact** command strings, never
-   `prefix*` patterns: a trailing `*` swallows the rest of the line, and under last-match-wins an
-   allow like `chmod +x*` would re-permit `chmod +x .husky/pre-commit && git commit --no-verify`
-   that the deny rules above it had just blocked. The cost of exactness is that a variant
-   spelling (another hook name, extra `git push` arguments) stays denied — run those yourself
-   rather than widening the pattern.
-
-Optional: **model tiering**. Generated agents carry no `model:` pin (see below); to opt in, copy
-the `agent` block from `plugins/fnd/opencode/model-profile.cloud.example.json` or
-`model-profile.local.example.json` into your `opencode.json` and replace the ids with ones your
-provider config actually exposes.
-
-### Verify
-
-The installer finishes by running `doctor.cjs --target opencode`:
+The installer finishes by running `doctor.cjs --target opencode` for you — read those rows
+before moving on:
 
 ```text
 PASS  generator-sync         generated dirs match scripts/gen-host-adapters.cjs
@@ -65,7 +77,61 @@ PASS  install:opencode       symlink install, 44 entry(ies) live (root: ~/.confi
 
 Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target opencode`.
 
-Then start a **new OpenCode session** and run the smoke test once: `/smoke-test` (the command
+The next two steps are pastes into **your own** `opencode.json` — the installer never links or
+edits that file, because it is yours. The global one lives at
+`~/.config/opencode/opencode.json`; if it does not exist yet, create it as:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json"
+}
+```
+
+### 3. Paste the MCP servers into your `opencode.json`
+
+Open `plugins/fnd/opencode/mcp-fragment.json` (generated from the canonical server list) and
+copy its `mcp` object — the whole `"mcp": { … }` block, six servers — into the top level of your
+`opencode.json`, next to `$schema`. Do not copy the `_comment` key. If your config already has
+an `mcp` block, add the six fnd entries inside it rather than replacing yours.
+
+The end state looks like:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "chrome-devtools-mcp": { "type": "local", "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--isolated"] },
+    "atlassian": { "…": "the other five entries, verbatim from the fragment" }
+  }
+}
+```
+
+### 4. Paste the commit-guard backstop
+
+Same file, second block: merge the `permission.bash` object from
+`plugins/fnd/opencode/permission-fragment.example.json` into your `opencode.json` (top-level
+`permission` key, next to `mcp`). The JS adapter is the precise layer; these globs are the blunt
+one that still holds in `--auto` runs and when the adapter never loaded.
+
+Because they are blunt, the fragment re-allows a few documented false positives — read-only
+`git config --get core.hooksPath`, `chmod +x` on a hook file,
+`git push --no-verify-signatures`. Those re-allows are **exact** command strings, never
+`prefix*` patterns: a trailing `*` swallows the rest of the line, and under last-match-wins an
+allow like `chmod +x*` would re-permit `chmod +x .husky/pre-commit && git commit --no-verify`
+that the deny rules above it had just blocked. The cost of exactness is that a variant
+spelling (another hook name, extra `git push` arguments) stays denied — run those yourself
+rather than widening the pattern.
+
+### 5. Optional: model tiering
+
+Generated agents carry no `model:` pin (see below); to opt in, copy
+the `agent` block from `plugins/fnd/opencode/model-profile.cloud.example.json` or
+`model-profile.local.example.json` into your `opencode.json` and replace the ids with ones your
+provider config actually exposes.
+
+### 6. Run the smoke test once
+
+Start a **new OpenCode session** (config edits load at startup) and run: `/smoke-test` (the command
 shim; OpenCode itself invokes skills by model choice only). It proves MCP connectivity, subagent
 delegation, the commit guards firing and the session context arriving. Run it after installing
 or updating, not every session — `/preflight-checks` owns the recurring per-project role.

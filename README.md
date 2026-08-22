@@ -128,6 +128,12 @@ and **OpenCode**. Every route ends the same way: the installer (or `/plugin inst
 with a checkout, `doctor.cjs` says whether the host will actually load it, and one `smoke-test`
 run in a live session proves the layers a script cannot reach.
 
+The table is the one-line summary; the **Details** column links the full numbered walkthrough
+for that host — starting from "the host CLI is not even installed yet" (prerequisites, sign-in,
+which branch to check out), through every config paste, to the smoke test. If you are
+installing for the first time, go straight to your host's doc and follow it top to bottom; the
+sections below the table are the same story compressed for someone who has done it before.
+
 | Host | Install | Verify | Details |
 |---|---|---|---|
 | Claude Code | `/plugin marketplace add …` + `/plugin install fnd@domaine` | `/fnd:smoke-test` | below |
