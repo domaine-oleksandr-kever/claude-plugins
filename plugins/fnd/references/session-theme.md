@@ -3,7 +3,11 @@
 Single home of the session-theme flow. `ship` (Step 0) and `worktree` both **offer** it and
 must offer it identically; `preview-theme`, the pipeline's qa phase, `create-pull-request`,
 and aftercare all **consume** it. Read this file when the offer actually has to run — the
-silent-reuse path needs nothing from here.
+silent-reuse path needs nothing from here. **Plugin root** = the plugin's own directory; this
+file is `<plugin root>/references/session-theme.md`, and every `<plugin root>/…` path below
+resolves the same way.
+On Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands — the host
+expands it; on other hosts substitute the plugin root's absolute path.
 
 ## Why
 
@@ -20,7 +24,7 @@ the PR's theme-preview table, and aftercare refreshes.
    `session-theme: <id>` line (read the last one, same idiom as `dev-port:`:
    `grep -oE 'session-theme: [0-9]+' notes.md | tail -1 | tr -dc '0-9'`) → that id is the
    answer; skip the question and run
-   `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh pin --theme <id>` **silently** to
+   `<plugin root>/scripts/create-preview-theme.sh pin --theme <id>` **silently** to
    re-assert it in *this* checkout's config. That is not busywork: the line outlives the
    checkout that wrote it (the workspace is shared with every worktree, and a worktree's toml
    is a fresh copy), so "recorded" never implies "pinned here". Re-pinning an id that is
@@ -29,12 +33,13 @@ the PR's theme-preview table, and aftercare refreshes.
    config: the skills may not read it, and `info`'s `dev_theme_id` looks identical whether it
    resolves a session pin or the untouched shared dev theme — treating that as "already
    pinned" would silently adopt the shared theme, the exact collision this exists to prevent.
-2. **Otherwise → one `AskUserQuestion`, never a block**, with the resolved commands (plugin
-   root expanded) inside the question text so the developer sees what will run:
+2. **Otherwise → one question to the developer (on Claude Code: `AskUserQuestion`), never a
+   block**, with the resolved commands (plugin root spelled out as its absolute path) inside
+   the question text so the developer sees what will run:
    - **Create one now** →
-     `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create --name "<name>" --reuse --pin-toml`
+     `<plugin root>/scripts/create-preview-theme.sh create --name "<name>" --reuse --pin-toml`
    - **Use an existing theme** → the developer supplies the numeric id →
-     `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh pin --theme <id>` — pin-only: it
+     `<plugin root>/scripts/create-preview-theme.sh pin --theme <id>` — pin-only: it
      validates the id against the store and refuses the live theme, and it pushes nothing.
 
    `<name>` is **the existing derivation, not a free-text description** — swap `info`'s
@@ -112,7 +117,7 @@ can differ; `refresh` is unaffected either way.
   One caveat: a hand-written theme id that `pin` reported as `pin=unchanged` carries no tag
   and is not reverted.
 - `error=` outcomes (incl. the live-theme refusal that guards pin-only mode) live in
-  `${CLAUDE_PLUGIN_ROOT}/references/preview-theme-errors.md`.
+  `<plugin root>/references/preview-theme-errors.md`.
 
 ## Consumers — everything reuses the same theme
 

@@ -1,0 +1,33 @@
+---
+description: Foundation theme blocks conventions — core-* pattern, scoped CSS, schema. Auto-attaches on blocks/*.liquid; covers project deltas, not generic Shopify block syntax.
+globs: blocks/*.liquid
+alwaysApply: false
+---
+
+# Theme Blocks — Foundation Conventions
+
+**Source of truth:** for current block syntax/APIs (`content_for`, `{% schema %}`,
+static vs dynamic blocks, presets, targeting) query `shopify-dev-mcp`
+(`learn_shopify_api` → `search_docs_chunks`). This file covers only
+Foundation-specific conventions.
+
+## Core Blocks
+
+**Core Blocks** are atomic, pattern-library components prefixed `core-`
+(`core-button.liquid`, `core-heading.liquid`, `core-text.liquid`, …). They are
+the backbone of Domaine's storefront tooling.
+
+- Core blocks may be edited directly when needed.
+- When pulling updates from the foundation repo, manually sync changes to
+  `blocks/core-*.liquid` — they are not auto-merged.
+
+## CSS
+
+- CSS exclusive to one block goes in that block's `{% stylesheet %}`, written in BEM.
+- CSS reused elsewhere goes in `src/styles/_base.css` (shared `@layer base`/`components`), not the block.
+- See [css-standards.mdc](css-standards.mdc).
+
+## Related rules
+
+- Schemas → [schemas.mdc](schemas.mdc)
+- Templates that render blocks → [templates.mdc](templates.mdc)

@@ -4,14 +4,20 @@ Everything a merchant clicks together in the theme editor is stored as **JSON fi
 theme**: `templates/*.json` (which sections a page has, their order, blocks, per-section
 settings), `sections/*.json` (header/footer section groups) and `config/settings_data.json`
 (global theme settings). You have no customizer UI — but you don't need it: read and write those
-files directly with `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh`, and any customizer-dependent
-AC, bug reproduction, or research question becomes scriptable.
+files directly with `<plugin root>/scripts/theme-json.sh`, and any customizer-dependent
+AC, bug reproduction, or research question becomes scriptable. **Plugin root** = the plugin's own
+directory; this file is `<plugin root>/references/theme-customizer-state.md`, and every
+`<plugin root>/…` path below resolves the same way.
+On Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands — the host
+expands it; on other hosts substitute the plugin root's absolute path.
 
 ## Always available — not only when finishing a plan
 
 **Read-only inspection is fair game at any moment**: researching a ticket, writing a TA,
 debugging, QA. `themes` lists the store's themes; `get` reads any file from **any** theme —
-including the live one (reading live is safe). Don't guess what's configured on the store — look:
+including the live one (reading live is safe). Don't guess what's configured on the store — look
+(substitute the plugin root's absolute path for the variable below;
+on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so these run verbatim):
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh themes                       # id / name / role
@@ -26,8 +32,8 @@ alike) with a self-describing `note=large_file` line — never redirect a big `g
 a snapshot; `--out` is the snapshot path (byte-exact). A human terminal prints in full.
 
 Writes (`set`) follow the protocol below. General Admin GraphQL (products, metafields,
-metaobjects, files) goes through `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` — see
-`${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md`.
+metaobjects, files) goes through `<plugin root>/scripts/shopify-admin-gql.sh` — see
+`<plugin root>/references/metafield-metaobject-setup.md`.
 
 ## Why these files never route through the working tree
 
@@ -139,5 +145,5 @@ nothing (same rule as data-driven AC in `metafield-metaobject-setup.md`).
 ## Sandbox for aggressive walks
 
 A walk would thrash the shared dev theme (many states, risky JSON) → take a disposable copy per
-`${CLAUDE_PLUGIN_ROOT}/references/customizer-sandbox.md` (preview theme or `theme duplicate`;
+`<plugin root>/references/customizer-sandbox.md` (preview theme or `theme duplicate`;
 mutate freely, verify, **delete it** after).

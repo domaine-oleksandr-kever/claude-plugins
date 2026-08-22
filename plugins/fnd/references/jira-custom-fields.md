@@ -82,7 +82,7 @@ This was verified working — it's the source of the `jira-field-ids.md` table.
 
 5. **If a resolved ID differs from the `jira-field-ids.md` table (and you're on
    `meetdomaine`), report it** — `field_id_mismatch: <old> → <new>` in your result; the
-   main session offers `/fnd:report-plugin-issue`. The IDs are site-wide, so fixing the
+   main session offers the `report-plugin-issue` skill. The IDs are site-wide, so fixing the
    table once spares every workflow from re-running discovery. Only edit on confirmation.
 
 > Tip: `fields: ["*all"]` can return a very large response. If your tooling truncates it, save the
@@ -97,7 +97,9 @@ Always request `responseContentFormat: "markdown"`. Then decide **per field** by
 - **Still raw ADF** (a JSON object with `type: "doc"`) → **decode it with the bundled converter**.
   The markdown conversion does **not** apply to rich-text **custom** fields — Acceptance Criteria,
   Assumptions, Technical Approach, Steps to test, Documentation Links come back as raw ADF even
-  under `markdown` format (verified on ELC-126). Don't hand-walk the JSON; run:
+  under `markdown` format (verified on ELC-126). Don't hand-walk the JSON; substitute the
+  plugin's own directory for the variable below —
+  on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so the command runs verbatim:
 
   ```bash
   node ${CLAUDE_PLUGIN_ROOT}/scripts/adf-to-md.cjs <issue.json> --field <customfield_id>

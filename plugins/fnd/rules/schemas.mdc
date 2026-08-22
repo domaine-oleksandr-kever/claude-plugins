@@ -1,0 +1,40 @@
+---
+description: Foundation section/block schema conventions — settings organization, label title-case, multi-brand preset injection. Auto-attaches on blocks|sections|schemas; covers project deltas, not generic Shopify schema syntax.
+globs: blocks/*.liquid,sections/*.liquid,schemas/*
+alwaysApply: false
+---
+
+# Schema Standards
+
+**Source of truth:** for current section/block schema settings syntax/APIs query `shopify-dev-mcp` (`learn_shopify_api` → `search_docs_chunks`). This file covers only Foundation-specific conventions.
+
+Every section and block authors its `{% schema %}` JSON inline in the `.liquid` file.
+
+## Multi-brand presets
+
+Do not hand-edit a section's `presets` for per-brand variants. Brand-specific presets live in `multi-brand/brands/<brand>/schema-presets/sections/<section>.json` and are merged into each section's `{% schema %}` `presets` key at build time by `multi-brand/vite-plugin/buildSchemaPresets.ts`. Edit the brand JSON, not the built `.liquid`.
+
+## Label Guidelines
+
+- Keep labels concise (under 30 characters).
+- Let the setting type carry context — "Columns", not "Number of columns".
+- No verb-based labels for checkboxes.
+- Use title case — "Show Vendor", not "show vendor".
+
+## Setting Organization Rules
+
+1. **Resource pickers first.** Collection, product, blog, page pickers come first — they are required for section functionality.
+2. **Visual-impact order.** Layout (columns, spacing) → typography (fonts, sizes) → color (background, text) → padding/margin last.
+3. **Group with headers.**
+
+```json
+{
+  "type": "header",
+  "content": "Layout"
+}
+```
+
+## References
+
+- [Input settings](https://shopify.dev/docs/storefronts/themes/architecture/settings/input-settings)
+- [Sidebar settings](https://shopify.dev/docs/storefronts/themes/architecture/settings/sidebar-settings)

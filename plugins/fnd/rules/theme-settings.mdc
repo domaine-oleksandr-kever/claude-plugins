@@ -1,0 +1,17 @@
+---
+description: Foundation theme settings conventions — translated labels, critical font stacks, color_scheme_group. Auto-attaches on config/*.json; covers project deltas, not generic Shopify settings_schema.json syntax.
+globs: config/*.json
+alwaysApply: false
+---
+
+# Theme Settings
+
+**Source of truth:** for current theme settings / settings_schema.json syntax/APIs query `shopify-dev-mcp` (`learn_shopify_api` → `search_docs_chunks`). This file covers only Foundation-specific conventions.
+
+Theme settings live in `config/settings_schema.json`; merchant-set values in `config/settings_data.json`.
+
+## Foundation conventions
+
+- Every group `name`, setting `label`, and `info` must be a `t:` translation key resolved from `locales/*.schema.json` — never a literal string (the only exception is the `theme_info` object). See [locales.mdc](locales.mdc).
+- Typography is driven by the critical font-stack text settings (`critical_heading_font_stack`, `critical_body_font_stack`, `font_preload_file`), not a `font_picker`.
+- Use `color_scheme_group` for theme color schemes.

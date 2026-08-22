@@ -1,7 +1,7 @@
 # Research pressure-test — cross-checking a draft against fresh external sources
 
 Shared reference for every flow that drafts a plan, a TA, or a ship implementation plan
-(`/write-technical-approach`, `/develop-feature-or-fix`, `/fnd:ship` Step 3). A subagent
+(`write-technical-approach`, `develop-feature-or-fix`, `ship` Step 3). A subagent
 validates the **draft** against current external sources and returns findings; the raw
 research never enters the calling context.
 
@@ -34,7 +34,8 @@ Spawn one **general-purpose subagent**:
 - **Return** — a compact findings list: **risks** / **corrections** / **confirmations**,
   each one line with its source. Never page dumps, never a research report.
 
-**Model:** ship pins `model: opus`; the solo skills let it inherit the session model.
+**Model:** ship pins the deepest-review tier (on Claude Code: `model: opus`); the solo skills let
+it inherit the session model.
 
 ## Folding in
 

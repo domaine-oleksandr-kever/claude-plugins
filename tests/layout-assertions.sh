@@ -211,6 +211,33 @@ if [ -f "$CODEX_MANIFEST" ]; then
   done
 fi
 
+# ------------------------------------------- smoke-test skill wired to what it verifies --
+# The post-install exercise names things that live elsewhere: its reference file, the canonical
+# MCP server list, and the fixture its compression row runs on. Each of those can move without
+# the skill noticing, and a smoke test that probes a server the plugin no longer ships (or skips
+# one it just added) reports a green install that was never checked.
+SMOKE_SKILL="$PLUGIN_DIR/skills/smoke-test/SKILL.md"
+SMOKE_REF="$PLUGIN_DIR/references/smoke-test-checks.md"
+if [ -f "$SMOKE_SKILL" ]; then
+  if [ -f "$SMOKE_REF" ]; then ok; else bad smoke-reference "references/smoke-test-checks.md missing"; fi
+  if grep -qF 'references/smoke-test-checks.md' "$SMOKE_SKILL"; then ok
+  else bad smoke-reference-link "smoke-test/SKILL.md does not read references/smoke-test-checks.md"; fi
+
+  if [ -f "$SMOKE_REF" ]; then
+    for s in $("$NODE_BIN" -e '
+      const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      process.stdout.write(Object.keys(m.mcpServers || {}).join("\n"));
+    ' "$CANON" 2>/dev/null); do
+      if grep -qF "\`$s\`" "$SMOKE_REF"; then ok
+      else bad "smoke-mcp-$s" "no cheap-call row for MCP server '$s' in smoke-test-checks.md"; fi
+    done
+    # the compression row runs a real bundled fixture — a renamed fixture would make it unrunnable
+    fx="$(grep -o 'tests/fixtures/[A-Za-z0-9._-]*' "$SMOKE_REF" | head -1)"
+    if [ -n "$fx" ] && [ -f "$ROOT/$fx" ]; then ok
+    else bad smoke-fixture "smoke-test-checks.md names a fixture that does not exist: '${fx:-none}'"; fi
+  fi
+fi
+
 # ------------------------------- Cursor marketplace mirrors the Claude one's identity --
 CM="$ROOT/.cursor-plugin/marketplace.json"
 CLM="$ROOT/.claude-plugin/marketplace.json"

@@ -1,8 +1,12 @@
 # Metafield / metaobject store setup — inspect, create, mock, bind
 
 Shared reference for `/develop-feature-or-fix` (and the Data / Config section of
-`/write-technical-approach`). **When the ticket — or a linked doc (e.g. a Notion data-mapping /
-schema page, see `${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md`) — describes a
+`/write-technical-approach`). Plugin root = the plugin's own directory; this file is
+`<plugin root>/references/metafield-metaobject-setup.md`, and every `<plugin root>/…` path below
+resolves the same way —
+on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands, elsewhere
+its absolute path. **When the ticket — or a linked doc (e.g. a Notion data-mapping /
+schema page, see `<plugin root>/references/reading-linked-docs.md`) — describes a
 metafield or metaobject**, the theme code has nothing to render until the store's data model
 exists. This is how you get it in place: inspect what's already there, create what's missing in
 dependency order, mock content, and bind it to a test product so the feature can be built and QA'd.
@@ -43,7 +47,7 @@ Pick based on whether you have **store API access** (either kind — see **Store
 
 - **Mode 1 — store access available** (CLI ≥ 4.x stored `shopify store auth`, **or** an Admin API
   token). Run the inspection query **and** all mutations yourself via the bundled runner
-  `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` — it picks the engine automatically
+  `<plugin root>/scripts/shopify-admin-gql.sh` — it picks the engine automatically
   (`store execute` first, token fallback). Drive it end to end: inspect → diff → create → mock →
   bind → report the resulting gids and final state. **Never print or `Read` any secret** (`.env`,
   `shopify.theme.toml`); the runner consumes credentials without exposing them.
@@ -71,7 +75,7 @@ shopify store auth --store <store>.myshopify.com \
 
 That list is the **full example** (metafields/metaobjects + products + files + themes — the
 `read_themes`/`write_themes` pair powers `theme-json.sh`, the customizer-state flow in
-`${CLAUDE_PLUGIN_ROOT}/references/theme-customizer-state.md`). **Don't hardcode it — agree the
+`<plugin root>/references/theme-customizer-state.md`). **Don't hardcode it — agree the
 scope list with the developer first**: propose what the task actually needs and ask which level
 this store allows. On some stores (client/production especially) only the `read_*` scopes are
 appropriate — inspection still works fully; you just hand mutations to the developer (Mode 2)
@@ -85,7 +89,7 @@ is interactive and hangs a non-TTY run. Mutations are auto-opted-in by the runne
 (`--allow-mutations`); the CLI blocks them otherwise.
 
 **Auth fails, expires, or the browser step misbehaves** → read
-`${CLAUDE_PLUGIN_ROOT}/references/store-auth-troubleshooting.md` — the fix per symptom and the
+`<plugin root>/references/store-auth-troubleshooting.md` — the fix per symptom and the
 ready-to-relay re-auth blurb (never just say "auth expired"; don't interrupt if the runner
 already fell back to the token engine).
 
@@ -98,7 +102,9 @@ sales channels → Develop apps → your app → API credentials → Admin API a
 the repo's **gitignored `.env`** as **`SHOPIFY_ADMIN_TOKEN=shpat_…`** (alongside the existing
 `BRAND` / `FIGMA_TOKEN`). **Never `Read` `.env` yourself** — that pulls the secret into context.
 
-Either way, run everything through the runner:
+Either way, run everything through the runner — substitute the plugin root's absolute path for
+the variable below;
+on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so the command runs verbatim:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh --query .claude/fnd/<work-id>/tmp/inspection.graphql \
@@ -116,7 +122,7 @@ on a GraphQL failure (exit 0, mirroring the Admin API's HTTP 200 + errors) — t
 wraps/unboxes `store execute`'s native output so responses read identically either way, and a
 GraphQL error never triggers the token fallback — and for a **mutation**, no failure after an
 actually-attempted execute does (the mutation may already be applied server-side; the runner
-exits with `error=store_execute_failed_mutation` — verify store state before re-running). Put each query/mutation in a `.graphql` file **inside the task workspace** — scratch/inspection queries in `.claude/fnd/<work-id>/tmp/`, the Mode 2 living setup file at the workspace root; never the repo's `docs/` (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) — and pass it with `--query` (and
+exits with `error=store_execute_failed_mutation` — verify store state before re-running). Put each query/mutation in a `.graphql` file **inside the task workspace** — scratch/inspection queries in `.claude/fnd/<work-id>/tmp/`, the Mode 2 living setup file at the workspace root; never the repo's `docs/` (`<plugin root>/references/task-workspace.md`) — and pass it with `--query` (and
 `--operation` when the file holds several named operations — for the store engine the runner
 extracts the named operation itself). If it exits with `error=no_admin_token`, **neither** engine
 is set up — its hint line names both fixes (add the token to `.env`, or the one-time
@@ -176,7 +182,7 @@ product metafield → mock instances → product bind):
 Write it to the task workspace — `.claude/fnd/<work-id>/metaobject-setup.graphql` (and, if
 useful, a companion `tmp/inspection.graphql` for STEP 0) — not the repo's `docs/`, so
 ticket-scoped working files never ship with the branch
-(`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`). Mirror the ELC-257 file's shape:
+(`<plugin root>/references/task-workspace.md`). Mirror the ELC-257 file's shape:
 
 - **Header comment block**: API version, the per-step **scopes** required
   (`read/write_metaobject_definitions`, `write_metaobjects`, `read/write_products`), a **diff vs

@@ -17,7 +17,7 @@ Draft a Technical Approach (TA) for a Jira ticket. Follow the phases in order.
 Series position: Workflow 2 — after ticket validation, before `develop-feature-or-fix`.
 Input (ask if missing): **Jira ticket URL or key** (`jira_ticket`) — its **Description** and **Acceptance Criteria** are the governing source of truth.
 Operating mode: **Phase 1 is analysis + outline only** — no repo or Jira writes until the developer approves the outline (on Claude Code: run Phase 1 in plan mode and leave plan mode on approval — that is what the `[plan mode]` marker below means); Jira updates only after approval.
-Model: on Claude Code unchanged (whatever the session runs); on Cursor **Claude Sonnet** (translating ambiguous requirements into a plan); on Codex `gpt-5.6-terra` (medium reasoning, proposed); on OpenCode the session model — no pin.
+Model: on Claude Code unchanged (whatever the session runs); on Cursor **Claude Sonnet** (translating ambiguous requirements into a plan); on Codex (proposed) the `standard` tier of `../../references/host-model-map.md`; on OpenCode the session model — no pin.
 
 ## North star
 

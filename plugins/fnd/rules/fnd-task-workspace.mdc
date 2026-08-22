@@ -1,0 +1,26 @@
+---
+description: Per-ticket task workspace under .claude/fnd/<work-id>/ — read it before re-asking, write to it as you go.
+alwaysApply: true
+---
+
+<!-- Canonical source: hooks/task-workspace.md (injected at sessionStart on Claude Code).
+     The hook text is authoritative; this is a hand-made transplant. M8 garden check: a
+     generator should own this file so the two cannot drift. -->
+
+## Foundation convention — task workspace (per-ticket memory)
+
+When work is tied to a Jira ticket (key in the conversation or in the branch name):
+
+- **Read first.** If `.claude/fnd/<work-id>/` exists (`<work-id>` = ticket key, or branch
+  slug for a multi-ticket batch), read it before re-asking or re-fetching: `progress.md`
+  says where the work stands — report that and offer the next unchecked step (on Claude Code,
+  its `session` field + `claude --resume <id>` reopens that conversation); `notes.md` holds
+  decisions and gotchas.
+- **Write as you go** — reader outputs, doc extracts, approved plans / checklists,
+  decisions → into the workspace, so context compaction and new sessions lose nothing.
+- **Placement:** scratch (test scripts, query drafts, dumps) → `.claude/fnd/<work-id>/tmp/`;
+  durable artifacts (e.g. the living `metaobject-setup.graphql`) → workspace root — never
+  the project root or `docs/`. Details + freshness rules: `references/task-workspace.md` in
+  the fnd plugin root (the directory above this rules directory).
+- Non-trivial ticket work with **no workspace yet** → offer the `save-task-context` skill once
+  (on Claude Code, `/fnd:save-task-context`).

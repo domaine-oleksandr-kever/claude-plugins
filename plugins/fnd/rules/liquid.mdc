@@ -1,0 +1,81 @@
+---
+description: Foundation Liquid conventions — prefer inlining Liquid over assign/capture. Auto-attaches on *.liquid; covers project deltas, not generic Shopify Liquid syntax.
+globs: *.liquid
+alwaysApply: false
+---
+
+# Liquid Syntax Standards
+
+**Source of truth:** for current Liquid tags/filters/objects syntax/APIs query `shopify-dev-mcp` (`learn_shopify_api` → `search_docs_chunks`). This file covers only Foundation-specific conventions.
+
+## Inline Variables Pattern
+
+For props that are relatively straightforward, inline the Liquid instead of declaring extra variables. In smaller components it makes little difference, but in bigger ones it avoids scrolling up and down to know what is applied where.
+
+**✅ Do this (inline approach):**
+
+```liquid
+<div
+  class='component component--{{ settings.style_modifier }}'
+  style='
+    color: {{ settings.text_color }};
+    {% if settings.show_border %}
+      border: 1px solid {{ settings.border_color }};
+    {% endif %}
+  '
+>
+  <h2>{{ 'sections.component.title' | t }}</h2>
+
+  {{ content | truncate: settings.max_length | default: 200 }}
+
+  <a
+    href='{{ link_url }}'
+    class='link--{{ settings.link_style | default: 'primary' }}'
+  >
+    {{ 'general.read_more' | t }}
+  </a>
+</div>
+```
+
+**❌ Don't do this (variable declaration approach):**
+
+```liquid
+{% liquid
+  assign component_class = 'component component--' | append: settings.style_modifier
+  assign text_color = settings.text_color
+  assign truncate_length = settings.max_length | default: 200
+  assign link_class = 'link--' | append: settings.link_style | default: 'primary'
+%}
+
+{% capture component_style %}
+  color: {{ text_color }};
+  {% if settings.show_border %}
+    border: 1px solid {{ settings.border_color }};
+  {% endif %}
+{% endcapture %}
+
+<div
+  class='{{ component_class }}'
+  style='{{ component_style }}'
+>
+  <h2>{{ 'sections.component.title' | t }}</h2>
+
+  {{ content | truncate: truncate_length }}
+
+  <a
+    href='{{ link_url }}'
+    class='{{ link_class }}'
+  >
+    {{ 'general.read_more' | t }}
+  </a>
+</div>
+```
+
+**Exceptions — declare a variable when:**
+
+- Liquid filter parameters require string values and complex logic cannot be inlined.
+- The same complex calculation is used multiple times.
+- The logic is extremely complex and inlining would harm readability.
+- You build a string incrementally with conditional parts.
+
+**Benefits:** easier to see what is applied where, no scrolling to find definitions, lower cognitive load and more maintainable code in larger components.

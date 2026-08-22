@@ -11,6 +11,7 @@
  *   node doctor.cjs                          # bundle checks only
  *   node doctor.cjs --target cursor          # + the Cursor install location
  *   node doctor.cjs --target opencode        # + the OpenCode install location
+ *   node doctor.cjs --target codex           # + the Codex subagent links
  *   node doctor.cjs --root <dir> --home <dir>   # overrides (tests, non-standard installs)
  *
  * Every check prints exactly one PASS / FAIL / SKIP line. SKIP means "nothing to verify here yet"
@@ -45,6 +46,9 @@ const MANIFEST_POINTERS = {
     { key: 'skills' },
     { key: 'hooks', generated: true },
     { key: 'mcpServers', generated: true },
+    // Declared only if M1b finds that Codex reads an agents pointer from a plugin manifest;
+    // until then the subagents are linked by scripts/install.sh and this row stays silent.
+    { key: 'agents', generated: true },
   ],
 };
 
@@ -55,14 +59,21 @@ const GENERATOR_REL = 'scripts/gen-host-adapters.cjs';
 // <root>/.fnd-install-mode and points every entry back into this checkout. `probe` lists the
 // entries a hand-made install would still create, so an install without the record is recognized.
 // M1C-DEFAULT: the OpenCode root is provisional — spike M1c picks the final lever.
+// Codex is a HALF-cache host: skills, hooks and MCP come from its marketplace cache, but the TOML
+// subagents have no verified plugin-level channel (M1b), so scripts/install.sh links them locally —
+// and an install without those links spawns nothing, which is what this row exists to say.
 const HOST_INSTALLS = {
   cursor: { root: (home) => path.join(home, '.cursor', 'plugins', 'local'), probe: ['fnd'] },
   opencode: { root: (home, xdg) => path.join(xdg || path.join(home, '.config'), 'opencode'), probe: [] },
+  codex: {
+    root: (home) => path.join(home, '.codex'),
+    probe: ['agents/jira-reader.toml'],
+    note: 'subagents only — skills/hooks/MCP come from ~/.codex/plugins/cache',
+  },
 };
 // Version-cache hosts: the host clones into its own cache, so there is no local install to inspect.
 const CACHE_HOSTS = {
   claude: '~/.claude/plugins/cache (managed by /plugin install)',
-  codex: '~/.codex/plugins/cache (managed by codex plugin marketplace)',
 };
 
 const INSTALL_MODE_FILE = '.fnd-install-mode';
@@ -83,7 +94,7 @@ function out(line) {
   }
 }
 
-const USAGE = 'usage: doctor.cjs [--target cursor|opencode|claude|codex] [--root <dir>] [--home <dir>]\n';
+const USAGE = 'usage: doctor.cjs [--target cursor|opencode|codex|claude] [--root <dir>] [--home <dir>]\n';
 
 function usage(msg) {
   if (!msg) {
@@ -396,6 +407,7 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
   }
 
   const host = HOST_INSTALLS[target];
+  const note = host.note ? ' [' + host.note + ']' : '';
   const root = host.root(homeDir, xdgConfigHome);
   const modeFile = path.join(root, INSTALL_MODE_FILE);
   const repoReal = realpath(repoRoot);
@@ -408,10 +420,10 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
       if (!fs.lstatSync(entry, { throwIfNoEntry: false })) continue;
       const problem = entryProblem(entry, 'symlink', repoReal);
       if (problem) fail(label, entry + ': ' + problem);
-      else pass(label, entry + ' → ' + realpath(entry) + ' (no installer record)');
+      else pass(label, entry + ' → ' + realpath(entry) + ' (no installer record)' + note);
       return;
     }
-    fail(label, 'not installed — no ' + modeFile + ' (run scripts/install.sh --target ' + target + ')');
+    fail(label, 'not installed — no ' + modeFile + ' (run scripts/install.sh --target ' + target + ')' + note);
     return;
   }
 
@@ -446,7 +458,7 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
     );
     return;
   }
-  pass(label, mode + ' install, ' + record.entries.length + ' entry(ies) live (root: ' + root + ')');
+  pass(label, mode + ' install, ' + record.entries.length + ' entry(ies) live (root: ' + root + ')' + note);
 }
 
 function main() {

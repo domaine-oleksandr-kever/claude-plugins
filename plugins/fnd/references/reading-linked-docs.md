@@ -20,7 +20,11 @@ text). De-duplicate, then read **all** of them — not only the Notion ones.
 (not summarized or truncated away) from an earlier workflow run, and links with a **fresh**
 task-workspace copy (`.claude/fnd/<work-id>/doc-*.md`, matched by `url` frontmatter —
 freshness probe:
-`${CLAUDE_PLUGIN_ROOT}/references/task-workspace-freshness.md`). Fetch only what's missing or stale.
+`<plugin root>/references/task-workspace-freshness.md` — **plugin root** = the plugin's own
+directory, this file being `<plugin root>/references/reading-linked-docs.md`, and every
+`<plugin root>/…` path below resolves the same way;
+on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands).
+Fetch only what's missing or stale.
 
 ## 2 — Read each link — delegate, in parallel
 
@@ -33,7 +37,7 @@ freshness probe:
 The raw pages stay in the readers' disposable contexts — the main loop receives only the
 extracts: data mappings, field/property lists, copy, asset links, constraints — and (for
 data-model docs) the metafield / metaobject schema, which feeds
-`${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md`. Read every returned
+`<plugin root>/references/metafield-metaobject-setup.md`. Read every returned
 `conflicts` / `needs_clarification` field — an unreadable link or a doc-vs-ticket
 contradiction surfaces to the developer, never silently drops. Reading a link inline via
 the MCPs is the fallback, not the default — only for a **single** link whose MCP is
@@ -48,7 +52,7 @@ path means the save never landed (a denied `Write` in plan mode, say) — write 
 extract to the workspace yourself before proceeding.
 Only an inline read (the §2 fallback) saves manually: the **extract** (§2's "what the
 task needs" — never the raw page) to `.claude/fnd/<work-id>/doc-<slug>-<hash>.md` — file format
-and frontmatter: `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`; freshness probes:
+and frontmatter: `<plugin root>/references/task-workspace.md`; freshness probes:
 `task-workspace-freshness.md`. A cached extract that lacks something your task needs
 isn't stale, it's incomplete — re-read the source.
 

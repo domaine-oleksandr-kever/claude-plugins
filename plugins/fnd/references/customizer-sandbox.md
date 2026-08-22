@@ -4,8 +4,11 @@ Read this only when a theme-JSON walk would thrash the shared dev theme
 (gated from `theme-customizer-state.md`).
 
 When a test needs many states or risky JSON, take a disposable copy instead: the ticket's
-preview theme from `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh` (builds the project,
-pushes an unpublished theme — the natural sandbox during development), or
+preview theme from `<plugin root>/scripts/create-preview-theme.sh` (**plugin root** = the
+plugin's own directory, this file being `<plugin root>/references/customizer-sandbox.md`;
+on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands, elsewhere
+its absolute path) — the script builds the project and
+pushes an unpublished theme, the natural sandbox during development — or
 `shopify theme duplicate -t <id> -n "fnd-<ticket>-sandbox" -f --json` (needs theme CLI auth).
 A fresh duplicate is copied **asynchronously** — for the first seconds its files return
 `NOT_FOUND` via Admin GraphQL even though the theme id already exists; poll `theme-json.sh

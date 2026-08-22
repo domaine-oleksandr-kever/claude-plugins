@@ -32,4 +32,4 @@ The site host works as `cloudId` directly; only if it is rejected call
 ID **absent from the `names` map** → wrong/renamed ID: rediscover per
 `jira-custom-fields.md` → Step B, use the resolved ID for the session, and report
 `field_id_mismatch: <old> → <new>` in your result so the developer can fix this table
-once, site-wide (offer `/fnd:report-plugin-issue`; never edit or file unasked).
+once, site-wide (offer the `report-plugin-issue` skill; never edit or file unasked).

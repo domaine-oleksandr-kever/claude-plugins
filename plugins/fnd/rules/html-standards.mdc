@@ -1,0 +1,61 @@
+---
+description: Foundation HTML/markup conventions — CamelCase IDs, custom-element patterns. Auto-attaches on *.liquid; covers project deltas, not generic HTML5/ARIA.
+globs: *.liquid
+alwaysApply: false
+---
+
+# Foundation HTML Conventions
+
+Project-specific markup deltas only. For generic HTML5, semantic elements, form
+inputs, and ARIA reference, use [MDN](mdc:https://developer.mozilla.org).
+
+## ID Naming Convention
+
+Use `CamelCase` for IDs and always append the section/block identifier — these
+are the only values guaranteed unique on the page.
+
+```html
+<section id="FeaturedCollection-{{ section.id }}">
+<div id="ProductCard-{{ block.id }}">
+<dialog id="ProductModal-{{ product.id }}-{{ section.id }}">
+<form id="ProductForm-{{ product.id }}-{{ section.id }}">
+```
+
+## Custom Elements
+
+Prefer native HTML where it suffices. Where the theme needs animation, focus
+trapping, or global state, use these registered custom elements instead of
+inline scripts.
+
+**Quick shop** — wraps a trigger; the quickshop dialog is rendered/handled
+globally (state in [modal store](mdc:src/stores/modal.ts)), markup in
+[snippets/quickshop.liquid](mdc:snippets/quickshop.liquid). Element:
+[`<quick-shop-toggle>`](mdc:src/entry/core/core-quickshop-toggle.ts).
+
+```html
+<quick-shop-toggle product-url="{{ shop.url }}{{ product.url | within: collection }}">
+  <button class="product__quick-view">{{ 'products.quick_view' | t }}</button>
+</quick-shop-toggle>
+```
+
+**Modal dialog** — [`<dialog-toggle modal-id="...">`](mdc:src/components/dialog-toggle.ts)
+opens the matching [`<modal-dialog>`](mdc:src/entry/core/core-dialog.ts). The
+`modal-id` must match the dialog's `id` (include `-{{ section.id }}`).
+
+```html
+<dialog-toggle modal-id="ProductModal-{{ product.id }}-{{ section.id }}">
+  <button class="product__details-toggle">{{ 'products.details' | t }}</button>
+</dialog-toggle>
+
+<modal-dialog id="ProductModal-{{ product.id }}-{{ section.id }}">
+  ...
+</modal-dialog>
+```
+
+**Accordion** — use [`<custom-accordion>`](mdc:src/entry/core/core-accordion.ts)
+where the open/close needs animation; plain `<details>`/`<summary>` otherwise.
+
+## No Inline Event Handlers
+
+Never use `onclick`, `onsubmit`, `onload`, etc. Wrap interactive markup in a
+custom element and handle events there (event delegation), not in attributes.

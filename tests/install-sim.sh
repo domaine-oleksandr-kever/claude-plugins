@@ -290,6 +290,53 @@ HOME="$H12" XDG_CONFIG_HOME="$XDG" "$BASH_BIN" "$REPO1/scripts/install.sh" --tar
 if [ "$RC" -eq 0 ] && [ -L "$XDG/opencode/skills/alpha" ] && [ ! -e "$H12/.config/opencode" ]; then ok
 else bad O8-xdg-config-home "rc=$RC err=$(head -c 160 "$E")"; fi
 
+# --------------------------------------------------------------------------- codex target --
+# Codex installs skills, hooks and MCP from its own marketplace; the TOML subagents have no
+# verified plugin channel (M1b), so this target links exactly those and says so — an install that
+# quietly skipped them would leave every delegating skill calling an agent the host never loaded.
+CX=".codex"
+REPO3="$TMP/repo3"; mkrepo "$REPO3"; mkbundle "$REPO3" 0.59.0
+mkdir -p "$REPO3/plugins/fnd/agents-codex"
+echo "agent" > "$REPO3/plugins/fnd/agents-codex/jira-reader.toml"
+echo "agent" > "$REPO3/plugins/fnd/agents-codex/bug-hunter.toml"
+H30="$TMP/h30"
+mkdir -p "$H30/$CX/agents"; echo "mine" > "$H30/$CX/agents/mine.toml"
+run "$H30" "$REPO3" --target codex
+if [ "$RC" -eq 0 ] && [ -L "$H30/$CX/agents/jira-reader.toml" ] && [ -L "$H30/$CX/agents/bug-hunter.toml" ] \
+   && [ "$(readlink "$H30/$CX/agents/jira-reader.toml")" = "$REPO3/plugins/fnd/agents-codex/jira-reader.toml" ]; then ok
+else bad X1-codex-agents "rc=$RC err=$(head -c 200 "$E")"; fi
+
+# only the subagent layer, and the developer is told where the rest comes from
+if grep -q "subagent layer only" "$O" && grep -q "codex plugin marketplace add" "$O"; then ok
+else bad X2-codex-partial-note "out=$(tr '\n' ';' < "$O")"; fi
+if [ -f "$H30/$CX/agents/mine.toml" ] && [ ! -L "$H30/$CX/agents" ]; then ok
+else bad X3-codex-user-agents-intact "the user's own agents dir was clobbered"; fi
+if [ "$(grep -c '^entry=' "$H30/$CX/.fnd-install-mode")" -eq 2 ] \
+   && grep -q "new Codex session" "$O"; then ok
+else bad X4-codex-mode-file "$(tr '\n' ';' < "$H30/$CX/.fnd-install-mode" 2>/dev/null)"; fi
+
+# the same doctor row the installer runs sees the links
+if grep -q "install:codex" "$O"; then ok
+else bad X5-codex-doctor-row "install report ran no codex doctor row: $(tr '\n' ';' < "$O")"; fi
+
+run "$H30" "$REPO3" --target codex --uninstall
+if [ "$RC" -eq 0 ] && [ ! -e "$H30/$CX/agents/jira-reader.toml" ] && [ -f "$H30/$CX/agents/mine.toml" ] \
+   && [ ! -f "$H30/$CX/.fnd-install-mode" ]; then ok
+else bad X6-codex-uninstall "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+# a checkout without generated agents says so instead of reporting a silent no-op install
+H31="$TMP/h31"
+run "$H31" "$REPO1" --target codex
+if [ "$RC" -eq 0 ] && grep -q "0 created" "$O" && grep -q "nothing to link" "$E"; then ok
+else bad X7-codex-no-agents "rc=$RC out=$(tr '\n' ';' < "$O") err=$(head -c 120 "$E")"; fi
+
+# X8 (bug): an install that linked nothing still records itself. The per-entry loop is what
+# creates the install root, so with zero entries the record write hit a missing directory —
+# stderr noise, exit 0, and doctor left with no record to diagnose.
+if [ -f "$H31/$CX/.fnd-install-mode" ] && [ "$(grep -c '^entry=' "$H31/$CX/.fnd-install-mode")" -eq 0 ] \
+   && ! grep -q "No such file or directory" "$E"; then ok
+else bad X8-empty-install-record "no record written for an empty install: err=$(head -c 160 "$E")"; fi
+
 # --------------------------------------------------------------------------- clone update --
 if command -v git >/dev/null 2>&1; then
   # not a git checkout at all

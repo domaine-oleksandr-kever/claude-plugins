@@ -4,8 +4,12 @@ The seven briefs the `ship` conductor spawns after the Step 3 ✋. **Read this f
 that approval exists** — before the gate it is unusable weight, which is why `ship`'s Step 4
 holds a stub and defers to here. Single home of the per-phase mission, brief contents and
 reference list; the standing rules every brief inherits, the tick/verify loop and the
-`ESCALATE` relay stay in `${CLAUDE_PLUGIN_ROOT}/skills/ship/SKILL.md` → Step 4, and the model
+`ESCALATE` relay stay in `<plugin root>/skills/ship/SKILL.md` → Step 4, and the model
 each phase is pinned to lives in `pipeline-mode.md` → Phase-agent models.
+**Plugin root** = the plugin's own directory; this file is `<plugin root>/references/pipeline-phases.md`,
+and every `<plugin root>/…` path below resolves the same way.
+On Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands — the host
+expands it; on other hosts substitute the plugin root's absolute path.
 
 The numbers are the execution order. Every phase is a fresh general-purpose subagent unless
 its brief says otherwise.
@@ -31,14 +35,14 @@ its brief says otherwise.
    rows; **QA targets (products/entities) come from the `store-data:` map in
    `notes.md`** — never rediscover them by scanning the store; a data gap the audit
    missed → ESCALATE, don't improvise; state walks through
-   `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` /
-   `${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh` (snapshot → mutate → verify →
+   `<plugin root>/scripts/shopify-admin-gql.sh` /
+   `<plugin root>/scripts/theme-json.sh` (snapshot → mutate → verify →
    **restore**); rows marked `preview-theme` (logged-in customer / checkout / account
    pages) → run them against the **session theme** `notes.md` records as
    `session-theme: <id>`, refreshed to this branch's code
-   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh refresh --theme <id>` — settings
+   (`<plugin root>/scripts/create-preview-theme.sh refresh --theme <id>` — settings
    preserved); no line recorded → build the `[ELC-…]` theme
-   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create --name "<name>" --reuse`)
+   (`<plugin root>/scripts/create-preview-theme.sh create --name "<name>" --reuse`)
    and record it as `session-theme: <id>` + links in `notes.md`, so create
    happens at most once per work stream. **No `--pin-toml` here** — this phase is past the ✋
    and rewriting the developer's `shopify.theme.toml` unasked (possibly the choice they
@@ -52,7 +56,7 @@ its brief says otherwise.
    qa agent re-runs the affected rows (a fixed bug-hunter finding is re-verified by code
    read when it can't be reproduced live); **cap 2 cycles**, then ESCALATE with the report.
 3. **finalize** — review + commit in one pass. Review per
-   `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` with `hygiene` emphasis
+   `<plugin root>/references/review-flow.md` with `hygiene` emphasis
    (`change-reviewer` subagent(s)) — §3's pre-existing-marker question is replaced by
    the pipeline exception (current `diff_hash` → skip and say so; stale or absent →
    full re-review; never ask); apply the objective classes (comment accuracy,
@@ -61,7 +65,7 @@ its brief says otherwise.
    report and hand-off. **F-class (correctness) findings never land in that log-only
    bucket**: an F row from the reviewer → fix it when that fits the qa cap and is
    AC-compatible; justify → `ceiling:` entry + PR body; else ESCALATE.
-   Commit per `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md` (scope per
+   Commit per `<plugin root>/references/commit-message-format.md` (scope per
    policy; body from plan + notes), **then** stamp the marker at
    `"$(git rev-parse --git-dir)/.fnd-review"` (resolved, never the literal `.git/` path —
    a linked worktree's `.git` is a file) — after the commit
@@ -79,7 +83,7 @@ its brief says otherwise.
    storefront path), the `notes.md` `ceiling:` entries **and its `session-theme: <id>`
    line — that theme is the PR's preview theme, so the agent refreshes it instead of
    auto-creating another** (REFERENCE.md → Preview theme, precedence step 2), and
-   `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md` — it owns the title
+   `<plugin root>/skills/create-pull-request/REFERENCE.md` — it owns the title
    convention, the body structure (core skeleton Summary → Jira → theme-preview table →
    Changes; conditional sections only with real content; ceilings one line each) and the
    preview-theme decision flow (`[ELC-…]` naming, `--reuse`). Escalations, verbatim in
@@ -87,7 +91,7 @@ its brief says otherwise.
    the build output; `error=settings_drift` → the reference's manual recovery;
    conformance pass (`change-reviewer`, `conformance` emphasis) — a `protected-core`
    blocker → ESCALATE; **correctness backstop** per
-   `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §3's create-pull-request entry —
+   `<plugin root>/references/review-flow.md` §3's create-pull-request entry —
    `correctness_hash` absent or ≠ the current diff hash → the conductor applies the gate and
    spawns `bug-hunter` over the diff **before** spawning this phase, refreshing the marker
    after; a blocking finding ESCALATEs like `protected-core`, so the agent drafts only once
@@ -98,18 +102,18 @@ its brief says otherwise.
    theme id + preview/editor links, ≤10-line report. The conductor verifies the tick
    and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
-   `${CLAUDE_PLUGIN_ROOT}/references/steps-to-test-format.md` from the AC + the branch
+   `<plugin root>/references/steps-to-test-format.md` from the AC + the branch
    diff (the format's setup inventory — sections/blocks/settings/metafields the QA engineer
    must configure) + `qa.md` + `notes.md` repro values; save `steps-to-test.md`; policy allows → write the field via
-   `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables` + `editJiraIssue`
-   (`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`).
+   `node "<plugin root>/scripts/md-to-adf.cjs" --no-tables` + `editJiraIssue`
+   (`<plugin root>/references/jira-adf-write.md`).
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent →
    commit + push (counts toward the aftercare-rounds cap). Then poll the policy bots' review threads via
    `gh api` (~90 s interval; the timebox is a **cap on active bot work, not a wait
    target** — see the silence early-exit below). Per finding: triage vs AC/TA —
    AC-compatible → fix; contradicts AC or out of scope → don't, and say why. After any
    fixes: refresh the session theme's code
-   (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh refresh --theme <the
+   (`<plugin root>/scripts/create-preview-theme.sh refresh --theme <the
    session-theme id from notes.md>` — settings
    untouched, and it is the same theme the PR table links to), re-verify the touched flow
    in the browser, commit + push. Reply to
@@ -136,5 +140,5 @@ its brief says otherwise.
    comment to a temp file (a **clickable PR link** + the distilled judgment calls from
    `notes.md`: accepted edge cases, anything not implemented and why, open questions),
    then spawn `jira-writer` (ticket · `comment` · that file) for the one
-   `addCommentToJiraIssue` write (`${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`);
+   `addCommentToJiraIssue` write (`<plugin root>/references/jira-adf-write.md`);
    policy forbids → print the comment for manual paste.

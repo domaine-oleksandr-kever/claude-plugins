@@ -1,0 +1,27 @@
+---
+description: Foundation localization conventions — English-only authoring, schema-translation typing. Auto-attaches on locale JSON and liquid; covers project deltas, not generic Shopify i18n syntax.
+globs: locales/*.json,*.liquid
+alwaysApply: false
+---
+
+# Foundation Localization Conventions
+
+**Source of truth:** for current localization / the `t` filter / locale files syntax/APIs query `shopify-dev-mcp` (`learn_shopify_api` → `search_docs_chunks`). This file covers only Foundation-specific conventions.
+
+## English-only authoring
+
+- Add new keys to **English only**: `locales/en.default.json` (storefront) and `locales/en.default.schema.json` (theme-editor/schema labels).
+- Do NOT hand-edit other-language locale files. Translators and the repo translation scripts populate them.
+  - Storefront copy: `update-translations`.
+  - Schema/admin labels: `update-schema-translations`.
+
+## UI copy
+
+- Use **sentence case** for UI strings.
+- Keep strings concise; account for character limits in UI elements.
+- Keep terminology consistent across keys.
+
+## Schema translations
+
+- Schema strings live in `locales/*.schema.json` and back the labels in section/block `{% schema %}` settings.
+- There is no repo TypeScript typedef for schema-translation key structure; structure follows Shopify's settings-schema labels. Verify against current `locales/en.default.schema.json` and Shopify schema docs via `shopify-dev-mcp`.

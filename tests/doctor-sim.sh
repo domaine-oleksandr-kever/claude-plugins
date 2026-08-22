@@ -253,6 +253,7 @@ record() {
 
 CUR_REL=".cursor/plugins/local"
 OC_REL=".config/opencode"
+CX_REL=".codex"
 
 # D20: no --target — host checks are not the doctor's business unless asked.
 run --root "$G"
@@ -399,11 +400,30 @@ record "$H15" "$OC_REL" symlink "$G" 0.59.0 "$H15/$OC_REL/skills/ship"
 rc=0; XDG_CONFIG_HOME="$TMP/elsewhere" node "$DOCTOR" --root "$G" --home "$H15" --target opencode >"$O" 2>"$E" || rc=$?
 expect D36-home-beats-xdg 0 "PASS  install:opencode" "!FAIL"
 
-# D37: the version-cache hosts have no local install to inspect — SKIP with where they do live.
+# D37: Claude Code has no local install to inspect — SKIP with where it does live.
 run --root "$G" --home "$H1" --target claude
 expect D37-claude-cache 0 "SKIP  install:claude" ".claude/plugins/cache" "!FAIL"
+
+# D37b: Codex is the half-cache host. Its skills/hooks/MCP come from the marketplace cache, but the
+# TOML subagents are linked locally, so "nothing linked" is a real broken install — a SKIP here
+# would bless a plugin whose whole agent layer can never load, with doctor green.
 run --root "$G" --home "$H1" --target codex
-expect D37b-codex-cache 0 "SKIP  install:codex" ".codex/plugins/cache" "!FAIL"
+expect D37b-codex-not-linked 1 "FAIL  install:codex" ".codex/.fnd-install-mode" \
+  "install.sh --target codex" "subagents only"
+
+# D37c: linked subagents pass, and the row still names what it does NOT cover.
+H16="$TMP/home16"; mkdir -p "$H16/$CX_REL/agents"
+mkdir -p "$G/agents-codex"; printf 'name = "jira-reader"\n' > "$G/agents-codex/jira-reader.toml"
+ln -s "$G/agents-codex/jira-reader.toml" "$H16/$CX_REL/agents/jira-reader.toml"
+record "$H16" "$CX_REL" symlink "$G" 0.59.0 "$H16/$CX_REL/agents/jira-reader.toml"
+run --root "$G" --home "$H16" --target codex
+expect D37d-codex-linked 0 "PASS  install:codex" "1 entry(ies) live" "skills/hooks/MCP" "!FAIL"
+
+# D37e: a hand-made link at the documented path counts, same as the Cursor probe.
+H17="$TMP/home17"; mkdir -p "$H17/$CX_REL/agents"
+ln -s "$G/agents-codex/jira-reader.toml" "$H17/$CX_REL/agents/jira-reader.toml"
+run --root "$G" --home "$H17" --target codex
+expect D37f-codex-handmade 0 "PASS  install:codex" "(no installer record)" "!FAIL"
 
 # ------------------------------------------------------------------------------ CLI surface --
 # D38: usage errors exit 2 — distinct from a FAILing check (1), so install.sh can tell them apart.

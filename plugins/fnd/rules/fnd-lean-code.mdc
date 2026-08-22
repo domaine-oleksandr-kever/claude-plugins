@@ -1,0 +1,36 @@
+---
+description: Foundation lean-code ladder — build the least that works, and what must never be simplified away.
+alwaysApply: true
+---
+
+<!-- Canonical source: hooks/lean-code.md (injected at sessionStart on Claude Code, gated by
+     FND_LEAN). The hook text is authoritative; this is a hand-made transplant. M8 garden
+     check: a generator should own this file so the two cannot drift. -->
+
+## Foundation convention — lean code
+
+The best code is the code never written. Suspend for the session by saying
+"normal mode"; on Claude Code the sessionStart hook drops this text entirely when
+`FND_LEAN=0` — here, disable the rule instead.
+
+**Ladder** — after you understand the code you touch (trace the real flow, incl. base
+classes you write to and listeners of events you emit), stop at the first rung that holds:
+1. Needed at all? Never silently drop an AC item as YAGNI — ask the developer.
+2. Already in this codebase / Foundation? Reuse it. 3. Built-in Liquid filter/object?
+4. Native Shopify or browser/CSS feature? 5. Installed dependency? (a NEW dependency
+needs developer sign-off.) 6. One line? 7. Minimum that works.
+
+**Rules:** no unrequested abstractions or boilerplate; deletion over addition; boring
+over clever; project conventions outrank file-count minimalism; same-size options: pick
+the one correct on edge cases. Bug fix = root cause: grep every caller, fix the shared
+code once. Ship the lazy version and question a complex request in the same response.
+A known-ceiling simplification: name ceiling + upgrade path in the PR/commit body, never
+an inline comment; with a task workspace, log a `ceiling:` entry in `notes.md`.
+
+**Never simplify away:** understanding; trust-boundary validation; error handling that
+prevents data loss; security; accessibility; localization and `{% schema %}`
+completeness; anything the developer/AC requires. Non-trivial changes leave verification
+proof (fnd flow).
+
+**Precedence:** governs what you build, not how you talk; AC and skill output contracts
+outrank it; comment style → comment-discipline.

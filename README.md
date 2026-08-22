@@ -17,8 +17,10 @@ in its own subfolder under `plugins/`:
 ├── plugins/
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
-│       │   └── plugin.json       # plugin manifest (+ bundled mcpServers)
-│       ├── skills/               # 17 workflow skills (see table below)
+│       │   └── plugin.json       # plugin manifest (+ bundled mcpServers) — canonical
+│       ├── .cursor-plugin/plugin.json   # Cursor manifest (same version stamp)
+│       ├── .codex-plugin/plugin.json    # Codex CLI manifest (same version stamp)
+│       ├── skills/               # 18 workflow skills (see table below)
 │       │   ├── develop-feature-or-fix/SKILL.md
 │       │   └── ...
 │       ├── agents/               # subagents the skills delegate to
@@ -38,11 +40,22 @@ in its own subfolder under `plugins/`:
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
+│       │   ├── gen-host-adapters.cjs #  writes every generated dir below
+│       │   ├── doctor.cjs           #  static install verification, any host
 │       │   └── ...
-│       └── references/           # shared docs the skills read
-│           ├── jira-custom-fields.md
-│           ├── review-flow.md    #  shared contract for the review/marker flow
-│           └── ...
+│       ├── references/           # shared docs the skills read
+│       │   ├── jira-custom-fields.md
+│       │   ├── review-flow.md    #  shared contract for the review/marker flow
+│       │   ├── host-model-map.md #  GENERATED — tier → model, per host
+│       │   └── ...
+│       ├── rules/                # Cursor rule bundle (vendored foundation .mdc + fnd rules)
+│       ├── agents-cursor/        # GENERATED per-host agent variants — never hand-edit;
+│       ├── agents-codex/         #   change agents/ (or the generator) and re-run
+│       ├── agents-opencode/      #   scripts/gen-host-adapters.cjs
+│       ├── commands-opencode/    # GENERATED /name shims (OpenCode invokes skills by model only)
+│       └── opencode/             # OpenCode adapter + GENERATED model-profile examples
+├── scripts/
+│   └── install.sh                # Cursor / OpenCode / Codex-subagent installer
 ├── tests/                        # committed test suites for the hooks + scripts
 │   ├── no-verify-bypass-matrix.sh   #  FP/FN contract of the two commit guards
 │   ├── hooks-sim.sh                 #  SessionStart / monitor-gate / context-stats sims
@@ -86,6 +99,7 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `fix-breaking-changes`            | `/fnd:fix-breaking-changes` |
 | `update-translations`             | `/fnd:update-translations` |
 | `report-plugin-issue`             | `/fnd:report-plugin-issue` |
+| `smoke-test`                      | `/fnd:smoke-test` |
 
 Skills are also **auto-invoked**: Claude reads each skill's `description` and
 runs the relevant one when your request matches — you don't have to type the
@@ -122,6 +136,24 @@ predeclare it in managed settings under `extraKnownMarketplaces`.
 
 Edits to skill files in a local marketplace are picked up on the next session
 (or after `/reload-plugins`). See [Updating](#updating).
+
+### Other agent hosts (in progress — see `HARNESS-PORT-PLAN.md`)
+
+The same plugin content also installs into Cursor, Codex CLI and OpenCode. Full
+per-host docs land with the port; the installer is already the entry point:
+
+```text
+./scripts/install.sh --target cursor      # symlinks ~/.cursor/plugins/local/fnd
+./scripts/install.sh --target opencode    # skills, agents, commands, plugin adapter
+./scripts/install.sh --target codex       # subagents only — see below
+node plugins/fnd/scripts/doctor.cjs --target <host>   # verify any install
+```
+
+On **Codex**, `codex plugin marketplace add domaine/claude-plugins` (then
+`/plugins` → install fnd) provides skills, hooks and MCP; the plugin manifest has
+no verified `agents:` pointer yet, so the TOML subagents are linked separately by
+`install.sh --target codex`. Without that step every skill that delegates hits an
+unknown agent — `doctor.cjs --target codex` reports it.
 
 ### Managing it
 
@@ -755,7 +787,7 @@ added to this table.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `FND_LEAN` | `1` | `0` disables the lean-code session convention |
+| `FND_LEAN` | `1` | `0` disables the lean-code session convention. Hook-gated, so it applies where the convention arrives through a hook (Claude Code, Codex). On Cursor the convention ships as an always-applied rule instead — turn `rules/fnd-lean-code.mdc` off there, or say "normal mode" in the session |
 | `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process) |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens) |

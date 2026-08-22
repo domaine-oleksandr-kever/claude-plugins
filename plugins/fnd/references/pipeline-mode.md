@@ -1,6 +1,6 @@
-# Pipeline mode — the /fnd:ship run contract
+# Pipeline mode — the `ship` run contract
 
-How an autonomous `/fnd:ship` run records its decisions, when it may act without asking,
+How an autonomous `ship` run records its decisions, when it may act without asking,
 when it must escalate, and how every phase re-grounds itself. Solo skills never read this
 file — the pipeline is opt-in and leaves solo behavior untouched.
 
@@ -53,8 +53,8 @@ the solo skills and move straight on — no offer-next inside a run.
 
 ## Escalation contract
 
-Escalate — AskUserQuestion from the conductor; a phase agent returns
-`ESCALATE(question, context, options)` instead of asking — ONLY for:
+Escalate — the conductor asks the developer (on Claude Code: AskUserQuestion); a phase agent
+returns `ESCALATE(question, context, options)` instead of asking — ONLY for:
 
 - missing access / credentials (store, `gh`, an MCP server);
 - an AC contradiction or material ambiguity the interview didn't cover;
@@ -83,23 +83,28 @@ report and the Jira hand-off comment are distilled from these entries.
 
 ## Phase-agent models
 
-Phase agents never inherit the session model — the conductor passes `model` on every
+Phase agents never inherit the session model — the conductor passes the phase's model on every
 spawn (this section is the single home of the **Step 4 phase-agent** assignments; the briefs
 those agents get live in `pipeline-phases.md` — **read only at the start of Step 4**, never
-before the gate):
-`opus` for reasoning-heavy
-phases (implement, qa, and the fix agents in the qa loop and aftercare), `sonnet` for
-mechanical ones (finalize, create-pr, steps-to-test, and the aftercare poll/triage
-agent — its fix agents stay `opus`). The inline conductor step (jira-hand-off) delegates its
+before the gate). Two tiers, by phase: **reasoning-heavy** — implement, qa, and the fix agents
+in the qa loop and aftercare; **mechanical** — finalize, create-pr, steps-to-test, and the
+aftercare poll/triage agent (its fix agents are reasoning-heavy). What each tier pins to is the
+host's business — on Claude Code: `opus` for reasoning-heavy, `sonnet` for mechanical. Off Claude
+Code, read the phase rows of `host-model-map.md` (generated: one tier table owns every non-Claude
+pin, so no id is ever repeated in prose) and pass the id for this host; on OpenCode there is no
+pin at all — phases inherit the session model, and tiering is opt-in via the optional
+model-profile fragment. The inline conductor step (jira-hand-off) delegates its
 one Jira write to the `jira-writer` subagent (so the comment body never enters the
-conductor context); `jira-writer` pins its own model via frontmatter (`sonnet`), so the
-conductor passes none.
+conductor context); `jira-writer` pins its own model via frontmatter (on Claude Code:
+`sonnet`), so the conductor passes none.
 Pre-gate helpers (the Step 1 store-data audit, the Step 3 research pressure-test) are
 pinned inline where ship spawns them; the reader agents pin via frontmatter. The
 conductor itself stays on the session model — planning, decomposition, and synthesis are
-where it earns its price — so run ship on the **strongest session model available: Fable
-recommended**, Opus acceptable; anything lighter weakens the one context that makes every
-judgment call. Gotcha: a `CLAUDE_CODE_SUBAGENT_MODEL` env var silently
+where it earns its price — so run ship on the **strongest session model the host offers**
+(on Claude Code: **Fable recommended**, Opus acceptable; elsewhere the conductor row of
+`host-model-map.md`, which on OpenCode is the session model as selected); anything lighter
+weakens the one context that makes every
+judgment call. Gotcha, on Claude Code: a `CLAUDE_CODE_SUBAGENT_MODEL` env var silently
 overrides every pin, including the bundled agents' frontmatter models — it must be unset
 or `inherit`.
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# fnd multi-harness installer — Cursor and OpenCode (HARNESS-PORT-PLAN.md § Install stories).
-# The clone IS the install: every entry points back into this checkout, so a `git pull`
-# updates the host live. Re-running the installer is the update path; Claude Code and
-# Codex install from their own marketplaces and are not handled here.
+# fnd multi-harness installer — Cursor, OpenCode and the Codex subagent layer
+# (HARNESS-PORT-PLAN.md § Install stories). The clone IS the install: every entry points back
+# into this checkout, so a `git pull` updates the host live. Re-running the installer is the
+# update path; Claude Code installs from its marketplace and is not handled here.
+# Codex is a partial target on purpose: `codex plugin marketplace add` installs skills, hooks and
+# MCP from the plugin manifest, but no plugin-level channel for TOML subagents is confirmed
+# (M1b), so `--target codex` links agents-codex/*.toml into ~/.codex/agents/ and nothing else.
 set -euo pipefail
 
 # Fallback stamp only: the canonical manifest in the checkout wins whenever it is readable,
@@ -19,10 +22,12 @@ ACTION="install"
 
 usage() {
   cat <<EOF
-usage: install.sh --target cursor|opencode [--copy] [--uninstall]
+usage: install.sh --target cursor|opencode|codex [--copy] [--uninstall]
 
   --target <host>   cursor  -> ~/.cursor/plugins/local/fnd
                     opencode-> ~/.config/opencode (skills, agents, commands, plugin)
+                    codex   -> ~/.codex/agents (subagents only — skills, hooks and MCP
+                               come from \`codex plugin marketplace add\`)
   --copy            copy instead of symlink (no-symlink environments); a --copy
                     install does not follow \`git pull\` — re-run to refresh it
   --uninstall       remove only the entries this installer created
@@ -41,9 +46,9 @@ while [ $# -gt 0 ]; do
 done
 
 case "$TARGET" in
-  cursor|opencode) ;;
-  "") echo "error: --target is required (cursor|opencode)" >&2; usage >&2; exit 2 ;;
-  *) echo "error: unknown target '$TARGET' (expected cursor|opencode)" >&2; exit 2 ;;
+  cursor|opencode|codex) ;;
+  "") echo "error: --target is required (cursor|opencode|codex)" >&2; usage >&2; exit 2 ;;
+  *) echo "error: unknown target '$TARGET' (expected cursor|opencode|codex)" >&2; exit 2 ;;
 esac
 
 [ -d "$PLUGIN" ] || { echo "error: $PLUGIN not found — run this script from its place in the repo" >&2; exit 1; }
@@ -51,6 +56,7 @@ esac
 case "$TARGET" in
   cursor)   ROOT_DIR="$HOME/.cursor/plugins/local" ;;
   opencode) ROOT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode" ;;
+  codex)    ROOT_DIR="$HOME/.codex" ;;
 esac
 
 MODE_FILE="$ROOT_DIR/.fnd-install-mode"
@@ -89,6 +95,15 @@ build_entries() {
       if [ -f "$PLUGIN/opencode/fnd-plugin.js" ]; then
         add_entry "$ROOT_DIR/plugins/fnd-plugin.js" "$PLUGIN/opencode/fnd-plugin.js"
       fi
+      ;;
+    codex)
+      # Subagents only. The marketplace install owns skills, hooks and MCP through
+      # .codex-plugin/plugin.json; that manifest declares no agents pointer, so without these
+      # links every delegating skill hits an unknown agent (see the header note + M1b).
+      for f in "$PLUGIN"/agents-codex/*.toml; do
+        [ -f "$f" ] || continue
+        add_entry "$ROOT_DIR/agents/$(basename "$f")" "$f"
+      done
       ;;
   esac
 }
@@ -226,6 +241,15 @@ do_install() {
   if [ "$TARGET" = "opencode" ]; then
     echo "note: the OpenCode install lever is provisional (symlink route, pending spike M1c)"
   fi
+  if [ "$TARGET" = "codex" ]; then
+    if [ "${#LINKS[@]}" -eq 0 ]; then
+      echo "warning: no plugins/fnd/agents-codex/*.toml in this checkout — nothing to link;" >&2
+      echo "         run plugins/fnd/scripts/gen-host-adapters.cjs, then re-run this installer" >&2
+    fi
+    echo "note: this target installs the subagent layer only — run"
+    echo "      'codex plugin marketplace add domaine/claude-plugins' and install fnd via /plugins"
+    echo "      for skills, hooks and MCP (they update with 'codex plugin marketplace upgrade')"
+  fi
 
   local i created=0 replaced=0 unchanged=0 pruned=0 rc link src stale
   i=0
@@ -277,6 +301,10 @@ do_install() {
 $PREV_ENTRIES
 EOF
 
+  # The per-entry loop above is what usually creates the root; an install that linked nothing
+  # (a checkout missing the generated dir this target needs) would otherwise fail to write its
+  # record here, report success on stdout, and leave doctor with nothing to diagnose.
+  mkdir -p "$ROOT_DIR"
   {
     echo "mode=$MODE"
     echo "repo=$REPO"
@@ -292,6 +320,7 @@ EOF
   case "$TARGET" in
     cursor) echo "next: reload the Cursor window (Developer: Reload Window) so manifest, hook and MCP changes load" ;;
     opencode) echo "next: start a new OpenCode session so skills, agents and the plugin adapter load" ;;
+    codex) echo "next: start a new Codex session so the subagents load, and approve the plugin's hooks via /hooks" ;;
   esac
   if [ "$MODE" = "copy" ]; then
     echo "note: --copy installs do not follow git pull — re-run this script to refresh them"
@@ -328,6 +357,7 @@ $targets
 EOF
 
   rm -f "$MODE_FILE"
+  # `rmdir`, never `rm -r`: these dirs are shared with the host's own config and a user's files
   for d in "$ROOT_DIR/skills" "$ROOT_DIR/agents" "$ROOT_DIR/commands" "$ROOT_DIR/plugins" "$ROOT_DIR"; do
     rmdir "$d" 2>/dev/null || true
   done

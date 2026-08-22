@@ -41,7 +41,8 @@ On Cursor: run Steps 1–3 in Plan Mode whenever the change trips a guidelines t
 security, multi-repo, a new architectural pattern, ambiguous requirements).
 Session model — on Claude Code: strongest available as the conductor, **Fable
 recommended**, Opus acceptable; on other hosts — Cursor: Sonnet, Opus only at the
-guidelines' "exceptional" bar; Codex (proposed): gpt-5.6-terra (medium); OpenCode: the
+guidelines' "exceptional" bar; Codex (proposed): the conductor row of
+`<plugin root>/references/host-model-map.md`; OpenCode: the
 session model, no pin. The conductor stays on the session model while every phase agent is
 pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 

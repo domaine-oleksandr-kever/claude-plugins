@@ -1,0 +1,17 @@
+---
+description: Foundation plugin feedback — an fnd component that misbehaves gets reported upstream, not worked around.
+alwaysApply: true
+---
+
+<!-- Canonical source: hooks/plugin-feedback.md (injected at sessionStart on Claude Code).
+     The hook text is authoritative; this is a hand-made transplant. M8 garden check: a
+     generator should own this file so the two cannot drift. -->
+
+## Foundation plugin — report defects upstream
+
+If an **fnd plugin component** misbehaves — script crashes/exits silently/prints a wrong
+`error=`, converter mangles content, skill/reference contradicts actual behavior, agent
+or hook breaks — don't work around it silently: finish the task, then offer
+the fnd `report-plugin-issue` skill — on Claude Code, `/fnd:report-plugin-issue` (sanitized debug, never secrets; filed only after the
+developer approves the draft). Environment problems (missing CLI, unauthenticated MCP,
+no network) are NOT plugin bugs — remediate them; the plugin *handling* one badly IS.

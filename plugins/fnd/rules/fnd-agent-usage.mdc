@@ -1,0 +1,46 @@
+---
+description: Running an agent session — pre-flight checklist, prompt format, Plan Mode triggers, bounded sessions, completion review.
+alwaysApply: true
+---
+
+<!-- Source: Domaine "Model Selection and Agentic Usage Guidelines" v1.0 (2026-08-17). Cursor-scoped;
+     the Codex and OpenCode equivalents await the sign-off recorded in HARNESS-PORT-PLAN.md. -->
+
+## Agentic usage — Cursor
+
+**Pre-flight.** Objective specific · expected behavior known · relevant files identified · existing
+pattern found · constraints listed · validation defined · cheapest capable model chosen · correct
+tool for this stage · investigation or planning needed first · no other agent on the same problem ·
+you can review the result · included Cursor requests accounted for · this portion could be done
+outside the IDE. Several "no" answers → improve the task definition first.
+
+**Prompt format.** Objective / Context / Current behavior / Expected behavior / Constraints /
+Validation / Scope. Describe the outcome, not the activity; point at the existing pattern instead of
+asking the agent to find it; state non-goals; give the validation commands; include what was tried
+and why it failed. **Separate investigation from implementation** — investigate under "do not modify
+files", review the findings, then implement.
+
+**Plan Mode** before a change that: touches more than ~5 files; crosses app layers; has ambiguous
+requirements; needs investigation before the solution is known; includes a migration; must stay
+backward compatible; touches checkout, customer data, auth, payments or security; exceeds one
+focused session; spans repositories; introduces a new architectural pattern; or would force several
+assumptions. A plan of generic steps ("update the component") is not a plan.
+
+**Running the agent.** One primary outcome per session; give the exact files, similar
+implementations, tests, error output and AC — not the repo. **Stop the run early** when
+the agent duplicates an existing utility, edits unrelated files, drops behavior unexplained, guesses
+at an API, repeats a failed approach, widens scope unasked, rewrites a subsystem for a localized
+bug, disables a test, hides type errors behind casts or ignores, changes dependencies, or continues
+after a core assumption is disproved. Never send a bare "Continue": review what changed, then give a
+specific next instruction or start a clean conversation. Before a second parallel agent: distinct
+objective, not the same investigation, value that justifies it, capacity to review both. Stop agents
+once useless.
+
+**Data handling.** Never paste credentials, customer, personal or restricted data into a prompt, and
+never enter restricted information into an unapproved system.
+
+**Before the PR.** Review every changed file yourself, drop unrelated edits, run the tests / lint /
+typecheck, validate the original AC, confirm no check was disabled, stop leftover agents. An agent's
+claim that tests pass or the change is safe is not evidence. fnd already encodes the guidelines'
+completion checklist — run `qa-feature-or-fix`, then `pre-commit-review`, and answer their findings
+instead of redoing it.

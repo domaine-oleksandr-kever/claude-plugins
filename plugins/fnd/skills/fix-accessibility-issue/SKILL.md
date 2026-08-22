@@ -52,4 +52,4 @@ Before implementing, **search the codebase for the existing ARIA pattern** for t
 
 ## Model
 
-On Claude Code: no model directive — run on whatever the session uses. On Cursor: Composer 2.5 → Sonnet for an a11y fix with clear criteria. On Codex (proposed): `gpt-5.6-luna` → `gpt-5.6-terra` at medium reasoning. On OpenCode: the session model — no pin.
+On Claude Code: no model directive — run on whatever the session uses. On Cursor: Composer 2.5 → Sonnet for an a11y fix with clear criteria. On Codex (proposed): the `routine` → `standard` tiers, ids in `../../references/host-model-map.md` (relative to this skill's directory). On OpenCode: the session model — no pin.

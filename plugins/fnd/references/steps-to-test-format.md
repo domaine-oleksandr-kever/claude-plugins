@@ -1,6 +1,6 @@
 # Steps to Test — Domaine format
 
-The output standard shared by `/fnd:write-steps-to-test` and the pipeline steps-to-test
+The output standard shared by the `write-steps-to-test` skill and the pipeline steps-to-test
 phase. The reader is a QA engineer whose **own unpublished theme** carries the branch code
 (GitHub Actions deploys it — the QA engineer never deploys anything) and who configures
 everything **from scratch**. They know the Shopify admin but not
