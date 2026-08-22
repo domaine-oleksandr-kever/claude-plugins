@@ -1,0 +1,22 @@
+{
+  "name": "fnd",
+  "version": "0.59.0",
+  "description": "Domaine Foundation skills for Codex CLI — Agentic Assisted Development workflow for Shopify theme work.",
+  "author": {
+    "name": "Oleksandr Kever",
+    "email": "oleksandr.kever@meetdomaine.com"
+  },
+  "license": "MIT",
+  "keywords": ["shopify", "foundation", "domaine", "skills"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks-codex.json",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "fnd — Domaine Foundation workflows",
+    "defaultPrompts": [
+      "$ship ELC-123 — take the ticket end to end",
+      "$develop-feature-or-fix ELC-123 from the approved technical approach",
+      "$preview-theme — spin up a preview theme for this branch"
+    ]
+  }
+}

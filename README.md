@@ -146,6 +146,42 @@ pull-based:
 The `version` field in `plugin.json` gates updates: bump it on every release, or
 omit it to use the git commit SHA (every commit counts as a new version).
 
+## Releasing — one command stamps every version
+
+Current release: **fnd v0.59.0**.
+
+The version is duplicated across per-host packaging files, and a stamp that drifts
+reads to a host as "nothing to update". One script owns all of them — run it instead
+of hand-editing any manifest:
+
+```bash
+node plugins/fnd/scripts/bump-version.cjs minor      # or major | patch | 0.60.0
+node plugins/fnd/scripts/bump-version.cjs 0.60.0 --dry-run   # report, write nothing
+```
+
+It stamps, all-or-nothing (a failure on any target writes nothing):
+
+| Target | What is stamped |
+|---|---|
+| `plugins/fnd/.claude-plugin/plugin.json` | `version` — canonical, the base for `major`/`minor`/`patch` |
+| `plugins/fnd/.cursor-plugin/plugin.json` | `version` |
+| `plugins/fnd/.codex-plugin/plugin.json` | `version` |
+| `README.md` | the markers `fnd v<semver>` and a double-quoted `FND_VERSION=` assignment |
+| `scripts/install.sh` | every double-quoted `FND_VERSION=` assignment |
+
+Only those two literal marker forms are recognized — a version written any other way
+(`fnd 0.60.0`, `version: 0.60.0`) is silently skipped forever, so use them verbatim
+when adding a version string to the docs. The flip side: every quoted `FND_VERSION=`
+assignment in a stamped file becomes a constant, so a shell variable of that name must
+be assigned unquoted.
+
+Then verify the packaging before committing:
+
+```bash
+node plugins/fnd/scripts/doctor.cjs      # manifests present, versions equal, hooks runnable
+bash tests/layout-assertions.sh
+```
+
 ## How global skills use project rules
 
 A common question: *if the plugin is installed globally, do its skills still pick

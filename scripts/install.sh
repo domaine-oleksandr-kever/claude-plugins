@@ -1,0 +1,340 @@
+#!/usr/bin/env bash
+# fnd multi-harness installer — Cursor and OpenCode (HARNESS-PORT-PLAN.md § Install stories).
+# The clone IS the install: every entry points back into this checkout, so a `git pull`
+# updates the host live. Re-running the installer is the update path; Claude Code and
+# Codex install from their own marketplaces and are not handled here.
+set -euo pipefail
+
+# Fallback stamp only: the canonical manifest in the checkout wins whenever it is readable,
+# so an update reports (and records) the version the `git pull` actually landed.
+FND_VERSION="0.59.0"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
+PLUGIN="$REPO/plugins/fnd"
+
+TARGET=""
+MODE="symlink"
+ACTION="install"
+
+usage() {
+  cat <<EOF
+usage: install.sh --target cursor|opencode [--copy] [--uninstall]
+
+  --target <host>   cursor  -> ~/.cursor/plugins/local/fnd
+                    opencode-> ~/.config/opencode (skills, agents, commands, plugin)
+  --copy            copy instead of symlink (no-symlink environments); a --copy
+                    install does not follow \`git pull\` — re-run to refresh it
+  --uninstall       remove only the entries this installer created
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --target) [ $# -ge 2 ] || { echo "error: --target needs a value" >&2; exit 2; }; TARGET="$2"; shift 2 ;;
+    --target=*) TARGET="${1#--target=}"; shift ;;
+    --copy) MODE="copy"; shift ;;
+    --uninstall) ACTION="uninstall"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "error: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+case "$TARGET" in
+  cursor|opencode) ;;
+  "") echo "error: --target is required (cursor|opencode)" >&2; usage >&2; exit 2 ;;
+  *) echo "error: unknown target '$TARGET' (expected cursor|opencode)" >&2; exit 2 ;;
+esac
+
+[ -d "$PLUGIN" ] || { echo "error: $PLUGIN not found — run this script from its place in the repo" >&2; exit 1; }
+
+case "$TARGET" in
+  cursor)   ROOT_DIR="$HOME/.cursor/plugins/local" ;;
+  opencode) ROOT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode" ;;
+esac
+
+MODE_FILE="$ROOT_DIR/.fnd-install-mode"
+
+LINKS=()
+SRCS=()
+add_entry() { LINKS+=("$1"); SRCS+=("$2"); }
+
+# The entry list is a snapshot of the checkout, so it MUST be built after update_clone:
+# a `git pull` that adds a skill has to be linked by the same run that pulled it.
+build_entries() {
+  LINKS=()
+  SRCS=()
+  case "$TARGET" in
+    cursor)
+      add_entry "$ROOT_DIR/fnd" "$PLUGIN"
+      ;;
+    opencode)
+      # M1C-DEFAULT: the OpenCode install lever is provisional. Spike M1c picks between
+      # OPENCODE_CONFIG_DIR, a global opencode.json fragment, and these symlinks; the plan's
+      # documented default (symlinks into ~/.config/opencode/*) is what runs until it decides.
+      # Per-entry links, never a link over ~/.config/opencode/skills itself, so a user's own
+      # entries in those dirs keep working. Generated dirs that M4/M5 add are linked when present.
+      for d in "$PLUGIN"/skills/*/; do
+        [ -d "$d" ] || continue
+        add_entry "$ROOT_DIR/skills/$(basename "$d")" "${d%/}"
+      done
+      for f in "$PLUGIN"/agents-opencode/*.md; do
+        [ -f "$f" ] || continue
+        add_entry "$ROOT_DIR/agents/$(basename "$f")" "$f"
+      done
+      for f in "$PLUGIN"/commands-opencode/*.md; do
+        [ -f "$f" ] || continue
+        add_entry "$ROOT_DIR/commands/$(basename "$f")" "$f"
+      done
+      if [ -f "$PLUGIN/opencode/fnd-plugin.js" ]; then
+        add_entry "$ROOT_DIR/plugins/fnd-plugin.js" "$PLUGIN/opencode/fnd-plugin.js"
+      fi
+      ;;
+  esac
+}
+
+PREV_MODE=""
+PREV_REPO=""
+PREV_ENTRIES=""
+if [ -f "$MODE_FILE" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      mode=*) PREV_MODE="${line#mode=}" ;;
+      repo=*) PREV_REPO="${line#repo=}" ;;
+      entry=*) PREV_ENTRIES="${PREV_ENTRIES}${line#entry=}
+" ;;
+    esac
+  done < "$MODE_FILE"
+fi
+
+points_into_repo() { case "$1" in "$REPO"|"$REPO"/*) return 0 ;; *) return 1 ;; esac; }
+
+was_recorded() {
+  local p="$1" e
+  while IFS= read -r e; do [ "$e" = "$p" ] && return 0; done <<EOF
+$PREV_ENTRIES
+EOF
+  return 1
+}
+
+# A path we may replace without asking: a copy this installer recorded, from this same repo.
+is_our_copy() {
+  [ "$PREV_MODE" = "copy" ] && [ "$PREV_REPO" = "$REPO" ] && was_recorded "$1"
+}
+
+is_current_entry() {
+  local p="$1" i=0
+  while [ "$i" -lt "${#LINKS[@]}" ]; do
+    [ "${LINKS[$i]}" = "$p" ] && return 0
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# remove_entry <path> — delete an entry this installer owns. 0 removed, 1 kept (someone
+# else's), 2 nothing there. Prints the reason whenever it declines.
+remove_entry() {
+  local link="$1"
+  if [ -L "$link" ]; then
+    if points_into_repo "$(readlink "$link")"; then
+      rm -f "$link"
+      return 0
+    fi
+    echo "kept: $link -> $(readlink "$link") (points outside $REPO)"
+    return 1
+  fi
+  if [ -e "$link" ]; then
+    if is_our_copy "$link"; then
+      rm -rf "$link"
+      return 0
+    fi
+    echo "kept: $link (not recorded as an fnd copy)"
+    return 1
+  fi
+  return 2
+}
+
+describe() { ls -ld "$1" 2>/dev/null || echo "$1"; }
+
+# The version the checkout carries right now. Read after update_clone so a --copy install
+# records what it actually copied; the FND_VERSION literal is the fallback when the
+# canonical manifest is absent (a partial checkout) or unreadable.
+manifest_version() {
+  local mf="$PLUGIN/.claude-plugin/plugin.json" v=""
+  [ -f "$mf" ] || return 1
+  if command -v node >/dev/null 2>&1; then
+    v="$(node -e 'const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+if (typeof m.version === "string" && m.version) process.stdout.write(m.version);' "$mf" 2>/dev/null)" || v=""
+  fi
+  if [ -z "$v" ]; then
+    v="$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$mf" 2>/dev/null | head -1 |
+         sed 's/.*:[[:space:]]*"\(.*\)"$/\1/')"
+  fi
+  [ -n "$v" ] || return 1
+  printf '%s' "$v"
+}
+
+resolve_version() {
+  local v
+  # assigned unquoted on purpose: bump-version.cjs stamps every double-quoted assignment to
+  # this variable, so a quoted one here would be rewritten into a constant on the next release
+  if v="$(manifest_version)"; then FND_VERSION=$v; fi
+}
+
+update_clone() {
+  if [ ! -e "$REPO/.git" ]; then
+    echo "note: $REPO is not a git checkout — skipping update"
+    return 0
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    echo "note: git not found — skipping update"
+    return 0
+  fi
+  if [ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]; then
+    echo "note: working tree has local changes — skipping git pull --ff-only"
+    return 0
+  fi
+  if [ -z "$(git -C "$REPO" remote 2>/dev/null)" ]; then
+    echo "note: no git remote configured — skipping git pull --ff-only"
+    return 0
+  fi
+  if git -C "$REPO" pull --ff-only >/dev/null 2>&1; then
+    echo "updated clone: git pull --ff-only"
+  else
+    echo "warning: git pull --ff-only failed — installing the checkout as it is" >&2
+  fi
+}
+
+run_doctor() {
+  local doctor="$PLUGIN/scripts/doctor.cjs" rc=0
+  if [ ! -f "$doctor" ]; then
+    echo "note: scripts/doctor.cjs not in this checkout — install not verified"
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "warning: node not found — install not verified (fnd needs Node 18+)" >&2
+    return 0
+  fi
+  node "$doctor" --target "$TARGET" || rc=$?
+  [ "$rc" -eq 0 ] || echo "warning: doctor reported problems (exit $rc) — the install itself is in place" >&2
+}
+
+do_install() {
+  update_clone
+  build_entries
+  resolve_version
+  if [ "$TARGET" = "opencode" ]; then
+    echo "note: the OpenCode install lever is provisional (symlink route, pending spike M1c)"
+  fi
+
+  local i created=0 replaced=0 unchanged=0 pruned=0 rc link src stale
+  i=0
+  while [ "$i" -lt "${#LINKS[@]}" ]; do
+    link="${LINKS[$i]}"; src="${SRCS[$i]}"
+    i=$((i + 1))
+    mkdir -p "$(dirname "$link")"
+    if [ -L "$link" ]; then
+      if [ "$MODE" = "symlink" ] && [ "$(readlink "$link")" = "$src" ]; then
+        unchanged=$((unchanged + 1))
+        continue
+      fi
+      points_into_repo "$(readlink "$link")" || echo "note: replacing foreign symlink $link -> $(readlink "$link")"
+      rm -f "$link"
+      replaced=$((replaced + 1))
+    elif [ -e "$link" ]; then
+      if is_our_copy "$link"; then
+        rm -rf "$link"
+        replaced=$((replaced + 1))
+      else
+        echo "error: refusing to clobber $link — not created by this installer:" >&2
+        describe "$link" >&2
+        echo "       move it aside (or remove it) and re-run." >&2
+        exit 1
+      fi
+    else
+      created=$((created + 1))
+    fi
+    if [ "$MODE" = "copy" ]; then
+      cp -R "$src" "$link"
+    else
+      ln -s "$src" "$link"
+    fi
+  done
+
+  # Entries the last run recorded that this checkout no longer produces (a renamed or deleted
+  # skill): without this they stay behind as dangling links the host keeps scanning, and the
+  # new record no longer mentions them so --uninstall would never reach them either.
+  while IFS= read -r stale; do
+    [ -n "$stale" ] || continue
+    is_current_entry "$stale" && continue
+    rc=0
+    remove_entry "$stale" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      echo "pruned: $stale (no longer in this checkout)"
+      pruned=$((pruned + 1))
+    fi
+  done <<EOF
+$PREV_ENTRIES
+EOF
+
+  {
+    echo "mode=$MODE"
+    echo "repo=$REPO"
+    echo "version=$FND_VERSION"
+    i=0
+    while [ "$i" -lt "${#LINKS[@]}" ]; do
+      echo "entry=${LINKS[$i]}"
+      i=$((i + 1))
+    done
+  } > "$MODE_FILE"
+
+  echo "entries: $created created, $replaced replaced, $unchanged unchanged, $pruned pruned (root: $ROOT_DIR)"
+  case "$TARGET" in
+    cursor) echo "next: reload the Cursor window (Developer: Reload Window) so manifest, hook and MCP changes load" ;;
+    opencode) echo "next: start a new OpenCode session so skills, agents and the plugin adapter load" ;;
+  esac
+  if [ "$MODE" = "copy" ]; then
+    echo "note: --copy installs do not follow git pull — re-run this script to refresh them"
+  fi
+  run_doctor
+  echo "fnd $FND_VERSION installed for $TARGET (mode: $MODE, repo: $REPO)"
+}
+
+do_uninstall() {
+  build_entries
+  resolve_version
+  local targets="" link removed=0 kept=0 rc
+  if [ -n "$PREV_ENTRIES" ]; then
+    targets="$PREV_ENTRIES"
+  else
+    local i=0
+    while [ "$i" -lt "${#LINKS[@]}" ]; do
+      targets="${targets}${LINKS[$i]}
+"
+      i=$((i + 1))
+    done
+  fi
+
+  while IFS= read -r link; do
+    [ -n "$link" ] || continue
+    rc=0
+    remove_entry "$link" || rc=$?
+    case "$rc" in
+      0) removed=$((removed + 1)) ;;
+      1) kept=$((kept + 1)) ;;
+    esac
+  done <<EOF
+$targets
+EOF
+
+  rm -f "$MODE_FILE"
+  for d in "$ROOT_DIR/skills" "$ROOT_DIR/agents" "$ROOT_DIR/commands" "$ROOT_DIR/plugins" "$ROOT_DIR"; do
+    rmdir "$d" 2>/dev/null || true
+  done
+  echo "fnd $FND_VERSION uninstalled from $TARGET ($removed removed, $kept kept)"
+}
+
+case "$ACTION" in
+  install) do_install ;;
+  uninstall) do_uninstall ;;
+esac
