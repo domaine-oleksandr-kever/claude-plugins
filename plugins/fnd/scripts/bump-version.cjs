@@ -224,6 +224,8 @@ function writeAll(stamped, next) {
     const tmp = p.abs + STAGE_SUFFIX;
     try {
       fs.writeFileSync(tmp, p.content);
+      // rename replaces the inode — carry the target's mode (install.sh is executable)
+      fs.chmodSync(tmp, fs.statSync(p.abs).mode);
     } catch (e) {
       discard(staged.map((s) => s.tmp).concat(tmp));
       return `refusing to stamp ${next} — could not stage ${p.rel} (${e.code || e.message});\nnothing was written.`;

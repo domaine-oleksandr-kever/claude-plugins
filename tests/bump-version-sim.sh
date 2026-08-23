@@ -109,6 +109,13 @@ if grep -q '"version": "9.9.9"' "$C1/plugins/fnd/.claude-plugin/plugin.json" \
    && grep -q 'Shopify CLI v3.2.1' "$C1/README.md"; then ok
 else bad C1b-decoys-untouched "manifest=$(grep -c 9.9.9 "$C1/plugins/fnd/.claude-plugin/plugin.json") readme=$(grep -n '18.0.0\|3.2.1' "$C1/README.md" | tr '\n' ';')"; fi
 
+# C1c the stage-and-rename write path carries each target's file mode (install.sh is
+# executable in the real repo; a rename from a default-mode stage file dropped the x bit)
+C1C="$TMP/c1c"; sandbox "$C1C"; chmod 755 "$C1C/scripts/install.sh"
+rc=0; run 0.60.0 --root "$C1C" || rc=$?
+if [ "$rc" -eq 0 ] && [ -x "$C1C/scripts/install.sh" ] && [ ! -x "$C1C/README.md" ]; then ok
+else bad C1c-mode-preserved "rc=$rc mode=$(ls -l "$C1C/scripts/install.sh" | cut -d' ' -f1)"; fi
+
 # C1c formatting survives: only the one version line differs from the pristine sandbox
 C1REF="$TMP/c1ref"; sandbox "$C1REF"
 DIFFLINES="$(diff "$C1REF/plugins/fnd/.claude-plugin/plugin.json" "$C1/plugins/fnd/.claude-plugin/plugin.json" | grep -c '^[<>]')"
