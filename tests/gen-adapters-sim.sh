@@ -278,11 +278,11 @@ done
 # --------------------------------------------------------------- model table vs the plan tables --
 cursor_model() { fm "$PLUGIN_DIR/agents-cursor/$1.md" | awk -F': ' '$1 == "model" { print $2 }'; }
 for n in $agents; do
-  # Hybrid policy (2026-08-23): the routine tier pins Cursor's cheapest model, everything else
-  # inherits the session model — those are the ONLY two legal frontmatter values.
+  # Owner decision 2026-08-23 (Domaine model-selection guidelines): routine work pins Cursor's
+  # cheapest model, reasoning tiers pin claude-sonnet-5 — the ONLY two legal frontmatter values.
   cm="$(cursor_model "$n")"
-  if [ "$cm" = 'composer-2.5[fast=false]' ] || [ "$cm" = 'inherit' ]; then ok
-  else bad "cursor-model-$n" "$n pins '$cm' — not the hybrid policy (cheap pin or inherit)"; fi
+  if [ "$cm" = 'composer-2.5[fast=false]' ] || [ "$cm" = 'claude-sonnet-5' ]; then ok
+  else bad "cursor-model-$n" "$n pins '$cm' — not in the policy (cheap pin or claude-sonnet-5)"; fi
   case "$(tval "$PLUGIN_DIR/agents-codex/$n.toml" model_reasoning_effort)" in
     low|medium|high|xhigh) ok ;;
     *) bad "codex-effort-$n" "$n.toml reasoning effort is not a Codex tier" ;;
@@ -294,20 +294,22 @@ check_row() {
   m="$(tval "$PLUGIN_DIR/agents-codex/$1.toml" model)"
   [ "$m" = "$3" ] && ok || bad "row-codex-$1" "$1.toml pins '$m', proposed map says '$3'"
 }
-check_row bug-hunter inherit gpt-5.6-sol
-check_row change-reviewer inherit gpt-5.6-terra
-check_row theme-explorer inherit gpt-5.6-terra
+check_row bug-hunter claude-sonnet-5 gpt-5.6-sol
+check_row change-reviewer claude-sonnet-5 gpt-5.6-terra
+check_row theme-explorer 'composer-2.5[fast=false]' gpt-5.6-terra
 check_row doc-reader 'composer-2.5[fast=false]' gpt-5.6-luna
 check_row figma-reader 'composer-2.5[fast=false]' gpt-5.6-luna
 check_row jira-reader 'composer-2.5[fast=false]' gpt-5.6-luna
 check_row jira-writer 'composer-2.5[fast=false]' gpt-5.6-luna
-# a routine agent's ladder escalates past its cheap pin to the session model — the rung is
-# recorded in the file; an inheriting agent has no rung to record
+# every pin records its next rung: a routine agent escalates past its cheap pin to the session
+# model, a reasoning agent's manual escalation target is claude-opus-5 (the guidelines' high-risk
+# bar), and theme-explorer's cheap override steps up to the tier it left
 if fm "$PLUGIN_DIR/agents-cursor/jira-reader.md" | grep -q '^# escalate: inherit'; then ok
 else bad escalate-jira-reader "jira-reader.md does not record the inherit escalation rung"; fi
-if fm "$PLUGIN_DIR/agents-cursor/bug-hunter.md" | grep -q '^# escalate:'; then
-  bad escalate-bug-hunter "bug-hunter.md records an escalation rung — inherit has none"
-else ok; fi
+if fm "$PLUGIN_DIR/agents-cursor/bug-hunter.md" | grep -q '^# escalate: claude-opus-5'; then ok
+else bad escalate-bug-hunter "bug-hunter.md does not record the claude-opus-5 escalation rung"; fi
+if fm "$PLUGIN_DIR/agents-cursor/theme-explorer.md" | grep -q '^# escalate: claude-sonnet-5'; then ok
+else bad escalate-theme-explorer "theme-explorer.md does not record the claude-sonnet-5 escalation rung"; fi
 # the Codex column is unsigned-off — every generated file must say so where a reader will see it
 for n in $agents; do
   if grep -q 'proposed — owner sign-off pending' "$PLUGIN_DIR/agents-codex/$n.toml"; then ok

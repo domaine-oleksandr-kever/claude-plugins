@@ -70,13 +70,16 @@ const OWNED_DIRS = [DIR_CURSOR, DIR_CODEX, DIR_OPENCODE, DIR_COMMANDS];
  * prose file has to repeat an id. A host renaming a model is one edit here + a regeneration.
  *
  * cursor: live-verified 2026-08-23 — subagent frontmatter accepts only `inherit` or an exact
- *   versioned id (no family aliases, no `auto`). Hybrid policy: the routine tier pins Cursor's
- *   cheapest model (composer-2.5 standard variant, $0.50/$2.50 per 1M; `[fast=false]` because the
- *   Fast variant is the default at ~6x the price), every reasoning tier inherits the session model —
- *   the developer's session choice is the quality dial. `escalate` is the next rung, carried as a
- *   comment — a subagent pin cannot escalate itself. Known host bug: marketplace-installed plugin
- *   agents currently ignore `model:` frontmatter (staff-acknowledged, forum #168771) — pins apply
- *   on the local-symlink channel and once Cursor fixes the bug.
+ *   versioned id (no family aliases, no `auto`). Owner decision 2026-08-23, per the Domaine
+ *   "Model Selection and Agentic Usage Guidelines" (Notion, v1.0 2026-08-17): the routine tier
+ *   pins Cursor's cheapest model (composer-2.5 standard variant, $0.50/$2.50 per 1M;
+ *   `[fast=false]` because the Fast variant is the default at ~6x the price), and every reasoning
+ *   tier pins claude-sonnet-5 — the guidelines start deep PR review at Sonnet and bar Opus from
+ *   standard reviews, so a cheap session can no longer silently degrade the review gates.
+ *   `escalate` is the next rung, carried as a comment — a subagent pin cannot escalate itself;
+ *   going to Opus is the deliberate manual act the guidelines require. Known host bug:
+ *   marketplace-installed plugin agents currently ignore `model:` frontmatter (staff-acknowledged,
+ *   forum #168771) — pins apply on the local-symlink channel and once Cursor fixes the bug.
  * codex: PROPOSED — owner sign-off pending (plan, Model policy per host). `effort: null` means the
  *   proposed map fixes no reasoning tier for that row.
  * opencode: intentionally absent — no pin, agents and phases inherit the session model so local
@@ -90,24 +93,25 @@ const TIERS = {
   },
   standard: {
     label: 'standard dev — the default coding and review tier',
-    cursor: { model: 'inherit', escalate: null },
+    cursor: { model: 'claude-sonnet-5', escalate: 'claude-opus-5' },
     codex: { model: 'gpt-5.6-terra', effort: 'medium' },
   },
   'deep-review': {
     label: 'deep review — large or risky changes, hard reasoning',
-    cursor: { model: 'inherit', escalate: null },
+    cursor: { model: 'claude-sonnet-5', escalate: 'claude-opus-5' },
     codex: { model: 'gpt-5.6-terra', effort: 'high' },
   },
   precision: {
     label: 'precision — correctness-critical, security-sensitive work',
-    cursor: { model: 'inherit', escalate: null },
+    cursor: { model: 'claude-sonnet-5', escalate: 'claude-opus-5' },
     codex: { model: 'gpt-5.6-sol', effort: 'xhigh' },
   },
 };
 
-// Which tier each agent sits on. `cursorEscalate` overrides the tier's next rung when an agent
-// needs one the tier does not name; bug-hunter sits on the proposed Codex map's
-// "Opus (bug-hunter bar)" row even though on Cursor it simply inherits the session model.
+// Which tier each agent sits on. `cursorModel` / `cursorEscalate` override the tier's pin or
+// next rung for ONE agent: theme-explorer stays on the standard tier for Codex but scouts
+// cheaply on Cursor — its briefs are scoped task recon (the guidelines' Composer bar), not the
+// broad exploration the tier's Sonnet pin is priced for.
 const MODEL_TABLE = {
   'bug-hunter': { tier: 'precision' },
   'change-reviewer': { tier: 'standard' },
@@ -115,7 +119,7 @@ const MODEL_TABLE = {
   'figma-reader': { tier: 'routine' },
   'jira-reader': { tier: 'routine' },
   'jira-writer': { tier: 'routine' },
-  'theme-explorer': { tier: 'standard' },
+  'theme-explorer': { tier: 'standard', cursorModel: 'composer-2.5[fast=false]', cursorEscalate: 'claude-sonnet-5' },
 };
 
 /*
@@ -153,9 +157,12 @@ function tierOf(name) {
   const escalate = Object.prototype.hasOwnProperty.call(entry, 'cursorEscalate')
     ? entry.cursorEscalate
     : tier.cursor.escalate;
+  const cursorModel = Object.prototype.hasOwnProperty.call(entry, 'cursorModel')
+    ? entry.cursorModel
+    : tier.cursor.model;
   return {
     tier: entry.tier,
-    cursor: { model: tier.cursor.model, escalate },
+    cursor: { model: cursorModel, escalate },
     codex: { model: tier.codex.model, effort: tier.codex.effort },
   };
 }
@@ -507,8 +514,8 @@ function cursorAgent(agent) {
     '---',
     '# ' + GEN_NOTE,
     '# source: agents/' + agent.file,
-    '# model: hybrid policy (references/host-model-map.md) — routine tier pins Cursor\'s cheapest',
-    '#        model, reasoning tiers inherit the session model. Ids verified 2026-08-23.',
+    '# model: pinned per references/host-model-map.md — routine work on Cursor\'s cheapest model,',
+    '#        reasoning tiers on claude-sonnet-5 (Domaine guidelines). Ids verified 2026-08-23.',
   ];
   if (escalate) lines.push('# escalate: ' + escalate + ' (next rung of the ladder — the pin is where it starts)');
   lines.push('name: ' + agent.name);
@@ -622,12 +629,14 @@ function hostModelMap(agents) {
   }
   lines.push(
     '',
-    'Cursor runs the hybrid policy (verified against cursor.com docs 2026-08-23: frontmatter takes ' +
+    'Cursor pins every agent (verified against cursor.com docs 2026-08-23: frontmatter takes ' +
       'only `inherit` or an exact versioned id — no family aliases, no `auto`): the routine tier ' +
       "pins Cursor's cheapest model — `composer-2.5[fast=false]`, the standard variant, since Fast " +
-      'is the pricier default — and every reasoning tier inherits the session model, so the session ' +
-      'picker is the quality dial. The escalate column is the next rung of the ladder, taken after ' +
-      'a failed attempt, never as a starting point. Caveat: Cursor currently ignores `model:` ' +
+      'is the pricier default — and every reasoning tier pins `claude-sonnet-5`, where the Domaine ' +
+      'model-selection guidelines start deep PR review (they also bar Opus from standard reviews, ' +
+      'so the pin is both a floor under cheap sessions and the guidelines\' ceiling for routine ' +
+      'gates). The escalate column is the next rung of the ladder, taken after a failed attempt ' +
+      'or at the guidelines\' high-risk bar, never as a starting point. Caveat: Cursor currently ignores `model:` ' +
       'frontmatter on marketplace-installed plugin agents (staff-acknowledged bug) — pins apply on ' +
       'the local-symlink install and once that is fixed.',
     '',

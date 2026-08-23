@@ -13,23 +13,23 @@ Generated from the tier table in `<plugin root>/scripts/gen-host-adapters.cjs`, 
 | Tier | Cursor (start → escalate) | Codex (proposed) |
 | --- | --- | --- |
 | `routine` — mechanical, predictable work | `composer-2.5[fast=false]` → `inherit` | `gpt-5.6-luna` (medium reasoning) |
-| `standard` — the default coding and review tier | `inherit` (no next rung) | `gpt-5.6-terra` (medium reasoning) |
-| `deep-review` — large or risky changes, hard reasoning | `inherit` (no next rung) | `gpt-5.6-terra` (high reasoning) |
-| `precision` — correctness-critical, security-sensitive work | `inherit` (no next rung) | `gpt-5.6-sol` (xhigh reasoning) |
+| `standard` — the default coding and review tier | `claude-sonnet-5` → `claude-opus-5` | `gpt-5.6-terra` (medium reasoning) |
+| `deep-review` — large or risky changes, hard reasoning | `claude-sonnet-5` → `claude-opus-5` | `gpt-5.6-terra` (high reasoning) |
+| `precision` — correctness-critical, security-sensitive work | `claude-sonnet-5` → `claude-opus-5` | `gpt-5.6-sol` (xhigh reasoning) |
 
-Cursor runs the hybrid policy (verified against cursor.com docs 2026-08-23: frontmatter takes only `inherit` or an exact versioned id — no family aliases, no `auto`): the routine tier pins Cursor's cheapest model — `composer-2.5[fast=false]`, the standard variant, since Fast is the pricier default — and every reasoning tier inherits the session model, so the session picker is the quality dial. The escalate column is the next rung of the ladder, taken after a failed attempt, never as a starting point. Caveat: Cursor currently ignores `model:` frontmatter on marketplace-installed plugin agents (staff-acknowledged bug) — pins apply on the local-symlink install and once that is fixed.
+Cursor pins every agent (verified against cursor.com docs 2026-08-23: frontmatter takes only `inherit` or an exact versioned id — no family aliases, no `auto`): the routine tier pins Cursor's cheapest model — `composer-2.5[fast=false]`, the standard variant, since Fast is the pricier default — and every reasoning tier pins `claude-sonnet-5`, where the Domaine model-selection guidelines start deep PR review (they also bar Opus from standard reviews, so the pin is both a floor under cheap sessions and the guidelines' ceiling for routine gates). The escalate column is the next rung of the ladder, taken after a failed attempt or at the guidelines' high-risk bar, never as a starting point. Caveat: Cursor currently ignores `model:` frontmatter on marketplace-installed plugin agents (staff-acknowledged bug) — pins apply on the local-symlink install and once that is fixed.
 
 ## Subagents
 
 | Agent | Tier | Cursor | Codex (proposed) |
 | --- | --- | --- | --- |
-| `bug-hunter` | `precision` | `inherit` (no next rung) | `gpt-5.6-sol` (xhigh reasoning) |
-| `change-reviewer` | `standard` | `inherit` (no next rung) | `gpt-5.6-terra` (medium reasoning) |
+| `bug-hunter` | `precision` | `claude-sonnet-5` → `claude-opus-5` | `gpt-5.6-sol` (xhigh reasoning) |
+| `change-reviewer` | `standard` | `claude-sonnet-5` → `claude-opus-5` | `gpt-5.6-terra` (medium reasoning) |
 | `doc-reader` | `routine` | `composer-2.5[fast=false]` → `inherit` | `gpt-5.6-luna` (medium reasoning) |
 | `figma-reader` | `routine` | `composer-2.5[fast=false]` → `inherit` | `gpt-5.6-luna` (medium reasoning) |
 | `jira-reader` | `routine` | `composer-2.5[fast=false]` → `inherit` | `gpt-5.6-luna` (medium reasoning) |
 | `jira-writer` | `routine` | `composer-2.5[fast=false]` → `inherit` | `gpt-5.6-luna` (medium reasoning) |
-| `theme-explorer` | `standard` | `inherit` (no next rung) | `gpt-5.6-terra` (medium reasoning) |
+| `theme-explorer` | `standard` | `composer-2.5[fast=false]` → `claude-sonnet-5` | `gpt-5.6-terra` (medium reasoning) |
 
 These are already pinned in the generated agent files (`agents-cursor/`, `agents-codex/`) — the table is here so a reader can see the whole map in one place.
 
@@ -39,8 +39,8 @@ Phase classes come from `<plugin root>/references/pipeline-mode.md`; the conduct
 
 | Phase class | Tier | Cursor | Codex (proposed) |
 | --- | --- | --- | --- |
-| conductor — the ship session itself | `standard` | `inherit` (no next rung) | `gpt-5.6-terra` (medium reasoning) |
-| reasoning-heavy — implement, qa, the qa-loop and aftercare fix agents | `standard` | `inherit` (no next rung) | `gpt-5.6-terra` (medium reasoning) |
+| conductor — the ship session itself | `standard` | `claude-sonnet-5` → `claude-opus-5` | `gpt-5.6-terra` (medium reasoning) |
+| reasoning-heavy — implement, qa, the qa-loop and aftercare fix agents | `standard` | `claude-sonnet-5` → `claude-opus-5` | `gpt-5.6-terra` (medium reasoning) |
 | mechanical — finalize, create-pr, steps-to-test, the aftercare poll/triage agent | `routine` | `composer-2.5[fast=false]` → `inherit` | `gpt-5.6-luna` (medium reasoning) |
 
 - **conductor**: no per-spawn pin — the session model ship is started on is the dial; on Cursor, Opus only at the guidelines' "exceptional" bar
