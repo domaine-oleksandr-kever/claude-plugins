@@ -70,6 +70,9 @@ else bad install-codex-slug "README's codex marketplace command does not name $S
 # Per-host docs: the same command, plus the walkthrough steps that only exist there.
 has "$ROOT/docs/README.cursor.md" './scripts/install.sh --target cursor' cursor-doc-install
 has "$ROOT/docs/README.cursor.md" '/smoke-test' cursor-doc-verify
+# 2026-08-23 research: CLI marketplace route + the hybrid model policy (cheap pin / inherit)
+has "$ROOT/docs/README.cursor.md" 'agent plugin marketplace add' cursor-doc-cli-route
+has "$ROOT/plugins/fnd/references/host-model-map.md" 'composer-2.5[fast=false]' cursor-hybrid-pin
 has "$ROOT/docs/README.opencode.md" './scripts/install.sh --target opencode' opencode-doc-install
 has "$ROOT/docs/README.opencode.md" '/smoke-test' opencode-doc-verify
 # The statics paste is the step a fresh install cannot infer (live-smoke 2026-08-22 found the

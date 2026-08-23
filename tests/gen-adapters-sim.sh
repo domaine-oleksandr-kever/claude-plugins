@@ -278,10 +278,11 @@ done
 # --------------------------------------------------------------- model table vs the plan tables --
 cursor_model() { fm "$PLUGIN_DIR/agents-cursor/$1.md" | awk -F': ' '$1 == "model" { print $2 }'; }
 for n in $agents; do
-  case "$(cursor_model "$n")" in
-    composer|sonnet|gpt-5.5|opus) ok ;;
-    *) bad "cursor-model-$n" "$n pins '$(cursor_model "$n")' — not a least-versioned guidelines id" ;;
-  esac
+  # Hybrid policy (2026-08-23): the routine tier pins Cursor's cheapest model, everything else
+  # inherits the session model — those are the ONLY two legal frontmatter values.
+  cm="$(cursor_model "$n")"
+  if [ "$cm" = 'composer-2.5[fast=false]' ] || [ "$cm" = 'inherit' ]; then ok
+  else bad "cursor-model-$n" "$n pins '$cm' — not the hybrid policy (cheap pin or inherit)"; fi
   case "$(tval "$PLUGIN_DIR/agents-codex/$n.toml" model_reasoning_effort)" in
     low|medium|high|xhigh) ok ;;
     *) bad "codex-effort-$n" "$n.toml reasoning effort is not a Codex tier" ;;
@@ -293,16 +294,20 @@ check_row() {
   m="$(tval "$PLUGIN_DIR/agents-codex/$1.toml" model)"
   [ "$m" = "$3" ] && ok || bad "row-codex-$1" "$1.toml pins '$m', proposed map says '$3'"
 }
-check_row bug-hunter gpt-5.5 gpt-5.6-sol
-check_row change-reviewer sonnet gpt-5.6-terra
-check_row theme-explorer sonnet gpt-5.6-terra
-check_row doc-reader composer gpt-5.6-luna
-check_row figma-reader composer gpt-5.6-luna
-check_row jira-reader composer gpt-5.6-luna
-check_row jira-writer composer gpt-5.6-luna
-# bug-hunter is the one agent whose ladder escalates past its pin — the rung is recorded in the file
-if fm "$PLUGIN_DIR/agents-cursor/bug-hunter.md" | grep -q '^# escalate: opus'; then ok
-else bad escalate-bug-hunter "bug-hunter.md does not record the Opus escalation rung"; fi
+check_row bug-hunter inherit gpt-5.6-sol
+check_row change-reviewer inherit gpt-5.6-terra
+check_row theme-explorer inherit gpt-5.6-terra
+check_row doc-reader 'composer-2.5[fast=false]' gpt-5.6-luna
+check_row figma-reader 'composer-2.5[fast=false]' gpt-5.6-luna
+check_row jira-reader 'composer-2.5[fast=false]' gpt-5.6-luna
+check_row jira-writer 'composer-2.5[fast=false]' gpt-5.6-luna
+# a routine agent's ladder escalates past its cheap pin to the session model — the rung is
+# recorded in the file; an inheriting agent has no rung to record
+if fm "$PLUGIN_DIR/agents-cursor/jira-reader.md" | grep -q '^# escalate: inherit'; then ok
+else bad escalate-jira-reader "jira-reader.md does not record the inherit escalation rung"; fi
+if fm "$PLUGIN_DIR/agents-cursor/bug-hunter.md" | grep -q '^# escalate:'; then
+  bad escalate-bug-hunter "bug-hunter.md records an escalation rung — inherit has none"
+else ok; fi
 # the Codex column is unsigned-off — every generated file must say so where a reader will see it
 for n in $agents; do
   if grep -q 'proposed — owner sign-off pending' "$PLUGIN_DIR/agents-codex/$n.toml"; then ok
@@ -339,8 +344,11 @@ if [ -f "$MAP" ]; then
     if grep -q "^| \`$n\` .*\`$m\`" "$MAP"; then ok
     else bad "map-codex-$n" "the map's $n row does not carry the pinned '$m'"; fi
     c="$(cursor_model "$n")"
-    if grep -q "^| \`$n\` .*\`$c\`" "$MAP"; then ok
-    else bad "map-cursor-$n" "the map's $n row does not carry the pinned '$c'"; fi
+    # case, not grep: the pinned id carries [], which a regex would read as a character class
+    case "$(grep "^| \`$n\`" "$MAP")" in
+      *"\`$c\`"*) ok ;;
+      *) bad "map-cursor-$n" "the map's $n row does not carry the pinned '$c'" ;;
+    esac
   done
   for t in routine standard deep-review precision; do
     if grep -q "^| \`$t\`" "$MAP"; then ok; else bad "map-tier-$t" "the map has no '$t' tier row"; fi

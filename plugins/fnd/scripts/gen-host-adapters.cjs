@@ -69,10 +69,14 @@ const OWNED_DIRS = [DIR_CURSOR, DIR_CODEX, DIR_OPENCODE, DIR_COMMANDS];
  * phases (PHASE_TIERS) both resolve through it, and references/host-model-map.md prints it so no
  * prose file has to repeat an id. A host renaming a model is one edit here + a regeneration.
  *
- * cursor: Domaine "Model Selection and Agentic Usage Guidelines" v1.0 scenario rows. `model` is the
- *   START of the ladder, pinned in the least-versioned form the guidelines allow (`composer`,
- *   `sonnet`, `gpt-5.5`, `opus`) per the Model-churn policy; id forms unverified until M1a.
- *   `escalate` is the next rung, carried as a comment — a subagent pin cannot escalate itself.
+ * cursor: live-verified 2026-08-23 — subagent frontmatter accepts only `inherit` or an exact
+ *   versioned id (no family aliases, no `auto`). Hybrid policy: the routine tier pins Cursor's
+ *   cheapest model (composer-2.5 standard variant, $0.50/$2.50 per 1M; `[fast=false]` because the
+ *   Fast variant is the default at ~6x the price), every reasoning tier inherits the session model —
+ *   the developer's session choice is the quality dial. `escalate` is the next rung, carried as a
+ *   comment — a subagent pin cannot escalate itself. Known host bug: marketplace-installed plugin
+ *   agents currently ignore `model:` frontmatter (staff-acknowledged, forum #168771) — pins apply
+ *   on the local-symlink channel and once Cursor fixes the bug.
  * codex: PROPOSED — owner sign-off pending (plan, Model policy per host). `effort: null` means the
  *   proposed map fixes no reasoning tier for that row.
  * opencode: intentionally absent — no pin, agents and phases inherit the session model so local
@@ -81,29 +85,29 @@ const OWNED_DIRS = [DIR_CURSOR, DIR_CODEX, DIR_OPENCODE, DIR_COMMANDS];
 const TIERS = {
   routine: {
     label: 'routine — mechanical, predictable work',
-    cursor: { model: 'composer', escalate: 'sonnet' },
+    cursor: { model: 'composer-2.5[fast=false]', escalate: 'inherit' },
     codex: { model: 'gpt-5.6-luna', effort: null },
   },
   standard: {
     label: 'standard dev — the default coding and review tier',
-    cursor: { model: 'sonnet', escalate: 'gpt-5.5' },
+    cursor: { model: 'inherit', escalate: null },
     codex: { model: 'gpt-5.6-terra', effort: 'medium' },
   },
   'deep-review': {
     label: 'deep review — large or risky changes, hard reasoning',
-    cursor: { model: 'gpt-5.5', escalate: 'opus' },
+    cursor: { model: 'inherit', escalate: null },
     codex: { model: 'gpt-5.6-terra', effort: 'high' },
   },
   precision: {
     label: 'precision — correctness-critical, security-sensitive work',
-    cursor: { model: 'gpt-5.5', escalate: 'opus' },
+    cursor: { model: 'inherit', escalate: null },
     codex: { model: 'gpt-5.6-sol', effort: 'xhigh' },
   },
 };
 
-// Which tier each agent sits on. `cursorEscalate` overrides the tier's next rung where the
-// guidelines row names none (theme-explorer is "Sonnet", full stop); bug-hunter sits on the
-// proposed map's "Opus (bug-hunter bar)" row even though its Cursor ladder starts a rung lower.
+// Which tier each agent sits on. `cursorEscalate` overrides the tier's next rung when an agent
+// needs one the tier does not name; bug-hunter sits on the proposed Codex map's
+// "Opus (bug-hunter bar)" row even though on Cursor it simply inherits the session model.
 const MODEL_TABLE = {
   'bug-hunter': { tier: 'precision' },
   'change-reviewer': { tier: 'standard' },
@@ -111,7 +115,7 @@ const MODEL_TABLE = {
   'figma-reader': { tier: 'routine' },
   'jira-reader': { tier: 'routine' },
   'jira-writer': { tier: 'routine' },
-  'theme-explorer': { tier: 'standard', cursorEscalate: null },
+  'theme-explorer': { tier: 'standard' },
 };
 
 /*
@@ -503,8 +507,8 @@ function cursorAgent(agent) {
     '---',
     '# ' + GEN_NOTE,
     '# source: agents/' + agent.file,
-    '# model: Domaine Model Selection and Agentic Usage Guidelines v1.0, scenario row for this agent;',
-    '#        pinned in least-versioned form — id forms unverified until M1a.',
+    '# model: hybrid policy (references/host-model-map.md) — routine tier pins Cursor\'s cheapest',
+    '#        model, reasoning tiers inherit the session model. Ids verified 2026-08-23.',
   ];
   if (escalate) lines.push('# escalate: ' + escalate + ' (next rung of the ladder — the pin is where it starts)');
   lines.push('name: ' + agent.name);
@@ -618,9 +622,14 @@ function hostModelMap(agents) {
   }
   lines.push(
     '',
-    'Cursor pins are the Domaine "Model Selection and Agentic Usage Guidelines" v1.0 scenario rows, ' +
-      'in the least-versioned form the doc allows; the escalate column is the next rung of the ' +
-      'ladder, taken after a failed attempt, never as a starting point.',
+    'Cursor runs the hybrid policy (verified against cursor.com docs 2026-08-23: frontmatter takes ' +
+      'only `inherit` or an exact versioned id — no family aliases, no `auto`): the routine tier ' +
+      "pins Cursor's cheapest model — `composer-2.5[fast=false]`, the standard variant, since Fast " +
+      'is the pricier default — and every reasoning tier inherits the session model, so the session ' +
+      'picker is the quality dial. The escalate column is the next rung of the ladder, taken after ' +
+      'a failed attempt, never as a starting point. Caveat: Cursor currently ignores `model:` ' +
+      'frontmatter on marketplace-installed plugin agents (staff-acknowledged bug) — pins apply on ' +
+      'the local-symlink install and once that is fixed.',
     '',
     '## Subagents',
     '',

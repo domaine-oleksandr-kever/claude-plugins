@@ -38,6 +38,23 @@ which also means **unpushed commits are invisible** on this route, exactly as on
 `node plugins/fnd/scripts/doctor.cjs --target cursor` recognizes the result as
 `marketplace cache install`. Skip to step 3 (reload) and step 4 (smoke test).
 
+The same registration is scriptable through the Cursor CLI (`curl https://cursor.com/install
+-fsS | bash` installs the `agent` binary):
+
+```bash
+agent plugin marketplace add https://github.com/domaine-oleksandr-kever/claude-plugins --git-ref harness-port
+agent plugin marketplace list --format json   # and: update / remove
+```
+
+Installing a plugin **by id** from a registered marketplace is interactive-only for now
+(staff-confirmed) — press **Add** on the card once in the editor, or in a chat use
+`/add-plugin`; the install syncs at user scope.
+
+**Pick one route per machine.** A marketplace install and a local-checkout install are two
+independent plugin copies — with both present, both load: duplicate skills and agents reach the
+model, and every hook fires twice. `./scripts/install.sh --target cursor --uninstall` removes
+the local one; the marketplace one is removed from Customize → Plugins.
+
 ### 1. Clone this repo
 
 The clone is not a temporary download — step 2 symlinks Cursor's plugin dir into it, so this
@@ -139,11 +156,17 @@ unless your filesystem forbids it.
   adversarial verify fan-out and the per-phase telemetry —
   `plugins/fnd/references/pipeline-phases.md` states it in full. Claude Code's scripted Workflow
   layer has no analogue and nothing to reproduce: `ship` never scripted one.
-- **Models are pinned per agent** from the Domaine "Model Selection and Agentic Usage
-  Guidelines" v1.0 — the generated `agents-cursor/*.md` carry them, the whole map is in
-  `plugins/fnd/references/host-model-map.md`, and the ladder + Plan-Mode triggers ride in
-  `rules/fnd-model-policy.mdc`. Never hand-edit a generated agent: change the tier table in
-  `plugins/fnd/scripts/gen-host-adapters.cjs` and re-run the generator.
+- **Subagent models are hybrid: cheap pin or inherit.** Cursor frontmatter takes only `inherit`
+  or an exact versioned id (no family aliases, verified 2026-08-23), so the reader-type agents
+  pin Cursor's cheapest model (`composer-2.5[fast=false]` — the standard variant; Fast is the
+  pricier default) and every reasoning agent (`bug-hunter`, `change-reviewer`, `theme-explorer`)
+  inherits the session model — your session picker is the quality dial. The whole map is in
+  `plugins/fnd/references/host-model-map.md`; the session-level ladder + Plan-Mode triggers ride
+  in `rules/fnd-model-policy.mdc`. Never hand-edit a generated agent: change the tier table in
+  `plugins/fnd/scripts/gen-host-adapters.cjs` and re-run the generator. Known host bug: a
+  **marketplace-installed** plugin's agents currently ignore `model:` frontmatter entirely
+  (staff-acknowledged), so on that route every agent inherits until Cursor fixes it; pins apply
+  on the local-symlink install.
 - **The context-usage monitor is inert.** It reads the session transcript, which
   `beforeSubmitPrompt` does not hand a hook; the prompt-JSON guard half of the same hook works
   normally.
