@@ -377,6 +377,12 @@ else
   if [ "$SAW_OPENCODE" = "yes" ]; then
     echo "  - OpenCode: three pastes into your own opencode.json that no installer may write — the"
     echo "    'mcp' block, the permission fragment and the statics in 'instructions'."
+    # A clone that predates the renderer reaches this line too, and a command that is not there
+    # is worse than no command.
+    if [ -f "$DIR/plugins/fnd/scripts/opencode-config.cjs" ]; then
+      echo "    Print all three, with this clone's paths already filled in:"
+      echo "      node $DIR/plugins/fnd/scripts/opencode-config.cjs"
+    fi
     echo "    Steps 3-5 of docs/README.opencode.md ($DIR/docs/README.opencode.md)"
   fi
   if [ "$SAW_CLAUDE" = "yes" ]; then

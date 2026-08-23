@@ -247,6 +247,16 @@ do_install() {
   resolve_version
   if [ "$TARGET" = "opencode" ]; then
     echo "note: the OpenCode install lever is provisional (symlink route, pending spike M1c)"
+    # opencode.json stays the user's file — no installer writes it. A clone old enough to predate
+    # the renderer still reaches this line (update_clone skips the pull on a dirty or remote-less
+    # tree), so the command is only named when it is there to run.
+    if [ -f "$PLUGIN/scripts/opencode-config.cjs" ]; then
+      echo "note: the three opencode.json pastes (steps 3-5) are yours to make — print them with"
+      echo "      node $PLUGIN/scripts/opencode-config.cjs"
+    else
+      echo "note: the three opencode.json pastes (steps 3-5) are yours to make — assemble them from"
+      echo "      $REPO/docs/README.opencode.md"
+    fi
   fi
   if [ "$TARGET" = "codex" ]; then
     if [ "${#LINKS[@]}" -eq 0 ]; then

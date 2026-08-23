@@ -75,6 +75,10 @@ STUB
   chmod +x "$d/scripts/install.sh"
   echo "alpha" > "$d/plugins/fnd/skills/alpha/SKILL.md"
   echo "opencode doc" > "$d/docs/README.opencode.md"
+  # The leftovers report names this renderer only when the checkout carries it, so a fixture
+  # without it would prove the opposite of what the OpenCode row asserts.
+  mkdir -p "$d/plugins/fnd/scripts"
+  printf '#!/usr/bin/env node\n' > "$d/plugins/fnd/scripts/opencode-config.cjs"
 }
 
 # run <home> <script> [args...] — bootstrap under a throwaway HOME with both recorders armed,
@@ -396,9 +400,24 @@ if grep -q "left to do by hand" "$O" \
    && grep -q "Reload Window" "$O"; then ok
 else bad P1-report-cursor-leftovers "out=$(tr '\n' ';' < "$O")"; fi
 
-if grep -q "docs/README.opencode.md" "$O" && grep -q "three pastes" "$O"; then ok
+# The leftovers block is bootstrap's own text (the stub installer never prints it), so this is
+# the assert that the OpenCode row still says both halves: the pastes stay the user's to make,
+# and one command renders them for the checkout this run just produced.
+if grep -q "docs/README.opencode.md" "$O" && grep -q "three pastes" "$O" \
+   && grep -q "no installer may write" "$O" \
+   && grep -qF "node $FIX/plugins/fnd/scripts/opencode-config.cjs" "$O"; then ok
 else bad P2-report-opencode-pastes "out=$(tr '\n' ';' < "$O")"; fi
 
+# …and a checkout too old to carry the renderer must not be handed its path: that command exits
+# "Cannot find module", while the doc pointer beside it still works.
+FIX4="$TMP/checkout-no-renderer"; mkcheckout "$FIX4"
+rm -f "$FIX4/plugins/fnd/scripts/opencode-config.cjs"
+run "$TMP/h10c" "$FIX4/scripts/bootstrap.sh" --targets opencode
+if ! grep -qF "opencode-config.cjs" "$O" && grep -q "three pastes" "$O" \
+   && grep -qF "$FIX4/docs/README.opencode.md" "$O"; then ok
+else bad P2b-renderer-absent "out=$(tr '\n' ';' < "$O")"; fi
+
+run "$TMP/h10" "$FIXBOOT" --targets all
 if grep -qF "codex plugin marketplace add domaine-oleksandr-kever/claude-plugins" "$O" \
    && grep -q "dev-channel subagents" "$O"; then ok
 else bad P3-report-codex-channel "out=$(tr '\n' ';' < "$O")"; fi

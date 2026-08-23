@@ -92,6 +92,17 @@ edits that file, because it is yours. The global one lives at
 }
 ```
 
+You do not have to assemble those three blocks by hand. From the checkout:
+
+```bash
+node plugins/fnd/scripts/opencode-config.cjs
+```
+
+It prints all three — steps 3, 4 and 5 below — as labeled JSON blocks with this clone's absolute
+paths already filled in, so the paste is copy-from-terminal. `--json` prints the same three
+merged into one object, for a `jq` merge. It reads; it never writes your `opencode.json`. Steps
+3–5 then describe what each block is and why, and stay the reference when you merge by hand.
+
 ### 3. Paste the MCP servers into your `opencode.json`
 
 Open `plugins/fnd/opencode/mcp-fragment.json` (generated from the canonical server list) and
@@ -153,30 +164,34 @@ rather than widening the pattern.
 
 ### 5. Paste the static conventions
 
-The session conventions that other hosts inject for you — comment discipline, lean code, task
-workspace, whale routing, plugin feedback — are wired by you on OpenCode: the plugin adapter
+The session conventions that other hosts inject for you — comment discipline, lean code, whale
+routing, plugin feedback, task workspace — are wired by you on OpenCode: the plugin adapter
 injects only the detection-gated live-store block. Without this paste **no fnd convention
 reaches your sessions** (the smoke test's context-injection row goes red on exactly this).
 
 Same file, third block: an `instructions` array at the top level, next to `mcp` and
-`permission`, naming the five static files with the absolute path of your clone:
+`permission`, naming the static convention files with the absolute path of your clone.
+`node plugins/fnd/scripts/opencode-config.cjs` prints this array with the paths already
+substituted; the files it names are:
 
 ```json
 "instructions": [
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/comment-discipline.md",
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/lean-code.md",
-  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/task-workspace.md",
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/mcp-whale.md",
-  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/plugin-feedback.md"
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/plugin-feedback.md",
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/task-workspace.md"
 ]
 ```
 
-If your config already has `instructions`, append these entries to it. List the five files
+If your config already has `instructions`, append these entries to it. List the files
 explicitly — a `hooks/*.md` glob would also pull in `store-access.md`, which the adapter
-injects dynamically only where store credentials exist, so a static copy would double it. (An
-`AGENTS.md` referencing the same five files works too, if that is how you organize global
+injects dynamically only where store credentials exist, so a static copy would double it. (That
+exclusion is exactly what the renderer applies, which is why its output is the safe list to
+paste. An `AGENTS.md` referencing the same files works too, if that is how you organize global
 instructions.) Because the paths point into the clone, `git pull` updates the content with no
-further pasting — only a renamed or added convention file comes back to this step.
+further pasting — only a renamed or added convention file comes back to this step, and re-running
+the renderer is how you see it.
 
 ### 6. Optional: model tiering
 

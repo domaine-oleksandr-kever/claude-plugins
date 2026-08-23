@@ -41,6 +41,10 @@ mkrepo() {
   echo "alpha" > "$d/plugins/fnd/skills/alpha/SKILL.md"
   echo "beta"  > "$d/plugins/fnd/skills/beta/SKILL.md"
   echo "ref"   > "$d/plugins/fnd/references/notes.md"
+  # The OpenCode report names the paste renderer only when the checkout holds it, so the fixture
+  # has to hold it for the pointer assert to be about anything.
+  mkdir -p "$d/plugins/fnd/scripts"
+  printf '#!/usr/bin/env node\n' > "$d/plugins/fnd/scripts/opencode-config.cjs"
 }
 
 # mkbundle <repo-dir> <version> — the packaging a real install carries: three manifests, a hook
@@ -80,6 +84,10 @@ gitq() {
 
 CURSOR_LINK=".cursor/plugins/local/fnd"
 CURSOR_MODE=".cursor/plugins/local/.fnd-install-mode"
+
+# The renderer that prints the three opencode.json blocks; the installer points at it because
+# those pastes are the one part of an OpenCode install no script may perform.
+POINTER="plugins/fnd/scripts/opencode-config.cjs"
 
 # ------------------------------------------------------------------ version stamp (drift) --
 # The installer's FND_VERSION is one of the stamps bump-version.cjs owns; the canonical
@@ -267,6 +275,13 @@ else bad O2-opencode-user-skills-intact "user skills dir clobbered"; fi
 if grep -q "provisional" "$O" && grep -q "M1c" "$O"; then ok
 else bad O3-opencode-provisional-note "out=$(tr '\n' ';' < "$O")"; fi
 
+# The three config pastes are the step the installer cannot take, so an OpenCode install has to
+# hand over the command that renders them — and with an absolute path, since the pastes are made
+# from wherever the developer's shell happens to be.
+if grep -qF "$POINTER" "$O" && grep -qF "$REPO1/plugins/fnd/scripts/opencode-config.cjs" "$O" \
+   && grep -q "steps 3-5" "$O"; then ok
+else bad O3b-opencode-render-pointer "out=$(tr '\n' ';' < "$O")"; fi
+
 if [ "$(grep -c '^entry=' "$H10/$OC/.fnd-install-mode")" -eq 2 ] \
    && grep -q "new OpenCode session" "$O"; then ok
 else bad O4-opencode-mode-file "$(tr '\n' ';' < "$H10/$OC/.fnd-install-mode" 2>/dev/null)"; fi
@@ -275,6 +290,30 @@ run "$H10" "$REPO1" --target opencode --uninstall
 if [ "$RC" -eq 0 ] && [ ! -e "$H10/$OC/skills/alpha" ] && [ ! -e "$H10/$OC/skills/beta" ] \
    && [ -f "$H10/$OC/skills/mine/SKILL.md" ] && [ ! -f "$H10/$OC/.fnd-install-mode" ]; then ok
 else bad O5-opencode-uninstall "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+# …and the pointer is install-only: an uninstall that printed it would send someone to re-paste
+# the config they came here to remove.
+if ! grep -qF "$POINTER" "$O"; then ok
+else bad O5b-no-pointer-on-uninstall "out=$(tr '\n' ';' < "$O")"; fi
+
+# The other two hosts have no opencode.json in their story, so the pointer must not follow them
+H10B="$TMP/h10b"
+run "$H10B" "$REPO1" --target cursor
+if [ "$RC" -eq 0 ] && ! grep -qF "$POINTER" "$O"; then ok
+else bad O5c-no-pointer-on-cursor "out=$(tr '\n' ';' < "$O")"; fi
+run "$H10B" "$REPO1" --target codex
+if [ "$RC" -eq 0 ] && [ -s "$O" ] && ! grep -qF "$POINTER" "$O"; then ok
+else bad O5d-no-pointer-on-codex "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+# A checkout that predates the renderer still reaches the OpenCode note (update_clone declines to
+# pull a dirty or remote-less tree), and a printed command that exits "Cannot find module" is
+# worse than the doc it replaced.
+REPO1B="$TMP/repo1-no-renderer"; mkrepo "$REPO1B"
+rm -f "$REPO1B/plugins/fnd/scripts/opencode-config.cjs"
+run "$TMP/h10d" "$REPO1B" --target opencode
+if [ "$RC" -eq 0 ] && ! grep -qF "$POINTER" "$O" && grep -q "steps 3-5" "$O" \
+   && grep -qF "$REPO1B/docs/README.opencode.md" "$O"; then ok
+else bad O5e-pointer-needs-the-file "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
 
 # generated adapter dirs (M4/M5 output) are linked when the checkout carries them
 REPO2="$TMP/repo2"; mkrepo "$REPO2"

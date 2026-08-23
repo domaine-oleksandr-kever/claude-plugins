@@ -50,8 +50,9 @@ jsources() {
 parses() { "$NODE_BIN" -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$1" 2>/dev/null; }
 
 # ------------------------------------------------------------------ required files --
-# Every M2 packaging file is listed here BY NAME: the per-host blocks below are guarded on
-# existence, so without this list a deleted manifest would take its own assertions with it.
+# Every packaging and install-path file is listed here BY NAME: the per-host blocks below are
+# guarded on existence, so without this list a deleted manifest would take its own assertions
+# with it — and a bundled script deleted with its suite would leave nothing red anywhere.
 for f in "$CANON" \
          "$ROOT/.claude-plugin/marketplace.json" \
          "$CURSOR_MANIFEST" \
@@ -60,7 +61,9 @@ for f in "$CANON" \
          "$ROOT/scripts/install.sh" \
          "$ROOT/scripts/bootstrap.sh" \
          "$PLUGIN_DIR/scripts/doctor.cjs" \
-         "$PLUGIN_DIR/scripts/bump-version.cjs"; do
+         "$PLUGIN_DIR/scripts/bump-version.cjs" \
+         "$PLUGIN_DIR/scripts/opencode-config.cjs" \
+         "$ROOT/tests/opencode-config-sim.sh"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
 
@@ -223,6 +226,28 @@ if [ -f "$CODEX_MANIFEST" ]; then
     else bad "codex-interface-prompt-$i" "unknown skill '$s'"; fi
   done
 fi
+
+# ------------------------------------ every session convention reaches every host --
+# plugins/fnd/hooks/*.md IS the set of session conventions, and each host delivers it from its own
+# hardcoded wiring — except OpenCode, whose paste is derived from the directory itself. Without
+# this row a new convention file reaches OpenCode alone, and a stray .md dropped into hooks/
+# reaches OpenCode users as an instruction nobody wired.
+# store-access.md is the exception on Cursor only: the shim injects it where store credentials are
+# detected instead of shipping it as an always-applied rule.
+CURSOR_SHIM_INJECTED="store-access"
+for f in "$PLUGIN_DIR"/hooks/*.md; do
+  [ -f "$f" ] || continue
+  n="$(basename "$f" .md)"
+  if grep -qF "$n" "$CANON"; then ok
+  else bad "convention-claude-$n" "hooks/$n.md is in no SessionStart command of the canonical manifest"; fi
+  if [ -f "$PLUGIN_DIR/hooks/hooks-codex.json" ]; then
+    if grep -qF "$n" "$PLUGIN_DIR/hooks/hooks-codex.json"; then ok
+    else bad "convention-codex-$n" "hooks/$n.md is in no SessionStart command of hooks-codex.json"; fi
+  fi
+  if [ "$n" = "$CURSOR_SHIM_INJECTED" ]; then continue; fi
+  if [ -f "$PLUGIN_DIR/rules/fnd-$n.mdc" ]; then ok
+  else bad "convention-cursor-$n" "no rules/fnd-$n.mdc — hooks/$n.md never reaches a Cursor session"; fi
+done
 
 # ------------------------------------------- smoke-test skill wired to what it verifies --
 # The post-install exercise names things that live elsewhere: its reference file, the canonical

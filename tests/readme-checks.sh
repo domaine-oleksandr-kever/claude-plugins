@@ -121,6 +121,11 @@ has "$ROOT/docs/README.opencode.md" '/smoke-test' opencode-doc-verify
 # walkthrough without it → smoke row 6 red); the reference must send an OpenCode red to that
 # paste, not to an issue filing.
 has "$ROOT/docs/README.opencode.md" 'plugins/fnd/hooks/comment-discipline.md' opencode-doc-statics-paste
+# …and the walkthrough offers the rendered alternative to assembling those three blocks by hand,
+# with the path a reader can paste; a command named nowhere is a command nobody runs.
+has "$ROOT/docs/README.opencode.md" 'node plugins/fnd/scripts/opencode-config.cjs' opencode-doc-render-command
+if [ -f "$ROOT/plugins/fnd/scripts/opencode-config.cjs" ]; then ok
+else bad opencode-render-script "docs/README.opencode.md names a renderer that is not in this checkout"; fi
 has "$ROOT/plugins/fnd/references/smoke-test-checks.md" 'docs/README.opencode.md' smoke-row6-opencode-remediation
 has "$ROOT/docs/README.codex.md" "codex plugin marketplace add $SLUG" codex-doc-marketplace
 has "$ROOT/docs/README.codex.md" 'codex plugin marketplace remove' codex-doc-marketplace-remove
