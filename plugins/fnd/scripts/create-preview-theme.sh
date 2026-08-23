@@ -732,7 +732,9 @@ pin_toml() { # $1 = theme id → 0 + PIN_ACTION=rewritten|appended|unchanged; 1 
     rm -f "$tmp"; PIN_TMP=""; PIN_ACTION="unchanged"; return 0
   fi
   # mktemp creates 0600; a config the developer keeps at 0644 must not silently change mode.
-  mode="$(stat -f '%Lp' "$target" 2>/dev/null || stat -c '%a' "$target" 2>/dev/null || true)"
+  # GNU first: on Linux `stat -f` is a different valid command (filesystem status) that exits 0
+  # with non-octal output, so BSD-first would skip the fallback and silently drop the mode.
+  mode="$(stat -c '%a' "$target" 2>/dev/null || stat -f '%Lp' "$target" 2>/dev/null || true)"
   case "$mode" in ''|*[!0-7]*) ;; *) chmod "$mode" "$tmp" 2>/dev/null || true ;; esac
   mv -f "$tmp" "$target" 2>/dev/null || { rm -f "$tmp"; PIN_TMP=""; return 1; }
   PIN_TMP=""

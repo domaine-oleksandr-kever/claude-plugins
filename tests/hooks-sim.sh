@@ -66,11 +66,20 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/plugins/fnd/.claude-plugin/plugin.json"
 CTX="$ROOT/plugins/fnd/hooks/context-stats.cjs"
 
-TMP="$(mktemp -d)"
+TMPROOT="$(mktemp -d)"
 # A failing byte-for-byte pin (M90–M92) points at the stdout it captured under $TMP, so the
 # cleanup stands down whenever one of them names a file the developer still has to read.
 KEEP_TMP=0
-trap '[ "$KEEP_TMP" = 1 ] || rm -rf "$TMP"' EXIT
+trap '[ "$KEEP_TMP" = 1 ] || rm -rf "$TMPROOT"' EXIT
+# Spill handles embed paths under $TMP, and several mcp-slim fixtures (M70, M86) sit at
+# deliberate marker-cost boundaries — a Linux /tmp prefix is ~40 chars shorter than macOS's
+# /var/folders one, which flips those thresholds. Pad short prefixes up to one fixed length so
+# the same fixture crosses the same boundary on every OS; already-long prefixes stay untouched.
+TMP="$TMPROOT"
+if [ "${#TMP}" -lt 60 ]; then
+  TMP="$TMP/$(printf 'p%.0s' $(seq 1 $((59 - ${#TMP}))))"
+  mkdir -p "$TMP"
+fi
 
 # A real ~/.config/domaine/env on this machine would inject switches into every hook under
 # test (they load it via env-file.cjs) — point the global layer at a sandbox path. It sits under

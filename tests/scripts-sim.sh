@@ -406,7 +406,12 @@ else bad T32-strip-appends-nothing "rc=$rc bytes=$(wc -c < "$BF/nonl.out" | tr -
 # degrades to error=no_store like an absent file, never a bare awk error with no error= line —
 # the `|| true` on the toml_value call site is what keeps set -euo pipefail out of it
 UT33="$TMP/unreadable-t.toml"; printf 'store = "acme-dev"\n' > "$UT33"; chmod 000 "$UT33"
-rc=0; TOML_PATH="$UT33" "$BASH_BIN" "$TJ" themes --engine themecli >"$O" 2>"$E" || rc=$?
+# The themecli engine probes `command -v shopify` before it ever reads the toml, so the case
+# needs a CLI on PATH to reach the read at all; the stub must never actually run — the no-store
+# refusal comes first — so it exits 99 to fail the case loudly if it ever does.
+T33SHIM="$TMP/t33-shim"; mkdir -p "$T33SHIM"
+printf '#!/bin/sh\nexit 99\n' > "$T33SHIM/shopify"; chmod +x "$T33SHIM/shopify"
+rc=0; TOML_PATH="$UT33" PATH="$T33SHIM:$PATH" "$BASH_BIN" "$TJ" themes --engine themecli >"$O" 2>"$E" || rc=$?
 chmod 644 "$UT33"
 if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && ! grep -qi "awk: can't open" "$E"; then ok
 else bad T33-unreadable-toml-no-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi

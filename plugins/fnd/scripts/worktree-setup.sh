@@ -41,6 +41,10 @@
 # Requires: git. npm only when the repo has a package.json.
 
 set -euo pipefail
+# The work-id validation below relies on glob bracket ranges ([A-Z], [!a-z0-9-]); under a UTF-8
+# collating locale some shells match those by collation order, which lets mixed-case ids like
+# ABC-12a through as "slugs" — and the id becomes a branch and directory name.
+export LC_ALL=C
 
 BASE_DEFAULT="develop"
 # 9292 is the Shopify CLI default and belongs to the main checkout's dev server; every
