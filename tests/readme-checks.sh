@@ -90,6 +90,7 @@ has "$ROOT/docs/README.opencode.md" '/smoke-test' opencode-doc-verify
 has "$ROOT/docs/README.opencode.md" 'plugins/fnd/hooks/comment-discipline.md' opencode-doc-statics-paste
 has "$ROOT/plugins/fnd/references/smoke-test-checks.md" 'docs/README.opencode.md' smoke-row6-opencode-remediation
 has "$ROOT/docs/README.codex.md" "codex plugin marketplace add $SLUG" codex-doc-marketplace
+has "$ROOT/docs/README.codex.md" 'codex plugin marketplace remove' codex-doc-marketplace-remove
 has "$ROOT/docs/README.codex.md" '/plugins' codex-doc-plugins-browser
 has "$ROOT/docs/README.codex.md" 'hooks = true' codex-doc-features-gate
 has "$ROOT/docs/README.codex.md" '/hooks' codex-doc-trust-review

@@ -38,6 +38,11 @@ Codex reads `.claude-plugin/marketplace.json` as a legacy-compatible marketplace
 this repo is already a Codex marketplace — nothing separate is published. Then run `/plugins`
 in Codex, find **fnd**, and install it.
 
+To undo a registration: `codex plugin marketplace list` shows the configured name,
+`codex plugin marketplace remove <name>` drops it. A registration also pins the git ref it
+was added with — remove and re-add is how you point it at a different one. Removing a
+marketplace does not uninstall an already-installed plugin; that happens in `/plugins`.
+
 That legacy-compat path is research, not yet a live measurement (spike M1b). If the add command
 does not resolve `plugins/fnd`, the repo gains a native `.agents/plugins/marketplace.json` and
 this section changes with it — nothing else about the install does.
