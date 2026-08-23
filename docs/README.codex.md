@@ -68,7 +68,12 @@ Nothing warns you if you skip steps 2 and 3: skills and MCP load either way, so 
 prompt-JSON guard, mcp-slim's spill-and-stub, and **both git guards**, including the
 `--no-verify` block.
 
-### 4. Link the subagents
+### 4. (Optional) Link the subagents from a checkout
+
+Current Codex loads the whole bundle from the marketplace cache — TOML subagents included
+(measured on CLI 0.149.0: `jira-reader` delegated on a cache-only install). Skip this step
+unless subagent delegation fails on your CLI version, or you develop plugin content and want
+Codex running your local checkout's agents:
 
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
@@ -76,8 +81,8 @@ cd claude-plugins
 ./scripts/install.sh --target codex
 ```
 
-Keep this clone somewhere permanent — the links below point into it, so deleting the folder
-removes the subagents (the marketplace half is unaffected; Codex keeps its own cache).
+Keep this clone somewhere permanent — the links point into it, so deleting the folder removes
+the linked subagents (the marketplace half is unaffected; Codex keeps its own cache).
 
 This links `plugins/fnd/agents-codex/*.toml` into `~/.codex/agents/` and nothing else — skills,
 hooks and MCP stay with the marketplace install. `--copy` and `--uninstall` work as on every
@@ -85,11 +90,12 @@ target; a `--copy` install does not follow `git pull`, so re-run the installer t
 
 ### 5. Verify
 
-The installer finishes by running `doctor.cjs --target codex`. Two of its rows exist only for
-this host:
+Run `doctor.cjs --target codex` (the installer finishes with it on the dev channel; on the
+cache-only route the smoke test runs it for you from the cached plugin path, where the install
+row reads `marketplace cache install`). Two of its rows exist only for this host:
 
 ```text
-PASS  install:codex          symlink install, 7 entry(ies) live (root: ~/.codex)
+PASS  install:codex          marketplace cache install (root: ~/.codex/plugins/cache/…)
 SKIP  codex:hooks-gate       no [features] hooks entry in ~/.codex/config.toml — set it to true
 SKIP  codex:hooks-trust      not inspectable — prove it with `git commit --no-verify -m probe`
 ```
@@ -110,7 +116,7 @@ codex plugin marketplace upgrade      # skills, hooks, MCP
 
 ```bash
 cd /path/to/claude-plugins
-./scripts/install.sh --target codex   # subagents (= git pull --ff-only + re-link + doctor)
+./scripts/install.sh --target codex   # only if you linked subagents (= git pull + re-link + doctor)
 ```
 
 Then start a new session. Three things to expect:

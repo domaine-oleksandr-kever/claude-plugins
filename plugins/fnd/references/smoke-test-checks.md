@@ -199,7 +199,7 @@ Remediation lines for non-green rows, most-blocking first:
 | doctor FAIL on a pointer/hook row | the host's wiring file is missing from this install — reinstall, then re-run doctor |
 | MCP server absent from the host | add it to the host's MCP config (or the host's plugin-provided config) and restart the session |
 | MCP server present but unauthenticated | run that server's own auth flow, then re-run row 3 |
-| Subagent not spawnable | the host's agent directory for this install is missing or not discovered — reinstall, then start a new session. On Codex the marketplace install does NOT carry the subagents: they are linked by `scripts/install.sh --target codex`, and `doctor.cjs --target codex` says whether they are live |
+| Subagent not spawnable | the host's agent directory for this install is missing or not discovered — reinstall, then start a new session. On Codex current CLIs load bundled TOML agents from the marketplace cache (measured 0.149.0); if yours does not, link them locally with `scripts/install.sh --target codex` — `doctor.cjs --target codex` says whether links are live |
 | Guard did not fire | the host's hook wiring is not loaded: check the install, and on hosts with a hook trust prompt, approve the plugin's hooks and start a new session |
 | No conventions in context | the host's injection path is not active — same wiring check as the guard row |
 | Any bundled script crashed | that is a plugin defect, not an environment gap → offer to file it |

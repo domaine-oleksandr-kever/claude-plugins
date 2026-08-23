@@ -59,13 +59,13 @@ const GENERATOR_REL = 'scripts/gen-host-adapters.cjs';
 // <root>/.fnd-install-mode and points every entry back into this checkout. `probe` lists the
 // entries a hand-made install would still create, so an install without the record is recognized.
 // M1C-DEFAULT: the OpenCode root is provisional — spike M1c picks the final lever.
-// Codex is a HALF-cache host: skills, hooks and MCP come from its marketplace cache, but the TOML
-// subagents have no verified plugin-level channel (M1b), so scripts/install.sh links them locally —
-// and an install without those links spawns nothing, which is what this row exists to say.
 // `cacheRoot` marks a host whose marketplace clones the plugin into its own cache: a doctor
 // running from inside that cache IS the install (live-verified on Cursor 2026-08-22 —
-// ~/.cursor/plugins/cache/<marketplace>/fnd/<commit>), so no local record is expected. Codex
-// stays without one: its cache carries skills/hooks/MCP but the subagent links are still local.
+// ~/.cursor/plugins/cache/<marketplace>/fnd/<commit>), so no local record is expected.
+// Codex has one too — M1b re-measured 2026-08-23 (CLI 0.149.0, smoke row 4): the marketplace
+// cache carries the WHOLE bundle, TOML subagents included — jira-reader spawned on a cache-only
+// install with no local links. scripts/install.sh --target codex is therefore the dev channel
+// (run Codex against a local checkout's agents), not a required install step.
 const HOST_INSTALLS = {
   cursor: {
     root: (home) => path.join(home, '.cursor', 'plugins', 'local'),
@@ -76,7 +76,8 @@ const HOST_INSTALLS = {
   codex: {
     root: (home) => path.join(home, '.codex'),
     probe: ['agents/jira-reader.toml'],
-    note: 'subagents only — skills/hooks/MCP come from ~/.codex/plugins/cache',
+    cacheRoot: (home) => path.join(home, '.codex', 'plugins', 'cache'),
+    note: 'local agent links are the dev channel — current Codex loads the whole bundle, agents included, from its marketplace cache',
   },
 };
 // Version-cache hosts: the host clones into its own cache, so there is no local install to inspect.

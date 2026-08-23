@@ -425,20 +425,33 @@ expect D36-home-beats-xdg 0 "PASS  install:opencode" "!FAIL"
 run --root "$G" --home "$H1" --target claude
 expect D37-claude-cache 0 "SKIP  install:claude" ".claude/plugins/cache" "!FAIL"
 
-# D37b: Codex is the half-cache host. Its skills/hooks/MCP come from the marketplace cache, but the
-# TOML subagents are linked locally, so "nothing linked" is a real broken install — a SKIP here
-# would bless a plugin whose whole agent layer can never load, with doctor green.
+# D37b: a doctor run from a plain checkout with nothing linked still fails — that checkout is not
+# installed anywhere, and the row says where the real channels live.
 run --root "$G" --home "$H1" --target codex
 expect D37b-codex-not-linked 1 "FAIL  install:codex" ".codex/.fnd-install-mode" \
-  "install.sh --target codex" "subagents only"
+  "install.sh --target codex" "dev channel"
 
-# D37c: linked subagents pass, and the row still names what it does NOT cover.
+# D37c: linked subagents pass — the dev channel: Codex runs this checkout's agents.
 H16="$TMP/home16"; mkdir -p "$H16/$CX_REL/agents"
 mkdir -p "$G/agents-codex"; printf 'name = "jira-reader"\n' > "$G/agents-codex/jira-reader.toml"
 ln -s "$G/agents-codex/jira-reader.toml" "$H16/$CX_REL/agents/jira-reader.toml"
 record "$H16" "$CX_REL" symlink "$G" 0.59.0 "$H16/$CX_REL/agents/jira-reader.toml"
 run --root "$G" --home "$H16" --target codex
-expect D37d-codex-linked 0 "PASS  install:codex" "1 entry(ies) live" "skills/hooks/MCP" "!FAIL"
+expect D37d-codex-linked 0 "PASS  install:codex" "1 entry(ies) live" "dev channel" "!FAIL"
+
+# D37d2 (M1b re-measured 2026-08-23, CLI 0.149.0 smoke row 4): a cache-only Codex install spawns
+# bundled TOML agents with no local links, so a doctor run from inside ~/.codex/plugins/cache IS
+# the install and must pass — not send the user to install.sh.
+HCX="$TMP/home-codex-cache"; CACHE_CX="$HCX/.codex/plugins/cache/domaine/fnd/0.60.0"
+mkroot "$CACHE_CX" "${ALL3[@]}"
+run --root "$CACHE_CX" --home "$HCX" --target codex
+expect D37d2-codex-marketplace-cache 0 "PASS  install:codex" "marketplace cache install" "!FAIL"
+
+# D37d3: same guard as Cursor's D29c — the cache pass is keyed to the plugin root actually being
+# IN the cache; a checkout beside a cache dir still checks (and fails) the local install.
+mkdir -p "$HCX/.codex/plugins/cache"
+run --root "$G" --home "$HCX" --target codex
+expect D37d3-checkout-beside-cache 1 "FAIL  install:codex" "not installed" "!marketplace cache install"
 
 # D37e: a hand-made link at the documented path counts, same as the Cursor probe.
 H17="$TMP/home17"; mkdir -p "$H17/$CX_REL/agents"

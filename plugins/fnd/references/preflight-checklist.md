@@ -147,9 +147,10 @@ hosts report the row as 🟢 `n/a — this host pins no versioned ids` and move 
 
 Where the pins live: `<plugin root>/agents-cursor/*.md` frontmatter `model:` on Cursor;
 `<plugin root>/agents-codex/*.toml` `model` / `model_reasoning_effort` on Codex — there, read the
-copies the installer linked into the host's own agents directory where they exist, since those are
-what the host loads. Not linked at all → 🟡 "subagents not linked — nothing to validate"
-(`doctor.cjs --target codex` is the row that reports the linking itself).
+copies the installer linked into the host's own agents directory where they exist (the dev
+channel loads those); otherwise read the bundled `agents-codex/` copies — current Codex loads
+them straight from the marketplace cache (`doctor.cjs --target codex` reports which install
+mode is live).
 
 Two halves, reported as one row:
 

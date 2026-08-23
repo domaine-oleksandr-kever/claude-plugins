@@ -138,7 +138,7 @@ sections below the table are the same story compressed for someone who has done 
 |---|---|---|---|
 | Claude Code | `/plugin marketplace add …` + `/plugin install fnd@domaine` | `/fnd:smoke-test` | below |
 | Cursor | Customize → Add Marketplace (or `./scripts/install.sh --target cursor`) | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
-| Codex CLI | `codex plugin marketplace add …` **+** `./scripts/install.sh --target codex` | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
+| Codex CLI | `codex plugin marketplace add …` (dev channel: `./scripts/install.sh --target codex`) | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
 | OpenCode | `./scripts/install.sh --target opencode` | `/smoke-test` (command shim) | [docs/README.opencode.md](docs/README.opencode.md) |
 
 `smoke-test` is a **run-once post-install check**, not a per-session routine: it runs the
@@ -208,16 +208,17 @@ codex plugin marketplace add domaine-oleksandr-kever/claude-plugins
 /plugins                                  # → install fnd
 ```
 
-Then, from a clone of this repo:
+Optionally, from a clone of this repo (dev channel — current Codex loads bundled subagents
+from the cache on its own):
 
 ```bash
-./scripts/install.sh --target codex       # subagents only
+./scripts/install.sh --target codex       # link subagents to your local checkout
 ```
 
 Then two steps the install cannot perform for you — `[features] hooks = true` in
 `~/.codex/config.toml`, and the per-content-hash trust review in `/hooks` — then a new session
-and `$smoke-test` once (Codex invokes skills with `$`). The full walkthrough, including the
-branch-ref form for the port's test phase and what re-triggers the trust review, is in
+and `$smoke-test` once (Codex invokes skills with `$`). The full walkthrough, including what
+re-triggers the trust review, is in
 [docs/README.codex.md](docs/README.codex.md).
 
 ### OpenCode
