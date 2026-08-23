@@ -199,9 +199,10 @@ host deltas: [docs/README.cursor.md](docs/README.cursor.md).
 
 ### Codex CLI
 
-Two channels: the marketplace plugin carries skills, hooks and MCP; the TOML subagents are
-linked by the installer, because no plugin-level agents channel is confirmed yet (spike M1b).
-Without the second step every delegating skill hits an unknown agent.
+One channel: the marketplace install carries the whole bundle — skills, hooks, MCP **and** the
+TOML subagents, measured live on Codex CLI 0.149.0 (a cache-only install spawned `jira-reader`
+with no local links). `install.sh --target codex` is the dev channel — point Codex at a local
+checkout's subagents — and the fallback on an older CLI that does not serve them from the cache.
 
 ```text
 codex plugin marketplace add domaine-oleksandr-kever/claude-plugins
@@ -781,7 +782,7 @@ alongside the rest of the generated adapters — never hand-edit one, add the se
 |---|---|---|
 | `plugins/fnd/mcp.json` | Cursor | auto-discovered at the plugin root; `type: "stdio"` spelled out |
 | `plugins/fnd/mcp.pruned.json` | Cursor | the priority profile below — a reference file, not loaded |
-| `plugins/fnd/mcp-codex.json` | Codex CLI | `mcpServers`, carried as-is; the manifest points at it. Deliberately **not** `.mcp.json`: Claude Code reads that name as a plugin MCP component, so a Codex-only edit would change what Claude Code loads |
+| `plugins/fnd/mcp-codex.json` | Codex CLI | `mcpServers`, carried as-is except the SSE→streamable-HTTP rewrite for `figma-dev-mode`; the manifest points at it. Deliberately **not** `.mcp.json`: Claude Code reads that name as a plugin MCP component, so a Codex-only edit would change what Claude Code loads |
 | `plugins/fnd/opencode/mcp-fragment.json` | OpenCode | argv-array `command`, `environment`, `type: local\|remote` — paste the `mcp` block into your own `opencode.json` |
 
 **Cursor tool cap.** Cursor is community-reported to stop exposing tools past ~40 across all
@@ -798,10 +799,13 @@ deliberate local drift: `doctor.cjs` and `gen-host-adapters.cjs --check` both re
 re-running the generator undoes it.) To change the cut for everyone, move `CURSOR_KEEP_RANKS`
 in the generator and re-run.
 
-Codex and OpenCode document no tool-count limit, so both get the full list. Two transports
-are unverified until the host spikes and say so in their own files: the Figma **SSE** server
-on Codex (fallback: drop it from `mcp-codex.json` and `codex mcp add` it per-user) and on OpenCode
-(carried as a plain `remote` url).
+Codex and OpenCode document no tool-count limit, so both get the full list. The Figma **SSE**
+transport is resolved on Codex and still open on OpenCode. Codex ships no SSE client (measured
+2026-08-23 — it drives every remote url through its streamable-HTTP client, so an `/sse`
+endpoint answers 404 at initialize), so `mcp-codex.json` points `figma-dev-mode` at the
+streamable `/mcp` path the same server serves; the per-user fallback is
+`codex mcp add figma-dev-mode --url http://127.0.0.1:3845/mcp`. On OpenCode it is still carried
+as a plain `remote` url and says so in its own file.
 
 ## Live store access
 

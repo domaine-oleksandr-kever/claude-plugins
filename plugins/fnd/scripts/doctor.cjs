@@ -46,8 +46,10 @@ const MANIFEST_POINTERS = {
     { key: 'skills' },
     { key: 'hooks', generated: true },
     { key: 'mcpServers', generated: true },
-    // Declared only if M1b finds that Codex reads an agents pointer from a plugin manifest;
-    // until then the subagents are linked by scripts/install.sh and this row stays silent.
+    // The Codex manifest declares no `agents` pointer and does not need one: M1b measured
+    // 2026-08-23 (CLI 0.149.0) that the marketplace cache serves the bundled TOML subagents on
+    // its own — see the HOST_INSTALLS.codex note below. An undeclared key is skipped, so this row
+    // is the standing check for the day one IS added.
     { key: 'agents', generated: true },
   ],
 };

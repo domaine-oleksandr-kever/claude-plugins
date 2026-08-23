@@ -4,10 +4,11 @@ Quickstart, update path and the host-specific deltas. The plugin content is the 
 Claude Code uses — only the wiring differs. Start at the
 [README](../README.md#install--four-hosts) for the cross-host picture.
 
-Codex is the one host where the install arrives through **two channels**: the marketplace
-plugin carries skills, hooks and MCP; the TOML subagents are linked by `install.sh` because no
-plugin-level agents channel is confirmed yet (spike M1b). Skipping the second channel leaves
-every delegating skill hitting an unknown agent.
+On a current CLI the install arrives through **one channel**: the marketplace plugin carries
+skills, hooks, MCP **and** the TOML subagents — measured live on Codex CLI 0.149.0, where a
+cache-only install spawned `jira-reader` with no local links. `install.sh --target codex` is an
+optional **dev channel** (run Codex against a local checkout's subagents), and the fallback on an
+older CLI that does not serve agents from the marketplace cache.
 
 ## Install
 
@@ -43,9 +44,10 @@ To undo a registration: `codex plugin marketplace list` shows the configured nam
 was added with — remove and re-add is how you point it at a different one. Removing a
 marketplace does not uninstall an already-installed plugin; that happens in `/plugins`.
 
-That legacy-compat path is research, not yet a live measurement (spike M1b). If the add command
-does not resolve `plugins/fnd`, the repo gains a native `.agents/plugins/marketplace.json` and
-this section changes with it — nothing else about the install does.
+That legacy-compat path is measured (2026-08-23, CLI 0.149.0): the add command resolves
+`plugins/fnd` from `.claude-plugin/marketplace.json` as it stands. If a later CLI drops the
+compat read, the repo gains a native `.agents/plugins/marketplace.json` and this section changes
+with it — nothing else about the install does.
 
 ### 2. Turn the hooks feature on
 
@@ -145,11 +147,14 @@ The subagent half is a live-checkout install (symlink into `~/.codex/agents/`), 
 - **Hooks do not exist on Windows.** Skills, MCP and subagents work; the guard layer does not.
   `hooks/no-verify.rules` is an optional second, declarative layer (Codex execpolicy Starlark)
   for the same commit block — opt-in, see the file's header — and is not a Windows workaround.
-- **The MCP list is carried as-is** into `plugins/fnd/mcp-codex.json` (deliberately *not*
-  `.mcp.json`: Claude Code reads that name as one of its own plugin components, so a Codex-only
-  edit would change what Claude Code loads). No tool-count cap is documented, so all six servers
-  ship. The Figma **SSE** server is unverified on this host until spike M1b — if it fails, drop
-  it from `mcp-codex.json` and `codex mcp add` it per-user.
+- **The MCP list is carried as-is** into `plugins/fnd/mcp-codex.json` — except the
+  SSE→streamable-HTTP rewrite for `figma-dev-mode` (deliberately *not* `.mcp.json`: Claude Code
+  reads that name as one of its own plugin components, so a Codex-only edit would change what
+  Claude Code loads). No tool-count cap is documented, so all six servers ship. Codex ships **no
+  SSE client** (measured 2026-08-23), so `figma-dev-mode` is pointed at Figma's streamable
+  endpoint `http://127.0.0.1:3845/mcp` instead of `/sse`. If your Figma build serves only `/sse`,
+  drop the server from `mcp-codex.json` and add it per-user:
+  `codex mcp add figma-dev-mode --url http://127.0.0.1:3845/mcp`.
 - **Ship orchestration runs hoisted, with real parallelism.** The conductor is the only spawner
   and every nested helper is hoisted to it, but `max_concurrent_threads_per_session` makes those
   hoisted helpers genuinely concurrent — the closest a non-Claude host gets to the Claude

@@ -3,9 +3,11 @@
 # (HARNESS-PORT-PLAN.md § Install stories). The clone IS the install: every entry points back
 # into this checkout, so a `git pull` updates the host live. Re-running the installer is the
 # update path; Claude Code installs from its marketplace and is not handled here.
-# Codex is a partial target on purpose: `codex plugin marketplace add` installs skills, hooks and
-# MCP from the plugin manifest, but no plugin-level channel for TOML subagents is confirmed
-# (M1b), so `--target codex` links agents-codex/*.toml into ~/.codex/agents/ and nothing else.
+# Codex is a partial target on purpose: `codex plugin marketplace add` installs the whole bundle
+# — skills, hooks, MCP and the TOML subagents (measured 2026-08-23 on CLI 0.149.0: a cache-only
+# install spawned jira-reader with no local links) — so `--target codex` is the DEV channel, which
+# links agents-codex/*.toml into ~/.codex/agents/ and nothing else: it points Codex at a local
+# checkout's subagents, and is the fallback on an older CLI that does not serve them from cache.
 set -euo pipefail
 
 # Fallback stamp only: the canonical manifest in the checkout wins whenever it is readable,
@@ -97,9 +99,9 @@ build_entries() {
       fi
       ;;
     codex)
-      # Subagents only. The marketplace install owns skills, hooks and MCP through
-      # .codex-plugin/plugin.json; that manifest declares no agents pointer, so without these
-      # links every delegating skill hits an unknown agent (see the header note + M1b).
+      # Subagents only — the dev channel (see the header note). The marketplace install already
+      # serves the whole bundle from its cache, subagents included; these links are what points a
+      # Codex session at the TOML agents of THIS checkout instead.
       for f in "$PLUGIN"/agents-codex/*.toml; do
         [ -f "$f" ] || continue
         add_entry "$ROOT_DIR/agents/$(basename "$f")" "$f"
