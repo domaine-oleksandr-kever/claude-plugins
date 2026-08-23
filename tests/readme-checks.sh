@@ -73,6 +73,7 @@ has "$ROOT/docs/README.cursor.md" '/smoke-test' cursor-doc-verify
 # 2026-08-23 research: CLI marketplace route + the hybrid model policy (cheap pin / inherit)
 has "$ROOT/docs/README.cursor.md" 'agent plugin marketplace add' cursor-doc-cli-route
 has "$ROOT/docs/README.cursor.md" 'agent login' cursor-doc-cli-login
+has "$ROOT/docs/README.cursor.md" 'agent plugin marketplace remove' cursor-doc-cli-remove
 has "$ROOT/plugins/fnd/references/host-model-map.md" 'composer-2.5[fast=false]' cursor-hybrid-pin
 has "$ROOT/docs/README.opencode.md" './scripts/install.sh --target opencode' opencode-doc-install
 has "$ROOT/docs/README.opencode.md" '/smoke-test' opencode-doc-verify

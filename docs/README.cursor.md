@@ -45,12 +45,17 @@ else — the plugin commands talk to your Cursor account and fail with an auth e
 ```bash
 agent login                                   # first run only: browser sign-in; check with `agent status`
 agent plugin marketplace add https://github.com/domaine-oleksandr-kever/claude-plugins --git-ref harness-port
-agent plugin marketplace list --format json   # and: update / remove
+agent plugin marketplace list --format json   # list is read-only — it changes nothing
+agent plugin marketplace update <name>        # re-index from the git repo, picks up new commits
+agent plugin marketplace remove <name-or-url> # unregister a marketplace (junk/duplicate entries included)
 ```
 
-Installing a plugin **by id** from a registered marketplace is interactive-only for now
-(staff-confirmed) — press **Add** on the card once in the editor, or in a chat use
-`/add-plugin`; the install syncs at user scope.
+The CLI manages **marketplaces only** — `agent plugin` has no install/uninstall subcommands.
+Installing the plugin itself is interactive (staff-confirmed): press **Add** on the fnd card
+once in the editor, or in a chat use `/add-plugin`; the install syncs at user scope.
+**Uninstalling** it is interactive too: Customize → Plugins → the fnd card's `…` menu →
+Uninstall. Registering a marketplace does NOT install its plugins, and removing a
+marketplace does not uninstall an already-installed plugin.
 
 **Pick one route per machine.** A marketplace install and a local-checkout install are two
 independent plugin copies — with both present, both load: duplicate skills and agents reach the
