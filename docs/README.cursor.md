@@ -39,9 +39,11 @@ which also means **unpushed commits are invisible** on this route, exactly as on
 `marketplace cache install`. Skip to step 3 (reload) and step 4 (smoke test).
 
 The same registration is scriptable through the Cursor CLI (`curl https://cursor.com/install
--fsS | bash` installs the `agent` binary):
+-fsS | bash` installs the `agent` binary). First time on a machine, sign in before anything
+else — the plugin commands talk to your Cursor account and fail with an auth error until then:
 
 ```bash
+agent login                                   # first run only: browser sign-in; check with `agent status`
 agent plugin marketplace add https://github.com/domaine-oleksandr-kever/claude-plugins --git-ref harness-port
 agent plugin marketplace list --format json   # and: update / remove
 ```
