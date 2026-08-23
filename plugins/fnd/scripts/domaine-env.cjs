@@ -9,7 +9,7 @@
 //
 // `--project` on set/unset/path targets `<git toplevel>/.claude/domaine.env` instead — the
 // per-repository layer ("debug for this project only"). Writes preserve every comment and
-// unrecognized line; only the first `KEY=` line is replaced or removed.
+// unrecognized line; `set` replaces the first matching line, `unset` removes every one.
 //
 // What each switch means is documented once, in README.md → "Environment switches" — KNOWN
 // below carries names only so `list` can show the unset ones (tests/readme-checks.sh keeps
@@ -83,7 +83,7 @@ function cmdSet(pair, project) {
   if (eq < 1) die('set expects KEY=VALUE');
   const key = pair.slice(0, eq).trim();
   const value = pair.slice(eq + 1).trim();
-  if (!envFile.allowed(key)) die('"' + key + '" is not an fnd switch (FND_* only)');
+  if (!envFile.allowed(key)) die('"' + key + '" is not an fnd switch (FND_* plus SHOPIFY_ADMIN_GQL_QUIET)');
   const file = targetFile(project);
   const lines = readLines(file);
   const at = lines.findIndex((l) => l.trim().startsWith(key + '='));

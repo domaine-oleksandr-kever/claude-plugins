@@ -63,7 +63,9 @@ function run(raw) {
     maxBuffer: 128 * 1024 * 1024,
     stdio: ['pipe', 'pipe', 'ignore'],
   });
-  if (child.error || !child.stdout) return;
+  // A non-zero exit is an explicit no-op: whatever it printed is not a hook envelope, and
+  // letting JSON.parse below decide that is a throw the caller has to absorb.
+  if (child.error || child.status !== 0 || !child.stdout) return;
   const stdout = child.stdout.toString('utf8').trim();
   if (!stdout) return; // passthrough — mcp-slim prints nothing when it leaves a result alone
 

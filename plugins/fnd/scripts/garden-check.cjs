@@ -58,8 +58,12 @@ const STAMPED_FILES = [
 // directory the rows' other paths are relative to — `scripts/bump-version.cjs` is not a file.
 const BUMP_CMD = 'node plugins/fnd/scripts/bump-version.cjs';
 
+// The Claude Code manifest is the canonical version stamp — every other manifest and every
+// documented text marker is bumped from it.
+const CANONICAL_MANIFEST_REL = path.join('.claude-plugin', 'plugin.json');
+
 const MANIFESTS = [
-  { rel: path.join('.claude-plugin', 'plugin.json'), host: 'Claude Code', required: true },
+  { rel: CANONICAL_MANIFEST_REL, host: 'Claude Code', required: true },
   { rel: path.join('.cursor-plugin', 'plugin.json'), host: 'Cursor', required: false },
   { rel: path.join('.codex-plugin', 'plugin.json'), host: 'Codex CLI', required: false },
 ];
@@ -330,7 +334,12 @@ function checkVersions(repoRoot, pluginRoot) {
     }
     found.push({ rel: m.rel, version: res.version });
   }
-  const canonical = found.length ? found[0].version : null;
+  // Only the Claude Code manifest is the stamp bump-version.cjs writes the documented markers
+  // from; the per-host manifests are copies of it. Comparing the markers against whichever
+  // manifest happened to survive would report drift against a substitute, so when the canonical
+  // one is absent or unparseable the stamps row is skipped — its absence is already a FAIL above.
+  const canonicalEntry = found.find((f) => f.rel === CANONICAL_MANIFEST_REL);
+  const canonical = canonicalEntry ? canonicalEntry.version : null;
   const versions = [...new Set(found.map((f) => f.version))];
   if (broken.length) {
     fail('version:manifests', summarize(broken, 3));
@@ -343,10 +352,7 @@ function checkVersions(repoRoot, pluginRoot) {
     pass('version:manifests', found.length + ' manifest(s) all at ' + versions[0]);
   }
 
-  if (!canonical) {
-    fail('version:stamps', 'no manifest version to compare the documented stamps against');
-    return;
-  }
+  if (!canonical) return;
   const stamped = [];
   const stale = [];
   for (const target of STAMPED_FILES) {

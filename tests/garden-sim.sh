@@ -183,7 +183,16 @@ expect G15b-installer-prose-not-a-stamp 0 "PASS  version:stamps" "!scripts/insta
 S="$(sandbox nomanifest)"
 rm -f "$S/$PLUGIN/.claude-plugin/plugin.json"
 run --root "$S"
-expect G16-no-canonical-manifest 1 "FAIL  version:manifests" "not an fnd checkout"
+# …and the stamps row is skipped, not answered from a per-host manifest: those are copies of the
+# canonical stamp, so a version read out of one would report drift against a substitute.
+expect G16-no-canonical-manifest 1 "FAIL  version:manifests" "not an fnd checkout" "!version:stamps"
+
+# G16b: same rule when the canonical manifest is present but unparseable — a surviving sibling
+# manifest is still not a stand-in for the stamp every documented marker is bumped from.
+S="$(sandbox brokenmanifest)"
+printf '{ not json\n' > "$S/$PLUGIN/.claude-plugin/plugin.json"
+run --root "$S"
+expect G16b-broken-canonical-manifest 1 "FAIL  version:manifests" "!version:stamps"
 
 # --------------------------------------------------------------------------- rules bundle --
 # G17: a vendored foundation rule edited in place instead of upstream — the recorded byte size is
@@ -271,9 +280,12 @@ if [ -f "$WF" ]; then ok; else bad ci-workflow "missing: $WF"; fi
 # `permissions: contents: read` is in the list because the suites build and drive real git repos:
 # an undeclared token inherits the repo/org default, so a suite bug that reaches `git push` would
 # write to this repository instead of failing.
+# `fail-fast: false` is pinned too: without it one red runner cancels the other, and "green on
+# macOS, red on Linux" is the finding this matrix exists to produce.
 for want in "macos-latest" "ubuntu-latest" "actions/checkout" "actions/setup-node" \
             "for f in tests/*.sh" "bash \"\$f\"" "for f in tests/*.mjs" "node \"\$f\"" \
-            "garden-check.cjs" "gen-host-adapters.cjs --check" "permissions:" "contents: read"; do
+            "garden-check.cjs" "gen-host-adapters.cjs --check" "permissions:" "contents: read" \
+            "fail-fast: false"; do
   if grep -qF -- "$want" "$WF" 2>/dev/null; then ok
   else bad "ci-workflow-content" "tests.yml does not mention: $want"; fi
 done

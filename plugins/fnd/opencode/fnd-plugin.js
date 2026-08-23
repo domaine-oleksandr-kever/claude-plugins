@@ -38,6 +38,10 @@
 //
 // ONE export on purpose: a loader that registers every exported function would otherwise
 // double-wire the hooks, which means double injection and a second compression pass.
+//
+// The `.js` extension and ESM syntax are what OpenCode's Bun plugin loader requires; this file
+// therefore cannot be run under plain `node` without `--input-type=module`. Everything else in
+// the bundle stays `.cjs` for exactly that reason — only this adapter is loaded by Bun.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -81,6 +85,9 @@ function isMcpTool(tool) {
 
 // The commit guard's own fast-reject words: a command naming none of them can never be a bypass,
 // so it is also the command a broken guard is safe to let through (see tool.execute.before).
+// SINGLE SOURCE: hooks/no-verify-bypass.sh — its `case "$input" in *git*|…` line is the list this
+// mirrors; hooks/cursor-shim.cjs holds the byte-identical twin (both sims diff the two literals),
+// and hooks-cursor.json's `case` glob is a deliberately coarser third copy for the no-node path.
 const GIT_TRIGGER = /(^|[^a-z])(git|commit|push|merge|pull)|(^|\s)am(\s|$)/i;
 
 function warn(msg) {

@@ -241,6 +241,9 @@ function subagentStart(payload) {
 // The guard's own fast-reject words: a command naming none of them can never be a bypass,
 // so it is also the command a broken guard is safe to let through (see the no-verdict branch
 // in beforeShellExecution below).
+// SINGLE SOURCE: hooks/no-verify-bypass.sh — its `case "$input" in *git*|…` line is the list this
+// mirrors; opencode/fnd-plugin.js holds the byte-identical twin (both sims diff the two literals),
+// and hooks-cursor.json's `case` glob is a deliberately coarser third copy for the no-node path.
 const GIT_TRIGGER = /(^|[^a-z])(git|commit|push|merge|pull)|(^|\s)am(\s|$)/i;
 
 // The reason rides BOTH channels on purpose: the JSON body is Cursor's own deny protocol, and
