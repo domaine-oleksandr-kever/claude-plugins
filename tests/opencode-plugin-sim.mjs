@@ -213,6 +213,15 @@ if (fragment) {
     ['deny', 'P09-plain-no-verify', 'git commit -m wip --no-verify'],
     ['deny', 'P10-husky-env', 'HUSKY=0 git commit -m x'],
     ['deny', 'P11-short-flag', 'git commit -nm wip'],
+    // A glob is prefix-anchored, so the deny spellings above only see a flag that comes FIRST.
+    // git does not care where it sits: `git commit -m wip -n` is the same bypass, and with only
+    // the prefix globs it matched no deny at all and the `*` allow decided it.
+    ['deny', 'P11a-trailing-n', 'git commit -m wip -n'],
+    ['deny', 'P11b-trailing-n-more', 'git commit -m wip -n --amend'],
+    ['deny', 'P11c-trailing-an', 'git commit -m wip -an'],
+    ['deny', 'P11d-trailing-na', 'git commit -m wip -na'],
+    ['deny', 'P11e-trailing-nm', 'git commit --amend -nm wip'],
+    ['deny', 'P11f-trailing-anm', 'git commit --amend -anm wip'],
     ['allow', 'P12-restore-hook', 'chmod +x .husky/pre-commit'],
     ['allow', 'P13-read-hookspath', 'git config --get core.hooksPath'],
     ['allow', 'P14-plain-commit', 'git commit -m "safe change"'],
