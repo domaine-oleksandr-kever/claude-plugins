@@ -290,6 +290,37 @@ HOME="$H12" XDG_CONFIG_HOME="$XDG" "$BASH_BIN" "$REPO1/scripts/install.sh" --tar
 if [ "$RC" -eq 0 ] && [ -L "$XDG/opencode/skills/alpha" ] && [ ! -e "$H12/.config/opencode" ]; then ok
 else bad O8-xdg-config-home "rc=$RC err=$(head -c 160 "$E")"; fi
 
+# ------------------------------------------------------------- removal that cannot happen --
+# P7/P8 (bug): every remove_entry call site reads the status through `|| rc=$?`, which turns
+# errexit off for the whole function — so an `rm` that FAILED used to fall through to "removed":
+# the uninstall reported success, dropped the entry from the record, and left a copy on disk that
+# nothing names any more. A read-only parent directory is the everyday spelling of that failure.
+# The copy target is opencode: its entries live one level below the install root, so the record
+# file itself stays deletable and "the record survived" means something.
+OCM=".config/opencode/.fnd-install-mode"
+H22="$TMP/h22"
+run "$H22" "$REPO1" --target opencode --copy
+if [ "$RC" -eq 0 ] && [ -d "$H22/$OC/skills/alpha" ] && [ ! -L "$H22/$OC/skills/alpha" ]; then ok
+else bad P7a-copy-baseline "rc=$RC err=$(head -c 160 "$E")"; fi
+chmod 0555 "$H22/$OC/skills"
+run "$H22" "$REPO1" --target opencode --uninstall
+if [ "$RC" -ne 0 ] && grep -q "removal failed" "$O" && [ -d "$H22/$OC/skills/alpha" ] \
+   && [ -f "$H22/$OCM" ] && grep -q "^entry=$H22/$OC/skills/alpha$" "$H22/$OCM"; then ok
+else bad P7-uninstall-removal-failed "rc=$RC out=$(tr '\n' ';' < "$O") record=$(tr '\n' ';' < "$H22/$OCM" 2>&1)"; fi
+
+# …and the install path's own replace branch: it deletes the recorded copy before writing the new
+# one, so a failure there would have the run go on to report a successful install and rewrite the
+# record for a state the disk does not have.
+run "$H22" "$REPO1" --target opencode --copy
+if [ "$RC" -ne 0 ] && grep -q "removal failed" "$E" && [ -f "$H22/$OCM" ]; then ok
+else bad P8-install-removal-failed "rc=$RC err=$(tr '\n' ';' < "$E")"; fi
+chmod 0755 "$H22/$OC/skills"
+
+# with the permission back, the same uninstall finishes and the record goes
+run "$H22" "$REPO1" --target opencode --uninstall
+if [ "$RC" -eq 0 ] && [ ! -e "$H22/$OC/skills/alpha" ] && [ ! -f "$H22/$OCM" ]; then ok
+else bad P9-uninstall-after-fix "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
 # --------------------------------------------------------------------------- codex target --
 # Codex installs skills, hooks and MCP from its own marketplace; the TOML subagents have no
 # verified plugin channel (M1b), so this target links exactly those and says so — an install that

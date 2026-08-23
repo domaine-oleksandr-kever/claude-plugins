@@ -147,12 +147,17 @@ is_current_entry() {
 }
 
 # remove_entry <path> — delete an entry this installer owns. 0 removed, 1 kept (someone
-# else's), 2 nothing there. Prints the reason whenever it declines.
+# else's), 2 nothing there, 3 OURS but the removal FAILED. Prints the reason whenever it
+# declines. Every call site reads the status through `|| rc=$?`, which switches errexit off for
+# the whole function — so an `rm` that fails (a read-only parent directory, an immutable flag)
+# would otherwise fall through to `return 0`, be reported as removed, and have its record line
+# dropped: the entry survives as an orphan that neither --uninstall nor the doctor can reach
+# again. 3 is its own code because "someone else's" is a normal outcome and this is a defect.
 remove_entry() {
   local link="$1"
   if [ -L "$link" ]; then
     if points_into_repo "$(readlink "$link")"; then
-      rm -f "$link"
+      rm -f "$link" || { echo "kept: $link (removal failed)"; return 3; }
       return 0
     fi
     echo "kept: $link -> $(readlink "$link") (points outside $REPO)"
@@ -160,7 +165,7 @@ remove_entry() {
   fi
   if [ -e "$link" ]; then
     if is_our_copy "$link"; then
-      rm -rf "$link"
+      rm -rf "$link" || { echo "kept: $link (removal failed)"; return 3; }
       return 0
     fi
     echo "kept: $link (not recorded as an fnd copy)"
@@ -267,7 +272,10 @@ do_install() {
       replaced=$((replaced + 1))
     elif [ -e "$link" ]; then
       if is_our_copy "$link"; then
-        rm -rf "$link"
+        # A failed removal here leaves the old copy in place while the run goes on to report a
+        # successful install and rewrite the record — so it stops the install instead, before
+        # the record can claim a state the disk does not have.
+        rm -rf "$link" || { echo "kept: $link (removal failed) — install stopped, record left as it was" >&2; return 1; }
         replaced=$((replaced + 1))
       else
         echo "error: refusing to clobber $link — not created by this installer:" >&2
@@ -338,7 +346,7 @@ EOF
 do_uninstall() {
   build_entries
   resolve_version
-  local targets="" link removed=0 kept=0 rc
+  local targets="" link removed=0 kept=0 stuck=0 rc
   if [ -n "$PREV_ENTRIES" ]; then
     targets="$PREV_ENTRIES"
   else
@@ -357,17 +365,26 @@ do_uninstall() {
     case "$rc" in
       0) removed=$((removed + 1)) ;;
       1) kept=$((kept + 1)) ;;
+      3) kept=$((kept + 1)); stuck=$((stuck + 1)) ;;
     esac
   done <<EOF
 $targets
 EOF
 
-  rm -f "$MODE_FILE"
+  # A foreign entry (rc 1) is a normal, final outcome — the record has said everything it can
+  # about it. An entry that is OURS and would not delete (rc 3) is not: dropping the record would
+  # leave it orphaned, with nothing left that names it. Keep the record so a re-run can finish
+  # the job once the reason (a read-only parent, a permission) is fixed.
+  [ "$stuck" -gt 0 ] || rm -f "$MODE_FILE"
   # `rmdir`, never `rm -r`: these dirs are shared with the host's own config and a user's files
   for d in "$ROOT_DIR/skills" "$ROOT_DIR/agents" "$ROOT_DIR/commands" "$ROOT_DIR/plugins" "$ROOT_DIR"; do
     rmdir "$d" 2>/dev/null || true
   done
   echo "fnd $FND_VERSION uninstalled from $TARGET ($removed removed, $kept kept)"
+  if [ "$stuck" -gt 0 ]; then
+    echo "warning: $stuck entry/entries could not be removed — the install record was kept so a re-run can finish" >&2
+    return 1
+  fi
 }
 
 case "$ACTION" in
