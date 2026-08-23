@@ -127,7 +127,7 @@ const PHASE_TIERS = [
   {
     name: 'conductor — the ship session itself',
     tier: 'standard',
-    note: 'the strongest session model the host offers; on Cursor, Opus only at the guidelines\' "exceptional" bar',
+    note: 'no per-spawn pin — the session model ship is started on is the dial; on Cursor, Opus only at the guidelines\' "exceptional" bar',
   },
   {
     name: 'reasoning-heavy — implement, qa, the qa-loop and aftercare fix agents',
@@ -674,7 +674,9 @@ function opencodeProfile(variant, agents) {
     if (!id) die(a.name + ': tier "' + a.model.tier + '" has no ' + variant + ' example id');
     agent[a.name] = { model: id };
   }
-  return jsonFile({ _comment: PROFILE_COMMENT, agent });
+  // GEN_NOTE leads, as it does on every other generated file — this one is user-editable only
+  // after it has been copied out, and editing it in place is overwritten by the next run.
+  return jsonFile({ _comment: GEN_NOTE + ' ' + PROFILE_COMMENT, agent });
 }
 
 // --------------------------------------------------------------------------- MCP configs --

@@ -43,6 +43,6 @@ Phase classes come from `<plugin root>/references/pipeline-mode.md`; the conduct
 | reasoning-heavy — implement, qa, the qa-loop and aftercare fix agents | `standard` | `inherit` (no next rung) | `gpt-5.6-terra` (medium reasoning) |
 | mechanical — finalize, create-pr, steps-to-test, the aftercare poll/triage agent | `routine` | `composer-2.5[fast=false]` → `inherit` | `gpt-5.6-luna` (medium reasoning) |
 
-- **conductor**: the strongest session model the host offers; on Cursor, Opus only at the guidelines' "exceptional" bar
+- **conductor**: no per-spawn pin — the session model ship is started on is the dial; on Cursor, Opus only at the guidelines' "exceptional" bar
 - **reasoning-heavy**: escalate one tier for a phase that failed twice, per the guidelines' failure ladder
 - **mechanical**: the aftercare fix agents are reasoning-heavy, not mechanical
