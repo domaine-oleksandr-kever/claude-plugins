@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "fnd",
   "displayName": "Foundation",
-  "version": "0.60.1",
+  "version": "0.61.0",
   "description": "Domaine Foundation skills for Claude Code — Agentic Assisted Development workflow for Shopify theme work.",
   "author": {
     "name": "Oleksandr Kever",
