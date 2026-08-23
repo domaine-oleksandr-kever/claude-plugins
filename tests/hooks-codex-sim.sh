@@ -102,9 +102,38 @@ xev="$(jq -r '.hooks | keys[]' "$WIRING" | sort)"
 assert_eq W2-event-parity "$xev" "$cev"
 
 # W3: every shared command is the Claude command, verbatim, modulo the root expansion.
-for pair in "SessionStart:0" "UserPromptSubmit:0" "SubagentStart:0" "PreToolUse:0" "PreToolUse:1"; do
+# PreToolUse:0/1 are carved out — see W3b. They are the two commands that may NOT be a bare
+# root expansion: an unset root would run "/hooks/<guard>.sh", which exits 127, and Codex reads
+# a 127 as "the hook did not block" and runs the git command unchecked. A fail-closed probe is
+# not expressible as the Claude command plus a variable, so the contract for those two is the
+# set of properties below instead of byte-equality.
+for pair in "SessionStart:0" "UserPromptSubmit:0" "SubagentStart:0"; do
   ev="${pair%%:*}"; idx="${pair#*:}"
   assert_eq "W3-$ev-$idx" "$(wcmd "$ev" "$idx")" "$(want_cmd "$(ccmd "$ev" "$idx")")"
+done
+
+# W3b: the guard commands' own contract — single-copy script, probe order, cache fallback,
+# deny-on-unresolved, and the git-verb gate in front of that deny.
+for pair in "0:no-ai-attribution.sh" "1:no-verify-bypass.sh"; do
+  idx="${pair%%:*}"; sh="${pair#*:}"
+  g="$(wcmd PreToolUse "$idx")"
+  # the canonical script, run by path — never a per-host copy of the guard logic
+  assert_contains "W3b-$sh-script"   "$g" "\$r/hooks/$sh"
+  # probe order: the documented alias first, Codex's own var second, the marketplace cache last
+  assert_contains "W3b-$sh-claude"   "$g" '"${CLAUDE_PLUGIN_ROOT:-}"'
+  assert_contains "W3b-$sh-plugin"   "$g" '"${PLUGIN_ROOT:-}"'
+  assert_contains "W3b-$sh-cache"    "$g" '"$HOME"/.codex/plugins/cache/*/fnd/*'
+  # each candidate is validated by the script actually being there, and the newest cache entry
+  # wins (a stale version dir left behind by an upgrade must not shadow the current one)
+  assert_contains "W3b-$sh-validate" "$g" "[ -f \"\$c/hooks/$sh\" ]"
+  assert_contains "W3b-$sh-newest"   "$g" '[ "$c" -nt "$r" ]'
+  # nothing resolved → deny, and only for a payload that names a git verb
+  assert_contains "W3b-$sh-gate"     "$g" 'case "$(cat)" in *git*|*commit*|*push*|*merge*|*pull*)'
+  assert_contains "W3b-$sh-exit2"    "$g" 'exit 2'
+  assert_absent   "W3b-$sh-failopen" "$g" '|| true'
+  # the claude-side alias order the rest of the wiring uses must not silently reappear here:
+  # `${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}` cannot fall through to the cache
+  assert_absent   "W3b-$sh-no-bare-expansion" "$g" '${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}'
 done
 
 # W4: the ONE deliberate divergence — PostToolUse routes through the Codex adapter instead of
@@ -348,9 +377,47 @@ err="$(printf '%s' "$(ev 'git commit --no-verify -m x')" | env CLAUDE_PLUGIN_ROO
 assert_contains B3-reason "$err" "Domaine convention"
 
 # B4: Codex's own payload shape — tool_name "shell" and an ARRAY command — still blocks. The
-# guards read .tool_input.command and scan whatever text comes back, so an argv array is covered.
+# guards join the array into one line before scanning, so both array spellings are covered:
+# ["bash","-lc","<one string>"] here, and the raw argv form in B7/B8 below.
 assert_eq B4-codex-shape-block "$(pre_ec "$(ev_codex 'git commit --no-verify -m x')")" 2
 assert_eq B4b-codex-shape-allow "$(pre_ec "$(ev_codex 'git commit -m ok')")" 0
+
+# B7/B8: the RAW argv array — the spelling `local_shell` (and `shell` without a -lc wrapper)
+# sends. `jq -r` on an array prints one element PER LINE, which puts `git` and its subcommand on
+# different lines; every matcher in both guards is per-line, so an unjoined array walks past all
+# of them. Run through the wired commands on both extraction paths — with jq, and with jq hidden,
+# where the guards fall back to sed. tests/no-verify-bypass-matrix.sh (V / AV rows) is the full
+# contract; these are the wiring's copy.
+ev_argv() { jq -nc '{tool_name:"shell",tool_input:{command:$ARGS.positional}}' --args -- "$@"; }
+NOJQ="$TMP/nojq"; mkdir -p "$NOJQ"
+for t in cat tr sed grep awk bash env; do ln -sf "$(command -v "$t")" "$NOJQ/$t"; done
+pre_ec_nojq() { # input — the same guard pair with jq off PATH
+  local a=0 b=0
+  printf '%s' "$1" | env CLAUDE_PLUGIN_ROOT="$PLUG" PATH="$NOJQ" bash -c "$ATTR_CMD" >/dev/null 2>&1 || a=$?
+  printf '%s' "$1" | env CLAUDE_PLUGIN_ROOT="$PLUG" PATH="$NOJQ" bash -c "$NV_CMD" >/dev/null 2>&1 || b=$?
+  if [ "$a" = 2 ] || [ "$b" = 2 ]; then printf '2'; else printf '%s' "$((a > b ? a : b))"; fi
+}
+argv_row() { # block|allow label element…
+  local expect="$1" label="$2" want=0 in; shift 2
+  [ "$expect" = block ] && want=2
+  in="$(ev_argv "$@")"
+  assert_eq "B7-$label-jq"   "$(pre_ec "$in")"      "$want"
+  assert_eq "B8-$label-nojq" "$(pre_ec_nojq "$in")" "$want"
+}
+argv_row block argv-long      git commit --no-verify -m x
+argv_row block argv-short     git commit -n -m x
+argv_row block argv-bundled   git commit -anm wip
+argv_row block argv-push      git push --no-verify origin main
+argv_row block argv-husky     env HUSKY=0 git commit -m x
+argv_row block argv-hookspath git -c core.hooksPath=/dev/null commit -m x
+argv_row block argv-trailer   git commit -m 'feat: x
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>'
+argv_row allow argv-clean     git commit -m ok
+argv_row allow argv-push-dry  git push -n origin main
+argv_row allow argv-human     git commit -m 'pair work
+
+Co-Authored-By: Jane Doe <jane@corp.example>'
 
 # B5: stdin reaches the script byte-for-byte and the child's exit code propagates unchanged —
 # the two properties the wiring is entirely responsible for. A recorder standing in for the guard
@@ -374,6 +441,44 @@ for want in 0 1 2 7; do
     bash -c "$NV_CMD" >/dev/null 2>&1 || got=$?
   assert_eq "B6-exit-$want" "$got" "$want"
 done
+
+# B9–B11: the unresolvable-root branch. With neither env var set and no marketplace cache under
+# HOME, a bare `"$r/hooks/<guard>.sh"` runs "/hooks/<guard>.sh" → exit 127 → Codex proceeds, and
+# the whole guard layer is gone on a broken install without anything saying so. It denies instead
+# — but only for the payloads it would have inspected.
+NOROOT="$TMP/noroot"; mkdir -p "$NOROOT"
+noroot_ec() { # command input
+  local ec=0
+  printf '%s' "$2" | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT HOME="$NOROOT" \
+    bash -c "$1" >/dev/null 2>&1 || ec=$?
+  printf '%s' "$ec"
+}
+assert_eq B9-noroot-attr-denies "$(noroot_ec "$ATTR_CMD" "$(ev 'git commit -m x')")" 2
+assert_eq B9b-noroot-nv-denies  "$(noroot_ec "$NV_CMD"   "$(ev 'git commit -m x')")" 2
+assert_eq B10-noroot-nongit     "$(noroot_ec "$NV_CMD"   "$(ev 'ls -la')")" 0
+assert_eq B10b-noroot-nongit-attr "$(noroot_ec "$ATTR_CMD" "$(ev 'npm run build')")" 0
+err="$(printf '%s' "$(ev 'git commit -m x')" | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT \
+  HOME="$NOROOT" bash -c "$NV_CMD" 2>&1 >/dev/null)"
+assert_contains B10c-noroot-reason "$err" "could not be located"
+
+# B11: the marketplace cache IS a resolvable root — a Codex session that sets no plugin-root env
+# still finds the bundle it was installed from. Two candidates: a stale one that sorts FIRST and
+# would allow everything, and the current one, newer by mtime, carrying the real guard. A block
+# is the proof that the newest dir wins rather than the first one the glob happens to yield.
+CXH="$TMP/codexhome"; CXC="$CXH/.codex/plugins/cache/domaine/fnd"
+mkdir -p "$CXC/0.10.0/hooks" "$CXC/0.9.0/hooks" "$CXC/0.5.0"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$CXC/0.10.0/hooks/no-verify-bypass.sh"
+chmod +x "$CXC/0.10.0/hooks/no-verify-bypass.sh"
+cp "$PLUG/hooks/no-verify-bypass.sh" "$CXC/0.9.0/hooks/no-verify-bypass.sh"
+touch -t 202001010000 "$CXC/0.10.0"
+cache_ec() { # input
+  local ec=0
+  printf '%s' "$1" | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT HOME="$CXH" \
+    bash -c "$NV_CMD" >/dev/null 2>&1 || ec=$?
+  printf '%s' "$ec"
+}
+assert_eq B11-cache-newest-blocks "$(cache_ec "$(ev 'git commit --no-verify -m x')")" 2
+assert_eq B11b-cache-allow        "$(cache_ec "$(ev 'git commit -m ok')")" 0
 
 # ═══ X — the bypass matrix through the Codex wiring ═════════════════════════
 # tests/no-verify-bypass-matrix.sh stays the full FP/FN contract against the scripts; these rows

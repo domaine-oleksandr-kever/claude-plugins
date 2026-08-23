@@ -92,6 +92,9 @@ for e in $EVENTS; do
   assert_contains "W6d-$e-install" "$cmd" '"$HOME/.cursor/plugins/local/fnd"'
   # the workspace cwd must never be a candidate — a checkout could hand the hook its own script
   assert_absent   "W6e-$e-nocwd" "$cmd" '"$PWD"'
+  # …and the RUNTIME is probed on the same footing as the file: `node` missing means exit 127
+  # with empty stdout, which Cursor reads as "not a deny" exactly like a missing shim does
+  assert_contains "W6f-$e-node-probe" "$cmd" 'command -v node'
 done
 
 # The guard event is the one place a non-zero exit is a VERDICT, not a failure — `|| true`
@@ -158,6 +161,39 @@ assert_contains W15-nobundle-err  "$(cat "$TMP/wired.err")" "could not be locate
 out="$(wired_real beforeShellExecution "$NOHOME" '{"command":"ls -la"}')"; EC=$?
 assert_eq W16-nobundle-nongit      "$out" ""
 assert_eq W16-nobundle-nongit-exit "$EC" 0
+
+# W17–W18: the bundle is all there, but `node` is not on PATH. Running the shim anyway exits 127
+# with empty stdout, and an empty stdout is not a deny — the guard event would wave the bypass
+# through on a machine whose PATH lost its runtime (a GUI-launched Cursor with an nvm-only node
+# is the everyday spelling of this). Same fallback as a missing shim: the JSON deny is printed
+# by pure shell, because without node there is nothing that could emit it.
+NONODE="$TMP/nonode"; mkdir -p "$NONODE"
+for t in cat bash; do ln -sf "$(command -v "$t")" "$NONODE/$t"; done
+wired_nonode() { # event payload — the wired command with no node anywhere on PATH
+  local event="$1" payload="$2" cmd out EC=0
+  cmd="$(jq -r --arg e "$event" '.hooks[$e][0].command' "$WIRING")"
+  out="$(printf '%s' "$payload" | env -u CURSOR_PLUGIN_ROOT -u CLAUDE_PLUGIN_ROOT \
+    HOME="$FAKEHOME" PATH="$NONODE" bash -c "$cmd" 2>"$TMP/nonode.err")" || EC=$?
+  printf '%s' "$out"
+  return "$EC"
+}
+if ! PATH="$NONODE" command -v node >/dev/null 2>&1; then ok
+else bad W17-nonode-fixture "node is still reachable with PATH=$NONODE"; fi
+out="$(wired_nonode beforeShellExecution '{"command":"git commit --no-verify -m x"}')"; EC=$?
+assert_eq       W17-nonode-exit "$EC" 2
+assert_eq       W17-nonode-deny "$(printf '%s' "$out" | jq -r '.permission')" "deny"
+assert_contains W17-nonode-msg  "$(printf '%s' "$out" | jq -r '.agentMessage')" "node is not on PATH"
+assert_contains W17-nonode-err  "$(cat "$TMP/nonode.err")" "blocked rather than run unchecked"
+# …and a non-git command still runs: a missing runtime may not brick the shell.
+out="$(wired_nonode beforeShellExecution '{"command":"ls -la"}')"; EC=$?
+assert_eq W18-nonode-nongit      "$out" ""
+assert_eq W18-nonode-nongit-exit "$EC" 0
+# The fail-open events stay fail-open without node — silence and exit 0, never a hook error.
+for e in sessionStart beforeSubmitPrompt subagentStart afterMCPExecution; do
+  out="$(wired_nonode "$e" '{"agent_type":"general-purpose","prompt":"hi","tool_response":{"content":[]}}')"; EC=$?
+  assert_eq "W18b-$e-nonode-exit"  "$EC" 0
+  assert_eq "W18b-$e-nonode-quiet" "$out" ""
+done
 
 # ═══ G — wiring gates against a fake node ═══════════════════════════════════
 NODESHIM="$TMP/nodeshim"; mkdir -p "$NODESHIM"

@@ -50,11 +50,14 @@
 // path) and takes the first that actually holds `hooks/cursor-shim.cjs`, so the same leak the
 // shim defends against cannot make the guard event resolve to a MODULE_NOT_FOUND exit 1 —
 // which Cursor reads as "not a deny" and runs the command. The workspace cwd is deliberately
-// NOT a candidate: a checkout could then hand the hook a script of its own to run. When no
-// candidate resolves, the guard command denies (exit 2 + the JSON body) any payload whose raw
-// text names a git verb and stays silent otherwise — the shim's own no-verdict rule below, read
-// bluntly: shell has no JSON parser, and while the bundle is missing, over-blocking git work is
-// the safe side of the trade.
+// NOT a candidate: a checkout could then hand the hook a script of its own to run. The runtime
+// is probed on the same footing (`command -v node`): a shim that is present but cannot be RUN
+// exits 127 with empty stdout, which Cursor reads as "not a deny" exactly like the missing-file
+// case, so both fall into the SAME fallback. When either probe fails, the guard command denies
+// (exit 2 + the JSON body) any payload whose raw text names a git verb and stays silent
+// otherwise — the shim's own no-verdict rule below, read bluntly: shell has no JSON parser (and
+// without node there is nothing to emit one), and while the guard cannot run, over-blocking git
+// work is the safe side of the trade.
 //
 // Env: reads no switch of its own. FND_CTX_MONITOR / FND_PROMPT_JSON / FND_MCP_SLIM are
 // re-checked here so a shim invoked directly gates like the wiring does (hooks-cursor.json
