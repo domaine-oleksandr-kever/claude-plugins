@@ -7,6 +7,8 @@
 # argument; the developer can still bypass by hand in their own terminal.
 #
 # stdin: PreToolUse event JSON ({"tool_name":"Bash","tool_input":{"command":…}}).
+# `command` is a STRING on Claude Code and Cursor and an ARGV ARRAY on Codex's
+# shell / local_shell tools — both are normalized to one line below.
 # Exit 2 + stderr blocks the call and feeds the message back to the model;
 # exit 0 lets it through. A hook failure must never block a commit.
 #
@@ -15,7 +17,12 @@
 # containing `git commit -n` outside quotes (echo args, heredoc bodies);
 # `HUSKY=0` in front of a NON-git command in the same line as a commit; a
 # `-F -` heredoc body that names a hook file (`-m "<msg>"` is the safe
-# spelling — the message span is stripped, the stdin body cannot be).
+# spelling — the message span is stripped, the stdin body cannot be); and an
+# argv ARRAY whose message element carries whitespace (["git","commit","-m",
+# "fix: never use --no-verify"]) — joining the elements loses the argv
+# boundary that told the message apart from the flags, so the words after the
+# first are read as command text. The `["bash","-lc","<one string>"]` spelling
+# Codex's shell tool actually uses keeps its quoting and is unaffected.
 # Known residual FNs: flags smuggled via variable expansion ($FLAG), hook
 # config rewritten in an earlier, separate Bash call, a hook path a `|`
 # separates from its verb (`… | xargs rm`, a `sed -i` script using `|` as
@@ -42,9 +49,14 @@ input="$(cat 2>/dev/null || true)"
 # decode, so anything carrying one stays in.
 case "$input" in *git*|*commit*|*push*|*merge*|*pull*|*" am"*|*$'\t'am*|*\\u*) ;; *) exit 0 ;; esac
 
+# An ARGV ARRAY is joined into one space-separated line before anything below reads it:
+# `jq -r` on an array prints one element PER LINE, which puts `git` and its subcommand on
+# different lines, and every matcher here is per-line (grep -o) — so the array spelling of a
+# bypass would walk straight past all of them. The string path is untouched.
 cmd=""
 if command -v jq >/dev/null 2>&1; then
-  cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+  cmd="$(printf '%s' "$input" | jq -r '(.tool_input.command // empty)
+    | if type == "array" then map(select(type == "string")) | join(" ") else . end' 2>/dev/null || true)"
 fi
 if [ -z "$cmd" ]; then
   # No (working) jq: pull the "command" JSON value with sed and unescape
@@ -52,6 +64,33 @@ if [ -z "$cmd" ]; then
   cmd="$(printf '%s' "$input" | tr '\n' ' ' \
     | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"((\\.|[^"\\])*)".*/\1/p' \
     | sed -E 's/\\n/ /g; s/\\t/ /g; s/\\"/"/g; s/\\\\/\\/g' || true)"
+fi
+if [ -z "$cmd" ]; then
+  # …and the array form with that same toolbox: take the bracket span, then join its elements
+  # on the JSON element separator. `","` cannot appear unescaped inside a JSON string, so it
+  # only ever splits elements. A span holding a bracket of its own (a `[` or `]` inside an
+  # argument) is not extractable this way and yields nothing — the fail-closed branch owns it.
+  arr="$(printf '%s' "$input" | tr '\n' ' ' \
+    | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*\[([^][]*)\].*/\1/p' || true)"
+  if [ -n "$arr" ]; then
+    cmd="$(printf '%s' "$arr" \
+      | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//; s/"[[:space:]]*,[[:space:]]*"/ /g' \
+      | sed -E 's/\\n/ /g; s/\\t/ /g; s/\\"/"/g; s/\\\\/\\/g' || true)"
+  fi
+fi
+if [ -z "$cmd" ]; then
+  # An argv array this toolbox could not read is the one unreadable payload that may NOT exit 0:
+  # the event is a shell call, and a bracket inside an argument is exactly what a crafted bypass
+  # would carry. Blocked only when the raw event names a git verb; every other unreadable
+  # payload (no command key at all, a shape nobody has seen) stays fail-open.
+  case "$input" in *'"command"'*)
+    if printf '%s' "$input" | tr '\n' ' ' | grep -qE '"command"[[:space:]]*:[[:space:]]*\['; then
+      case "$input" in *git*|*commit*|*push*|*merge*|*pull*)
+        echo "Domaine convention (references/commit-message-format.md): this call carries an argv-array command the fnd commit guard could not parse, so the git command inside it is blocked rather than run unchecked. Re-run it as a single command string (e.g. bash -lc '<command>'). Never bypass the repo git hooks (--no-verify, core.hooksPath, HUSKY=0) — they are quality gates." >&2
+        exit 2 ;;
+      esac
+    fi ;;
+  esac
 fi
 [ -n "$cmd" ] || exit 0
 

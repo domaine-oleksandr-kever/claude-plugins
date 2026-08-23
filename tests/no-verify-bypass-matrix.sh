@@ -383,15 +383,94 @@ attribution_cases() {
   raw block NJ3-unicode-escape "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git ${bs}u0063ommit -m ${bs}\"x Co-Authored-By: Claude${bs}\"\"}}"
 }
 
-CUR_HOOK="$HOOK";      LBL=""; no_verify_cases
-CUR_HOOK="$HOOK_ATTR"; LBL=""; attribution_cases
+# ── V / AV — the ARGV-ARRAY payload shape ───────────────────────────────────────────────────
+# Codex's `shell` / `local_shell` tools carry the command as an argv ARRAY, not a string, and
+# `jq -r` on one prints an element PER LINE — `git` and `commit` land on different lines, every
+# per-line matcher in both guards finds nothing, and the call is allowed. The guards join the
+# array into one line before scanning; these rows are that join's contract, run against BOTH
+# extraction paths (jq, and the sed fallback with jq hidden).
+# They sit OUTSIDE no_verify_cases / attribution_cases deliberately: tests/hooks-cursor-sim.sh
+# re-runs those two functions through hooks/cursor-shim.cjs, whose payload contract is a command
+# STRING — an array row there would test the shim's fail-open rail, not the guards' join.
+argv_ev() { # element… — a Codex shell event whose tool_input.command is an argv array
+  jq -nc '{tool_name:"shell",tool_input:{command:$ARGS.positional}}' --args -- "$@"
+}
+
+codex_argv_no_verify_cases() {
+  local p t
+  for p in "" "$shim"; do
+    t=jq; [ -n "$p" ] && t=nojq
+    # the bypasses, in the shape Codex sends them
+    raw block "V01-$t-argv-long"     "$(argv_ev git commit --no-verify -m x)" "$p"
+    raw block "V02-$t-argv-short"    "$(argv_ev git commit -n -m x)" "$p"
+    raw block "V03-$t-argv-bundled"  "$(argv_ev git commit -anm wip)" "$p"
+    raw block "V04-$t-argv-push"     "$(argv_ev git push --no-verify origin main)" "$p"
+    raw block "V05-$t-argv-husky"    "$(argv_ev env HUSKY=0 git commit -m x)" "$p"
+    raw block "V06-$t-argv-hookspath" "$(argv_ev git -c core.hooksPath=/dev/null commit -m x)" "$p"
+    # the `["bash","-lc","<one string>"]` spelling: the command keeps its own quoting inside one
+    # element, so it scans exactly like the Claude-shaped string payload
+    raw block "V07-$t-argv-lc-bypass" "$(argv_ev bash -lc 'git commit --no-verify -m x')" "$p"
+    raw allow "V08-$t-argv-lc-msg"    "$(argv_ev bash -lc 'git commit -m "do not use --no-verify"')" "$p"
+    # …and the clean argv commit must stay clean
+    raw allow "V09-$t-argv-clean"     "$(argv_ev git commit -m ok)" "$p"
+    raw allow "V10-$t-argv-status"    "$(argv_ev git status --short)" "$p"
+    raw allow "V11-$t-argv-push-dry"  "$(argv_ev git push -n origin main)" "$p"
+    # Residual FP of the join, asserted so a fix is a conscious matrix update: joining on spaces
+    # loses the argv boundary that told a multi-word -m VALUE apart from the flags around it, so
+    # the words after the first are read as command text. (Codex's own shell tool sends
+    # ["bash","-lc",…] — V08 — which keeps its quoting and is unaffected.)
+    raw block "V12-$t-residual-msg-fp" "$(argv_ev git commit -m 'fix: never use --no-verify')" "$p"
+  done
+  # The ONE class where the two extraction paths diverge, pinned on both sides. An element
+  # carrying a bracket has no `[…]` span the sed fallback can delimit, so that path reads
+  # nothing at all — and an unreadable argv array naming a git verb FAILS CLOSED rather than
+  # waving a shell call through unchecked. jq has no such limit and reads the real command.
+  raw allow "V13-jq-bracket-parsed"       "$(argv_ev git commit -m '[wip] tidy')"
+  raw block "V13-nojq-bracket-failclosed" "$(argv_ev git commit -m '[wip] tidy')" "$shim"
+  # …and the fail-closed branch is gated on the git verbs: an unreadable argv array that is not
+  # a git call at all is not this guard's business.
+  raw allow "V14-jq-bracket-nongit"       "$(argv_ev ls -la '[a]')"
+  raw allow "V14-nojq-bracket-nongit"     "$(argv_ev ls -la '[a]')" "$shim"
+}
+
+codex_argv_attribution_cases() {
+  local p t
+  for p in "" "$shim"; do
+    t=jq; [ -n "$p" ] && t=nojq
+    raw block "AV01-$t-argv-trailer" \
+      "$(argv_ev git commit -m 'feat: x
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>')" "$p"
+    raw block "AV02-$t-argv-generated" \
+      "$(argv_ev git commit -m 'x
+
+Generated with [Claude Code]')" "$p"
+    raw block "AV03-$t-argv-lc-trailer" \
+      "$(argv_ev bash -lc 'git commit -m "x
+
+Co-Authored-By: Claude <noreply@anthropic.com>"')" "$p"
+    raw allow "AV04-$t-argv-human" \
+      "$(argv_ev git commit -m 'pair work
+
+Co-Authored-By: Jane Doe <jane@corp.example>')" "$p"
+    raw allow "AV05-$t-argv-clean" "$(argv_ev git commit -m ok)" "$p"
+  done
+  # Same divergence as V13, on this guard's own trigger set.
+  raw block "AV06-nojq-bracket-failclosed" \
+    "$(argv_ev git commit -m '[wip] x
+
+Co-Authored-By: Claude <noreply@anthropic.com>')" "$shim"
+}
+
+CUR_HOOK="$HOOK";      LBL=""; no_verify_cases; codex_argv_no_verify_cases
+CUR_HOOK="$HOOK_ATTR"; LBL=""; attribution_cases; codex_argv_attribution_cases
 
 NV_NOPRE="$TMPD/no-verify-bypass-noprefilter.sh"
 AT_NOPRE="$TMPD/no-ai-attribution-noprefilter.sh"
 strip_prefilter "$HOOK" "$NV_NOPRE" 2
 strip_prefilter "$HOOK_ATTR" "$AT_NOPRE" 2
-CUR_HOOK="$NV_NOPRE"; LBL="nopre-"; no_verify_cases
-CUR_HOOK="$AT_NOPRE"; LBL="nopre-"; attribution_cases
+CUR_HOOK="$NV_NOPRE"; LBL="nopre-"; no_verify_cases; codex_argv_no_verify_cases
+CUR_HOOK="$AT_NOPRE"; LBL="nopre-"; attribution_cases; codex_argv_attribution_cases
 
 # A quote-split SUBCOMMAND still runs a commit, and the fast reject reads the raw event — so it stays
 # in only because `git` itself is one of the trigger words. Both twins must block: this is the row that

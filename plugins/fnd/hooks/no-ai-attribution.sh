@@ -7,6 +7,8 @@
 # call is the only outcome that can't lose the fight.
 #
 # stdin: PreToolUse event JSON ({"tool_name":"Bash","tool_input":{"command":…}}).
+# `command` is a STRING on Claude Code and Cursor and an ARGV ARRAY on Codex's
+# shell / local_shell tools — both are normalized to one line below.
 # Exit 2 + stderr blocks the call and feeds the message back to the model;
 # exit 0 lets it through. A hook failure must never block a commit.
 #
@@ -36,9 +38,14 @@ shopt -s nocasematch 2>/dev/null || true
 case "$input" in *commit*|*\\u*) ;; *) exit 0 ;; esac
 case "$input" in *co-authored-by*|*anthropic*|*generated*with*|*\\u*) ;; *) exit 0 ;; esac
 
+# An ARGV ARRAY is joined into one space-separated line before the segment matcher reads it:
+# `jq -r` on an array prints one element PER LINE, and `grep -o` below is per-line, so `git`
+# and `commit` on separate lines form no segment at all and the trailer rides through. Same
+# normalization as no-verify-bypass.sh, deliberately kept in step with it.
 cmd=""
 if command -v jq >/dev/null 2>&1; then
-  cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+  cmd="$(printf '%s' "$input" | jq -r '(.tool_input.command // empty)
+    | if type == "array" then map(select(type == "string")) | join(" ") else . end' 2>/dev/null || true)"
 fi
 if [ -z "$cmd" ]; then
   # No (working) jq: pull the "command" JSON value with sed and unescape
@@ -46,6 +53,32 @@ if [ -z "$cmd" ]; then
   cmd="$(printf '%s' "$input" | tr '\n' ' ' \
     | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"((\\.|[^"\\])*)".*/\1/p' \
     | sed -E 's/\\n/ /g; s/\\t/ /g; s/\\"/"/g; s/\\\\/\\/g' || true)"
+fi
+if [ -z "$cmd" ]; then
+  # …and the array form with that same toolbox: the bracket span, joined on the JSON element
+  # separator (`","` cannot appear unescaped inside a JSON string). A span holding a bracket of
+  # its own is not extractable this way — the fail-closed branch owns that case.
+  arr="$(printf '%s' "$input" | tr '\n' ' ' \
+    | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*\[([^][]*)\].*/\1/p' || true)"
+  if [ -n "$arr" ]; then
+    cmd="$(printf '%s' "$arr" \
+      | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//; s/"[[:space:]]*,[[:space:]]*"/ /g' \
+      | sed -E 's/\\n/ /g; s/\\t/ /g; s/\\"/"/g; s/\\\\/\\/g' || true)"
+  fi
+fi
+if [ -z "$cmd" ]; then
+  # An argv array this toolbox could not read is the one unreadable payload that may NOT exit 0.
+  # The stdin prefilters above already required a `commit` AND a trailer word, so anything
+  # reaching here is a commit call carrying attribution text that cannot be inspected — blocked
+  # rather than waved through. Every other unreadable payload stays fail-open.
+  case "$input" in *'"command"'*)
+    if printf '%s' "$input" | tr '\n' ' ' | grep -qE '"command"[[:space:]]*:[[:space:]]*\['; then
+      case "$input" in *commit*)
+        echo "Domaine convention (references/commit-message-format.md): this call carries an argv-array command the fnd commit-message guard could not parse, so the git commit inside it is blocked rather than run unchecked. Re-run it as a single command string (e.g. bash -lc '<command>'), without the Co-Authored-By / Generated-with-Claude trailer." >&2
+        exit 2 ;;
+      esac
+    fi ;;
+  esac
 fi
 [ -n "$cmd" ] || exit 0
 
