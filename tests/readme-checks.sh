@@ -238,6 +238,7 @@ done
 # switch it lists must appear here.
 has "$README" 'domaine-env.cjs list' env-cli-documented
 has "$README" '.claude/domaine.env' env-project-file-documented
+has "$README" 'ask the agent in a session' env-ask-agent-documented
 for k in $(grep -oE "'(FND_[A-Z0-9_]+|SHOPIFY_ADMIN_GQL_QUIET)'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs" | tr -d "'" | sort -u); do
   has "$README" "$k" "env-known-$k"
 done

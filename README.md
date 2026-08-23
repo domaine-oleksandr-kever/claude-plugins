@@ -1018,6 +1018,13 @@ node plugins/fnd/scripts/domaine-env.cjs set FND_MCP_SLIM_DEBUG=1 --project   # 
 node plugins/fnd/scripts/domaine-env.cjs unset FND_MCP_SLIM_DEBUG        # and: path [--project]
 ```
 
+The CLI is never installed on its own — it ships inside the plugin (bare Node, no
+dependencies) and lives wherever the plugin does: the clone, or the host's plugin cache.
+The intended route is to **ask the agent in a session**: say "enable mcp-slim debug for
+this project" or "turn off the prompt-JSON guard globally", and the session runs the
+matching `set`/`unset` against the script under its own plugin root — no path to remember.
+Running it by hand from the plugin directory works exactly the same.
+
 Two caveats. The shell fast-gates in the hook wirings (the `[ "$FND_MCP_SLIM" = "0" ] && exit`
 short-circuits) see only the real process env — a file-set `0` still disables the feature (the
 Node side re-checks after loading the files), it just no longer skips the node spawn. And
