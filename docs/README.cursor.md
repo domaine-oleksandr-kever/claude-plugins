@@ -50,12 +50,18 @@ agent plugin marketplace update <name>        # re-index from the git repo, pick
 agent plugin marketplace remove <name-or-url> # unregister a marketplace (junk/duplicate entries included)
 ```
 
-The CLI manages **marketplaces only** — `agent plugin` has no install/uninstall subcommands.
-Installing the plugin itself is interactive (staff-confirmed): press **Add** on the fnd card
-once in the editor, or in a chat use `/add-plugin`; the install syncs at user scope.
-**Uninstalling** it is interactive too: Customize → Plugins → the fnd card's `…` menu →
-Uninstall. Registering a marketplace does NOT install its plugins, and removing a
-marketplace does not uninstall an already-installed plugin.
+The CLI manages **marketplaces only** — `agent plugin` has no install/uninstall subcommands
+(staff-confirmed; the marketplace verbs still earn their keep as the scriptable half:
+registration, re-index after a push, cleanup of stale entries). Installing the plugin itself
+takes one interactive step, with or without the editor:
+
+- terminal: run `agent`, type `/plugins`, pick the fnd card — the same picker in the TUI;
+  installs sync at user scope, so the result shows up in the editor too
+- editor: press **Add** on the fnd card in Customize → Plugins, or `/add-plugin` in a chat
+
+**Uninstalling** is interactive the same way: the fnd card's `…` menu → Uninstall (TUI
+`/plugins` or Customize → Plugins). Registering a marketplace does NOT install its plugins,
+and removing a marketplace does not uninstall an already-installed plugin.
 
 **Pick one route per machine.** A marketplace install and a local-checkout install are two
 independent plugin copies — with both present, both load: duplicate skills and agents reach the
