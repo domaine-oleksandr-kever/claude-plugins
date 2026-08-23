@@ -192,6 +192,30 @@ emit_envelope() { # $1 = file holding the {"data"|"errors":…} envelope
   echo "ok=1 bytes=$bytes out=$OUT_FILE errors=$errs"
 }
 
+# Domaine env files (process env wins): nearest .claude/domaine.env above cwd, then the global
+# ~/.config/domaine/env — same dialect as scripts/env-file.cjs, read per key, never sourced.
+# A file value fills an UNSET variable only; an empty value in the file cannot be expressed here.
+domaine_env() {
+  local d="$PWD" f v
+  while :; do
+    f="$d/.claude/domaine.env"
+    if [ -f "$f" ]; then
+      v="$(grep -m1 "^$1=" "$f" 2>/dev/null | cut -d= -f2-)"
+      [ -n "$v" ] && { printf '%s' "$v"; return; }
+      break
+    fi
+    [ "$d" = "/" ] && break
+    d="$(dirname "$d")"
+  done
+  grep -m1 "^$1=" "${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env" 2>/dev/null | cut -d= -f2- || true
+}
+if [ -z "${FND_GQL_PROBE_CACHE+x}" ]; then
+  _v="$(domaine_env FND_GQL_PROBE_CACHE)"; [ -n "$_v" ] && FND_GQL_PROBE_CACHE="$_v"
+fi
+if [ -z "${SHOPIFY_ADMIN_GQL_QUIET+x}" ]; then
+  _v="$(domaine_env SHOPIFY_ADMIN_GQL_QUIET)"; [ -n "$_v" ] && SHOPIFY_ADMIN_GQL_QUIET="$_v"
+fi
+
 # --- engine 1: shopify store execute (CLI ≥ 4.x + stored store auth) --------------------------
 SKIP_REASON=""
 

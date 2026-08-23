@@ -333,6 +333,28 @@ push_fail() { # $1 = error code; $2 (create only) = theme name to scan for a thi
   exit 1
 }
 
+# Domaine env files (process env wins): nearest .claude/domaine.env above cwd, then the global
+# ~/.config/domaine/env — same dialect as scripts/env-file.cjs, read per key, never sourced.
+# Fills an UNSET variable only — a set-but-empty FND_CPT_THROTTLE_WAITS (retrying disabled)
+# stays exactly that, and an empty value in the file cannot be expressed here.
+domaine_env() {
+  local d="$PWD" f v
+  while :; do
+    f="$d/.claude/domaine.env"
+    if [ -f "$f" ]; then
+      v="$(grep -m1 "^$1=" "$f" 2>/dev/null | cut -d= -f2-)"
+      [ -n "$v" ] && { printf '%s' "$v"; return; }
+      break
+    fi
+    [ "$d" = "/" ] && break
+    d="$(dirname "$d")"
+  done
+  grep -m1 "^$1=" "${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env" 2>/dev/null | cut -d= -f2- || true
+}
+if [ -z "${FND_CPT_THROTTLE_WAITS+x}" ]; then
+  _v="$(domaine_env FND_CPT_THROTTLE_WAITS)"; [ -n "$_v" ] && FND_CPT_THROTTLE_WAITS="$_v"
+fi
+
 # Shopify rate-limits per store+token, and a running `shopify theme dev` against the same store
 # draws on the SAME budget — so a bulk push can land a 429 `Throttled` (observed live at 0% upload)
 # while every other call is healthy. Two spaced retries absorb the transient case;

@@ -67,6 +67,13 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+// domaine env files fill process.env gaps (env > project > global); the spawned canonical
+// hooks inherit the result, and sessionStart forwards `applied` so Cursor propagates the
+// file-sourced values to every later hook in the session — including the shell fast-gates.
+// Absent in a partial install — the shim must keep guarding without it.
+let DOMAINE_ENV = { applied: {}, files: {} };
+try { DOMAINE_ENV = require('../scripts/env-file.cjs').load(); } catch (_) {}
+
 const HOOKS_DIR = __dirname;
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
 
@@ -175,7 +182,9 @@ function sessionStart(payload) {
     const text = readFileOr(path.join(HOOKS_DIR, 'store-access.md'), '');
     if (text) parts.push(text);
   }
-  return { additional_context: parts.join('\n') };
+  const out = { additional_context: parts.join('\n') };
+  if (Object.keys(DOMAINE_ENV.applied).length) out.env = DOMAINE_ENV.applied;
+  return out;
 }
 
 // ── beforeSubmitPrompt ──────────────────────────────────────────────────────────────────

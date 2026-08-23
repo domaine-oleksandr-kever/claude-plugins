@@ -28,6 +28,8 @@
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps (env > project > global); absent in a partial install
+
 // __dirname, never CLAUDE_PLUGIN_ROOT/PLUGIN_ROOT: Cursor leaks plugin-root env between concurrent
 // hooks and Claude Code has its own source-vs-cache inconsistency, so the env is a cross-check at
 // most (HARNESS-PORT-PLAN.md, hazards ledger).

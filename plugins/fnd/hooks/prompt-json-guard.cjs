@@ -146,6 +146,9 @@ function promptJsonDecision(input) {
 module.exports = { promptJsonDecision };
 
 if (require.main === module) {
+  // Standalone runs only — as a module, user-prompt.cjs (the merged entry) has already loaded.
+  try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps; absent in a partial install
+
   // Collect stdin as bytes, decode once — decoding per chunk would mangle a multibyte char
   // split across a read boundary, corrupting the spilled blob (U+FFFD).
   const chunks = [];

@@ -42,6 +42,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 // Resolved from this file, never from CURSOR_/CLAUDE_PLUGIN_ROOT: those leak between
@@ -49,6 +50,13 @@ import { fileURLToPath } from 'node:url';
 // silently stops guarding.
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOOKS = path.join(PLUGIN_ROOT, 'hooks');
+
+// Domaine env files fill process.env gaps (env > project > global) — the fast gates below read
+// process.env, and every spawned .cjs core inherits the result. Single-copy: the loader is the
+// same scripts/env-file.cjs the other hosts use (Bun resolves CJS through createRequire).
+try {
+  createRequire(import.meta.url)(path.join(PLUGIN_ROOT, 'scripts', 'env-file.cjs')).load();
+} catch (_) {} // a broken config file must never take the plugin down
 
 const GUARD_TIMEOUT_MS = 10000;
 // mcp-slim's own wall-clock budget defaults to 5 s and applies to the pipeline only, so the

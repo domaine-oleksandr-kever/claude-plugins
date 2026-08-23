@@ -156,6 +156,9 @@ function contextNotice(input) {
 module.exports = { contextNotice };
 
 if (require.main === module) {
+  // Standalone runs only — as a module, user-prompt.cjs (the merged entry) has already loaded.
+  try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps; absent in a partial install
+
   let raw = '';
   process.stdin.on('data', (d) => (raw += d));
   process.stdin.on('end', () => {

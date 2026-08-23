@@ -233,5 +233,14 @@ for f in "$README" $ROOT/docs/README.*.md; do
   else bad "links-${f##*/}" "$out"; fi
 done
 
+# Domaine env files (2026-08-23): the mechanism is documented where the switches live, and the
+# CLI's KNOWN registry (names only by design) can never drift from the README table — every
+# switch it lists must appear here.
+has "$README" 'domaine-env.cjs list' env-cli-documented
+has "$README" '.claude/domaine.env' env-project-file-documented
+for k in $(grep -oE "'(FND_[A-Z0-9_]+|SHOPIFY_ADMIN_GQL_QUIET)'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs" | tr -d "'" | sort -u); do
+  has "$README" "$k" "env-known-$k"
+done
+
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

@@ -17,6 +17,10 @@ unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR SHOPIFY_CLI_THEME_TOKEN SHOPIFY_STORE 
       FND_GQL_PROBE_CACHE TOML_PATH
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# A real ~/.config/domaine/env on this machine would inject switches into every case (the
+# scripts under test read it via env-file.cjs / domaine_env) — point the global layer at a
+# sandbox. The EV cases below set their own.
+export XDG_CONFIG_HOME="${TMPDIR:-/tmp}/fnd-sim-xdg-$$"
 GQL="$ROOT/plugins/fnd/scripts/shopify-admin-gql.sh"
 TJ="$ROOT/plugins/fnd/scripts/theme-json.sh"
 CPT="$ROOT/plugins/fnd/scripts/create-preview-theme.sh"
@@ -3158,6 +3162,54 @@ if [ "$rc" -eq 0 ] && [ ! -e "$WTR/mig/theme/.claude/fnd" ] \
    && grep -qx 'legacy note' "$WTR/mig/theme/.claude/tasks/MIG-1/notes.md" 2>/dev/null \
    && [ -L "$WTR/mig/theme-MIG-1/.claude/tasks" ]; then ok
 else bad W30-legacy-workspace-migrated "rc=$rc fnd=$(ls "$WTR/mig/theme/.claude" 2>&1 | tr '\n' ' ') out=$(tr '\n' ';' < "$O")"; fi
+
+# ═══ EV — domaine env files: scripts/env-file.cjs loader + scripts/domaine-env.cjs CLI ═══
+EVR="$TMP/env"; mkdir -p "$EVR/cfg" "$EVR/repo/sub"
+git init -q "$EVR/repo"
+EVF="$ROOT/plugins/fnd/scripts/env-file.cjs"
+EVC="$ROOT/plugins/fnd/scripts/domaine-env.cjs"
+
+# EV1: `set` writes the global file; `set --project` targets <git toplevel>/.claude/domaine.env
+(cd "$EVR/repo" && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_DEBUG=1 >/dev/null \
+  && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_TTL=12 >/dev/null \
+  && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_TTL=48 --project >/dev/null)
+if grep -qx 'FND_MCP_SLIM_DEBUG=1' "$EVR/cfg/domaine/env" \
+   && grep -qx 'FND_MCP_SLIM_TTL=12' "$EVR/cfg/domaine/env" \
+   && grep -qx 'FND_MCP_SLIM_TTL=48' "$EVR/repo/.claude/domaine.env"; then ok
+else bad EV1-cli-set "global=$(tr '\n' ';' < "$EVR/cfg/domaine/env" 2>&1) project=$(tr '\n' ';' < "$EVR/repo/.claude/domaine.env" 2>&1)"; fi
+
+# EV2: loader precedence from a SUBDIR (walk-up finds the project file): project beats global,
+# a real process-env value beats both
+o1="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" node -e \
+  'require(process.argv[1]).load(); console.log(process.env.FND_MCP_SLIM_DEBUG+"|"+process.env.FND_MCP_SLIM_TTL)' "$EVF")"
+o2="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" FND_MCP_SLIM_TTL=7 node -e \
+  'require(process.argv[1]).load(); console.log(process.env.FND_MCP_SLIM_TTL)' "$EVF")"
+if [ "$o1" = "1|48" ] && [ "$o2" = "7" ]; then ok; else bad EV2-precedence "o1=$o1 o2=$o2"; fi
+
+# EV3: the allowlist — PATH/NODE_OPTIONS in the file never reach process.env, and the CLI
+# refuses to write them; malformed lines and comments are skipped without error
+printf '# tuning\nPATH=/evil\nNODE_OPTIONS=--bad\nnot a pair\nFND_WHALE_GUIDE=0\n' > "$EVR/cfg/domaine/env"
+o3="$(cd "$EVR/cfg" && XDG_CONFIG_HOME="$EVR/cfg" node -e \
+  'require(process.argv[1]).load(); console.log((process.env.PATH.includes("/evil")?"evil":"clean")+"|"+process.env.FND_WHALE_GUIDE+"|"+(process.env.NODE_OPTIONS||"unset"))' "$EVF")"
+rc=0; XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set PATH=/evil >/dev/null 2>&1 || rc=$?
+if [ "$o3" = "clean|0|unset" ] && [ "$rc" -ne 0 ]; then ok; else bad EV3-allowlist "o3=$o3 rc=$rc"; fi
+
+# EV4: `unset` removes only the key line — comments and unknown lines survive; `list` names
+# the source that won
+XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" unset FND_WHALE_GUIDE >/dev/null
+o4="$(cd "$EVR/repo" && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" list)"
+if grep -qx '# tuning' "$EVR/cfg/domaine/env" && ! grep -q 'FND_WHALE_GUIDE' "$EVR/cfg/domaine/env" \
+   && printf '%s' "$o4" | grep -q 'FND_MCP_SLIM_TTL.*= 48.*(project file)'; then ok
+else bad EV4-unset-list "file=$(tr '\n' ';' < "$EVR/cfg/domaine/env") list=$(printf '%s' "$o4" | grep FND_MCP_SLIM_TTL)"; fi
+
+# EV5: the bash-side reader — the domaine_env function the two shell scripts carry (extracted
+# from the shipped file, so this tests the real code): project-first walk-up, first-'=' split,
+# values with spaces intact
+eval "$(sed -n '/^domaine_env()/,/^}/p' "$CPT")"
+printf 'FND_CPT_THROTTLE_WAITS=5 9\n' > "$EVR/repo/.claude/domaine.env"
+o5="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FND_CPT_THROTTLE_WAITS)"
+o6="$(cd "$EVR/cfg" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FND_MCP_SLIM_DEBUG)"
+if [ "$o5" = "5 9" ] && [ "$o6" = "" ]; then ok; else bad EV5-bash-reader "o5='$o5' o6='$o6'"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

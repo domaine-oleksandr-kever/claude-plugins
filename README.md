@@ -996,13 +996,35 @@ Single home for every knob the plugin reads, on every host. Every new switch mus
 this table — with its per-host behavior whenever the switch does not mean the same thing
 everywhere.
 
-**Where to set them.** On **Claude Code**: `~/.claude/settings.json` → `"env": { … }` for all
-your projects, or a project's `.claude/settings.json` for just that repo. On **Cursor**,
-**Codex** and **OpenCode** there is no such per-plugin env block, so the portable route is the
-environment the host process inherits — export them from your shell profile (or the launcher
-that starts the editor) before starting the host. Every wiring on every host reads the same
-variables from its own process environment; a per-host config key for env is unverified until
-the M1 spikes.
+**Where to set them.** Two **Domaine env files** work identically on all four hosts — every
+fnd entry point (Node hooks, the `json-slim` CLI, the two Shopify shell scripts, the OpenCode
+plugin) reads them first thing, so a GUI-launched Cursor no longer needs `launchctl` gymnastics:
+
+- global — `~/.config/domaine/env` (Windows: `%APPDATA%\domaine\env`; `$XDG_CONFIG_HOME` honored)
+- per-project — `<repo>/.claude/domaine.env` (found by walking up from the working directory)
+
+Precedence is **process env > project file > global file > default** — a value already in the
+real environment is never overridden, so Claude Code's `settings.json` → `"env": { … }` (global
+or per-project) keeps working and keeps winning. The file format is a strict `KEY=VALUE` subset:
+one pair per line, `#` full-line comments, value = everything after the first `=`, no quoting
+and no `$VAR` expansion. Only `FND_*` keys (plus `SHOPIFY_ADMIN_GQL_QUIET`) are read — the file
+can never smuggle `PATH` or `NODE_OPTIONS` into a hook. Edit the files by hand or through the
+CLI:
+
+```bash
+node plugins/fnd/scripts/domaine-env.cjs list                            # switches, values, which source won
+node plugins/fnd/scripts/domaine-env.cjs set FND_MCP_SLIM_DEBUG=1        # global
+node plugins/fnd/scripts/domaine-env.cjs set FND_MCP_SLIM_DEBUG=1 --project   # this repo only
+node plugins/fnd/scripts/domaine-env.cjs unset FND_MCP_SLIM_DEBUG        # and: path [--project]
+```
+
+Two caveats. The shell fast-gates in the hook wirings (the `[ "$FND_MCP_SLIM" = "0" ] && exit`
+short-circuits) see only the real process env — a file-set `0` still disables the feature (the
+Node side re-checks after loading the files), it just no longer skips the node spawn. And
+`FND_LEAN`'s session gate is pure shell (the sessionStart one-liners that `cat` the statics), so
+that one switch is process-env-only where it is hook-gated — on Cursor our sessionStart hook
+also hands the file values back to the host, which then feeds them to every later hook of the
+session, shell gates included.
 
 Hooks never read a project's `.env` file on any host.
 

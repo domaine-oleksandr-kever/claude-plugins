@@ -61,6 +61,9 @@ set -u
 # must not leak into the cases — the debug ones set both switches on the invocation themselves, and
 # the rest would otherwise append fixture noise to the developer's real log.
 unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR
+# A real ~/.config/domaine/env on this machine would inject switches into every hook under
+# test (they load it via env-file.cjs) — point the global layer at a sandbox path.
+export XDG_CONFIG_HOME="${TMPDIR:-/tmp}/fnd-sim-xdg-$$"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/plugins/fnd/.claude-plugin/plugin.json"
@@ -1999,6 +2002,17 @@ assert_absent   T5-no-lean "$out" "MARK-lean-code"
 # T6: the hook always exits 0 (a hook failure must never block an agent start)
 run_subc '{"agent_type":"jira-writer"}'    >/dev/null 2>&1; assert_eq T6-skip-exit   "$?" 0
 run_subc '{"agent_type":"general-purpose"}' >/dev/null 2>&1; assert_eq T6-inject-exit "$?" 0
+
+# U9 (domaine env files): FND_PROMPT_JSON=0 in a project .claude/domaine.env disables the guard
+# half exactly like the real env var — the process env stays empty, only the file speaks. The
+# same blob WITHOUT the file must still block, or this case proves nothing.
+UED="$TMP/uenv"; mkdir -p "$UED/.claude"
+in="$(mk 20000 25000 "$UED" "$UED/blob.json")"
+out="$(printf '%s' "$in" | (cd "$UED" && env TMPDIR="$PJD" node "$MERGED" 2>/dev/null))"
+assert_contains U9-blocks-without-file "$out" '"decision":"block"'
+printf 'FND_PROMPT_JSON=0\n' > "$UED/.claude/domaine.env"
+out="$(printf '%s' "$in" | (cd "$UED" && env TMPDIR="$PJD" node "$MERGED" 2>/dev/null))"
+if [ -z "$out" ]; then ok; else bad U9-file-disables-guard "out=$(printf '%s' "$out" | head -c 120)"; fi
 
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then
