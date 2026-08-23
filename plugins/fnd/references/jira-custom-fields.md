@@ -1,7 +1,7 @@
 # Jira custom fields — discovery reference
 
-Shared reference for every workflow that ingests a Jira ticket (`/write-technical-approach`,
-`/develop-feature-or-fix`, `/qa-feature-or-fix`, `/write-steps-to-test`, `/create-pull-request`).
+Shared reference for every workflow that ingests a Jira ticket (the `write-technical-approach`,
+`develop-feature-or-fix`, `qa-feature-or-fix`, `write-steps-to-test` and `create-pull-request` skills).
 It documents how to locate the ticket fields the workflows depend on:
 
 **Description · Acceptance Criteria · Assumptions · Technical Approach · Documentation Links · Steps to test**

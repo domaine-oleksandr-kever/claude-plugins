@@ -787,7 +787,7 @@ alongside the rest of the generated adapters — never hand-edit one, add the se
 
 **Cursor tool cap.** Cursor is community-reported to stop exposing tools past ~40 across all
 connected servers; the six bundled servers are roughly three times that. `mcp.json` still
-ships all six — the cap is unmeasured (an M1a spike item), and a cap we haven't seen is no
+ships all six — the cap is unmeasured on this host, and a cap we haven't seen is no
 reason to hand you a smaller plugin. If you do hit it, `mcp.pruned.json` is the priority
 list to fall back to: **atlassian** (every workflow starts at a ticket) → **shopify-dev-mcp**
 (five tools for the whole Shopify docs + validator surface) → **chrome-devtools-mcp** (one

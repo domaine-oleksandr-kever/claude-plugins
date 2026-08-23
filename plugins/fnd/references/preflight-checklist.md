@@ -80,8 +80,9 @@ not run is 🟡 with the reason, never 🔴 and never a guess.
 | --- | --- | --- |
 | Claude Code | the marketplace checkout the host keeps for this marketplace (`plugins/fnd/.claude-plugin/plugin.json` inside it); the installed entry is in the host's `installed_plugins.json` | `/plugin marketplace update <marketplace>`, then `/reload-plugins` |
 | Codex CLI | the clone the installer recorded in `~/.codex/.fnd-install-mode` (`repo=`) — the same repository the marketplace serves, so compare its commit to the remote exactly as below. **Never the plugin cache** (`…/plugins/cache/<marketplace>/fnd/<version>/`) | `codex plugin marketplace upgrade`, then a new session (and a fresh `/hooks` review when hook commands changed) |
-| Cursor | live checkout: the install points at the clone, so the only newer thing is the git remote | `./scripts/install.sh --target cursor` in the clone, then a window reload for manifest / hook / MCP changes |
-| OpenCode | live checkout, same as Cursor | `./scripts/install.sh --target opencode` in the clone, then a new session |
+| Cursor — marketplace route | the plugin cache Cursor keeps for this marketplace (`~/.cursor/plugins/cache/<marketplace>/fnd/<commit>/`), which it re-indexes from GitHub; only pushed commits arrive | nothing to run — press **Refresh** on the marketplace in **Customize → Plugins**, then a window reload for manifest / hook / MCP changes |
+| Cursor — local-symlink route | live checkout: the install points at the clone, so the only newer thing is the git remote | `./scripts/install.sh --target cursor` in the clone, then a window reload for manifest / hook / MCP changes |
+| OpenCode | live checkout, same as the Cursor local-symlink route | `./scripts/install.sh --target opencode` in the clone, then a new session |
 
 The Codex cache deserves its own warning, because it looks like an answer and is not: **only
 installs write into it**, so its highest version directory can never exceed the installed one. Read

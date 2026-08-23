@@ -17,6 +17,12 @@
 #   4. anchor      — a file that uses `<plugin root>/` must define the term at least once
 #      ("plugin root" + "the plugin's own directory"), because a subagent may open this file with
 #      no skill body around it.
+#   5. slash-skill — a bare `/<skill>` (slash + an exact directory name under skills/) is the
+#      Claude Code invocation spelled without the `fnd:` prefix, so it needs the same guard as
+#      rule 3; unguarded, references name the skill neutrally ("the `<name>` skill"). The name
+#      list is read from skills/*/ so a new skill is covered the day it lands. A path segment
+#      (`<plugin root>/skills/create-pull-request/…`, `references/commit-message-format.md`) is
+#      not an invocation — the surrounding character classes exclude it.
 # Scope: plugins/fnd/references/*.md plus every skills/*/REFERENCE.md (same audience, same rules;
 # SKILL.md bodies belong to skill-neutral-lint.sh).
 # Usage: reference-neutral-lint.sh [plugin-dir]   (default: plugins/fnd)
@@ -26,6 +32,13 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_DIR="${1:-$ROOT/plugins/fnd}"
 
+# rule 5's name list — the skill directories themselves, so it never drifts from what ships
+SKILL_NAMES=""
+for d in "$PLUGIN_DIR"/skills/*/; do
+  [ -d "$d" ] || continue
+  SKILL_NAMES="${SKILL_NAMES:+$SKILL_NAMES|}$(basename "$d")"
+done
+
 pass=0; fail=0; failures=""
 ok() { pass=$((pass + 1)); }
 bad() { fail=$((fail + 1)); failures="${failures}  [$1] $2
@@ -33,7 +46,7 @@ bad() { fail=$((fail + 1)); failures="${failures}  [$1] $2
 
 # violations <file> <rule> — one `line<TAB>excerpt` row per unguarded hit, empty when clean
 violations() {
-  awk -v rule="$2" '
+  awk -v rule="$2" -v skills="$SKILL_NAMES" '
     function guarded(s) {
       if (s ~ /Claude Code only|Claude-Code-only/) return 1
       return s ~ /(^|—|–|[.!?({;:,*>`"]|[[:space:]](and|or|both|only|then))[[:space:]]*[Oo]n Claude Code/
@@ -52,6 +65,10 @@ violations() {
       hit = 0
       if (rule == "plugin-root") { if (index(line, "CLAUDE_PLUGIN_ROOT") > 0) hit = 1 }
       else if (rule == "invocation") { if (index(line, "/fnd:") > 0) hit = 1 }
+      else if (rule == "slash-skill") {
+        # the classes on both sides keep path segments (`…/skills/ship/SKILL.md`) out of it
+        if (skills != "" && line ~ ("(^|[^A-Za-z0-9._/-])/(" skills ")([^A-Za-z0-9._/-]|$)")) hit = 1
+      }
       else if (line ~ /AskUserQuestion|EnterPlanMode|ExitPlanMode|ultracode|Workflow\(/) hit = 1
       if (hit && !g) {
         excerpt = line
@@ -96,6 +113,9 @@ for f in "$REF_DIR"/*.md "$PLUGIN_DIR"/skills/*/REFERENCE.md; do
 
   # rule 3 — `/fnd:` slash commands exist on Claude Code only
   check_rule "$f" "$label" invocation "/fnd: command without a 'Claude Code' guard"
+
+  # rule 5 — a bare `/<skill>` is the same slash command minus the prefix
+  check_rule "$f" "$label" slash-skill "bare /<skill> invocation; name the skill instead"
 
   # rule 4 — a file using the `<plugin root>` form defines it, for standalone readers
   if grep -qF '<plugin root>/' "$f"; then
@@ -171,13 +191,28 @@ done
 # self-test of rule 2's guard on the phrasing the M7 prose uses — proves the new lines are
 # clean because they are guarded, not because the rule stopped matching
 tmp="$(mktemp -d 2>/dev/null || mktemp -d -t refneutral)"
+trap 'rm -rf "$tmp"' EXIT INT TERM
 printf 'On Claude Code, the host scripted Workflow (ultracode) layer stays out of it.\n' > "$tmp/guarded.md"
 printf 'The conductor calls Workflow(step) through the ultracode layer.\n' > "$tmp/unguarded.md"
 if [ -z "$(violations "$tmp/guarded.md" claude-only)" ]; then ok
 else bad m7-selftest "guard self-test: a guarded 'On Claude Code …ultracode' line was flagged"; fi
 if [ "$(violations "$tmp/unguarded.md" claude-only | wc -l | tr -d ' ')" = 1 ]; then ok
 else bad m7-selftest "guard self-test: an unguarded ultracode/Workflow( line was NOT flagged"; fi
+
+# self-test of rule 5: the slash form is caught, the path segment that contains the same name
+# is not, and a guarded line is left alone
+printf 'Shared reference for `/develop-feature-or-fix` and `/write-technical-approach`.\n' > "$tmp/slash.md"
+printf 'Read `<plugin root>/skills/create-pull-request/REFERENCE.md` and\n`references/commit-message-format.md` — the `commit` skill owns it.\n' > "$tmp/paths.md"
+printf 'On Claude Code, run /ship to hand the ticket to the pipeline.\n' > "$tmp/slash-guarded.md"
+if [ "$(violations "$tmp/slash.md" slash-skill | wc -l | tr -d ' ')" = 1 ]; then ok
+else bad slash-selftest "rule-5 self-test: a bare /<skill> line was NOT flagged"; fi
+if [ -z "$(violations "$tmp/paths.md" slash-skill)" ]; then ok
+else bad slash-selftest "rule-5 self-test: a path segment holding a skill name was flagged"; fi
+if [ -z "$(violations "$tmp/slash-guarded.md" slash-skill)" ]; then ok
+else bad slash-selftest "rule-5 self-test: a guarded /<skill> line was flagged"; fi
+
 rm -rf "$tmp"
+trap - EXIT INT TERM
 
 echo "reference-neutral-lint: $pass passed, $fail failed ($found files)"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

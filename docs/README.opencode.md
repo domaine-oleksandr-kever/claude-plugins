@@ -59,8 +59,8 @@ live. The installer links, never replaces a directory of yours:
 | `~/.config/opencode/commands/<name>.md` | `plugins/fnd/commands-opencode/` (18 `/name` shims, generated) |
 | `~/.config/opencode/plugins/fnd-plugin.js` | `plugins/fnd/opencode/fnd-plugin.js` |
 
-> The install lever is **provisional** (`M1C-DEFAULT`): spike M1c still has to choose between
-> these symlinks, `OPENCODE_CONFIG_DIR` and a global `opencode.json` fragment. Exactly one route
+> The install lever is **provisional**, pending a decision between these symlinks,
+> `OPENCODE_CONFIG_DIR` and a global `opencode.json` fragment. Exactly one route
 > will remain — mixing two would duplicate the content.
 
 The installer finishes by running `doctor.cjs --target opencode` for you — read those rows

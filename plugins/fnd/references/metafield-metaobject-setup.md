@@ -1,7 +1,7 @@
 # Metafield / metaobject store setup — inspect, create, mock, bind
 
-Shared reference for `/develop-feature-or-fix` (and the Data / Config section of
-`/write-technical-approach`). Plugin root = the plugin's own directory; this file is
+Shared reference for the `develop-feature-or-fix` skill (and the Data / Config section of
+the `write-technical-approach` skill). Plugin root = the plugin's own directory; this file is
 `<plugin root>/references/metafield-metaobject-setup.md`, and every `<plugin root>/…` path below
 resolves the same way —
 on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands, elsewhere
@@ -236,7 +236,7 @@ clean.
 
 ## Plan it in the TA first
 
-In `/write-technical-approach`, the **Data / Config** section should already name the required
-metafield/metaobject definitions (types, keys, field list, owner/namespace) and can carry the
-STEP 0 inspection query, so `/develop-feature-or-fix` starts from a known target instead of
+In the `write-technical-approach` skill, the **Data / Config** section should already name the
+required metafield/metaobject definitions (types, keys, field list, owner/namespace) and can carry
+the STEP 0 inspection query, so the `develop-feature-or-fix` skill starts from a known target instead of
 rediscovering the schema.

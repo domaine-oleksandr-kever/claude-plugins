@@ -26,7 +26,7 @@ Open a Pull Request with a Domaine-standard description pulled from the Jira tic
 
 Series position: Workflow 6 — the final step, after `develop-feature-or-fix` and `qa-feature-or-fix`.
 Inputs — infer from the conversation first, ask only what can't be inferred: **Jira ticket(s)** (`jira_ticket` — one key or several); **target branch** (usually `develop` — confirm against Git Flow); optional `preview_path`; optional theme triplet `theme_name` / `theme_url` / `theme_admin_url` — passing all three skips auto-creation (REFERENCE.md → Preview theme, "Args win"), omitting them falls to the workspace's recorded `session-theme: <id>` and only then to auto-creation in step 4, and their rows are omitted from the body when nothing is provided, recorded, or created.
-Operating mode: **Phase 1 prepares the PR** (ingest, diff, review gate, preview theme, draft title + body) but never opens one — creation starts after the developer approves the draft; the repo's tracked files stay untouched throughout. On Claude Code: run Phase 1 in plan mode and leave plan mode after the developer approves the draft.
+Operating mode: **Phase 1 prepares the PR** (ingest, diff, review gate, preview theme, draft title + body) but never opens one — creation starts after the developer approves the draft; the repo's tracked files stay untouched throughout. On Claude Code: run Phase 1 in plan mode and leave plan mode after the developer approves the draft — that is what the `[plan mode]` marker below means.
 
 ## Global rules
 

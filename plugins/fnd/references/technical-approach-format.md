@@ -1,6 +1,6 @@
 # Technical Approach — Format reference
 
-All Technical Approach (TA) documents produced by Workflow 2 (`/write-technical-approach`) **must**
+All Technical Approach (TA) documents produced by Workflow 2 (the `write-technical-approach` skill) **must**
 follow the **short format** below — the same structure used on ELC-126, ELC-80, and the current
 Domaine tickets: seven H4 sections, dense and skimmable, no title/metadata block.
 
