@@ -6,27 +6,11 @@ checkout Claude Code uses — only the wiring differs. Start at the
 
 ## Install
 
-Two routes from a clean machine to a proven install; both end at the same reload + smoke test:
-
-- **Marketplace — no clone** (live-verified 2026-08-22). Cursor imports this repo as a
-  marketplace and installs fnd into its own cache
-  (`~/.cursor/plugins/cache/<marketplace>/fnd/<commit>`), tracking GitHub for updates. Take this
-  route to *use* the plugin.
-- **Local checkout — steps 1–2 below.** The clone **is** the install: Cursor reads a symlink
-  into `~/.cursor/plugins/local/fnd`, so the files it loads are the ones in this checkout. Take
-  this route to develop plugin content or to run local, unpushed work.
-
-Fast path: the bootstrap one-liner from the [README](../README.md#install--four-hosts) does
-steps 1–2 — clone plus this installer — in one command.
-
-> [!WARNING]
-> **Marketplace installs currently ignore agent model pins.** A staff-acknowledged Cursor bug
-> (open since April 2026, **no fix date**) makes marketplace-installed plugin agents drop their
-> `model:` frontmatter — on that route every fnd subagent silently inherits the session model
-> instead of the tier map in `plugins/fnd/references/host-model-map.md`. Skills, hooks, MCP and
-> the agents themselves still work; only the model routing is lost. Until Cursor fixes it,
-> **prefer the local-checkout route** — pins bind there — and confirm once with the
-> `/preflight-checks` model-pin row.
+The route is the **local checkout**: the clone **is** the install — Cursor reads a symlink into
+`~/.cursor/plugins/local/fnd`, so the files it loads are the ones in this checkout, agent model
+pins bind, and a `git pull` updates the host live. A marketplace route also exists, but a Cursor
+bug currently breaks its model routing — it is documented at the end of this section as the
+alternative, with that caveat.
 
 ### 0. Prerequisites
 
@@ -36,9 +20,70 @@ steps 1–2 — clone plus this installer — in one command.
 - **Node.js** (any current LTS) and **git** on your PATH — every fnd script and hook runs on
   bare `node`, no npm installs.
 
-### Marketplace route — no clone
+### 1. Install — one command
 
-In Cursor: **Customize → Plugins → Add Marketplace** (or `/add-plugin` in chat), paste
+The bootstrap one-liner clones this repo to a permanent location (default
+`~/tools/claude-plugins`; `--dir <path>` to change) and runs the Cursor installer inside it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets cursor
+```
+
+The clone is not a temporary download — the symlink points into it, so this folder **is** the
+installed plugin and deleting it uninstalls everything; leave it where the bootstrap put it.
+Already have a clone, or prefer the steps by hand? The equivalent is:
+
+```bash
+git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git ~/tools/claude-plugins
+cd ~/tools/claude-plugins
+./scripts/install.sh --target cursor
+```
+
+Either way the installer pulls (`git pull --ff-only`, skipped on a dirty tree), creates the
+symlink, refuses to clobber anything it did not create, and finishes by running `doctor.cjs
+--target cursor` for you — read those rows before doing anything else:
+
+```text
+PASS  manifest:cursor        .cursor-plugin/plugin.json version <version>
+PASS  version-sync           3 manifests all at <version>
+PASS  generator-sync         generated dirs match scripts/gen-host-adapters.cjs
+PASS  install:cursor         symlink install, 1 entry(ies) live (root: ~/.cursor/plugins/local)
+```
+
+Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target cursor`.
+
+### 2. Reload the Cursor window
+
+Command Palette (`Cmd+Shift+P`) → *Developer: Reload Window*. The manifest, the hooks wiring
+and `mcp.json` are read at startup, so a fresh install is not live until you do. First load
+also brings MCP auth prompts for the remote servers (Atlassian, Notion) — approve the ones you
+use.
+
+### 3. Run the smoke test once
+
+`/smoke-test` in a Cursor chat. It proves the layers a script cannot reach — MCP connectivity,
+subagent spawning, the commit guards firing, the session conventions arriving. Run it after
+installing or updating, not every session (`/preflight-checks` owns the recurring per-project
+role).
+
+`--copy` installs a real copy instead of the symlink (no-symlink environments); such an install
+does **not** follow `git pull` — re-run `./scripts/install.sh --target cursor --copy` to refresh
+it. `./scripts/install.sh --target cursor --uninstall` removes only the entries the installer
+created.
+
+### Alternative: marketplace route — currently degraded
+
+> [!WARNING]
+> **Marketplace installs currently ignore agent model pins.** A staff-acknowledged Cursor bug
+> (open since April 2026, **no fix date**) makes marketplace-installed plugin agents drop their
+> `model:` frontmatter — on this route every fnd subagent silently inherits the session model
+> instead of the tier map in `plugins/fnd/references/host-model-map.md`. Skills, hooks, MCP and
+> the agents themselves still work; only the model routing is lost. Until Cursor fixes it,
+> **prefer the local-checkout route above** — pins bind there — and confirm once with the
+> `/preflight-checks` model-pin row.
+
+No clone, no shell (live-verified 2026-08-22). In Cursor: **Customize → Plugins →
+Add Marketplace** (or `/add-plugin` in chat), paste
 
 ```text
 https://github.com/domaine-oleksandr-kever/claude-plugins
@@ -48,7 +93,7 @@ then press **Add** on the **fnd** card that appears under the marketplace's name
 the plugin into its own cache and keeps it updated by re-indexing the marketplace from GitHub —
 which also means **unpushed commits are invisible** on this route, exactly as on Codex.
 `node plugins/fnd/scripts/doctor.cjs --target cursor` recognizes the result as
-`marketplace cache install`. Skip to step 3 (reload) and step 4 (smoke test).
+`marketplace cache install`. Then do step 2 (reload) and step 3 (smoke test).
 
 **Uninstalling** happens on the same screen: the fnd card's `…` menu → Uninstall in
 Customize → Plugins; a stale or duplicate marketplace entry is removed there too. Registering
@@ -63,60 +108,7 @@ independent plugin copies — with both present, both load: duplicate skills and
 model, and every hook fires twice. `./scripts/install.sh --target cursor --uninstall` removes
 the local one; the marketplace one is removed from Customize → Plugins.
 
-### 1. Clone this repo
-
-The clone is not a temporary download — step 2 symlinks Cursor's plugin dir into it, so this
-folder **is** the installed plugin and deleting it uninstalls everything. Put it somewhere
-permanent (`~/tools/`, not `~/Downloads/`):
-
-```bash
-git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
-cd claude-plugins
-```
-
-### 2. Run the installer
-
-```bash
-./scripts/install.sh --target cursor
-```
-
-The installer pulls (`git pull --ff-only`, skipped on a dirty tree), creates the symlink,
-refuses to clobber anything it did not create, and finishes by running `doctor.cjs --target
-cursor` for you — read those rows before doing anything else:
-
-```text
-PASS  manifest:cursor        .cursor-plugin/plugin.json version <version>
-PASS  version-sync           3 manifests all at <version>
-PASS  generator-sync         generated dirs match scripts/gen-host-adapters.cjs
-PASS  install:cursor         symlink install, 1 entry(ies) live (root: ~/.cursor/plugins/local)
-```
-
-Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target cursor`.
-
-### 3. Reload the Cursor window
-
-Command Palette (`Cmd+Shift+P`) → *Developer: Reload Window*. The manifest, the hooks wiring
-and `mcp.json` are read at startup, so a fresh install is not live until you do. First load
-also brings MCP auth prompts for the remote servers (Atlassian, Notion) — approve the ones you
-use.
-
-### 4. Run the smoke test once
-
-`/smoke-test` in a Cursor chat. It proves the layers a script cannot reach — MCP connectivity,
-subagent spawning, the commit guards firing, the session conventions arriving. Run it after
-installing or updating, not every session (`/preflight-checks` owns the recurring per-project
-role).
-
-`--copy` installs a real copy instead of the symlink (no-symlink environments); such an install
-does **not** follow `git pull` — re-run `./scripts/install.sh --target cursor --copy` to refresh
-it. `./scripts/install.sh --target cursor --uninstall` removes only the entries the installer
-created.
-
 ## Update
-
-On the **marketplace route** there is nothing to run: Cursor re-indexes the marketplace from
-GitHub on its own (batching pushes, roughly every 10 minutes), or press **Refresh** on the
-marketplace in Customize → Plugins. Only pushed commits arrive.
 
 On the **local-checkout route**:
 
@@ -124,6 +116,10 @@ On the **local-checkout route**:
 cd /path/to/claude-plugins
 ./scripts/install.sh --target cursor        # = git pull --ff-only + re-link + doctor
 ```
+
+On the **marketplace route** there is nothing to run: Cursor re-indexes the marketplace from
+GitHub on its own (batching pushes, roughly every 10 minutes), or press **Refresh** on the
+marketplace in Customize → Plugins. Only pushed commits arrive.
 
 The installer is the updater — there is no "reinstall" on this host. What lands when:
 

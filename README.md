@@ -165,7 +165,7 @@ remain the full story — the fast path is those same steps with the typing remo
 | Host | Install | Verify | Details |
 |---|---|---|---|
 | Claude Code | `/plugin marketplace add …` + `/plugin install fnd@domaine` | `/fnd:smoke-test` | below |
-| Cursor | Customize → Add Marketplace (or `./scripts/install.sh --target cursor`) | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
+| Cursor | `./scripts/install.sh --target cursor` (or the fast path above; the marketplace route currently loses model pins — see the doc) | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
 | Codex CLI | `codex plugin marketplace add …` (dev channel: `./scripts/install.sh --target codex`) | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
 | OpenCode | `./scripts/install.sh --target opencode` | `/smoke-test` (command shim) | [docs/README.opencode.md](docs/README.opencode.md) |
 

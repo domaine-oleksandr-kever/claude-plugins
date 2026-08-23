@@ -11,11 +11,9 @@ backstop and the static conventions.
 ## Install
 
 Seven steps take a machine that has never seen OpenCode to a proven install: 0 installs the host
-itself, 1–2 clone and link the plugin, 3–5 are three pastes into a config file you own, 6 is
-optional, 7 proves the whole thing in a live session.
-
-Fast path: the bootstrap one-liner from the [README](../README.md#install--four-hosts) does
-steps 1–2 — clone plus this installer — in one command; the pastes below are still yours.
+itself, 1 installs the plugin in one command (2 is the manual equivalent, and what got linked),
+3–5 are three pastes into a config file you own, 6 is optional, 7 proves the whole thing in a
+live session.
 
 ### 0. Prerequisites — the host and the runtime
 
@@ -34,20 +32,26 @@ Skip anything you already have:
 - **Node.js** (any current LTS) and **git** on the PATH OpenCode inherits — every fnd script and
   hook runs on bare `node`, no npm installs.
 
-### 1. Clone this repo
+### 1. Install — one command
 
-The clone is not a temporary download — step 2 symlinks the host config into it, so this
-folder **is** the installed plugin and deleting it uninstalls everything. Put it somewhere
-permanent (`~/tools/`, not `~/Downloads/`):
+The bootstrap one-liner clones this repo to a permanent location (default
+`~/tools/claude-plugins`; `--dir <path>` to change) and runs the OpenCode installer inside it:
 
 ```bash
-git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
-cd claude-plugins
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets opencode
 ```
 
-### 2. Run the installer
+The clone is not a temporary download — the symlinks point into it, so this folder **is** the
+installed plugin and deleting it uninstalls everything; leave it where the bootstrap put it.
+The three config pastes (steps 3–5) are still yours — no script edits your `opencode.json`.
+
+### 2. The installer — manual equivalent, and what it links
+
+Already have a clone, or prefer the steps by hand?
 
 ```bash
+git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git ~/tools/claude-plugins
+cd ~/tools/claude-plugins
 ./scripts/install.sh --target opencode
 ```
 
