@@ -467,25 +467,28 @@ if [ -f "$MCP_CURSOR" ]; then
   if [ -z "$bad_shape" ]; then ok; else bad mcp-cursor-shape "mcp.json entries diverge: $bad_shape"; fi
 fi
 
-# Codex: a plain translation — the plugin bundles the Claude `mcpServers` shape, so a command server
-# must NOT grow a type key the canonical list does not have, and the SSE server rides as-is
+# Codex: a near-plain translation — command servers ride verbatim, but SSE is rewritten (M1b
+# measured live 2026-08-23: Codex has no SSE client, an /sse URL 404s at initialize), so an sse
+# source becomes a streamable-HTTP entry pointed at the same server's /mcp path
 if [ -f "$MCP_CODEX" ]; then
   bad_shape="$(jnode "$MCP_CODEX" '
     (() => {
       const c = JSON.parse(require("fs").readFileSync(process.argv[3] || "", "utf8"));
       const out = [];
       for (const [n, v] of Object.entries(m.mcpServers)) {
-        const src = c.mcpServers[n];
+        let src = c.mcpServers[n];
+        if (src && src.type === "sse")
+          src = Object.assign({}, src, { type: "http", url: src.url.replace(/\/sse$/, "/mcp") });
         if (JSON.stringify(v) !== JSON.stringify(src)) out.push(n);
       }
       return out.join(" ");
     })()' "$CANON_MANIFEST")"
-  if [ -z "$bad_shape" ]; then ok; else bad mcp-codex-verbatim "mcp-codex.json entries are not carried as-is: $bad_shape"; fi
-  if [ "$(jnode "$MCP_CODEX" 'm.mcpServers["figma-dev-mode"].type')" = "sse" ]; then ok
-  else bad mcp-codex-sse "the figma SSE server is not carried as an sse entry"; fi
-  # the one unverified transport has to say so, with the manual route spelled out
-  if grep -qF 'M1B-VERIFY' "$MCP_CODEX" && grep -qF 'codex mcp add' "$MCP_CODEX"; then ok
-  else bad mcp-codex-sse-note "mcp-codex.json records no SSE verify item + manual fallback"; fi
+  if [ -z "$bad_shape" ]; then ok; else bad mcp-codex-verbatim "mcp-codex.json entries diverge from the canonical list (modulo the sse->http rewrite): $bad_shape"; fi
+  if [ "$(jnode "$MCP_CODEX" 'm.mcpServers["figma-dev-mode"].type + " " + m.mcpServers["figma-dev-mode"].url')" = "http http://127.0.0.1:3845/mcp" ]; then ok
+  else bad mcp-codex-sse "the figma server is not rewritten to streamable http at /mcp"; fi
+  # the rewrite has to say why, with the manual route spelled out
+  if grep -qF 'M1b MEASURED' "$MCP_CODEX" && grep -qF 'codex mcp add' "$MCP_CODEX"; then ok
+  else bad mcp-codex-sse-note "mcp-codex.json records no measured SSE rationale + manual fallback"; fi
   # and the Codex manifest pointer must land on it
   ptr="$(jnode "$PLUGIN_DIR/.codex-plugin/plugin.json" 'm.mcpServers')"
   if [ -f "$PLUGIN_DIR/${ptr#./}" ]; then ok
@@ -543,7 +546,9 @@ carried="$("$NODE_BIN" -e '
     if (!eq(oc.mcp[n].environment, src.env)) out.push("opencode:" + n + ":environment");
     for (const [label, v] of [["cursor", cursor.mcpServers[n]], ["codex", codex.mcpServers[n]], ["opencode", oc.mcp[n]]]) {
       if (!eq(v.headers, src.headers)) out.push(label + ":" + n + ":headers");
-      if (src.url && v.url !== src.url) out.push(label + ":" + n + ":url");
+      // the one sanctioned rewrite: Codex has no SSE client (M1b), so an sse url lands on /mcp
+      const want = label === "codex" && src.type === "sse" ? src.url.replace(/\/sse$/, "/mcp") : src.url;
+      if (src.url && v.url !== want) out.push(label + ":" + n + ":url");
     }
   }
   process.stdout.write(out.join(" "));

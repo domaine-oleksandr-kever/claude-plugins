@@ -775,10 +775,12 @@ function cursorMcpPruned(servers) {
 }
 
 /*
- * Codex. A plugin bundles JSON in the Claude `mcpServers` shape, so this is a plain translation and
- * the entries are carried as-is — including figma-dev-mode's `type: "sse"`, whose support is the one
- * open question (M1B-VERIFY) and whose fallback is a manual `codex mcp add`, spelled out in the
- * header because JSON has nowhere else to put it.
+ * Codex. A plugin bundles JSON in the Claude `mcpServers` shape, so this is a near-plain
+ * translation. The one rewrite is SSE — M1b MEASURED live 2026-08-23: Codex drives every remote
+ * `url` entry through its streamable-HTTP client (no SSE client), so figma's `/sse` endpoint
+ * answered HTTP 404 to the initialize POST. The same Figma desktop server speaks streamable HTTP
+ * at `/mcp`, so an sse entry is emitted as `type: "http"` with a trailing `/sse` swapped for
+ * `/mcp`; the manual fallback stays in the header because JSON has nowhere else to put it.
  */
 function codexEntry(s) {
   if (s.transport === 'stdio') {
@@ -786,7 +788,10 @@ function codexEntry(s) {
     if (s.env) e.env = s.env;
     return e;
   }
-  const e = { type: s.transport, url: s.url };
+  const e = {
+    type: 'http',
+    url: s.transport === 'sse' ? s.url.replace(/\/sse$/, '/mcp') : s.url,
+  };
   if (s.headers) e.headers = s.headers;
   return e;
 }
@@ -803,10 +808,13 @@ function codexMcp(servers) {
       ' `mcpServers` pointer — deliberately NOT named .mcp.json, which Claude Code reads as a plugin' +
       ' MCP component of its own, on top of the mcpServers block its own manifest already declares.' +
       ' stdio and streamable-HTTP servers are documented Codex transports and' +
-      ' are carried as-is. M1B-VERIFY: SSE support is unconfirmed — if ' +
-      (sse.join(', ') || 'an SSE server') +
+      ' are carried as-is. M1b MEASURED 2026-08-23: Codex has no SSE client — it drives every' +
+      ' remote url through its streamable-HTTP client, so an /sse endpoint answers HTTP 404 at' +
+      ' initialize; ' +
+      (sse.join(', ') || 'no server') +
+      ' is therefore re-pointed at the streamable `/mcp` path the same server serves. If it still' +
       ' does not connect, remove it from this file and add it per-user instead' +
-      ' (`codex mcp add figma-dev-mode --url http://127.0.0.1:3845/sse`, adjusting for the syntax the' +
+      ' (`codex mcp add figma-dev-mode --url http://127.0.0.1:3845/mcp`, adjusting for the syntax the' +
       ' installed CLI accepts); everything else keeps working. Codex documents no tool-count cap, so' +
       ' no pruning is applied here — per-server `enabled_tools`/`disabled_tools` is the lever if one' +
       ' appears. Codex has no per-tool trust prompt for MCP config, but hook wiring is trust-reviewed' +

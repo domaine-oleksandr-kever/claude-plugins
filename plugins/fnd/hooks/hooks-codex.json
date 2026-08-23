@@ -1,58 +1,61 @@
 {
-  "SessionStart": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; echo \"fnd plugin root: $r\"; for f in comment-discipline plugin-feedback task-workspace mcp-whale; do cat \"$r/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"$r/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"$r/hooks/lean-code.md\" 2>/dev/null; true"
-        }
-      ]
-    }
-  ],
-  "UserPromptSubmit": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] || node \"$r/hooks/user-prompt.cjs\" || true"
-        }
-      ]
-    }
-  ],
-  "SubagentStart": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; \"$r/hooks/subagent-conventions.sh\""
-        }
-      ]
-    }
-  ],
-  "PreToolUse": [
-    {
-      "matcher": "^(Bash|shell|local_shell)$",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; \"$r/hooks/no-ai-attribution.sh\""
-        },
-        {
-          "type": "command",
-          "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; \"$r/hooks/no-verify-bypass.sh\""
-        }
-      ]
-    }
-  ],
-  "PostToolUse": [
-    {
-      "matcher": "mcp__.*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_MCP_SLIM:-1}\" = \"0\" ] || node \"$r/hooks/codex-mcp-shim.cjs\" || true"
-        }
-      ]
-    }
-  ]
+  "description": "fnd hook wiring for Codex — the canonical Claude Code hooks in Codex hooks.json envelope form (M1b measured live 2026-08-23: the top level is {description, hooks}, not a bare event map). Guards block by exit code; PostToolUse routes through codex-mcp-shim because Codex cannot rewrite tool output.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; echo \"fnd plugin root: $r\"; for f in comment-discipline plugin-feedback task-workspace mcp-whale; do cat \"$r/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"$r/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"$r/hooks/lean-code.md\" 2>/dev/null; true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] || node \"$r/hooks/user-prompt.cjs\" || true"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; \"$r/hooks/subagent-conventions.sh\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|shell|local_shell)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; \"$r/hooks/no-ai-attribution.sh\""
+          },
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; \"$r/hooks/no-verify-bypass.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_MCP_SLIM:-1}\" = \"0\" ] || node \"$r/hooks/codex-mcp-shim.cjs\" || true"
+          }
+        ]
+      }
+    ]
+  }
 }

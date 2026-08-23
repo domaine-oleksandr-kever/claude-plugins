@@ -38,9 +38,10 @@
 #             plugin-root env.
 #
 # PROTOCOL ASSUMPTIONS recorded here because JSON carries no comments (all → verify at M1b):
-#   - hooks-codex.json is a bare event map (SessionStart / UserPromptSubmit / SubagentStart /
-#     PreToolUse / PostToolUse → array of {matcher?, hooks:[{type,command}]}), the JSON spelling
-#     of config.toml's [[hooks.Event]]; the `hooks` prefix is implied by the file name.
+#   - hooks-codex.json is a {description, hooks: <event map>} envelope — MEASURED at M1b
+#     (live 2026-08-23): a bare event map is rejected at parse time with "unknown field
+#     `SessionStart`, expected `description` or `hooks`". The inner map is Claude-shaped:
+#     Event → array of {matcher?, hooks:[{type,command}]}.
 #   - SessionStart / SubagentStart stdout becomes context (Claude parity). If Codex requires the
 #     JSON channel instead, only the wiring changes — the scripts already emit plain text.
 #   - Exit 2 + stderr blocks a tool call; `permissionDecision: "deny"` is the JSON equivalent and
@@ -72,7 +73,7 @@ assert_absent()   { case "$2" in *"$3"*) bad "$1" "unexpected: $3" ;; *) ok ;; e
 assert_eq()       { if [ "$2" = "$3" ]; then ok; else bad "$1" "got '$2', want '$3'"; fi; }
 
 wcmd() { # event [hook-index] — the command Codex would run
-  jq -r --arg e "$1" --argjson i "${2:-0}" '.[$e][0].hooks[$i].command' "$WIRING"
+  jq -r --arg e "$1" --argjson i "${2:-0}" '.hooks[$e][0].hooks[$i].command' "$WIRING"
 }
 ccmd() { # event [hook-index] — the canonical Claude Code command
   jq -r --arg e "$1" --argjson i "${2:-0}" '.hooks[$e][0].hooks[$i].command' "$MANIFEST"
@@ -85,14 +86,19 @@ want_cmd() { printf 'r="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; %s' "$(codex_s
 # ═══ W — the wiring file ════════════════════════════════════════════════════
 if jq -e . "$WIRING" >/dev/null 2>&1; then ok; else bad W0-json "hooks-codex.json is not valid JSON"; fi
 
+# W0b: the envelope Codex actually parses — exactly {description, hooks} at top level; any other
+# key is the parse error the live install hit ("unknown field …, expected `description` or `hooks`")
+if [ "$(jq -r 'keys | sort | join(",")' "$WIRING")" = "description,hooks" ]; then ok
+else bad W0b-envelope "top level must be exactly {description, hooks}"; fi
+
 for ev in SessionStart UserPromptSubmit SubagentStart PreToolUse PostToolUse; do
-  n="$(jq -r --arg e "$ev" '.[$e] | length' "$WIRING" 2>/dev/null)"
+  n="$(jq -r --arg e "$ev" '.hooks[$e] | length' "$WIRING" 2>/dev/null)"
   if [ "$n" = "1" ]; then ok; else bad "W1-$ev" "want exactly one entry, got '$n'"; fi
 done
 
 # W2: same events as the canonical block — no fnd hook may exist on Claude Code and not on Codex.
 cev="$(jq -r '.hooks | keys[]' "$MANIFEST" | sort)"
-xev="$(jq -r 'keys[]' "$WIRING" | sort)"
+xev="$(jq -r '.hooks | keys[]' "$WIRING" | sort)"
 assert_eq W2-event-parity "$xev" "$cev"
 
 # W3: every shared command is the Claude command, verbatim, modulo the root expansion.
@@ -109,14 +115,14 @@ assert_eq W4-posttooluse "$(wcmd PostToolUse 0)" \
 
 # W5: every script the wiring names exists in the canonical hooks dir (single-copy: no forked
 # per-host copy of a guard or of the compressor).
-scripts="$(jq -r 'to_entries[] | .value[] | .hooks[] | .command' "$WIRING" | grep -oE 'hooks/[a-z0-9-]+\.(cjs|sh)' | sort -u)"
+scripts="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$WIRING" | grep -oE 'hooks/[a-z0-9-]+\.(cjs|sh)' | sort -u)"
 for s in $scripts; do
   if [ -f "$PLUG/$s" ]; then ok; else bad "W5-$s" "wiring names a file that does not exist"; fi
 done
 assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 5
 
 # W6: PreToolUse matcher — Codex regex, covering every spelling of the shell tool and nothing else.
-pm="$(jq -r '.PreToolUse[0].matcher' "$WIRING")"
+pm="$(jq -r '.hooks.PreToolUse[0].matcher' "$WIRING")"
 for t in Bash shell local_shell; do
   if printf '%s\n' "$t" | grep -Eq "$pm"; then ok; else bad "W6-$t" "PreToolUse matcher '$pm' misses the shell tool"; fi
 done
@@ -125,12 +131,12 @@ for t in Read Write mcp__plugin_fnd_atlassian__getJiraIssue; do
 done
 
 # W7: PostToolUse matcher — MCP tools only.
-qm="$(jq -r '.PostToolUse[0].matcher' "$WIRING")"
+qm="$(jq -r '.hooks.PostToolUse[0].matcher' "$WIRING")"
 if printf '%s\n' "mcp__plugin_fnd_atlassian__getJiraIssue" | grep -Eq "$qm"; then ok; else bad W7-mcp "PostToolUse matcher '$qm' misses an MCP tool"; fi
 if printf '%s\n' "Bash" | grep -Eq "$qm"; then bad W7-bash "PostToolUse matcher '$qm' matches Bash"; else ok; fi
 
 # W8: both guards stay wired, in the canonical order (attribution first, no-verify second).
-assert_eq W8-guard-count "$(jq -r '.PreToolUse[0].hooks | length' "$WIRING")" 2
+assert_eq W8-guard-count "$(jq -r '.hooks.PreToolUse[0].hooks | length' "$WIRING")" 2
 assert_contains W8-attr-first "$(wcmd PreToolUse 0)" "no-ai-attribution.sh"
 assert_contains W8-nv-second  "$(wcmd PreToolUse 1)" "no-verify-bypass.sh"
 
