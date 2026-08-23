@@ -197,10 +197,51 @@ MAIN="$(cd "$CDIR/.." 2>/dev/null && pwd -P || true)"
 [ -e "$MAIN/.git" ] || \
   fail "unsupported_layout main=$MAIN common_dir=$CDIR (the git dir does not sit beside a working tree — submodules and --separate-git-dir checkouts cannot host a sibling worktree)"
 
+# `.claude/tasks` is untracked in every checkout that has one, and the exclude line the
+# task-workspace reference documents (`.claude/tasks/`, trailing slash) matches directories only
+# — a symlink is not one. Unstamped, the ship run's "git add every new file" pass stages a link
+# holding an absolute path from one machine, or the whole shared workspace, into a client PR. No
+# trailing slash here, so one line covers both the link and the main checkout's real directory;
+# `info/exclude` lives in the COMMON git dir, so one stamp serves every worktree.
+ensure_tasks_excluded() { # $1 = a checkout to ask check-ignore in
+  if git -C "$1" check-ignore -q .claude/tasks 2>/dev/null; then return 0; fi
+  mkdir -p "$CDIR/info"
+  local exclude="$CDIR/info/exclude"
+  # An exclude file whose last byte is not a newline is legal and not rare (hand-edited ones
+  # often are), and appending blind would glue `.claude/tasks` onto the developer's last pattern:
+  # their rule breaks AND the workspace stays unexcluded. `$( )` strips trailing newlines, so a
+  # non-empty result means the last byte was not one.
+  if [ -s "$exclude" ] && [ -n "$(tail -c 1 "$exclude" 2>/dev/null)" ]; then
+    printf '\n' >> "$exclude"
+  fi
+  printf '.claude/tasks\n' >> "$exclude"
+}
+
 # One-time migration from the workspace's pre-rename home: existing per-ticket memory
 # follows the rename; never merged into a `.claude/tasks` that already exists.
 if [ -d "$MAIN/.claude/fnd" ] && [ ! -L "$MAIN/.claude/fnd" ] && [ ! -e "$MAIN/.claude/tasks" ]; then
   mv "$MAIN/.claude/fnd" "$MAIN/.claude/tasks"
+  # Worktrees created before the rename hold `<wt>/.claude/fnd -> <main>/.claude/fnd`, which the
+  # mv above turns into a dangling link: the session working there would silently start a second,
+  # private workspace and the two forks would never meet again. Each one is re-pointed under its
+  # new name — a fresh `<wt>/.claude/tasks` link, the legacy link dropped only once its
+  # replacement exists. A compat `fnd -> tasks` link in MAIN was the alternative and is not taken:
+  # `.claude/fnd` is not in the exclude line below, so it would be one more untracked link for a
+  # bulk `git add` to stage. The never-merge rule of the mv applies here too — a worktree that
+  # already has a real `.claude/tasks` is left exactly as it is.
+  git -C "$MAIN" worktree list --porcelain 2>/dev/null | while IFS= read -r wtline; do
+    case "$wtline" in 'worktree '*) ;; *) continue ;; esac
+    owt="${wtline#worktree }"
+    [ -L "$owt/.claude/fnd" ] || continue
+    [ ! -e "$owt/.claude/tasks" ] || continue
+    if ln -s "$MAIN/.claude/tasks" "$owt/.claude/tasks" 2>/dev/null; then
+      rm -f "$owt/.claude/fnd"
+    fi
+  done || true
+  # The migration also runs in --remove mode, where the create-mode stamp below never happens:
+  # a workspace renamed by a teardown and left unexcluded is one bulk `git add` away from a
+  # client PR. Stamped wherever the rename itself runs.
+  ensure_tasks_excluded "$MAIN"
 fi
 
 REPO="$(basename "$MAIN")"
@@ -542,24 +583,9 @@ elif [ -e "$LINK" ]; then
   fail "claude_tasks_not_a_symlink path=$LINK (a real directory is in the way — move it aside; the worktree has to share the main checkout's task workspaces)"
 fi
 ln -s "$MAIN/.claude/tasks" "$LINK"
-# The link is untracked, and the exclude line the task-workspace reference documents
-# (`.claude/tasks/`, trailing slash) matches directories only — a symlink is not one. Unstamped,
-# the ship run inside the worktree does its "git add every new file" pass and commits a link
-# holding an absolute path from one machine. No trailing slash here, so it covers both the
-# link and the main checkout's real directory; `info/exclude` lives in the common dir and is
-# shared by every worktree.
-if ! git -C "$WT" check-ignore -q .claude/tasks 2>/dev/null; then
-  mkdir -p "$CDIR/info"
-  EXCLUDE="$CDIR/info/exclude"
-  # An exclude file whose last byte is not a newline is legal and not rare (hand-edited ones
-  # often are), and appending blind would glue `.claude/tasks` onto the developer's last pattern:
-  # their rule breaks AND the link stays unexcluded. `$( )` strips trailing newlines, so a
-  # non-empty result means the last byte was not one.
-  if [ -s "$EXCLUDE" ] && [ -n "$(tail -c 1 "$EXCLUDE" 2>/dev/null)" ]; then
-    printf '\n' >> "$EXCLUDE"
-  fi
-  printf '.claude/tasks\n' >> "$EXCLUDE"
-fi
+# The new link is asked about in the WORKTREE — check-ignore answers per checkout, and this is
+# the one the ship run's `git add` pass will run in.
+ensure_tasks_excluded "$WT"
 
 SETTINGS=absent
 if [ -f "$WT/.claude/settings.local.json" ]; then SETTINGS=kept

@@ -3163,6 +3163,94 @@ if [ "$rc" -eq 0 ] && [ ! -e "$WTR/mig/theme/.claude/fnd" ] \
    && [ -L "$WTR/mig/theme-MIG-1/.claude/tasks" ]; then ok
 else bad W30-legacy-workspace-migrated "rc=$rc fnd=$(ls "$WTR/mig/theme/.claude" 2>&1 | tr '\n' ' ') out=$(tr '\n' ';' < "$O")"; fi
 
+# A fresh theme fixture per migration case: the rename runs once per checkout, so each case
+# needs its own main checkout to run it in.
+mk_mig_repo() { # <dir>
+  mkdir -p "$1"
+  wt_git init --bare -q "$1/origin.git"
+  wt_git init -q "$1/theme"
+  printf 'x\n' > "$1/theme/README.md"
+  wt_git -C "$1/theme" add -A
+  wt_git -C "$1/theme" commit -qm init
+  wt_git -C "$1/theme" remote add origin "$1/origin.git"
+  wt_git -C "$1/theme" push -qu origin develop
+}
+mig_run() { # <repo-dir> <args…>
+  (cd "$1/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+     "$BASH_BIN" "$WTS" "${@:2}") >"$O" 2>"$E"
+}
+
+# W30a: BOTH homes present — the new one is real content, and the migration may not merge into
+# it or overwrite it. The legacy directory stays where it is, untouched, for the developer.
+mk_mig_repo "$WTR/mig2"
+mkdir -p "$WTR/mig2/theme/.claude/fnd/OLD-1" "$WTR/mig2/theme/.claude/tasks/NEW-1"
+printf 'legacy\n' > "$WTR/mig2/theme/.claude/fnd/OLD-1/notes.md"
+printf 'current\n' > "$WTR/mig2/theme/.claude/tasks/NEW-1/notes.md"
+rc=0; mig_run "$WTR/mig2" MIG-2 || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'legacy' "$WTR/mig2/theme/.claude/fnd/OLD-1/notes.md" 2>/dev/null \
+   && grep -qx 'current' "$WTR/mig2/theme/.claude/tasks/NEW-1/notes.md" 2>/dev/null \
+   && [ ! -e "$WTR/mig2/theme/.claude/tasks/OLD-1" ]; then ok
+else bad W30a-no-merge "rc=$rc fnd=$(ls "$WTR/mig2/theme/.claude/fnd" 2>&1 | tr '\n' ' ') tasks=$(ls "$WTR/mig2/theme/.claude/tasks" 2>&1 | tr '\n' ' ')"; fi
+
+# W30b: a `.claude/fnd` that is already a SYMLINK is somebody's own wiring (or a worktree's link
+# into another checkout) — `mv` would move the link, not the workspace behind it.
+mk_mig_repo "$WTR/mig3"
+mkdir -p "$WTR/mig3/theme/.claude" "$WTR/mig3/elsewhere/MIG-3"
+printf 'elsewhere\n' > "$WTR/mig3/elsewhere/MIG-3/notes.md"
+ln -s "$WTR/mig3/elsewhere" "$WTR/mig3/theme/.claude/fnd"
+rc=0; mig_run "$WTR/mig3" MIG-3 || rc=$?
+if [ "$rc" -eq 0 ] && [ -L "$WTR/mig3/theme/.claude/fnd" ] \
+   && [ "$(readlink "$WTR/mig3/theme/.claude/fnd")" = "$WTR/mig3/elsewhere" ]; then ok
+else bad W30b-symlink-untouched "rc=$rc link=$(readlink "$WTR/mig3/theme/.claude/fnd" 2>&1)"; fi
+
+# W30c (bug): the migration runs in BOTH modes, but the exclude stamp used to run only in create
+# mode — a `--remove` that renamed the workspace left it untracked AND unignored, one bulk
+# `git add` away from a client PR. The teardown below is the only run that touches this checkout.
+mk_mig_repo "$WTR/mig4"
+rc=0; mig_run "$WTR/mig4" MIG-4 || rc=$?         # create the worktree first…
+# …then put the checkout back into its pre-rename shape (the state a worktree made by the older
+# script is torn down from) and drop the stamp the create run left behind
+mv "$WTR/mig4/theme/.claude/tasks" "$WTR/mig4/theme/.claude/fnd"
+mkdir -p "$WTR/mig4/theme/.claude/fnd/OLD-4"
+printf 'legacy\n' > "$WTR/mig4/theme/.claude/fnd/OLD-4/notes.md"
+rm -f "$WTR/mig4/theme/.git/info/exclude"
+rc2=0; mig_run "$WTR/mig4" --remove MIG-4 --force || rc2=$?
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] \
+   && grep -qx 'legacy' "$WTR/mig4/theme/.claude/tasks/OLD-4/notes.md" 2>/dev/null \
+   && grep -qx '\.claude/tasks' "$WTR/mig4/theme/.git/info/exclude" 2>/dev/null; then ok
+else bad W30c-remove-mode-exclude "rc=$rc rc2=$rc2 out=$(tr '\n' ';' < "$O") exclude=$(tr '\n' ';' < "$WTR/mig4/theme/.git/info/exclude" 2>&1)"; fi
+
+# W30d (bug): worktrees created BEFORE the rename hold `<wt>/.claude/fnd -> <main>/.claude/fnd`.
+# The `mv` leaves every one of them dangling, so the session working there quietly starts its own
+# private workspace and the two forks of the task memory never meet again. Each link is re-pointed
+# under the new name instead, and the legacy one dropped only once its replacement exists.
+mk_mig_repo "$WTR/mig5"
+mkdir -p "$WTR/mig5/theme/.claude/fnd/OLD-5"
+printf 'legacy\n' > "$WTR/mig5/theme/.claude/fnd/OLD-5/notes.md"
+wt_git -C "$WTR/mig5/theme" worktree add -q -b feat/pre-rename "$WTR/mig5/theme-pre" >/dev/null 2>&1
+mkdir -p "$WTR/mig5/theme-pre/.claude"
+ln -s "$WTR/mig5/theme/.claude/fnd" "$WTR/mig5/theme-pre/.claude/fnd"
+rc=0; mig_run "$WTR/mig5" MIG-5 || rc=$?
+if [ "$rc" -eq 0 ] && [ -L "$WTR/mig5/theme-pre/.claude/tasks" ] \
+   && [ ! -e "$WTR/mig5/theme-pre/.claude/fnd" ] \
+   && grep -qx 'legacy' "$WTR/mig5/theme-pre/.claude/tasks/OLD-5/notes.md" 2>/dev/null; then ok
+else bad W30d-worktree-link-repointed "rc=$rc pre=$(ls -l "$WTR/mig5/theme-pre/.claude" 2>&1 | tr '\n' ';')"; fi
+
+# W30e: …and a worktree that ALREADY has a real `.claude/tasks` keeps it — the never-merge rule
+# of the rename applies to the re-point too.
+mk_mig_repo "$WTR/mig6"
+mkdir -p "$WTR/mig6/theme/.claude/fnd/OLD-6"
+printf 'legacy\n' > "$WTR/mig6/theme/.claude/fnd/OLD-6/notes.md"
+wt_git -C "$WTR/mig6/theme" worktree add -q -b feat/pre-rename "$WTR/mig6/theme-pre" >/dev/null 2>&1
+mkdir -p "$WTR/mig6/theme-pre/.claude/tasks/OWN-6"
+printf 'own\n' > "$WTR/mig6/theme-pre/.claude/tasks/OWN-6/notes.md"
+ln -s "$WTR/mig6/theme/.claude/fnd" "$WTR/mig6/theme-pre/.claude/fnd"
+rc=0; mig_run "$WTR/mig6" MIG-6 || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -L "$WTR/mig6/theme-pre/.claude/tasks" ] \
+   && grep -qx 'own' "$WTR/mig6/theme-pre/.claude/tasks/OWN-6/notes.md" 2>/dev/null \
+   && [ -L "$WTR/mig6/theme-pre/.claude/fnd" ]; then ok
+else bad W30e-worktree-own-tasks-kept "rc=$rc pre=$(ls -l "$WTR/mig6/theme-pre/.claude" 2>&1 | tr '\n' ';')"; fi
+
 # ═══ EV — domaine env files: scripts/env-file.cjs loader + scripts/domaine-env.cjs CLI ═══
 EVR="$TMP/env"; mkdir -p "$EVR/cfg" "$EVR/repo/sub"
 git init -q "$EVR/repo"
