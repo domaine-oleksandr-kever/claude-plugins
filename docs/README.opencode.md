@@ -38,10 +38,12 @@ The bootstrap one-liner clones this repo to a permanent location (default
 `~/tools/claude-plugins`; `--dir <path>` to change) and runs the OpenCode installer inside it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets opencode
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets opencode --yes
 ```
 
-The clone is not a temporary download — the symlinks point into it, so this folder **is** the
+`--yes` is what makes it one command: it accepts the default destination instead of prompting
+for one when a terminal is attached (piped runs never prompt). The clone is not a temporary
+download — the symlinks point into it, so this folder **is** the
 installed plugin and deleting it uninstalls everything; leave it where the bootstrap put it.
 The three config pastes (steps 3–5) are still yours — no script edits your `opencode.json`.
 

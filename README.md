@@ -62,6 +62,7 @@ in its own subfolder under `plugins/`:
 │       └── opencode/             # OpenCode adapter + GENERATED model-profile examples
 │                                 #   and mcp-fragment.json
 ├── scripts/
+│   ├── bootstrap.sh              # one-command clone + per-host install / update / uninstall
 │   └── install.sh                # Cursor / OpenCode / Codex-subagent installer
 ├── docs/                         # per-host quickstarts (install · update · what differs)
 │   ├── README.cursor.md
@@ -71,6 +72,7 @@ in its own subfolder under `plugins/`:
 │   ├── no-verify-bypass-matrix.sh   #  FP/FN contract of the two commit guards
 │   ├── hooks-sim.sh                 #  SessionStart / monitor-gate / context-stats sims
 │   ├── scripts-sim.sh               #  runner + theme-json + converter-caller sims
+│   ├── bootstrap-sim.sh             #  bootstrap: arg gates, clone, pty picker, uninstall
 │   ├── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
 │   ├── json-slim-fixtures.mjs       #  mcp-slim pipeline + CLI + hook fixtures
 │   ├── readme-checks.sh             #  README/docs: commands, paths, links, version markers
@@ -146,8 +148,9 @@ clone, and `--copy` tells `install.sh` to copy the plugin instead of symlinking 
 nowhere to prompt — CI, or output piped to a file — needs the hosts spelled out instead:
 `… | bash -s -- --targets cursor,opencode --yes`.
 
-**Update** — re-running it from the clone *is* the update: `install.sh` pulls ff-only and relinks
-(with `--copy`, the copies refresh only on such a re-run):
+**Update** — re-running it from the clone *is* the update: `install.sh` pulls ff-only and relinks.
+A `--copy` install refreshes only on such a re-run, and only with `--copy` passed **again** —
+bootstrap does not remember the mode, and an update without it converts the install to symlinks:
 
 ```bash
 ./scripts/bootstrap.sh --targets cursor,opencode --yes

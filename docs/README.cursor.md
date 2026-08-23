@@ -26,11 +26,13 @@ The bootstrap one-liner clones this repo to a permanent location (default
 `~/tools/claude-plugins`; `--dir <path>` to change) and runs the Cursor installer inside it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets cursor
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets cursor --yes
 ```
 
-The clone is not a temporary download — the symlink points into it, so this folder **is** the
-installed plugin and deleting it uninstalls everything; leave it where the bootstrap put it.
+`--yes` is what makes it one command: it accepts the default destination instead of prompting
+for one when a terminal is attached (piped runs never prompt). The clone is not a temporary
+download — the symlink points into it, so this folder **is** the installed plugin and deleting
+it uninstalls everything; leave it where the bootstrap put it.
 Already have a clone, or prefer the steps by hand? The equivalent is:
 
 ```bash
@@ -52,6 +54,11 @@ PASS  install:cursor         symlink install, 1 entry(ies) live (root: ~/.cursor
 
 Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target cursor`.
 
+`--copy` installs a real copy instead of the symlink (no-symlink environments); such an install
+does **not** follow `git pull` — re-run `./scripts/install.sh --target cursor --copy` to refresh
+it. `./scripts/install.sh --target cursor --uninstall` removes only the entries the installer
+created.
+
 ### 2. Reload the Cursor window
 
 Command Palette (`Cmd+Shift+P`) → *Developer: Reload Window*. The manifest, the hooks wiring
@@ -65,11 +72,6 @@ use.
 subagent spawning, the commit guards firing, the session conventions arriving. Run it after
 installing or updating, not every session (`/preflight-checks` owns the recurring per-project
 role).
-
-`--copy` installs a real copy instead of the symlink (no-symlink environments); such an install
-does **not** follow `git pull` — re-run `./scripts/install.sh --target cursor --copy` to refresh
-it. `./scripts/install.sh --target cursor --uninstall` removes only the entries the installer
-created.
 
 ### Alternative: marketplace route — currently degraded
 

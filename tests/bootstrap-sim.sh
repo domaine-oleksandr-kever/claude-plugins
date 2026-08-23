@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Simulation harness for scripts/bootstrap.sh (one-command install, M2).
+# Simulation harness for scripts/bootstrap.sh (one-command install).
 # Hermetic: every case runs a COPY of bootstrap whose REPO_URL points at a local bare origin,
 # against a throwaway $HOME, with a stub scripts/install.sh that records its argv and a `git`
 # shim that records every invocation — no network, no writes outside $TMP, and the piped case
@@ -209,6 +209,29 @@ run "$TMP/h-args" "$BOOT" --dir
 if [ "$RC" -eq 2 ] && grep -q -- "--dir needs a value" "$E"; then ok
 else bad A4-dir-needs-value "rc=$RC err=$(head -c 160 "$E")"; fi
 
+# A following flag is not a --dir value: `--dir --yes` (a dropped path) must refuse up front,
+# not swallow --yes as the destination and die later in dirname/mkdir with no bootstrap error.
+run "$TMP/h-args" "$BOOT" --targets cursor --dir --yes
+if [ "$RC" -eq 2 ] && grep -q -- "--dir needs a value" "$E" && [ "$(argv_count)" -eq 0 ] \
+   && ! grep -q '^clone' "$GIT_LOG"; then ok
+else bad A10-dir-flag-as-value "rc=$RC err=$(head -c 160 "$E")"; fi
+
+# The HOME-free paths must stay HOME-free under `set -u`: a claude-only run touches no
+# filesystem, so an unset HOME (cron, containers) is no reason to die at line 1.
+: > "$STUB_LOG"; : > "$GIT_LOG"; RC=0
+( cd "$TMP" && env -u HOME PATH="$SHIM:$PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
+    "$BASH_BIN" "$BOOT" --targets claude ) >"$O" 2>"$E" || RC=$?
+if [ "$RC" -eq 0 ] && grep -qF '/plugin install fnd@domaine' "$O"; then ok
+else bad H1-no-home-claude-only "rc=$RC err=$(head -c 200 "$E")"; fi
+
+# …while a target that needs the default destination has nowhere to put it: a named refusal,
+# not bash's unbound-variable crash and not a clone into "/tools".
+: > "$STUB_LOG"; : > "$GIT_LOG"; RC=0
+( cd "$TMP" && env -u HOME PATH="$SHIM:$PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
+    "$BASH_BIN" "$BOOT" --targets cursor --yes ) >"$O" 2>"$E" || RC=$?
+if [ "$RC" -eq 2 ] && grep -q "HOME is unset" "$E" && ! grep -q '^clone' "$GIT_LOG"; then ok
+else bad H2-no-home-needs-dir "rc=$RC err=$(head -c 200 "$E")"; fi
+
 run "$TMP/h-args" "$BOOT" --targets vscode --yes
 if [ "$RC" -eq 2 ] && grep -q "unknown target 'vscode'" "$E"; then ok
 else bad A5-unknown-target "rc=$RC err=$(head -c 160 "$E")"; fi
@@ -216,7 +239,7 @@ if [ ! -e "$TMP/h-args/tools" ]; then ok
 else bad A6-unknown-target-no-clone "a refused run created the default clone dir"; fi
 
 # An explicitly empty --targets is a typo — an unset variable in someone's wrapper — and the one
-# thing it cannot mean is "every host". Paired with --yes it used to mean exactly that, silently.
+# thing it cannot mean is "every host", --yes or not.
 run "$TMP/h-args" "$BOOT" --targets "" --yes
 if [ "$RC" -eq 2 ] && grep -q "no targets selected" "$E" && [ ! -e "$TMP/h-args/tools" ]; then ok
 else bad A7-empty-targets "rc=$RC err=$(head -c 160 "$E")"; fi
@@ -311,6 +334,17 @@ run "$TMP/h7" "$FIXBOOT" --targets cursor --copy
 if [ "$RC" -eq 0 ] && [ "$(argv_line 1)" = "--target cursor --copy" ]; then ok
 else bad C9-copy-passthrough "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG")"; fi
 
+# In-checkout detection must hold when scripts/ is itself a symlink (shared-tooling layouts):
+# the -d probe and the recorded path resolve through the same logical cd, so bootstrap installs
+# the tree the developer ran from instead of cloning a second copy.
+SYMCO="$TMP/co-sym"; mkcheckout "$SYMCO"
+mv "$SYMCO/scripts" "$TMP/shared-scripts"
+ln -s "$TMP/shared-scripts" "$SYMCO/scripts"
+run "$TMP/h7b" "$SYMCO/scripts/bootstrap.sh" --targets cursor
+if [ "$RC" -eq 0 ] && [ "$(argv_line 1)" = "--target cursor" ] && grep -q "from $SYMCO" "$O" \
+   && ! grep -q '^clone' "$GIT_LOG" && [ ! -e "$TMP/h7b/tools" ]; then ok
+else bad C10-symlinked-scripts-dir "rc=$RC out=$(tr '\n' ';' < "$O") git=$(tr '\n' ';' < "$GIT_LOG")"; fi
+
 # ------------------------------------------------------------------------- the claude target --
 # Claude Code installs from inside a live session and cannot be driven from outside, so this
 # target prints and says so. The four commands are the README block, verbatim.
@@ -377,12 +411,12 @@ else bad P4-report-smoke-test "out=$(tr '\n' ';' < "$O")"; fi
 # that skips it drops the only instruction that target ever produces.
 if grep -q "^claude PRINTED (run the slash commands in a session)$" "$O" \
    && grep -q "Claude Code: run the four slash commands printed above in a live session" "$O"; then ok
-else bad P6-report-claude-rows "out=$(tr '\n' ';' < "$O")"; fi
+else bad P5-report-claude-rows "out=$(tr '\n' ';' < "$O")"; fi
 
 # a host that was not selected contributes no leftovers
 run "$TMP/h11" "$FIXBOOT" --targets codex
 if [ "$RC" -eq 0 ] && ! grep -q "docs/README.opencode.md" "$O" && ! grep -q "Reload Window" "$O"; then ok
-else bad P5-report-only-selected "out=$(tr '\n' ';' < "$O")"; fi
+else bad P6-report-only-selected "out=$(tr '\n' ';' < "$O")"; fi
 
 # ------------------------------------------------------------------------------ the clone ---
 if [ -n "$REAL_GIT" ]; then
@@ -434,8 +468,7 @@ if [ -n "$REAL_GIT" ]; then
   else bad G6-git-but-foreign "rc=$RC err=$(head -c 200 "$E")"; fi
 
   # --yes on its own is the whole non-interactive contract that usage promises: the default
-  # destination AND every host. Only --yes-with-targets was covered before, which is the one
-  # spelling that reaches neither half of that promise.
+  # destination AND every host.
   run "$TMP/h15b" "$BOOT" --yes
   if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 3 ] \
      && grep -q '^--target cursor$' "$STUB_LOG" && grep -q '^--target codex$' "$STUB_LOG" \
@@ -591,10 +624,10 @@ else bad U8-report-marketplace-ui-only "out=$(tr '\n' ';' < "$O")"; fi
 # the destination is part of the report on every run that used one — a bootstrap whose clone
 # landed somewhere the developer cannot name is a checkout they will clone a second time
 if grep -q "^checkout $FIX$" "$O"; then ok
-else bad U10-report-names-checkout "out=$(tr '\n' ';' < "$O")"; fi
+else bad U9-report-names-checkout "out=$(tr '\n' ';' < "$O")"; fi
 
 if grep -q "^cursor OK$" "$O" && ! grep -q "run /smoke-test once in a live session" "$O"; then ok
-else bad U9-uninstall-report-shape "out=$(tr '\n' ';' < "$O")"; fi
+else bad U10-uninstall-report-shape "out=$(tr '\n' ';' < "$O")"; fi
 
 if [ "$PTY_SKIPPED" = "yes" ]; then
   echo "bootstrap-sim: NOTE — no usable script(1), the 5 terminal-prompt cases (Y1-Y5) did not run" >&2

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fnd bootstrap — one command from a clean machine to an installed plugin
-# (BOOTSTRAP-PLAN.md § Shape decision: the rustup-style one-liner, NOT a globally registered
-# CLI, so there is exactly one distribution channel and it is this repo).
+# (shape decision: the rustup-style one-liner, NOT a globally registered CLI, so there is
+# exactly one distribution channel and it is this repo).
 # Two invocation modes:
 #   piped   curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash
 #           (flags: `| bash -s -- --targets cursor,opencode --yes`)
@@ -17,7 +17,9 @@ set -euo pipefail
 # The one hardcoded fact a piped run cannot discover: where the plugin comes from. Kept as a
 # single unconditional assignment so tests can retarget it at a local bare origin.
 REPO_URL="https://github.com/domaine-oleksandr-kever/claude-plugins.git"
-DEFAULT_DIR="$HOME/tools/claude-plugins"
+# `${HOME:-}` so the HOME-free paths (--help, a claude-only run) survive `set -u`; every use
+# that actually needs the default destination re-checks HOME first.
+DEFAULT_DIR="${HOME:-}/tools/claude-plugins"
 
 DIR=""
 TARGETS=""
@@ -50,7 +52,13 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dir) [ $# -ge 2 ] || { echo "error: --dir needs a value" >&2; exit 2; }; DIR="$2"; shift 2 ;;
+    # A following flag is not a value: `--dir --yes` must refuse, not clone into "./--yes"
+    # (the `--dir=<path>` form is the escape hatch for a path that really starts with `-`).
+    --dir)
+      if [ $# -lt 2 ] || [ "${2#-}" != "$2" ]; then
+        echo "error: --dir needs a value (for a path starting with '-', use --dir=<path>)" >&2; exit 2
+      fi
+      DIR="$2"; shift 2 ;;
     --dir=*) DIR="${1#--dir=}"; shift ;;
     # --target is the spelling install.sh uses, so people type it here too; both take the csv
     --targets|--target) [ $# -ge 2 ] || { echo "error: $1 needs a value" >&2; exit 2; }; TARGETS="$2"; TARGETS_SET="yes"; shift 2 ;;
@@ -97,8 +105,8 @@ ask() {
 # `~someone` without eval, so that form is refused rather than taken literally.
 normalize_dir() {
   case "$DIR" in
-    "~") DIR="$HOME" ;;
-    "~/"*) DIR="$HOME${DIR#\~}" ;;
+    "~") DIR="${HOME:?cannot expand '~' with HOME unset — write the path out in full}" ;;
+    "~/"*) DIR="${HOME:?cannot expand '~' with HOME unset — write the path out in full}${DIR#\~}" ;;
     "~"*) echo "error: cannot expand '$DIR' — write the path out in full" >&2; exit 2 ;;
   esac
 }
@@ -111,8 +119,12 @@ IN_CHECKOUT=""
 SELF="${BASH_SOURCE[0]:-}"
 if [ -n "$SELF" ] && [ -f "$SELF" ]; then
   SELF_DIR="$(cd "$(dirname "$SELF")" && pwd)"
-  if [ -d "$SELF_DIR/../plugins/fnd" ]; then
-    IN_CHECKOUT="$(cd "$SELF_DIR/.." && pwd)"
+  # Probe and record through the same logical `cd`: mixing a kernel-resolved `-d` test with a
+  # lexical pwd would disagree when scripts/ is itself a symlink, and bootstrap would clone a
+  # second copy instead of installing the tree the developer ran from.
+  CHECKOUT_CAND="$(cd "$SELF_DIR/.." && pwd)"
+  if [ -d "$CHECKOUT_CAND/plugins/fnd" ]; then
+    IN_CHECKOUT="$CHECKOUT_CAND"
   fi
 fi
 
@@ -203,6 +215,7 @@ for target in $TARGET_LIST; do
 done
 
 if [ "$NEEDS_CHECKOUT" = "yes" ] && [ -z "$DIR" ]; then
+  [ -n "${HOME:-}" ] || { echo "error: HOME is unset and no --dir given — pass --dir <path>" >&2; exit 2; }
   DIR="$DEFAULT_DIR"
   if [ "$ACTION" = "install" ] && tty_available; then
     ask "Clone destination [$DIR]: " "$DIR"

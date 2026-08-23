@@ -119,7 +119,8 @@ const MODEL_TABLE = {
   'figma-reader': { tier: 'routine' },
   'jira-reader': { tier: 'routine' },
   'jira-writer': { tier: 'routine' },
-  'theme-explorer': { tier: 'standard', cursorModel: 'composer-2.5[fast=false]', cursorEscalate: 'claude-sonnet-5' },
+  'theme-explorer': { tier: 'standard', cursorModel: 'composer-2.5[fast=false]', cursorEscalate: 'claude-sonnet-5',
+    cursorNote: "scoped task recon sits at the guidelines' Composer bar, not the tier's Sonnet bar" },
 };
 
 /*
@@ -162,6 +163,7 @@ function tierOf(name) {
     : tier.cursor.model;
   return {
     tier: entry.tier,
+    cursorNote: entry.cursorNote,
     cursor: { model: cursorModel, escalate },
     codex: { model: tier.codex.model, effort: tier.codex.effort },
   };
@@ -510,13 +512,18 @@ function collectMcpServers() {
 
 function cursorAgent(agent) {
   const { model, escalate } = agent.model.cursor;
+  const tierPin = TIERS[agent.model.tier].cursor.model;
   const lines = [
     '---',
     '# ' + GEN_NOTE,
     '# source: agents/' + agent.file,
-    '# model: pinned per references/host-model-map.md — routine work on Cursor\'s cheapest model,',
-    '#        reasoning tiers on claude-sonnet-5 (Domaine guidelines). Ids verified 2026-08-23.',
+    '# model: pinned per references/host-model-map.md — the `' + agent.model.tier + '` tier pin' +
+      (model === tierPin ? '' : ', overridden per-agent'),
+    '#        (Domaine guidelines). Ids verified 2026-08-23.',
   ];
+  if (agent.model.cursorNote) {
+    lines.push('# override: ' + agent.model.cursorNote + ' — the tier still governs its Codex pin');
+  }
   if (escalate) lines.push('# escalate: ' + escalate + ' (next rung of the ladder — the pin is where it starts)');
   lines.push('name: ' + agent.name);
   lines.push('description: ' + yamlStr(agent.description));
@@ -627,15 +634,24 @@ function hostModelMap(agents) {
   for (const t of Object.keys(TIERS)) {
     lines.push('| `' + t + '` — ' + TIERS[t].label.split('— ')[1] + ' | ' + cursorCell(TIERS[t].cursor) + ' | ' + codexCell(t) + ' |');
   }
+  const overridden = Object.keys(MODEL_TABLE)
+    .filter((n) => Object.prototype.hasOwnProperty.call(MODEL_TABLE[n], 'cursorModel'));
   lines.push(
     '',
     'Cursor pins every agent (verified against cursor.com docs 2026-08-23: frontmatter takes ' +
       'only `inherit` or an exact versioned id — no family aliases, no `auto`): the routine tier ' +
       "pins Cursor's cheapest model — `composer-2.5[fast=false]`, the standard variant, since Fast " +
-      'is the pricier default — and every reasoning tier pins `claude-sonnet-5`, where the Domaine ' +
+      'is the pricier default — and the reasoning tiers pin `claude-sonnet-5`, where the Domaine ' +
       'model-selection guidelines start deep PR review (they also bar Opus from standard reviews, ' +
       'so the pin is both a floor under cheap sessions and the guidelines\' ceiling for routine ' +
-      'gates). The escalate column is the next rung of the ladder, taken after a failed attempt ' +
+      'gates).' +
+      (overridden.length
+        ? ' Per-agent overrides in the generator\'s tier table move ' +
+          overridden.map((n) => '`' + n + '`').join(', ') +
+          ' off its tier\'s Cursor pin (rationale in that agent\'s generated header) — the ' +
+          'Subagents table below is authoritative per agent.'
+        : '') +
+      ' The escalate column is the next rung of the ladder, taken after a failed attempt ' +
       'or at the guidelines\' high-risk bar, never as a starting point. Caveat: Cursor currently ignores `model:` ' +
       'frontmatter on marketplace-installed plugin agents (staff-acknowledged bug) — pins apply on ' +
       'the local-symlink install and once that is fixed.',

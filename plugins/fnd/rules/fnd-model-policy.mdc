@@ -12,7 +12,7 @@ Ladder: **Composer 2.5 → Claude Sonnet → GPT-5.5 → Claude Opus** — tier 
 versions (version gone → newest of the same family and tier). Start at the cheapest tier
 that can finish reliably; skipping a rung is fine when the task type warrants it.
 
-| fnd work | Start → escalate |
+| fnd work | Model |
 |---|---|
 | commit, create-pull-request, write-steps-to-test | Composer → Sonnet |
 | update-translations, fix-breaking-changes | Composer → Sonnet |
@@ -23,12 +23,12 @@ that can finish reliably; skipping a rung is fine when the task type warrants it
 | develop: planning phase, medium feature across files | Sonnet in Plan Mode → GPT-5.5 |
 | fix-accessibility-issue, clear AC | Composer → Sonnet |
 | qa-feature-or-fix, pre-commit-review | Sonnet → GPT-5.5 |
-| bug-hunter agent | pinned `claude-sonnet-5`; Opus by hand at the high-risk bar |
-| change-reviewer agent | pinned `claude-sonnet-5` |
-| theme-explorer agent | pinned `composer-2.5[fast=false]` |
+| bug-hunter agent, change-reviewer | pinned Sonnet; Opus by hand at the high-risk bar |
+| theme-explorer agent | pinned Composer |
 | ship conductor | Sonnet; Opus only at the doc's "exceptional" bar |
 
-Pins are frontmatter (`references/host-model-map.md`); the session picker skips them.
+Exact pinned ids live in `references/host-model-map.md` in the fnd plugin root — never in this
+rule; the session picker skips pinned agents.
 
 ### Avoid — both directions
 - **Opus on routine work**: explaining files, known-repro bugs, CSS, Liquid sections, lint/type
