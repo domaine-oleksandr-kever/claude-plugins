@@ -34,13 +34,6 @@ Skip anything you already have:
 codex plugin marketplace add domaine-oleksandr-kever/claude-plugins
 ```
 
-While the multi-harness port is on its branch, add the branch ref instead — the plain form
-above is the release form:
-
-```text
-codex plugin marketplace add domaine-oleksandr-kever/claude-plugins --ref harness-port
-```
-
 Codex reads `.claude-plugin/marketplace.json` as a legacy-compatible marketplace location, so
 this repo is already a Codex marketplace — nothing separate is published. Then run `/plugins`
 in Codex, find **fnd**, and install it.
@@ -75,7 +68,6 @@ prompt-JSON guard, mcp-slim's spill-and-stub, and **both git guards**, including
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins
-git checkout harness-port   # only while the port is unreleased — the branch the --ref above named
 ./scripts/install.sh --target codex
 ```
 

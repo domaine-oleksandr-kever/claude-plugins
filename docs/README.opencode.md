@@ -42,14 +42,6 @@ git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins
 ```
 
-While the multi-harness port is unreleased, its content lives on the `harness-port` branch —
-check it out before installing (once the port merges, `main` is the branch and this step
-disappears):
-
-```bash
-git checkout harness-port
-```
-
 ### 2. Run the installer
 
 ```bash

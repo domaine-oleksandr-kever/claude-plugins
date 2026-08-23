@@ -38,30 +38,13 @@ which also means **unpushed commits are invisible** on this route, exactly as on
 `node plugins/fnd/scripts/doctor.cjs --target cursor` recognizes the result as
 `marketplace cache install`. Skip to step 3 (reload) and step 4 (smoke test).
 
-The same registration is scriptable through the Cursor CLI (`curl https://cursor.com/install
--fsS | bash` installs the `agent` binary). First time on a machine, sign in before anything
-else — the plugin commands talk to your Cursor account and fail with an auth error until then:
+**Uninstalling** happens on the same screen: the fnd card's `…` menu → Uninstall in
+Customize → Plugins; a stale or duplicate marketplace entry is removed there too. Registering
+a marketplace does NOT install its plugins, and removing a marketplace does not uninstall an
+already-installed plugin.
 
-```bash
-agent login                                   # first run only: browser sign-in; check with `agent status`
-agent plugin marketplace add https://github.com/domaine-oleksandr-kever/claude-plugins --git-ref harness-port
-agent plugin marketplace list --format json   # list is read-only — it changes nothing
-agent plugin marketplace update <name>        # re-index from the git repo, picks up new commits
-agent plugin marketplace remove <name-or-url> # unregister a marketplace (junk/duplicate entries included)
-```
-
-The CLI manages **marketplaces only** — `agent plugin` has no install/uninstall subcommands
-(staff-confirmed; the marketplace verbs still earn their keep as the scriptable half:
-registration, re-index after a push, cleanup of stale entries). Installing the plugin itself
-takes one interactive step, with or without the editor:
-
-- terminal: run `agent`, type `/plugins`, pick the fnd card — the same picker in the TUI;
-  installs sync at user scope, so the result shows up in the editor too
-- editor: press **Add** on the fnd card in Customize → Plugins, or `/add-plugin` in a chat
-
-**Uninstalling** is interactive the same way: the fnd card's `…` menu → Uninstall (TUI
-`/plugins` or Customize → Plugins). Registering a marketplace does NOT install its plugins,
-and removing a marketplace does not uninstall an already-installed plugin.
+This route is editor-UI only, on purpose: the Cursor CLI has no plugin install/uninstall
+commands (staff-confirmed), so anything scripted ends in workarounds — stay in the editor.
 
 **Pick one route per machine.** A marketplace install and a local-checkout install are two
 independent plugin copies — with both present, both load: duplicate skills and agents reach the
@@ -77,14 +60,6 @@ permanent (`~/tools/`, not `~/Downloads/`):
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
 cd claude-plugins
-```
-
-While the multi-harness port is unreleased, its content lives on the `harness-port` branch —
-check it out before installing (once the port merges, `main` is the branch and this step
-disappears):
-
-```bash
-git checkout harness-port
 ```
 
 ### 2. Run the installer

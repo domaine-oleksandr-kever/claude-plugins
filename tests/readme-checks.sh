@@ -33,6 +33,11 @@ has() {
   if grep -qF -- "$2" "$1"; then ok; else bad "$3" "not found in ${1#$ROOT/}: '$2'"; fi
 }
 
+# lacks <file> <literal> — fixed-string ABSENCE, for content the docs must not carry
+lacks() {
+  if grep -qF -- "$2" "$1"; then bad "$3" "must not appear in ${1#$ROOT/}: '$2'"; else ok; fi
+}
+
 DOCS=""
 for f in "$ROOT"/docs/README.*.md; do
   [ -f "$f" ] || continue
@@ -70,11 +75,12 @@ else bad install-codex-slug "README's codex marketplace command does not name $S
 # Per-host docs: the same command, plus the walkthrough steps that only exist there.
 has "$ROOT/docs/README.cursor.md" './scripts/install.sh --target cursor' cursor-doc-install
 has "$ROOT/docs/README.cursor.md" '/smoke-test' cursor-doc-verify
-# 2026-08-23 research: CLI marketplace route + the hybrid model policy (cheap pin / inherit)
-has "$ROOT/docs/README.cursor.md" 'agent plugin marketplace add' cursor-doc-cli-route
-has "$ROOT/docs/README.cursor.md" 'agent login' cursor-doc-cli-login
-has "$ROOT/docs/README.cursor.md" 'agent plugin marketplace remove' cursor-doc-cli-remove
-has "$ROOT/docs/README.cursor.md" 'type `/plugins`' cursor-doc-tui-install
+# 2026-08-23 owner decision: the Cursor install story is editor-UI only — the CLI has no
+# plugin install/uninstall verbs, so a scripted route is workarounds; no `agent` command
+# lines may appear in the doc (the marketplace-add UI step and the hybrid model policy stay)
+has "$ROOT/docs/README.cursor.md" 'Add Marketplace' cursor-doc-marketplace-ui
+lacks "$ROOT/docs/README.cursor.md" 'agent plugin marketplace' cursor-doc-no-cli-route
+lacks "$ROOT/docs/README.cursor.md" 'agent login' cursor-doc-no-cli-login
 has "$ROOT/plugins/fnd/references/host-model-map.md" 'composer-2.5[fast=false]' cursor-hybrid-pin
 has "$ROOT/docs/README.opencode.md" './scripts/install.sh --target opencode' opencode-doc-install
 has "$ROOT/docs/README.opencode.md" '/smoke-test' opencode-doc-verify
@@ -84,12 +90,18 @@ has "$ROOT/docs/README.opencode.md" '/smoke-test' opencode-doc-verify
 has "$ROOT/docs/README.opencode.md" 'plugins/fnd/hooks/comment-discipline.md' opencode-doc-statics-paste
 has "$ROOT/plugins/fnd/references/smoke-test-checks.md" 'docs/README.opencode.md' smoke-row6-opencode-remediation
 has "$ROOT/docs/README.codex.md" "codex plugin marketplace add $SLUG" codex-doc-marketplace
-has "$ROOT/docs/README.codex.md" '--ref harness-port' codex-doc-branch-ref
 has "$ROOT/docs/README.codex.md" '/plugins' codex-doc-plugins-browser
 has "$ROOT/docs/README.codex.md" 'hooks = true' codex-doc-features-gate
 has "$ROOT/docs/README.codex.md" '/hooks' codex-doc-trust-review
 has "$ROOT/docs/README.codex.md" './scripts/install.sh --target codex' codex-doc-agents-link
 has "$ROOT/docs/README.codex.md" '$smoke-test' codex-doc-verify
+
+# Release form: no doc may point a user at the harness-port work branch — every install ref
+# is branch-free (main) so the docs survive the merge without another pass.
+for f in "$README" "$ROOT"/docs/README.*.md; do
+  [ -f "$f" ] || continue
+  lacks "$f" 'harness-port' "no-work-branch-${f##*/}"
+done
 
 # Update stories: the exact update command per host, and the caveats a user cannot infer.
 has "$README" 'codex plugin marketplace upgrade' update-codex
