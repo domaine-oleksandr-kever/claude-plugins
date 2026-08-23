@@ -134,6 +134,34 @@ which branch to check out), through every config paste, to the smoke test. If yo
 installing for the first time, go straight to your host's doc and follow it top to bottom; the
 sections below the table are the same story compressed for someone who has done it before.
 
+**Fast path — one command.** On a clean machine, `scripts/bootstrap.sh` does the clone, asks which
+hosts to install for, runs `install.sh` for each, and prints what is left to do by hand:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash
+```
+
+It clones into `~/tools/claude-plugins` and picks hosts interactively; `--dir <path>` moves the
+clone, and `--copy` tells `install.sh` to copy the plugin instead of symlinking it. A run with
+nowhere to prompt — CI, or output piped to a file — needs the hosts spelled out instead:
+`… | bash -s -- --targets cursor,opencode --yes`.
+
+**Update** — re-running it from the clone *is* the update: `install.sh` pulls ff-only and relinks
+(with `--copy`, the copies refresh only on such a re-run):
+
+```bash
+./scripts/bootstrap.sh --targets cursor,opencode --yes
+```
+
+**Uninstall** — also from the clone:
+
+```bash
+./scripts/bootstrap.sh --targets cursor,opencode --uninstall
+```
+
+That removes only what `install.sh` created and keeps the clone. The per-host walkthroughs below
+remain the full story — the fast path is those same steps with the typing removed.
+
 | Host | Install | Verify | Details |
 |---|---|---|---|
 | Claude Code | `/plugin marketplace add …` + `/plugin install fnd@domaine` | `/fnd:smoke-test` | below |

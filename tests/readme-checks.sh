@@ -72,6 +72,35 @@ SLUG="domaine-oleksandr-kever/claude-plugins"
 if grep -qF "codex plugin marketplace add $SLUG" "$README"; then ok
 else bad install-codex-slug "README's codex marketplace command does not name $SLUG"; fi
 
+# The bootstrap one-liner is a URL a reader pastes into a shell: it must name this repo's slug,
+# the `main` branch and the script's real path, or it fetches a 404 with no way to tell why.
+# All three lifecycle forms belong to that same block: an install one-liner whose update and undo
+# live 200 lines away, under a different script's name, is how a machine ends up with a stale
+# link tree or two competing fnd routes.
+BOOTSTRAP_URL="https://raw.githubusercontent.com/$SLUG/main/scripts/bootstrap.sh"
+has "$README" "curl -fsSL $BOOTSTRAP_URL | bash" install-bootstrap-oneliner
+has "$README" '`scripts/bootstrap.sh`' install-bootstrap-script-named
+has "$README" 'bash -s -- --targets cursor,opencode --yes' install-bootstrap-noninteractive
+has "$README" './scripts/bootstrap.sh --targets cursor,opencode --yes' install-bootstrap-update
+has "$README" './scripts/bootstrap.sh --targets cursor,opencode --uninstall' install-bootstrap-uninstall
+# The two knobs belong to that block too, and the check is scoped to it: `--copy` is discussed
+# again 200 lines below, and a reader who cannot see where the clone lands — or how to get copies
+# instead of symlinks — while looking at the one-liner goes and reads bootstrap.sh to find out.
+FASTPATH="$(awk '/^\*\*Fast path/ { f = 1 } f { print } /^\*\*Update\*\*/ { f = 0 }' "$README")"
+if printf '%s\n' "$FASTPATH" | grep -qF -- '`--dir <path>`'; then ok
+else bad install-bootstrap-dir-knob "README's fast-path block does not name the --dir <path> knob"; fi
+if printf '%s\n' "$FASTPATH" | grep -qF -- '`--copy`'; then ok
+else bad install-bootstrap-copy-knob "README's fast-path block does not name the --copy knob"; fi
+# and the URL's path half has to resolve inside this checkout
+if [ -f "$ROOT/scripts/bootstrap.sh" ]; then ok
+else bad install-bootstrap-exists "README's one-liner fetches scripts/bootstrap.sh, which is not in the repo"; fi
+
+# Each host doc points back at the fast path: the walkthroughs are where a first install starts,
+# so a one-liner only they do not mention is a one-liner nobody finds.
+for d in "$ROOT/docs/README.cursor.md" "$ROOT/docs/README.codex.md" "$ROOT/docs/README.opencode.md"; do
+  has "$d" 'bootstrap one-liner' "fast-path-${d##*/}"
+done
+
 # Per-host docs: the same command, plus the walkthrough steps that only exist there.
 has "$ROOT/docs/README.cursor.md" './scripts/install.sh --target cursor' cursor-doc-install
 has "$ROOT/docs/README.cursor.md" '/smoke-test' cursor-doc-verify

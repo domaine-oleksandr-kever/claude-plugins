@@ -12,6 +12,9 @@ older CLI that does not serve agents from the marketplace cache.
 
 ## Install
 
+Fast path: the bootstrap one-liner from the [README](../README.md#install--four-hosts) does the
+clone plus this dev-channel installer in one command; step 1's marketplace add stays manual.
+
 ### 0. Prerequisites — the host and the runtime
 
 Skip anything you already have:

@@ -58,9 +58,16 @@ for f in "$CANON" \
          "$ROOT/.cursor-plugin/marketplace.json" \
          "$CODEX_MANIFEST" \
          "$ROOT/scripts/install.sh" \
+         "$ROOT/scripts/bootstrap.sh" \
          "$PLUGIN_DIR/scripts/doctor.cjs" \
          "$PLUGIN_DIR/scripts/bump-version.cjs"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
+done
+
+# Both entry scripts are documented as `./scripts/<name>.sh`, so the mode bit git carries is part
+# of the packaging: a lost +x turns a documented install command into "permission denied".
+for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh"; do
+  if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
 done
 
 CANON_VERSION="$(jval "$CANON" version)"

@@ -14,6 +14,9 @@ Seven steps take a machine that has never seen OpenCode to a proven install: 0 i
 itself, 1–2 clone and link the plugin, 3–5 are three pastes into a config file you own, 6 is
 optional, 7 proves the whole thing in a live session.
 
+Fast path: the bootstrap one-liner from the [README](../README.md#install--four-hosts) does
+steps 1–2 — clone plus this installer — in one command; the pastes below are still yours.
+
 ### 0. Prerequisites — the host and the runtime
 
 Skip anything you already have:
