@@ -16,6 +16,15 @@ Two routes from a clean machine to a proven install; both end at the same reload
   into `~/.cursor/plugins/local/fnd`, so the files it loads are the ones in this checkout. Take
   this route to develop plugin content or to run local, unpushed work.
 
+> [!WARNING]
+> **Marketplace installs currently ignore agent model pins.** A staff-acknowledged Cursor bug
+> (open since April 2026, **no fix date**) makes marketplace-installed plugin agents drop their
+> `model:` frontmatter — on that route every fnd subagent silently inherits the session model
+> instead of the tier map in `plugins/fnd/references/host-model-map.md`. Skills, hooks, MCP and
+> the agents themselves still work; only the model routing is lost. Until Cursor fixes it,
+> **prefer the local-checkout route** — pins bind there — and confirm once with the
+> `/preflight-checks` model-pin row.
+
 ### 0. Prerequisites
 
 - **Cursor itself** — the desktop app from [cursor.com](https://cursor.com), on a current
