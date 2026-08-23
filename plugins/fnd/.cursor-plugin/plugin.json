@@ -11,5 +11,6 @@
   "keywords": ["shopify", "foundation", "domaine", "skills"],
   "skills": "skills/",
   "agents": "agents-cursor/",
+  "rules": "rules/",
   "hooks": "hooks/hooks-cursor.json"
 }

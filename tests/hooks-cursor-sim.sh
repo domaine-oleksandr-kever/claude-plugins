@@ -112,6 +112,12 @@ assert_contains W10-slim-gate  "$(jq -r '.hooks.afterMCPExecution[0].command' "$
 ptr="$(jq -r '.hooks // empty' "$CURSOR_MANIFEST")"
 if [ -n "$ptr" ] && [ -f "$PLUGIN/$ptr" ]; then ok; else bad W11-manifest-pointer "manifest hooks '$ptr' does not resolve"; fi
 
+# W11b: rules are declared EXPLICITLY — folder auto-discovery proved unreliable on a live
+# marketplace install (empty Rules tab, 2026-08-23) — and the pointer resolves to .mdc files.
+rptr="$(jq -r '.rules // empty' "$CURSOR_MANIFEST")"
+if [ -n "$rptr" ] && [ -d "$PLUGIN/$rptr" ] && ls "$PLUGIN/$rptr"/*.mdc >/dev/null 2>&1; then ok
+else bad W11b-manifest-rules "manifest rules '$rptr' does not resolve to a dir with .mdc files"; fi
+
 # W12–W16: the wiring under Cursor's plugin-root LEAK, run for real (real node, real guards).
 # A wiring that reads the root out of the env resolves to another plugin's directory here, and
 # the guard event — the one that must fail CLOSED — would exit 1 (MODULE_NOT_FOUND), which
