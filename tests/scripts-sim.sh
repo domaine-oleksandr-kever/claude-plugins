@@ -17,10 +17,6 @@ unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR SHOPIFY_CLI_THEME_TOKEN SHOPIFY_STORE 
       FND_GQL_PROBE_CACHE TOML_PATH
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# A real ~/.config/domaine/env on this machine would inject switches into every case (the
-# scripts under test read it via env-file.cjs / domaine_env) — point the global layer at a
-# sandbox. The EV cases below set their own.
-export XDG_CONFIG_HOME="${TMPDIR:-/tmp}/fnd-sim-xdg-$$"
 GQL="$ROOT/plugins/fnd/scripts/shopify-admin-gql.sh"
 TJ="$ROOT/plugins/fnd/scripts/theme-json.sh"
 CPT="$ROOT/plugins/fnd/scripts/create-preview-theme.sh"
@@ -33,6 +29,12 @@ TMP="$(mktemp -d)"
 # developer's machine — and the next run of this suite would then be testing around it.
 WPID=""
 trap 'if [ -n "$WPID" ]; then kill "$WPID" 2>/dev/null; fi; rm -rf "$TMP"' EXIT
+
+# A real ~/.config/domaine/env on this machine would inject switches into every case (the
+# scripts under test read it via env-file.cjs / domaine_env) — point the global layer at a
+# sandbox. It sits under $TMP so the trap above owns its removal; a PID-suffixed path beside it
+# would outlive the run. The EV cases below set their own.
+export XDG_CONFIG_HOME="$TMP/xdg"
 
 pass=0; fail=0; failures=""
 ok() { pass=$((pass + 1)); }
@@ -3298,6 +3300,16 @@ printf 'FND_CPT_THROTTLE_WAITS=5 9\n' > "$EVR/repo/.claude/domaine.env"
 o5="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FND_CPT_THROTTLE_WAITS)"
 o6="$(cd "$EVR/cfg" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FND_MCP_SLIM_DEBUG)"
 if [ "$o5" = "5 9" ] && [ "$o6" = "" ]; then ok; else bad EV5-bash-reader "o5='$o5' o6='$o6'"; fi
+
+# EV5b: the behavior above was proved on create-preview-theme.sh's copy alone. shopify-admin-gql.sh
+# carries the same function verbatim — two copies because a shell script has no import — so the two
+# bodies are diffed here; without this, drift in the second copy is a silent pass.
+cpt_fn="$(sed -n '/^domaine_env()/,/^}/p' "$CPT")"
+gql_fn="$(sed -n '/^domaine_env()/,/^}/p' "$GQL")"
+if [ -n "$cpt_fn" ]; then ok; else bad EV5b-cpt-fn "create-preview-theme.sh has no domaine_env()"; fi
+if [ -n "$gql_fn" ]; then ok; else bad EV5b-gql-fn "shopify-admin-gql.sh has no domaine_env()"; fi
+if [ "$cpt_fn" = "$gql_fn" ]; then ok
+else bad EV5b-copies-drifted "domaine_env() differs: $(diff <(printf '%s\n' "$cpt_fn") <(printf '%s\n' "$gql_fn") | tr '\n' ';' | head -c 300)"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

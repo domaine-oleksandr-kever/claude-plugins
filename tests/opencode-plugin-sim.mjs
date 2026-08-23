@@ -374,6 +374,23 @@ assertContains('C19-no-guard-run', gated[0].text, blob.slice(0, 200));
 delete process.env.FND_PROMPT_JSON;
 delete process.env.FND_CTX_MONITOR;
 
+// G-drift — the fast-reject list has three copies and hooks/no-verify-bypass.sh is the single
+// source (its `case "$input" in *git*|…` line). This adapter and hooks/cursor-shim.cjs must carry
+// a byte-identical literal, so both are extracted and compared rather than pinned to a copy here;
+// the third copy, the `case` glob in hooks/hooks-cursor.json, is deliberately coarser and is
+// asserted in tests/hooks-cursor-sim.sh instead.
+{
+  const literal = (file) => {
+    const line = fs.readFileSync(file, 'utf8').split('\n').find((l) => l.startsWith('const GIT_TRIGGER = '));
+    return line === undefined ? null : line;
+  };
+  const here = literal(PLUGIN_FILE);
+  const cursor = literal(path.join(ROOT, 'plugins', 'fnd', 'hooks', 'cursor-shim.cjs'));
+  assert('G40-trigger-opencode', here !== null, 'opencode/fnd-plugin.js has no GIT_TRIGGER literal');
+  assert('G40-trigger-cursor', cursor !== null, 'hooks/cursor-shim.cjs has no GIT_TRIGGER literal');
+  assertEq('G40-trigger-identical', here, cursor);
+}
+
 console.log(`opencode plugin sim: ${pass} passed, ${fail} failed`);
 if (fail > 0) {
   console.log(failures.join('\n'));

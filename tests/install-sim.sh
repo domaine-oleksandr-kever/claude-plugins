@@ -147,6 +147,18 @@ if [ "$RC" -eq 0 ] && [ -L "$H1/$CURSOR_LINK" ] \
    && [ "$(grep -c '^entry=' "$H1/$CURSOR_MODE")" -eq 1 ]; then ok
 else bad C7-rerun-idempotent "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
 
+# C7b: `--target=<host>` is the second accepted spelling and must reach the same code path — a
+# fresh HOME so this is a real install, not a re-run of C1's.
+H1B="$TMP/h1b"
+run "$H1B" "$REPO1" --target=cursor
+if [ "$RC" -eq 0 ] && [ -L "$H1B/$CURSOR_LINK" ] \
+   && [ "$(readlink "$H1B/$CURSOR_LINK")" = "$REPO1/plugins/fnd" ] \
+   && grep -q "fnd $INSTALL_VER installed for cursor" "$O" \
+   && grep -q "mode: symlink" "$O" \
+   && grep -q "^mode=symlink$" "$H1B/$CURSOR_MODE" \
+   && [ "$(grep -c '^entry=' "$H1B/$CURSOR_MODE")" -eq 1 ]; then ok
+else bad C7b-equals-form "rc=$RC link=$(readlink "$H1B/$CURSOR_LINK" 2>/dev/null) out=$(tr '\n' ';' < "$O") err=$(head -c 160 "$E")"; fi
+
 # ------------------------------------------------------------- clobber refusal (non-link) --
 H2="$TMP/h2"; mkdir -p "$H2/$CURSOR_LINK"
 echo "someone else's plugin" > "$H2/$CURSOR_LINK/manifest.json"

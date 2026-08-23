@@ -97,9 +97,11 @@ has "$ROOT/docs/README.codex.md" '/hooks' codex-doc-trust-review
 has "$ROOT/docs/README.codex.md" './scripts/install.sh --target codex' codex-doc-agents-link
 has "$ROOT/docs/README.codex.md" '$smoke-test' codex-doc-verify
 
-# Release form: no doc may point a user at the harness-port work branch — every install ref
-# is branch-free (main) so the docs survive the merge without another pass.
-for f in "$README" "$ROOT"/docs/README.*.md; do
+# Release form: nothing a user reads or runs may point at the harness-port work branch — every
+# install ref is branch-free (main) so it survives the merge without another pass. The installer
+# is in the sweep because it clones and reports paths, and the references because subagents read
+# them standalone on every host.
+for f in "$README" "$ROOT"/docs/README.*.md "$ROOT/scripts/install.sh" "$PLUGIN_DIR"/references/*.md; do
   [ -f "$f" ] || continue
   lacks "$f" 'harness-port' "no-work-branch-${f##*/}"
 done
@@ -257,6 +259,29 @@ has "$README" '.claude/domaine.env' env-project-file-documented
 has "$README" 'ask the agent in a session' env-ask-agent-documented
 for k in $(grep -oE "'(FND_[A-Z0-9_]+|SHOPIFY_ADMIN_GQL_QUIET)'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs" | tr -d "'" | sort -u); do
   has "$README" "$k" "env-known-$k"
+done
+
+# …and the sweep in the other direction: a switch the CODE reads but neither list carries is a
+# knob nobody can find, and one the CLI cannot set. Source of truth is the bundle itself — the
+# three script/hook trees plus the installer. The leading character class keeps identifiers that
+# merely END in a switch-shaped name out of it (`MARK_FND_V`, the `fnd v<semver>` text marker).
+# ENV_IGNORE holds names the sweep proved are not switches:
+#   FND_VERSION — the installer's own version stamp (`FND_VERSION="<semver>"`, written by
+#                 bump-version.cjs and read back for the report line); nothing reads it as input.
+ENV_IGNORE=" FND_VERSION "
+ENV_SECTION="$(awk '/^### Environment switches/ { on = 1; next } on && /^## / { exit } on' "$README")"
+if [ -n "$ENV_SECTION" ]; then ok; else bad env-section "README has no '### Environment switches' section"; fi
+for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
+             "$PLUGIN_DIR/scripts" "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/opencode" "$ROOT/scripts/install.sh" \
+             2>/dev/null | sed 's/^[^F]*//' | sort -u); do
+  case "$ENV_IGNORE" in *" $k "*) continue ;; esac
+  if grep -qF -- "'$k'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs"; then ok
+  else bad "env-unregistered-$k" "$k is read by the bundle but missing from domaine-env.cjs's KNOWN list"; fi
+  # backtick-delimited so `FND_MCP_SLIM` cannot be answered by `FND_MCP_SLIM_DIR`'s row
+  case "$ENV_SECTION" in
+    *'`'"$k"'`'*) ok ;;
+    *) bad "env-undocumented-$k" "$k is read by the bundle but has no README → Environment switches row" ;;
+  esac
 done
 
 echo "readme-checks: $pass passed, $fail failed"

@@ -488,6 +488,23 @@ out="$(brun '{"command":"git commit --no-verify -m x"}')"; EC=$?
 assert_eq X11-second-guard-runs "$EC" 2
 assert_contains X11-second-guard-msg "$(printf '%s' "$out" | jq -r '.agentMessage')" "quality gates"
 
+# X12 — the fast-reject list has three copies and hooks/no-verify-bypass.sh is the single source
+# (its `case "$input" in *git*|…` line). The two JS copies must stay byte-identical, so they are
+# extracted and diffed rather than each pinned to a literal here. The third copy — the `case` glob
+# in hooks/hooks-cursor.json's beforeShellExecution fallback — is deliberately COARSER (no `am`,
+# no word boundaries): it runs only when node is unavailable, where over-blocking is the safe
+# direction, and JSON carries no comment to say so, so it is recorded here.
+gt_cursor="$(grep -n 'const GIT_TRIGGER = ' "$SHIM" | head -1 | cut -d: -f2-)"
+gt_opencode="$(grep -n 'const GIT_TRIGGER = ' "$PLUGIN/opencode/fnd-plugin.js" | head -1 | cut -d: -f2-)"
+if [ -n "$gt_cursor" ]; then ok; else bad X12-trigger-cursor "cursor-shim.cjs has no GIT_TRIGGER literal"; fi
+if [ -n "$gt_opencode" ]; then ok; else bad X12-trigger-opencode "opencode/fnd-plugin.js has no GIT_TRIGGER literal"; fi
+assert_eq X12-trigger-identical "$gt_cursor" "$gt_opencode"
+# and the coarse shell copy still names every keyword the JS one does, minus the documented `am`
+for kw in git commit push merge pull; do
+  if grep -qF "*$kw*" "$PLUGIN/hooks/hooks-cursor.json"; then ok
+  else bad X12-trigger-json "hooks-cursor.json's fallback case glob drops '$kw'"; fi
+done
+
 # ═══ N — the whole commit-guard matrix, re-run through the Cursor dialect ═══
 # The case lists are READ from the matrix file, never copied: rows added there must be covered
 # here on the next run, and a rename that breaks the extraction trips the row-count floor below.

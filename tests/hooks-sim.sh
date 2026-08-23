@@ -61,9 +61,6 @@ set -u
 # must not leak into the cases — the debug ones set both switches on the invocation themselves, and
 # the rest would otherwise append fixture noise to the developer's real log.
 unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR
-# A real ~/.config/domaine/env on this machine would inject switches into every hook under
-# test (they load it via env-file.cjs) — point the global layer at a sandbox path.
-export XDG_CONFIG_HOME="${TMPDIR:-/tmp}/fnd-sim-xdg-$$"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/plugins/fnd/.claude-plugin/plugin.json"
@@ -74,6 +71,11 @@ TMP="$(mktemp -d)"
 # cleanup stands down whenever one of them names a file the developer still has to read.
 KEEP_TMP=0
 trap '[ "$KEEP_TMP" = 1 ] || rm -rf "$TMP"' EXIT
+
+# A real ~/.config/domaine/env on this machine would inject switches into every hook under
+# test (they load it via env-file.cjs) — point the global layer at a sandbox path. It sits under
+# $TMP so the trap above owns its removal; a PID-suffixed path beside it would outlive the run.
+export XDG_CONFIG_HOME="$TMP/xdg"
 
 pass=0; fail=0; failures=""
 ok()  { pass=$((pass+1)); }
@@ -319,6 +321,24 @@ if [ -s "$TMP/node.log" ]; then bad M6-off "node ran with FND_MCP_SLIM=0"; else 
 run_ptu_gate; ec=$?
 assert_eq M6-default-exit "$ec" 0
 if [ -s "$TMP/node.log" ]; then ok; else bad M6-default "node did not run by default"; fi
+
+# M6b: the same switch set from a project .claude/domaine.env (U9 shape). The wiring gate above is
+# a SHELL test — it reads the process env and can never see a file-set value — so mcp-slim.cjs
+# re-reads FND_MCP_SLIM after its own env-file load. The switch is absent from the process env
+# here; only the file speaks, and the control run without the file must compress or this proves
+# nothing.
+MSE="$TMP/slim-envfile"; mkdir -p "$MSE/.claude"
+# stdin comes from a FILE, not a pipe: the kill switch exits before reading stdin, and a pipe
+# would leave the writer with EPIPE noise that has nothing to do with the assertion.
+jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}' \
+  > "$MSE/in.json"
+run_slim_at() { (cd "$MSE" && env -u FND_MCP_SLIM FND_MCP_SLIM_DIR="$MSD" node "$SLIM" < "$MSE/in.json" 2>/dev/null); }
+assert_contains M6b-control-compresses "$(run_slim_at)" "updatedToolOutput"
+printf 'FND_MCP_SLIM=0\n' > "$MSE/.claude/domaine.env"
+out="$(run_slim_at)"; ec=$?
+assert_eq M6b-envfile-off      "$out" ""
+assert_eq M6b-envfile-off-exit "$ec" 0
 
 # M7: raw-string result shape → compressed string (mirrors input shape, carries full=)
 in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:$t}')"

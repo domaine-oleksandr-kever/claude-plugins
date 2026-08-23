@@ -21,8 +21,9 @@
 #      must say so somewhere: one line matching both a conditional Claude-Code phrase and
 #      "plan mode" (the Operating-mode gloss). File-scoped, since the marker sits in headings
 #      far from that line.
-#   5. size        — SKILL.md files over 8000 bytes are printed as a WARN row only; the Codex
-#      per-skill cap is unconfirmed until M1b, so this never fails the run.
+#   5. size        — SKILL.md files over 8000 bytes are printed as a WARN row only. The live
+#      Codex run on 2026-08-23 did not measure a per-skill cap, so no threshold is known to
+#      enforce; the watchlist stays a WARN until one is measured.
 # Usage: skill-neutral-lint.sh [skills-dir]   (default: plugins/fnd/skills)
 # Exit 0 = skills are host-neutral.
 set -u
