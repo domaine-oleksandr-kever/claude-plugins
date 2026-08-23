@@ -22,7 +22,7 @@ on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so these run ver
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh themes                       # id / name / role
 ${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh get --theme <id> --file templates/product.json \
-  --strip-comments --out .claude/fnd/<work-id>/tmp/product.json          # then pull values with jq
+  --strip-comments --out .claude/tasks/<work-id>/tmp/product.json          # then pull values with jq
 ```
 
 Inspection reads go through `--out` (target the task workspace `tmp/`, mktemp when no

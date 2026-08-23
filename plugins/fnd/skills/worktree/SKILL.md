@@ -24,7 +24,7 @@ plugin's own directory — `../../` relative to this skill's directory — and e
 literal `${CLAUDE_PLUGIN_ROOT}` in every command: the host expands it, and this skill's
 pre-approved Bash prefixes match that exact form. Run it from the client
 theme repo root. The script owns every decision — worktree directory, branch reuse, `npm ci`,
-the gitignored config copies (`shopify.theme.toml`, `.env`), the `.claude/fnd` symlink back to
+the gitignored config copies (`shopify.theme.toml`, `.env`), the `.claude/tasks` symlink back to
 the main repo, the free dev port, the hand-off block. This skill resolves the work-id, runs the
 script, relays what it printed, and — once the worktree exists — settles its **session theme**
 (step 4) so the new checkout's dev server never syncs into the shared dev theme.
@@ -61,7 +61,7 @@ script, relays what it printed, and — once the worktree exists — settles its
      free-text description, or a later `--reuse` misses
      it and stacks a second theme) vs **pin an existing theme id** the developer supplies
      (`…/create-preview-theme.sh pin --theme <id>`). Record the id as a dated
-     `session-theme: <id>` bullet in the shared `.claude/fnd/<WORK-ID>/notes.md` the instant
+     `session-theme: <id>` bullet in the shared `.claude/tasks/<WORK-ID>/notes.md` the instant
      the script returns it.
 
    Either way, run the script **with the new worktree as the working directory** — a one-shot
@@ -76,7 +76,7 @@ script, relays what it printed, and — once the worktree exists — settles its
    or echo `shopify.theme.toml`. Close with the reminder above: new terminal, new session.
 5. **Remove:** `worktree-setup.sh --remove <WORK-ID>`. A refusal on a dirty tree is a real
    answer — report it and ask before re-running with `--force`. The task workspace
-   (`.claude/fnd/<WORK-ID>/`) lives in the main repo and survives removal; the session theme
+   (`.claude/tasks/<WORK-ID>/`) lives in the main repo and survives removal; the session theme
    it recorded is not the script's business — deleting it is the developer's call.
 
 Any `error=` line from `worktree-setup.sh` → report it plainly and stop. Do not work around it with raw

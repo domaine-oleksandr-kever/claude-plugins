@@ -1,7 +1,7 @@
 ---
 name: save-task-context
 description: >
-  Create or update the task workspace (`.claude/fnd/<work-id>/`) from what is already in the
+  Create or update the task workspace (`.claude/tasks/<work-id>/`) from what is already in the
   conversation — ticket fields, decisions, root causes, progress — so the next skill or a
   fresh session resumes without re-running readers. Use when the user asks to save / remember
   the task context or progress (сохранить контекст) or set up a task workspace.
@@ -23,9 +23,9 @@ already known; missing data is reported as a gap, not fetched.
 1. **Resolve `<work-id>`** — one ticket → its key; several tickets shipping as one PR on one
    branch → the branch slug (with one `ticket-<KEY>.md` per ticket inside). State the resolved
    id in one line if it was inferred rather than passed.
-2. **Ensure the folder** — `git check-ignore -q .claude/fnd || echo '.claude/fnd/' >> "$(git rev-parse --git-common-dir)/info/exclude"`
+2. **Ensure the folder** — `git check-ignore -q .claude/tasks || echo '.claude/tasks/' >> "$(git rev-parse --git-common-dir)/info/exclude"`
    (the common dir, not `.git/`: the exclude file is shared and a linked worktree's `.git` is a file),
-   then create `.claude/fnd/<work-id>/` if absent. Merge into existing files — don't blow away
+   then create `.claude/tasks/<work-id>/` if absent. Merge into existing files — don't blow away
    earlier entries.
 3. **Write what the conversation holds** (verbatim, per the reference):
    - ticket fields you actually have → `ticket.md` / `ticket-<KEY>.md` (stamp `fetched_at`, and
@@ -45,4 +45,4 @@ already known; missing data is reported as a gap, not fetched.
    worth filling.
 
 Never store secrets or raw payloads. Scratch files created while working belong in
-`.claude/fnd/<work-id>/tmp/`, not the project root.
+`.claude/tasks/<work-id>/tmp/`, not the project root.

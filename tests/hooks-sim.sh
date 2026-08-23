@@ -1760,7 +1760,7 @@ if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP6"; then ok; else bad P6-bytee
 # P7: spill write failure (read-only tmpdir, no workspace) → NEVER block (don't lose the paste)
 if [ "$(id -u)" = 0 ]; then ok; else   # root ignores 000 perms — skip there
   RO="$TMP/pj-ro"; mkdir -p "$RO"; chmod 000 "$RO"
-  in="$(mk 20000 25000 "$RO/nope" "$PJD/p7.json")"   # cwd under RO → no .claude/fnd, unwritable
+  in="$(mk 20000 25000 "$RO/nope" "$PJD/p7.json")"   # cwd under RO → no .claude/tasks, unwritable
   assert_eq P7-spill-fail-passthrough "$(run_guard "$in" TMPDIR="$RO")" ""
   chmod 755 "$RO"
 fi
@@ -1785,13 +1785,24 @@ for exp in "$EXP8A" "$EXP8B"; do
   if [ "$hit" = yes ]; then ok; else bad "P8-saved-$(basename "$exp")" "blob not saved byte-exact"; fi
 done
 
-# P9: an active task workspace → blob spilled under .claude/fnd/<id>/tmp/, not the tmpdir
-WS="$PJD/ws"; mkdir -p "$WS/.claude/fnd/ELC-999"
+# P9: an active task workspace → blob spilled under .claude/tasks/<id>/tmp/, not the tmpdir
+WS="$PJD/ws"; mkdir -p "$WS/.claude/tasks/ELC-999"
 in="$(mk 20000 25000 "$WS" "$PJD/p9.json")"
 out="$(run_guard "$in")"
 p="$(reason_path "$out")"
 assert_contains P9-block "$out" '"decision":"block"'
-case "$p" in *"/.claude/fnd/ELC-999/tmp/"*) ok ;; *) bad P9-workspace "blob not in workspace tmp (p='$p')" ;; esac
+case "$p" in *"/.claude/tasks/ELC-999/tmp/"*) ok ;; *) bad P9-workspace "blob not in workspace tmp (p='$p')" ;; esac
+
+# P9b (rename migration): a workspace still at the legacy `.claude/fnd` home is honored — the
+# spill co-locates with the task, not the tmpdir; and the new home wins when both exist.
+WSL="$PJD/ws-legacy"; mkdir -p "$WSL/.claude/fnd/ELC-77"
+in="$(mk 20000 25000 "$WSL" "$PJD/p9b.json")"
+p="$(reason_path "$(run_guard "$in")")"
+case "$p" in *"/.claude/fnd/ELC-77/tmp/"*) ok ;; *) bad P9b-legacy-workspace "blob not in legacy workspace tmp (p='$p')" ;; esac
+mkdir -p "$WSL/.claude/tasks/ELC-77"
+in="$(mk 20000 25000 "$WSL" "$PJD/p9c.json")"
+p="$(reason_path "$(run_guard "$in")")"
+case "$p" in *"/.claude/tasks/ELC-77/tmp/"*) ok ;; *) bad P9c-new-home-wins "blob not in .claude/tasks tmp (p='$p')" ;; esac
 
 # P10: a multibyte JSON blob survives stdin decoding — saved byte-exact, no U+FFFD
 EXP10="$PJD/p10.json"
@@ -1833,13 +1844,13 @@ assert_eq P13-malformed-out "$out" ""
 assert_eq P13-malformed-exit "$ec" 0
 
 # P14: TWO active work-id dirs (ambiguous) → fall back to tmpdir, never an arbitrary ticket dir
-WS2="$PJD/ws2"; mkdir -p "$WS2/.claude/fnd/ELC-999" "$WS2/.claude/fnd/ELC-1000"
+WS2="$PJD/ws2"; mkdir -p "$WS2/.claude/tasks/ELC-999" "$WS2/.claude/tasks/ELC-1000"
 in="$(mk 20000 25000 "$WS2" "$PJD/p14.json")"
 out="$(run_guard "$in")"
 assert_contains P14-block "$out" '"decision":"block"'
 p="$(reason_path "$out")"
 case "$p" in
-  *"/.claude/fnd/"*) bad P14-ambiguous "ambiguous workspaces spilled into a ticket dir (p='$p')" ;;
+  *"/.claude/tasks/"*) bad P14-ambiguous "ambiguous workspaces spilled into a ticket dir (p='$p')" ;;
   "$PJD"/*)         ok ;;
   *)                bad P14-ambiguous "unexpected spill path (p='$p')" ;;
 esac
@@ -1880,7 +1891,7 @@ if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP16"; then ok; else bad P16-str
 # neither silence nor forge the other. Exit is always 0.
 MERGED="$ROOT/plugins/fnd/hooks/user-prompt.cjs"
 UPD="$TMP/up"; mkdir -p "$UPD"
-UPCWD="$TMP/up-cwd"; mkdir -p "$UPCWD"    # no .claude/fnd → blobs spill to TMPDIR
+UPCWD="$TMP/up-cwd"; mkdir -p "$UPCWD"    # no .claude/tasks → blobs spill to TMPDIR
 
 up_in() { # session-id prompt-bytes — one event carrying BOTH a transcript and a prompt
   node -e '

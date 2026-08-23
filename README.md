@@ -614,7 +614,7 @@ lands in the worktree and leaves the main checkout's dev environment alone (and 
 source checkout already carried is undone in the copy — `toml_unpinned=yes` — so this stream
 starts from the shared dev theme rather than inheriting another stream's preview), and `.env`,
 without which every Admin API read from the worktree would fail on a missing token; the
-worktree's `.claude/fnd` **symlinked** to the main repo's, so the task workspace is shared
+worktree's `.claude/tasks` **symlinked** to the main repo's, so the task workspace is shared
 between the two checkouts and survives the worktree's removal (and git-excluded, so the
 link never reaches a commit);
 `.claude/settings.local.json` copied rather than shared (two sessions approving permissions

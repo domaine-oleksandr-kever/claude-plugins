@@ -18,7 +18,7 @@ cross-sibling: two adjacent Comparison Column subtrees are the smallest real exc
 carries a repeated className dictionary worth a legend, the `$N` var-token pass and a ×N fold.
 Anything smaller drops the excerpt's ratio to ~0.3 and the assertions with it. The whole capture —
 211 KB of JSX inside a 219 KB MCP envelope — stays out of the repo at
-`.claude/fnd/mcp-compression/figma-captures/` (git-excluded).
+`.claude/tasks/mcp-compression/figma-captures/` (git-excluded).
 
 `../parity/fixtures/smart_crusher/` holds Headroom's 17 SmartCrusher parity fixtures (vendored
 verbatim, Apache-2.0 — see `../parity/NOTICE`); they are the array-crush porting contract.

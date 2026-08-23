@@ -108,7 +108,7 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    allowlisted in `settings.json`, or acceptEdits on — offer those entries or
    `/fewer-permission-prompts` if not). A permission prompt mid-run kills autonomy — fix
    this before the interview, not after the ✋.
-5. **Workspace.** Ensure `.claude/fnd/<work-id>/` exists with `progress.md`
+5. **Workspace.** Ensure `.claude/tasks/<work-id>/` exists with `progress.md`
    (`<plugin root>/references/task-workspace.md`, incl. the git-exclude line).
 6. **Branch.** Working tree clean (or only this ticket's work in it); note the current
    branch for the interview.
@@ -180,7 +180,7 @@ definitions AND actual values, selling plan groups
 assignments, app-owned records. Then spawn one **general-purpose subagent**
 (on Claude Code `model: sonnet`; elsewhere the host's standard-dev tier) briefed with
 that list, the store-access level from Step 0, the
-workspace path (`.claude/fnd/<work-id>/`, so `--out` dumps land in its `tmp/`, never the
+workspace path (`.claude/tasks/<work-id>/`, so `--out` dumps land in its `tmp/`, never the
 project root), and the probe rules — **strictly read-only**: GraphQL queries only (no
 mutations) via `<plugin root>/scripts/shopify-admin-gql.sh`, targeted, not a full
 catalog scan, and `theme-json.sh` **`get` only, never `set`** — it probes, it never mutates

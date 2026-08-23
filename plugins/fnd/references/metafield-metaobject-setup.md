@@ -107,8 +107,8 @@ the variable below;
 on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so the command runs verbatim:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh --query .claude/fnd/<work-id>/tmp/inspection.graphql \
-  [--operation <Name>] --out .claude/fnd/<work-id>/tmp/inspection.json   # then pull fields with jq
+${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh --query .claude/tasks/<work-id>/tmp/inspection.graphql \
+  [--operation <Name>] --out .claude/tasks/<work-id>/tmp/inspection.json   # then pull fields with jq
 ```
 
 It tries `store execute` first (CLI ≥ 4.x), falls back to the token, takes the store domain from
@@ -122,7 +122,7 @@ on a GraphQL failure (exit 0, mirroring the Admin API's HTTP 200 + errors) — t
 wraps/unboxes `store execute`'s native output so responses read identically either way, and a
 GraphQL error never triggers the token fallback — and for a **mutation**, no failure after an
 actually-attempted execute does (the mutation may already be applied server-side; the runner
-exits with `error=store_execute_failed_mutation` — verify store state before re-running). Put each query/mutation in a `.graphql` file **inside the task workspace** — scratch/inspection queries in `.claude/fnd/<work-id>/tmp/`, the Mode 2 living setup file at the workspace root; never the repo's `docs/` (`<plugin root>/references/task-workspace.md`) — and pass it with `--query` (and
+exits with `error=store_execute_failed_mutation` — verify store state before re-running). Put each query/mutation in a `.graphql` file **inside the task workspace** — scratch/inspection queries in `.claude/tasks/<work-id>/tmp/`, the Mode 2 living setup file at the workspace root; never the repo's `docs/` (`<plugin root>/references/task-workspace.md`) — and pass it with `--query` (and
 `--operation` when the file holds several named operations — for the store engine the runner
 extracts the named operation itself). If it exits with `error=no_admin_token`, **neither** engine
 is set up — its hint line names both fixes (add the token to `.env`, or the one-time
@@ -179,7 +179,7 @@ product metafield → mock instances → product bind):
 
 ## The living `.graphql` file (Mode 2)
 
-Write it to the task workspace — `.claude/fnd/<work-id>/metaobject-setup.graphql` (and, if
+Write it to the task workspace — `.claude/tasks/<work-id>/metaobject-setup.graphql` (and, if
 useful, a companion `tmp/inspection.graphql` for STEP 0) — not the repo's `docs/`, so
 ticket-scoped working files never ship with the branch
 (`<plugin root>/references/task-workspace.md`). Mirror the ELC-257 file's shape:
@@ -200,7 +200,7 @@ ticket-scoped working files never ship with the branch
 
 Never paste a GraphQL operation into the chat for the developer to copy — terminal wrapping
 mangles it and copying from chat is awkward. Write the current step as a **standalone
-ready-to-run file** in `.claude/fnd/<work-id>/tmp/step-<n>-<short-name>.graphql`: exactly one
+ready-to-run file** in `.claude/tasks/<work-id>/tmp/step-<n>-<short-name>.graphql`: exactly one
 operation, every `REPLACE_WITH_*` placeholder already filled from prior results, runnable as-is —
 and **`validate_graphql_codeblocks`-clean before you hand it over** (a hand-off you can't run
 yourself is exactly where a hallucinated field wastes the developer's round-trip).

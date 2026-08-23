@@ -4,7 +4,7 @@ How an autonomous `ship` run records its decisions, when it may act without aski
 when it must escalate, and how every phase re-grounds itself. Solo skills never read this
 file — the pipeline is opt-in and leaves solo behavior untouched.
 
-## Decision record — `.claude/fnd/<work-id>/pipeline.md`
+## Decision record — `.claude/tasks/<work-id>/pipeline.md`
 
 Written by ship at the end of the interview as `status: draft`, armed to `active` only
 by the ✋ approval; the single source of pre-approved decisions.
