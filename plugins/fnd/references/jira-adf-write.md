@@ -46,7 +46,10 @@ is spawned at all.
 
 ## The mechanics — use the converter, don't hand-build ADF
 
-`jira-writer` runs exactly this; it is also the inline / manual recipe.
+`jira-writer` runs exactly this; it is also the inline / manual recipe. **Plugin root** = the
+plugin's own directory, this file being `<plugin root>/references/jira-adf-write.md`; substitute
+its absolute path for the variable below —
+on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so the command runs verbatim.
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <approved.md>   # or pipe via stdin

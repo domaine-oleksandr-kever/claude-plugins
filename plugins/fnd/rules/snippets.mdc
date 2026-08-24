@@ -1,0 +1,40 @@
+---
+description: Foundation snippets / render / LiquidDoc conventions — Core Snippets use the @-prefix taxonomy (@spacing-*, @color/scheme, @body-scripts, @width-token…), mandatory LiquidDoc on every snippet, testing-scenario comments. Auto-attaches on snippets/*.liquid; covers project deltas, not generic Shopify render/LiquidDoc syntax.
+globs: snippets/*.liquid
+alwaysApply: false
+---
+
+# Snippet Development Standards
+
+**Source of truth:** for current snippets / render / LiquidDoc syntax/APIs query `shopify-dev-mcp` (`learn_shopify_api` → `search_docs_chunks`). This file covers only Foundation-specific conventions.
+
+## Core Snippets Pattern (`@`-prefixed utilities)
+
+**Core Snippets** are utility snippets prefixed with `@` (e.g. `snippets/@spacing-token.liquid`). They handle spacing, color, script injection, and other shared theme/customizer utilities. Modify them directly when needed, but when pulling updates from the foundation repo, manually sync changes to `snippets/@*.liquid`.
+
+Category taxonomy (real snippets in this repo):
+
+- **Spacing / layout**: `@spacing-padding`, `@spacing-token`, `@gap-token`, `@width-token`, `@height-token`, `@container-token`
+- **Color**: `@color-scheme`, `@color-schemes`, `@system-colors`, `@text-color-class`
+- **Scripts**: `@body-scripts`, `@needs-script`, `@track-recently-viewed`
+- **Assets / utilities**: `@critical-css`, `@async-stylesheet`, `@preload-image-sizes`, `@text-alignment-classes`
+
+## Documentation Requirement
+
+Every snippet must open with a LiquidDoc `{% doc %}` block documenting each `@param` (with type and default) and an `@example` `{% render %}` call. This is mandatory, not optional.
+
+## Testing-Scenario Comments
+
+Include the relevant test cases in a comment so reviewers know what to exercise:
+
+```liquid
+{% comment %}
+  Test cases:
+  - Product with variants
+  - Product without image
+  - Product with compare_at_price
+  - Out of stock product
+{% endcomment %}
+```
+
+See [sections.mdc](sections.mdc) for the sections that render these utilities.

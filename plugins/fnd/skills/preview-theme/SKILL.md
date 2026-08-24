@@ -24,25 +24,29 @@ allowed-tools: Read, Glob, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-the
 
 # Preview theme (create / refresh)
 
-Both modes wrap `${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh` (the same script
+Both modes wrap `<plugin root>/scripts/create-preview-theme.sh` — **plugin root** = the
+plugin's own directory, `../../` relative to this skill's directory, and every
+`<plugin root>/…` path below resolves the same way; on Claude Code, write plugin root as the
+literal `${CLAUDE_PLUGIN_ROOT}` in every command (the host expands it, and this skill's
+pre-approved Bash prefix matches that exact form). It is the same script
 `create-pull-request` uses — running this skill is a good way to test the mechanics in
-isolation). **create** builds a named, **unpublished** theme = your branch's code (built
+isolation. **create** builds a named, **unpublished** theme = your branch's code (built
 locally) + the dev theme's customizer settings. **refresh** redeploys the branch's code
 into an existing preview **without touching its customizer settings** — everything except
 `config/settings_data.json`, `templates/**/*.json`, and section groups `sections/*.json`
 is pushed, so the content a reviewer configured stays put. Full contract:
-`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md → Preview theme`. The
+`<plugin root>/skills/create-pull-request/REFERENCE.md → Preview theme`. The
 **`error=` outcomes** + **page deep-link formulas** the steps below defer to live in the
-errors reference — `${CLAUDE_PLUGIN_ROOT}/references/preview-theme-errors.md` (read it
+errors reference — `<plugin root>/references/preview-theme-errors.md` (read it
 when a run fails or a deep-link is needed).
 
 When this checkout is a `git worktree` — or anything else already holds port 9292 — its dev
 server has to start on the theme the workspace's `notes.md` records as `session-theme:` and
 the port it records as `dev-port:` (`npm run dev -- --theme <id> --port <N>`), otherwise it
 silently collides with the main checkout's server or overwrites the shared dev theme
-(`${CLAUDE_PLUGIN_ROOT}/references/session-theme.md`).
+(`<plugin root>/references/session-theme.md`).
 
-> **Security:** the Theme Access token lives in `shopify.theme.toml`. **Never `Read` that
+> **Security:** the Theme Access token lives in `shopify.theme.toml`. **Never read that
 > file** — the script consumes the token inside the `shopify` subprocess and never prints
 > it. Pass nothing secret on the command line.
 
@@ -88,10 +92,10 @@ silently collides with the main checkout's server or overwrites the shared dev t
    template unknown → **ask, never guess**.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id
    exists, append the id to its `notes.md` as a dated `session-theme: <id> (<name>)
-   <preview_url>` bullet — otherwise the next `/fnd:ship`, qa phase or PR run finds no line
-   and creates a *second* theme for the same stream. Do **not** pass `--pin-toml` here: the
-   pin rewrites the developer's `shopify.theme.toml` and is the session-theme offer's call
-   (`${CLAUDE_PLUGIN_ROOT}/references/session-theme.md`), not this skill's.
+   <preview_url>` bullet — otherwise the next fnd `ship` skill run, qa phase or PR run finds
+   no line and creates a *second* theme for the same stream. Do **not** pass `--pin-toml`
+   here: the pin rewrites the developer's `shopify.theme.toml` and is the session-theme
+   offer's call (`<plugin root>/references/session-theme.md`), not this skill's.
 
 ## Steps — refresh
 

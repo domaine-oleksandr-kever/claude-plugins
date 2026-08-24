@@ -18,7 +18,11 @@ arguments:
 From a ready ticket to an open PR + Steps to Test in one run. The run contract —
 decision-record format, autonomy rule, escalation contract with the pre-authorized list,
 judgment-call log, phase-start re-read — lives in
-`${CLAUDE_PLUGIN_ROOT}/references/pipeline-mode.md`. **Read it now; it governs the run.**
+`<plugin root>/references/pipeline-mode.md`, where **plugin root** = the plugin's own
+directory — `../../` relative to this skill's directory — and every `<plugin root>/…` path
+below resolves the same way. On Claude Code, write plugin root as the literal
+`${CLAUDE_PLUGIN_ROOT}` in every command; the host expands it and the pre-approved Bash
+prefixes match that form. **Read it now; it governs the run.**
 
 Relationship to the series: the autonomous alternative to workflows 3–6. It never invokes
 the solo skills — it reuses their shared references, agents, and scripts, writes the same
@@ -32,9 +36,15 @@ Inputs (ask if missing): **Jira ticket** (`jira_ticket`); designs from the ticke
 link or `figma_url`.
 Operating mode: Steps 0–3 interactive (plan-mode discipline — read, align, ask; the only
 writes are the workspace cache and `pipeline.md`); Step 4 autonomous.
-Session model: strongest available as the conductor — **Fable recommended**, Opus
-acceptable; the conductor stays on the session model while every phase agent is pinned —
-rationale and assignments: `pipeline-mode.md` → Phase-agent models.
+On Cursor: run Steps 1–3 in Plan Mode whenever the change trips a guidelines trigger
+(>~5 files, multiple app layers, migrations, checkout/customer-data/auth/payments/
+security, multi-repo, a new architectural pattern, ambiguous requirements).
+Session model — on Claude Code: strongest available as the conductor, **Fable
+recommended**, Opus acceptable; on other hosts — Cursor: Sonnet, Opus only at the
+guidelines' "exceptional" bar; Codex (proposed): the conductor row of
+`<plugin root>/references/host-model-map.md`; OpenCode: the
+session model, no pin. The conductor stays on the session model while every phase agent is
+pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 
 ## Global rules
 
@@ -63,9 +73,10 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    `status: draft` — interviewed, never approved: keep the recorded answers, redo
    Steps 1–3 compactly from the workspace cache and re-present the ✋ — approval never
    comes from a resume. `done` / `aborted` / absent → fresh run.
-2. **Fresh context.** If the context monitor flagged this prompt (its notice
-   recommends `/compact`), recommend the stronger option — `/clear` + rerunning
-   `/fnd:ship <ticket>`; proceed only if the developer insists.
+2. **Fresh context.** If the context monitor flagged this prompt (its notice recommends
+   compacting), recommend the stronger option — a fresh session, then re-invoke ship on
+   the ticket (on Claude Code: `/clear` + `/fnd:ship <ticket>`); proceed only if the
+   developer insists.
 3. **Environment** (the `preflight-checks` scope, inline and compact — classify here,
    not mid-run): Atlassian MCP up; Figma MCP when designs are involved; Chrome DevTools
    MCP; the **local dev server** running (`npm run dev` — Turbo: `shopify theme dev -e dev`
@@ -80,7 +91,7 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    running on a different theme has to be restarted on this one — ask, never do it yourself).
    Everything else in item 3 keeps its stop semantics.
    `gh auth status`; Shopify CLI present; **store access** — one cheap read through
-   `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh` (probe `.graphql` → scratch),
+   `<plugin root>/scripts/shopify-admin-gql.sh` (probe `.graphql` → scratch),
    then classify: read failed → `none`; read ok → probe
    `currentAppInstallation { accessScopes }` — a `write_*` scope present → `full`, else
    `read-only` (never infer `full` from a working read). `error=` is **not** a stop:
@@ -90,41 +101,46 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 4. **Permissions.** List the side-effect commands this run will execute — `git commit`,
    `git push`, `gh pr create`, `gh pr checks` (the `--watch` loop), `gh api` (aftercare
    thread polling **and** the `graphql` `resolveReviewThread` mutation), `gh pr ready`
-   (the draft end-state flip), `${CLAUDE_PLUGIN_ROOT}/scripts/*.sh`,
-   `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs`, plus the policy-gated Atlassian
+   (the draft end-state flip), `<plugin root>/scripts/*.sh`,
+   `node "<plugin root>/scripts/md-to-adf.cjs"`, plus the policy-gated Atlassian
    MCP writes (`editJiraIssue`, `addCommentToJiraIssue`) — and confirm with the developer
-   that they're allowlisted (or acceptEdits is on); offer the `settings.json` entries or
-   `/fewer-permission-prompts` if not. A permission prompt mid-run kills autonomy — fix
+   that they're pre-approved in the host's permission settings (on Claude Code:
+   allowlisted in `settings.json`, or acceptEdits on — offer those entries or
+   `/fewer-permission-prompts` if not). A permission prompt mid-run kills autonomy — fix
    this before the interview, not after the ✋.
-5. **Workspace.** Ensure `.claude/fnd/<work-id>/` exists with `progress.md`
-   (`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`, incl. the git-exclude line).
+5. **Workspace.** Ensure `.claude/tasks/<work-id>/` exists with `progress.md`
+   (`<plugin root>/references/task-workspace.md`, incl. the git-exclude line).
 6. **Branch.** Working tree clean (or only this ticket's work in it); note the current
    branch for the interview.
 7. **Isolation offer** — compare the two dirs in **absolute** form, or a subdirectory of a
    plain checkout looks like a worktree:
    `test "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)"`
    — differing paths ⇒ already a linked worktree → say nothing, proceed. Same path = the main checkout → one
-   AskUserQuestion, never a block: this run occupies the repo and this session end to end.
-   Put the resolved command — `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh <ticket-key>`,
-   plugin root expanded — in the question itself, so "Continue here" still leaves it in front
+   question to the developer (on Claude Code: AskUserQuestion), never a block: this run
+   occupies the repo and this session end to end.
+   Put the resolved command — `<plugin root>/scripts/worktree-setup.sh <ticket-key>`,
+   plugin root spelled out as its absolute path — in the question itself, so "Continue here"
+   still leaves a pasteable command in front
    of the developer. **Isolate** → run that command, print
    its hand-off block **verbatim**, and **stop** — a session cannot relocate itself, so the
-   developer opens a new terminal, `cd`s into the printed worktree, launches `claude`, and
-   re-runs `/fnd:ship <ticket>` there. **Continue here** → proceed, no further mention.
+   developer opens a new terminal, `cd`s into the printed worktree, starts a fresh agent
+   session there, and re-invokes ship on the ticket (on Claude Code: `claude` +
+   `/fnd:ship <ticket>`). **Continue here** → proceed, no further mention.
    Script absent (older plugin install) → offer the one-line fallback instead:
    `git worktree add -b feat/<KEY> ../<repo>-<KEY> origin/develop`.
 8. **Session theme** — one preview theme per work stream, so the dev server, the QA rows
    that can't run locally, and the PR all point at the same unpublished theme instead of
    the shared dev theme two checkouts would fight over. The flow is
-   `${CLAUDE_PLUGIN_ROOT}/references/session-theme.md` (read it whenever the gate runs).
+   `<plugin root>/references/session-theme.md` (read it whenever the gate runs).
    Workspace `notes.md` already records a `session-theme: <id>` line → no question: run
    `…/create-preview-theme.sh pin --theme <id>` silently to re-assert it in **this**
    checkout (the workspace is shared across checkouts, so recorded ≠ pinned here;
    re-pinning the same id is a no-op) and say so in one line. That line is the only
    silent-reuse trigger — never infer one from the config, which you may not read and
    whose `dev_theme_id` cannot tell a session pin from the shared dev theme.
-   Otherwise one AskUserQuestion, never a block, both resolved commands in the question
-   text: **create one now** (`${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh create
+   Otherwise one question to the developer (on Claude Code: AskUserQuestion), never a
+   block, both resolved commands in the question
+   text: **create one now** (`<plugin root>/scripts/create-preview-theme.sh create
    --name "<name>" --reuse --pin-toml`, `<name>` derived as the PR's is — `info`'s
    `dev_theme_name` with the role prefix swapped for the key: `[ELC-206] Kever | Domaine`)
    vs **use an existing theme id** the developer supplies (`…/create-preview-theme.sh pin
@@ -138,19 +154,19 @@ rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 ## Step 1 — Ingest (parallel reads, workspace-first)
 
 As develop's Phase 1: context-first, then workspace, then fetch (layout + write rule:
-`${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`) — every reader gets the workspace path
+`<plugin root>/references/task-workspace.md`) — every reader gets the workspace path
 and writes its own file.
 Spawn concurrently: **`jira-reader`** (Description, AC, TA, Steps to Test, links,
 `figma_urls`), one **`figma-reader`** per Figma URL, **`theme-explorer`** seeded with the
 task intent. Once `jira-reader` returns the links, spawn one **`doc-reader`** per
 remaining doc link, in parallel, per
-`${CLAUDE_PLUGIN_ROOT}/references/reading-linked-docs.md` (reuse-before-fetch; pass the
+`<plugin root>/references/reading-linked-docs.md` (reuse-before-fetch; pass the
 workspace path; Notion mandatory — a reader naming a missing MCP → stop and tell the
 developer). Then **validate readiness**: Description, AC,
 approved **Technical Approach**, Figma node — any missing → **stop** and point at the gap
-(`/fnd:write-technical-approach` for a missing TA). If the ticket/docs define metafields
-or metaobjects, plan the provisioning per
-`${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md` → **Planning & QA
+(the fnd `write-technical-approach` skill for a missing TA). If the ticket/docs define
+metafields or metaobjects, plan the provisioning per
+`<plugin root>/references/metafield-metaobject-setup.md` → **Planning & QA
 digest** (the file's first ~45 lines — read only that; the rest is implement-phase
 material). Read the
 load-bearing files `theme-explorer` points to yourself — the plan is built from real
@@ -162,10 +178,11 @@ every store-data dependency needed to **build and to QA**: metafield/metaobject
 definitions AND actual values, selling plan groups
 (subscriptions), bundle configuration, target products/collections/pages, template
 assignments, app-owned records. Then spawn one **general-purpose subagent**
-(`model: sonnet`) briefed with that list, the store-access level from Step 0, the
-workspace path (`.claude/fnd/<work-id>/`, so `--out` dumps land in its `tmp/`, never the
+(on Claude Code `model: sonnet`; elsewhere the host's standard-dev tier) briefed with
+that list, the store-access level from Step 0, the
+workspace path (`.claude/tasks/<work-id>/`, so `--out` dumps land in its `tmp/`, never the
 project root), and the probe rules — **strictly read-only**: GraphQL queries only (no
-mutations) via `${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh`, targeted, not a full
+mutations) via `<plugin root>/scripts/shopify-admin-gql.sh`, targeted, not a full
 catalog scan, and `theme-json.sh` **`get` only, never `set`** — it probes, it never mutates
 store or theme state (that right belongs to the post-✋ phases, under snapshot→restore);
 anything big goes through `--out` into the workspace `tmp/` + `jq`; never `Read` `.env` or
@@ -183,7 +200,8 @@ or unverified entry becomes a Step 2 interview question — never a mid-run esca
 
 ## Step 2 — Interview (batched, once)
 
-AskUserQuestion, ≤4 questions per call, 2–3 calls as the target — but **every store-data
+Ask in batches — ≤4 questions per batch, 2–3 batches as the target (on Claude Code: one
+AskUserQuestion call per batch) — but **every store-data
 gap always gets its question**; an extra call beats an unasked gap. Every question
 carries your
 recommended answer. Explore the codebase instead of asking whenever the code can answer.
@@ -235,14 +253,15 @@ Draft **two artifacts** and present them together:
   metafield/metaobject when both exist); every data-driven row names its **QA target**
   (product/entity handle) from the store-data audit — rows resolved as static-only are
   marked so; break-it rows per
-  `${CLAUDE_PLUGIN_ROOT}/references/break-it-qa.md` (its rules govern — No reduced
+  `<plugin root>/references/break-it-qa.md` (its rules govern — No reduced
   mode, `not-executable: access`); design
   conformance vs the Figma
   specs; accessibility; performance; viewport & cross-browser — the same dimensions
   solo QA covers.
 
 **Policy said yes to the pressure-test** → **before presenting**, run it on the draft plan
-per `${CLAUDE_PLUGIN_ROOT}/references/research-pressure-test.md`, pinning `model: opus`.
+per `<plugin root>/references/research-pressure-test.md`, pinned to the deepest-review
+tier (on Claude Code: `model: opus`).
 
 ✋ Wait for explicit approval (edits welcome). Then save `plan.md` + the checklist into
 `qa.md`, finalize `pipeline.md` and flip `status: draft` → `active` — only this approval
@@ -263,17 +282,22 @@ judgment calls to `notes.md` as dated
 `pipeline:` entries; on completion write your artifact and tick your `progress.md` row
 (aftercare: `pipeline.md` only); your final message is a compact report
 (≤ ~20 lines), never file dumps."*
+**Spawning shape:** where a subagent may spawn subagents of its own (on Claude Code, always)
+the briefs run as written. Where it may not — one-level nesting — `pipeline-phases.md` →
+Orchestration governs: you spawn every helper at your own level and hand its findings into the
+phase brief. Read that section with the file; it names what the degraded shape costs.
 **Model tiering:** phase agents never inherit the session model — pass `model` explicitly
 on every spawn; the assignments live in `pipeline-mode.md` → Phase-agent models (their
 single home).
 The conductor verifies tick + artifact before advancing, ticks the `pipeline.md` phase
-row, and relays any `ESCALATE` via AskUserQuestion → appends the answer to `pipeline.md`
+row, and relays any `ESCALATE` to the developer as a question (on Claude Code:
+AskUserQuestion) → appends the answer to `pipeline.md`
 → re-spawns the phase (it resumes from the artifacts).
 
 The phases, in order: **implement → qa → finalize → create-pr → steps-to-test → aftercare →
 jira-hand-off** (the row mapping above says which `progress.md` row each ticks). Their briefs
 — mission, what the brief must contain, the per-phase reference list, the phase-local caps and
-escalations — live in `${CLAUDE_PLUGIN_ROOT}/references/pipeline-phases.md`: **read it here, at
+escalations — live in `<plugin root>/references/pipeline-phases.md`: **read it here, at
 the start of Step 4, and not before** — it is this step's working spec and pure weight before
 the ✋, so a run that stops at the gate never pays for it. Work it phase by phase; every brief
 there inherits the protocol above.

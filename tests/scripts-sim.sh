@@ -30,6 +30,12 @@ TMP="$(mktemp -d)"
 WPID=""
 trap 'if [ -n "$WPID" ]; then kill "$WPID" 2>/dev/null; fi; rm -rf "$TMP"' EXIT
 
+# A real ~/.config/domaine/env on this machine would inject switches into every case (the
+# scripts under test read it via env-file.cjs / domaine_env) — point the global layer at a
+# sandbox. It sits under $TMP so the trap above owns its removal; a PID-suffixed path beside it
+# would outlive the run. The EV cases below set their own.
+export XDG_CONFIG_HOME="$TMP/xdg"
+
 pass=0; fail=0; failures=""
 ok() { pass=$((pass + 1)); }
 bad() { fail=$((fail + 1)); failures="${failures}  [$1] $2
@@ -400,7 +406,12 @@ else bad T32-strip-appends-nothing "rc=$rc bytes=$(wc -c < "$BF/nonl.out" | tr -
 # degrades to error=no_store like an absent file, never a bare awk error with no error= line —
 # the `|| true` on the toml_value call site is what keeps set -euo pipefail out of it
 UT33="$TMP/unreadable-t.toml"; printf 'store = "acme-dev"\n' > "$UT33"; chmod 000 "$UT33"
-rc=0; TOML_PATH="$UT33" "$BASH_BIN" "$TJ" themes --engine themecli >"$O" 2>"$E" || rc=$?
+# The themecli engine probes `command -v shopify` before it ever reads the toml, so the case
+# needs a CLI on PATH to reach the read at all; the stub must never actually run — the no-store
+# refusal comes first — so it exits 99 to fail the case loudly if it ever does.
+T33SHIM="$TMP/t33-shim"; mkdir -p "$T33SHIM"
+printf '#!/bin/sh\nexit 99\n' > "$T33SHIM/shopify"; chmod +x "$T33SHIM/shopify"
+rc=0; TOML_PATH="$UT33" PATH="$T33SHIM:$PATH" "$BASH_BIN" "$TJ" themes --engine themecli >"$O" 2>"$E" || rc=$?
 chmod 644 "$UT33"
 if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && ! grep -qi "awk: can't open" "$E"; then ok
 else bad T33-unreadable-toml-no-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
@@ -2645,7 +2656,7 @@ wt_unlisten() {
 # NOT already exclude, or it proves nothing.
 wt_next_port() {
   local p=9293
-  while [ "$p" -le 9312 ] && grep -rqE "dev-port: $p\$" "$WTR/theme/.claude/fnd" 2>/dev/null; do
+  while [ "$p" -le 9312 ] && grep -rqE "dev-port: $p\$" "$WTR/theme/.claude/tasks" 2>/dev/null; do
     p=$((p + 1))
   done
   printf '%s' "$p"
@@ -2696,11 +2707,11 @@ if grep -qF "cd '$W1DIRP' && claude" "$O" && grep -q '/fnd:ship ABC-123' "$O" \
    && printf '%s' "$W1PORT" | grep -qE '^9[0-9]+$'; then ok
 else bad W2-handoff-block "port=$W1PORT out=$(tr '\n' ';' < "$O")"; fi
 
-# W3: `.claude/fnd` is a symlink INTO the main checkout (one shared task workspace for both
+# W3: `.claude/tasks` is a symlink INTO the main checkout (one shared task workspace for both
 # sessions), while settings.local.json is a real copy — sharing it live would let two sessions
 # overwrite each other's permission approvals
-if [ -L "$W1DIR/.claude/fnd" ] \
-   && [ "$(cd "$W1DIR/.claude/fnd" && pwd -P)" = "$(cd "$WTR/theme/.claude/fnd" && pwd -P)" ] \
+if [ -L "$W1DIR/.claude/tasks" ] \
+   && [ "$(cd "$W1DIR/.claude/tasks" && pwd -P)" = "$(cd "$WTR/theme/.claude/tasks" && pwd -P)" ] \
    && [ -f "$W1DIR/.claude/settings.local.json" ] && [ ! -L "$W1DIR/.claude/settings.local.json" ]; then ok
 else bad W3-claude-wiring "link=$(ls -l "$W1DIR/.claude" 2>&1 | tr '\n' ';')"; fi
 
@@ -2712,18 +2723,18 @@ if grep -q '^env=copied$' "$O" && [ -f "$W1DIR/.env" ] && [ ! -L "$W1DIR/.env" ]
 else bad W3b-env-copied "out=$(grep '^env=' "$O") env=$(cat "$W1DIR/.env" 2>&1 | tr '\n' ';')"; fi
 
 # W3c: the symlink is stamped into the shared `.git/info/exclude`, so git never sees it. The
-# documented `.claude/fnd/` line matches directories only — unstamped, the ship run inside the
+# documented `.claude/tasks/` line matches directories only — unstamped, the ship run inside the
 # worktree would `git add` a link holding an absolute path from one developer's machine.
-if ! wt_git -C "$W1DIR" status --porcelain -uall | grep -q '\.claude/fnd' \
+if ! wt_git -C "$W1DIR" status --porcelain -uall | grep -q '\.claude/tasks' \
    && wt_git -C "$W1DIR" status --porcelain -uall | grep -q '\.claude/settings.local.json' \
-   && grep -qx '\.claude/fnd' "$WTR/theme/.git/info/exclude"; then ok
+   && grep -qx '\.claude/tasks' "$WTR/theme/.git/info/exclude"; then ok
 else bad W3c-fnd-link-excluded "status=$(wt_git -C "$W1DIR" status --porcelain -uall | tr '\n' ';')"; fi
 
 # W4: the chosen dev port is recorded in the SHARED workspace (the worktree session finds it
 # through the symlink), and it is not the main checkout's 9292
-if grep -qE "dev-port: $W1PORT\$" "$WTR/theme/.claude/fnd/ABC-123/notes.md" 2>/dev/null \
-   && [ -f "$W1DIR/.claude/fnd/ABC-123/notes.md" ] && [ "$W1PORT" != "9292" ]; then ok
-else bad W4-dev-port-recorded "port=$W1PORT notes=$(tr '\n' ';' < "$WTR/theme/.claude/fnd/ABC-123/notes.md" 2>&1)"; fi
+if grep -qE "dev-port: $W1PORT\$" "$WTR/theme/.claude/tasks/ABC-123/notes.md" 2>/dev/null \
+   && [ -f "$W1DIR/.claude/tasks/ABC-123/notes.md" ] && [ "$W1PORT" != "9292" ]; then ok
+else bad W4-dev-port-recorded "port=$W1PORT notes=$(tr '\n' ';' < "$WTR/theme/.claude/tasks/ABC-123/notes.md" 2>&1)"; fi
 
 # W5 (pin): no package.json in the fixture ⇒ `npm ci` is skipped entirely, not attempted
 if grep -q '^npm=skipped$' "$O" && [ ! -s "$WT_NPM_LOG" ]; then ok
@@ -2738,14 +2749,14 @@ rc=0; wt_run ABC-123 || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^reused=true$' "$O" && grep -q '^toml=kept$' "$O" \
    && grep -q '^env=kept$' "$O" && grep -q '^EXTRA=1$' "$W1DIR/.env" \
    && [ "$(wt_key dev_port)" = "$W1PORT" ] && grep -q '# local edit' "$W1DIR/shopify.theme.toml" \
-   && [ "$(grep -c 'dev-port:' "$WTR/theme/.claude/fnd/ABC-123/notes.md")" -eq 1 ]; then ok
+   && [ "$(grep -c 'dev-port:' "$WTR/theme/.claude/tasks/ABC-123/notes.md")" -eq 1 ]; then ok
 else bad W6-idempotent-rerun "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # W7: a kebab-case slug is a valid work-id too — not every worktree is ticket-shaped
 rc=0; wt_run header-refactor || rc=$?
 if [ "$rc" -eq 0 ] && [ -d "$WTR/theme-header-refactor" ] \
    && [ "$(wt_branch "$WTR/theme-header-refactor")" = "feat/header-refactor" ] \
-   && [ -d "$WTR/theme/.claude/fnd/header-refactor" ] \
+   && [ -d "$WTR/theme/.claude/tasks/header-refactor" ] \
    && ! grep -q '/fnd:ship' "$O"; then ok
 else bad W7-slug-create "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
@@ -2848,15 +2859,15 @@ else bad W13-remove-force "rc=$rc out=$(tr '\n' ';' < "$O") dir=$([ -d "$W1DIR" 
 # W14 (the data-loss guard): a CLEAN worktree removes without --force even though the `.claude`
 # wiring and the copied toml are untracked (git's own `worktree remove` refuses on those), and
 # the shared task workspace in the MAIN checkout survives — the symlink is dropped before the
-# removal, so nothing follows it back into `<main>/.claude/fnd`.
-printf 'the approved plan\n' > "$WTR/theme/.claude/fnd/header-refactor/plan.md"
+# removal, so nothing follows it back into `<main>/.claude/tasks`.
+printf 'the approved plan\n' > "$WTR/theme/.claude/tasks/header-refactor/plan.md"
 rc=0; wt_run --remove header-refactor || rc=$?
 if [ "$rc" -eq 0 ] && [ ! -d "$WTR/theme-header-refactor" ] \
-   && [ -d "$WTR/theme/.claude/fnd/header-refactor" ] \
-   && [ "$(cat "$WTR/theme/.claude/fnd/header-refactor/plan.md" 2>/dev/null)" = "the approved plan" ] \
-   && [ -f "$WTR/theme/.claude/fnd/ABC-123/notes.md" ] \
-   && grep -q "^workspace_kept=$WTMAIN/.claude/fnd/header-refactor$" "$O"; then ok
-else bad W14-remove-clean-keeps-workspace "rc=$rc out=$(tr '\n' ';' < "$O") left=$(ls "$WTR/theme/.claude/fnd" 2>&1 | tr '\n' ' ')"; fi
+   && [ -d "$WTR/theme/.claude/tasks/header-refactor" ] \
+   && [ "$(cat "$WTR/theme/.claude/tasks/header-refactor/plan.md" 2>/dev/null)" = "the approved plan" ] \
+   && [ -f "$WTR/theme/.claude/tasks/ABC-123/notes.md" ] \
+   && grep -q "^workspace_kept=$WTMAIN/.claude/tasks/header-refactor$" "$O"; then ok
+else bad W14-remove-clean-keeps-workspace "rc=$rc out=$(tr '\n' ';' < "$O") left=$(ls "$WTR/theme/.claude/tasks" 2>&1 | tr '\n' ' ')"; fi
 
 # W14b: the workspace outlives the worktree by design, so its `dev-port:` line is still there on
 # a re-create — sticky is right for a re-entry (the dev server is already on that port) but a
@@ -2969,7 +2980,7 @@ rc=0; wt_run REL-9 || rc=$?; wt_rel1="$(wt_key dev_port)"
 rc2=0; wt_run --remove REL-9 || rc2=$?
 rc3=0; wt_run REL-10 || rc3=$?; wt_rel2="$(wt_key dev_port)"
 if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$rc3" -eq 0 ] \
-   && [ -f "$WTR/theme/.claude/fnd/REL-9/notes.md" ] && [ -n "$wt_rel1" ] \
+   && [ -f "$WTR/theme/.claude/tasks/REL-9/notes.md" ] && [ -n "$wt_rel1" ] \
    && [ "$wt_rel2" = "$wt_rel1" ]; then ok
 else bad W23-port-released-on-remove "rc=$rc/$rc2/$rc3 ports=$wt_rel1/$wt_rel2 out=$(tr '\n' ';' < "$O")"; fi
 wt_run --remove REL-10 --force >/dev/null 2>&1 || true
@@ -2979,21 +2990,21 @@ wt_run --remove REL-10 --force >/dev/null 2>&1 || true
 # that made the re-run fail with worktree_path_taken. Nothing is listening on any of them.
 i=9293
 while [ "$i" -le 9312 ]; do
-  mkdir -p "$WTR/theme/.claude/fnd/OLD-$i"
+  mkdir -p "$WTR/theme/.claude/tasks/OLD-$i"
   printf -- '- 2026-01-01 worktree `gone` on branch `feat/OLD-%s`, dev-port: %s\n' "$i" "$i" \
-    > "$WTR/theme/.claude/fnd/OLD-$i/notes.md"
+    > "$WTR/theme/.claude/tasks/OLD-$i/notes.md"
   i=$((i + 1))
 done
 rc=0; wt_run EXH-1 || rc=$?
 wt_exh_port="$(wt_key dev_port)"
-rm -rf "$WTR"/theme/.claude/fnd/OLD-*
+rm -rf "$WTR"/theme/.claude/tasks/OLD-*
 if [ "$rc" -eq 0 ] && [ -d "$WTR/theme-EXH-1" ] && ! grep -q '^error=' "$O" \
    && printf '%s' "$wt_exh_port" | grep -qE '^9[0-9]+$'; then ok
 else bad W24-stale-ports-released "rc=$rc port=$wt_exh_port out=$(tr '\n' ';' < "$O")"; fi
 wt_run --remove EXH-1 --force >/dev/null 2>&1 || true
 
 # W25 (bug): the exclude stamp appends to a file the DEVELOPER owns. One whose last byte is not
-# a newline — hand-edited ones often are — used to get `.claude/fnd` glued onto the last
+# a newline — hand-edited ones often are — used to get `.claude/tasks` glued onto the last
 # pattern, which breaks that pattern and leaves the symlink unexcluded. Fresh repo: the main
 # fixture's exclude was already stamped (and already ends in a newline).
 mkdir -p "$WTR/nonl"
@@ -3008,7 +3019,7 @@ printf 'secret.txt' > "$WTR/nonl/theme/.git/info/exclude"
 rc=0; (cd "$WTR/nonl/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
   "$BASH_BIN" "$WTS" NL-1) >"$O" 2>"$E" || rc=$?
 WT_NL_EXCL="$WTR/nonl/theme/.git/info/exclude"
-if [ "$rc" -eq 0 ] && grep -qx 'secret.txt' "$WT_NL_EXCL" && grep -qx '\.claude/fnd' "$WT_NL_EXCL" \
+if [ "$rc" -eq 0 ] && grep -qx 'secret.txt' "$WT_NL_EXCL" && grep -qx '\.claude/tasks' "$WT_NL_EXCL" \
    && ! grep -q 'secret.txt\.claude' "$WT_NL_EXCL"; then ok
 else bad W25-exclude-trailing-newline "rc=$rc exclude=$(tr '\n' ';' < "$WT_NL_EXCL" 2>&1)"; fi
 
@@ -3038,7 +3049,7 @@ wt_run --remove NOP-1 --force >/dev/null 2>&1 || true
 
 # W27: in a submodule (or a `--separate-git-dir` checkout) the common git dir is not inside the
 # working tree, so dirname(common dir) is not a checkout — the sibling worktree and the shared
-# `.claude/fnd` would be created inside git's own plumbing. Named refusal, nothing created.
+# `.claude/tasks` would be created inside git's own plumbing. Named refusal, nothing created.
 mkdir -p "$WTR/sep"
 wt_git init -q --separate-git-dir "$WTR/sep/realgit" "$WTR/sep/theme"
 rc=0; (cd "$WTR/sep/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
@@ -3138,6 +3149,172 @@ else bad W28f-unpin-stray-comment "rc=$rc out=$(grep -E '^toml' "$O" | tr '\n' '
 if grep -q 'npm run dev -- --theme <session-theme-id> --port' "$O" \
    && ! grep -q '(dev server: --port' "$O"; then ok
 else bad W29-handoff-names-theme "out=$(grep -n 'dev server' "$O" | tr '\n' ';')"; fi
+
+# W30 (rename migration): a main checkout still holding the legacy `.claude/fnd` workspace —
+# the run moves it to `.claude/tasks` once (never merging into an existing new home), so
+# per-ticket memory follows the rename before the shared symlink is created.
+mkdir -p "$WTR/mig"
+wt_git init --bare -q "$WTR/mig/origin.git"
+wt_git init -q "$WTR/mig/theme"
+printf 'x\n' > "$WTR/mig/theme/README.md"
+wt_git -C "$WTR/mig/theme" add -A
+wt_git -C "$WTR/mig/theme" commit -qm init
+wt_git -C "$WTR/mig/theme" remote add origin "$WTR/mig/origin.git"
+wt_git -C "$WTR/mig/theme" push -qu origin develop
+mkdir -p "$WTR/mig/theme/.claude/fnd/MIG-1"
+printf '# MIG-1 — notes\nlegacy note\n' > "$WTR/mig/theme/.claude/fnd/MIG-1/notes.md"
+rc=0; (cd "$WTR/mig/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+  "$BASH_BIN" "$WTS" MIG-1) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -e "$WTR/mig/theme/.claude/fnd" ] \
+   && grep -qx 'legacy note' "$WTR/mig/theme/.claude/tasks/MIG-1/notes.md" 2>/dev/null \
+   && [ -L "$WTR/mig/theme-MIG-1/.claude/tasks" ]; then ok
+else bad W30-legacy-workspace-migrated "rc=$rc fnd=$(ls "$WTR/mig/theme/.claude" 2>&1 | tr '\n' ' ') out=$(tr '\n' ';' < "$O")"; fi
+
+# A fresh theme fixture per migration case: the rename runs once per checkout, so each case
+# needs its own main checkout to run it in.
+mk_mig_repo() { # <dir>
+  mkdir -p "$1"
+  wt_git init --bare -q "$1/origin.git"
+  wt_git init -q "$1/theme"
+  printf 'x\n' > "$1/theme/README.md"
+  wt_git -C "$1/theme" add -A
+  wt_git -C "$1/theme" commit -qm init
+  wt_git -C "$1/theme" remote add origin "$1/origin.git"
+  wt_git -C "$1/theme" push -qu origin develop
+}
+mig_run() { # <repo-dir> <args…>
+  (cd "$1/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+     "$BASH_BIN" "$WTS" "${@:2}") >"$O" 2>"$E"
+}
+
+# W30a: BOTH homes present — the new one is real content, and the migration may not merge into
+# it or overwrite it. The legacy directory stays where it is, untouched, for the developer.
+mk_mig_repo "$WTR/mig2"
+mkdir -p "$WTR/mig2/theme/.claude/fnd/OLD-1" "$WTR/mig2/theme/.claude/tasks/NEW-1"
+printf 'legacy\n' > "$WTR/mig2/theme/.claude/fnd/OLD-1/notes.md"
+printf 'current\n' > "$WTR/mig2/theme/.claude/tasks/NEW-1/notes.md"
+rc=0; mig_run "$WTR/mig2" MIG-2 || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'legacy' "$WTR/mig2/theme/.claude/fnd/OLD-1/notes.md" 2>/dev/null \
+   && grep -qx 'current' "$WTR/mig2/theme/.claude/tasks/NEW-1/notes.md" 2>/dev/null \
+   && [ ! -e "$WTR/mig2/theme/.claude/tasks/OLD-1" ]; then ok
+else bad W30a-no-merge "rc=$rc fnd=$(ls "$WTR/mig2/theme/.claude/fnd" 2>&1 | tr '\n' ' ') tasks=$(ls "$WTR/mig2/theme/.claude/tasks" 2>&1 | tr '\n' ' ')"; fi
+
+# W30b: a `.claude/fnd` that is already a SYMLINK is somebody's own wiring (or a worktree's link
+# into another checkout) — `mv` would move the link, not the workspace behind it.
+mk_mig_repo "$WTR/mig3"
+mkdir -p "$WTR/mig3/theme/.claude" "$WTR/mig3/elsewhere/MIG-3"
+printf 'elsewhere\n' > "$WTR/mig3/elsewhere/MIG-3/notes.md"
+ln -s "$WTR/mig3/elsewhere" "$WTR/mig3/theme/.claude/fnd"
+rc=0; mig_run "$WTR/mig3" MIG-3 || rc=$?
+if [ "$rc" -eq 0 ] && [ -L "$WTR/mig3/theme/.claude/fnd" ] \
+   && [ "$(readlink "$WTR/mig3/theme/.claude/fnd")" = "$WTR/mig3/elsewhere" ]; then ok
+else bad W30b-symlink-untouched "rc=$rc link=$(readlink "$WTR/mig3/theme/.claude/fnd" 2>&1)"; fi
+
+# W30c (bug): the migration runs in BOTH modes, but the exclude stamp used to run only in create
+# mode — a `--remove` that renamed the workspace left it untracked AND unignored, one bulk
+# `git add` away from a client PR. The teardown below is the only run that touches this checkout.
+mk_mig_repo "$WTR/mig4"
+rc=0; mig_run "$WTR/mig4" MIG-4 || rc=$?         # create the worktree first…
+# …then put the checkout back into its pre-rename shape (the state a worktree made by the older
+# script is torn down from) and drop the stamp the create run left behind
+mv "$WTR/mig4/theme/.claude/tasks" "$WTR/mig4/theme/.claude/fnd"
+mkdir -p "$WTR/mig4/theme/.claude/fnd/OLD-4"
+printf 'legacy\n' > "$WTR/mig4/theme/.claude/fnd/OLD-4/notes.md"
+rm -f "$WTR/mig4/theme/.git/info/exclude"
+rc2=0; mig_run "$WTR/mig4" --remove MIG-4 --force || rc2=$?
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] \
+   && grep -qx 'legacy' "$WTR/mig4/theme/.claude/tasks/OLD-4/notes.md" 2>/dev/null \
+   && grep -qx '\.claude/tasks' "$WTR/mig4/theme/.git/info/exclude" 2>/dev/null; then ok
+else bad W30c-remove-mode-exclude "rc=$rc rc2=$rc2 out=$(tr '\n' ';' < "$O") exclude=$(tr '\n' ';' < "$WTR/mig4/theme/.git/info/exclude" 2>&1)"; fi
+
+# W30d (bug): worktrees created BEFORE the rename hold `<wt>/.claude/fnd -> <main>/.claude/fnd`.
+# The `mv` leaves every one of them dangling, so the session working there quietly starts its own
+# private workspace and the two forks of the task memory never meet again. Each link is re-pointed
+# under the new name instead, and the legacy one dropped only once its replacement exists.
+mk_mig_repo "$WTR/mig5"
+mkdir -p "$WTR/mig5/theme/.claude/fnd/OLD-5"
+printf 'legacy\n' > "$WTR/mig5/theme/.claude/fnd/OLD-5/notes.md"
+wt_git -C "$WTR/mig5/theme" worktree add -q -b feat/pre-rename "$WTR/mig5/theme-pre" >/dev/null 2>&1
+mkdir -p "$WTR/mig5/theme-pre/.claude"
+ln -s "$WTR/mig5/theme/.claude/fnd" "$WTR/mig5/theme-pre/.claude/fnd"
+rc=0; mig_run "$WTR/mig5" MIG-5 || rc=$?
+if [ "$rc" -eq 0 ] && [ -L "$WTR/mig5/theme-pre/.claude/tasks" ] \
+   && [ ! -e "$WTR/mig5/theme-pre/.claude/fnd" ] \
+   && grep -qx 'legacy' "$WTR/mig5/theme-pre/.claude/tasks/OLD-5/notes.md" 2>/dev/null; then ok
+else bad W30d-worktree-link-repointed "rc=$rc pre=$(ls -l "$WTR/mig5/theme-pre/.claude" 2>&1 | tr '\n' ';')"; fi
+
+# W30e: …and a worktree that ALREADY has a real `.claude/tasks` keeps it — the never-merge rule
+# of the rename applies to the re-point too.
+mk_mig_repo "$WTR/mig6"
+mkdir -p "$WTR/mig6/theme/.claude/fnd/OLD-6"
+printf 'legacy\n' > "$WTR/mig6/theme/.claude/fnd/OLD-6/notes.md"
+wt_git -C "$WTR/mig6/theme" worktree add -q -b feat/pre-rename "$WTR/mig6/theme-pre" >/dev/null 2>&1
+mkdir -p "$WTR/mig6/theme-pre/.claude/tasks/OWN-6"
+printf 'own\n' > "$WTR/mig6/theme-pre/.claude/tasks/OWN-6/notes.md"
+ln -s "$WTR/mig6/theme/.claude/fnd" "$WTR/mig6/theme-pre/.claude/fnd"
+rc=0; mig_run "$WTR/mig6" MIG-6 || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -L "$WTR/mig6/theme-pre/.claude/tasks" ] \
+   && grep -qx 'own' "$WTR/mig6/theme-pre/.claude/tasks/OWN-6/notes.md" 2>/dev/null \
+   && [ -L "$WTR/mig6/theme-pre/.claude/fnd" ]; then ok
+else bad W30e-worktree-own-tasks-kept "rc=$rc pre=$(ls -l "$WTR/mig6/theme-pre/.claude" 2>&1 | tr '\n' ';')"; fi
+
+# ═══ EV — domaine env files: scripts/env-file.cjs loader + scripts/domaine-env.cjs CLI ═══
+EVR="$TMP/env"; mkdir -p "$EVR/cfg" "$EVR/repo/sub"
+git init -q "$EVR/repo"
+EVF="$ROOT/plugins/fnd/scripts/env-file.cjs"
+EVC="$ROOT/plugins/fnd/scripts/domaine-env.cjs"
+
+# EV1: `set` writes the global file; `set --project` targets <git toplevel>/.claude/domaine.env
+(cd "$EVR/repo" && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_DEBUG=1 >/dev/null \
+  && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_TTL=12 >/dev/null \
+  && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_TTL=48 --project >/dev/null)
+if grep -qx 'FND_MCP_SLIM_DEBUG=1' "$EVR/cfg/domaine/env" \
+   && grep -qx 'FND_MCP_SLIM_TTL=12' "$EVR/cfg/domaine/env" \
+   && grep -qx 'FND_MCP_SLIM_TTL=48' "$EVR/repo/.claude/domaine.env"; then ok
+else bad EV1-cli-set "global=$(tr '\n' ';' < "$EVR/cfg/domaine/env" 2>&1) project=$(tr '\n' ';' < "$EVR/repo/.claude/domaine.env" 2>&1)"; fi
+
+# EV2: loader precedence from a SUBDIR (walk-up finds the project file): project beats global,
+# a real process-env value beats both
+o1="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" node -e \
+  'require(process.argv[1]).load(); console.log(process.env.FND_MCP_SLIM_DEBUG+"|"+process.env.FND_MCP_SLIM_TTL)' "$EVF")"
+o2="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" FND_MCP_SLIM_TTL=7 node -e \
+  'require(process.argv[1]).load(); console.log(process.env.FND_MCP_SLIM_TTL)' "$EVF")"
+if [ "$o1" = "1|48" ] && [ "$o2" = "7" ]; then ok; else bad EV2-precedence "o1=$o1 o2=$o2"; fi
+
+# EV3: the allowlist — PATH/NODE_OPTIONS in the file never reach process.env, and the CLI
+# refuses to write them; malformed lines and comments are skipped without error
+printf '# tuning\nPATH=/evil\nNODE_OPTIONS=--bad\nnot a pair\nFND_WHALE_GUIDE=0\n' > "$EVR/cfg/domaine/env"
+o3="$(cd "$EVR/cfg" && XDG_CONFIG_HOME="$EVR/cfg" node -e \
+  'require(process.argv[1]).load(); console.log((process.env.PATH.includes("/evil")?"evil":"clean")+"|"+process.env.FND_WHALE_GUIDE+"|"+(process.env.NODE_OPTIONS||"unset"))' "$EVF")"
+rc=0; XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set PATH=/evil >/dev/null 2>&1 || rc=$?
+if [ "$o3" = "clean|0|unset" ] && [ "$rc" -ne 0 ]; then ok; else bad EV3-allowlist "o3=$o3 rc=$rc"; fi
+
+# EV4: `unset` removes only the key line — comments and unknown lines survive; `list` names
+# the source that won
+XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" unset FND_WHALE_GUIDE >/dev/null
+o4="$(cd "$EVR/repo" && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" list)"
+if grep -qx '# tuning' "$EVR/cfg/domaine/env" && ! grep -q 'FND_WHALE_GUIDE' "$EVR/cfg/domaine/env" \
+   && printf '%s' "$o4" | grep -q 'FND_MCP_SLIM_TTL.*= 48.*(project file)'; then ok
+else bad EV4-unset-list "file=$(tr '\n' ';' < "$EVR/cfg/domaine/env") list=$(printf '%s' "$o4" | grep FND_MCP_SLIM_TTL)"; fi
+
+# EV5: the bash-side reader — the domaine_env function the two shell scripts carry (extracted
+# from the shipped file, so this tests the real code): project-first walk-up, first-'=' split,
+# values with spaces intact
+eval "$(sed -n '/^domaine_env()/,/^}/p' "$CPT")"
+printf 'FND_CPT_THROTTLE_WAITS=5 9\n' > "$EVR/repo/.claude/domaine.env"
+o5="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FND_CPT_THROTTLE_WAITS)"
+o6="$(cd "$EVR/cfg" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FND_MCP_SLIM_DEBUG)"
+if [ "$o5" = "5 9" ] && [ "$o6" = "" ]; then ok; else bad EV5-bash-reader "o5='$o5' o6='$o6'"; fi
+
+# EV5b: the behavior above was proved on create-preview-theme.sh's copy alone. shopify-admin-gql.sh
+# carries the same function verbatim — two copies because a shell script has no import — so the two
+# bodies are diffed here; without this, drift in the second copy is a silent pass.
+cpt_fn="$(sed -n '/^domaine_env()/,/^}/p' "$CPT")"
+gql_fn="$(sed -n '/^domaine_env()/,/^}/p' "$GQL")"
+if [ -n "$cpt_fn" ]; then ok; else bad EV5b-cpt-fn "create-preview-theme.sh has no domaine_env()"; fi
+if [ -n "$gql_fn" ]; then ok; else bad EV5b-gql-fn "shopify-admin-gql.sh has no domaine_env()"; fi
+if [ "$cpt_fn" = "$gql_fn" ]; then ok
+else bad EV5b-copies-drifted "domaine_env() differs: $(diff <(printf '%s\n' "$cpt_fn") <(printf '%s\n' "$gql_fn") | tr '\n' ';' | head -c 300)"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

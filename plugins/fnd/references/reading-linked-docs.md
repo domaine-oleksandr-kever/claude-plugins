@@ -1,8 +1,8 @@
 # Reading linked docs — Notion & other external links
 
-Shared reference for every workflow that ingests a Jira ticket (`/write-technical-approach`,
-`/develop-feature-or-fix`, `/qa-feature-or-fix`, `/write-steps-to-test`,
-`/create-pull-request`). A ticket is rarely
+Shared reference for every workflow that ingests a Jira ticket (the `write-technical-approach`,
+`develop-feature-or-fix`, `qa-feature-or-fix`, `write-steps-to-test` and
+`create-pull-request` skills). A ticket is rarely
 self-contained: it links out to **Notion** data-mapping / spec docs, **Figma** frames,
 **Confluence** pages, Google docs, etc. Those links carry real scope (data models, copy, field
 lists, edge cases). **Skipping them means planning against an incomplete picture.** So: read the
@@ -18,9 +18,13 @@ text). De-duplicate, then read **all** of them — not only the Notion ones.
 
 **Reuse before fetching:** skip links whose content is already in this conversation **in full**
 (not summarized or truncated away) from an earlier workflow run, and links with a **fresh**
-task-workspace copy (`.claude/fnd/<work-id>/doc-*.md`, matched by `url` frontmatter —
+task-workspace copy (`.claude/tasks/<work-id>/doc-*.md`, matched by `url` frontmatter —
 freshness probe:
-`${CLAUDE_PLUGIN_ROOT}/references/task-workspace-freshness.md`). Fetch only what's missing or stale.
+`<plugin root>/references/task-workspace-freshness.md` — **plugin root** = the plugin's own
+directory, this file being `<plugin root>/references/reading-linked-docs.md`, and every
+`<plugin root>/…` path below resolves the same way;
+on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands).
+Fetch only what's missing or stale.
 
 ## 2 — Read each link — delegate, in parallel
 
@@ -28,12 +32,12 @@ freshness probe:
 | --- | --- |
 | **Figma** (`figma.com`) | the `figma-reader` subagent (one per URL) — already part of the develop/QA flow. |
 | **Jira** (`*.atlassian.net/browse/*`, or a bare ticket key) | already ingested by `jira-reader` — **never** spawn a `doc-reader` for one. `other_links` can contain them; skip. |
-| **Everything else** — Notion, Confluence, Google docs, Shopify/3rd-party docs, articles | the **`doc-reader`** subagent — **one per link, spawned in parallel**. Brief: the URL, the task intent (what this task needs from the doc), and the workspace path (`.claude/fnd/<work-id>/`). It picks the tool (Notion MCP with sub-page follow-through / Atlassian MCP / `WebFetch`), writes the extract to `doc-<slug>-<hash>.md` itself, and returns it compactly. |
+| **Everything else** — Notion, Confluence, Google docs, Shopify/3rd-party docs, articles | the **`doc-reader`** subagent — **one per link, spawned in parallel**. Brief: the URL, the task intent (what this task needs from the doc), and the workspace path (`.claude/tasks/<work-id>/`). It picks the tool (Notion MCP with sub-page follow-through / Atlassian MCP / `WebFetch`), writes the extract to `doc-<slug>-<hash>.md` itself, and returns it compactly. |
 
 The raw pages stay in the readers' disposable contexts — the main loop receives only the
 extracts: data mappings, field/property lists, copy, asset links, constraints — and (for
 data-model docs) the metafield / metaobject schema, which feeds
-`${CLAUDE_PLUGIN_ROOT}/references/metafield-metaobject-setup.md`. Read every returned
+`<plugin root>/references/metafield-metaobject-setup.md`. Read every returned
 `conflicts` / `needs_clarification` field — an unreadable link or a doc-vs-ticket
 contradiction surfaces to the developer, never silently drops. Reading a link inline via
 the MCPs is the fallback, not the default — only for a **single** link whose MCP is
@@ -47,8 +51,8 @@ When the readers return, check every `saved_to`: empty while you *did* pass a wo
 path means the save never landed (a denied `Write` in plan mode, say) — write the returned
 extract to the workspace yourself before proceeding.
 Only an inline read (the §2 fallback) saves manually: the **extract** (§2's "what the
-task needs" — never the raw page) to `.claude/fnd/<work-id>/doc-<slug>-<hash>.md` — file format
-and frontmatter: `${CLAUDE_PLUGIN_ROOT}/references/task-workspace.md`; freshness probes:
+task needs" — never the raw page) to `.claude/tasks/<work-id>/doc-<slug>-<hash>.md` — file format
+and frontmatter: `<plugin root>/references/task-workspace.md`; freshness probes:
 `task-workspace-freshness.md`. A cached extract that lacks something your task needs
 isn't stale, it's incomplete — re-read the source.
 

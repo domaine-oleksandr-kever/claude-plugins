@@ -1,6 +1,6 @@
 # Commit message format — Conventional Commits, Domaine profile
 
-The message rules shared by `/fnd:commit` and the pipeline finalize phase —
+The message rules shared by the `commit` skill and the pipeline finalize phase —
 [Conventional Commits](https://www.conventionalcommits.org/) plus house rules.
 
 ## Rules

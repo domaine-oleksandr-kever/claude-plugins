@@ -1,0 +1,16 @@
+{
+  "name": "fnd",
+  "displayName": "Foundation",
+  "version": "0.62.1",
+  "description": "Domaine Foundation skills for Cursor — Agentic Assisted Development workflow for Shopify theme work.",
+  "author": {
+    "name": "Oleksandr Kever",
+    "email": "oleksandr.kever@meetdomaine.com"
+  },
+  "license": "MIT",
+  "keywords": ["shopify", "foundation", "domaine", "skills"],
+  "skills": "skills/",
+  "agents": "agents-cursor/",
+  "rules": "rules/",
+  "hooks": "hooks/hooks-cursor.json"
+}

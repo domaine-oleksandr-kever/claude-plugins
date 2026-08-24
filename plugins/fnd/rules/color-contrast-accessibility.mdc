@@ -1,0 +1,35 @@
+---
+description: "Foundation color-contrast rules — WCAG 2.2 1.4.3/1.4.11 bound to theme color tokens. Auto-attaches on liquid/CSS."
+globs: *.liquid,src/styles/*.css
+alwaysApply: false
+---
+
+# Color Contrast (WCAG 2.2)
+
+## Thresholds (hard rules)
+
+**1.4.3 Text Contrast (AA)**
+- Normal text MUST be >= 4.5:1 against its background.
+- Large text (>= 24px, or >= 18.66px bold) MUST be >= 3:1.
+
+**1.4.11 Non-text Contrast (AA)**
+- UI components, focus indicators, and meaningful graphics MUST be >= 3:1 against adjacent colors.
+
+## Foundation token bindings
+
+Color tokens live in `src/styles/@colors.css`. Apply the thresholds to these real tokens:
+
+- Foreground/background pairs — `--color-foreground` / `--color-foreground-secondary` on `--color-background` / `--color-background-secondary` / `--color-background-tertiary`, plus every `*-inverse` pair.
+- Accents & links — `--color-accent-01`, `--color-accent-02` (+ `-inverse`), `--color-link` (+ `-inverse`).
+- UI/structure — `--color-border-01`, `--color-border-02`, `--color-focus`, `--color-disabled`, and the `--color-grey-100` … `--color-grey-600` scale.
+
+Project rules:
+- Body and secondary text using `--color-foreground-secondary` MUST still meet 4.5:1 on whichever background it sits on.
+- The focus ring (`--color-focus`) MUST meet >= 3:1 against the adjacent background (1.4.11).
+- `--color-disabled` is exempt from 1.4.3, but it MUST NOT visually read as enabled/active.
+- NEVER use a raw `--color-grey-*` token for body text without verifying its contrast against the actual background.
+- On any `*-inverse` background, switch to the matching `*-inverse` foreground token (e.g. `--color-foreground-inverse` on `--color-background-inverse`).
+
+## Verify ratios
+
+Check pairs with the [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/) or [MDN's contrast guidance](https://developer.mozilla.org/en-US/docs/Web/Accessibility/Understanding_WCAG/Perceivable/Color_contrast).

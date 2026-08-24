@@ -11,7 +11,7 @@
 # server syncs into; a pin the SOURCE checkout had made is undone in the copy, so this stream
 # starts from the shared dev theme rather than inheriting another one's) and .env (the Admin API
 # token every store read needs). But
-# `<worktree>/.claude/fnd` is a SYMLINK to `<main>/.claude/fnd`, so both sessions read and
+# `<worktree>/.claude/tasks` is a SYMLINK to `<main>/.claude/tasks`, so both sessions read and
 # write one cache — and removing the worktree cannot take the cache with it (the link is
 # dropped before the removal, so nothing walking the tree can reach the shared workspaces
 # through it).
@@ -33,7 +33,7 @@
 # Remove mode refuses a dirty worktree — or one on a detached HEAD, whose commits nothing else
 # points at — unless --force, never deletes the branch, never
 # touches the preview theme (the orphan reaper in create-preview-theme.sh owns that) and
-# never deletes `.claude/fnd/<WORK-ID>/` (it lives in the main checkout).
+# never deletes `.claude/tasks/<WORK-ID>/` (it lives in the main checkout).
 #
 # Output is `key=value` lines on stdout; non-fatal problems print `warn=<reason>`. Errors
 # print `error=<reason>` on STDOUT — as create-preview-theme.sh does, because the calling
@@ -41,6 +41,10 @@
 # Requires: git. npm only when the repo has a package.json.
 
 set -euo pipefail
+# The work-id validation below relies on glob bracket ranges ([A-Z], [!a-z0-9-]); under a UTF-8
+# collating locale some shells match those by collation order, which lets mixed-case ids like
+# ABC-12a through as "slugs" — and the id becomes a branch and directory name.
+export LC_ALL=C
 
 BASE_DEFAULT="develop"
 # 9292 is the Shopify CLI default and belongs to the main checkout's dev server; every
@@ -184,7 +188,7 @@ TOP="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$TOP" ] || fail "not_a_git_repo — run this from the theme repo (no git checkout at $(pwd))"
 
 # `--show-toplevel` is THIS checkout, which may already be a linked worktree; the sibling
-# directory and the shared `.claude/fnd` must both hang off the MAIN checkout. Its git dir is
+# directory and the shared `.claude/tasks` must both hang off the MAIN checkout. Its git dir is
 # the COMMON dir, printed relative to the cwd when it is relative — hence the `cd "$TOP"`.
 CDIR="$(cd "$TOP" && git rev-parse --git-common-dir 2>/dev/null || true)"
 [ -n "$CDIR" ] || fail "not_a_git_repo — git reported no common git dir for $TOP"
@@ -193,14 +197,61 @@ MAIN="$(cd "$CDIR/.." 2>/dev/null && pwd -P || true)"
 [ -n "$MAIN" ] || fail "main_checkout_not_found common_dir=$CDIR (a bare repo has no worktree to hang siblings off)"
 # A submodule (or a `--separate-git-dir` checkout) keeps its common dir under
 # `<super>/.git/modules/<name>`, so the parent directory is INSIDE .git — creating the sibling
-# worktree and the shared `.claude/fnd` there would bury both in git's own plumbing.
+# worktree and the shared `.claude/tasks` there would bury both in git's own plumbing.
 [ -e "$MAIN/.git" ] || \
   fail "unsupported_layout main=$MAIN common_dir=$CDIR (the git dir does not sit beside a working tree — submodules and --separate-git-dir checkouts cannot host a sibling worktree)"
+
+# `.claude/tasks` is untracked in every checkout that has one, and the exclude line the
+# task-workspace reference documents (`.claude/tasks/`, trailing slash) matches directories only
+# — a symlink is not one. Unstamped, the ship run's "git add every new file" pass stages a link
+# holding an absolute path from one machine, or the whole shared workspace, into a client PR. No
+# trailing slash here, so one line covers both the link and the main checkout's real directory;
+# `info/exclude` lives in the COMMON git dir, so one stamp serves every worktree.
+ensure_tasks_excluded() { # $1 = a checkout to ask check-ignore in
+  if git -C "$1" check-ignore -q .claude/tasks 2>/dev/null; then return 0; fi
+  mkdir -p "$CDIR/info"
+  local exclude="$CDIR/info/exclude"
+  # An exclude file whose last byte is not a newline is legal and not rare (hand-edited ones
+  # often are), and appending blind would glue `.claude/tasks` onto the developer's last pattern:
+  # their rule breaks AND the workspace stays unexcluded. `$( )` strips trailing newlines, so a
+  # non-empty result means the last byte was not one.
+  if [ -s "$exclude" ] && [ -n "$(tail -c 1 "$exclude" 2>/dev/null)" ]; then
+    printf '\n' >> "$exclude"
+  fi
+  printf '.claude/tasks\n' >> "$exclude"
+}
+
+# One-time migration from the workspace's pre-rename home: existing per-ticket memory
+# follows the rename; never merged into a `.claude/tasks` that already exists.
+if [ -d "$MAIN/.claude/fnd" ] && [ ! -L "$MAIN/.claude/fnd" ] && [ ! -e "$MAIN/.claude/tasks" ]; then
+  mv "$MAIN/.claude/fnd" "$MAIN/.claude/tasks"
+  # Worktrees created before the rename hold `<wt>/.claude/fnd -> <main>/.claude/fnd`, which the
+  # mv above turns into a dangling link: the session working there would silently start a second,
+  # private workspace and the two forks would never meet again. Each one is re-pointed under its
+  # new name — a fresh `<wt>/.claude/tasks` link, the legacy link dropped only once its
+  # replacement exists. A compat `fnd -> tasks` link in MAIN was the alternative and is not taken:
+  # `.claude/fnd` is not in the exclude line below, so it would be one more untracked link for a
+  # bulk `git add` to stage. The never-merge rule of the mv applies here too — a worktree that
+  # already has a real `.claude/tasks` is left exactly as it is.
+  git -C "$MAIN" worktree list --porcelain 2>/dev/null | while IFS= read -r wtline; do
+    case "$wtline" in 'worktree '*) ;; *) continue ;; esac
+    owt="${wtline#worktree }"
+    [ -L "$owt/.claude/fnd" ] || continue
+    [ ! -e "$owt/.claude/tasks" ] || continue
+    if ln -s "$MAIN/.claude/tasks" "$owt/.claude/tasks" 2>/dev/null; then
+      rm -f "$owt/.claude/fnd"
+    fi
+  done || true
+  # The migration also runs in --remove mode, where the create-mode stamp below never happens:
+  # a workspace renamed by a teardown and left unexcluded is one bulk `git add` away from a
+  # client PR. Stamped wherever the rename itself runs.
+  ensure_tasks_excluded "$MAIN"
+fi
 
 REPO="$(basename "$MAIN")"
 WT="$(dirname "$MAIN")/$REPO-$WORK_ID"
 BRANCH="feat/$WORK_ID"
-WORKSPACE="$MAIN/.claude/fnd/$WORK_ID"
+WORKSPACE="$MAIN/.claude/tasks/$WORK_ID"
 
 git_main() { git -C "$MAIN" "$@"; }
 
@@ -254,7 +305,7 @@ dirty_lines() {
     case "$line" in
       '?? '*)
         case "$p" in
-          .claude/fnd|.claude/settings.local.json|shopify.theme.toml|.env|node_modules/*) continue ;;
+          .claude/tasks|.claude/settings.local.json|shopify.theme.toml|.env|node_modules/*) continue ;;
         esac
         ;;
     esac
@@ -293,20 +344,20 @@ if [ "$MODE" = "remove" ]; then
 
   # Drop the LINK before the removal. `git worktree remove` unlinks a symlink instead of
   # descending through it (verified), so this is belt-and-braces — but the link points at the
-  # main checkout's `.claude/fnd`, and a delete that ever followed it would take EVERY task
+  # main checkout's `.claude/tasks`, and a delete that ever followed it would take EVERY task
   # workspace in the repo with it. Cheap insurance for an irreversible loss.
   LINK_DROPPED=0
-  if [ -L "$WT/.claude/fnd" ]; then rm -f "$WT/.claude/fnd"; LINK_DROPPED=1; fi
+  if [ -L "$WT/.claude/tasks" ]; then rm -f "$WT/.claude/tasks"; LINK_DROPPED=1; fi
 
   RMLOG="$(mk_tmpf)"
   if ! git_main worktree remove --force "$WT" >"$RMLOG" 2>&1; then
     # The worktree directory outlives the failed removal (git may or may not have kept its
     # registration), so the link back to the shared task workspace has to go back — without it
-    # a session working there silently starts its own `.claude/fnd` and the two forks of the
+    # a session working there silently starts its own `.claude/tasks` and the two forks of the
     # workspace never meet again.
-    if [ "$LINK_DROPPED" -eq 1 ] && [ -d "$WT/.claude" ] && [ ! -L "$WT/.claude/fnd" ]; then
-      ln -s "$MAIN/.claude/fnd" "$WT/.claude/fnd" 2>/dev/null || \
-        warn "claude_fnd_link_not_restored path=$WT/.claude/fnd (re-create it by hand before working in the worktree again)"
+    if [ "$LINK_DROPPED" -eq 1 ] && [ -d "$WT/.claude" ] && [ ! -L "$WT/.claude/tasks" ]; then
+      ln -s "$MAIN/.claude/tasks" "$WT/.claude/tasks" 2>/dev/null || \
+        warn "claude_tasks_link_not_restored path=$WT/.claude/tasks (re-create it by hand before working in the worktree again)"
     fi
     fail_with_log "$RMLOG" "worktree_remove_failed path=$WT"
   fi
@@ -376,13 +427,13 @@ port_free() { # 0 = nothing is listening on 127.0.0.1:$1 — and 0 when there is
 }
 
 # The dev-ports other work-ids hold, one per line. A workspace OUTLIVES its worktree by design
-# (--remove keeps `.claude/fnd/<WORK-ID>/`), so a recorded port counts only while the worktree
+# (--remove keeps `.claude/tasks/<WORK-ID>/`), so a recorded port counts only while the worktree
 # that took it is still registered — otherwise every work-id ever started would burn a port for
 # good and the range would be exhausted after ~20 tickets with nothing listening anywhere.
 ports_taken() {
   local n id live
   live="$(git_main worktree list --porcelain 2>/dev/null | grep '^worktree ' || true)"
-  for n in "$MAIN"/.claude/fnd/*/notes.md; do
+  for n in "$MAIN"/.claude/tasks/*/notes.md; do
     [ -f "$n" ] || continue
     [ "$n" != "$NOTES" ] || continue
     id="$(basename "$(dirname "$n")")"
@@ -528,32 +579,17 @@ if [ -f "$WT/.env" ]; then ENV_STATE=kept
 elif [ -f "$MAIN/.env" ]; then cp "$MAIN/.env" "$WT/.env"; ENV_STATE=copied
 fi
 
-mkdir -p "$MAIN/.claude/fnd"
+mkdir -p "$MAIN/.claude/tasks"
 mkdir -p "$WT/.claude"
-LINK="$WT/.claude/fnd"
+LINK="$WT/.claude/tasks"
 if [ -L "$LINK" ]; then rm -f "$LINK"
 elif [ -e "$LINK" ]; then
-  fail "claude_fnd_not_a_symlink path=$LINK (a real directory is in the way — move it aside; the worktree has to share the main checkout's task workspaces)"
+  fail "claude_tasks_not_a_symlink path=$LINK (a real directory is in the way — move it aside; the worktree has to share the main checkout's task workspaces)"
 fi
-ln -s "$MAIN/.claude/fnd" "$LINK"
-# The link is untracked, and the exclude line the task-workspace reference documents
-# (`.claude/fnd/`, trailing slash) matches directories only — a symlink is not one. Unstamped,
-# the ship run inside the worktree does its "git add every new file" pass and commits a link
-# holding an absolute path from one machine. No trailing slash here, so it covers both the
-# link and the main checkout's real directory; `info/exclude` lives in the common dir and is
-# shared by every worktree.
-if ! git -C "$WT" check-ignore -q .claude/fnd 2>/dev/null; then
-  mkdir -p "$CDIR/info"
-  EXCLUDE="$CDIR/info/exclude"
-  # An exclude file whose last byte is not a newline is legal and not rare (hand-edited ones
-  # often are), and appending blind would glue `.claude/fnd` onto the developer's last pattern:
-  # their rule breaks AND the link stays unexcluded. `$( )` strips trailing newlines, so a
-  # non-empty result means the last byte was not one.
-  if [ -s "$EXCLUDE" ] && [ -n "$(tail -c 1 "$EXCLUDE" 2>/dev/null)" ]; then
-    printf '\n' >> "$EXCLUDE"
-  fi
-  printf '.claude/fnd\n' >> "$EXCLUDE"
-fi
+ln -s "$MAIN/.claude/tasks" "$LINK"
+# The new link is asked about in the WORKTREE — check-ignore answers per checkout, and this is
+# the one the ship run's `git add` pass will run in.
+ensure_tasks_excluded "$WT"
 
 SETTINGS=absent
 if [ -f "$WT/.claude/settings.local.json" ]; then SETTINGS=kept
@@ -564,7 +600,7 @@ elif [ -f "$MAIN/.claude/settings.local.json" ]; then
 fi
 
 # The port lives in the SHARED workspace, so the session that runs in the worktree finds it
-# in `.claude/fnd/<WORK-ID>/notes.md` — the same append-only log every skill already reads.
+# in `.claude/tasks/<WORK-ID>/notes.md` — the same append-only log every skill already reads.
 if [ "$PORT_FROM_NOTES" = "false" ] || [ "$REUSED" = "false" ]; then
   [ -f "$NOTES" ] || printf '# %s — notes\n\n' "$WORK_ID" > "$NOTES"
   printf -- '- %s worktree `%s` on branch `%s`, dev-port: %s\n' \

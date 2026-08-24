@@ -1,7 +1,7 @@
 # Research pressure-test — cross-checking a draft against fresh external sources
 
 Shared reference for every flow that drafts a plan, a TA, or a ship implementation plan
-(`/write-technical-approach`, `/develop-feature-or-fix`, `/fnd:ship` Step 3). A subagent
+(`write-technical-approach`, `develop-feature-or-fix`, `ship` Step 3). A subagent
 validates the **draft** against current external sources and returns findings; the raw
 research never enters the calling context.
 
@@ -23,18 +23,23 @@ checkpoint. Ship asks it as a Step 2 policy question instead and runs the sweep 
 
 ## The subagent brief
 
-Spawn one **general-purpose subagent**:
+Spawn one **general-purpose subagent** — always from the top-level session (a solo skill, or
+ship's conductor in Step 3, before the ✋), never from inside a phase agent, so hosts that cap
+subagents at one level run this sweep unchanged:
 
 - **Inputs** — the draft artifact **verbatim** (plan / TA / ship plan) plus the workspace
   extract paths (`ticket.md`, `doc-*.md`, `figma-*.md`); it **re-reads those from disk** and
   **never re-fetches the sources** (Jira, Notion, Figma) — they're already extracted.
-- **Mission** — validate *this* approach against **fresh external sources** via
-  WebSearch/WebFetch: Shopify changelogs and docs, third-party API docs, known-issue
-  threads. A `deep-research` skill, if the session exposes one, may drive the sweep.
+- **Mission** — validate *this* approach against **fresh external sources** via the host's
+  web search and fetch tools (on Claude Code: WebSearch/WebFetch): Shopify changelogs and
+  docs, third-party API docs, known-issue threads. A `deep-research` skill, if the session
+  exposes one, may drive the sweep. No web tool on this host → say so and return the sweep
+  as not run; never answer it from memory.
 - **Return** — a compact findings list: **risks** / **corrections** / **confirmations**,
   each one line with its source. Never page dumps, never a research report.
 
-**Model:** ship pins `model: opus`; the solo skills let it inherit the session model.
+**Model:** ship pins the deepest-review tier (on Claude Code: `model: opus`); the solo skills let
+it inherit the session model.
 
 ## Folding in
 

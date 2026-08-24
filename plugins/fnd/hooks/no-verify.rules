@@ -1,0 +1,67 @@
+# fnd — Codex execpolicy rules: a SECOND, declarative layer under the no-verify guard.
+#
+# STATUS: OPT-IN, unverified. Codex's execpolicy is experimental and this file is written
+# against the researched Starlark surface (`prefix_rule(pattern=[…], decision="forbidden")`,
+# HARNESS-PORT-PLAN.md → Codex digest, 2026-08-22), not against a live run — no Codex CLI
+# exists on the build machine yet. Nothing loads it automatically: the plugin's hook wiring
+# (hooks/hooks-codex.json) does NOT point at it, and Codex only reads it when the user opts
+# in from their own config. Promote it to a documented install step only after the M1b spike
+# confirms the syntax, the load path, and the shell-chain parsing below.
+#
+# Enabling it (M1b verifies the exact key):
+#   ~/.codex/config.toml → the execpolicy rules path, pointing at this file inside the
+#   installed plugin, e.g. ~/.codex/plugins/cache/<marketplace>/fnd/<version>/hooks/no-verify.rules
+#
+# WHAT THIS LAYER IS FOR
+# The authoritative guard is hooks/no-verify-bypass.sh — the single-copy script the Claude
+# Code, Cursor and Codex wirings all run, whose FP/FN contract is tests/no-verify-bypass-matrix.sh
+# (228 rows). It is a hard block: the one hook in this plugin that is never fail-open. This file
+# adds a host-native refusal for the plain spellings, so a bypass is stopped even in a session
+# where hooks are switched off ([features] hooks = false), not yet trusted (`/hooks` review
+# pending after an update), or unavailable (Codex hooks do not exist on Windows).
+#
+# WHAT IT DELIBERATELY DOES NOT COVER (the hook keeps owning these)
+#   - bundled short flags (`git commit -anm wip`) and quote/ANSI-C-split spellings
+#     (`git commit "-n"`, `git commit $'--no-\x76erify'`) — a prefix rule matches argv tokens,
+#     it does not re-derive what the shell will hand git;
+#   - hook-file tampering (rm / chmod / truncate / sed -i over .husky or .git/hooks) and
+#     `git config core.hooksPath …` writes — a bare `git config core.hooksPath .husky` is a
+#     legitimate SETUP command (matrix row A11) and only the chained commit makes it a bypass,
+#     which is exactly the context this layer does not have;
+#   - `HUSKY=0 git commit …` — an env prefix, not an argv prefix.
+# So: this file never REPLACES the hook, and a row it does not cover is not a gap in the guard.
+#
+# FALSE-POSITIVE RAIL: `git push -n` / `git push --dry-run` are dry runs, not bypasses (matrix
+# rows A23–A25) — `-n` is forbidden for `commit` only. Everything below is a spelling git itself
+# would accept as a hook bypass and nothing else.
+
+# --- the flag, on every verb that runs hooks -------------------------------------------------
+# git accepts any unambiguous prefix of a long option, so --no-veri and --no-verif reach git as
+# --no-verify and each needs its own rule.
+prefix_rule(pattern = ["git", "commit", "--no-verify"], decision = "forbidden")
+prefix_rule(pattern = ["git", "commit", "--no-verif"], decision = "forbidden")
+prefix_rule(pattern = ["git", "commit", "--no-veri"], decision = "forbidden")
+prefix_rule(pattern = ["git", "commit", "-n"], decision = "forbidden")
+
+prefix_rule(pattern = ["git", "push", "--no-verify"], decision = "forbidden")
+prefix_rule(pattern = ["git", "push", "--no-verif"], decision = "forbidden")
+prefix_rule(pattern = ["git", "push", "--no-veri"], decision = "forbidden")
+
+prefix_rule(pattern = ["git", "pull", "--no-verify"], decision = "forbidden")
+prefix_rule(pattern = ["git", "pull", "--no-verif"], decision = "forbidden")
+prefix_rule(pattern = ["git", "pull", "--no-veri"], decision = "forbidden")
+
+prefix_rule(pattern = ["git", "merge", "--no-verify"], decision = "forbidden")
+prefix_rule(pattern = ["git", "merge", "--no-verif"], decision = "forbidden")
+prefix_rule(pattern = ["git", "merge", "--no-veri"], decision = "forbidden")
+
+prefix_rule(pattern = ["git", "am", "--no-verify"], decision = "forbidden")
+prefix_rule(pattern = ["git", "am", "--no-verif"], decision = "forbidden")
+prefix_rule(pattern = ["git", "am", "--no-veri"], decision = "forbidden")
+
+# --- the per-invocation hook redirect --------------------------------------------------------
+# `git -c core.hooksPath=…` points the hooks somewhere harmless for this call only; unlike the
+# `git config` form it has no legitimate reading (matrix rows B07, B49e). Pattern tokens are
+# matched whole here, so only the spelling models actually write is covered — a value-agnostic
+# form needs whatever wildcard the execpolicy dialect offers, which is an M1b question.
+prefix_rule(pattern = ["git", "-c", "core.hooksPath=/dev/null"], decision = "forbidden")

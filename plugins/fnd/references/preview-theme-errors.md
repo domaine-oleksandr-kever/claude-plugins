@@ -4,7 +4,11 @@ Single home for interpreting `create-preview-theme.sh` failures and building pag
 deep-links, read on demand by both callers (`preview-theme` skill; `create-pull-request`
 step 4). The script never half-succeeds silently — every failure exits with one `error=`
 key. Flow context (decision flow, drift blockquote, push-root mechanics) stays in
-`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md → Preview theme`.
+`<plugin root>/skills/create-pull-request/REFERENCE.md → Preview theme`, where **plugin root** =
+the plugin's own directory — this file is `<plugin root>/references/preview-theme-errors.md`, and
+every `<plugin root>/…` path below resolves the same way.
+On Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands — the host
+expands it; on other hosts substitute the plugin root's absolute path.
 
 ## `error=` outcomes
 
@@ -18,7 +22,7 @@ key. Flow context (decision flow, drift blockquote, push-root mechanics) stays i
 - **`error=settings_drift`** → **don't retry**. The recovery is manual and the same for both modes:
   the developer **duplicates the dev theme in the Shopify admin** (a server-side copy keeps every
   setting, drifted or not) and **renames the copy to the `[ELC-…]` name** — click-path and why: the
-  drift blockquote in `${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md → Preview theme`. Then
+  drift blockquote in `<plugin root>/skills/create-pull-request/REFERENCE.md → Preview theme`. Then
   `create-pull-request` re-runs with `theme_name` + `theme_url` + `theme_admin_url` (it uses that
   theme and skips auto-creation), while `preview-theme` just pushes code into it with
   `refresh --theme <the new id>`. The preview URL is `…/?preview_theme_id=<the new id>`.
@@ -59,7 +63,7 @@ key. Flow context (decision flow, drift blockquote, push-root mechanics) stays i
   exception is `pin`, which is deliberately allowed to run on a config in that state: it exists
   to repair the `theme =` line, so `pin --theme <id>` is the fix for `invalid_dev_theme_id`.
 - **Session-theme pin outcomes** (`pin`, and `create` / `refresh` with `--pin-toml` —
-  `${CLAUDE_PLUGIN_ROOT}/references/session-theme.md`):
+  `<plugin root>/references/session-theme.md`):
   - **`error=theme_not_found theme=<id> store=<store>`** → nothing was written: no theme with
     that id is listed on the store. Check the id (a preview URL's `?preview_theme_id=…`) or
     create one. Note `error=live_theme_write_refused` guards pin-only mode too — pinning the

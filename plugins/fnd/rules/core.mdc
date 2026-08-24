@@ -1,0 +1,85 @@
+---
+description: Core file patterns and protection rules for Domaine's storefront tooling
+globs:
+alwaysApply: true
+---
+
+<core_components>
+<purpose>
+Core files are foundational, utility components that form the backbone of Domaine's storefront tooling and pattern library.
+
+    Core files take several forms:
+    - **Core Blocks**: Atomic components prefixed with `core-` (e.g., `core-button.liquid`)
+    - **Core Sections**: Sections prefixed with `core-` (e.g., `core-section.liquid`)
+    - **Core Snippets**: Utility snippets prefixed with `@` (e.g., `@spacing-padding.liquid`)
+    - **src/entry/core Directory**: Abstracted utility components (JS/TS)
+
+    Key points:
+    - These are utility components, not feature components
+    - They are part of the core system maintenance
+    - Liquid core files can be modified directly but MUST be manually synced from the foundation repo when needed
+    - JavaScript/TypeScript core files are protected; DO NOT modify them directly
+
+  </purpose>
+
+<modification_rules>
+If modifications to core functionality are needed:
+
+    **For JavaScript/TypeScript Core Components (src/entry/core/):**
+    1. DO NOT modify files in src/entry/core directory directly
+    2. Instead, extend the core component by:
+       - Creating a new component that inherits from the core component
+       - Using composition to wrap the core component
+       - Implementing the new functionality in the extended component
+
+    Example of proper extension:
+    ```typescript
+    // DO NOT modify src/entry/core/core-dialog.ts directly
+    // Instead, create a new component:
+    class ExtendedDialog extends CoreDialog {
+      // Add new functionality here
+    }
+    ```
+
+    **For Liquid Core Files (blocks/, sections/, snippets/):**
+    1. Liquid core files can be modified directly as needed
+    2. When pulling updates from the foundation repo, manually sync changes to:
+       - `blocks/core-*.liquid` files
+       - `sections/core-*.liquid` files
+       - `snippets/@*.liquid` files
+    3. If you need to customize functionality while maintaining upgrade paths:
+       - Copy the core file to a new file with a different name
+       - Extend the copied file with your custom functionality
+       - Reference the new file in your templates
+
+
+</modification_rules>
+
+  <validation>
+    ∀ file ∈ core files:
+      - src/entry/core/* - Should not be modified directly (protected)
+      - blocks/core-* - Can be modified directly (not protected, sync manually from foundation repo)
+      - sections/core-* - Can be modified directly (not protected, sync manually from foundation repo)
+      - snippets/@* - Can be modified directly (not protected, sync manually from foundation repo)
+      - JS/TS core files should use extension patterns
+      - Liquid core files can be modified but should be manually synced when pulling foundation updates
+  </validation>
+
+<core_file_patterns>
+The following file patterns are considered core:
+
+    **JavaScript/TypeScript (Protected - Read-Only):**
+    - `src/entry/core/*.ts`
+    - `src/entry/core/*.js`
+    - These files are protected and should not be modified directly. Extend them instead.
+
+    **Liquid Files (Not Protected - Can Be Modified):**
+    - `blocks/core-*.liquid` - Can be modified directly, but manually sync from foundation repo when needed
+    - `sections/core-*.liquid` - Can be modified directly, but manually sync from foundation repo when needed
+    - `snippets/@*.liquid` - Can be modified directly, but manually sync from foundation repo when needed
+
+    When working with JS/TS core files, always suggest extension patterns rather than direct modification.
+    When working with Liquid core files, modifications are allowed but manual sync from foundation repo is recommended.
+
+</core_file_patterns>
+</core_components>

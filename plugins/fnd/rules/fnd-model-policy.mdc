@@ -1,0 +1,52 @@
+---
+description: Cursor model choice for fnd work — ladder, start/escalate map, avoid list, failure escalation.
+alwaysApply: true
+---
+
+<!-- Source: Domaine "Model Selection and Agentic Usage Guidelines" v1.0 (2026-08-17). Cursor-scoped;
+     the Codex and OpenCode maps are PROPOSED in HARNESS-PORT-PLAN.md, pending sign-off. -->
+
+## Model policy — Cursor
+
+Ladder: **Composer 2.5 → Claude Sonnet → GPT-5.5 → Claude Opus** — tier labels, not pinned
+versions (version gone → newest of the same family and tier). Start at the cheapest tier
+that can finish reliably; skipping a rung is fine when the task type warrants it.
+
+| fnd work | Model |
+|---|---|
+| commit, create-pull-request, write-steps-to-test | Composer → Sonnet |
+| update-translations, fix-breaking-changes | Composer → Sonnet |
+| preflight-checks, preview-theme, worktree, save-task-context | Composer |
+| readers (jira / doc / figma), jira-writer | Composer → Sonnet |
+| write-technical-approach | Sonnet |
+| develop: scoped ticket, Liquid section/block, CSS | Composer → Sonnet |
+| develop: planning phase, medium feature across files | Sonnet in Plan Mode → GPT-5.5 |
+| fix-accessibility-issue, clear AC | Composer → Sonnet |
+| qa-feature-or-fix, pre-commit-review | Sonnet → GPT-5.5 |
+| bug-hunter agent, change-reviewer | pinned Sonnet; Opus by hand at the high-risk bar |
+| theme-explorer agent | pinned Composer |
+| ship conductor | Sonnet; Opus only at the doc's "exceptional" bar |
+
+Exact pinned ids live in `references/host-model-map.md` in the fnd plugin root — never in this
+rule; the session picker skips pinned agents.
+
+### Avoid — both directions
+- **Opus on routine work**: explaining files, known-repro bugs, CSS, Liquid sections, lint/type
+  fixes, existing-pattern work, docs, PR summaries, mechanical replacements. Opus is for genuinely
+  difficult architecture, investigation and recovery.
+- **Auto on anything mid- or high-risk, and never as an escalation target.** Auto is for low-risk
+  interactive work only (explain syntax, "where is X", summaries).
+- **Composer beyond its tier**: autonomous large refactors, broad prompts on unknown production
+  bugs, architecture, cross-repo design.
+- Implementing straight away on migration planning or broad exploration.
+- Retrying the same model after repeated failures.
+
+### After a failed attempt
+1. **First** → fix the prompt: name the wrong file or assumption, ask for a corrected plan without
+   edits.
+2. **Second** → clean conversation (polluted context anchors the wrong approach): objective, what
+   failed and why, constraints, exact next output — not the old thread.
+3. **Third** → one rung up the ladder.
+4. **Still failing** → stop agentic implementation and involve humans: smaller repro, analysis
+   instead of code, re-confirm requirements, rule out environment/config/data issues, pair or
+   escalate to an architect. More model spend does not fix an unclear problem.

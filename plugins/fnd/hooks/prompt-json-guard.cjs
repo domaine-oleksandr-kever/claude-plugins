@@ -82,19 +82,21 @@ function collectJsonBlobs(text) {
 }
 
 // Spill the blob so the developer can re-reference it. Prefer the active task workspace
-// (`.claude/fnd/<work-id>/tmp/`) when exactly one work-id dir exists — co-located with the
+// (`.claude/tasks/<work-id>/tmp/`) when exactly one work-id dir exists — co-located with the
 // task, durable across sessions — else fall back to a private tmp file. Returns the path,
 // or null on any failure (caller must NOT block without a saved file).
 function spillBlob(blob, cwd) {
   const name = `fnd-prompt-json-${crypto.randomUUID()}.json`;
   try {
-    const fndDir = path.join(cwd, '.claude', 'fnd');
+    // `.claude/fnd` is the workspace's pre-rename home — honored until the repo migrates.
+    const wsRoot = [path.join(cwd, '.claude', 'tasks'), path.join(cwd, '.claude', 'fnd')]
+      .find((d) => fs.existsSync(d));
     const dirs = fs
-      .readdirSync(fndDir, { withFileTypes: true })
+      .readdirSync(wsRoot, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => e.name);
     if (dirs.length === 1) {
-      const tmp = path.join(fndDir, dirs[0], 'tmp');
+      const tmp = path.join(wsRoot, dirs[0], 'tmp');
       fs.mkdirSync(tmp, { recursive: true });
       const p = path.join(tmp, name);
       fs.writeFileSync(p, blob);
@@ -144,6 +146,9 @@ function promptJsonDecision(input) {
 module.exports = { promptJsonDecision };
 
 if (require.main === module) {
+  // Standalone runs only — as a module, user-prompt.cjs (the merged entry) has already loaded.
+  try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps; absent in a partial install
+
   // Collect stdin as bytes, decode once — decoding per chunk would mangle a multibyte char
   // split across a read boundary, corrupting the spilled blob (U+FFFD).
   const chunks = [];

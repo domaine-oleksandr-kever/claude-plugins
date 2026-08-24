@@ -1,0 +1,108 @@
+---
+description: Foundation CSS conventions — Tailwind v4 + syrah tokens, BEM, specificity caps, variable scoping. Auto-attaches on CSS/liquid; not generic CSS reference.
+globs: *.css,*.liquid
+alwaysApply: false
+---
+
+# CSS Standards
+
+Foundation/Domaine conventions only. For generic modern-CSS reference (container queries, cascade layers, logical properties, `:is()`/`:where()`, view transitions, `prefers-reduced-motion`, property order, performance), use [MDN](https://developer.mozilla.org/en-US/docs/Web/CSS).
+
+## Tailwind v4 First
+
+Style with Tailwind v4 utilities by default. Tokens come from the `@meetdomaine/project-syrah-config` package and the `@theme` blocks in `src/styles/@theme.css` and `@colors.css` (spacing, colors, radius, fonts, button variables). Never hardcode arbitrary values (`bg-[#fff]`, `p-[24px]`) when a token utility exists.
+
+Write custom CSS only for: keyframe animations, vendor hacks (`-webkit-appearance`), Liquid-driven runtime variables, third-party overrides, or pseudo-selectors Tailwind can't express.
+
+Use mobile-first responsive prefixes (`md:`, `lg:`). Put custom CSS in `{% stylesheet %}` blocks, never `{% style %}` (reserve `{% style %}` for runtime Liquid values only).
+
+### Semantic token utilities
+
+Use the design-system token utilities, not raw values:
+
+- Color: `bg-background`, `bg-background-secondary`, `text-foreground`, `text-foreground-inverse`, `text-foreground-secondary`, `border-border-01`, `border-border-02`, `bg-accent-01`, `bg-accent-02`, `text-link`, `bg-danger`, `text-focus`.
+- Spacing scale (`none 2xs xs sm md lg xl 2xl 3xl`): `p-md`, `gap-y-sm`, `pt-lg`, `py-(--section-padding)`.
+- Page grid: `px-pagemargin`, `pagegutter`, `pagecolumns`.
+- Radius: `rounded-sm`, `rounded-md`, `rounded-rounded`. Max-width: `max-w-md` etc.
+
+### @utility for repeated patterns
+
+Create an `@utility` (with `@apply`) only for patterns reused across components — see the existing `text-body`, `text-caption`, `text-heading-*`, `utility`, `caption` utilities in `src/styles/`. Don't wrap a single-use class set.
+
+```css
+@utility btn {
+  @apply uppercase tracking-[0.05em] px-6 py-3 rounded-full transition-colors;
+}
+```
+
+## Custom CSS
+
+### Specificity
+
+- No IDs as selectors. Avoid bare element selectors.
+- Avoid `!important`; if unavoidable, comment why inline.
+- Target `0,1,0` (a single `.class`). Cap at `0,4,0` for unavoidable parent/child chains (pseudo-classes like `:hover` may force this).
+- Keep selectors readable at a glance.
+
+### BEM naming
+
+- Block = component (`.product-card`). Element = `block__element` (`.product-card__title`). Modifier = `block--modifier` / `block__element--modifier`.
+- Separate words with single dashes (`.product-card__multi-word-element`).
+- One element segment per classname — never `__wrapper__button`. If an element could stand alone, start a new block scope.
+- The block namespace must wrap its elements; never use an element class as a parent of its block.
+- A modifier (`--x`) always needs the base class present: `class="button button--secondary"`, never `button--secondary` alone or `button button-secondary`.
+- Keep modifiers on the highest element that makes sense for extensibility.
+- Global `@utility` classes are the exception — they don't follow BEM and assume no block.
+
+## CSS Variables
+
+Prefer Tailwind utilities. Use CSS variables for Liquid-driven runtime values, global theme customization, or third-party APIs.
+
+### Where global variables live
+
+Global `:root` variables are defined across:
+
+- `src/styles/@theme.css` and `src/styles/@colors.css` — build-time design tokens inside `@theme {}` (spacing, color, radius, fonts, button variables).
+- `snippets/@color-schemes.liquid` — per-scheme color/button overrides on `:root` and `.color-{{ scheme.id }}`.
+- `snippets/@system-colors.liquid` — global system colors on `:root` (`--color-danger`, `--color-focus`, etc.).
+
+(There is no `snippets/theme-styles-variables.liquid`.)
+
+### Scoping & namespacing
+
+- Scope component variables to the component; scoped vars may reference globals.
+- Namespace variable names to avoid collisions (`--component-padding`, not `--padding`) unless intentional bleed-through.
+
+```css
+.facets {
+  --drawer-padding: var(--spacing-md);
+  --facets-open-z-index: 4;
+}
+```
+
+### Scope section/block instances inline, not by id selector
+
+Reset variable values via an inline `style=""` attribute driven by settings. Avoid the `.selector--{{ block.id }}` pattern — it keeps CSS out of Liquid `{% style %}` and cuts selector redundancy.
+
+```html
+<!-- ✅ -->
+<section style="--background-color: {{ settings.background_color }}; --padding: {{ settings.padding }}px;">…</section>
+
+<!-- ❌ -->
+{% style %} .selector--{{ block.id }} { --button-color: {{ settings.button_color }}; } {% endstyle %}
+<button class="selector--{{ block.id }}">…</button>
+```
+
+Use variables to cut property-assignment redundancy across modifiers:
+
+```css
+.button { background: rgb(var(--button-color) / 0.75); }
+.button--secondary { --button-color: var(--secondary-color); }
+```
+
+## CSS Nesting
+
+- No `&` except for a direct relationship: state selectors (`&:hover`, `&:focus`) or interacting modifiers (`.button--integrated { &.button--text }`).
+- Never nest beyond the first level.
+- Nest media queries even when there's nothing to override yet, so additions don't require flipping the query inside.
+- You may nest child overrides under a parent modifier when one parent state drives several children (avoids repeating `parent--full-width` on each child) — still one level only.

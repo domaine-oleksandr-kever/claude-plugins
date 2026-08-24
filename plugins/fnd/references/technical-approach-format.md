@@ -1,6 +1,6 @@
 # Technical Approach — Format reference
 
-All Technical Approach (TA) documents produced by Workflow 2 (`/write-technical-approach`) **must**
+All Technical Approach (TA) documents produced by Workflow 2 (the `write-technical-approach` skill) **must**
 follow the **short format** below — the same structure used on ELC-126, ELC-80, and the current
 Domaine tickets: seven H4 sections, dense and skimmable, no title/metadata block.
 
@@ -62,7 +62,10 @@ sentences where they read cleaner (e.g. "PDP only — cart/checkout → ELC-303.
    live in Jira, not here. Net-new apps / app embeds / scripts go under **Dependencies** — never
    the Shopify platform, CDN, theme editor, or already-installed apps (net-new prerequisites only).
 7. **Jira parity:** the markdown file is the review source of truth; converted to ADF
-   (`${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs`) it must paste in as the same seven H4 sections.
+   (`<plugin root>/scripts/md-to-adf.cjs` — **plugin root** = the plugin's own directory, this
+   file being `<plugin root>/references/technical-approach-format.md`;
+   on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands, elsewhere
+   its absolute path) it must paste in as the same seven H4 sections.
 8. **Client confidentiality:** this repo is client-facing — never reference tickets, projects, repos,
    or Figma files from other client accounts.
 

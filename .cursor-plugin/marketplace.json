@@ -1,0 +1,16 @@
+{
+  "name": "domaine",
+  "description": "Domaine marketplace for Cursor plugins.",
+  "owner": {
+    "name": "Oleksandr Kever",
+    "email": "oleksandr.kever@meetdomaine.com"
+  },
+  "plugins": [
+    {
+      "name": "fnd",
+      "source": "plugins/fnd",
+      "description": "Domaine Foundation skills — Agentic Assisted Development workflow for Shopify theme work.",
+      "license": "MIT"
+    }
+  ]
+}

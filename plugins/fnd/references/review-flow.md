@@ -143,6 +143,16 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
 
 - **Emphasis by caller** — assigned per skill in §3 → Per-skill entry behaviour.
 
+- **Who spawns these agents, per host.** In a solo run the caller *is* the session, so it
+  spawns them directly everywhere. Inside a `ship` run the caller is a phase agent: where a
+  subagent may spawn subagents (on Claude Code, always) it spawns them itself, exactly as
+  above; where it may not — one-level nesting, see
+  `<plugin root>/references/pipeline-phases.md` → Orchestration — the conductor runs the pass
+  at its own level and hands the findings into the phase brief. Same agents, same emphases,
+  same blocking semantics; only the spawner moves. A caller that can neither spawn nor was
+  handed findings does not skip the pass: it `ESCALATE`s (pipeline) or tells the developer
+  (solo).
+
 Merge the agent findings with the inline B/D hits into one plan/table for the developer.
 
 ### Correctness findings — disposition is mandatory
@@ -151,7 +161,10 @@ A finding tagged correctness (check F from `bug-hunter`, or stumbled on by
 `change-reviewer` while reading) is **never "observation only"**. The calling skill must
 close every one explicitly — **fix** it, **justify** it (the justification travels to the
 PR body as a **one-line named ceiling**, placement per
-`${CLAUDE_PLUGIN_ROOT}/skills/create-pull-request/REFERENCE.md` → Body sections; the full
+`<plugin root>/skills/create-pull-request/REFERENCE.md` → Body sections — **plugin root** = the
+plugin's own directory, this file being `<plugin root>/references/review-flow.md`, and every
+`<plugin root>/…` path here resolves the same way;
+on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands; the full
 reasoning stays in `notes.md`), or have the developer **explicitly waive**
 it — and record the disposition (workspace `notes.md` when one exists). A **blocking**
 correctness finding stops a PR the same way a `protected-core` blocker does.
@@ -165,7 +178,7 @@ reviewed_before == no   → run the FULL flow (§2), then write the marker (§1)
 reviewed_before == yes  → ASK the developer; do not auto-skip and do not auto-rerun.
 ```
 
-> **Pipeline exception:** inside a `/fnd:ship` run the autonomy rule forbids the ask —
+> **Pipeline exception:** inside a `ship` run the autonomy rule forbids the ask —
 > the finalize brief replaces it deterministically: `diff_hash` unchanged → skip (say
 > so); changed or marker absent → full re-review. A phase agent never asks.
 
@@ -192,7 +205,7 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
   when the correctness gate holds). Applies edits after developer approval, then
   writes/refreshes the marker (incl. `correctness_hash`).
 - **`commit`** — does **not** itself run the hygiene review. On entry: if
-  `reviewed_before == no`, offer to run `/fnd:pre-commit-review` first (proceed if the dev
+  `reviewed_before == no`, offer to run the `pre-commit-review` skill first (proceed if the dev
   declines); if `yes`, continue to the commit. (Its own untracked-file check still runs.)
   Around the commit itself it applies §1's **re-stamp** rule.
 - **`create-pull-request`** — final gate; emphasis **`conformance`** (lead E;

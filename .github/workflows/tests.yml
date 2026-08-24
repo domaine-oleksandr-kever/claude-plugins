@@ -1,0 +1,101 @@
+name: tests
+
+# The plugin is installed by git clone and runs on bare Node and bash on whatever machine a
+# developer has, so CI proves exactly that: no package manager, no third-party actions beyond
+# checkout and setup-node, no cached toolchain. Two runners because the suites drive real git,
+# real symlinks and BSD-vs-GNU-sensitive shell tools, and macOS is where the plugin is used while
+# Linux is where its assumptions break first.
+
+on:
+  push:
+  pull_request:
+
+# Several suites build and drive real git repos, so the job's token is declared rather than
+# inherited from the repo/org default: a suite bug that reaches a `git push` fails instead of
+# writing to this repository.
+permissions:
+  contents: read
+
+# A second push to the same branch makes the previous run's result irrelevant.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  suites:
+    name: suites (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      # Both runners always report: "green on macOS, red on Linux" is the finding, not a reason to
+      # skip the other half of the matrix.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      # jq is the ONE tool beyond node, bash and git that the suites assume: several of them build
+      # and read their hook payloads with it. Both runners ship it preinstalled, so it is reported
+      # rather than installed — a missing jq must surface here, not as a suite failure.
+      # No pipes here on purpose: the default shell runs with pipefail, and a `| head` that closes
+      # early would fail the step on a SIGPIPE that means nothing.
+      - name: Report the toolchain
+        run: |
+          node --version
+          echo "bash $BASH_VERSION"
+          git --version
+          jq --version
+
+      # Several suites build throwaway git repos and commit into them. A GitHub runner has no
+      # identity configured, so without this the commit-guard matrices would fail on the commit
+      # itself rather than on what they are asserting.
+      - name: Git identity for the sandbox repos the suites create
+        run: |
+          git config --global user.name "fnd ci"
+          git config --global user.email "fnd-ci@example.invalid"
+          git config --global init.defaultBranch main
+          git config --global commit.gpgsign false
+
+      # Discovered by glob, never listed: a suite added in a later change is covered by CI the
+      # moment it lands. Every suite runs even after one fails — one red run should name every
+      # broken suite, not just the first.
+      - name: Bash suites
+        run: |
+          status=0
+          for f in tests/*.sh; do
+            echo "::group::$f"
+            bash "$f" || { status=1; echo "::error file=$f::suite failed"; }
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Node suites
+        run: |
+          status=0
+          for f in tests/*.mjs; do
+            echo "::group::$f"
+            node "$f" || { status=1; echo "::error file=$f::suite failed"; }
+            echo "::endgroup::"
+          done
+          exit $status
+
+      # The garden check runs last because it is the cheapest thing to read when everything else is
+      # green: dead links, version drift, hand-edited vendored rules and per-host wiring rot.
+      - name: Garden check
+        run: node plugins/fnd/scripts/garden-check.cjs
+
+      # Generated adapters are committed, so a push can carry output the generator would no longer
+      # produce. garden-check already delegates this check; it is repeated as its own step so a
+      # drift failure is visible in the step list without opening a log.
+      - name: Generated adapters in sync
+        run: node plugins/fnd/scripts/gen-host-adapters.cjs --check

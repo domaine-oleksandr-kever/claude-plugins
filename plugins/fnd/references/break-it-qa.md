@@ -1,6 +1,6 @@
 # Break-it QA — think like a QA trying to break it
 
-The break-it method shared by `/fnd:qa-feature-or-fix` and the pipeline QA phase
+The break-it method shared by the `qa-feature-or-fix` skill and the pipeline QA phase
 (checklist generation and execution). TA/AC describe intended behaviour; real bugs live
 in the states nobody wrote down.
 

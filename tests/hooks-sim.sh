@@ -66,11 +66,25 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/plugins/fnd/.claude-plugin/plugin.json"
 CTX="$ROOT/plugins/fnd/hooks/context-stats.cjs"
 
-TMP="$(mktemp -d)"
+TMPROOT="$(mktemp -d)"
 # A failing byte-for-byte pin (M90–M92) points at the stdout it captured under $TMP, so the
 # cleanup stands down whenever one of them names a file the developer still has to read.
 KEEP_TMP=0
-trap '[ "$KEEP_TMP" = 1 ] || rm -rf "$TMP"' EXIT
+trap '[ "$KEEP_TMP" = 1 ] || rm -rf "$TMPROOT"' EXIT
+# Spill handles embed paths under $TMP, and several mcp-slim fixtures (M70, M86) sit at
+# deliberate marker-cost boundaries — a Linux /tmp prefix is ~40 chars shorter than macOS's
+# /var/folders one, which flips those thresholds. Pad short prefixes up to one fixed length so
+# the same fixture crosses the same boundary on every OS; already-long prefixes stay untouched.
+TMP="$TMPROOT"
+if [ "${#TMP}" -lt 60 ]; then
+  TMP="$TMP/$(printf 'p%.0s' $(seq 1 $((59 - ${#TMP}))))"
+  mkdir -p "$TMP"
+fi
+
+# A real ~/.config/domaine/env on this machine would inject switches into every hook under
+# test (they load it via env-file.cjs) — point the global layer at a sandbox path. It sits under
+# $TMP so the trap above owns its removal; a PID-suffixed path beside it would outlive the run.
+export XDG_CONFIG_HOME="$TMP/xdg"
 
 pass=0; fail=0; failures=""
 ok()  { pass=$((pass+1)); }
@@ -316,6 +330,24 @@ if [ -s "$TMP/node.log" ]; then bad M6-off "node ran with FND_MCP_SLIM=0"; else 
 run_ptu_gate; ec=$?
 assert_eq M6-default-exit "$ec" 0
 if [ -s "$TMP/node.log" ]; then ok; else bad M6-default "node did not run by default"; fi
+
+# M6b: the same switch set from a project .claude/domaine.env (U9 shape). The wiring gate above is
+# a SHELL test — it reads the process env and can never see a file-set value — so mcp-slim.cjs
+# re-reads FND_MCP_SLIM after its own env-file load. The switch is absent from the process env
+# here; only the file speaks, and the control run without the file must compress or this proves
+# nothing.
+MSE="$TMP/slim-envfile"; mkdir -p "$MSE/.claude"
+# stdin comes from a FILE, not a pipe: the kill switch exits before reading stdin, and a pipe
+# would leave the writer with EPIPE noise that has nothing to do with the assertion.
+jq -n --rawfile t "$JIRA" \
+  '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}' \
+  > "$MSE/in.json"
+run_slim_at() { (cd "$MSE" && env -u FND_MCP_SLIM FND_MCP_SLIM_DIR="$MSD" node "$SLIM" < "$MSE/in.json" 2>/dev/null); }
+assert_contains M6b-control-compresses "$(run_slim_at)" "updatedToolOutput"
+printf 'FND_MCP_SLIM=0\n' > "$MSE/.claude/domaine.env"
+out="$(run_slim_at)"; ec=$?
+assert_eq M6b-envfile-off      "$out" ""
+assert_eq M6b-envfile-off-exit "$ec" 0
 
 # M7: raw-string result shape → compressed string (mirrors input shape, carries full=)
 in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:$t}')"
@@ -1760,7 +1792,7 @@ if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP6"; then ok; else bad P6-bytee
 # P7: spill write failure (read-only tmpdir, no workspace) → NEVER block (don't lose the paste)
 if [ "$(id -u)" = 0 ]; then ok; else   # root ignores 000 perms — skip there
   RO="$TMP/pj-ro"; mkdir -p "$RO"; chmod 000 "$RO"
-  in="$(mk 20000 25000 "$RO/nope" "$PJD/p7.json")"   # cwd under RO → no .claude/fnd, unwritable
+  in="$(mk 20000 25000 "$RO/nope" "$PJD/p7.json")"   # cwd under RO → no .claude/tasks, unwritable
   assert_eq P7-spill-fail-passthrough "$(run_guard "$in" TMPDIR="$RO")" ""
   chmod 755 "$RO"
 fi
@@ -1785,13 +1817,24 @@ for exp in "$EXP8A" "$EXP8B"; do
   if [ "$hit" = yes ]; then ok; else bad "P8-saved-$(basename "$exp")" "blob not saved byte-exact"; fi
 done
 
-# P9: an active task workspace → blob spilled under .claude/fnd/<id>/tmp/, not the tmpdir
-WS="$PJD/ws"; mkdir -p "$WS/.claude/fnd/ELC-999"
+# P9: an active task workspace → blob spilled under .claude/tasks/<id>/tmp/, not the tmpdir
+WS="$PJD/ws"; mkdir -p "$WS/.claude/tasks/ELC-999"
 in="$(mk 20000 25000 "$WS" "$PJD/p9.json")"
 out="$(run_guard "$in")"
 p="$(reason_path "$out")"
 assert_contains P9-block "$out" '"decision":"block"'
-case "$p" in *"/.claude/fnd/ELC-999/tmp/"*) ok ;; *) bad P9-workspace "blob not in workspace tmp (p='$p')" ;; esac
+case "$p" in *"/.claude/tasks/ELC-999/tmp/"*) ok ;; *) bad P9-workspace "blob not in workspace tmp (p='$p')" ;; esac
+
+# P9b (rename migration): a workspace still at the legacy `.claude/fnd` home is honored — the
+# spill co-locates with the task, not the tmpdir; and the new home wins when both exist.
+WSL="$PJD/ws-legacy"; mkdir -p "$WSL/.claude/fnd/ELC-77"
+in="$(mk 20000 25000 "$WSL" "$PJD/p9b.json")"
+p="$(reason_path "$(run_guard "$in")")"
+case "$p" in *"/.claude/fnd/ELC-77/tmp/"*) ok ;; *) bad P9b-legacy-workspace "blob not in legacy workspace tmp (p='$p')" ;; esac
+mkdir -p "$WSL/.claude/tasks/ELC-77"
+in="$(mk 20000 25000 "$WSL" "$PJD/p9c.json")"
+p="$(reason_path "$(run_guard "$in")")"
+case "$p" in *"/.claude/tasks/ELC-77/tmp/"*) ok ;; *) bad P9c-new-home-wins "blob not in .claude/tasks tmp (p='$p')" ;; esac
 
 # P10: a multibyte JSON blob survives stdin decoding — saved byte-exact, no U+FFFD
 EXP10="$PJD/p10.json"
@@ -1833,13 +1876,13 @@ assert_eq P13-malformed-out "$out" ""
 assert_eq P13-malformed-exit "$ec" 0
 
 # P14: TWO active work-id dirs (ambiguous) → fall back to tmpdir, never an arbitrary ticket dir
-WS2="$PJD/ws2"; mkdir -p "$WS2/.claude/fnd/ELC-999" "$WS2/.claude/fnd/ELC-1000"
+WS2="$PJD/ws2"; mkdir -p "$WS2/.claude/tasks/ELC-999" "$WS2/.claude/tasks/ELC-1000"
 in="$(mk 20000 25000 "$WS2" "$PJD/p14.json")"
 out="$(run_guard "$in")"
 assert_contains P14-block "$out" '"decision":"block"'
 p="$(reason_path "$out")"
 case "$p" in
-  *"/.claude/fnd/"*) bad P14-ambiguous "ambiguous workspaces spilled into a ticket dir (p='$p')" ;;
+  *"/.claude/tasks/"*) bad P14-ambiguous "ambiguous workspaces spilled into a ticket dir (p='$p')" ;;
   "$PJD"/*)         ok ;;
   *)                bad P14-ambiguous "unexpected spill path (p='$p')" ;;
 esac
@@ -1880,7 +1923,7 @@ if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP16"; then ok; else bad P16-str
 # neither silence nor forge the other. Exit is always 0.
 MERGED="$ROOT/plugins/fnd/hooks/user-prompt.cjs"
 UPD="$TMP/up"; mkdir -p "$UPD"
-UPCWD="$TMP/up-cwd"; mkdir -p "$UPCWD"    # no .claude/fnd → blobs spill to TMPDIR
+UPCWD="$TMP/up-cwd"; mkdir -p "$UPCWD"    # no .claude/tasks → blobs spill to TMPDIR
 
 up_in() { # session-id prompt-bytes — one event carrying BOTH a transcript and a prompt
   node -e '
@@ -1988,6 +2031,17 @@ assert_absent   T5-no-lean "$out" "MARK-lean-code"
 # T6: the hook always exits 0 (a hook failure must never block an agent start)
 run_subc '{"agent_type":"jira-writer"}'    >/dev/null 2>&1; assert_eq T6-skip-exit   "$?" 0
 run_subc '{"agent_type":"general-purpose"}' >/dev/null 2>&1; assert_eq T6-inject-exit "$?" 0
+
+# U9 (domaine env files): FND_PROMPT_JSON=0 in a project .claude/domaine.env disables the guard
+# half exactly like the real env var — the process env stays empty, only the file speaks. The
+# same blob WITHOUT the file must still block, or this case proves nothing.
+UED="$TMP/uenv"; mkdir -p "$UED/.claude"
+in="$(mk 20000 25000 "$UED" "$UED/blob.json")"
+out="$(printf '%s' "$in" | (cd "$UED" && env TMPDIR="$PJD" node "$MERGED" 2>/dev/null))"
+assert_contains U9-blocks-without-file "$out" '"decision":"block"'
+printf 'FND_PROMPT_JSON=0\n' > "$UED/.claude/domaine.env"
+out="$(printf '%s' "$in" | (cd "$UED" && env TMPDIR="$PJD" node "$MERGED" 2>/dev/null))"
+if [ -z "$out" ]; then ok; else bad U9-file-disables-guard "out=$(printf '%s' "$out" | head -c 120)"; fi
 
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then

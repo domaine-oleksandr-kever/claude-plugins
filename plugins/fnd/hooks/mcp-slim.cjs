@@ -57,6 +57,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps (env > project > global); absent in a partial install
+// The shell gates in the hook wirings see only the real process env — a file-set 0 must
+// still disable the hook, so it is honored here too (no output = the original passes through).
+if (process.env.FND_MCP_SLIM === '0') process.exit(0);
+
 // json-slim brings ~210 KB of module graph (the compressor plus the ADF and log converters), and most
 // invocations never need a line of it: a small result, an unrecognized shape, a payload the platform
 // already spilled. So it is required on first USE — the first branch that compresses, spills, hints or

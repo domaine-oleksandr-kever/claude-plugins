@@ -2800,6 +2800,10 @@ module.exports = {
 // -------------------------------------------------------------------------------- CLI --
 
 if (require.main === module) {
+  // CLI runs only — as a module the caller (mcp-slim) has already loaded the env files, and a
+  // library require must not mutate process.env as a side effect.
+  try { require('./env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps (env > project > global)
+
   // A downstream `| head` closes stdout mid-write; the EPIPE (Windows: `code: 'EOF'`)
   // surfaces async and would crash the process AFTER the consumer got its bytes.
   // Reader-side truncation is success — exit quietly; other stream errors still throw.

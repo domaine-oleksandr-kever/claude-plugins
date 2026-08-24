@@ -1,9 +1,12 @@
-# Foundation — Claude Code plugin
+# Foundation — the fnd plugin
 
-Domaine's **Agentic Assisted Development** skills for Claude Code, packaged as a
-plugin. It bundles the Foundation workflow skills (technical approach → develop →
-QA → PR, plus translations, breaking-changes, preview themes, etc.) for Shopify
-theme work.
+Domaine's **Agentic Assisted Development** skills, packaged as a plugin. It bundles the
+Foundation workflow skills (technical approach → develop → QA → PR, plus translations,
+breaking-changes, preview themes, etc.) for Shopify theme work.
+
+**Claude Code is the canonical host**; the same content also runs on **Cursor**, **OpenAI Codex
+CLI** and **OpenCode** through thin, committed adapters generated from it — one repo, no fork.
+See [Install — four hosts](#install--four-hosts).
 
 ## What's inside
 
@@ -17,8 +20,10 @@ in its own subfolder under `plugins/`:
 ├── plugins/
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
-│       │   └── plugin.json       # plugin manifest (+ bundled mcpServers)
-│       ├── skills/               # 17 workflow skills (see table below)
+│       │   └── plugin.json       # plugin manifest (+ bundled mcpServers) — canonical
+│       ├── .cursor-plugin/plugin.json   # Cursor manifest (same version stamp)
+│       ├── .codex-plugin/plugin.json    # Codex CLI manifest (same version stamp)
+│       ├── skills/               # 18 workflow skills (see table below)
 │       │   ├── develop-feature-or-fix/SKILL.md
 │       │   └── ...
 │       ├── agents/               # subagents the skills delegate to
@@ -38,17 +43,39 @@ in its own subfolder under `plugins/`:
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
+│       │   ├── gen-host-adapters.cjs #  writes every generated dir below
+│       │   ├── doctor.cjs           #  static install verification, any host
 │       │   └── ...
-│       └── references/           # shared docs the skills read
-│           ├── jira-custom-fields.md
-│           ├── review-flow.md    #  shared contract for the review/marker flow
-│           └── ...
+│       ├── references/           # shared docs the skills read
+│       │   ├── jira-custom-fields.md
+│       │   ├── review-flow.md    #  shared contract for the review/marker flow
+│       │   ├── host-model-map.md #  GENERATED — tier → model, per host
+│       │   └── ...
+│       ├── rules/                # Cursor rule bundle (vendored foundation .mdc + fnd rules)
+│       ├── agents-cursor/        # GENERATED per-host agent variants — never hand-edit;
+│       ├── agents-codex/         #   change agents/ (or the generator) and re-run
+│       ├── agents-opencode/      #   scripts/gen-host-adapters.cjs
+│       ├── commands-opencode/    # GENERATED /name shims (OpenCode invokes skills by model only)
+│       ├── mcp.json              # GENERATED Cursor MCP config (+ mcp.pruned.json profile)
+│       ├── mcp-codex.json        # GENERATED Codex MCP config (not `.mcp.json` — that
+│       │                         #   name is a Claude Code plugin component)
+│       └── opencode/             # OpenCode adapter + GENERATED model-profile examples
+│                                 #   and mcp-fragment.json
+├── scripts/
+│   ├── bootstrap.sh              # one-command clone + per-host install / update / uninstall
+│   └── install.sh                # Cursor / OpenCode / Codex-subagent installer
+├── docs/                         # per-host quickstarts (install · update · what differs)
+│   ├── README.cursor.md
+│   ├── README.codex.md
+│   └── README.opencode.md
 ├── tests/                        # committed test suites for the hooks + scripts
 │   ├── no-verify-bypass-matrix.sh   #  FP/FN contract of the two commit guards
 │   ├── hooks-sim.sh                 #  SessionStart / monitor-gate / context-stats sims
 │   ├── scripts-sim.sh               #  runner + theme-json + converter-caller sims
+│   ├── bootstrap-sim.sh             #  bootstrap: arg gates, clone, pty picker, uninstall
 │   ├── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
 │   ├── json-slim-fixtures.mjs       #  mcp-slim pipeline + CLI + hook fixtures
+│   ├── readme-checks.sh             #  README/docs: commands, paths, links, version markers
 │   ├── fixtures/                    #  real captured payloads (secrets scrubbed)
 │   └── parity/                      #  upstream-port parity fixtures + license NOTICE
 ├── LICENSE
@@ -86,14 +113,72 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `fix-breaking-changes`            | `/fnd:fix-breaking-changes` |
 | `update-translations`             | `/fnd:update-translations` |
 | `report-plugin-issue`             | `/fnd:report-plugin-issue` |
+| `smoke-test`                      | `/fnd:smoke-test` |
 
 Skills are also **auto-invoked**: Claude reads each skill's `description` and
 runs the relevant one when your request matches — you don't have to type the
 slash command.
 
-## Install
+The `Invoke` column is the Claude Code form. Elsewhere: `/<name>` on Cursor, `$<name>` on Codex
+CLI, and on OpenCode either by description (its native `skill` tool) or `/<name>` through the
+generated command shims. Auto-invocation by description works on all four.
 
-### From the published Git marketplace (team use)
+## Install — four hosts
+
+The same plugin content runs on **Claude Code** (canonical), **Cursor**, **OpenAI Codex CLI**
+and **OpenCode**. Every route ends the same way: the installer (or `/plugin install`) leaves you
+with a checkout, `doctor.cjs` says whether the host will actually load it, and one `smoke-test`
+run in a live session proves the layers a script cannot reach.
+
+The table is the one-line summary; the **Details** column links the full numbered walkthrough
+for that host — starting from "the host CLI is not even installed yet" (prerequisites, sign-in,
+which branch to check out), through every config paste, to the smoke test. If you are
+installing for the first time, go straight to your host's doc and follow it top to bottom; the
+sections below the table are the same story compressed for someone who has done it before.
+
+**Fast path — one command.** On a clean machine, `scripts/bootstrap.sh` does the clone, asks which
+hosts to install for, runs `install.sh` for each, and prints what is left to do by hand:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash
+```
+
+It clones into `~/tools/claude-plugins` and picks hosts interactively; `--dir <path>` moves the
+clone, and `--copy` tells `install.sh` to copy the plugin instead of symlinking it. A run with
+nowhere to prompt — CI, or output piped to a file — needs the hosts spelled out instead:
+`… | bash -s -- --targets cursor,opencode --yes`.
+
+**Update** — re-running it from the clone *is* the update: `install.sh` pulls ff-only and relinks.
+A `--copy` install refreshes only on such a re-run, and only with `--copy` passed **again** —
+bootstrap does not remember the mode, and an update without it converts the install to symlinks:
+
+```bash
+./scripts/bootstrap.sh --targets cursor,opencode --yes
+```
+
+**Uninstall** — also from the clone:
+
+```bash
+./scripts/bootstrap.sh --targets cursor,opencode --uninstall
+```
+
+That removes only what `install.sh` created and keeps the clone. The per-host walkthroughs below
+remain the full story — the fast path is those same steps with the typing removed.
+
+| Host | Install | Verify | Details |
+|---|---|---|---|
+| Claude Code | `/plugin marketplace add …` + `/plugin install fnd@domaine` | `/fnd:smoke-test` | below |
+| Cursor | `./scripts/install.sh --target cursor` (or the fast path above; the marketplace route currently loses model pins — see the doc) | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
+| Codex CLI | `codex plugin marketplace add …` (dev channel: `./scripts/install.sh --target codex`) | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
+| OpenCode | `./scripts/install.sh --target opencode` | `/smoke-test` (command shim) | [docs/README.opencode.md](docs/README.opencode.md) |
+
+`smoke-test` is a **run-once post-install check**, not a per-session routine: it runs the
+doctor from inside the session, makes one cheap read-only call per configured MCP server,
+spawns one subagent, attempts a `--no-verify` commit in a scratch repo expecting the host to
+block it, and reports a pass/fail matrix with remediation. `preflight-checks` keeps the
+recurring per-project role.
+
+### Claude Code — from the published Git marketplace (team use)
 
 ```text
 # 1. Add the marketplace (you'll get a trust prompt — confirm it)
@@ -104,6 +189,9 @@ slash command.
 
 # 3. Activate without restarting the session
 /reload-plugins
+
+# 4. Prove the install once, in a session
+/fnd:smoke-test
 ```
 
 `/plugin marketplace add` shows a **trust dialog** the first time, because a
@@ -112,7 +200,7 @@ Review the source, then confirm to add it to your trusted marketplaces. To make
 it trusted for a whole team without each person confirming, an admin can
 predeclare it in managed settings under `extraKnownMarketplaces`.
 
-### Local development (from this folder on disk)
+### Claude Code — local development (from this folder on disk)
 
 ```text
 /plugin marketplace add /path/to/claude-plugins
@@ -123,7 +211,129 @@ predeclare it in managed settings under `extraKnownMarketplaces`.
 Edits to skill files in a local marketplace are picked up on the next session
 (or after `/reload-plugins`). See [Updating](#updating).
 
-### Managing it
+### Cursor
+
+To **use** the plugin, no clone is needed: in Cursor, **Customize → Plugins → Add Marketplace**
+with this repo's URL, then **Add** on the **fnd** card — Cursor installs into its own cache and
+follows GitHub for updates (live-verified 2026-08-22). To **develop** it, or run unpushed work:
+
+```bash
+git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
+cd claude-plugins
+./scripts/install.sh --target cursor      # symlinks ~/.cursor/plugins/local/fnd
+```
+
+The installer pulls, links, and runs `doctor.cjs --target cursor` at the end — read those rows.
+On either route, reload the Cursor window (*Developer: Reload Window*) so the manifest, hooks
+and `mcp.json` load, and run `/smoke-test` once in a chat. Full walkthrough, update path and
+host deltas: [docs/README.cursor.md](docs/README.cursor.md).
+
+### Codex CLI
+
+One channel: the marketplace install carries the whole bundle — skills, hooks, MCP **and** the
+TOML subagents, measured live on Codex CLI 0.149.0 (a cache-only install spawned `jira-reader`
+with no local links). `install.sh --target codex` is the dev channel — point Codex at a local
+checkout's subagents — and the fallback on an older CLI that does not serve them from the cache.
+
+```text
+codex plugin marketplace add domaine-oleksandr-kever/claude-plugins
+/plugins                                  # → install fnd
+```
+
+Optionally, from a clone of this repo (dev channel — current Codex loads bundled subagents
+from the cache on its own):
+
+```bash
+./scripts/install.sh --target codex       # link subagents to your local checkout
+```
+
+Then two steps the install cannot perform for you — `[features] hooks = true` in
+`~/.codex/config.toml`, and the per-content-hash trust review in `/hooks` — then a new session
+and `$smoke-test` once (Codex invokes skills with `$`). The full walkthrough, including what
+re-triggers the trust review, is in
+[docs/README.codex.md](docs/README.codex.md).
+
+### OpenCode
+
+From a clone of this repo:
+
+```bash
+./scripts/install.sh --target opencode    # skills, agents, commands, plugin adapter
+```
+
+The installer links into `~/.config/opencode/` and runs `doctor.cjs --target opencode`. Two
+fragments stay yours to paste into your own `opencode.json` — the `mcp` block from
+`plugins/fnd/opencode/mcp-fragment.json` and the `permission.bash` backstop from
+`plugins/fnd/opencode/permission-fragment.example.json` — then start a new session and run
+`/smoke-test` once (the command shim). Details, including the optional model-profile fragments:
+[docs/README.opencode.md](docs/README.opencode.md).
+
+### Verifying any install
+
+`install.sh` runs the doctor for you at the end of every run; re-run it standalone whenever an
+install stops behaving:
+
+```bash
+node plugins/fnd/scripts/doctor.cjs --target <cursor|codex|opencode>
+```
+
+It checks the install mode and symlink targets, that all three manifests carry the **same**
+version stamp, that the generated dirs still match the generator, and that the hook scripts are
+executable — the whole class of "the clone succeeded but the host will never load it" failures,
+before any session. `smoke-test` then covers what a script cannot reach.
+
+### What's different per host
+
+The content is identical; the wiring is not. Claude Code is the baseline every column is read
+against — nothing about it changed in the port — and each row is spelled out in full in the
+per-host doc it belongs to:
+
+| | Cursor | Codex CLI | OpenCode |
+|---|---|---|---|
+| Session statics | always-applied `rules/*.mdc` | `SessionStart` hook, as on Claude Code | your `instructions` config / `AGENTS.md` |
+| MCP result handling | in-place rewrite (compress **and** spill-and-stub) | no output rewrite — spill-and-stub only, via `additionalContext` | in-place rewrite |
+| MCP servers | all 6; `mcp.pruned.json` if the ~40-tool cap bites | all 6, no documented cap | all 6, pasted from `mcp-fragment.json` |
+| Guard hooks | `beforeShellExecution`, deny + reason | `PreToolUse`; needs `[features] hooks` + `/hooks` trust; **absent on Windows** | `tool.execute.before` throw + `permission.bash` backstop |
+| Subagents | 1 level → hoisted ship shape | hoisted, genuinely concurrent | hoisted unless `subagent_depth` raised |
+| Models | pinned per the Domaine guidelines | pinned (PROPOSED map, sign-off pending) | **no pins** — session model; optional profile fragment |
+| Skill invocation | `/name` | `$name` | model-invoked + `/name` shims |
+
+Losses that hold on all three: no adversarial verify fan-out, no per-phase workflow telemetry,
+and the context-usage monitor is inert wherever the host hands a prompt hook no transcript
+(Cursor, OpenCode). `plugins/fnd/references/pipeline-phases.md` is the single home of the
+orchestration fallback.
+
+### Marketplace posture
+
+- **Claude Code** — the git marketplace in `.claude-plugin/marketplace.json`, unchanged; this is
+  how the team installs today.
+- **Codex CLI** — this repo *is* a Codex marketplace: `codex plugin marketplace add <repo>` reads
+  the same `.claude-plugin/marketplace.json` as a legacy-compatible location, so nothing separate
+  is published.
+- **Cursor** — this repo imports as a Cursor marketplace (Customize → Add Marketplace;
+  live-verified 2026-08-22, installs into `~/.cursor/plugins/cache/…`); a root
+  `.cursor-plugin/marketplace.json` is committed and mirrors the Claude one's identity. The
+  local-symlink route (`~/.cursor/plugins/local/fnd`) stays as the development channel.
+- **OpenCode** — no marketplace primitive exists; `install.sh` is the whole distribution channel.
+
+### Plugin layer vs project layer
+
+The plugin installs **once, in user space, and works in any project**; a project's own
+skills/rules/agents sit on top and the two layers are **additive** on every host — a project
+layer never disables the plugin, and the plugin never blocks project content. Three rules keep
+that honest:
+
+1. **Plugin content self-gates** — bundled rules stay glob-scoped or detection-gated, so the
+   plugin is inert in a non-Shopify project instead of shouting theme guidance at it.
+2. **Don't reuse fnd names project-side.** Skills are namespaced on Claude Code (`fnd:*`); the
+   other hosts have no namespace, so a same-named project skill or agent is at best ambiguous.
+3. **Hook wiring lives in exactly one layer — the plugin.** All layers fire on every host, so a
+   project that re-declares an fnd hook gets a double run, not an override.
+
+Conflicting *prose* is a docs problem, not a mechanism: no host offers hard precedence between
+layers, so keep plugin rules generic-Foundation and let projects own their deltas.
+
+### Managing it on Claude Code
 
 ```text
 /plugin disable fnd@domaine    # keep installed, turn off
@@ -134,17 +344,88 @@ Edits to skill files in a local marketplace are picked up on the next session
 
 ## Updating
 
-There is **no proactive "new version available" notification.** Updates are
-pull-based:
+No host silently updates on push, and there is **no proactive "new version available"
+notification** anywhere. Two models cover all four hosts:
 
-- **Auto-update on:** at startup Claude Code pulls the latest version silently,
-  then prompts you to run `/reload-plugins`. Toggle per-marketplace in
-  `/plugin` → Marketplaces.
-- **Auto-update off (default for third-party):** run
-  `/plugin marketplace update domaine` to pull changes.
+**Version-cache hosts — Claude Code and Codex.** The host clones from the git remote into a
+version-keyed cache, so updating is an explicit command plus a new session:
 
-The `version` field in `plugin.json` gates updates: bump it on every release, or
-omit it to use the git commit SHA (every commit counts as a new version).
+```text
+/plugin marketplace update domaine       # Claude Code, then /reload-plugins
+codex plugin marketplace upgrade         # Codex, then a new session
+```
+
+- On Claude Code with **auto-update on**, the pull happens at startup and you are prompted to
+  run `/reload-plugins`; toggle it per-marketplace in `/plugin` → Marketplaces. Third-party
+  marketplaces default to **off**, hence the command above.
+- **Unpushed commits are invisible** on both: they pull from the remote, never from your local
+  folder. Push first, then update.
+- The `version` field gates the update — an unbumped version can read as "nothing to update".
+  `bump-version.cjs` (below) stamps every copy of it in one run.
+- **Codex re-asks for hook trust** after any update that changes a hook command or its content,
+  because the trust is per content hash. Until you re-approve in `/hooks`, the guard layer is
+  dormant.
+
+**Live-checkout hosts — Cursor and OpenCode** (and the Codex subagent half). The install points
+at your clone, so re-running the installer *is* the update — it pulls and re-links in one pass:
+
+```bash
+./scripts/install.sh --target <cursor|opencode|codex>
+```
+
+- Skills, references, agents and scripts apply on the **next read**; manifest, hook-wiring, MCP
+  and rules changes need a **window reload** (Cursor) or a **new session** (OpenCode).
+- There is no "reinstall", and entries a rename or deletion removed upstream are pruned by the
+  same run that pulled them.
+- **`--copy` installs do not follow `git pull`** — re-run the installer to refresh one. The
+  install report says which mode is active, and `doctor.cjs` fails a copy install whose recorded
+  version has drifted from the checkout's.
+
+The two models coexist on one machine without conflict — they read from different sources.
+
+Nothing tells you an update exists, so `preflight-checks` carries the nudge: it compares the
+installed version against what the host could install and — on Cursor and Codex — whether the
+model ids pinned in that host's generated agents still resolve. Both rows are advisory; they
+never gate a workflow.
+
+## Releasing — one command stamps every version
+
+Current release: **fnd v0.62.1**.
+
+The version is duplicated across per-host packaging files, and a stamp that drifts
+reads to a host as "nothing to update". One script owns all of them — run it instead
+of hand-editing any manifest:
+
+```bash
+node plugins/fnd/scripts/bump-version.cjs minor      # or major | patch | 0.60.0
+node plugins/fnd/scripts/bump-version.cjs 0.60.0 --dry-run   # report, write nothing
+```
+
+It stamps, all-or-nothing (a failure on any target writes nothing):
+
+| Target | What is stamped |
+|---|---|
+| `plugins/fnd/.claude-plugin/plugin.json` | `version` — canonical, the base for `major`/`minor`/`patch` |
+| `plugins/fnd/.cursor-plugin/plugin.json` | `version` |
+| `plugins/fnd/.codex-plugin/plugin.json` | `version` |
+| `README.md` | the markers `fnd v<semver>` and a double-quoted `FND_VERSION=` assignment |
+| `scripts/install.sh` | every double-quoted `FND_VERSION=` assignment |
+
+Only those two literal marker forms are recognized — a version written any other way
+(`fnd 0.60.0`, `version: 0.60.0`) is silently skipped forever, so use them verbatim
+when adding a version string to the docs. `docs/README.*.md` are deliberately **version-free**
+for the same reason: they are not stamped targets, so a version literal there would drift on the
+next release (`tests/readme-checks.sh` fails one). The flip side: every quoted `FND_VERSION=`
+assignment in a stamped file becomes a constant, so a shell variable of that name must
+be assigned unquoted.
+
+Then verify the packaging before committing:
+
+```bash
+node plugins/fnd/scripts/doctor.cjs      # manifests present, versions equal, hooks runnable
+bash tests/layout-assertions.sh
+bash tests/readme-checks.sh              # install commands, referenced paths, links, stamps
+```
 
 ## How global skills use project rules
 
@@ -366,7 +647,7 @@ lands in the worktree and leaves the main checkout's dev environment alone (and 
 source checkout already carried is undone in the copy — `toml_unpinned=yes` — so this stream
 starts from the shared dev theme rather than inheriting another stream's preview), and `.env`,
 without which every Admin API read from the worktree would fail on a missing token; the
-worktree's `.claude/fnd` **symlinked** to the main repo's, so the task workspace is shared
+worktree's `.claude/tasks` **symlinked** to the main repo's, so the task workspace is shared
 between the two checkouts and survives the worktree's removal (and git-excluded, so the
 link never reaches a commit);
 `.claude/settings.local.json` copied rather than shared (two sessions approving permissions
@@ -520,6 +801,42 @@ The plugin declares the MCP servers the skills/agents use (`plugin.json` →
 
 > OAuth servers need a browser sign-in, so they're unavailable in headless/non-interactive
 > runs.
+
+### The same list on the other hosts
+
+`plugin.json` → `mcpServers` is the **only** hand-maintained server list. Each other host
+reads a generated translation of it, written by `scripts/gen-host-adapters.cjs` and committed
+alongside the rest of the generated adapters — never hand-edit one, add the server to
+`plugin.json` and re-run the generator:
+
+| File | Host | Shape |
+|---|---|---|
+| `plugins/fnd/mcp.json` | Cursor | auto-discovered at the plugin root; `type: "stdio"` spelled out |
+| `plugins/fnd/mcp.pruned.json` | Cursor | the priority profile below — a reference file, not loaded |
+| `plugins/fnd/mcp-codex.json` | Codex CLI | `mcpServers`, carried as-is except the SSE→streamable-HTTP rewrite for `figma-dev-mode`; the manifest points at it. Deliberately **not** `.mcp.json`: Claude Code reads that name as a plugin MCP component, so a Codex-only edit would change what Claude Code loads |
+| `plugins/fnd/opencode/mcp-fragment.json` | OpenCode | argv-array `command`, `environment`, `type: local\|remote` — paste the `mcp` block into your own `opencode.json` |
+
+**Cursor tool cap.** Cursor is community-reported to stop exposing tools past ~40 across all
+connected servers; the six bundled servers are roughly three times that. `mcp.json` still
+ships all six — the cap is unmeasured on this host, and a cap we haven't seen is no
+reason to hand you a smaller plugin. If you do hit it, `mcp.pruned.json` is the priority
+list to fall back to: **atlassian** (every workflow starts at a ticket) → **shopify-dev-mcp**
+(five tools for the whole Shopify docs + validator surface) → **chrome-devtools-mcp** (one
+browser stack, picked over `playwright` for console/network/performance access) → **figma-dev-mode**;
+`playwright` and `notion-mcp` are the two it drops. Applying it is a per-server toggle in
+**Cursor Settings → MCP** — nothing in the checkout changes, and re-enabling a dropped server
+is the same toggle back. (Overwriting `mcp.json` with the pruned copy works too, but it is
+deliberate local drift: `doctor.cjs` and `gen-host-adapters.cjs --check` both report it, and
+re-running the generator undoes it.) To change the cut for everyone, move `CURSOR_KEEP_RANKS`
+in the generator and re-run.
+
+Codex and OpenCode document no tool-count limit, so both get the full list. The Figma **SSE**
+transport is resolved on Codex and still open on OpenCode. Codex ships no SSE client (measured
+2026-08-23 — it drives every remote url through its streamable-HTTP client, so an `/sse`
+endpoint answers 404 at initialize), so `mcp-codex.json` points `figma-dev-mode` at the
+streamable `/mcp` path the same server serves; the per-user fallback is
+`codex mcp add figma-dev-mode --url http://127.0.0.1:3845/mcp`. On OpenCode it is still carried
+as a plain `remote` url and says so in its own file.
 
 ## Live store access
 
@@ -711,28 +1028,70 @@ hook error never blocks work:
 
 ### Environment switches
 
-Single home for every knob the plugin reads. Set them in Claude Code settings —
-`~/.claude/settings.json` → `"env": { … }` for all your projects, or a project's
-`.claude/settings.json` for just that repo. Hooks inherit Claude Code's process
-environment; they do **not** read a project's `.env` file. Every new switch must be
-added to this table.
+Single home for every knob the plugin reads, on every host. Every new switch must be added to
+this table — with its per-host behavior whenever the switch does not mean the same thing
+everywhere.
+
+**Where to set them.** Two **Domaine env files** work identically on all four hosts — every
+fnd entry point (Node hooks, the `json-slim` CLI, the two Shopify shell scripts, the OpenCode
+plugin) reads them first thing, so a GUI-launched Cursor no longer needs `launchctl` gymnastics:
+
+- global — `~/.config/domaine/env` (Windows: `%APPDATA%\domaine\env`; `$XDG_CONFIG_HOME` honored)
+- per-project — `<repo>/.claude/domaine.env` (found by walking up from the working directory)
+
+Precedence is **process env > project file > global file > default** — a value already in the
+real environment is never overridden, so Claude Code's `settings.json` → `"env": { … }` (global
+or per-project) keeps working and keeps winning. The file format is a strict `KEY=VALUE` subset:
+one pair per line, `#` full-line comments, value = everything after the first `=`, no quoting
+and no `$VAR` expansion. Only `FND_*` keys (plus `SHOPIFY_ADMIN_GQL_QUIET`) are read — the file
+can never smuggle `PATH` or `NODE_OPTIONS` into a hook. Edit the files by hand or through the
+CLI:
+
+```bash
+node plugins/fnd/scripts/domaine-env.cjs list                            # switches, values, which source won
+node plugins/fnd/scripts/domaine-env.cjs set FND_MCP_SLIM_DEBUG=1        # global
+node plugins/fnd/scripts/domaine-env.cjs set FND_MCP_SLIM_DEBUG=1 --project   # this repo only
+node plugins/fnd/scripts/domaine-env.cjs unset FND_MCP_SLIM_DEBUG        # and: path [--project]
+```
+
+The CLI is never installed on its own — it ships inside the plugin (bare Node, no
+dependencies) and lives wherever the plugin does: the clone, or the host's plugin cache.
+The intended route is to **ask the agent in a session**: say "enable mcp-slim debug for
+this project" or "turn off the prompt-JSON guard globally", and the session runs the
+matching `set`/`unset` against the script under its own plugin root — no path to remember.
+Running it by hand from the plugin directory works exactly the same.
+
+Two caveats. The shell fast-gates in the hook wirings (the `[ "$FND_MCP_SLIM" = "0" ] && exit`
+short-circuits) see only the real process env — a file-set `0` still disables the feature (the
+Node side re-checks after loading the files), it just no longer skips the node spawn. And
+`FND_LEAN`'s session gate is pure shell (the sessionStart one-liners that `cat` the statics), so
+that one switch is process-env-only where it is hook-gated — on Cursor our sessionStart hook
+also hands the file values back to the host, which then feeds them to every later hook of the
+session, shell gates included.
+
+Hooks never read a project's `.env` file on any host.
+
+Five switches do not mean the same thing on every host — `FND_LEAN`, `FND_CTX_MONITOR`,
+`FND_MCP_SLIM`, `FND_MCP_SLIM_STUB` and `FND_PROMPT_JSON`. Each of those rows carries a **Host
+divergence** note; every other switch behaves identically everywhere, because the script that
+reads it is the same single copy on all four hosts.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `FND_LEAN` | `1` | `0` disables the lean-code session convention |
-| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process) |
+| `FND_LEAN` | `1` | `0` disables the lean-code session convention. Hook-gated, so it applies where the convention arrives through a hook (Claude Code and Codex at session start; every host's subagent conventions on Claude Code, Cursor and Codex). On Cursor the SESSION copy ships as an always-applied rule instead — turn `rules/fnd-lean-code.mdc` off there — and on OpenCode the statics live in your own `instructions` config, which this switch cannot reach; either way, "normal mode" in the session still works |
+| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens) |
-| `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns |
+| `FND_MCP_SLIM` | `1` | `0` disables the MCP result compressor (PostToolUse `mcp-slim` hook) — node never spawns. **Host divergence:** Claude Code, Cursor and OpenCode all rewrite the result in place, so compression AND spill-and-stub both land. Codex cannot rewrite a tool result, so `hooks/codex-mcp-shim.cjs` drops every compressed body (adding it would only grow context) and forwards the spill-and-stub half as `additionalContext` — with `1` you get whale offloading there, never compression |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a spill file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume); `0` disables the sweep; any invalid value falls back to `24` |
 | `FND_MCP_SLIM_DEBUG` | off | opt-in: append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, `lvl`, decision, reason, `format` on non-json, `narrowed` on a `--jq` CLI run, `guide` (`full`/`reminder`) on a JSONL profile, `budget_partial` on a mid-array wall-clock expiry, bytes, %, stages, `spills` — never any payload); rotates one generation at ~5 MB. `1` (or `true`/`yes`/`on`) = **key events**: everything except the sub-gate `size-gate` lines for results under the 4 KB gate, which were ~76 % of a real week's log. `2` (any integer ≥ 2) = **everything**, sub-gate lines included. Unset / `0` / `false` / an unrecognized value ⇒ no file written. The level rides on each line as `lvl`, so `--report` can say which of its numbers cover a partial event set — a `1` window's totals % is not comparable with a `2` window's |
-| `FND_MCP_SLIM_STUB` | `1` | `0` disables the spill-and-stub guard: a result the compressor cannot bring under the threshold is then handed to the model raw again, instead of as a ~1 KB stub + spill |
+| `FND_MCP_SLIM_STUB` | `1` | `0` disables the spill-and-stub guard: a result the compressor cannot bring under the threshold is then handed to the model raw again, instead of as a ~1 KB stub + spill. **Host divergence:** on Codex the stub is the only half of `mcp-slim` that survives (no output rewrite there), forwarded as `additionalContext` — so `0` on that host means a whale lands in context with nothing said about the spill that holds it |
 | `FND_MCP_SLIM_STUB_BYTES` | `32768` | bytes above which the `mcp-slim` hook spills-and-stubs instead of passing a whale through (also applies to a compressed body that is still this large); any invalid value falls back to `32768`, never to `0`, and any value below the stub's own ~1.2 KB is raised to it (a smaller gate could emit a stub bigger than the text it replaces) |
 | `FND_MCP_SLIM_BUDGET_MS` | `5000` | wall-clock ceiling for one `mcp-slim` compression run (shared across every block of a result). An expiry hands the ORIGINAL back — per block, so a partly-slimmed content array is logged `compressed` + `budget_partial`, and a whole-result expiry `budget-exceeded` (stubbed above the stub threshold); `0` disables the ceiling; any invalid value falls back to `5000`, never to `0`. The default is ~22× a 1 MB-class payload on this pipeline and well inside Claude Code's PostToolUse timeout — headroom, not a guarantee: a genuinely huge result (tens of MB, or several fat blocks sharing the one deadline) can still reach it, and is then handed back uncompressed rather than half-compressed |
 | `FND_WHALE_GUIDE` | `1` | `0` (or `false`/`no`/`off`) disables the one-shot rule for `json-slim`'s whale-recovery guidance: the full block (readline filter template + `sed`/`grep` single-row hints) is then printed after every profile instead of only the FIRST profile of a given file per session. With the default, later profiles of the same file carry a one-line reminder that stays self-sufficient — the file, the row count, any fence offset, the `sed`/`grep` single-row forms and this switch — dropping only the readline template (the reader of a repeat may be a subagent, or a context that was compacted since). The suppression state is a dotfile per session × **resolved** file path under `FND_MCP_SLIM_DIR`, expires after 2 h, and is pruned by the same sweep as the spills (so `FND_MCP_SLIM_TTL=0`, which disables that sweep, leaves the small per-file **state files** in place); a new file path, a missing, unreadable or future-dated state file always yields the full block. The profile itself is never affected, and each profile's debug line records which variant it printed (`guide: full` / `reminder`) |
 | `FND_NOGAIN_MEMO` | `1` | `0` (or `false`/`no`/`off`) disables `json-slim`'s per-file no-gain memo. With the default, a **file** run that printed its body back unchanged (a deliberate decline, now also stated on stderr) is remembered — per session × **resolved** file path, for 2 h, invalidated as soon as the file's size or mtime change — and a repeat run on that file answers with a one-line refusal naming the recovery instead of re-printing the body; the field pattern it removes is "decline → immediate re-run", where a 0 % result reads as a failed attempt. Only declines of at least 4 KB are remembered (below that a refusal saves nothing). The state is dotfiles under `FND_MCP_SLIM_DIR`, swept with the spills (so `FND_MCP_SLIM_TTL=0` leaves them in place); a missing, unreadable, corrupt or future-dated state file always yields the normal run. The same switch also governs the second refusal, which needs no memo: `fnd-slim-out-*` files — `json-slim`'s own Gate-A output spills, already slimmed — are answered the same way (only below the 8 MB stream gate; past it the big-document guidance is the useful answer). Neither refusal ever applies to a run whose answer they cannot stand for: a narrowing `--jq <dot.path>` (the documented recovery after a decline), `--stats` (a measurement run, which must report its 0.0 %), and the pipeline flags `--toon` / `--no-spill` all bypass both — and a decline under a pipeline flag is never remembered either. The stderr decline notice is NOT governed by this switch: it rides on every file run that printed the file's own bytes back unchanged. Both refusals log `already-slim-out` / `no-gain-memo` and are counted on `--report`'s `cli runs:` line |
-| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor unless `FND_CTX_MONITOR=0` too — with both at `0` no node process runs at all |
+| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor unless `FND_CTX_MONITOR=0` too — with both at `0` no node process runs at all. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 | `FND_GQL_PROBE_CACHE` | `21600` | seconds the gql runner reuses its two sticky machine facts — the `shopify version` probe (~1.5 s, also invalidated whenever the CLI binary is newer than the cache) and "`store execute` is unavailable for this store", which lets a later call skip the doomed probe entirely. `0` re-probes on every call — the escape hatch right after a `shopify store auth`; any invalid value falls back to `21600`. Both caches live in a 0700 per-user dir under `$TMPDIR`; `--engine store` ignores the second one and always attempts |
 | `FND_CPT_THROTTLE_WAITS` | `20 60` | pause(s), in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled` — the store+token rate limit is shared with a running `shopify theme dev`, so a bulk push can 429 while everything else is healthy. One retry per listed value; empty disables retrying (tests pass `0 0`) |
@@ -743,6 +1102,7 @@ added to this table.
 | `SHOPIFY_ADMIN_API_VERSION` | `2026-04` | Admin API version the gql runner requests when `--api-version` is not passed |
 | `CLAUDE_CODE_SESSION_ID` | set by Claude Code | *read, not set by fnd*: scopes `FND_WHALE_GUIDE`'s one-shot state and `FND_NOGAIN_MEMO`'s no-gain memo to the conversation, so a new session sees the full guidance block — and the declined body — again. Absent (a bare shell) ⇒ both are keyed on the file path alone and the 2 h expiry bounds them |
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |
+| `CLAUDE_PLUGIN_ROOT` / `PLUGIN_ROOT` | set by the host | *read, not set by fnd*: where a hook **wiring** file finds the bundled scripts and session-convention markdown. Claude Code and Cursor set `CLAUDE_PLUGIN_ROOT`; Codex sets `PLUGIN_ROOT` plus `CLAUDE_PLUGIN_ROOT` as a compatibility alias, and `hooks/hooks-codex.json` prefers the alias with a fallback to `PLUGIN_ROOT`. Hook **scripts** never trust either one for guard logic — they resolve their own bundled paths from `__dirname` / their own `dirname`, because Cursor leaks the variable between concurrent plugins' hooks and Claude Code has a source-vs-cache inconsistency |
 
 ## Lean-code convention
 

@@ -18,6 +18,8 @@
 // break a prompt.
 'use strict';
 
+try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps (env > project > global); absent in a partial install
+
 function run(raw) {
   const input = JSON.parse(raw);
 

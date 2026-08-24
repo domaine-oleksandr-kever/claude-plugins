@@ -1,0 +1,61 @@
+{
+  "description": "fnd hook wiring for Codex — the canonical Claude Code hooks in Codex hooks.json envelope form (M1b measured live 2026-08-23: the top level is {description, hooks}, not a bare event map). Guards block by exit code; PostToolUse routes through codex-mcp-shim because Codex cannot rewrite tool output. The two PreToolUse guards are the ONE deliberate divergence from the verbatim Claude commands: they PROBE for the bundle (CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT, then the newest ~/.codex/plugins/cache/*/fnd/* holding the script) and, when nothing resolves, deny a git payload with exit 2 instead of running \"/hooks/...\" out of an empty root — which exits 127 and lets Codex proceed. Cursor's wiring denies the same case, OpenCode's adapter throws.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; echo \"fnd plugin root: $r\"; for f in comment-discipline plugin-feedback task-workspace mcp-whale; do cat \"$r/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"$r/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"$r/hooks/lean-code.md\" 2>/dev/null; true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] || node \"$r/hooks/user-prompt.cjs\" || true"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; \"$r/hooks/subagent-conventions.sh\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|shell|local_shell)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"\"; for c in \"${CLAUDE_PLUGIN_ROOT:-}\" \"${PLUGIN_ROOT:-}\"; do [ -n \"$c\" ] && [ -f \"$c/hooks/no-ai-attribution.sh\" ] && { r=\"$c\"; break; }; done; if [ -z \"$r\" ]; then for c in \"$HOME\"/.codex/plugins/cache/*/fnd/*; do [ -f \"$c/hooks/no-ai-attribution.sh\" ] || continue; if [ -z \"$r\" ] || [ \"$c\" -nt \"$r\" ]; then r=\"$c\"; fi; done; fi; if [ -n \"$r\" ]; then \"$r/hooks/no-ai-attribution.sh\"; else case \"$(cat)\" in *git*|*commit*|*push*|*merge*|*pull*) echo \"fnd commit guard: hooks/no-ai-attribution.sh could not be located (CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT, ~/.codex/plugins/cache/*/fnd/*), so this git command is blocked rather than run unchecked. Re-install or repair the fnd plugin, then re-run the same command.\" >&2; exit 2 ;; esac; fi"
+          },
+          {
+            "type": "command",
+            "command": "r=\"\"; for c in \"${CLAUDE_PLUGIN_ROOT:-}\" \"${PLUGIN_ROOT:-}\"; do [ -n \"$c\" ] && [ -f \"$c/hooks/no-verify-bypass.sh\" ] && { r=\"$c\"; break; }; done; if [ -z \"$r\" ]; then for c in \"$HOME\"/.codex/plugins/cache/*/fnd/*; do [ -f \"$c/hooks/no-verify-bypass.sh\" ] || continue; if [ -z \"$r\" ] || [ \"$c\" -nt \"$r\" ]; then r=\"$c\"; fi; done; fi; if [ -n \"$r\" ]; then \"$r/hooks/no-verify-bypass.sh\"; else case \"$(cat)\" in *git*|*commit*|*push*|*merge*|*pull*) echo \"fnd commit guard: hooks/no-verify-bypass.sh could not be located (CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT, ~/.codex/plugins/cache/*/fnd/*), so this git command is blocked rather than run unchecked. Re-install or repair the fnd plugin, then re-run the same command. Never bypass the repo git hooks (--no-verify, core.hooksPath, HUSKY=0) - they are quality gates.\" >&2; exit 2 ;; esac; fi"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_MCP_SLIM:-1}\" = \"0\" ] || node \"$r/hooks/codex-mcp-shim.cjs\" || true"
+          }
+        ]
+      }
+    ]
+  }
+}

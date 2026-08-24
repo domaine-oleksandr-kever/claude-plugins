@@ -9,7 +9,8 @@
   license attribution — see MCP-COMPRESSION-PLAN.md's SmartCrusher port for the
   pattern) or make the dependency an optional, silently-skipped backend.
 - **Every script and hook ships with test coverage** in `tests/`: bash scripts →
-  `scripts-sim.sh`, hooks → `hooks-sim.sh`, the ADF converters →
+  `scripts-sim.sh` or the script's own `*-sim.sh` suite (`install-sim`, `doctor-sim`,
+  `bootstrap-sim`), hooks → `hooks-sim.sh`, the ADF converters →
   `adf-md-fixtures.mjs`, the commit guard → `no-verify-bypass-matrix.sh`. Extend the
   matching suite in the same change that alters behavior.
 - **Every environment switch the plugin reads** (`FND_*`,

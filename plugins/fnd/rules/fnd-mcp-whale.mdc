@@ -1,0 +1,32 @@
+---
+description: Oversized MCP results and big local JSON/JSONL/log dumps — compress with json-slim, never read them raw.
+alwaysApply: true
+---
+
+<!-- Canonical source: hooks/mcp-whale.md (injected at sessionStart on Claude Code).
+     The hook text is authoritative; this is a hand-made transplant. Always-on rather than
+     glob-scoped: it governs how tool results are handled, not which files are edited, and it
+     is project-generic. M8 garden check: a generator should own this file so the two cannot
+     drift. -->
+
+## Foundation convention — oversized MCP results
+
+An over-limit MCP result spills to a file — you get a path, not content, and the compression
+hook is skipped. Don't read it raw, and don't read any big local JSON / JSONL / log
+dump raw either: run `node <plugin-root>/scripts/json-slim.cjs <path>` and work from its
+stdout (`--stats` shows the cut). `<plugin-root>` is the directory above this rules directory —
+on a standard Cursor install, `~/.cursor/plugins/local/fnd`. A **JSONL** dump (one JSON object
+per line, e.g. a Shopify bulk-operation result) is never printed as rows at any size — you get a
+PROFILE plus a ready-to-adapt recipe for querying the ORIGINAL by line; run that, not a second
+whole-file pass (never `--jq` a JSONL — it bypasses the profile and slims reshaped rows).
+
+Then **read what it printed and do exactly that.** `nothing to compress (…); read the file
+directly` = json-slim printed nothing of its own; the parenthetical says why — not JSON
+(prose / markdown / HTML / XML, or a log / Figma-JSX payload already minimal: those two shapes
+*do* compress when there is a gain), an error envelope, or a transform error; recover with a
+windowed read (an offset/limit range), or `--jq <dot.path>` into an envelope. A body printed
+back **unchanged** is a deliberate decline (stderr says so; `--stats` reports the 0.0 %) — don't
+re-run it: a repeat, or any run on a `fnd-slim-out-*` spill, answers with a one-line refusal
+instead. Narrow with `--jq <dot.path>` (the guards never refuse it) or query the file (`grep`,
+`sed -n '<N>p'`). A
+`<<fnd-mcp-slim stub>>` saying the compressor already gained nothing prints that `--jq` line.

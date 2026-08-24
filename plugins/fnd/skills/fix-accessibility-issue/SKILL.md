@@ -15,7 +15,7 @@ allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npx playwright test*), Bash(g
 
 Fix accessibility issues in theme components. Follow the standard issue-fix workflow (branch → implement → test → hand off the commit), with the a11y-specific rules below.
 
-**The commit is not pre-approved here.** Staging (`git add`) is; `git commit` is not — hand the commit to `/fnd:commit` (committing is that skill's job; the developer invokes it themselves).
+**The commit is not pre-approved here.** Staging (`git add`) is; `git commit` is not — hand the commit to the fnd `commit` skill (invoked as `/fnd:commit` on Claude Code; committing is that skill's job — the developer invokes it themselves).
 
 ## Component ARIA patterns
 
@@ -40,7 +40,7 @@ Before implementing, **search the codebase for the existing ARIA pattern** for t
 - Native browser behaviour (`<details>`, `<dialog>`, `popover`) often suffices.
 - Use `aria-labelledby` to reference existing visible text instead of duplicating it in `aria-label`.
 - Avoid duplicate logic between keyboard and mouse handlers; separate ARIA-state management from focus management.
-- Toggle visual state via `data-*` attributes + Tailwind `data-[]:` selectors, not `classList`/`style.*` — the repo lints against those; if legacy code trips `no-restricted-syntax`, see `${CLAUDE_PLUGIN_ROOT}/references/eslint-no-restricted-syntax.md`.
+- Toggle visual state via `data-*` attributes + Tailwind `data-[]:` selectors, not `classList`/`style.*` — the repo lints against those; if legacy code trips `no-restricted-syntax`, see `../../references/eslint-no-restricted-syntax.md` (relative to this skill's directory).
 
 ## Performance
 
@@ -49,3 +49,7 @@ Before implementing, **search the codebase for the existing ARIA pattern** for t
 ## Testing
 
 - Run the relevant test suite (`npx playwright test --reporter=line`); update selectors / page objects when roles change. Verify with the accessibility tree, then record learnings.
+
+## Model
+
+On Claude Code: no model directive — run on whatever the session uses. On Cursor: Composer 2.5 → Sonnet for an a11y fix with clear criteria. On Codex (proposed): the `routine` → `standard` tiers, ids in `../../references/host-model-map.md` (relative to this skill's directory). On OpenCode: the session model — no pin.

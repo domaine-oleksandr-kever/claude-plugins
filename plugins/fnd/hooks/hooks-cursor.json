@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "r=\"\"; for c in \"${CURSOR_PLUGIN_ROOT:-}\" \"${CLAUDE_PLUGIN_ROOT:-}\" \"$HOME/.cursor/plugins/local/fnd\"; do [ -n \"$c\" ] && [ -f \"$c/hooks/cursor-shim.cjs\" ] && { r=\"$c\"; break; }; done; if [ -n \"$r\" ] && command -v node >/dev/null 2>&1; then node \"$r/hooks/cursor-shim.cjs\" sessionStart || true; fi"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "[ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] && exit 0; r=\"\"; for c in \"${CURSOR_PLUGIN_ROOT:-}\" \"${CLAUDE_PLUGIN_ROOT:-}\" \"$HOME/.cursor/plugins/local/fnd\"; do [ -n \"$c\" ] && [ -f \"$c/hooks/cursor-shim.cjs\" ] && { r=\"$c\"; break; }; done; if [ -n \"$r\" ] && command -v node >/dev/null 2>&1; then node \"$r/hooks/cursor-shim.cjs\" beforeSubmitPrompt || true; fi"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "r=\"\"; for c in \"${CURSOR_PLUGIN_ROOT:-}\" \"${CLAUDE_PLUGIN_ROOT:-}\" \"$HOME/.cursor/plugins/local/fnd\"; do [ -n \"$c\" ] && [ -f \"$c/hooks/cursor-shim.cjs\" ] && { r=\"$c\"; break; }; done; if [ -n \"$r\" ] && command -v node >/dev/null 2>&1; then node \"$r/hooks/cursor-shim.cjs\" subagentStart || true; fi"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "r=\"\"; for c in \"${CURSOR_PLUGIN_ROOT:-}\" \"${CLAUDE_PLUGIN_ROOT:-}\" \"$HOME/.cursor/plugins/local/fnd\"; do [ -n \"$c\" ] && [ -f \"$c/hooks/cursor-shim.cjs\" ] && { r=\"$c\"; break; }; done; if [ -n \"$r\" ] && command -v node >/dev/null 2>&1; then node \"$r/hooks/cursor-shim.cjs\" beforeShellExecution; else m='The fnd commit guard could not be located or could not be run (hooks/cursor-shim.cjs was not found under CURSOR_PLUGIN_ROOT, CLAUDE_PLUGIN_ROOT or ~/.cursor/plugins/local/fnd, or node is not on PATH), so this git command is blocked rather than run unchecked. Re-install or repair the fnd plugin, make sure node is on PATH, then re-run the same command. Never bypass the repo git hooks (--no-verify, core.hooksPath, HUSKY=0) - they are quality gates.'; case \"$(cat)\" in *git*|*commit*|*push*|*merge*|*pull*) printf '{\"permission\":\"deny\",\"userMessage\":\"%s\",\"agentMessage\":\"%s\"}' \"$m\" \"$m\"; echo \"fnd cursor hook: $m\" >&2; exit 2 ;; esac; fi"
+      }
+    ],
+    "afterMCPExecution": [
+      {
+        "command": "[ \"${FND_MCP_SLIM:-1}\" = \"0\" ] && exit 0; r=\"\"; for c in \"${CURSOR_PLUGIN_ROOT:-}\" \"${CLAUDE_PLUGIN_ROOT:-}\" \"$HOME/.cursor/plugins/local/fnd\"; do [ -n \"$c\" ] && [ -f \"$c/hooks/cursor-shim.cjs\" ] && { r=\"$c\"; break; }; done; if [ -n \"$r\" ] && command -v node >/dev/null 2>&1; then node \"$r/hooks/cursor-shim.cjs\" afterMCPExecution || true; fi"
+      }
+    ]
+  }
+}

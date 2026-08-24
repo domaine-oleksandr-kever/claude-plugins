@@ -1,0 +1,27 @@
+---
+description: Foundation sections / section schema conventions — Core Sections (core-*) ingest pattern-library config, t:names.*/t:settings.* translation keys, --section-padding-* CSS-var scoping, section.index < 3 eager-load. Auto-attaches on sections/*.liquid; covers project deltas, not generic Shopify section syntax.
+globs: sections/*.liquid
+alwaysApply: false
+---
+
+# Section Development Standards
+
+**Source of truth:** for current sections / section schema syntax/APIs query `shopify-dev-mcp` (`learn_shopify_api` → `search_docs_chunks`). This file covers only Foundation-specific conventions.
+
+## Core Sections Pattern
+
+**Core Sections** are prefixed `core-` (e.g. `sections/core-section.liquid`). They ingest pattern-library configuration and work with any combination of core or non-core global blocks. Modify them directly when needed, but when pulling updates from the foundation repo, manually sync changes to `sections/core-*.liquid`.
+
+## Foundation Conventions
+
+- Translation keys use the `t:names.*` and `t:settings.*` namespaces (e.g. `"name": "t:names.section_name"`, `"label": "t:settings.padding"`) — never inline English in schema strings.
+- Scope padding via inline `--section-padding-*` CSS variables on the section element, consumed by `{% stylesheet %}`:
+  ```liquid
+  style='
+    --section-padding-top: {{ section.settings.padding_top }}px;
+    --section-padding-bottom: {{ section.settings.padding_bottom }}px;
+  '
+  ```
+- Eager-load above-the-fold media for LCP: when `section.index < 3`, set `loading='eager'` + `fetchpriority='high'`; otherwise `loading='lazy'` + `fetchpriority='auto'`.
+
+See [snippets.mdc](snippets.mdc) for the `@`-prefixed utility snippets these sections render.

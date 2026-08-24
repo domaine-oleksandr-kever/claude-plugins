@@ -10,7 +10,7 @@ forward.
 
 ## Location & layout
 
-`.claude/fnd/<work-id>/` in the project repo — one folder per **unit of work**; the folder is a
+`.claude/tasks/<work-id>/` in the project repo — one folder per **unit of work**; the folder is a
 **cache**, safe to delete at any time (suggest removing it once the ticket is Done). `<work-id>` is
 the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as one PR**
 (several bug tickets fixed on one branch, no full series per bug) use the **branch slug**
@@ -42,10 +42,15 @@ ships in a diff):
 
 ```bash
 # --git-common-dir, not --git-dir: info/exclude is shared, and a linked worktree's .git is a file
-git check-ignore -q .claude/fnd || echo '.claude/fnd/' >> "$(git rev-parse --git-common-dir)/info/exclude"
+git check-ignore -q .claude/tasks || echo '.claude/tasks/' >> "$(git rev-parse --git-common-dir)/info/exclude"
 ```
 
 A team that prefers a committed rule can put the line in `.gitignore` instead.
+
+**Legacy home.** The workspace lived at `.claude/fnd/` before the rename. On sight of that
+folder (a real directory, not a worktree symlink) with no `.claude/tasks/` beside it, move it —
+`mv .claude/fnd .claude/tasks` — and ensure the exclude line above covers the new name; never
+merge into an existing `.claude/tasks/`. `worktree-setup.sh` performs the same move on its own.
 
 ## Read rule — context-first order
 

@@ -1,0 +1,16 @@
+---
+description: Foundation JSON template conventions — alternate-template suffix naming. Auto-attaches on templates/*.json; covers project deltas, not generic Shopify JSON-template syntax.
+globs: templates/*.json
+alwaysApply: false
+---
+
+# Templates
+
+**Source of truth:** for current JSON templates / template structure syntax/APIs query `shopify-dev-mcp` (`learn_shopify_api` → `search_docs_chunks`). This file covers only Foundation-specific conventions.
+
+## Alternate templates
+
+- Alternate templates must be named `template-name.suffix.json` (suffix between the base name and `.json`), e.g. `product.quick-shop.json`, `page.styleguide.json`.
+- The suffix is the merchant-selectable template; match an existing base template's section structure unless the alternate intentionally diverges.
+
+See [schemas.mdc](schemas.mdc) for section/block schema conventions.
