@@ -6,11 +6,21 @@ checkout Claude Code uses — only the wiring differs. Start at the
 
 ## Install
 
+> [!WARNING]
+> **Cursor currently ignores subagent model pins — on every install route.** A
+> staff-acknowledged Cursor bug (open since April 2026, **no fix date**) makes plugin agents
+> drop their `model:` frontmatter. First observed on marketplace installs, live-verified
+> 2026-08-24 on the local-symlink install too: on both routes every fnd subagent
+> (`jira-reader`, `figma-reader`, `bug-hunter`, …) silently inherits the session model instead
+> of the tier map in `plugins/fnd/references/host-model-map.md`. Skills, hooks, MCP and the
+> agents themselves still work; only the model routing is lost. The pins stay in the generated
+> agents so they bind the moment Cursor ships the fix — until then **pick the session model
+> with subagents in mind** (e.g. run the review gates from a `claude-sonnet-5` session).
+
 The route is the **local checkout**: the clone **is** the install — Cursor reads a symlink into
-`~/.cursor/plugins/local/fnd`, so the files it loads are the ones in this checkout, agent model
-pins bind, and a `git pull` updates the host live. A marketplace route also exists, but a Cursor
-bug currently breaks its model routing — it is documented at the end of this section as the
-alternative, with that caveat.
+`~/.cursor/plugins/local/fnd`, so the files it loads are the ones in this checkout and a
+`git pull` updates the host live. A marketplace route also exists — it is documented at the end
+of this section as the alternative.
 
 ### 0. Prerequisites
 
@@ -73,16 +83,7 @@ subagent spawning, the commit guards firing, the session conventions arriving. R
 installing or updating, not every session (`/preflight-checks` owns the recurring per-project
 role).
 
-### Alternative: marketplace route — currently degraded
-
-> [!WARNING]
-> **Marketplace installs currently ignore agent model pins.** A staff-acknowledged Cursor bug
-> (open since April 2026, **no fix date**) makes marketplace-installed plugin agents drop their
-> `model:` frontmatter — on this route every fnd subagent silently inherits the session model
-> instead of the tier map in `plugins/fnd/references/host-model-map.md`. Skills, hooks, MCP and
-> the agents themselves still work; only the model routing is lost. Until Cursor fixes it,
-> **prefer the local-checkout route above** — pins bind there — and confirm once with the
-> `/preflight-checks` model-pin row.
+### Alternative: marketplace route
 
 No clone, no shell (live-verified 2026-08-22). In Cursor: **Customize → Plugins →
 Add Marketplace** (or `/add-plugin` in chat), paste
@@ -154,20 +155,20 @@ unless your filesystem forbids it.
   adversarial verify fan-out and the per-phase telemetry —
   `plugins/fnd/references/pipeline-phases.md` states it in full. Claude Code's scripted Workflow
   layer has no analogue and nothing to reproduce: `ship` never scripted one.
-- **Every subagent is pinned; the session picker does not reach them.** Cursor frontmatter takes
-  only `inherit` or an exact versioned id (no family aliases, verified 2026-08-23). Per the
-  Domaine model-selection guidelines: the reader-type agents and `theme-explorer` pin Cursor's
-  cheapest model (`composer-2.5[fast=false]` — the standard variant; Fast is the pricier
-  default), and the review gates (`bug-hunter`, `change-reviewer`) pin `claude-sonnet-5`, where
-  the guidelines start deep PR review — Opus is barred from standard reviews there, so going
-  past a pin is a deliberate manual act, not a session default. The whole map is in
-  `plugins/fnd/references/host-model-map.md`; the session-level ladder + Plan-Mode triggers ride
-  in `rules/fnd-model-policy.mdc`. Never hand-edit a generated agent: change the tier table in
-  `plugins/fnd/scripts/gen-host-adapters.cjs` and re-run the generator. Known host bug: a
-  **marketplace-installed** plugin's agents currently ignore `model:` frontmatter entirely
-  (staff-acknowledged), so on that route every agent inherits until Cursor fixes it; pins apply
-  on the local-symlink install. `claude-sonnet-5` may be absent from a fresh model picker — if a
-  spawn rejects it, enable it once via the picker's **Add Models**, then re-check with the
+- **Every subagent is pinned — but the pins are currently inert (the warning at the top of
+  Install).** Cursor frontmatter takes only `inherit` or an exact versioned id (no family
+  aliases, verified 2026-08-23). Per the Domaine model-selection guidelines: the reader-type
+  agents and `theme-explorer` pin Cursor's cheapest model (`composer-2.5[fast=false]` — the
+  standard variant; Fast is the pricier default), and the review gates (`bug-hunter`,
+  `change-reviewer`) pin `claude-sonnet-5`, where the guidelines start deep PR review — Opus is
+  barred from standard reviews there, so going past a pin is a deliberate manual act, not a
+  session default. The whole map is in `plugins/fnd/references/host-model-map.md`; the
+  session-level ladder + Plan-Mode triggers ride in `rules/fnd-model-policy.mdc`. Never
+  hand-edit a generated agent: change the tier table in
+  `plugins/fnd/scripts/gen-host-adapters.cjs` and re-run the generator. Until Cursor fixes the
+  frontmatter bug every subagent runs on the session model, so the session picker is the only
+  model dial that actually works. `claude-sonnet-5` may be absent from a fresh model picker —
+  if a spawn rejects it, enable it once via the picker's **Add Models**, then re-check with the
   `/preflight-checks` model-pin row.
 - **The context-usage monitor is inert.** It reads the session transcript, which
   `beforeSubmitPrompt` does not hand a hook; the prompt-JSON guard half of the same hook works

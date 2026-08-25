@@ -78,8 +78,9 @@ const OWNED_DIRS = [DIR_CURSOR, DIR_CODEX, DIR_OPENCODE, DIR_COMMANDS];
  *   standard reviews, so a cheap session can no longer silently degrade the review gates.
  *   `escalate` is the next rung, carried as a comment — a subagent pin cannot escalate itself;
  *   going to Opus is the deliberate manual act the guidelines require. Known host bug:
- *   marketplace-installed plugin agents currently ignore `model:` frontmatter (staff-acknowledged,
- *   forum #168771) — pins apply on the local-symlink channel and once Cursor fixes the bug.
+ *   plugin agents currently ignore `model:` frontmatter on EVERY install route (staff-acknowledged,
+ *   forum #168771; live-verified 2026-08-24 on the local symlink too) — every subagent inherits the
+ *   session model; pins stay in place and bind once Cursor fixes the bug.
  * codex: PROPOSED — owner sign-off pending (plan, Model policy per host). `effort: null` means the
  *   proposed map fixes no reasoning tier for that row.
  * opencode: intentionally absent — no pin, agents and phases inherit the session model so local
@@ -652,9 +653,10 @@ function hostModelMap(agents) {
           'Subagents table below is authoritative per agent.'
         : '') +
       ' The escalate column is the next rung of the ladder, taken after a failed attempt ' +
-      'or at the guidelines\' high-risk bar, never as a starting point. Caveat: Cursor currently ignores `model:` ' +
-      'frontmatter on marketplace-installed plugin agents (staff-acknowledged bug) — pins apply on ' +
-      'the local-symlink install and once that is fixed.',
+      'or at the guidelines\' high-risk bar, never as a starting point. Caveat: Cursor currently ignores subagent ' +
+      '`model:` frontmatter on every install route (staff-acknowledged bug; live-verified 2026-08-24 on the ' +
+      'local-symlink install too) — every agent inherits the session model until Cursor fixes it; the pins stay ' +
+      'in place and bind the moment that fix ships.',
     '',
     '## Subagents',
     '',

@@ -111,10 +111,11 @@ has "$ROOT/docs/README.cursor.md" 'Add Marketplace' cursor-doc-marketplace-ui
 lacks "$ROOT/docs/README.cursor.md" 'agent plugin marketplace' cursor-doc-no-cli-route
 lacks "$ROOT/docs/README.cursor.md" 'agent login' cursor-doc-no-cli-login
 has "$ROOT/plugins/fnd/references/host-model-map.md" 'composer-2.5[fast=false]' cursor-hybrid-pin
-# The marketplace model-pin bug has no fix date, so the install section must open with a
-# GitHub-rendered alert steering users to the route where pins bind (2026-08-23 ask)
+# The subagent model-pin bug has no fix date and hits every install route (live-verified
+# 2026-08-24 on the local symlink), so the install section must open with a GitHub-rendered
+# alert saying so — no route is steered to as pin-safe (2026-08-24 ask)
 has "$ROOT/docs/README.cursor.md" '[!WARNING]' cursor-doc-pin-warning-alert
-has "$ROOT/docs/README.cursor.md" 'Marketplace installs currently ignore agent model pins' cursor-doc-pin-warning-text
+has "$ROOT/docs/README.cursor.md" 'Cursor currently ignores subagent model pins — on every install route' cursor-doc-pin-warning-text
 has "$ROOT/docs/README.opencode.md" './scripts/install.sh --target opencode' opencode-doc-install
 has "$ROOT/docs/README.opencode.md" '/smoke-test' opencode-doc-verify
 # The statics paste is the step a fresh install cannot infer (live-smoke 2026-08-22 found the
