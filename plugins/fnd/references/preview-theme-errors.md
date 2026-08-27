@@ -103,15 +103,21 @@ expands it; on other hosts substitute the plugin root's absolute path.
 
 ## Page deep-links
 
-When the change is reviewed on a specific storefront path (`preview_path`, or inferable from
-context — e.g. you developed/QA'd on `/products/group-lipglass`), deep-link the rows instead of
-sending the reviewer to the home page:
+Deep-links are the **default** form of the Preview row, not an on-request extra. Before
+falling back to a bare home-page link, collect the surfaces the change was actually verified
+on — **without being asked**: the workspace verification record (`notes.md` / `qa.md` test
+URLs and the pages named next to screenshots), the develop/QA phases of this conversation,
+an explicit `preview_path`. A path that record names is **not a guess** — use it. Then:
 
 - **Preview** → `https://<store>/<path>?preview_theme_id=<id>` (append the path to the base `preview_url`).
+  Carry every query param the feature needs to render (a market/locale switch like
+  `&country=GB`, a variant selection) on **each storefront deep-link** — a link that lands on
+  a page where the change is invisible is worse than no link. The Admin link never takes them.
 - **Admin** → the theme editor on that template: `https://<store>/admin/themes/<id>/editor?previewPath=<url-encoded path>`, or `?template=<name>` when the developer names the template (e.g. `product`, `product.lipglass`).
 
-If the path or template is unknown or ambiguous, **ask the developer — never guess.**
+Ask the developer **only** when no verification record names a path and the surface is
+genuinely ambiguous — never guess a URL into the table.
 
-**Several pages / several tickets:** when the bugs live on different pages, list one deep-link per
-page in the Preview row (e.g. `[PDP](…/products/x?preview_theme_id=ID) · [Cart](…/cart?preview_theme_id=ID)`),
-ideally labelled by ticket. Same preview theme ID throughout — only the path differs.
+**Several pages / several tickets:** one deep-link per surface in the Preview row, labelled by
+surface (`[PLP](…) · [PDP](…) · [Cart](…)`, Admin last) — by ticket when a multi-ticket PR's
+bugs live on different pages. Same preview theme ID throughout — only the path differs.
