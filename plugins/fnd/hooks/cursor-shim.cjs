@@ -27,6 +27,14 @@
 //   afterMCPExecution     → hooks/mcp-slim.cjs, its compressed/stubbed result handed back
 //                           as `updated_mcp_tool_output` — Cursor rewrites the MCP result
 //                           in place, the same net effect as Claude Code's updatedToolOutput.
+//   beforeMCPExecution    → hooks/scratch-path-guard.cjs, the PreToolUse screenshot-path deny
+//                           (M3). Cursor documents this event (cursor.com/docs/agent/hooks) with
+//                           the same allow/deny/ask primitive as beforeShellExecution. Two
+//                           payload divergences it handles: `tool_input` arrives as a JSON
+//                           STRING, and the tool name carries no server prefix
+//                           (`mcp_server_name` is its own field), so the tool filter this event
+//                           needs (Cursor has no per-event matcher) matches the bare spelling
+//                           too.
 //
 // Fail-open everywhere: a crash, an unparsable payload, a script that cannot be spawned,
 // an unknown event → emit nothing, exit 0, the host proceeds untouched. The ONE exception
@@ -250,9 +258,23 @@ const GIT_TRIGGER = /(^|[^a-z])(git|commit|push|merge|pull)|(^|\s)am(\s|$)/i;
 // stderr is what the Claude Code-compatible exit-2 path treats as the model-facing reason. A
 // model blocked without a reason retries with another bypass spelling, which is the loop
 // no-verify-bypass.sh exists to end.
+//
+// BOTH key spellings, on every event: Cursor's docs show camelCase for the shell event and
+// snake_case for the MCP one, and the host reads at most one of each pair — a set of keys it
+// ignores costs nothing, while guessing wrong drops the reason and leaves a silent block.
+function denyBody(message) {
+  return {
+    permission: 'deny',
+    userMessage: message,
+    agentMessage: message,
+    user_message: message,
+    agent_message: message,
+  };
+}
+
 function deny(message) {
   warn(message);
-  return { permission: 'deny', userMessage: message, agentMessage: message, __exit: 2 };
+  return { ...denyBody(message), __exit: 2 };
 }
 
 function beforeShellExecution(payload) {
@@ -333,11 +355,49 @@ function afterMCPExecution(payload) {
   return { updated_mcp_tool_output: updated };
 }
 
+// ── beforeMCPExecution ──────────────────────────────────────────────────────────────────
+// The screenshot scratch-path deny. Cursor runs this for EVERY MCP call — there is no matcher
+// in its wiring — so the two tools the guard covers are selected here, on the bare spelling as
+// well as the prefixed one (`mcp_server_name` is a separate field on this host).
+const SCREENSHOT_TOOL = /(^|__)(take_screenshot|browser_take_screenshot)$/;
+
+function beforeMCPExecution(payload) {
+  if (process.env.FND_SCRATCH_GUARD === '0') return null;
+  const tool = String(firstDefined(payload, ['tool_name', 'tool', 'mcp_tool_name']) || '');
+  if (!SCREENSHOT_TOOL.test(tool)) return null;
+
+  // documented as a JSON string on this host; an object is accepted too rather than betting the
+  // guard on one spelling of an unpinned payload
+  let ti = firstDefined(payload, ['tool_input', 'tool_args', 'arguments', 'params']);
+  if (typeof ti === 'string') ti = parseJson(ti);
+  if (!ti || typeof ti !== 'object') ti = {};
+
+  const r = runScript(
+    'scratch-path-guard.cjs',
+    JSON.stringify({
+      hook_event_name: 'PreToolUse',
+      tool_name: tool,
+      tool_input: ti,
+      cwd: workspaceRoot(payload),
+    })
+  );
+  if (r.status !== 0) return null; // a guard that could not run never blocks QA (fail-open)
+  const emitted = parseJson(r.stdout);
+  const d = emitted && emitted.hookSpecificOutput;
+  if (!d || d.permissionDecision !== 'deny') return null;
+  // No exit 2 here: the deny primitive on this event is the JSON body alone, unlike the shell
+  // event's Claude-compatible exit code.
+  const message = String(d.permissionDecisionReason || '');
+  warn(message);
+  return denyBody(message);
+}
+
 const HANDLERS = {
   sessionStart,
   beforeSubmitPrompt,
   subagentStart,
   beforeShellExecution,
+  beforeMCPExecution,
   afterMCPExecution,
 };
 

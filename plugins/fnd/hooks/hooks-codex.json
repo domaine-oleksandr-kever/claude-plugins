@@ -1,5 +1,5 @@
 {
-  "description": "fnd hook wiring for Codex — the canonical Claude Code hooks in Codex hooks.json envelope form (M1b measured live 2026-08-23: the top level is {description, hooks}, not a bare event map). Guards block by exit code; PostToolUse routes through codex-mcp-shim because Codex cannot rewrite tool output. The two PreToolUse guards are the ONE deliberate divergence from the verbatim Claude commands: they PROBE for the bundle (CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT, then the newest ~/.codex/plugins/cache/*/fnd/* holding the script) and, when nothing resolves, deny a git payload with exit 2 instead of running \"/hooks/...\" out of an empty root — which exits 127 and lets Codex proceed. Cursor's wiring denies the same case, OpenCode's adapter throws.",
+  "description": "fnd hook wiring for Codex — the canonical Claude Code hooks in Codex hooks.json envelope form (M1b measured live 2026-08-23: the top level is {description, hooks}, not a bare event map). Guards block by exit code; PostToolUse routes through codex-mcp-shim because Codex cannot rewrite tool output. The two PreToolUse guards are the ONE deliberate divergence from the verbatim Claude commands: they PROBE for the bundle (CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT, then the newest ~/.codex/plugins/cache/*/fnd/* holding the script) and, when nothing resolves, deny a git payload with exit 2 instead of running \"/hooks/...\" out of an empty root — which exits 127 and lets Codex proceed. Cursor's wiring denies the same case, OpenCode's adapter throws. The second PreToolUse group is the scratch-path guard (M3): the Claude command and matcher verbatim, modulo the root expansion. That matcher is prefix-agnostic on BOTH hosts on purpose — Codex names an MCP tool mcp__<server>__<tool> with the server name from mcp-codex.json, without the plugin_fnd_ prefix Claude Code adds, and on Claude Code the same two servers are often installed per-user rather than from the plugin. The guard denies through permissionDecision JSON (fail-open on everything else), which is why this one command keeps its `|| true`.",
   "hooks": {
     "SessionStart": [
       {
@@ -42,6 +42,15 @@
           {
             "type": "command",
             "command": "r=\"\"; for c in \"${CLAUDE_PLUGIN_ROOT:-}\" \"${PLUGIN_ROOT:-}\"; do [ -n \"$c\" ] && [ -f \"$c/hooks/no-verify-bypass.sh\" ] && { r=\"$c\"; break; }; done; if [ -z \"$r\" ]; then for c in \"$HOME\"/.codex/plugins/cache/*/fnd/*; do [ -f \"$c/hooks/no-verify-bypass.sh\" ] || continue; if [ -z \"$r\" ] || [ \"$c\" -nt \"$r\" ]; then r=\"$c\"; fi; done; fi; if [ -n \"$r\" ]; then \"$r/hooks/no-verify-bypass.sh\"; else case \"$(cat)\" in *git*|*commit*|*push*|*merge*|*pull*) echo \"fnd commit guard: hooks/no-verify-bypass.sh could not be located (CLAUDE_PLUGIN_ROOT, PLUGIN_ROOT, ~/.codex/plugins/cache/*/fnd/*), so this git command is blocked rather than run unchecked. Re-install or repair the fnd plugin, then re-run the same command. Never bypass the repo git hooks (--no-verify, core.hooksPath, HUSKY=0) - they are quality gates.\" >&2; exit 2 ;; esac; fi"
+          }
+        ]
+      },
+      {
+        "matcher": "^mcp__.*__(take_screenshot|browser_take_screenshot)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_SCRATCH_GUARD:-1}\" = \"0\" ] || node \"$r/hooks/scratch-path-guard.cjs\" || true"
           }
         ]
       }

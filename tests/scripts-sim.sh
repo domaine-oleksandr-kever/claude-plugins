@@ -89,6 +89,18 @@ elif grep -q FndThemeFileGet "$Q"; then
     notheme) printf '{"data":{"theme":null}}\n'; exit 0 ;;
     ue) printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[],"userErrors":[{"filename":"templates/product.json","code":"NOT_FOUND"}]}}}}\n' "$role"; exit 0 ;;
     nobody) printf '{"data":{"theme":{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"%s","files":{"nodes":[{"filename":"templates/product.json","updatedAt":"now","body":{}}],"userErrors":[]}}}}\n' "$role"; exit 0 ;;
+    # the READ-BACK failing on its own after a committed mutation: Admin API throttling right
+    # after a write is an ordinary condition, and a 5xx comes back as an HTML body
+    throttled) printf '{"errors":[{"message":"Throttled","extensions":{"code":"THROTTLED"}}]}\n'; exit 0 ;;
+    gethtml)   printf '<html><body>502 Bad Gateway</body></html>\n'; exit 0 ;;
+    # …and the same 5xx on the FIRST read-back only (FAKE_GET_COUNT counts read-backs, since no
+    # other query reaches this branch): the retry falls through to the FAKE_BODY_FILE answer
+    gethtml1)
+      n=1
+      if [ -n "${FAKE_GET_COUNT:-}" ]; then
+        n=$(( $(cat "$FAKE_GET_COUNT" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "$FAKE_GET_COUNT"
+      fi
+      [ "$n" -eq 1 ] && { printf '<html><body>502 Bad Gateway</body></html>\n'; exit 0; } ;;
   esac
   if [ -n "${FAKE_BODY_FILE:-}" ]; then
     jq -nc --arg role "$role" --rawfile b "$FAKE_BODY_FILE" \
@@ -162,9 +174,35 @@ if [ -n "${TJ_CLI_LOG:-}" ]; then
   printf 'argv=%s\n' "$*" >> "$TJ_CLI_LOG"
   printf 'token=%s\n' "${SHOPIFY_CLI_THEME_TOKEN:-}" >> "$TJ_CLI_LOG"
 fi
+# --path/--only are parsed so `theme pull` can materialize a file the way the real CLI does —
+# that pull IS the `set` read-back verify. TJ_PULL_BODY (a file) becomes <path>/<only>;
+# TJ_PULL_BODY_1 overrides it for the FIRST pull only (the read-after-write race the retry
+# covers) and needs TJ_PULL_COUNT, which also records how many pulls a case triggered — the
+# only way to assert that FND_THEME_JSON_VERIFY=0 pulls nothing. With no body set the pull
+# "succeeds" and produces no file (the unreadable-read-back path). TJ_PUSH_SAVE captures the
+# pushed bytes (point TJ_PULL_BODY at it for the round-trip); TJ_PUSH_JSON overrides the
+# --json envelope the push prints.
+path=""; only=""; prev=""
+for a in "$@"; do
+  case "$prev" in --path) path="$a" ;; --only) only="$a" ;; esac
+  prev="$a"
+done
 case "$*" in
   *"theme list"*) printf '[{"id":2,"name":"Dev","role":"development"}]\n' ;;
-  *"theme push"*) printf '{}\n' ;;
+  *"theme push"*)
+    if [ -n "${TJ_PUSH_SAVE:-}" ] && [ -n "$path" ] && [ -n "$only" ]; then cp "$path/$only" "$TJ_PUSH_SAVE"; fi
+    pj="${TJ_PUSH_JSON:-}"; [ -n "$pj" ] || pj='{}'
+    printf '%s\n' "$pj" ;;
+  *"theme pull"*)
+    n=1
+    if [ -n "${TJ_PULL_COUNT:-}" ]; then
+      n=$(( $(cat "$TJ_PULL_COUNT" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "$TJ_PULL_COUNT"
+    fi
+    src="${TJ_PULL_BODY:-}"
+    if [ "$n" -eq 1 ] && [ -n "${TJ_PULL_BODY_1:-}" ]; then src="${TJ_PULL_BODY_1}"; fi
+    if [ -n "$src" ] && [ -n "$path" ] && [ -n "$only" ]; then
+      mkdir -p "$path/$(dirname "$only")"; cp "$src" "$path/$only"
+    fi ;;
 esac
 exit 0
 FAKE
@@ -179,7 +217,9 @@ assert T9-mutfail-no-cli-fallback 3 "$rc" "$E" "store_execute_failed_mutation"
 if [ ! -f "$M9" ]; then ok; else bad T9b-cli-untouched "themecli invoked after an attempted mutation"; fi
 
 # T10: runner exit 3 for MISSING credentials still falls back to themecli
+# (TJ_PULL_BODY = the payload: the read-back verify has to find the file it just pushed)
 rc=0; M10="$TMP/tj10"; TJ_CLI_MARKER="$M10" FAKE_RUNNER_MODE=nocreds SHOPIFY_CLI_THEME_TOKEN=fake \
+  TJ_PULL_BODY="$TMP/snap.json" \
   PATH="$TJSHIM:$PATH" "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
   --from "$TMP/snap.json" --store test.myshopify.com >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && [ -f "$M10" ] && grep -q themecli "$O"; then ok; else bad T10-nocreds-fallback "rc=$rc out=$(cat "$O") err=$(head -c 150 "$E" | tr '\n' ' ')"; fi
@@ -268,9 +308,10 @@ rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.
 assert T18-from-guard-json-aware 2 "$rc" "$E" "error=from_file_invalid_json"
 
 # T18b (pin): a genuinely banner-commented body is still accepted by that guard
+# (FAKE_BODY_FILE = the same body, so the read-back verify sees what was written)
 printf '%s' '/* auto-generated */
 {"current":{"a":1}}' > "$BF/bannered.json"
-rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+rc=0; FAKE_BODY_FILE="$BF/bannered.json" "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
   --from "$BF/bannered.json" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '"ok":"upserted"' "$O"; then ok; else bad T18b-banner-accepted "rc=$rc err=$(head -c 150 "$E" | tr '\n' ' ')"; fi
 
@@ -415,6 +456,213 @@ rc=0; TOML_PATH="$UT33" PATH="$T33SHIM:$PATH" "$BASH_BIN" "$TJ" themes --engine 
 chmod 644 "$UT33"
 if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && ! grep -qi "awk: can't open" "$E"; then ok
 else bad T33-unreadable-toml-no-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# --- `set` read-back verify: Shopify keeps the PREVIOUS content for payloads it rejects
+# server-side while the write reports success — push exit 0, no userErrors. Every case
+# below drives that divergence through the stubs; the themecli set runs with --engine themecli so
+# the gql stub is out of the picture. FND_THEME_JSON_VERIFY_WAIT=0 keeps every retrying case from
+# paying the pause before the second read-back (2 s each at the default) — T47 is the one row
+# that pays it, because it is the row about the fallback.
+export FND_THEME_JSON_VERIFY_WAIT=0
+TV="$TMP/tjverify"; mkdir -p "$TV"
+printf '%s' '{"sections":{"main":{"settings":{"test_parent":"{{ product.metafields.a.b.value }}"}}}}' > "$TV/new.json"
+printf '%s' '{"sections":{"main":{"settings":{"test_parent":"old"}}}}' > "$TV/old.json"
+tj_set_cli() { # tj_set_cli <from> — themecli `set`, caller sets the TJ_PULL_* fixture vars
+  SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+    "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+    --theme 2 --file templates/product.json --from "$1"
+}
+
+# T34: the pull-back returns exactly what was pushed → the existing success line, now carrying
+# verified=true (TJ_PUSH_SAVE→TJ_PULL_BODY makes the stub a real round-trip, not a fixture echo)
+rc=0; TJ_PUSH_SAVE="$TV/pushed.json" TJ_PULL_BODY="$TV/pushed.json" \
+  tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":"upserted"' "$O" && grep -q '"verified":"true"' "$O" \
+   && cmp -s "$TV/pushed.json" "$TV/new.json"; then ok
+else bad T34-cli-verified "rc=$rc out=$(head -c 160 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T35 (bug): the theme still serves the old content on BOTH attempts — the false ok=upserted this
+# whole section exists for. The error line is stdout (the caller's channel), the fix hint stderr,
+# and the two known triggers are named — including the canonical `{{ ….value }}` form.
+rc=0; C35="$TMP/tj35-pulls"; : > "$C35"
+TJ_PULL_BODY="$TV/old.json" TJ_PULL_COUNT="$C35" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied engine=themecli theme=2 file=templates/product.json' "$O" \
+   && ! grep -q 'ok":"upserted' "$O"; then ok
+else bad T35-cli-not-applied "rc=$rc out=$(head -c 200 "$O")"; fi
+if grep -qF '.value' "$E" && grep -q 'hint=' "$E" && grep -qi 'previous content' "$E"; then ok
+else bad T35b-hint-names-triggers "err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T35d (bug): the hint may not ASSERT the pre-image — nothing is read before the write, so
+# "the old content is still in place" is a claim the script cannot make, and a caller that
+# believes it skips the restore step on a theme that may well have changed.
+if grep -q 'get --theme 2 --file templates/product.json' "$E" \
+   && ! grep -qi 'old content is still in place' "$E"; then ok
+else bad T35d-hint-no-preimage-claim "err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+if [ "$(cat "$C35")" = 2 ]; then ok; else bad T35c-retried-once "pulls=$(cat "$C35") want 2"; fi
+
+# T36 (race guard): a read issued right after a write can still be served the old copy — the
+# FIRST pull-back is stale, the retry sees the payload, and the set succeeds
+rc=0; C36="$TMP/tj36-pulls"; : > "$C36"
+TJ_PULL_BODY_1="$TV/old.json" TJ_PULL_BODY="$TV/new.json" TJ_PULL_COUNT="$C36" \
+  tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" && [ "$(cat "$C36")" = 2 ]; then ok
+else bad T36-retry-then-success "rc=$rc pulls=$(cat "$C36") out=$(head -c 160 "$O")"; fi
+
+# T37 (bug): Shopify re-stamps its /*…*/ banner and reserializes the JSON on every write, so a raw
+# byte compare would report not_applied on every single successful set. Same content, different
+# banner + key order + whitespace → verified.
+printf '%s' '{"b":2,"a":{"y":1,"x":2}}' > "$TV/payload.json"
+printf '%s' '/* This file is auto-generated — do not edit */
+{
+  "a": { "x": 2, "y": 1 },
+  "b": 2
+}' > "$TV/reserialized.json"
+rc=0; TJ_PULL_BODY="$TV/reserialized.json" tj_set_cli "$TV/payload.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" \
+   && ! cmp -s "$TV/payload.json" "$TV/reserialized.json"; then ok
+else bad T37-banner-keyorder-normalized "rc=$rc out=$(head -c 160 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T38 (escape hatch): FND_THEME_JSON_VERIFY=0 does no read-back at all — the pull-back fixture is
+# the stale content, which would otherwise fail the case, and no pull is recorded
+rc=0; C38="$TMP/tj38-pulls"; : > "$C38"
+FND_THEME_JSON_VERIFY=0 TJ_PULL_BODY="$TV/old.json" TJ_PULL_COUNT="$C38" \
+  tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"skipped"' "$O" && [ ! -s "$C38" ]; then ok
+else bad T38-verify-off "rc=$rc pulls=$(cat "$C38") out=$(head -c 160 "$O")"; fi
+
+# T39 (bug): the push's --json envelope was captured and never read. An envelope reporting errors
+# despite exit 0 fails before the read-back — nothing to verify, the file did not go up.
+rc=0; C39="$TMP/tj39-pulls"; : > "$C39"
+TJ_PUSH_JSON='{"errors":["templates/product.json: Invalid schema attribute"]}' \
+  TJ_PULL_BODY="$TV/new.json" TJ_PULL_COUNT="$C39" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+assert T39-push-json-errors 5 "$rc" "$E" "error=cli_push_reported_errors"
+if [ ! -s "$C39" ] && [ ! -s "$O" ]; then ok
+else bad T39b-no-readback-after-errors "pulls=$(cat "$C39") out=$(head -c 120 "$O")"; fi
+# T39c: exiting before the read-back leaves the theme's state as unconfirmed as an exit 6 does —
+# the caller gets the same `get` hint, or it learns nothing about where the theme now stands
+if grep -q 'hint=.*get --theme 2 --file templates/product.json' "$E"; then ok
+else bad T39c-errors-recovery-hint "err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+
+# T40: gql mirror of T34 — themeFilesUpsert returning no userErrors is not proof either, so the
+# same read-back runs there (the stub's FndThemeFileGet answers with FAKE_BODY_FILE)
+rc=0; FAKE_BODY_FILE="$TV/new.json" "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 \
+  --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"engine":"gql"' "$O" && grep -q '"verified":"true"' "$O"; then ok
+else bad T40-gql-verified "rc=$rc out=$(head -c 160 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T41: gql mirror of T35 — read-back returns the old content, same contract with engine=gql
+rc=0; FAKE_BODY_FILE="$TV/old.json" "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 \
+  --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied engine=gql theme=gid://shopify/OnlineStoreTheme/2 file=templates/product.json' "$O" \
+   && grep -qF '.value' "$E"; then ok
+else bad T41-gql-not-applied "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# T42 (degradation): the normalizer needs perl to strip the banner, and the `set` json guard
+# already degrades instead of refusing when perl is missing — the verify does the same, comparing
+# raw bytes and saying so on stderr. A PATH of symlinks to exactly the tools the script uses is
+# the only way to make `command -v perl` fail on a normal machine.
+NOPERL="$TMP/noperl-bin"; mkdir -p "$NOPERL"
+for b in jq mktemp cmp cat sed tr wc grep awk dirname mkdir head tail cp sleep rm touch bash; do
+  p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$NOPERL/$b"
+done
+rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/new.json" PATH="$TJSHIM:$NOPERL" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" && grep -q 'note=verify_raw_compare' "$E"; then ok
+else bad T42-no-perl-raw-compare "rc=$rc out=$(head -c 160 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# T43 (bug): the degradation above must not be fail-CLOSED. Shopify re-stamps the banner and
+# reserializes on EVERY successful write, so on a perl-less host the raw compare differs for
+# every real `set` — reporting that as not_applied + exit 6 would make the escape hatch
+# (FND_THEME_JSON_VERIFY=0) the only way to work, restoring the very false success this exists
+# to kill. A raw MISMATCH is `verified=unverified` + exit 0 instead, said on stderr.
+rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/reserialized.json" PATH="$TJSHIM:$NOPERL" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file templates/product.json --from "$TV/payload.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":"upserted"' "$O" && grep -q '"verified":"unverified"' "$O" \
+   && grep -q 'note=verify_unverified' "$E" && ! grep -q 'error=not_applied' "$O"; then ok
+else bad T43-no-perl-mismatch-fails-open "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+
+# T44 (bug): the note was gated on `command -v perl` FAILING, so a perl that EXISTS but errors
+# degraded to the same raw compare with an empty note channel — nothing pointing at the cause.
+PERLFAIL="$TMP/perlfail-bin"; mkdir -p "$PERLFAIL"
+printf '#!/bin/sh\nexit 9\n' > "$PERLFAIL/perl"; chmod +x "$PERLFAIL/perl"
+rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/reserialized.json" PATH="$PERLFAIL:$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file templates/product.json --from "$TV/payload.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"unverified"' "$O" && grep -q 'note=verify_raw_compare' "$E"; then ok
+else bad T44-broken-perl-notes-it "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+
+# T45 (bug): a NON-json file compares raw by design — but the CLI's pull hands back a body with
+# a trailing newline the payload never had, and that is not a dropped write.
+printf '%s' 'a{{ x }}b' > "$TV/snippet.liquid"
+printf '%s\n' 'a{{ x }}b' > "$TV/snippet.pulled.liquid"
+rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/snippet.pulled.liquid" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file sections/x.liquid --from "$TV/snippet.liquid" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O"; then ok
+else bad T45-liquid-trailing-newline "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# …while a genuinely different non-json body is still the hard verdict
+rc=0; printf '%s' 'DIFFERENT' > "$TV/other.liquid"
+SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/other.liquid" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file sections/x.liquid --from "$TV/snippet.liquid" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O"; then ok
+else bad T45b-liquid-real-mismatch "rc=$rc out=$(head -c 200 "$O")"; fi
+
+# T46 (bug): a gql read-back that fails on its own — Shopify throttling right after the
+# committed mutation — used to exit 5 with `error=gql_errors` from INSIDE the read-back: output
+# byte-identical to "the upsert failed", for a write that already went through. It is a read
+# failure: error=verify_read_failed + exit 6, after the same retry.
+rc=0; FAKE_GET_MODE=throttled "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 \
+  --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=verify_read_failed engine=gql' "$O" \
+   && ! grep -q 'error=gql_errors' "$O" && ! grep -q '"ok":"upserted"' "$O"; then ok
+else bad T46-gql-readback-throttled "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# same for a non-JSON (5xx HTML) read-back body
+rc=0; FAKE_GET_MODE=gethtml "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 \
+  --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=verify_read_failed engine=gql' "$O"; then ok
+else bad T46b-gql-readback-non-json "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# T46c (bug): the SAME transient 5xx on the first read-back and the payload on the retry — a run
+# that ends verified + exit 0. The non-JSON branch used to print `error=non_json_response log=…`
+# + 600 bytes of body BEFORE it looked at the soft-read flag, so a healthy `set` came back with an
+# `error=` line on its stderr (byte-identical to a failed upsert) and a $TMPDIR log nobody reaps.
+GT="$TMP/tj46c-tmp"; mkdir -p "$GT"; C46="$TMP/tj46c-gets"; : > "$C46"
+rc=0; TMPDIR="$GT" FAKE_GET_MODE=gethtml1 FAKE_GET_COUNT="$C46" FAKE_BODY_FILE="$TV/new.json" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+  --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" && [ "$(cat "$C46")" = 2 ]; then ok
+else bad T46c-gql-readback-retry "rc=$rc gets=$(cat "$C46") out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+if ! grep -q 'error=' "$E"; then ok
+else bad T46d-no-error-token "a verified run printed an error= line: $(head -c 240 "$E" | tr '\n' ' ')"; fi
+if [ -z "$(ls -A "$GT" 2>/dev/null)" ]; then ok
+else bad T46e-no-leaked-log "the soft read-back left files in TMPDIR: $(ls -A "$GT" | tr '\n' ' ')"; fi
+
+# T47 (bug): the read-back BODY not parsing as JSON is not the same fact as "this host cannot
+# normalize". The payload is validated as JSON before the upload, so a theme serving a non-JSON
+# body is a theme not serving the payload — a mismatch, not a fail-open. It used to raise the
+# same flag as a missing perl and come back `verified=unverified` + exit 0, i.e. the false
+# success this whole section exists to kill, on a host that could have told the truth.
+printf '%s' '<html><body>Shopify was unhappy</body></html>' > "$TV/garbled.json"
+rc=0; TJ_PULL_BODY="$TV/garbled.json" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied engine=themecli' "$O" \
+   && grep -q 'note=verify_body_not_json' "$E" && ! grep -q '"verified":"unverified"' "$O"; then ok
+else bad T47-body-not-json-is-mismatch "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T47b (bug): and that verdict is per ATTEMPT. The flag was sticky for the whole run, so one
+# garbled first read poisoned a clean, MATCHING second one into `unverified`.
+rc=0; C47="$TMP/tj47-pulls"; : > "$C47"
+TJ_PUSH_SAVE="$TV/pushed47.json" TJ_PULL_BODY_1="$TV/garbled.json" TJ_PULL_BODY="$TV/pushed47.json" \
+  TJ_PULL_COUNT="$C47" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" && [ "$(cat "$C47")" = 2 ]; then ok
+else bad T47b-garbled-then-clean "rc=$rc pulls=$(cat "$C47") out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T47c: an unusable FND_THEME_JSON_VERIFY_WAIT falls back to the default instead of handing
+# `sleep` an argument it refuses — under `set -e` that would abort the verify mid-run. This is
+# the one row in the section that pays the pause.
+rc=0; FND_THEME_JSON_VERIFY_WAIT=soon TJ_PULL_BODY="$TV/old.json" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E"; then ok
+else bad T47c-invalid-wait "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+unset FND_THEME_JSON_VERIFY_WAIT
 
 # ------------------------------------- shopify-admin-gql.sh against PATH shims --
 SHIM="$TMP/shim"; mkdir -p "$SHIM"

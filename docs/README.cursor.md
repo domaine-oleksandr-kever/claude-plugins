@@ -176,6 +176,11 @@ unless your filesystem forbids it.
 - **The context-usage monitor is inert.** It reads the session transcript, which
   `beforeSubmitPrompt` does not hand a hook; the prompt-JSON guard half of the same hook works
   normally.
+- **The screenshot scratch-path guard rides `beforeMCPExecution`.** Same deny as on Claude Code
+  and Codex, translated into this host's `permission: "deny"` response with its `user_message` /
+  `agent_message` pair. Two payload divergences the shim absorbs: Cursor hands the hook
+  `tool_input` as a JSON *string*, and the tool name arrives without a server prefix
+  (`mcp_server_name` is its own field). `FND_SCRATCH_GUARD=0` disables it here too.
 - **Cloud Agents run without your plugins.** A Cursor Cloud/background agent executes on a
   remote VM whose plugin cache is empty (live-verified 2026-08-22: `.cloud-plugin-manifest.json`
   carries `plugins: []`) — no fnd skills, hooks, MCP or subagents ride along, and in particular

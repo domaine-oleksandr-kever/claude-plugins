@@ -50,6 +50,14 @@
 #             block is the whole output and stops the monitor dead (no band state
 #             recorded for a prompt that never ran), each half rides its own switch,
 #             one half throwing neither silences nor forges the other, always exit 0
+#   D cases — hooks/scratch-path-guard.cjs, the PreToolUse screenshot-path deny: a relative or
+#             absolute path into the project working tree is denied with a reason naming the
+#             task-workspace tmp/ path to use instead (a remediation this guard itself allows and
+#             the screenshot servers accept), as is a playwright call with NO filename (its
+#             default output dir is <cwd>/.playwright-mcp, inside the tree) — while a `.claude/`
+#             path, any tmp/ dir, an out-of-tree path, an inline chrome-devtools screenshot,
+#             FND_SCRATCH_GUARD=0 and malformed stdin all pass through; plus the deny ENVELOPE
+#             shape, symlinked prefixes, the wiring gate and the matcher's tool coverage
 #   T cases — hooks/subagent-conventions.sh: code-writing / unknown agents get the
 #             conventions, read-only readers AND jira-writer are skipped, FND_LEAN=0
 #             drops lean-code, the hook always exits 0
@@ -2042,6 +2050,177 @@ assert_contains U9-blocks-without-file "$out" '"decision":"block"'
 printf 'FND_PROMPT_JSON=0\n' > "$UED/.claude/domaine.env"
 out="$(printf '%s' "$in" | (cd "$UED" && env TMPDIR="$PJD" node "$MERGED" 2>/dev/null))"
 if [ -z "$out" ]; then ok; else bad U9-file-disables-guard "out=$(printf '%s' "$out" | head -c 120)"; fi
+
+# ═══ D — PreToolUse scratch-path guard (screenshot litter) ══════════════════
+# The deny rule is narrow on purpose: project working tree, outside `.claude/`, under no `tmp`
+# dir. Every other shape — a workspace path, a system-tmp path, no path at all, the kill switch,
+# broken stdin — is an ALLOW, because a guard that misfires would block QA.
+SPG="$ROOT/plugins/fnd/hooks/scratch-path-guard.cjs"
+DPROJ="$TMP/dproj"; mkdir -p "$DPROJ/.claude/tasks/ELC-1/tmp" "$DPROJ/sections" "$DPROJ/tmp"
+DOUT="$TMP/dscratch"; mkdir -p "$DOUT"   # a directory OUTSIDE the project working tree
+
+run_spg() { # payload [VAR=val…] — the guard as the host runs it, from the project cwd
+  payload="$1"; shift
+  printf '%s' "$payload" | (cd "$DPROJ" && env "$@" node "$SPG" 2>/dev/null)
+}
+spg_ev() { # tool key path — a PreToolUse event for one screenshot tool
+  jq -cn --arg t "$1" --arg k "$2" --arg p "$3" --arg cwd "$DPROJ" \
+    '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{($k):$p}, cwd:$cwd}'
+}
+PW=mcp__plugin_fnd_playwright__browser_take_screenshot
+CDT=mcp__plugin_fnd_chrome-devtools-mcp__take_screenshot
+
+# D1: the live case — a bare relative `filename` lands in the project root. Deny, and the reason
+# (which reaches the MODEL) must name the workspace path to use instead, filename included.
+out="$(run_spg "$(spg_ev "$PW" filename elc-123-cart.jpeg)")"; ec=$?
+assert_eq       D1-exit    "$ec" 0
+assert_contains D1-deny    "$out" '"permissionDecision":"deny"'
+assert_contains D1-event   "$out" '"hookEventName":"PreToolUse"'
+assert_contains D1-where   "$out" '.claude/tasks/<work-id>/tmp/elc-123-cart.jpeg'
+assert_contains D1-switch  "$out" 'FND_SCRATCH_GUARD=0'
+# …and the SHAPE the host actually reads, not just the substrings: re-nest or rename that
+# envelope and every assertion above still matches while Claude Code sees no decision at all.
+if printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 \
+   && printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecisionReason | type == "string"' >/dev/null 2>&1; then ok
+else bad D1-envelope "deny is not nested under hookSpecificOutput: $(printf '%s' "$out" | head -c 160)"; fi
+# The remediation must stay INSIDE the workspace: the playwright server refuses any file outside
+# its allowed roots (<cwd>/.playwright-mcp, <cwd>), so the old "an absolute path under <system
+# tmp>" fallback turned a deny into a hard tool error on the retry. The no-ticket answer is a
+# workspace path too — and it is one this very guard allows.
+assert_contains D1-noticket  "$out" '.claude/tmp/elc-123-cart.jpeg'
+assert_absent   D1-no-systmp "$out" 'absolute path under'
+out2="$(run_spg "$(spg_ev "$PW" filename .claude/tmp/elc-123-cart.jpeg)")"
+if [ -z "$out2" ]; then ok; else bad D1b-noticket-allowed "the guard denies its own remediation: $out2"; fi
+
+# D2: chrome-devtools' key, absolute into the project root — same verdict as the relative form.
+out="$(run_spg "$(spg_ev "$CDT" filePath "$DPROJ/elc-99.png")")"
+assert_contains D2-deny "$out" '"permissionDecision":"deny"'
+# D2b: stray SUBDIR litter is litter too — the rule is the whole tree, not just its root.
+out="$(run_spg "$(spg_ev "$CDT" filePath sections/shot.png)")"
+assert_contains D2b-subdir-deny "$out" '"permissionDecision":"deny"'
+
+# D3: the sanctioned destinations — the task workspace and `.claude/tmp/`, both under `.claude/`.
+out="$(run_spg "$(spg_ev "$PW" filename .claude/tasks/ELC-1/tmp/shot.png)")"; ec=$?
+assert_eq D3-workspace-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad D3-workspace "workspace path denied: $out"; fi
+# D3b (bug): a `tmp` segment used to be sanctioned ANYWHERE, so the model's second attempt after
+# a deny — `tmp/elc-123-cart.jpeg`, a directory a theme checkout neither ships nor gitignores —
+# put the same litter back in the tree. Only `.claude/` makes a `tmp` dir scratch.
+out="$(run_spg "$(spg_ev "$CDT" filePath "$DPROJ/tmp/shot.png")")"
+assert_contains D3b-project-tmp-deny "$out" '"permissionDecision":"deny"'
+out="$(run_spg "$(spg_ev "$PW" filename tmp/elc-123-cart.jpeg)")"
+assert_contains D3c-retry-deny "$out" '"permissionDecision":"deny"'
+
+# D4: absolute path outside the project (system tmp, a scratchpad) — not this guard's business.
+out="$(run_spg "$(spg_ev "$PW" filename "$DOUT/shot.png")")"; ec=$?
+assert_eq D4-outside-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad D4-outside "an out-of-tree path was denied: $out"; fi
+out="$(run_spg "$(spg_ev "$CDT" filePath ../shot.png)")"
+if [ -z "$out" ]; then ok; else bad D4b-parent "a ../ path was denied: $out"; fi
+
+# D5 (bug): "no path field → allow" rested on a false premise for playwright. With no
+# --output-dir in mcp.json the bundled server's default output dir is <cwd>/.playwright-mcp —
+# INSIDE the checkout (live evidence: 367 untracked files in elc-theme/.playwright-mcp, not
+# gitignored), so dropping the filename was the way AROUND the guard. It is denied too, and the
+# reason names the dir it would have written to.
+nopath_ev() { # tool — a screenshot call with no output-path key at all
+  jq -cn --arg t "$1" --arg cwd "$DPROJ" \
+    '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{fullPage:true}, cwd:$cwd}'
+}
+out="$(run_spg "$(nopath_ev "$PW")")"; ec=$?
+assert_eq       D5-nopath-exit "$ec" 0
+assert_contains D5-nopath-deny "$out" '"permissionDecision":"deny"'
+assert_contains D5-nopath-dir  "$out" '.playwright-mcp'
+assert_contains D5-nopath-where "$out" '.claude/tasks/<work-id>/tmp/'
+# …while chrome-devtools' take_screenshot without filePath returns the image inline and writes
+# no file at all — denying that would block ordinary QA.
+out="$(run_spg "$(nopath_ev "$CDT")")"; ec=$?
+assert_eq D5b-cdt-nopath-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad D5b-cdt-nopath "an inline chrome-devtools screenshot was denied: $out"; fi
+# a non-string path is not a path — the same no-path branch decides, per tool
+out="$(run_spg "$(jq -cn --arg t "$CDT" --arg cwd "$DPROJ" '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{filePath:7}, cwd:$cwd}')")"
+if [ -z "$out" ]; then ok; else bad D5c-nonstring "a non-string path was denied: $out"; fi
+
+# D6: the kill switch — in-process, and at the wiring gate (no node spawns at all there).
+out="$(run_spg "$(spg_ev "$PW" filename elc-123-cart.jpeg)" FND_SCRATCH_GUARD=0)"; ec=$?
+assert_eq D6-off-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad D6-off "FND_SCRATCH_GUARD=0 still denied: $out"; fi
+SPG_CMD="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .hooks[0].command' "$MANIFEST")"
+run_spg_gate() { # [VAR=val…] — the wired command with the fake node on PATH
+  : > "$TMP/node.log"
+  env "$@" NODE_LOG="$TMP/node.log" PATH="$shim:$PATH" CLAUDE_PLUGIN_ROOT="$fake" \
+    bash -c "$SPG_CMD" >/dev/null 2>&1
+}
+run_spg_gate FND_SCRATCH_GUARD=0; ec=$?
+assert_eq D6b-gate-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad D6b-gate-off "node ran with FND_SCRATCH_GUARD=0"; else ok; fi
+run_spg_gate; ec=$?
+assert_eq D6c-gate-default-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then ok; else bad D6c-gate-default "node did not run by default"; fi
+# a node that fails must never surface as a hook error — the guard is fail-open end to end
+run_spg_gate NODE_EC=1; ec=$?
+assert_eq D6d-gate-node-failure-exit "$ec" 0
+
+# D7: malformed stdin → allow, exit 0 (fail-open on any internal error).
+out="$(printf 'not json' | (cd "$DPROJ" && node "$SPG" 2>/dev/null))"; ec=$?
+assert_eq D7-malformed-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad D7-malformed "malformed stdin produced output: $out"; fi
+
+# D9 (bug): containment was decided lexically, so the SAME directory reached through a symlinked
+# prefix (macOS /tmp → /private/tmp, a symlinked checkout) produced a `../…` relative path and
+# sailed through. Both sides are realpath'd now — fail-open still, since the leaf file does not
+# exist yet and only existing prefixes resolve.
+DREAL="$TMP/dreal/proj"; mkdir -p "$DREAL"
+ln -sf "$TMP/dreal" "$TMP/dlink"
+out="$(jq -cn --arg t "$CDT" --arg p "$DREAL/litter.png" --arg cwd "$TMP/dlink/proj" \
+  '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{filePath:$p}, cwd:$cwd}' \
+  | (cd "$TMP/dlink/proj" && node "$SPG" 2>/dev/null))"; ec=$?
+assert_eq       D9-symlink-exit "$ec" 0
+assert_contains D9-symlink-deny "$out" '"permissionDecision":"deny"'
+
+# D10 (bug): the deny names two remediation directories and NEITHER existed. @playwright/mcp's
+# `filename` branch resolves the path and writes it straight out — no mkdir — and `.claude/tmp/`
+# is created by nothing in the bundle, so a model that followed the reason got ENOENT and went
+# back to writing in the checkout. The guard now creates them as it denies.
+run_spg_at() { # cwd payload — the guard from an arbitrary project dir
+  printf '%s' "$2" | (cd "$1" && node "$SPG" 2>/dev/null)
+}
+spg_ev_at() { # cwd tool key path
+  jq -cn --arg t "$2" --arg k "$3" --arg p "$4" --arg cwd "$1" \
+    '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{($k):$p}, cwd:$cwd}'
+}
+DFRESH="$TMP/dfresh"; mkdir -p "$DFRESH/.claude/tasks/ELC-7"
+out="$(run_spg_at "$DFRESH" "$(spg_ev_at "$DFRESH" "$PW" filename elc-7-cart.jpeg)")"
+assert_contains D10-deny "$out" '"permissionDecision":"deny"'
+if [ -d "$DFRESH/.claude/tmp" ]; then ok; else bad D10b-noticket-dir "the deny did not create .claude/tmp/"; fi
+if [ -d "$DFRESH/.claude/tasks/ELC-7/tmp" ]; then ok
+else bad D10c-workspace-dir "the deny did not create the task workspace's tmp/"; fi
+# the no-path playwright deny prepares the same destinations
+DFRESH2="$TMP/dfresh2"; mkdir -p "$DFRESH2"
+out="$(run_spg_at "$DFRESH2" "$(nopath_ev "$PW" | jq -c --arg cwd "$DFRESH2" '.cwd = $cwd')")"
+assert_contains D10d-nopath-deny "$out" '"permissionDecision":"deny"'
+if [ -d "$DFRESH2/.claude/tmp" ]; then ok; else bad D10e-nopath-dir "the no-path deny did not create .claude/tmp/"; fi
+# …and a tree the guard cannot write to still DENIES: creating a directory is a side effect, never
+# a precondition (root can write anywhere, so that case cannot be staged there)
+if [ "$(id -u)" != 0 ]; then
+  DRO="$TMP/dro"; mkdir -p "$DRO"; chmod 500 "$DRO"
+  out="$(run_spg_at "$DRO" "$(spg_ev_at "$DRO" "$PW" filename shot.png)")"; ec=$?
+  chmod 700 "$DRO"
+  assert_eq       D10f-readonly-exit "$ec" 0
+  assert_contains D10f-readonly-deny "$out" '"permissionDecision":"deny"'
+fi
+
+# D8: the wiring matcher covers both screenshot tools and nothing else in the bundle. It is
+# deliberately PREFIX-AGNOSTIC (like the PostToolUse `mcp__.*` sibling): the same two servers are
+# routinely installed per-user rather than from the plugin (`claude mcp add playwright …`), and a
+# matcher pinned to `plugin_fnd_` would leave the guard silently inert for exactly those users.
+SPG_MATCHER="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .matcher' "$MANIFEST")"
+for t in "$PW" "$CDT" mcp__playwright__browser_take_screenshot mcp__chrome-devtools-mcp__take_screenshot; do
+  if printf '%s\n' "$t" | grep -Eq "$SPG_MATCHER"; then ok; else bad "D8-$t" "matcher misses the screenshot tool"; fi
+done
+for t in Bash mcp__plugin_fnd_chrome-devtools-mcp__take_snapshot mcp__plugin_fnd_figma-dev-mode__get_screenshot; do
+  if printf '%s\n' "$t" | grep -Eq "$SPG_MATCHER"; then bad "D8-not-$t" "matcher over-matches"; else ok; fi
+done
 
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then

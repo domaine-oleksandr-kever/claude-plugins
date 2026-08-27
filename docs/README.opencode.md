@@ -254,6 +254,11 @@ after an update that touched them.
   The context-usage monitor is inert (`chat.message` hands a hook no transcript path).
 - **No subagent-start hook.** The conventions that hook injects elsewhere are written into the
   generated agent bodies instead.
+- **No screenshot scratch-path guard.** `tool.execute.before` reaches only the bash tool in this
+  adapter, and the MCP tool-name/argument shapes OpenCode hands it are unverified — so the deny
+  that keeps QA screenshots out of the checkout on the other three hosts is absent here, and the
+  task workspace `tmp/` convention is the only rail
+  (`plugins/fnd/references/task-workspace.md`).
 - **`/name` comes from shims.** OpenCode invokes skills by model choice only; the 18 generated
   `commands-opencode/*.md` shims give slash parity by loading the skill by name (with an
   anchored path fallback if the lookup misses).

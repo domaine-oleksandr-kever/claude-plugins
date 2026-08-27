@@ -23,6 +23,11 @@
 //     Code instead of riding along in every turn.
 //   - subagent-conventions.sh has no OpenCode event (no subagent-start hook); the generated
 //     agents-opencode/*.md carry those conventions in the agent body instead.
+//   - hooks/scratch-path-guard.cjs (the PreToolUse screenshot-path deny, M3) is NOT wired here:
+//     tool.execute.before only sees the bash tool in this adapter, and the MCP tool-name/arg
+//     shapes OpenCode hands it are unverified — skipped rather than faked. It is wired on every
+//     other host (Claude Code, Codex, and Cursor's beforeMCPExecution); on this one the
+//     task-workspace convention is the instruction-only rail (references/task-workspace.md).
 //
 // Fail-open everywhere except the commit guard: an explicit exit 2 from either git guard throws
 // (OpenCode's block primitive), and a no-verify guard that reaches NO verdict at all — no bash, a

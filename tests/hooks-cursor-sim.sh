@@ -22,6 +22,11 @@
 #             `updated_mcp_tool_output` rewrite carrying its own full= spill, passthroughs
 #             (small / error / no-gain) leave the result alone — a passthrough must never
 #             collapse into a null rewrite — and every plausible result key is read
+#   P cases — beforeMCPExecution → scratch-path-guard.cjs: a screenshot aimed into the checkout
+#             comes back as `permission:"deny"` carrying both message-key spellings, while the
+#             workspace path, an out-of-tree path, another MCP tool, the switch and a malformed
+#             payload are silent — plus this host's two payload divergences (tool_input as a
+#             JSON string, an unprefixed tool name) and the screenshot-tool set's fourth copy
 #   X cases — beforeShellExecution → the two commit guards: exit 2 becomes
 #             `permission:"deny"` + both message fields + exit 2; a clean command emits
 #             nothing; a guard that reaches NO verdict fails open — except the no-verify guard
@@ -74,7 +79,7 @@ run_shim() { # event payload [VAR=val…]
 if jq -e . "$WIRING" >/dev/null 2>&1; then ok; else bad W0-parse "hooks-cursor.json is not valid JSON"; fi
 assert_eq W1-version "$(jq -r '.version' "$WIRING")" 1
 
-EVENTS="sessionStart beforeSubmitPrompt subagentStart beforeShellExecution afterMCPExecution"
+EVENTS="sessionStart beforeSubmitPrompt subagentStart beforeShellExecution beforeMCPExecution afterMCPExecution"
 for e in $EVENTS; do
   cmd="$(jq -r --arg e "$e" '.hooks[$e][0].command // empty' "$WIRING")"
   if [ -n "$cmd" ]; then ok; else bad "W2-$e" "no command wired"; fi
@@ -101,7 +106,7 @@ done
 # there would silently reopen every bypass. Everywhere else it is the fail-open rail.
 gcmd="$(jq -r '.hooks.beforeShellExecution[0].command' "$WIRING")"
 assert_absent W7-guard-no-true "$gcmd" '|| true'
-for e in sessionStart beforeSubmitPrompt subagentStart afterMCPExecution; do
+for e in sessionStart beforeSubmitPrompt subagentStart beforeMCPExecution afterMCPExecution; do
   assert_contains "W8-$e-failopen" "$(jq -r --arg e "$e" '.hooks[$e][0].command' "$WIRING")" '|| true'
 done
 
@@ -110,6 +115,7 @@ done
 assert_contains W9-prompt-gate "$(jq -r '.hooks.beforeSubmitPrompt[0].command' "$WIRING")" '"${FND_CTX_MONITOR:-1}" = "0"'
 assert_contains W9b-prompt-gate "$(jq -r '.hooks.beforeSubmitPrompt[0].command' "$WIRING")" '"${FND_PROMPT_JSON:-1}" = "0"'
 assert_contains W10-slim-gate  "$(jq -r '.hooks.afterMCPExecution[0].command' "$WIRING")" '"${FND_MCP_SLIM:-1}" = "0"'
+assert_contains W10b-scratch-gate "$(jq -r '.hooks.beforeMCPExecution[0].command' "$WIRING")" '"${FND_SCRATCH_GUARD:-1}" = "0"'
 
 # The Cursor manifest points at this file — M5 is what makes that pointer resolvable.
 ptr="$(jq -r '.hooks // empty' "$CURSOR_MANIFEST")"
@@ -156,6 +162,9 @@ out="$(wired_real beforeShellExecution "$NOHOME" '{"command":"git commit --no-ve
 assert_eq       W15-nobundle-exit "$EC" 2
 assert_eq       W15-nobundle-deny "$(printf '%s' "$out" | jq -r '.permission')" "deny"
 assert_contains W15-nobundle-msg  "$(printf '%s' "$out" | jq -r '.agentMessage')" "could not be located"
+# the pure-shell body carries both key spellings too — it is the same deny, minus the runtime
+assert_contains W15-nobundle-snake "$(printf '%s' "$out" | jq -r '.agent_message')" "could not be located"
+assert_contains W15-nobundle-snake-user "$(printf '%s' "$out" | jq -r '.user_message')" "could not be located"
 assert_contains W15-nobundle-err  "$(cat "$TMP/wired.err")" "could not be located"
 # …and an ordinary command is not collateral damage
 out="$(wired_real beforeShellExecution "$NOHOME" '{"command":"ls -la"}')"; EC=$?
@@ -189,7 +198,7 @@ out="$(wired_nonode beforeShellExecution '{"command":"ls -la"}')"; EC=$?
 assert_eq W18-nonode-nongit      "$out" ""
 assert_eq W18-nonode-nongit-exit "$EC" 0
 # The fail-open events stay fail-open without node — silence and exit 0, never a hook error.
-for e in sessionStart beforeSubmitPrompt subagentStart afterMCPExecution; do
+for e in sessionStart beforeSubmitPrompt subagentStart beforeMCPExecution afterMCPExecution; do
   out="$(wired_nonode "$e" '{"agent_type":"general-purpose","prompt":"hi","tool_response":{"content":[]}}')"; EC=$?
   assert_eq "W18b-$e-nonode-exit"  "$EC" 0
   assert_eq "W18b-$e-nonode-quiet" "$out" ""
@@ -229,8 +238,14 @@ if [ -s "$TMP/node.log" ]; then bad G3-slim-off "node ran with FND_MCP_SLIM=0"; 
 run_wired afterMCPExecution
 if [ -s "$TMP/node.log" ]; then ok; else bad G4-slim-default "node did not run by default"; fi
 
+run_wired beforeMCPExecution FND_SCRATCH_GUARD=0; ec=$?
+assert_eq G3b-scratch-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad G3b-scratch-off "node ran with FND_SCRATCH_GUARD=0"; else ok; fi
+run_wired beforeMCPExecution
+if [ -s "$TMP/node.log" ]; then ok; else bad G4b-scratch-default "node did not run by default"; fi
+
 # A node that fails is a broken bundle, not a verdict — every event but the guard swallows it.
-for e in sessionStart beforeSubmitPrompt subagentStart afterMCPExecution; do
+for e in sessionStart beforeSubmitPrompt subagentStart beforeMCPExecution afterMCPExecution; do
   run_wired "$e" NODE_EC=1; ec=$?
   assert_eq "G5-$e-failopen-exit" "$ec" 0
 done
@@ -422,6 +437,61 @@ out="$(mrun "$in" FND_MCP_SLIM=0)"; EC=$?
 assert_eq M7-slim-off "$out" ""
 assert_eq M7-exit     "$EC" 0
 
+# ═══ P — beforeMCPExecution (the screenshot scratch-path deny) ══════════════
+# This host documents a before-MCP event with a deny primitive (cursor.com/docs/agent/hooks), so
+# the screenshot guard reaches Cursor sessions too. Two payload divergences are pinned here:
+# tool_input arrives as a JSON STRING, and the tool name carries no server prefix.
+PPROJ="$TMP/pproj"; mkdir -p "$PPROJ/.claude/tasks/ELC-1/tmp"
+pev() { # tool key path [--obj] — a Cursor beforeMCPExecution payload
+  local t="$1" k="$2" p="$3" shape="${4:-string}"
+  if [ "$shape" = "obj" ]; then
+    jq -cn --arg t "$t" --arg k "$k" --arg p "$p" --arg w "$PPROJ" \
+      '{hook_event_name:"beforeMCPExecution", tool_name:$t, mcp_server_name:"playwright", tool_input:{($k):$p}, workspace_roots:[$w]}'
+  else
+    jq -cn --arg t "$t" --arg k "$k" --arg p "$p" --arg w "$PPROJ" \
+      '{hook_event_name:"beforeMCPExecution", tool_name:$t, mcp_server_name:"playwright", tool_input:({($k):$p}|tojson), workspace_roots:[$w]}'
+  fi
+}
+out="$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename elc-123-cart.jpeg)")"; EC=$?
+assert_eq       P1-exit       "$EC" 0
+assert_eq       P1-permission "$(printf '%s' "$out" | jq -r '.permission')" "deny"
+# Cursor's docs spell this event's response keys snake_case and the shell event's camelCase, and
+# the host reads at most one of each pair — so BOTH ride on BOTH events. A key the host ignores
+# costs nothing; guessing wrong drops the reason and leaves the model staring at a silent block.
+assert_contains P1-agent-msg  "$(printf '%s' "$out" | jq -r '.agent_message')" '.claude/tasks/<work-id>/tmp/elc-123-cart.jpeg'
+assert_contains P1-user-msg   "$(printf '%s' "$out" | jq -r '.user_message')"  'scratch-path guard'
+assert_contains P1-camel-agent "$(printf '%s' "$out" | jq -r '.agentMessage')" '.claude/tasks/<work-id>/tmp/elc-123-cart.jpeg'
+assert_contains P1-camel-user  "$(printf '%s' "$out" | jq -r '.userMessage')"  'scratch-path guard'
+# the object spelling of tool_input is accepted too (the string one is what the docs pin)
+assert_eq P1b-obj-shape "$(printf '%s' "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename elc-1.jpeg obj)")" | jq -r '.permission')" "deny"
+# a prefixed tool name (another host's spelling reaching this event) is covered as well
+assert_eq P1c-prefixed "$(printf '%s' "$(run_shim beforeMCPExecution "$(pev mcp__playwright__browser_take_screenshot filename elc-1.jpeg)")" | jq -r '.permission')" "deny"
+# P2: the sanctioned destination, an out-of-tree path, and a non-screenshot MCP tool are silent
+assert_eq P2-workspace  "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename .claude/tasks/ELC-1/tmp/shot.png)")" ""
+assert_eq P2b-outside   "$(run_shim beforeMCPExecution "$(pev take_screenshot filePath "$TMP/outside.png")")" ""
+assert_eq P2c-other-tool "$(run_shim beforeMCPExecution "$(pev browser_navigate url https://example.com)")" ""
+# P3: the switch (in-shim; the wiring gate is G3b) and the fail-open rails
+assert_eq P3-off        "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename elc-1.jpeg)" FND_SCRATCH_GUARD=0)" ""
+assert_eq P3b-malformed "$(run_shim beforeMCPExecution 'not json at all')" ""
+assert_eq P3c-no-input  "$(run_shim beforeMCPExecution '{"hook_event_name":"beforeMCPExecution","tool_name":"take_screenshot"}')" ""
+
+# P4: the screenshot-tool SET is spelled in four places — plugin.json's matcher, hooks-codex.json's
+# matcher, this shim's SCREENSHOT_TOOL (Cursor has no per-event matcher, so the filter lives in
+# code) and the guard's own ALWAYS_WRITES. The first two are pinned against each other by
+# hooks-codex-sim W10b and against the tool names by hooks-sim D8; nothing pinned this one, so a
+# tool renamed in the manifests would go on being guarded everywhere BUT Cursor. The literal is
+# read out of the shim, never copied here.
+SPT="$(grep 'const SCREENSHOT_TOOL = ' "$SHIM" | head -1 | sed 's|.*= /||; s|/;[[:space:]]*$||')"
+if [ -n "$SPT" ]; then ok; else bad P4-literal "cursor-shim.cjs has no SCREENSHOT_TOOL regex literal"; fi
+for t in take_screenshot browser_take_screenshot \
+         mcp__plugin_fnd_chrome-devtools-mcp__take_screenshot mcp__plugin_fnd_playwright__browser_take_screenshot \
+         mcp__chrome-devtools-mcp__take_screenshot mcp__playwright__browser_take_screenshot; do
+  if printf '%s\n' "$t" | grep -Eq "$SPT"; then ok; else bad "P4-$t" "SCREENSHOT_TOOL '$SPT' misses a screenshot tool"; fi
+done
+for t in take_snapshot get_screenshot mcp__chrome-devtools-mcp__take_snapshot mcp__figma-dev-mode__get_screenshot browser_navigate; do
+  if printf '%s\n' "$t" | grep -Eq "$SPT"; then bad "P4-not-$t" "SCREENSHOT_TOOL '$SPT' over-matches"; else ok; fi
+done
+
 # ═══ X — beforeShellExecution (the two commit guards) ═══════════════════════
 xrun() { run_shim beforeShellExecution "$1"; }
 
@@ -431,6 +501,9 @@ assert_eq       X1-permission   "$(printf '%s' "$out" | jq -r '.permission')" "d
 # both message fields: the developer sees why, and the model gets the rule text back
 assert_contains X1-agent-msg    "$(printf '%s' "$out" | jq -r '.agentMessage')" "never commit, push, merge or am with --no-verify"
 assert_contains X1-user-msg     "$(printf '%s' "$out" | jq -r '.userMessage')"  "quality gates"
+# …in both key spellings, exactly as the MCP deny above (P1)
+assert_contains X1-snake-agent  "$(printf '%s' "$out" | jq -r '.agent_message')" "never commit, push, merge or am with --no-verify"
+assert_contains X1-snake-user   "$(printf '%s' "$out" | jq -r '.user_message')"  "quality gates"
 
 out="$(xrun '{"command":"git commit -m \"x Co-Authored-By: Claude <noreply@anthropic.com>\""}')"; EC=$?
 assert_eq       X2-attr-exit  "$EC" 2

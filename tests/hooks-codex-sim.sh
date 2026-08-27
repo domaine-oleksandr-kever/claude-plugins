@@ -9,8 +9,10 @@
 #   W cases — the wiring file itself: valid JSON, every event present, every referenced script
 #             resolves, and each command is the CLAUDE command byte-for-byte modulo the root
 #             expansion (the near-verbatim contract — a hook added to plugin.json and forgotten
-#             here fails the suite). Matchers are Codex regexes: the PreToolUse one covers all
-#             three spellings of the shell tool (Bash / shell / local_shell) and nothing else.
+#             here fails the suite). Matchers are Codex regexes: the shell PreToolUse one covers
+#             all three spellings of the shell tool (Bash / shell / local_shell) and nothing
+#             else, and the scratch-path group's covers both host spellings of the two
+#             screenshot tools (Codex's MCP names carry no plugin_fnd_ prefix).
 #   S cases — SessionStart through the wiring: per-file tolerance, FND_LEAN gate, store-access
 #             detection, always exit 0, the real plugin root's whale instruction — plus the two
 #             root env vars Codex sets (CLAUDE_PLUGIN_ROOT alias and PLUGIN_ROOT) and the
@@ -25,7 +27,9 @@
 #   B cases — PreToolUse guards through the wiring: exit-2 blocks with a reason on stderr,
 #             stdin arrives byte-exact, the child's exit code propagates unchanged (fail-open
 #             stays fail-open, the hard block stays a hard block), and Codex's own payload shape
-#             (tool_name "shell", ARRAY command) still blocks.
+#             (tool_name "shell", ARRAY command) still blocks — plus B12, the scratch-path guard
+#             on the second PreToolUse group, which denies on the JSON channel (exit 0) and
+#             fails open on its switch and on an unresolvable plugin root.
 #   X cases — the no-verify / no-AI-attribution bypass matrix re-run through the Codex wiring:
 #             a representative row from every class in tests/no-verify-bypass-matrix.sh (which
 #             stays the full FP/FN contract against the scripts themselves), driven through the
@@ -91,9 +95,12 @@ if jq -e . "$WIRING" >/dev/null 2>&1; then ok; else bad W0-json "hooks-codex.jso
 if [ "$(jq -r 'keys | sort | join(",")' "$WIRING")" = "description,hooks" ]; then ok
 else bad W0b-envelope "top level must be exactly {description, hooks}"; fi
 
+# W1: one matcher group per event on each side — a group added to plugin.json and forgotten here
+# (or the reverse) is a hook that silently does not exist on this host.
 for ev in SessionStart UserPromptSubmit SubagentStart PreToolUse PostToolUse; do
   n="$(jq -r --arg e "$ev" '.hooks[$e] | length' "$WIRING" 2>/dev/null)"
-  if [ "$n" = "1" ]; then ok; else bad "W1-$ev" "want exactly one entry, got '$n'"; fi
+  c="$(jq -r --arg e "$ev" '.hooks[$e] | length' "$MANIFEST" 2>/dev/null)"
+  if [ "$n" = "$c" ]; then ok; else bad "W1-$ev" "want $c entr(ies) like plugin.json, got '$n'"; fi
 done
 
 # W2: same events as the canonical block — no fnd hook may exist on Claude Code and not on Codex.
@@ -148,7 +155,7 @@ scripts="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$WIRI
 for s in $scripts; do
   if [ -f "$PLUG/$s" ]; then ok; else bad "W5-$s" "wiring names a file that does not exist"; fi
 done
-assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 5
+assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 6
 
 # W6: PreToolUse matcher — Codex regex, covering every spelling of the shell tool and nothing else.
 pm="$(jq -r '.hooks.PreToolUse[0].matcher' "$WIRING")"
@@ -179,6 +186,30 @@ done
 # the dry-run rail: -n is a bypass on commit and a DRY RUN on push (matrix rows A23–A25)
 if grep -q '"git", "commit", "-n"' "$RULES"; then ok; else bad W9-commit-n "no prefix_rule forbidding git commit -n"; fi
 if grep -q '"git", "push", "-n"' "$RULES"; then bad W9-push-n "git push -n is a dry run, not a bypass"; else ok; fi
+
+# W10: the SECOND PreToolUse group — the scratch-path guard (M3). Unlike the git guards it is
+# near-verbatim (byte-equal to the Claude command modulo the root expansion): it denies through
+# permissionDecision JSON on exit 0, so an unresolvable root is a plain fail-open, not a hole.
+SPG_CMD="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .hooks[0].command' "$WIRING")"
+CSPG_CMD="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .hooks[0].command' "$MANIFEST")"
+assert_eq       W10-verbatim  "$SPG_CMD" "$(want_cmd "$CSPG_CMD")"
+assert_contains W10-script    "$SPG_CMD" '$r/hooks/scratch-path-guard.cjs'
+assert_contains W10-gate      "$SPG_CMD" '"${FND_SCRATCH_GUARD:-1}" = "0"'
+assert_contains W10-failopen  "$SPG_CMD" '|| true'
+# W10b: the matcher is prefix-agnostic on both hosts — Codex names an MCP tool
+# mcp__<server>__<tool> from mcp-codex.json, without the plugin_fnd_ prefix Claude Code adds, and
+# on Claude Code the same servers are often installed per-user — so BOTH spellings of the two
+# screenshot tools must match, and the two hosts' matchers must not drift apart.
+spm="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .matcher' "$WIRING")"
+assert_eq W10b-matcher-parity "$spm" \
+  "$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .matcher' "$MANIFEST")"
+for t in mcp__plugin_fnd_chrome-devtools-mcp__take_screenshot mcp__plugin_fnd_playwright__browser_take_screenshot \
+         mcp__chrome-devtools-mcp__take_screenshot mcp__playwright__browser_take_screenshot; do
+  if printf '%s\n' "$t" | grep -Eq "$spm"; then ok; else bad "W10b-$t" "scratch matcher '$spm' misses a screenshot tool"; fi
+done
+for t in Bash shell mcp__chrome-devtools-mcp__take_snapshot mcp__figma-dev-mode__get_screenshot; do
+  if printf '%s\n' "$t" | grep -Eq "$spm"; then bad "W10b-not-$t" "scratch matcher '$spm' over-matches"; else ok; fi
+done
 
 # ═══ S — SessionStart through the Codex wiring ══════════════════════════════
 SS_CMD="$(wcmd SessionStart)"
@@ -479,6 +510,31 @@ cache_ec() { # input
 }
 assert_eq B11-cache-newest-blocks "$(cache_ec "$(ev 'git commit --no-verify -m x')")" 2
 assert_eq B11b-cache-allow        "$(cache_ec "$(ev 'git commit -m ok')")" 0
+
+# B12: the scratch-path guard through the wired command, real node. The deny travels on STDOUT
+# as permissionDecision JSON (exit stays 0 — Codex reads the JSON channel here, not the code),
+# and every allow shape stays silent. The rule itself is pinned in tests/hooks-sim.sh.
+SPGP="$TMP/spg-proj"; mkdir -p "$SPGP/.claude/tasks/ELC-1/tmp"
+spg_run() { # key path [VAR=val…] — one screenshot event through the wired Codex command
+  local key="$1" p="$2"; shift 2
+  jq -cn --arg k "$key" --arg p "$p" --arg cwd "$SPGP" \
+    '{hook_event_name:"PreToolUse",tool_name:"mcp__playwright__browser_take_screenshot",tool_input:{($k):$p},cwd:$cwd}' \
+    | (cd "$SPGP" && env "$@" CLAUDE_PLUGIN_ROOT="$PLUG" bash -c "$SPG_CMD" 2>/dev/null)
+}
+out="$(spg_run filename elc-123-cart.jpeg)"; ec=$?
+assert_eq       B12-exit "$ec" 0
+assert_contains B12-deny "$out" '"permissionDecision":"deny"'
+out="$(spg_run filePath ".claude/tasks/ELC-1/tmp/shot.png")"
+if [ -z "$out" ]; then ok; else bad B12b-workspace "a workspace path was denied: $out"; fi
+out="$(spg_run filename elc-123-cart.jpeg FND_SCRATCH_GUARD=0)"; ec=$?
+assert_eq B12c-off-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad B12c-off "FND_SCRATCH_GUARD=0 still denied: $out"; fi
+# an unresolvable plugin root is a fail-open here (the guard denies through JSON, not exit 2) —
+# node cannot load the file, `|| true` swallows it, the screenshot proceeds
+out="$(jq -cn --arg cwd "$SPGP" '{hook_event_name:"PreToolUse",tool_input:{filename:"x.png"},cwd:$cwd}' \
+  | (cd "$SPGP" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT bash -c "$SPG_CMD" 2>/dev/null))"; ec=$?
+assert_eq B12d-noroot-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad B12d-noroot "an unresolvable root produced output: $out"; fi
 
 # ═══ X — the bypass matrix through the Codex wiring ═════════════════════════
 # tests/no-verify-bypass-matrix.sh stays the full FP/FN contract against the scripts; these rows

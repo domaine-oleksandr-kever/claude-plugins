@@ -64,7 +64,8 @@ lack the theme scopes, the script **falls back to the theme-CLI engine automatic
 printed). So theme JSON works even with **no Admin API access at all**; both engines return
 identical bytes and enforce the same live-theme refusal. Exit codes: 0 ok · 2 usage · 4
 live-theme write refused · 5 GraphQL/user/CLI errors · 3 no credentials for any engine (the
-hints name every remedy).
+hints name every remedy) · 6 a `set` reported success but the content did not land (read-back
+mismatch, or the read-back itself failed — see the write protocol below).
 
 **Finding the dev theme id** without exposing secrets (never `Read` `shopify.theme.toml` — it can
 hold a Theme Access password):
@@ -100,12 +101,27 @@ against, or a preview/sandbox theme. Then:
    skeleton theme missing section files refuses even a rewrite of its own current JSON.)
 
 3. **Write**: `set --theme <id> --file templates/product.json --from "$TMP/product.working.json"`.
-4. **Verify**: reload the page (running dev server → `127.0.0.1:9292`; otherwise the theme
-   preview URL). Ignored paths render from the **remote** theme, so the upserted JSON is what the
-   dev server shows. If the UI looks stale, `get` the file again to confirm the write landed,
-   hard-reload, and retry briefly before calling it a bug — same propagation discipline as
-   metafields. Compare **semantically** (`--strip-comments` + `jq -S`), not byte-wise against the
-   working copy — the re-read file is your JSON with the banner re-prepended.
+   The write is **verified mechanically**: on both engines `set` pulls the file back and compares
+   it against the payload (semantically for `*.json` — banner stripped, `jq -S` key order — so the
+   re-stamped `/*…*/` header is not a diff), retrying once. Landed ⇒ `verified=true` on the result
+   line. Shopify validates theme JSON server-side and, for payloads it rejects, **keeps the
+   previous content while the write reports success** — that case is now `error=not_applied` +
+   **exit 6**, with the two known triggers on stderr: an attribute the setting's schema does not
+   support, and a non-canonical dynamic source (write `{{ ….value }}` — a `.value` after every
+   reference hop). Fix the payload and re-run — and treat exit 6 as *the theme diverged*, not as
+   *nothing happened*: no pre-image is read before the write, so what it proves is only that the
+   theme does not serve your payload. `get` the file, and restore the snapshot (step 5) if what
+   comes back is neither the payload nor the content you started from.
+   `error=verify_read_failed` (same exit 6) means the read-back itself did not run — throttled,
+   5xx, unparsable — so the state is unconfirmed; `get` before assuming either outcome. On a host
+   with no working `perl` the comparison degrades to raw bytes, which cannot tell the re-stamped
+   banner from a lost write: a difference is then `verified=unverified` on the result line + exit
+   0 (`note=verify_raw_compare` / `note=verify_unverified` on stderr), and confirming is yours.
+4. **Verify the render**: reload the page (running dev server → `127.0.0.1:9292`; otherwise the
+   theme preview URL). Ignored paths render from the **remote** theme, so the upserted JSON is
+   what the dev server shows. Step 3 already proved the file on the theme, so a stale UI is
+   propagation/caching, not a lost write: hard-reload and retry briefly before calling it a bug —
+   same discipline as metafields.
 5. **Restore** the snapshot (`set --from "$TMP/product.pristine.json"`), `get` once more to
    confirm — the raw pristine restores **byte-exact** (banner included, not duplicated) — and say
    so in your report. The theme must end exactly as you found it.

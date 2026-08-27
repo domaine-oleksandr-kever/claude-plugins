@@ -30,8 +30,39 @@
 # unpublished themes, and follow the snapshot protocol (files in a temp dir, never the repo):
 #   1. get  --out snapshot.json          # pristine copy (raw — restores byte-exact)
 #   2. edit a working copy               # get --strip-comments first; then jq
-#   3. set  --from working.json          # verify on the storefront after reload
+#   3. set  --from working.json          # read-back verified (below); then check the storefront
 #   4. set  --from snapshot.json         # restore
+#
+# VERIFY (mechanical, both engines): Shopify validates theme JSON server-side and, for some
+# payloads, KEEPS THE PREVIOUS CONTENT while the write reports success — `shopify theme push`
+# exits 0, `themeFilesUpsert` returns no userErrors, and the theme still serves the old file.
+# Every `set` therefore pulls the file back and compares it against the payload: for *.json
+# normalized (banner comments stripped, `jq -S` key order) so Shopify's re-stamped /*…*/ header
+# is not a diff, raw bytes (modulo trailing newlines) for anything else. A mismatch is retried
+# ONCE after FND_THEME_JSON_VERIFY_WAIT seconds, default 2 (a read straight after a write can
+# still serve the old copy). Landed →
+# `verified=true` on the result line; the read-back does NOT carry the payload →
+# `error=not_applied` + hint + exit 6; the read-back itself unable to produce the file (including
+# a throttled/5xx/garbled gql read — the mutation already ran, so it is never retried on the
+# other engine) → `error=verify_read_failed` + hint + the same exit 6 (state unconfirmed, not
+# known-stale). NOTE the one degradation: normalizing a *.json body needs perl, and on a host
+# without it (or with a perl that will not run) the compare is raw bytes, which cannot tell a
+# re-stamped banner from a dropped write — so there a MISMATCH is `verified=unverified` + exit 0,
+# not `not_applied`, noted on stderr as `note=verify_raw_compare` (fail-open, the same direction
+# the `set` json guard degrades in; a raw MATCH is still proof, `verified=true`). A read-back
+# that does NOT strip+parse as JSON on a host that can normalize is a different story and not a
+# degradation: the payload is gated as valid JSON before the upload, so a theme serving a
+# non-JSON body is not serving the payload — `note=verify_body_not_json` and the ordinary
+# not_applied verdict. On themecli the
+# push's own --json envelope is gated FIRST, so a failed upload is never reported as not_applied:
+# a non-empty `.errors` is `error=cli_push_reported_errors` + exit 5 before any read-back, while
+# `.warnings` only print `note=cli_push_warnings` and let the read-back decide.
+# FND_THEME_JSON_VERIFY=0 skips the read-back and prints `verified=skipped`.
+#
+# What verify does NOT establish: no pre-image is read before the write, so a mismatch proves
+# only "the theme does not serve the payload" — never "the theme still holds exactly what it
+# held before". Treat exit 6 as "state diverged, go look", and restore from the snapshot if the
+# `get` shows it changed.
 #
 # Usage:
 #   theme-json.sh themes [--role main|development|unpublished|live|demo]
@@ -51,11 +82,16 @@
 # `note=large_file … NOT the file content` line (a settings_data.json is 30–150 KB of context
 # burn; a human terminal still prints in full; a redirect-snapshot of the note fails `set`'s
 # json validation before any upload — real snapshots use --out); `set` prints a
-# one-line result incl. the engine used. GraphQL errors print the {"errors":…} head on stdout
-# (partial data stripped) with exit 5 and the FULL envelope at a `log=<path>` mktemp (plus a
-# scope hint when it looks like a missing read_themes/write_themes grant).
+# one-line result incl. the engine used and `verified` ("true" = read back and compared,
+# "skipped" = FND_THEME_JSON_VERIFY=0, "unverified" = read back but this host could not normalize
+# the JSON to compare it — see VERIFY above), or an `error=not_applied …` /
+# `error=verify_read_failed …` line on stdout with the fix hint on stderr.
+# GraphQL errors print the {"errors":…} head on stdout (partial data stripped) with exit 5 and
+# the FULL envelope at a `log=<path>` mktemp (plus a scope hint when it looks like a missing
+# read_themes/write_themes grant).
 # Exit: 0 ok · 2 usage · 4 live-theme write refused · 5 GraphQL/user/CLI errors · 3 no engine
-# credentials at all (hints name every remedy).
+# credentials at all (hints name every remedy) · 6 the write reported success but the theme does
+# not serve the payload (read-back mismatch, or the read-back itself failed — state unconfirmed).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -180,10 +216,134 @@ live_refuse() { # $1 name
   exit 4
 }
 
+# ------------------------------------------------- read-back verify (shared) --
+# Both engines report success from the transport alone (push exit code / empty userErrors),
+# and Shopify's server-side validation silently keeps the previous content for payloads it
+# rejects — so `set` is only believable after reading the file back. One comparison helper,
+# two engine-specific readers.
+VERIFY=1
+[ "${FND_THEME_JSON_VERIFY:-1}" = "0" ] && VERIFY=0
+# Pause before the ONE read-back retry: a read issued straight after a write can still be served
+# the old copy, so the default buys the write a moment to land. The suites pass 0 — every
+# not_applied case would otherwise pay it. A non-numeric value falls back to the default rather
+# than handing `sleep` an argument it refuses under `set -e`.
+VERIFY_WAIT="${FND_THEME_JSON_VERIFY_WAIT:-2}"
+case "$VERIFY_WAIT" in ''|.|*[!0-9.]*) VERIFY_WAIT=2 ;; esac
+
+# normalize_body <file> → stdout: the comparable form of a theme file body. *.json rides
+# strip_json_comments (Shopify re-stamps its /*…*/ banner on every write, so the banner is not
+# a difference) and then `jq -S .` (neither is key order or whitespace). Anything else — a
+# non-.json file — compares as RAW bytes minus trailing newlines: the CLI's pull can hand back a
+# body with a newline the payload did not have, and that is not a dropped write.
+# TWO different failures hide behind "we could not normalize", and they point opposite ways:
+#   HOST — this machine cannot normalize *.json at all (no perl, or a perl that will not run).
+#          Shopify re-stamps its banner and reserializes on EVERY successful write, so a raw
+#          compare then differs for every real `set`: a mismatch is no evidence and the verdict
+#          fails OPEN (unverified). A property of the machine, so the flag lives for the run.
+#   BODY — perl ran and the READ-BACK did not parse as JSON after stripping. `set` gates the
+#          payload as valid JSON before any upload, so a theme serving a non-JSON body is a
+#          theme not serving the payload: that is a MISMATCH, and it belongs on the not_applied
+#          path. A property of ONE read-back, so it resets per attempt — a garbled attempt 1
+#          must not decide the outcome of a clean attempt 2.
+VERIFY_HOST_NOTED=0
+VERIFY_HOST_DEGRADED=0
+VERIFY_BODY_NOTED=0
+VERIFY_BODY_UNPARSED=0
+# which side of the compare normalize_body is working on: only the READ-BACK's failure to parse
+# says anything about the write, and the intended payload degrades fail-open like the host case
+NORM_SIDE=intended
+verify_raw_note() { # $1 = why
+  VERIFY_HOST_DEGRADED=1
+  [ "$VERIFY_HOST_NOTED" -eq 1 ] && return 0
+  VERIFY_HOST_NOTED=1
+  echo "note=verify_raw_compare ($1 — comparing raw bytes, which cannot tell Shopify's re-stamped /*…*/ banner from a lost write, so a difference is reported as unverified)" >&2
+}
+verify_body_note() { # $1 = why
+  [ "$NORM_SIDE" = "read_back" ] || { verify_raw_note "$1"; return 0; }
+  VERIFY_BODY_UNPARSED=1
+  [ "$VERIFY_BODY_NOTED" -eq 1 ] && return 0
+  VERIFY_BODY_NOTED=1
+  echo "note=verify_body_not_json ($1 — the payload is validated as JSON before the upload, so a read-back that will not parse is not the payload)" >&2
+}
+raw_body() { # trailing newlines are not content for this comparison; $() eats them on both sides
+  printf '%s' "$(cat "$1")"
+}
+normalize_body() {
+  local s t
+  case "$FILE" in *.json) ;; *) raw_body "$1"; return 0 ;; esac
+  if ! command -v perl >/dev/null 2>&1; then
+    verify_raw_note "no perl to strip /*…*/ comments"
+    raw_body "$1"; return 0
+  fi
+  s="$(mktemp)"; t="$(mktemp)"; CLEAN+=("$s" "$t")
+  # the strip and the parse are graded SEPARATELY: a perl that exits non-zero is the host's
+  # limitation, a body jq then refuses is the body's, and one verdict for both fails the wrong way
+  if ! strip_json_comments "$1" > "$s" 2>/dev/null; then
+    verify_raw_note "perl is present but could not strip /*…*/ comments"
+    raw_body "$1"; return 0
+  fi
+  if jq -S . < "$s" > "$t" 2>/dev/null; then cat "$t"; return 0; fi
+  verify_body_note "the body did not parse as JSON after stripping /*…*/ comments"
+  raw_body "$1"
+}
+
+# bodies_match <intended> <read-back> — 0 when the write landed. Called with redirects (never
+# in a command substitution) so normalize_body's flags and one-shot notes survive the call.
+bodies_match() {
+  local a b
+  a="$(mktemp)"; b="$(mktemp)"; CLEAN+=("$a" "$b")
+  NORM_SIDE=intended;  normalize_body "$1" > "$a"
+  NORM_SIDE=read_back; normalize_body "$2" > "$b"
+  NORM_SIDE=intended
+  cmp -s "$a" "$b"
+}
+
+# verify_applied <engine> <theme-id> <reader-fn>: reader-fn <dest> writes the theme's current
+# copy of $FILE to <dest> (non-zero = could not read it). Compares against $FROM and, on a
+# mismatch, retries ONCE after a short sleep — a read issued right after a write can still be
+# served the old copy, and a false `not_applied` would send the caller chasing a phantom.
+# Returns 0 = the payload is on the theme; 2 = compared raw and it differed, which on this host
+# is not evidence either way (VERIFY_HOST_DEGRADED); both real failure modes exit 6 and never
+# return.
+verify_applied() {
+  local engine="$1" theme="$2" reader="$3" back rc=0 attempt=1
+  while : ; do
+    VERIFY_BODY_UNPARSED=0   # a per-attempt fact; the last attempt's read-back is the one judged
+    back="$(mktemp)"; CLEAN+=("$back")
+    rc=0; "$reader" "$back" || rc=$?
+    if [ "$rc" -eq 0 ] && bodies_match "$FROM" "$back"; then return 0; fi
+    [ "$attempt" -eq 1 ] || break
+    attempt=2; sleep "$VERIFY_WAIT"
+  done
+  if [ "$rc" -ne 0 ]; then
+    echo "error=verify_read_failed engine=$engine theme=$theme file=$FILE"
+    echo "hint=the write reported success but the file could not be read back, so the theme's state is unconfirmed — re-run \`theme-json.sh get --theme $theme --file $FILE\` before assuming either outcome" >&2
+    exit 6
+  fi
+  if [ "$VERIFY_BODY_UNPARSED" -eq 0 ] && [ "$VERIFY_HOST_DEGRADED" -eq 1 ]; then
+    # a raw compare said "different" — but see note=verify_raw_compare: on this host that also
+    # describes a write that landed and came back with its banner re-stamped. Fail OPEN and say
+    # the state is unknown, the same direction the `set` json guard degrades in.
+    echo "note=verify_unverified engine=$engine theme=$theme file=$FILE — the read-back differs from the payload, but this host could not normalize the JSON to compare it (see note=verify_raw_compare), so this is NOT evidence the write was dropped. Confirm with \`theme-json.sh get --theme $theme --file $FILE\`; install perl to get the real verdict." >&2
+    return 2
+  fi
+  echo "error=not_applied engine=$engine theme=$theme file=$FILE"
+  # No pre-image is read before the write, so the ONE proven statement is "the theme does not
+  # serve the payload" — claiming the previous content survived would waive the restore step on
+  # a theme that may well have changed.
+  echo "hint=the write reported success but the theme does NOT serve the payload — the usual cause is Shopify validating it server-side, dropping it and keeping the previous content. Two known triggers: an attribute the setting's schema does not support, and a non-canonical dynamic-source string — write '{{ ….value }}', a .value after EVERY reference hop, the form the customizer itself stores. Fix the payload and re-run — and \`theme-json.sh get --theme $theme --file $FILE\` to see what the theme holds now, restoring your snapshot if it is neither the payload nor the content you started from." >&2
+  exit 6
+}
+
 # ---------------------------------------------------------------- gql engine --
 # gql <query> <variables>: fills RESP. Returns 0 = ok; 1 = fall back to themecli (auto mode,
-# credentials missing/insufficient AND a Theme Access token exists); exits on hard failures.
+# credentials missing/insufficient AND a Theme Access token exists); exits on hard failures —
+# EXCEPT while GQL_SOFT=1 (the post-mutation read-back), where every hard failure returns 2
+# instead. Exiting from inside the read-back would print the pre-existing `error=gql_errors`
+# exit 5 — byte-identical to "the upsert itself failed" — for a write that already committed,
+# and Admin API throttling right after a mutation is an ordinary condition, not a new failure.
 GQL_NOTE=""
+GQL_SOFT=0
 gql() {
   local qf vf rerr rc=0
   qf="$(mktemp)"; vf="$(mktemp)"; rerr="$(mktemp)"; CLEAN+=("$qf" "$vf" "$rerr")
@@ -202,6 +362,7 @@ gql() {
       GQL_NOTE="admin credentials not set up"
       return 1
     fi
+    if [ "$GQL_SOFT" -eq 1 ]; then tail -3 "$rerr" >&2; return 2; fi
     cat "$rerr" >&2
     [ "$rc" -eq 3 ] && echo "hint=the theme-CLI engine is a third option — put the Theme Access password in $TOML or export SHOPIFY_CLI_THEME_TOKEN" >&2
     exit "$rc"
@@ -217,12 +378,24 @@ gql() {
   # refusal, whose `.data.theme.role` comparison would silently stop matching MAIN.
   case "$status" in *$'\n'*) jrc=1 ;; esac
   if [ "$jrc" -ne 0 ]; then
+    # GQL_SOFT is gated FIRST, exactly as the errors branch below: inside the post-mutation
+    # read-back a transient 5xx is an ordinary condition on a run that goes on to exit 0
+    # verified, and an `error=` line on its stderr reads as a failed write. The log file is
+    # still written (a garbled body is worth keeping) but joins CLEAN so the soft path leaks
+    # nothing into $TMPDIR.
     local lf; lf="$(mktemp)"; printf '%s\n' "$RESP" > "$lf"
+    if [ "$GQL_SOFT" -eq 1 ]; then CLEAN+=("$lf"); head -c 400 "$lf" >&2; echo >&2; return 2; fi
     echo "error=non_json_response log=$lf" >&2
     head -c 600 "$lf" >&2; echo >&2
     exit 5
   fi
   if [ "$status" = "errors" ]; then
+    if [ "$GQL_SOFT" -eq 1 ]; then
+      # never gql_err_report here: its errors head goes to STDOUT, which in a read-back is the
+      # channel the error=verify_read_failed line owns
+      printf '%s' "$RESP" | jq -c '{errors}' 2>/dev/null | head -c 400 >&2; echo >&2
+      return 2
+    fi
     if printf '%s' "$RESP" | grep -qi 'ACCESS_DENIED\|access denied'; then
       if [ "$ENGINE" = "auto" ] && cli_token_ready; then
         GQL_NOTE="admin credential lacks read_themes/write_themes"
@@ -258,9 +431,9 @@ gql_themes_lines() {
   printf '%s' "$RESP" | jq -c '.data.themes.nodes[]' | role_filter
 }
 
-gql_get() {
-  local gid; gid="$(gid_of "$THEME")"
-  gql 'query FndThemeFileGet($id: ID!, $filenames: [String!]!) {
+# one query text for the two readers (`get` and the `set` read-back) — a second copy would be
+# free to drift into asking for a different shape than the status pass below parses
+GQL_FILE_GET='query FndThemeFileGet($id: ID!, $filenames: [String!]!) {
     theme(id: $id) {
       id name role
       files(filenames: $filenames, first: 1) {
@@ -268,7 +441,11 @@ gql_get() {
         userErrors { filename code }
       }
     }
-  }' "$(jq -n --arg id "$gid" --arg f "$FILE" '{id: $id, filenames: [$f]}')" || return 1
+  }'
+
+gql_get() {
+  local gid; gid="$(gid_of "$THEME")"
+  gql "$GQL_FILE_GET" "$(jq -n --arg id "$gid" --arg f "$FILE" '{id: $id, filenames: [$f]}')" || return 1
   # ONE status pass, deciding in the caller-visible order: theme missing → file userErrors → body
   # missing (callers branch on which error comes first, so the order is a contract). The body stays
   # its own `jq -rj` pass — that trailing-newline-free write IS the byte-exact restore promise.
@@ -291,8 +468,31 @@ gql_get() {
   emit_file "$raw"
 }
 
+# read-back reader for verify_applied. NOTHING in here may leave the script: a `gql` hand-back
+# (return 1 = "fall back to themecli") must not propagate, because the mutation already ran and
+# re-running it on the other engine would double-apply — and neither may `gql`'s own hard
+# failures (throttled/error envelope, non-JSON body, runner exit), which GQL_SOFT turns into a
+# return 2. Every one of them reads as an unreadable file, which verify_applied retries and then
+# reports as error=verify_read_failed + exit 6.
+gql_read_back() { # $1 = dest file
+  local rc=0
+  GQL_SOFT=1
+  gql_read_back_inner "$1" || rc=$?
+  GQL_SOFT=0
+  return "$rc"
+}
+gql_read_back_inner() { # $1 = dest file
+  local gid st=""
+  gid="$(gid_of "$THEME")"
+  gql "$GQL_FILE_GET" "$(jq -n --arg id "$gid" --arg f "$FILE" '{id: $id, filenames: [$f]}')" || return 1
+  st="$(printf '%s' "$RESP" | jq -r '
+    if ((try .data.theme.files.nodes[0].body.content catch null) // null) == null then "no" else "ok" end' 2>/dev/null)" || st="no"
+  [ "$st" = "ok" ] || return 1
+  printf '%s' "$RESP" | jq -rj '.data.theme.files.nodes[0].body.content' > "$1"
+}
+
 gql_set() {
-  local gid role name ue
+  local gid role name ue verified="skipped"
   gid="$(gid_of "$THEME")"
   gql 'query FndThemeMeta($id: ID!) { theme(id: $id) { id name role } }' \
       "$(jq -n --arg id "$gid" '{id: $id}')" || return 1
@@ -310,8 +510,14 @@ gql_set() {
   ue="$(printf '%s' "$RESP" | jq -c '.data.themeFilesUpsert.userErrors // []')"
   [ "$ue" = "[]" ] || { local lf; lf="$(mktemp)"; printf '%s\n' "$RESP" > "$lf"
     echo "error=upsert_user_errors $(printf '%s' "$ue" | head -c 600) log=$lf" >&2; exit 5; }
-  jq -nc --arg name "$name" --arg role "$role" --arg f "$FILE" \
-    '{ok: "upserted", engine: "gql", theme: $name, role: $role, files: [$f]}'
+  # no userErrors is NOT proof the content landed — read it back (exits 6 when it did not).
+  # NEVER inside a command substitution: verify_applied's exit 6 would only kill the subshell.
+  if [ "$VERIFY" -eq 1 ]; then
+    local vrc=0; verify_applied gql "$gid" gql_read_back || vrc=$?
+    if [ "$vrc" -eq 0 ]; then verified="true"; else verified="unverified"; fi
+  fi
+  jq -nc --arg name "$name" --arg role "$role" --arg f "$FILE" --arg v "$verified" \
+    '{ok: "upserted", engine: "gql", theme: $name, role: $role, files: [$f], verified: $v}'
 }
 
 # ----------------------------------------------------------- themecli engine --
@@ -413,8 +619,40 @@ cli_get() {
   emit_file "$tmp/$FILE"
 }
 
+# read-back reader for verify_applied — the `cli_get` pull mechanics into a private temp dir,
+# minus the emit path (the body goes to a file, never to stdout)
+cli_read_back() { # $1 = dest file
+  local nid d e
+  nid="$(num_of "$THEME")"
+  d="$(mktemp -d)"; e="$(mktemp)"; CLEAN+=("$d" "$e")
+  shopify theme pull --store "$DOMAIN" --theme "$nid" --path "$d" \
+      --only "$FILE" --nodelete --no-color >/dev/null 2>"$e" \
+    || { tail -3 "$e" >&2; return 1; }
+  [ -f "$d/$FILE" ] || return 1
+  cat "$d/$FILE" > "$1"
+}
+
+# The push's --json envelope. Exit 0 does not mean the server took the file, but when the CLI
+# DOES know about per-file trouble it says so here. The shape varies across CLI versions, so only
+# a parseable envelope with a non-empty `errors` is fatal; `warnings` are surfaced as a note and
+# the read-back below decides the outcome.
+cli_push_report() { # $1 = raw --json output; $2 = theme id, for the recovery hint
+  local errs warns
+  printf '%s' "$1" | jq empty >/dev/null 2>&1 || return 0
+  errs="$(printf '%s' "$1" | jq -c 'try (.errors // null) catch null | if . == null or . == [] or . == {} or . == "" then empty else . end' 2>/dev/null)" || errs=""
+  warns="$(printf '%s' "$1" | jq -c 'try (.warnings // null) catch null | if . == null or . == [] or . == {} or . == "" then empty else . end' 2>/dev/null)" || warns=""
+  if [ -n "$warns" ]; then echo "note=cli_push_warnings $(printf '%s' "$warns" | head -c 400)" >&2; fi
+  if [ -n "$errs" ]; then
+    echo "error=cli_push_reported_errors file=$FILE $(printf '%s' "$errs" | head -c 400)" >&2
+    # this exits BEFORE the read-back, so the theme's state is as unconfirmed here as it is on
+    # the exit-6 paths — hand over the same way to look
+    echo "hint=the upload reported per-file errors and nothing was read back, so the theme's state is unconfirmed — re-run \`theme-json.sh get --theme $2 --file $FILE\` before assuming either outcome" >&2
+    exit 5
+  fi
+}
+
 cli_set() {
-  local nid role name tmp err out
+  local nid role name tmp err out verified="skipped"
   nid="$(num_of "$THEME")"
   cli_list
   role="$(printf '%s' "$CLI_LIST" | jq -r --arg id "$nid" '.[] | select((.id|tostring) == $id) | .role' | head -1)"
@@ -427,8 +665,14 @@ cli_set() {
   out="$(shopify theme push --store "$DOMAIN" --theme "$nid" --path "$tmp" \
       --only "$FILE" --nodelete --json --no-color 2>"$err")" \
     || { echo "error=cli_push_failed theme=$nid" >&2; tail -8 "$err" >&2; exit 5; }
-  jq -nc --arg name "$name" --arg role "$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]' | sed 's/^LIVE$/MAIN/')" --arg f "$FILE" \
-    '{ok: "upserted", engine: "themecli", theme: $name, role: $role, files: [$f]}'
+  cli_push_report "$out" "$nid"
+  # rc 0 is the transport's opinion, not the server's — read it back (exits 6 when it did not land)
+  if [ "$VERIFY" -eq 1 ]; then
+    local vrc=0; verify_applied themecli "$nid" cli_read_back || vrc=$?
+    if [ "$vrc" -eq 0 ]; then verified="true"; else verified="unverified"; fi
+  fi
+  jq -nc --arg name "$name" --arg role "$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]' | sed 's/^LIVE$/MAIN/')" --arg f "$FILE" --arg v "$verified" \
+    '{ok: "upserted", engine: "themecli", theme: $name, role: $role, files: [$f], verified: $v}'
 }
 
 # ------------------------------------------------------------------ dispatch --

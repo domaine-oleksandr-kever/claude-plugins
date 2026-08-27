@@ -81,6 +81,15 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/no-verify-bypass.sh\""
           }
         ]
+      },
+      {
+        "matcher": "^mcp__.*__(take_screenshot|browser_take_screenshot)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ \"${FND_SCRATCH_GUARD:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scratch-path-guard.cjs\" || true"
+          }
+        ]
       }
     ],
     "PostToolUse": [

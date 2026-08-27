@@ -14,15 +14,19 @@ server** item as their browser-validation prerequisite.
 | Git         | `git --version`    | all |
 | GitHub CLI  | `gh --version`     | `create-pull-request` |
 | jq          | `jq --version`     | all three bundled runners — `shopify-admin-gql.sh`, `theme-json.sh`, `create-preview-theme.sh` |
-| perl        | `perl -v`          | `theme-json.sh --strip-comments` |
+| perl        | `perl -v`          | `theme-json.sh --strip-comments`, and `set`'s read-back verify |
 
 Report version numbers; flag anything missing or below known team minimums. Two severities worth
 getting right: **jq missing is a 🔴** — all three runners exit immediately with an `error=` line
 naming jq (`error=jq_not_found` from the gql and theme-JSON runners, `error=jq not found on
 PATH …` from `create-preview-theme.sh`), so store access and preview themes are dead; **perl
 missing is a 🟡** — only `theme-json.sh get --strip-comments` hard-fails
-(`error=strip_needs_perl`), while a `set` whose `--from` JSON carries `/*…*/` comments skips
-validation with `note=json_validation_skipped` instead of refusing the push. The version
+(`error=strip_needs_perl`); everything else degrades and says so. A `set` whose `--from` JSON
+carries `/*…*/` comments skips validation with `note=json_validation_skipped` instead of refusing
+the push, and that `set`'s read-back verify falls back to a raw byte compare
+(`note=verify_raw_compare`) — which cannot tell Shopify's re-stamped banner from a lost write, so
+a difference reports `verified=unverified` (exit 0) rather than `error=not_applied`: on such a
+host, confirming a `set` is the developer's job. The version
 commands above are read-only (the
 `preflight-checks` skill pre-approves exactly these); any other shell command still needs the
 developer's go-ahead.
