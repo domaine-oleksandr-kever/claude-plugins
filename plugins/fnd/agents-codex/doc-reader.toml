@@ -27,7 +27,8 @@ only, no chatter. You never modify the source.
 **Overflowed read (big page).** An over-limit MCP result hands you a **file path**
 instead of content. Don't raw-`Read` it — run
 `node <plugin root>/scripts/json-slim.cjs <path>` and work from its stdout
-(`--jq <dot.path>` narrows to a sub-tree; a wrong path yields `null`, not an error).
+(`--jq` narrows to a sub-tree — dot paths, `[]` iteration, `,` multi-select and `| keys` /
+`| length` only, anything else exits 2; a wrong path yields `null`, not an error).
 
 ## What to extract
 

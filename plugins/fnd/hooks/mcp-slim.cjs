@@ -27,7 +27,7 @@
 // Spill-and-stub guard (M12b): a result the pipeline cannot shrink below FND_MCP_SLIM_STUB_BYTES —
 // an incompressible passthrough, or a compressed body that is still huge — is REPLACED by a ~1 KB
 // stub naming the spill path and the recovery that fits the branch it replaced (the plain CLI line,
-// or `--jq <dot.path>` for a payload the compressor already declined), instead of landing in context
+// or `--jq <jq-path>` for a payload the compressor already declined), instead of landing in context
 // raw. Same contract as the M7 CLI path-handback, moved into the hook; the stub never appears where
 // a rail says passthrough (an error envelope ANYWHERE in the result — at any size, see `anyError` —
 // a binary/base64 block, platform-overflow notices, spill failure). A block array that cannot be
@@ -309,8 +309,10 @@ function stubBytes() {
 
 // The stub text. Wording mirrors hooks/mcp-whale.md so the instruction layer and the stub state one
 // contract: never raw-Read a whale. The shape hint is the only DROPPABLE part — it goes whole if the cap
-// is reached, leaving a few fixed lines plus the two paths (tool name capped at STUB_TOOL_MAX),
-// comfortably under the cap. The command line must survive intact.
+// is reached, leaving a few fixed lines plus the two paths (tool name capped at STUB_TOOL_MAX) —
+// ~700-800 B with realistic paths, so the hint keeps roughly a third of the 1200 B cap. The command
+// line must survive intact, which is why the supported --jq grammar rides ON it: as a line of its own
+// it was ~110 B off the hint's budget, and the hint is dropped WHOLE.
 // Which recovery the stub names depends on the branch it replaced. `no-gain` over a single JSON DOCUMENT
 // is the one case where a whole-file re-run is WORSE than no guard: the CLI would put the identical
 // pipeline over the identical bytes and print the payload straight back (measured: a 43 KB decline
@@ -329,7 +331,7 @@ function stubText(tool, bytes, format, hint, file, reason, perBlock) {
     `<<fnd-mcp-slim stub>> ${who} returned ${bytes} B (format=${format}) — too large for context, and the compressor already ran on it and gained nothing, so ${what} to disk instead of being shown:`,
     `full=${file}`,
     'Do NOT re-run the compressor over the whole file (it would print the same bytes back) and never raw-Read it. Narrow instead:',
-    `  node ${SLIM_CLI} ${file} --jq <dot.path>`,
+    `  node ${SLIM_CLI} ${file} --jq '<jq-path>'   — ${jsonSlim().JQ_GRAMMAR_HINT}`,
     'For anything a sub-path cannot answer: grep the file, or Read it windowed (offset/limit).',
     `shape — ${hint}`,
   ] : [

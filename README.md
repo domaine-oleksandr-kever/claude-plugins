@@ -39,6 +39,7 @@ in its own subfolder under `plugins/`:
 │       │   ├── lean-code.md      #  "lazy senior dev" ladder (FND_LEAN=0 to disable)
 │       │   ├── subagent-conventions.sh  # injects the above into code-writing subagents
 │       │   ├── no-verify-bypass.sh      # PreToolUse guard: no hook-bypassing commits
+│       │   ├── spill-access.sh          # PreToolUse recorder: which tool read an MCP spill
 │       │   └── ...               # see "Hooks" below for the full set
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
@@ -886,6 +887,19 @@ hook error never blocks work:
   `FND_SCRATCH_GUARD=0` disables it. Wired on Claude Code, Codex and Cursor
   (`beforeMCPExecution`); OpenCode's tool hook has no verified MCP payload shape, so
   screenshots are unguarded there.
+- **PreToolUse (Bash / Read / Grep) — spill-access recorder.** `spill-access.sh` notes, in the
+  compressor's own debug log, that a tool touched one of the two MCP spill families (our
+  `fnd-mcp-slim-<hash>.json`, or any file under the platform's own `tool-results/` directory —
+  those names are opaque, and `mcp-slim.cjs`'s `OVERFLOW_PATH` is the single source of truth for
+  the shape) — one `entry:"access"` JSONL line per distinct path (at most 8 per call), carrying
+  which reader got there (`jq` / `grep` / `shell` / `node` / `Read` / `Grep` / `other`, or
+  `named` for a command that only touched the NAME: `rm`, `mv`, `ls`, `echo` …). It is
+  **measurement only**: it never blocks, prints
+  nothing, and changes no tool input. Without it `--report` called a whale *missed* whenever the
+  agent recovered it with three targeted `jq` queries instead of a `json-slim` run — the right
+  move, counted as a gap. It writes only while `FND_MCP_SLIM_DEBUG` is on and is disabled
+  entirely by `FND_SPILL_ACCESS=0`; it is POSIX sh + grep (no node), because it fires on every
+  Bash / Read / Grep call.
 - **UserPromptSubmit** — one node process (`user-prompt.cjs`) running two independently
   gated halves; a block from the guard wins over the monitor's notice. `context-stats.cjs` monitors
   context-window usage and warns (recommending `/compact`) past a threshold. Knobs, set
@@ -922,7 +936,8 @@ hook error never blocks work:
     independent results, not one document) whose inner payload is JSON, slims that, and
     prints the INNER body with one stderr line saying so; an inner that does not slim declines with
     the whole original. `--jq` walks the envelope FIRST (`--jq 0` / `--jq 0.text` still resolve
-    to the block) and re-runs the walk inside the payload only when the first segment misses — a miss at
+    to the block) and re-runs the whole EXPRESSION inside the payload only when the first segment misses —
+    so `--jq '.fields | keys'` on a spilled envelope lists the payload's field names; a miss at
     both levels reports the payload's keys, not `length: 1`. `--jq .` (identity) still dumps the document
     it was given. A JSONL payload inside an envelope profiles like any JSONL, against a spill of the
     unwrapped body — the line recipes must address rows that really exist as lines.
@@ -939,13 +954,24 @@ hook error never blocks work:
     stops tracking new keys past a build cap and says so: `keysCapped: true`, and the dropped-key count
     comes back as `keysTruncatedAtLeast` (a FLOOR) instead of the exact `keysTruncated`.
     Files ≤ 8 MB profile the parsed rows; larger ones stream via `readline` (never loaded whole) — the
-    same PROFILE either way. `--jq <dot.path>` extracts a single value from a ≤ 8 MB JSONL; on a larger one it
-    is refused (it would re-read the whole file). The path is a **plain dot walk** (`products.0.title`);
-    a leading `.` and `[N]` indices are accepted as the same thing (`.products[0].title`), while quoted
-    keys and real jq filters are not supported. A path that doesn't resolve still prints `null` on stdout,
+    same PROFILE either way. `--jq <jq-path>` extracts a single value from a ≤ 8 MB JSONL; on a larger one it
+    is refused (it would re-read the whole file), and the two spellings that select the whole file
+    (`--jq .`, `--jq '.[]'`) PROFILE it like a plain run instead. `--jq` speaks a **small jq subset**,
+    evaluated here with
+    no jq dependency: dot paths (`products.0.title`, with a leading `.` and `[N]` indices accepted as the
+    same thing — `.products[0].title`), `[]` iteration at any segment (`.a[].b`, flattened across nesting,
+    an object iterating to its values), `,` multi-select (jq emits one document per term, this CLI has one
+    stdout — so the terms come back as ONE array, `null` in a missed slot) and the filters `| keys` (sorted
+    names / `0..n-1`) and `| length`. Quote the expression as ONE argument — an unquoted `,` is split by
+    the shell, and the empty slot left behind (`.a,`) is refused rather than read as "everything".
+    Anything else — `select`/`map`/any function call, `?`, `//`, `..`,
+    quoted keys, slices, literals, comparisons — is a **usage error**: empty stdout, one stderr line naming
+    the offending token and the supported grammar, exit **2**, and nothing read or spilled; pipe a supported
+    path into real `jq` for the rest. A path that doesn't resolve still prints `null` on stdout,
     but names the failing segment on stderr with what WAS addressable there
     (`--jq: 'produtcs' not found at top level; keys: products`) — a value that is genuinely `null` stays
-    silent. **Log-shaped text** (build/test output, console spam,
+    silent, and an iteration where EVERY element missed says so once (`'creted' not found at
+    'comments[]'`) instead of printing a silent column of nulls. **Log-shaped text** (build/test output, console spam,
     stack traces) is compressed by signal selection instead — errors, stack-trace heads, and summary
     lines are kept while repeated INFO/WARN spam is deduped `×N` and everything else is dropped to a
     `[N lines omitted: …]` trailer (on a file the CLI names the on-disk original for recovery); prose,
@@ -958,7 +984,7 @@ hook error never blocks work:
     captured envelope → 77.3 %) — the original is
     in the spill, and generic HTML/XML/Liquid never matches the detector. A **non-JSONL**
     JSON document keeps the normal slim behavior, plus a guard: if its slimmed body still exceeds ~48 KB it is spilled to a `fnd-slim-out-*`
-    file and handed back as a one-line summary + the first element + both paths (`--jq <dot.path>` to narrow),
+    file and handed back as a one-line summary + the first element + both paths (`--jq <jq-path>` to narrow),
     never dumped inline. A result the pipeline **cannot** shrink under ~32 KB — incompressible text/HTML,
     already-minimal JSON, or a compressed body that is still huge — is not handed to the model raw: it is
     **spilled and stubbed**, i.e. replaced by a ~1 KB note naming the file, its format and shape, and the
@@ -1005,7 +1031,7 @@ hook error never blocks work:
     (an error row, a status enum, a numeric column with an outlier), which is why one dump can report
     0 % and its next page 99 %. Above `FND_MCP_SLIM_STUB_BYTES` the spill-and-stub guard is what
     protects context here — and because a second whole-file run would only print the same bytes back, that
-    stub names the narrowing command (`--jq <dot.path>`) instead of a bare re-run; below the threshold the
+    stub names the narrowing command (`--jq <jq-path>`) instead of a bare re-run; below the threshold the
     result lands in full and `--jq` narrows it. On a `stubbed` line the
     `reason` instead names the branch the stub replaced (`non-json`, `no-gain`, `weak-gain` — a
     compression that stayed over the threshold — or `budget-exceeded`). Lines that wrote files also list them in
@@ -1024,11 +1050,27 @@ hook error never blocks work:
     up to?** `node scripts/json-slim.cjs --report [logfile] [--since <ISO>]` (default: the log above)
     prints totals, counts per decision/reason/stage, the top hook tools by bytes saved (CLI runs, keyed
     by file path rather than tool name, get one aggregate line — with the whole-file runs that reduced
-    *nothing* counted separately, since those read a file into context for no gain; a `--jq` run is
+    *nothing* counted separately, since those read a file into context for no gain (a `jq-unsupported`
+    refusal is not one of them — it read no body at all); a `--jq` run is
     excluded, it answered a sub-path), per-project subtotals, how many
     DISTINCT spill files the window left behind (paths are deduped across events, so the content-hash
     reuse above shows up as one file, not one per call),
-    and the **missed whales** — `platform-overflow` results no later `json-slim` run ever compressed.
+    and the **missed whales** — `platform-overflow` results **no tool ever opened**. That last number
+    used to read "no later `json-slim` run", which called a whale missed whenever the agent recovered it
+    the sensible way: three targeted `jq` queries straight on the 236 KB spill. The `spill-access` hook
+    above records those reads as `entry:"access"` lines, and `--report` pairs them with the overflow /
+    stub they follow exactly as it pairs a CLI run — same path or basename, not earlier — so a read by
+    ANY tool counts as the recovery. Two limits of that evidence, both by construction: the line is
+    written on **PreToolUse**, i.e. it records the read that was *attempted* (a call the user denies, or
+    one that fails, still counts as a read); and a command that only NAMES the spill (`rm`, `mv`, `ls`,
+    `echo` — recorded as `via: named`) is deliberately **not** paired, so a post-session cleanup cannot
+    clear a session's misses. Access lines are **not** compression events: they carry no bytes and
+    are excluded from the totals, the decision / reason / stage counts, the per-tool and per-project
+    aggregates, the CLI-run line and the spill-file inventory (the `log:` header counts the whole window
+    and says how many of its events are spill reads). They get two lines of their own instead —
+    `spill reads (access hook): N (via: …)` and, when a whale was recovered, `whale recoveries via:
+    json-slim N · jq N · Read N …` (each whale counted once per distinct reader). A log with no access
+    lines reports exactly the numbers it always did.
     Results that were **stubbed** (above) get their own line and count as bytes saved, never as missed
     whales; a stub whose follow-up run gained nothing is called out there too. Totals collected at level 1
     are labelled as such (the sub-gate lines are missing from them, which inflates the %), and a log that
@@ -1089,8 +1131,9 @@ session, shell gates included.
 
 Hooks never read a project's `.env` file on any host.
 
-Six switches do not mean the same thing on every host — `FND_LEAN`, `FND_CTX_MONITOR`,
-`FND_MCP_SLIM`, `FND_MCP_SLIM_STUB`, `FND_PROMPT_JSON` and `FND_SCRATCH_GUARD`. Each of those
+Seven switches do not mean the same thing on every host — `FND_LEAN`, `FND_CTX_MONITOR`,
+`FND_MCP_SLIM`, `FND_MCP_SLIM_STUB`, `FND_PROMPT_JSON`, `FND_SCRATCH_GUARD` and
+`FND_SPILL_ACCESS`. Each of those
 rows carries a **Host divergence** note; every other switch behaves identically everywhere,
 because the script that reads it is the same single copy on all four hosts.
 
@@ -1108,9 +1151,10 @@ because the script that reads it is the same single copy on all four hosts.
 | `FND_MCP_SLIM_STUB_BYTES` | `32768` | bytes above which the `mcp-slim` hook spills-and-stubs instead of passing a whale through (also applies to a compressed body that is still this large); any invalid value falls back to `32768`, never to `0`, and any value below the stub's own ~1.2 KB is raised to it (a smaller gate could emit a stub bigger than the text it replaces) |
 | `FND_MCP_SLIM_BUDGET_MS` | `5000` | wall-clock ceiling for one `mcp-slim` compression run (shared across every block of a result). An expiry hands the ORIGINAL back — per block, so a partly-slimmed content array is logged `compressed` + `budget_partial`, and a whole-result expiry `budget-exceeded` (stubbed above the stub threshold); `0` disables the ceiling; any invalid value falls back to `5000`, never to `0`. The default is ~22× a 1 MB-class payload on this pipeline and well inside Claude Code's PostToolUse timeout — headroom, not a guarantee: a genuinely huge result (tens of MB, or several fat blocks sharing the one deadline) can still reach it, and is then handed back uncompressed rather than half-compressed |
 | `FND_WHALE_GUIDE` | `1` | `0` (or `false`/`no`/`off`) disables the one-shot rule for `json-slim`'s whale-recovery guidance: the full block (readline filter template + `sed`/`grep` single-row hints) is then printed after every profile instead of only the FIRST profile of a given file per session. With the default, later profiles of the same file carry a one-line reminder that stays self-sufficient — the file, the row count, any fence offset, the `sed`/`grep` single-row forms and this switch — dropping only the readline template (the reader of a repeat may be a subagent, or a context that was compacted since). The suppression state is a dotfile per session × **resolved** file path under `FND_MCP_SLIM_DIR`, expires after 2 h, and is pruned by the same sweep as the spills (so `FND_MCP_SLIM_TTL=0`, which disables that sweep, leaves the small per-file **state files** in place); a new file path, a missing, unreadable or future-dated state file always yields the full block. The profile itself is never affected, and each profile's debug line records which variant it printed (`guide: full` / `reminder`) |
-| `FND_NOGAIN_MEMO` | `1` | `0` (or `false`/`no`/`off`) disables `json-slim`'s per-file no-gain memo. With the default, a **file** run that printed its body back unchanged (a deliberate decline, now also stated on stderr) is remembered — per session × **resolved** file path, for 2 h, invalidated as soon as the file's size or mtime change — and a repeat run on that file answers with a one-line refusal naming the recovery instead of re-printing the body; the field pattern it removes is "decline → immediate re-run", where a 0 % result reads as a failed attempt. Only declines of at least 4 KB are remembered (below that a refusal saves nothing). The state is dotfiles under `FND_MCP_SLIM_DIR`, swept with the spills (so `FND_MCP_SLIM_TTL=0` leaves them in place); a missing, unreadable, corrupt or future-dated state file always yields the normal run. The same switch also governs the second refusal, which needs no memo: `fnd-slim-out-*` files — `json-slim`'s own Gate-A output spills, already slimmed — are answered the same way (only below the 8 MB stream gate; past it the big-document guidance is the useful answer). Neither refusal ever applies to a run whose answer they cannot stand for: a narrowing `--jq <dot.path>` (the documented recovery after a decline), `--stats` (a measurement run, which must report its 0.0 %), and the pipeline flags `--toon` / `--no-spill` all bypass both — and a decline under a pipeline flag is never remembered either. The stderr decline notice is NOT governed by this switch: it rides on every file run that printed the file's own bytes back unchanged. Both refusals log `already-slim-out` / `no-gain-memo` and are counted on `--report`'s `cli runs:` line |
+| `FND_NOGAIN_MEMO` | `1` | `0` (or `false`/`no`/`off`) disables `json-slim`'s per-file no-gain memo. With the default, a **file** run that printed its body back unchanged (a deliberate decline, now also stated on stderr) is remembered — per session × **resolved** file path, for 2 h, invalidated as soon as the file's size or mtime change — and a repeat run on that file answers with a one-line refusal naming the recovery instead of re-printing the body; the field pattern it removes is "decline → immediate re-run", where a 0 % result reads as a failed attempt. Only declines of at least 4 KB are remembered (below that a refusal saves nothing). The state is dotfiles under `FND_MCP_SLIM_DIR`, swept with the spills (so `FND_MCP_SLIM_TTL=0` leaves them in place); a missing, unreadable, corrupt or future-dated state file always yields the normal run. The same switch also governs the second refusal, which needs no memo: `fnd-slim-out-*` files — `json-slim`'s own Gate-A output spills, already slimmed — are answered the same way (only below the 8 MB stream gate; past it the big-document guidance is the useful answer). Neither refusal ever applies to a run whose answer they cannot stand for: a narrowing `--jq <jq-path>` (the documented recovery after a decline), `--stats` (a measurement run, which must report its 0.0 %), and the pipeline flags `--toon` / `--no-spill` all bypass both — and a decline under a pipeline flag is never remembered either. The stderr decline notice is NOT governed by this switch: it rides on every file run that printed the file's own bytes back unchanged. Both refusals log `already-slim-out` / `no-gain-memo` and are counted on `--report`'s `cli runs:` line |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor unless `FND_CTX_MONITOR=0` too — with both at `0` no node process runs at all. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere |
 | `FND_SCRATCH_GUARD` | `1` | `0` disables the screenshot scratch-path guard (PreToolUse `scratch-path-guard`) — node never spawns. With the default, a `take_screenshot` / `browser_take_screenshot` whose output path resolves inside the project working tree and outside `.claude/` is **denied** with a reason naming `.claude/tasks/<work-id>/tmp/<name>` (or `.claude/tmp/<name>` with no ticket) instead — as is a playwright call with no `filename` at all, whose default output dir is `<cwd>/.playwright-mcp`, inside the checkout. The guard creates those two destinations itself as it denies (nothing else does, and the playwright `filename` branch does no mkdir, so a compliant retry would fail with ENOENT). Anything under `.claude/`, an absolute path outside the checkout and an inline chrome-devtools screenshot (no `filePath`, no file written) all pass, and any internal error fails open; an in-project `tmp/` is denied like the rest of the tree, since a theme checkout neither ships nor gitignores one. **Host divergence:** wired on Claude Code, Codex and Cursor — the matcher is prefix-agnostic, since Codex names the same tools without the `plugin_fnd_` prefix and either host may have the servers installed per-user, and on Cursor the deny travels through `beforeMCPExecution` (a `permission: "deny"` response, `tool_input` decoded from a JSON string). OpenCode's tool hook has no verified MCP payload shape, so there screenshots are unguarded whatever this is set to |
+| `FND_SPILL_ACCESS` | `1` | `0` disables the spill-access recorder (PreToolUse `spill-access.sh`) — the wiring pre-gates on it, so nothing is spawned, and the script re-checks it too. With the default it appends one `entry:"access"` line per DISTINCT spill path a Bash / Read / Grep call named (`fnd-mcp-slim-<hash>.json`, or any name under a `tool-results/` directory — the platform's overflow files are opaquely named, so the recorder matches the same family `mcp-slim.cjs`'s `OVERFLOW_PATH` writes; at most 8 paths per call) to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log`, recording which reader got there — that is what lets `json-slim --report` stop calling a whale *missed* when the agent recovered it with `jq` instead of a `json-slim` run. It writes **only while `FND_MCP_SLIM_DEBUG` is on** (the log is a debug artefact), never blocks, prints nothing, and reads a run naming `json-slim.cjs` as no access at all (the CLI logs its own line). Being a PreToolUse hook it records the read that was *attempted*, and a command that only names a spill (`rm`, `ls`, `echo` …) is recorded as `via: named`, which `--report` does not count as a recovery. **Host divergence:** Claude Code matches `Bash|Read|Grep`; Codex adds its `shell` / `local_shell` spellings; Cursor covers the SHELL only, since it documents no read-file event; OpenCode covers `bash` plus its `read` / `grep` tools |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 | `FND_GQL_PROBE_CACHE` | `21600` | seconds the gql runner reuses its two sticky machine facts — the `shopify version` probe (~1.5 s, also invalidated whenever the CLI binary is newer than the cache) and "`store execute` is unavailable for this store", which lets a later call skip the doomed probe entirely. `0` re-probes on every call — the escape hatch right after a `shopify store auth`; any invalid value falls back to `21600`. Both caches live in a 0700 per-user dir under `$TMPDIR`; `--engine store` ignores the second one and always attempts |
 | `FND_CPT_THROTTLE_WAITS` | `20 60` | pause(s), in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled` — the store+token rate limit is shared with a running `shopify theme dev`, so a bulk push can 429 while everything else is healthy. One retry per listed value; empty disables retrying (tests pass `0 0`) |

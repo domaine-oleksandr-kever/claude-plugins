@@ -90,6 +90,15 @@
             "command": "[ \"${FND_SCRATCH_GUARD:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scratch-path-guard.cjs\" || true"
           }
         ]
+      },
+      {
+        "matcher": "^(Bash|Read|Grep)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ \"${FND_SPILL_ACCESS:-1}\" = \"0\" ] || \"${CLAUDE_PLUGIN_ROOT}/hooks/spill-access.sh\" || true"
+          }
+        ]
       }
     ],
     "PostToolUse": [

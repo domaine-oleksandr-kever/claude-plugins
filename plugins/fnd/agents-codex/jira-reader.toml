@@ -43,9 +43,11 @@ resolved ID, and set `field_id_mismatch` in your output.
 - **Overflowed read (big ticket).** If the MCP result exceeds the platform limit, Claude
   Code hands you a **file path** instead of content (the compression hook never sees it).
   Don't raw-`Read` that file — run `node <plugin root>/scripts/json-slim.cjs <path>`
-  (Jira JSON crushes ~75%) and read its stdout; `--jq <dot.path>` narrows to a sub-tree first
-  (a wrong path yields `null`, not an error — verify before trusting an empty result),
-  `--stats` shows the reduction.
+  (Jira JSON crushes ~75%) and read its stdout; `--jq` narrows to a sub-tree first — it takes
+  dot paths (`.fields.summary`, `.a[0]`), `[]` iteration, `,` multi-select and `| keys` /
+  `| length`, and refuses anything else (`select`/`map`/`?`/`//`) with exit 2 instead of a
+  misleading answer (a wrong path yields `null`, not an error — verify before trusting an empty
+  result), `--stats` shows the reduction.
 - Extract **every external URL** found anywhere in the ticket (description, AC, TA, Documentation
   Links, comments) — the ADF decoder preserves inline-mark links **and** block-level smart links
   (`inlineCard` / `blockCard` / `embedCard`) as `<url>`, so don't lose links pasted on their own

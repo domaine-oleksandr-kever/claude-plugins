@@ -764,9 +764,13 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   check('m9b-capA-stats-line', /→ .*bytes/.test(cap.handback) && cap.handback.includes('30 rows kept'), `stats line / rows-kept missing:\n${cap.handback}`);
   check('m9b-capA-first-row', cap.handback.includes('first row') && cap.handback.includes('"id":0'), 'first-row shape sample missing');
   check('m9b-capA-both-paths', cap.handback.includes(cap.spillOut) && cap.handback.includes('/some/bulk.jsonl'), 'slimmed-spill + original path must both appear');
-  // M12: the hint spells the SYNTAX (`<dot.path>`, not `<path>` — which read like a file path) and
-  // carries a one-token example taken from the data (an array body → index `0`).
-  check('m9b-capA-jq-hint', cap.handback.includes('--jq <dot.path>') && cap.handback.includes('(e.g. --jq 0)'), `--jq narrow hint missing/unreworded:\n${cap.handback}`);
+  // M12: the hint spells the SYNTAX (`<jq-path>`, not `<path>` — which read like a file path) and
+  // carries a one-token example taken from the data (an array body → index `0`), now over a line
+  // naming the grammar the evaluator accepts (M15) — a reader who only sees the handback still
+  // learns that `[]`, `,` and `| keys` / `| length` are on the table.
+  check('m9b-capA-jq-hint', cap.handback.includes('--jq <jq-path>') && cap.handback.includes('(e.g. --jq 0)')
+    && /<jq-path>: dot paths \(\.a\.b, \.a\[0\]\), '\[\]' iteration, ',' multi-select, '\| keys' \/ '\| length'/.test(cap.handback),
+    `--jq narrow hint missing/unreworded:\n${cap.handback}`);
   check('m9b-capA-spill-roundtrips', existsSync(cap.spillOut) && readFileSync(cap.spillOut, 'utf8') === output, 'spill must hold the exact slimmed output');
   check('m9b-capA-undercap-null', J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10_000_000, spillDir: dir }) === null, '≤ cap → null (caller prints the body unchanged)');
   check('m9b-capA-stdin-null', J.capOutput(res, null, { cliOutCap: 100, spillDir: dir }) === null, 'no fileArg (stdin) → null even over cap (no path to point at)');
@@ -798,7 +802,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
     ['empty-key', { '': 1 }],
   ]) {
     const h = capFor(obj).handback;
-    check(`m12-capA-no-bogus-example:${label}`, h.includes('--jq <dot.path>') && !h.includes('(e.g. --jq '),
+    check(`m12-capA-no-bogus-example:${label}`, h.includes('--jq <jq-path>') && !h.includes('(e.g. --jq '),
       `an unaddressable first key must not be advertised as an example:\n${h}`);
   }
   // …while a plain key still gets its example (the ergonomics win the guard must not eat)
@@ -1330,12 +1334,14 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     ['[10][2]', '10.2'],
     ['.', ''],
     ['..', ''],
-    ['.a.', 'a.'], // a trailing dot survives normalization; the segment filter drops it at walk time
+    ['.a.', 'a.'], // a trailing dot survives normalization — the PARSER (M15) refuses it, exit 2
     ['["a.b"]', '["a.b"]'], // quoted keys are NOT supported (only [N] is rewritten) — documented, not a feature
   ];
   for (const [input, want] of norm) eq(`m12-normjq:${input}`, J.normalizeJqPath(input), want);
-  // …and the unsupported quoted key really does walk as two plain segments, not one key with a dot
-  eq('m12-normjq-quoted-segments', J.normalizeJqPath('["a.b"]').split('.').filter(Boolean), ['["a', 'b"]']);
+  // …normalization is SPELLING only: both of those reach the M15 parser, which refuses them by name
+  // rather than walking whatever the rewrite left behind
+  eq('m12-normjq-trailing-dot-refused', J.parseJqExpr('.a.').bad, '.');
+  eq('m12-normjq-quoted-refused', J.parseJqExpr('["a.b"]').bad, '["a.b"]');
 
   const arrDir = mkdtempSync(path.join(tmpdir(), 'jslim-m12-'));
   const runJq = (p, file) => spawnSync('node', [SLIM, '--jq', p, file], { encoding: 'utf8' });
@@ -1594,7 +1600,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // --- Gate A on a compacted body that is NOT JSON (the first shape that can reach it) ---
   const cap = J.capOutput(r, path.join(dir, 'design-context.jsx'), { cliOutCap: 50, spillDir: dir });
   check('m13-cap-nonjson-handback', !!cap && cap.handback.includes('not JSON — read the slimmed body windowed') &&
-    !cap.handback.includes('--jq <dot.path>') && !/\n {2}(first row|shape): /.test(cap.handback),
+    !cap.handback.includes('--jq <jq-path>') && !/\n {2}(first row|shape): /.test(cap.handback),
     `a non-JSON slimmed body must not sample a row or advertise --jq:\n${cap && cap.handback}`);
   check('m13-cap-spill-byte-exact', !!cap && readFileSync(cap.spillOut, 'utf8') === r.output, 'the Gate-A spill holds the compacted body verbatim');
 
@@ -2828,6 +2834,424 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     rmSync(mdir, { recursive: true, force: true });
   }
   rmSync(dir, { recursive: true, force: true });
+}
+
+// ============================= M15 — the supported --jq grammar (real jq, evaluated or refused) ==
+// Reader agents write jq, not dot-walks: `.fields | keys`, `.a[].b`, `.x, .y, .z`, and the occasional
+// `map(select(…))`. Every one of them used to come back as stdout `null` plus a diagnostic about a
+// segment called `fields | keys`, which reads as "wrong path" — so the same file was re-run three to
+// seven times with guessed spellings. The CLI now evaluates the subset those expressions use and
+// REFUSES the rest by name, with a usage exit code that cannot be mistaken for a miss.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m15-'));
+  const run = (args, env) => spawnSync('node', [SLIM, ...args], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, ...(env || {}) } });
+  const doc = {
+    fields: {
+      status: { name: 'Done' },
+      assignee: null,
+      updated: '2026-08-30',
+      comment: { comments: [{ created: 'c1', body: 'one' }, { created: 'c2', body: 'two' }] },
+    },
+    a: [{ b: [1, 2] }, { b: [3] }],
+    mixed: [{ b: 1 }, { c: 2 }],
+    obj: { x: 'ex', y: 'why' },
+    s: 'héllo',
+    n: -7,
+    t: true,
+    arr: [10, 20, 30],
+  };
+  const plain = path.join(dir, 'plain.json');
+  writeFileSync(plain, JSON.stringify(doc));
+  const jqOut = (expr) => { const r = run(['--jq', expr, plain]); return { v: JSON.parse(r.stdout), err: r.stderr, code: r.status }; };
+
+  // ---- the grammar, parsed (no spawn): what the CLI accepts and what it names as unsupported
+  eq('m15-parse-identity', J.parseJqExpr('.').identity, true);
+  eq('m15-parse-identity-dotdot', J.parseJqExpr('..').identity, true);
+  eq('m15-parse-path-not-identity', J.parseJqExpr('.a').identity, false);
+  eq('m15-parse-filter-not-identity', J.parseJqExpr('. | keys').identity, false);
+  eq('m15-parse-terms', J.parseJqExpr('.a, .b.c').terms.length, 2);
+  eq('m15-parse-iteration-step', J.parseJqExpr('.a[].b').terms[0].segs, ['a', null, 'b']);
+  eq('m15-parse-bracket-index', J.parseJqExpr('.a[0].b').terms[0].segs, ['a', '0', 'b']);
+  // the unsupported families, each naming the token that put it out of scope
+  for (const [expr, token] of [
+    ['.a | map(.b)', 'map('],
+    ['.a | select(.b == 1)', 'select('],
+    ['.a | any', 'any'],
+    ['.a?', '?'],
+    ['.a // .b', '//'],
+    ['.. | .a', '..'],
+    ['.a..b', '..'],
+    ['.["a"]', '["a"]'],
+    ['.a[1:3]', '[1:3]'],
+    ['.a == "x"', '=='],
+    ['.a | not', 'not'],
+    ['.a | keys_unsorted', 'keys_unsorted'],
+    ['.a | length > 2', 'length > 2'],
+  ]) {
+    eq(`m15-unsupported-token:${expr}`, J.parseJqExpr(expr).bad, token);
+    // …and every one of them reaches the CLI's refusal, not just the parser: a guard that read a body
+    // before refusing, or a branch that swallowed `bad`, would keep the table above green.
+    const r = run(['--jq', expr, plain]);
+    check(`m15-unsupported-cli:${expr}`, r.status === 2 && r.stdout === '' && r.stderr.includes(`near '${token}'`),
+      `${expr} must exit 2 with empty stdout: ${r.status} / ${JSON.stringify(r.stdout)} / ${JSON.stringify(r.stderr)}`);
+  }
+  // An EMPTY multi-select slot is a syntax error too — parsed as a path it would be the identity
+  // selector, i.e. the whole document handed back in that slot (and `.a,` is exactly what the shell
+  // leaves when an unquoted `--jq .a, .b` is split).
+  for (const expr of ['.a,', ',.a', '.a,,.obj', ',']) eq(`m15-empty-term:${expr}`, J.parseJqExpr(expr).bad, ',');
+  // `.a.[0]` is jq's own spelling of `.a[0]` — the `[N]` rewrite glues a dot pair there, which is not
+  // the recursive descent the refusal names
+  eq('m15-parse-dot-bracket', J.parseJqExpr('.a.[0]').terms[0].segs, ['a', '0']);
+  // Keys the dot-walk this replaced could address stay addressable: a digit-LEADING key is ONE segment
+  // (not `2` + `fa`, which reads a numeric sibling's value), and a key outside `\w` is still a key.
+  eq('m15-parse-digit-leading-key', J.parseJqExpr('.2fa').terms[0].segs, ['2fa']);
+  eq('m15-parse-nonword-keys', J.parseJqExpr('.@type.a:b.x/y').terms[0].segs, ['@type', 'a:b', 'x/y']);
+
+  // ---- paths, iteration, multi-select, filters — through the CLI, on a plain JSON file
+  eq('m15-cli-keys-object', jqOut('.obj | keys').v, ['x', 'y']);
+  eq('m15-cli-keys-array', jqOut('.arr | keys').v, [0, 1, 2]);
+  eq('m15-cli-length-array', jqOut('.arr | length').v, 3);
+  eq('m15-cli-length-object', jqOut('.obj | length').v, 2);
+  eq('m15-cli-length-string', jqOut('.s | length').v, 5); // codepoints, like jq
+  eq('m15-cli-length-number', jqOut('.n | length').v, 7); // magnitude, like jq
+  eq('m15-cli-length-null', jqOut('.fields.assignee | length').v, 0);
+  {
+    const r = jqOut('.t | length'); // jq has no length for a boolean — a miss, not a made-up number
+    check('m15-cli-length-boolean', r.v === null && r.code === 0
+      && /--jq: 'length' is not defined at 't'; value is boolean/.test(r.err),
+      `length on a boolean must say so and stay a miss: ${r.v} / ${JSON.stringify(r.err)}`);
+  }
+  eq('m15-cli-pipe-path', jqOut('.fields | .updated').v, '2026-08-30'); // `.a | .b` ≡ `.a.b`
+  // `[]` — over an array, over an object (its values), and flattened across nesting
+  eq('m15-cli-iterate-array', jqOut('.a[].b').v, [[1, 2], [3]]);
+  eq('m15-cli-iterate-flattens', jqOut('.a[].b[]').v, [1, 2, 3]);
+  eq('m15-cli-iterate-object-values', jqOut('.obj[]').v, ['ex', 'why']);
+  eq('m15-cli-iterate-field', jqOut('.arr[]').v, [10, 20, 30]);
+  // `.[]` at ROOT iterates the document itself
+  {
+    const rootFix = path.join(dir, 'root-array.json');
+    writeFileSync(rootFix, JSON.stringify([{ k: 1 }, { k: 2 }]));
+    const r = JSON.parse(run(['--jq', '.[]', rootFix]).stdout);
+    eq('m15-cli-iterate-root', r, [{ k: 1 }, { k: 2 }]);
+    eq('m15-cli-iterate-root-then-path', JSON.parse(run(['--jq', '.[].k', rootFix]).stdout), [1, 2]);
+  }
+  // a filter after a fan-out is applied PER ELEMENT, the way jq's stream does it
+  eq('m15-cli-iterate-then-length', jqOut('.a[].b | length').v, [2, 1]);
+  // a missing key INSIDE a fan-out is jq's null for that element on stdout — but an iteration where
+  // NOTHING resolved says which key was wrong ONCE, or a typo is indistinguishable from a real null
+  {
+    const r = jqOut('.a[].nope');
+    const diags = r.err.split('\n').filter((l) => l.includes('--jq:'));
+    check('m15-cli-iterate-missing-is-null', JSON.stringify(r.v) === '[null,null]' && diags.length === 1
+      && /'nope' not found at 'a\[\]'; keys: b/.test(diags[0]),
+      `an all-missed iteration keeps jq's nulls and reports the key once: ${JSON.stringify(r.v)} / ${JSON.stringify(r.err)}`);
+    // …and a fan-out where SOME element resolved is a real answer: no diagnostic
+    const part = jqOut('.mixed[].b');
+    check('m15-cli-iterate-partial-silent', JSON.stringify(part.v) === '[1,null]' && !part.err.includes('--jq:'),
+      `a partly-resolved iteration must not warn: ${JSON.stringify(part.v)} / ${JSON.stringify(part.err)}`);
+  }
+  // `[]` on something that cannot be iterated names the location and the type it found
+  {
+    const r = jqOut('.s[]');
+    check('m15-cli-iterate-scalar-diag', r.v === null && /--jq: '\[\]' needs an array or object at 's'; value is string/.test(r.err),
+      `iterating a string must say so: ${JSON.stringify(r.err)}`);
+    const k = jqOut('.s | keys');
+    check('m15-cli-keys-scalar-diag', k.v === null && /--jq: 'keys' needs an array or object at 's'; value is string/.test(k.err),
+      `keys on a string must say so: ${JSON.stringify(k.err)}`);
+  }
+  // ',' multi-select → ONE array in term order (this CLI has one stdout where jq emits N documents)
+  eq('m15-cli-multiselect', jqOut('.fields.status.name, .fields.updated, .n').v, ['Done', '2026-08-30', -7]);
+  // …and a missed term is `null` in ITS slot, with one diagnostic per miss
+  {
+    const r = jqOut('.n, .nope, .alsono');
+    const diags = r.err.split('\n').filter((l) => l.includes('--jq:'));
+    check('m15-cli-multiselect-misses', JSON.stringify(r.v) === '[-7,null,null]' && diags.length === 2
+      && /'nope' not found at top level/.test(diags[0]) && /'alsono' not found at top level/.test(diags[1]),
+      `a missed term contributes null and one diagnostic: ${JSON.stringify(r.v)} / ${JSON.stringify(r.err)}`);
+  }
+
+  // ---- the five expressions the transcripts actually contained, on a plain document
+  eq('m15-real-keys', jqOut('.fields | keys').v, ['assignee', 'comment', 'status', 'updated']);
+  eq('m15-real-comments-length', jqOut('.fields.comment.comments | length').v, 2);
+  eq('m15-real-multiselect', jqOut('.fields.status, .fields.assignee, .fields.updated').v, [{ name: 'Done' }, null, '2026-08-30']);
+  eq('m15-real-comment-created', jqOut('.fields.comment.comments[].created').v, ['c1', 'c2']);
+  {
+    const r = run(['--jq', '.issues.nodes[0].changelog.histories | map(select(.items[]?.field == "status")) | length', plain]);
+    check('m15-real-map-select-refused', r.status === 2 && r.stdout === '' && /unsupported jq syntax near 'map\('/.test(r.stderr),
+      `the map(select(…)) transcript line must refuse, not answer null: ${r.status} / ${JSON.stringify(r.stdout)} / ${JSON.stringify(r.stderr)}`);
+  }
+
+  // ---- the refusal itself: empty stdout, ONE diagnostic naming the token AND the escape hatch, exit 2
+  {
+    const r = run(['--jq', '.fields | map(.x)', plain]);
+    check('m15-refusal-exit-2', r.status === 2 && r.stdout === '', `exit 2 with no stdout: ${r.status} / ${JSON.stringify(r.stdout)}`);
+    check('m15-refusal-names-the-grammar',
+      r.stderr.includes(`supported: ${J.JQ_GRAMMAR_HINT}, quoted as one argument ('.a, .b')`)
+        && /node json-slim\.cjs <file> --jq '<supported-path>' \| jq '<rest of your expression>'/.test(r.stderr),
+      `the refusal must state the grammar and the full-jq escape hatch: ${JSON.stringify(r.stderr)}`);
+    // a USAGE error is not the M12 miss contract: that one still prints `null` and exits 0
+    const miss = run(['--jq', '.produtcs', plain]);
+    check('m15-miss-contract-unchanged', miss.status === 0 && miss.stdout.trim() === 'null'
+      && /--jq: 'produtcs' not found at top level; keys: fields, a, mixed, obj, s, n, t, arr/.test(miss.stderr),
+      `a plain-path miss keeps its M12 wording and exit 0: ${miss.status} / ${JSON.stringify(miss.stderr)}`);
+    // a refusal writes nothing: no pipeline, no spill
+    check('m15-refusal-writes-nothing', !readdirSync(dir).some((f) => f.startsWith('fnd-')),
+      `a refusal must not spill: ${readdirSync(dir).join(', ')}`);
+  }
+  // identity and `[N]` are untouched by the new parser
+  {
+    const ident = run(['--jq', '.', plain]);
+    check('m15-identity-unchanged', JSON.parse(ident.stdout).arr.length === 3 && !ident.stderr.includes('--jq:'),
+      `bare '.' still dumps the whole document: ${ident.stdout.slice(0, 60)}`);
+    eq('m15-bracket-index-unchanged', jqOut('.a[0].b[1]').v, 2);
+    eq('m15-bare-dotted-unchanged', jqOut('a.0.b.0').v, 1);
+  }
+  // keys the dot-walk could address must still resolve to the SAME value: a digit-leading key beside a
+  // numeric sibling is the case where a wrong split answers with someone else's value, silently
+  {
+    const odd = path.join(dir, 'odd-keys.json');
+    writeFileSync(odd, JSON.stringify({ 2: { fa: 'numeric-sibling' }, '2fa': 'digit-leading', '@type': 'Product', 'a:b': 'colon', 'my key': 'spaced' }));
+    const one = (expr) => { const r = run(['--jq', expr, odd]); return { v: JSON.parse(r.stdout), code: r.status }; };
+    eq('m15-cli-digit-leading-key', one('.2fa').v, 'digit-leading');
+    eq('m15-cli-numeric-key', one('.2.fa').v, 'numeric-sibling');
+    eq('m15-cli-nonword-key', one('.@type').v, 'Product');
+    eq('m15-cli-colon-key', one('.a:b').v, 'colon');
+    eq('m15-cli-spaced-key', one('my key').v, 'spaced');
+  }
+  // a fan-out is not a sample: the crush's string-array sampling would hand back a subset of the
+  // iteration as if it were the whole list, so `[]` opts out of it exactly like `| keys`
+  {
+    const many = path.join(dir, 'many-comments.json');
+    const created = Array.from({ length: 40 }, (_, i) => ({ created: `2026-08-${String(i % 28 + 1).padStart(2, '0')}` }));
+    writeFileSync(many, JSON.stringify({ fields: { comment: { comments: created } } }));
+    const fan = JSON.parse(run(['--jq', '.fields.comment.comments[].created', many]).stdout);
+    const len = JSON.parse(run(['--jq', '.fields.comment.comments | length', many]).stdout);
+    check('m15-cli-fanout-not-sampled', fan.length === len && fan.length === 40 && fan[39] === created[39].created,
+      `a 40-element fan-out must answer 40, the same number '| length' reports: ${fan.length} vs ${len}`);
+  }
+  // a nested `[]` fans one element's whole array into the result — by APPEND, since `push(...rows)`
+  // passes one argument per element and dies with a RangeError past ~125k of them
+  {
+    const wide = { a: [{ b: Array.from({ length: 130_000 }, (_, i) => i) }] };
+    for (const expr of ['.a[].b[]', '.a[] | .b[]']) {
+      const r = J.evalJqExpr(wide, J.parseJqExpr(expr));
+      check(`m15-fanout-no-arg-limit:${expr}`, r.ok && r.value.length === 130_000 && r.value[129_999] === 129_999,
+        `a 130k fan-out must survive: ${r.ok} / ${r.value && r.value.length}`);
+    }
+  }
+
+  // ---- the same expressions THROUGH an MCP text-block envelope (M14's fallback re-runs the whole
+  // expression, not a segment list, so a filter resolves inside the payload too)
+  {
+    const ENV_FIX = path.join(FIX, 'mcp-envelope-jira.json');
+    const inner = JSON.parse(JSON.parse(readFileSync(ENV_FIX, 'utf8'))[0].text);
+    const NOTE = /unwrapped MCP text envelope \(\[0\]\.text\)/;
+    const env = (expr) => { const r = run(['--jq', expr, ENV_FIX]); return { v: JSON.parse(r.stdout), err: r.stderr, code: r.status }; };
+    const keys = env('.fields | keys');
+    check('m15-env-keys', NOTE.test(keys.err) && JSON.stringify(keys.v) === JSON.stringify(Object.keys(inner.fields).sort()),
+      `'.fields | keys' must resolve inside the envelope and list EVERY name: ${JSON.stringify(keys.v)}`);
+    eq('m15-env-comments-length', env('.fields.comment.comments | length').v, inner.fields.comment.comments.length);
+    eq('m15-env-comment-created', env('.fields.comment.comments[].created').v, inner.fields.comment.comments.map((c) => c.created));
+    const multi = env('.fields.status, .fields.assignee, .fields.updated');
+    check('m15-env-multiselect', Array.isArray(multi.v) && multi.v.length === 3 && multi.v[2] === inner.fields.updated
+      && multi.v[0].name === inner.fields.status.name && NOTE.test(multi.err),
+      `a multi-select resolves inside the payload as one 3-slot array: ${JSON.stringify(multi.v).slice(0, 120)}`);
+    // an unsupported expression is refused BEFORE any of that — the envelope is never opened
+    const bad = run(['--jq', '.fields | map(.status)', ENV_FIX]);
+    check('m15-env-unsupported-refused', bad.status === 2 && bad.stdout === '' && !NOTE.test(bad.stderr),
+      `the refusal precedes every rail: ${bad.status} / ${JSON.stringify(bad.stderr)}`);
+    // a root fan-out over the envelope "succeeds" on the wrapper (it IS an array) — but nothing in it
+    // resolved, so the rail still gets its turn and the reader hears which key was wrong
+    const rootFan = run(['--jq', '.[].key', ENV_FIX]);
+    check('m15-env-root-fanout-retries-inner', NOTE.test(rootFan.stderr) && /'key' not found/.test(rootFan.stderr),
+      `an all-missed root fan-out must reach the envelope rail: ${JSON.stringify(rootFan.stderr)}`);
+    // a miss at BOTH levels still reports the payload's keys (the M14 rule, now per term)
+    const miss = run(['--jq', '.nosuch | keys', ENV_FIX]);
+    check('m15-env-miss-reports-inner', miss.stdout.trim() === 'null' && /'nosuch' not found at top level; keys: expand, id, self, key, fields/.test(miss.stderr),
+      `a double miss describes the payload, not the wrapper: ${JSON.stringify(miss.stderr)}`);
+    // …but a term whose PREFIX resolved on the wrapper is about THIS document: `.content[]` iterated
+    // the envelope's own block list, so the miss is `foo` inside a block — re-running the expression
+    // against the payload answered with a diagnostic about `content`, a key nobody typed a path to.
+    const wrapped = path.join(dir, 'content-envelope.json');
+    writeFileSync(wrapped, JSON.stringify({ content: [{ type: 'text', text: JSON.stringify({ key: 'ELC-1', fields: { summary: 's' } }) }] }));
+    const fanIn = run(['--jq', '.content[].foo', wrapped]);
+    check('m15-env-resolved-prefix-stays', JSON.stringify(JSON.parse(fanIn.stdout)) === '[null]'
+      && /'foo' not found at 'content\[\]'; keys: type, text/.test(fanIn.stderr) && !NOTE.test(fanIn.stderr),
+      `a fan-out with a resolved prefix must report its own miss, not the envelope's: ${JSON.stringify(fanIn.stderr)}`);
+  }
+
+  // ---- a JSONL file: every spelling of "the whole file" PROFILES like a plain run. Walking one would
+  // leave the reshaped row array for slim() to crush and spill — the one thing the JSONL contract
+  // forbids — and a multi-select would hand back N copies of the file. The whole-document test is on
+  // the SHAPE the expression selects, so `. | .` and `., .` are as whole as `.` and `.[]`.
+  {
+    const jl = path.join(dir, 'rows.jsonl');
+    writeFileSync(jl, Array.from({ length: 300 }, (_, i) => JSON.stringify({ id: i, handle: `h${i}` })).join('\n'));
+    const bytes = Buffer.byteLength(readFileSync(jl, 'utf8'));
+    for (const expr of ['.', '.[]', '. | .', '.[] | .', '. | .[]', '., .', '.[], .[]']) {
+      const r = run(['--jq', expr, jl]);
+      const head = JSON.parse(r.stdout.split('\n')[0]);
+      check(`m15-jsonl-whole-profiles:${expr}`, head.profile === true && head.rows === 300
+        && Buffer.byteLength(r.stdout) < bytes && !readdirSync(dir).some((f) => f.startsWith('fnd-slim-out-')),
+        `'${expr}' on a JSONL must profile and spill nothing: ${r.stdout.slice(0, 120)} / ${readdirSync(dir).join(', ')}`);
+    }
+    // …and the parser's own answer, so a future spelling is checked without a spawn
+    for (const [expr, whole] of [['.', true], ['.[]', true], ['. | .', true], ['.[] | .', true], ['. | .[]', true],
+      ['., .', true], ['.[], .[]', true], ['.a', false], ['. | keys', false], ['.[] | .k', false], ['.[][]', false]]) {
+      eq(`m15-parse-whole:${expr}`, J.jqExprWhole(J.parseJqExpr(expr)), whole);
+    }
+  }
+
+  // ---- the same spellings on json-slim's OWN Gate-A output: B2 refuses a re-run in one line, and a
+  // whole-document `--jq` is not the narrowing recovery that refusal advertises. The syntactic test
+  // this replaced let `. | .` through and printed the file back with `narrowed:true`, which also hid
+  // the re-dump from `--report`'s "gained nothing" count.
+  {
+    const sdir = mkdtempSync(path.join(tmpdir(), 'jslim-m15b2-'));
+    const so = path.join(sdir, 'fnd-slim-out-deadbeef.json');
+    writeFileSync(so, JSON.stringify({ products: Array.from({ length: 400 }, (_, i) => ({ id: i, handle: `h${i}`, title: 't'.repeat(30) })) }));
+    for (const expr of ['.', '. | .', '.[] | .', '. | .[]', '., .']) {
+      const r = run(['--jq', expr, so], { FND_MCP_SLIM_DIR: sdir });
+      check(`m15-slim-out-whole-refused:${expr}`, r.status === 0 && r.stdout.trimEnd().split('\n').length === 1
+        && r.stdout.includes("IS json-slim's own slimmed output"),
+        `'${expr}' selects the whole file, so the slim-out guard must answer it in one line: ${r.stdout.slice(0, 200)}`);
+    }
+    const dl = run(['--jq', '. | .', so], { FND_MCP_SLIM_DIR: sdir, FND_MCP_SLIM_DEBUG: '1' });
+    const line = JSON.parse(readFileSync(path.join(sdir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').pop());
+    check('m15-slim-out-whole-debug', dl.status === 0 && line.reason === 'already-slim-out' && !line.narrowed,
+      `a whole-document re-run is a refusal, never a narrowing: ${JSON.stringify(line)}`);
+    // …and over a plain JSON document a root fan-out is a re-dump too: `--report` counts it only if the
+    // line does NOT claim to have narrowed (B4.11's flag exempts a run from the "gained nothing" tally).
+    const ra = path.join(sdir, 'root-array.json');
+    writeFileSync(ra, JSON.stringify(Array.from({ length: 5 }, (_, i) => ({ k: i }))));
+    run(['--jq', '.[]', ra], { FND_MCP_SLIM_DIR: sdir, FND_MCP_SLIM_DEBUG: '1' });
+    const rootLine = JSON.parse(readFileSync(path.join(sdir, 'fnd-mcp-slim-debug.log'), 'utf8').trim().split('\n').pop());
+    check('m15-root-fanout-not-narrowed', !rootLine.narrowed && rootLine.reason === 'no-gain',
+      `'.[]' over a JSON array narrows nothing, so the debug line must not claim it did: ${JSON.stringify(rootLine)}`);
+    rmSync(sdir, { recursive: true, force: true });
+  }
+
+  // ---- the crush-sampler exemption is decided on the RESULT, not on the spelling. `.comments[]` over
+  // an array of OBJECTS is the whale query mcp-whale.md advertises: exempting it (because `[]` appeared
+  // anywhere in the expression) turned an 832 KB answer into 0.0 % and a Gate-A path handback. Only a
+  // scalar list — the enumeration the exemption exists for — may opt out of row sampling.
+  {
+    const cdir = mkdtempSync(path.join(tmpdir(), 'jslim-m15crush-'));
+    const whale = path.join(cdir, 'whale.json');
+    const comments = Array.from({ length: 900 }, (_, i) => ({ id: i, author: `user${i % 7}`, created: `2026-08-0${i % 9 + 1}`, body: 'lorem ipsum dolor sit amet '.repeat(12) }));
+    writeFileSync(whale, JSON.stringify({ fields: { status: 'Done', assignee: null, updated: '2026-08-30' }, comments }));
+    const cq = (expr) => run(['--jq', expr, whale], { FND_MCP_SLIM_DIR: cdir });
+    const plainKey = cq('.comments').stdout;
+    const fanned = cq('.comments[]').stdout;
+    check('m15-fanout-objects-crush', fanned === plainKey && Buffer.byteLength(fanned) < 20_000,
+      `'.comments[]' is the same array as '.comments' and must crush the same: ${Buffer.byteLength(fanned)} vs ${Buffer.byteLength(plainKey)}`);
+    eq('m15-keys-still-complete', JSON.parse(cq('.fields | keys').stdout), ['assignee', 'status', 'updated']);
+    const created = JSON.parse(cq('.comments[].created').stdout);
+    check('m15-scalar-fanout-still-complete', created.length === 900 && created[899] === comments[899].created,
+      `a scalar fan-out is an enumeration and must come back whole: ${created.length}`);
+    rmSync(cdir, { recursive: true, force: true });
+  }
+
+  // ---- the debug line of a refused run: its own reason, and `--report` must not count it among the
+  // runs that "gained nothing" — it read no body and printed none
+  {
+    const ddir = mkdtempSync(path.join(tmpdir(), 'jslim-m15dbg-'));
+    const denv = { ...process.env, FND_MCP_SLIM_DIR: ddir, FND_MCP_SLIM_DEBUG: '1' };
+    const r = spawnSync('node', [SLIM, plain, '--jq', '.fields | map(.x)'], { encoding: 'utf8', env: denv });
+    const logPath = path.join(ddir, 'fnd-mcp-slim-debug.log');
+    const line = JSON.parse(readFileSync(logPath, 'utf8').trim().split('\n').pop());
+    check('m15-debug-line', r.status === 2 && line.entry === 'cli' && line.reason === 'jq-unsupported'
+      && line.decision === 'passthrough' && !line.narrowed,
+      `the refusal logs its own reason, not a narrowed no-gain: ${JSON.stringify(line)}`);
+    const rep = spawnSync('node', [SLIM, '--report', logPath], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: ddir } }).stdout;
+    check('m15-report-ignores-refusals', /passthrough reasons:[^\n]*jq-unsupported 1/.test(rep) && !/gained nothing/.test(rep),
+      `--report must show the refusal without counting it as a re-dump: ${rep}`);
+    // …and it is not the RECOVERY for a whale either: a refusal read no body, so the overflow it
+    // followed is still a missed whale — the two-lever number must not count it as handled
+    const whaleLog = path.join(ddir, 'whales.log');
+    writeFileSync(whaleLog, [
+      JSON.stringify({ ts: '2026-08-28T10:00:00.000Z', entry: 'hook', tool: 'mcp__x__y', decision: 'passthrough', reason: 'platform-overflow', spill: '/tmp/whale-a.json' }),
+      JSON.stringify({ ts: '2026-08-28T10:01:00.000Z', entry: 'cli', tool: '/tmp/whale-a.json', decision: 'passthrough', reason: 'jq-unsupported' }),
+    ].join('\n'));
+    check('m15-report-refusal-is-no-recovery', /missed whales \(platform-overflow never read by any tool\): 1 of 1/.test(J.buildReport(readFileSync(whaleLog, 'utf8').split('\n'), {})),
+      `a refusal must not pair with the whale it followed: ${J.buildReport(readFileSync(whaleLog, 'utf8').split('\n'), {})}`);
+    rmSync(ddir, { recursive: true, force: true });
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ============================ M16 — spill-access events in `--report` (the missed-whale correction) ==
+// hooks/spill-access.sh appends `entry:"access"` lines to the SAME debug log the compressor writes.
+// They are not compression events, so they may not move a single byte total — and they ARE the answer
+// to "did anybody ever open this whale", which is what the missed-whale line was getting wrong.
+{
+  // The spill name is the PLATFORM's, not ours: real overflow files are opaque (9 random chars), which
+  // is the shape both mcp-slim's OVERFLOW_PATH and the access hook have to accept.
+  const ov = (extra) => JSON.stringify({ ts: '2026-08-25T09:00:00.000Z', project: 'elc', lvl: 2, entry: 'hook', tool: 'mcp__x__evaluate_script', decision: 'passthrough', reason: 'platform-overflow', bytes_in: 1463, bytes_out: 1463, pct: 0, stages: [], spill: '/p/tool-results/b1z10evqs.txt', ...extra });
+  const acc = (extra) => JSON.stringify({ ts: '2026-08-25T09:37:00.000Z', project: 'elc', lvl: 2, entry: 'access', tool: 'Bash', via: 'jq', spill: '/p/tool-results/b1z10evqs.txt', ...extra });
+
+  // 1 — the real case: three targeted jq queries over the spill. The whale was recovered, not missed.
+  const rep = J.buildReport([ov(), acc(), acc({ ts: '2026-08-25T09:38:00.000Z' })], { file: '/x.log' });
+  check('m16-access-recovers-the-whale', /missed whales \(platform-overflow never read by any tool\): 0 of 1/.test(rep),
+    `a spill READ is a recovery, whatever tool did the reading:\n${rep}`);
+  check('m16-access-line', /spill reads \(access hook\): 2 {2}\(via: jq 2\)/.test(rep),
+    `the access lines get their own line, counted by via:\n${rep}`);
+  check('m16-recovery-via-line', /whale recoveries via: jq 1/.test(rep),
+    `each whale counts once per DISTINCT via — two jq reads of one spill are one jq recovery:\n${rep}`);
+
+  // 2 — an access line stamped BEFORE the overflow cannot be its recovery (same rule the cli runs obey).
+  const early = J.buildReport([ov(), acc({ ts: '2026-08-25T08:00:00.000Z' })], { file: '/x.log' });
+  check('m16-earlier-access-is-no-recovery', /missed whales \(platform-overflow never read by any tool\): 1 of 1/.test(early)
+    && !/whale recoveries via/.test(early),
+    `a read that happened before the spill existed is not a recovery:\n${early}`);
+
+  // 3 — access events carry no bytes and no decision, so they may not appear in ANY compression
+  // aggregate: totals, decisions, the cli-run line, the per-tool ranking or the per-project counts.
+  const mixed = J.buildReport([
+    JSON.stringify({ ts: '2026-08-25T09:00:00.000Z', project: 'elc', lvl: 2, entry: 'hook', tool: 'mcp__a__x', decision: 'compressed', reason: null, bytes_in: 10000, bytes_out: 4000, pct: 60, stages: ['crush'], spill: '/tmp/fnd-mcp-slim-a.json' }),
+    acc({ tool: 'Read', via: 'Read', spill: '/tmp/fnd-mcp-slim-a.json' }),
+  ], { file: '/x.log' });
+  check('m16-access-out-of-totals', /totals: 10000 → 4000 B \(60.0% saved\)/.test(mixed)
+    && /decisions: compressed 1/.test(mixed) && !/cli runs:/.test(mixed)
+    && /elc: 1 event, 6000 B saved/.test(mixed) && !/ {4}0 B over 1 call — Bash/.test(mixed),
+    `an access line must not move totals, decisions, cli runs, projects or the tool ranking:\n${mixed}`);
+  check('m16-access-recovers-a-stub', /spill reads \(access hook\): 1 {2}\(via: Read 1\)/.test(mixed),
+    `the Read of a hook spill is still recorded:\n${mixed}`);
+
+  // 4 — a log written before the hook existed reports exactly the numbers it always did; only the two
+  // labels changed. Pinned against the same events with the access line removed.
+  const legacy = J.buildReport([
+    ov(),
+    JSON.stringify({ ts: '2026-08-25T09:02:00.000Z', project: 'elc', lvl: 2, entry: 'cli', tool: '/p/tool-results/b1z10evqs.txt', decision: 'compressed', reason: null, bytes_in: 764124, bytes_out: 123048, pct: 83.9, stages: ['crush'], spill: null }),
+    JSON.stringify({ ts: '2026-08-25T09:10:00.000Z', project: 'elc', lvl: 2, entry: 'hook', tool: 'mcp__a__y', decision: 'stubbed', reason: 'weak-gain', bytes_in: 260000, bytes_out: 910, pct: 99.6, stages: ['crush'], spill: '/tmp/fnd-mcp-slim-b.json' }),
+  ], { file: '/x.log' });
+  check('m16-legacy-log-unchanged', /missed whales \(platform-overflow never read by any tool\): 0 of 1/.test(legacy)
+    && /stubbed \(spill-and-stub guard\): 1 \(weak-gain 1\), 1 never read/.test(legacy)
+    && /cli runs: 1 · saved 641076 B \(83.9%\)/.test(legacy) && !/spill reads/.test(legacy)
+    && /whale recoveries via: json-slim 1/.test(legacy),
+    `a log with no access lines keeps every number and only renames the two labels:\n${legacy}`);
+
+  // 5 — `via:"named"` is the hook's mark for a command that only touched the NAME (`rm`, `mv`, `ls`,
+  // `echo`). Nothing was read into a context, so it may not clear the whale: a post-session `rm` of the
+  // spill would otherwise report full recovery of everything the session missed.
+  const named = J.buildReport([ov(), acc({ via: 'named', ts: '2026-08-25T09:40:00.000Z' })], { file: '/x.log' });
+  check('m16-named-only-is-no-recovery', /missed whales \(platform-overflow never read by any tool\): 1 of 1/.test(named)
+    && !/whale recoveries via/.test(named)
+    && /spill reads \(access hook\): 1 {2}\(via: named 1\)/.test(named),
+    `naming a spill (rm/ls/echo) is recorded but is not a read:\n${named}`);
+
+  // 6 — a window can hold access lines and NO compression event (spills read, no MCP call). The body
+  // below the header is all bytes and decisions, so it is skipped rather than rendered empty.
+  const only = J.buildReport([acc()], { file: '/x.log' });
+  check('m16-access-only-window', /no compression events in range\./.test(only)
+    && /spill reads \(access hook\): 1/.test(only)
+    && !/decisions:/.test(only) && !/projects:/.test(only) && !/totals:/.test(only),
+    `an access-only window prints the access line, not an empty compression body:\n${only}`);
+
+  // 7 — the header counts the whole window while every aggregate counts compression events; the split
+  // is named on the line so the two populations reconcile.
+  check('m16-header-names-the-split', /log: 2 events \(1 spill read\)/.test(J.buildReport([ov(), acc()], {})),
+    'the header must say how many of its events are spill reads');
 }
 
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);

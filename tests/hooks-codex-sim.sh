@@ -155,7 +155,7 @@ scripts="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$WIRI
 for s in $scripts; do
   if [ -f "$PLUG/$s" ]; then ok; else bad "W5-$s" "wiring names a file that does not exist"; fi
 done
-assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 6
+assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 7
 
 # W6: PreToolUse matcher — Codex regex, covering every spelling of the shell tool and nothing else.
 pm="$(jq -r '.hooks.PreToolUse[0].matcher' "$WIRING")"
@@ -210,6 +210,43 @@ done
 for t in Bash shell mcp__chrome-devtools-mcp__take_snapshot mcp__figma-dev-mode__get_screenshot; do
   if printf '%s\n' "$t" | grep -Eq "$spm"; then bad "W10b-not-$t" "scratch matcher '$spm' over-matches"; else ok; fi
 done
+
+# W11: the THIRD PreToolUse group — hooks/spill-access.sh, the spill-read recorder. It is the one
+# PreToolUse command that may never deny: it measures, so an unresolvable bundle exits 0 rather than
+# blocking a tool call (the git guards' fail-closed rule would be a pure regression here).
+SPA_CMD="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("Read")) | .hooks[0].command' "$WIRING")"
+assert_contains W11-script    "$SPA_CMD" '$r/hooks/spill-access.sh'
+assert_contains W11-gate      "$SPA_CMD" '"${FND_SPILL_ACCESS:-1}" = "0"'
+assert_contains W11-claude    "$SPA_CMD" '"${CLAUDE_PLUGIN_ROOT:-}"'
+assert_contains W11-plugin    "$SPA_CMD" '"${PLUGIN_ROOT:-}"'
+assert_contains W11-cache     "$SPA_CMD" '"$HOME"/.codex/plugins/cache/*/fnd/*'
+assert_contains W11-newest    "$SPA_CMD" '[ "$c" -nt "$r" ]'
+assert_contains W11-failopen  "$SPA_CMD" 'exit 0'
+assert_absent   W11-no-deny   "$SPA_CMD" 'exit 2'
+# the matcher carries Codex's shell spellings alongside the two file readers
+spam="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("Read")) | .matcher' "$WIRING")"
+for t in Bash shell local_shell Read Grep; do
+  if printf '%s\n' "$t" | grep -Eq "$spam"; then ok; else bad "W11-$t" "spill-access matcher '$spam' misses $t"; fi
+done
+for t in Write Edit mcp__plugin_fnd_atlassian__getJiraIssue; do
+  if printf '%s\n' "$t" | grep -Eq "$spam"; then bad "W11-not-$t" "spill-access matcher '$spam' over-matches"; else ok; fi
+done
+# …and it records through the wiring for real: an unresolvable root is silent, a resolved one writes
+# the access line the report pairs on.
+SPA_D="$TMP/spa-log"; mkdir -p "$SPA_D"
+SPA_PAY='{"tool_name":"shell","tool_input":{"command":["bash","-lc","jq . /p/tool-results/b1z10evqs.txt"]},"cwd":"/r/elc"}'
+out="$(printf '%s' "$SPA_PAY" | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT HOME="$TMP/nohome" \
+  FND_MCP_SLIM_DIR="$SPA_D" FND_MCP_SLIM_DEBUG=1 bash -c "$SPA_CMD" 2>&1)"; ec=$?
+assert_eq W11-unresolved-exit   "$ec" 0
+assert_eq W11-unresolved-silent "$out" ""
+printf '%s' "$SPA_PAY" | env CLAUDE_PLUGIN_ROOT="$PLUG" FND_MCP_SLIM_DIR="$SPA_D" FND_MCP_SLIM_DEBUG=1 \
+  bash -c "$SPA_CMD" >/dev/null 2>&1
+assert_eq W11-run-exit "$?" 0
+assert_contains W11-run-line "$(cat "$SPA_D/fnd-mcp-slim-debug.log" 2>/dev/null)" '"entry":"access"'
+assert_contains W11-run-via  "$(cat "$SPA_D/fnd-mcp-slim-debug.log" 2>/dev/null)" '"via":"jq"'
+printf '%s' "$SPA_PAY" | env CLAUDE_PLUGIN_ROOT="$PLUG" FND_SPILL_ACCESS=0 FND_MCP_SLIM_DIR="$TMP/spa-off" \
+  FND_MCP_SLIM_DEBUG=1 bash -c "$SPA_CMD" >/dev/null 2>&1
+if [ -e "$TMP/spa-off/fnd-mcp-slim-debug.log" ]; then bad W11-gate-off "the wiring ran the hook with FND_SPILL_ACCESS=0"; else ok; fi
 
 # ═══ S — SessionStart through the Codex wiring ══════════════════════════════
 SS_CMD="$(wcmd SessionStart)"

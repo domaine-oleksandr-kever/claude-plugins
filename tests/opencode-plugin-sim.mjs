@@ -11,6 +11,10 @@
 //             non-bash tools and commandless args never reach a guard, and a guard that
 //             cannot be RUN blocks the git commands it would have inspected (a broken install
 //             is not an allow) while leaving every other command alone
+//   A cases — tool.execute.before → hooks/spill-access.sh: a bash / read / grep call that touches
+//             an MCP spill appends one `entry:"access"` line to the compressor's debug log (this
+//             host DOES route the file readers, unlike Cursor), a blocked command records nothing,
+//             and the switch, a missing path argument and a broken hook are all silent no-ops
 //   P cases — permission-fragment.example.json: the `--auto` backstop for an adapter that never
 //             loaded — deny globs, last-match-wins ordering, and re-allows that cannot span a
 //             `&&` into a bypass
@@ -171,6 +175,56 @@ assertEq('G38-unrunnable-non-git-open', unrunnableNonGit.blocked, false);
 // A guard that cannot run is an install defect: silence would leave a developer with an
 // un-armed guard layer and nothing to notice it by.
 assertContains('G39-unrunnable-warned', captured, 'no-verify-bypass.sh reached no verdict');
+
+// A — tool.execute.before → hooks/spill-access.sh ------------------------------------------
+// Measurement only: `json-slim --report` used to call a platform-overflow whale MISSED whenever
+// the agent read the spill with anything but json-slim. These cases pin that the adapter feeds
+// the recorder — for the shell tool AND for this host's file readers, which do carry a path.
+const SPILL = '/p/tool-results/b1z10evqs.txt';
+let accessDir = 0;
+async function runAccess(tool, args, env = {}) {
+  accessDir += 1;
+  const dir = path.join(TMP, `access-${accessDir}`);
+  const prev = { ...process.env };
+  process.env.FND_MCP_SLIM_DIR = dir;
+  process.env.FND_MCP_SLIM_DEBUG = '1';
+  for (const [k, v] of Object.entries(env)) process.env[k] = v;
+  let threw = false;
+  try {
+    await hooks['tool.execute.before']({ tool }, { args });
+  } catch (_) {
+    threw = true;
+  }
+  for (const k of Object.keys(process.env)) if (k.startsWith('FND_')) delete process.env[k];
+  for (const [k, v] of Object.entries(prev)) if (k.startsWith('FND_')) process.env[k] = v;
+  const log = path.join(dir, 'fnd-mcp-slim-debug.log');
+  return { threw, line: fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim() : '' };
+}
+
+const aBash = await runAccess('bash', { command: `jq -r '.[0].text' ${SPILL} | head -20` });
+assertContains('A1-bash-entry', aBash.line, '"entry":"access"');
+assertContains('A2-bash-tool', aBash.line, '"tool":"Bash"');
+assertContains('A3-bash-via', aBash.line, '"via":"jq"');
+assertContains('A4-bash-spill', aBash.line, `"spill":"${SPILL}"`);
+
+// OpenCode's read/grep tools carry a path argument, so the file-reader side is wired here.
+const aRead = await runAccess('read', { filePath: SPILL });
+assertContains('A5-read-tool', aRead.line, '"tool":"Read"');
+assertContains('A6-read-via', aRead.line, '"via":"Read"');
+const aGrep = await runAccess('grep', { pattern: 'error', path: SPILL });
+assertContains('A7-grep-tool', aGrep.line, '"tool":"Grep"');
+assertContains('A8-grep-via', aGrep.line, '"via":"Grep"');
+
+// The rails: the switch, a command touching no spill, a read with no path, and a BLOCKED command
+// (which never ran, so it read nothing) all leave the log absent — and none of them throws.
+assertEq('A9-switch', (await runAccess('bash', { command: `jq . ${SPILL}` }, { FND_SPILL_ACCESS: '0' })).line, '');
+assertEq('A10-no-spill', (await runAccess('bash', { command: 'npm run lint' })).line, '');
+const aNoPath = await runAccess('read', { limit: 20 });
+assertEq('A11-read-no-path', aNoPath.line, '');
+assertEq('A12-read-no-throw', aNoPath.threw, false);
+const aBlocked = await runAccess('bash', { command: 'git commit --no-verify -m "x" /p/tool-results/b1z10evqs.txt' });
+assertEq('A13-blocked-not-recorded', aBlocked.line, '');
+assertEq('A14-blocked-still-blocks', aBlocked.threw, true);
 
 // P — the declarative backstop --------------------------------------------------------------
 const fragmentPath = path.join(ROOT, 'plugins', 'fnd', 'opencode', 'permission-fragment.example.json');

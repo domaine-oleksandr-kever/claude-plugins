@@ -58,6 +58,12 @@
 #             path, any tmp/ dir, an out-of-tree path, an inline chrome-devtools screenshot,
 #             FND_SCRATCH_GUARD=0 and malformed stdin all pass through; plus the deny ENVELOPE
 #             shape, symlinked prefixes, the wiring gate and the matcher's tool coverage
+#   A cases — hooks/spill-access.sh, the PreToolUse spill-read recorder: a Bash/Read/Grep call
+#             touching one of the two spill families appends ONE `entry:"access"` JSONL line per
+#             distinct path to the compressor's own debug log (via = the reader that did it), while
+#             the gate, the debug switch, a json-slim run, a non-spill command and the other fnd-
+#             prefixes write nothing; plus the domaine.env precedence, the 5 MB rotation, JSON
+#             escaping, the no-node rule and the wiring gate
 #   T cases — hooks/subagent-conventions.sh: code-writing / unknown agents get the
 #             conventions, read-only readers AND jira-writer are skipped, FND_LEAN=0
 #             drops lean-code, the hook always exits 0
@@ -68,7 +74,7 @@ set -u
 # Hermetic env: an exported FND_MCP_SLIM_DEBUG / FND_MCP_SLIM_DIR (a developer watching the log live)
 # must not leak into the cases — the debug ones set both switches on the invocation themselves, and
 # the rest would otherwise append fixture noise to the developer's real log.
-unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR
+unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_SPILL_ACCESS
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MANIFEST="$ROOT/plugins/fnd/.claude-plugin/plugin.json"
@@ -1166,14 +1172,24 @@ in="$(jq -n --rawfile t "$UNIQBIG" '{tool_name:"mcp__x__y",tool_response:{conten
 SBU="$TMP/stub-nogain"; mkdir -p "$SBU"
 textU="$(run_stub "$SBU" "$in" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
 assert_contains M67-nogain-stub      "$textU" "<<fnd-mcp-slim stub>>"
-assert_contains M67-nogain-narrows   "$textU" "--jq <dot.path>"
+assert_contains M67-nogain-narrows   "$textU" "--jq '<jq-path>'"
+assert_contains M67-nogain-grammar   "$textU" "'[]' iteration, ',' multi-select"
 assert_contains M67-nogain-says-ran  "$textU" "already ran on it and gained nothing"
 assert_absent   M67-nogain-no-rerun  "$textU" "Compress or inspect it"
 # the weak-gain stub (the 260 KB Jira fixture compresses, stays over the threshold) still points at the
 # CLI, because running it there really does hand back a smaller body
 textW2="$(run_stub "$TMP/stub-weak2" "$msin" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
 assert_contains M67-weakgain-cli "$textW2" "Compress or inspect it"
-assert_absent   M67-weakgain-no-jq "$textW2" "--jq <dot.path>"
+assert_absent   M67-weakgain-no-jq "$textW2" "--jq '<jq-path>'"
+# …and this branch pays the same 1200 B cap M37 pins on the non-JSON stub: the grammar hint added ~85 B
+# to a budget whose worst case is a tool name at STUB_TOOL_MAX (80) beside two full spill paths.
+STUB_TOOL80="mcp__plugin_fnd_$(printf 'n%.0s' $(seq 1 64))"
+inU80="$(jq -n --rawfile t "$UNIQBIG" --arg n "$STUB_TOOL80" '{tool_name:$n,tool_response:{content:[{type:"text",text:$t}]}}')"
+SBU80="$TMP/stub-nogain-cap"; mkdir -p "$SBU80"
+textU80="$(run_stub "$SBU80" "$inU80" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_contains M67-cap-is-nogain "$textU80" "already ran on it and gained nothing"
+stublen=$(printf '%s' "$textU80" | wc -c | tr -d ' ')
+if [ "$stublen" -le 1200 ]; then ok; else bad M67-nogain-cap "the no-gain stub is $stublen B, over the 1200 B cap"; fi
 
 # ── M68–M70: discarded-work spill cleanup (B4.5) ──────────────────────────────
 # Every branch that throws the compressed body away — the stub, the no-gain passthrough, the
@@ -2221,6 +2237,255 @@ done
 for t in Bash mcp__plugin_fnd_chrome-devtools-mcp__take_snapshot mcp__plugin_fnd_figma-dev-mode__get_screenshot; do
   if printf '%s\n' "$t" | grep -Eq "$SPG_MATCHER"; then bad "D8-not-$t" "matcher over-matches"; else ok; fi
 done
+
+
+# ═══ A — hooks/spill-access.sh, the PreToolUse spill-read recorder ══════════
+# Measurement only: --report called a platform-overflow whale MISSED whenever the agent read the
+# spill with anything but json-slim (the real case: three targeted `jq` queries over a 236 KB
+# tool-results file). These cases pin the line this hook writes so that pairing can happen.
+SPA="$ROOT/plugins/fnd/hooks/spill-access.sh"
+SPA_HEX=0123456789abcdef
+SPA_HOOK="/h/fnd-mcp-slim-$SPA_HEX.json"     # our own content-addressed spill
+# The platform's overflow file: ANY name under a tool-results/ dir (the real ones are 9 random
+# characters). The recorder may never be narrower than mcp-slim.cjs's OVERFLOW_PATH, which is what
+# writes the `spill` value --report pairs this line with.
+SPA_PLAT="/p/tool-results/b1z10evqs.txt"
+spa_dir=0; spa_d=""; spa_ec=0
+spa_run() { # $1 = payload, rest = extra env → runs the hook into a fresh log dir ($spa_d)
+  spa_dir=$((spa_dir+1))
+  spa_d="$TMP/spa/$spa_dir"; mkdir -p "$spa_d"
+  _pay="$1"; shift
+  printf '%s' "$_pay" | env FND_MCP_SLIM_DIR="$spa_d" FND_MCP_SLIM_DEBUG=1 "$@" "$SPA" >"$TMP/spa.out" 2>"$TMP/spa.err"
+  spa_ec=$?
+}
+spa_log() { cat "$1/fnd-mcp-slim-debug.log" 2>/dev/null; }
+spa_lines() { wc -l < "$1/fnd-mcp-slim-debug.log" 2>/dev/null | tr -d ' '; }
+
+# A1: the gate. FND_SPILL_ACCESS=0 writes nothing at all — not even the log file.
+spa_run '{"tool_name":"Bash","tool_input":{"command":"jq . '"$SPA_HOOK"'"},"cwd":"/r/elc"}' FND_SPILL_ACCESS=0; d="$spa_d"
+assert_eq A1-gate-exit "$spa_ec" 0
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A1-gate-off "the disabled hook wrote a log"; else ok; fi
+
+# A2: the log is a DEBUG artefact — with FND_MCP_SLIM_DEBUG unset the hook records nothing.
+spa_dir=$((spa_dir+1)); d="$TMP/spa/$spa_dir"; mkdir -p "$d"
+printf '%s' '{"tool_name":"Bash","tool_input":{"command":"jq . '"$SPA_HOOK"'"},"cwd":"/r/elc"}' \
+  | env FND_MCP_SLIM_DIR="$d" "$SPA" >/dev/null 2>&1
+assert_eq A2-debug-off-exit "$?" 0
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A2-debug-off "the hook wrote a log with the debug switch off"; else ok; fi
+
+# A3: the real case — a jq read of a spill. Every field of the line is pinned here; the later cases
+# only assert what they change.
+spa_run '{"session_id":"s","cwd":"/r/elc-theme","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"jq -r '"'"'.[0].text'"'"' '"$SPA_HOOK"' | head -50"}}'; d="$spa_d"
+assert_eq       A3-exit        "$spa_ec" 0
+assert_eq       A3-stdout      "$(cat "$TMP/spa.out")" ""
+assert_eq       A3-one-line    "$(spa_lines "$d")" 1
+out="$(spa_log "$d")"
+assert_contains A3-entry       "$out" '"entry":"access"'
+assert_contains A3-tool        "$out" '"tool":"Bash"'
+assert_contains A3-via         "$out" '"via":"jq"'
+assert_contains A3-spill       "$out" "\"spill\":\"$SPA_HOOK\""
+assert_contains A3-project     "$out" '"project":"elc-theme"'
+assert_contains A3-lvl         "$out" '"lvl":1'
+if printf '%s' "$out" | grep -qE '"ts":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"'; then ok
+else bad A3-ts "ts is not ISO-8601 UTC with ms: $out"; fi
+spa_run '{"tool_name":"Bash","tool_input":{"command":"jq . '"$SPA_HOOK"'"},"cwd":"/r/x"}' FND_MCP_SLIM_DEBUG=2
+assert_eq       A3-lvl2 "$(spa_log "$spa_d" | sed -n 's/.*"lvl":\([0-9]*\).*/\1/p')" 2
+
+# A4–A5: the file readers name themselves — no command to classify.
+spa_run '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"},"cwd":"/r/elc"}'; out="$(spa_log "$spa_d")"
+assert_contains A4-read-tool "$out" '"tool":"Read"'
+assert_contains A4-read-via  "$out" '"via":"Read"'
+assert_contains A4-platform-spill "$out" "\"spill\":\"$SPA_PLAT\""
+spa_run '{"tool_name":"Grep","tool_input":{"pattern":"error","path":"'"$SPA_PLAT"'"},"cwd":"/r/elc"}'; out="$(spa_log "$spa_d")"
+assert_contains A5-grep-tool "$out" '"tool":"Grep"'
+assert_contains A5-grep-via  "$out" '"via":"Grep"'
+
+# A6: a json-slim run logs its own `entry:"cli"` line — recording it here would double-count the
+# recovery and inflate exactly the number --report exists to give.
+spa_run '{"tool_name":"Bash","tool_input":{"command":"node ~/p/scripts/json-slim.cjs '"$SPA_HOOK"'"},"cwd":"/r/elc"}'; d="$spa_d"
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A6-json-slim-skipped "a json-slim run was recorded as an access"; else ok; fi
+
+# A7: one line per DISTINCT path — the same spill named twice in one command is one read.
+spa_run '{"tool_name":"Bash","tool_input":{"command":"cat '"$SPA_HOOK"' '"$SPA_PLAT"' '"$SPA_HOOK"'"},"cwd":"/r/elc"}'; d="$spa_d"
+assert_eq       A7-two-lines "$(spa_lines "$d")" 2
+out="$(spa_log "$d")"
+assert_contains A7-hook-path "$out" "\"spill\":\"$SPA_HOOK\""
+assert_contains A7-plat-path "$out" "\"spill\":\"$SPA_PLAT\""
+assert_contains A7-via-shell "$out" '"via":"shell"'
+
+# A8–A9: nothing to measure → no file. An ordinary command, and the other fnd- prefixes (slim-out /
+# prompt-json / the no-gain memo) — none of those is a platform-overflow spill, so --report has nothing
+# to pair a read of one with, and json-slim already logs such reads as its own `entry:"cli"` runs.
+for cmd in "npm run lint && git status" "cat /h/fnd-slim-out-abc.json /h/fnd-prompt-json-1.json /h/.fnd-nogain-x"; do
+  spa_run '{"tool_name":"Bash","tool_input":{"command":"'"$cmd"'"},"cwd":"/r/elc"}'; d="$spa_d"
+  if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad "A8-$cmd" "a non-spill command was recorded"; else ok; fi
+done
+
+# A10: Codex sends `command` as an ARGV ARRAY — the raw-text match reads both spellings the same.
+spa_run '{"tool_name":"local_shell","tool_input":{"command":["bash","-lc","grep -c error '"$SPA_PLAT"'"]},"cwd":"/r/elc"}'; out="$(spa_log "$spa_d")"
+assert_contains A10-argv-array "$out" "\"spill\":\"$SPA_PLAT\""
+assert_contains A10-argv-tool  "$out" '"tool":"Bash"'
+assert_contains A10-argv-via   "$out" '"via":"grep"'
+
+# A11: a path carrying a backslash still produces PARSEABLE JSON — the log is machine-read by
+# --report, so a broken line would take the whole window with it.
+spa_run '{"tool_name":"Read","tool_input":{"file_path":"/we\\ird/fnd-mcp-slim-'"$SPA_HEX"'.json"},"cwd":"/r/elc"}'; d="$spa_d"
+if node -e 'const l=require("fs").readFileSync(process.argv[1],"utf8").trim();const o=JSON.parse(l);process.exit(o.spill==="/we\\ird/fnd-mcp-slim-0123456789abcdef.json"?0:1)' \
+     "$d/fnd-mcp-slim-debug.log" 2>/dev/null; then ok
+else bad A11-json-escaping "the escaped path did not round-trip: $(spa_log "$d")"; fi
+
+# A12: no `cwd` in the payload → the project tag falls back to this process's own directory.
+spa_dir=$((spa_dir+1)); d="$TMP/spa/$spa_dir"; mkdir -p "$d" "$TMP/spa-cwd"
+printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"}}' \
+  | (cd "$TMP/spa-cwd" && env FND_MCP_SLIM_DIR="$d" FND_MCP_SLIM_DEBUG=1 "$SPA") >/dev/null 2>&1
+assert_contains A12-cwdless-project "$(spa_log "$d")" '"project":"spa-cwd"'
+
+# A13: the domaine env file supplies the switches when the environment does not — and loses to the
+# environment when it does (scripts/env-file.cjs's precedence, mirrored in sh).
+SPA_PROJ="$TMP/spa-proj"; mkdir -p "$SPA_PROJ/.claude" "$TMP/spa-envfile"
+cat > "$SPA_PROJ/.claude/domaine.env" <<EOF
+# a comment line, and a key that is not ours
+PATH=/nope
+FND_MCP_SLIM_DIR=$TMP/spa-envfile
+FND_MCP_SLIM_DEBUG=2
+EOF
+printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"},"cwd":"'"$SPA_PROJ"'"}' \
+  | env -u FND_MCP_SLIM_DIR -u FND_MCP_SLIM_DEBUG "$SPA" >/dev/null 2>&1
+assert_contains A13-envfile-dir "$(spa_log "$TMP/spa-envfile")" '"lvl":2'
+spa_dir=$((spa_dir+1)); d="$TMP/spa/$spa_dir"; mkdir -p "$d"
+printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"},"cwd":"'"$SPA_PROJ"'"}' \
+  | env FND_MCP_SLIM_DIR="$d" FND_MCP_SLIM_DEBUG=1 "$SPA" >/dev/null 2>&1
+assert_contains A13-env-wins "$(spa_log "$d")" '"lvl":1'
+# …and the gate reads the same file, so a repo can turn the recorder off for everyone in it
+echo "FND_SPILL_ACCESS=0" >> "$SPA_PROJ/.claude/domaine.env"
+rm -f "$TMP/spa-envfile/fnd-mcp-slim-debug.log"
+printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"},"cwd":"'"$SPA_PROJ"'"}' \
+  | env -u FND_MCP_SLIM_DIR -u FND_MCP_SLIM_DEBUG "$SPA" >/dev/null 2>&1
+if [ -e "$TMP/spa-envfile/fnd-mcp-slim-debug.log" ]; then bad A13-envfile-gate "domaine.env FND_SPILL_ACCESS=0 was ignored"; else ok; fi
+printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"},"cwd":"'"$SPA_PROJ"'"}' \
+  | env -u FND_MCP_SLIM_DIR -u FND_MCP_SLIM_DEBUG FND_SPILL_ACCESS=1 "$SPA" >/dev/null 2>&1
+assert_contains A13-env-gate-wins "$(spa_log "$TMP/spa-envfile")" '"entry":"access"'
+
+# A14: rotation at DEBUG_LOG_MAX, the same 5 MB one generation the compressor uses — this hook shares
+# the file, so it has to share the bound or a busy session would grow it without limit.
+spa_dir=$((spa_dir+1)); d="$TMP/spa/$spa_dir"; mkdir -p "$d"
+node -e 'require("fs").writeFileSync(process.argv[1], "x".repeat(5*1024*1024))' "$d/fnd-mcp-slim-debug.log"
+printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"},"cwd":"/r/elc"}' \
+  | env FND_MCP_SLIM_DIR="$d" FND_MCP_SLIM_DEBUG=1 "$SPA" >/dev/null 2>&1
+if [ -f "$d/fnd-mcp-slim-debug.log.1" ]; then ok; else bad A14-rotation "the 5 MB log was not rotated"; fi
+assert_eq A14-fresh-log "$(spa_lines "$d")" 1
+
+# A15: garbage on stdin is a no-op — silent, empty stdout, exit 0. A PreToolUse hook that printed
+# anything here would inject it into the model's context.
+printf 'not json at all — fnd-mcp-slim-nope.json' | env FND_MCP_SLIM_DIR="$TMP/spa" FND_MCP_SLIM_DEBUG=1 "$SPA" >"$TMP/spa.out" 2>"$TMP/spa.err"
+assert_eq A15-garbage-exit   "$?" 0
+assert_eq A15-garbage-stdout "$(cat "$TMP/spa.out")" ""
+assert_eq A15-garbage-stderr "$(cat "$TMP/spa.err")" ""
+
+# A16: no node. This hook runs on EVERY Bash/Read/Grep call, where a node start-up (~29 ms) would cost
+# more than the whole measurement is worth — sh + grep is ~7 ms. Asserted as "spawns no node", not as
+# "never spells the four letters": `via=node` is one of the values it records.
+if [ "$(grep -vE '^[[:space:]]*#' "$SPA" | grep -cE '(^|[|&;(` ])node([[:space:]"'"'"'$]|$)' || true)" -eq 0 ]; then ok
+else bad A16-no-node "spill-access.sh spawns node: $(grep -vE '^[[:space:]]*#' "$SPA" | grep -nE '(^|[|&;(` ])node([[:space:]"'"'"'$]|$)')"; fi
+
+# A17: the wiring. The matcher covers the three reading tools and nothing else, and the command
+# pre-gates on FND_SPILL_ACCESS so a disabled hook is not even spawned — then falls back to `|| true`,
+# because a measurement hook may never turn into a blocked tool call.
+SPA_GROUP="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("Read")) | .hooks[0].command' "$MANIFEST")"
+SPA_MATCHER="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("Read")) | .matcher' "$MANIFEST")"
+for t in Bash Read Grep; do
+  if printf '%s\n' "$t" | grep -Eq "$SPA_MATCHER"; then ok; else bad "A17-$t" "matcher misses $t"; fi
+done
+for t in Edit Write mcp__a__b BashOutput; do
+  if printf '%s\n' "$t" | grep -Eq "$SPA_MATCHER"; then bad "A17-not-$t" "matcher over-matches"; else ok; fi
+done
+spa_fake="$TMP/spa-root"; mkdir -p "$spa_fake/hooks"
+cat > "$spa_fake/hooks/spill-access.sh" <<'SH'
+#!/usr/bin/env bash
+echo ran >> "$SPA_MARK"
+exit 1
+SH
+chmod +x "$spa_fake/hooks/spill-access.sh"
+: > "$TMP/spa.mark"
+SPA_MARK="$TMP/spa.mark" CLAUDE_PLUGIN_ROOT="$spa_fake" FND_SPILL_ACCESS=0 bash -c "$SPA_GROUP" >/dev/null 2>&1
+assert_eq A17-gate-exit "$?" 0
+if [ -s "$TMP/spa.mark" ]; then bad A17-gate-spawn "the wiring ran the hook with FND_SPILL_ACCESS=0"; else ok; fi
+SPA_MARK="$TMP/spa.mark" CLAUDE_PLUGIN_ROOT="$spa_fake" bash -c "$SPA_GROUP" >/dev/null 2>&1
+assert_eq A17-failopen-exit "$?" 0
+if [ -s "$TMP/spa.mark" ]; then ok; else bad A17-spawn "the wiring did not run the hook"; fi
+
+# A18: the platform names its overflow files opaquely — the pairing key is whatever mcp-slim's
+# OVERFLOW_PATH captured, so every filename under a tool-results/ dir counts, not just `mcp-*.txt`.
+for spill in /p/tool-results/b1z10evqs.txt /p/tool-results/webfetch-3.pdf /p/tool-results/bacboxujh; do
+  spa_run '{"tool_name":"Bash","tool_input":{"command":"jq . '"$spill"'"},"cwd":"/r/elc"}'
+  assert_contains "A18-$spill" "$(spa_log "$spa_d")" "\"spill\":\"$spill\""
+done
+
+# A19: a glob is NOT a path. Left to the shell it would expand against the real directory and record
+# every whale in it as read — one `rm <dir>/tool-results/*` would clear a whole session's misses.
+SPA_GLOB="$TMP/spa-glob/tool-results"; mkdir -p "$SPA_GLOB"
+for n in a b c; do : > "$SPA_GLOB/spill-$n.txt"; done
+spa_run '{"tool_name":"Bash","tool_input":{"command":"wc -c '"$SPA_GLOB"'/*.txt"},"cwd":"/r/elc"}'; d="$spa_d"
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A19-glob "a glob was expanded into $(spa_lines "$d") access lines"; else ok; fi
+
+# A20: a call may never append more than json-slim's own SPILL_LOG_MAX (8) lines to the shared log —
+# one path-rich command must not be able to grow it toward the rotation cap on its own.
+spa_cmd="cat"; i=0
+while [ "$i" -lt 12 ]; do spa_cmd="$spa_cmd /p/tool-results/w$i.txt"; i=$((i+1)); done
+spa_run '{"tool_name":"Bash","tool_input":{"command":"'"$spa_cmd"'"},"cwd":"/r/elc"}'
+assert_eq A20-cap "$(spa_lines "$spa_d")" 8
+
+# A21: `rm`/`ls`/`mv`/`echo` touch the NAME, not the bytes. Recorded (the traffic is real) under a
+# `via` of its own, which --report deliberately does not pair as a recovery.
+for cmd in "rm -f $SPA_PLAT" "ls -la $SPA_PLAT" "echo see $SPA_PLAT >> notes.md"; do
+  spa_run '{"tool_name":"Bash","tool_input":{"command":"'"$cmd"'"},"cwd":"/r/elc"}'
+  assert_contains "A21-named-$(printf '%s' "$cmd" | cut -d' ' -f1)" "$(spa_log "$spa_d")" '"via":"named"'
+done
+# …but a real reader anywhere in the command outranks it: `rm $(jq …)` read the file.
+spa_run '{"tool_name":"Bash","tool_input":{"command":"jq -r .id '"$SPA_PLAT"' | xargs rm -f"},"cwd":"/r/elc"}'
+assert_contains A21-reader-wins "$(spa_log "$spa_d")" '"via":"jq"'
+
+# A22: env-file.cjs's load() takes the FIRST layer that CARRIES the key — an EMPTY project value
+# shadows the global file (that is how a repo opts out of a machine-wide dir). Reading it as "not
+# found" would send these lines to a different log than the compressor's.
+SPA_P2="$TMP/spa-proj2"; SPA_G2="$TMP/spa-global2"; mkdir -p "$SPA_P2/.claude" "$SPA_G2/domaine" "$TMP/spa-globaldir"
+printf 'FND_MCP_SLIM_DIR=\nFND_MCP_SLIM_DEBUG=1\n' > "$SPA_P2/.claude/domaine.env"
+printf 'FND_MCP_SLIM_DIR=%s\n' "$TMP/spa-globaldir" > "$SPA_G2/domaine/env"
+spa_dir=$((spa_dir+1)); d="$TMP/spa/$spa_dir"; mkdir -p "$d"
+printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"},"cwd":"'"$SPA_P2"'"}' \
+  | (cd "$d" && env -u FND_MCP_SLIM_DIR -u FND_MCP_SLIM_DEBUG TMPDIR="$d" XDG_CONFIG_HOME="$SPA_G2" "$SPA") >/dev/null 2>&1
+if [ -e "$TMP/spa-globaldir/fnd-mcp-slim-debug.log" ]; then bad A22-empty-shadows "an empty project value fell through to the global file"; else ok; fi
+assert_contains A22-empty-tmpdir "$(spa_log "$d")" '"entry":"access"'
+
+# A23: a multi-line Bash command reaches the hook as ONE JSON string with \n in it. Un-escaping those
+# to a space is what keeps the tokens apart: the path used to swallow the next line ("…txt\nwc", a
+# spill --report can never pair), and a verb that opened a line fell through to `via:"other"`.
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cd /r/elc\njq -r '"'"'.x'"'"' '"$SPA_PLAT"'\nwc -l"}}'; d="$spa_d"
+assert_eq       A23-one-line "$(spa_lines "$d")" 1
+assert_contains A23-spill    "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
+assert_contains A23-via      "$(spa_log "$d")" '"via":"jq"'
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cd /r/elc\nrm -f '"$SPA_PLAT"'"}}'
+assert_contains A23-newline-verb "$(spa_log "$spa_d")" '"via":"named"'
+
+# A24: paths and verbs are harvested from the tool_input SLICE, and a verb counts only where a command
+# can start. The envelope and the arguments are both traps: a `transcript_path` under a tool-results/
+# dir is not a file anyone read, and the `node` inside a directory name is not the reader that read it.
+spa_run '{"session_id":"s","transcript_path":"/x/t.jsonl","cwd":"/Users/me/node.js/elc","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -f '"$SPA_PLAT"'"}}'
+assert_contains A24-cwd-not-a-verb "$(spa_log "$spa_d")" '"via":"named"'
+spa_run '{"session_id":"s","transcript_path":"/x/tool-results/9ab3cdefg.jsonl","cwd":"/r/elc","hook_event_name":"PreToolUse","tool_name":"Grep","tool_input":{"pattern":"error","path":"/repo/src"}}'; d="$spa_d"
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A24-transcript "an envelope path was recorded as a read: $(spa_log "$d")"; else ok; fi
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cp '"$SPA_PLAT"' /proj/node/fixture.json"}}'
+assert_contains A24-arg-not-a-verb "$(spa_log "$spa_d")" '"via":"named"'
+
+# A25: a stripped environment. `set -u` over a bare $HOME aborted the hook with a stderr line and a
+# non-zero exit — on a PreToolUse hook that stderr is text the model reads back.
+spa_dir=$((spa_dir+1)); d="$TMP/spa/$spa_dir"; mkdir -p "$d"
+printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"},"cwd":"/r/elc"}' \
+  | env -u HOME -u XDG_CONFIG_HOME FND_MCP_SLIM_DIR="$d" FND_MCP_SLIM_DEBUG=1 "$SPA" >"$TMP/spa.out" 2>"$TMP/spa.err"
+assert_eq       A25-nohome-exit   "$?" 0
+assert_eq       A25-nohome-stdout "$(cat "$TMP/spa.out")" ""
+assert_eq       A25-nohome-stderr "$(cat "$TMP/spa.err")" ""
+assert_contains A25-nohome-line   "$(spa_log "$d")" '"entry":"access"'
 
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then

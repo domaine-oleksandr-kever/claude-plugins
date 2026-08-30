@@ -2651,7 +2651,7 @@ missed="$(sed -n '/missed whales/,$p' "$O")"
 if [ "$rc" -eq 0 ] && [ "$lines" -le 40 ] && grep -Fq "$RPLOG" "$O" \
    && grep -Fq '5 events' "$O" && grep -Fq '(+1 unparseable)' "$O" \
    && grep -Fq 'compressed 2' "$O" && grep -Fq 'platform-overflow 2' "$O" \
-   && grep -Fq 'no later json-slim run): 1 of 2' "$O" \
+   && grep -Fq 'never read by any tool): 1 of 2' "$O" \
    && printf '%s' "$missed" | grep -Fq 'lonely-whale.txt' \
    && ! printf '%s' "$missed" | grep -Fq 'paired-whale.txt' \
    && grep -Fq 'elc:' "$O" && grep -Fq 'other:' "$O" \
@@ -2678,6 +2678,34 @@ rc=0; FND_MCP_SLIM_DIR="$RPD" node "$SLIM" --report >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -Fq '5 events' "$O"; then ok
 else bad R4-report-default-path "rc=$rc out=$(head -c 200 "$O") err=$(head -c 120 "$E")"; fi
 
+# R4b: the ≤ 40-line promise is made about a report with EVERY optional section populated, and the log
+# R1 measures has no access events — so the two M16 lines it grew (`spill reads`, `whale recoveries
+# via`) were never inside the length anyone checked. This log fills them all: six hook tools and six
+# projects (both rankings truncate), a cli aggregate, a stub, mixed collection levels, spill
+# inventories, nine overflows so the missed list is long, and access reads that recover two of them.
+RPLOG4="$RPD/full.log"
+: > "$RPLOG4"
+for i in 1 2 3 4 5 6; do
+  printf '{"ts":"2026-08-25T0%s:00:00.000Z","project":"p%s","lvl":2,"entry":"hook","tool":"mcp__a__t%s","decision":"compressed","reason":null,"bytes_in":90000,"bytes_out":%s0000,"pct":50,"stages":["adf","noise","crush"],"spill":"/tmp/fnd-mcp-slim-h%s.json","spills":["/tmp/fnd-crush-%s.json"],"spills_n":3,"ms":5}\n' "$i" "$i" "$i" "$i" "$i" "$i" >> "$RPLOG4"
+done
+for i in 1 2 3 4 5 6 7 8 9; do
+  printf '{"ts":"2026-08-25T1%s:00:00.000Z","project":"p1","lvl":1,"entry":"hook","tool":"mcp__x__evaluate_script","decision":"passthrough","reason":"platform-overflow","bytes_in":1463,"bytes_out":1463,"pct":0,"stages":[],"spill":"/p/tool-results/w%s.txt","ms":1}\n' "$i" "$i" >> "$RPLOG4"
+done
+cat >> "$RPLOG4" <<'RPEOF'
+{"ts":"2026-08-25T20:00:00.000Z","project":"p1","lvl":2,"entry":"cli","tool":"/p/tool-results/w1.txt","decision":"compressed","reason":null,"bytes_in":800000,"bytes_out":90000,"pct":88.8,"stages":["crush"],"spill":null,"spill_out":"/tmp/fnd-slim-out-a.json","ms":40}
+{"ts":"2026-08-25T20:05:00.000Z","project":"p1","lvl":2,"entry":"access","tool":"Bash","via":"jq","spill":"/p/tool-results/w2.txt"}
+{"ts":"2026-08-25T20:06:00.000Z","project":"p1","lvl":2,"entry":"access","tool":"Read","via":"read","spill":"/p/tool-results/w3.txt"}
+{"ts":"2026-08-25T20:10:00.000Z","project":"p2","lvl":2,"entry":"hook","tool":"mcp__a__getJiraIssue","decision":"stubbed","reason":"weak-gain","bytes_in":260000,"bytes_out":910,"pct":99.6,"stages":["adf"],"spill":"/tmp/fnd-mcp-slim-s1.json","ms":33}
+{"ts":"2026-08-25T20:20:00.000Z","project":"p3","lvl":2,"entry":"hook","tool":"mcp__a__listFiles","decision":"passthrough","reason":"non-json","bytes_in":52518,"bytes_out":52518,"pct":0,"stages":[],"spill":null,"ms":2}
+RPEOF
+rc=0; node "$SLIM" --report "$RPLOG4" >"$O" 2>"$E" || rc=$?
+lines=$(wc -l < "$O" | tr -d ' ')
+if [ "$rc" -eq 0 ] && [ "$lines" -le 40 ] \
+   && grep -Fq 'spill reads (access hook): 2' "$O" && grep -Fq 'whale recoveries via:' "$O" \
+   && grep -Fq 'never read by any tool): 6 of 9' "$O" \
+   && grep -Fq 'MIXED levels' "$O" && grep -Fq 'stubbed (spill-and-stub guard)' "$O"; then ok
+else bad R4b-report-length-every-section "rc=$rc lines=$lines out=$(cat "$O")"; fi
+
 # R5 (M12b): `stubbed` is its own decision — the hook replaced a whale with a ~1 KB stub, so it counts
 # toward the bytes saved (not as a passthrough that saved nothing) and gets its own line broken down by
 # the branch it replaced. A stub nobody followed up on is a MODEL choice, reported for curiosity — never
@@ -2690,8 +2718,8 @@ cat > "$RPLOG2" <<'RPEOF'
 RPEOF
 rc=0; node "$SLIM" --report "$RPLOG2" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -Fq 'stubbed 2' "$O" \
-   && grep -Fq 'stubbed (spill-and-stub guard): 2 (non-json 1 · weak-gain 1), 1 with no later json-slim run' "$O" \
-   && grep -Fq 'no later json-slim run): 0 of 0' "$O" \
+   && grep -Fq 'stubbed (spill-and-stub guard): 2 (non-json 1 · weak-gain 1), 1 never read' "$O" \
+   && grep -Fq 'never read by any tool): 0 of 0' "$O" \
    && ! grep -q 'passthrough reasons' "$O" \
    && grep -Fq '95.1% saved' "$O"; then ok
 else bad R5-report-stubbed "rc=$rc out=$(head -c 500 "$O") err=$(head -c 120 "$E")"; fi
@@ -2729,7 +2757,7 @@ RPEOF
 rc=0; node "$SLIM" --report "$RPLOG4" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -Fq 'passthrough reasons: marker-overhead 1' "$O" \
    && grep -Fq 'totals: 22399 → 18655 B (16.7% saved)' "$O" \
-   && grep -Fq 'no later json-slim run): 0 of 0' "$O"; then ok
+   && grep -Fq 'never read by any tool): 0 of 0' "$O"; then ok
 else bad R7-report-marker-overhead "rc=$rc out=$(head -c 500 "$O") err=$(head -c 120 "$E")"; fi
 
 # R8 (B4.10c/B4.11): at FND_MCP_SLIM_DEBUG=1 sub-gate (`size-gate`) lines are not recorded, so the totals
@@ -2781,7 +2809,7 @@ cat > "$RPLOG6" <<'RPEOF'
 {"ts":"2026-07-25T22:01:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/fnd-mcp-slim-f.json","decision":"passthrough","reason":"no-gain","bytes_in":43364,"bytes_out":43364,"pct":0,"stages":[],"spill":null,"ms":4}
 RPEOF
 rc=0; node "$SLIM" --report "$RPLOG6" >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 0 ] && grep -Fq '0 with no later json-slim run, 1 whose run gained nothing' "$O" \
+if [ "$rc" -eq 0 ] && grep -Fq '0 never read, 1 whose run gained nothing' "$O" \
    && grep -Fq 'cli runs: 1 · saved 0 B (0.0%) · 1 gained nothing' "$O"; then ok
 else bad R8e-flat-followup "rc=$rc out=$(head -c 500 "$O")"; fi
 # …but a `--jq` run that reduced nothing ANSWERED a sub-path (it printed one field, not the file) — that is
@@ -2790,7 +2818,7 @@ RPLOG7="$RPD/narrowed-followup.log"
 head -1 "$RPLOG6" > "$RPLOG7"
 printf '%s\n' '{"ts":"2026-07-25T22:02:00.000Z","project":"elc","lvl":1,"entry":"cli","tool":"/tmp/fnd-mcp-slim-f.json","decision":"passthrough","reason":"no-gain","narrowed":true,"bytes_in":160,"bytes_out":160,"pct":0,"stages":[],"spill":null,"ms":2}' >> "$RPLOG7"
 rc=0; node "$SLIM" --report "$RPLOG7" >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 0 ] && grep -Fq '0 with no later json-slim run' "$O" \
+if [ "$rc" -eq 0 ] && grep -Fq '0 never read' "$O" \
    && ! grep -Fq 'gained nothing' "$O"; then ok
 else bad R8f-narrowed-followup "rc=$rc out=$(head -c 500 "$O")"; fi
 # R8g: the designed low-context recoveries are NOT re-dumps, whatever their saved-bytes delta says: a
@@ -2809,7 +2837,7 @@ cat > "$RPLOG8" <<'RPEOF'
 RPEOF
 rc=0; node "$SLIM" --report "$RPLOG8" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && ! grep -Fq 'gained nothing' "$O" \
-   && grep -Fq '0 with no later json-slim run' "$O"; then ok
+   && grep -Fq '0 never read' "$O"; then ok
 else bad R8g-recoveries-not-flat "rc=$rc out=$(head -c 600 "$O")"; fi
 
 # ---------------------------------------------- json-slim.cjs: CLI telemetry (B4.10a/b) --

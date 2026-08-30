@@ -30,7 +30,10 @@
 #   X cases — beforeShellExecution → the two commit guards: exit 2 becomes
 #             `permission:"deny"` + both message fields + exit 2; a clean command emits
 #             nothing; a guard that reaches NO verdict fails open — except the no-verify guard
-#             on a git command, which fails closed (a missing guard is a broken install)
+#             on a git command, which fails closed (a missing guard is a broken install) —
+#             plus X13, hooks/spill-access.sh riding the same event: it runs only AFTER the
+#             guards allow the command, records the spill read, changes no output, and this
+#             host has no read-file event, so shell reads are its whole coverage here
 #   N cases — the ENTIRE tests/no-verify-bypass-matrix.sh case list, re-run through the Cursor
 #             dialect: the case lists are read out of that file (never copied), so a row added
 #             there is covered here on the next run
@@ -40,7 +43,7 @@ set -u
 # Hermetic: an exported plugin-root env var would decide which bundle the scripts read, and
 # these cases exist to prove __dirname does. Debug switches are unset for the same reason
 # hooks-sim.sh unsets them — a developer watching the live log must not collect fixture noise.
-unset CLAUDE_PLUGIN_ROOT CURSOR_PLUGIN_ROOT FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR
+unset CLAUDE_PLUGIN_ROOT CURSOR_PLUGIN_ROOT FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_SPILL_ACCESS
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN="$ROOT/plugins/fnd"
@@ -560,6 +563,30 @@ assert_eq X10-attr-failopen-exit "$EC" 0
 out="$(brun '{"command":"git commit --no-verify -m x"}')"; EC=$?
 assert_eq X11-second-guard-runs "$EC" 2
 assert_contains X11-second-guard-msg "$(printf '%s' "$out" | jq -r '.agentMessage')" "quality gates"
+
+# X13 — hooks/spill-access.sh on this same event. It is measurement, not a guard: it must add
+# nothing to the response, run only once the guards have allowed the command, and honour its own
+# switch in-shim (the wiring cannot pre-gate it — the commit guard shares beforeShellExecution).
+SPA_D="$TMP/spa"; mkdir -p "$SPA_D"
+SPA_CMD='{"command":"jq -r .x /p/tool-results/b1z10evqs.txt","workspace_roots":["/r/elc"]}'
+out="$(run_shim beforeShellExecution "$SPA_CMD" FND_MCP_SLIM_DIR="$SPA_D" FND_MCP_SLIM_DEBUG=1)"; EC=$?
+assert_eq       X13-silent  "$out" ""
+assert_eq       X13-exit    "$EC" 0
+assert_contains X13-line    "$(cat "$SPA_D/fnd-mcp-slim-debug.log" 2>/dev/null)" '"entry":"access"'
+assert_contains X13-via     "$(cat "$SPA_D/fnd-mcp-slim-debug.log" 2>/dev/null)" '"via":"jq"'
+assert_contains X13-project "$(cat "$SPA_D/fnd-mcp-slim-debug.log" 2>/dev/null)" '"project":"elc"'
+# a DENIED command never ran, so it read no spill
+SPA_D2="$TMP/spa-denied"; mkdir -p "$SPA_D2"
+run_shim beforeShellExecution '{"command":"git commit --no-verify -m x /p/tool-results/b1z10evqs.txt"}' \
+  FND_MCP_SLIM_DIR="$SPA_D2" FND_MCP_SLIM_DEBUG=1 >/dev/null 2>&1
+if [ -e "$SPA_D2/fnd-mcp-slim-debug.log" ]; then bad X13-denied "a blocked command was recorded as a spill read"; else ok; fi
+# the in-shim switch
+SPA_D3="$TMP/spa-off"; mkdir -p "$SPA_D3"
+run_shim beforeShellExecution "$SPA_CMD" FND_SPILL_ACCESS=0 FND_MCP_SLIM_DIR="$SPA_D3" FND_MCP_SLIM_DEBUG=1 >/dev/null 2>&1
+if [ -e "$SPA_D3/fnd-mcp-slim-debug.log" ]; then bad X13-switch "FND_SPILL_ACCESS=0 was ignored in the shim"; else ok; fi
+# Cursor documents no read-file event, so nothing routes the file readers here — recorded as the
+# host divergence it is, and asserted so a future event cannot land silently unwired.
+if grep -qiE 'beforeReadFile|readFile' "$WIRING"; then bad X13-read-event "hooks-cursor.json gained a read event — wire spill-access.sh to it"; else ok; fi
 
 # X12 — the fast-reject list has three copies and hooks/no-verify-bypass.sh is the single source
 # (its `case "$input" in *git*|…` line). The two JS copies must stay byte-identical, so they are

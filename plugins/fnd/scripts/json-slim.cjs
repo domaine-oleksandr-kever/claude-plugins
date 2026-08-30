@@ -5,7 +5,9 @@
  * Dual entry point (one home for the transform):
  *   - require()d as a module by the mcp-slim PostToolUse hook (M2) — { slim, crush, crushValue };
  *   - a standalone CLI to compress an already-saved dump on demand:
- *       node json-slim.cjs <file.json> [--jq <dot.path>] [--toon] [--no-spill] [--stats]
+ *       node json-slim.cjs <file.json> [--jq <jq-path>] [--toon] [--no-spill] [--stats]
+ *         --jq speaks a small jq subset: dot paths (`.a.b`, `.a[0]`), `[]` iteration, `,` multi-select
+ *         (one array on stdout) and `| keys` / `| length`; anything else exits 2 naming the token.
  *       cat big.json | node json-slim.cjs
  *       node json-slim.cjs --report [logfile] [--since <ISO>]   (aggregate the FND_MCP_SLIM_DEBUG log)
  *     A JSONL file is PROFILED, never compressed (stats + sample rows + line-scripting
@@ -2087,7 +2089,7 @@ function capOutput(res, fileArg, config) {
   // …but ONLY when that segment survives the round trip: a key holding a dot, a bracket or a space is
   // unreachable by this dot-walk (`weird.key` splits, `a[0]` normalizes to `a.0`) and a space would
   // even split the pasted command line, silently retargeting the file argument. Unaddressable key →
-  // no example (the ternary below drops the parenthetical); the `<dot.path>` syntax hint still shows.
+  // no example (the ternary below drops the parenthetical); the `<jq-path>` syntax hint still shows.
   const jqExample = isArr ? '0' : (firstKey && /^[\w$-]+$/.test(firstKey) ? firstKey : null);
   let sampleStr = sample === null ? '(none)' : compact(sample);
   if (sampleStr.length > 200) sampleStr = `${sampleStr.slice(0, 200)}…`;
@@ -2105,7 +2107,8 @@ function capOutput(res, fileArg, config) {
     `  slimmed output: ${outPath} (${spilledBytes} B)\n` +
     `  original file:  ${fileArg}\n` +
     (isJson
-      ? `  narrow with: node json-slim.cjs --jq <dot.path> ${outPath}${jqExample ? `  (e.g. --jq ${jqExample})` : ''}`
+      ? `  narrow with: node json-slim.cjs --jq <jq-path> ${outPath}${jqExample ? `  (e.g. --jq ${jqExample})` : ''}\n`
+        + `  <jq-path>: ${JQ_GRAMMAR_HINT}`
       : `  not JSON — read the slimmed body windowed: sed -n '1,80p' ${shq(outPath)}  (--jq does not apply)`) + post;
   return { handback, spillOut: outPath };
 }
@@ -2503,7 +2506,7 @@ function nogainStamp(dir, file) {
 // /compact drops the earlier transcript), so it carries the size, both recoveries and the off switch.
 function nogainRefusal(file, bytes) {
   return `json-slim: ${file} already passed through uncompressed this session (${bytes} B — nothing to shrink). ` +
-    `Do NOT re-run json-slim on it: read it directly (Read/head/sed -n '<K>p') or extract a sub-path: --jq <dot.path>. ` +
+    `Do NOT re-run json-slim on it: read it directly (Read/head/sed -n '<K>p') or extract a sub-path: --jq <jq-path>. ` +
     `FND_NOGAIN_MEMO=0 disables this memo.`;
 }
 // B2 Layer 1 — json-slim's OWN Gate-A output spill (capOutput writes it as fnd-slim-out-*) holds an
@@ -2514,7 +2517,7 @@ function nogainRefusal(file, bytes) {
 const SLIM_OUT_PREFIX = 'fnd-slim-out-';
 function slimOutRefusal(file, bytes) {
   return `json-slim: ${file} IS json-slim's own slimmed output (already compressed, ${bytes} B) — re-slimming cannot shrink it. ` +
-    `Read it directly (Read/head/sed) or extract a sub-path: --jq <dot.path>. FND_NOGAIN_MEMO=0 forces the run.`;
+    `Read it directly (Read/head/sed) or extract a sub-path: --jq <jq-path>. FND_NOGAIN_MEMO=0 forces the run.`;
 }
 function streamJqRefusal(file, bytes) {
   const qf = shq(file);
@@ -2577,11 +2580,11 @@ function emitProfile(profile, file, bytes, t0, cfg, offset, extra) {
 
 // ==================================================================== --jq ergonomics (M12) ==
 
-// Normalize a --jq path to the plain dot-walk this CLI understands: a leading `.` is stripped and
-// `[N]` numeric indices are rewritten to `.N`, so `.products[0].title` ≡ `products.0.title`. Full jq
-// stays out of scope on purpose — quoted keys (`["a.b"]`), slices, pipes and filters are NOT parsed
-// (a `["a.b"]` spelling survives verbatim and then splits on its dot, so a key literally
-// containing a dot stays unreachable). `.` / `..` still normalize to the empty identity selector.
+// Normalize ONE --jq path to the plain dot-walk underneath it: a leading `.` is stripped and `[N]`
+// numeric indices are rewritten to `.N`, so `.products[0].title` ≡ `products.0.title`. Spelling only —
+// pipes, commas and `[]` belong to the grammar layer below, and a quoted key (`["a.b"]`) survives
+// verbatim (it is refused there, so a key literally containing a dot stays unreachable). `.` / `..`
+// still normalize to the empty identity selector.
 function normalizeJqPath(p) {
   return String(p).replace(/\[(\d+)\]/g, '.$1').replace(/^\.+/, '');
 }
@@ -2600,17 +2603,233 @@ function jqAvailable(v) {
   return `value is ${v === null ? 'null' : typeof v}`;
 }
 
+// ------------------------------------------------------------ the supported --jq grammar (M15) --
+// Readers write REAL jq (`.fields | keys`, `.a[].b`, `.x, .y`), and a plain dot-walk answered those
+// with `null` plus a diagnostic about a segment called `fields | keys` — so the path looked wrong and
+// the same file was re-run three to seven times with guessed spellings. The CLI now evaluates the
+// small subset those expressions actually use and REFUSES the rest by name (no jq dependency, still):
+//   expr   := term (',' term)*     — one stdout doc here where jq emits N, so terms come back as ONE array
+//   term   := path ('|' filter)*
+//   path   := dot path (as before) with `[]` fan-out allowed at any segment
+//   filter := 'keys' | 'length' | a leading-dot path (`.a | .b` ≡ `.a.b`)
+// A step is a key string; `null` is the `[]` fan-out (a key is always a string, so the marker needs no
+// wrapper). Anything else is a USAGE error, named before the walk runs — see the CLI's refusal.
+// The ONE spelling of that grammar, interpolated by the refusal, the Gate-A handback and the hook's
+// stub: hand-copying this sentence into three strings is how they drift apart. Examples are quoted
+// because an unquoted `,` multi-select is split by the shell into two arguments.
+const JQ_GRAMMAR_HINT = "dot paths (.a.b, .a[0]), '[]' iteration, ',' multi-select, '| keys' / '| length'";
+
+// The constructs this evaluator cannot run, matched on the stage AS TYPED (before normalizeJqPath
+// rewrites `[N]`): recursive descent, the alternative operator, optionals, function calls, literals,
+// comparisons, and any bracket that is not `[]` or `[N]`. Judged FIRST, so whatever is left over may be
+// a plain key — the dot-walk this replaced addressed `@type`, `a:b`, `x/y` and `2fa`, and refusing them
+// now would send the reader back to reading the whole file for want of one value.
+const JQ_UNSUPPORTED = /\.\.|\/\/|\?|[()"']|[=<>!]=?|\[(?!\]|\d+\])[^\]]*\]?/;
+// One step: the separating dot — absent only on the first, which normalizeJqPath already stripped —
+// then the key. The dot is REQUIRED, or a digit-leading key splits in two (`2fa` → `2`, `fa`) and
+// answers with a sibling numeric key's value instead of the one the reader addressed.
+const JQ_STEP = /^(\.?)([^.[\]]+)/;
+
+// The first slice of a stage that is NOT supported syntax — the token the refusal names, so the
+// reader sees WHICH part of their filter is out of scope instead of the whole expression back. The
+// constructs with a spelling of their own come first; the trailing run-of-characters is the catch-all.
+function jqBadToken(s) {
+  const t = String(s).trim();
+  const m = /^(?:\.\.|\/\/|[A-Za-z_$][\w$-]*\s*\(|"[^"]*"?|'[^']*'?|\[[^\]]*\]?|[^\s,|]+)/.exec(t);
+  if (!m) return t.slice(0, 40);
+  // A bare word with something after it is refused for what FOLLOWS it, not for the word: naming
+  // `length` in `length > 2` would point at the one part of that filter this CLI does support.
+  const bare = m[0] !== t && /^[A-Za-z_$][\w$-]*$/.test(m[0]);
+  return (bare ? t : m[0]).slice(0, 40);
+}
+
+// One path stage → steps, or `{ bad }` for the first unsupported slice. normalizeJqPath still owns the
+// `[N]` → `.N` and leading-dot rewrites, so only `[]` brackets survive into the tokenizer.
+function parseJqPath(src) {
+  // `.a.[0]` is jq's own spelling of `.a[0]`; collapsing the pair keeps the scan below from reading it
+  // as the recursive descent the reader never typed.
+  const s = String(src).trim().replace(/\.\[/g, '[');
+  if (/^\.?$/.test(s)) return { segs: [] }; // '.' — identity: the whole value, not a field
+  const out = JQ_UNSUPPORTED.exec(s);
+  if (out) return { bad: out[0].slice(0, 40) };
+  const segs = [];
+  let rest = normalizeJqPath(s);
+  for (let first = true; rest; first = false) {
+    if (rest.startsWith('[]')) { segs.push(null); rest = rest.slice(2); continue; }
+    const m = JQ_STEP.exec(rest);
+    if (!m || (m[1] === '.') === first) return { bad: jqBadToken(rest) }; // a missing or doubled separator
+    segs.push(m[2]);
+    rest = rest.slice(m[0].length);
+  }
+  return { segs };
+}
+
+// The whole expression, parsed ONCE: the CLI needs the identity answer (and the refusal) before it
+// reads any body. `identity` is the old empty-segment rule — `.` / `..` select the whole value.
+function parseJqExpr(src) {
+  // `..` is identity only as the WHOLE expression (the spelling the CLI has always accepted for
+  // "re-dump everything"); inside a pipeline it is jq's recursive descent, which this evaluator
+  // refuses like any other construct it cannot run.
+  if (/^\s*\.+\s*$/.test(String(src))) return { terms: [{ segs: [], ops: [] }], identity: true };
+  const terms = [];
+  for (const term of String(src).split(',')) {
+    // An EMPTY slot (`.a,`, `,.a`, `.a,,.b` — what an unquoted multi-select leaves behind after the
+    // shell splits it) is a syntax error in jq and must be one here: parsed as a path it is the
+    // identity selector, which would answer a stray comma with the WHOLE document.
+    if (!term.trim()) return { bad: ',' };
+    const stages = term.split('|');
+    const head = parseJqPath(stages[0]);
+    if (head.bad) return { bad: head.bad };
+    const ops = [];
+    for (const stage of stages.slice(1)) {
+      const f = stage.trim();
+      if (f === 'keys' || f === 'length') { ops.push(f); continue; }
+      // A path filter must be spelled with its dot: a BARE word after a pipe is a jq function
+      // (`keys_unsorted`, `not`, `add`), and reading it as a key would answer a filter this CLI
+      // cannot run with a plausible-looking null — the exact failure the refusal exists to end.
+      if (!f.startsWith('.')) return { bad: jqBadToken(f || '|') };
+      const p = parseJqPath(f);
+      if (p.bad) return { bad: p.bad };
+      ops.push(p.segs);
+    }
+    terms.push({ segs: head.segs, ops });
+  }
+  return { terms, identity: terms.length === 1 && !terms[0].ops.length && !terms[0].segs.length };
+}
+
+// Does this expression select the WHOLE document? Answered by SHAPE, not by spelling: a path-filter
+// stage continues the walk (`.a | .b` ≡ `.a.b`, so `. | .[]` ≡ `.[]`), so flatten each term's path with
+// its path-filters and ask whether nothing is left but the bare root or a bare root `[]` — and every
+// term must be whole, since a multi-select of two whole terms answers with TWO copies of the document.
+// The syntactic test this replaced recognized only the literal `.` and `.[]`, so `. | .`, `.[] | .`,
+// `., .` … counted as narrowings and re-dumped the file the JSONL gate and the B2 guards exist to spare.
+function jqExprWhole(expr) {
+  if (!expr || expr.bad) return false;
+  if (expr.identity) return true;
+  return expr.terms.every((t) => {
+    if (t.ops.some((o) => typeof o === 'string')) return false; // `| keys` / `| length` answer something else
+    const flat = [].concat(t.segs, ...t.ops); // a `| .` stage contributes no segment at all
+    return flat.length === 0 || (flat.length === 1 && flat[0] === null);
+  });
+}
+
+// Where a walk died, in the spelling the reader typed (`a[].b`), plus what was addressable there.
+function jqMiss(what, where, cur) {
+  const at = where.length ? `at '${where.join('.')}'` : 'at top level';
+  return { ok: false, depth: where.length, diag: `json-slim: --jq: ${what} ${at}; ${jqAvailable(cur)}\n` };
+}
+
+// One `[]` iteration, shared by the path walk and by the per-element filter loop (`.a[] | .b` is the
+// same fan as `.a[].b`). `depth` is how many segments had already RESOLVED when the fan opened: 0 means
+// the iteration was over the whole document, which is the only shape M14's envelope rail may re-try
+// against another one. A HARD failure is the term's answer and stops the loop; jq's per-element `null`
+// rides on `miss` instead.
+function fanResult(items, where, depth, apply) {
+  const out = [];
+  let n = 0, dead = 0, note = null;
+  for (const item of items) {
+    const r = apply(item);
+    if (!r.ok) return r;
+    n++;
+    if (r.miss) { dead++; note = note || r.miss; }
+    // Concatenated, never spread: `push(...rows)` passes one argument per element and dies with a
+    // RangeError above ~125k of them — a size a spilled whale reaches by design.
+    if (r.fan && Array.isArray(r.value)) { for (const x of r.value) out.push(x); } else out.push(r.value);
+  }
+  const fan = { ok: true, value: out, where, depth, fan: true };
+  // NOTHING in the iteration resolved: the value is still jq's column of nulls, but the reader hears
+  // once which key was wrong instead of reading an empty stderr as "the field is genuinely null".
+  if (n && dead === n) { fan.allMissed = true; fan.miss = note; }
+  return fan;
+}
+
+function jqWalkPath(root, segs, where0, lenient) {
+  let cur = root;
+  const where = where0.slice();
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i];
+    if (seg === null) {
+      // `[]` FANS OUT: the rest of the path runs per element and the results come back as one array,
+      // concatenated when a later `[]` already produced arrays — jq's flat stream, not nesting. An
+      // object iterates to its values, as in jq.
+      if (!cur || typeof cur !== 'object') return jqMiss("'[]' needs an array or object", where, cur);
+      const rest = segs.slice(i + 1);
+      const inner = where.length ? where.slice(0, -1).concat(`${where[where.length - 1]}[]`) : ['[]'];
+      return fanResult(Array.isArray(cur) ? cur : Object.values(cur), inner, where.length,
+        (item) => jqWalkPath(item, rest, inner, true));
+    }
+    const next = cur == null ? undefined : (Array.isArray(cur) && /^\d+$/.test(seg) ? cur[Number(seg)] : cur[seg]);
+    // Inside a fan-out a missing key is jq's `null`, not a hard miss — but the diagnostic is CARRIED, so
+    // the caller can report it once for the whole iteration instead of once per row.
+    if (next === undefined) {
+      if (!lenient) return jqMiss(`'${seg}' not found`, where, cur);
+      return { ok: true, value: null, where: where.concat(seg), miss: jqMiss(`'${seg}' not found`, where, cur).diag };
+    }
+    where.push(seg);
+    cur = next;
+  }
+  return { ok: true, value: cur, where };
+}
+
+// jq's own definitions: `keys` sorts an object's names and yields an array's indices; `length` is the
+// element/key/codepoint count, a number's magnitude, and 0 for null (a boolean has none).
+function jqFilter(name, v, where) {
+  if (name === 'keys') {
+    if (Array.isArray(v)) return { ok: true, value: v.map((_, i) => i), where };
+    if (v && typeof v === 'object') return { ok: true, value: Object.keys(v).sort(), where };
+    return jqMiss("'keys' needs an array or object", where, v);
+  }
+  const n = Array.isArray(v) ? v.length
+    : v === null ? 0
+      : typeof v === 'object' ? Object.keys(v).length
+        : typeof v === 'string' ? [...v].length
+          : typeof v === 'number' ? Math.abs(v) : null;
+  if (n === null) return jqMiss("'length' is not defined", where, v);
+  return { ok: true, value: n, where };
+}
+
+// One expression against one document. A filter after a fan-out is applied PER ELEMENT (`.a[] | length`
+// is N lengths in jq, not the length of the collection), which also makes `.a[] | .b` ≡ `.a[].b`.
+function evalJqTerm(root, term) {
+  let r = jqWalkPath(root, term.segs, [], false);
+  for (const op of term.ops) {
+    if (!r.ok) return r;
+    const apply = (v, lenient) => (typeof op === 'string' ? jqFilter(op, v, r.where) : jqWalkPath(v, op, r.where, lenient));
+    if (!r.fan) { r = apply(r.value, false); continue; }
+    r = fanResult(r.value, r.where, r.depth, (item) => apply(item, true));
+  }
+  return r;
+}
+
+// Multi-select answers with ONE array (this CLI has a single stdout where jq emits a document per
+// term), a missed term contributing `null` in its slot and its own diagnostic. A term whose iteration
+// resolved NOTHING counts as missed too — it answered `[null, …]`, which is not an answer. `retryInner`
+// is M14's envelope question asked of the WHOLE expression: nothing resolved here, and every term died
+// at DEPTH 0 — on its first segment, or iterating the document itself ⇒ it was never about this one. A
+// term whose prefix DID resolve here (`.content[].foo`) stays: its real miss is `foo`, in this document.
+function evalJqExpr(root, expr) {
+  const rs = expr.terms.map((t) => evalJqTerm(root, t));
+  const one = rs.length === 1;
+  const dead = (r) => !r.ok || r.allMissed === true;
+  return {
+    ok: rs.some((r) => !dead(r)),
+    value: one ? (rs[0].ok && rs[0].value !== undefined ? rs[0].value : null) : rs.map((r) => (r.ok && r.value !== undefined ? r.value : null)),
+    diags: rs.filter(dead).map((r) => r.diag || r.miss).filter(Boolean),
+    retryInner: rs.every((r) => dead(r) && r.depth === 0),
+  };
+}
+
 // ================================================================ debug-log report (M12) ==
 
-// Aggregate the FND_MCP_SLIM_DEBUG JSONL log (M6/M8) into a ≤ 40-line plain-text summary (32 lines with
+// Aggregate the FND_MCP_SLIM_DEBUG JSONL log (M6/M8) into a ≤ 40-line plain-text summary (34 lines with
 // every optional section populated): totals — labelled with the collection level, which decides what they
 // can be compared to — counts per decision / reason / stage, the top HOOK tools by bytes saved (CLI runs
 // are keyed by file path, not tool name — they get one aggregate line), per-project subtotals, the count
 // of DISTINCT spill files left on disk, and the MISSED-WHALE list — `platform-overflow` events (the hook's
-// tag for a result the platform spilled to a tool-results file before the hook could see it) with NO later
-// `entry:"cli"` run over that spill path, i.e. the whale nobody ever compressed. Pure over an array of raw
-// lines (`opts.file`/`bytes` only decorate the header), so tests feed a synthetic log and the CLI feeds a
-// real one.
+// tag for a result the platform spilled to a tool-results file before the hook could see it) that no later
+// `entry:"cli"` run AND no `entry:"access"` read (hooks/spill-access.sh) ever touched, i.e. the whale
+// nobody ever opened at all. Pure over an array of raw lines (`opts.file`/`bytes` only decorate the
+// header), so tests feed a synthetic log and the CLI feeds a real one.
 const REPORT_TOP_TOOLS = 5;
 const REPORT_TOP_PROJECTS = 5;
 const REPORT_MISSED = 8;
@@ -2632,9 +2851,18 @@ function buildReport(lines, opts) {
     if (since != null && !(Date.parse(r.ts) >= since)) continue;
     events.push(r);
   }
+  // An `entry:"access"` line (hooks/spill-access.sh) is not a compression event: it measures that a
+  // tool READ a spill. It carries no bytes, no decision and no stages, so every aggregate below runs
+  // over `comp` and the access lines are only counted on their own line and paired as recoveries —
+  // a log written before the hook existed therefore reports exactly the numbers it always did.
+  const access = events.filter((e) => e.entry === 'access');
+  const comp = events.filter((e) => e.entry !== 'access');
   const out = [`json-slim: debug-log report — ${o.file || '(stdin)'}`];
   const stamps = events.map((e) => e.ts).filter(Boolean).sort();
+  // The header counts the whole window; every aggregate below counts `comp`. Naming the split on the
+  // line is what keeps the two populations reconcilable (`140 events` vs `100 events here came from…`).
   out.push(`  log: ${o.bytes != null ? `${o.bytes} B, ` : ''}${events.length} events` +
+    `${access.length ? ` (${access.length} spill read${access.length === 1 ? '' : 's'})` : ''}` +
     `${skipped ? ` (+${skipped} unparseable)` : ''}` +
     `${stamps.length ? `, ${stamps[0]} → ${stamps[stamps.length - 1]}` : ''}` +
     `${o.since ? `  [since ${o.since}]` : ''}`);
@@ -2642,6 +2870,16 @@ function buildReport(lines, opts) {
 
   const decisions = new Map(), reasons = new Map(), stages = new Map(), tools = new Map(), projects = new Map();
   const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+  // Access lines are the only population that can survive a window with no compression in it (a session
+  // that read spills and made no MCP call), and the body below is all bytes and decisions — rendering it
+  // over an empty `comp` printed a bare `decisions:` line and a headerless `projects:` block.
+  let spillReads = '';
+  if (access.length) {
+    const vias = new Map();
+    for (const e of access) bump(vias, e.via || 'other');
+    spillReads = `  spill reads (access hook): ${access.length}  (via: ${fmtCounts(vias)})`;
+  }
+  if (!comp.length) { out.push('  no compression events in range.', spillReads); return out.join('\n'); }
   // What an event actually saved — only a `compressed`/`stubbed` decision shrank anything, whatever a
   // passthrough happened to log as bytes_out. One `shrunkOf` predicate, shared by the totals and
   // `savedOf`; `savedOf` feeds the per-tool/project/cli aggregates and the recovery pairing below.
@@ -2657,7 +2895,9 @@ function buildReport(lines, opts) {
   // either — and they are counted on the cli line, because "how often did the guard fire" is the measure
   // of the re-run tax it exists to remove.
   const REFUSED_RERUN = new Set(['already-slim-out', 'no-gain-memo']);
-  const NOT_A_DUMP = new Set(['non-json', 'transform-error', 'error-shape', 'big-nonjsonl', 'stream-jq-refused', ...REFUSED_RERUN]);
+  // `jq-unsupported` joins them: that run never read a body at all — it refused an out-of-grammar
+  // filter on the argument line — so counting it as a re-dump would report context cost nobody paid.
+  const NOT_A_DUMP = new Set(['non-json', 'transform-error', 'error-shape', 'big-nonjsonl', 'stream-jq-refused', 'jq-unsupported', ...REFUSED_RERUN]);
   const flatOf = (e) => !savedOf(e) && !e.narrowed && !e.profile && !e.spill_out && !NOT_A_DUMP.has(e.reason);
   let bytesIn = 0, bytesOut = 0;
   const cli = { n: 0, in: 0, saved: 0, flat: 0, memo: 0 };
@@ -2666,7 +2906,7 @@ function buildReport(lines, opts) {
   // so this event's siblings are missing from the totals; ≥2 or absent (a pre-B4.11 line, which recorded
   // them even at 1) = the window is complete.
   let lvl1 = 0, lvlFull = 0;
-  for (const e of events) {
+  for (const e of comp) {
     const bi = Number(e.bytes_in) || 0;
     const bo = Number(e.bytes_out) || 0;
     // A `stubbed` event (M12b) shrank the payload as surely as a compressed one — the model got a
@@ -2731,25 +2971,54 @@ function buildReport(lines, opts) {
   out.push('  projects:');
   for (const [name, p] of topProjects) out.push(`    ${name}: ${p.n} event${p.n === 1 ? '' : 's'}, ${p.saved} B saved`);
 
+  if (spillReads) out.push(spillReads);
+
   // Missed whales: pair each platform-overflow event with a LATER cli run over the same spill path
   // (the M7 instruction being followed). Basenames are compared too, so an equivalent path spelling
   // still pairs. Unpaired = the compressor never ran on that whale — the two-lever evidence number.
   // Content addressing does NOT reach this count: a platform-overflow `spill` is the PLATFORM's own
   // tool-results file, not one of our hash names, so no two of these events share a path.
-  const cliRuns = events.filter((e) => e.entry === 'cli' && e.tool)
-    .map((e) => ({ at: Date.parse(e.ts) || 0, tool: String(e.tool), flat: flatOf(e) }));
-  // The cli runs that could be the recovery for this event: same spill path, not earlier. Empty = nobody
-  // ran the compressor on it (an event whose path we could not extract is not provably handled either).
+  // A `jq-unsupported` refusal is not a recovery either: it read no body and printed nothing, so
+  // pairing it with a whale would drop that whale out of the count this number exists to give.
+  const cliRuns = comp.filter((e) => e.entry === 'cli' && e.tool && e.reason !== 'jq-unsupported')
+    .map((e) => ({ at: Date.parse(e.ts) || 0, tool: String(e.tool), via: 'json-slim', flat: flatOf(e) }));
+  // …and a spill READ recovers the whale just as well: three targeted `jq` queries over a
+  // tool-results file is the right move, and counting it as a miss is what this line was reporting
+  // before the access hook existed. `via` names which tool got there, never a byte count.
+  // …with one exception: `via:"named"` is the hook's mark for a command that only touched the NAME
+  // (`rm`/`mv`/`ls`/`echo` …). Those bytes never entered a context, so pairing one would clear a whale
+  // from the very count this line exists to give — a post-session `rm <spill>` would report full recovery.
+  const accessRuns = access.filter((e) => e.spill && e.via !== 'named')
+    .map((e) => ({ at: Date.parse(e.ts) || 0, tool: String(e.spill), via: String(e.via || 'other'), flat: false }));
+  const runs = cliRuns.concat(accessRuns);
+  // Indexed by basename once, and memoized per (event ts × path): access lines are the most frequent
+  // line the log holds and `recoveries` is called ~3× per overflow/stub, so the linear scan this used to
+  // be turned a 5 MB log into a 12 s `--report`. A path equal to `spill` shares its basename, so the
+  // bucket subsumes the exact-path test.
+  const runsByBase = new Map();
+  for (const c of runs) {
+    const b = path.basename(c.tool);
+    const bucket = runsByBase.get(b);
+    if (bucket) bucket.push(c); else runsByBase.set(b, [c]);
+  }
+  const recCache = new Map();
+  // The runs that could be the recovery for this event: same spill path, not earlier. Empty = nobody
+  // read it (an event whose path we could not extract is not provably handled either).
   const recoveries = (e) => {
     const spill = e.spill ? String(e.spill) : null;
     if (!spill) return [];
     const at = Date.parse(e.ts) || 0;
-    return cliRuns.filter((c) => c.at >= at && (c.tool === spill || path.basename(c.tool) === path.basename(spill)));
+    const key = `${at}|${spill}`;
+    const hit = recCache.get(key);
+    if (hit) return hit;
+    const found = (runsByBase.get(path.basename(spill)) || []).filter((c) => c.at >= at);
+    recCache.set(key, found);
+    return found;
   };
   const unpaired = (e) => recoveries(e).length === 0;
-  const overflows = events.filter((e) => e.reason === 'platform-overflow');
+  const overflows = comp.filter((e) => e.reason === 'platform-overflow');
   const missed = overflows.filter(unpaired);
-  out.push(`  missed whales (platform-overflow with no later json-slim run): ${missed.length} of ${overflows.length}`);
+  out.push(`  missed whales (platform-overflow never read by any tool): ${missed.length} of ${overflows.length}`);
   for (const e of missed.slice(0, REPORT_MISSED)) out.push(`    ${e.ts || '(no ts)'}  ${e.tool || '(unknown tool)'}  →  ${e.spill || '(no path)'}`);
   if (missed.length > REPORT_MISSED) out.push(`    …(+${missed.length - REPORT_MISSED} more)`);
   // M12b: stubbed results are NOT missed whales — the hook already replaced the payload with a stub
@@ -2758,14 +3027,22 @@ function buildReport(lines, opts) {
   // `spill` IS one of our content-addressed names, so two identical stubbed payloads name the same file
   // and one CLI run pairs both (that much optimism is real here), and a run that reduced nothing put the
   // payload into context anyway — reported separately, or "0 unfollowed" would read as full compliance.
-  const stubbed = events.filter((e) => e.decision === 'stubbed');
+  const stubbed = comp.filter((e) => e.decision === 'stubbed');
   if (stubbed.length) {
     const stubReasons = new Map();
     for (const e of stubbed) bump(stubReasons, e.reason || 'unknown');
     const flatFollowUp = stubbed.filter((e) => recoveries(e).some((c) => c.flat)).length;
-    out.push(`  stubbed (spill-and-stub guard): ${stubbed.length} (${fmtCounts(stubReasons)}), ${stubbed.filter(unpaired).length} with no later json-slim run` +
+    out.push(`  stubbed (spill-and-stub guard): ${stubbed.length} (${fmtCounts(stubReasons)}), ${stubbed.filter(unpaired).length} never read` +
       `${flatFollowUp ? `, ${flatFollowUp} whose run gained nothing` : ''}`);
   }
+  // Which tool actually got to each whale — the follow-up question the missed count raises, and the
+  // one the access hook exists to answer. Each whale counts once per DISTINCT via among its
+  // recoveries, so two jq reads of one spill are one jq recovery, not two.
+  const recoveryVias = new Map();
+  for (const e of overflows.concat(stubbed)) {
+    for (const v of new Set(recoveries(e).map((c) => c.via))) bump(recoveryVias, v);
+  }
+  if (recoveryVias.size) out.push(`  whale recoveries via: ${fmtCounts(recoveryVias)}`);
   if (spills.events) {
     out.push(`  spill files: ${spills.paths.size} named by ${spills.events} event${spills.events === 1 ? '' : 's'}` +
       `${spills.capped ? ` (+ up to ${spills.capped} more the capped lines did not name)` : ''}`);
@@ -2776,7 +3053,7 @@ function buildReport(lines, opts) {
   // keeps it even when a foreign `size-gate` line from another project shares the file.
   if (lvl1) {
     out.push('  note: sub-gate results (≤4 KB, reason size-gate) are logged only at FND_MCP_SLIM_DEBUG=2 — ' +
-      `${lvl1} of ${events.length} events here came from level 1, so totals and call counts cover logged events.`);
+      `${lvl1} of ${comp.length} events here came from level 1, so totals and call counts cover logged events.`);
   }
   return out.join('\n');
 }
@@ -2785,7 +3062,8 @@ module.exports = {
   slim, crush, crushValue, parseJsonl, unwrapFence, findOpeningFence,
   blockText, soleBlockText, envelopeInner, // M14: the pure text-block envelope rail (purity gate + inner payload)
   detectJsx, compressJsx, foldSiblings, // M13: the Figma design-context (jsx) stage
-  normalizeJqPath, jqAvailable, buildReport, shapeHint,
+  normalizeJqPath, jqAvailable, parseJqExpr, jqExprWhole, evalJqExpr, JQ_GRAMMAR_HINT, // M15: the supported --jq grammar + its evaluator
+  buildReport, shapeHint,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
   sweepSpills, spillTtlHours, spillRoot, writeSpill,
@@ -2818,17 +3096,20 @@ if (require.main === module) {
   const opt = (f) => { const i = args.indexOf(f); return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null; };
   const fileArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--jq' && args[i - 1] !== '--report' && args[i - 1] !== '--since');
   const jq = opt('--jq');
-  // Segments of the --jq path (simple dot-walk, jq-ish spellings normalized — M12). An empty result —
-  // `.` / `..` / leading/trailing dots — is the IDENTITY selector: it addresses the WHOLE value, not a
-  // single row/field. On a JSONL file that means "the whole file", which must PROFILE like a no-jq run,
-  // never crush the reshaped array.
-  const jqSegs = jq != null ? normalizeJqPath(jq).split('.').filter(Boolean) : null;
-  const jqIdentity = jq != null && jqSegs.length === 0;
-  // A real NARROWING (`--jq <dot.path>`, not the identity selector, which re-dumps the whole value):
-  // the run answers a sub-path instead of the file. Hoisted above the guards below because narrowing is
-  // the documented recovery AFTER a decline — the one thing they must never refuse. Read further down by
-  // the handback gates and the debug line.
-  const narrowed = jq != null && !jqIdentity;
+  // The --jq expression, parsed once (see the grammar above). An empty segment list — `.` / `..` —
+  // is the IDENTITY selector: it addresses the WHOLE value, not a single row/field. On a JSONL file
+  // that means "the whole file", which must PROFILE like a no-jq run, never crush the reshaped array.
+  // An unsupported expression is neither, and is refused below before any body is read.
+  const jqExpr = jq ? parseJqExpr(jq) : null;
+  const jqIdentity = jqExpr !== null && jqExpr.identity === true;
+  // The OTHER spellings of "the whole file" — `.[]`, `. | .`, `., .` … (see jqExprWhole for the rule).
+  const jqWhole = jqExpr !== null && jqExprWhole(jqExpr);
+  // A real NARROWING (`--jq <jq-path>`, not a whole-document selector, which re-dumps the value it was
+  // given): the run answers a sub-path instead of the file. Hoisted above the guards below because
+  // narrowing is the documented recovery AFTER a decline — the one thing they must never refuse. Read
+  // further down by the handback gates and the debug line, so a whole-document re-dump is counted as the
+  // re-dump it is instead of hiding behind `narrowed:true`.
+  const narrowed = jqExpr !== null && !jqWhole;
 
   // --report [logfile] [--since <ISO>] (M12): aggregate the FND_MCP_SLIM_DEBUG log instead of
   // compressing anything. Runs before every input path — it reads the log, not a payload — and logs
@@ -2847,6 +3128,19 @@ if (require.main === module) {
     }
     process.stdout.write(buildReport(text.split('\n'), { file: logPath, bytes, since }) + '\n');
     return;
+  }
+
+  // An expression outside the supported grammar is a USAGE error, not a miss: answering it with the
+  // M12 `null` told the reader their jq had RUN and found nothing, so they re-ran with guessed plain
+  // paths (3–7 CLI runs per question in the field). Empty stdout, one named diagnostic, exit 2 —
+  // before any body is read, so no pipeline runs and nothing is spilled. Its own debug reason keeps
+  // `--report` from counting a refusal that printed no body as a run that "gained nothing".
+  if (jqExpr && jqExpr.bad) {
+    process.stderr.write(`json-slim: --jq: unsupported jq syntax near '${jqExpr.bad}' — supported: ${JQ_GRAMMAR_HINT}, ` +
+      `quoted as one argument ('.a, .b'). For full jq run:\n` +
+      `  node json-slim.cjs <file> --jq '<supported-path>' | jq '<rest of your expression>'\n`);
+    debugLog({ entry: 'cli', tool: fileArg || null, decision: 'passthrough', reason: 'jq-unsupported', bytes_in: 0, bytes_out: 0, pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, null);
+    process.exit(2);
   }
 
   const cfg = {};
@@ -2946,7 +3240,7 @@ if (require.main === module) {
   }
   // What arrived, kept because the `--jq` walk below REPLACES `raw` with a re-serialization of the
   // selected value. For a real narrowing that re-serialization IS what the stages consume, so it is the
-  // right recovery copy — but an IDENTITY selector narrows nothing while still re-serializing, and a
+  // right recovery copy — but a WHOLE-document selector narrows nothing while still re-serializing, and a
   // piped JSONL stream then collapses into one array line: the copy the run calls "the original" would
   // hold none of the line boundaries its own guidance tells the reader to address.
   const stdinBytes = raw;
@@ -2971,10 +3265,11 @@ if (require.main === module) {
   // fails it on line 1 and slims below; a truncated/prose file also declines and falls to the non-json
   // handback. Detecting BEFORE slim keeps crush from ever running on a JSONL file — so no fnd-crush-*
   // and no fnd-slim-out spill is ever written for it. STDIN never profiles (no on-disk original to
-  // point the guidance at) — it keeps flowing through the pipeline below. `--jq .` (identity) selects
-  // the WHOLE file, so it counts as "no narrowing" here and profiles too — otherwise the identity walk
-  // leaves the whole reshaped array and slim() would crush + spill it (a JSONL body, contract-forbidden).
-  if (fileArg && (!jq || jqIdentity)) {
+  // point the guidance at) — it keeps flowing through the pipeline below. EVERY spelling that selects the
+  // whole document (`jqWhole`: `.`, `.[]`, `. | .`, `., .` …) counts as "no narrowing" here and profiles
+  // too — otherwise the walk leaves the whole reshaped array and slim() would crush + spill it (a JSONL
+  // body, contract-forbidden), or hand a multi-select's N copies of it straight back.
+  if (fileArg && (!jq || jqWhole)) {
     const bytes = Buffer.byteLength(raw, 'utf8');
     let feed = null, offset = 0;
     if (parseJsonl(raw)) { feed = raw.split('\n'); }
@@ -3013,7 +3308,7 @@ if (require.main === module) {
     }
   }
 
-  // --jq <dot.path>: narrow to a sub-path before slimming (simple key/index walk, no jq dependency).
+  // --jq <jq-path>: narrow before slimming — the supported-grammar evaluator above, no jq dependency.
   if (jq) {
     let v;
     try { v = JSON.parse(stripBom(raw)); } catch (e) {
@@ -3022,7 +3317,7 @@ if (require.main === module) {
       if (rows) v = rows;
       else {
         // M11: a fenced JSON/JSONL payload (tool prose + ```json…```) — unwrap the dominant fence and
-        // narrow into its body so `--jq <dot.path>` works on the ORIGINAL wrapper file too, not only the
+        // narrow into its body so `--jq <jq-path>` works on the ORIGINAL wrapper file too, not only the
         // Gate-A spill. Without this, `--jq` on a fenced whale errored on the prose line.
         const f = DEFAULTS.fence ? unwrapFence(raw, cfg) : null;
         let fv;
@@ -3031,37 +3326,23 @@ if (require.main === module) {
         else { process.stderr.write('json-slim: input is not valid JSON: ' + e.message + '\n'); process.exit(1); }
       }
     }
-    // Walk the normalized segments. stdout stays `null` for a path that doesn't resolve (machine-
-    // friendly, unchanged), but a MISSING segment now says so on stderr — the deepest location that
-    // did resolve plus what is addressable there, so a typo is distinguishable from a real null (M12).
-    // A value that genuinely IS null prints nothing. The diagnostic is BUILT here and written by the
-    // caller: which of the two documents (envelope or inner payload) the reader needs to hear about is
-    // only known after the fallback below has had its turn.
-    const walk = (root) => {
-      let cur = root;
-      const walked = [];
-      for (const seg of jqSegs) {
-        const next = cur == null ? undefined : (Array.isArray(cur) && /^\d+$/.test(seg) ? cur[Number(seg)] : cur[seg]);
-        if (next === undefined) {
-          const where = walked.length ? `at '${walked.join('.')}'` : 'at top level';
-          return { ok: false, depth: walked.length, diag: `json-slim: --jq: '${seg}' not found ${where}; ${jqAvailable(cur)}\n` };
-        }
-        walked.push(seg);
-        cur = next;
-      }
-      return { ok: true, value: cur };
-    };
+    // Evaluate the expression (parsed with the args above). stdout stays `null` for a path that
+    // doesn't resolve (machine-friendly, unchanged), but a MISSING segment says so on stderr — the
+    // deepest location that did resolve plus what is addressable there, so a typo is distinguishable
+    // from a real null (M12). A value that genuinely IS null prints nothing. The diagnostics are BUILT
+    // by the evaluator and written by the caller: which of the two documents (envelope or inner
+    // payload) the reader needs to hear about is only known after the fallback below has had its turn.
     // M14 — the ENVELOPE is walked first, always: `--jq 0.text` addresses the transport on purpose and
     // must keep working. Only a miss on the FIRST segment says the path was never about this document
     // (a deeper miss IS about it — the prefix resolved here), and only then is the pure text-block
-    // envelope reopened and the WHOLE walk re-run against the payload inside it. A double miss reports
-    // the INNER location: `length: 1` describes the wrapper the reader did not ask about, while the
-    // payload's key list is what tells them which spelling to try next.
-    let r = walk(v);
-    if (!r.ok && r.depth === 0 && envelopeRail) {
+    // envelope reopened and the WHOLE EXPRESSION re-run against the payload inside it. A double miss
+    // reports the INNER location: `length: 1` describes the wrapper the reader did not ask about,
+    // while the payload's key list is what tells them which spelling to try next.
+    let r = evalJqExpr(v, jqExpr);
+    if (!r.ok && r.retryInner && envelopeRail) {
       const env = envelopeInner(v, cfg);
       if (env) {
-        const innerWalk = walk(env.value);
+        const innerWalk = evalJqExpr(env.value, jqExpr);
         process.stderr.write(`${ENVELOPE_NOTE} — the path ${innerWalk.ok ? 'resolved inside' : 'was re-tried against'} the inner payload.\n`);
         r = innerWalk;
       } else if (fileArg) {
@@ -3074,8 +3355,8 @@ if (require.main === module) {
         if (innerText !== null && parseJsonl(innerText) && envelopeJsonlProfile(innerText, Buffer.byteLength(raw, 'utf8'))) return;
       }
     }
-    if (!r.ok) process.stderr.write(r.diag);
-    raw = JSON.stringify(r.ok && r.value !== undefined ? r.value : null); // a missed path yields null, never a crash
+    for (const d of r.diags) process.stderr.write(d); // one per missed term — a multi-select misses per slot
+    raw = JSON.stringify(r.value === undefined ? null : r.value); // a missed path yields null, never a crash
     // The rail has had its ONE turn on this run — slim() must not take a second. A narrowed value is
     // the answer to a path the caller wrote, and the two spellings that address the TRANSPORT resolve
     // on the envelope itself: without this, `--jq 0` (the block) came back as the unwrapped, noise-
@@ -3083,6 +3364,16 @@ if (require.main === module) {
     // selector meaning two things depending on the shape underneath. A path that resolved through the
     // fallback above is already INSIDE the payload, so there is nothing left for the rail to unwrap.
     cfg.envelope = false;
+    // An ENUMERATION — `| keys`, or a fan-out that answered with SCALARS — must come back whole: the
+    // crush's string-array sampling would hand back a subset as if it were the list (a 21-key Jira
+    // `fields` came back as 14 names, 40 comment dates as 15, no marker). Enumerations are cheap — a
+    // list of names is a few KB — so they opt out of row sampling. Decided on the RESULT, not on the
+    // spelling: `[]` anywhere in the expression also describes `.comments[]`, an array of OBJECTS and
+    // the whale query the stub itself advertises, which exempted itself from the crush and degraded
+    // an 832 KB answer to 0.0 % and a path handback. Arrays of objects crush like any other rows.
+    const enumerated = jqExpr.terms.some((t) => t.ops[t.ops.length - 1] === 'keys')
+      || (Array.isArray(r.value) && r.value.every((x) => x === null || typeof x !== 'object'));
+    if (enumerated) cfg.minItemsToAnalyze = Infinity;
   }
 
   // The same rail slimText gives the hook: a stage fault degrades to the path handback below instead
@@ -3099,11 +3390,12 @@ if (require.main === module) {
   // original. Spill it here, before anything is printed: content-addressed, so a re-run of the same
   // payload reuses one file. Under a NARROWING `--jq` the "original" is the narrowed value the stages
   // consumed — that is the complete undo for the body being printed, and a far smaller one than the whole
-  // stream; an identity selector narrowed nothing, so the piped bytes are the copy (see stdinBytes).
+  // stream; a whole-document selector narrowed nothing, so the piped bytes are the copy (see stdinBytes)
+  // — the same `jqWhole` the stderr label below reads, or the copy and its name would disagree.
   // A passthrough loses nothing and must never spill. `--no-spill` is the explicit opt-out.
   let stdinOriginal = null;
   if (!fileArg && res.wasModified && res.bytesOut < res.bytesIn && cfg.enableMarker !== false) {
-    const s = writeSpill(cfg.spillDir, 'fnd-mcp-slim-', jqIdentity ? stdinBytes : raw);
+    const s = writeSpill(cfg.spillDir, 'fnd-mcp-slim-', jqWhole ? stdinBytes : raw);
     if (s) { noteSpill(cfg, s.path, s.created); stdinOriginal = s.path; }
     else {
       // No recovery copy → hand the original back verbatim rather than a lossy body nothing can undo
@@ -3160,7 +3452,7 @@ if (require.main === module) {
     // passthrough by contract, so a re-run has nothing to shrink either.
     if (fileArg && !compressed && jq == null && !res.wasModified) {
       process.stderr.write(`json-slim: no reduction possible — ${res.bytesIn} B printed unchanged; this is a deliberate decline, not an error. ` +
-        `Do NOT re-run json-slim on this file; read it directly or narrow with --jq <dot.path>.\n`);
+        `Do NOT re-run json-slim on this file; read it directly or narrow with --jq <jq-path>.\n`);
       // …and remember it, so the NEXT run answers in one line instead of re-printing this body. Stamped
       // here, after the delivery (the whaleGuideStamp rule), never at the decision. Under the floor a
       // refusal would save too little to be worth remembering; under a pipeline flag the decline belongs

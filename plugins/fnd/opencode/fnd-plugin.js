@@ -5,7 +5,9 @@
 // from hooks/*.cjs|sh, which stay single-copy across all four hosts.
 //
 //   chat.message         → hooks/user-prompt.cjs   (UserPromptSubmit) + first-message session context
-//   tool.execute.before  → hooks/no-ai-attribution.sh + hooks/no-verify-bypass.sh (PreToolUse: Bash)
+//   tool.execute.before  → hooks/no-ai-attribution.sh + hooks/no-verify-bypass.sh (PreToolUse: Bash),
+//                          then hooks/spill-access.sh for the bash / read / grep tools (measurement
+//                          only — see recordSpillAccess)
 //   tool.execute.after   → hooks/mcp-slim.cjs      (PostToolUse: mcp__*), rewriting output.output in place
 //   event                → session bookkeeping only
 //
@@ -107,6 +109,31 @@ function warn(msg) {
 function claudeToolName(tool) {
   const at = tool.indexOf('_');
   return `mcp__${tool.slice(0, at)}__${tool.slice(at + 1)}`;
+}
+
+// hooks/spill-access.sh records that SOME tool read an MCP spill, so `json-slim --report` can pair a
+// platform-overflow whale with the read that recovered it. Measurement only: it never blocks and its
+// status is ignored. OpenCode's read/grep tools DO carry a path argument, so this host records the
+// file-reader side too — the arg spellings are unpinned, hence the small candidate list.
+const SPILL_ARGS = {
+  read: ['filePath', 'file_path', 'path'],
+  grep: ['path', 'filePath', 'file_path'],
+};
+
+async function recordSpillAccess(claudeTool, args, cwd) {
+  try {
+    if (process.env.FND_SPILL_ACCESS === '0') return;
+    let toolInput;
+    if (claudeTool === 'Bash') {
+      toolInput = { command: args.command };
+    } else {
+      const key = SPILL_ARGS[claudeTool === 'Read' ? 'read' : 'grep'].find((k) => typeof args[k] === 'string' && args[k]);
+      if (!key) return;
+      toolInput = claudeTool === 'Grep' ? { pattern: String(args.pattern || ''), path: args[key] } : { file_path: args[key] };
+    }
+    await runScript('bash', [path.join(HOOKS, 'spill-access.sh')],
+      JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: claudeTool, tool_input: toolInput, cwd }), GUARD_TIMEOUT_MS);
+  } catch (_) {} // a measurement hook may never affect the call it measures
 }
 
 // Run a hook script to completion. Never rejects: the caller decides what a failure means,
@@ -286,8 +313,12 @@ export const FndPlugin = async (ctx = {}) => {
 
     'tool.execute.before': async (input, output) => {
       const tool = (input && input.tool) || (output && output.tool);
-      if (tool !== 'bash') return;
       const args = (output && output.args) || (input && input.args) || {};
+      if (tool === 'read' || tool === 'grep') {
+        await recordSpillAccess(tool === 'read' ? 'Read' : 'Grep', args, cwd);
+        return;
+      }
+      if (tool !== 'bash') return;
       const command = args.command;
       if (typeof command !== 'string' || !command) return;
 
@@ -317,6 +348,8 @@ export const FndPlugin = async (ctx = {}) => {
           );
         }
       }
+      // After the guards, never before: a blocked command was not run, so it read no spill.
+      await recordSpillAccess('Bash', args, cwd);
     },
 
     'tool.execute.after': async (input, output) => {

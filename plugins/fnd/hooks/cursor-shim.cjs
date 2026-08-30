@@ -23,7 +23,10 @@
 //                           wiring does.
 //   beforeSubmitPrompt    → hooks/user-prompt.cjs (context monitor + large-JSON guard).
 //   subagentStart         → hooks/subagent-conventions.sh.
-//   beforeShellExecution  → hooks/no-ai-attribution.sh + hooks/no-verify-bypass.sh.
+//   beforeShellExecution  → hooks/no-ai-attribution.sh + hooks/no-verify-bypass.sh, then
+//                           hooks/spill-access.sh (measurement only, status ignored). Cursor
+//                           documents no read-file event, so a spill this host's file reader
+//                           opens is not recorded — shell reads are the whole coverage here.
 //   afterMCPExecution     → hooks/mcp-slim.cjs, its compressed/stubbed result handed back
 //                           as `updated_mcp_tool_output` — Cursor rewrites the MCP result
 //                           in place, the same net effect as Claude Code's updatedToolOutput.
@@ -69,7 +72,9 @@
 //
 // Env: reads no switch of its own. FND_CTX_MONITOR / FND_PROMPT_JSON / FND_MCP_SLIM are
 // re-checked here so a shim invoked directly gates like the wiring does (hooks-cursor.json
-// short-circuits first, so a disabled half spawns no node at all); FND_LEAN is honored by
+// short-circuits first, so a disabled half spawns no node at all). FND_SPILL_ACCESS is checked
+// HERE only: its hook rides inside beforeShellExecution, whose wiring must stay ungated because
+// the commit guard shares the event; FND_LEAN is honored by
 // subagent-conventions.sh, but NOT at sessionStart on this host — the lean-code convention
 // arrives as rules/fnd-lean-code.mdc there (README "Environment switches").
 'use strict';
@@ -322,6 +327,10 @@ function beforeShellExecution(payload) {
       );
     }
   }
+  // Measurement only (spill-access.sh records that a tool read an MCP spill, so json-slim --report
+  // can pair a whale with the read that recovered it): it never denies, so its status is ignored and
+  // it runs only after the guards have let the command through.
+  if (process.env.FND_SPILL_ACCESS !== '0') runScript('spill-access.sh', stdin);
   return null;
 }
 
