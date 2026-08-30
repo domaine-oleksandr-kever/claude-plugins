@@ -50,14 +50,18 @@
 #             block is the whole output and stops the monitor dead (no band state
 #             recorded for a prompt that never ran), each half rides its own switch,
 #             one half throwing neither silences nor forges the other, always exit 0
-#   D cases — hooks/scratch-path-guard.cjs, the PreToolUse screenshot-path deny: a relative or
-#             absolute path into the project working tree is denied with a reason naming the
-#             task-workspace tmp/ path to use instead (a remediation this guard itself allows and
-#             the screenshot servers accept), as is a playwright call with NO filename (its
-#             default output dir is <cwd>/.playwright-mcp, inside the tree) — while a `.claude/`
-#             path, any tmp/ dir, an out-of-tree path, an inline chrome-devtools screenshot,
-#             FND_SCRATCH_GUARD=0 and malformed stdin all pass through; plus the deny ENVELOPE
-#             shape, symlinked prefixes, the wiring gate and the matcher's tool coverage
+#   D cases — hooks/scratch-path-guard.cjs, the PreToolUse screenshot-path deny: a path that
+#             resolves into the project working tree outside a first-segment `.claude/` is denied
+#             with a reason naming the ABSOLUTE task-workspace tmp/ path to use instead (a
+#             remediation this guard itself allows and the screenshot servers accept), as is a
+#             per-user playwright call with NO filename (its default output dir is
+#             <cwd>/.playwright-mcp, inside the tree) — while the BUNDLED playwright, whose
+#             manifest pins --output-dir .claude/fnd-tmp/playwright, is allowed both a bare
+#             filename and no filename at all, and a `.claude/` path, an out-of-tree path, an
+#             inline chrome-devtools screenshot, FND_SCRATCH_GUARD=0 and malformed stdin all pass
+#             through; plus the deny ENVELOPE shape, symlinked prefixes, the wiring gate, the
+#             matcher's tool coverage, the three-way output-dir literal pin, and the
+#             `.git/info/exclude` stamp the bundled allow owes and a deny does not
 #   A cases — hooks/spill-access.sh, the PreToolUse spill-read recorder: a Bash/Read/Grep call
 #             touching one of the two spill families appends ONE `entry:"access"` JSONL line per
 #             distinct path to the compressor's own debug log (via = the reader that did it), while
@@ -351,8 +355,8 @@ if [ -s "$TMP/node.log" ]; then ok; else bad M6-default "node did not run by def
 # here; only the file speaks, and the control run without the file must compress or this proves
 # nothing.
 MSE="$TMP/slim-envfile"; mkdir -p "$MSE/.claude"
-# stdin comes from a FILE, not a pipe: the kill switch exits before reading stdin, and a pipe
-# would leave the writer with EPIPE noise that has nothing to do with the assertion.
+# stdin comes from a FILE, not a pipe: what this case measures is the emitted output, and a pipe
+# would put the writer's own EPIPE noise in reach of an assertion that has nothing to do with it.
 jq -n --rawfile t "$JIRA" \
   '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}' \
   > "$MSE/in.json"
@@ -408,6 +412,9 @@ if [ -n "$sp" ] && node -e 'const fs=require("fs");process.exit(/�/.test(fs.re
 # The hook calls sweepSpills() AFTER emitting; a dedicated spill dir per scenario keeps the
 # throttle-marker state controlled (M1–M11's $MSD already carries a fresh marker). `touch -t`
 # ages a seeded spill past the 24 h TTL. `msin` = the M1 content-array input for a real spill.
+# M16b–M16e cover the sweep's SECOND target: the bundled playwright server's output dir, which
+# lives in the PROJECT (the event's cwd), not in the shared spill dir. M16f pins that neither prune
+# is gated on the COMPRESSION switch.
 msin="$(jq -n --rawfile t "$JIRA" \
   '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}')"
 sweep_body() { printf '%s' "$1" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | sed 's/<<full=[^>]*>>//g'; }
@@ -457,6 +464,77 @@ stale="$SWD/fnd-mcp-slim-STALE.json"; : > "$stale"; touch -t 200001010000 "$stal
 printf '%s' "$msin" | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
 if [ -f "$dbg" ] && [ -f "$dbg1" ]; then ok; else bad M16-debug-kept "sweep deleted the debug log"; fi
 if [ ! -f "$stale" ]; then ok; else bad M16-stale-swept "sweep missed a stale spill next to the debug log"; fi
+
+# M16b: the playwright output dir rides the same TTL. It is reached through the EVENT's cwd — the
+# exit-time sweep runs outside run(), so a hook that forgot to stash that cwd would sweep the spill
+# dir and leave the checkout's screenshots, .yml snapshot dumps and console logs piling up (374
+# untracked files, 29 MB, in one client theme before the dir moved under `.claude/`). Nested,
+# because playwright makes per-session subdirs.
+SWD="$TMP/sweep-m16b"; mkdir -p "$SWD"
+PWPROJ="$TMP/pwproj"; mkdir -p "$PWPROJ/.claude/fnd-tmp/playwright/stale"
+pwold="$PWPROJ/.claude/fnd-tmp/playwright/stale/page-old.png"; : > "$pwold"; touch -t 200001010000 "$pwold"
+pwnew="$PWPROJ/.claude/fnd-tmp/playwright/page-new.png"; : > "$pwnew"
+printf '%s' "$(jq -c --arg cwd "$PWPROJ" '. + {cwd:$cwd}' <<<"$msin")" \
+  | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
+if [ ! -f "$pwold" ]; then ok; else bad M16b-stale-swept "a stale playwright artefact survived the sweep"; fi
+if [ -f "$pwnew" ]; then ok; else bad M16b-fresh-kept "a fresh playwright artefact was swept"; fi
+if [ -d "$PWPROJ/.claude/fnd-tmp/playwright/stale" ]; then ok; else bad M16b-dir-kept "the sweep removed a directory"; fi
+
+# M16c: once that dir exists the sweep stamps it into `.git/info/exclude` — local-only, so the
+# client's tracked `.gitignore` is never edited — and appending is idempotent. Without the stamp
+# the scratch dir shows up in every `git status` and any bulk `git add`.
+GPROJ="$TMP/pwgit"; mkdir -p "$GPROJ/.claude/fnd-tmp/playwright"
+git -C "$GPROJ" init -q 2>/dev/null
+: > "$GPROJ/.claude/fnd-tmp/playwright/page.png"
+SWD="$TMP/sweep-m16c"; mkdir -p "$SWD"
+printf '%s' "$(jq -c --arg cwd "$GPROJ" '. + {cwd:$cwd}' <<<"$msin")" \
+  | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
+assert_eq M16c-excluded "$(grep -c '^/\.claude/fnd-tmp/$' "$GPROJ/.git/info/exclude" 2>/dev/null | tr -d ' ')" 1
+SWD="$TMP/sweep-m16c2"; mkdir -p "$SWD"   # fresh dir: the 10-min throttle would skip a second sweep
+printf '%s' "$(jq -c --arg cwd "$GPROJ" '. + {cwd:$cwd}' <<<"$msin")" \
+  | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
+assert_eq M16c-idempotent "$(grep -c '^/\.claude/fnd-tmp/$' "$GPROJ/.git/info/exclude" 2>/dev/null | tr -d ' ')" 1
+
+# M16d: a repo that ALREADY ignores `.claude` needs no stamp — `git check-ignore` decides, so the
+# guard never appends a rule the repo has covered its own way.
+IPROJ="$TMP/pwignored"; mkdir -p "$IPROJ/.claude/fnd-tmp/playwright"
+git -C "$IPROJ" init -q 2>/dev/null
+printf '.claude\n' > "$IPROJ/.gitignore"
+: > "$IPROJ/.claude/fnd-tmp/playwright/page.png"
+SWD="$TMP/sweep-m16d"; mkdir -p "$SWD"
+printf '%s' "$(jq -c --arg cwd "$IPROJ" '. + {cwd:$cwd}' <<<"$msin")" \
+  | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" >/dev/null 2>&1
+if grep -q 'fnd-tmp' "$IPROJ/.git/info/exclude" 2>/dev/null; then
+  bad M16d-no-stamp "stamped an exclude line into a repo that already ignores .claude"; else ok; fi
+
+# M16e: outside a git repo there is nothing to exclude from — the sweep still prunes, still emits
+# the compressed body, still exits 0 (a sweep may never influence what the model sees).
+NPROJ="$TMP/pwnogit"; mkdir -p "$NPROJ/.claude/fnd-tmp/playwright"
+npold="$NPROJ/.claude/fnd-tmp/playwright/page-old.png"; : > "$npold"; touch -t 200001010000 "$npold"
+SWD="$TMP/sweep-m16e"; mkdir -p "$SWD"
+outP="$(printf '%s' "$(jq -c --arg cwd "$NPROJ" '. + {cwd:$cwd}' <<<"$msin")" \
+  | env FND_MCP_SLIM_DIR="$SWD" node "$SLIM" 2>"$TMP/m16e.err")"; ec=$?
+assert_eq M16e-exit "$ec" 0
+assert_eq M16e-no-stderr "$(cat "$TMP/m16e.err")" ""
+assert_contains M16e-body "$outP" "updatedToolOutput"
+if [ ! -f "$npold" ]; then ok; else bad M16e-swept "a stale artefact survived outside a git repo"; fi
+
+# M16f: hygiene is not compression. FND_MCP_SLIM=0 silences the compressor — nothing on stdout, the
+# original result rides through — but a developer who turned compression off did not ask for a spill
+# dir and a checkout that fill up forever. Both prunes still run; FND_MCP_SLIM_TTL is their switch.
+# (The file-set form of this switch, M6b, reaches the same code path — the wiring's shell gate is the
+# only thing that can stop node from spawning at all.)
+SWD="$TMP/sweep-m16f"; mkdir -p "$SWD"
+offstale="$SWD/fnd-crush-STALE.json"; : > "$offstale"; touch -t 200001010000 "$offstale"
+OPROJ="$TMP/pwoff"; mkdir -p "$OPROJ/.claude/fnd-tmp/playwright"
+opwold="$OPROJ/.claude/fnd-tmp/playwright/page-old.png"; : > "$opwold"; touch -t 200001010000 "$opwold"
+outO="$(printf '%s' "$(jq -c --arg cwd "$OPROJ" '. + {cwd:$cwd}' <<<"$msin")" \
+  | env FND_MCP_SLIM=0 FND_MCP_SLIM_DIR="$SWD" node "$SLIM" 2>"$TMP/m16f.err")"; ec=$?
+assert_eq M16f-exit      "$ec" 0
+assert_eq M16f-silent    "$outO" ""
+assert_eq M16f-no-stderr "$(cat "$TMP/m16f.err")" ""
+if [ ! -f "$offstale" ]; then ok; else bad M16f-spill-swept "FND_MCP_SLIM=0 skipped the spill sweep"; fi
+if [ ! -f "$opwold" ]; then ok; else bad M16f-pw-swept "FND_MCP_SLIM=0 skipped the playwright prune"; fi
 
 # ── M17–M24: FND_MCP_SLIM_DEBUG log (M6, + M8 format/project) ─────────────────
 # One JSONL metadata line per invocation → <FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log; opt-in, never
@@ -2068,9 +2146,13 @@ out="$(printf '%s' "$in" | (cd "$UED" && env TMPDIR="$PJD" node "$MERGED" 2>/dev
 if [ -z "$out" ]; then ok; else bad U9-file-disables-guard "out=$(printf '%s' "$out" | head -c 120)"; fi
 
 # ═══ D — PreToolUse scratch-path guard (screenshot litter) ══════════════════
-# The deny rule is narrow on purpose: project working tree, outside `.claude/`, under no `tmp`
-# dir. Every other shape — a workspace path, a system-tmp path, no path at all, the kill switch,
-# broken stdin — is an ALLOW, because a guard that misfires would block QA.
+# The deny rule is narrow on purpose: the RESOLVED path lands in the project working tree, outside
+# a first-segment `.claude/`. Every other shape — a workspace path, a system-tmp path, the kill
+# switch, broken stdin — is an ALLOW, because a guard that misfires would block QA.
+# Which directory a relative path resolves against depends on the server: @playwright/mcp resolves
+# `filename` against its OWN output dir, so the bundled server (manifest-pinned to the swept
+# `.claude/fnd-tmp/playwright`) and a per-user one (`<cwd>/.playwright-mcp`) get opposite verdicts
+# for the same argument. Both spellings are exercised below.
 SPG="$ROOT/plugins/fnd/hooks/scratch-path-guard.cjs"
 DPROJ="$TMP/dproj"; mkdir -p "$DPROJ/.claude/tasks/ELC-1/tmp" "$DPROJ/sections" "$DPROJ/tmp"
 DOUT="$TMP/dscratch"; mkdir -p "$DOUT"   # a directory OUTSIDE the project working tree
@@ -2083,12 +2165,14 @@ spg_ev() { # tool key path — a PreToolUse event for one screenshot tool
   jq -cn --arg t "$1" --arg k "$2" --arg p "$3" --arg cwd "$DPROJ" \
     '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{($k):$p}, cwd:$cwd}'
 }
-PW=mcp__plugin_fnd_playwright__browser_take_screenshot
+PW=mcp__plugin_fnd_playwright__browser_take_screenshot   # the bundled server — --output-dir pinned
+PWU=mcp__playwright__browser_take_screenshot             # a per-user `claude mcp add` — default output dir
 CDT=mcp__plugin_fnd_chrome-devtools-mcp__take_screenshot
 
-# D1: the live case — a bare relative `filename` lands in the project root. Deny, and the reason
-# (which reaches the MODEL) must name the workspace path to use instead, filename included.
-out="$(run_spg "$(spg_ev "$PW" filename elc-123-cart.jpeg)")"; ec=$?
+# D1: the live case — a bare relative `filename` handed to a server with no --output-dir lands in
+# `<cwd>/.playwright-mcp`. Deny, and the reason (which reaches the MODEL) must name the workspace
+# path to use instead, filename included.
+out="$(run_spg "$(spg_ev "$PWU" filename elc-123-cart.jpeg)")"; ec=$?
 assert_eq       D1-exit    "$ec" 0
 assert_contains D1-deny    "$out" '"permissionDecision":"deny"'
 assert_contains D1-event   "$out" '"hookEventName":"PreToolUse"'
@@ -2100,13 +2184,30 @@ if printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecision == "deny"'
    && printf '%s' "$out" | jq -e '.hookSpecificOutput.permissionDecisionReason | type == "string"' >/dev/null 2>&1; then ok
 else bad D1-envelope "deny is not nested under hookSpecificOutput: $(printf '%s' "$out" | head -c 160)"; fi
 # The remediation must stay INSIDE the workspace: the playwright server refuses any file outside
-# its allowed roots (<cwd>/.playwright-mcp, <cwd>), so the old "an absolute path under <system
-# tmp>" fallback turned a deny into a hard tool error on the retry. The no-ticket answer is a
-# workspace path too — and it is one this very guard allows.
+# its allowed roots (its output dir, <cwd>), so the old "an absolute path under <system tmp>"
+# fallback turned a deny into a hard tool error on the retry. The no-ticket answer is a workspace
+# path too — and it is one this very guard allows.
 assert_contains D1-noticket  "$out" '.claude/tmp/elc-123-cart.jpeg'
 assert_absent   D1-no-systmp "$out" 'absolute path under'
-out2="$(run_spg "$(spg_ev "$PW" filename .claude/tmp/elc-123-cart.jpeg)")"
+# …and it is recommended ABSOLUTE (bug): a RELATIVE `.claude/tmp/x.png` given to a playwright
+# server resolves against that server's output dir, so the "remediation" landed nested inside the
+# very litter dir the deny was about. The absolute form is the one that must sail through.
+assert_contains D1-absolute  "$out" "$DPROJ/.claude/tmp/elc-123-cart.jpeg"
+out2="$(run_spg "$(spg_ev "$PWU" filename "$DPROJ/.claude/tmp/elc-123-cart.jpeg")")"
 if [ -z "$out2" ]; then ok; else bad D1b-noticket-allowed "the guard denies its own remediation: $out2"; fi
+out2="$(run_spg "$(spg_ev "$PWU" filename .claude/tmp/elc-123-cart.jpeg)")"
+assert_contains D1c-relative-remediation-denied "$out2" '.playwright-mcp/.claude/tmp'
+
+# D1z: the BUNDLED server is the opposite verdict on the identical argument. Its manifest pins
+# --output-dir .claude/fnd-tmp/playwright, so `elc-123-cart.jpeg` resolves into a directory the
+# mcp-slim TTL sweep prunes and git never sees — denying it would block QA for no litter at all.
+out="$(run_spg "$(spg_ev "$PW" filename elc-123-cart.jpeg)")"; ec=$?
+assert_eq D1z-bundled-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad D1z-bundled-allowed "the bundled server's scratch dir was denied: $out"; fi
+# …but escaping that dir is still litter: the output dir is a base, not a licence.
+out="$(run_spg "$(spg_ev "$PW" filename ../../../x.png)")"
+assert_contains D1z-bundled-escape-deny "$out" '"permissionDecision":"deny"'
+assert_contains D1z-bundled-escape-path "$out" "$DPROJ/x.png"
 
 # D2: chrome-devtools' key, absolute into the project root — same verdict as the relative form.
 out="$(run_spg "$(spg_ev "$CDT" filePath "$DPROJ/elc-99.png")")"
@@ -2116,7 +2217,7 @@ out="$(run_spg "$(spg_ev "$CDT" filePath sections/shot.png)")"
 assert_contains D2b-subdir-deny "$out" '"permissionDecision":"deny"'
 
 # D3: the sanctioned destinations — the task workspace and `.claude/tmp/`, both under `.claude/`.
-out="$(run_spg "$(spg_ev "$PW" filename .claude/tasks/ELC-1/tmp/shot.png)")"; ec=$?
+out="$(run_spg "$(spg_ev "$CDT" filePath .claude/tasks/ELC-1/tmp/shot.png)")"; ec=$?
 assert_eq D3-workspace-exit "$ec" 0
 if [ -z "$out" ]; then ok; else bad D3-workspace "workspace path denied: $out"; fi
 # D3b (bug): a `tmp` segment used to be sanctioned ANYWHERE, so the model's second attempt after
@@ -2124,8 +2225,12 @@ if [ -z "$out" ]; then ok; else bad D3-workspace "workspace path denied: $out"; 
 # put the same litter back in the tree. Only `.claude/` makes a `tmp` dir scratch.
 out="$(run_spg "$(spg_ev "$CDT" filePath "$DPROJ/tmp/shot.png")")"
 assert_contains D3b-project-tmp-deny "$out" '"permissionDecision":"deny"'
-out="$(run_spg "$(spg_ev "$PW" filename tmp/elc-123-cart.jpeg)")"
+out="$(run_spg "$(spg_ev "$PWU" filename tmp/elc-123-cart.jpeg)")"
 assert_contains D3c-retry-deny "$out" '"permissionDecision":"deny"'
+# D3d: the workspace path the deny recommends, absolute, through the playwright key — the shape a
+# model actually retries with after D1.
+out="$(run_spg "$(spg_ev "$PWU" filename "$DPROJ/.claude/tasks/ELC-1/tmp/shot.png")")"
+if [ -z "$out" ]; then ok; else bad D3d-abs-workspace "the absolute workspace path was denied: $out"; fi
 
 # D4: absolute path outside the project (system tmp, a scratchpad) — not this guard's business.
 out="$(run_spg "$(spg_ev "$PW" filename "$DOUT/shot.png")")"; ec=$?
@@ -2134,20 +2239,25 @@ if [ -z "$out" ]; then ok; else bad D4-outside "an out-of-tree path was denied: 
 out="$(run_spg "$(spg_ev "$CDT" filePath ../shot.png)")"
 if [ -z "$out" ]; then ok; else bad D4b-parent "a ../ path was denied: $out"; fi
 
-# D5 (bug): "no path field → allow" rested on a false premise for playwright. With no
-# --output-dir in mcp.json the bundled server's default output dir is <cwd>/.playwright-mcp —
-# INSIDE the checkout (live evidence: 367 untracked files in elc-theme/.playwright-mcp, not
-# gitignored), so dropping the filename was the way AROUND the guard. It is denied too, and the
-# reason names the dir it would have written to.
+# D5 (bug): "no path field → allow" rests on a false premise for a playwright server with no
+# --output-dir: its default output dir is <cwd>/.playwright-mcp — INSIDE the checkout (live
+# evidence: 374 untracked files, 29 MB, in one client theme, not gitignored), so dropping the
+# filename was the way AROUND the guard. That one is denied, and the reason names the dir it would
+# have written to.
 nopath_ev() { # tool — a screenshot call with no output-path key at all
   jq -cn --arg t "$1" --arg cwd "$DPROJ" \
     '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{fullPage:true}, cwd:$cwd}'
 }
-out="$(run_spg "$(nopath_ev "$PW")")"; ec=$?
+out="$(run_spg "$(nopath_ev "$PWU")")"; ec=$?
 assert_eq       D5-nopath-exit "$ec" 0
 assert_contains D5-nopath-deny "$out" '"permissionDecision":"deny"'
-assert_contains D5-nopath-dir  "$out" '.playwright-mcp'
+assert_contains D5-nopath-dir  "$out" "$DPROJ/.playwright-mcp"
 assert_contains D5-nopath-where "$out" '.claude/tasks/<work-id>/tmp/'
+# …while the BUNDLED server's no-filename artefacts (page-<ts>.png, the .yml snapshot dumps,
+# console logs) land in its pinned, swept output dir — nothing to deny.
+out="$(run_spg "$(nopath_ev "$PW")")"; ec=$?
+assert_eq D5z-bundled-nopath-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad D5z-bundled-nopath "the bundled server's no-filename write was denied: $out"; fi
 # …while chrome-devtools' take_screenshot without filePath returns the image inline and writes
 # no file at all — denying that would block ordinary QA.
 out="$(run_spg "$(nopath_ev "$CDT")")"; ec=$?
@@ -2206,21 +2316,21 @@ spg_ev_at() { # cwd tool key path
     '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{($k):$p}, cwd:$cwd}'
 }
 DFRESH="$TMP/dfresh"; mkdir -p "$DFRESH/.claude/tasks/ELC-7"
-out="$(run_spg_at "$DFRESH" "$(spg_ev_at "$DFRESH" "$PW" filename elc-7-cart.jpeg)")"
+out="$(run_spg_at "$DFRESH" "$(spg_ev_at "$DFRESH" "$PWU" filename elc-7-cart.jpeg)")"
 assert_contains D10-deny "$out" '"permissionDecision":"deny"'
 if [ -d "$DFRESH/.claude/tmp" ]; then ok; else bad D10b-noticket-dir "the deny did not create .claude/tmp/"; fi
 if [ -d "$DFRESH/.claude/tasks/ELC-7/tmp" ]; then ok
 else bad D10c-workspace-dir "the deny did not create the task workspace's tmp/"; fi
 # the no-path playwright deny prepares the same destinations
 DFRESH2="$TMP/dfresh2"; mkdir -p "$DFRESH2"
-out="$(run_spg_at "$DFRESH2" "$(nopath_ev "$PW" | jq -c --arg cwd "$DFRESH2" '.cwd = $cwd')")"
+out="$(run_spg_at "$DFRESH2" "$(nopath_ev "$PWU" | jq -c --arg cwd "$DFRESH2" '.cwd = $cwd')")"
 assert_contains D10d-nopath-deny "$out" '"permissionDecision":"deny"'
 if [ -d "$DFRESH2/.claude/tmp" ]; then ok; else bad D10e-nopath-dir "the no-path deny did not create .claude/tmp/"; fi
 # …and a tree the guard cannot write to still DENIES: creating a directory is a side effect, never
 # a precondition (root can write anywhere, so that case cannot be staged there)
 if [ "$(id -u)" != 0 ]; then
   DRO="$TMP/dro"; mkdir -p "$DRO"; chmod 500 "$DRO"
-  out="$(run_spg_at "$DRO" "$(spg_ev_at "$DRO" "$PW" filename shot.png)")"; ec=$?
+  out="$(run_spg_at "$DRO" "$(spg_ev_at "$DRO" "$PWU" filename shot.png)")"; ec=$?
   chmod 700 "$DRO"
   assert_eq       D10f-readonly-exit "$ec" 0
   assert_contains D10f-readonly-deny "$out" '"permissionDecision":"deny"'
@@ -2238,6 +2348,42 @@ for t in Bash mcp__plugin_fnd_chrome-devtools-mcp__take_snapshot mcp__plugin_fnd
   if printf '%s\n' "$t" | grep -Eq "$SPG_MATCHER"; then bad "D8-not-$t" "matcher over-matches"; else ok; fi
 done
 
+
+# D11: the output-dir literal is spelled in THREE places — plugin.json's playwright args, the
+# guard's PLAYWRIGHT_OUT_REL (which decides where a relative filename resolves) and json-slim's
+# PLAYWRIGHT_OUT_REL (which decides what the TTL sweep prunes). Drift in any one of them means
+# either the guard denies the server's own scratch dir or the sweep prunes nothing while the
+# checkout fills up. The literal is read out of the manifest, never copied here.
+PW_ARGS="$(jq -r '.mcpServers.playwright.args | join(" ")' "$MANIFEST")"
+PW_OUT="$(jq -r '.mcpServers.playwright.args | index("--output-dir") as $i | if $i == null then "" else .[$i+1] end' "$MANIFEST")"
+assert_contains D11-manifest-flag "$PW_ARGS" '--output-dir'
+if [ -n "$PW_OUT" ] && [ "$PW_OUT" != "null" ]; then ok; else bad D11-manifest-value "playwright args carry no --output-dir value"; fi
+assert_eq D11-json-slim "$(node -e 'process.stdout.write(require(process.argv[1]).PLAYWRIGHT_OUT_REL)' "$ROOT/plugins/fnd/scripts/json-slim.cjs")" "$PW_OUT"
+if grep -Fq "'$PW_OUT'" "$SPG"; then ok; else bad D11-guard "scratch-path-guard.cjs does not carry the manifest's output dir '$PW_OUT'"; fi
+
+# D12: the bundled server's allow is bought with "swept AND git-excluded", and both halves used to
+# be somebody else's job — the sweep rides on FND_MCP_SLIM / FND_MCP_SLIM_TTL, which a developer may
+# have turned off, leaving the guard allowing writes into a dir git shows in every `git status`. So
+# the allow branches stamp `.git/info/exclude` themselves. A DENY stamps nothing: nothing was
+# allowed, so nothing is owed.
+DGIT="$TMP/dgit"; mkdir -p "$DGIT/.claude/fnd-tmp/playwright"
+git -C "$DGIT" init -q 2>/dev/null
+excl_hits() { # a repo with no exclude file yet has zero of them, not an empty answer
+  [ -f "$1/.git/info/exclude" ] || { printf 0; return; }
+  grep -c '^/\.claude/fnd-tmp/$' "$1/.git/info/exclude" | tr -d ' \n'
+}
+out="$(run_spg_at "$DGIT" "$(nopath_ev "$PW" | jq -c --arg cwd "$DGIT" '.cwd = $cwd')")"
+if [ -z "$out" ]; then ok; else bad D12-bundled-allowed "the bundled no-filename call was denied: $out"; fi
+assert_eq D12-stamped "$(excl_hits "$DGIT")" 1
+# …and a bare `filename`, which resolves INTO that same pinned dir, is the other allow that owes it
+out="$(run_spg_at "$DGIT" "$(spg_ev_at "$DGIT" "$PW" filename shot.png)")"
+if [ -z "$out" ]; then ok; else bad D12b-bundled-name-allowed "a bare bundled filename was denied: $out"; fi
+assert_eq D12b-idempotent "$(excl_hits "$DGIT")" 1
+DGIT2="$TMP/dgit2"; mkdir -p "$DGIT2"
+git -C "$DGIT2" init -q 2>/dev/null
+out="$(run_spg_at "$DGIT2" "$(spg_ev_at "$DGIT2" "$PWU" filename shot.png)")"
+assert_contains D12c-deny "$out" '"permissionDecision":"deny"'
+assert_eq       D12c-no-stamp "$(excl_hits "$DGIT2")" 0
 
 # ═══ A — hooks/spill-access.sh, the PreToolUse spill-read recorder ══════════
 # Measurement only: --report called a platform-overflow whale MISSED whenever the agent read the

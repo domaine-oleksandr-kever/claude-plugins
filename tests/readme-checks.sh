@@ -127,6 +127,23 @@ has "$ROOT/docs/README.opencode.md" 'plugins/fnd/hooks/comment-discipline.md' op
 has "$ROOT/docs/README.opencode.md" 'node plugins/fnd/scripts/opencode-config.cjs' opencode-doc-render-command
 if [ -f "$ROOT/plugins/fnd/scripts/opencode-config.cjs" ]; then ok
 else bad opencode-render-script "docs/README.opencode.md names a renderer that is not in this checkout"; fi
+# The walkthrough shows the fragment's `mcp` block inline, and that copy is hand-maintained while
+# the fragment is generated — so it drifts silently, and the reader who pastes it gets a server
+# launched with the wrong argv. The playwright one is the argv that decides whether QA screenshots
+# land in a swept scratch dir or in the checkout, so the doc's array is compared, not just grepped.
+opencode_pw_drift="$("$NODE_BIN" -e '
+  const fs = require("fs");
+  const doc = fs.readFileSync(process.argv[1], "utf8");
+  const frag = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+  const block = (doc.match(/```json\n[\s\S]*?\n```/g) || [])
+    .map((b) => { try { return JSON.parse(b.slice(8, -4)); } catch (_) { return null; } })
+    .find((o) => o && o.mcp && o.mcp.playwright);
+  if (!block) { process.stdout.write("no pasteable mcp block with a playwright server in the doc"); process.exit(0); }
+  const a = JSON.stringify(block.mcp.playwright.command);
+  const b = JSON.stringify(frag.mcp.playwright.command);
+  if (a !== b) process.stdout.write("doc shows " + a + ", mcp-fragment.json generates " + b);
+' "$ROOT/docs/README.opencode.md" "$PLUGIN_DIR/opencode/mcp-fragment.json" 2>&1)"
+if [ -z "$opencode_pw_drift" ]; then ok; else bad opencode-doc-playwright-argv "$opencode_pw_drift"; fi
 has "$ROOT/plugins/fnd/references/smoke-test-checks.md" 'docs/README.opencode.md' smoke-row6-opencode-remediation
 has "$ROOT/docs/README.codex.md" "codex plugin marketplace add $SLUG" codex-doc-marketplace
 has "$ROOT/docs/README.codex.md" 'codex plugin marketplace remove' codex-doc-marketplace-remove

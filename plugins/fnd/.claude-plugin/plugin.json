@@ -30,7 +30,7 @@
     },
     "playwright": {
       "command": "npx",
-      "args": ["@playwright/mcp@latest"]
+      "args": ["@playwright/mcp@latest", "--output-dir", ".claude/fnd-tmp/playwright"]
     },
     "notion-mcp": {
       "type": "http",

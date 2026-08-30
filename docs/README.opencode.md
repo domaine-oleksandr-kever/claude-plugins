@@ -136,7 +136,7 @@ from your copy of `plugins/fnd/opencode/mcp-fragment.json`, the file wins):
     },
     "playwright": {
       "type": "local",
-      "command": ["npx", "@playwright/mcp@latest"]
+      "command": ["npx", "@playwright/mcp@latest", "--output-dir", ".claude/fnd-tmp/playwright"]
     },
     "notion-mcp": {
       "type": "remote",

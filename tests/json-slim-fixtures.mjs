@@ -4,7 +4,8 @@
 //   parity:*   — the array-crush port vs Headroom's vendored SmartCrusher fixtures (byte-parity,
 //                or value-parity where JS number semantics prevent byte-parity);
 //   unit tests — each pipeline stage, the crush gates, markers, safety rails, the spill-TTL
-//                sweep (M5: TTL parsing, prefix/exclude filtering, throttle), CLI;
+//                sweep (M5: TTL parsing, prefix/exclude filtering, throttle, the playwright
+//                output-dir pass and its .git/info/exclude stamp), CLI;
 //   reduction:* — the M1 exit gate: ≥70% byte reduction on the real Jira + Figma fixtures.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -331,6 +332,150 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
   check('sweep-throttled', r2.throttled && existsSync(stale2), `throttle failed ${JSON.stringify(r2)}`);
   rmSync(dir, { recursive: true, force: true });
 }
+// The sweep's SECOND target (v0.64.1): the bundled playwright server's --output-dir, which lives in
+// the PROJECT, not in the shared spill dir — the server resolves that relative flag against its own
+// cwd. Reached only when sweepSpills() is handed a project dir, so the whole pass is opt-in.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-pw-'));
+  const proj = mkdtempSync(path.join(tmpdir(), 'jslim-pwproj-'));
+  const out = path.join(proj, J.PLAYWRIGHT_OUT_REL);
+  mkdirSync(path.join(out, 'session-1'), { recursive: true });
+  const seed = (rel, old) => { const f = path.join(out, rel); writeFileSync(f, 'x'); if (old) utimesSync(f, 1000, 1000); return f; };
+  const stale = seed('page-1970.png', true);
+  const nested = seed('session-1/console-1970.log', true); // playwright nests per-session dirs
+  const fresh = seed('page-now.yml', false);
+  const r = J.sweepSpills(dir, proj);
+  check('pw-stale-deleted', !existsSync(stale), 'a stale playwright artefact must be pruned');
+  check('pw-nested-deleted', !existsSync(nested), 'the pass must recurse into per-session subdirs');
+  check('pw-fresh-kept', existsSync(fresh), 'a fresh artefact must survive (mtime, not a blanket rm)');
+  check('pw-dir-kept', existsSync(path.join(out, 'session-1')), 'directories are left standing — a live session may own one');
+  check('pw-summary', r.swept === 2, `both pruned files must count in the summary ${JSON.stringify(r)}`);
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(proj, { recursive: true, force: true });
+}
+// A project playwright never wrote in is the common case: no dir, no error, no work.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-pw-none-'));
+  const proj = mkdtempSync(path.join(tmpdir(), 'jslim-pwproj-none-'));
+  const r = J.sweepSpills(dir, proj);
+  check('pw-missing-noop', r.swept === 0 && !r.disabled && !r.throttled, `missing output dir must be a no-op ${JSON.stringify(r)}`);
+  check('pw-missing-nomkdir', !existsSync(path.join(proj, '.claude')), 'the sweep must not CREATE the scratch dir');
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(proj, { recursive: true, force: true });
+}
+// The throttle lives in a marker file inside the spill root, and the root is never CREATED here (a
+// typo'd FND_MCP_SLIM_DIR must not grow a tree). So when the marker cannot be claimed the window can
+// never close, and the project pass — a recursive walk plus two git forks — would run on EVERY hook
+// invocation. The observable: with an unwritable spill root the stale artefact simply survives, on
+// the second call as on the first.
+{
+  const proj = mkdtempSync(path.join(tmpdir(), 'jslim-pwproj-nospill-'));
+  const out = path.join(proj, J.PLAYWRIGHT_OUT_REL);
+  mkdirSync(out, { recursive: true });
+  const stale = path.join(out, 'page-1970.png'); writeFileSync(stale, 'x'); utimesSync(stale, 1000, 1000);
+  const missing = path.join(tmpdir(), 'jslim-does-not-exist-' + Date.now());
+  const r1 = J.sweepSpills(missing, proj);
+  const r2 = J.sweepSpills(missing, proj);
+  check('pw-unclaimed-marker-skips', existsSync(stale) && r1.swept === 0 && r2.swept === 0,
+    `an unclaimable throttle marker must not leave the project pass running unthrottled ${JSON.stringify([r1, r2])}`);
+  check('pw-nospill-nomkdir', !existsSync(missing), 'the sweep must never create the spill root');
+  rmSync(proj, { recursive: true, force: true });
+}
+// Symlinks are not followed on the way IN: the walk deletes by mtime with no name filter, so a
+// symlinked component would aim it at the link's target. The plugin's own worktree flow symlinks
+// `<wt>/.claude/tasks`, so a part-symlinked `.claude` subtree is a live shape, not a hypothetical.
+for (const [label, linkAt] of [['playwright', J.PLAYWRIGHT_OUT_REL], ['dotclaude', '.claude']]) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-pwlink-'));
+  const proj = mkdtempSync(path.join(tmpdir(), 'jslim-pwlinkproj-'));
+  const victim = mkdtempSync(path.join(tmpdir(), 'jslim-pwvictim-'));
+  // The victim carries the same shape the sweep expects to find, so only the lstat rail can save it.
+  mkdirSync(path.join(victim, '.claude/fnd-tmp/playwright'), { recursive: true });
+  const keep = path.join(victim, '.claude/fnd-tmp/playwright/page-1970.png');
+  writeFileSync(keep, 'x'); utimesSync(keep, 1000, 1000);
+  const link = path.join(proj, linkAt);
+  mkdirSync(path.dirname(link), { recursive: true });
+  symlinkSync(path.join(victim, linkAt), link, 'dir');
+  const r = J.sweepSpills(dir, proj);
+  check(`pw-symlink-${label}-skipped`, existsSync(keep) && r.swept === 0,
+    `a symlinked path component must skip the pass, not redirect it ${JSON.stringify(r)}`);
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(proj, { recursive: true, force: true });
+  rmSync(victim, { recursive: true, force: true });
+}
+
+// ensureFndTmpExcluded: keep the scratch root out of `git status` without touching the client's
+// TRACKED .gitignore. Best-effort — every branch below must stay silent and never throw.
+const gitOk = spawnSync('git', ['--version'], { encoding: 'utf8' }).status === 0;
+const gitInit = (d) => spawnSync('git', ['init', '-q', d], { encoding: 'utf8' }).status === 0;
+if (gitOk) {
+  {
+    const proj = mkdtempSync(path.join(tmpdir(), 'jslim-excl-'));
+    gitInit(proj);
+    const excl = path.join(proj, '.git/info/exclude');
+    J.ensureFndTmpExcluded(proj);
+    const body = readFileSync(excl, 'utf8');
+    const hits = body.split('\n').filter((l) => l.trim() === '/.claude/fnd-tmp/').length;
+    check('excl-appended', hits === 1, `exactly one exclude line expected, got ${hits}`);
+    J.ensureFndTmpExcluded(proj);
+    const hits2 = readFileSync(excl, 'utf8').split('\n').filter((l) => l.trim() === '/.claude/fnd-tmp/').length;
+    check('excl-idempotent', hits2 === 1, `a second call must not append again, got ${hits2}`);
+    rmSync(proj, { recursive: true, force: true });
+  }
+  // The stamp is ANCHORED at the repo root, but the session's project dir may sit deeper in the repo
+  // (`cd packages/theme && claude`). An unprefixed `/.claude/fnd-tmp/` would then match nothing — and
+  // the "already stamped" scan would keep the correct line out forever. git's own verdict is the
+  // assertion that matters here; the literal is only how it gets there.
+  {
+    const proj = mkdtempSync(path.join(tmpdir(), 'jslim-excl-sub-'));
+    gitInit(proj);
+    const rel = 'packages/theme';
+    mkdirSync(path.join(proj, rel, '.claude/fnd-tmp'), { recursive: true });
+    J.ensureFndTmpExcluded(path.join(proj, rel));
+    const body = readFileSync(path.join(proj, '.git/info/exclude'), 'utf8');
+    check('excl-subdir-prefixed', body.split('\n').some((l) => l.trim() === `/${rel}/.claude/fnd-tmp/`),
+      `the stamp must carry the project's prefix inside the repo: ${JSON.stringify(body)}`);
+    const ci = spawnSync('git', ['check-ignore', '-q', `${rel}/.claude/fnd-tmp`], { cwd: proj, encoding: 'utf8' });
+    check('excl-subdir-ignored', ci.status === 0, `git must actually ignore the stamped dir, status ${ci.status}`);
+    // …and a second call adds nothing — the stamp it just wrote is now git's own answer.
+    J.ensureFndTmpExcluded(path.join(proj, rel));
+    const hits = readFileSync(path.join(proj, '.git/info/exclude'), 'utf8')
+      .split('\n').filter((l) => l.trim() === `/${rel}/.claude/fnd-tmp/`).length;
+    check('excl-subdir-idempotent', hits === 1, `a second call must not append again, got ${hits}`);
+    rmSync(proj, { recursive: true, force: true });
+  }
+  // An exclude file whose last byte is not a newline is legal and not rare (hand-edited ones often
+  // are); appending blind would glue our pattern onto the developer's last one, breaking both.
+  {
+    const proj = mkdtempSync(path.join(tmpdir(), 'jslim-excl-nonl-'));
+    gitInit(proj);
+    const excl = path.join(proj, '.git/info/exclude');
+    writeFileSync(excl, '# mine\nscratch.txt');
+    J.ensureFndTmpExcluded(proj);
+    const lines = readFileSync(excl, 'utf8').split('\n');
+    check('excl-bridges-newline', lines.includes('scratch.txt') && lines.includes('/.claude/fnd-tmp/'),
+      `the developer's last pattern must survive intact: ${JSON.stringify(lines)}`);
+    rmSync(proj, { recursive: true, force: true });
+  }
+  // A repo that already ignores `.claude` its own way needs no stamp — check-ignore decides.
+  {
+    const proj = mkdtempSync(path.join(tmpdir(), 'jslim-excl-ignored-'));
+    gitInit(proj);
+    writeFileSync(path.join(proj, '.gitignore'), '.claude\n');
+    J.ensureFndTmpExcluded(proj);
+    const body = readFileSync(path.join(proj, '.git/info/exclude'), 'utf8');
+    check('excl-skips-ignored', !body.includes('fnd-tmp'), 'no line may be added when git already ignores the dir');
+    rmSync(proj, { recursive: true, force: true });
+  }
+}
+// No repo (and, on a host without git, no git either) → nothing to exclude from, and no throw.
+{
+  const proj = mkdtempSync(path.join(tmpdir(), 'jslim-excl-nogit-'));
+  let threw = false;
+  try { J.ensureFndTmpExcluded(proj); } catch (_) { threw = true; }
+  check('excl-nogit-silent', !threw && !existsSync(path.join(proj, '.git')), 'outside a repo the stamp is a silent no-op');
+  rmSync(proj, { recursive: true, force: true });
+}
+
 // FND_MCP_SLIM_TTL=0 disables the sweep entirely (env save/restore — don't leak into later cases)
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-sweep0-'));

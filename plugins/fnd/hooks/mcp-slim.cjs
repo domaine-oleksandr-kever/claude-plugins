@@ -43,9 +43,11 @@
 // which the debug line reports as `compressed` + `budget_partial:true`. Only a whole-result expiry (a
 // string/single-text shape, or an array where nothing got through) is logged `budget-exceeded`.
 //
-// Env: FND_MCP_SLIM (gated in plugin.json — node never spawns when 0);
+// Env: FND_MCP_SLIM (gated in plugin.json — node never spawns when 0; a file-set 0 still reaches
+//      here, where it skips the compression only — the exit-time sweep is hygiene and runs anyway);
 //      FND_MCP_SLIM_DIR (spill directory, shared with json-slim; default os.tmpdir());
-//      FND_MCP_SLIM_TTL (hours a spill survives before the exit-time sweep prunes it; default 24);
+//      FND_MCP_SLIM_TTL (hours a spill — and a file in the project's playwright output dir —
+//      survives before the exit-time sweep prunes it; default 24, `0` disables the sweep);
 //      FND_MCP_SLIM_DEBUG (opt-in: one JSONL trace line per invocation to fnd-mcp-slim-debug.log —
 //      `1` = key events, `2` = everything, sub-gate size-gate lines included);
 //      FND_MCP_SLIM_STUB (0 disables the spill-and-stub guard) + FND_MCP_SLIM_STUB_BYTES (its
@@ -60,7 +62,10 @@ const path = require('path');
 try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps (env > project > global); absent in a partial install
 // The shell gates in the hook wirings see only the real process env — a file-set 0 must
 // still disable the hook, so it is honored here too (no output = the original passes through).
-if (process.env.FND_MCP_SLIM === '0') process.exit(0);
+// Not an exit: this switch turns off COMPRESSION, and the exit-time sweep at the bottom is
+// hygiene — nobody who silenced the compressor asked for a checkout that fills up with
+// playwright artefacts. FND_MCP_SLIM_TTL is the switch that governs the sweep.
+const slimOff = process.env.FND_MCP_SLIM === '0';
 
 // json-slim brings ~210 KB of module graph (the compressor plus the ADF and log converters), and most
 // invocations never need a line of it: a small result, an unrecognized shape, a payload the platform
@@ -100,6 +105,10 @@ function debugLevel() {
 // re-checked inside sweepSpills(), so a race here costs one extra stat and nothing else.
 const SWEEP_MARKER = '.fnd-mcp-slim-sweep';
 const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
+// The event's project dir, stashed for the exit-time sweep: that sweep runs OUTSIDE run(), and the
+// second dir it prunes (the playwright output dir) lives in the project, not in the shared spill dir.
+// process.cwd() is the fallback, not the source — a host may spawn the hook from anywhere.
+let eventCwd = null;
 function sweepDue() {
   const raw = process.env.FND_MCP_SLIM_TTL;
   if (raw !== undefined && raw !== null && raw !== '') {
@@ -538,6 +547,7 @@ function run(raw) {
   const dbgLevel = debugLevel();
   const dbg = dbgLevel > 0; // cache: disabled → every trace() is a no-op and the metrics below are skipped
   const input = JSON.parse(raw);
+  eventCwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : null;
   const tool = typeof input.tool_name === 'string' ? input.tool_name : null;
   const result = input.tool_response !== undefined ? input.tool_response : input.tool_output;
 
@@ -750,11 +760,15 @@ const chunks = [];
 process.stdin.on('data', (d) => chunks.push(d));
 process.stdin.on('end', () => {
   try {
-    run(Buffer.concat(chunks).toString('utf8'));
+    const raw = Buffer.concat(chunks).toString('utf8');
+    // With the compressor off the event is still parsed — for its cwd alone, so the sweep below can
+    // find the project's playwright output dir. Nothing is emitted on this path, as before.
+    if (slimOff) { const ev = JSON.parse(raw); eventCwd = typeof ev.cwd === 'string' && ev.cwd ? ev.cwd : null; }
+    else run(raw);
   } catch (_) {
     // Any failure → emit nothing, original result passes through untouched.
   }
   // Spill hygiene runs AFTER the result is emitted (or passed through) so it never delays what
   // the model sees; throttled and self-guarding, so it costs one stat on the hot path.
-  try { if (sweepDue()) jsonSlim().sweepSpills(); } catch (_) {}
+  try { if (sweepDue()) jsonSlim().sweepSpills(undefined, eventCwd || process.cwd()); } catch (_) {}
 });

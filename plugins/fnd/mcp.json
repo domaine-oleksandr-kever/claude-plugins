@@ -38,7 +38,9 @@
       "type": "stdio",
       "command": "npx",
       "args": [
-        "@playwright/mcp@latest"
+        "@playwright/mcp@latest",
+        "--output-dir",
+        ".claude/fnd-tmp/playwright"
       ]
     },
     "notion-mcp": {

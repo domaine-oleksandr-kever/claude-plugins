@@ -469,8 +469,11 @@ assert_contains P1-camel-user  "$(printf '%s' "$out" | jq -r '.userMessage')"  '
 assert_eq P1b-obj-shape "$(printf '%s' "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename elc-1.jpeg obj)")" | jq -r '.permission')" "deny"
 # a prefixed tool name (another host's spelling reaching this event) is covered as well
 assert_eq P1c-prefixed "$(printf '%s' "$(run_shim beforeMCPExecution "$(pev mcp__playwright__browser_take_screenshot filename elc-1.jpeg)")" | jq -r '.permission')" "deny"
-# P2: the sanctioned destination, an out-of-tree path, and a non-screenshot MCP tool are silent
-assert_eq P2-workspace  "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename .claude/tasks/ELC-1/tmp/shot.png)")" ""
+# P2: the sanctioned destination, an out-of-tree path, and a non-screenshot MCP tool are silent.
+# The workspace path is ABSOLUTE (v0.64.1): Cursor's tool names carry no server prefix, so the guard
+# cannot tell this from a per-user playwright and judges it as a default-configured one — which
+# resolves a relative filename against `<cwd>/.playwright-mcp`, inside the checkout.
+assert_eq P2-workspace  "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename "$PPROJ/.claude/tasks/ELC-1/tmp/shot.png")")" ""
 assert_eq P2b-outside   "$(run_shim beforeMCPExecution "$(pev take_screenshot filePath "$TMP/outside.png")")" ""
 assert_eq P2c-other-tool "$(run_shim beforeMCPExecution "$(pev browser_navigate url https://example.com)")" ""
 # P3: the switch (in-shim; the wiring gate is G3b) and the fail-open rails

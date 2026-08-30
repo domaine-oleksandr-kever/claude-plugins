@@ -561,7 +561,11 @@ spg_run() { # key path [VAR=val…] — one screenshot event through the wired C
 out="$(spg_run filename elc-123-cart.jpeg)"; ec=$?
 assert_eq       B12-exit "$ec" 0
 assert_contains B12-deny "$out" '"permissionDecision":"deny"'
-out="$(spg_run filePath ".claude/tasks/ELC-1/tmp/shot.png")"
+# The workspace path is ABSOLUTE here (v0.64.1): Codex names MCP tools without the plugin_fnd_
+# prefix, so the guard cannot tell this server from a per-user one and judges it as a default-
+# configured playwright — which resolves a RELATIVE filename against `<cwd>/.playwright-mcp`, not
+# the project. The absolute form is what the deny reason recommends and what sails through.
+out="$(spg_run filePath "$SPGP/.claude/tasks/ELC-1/tmp/shot.png")"
 if [ -z "$out" ]; then ok; else bad B12b-workspace "a workspace path was denied: $out"; fi
 out="$(spg_run filename elc-123-cart.jpeg FND_SCRATCH_GUARD=0)"; ec=$?
 assert_eq B12c-off-exit "$ec" 0

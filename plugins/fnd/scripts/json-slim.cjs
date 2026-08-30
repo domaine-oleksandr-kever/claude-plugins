@@ -744,6 +744,18 @@ const DEBUG_LOG = 'fnd-mcp-slim-debug.log';
 // Files that share a spill prefix but must survive: the debug log + its one rotation, and the sweep
 // marker. Excluded by EXACT name, so `fnd-mcp-slim-debug.log` is never mistaken for a spill and swept.
 const SWEEP_KEEP = new Set([DEBUG_LOG, `${DEBUG_LOG}.1`, SWEEP_MARKER]);
+// The bundled @playwright/mcp server's `--output-dir`, PROJECT-relative: the server resolves it against
+// its own cwd, which every host launches in the project dir. The same literal is spelled in the manifest's
+// args and in hooks/scratch-path-guard.cjs; a hooks-sim case pins the three together. Without it the
+// server defaults to `<cwd>/.playwright-mcp`, where every no-`filename` screenshot, `.yml` snapshot dump
+// and console log lands — 374 untracked files in one client checkout, gitignored by nobody. Pointing it
+// under `.claude/` puts that traffic in a directory this sweep prunes and git never sees.
+const PLAYWRIGHT_OUT_REL = '.claude/fnd-tmp/playwright';
+// The `.git/info/exclude` pattern that keeps the whole scratch root out of `git status` (and out of a
+// bulk `git add`). The written line is anchored (leading slash) and trailing-slashed: a directory,
+// never a stray match — and anchoring is at the REPO root, so the line is built with the project's
+// path prefix inside the repo rather than used as-is (see ensureFndTmpExcluded).
+const EXCLUDE_SUFFIX = '.claude/fnd-tmp/';
 
 // Parse FND_MCP_SLIM_TTL as hours. Default 24; exactly `0` disables the sweep. ANY invalid value —
 // non-numeric, NaN, negative — falls back to 24: a negative TTL must NEVER become a past cutoff
@@ -765,7 +777,12 @@ function spillTtlHours(raw) {
 // implementation covers every writer. NB the prompt-json guard's WORKSPACE-placed spills ride with
 // the task workspace, outside this dir; its tmpdir spills are swept only when the sweep dir is the
 // default os.tmpdir() (FND_MCP_SLIM_DIR unset — the common case). Returns a small summary for tests.
-function sweepSpills(dir) {
+// `projectDir` adds the second pass: the playwright output dir lives in the PROJECT, not in the
+// shared spill dir, so it can only be reached from here with the project in hand. Omitting it keeps
+// the old single-dir behaviour. The hook passes the EVENT's cwd, which names the project exactly;
+// the CLI passes its own process.cwd(), which is the agent shell's working dir — the project only
+// when the run started at the project root, and a harmless miss (an absent dir) otherwise.
+function sweepSpills(dir, projectDir) {
   const summary = { disabled: false, throttled: false, swept: 0 };
   try {
     const ttl = spillTtlHours(process.env.FND_MCP_SLIM_TTL);
@@ -777,11 +794,15 @@ function sweepSpills(dir) {
       if (now - fs.statSync(marker).mtimeMs < SWEEP_THROTTLE_MS) { summary.throttled = true; return summary; }
     } catch (_) {} // no marker yet → first sweep in this dir
     // Touch BEFORE scanning so a sibling hook firing during the scan sees a fresh marker and skips
-    // — one scan per window even under parallel MCP calls.
-    try { fs.writeFileSync(marker, ''); } catch (_) {}
+    // — one scan per window even under parallel MCP calls. The spill root is never CREATED here: a
+    // typo'd FND_MCP_SLIM_DIR must not silently grow a tree.
+    let claimed = false;
+    try { fs.writeFileSync(marker, ''); claimed = true; } catch (_) {}
     const cutoff = now - ttl * 3600 * 1000;
     let names;
-    try { names = fs.readdirSync(root); } catch (_) { return summary; }
+    // An unreadable spill root is not a reason to skip the PROJECT pass below — the two dirs are
+    // independent, and the marker (written before the scan) still throttles the window.
+    try { names = fs.readdirSync(root); } catch (_) { names = []; }
     for (const name of names) {
       if (SWEEP_KEEP.has(name)) continue;
       if (!SPILL_PREFIXES.some((p) => name.startsWith(p)) && !name.startsWith(WHALE_GUIDE_PREFIX) && !name.startsWith(NOGAIN_PREFIX)) continue;
@@ -791,8 +812,90 @@ function sweepSpills(dir) {
         if (st.isFile() && st.mtimeMs < cutoff) { fs.unlinkSync(p); summary.swept++; }
       } catch (_) {} // gone / racing another sweep / unreadable → skip
     }
+    // Only behind a CLAIMED marker: an unwritable spill root (a missing dir, a read-only one) means
+    // the throttle window never closes, and an unthrottled project pass — a recursive walk plus two
+    // git forks — would then run on every single hook invocation. It also stamps `.git/info/exclude`,
+    // and only for a project playwright has actually written in.
+    if (claimed && typeof projectDir === 'string' && projectDir) sweepPlaywrightOut(projectDir, cutoff, summary);
   } catch (_) {} // any failure → no-op
   return summary;
+}
+
+// Second sweep target: `<project>/.claude/fnd-tmp/playwright`, where the bundled server drops the
+// artefacts no tool call names a path for (page-<ts>.png, the .yml snapshot dumps, console-<ts>.log,
+// session/trace files). Same TTL and the same total silence as the spill pass — the browser session's
+// own files are only ever re-read within the run that made them. Directories are left standing:
+// playwright nests per-session dirs, and an empty one costs nothing while removing it could race a
+// live session. Absent dir = playwright never ran in this project, the common case, so this is one
+// stat on the throttled path.
+function sweepPlaywrightOut(projectDir, cutoff, summary) {
+  // Every component of the path has to be a REAL directory, checked with lstat: the walk below deletes
+  // by mtime alone, with no name filter, so a single symlinked component would aim it at whatever the
+  // link points at and prune that instead. Not hypothetical — this plugin's own worktree flow symlinks
+  // `<wt>/.claude/tasks` at the main checkout, so a part-symlinked `.claude` subtree is a live shape.
+  // (Nested entries are already lstat-based: readdir Dirents do not follow links.)
+  let dir = projectDir;
+  for (const seg of PLAYWRIGHT_OUT_REL.split('/')) {
+    dir = path.join(dir, seg);
+    try {
+      if (!fs.lstatSync(dir).isDirectory()) return;
+    } catch (_) { return; }
+  }
+  const walk = (d, depth) => {
+    if (depth > 8) return; // a pathological nest is not worth unbounded recursion
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch (_) { return; }
+    for (const e of entries) {
+      const p = path.join(d, e.name);
+      try {
+        if (e.isDirectory()) { walk(p, depth + 1); continue; }
+        if (!e.isFile()) continue; // symlinks and sockets are not ours to delete
+        if (fs.statSync(p).mtimeMs < cutoff) { fs.unlinkSync(p); summary.swept++; }
+      } catch (_) {} // gone / racing / unreadable → skip
+    }
+  };
+  walk(dir, 0);
+  ensureFndTmpExcluded(projectDir);
+}
+
+// Keep the scratch root invisible to git without editing anything the developer owns: `.gitignore` is
+// a tracked file of the client's repo, `.git/info/exclude` is local-only. Best-effort and silent —
+// this rides on a sweep, and a sweep may never influence a hook's output or exit code. Two callers:
+// the sweep, at most once per throttle window and only in a project playwright has written in, and
+// hooks/scratch-path-guard.cjs, whose allow of the bundled server's scratch dir is justified by this
+// stamp — so the guard makes it true itself rather than waiting on a compressor switch.
+function ensureFndTmpExcluded(projectDir) {
+  try {
+    const { spawnSync } = require('child_process'); // required here so the hot path never loads it
+    const opts = { cwd: projectDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 };
+    // 0 = git already ignores it (a repo-level rule, or a stamp from an earlier run); 1 = not ignored;
+    // anything else (128, a spawn failure) = no repo / no git, where there is nothing to exclude from.
+    const ci = spawnSync('git', ['check-ignore', '-q', '.claude/fnd-tmp'], opts);
+    if (ci.status !== 1) return;
+    // An anchored pattern is read from the REPO root, but the session's project dir may sit deeper in it
+    // (`cd packages/theme && claude`) — there `/.claude/fnd-tmp/` would match nothing, and the "already
+    // stamped" scan below would then block the correct line forever. The prefix git reports for this dir
+    // is what puts the anchor in the right place; it already ends in `/` when non-empty.
+    const sp = spawnSync('git', ['rev-parse', '--show-prefix'], opts);
+    if (sp.status !== 0 || typeof sp.stdout !== 'string') return;
+    const line = `/${sp.stdout.trim()}${EXCLUDE_SUFFIX}`;
+    // --git-path answers with the COMMON dir's file, so one stamp serves every worktree of the repo —
+    // the same rule scripts/worktree-setup.sh follows for `.claude/tasks`.
+    const gp = spawnSync('git', ['rev-parse', '--git-path', 'info/exclude'], opts);
+    if (gp.status !== 0 || typeof gp.stdout !== 'string') return;
+    const rel = gp.stdout.trim();
+    if (!rel) return;
+    const file = path.isAbsolute(rel) ? rel : path.join(projectDir, rel);
+    let body = '';
+    try { body = fs.readFileSync(file, 'utf8'); } catch (_) {} // no exclude file yet → create it below
+    const has = body.split('\n').some((l) => l.trim() === line);
+    if (has) return;
+    // An exclude file whose last byte is not a newline is legal and not rare; appending blind would glue
+    // our pattern onto the developer's last one, breaking both.
+    const bridge = body !== '' && !body.endsWith('\n') ? '\n' : '';
+    try { fs.mkdirSync(path.dirname(file), { recursive: true }); } catch (_) {}
+    fs.appendFileSync(file, `${bridge}${line}\n`);
+  } catch (_) {} // any failure → the dir stays visible in git status, which is not worth a broken hook
 }
 
 // ---------------------------------------------------------------------------- debug log --
@@ -2559,7 +2662,7 @@ function emitProfile(profile, file, bytes, t0, cfg, offset, extra) {
     const notice = bigDocNotice(file, bytes);
     process.stdout.write(notice + '\n');
     debugLog({ entry: 'cli', tool: logTool, decision: 'passthrough', reason: 'big-nonjsonl', bytes_in: bytes, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: logStages, spill: logSpill, spill_out: null, ...(logSpills ? { spills: logSpills } : {}), ms: Date.now() - t0 }, cfg.spillDir);
-    sweepSpills(cfg.spillDir);
+    sweepSpills(cfg.spillDir, process.cwd());
     return;
   }
   const body = compact(profile);
@@ -2575,7 +2678,7 @@ function emitProfile(profile, file, bytes, t0, cfg, offset, extra) {
     : whaleReminder(file, profile.rows, offset)) + '\n',
   (err) => { if (!err && full) whaleGuideStamp(cfg.spillDir, file); });
   debugLog({ entry: 'cli', tool: logTool, decision: 'passthrough', reason: 'stream-profile', bytes_in: bytes, bytes_out: Buffer.byteLength(body, 'utf8'), pct: 0, stages: logStages, spill: logSpill, spill_out: null, ...(logSpills ? { spills: logSpills } : {}), profile: true, guide: full ? 'full' : 'reminder', ms: Date.now() - t0 }, cfg.spillDir);
-  sweepSpills(cfg.spillDir);
+  sweepSpills(cfg.spillDir, process.cwd());
 }
 
 // ==================================================================== --jq ergonomics (M12) ==
@@ -3066,7 +3169,7 @@ module.exports = {
   buildReport, shapeHint,
   classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
   adfStage, noiseStage, truncateStage, toonStage,
-  sweepSpills, spillTtlHours, spillRoot, writeSpill,
+  sweepSpills, sweepPlaywrightOut, ensureFndTmpExcluded, PLAYWRIGHT_OUT_REL, spillTtlHours, spillRoot, writeSpill,
   whaleGuidance, whaleReminder, whaleGuideEnabled, whaleGuideFullBlock, whaleGuideStamp, whaleGuideStatePath,
   nogainMemoEnabled, nogainMemoHit, nogainStamp, nogainStatePath, nogainRefusal, // B2: the re-run guards' state
   debugLog, debugEnabled, debugLevel,
@@ -3187,7 +3290,7 @@ if (require.main === module) {
       const notice = slimOutRefusal(fileArg, sz) + '\n';
       process.stdout.write(notice);
       debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'already-slim-out', bytes_in: sz, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
-      sweepSpills(cfg.spillDir);
+      sweepSpills(cfg.spillDir, process.cwd());
       return;
     }
     // Layer 2 — this session already printed THIS file back unchanged and it has not changed since.
@@ -3196,7 +3299,7 @@ if (require.main === module) {
       const notice = nogainRefusal(fileArg, memoBytes) + '\n';
       process.stdout.write(notice);
       debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'no-gain-memo', bytes_in: memoBytes, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
-      sweepSpills(cfg.spillDir);
+      sweepSpills(cfg.spillDir, process.cwd());
       return;
     }
   }
@@ -3212,7 +3315,7 @@ if (require.main === module) {
         // --jq would re-read the whole gigabyte to walk one path — refuse and point at line tools.
         process.stdout.write(streamJqRefusal(fileArg, sz) + '\n');
         debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'stream-jq-refused', bytes_in: sz, bytes_out: 0, pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
-        sweepSpills(cfg.spillDir);
+        sweepSpills(cfg.spillDir, process.cwd());
       } else {
         // M11: a >8 MB file may be a fenced JSONL whale (tool prose + ```jsonl…``` around the rows).
         // Peek the head (bounded — never loads the file whole) for an opening fence in the first
@@ -3499,5 +3602,5 @@ if (require.main === module) {
     ms: Date.now() - t0,
   }, cfg.spillDir);
   // Spill hygiene at exit — prune stale spills (best-effort; never affects output or exit code).
-  sweepSpills(cfg.spillDir);
+  sweepSpills(cfg.spillDir, process.cwd());
 }

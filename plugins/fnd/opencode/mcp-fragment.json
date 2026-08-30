@@ -38,7 +38,9 @@
       "type": "local",
       "command": [
         "npx",
-        "@playwright/mcp@latest"
+        "@playwright/mcp@latest",
+        "--output-dir",
+        ".claude/fnd-tmp/playwright"
       ]
     },
     "notion-mcp": {
