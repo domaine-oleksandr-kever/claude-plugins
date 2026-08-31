@@ -226,9 +226,10 @@ VERIFY=1
 # Pause before the ONE read-back retry: a read issued straight after a write can still be served
 # the old copy, so the default buys the write a moment to land. The suites pass 0 — every
 # not_applied case would otherwise pay it. A non-numeric value falls back to the default rather
-# than handing `sleep` an argument it refuses under `set -e`.
+# than handing `sleep` an argument it refuses under `set -e` — including `1.2.3`, which a
+# bytes-only filter would let through.
 VERIFY_WAIT="${FND_THEME_JSON_VERIFY_WAIT:-2}"
-case "$VERIFY_WAIT" in ''|.|*[!0-9.]*) VERIFY_WAIT=2 ;; esac
+case "$VERIFY_WAIT" in ''|.|*.*.*|*[!0-9.]*) VERIFY_WAIT=2 ;; esac
 
 # normalize_body <file> → stdout: the comparable form of a theme file body. *.json rides
 # strip_json_comments (Shopify re-stamps its /*…*/ banner on every write, so the banner is not
@@ -313,7 +314,9 @@ verify_applied() {
     rc=0; "$reader" "$back" || rc=$?
     if [ "$rc" -eq 0 ] && bodies_match "$FROM" "$back"; then return 0; fi
     [ "$attempt" -eq 1 ] || break
-    attempt=2; sleep "$VERIFY_WAIT"
+    # non-fatal: the mutation already committed, so dying on sleep's complaint instead of
+    # printing the verdict (or the exit-6 hint) would strand the caller with no read-back at all
+    attempt=2; sleep "$VERIFY_WAIT" || true
   done
   if [ "$rc" -ne 0 ]; then
     echo "error=verify_read_failed engine=$engine theme=$theme file=$FILE"

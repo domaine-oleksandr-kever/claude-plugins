@@ -45,7 +45,9 @@
 #   create --name "<NAME>" [--reuse] [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #       → build repo → push code (settings ignored) to a new unpublished theme
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
-#       → theme_id=… name=… store=… preview_url=… editor_url=… reused=… built=…
+#         → read the overlay back (see verify_overlay)
+#       → theme_id=… name=… store=… preview_url=… editor_url=… reused=… built=… overlay=…
+#         [warn=overlay_file_dropped file=… [unknown_types=…]] [hint=…] | [warn=overlay_unverified …]
 #   refresh --theme <ID> [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
@@ -77,6 +79,13 @@
 # Output is `key=value` lines on stdout. Errors print `error=<reason>` and exit non-zero.
 # Pushes retry on a Shopify `Throttled` answer (pauses: $FND_CPT_THROTTLE_WAITS, default "20 60");
 # a throttle that holds is reported as `cause=throttled`.
+# After the overlay push, `create` pulls the settings patterns back off the target and reports
+# `overlay=verified|partial|unverified|skipped` — Shopify silently drops a *.json file whose
+# section/block types this branch's code lacks while the push exits 0 (see verify_overlay). Each
+# dropped file prints `warn=overlay_file_dropped file=… [unknown_types=…]`; the run still exits 0.
+# FND_CPT_OVERLAY_VERIFY=0 skips the read-back; FND_CPT_OVERLAY_VERIFY_WAIT sets its re-check pause.
+# The read-back pulls go through push_retry too, so on a throttled store they can add the
+# $FND_CPT_THROTTLE_WAITS pauses AFTER every piece of real work has already succeeded.
 # Requires: shopify CLI, jq; npm for the default build.
 
 set -euo pipefail
@@ -354,6 +363,16 @@ domaine_env() {
 if [ -z "${FND_CPT_THROTTLE_WAITS+x}" ]; then
   _v="$(domaine_env FND_CPT_THROTTLE_WAITS)"; [ -n "$_v" ] && FND_CPT_THROTTLE_WAITS="$_v"
 fi
+if [ -z "${FND_CPT_OVERLAY_VERIFY+x}" ]; then
+  _v="$(domaine_env FND_CPT_OVERLAY_VERIFY)"; [ -n "$_v" ] && FND_CPT_OVERLAY_VERIFY="$_v"
+fi
+if [ -z "${FND_CPT_OVERLAY_VERIFY_WAIT+x}" ]; then
+  _v="$(domaine_env FND_CPT_OVERLAY_VERIFY_WAIT)"; [ -n "$_v" ] && FND_CPT_OVERLAY_VERIFY_WAIT="$_v"
+fi
+# a non-numeric pause would hand `sleep` an argument it refuses under `set -e`; `1.2.3` passes a
+# bytes-only filter, so multi-dot values are rejected too
+OVERLAY_VERIFY_WAIT="${FND_CPT_OVERLAY_VERIFY_WAIT:-2}"
+case "$OVERLAY_VERIFY_WAIT" in ''|.|*.*.*|*[!0-9.]*) OVERLAY_VERIFY_WAIT=2 ;; esac
 
 # Shopify rate-limits per store+token, and a running `shopify theme dev` against the same store
 # draws on the SAME budget — so a bulk push can land a 429 `Throttled` (observed live at 0% upload)
@@ -449,7 +468,9 @@ overlay_fail() { # $1 = error code, $2 = target theme, $3 = reused, $4 = stderr 
 # Apply the dev theme's customizer settings onto $1 (target theme id), collecting the backgrounded
 # pull on the way in.
 #   $2 = "true" if the theme pre-existed (--reuse), else we created it this run.
-# Three outcomes, and the caller acts differently on each: applied (return 0); DRIFT — the dev theme
+# Three outcomes, and the caller acts differently on each: applied (return 0, carrying the read-back
+# verdict in $OVERLAY_VERIFY — verified/partial/unverified/skipped, see verify_overlay, so an applied
+# overlay is not automatically a complete one); DRIFT — the dev theme
 # is "ahead" of this branch (e.g. its templates/product.json references a block type whose schema
 # lives only in another feature branch) so Shopify rejects that template, and since a partial overlay
 # would give a misleading preview the only fix is duplicating the dev theme MANUALLY in the admin (a
@@ -471,7 +492,9 @@ overlay_settings() {
     overlay_fail overlay_pull_failed "$target" "$reused" "$perr" "$reason"
   fi
   if push_retry "$perr" shopify theme push --store "$STORE" --theme "$target" --path "$tmp" --nodelete "${ONLY[@]}"; then
-    rm -f "$perr"; return 0   # no drift — settings applied
+    rm -f "$perr"
+    verify_overlay "$target" "$tmp"   # exit 0 is the transport's opinion — read the overlay back
+    return 0
   fi
   # Only real DRIFT (Shopify rejecting a setting whose code is missing from this branch) justifies the
   # manual-duplication verdict, so it is gated on the drift wording; a 503, a socket hang-up or an
@@ -492,6 +515,112 @@ overlay_settings() {
   reason="$(grep -iE 'error|fail|invalid|denied' "$perr" | head -1 | sed -E 's/^[[:space:]]*//' || true)"
   [ -n "$reason" ] || reason="$(first_line "$perr")"
   overlay_fail overlay_push_failed "$target" "$reused" "$perr" "$reason"
+}
+
+# --- overlay read-back --------------------------------------------------------
+# `shopify theme push` exiting 0 with a clean stderr does not prove the files landed: Shopify
+# validates theme JSON server-side and silently DROPS a file it rejects while the push reports
+# success (the same class theme-json.sh's `set` read-back exists for). Observed live 2026-08-31:
+# a dev theme's templates/product.json referenced a block type absent from this branch's schemas —
+# the overlay "succeeded", the file never landed, every PDP on the preview 404'd. So after a clean
+# overlay push the settings patterns are pulled back off the TARGET and every source *.json must be
+# present. Presence only, by design: content can differ legitimately (Shopify re-stamps its /*…*/
+# banner), and the verified failure class drops the whole file — which also means a --reuse
+# target's pre-existing stale copy can still pass (known ceiling). A missing file is re-checked
+# once after $OVERLAY_VERIFY_WAIT seconds (a read straight after a write can trail it), then
+# reported as warn=overlay_file_dropped — a WARNING, not settings_drift: unlike the stderr-worded
+# drift (where the push failed wholesale) everything else landed, the cheap recovery is fixing the
+# one file via theme-json.sh set, and deleting the theme would only replay the same silent drop on
+# the next create. A verify PULL that fails must never fail a run whose pushes all succeeded —
+# that is overlay=unverified. FND_CPT_OVERLAY_VERIFY=0 skips the read-back (overlay=skipped).
+OVERLAY_VERIFY="skipped"; OVERLAY_DROPPED=""
+overlay_missing() { # $1 = overlay source dir, $2 = pulled-back dir → source *.json absent from $2
+  ( cd "$1" && find . -type f -name '*.json' ) | sed 's|^\./||' | while IFS= read -r f; do
+    [ -f "$2/$f" ] || printf '%s\n' "$f"
+  done
+}
+overlay_unknown_types() { # $1 = dropped source file → types with no schema in the pushed code, comma-joined
+  local t types body out=""
+  # Every theme *.json Shopify serves carries an auto-generated /*…*/ banner, which jq refuses —
+  # stripping it is what keeps the structural read below the live path instead of the fallback.
+  # Only a LEADING banner is stripped: a /*…*/ further down is a settings value, not a comment.
+  body="$(awk 'NR==1 && $0 ~ /^[ \t]*\/\*/ { skip=1 } skip { if (sub(/.*\*\//, "")) { skip=0; if (length) print }; next } { print }' "$1" 2>/dev/null || true)"
+  if [ -n "$body" ] && printf '%s\n' "$body" | jq empty >/dev/null 2>&1; then
+    # only the section/block `type` chains — a settings VALUE that happens to sit under a "type"
+    # key is content, not a schema reference. `objects |` keeps a non-object inside a blocks
+    # container from erroring out the collector, which would cost the whole file's type list.
+    types="$(printf '%s\n' "$body" | jq -r 'def t: objects | ((.type? | strings), (.blocks[]? | t)); [.sections[]? | t] | unique | .[]' 2>/dev/null || true)"
+  else
+    # unparseable even without a banner — raw scan instead. On this path the list is a HINT, not a
+    # definitive one: the schema check below only removes types it RECOGNIZES, so a content value
+    # that happens to sit under a "type" key survives into unknown_types=.
+    types="$(grep -oE '"type"[[:space:]]*:[[:space:]]*"[^"]+"' "$1" 2>/dev/null | sed -E 's/.*"([^"]*)"$/\1/' | sort -u || true)"
+  fi
+  # read, not `for t in $types` — an unquoted expansion would glob a type like "Bundle * Save"
+  # against the checkout; a heredoc keeps $out in THIS shell where a pipe would not
+  while IFS= read -r t; do
+    # @app/@theme are placeholders; a type with odd characters would also poison the grep below
+    case "$t" in ''|@*|*[!A-Za-z0-9_-]*) continue ;; esac
+    [ -f "$TMP_CODE/sections/$t.liquid" ] && continue
+    [ -f "$TMP_CODE/blocks/$t.liquid" ] && continue
+    grep -qE "\"type\"[[:space:]]*:[[:space:]]*\"$t\"" "$TMP_CODE"/sections/*.liquid "$TMP_CODE"/blocks/*.liquid 2>/dev/null && continue
+    out="$out,$t"
+  done <<EOF
+$types
+EOF
+  printf '%s' "${out#,}"
+}
+verify_overlay() { # $1 = target theme id, $2 = overlay source dir; fills OVERLAY_VERIFY/_DROPPED
+  local target="$1" src="$2" verr vdir missing f t rows=""
+  [ "${FND_CPT_OVERLAY_VERIFY:-1}" = "0" ] && return 0
+  OVERLAY_VERIFY="unverified"
+  vdir="$(mk_tmpd)"; CLEAN_DIRS+=("$vdir")
+  # the stderr sink lives INSIDE the verify dir, so cleanup() reaps it even when the run aborts
+  # mid-verify — a loose $TMPDIR file would just accumulate
+  verr="$vdir/verify.err"
+  # --nodelete is NOT decorative here: verify.err shares the pull target dir, and without the
+  # flag the CLI is licensed to delete local files absent from the theme
+  push_retry "$verr" shopify theme pull --store "$STORE" --theme "$target" --path "$vdir" "${ONLY[@]}" --nodelete </dev/null \
+    || return 0
+  missing="$(overlay_missing "$src" "$vdir")"
+  if [ -n "$missing" ]; then
+    # non-fatal like the pin step below: past this point the theme is real, and dying on sleep's
+    # complaint would take the run non-zero without ever printing the id the caller needs
+    sleep "$OVERLAY_VERIFY_WAIT" || true
+    vdir="$(mk_tmpd)"; CLEAN_DIRS+=("$vdir")
+    # a failed RE-pull keeps the first observation — loud beats silent here
+    if push_retry "$verr" shopify theme pull --store "$STORE" --theme "$target" --path "$vdir" "${ONLY[@]}" --nodelete </dev/null; then
+      missing="$(overlay_missing "$src" "$vdir")"
+    fi
+  fi
+  [ -n "$missing" ] || { OVERLAY_VERIFY="verified"; return 0; }
+  OVERLAY_VERIFY="partial"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    t="$(overlay_unknown_types "$src/$f")"
+    rows="$rows$f"$'\t'"$t"$'\n'
+  done <<EOF
+$missing
+EOF
+  OVERLAY_DROPPED="$rows"
+  return 0
+}
+# The overlay keys, printed with the theme keys on create: overlay= is the machine-readable
+# verdict, and each dropped file gets its own warn= line so a caller that only skims for error=
+# still sees the failure spelled out in the stream.
+print_overlay_keys() {
+  printf 'overlay=%s\n' "$OVERLAY_VERIFY"
+  if [ "$OVERLAY_VERIFY" = "unverified" ]; then
+    printf 'warn=overlay_unverified — the read-back pull failed, so whether every settings file landed is unknown; spot-check a key template (theme-json.sh get) before trusting the preview\n'
+    return 0
+  fi
+  [ "$OVERLAY_VERIFY" = "partial" ] || return 0
+  printf '%s' "$OVERLAY_DROPPED" | while IFS=$'\t' read -r f t; do
+    [ -n "$f" ] || continue
+    if [ -n "$t" ]; then printf 'warn=overlay_file_dropped file=%s unknown_types=%s\n' "$f" "$t"
+    else printf 'warn=overlay_file_dropped file=%s\n' "$f"; fi
+  done
+  printf 'hint=Shopify rejected the file(s) server-side while the push reported success — the dev-theme customizer state references a section/block type this branch does not define, so the affected pages render 404 (missing template) or stale content. Fix the one file: pull it (theme-json.sh get), strip the unknown section/block entry plus its order/block_order reference, push it back with theme-json.sh set (read-back verified) — or duplicate the dev theme manually in the admin for a full-fidelity preview.\n'
 }
 
 # --- session-theme pin --------------------------------------------------------
@@ -917,6 +1046,7 @@ case "$MODE" in
     printf 'editor_url=%s\n' "$EDITOR"
     printf 'reused=%s\n' "$REUSED"
     printf 'built=%s\n' "$BUILT"
+    print_overlay_keys
     [ "$PIN" -eq 0 ] || print_pin_keys
     ;;
 

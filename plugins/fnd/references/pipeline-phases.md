@@ -81,7 +81,11 @@ its brief says otherwise.
    preserved); no line recorded → build the `[ELC-…]` theme
    (`<plugin root>/scripts/create-preview-theme.sh create --name "<name>" --reuse`)
    and record it as `session-theme: <id>` + links in `notes.md`, so create
-   happens at most once per work stream. **No `--pin-toml` here** — this phase is past the ✋
+   happens at most once per work stream. A create/reuse that exits **0** but prints
+   `overlay=partial` + `warn=overlay_file_dropped` is not a reviewable preview — the named
+   settings files never landed, so their pages 404 or serve stale content; follow
+   `<plugin root>/references/preview-theme-errors.md` and never book those 404s as branch
+   defects. **No `--pin-toml` here** — this phase is past the ✋
    and rewriting the developer's `shopify.theme.toml` unasked (possibly the choice they
    declined at Step 0) is not an autonomous phase's call; the pin is re-asserted by the Step 0
    gate on the next entry. Never simulate a

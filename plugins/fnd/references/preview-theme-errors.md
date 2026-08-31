@@ -2,8 +2,11 @@
 
 Single home for interpreting `create-preview-theme.sh` failures and building page
 deep-links, read on demand by both callers (`preview-theme` skill; `create-pull-request`
-step 4). The script never half-succeeds silently — every failure exits with one `error=`
-key. Flow context (decision flow, drift blockquote, push-root mechanics) stays in
+step 4). Every HARD failure exits with one `error=` key. The one class Shopify hides from the
+CLI — a settings file rejected server-side on a push that exits 0 with a clean stderr — is
+caught instead by `create`'s overlay read-back and surfaces as `overlay=partial` +
+`warn=overlay_file_dropped` on a run that still exits 0; act on those warn lines (below), never
+skim past them. Flow context (decision flow, drift blockquote, push-root mechanics) stays in
 `<plugin root>/skills/create-pull-request/REFERENCE.md → Preview theme`, where **plugin root** =
 the plugin's own directory — this file is `<plugin root>/references/preview-theme-errors.md`, and
 every `<plugin root>/…` path below resolves the same way.
@@ -29,6 +32,20 @@ expands it; on other hosts substitute the plugin root's absolute path.
 - **`error=overlay_push_failed`** / **`error=overlay_pull_failed`** → transient or auth (`cause=`
   names it), so this one IS worth retrying; the same drift blockquote covers the `--reuse`
   `mixed_state=` case.
+- **`overlay=partial` + `warn=overlay_file_dropped file=<f> [unknown_types=<t,…>]`** (create,
+  **exit 0**) → the same drift as `error=settings_drift`, but Shopify rejected the file(s)
+  server-side while the push reported success — caught by the read-back, not the CLI. The affected
+  pages **404 (missing template) or show stale content**, so the preview is NOT reviewable until
+  fixed; say so instead of handing over the preview URL as-is. Recover **per file on the surviving
+  theme** — do not delete/re-create, a re-create replays the same drop: `theme-json.sh get` the
+  file from the DEV theme, strip the `unknown_types=` section/block entry plus its
+  `order`/`block_order` reference, `theme-json.sh set` it onto the preview theme (read-back
+  verified) — or, when full-fidelity settings matter, the manual dev-theme duplication from the
+  `settings_drift` entry above. `unknown_types=` is best-effort (source types matched against the
+  pushed code's schemas); absent, diff the file's section/block types against the branch by hand.
+- **`overlay=unverified` + `warn=overlay_unverified`** (create, exit 0) → the read-back pull
+  failed, so whether every settings file landed is unknown. Spot-check a key template
+  (`theme-json.sh get --theme <id> --file templates/product.json`) before offering the preview.
 - **`error=ambiguous_name`** / **`error=unusable_theme_id`** → nothing was pushed; re-run
   `refresh --theme <id>` naming the one theme you mean.
 - **`error=live_theme_write_refused`** → nothing was pushed: the target IS the published theme.

@@ -147,7 +147,11 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    --theme <id>` — validates it against the store, refuses the live theme, pushes nothing).
    Record the id as a dated `session-theme: <id>` bullet in `notes.md` the instant the
    script returns it (crash-safe ordering), with the name/`preview_url` only if the script
-   returned them and `superseded: <id>` when it reported `superseded_theme_id=`. Then hand
+   returned them and `superseded: <id>` when it reported `superseded_theme_id=`. A create
+   that exits 0 while printing `overlay=partial` + `warn=overlay_file_dropped` is not a
+   reviewable preview — the named settings files never landed and their pages 404 or go
+   stale; record the id, then follow `<plugin root>/references/preview-theme-errors.md`
+   before anyone reads the preview or blames the branch for those 404s. Then hand
    over item 3's start command with `--theme <id>` filled in. Never read or echo
    `shopify.theme.toml`.
 

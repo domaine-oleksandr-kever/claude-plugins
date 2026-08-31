@@ -47,6 +47,10 @@ the PR's theme-preview table, and aftercare refreshes.
    `[ELC-206] Kever | Domaine`. `--reuse` matches by name, and the qa phase and
    `create-pull-request` derive the same string, so a name invented here (`[ELC-206] cart
    drawer fix`) makes those later calls miss and create a **second** theme for one ticket.
+   `create` exiting **0** is not the whole verdict: a run that also prints `overlay=partial`
+   + `warn=overlay_file_dropped` produced a theme whose named settings files never landed
+   (their pages 404 or serve stale content) — record the id, but say the preview is not
+   reviewable yet and follow `<plugin root>/references/preview-theme-errors.md`.
 3. **Run it from the checkout the work lives in.** `shopify.theme.toml` is resolved relative
    to the cwd, and `create` builds the local branch — so a worktree's session theme is created
    from **inside that worktree**, never from the main checkout.

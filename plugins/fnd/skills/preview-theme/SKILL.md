@@ -86,8 +86,12 @@ silently collides with the main checkout's server or overwrites the shared dev t
    `--build-cmd "<cmd>"` for a non-default build. **Any `error=` line** → report it plainly,
    then follow the errors reference's **`error=` outcomes** — it names, per code, whether
    anything was pushed, whether retrying is right, and the recovery. Don't improvise one.
-5. **Report.** Print the resulting `theme_id`, `preview_url`, `editor_url`, `reused`, and
-   `built`. If a `preview_path` is known, also give the page-deep-linked preview and the
+   A run that exits 0 with `overlay=partial` + `warn=overlay_file_dropped` lines is NOT a
+   clean success: the named settings files never landed (their pages 404 or go stale) —
+   report the warn lines and follow the same reference's recovery before offering the URL.
+5. **Report.** Print the resulting `theme_id`, `preview_url`, `editor_url`, `reused`,
+   `built`, and — when it isn't `verified` — the `overlay=` verdict with its warn
+   lines. If a `preview_path` is known, also give the page-deep-linked preview and the
    editor-on-template link (formulas: the errors reference's **Page deep-links**); path or
    template unknown → **ask, never guess**.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id

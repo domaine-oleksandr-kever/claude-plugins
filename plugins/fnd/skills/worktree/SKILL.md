@@ -62,7 +62,10 @@ script, relays what it printed, and — once the worktree exists — settles its
      it and stacks a second theme) vs **pin an existing theme id** the developer supplies
      (`…/create-preview-theme.sh pin --theme <id>`). Record the id as a dated
      `session-theme: <id>` bullet in the shared `.claude/tasks/<WORK-ID>/notes.md` the instant
-     the script returns it.
+     the script returns it. A `create` that exits 0 but prints `overlay=partial` +
+     `warn=overlay_file_dropped` is not a reviewable preview — the named settings files never
+     landed and their pages 404 or serve stale content; hand the id over with that caveat and
+     `<plugin root>/references/preview-theme-errors.md`, not as a clean preview.
 
    Either way, run the script **with the new worktree as the working directory** — a one-shot
    `cd <worktree> && …` inside a single Bash call, whose subshell exits when the command does,
