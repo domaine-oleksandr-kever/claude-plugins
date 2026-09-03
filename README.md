@@ -526,8 +526,8 @@ sources (`doc-reader` writes only its own workspace extract), plus the write-sid
 - **`jira-reader`** — fetches a Jira ticket via the Atlassian MCP and returns clean
   structured fields (keeps raw ADF out of context).
 - **`jira-writer`** — the write-side mirror: writes one **approved** value with a single
-  call — a rich-text custom field via `editJiraIssue` (markdown converted to ADF first), a
-  comment via `addCommentToJiraIssue` (markdown verbatim, `contentFormat: "markdown"`) — so
+  call — a rich-text custom field via `editJiraIssue`, or a comment via
+  `addCommentToJiraIssue` (`contentFormat: "adf"`), the markdown converted to ADF first — so
   the large payload stays in its disposable context, not the main loop. Writer skills
   delegate here **after** the ✋ approval (the gate stays in the skill; the agent never
   authorizes).

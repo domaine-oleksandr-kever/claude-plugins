@@ -33,6 +33,9 @@
  * break-separated segment on its own so no mark may span a break: a newline INSIDE marked text
  * (including a code span) degrades to a space, and a newline inside unmarked text is emitted as a
  * hard break — so it returns as a hardBreak node rather than as text carrying a newline.
+ * A third one is deliberate: a bare https:// URL sitting in UNLINKED text is not escaped here, so
+ * md-to-adf reads it back as a GFM autolink and the field gains a `link` mark — a URL stored as
+ * inert prose (an API writer that never linkified it) becomes clickable on the first write-back.
  */
 'use strict';
 const fs = require('fs');

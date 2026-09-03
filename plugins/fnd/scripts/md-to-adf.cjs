@@ -6,9 +6,9 @@
  * Assumptions, Documentation Links) store ADF, not Markdown. The fnd write-back skills
  * run the APPROVED markdown through this script and pass the resulting ADF object to
  * editJiraIssue — so content renders correctly instead of showing literal `#`/`*`/`|`.
- * Comments are NOT a target: addCommentToJiraIssue takes markdown as a string, so the
- * comment path skips this converter. Dependency-free (Node only); deterministic, so the
- * model never hand-builds ADF JSON.
+ * Comments take the same output serialized as a string (addCommentToJiraIssue with
+ * contentFormat "adf"): the MCP's own markdown path leaves bare URLs inert. Dependency-free
+ * (Node only); deterministic, so the model never hand-builds ADF JSON.
  *
  * Usage:
  *   node md-to-adf.cjs <file.md>         # read from a file
@@ -27,7 +27,8 @@
  * to stderr when the ADF is large, so you trim/restructure instead of shipping a fragile blob.
  *
  * Supported: headings (#..######), paragraphs, **bold**, *italic*, ***bold-italic***, `inline code`,
- * [links](url), <autolinks>, ~~strike~~, nested inline marks (**bold `code`**, **[link](u)**),
+ * [links](url), <autolinks>, bare https:// http:// mailto: URLs (GFM extended autolinks —
+ * trailing sentence punctuation stays prose), ~~strike~~, nested inline marks (**bold `code`**, **[link](u)**),
  * hard line breaks (two trailing spaces or a trailing backslash), bullet/ordered lists,
  * ``` fenced code blocks ```, --- horizontal rules, > blockquotes (which hold BLOCKS — a quoted
  * fence, list or second paragraph survives; a construct ADF forbids inside a quote degrades to
@@ -175,6 +176,36 @@ function scanAutolink(s, i) {
   return AUTOLINK_RE.test(body) ? { href: body, end: close + 1 } : null;
 }
 
+// Bare `https://…` in prose, the GFM extended-autolink subset — what a developer pastes
+// (a preview-theme URL, a Figma link). Without it the URL lands in Jira as inert text.
+// Only well-known schemes, so `foo:bar` prose is never linkified; the run must start a word
+// (line start, whitespace, or a delimiter GFM allows: * _ ~ ( and a quote) and ends at
+// whitespace or `<`. Trailing punctuation belongs to the sentence, not the URL, and a
+// closing paren is dropped only when nothing inside the URL opened it (`(see https://x.dev)`
+// vs `https://en.wikipedia.org/wiki/Foo_(bar)`). Escapes inside the run are consumed the
+// same way as in prose, so a `\_` from another converter's escaping is not a URL character.
+const BARE_URL_RE = /(?:https?:\/\/|mailto:)[^\s<]+/iy;
+const BARE_URL_BOUNDARY_RE = /[ \t\n*_~("']/;
+const TRAILING_PUNCT = '?!.,:;*~_"\'';
+function scanBareUrl(s, i) {
+  if (i > 0 && !BARE_URL_BOUNDARY_RE.test(s[i - 1])) return null;
+  BARE_URL_RE.lastIndex = i;
+  const m = BARE_URL_RE.exec(s);
+  if (!m) return null;
+  let end = i + m[0].length;
+  let open = 0;
+  for (let k = i; k < end; k++) { if (s[k] === '(') open++; else if (s[k] === ')') open--; }
+  while (end > i && s[end - 2] !== '\\') {
+    const c = s[end - 1];
+    if (TRAILING_PUNCT.includes(c)) end--;
+    else if (c === ')' && open < 0) { end--; open++; }
+    else break;
+  }
+  const href = unescapeHref(s.slice(i, end));
+  if (!/^(?:https?:\/\/|mailto:)./i.test(href)) return null; // a bare scheme is prose
+  return { href, end };
+}
+
 // Find the closing delimiter run for an opener of `n` × `ch`, skipping escapes and code spans.
 // The closer must be a run of EXACTLY n, so both runs are consumed WHOLE (`**a *b* c**` closes
 // on the final `**`, `*a **b** c*` on the final `*`). Matching a longer run and taking n
@@ -297,6 +328,15 @@ function inlineNodes(input, marks, depth) {
         flush();
         out.push(...inlineNodes(e.inner, mergeMarks(marks, ...e.marks), depth + 1));
         i = e.end;
+        continue;
+      }
+    } else if (ch === 'h' || ch === 'H' || ch === 'm' || ch === 'M') {
+      const u = scanBareUrl(input, i);
+      if (u) {
+        flush();
+        const n = textNode(u.href, mergeMarks(marks, { type: 'link', attrs: { href: u.href } }));
+        if (n) out.push(n);
+        i = u.end;
         continue;
       }
     }

@@ -28,41 +28,40 @@ reaches the main loop.
   `comment`. The caller resolves field ids (`jira-field-ids.md`); you use what you are given.
 - **source** — path to the approved markdown file — the exact content to write, verbatim.
 - (optional) `tables: keep` — pass this only if the caller says tables must be preserved;
-  default is `--no-tables` (ADF tables are the heaviest, most fragile construct). A
-  converter flag, so it is moot on the comment path.
+  default is `--no-tables` (ADF tables are the heaviest, most fragile construct).
 
 If ticket, target, or source is missing or ambiguous, do **not** guess or write — return
 `error: <what is missing>` and stop.
 
 ## How to write
 
-The two targets take **different formats**. A rich-text **custom field** stores **ADF** — a
-bare markdown string is rejected (`Operation value must be an Atlassian Document…`) or
-stored literally, so convert first, via the converter (never hand-build ADF). A **comment**
-is the reverse: `addCommentToJiraIssue` declares `commentBody` as a *string*, so it takes
-the approved markdown **verbatim** with `contentFormat: "markdown"` — no converter run.
+Both targets store **ADF**. A rich-text **custom field** rejects a bare markdown string
+(`Operation value must be an Atlassian Document…`) or stores it literally; a **comment**
+accepts markdown, but the MCP's own markdown conversion leaves a bare URL as inert text and
+escapes the `_` in its query string — so both go through the converter (never hand-build
+ADF), and the comment carries the result as a JSON **string** with `contentFormat: "adf"`.
 Full mechanics + call shape: `<plugin root>/references/jira-adf-write.md`.
 
 Both calls also require `cloudId`: pass the site host `meetdomaine.atlassian.net` (cloudId
 resolution: `jira-field-ids.md`).
 
-1. **Convert** — **custom-field target only** (a `comment` target skips this step entirely):
-   `node <plugin root>/scripts/md-to-adf.cjs --no-tables <source>` (drop `--no-tables`
-   only when the brief says `tables: keep`). Capture stdout — the minified ADF document.
-   If the converter prints a size warning to stderr and the ADF is large, the write is
-   fragile: return `error: ADF too large (<n> bytes) — trim the source` rather than ship a
+1. **Convert**: `node <plugin root>/scripts/md-to-adf.cjs --no-tables <source>` (drop
+   `--no-tables` only when the brief says `tables: keep`). Capture stdout — the minified ADF
+   document. If the converter prints a size warning to stderr and the ADF is large, the write
+   is fragile: return `error: ADF too large (<n> bytes) — trim the source` rather than ship a
    fragile blob (the caller decides how to trim). **Never** fall back to a raw markdown string.
 2. **Write** with ONE MCP call:
    - a **field**: `editJiraIssue` on `<ticket>` with `fields: { "<target>": <the ADF object> }`.
-   - a **comment**: `Read <source>`, then `addCommentToJiraIssue` on `<ticket>` with
-     `commentBody: <that markdown, verbatim>` and `contentFormat: "markdown"`.
+   - a **comment**: `addCommentToJiraIssue` on `<ticket>` with `commentBody: <the ADF JSON,
+     as one string>` and `contentFormat: "adf"` — the converter's stdout verbatim, not an
+     object (`commentBody` is declared as a string).
 3. If the MCP call returns an error envelope, return `error: <its message>` verbatim — do
-   not retry with a different shape, and on a field write do not fall back to markdown.
+   not retry with a different shape, and do not fall back to markdown.
 
 ## Output — one line, data only
 
 - success: `ok: <ticket> <target> written (<n> bytes)`  (`<target>` = the field id, or `comment`;
-  `<n>` = the ADF bytes on a field write, the markdown bytes on a comment)
+  `<n>` = the ADF bytes)
 - failure: `error: <one-line reason>`  (missing brief, oversized ADF, or the MCP error)
 
 Return only that line — no chatter, no payload echo. The written value stays in your context;

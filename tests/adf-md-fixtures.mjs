@@ -515,6 +515,51 @@ check('m2a-autolink-mailto', m2a('<mailto:a@b.test>'), doc([
   p([t('mailto:a@b.test', [mLink('mailto:a@b.test')])]),
 ]));
 
+// ---------------------------- bug-20: a bare URL in prose lands in Jira as inert text --
+
+// the GFM autolink form — what a developer pastes — must carry a `link` mark (2026-09-03 report)
+const previewUrl = 'https://example.myshopify.com/?_ab=0&_fd=0&preview_theme_id=150838182070';
+check('bug-m2a-bare-url', m2a('Bare: ' + previewUrl), doc([
+  p([t('Bare: '), t(previewUrl, [mLink(previewUrl)])]),
+]));
+// sentence punctuation after the URL is prose; a `)` closes the URL only when nothing inside
+// the URL opened it
+check('bug-m2a-bare-url-punct',
+  m2a('See https://x.dev/a. Then https://x.dev/b, or (https://x.dev/c) and https://en.wikipedia.org/wiki/Foo_(bar) end'),
+  doc([p([
+    t('See '), t('https://x.dev/a', [mLink('https://x.dev/a')]),
+    t('. Then '), t('https://x.dev/b', [mLink('https://x.dev/b')]),
+    t(', or ('), t('https://x.dev/c', [mLink('https://x.dev/c')]),
+    t(') and '), t('https://en.wikipedia.org/wiki/Foo_(bar)', [mLink('https://en.wikipedia.org/wiki/Foo_(bar)')]),
+    t(' end'),
+  ])]));
+check('bug-m2a-bare-url-quoted', m2a('"https://q.dev" and mailto:a@b.co;'), doc([
+  p([t('"'), t('https://q.dev', [mLink('https://q.dev')]), t('" and '), t('mailto:a@b.co', [mLink('mailto:a@b.co')]), t(';')]),
+]));
+// only well-known schemes, only at a word start, never a bare scheme, never inside a code span
+check('bug-m2a-bare-url-not', m2a('foo:bar https:// x word-https://x.dev `https://c.dev`'), doc([
+  p([t('foo:bar https:// x word-https://x.dev '), t('https://c.dev', [mCode])]),
+]));
+// an escape inside the run is consumed like anywhere else in prose (the Atlassian MCP's own
+// markdown writer escapes query-string underscores that way)
+check('bug-m2a-bare-url-escaped', m2a('https://x.dev/?\\_ab=0&\\_fd=1'), doc([
+  p([t('https://x.dev/?_ab=0&_fd=1', [mLink('https://x.dev/?_ab=0&_fd=1')])]),
+]));
+// inside a label the explicit target wins; inside a mark the mark is kept
+check('bug-m2a-bare-url-in-label', m2a('[https://a.test](https://b.test)'), doc([
+  p([t('https://a.test', [mLink('https://b.test')])]),
+]));
+check('bug-m2a-bare-url-in-strong', m2a('**see https://x.dev/b**'), doc([
+  p([t('see ', [mStrong]), t('https://x.dev/b', [mStrong, mLink('https://x.dev/b')])]),
+]));
+// a plain-text URL stored in ADF (written by something that never linkified it) comes back
+// LINKED after one read-edit-write cycle — the one deliberate non-identity of the pair — and
+// is stable from then on
+const plainUrl = doc([p([t('see https://n.test/p here')])]);
+const linkedUrl = doc([p([t('see '), t('https://n.test/p', [mLink('https://n.test/p')]), t(' here')])]);
+check('bug-roundtrip-plain-url-promoted', m2a(a2m(plainUrl)), linkedUrl);
+check('bug-roundtrip-plain-url-stable', m2a(a2m(linkedUrl)), linkedUrl);
+
 // ------------------------------------------ bug-19: a code span of nothing but spaces --
 
 // CommonMark only strips the padding space when the content is not all whitespace, so padding
@@ -824,6 +869,8 @@ const MD_CORPUS = [
   ['code-blank', '`  `', { canonical: true }],
   ['pipeless-table', 'Intro\nA | B\n--- | ---\n1 | 2', { leakFree: true }],
   ['autolink', 'see <https://n.test/p> here', { canonical: true, leakFree: true }],
+  // emitted back in the <…> form (lossless for any scheme and trailing dot), so not canonical
+  ['bare-url', 'see https://x.dev/a. (https://x.dev/b) done', { leakFree: true }],
   ['quote-multiblock', '> a\n>\n> ```\n> x\n> ```', { canonical: true }],
   ['label-code-bracket', '[`a]b`](https://u.test)', { canonical: true }],
   ['regex-backslash', 'Match ^\\d+\\.\\d+$ here', { leakFree: true }],

@@ -1,4 +1,4 @@
-# Writing to Jira — ADF for rich-text fields, markdown for comments
+# Writing to Jira — ADF for rich-text fields and comments
 
 The rich-text **custom** fields — **Acceptance Criteria, Assumptions, Technical Approach,
 Steps to test, Documentation Links** — store **Atlassian Document Format**, not markdown: a
@@ -9,10 +9,12 @@ and pass that object as the field value. This applies to every skill that writes
 any `qa-feature-or-fix` write. **Description** is a *standard* field and may accept markdown,
 but we send it as ADF too — one path, one converter.
 
-**Comments are the exception — no conversion.** `addCommentToJiraIssue` declares
-`commentBody` as a *string*, so post the approved **markdown verbatim** with
-`contentFormat: "markdown"`; an ADF object in `commentBody` is schema-invalid. Nothing
-below (converter, size rules, `--no-tables`) applies to a comment.
+**Comments go through the same converter.** `addCommentToJiraIssue` does accept markdown
+(`contentFormat: "markdown"`), but the MCP's own conversion leaves a bare URL as inert,
+unclickable text and backslash-escapes the `_` in its query string (a preview-theme URL
+comes out as `?\_ab=0&\_fd=0`). So convert, then pass the ADF as a JSON **string** —
+`commentBody: <converter stdout verbatim>` with `contentFormat: "adf"`. `commentBody` is
+declared as a string, so the ADF goes in serialized, never as an object.
 
 Both write calls also require **`cloudId`** — pass the site host
 `meetdomaine.atlassian.net` (cloudId resolution: `jira-field-ids.md`).
@@ -40,7 +42,7 @@ writer at all.
 
 One case keeps the write **inline** (no `jira-writer` spawn): you are **already inside a
 subagent** — subagents can't nest, and the ADF is already off the main loop, so convert
-first (field targets only) and write directly with the mechanics below. A **manual** update
+first and write directly with the mechanics below. A **manual** update
 is different again: the developer edits Jira themselves, so no converter runs and no writer
 is spawned at all.
 
@@ -55,20 +57,22 @@ on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so the command r
 node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <approved.md>   # or pipe via stdin
 ```
 
-It prints the ADF document JSON to stdout; pass that object straight to `editJiraIssue`.
-Dependency-free Node, deterministic; supports headings, **bold**/*italic*/`code`/links/
-~~strike~~, bullet & ordered lists, fenced code blocks, `---` rules, blockquotes, and GFM
-tables. (Underscore emphasis is deliberately ignored so `customfield_10038`-style
-snake_case survives — use `*`/`**` for emphasis.) Typical flow: write the approved content
-to a temp `.md`, convert, capture the JSON, then `editJiraIssue` with
-`fields: { "<id>": <that JSON> }`.
+It prints the ADF document JSON to stdout; pass that object straight to `editJiraIssue`
+(or, for a comment, the same text as the `commentBody` string). Dependency-free Node,
+deterministic; supports headings, **bold**/*italic*/`code`/~~strike~~, links in all three
+forms — `[text](url)`, `<url>`, and a bare `https://…` pasted in prose (trailing sentence
+punctuation stays prose) — bullet & ordered lists, fenced code blocks, `---` rules,
+blockquotes, and GFM tables. (Underscore emphasis is deliberately ignored so
+`customfield_10038`-style snake_case survives — use `*`/`**` for emphasis.) Typical flow:
+write the approved content to a temp `.md`, convert, capture the JSON, then `editJiraIssue`
+with `fields: { "<id>": <that JSON> }`.
 
 ## Keep the ADF compact — a huge field value is fragile (never fall back to markdown)
 
 A large ADF object is fragile to inline into one `editJiraIssue` call — one slip breaks
 the JSON, which tempts "shortcutting" to a raw **markdown string**. Don't: Jira rich-text
-**custom** fields reject it (`Operation value must be an Atlassian Document…`); the markdown
-path is the comment path, not a field-write fallback. Keep the ADF small instead:
+**custom** fields reject it (`Operation value must be an Atlassian Document…`), and a
+comment posted as markdown loses its bare URLs. Keep the ADF small instead:
 
 - **Output is minified by default** — use `--pretty` only to eyeball it.
 - **Pass `--no-tables`** — ADF `table` nodes are the heaviest construct; `--no-tables`
@@ -87,7 +91,9 @@ path is the comment path, not a field-write fallback. Keep the ADF small instead
 **Call shape:** `editJiraIssue` with `cloudId: "meetdomaine.atlassian.net"`,
 `issueIdOrKey: "<KEY>"`, `fields: { "<customfield_id>": <ADF doc object> }` — field IDs
 live in `jira-field-ids.md` (their single home; an ID missing from the `names` map → Step B
-in `jira-custom-fields.md`).
+in `jira-custom-fields.md`). A **comment**: `addCommentToJiraIssue` with the same `cloudId`
+and `issueIdOrKey`, `commentBody: "<ADF doc as one JSON string>"`, `contentFormat: "adf"`
+(add `commentId` to update an existing comment).
 
 > Honour the TA rule: **no internal repo file links** — reference in-repo files with an
 > inline-`code` mark, never a `link` mark. External links (Jira, Figma, public docs) use
