@@ -178,8 +178,9 @@ its brief says otherwise.
 7. **jira-hand-off** — inline in the conductor (no phase subagent, so no model to pin), but
    delegate its one Jira write to the `jira-writer` subagent so the comment body
    never lands in the conductor context. Policy allows → write the approved
-   comment to a temp file (a **clickable PR link** + the distilled judgment calls from
-   `notes.md`: accepted edge cases, anything not implemented and why, open questions),
-   then spawn `jira-writer` (ticket · `comment` · that file) for the one
+   comment (a **clickable PR link** + the distilled judgment calls from `notes.md`: accepted
+   edge cases, anything not implemented and why, open questions) to a `mktemp` file — or the
+   workspace, never a fixed name in the shared temp directory — then spawn `jira-writer`
+   (ticket · `comment` · that file) for the one
    `addCommentToJiraIssue` write (`<plugin root>/references/jira-adf-write.md`);
    policy forbids → print the comment for manual paste.

@@ -31,12 +31,31 @@ touches the main loop.
 
 Brief (one writer per field; parallel writers for several fields):
 
-> **jira-writer** — ticket `<KEY>` · target `<customfield_id>` (or `comment`) · source
-> `<path to the approved .md>`. (Add `tables: keep` only if tables must be preserved.)
+> **jira-writer** — ticket `<KEY>` · target `<customfield_id>` (or `comment`, or
+> `comment:<id>` to replace that comment) · source `<path to the approved .md>`. (Add
+> `tables: keep` only if tables must be preserved.)
 
-It returns one line: `ok: <KEY> <target> written (<n> bytes)` or `error: <reason>`.
-The approval gate stays in the calling skill — `jira-writer` only converts-if-needed and
-writes, it never authorizes or decides content. Resolve the field id yourself
+It returns one line: `ok: <KEY> <target> written (<n> bytes, read-back verified)` or
+`error: <reason>`. `ok` means the writer read the target back and found the source's headings
+*and* a distinctive sentence of it in there.
+
+A batch of parallel writers therefore needs no re-read from you — but only for **distinct**
+targets: never hand one field id to two writers, since both verify their own write and the
+later one silently wins. Differing `<n>` across parallel writers is the tell that they shipped
+distinct documents. Never report the batch as written on the strength of the write calls
+succeeding. On an `error:` line:
+
+- `… read-back does not match source` on a **field** — that target holds the wrong document
+  (a sibling's, typically): re-run that writer alone; setting a field is idempotent.
+- `… read-back does not match source` on a **comment** — re-run it with target `comment:<id>`,
+  the id taken from the error line, so it replaces the comment in place instead of appending a
+  second one.
+- `… field_id_mismatch …` — the id is not on that issue: re-resolve it (`jira-field-ids.md`,
+  Step B in `jira-custom-fields.md`) and re-run the writer with the new id; not a content
+  mismatch.
+
+The approval gate stays in the calling skill — `jira-writer` only converts-if-needed, writes
+and verifies, it never authorizes or decides content. Resolve the field id yourself
 (`jira-field-ids.md`) and pass it in; a manual-update path (developer edits Jira) needs no
 writer at all.
 
@@ -64,8 +83,27 @@ forms — `[text](url)`, `<url>`, and a bare `https://…` pasted in prose (trai
 punctuation stays prose) — bullet & ordered lists, fenced code blocks, `---` rules,
 blockquotes, and GFM tables. (Underscore emphasis is deliberately ignored so
 `customfield_10038`-style snake_case survives — use `*`/`**` for emphasis.) Typical flow:
-write the approved content to a temp `.md`, convert, capture the JSON, then `editJiraIssue`
-with `fields: { "<id>": <that JSON> }`.
+write the approved content to a `.md` (the workspace file, or `mktemp` — never a fixed name
+in the shared temp directory, which parallel writers overwrite for each other), convert, take
+the JSON from the tool result (stderr shows beside stdout — no `> adf.json` staging), then
+`editJiraIssue` with `fields: { "<id>": <that JSON> }`, then run the read-back check below.
+
+**Read-back check.** A successful write call proves Jira accepted *a* document, not that it was
+yours. A **field**: `getJiraIssue` on the ticket with `fields: ["<id>"]`,
+`responseContentFormat: "markdown"`, `expand: "names"`, same `cloudId` — the id absent from the
+returned `names` map is a wrong id, not wrong content:
+`error: <ticket> <id> field_id_mismatch — not on this issue, re-resolve (jira-field-ids.md)`.
+A **comment**: check the create response if it echoes the stored body, otherwise `getJiraIssue`
+with `fields: ["comment"]` and locate it by the id the create returned. The body that comes back
+must contain **every heading of the source** AND **one distinctive non-heading sentence** of it —
+the first sentence under the first heading, or the first sentence of a headingless source.
+Headings alone prove nothing: the template headings (the seven TA headings, Setup / Steps /
+Expected) are shared by every document on the site. Match **each** anchor by its longest plain
+run — inline code, emphasis and links split a line across ADF text nodes, and a short result
+(≤ 4 KB) arrives as raw ADF rather than markdown (the compression hook converts only larger
+results). Any miss → `error: <ticket> <target> read-back does not match source`, for a comment
+`error: <ticket> comment <id> read-back does not match source`, and stop: no rewrite, no second
+attempt.
 
 ## Keep the ADF compact — a huge field value is fragile (never fall back to markdown)
 
