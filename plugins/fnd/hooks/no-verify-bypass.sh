@@ -10,7 +10,11 @@
 # `command` is a STRING on Claude Code and Cursor and an ARGV ARRAY on Codex's
 # shell / local_shell tools — both are normalized to one line below.
 # Exit 2 + stderr blocks the call and feeds the message back to the model;
-# exit 0 lets it through. A hook failure must never block a commit.
+# exit 0 lets it through. A missing or broken `awk`/`sed`/`tr` degrades the
+# scan to a shorter pipeline and then to the raw command; a `grep` that cannot
+# run swaps the segment matchers for a coarse bash-native rail; an event the
+# extraction toolbox cannot read is scanned as raw text. A tool failure must
+# never disarm the guard, and must never block a plain commit on its own.
 #
 # Best-effort by design — tests/no-verify-bypass-matrix.sh is the FP/FN
 # contract; run it after any regex change. Known residual FPs: bare prose
@@ -22,7 +26,13 @@
 # "fix: never use --no-verify"]) — joining the elements loses the argv
 # boundary that told the message apart from the flags, so the words after the
 # first are read as command text. The `["bash","-lc","<one string>"]` spelling
-# Codex's shell tool actually uses keeps its quoting and is unaffected.
+# Codex's shell tool actually uses keeps its quoting and is unaffected. On a host
+# with no working `sed` the raw command stands in for the normalized scan, so a
+# commit MESSAGE naming the flag false-blocks. With no working `grep` the
+# bash-native rail reads each commit span coarsely, so a hook path or a read-only
+# `--get core.hooksPath` next to a commit false-blocks. With the extraction
+# toolbox unusable (no jq AND no sed, or no `cat`) the raw event text is scanned,
+# whose JSON escapes defeat the message strip — the same message FP as no-sed.
 # Known residual FNs: flags smuggled via variable expansion ($FLAG), hook
 # config rewritten in an earlier, separate Bash call, a hook path a `|`
 # separates from its verb (`… | xargs rm`, a `sed -i` script using `|` as
@@ -34,6 +44,9 @@
 set -u
 
 input="$(cat 2>/dev/null || true)"
+# A `cat` that cannot run empties the event before any matcher sees it, so the builtin reads
+# stdin in its place. No fork and no read on the normal path, where `input` already arrived.
+[ -n "$input" ] || IFS= read -r -d '' input || true
 
 # Fast reject, before the jq/sed/grep pipeline this hook pays on EVERY Bash call:
 # every block below sits behind a `git … commit|push|merge|am|pull` segment, so an event
@@ -92,6 +105,12 @@ if [ -z "$cmd" ]; then
     fi ;;
   esac
 fi
+# Neither extraction path could read a payload that nevertheless carries a command: scan the raw
+# event text instead of nothing. JSON punctuation only ever adds separators the matchers already
+# stop at, and its escapes cost the message strip (a residual FP above), not the verdict.
+if [ -z "$cmd" ]; then
+  case "$input" in *'"command"'*) cmd="$input" ;; esac
+fi
 [ -n "$cmd" ] || exit 0
 
 # Normalize before matching:
@@ -135,7 +154,20 @@ strip_msg_spans() { # extra `-e` expressions ride in the same sed pass (one fork
 scan="$(printf '%s\n' "$cmd" \
   | awk '{ if (sub(/\\$/, "")) printf "%s ", $0; else print }' \
   | strip_msg_spans)"
+# A non-empty command that normalizes to NOTHING means a tool in that pipeline is missing or
+# broken, not that there is nothing left to scan — so a shorter pipeline stands in rather than
+# leaving every matcher below an empty string to agree with. The strip pass alone still dequotes
+# and still drops the message spans (only the continuation join is lost); the raw command keeps
+# both, which costs the quote-split spellings and false-blocks a message naming the flag.
+if [ -z "$scan" ]; then
+  scan="$(printf '%s\n' "$cmd" | strip_msg_spans)"
+  [ -n "$scan" ] || scan="$cmd"
+fi
 
+# The segment shape and the flag shape are read by two engines — `grep -E` below and bash's own
+# `[[ =~ ]]` on the no-grep rail — so each is spelled once: a copy that drifts is a hole nobody sees.
+git_seg_re='(^|[^[:alnum:]_.-])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+'
+no_verify_re='--no-veri(fy|f)?([^[:alnum:]-]|$)'
 # Isolate each `git … <subcommand> …` segment. Any run of global options
 # may sit between git and the subcommand — each a dash token plus at most one value
 # token (-C <path>, -c <k>=<v>, --git-dir=…). grep -o is per-line, so heredoc
@@ -144,7 +176,7 @@ scan="$(printf '%s\n' "$cmd" \
 # an alternation has to arrive PARENTHESIZED or it would split the whole pattern.
 git_segments() { # $1 = subcommand (ERE)
   printf '%s' "$scan" \
-    | grep -oE "(^|[^[:alnum:]_.-])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+$1[^|&;]*" || true
+    | grep -oE "$git_seg_re$1[^|&;]*" || true
 }
 # One grep per subcommand actually named, gated by glob first: a big command (a heredoc writing a
 # file) reaches here whenever it happens to contain the three letters of `git`, and each grep is a
@@ -162,6 +194,36 @@ case "$scan" in *git*)
   case "$scan" in *merge*|*pull*|*" am"*|*$'\t'am*) msegs="$(git_segments '(merge|am|pull)')" ;; esac
   ;;
 esac
+# Every matcher below the segment split is a grep, so empty segments on a host whose grep cannot
+# run mean the tool failed — not that the command is clean. A grep that is ABSENT and one that
+# exits nonzero leave the same empty result, so the probe is a real grep rather than a PATH
+# lookup; the two cheap tests in front keep that fork off the normal path (segments are non-empty
+# there, and the regex needs a git verb). The plain spellings then get a bash-native rail instead
+# of a free pass — spans coarser than the segments a grep would cut, so it over-blocks rather
+# than under-blocks. nocasematch because git reads config keys case-insensitively and HUSKY is
+# spelled in caps.
+nogrep_seg="$git_seg_re(commit|push|merge|am|pull)"
+if [ -z "$segs$psegs$msegs" ] && [[ $scan =~ $nogrep_seg ]] && ! printf 'g\n' | grep -q g 2>/dev/null; then
+  shopt -s nocasematch 2>/dev/null || true
+  nogrep_bundle='(^|[[:space:]])-[[:alpha:]]*n[[:alpha:]]*([^[:alnum:]-]|$)'
+  nogrep_disable='(core\.hookspath|\.husky|\.git/hooks|husky=0)'
+  # `-n` is --no-verify on a commit and something else everywhere else, so the bundle test walks
+  # the commit spans the way git_segments would: read against the whole scan it takes a
+  # neighbouring `git log -n 5`, `git push -n` or `find -name` for a bypass. Parameter expansion,
+  # not `[[ ]]`, so nocasematch cannot make the loop match a word it then fails to strip.
+  bundled=""
+  rest="$scan"
+  while [ "$rest" != "${rest#*[Cc]ommit}" ]; do
+    rest="${rest#*[Cc]ommit}"
+    span="${rest%%[\|\&\;]*}"
+    [[ $span =~ $nogrep_bundle ]] && { bundled=1; break; }
+  done
+  if [[ $scan =~ $no_verify_re ]] || [[ $scan =~ $nogrep_disable ]] || [ -n "$bundled" ]; then
+    echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never commit, push, merge or am with --no-verify (-n on a commit), and never disable them (core.hooksPath, .husky / .git/hooks, HUSKY=0). This host has no working \`grep\`, so the guard is running a reduced text scan that cannot tell a commit message apart from the command: if those words only appear inside your -m message, rephrase it — otherwise re-run the plain git command and let the hooks run." >&2
+    exit 2
+  fi
+  shopt -u nocasematch 2>/dev/null || true
+fi
 [ -n "$segs$psegs$msegs" ] || exit 0
 
 # --no-verify — including the unique prefixes git accepts (--no-veri…) — skips the
@@ -172,7 +234,7 @@ esac
 # stays on the commit segments. Double-dash options never match the bundle pattern,
 # which is what keeps `--no-verify-signatures` — a pull/fetch flag about GPG, not hooks —
 # out of both (the trailing boundary rejects the `-` that follows it).
-if printf '%s\n%s\n%s' "$segs" "$psegs" "$msegs" | grep -qE -- '--no-veri(fy|f)?([^[:alnum:]-]|$)' \
+if printf '%s\n%s\n%s' "$segs" "$psegs" "$msegs" | grep -qE -- "$no_verify_re" \
   || printf '%s' "$segs" | grep -qE -- '(^|[[:space:]])-[a-zA-Z]*n[a-zA-Z]*([^[:alnum:]-]|$)'; then
   echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never commit, push, merge or am with --no-verify (-n on a commit), in any flow. Re-run the same git command and let the hooks run. If a hook fails on a pre-existing repo defect your change didn't touch, report it to the developer (in auto flows: ESCALATE) instead of bypassing — only the developer may bypass, by hand." >&2
   exit 2
@@ -200,6 +262,14 @@ flat="$(printf '%s' "$cmd" | tr '\n' ';' \
     -e 's/config([[:space:]]+-[a-zA-Z-]+([[:space:]]+[^-|&;[:space:]][^|&;[:space:]]*)?)*[[:space:]]+--get[a-z-]*([[:space:]]+[^-|&;[:space:]][^|&;[:space:]]*)?//g' \
     -e "s/config([[:space:]]+--(local|global|system|worktree))*[[:space:]]+$hooks_key([[:space:]]*[|&;])/\\3/g" \
     -e "s/config([[:space:]]+--(local|global|system|worktree))*[[:space:]]+$hooks_key[[:space:]]*\$//")"
+# Same rule as $scan above: empty out of a non-empty command is a failed tool. The newline
+# flattening alone is tried first, then the raw command — whose newlines stay real, which only
+# tightens the per-line greps below (a span can no longer fuse two lines); what is lost is the
+# message strip, so a quoted message naming a hook path can false-block in that state.
+if [ -z "$flat" ]; then
+  flat="$(printf '%s' "$cmd" | tr '\n' ';')"
+  [ -n "$flat" ] || flat="$cmd"
+fi
 
 # Every disable form below names a hook path or husky itself, so a command mentioning neither
 # substring is done here — that keeps the grep below off the ordinary `git commit -m …` path.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # FP/FN contract for the two PreToolUse git guards — every way past the repo's hooks
 # (the flag in any spelling, a config redirect, a disabled hook file) and AI attribution:
-#   plugins/fnd/hooks/no-verify-bypass.sh   (B/A/R/J cases; XP/XQ pin the fast rejects)
+#   plugins/fnd/hooks/no-verify-bypass.sh   (B/A/R/J/D cases; XP/XQ pin the fast rejects)
 #   plugins/fnd/hooks/no-ai-attribution.sh  (N/M/NJ cases)
 # Every regex change to either hook re-runs this matrix: `block` rows are the
 # bypasses that must stay closed (false negatives), `allow` rows are the
@@ -63,6 +63,35 @@ raw() { # $1 block|allow  $2 label  $3 raw stdin  [$4 PATH override]
 # builtins are allowed in a hook's prefilter, so this shim also proves that.
 shim="$TMPD/shim"; mkdir -p "$shim"
 for t in cat tr sed grep awk; do ln -s "$(command -v "$t")" "$shim/$t"; done
+
+# One PATH per casualty of the normalization pipeline (D cases). The first group keeps jq: reading
+# the command out of the event is the J rows' business, these pin the SCAN pipeline behind it. The
+# last three take the EXTRACTION toolbox apart instead — `nojqsed` / `nojqtr` drop jq so the sed
+# fallback owns the read and then lose one half of it, `nocat` keeps jq but removes the reader in
+# front of it. A tool that is present but BROKEN is the same failure as an absent one — `awk` and
+# `grep` here are stubs that exit 3, the shape that shipped these rails — because an empty result,
+# not the PATH lookup, is what the hook has to treat as failure.
+mkshim() { # $1 dirname  $2… tools to link  → prints the dir
+  local d="$TMPD/$1"; shift; mkdir -p "$d"
+  local t; for t in "$@"; do ln -s "$(command -v "$t")" "$d/$t"; done
+  printf '%s' "$d"
+}
+noawk="$(mkshim noawk cat tr sed grep jq)"
+brokenawk="$(mkshim brokenawk cat tr sed grep jq)"
+printf '#!/bin/sh\nexit 3\n' > "$brokenawk/awk"; chmod +x "$brokenawk/awk"
+nosed="$(mkshim nosed cat tr grep awk jq)"
+notr="$(mkshim notr cat sed grep awk jq)"
+nogrep="$(mkshim nogrep cat tr sed awk jq)"
+brokengrep="$(mkshim brokengrep cat tr sed awk jq)"
+printf '#!/bin/sh\nexit 3\n' > "$brokengrep/grep"; chmod +x "$brokengrep/grep"
+nosedgrep="$(mkshim nosedgrep cat tr awk jq)"
+nojqsed="$(mkshim nojqsed cat tr grep awk)"
+nojqtr="$(mkshim nojqtr cat sed grep awk)"
+nocat="$(mkshim nocat tr sed grep awk jq)"
+
+str_ev() { # a Claude-shaped event for a command STRING — check(), for rows that need a PATH override
+  jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}'
+}
 
 # The no-fast-reject twin: every fast reject in both hooks is one `case … esac` line, so dropping
 # those lines yields the same hook with none of them. TWO lines go per hook — for no-ai-attribution
@@ -345,6 +374,69 @@ no_verify_cases() {
   # holds the decoded form.
   local bs='\'
   raw block J07-unicode-escape "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git ${bs}u0063ommit -n -m x\"}}"
+
+  # --- degraded TOOLING (D) ---------------------------------------------------
+  # awk/sed/tr/grep build the text every matcher below reads, so a missing or broken one used to
+  # hand back an empty scan — and an empty scan matches nothing, which allowed a plain
+  # `--no-verify`. The guard now degrades to the raw command instead: the plain spellings must
+  # still block on every one of these PATHs, and an ordinary commit must still go through.
+  # tests/hooks-cursor-sim.sh eval's this function with a harness of its own, where these dirs
+  # do not exist (and where a PATH without `bash` would test the shim's own no-verdict rail
+  # rather than the guard) — so the block runs only where the matrix built them.
+  [ -n "${noawk:-}" ] || return 0
+  local d t
+  for d in "$noawk" "$brokenawk" "$nosed" "$notr" "$nogrep" "$brokengrep" "$nosedgrep"; do
+    t="$(basename "$d")"
+    raw block "D01-$t-long"      "$(str_ev 'git commit --no-verify -m wip')" "$d"
+    raw block "D02-$t-short"     "$(str_ev 'git commit -n -m wip')" "$d"
+    raw block "D03-$t-hookspath" "$(str_ev 'git -c core.hooksPath=/dev/null commit -m wip')" "$d"
+    raw block "D04-$t-husky"     "$(str_ev 'HUSKY=0 git commit -m wip')" "$d"
+    raw allow "D05-$t-plain"     "$(str_ev 'git commit -m "plain message"')" "$d"
+    raw allow "D06-$t-status"    "$(str_ev 'git status')" "$d"
+    raw allow "D07-$t-echo"      "$(str_ev 'echo hello')" "$d"
+  done
+  # The message strip is sed's half of that pipeline, and the fallback drops the failed stage
+  # rather than the whole pass — so with awk (or tr, or grep) gone the strip still runs and a
+  # MESSAGE quoting the flag is still allowed, exactly as J04/A02 pin it with a full toolbox…
+  raw allow "D08-noawk-msg"      "$(str_ev 'git commit -m "never use --no-verify"')" "$noawk"
+  raw allow "D08-brokenawk-msg"  "$(str_ev 'git commit -m "never use --no-verify"')" "$brokenawk"
+  raw allow "D08-notr-msg"       "$(str_ev 'git commit -m "never use --no-verify"')" "$notr"
+  raw allow "D08-nogrep-msg"     "$(str_ev 'git commit -m "never use --no-verify"')" "$nogrep"
+  raw allow "D08-brokengrep-msg" "$(str_ev 'git commit -m "never use --no-verify"')" "$brokengrep"
+  # …and with sed itself gone there is nothing left to strip with: the raw command stands in,
+  # the message is read as command text, and the row false-blocks. Accepted — over-blocking a
+  # message on a host with no sed is the price of not disarming the guard on one.
+  raw block "D09-nosed-msg-fp"     "$(str_ev 'git commit -m "never use --no-verify"')" "$nosed"
+  raw block "D09-nosedgrep-msg-fp" "$(str_ev 'git commit -m "never use --no-verify"')" "$nosedgrep"
+  # The no-grep rail reads `-n` per commit span, not across the whole command: a `-n` that belongs
+  # to a NEIGHBOUR (git log, git push, find -name) is not a commit's --no-verify, and a second
+  # commit further along the line still is.
+  raw allow "D10-nogrep-log-n"       "$(str_ev 'git commit -m x && git log -n 5')" "$nogrep"
+  raw allow "D10-nogrep-sort-n"      "$(str_ev 'sort -n f && git commit -m wip')" "$nogrep"
+  raw allow "D10-nogrep-push-n"      "$(str_ev 'git commit -m x && git push -n origin main')" "$nogrep"
+  raw allow "D10-nogrep-find-name"   "$(str_ev 'find . -name x.js && git commit -m x')" "$nogrep"
+  raw block "D10-nogrep-second-cmt"  "$(str_ev 'git commit -m x && git commit -n -m y')" "$nogrep"
+  raw block "D10-nogrep-short"       "$(str_ev 'git commit -n')" "$nogrep"
+  raw allow "D10-nosedgrep-log-n"      "$(str_ev 'git commit -m x && git log -n 5')" "$nosedgrep"
+  raw allow "D10-nosedgrep-push-n"     "$(str_ev 'git commit -m x && git push -n origin main')" "$nosedgrep"
+  raw block "D10-nosedgrep-second-cmt" "$(str_ev 'git commit -m x && git commit -n -m y')" "$nosedgrep"
+  # D11 — the EXTRACTION toolbox, not the scan pipeline: with no jq and no sed (or no tr behind
+  # it), and with no `cat` to read stdin at all, the hook has to keep a verdict rather than fall
+  # off the front of its own pipeline.
+  for d in "$nojqsed" "$nojqtr" "$nocat"; do
+    t="$(basename "$d")"
+    raw block "D11-$t-long"   "$(str_ev 'git commit --no-verify -m wip')" "$d"
+    raw block "D11-$t-short"  "$(str_ev 'git commit -n -m wip')" "$d"
+    raw allow "D11-$t-plain"  "$(str_ev 'git commit -m ok')" "$d"
+    raw allow "D11-$t-status" "$(str_ev 'git status')" "$d"
+    raw allow "D11-$t-echo"   "$(str_ev 'echo hello')" "$d"
+  done
+  # Scanning the raw EVENT means scanning JSON escapes, which the message strip cannot see past —
+  # so on that PATH a message naming the flag false-blocks, the same trade as D09. `nocat` keeps
+  # jq, so it reads the real command and D08's verdict holds there.
+  raw block "D11-nojqsed-msg-fp" "$(str_ev 'git commit -m "never use --no-verify"')" "$nojqsed"
+  raw block "D11-nojqtr-msg-fp"  "$(str_ev 'git commit -m "never use --no-verify"')" "$nojqtr"
+  raw allow "D11-nocat-msg"      "$(str_ev 'git commit -m "never use --no-verify"')" "$nocat"
 }
 
 attribution_cases() {
