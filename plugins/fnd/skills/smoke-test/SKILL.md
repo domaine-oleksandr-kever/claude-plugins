@@ -22,9 +22,10 @@ question (`doctor.cjs`) is also run by the installer; this skill proves the laye
 cannot reach, from inside a live session.
 
 **Plugin root** = the plugin's own directory, `../../` relative to this skill's directory, and
-every `<plugin root>/…` path below resolves the same way; on Claude Code, write plugin root as
-the literal `${CLAUDE_PLUGIN_ROOT}` in every command (the host expands it, and this skill's
-pre-approved Bash prefixes match that exact form).
+every `<plugin root>/…` path below resolves the same way.
+On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty.
 
 Read `../../references/smoke-test-checks.md` now — it owns the per-server call list, expected
 shapes, the scratch-repo probe, the report format, and remediation per failure.

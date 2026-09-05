@@ -8,20 +8,20 @@ files directly with `<plugin root>/scripts/theme-json.sh`, and any customizer-de
 AC, bug reproduction, or research question becomes scriptable. **Plugin root** = the plugin's own
 directory; this file is `<plugin root>/references/theme-customizer-state.md`, and every
 `<plugin root>/…` path below resolves the same way.
-On Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands — the host
-expands it; on other hosts substitute the plugin root's absolute path.
+On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty. On other hosts substitute the same path.
 
 ## Always available — not only when finishing a plan
 
 **Read-only inspection is fair game at any moment**: researching a ticket, writing a TA,
 debugging, QA. `themes` lists the store's themes; `get` reads any file from **any** theme —
 including the live one (reading live is safe). Don't guess what's configured on the store — look
-(substitute the plugin root's absolute path for the variable below;
-on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so these run verbatim):
+(substitute the plugin root's absolute path for the placeholder below):
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh themes                       # id / name / role
-${CLAUDE_PLUGIN_ROOT}/scripts/theme-json.sh get --theme <id> --file templates/product.json \
+<plugin root>/scripts/theme-json.sh themes                       # id / name / role
+<plugin root>/scripts/theme-json.sh get --theme <id> --file templates/product.json \
   --strip-comments --out .claude/tasks/<work-id>/tmp/product.json          # then pull values with jq
 ```
 

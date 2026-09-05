@@ -52,7 +52,10 @@ are unclear:
    > "Add the task as scope — e.g. `feat(ELC-61): <message>`? Or commit without it?"
    Only use the ticket as scope after the user confirms.
 5. Draft the message per the format reference. Include a body unless the change is trivial.
-6. Commit immediately with that message — no preview, no confirmation. Use a HEREDOC for
+6. Commit immediately with that message — no preview, no confirmation. Stage and commit in
+   **separate** Bash calls — a guard refusal blocks the whole call before either command runs, so a
+   bare retry of a bundled `git add … && git commit …` commits a stale index; re-check
+   `git status --short` after any refusal before committing again. Use a HEREDOC for
    multi-line messages, then report the result (`git log --oneline -1` + the full message):
 
    ```bash

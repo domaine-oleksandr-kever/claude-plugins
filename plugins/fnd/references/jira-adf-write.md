@@ -72,11 +72,13 @@ is spawned at all.
 
 `jira-writer` runs exactly this; it is also the inline / manual recipe. **Plugin root** = the
 plugin's own directory, this file being `<plugin root>/references/jira-adf-write.md`; substitute
-its absolute path for the variable below —
-on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so the command runs verbatim.
+its absolute path for the placeholder below.
+On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty.
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <approved.md>   # or pipe via stdin
+node <plugin root>/scripts/md-to-adf.cjs --no-tables <approved.md>   # or pipe via stdin
 ```
 
 It prints the ADF document JSON to stdout; pass that object straight to `editJiraIssue`

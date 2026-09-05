@@ -1008,7 +1008,8 @@ case "$MODE" in
       load_theme_list
       PRE_NAME_IDS="$(theme_ids_by_name "$NAME" | grep '^[0-9][0-9]*$' | tr '\n' ' ' || true)"
       if ! push_retry "$ERR" shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json; then
-        grep -qiE 'theme limit|maximum number of themes|too many themes' "$ERR" \
+        # The CLI boxes its cap message ("│  A shop may only have 100 themes  │") — match the sentence, not the box.
+        grep -qiE 'theme limit|maximum number of themes|too many themes|may only have [0-9]+ themes' "$ERR" \
           && { rm -f "$ERR"; fail "theme_limit — store is at its theme cap (20 non-Plus / 100 Plus). Delete an old theme or re-run with --reuse."; }
         push_fail push_code_failed "$NAME"
       fi

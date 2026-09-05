@@ -26,7 +26,7 @@ Other hosts (Claude Code unchanged) — Cursor: Composer 2.5 → Sonnet for a si
 
 - **Never proceed past a ✋ checkpoint** without explicit developer confirmation.
 - **Atlassian MCP** for Jira; **Figma MCP** for design extraction; **Chrome DevTools MCP** for in-browser validation when the preview is running. Ticket / design / codebase **reads are delegated to the `jira-reader`, `figma-reader`, and `theme-explorer` subagents** so raw ADF, node trees, and broad search stay out of this context — see steps 1, 3, 4.
-- **Browser-MCP prerequisite:** the local dev server must be running (see `<plugin root>/references/preflight-checklist.md` → Local dev server; **plugin root** = the plugin's own directory, `../../` relative to this skill's directory — every bundled path below uses that form, and on Claude Code you write it as the literal `${CLAUDE_PLUGIN_ROOT}` in commands). Confirm before validation.
+- **Browser-MCP prerequisite:** the local dev server must be running (see `<plugin root>/references/preflight-checklist.md` → Local dev server; **plugin root** = the plugin's own directory, `../../` relative to this skill's directory — every bundled path below uses that form, and on Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands to empty). Confirm before validation.
 - Respect the repo's coding rules. **Extend — never directly modify** `src/entry/core/*` JS/TS; prefer extending or composing core Liquid blocks/snippets per project conventions.
 
 ---

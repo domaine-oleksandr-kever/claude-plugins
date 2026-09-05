@@ -3197,6 +3197,7 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const has = (f) => args.includes(f);
   const opt = (f) => { const i = args.indexOf(f); return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null; };
+  const isStdinPath = (p) => p === '/dev/stdin' || p === '/dev/fd/0' || p === '/proc/self/fd/0';
   const fileArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--jq' && args[i - 1] !== '--report' && args[i - 1] !== '--since');
   const jq = opt('--jq');
   // The --jq expression, parsed once (see the grammar above). An empty segment list — `.` / `..` —
@@ -3536,7 +3537,12 @@ if (require.main === module) {
   const jsxOut = res.jsxCompressed && fileArg && !capped;
   if (handback) {
     const why = { 'error-shape': 'error envelope', 'non-json': 'not JSON', 'transform-error': 'transform error' }[res.reason];
-    process.stdout.write(`json-slim: nothing to compress (${why}); read the file directly: ${fileArg}\n`);
+    // A stdin device is not a path anyone can open again — the stream is spent, so "read the file
+    // directly: /dev/stdin" is advice that cannot be followed. Name the shape of the recovery instead.
+    const lead = `json-slim: nothing to compress (${why}); `;
+    process.stdout.write(lead + (isStdinPath(fileArg)
+      ? 'the payload came in on stdin — re-run json-slim on the file itself, or narrow it with --jq <jq-path>.\n'
+      : `read the file directly: ${fileArg}\n`));
   } else if (logOut || jsxOut) {
     process.stdout.write(`${res.output}\noriginal: ${fileArg}\n`);
   } else if (capped) {

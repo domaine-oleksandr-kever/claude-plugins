@@ -1174,10 +1174,13 @@ if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && ! grep -qi "awk: can't op
 else bad G42-unreadable-toml-no-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 
 # ---------------------------------------- create-preview-theme.sh cap classifier --
-CAP_RE='theme limit|maximum number of themes|too many themes'
+CAP_RE='theme limit|maximum number of themes|too many themes|may only have [0-9]+ themes'
 if grep -qF "$CAP_RE" "$CPT"; then ok; else bad C1-pattern-in-script "cap regex in the test drifted from the script"; fi
 if printf 'You have reached your theme limit.\n' | grep -qiE "$CAP_RE"; then ok; else bad C2-real-cap "true cap message not classified"; fi
 if printf 'The maximum number of themes has been reached\n' | grep -qiE "$CAP_RE"; then ok; else bad C3-real-cap2 "true cap message not classified"; fi
+# C3b: the wording the CLI actually prints — one boxed line, padded to the box width
+if printf '│  A shop may only have 100 themes                                             │\n' \
+   | grep -qiE "$CAP_RE"; then ok; else bad C3b-boxed-cap "boxed CLI cap message not classified"; fi
 if printf 'Error pushing theme: rate limit exceeded, too many requests\n' | grep -qiE "$CAP_RE"; then
   bad C4-rate-limit-fp "rate-limit stderr still classified as theme cap"
 else ok; fi
@@ -1480,6 +1483,17 @@ run_cpt "$L" FAKE_PUSH_CODE_FAIL='You have reached your theme limit.' \
   -- create --name "PREVIEW-I" --no-build || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=theme_limit' "$O" && ! grep -q 'push_code_failed' "$O"; then ok
 else bad P9-theme-limit "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P9b (bug): the stderr the CLI really prints when the store is at the cap — a boxed sentence.
+# Read as push_code_failed it sends the caller hunting a rejected asset that does not exist.
+rc=0; L="$TMP/cpt9b"; : > "$L"
+run_cpt "$L" FAKE_PUSH_CODE_FAIL='╭─ error ──────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│  A shop may only have 100 themes                                             │
+╰──────────────────────────────────────────────────────────────────────────────╯' \
+  -- create --name "PREVIEW-I2" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=theme_limit' "$O" && ! grep -q 'push_code_failed' "$O"; then ok
+else bad P9b-theme-limit-boxed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # P10 (pin): refresh onto a non-live theme pushes CODE only and never touches settings
 rc=0; L="$TMP/cpt10"; : > "$L"
@@ -2500,6 +2514,17 @@ rc=0; FND_MCP_SLIM_DIR="$LOGD" node "$SLIM" "$DOCF" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -Fq "read the file directly: $DOCF" "$O" && ! grep -q 'lines omitted' "$O"; then ok
 else bad L2-docs-passthrough "rc=$rc head=$(head -c 160 "$O")"; fi
 
+# L2b (bug): the same decline on a payload PIPED in as a stdin device — the stream is spent by the
+# time the caller reads the advice, so naming the device back is advice nobody can follow. Every
+# spelling of that device counts: the caller chooses which one it passes.
+for dev in /dev/stdin /dev/fd/0 /proc/self/fd/0; do
+  [ -e "$dev" ] || continue   # Linux-only on /proc, and some sandboxes hide /dev/fd
+  rc=0; FND_MCP_SLIM_DIR="$LOGD" node "$SLIM" "$dev" <"$DOCF" >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && grep -Fq 'came in on stdin' "$O" && grep -Fq -- '--jq' "$O" \
+     && ! grep -Fq "$dev" "$O"; then ok
+  else bad "L2b-stdin-handback-$dev" "rc=$rc head=$(head -c 200 "$O")"; fi
+done
+
 # L3 (finding 1): a 50+ line troubleshooting markdown doc that MENTIONS error/failed/warning words in
 # ordinary prose is NOT a log — the CLI must hand it back byte-identical, never compress+mangle it.
 TSHF="$LOGD/tshoot.md"
@@ -2779,6 +2804,21 @@ if [ "$rc" -eq 0 ] && [ "$lines" -le 40 ] && grep -Fq "$RPLOG" "$O" \
    && grep -Fq 'elc:' "$O" && grep -Fq 'other:' "$O" \
    && grep -Fq 'cli runs: 1 · saved 641076 B (83.9%)' "$O"; then ok
 else bad R1-report "rc=$rc lines=$lines out=$(head -c 400 "$O") err=$(head -c 120 "$E")"; fi
+
+# R1b (bug): the two halves against each other — hooks/spill-access.sh records the read, --report
+# pairs it. A command naming the spill RELATIVE to its cwd is the same recovery as an absolute one,
+# so the whale must come back paired; recorded truncated it never could.
+RPD2="$TMP/report-rel"; mkdir -p "$RPD2"
+RPLOG2="$RPD2/fnd-mcp-slim-debug.log"
+cat > "$RPLOG2" <<'RPEOF'
+{"ts":"2026-01-01T09:00:00.000Z","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__get_metadata","decision":"passthrough","reason":"platform-overflow","bytes_in":1400,"bytes_out":1400,"pct":0,"stages":[],"spill":"/r/elc/.claude/fnd-tmp/tool-results/b1z10evqs.txt","ms":1}
+RPEOF
+printf '%s' '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"jq . .claude/fnd-tmp/tool-results/b1z10evqs.txt"}}' \
+  | env FND_MCP_SLIM_DIR="$RPD2" FND_MCP_SLIM_DEBUG=1 "$ROOT/plugins/fnd/hooks/spill-access.sh" >/dev/null 2>&1
+rc=0; node "$SLIM" --report "$RPLOG2" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -Fq 'never read by any tool): 0 of 1' "$O" \
+   && grep -Fq 'whale recoveries via: jq 1' "$O"; then ok
+else bad R1b-relative-access-pairs "rc=$rc log=$(tr '\n' ';' < "$RPLOG2") out=$(head -c 300 "$O")"; fi
 
 # R2: --since filters by timestamp (only the last event survives) and the header states the cutoff.
 rc=0; node "$SLIM" --report "$RPLOG" --since 2026-07-24T11:30:00Z >"$O" 2>"$E" || rc=$?

@@ -17,10 +17,10 @@ Apply the fixes documented in `breaking-changes.md` to `templates/**/*.json` and
 ## Process
 
 1. **Read `breaking-changes.md`** — identify what to change: settings to remove, block types to rename, property values to update, context changes (e.g. `{{ closest.product }}` vs explicit settings).
-2. **Copy the bundled script template** into the repo (`scripts/` may not exist yet). Plugin root = the plugin's own directory, `../../` relative to this skill's directory; on Claude Code run the `cp` verbatim (`${CLAUDE_PLUGIN_ROOT}` expands to that directory and the exact command is pre-approved), on other hosts substitute the plugin root's absolute path:
+2. **Copy the bundled script template** into the repo (`scripts/` may not exist yet). Plugin root = the plugin's own directory, `../../` relative to this skill's directory; substitute its absolute path — on Claude Code the session context opens with `fnd plugin root: <absolute path>`, and the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands to empty:
    ```bash
    mkdir -p scripts
-   cp ${CLAUDE_PLUGIN_ROOT}/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js scripts/fix-breaking-changes.js
+   cp <plugin root>/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js scripts/fix-breaking-changes.js
    ```
 3. **Customize `applyFixes`** in `scripts/fix-breaking-changes.js` — uncomment/adapt the patterns documented in the template's own comments.
 4. **Run it:**

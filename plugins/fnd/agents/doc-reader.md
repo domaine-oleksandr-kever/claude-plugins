@@ -23,9 +23,13 @@ only, no chatter. You never modify the source.
 
 **Overflowed read (big page).** An over-limit MCP result hands you a **file path**
 instead of content. Don't raw-`Read` it — run
-`node ${CLAUDE_PLUGIN_ROOT}/scripts/json-slim.cjs <path>` and work from its stdout
+`node <plugin root>/scripts/json-slim.cjs <path>` and work from its stdout
 (`--jq` narrows to a sub-tree — dot paths, `[]` iteration, `,` multi-select and `| keys` /
 `| length` only, anything else exits 2; a wrong path yields `null`, not an error).
+**plugin root** in a command = the plugin directory's absolute path written out — take it from
+your brief, or from an absolute `…/fnd/<version>/references/…` path the brief cites, or from a
+`fnd plugin root: …` line if your context has one; never type `<plugin root>` or
+`${CLAUDE_PLUGIN_ROOT}` into a shell command.
 
 ## What to extract
 

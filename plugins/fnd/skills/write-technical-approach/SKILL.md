@@ -21,7 +21,7 @@ Model: on Claude Code unchanged (whatever the session runs); on Cursor **Claude 
 
 ## North star
 
-**The ticket's Description and AC govern the TA** — ungrounded decisions land in **Assumptions** (developer-confirmed), ambiguous or incomplete AC **stops** the draft. Full grounding rules: `../../references/technical-approach-format.md` (relative to this skill's directory; `<plugin root>` below is that same `../../` — on Claude Code write it as the literal `${CLAUDE_PLUGIN_ROOT}` in commands) §North star.
+**The ticket's Description and AC govern the TA** — ungrounded decisions land in **Assumptions** (developer-confirmed), ambiguous or incomplete AC **stops** the draft. Full grounding rules: `../../references/technical-approach-format.md` (relative to this skill's directory; `<plugin root>` below is that same `../../` — on Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands to empty) §North star.
 
 ## Global rules
 

@@ -23,7 +23,9 @@ freshness probe:
 `<plugin root>/references/task-workspace-freshness.md` — **plugin root** = the plugin's own
 directory, this file being `<plugin root>/references/reading-linked-docs.md`, and every
 `<plugin root>/…` path below resolves the same way;
-on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands).
+on Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty).
 Fetch only what's missing or stale.
 
 ## 2 — Read each link — delegate, in parallel

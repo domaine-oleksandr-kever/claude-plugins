@@ -208,6 +208,19 @@ no_verify_cases() {
   # …and `-F -` hands the message on stdin, so its heredoc body stays in the scanned text (`-m` is the
   # safe spelling for a commit that has to TALK about removing a hook — A57).
   check block B55-residual-heredoc-F $'git commit -F - <<EOF\nchore: drop husky\n\nMigration does rm .husky/pre-commit.\nEOF'
+  # A heredoc is not a scanning boundary: the command arrives as ONE string, so `<<'EOF'` anywhere in
+  # it leaves the words that follow on the record — the opening line is the command it always was, a
+  # body a shell reads still executes, and an unquoted body is expanded before it is written. Exempting
+  # quoted bodies would hand every bypass a two-line spelling, so blocking prose is the trade taken.
+  check block B56-heredoc-open-line     $'git -c core.hooksPath=/dev/null commit -F - <<\'EOF\'\nchore: x\nEOF'
+  check block B57-heredoc-into-shell    $'bash <<\'EOF\'\ngit commit --no-verify -m x\nEOF'
+  check block B58-heredoc-unquoted      $'cat <<EOF > note.md\ngit commit --no-verify\nEOF'
+  # …and the same holds for a `<<'X'` that opens no heredoc at all: text that merely mentions the
+  # spelling, or a here-string, must not become a lid the rest of the command hides under.
+  check block B59-comment-heredoc-text  $'# see <<\'X\' pattern\ngit commit --no-verify -m wip'
+  check block B60-quoted-heredoc-text   $'echo "docs use <<\'EOF\' for notes"\ngit -c core.hooksPath=/dev/null commit -m wip'
+  check block B61-herestring            $'grep -q x <<<\'OK\'\ngit commit -n -m wip'
+  check block B62-heredoc-scan-resumes  $'cat > n.md <<\'EOF\'\ntext\nEOF\ngit commit --no-verify -m wip'
 
   # --- must ALLOW (no false positives) ---------------------------------------
   check allow A01-plain             'git commit -m "safe change"'

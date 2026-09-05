@@ -38,10 +38,13 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
    a lossless jsx compaction (repeated classNames become a `C<N>:` legend, `data-node-id`s become
    `#nN` refs whose full-id map is in the `ids=<path>` file, repeated sibling subtrees fold to
    one exemplar), typically 55–77 % smaller, so the compacted output usually fits in one or two
-   `Read`s. Work from the compacted output — nothing is dropped; resolve a `#nN` via the `ids=`
-   map when you need a real node-id (e.g. for `get_screenshot`). If json-slim only hands the
-   path back (no byte win), page through the ORIGINAL file instead — never stop at the first
-   chunk:
+   `Read`s. **plugin root** in a command = the plugin directory's absolute path written out — take
+   it from your brief, or from an absolute `…/fnd/<version>/references/…` path the brief cites, or
+   from a `fnd plugin root: …` line if your context has one; never type `<plugin root>` or
+   `<plugin root>` into a shell command. Work from the compacted output — nothing is
+   dropped; resolve a `#nN` via the `ids=` map when you need a real node-id (e.g. for
+   `get_screenshot`). If json-slim only hands the path back (no byte win), page through the
+   ORIGINAL file instead — never stop at the first chunk:
    - `wc -l <file>` to get its length, then
    - `Read` it in **sequential** chunks from `offset` 0 to EOF, each with `limit` (~400–500
      lines, under 25k tokens), extracting every element's measurements as you go — **or** walk
@@ -49,6 +52,9 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
    - `grep -nE` is only a **navigation aid** (jump to a named component / find a section) — it is
      **not** a substitute for covering the whole file.
    Cover the whole compacted output (or all pages of the original) before you write the spec.
+   **`get_metadata` spills the same way** on a big frame; its XML does not compress (json-slim
+   declines it or hands back a ~0 % spill) — page the ORIGINAL with the same ladder, and never
+   proceed on a guessed node id.
 4. **Cross-check** the assembled spec against the screenshot. If a measurement is missing or a
    region wouldn't parse, put that in `needs_clarification` — never silently drop it.
 5. **Distil, don't echo.** Build the compact spec from what you extracted; never paste raw

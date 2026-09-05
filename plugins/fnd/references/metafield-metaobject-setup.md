@@ -3,13 +3,16 @@
 Shared reference for the `develop-feature-or-fix` skill (and the Data / Config section of
 the `write-technical-approach` skill). Plugin root = the plugin's own directory; this file is
 `<plugin root>/references/metafield-metaobject-setup.md`, and every `<plugin root>/…` path below
-resolves the same way —
-on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands, elsewhere
-its absolute path. **When the ticket — or a linked doc (e.g. a Notion data-mapping /
-schema page, see `<plugin root>/references/reading-linked-docs.md`) — describes a
-metafield or metaobject**, the theme code has nothing to render until the store's data model
-exists. This is how you get it in place: inspect what's already there, create what's missing in
-dependency order, mock content, and bind it to a test product so the feature can be built and QA'd.
+resolves the same way.
+On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty.
+
+**When the ticket — or a linked doc (e.g. a Notion data-mapping / schema page, see
+`<plugin root>/references/reading-linked-docs.md`) — describes a metafield or metaobject**, the
+theme code has nothing to render until the store's data model exists. This is how you get it in
+place: inspect what's already there, create what's missing in dependency order, mock content, and
+bind it to a test product so the feature can be built and QA'd.
 
 Admin GraphQL API (pin the version the repo targets, e.g. `2026-04`). Every mutation must select
 `userErrors { field message code }` and the created `id`.
@@ -103,11 +106,10 @@ the repo's **gitignored `.env`** as **`SHOPIFY_ADMIN_TOKEN=shpat_…`** (alongsi
 `BRAND` / `FIGMA_TOKEN`). **Never `Read` `.env` yourself** — that pulls the secret into context.
 
 Either way, run everything through the runner — substitute the plugin root's absolute path for
-the variable below;
-on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so the command runs verbatim:
+the placeholder below:
 
 ```bash
-${CLAUDE_PLUGIN_ROOT}/scripts/shopify-admin-gql.sh --query .claude/tasks/<work-id>/tmp/inspection.graphql \
+<plugin root>/scripts/shopify-admin-gql.sh --query .claude/tasks/<work-id>/tmp/inspection.graphql \
   [--operation <Name>] --out .claude/tasks/<work-id>/tmp/inspection.json   # then pull fields with jq
 ```
 

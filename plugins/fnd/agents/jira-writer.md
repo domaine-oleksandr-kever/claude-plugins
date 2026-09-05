@@ -45,8 +45,12 @@ Full mechanics + call shape: `${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md
 Both calls also require `cloudId`: pass the site host `meetdomaine.atlassian.net` (cloudId
 resolution: `jira-field-ids.md`).
 
-1. **Convert**: `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <source>` (drop
-   `--no-tables` only when the brief says `tables: keep`). The tool result IS your capture:
+1. **Convert**: `node <plugin root>/scripts/md-to-adf.cjs --no-tables <source>` (drop
+   `--no-tables` only when the brief says `tables: keep`). **plugin root** in a command =
+   the plugin directory's absolute path written out — take it from your brief, or from an
+   absolute `…/fnd/<version>/references/…` path the brief cites, or from a
+   `fnd plugin root: …` line if your context has one; never type `<plugin root>` or
+   `${CLAUDE_PLUGIN_ROOT}` into a shell command. The tool result IS your capture:
    stdout is the minified ADF document (one JSON line), and stderr — shown alongside it —
    carries `md-to-adf: <n> bytes` plus any size warning, so there is nothing to split into
    files. Do **not** redirect stdout to a file (`> adf.json`) or `cat` one back. If the

@@ -2,8 +2,12 @@
 
 An over-limit MCP result spills to a file — you get a path, not content, and the compression
 hook is skipped. Don't raw-`Read` it, and don't raw-`Read` any big local JSON / JSONL / log
-dump either: run `node ${CLAUDE_PLUGIN_ROOT}/scripts/json-slim.cjs <path>` and work from its
-stdout (`--stats` shows the cut). A **JSONL** dump (one JSON object per line, e.g. a Shopify
+dump either: run `node <plugin root>/scripts/json-slim.cjs <path>` and work from its stdout
+(`--stats` shows the cut).
+On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty.
+A **JSONL** dump (one JSON object per line, e.g. a Shopify
 bulk-operation result) is never printed as rows at any size — you get a PROFILE plus a
 ready-to-adapt recipe for querying the ORIGINAL by line; run that, not a second whole-file
 pass (never `--jq` a JSONL — it bypasses the profile and slims reshaped rows).

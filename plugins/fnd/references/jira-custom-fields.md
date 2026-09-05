@@ -98,11 +98,13 @@ Always request `responseContentFormat: "markdown"`. Then decide **per field** by
   The markdown conversion does **not** apply to rich-text **custom** fields — Acceptance Criteria,
   Assumptions, Technical Approach, Steps to test, Documentation Links come back as raw ADF even
   under `markdown` format (verified on ELC-126). Don't hand-walk the JSON; substitute the
-  plugin's own directory for the variable below —
-  on Claude Code the host expands `${CLAUDE_PLUGIN_ROOT}` itself, so the command runs verbatim:
+  plugin root — the plugin's own directory — for the placeholder below
+  (on Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that
+  path into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one
+  expands to empty):
 
   ```bash
-  node ${CLAUDE_PLUGIN_ROOT}/scripts/adf-to-md.cjs <issue.json> --field <customfield_id>
+  node <plugin root>/scripts/adf-to-md.cjs <issue.json> --field <customfield_id>
   ```
 
   Save the getJiraIssue response to a temp file and decode each ADF field with `--field`; it prints

@@ -38,7 +38,9 @@
 #   * `project` is the payload cwd's basename, not json-slim's projectName() (which prefers the nearest
 #     `.git` ancestor) — no consumer aggregates access lines by project;
 #   * at most 8 distinct paths per call (json-slim's SPILL_LOG_MAX), and a token still carrying a glob
-#     metacharacter is dropped rather than recorded or expanded.
+#     metacharacter is dropped rather than recorded or expanded;
+#   * a relative spill token is joined to the PAYLOAD cwd textually — a `cd` earlier in the command is
+#     not followed — and a token carrying `../`, a `~`, a `$VAR` or a URL scheme is dropped, not recorded.
 # -f matters: the extracted tokens are word-split unquoted below, and pathname expansion on them would
 # let one `rm <dir>/tool-results/*` record every whale on disk as read.
 set -uf
@@ -60,9 +62,11 @@ esac
 # source of truth, and this must not be narrower than the producer of the `spill` value it pairs with,
 # or the pairing silently never happens); and the other fnd- prefixes (slim-out, prompt-json, nogain) are
 # not platform-overflow spills, so --report has nothing to pair a read of one with — json-slim already
-# logs those reads as its own `entry:"cli"` runs — and no pattern here matches them. A path match starts
-# at a `/` and stops at the shell/JSON delimiters, which keeps a `full=` prefix and a closing quote off
-# the record.
+# logs those reads as its own `entry:"cli"` runs — and no pattern here matches them. A path match stops
+# at the shell/JSON delimiters and never spans an `=`, a redirect or an `&`, which keeps a `full=` prefix,
+# a `-l<` glued in front of a path and a closing quote off the record; it need not start at a `/`, because
+# a spill named relative to the cwd (`.claude/fnd-tmp/fnd-mcp-slim-<hash>.json`) is the same read, and
+# --report pairs on the producer's absolute path.
 #
 # Both alternatives read the tool_input SLICE, never the whole event: a `transcript_path` under a
 # tool-results/ dir would otherwise fabricate an access line out of an unrelated Grep, and a cwd like
@@ -81,7 +85,14 @@ esac
 # would mean re-injecting it into this pattern, and that is a fork on the hot path. A verb counts only
 # at a COMMAND position (start, or after a separator / quote / whitespace), so the `node` inside
 # /proj/node/fixture.json is a path component, not the reader.
-hits="$(printf '%s' "$scan" | grep -oE "/[^\"' ,;|()]*(fnd-mcp-slim-[0-9a-f]{16}(-[0-9a-f]+)?\.json|tool-results/[^\"' ,;|()]+)|(^|[[:space:]|;&(){}\`\"'=])(jq|grep|rg|sed|awk|head|tail|cat|wc|less|node|rm|mv|cp|ln|touch|ls|echo|stat)([^[:alnum:]_-]|\$)" 2>/dev/null || true)"
+hits="$(printf '%s' "$scan" | grep -oE "[^\"' ,;|()=<>&]*(fnd-mcp-slim-[0-9a-f]{16}(-[0-9a-f]+)?\.json|tool-results/[^\"' ,;|()=<>&]+)|(^|[[:space:]|;&(){}\`\"'=])(jq|grep|rg|sed|awk|head|tail|cat|wc|less|node|rm|mv|cp|ln|touch|ls|echo|stat)([^[:alnum:]_-]|\$)" 2>/dev/null || true)"
+# The payload cwd, read here rather than with the other envelope keys below: a relative token and its
+# absolute twin in the same command are ONE path, so the dedup has to see the resolved form.
+cwd=""
+case "$input" in *'"cwd"'*) t="${input#*\"cwd\"}"; t="${t#*\"}"; cwd="${t%%\"*}" ;; esac
+[ -n "$cwd" ] || cwd="$PWD"
+cwd="${cwd%/}"
+
 # Deduped and CAPPED here, not at the write: `ls <dir>/tool-results/*` names every whale in a directory,
 # and one call may never append more than json-slim's own SPILL_LOG_MAX lines to the shared log.
 paths=""; toks=""; seen=""; np=0
@@ -90,7 +101,14 @@ IFS='
 for h in $hits; do
   case "$h" in
     *fnd-mcp-slim-*|*tool-results/*)
-      case "$h" in *'*'*|*'?'*|*'['*) continue ;; esac  # an unexpanded glob is not a path anyone read
+      # An unexpanded token is not a path anyone read: a glob, a `~`, a `$VAR` and a URL have no
+      # textual resolution here, and a `../` joined to the cwd would name a file nobody asked for.
+      case "$h" in *'*'*|*'?'*|*'['*|*'../'*|*'$'*|*'://'*|'~'*) continue ;; esac
+      # `./x`, `x` and `<cwd>/./x` are one path spelled three ways, and the dedup below compares
+      # strings — so every spelling has to reach it as the one absolute form --report pairs on.
+      while :; do case "$h" in ./*) h="${h#./}" ;; *) break ;; esac; done
+      case "$h" in /*) ;; *) h="$cwd/$h" ;; esac
+      while :; do case "$h" in */./*) h="${h%%/./*}/${h#*/./}" ;; *) break ;; esac; done
       [ "$np" -lt 8 ] || continue
       case "$seen" in *"|$h|"*) continue ;; esac
       seen="$seen|$h|"; np=$((np+1)); paths="$paths$h$IFS" ;;
@@ -100,16 +118,14 @@ done
 unset IFS
 [ -n "$paths" ] || exit 0
 
-# tool_name + cwd off the raw event with parameter expansion only — one fork saved on a path that is
-# already fork-bound. FIRST occurrence of each key, so a command quoting the key name loses to the
-# real field on every host whose payload puts the envelope keys first.
-tool=Bash; cwd=""
+# tool_name off the raw event with parameter expansion only — one fork saved on a path that is
+# already fork-bound. FIRST occurrence of the key, so a command quoting the key name loses to the
+# real field on every host whose payload puts the envelope keys first (same for `cwd`, above).
+tool=Bash
 case "$input" in *'"tool_name"'*) t="${input#*\"tool_name\"}"; t="${t#*\"}"; tool="${t%%\"*}" ;; esac
-case "$input" in *'"cwd"'*) t="${input#*\"cwd\"}"; t="${t#*\"}"; cwd="${t%%\"*}" ;; esac
 # Codex spells the shell tool `shell` / `local_shell`; everything that is not a file reader is a
 # command, which is the only `tool` value whose `via` has to be classified.
 case "$tool" in Read) tool=Read ;; Grep) tool=Grep ;; *) tool=Bash ;; esac
-[ -n "$cwd" ] || cwd="$PWD"
 
 # The nearest .claude/domaine.env, resolved ONCE — env-file.cjs's projectPath() walk, whose answer
 # cannot change between the three keys asked for below.
@@ -179,7 +195,6 @@ fi
 esc() { # $1 JSON-escaped into `_e`; the fork is paid only by a path that actually needs it
   case "$1" in *\\*|*\"*) _e="$(printf '%s' "$1" | sed 's:\\:\\\\:g; s:":\\":g' 2>/dev/null)" ;; *) _e="$1" ;; esac
 }
-cwd="${cwd%/}"
 project="${cwd##*/}"
 [ -n "$project" ] || project="$cwd"
 # BSD date has no %N — it prints the format back, which is the fallback's cue.

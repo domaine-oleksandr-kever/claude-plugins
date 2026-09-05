@@ -164,8 +164,9 @@ PR body as a **one-line named ceiling**, placement per
 `<plugin root>/skills/create-pull-request/REFERENCE.md` → Body sections — **plugin root** = the
 plugin's own directory, this file being `<plugin root>/references/review-flow.md`, and every
 `<plugin root>/…` path here resolves the same way;
-on Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands; the full
-reasoning stays in `notes.md`), or have the developer **explicitly waive**
+on Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty; the full reasoning stays in `notes.md`), or have the developer **explicitly waive**
 it — and record the disposition (workspace `notes.md` when one exists). A **blocking**
 correctness finding stops a PR the same way a `protected-core` blocker does.
 

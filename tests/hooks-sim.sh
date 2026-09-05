@@ -2633,6 +2633,34 @@ assert_eq       A25-nohome-stdout "$(cat "$TMP/spa.out")" ""
 assert_eq       A25-nohome-stderr "$(cat "$TMP/spa.err")" ""
 assert_contains A25-nohome-line   "$(spa_log "$d")" '"entry":"access"'
 
+# A26 (bug): a spill named RELATIVE to the payload cwd. The harvest used to demand a leading `/`, so
+# `.claude/fnd-tmp/fnd-mcp-slim-<hash>.json` was recorded as `/fnd-tmp/fnd-mcp-slim-<hash>.json` — a
+# path --report can never pair with the producer's absolute `spill`, i.e. the whale reads as unread.
+spa_run '{"cwd":"/r/elc-theme","tool_name":"Bash","tool_input":{"command":"wc -l .claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'; d="$spa_d"
+assert_eq       A26-rel-one-line "$(spa_lines "$d")" 1
+assert_contains A26-rel-hook     "$(spa_log "$d")" "\"spill\":\"/r/elc-theme/.claude/fnd-tmp/fnd-mcp-slim-$SPA_HEX.json\""
+assert_contains A26-rel-via      "$(spa_log "$d")" '"via":"shell"'
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"jq . tmp/tool-results/b1z10evqs.txt"}}'
+assert_contains A26-rel-platform "$(spa_log "$spa_d")" '"spill":"/r/elc/tmp/tool-results/b1z10evqs.txt"'
+# …the absolute form is recorded untouched: neither a `full=` prefix nor a glued redirect may ride
+# along, or the record stops being the producer's path and the pairing is lost the other way round
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat full='"$SPA_PLAT"'"}}'
+assert_contains A26-abs-unchanged "$(spa_log "$spa_d")" "\"spill\":\"$SPA_PLAT\""
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"wc -l<'"$SPA_PLAT"'"}}'
+assert_contains A26-abs-redirect "$(spa_log "$spa_d")" "\"spill\":\"$SPA_PLAT\""
+# …and the two spellings of ONE path in one command are one read: the dedup sees the resolved form
+spa_run '{"cwd":"'"${SPA_PLAT%/tool-results/*}"'","tool_name":"Bash","tool_input":{"command":"cat tool-results/b1z10evqs.txt '"$SPA_PLAT"'"}}'
+assert_eq A26-rel-dedup "$(spa_lines "$spa_d")" 1
+# …which holds for the `./` spelling too, and no `/./` survives into the record
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat ./.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'
+assert_contains A26-rel-dotslash "$(spa_log "$spa_d")" "\"spill\":\"/r/elc/.claude/fnd-tmp/fnd-mcp-slim-$SPA_HEX.json\""
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat ./.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json /r/elc/.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'
+assert_eq A26-rel-dotslash-dedup "$(spa_lines "$spa_d")" 1
+# …but a token the shell would still have to expand is no path at all: joining `~`, a `$VAR`, a URL or
+# a parent-walk to the cwd invents a read of a file nobody named, so all four are dropped.
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat ~/.claude/projects/p/tool-results/abc.txt $TMPDIR/tool-results/x.txt ../tool-results/y.txt https://cdn.example/tool-results/z.txt"}}'; d="$spa_d"
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A26-rel-dropped "an unresolvable token was recorded as a read: $(spa_log "$d")"; else ok; fi
+
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then
   printf '%s' "$failures"

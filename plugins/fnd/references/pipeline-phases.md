@@ -8,8 +8,9 @@ reference list; the standing rules every brief inherits, the tick/verify loop an
 each phase is pinned to lives in `pipeline-mode.md` → Phase-agent models.
 **Plugin root** = the plugin's own directory; this file is `<plugin root>/references/pipeline-phases.md`,
 and every `<plugin root>/…` path below resolves the same way.
-On Claude Code, write plugin root as the literal `${CLAUDE_PLUGIN_ROOT}` in commands — the host
-expands it; on other hosts substitute the plugin root's absolute path.
+On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty. On other hosts substitute the same path.
 
 ## Orchestration — who spawns whom on this host
 

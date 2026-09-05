@@ -20,10 +20,10 @@ allowed-tools: Read, Glob, Edit, AskUserQuestion, Bash(${CLAUDE_PLUGIN_ROOT}/scr
 
 A thin wrapper over `<plugin root>/scripts/worktree-setup.sh`, where **plugin root** = the
 plugin's own directory — `../../` relative to this skill's directory — and every
-`<plugin root>/…` path below resolves the same way. On Claude Code, write plugin root as the
-literal `${CLAUDE_PLUGIN_ROOT}` in every command: the host expands it, and this skill's
-pre-approved Bash prefixes match that exact form. Run it from the client
-theme repo root. The script owns every decision — worktree directory, branch reuse, `npm ci`,
+`<plugin root>/…` path below resolves the same way.
+On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
+into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
+to empty. Run it from the client theme repo root. The script owns every decision — worktree directory, branch reuse, `npm ci`,
 the gitignored config copies (`shopify.theme.toml`, `.env`), the `.claude/tasks` symlink back to
 the main repo, the free dev port, the hand-off block. This skill resolves the work-id, runs the
 script, relays what it printed, and — once the worktree exists — settles its **session theme**
