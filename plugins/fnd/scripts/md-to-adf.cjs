@@ -23,8 +23,12 @@
  * markdown string, which Jira custom fields REJECT ("Operation value must be an Atlassian
  * Document"). Two levers keep it small: (1) output is minified, not pretty-printed (≈half the
  * bytes); (2) `--no-tables` renders GFM tables as bullet lists — ADF `table` nodes are by far
- * the heaviest construct (every cell wraps a paragraph). The script also prints a size warning
- * to stderr when the ADF is large, so you trim/restructure instead of shipping a fragile blob.
+ * the heaviest construct (every cell wraps a paragraph).
+ *
+ * stderr (never stdout) carries, on every successful run, `md-to-adf: <n> bytes` — the byte
+ * length of the MINIFIED JSON, newline excluded, always the minified size, even under `--pretty`,
+ * whose stdout is larger — plus a size warning when the ADF is large, so you trim/restructure
+ * instead of shipping a fragile blob.
  *
  * Supported: headings (#..######), paragraphs, **bold**, *italic*, ***bold-italic***, `inline code`,
  * [links](url), <autolinks>, bare https:// http:// mailto: URLs (GFM extended autolinks —
@@ -55,6 +59,16 @@ const OPT = {
 const FILE_ARG = ARGV.find((a) => !a.startsWith('--'));
 // Warn above this serialized size — large field values are fragile to write back via one tool call.
 const SIZE_WARN_BYTES = 30000;
+
+// A reader that goes away mid-write (`| head`, a spawned parent that destroys the pipe) is
+// success, not failure: the EPIPE (Windows: `code: 'EOF'`) surfaces async and would otherwise
+// crash the process after the consumer already got its bytes.
+const quietOnEpipe = (s) => s.on('error', (e) => {
+  if (e && (e.code === 'EPIPE' || e.code === 'EOF')) process.exit(0);
+  throw e;
+});
+quietOnEpipe(process.stdout);
+quietOnEpipe(process.stderr);
 
 function readInput() {
   try {
@@ -585,14 +599,19 @@ function toADF(md, quoted) {
 
 const adf = toADF(readInput());
 const min = JSON.stringify(adf);
+const bytes = Buffer.byteLength(min, 'utf8');
+
+// The caller reports this number verbatim instead of estimating it, so it is a real
+// per-document fingerprint rather than a guess.
+process.stderr.write('md-to-adf: ' + bytes + ' bytes\n');
 
 // Size guardrail: a large field value is fragile to inline into one editJiraIssue call. Warn so
 // the caller trims/restructures (shorter content, --no-tables) instead of falling back to raw
 // markdown (which Jira custom fields reject). Warning goes to stderr; stdout stays pure JSON.
 const hasTables = min.includes('"type":"table"');
-if (min.length > SIZE_WARN_BYTES || (hasTables && min.length > SIZE_WARN_BYTES / 2)) {
+if (bytes > SIZE_WARN_BYTES || (hasTables && bytes > SIZE_WARN_BYTES / 2)) {
   process.stderr.write(
-    'md-to-adf: warning: ADF is ' + min.length + ' bytes' + (hasTables ? ' and contains table node(s)' : '') +
+    'md-to-adf: warning: ADF is ' + bytes + ' bytes' + (hasTables ? ' and contains table node(s)' : '') +
     '. Large/table-heavy field values are fragile to write back in one tool call — ' +
     'consider --no-tables and trimming the content (headings + bullet lists stay compact).\n'
   );

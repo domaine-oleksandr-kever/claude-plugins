@@ -52,11 +52,11 @@ resolution: `jira-field-ids.md`).
 1. **Convert**: `node <plugin root>/scripts/md-to-adf.cjs --no-tables <source>` (drop
    `--no-tables` only when the brief says `tables: keep`). The tool result IS your capture:
    stdout is the minified ADF document (one JSON line), and stderr — shown alongside it —
-   carries any size warning, so there is nothing to split into files. Do **not** redirect
-   stdout to a file (`> adf.json`) or `cat` one back. If the converter prints a size warning
-   and the ADF is large, the write is fragile: return `error: ADF too large (<n> bytes) — trim
-   the source` rather than ship a fragile blob (the caller decides how to trim). **Never** fall
-   back to a raw markdown string.
+   carries `md-to-adf: <n> bytes` plus any size warning, so there is nothing to split into
+   files. Do **not** redirect stdout to a file (`> adf.json`) or `cat` one back. If the
+   converter prints a size warning and the ADF is large, the write is fragile: return
+   `error: ADF too large (<n> bytes) — trim the source` rather than ship a fragile blob (the
+   caller decides how to trim). **Never** fall back to a raw markdown string.
 2. **Write** with ONE MCP call:
    - a **field**: `editJiraIssue` on `<ticket>` with `fields: { "<target>": <the ADF object> }`.
    - a **comment**: `addCommentToJiraIssue` on `<ticket>` with `commentBody: <the ADF JSON,
@@ -88,9 +88,9 @@ resolution: `jira-field-ids.md`).
 ## Output — one line, data only
 
 - success: `ok: <ticket> <target> written (<n> bytes, read-back verified)`  (`<target>` = the
-  field id, or `comment`; `<n>` = the byte length of **this** conversion's stdout — the string
-  you passed as `commentBody`, or the same JSON passed as the field object — never a size from
-  an earlier run). Print `read-back verified` only after a check actually passed.
+  field id, or `comment`; `<n>` = the number from the converter's `md-to-adf: <n> bytes` stderr
+  line of **this** conversion — copy it, never count or estimate it yourself). Print
+  `read-back verified` only after a check actually passed.
 - failure: `error: <one-line reason>`  (missing brief, oversized ADF, the MCP error, a field
   id mismatch, or a read-back mismatch)
 

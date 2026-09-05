@@ -2,7 +2,7 @@
 // Fixture suite for the two ADF converters (plugins/fnd/scripts/{adf-to-md,md-to-adf}.cjs).
 // Encodes the DESIRED behavior: run it after any converter change. Cases named `bug-*` are
 // the 2026-07 audit findings; the rest pin behavior that was already correct.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,8 +11,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const A2M = path.join(ROOT, 'plugins/fnd/scripts/adf-to-md.cjs');
 const M2A = path.join(ROOT, 'plugins/fnd/scripts/md-to-adf.cjs');
 
+// stderr is PIPED, not inherited: md-to-adf writes a `md-to-adf: <n> bytes` line on every run,
+// which would otherwise flood this suite's output. A crash still surfaces via the thrown error.
 const run = (script, input, args = []) =>
-  execFileSync('node', [script, ...args], { input, encoding: 'utf8' });
+  execFileSync('node', [script, ...args], { input, encoding: 'utf8', stdio: 'pipe' });
 
 const doc = (content) => ({ type: 'doc', version: 1, content });
 const p = (content) => ({ type: 'paragraph', content });
@@ -953,6 +955,96 @@ const ADF_CORPUS = [
 ];
 for (const [label, adf] of ADF_CORPUS) {
   check(`prop-adf-identity[${label}]`, sortMarks(m2a(a2m(adf))), sortMarks(adf));
+}
+
+// -------------------------------------------------------- md-to-adf CLI stderr --
+// The `md-to-adf: <n> bytes` line is the writer agent's ONLY source for the `<n>` it reports;
+// two parallel writers once ESTIMATED it, so distinct documents were indistinguishable. It must
+// be measured by the tool, in BYTES (not JS string length), on every successful run.
+const m2aCli = (md, args = []) => spawnSync('node', [M2A, ...args], { input: md, encoding: 'utf8' });
+// em dash + NBSP: byte length differs from character length, so a `.length` count would fail here
+const BYTES_MD = '## A \u2014 b\n\ntext' + NB + 'more\n';
+
+for (const [label, args] of [['min', ['--no-tables']], ['pretty', ['--no-tables', '--pretty']]]) {
+  const r = m2aCli(BYTES_MD, args);
+  const lines = r.stderr.split('\n').filter(Boolean);
+  const byteLines = lines.filter((l) => /^md-to-adf: \d+ bytes$/.test(l));
+  check(`cli-bytes-line-once[${label}]`, byteLines.length, 1);
+  const reported = Number((byteLines[0] || '').match(/\d+/)?.[0]);
+  const minifiedBytes = Buffer.byteLength(JSON.stringify(JSON.parse(r.stdout)), 'utf8');
+  check(`cli-bytes-match-minified[${label}]`, reported, minifiedBytes);
+  if (label === 'min') {
+    // stdout minus the single newline the CLI appends, measured in BYTES
+    const stdoutBytes = Buffer.byteLength(r.stdout.replace(/\n$/, ''), 'utf8');
+    check(`cli-bytes-match-stdout[${label}]`, reported, stdoutBytes);
+    // the count is BYTES, not JS string length — the em dash and NBSP make the two differ
+    check(`cli-bytes-are-bytes[${label}]`, reported > r.stdout.replace(/\n$/, '').length, true);
+  }
+  check(`cli-exit-ok[${label}]`, r.status, 0);
+}
+
+// stdout is untouched by the stderr line: still exactly the ADF the in-process path builds
+check('cli-stdout-unchanged',
+  m2a(BYTES_MD, ['--no-tables']),
+  JSON.parse(m2aCli(BYTES_MD, ['--no-tables']).stdout));
+
+// the line is present for the smallest possible document too (no size warning in play)
+{
+  const r = m2aCli('x\n');
+  check('cli-bytes-line-small', r.stderr, `md-to-adf: ${Buffer.byteLength(r.stdout.replace(/\n$/, ''), 'utf8')} bytes\n`);
+}
+
+// a large table-bearing doc emits BOTH the byte line and the size warning, byte line first
+{
+  const row = '| ' + 'aaaaaaaa '.repeat(20) + ' | b |\n';
+  const big = '| h | i |\n| --- | --- |\n' + row.repeat(400);
+  const r = m2aCli(big);
+  const lines = r.stderr.split('\n').filter(Boolean);
+  check('cli-bytes-line-before-warning', /^md-to-adf: \d+ bytes$/.test(lines[0]), true);
+  check('cli-warning-still-emitted', lines.length > 1 && lines[1].startsWith('md-to-adf: warning:'), true);
+  check('cli-warning-bytes-agree', lines[1].match(/ADF is (\d+) bytes/)?.[1], lines[0].match(/(\d+)/)?.[1]);
+}
+
+// a failed conversion prints NO byte line: the number must never be reported for a document
+// that was never produced
+{
+  const r = m2aCli('', [path.join(ROOT, 'no-such-source-9d3f.md')]);
+  check('cli-missing-file-exit-nonzero', r.status !== 0, true);
+  check('cli-missing-file-no-bytes-line', /md-to-adf: \d+ bytes/.test(r.stderr), false);
+}
+
+// ---------------------------------------------------------- md-to-adf CLI EPIPE --
+// A reader that goes away mid-write (`| head`, a parent that destroys the pipe) is success, not
+// failure — without the guard the async EPIPE turns a fully-written stdout into exit 1.
+const cliWithClosedPipe = (md, which, args = []) => new Promise((resolve) => {
+  const child = spawn('node', [M2A, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let stdout = '';
+  if (which === 'stderr') {
+    child.stderr.destroy();
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d) => { stdout += d; });
+  } else {
+    child.stdout.destroy();
+    child.stderr.resume();
+  }
+  child.stdin.on('error', () => {}); // the child may exit before stdin drains
+  child.stdin.end(md);
+  // the EPIPE surfaces a tick after 'exit' — settle on 'close', when the streams are done
+  child.on('close', (code) => resolve({ code, stdout }));
+});
+
+{
+  const r = await cliWithClosedPipe(BYTES_MD, 'stderr', ['--no-tables']);
+  check('cli-epipe-stderr-exit-0', r.code, 0);
+  check('cli-epipe-stderr-stdout-intact', JSON.parse(r.stdout), m2a(BYTES_MD, ['--no-tables']));
+}
+
+{
+  // > 64 KB of markdown, so the stdout write really reaches the closed pipe instead of the
+  // kernel buffer
+  const big = 'lorem ipsum dolor sit amet consectetur adipiscing elit\n\n'.repeat(1400);
+  const r = await cliWithClosedPipe(big, 'stdout', ['--no-tables']);
+  check('cli-epipe-stdout-exit-0', r.code, 0);
 }
 
 console.log(`adf-md fixtures: ${pass} passed, ${fail} failed`);

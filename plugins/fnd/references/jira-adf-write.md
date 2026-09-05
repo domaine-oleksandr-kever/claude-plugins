@@ -42,8 +42,11 @@ It returns one line: `ok: <KEY> <target> written (<n> bytes, read-back verified)
 A batch of parallel writers therefore needs no re-read from you — but only for **distinct**
 targets: never hand one field id to two writers, since both verify their own write and the
 later one silently wins. Differing `<n>` across parallel writers is the tell that they shipped
-distinct documents. Never report the batch as written on the strength of the write calls
-succeeding. On an `error:` line:
+distinct documents — `<n>` is the converter's own count, so it can be checked against the
+source: `node <plugin root>/scripts/md-to-adf.cjs --no-tables <source> >/dev/null` prints
+`md-to-adf: <n> bytes` on stderr (drop `--no-tables` when the brief said `tables: keep`, so
+the flags match the writer's). Never report the batch as written on the strength of the write
+calls succeeding. On an `error:` line:
 
 - `… read-back does not match source` on a **field** — that target holds the wrong document
   (a sibling's, typically): re-run that writer alone; setting a field is idempotent.
@@ -85,8 +88,9 @@ blockquotes, and GFM tables. (Underscore emphasis is deliberately ignored so
 `customfield_10038`-style snake_case survives — use `*`/`**` for emphasis.) Typical flow:
 write the approved content to a `.md` (the workspace file, or `mktemp` — never a fixed name
 in the shared temp directory, which parallel writers overwrite for each other), convert, take
-the JSON from the tool result (stderr shows beside stdout — no `> adf.json` staging), then
-`editJiraIssue` with `fields: { "<id>": <that JSON> }`, then run the read-back check below.
+the JSON from the tool result (stderr shows beside stdout — the `md-to-adf: <n> bytes` line and
+any warning — no `> adf.json` staging), then `editJiraIssue` with
+`fields: { "<id>": <that JSON> }`, then run the read-back check below.
 
 **Read-back check.** A successful write call proves Jira accepted *a* document, not that it was
 yours. A **field**: `getJiraIssue` on the ticket with `fields: ["<id>"]`,
@@ -117,8 +121,9 @@ comment posted as markdown loses its bare URLs. Keep the ADF small instead:
   renders each table row as one compact bullet.
 - **Prefer headings + lists over tables in the source markdown**; reserve tables for
   genuinely tabular, short data.
-- The converter **prints a size warning to stderr** when the ADF is large — a signal to
-  **trim/restructure**, never to switch to markdown.
+- The converter **prints `md-to-adf: <n> bytes` to stderr** on every successful run — the
+  measured size of the minified JSON — and adds a **size warning** when the ADF is large: a
+  signal to **trim/restructure**, never to switch to markdown.
 
 **Document wrapper** (what the converter emits):
 
