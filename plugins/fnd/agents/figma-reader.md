@@ -28,14 +28,14 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
 3. **Per-element measurements — `get_design_context`, processed in FULL.** This holds the exact
    px dimensions, padding, gaps, and font assignments per element, plus the hierarchy. It spills
    to a tool-result file (over the platform limit → the compression hook never sees it). **First
-   run `node <plugin root>/scripts/json-slim.cjs <file>`** — a Figma design context gets
+   run `node ${CLAUDE_PLUGIN_ROOT}/scripts/json-slim.cjs <file>`** — a Figma design context gets
    a lossless jsx compaction (repeated classNames become a `C<N>:` legend, `data-node-id`s become
    `#nN` refs whose full-id map is in the `ids=<path>` file, repeated sibling subtrees fold to
    one exemplar), typically 55–77 % smaller, so the compacted output usually fits in one or two
-   `Read`s. **plugin root** in a command = the plugin directory's absolute path written out — take
-   it from your brief, or from an absolute `…/fnd/<version>/references/…` path the brief cites, or
-   from a `fnd plugin root: …` line if your context has one; never type `<plugin root>` or
-   `${CLAUDE_PLUGIN_ROOT}` into a shell command. Work from the compacted output — nothing is
+   `Read`s. **plugin root** = the plugin's own directory, the one holding `references/` and
+   `scripts/`. On Claude Code the `node …` command above already carries its absolute path — copy
+   that path into the shell; no shell variable carries it. On any other host, substitute the
+   absolute path your brief cites. Work from the compacted output — nothing is
    dropped; resolve a `#nN` via the `ids=` map when you need a real node-id (e.g. for
    `get_screenshot`). If json-slim only hands the path back (no byte win), page through the
    ORIGINAL file instead — never stop at the first chunk:

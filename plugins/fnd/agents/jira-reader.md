@@ -34,15 +34,14 @@ resolved ID, and set `field_id_mismatch` in your output.
   **custom** fields (AC, Assumptions, Technical Approach, Steps to test, Documentation
   Links) come back as raw ADF even then — **decode them with the converter**: save the
   response to a temp file and run
-  `node <plugin root>/scripts/adf-to-md.cjs <file> --field <customfield_id>` per
-  field, rather than hand-walking the JSON. **plugin root** in a command = the plugin
-  directory's absolute path written out — take it from your brief, or from an absolute
-  `…/fnd/<version>/references/…` path the brief cites, or from a `fnd plugin root: …` line
-  if your context has one; never type `<plugin root>` or `${CLAUDE_PLUGIN_ROOT}` into a
-  shell command.
+  `node ${CLAUDE_PLUGIN_ROOT}/scripts/adf-to-md.cjs <file> --field <customfield_id>` per
+  field, rather than hand-walking the JSON. **plugin root** = the plugin's own directory, the
+  one holding `references/` and `scripts/`. On Claude Code the `node …` commands in these
+  instructions already carry its absolute path — copy that path into the shell; no shell
+  variable carries it. On any other host, substitute the absolute path your brief cites.
 - **Overflowed read (big ticket).** If the MCP result exceeds the platform limit, Claude
   Code hands you a **file path** instead of content (the compression hook never sees it).
-  Don't raw-`Read` that file — run `node <plugin root>/scripts/json-slim.cjs <path>`
+  Don't raw-`Read` that file — run `node ${CLAUDE_PLUGIN_ROOT}/scripts/json-slim.cjs <path>`
   (Jira JSON crushes ~75%) and read its stdout; `--jq` narrows to a sub-tree first — it takes
   dot paths (`.fields.summary`, `.a[0]`), `[]` iteration, `,` multi-select and `| keys` /
   `| length`, and refuses anything else (`select`/`map`/`?`/`//`) with exit 2 instead of a

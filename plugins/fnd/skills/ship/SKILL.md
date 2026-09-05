@@ -20,10 +20,9 @@ decision-record format, autonomy rule, escalation contract with the pre-authoriz
 judgment-call log, phase-start re-read — lives in
 `<plugin root>/references/pipeline-mode.md`, where **plugin root** = the plugin's own
 directory — `../../` relative to this skill's directory — and every `<plugin root>/…` path
-below resolves the same way.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty. **Read it now; it governs the run.**
+below resolves the same way; on Claude Code it is `${CLAUDE_PLUGIN_ROOT}` — the host substitutes
+the absolute path into this text, so the path you see here is the one to write into commands (no
+shell variable carries it). **Read it now; it governs the run.**
 
 Relationship to the series: the autonomous alternative to workflows 3–6. It never invokes
 the solo skills — it reuses their shared references, agents, and scripts, writes the same

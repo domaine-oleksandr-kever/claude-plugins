@@ -29,10 +29,10 @@ instead of content. Don't raw-`Read` it — run
 `node <plugin root>/scripts/json-slim.cjs <path>` and work from its stdout
 (`--jq` narrows to a sub-tree — dot paths, `[]` iteration, `,` multi-select and `| keys` /
 `| length` only, anything else exits 2; a wrong path yields `null`, not an error).
-**plugin root** in a command = the plugin directory's absolute path written out — take it from
-your brief, or from an absolute `…/fnd/<version>/references/…` path the brief cites, or from a
-`fnd plugin root: …` line if your context has one; never type `<plugin root>` or
-`<plugin root>` into a shell command.
+**plugin root** = the plugin's own directory, the one holding this agent's `references/`.
+On Claude Code the command above already reads as an absolute path — copy it as it stands; no
+shell variable carries it. On any other host, substitute that absolute path yourself: take it
+from your brief, or from an absolute `…/fnd/<version>/references/…` path the brief cites.
 
 ## What to extract
 

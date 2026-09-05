@@ -24,7 +24,7 @@ Operating mode: **Phase 1 is ingest + analysis** (review diff vs TA/AC, build th
 
 - **Never proceed past the ✋ checkpoint** without explicit developer confirmation.
 - **Atlassian MCP** for Jira; **Chrome DevTools MCP** for browser validation; **Figma MCP** when comparing to designs if URLs are available. Ticket and design **reads are delegated to the `jira-reader` / `figma-reader` subagents** (raw payloads stay out of context).
-- Local preview should be running for interactive checks (see `../../references/preflight-checklist.md` → Local dev server; paths like this are relative to this skill's directory, and `<plugin root>` below is that same `../../` — on Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands to empty) — confirm with the developer.
+- Local preview should be running for interactive checks (see `../../references/preflight-checklist.md` → Local dev server; paths like this are relative to this skill's directory, and `<plugin root>` below is that same `../../` — on Claude Code it is `${CLAUDE_PLUGIN_ROOT}`, the host substitutes the absolute path into this text, so the path you see here is the one to write into commands, no shell variable carries it) — confirm with the developer.
 
 ---
 

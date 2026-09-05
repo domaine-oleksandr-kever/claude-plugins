@@ -50,11 +50,11 @@ Both calls also require `cloudId`: pass the site host `meetdomaine.atlassian.net
 resolution: `jira-field-ids.md`).
 
 1. **Convert**: `node <plugin root>/scripts/md-to-adf.cjs --no-tables <source>` (drop
-   `--no-tables` only when the brief says `tables: keep`). **plugin root** in a command =
-   the plugin directory's absolute path written out — take it from your brief, or from an
-   absolute `…/fnd/<version>/references/…` path the brief cites, or from a
-   `fnd plugin root: …` line if your context has one; never type `<plugin root>` or
-   `<plugin root>` into a shell command. The tool result IS your capture:
+   `--no-tables` only when the brief says `tables: keep`). **plugin root** = the plugin's own
+   directory, the one holding `references/` and `scripts/`. On Claude Code the `node …` command
+   above already carries its absolute path — copy that path into the shell; no shell variable
+   carries it. On any other host, substitute the absolute path your brief cites. The tool
+   result IS your capture:
    stdout is the minified ADF document (one JSON line), and stderr — shown alongside it —
    carries `md-to-adf: <n> bytes` plus any size warning, so there is nothing to split into
    files. Do **not** redirect stdout to a file (`> adf.json`) or `cat` one back. If the

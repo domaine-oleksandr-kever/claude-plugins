@@ -26,10 +26,9 @@ allowed-tools: Read, Glob, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-the
 
 Both modes wrap `<plugin root>/scripts/create-preview-theme.sh` — **plugin root** = the
 plugin's own directory, `../../` relative to this skill's directory, and every
-`<plugin root>/…` path below resolves the same way.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty. It is the same script `create-pull-request` uses — running this skill is a good way to
+`<plugin root>/…` path below resolves the same way; on Claude Code it is `${CLAUDE_PLUGIN_ROOT}` —
+the host substitutes the absolute path into this text, so the path you see here is the one to write
+into commands (no shell variable carries it). It is the same script `create-pull-request` uses — running this skill is a good way to
 test the mechanics in isolation. **create** builds a named, **unpublished** theme = your branch's code (built
 locally) + the dev theme's customizer settings. **refresh** redeploys the branch's code
 into an existing preview **without touching its customizer settings** — everything except
