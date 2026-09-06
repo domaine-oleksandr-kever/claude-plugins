@@ -5,9 +5,9 @@ the sequence and the honest-status rule; this file owns what each row runs, what
 looks like, and what to do when it isn't one.
 
 Path convention: `<plugin root>` is the plugin's own directory (`../../` relative to a skill
-directory); on Claude Code the session context opens with `fnd plugin root: <absolute path>` —
-write that path into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a
-literal one expands to empty. Every path below is written against `<plugin root>`.
+directory); on Claude Code use the session context's `fnd plugin root:` path —
+`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell. Every path below is written against
+`<plugin root>`.
 
 Status vocabulary, used identically in every row: **🟢** the check ran and returned what this
 file expects · **🔴** it ran and failed · **🟡** it could not run, or its outcome is not

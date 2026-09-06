@@ -17,6 +17,5 @@ archive links fail with `Src is empty`). Mutate the copy freely, verify via its 
 
 **Plugin root** = the plugin's own directory, this file being
 `<plugin root>/references/customizer-sandbox.md`.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty.
+On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is empty
+in the Bash tool's shell.

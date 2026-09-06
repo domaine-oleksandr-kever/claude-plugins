@@ -95,10 +95,3 @@ crashes, a wiring pointer that resolves nowhere, a guard that does not fire wher
 supports it, an instruction here that contradicts what happened — is worth filing: offer the fnd
 report-plugin-issue skill (on Claude Code, `/fnd:report-plugin-issue`) with this run's host,
 version, command and output; **offer only, never auto-run**.
-
-## Quality bar
-
-- Every row reports an outcome that was actually observed in this run.
-- Rows that could not run say so, with the reason — no silent omissions, no assumed greens.
-- Remediation is specific enough to act on without re-running the skill.
-- The matrix pastes into a ticket or an install report as-is.

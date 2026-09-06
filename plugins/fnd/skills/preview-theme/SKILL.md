@@ -36,8 +36,9 @@ into an existing preview **without touching its customizer settings** — everyt
 is pushed, so the content a reviewer configured stays put. Full contract:
 `<plugin root>/skills/create-pull-request/REFERENCE.md → Preview theme`. The
 **`error=` outcomes** + **page deep-link formulas** the steps below defer to live in the
-errors reference — `<plugin root>/references/preview-theme-errors.md` (read it
-when a run fails or a deep-link is needed).
+errors reference — `<plugin root>/references/preview-theme-errors.md`: its `error= outcomes`
+section when a run fails, its `Page deep-links` section when a deep-link is needed (read the
+section, not the file).
 
 When this checkout is a `git worktree` — or anything else already holds port 9292 — its dev
 server has to start on the theme the workspace's `notes.md` records as `session-theme:` and
@@ -128,9 +129,3 @@ silently collides with the main checkout's server or overwrites the shared dev t
    and its `notes.md` has no `session-theme:` line, append the refreshed id the same way as
    create's step 6 (dated bullet, only the parts the script returned — refresh hands back no
    name) — and, for the same reason as there, **without** `--pin-toml`.
-
-## Quality bar
-
-- Never expose the access token; never read `shopify.theme.toml` directly.
-- Always confirm before creating or overwriting a theme.
-- Report exactly what the script returned — don't invent URLs the script didn't produce.

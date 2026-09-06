@@ -4,9 +4,8 @@ Shared reference for the `develop-feature-or-fix` skill (and the Data / Config s
 the `write-technical-approach` skill). Plugin root = the plugin's own directory; this file is
 `<plugin root>/references/metafield-metaobject-setup.md`, and every `<plugin root>/…` path below
 resolves the same way.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty.
+On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is empty
+in the Bash tool's shell.
 
 **When the ticket — or a linked doc (e.g. a Notion data-mapping / schema page, see
 `<plugin root>/references/reading-linked-docs.md`) — describes a metafield or metaobject**, the
@@ -123,12 +122,11 @@ before trusting the file. **Mutations stay inline** (small responses; the flow c
 on a GraphQL failure (exit 0, mirroring the Admin API's HTTP 200 + errors) — the runner
 wraps/unboxes `store execute`'s native output so responses read identically either way, and a
 GraphQL error never triggers the token fallback — and for a **mutation**, no failure after an
-actually-attempted execute does (the mutation may already be applied server-side; the runner
-exits with `error=store_execute_failed_mutation` — verify store state before re-running). Put each query/mutation in a `.graphql` file **inside the task workspace** — scratch/inspection queries in `.claude/tasks/<work-id>/tmp/`, the Mode 2 living setup file at the workspace root; never the repo's `docs/` (`<plugin root>/references/task-workspace.md`) — and pass it with `--query` (and
+actually-attempted execute ever falls back (`error=store_execute_failed_mutation` — do what its
+hint says before any re-run). Put each query/mutation in a `.graphql` file **inside the task workspace** — scratch/inspection queries in `.claude/tasks/<work-id>/tmp/`, the Mode 2 living setup file at the workspace root; never the repo's `docs/` (`<plugin root>/references/task-workspace.md`) — and pass it with `--query` (and
 `--operation` when the file holds several named operations — for the store engine the runner
 extracts the named operation itself). If it exits with `error=no_admin_token`, **neither** engine
-is set up — its hint line names both fixes (add the token to `.env`, or the one-time
-`shopify store auth`); relay them to the developer, or fall back to **Mode 2**.
+is set up — relay the two fixes its hint names to the developer, or fall back to **Mode 2**.
 
 **Validate before you run.** Every query or mutation you wrote goes through
 `validate_graphql_codeblocks` (Shopify Dev MCP, `api: "admin"`, `version` = the version the
@@ -141,8 +139,8 @@ hallucinated field costs a round-trip, and a bad **mutation** may not be undoabl
 
 ## Step skeleton (dependency order)
 
-Derived from the ELC-257 worked example (`pdp_split_view_block` → `pdp_editorial_content` wrapper →
-product metafield → mock instances → product bind):
+Worked example — a PDP split-view block → an editorial-content wrapper metaobject → product
+metafield → mock instances → product bind:
 
 - **STEP 0 — INSPECT what exists.** A read query covering: the target metaobject definition(s) by
   type (`metaobjectDefinitionByType(type: "…")`), any wrapper/parent they attach to, a broad
@@ -184,7 +182,7 @@ product metafield → mock instances → product bind):
 Write it to the task workspace — `.claude/tasks/<work-id>/metaobject-setup.graphql` (and, if
 useful, a companion `tmp/inspection.graphql` for STEP 0) — not the repo's `docs/`, so
 ticket-scoped working files never ship with the branch
-(`<plugin root>/references/task-workspace.md`). Mirror the ELC-257 file's shape:
+(`<plugin root>/references/task-workspace.md`). Shape:
 
 - **Header comment block**: API version, the per-step **scopes** required
   (`read/write_metaobject_definitions`, `write_metaobjects`, `read/write_products`), a **diff vs

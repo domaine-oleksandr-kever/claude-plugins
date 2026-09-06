@@ -323,8 +323,8 @@ per-host doc it belongs to:
 
 Losses that hold on all three: no adversarial verify fan-out, no per-phase workflow telemetry,
 and the context-usage monitor is inert wherever the host hands a prompt hook no transcript
-(Cursor, OpenCode). `plugins/fnd/references/pipeline-phases.md` is the single home of the
-orchestration fallback.
+(Cursor, OpenCode). `plugins/fnd/references/host-orchestration.md` is the single home of the
+hoisted fallback; `plugins/fnd/references/pipeline-phases.md` → Orchestration is the branch point.
 
 ### Marketplace posture
 

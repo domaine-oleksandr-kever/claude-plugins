@@ -49,12 +49,6 @@ Present the Steps to Test. Encourage the developer to **walk through** them (men
 
 2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. For the **MCP** path: resolve the Steps-to-test field id (`jira-field-ids.md`) and **delegate the write to the `jira-writer` subagent** (ticket — with the workspace path it came from, or "the key the developer named" when there is no workspace · that field id · the saved `steps-to-test.md`) — the field is rich-text (ADF), and delegating keeps the large ADF blob out of the main context. Mechanics + when to write inline instead: **`../../references/jira-adf-write.md`**.
 
-## Quality bar
-
-Per `../../references/steps-to-test-format.md` → Self-check: full AC
-coverage; complete Setup (fresh theme → checkpoint); named fixtures; zero clarifying
-questions.
-
 ## Next in the series
 
 Close out per `../../references/task-workspace.md` → Progress tracking; next is the fnd `create-pull-request` skill (`/fnd:create-pull-request <ticket>` on Claude Code) if the branch has no PR yet, else the series is complete (reviewers, QA hand-off, ticket transition stay with the developer); **offer only; never auto-run**.

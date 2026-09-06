@@ -64,12 +64,6 @@ Present the draft path and summary (with any research findings folded in). The d
 
 3. **Update Jira** (only after approval) — ask whether **(a)** the developer updates manually or **(b)** you use Atlassian MCP. Put the approved TA in the **Technical Approach** custom field, not only description/comments. For **(b)**: resolve the TA field id (`jira-field-ids.md`) and **delegate the write to the `jira-writer` subagent** (ticket — with the workspace path it came from, or "the key the developer named" when there is no workspace · that field id · the approved `docs/technical-approaches/<TICKET-KEY>-technical-approach.md`) — the field is rich-text (ADF), and delegating keeps the large ADF blob out of the main context. Mechanics + when to write inline instead: **`../../references/jira-adf-write.md`**.
 
-## Quality bar
-
-- Every section traces to the Description + AC; out-of-AC scope lives in **Assumptions** (with a reason).
-- Aligns with Foundation patterns and repo rules.
-- Concise senior-level tone (~3-min read), no AI-speak, no cross-client references, no merge/deploy instructions that bypass developer ownership.
-
 ## Next in the series
 
 Close out per `../../references/task-workspace.md` → Progress tracking; next is normally the fnd `develop-feature-or-fix` skill (`/fnd:develop-feature-or-fix <ticket>` on Claude Code) once the TA is on the ticket; **offer only; never auto-run**.

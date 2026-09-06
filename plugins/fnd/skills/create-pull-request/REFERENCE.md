@@ -67,9 +67,8 @@ footer is overridden by this Domaine convention — the same rule
 `<plugin root>/references/commit-message-format.md` applies to commit messages. **Plugin root** =
 the plugin's own directory; this file is `<plugin root>/skills/create-pull-request/REFERENCE.md`,
 and every `<plugin root>/…` path below resolves the same way.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty. On other hosts substitute the same path.
+On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is empty
+in the Bash tool's shell.
 
 ## Preview theme — auto-create or manual
 
@@ -90,37 +89,19 @@ block the Shopify CLI resolves, keeping the value they replaced on a commented
 > branch — e.g. its `templates/product.json` references a block type (`subscription_selector`) whose
 > schema lives only in another feature branch. Shopify rejects pushing that template onto a preview
 > built from this branch's code. A partial overlay would give a misleading preview, so the script
-> **stops**: it reports the real `cause=`, deletes the code-only theme it just created
-> (`created_theme=<id>` + `created_theme_deleted=yes` — or `=failed` when the cleanup delete itself
-> failed, in which case that theme is still on the store burning a slot), and exits
-> `error=settings_drift`. A
-> `--reuse` of a pre-existing theme is never deleted — that run reports `theme=<id>`, `reused=true`
-> and a `mixed_state=` line instead (this branch's code now sits on it with unmatched settings), and
-> no `created_theme` key at all. A transient/auth failure is NOT drift: it exits
-> `error=overlay_push_failed` (or `error=overlay_pull_failed` when the settings pull half died) with
-> the same keys and is worth retrying. The same drift can also pass the CLI **silently** — the push
-> exits 0 and Shopify drops just the offending file; `create` reads the overlay back and reports
-> that as `overlay=partial` + `warn=overlay_file_dropped file=… [unknown_types=…]` on a run that
-> still exits 0, keeping the theme (recovery is per-file:
-> `<plugin root>/references/preview-theme-errors.md`). A `--reuse` run that prints `overlay=empty`
-> + `warn=overlay_empty` overlaid nothing at all (the dev-theme pull came back without settings
-> files; the theme keeps its previous ones) — not a reviewable preview until re-run against a dev
-> theme with settings. **The fix is manual:** for
-> real drift the developer duplicates the dev theme in the
-> Shopify admin (a server-side copy preserves every setting, drifted or not), renames it to the
-> `[ELC-…]` name, and re-runs `create-pull-request` with `theme_name` + `theme_url` +
-> `theme_admin_url` — which makes the skill use that theme and skip auto-creation.
+> **stops** with `error=settings_drift`. Its keys — the reaped `created_theme=` /
+> `created_theme_deleted=`, the `--reuse` `mixed_state=`, the transient `overlay_push_failed` /
+> `overlay_pull_failed` retry, the silent-drop `overlay=partial` / `overlay=empty` warns — and every
+> recovery, including the manual dev-theme duplication and the `theme_name` + `theme_url` +
+> `theme_admin_url` re-run after it: `<plugin root>/references/preview-theme-errors.md → error= outcomes`.
 
 Code pushes never use `--path .` — the script **assembles a clean push root** of only the
 canonical theme dirs and pushes that, so non-theme repo paths can't leak into the push or crash
 the CLI. For a file living *inside* a theme dir that still shouldn't ship, pass
 `--ignore-extra "<glob>"` (both `create` and `refresh` accept it, repeatable). On a push failure
 the script prints the real cause plus a `log=<path>` to the full `shopify` stderr — read that,
-don't guess. Pushes already retry a Shopify `Throttled` answer twice (the store+token rate limit
-is shared with a running `shopify theme dev`); a throttle that holds is reported as
-`cause=throttled`, and a create that had already made the theme server-side reports reaping it
-(`created_theme=` + `created_theme_deleted=`) — the fix is stopping the competing consumer or
-waiting, then re-running.
+don't guess; a held throttle (`cause=throttled`) and the reap keys are `error=` outcomes in
+`<plugin root>/references/preview-theme-errors.md`.
 
 > **Security:** the access token lives in `shopify.theme.toml`. **Never `Read` that file** —
 > it would pull the token into context. The script consumes the token inside the `shopify`
@@ -133,15 +114,7 @@ Decision flow (step 4 of the skill):
 3. **`info`** (`<plugin root>/scripts/create-preview-theme.sh info`) detects `store`, `dev_theme_id`, `dev_theme_name`.
    - **`error=…`** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config) → **manual path**: ask the developer for the theme name + Preview / Admin URLs.
    - **success** → propose the new name (swap the role prefix for the Jira key: `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`; **multiple tickets** → one bracket, prefix once, slash-separated numbers: `[ELC-299/307/309/315/382] Kever | Domaine`) and **ask before mutating**: `create the preview theme now? [ yes / no ]`. One PR = one preview theme regardless of how many tickets it carries — the preview overlays the dev theme's **current** customizer settings, so it reflects the content configured right now, not one ticket in isolation.
-4. **`create`** (`<plugin root>/scripts/create-preview-theme.sh create --name "<name>" [--reuse]`) builds the branch, assembles the built code into a clean temp dir (working tree untouched), pushes it to a new unpublished theme, then overlays the dev theme's customizer settings. It prints `theme_id`, `preview_url`, `editor_url`, `reused`. The skill passes `--reuse` **by default — deliberate**: one PR = one preview theme, so a re-run refreshes the same `[ELC-…]` theme instead of stacking duplicates. Note it will overwrite a pre-existing theme that happens to carry the same name (the bracketed ticket naming keeps collisions ticket-scoped). Record the returned id as the workspace's `session-theme: <id>` line, so aftercare and every later refresh reuse this theme instead of stacking another — **recorded, not pinned**: like the qa phase's fallback this runs unattended, so it never passes `--pin-toml`; the Step 0 session-theme gate re-asserts the pin on the next entry (`<plugin root>/references/session-theme.md`). Any `error=` — and any `warn=overlay_file_dropped` on an exit-0 run (the preview's affected pages 404; not reviewable as-is) → `<plugin root>/references/preview-theme-errors.md`.
-
-### `error=` outcomes · page deep-links
-
-Both live in `<plugin root>/references/preview-theme-errors.md` — the single home for
-every caller (this skill's step 4, the `preview-theme` skill). Read it whenever an `error=` line
-appears (it names, per code, whether anything was pushed, whether retrying is right, and the
-recovery) and **when building the Preview row** — its Page deep-links section owns the link
-formulas and where the paths come from.
+4. **`create`** (`<plugin root>/scripts/create-preview-theme.sh create --name "<name>" [--reuse]`) builds the branch, assembles the built code into a clean temp dir (working tree untouched), pushes it to a new unpublished theme, then overlays the dev theme's customizer settings. It prints `theme_id`, `preview_url`, `editor_url`, `reused`. The skill passes `--reuse` **by default — deliberate**: one PR = one preview theme, so a re-run refreshes the same `[ELC-…]` theme instead of stacking duplicates. Note it will overwrite a pre-existing theme that happens to carry the same name (the bracketed ticket naming keeps collisions ticket-scoped). Record the returned id as the workspace's `session-theme: <id>` line, so aftercare and every later refresh reuse this theme instead of stacking another — **recorded, not pinned**: like the qa phase's fallback this runs unattended, so it never passes `--pin-toml`; the Step 0 session-theme gate re-asserts the pin on the next entry (`<plugin root>/references/session-theme.md`). Any `error=` — and any `warn=overlay_file_dropped` on an exit-0 run (the preview's affected pages 404; not reviewable as-is) → `<plugin root>/references/preview-theme-errors.md → error= outcomes` (per key: was anything pushed, retry or not, the recovery — read that section, not the file).
 
 ## Theme-preview table — conditional construction
 

@@ -174,7 +174,7 @@ The subagent half is a live-checkout install (symlink into `~/.codex/agents/`), 
   and every nested helper is hoisted to it, but `max_concurrent_threads_per_session` makes those
   hoisted helpers genuinely concurrent — the closest a non-Claude host gets to the Claude
   fan-out. Losses are the same as on every other host: no adversarial verify fan-out, no
-  per-phase telemetry (`plugins/fnd/references/pipeline-phases.md`).
+  per-phase telemetry (`plugins/fnd/references/host-orchestration.md`).
 - **Model pins are PROPOSED, not blessed.** The gpt-5.6 tier map in
   `plugins/fnd/references/host-model-map.md` awaits owner sign-off; it lives in one table in
   `plugins/fnd/scripts/gen-host-adapters.cjs` and is regenerated from there — never hand-edit a

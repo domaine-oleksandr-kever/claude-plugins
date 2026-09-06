@@ -20,8 +20,7 @@ The verified ID table and the ready-to-paste request shape live in
 
 ### Empty field vs. wrong ID — don't run discovery for an empty field
 
-A `null` value does **not** mean the ID is wrong. Verified against the live API (ELC-61,
-2026-05-30):
+A `null` value does **not** mean the ID is wrong. Verified against the live API:
 
 | Case                        | `names` map        | `fields` value | Meaning                        |
 | --------------------------- | ------------------ | -------------- | ------------------------------ |
@@ -97,11 +96,10 @@ Always request `responseContentFormat: "markdown"`. Then decide **per field** by
 - **Still raw ADF** (a JSON object with `type: "doc"`) → **decode it with the bundled converter**.
   The markdown conversion does **not** apply to rich-text **custom** fields — Acceptance Criteria,
   Assumptions, Technical Approach, Steps to test, Documentation Links come back as raw ADF even
-  under `markdown` format (verified on ELC-126). Don't hand-walk the JSON; substitute the
+  under `markdown` format. Don't hand-walk the JSON; substitute the
   plugin root — the plugin's own directory — for the placeholder below
-  (on Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that
-  path into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one
-  expands to empty):
+  (on Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is
+  empty in the Bash tool's shell):
 
   ```bash
   node <plugin root>/scripts/adf-to-md.cjs <issue.json> --field <customfield_id>

@@ -85,11 +85,3 @@ script, relays what it printed, and — once the worktree exists — settles its
 
 Any `error=` line from `worktree-setup.sh` → report it plainly and stop. Do not work around it with raw
 `git worktree` commands — the guards exist because the failure they name is real.
-
-## Quality bar
-
-- The hand-off block reaches the developer character-for-character.
-- No behavior reimplemented here: the worktree script, plus the preview-theme script when the
-  developer accepts the session-theme offer, are the only things that mutate anything — this
-  skill only sequences them and records the id.
-- Never suggest continuing the current session inside the new worktree.

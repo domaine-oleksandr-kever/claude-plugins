@@ -18,11 +18,11 @@ arguments:
 From a ready ticket to an open PR + Steps to Test in one run. The run contract —
 decision-record format, autonomy rule, escalation contract with the pre-authorized list,
 judgment-call log, phase-start re-read — lives in
-`<plugin root>/references/pipeline-mode.md`, where **plugin root** = the plugin's own
-directory — `../../` relative to this skill's directory — and every `<plugin root>/…` path
-below resolves the same way; on Claude Code it is `${CLAUDE_PLUGIN_ROOT}` — the host substitutes
-the absolute path into this text, so the path you see here is the one to write into commands (no
-shell variable carries it). **Read it now; it governs the run.**
+`<plugin root>/references/pipeline-mode.md` — read at the end of Step 2, not here.
+**Plugin root** = the plugin's own directory — `../../` relative to this skill's directory — and
+every `<plugin root>/…` path below resolves the same way; on Claude Code it is `${CLAUDE_PLUGIN_ROOT}`
+— the host substitutes the absolute path into this text, so the path you see here is the one to
+write into commands (no shell variable carries it).
 
 Relationship to the series: the autonomous alternative to workflows 3–6. It never invokes
 the solo skills — it reuses their shared references, agents, and scripts, writes the same
@@ -64,7 +64,8 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 
 1. **Resume?** Workspace `pipeline.md` with `status: active` **and** the ✋ artifacts on
    disk (`plan.md` + `qa.md` — `active` without them is a half-written record: treat as
-   `draft`) → reconcile the phase ledger against ground truth per `pipeline-mode.md` — a tick is
+   `draft`) → read `<plugin root>/references/pipeline-mode.md` here — an `active` resume jumps to
+   Step 4, past the Step 2 read — and reconcile the phase ledger against ground truth — a tick is
    a claim, not an authorization: check each ticked phase against the evidence that phase itself
    leaves (`finalize` → a commit on the working branch; `create-pr` → the PR the record names,
    via `gh pr view`; `steps-to-test` / `jira-hand-off` → the Jira field / comment; `implement` /
@@ -251,7 +252,11 @@ recommended answer. Explore the codebase instead of asking whenever the code can
   QA depth is **not** a question (`break-it-qa.md` → No reduced mode — that rule's
   single home).
 
-Write `pipeline.md` per `pipeline-mode.md` (`status: draft`; caps, the phase list).
+**Read `<plugin root>/references/pipeline-mode.md` here, at the end of Step 2, and not before**
+— the run contract (decision-record template, autonomy rule, escalation contract with the
+pre-authorized list, judgment-call log, phase-start re-read) is this gate's working spec, governs the
+run from here on, and is pure weight before it, so a run that stops in Step 0 never pays for it. Write `pipeline.md` per its
+template (`status: draft`; caps, the phase list).
 
 ## Step 3 — Contract ✋ (the only gate)
 
@@ -297,9 +302,8 @@ judgment calls to `notes.md` as dated
 (aftercare: `pipeline.md` only); your final message is a compact report
 (≤ ~20 lines), never file dumps."*
 **Spawning shape:** where a subagent may spawn subagents of its own (on Claude Code, always)
-the briefs run as written. Where it may not — one-level nesting — `pipeline-phases.md` →
-Orchestration governs: you spawn every helper at your own level and hand its findings into the
-phase brief. Read that section with the file; it names what the degraded shape costs.
+the briefs run as written; one-level nesting → `pipeline-phases.md` → Orchestration governs (it
+hands you on to the hoisted shape and names what it costs).
 **Model tiering:** phase agents never inherit the session model — pass `model` explicitly
 on every spawn; the assignments live in `pipeline-mode.md` → Phase-agent models (their
 single home).
@@ -323,14 +327,3 @@ links · judgment-call digest · anything pending (bots). Set `pipeline.md` →
 `status: done`; every `progress.md` row **this run owns** ticked with dates (rows ship
 never runs — e.g. the pre-existing `write-technical-approach` — stay as they were). Offer workspace cleanup once
 the ticket is Done. Nothing else to offer — the series is complete.
-
-## Quality bar
-
-- Zero unplanned stops: the interview, one ✋, and contract escalations only — a
-  permission prompt mid-run is a Step 0 failure.
-- Solo interop intact: same artifacts, same `progress.md` rows, `.fnd-review` stamped —
-  an interrupted run continues solo without unwinding.
-- Every autonomous decision is either pre-approved in `pipeline.md` or logged in
-  `notes.md`.
-- Output formats render from the shared references (commit message, PR body, Steps to
-  Test) — parity with the solo skills' standards.

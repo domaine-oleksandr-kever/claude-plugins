@@ -8,9 +8,8 @@ files directly with `<plugin root>/scripts/theme-json.sh`, and any customizer-de
 AC, bug reproduction, or research question becomes scriptable. **Plugin root** = the plugin's own
 directory; this file is `<plugin root>/references/theme-customizer-state.md`, and every
 `<plugin root>/…` path below resolves the same way.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty. On other hosts substitute the same path.
+On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is empty
+in the Bash tool's shell.
 
 ## Always available — not only when finishing a plan
 
@@ -25,11 +24,10 @@ including the live one (reading live is safe). Don't guess what's configured on 
   --strip-comments --out .claude/tasks/<work-id>/tmp/product.json          # then pull values with jq
 ```
 
-Inspection reads go through `--out` (target the task workspace `tmp/`, mktemp when no
-workspace) — a `settings_data.json` is 30–150 KB of context burn inline. `get` without
-`--out` suppresses any body over 8 KB to a **non-TTY** caller (pipes and `>` redirects
-alike) with a self-describing `note=large_file` line — never redirect a big `get` to make
-a snapshot; `--out` is the snapshot path (byte-exact). A human terminal prints in full.
+Inspection reads go through `--out` (the task workspace `tmp/`, mktemp when none) — a
+`settings_data.json` is 30–150 KB of context burn inline, and `get` without `--out` suppresses any
+body over 8 KB to a non-TTY caller (`note=large_file`); never redirect a big `get` to make a
+snapshot — `--out` is the snapshot path (byte-exact). A human terminal prints in full.
 
 Writes (`set`) follow the protocol below. General Admin GraphQL (products, metafields,
 metaobjects, files) goes through `<plugin root>/scripts/shopify-admin-gql.sh` — see
@@ -52,11 +50,11 @@ theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
 # common: --store <domain> · --engine auto|store|token|themecli · --env <path> · --api-version <v>
 ```
 
-`--file` is a path **inside the theme** — it must start with a theme top-level dir and carry no
-absolute, `~` or `..` segment (else `error=bad_file`, exit 2) — and `set` writes the JSON content
-layer only: `config/*.json`, `templates/**/*.json`, `sections/*.json`, `locales/*.json` (else
-`error=file_not_writable`); a `--from` that names a credential file is refused outright
-(`error=from_file_refused`), since an upload publishes those bytes and an asset is public.
+`--file` is a path **inside the theme** — a theme top-level dir, no absolute / `~` / `..`
+segment; `set` writes the JSON content layer only
+(`config/*.json`, `templates/**/*.json`, `sections/*.json`, `locales/*.json`) and refuses a
+`--from` that names a credential file — an upload publishes those bytes onto a public CDN.
+Anything else is refused before any read or write, with the reason on the line.
 
 Engines (`--engine auto|store|token|themecli`, default `auto`) — Admin GraphQL first, via the gql
 runner (store execute → `SHOPIFY_ADMIN_TOKEN`); scopes **`read_themes`** for `themes`/`get`,
@@ -68,10 +66,8 @@ lack the theme scopes, the script **falls back to the theme-CLI engine automatic
 **Theme Access token** every Foundation project already has for `theme dev`
 (`SHOPIFY_CLI_THEME_TOKEN`, else `password=` in `shopify.theme.toml` — read internally, never
 printed). So theme JSON works even with **no Admin API access at all**; both engines return
-identical bytes and enforce the same live-theme refusal. Exit codes: 0 ok · 2 usage · 4
-live-theme write refused · 5 GraphQL/user/CLI errors · 3 no credentials for any engine (the
-hints name every remedy) · 6 a `set` reported success but the content did not land (read-back
-mismatch, or the read-back itself failed — see the write protocol below).
+identical bytes and enforce the same live-theme refusal. Exit 6 is the one code that needs
+judgement — the write protocol below.
 
 **Finding the dev theme id** without exposing secrets (never `Read` `shopify.theme.toml` — it can
 hold a Theme Access password):
@@ -108,21 +104,16 @@ against, or a preview/sandbox theme. Then:
 
 3. **Write**: `set --theme <id> --file templates/product.json --from "$TMP/product.working.json"`.
    The write is **verified mechanically**: on both engines `set` pulls the file back and compares
-   it against the payload (semantically for `*.json` — banner stripped, `jq -S` key order — so the
-   re-stamped `/*…*/` header is not a diff), retrying once. Landed ⇒ `verified=true` on the result
-   line. Shopify validates theme JSON server-side and, for payloads it rejects, **keeps the
-   previous content while the write reports success** — that case is now `error=not_applied` +
-   **exit 6**, with the two known triggers on stderr: an attribute the setting's schema does not
-   support, and a non-canonical dynamic source (write `{{ ….value }}` — a `.value` after every
-   reference hop). Fix the payload and re-run — and treat exit 6 as *the theme diverged*, not as
-   *nothing happened*: no pre-image is read before the write, so what it proves is only that the
-   theme does not serve your payload. `get` the file, and restore the snapshot (step 5) if what
-   comes back is neither the payload nor the content you started from.
-   `error=verify_read_failed` (same exit 6) means the read-back itself did not run — throttled,
-   5xx, unparsable — so the state is unconfirmed; `get` before assuming either outcome. On a host
-   with no working `perl` the comparison degrades to raw bytes, which cannot tell the re-stamped
-   banner from a lost write: a difference is then `verified=unverified` on the result line + exit
-   0 (`note=verify_raw_compare` / `note=verify_unverified` on stderr), and confirming is yours.
+   it against the payload (semantically for `*.json`, retrying once); landed ⇒ `verified=true`.
+   Shopify validates theme JSON server-side and, for a payload it rejects, **keeps the previous
+   content while the write reports success** — `error=not_applied` + **exit 6**, its hint naming
+   the two known triggers (a schema-unsupported attribute; a dynamic source without `.value` after
+   every reference hop — write `{{ ….value }}` from the start). Treat exit 6 as *the theme
+   diverged*, not *nothing happened*: no pre-image is read, so `get` the file and restore the
+   snapshot (step 5) if what comes back is neither the payload nor what you started from.
+   `error=verify_read_failed` (also exit 6) = the state is unconfirmed — `get` before assuming
+   either outcome. On a host with no working `perl` the compare degrades to raw bytes and a
+   difference is `verified=unverified` + exit 0: confirming is yours.
 4. **Verify the render**: reload the page (running dev server → `127.0.0.1:9292`; otherwise the
    theme preview URL). Ignored paths render from the **remote** theme, so the upserted JSON is
    what the dev server shows. Step 3 already proved the file on the theme, so a stale UI is

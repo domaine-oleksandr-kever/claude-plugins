@@ -42,12 +42,6 @@ Run the full checklist in `../../references/preflight-checklist.md` (paths like 
 
 Present the report. Once the developer confirms issues are resolved or accepted, the environment is cleared for Workflows 2–6.
 
-## Quality bar
-
-- Honest status — no assumed green checks.
-- Actionable remediation for every failure.
-- Compact table suitable for pasting into a ticket or session notes.
-
 ## Next in the series
 
 Environment cleared → offer the ticket's entry point per `../../references/task-workspace.md` → Progress tracking; no workspace → the fnd write-technical-approach skill (no approved TA) or develop-feature-or-fix (TA approved) — on Claude Code, `/fnd:write-technical-approach <ticket>` / `/fnd:develop-feature-or-fix <ticket>`; **offer only; never auto-run**.

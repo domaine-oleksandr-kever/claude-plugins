@@ -59,15 +59,15 @@ sentences where they read cleaner (e.g. "PDP only — cart/checkout → ELC-303.
    links render as plain text. Reference in-repo files/folders/rules with **inline code only**.
    **External** links are fine — other Jira tickets, Figma, public Shopify / Domaine docs.
 6. **Scope discipline:** describe **how**, not **what** or **how to verify** — AC and Steps to test
-   live in Jira, not here. Net-new apps / app embeds / scripts go under **Dependencies** — never
+   live in Jira, not here, and never merge / deploy / release instructions: those are the
+   developer's to run. Net-new apps / app embeds / scripts go under **Dependencies** — never
    the Shopify platform, CDN, theme editor, or already-installed apps (net-new prerequisites only).
 7. **Jira parity:** the markdown file is the review source of truth; converted to ADF with
    `<plugin root>/scripts/md-to-adf.cjs` it must paste in as the same seven H4 sections.
    **Plugin root** = the plugin's own directory, this file being
    `<plugin root>/references/technical-approach-format.md`.
-   On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that
-   path into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one
-   expands to empty.
+   On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is
+   empty in the Bash tool's shell.
 8. **Client confidentiality:** this repo is client-facing — never reference tickets, projects, repos,
    or Figma files from other client accounts.
 

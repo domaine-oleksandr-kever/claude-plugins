@@ -170,8 +170,8 @@ unless your filesystem forbids it.
   (`bug-hunter`, `change-reviewer`, the PR conformance pass) is hoisted to the conductor and its
   findings handed into the phase. Same phases, same gates, same artifacts; what is lost is the
   adversarial verify fan-out and the per-phase telemetry —
-  `plugins/fnd/references/pipeline-phases.md` states it in full. Claude Code's scripted Workflow
-  layer has no analogue and nothing to reproduce: `ship` never scripted one.
+  `plugins/fnd/references/host-orchestration.md` states it in full
+  (`plugins/fnd/references/pipeline-phases.md` → Orchestration is the branch point).
 - **Every subagent is pinned — but the pins are currently inert (the warning at the top of
   Install).** Cursor frontmatter takes only `inherit` or an exact versioned id (no family
   aliases, verified 2026-08-23). Per the Domaine model-selection guidelines: the reader-type

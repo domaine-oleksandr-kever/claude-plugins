@@ -273,7 +273,7 @@ after an update that touched them.
   anchored path fallback if the lookup misses).
 - **Ship orchestration runs hoisted** unless you raised `subagent_depth`: the conductor is the
   only spawner and every nested helper is hoisted to it, possibly serialized — that costs
-  wall-clock, not coverage (`plugins/fnd/references/pipeline-phases.md`).
+  wall-clock, not coverage (`plugins/fnd/references/host-orchestration.md`).
 - **Windows:** OpenCode recommends WSL; fnd is macOS-first and does not engineer around it.
 
 ## Project layer

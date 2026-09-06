@@ -18,18 +18,12 @@ server** item as their browser-validation prerequisite.
 
 Report version numbers; flag anything missing or below known team minimums. Two severities worth
 getting right: **jq missing is a 🔴** — all three runners exit immediately with an `error=` line
-naming jq (`error=jq_not_found` from the gql and theme-JSON runners, `error=jq not found on
-PATH …` from `create-preview-theme.sh`), so store access and preview themes are dead; **perl
+naming jq, so store access and preview themes are dead; **perl
 missing is a 🟡** — only `theme-json.sh get --strip-comments` hard-fails
-(`error=strip_needs_perl`); everything else degrades and says so. A `set` whose `--from` JSON
-carries `/*…*/` comments skips validation with `note=json_validation_skipped` instead of refusing
-the push, and that `set`'s read-back verify falls back to a raw byte compare
-(`note=verify_raw_compare`) — which cannot tell Shopify's re-stamped banner from a lost write, so
-a difference reports `verified=unverified` (exit 0) rather than `error=not_applied`: on such a
-host, confirming a `set` is the developer's job. The version
-commands above are read-only (the
-`preflight-checks` skill pre-approves exactly these); any other shell command still needs the
-developer's go-ahead.
+(`error=strip_needs_perl`); everything else degrades and says so on the line, but on such a host a
+`set`'s read-back cannot tell Shopify's re-stamped banner from a lost write, so confirming a `set`
+is the developer's job. The version commands above are read-only (the `preflight-checks` skill
+pre-approves exactly these); any other shell command still needs the developer's go-ahead.
 
 Shopify CLI **≥ 4.x** additionally provides `shopify store execute` — the preferred engine for
 Admin GraphQL work (`metafield-metaobject-setup.md`) and for theme-JSON/customizer state
@@ -69,6 +63,8 @@ On failure, report the **specific** error + remediation (auth, MCP config, serve
 
 **Plugin root** = the plugin's own directory — this file is `<plugin root>/references/preflight-checklist.md`,
 and every `<plugin root>/…` path below resolves the same way.
+On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is
+empty in the Bash tool's shell.
 
 Two facts and one line of output: which version is installed, and whether a newer one is waiting.
 This row is **advisory — never a blocker**: it does not gate Workflows 2–6, and a check that could
@@ -145,44 +141,29 @@ Rules that keep this row honest and cheap:
 
 ## Model pins
 
-Only two hosts pin versioned model ids: **Cursor** and **Codex**. Claude Code's agents pin aliases
-that do not churn, and OpenCode deliberately pins nothing so local providers work — on those two
-hosts report the row as 🟢 `n/a — this host pins no versioned ids` and move on. The full map is
-`<plugin root>/references/host-model-map.md`.
+**Claude Code and OpenCode pin no versioned model ids** (aliases that do not churn; nothing at all,
+so local providers work) — on those hosts report 🟢 `n/a — this host pins no versioned ids` and skip
+the rest of this section. **Cursor** and **Codex** do pin: `<plugin root>/agents-cursor/*.md`
+frontmatter `model:`, `<plugin root>/agents-codex/*.toml` `model` / `model_reasoning_effort` — read
+the copies the installer linked into the host's agents directory when they exist, else the bundled
+ones (`doctor.cjs --target codex` says which install mode is live). The map is
+`<plugin root>/references/host-model-map.md`. One row, two halves:
 
-Where the pins live: `<plugin root>/agents-cursor/*.md` frontmatter `model:` on Cursor;
-`<plugin root>/agents-codex/*.toml` `model` / `model_reasoning_effort` on Codex — there, read the
-copies the installer linked into the host's own agents directory where they exist (the dev
-channel loads those); otherwise read the bundled `agents-codex/` copies — current Codex loads
-them straight from the marketplace cache (`doctor.cjs --target codex` reports which install
-mode is live).
+1. **Structural** — every generated agent file carries a pin and every pinned id is in
+   `host-model-map.md`; a missing pin silently inherits the session model, an unknown id means a
+   hand-edited file. Either is 🔴; the fix is to regenerate (`<plugin root>/scripts/gen-host-adapters.cjs`).
+2. **Resolution** — best effort: does the host still accept each id? Only a documented model-listing
+   mechanism of the running host (a CLI listing subcommand, or the picker as the developer reports
+   it); those commands are outside the pre-approved allow-list, so ask before running one. No such
+   mechanism, or any doubt it exists on this host version → 🟡 SKIP with that reason. Never infer a
+   pin is fine because an agent ran, never spawn one to test it, and never invent a listing command
+   or a model list.
 
-Two halves, reported as one row:
-
-1. **Structural** — always runnable. Every generated agent file for this host carries a pin, and
-   every pinned id appears in `host-model-map.md`. A missing `model` means that agent silently
-   inherits the session model and its guidelines row stops being enforced; an id that is not in the
-   map means a generated file was hand-edited. Either is 🔴, and the fix is to regenerate
-   (`<plugin root>/scripts/gen-host-adapters.cjs`), never to edit the generated file.
-2. **Resolution** — best effort. Does the host still accept each distinct id? Use only a documented
-   model-listing mechanism of the running host — a listing subcommand of its CLI, or the model
-   picker as reported by the developer. Those commands are outside this skill's pre-approved
-   allow-list, so ask before running one. **No listing mechanism available from this session, or any
-   doubt that the command exists on this host version → 🟡 SKIP with that reason.** Never infer that
-   a pin is fine because some agent ran, never spawn an agent to test one, and never invent a
-   listing command or a model list: a fabricated "resolves" is worse than a skip.
-
-When a pin is genuinely stale — the host lists its models and one pinned id is not among them, or
-rejects it by name:
-
-- **Update available (from the row above)** → update first and re-run; the pin may already be fixed
-  upstream.
-- **Already on the latest version** → this is a plugin content defect, not an environment gap.
-  Offer the fnd report-plugin-issue skill (on Claude Code, `/fnd:report-plugin-issue`) with a
-  sanitized report: host, host version, the pinned id, the agent file it came from, and the host's
-  exact error text. Offer only — never file automatically.
-- Do not hand-edit the generated agent as a local workaround: it is regenerated output, and the fix
-  belongs in the generator's tier table.
+A genuinely stale pin (the host's listing omits it, or rejects it by name): update available →
+update and re-run; already latest → a plugin content defect — offer the fnd report-plugin-issue
+skill (on Claude Code, `/fnd:report-plugin-issue`) with host, host version, the pinned id, the agent
+file, and the host's exact error text; offer only, never file. Do not hand-edit the generated agent
+as a workaround — the fix belongs in the generator's tier table.
 
 ## Report format
 

@@ -8,46 +8,22 @@ reference list; the standing rules every brief inherits, the tick/verify loop an
 each phase is pinned to lives in `pipeline-mode.md` → Phase-agent models.
 **Plugin root** = the plugin's own directory; this file is `<plugin root>/references/pipeline-phases.md`,
 and every `<plugin root>/…` path below resolves the same way.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty. On other hosts substitute the same path.
+On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is empty
+in the Bash tool's shell.
 
 ## Orchestration — who spawns whom on this host
 
-The briefs below are host-neutral; only *who spawns whom* differs. Where a subagent may spawn
-subagents of its own, run them exactly as written: the conductor spawns each phase agent, and a
-phase agent spawns the helpers its brief names — qa's parallel `bug-hunter`, finalize's
+The briefs below are host-neutral; only *who spawns whom* differs. On Claude Code a subagent may
+spawn subagents of its own, so run them exactly as written: the conductor spawns each phase agent,
+and a phase agent spawns the helpers its brief names — qa's parallel `bug-hunter`, finalize's
 `change-reviewer`(s), create-pr's conformance and correctness passes.
-On Claude Code that is the shape, and the host's scripted Workflow (ultracode) layer stays out
-of it: ship has never scripted one, so no other host has anything to reproduce.
-
-Where a subagent **cannot** spawn subagents — one-level nesting: Cursor; OpenCode unless the
-user raised `subagent_depth`; Codex within whatever its `[agents]` thread budget allows — run
-the **hoisted** shape. One fallback, not a variant per host:
-
-- **The conductor is the only spawner.** Same phases, same order, same briefs, same artifacts
-  and ticks; each phase runs as ONE subagent.
-- **Every nested spawn a brief names is hoisted to the conductor**, which runs it at its own
-  level and passes the findings *into* the phase brief: `bug-hunter` alongside the qa agent,
-  `change-reviewer` before the finalize agent commits, the conformance and correctness passes
-  before the create-pr agent drafts. Gate semantics do not move — a blocking finding still
-  stops the phase, and the phase agent still dispositions every finding it is handed. A phase
-  agent that needs a helper it cannot spawn and was handed nothing `ESCALATE`s; it never
-  improvises a nested spawn and never substitutes its own read of the diff for a missing pass.
-- **Fan out where the host runs threads concurrently** — Codex's
-  `max_concurrent_threads_per_session` makes the hoisted helpers genuinely parallel and is the
-  closest a non-Claude host gets to the Claude fan-out; Cursor and OpenCode may serialize them,
-  which costs wall-clock, not coverage.
-- **No usable spawning at all** (a host or a mode without subagents) → the phase runs inline in
-  the conductor session, following the skill its row maps to (`ship` → Relationship to the
-  series): the sequential skill chain workflows 2–6 already encode. Same artifacts, same ticks;
-  the fresh-lens property of the qa and review agents is lost, so say so in the final report.
-
-Honest losses off Claude Code, in every shape above: **no adversarial verify fan-out** — one
-pass per lens is the whole review, so what it misses stays missed; **no per-phase workflow
-telemetry** — `pipeline.md` ticks plus each phase's ≤20-line report are the entire run trace;
-and on one-level hosts the conductor carries the findings tables that would otherwise have
-stayed inside a phase agent, so keep them to tables, never file dumps.
+On a one-level host — Cursor; OpenCode unless the user raised `subagent_depth`; Codex within its
+`[agents]` thread budget (`max_concurrent_threads_per_session` sets how parallel the hoisted
+helpers run) — or on a host or mode with no usable spawning at all — read
+`<plugin root>/references/host-orchestration.md` now.
+One fallback, not a variant per host: the conductor is the only spawner and hoists every nested
+spawn to its own level; the losses (no adversarial verify fan-out, no per-phase workflow
+telemetry) are named there.
 
 The numbers are the execution order. Every phase is a fresh general-purpose subagent unless
 its brief says otherwise.
@@ -128,7 +104,8 @@ its brief says otherwise.
 4. **create-pr** — agent. Brief: the policy answers (preview theme / target branch /
    storefront path), the `notes.md` `ceiling:` entries **and its `session-theme: <id>`
    line — that theme is the PR's preview theme, so the agent refreshes it instead of
-   auto-creating another** (REFERENCE.md → Preview theme, precedence step 2), and
+   auto-creating another** (create-pull-request/SKILL.md step 4 —
+   precedence: explicit args → workspace session-theme → auto-create), and
    `<plugin root>/skills/create-pull-request/REFERENCE.md` — it owns the title
    convention, the body structure (core skeleton Summary → Jira → theme-preview table →
    Changes; conditional sections only with real content; ceilings one line each) and the

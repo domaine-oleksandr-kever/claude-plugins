@@ -85,9 +85,8 @@ is spawned at all.
 `jira-writer` runs exactly this; it is also the inline / manual recipe. **Plugin root** = the
 plugin's own directory, this file being `<plugin root>/references/jira-adf-write.md`; substitute
 its absolute path for the placeholder below.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty.
+On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is empty
+in the Bash tool's shell.
 
 ```bash
 node <plugin root>/scripts/md-to-adf.cjs --no-tables <approved.md>   # or pipe via stdin

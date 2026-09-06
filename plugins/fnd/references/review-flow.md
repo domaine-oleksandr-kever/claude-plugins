@@ -143,15 +143,12 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
 
 - **Emphasis by caller** — assigned per skill in §3 → Per-skill entry behaviour.
 
-- **Who spawns these agents, per host.** In a solo run the caller *is* the session, so it
-  spawns them directly everywhere. Inside a `ship` run the caller is a phase agent: where a
-  subagent may spawn subagents (on Claude Code, always) it spawns them itself, exactly as
-  above; where it may not — one-level nesting, see
-  `<plugin root>/references/pipeline-phases.md` → Orchestration — the conductor runs the pass
-  at its own level and hands the findings into the phase brief. Same agents, same emphases,
-  same blocking semantics; only the spawner moves. A caller that can neither spawn nor was
-  handed findings does not skip the pass: it `ESCALATE`s (pipeline) or tells the developer
-  (solo).
+- **Who spawns these agents, per host.** Solo: the caller is the session and spawns them
+  directly. Inside a `ship` run the caller is a phase agent — it spawns them itself where it may
+  (on Claude Code, always); where it may not,
+  `<plugin root>/references/pipeline-phases.md` → Orchestration says who does. Same agents,
+  emphases and blocking semantics; a caller that can neither spawn nor was handed findings never
+  skips the pass — it `ESCALATE`s (pipeline) or tells the developer (solo).
 
 Merge the agent findings with the inline B/D hits into one plan/table for the developer.
 
@@ -164,9 +161,9 @@ PR body as a **one-line named ceiling**, placement per
 `<plugin root>/skills/create-pull-request/REFERENCE.md` → Body sections — **plugin root** = the
 plugin's own directory, this file being `<plugin root>/references/review-flow.md`, and every
 `<plugin root>/…` path here resolves the same way;
-on Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty; the full reasoning stays in `notes.md`), or have the developer **explicitly waive**
+on Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is empty
+in the Bash tool's shell; the full reasoning stays in `notes.md`), or have the developer
+**explicitly waive**
 it — and record the disposition (workspace `notes.md` when one exists). A **blocking**
 correctness finding stops a PR the same way a `protected-core` blocker does.
 

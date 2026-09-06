@@ -6,9 +6,8 @@ and aftercare all **consume** it. Read this file when the offer actually has to 
 silent-reuse path needs nothing from here. **Plugin root** = the plugin's own directory; this
 file is `<plugin root>/references/session-theme.md`, and every `<plugin root>/…` path below
 resolves the same way.
-On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path
-into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands
-to empty. On other hosts substitute the same path.
+On Claude Code use the session context's `fnd plugin root:` path — `${CLAUDE_PLUGIN_ROOT}` is empty
+in the Bash tool's shell.
 
 ## Why
 
@@ -110,23 +109,12 @@ can differ; `refresh` is unaffected either way.
 
 - **Never `Read` or print that file, or any line of it** — the Theme Access token lives two
   lines away. Report only the path and the id the script returned.
-- On `create`/`refresh` the pin is **non-fatal**: the theme id is printed first and stands even
-  when the rewrite fails (`pin=failed` + `pin_error=…`). Record the id, say the pin didn't land,
-  and keep using the explicit `--theme <id>` flag.
-- Pinning vets the id against the store listing. When the listing is unavailable, standalone
-  `pin` **refuses** (`error=theme_unverifiable` — a pin persists, so it is never applied
-  unvetted; the config is untouched, retry when the store answers), while a fresh
-  `create --pin-toml` proceeds, `refresh --pin-toml` proceeds for an id recorded as
-  `session-theme:` in any workspace under `.claude/tasks` (or with `--allow-unverified`; any other
-  id is refused, `error=refresh_unverifiable`), and `--reuse --pin-toml` proceeds only with
-  `--allow-unverified` (else `error=reuse_unverifiable` — a name lookup has no recorded-id
-  exemption) — each prints `warn=pin_unvetted` before the pin keys (the id
-  was just pushed to, so it exists). The script-side match is an id lookup, not provenance —
-  the gate in step 1 still applies before a skill refreshes unattended.
-- **Restoring by hand:** the superseded value sits on the `# theme = "…" # fnd:superseded`
-  line directly above the pinned one — the developer uncomments it and comments out or deletes
-  the session line below (an appended session line is tagged `# fnd:session-theme` — just
-  delete it). That is the same edit `worktree-setup.sh`'s unpin makes.
+- Pin outcomes — `pin=failed` + `pin_error=` on a `create`/`refresh` (non-fatal: the theme
+  stands, keep the explicit `--theme <id>`), the refusals under a silent store listing
+  (`theme_unverifiable`, `refresh_unverifiable`, `reuse_unverifiable`, `warn=pin_unvetted`), the
+  live-theme refusal that guards pin-only mode, and restoring a pin by hand are `error=`
+  outcomes: `<plugin root>/references/preview-theme-errors.md` → error= outcomes (Session-theme pin
+  outcomes).
 - A **worktree starts unpinned on purpose.** `worktree-setup.sh` copies the source checkout's
   toml and then reverts every pin it finds in it, both shapes — `fnd:superseded` markers
   restored, `fnd:session-theme` lines deleted (`toml_unpinned=yes`; `=no` means the source was
@@ -134,8 +122,6 @@ can differ; `refresh` is unaffected either way.
   session theme — which is what its first `create` would have copied customizer settings from.
   One caveat: a hand-written theme id that `pin` reported as `pin=unchanged` carries no tag
   and is not reverted.
-- `error=` outcomes (incl. the live-theme refusal that guards pin-only mode) live in
-  `<plugin root>/references/preview-theme-errors.md`.
 
 ## Consumers — everything reuses the same theme
 

@@ -91,7 +91,8 @@ or skip. Never open a duplicate.
 - **Title:** `[<component>] <symptom>` — e.g.
   `[create-preview-theme.sh] refresh dies silently when --theme is the last arg`,
   `[skill:write-steps-to-test] instructs a command its allowed-tools blocks`,
-  `[agents-cursor] pinned model <id> no longer resolves on Cursor`.
+  `[agents-cursor] pinned model <id> no longer resolves on Cursor`. One defect per issue —
+  related-but-different symptoms get separate issues or comments.
 - **Body** (write it to a temp file for `--body-file`):
 
 ````markdown
@@ -130,9 +131,3 @@ gh issue create --repo domaine-oleksandr-kever/claude-plugins --title "<title>" 
 Report the issue URL back. If `gh` is missing, unauthenticated (`gh auth status`), or lacks
 access to the repo, print the finished title + body in a fenced block and hand over the manual
 link: `https://github.com/domaine-oleksandr-kever/claude-plugins/issues/new`.
-
-## Quality bar
-
-- Reproducible from the issue alone: command, input, output, versions — no "it broke".
-- Zero secrets: no tokens, headers, share-keys, or client identifiers without approval.
-- One defect per issue; related-but-different symptoms get separate issues or comments.

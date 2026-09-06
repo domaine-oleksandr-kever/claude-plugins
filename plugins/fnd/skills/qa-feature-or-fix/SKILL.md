@@ -46,13 +46,7 @@ Present the checklist; let the developer add/remove cases. Wait for approval bef
    - **Data-driven AC — exercise each configured state, don't assume it** (store access required): flip the value via `<plugin root>/scripts/shopify-admin-gql.sh` → reload → verify → **restore**, walking every enumerated/optional/conditional state; inspect the **DOM, not just the visual**; mind propagation lag (retry before calling a Fail). Full pattern: `../../references/metafield-metaobject-setup.md` → Verifying data-driven AC.
    - **Customizer-driven AC — same discipline through theme JSON** via `<plugin root>/scripts/theme-json.sh` (snapshot → `set` → reload → verify → **restore**; live theme refused). Pattern: `../../references/theme-customizer-state.md`.
    - **Break-it rows** — execute per `../../references/break-it-qa.md` → Executing the rows: hostile values through the same two state patterns (restore after), timing via throttle/races; a row that breaks the feature is a **finding** with evidence + the exact hostile value, filed blocking/non-blocking.
-2. **Report findings** — summarize in a structured table or list; separate **blocking** vs **non-blocking**; suggest Jira updates (QA notes, screenshots, reopen criteria) but let the developer own ticket edits unless they ask you to use Atlassian MCP. **If you do write to a rich-text field or comment via MCP, delegate it to the `jira-writer` subagent** (ticket · the field id or `comment` · the approved markdown file) — it converts either to ADF, writes, and reads the target back, keeping the large payload out of the main context. Mechanics + when to write inline instead: `../../references/jira-adf-write.md`. Append the pass/fail outcome and confirmed findings (with their repro values) to the workspace `qa.md`, below the checklist.
-
-## Quality bar
-
-- Traceability from AC → test → outcome.
-- Honest gaps (e.g. cannot test checkout without credentials).
-- No false "pass" without basis.
+2. **Report findings** — summarize in a structured table or list; separate **blocking** vs **non-blocking**; every outcome observed in this run, gaps named (no credentials, no checkout) — never a pass without basis; suggest Jira updates (QA notes, screenshots, reopen criteria) but let the developer own ticket edits unless they ask you to use Atlassian MCP. **If you do write to a rich-text field or comment via MCP, delegate it to the `jira-writer` subagent** (ticket · the field id or `comment` · the approved markdown file) — it converts either to ADF, writes, and reads the target back, keeping the large payload out of the main context. Mechanics + when to write inline instead: `../../references/jira-adf-write.md`. Append the pass/fail outcome and confirmed findings (with their repro values) to the workspace `qa.md`, below the checklist.
 
 ## Next in the series
 
