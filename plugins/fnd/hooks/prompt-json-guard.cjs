@@ -81,6 +81,24 @@ function collectJsonBlobs(text) {
   return blobs;
 }
 
+// `wx` + 0600: the blob IS the developer's paste (API tokens, customer records) and the tmpdir
+// fallback can be shared, where a plain write would leave it world-readable and would follow
+// anything already sitting at the name. EEXIST retries ONCE under a fresh uuid instead of failing —
+// the caller may not block without a saved file, so a collision must never cost the paste.
+function writeBlobFile(dir, name, blob) {
+  const opts = { flag: 'wx', mode: 0o600 };
+  const p = path.join(dir, name);
+  try {
+    fs.writeFileSync(p, blob, opts);
+    return p;
+  } catch (e) {
+    if (!e || e.code !== 'EEXIST') throw e;
+  }
+  const retry = path.join(dir, `fnd-prompt-json-${crypto.randomUUID()}.json`);
+  fs.writeFileSync(retry, blob, opts);
+  return retry;
+}
+
 // Spill the blob so the developer can re-reference it. Prefer the active task workspace
 // (`.claude/tasks/<work-id>/tmp/`) when exactly one work-id dir exists — co-located with the
 // task, durable across sessions — else fall back to a private tmp file. Returns the path,
@@ -98,15 +116,11 @@ function spillBlob(blob, cwd) {
     if (dirs.length === 1) {
       const tmp = path.join(wsRoot, dirs[0], 'tmp');
       fs.mkdirSync(tmp, { recursive: true });
-      const p = path.join(tmp, name);
-      fs.writeFileSync(p, blob);
-      return p;
+      return writeBlobFile(tmp, name, blob);
     }
   } catch (_) {} // no workspace, ambiguous, or unwritable → fall through to tmpdir
   try {
-    const p = path.join(os.tmpdir(), name);
-    fs.writeFileSync(p, blob);
-    return p;
+    return writeBlobFile(os.tmpdir(), name, blob);
   } catch (_) {
     return null;
   }

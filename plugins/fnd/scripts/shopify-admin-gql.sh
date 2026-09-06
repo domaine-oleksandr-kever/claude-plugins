@@ -192,21 +192,28 @@ emit_envelope() { # $1 = file holding the {"data"|"errors":…} envelope
   echo "ok=1 bytes=$bytes out=$OUT_FILE errors=$errs"
 }
 
-# Domaine env files (process env wins): nearest .claude/domaine.env above cwd, then the global
-# ~/.config/domaine/env — same dialect as scripts/env-file.cjs, read per key, never sourced.
-# A file value fills an UNSET variable only; an empty value in the file cannot be expressed here.
+# Domaine env files (process env wins): nearest .claude/domaine.env above cwd — tuning keys only,
+# see below — then the global ~/.config/domaine/env; same dialect as scripts/env-file.cjs, read per
+# key, never sourced. A file value fills an UNSET variable only; an empty value in the file cannot
+# be expressed here.
 domaine_env() {
   local d="$PWD" f v
-  while :; do
-    f="$d/.claude/domaine.env"
-    if [ -f "$f" ]; then
-      v="$(grep -m1 "^$1=" "$f" 2>/dev/null | cut -d= -f2-)"
-      [ -n "$v" ] && { printf '%s' "$v"; return; }
-      break
-    fi
-    [ "$d" = "/" ] && break
-    d="$(dirname "$d")"
-  done
+  # PROJECT_OK, mirrored by hand from scripts/env-file.cjs: the project file is committable by a
+  # client repo, so only these tuning keys are read from it. Every other switch — the guards, the
+  # spill dir, the verify gates — comes from the environment or the global file, default-deny.
+  case "$1" in
+    FND_LEAN|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET)
+      while :; do
+        f="$d/.claude/domaine.env"
+        if [ -f "$f" ]; then
+          v="$(grep -m1 "^$1=" "$f" 2>/dev/null | cut -d= -f2-)"
+          [ -n "$v" ] && { printf '%s' "$v"; return; }
+          break
+        fi
+        [ "$d" = "/" ] && break
+        d="$(dirname "$d")"
+      done ;;
+  esac
   grep -m1 "^$1=" "${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env" 2>/dev/null | cut -d= -f2- || true
 }
 if [ -z "${FND_GQL_PROBE_CACHE+x}" ]; then

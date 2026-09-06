@@ -58,8 +58,11 @@ cp "$TJ" "$TJDIR/theme-json.sh"
 cat > "$TJDIR/shopify-admin-gql.sh" <<'STUB'
 #!/usr/bin/env bash
 # stub runner — answers by query content; FAKE_ROLE controls the theme role,
-# FAKE_RUNNER_MODE simulates the runner's exit-3 stderr contracts
+# FAKE_RUNNER_MODE simulates the runner's exit-3 stderr contracts. TJ_GQL_LOG records that the
+# runner was reached at all — the --file vetting cases assert the OPPOSITE (nothing was read or
+# written), and "no output" alone would also be what a broken stub looks like.
 set -u
+if [ -n "${TJ_GQL_LOG:-}" ]; then printf 'call\n' >> "$TJ_GQL_LOG"; fi
 case "${FAKE_RUNNER_MODE:-ok}" in
   mutfail) echo "error=store_execute_failed_mutation (stub)" >&2; exit 3 ;;
   nocreds) echo "error=no_admin_token" >&2; exit 3 ;;
@@ -592,22 +595,17 @@ rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/reserialized.json" PATH="$P
 if [ "$rc" -eq 0 ] && grep -q '"verified":"unverified"' "$O" && grep -q 'note=verify_raw_compare' "$E"; then ok
 else bad T44-broken-perl-notes-it "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 
-# T45 (bug): a NON-json file compares raw by design — but the CLI's pull hands back a body with
-# a trailing newline the payload never had, and that is not a dropped write.
+# T45: a `set` on a NON-json file used to reach the raw-bytes half of the verify compare; the
+# writable set is now the JSON content layer alone (T48 owns that gate), so the refusal is what
+# this pair pins instead — including the one property the old case cared about, that a write which
+# never reached the store cannot be reported as a landed one.
 printf '%s' 'a{{ x }}b' > "$TV/snippet.liquid"
-printf '%s\n' 'a{{ x }}b' > "$TV/snippet.pulled.liquid"
-rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/snippet.pulled.liquid" PATH="$TJSHIM:$PATH" \
+rc=0; M45="$TMP/tj45"; SHOPIFY_CLI_THEME_TOKEN=fake TJ_CLI_MARKER="$M45" PATH="$TJSHIM:$PATH" \
   "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
   --theme 2 --file sections/x.liquid --from "$TV/snippet.liquid" >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O"; then ok
-else bad T45-liquid-trailing-newline "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
-# …while a genuinely different non-json body is still the hard verdict
-rc=0; printf '%s' 'DIFFERENT' > "$TV/other.liquid"
-SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/other.liquid" PATH="$TJSHIM:$PATH" \
-  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
-  --theme 2 --file sections/x.liquid --from "$TV/snippet.liquid" >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O"; then ok
-else bad T45b-liquid-real-mismatch "rc=$rc out=$(head -c 200 "$O")"; fi
+assert T45-liquid-set-refused 2 "$rc" "$E" "error=file_not_writable"
+if [ ! -e "$M45" ] && ! grep -q 'verified' "$O"; then ok
+else bad T45b-liquid-no-push "the theme CLI ran or a verdict was printed: out=$(head -c 200 "$O")"; fi
 
 # T46 (bug): a gql read-back that fails on its own — Shopify throttling right after the
 # committed mutation — used to exit 5 with `error=gql_errors` from INSIDE the read-back: output
@@ -669,6 +667,96 @@ rc=0; FND_THEME_JSON_VERIFY_WAIT=1.2.3 TJ_PULL_BODY="$TV/old.json" tj_set_cli "$
 if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E"; then ok
 else bad T47d-multidot-wait "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 unset FND_THEME_JSON_VERIFY_WAIT
+
+# T48: --file vetting. `--file` names a path INSIDE the theme, but themecli materializes it under
+# a mktemp dir (`cp "$FROM" "$tmp/$FILE"`), so a `../` used to escape onto the local filesystem —
+# and on BOTH engines a `set --file assets/… --from ~/.ssh/id_rsa` published a local secret on the
+# theme's public CDN. The gate runs at dispatch, before any engine, which is what the
+# runner/CLI-untouched half of each case pins: a refusal that already spoke to the store is not a
+# refusal. TJ_GQL_LOG only ever records the gql runner being REACHED, never a query.
+TJV="$TMP/tjvet"; mkdir -p "$TJV"
+tjv_run() { # <label> <want-rc> <stderr-key> — rest is the theme-json.sh argv
+  local label="$1" want="$2" key="$3"; shift 3
+  local g="$TJV/gql.log" m="$TJV/cli.marker" rc=0
+  : > "$g"; rm -f "$m"
+  TJ_GQL_LOG="$g" TJ_CLI_MARKER="$m" SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TMP/snap.json" \
+    PATH="$TJSHIM:$PATH" "$BASH_BIN" "$TJDIR/theme-json.sh" "$@" \
+    --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+  if [ "$want" -eq 0 ]; then   # the accepted shapes print their verdict on stdout, not stderr
+    if [ "$rc" -eq 0 ] && grep -q "$key" "$O"; then ok
+    else bad "$label" "rc=$rc out=$(head -c 160 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+    return 0
+  fi
+  assert "$label" "$want" "$rc" "$E" "$key"
+  if [ ! -s "$g" ] && [ ! -e "$m" ]; then ok
+  else bad "$label-no-engine" "an engine ran before the refusal: gql=$(wc -l < "$g" | tr -d ' ') cli=$([ -e "$m" ] && echo yes || echo no)"; fi
+}
+tjv_run T48a-get-traversal      2 error=bad_file get --theme 2 --file ../../x.json
+tjv_run T48b-get-inner-dotdot   2 error=bad_file get --theme 2 --file templates/../../x.json
+tjv_run T48c-get-absolute       2 error=bad_file get --theme 2 --file /etc/passwd
+tjv_run T48d-get-empty-segment  2 error=bad_file get --theme 2 --file templates//a.json
+tjv_run T48e-get-foreign-dir    2 error=bad_file get --theme 2 --file .git/config
+tjv_run T48f-set-traversal      2 error=bad_file set --theme 2 --file ../../x.json --from "$TMP/snap.json"
+# `set` narrows further: an asset is served from the theme's PUBLIC CDN, so the JSON content layer
+# is the whole writable set — and the refusal names the CLI to use instead.
+tjv_run T48g-set-asset          2 error=file_not_writable set --theme 2 --file assets/leak.txt --from "$TMP/snap.json"
+tjv_run T48h-set-liquid         2 error=file_not_writable set --theme 2 --file snippets/x.liquid --from "$TMP/snap.json"
+tjv_run T48i-set-nested-config  2 error=file_not_writable set --theme 2 --file config/sub/settings_data.json --from "$TMP/snap.json"
+# …while the shapes the script exists for still go through, at any depth under templates/
+tjv_run T48j-set-nested-template 0 '"ok":"upserted"' set --theme 2 --file templates/customers/account.json --from "$TMP/snap.json"
+tjv_run T48k-set-section-group   0 '"ok":"upserted"' set --theme 2 --file sections/header-group.json --from "$TMP/snap.json"
+# `get` keeps the broader read set — the same top-level dirs, JSON or not (nothing leaves the store
+# on a read, and inspecting a rendered asset is a legitimate use)
+rc=0; TJ_GQL_LOG="$TJV/gql.log" "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file assets/app.js \
+  --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(head -1 "$O")" = '{"a":1}' ]; then ok
+else bad T48l-get-asset-allowed "rc=$rc out=$(head -c 120 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# --from vetting: whatever it names is what gets published, so the credential files an agent might
+# reach for by name are refused before the upload (a deny list, not a sandbox)
+FAKEHOME="$TMP/tjvet-home"; mkdir -p "$FAKEHOME/.ssh"
+printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\n' > "$FAKEHOME/.ssh/id_rsa"
+tjv_run T48m-from-ssh-key 2 error=from_file_refused \
+  set --theme 2 --file templates/product.json --from "$FAKEHOME/.ssh/id_rsa"
+printf '{"a":1}\n' > "$FAKEHOME/.env.local"
+tjv_run T48n-from-dotenv 2 error=from_file_refused \
+  set --theme 2 --file templates/product.json --from "$FAKEHOME/.env.local"
+# …and the deny list matches a RESOLVED path, not the string the caller typed: an agent whose cwd
+# is $HOME names `.aws/credentials` with no leading slash, and a symlink hides the name entirely.
+tjv_from_at() { # <label> <want-rc> <stderr-key> <cwd> — rest is the theme-json.sh argv
+  local label="$1" want="$2" key="$3" dir="$4"; shift 4
+  local g="$TJV/gql.log" m="$TJV/cli.marker" rc=0
+  : > "$g"; rm -f "$m"
+  ( cd "$dir" && TJ_GQL_LOG="$g" TJ_CLI_MARKER="$m" SHOPIFY_CLI_THEME_TOKEN=fake \
+      TJ_PULL_BODY="$TMP/snap.json" PATH="$TJSHIM:$PATH" \
+      "$BASH_BIN" "$TJDIR/theme-json.sh" "$@" --store test.myshopify.com ) >"$O" 2>"$E" || rc=$?
+  if [ "$want" -eq 0 ]; then
+    if [ "$rc" -eq 0 ] && grep -q "$key" "$O"; then ok
+    else bad "$label" "rc=$rc out=$(head -c 160 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+    return 0
+  fi
+  assert "$label" "$want" "$rc" "$E" "$key"
+  if [ ! -s "$g" ] && [ ! -e "$m" ]; then ok
+  else bad "$label-no-engine" "an engine ran before the refusal: gql=$(wc -l < "$g" | tr -d ' ') cli=$([ -e "$m" ] && echo yes || echo no)"; fi
+}
+mkdir -p "$FAKEHOME/.aws"
+printf 'aws_secret_access_key = s3cret\n' > "$FAKEHOME/.aws/credentials"
+tjv_from_at T48o-from-relative-creds 2 error=from_file_refused "$FAKEHOME" \
+  set --theme 2 --file templates/product.json --from .aws/credentials
+# the target is VALID JSON (an SSO token cache), so only the deny list can be what refuses it
+mkdir -p "$FAKEHOME/.aws/sso"
+printf '{"accessToken":"s3cret"}\n' > "$FAKEHOME/.aws/sso/cache.json"
+ln -sf .aws/sso/cache.json "$FAKEHOME/ok.json"
+tjv_from_at T48p-from-symlink 2 error=from_file_refused "$FAKEHOME" \
+  set --theme 2 --file templates/product.json --from ok.json
+# …and a chain of links reaches the same bytes through an innocent middle name
+ln -sf ok.json "$FAKEHOME/mid.json"
+ln -sf mid.json "$FAKEHOME/chain.json"
+tjv_from_at T48p2-from-symlink-chain 2 error=from_file_refused "$FAKEHOME" \
+  set --theme 2 --file templates/product.json --from chain.json
+# a plain relative --from is still the ordinary case and goes through
+cp "$TMP/snap.json" "$FAKEHOME/good.json"
+tjv_from_at T48q-from-relative-ok 0 '"ok":"upserted"' "$FAKEHOME" \
+  set --theme 2 --file templates/product.json --from good.json
 
 # ------------------------------------- shopify-admin-gql.sh against PATH shims --
 SHIM="$TMP/shim"; mkdir -p "$SHIM"
@@ -3792,20 +3880,21 @@ EVF="$ROOT/plugins/fnd/scripts/env-file.cjs"
 EVC="$ROOT/plugins/fnd/scripts/domaine-env.cjs"
 
 # EV1: `set` writes the global file; `set --project` targets <git toplevel>/.claude/domaine.env
+# (with a PROJECT_OK key — the project layer takes tuning switches only, EV6)
 (cd "$EVR/repo" && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_DEBUG=1 >/dev/null \
   && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_TTL=12 >/dev/null \
-  && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_MCP_SLIM_TTL=48 --project >/dev/null)
+  && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" set FND_CTX_WARN=48 --project >/dev/null)
 if grep -qx 'FND_MCP_SLIM_DEBUG=1' "$EVR/cfg/domaine/env" \
    && grep -qx 'FND_MCP_SLIM_TTL=12' "$EVR/cfg/domaine/env" \
-   && grep -qx 'FND_MCP_SLIM_TTL=48' "$EVR/repo/.claude/domaine.env"; then ok
+   && grep -qx 'FND_CTX_WARN=48' "$EVR/repo/.claude/domaine.env"; then ok
 else bad EV1-cli-set "global=$(tr '\n' ';' < "$EVR/cfg/domaine/env" 2>&1) project=$(tr '\n' ';' < "$EVR/repo/.claude/domaine.env" 2>&1)"; fi
 
 # EV2: loader precedence from a SUBDIR (walk-up finds the project file): project beats global,
 # a real process-env value beats both
 o1="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" node -e \
-  'require(process.argv[1]).load(); console.log(process.env.FND_MCP_SLIM_DEBUG+"|"+process.env.FND_MCP_SLIM_TTL)' "$EVF")"
-o2="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" FND_MCP_SLIM_TTL=7 node -e \
-  'require(process.argv[1]).load(); console.log(process.env.FND_MCP_SLIM_TTL)' "$EVF")"
+  'require(process.argv[1]).load(); console.log(process.env.FND_MCP_SLIM_DEBUG+"|"+process.env.FND_CTX_WARN)' "$EVF")"
+o2="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" FND_CTX_WARN=7 node -e \
+  'require(process.argv[1]).load(); console.log(process.env.FND_CTX_WARN)' "$EVF")"
 if [ "$o1" = "1|48" ] && [ "$o2" = "7" ]; then ok; else bad EV2-precedence "o1=$o1 o2=$o2"; fi
 
 # EV3: the allowlist — PATH/NODE_OPTIONS in the file never reach process.env, and the CLI
@@ -3821,8 +3910,8 @@ if [ "$o3" = "clean|0|unset" ] && [ "$rc" -ne 0 ]; then ok; else bad EV3-allowli
 XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" unset FND_WHALE_GUIDE >/dev/null
 o4="$(cd "$EVR/repo" && XDG_CONFIG_HOME="$EVR/cfg" node "$EVC" list)"
 if grep -qx '# tuning' "$EVR/cfg/domaine/env" && ! grep -q 'FND_WHALE_GUIDE' "$EVR/cfg/domaine/env" \
-   && printf '%s' "$o4" | grep -q 'FND_MCP_SLIM_TTL.*= 48.*(project file)'; then ok
-else bad EV4-unset-list "file=$(tr '\n' ';' < "$EVR/cfg/domaine/env") list=$(printf '%s' "$o4" | grep FND_MCP_SLIM_TTL)"; fi
+   && printf '%s' "$o4" | grep -q 'FND_CTX_WARN.*= 48.*(project file)'; then ok
+else bad EV4-unset-list "file=$(tr '\n' ';' < "$EVR/cfg/domaine/env") list=$(printf '%s' "$o4" | grep FND_CTX_WARN)"; fi
 
 # EV5: the bash-side reader — the domaine_env function the two shell scripts carry (extracted
 # from the shipped file, so this tests the real code): project-first walk-up, first-'=' split,
@@ -3842,6 +3931,53 @@ if [ -n "$cpt_fn" ]; then ok; else bad EV5b-cpt-fn "create-preview-theme.sh has 
 if [ -n "$gql_fn" ]; then ok; else bad EV5b-gql-fn "shopify-admin-gql.sh has no domaine_env()"; fi
 if [ "$cpt_fn" = "$gql_fn" ]; then ok
 else bad EV5b-copies-drifted "domaine_env() differs: $(diff <(printf '%s\n' "$cpt_fn") <(printf '%s\n' "$gql_fn") | tr '\n' ';' | head -c 300)"; fi
+
+# EV6: the project layer is a file a CLIENT REPO can commit, so it carries env-file.cjs's
+# PROJECT_OK tuning keys and nothing else — a security switch in it is skipped by the loader
+# (reported back as `ignored` for a caller that wants to say so; hooks stay silent), while the same
+# key still works from the global file. Default-deny: an unlisted FND_* key is global-only too.
+EV2R="$TMP/env2"; mkdir -p "$EV2R/cfg/domaine" "$EV2R/repo/.claude"
+git init -q "$EV2R/repo"
+printf 'FND_MCP_SLIM=0\nFND_MCP_SLIM_DIR=/tmp/evil\nFND_FUTURE_SWITCH=0\nFND_CTX_WARN=11\n' \
+  > "$EV2R/repo/.claude/domaine.env"
+printf 'FND_MCP_SLIM_DIR=/tmp/good\n' > "$EV2R/cfg/domaine/env"
+o7="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" node -e \
+  'const r = require(process.argv[1]).load();
+   console.log([process.env.FND_MCP_SLIM || "unset", process.env.FND_MCP_SLIM_DIR,
+                process.env.FND_CTX_WARN, r.ignored.map((i) => i.key).sort().join(",")].join("|"))' "$EVF")"
+if [ "$o7" = "unset|/tmp/good|11|FND_FUTURE_SWITCH,FND_MCP_SLIM,FND_MCP_SLIM_DIR" ]; then ok
+else bad EV6-project-class-split "o7=$o7"; fi
+
+# EV6b: `list` says so where the developer looks for the value — a key that only the project file
+# carries names the class, and one the global file also carries shows the winner plus the dead line
+o8="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" node "$EVC" list)"
+if printf '%s' "$o8" | grep -q 'FND_MCP_SLIM .*= 0.*(project (ignored: global-only switch))' \
+   && printf '%s' "$o8" | grep -q 'FND_MCP_SLIM_DIR .*= /tmp/good.*(global file).*\[project (ignored: global-only switch): /tmp/evil\]' \
+   && printf '%s' "$o8" | grep -q 'FND_CTX_WARN .*= 11.*(project file)'; then ok
+else bad EV6b-list-ignored "$(printf '%s' "$o8" | grep 'FND_MCP_SLIM\|FND_CTX_WARN' | tr '\n' ';' | head -c 300)"; fi
+
+# EV6c: and the CLI will not write one in the first place — exit 2 (not die()'s 1), naming the
+# command that does work; `unset --project` still works, so a file that predates this can be cleaned
+rc=0; (cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" node "$EVC" set FND_SCRATCH_GUARD=0 --project) \
+  >/dev/null 2>"$E" || rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'global-only switch' "$E" && grep -q 'without --project' "$E" \
+   && ! grep -q FND_SCRATCH_GUARD "$EV2R/repo/.claude/domaine.env"; then ok
+else bad EV6c-set-project-refused "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+rc=0; (cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" node "$EVC" unset FND_MCP_SLIM --project) \
+  >/dev/null 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q '^FND_MCP_SLIM=' "$EV2R/repo/.claude/domaine.env"; then ok
+else bad EV6d-unset-project-still-works "rc=$rc file=$(tr '\n' ';' < "$EV2R/repo/.claude/domaine.env")"; fi
+
+# EV7: the bash reader carries the same split by hand — a global-only key is not even looked for in
+# the project file (the global value wins), a PROJECT_OK key still comes from the project layer
+printf 'FND_MCP_SLIM_DIR=/tmp/evil\nFND_CPT_OVERLAY_VERIFY=0\nFND_CPT_OVERLAY_VERIFY_WAIT=9\n' \
+  > "$EV2R/repo/.claude/domaine.env"
+printf 'FND_MCP_SLIM_DIR=/tmp/good\nFND_CPT_OVERLAY_VERIFY=1\n' > "$EV2R/cfg/domaine/env"
+o9="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" domaine_env FND_MCP_SLIM_DIR)"
+o10="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" domaine_env FND_CPT_OVERLAY_VERIFY)"
+o11="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" domaine_env FND_CPT_OVERLAY_VERIFY_WAIT)"
+if [ "$o9" = "/tmp/good" ] && [ "$o10" = "1" ] && [ "$o11" = "9" ]; then ok
+else bad EV7-bash-class-split "dir='$o9' verify='$o10' wait='$o11'"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

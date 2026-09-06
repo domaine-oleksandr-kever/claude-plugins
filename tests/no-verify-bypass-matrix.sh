@@ -250,6 +250,89 @@ no_verify_cases() {
   check block B60-quoted-heredoc-text   $'echo "docs use <<\'EOF\' for notes"\ngit -c core.hooksPath=/dev/null commit -m wip'
   check block B61-herestring            $'grep -q x <<<\'OK\'\ngit commit -n -m wip'
   check block B62-heredoc-scan-resumes  $'cat > n.md <<\'EOF\'\ntext\nEOF\ngit commit --no-verify -m wip'
+  # a COPY verb overwrites a hook without deleting it — blocked when the hook path is the
+  # DESTINATION (the last operand), which is what keeps the backup reads in A61–A65 allowed
+  check block B63-cp-devnull-husky   'cp /dev/null .husky/pre-commit && git commit -m x'
+  check block B64-cp-f-git-hooks     'cp -f /dev/null .git/hooks/pre-commit && git commit -m x'
+  check block B65-cp-semicolon-end   'cp empty.sh .husky/pre-commit;git commit -m x'
+  check block B66-cp-hook-dir-dest   'cp -r /tmp/bak/. .husky && git commit -m x'
+  check block B67-cp-hooks-dir-slash 'cp -r /tmp/bak/. .git/hooks/ && git commit -m x'
+  check block B68-dd-of-hook         'dd if=/dev/null of=.husky/pre-commit && git commit -m x'
+  check block B69-rsync-hook-dest    'rsync -a empty.sh .git/hooks/pre-commit && git commit -m x'
+  # …and after a cd the destination is a BARE name, the only kind that lands in the hook dir
+  check block B70-cd-then-cp         'cd .husky && cp /dev/null pre-commit && cd .. && git commit -m x'
+  check block B71-cd-then-cp-semi    'cd .git/hooks && cp /dev/null pre-commit;git commit -m x'
+  # …and a trailing redirect ends that operand the way a separator does: `2>/dev/null` on a copy
+  # must not be the one idiom walking past a rule every other disable verb keeps closed
+  check block B63b-cp-devnull-fd-redir 'cp /dev/null .husky/pre-commit 2>/dev/null && git commit -m x'
+  check block B63c-cp-devnull-redir    'cp /dev/null .husky/pre-commit >/dev/null 2>&1 && git commit -m x'
+  check block B69b-rsync-hook-redir    'rsync -a empty.sh .git/hooks/pre-commit >/dev/null && git commit -m x'
+  check block B70b-cd-then-cp-redir    'cd .husky && cp /dev/null pre-commit >/dev/null && git commit -m x'
+  check block B70c-cd-then-cp-fd-redir 'cd .husky && cp /dev/null pre-commit 2>/dev/null && git commit -m x'
+  # Accepted over-block, pinned so a change of mind is conscious: the guard cannot read the bytes
+  # a copy carries, so RESTORING a hook from a backup looks exactly like neutering one.
+  check block B72-cp-restore-overblock 'cp /tmp/bak/pre-commit .husky/pre-commit && git commit -m x'
+  check block B73-cp-backup-in-place   'git commit -m x && cp .husky/pre-commit .husky/pre-commit.bak'
+  # …and same class again: a hook path ending a copy span reads as the destination even when it is
+  # an option's value, which nothing short of parsing rsync's flags could tell apart
+  check block B73b-rsync-exclude-overblock 'rsync -av src/ dst/ --exclude=.husky && git commit -m x'
+  # an ALIAS definition carries the flag in its VALUE: the invoked verb is the alias NAME, so no
+  # commit/push/merge segment exists on the line for the flag rules above to pair with
+  check block B74-alias-c-commit-nv  'git -c alias.z="commit --no-verify" z'
+  check block B75-alias-c-commit-n   "git -c alias.z='commit -n' z"
+  check block B76-alias-c-unquoted   'git -c alias.z=commit --no-verify z'
+  check block B77-alias-config-run   'git config alias.z "commit --no-verify" && git z'
+  check block B78-alias-config-global "git config --global alias.ci 'commit -n' && git ci -m x"
+  check block B79-alias-config-local 'git config --local alias.z "commit --no-veri" && git z'
+  check block B80-alias-config-file  'git config -f .gitconfig alias.z "commit --no-verify"'
+  check block B81-alias-push         'git -c alias.p="push --no-verify" p'
+  check block B82-alias-merge        'git config alias.m "merge --no-verify" && git m main'
+  check block B83-alias-sh-wrap      "sh -c \"git config alias.z 'commit -n'\" && git z"
+  # git resolves an unambiguous prefix, and `am` — which has no `--verbose` to collide with —
+  # accepts them down to `--no-v`; the shorter spellings block on every verb, ambiguous or not
+  check block B84-am-no-v            'git am --no-v patch.mbox'
+  check block B85-commit-no-ve       'git commit --no-ve -m x'
+  check block B86-alias-am-no-v      'git config alias.z "am --no-v" && git z'
+  # the GIT_CONFIG_* env pair is the third spelling of the same definition — the key and the value
+  # are paired by index, so the value carries the bypass wherever its key sits on the line
+  check block B87-alias-env-nv       'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.z GIT_CONFIG_VALUE_0="commit --no-verify" git z'
+  check block B88-alias-env-n        'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.z GIT_CONFIG_VALUE_0="commit -n" git z'
+  check block B89-alias-env-reversed 'GIT_CONFIG_COUNT=1 GIT_CONFIG_VALUE_0="commit --no-verify" GIT_CONFIG_KEY_0=alias.z git z'
+  # …and git strips the value's OWN global options before reading the verb out of it, so a run of
+  # them in front of the verb is a working bypass in every one of those three spellings
+  check block B90-alias-opt-p        'git config alias.z "-p commit --no-verify" && git z'
+  check block B91-alias-opt-paginate 'git config alias.z "--paginate commit --no-verify" && git z'
+  check block B92-alias-opt-c-value  'git config alias.z "-c core.pager=cat commit --no-verify" && git z'
+  check block B93-alias-opt-bundle   'git config alias.z "-p commit -n" && git z'
+  check block B94-alias-opt-push     'git config alias.p "-p push --no-verify" && git p'
+  check block B95-alias-opt-c-inline 'git -c alias.z="-p commit --no-verify" z'
+  check block B96-alias-opt-env      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.z GIT_CONFIG_VALUE_0="-p commit --no-verify" git z'
+  # the INVOCATION side of the same move: the flag is in the open, the verb is the alias name, so
+  # any git word that is not one of the five carries it (`git rebase --no-verify` blocks too — the
+  # pre-rebase hook is a hook)
+  check block B97-alias-invoke-and   'git config alias.z commit && git z --no-verify -m x'
+  check block B98-alias-invoke-semi  'git config alias.z commit; git z --no-verify -m x'
+  check block B99-alias-invoke-global 'git config --global alias.ci commit && git ci --no-verify'
+  # the fourth definition spelling git honours: GIT_CONFIG_PARAMETERS carries whole key=value pairs
+  check block B100-alias-params-nv    'GIT_CONFIG_PARAMETERS="'"'"'alias.z=commit --no-verify'"'"'" git z'
+  check block B101-alias-params-n     'GIT_CONFIG_PARAMETERS="'"'"'alias.z=commit -n'"'"'" git z -m x'
+  check block B102-alias-params-export 'export GIT_CONFIG_PARAMETERS="'"'"'alias.z=commit --no-verify'"'"'"; git z'
+  # accepted over-block: a non-verb git command carrying the flag as an option token before `--`
+  check block B103-invoke-grep-opt-fp 'git grep -n --no-verify -- plugins/'
+  check block B100-alias-invoke-bare 'git z --no-verify -m x'
+  check block B101-rebase-no-verify  'git rebase --no-verify main'
+  # a trailing comment or a trailing option ends a copy's destination the way a separator does —
+  # GNU cp permutes its operands, so the flag may follow the hook file it overwrites
+  check block B102-cp-trailing-comment $'cp /dev/null .husky/pre-commit # neutralize\ngit commit -m x'
+  check block B103-rsync-trail-comment $'rsync -a e.sh .git/hooks/pre-commit # x\ngit commit -m x'
+  check block B104-cp-trailing-option  'cp /dev/null .husky/pre-commit -f && git commit -m x'
+  # Accepted over-blocks of the copy rules, pinned so a later regex change flips them consciously.
+  # A hook path ending a copy span reads as the destination even as an option's value…
+  check block B105-rsync-exclude-space 'rsync -av src/ dst/ --exclude .husky && git commit -m x'
+  # …a bare destination after a `cd` into the hook dir is a copy ONTO a hook whatever it is named…
+  check block B106-cd-cp-bare-bak      'cd .husky && cp pre-commit bak && git commit -m x'
+  # …and installing git's own sample carries bytes this guard cannot read, so it reads as neutering
+  check block B107-cp-sample-restore   'cp .git/hooks/pre-commit.sample .git/hooks/pre-commit && git commit -m x'
 
   # --- must ALLOW (no false positives) ---------------------------------------
   check allow A01-plain             'git commit -m "safe change"'
@@ -358,6 +441,54 @@ no_verify_cases() {
   # does not (only the ANSI-C escape FORMS are decoded — B30a–B30c).
   check allow A60a-residual-backslash-long  'git commit --no-\verify -m x'
   check allow A60b-residual-backslash-short 'git commit -\n -m x'
+  # a copy whose hook path is the SOURCE is a backup, not a mutation (A30c is the .husky file form)
+  check allow A61-cp-hooks-read     'cp .git/hooks/pre-commit /tmp/ && git commit -m x'
+  check allow A62-cp-husky-dir-read 'cp -r .husky /tmp/ && git commit -m x'
+  check allow A63-rsync-husky-out   'rsync -a .husky/ /tmp/bak/ && git commit -m x'
+  # …and after a cd, a destination carrying a `/` writes outside the directory cd landed in
+  check allow A64-cd-then-cp-out    'cd .husky && cp pre-commit /tmp/bak && git commit -m x'
+  check allow A65-cd-then-cp-out-semi $'cd .husky; cp pre-push /tmp/bak\ngit commit -m x'
+  # …and a redirect after one of those reads leaves it a read: the fd digits in front of it are
+  # part of the redirect, never the destination the copy rules look for
+  check allow A61b-cp-hooks-read-redir   'cp .git/hooks/pre-commit /tmp/ 2>/dev/null && git commit -m x'
+  check allow A63b-rsync-husky-out-redir 'rsync -a .husky/ /tmp/bak/ >/dev/null && git commit -m x'
+  check allow A64b-cd-then-cp-out-fd     'cd .husky && cp pre-commit /tmp/bak 2>/dev/null && git commit -m x'
+  # alias forms that define nothing, or define something that is not a bypass
+  check allow A66-alias-get         'git config --get alias.z && git commit -m x'
+  check allow A67-alias-get-regexp  'git config --get-regexp alias && git commit -m x'
+  check allow A68-alias-status      'git config alias.st status && git commit -m x'
+  # `-n` outside a commit verb is that verb's own option, in an alias value as anywhere else
+  check allow A69-alias-log-n       'git -c alias.lg="log --oneline -n 5" lg'
+  check allow A70-alias-amend-noedit 'git config alias.cane "commit --amend --no-edit" && git cane'
+  check allow A71-alias-pull-rebase 'git config alias.up "pull --rebase" && git up'
+  check allow A72-c-non-alias       'git -c core.editor=true commit -m x'
+  # the message span is stripped before the alias matcher reads it (A02's rule, this family)
+  check allow A73-alias-in-msg      'git commit -m "alias.z=commit --no-verify"'
+  # `--no-verbose` is another flag entirely, and the prefix rule must stop short of swallowing it
+  check allow A74-no-verbose        'git commit --no-verbose -m x'
+  check allow A75-no-v-in-msg       'git commit -m "docs: --no-v is banned"'
+  # an env pair defining something that is not a bypass is ordinary config
+  check allow A76-alias-env-status  'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.z GIT_CONFIG_VALUE_0=status git z'
+  check allow A77-alias-env-log-n   'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.lg GIT_CONFIG_VALUE_0="log --oneline -n 5" git lg'
+  # …and a value whose global options head a verb that is NOT one of the five is ordinary config too
+  check allow A78-alias-opt-log-n   'git config alias.lg "-p log --oneline -n 5"'
+  check allow A79-alias-opt-status  'git -c alias.st="-p status" st'
+  # the flag inside an option's VALUE is a search string, not a flag of its own
+  check allow A80-grep-no-verify    'git log --grep=no-verify'
+  # the invocation rule reads the stripped scan, so a message quoting an alias run stays prose…
+  check allow A81-invoke-in-msg     'git commit -m "alias z --no-verify"'
+  # …and `--no-verify-signatures` is a GPG flag whose trailing `-` the prefix rule must reject
+  check allow A82-no-verify-sigs    'git pull --no-verify-signatures'
+  # Accepted residual FN, pinned so a later rule that closes it is a conscious matrix update: `-n`
+  # on an alias INVOCATION means whatever the alias definition makes it mean, which is unknowable here
+  check allow A83-invoke-bundle-fn  'git config alias.z commit && git z -n -m x'
+  check allow A84-params-status     'GIT_CONFIG_PARAMETERS="'"'"'alias.z=status'"'"'" git z'
+  check allow A85-params-log-n      'GIT_CONFIG_PARAMETERS="'"'"'alias.lg=log --oneline -n 5'"'"'" git lg'
+  # after a bare `--` git reads arguments as paths / patterns, never as options
+  check allow A86-grep-dashdash     'git grep -- --no-verify'
+  check allow A87-log-dashdash-path 'git log -- --no-verify.md'
+  check allow A88-checkout-dashdash 'git checkout -- --no-verify.txt'
+  check allow A89-log-S-glued       'git log -S--no-verify --oneline'
 
   # --- malformed / degraded input --------------------------------------------
   raw allow R01-no-command-field '{"tool_name":"Bash","tool_input":{}}'
@@ -417,6 +548,26 @@ no_verify_cases() {
   raw allow "D10-nogrep-find-name"   "$(str_ev 'find . -name x.js && git commit -m x')" "$nogrep"
   raw block "D10-nogrep-second-cmt"  "$(str_ev 'git commit -m x && git commit -n -m y')" "$nogrep"
   raw block "D10-nogrep-short"       "$(str_ev 'git commit -n')" "$nogrep"
+  # An alias definition has no commit segment, so it opens the coarse rail on its own head — the
+  # rail's flag test then reads the value the alias matcher would have read with a working grep.
+  raw block "D10-nogrep-alias-nv"    "$(str_ev 'git -c alias.z="commit --no-verify" z')" "$nogrep"
+  raw block "D10-nogrep-alias-n"     "$(str_ev 'git config alias.ci "commit -n" && git ci')" "$nogrep"
+  raw allow "D10-nogrep-alias-get"   "$(str_ev 'git config --get alias.z')" "$nogrep"
+  raw allow "D10-nogrep-alias-log-n" "$(str_ev 'git -c alias.lg="log --oneline -n 5" lg')" "$nogrep"
+  raw block "D10-brokengrep-alias-nv" "$(str_ev 'git -c alias.z="commit --no-verify" z')" "$brokengrep"
+  raw block "D10-nogrep-alias-env-nv" "$(str_ev 'GIT_CONFIG_KEY_0=alias.z GIT_CONFIG_VALUE_0="commit --no-verify" git z')" "$nogrep"
+  raw allow "D10-nogrep-alias-env-st" "$(str_ev 'GIT_CONFIG_KEY_0=alias.z GIT_CONFIG_VALUE_0=status git z')" "$nogrep"
+  # An alias INVOCATION opens the rail on its own head too — a `git <word> … --no-verify` shape,
+  # narrow enough that a git command merely NAMING a hook file next to it stays out of the rail.
+  raw block "D10-nogrep-alias-invoke" "$(str_ev 'git z --no-verify -m x')" "$nogrep"
+  raw allow "D10-nogrep-status-hook"  "$(str_ev 'git status && cat .husky/pre-commit')" "$nogrep"
+  # …and a value's own global options in front of the verb reach the rail through the same head
+  raw block "D10-nogrep-alias-opt"    "$(str_ev 'git config alias.z "-p commit --no-verify" && git z')" "$nogrep"
+  raw allow "D10-nogrep-alias-opt-lg" "$(str_ev 'git config alias.lg "-p log --oneline -n 5"')" "$nogrep"
+  # Accepted over-block of that same head, pinned so a change of mind is conscious: the coarse rail
+  # reads the whole scan, so an alias value that merely NAMES a hook file blocks here while the
+  # grep rail (which pairs the value's verb with a flag) lets it through.
+  raw block "D10-nogrep-alias-hook-read" "$(str_ev 'git config alias.hk "!cat .husky/pre-commit"')" "$nogrep"
   raw allow "D10-nosedgrep-log-n"      "$(str_ev 'git commit -m x && git log -n 5')" "$nosedgrep"
   raw allow "D10-nosedgrep-push-n"     "$(str_ev 'git commit -m x && git push -n origin main')" "$nosedgrep"
   raw block "D10-nosedgrep-second-cmt" "$(str_ev 'git commit -m x && git commit -n -m y')" "$nosedgrep"

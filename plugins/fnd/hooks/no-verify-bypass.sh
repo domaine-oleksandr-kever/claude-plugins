@@ -17,7 +17,15 @@
 # never disarm the guard, and must never block a plain commit on its own.
 #
 # Best-effort by design — tests/no-verify-bypass-matrix.sh is the FP/FN
-# contract; run it after any regex change. Known residual FPs: bare prose
+# contract; run it after any regex change. Known residual FPs: restoring a hook
+# by copying a file ONTO it (`cp backup .husky/pre-commit`), which reads the same
+# as neutering it, a hook path that ends a copy span as an OPTION's value
+# rather than as its destination (`rsync … --exclude .husky`), a hook BACKUP
+# whose destination is followed by an option or a comment (`cp .husky/pre-commit
+# -t /tmp/`, `cd .husky && cp pre-commit /tmp/bak -v`), which is the same span
+# shape as the GNU operand permutation it has to catch, and a non-git-verb
+# command carrying the flag as an option token before a `--` (`git grep -n
+# --no-verify -- src/`), which reads as an alias invocation; bare prose
 # containing `git commit -n` outside quotes (echo args, heredoc bodies);
 # `HUSKY=0` in front of a NON-git command in the same line as a commit; a
 # `-F -` heredoc body that names a hook file (`-m "<msg>"` is the safe
@@ -36,7 +44,11 @@
 # Known residual FNs: flags smuggled via variable expansion ($FLAG), hook
 # config rewritten in an earlier, separate Bash call, a hook path a `|`
 # separates from its verb (`… | xargs rm`, a `sed -i` script using `|` as
-# its own delimiter), a plain backslash inside the flag word (`--no-\verify`
+# its own delimiter), a copy verb outside `cp` / `rsync` / `dd of=` (`scp`,
+# macOS `ditto`, GNU `cp -t <hook dir>`, whose destination is not the last
+# operand), `-n` bundled onto an alias INVOCATION (`git z -n -m x` — only the
+# alias's own definition says whether that is --no-verify), a plain backslash
+# inside the flag word (`--no-\verify`
 # — the shell drops it, the scan does not; the ANSI-C escape FORMS are
 # decoded), and `git` AND the subcommand BOTH split by quoting
 # (`g"it" com"mit" -n`) — the fast reject below reads the raw event, where
@@ -167,7 +179,30 @@ fi
 # The segment shape and the flag shape are read by two engines — `grep -E` below and bash's own
 # `[[ =~ ]]` on the no-grep rail — so each is spelled once: a copy that drifts is a hole nobody sees.
 git_seg_re='(^|[^[:alnum:]_.-])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+'
-no_verify_re='--no-veri(fy|f)?([^[:alnum:]-]|$)'
+# Down to `--no-v`: git resolves an unambiguous prefix, and `am` — which has no `--verbose` for
+# `--no-verbose` to collide with — accepts every prefix the other verbs reject as ambiguous.
+no_verify_re='--no-v(e(r(i(f(y)?)?)?)?)?([^[:alnum:]-]|$)'
+bundle_re='(^|[[:space:]])-[a-zA-Z]*n[a-zA-Z]*([^[:alnum:]-]|$)'
+# The head of an alias DEFINITION, in the spellings git accepts: `-c alias.<name>=<value>`,
+# `config [scope…] alias.<name> <value>`, `GIT_CONFIG_PARAMETERS='alias.<name>=<value>'` and the
+# GIT_CONFIG_* env pair, whose VALUE carries the definition wherever its KEY sits (the two are
+# matched by index, not by order on the line).
+# Quotes are already gone by here, so the value simply runs on to the end of the span — its first
+# token is the verb the two rules below pair a flag with.
+alias_head='((^|[^[:alnum:]_.-])git[[:space:]][^|&;]*alias\.[^[:space:]|&;=]+|(^|[^[:alnum:]_])GIT_CONFIG_PARAMETERS=[^|&;]*alias\.[^[:space:]|&;=]+|(^|[^[:alnum:]_])GIT_CONFIG_VALUE_[0-9]+)[=[:space:]]+'
+# A VALUE may open with git global options of its own (`-p commit --no-verify`, `-c core.pager=cat
+# commit -n`): git strips them before the verb, so the verb the flag rules pair with is the first
+# token that is not one of them. Same shape as $git_seg_re's option run — a dash token plus at most
+# one value token — but bounded by the command separators the alias rules read spans between.
+alias_opts='(-[^|&;[:space:]]+([[:space:]]+[^-|&;[:space:]][^|&;[:space:]]*)?[[:space:]]+)*'
+# The mirror case: an alias INVOCATION spells the flag in the open and hides the VERB instead
+# (`git z --no-verify` after `git config alias.z commit`). Any word that is not one of the five
+# reads as an alias here — `git rebase --no-verify` blocks with them, which is right, pre-rebase is
+# a hook too. Only --no-verify pairs with such a word: `-n` means whatever the alias's own
+# definition makes it mean, which nothing on this line can know. The flag has to stand as its own
+# token, and not behind a bare `--`: after that marker git reads arguments as paths and patterns
+# (`git grep -- --no-verify`, `git checkout -- --no-verify.txt`), never as options.
+alias_invoke_re="$git_seg_re[^-|&;[:space:]][^|&;[:space:]]*([[:space:]]+(-?[^-|&;[:space:]][^|&;[:space:]]*|--[^|&;[:space:]]+))*[[:space:]]+$no_verify_re"
 # Isolate each `git … <subcommand> …` segment. Any run of global options
 # may sit between git and the subcommand — each a dash token plus at most one value
 # token (-C <path>, -c <k>=<v>, --git-dir=…). grep -o is per-line, so heredoc
@@ -202,7 +237,9 @@ esac
 # of a free pass — spans coarser than the segments a grep would cut, so it over-blocks rather
 # than under-blocks. nocasematch because git reads config keys case-insensitively and HUSKY is
 # spelled in caps.
-nogrep_seg="$git_seg_re(commit|push|merge|am|pull)"
+# An alias definition joins the gate on its own: it carries no commit segment for the first half
+# to match, and it is exactly where the coarse rail's flag test earns its keep.
+nogrep_seg="$git_seg_re(commit|push|merge|am|pull)|$alias_head|$alias_invoke_re"
 if [ -z "$segs$psegs$msegs" ] && [[ $scan =~ $nogrep_seg ]] && ! printf 'g\n' | grep -q g 2>/dev/null; then
   shopt -s nocasematch 2>/dev/null || true
   nogrep_bundle='(^|[[:space:]])-[[:alpha:]]*n[[:alpha:]]*([^[:alnum:]-]|$)'
@@ -224,9 +261,28 @@ if [ -z "$segs$psegs$msegs" ] && [[ $scan =~ $nogrep_seg ]] && ! printf 'g\n' | 
   fi
   shopt -u nocasematch 2>/dev/null || true
 fi
-[ -n "$segs$psegs$msegs" ] || exit 0
+# An alias hides the flag in its VALUE, where the segment split above can never find it: after
+# `git -c alias.z="commit --no-verify" z`, `git config alias.z "commit -n"` or the GIT_CONFIG_*
+# env pair that spells the same definition, the invoked verb is the alias NAME, and nothing on the
+# line reads as a commit segment. The value's first token is the git verb, so the flag rules pair
+# with it exactly as they do on a real segment — the -n bundle on commit only, --no-verify on any
+# of them. $scan, not $cmd: a -m message quoting an alias definition has already been stripped,
+# which keeps this off the prose path.
+alias_bypass=""
+case "$scan" in *[Aa][Ll][Ii][Aa][Ss].*)
+  printf '%s' "$scan" | grep -qiE -- \
+    "$alias_head$alias_opts(commit|push|merge|am|pull)[^|&;]*($no_verify_re)|$alias_head${alias_opts}commit[^|&;]*($bundle_re)" \
+    && alias_bypass=1 ;;
+esac
+# …and the invocation side of the same move, which needs no `alias` word on the line at all — the
+# definition may have run in an earlier call. Gated on the flag's own opening, so the ordinary
+# commit path never pays this grep.
+case "$scan" in *no-v*)
+  printf '%s' "$scan" | grep -qE -- "$alias_invoke_re" && alias_bypass=1 ;;
+esac
+[ -n "$segs$psegs$msegs$alias_bypass" ] || exit 0
 
-# --no-verify — including the unique prefixes git accepts (--no-veri…) — skips the
+# --no-verify — including the prefixes git accepts (--no-v…) — skips the
 # pre-commit hooks on a commit, the pre-push hook on a push, and the commit-msg /
 # pre-merge-commit hooks on a merge, an `am` or a pull. `-n` in a short-flag bundle
 # (-n / -an / -anm) is that same flag for `git commit` ONLY: elsewhere it is another
@@ -234,9 +290,10 @@ fi
 # stays on the commit segments. Double-dash options never match the bundle pattern,
 # which is what keeps `--no-verify-signatures` — a pull/fetch flag about GPG, not hooks —
 # out of both (the trailing boundary rejects the `-` that follows it).
-if printf '%s\n%s\n%s' "$segs" "$psegs" "$msegs" | grep -qE -- "$no_verify_re" \
-  || printf '%s' "$segs" | grep -qE -- '(^|[[:space:]])-[a-zA-Z]*n[a-zA-Z]*([^[:alnum:]-]|$)'; then
-  echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never commit, push, merge or am with --no-verify (-n on a commit), in any flow. Re-run the same git command and let the hooks run. If a hook fails on a pre-existing repo defect your change didn't touch, report it to the developer (in auto flows: ESCALATE) instead of bypassing — only the developer may bypass, by hand." >&2
+if [ -n "$alias_bypass" ] \
+  || printf '%s\n%s\n%s' "$segs" "$psegs" "$msegs" | grep -qE -- "$no_verify_re" \
+  || printf '%s' "$segs" | grep -qE -- "$bundle_re"; then
+  echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never commit, push, merge or am with --no-verify (-n on a commit), in any flow, and never hide one behind a git alias — neither in its definition nor on its invocation. Re-run the same git command and let the hooks run. If a hook fails on a pre-existing repo defect your change didn't touch, report it to the developer (in auto flows: ESCALATE) instead of bypassing — only the developer may bypass, by hand." >&2
   exit 2
 fi
 
@@ -290,7 +347,11 @@ case "$flat" in *hooks*|*husky*) ;; *) exit 0 ;; esac
 #    `-commit` inside a hook PATH can never read as one. chmod is read for its MODE — one
 #    that clears the execute bit (a symbolic form carrying `-…x` and no `+`, an `=` form
 #    that omits x, or an octal whose every digit is even) — because `chmod +x
-#    .husky/pre-commit` is how a hook gets RESTORED, which this must not block;
+#    .husky/pre-commit` is how a hook gets RESTORED, which this must not block. A COPY verb
+#    (cp / rsync, and dd's `of=`) is read for its DESTINATION — the last operand — so backing a
+#    hook up (`cp .husky/pre-commit /tmp/bak`, `cp -r .husky /tmp/`) stays a read while
+#    `cp /dev/null .husky/pre-commit` does not; restoring one with cp is over-blocked, because
+#    nothing here can tell the restored bytes from an `exit 0`;
 # 3. `cd` into a hook directory, which separates the verb from the path the rules above pair:
 #    the verb has to be the FIRST thing after it, so `cd .husky && ls` stays fine. A redirect
 #    counts as one of those verbs — `: > pre-commit`, a bare `> pre-commit`, `echo "" >
@@ -305,13 +366,25 @@ verbs='rm|mv|truncate|unlink|shred|ln|tee|install'
 chmod_off='[^[:space:]+]*-[^[:space:]+]*x|[ugoa]*=[^x[:space:]]*|[0-7]?[0246][0246][0246]'
 sed_i='(-[a-zA-Z]*i|--in-place)([[:space:]]|=|\.)' # -i, -i.bak, -ni, --in-place=
 redir_bare='[^|&;>]*>[[:space:]]*[^/|&;[:space:]]'  # … > pre-commit, but not … > /tmp/out
+# An operand is last when a separator, the end of the span or a REDIRECT follows it: every other
+# verb here stays blocked through a trailing `2>/dev/null`, and a copy must not be the one form
+# that idiom walks past. A destination that begins with a digit is the redirect's own fd, not a
+# file (`cp pre-commit /tmp/bak 2>log`), so the bare form takes a non-digit first character.
+# A trailing COMMENT and a trailing option end that operand too — `cp /dev/null .husky/pre-commit
+# # x` and, because GNU cp permutes its operands, `cp /dev/null .husky/pre-commit -f`. Both walk
+# past a separator-or-redirect-only rule while every other verb here stays blocked through them.
+copy_end='([[:space:]]*([0-9]*[<>]|[|&;]|$)|[[:space:]]+(#|-[[:alnum:]-]))'
+copy_dest='(\.husky|\.git/hooks)(/[^|&;[:space:]]*)*'"$copy_end" # a hook path as the LAST operand
+copy_bare='(cp|rsync)[[:space:]][^|&;]*[[:space:]][^0-9/|&;<>[:space:]][^/|&;<>[:space:]]*'"$copy_end" # …that operand, bare
 if printf '%s' "$flat" | grep -qiE \
   "core\.hookspath\
 |(^|[^[:alnum:]_.-])($verbs)[[:space:]][^|&;]*$hook_file\
+|(^|[^[:alnum:]_.-])(cp|rsync)[[:space:]][^|&;]*$copy_dest\
+|(^|[^[:alnum:]_.-])dd[[:space:]][^|&;]*of=[^|&;[:space:]]*$hook_file\
 |(^|[^[:alnum:]_.-])chmod([[:space:]]+-[a-zA-Z]+)*[[:space:]]+($chmod_off)[[:space:]][^|&;]*$hook_file\
 |(^|[^[:alnum:]_.-])sed[[:space:]]([^|&;]*[[:space:]])?$sed_i[^|&;]*$hook_file\
 |(^|[^[:alnum:]_.-])find[[:space:]][^|&;]*$hook_file[^|&;]*(-delete|-exec)\
-|(^|[^[:alnum:]_.-])(cd|pushd)[[:space:]]+[^|&;]*$hook_file[^|&;]*[|&;]*[[:space:]]*(($verbs|chmod)[[:space:]]|sed[^|&;]*[[:space:]]$sed_i|$redir_bare)\
+|(^|[^[:alnum:]_.-])(cd|pushd)[[:space:]]+[^|&;]*$hook_file[^|&;]*[|&;]*[[:space:]]*(($verbs|chmod)[[:space:]]|sed[^|&;]*[[:space:]]$sed_i|$copy_bare|$redir_bare)\
 |>[[:space:]]*[^[:space:]|&;]*$hook_file\
 |(^|[^[:alnum:]_])HUSKY=0([^[:alnum:]_.-]|$)"; then
   echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never disable them to get a commit or push through: no core.hooksPath / GIT_CONFIG_* redirect, no removing / chmod-ing / truncating / overwriting .husky or .git/hooks files, no HUSKY=0. Restore the hooks and re-run the plain git command. If a hook fails on a pre-existing repo defect your change didn't touch, report it to the developer (in auto flows: ESCALATE) — only the developer may bypass, by hand." >&2

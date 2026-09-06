@@ -18,6 +18,8 @@
 #   FND_MCP_SLIM_DEBUG unset/"0" → write nothing (the log is a debug artefact); "1"/"2" → write,
 #                      stamped as `lvl` the way json-slim's debugLevel() reads it.
 #   FND_MCP_SLIM_DIR   log dir; else Node's os.tmpdir(): $TMPDIR, $TMP, $TEMP, else /tmp.
+# The project layer carries env-file.cjs's PROJECT_OK keys only, so of the three above just
+# FND_MCP_SLIM_DEBUG is readable from a repo's own file; the gate and the log dir are global-only.
 # Divergences from env-file.cjs, all sh-shaped: no allowlist (only FND_* keys are ever asked for),
 # no Windows %APPDATA% global layer, and a process-env value is read untrimmed.
 #
@@ -140,12 +142,19 @@ done
 env_get() { # $1 = key → its effective value in `_g` (a variable, not stdout: `$(…)` is a fork)
   eval "_s=\${$1+x}; _g=\${$1-}"
   [ -z "${_s}" ] || return 0
+  # env-file.cjs's PROJECT_OK, mirrored: the project file is committable by a client repo, so only
+  # the tuning keys are read from that layer — the gate below and the log dir are global-only, or a
+  # repo could silence and re-aim its own measurement. Default-deny, the same list as the CLI's.
+  _pf=""
+  case "$1" in
+    FND_LEAN|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET) _pf="$envf" ;;
+  esac
   # ${HOME:-}, not $HOME: `set -u` would abort the whole hook on a stripped environment (cron, a
   # sandboxed exec), and a measurement hook may never write to stderr or exit non-zero.
-  for _f in "$envf" "${XDG_CONFIG_HOME:-${HOME:-}/.config}/domaine/env"; do
+  for _f in "$_pf" "${XDG_CONFIG_HOME:-${HOME:-}/.config}/domaine/env"; do
     [ -n "$_f" ] && [ -f "$_f" ] || continue
-    # load() takes the FIRST layer that CARRIES the key, empty value included (`FND_MCP_SLIM_DIR=` in the
-    # project file shadows the global one), so a match has to be told apart from "no such line" — hence
+    # load() takes the FIRST layer that CARRIES the key, empty value included (`FND_MCP_SLIM_DEBUG=` in
+    # the project file shadows the global one), so a match has to be told apart from "no such line" — hence
     # the `=` sentinel the value is printed behind and stripped off again.
     _g="$(sed -n "/^[[:space:]]*$1[[:space:]]*=/{
 s/^[^=]*=[[:space:]]*//

@@ -27,7 +27,10 @@
  * Nodes markdown cannot express INSIDE a single-line construct degrade instead of leaking their
  * delimiter: a hard break in a heading / list item / table cell becomes a space, and a code block
  * in a list item or a cell becomes a code span. A leaked fence never closes and would swallow
- * every block after it.
+ * every block after it. A taskList / decisionList has no markdown form md-to-adf reads back as
+ * one either: it is emitted as a bullet list (`- [ ]` / `- [x]` / `- `) and returns as a
+ * bulletList whose text keeps a literal `[ ]`, which is stable from that cycle on — the marks
+ * INSIDE the items (links above all) survive, which is what the reading path needs.
  *
  * Two normalizations the round trip cannot avoid, both because md-to-adf parses each
  * break-separated segment on its own so no mark may span a break: a newline INSIDE marked text
@@ -355,24 +358,84 @@ function renderInline(n, atLineStart, singleLine) {
   return (n.attrs && (n.attrs.text || n.attrs.shortName)) || '';
 }
 
+const CHILD_LIST_RE = /^(bulletList|orderedList|taskList|decisionList)$/;
+
 // a listItem usually holds one paragraph, but Jira nests child lists as sibling blocks —
 // those must come out as their own indented lines, never space-joined into the parent item
 function renderListItem(item, depth, marker) {
   const pad = '  '.repeat(depth);
   const inlineParts = [];
   const childLines = [];
+  // a `text` child sitting DIRECTLY in the item (no paragraph wrapper) has to go through the
+  // mark-aware inline(), or renderBlock degrades it to textOf() and its link href is gone
+  let buf = [];
+  const flush = () => {
+    if (!buf.length) return;
+    const s = inline(buf, true, true);
+    if (s !== '') inlineParts.push(s);
+    buf = [];
+  };
   for (const b of item.content || []) {
-    if (b && (b.type === 'bulletList' || b.type === 'orderedList')) childLines.push(renderBlock(b, depth + 1));
+    if (b && typeof b === 'object' && INLINE_TYPE_RE.test(b.type)) { buf.push(b); continue; }
+    flush();
+    if (b && CHILD_LIST_RE.test(b.type)) childLines.push(renderBlock(b, depth + 1));
     else if (b && b.type === 'codeBlock') {
       const span = codeBlockSpan(b);
       if (span) inlineParts.push(span);
     }
     else inlineParts.push(renderBlock(b, depth, true));
   }
+  flush();
   // an item is ONE line: a newline a child block emitted (a nested table, a second paragraph)
   // would end the list and spill the rest out as a top-level block
   const text = trimAscii(inlineParts.join(' ').replace(/\n/g, ' '));
   return [pad + marker + text, ...childLines].join('\n');
+}
+
+// The inline node types renderInline knows. Everything else is a block: an unknown node that
+// carries content keeps degrading through renderBlock (children, then '\n\n'), as before.
+const INLINE_TYPE_RE = /^(text|hardBreak|emoji|mention|inlineCard|status|date)$/;
+
+// Children that are INLINE go through the mark-aware inline(), never through textOf(): a
+// `text` node carrying a link mark would otherwise come out as bare label text with the href
+// dropped — the one thing the reading path must never lose.
+// Parts, not a joined string: blockquote prefixes every part on its own and separates siblings
+// with a bare `>`, which a pre-joined body cannot be split back into.
+function renderMixedParts(nodes, depth, singleLine) {
+  const parts = [];
+  let buf = [];
+  const flush = () => {
+    if (!buf.length) return;
+    const s = inline(buf, true, singleLine);
+    if (s !== '') parts.push(s);
+    buf = [];
+  };
+  for (const c of Array.isArray(nodes) ? nodes : []) {
+    if (c && typeof c === 'object' && !INLINE_TYPE_RE.test(c.type)) {
+      flush();
+      parts.push(renderBlock(c, depth, singleLine));
+    } else buf.push(c);
+  }
+  flush();
+  return parts;
+}
+
+function renderMixed(nodes, depth, singleLine, joiner) {
+  return renderMixedParts(nodes, depth, singleLine).join(joiner);
+}
+
+// A taskItem / decisionItem holds inline content directly (no wrapping paragraph); a block a
+// nested editor put there is flattened, because the item is ONE line.
+function renderItemLine(item, depth, marker) {
+  const body = trimAscii(renderMixed(item && item.content, depth, true, ' ').replace(/\n/g, ' '));
+  return '  '.repeat(depth) + marker + body;
+}
+
+// A nested taskList/decisionList is a SIBLING of the items, not a child of one.
+function renderItemList(node, depth, markerOf) {
+  return (node.content || []).map((it) => (it && it.type === node.type
+    ? renderBlock(it, depth + 1)
+    : renderItemLine(it, depth, markerOf(it)))).join('\n');
 }
 
 function renderBlock(node, depth, singleLine) {
@@ -396,6 +459,15 @@ function renderBlock(node, depth, singleLine) {
       let i = (node.attrs && node.attrs.order) || 1;
       return (node.content || []).map((li) => renderListItem(li, depth, (i++) + '. ')).join('\n');
     }
+    case 'taskList':
+      // markdown has no checklist ADF can read back: md-to-adf returns a bulletList whose text
+      // starts with a literal `[ ]`/`[x]`, which is stable across further cycles
+      return renderItemList(node, depth, (it) =>
+        (it && it.attrs && it.attrs.state === 'DONE' ? '- [x] ' : '- [ ] '));
+    case 'decisionList':
+      // no "Decision:" prefix — that would be prose the author never wrote, and it would
+      // survive the round trip as real text
+      return renderItemList(node, depth, () => '- ');
     case 'codeBlock': {
       const lang = (node.attrs && node.attrs.language) || '';
       const text = codeText(node);
@@ -408,8 +480,10 @@ function renderBlock(node, depth, singleLine) {
       // prefix EVERY line — a child block that renders multi-line (hard break, code)
       // would otherwise fall out of the quote — and separate siblings with a bare `>`, or two
       // quoted paragraphs read back as one and a quoted rule/table as literal text
-      return (node.content || []).map((b) => renderBlock(b, depth + 1)
-        .split('\n').map((l) => '> ' + l).join('\n')).join('\n>\n');
+      // …and inline children sitting directly in the quote go through inline() as one run, or a
+      // link in an unwrapped `text` child comes back as bare label text
+      return renderMixedParts(node.content, depth + 1, false)
+        .map((s) => s.split('\n').map((l) => '> ' + l).join('\n')).join('\n>\n');
     case 'rule':
       return '---';
     case 'table': {
@@ -438,8 +512,11 @@ function renderBlock(node, depth, singleLine) {
     case 'mediaGroup':
       return '_(media omitted)_';
     default:
-      // unknown block: try children, else inline text
-      if (node.content) return (node.content || []).map((b) => renderBlock(b, depth, singleLine)).join('\n\n');
+      // unknown block: try children, else inline text. Only an ARRAY is walkable — `content` as a
+      // bare string used to throw (json-slim then handed the payload back intact), and iterating
+      // it would render the node EMPTY, so it is read as the node's text.
+      if (Array.isArray(node.content)) return renderMixed(node.content, depth, singleLine, '\n\n');
+      if (typeof node.content === 'string') return renderText({ type: 'text', text: node.content }, true, singleLine);
       return textOf(node);
   }
 }

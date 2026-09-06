@@ -13,10 +13,12 @@
  *     A JSONL file is PROFILED, never compressed (stats + sample rows + line-scripting
  *     guidance, streamed above 8 MB); log-shaped text is signal-compressed (log-slim.cjs) with
  *     an `original: <path>` recovery line; a Figma design-context JSX payload is compacted in place
- *     with that same `original: <path>` line (its node-id map spilled beside it); other non-JSONL
- *     JSON output is capped at 48 KB (spill + handback). A STDIN run names no input file, so a lossy
- *     body comes with a spilled copy of what the stages consumed (the whole stream, or the `--jq`
- *     subtree), reported on stderr — `--no-spill` opts out of that copy (and of the crush marker's),
+ *     with that same `original: <path>` line (its node-id map spilled beside it); a compressed JSON
+ *     file body gets the same pointer on STDERR, where it cannot break the document its stdout is
+ *     (not on a `--jq` run, whose stdout is the selected value by contract);
+ *     other non-JSONL JSON output is capped at 48 KB (spill + handback). A STDIN run names no input
+ *     file, so a lossy body comes with a spilled copy of what the stages consumed (the whole stream,
+ *     or the `--jq` subtree), reported on stderr — `--no-spill` opts out of that copy (and of the crush marker's),
  *     accepting an unrecoverable body.
  *
  * The pipeline is shape-driven (each stage independent, all generic — no per-tool registry),
@@ -624,7 +626,10 @@ const SPILL_HASH_HEX = 16;
 function writeSpill(dir, prefix, text) {
   try {
     const root = spillRoot(dir);
-    fs.mkdirSync(root, { recursive: true });
+    // 0700 on a dir this call CREATES: a spill carries whole MCP results (tokens, customer PII) and
+    // lives for the TTL window, so a shared tmpdir must not expose the tree. An existing dir keeps its
+    // own mode — os.tmpdir() is the usual root and is never re-chmod'ed here.
+    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
     const bytes = Buffer.byteLength(text, 'utf8');
     const hash = sha256hex(text, SPILL_HASH_HEX);
     // Two candidates, BOTH content-addressed. A base name holding foreign bytes — a hash collision or a
@@ -638,7 +643,9 @@ function writeSpill(dir, prefix, text) {
     for (const name of names) {
       const cand = path.join(root, name);
       let st;
-      try { st = fs.statSync(cand); } catch (_) { p = cand; break; } // nothing there → write it
+      // lstat, not stat: a symlink planted at this predictable content name would otherwise be
+      // measured through its target and that foreign file handed back behind a live `full=` handle.
+      try { st = fs.lstatSync(cand); } catch (_) { p = cand; break; } // nothing there → write it
       if (st.isFile() && st.size === bytes && dedupSafe(cand, st)) {
         // Same bytes already on disk. Re-date it: the TTL sweep prunes by mtime, so a REUSED spill
         // would otherwise expire while the handle this call just handed out still names it.
@@ -651,9 +658,20 @@ function writeSpill(dir, prefix, text) {
     if (!p) p = path.join(root, `${prefix}${hash}-${crypto.randomUUID().slice(0, 8)}.json`);
     // tmp + rename, so two processes spilling identical content race safely and no reader can ever see
     // a half-written file behind a handle. The tmp keeps the fnd- prefix, so a leaked one is swept.
-    const tmp = `${p}.tmp-${process.pid}`;
+    // `wx` + 0600: the final name is a content hash, so the tmp name is predictable — a symlink planted
+    // there would send the payload into a foreign file, and a plain write would leave the spill
+    // world-readable for the whole TTL window. EEXIST (a planted link, or a crashed run's leftover from
+    // a recycled pid) retries ONCE under a random name, or that one leftover would null every later
+    // spill of this payload; any other error keeps the cleanup+throw path.
+    let tmp = `${p}.tmp-${process.pid}`;
     try {
-      fs.writeFileSync(tmp, text);
+      try {
+        fs.writeFileSync(tmp, text, { flag: 'wx', mode: 0o600 });
+      } catch (e) {
+        if (!e || e.code !== 'EEXIST') throw e;
+        tmp = `${p}.tmp-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
+        fs.writeFileSync(tmp, text, { flag: 'wx', mode: 0o600 });
+      }
       fs.renameSync(tmp, p);
     } catch (e) {
       try { fs.unlinkSync(tmp); } catch (_) {}
@@ -977,7 +995,9 @@ function debugLog(record, dir, cwd) {
     if (!level) return;
     if (level < 2 && record && SUBGATE_REASONS.has(record.reason)) return;
     const root = spillRoot(dir);
-    try { fs.mkdirSync(root, { recursive: true }); } catch (_) {}
+    // 0700 for the same reason writeSpill gives: whichever writer CREATES the shared root decides the
+    // mode for every spill that lands in it afterwards.
+    try { fs.mkdirSync(root, { recursive: true, mode: 0o700 }); } catch (_) {}
     const logPath = path.join(root, DEBUG_LOG);
     try {
       if (fs.statSync(logPath).size >= DEBUG_LOG_MAX) fs.renameSync(logPath, path.join(root, `${DEBUG_LOG}.1`));
@@ -1002,7 +1022,9 @@ function debugLog(record, dir, cwd) {
     // events it is speaking about instead of inferring it from whether a `size-gate` reason happens to be
     // present — one foreign line silenced that guess, and a pre-B4.11 log (no `lvl`) recorded the sub-gate
     // events even at =1, so for those the totals ARE complete.
-    fs.appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...(project ? { project } : {}), lvl: level, ...rec })}\n`);
+    // Append-only, and 0600 on the file this call may CREATE: the line carries tool names and spill
+    // paths, and the log lives in a possibly shared tmpdir for as long as the user keeps debugging.
+    fs.appendFileSync(logPath, `${JSON.stringify({ ts: new Date().toISOString(), ...(project ? { project } : {}), lvl: level, ...rec })}\n`, { mode: 0o600 });
   } catch (_) {}
 }
 
@@ -1041,13 +1063,42 @@ function crushDictArray(items, cfg) {
   return { items: outItems, info: 'smart_sample', keptCount };
 }
 
-// NumberArray: first/last slice ∪ outliers ∪ change-points, stride-fill to K. No dedup, no marker.
+// The primitive samplers keep K of N with no sentinel and no spill, so the drop used to be legible
+// only in the internal `info` string — a reader answered from 16 values believing it held all 400.
+// ONE trailing element says it where the data is. `ccr` mode stays marker-less: Headroom's byte-parity
+// fixtures have no such element (the same carve-out sampleMixedArray's marker takes).
+// Rough JSON width of a primitive array (brackets + commas + each element). String escapes are not
+// counted — an undercount, which can only ever suppress a marker, never buy one.
+function arrayWidth(a) {
+  let w = a.length + 1;
+  for (const v of a) w += typeof v === 'string' ? v.length + 2 : String(v).length;
+  return w;
+}
+function withSampleMarker(value, arr, cfg) {
+  const total = arr.length;
+  if (!cfg.enableMarker || cfg.markerMode === 'ccr' || value.length >= total) return value;
+  // Nothing DISTINCT was dropped ⇒ nothing is hidden: the string sampler dedups, so an array of 400
+  // identical codes comes back as one of them and a marker would only claim a loss that did not happen
+  // (and cost more bytes than the dedup saved).
+  const shown = new Set(value);
+  let hidden = 0;
+  for (const v of arr) if (!shown.has(v)) hidden++;
+  if (!hidden) return value;
+  const marker = `…${total - value.length} more of ${total} omitted`;
+  // The marker also has to pay for itself: on a map of short arrays of short values its ~30 bytes cost
+  // MORE than the sampling saved, and the run then printed a body larger than the file it read.
+  if (arrayWidth(arr) - arrayWidth(value) <= Buffer.byteLength(marker, 'utf8') + 3) return value;
+  return [...value, marker];
+}
+
+// NumberArray: first/last slice ∪ outliers ∪ change-points, stride-fill to K. No dedup, no spill —
+// `kept` is the real value count, which the marker element (if any) is not part of.
 function sampleNumberArray(arr, cfg) {
   const n = arr.length;
-  if (n <= 8) return { value: arr, info: 'number:passthrough' };
+  if (n <= 8) return { value: arr, info: 'number:passthrough', kept: n };
   const finiteIdx = [];
   arr.forEach((v, i) => { if (typeof v === 'number' && Number.isFinite(v)) finiteIdx.push(i); });
-  if (!finiteIdx.length) return { value: arr, info: 'number:no_finite' };
+  if (!finiteIdx.length) return { value: arr, info: 'number:no_finite', kept: n };
   const kTotal = computeOptimalK(arr.map(compact), 1, 3, cfg.maxItemsAfterCrush);
   const { kFirst, kLast } = computeKSplit(kTotal, cfg);
   const nums = arr.map((v) => (typeof v === 'number' ? v : NaN));
@@ -1078,13 +1129,13 @@ function sampleNumberArray(arr, cfg) {
   const sorted = [...finite].sort((a, b) => a - b);
   const mm = minMax(finite);
   const stats = `min=${fmtStat(mm.min)},max=${fmtStat(mm.max)},mean=${fmtStat(m)},median=${fmtStat(median(sorted))},stddev=${fmtStat(sd)},p25=${fmtStat(percentile(sorted, 25))},p75=${fmtStat(percentile(sorted, 75))}`;
-  return { value, info: `number:adaptive(${n}->${value.length},${stats})` };
+  return { value: withSampleMarker(value, arr, cfg), info: `number:adaptive(${n}->${value.length},${stats})`, kept: value.length };
 }
 
-// StringArray: first/last slice ∪ length-anomalies, stride-fill, dedup by raw string. No marker.
+// StringArray: first/last slice ∪ length-anomalies, stride-fill, dedup by raw string. No spill.
 function sampleStringArray(arr, cfg) {
   const n = arr.length;
-  if (n <= 8) return { value: arr, info: 'string:passthrough' };
+  if (n <= 8) return { value: arr, info: 'string:passthrough', kept: n };
   const kTotal = computeOptimalK(arr, 1, 3, cfg.maxItemsAfterCrush);
   const { kFirst, kLast } = computeKSplit(kTotal, cfg);
   const lens = arr.map((s) => s.length);
@@ -1107,7 +1158,7 @@ function sampleStringArray(arr, cfg) {
   }
   const idx = [...keep].filter((i) => i >= 0 && i < n).sort((a, b) => a - b);
   const value = idx.map((i) => arr[i]);
-  return { value, info: `string:adaptive(${n}->${value.length})` };
+  return { value: withSampleMarker(value, arr, cfg), info: `string:adaptive(${n}->${value.length})`, kept: value.length };
 }
 
 // Number sub-group inside a mixed array: first/last slice ∪ outliers only (no change-points, no
@@ -1153,7 +1204,9 @@ function sampleMixedArray(arr, cfg) {
     if (sub.length < 5) { idxs.forEach((i) => kept.add(i)); parts.push(`${key}:${sub.length}->${sub.length}`); continue; }
     let keptVals;
     if (key === 'dict') keptVals = crushDictArray(sub, { ...cfg, enableMarker: false }).items;
-    else if (key === 'str') keptVals = sampleStringArray(sub, cfg).value;
+    // enableMarker:false for the dict subgroup's reason — this array gets ONE {_ccr_dropped} sentinel
+    // over all groups below, and a per-group marker string has no index to map back to anyway.
+    else if (key === 'str') keptVals = sampleStringArray(sub, { ...cfg, enableMarker: false }).value;
     else if (key === 'num') keptVals = sampleMixedNumberGroup(sub, cfg);
     else { idxs.forEach((i) => kept.add(i)); parts.push(`${key}:${sub.length}->${sub.length}`); continue; }
     // map kept sub-values back to original indices by greedy forward match
@@ -1213,8 +1266,8 @@ function processValue(value, depth, cfg) {
         const r = crushDictArray(arr, cfg);
         return [r.items, r.info ? `${r.info}(${n}->${r.keptCount})` : ''];
       }
-      if (cls === 'StringArray') { const r = sampleStringArray(arr, cfg); return [r.value, `${r.info}(${n}->${r.value.length})`]; }
-      if (cls === 'NumberArray') { const r = sampleNumberArray(arr, cfg); return [r.value, `${r.info}(${n}->${r.value.length})`]; }
+      if (cls === 'StringArray') { const r = sampleStringArray(arr, cfg); return [r.value, `${r.info}(${n}->${r.kept})`]; }
+      if (cls === 'NumberArray') { const r = sampleNumberArray(arr, cfg); return [r.value, `${r.info}(${n}->${r.kept})`]; }
       if (cls === 'MixedArray') { const r = sampleMixedArray(arr, cfg); return [r.value, `${r.info}(${n}->${r.value.length})`]; }
       // Empty / Bool / Nested → fall through to element recursion
     }
@@ -1296,6 +1349,10 @@ function adfStage(value, cfg, depth) {
 }
 
 const AVATAR_KEY = /avatar|iconurl|24x24|16x16|32x32|48x48|thumbnail/i;
+// …but a SUBSTRING match also swallowed real content: `thumbnail_alt`, `image_thumbnail_text` and
+// `avatarDescription` hold prose, not an image reference. A key whose TAIL names text — after a
+// `_`/`-` separator or at a camel-case boundary — is kept whatever AVATAR_KEY saw earlier in it.
+const CONTENT_TAIL = /(?:[_-](?:alt|text|title|description|ALT|TEXT|TITLE|DESCRIPTION)|Alt|Text|Title|Description|ALT|TEXT|TITLE|DESCRIPTION)$/;
 
 // A `self` value that is a REST-navigation URL — Jira/Confluence stamp one on every nested
 // resource (`.../rest/api/2/status/3`, Confluence `_links.self`). The model never dereferences
@@ -1314,7 +1371,7 @@ function noiseStage(value, cfg, depth) {
     const out = {};
     for (const k of Object.keys(value)) {
       if (cfg.preserveFields && cfg.preserveFields[k]) { out[k] = value[k]; continue; }
-      if (AVATAR_KEY.test(k)) continue;
+      if (AVATAR_KEY.test(k) && !CONTENT_TAIL.test(k)) continue;
       if (cfg.dropRestLinks && k === 'self' && typeof value[k] === 'string' && REST_LINK.test(value[k])) continue;
       const v = noiseStage(value[k], cfg, depth + 1);
       if (v === null) continue;
@@ -1941,6 +1998,75 @@ function envelopeInner(v, config) {
   return null;
 }
 
+// ------------------------------------------------------------- number round-trip gate --
+
+// Every stage below re-serializes what JSON.parse gave it, and JSON.parse is lossy on two number
+// shapes: an exponent past ±1.8e308 becomes Infinity (JSON.stringify then writes `null`), and more
+// than 15 significant digits round to the nearest double (12345678901234567890 →
+// …67000). Re-emitting that as a "reduction" silently rewrites the caller's data, so a payload
+// holding one is declined instead — the whole body passes through as `number-precision`.
+//
+// A decimal token with ≤ 15 significant digits always survives the double round trip, which is the
+// cheap gate; beyond that the token is compared with String(Number(tok)) in a normalized form, so the
+// legal spellings (1.0, 1e5, 0.250, -0) are not mistaken for loss.
+function normalizeNumberToken(tok) {
+  const m = /^(-?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(tok);
+  if (!m) return null;
+  const frac = m[3] || '';
+  let digits = `${m[2] || ''}${frac}`;
+  let exp = (m[4] ? parseInt(m[4], 10) : 0) - frac.length; // value = digits × 10^exp
+  digits = digits.replace(/^0+/, '');
+  const trimmed = digits.replace(/0+$/, '');
+  exp += digits.length - trimmed.length;
+  if (!trimmed) return '0'; // every spelling of zero, sign included
+  return `${m[1]}${trimmed}e${exp}`;
+}
+function numberTokenSurvives(tok) {
+  const v = Number(tok);
+  if (Number.isNaN(v)) return true; // not a number at all (`1.2.3` in a fenced payload's prose) — never decline on a guess
+  if (!Number.isFinite(v)) return false; // 1e400 → Infinity → JSON.parse hands back null
+  const a = normalizeNumberToken(tok);
+  if (a === null) return true; // not a shape this gate can judge — never decline on a guess
+  if (v === 0) return a === '0'; // 1e-400 underflows to 0 — a loss the digit count below cannot see
+  // The ≤15-digit short-circuit is exact for NORMAL doubles only: under ~2.2e-308 a double loses
+  // mantissa bits, so a 2-digit 2.5e-324 still lands on 5e-324. Subnormals take the exact comparison.
+  if (Math.abs(v) >= 2.2250738585072014e-308 && a.replace(/^-/, '').split('e')[0].length <= 15) return true;
+  return a === normalizeNumberToken(String(v));
+}
+// A LINEAR hand-scan, deliberately not a regex over the whole body: a backtracking pattern on a 1 MB
+// payload cost this repo 43 s once. String literals are skipped wholesale, so a URL full of digits is
+// walked, not parsed, and only real number tokens reach the check above. Callers run it on text
+// JSON.parse has already accepted, where a digit outside a string can only start a number.
+function numberPrecisionLoss(text) {
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text.charCodeAt(i);
+    if (c === 34) { // '"' — skip the whole literal, escapes included
+      i++;
+      while (i < n) {
+        const d = text.charCodeAt(i);
+        if (d === 92) { i += 2; continue; } // '\'
+        i++;
+        if (d === 34) break;
+      }
+      continue;
+    }
+    if (c === 45 || (c >= 48 && c <= 57)) { // '-' or a digit
+      const start = i++;
+      while (i < n) {
+        const d = text.charCodeAt(i);
+        if ((d >= 48 && d <= 57) || d === 46 || d === 43 || d === 45 || d === 101 || d === 69) i++;
+        else break;
+      }
+      if (!numberTokenSurvives(text.slice(start, i))) return true;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
+
 // Run the jsx stage over `text` and shape the slim() result, or null when the payload is not Figma
 // JSX / the transforms produced no byte win against the ORIGINAL input (`content` — the text itself
 // unless it arrived wrapped in a block envelope, which is what the win has to beat).
@@ -1959,7 +2085,8 @@ function jsxResult(text, cfg, content = text) {
 // truncate / crush / toon) — the FND_MCP_SLIM_DEBUG instrumentation; populated ONLY when
 // `cfg.trace` (off by default), so the compression hot path stays single-serialization. `reason`
 // marks a non-compressing outcome the debug log reports verbatim (`non-json` / `error-shape` /
-// `transform-error`). Any stage failure → the original passes through untouched (safety rail).
+// `transform-error` / `number-precision`). Any stage failure → the original passes through untouched
+// (safety rail).
 function slim(content, config) {
   const cfg = { ...DEFAULTS, ...(config || {}) };
   if (typeof content !== 'string') return { output: content, wasModified: false, bytesIn: 0, bytesOut: 0, ratio: 0, stages: [] };
@@ -2057,6 +2184,14 @@ function slim(content, config) {
     }
     return pass('budget-exceeded');
   }
+  // A number JSON.parse could not round-trip is already WRONG in `parsed`; every stage would then
+  // re-serialize the rounded value and the run would report it as a reduction. Decline the whole body
+  // instead. Runs on the JSON route only — an envelope's escaped inner text is inside a string literal
+  // here and is judged by the recursive slim() that actually compresses it.
+  // BEHIND the budget gate, not in front of it: this is a full linear walk of the body, and an expired
+  // deadline must bound every scan that follows it (`budget-exceeded` is stubbable, which is the safer
+  // outcome of the two anyway).
+  if (numberPrecisionLoss(content)) return pass('number-precision');
   // M13: a Figma design-context result also reaches the CLI still inside its MCP block envelope
   // (`[{"type":"text","text":"<the JSX>"}]` — the platform overflow spill), which parses as JSON and
   // would otherwise never meet the jsx stage in the non-JSON branch above. Unwrap a pure text-block
@@ -2127,6 +2262,10 @@ function slim(content, config) {
     // Not modified ⇒ the argument itself is the result (same rail as the passthrough returns above):
     // re-serializing would otherwise report a phantom gain for stripped surrounding whitespace / a BOM.
     const bytesOut = wasModified ? Buffer.byteLength(output, 'utf8') : bytesIn;
+    // A body that GREW is not a compression — a sampling marker or a toon table can cost more than the
+    // stage that ran saved. Both callers already refuse to call this compressed, so without the rail the
+    // CLI still printed the larger body (and `--stats` reported a negative reduction as a win).
+    if (wasModified && bytesOut >= bytesIn) return pass('no-gain');
     return {
       output: wasModified ? output : original,
       wasModified,
@@ -2516,7 +2655,7 @@ function whaleGuideStamp(dir, file) {
   try {
     if (!fs.existsSync(spillRoot(dir))) return;
     const tmp = `${state}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ p: abs, t: Date.now() }), { flag: 'wx' });
+    fs.writeFileSync(tmp, JSON.stringify({ p: abs, t: Date.now() }), { flag: 'wx', mode: 0o600 });
     fs.renameSync(tmp, state);
   } catch (_) {} // unwritable dir → every run prints the full block, which is the safe direction
 }
@@ -2600,7 +2739,7 @@ function nogainStamp(dir, file) {
     if (!fs.existsSync(spillRoot(dir))) return;
     const s = fs.statSync(file); // the identity the next run re-checks: same bytes, or no refusal
     const tmp = `${state}.${process.pid}-${crypto.randomBytes(4).toString('hex')}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ p: abs, t: Date.now(), size: s.size, mtimeMs: s.mtimeMs }), { flag: 'wx' });
+    fs.writeFileSync(tmp, JSON.stringify({ p: abs, t: Date.now(), size: s.size, mtimeMs: s.mtimeMs }), { flag: 'wx', mode: 0o600 });
     fs.renameSync(tmp, state);
   } catch (_) {} // unwritable dir → every run prints the body, which is the safe direction
 }
@@ -3167,7 +3306,7 @@ module.exports = {
   detectJsx, compressJsx, foldSiblings, // M13: the Figma design-context (jsx) stage
   normalizeJqPath, jqAvailable, parseJqExpr, jqExprWhole, evalJqExpr, JQ_GRAMMAR_HINT, // M15: the supported --jq grammar + its evaluator
   buildReport, shapeHint,
-  classifyArray, computeOptimalK, analyseDictArray, isErrorShape,
+  classifyArray, computeOptimalK, analyseDictArray, isErrorShape, numberPrecisionLoss,
   adfStage, noiseStage, truncateStage, toonStage,
   sweepSpills, sweepPlaywrightOut, ensureFndTmpExcluded, PLAYWRIGHT_OUT_REL, spillTtlHours, spillRoot, writeSpill,
   whaleGuidance, whaleReminder, whaleGuideEnabled, whaleGuideFullBlock, whaleGuideStamp, whaleGuideStatePath,
@@ -3199,7 +3338,7 @@ if (require.main === module) {
   const opt = (f) => { const i = args.indexOf(f); return i !== -1 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null; };
   const isStdinPath = (p) => p === '/dev/stdin' || p === '/dev/fd/0' || p === '/proc/self/fd/0';
   const fileArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--jq' && args[i - 1] !== '--report' && args[i - 1] !== '--since');
-  const jq = opt('--jq');
+  let jq = opt('--jq');
   // The --jq expression, parsed once (see the grammar above). An empty segment list — `.` / `..` —
   // is the IDENTITY selector: it addresses the WHOLE value, not a single row/field. On a JSONL file
   // that means "the whole file", which must PROFILE like a no-jq run, never crush the reshaped array.
@@ -3213,7 +3352,7 @@ if (require.main === module) {
   // narrowing is the documented recovery AFTER a decline — the one thing they must never refuse. Read
   // further down by the handback gates and the debug line, so a whole-document re-dump is counted as the
   // re-dump it is instead of hiding behind `narrowed:true`.
-  const narrowed = jqExpr !== null && !jqWhole;
+  let narrowed = jqExpr !== null && !jqWhole;
 
   // --report [logfile] [--since <ISO>] (M12): aggregate the FND_MCP_SLIM_DEBUG log instead of
   // compressing anything. Runs before every input path — it reads the log, not a payload — and logs
@@ -3412,6 +3551,26 @@ if (require.main === module) {
     }
   }
 
+  // The round-trip gate belongs on the ORIGINAL text here, not on slim()'s input: the walk below
+  // re-serializes the PARSED document, so a number JSON.parse could not carry is already rewritten by
+  // the time slim() sees it and the narrowed value would be handed back silently wrong — on the very
+  // path the whale stub tells the model to use. Drop the narrowing; the plain route below then declines
+  // the whole body with the same notice a file run gives.
+  // The scan has to run on the text the EVALUATOR consumes, which for an MCP text envelope is the
+  // payload inside `[0].text`: there the outer scan sees one escaped string literal and walks straight
+  // past a 19-digit id, and the rail below then re-runs the whole expression against that inner
+  // document and hands the rounded value back. Same sniff-then-parse gate the JSONL divert above uses,
+  // so an ordinary document pays nothing for it.
+  let jqNumberDeclined = !!jq && numberPrecisionLoss(stripBom(raw));
+  if (jq && !jqNumberDeclined && envelopeRail && ENVELOPE_HEAD_SNIFF.test(stripBom(raw).slice(0, 64))) {
+    let doc = null;
+    try { doc = JSON.parse(stripBom(raw)); } catch (_) {}
+    const innerText = doc === null ? null : soleBlockText(doc);
+    // Only an inner DOCUMENT is re-parsed by the rail — log or prose text keeps its digits verbatim.
+    const innerIsDoc = innerText !== null && (() => { try { JSON.parse(stripBom(innerText)); return true; } catch (_) { return !!parseJsonl(innerText); } })();
+    if (innerIsDoc && numberPrecisionLoss(innerText)) jqNumberDeclined = true;
+  }
+  if (jqNumberDeclined) { jq = null; narrowed = false; }
   // --jq <jq-path>: narrow before slimming — the supported-grammar evaluator above, no jq dependency.
   if (jq) {
     let v;
@@ -3445,7 +3604,12 @@ if (require.main === module) {
     let r = evalJqExpr(v, jqExpr);
     if (!r.ok && r.retryInner && envelopeRail) {
       const env = envelopeInner(v, cfg);
-      if (env) {
+      if (env && numberPrecisionLoss(env.text)) {
+        // The gate above scanned the file's own bytes and, for a BARE envelope, the text inside it. A
+        // FENCED one only becomes `v` through the unwrap above, so this is the first place its payload
+        // exists as text — and the walk about to run on it would answer with a rounded number.
+        jqNumberDeclined = true;
+      } else if (env) {
         const innerWalk = evalJqExpr(env.value, jqExpr);
         process.stderr.write(`${ENVELOPE_NOTE} — the path ${innerWalk.ok ? 'resolved inside' : 'was re-tried against'} the inner payload.\n`);
         r = innerWalk;
@@ -3459,34 +3623,48 @@ if (require.main === module) {
         if (innerText !== null && parseJsonl(innerText) && envelopeJsonlProfile(innerText, Buffer.byteLength(raw, 'utf8'))) return;
       }
     }
-    for (const d of r.diags) process.stderr.write(d); // one per missed term — a multi-select misses per slot
-    raw = JSON.stringify(r.value === undefined ? null : r.value); // a missed path yields null, never a crash
-    // The rail has had its ONE turn on this run — slim() must not take a second. A narrowed value is
-    // the answer to a path the caller wrote, and the two spellings that address the TRANSPORT resolve
-    // on the envelope itself: without this, `--jq 0` (the block) came back as the unwrapped, noise-
-    // stripped payload while `--jq 0.text` (the same block, one field deeper) came back verbatim — one
-    // selector meaning two things depending on the shape underneath. A path that resolved through the
-    // fallback above is already INSIDE the payload, so there is nothing left for the rail to unwrap.
-    cfg.envelope = false;
-    // An ENUMERATION — `| keys`, or a fan-out that answered with SCALARS — must come back whole: the
-    // crush's string-array sampling would hand back a subset as if it were the list (a 21-key Jira
-    // `fields` came back as 14 names, 40 comment dates as 15, no marker). Enumerations are cheap — a
-    // list of names is a few KB — so they opt out of row sampling. Decided on the RESULT, not on the
-    // spelling: `[]` anywhere in the expression also describes `.comments[]`, an array of OBJECTS and
-    // the whale query the stub itself advertises, which exempted itself from the crush and degraded
-    // an 832 KB answer to 0.0 % and a path handback. Arrays of objects crush like any other rows.
-    const enumerated = jqExpr.terms.some((t) => t.ops[t.ops.length - 1] === 'keys')
-      || (Array.isArray(r.value) && r.value.every((x) => x === null || typeof x !== 'object'));
-    if (enumerated) cfg.minItemsToAnalyze = Infinity;
+    // A decline discovered on the inner document lands here, after the walk was already set up: drop the
+    // narrowing exactly as the pre-gate does and leave `raw` alone — the file's own bytes are the answer.
+    if (jqNumberDeclined) { jq = null; narrowed = false; }
+    else {
+      for (const d of r.diags) process.stderr.write(d); // one per missed term — a multi-select misses per slot
+      raw = JSON.stringify(r.value === undefined ? null : r.value); // a missed path yields null, never a crash
+      // The rail has had its ONE turn on this run — slim() must not take a second. A narrowed value is
+      // the answer to a path the caller wrote, and the two spellings that address the TRANSPORT resolve
+      // on the envelope itself: without this, `--jq 0` (the block) came back as the unwrapped, noise-
+      // stripped payload while `--jq 0.text` (the same block, one field deeper) came back verbatim — one
+      // selector meaning two things depending on the shape underneath. A path that resolved through the
+      // fallback above is already INSIDE the payload, so there is nothing left for the rail to unwrap.
+      cfg.envelope = false;
+      // An ENUMERATION — `| keys`, or a fan-out that answered with SCALARS — must come back whole: the
+      // crush's string-array sampling would hand back a subset as if it were the list (a 21-key Jira
+      // `fields` came back as 14 names, 40 comment dates as 15, no marker). Enumerations are cheap — a
+      // list of names is a few KB — so they opt out of row sampling. Decided on the RESULT, not on the
+      // spelling: `[]` anywhere in the expression also describes `.comments[]`, an array of OBJECTS and
+      // the whale query the stub itself advertises, which exempted itself from the crush and degraded
+      // an 832 KB answer to 0.0 % and a path handback. Arrays of objects crush like any other rows.
+      const enumerated = jqExpr.terms.some((t) => t.ops[t.ops.length - 1] === 'keys')
+        || (Array.isArray(r.value) && r.value.every((x) => x === null || typeof x !== 'object'));
+      if (enumerated) cfg.minItemsToAnalyze = Infinity;
+    }
   }
 
   // The same rail slimText gives the hook: a stage fault degrades to the path handback below instead
   // of killing the process — this IS the whale-recovery command the stub hands the model.
   let res;
-  try { res = slim(raw, { ...cfg, trace: debugEnabled() }); } // trace only when the debug log will consume `stages`
-  catch (_) {
+  if (jqNumberDeclined) {
+    // The gate has already read the whole body, envelope payload included. slim() would only re-find
+    // that number when it sits at the TOP level: inside an envelope it is one escaped string literal, so
+    // the run would compress AROUND it and report a reduction on a body that answers neither the path
+    // the caller wrote nor the file. Hand the original back under the reason the notice below reads.
     const b = Buffer.byteLength(raw, 'utf8');
-    res = { output: raw, wasModified: false, bytesIn: b, bytesOut: b, ratio: 0, reason: 'transform-error', stages: [] };
+    res = { output: raw, wasModified: false, bytesIn: b, bytesOut: b, ratio: 0, reason: 'number-precision', stages: [] };
+  } else {
+    try { res = slim(raw, { ...cfg, trace: debugEnabled() }); } // trace only when the debug log will consume `stages`
+    catch (_) {
+      const b = Buffer.byteLength(raw, 'utf8');
+      res = { output: raw, wasModified: false, bytesIn: b, bytesOut: b, ratio: 0, reason: 'transform-error', stages: [] };
+    }
   }
   // The recovery net for STDIN. Every lossy branch below names the on-disk original, which a FILE
   // run already has; a stdin run had none, so `noise` (dropped fields) and `truncate` (clipped strings)
@@ -3522,8 +3700,14 @@ if (require.main === module) {
   // costs a second Read to learn the run failed. Both carve out a narrowing `--jq` (`narrowed`, decided
   // with the args at the top of the CLI): that selects a sub-value the file path does not answer (same
   // test as the JSONL profile gate above).
+  // `number-precision` follows the error-shape rule for the error-shape reason: nothing was attempted on
+  // that body, so above the cap Gate A would spill a full-size DUPLICATE of the file the caller just
+  // named and label it `slimmed output` at 0.0 %. Under the cap the payload is still the answer, printed
+  // with its own notice. (`narrowed` is always false here — the decline drops the narrowing — so it is
+  // not re-tested.)
   const handback = fileArg && (res.reason === 'non-json'
     || (res.reason === 'transform-error' && !narrowed)
+    || (res.reason === 'number-precision' && res.bytesIn > DEFAULTS.cliOutCap)
     || (res.reason === 'error-shape' && res.bytesIn > DEFAULTS.cliOutCap && !narrowed));
   // M10 — a compressed LOG file: print the selected body (its own `[N lines omitted…]` trailer
   // included) + one line naming the on-disk original, which IS the recovery (profile-philosophy
@@ -3536,7 +3720,7 @@ if (require.main === module) {
   // so name the on-disk original the way the log stage does. Over the cap, Gate A already names it.
   const jsxOut = res.jsxCompressed && fileArg && !capped;
   if (handback) {
-    const why = { 'error-shape': 'error envelope', 'non-json': 'not JSON', 'transform-error': 'transform error' }[res.reason];
+    const why = { 'error-shape': 'error envelope', 'non-json': 'not JSON', 'transform-error': 'transform error', 'number-precision': 'number precision' }[res.reason];
     // A stdin device is not a path anyone can open again — the stream is spent, so "read the file
     // directly: /dev/stdin" is advice that cannot be followed. Name the shape of the recovery instead.
     const lead = `json-slim: nothing to compress (${why}); `;
@@ -3548,7 +3732,17 @@ if (require.main === module) {
   } else if (capped) {
     process.stdout.write(capped.handback + '\n');
   } else {
-    process.stdout.write(res.output + '\n');
+    // A LOSSY body (noise-dropped fields, clipped strings, sampled rows) printed inline names the file
+    // it came from — the same recovery pointer the log and jsx branches give. Only here: a passthrough
+    // lost nothing, Gate A and the handback already name the file, and a stdin run has no path at all
+    // (its stderr names the spilled copy instead). A `--jq` run is excluded too: its stdout is the
+    // selected VALUE by contract (callers parse it), and the file does not hold that value anyway.
+    // On STDERR, unlike the log and jsx branches: this branch's stdout is a JSON document a caller pipes
+    // into jq (two suites parse it), and a trailing prose line would break every one of them. The log and
+    // jsx bodies are not JSON, so their pointer can ride along on stdout.
+    const nameOriginal = compressed && fileArg && jq == null && !isStdinPath(fileArg);
+    process.stdout.write(`${res.output}\n`);
+    if (nameOriginal && !res.envelopeUnwrapped) process.stderr.write(`json-slim: original: ${fileArg}\n`); // the M14 note below names it
     // B2 Layer 3 — this FILE run printed the file's own bytes back UNCHANGED, which is a deliberate
     // decline; in the field it read as a failed attempt and was immediately re-run on the same file. Say
     // it out loud, on stderr only: stdout stays the parseable body a caller can pipe, and both streams
@@ -3559,7 +3753,10 @@ if (require.main === module) {
     // neither may arm the memo for a run whose pipeline it never describes.
     // An `error-shape` envelope under the inline cap does stamp, deliberately: it is a verbatim
     // passthrough by contract, so a re-run has nothing to shrink either.
-    if (fileArg && !compressed && jq == null && !res.wasModified) {
+    // `number-precision` is carved out: nothing was ATTEMPTED on that body, so "no reduction possible"
+    // would misreport it — and a memo saying "nothing to shrink" would outlive an edit of the payload.
+    // Its own notice below names the real cause.
+    if (fileArg && !compressed && jq == null && !res.wasModified && res.reason !== 'number-precision') {
       process.stderr.write(`json-slim: no reduction possible — ${res.bytesIn} B printed unchanged; this is a deliberate decline, not an error. ` +
         `Do NOT re-run json-slim on this file; read it directly or narrow with --jq <jq-path>.\n`);
       // …and remember it, so the NEXT run answers in one line instead of re-printing this body. Stamped
@@ -3584,6 +3781,12 @@ if (require.main === module) {
   // it looking for one.
   if (stdinOriginal) process.stderr.write(`json-slim: ${narrowed ? 'narrowed input' : 'original'} spilled to ${stdinOriginal}\n`);
   else if (res.reason === 'spill-write-failure') process.stderr.write('json-slim: cannot write a recovery copy — passing the original through uncompressed\n');
+  // "nothing was compressed", not "passed through": above the inline cap this run handed the path back
+  // and printed no body at all, and the notice has to be true of both branches.
+  if (res.reason === 'number-precision') {
+    process.stderr.write(`json-slim: nothing was compressed${jqNumberDeclined ? ' and --jq was NOT applied' : ''} — this payload holds a number JSON.parse cannot round-trip ` +
+      '(an exponent past ±1.8e308, or more than 15 significant digits); re-serializing it would silently change the value.\n');
+  }
   if (has('--stats')) {
     process.stderr.write(`json-slim: ${res.bytesIn} → ${res.bytesOut} bytes (${(res.ratio * 100).toFixed(1)}% reduction)${res.error ? ' [error-shape passthrough]' : ''}\n`);
   }

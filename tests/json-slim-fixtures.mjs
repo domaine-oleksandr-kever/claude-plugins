@@ -215,7 +215,9 @@ check('reduction:figma≥0.70', ratio('figma-node-rest.json') >= 0.70, `figma ra
   // here rather than leaked into the suite's own output.
   const out = spawnSync('node', [SLIM], { input: inp, encoding: 'utf8' }).stdout;
   check('cli-stdin', out.length < inp.length && JSON.parse(out), 'CLI over stdin compresses to valid JSON');
-  const outFile = execFileSync('node', [SLIM, path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8' });
+  // stderr ignored, not inherited: a compressed file run names its original there, and this case is
+  // about stdout — the note would otherwise land in the suite's own output.
+  const outFile = execFileSync('node', [SLIM, path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   check('cli-file', outFile.length < inp.length, 'CLI over a file compresses');
   const jqOut = execFileSync('node', [SLIM, '--jq', 'nodes', path.join(FIX, 'figma-node-rest.json')], { encoding: 'utf8' });
   check('cli-jq', JSON.parse(jqOut)['3326:39542'] !== undefined, '--jq narrows to a sub-path');
@@ -624,7 +626,7 @@ if (gitOk) {
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-dbgcli-'));
   const out = execFileSync('node', [SLIM, path.join(FIX, 'figma-node-rest.json')],
-    { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, FND_MCP_SLIM_DEBUG: '1' } });
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, FND_MCP_SLIM_DIR: dir, FND_MCP_SLIM_DEBUG: '1' } });
   check('cli-dbg-output-intact', JSON.parse(out) && out.length > 0, 'CLI stdout still valid despite debug logging');
   const line = JSON.parse(readFileSync(path.join(dir, 'fnd-mcp-slim-debug.log'), 'utf8').trim());
   check('cli-dbg-entry', line.entry === 'cli', `entry ${line.entry}`);
@@ -3397,6 +3399,326 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // is named on the line so the two populations reconcile.
   check('m16-header-names-the-split', /log: 2 events \(1 spill read\)/.test(J.buildReport([ov(), acc()], {})),
     'the header must say how many of its events are spill reads');
+}
+
+// ============================================== spill privacy: wx + 0600 tmp, 0700 spill dir ==
+// The final spill name is a content HASH, so `<final>.tmp-<pid>` is predictable: a plain write there
+// followed a planted symlink into a foreign file, and the payload (whole MCP results — tokens, PII)
+// then sat 0644 for the whole TTL window.
+{
+  const base = mkdtempSync(path.join(tmpdir(), 'jslim-perm-'));
+  const dir = path.join(base, 'created-by-writespill');
+  const s = J.writeSpill(dir, 'fnd-crush-', 'shpat_secret payload');
+  check('sec-spill-written', !!s && readFileSync(s.path, 'utf8') === 'shpat_secret payload', `spill written: ${JSON.stringify(s)}`);
+  if (process.platform !== 'win32') {
+    check('sec-spill-mode-0600', (statSync(s.path).mode & 0o777) === 0o600,
+      `a spill must not be readable by anyone else: ${(statSync(s.path).mode & 0o777).toString(8)}`);
+    check('sec-spill-dir-mode-0700', (statSync(dir).mode & 0o777) === 0o700,
+      `a spill dir this call CREATED must be private: ${(statSync(dir).mode & 0o777).toString(8)}`);
+  }
+  rmSync(base, { recursive: true, force: true });
+}
+// A symlink pre-planted at the exact tmp name must not be written through, and the spill must still
+// succeed (a retry name), or one planted link would null every spill of that payload.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-plant-'));
+  const victim = path.join(dir, 'victim.txt');
+  writeFileSync(victim, 'victim bytes');
+  const text = 'payload aimed at a planted tmp name';
+  const finalName = `fnd-crush-${createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16)}.json`;
+  symlinkSync(victim, path.join(dir, `${finalName}.tmp-${process.pid}`));
+  const s = J.writeSpill(dir, 'fnd-crush-', text);
+  check('sec-symlink-victim-untouched', readFileSync(victim, 'utf8') === 'victim bytes',
+    `a planted symlink must not be followed: ${JSON.stringify(readFileSync(victim, 'utf8').slice(0, 40))}`);
+  check('sec-symlink-spill-still-written', !!s && readFileSync(s.path, 'utf8') === text && path.basename(s.path) === finalName,
+    `the spill must still land under its content name: ${JSON.stringify(s)}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+// The same rail for a STALE regular file at the tmp name (a crashed run whose pid was recycled).
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-stale-'));
+  const text = 'payload behind a stale tmp file';
+  const finalName = `fnd-crush-${createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16)}.json`;
+  const stale = path.join(dir, `${finalName}.tmp-${process.pid}`);
+  writeFileSync(stale, 'stale leftover');
+  const s = J.writeSpill(dir, 'fnd-crush-', text);
+  check('sec-stale-tmp-untouched', readFileSync(stale, 'utf8') === 'stale leftover', 'a stale tmp file is never overwritten');
+  check('sec-stale-spill-still-written', !!s && readFileSync(s.path, 'utf8') === text && path.basename(s.path) === finalName,
+    `a stale tmp must not turn the spill into a null: ${JSON.stringify(s)}`);
+  // …and a SECOND call still dedups on the content name (the retry name is only for the tmp).
+  const s2 = J.writeSpill(dir, 'fnd-crush-', text);
+  check('sec-stale-still-dedups', !!s2 && s2.path === s.path && s2.created === false,
+    `the content-addressed dedup must survive a planted tmp: ${JSON.stringify(s2)}`);
+  check('sec-no-tmp-leaked', readdirSync(dir).filter((f) => f.includes('.tmp-')).length === 1,
+    `only the planted tmp may remain: ${JSON.stringify(readdirSync(dir))}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ==================================================== primitive sampling leaves a marker ==
+// 400 strings sampled to 16 used to arrive with no count anywhere in the body: the model answered
+// from the sample believing it held the list.
+{
+  const strs = Array.from({ length: 400 }, (_, i) => `item-${i}-${'x'.repeat(i % 7)}`);
+  const nums = Array.from({ length: 400 }, (_, i) => i * 3 + (i % 5));
+  const outS = JSON.parse(J.slim(JSON.stringify({ items: strs })).output).items;
+  const outN = JSON.parse(J.slim(JSON.stringify({ items: nums })).output).items;
+  const m = /^…(\d+) more of (\d+) omitted$/.exec(outS[outS.length - 1]);
+  check('sample-marker-string', !!m && Number(m[2]) === 400 && Number(m[1]) === 400 - (outS.length - 1),
+    `the last element must state the drop: ${JSON.stringify(outS.slice(-2))}`);
+  const mn = /^…(\d+) more of (\d+) omitted$/.exec(outN[outN.length - 1]);
+  check('sample-marker-number', !!mn && Number(mn[2]) === 400 && Number(mn[1]) === 400 - (outN.length - 1),
+    `a sampled number array must say so too: ${JSON.stringify(outN.slice(-2))}`);
+  // The switches: `ccr` is Headroom's byte-parity mode (marker-less by contract, the parity group
+  // above depends on it) and `--no-spill`/enableMarker:false opts out of every marker.
+  check('sample-marker-not-in-ccr-mode', !J.crush(JSON.stringify({ items: strs }), { markerMode: 'ccr' }).compressed.includes('omitted'),
+    'ccr mode must stay marker-less (smart-crusher parity)');
+  check('sample-marker-off-with-enablemarker-false', !J.slim(JSON.stringify({ items: strs }), { enableMarker: false }).output.includes('omitted'),
+    'enableMarker:false must drop the sampling marker with the rest');
+  // A MIXED array already carries ONE {_ccr_dropped} sentinel over all groups — its string subgroup
+  // must not add a second, unmappable one.
+  const mixed = [...strs.slice(0, 60), ...Array.from({ length: 60 }, (_, i) => ({ id: i, msg: 'row' }))];
+  const outM = J.slim(JSON.stringify({ items: mixed })).output;
+  check('sample-marker-not-in-mixed-subgroup', outM.includes('_ccr_dropped') && !outM.includes('omitted'),
+    `a mixed array keeps its single sentinel: ${outM.slice(0, 120)}`);
+  // …and the strategy string still counts REAL rows, not the marker.
+  check('sample-marker-not-counted-in-info', /string:adaptive\(400->(\d+)\)\(400->\1\)/.test(J.crush(JSON.stringify({ items: strs })).strategy),
+    `the info line must report kept rows, not kept+marker: ${J.crush(JSON.stringify({ items: strs })).strategy}`);
+  // The path the hook and the CLI share: the marker must survive to real stdout, not just to slim().
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-mark-'));
+  const f = path.join(dir, 'strings.json');
+  writeFileSync(f, JSON.stringify({ items: strs }));
+  const cli = spawnSync('node', [SLIM, f], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir } });
+  check('sample-marker-through-cli', /…\d+ more of 400 omitted/.test(cli.stdout),
+    `the CLI body must carry the marker: ${cli.stdout.slice(0, 160)}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ====================================== avatar-key drop no longer eats text content ==
+// AVATAR_KEY is a SUBSTRING match, so `thumbnail_alt` / `image_thumbnail_text` — real copy — vanished
+// with the image references.
+eq('noise-thumbnail-alt-survives', J.noiseStage({ thumbnail_alt: 'A cat on a chair' }, J.DEFAULTS), { thumbnail_alt: 'A cat on a chair' });
+eq('noise-thumbnail-text-survives', J.noiseStage({ image_thumbnail_text: 'Caption copy' }, J.DEFAULTS), { image_thumbnail_text: 'Caption copy' });
+eq('noise-thumbnail-camel-alt-survives', J.noiseStage({ thumbnailAlt: 'alt copy', avatarDescription: 'who' }, J.DEFAULTS), { thumbnailAlt: 'alt copy', avatarDescription: 'who' });
+eq('noise-thumbnail-url-dropped', J.noiseStage({ thumbnailUrl: 'http://t', thumbnail: 'http://t', thumbnails: ['http://t'], keep: 1 }, J.DEFAULTS), { keep: 1 });
+eq('noise-avatar-icon-dropped', J.noiseStage({ avatarUrls: { '48x48': 'http://a' }, iconUrl: 'http://i', keep: 1 }, J.DEFAULTS), { keep: 1 });
+
+// ============================================ a lossy FILE body names its original ==
+// On STDERR for the JSON branch: this stdout is a document callers pipe into jq (scripts-sim parses
+// it), so the pointer rides the same stream as the stdin run's "original spilled to" note.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-orig-'));
+  const env = { ...process.env, FND_MCP_SLIM_DIR: dir };
+  const lossy = path.join(dir, 'lossy.json');
+  writeFileSync(lossy, JSON.stringify({ rows: Array.from({ length: 60 }, (_, i) => ({ id: i, msg: 'same row', n: null })) }));
+  const r = spawnSync('node', [SLIM, lossy], { encoding: 'utf8', env });
+  check('cli-original-line-on-compressed-file', r.stderr.includes(`json-slim: original: ${lossy}\n`),
+    `a compressed file run must point back at the file on stderr: ${JSON.stringify(r.stderr.slice(-160))}`);
+  check('cli-original-line-not-on-stdout', !r.stdout.includes('original:') && JSON.parse(r.stdout).rows.length > 0,
+    `stdout must stay one parseable JSON document: ${JSON.stringify(r.stdout.slice(-120))}`);
+  // A passthrough lost nothing → no pointer (and the decline notice already speaks).
+  const flat = path.join(dir, 'flat.json');
+  writeFileSync(flat, JSON.stringify({ a: 1 }));
+  const rf = spawnSync('node', [SLIM, flat], { encoding: 'utf8', env });
+  check('cli-no-original-line-on-passthrough', !rf.stdout.includes('original:') && !rf.stderr.includes('original:'),
+    'a passthrough must not claim a lossy body');
+  // stdin has no path to name — its stderr names the spilled copy instead.
+  const viaStdin = spawnSync('node', [SLIM], { input: readFileSync(lossy, 'utf8'), encoding: 'utf8', env });
+  check('cli-no-original-line-on-stdin', !viaStdin.stdout.includes('original:') && /spilled to /.test(viaStdin.stderr)
+    && !/json-slim: original: /.test(viaStdin.stderr),
+    `stdin keeps its spill line and adds no pointer: ${JSON.stringify(viaStdin.stderr.slice(-120))}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// =============================== numbers JSON.parse cannot round-trip are not "compressed" ==
+// JSON.parse turns 1e400 into null and 12345678901234567890 into …67000; re-serializing that and
+// reporting a reduction rewrites the caller's data.
+{
+  const rows = Array.from({ length: 60 }, (_, i) => ({ id: i, msg: 'same row' }));
+  const withNum = (lit) => `{"v":${lit},"rows":${JSON.stringify(rows)}}`;
+  for (const [name, lit] of [['exponent-overflow', '1e400'], ['19-digit-int', '12345678901234567890'], ['underflow', '1e-400']]) {
+    const p = withNum(lit);
+    const r = J.slim(p);
+    check(`numgate-declines:${name}`, r.reason === 'number-precision' && r.wasModified === false && r.output === p,
+      `${lit} must pass through byte-exact: reason=${r.reason} modified=${r.wasModified} same=${r.output === p}`);
+  }
+  const safe = `{"a":1.5,"b":1e5,"c":9007199254740991,"d":-0.25,"e":-0,"f":0.250,"g":1.0,"rows":${JSON.stringify(rows)}}`;
+  const rs = J.slim(safe);
+  check('numgate-passes-safe-numbers', rs.reason === undefined && rs.wasModified === true && rs.bytesOut < rs.bytesIn,
+    `ordinary numbers must still compress: reason=${rs.reason} modified=${rs.wasModified}`);
+  const tok = (t) => J.numberPrecisionLoss(`{"v":${t}}`);
+  check('numgate-token-matrix', [1.5, '1e5', '9007199254740991', '-0.25', '0', '-0', '1.0', '0.1', '1e308', '-1e-5'].every((t) => tok(t) === false)
+    && ['1e400', '-1e400', '12345678901234567890', '0.12345678901234567890', '1e-400'].every((t) => tok(t) === true),
+    'the token matrix must split exactly on what the double round trip loses');
+  // A number INSIDE a string is not a number token — the scanner skips literals, so an envelope's
+  // escaped payload is judged by the recursive slim() that actually compresses it.
+  check('numgate-string-digits-ignored', J.numberPrecisionLoss('{"v":"1e400 12345678901234567890"}') === false,
+    'digits inside a string literal must not trip the gate');
+  // LINEAR: a backtracking regex over a 1 MB body cost this repo 43 s once, so the scan is hand-written.
+  const urls = [];
+  while (JSON.stringify(urls).length < 1024 * 1024) {
+    urls.push(`https://shop.example.com/products/handle-${urls.length}?v=1234567890123456789&utm=a-b-c-0987654321`);
+  }
+  const bigPayload = JSON.stringify({ urls });
+  const t0 = Date.now();
+  const hit = J.numberPrecisionLoss(bigPayload);
+  const ms = Date.now() - t0;
+  check('numgate-linear-on-1mb', hit === false && ms < 500, `1 MB of URL-dense strings: hit=${hit} in ${ms} ms (must be well under a second)`);
+  // …and the CLI names the real cause instead of the generic "no reduction possible" decline.
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-numgate-'));
+  const f = path.join(dir, 'wide-number.json');
+  writeFileSync(f, withNum('1e400'));
+  const r = spawnSync('node', [SLIM, f], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir } });
+  check('numgate-cli-notice', r.stdout === `${withNum('1e400')}\n` && /cannot round-trip/.test(r.stderr) && !/deliberate decline/.test(r.stderr),
+    `the CLI must print the file verbatim and name the cause: ${JSON.stringify(r.stderr)}`);
+  check('numgate-cli-no-memo', readdirSync(dir).every((n) => !n.startsWith('.fnd-nogain-')),
+    `a precision decline must not arm the "nothing to shrink" memo: ${JSON.stringify(readdirSync(dir))}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ================================== the sampling marker may never cost more than it saves ==
+// A map of short primitive arrays (metafields, translations, block ids): the marker's ~30 bytes per
+// array outweighed the sampling and json-slim printed a body LARGER than the file it read.
+{
+  const map = {};
+  for (let k = 0; k < 200; k++) map[`group_${k}`] = Array.from({ length: 16 }, (_, i) => String(i));
+  const flip = JSON.stringify(map);
+  const f = J.slim(flip);
+  check('sample-marker-never-inflates', f.bytesOut < f.bytesIn,
+    `a 200×16 short-code map must still shrink: ${f.bytesIn} → ${f.bytesOut} (reason=${f.reason})`);
+  const one = JSON.stringify({ k0: Array.from({ length: 16 }, (_, i) => String(i)) });
+  const o = J.slim(one);
+  check('sample-marker-never-inflates-single-array', o.bytesOut < o.bytesIn && !o.output.includes('omitted'),
+    `78 B of short codes must not grow to fit a marker: ${o.bytesIn} → ${o.bytesOut} — ${o.output}`);
+  // Dedup-only sampling hides NOTHING: the dropped elements were byte-identical to the kept ones, so a
+  // marker would both overstate the loss and cost more than the dedup saved.
+  const dup = J.slim(JSON.stringify({ items: Array.from({ length: 9 }, () => 'dup') }));
+  check('sample-marker-not-on-dedup-only', !dup.output.includes('omitted') && dup.bytesOut < dup.bytesIn,
+    `only duplicates were dropped — no marker, and the win survives: ${dup.output}`);
+  // …and the global rail behind it: a body that GREW is a passthrough, not a "reduction". `1e5`
+  // re-serializes as `100000`, so the pipeline's own output is bigger than the file.
+  const grew = `{${Array.from({ length: 20 }, (_, i) => `"k${i}":1e5`).join(',')}}`;
+  const g = J.slim(grew);
+  check('slim-declines-a-body-that-grew', g.wasModified === false && g.reason === 'no-gain' && g.output === grew && g.bytesOut === g.bytesIn,
+    `a grown body must come back as the original: modified=${g.wasModified} reason=${g.reason} ${g.bytesIn}→${g.bytesOut}`);
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-grew-'));
+  const gf = path.join(dir, 'grew.json');
+  writeFileSync(gf, grew);
+  const r = spawnSync('node', [SLIM, gf, '--stats'], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: dir, FND_NOGAIN_MEMO: '0' } });
+  check('cli-prints-the-original-not-the-grown-body', r.stdout === `${grew}\n` && /no reduction possible/.test(r.stderr) && /0\.0% reduction/.test(r.stderr),
+    `the CLI must print the file and say it declined: ${JSON.stringify(r.stdout)} / ${JSON.stringify(r.stderr)}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ============================== the number gate also guards the --jq route ==
+// `--jq` re-serializes the PARSED document, so slim()'s gate never sees the original token: the
+// narrowed value came back silently rounded (1e400 → `null`, a 19-digit id → …67000) on the very path
+// the whale stub advertises.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-jqnum-'));
+  const env = { ...process.env, FND_MCP_SLIM_DIR: dir };
+  let seq = 0;
+  const run = (body, ...args) => {
+    const f = path.join(dir, `p${seq++}.json`);
+    writeFileSync(f, body);
+    return { f, r: spawnSync('node', [SLIM, ...args, f], { encoding: 'utf8', env }) };
+  };
+  const over = '{"v":1e400,"a":1}';
+  const a = run(over, '--jq', '.v');
+  check('numgate-jq-does-not-narrow-an-overflow', a.r.stdout === `${over}\n` && /--jq was NOT applied/.test(a.r.stderr) && /cannot round-trip/.test(a.r.stderr),
+    `--jq must refuse to hand back a rewritten value: ${JSON.stringify(a.r.stdout)} / ${JSON.stringify(a.r.stderr)}`);
+  const wide = '{"v":12345678901234567890,"a":1}';
+  const b = run(wide, '--jq', '.v');
+  check('numgate-jq-does-not-narrow-a-19-digit-int', b.r.stdout === `${wide}\n` && !b.r.stdout.includes('12345678901234567000'),
+    `the rounded id must never be the answer: ${JSON.stringify(b.r.stdout)}`);
+  // …and an ordinary payload still narrows.
+  const c = run('{"v":42,"a":[1,2,3]}', '--jq', '.v');
+  check('numgate-jq-still-narrows-safe-numbers', c.r.stdout === '42\n' && c.r.stderr === '',
+    `a safe payload must still answer the path: ${JSON.stringify(c.r.stdout)} / ${JSON.stringify(c.r.stderr)}`);
+  // The M14 rail re-runs the WHOLE expression against the payload inside a text-block envelope, where
+  // a scan of the file's own bytes sees one escaped string literal and walks past both numbers — so
+  // `--jq .id` answered 12345678901234567000 and `--jq .over` answered `null`.
+  const envBody = '[{"type":"text","text":"{\\"id\\":12345678901234567890,\\"over\\":1e400}"}]';
+  const e1 = run(envBody, '--jq', '.id');
+  check('numgate-jq-envelope-inner-id', e1.r.stdout === `${envBody}\n` && !e1.r.stdout.includes('12345678901234567000')
+    && /--jq was NOT applied/.test(e1.r.stderr) && /cannot round-trip/.test(e1.r.stderr),
+    `an envelope's inner id must not be narrowed: ${JSON.stringify(e1.r.stdout)} / ${JSON.stringify(e1.r.stderr)}`);
+  const e2 = run(envBody, '--jq', '.over');
+  check('numgate-jq-envelope-inner-overflow', e2.r.stdout === `${envBody}\n` && /--jq was NOT applied/.test(e2.r.stderr),
+    `an envelope's inner overflow must not answer null: ${JSON.stringify(e2.r.stdout)}`);
+  // …and on STDIN, which has no file argument for the sniff-and-divert paths above to lean on.
+  const e3 = spawnSync('node', [SLIM, '--jq', '.id'], { input: envBody, encoding: 'utf8', env });
+  check('numgate-jq-envelope-inner-on-stdin', e3.stdout === `${envBody}\n` && !e3.stdout.includes('12345678901234567000')
+    && /--jq was NOT applied/.test(e3.stderr),
+    `a piped envelope must decline the same way: ${JSON.stringify(e3.stdout)} / ${JSON.stringify(e3.stderr)}`);
+  // The control: the same envelope shape with an ordinary inner number still narrows through the rail.
+  const okEnv = '[{"type":"text","text":"{\\"id\\":42,\\"a\\":1}"}]';
+  const e4 = run(okEnv, '--jq', '.id');
+  check('numgate-jq-envelope-safe-still-narrows', e4.r.stdout === '42\n',
+    `a safe envelope payload must still answer the path: ${JSON.stringify(e4.r.stdout)} / ${JSON.stringify(e4.r.stderr)}`);
+  // An inner payload that is NOT a document (log text with a 19-digit trace id) is never re-parsed,
+  // so its digits cannot be rewritten — the narrowing recovery a whale stub advertises must still work.
+  const logEnv = JSON.stringify([{ type: 'text', text: 'ts=1725600000123456789 level=info msg=started\nts=1725600000123456790 level=warn msg=slow' }]);
+  const e5 = run(logEnv, '--jq', '0.text');
+  check('numgate-jq-envelope-log-text-still-narrows', /^"ts=1725600000123456789 /.test(e5.r.stdout) && !/NOT applied/.test(e5.r.stderr),
+    `a non-document inner text must still narrow: ${JSON.stringify(e5.r.stdout)} / ${JSON.stringify(e5.r.stderr)}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ================== a whale-sized precision decline hands the path back, never a duplicate spill ==
+// Above the inline cap Gate A would otherwise write a full-size COPY of the file the caller just named
+// and label it `slimmed output` at 0.0 % — for a body nothing was even attempted on.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-numcap-'));
+  const env = { ...process.env, FND_MCP_SLIM_DIR: dir };
+  const rows = Array.from({ length: 3000 }, (_, i) => ({ id: i, msg: 'a padded row of text', n: null }));
+  const body = `{"v":1e400,"rows":${JSON.stringify(rows)}}`;
+  const f = path.join(dir, 'whale.json');
+  writeFileSync(f, body);
+  check('numgate-whale-over-cap', Buffer.byteLength(body, 'utf8') > J.DEFAULTS.cliOutCap, 'the fixture must exceed the inline cap');
+  const r = spawnSync('node', [SLIM, f], { encoding: 'utf8', env });
+  check('numgate-cap-hands-the-path-back', r.stdout === `json-slim: nothing to compress (number precision); read the file directly: ${f}\n`,
+    `an over-cap precision decline must hand the path back: ${JSON.stringify(r.stdout.slice(0, 200))}`);
+  check('numgate-cap-explains-itself', /cannot round-trip/.test(r.stderr) && !/deliberate decline/.test(r.stderr),
+    `the cause still has to be named: ${JSON.stringify(r.stderr)}`);
+  check('numgate-cap-writes-no-duplicate', readdirSync(dir).filter((n) => n.startsWith('fnd-')).length === 0,
+    `no spill may be written for a body nothing was attempted on: ${JSON.stringify(readdirSync(dir))}`);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ================================================= gate + noise carve-out edge cases ==
+// Subnormals defeat the "≤15 significant digits always round-trips" short-circuit: 2.5e-324 has two
+// digits and still lands on 5e-324, a 2× rewrite.
+check('numgate-subnormal-rewrite-declines', ['2.5e-324', '7.4e-324', '4.9e-324'].every((t) => J.numberPrecisionLoss(`{"v":${t}}`) === true),
+  'a subnormal that shifts value must not pass the digit-count short-circuit');
+check('numgate-subnormal-exact-passes', ['5e-324', '1e-323', '1.2e-320'].every((t) => J.numberPrecisionLoss(`{"v":${t}}`) === false),
+  'a subnormal that DOES round-trip must not be declined');
+// A token Number() cannot read at all (`1.2.3` in a fenced payload's prose) is not a number — the CLI
+// runs this gate on the raw text before `--jq`, where prose can still be in front of the fence.
+check('numgate-non-number-token-ignored', J.numberPrecisionLoss('see release 1.2.3.4 below') === false,
+  'a malformed token must never be read as a precision loss');
+// AVATAR_KEY is case-insensitive; its content carve-out must be too, or SHOUTING keys still lose copy.
+eq('noise-thumbnail-uppercase-tail-survives',
+  J.noiseStage({ THUMBNAIL_ALT: 'copy', thumbnail_ALT: 'copy', avatar_TITLE: 'copy', thumbnailALT: 'copy' }, J.DEFAULTS),
+  { THUMBNAIL_ALT: 'copy', thumbnail_ALT: 'copy', avatar_TITLE: 'copy', thumbnailALT: 'copy' });
+// …without widening into words that merely END in one of them.
+eq('noise-thumbnail-context-still-dropped', J.noiseStage({ thumbnailContext: 'http://t', keep: 1 }, J.DEFAULTS), { keep: 1 });
+
+// ============================ a symlink at the FINAL spill name is not handed back ==
+// The tmp name is now O_EXCL, which leaves the content-addressed FINAL name as the predictable target:
+// statSync followed the link and returned the victim's bytes behind a live `full=` handle.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-symfinal-'));
+  const text = 'XXXXXXXXXXXXXXXXX';
+  const victim = path.join(dir, 'victim.txt');
+  writeFileSync(victim, text);
+  const link = path.join(dir, `fnd-crush-${createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16)}.json`);
+  symlinkSync(victim, link);
+  const s = J.writeSpill(dir, 'fnd-crush-', text);
+  check('sec-final-symlink-not-deduped', !!s && s.path !== link && s.created === true && readFileSync(s.path, 'utf8') === text,
+    `a symlinked final name must not be handed back: ${JSON.stringify(s)}`);
+  check('sec-final-symlink-victim-untouched', readFileSync(victim, 'utf8') === text && lstatSync(link).isSymbolicLink(),
+    'the planted link and its target are left exactly as they were');
+  rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`json-slim fixtures: ${pass} passed, ${fail} failed  (smart-crusher parity ${byteExact} byte + ${valueOnly} value of 17; log-compressor upstream parity ${logParityTotal}/20 = ${logByteExact} byte-exact + ${logDeviation1.length} deviation#1-trailer)`);

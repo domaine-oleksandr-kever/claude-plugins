@@ -11,6 +11,10 @@
 // per-repository layer ("debug for this project only"). Writes preserve every comment and
 // unrecognized line; `set` replaces the first matching line, `unset` removes every one.
 //
+// That layer carries TUNING keys only (env-file.cjs's PROJECT_OK): a global-only switch is
+// refused by `set --project` and shown as ignored by `list`. `unset --project` still removes any
+// key, so a file that predates the split can be cleaned up.
+//
 // What each switch means is documented once, in README.md → "Environment switches" — KNOWN
 // below carries names only so `list` can show the unset ones (tests/readme-checks.sh keeps
 // the two lists in sync).
@@ -90,6 +94,13 @@ function cmdSet(pair, project) {
   const key = pair.slice(0, eq).trim();
   const value = pair.slice(eq + 1).trim();
   if (!envFile.allowed(key)) die('"' + key + '" is not an fnd switch (FND_* plus SHOPIFY_ADMIN_GQL_QUIET)');
+  if (project && !envFile.projectAllowed(key)) {
+    // exit 2, not die()'s 1: a caller can tell "refused by policy" from "bad usage"
+    process.stderr.write('domaine-env: "' + key + '" is a global-only switch (the project file is '
+      + 'repo-committable, so it carries tuning keys only) — run `domaine-env set ' + key + '='
+      + value + '` without --project\n');
+    process.exit(2);
+  }
   const file = targetFile(project);
   const lines = readLines(file);
   const at = lines.findIndex((l) => l.trim().startsWith(key + '='));
@@ -119,13 +130,20 @@ function cmdList() {
   process.stdout.write('global:  ' + global + (fs.existsSync(global) ? '' : ' (absent)') + '\n\n');
   const keys = [...new Set([...KNOWN, ...Object.keys(projVals), ...Object.keys(globVals)])];
   for (const key of keys) {
+    // a global-only key sitting in the project file is dead weight the loader skips — say so
+    // where the developer looks for it, rather than letting it read as "set, but not winning"
+    const dead = key in projVals && !envFile.projectAllowed(key);
     let value, source;
     if (process.env[key] !== undefined) [value, source] = [process.env[key], 'process env'];
-    else if (key in projVals) [value, source] = [projVals[key], 'project file'];
+    else if (key in projVals && !dead) [value, source] = [projVals[key], 'project file'];
     else if (key in globVals) [value, source] = [globVals[key], 'global file'];
+    else if (dead) [value, source] = [projVals[key], 'project (ignored: global-only switch)'];
     else [value, source] = ['', 'default'];
-    const cell = source === 'default' ? '(default — see README "Environment switches")'
+    let cell = source === 'default' ? '(default — see README "Environment switches")'
       : '= ' + value + '   (' + source + ')';
+    if (dead && source !== 'project (ignored: global-only switch)') {
+      cell += '   [project (ignored: global-only switch): ' + projVals[key] + ']';
+    }
     process.stdout.write(key.padEnd(24) + ' ' + cell + '\n');
   }
 }

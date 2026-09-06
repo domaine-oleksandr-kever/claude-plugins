@@ -32,6 +32,11 @@ const tbl = (rows) => ({ type: 'table', content: rows });
 const trow = (cells) => ({ type: 'tableRow', content: cells });
 const th = (content) => ({ type: 'tableHeader', content });
 const td = (content) => ({ type: 'tableCell', content });
+// taskItem / decisionItem hold INLINE content directly — no wrapping paragraph
+const taskItem = (content, state) => ({ type: 'taskItem', attrs: { localId: 'ti', state: state || 'TODO' }, content });
+const taskList = (content) => ({ type: 'taskList', attrs: { localId: 'tl' }, content });
+const decItem = (content) => ({ type: 'decisionItem', attrs: { localId: 'di', state: 'DECIDED' }, content });
+const decList = (content) => ({ type: 'decisionList', attrs: { localId: 'dl' }, content });
 // U+00A0: JS \s matches it, so every trim in the converters has to be ASCII-only, or the
 // NBSP the Jira editor inserts is silently deleted at a block or mark boundary.
 const NB = '\u00a0';
@@ -825,6 +830,99 @@ check('bug-a2m-null-codeblock-block',
 check('bug-a2m-nonstring-unknown-block',
   run(A2M, JSON.stringify(doc([{ type: 'weird', text: 7 }]))), '7');
 
+// -------------------------------- bug-2.7: marks inside taskItem / decisionItem --
+
+// A checklist item's inline children have to go through the mark-aware renderer: via textOf()
+// a link inside one loses its href, which the reading path ("extract every external URL") needs.
+const taskLinked = doc([taskList([
+  taskItem([t('see '), t('the spec', [{ type: 'link', attrs: { href: 'https://x.test/spec' } }])]),
+  taskItem([t('shipped', [{ type: 'strong' }]), t(' as '), t('a.js', [{ type: 'code' }])], 'DONE'),
+])]);
+check('a2m-taskitem-link', a2m(taskLinked),
+  '- [ ] see [the spec](https://x.test/spec)\n- [x] **shipped** as `a.js`');
+
+// every other mark survives the item too, and the state drives the checkbox
+check('a2m-taskitem-marks', a2m(doc([taskList([
+  taskItem([t('old', [{ type: 'strike' }]), t(' '), t('new', [{ type: 'em' }])]),
+])])), '- [ ] ~~old~~ *new*');
+check('a2m-taskitem-state-done', a2m(doc([taskList([taskItem([t('x')], 'DONE')])])), '- [x] x');
+check('a2m-taskitem-state-missing', a2m(doc([taskList([{ type: 'taskItem', content: [t('x')] }])])), '- [ ] x');
+
+// a decisionItem renders as a plain bullet — a "Decision:" prefix would be prose the author
+// never wrote, and md-to-adf would store it as real text on the first write-back
+check('a2m-decisionitem-link', a2m(doc([decList([
+  decItem([t('use '), t('Vite', [{ type: 'link', attrs: { href: 'https://vite.dev' } }])]),
+])])), '- use [Vite](https://vite.dev)');
+
+// an item is ONE line: a hard break degrades to a space instead of ending the list
+check('a2m-taskitem-hardbreak', a2m(doc([taskList([taskItem([t('a'), hb, t('b')])])])), '- [ ] a b');
+
+// a nested taskList is a SIBLING of the items, not a child of one — it gets its own indent
+check('a2m-tasklist-nested', a2m(doc([taskList([
+  taskItem([t('parent')]),
+  taskList([taskItem([t('child')], 'DONE')]),
+])])), '- [ ] parent\n  - [x] child');
+
+// a checklist nested under a bullet keeps its own lines instead of being space-joined in
+check('a2m-tasklist-in-listitem', a2m(doc([ul([li([
+  p([t('Steps')]), taskList([taskItem([t('one')])]),
+])])])), '- Steps\n  - [ ] one');
+
+// a block a nested editor put inside an item is flattened onto the item's line, with its
+// marks intact
+check('a2m-taskitem-block-child', a2m(doc([taskList([taskItem([
+  p([t('go to '), t('checkout', [{ type: 'link', attrs: { href: 'https://s.test/c' } }])]),
+])])])), '- [ ] go to [checkout](https://s.test/c)');
+
+// an UNKNOWN block's inline children take the same path — the panel's link is not dropped
+check('a2m-unknown-block-linked-child', a2m(doc([{
+  type: 'panel',
+  attrs: { panelType: 'info' },
+  content: [t('read '), t('docs', [{ type: 'link', attrs: { href: 'https://d.test' } }])],
+}])), 'read [docs](https://d.test)');
+
+// markdown has no checklist md-to-adf reads back as one: the round trip stores a bulletList
+// whose text keeps a literal `[ ]`/`[x]` — lossy on the structure, lossless on the content,
+// and stable from that cycle on
+check('roundtrip-tasklist-degrades-to-bullets', m2a(a2m(taskLinked)), doc([ul([
+  li([p([t('[ ] see '), t('the spec', [{ type: 'link', attrs: { href: 'https://x.test/spec' } }])])]),
+  li([p([t('[x] '), t('shipped', [{ type: 'strong' }]), t(' as '), t('a.js', [{ type: 'code' }])])]),
+])]));
+check('roundtrip-tasklist-md-fixpoint', a2m(m2a(a2m(taskLinked))).trimEnd(), a2m(taskLinked).trimEnd());
+
+// an invalid node whose `content` is a STRING is not walkable — iterating it emits nothing, so the
+// string is read as the node's text and the payload survives the conversion
+check('a2m-string-content-block',
+  a2m(doc([{ type: 'panel', attrs: { panelType: 'info' }, content: 'Beware: read the spec' }])),
+  'Beware: read the spec');
+// …escaped like any other unmarked text: a fence or a heading marker in it must not become
+// block structure that swallows the blocks after it on the way back
+{
+  const fenced = doc([{ type: 'panel', content: '```\nrm -rf /' }, p([t('after')])]);
+  const md = a2m(fenced);
+  check('a2m-string-content-escaped', /^```/m.test(md) || !md.includes('after'), false);
+  check('a2m-string-content-fixpoint', a2m(m2a(md)).trimEnd(), md.trimEnd());
+  const heading = a2m(doc([{ type: 'panel', content: '# Injected' }]));
+  check('a2m-string-content-no-heading', /^# /m.test(heading), false);
+}
+
+// a `text` child sitting DIRECTLY in a listItem / blockquote (no paragraph wrapper) keeps its
+// href — via renderBlock it degraded to textOf() and the URL was gone
+check('a2m-listitem-direct-link', a2m(doc([ul([li([
+  t('see '), t('the spec', [{ type: 'link', attrs: { href: 'https://x.test/spec' } }]),
+])])])), '- see [the spec](https://x.test/spec)');
+check('a2m-blockquote-direct-link', a2m(doc([quote([
+  t('see '), t('the docs', [{ type: 'link', attrs: { href: 'https://d.test' } }]),
+])])), '> see [the docs](https://d.test)');
+// …and the quote still separates an inline run from a following block with a bare `>`
+check('a2m-blockquote-mixed-children', a2m(doc([quote([
+  t('lead '), t('link', [{ type: 'link', attrs: { href: 'https://d.test' } }]), p([t('after')]),
+])])), '> lead [link](https://d.test)\n>\n> after');
+// a nested list is still a sibling line, not part of the parent item's inline run
+check('a2m-listitem-direct-link-nested', a2m(doc([ul([li([
+  t('a'), ul([li([t('b', [{ type: 'link', attrs: { href: 'https://n.test' } }])])]),
+])])])), '- a\n  - [b](https://n.test)');
+
 // ------------------------------------------------------ round-trip properties --
 
 // md → adf → md must reach a fixpoint on the FIRST pass: whatever the pair normalizes
@@ -883,6 +981,8 @@ const MD_CORPUS = [
   ['nbsp', NB + 'a' + NB + 'and', { canonical: true, leakFree: true }],
   ['hardbreak-double', 'a  \n\\\nb', { canonical: true, leakFree: true }],
   ['listitem-code', '- run `bin/rake db:migrate`', { canonical: true }],
+  // what a taskList degrades to: the checkbox is literal text from here on, and stays put
+  ['checklist-literal', '- [ ] open\n- [x] done', { canonical: true, leakFree: true }],
 ];
 // strip only the newline the CLI appends — JS trimEnd() would eat a trailing U+00A0
 const noEOL = (s) => s.replace(/\n+$/, '');

@@ -9,6 +9,12 @@
 //               multiline — the dialect is defined here, not by any dotenv implementation.
 //   allowlist   FND_* plus the named extras. Anything else is ignored so the file can never
 //               smuggle PATH / NODE_OPTIONS / LD_PRELOAD into every hook.
+//   layers      the PROJECT file is a file a client repository can commit, so it may carry the
+//               TUNING keys in PROJECT_OK and nothing else. Every other allowed key — the
+//               compression, spill, guard and verify gates — is GLOBAL-ONLY: read from the
+//               process env and ~/.config/domaine/env, silently skipped in the project file and
+//               reported back in load()'s `ignored`. Default-deny, so a switch added later is
+//               global-only until someone lists it here.
 //
 // Malformed lines are skipped silently: hooks must never die on a bad config file. The
 // `domaine-env` CLI (scripts/domaine-env.cjs) reads, writes and lists these files.
@@ -20,8 +26,29 @@ const path = require('path');
 
 const ALLOW_EXTRA = new Set(['SHOPIFY_ADMIN_GQL_QUIET']);
 
+// Tuning and UX only — nothing here can disarm a guard, redirect a spill or shorten a TTL. The
+// bash `domaine_env()` copies and hooks/spill-access.sh carry this same list, by hand.
+const PROJECT_OK = new Set([
+  'FND_LEAN',
+  'FND_CTX_MONITOR',
+  'FND_CTX_WARN',
+  'FND_CTX_WINDOW',
+  'FND_MCP_SLIM_DEBUG',
+  'FND_WHALE_GUIDE',
+  'FND_NOGAIN_MEMO',
+  'FND_GQL_PROBE_CACHE',
+  'FND_CPT_THROTTLE_WAITS',
+  'FND_CPT_OVERLAY_VERIFY_WAIT',
+  'FND_THEME_JSON_VERIFY_WAIT',
+  'SHOPIFY_ADMIN_GQL_QUIET',
+]);
+
 function allowed(key) {
   return /^FND_[A-Z0-9_]+$/.test(key) || ALLOW_EXTRA.has(key);
+}
+
+function projectAllowed(key) {
+  return PROJECT_OK.has(key);
 }
 
 function globalPath() {
@@ -74,18 +101,36 @@ function readVals(file) {
 }
 
 // Fills process.env gaps from the project file, then the global file. Returns what it applied
-// (only file-sourced values — the Cursor sessionStart hook forwards exactly that set) and the
-// file paths involved. Never throws.
+// (only file-sourced values — the Cursor sessionStart hook forwards exactly that set), the file
+// paths involved, and the project-layer keys skipped as global-only (`ignored`, for a caller that
+// wants to surface them — hooks stay silent). Never throws.
 function load(cwd) {
   const files = { project: projectPath(cwd), global: globalPath() };
   const applied = {};
-  for (const layer of [readVals(files.project), readVals(files.global)]) {
+  const ignored = [];
+  for (const [layer, isProject] of [
+    [readVals(files.project), true],
+    [readVals(files.global), false],
+  ]) {
     for (const key of Object.keys(layer)) {
+      if (isProject && !PROJECT_OK.has(key)) {
+        ignored.push({ key, file: files.project });
+        continue;
+      }
       if (process.env[key] === undefined && !(key in applied)) applied[key] = layer[key];
     }
   }
   for (const key of Object.keys(applied)) process.env[key] = applied[key];
-  return { applied, files };
+  return { applied, files, ignored };
 }
 
-module.exports = { load, parse, readVals, projectPath, globalPath, allowed };
+module.exports = {
+  load,
+  parse,
+  readVals,
+  projectPath,
+  globalPath,
+  allowed,
+  projectAllowed,
+  PROJECT_OK,
+};

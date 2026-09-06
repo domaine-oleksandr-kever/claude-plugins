@@ -71,6 +71,14 @@
 # Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
 #          [--api-version <v>]   (store domain defaults from shopify.theme.toml)
 #
+# --file is a path INSIDE the theme, vetted before any engine runs: it must start with a theme
+# top-level dir (assets|blocks|config|layout|locales|sections|snippets|templates) and carry no
+# absolute, `~`, `.`/`..` or empty segment (`error=bad_file`, exit 2). `set` narrows that to the
+# JSON content layer this script exists to write — config/*.json, templates/**/*.json,
+# sections/*.json, locales/*.json (`error=file_not_writable`, exit 2) — and refuses a `--from`
+# that names a credential file (`error=from_file_refused`): an upload publishes those bytes, and
+# an asset is served from the theme's public CDN.
+#
 # --strip-comments removes /*…*/ blocks that sit OUTSIDE JSON strings (Shopify's auto-generated
 # banner) so the result is plain JSON a jq edit can consume; a `/*` inside a value (custom_css) is
 # content and survives. Lossless — Shopify re-stamps the banner on every write. Snapshot WITHOUT it
@@ -678,6 +686,71 @@ cli_set() {
     '{ok: "upserted", engine: "themecli", theme: $name, role: $role, files: [$f], verified: $v}'
 }
 
+# ------------------------------------------------------------------ vetting --
+# --file names a path INSIDE the theme, never a path on this machine — but the themecli engine
+# materializes it under a mktemp dir (`cp "$FROM" "$tmp/$FILE"`, and the pull writes `$tmp/$FILE`
+# back), so a `../` segment escapes that dir on the local filesystem. Vetted once at dispatch,
+# before any engine runs, so `get` and `set` refuse the same shapes on every engine.
+vet_file() {
+  # the two refusing arms come FIRST and fall through to the error below: `templates/../../x`
+  # would otherwise be accepted by the top-level-dir arm
+  case "$FILE" in
+    ''|/*|*\\*|*//*|*/|'~'*|*[[:cntrl:]]*) ;;
+    .|..|./*|../*|*/.|*/..|*/./*|*/../*) ;;
+    assets/*|blocks/*|config/*|layout/*|locales/*|sections/*|snippets/*|templates/*) return 0 ;;
+  esac
+  echo "error=bad_file path=$FILE — --file is a path inside the theme (config/…, templates/…, sections/…, locales/…); nothing was read or written" >&2
+  exit 2
+}
+
+# `set` writes the JSON content layer and nothing else: the same `--only` push that uploads a
+# template would publish an asset — and an asset is served from the theme's PUBLIC CDN, so a
+# mistyped `--from` there is a disclosure, not a bad write. `get` keeps the broader read set.
+vet_writable() {
+  case "$FILE" in
+    templates/*.json) return 0 ;;                          # any depth: templates/customers/…, …
+    config/*/*|sections/*/*|locales/*/*) ;;                # …the other three are flat
+    config/*.json|sections/*.json|locales/*.json) return 0 ;;
+  esac
+  echo "error=file_not_writable path=$FILE — theme-json.sh set writes theme JSON only (config/*.json, templates/**/*.json, sections/*.json, locales/*.json); use the Shopify CLI for other files" >&2
+  exit 2
+}
+
+# …and the payload side of the same disclosure: whatever `--from` names ends up on the theme.
+# A small deny list, not a sandbox — it catches the credential files an agent might reach for by
+# name, and the write protocol (snapshots in a temp dir) is what keeps the rest honest.
+from_refuse() { # <path-to-match> — refuses on a match, returns otherwise
+  case "$1" in
+    */.ssh/*|*/.aws/*|*/.config/gh/*|*.pem|*.key|id_rsa*|*/id_rsa*|.env|.env.*|*/.env|*/.env.*)
+      echo "error=from_file_refused file=$1 — that looks like a credential file, and \`set\` publishes its bytes onto the theme; copy the JSON you mean to write into a temp file first" >&2
+      exit 2 ;;
+  esac
+}
+# The patterns above only bite on a path that SPELLS the credential dir, so the name is resolved
+# first: a relative `--from .aws/credentials` (cwd = $HOME) and a symlink called `ok.json` both
+# reach the same bytes without ever matching the raw string.
+vet_from() {
+  local dir base abs link tgt
+  dir="$(cd "$(dirname "$FROM")" 2>/dev/null && pwd -P)" || dir=""
+  [ -n "$dir" ] || dir="$(dirname "$FROM")"
+  base="${FROM##*/}"
+  case "$dir" in /) abs="/$base" ;; *) abs="$dir/$base" ;; esac
+  from_refuse "$abs"
+  # a symlink publishes its TARGET's bytes, so every hop of the chain is vetted — resolved against
+  # the link's own dir (macOS readlink has no -f), bounded so a link loop cannot spin
+  local cur="$FROM" hops=0
+  while [ -L "$cur" ] && [ "$hops" -lt 8 ]; do
+    link="$(readlink "$cur")" || break
+    [ -n "$link" ] || break
+    case "$link" in
+      /*) tgt="$link" ;;
+      *)  tgt="$(dirname "$cur")/$link" ;;
+    esac
+    from_refuse "$tgt"
+    cur="$tgt"; hops=$((hops + 1))
+  done
+}
+
 # ------------------------------------------------------------------ dispatch --
 # run_op <gql_fn> <cli_fn>: engine dispatch with auto-fallback (gql fn returns 1 = fall back).
 run_op() {
@@ -693,13 +766,17 @@ case "$CMD" in
     ;;
   get)
     [ -n "$THEME" ] && [ -n "$FILE" ] || { echo "error=usage (get needs --theme and --file)" >&2; exit 2; }
+    vet_file
     gid_of "$THEME" >/dev/null   # validate id format HERE — inside $(…) an exit can't stop the flow
     run_op gql_get cli_get
     ;;
   set)
     [ -n "$THEME" ] && [ -n "$FILE" ] && [ -n "$FROM" ] || { echo "error=usage (set needs --theme, --file and --from)" >&2; exit 2; }
+    vet_file
+    vet_writable
     gid_of "$THEME" >/dev/null
     [ -f "$FROM" ] || { echo "error=from_file_not_found file=$FROM" >&2; exit 2; }
+    vet_from
     case "$FILE" in
       *.json)
         # theme JSON may carry /* … */ comments (Horizon ships an auto-generated banner in its

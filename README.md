@@ -883,10 +883,14 @@ hook error never blocks work:
   discipline + lean code into the code-writing ones; read-only readers skip those two.
 - **PreToolUse (Bash) — two deterministic git guards.** `no-verify-bypass.sh` blocks
   every way of getting past the repo's git hooks: `--no-verify` on a commit, push,
-  merge, `am` or pull (plus `-n`, which is that flag on a commit only), `core.hooksPath`
-  and `GIT_CONFIG_*` redirects (read-only config *reads* stay allowed), and disabling the
-  hook files themselves — `rm` / `mv` / `chmod -x` / truncate / in-place edit / redirect,
-  and `HUSKY=0`. Its FP/FN contract lives in `tests/no-verify-bypass-matrix.sh`.
+  merge, `am` or pull — including the unique prefixes git resolves, down to `--no-v` —
+  plus `-n`, which is that flag on a commit only; the same flag hidden in a git alias,
+  whether in its definition (`git config alias.z "commit --no-verify"`, `-c alias.z=…`,
+  `GIT_CONFIG_PARAMETERS`, the `GIT_CONFIG_KEY_*`/`VALUE_*` pair) or on its invocation (`git z --no-verify`);
+  `core.hooksPath` and `GIT_CONFIG_*` redirects (read-only config *reads* stay allowed), and disabling the
+  hook files themselves — `rm` / `mv` / `chmod -x` / truncate / in-place edit / redirect /
+  copying onto one (`cp`, `rsync`, `dd of=`), and `HUSKY=0`. Its FP/FN contract lives in
+  `tests/no-verify-bypass-matrix.sh`.
   `no-ai-attribution.sh` blocks AI-attribution trailers in commit messages.
 - **PreToolUse (the two browser screenshot tools) — scratch-path guard.**
   `scratch-path-guard.cjs` **denies** a `take_screenshot` / `browser_take_screenshot` whose
@@ -1131,8 +1135,19 @@ real environment is never overridden, so Claude Code's `settings.json` → `"env
 or per-project) keeps working and keeps winning. The file format is a strict `KEY=VALUE` subset:
 one pair per line, `#` full-line comments, value = everything after the first `=`, no quoting
 and no `$VAR` expansion. Only `FND_*` keys (plus `SHOPIFY_ADMIN_GQL_QUIET`) are read — the file
-can never smuggle `PATH` or `NODE_OPTIONS` into a hook. Edit the files by hand or through the
-CLI:
+can never smuggle `PATH` or `NODE_OPTIONS` into a hook.
+
+**The project layer carries tuning keys only.** A `<repo>/.claude/domaine.env` is a file a client
+repository can commit, so exactly these twelve switches are read from it — `FND_LEAN`,
+`FND_CTX_MONITOR`, `FND_CTX_WARN`, `FND_CTX_WINDOW`, `FND_MCP_SLIM_DEBUG`, `FND_WHALE_GUIDE`,
+`FND_NOGAIN_MEMO`, `FND_GQL_PROBE_CACHE`, `FND_CPT_THROTTLE_WAITS`,
+`FND_CPT_OVERLAY_VERIFY_WAIT`, `FND_THEME_JSON_VERIFY_WAIT` and `SHOPIFY_ADMIN_GQL_QUIET`.
+Every other switch — the compression, spill, guard and read-back-verify gates, and any switch
+added later until it is listed here — is **global-only**: it comes from the shell or
+`~/.config/domaine/env`, and a copy sitting in a project file is ignored (`domaine-env list`
+shows it as `project (ignored: global-only switch)`, and `set --project` refuses to write one).
+
+Edit the files by hand or through the CLI:
 
 ```bash
 node plugins/fnd/scripts/domaine-env.cjs list                            # switches, values, which source won
@@ -1149,8 +1164,9 @@ matching `set`/`unset` against the script under its own plugin root — no path 
 Running it by hand from the plugin directory works exactly the same.
 
 Two caveats. The shell fast-gates in the hook wirings (the `[ "$FND_MCP_SLIM" = "0" ] && exit`
-short-circuits) see only the real process env — a file-set `0` still disables the feature (the
-Node side re-checks after loading the files), it just no longer skips the node spawn. And
+short-circuits) see only the real process env — a `0` set in the global file still disables the
+feature (the Node side re-checks after loading the files), it just no longer skips the node
+spawn. And
 `FND_LEAN`'s session gate is pure shell (the sessionStart one-liners that `cat` the statics), so
 that one switch is process-env-only where it is hook-gated — on Cursor our sessionStart hook
 also hands the file values back to the host, which then feeds them to every later hook of the
@@ -1170,7 +1186,7 @@ because the script that reads it is the same single copy on all four hosts.
 | `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens) |
-| `FND_MCP_SLIM` | `1` | `0` disables the MCP result **compression** (PostToolUse `mcp-slim` hook) — node never spawns. Where it does spawn anyway — a value set in a `.claude/domaine.env`, which the wiring's shell gate cannot see — the hook emits nothing but still runs its exit-time TTL sweep: hygiene is not compression, and nobody who silenced the compressor asked for a spill dir and a checkout that fill up. `FND_MCP_SLIM_TTL` is the switch that governs the sweep. **Host divergence:** Claude Code, Cursor and OpenCode all rewrite the result in place, so compression AND spill-and-stub both land. Codex cannot rewrite a tool result, so `hooks/codex-mcp-shim.cjs` drops every compressed body (adding it would only grow context) and forwards the spill-and-stub half as `additionalContext` — with `1` you get whale offloading there, never compression |
+| `FND_MCP_SLIM` | `1` | `0` disables the MCP result **compression** (PostToolUse `mcp-slim` hook) — node never spawns. Where it does spawn anyway — a `0` set in the global `~/.config/domaine/env`, which the wiring's shell gate cannot see (this switch is global-only: a project `.claude/domaine.env` cannot set it at all) — the hook emits nothing but still runs its exit-time TTL sweep: hygiene is not compression, and nobody who silenced the compressor asked for a spill dir and a checkout that fill up. `FND_MCP_SLIM_TTL` is the switch that governs the sweep. **Host divergence:** Claude Code, Cursor and OpenCode all rewrite the result in place, so compression AND spill-and-stub both land. Codex cannot rewrite a tool result, so `hooks/codex-mcp-shim.cjs` drops every compressed body (adding it would only grow context) and forwards the spill-and-stub half as `additionalContext` — with `1` you get whale offloading there, never compression |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume). Two directories ride this clock: the spill dir, and the bundled playwright server's project output dir `.claude/fnd-tmp/playwright` — pruned recursively, files only, with directories left standing since a live browser session may own one. The sweep runs even with `FND_MCP_SLIM=0` (that switch turns off compression, not hygiene). `0` disables both prunes — but not the `/.claude/fnd-tmp/` line in `.git/info/exclude`, which the scratch-path guard stamps itself on the first bundled screenshot it allows. Any invalid value falls back to `24` |
 | `FND_MCP_SLIM_DEBUG` | off | opt-in: append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, `lvl`, decision, reason, `format` on non-json, `narrowed` on a `--jq` CLI run, `guide` (`full`/`reminder`) on a JSONL profile, `budget_partial` on a mid-array wall-clock expiry, bytes, %, stages, `spills` — never any payload); rotates one generation at ~5 MB. `1` (or `true`/`yes`/`on`) = **key events**: everything except the sub-gate `size-gate` lines for results under the 4 KB gate, which were ~76 % of a real week's log. `2` (any integer ≥ 2) = **everything**, sub-gate lines included. Unset / `0` / `false` / an unrecognized value ⇒ no file written. The level rides on each line as `lvl`, so `--report` can say which of its numbers cover a partial event set — a `1` window's totals % is not comparable with a `2` window's |

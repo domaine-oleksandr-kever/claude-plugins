@@ -317,6 +317,20 @@ for k in $(grep -oE "'(FND_[A-Z0-9_]+|SHOPIFY_ADMIN_GQL_QUIET)'" "$ROOT/plugins/
   has "$README" "$k" "env-known-$k"
 done
 
+# The project/global class split is a security boundary (a client repo can commit the project
+# file), so env-file.cjs's PROJECT_OK has to be readable in prose too — every key it holds is
+# named in the README paragraph that states the rule, or the paragraph is quietly wrong.
+POK_PARA="$(awk '/^\*\*The project layer carries tuning keys only\.\*\*/ { on = 1 } on { print } on && /^$/ { exit }' "$README")"
+if [ -n "$POK_PARA" ]; then ok
+else bad env-project-ok-para "README has no 'The project layer carries tuning keys only.' paragraph"; fi
+for k in $(awk '/^const PROJECT_OK = new Set\(\[/ { on = 1; next } on && /^\]\);/ { exit } on' \
+             "$ROOT/plugins/fnd/scripts/env-file.cjs" | grep -oE "'[A-Z0-9_]+'" | tr -d "'"); do
+  case "$POK_PARA" in
+    *'`'"$k"'`'*) ok ;;
+    *) bad "env-project-ok-$k" "$k is in env-file.cjs's PROJECT_OK but is not named in the README project-layer paragraph" ;;
+  esac
+done
+
 # …and the sweep in the other direction: a switch the CODE reads but neither list carries is a
 # knob nobody can find, and one the CLI cannot set. Source of truth is the bundle itself — the
 # three script/hook trees plus the installer. The leading character class keeps identifiers that

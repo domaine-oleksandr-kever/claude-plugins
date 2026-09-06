@@ -52,6 +52,12 @@ theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
 # common: --store <domain> · --engine auto|store|token|themecli · --env <path> · --api-version <v>
 ```
 
+`--file` is a path **inside the theme** — it must start with a theme top-level dir and carry no
+absolute, `~` or `..` segment (else `error=bad_file`, exit 2) — and `set` writes the JSON content
+layer only: `config/*.json`, `templates/**/*.json`, `sections/*.json`, `locales/*.json` (else
+`error=file_not_writable`); a `--from` that names a credential file is refused outright
+(`error=from_file_refused`), since an upload publishes those bytes and an asset is public.
+
 Engines (`--engine auto|store|token|themecli`, default `auto`) — Admin GraphQL first, via the gql
 runner (store execute → `SHOPIFY_ADMIN_TOKEN`); scopes **`read_themes`** for `themes`/`get`,
 **`write_themes`** only for `set`. **Ask the developer which level this store gets** — on
