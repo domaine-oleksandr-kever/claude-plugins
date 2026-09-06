@@ -21,6 +21,8 @@ let errorCount = 0
 
 // ========================================
 // CUSTOMIZE THIS SECTION BASED ON breaking-changes.md
+// Literal key/value rewrites only — no require(), no process spawn, no network, no writes
+// outside templates/**/*.json and config/settings_data.json.
 // ========================================
 const applyFixes = (obj) => {
   if (typeof obj !== 'object' || obj === null) return obj

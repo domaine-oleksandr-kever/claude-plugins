@@ -14,7 +14,8 @@
 // Event map (wiring: hooks/hooks-cursor.json):
 //   sessionStart          → the DYNAMIC session context only. The static conventions
 //                           (comment-discipline, lean-code, task-workspace, mcp-whale,
-//                           plugin-feedback) ship as always-applied rules/*.mdc on Cursor
+//                           untrusted-content, plugin-feedback) ship as always-applied
+//                           rules/*.mdc on Cursor
 //                           (M4), so injecting them here too would duplicate every one of
 //                           them in context. What a rule file cannot do is look at the
 //                           workspace: the plugin-root line (store-access.md resolves its

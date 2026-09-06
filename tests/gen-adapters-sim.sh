@@ -233,6 +233,68 @@ for n in $agents; do
   fi
 done
 
+# ------------------------------------ the four MCP agents are fenced by a canonical denylist --
+# `tools:` (an allowlist) cannot name MCP tools that are spelled differently per install scope, so
+# the readers/writer carry `disallowedTools:` instead: every write tool by exact name in BOTH
+# spellings, plus the servers they have no business touching, denied whole. These assertions guard
+# the two ways that rots — a half-added pair (one spelling only) and a denial that would take away
+# a tool the agent needs.
+MCP_AGENTS="doc-reader figma-reader jira-reader jira-writer"
+deny_list() { fm "$PLUGIN_DIR/agents/$1.md" | sed -n 's/^disallowedTools: //p' | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$'; }
+denies() { deny_list "$1" | grep -qx "$2"; }
+for n in $MCP_AGENTS; do
+  [ "$(fm "$PLUGIN_DIR/agents/$n.md" | grep -c '^disallowedTools:')" = "1" ] && ok \
+    || bad "deny-line-$n" "agents/$n.md does not carry exactly one disallowedTools: line"
+  fm "$PLUGIN_DIR/agents/$n.md" | grep -q '^tools:' \
+    && bad "deny-allowlist-$n" "$n mixes an allowlist into the denylist design" || ok
+  # Edit and subagent spawning are denied everywhere: these agents only ever write their own file
+  for t in Edit NotebookEdit Task Agent; do
+    denies "$n" "$t" && ok || bad "deny-$t-$n" "$n does not deny $t"
+  done
+  # every plugin-scoped MCP tool denial has its user-scoped twin, or the fence has a hole
+  for t in $(deny_list "$n" | grep '^mcp__plugin_fnd_atlassian__'); do
+    twin="mcp__atlassian__${t#mcp__plugin_fnd_atlassian__}"
+    denies "$n" "$twin" && ok || bad "deny-twin-$n" "$n denies $t but not $twin"
+  done
+  for t in $(deny_list "$n" | grep '^mcp__plugin_fnd_notion-mcp__'); do
+    twin="mcp__notion__${t#mcp__plugin_fnd_notion-mcp__}"
+    denies "$n" "$twin" && ok || bad "deny-twin-$n" "$n denies $t but not $twin"
+  done
+done
+# the reads each agent lives on must survive the fence
+denies doc-reader WebFetch && bad deny-doc-webfetch "doc-reader cannot read a web URL" || ok
+for t in mcp__plugin_fnd_notion-mcp__notion-fetch mcp__plugin_fnd_notion-mcp__notion-search \
+  mcp__plugin_fnd_atlassian__getConfluencePage; do
+  denies doc-reader "$t" && bad "deny-doc-read-$t" "doc-reader cannot call $t" || ok
+done
+for t in mcp__plugin_fnd_figma-dev-mode mcp__figma; do
+  denies figma-reader "$t" && bad "deny-figma-$t" "figma-reader cannot reach $t" || ok
+done
+denies jira-reader mcp__plugin_fnd_atlassian__getJiraIssue \
+  && bad deny-jira-read "jira-reader cannot read a ticket" || ok
+for t in mcp__plugin_fnd_atlassian__editJiraIssue mcp__plugin_fnd_atlassian__addCommentToJiraIssue \
+  mcp__plugin_fnd_atlassian__getJiraIssue Read Bash; do
+  denies jira-writer "$t" && bad "deny-writer-$t" "jira-writer needs $t for its one write + read-back" || ok
+done
+# …and the writes each agent must not make are denied by name
+for n in doc-reader jira-reader; do
+  for t in editJiraIssue addCommentToJiraIssue transitionJiraIssue createJiraIssue; do
+    denies "$n" "mcp__plugin_fnd_atlassian__$t" && ok || bad "deny-write-$n-$t" "$n does not deny $t"
+  done
+done
+for t in notion-create-pages notion-update-page notion-create-comment notion-duplicate-page; do
+  denies doc-reader "mcp__plugin_fnd_notion-mcp__$t" && ok || bad "deny-notion-$t" "doc-reader does not deny $t"
+done
+for t in transitionJiraIssue createJiraIssue createIssueLink createConfluencePage updateConfluencePage; do
+  denies jira-writer "mcp__plugin_fnd_atlassian__$t" && ok || bad "deny-writer-w-$t" "jira-writer does not deny $t"
+done
+for t in Write Glob Grep WebFetch WebSearch; do
+  denies jira-writer "$t" && ok || bad "deny-writer-$t" "jira-writer does not deny $t"
+done
+for n in figma-reader jira-reader; do
+  denies "$n" WebFetch && ok || bad "deny-webfetch-$n" "$n does not deny WebFetch"
+done
+
 # ------------------------------------------------------------------- Codex TOML is well-formed --
 for n in $agents; do
   f="$PLUGIN_DIR/agents-codex/$n.toml"

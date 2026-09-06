@@ -262,7 +262,7 @@ assert_eq G6-guard-exit-survives "$ec" 2
 FAKE="$TMP/fakeroot"; mkdir -p "$FAKE/hooks"
 cp "$SHIM" "$FAKE/hooks/"
 cp "$PLUGIN/hooks/subagent-conventions.sh" "$FAKE/hooks/"
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
   echo "MARK-$f" > "$FAKE/hooks/$f.md"
 done
 fshim() { # event payload [VAR=val…] — same contract as run_shim(), against the fake bundle
@@ -288,7 +288,7 @@ assert_contains S1-store-access  "$ctx" "MARK-store-access"
 assert_contains S1-root-line     "$ctx" "fnd plugin root: $FAKE_REAL"
 # The statics became always-applied rules on Cursor (M4) — injecting them here too would put
 # every one of them in context twice.
-for f in comment-discipline plugin-feedback task-workspace mcp-whale lean-code; do
+for f in comment-discipline plugin-feedback task-workspace mcp-whale lean-code untrusted-content; do
   assert_absent "S2-no-static-$f" "$ctx" "MARK-$f"
 done
 
@@ -370,15 +370,22 @@ ctx="$(printf '%s' "$out" | jq -r '.additional_context')"
 assert_contains T1-comment "$ctx" "MARK-comment-discipline"
 assert_contains T1-lean    "$ctx" "MARK-lean-code"
 
-# Read-only agents are skipped — and a skip is silence, not an empty additional_context
+# Read-only agents skip the CODE conventions, but every subagent still gets the
+# untrusted-content rail — so the reader payload is that file and nothing else
+rdr() { printf '%s' "$(tsub "$1")" | jq -r '.additional_context' 2>/dev/null; }
 for a in jira-reader jira-writer bug-hunter change-reviewer figma-reader doc-reader theme-explorer; do
-  assert_eq "T2-$a-skip" "$(tsub "{\"agent_type\":\"$a\"}")" ""
+  c="$(rdr "{\"agent_type\":\"$a\"}")"
+  assert_contains "T2-$a-untrusted"  "$c" "MARK-untrusted-content"
+  assert_absent   "T2-$a-no-comment" "$c" "MARK-comment-discipline"
+  assert_absent   "T2-$a-no-lean"    "$c" "MARK-lean-code"
 done
 
 # Cursor's spelling of the agent-type field is not pinned yet (M1a) — every plausible one is read
-assert_eq T3-subagent-type "$(tsub '{"subagent_type":"jira-reader"}')" ""
-assert_eq T3-agent-object  "$(tsub '{"agent":{"name":"jira-reader"}}')" ""
-assert_eq T3-agent-string  "$(tsub '{"agent":"jira-reader"}')" ""
+i=0
+for shape in '{"subagent_type":"jira-reader"}' '{"agent":{"name":"jira-reader"}}' '{"agent":"jira-reader"}'; do
+  i=$((i + 1))
+  assert_absent "T3-shape-$i" "$(rdr "$shape")" "MARK-comment-discipline"
+done
 # …and an unrecognized shape errs toward injecting: a code-writing agent without the
 # conventions is the costly miss
 assert_contains T4-unknown-shape "$(tsub '{"who":"?"}')"        "MARK-comment-discipline"

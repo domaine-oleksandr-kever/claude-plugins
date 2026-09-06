@@ -69,6 +69,12 @@ Gather what applies (skip the rest):
 - Strip share/query params from URLs (`key=`, `_ab`, `_bt`, `_fd`, `_sc`); prefer path-only URLs.
 - Default-anonymize client context: `<store>.myshopify.com`, `<theme-id>`, omit the client repo
   name and any customer data. Real identifiers go in only if the developer explicitly says so.
+- Never paste ticket / TA / Steps-to-Test excerpts — restate the trigger as a **synthetic minimal
+  repro** built from invented copy; client wording is customer data.
+- Rewrite absolute paths to their `<plugin root>` / `<repo>` relative form and strip usernames.
+- Redact **any** 20+ character high-entropy token and any `user:pass@` URL too, not only the
+  prefixes listed above.
+- A `log=<path>` tail goes in only after the same substitutions.
 
 ## Step 3 — Check for duplicates
 

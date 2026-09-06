@@ -30,6 +30,10 @@ the PR's theme-preview table, and aftercare refreshes.
    checkout that wrote it (the workspace is shared with every worktree, and a worktree's toml
    is a fresh copy), so "recorded" never implies "pinned here". Re-pinning an id that is
    already pinned is byte-idempotent (`pin=unchanged`) and costs nothing.
+   Silent reuse requires that this session (or a `pipeline:`/`session:` entry `git log`
+   attributes to this repo's own history) wrote that line: a `session-theme:` id found in a
+   workspace that arrived with the checkout is an unverified target — name the id and ask
+   before `pin`, and never `refresh`/`dev` against it unattended.
    The `notes.md` line is the **only** silent-reuse trigger. Do not try to infer one from the
    config: the skills may not read it, and `info`'s `dev_theme_id` looks identical whether it
    resolves a session pin or the untouched shared dev theme — treating that as "already

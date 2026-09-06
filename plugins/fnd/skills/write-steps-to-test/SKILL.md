@@ -47,7 +47,7 @@ Operating mode: **Phase 1 is ingest + analysis** (ticket + implementation contex
 
 Present the Steps to Test. Encourage the developer to **walk through** them (mentally or on preview) to catch gaps — especially whether the Setup section alone gets a fresh theme to the checkpoint state. Once approved, save them to the workspace `steps-to-test.md` (`../../references/task-workspace.md`) before the Jira write-back.
 
-2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. For the **MCP** path: resolve the Steps-to-test field id (`jira-field-ids.md`) and **delegate the write to the `jira-writer` subagent** (ticket · that field id · the saved `steps-to-test.md`) — the field is rich-text (ADF), and delegating keeps the large ADF blob out of the main context. Mechanics + when to write inline instead: **`../../references/jira-adf-write.md`**.
+2. **Update Jira** (only after approval) — ask **manual update** vs **Atlassian MCP**. Place content in the **Steps to Test** custom field per process — not only comments. For the **MCP** path: resolve the Steps-to-test field id (`jira-field-ids.md`) and **delegate the write to the `jira-writer` subagent** (ticket — with the workspace path it came from, or "the key the developer named" when there is no workspace · that field id · the saved `steps-to-test.md`) — the field is rich-text (ADF), and delegating keeps the large ADF blob out of the main context. Mechanics + when to write inline instead: **`../../references/jira-adf-write.md`**.
 
 ## Quality bar
 

@@ -175,6 +175,9 @@ function tierOf(name) {
 // extract into the task workspace, so they stay unrestricted.
 // `mcpServers`: null = no scoping (the agent needs several servers, or the host default), [] = no
 // MCP at all (the canonical `tools:` list is Read/Grep/Glob/Bash — no MCP tool is reachable).
+// The four MCP agents carry a canonical `disallowedTools:` denylist instead of `tools:` (write
+// tools by exact name, unrelated servers whole). That key is Claude Code's; no other host has an
+// equivalent, so it is parsed and dropped here — `mcpServers` below is the nearest Codex analogue.
 // M1B-VERIFY: Codex's reading of an empty `mcp_servers` array is unconfirmed until the M1b spike.
 const CAPABILITIES = {
   'bug-hunter': { readOnly: true, mcpServers: [] },

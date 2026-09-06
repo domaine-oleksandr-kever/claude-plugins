@@ -18,9 +18,9 @@ HOOKS_DIR="$ROOT/plugins/fnd/hooks"
 # unbounded, so it gets the tightest guard (6 KiB, the M4 brief's ceiling).
 MAX_FILE_BYTES=4096
 MAX_GUIDELINES_BYTES=6144
-# 15 KiB, raised from 14 when plugin-feedback joined the transplanted set: every ungated
+# 17 KiB, raised from 15 when untrusted-content joined the transplanted set: every ungated
 # sessionStart convention has to reach Cursor somehow, and rules are the only channel there.
-MAX_PACK_BYTES=15360
+MAX_PACK_BYTES=17408
 
 # name:alwaysApply:kind:canonical-source
 # kind `hook` = transplant of hooks/<source>.md; kind `doc` = guidelines rule-pack.
@@ -28,6 +28,7 @@ EXPECTED="fnd-comment-discipline:true:hook:comment-discipline
 fnd-lean-code:true:hook:lean-code
 fnd-task-workspace:true:hook:task-workspace
 fnd-mcp-whale:true:hook:mcp-whale
+fnd-untrusted-content:true:hook:untrusted-content
 fnd-plugin-feedback:true:hook:plugin-feedback
 fnd-model-policy:true:doc:guidelines
 fnd-agent-usage:true:doc:guidelines"

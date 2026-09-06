@@ -13,7 +13,7 @@
 //
 // Deliberate divergences from the Claude Code wiring (HARNESS-PORT-PLAN M5):
 //   - the sessionStart STATICS (comment discipline, lean code, task workspace, mcp-whale,
-//     plugin feedback) are NOT injected here. On OpenCode they belong in the user's
+//     untrusted content, plugin feedback) are NOT injected here. On OpenCode they belong in the user's
 //     `instructions` config (or an AGENTS.md), which costs nothing per message and survives
 //     compaction; injecting them from a message hook would re-pay them per session at best.
 //     Only the detection-gated store-access block is dynamic, so it is the only one injected —
@@ -24,7 +24,8 @@
 //     replaced in place by its `full=` handle, so the paste is offloaded exactly as on Claude
 //     Code instead of riding along in every turn.
 //   - subagent-conventions.sh has no OpenCode event (no subagent-start hook); the generated
-//     agents-opencode/*.md carry those conventions in the agent body instead.
+//     agents-opencode/*.md carry those conventions in the agent body instead, and the
+//     untrusted-content rail rides in the `instructions` list above with the other statics.
 //   - hooks/scratch-path-guard.cjs (the PreToolUse screenshot-path deny, M3) is NOT wired here:
 //     tool.execute.before only sees the bash tool in this adapter, and the MCP tool-name/arg
 //     shapes OpenCode hands it are unverified — skipped rather than faked. It is wired on every

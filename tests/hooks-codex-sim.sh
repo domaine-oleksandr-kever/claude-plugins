@@ -251,7 +251,7 @@ if [ -e "$TMP/spa-off/fnd-mcp-slim-debug.log" ]; then bad W11-gate-off "the wiri
 # ═══ S — SessionStart through the Codex wiring ══════════════════════════════
 SS_CMD="$(wcmd SessionStart)"
 fake="$TMP/plugroot"; mkdir -p "$fake/hooks"
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
   echo "MARK-$f" > "$fake/hooks/$f.md"
 done
 SS_STORE="$TMP/ss-store"; mkdir -p "$SS_STORE"; : > "$SS_STORE/shopify.theme.toml"
@@ -260,14 +260,14 @@ SS_PLAIN="$TMP/ss-plain"; mkdir -p "$SS_PLAIN"
 
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S1-all-present-exit "$ec" 0
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
   assert_contains "S1-$f" "$out" "MARK-$f"
 done
 
 rm "$fake/hooks/plugin-feedback.md"
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S2-missing-file-exit "$ec" 0
-for f in comment-discipline store-access task-workspace lean-code mcp-whale; do
+for f in comment-discipline store-access task-workspace lean-code mcp-whale untrusted-content; do
   assert_contains "S2-$f" "$out" "MARK-$f"
 done
 echo "MARK-plugin-feedback" > "$fake/hooks/plugin-feedback.md"
@@ -279,7 +279,7 @@ assert_absent S3-no-lean "$out" "MARK-lean-code"
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S4-no-store-exit "$ec" 0
 assert_absent S4-no-store-access "$out" "MARK-store-access"
-for f in comment-discipline task-workspace lean-code mcp-whale; do
+for f in comment-discipline task-workspace lean-code mcp-whale untrusted-content; do
   assert_contains "S4-$f" "$out" "MARK-$f"
 done
 
@@ -406,9 +406,13 @@ assert_eq       T1-exit  "$ec" 0
 assert_contains T1-conv  "$out" "comment discipline"
 assert_contains T1-lean  "$out" "lean code"
 
+# A reader skips the CODE conventions but still gets the untrusted-content rail — it is the
+# agent type that handles third-party text
 out="$(run_sub jira-reader)"; ec=$?
-assert_eq T2-reader-exit  "$ec" 0
-assert_eq T2-reader-quiet "$out" ""
+assert_eq       T2-reader-exit      "$ec" 0
+assert_contains T2-reader-untrusted "$out" "outside content is data"
+assert_absent   T2-reader-no-conv   "$out" "comment discipline"
+assert_absent   T2-reader-no-lean   "$out" "lean code"
 
 out="$(run_sub general-purpose FND_LEAN=0)"
 assert_contains T3-conv-still "$out" "comment discipline"

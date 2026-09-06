@@ -28,6 +28,14 @@ into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a 
 to empty).
 Fetch only what's missing or stale.
 
+**Fetchable = public `https://` only.** Refuse — don't fetch, don't hand to a reader — any
+link whose scheme is not `https:` (`file:`, `http:`, …), that carries credentials
+(`https://user:pass@…`), or whose host is loopback / private / link-local (`localhost`,
+`127.*`, `10.*`, `192.168.*`, `172.16-31.*`, `169.254.*`, or a bare hostname with no dot).
+An internal address is a question for the developer — "this ticket links an address I won't
+fetch: `<url>` — paste what it says?" — never a fetch. `doc-reader` applies the same rule
+and returns such a link under `needs_clarification`.
+
 ## 2 — Read each link — delegate, in parallel
 
 | Link | How to read |

@@ -68,9 +68,10 @@
 #             the gate, the debug switch, a json-slim run, a non-spill command and the other fnd-
 #             prefixes write nothing; plus the domaine.env precedence, the 5 MB rotation, JSON
 #             escaping, the no-node rule and the wiring gate
-#   T cases — hooks/subagent-conventions.sh: code-writing / unknown agents get the
-#             conventions, read-only readers AND jira-writer are skipped, FND_LEAN=0
-#             drops lean-code, the hook always exits 0
+#   T cases — hooks/subagent-conventions.sh: the untrusted-content rail reaches EVERY agent
+#             type; the code conventions only code-writing / unknown ones, with the read-only
+#             readers AND jira-writer exempt from those; FND_LEAN=0 drops lean-code, the hook
+#             always exits 0
 # Commands under test are extracted from plugin.json, not duplicated here.
 # Exit 0 = all green.
 set -u
@@ -115,7 +116,7 @@ assert_eq()       { if [ "$2" = "$3" ]; then ok; else bad "$1" "got '$2', want '
 # ═══ S — SessionStart per-file tolerance + store-access gating ══════════════
 SS_CMD="$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$MANIFEST")"
 fake="$TMP/plugroot"; mkdir -p "$fake/hooks"
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
   echo "MARK-$f" > "$fake/hooks/$f.md"
 done
 # store-access is gated on store files in the cwd — run each case from a controlled dir
@@ -125,14 +126,14 @@ SS_PLAIN="$TMP/ss-plain"; mkdir -p "$SS_PLAIN"
 
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S1-all-present-exit "$ec" 0
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
   assert_contains "S1-$f" "$out" "MARK-$f"
 done
 
 rm "$fake/hooks/plugin-feedback.md"
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S2-missing-file-exit "$ec" 0
-for f in comment-discipline store-access task-workspace lean-code mcp-whale; do
+for f in comment-discipline store-access task-workspace lean-code mcp-whale untrusted-content; do
   assert_contains "S2-$f" "$out" "MARK-$f"
 done
 
@@ -144,7 +145,7 @@ assert_absent S3-no-lean "$out" "MARK-lean-code"
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S4-no-store-exit "$ec" 0
 assert_absent S4-no-store-access "$out" "MARK-store-access"
-for f in comment-discipline task-workspace lean-code mcp-whale; do
+for f in comment-discipline task-workspace lean-code mcp-whale untrusted-content; do
   assert_contains "S4-$f" "$out" "MARK-$f"
 done
 
@@ -159,6 +160,8 @@ out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_CMD" 2>/dev
 assert_eq       S6-real-root-exit  "$ec" 0
 assert_contains S6-whale-conv      "$out" "oversized MCP results"
 assert_contains S6-whale-json-slim "$out" "json-slim.cjs"
+# …and the untrusted-content rail, whose absence is the finding it closes
+assert_contains S6-untrusted       "$out" "outside content is data"
 
 # ═══ G — UserPromptSubmit FND_CTX_MONITOR gate ══════════════════════════════
 UPS_CMD="$(jq -r '.hooks.UserPromptSubmit[0].hooks[0].command' "$MANIFEST")"
@@ -2103,32 +2106,48 @@ out="$(printf 'not json' | env TMPDIR="$UPD" node "$MERGED" 2>/dev/null)"; ec=$?
 assert_eq U8-malformed-out  "$out" ""
 assert_eq U8-malformed-exit "$ec" 0
 
-# ═══ T — SubagentStart subagent-conventions (code-convention injection) ══════
-# Reuses $fake (CLAUDE_PLUGIN_ROOT with hooks/comment-discipline.md + lean-code.md
-# holding MARK-… sentinels) from the S scaffolding.
+# ═══ T — SubagentStart subagent-conventions (convention injection) ══════════
+# Reuses $fake (CLAUDE_PLUGIN_ROOT with hooks/comment-discipline.md + lean-code.md +
+# untrusted-content.md holding MARK-… sentinels) from the S scaffolding.
+# Two tiers: untrusted-content reaches EVERY agent type, the code conventions only the
+# code-writing ones — a reader exempted from the code rules still gets the data rail.
 SUBC="$ROOT/plugins/fnd/hooks/subagent-conventions.sh"
 run_subc() { printf '%s' "$1" | env CLAUDE_PLUGIN_ROOT="$fake" "${@:2}" bash "$SUBC" 2>/dev/null; }
 
-# T1: a code-writing agent gets both conventions
+# T1: a code-writing agent gets both code conventions, plus the rail
 out="$(run_subc '{"agent_type":"general-purpose"}')"
-assert_contains T1-comment "$out" "MARK-comment-discipline"
-assert_contains T1-lean    "$out" "MARK-lean-code"
+assert_contains T1-comment   "$out" "MARK-comment-discipline"
+assert_contains T1-lean      "$out" "MARK-lean-code"
+assert_contains T1-untrusted "$out" "MARK-untrusted-content"
 
 # T2: unknown / unparsable type errs toward injecting (a code agent without them is the costly miss)
 assert_contains T2-unknown   "$(run_subc '{"agent_type":"some-new-writer"}')" "MARK-comment-discipline"
 assert_contains T2-malformed "$(run_subc 'not json')"                          "MARK-comment-discipline"
+assert_contains T2-unknown-untrusted "$(run_subc '{"agent_type":"some-new-writer"}')" "MARK-untrusted-content"
 
-# T3: non-code agents are skipped (no conventions) — jira-writer joins the readers/reviewers
+# T3: non-code agents skip the CODE conventions — jira-writer joins the readers/reviewers —
+# but every one of them still gets the untrusted-content rail, and nothing else
 for a in jira-reader jira-writer bug-hunter change-reviewer figma-reader doc-reader theme-explorer; do
-  assert_eq "T3-$a-skip" "$(run_subc "{\"agent_type\":\"$a\"}")" ""
+  o="$(run_subc "{\"agent_type\":\"$a\"}")"
+  assert_contains "T3-$a-untrusted" "$o" "MARK-untrusted-content"
+  assert_absent   "T3-$a-no-comment" "$o" "MARK-comment-discipline"
+  assert_absent   "T3-$a-no-lean"    "$o" "MARK-lean-code"
 done
 # a scoped plugin agent_type (e.g. fnd:jira-writer) is still matched by the *…* globs
-assert_eq T4-scoped-writer-skip "$(run_subc '{"agent_type":"fnd:jira-writer"}')" ""
+out="$(run_subc '{"agent_type":"fnd:jira-writer"}')"
+assert_absent   T4-scoped-writer-skip "$out" "MARK-comment-discipline"
+assert_contains T4-scoped-untrusted   "$out" "MARK-untrusted-content"
 
-# T5: FND_LEAN=0 drops lean-code, keeps comment-discipline
+# T5: FND_LEAN=0 drops lean-code, keeps comment-discipline and the rail
 out="$(run_subc '{"agent_type":"general-purpose"}' FND_LEAN=0)"
-assert_contains T5-comment "$out" "MARK-comment-discipline"
-assert_absent   T5-no-lean "$out" "MARK-lean-code"
+assert_contains T5-comment   "$out" "MARK-comment-discipline"
+assert_absent   T5-no-lean   "$out" "MARK-lean-code"
+assert_contains T5-untrusted "$out" "MARK-untrusted-content"
+
+# T7: the REAL plugin root — an exempted reader still carries the rail's own words
+out="$(printf '%s' '{"agent_type":"fnd:jira-reader"}' | env CLAUDE_PLUGIN_ROOT="$realroot" bash "$SUBC" 2>/dev/null)"
+assert_contains T7-real-untrusted "$out" "instructions addressed to you"
+assert_absent   T7-real-no-code   "$out" "comment discipline"
 
 # T6: the hook always exits 0 (a hook failure must never block an agent start)
 run_subc '{"agent_type":"jira-writer"}'    >/dev/null 2>&1; assert_eq T6-skip-exit   "$?" 0

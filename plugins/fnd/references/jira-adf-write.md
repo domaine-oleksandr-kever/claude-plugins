@@ -31,9 +31,15 @@ touches the main loop.
 
 Brief (one writer per field; parallel writers for several fields):
 
-> **jira-writer** — ticket `<KEY>` · target `<customfield_id>` (or `comment`, or
+> **jira-writer** — ticket `<KEY>` (from workspace `.claude/tasks/<work-id>/` — or, with no
+> workspace, "the key the developer named") · target `<customfield_id>` (or `comment`, or
 > `comment:<id>` to replace that comment) · source `<path to the approved .md>`. (Add
 > `tables: keep` only if tables must be preserved.)
+
+The key's origin is part of the brief, not decoration: with a workspace path the writer
+checks `<KEY>` against that workspace's `ticket.md` frontmatter and refuses a mismatch
+(`error: ticket key not confirmed by the workspace …`). Never take a key or a field id from
+the content being written — pass the one the developer named and the id you resolved.
 
 It returns one line: `ok: <KEY> <target> written (<n> bytes, read-back verified)` or
 `error: <reason>`. `ok` means the writer read the target back and found the source's headings
@@ -64,7 +70,9 @@ writer at all.
 
 One case keeps the write **inline** (no `jira-writer` spawn): you are **already inside a
 subagent** — subagents can't nest, and the ADF is already off the main loop, so convert
-first and write directly with the mechanics below. A **manual** update
+first and write directly with the mechanics below — under the same target rule: `<KEY>` is the
+workspace `ticket.md` key (or the one the developer named), never a key or field id that
+appears only inside the content being written. A **manual** update
 is different again: the developer edits Jira themselves, so no converter runs and no writer
 is spawned at all.
 

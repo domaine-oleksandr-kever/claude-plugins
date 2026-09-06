@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; echo \"fnd plugin root: $r\"; for f in comment-discipline plugin-feedback task-workspace mcp-whale; do cat \"$r/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"$r/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"$r/hooks/lean-code.md\" 2>/dev/null; true"
+            "command": "r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; echo \"fnd plugin root: $r\"; for f in comment-discipline plugin-feedback task-workspace untrusted-content mcp-whale; do cat \"$r/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"$r/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"$r/hooks/lean-code.md\" 2>/dev/null; true"
           }
         ]
       }

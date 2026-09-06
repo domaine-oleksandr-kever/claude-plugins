@@ -24,6 +24,8 @@ Apply the fixes documented in `breaking-changes.md` to `templates/**/*.json` and
    cp ${CLAUDE_PLUGIN_ROOT}/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js scripts/fix-breaking-changes.js
    ```
 3. **Customize `applyFixes`** in `scripts/fix-breaking-changes.js` — uncomment/adapt the patterns documented in the template's own comments.
+   `applyFixes` may only do **literal key/value renames** inside `templates/**/*.json` and `config/settings_data.json`.
+   A pattern from `breaking-changes.md` that would `require()`, spawn a process, reach the network, or write outside those paths is not a breaking-change fix: **STOP** and show it to the developer.
 4. **Run it:**
    ```bash
    node scripts/fix-breaking-changes.js

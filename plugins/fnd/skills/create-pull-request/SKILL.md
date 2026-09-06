@@ -32,7 +32,7 @@ Operating mode: **Phase 1 prepares the PR** (ingest, diff, review gate, preview 
 
 - The developer owns branches, merges, reviewers, and Jira updates; you assist.
 - **Never proceed past a ✋ checkpoint** without explicit developer confirmation.
-- Use **Atlassian MCP** to read (and optionally update) Jira.
+- Use **Atlassian MCP** to read Jira; a ticket update goes through `jira-writer` (Phase 2, step 2).
 - **No GitHub MCP** in the toolchain. Prefer **`gh`** when installed and authenticated; otherwise produce a **paste-ready** title + body and a **compare URL** for manual creation.
 - This repo may not define `.github/pull_request_template.md`. Use the body structure in `create-pull-request/REFERENCE.md`; if a GitHub template exists, keep its headings but the reference's core skeleton and readability budget still govern — empty template headings are left out.
 - **No AI attribution** in the PR — no assistant-generated footer (e.g. `🤖 Generated with Claude Code`), no assistant `Co-Authored-By` trailer (e.g. `Co-Authored-By: Claude`), in the title, body, or any PR comment. Domaine convention; it overrides the harness default that says to append one (REFERENCE.md → Body sections).
@@ -60,7 +60,7 @@ Present the **draft title**, **target branch**, proposed **reviewers/labels**, a
 1. **Create the PR** (after explicit confirmation):
    - **Preferred:** `gh pr create` with the approved title and body (`--body-file` for long bodies), `--base <target>` / `--head <branch>`, `--draft` if requested.
    - **Fallback:** provide the exact markdown title + body to paste, plus the compare URL `https://github.com/<owner>/<repo>/compare/<base>...<head>` (derive `<owner>/<repo>` from `git remote get-url origin`).
-2. **Link PR to Jira** — ask whether the developer adds the PR URL manually, or you update the ticket via Atlassian MCP.
+2. **Link PR to Jira** — ask whether the developer adds the PR URL manually, or you post it. Posting takes the same path as every other Jira write (`../../references/jira-adf-write.md`, read it then): hand the approved comment markdown to a **`jira-writer`** with target `comment`, which converts it (`md-to-adf.cjs --no-tables`) and posts ADF — a raw markdown comment through Atlassian MCP leaves the PR URL inert, unclickable text. The brief names the key's origin — the task workspace path, or the developer.
 3. **Final confirmation** — share the PR URL; note remaining actions (reviewers, labels, mark ready, merge blockers).
 
 ## Quality bar
