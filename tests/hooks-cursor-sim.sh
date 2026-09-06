@@ -18,10 +18,9 @@
 #   T cases — subagentStart → subagent-conventions.sh: code-writing agents get the
 #             conventions as additional_context, read-only readers are skipped, every
 #             plausible Cursor spelling of the agent-type field is accepted, FND_LEAN honored
-#   M cases — afterMCPExecution → mcp-slim.cjs: a whale comes back as an in-place
-#             `updated_mcp_tool_output` rewrite carrying its own full= spill, passthroughs
-#             (small / error / no-gain) leave the result alone — a passthrough must never
-#             collapse into a null rewrite — and every plausible result key is read
+#   M cases — afterMCPExecution is observe-only on this host (no response schema): a whale
+#             leaves NOTHING on stdout and NO spill behind, mcp-slim is never spawned, and the
+#             switch still silences the event
 #   P cases — beforeMCPExecution → scratch-path-guard.cjs: a screenshot aimed into the checkout
 #             comes back as `permission:"deny"` carrying both message-key spellings, while the
 #             workspace path, an out-of-tree path, another MCP tool, the switch and a malformed
@@ -410,48 +409,38 @@ assert_contains T6-leak-lean    "$(printf '%s' "$out" | jq -r '.additional_conte
 out="$(run_shim subagentStart '{"agent_type":"general-purpose"}' CURSOR_PLUGIN_ROOT="$TMP/decoy-plugin")"
 assert_contains T6b-leak-cursor-env "$(printf '%s' "$out" | jq -r '.additional_context')" "comment discipline"
 
-# ═══ M — afterMCPExecution (in-place MCP-output rewrite) ════════════════════
+# ═══ M — afterMCPExecution (observe-only: Cursor cannot rewrite an MCP result) ═══
+# cursor.com/docs/agent/hooks lists no response fields for this event, and a live run
+# (2026.09.02) confirmed every rewrite key is ignored — so the shim must not spawn mcp-slim:
+# a spill nobody gets a handle to, plus a `compress` line for a result the model reads raw.
 MSD="$TMP/slim-spill"; mkdir -p "$MSD"
 mrun() { # payload-json [VAR=val…]
   local in="$1"; shift
   run_shim afterMCPExecution "$in" FND_MCP_SLIM_DIR="$MSD" FND_MCP_SLIM_STUB=0 "$@"
 }
 
-# M1: a whale comes back REWRITTEN in place, smaller, with a resolvable full= handle
-in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp_atlassian_getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}')"
+# M1: the shape Cursor sends — `result_json`, a JSON STRING of the Claude-shape envelope, the
+# tool name bare with the server beside it. A whale: nothing on stdout, exit 0, no spill file.
+in="$(jq -n --rawfile t "$JIRA" '{hook_event_name:"afterMCPExecution",tool_name:"getJiraIssue",mcp_server_name:"plugin-fnd-atlassian",tool_input:"{}",result_json:({content:[{type:"text",text:$t}]}|tojson),duration:812}')"
 out="$(mrun "$in")"; EC=$?
-assert_eq       M1-exit    "$EC" 0
-assert_contains M1-key     "$out" "updated_mcp_tool_output"
-assert_absent   M1-noclaude "$out" "hookSpecificOutput"
-text="$(printf '%s' "$out" | jq -r '.updated_mcp_tool_output.content[0].text' 2>/dev/null)"
-p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
-if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M1-fullfile "no existing full= file (p='$p')"; fi
-inb=$(printf '%s' "$in" | wc -c); outb=$(printf '%s' "$out" | wc -c)
-if [ "$outb" -lt "$inb" ]; then ok; else bad M1-smaller "rewrite $outb not < input $inb"; fi
+assert_eq M1-exit     "$EC" 0
+assert_eq M1-silent   "$out" ""
+assert_eq M1-no-spill "$(ls "$MSD" 2>/dev/null | grep -c '^fnd-mcp-slim-')" 0
 
-# M2: every plausible Cursor key for the result is read (the pinned one is an M1a item)
+# M2: the older object keys, a small result, an error envelope, malformed stdin, no result at all —
+# every one of them is the same silence (there is nothing this event could say).
 for k in tool_response tool_output result output response; do
   in="$(jq -n --arg k "$k" --rawfile t "$JIRA" '{tool_name:"x"} + {($k):{content:[{type:"text",text:$t}]}}')"
-  assert_contains "M2-$k" "$(mrun "$in")" "updated_mcp_tool_output"
+  assert_eq "M2-$k" "$(mrun "$in")" ""
 done
+assert_eq M2-malformed "$(mrun 'not json at all')" ""
+assert_eq M2-no-result "$(mrun '{"tool_name":"x"}')" ""
 
-# M3–M6: passthrough must stay passthrough — emitting `{"updated_mcp_tool_output":null}`
-# would erase the very result the passthrough exists to preserve.
-in='{"tool_name":"mcp_x_y","tool_response":{"content":[{"type":"text","text":"{\"a\":1,\"b\":2}"}]}}'
-assert_eq M3-small-passthrough "$(mrun "$in")" ""
-in="$(jq -n --rawfile t "$JIRA" '{tool_name:"x",tool_response:{content:[{type:"text",text:$t}],isError:true}}')"
-assert_eq M4-error-passthrough "$(mrun "$in")" ""
-bignon="$(printf 'x%.0s' $(seq 1 5000))"
-in="$(jq -n --arg t "$bignon" '{tool_name:"x",tool_response:{content:[{type:"text",text:$t}]}}')"
-assert_eq M5-nogain-passthrough "$(mrun "$in")" ""
-assert_eq M6-malformed          "$(mrun 'not json at all')" ""
-assert_eq M6b-no-result         "$(mrun '{"tool_name":"x"}')" ""
-
-# M7: the in-shim switch (the wiring gate is G3)
-in="$(jq -n --rawfile t "$JIRA" '{tool_name:"x",tool_response:{content:[{type:"text",text:$t}]}}')"
+# M3: the in-shim switch (the wiring gate is G3) — same silence, exit 0
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"x",mcp_server_name:"s",result_json:({content:[{type:"text",text:$t}]}|tojson)}')"
 out="$(mrun "$in" FND_MCP_SLIM=0)"; EC=$?
-assert_eq M7-slim-off "$out" ""
-assert_eq M7-exit     "$EC" 0
+assert_eq M3-slim-off "$out" ""
+assert_eq M3-exit     "$EC" 0
 
 # ═══ P — beforeMCPExecution (the screenshot scratch-path deny) ══════════════
 # This host documents a before-MCP event with a deny primitive (cursor.com/docs/agent/hooks), so
@@ -673,6 +662,26 @@ chmod +x "$HOSTREC/hooks/subagent-conventions.sh"
 out="$(printf '%s' '{"agent_type":"general-purpose"}' | env -u FND_HOST "$NODE_BIN" \
   "$HOSTREC/hooks/cursor-shim.cjs" subagentStart 2>/dev/null | jq -r '.additional_context' 2>/dev/null)"
 assert_contains H6-child-host "$out" "FNDHOST=[cursor]"
+
+# H7: `project` names the WORKSPACE, not wherever Cursor happens to run the hook process from
+# (measured: the plugin dir — so every shim line read `claude-plugins` in a store repo). The
+# suite's own cwd is a git checkout too, so a wrong walk here has a concrete wrong answer.
+mkdir -p "$HTD/ws/.git"
+hrun "$HTD/h7" sessionStart "$(ss_in "$HTD/ws")" FND_HOST_TRACE=1 >/dev/null
+assert_contains H7-project-is-workspace "$(hlog "$HTD/h7")" '"project":"ws"'
+
+# H8: afterMCPExecution proves it fired the only way it can — a `skip` line under the Claude
+# Code spelling of the tool (server prefix folded in), and no `mcp-slim` line, since nothing
+# was spawned. With the switch off, not even that.
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"getJiraIssue",mcp_server_name:"plugin-fnd-atlassian",result_json:({content:[{type:"text",text:$t}]}|tojson)}')"
+hrun "$HTD/h8" afterMCPExecution "$in" FND_HOST_TRACE=1 >/dev/null
+assert_eq       H8-one-line "$(hlog "$HTD/h8" | wc -l | tr -d ' ')" 1
+assert_contains H8-event    "$(hlog "$HTD/h8")" '"event":"PostToolUse"'
+assert_contains H8-hook     "$(hlog "$HTD/h8")" '"hook":"cursor-shim"'
+assert_contains H8-decision "$(hlog "$HTD/h8")" '"decision":"skip"'
+assert_contains H8-tool     "$(hlog "$HTD/h8")" '"tool":"mcp__plugin-fnd-atlassian__getJiraIssue"'
+hrun "$HTD/h8off" afterMCPExecution "$in" FND_HOST_TRACE=1 FND_MCP_SLIM=0 >/dev/null
+if [ -e "$HTD/h8off/fnd-host-trace.log" ]; then bad H8-off-silent "the switched-off event still logged"; else ok; fi
 
 # ═══ N — the whole commit-guard matrix, re-run through the Cursor dialect ═══
 # The case lists are READ from the matrix file, never copied: rows added there must be covered

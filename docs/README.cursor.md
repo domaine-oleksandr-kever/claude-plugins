@@ -155,8 +155,12 @@ unless your filesystem forbids it.
   (13 `.mdc`, provenance in `plugins/fnd/rules/SOURCE.md`). The `sessionStart` hook keeps only
   the dynamic, detection-gated part (live-store access). Consequence: `FND_LEAN=0` does not
   reach the session copy here — turn `rules/fnd-lean-code.mdc` off instead.
-- **MCP output is rewritten in place.** Cursor's `afterMCPExecution` can replace a tool result,
-  so `mcp-slim` both compresses and spills-and-stubs here, exactly as on Claude Code.
+- **MCP output is NOT compressed here.** Cursor's `afterMCPExecution` has no response schema
+  (the docs list none; measured 2026.09.02: `updated_mcp_tool_output` and every other key are
+  ignored), so a tool result cannot be rewritten or stubbed — the model reads it raw, and
+  `mcp-slim` is never spawned on this host. The shim only logs that the event fired
+  (`PostToolUse/cursor-shim skip` in `doctor --trace`). The `json-slim` CLI recipe still applies
+  to any large file on disk.
 - **The ~40-tool cap.** Cursor is community-reported to stop exposing tools past ~40 across all
   servers; the six bundled servers are roughly three times that. `mcp.json` still ships all six —
   see [Bundled MCP servers](../README.md#the-same-list-on-the-other-hosts) for the pruned
@@ -202,6 +206,10 @@ unless your filesystem forbids it.
   (`CURSOR_PLUGIN_ROOT` → `CLAUDE_PLUGIN_ROOT` → `~/.cursor/plugins/local/fnd`) and the guard
   scripts resolve their own paths from `__dirname`. If no shim is found, a git command that
   looks like a commit/push/merge/pull is **denied** rather than run unchecked.
+- **Headless `cursor-agent -p`** loads none of the installed plugins (measured on
+  2026.09.02: no fnd hook fires, no trace line), so a scripted run has to name the plugin
+  itself — `cursor-agent -p --plugin-dir ~/.cursor/plugins/local/fnd …`. The IDE needs no such
+  flag.
 
 ## Project layer
 

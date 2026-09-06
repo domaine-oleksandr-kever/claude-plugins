@@ -28,9 +28,10 @@
 //                           hooks/spill-access.sh (measurement only, status ignored). Cursor
 //                           documents no read-file event, so a spill this host's file reader
 //                           opens is not recorded — shell reads are the whole coverage here.
-//   afterMCPExecution     → hooks/mcp-slim.cjs, its compressed/stubbed result handed back
-//                           as `updated_mcp_tool_output` — Cursor rewrites the MCP result
-//                           in place, the same net effect as Claude Code's updatedToolOutput.
+//   afterMCPExecution     → observe-only. Cursor's event has NO response schema
+//                           (cursor.com/docs/agent/hooks; measured 2026.09.02: every rewrite key
+//                           is ignored, the model reads the raw result), so mcp-slim is never
+//                           spawned here — the shim only logs that the hook fired.
 //   beforeMCPExecution    → hooks/scratch-path-guard.cjs, the PreToolUse screenshot-path deny
 //                           (M3). Cursor documents this event (cursor.com/docs/agent/hooks) with
 //                           the same allow/deny/ask primitive as beforeShellExecution. Two
@@ -359,33 +360,22 @@ function beforeShellExecution(payload) {
 }
 
 // ── afterMCPExecution ───────────────────────────────────────────────────────────────────
+// No rewrite primitive on this host: the docs list no response fields for the event, and
+// `updated_mcp_tool_output` / `result_json` / `result` / `tool_response` were all measured as
+// ignored (2026.09.02). Spawning mcp-slim would spill whales nobody gets a handle to and stamp
+// `compress` on a result the model still reads raw, so the only honest line is `skip`.
 function afterMCPExecution(payload) {
   if (process.env.FND_MCP_SLIM === '0') return null;
-  // Cursor's key for the tool result is unpinned (M1a) — mcp-slim mirrors whatever shape it
-  // is handed, so the first key that carries a value is the result.
-  const result = firstDefined(payload, ['tool_response', 'tool_output', 'result', 'output', 'response']);
-  if (result === undefined || result === null) return null;
-
-  const r = runScript(
-    'mcp-slim.cjs',
-    JSON.stringify({
-      hook_event_name: 'PostToolUse',
-      tool_name: firstDefined(payload, ['tool_name', 'tool', 'mcp_tool_name']) || null,
-      tool_response: result,
-      cwd: workspaceRoot(payload),
-    })
-  );
-  if (r.status !== 0) return null; // any failure → the original result rides on untouched
-  // No output at all is mcp-slim's passthrough (below the size gate, an error envelope, no
-  // byte gain) — and the whale branches it DOES emit for already carry their own `full=`
-  // spill handle, so the in-place rewrite needs nothing added here. Tested separately from
-  // the value: a missing envelope collapsing into a `null` REWRITE would erase the tool
-  // result the passthrough meant to preserve.
-  const emitted = parseJson(r.stdout);
-  if (!emitted || !emitted.hookSpecificOutput) return null;
-  const updated = emitted.hookSpecificOutput.updatedToolOutput;
-  if (updated === undefined) return null;
-  return { updated_mcp_tool_output: updated };
+  const started = hostTrace.start();
+  // Cursor's tool name carries no server prefix (`getJiraIssue` + `mcp_server_name`); the log
+  // uses the Claude Code spelling so one column reads like the others.
+  let tool = firstDefined(payload, ['tool_name', 'tool', 'mcp_tool_name']) || '';
+  const server = payload.mcp_server_name;
+  if (typeof tool === 'string' && tool && typeof server === 'string' && server && !tool.startsWith('mcp__')) {
+    tool = `mcp__${server}__${tool}`;
+  }
+  hostTrace.trace({ event: 'PostToolUse', hook: 'cursor-shim', decision: 'skip', tool, startedAt: started });
+  return null;
 }
 
 // ── beforeMCPExecution ──────────────────────────────────────────────────────────────────
@@ -449,6 +439,9 @@ function main(raw) {
   const event = process.argv[2] || payload.hook_event_name || '';
   const handler = HANDLERS[event];
   if (!handler) return; // unknown / unwired event → nothing to say
+  // Cursor runs hook processes from the PLUGIN dir; the workspace is what the spawned scripts
+  // (and their `project` trace field) must see.
+  try { process.chdir(workspaceRoot(payload)); } catch (_) {}
   crossCheckRoot();
   const res = handler(payload);
   if (TRACED_EVENTS[event]) {
