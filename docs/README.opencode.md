@@ -4,6 +4,14 @@ Quickstart, update path and the host-specific deltas. The plugin content is the 
 Claude Code uses — only the wiring differs. Start at the
 [README](../README.md#install--four-hosts) for the cross-host picture.
 
+> [!IMPORTANT]
+> **Verification status: unverified, frozen 2026-09-07.** The OpenCode wiring ships as last
+> measured (installer route and hooks firing per the `FND_HOST_TRACE` matrix), but no release
+> since has been smoke-tested here in an interactive session, and no full `smoke-test` run was
+> ever recorded on this host. Known gaps: no MCP-level guard and no verified MCP payload shape,
+> so screenshots are unguarded. Details and what "best-effort" means: [README → Host verification
+> status](../README.md#host-verification-status--cursor-codex-cli-and-opencode-are-unverified).
+
 OpenCode has no plugin marketplace primitive, so the installer is the whole distribution
 channel, and three pieces of configuration stay yours to paste: the MCP block, the commit-guard
 backstop and the static conventions.

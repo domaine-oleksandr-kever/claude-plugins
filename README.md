@@ -326,6 +326,32 @@ and the context-usage monitor is inert wherever the host hands a prompt hook no 
 (Cursor, OpenCode). `plugins/fnd/references/host-orchestration.md` is the single home of the
 hoisted fallback; `plugins/fnd/references/pipeline-phases.md` → Orchestration is the branch point.
 
+### Host verification status — Cursor, Codex CLI and OpenCode are **unverified**
+
+Frozen 2026-09-07, by decision. Claude Code is the host the team works in daily and the only one
+every release is live-verified on. The other three columns ship the same content and the same
+wiring they had when they were last measured, and **no release since has been smoke-tested on
+them in an interactive session**. What *is* proven, from disk rather than from a model reporting
+on itself: the hook layer fires on all four hosts (`FND_HOST_TRACE` matrix, 2026-09-06), the
+Cursor deny path and both key spellings were accepted by a headless `cursor-agent` run
+(2026-09-06), and the Codex and OpenCode install routes were exercised live once in August
+(a marketplace install on Codex CLI 0.149.0 spawning `jira-reader`; the OpenCode installer and
+host-trace columns). No full `smoke-test` session has ever been recorded on any of the three.
+Known gaps that stay open with the freeze:
+
+- **Cursor** — `afterMCPExecution` is observe-only: the host documents no output-rewrite field
+  for that event, so nothing is compressed, stubbed or spilled there (the shim logs `skip`);
+  `subagentStart` conventions injection is unconfirmed (no headless run spawned a subagent); and
+  subagent model pins are dropped by a Cursor bug with no fix date (see `docs/README.cursor.md`).
+- **Codex CLI** — hooks need `[features] hooks` plus a `/hooks` trust that is lost on some
+  updates; the model map is PROPOSED, sign-off pending.
+- **OpenCode** — no MCP-level guard and no verified MCP payload shape; screenshots are unguarded.
+
+Treat those columns as best-effort: install, run `doctor.cjs`, then the `smoke-test` skill, and
+file what breaks with `/fnd:report-plugin-issue`. Re-verifying a host is a deliberate, separate
+piece of work — one live session per host plus whatever it turns up — not part of the release
+cadence, and the per-host docs carry the same notice at the top.
+
 ### Marketplace posture
 
 - **Claude Code** — the git marketplace in `.claude-plugin/marketplace.json`, unchanged; this is

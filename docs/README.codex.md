@@ -4,6 +4,15 @@ Quickstart, update path and the host-specific deltas. The plugin content is the 
 Claude Code uses — only the wiring differs. Start at the
 [README](../README.md#install--four-hosts) for the cross-host picture.
 
+> [!IMPORTANT]
+> **Verification status: unverified, frozen 2026-09-07.** The Codex wiring ships as last
+> measured (marketplace install on CLI 0.149.0 spawning `jira-reader`; hooks fire per the
+> `FND_HOST_TRACE` matrix), but no release since has been smoke-tested here in an interactive
+> session, and no full `smoke-test` run was ever recorded on this host. Known soft spots: the
+> `/hooks` trust that some updates drop, and a model map still marked PROPOSED. Details and what
+> "best-effort" means: [README → Host verification
+> status](../README.md#host-verification-status--cursor-codex-cli-and-opencode-are-unverified).
+
 On a current CLI the install arrives through **one channel**: the marketplace plugin carries
 skills, hooks, MCP **and** the TOML subagents — measured live on Codex CLI 0.149.0, where a
 cache-only install spawned `jira-reader` with no local links. `install.sh --target codex` is an

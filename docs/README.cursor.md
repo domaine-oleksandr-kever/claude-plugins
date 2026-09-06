@@ -4,6 +4,15 @@ Quickstart, update path and the host-specific deltas. The plugin content is the 
 checkout Claude Code uses — only the wiring differs. Start at the
 [README](../README.md#install--four-hosts) for the cross-host picture.
 
+> [!IMPORTANT]
+> **Verification status: unverified, frozen 2026-09-07.** The Cursor wiring ships as last
+> measured (hooks fire per the `FND_HOST_TRACE` matrix; the deny path was accepted by a headless
+> `cursor-agent` run), but no release since has been smoke-tested here in an interactive session,
+> and three gaps stay open by decision: `afterMCPExecution` is observe-only (no compression, stub
+> or spill on Cursor), `subagentStart` conventions injection is unconfirmed, and the model-pin bug
+> below. Details and what "best-effort" means: [README → Host verification
+> status](../README.md#host-verification-status--cursor-codex-cli-and-opencode-are-unverified).
+
 ## Install
 
 > [!WARNING]
