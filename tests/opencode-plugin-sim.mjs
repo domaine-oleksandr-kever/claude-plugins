@@ -330,6 +330,17 @@ const objectOutput = { title: 't', output: { content: whale }, metadata: {} };
 await hooks['tool.execute.after']({ tool: 'atlassian_searchJiraIssuesUsingJql' }, objectOutput);
 assertEq('M09-non-string-output', typeof objectOutput.output, 'object');
 
+// M09b: the shape an MCP tool ACTUALLY arrives in on 1.18.21 — the raw result, no `output` key.
+// The whale block is rewritten in place and carries a recovery handle; a sibling error flag survives.
+const rawMcp = { content: [{ type: 'text', text: whale }], isError: false };
+await hooks['tool.execute.after']({ tool: 'atlassian_searchJiraIssuesUsingJql', sessionID: 'm', callID: 'c3' }, rawMcp);
+assert('M09b-raw-mcp-rewritten', rawMcp.content[0].text.length < whale.length, `not rewritten: ${rawMcp.content[0].text.length} B`);
+assertContains('M09b-raw-mcp-handle', rawMcp.content[0].text, 'full=');
+assertEq('M09b-raw-mcp-flag-kept', rawMcp.isError, false);
+const rawSmall = { content: [{ type: 'text', text: '{"ok":true}' }], isError: false };
+await hooks['tool.execute.after']({ tool: 'atlassian_atlassianUserInfo', sessionID: 'm', callID: 'c4' }, rawSmall);
+assertEq('M09c-raw-mcp-small-untouched', rawSmall.content[0].text, '{"ok":true}');
+
 process.env.FND_MCP_SLIM = '0';
 const disabled = await runAfter('atlassian_searchJiraIssuesUsingJql', whale);
 assertEq('M10-switch-off', disabled.output, whale);

@@ -8,7 +8,8 @@
 //   tool.execute.before  → hooks/no-ai-attribution.sh + hooks/no-verify-bypass.sh (PreToolUse: Bash),
 //                          then hooks/spill-access.sh for the bash / read / grep tools (measurement
 //                          only — see recordSpillAccess)
-//   tool.execute.after   → hooks/mcp-slim.cjs      (PostToolUse: mcp__*), rewriting output.output in place
+//   tool.execute.after   → hooks/mcp-slim.cjs      (PostToolUse: mcp__*), rewriting the result in place
+//                          (a built-in tool's output.output, an MCP tool's raw content blocks)
 //   event                → session bookkeeping only
 //
 // Deliberate divergences from the Claude Code wiring (HARNESS-PORT-PLAN M5):
@@ -392,8 +393,13 @@ export const FndPlugin = async (ctx = {}) => {
         if (process.env.FND_MCP_SLIM === '0') return;
         tool = (input && input.tool) || (output && output.tool);
         if (!isMcpTool(tool)) return;
+        // Two shapes reach this hook (measured on 1.18.21): a built-in tool's `{title, output,
+        // metadata}` with the text in `output`, and an MCP tool's RAW result `{content:[…],
+        // isError}` — the Claude Code shape mcp-slim reads natively, rewritten block by block.
         const text = output && output.output;
-        if (typeof text !== 'string' || !text) {
+        const rawMcp = output && Array.isArray(output.content) ? output : null;
+        const textShape = typeof text === 'string' && text.length > 0;
+        if (!textShape && !rawMcp) {
           hostTrace.trace({ event: 'PostToolUse', hook: 'fnd-plugin', decision: 'skip', tool: claudeToolName(tool), startedAt: started });
           return;
         }
@@ -403,7 +409,7 @@ export const FndPlugin = async (ctx = {}) => {
         const event = JSON.stringify({
           hook_event_name: 'PostToolUse',
           tool_name: claudeToolName(tool),
-          tool_response: text,
+          tool_response: textShape ? text : rawMcp,
           cwd,
         });
         const r = await runScript(NODE_BIN, [path.join(HOOKS, 'mcp-slim.cjs')], event, SLIM_TIMEOUT_MS);
@@ -411,9 +417,14 @@ export const FndPlugin = async (ctx = {}) => {
         if (r.error) hostTrace.trace({ event: 'PostToolUse', hook: 'fnd-plugin', decision: 'error', tool: claudeToolName(tool), startedAt: started });
         const emitted = parseHookOutput(r.stdout);
         const slimmed = emitted && emitted.hookSpecificOutput && emitted.hookSpecificOutput.updatedToolOutput;
-        // A string result comes back a string; anything else means the shapes stopped
-        // matching, and a serialized object in place of tool text is worse than the whale.
-        if (typeof slimmed === 'string' && slimmed.length < text.length) output.output = slimmed;
+        // Each shape comes back as itself; anything else means the shapes stopped matching, and a
+        // serialized object in place of tool text is worse than the whale.
+        if (textShape) {
+          if (typeof slimmed === 'string' && slimmed.length < text.length) output.output = slimmed;
+        } else if (slimmed && Array.isArray(slimmed.content)
+          && JSON.stringify(slimmed.content).length < JSON.stringify(rawMcp.content).length) {
+          output.content = slimmed.content;
+        }
       } catch (_) {
         // Compression is an optimization — the original result always survives a failure.
         if (tool) hostTrace.trace({ event: 'PostToolUse', hook: 'fnd-plugin', decision: 'error', tool: claudeToolName(tool), startedAt: started });
