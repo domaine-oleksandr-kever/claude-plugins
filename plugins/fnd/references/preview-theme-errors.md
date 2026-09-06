@@ -18,7 +18,9 @@ to empty. On other hosts substitute the same path.
 
 - **`info` errors** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config) → report
   the line with its fix (run from the project root / install `jq` / uncomment a `theme = "…"` line)
-  and take the manual path. Never read the toml to "check".
+  and take the manual path. Never read the toml to "check". `error=common_lib_not_found path=…`
+  is the plugin install, not the project: `scripts/_shopify-common.sh` must sit beside the script
+  (a partial copy of `scripts/` drops it) — reinstall or update the plugin; nothing ran.
 - **`error=build_failed`** → surface the build output and **stop**: fix the branch, don't enter
   theme URLs by hand.
 - **`error=bad_build_script`** → nothing was built or pushed, and **retrying the same value is
@@ -40,7 +42,9 @@ to empty. On other hosts substitute the same path.
   `refresh --theme <the new id>`. The preview URL is `…/?preview_theme_id=<the new id>`.
 - **`error=overlay_push_failed`** / **`error=overlay_pull_failed`** → transient or auth (`cause=`
   names it), so this one IS worth retrying; the same drift blockquote covers the `--reuse`
-  `mixed_state=` case.
+  `mixed_state=` case. `overlay_pull_failed` also fires when the pull wrote no settings file at
+  all (`cause=` names the 0 *.json) — then retrying replays it: check that the toml's
+  `dev_theme_id` is a real theme with customizer content before re-running.
 - **`overlay=partial` + `warn=overlay_file_dropped file=<f> [unknown_types=<t,…>]`** (create,
   **exit 0**) → the same drift as `error=settings_drift`, but Shopify rejected the file(s)
   server-side while the push reported success — caught by the read-back, not the CLI. The affected
@@ -55,6 +59,12 @@ to empty. On other hosts substitute the same path.
 - **`overlay=unverified` + `warn=overlay_unverified`** (create, exit 0) → the read-back pull
   failed, so whether every settings file landed is unknown. Spot-check a key template
   (`theme-json.sh get --theme <id> --file templates/product.json`) before offering the preview.
+- **`overlay=empty` + `warn=overlay_empty dev_theme_id=<id>`** (create `--reuse`, exit 0) → the
+  settings pull off the dev theme returned no `*.json`, so nothing was overlaid and the reused
+  theme keeps its previous settings — NOT a reviewable preview until the overlay lands. Check that
+  the id is a real theme with customizer content (`info`, `shopify theme list`), fix the toml if
+  not, then re-run `create --reuse` (a re-push overwrites). On a fresh create the same pull is
+  `error=overlay_pull_failed` and the theme is deleted.
 - **`error=ambiguous_name`** / **`error=unusable_theme_id`** → nothing was pushed; re-run
   `refresh --theme <id>` naming the one theme you mean.
 - **`error=live_theme_write_refused`** → nothing was pushed: the target IS the published theme.
@@ -67,6 +77,23 @@ to empty. On other hosts substitute the same path.
   nothing was pushed and the name could not be resolved, so a blind re-run risks a **duplicate
   same-named theme**. Resolve the name by hand first, then `refresh --theme <id>` — or re-run
   only once the listing is readable.
+- **`error=refresh_unverifiable theme=<id> store=<s>`** / **`error=reuse_unverifiable name=<n>`**
+  → nothing was pushed or created: the store listing was **silent** (the call failed, or it named
+  no theme at all), so the live-theme guard could not clear the id / the name could not be
+  resolved, and — for `refresh` — no workspace under `.claude/tasks` records that id as
+  `session-theme:` (a `--reuse` name has no such exemption). That check is an **id lookup across
+  every workspace under the current directory, not provenance** — the gate in
+  `<plugin root>/references/session-theme.md` still applies before an unattended refresh; a
+  legacy `.claude/fnd/` workspace is not scanned (migrate it first). Re-run when the store
+  answers. A developer may pass `--allow-unverified` (it lifts these two refusals only — never
+  the live-theme guard, never the dev-theme guard); **never add it unattended**.
+- **`error=dev_theme_write_refused theme=<id> name=<n>`** → nothing was pushed: the target is
+  an id the toml names as the **shared dev theme** — its settings source (unless the developer
+  pinned this id by hand) or an id a pin superseded. If it IS this stream's session theme, record the `session-theme:` line
+  in the workspace `notes.md` (session-theme.md step 4) and re-run without any flag; else push
+  to a session/preview theme (`create --name "<name>" --reuse --pin-toml` makes one).
+  `--allow-dev-theme` overwrites the shared theme deliberately — only on the developer's explicit
+  say-so, and `--allow-unverified` does not cover this refusal.
 - **The code push itself failed** — `error=push_code_failed` (plain `create`),
   `error=push_code_failed_reuse` (`create --reuse`), `error=refresh_push_failed` (`refresh`). Each
   prints the real cause: `log=<path>` to the full `shopify` stderr plus its last 25 lines (usually a
@@ -81,8 +108,8 @@ to empty. On other hosts substitute the same path.
   named cause, then re-run the same command (a re-push is idempotent — it overwrites, it never
   stacks).
 - **`error=invalid_theme_id`** → nothing ran: `refresh --theme` and `pin --theme` take a
-  **numeric** id; a gid (`gid://shopify/OnlineStoreTheme/…`) or a name is refused — strip it to
-  the digits, or use `create --name "<name>" --reuse`, which resolves and vets a name.
+  **numeric** id; a gid (`gid://shopify/OnlineStoreTheme/…`), a name or a leading zero is refused —
+  strip it to the digits, or use `create --name "<name>" --reuse`, which resolves and vets a name.
 - **`error=invalid_dev_theme_id`** / **`error=invalid_store`** → nothing ran: the toml's `theme =` /
   `store =` line is unusable (non-numeric id, or a store that isn't a myshopify handle/URL). Take the
   manual path and have the developer fix that line — never read the toml to "check". The one
@@ -96,9 +123,12 @@ to empty. On other hosts substitute the same path.
     published theme would point `shopify theme dev` at the storefront.
   - **`error=theme_unverifiable`** → nothing was written: the store listing was unavailable, so
     the id could not be vetted, and a standalone `pin` refuses rather than persist an unvetted
-    pin. Retry when the store answers. On `create`/`refresh --pin-toml` the same outage is
-    non-blocking: the pin proceeds, flagged by a `warn=pin_unvetted` line before the pin keys
-    (the id was just pushed to, so it exists) — a warning, not an error.
+    pin. Retry when the store answers. Under the same outage a fresh `create --pin-toml` proceeds,
+    `refresh --pin-toml` only for a recorded session theme or with `--allow-unverified`, and
+    `--reuse --pin-toml` only with `--allow-unverified` (else `refresh_unverifiable` /
+    `reuse_unverifiable`, above); the
+    pin is then flagged by a `warn=pin_unvetted` line before the pin keys (the id was just
+    pushed to, so it exists) — a warning, not an error.
   - **`error=ambiguous_env envs='<a b>'`** → the toml's `[environments.*]` blocks include none
     named `dev`/`development` (a lone block with another name is refused, never auto-picked),
     so which one the dev server reads cannot be guessed. Nothing

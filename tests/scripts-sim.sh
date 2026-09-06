@@ -20,15 +20,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GQL="$ROOT/plugins/fnd/scripts/shopify-admin-gql.sh"
 TJ="$ROOT/plugins/fnd/scripts/theme-json.sh"
 CPT="$ROOT/plugins/fnd/scripts/create-preview-theme.sh"
+COMMON="$ROOT/plugins/fnd/scripts/_shopify-common.sh"
+WTS_SRC="$ROOT/plugins/fnd/scripts/worktree-setup.sh"
 FBC="$ROOT/plugins/fnd/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js"
 BASH_BIN="$(command -v bash)"
 
 TMP="$(mktemp -d)"
-# WPID is the port-probe listener the worktree cases start (see wt_listen). An interrupt between
-# `wt_listen` and `wt_unlisten` would otherwise leak a node process holding a 929x port on the
-# developer's machine — and the next run of this suite would then be testing around it.
-WPID=""
-trap 'if [ -n "$WPID" ]; then kill "$WPID" 2>/dev/null; fi; rm -rf "$TMP"' EXIT
+# WPID/WPID2 are the port-probe listeners the worktree cases start (see wt_listen). An interrupt
+# between `wt_listen` and `wt_unlisten` would otherwise leak a node process holding a 929x port on
+# the developer's machine — and the next run of this suite would then be testing around it.
+WPID=""; WPID2=""
+trap 'for p in "$WPID" "$WPID2"; do [ -n "$p" ] && kill "$p" 2>/dev/null; done; rm -rf "$TMP"' EXIT
 
 # A real ~/.config/domaine/env on this machine would inject switches into every case (the
 # scripts under test read it via env-file.cjs / domaine_env) — point the global layer at a
@@ -55,6 +57,7 @@ assert() {
 # ---------------------------------------------- theme-json.sh against a stub runner --
 TJDIR="$TMP/tj"; mkdir -p "$TJDIR"
 cp "$TJ" "$TJDIR/theme-json.sh"
+cp "$COMMON" "$TJDIR/"   # sourced from the script's own dir — every fixture copy needs it beside
 cat > "$TJDIR/shopify-admin-gql.sh" <<'STUB'
 #!/usr/bin/env bash
 # stub runner — answers by query content; FAKE_ROLE controls the theme role,
@@ -184,19 +187,22 @@ fi
 # only way to assert that FND_THEME_JSON_VERIFY=0 pulls nothing. With no body set the pull
 # "succeeds" and produces no file (the unreadable-read-back path). TJ_PUSH_SAVE captures the
 # pushed bytes (point TJ_PULL_BODY at it for the round-trip); TJ_PUSH_JSON overrides the
-# --json envelope the push prints.
+# --json envelope the push prints. TJ_PULL_FAIL makes every pull fail the way a 503 does.
 path=""; only=""; prev=""
 for a in "$@"; do
   case "$prev" in --path) path="$a" ;; --only) only="$a" ;; esac
   prev="$a"
 done
 case "$*" in
-  *"theme list"*) printf '[{"id":2,"name":"Dev","role":"development"}]\n' ;;
+  *"theme list"*)
+    if [ -n "${TJ_LIST_JSON:-}" ]; then printf '%s\n' "$TJ_LIST_JSON"
+    else printf '[{"id":2,"name":"Dev","role":"development"}]\n'; fi ;;
   *"theme push"*)
     if [ -n "${TJ_PUSH_SAVE:-}" ] && [ -n "$path" ] && [ -n "$only" ]; then cp "$path/$only" "$TJ_PUSH_SAVE"; fi
     pj="${TJ_PUSH_JSON:-}"; [ -n "$pj" ] || pj='{}'
     printf '%s\n' "$pj" ;;
   *"theme pull"*)
+    [ -n "${TJ_PULL_FAIL:-}" ] && { echo "Error: could not pull (503)" >&2; exit 1; }
     n=1
     if [ -n "${TJ_PULL_COUNT:-}" ]; then
       n=$(( $(cat "$TJ_PULL_COUNT" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "$TJ_PULL_COUNT"
@@ -427,15 +433,24 @@ TOML_PATH="$TT/single.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
 if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store acme-dev\.myshopify\.com ' "$L"; then ok
 else bad T30-store-url-form "rc=$rc log=$(tr '\n' ';' < "$L") err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
 
-# T31 (drift guard): the toml scalar reader is copied byte-for-byte into three scripts because the
-# plugin installs by git clone and each must stand alone — an edit to one copy would make them
-# disagree about which store/theme/token a toml resolves to, which is the class of bug they fix
-tv_a="$TMP/tv-a"; tv_b="$TMP/tv-b"; tv_c="$TMP/tv-c"
-awk '/^toml_value\(\) \{/,/^\}/' "$TJ" > "$tv_a"
-awk '/^toml_value\(\) \{/,/^\}/' "$CPT" > "$tv_b"
-awk '/^toml_value\(\) \{/,/^\}/' "$GQL" > "$tv_c"
-if [ -s "$tv_a" ] && cmp -s "$tv_a" "$tv_b" && cmp -s "$tv_a" "$tv_c"; then ok
-else bad T31-toml-reader-in-sync "the three toml_value copies have drifted apart"; fi
+# T31 (drift guard): the toml scalar reader has ONE home — a private copy in any of the three theme
+# scripts would let them disagree about which store/theme/token a toml resolves to, which is the
+# class of bug the shared reader fixes
+if [ "$(grep -c '^toml_value() {' "$COMMON")" -eq 1 ] \
+   && [ "$(cat "$TJ" "$CPT" "$GQL" "$WTS_SRC" | grep -c '^toml_value() {')" -eq 0 ]; then ok
+else bad T31-toml-reader-single-home "toml_value() is defined outside _shopify-common.sh (or missing from it)"; fi
+# T31b: the three theme scripts source the lib from their own dir; worktree-setup.sh shares nothing
+# with it and stays lib-free (it derives nothing from $0 by design)
+if grep -q '^\. "\$SCRIPT_DIR/_shopify-common\.sh"$' "$TJ" && grep -q '^\. "\$SCRIPT_DIR/_shopify-common\.sh"$' "$CPT" \
+   && grep -q '^\. "\$SCRIPT_DIR/_shopify-common\.sh"$' "$GQL" && ! grep -q '_shopify-common' "$WTS_SRC"; then ok
+else bad T31b-common-lib-sourced "expected cpt/tj/gql to source _shopify-common.sh and worktree-setup.sh not to"; fi
+# T31c: the sourcing is real, not vacuous — a copy without the lib beside it stops with its own
+# error= line (exit 2 on the stderr scripts) before any engine runs
+LONE="$TMP/lone"; mkdir -p "$LONE"; cp "$TJ" "$LONE/theme-json.sh"; cp "$GQL" "$LONE/shopify-admin-gql.sh"
+rc=0; "$BASH_BIN" "$LONE/theme-json.sh" themes >"$O" 2>"$E" || rc=$?
+assert T31c-tj-common-lib-missing 2 "$rc" "$E" "error=common_lib_not_found path=$LONE/_shopify-common.sh"
+rc=0; "$BASH_BIN" "$LONE/shopify-admin-gql.sh" --query "$TJDIR/theme-json.sh" >"$O" 2>"$E" || rc=$?
+assert T31d-gql-common-lib-missing 2 "$rc" "$E" "error=common_lib_not_found path=$LONE/_shopify-common.sh"
 
 # T32 (pin): --strip-comments removes bytes and appends none — the stripped body is the base a jq
 # edit and then `set --from` upload, so a trailing newline would be a byte the theme did not have
@@ -666,7 +681,77 @@ else bad T47c-invalid-wait "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E
 rc=0; FND_THEME_JSON_VERIFY_WAIT=1.2.3 TJ_PULL_BODY="$TV/old.json" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E"; then ok
 else bad T47d-multidot-wait "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T50 (bug): the themecli live guard used to compare the role against the exact lowercase `live`
+# only; it now shares create-preview-theme.sh's rule (live|main, any case). No push reaches the CLI.
+rc=0; L="$TMP/tjl50"; : > "$L"
+TJ_CLI_LOG="$L" TJ_LIST_JSON='[{"id":2,"name":"Live","role":"live"}]' tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 4 ] && grep -q 'error=live_theme_write_refused' "$E" && ! grep -q 'argv=theme push' "$L"; then ok
+else bad T50-cli-set-live-refused "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# T50b: the GraphQL enum spelling, upper-case
+rc=0; L="$TMP/tjl50b"; : > "$L"
+TJ_CLI_LOG="$L" TJ_LIST_JSON='[{"id":2,"name":"Live","role":"MAIN"}]' tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 4 ] && grep -q 'error=live_theme_write_refused' "$E" && ! grep -q 'argv=theme push' "$L"; then ok
+else bad T50b-cli-set-main-refused "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# T50c: an id the listing does not carry is theme_not_found …
+rc=0; TJ_LIST_JSON='[{"id":9,"name":"Other","role":"development"}]' tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+assert T50c-cli-set-not-listed 5 "$rc" "$E" "error=theme_not_found theme=2 (engine=themecli)"
+# T50d: … while a LISTED theme with no role is a list-shape drift — refused as unreadable, never
+# "not found" and never waved through (a literal jq `null` used to pass the emptiness check)
+rc=0; L="$TMP/tjl50d"; : > "$L"
+TJ_CLI_LOG="$L" TJ_LIST_JSON='[{"id":2,"name":"Dev"}]' tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'error=live_role_unreadable theme=2 (engine=themecli)' "$E" && ! grep -q 'argv=theme push' "$L"; then ok
+else bad T50d-cli-set-roleless "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+
+# T51 (bug): a CLI upgrade banner before the listing JSON used to kill every themecli `themes` and
+# `set` with cli_list_failed — the shared trim (the one create-preview-theme.sh always had) drops it
+TJ_BANNER_LIST='Upgrade available: run `npm i -g @shopify/cli`
+[{"id":2,"name":"Dev","role":"development"}]'
+rc=0; TJ_LIST_JSON="$TJ_BANNER_LIST" SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"name":"Dev"' "$O" && grep -q '"role":"DEVELOPMENT"' "$O"; then ok
+else bad T51-cli-list-banner "rc=$rc out=$(head -c 160 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# T51b: the same banner on the `set` path — the role read still finds the theme and the write lands
+rc=0; TJ_LIST_JSON="$TJ_BANNER_LIST" TJ_PUSH_SAVE="$TV/pushed51.json" TJ_PULL_BODY="$TV/pushed51.json" \
+  tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":"upserted"' "$O" && grep -q '"verified":"true"' "$O"; then ok
+else bad T51b-cli-list-banner-set "rc=$rc out=$(head -c 160 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# T51c: an EMPTY listing is a failed listing, not "no themes" — `jq empty` accepts no input, so
+# without this gate a silent CLI read as theme_not_found by accident
+rc=0; TJ_LIST_JSON=' ' SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+assert T51c-cli-list-empty 5 "$rc" "$E" "error=cli_list_failed"
+rc=0; TJ_LIST_JSON=' ' tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+assert T51d-cli-list-empty-set 5 "$rc" "$E" "error=cli_list_failed"
 unset FND_THEME_JSON_VERIFY_WAIT
+
+# T49: themecli `get` — a pull of exactly the named file into a private dir, whose body reaches
+# stdout through the same emit_file the gql engine uses (every earlier `get` case ran the stub runner)
+tj_get_cli() { # tj_get_cli <log> <args…> — themecli `get --theme 2 --file templates/product.json`
+  local log="$1"; shift
+  TJ_CLI_LOG="$log" SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+    "$BASH_BIN" "$TJDIR/theme-json.sh" get --engine themecli --store test.myshopify.com \
+    --theme 2 --file templates/product.json "$@"
+}
+L="$TMP/tj49.log"; : > "$L"
+rc=0; TJ_PULL_BODY="$TMP/snap.json" tj_get_cli "$L" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(head -1 "$O")" = '{"a":1}' ] \
+   && grep -q 'argv=theme pull --store test.myshopify.com --theme 2 --path .* --only templates/product.json --nodelete' "$L" \
+   && ! grep -q 'theme list' "$L"; then ok
+else bad T49-cli-get-body "rc=$rc out=$(head -c 120 "$O") err=$(head -c 160 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# T49b: --out lands the exact bytes and reports on stderr, the snapshot contract `set` restores from
+rc=0; TJ_PULL_BODY="$TMP/snap.json" tj_get_cli /dev/null --out "$TMP/snap-cli.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && cmp -s "$TMP/snap-cli.json" "$TMP/snap.json" && [ ! -s "$O" ] \
+   && grep -q "^ok=saved file=templates/product.json out=$TMP/snap-cli.json bytes=" "$E"; then ok
+else bad T49b-cli-get-out "rc=$rc out=$(head -c 120 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# T49c: a pull that succeeds without producing the file is file_not_found on this engine (the CLI
+# exits 0 for an --only pattern that matches nothing)
+rc=0; tj_get_cli /dev/null >"$O" 2>"$E" || rc=$?
+assert T49c-cli-get-missing 5 "$rc" "$E" "error=file_not_found file=templates/product.json theme=2 (engine=themecli)"
+# T49d: a failed pull is cli_pull_failed with the CLI's stderr tail, never an empty body
+rc=0; TJ_PULL_FAIL=1 tj_get_cli /dev/null >"$O" 2>"$E" || rc=$?
+assert T49d-cli-get-pull-failed 5 "$rc" "$E" "error=cli_pull_failed theme=2"
+if grep -q 'could not pull (503)' "$E" && [ ! -s "$O" ]; then ok
+else bad T49d-cli-get-pull-failed-tail "err=$(head -c 160 "$E" | tr '\n' ' ') out=$(head -c 80 "$O")"; fi
 
 # T48: --file vetting. `--file` names a path INSIDE the theme, but themecli materializes it under
 # a mktemp dir (`cp "$FROM" "$tmp/$FILE"`), so a `../` used to escape onto the local filesystem —
@@ -764,6 +849,8 @@ GQLDIR="$TMP/gqlwork"; mkdir -p "$GQLDIR"
 printf 'mutation FndX { thingCreate { id } }\n' > "$GQLDIR/mutation.graphql"
 printf 'query FndY { shop { name } }\n' > "$GQLDIR/query.graphql"
 printf '{"k":"v"}\n' > "$GQLDIR/vars.json"
+# a multi-operation document: --operation must carve out ONE named block plus every fragment
+printf 'query FndA {\n  shop { ...F }\n}\n\nmutation FndB {\n  thingCreate { id }\n}\n\nfragment F on Shop {\n  name\n}\n' > "$GQLDIR/multi.graphql"
 
 cat > "$SHIM/shopify" <<'FAKE'
 #!/usr/bin/env bash
@@ -773,10 +860,20 @@ cat > "$SHIM/shopify" <<'FAKE'
 # FAKE_VERSION set-but-EMPTY is its own fixture (a CLI that prints nothing), so the default only
 # applies when the variable is unset
 if [ "${1:-}" = "version" ]; then echo "${FAKE_VERSION-4.5.2}"; exit 0; fi
+# SHOPIFY_QF_SAVE captures the --query-file the runner hands over — an extracted operation lives
+# in a temp file the runner deletes right after the call
+prev=""; for a in "$@"; do
+  [ "$prev" = "--query-file" ] && [ -n "${SHOPIFY_QF_SAVE:-}" ] && cp "$a" "$SHOPIFY_QF_SAVE"
+  prev="$a"
+done
 case "${FAKE_EXEC_MODE:-garbage}" in
   garbage) echo "unexpected CLI crash output" >&2; exit 1 ;;
   noauth)  echo "No stored app authentication found" >&2; exit 1 ;;
   ok)      echo '{"ok":true}'; exit 0 ;;
+  # the CLI's shape for a server-side GraphQL error: a phrase, then the {"errors":…} JSON boxed in
+  # box-drawing bars; `gqlfail-noisy` is the phrase with nothing parseable behind it
+  gqlfail) printf 'GraphQL operation failed\n│ {"errors":[{"message":"Field x does not exist"}]} │\n' >&2; exit 1 ;;
+  gqlfail-noisy) printf 'GraphQL operation failed\n│ see the logs │\n' >&2; exit 1 ;;
 esac
 FAKE
 cat > "$SHIM/curl" <<'FAKE'
@@ -1261,6 +1358,61 @@ chmod 644 "$UT42"
 if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && ! grep -qi "awk: can't open" "$E"; then ok
 else bad G42-unreadable-toml-no-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 
+# G43: --operation on a multi-operation document — `store execute` has no operationName flag, so
+# the runner hands it ONLY the named block plus every fragment; a query block carved out of a file
+# that also holds a mutation must not be sent with --allow-mutations
+L43="$TMP/sl43"; : > "$L43"; QF43="$TMP/qf43.graphql"; rm -f "$QF43"
+rc=0; GQL_LOG="$L43" SHOPIFY_QF_SAVE="$QF43" FAKE_EXEC_MODE=ok \
+  run_gql --query multi.graphql --operation FndA >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"data":{"ok":true}' "$O" \
+   && [ "$(grep -c 'store execute' "$L43")" -eq 1 ] && ! grep -q -- '--allow-mutations' "$L43" \
+   && grep -q '^query FndA' "$QF43" && grep -q '^fragment F on Shop' "$QF43" && ! grep -q 'FndB' "$QF43"; then ok
+else bad G43-operation-extracted "rc=$rc out=$(head -c 80 "$O") log=$(tr '\n' ';' < "$L43") qf=$(tr '\n' ';' < "$QF43" 2>&1)"; fi
+# G43b: a name the document does not define — the store engine steps aside with the reason and
+# the token engine gets the WHOLE document (the Admin API takes operationName; the runner does not
+# pass one, so the caller sees the same document the file holds)
+L43b="$TMP/sl43b"; : > "$L43b"
+rc=0; M="$TMP/m43b"; GQL_LOG="$L43b" CURL_MARKER="$M" FAKE_EXEC_MODE=ok \
+  run_gql --query multi.graphql --operation Nope >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ -f "$M" ] && ! grep -q 'store execute' "$L43b" \
+   && grep -q "could not extract operation 'Nope'" "$E"; then ok
+else bad G43b-operation-missing-falls-back "rc=$rc out=$(head -c 80 "$O") err=$(head -c 200 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L43b")"; fi
+# G43c: the mutation block from the same document does get --allow-mutations (the detection
+# runs on the EXTRACTED file, not the source document)
+L43c="$TMP/sl43c"; : > "$L43c"
+rc=0; GQL_LOG="$L43c" FAKE_EXEC_MODE=ok run_gql --query multi.graphql --operation FndB >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"data":{"ok":true}' "$O" && grep -q 'store execute.*--allow-mutations' "$L43c"; then ok
+else bad G43c-operation-mutation-flag "rc=$rc out=$(head -c 80 "$O") log=$(tr '\n' ';' < "$L43c")"; fi
+
+# G44: a definitive GraphQL error from `store execute` is an ANSWER, not an availability failure:
+# the boxed {"errors":…} is unboxed onto stdout with exit 0 (the curl engine's HTTP-200 contract),
+# the token engine is never tried — for a mutation that would risk executing it twice — and no
+# store-skip verdict is recorded
+QT44="$TMP/probe-gqlfail"; mkdir -p "$QT44"; L44="$TMP/sl44"; : > "$L44"
+rc=0; M="$TMP/m44"; GQL_TMPDIR="$QT44" GQL_LOG="$L44" CURL_MARKER="$M" FAKE_EXEC_MODE=gqlfail \
+  run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(jq -c '.errors[0].message' "$O" 2>/dev/null)" = '"Field x does not exist"' ] \
+   && [ ! -f "$M" ] && [ "$(grep -c 'store execute' "$L44")" -eq 1 ] \
+   && [ ! -f "$(gql_state "$QT44")/store-skip-test-store.myshopify.com" ]; then ok
+else bad G44-gql-error-unboxed "rc=$rc out=$(head -c 120 "$O") err=$(head -c 160 "$E" | tr '\n' ' ') curl=$([ -f "$M" ] && echo yes || echo no)"; fi
+rc=0; M="$TMP/m44m"; GQL_TMPDIR="$QT44" CURL_MARKER="$M" FAKE_EXEC_MODE=gqlfail \
+  run_gql --query mutation.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"errors"' "$O" && [ ! -f "$M" ] && ! grep -q 'store_execute_failed_mutation' "$E"; then ok
+else bad G44b-gql-error-mutation-no-fallback "rc=$rc out=$(head -c 120 "$O") err=$(head -c 160 "$E" | tr '\n' ' ') curl=$([ -f "$M" ] && echo yes || echo no)"; fi
+# G44c: the phrase without parseable JSON behind it is an unrecognized failure — a query falls back
+# (naming the unparseable box), a mutation stops with the double-execution warning (G1 shape),
+# and neither writes a sticky mark (G40 shape)
+rc=0; M="$TMP/m44n"; GQL_TMPDIR="$QT44" CURL_MARKER="$M" FAKE_EXEC_MODE=gqlfail-noisy \
+  run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ -f "$M" ] \
+   && grep -q 'boxed error JSON could not be parsed' "$E"; then ok
+else bad G44c-gql-error-noisy-query-falls-back "rc=$rc out=$(head -c 80 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+rc=0; M="$TMP/m44nm"; GQL_TMPDIR="$QT44" CURL_MARKER="$M" FAKE_EXEC_MODE=gqlfail-noisy \
+  run_gql --query mutation.graphql >"$O" 2>"$E" || rc=$?
+assert G44d-gql-error-noisy-mutation-stops 3 "$rc" "$E" "store_execute_failed_mutation"
+if [ ! -f "$M" ] && [ ! -f "$(gql_state "$QT44")/store-skip-test-store.myshopify.com" ]; then ok
+else bad G44d-no-fallback-no-mark "curl=$([ -f "$M" ] && echo yes || echo no) mark=$([ -f "$(gql_state "$QT44")/store-skip-test-store.myshopify.com" ] && echo yes || echo no)"; fi
+
 # ---------------------------------------- create-preview-theme.sh cap classifier --
 CAP_RE='theme limit|maximum number of themes|too many themes|may only have [0-9]+ themes'
 if grep -qF "$CAP_RE" "$CPT"; then ok; else bad C1-pattern-in-script "cap regex in the test drifted from the script"; fi
@@ -1279,7 +1431,7 @@ else ok; fi
 # deleted" are assertable, not inferred from the report.
 # NB create-preview-theme.sh prints error= on STDOUT, not stderr — every case greps $O.
 CPTD="$TMP/cpt"; mkdir -p "$CPTD/shim" "$CPTD/repo/assets" "$CPTD/repo/sections" "$CPTD/toml"
-cp "$CPT" "$CPTD/cpt.sh"
+cp "$CPT" "$CPTD/cpt.sh"; cp "$COMMON" "$CPTD/"
 printf 'x{}\n' > "$CPTD/repo/assets/app.css"
 # a real section schema, so the overlay read-back's unknown-type filter has a KNOWN type
 # (main-product, by filename; text, by schema block) to tell apart from an alien one
@@ -1320,7 +1472,7 @@ case "$1 ${2:-}" in
       [ -n "${FAKE_LIST_MARK:-}" ] && : > "$FAKE_LIST_MARK"
       printf '%s\n' "$FAKE_LIST"
     else cat <<'J'
-[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"}]
+[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"[ELC-1] Kever","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]
 J
     fi ;;
   "theme pull")
@@ -1335,6 +1487,8 @@ J
     # the dev-theme settings pull stays healthy
     [ -n "${FAKE_PULL_FAIL_NONDEV:-}" ] && [ "$nid" != "111" ] && { echo "Error: could not pull (503)" >&2; exit 1; }
     p=""; prev=""; for a in "$@"; do [ "$prev" = "--path" ] && p="$a"; prev="$a"; done
+    # FAKE_PULL_EMPTY: the pull exits 0 having written NOTHING — an id with no customizer content
+    [ -n "${FAKE_PULL_EMPTY:-}" ] && { mkdir -p "$p"; exit 0; }
     mkdir -p "$p/config"; printf '{"current":{"pulled":1}}\n' > "$p/config/settings_data.json"
     # FAKE_PULL_TPL: the theme also carries a product template referencing a block type.
     # FAKE_PULL_BANNER prefixes it with the auto-generated /*…*/ header Shopify stamps onto every
@@ -1368,6 +1522,12 @@ J
     fi
     [ "$is_only" -eq 1 ] && [ -n "${FAKE_PUSH_ONLY_FAIL:-}" ] && { printf '%s\n' "$FAKE_PUSH_ONLY_FAIL" >&2; exit 1; }
     [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_CODE_FAIL:-}" ] && { printf '%s\n' "$FAKE_PUSH_CODE_FAIL" >&2; exit 1; }
+    # CPT_PUSH_PATH_SAVE keeps a copy of the assembled code dir a CODE push received — the script
+    # deletes that temp dir on exit, so what it contained is only observable from inside the push
+    if [ "$is_only" -eq 0 ] && [ -n "${CPT_PUSH_PATH_SAVE:-}" ]; then
+      p=""; prev=""; for a in "$@"; do [ "$prev" = "--path" ] && p="$a"; prev="$a"; done
+      [ -n "$p" ] && cp -R "$p" "$CPT_PUSH_PATH_SAVE"
+    fi
     # FAKE_PUSH_JSON: the whole --json answer, verbatim — for a payload the default printf cannot
     # express (a gid-shaped theme id above all). Same gotcha: the value is never a ${…:-default}.
     [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_JSON:-}" ] && { printf '%s\n' "$FAKE_PUSH_JSON"; exit 0; }
@@ -1443,6 +1603,14 @@ run_cpt() { # run_cpt <log-file> <env=val…> -- <args…>   ; stdout -> $O, std
      "$BASH_BIN" "$CPTD/cpt.sh" "$@") >"$O" 2>"$E"
 }
 cpt_calls() { grep -c "argv=$1" "$2" 2>/dev/null || true; }
+
+# P0: the script sources _shopify-common.sh from its own dir — a copy without it stops with the
+# stdout error= contract (exit 1) before the CLI is touched, so the fixture copy above is load-bearing
+LONE_CPT="$TMP/lonecpt"; mkdir -p "$LONE_CPT"; cp "$CPT" "$LONE_CPT/cpt.sh"
+rc=0; L="$TMP/cpt0"; : > "$L"
+(cd "$CPTD/repo" && PATH="$CPTD/shim:$PATH" CPT_LOG="$L" "$BASH_BIN" "$LONE_CPT/cpt.sh" info) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 1 ] && grep -q "^error=common_lib_not_found path=$LONE_CPT/_shopify-common.sh$" "$O" && [ ! -s "$L" ]; then ok
+else bad P0-common-lib-missing "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # P1 (bug): `refresh --theme <live id>` must be refused BEFORE any push — a mistyped id
 # otherwise ships branch code onto the storefront
@@ -1611,8 +1779,8 @@ else bad P9b-theme-limit-boxed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # P10 (pin): refresh onto a non-live theme pushes CODE only and never touches settings
 rc=0; L="$TMP/cpt10"; : > "$L"
-run_cpt "$L" NO=1 -- refresh --theme 111 --no-build || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O" \
+run_cpt "$L" NO=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" \
    && [ "$(cpt_calls 'theme pull' "$L")" -eq 0 ] \
    && ! grep -q -- '--only' "$L"; then ok
 else bad P10-refresh-code-only "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
@@ -1625,12 +1793,48 @@ if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^reused=false$' 
    && grep -q 'argv=theme push --store acme-dev --unpublished --theme PREVIEW-NEW ' "$L"; then ok
 else bad P13-reuse-no-match "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
 
-# P11 (pin): the live guard is a POSITIVE match — when `theme list` itself fails the role is
-# unknown and the refresh proceeds, so a listing outage cannot brick every preview refresh
+# P11 (bug): when `theme list` itself fails the role is unknown — an id no workspace records as
+# session-theme is REFUSED (the live-theme guard cannot clear it), nothing pushed
 rc=0; L="$TMP/cpt11"; : > "$L"
-run_cpt "$L" FAKE_LIST_FAIL=1 -- refresh --theme 111 --no-build || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O" && ! grep -q 'error=' "$O"; then ok
-else bad P11-list-outage-not-fatal "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+run_cpt "$L" FAKE_LIST_FAIL=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=refresh_unverifiable theme=555 store=acme-dev' "$O" \
+   && grep -q '^hint=.*--allow-unverified' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P11-list-outage-refresh-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P11b: --allow-unverified is the developer's override — the push proceeds without the store check
+rc=0; L="$TMP/cpt11b"; : > "$L"
+run_cpt "$L" FAKE_LIST_FAIL=1 -- refresh --theme 555 --no-build --allow-unverified || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && ! grep -q 'error=' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad P11b-list-outage-allow-unverified "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P11c/P11d: an id some workspace under .claude/tasks records as `session-theme:` is the routine
+# refresh target and proceeds under the outage without any flag — matched as a whole id, so a
+# recorded 555 does not clear 5550
+mkdir -p "$CPTD/repo/.claude/tasks/ELC-1"
+printf -- '- 2026-09-06 session-theme: 555 ([ELC-1] Kever) https://acme-dev.myshopify.com/?preview_theme_id=555\n' > "$CPTD/repo/.claude/tasks/ELC-1/notes.md"
+rc=0; L="$TMP/cpt11c"; : > "$L"
+run_cpt "$L" FAKE_LIST_FAIL=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad P11c-list-outage-session-theme-proceeds "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/cpt11d"; : > "$L"
+run_cpt "$L" FAKE_LIST_FAIL=1 -- refresh --theme 5550 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=refresh_unverifiable theme=5550 ' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P11d-list-outage-other-id-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# P11e/P11f (bug): valid JSON naming NO theme is an outage too — a store always lists its live
+# theme — so it must not clear every id through the "absent id proceeds" branch; the recorded
+# session theme still refreshes
+rc=0; L="$TMP/cpt11e"; : > "$L"
+run_cpt "$L" FAKE_LIST='{"themes":[]}' -- refresh --theme 5550 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=refresh_unverifiable theme=5550 ' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P11e-empty-listing-refresh-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt11f"; : > "$L"
+run_cpt "$L" FAKE_LIST='[]' -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad P11f-empty-listing-session-theme-proceeds "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rm -rf "$CPTD/repo/.claude"
 
 # P12 (pin): a CRLF toml — the quoted value stops at the closing quote and a bare one drops the CR,
 # so the digits assertion cannot turn a Windows-edited config into a hard failure
@@ -1676,7 +1880,7 @@ else bad P15-pull-still-running-at-build-end "rc=$rc out=$(tr '\n' ';' < "$O") e
 # before the JSON — the shape json_field is written tolerantly for) must not disarm the live-theme
 # guard. A positive match is impossible on a document jq cannot parse, so "no role" means UNKNOWN.
 BANNER_LIST='Upgrade available: run `npm i -g @shopify/cli`
-[{"id":999,"name":"Live Theme","role":"live"},{"id":111,"name":"[DEV] Kever","role":"development"}]'
+[{"id":999,"name":"Live Theme","role":"live"},{"id":111,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"[ELC-1] Kever","role":"unpublished"}]'
 rc=0; L="$TMP/cpt16"; : > "$L"
 run_cpt "$L" FAKE_LIST="$BANNER_LIST" -- refresh --theme 999 --no-build || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=live_theme_write_refused' "$O" \
@@ -1685,21 +1889,21 @@ else bad P16-banner-live-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') c
 
 # P16b: the banner does not break the ordinary lookups either
 rc=0; L="$TMP/cpt16b"; : > "$L"
-run_cpt "$L" FAKE_LIST="$BANNER_LIST" -- refresh --theme 111 --no-build || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O"; then ok
+run_cpt "$L" FAKE_LIST="$BANNER_LIST" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
 else bad P16b-banner-nonlive-ok "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # P16d (bug): noise glued to the JSON's OWN line (an oclif spinner artifact `⠋ Fetching themes\r[…`,
 # stray ANSI under FORCE_COLOR) — the salvage is byte-anchored, so this parses instead of turning
 # into a cli_list_unreadable lockout on a perfectly healthy store
 rc=0; L="$TMP/cpt16d"; : > "$L"
-run_cpt "$L" FAKE_LIST='Fetching themes... [{"id":999,"name":"Live Theme","role":"live"},{"id":111,"name":"[DEV] Kever","role":"development"}]' \
-  -- refresh --theme 111 --no-build || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O"; then ok
+run_cpt "$L" FAKE_LIST='Fetching themes... [{"id":999,"name":"Live Theme","role":"live"},{"id":111,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"[ELC-1] Kever","role":"unpublished"}]' \
+  -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
 else bad P16d-sameline-noise-salvaged "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
 
-# P16c: a listing that came back and is not JSON at all is refused, not waved through — unlike an
-# EMPTY listing (P11: the call failed, role unknown, proceed) this one is output we cannot read
+# P16c: a listing that came back and is not JSON at all is refused as unreadable — a different
+# refusal from the EMPTY listing (P11: the call failed, refresh_unverifiable), and one no flag lifts
 rc=0; L="$TMP/cpt16c"; : > "$L"
 run_cpt "$L" FAKE_LIST='<html>503 Service Unavailable</html>' -- refresh --theme 111 --no-build || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=cli_list_unreadable' "$O" \
@@ -1723,6 +1927,19 @@ run_cpt "$L" FAKE_LIST='[{"id":"gid://shopify/OnlineStoreTheme/700","name":"PREV
 if [ "$rc" -ne 0 ] && grep -q 'error=unusable_theme_id' "$O" \
    && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
 else bad P17b-nonnumeric-id "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P17c (bug): a listing that never ANSWERED on the --reuse path — "no match" out of nothing used to
+# fall into the create path and stack a second same-named theme, which ambiguous_name then blocks
+# for good. Refused; --allow-unverified (P17d) is the developer's way through.
+rc=0; L="$TMP/cpt17c"; : > "$L"
+run_cpt "$L" FAKE_LIST_FAIL=1 -- create --name "PREVIEW-X" --reuse --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=reuse_unverifiable name="PREVIEW-X"' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P17c-list-outage-reuse-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+rc=0; L="$TMP/cpt17d"; : > "$L"
+run_cpt "$L" FAKE_LIST_FAIL=1 -- create --name "PREVIEW-X" --reuse --no-build --allow-unverified || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^reused=false$' "$O"; then ok
+else bad P17d-list-outage-reuse-allow-unverified "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # P18 (pin): every alternative of the drift pattern has its own fixture, so the pattern cannot be
 # narrowed back without a red case; and a non-drift failure still reports a REAL cause= line, never
@@ -1833,6 +2050,13 @@ run_cpt "$L" TOML_PATH="$CPTD/toml/notoken.toml" SHOPIFY_CLI_THEME_TOKEN=shptka_
 if [ "$rc" -eq 0 ] && grep -q '^token=shptka_from_env$' "$L"; then ok
 else bad P20b-env-token-fallback "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
 
+# P20c: no token anywhere — the file scan matches nothing, and that no-match must surface as the
+# script's own "no access token" line, never as a silent set -e abort inside the shared helper
+rc=0; L="$TMP/cpt20c"; : > "$L"
+run_cpt "$L" TOML_PATH="$CPTD/toml/notoken.toml" -- info || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=no access token' "$O" && [ ! -s "$L" ]; then ok
+else bad P20c-no-token "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
 # P21 (bug): `shopify --store` documents the https:// URL form as valid and real tomls carry it —
 # it is normalized, not refused
 printf '[environments.development]\nstore = "https://acme-dev.myshopify.com"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$CPTD/toml/url.toml"
@@ -1855,7 +2079,7 @@ else bad P22-refresh-name-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') 
 # `null` (or a role key renamed by list-shape drift) would otherwise satisfy neither guard branch
 # and wave through every target, the published theme included
 rc=0; L="$TMP/cpt23"; : > "$L"
-run_cpt "$L" FAKE_LIST='[{"id":111,"name":"[DEV] Kever"}]' -- refresh --theme 111 --no-build || rc=$?
+run_cpt "$L" FAKE_LIST='[{"id":555,"name":"X"}]' -- refresh --theme 555 --no-build || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=live_role_unreadable' "$O" \
    && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
 else bad P23-roleless-id-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
@@ -1863,9 +2087,170 @@ else bad P23-roleless-id-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') c
 # P23b (pin): an id ABSENT from a readable listing still proceeds — absence is what a fresh or
 # paginated-away theme looks like, and only found-but-roleless is the drift shape P23 refuses
 rc=0; L="$TMP/cpt23b"; : > "$L"
-run_cpt "$L" FAKE_LIST='[{"id":222,"name":"Other","role":"unpublished"}]' -- refresh --theme 111 --no-build || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O"; then ok
+run_cpt "$L" FAKE_LIST='[{"id":222,"name":"Other","role":"unpublished"}]' -- refresh --theme 333 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O"; then ok
 else bad P23b-absent-id-proceeds "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# ------------------------------ create-preview-theme.sh shared dev theme guard --
+# P54 (bug): `refresh --theme <the toml's theme id>` overwrote the SHARED dev theme's code — the id
+# the toml names as the settings source is never a push target unless a workspace records it as
+# this stream's session theme. Refused before the build, nothing pushed.
+rc=0; L="$TMP/cpt54"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme 111 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=dev_theme_write_refused theme=111 name=\[DEV\] Kever' "$O" \
+   && grep -q '^hint=.*session-theme: 111' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P54-dev-theme-refresh-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+
+# P54b (bug): the name path — `--reuse` resolving to the dev theme's own name pushed code onto it
+# and then overlaid its settings onto itself
+rc=0; L="$TMP/cpt54b"; : > "$L"
+run_cpt "$L" NO=1 -- create --name "[DEV] Kever" --reuse --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=dev_theme_write_refused theme=111 name=\[DEV\] Kever' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P54b-dev-theme-reuse-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P54c: --allow-dev-theme is the one opt-out — a deliberate overwrite of the shared theme
+rc=0; L="$TMP/cpt54c"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme 111 --no-build --allow-dev-theme || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad P54c-dev-theme-allow-flag "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P54c2 (blocker): --allow-unverified clears the listing-outage refusal ONLY — the dev-theme guard
+# reads the toml, not the store, so an outage plus that flag must still refuse the shared theme
+rc=0; L="$TMP/cpt54c2"; : > "$L"
+run_cpt "$L" FAKE_LIST_FAIL=1 -- refresh --theme 111 --no-build --allow-unverified || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=dev_theme_write_refused theme=111' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P54c2-dev-theme-not-cleared-by-allow-unverified "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P54c3: `pin` takes neither flag — it pushes nothing, so there is nothing for them to override
+rc=0; L="$TMP/cpt54c3"; : > "$L"
+run_cpt "$L" NO=1 -- pin --theme 555 --allow-dev-theme || rc=$?
+OUT54="$(cat "$O")"
+rc2=0; run_cpt "$L" NO=1 -- pin --theme 555 --allow-unverified || rc2=$?
+if [ "$rc" -ne 0 ] && printf '%s' "$OUT54" | grep -q 'error=unknown arg: --allow-dev-theme' \
+   && [ "$rc2" -ne 0 ] && grep -q 'error=unknown arg: --allow-unverified' "$O" && [ ! -s "$L" ]; then ok
+else bad P54c3-pin-rejects-flags "rc=$rc rc2=$rc2 out=$OUT54 out2=$(tr '\n' ';' < "$O")"; fi
+
+# P54d/P54e (pin): after a pin the toml's `theme =` IS the session theme — the shared dev id moved
+# onto the `# fnd:superseded` marker above it. The session id refreshes; the superseded one is
+# still the shared theme and still refused.
+FP54="$CPTD/toml/pinned.toml"
+printf '[environments.development]\nstore = "acme-dev"\n# theme = "111"   # dev theme  # fnd:superseded\ntheme = "555"   # dev theme\npassword = "shptka_fixture1234"\n' > "$FP54"
+rc=0; L="$TMP/cpt54d"; : > "$L"
+run_cpt "$L" TOML_PATH="$FP54" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
+else bad P54d-pinned-toml-session-refresh-ok "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/cpt54e"; : > "$L"
+run_cpt "$L" TOML_PATH="$FP54" -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=dev_theme_write_refused theme=111' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P54e-pinned-toml-superseded-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P54f/P54f2 (bug): a HAND-written session id (pin reported pin=unchanged — no marker, no tag) is
+# indistinguishable from the shared theme in the toml; only the workspace's `session-theme:` line
+# tells them apart. Recorded → proceeds; unrecorded → refused with the record-first hint.
+FH54="$CPTD/toml/hand.toml"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "555"\npassword = "shptka_fixture1234"\n' > "$FH54"
+mkdir -p "$CPTD/repo/.claude/tasks/ELC-1"
+printf -- '- 2026-09-06 worktree `x` on branch `y`, dev-port: 9293\n- 2026-09-06 session-theme: 555 ([ELC-1] Kever) https://acme-dev.myshopify.com/?preview_theme_id=555\n' > "$CPTD/repo/.claude/tasks/ELC-1/notes.md"
+rc=0; L="$TMP/cpt54f"; : > "$L"
+run_cpt "$L" TOML_PATH="$FH54" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
+else bad P54f-hand-pinned-recorded-ok "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rm -rf "$CPTD/repo/.claude"
+rc=0; L="$TMP/cpt54f2"; : > "$L"
+run_cpt "$L" TOML_PATH="$FH54" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=dev_theme_write_refused theme=555' "$O" \
+   && grep -q '^hint=.*session-theme: 555' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P54f2-hand-pinned-unrecorded-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P54g (pin): a session-owned appended line (`# fnd:session-theme` tag) means the block never had a
+# `theme =` of its own — there is no shared dev id in this file to protect
+FG54="$CPTD/toml/tagged.toml"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "555" # fnd:session-theme\npassword = "shptka_fixture1234"\n' > "$FG54"
+rc=0; L="$TMP/cpt54g"; : > "$L"
+run_cpt "$L" TOML_PATH="$FG54" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
+else bad P54g-tagged-line-no-dev-theme "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P54h: the tag is matched by line shape — a comment merely mentioning it does not disarm the guard
+FT54="$CPTD/toml/tagcomment.toml"
+printf '[environments.development]\n# see fnd:session-theme in the docs\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FT54"
+rc=0; L="$TMP/cpt54h"; : > "$L"
+run_cpt "$L" TOML_PATH="$FT54" -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=dev_theme_write_refused theme=111' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P54h-tag-in-comment-does-not-disarm "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P54i (bug): a multi-block toml pinned in a block OTHER than the one supplying the settings source
+# — the first-marker reader guarded 333 only and left the shared dev theme 111 open. Real pin run,
+# so the marker shape is the one pin_toml writes; every superseded id AND the settings source refuse.
+FI54="$CPTD/toml/twoblock.toml"
+printf '[environments.dev]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n\n[environments.staging]\nstore = "acme-dev"\ntheme = "333"\n' > "$FI54"
+rc=0; L="$TMP/cpt54i"; : > "$L"
+run_cpt "$L" TOML_PATH="$FI54" -- pin --theme 555 --env staging || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^superseded_theme_id=333$' "$O" && grep -q 'fnd:superseded' "$FI54"; then ok
+else bad P54i-two-block-pin-setup "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+for id in 111 333; do
+  rc=0; L="$TMP/cpt54i$id"; : > "$L"
+  run_cpt "$L" TOML_PATH="$FI54" -- refresh --theme "$id" --no-build || rc=$?
+  if [ "$rc" -ne 0 ] && grep -q "^error=dev_theme_write_refused theme=$id" "$O" \
+     && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+  else bad "P54i-two-block-refused-$id" "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+done
+rc=0; L="$TMP/cpt54i555"; : > "$L"
+run_cpt "$L" TOML_PATH="$FI54" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
+else bad P54i-two-block-session-ok "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P54j (bug): the tagged branch — a theme-less dev block gets `theme = "555" # fnd:session-theme`
+# appended while the settings source (777) comes from another block; the tag disarmed the guard
+FJ54="$CPTD/toml/prodfirst.toml"
+printf '[environments.production]\nstore = "acme-dev"\ntheme = "777"\n\n[environments.dev]\nstore = "acme-dev"\npassword = "shptka_fixture1234"\n' > "$FJ54"
+rc=0; L="$TMP/cpt54j"; : > "$L"
+run_cpt "$L" TOML_PATH="$FJ54" -- pin --theme 555 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'theme = "555" # fnd:session-theme' "$FJ54"; then ok
+else bad P54j-tagged-pin-setup "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/cpt54j777"; : > "$L"
+run_cpt "$L" TOML_PATH="$FJ54" -- refresh --theme 777 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=dev_theme_write_refused theme=777' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P54j-tagged-other-block-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt54j555"; : > "$L"
+run_cpt "$L" TOML_PATH="$FJ54" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
+else bad P54j-tagged-session-ok "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P54k: a COMMENTED tagged line (a pin dupe commented out) is not the settings source's tag —
+# same uncommented-only test as pin_toml's own `tagged`
+FK54="$CPTD/toml/tagcommented.toml"
+printf '[environments.development]\nstore = "acme-dev"\n# theme = "555" # fnd:session-theme\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FK54"
+rc=0; L="$TMP/cpt54k"; : > "$L"
+run_cpt "$L" TOML_PATH="$FK54" -- refresh --theme 111 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=dev_theme_write_refused theme=111' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P54k-commented-tag-does-not-disarm "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P54l: a marker whose value is a NAME still marks the block as pinned — the line below it is the
+# session theme, not a fallback to "the settings source is the dev theme"
+FL54="$CPTD/toml/namemarker.toml"
+printf '[environments.development]\nstore = "acme-dev"\n# theme = "Kever Dev"  # fnd:superseded\ntheme = "555"\npassword = "shptka_fixture1234"\n' > "$FL54"
+rc=0; L="$TMP/cpt54l"; : > "$L"
+run_cpt "$L" TOML_PATH="$FL54" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O"; then ok
+else bad P54l-name-marker-session-ok "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P58: a leading zero would clear every string-compared guard (listing, dev theme, notes) and still
+# reach `theme push --theme 0111` — refused before the CLI is called, on refresh and pin alike
+rc=0; L="$TMP/cpt58"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme 0111 --no-build || rc=$?
+OUT58="$(cat "$O")"
+rc2=0; run_cpt "$L" NO=1 -- pin --theme 0111 || rc2=$?
+if [ "$rc" -ne 0 ] && [ "$rc2" -ne 0 ] && printf '%s' "$OUT58" | grep -q "^error=invalid_theme_id theme='0111'" \
+   && grep -q "^error=invalid_theme_id theme='0111'" "$O" && [ ! -s "$L" ]; then ok
+else bad P58-leading-zero-id-refused "rc=$rc rc2=$rc2 out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # ------------------------------ create-preview-theme.sh throttle retry + orphan reap --
 # Shopify rate-limits per store+token (a running `shopify theme dev` draws on the SAME budget), so
@@ -1927,8 +2312,8 @@ else bad P27-overlay-throttle-cause "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' '
 # P28 (pin): refresh shares the retry loop — one throttled 429, then success on the second attempt
 rc=0; L="$TMP/cpt28"; : > "$L"; CNT="$TMP/cpt28.count"; rm -f "$CNT"
 run_cpt "$L" FND_CPT_THROTTLE_WAITS="0 0" FAKE_PUSH_THROTTLE_N=1 FAKE_PUSH_COUNT="$CNT" \
-  -- refresh --theme 111 --no-build || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^theme_id=111$' "$O" \
+  -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" \
    && [ "$(cpt_calls 'theme push' "$L")" -eq 2 ]; then ok
 else bad P28-refresh-throttle-retry "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
 
@@ -2021,6 +2406,83 @@ if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && grep -q '^reused=true$' "
    && grep -q '^warn=overlay_file_dropped file=templates/product.json unknown_types=delivery_banner$' "$O" \
    && [ "$(cpt_calls 'theme delete' "$L")" -eq 0 ]; then ok
 else bad P53i-reuse-verified "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P55 (bug): a dev-theme pull that exits 0 with NO settings file used to push nothing and read
+# back as "nothing missing" — overlay=verified on a preview carrying default settings. On a fresh
+# create that is a failed overlay: the code-only theme is deleted and named, like any pull failure
+rc=0; L="$TMP/cpt55"; : > "$L"
+run_cpt "$L" FAKE_PULL_EMPTY=1 -- create --name "PREVIEW-E" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=overlay_pull_failed$' "$O" \
+   && grep -q '^cause=.*0 \*\.json' "$O" && grep -q '^created_theme=222$' "$O" \
+   && grep -q '^created_theme_deleted=yes$' "$O" && ! grep -q '^overlay=' "$O" \
+   && [ "$(grep -c 'argv=theme push.*--only' "$L")" -eq 0 ] \
+   && [ "$(grep -c 'argv=theme delete --store acme-dev --theme 222 --force' "$L")" -eq 1 ]; then ok
+else bad P55-overlay-empty-create "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P55b (bug): on --reuse deletion is off the table — the theme keeps its previous settings, and
+# the run says so as overlay=empty + warn=overlay_empty instead of a vacuous verified
+rc=0; L="$TMP/cpt55b"; : > "$L"
+run_cpt "$L" FAKE_PULL_EMPTY=1 -- create --name "[ELC-1] Kever" --reuse --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && grep -q '^reused=true$' "$O" \
+   && grep -q '^overlay=empty$' "$O" && grep -q '^warn=overlay_empty dev_theme_id=111 ' "$O" \
+   && ! grep -q 'overlay_file_dropped\|overlay_unverified' "$O" \
+   && [ "$(grep -c 'argv=theme push.*--only' "$L")" -eq 0 ] \
+   && [ "$(cpt_calls 'theme delete' "$L")" -eq 0 ]; then ok
+else bad P55b-overlay-empty-reuse "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+
+# P56: the repo's .shopifyignore rides along into the pushed code dir MINUS its locale lines — a
+# `locales/*.json` exclude (plus its `!` negations) would leave a fresh preview with no locale
+# files at all; every other exclude stays. The fixture file is removed afterwards: every later
+# cpt case shares this repo.
+printf 'locales/*.json\n!locales/en.default.json\nconfig/settings_data.json\n' > "$CPTD/repo/.shopifyignore"
+rc=0; L="$TMP/cpt56"; : > "$L"; SAVE56="$TMP/cpt56.push"; rm -rf "$SAVE56"
+run_cpt "$L" CPT_PUSH_PATH_SAVE="$SAVE56" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && [ -f "$SAVE56/assets/app.css" ] \
+   && [ "$(cat "$SAVE56/.shopifyignore")" = 'config/settings_data.json' ] \
+   && [ "$(cat "$CPTD/repo/.shopifyignore")" = "$(printf 'locales/*.json\n!locales/en.default.json\nconfig/settings_data.json')" ]; then ok
+else bad P56-shopifyignore-locales-stripped "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') pushed=$(cat "$SAVE56/.shopifyignore" 2>&1 | tr '\n' ';')"; fi
+rm -f "$CPTD/repo/.shopifyignore"
+# P56b: no .shopifyignore in the repo → none is invented in the pushed dir
+rc=0; L="$TMP/cpt56b"; : > "$L"; SAVE56B="$TMP/cpt56b.push"; rm -rf "$SAVE56B"
+run_cpt "$L" CPT_PUSH_PATH_SAVE="$SAVE56B" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && [ -f "$SAVE56B/assets/app.css" ] && [ ! -e "$SAVE56B/.shopifyignore" ]; then ok
+else bad P56b-no-shopifyignore "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') ls=$(ls -a "$SAVE56B" 2>&1 | tr '\n' ' ')"; fi
+
+# P57: the cleanup delete itself failing is reported as created_theme_deleted=failed — the reader
+# acts on that value (the theme is still burning a slot), so it must never read `yes` or vanish.
+# Both producers: the overlay failure path on a fresh create (P4 shape) …
+rc=0; L="$TMP/cpt57"; : > "$L"
+run_cpt "$L" FAKE_PULL_FAIL=1 FAKE_DELETE_FAIL=1 -- create --name "PREVIEW-Z" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=overlay_pull_failed' "$O" \
+   && grep -q '^created_theme=222$' "$O" && grep -q '^created_theme_deleted=failed$' "$O" \
+   && [ "$(cpt_calls 'theme delete --store acme-dev --theme 222 --force' "$L")" -eq 1 ]; then ok
+else bad P57-delete-failed-overlay "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+# … and the throttled-create orphan reap (P25 shape)
+rc=0; L="$TMP/cpt57b"; : > "$L"; MK="$TMP/cpt57b.mark"; rm -f "$MK"
+run_cpt "$L" FND_CPT_THROTTLE_WAITS="0" FAKE_PUSH_CODE_FAIL='│  Throttled' FAKE_LIST_MARK="$MK" FAKE_DELETE_FAIL=1 \
+  FAKE_LIST='[{"id":999,"name":"Live Theme","role":"live"}]' \
+  FAKE_LIST2='[{"id":999,"name":"Live Theme","role":"live"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
+  -- create --name "PREVIEW-T" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=push_code_failed' "$O" && grep -q 'cause=throttled' "$O" \
+   && grep -q '^created_theme=777$' "$O" && grep -q '^created_theme_deleted=failed$' "$O" \
+   && [ "$(cpt_calls 'theme delete --store acme-dev --theme 777 --force' "$L")" -eq 1 ]; then ok
+else bad P57b-delete-failed-reap "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# N1-N3: a flag given as the LAST arg with no value — each script's need_val stops before any CLI
+# or runner call, on its own channel (theme-json/gql: stderr exit 2; create-preview-theme: the
+# stdout error= contract, exit 1)
+rc=0; L="$TMP/n1"; : > "$L"; M="$TMP/n1.marker"; rm -f "$M"
+TJ_GQL_LOG="$L" TJ_CLI_MARKER="$M" PATH="$TJSHIM:$PATH" "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme >"$O" 2>"$E" || rc=$?
+assert N1-theme-json-need-val 2 "$rc" "$E" "error=missing_value flag=--theme"
+if [ ! -s "$L" ] && [ ! -e "$M" ]; then ok; else bad N1-no-engine "an engine ran before the usage error"; fi
+rc=0; L="$TMP/n2"; : > "$L"; M="$TMP/n2.marker"; rm -f "$M"
+GQL_LOG="$L" CURL_MARKER="$M" run_gql --query >"$O" 2>"$E" || rc=$?
+assert N2-gql-need-val 2 "$rc" "$E" "error=missing_value flag=--query"
+if [ ! -s "$L" ] && [ ! -e "$M" ]; then ok; else bad N2-no-engine "an engine ran before the usage error"; fi
+rc=0; L="$TMP/n3"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=missing value for --theme$' "$O" && [ ! -s "$L" ]; then ok
+else bad N3-cpt-need-val "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # ------------------------------------- create-preview-theme.sh session-theme pin --
 # `pin` (and `--pin-toml`) REWRITE the developer's shopify.theme.toml, so every case below gets
@@ -2225,9 +2687,9 @@ if [ "$rc" -ne 0 ] && grep -q 'error=theme_not_found' "$O" && [ "$(fhash "$FM")"
 else bad P36-pin-unknown-id "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
 
 # P37 (blocker): a `theme list` that never answered leaves the id UNVERIFIABLE — and unlike a
-# refresh (one push, P11 lets it through), a pin PERSISTS in the config, so fail-open would
-# leave a typo pinned until a human notices. Standalone `pin` refuses and changes nothing;
-# retry when the store answers.
+# refresh (one push; a recorded session theme or --allow-unverified gets through, P11), a pin
+# PERSISTS in the config, so fail-open would leave a typo pinned until a human notices.
+# Standalone `pin` refuses and changes nothing; retry when the store answers.
 FO="$CPTD/toml/pin-outage.toml"
 printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FO"
 H37="$(fhash "$FO")"
@@ -2240,9 +2702,10 @@ else bad P37-pin-outage-refused "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v
 # P37b: create/refresh --pin-toml hold a REAL theme by pin time, so the same outage must not
 # cost the caller the pin (or the id) — the pin lands, but `warn=pin_unvetted` says it was
 # never checked against the store, printed BEFORE the pin keys so a caller acting on pin=
-# has already seen it
+# has already seen it. (An unrecorded id needs --allow-unverified to get past
+# refresh_unverifiable at all — P11.)
 rc=0; L="$TMP/cpt37b"; : > "$L"
-run_cpt "$L" TOML_PATH="$FO" FAKE_LIST_FAIL=1 -- refresh --theme 222 --no-build --pin-toml || rc=$?
+run_cpt "$L" TOML_PATH="$FO" FAKE_LIST_FAIL=1 -- refresh --theme 222 --no-build --pin-toml --allow-unverified || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^warn=pin_unvetted$' "$O" \
    && grep -q '^pin=rewritten$' "$O" && grep -qx 'theme = "222"' "$FO" \
    && [ "$(grep -n '^warn=pin_unvetted$' "$O" | cut -d: -f1)" -lt "$(grep -n '^pinned_toml=' "$O" | cut -d: -f1)" ]; then ok
@@ -3252,9 +3715,7 @@ wt_key() { grep "^$1=" "$O" | head -1 | cut -d= -f2- ; }
 
 # A REAL listener on 127.0.0.1:$1, polled until it accepts — the port probe under test talks to
 # the loopback stack, so nothing short of an open socket exercises it.
-wt_listen() {
-  node -e 'require("net").createServer().listen(Number(process.argv[1]),"127.0.0.1")' "$1" &
-  WPID=$!
+wt_wait_port() { # blocks until 127.0.0.1:$1 accepts (5 s cap)
   local i=0
   while [ "$i" -lt 50 ] && ! node -e '
     const s=require("net").connect(Number(process.argv[1]),"127.0.0.1");
@@ -3262,9 +3723,23 @@ wt_listen() {
     sleep 0.1; i=$((i + 1))
   done
 }
+wt_listen() {
+  node -e 'require("net").createServer().listen(Number(process.argv[1]),"127.0.0.1")' "$1" &
+  WPID=$!
+  wt_wait_port "$1"
+}
+wt_listen2() { # a second listener alongside wt_listen's (the no_free_port case needs two)
+  node -e 'require("net").createServer().listen(Number(process.argv[1]),"127.0.0.1")' "$1" &
+  WPID2=$!
+  wt_wait_port "$1"
+}
 wt_unlisten() {
-  [ -n "$WPID" ] || return 0
-  kill "$WPID" 2>/dev/null; wait "$WPID" 2>/dev/null; WPID=""
+  local p
+  for p in "$WPID" "$WPID2"; do
+    [ -n "$p" ] || continue
+    kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
+  done
+  WPID=""; WPID2=""
 }
 # The port the script would pick next: the lowest in its range no workspace has recorded yet. A
 # case that wants the live probe tested has to occupy a port the recorded-port bookkeeping does
@@ -3293,9 +3768,16 @@ mkdir -p "$WTR/theme/.claude"
 printf '{"permissions":{"allow":["Bash(ls:*)"]}}\n' > "$WTR/theme/.claude/settings.local.json"
 # npm must never really run (no network, and the fixture deliberately has no package.json);
 # the shim logs every call so "npm never ran" is assertable rather than inferred.
+# WT_NPM_WAIT holds `npm ci` until that file exists (a setup frozen mid-install, W31);
+# WT_NPM_NOTES logs how many `dev-port:` lines that notes file carries at install time (W31b).
 cat > "$WTR/shim/npm" <<'FAKE'
 #!/usr/bin/env bash
 printf 'argv=%s\n' "$*" >> "${WT_NPM_LOG:-/dev/null}"
+if [ -n "${WT_NPM_WAIT:-}" ]; then
+  i=0; while [ ! -f "$WT_NPM_WAIT" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+fi
+[ -z "${WT_NPM_NOTES:-}" ] || \
+  printf 'dev-port-lines=%s\n' "$(grep -c 'dev-port:' "$WT_NPM_NOTES" 2>/dev/null)" >> "${WT_NPM_LOG:-/dev/null}"
 exit 0
 FAKE
 chmod +x "$WTR/shim/npm"
@@ -3656,7 +4138,7 @@ rc=0; (cd "$WTR/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/ncsh
   "$BASH_BIN" "$WTS_NP" NOP-1) >"$O" 2>"$E" || rc=$?
 wt_nop_port="$(wt_key dev_port)"
 if [ "$rc" -eq 0 ] && grep -q '^DEVTCP_MSG="fnd-sim' "$WTS_NP" \
-   && grep -q '^warn=port_probe_unavailable' "$O" \
+   && [ "$(grep -c '^warn=port_probe_unavailable' "$O")" -eq 1 ] \
    && grep -qF 'shopify theme dev --port' "$O" \
    && printf '%s' "$wt_nop_port" | grep -qE '^9[0-9]+$' && [ -d "$WTR/theme-NOP-1" ]; then ok
 else bad W26-port-probe-unavailable "rc=$rc port=$wt_nop_port out=$(tr '\n' ';' < "$O")"; fi
@@ -3873,6 +4355,74 @@ if [ "$rc" -eq 0 ] && [ ! -L "$WTR/mig6/theme-pre/.claude/tasks" ] \
    && [ -L "$WTR/mig6/theme-pre/.claude/fnd" ]; then ok
 else bad W30e-worktree-own-tasks-kept "rc=$rc pre=$(ls -l "$WTR/mig6/theme-pre/.claude" 2>&1 | tr '\n' ';')"; fi
 
+# W31 (bug): two setups running at once used to share a port — the pick happened before
+# `worktree add` and the `dev-port:` line landed only after `npm ci`, so a second setup started
+# during the (minutes-long) install counted nothing. RACE-1 is frozen inside `npm ci` by the shim
+# while RACE-2 runs to completion; the poll waits for RACE-1's claim, which the fixed script
+# writes before the install (on a regressed tree it times out after ~5 s and RACE-2 collides).
+mk_mig_repo "$WTR/race"
+printf '{"name":"x","private":true}\n' > "$WTR/race/theme/package.json"
+wt_git -C "$WTR/race/theme" add -A
+wt_git -C "$WTR/race/theme" commit -qm pkg
+wt_git -C "$WTR/race/theme" push -q origin develop
+RACE_MK="$TMP/race.npm.mark"; rm -f "$RACE_MK"
+RACE1_NOTES="$WTR/race/theme/.claude/tasks/RACE-1/notes.md"
+(cd "$WTR/race/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+   WT_NPM_WAIT="$RACE_MK" WT_NPM_LOG=/dev/null "$BASH_BIN" "$WTS" RACE-1) >"$TMP/race1.out" 2>&1 &
+RACE_PID=$!
+i=0
+while [ "$i" -lt 50 ] && ! grep -q 'dev-port:' "$RACE1_NOTES" 2>/dev/null; do sleep 0.1; i=$((i + 1)); done
+rc=0; mig_run "$WTR/race" RACE-2 || rc=$?
+wt_race2="$(wt_key dev_port)"
+: > "$RACE_MK"
+rc1=0; wait "$RACE_PID" || rc1=$?
+wt_race1_rec="$(grep -oE 'dev-port: [0-9]+' "$RACE1_NOTES" 2>/dev/null | tail -1 | tr -dc '0-9')"
+wt_race1_out="$(grep '^dev_port=' "$TMP/race1.out" | cut -d= -f2)"
+if [ "$rc" -eq 0 ] && [ "$rc1" -eq 0 ] && [ -n "$wt_race1_rec" ] && [ "$wt_race1_rec" = "$wt_race1_out" ] \
+   && [ -n "$wt_race2" ] && [ "$wt_race2" != "$wt_race1_rec" ] \
+   && grep -q '^npm=installed$' "$TMP/race1.out" && grep -q '^npm=installed$' "$O"; then ok
+else bad W31-port-race-parallel-setups "rc=$rc/$rc1 race1=$wt_race1_out rec=$wt_race1_rec race2=$wt_race2 out1=$(tr '\n' ';' < "$TMP/race1.out") out2=$(tr '\n' ';' < "$O")"; fi
+
+# W31b: the claim is on disk when `npm ci` starts (one `dev-port:` line, seen by the shim from
+# inside the install) and is not written a second time afterwards.
+RACE3_NOTES="$WTR/race/theme/.claude/tasks/RACE-3/notes.md"
+RACE3_LOG="$TMP/race3.npm.log"; : > "$RACE3_LOG"
+rc=0; (cd "$WTR/race/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+   WT_NPM_NOTES="$RACE3_NOTES" WT_NPM_LOG="$RACE3_LOG" "$BASH_BIN" "$WTS" RACE-3) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'dev-port-lines=1' "$RACE3_LOG" \
+   && [ "$(grep -c 'dev-port:' "$RACE3_NOTES" 2>/dev/null)" -eq 1 ] \
+   && grep -qE "dev-port: $(wt_key dev_port)\$" "$RACE3_NOTES"; then ok
+else bad W31b-port-recorded-before-npm "rc=$rc log=$(tr '\n' ';' < "$RACE3_LOG") notes=$(tr '\n' ';' < "$RACE3_NOTES" 2>&1) out=$(tr '\n' ';' < "$O")"; fi
+
+# W32: the second port pass — every port in the range is recorded by a LIVE registered worktree
+# (W24's stale claims never get here), nothing is listening, so the setup is still handed a port,
+# the first one the live probe clears, and SAYS the claim may collide. Reaching it with the real
+# 20-port range would need 20 worktrees, so the copy under test has PORT_LAST narrowed to a 2-port
+# range (W26's pattern); a per-case repo keeps its bookkeeping away from wt_next_port.
+WTS_NAR="$WTR/worktree-setup-narrow.sh"
+sed 's/^PORT_LAST=.*/PORT_LAST=9294/' "$WTS" > "$WTS_NAR"
+mk_mig_repo "$WTR/nar"
+nar_run() { # <args…> — the narrowed copy against the per-case repo
+  (cd "$WTR/nar/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+     "$BASH_BIN" "$WTS_NAR" "$@") >"$O" 2>"$E"
+}
+rc=0; nar_run NAR-1 || rc=$?; wt_nar1="$(wt_key dev_port)"
+rc2=0; nar_run NAR-2 || rc2=$?; wt_nar2="$(wt_key dev_port)"
+rc3=0; nar_run NAR-3 || rc3=$?; wt_nar3="$(wt_key dev_port)"
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$rc3" -eq 0 ] && grep -q '^PORT_LAST=9294$' "$WTS_NAR" \
+   && [ "$wt_nar1" = 9293 ] && [ "$wt_nar2" = 9294 ] && [ "$wt_nar3" = 9293 ] \
+   && [ "$(grep -c '^warn=port_range_crowded range=9293-9294' "$O")" -eq 1 ] \
+   && grep -qE 'dev-port: 9293$' "$WTR/nar/theme/.claude/tasks/NAR-3/notes.md"; then ok
+else bad W32-second-port-pass "rc=$rc/$rc2/$rc3 ports=$wt_nar1/$wt_nar2/$wt_nar3 out=$(tr '\n' ';' < "$O")"; fi
+# W32b: … and with something listening on every port too, the refusal is named and nothing is
+# created (the pick runs before `worktree add`)
+wt_listen 9293; wt_listen2 9294
+rc=0; nar_run NAR-4 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=no_free_port range=9293-9294' "$O" \
+   && [ ! -d "$WTR/nar/theme-NAR-4" ] && ! grep -qs 'dev-port:' "$WTR/nar/theme/.claude/tasks/NAR-4/notes.md"; then ok
+else bad W32b-no-free-port "rc=$rc out=$(tr '\n' ';' < "$O") wt=$([ -d "$WTR/nar/theme-NAR-4" ] && echo yes || echo no)"; fi
+wt_unlisten
+
 # ═══ EV — domaine env files: scripts/env-file.cjs loader + scripts/domaine-env.cjs CLI ═══
 EVR="$TMP/env"; mkdir -p "$EVR/cfg" "$EVR/repo/sub"
 git init -q "$EVR/repo"
@@ -3913,24 +4463,18 @@ if grep -qx '# tuning' "$EVR/cfg/domaine/env" && ! grep -q 'FND_WHALE_GUIDE' "$E
    && printf '%s' "$o4" | grep -q 'FND_CTX_WARN.*= 48.*(project file)'; then ok
 else bad EV4-unset-list "file=$(tr '\n' ';' < "$EVR/cfg/domaine/env") list=$(printf '%s' "$o4" | grep FND_CTX_WARN)"; fi
 
-# EV5: the bash-side reader — the domaine_env function the two shell scripts carry (extracted
-# from the shipped file, so this tests the real code): project-first walk-up, first-'=' split,
-# values with spaces intact
-eval "$(sed -n '/^domaine_env()/,/^}/p' "$CPT")"
+# EV5: the bash-side reader — the domaine_env function create-preview-theme.sh and
+# shopify-admin-gql.sh source from _shopify-common.sh (extracted from the shipped file, so this
+# tests the real code): project-first walk-up, first-'=' split, values with spaces intact
+eval "$(sed -n '/^domaine_env()/,/^}/p' "$COMMON")"
 printf 'FND_CPT_THROTTLE_WAITS=5 9\n' > "$EVR/repo/.claude/domaine.env"
 o5="$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FND_CPT_THROTTLE_WAITS)"
 o6="$(cd "$EVR/cfg" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FND_MCP_SLIM_DEBUG)"
 if [ "$o5" = "5 9" ] && [ "$o6" = "" ]; then ok; else bad EV5-bash-reader "o5='$o5' o6='$o6'"; fi
 
-# EV5b: the behavior above was proved on create-preview-theme.sh's copy alone. shopify-admin-gql.sh
-# carries the same function verbatim — two copies because a shell script has no import — so the two
-# bodies are diffed here; without this, drift in the second copy is a silent pass.
-cpt_fn="$(sed -n '/^domaine_env()/,/^}/p' "$CPT")"
-gql_fn="$(sed -n '/^domaine_env()/,/^}/p' "$GQL")"
-if [ -n "$cpt_fn" ]; then ok; else bad EV5b-cpt-fn "create-preview-theme.sh has no domaine_env()"; fi
-if [ -n "$gql_fn" ]; then ok; else bad EV5b-gql-fn "shopify-admin-gql.sh has no domaine_env()"; fi
-if [ "$cpt_fn" = "$gql_fn" ]; then ok
-else bad EV5b-copies-drifted "domaine_env() differs: $(diff <(printf '%s\n' "$cpt_fn") <(printf '%s\n' "$gql_fn") | tr '\n' ';' | head -c 300)"; fi
+# EV5b: single home — a private domaine_env() in either script would let the two allowlists drift
+if [ "$(cat "$CPT" "$GQL" | grep -c '^domaine_env() {')" -eq 0 ] && [ -n "$(type -t domaine_env)" ]; then ok
+else bad EV5b-domaine-env-single-home "domaine_env() is defined outside _shopify-common.sh (or the lib's copy did not load)"; fi
 
 # EV6: the project layer is a file a CLIENT REPO can commit, so it carries env-file.cjs's
 # PROJECT_OK tuning keys and nothing else — a security switch in it is skipped by the loader

@@ -20,6 +20,9 @@
 # plugin is installed elsewhere, so the repo is resolved with `git rev-parse` and nothing
 # here is derived from $0.
 #
+# The dev port is picked before `worktree add` and recorded in the shared workspace right
+# after it, before `npm ci` — a parallel setup started during the install sees the claim.
+#
 # Usage:
 #   worktree-setup.sh <WORK-ID> [<base-branch>]                      (default base: develop)
 #       → worktree=… branch=… base=… branch_source=… reused=… npm=… toml=… env=…
@@ -394,7 +397,8 @@ fi
 # --- dev port ----------------------------------------------------------------
 # Picked BEFORE `worktree add`: a port problem used to surface at the very end, after the
 # worktree, the npm install and the config copies were all in place, and the `exit 1` then left
-# a registered worktree nobody cleaned up and a re-run that hit `worktree_path_taken`.
+# a registered worktree nobody cleaned up and a re-run that hit `worktree_path_taken`. Recorded
+# right AFTER it (see the call site): only a registered worktree's claim counts for others.
 #
 # Free-port probe without a dependency: bash's own /dev/tcp redirection when this bash was
 # built with net redirections (stock macOS bash 3.2 was), else `nc -z`. A refused connection and
@@ -455,10 +459,10 @@ fi
 # a --remove the stale line is still there: a fresh create re-probes and keeps the old number
 # only while it is still free.
 if [ -n "$PORT" ] && [ "$REUSED" = "false" ] && ! port_free "$PORT"; then PORT=""; fi
-PORT_FROM_NOTES=true
-if [ -z "$PORT" ]; then
-  PORT_FROM_NOTES=false
-  p="$PORT_FIRST"
+# Sets PORT and PORT_PASS (1 = free and unrecorded, 2 = recorded but nothing listening).
+pick_port() {
+  local p="$PORT_FIRST"
+  PORT=""; PORT_PASS=1
   while [ "$p" -le "$PORT_LAST" ]; do
     # "Nothing is listening" is not enough: the dev servers are started later, by hand, in the
     # new sessions, so at setup time NOTHING is listening and two worktrees created a minute
@@ -470,6 +474,7 @@ if [ -z "$PORT" ]; then
     # Every port is claimed by a live worktree. The claim is bookkeeping, not evidence — a
     # worktree whose dev server was never started holds nothing — so the second pass trusts the
     # live probe alone rather than refusing to set the worktree up at all.
+    PORT_PASS=2
     p="$PORT_FIRST"
     while [ "$p" -le "$PORT_LAST" ]; do
       if port_free "$p"; then PORT="$p"; break; fi
@@ -479,9 +484,17 @@ if [ -z "$PORT" ]; then
       warn "port_range_crowded range=$PORT_FIRST-$PORT_LAST — every port is claimed by another worktree, so dev_port=$PORT may collide with one of them; start that worktree's dev server first if both run at once"
   fi
   [ -n "$PORT" ] || fail "no_free_port range=$PORT_FIRST-$PORT_LAST (something is listening on every port in the range — stop a stale dev server, then re-run)"
-  [ "$PROBE" != "none" ] || \
-    warn "port_probe_unavailable — this bash has no /dev/tcp and there is no usable \`nc\`, so dev_port=$PORT was picked without checking whether anything is listening; if the dev server refuses to bind, start it on another port (\`shopify theme dev --port <n>\`) and note that in the workspace"
-fi
+}
+# The port lives in the SHARED workspace, so the session that runs in the worktree finds it
+# in `.claude/tasks/<WORK-ID>/notes.md` — the same append-only log every skill already reads.
+record_port() {
+  [ -f "$NOTES" ] || printf '# %s — notes\n\n' "$WORK_ID" > "$NOTES"
+  printf -- '- %s worktree `%s` on branch `%s`, dev-port: %s\n' \
+    "$(date +%Y-%m-%d)" "$WT" "$BRANCH_REPORT" "$PORT" >> "$NOTES"
+}
+PORT_FROM_NOTES=true
+PORT_PASS=1
+if [ -z "$PORT" ]; then PORT_FROM_NOTES=false; pick_port; fi
 
 # --- branch and worktree ------------------------------------------------------
 BRANCH_SOURCE=existing
@@ -527,6 +540,12 @@ if [ "$REUSED" = "false" ]; then
   fi
   if [ "$rc" -ne 0 ]; then fail_with_log "$ADDLOG" "worktree_add_failed path=$WT"; fi
   rm -f "$ADDLOG"
+  # registered now, so competing setups count this worktree: re-verify the bookkeeping and claim the
+  # port BEFORE npm ci (residual window = two re-verifies inside one ports_taken scan; a pass-2 pick
+  # is recorded by construction, so not re-picked; a no_free_port here leaves the re-entry path)
+  PORTS_TAKEN="$(ports_taken || true)"
+  if [ "$PORT_PASS" -eq 1 ] && port_recorded "$PORT"; then PORT_FROM_NOTES=false; pick_port; fi
+  record_port
 else
   # Re-entry: the worktree already exists, and nothing here moves it back onto feat/<WORK-ID>.
   # Report what it is on — a developer who renamed or switched branches inside it must not be
@@ -538,6 +557,10 @@ else
   elif [ "$BRANCH_REPORT" != "$BRANCH" ]; then
     warn "branch_switched expected=$BRANCH actual=$BRANCH_REPORT (the worktree was moved off the branch this script created)"
   fi
+  [ "$PORT_FROM_NOTES" = "true" ] || record_port
+fi
+if [ "$PROBE" = "none" ] && [ "$PORT_FROM_NOTES" = "false" ]; then
+  warn "port_probe_unavailable — this bash has no /dev/tcp and there is no usable \`nc\`, so dev_port=$PORT was picked without checking whether anything is listening; if the dev server refuses to bind, start it on another port (\`shopify theme dev --port <n>\`) and note that in the workspace"
 fi
 
 NPM=skipped
@@ -597,14 +620,6 @@ elif [ -f "$MAIN/.claude/settings.local.json" ]; then
   # Copied, not shared: two sessions approving permissions would write the same file
   # concurrently and lose each other's approvals.
   cp "$MAIN/.claude/settings.local.json" "$WT/.claude/settings.local.json"; SETTINGS=copied
-fi
-
-# The port lives in the SHARED workspace, so the session that runs in the worktree finds it
-# in `.claude/tasks/<WORK-ID>/notes.md` — the same append-only log every skill already reads.
-if [ "$PORT_FROM_NOTES" = "false" ] || [ "$REUSED" = "false" ]; then
-  [ -f "$NOTES" ] || printf '# %s — notes\n\n' "$WORK_ID" > "$NOTES"
-  printf -- '- %s worktree `%s` on branch `%s`, dev-port: %s\n' \
-    "$(date +%Y-%m-%d)" "$WT" "$BRANCH_REPORT" "$PORT" >> "$NOTES"
 fi
 
 printf 'worktree=%s\n' "$WT"

@@ -85,6 +85,10 @@
 # re-running a mutation elsewhere could execute it twice.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+[ -f "$SCRIPT_DIR/_shopify-common.sh" ] || { echo "error=common_lib_not_found path=$SCRIPT_DIR/_shopify-common.sh" >&2; exit 2; }
+. "$SCRIPT_DIR/_shopify-common.sh"
+
 QUERY_FILE=""; OPERATION=""; VARIABLES=""; VARIABLES_FILE=""; ENV_FILE=".env"; STORE=""; ENGINE="auto"
 OUT_FILE=""
 API_VERSION="${SHOPIFY_ADMIN_API_VERSION:-2026-04}"
@@ -128,49 +132,14 @@ fi
 # --- store domain: --store, else $SHOPIFY_STORE, else uncommented store= in shopify.theme.toml ---
 TOML="${TOML_PATH:-shopify.theme.toml}"
 
-# TOML scalar reader: handles "…" / '…' / bare values, drops a trailing comment only OUTSIDE quotes,
-# tolerates CRLF. All three shapes occur in real shopify.theme.toml files, and a `"`-only sed
-# (`s/^[^=]*=…; s/^"//; s/"$//`) silently keeps the single quotes — `store = 'x'` then becomes the
-# request host `'x'.myshopify.com` and the API answers with something unrelated. Byte-identical
-# copies live in theme-json.sh and create-preview-theme.sh — the plugin installs by git clone, so
-# every script stands alone; keep the three in sync.
-toml_value() { # $1 = key, first uncommented value to stdout (empty when absent)
-  [ -f "$TOML" ] || return 0
-  awk -v k="$1" '
-    BEGIN { SQ = "\047" }
-    /^[ \t]*#/ { next }
-    $0 ~ "^[ \t]*" k "[ \t]*=" {
-      v = $0
-      sub("^[ \t]*" k "[ \t]*=[ \t]*", "", v)
-      q = substr(v, 1, 1)
-      if (q == "\"" || q == SQ) {
-        v = substr(v, 2)
-        p = index(v, q)
-        if (p > 0) v = substr(v, 1, p - 1)
-      } else {
-        h = index(v, "#"); if (h > 0) v = substr(v, 1, h - 1)
-        sub(/[ \t\r]+$/, "", v)
-      }
-      print v; exit
-    }
-  ' "$TOML" 2>/dev/null
-}
-
 if [ -z "$STORE" ]; then STORE="${SHOPIFY_STORE:-}"; fi
 [ -n "$STORE" ] || STORE="$(toml_value store)" || true
 [ -n "$STORE" ] || { echo "error=no_store (pass --store or set store= in $TOML)" >&2; exit 2; }
-# `shopify --store` documents the full URL form (https://acme.myshopify.com) as valid and real tomls
-# carry it, so the scheme is stripped rather than refused. What is left must be a bare handle/domain:
-# anything else would be spliced into the request URL and come back as an opaque 401/404, and this is
-# also what keeps $DOMAIN safe to use as a state-file name below. Applies to --store / $SHOPIFY_STORE /
-# the toml alike.
-STORE="${STORE#http://}"; STORE="${STORE#https://}"; STORE="${STORE%/}"
-case "$STORE" in
-  ''|*[!A-Za-z0-9.-]*)
-    echo "error=invalid_store store='$STORE' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL)" >&2
-    exit 2 ;;
-esac
-case "$STORE" in *.myshopify.com) DOMAIN="$STORE" ;; *) DOMAIN="${STORE}.myshopify.com" ;; esac
+# the handle guard is also what keeps $DOMAIN safe to use as a state-file name below; it applies to
+# --store / $SHOPIFY_STORE / the toml alike
+STORE="$(store_handle "$STORE")" \
+  || { echo "error=invalid_store store='$STORE' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL)" >&2; exit 2; }
+DOMAIN="$(store_domain "$STORE")"
 
 # single exit point for the envelope, both engines: inline by default; --out swaps the
 # payload for a summary line so a 20–100 KB inspection read never lands in the caller's
@@ -192,30 +161,7 @@ emit_envelope() { # $1 = file holding the {"data"|"errors":…} envelope
   echo "ok=1 bytes=$bytes out=$OUT_FILE errors=$errs"
 }
 
-# Domaine env files (process env wins): nearest .claude/domaine.env above cwd — tuning keys only,
-# see below — then the global ~/.config/domaine/env; same dialect as scripts/env-file.cjs, read per
-# key, never sourced. A file value fills an UNSET variable only; an empty value in the file cannot
-# be expressed here.
-domaine_env() {
-  local d="$PWD" f v
-  # PROJECT_OK, mirrored by hand from scripts/env-file.cjs: the project file is committable by a
-  # client repo, so only these tuning keys are read from it. Every other switch — the guards, the
-  # spill dir, the verify gates — comes from the environment or the global file, default-deny.
-  case "$1" in
-    FND_LEAN|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET)
-      while :; do
-        f="$d/.claude/domaine.env"
-        if [ -f "$f" ]; then
-          v="$(grep -m1 "^$1=" "$f" 2>/dev/null | cut -d= -f2-)"
-          [ -n "$v" ] && { printf '%s' "$v"; return; }
-          break
-        fi
-        [ "$d" = "/" ] && break
-        d="$(dirname "$d")"
-      done ;;
-  esac
-  grep -m1 "^$1=" "${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env" 2>/dev/null | cut -d= -f2- || true
-}
+# Domaine env files fill an UNSET variable only.
 if [ -z "${FND_GQL_PROBE_CACHE+x}" ]; then
   _v="$(domaine_env FND_GQL_PROBE_CACHE)"; [ -n "$_v" ] && FND_GQL_PROBE_CACHE="$_v"
 fi

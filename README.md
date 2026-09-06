@@ -47,6 +47,7 @@ in its own subfolder under `plugins/`:
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
+│       │   ├── _shopify-common.sh   #  sourced by the three theme scripts (never run directly)
 │       │   ├── gen-host-adapters.cjs #  writes every generated dir below
 │       │   ├── doctor.cjs           #  static install verification, any host
 │       │   └── ...
@@ -679,7 +680,9 @@ link never reaches a commit);
 into one file would race); and a free dev port from 9293 upward, recorded as a `dev-port:`
 line in the shared workspace so the ship session finds it — a port counts as taken when
 something is listening on it **or** another work-id's workspace already recorded it, because
-the dev servers only start later, by hand, in the new sessions. Re-running for the same
+the dev servers only start later, by hand, in the new sessions; the line is written right
+after the worktree is registered, before `npm ci`, so a parallel setup started during the
+install already sees the claim. Re-running for the same
 work-id is idempotent — an existing worktree just re-prints the hand-off block.
 
 Its own port is half the isolation; the other half is its own **session preview theme**,
@@ -760,14 +763,27 @@ table rather than auto-creating (a recorded session theme now outranks auto-crea
 Pinning is a `create-preview-theme.sh` job; both forms validate the id against the store
 and refuse the **live** theme. When the store listing is unavailable, the standalone `pin`
 refuses outright (`error=theme_unverifiable`, config untouched — a pin persists, so it is
-never applied unvetted; retry), while `create` / `refresh --pin-toml` proceed and flag it
-with `warn=pin_unvetted`:
+never applied unvetted; retry), while a fresh `create --pin-toml` proceeds — `refresh --pin-toml`
+only for a recorded session theme or with `--allow-unverified`, `--reuse --pin-toml` only with
+`--allow-unverified` — flagged with `warn=pin_unvetted`:
 
 ```text
 create-preview-theme.sh pin --theme <ID> [--env <name>]           # pin only, no push
 create-preview-theme.sh create --name "<NAME>" --reuse --pin-toml
 create-preview-theme.sh refresh --theme <ID> --pin-toml
 ```
+
+Under that outage (a silent listing, or one naming no theme at all) `refresh` proceeds only for
+an id some workspace under `.claude/tasks` records as `session-theme:`; any other id, and every
+`create --reuse` (a name lookup has no such exemption), is refused
+(`error=refresh_unverifiable` / `error=reuse_unverifiable`) unless a developer passes
+`--allow-unverified`, which overrides those two refusals only — never the live-theme guard and
+never the dev-theme guard — and is never passed by the pipeline. The dev-theme guard is the
+script's other refusal: a `refresh` / `--reuse` whose target is an id the toml names as the
+shared dev theme — its settings source (unless pinned by hand) or an id a pin superseded — is refused
+(`error=dev_theme_write_refused`) unless a workspace records that id as a session theme;
+`--allow-dev-theme` is its sole, developer-only override. Both are command flags, not
+environment switches.
 
 The rewrite is **scoped to one environment block**, because that is how the Shopify CLI
 reads this file: `shopify theme dev -e dev` resolves `theme =` inside `[environments.dev]`,
@@ -1223,7 +1239,7 @@ because the script that reads it is the same single copy on all four hosts.
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | non-`0` value shortens the gql runner's engine-fallback note to `note=engine=token` |
 | `FND_GQL_PROBE_CACHE` | `21600` | seconds the gql runner reuses its two sticky machine facts — the `shopify version` probe (~1.5 s, also invalidated whenever the CLI binary is newer than the cache) and "`store execute` is unavailable for this store", which lets a later call skip the doomed probe entirely. `0` re-probes on every call — the escape hatch right after a `shopify store auth`; any invalid value falls back to `21600`. Both caches live in a 0700 per-user dir under `$TMPDIR`; `--engine store` ignores the second one and always attempts |
 | `FND_CPT_THROTTLE_WAITS` | `20 60` | pause(s), in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled` — the store+token rate limit is shared with a running `shopify theme dev`, so a bulk push can 429 while everything else is healthy. One retry per listed value; empty disables retrying (tests pass `0 0`) |
-| `FND_CPT_OVERLAY_VERIFY` | `1` | `0` skips `create-preview-theme.sh` create's overlay read-back (the run prints `overlay=skipped`). With the default, after the settings overlay pushes cleanly the script pulls the settings patterns back off the target theme and requires every overlaid `*.json` to be present — Shopify validates theme JSON server-side and silently drops a file whose section/block types the branch's code lacks while `theme push` exits 0 with a clean stderr (observed live: a dev-theme `templates/product.json` carrying a feature-branch block type never landed and every PDP on the "successful" preview 404'd). Each missing file prints `warn=overlay_file_dropped file=… [unknown_types=…]` (the alien types, best-effort, matched against the pushed code's schemas) plus `overlay=partial` — the run still **exits 0**: everything else landed, and the per-file recovery via `theme-json.sh set` beats deleting a theme whose re-create would replay the same drop. A read-back pull that itself fails is `overlay=unverified` + `warn=overlay_unverified`, never a drop claim and never a failed run. Presence-only by design (content legitimately differs — Shopify re-stamps its `/*…*/` banner), so a `--reuse` target's pre-existing stale copy can still pass — a known ceiling. Costs two pulls, and they retry through the same loop as the pushes (`FND_CPT_THROTTLE_WAITS`), so a throttled store can add those pauses *after* every piece of real work already succeeded |
+| `FND_CPT_OVERLAY_VERIFY` | `1` | `0` skips `create-preview-theme.sh` create's overlay read-back (the run prints `overlay=skipped`). With the default, after the settings overlay pushes cleanly the script pulls the settings patterns back off the target theme and requires every overlaid `*.json` to be present — Shopify validates theme JSON server-side and silently drops a file whose section/block types the branch's code lacks while `theme push` exits 0 with a clean stderr (observed live: a dev-theme `templates/product.json` carrying a feature-branch block type never landed and every PDP on the "successful" preview 404'd). Each missing file prints `warn=overlay_file_dropped file=… [unknown_types=…]` (the alien types, best-effort, matched against the pushed code's schemas) plus `overlay=partial` — the run still **exits 0**: everything else landed, and the per-file recovery via `theme-json.sh set` beats deleting a theme whose re-create would replay the same drop. A read-back pull that itself fails is `overlay=unverified` + `warn=overlay_unverified`, never a drop claim and never a failed run. A dev-theme pull that produced no settings file at all is `overlay=empty` + `warn=overlay_empty` (`--reuse`: nothing overlaid, the theme keeps its previous settings) or `error=overlay_pull_failed` (fresh create: the theme is deleted), independent of this switch. Presence-only by design (content legitimately differs — Shopify re-stamps its `/*…*/` banner), so a `--reuse` target's pre-existing stale copy can still pass — a known ceiling. Costs two pulls, and they retry through the same loop as the pushes (`FND_CPT_THROTTLE_WAITS`), so a throttled store can add those pauses *after* every piece of real work already succeeded |
 | `FND_CPT_OVERLAY_VERIFY_WAIT` | `2` | seconds before the overlay read-back's ONE re-pull when a file comes back missing — a read issued straight after a write can trail it, and calling consistency lag a drop would cry wolf. `0` re-checks immediately (what the suites pass); any non-numeric value falls back to `2` |
 | `FND_THEME_JSON_VERIFY` | `1` | `0` skips `theme-json.sh set`'s read-back verify, which then believes the transport alone (`shopify theme push`'s exit code, an empty `themeFilesUpsert.userErrors`) and prints `verified=skipped` on the result line. With the default — both engines — every `set` pulls the file back and compares it against the payload (`*.json` normalized: Shopify's re-stamped `/*…*/` banner stripped, `jq -S` key order; raw bytes, trailing newlines aside, for anything else), retrying once after `FND_THEME_JSON_VERIFY_WAIT` seconds so a read served the pre-write copy is not called a failure. Landed ⇒ `verified=true`; a read-back that does not carry the payload ⇒ `error=not_applied` on stdout, a hint naming the two known triggers on stderr, **exit 6** — same code when the read-back itself could not run (`error=verify_read_failed`, state unconfirmed; a throttled or garbled gql read counts, and is never re-tried on the other engine, since the mutation already committed). Exit 6 means *the theme does not serve the payload*, not *nothing changed*: no pre-image is read before the write, so `get` and restore your snapshot if it moved. Normalizing `*.json` needs perl — without it (or with a perl that will not run) the compare is raw, which cannot tell a re-stamped banner from a lost write, so there a difference is `verified=unverified` + exit 0 and `note=verify_raw_compare` on stderr, never `not_applied`. A read-back that will not parse as JSON on a host that *can* normalize is the opposite case and not a degradation: the payload is validated as JSON before the upload, so that body is not the payload — `note=verify_body_not_json` and the ordinary `not_applied` + exit 6, judged per attempt (a garbled first read followed by a clean matching retry still verifies). Shopify keeps the old content for some payloads it rejects server-side while reporting success, so `0` is an escape hatch for a mis-verified write, not a speed-up |
 | `FND_THEME_JSON_VERIFY_WAIT` | `2` | seconds `theme-json.sh set` waits before its ONE read-back retry — a read issued straight after a write can still be served the pre-write copy, and calling that a failure would send the caller chasing a phantom. `0` retries immediately (what the suites pass, so a `not_applied` case does not pay the pause); any non-numeric value falls back to `2`. Only the pause is configurable: the retry itself is not optional, and `FND_THEME_JSON_VERIFY=0` is the switch that skips the read-back entirely |

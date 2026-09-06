@@ -17,7 +17,9 @@ block of `shopify.theme.toml` names — normally the shared dev theme. Two paral
 checkout + worktree) would therefore sync two different branches into that one remote theme and
 overwrite each other. A **session theme** is one unpublished preview theme owned by this work
 stream and used for everything after that: the dev server, the QA rows that can't run locally,
-the PR's theme-preview table, and aftercare refreshes.
+the PR's theme-preview table, and aftercare refreshes. The script backs this up: it refuses to
+push onto the shared dev theme (`error=dev_theme_write_refused`) unless a workspace under
+`.claude/tasks` records that id as a session theme.
 
 ## The gate — identical in `ship` and `worktree`
 
@@ -54,8 +56,10 @@ the PR's theme-preview table, and aftercare refreshes.
    drawer fix`) makes those later calls miss and create a **second** theme for one ticket.
    `create` exiting **0** is not the whole verdict: a run that also prints `overlay=partial`
    + `warn=overlay_file_dropped` produced a theme whose named settings files never landed
-   (their pages 404 or serve stale content) — record the id, but say the preview is not
-   reviewable yet and follow `<plugin root>/references/preview-theme-errors.md`.
+   (their pages 404 or serve stale content), and a `--reuse` run printing `overlay=empty` +
+   `warn=overlay_empty` overlaid nothing (the theme keeps its previous settings) — record the
+   id, but say the preview is not reviewable yet and follow
+   `<plugin root>/references/preview-theme-errors.md`.
 3. **Run it from the checkout the work lives in.** `shopify.theme.toml` is resolved relative
    to the cwd, and `create` builds the local branch — so a worktree's session theme is created
    from **inside that worktree**, never from the main checkout.
@@ -111,9 +115,14 @@ can differ; `refresh` is unaffected either way.
   and keep using the explicit `--theme <id>` flag.
 - Pinning vets the id against the store listing. When the listing is unavailable, standalone
   `pin` **refuses** (`error=theme_unverifiable` — a pin persists, so it is never applied
-  unvetted; the config is untouched, retry when the store answers), while `create` and
-  `refresh` with `--pin-toml` proceed and print `warn=pin_unvetted` before the pin keys
-  (the id was just pushed to, so it exists).
+  unvetted; the config is untouched, retry when the store answers), while a fresh
+  `create --pin-toml` proceeds, `refresh --pin-toml` proceeds for an id recorded as
+  `session-theme:` in any workspace under `.claude/tasks` (or with `--allow-unverified`; any other
+  id is refused, `error=refresh_unverifiable`), and `--reuse --pin-toml` proceeds only with
+  `--allow-unverified` (else `error=reuse_unverifiable` — a name lookup has no recorded-id
+  exemption) — each prints `warn=pin_unvetted` before the pin keys (the id
+  was just pushed to, so it exists). The script-side match is an id lookup, not provenance —
+  the gate in step 1 still applies before a skill refreshes unattended.
 - **Restoring by hand:** the superseded value sits on the `# theme = "…" # fnd:superseded`
   line directly above the pinned one — the developer uncomments it and comments out or deletes
   the session line below (an appended session line is tagged `# fnd:session-theme` — just

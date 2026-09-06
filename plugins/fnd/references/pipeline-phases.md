@@ -84,9 +84,13 @@ its brief says otherwise.
    and record it as `session-theme: <id>` + links in `notes.md`, so create
    happens at most once per work stream. A create/reuse that exits **0** but prints
    `overlay=partial` + `warn=overlay_file_dropped` is not a reviewable preview — the named
-   settings files never landed, so their pages 404 or serve stale content; follow
+   settings files never landed, so their pages 404 or serve stale content — and neither is a
+   `--reuse` run printing `overlay=empty` + `warn=overlay_empty` (nothing overlaid, the theme
+   keeps its previous settings); follow
    `<plugin root>/references/preview-theme-errors.md` and never book those 404s as branch
-   defects. **No `--pin-toml` here** — this phase is past the ✋
+   defects. `error=refresh_unverifiable`, `error=reuse_unverifiable`,
+   `error=dev_theme_write_refused` → ESCALATE; the pipeline never passes `--allow-unverified`
+   or `--allow-dev-theme`. **No `--pin-toml` here** — this phase is past the ✋
    and rewriting the developer's `shopify.theme.toml` unasked (possibly the choice they
    declined at Step 0) is not an autonomous phase's call; the pin is re-asserted by the Step 0
    gate on the next entry. Never simulate a
@@ -152,7 +156,9 @@ its brief says otherwise.
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent → refresh
    the session theme's code (`<plugin root>/scripts/create-preview-theme.sh refresh --theme
    <the session-theme id from notes.md — under session-theme.md's provenance gate>` — settings
-   untouched, and it is the same theme the PR table links to), re-verify the touched flow in the browser, commit + push (counts toward the
+   untouched, and it is the same theme the PR table links to; `error=refresh_unverifiable` /
+   `error=dev_theme_write_refused` → ESCALATE, never `--allow-unverified` / `--allow-dev-theme`
+   from the pipeline), re-verify the touched flow in the browser, commit + push (counts toward the
    aftercare-rounds cap). A failing check is a deterministic signal from this repo's own CI and
    is the ONLY thing this phase changes code for on its own. Then poll the policy bots'
    review threads via

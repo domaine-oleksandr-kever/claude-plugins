@@ -90,11 +90,16 @@ silently collides with the main checkout's server or overwrites the shared dev t
    A run that exits 0 with `overlay=partial` + `warn=overlay_file_dropped` lines is NOT a
    clean success: the named settings files never landed (their pages 404 or go stale) —
    report the warn lines and follow the same reference's recovery before offering the URL.
+   With `--reuse`, `error=reuse_unverifiable` / `error=dev_theme_write_refused` follow the same
+   two consents as refresh step 3 (never add `--allow-unverified` / `--allow-dev-theme` on your own).
+   Same for `overlay=empty` + `warn=overlay_empty` on a `--reuse` run: nothing was overlaid,
+   the theme keeps its previous settings — not a reviewable preview until re-run against a dev
+   theme with settings.
 5. **Report.** Print the resulting `theme_id`, `preview_url`, `editor_url`, `reused`,
-   `built`, and — when it isn't `verified` — the `overlay=` verdict with its warn
-   lines. If a `preview_path` is known, also give the page-deep-linked preview and the
-   editor-on-template link (formulas: the errors reference's **Page deep-links**); path or
-   template unknown → **ask, never guess**.
+   `built`, and — when it isn't `verified` — the `overlay=` verdict (`partial`, `unverified`,
+   `skipped` or `empty`) with its warn lines. If a `preview_path` is known, also give the
+   page-deep-linked preview and the editor-on-template link (formulas: the errors reference's
+   **Page deep-links**); path or template unknown → **ask, never guess**.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id
    exists, append the id to its `notes.md` as a dated `session-theme: <id> (<name>)
    <preview_url>` bullet — otherwise the next fnd `ship` skill run, qa phase or PR run finds
@@ -110,7 +115,13 @@ silently collides with the main checkout's server or overwrites the shared dev t
    (settings are preserved). Show the target id and `[ update / cancel ]`.
 3. **Refresh.** Run `create-preview-theme.sh refresh --theme <id>` (add `--no-build` /
    `--build-script <name>` as above). Any `error=` line → report it plainly and follow the
-   errors reference's **`error=` outcomes**; don't read the toml yourself.
+   errors reference's **`error=` outcomes**; don't read the toml yourself. Two refusals need a
+   distinct developer consent each: `error=refresh_unverifiable` / `error=reuse_unverifiable`
+   (the store listing was silent) → report; ask the developer before re-running with
+   `--allow-unverified`. `error=dev_theme_write_refused` (the target is the shared dev theme) →
+   if the developer confirms the id is this stream's session theme, do step 5 (record the
+   `session-theme:` line) FIRST and re-run without any flag; only an explicit "overwrite the dev
+   theme" gets `--allow-dev-theme`.
 4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`.
    Remind the developer that customizer settings were intentionally left as-is.
 5. **Record it when the workspace hasn't.** When a task workspace for this work-id exists

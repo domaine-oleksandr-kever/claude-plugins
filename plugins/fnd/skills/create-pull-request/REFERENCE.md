@@ -102,7 +102,10 @@ block the Shopify CLI resolves, keeping the value they replaced on a commented
 > exits 0 and Shopify drops just the offending file; `create` reads the overlay back and reports
 > that as `overlay=partial` + `warn=overlay_file_dropped file=… [unknown_types=…]` on a run that
 > still exits 0, keeping the theme (recovery is per-file:
-> `<plugin root>/references/preview-theme-errors.md`). **The fix is manual:** for
+> `<plugin root>/references/preview-theme-errors.md`). A `--reuse` run that prints `overlay=empty`
+> + `warn=overlay_empty` overlaid nothing at all (the dev-theme pull came back without settings
+> files; the theme keeps its previous ones) — not a reviewable preview until re-run against a dev
+> theme with settings. **The fix is manual:** for
 > real drift the developer duplicates the dev theme in the
 > Shopify admin (a server-side copy preserves every setting, drifted or not), renames it to the
 > `[ELC-…]` name, and re-runs `create-pull-request` with `theme_name` + `theme_url` +

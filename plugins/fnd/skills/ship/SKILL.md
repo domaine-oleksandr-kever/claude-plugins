@@ -157,7 +157,8 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    returned them and `superseded: <id>` when it reported `superseded_theme_id=`. A create
    that exits 0 while printing `overlay=partial` + `warn=overlay_file_dropped` is not a
    reviewable preview — the named settings files never landed and their pages 404 or go
-   stale; record the id, then follow `<plugin root>/references/preview-theme-errors.md`
+   stale; nor is a `--reuse` run printing `overlay=empty` + `warn=overlay_empty` (nothing
+   overlaid, the theme keeps its previous settings). Record the id, then follow `<plugin root>/references/preview-theme-errors.md`
    before anyone reads the preview or blames the branch for those 404s. Then hand
    over item 3's start command with `--theme <id>` filled in. Never read or echo
    `shopify.theme.toml`.

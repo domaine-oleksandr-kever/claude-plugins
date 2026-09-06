@@ -97,12 +97,16 @@
 # GraphQL errors print the {"errors":…} head on stdout (partial data stripped) with exit 5 and
 # the FULL envelope at a `log=<path>` mktemp (plus a scope hint when it looks like a missing
 # read_themes/write_themes grant).
-# Exit: 0 ok · 2 usage · 4 live-theme write refused · 5 GraphQL/user/CLI errors · 3 no engine
-# credentials at all (hints name every remedy) · 6 the write reported success but the theme does
-# not serve the payload (read-back mismatch, or the read-back itself failed — state unconfirmed).
+# Exit: 0 ok · 2 usage · 4 live-theme write refused · 5 GraphQL/user/CLI errors (on themecli also
+# `cli_list_failed` — the listing was empty or unparseable — and `live_role_unreadable` — the theme
+# is listed but carries no role, so the live guard cannot clear it) · 3 no engine credentials at
+# all (hints name every remedy) · 6 the write reported success but the theme does not serve the
+# payload (read-back mismatch, or the read-back itself failed — state unconfirmed).
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+[ -f "$SCRIPT_DIR/_shopify-common.sh" ] || { echo "error=common_lib_not_found path=$SCRIPT_DIR/_shopify-common.sh" >&2; exit 2; }
+. "$SCRIPT_DIR/_shopify-common.sh"
 RUNNER="$SCRIPT_DIR/shopify-admin-gql.sh"
 [ -x "$RUNNER" ] || { echo "error=runner_not_found path=$RUNNER" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "error=jq_not_found" >&2; exit 2; }
@@ -532,62 +536,23 @@ gql_set() {
 }
 
 # ----------------------------------------------------------- themecli engine --
-# TOML scalar reader: handles "…" / '…' / bare values, drops a trailing comment only OUTSIDE quotes,
-# tolerates CRLF. All three shapes occur in real shopify.theme.toml files, and a `"`-only sed
-# (`s/^[^"]*"([^"]*)".*/\1/`) silently returns the WHOLE LINE for the other two — `store = 'x'`
-# becomes the domain `store = 'x'.myshopify.com` and a single-quoted password= is exported as the
-# Theme Access token. Byte-identical copies live in create-preview-theme.sh and
-# shopify-admin-gql.sh — the plugin installs by git clone, so every script stands alone; keep the
-# three in sync.
-toml_value() { # $1 = key, first uncommented value to stdout (empty when absent)
-  [ -f "$TOML" ] || return 0
-  awk -v k="$1" '
-    BEGIN { SQ = "\047" }
-    /^[ \t]*#/ { next }
-    $0 ~ "^[ \t]*" k "[ \t]*=" {
-      v = $0
-      sub("^[ \t]*" k "[ \t]*=[ \t]*", "", v)
-      q = substr(v, 1, 1)
-      if (q == "\"" || q == SQ) {
-        v = substr(v, 2)
-        p = index(v, q)
-        if (p > 0) v = substr(v, 1, p - 1)
-      } else {
-        h = index(v, "#"); if (h > 0) v = substr(v, 1, h - 1)
-        sub(/[ \t\r]+$/, "", v)
-      }
-      print v; exit
-    }
-  ' "$TOML" 2>/dev/null
-}
-
 DOMAIN=""
 resolve_domain() {
   local s="$STORE_ARG"
   [ -z "$s" ] && s="${SHOPIFY_STORE:-}"
   if [ -z "$s" ]; then s="$(toml_value store)" || true; fi
   [ -n "$s" ] || { echo "error=no_store (pass --store or set store= in $TOML)" >&2; exit 2; }
-  # `shopify --store` documents the full URL form as valid, so the scheme is stripped, not refused;
-  # what is left must be a shop handle, because a mis-parse handed to the CLI is an opaque error at
-  # best and the wrong store at worst
-  s="${s#http://}"; s="${s#https://}"; s="${s%/}"
-  case "$s" in ''|*[!A-Za-z0-9.-]*)
-    echo "error=invalid_store store='$s' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL)" >&2; exit 2 ;;
-  esac
-  case "$s" in *.myshopify.com) DOMAIN="$s" ;; *) DOMAIN="${s}.myshopify.com" ;; esac
+  s="$(store_handle "$s")" \
+    || { echo "error=invalid_store store='$s' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL)" >&2; exit 2; }
+  DOMAIN="$(store_domain "$s")"
 }
 
 # Theme Access token: env wins, else shopify.theme.toml (password=, else first shp*_…).
 # Read internally and exported ONLY for the `shopify` subprocess — never printed.
 cli_token_ready() {
   [ -n "${SHOPIFY_CLI_THEME_TOKEN:-}" ] && return 0
-  [ -f "$TOML" ] || return 1
   local t
-  t="$(toml_value password)"
-  # a password= that is not token-shaped is not a token — fall through to the file-wide scan
-  # instead of exporting it (a garbage token surfaces as an opaque CLI 401)
-  case "$t" in shp[a-z]*_[A-Za-z0-9]*) ;; *) t="" ;; esac
-  [ -n "$t" ] || t="$(grep -oE 'shp[a-z]+_[A-Za-z0-9]+' "$TOML" | head -1)" || true
+  t="$(theme_token_from_toml)"
   [ -n "$t" ] || return 1
   export SHOPIFY_CLI_THEME_TOKEN="$t"
 }
@@ -604,10 +569,12 @@ prep_cli() {
 }
 
 CLI_LIST=""
+# A banner before the JSON is trimmed, not fatal (pipefail keeps the CLI's own rc); an EMPTY listing
+# is fatal — `jq empty` accepts no input, and a silent CLI would otherwise read as "no such theme".
 cli_list() {
   local err rc=0; err="$(mktemp)"; CLEAN+=("$err")
-  CLI_LIST="$(shopify theme list --store "$DOMAIN" --json --no-color 2>"$err")" || rc=$?
-  if [ "$rc" -ne 0 ] || ! printf '%s' "$CLI_LIST" | jq empty >/dev/null 2>&1; then
+  CLI_LIST="$(shopify theme list --store "$DOMAIN" --json --no-color 2>"$err" | theme_list_trim)" || rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$CLI_LIST" ] || ! printf '%s' "$CLI_LIST" | jq empty >/dev/null 2>&1; then
     echo "error=cli_list_failed" >&2; tail -5 "$err" >&2; exit 5
   fi
 }
@@ -666,10 +633,12 @@ cli_set() {
   local nid role name tmp err out verified="skipped"
   nid="$(num_of "$THEME")"
   cli_list
-  role="$(printf '%s' "$CLI_LIST" | jq -r --arg id "$nid" '.[] | select((.id|tostring) == $id) | .role' | head -1)"
-  name="$(printf '%s' "$CLI_LIST" | jq -r --arg id "$nid" '.[] | select((.id|tostring) == $id) | .name' | head -1)"
-  [ -n "$role" ] || { echo "error=theme_not_found theme=$nid (engine=themecli)" >&2; exit 5; }
-  [ "$role" = "live" ] && live_refuse "$name"
+  [ -n "$(theme_list_field "$CLI_LIST" "$nid" id)" ] || { echo "error=theme_not_found theme=$nid (engine=themecli)" >&2; exit 5; }
+  role="$(theme_list_field "$CLI_LIST" "$nid" role)"; name="$(theme_list_field "$CLI_LIST" "$nid" name)"
+  # listed but roleless is a list-shape drift, not a missing theme — a guard that cannot read the
+  # role must not clear the target
+  [ -n "$role" ] || { echo "error=live_role_unreadable theme=$nid (engine=themecli)" >&2; exit 5; }
+  if role_is_live "$role"; then live_refuse "$name"; fi
   tmp="$(mktemp -d)"; err="$(mktemp)"; CLEAN+=("$tmp" "$err")
   mkdir -p "$tmp/$(dirname "$FILE")"
   cp "$FROM" "$tmp/$FILE"

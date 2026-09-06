@@ -63,7 +63,9 @@ script, relays what it printed, and — once the worktree exists — settles its
      `session-theme: <id>` bullet in the shared `.claude/tasks/<WORK-ID>/notes.md` the instant
      the script returns it. A `create` that exits 0 but prints `overlay=partial` +
      `warn=overlay_file_dropped` is not a reviewable preview — the named settings files never
-     landed and their pages 404 or serve stale content; hand the id over with that caveat and
+     landed and their pages 404 or serve stale content — and neither is a `--reuse` run printing
+     `overlay=empty` + `warn=overlay_empty` (nothing overlaid, the theme keeps its previous
+     settings); hand the id over with that caveat and
      `<plugin root>/references/preview-theme-errors.md`, not as a clean preview.
 
    Either way, run the script **with the new worktree as the working directory** — a one-shot

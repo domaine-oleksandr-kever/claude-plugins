@@ -26,8 +26,9 @@ const path = require('path');
 
 const ALLOW_EXTRA = new Set(['SHOPIFY_ADMIN_GQL_QUIET']);
 
-// Tuning and UX only — nothing here can disarm a guard, redirect a spill or shorten a TTL. The
-// bash `domaine_env()` copies and hooks/spill-access.sh carry this same list, by hand.
+// Tuning and UX only — nothing here can disarm a guard, redirect a spill or shorten a TTL.
+// The bash `domaine_env()` in scripts/_shopify-common.sh and hooks/spill-access.sh carry this same
+// list, by hand.
 const PROJECT_OK = new Set([
   'FND_LEAN',
   'FND_CTX_MONITOR',

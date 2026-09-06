@@ -42,23 +42,41 @@
 # Subcommands:
 #   info
 #       → store=… dev_theme_id=… dev_theme_name=…                       (no mutation)
-#   create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+#   create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push code (settings ignored) to a new unpublished theme
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
 #         → read the overlay back (see verify_overlay)
 #       → theme_id=… name=… store=… preview_url=… editor_url=… reused=… built=… overlay=…
-#         [warn=overlay_file_dropped file=… [unknown_types=…]] [hint=…] | [warn=overlay_unverified …]
-#   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+#         [warn=overlay_file_dropped file=… [unknown_types=…]] [hint=…] | [warn=overlay_unverified …] | [warn=overlay_empty …]
+#       `--reuse` resolves the name through `theme list`: a listing that never answered is refused
+#       (`error=reuse_unverifiable`), and a name that resolves to the shared dev theme is refused
+#       (`error=dev_theme_write_refused`) — see the two flags below.
+#   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
 #       → theme_id=… store=… preview_url=… editor_url=… built=…
+#       <ID> must clear the live-theme guard; when `theme list` never answered it must also be an id
+#       some workspace under ./.claude/tasks records as `session-theme:` (`error=refresh_unverifiable`
+#       otherwise), and it must not be the shared dev theme (`error=dev_theme_write_refused`).
 #   pin --theme <ID> [--env <name>]
 #       → vet <ID> against the store (must exist, must not be the live theme) and pin it into
 #         the toml. No build, no push, no theme is created or changed on the store. A `theme list`
 #         that gave no readable answer leaves the id unverifiable and the pin is REFUSED
 #         (`error=theme_unverifiable`): a pin persists in the config, so fail-open is not an
-#         option here — retry when the store answers.
+#         option here — retry when the store answers. (create/refresh --pin-toml under the same
+#         outage: the pin still proceeds when the run did — refresh for a recorded session theme or
+#         with --allow-unverified, --reuse only with the flag; otherwise refresh_unverifiable /
+#         reuse_unverifiable — and is flagged warn=pin_unvetted.)
 #       → theme_id=… store=… pinned_toml=… pin=… pin_env=… commented_dupes=… [superseded_theme_id=…]
+#
+#   --allow-unverified  (create & refresh) — overrides `refresh_unverifiable` and `reuse_unverifiable`
+#       ONLY: a `theme list` that never answered no longer blocks a `refresh --theme <ID>` of an id no
+#       workspace records, or a `create --reuse` name lookup. It never touches the live-theme guard
+#       (a listing that answered and names <ID> live still refuses) and never the dev-theme guard.
+#       A developer decision, passed by hand — the pipeline never adds it.
+#   --allow-dev-theme  (create & refresh) — the sole override of `dev_theme_write_refused`: push onto
+#       the shared dev theme deliberately. The live-theme guard is never overridable. Developer-only,
+#       never passed unattended. `pin` rejects both flags (`unknown arg`).
 #
 #   --build-script <name>  (create & refresh, default `build`) — the ./package.json script the
 #       build runs, as `npm run <name>`. A script NAME, never a command line: the skills that
@@ -74,8 +92,10 @@
 #       [superseded_theme_id=…]` to the output; on failure only `pinned_toml=`, `pin=failed`,
 #       `pin_error=…` are printed. A pin failure here is reported but never fails the run: the
 #       theme exists by then and a caller that lost its id cannot clean it up. When `theme list`
-#       gave no readable answer the pin still proceeds (unlike standalone `pin` — the theme is
-#       real by now and its id must reach the config) but `warn=pin_unvetted` precedes the pin keys.
+#       gave no readable answer the pin still proceeds when the run did: refresh for a recorded
+#       session theme or with --allow-unverified, --reuse only with the flag (otherwise
+#       refresh_unverifiable / reuse_unverifiable); a fresh `create` always proceeds — the theme is
+#       real by pin time and its id must reach the config — flagged `warn=pin_unvetted` before the pin keys.
 #   --env <name>  (pin, and create/refresh WITH --pin-toml — without it the flag would be a silent
 #       no-op, so it is refused: `--env requires --pin-toml`) — the `[environments.<name>]` block
 #       to pin. Default: `dev`, else `development` — by NAME, never by count (a single block under
@@ -87,9 +107,12 @@
 # Pushes retry on a Shopify `Throttled` answer (pauses: $FND_CPT_THROTTLE_WAITS, default "20 60");
 # a throttle that holds is reported as `cause=throttled`.
 # After the overlay push, `create` pulls the settings patterns back off the target and reports
-# `overlay=verified|partial|unverified|skipped` — Shopify silently drops a *.json file whose
+# `overlay=verified|partial|unverified|skipped|empty` — Shopify silently drops a *.json file whose
 # section/block types this branch's code lacks while the push exits 0 (see verify_overlay). Each
 # dropped file prints `warn=overlay_file_dropped file=… [unknown_types=…]`; the run still exits 0.
+# A dev-theme pull that wrote no *.json at all is `error=overlay_pull_failed` on a fresh create
+# (the theme is deleted) and `overlay=empty` + `warn=overlay_empty` on --reuse (nothing overlaid,
+# the theme keeps its settings) — gated before the read-back, independent of the switch below.
 # FND_CPT_OVERLAY_VERIFY=0 skips the read-back; FND_CPT_OVERLAY_VERIFY_WAIT sets its re-check pause.
 # The read-back pulls go through push_retry too, so on a throttled store they can add the
 # $FND_CPT_THROTTLE_WAITS pauses AFTER every piece of real work has already succeeded.
@@ -116,6 +139,10 @@ SETTINGS_PATTERNS=(
 # dependency. Without this the CLI crashes parsing the API's rejection of an invalid asset.
 THEME_DIRS=( assets blocks config layout locales sections snippets templates )
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+[ -f "$SCRIPT_DIR/_shopify-common.sh" ] || { printf 'error=common_lib_not_found path=%s\n' "$SCRIPT_DIR/_shopify-common.sh"; exit 1; }
+. "$SCRIPT_DIR/_shopify-common.sh"
+
 fail() { printf 'error=%s\n' "$1"; exit 1; }
 # a flag that takes a value must not be the last arg — a bare `shift 2` past the end of $@
 # kills the whole script silently under `set -e`, with no error= line for the caller
@@ -131,53 +158,18 @@ command -v jq >/dev/null 2>&1 || fail "jq not found on PATH (install: brew insta
 MODE="${1:-}"; shift || true
 
 # --- parse shopify.theme.toml (token is read but NEVER printed) ---------------
-# TOML scalar reader: handles "…" / '…' / bare values, drops a trailing comment only OUTSIDE quotes,
-# tolerates CRLF. All three shapes occur in real shopify.theme.toml files, and a `"`-only sed
-# (`s/^[^"]*"([^"]*)".*/\1/`) silently returns the WHOLE LINE for the other two — the store then
-# reaches the CLI as `store = 'x'` and a single-quoted password= is exported as the access token.
-# Byte-identical copies live in theme-json.sh and shopify-admin-gql.sh — the plugin installs by git
-# clone, so every script stands alone; keep the three in sync.
-toml_value() { # $1 = key, first uncommented value to stdout (empty when absent)
-  [ -f "$TOML" ] || return 0
-  awk -v k="$1" '
-    BEGIN { SQ = "\047" }
-    /^[ \t]*#/ { next }
-    $0 ~ "^[ \t]*" k "[ \t]*=" {
-      v = $0
-      sub("^[ \t]*" k "[ \t]*=[ \t]*", "", v)
-      q = substr(v, 1, 1)
-      if (q == "\"" || q == SQ) {
-        v = substr(v, 2)
-        p = index(v, q)
-        if (p > 0) v = substr(v, 1, p - 1)
-      } else {
-        h = index(v, "#"); if (h > 0) v = substr(v, 1, h - 1)
-        sub(/[ \t\r]+$/, "", v)
-      }
-      print v; exit
-    }
-  ' "$TOML" 2>/dev/null
-}
-
 DEV_THEME_ID="$(toml_value theme || true)"
 STORE="$(toml_value store || true)"
 # The project's own credential wins: a $SHOPIFY_CLI_THEME_TOKEN exported for ANOTHER project (a common
 # `theme dev` habit) would otherwise authenticate this repo's pushes against that store and die as an
 # opaque CLI 401 naming neither source. The env var is the last resort — which is also the escape
-# hatch for a token this file cannot supply, since a password= that is not token-shaped is not a
-# token and falls through to the file-wide scan.
-TOKEN="$(toml_value password || true)"
-case "$TOKEN" in shp[a-z]*_[A-Za-z0-9]*) ;; *) TOKEN="" ;; esac
-[ -n "$TOKEN" ] || TOKEN="$(grep -oE 'shp[a-z]+_[A-Za-z0-9]+' "$TOML" | head -1 || true)"
+# hatch for a token this file cannot supply.
+TOKEN="$(theme_token_from_toml)"
 [ -n "$TOKEN" ] || TOKEN="${SHOPIFY_CLI_THEME_TOKEN:-}"
 
 [ "$MODE" = pin ] || [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML"
 [ -n "${STORE:-}" ]        || fail "no uncommented \`store = \"...\"\` line in $TOML"
 [ -n "${TOKEN:-}" ]        || fail "no access token (password / shp*_… in $TOML, or \$SHOPIFY_CLI_THEME_TOKEN)"
-
-# `shopify --store` documents the full URL form as valid and real tomls carry it — strip the scheme
-# instead of refusing a supported config.
-STORE="${STORE#http://}"; STORE="${STORE#https://}"; STORE="${STORE%/}"
 
 # A value that cannot be what it claims to be is a typo or a mis-parse, and handing it to the CLI is
 # an opaque failure at best and the WRONG STORE at worst. A malformed dev theme id is the nastier
@@ -188,9 +180,9 @@ if [ "$MODE" != pin ]; then
     fail "invalid_dev_theme_id id='$DEV_THEME_ID' (expected digits — check the \`theme =\` line in $TOML)" ;;
   esac
 fi
-case "$STORE" in ''|*[!A-Za-z0-9.-]*)
-  fail "invalid_store store='$STORE' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL — check the \`store =\` line in $TOML)" ;;
-esac
+# the bare handle is what the CLI gets and what `store=` reports — never the .myshopify.com form
+STORE="$(store_handle "$STORE")" \
+  || fail "invalid_store store='$STORE' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL — check the \`store =\` line in $TOML)"
 
 export SHOPIFY_CLI_THEME_TOKEN="$TOKEN"   # consumed by `shopify`; never echoed
 
@@ -263,31 +255,26 @@ load_theme_list() {
   local raw
   raw="$(shopify theme list --store "$STORE" --json --no-color 2>/dev/null || true)"
   [ -z "$raw" ] || THEME_LIST_SILENT=0
-  # The CLI can print a deprecation/upgrade banner before the JSON, and a banner is enough to make jq
-  # fail on the whole document — which would leave every lookup below (the live-theme guard included)
-  # blind. Drop every byte before the first `[`/`{` — BYTE-anchored, not line-anchored, because a
-  # spinner artifact or stray ANSI can share the JSON's own line (--no-color trims most of it, the cut
-  # handles the rest). Then record whether what remains actually parses: a listing the callers cannot
-  # read is UNKNOWN, never "not the live theme".
-  THEME_LIST="$(printf '%s' "$raw" | awk 'f{print;next} match($0,/[[{]/){print substr($0,RSTART);f=1}')"
+  # A banner before the JSON would leave every lookup below (the live-theme guard included) blind, so
+  # it is trimmed first; then record whether what remains actually parses: a listing the callers
+  # cannot read is UNKNOWN, never "not the live theme".
+  THEME_LIST="$(printf '%s' "$raw" | theme_list_trim)"
   [ -n "$THEME_LIST" ] && printf '%s' "$THEME_LIST" | jq empty >/dev/null 2>&1 && THEME_LIST_OK=1
+  # a store always lists at least its live theme, so valid JSON naming no theme is an outage too —
+  # read as an answer it would clear every id through the "absent id proceeds" branch
+  [ "$THEME_LIST_OK" -eq 1 ] && ! printf '%s' "$THEME_LIST" | jq -e 'any(.. | objects; has("id"))' >/dev/null 2>&1 && THEME_LIST_SILENT=1
   return 0
 }
 # 1 = the CLI answered but nothing parseable came out. A SILENT call (the listing failed) is not this
-# case and must stay non-fatal — a listing outage cannot be allowed to brick every preview refresh.
+# case: it must not brick the refresh of a recorded session theme — anything else is refused as
+# refresh_unverifiable / reuse_unverifiable at the call sites.
 theme_list_unreadable() { [ "$THEME_LIST_SILENT" -eq 0 ] && [ "$THEME_LIST_OK" -ne 1 ]; }
-theme_name_by_id() {
-  load_theme_list
-  printf '%s' "$THEME_LIST" | jq -r --arg id "$1" '.. | objects | select((.id|tostring)==$id) | .name' 2>/dev/null \
-    | head -1 || true
-}
-theme_role_by_id() {
-  # `// empty` so an object that matches the id but has no role yields NOTHING — a printed literal
-  # `null` would satisfy neither guard branch in assert_not_live and silently clear the target
-  load_theme_list
-  printf '%s' "$THEME_LIST" | jq -r --arg id "$1" '.. | objects | select((.id|tostring)==$id) | .role // empty' 2>/dev/null \
-    | head -1 || true
-}
+# the recorded session theme is the one write target a listing outage may not block (every routine
+# refresh is that id); an id lookup across every workspace under ./.claude/tasks, not the skills'
+# per-stream provenance gate. One grep, no pipe: pipefail could turn a recorded id into "unrecorded"
+session_theme_recorded() { grep -qsE "session-theme: $1([^0-9]|\$)" .claude/tasks/*/notes.md 2>/dev/null; }
+theme_name_by_id() { load_theme_list; theme_list_field "$THEME_LIST" "$1" name; }
+theme_role_by_id() { load_theme_list; theme_list_field "$THEME_LIST" "$1" role; }
 theme_found_by_id() { # 0 = the parsed listing contains an object with this id
   load_theme_list
   printf '%s' "$THEME_LIST" | jq -e --arg id "$1" 'any(.. | objects; (.id|tostring)==$id)' >/dev/null 2>&1
@@ -301,17 +288,16 @@ theme_ids_by_name() {
 
 # Never write to the PUBLISHED theme: a mistyped `refresh --theme <id>` or a `--reuse` name colliding
 # with the live theme would push branch code (and then the dev theme's settings) onto the storefront.
-# An EMPTY listing (the call failed) leaves the role unknown and the write proceeds, so a listing
-# outage cannot brick the script — but a listing that came back and cannot be read is refused rather
-# than waved through: that is the one input shape where "no role matched" means nothing. The CLI spells
-# the role lowercase (`live`); `main` is accepted too so a spelling change cannot silently disarm this.
+# An EMPTY listing (the call failed) leaves the role unknown here — the call sites then refuse every
+# target but a recorded session theme (refresh_unverifiable / reuse_unverifiable), so an outage
+# cannot brick a routine refresh yet clears nothing else — and a listing that came back and cannot
+# be read is refused outright: that is the one input shape where "no role matched" means nothing.
 assert_not_live() { # $1 = target theme id
   local role
   role="$(theme_role_by_id "$1" | tr 'A-Z' 'a-z')"
-  case "$role" in
-    live|main)
-      fail "live_theme_write_refused theme=$1 role=$role name=$(theme_name_by_id "$1") — that is the PUBLISHED theme; pass an unpublished/preview theme id" ;;
-  esac
+  if role_is_live "$role"; then
+    fail "live_theme_write_refused theme=$1 role=$role name=$(theme_name_by_id "$1") — that is the PUBLISHED theme; pass an unpublished/preview theme id"
+  fi
   if [ -z "$role" ] && theme_list_unreadable; then
     fail "cli_list_unreadable theme=$1 — \`shopify theme list --json\` returned output that is not JSON, so the live-theme guard cannot clear this target; check \`shopify theme list\` by hand and re-run"
   fi
@@ -323,6 +309,40 @@ assert_not_live() { # $1 = target theme id
     fail "live_role_unreadable theme=$1 — the theme is in \`shopify theme list --json\` but carries no readable role, so the live-theme guard cannot clear it; check the listing by hand and re-run"
   fi
   return 0
+}
+
+# The shared dev theme ids: every id a pin superseded, plus the settings source (the first
+# uncommented `theme =`, file-wide) unless that line is itself pinned — a marker above it in its
+# block, or the uncommented `# fnd:session-theme` tag (pin_toml's `tagged` test). Third reader of
+# the marker/tag shapes after pin_toml and worktree-setup's unpin_toml — change all three
+shared_dev_theme_ids() {
+  local ids v
+  ids="$(awk -v dev="$DEV_THEME_ID" '
+    { sub(/\r$/, "") }
+    /^[ \t]*\[/ { marked = 0; next }
+    /^[ \t]*#[ \t]*theme[ \t]*=/ && /fnd:superseded/ {
+      marked = 1; v = $0
+      sub(/^[ \t]*#[ \t]*theme[ \t]*=[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v); gsub(/["\047 ]/, "", v)
+      print v; next
+    }
+    /^[ \t]*#/ { next }
+    /^[ \t]*theme[ \t]*=/ && !first { first = 1; if (!marked && $0 !~ /#[ \t]*fnd:session-theme[ \t]*$/) print dev }
+  ' "$TOML" 2>/dev/null || true)"
+  for v in $ids; do case "$v" in ''|*[!0-9]*) ;; *) printf '%s\n' "$v" ;; esac; done
+}
+# Toml-based, never role-based: needs no listing, so an outage (and ALLOW_UNVERIFIED) cannot disarm it.
+# The notes exemption covers a hand-written toml id `pin` left as pin=unchanged (no marker, no tag):
+# then DEV_THEME_ID IS the session theme and only the recorded `session-theme:` line says so
+ALLOW_UNVERIFIED=0; ALLOW_DEV_THEME=0
+assert_not_dev_theme() { # $1 = target id, $2 = context name for the message
+  local dev hit=0
+  for dev in $(shared_dev_theme_ids); do [ "$1" = "$dev" ] && hit=1; done
+  [ "$hit" -eq 1 ] || return 0
+  [ "$ALLOW_DEV_THEME" -eq 0 ] || return 0
+  session_theme_recorded "$1" && return 0
+  printf 'error=dev_theme_write_refused theme=%s name=%s — the shopify.theme.toml of this checkout names this id as the shared dev theme (its settings source, or an id a pin superseded — unless you pinned this id by hand) and no workspace under .claude/tasks records it as session-theme; nothing was pushed\n' "$1" "$2"
+  printf 'hint=if this IS your session theme, record it first — `- <date> session-theme: %s (<name>) <preview_url>` in .claude/tasks/<work-id>/notes.md (session-theme.md step 4) — and re-run; otherwise push to a session/preview theme (`create --name "<name>" --reuse --pin-toml` makes one), or pass --allow-dev-theme to overwrite the shared dev theme deliberately\n' "$1"
+  exit 1
 }
 # Tolerant: `2>/dev/null` swallows jq parse errors (load_theme_list decides what an unparseable
 # listing means), and `|| true` neutralizes a no-match / SIGPIPE pipeline status so a
@@ -349,30 +369,8 @@ push_fail() { # $1 = error code; $2 (create only) = theme name to scan for a thi
   exit 1
 }
 
-# Domaine env files (process env wins): nearest .claude/domaine.env above cwd — tuning keys only,
-# see below — then the global ~/.config/domaine/env; same dialect as scripts/env-file.cjs, read per
-# key, never sourced. Fills an UNSET variable only — a set-but-empty FND_CPT_THROTTLE_WAITS
-# (retrying disabled) stays exactly that, and an empty value in the file cannot be expressed here.
-domaine_env() {
-  local d="$PWD" f v
-  # PROJECT_OK, mirrored by hand from scripts/env-file.cjs: the project file is committable by a
-  # client repo, so only these tuning keys are read from it. Every other switch — the guards, the
-  # spill dir, the verify gates — comes from the environment or the global file, default-deny.
-  case "$1" in
-    FND_LEAN|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET)
-      while :; do
-        f="$d/.claude/domaine.env"
-        if [ -f "$f" ]; then
-          v="$(grep -m1 "^$1=" "$f" 2>/dev/null | cut -d= -f2-)"
-          [ -n "$v" ] && { printf '%s' "$v"; return; }
-          break
-        fi
-        [ "$d" = "/" ] && break
-        d="$(dirname "$d")"
-      done ;;
-  esac
-  grep -m1 "^$1=" "${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env" 2>/dev/null | cut -d= -f2- || true
-}
+# Domaine env files fill an UNSET variable only — a set-but-empty FND_CPT_THROTTLE_WAITS (retrying
+# disabled) stays exactly that.
 if [ -z "${FND_CPT_THROTTLE_WAITS+x}" ]; then
   _v="$(domaine_env FND_CPT_THROTTLE_WAITS)"; [ -n "$_v" ] && FND_CPT_THROTTLE_WAITS="$_v"
 fi
@@ -483,7 +481,8 @@ overlay_fail() { # $1 = error code, $2 = target theme, $3 = reused, $4 = stderr 
 #   $2 = "true" if the theme pre-existed (--reuse), else we created it this run.
 # Three outcomes, and the caller acts differently on each: applied (return 0, carrying the read-back
 # verdict in $OVERLAY_VERIFY — verified/partial/unverified/skipped, see verify_overlay, so an applied
-# overlay is not automatically a complete one); DRIFT — the dev theme
+# overlay is not automatically a complete one; `empty` = a --reuse target the pull gave nothing to
+# overlay, left as it was); DRIFT — the dev theme
 # is "ahead" of this branch (e.g. its templates/product.json references a block type whose schema
 # lives only in another feature branch) so Shopify rejects that template, and since a partial overlay
 # would give a misleading preview the only fix is duplicating the dev theme MANUALLY in the admin (a
@@ -503,6 +502,12 @@ overlay_settings() {
     reason="$(grep -iE 'error|does not exist|forbidden|denied' "$perr" | head -1 | sed -E 's/^[[:space:]]*//' || true)"
     [ -n "$reason" ] || reason="$(first_line "$perr")"
     overlay_fail overlay_pull_failed "$target" "$reused" "$perr" "$reason"
+  fi
+  # a pull that exits 0 but wrote no settings file is not an overlay — pushing nothing would then
+  # read back as "nothing missing" and stamp overlay=verified on a preview carrying default settings
+  if [ -z "$(find "$tmp" -type f -name '*.json' 2>/dev/null | head -1)" ]; then
+    [ "$reused" = "true" ] || overlay_fail overlay_pull_failed "$target" "$reused" "$perr" "the pull wrote no settings file (0 *.json) — check that dev_theme_id is a real theme with customizer content"
+    OVERLAY_VERIFY="empty"; rm -f "$perr"; return 0
   fi
   if push_retry "$perr" shopify theme push --store "$STORE" --theme "$target" --path "$tmp" --nodelete "${ONLY[@]}"; then
     rm -f "$perr"
@@ -545,7 +550,8 @@ overlay_settings() {
 # drift (where the push failed wholesale) everything else landed, the cheap recovery is fixing the
 # one file via theme-json.sh set, and deleting the theme would only replay the same silent drop on
 # the next create. A verify PULL that fails must never fail a run whose pushes all succeeded —
-# that is overlay=unverified. FND_CPT_OVERLAY_VERIFY=0 skips the read-back (overlay=skipped).
+# that is overlay=unverified. FND_CPT_OVERLAY_VERIFY=0 skips the read-back (overlay=skipped); a
+# pull that produced nothing to overlay never reaches it (overlay=empty, see overlay_settings).
 OVERLAY_VERIFY="skipped"; OVERLAY_DROPPED=""
 overlay_missing() { # $1 = overlay source dir, $2 = pulled-back dir → source *.json absent from $2
   ( cd "$1" && find . -type f -name '*.json' ) | sed 's|^\./||' | while IFS= read -r f; do
@@ -623,6 +629,10 @@ EOF
 # still sees the failure spelled out in the stream.
 print_overlay_keys() {
   printf 'overlay=%s\n' "$OVERLAY_VERIFY"
+  if [ "$OVERLAY_VERIFY" = "empty" ]; then
+    printf 'warn=overlay_empty dev_theme_id=%s — the settings pull off the dev theme returned no *.json, so nothing was overlaid and the theme keeps its previous settings; check that the id is a real theme with customizer content, then re-run with --reuse (a re-push overwrites)\n' "$DEV_THEME_ID"
+    return 0
+  fi
   if [ "$OVERLAY_VERIFY" = "unverified" ]; then
     printf 'warn=overlay_unverified — the read-back pull failed, so whether every settings file landed is unknown; spot-check a key template (theme-json.sh get) before trusting the preview\n'
     return 0
@@ -955,15 +965,15 @@ case "$MODE" in
     # Numeric ids only, for the same reason refresh insists: assert_not_live vets by id, so a NAME
     # would sail past the guard with role="" — and here it would then be written into the config
     # every later run and `shopify theme dev` resolve against.
-    case "$TARGET" in *[!0-9]*)
-      fail "invalid_theme_id theme='$TARGET' (pin takes a numeric theme id — the id of an existing unpublished/preview theme; to create one use \`create --name \"<name>\" --reuse --pin-toml\`)" ;;
+    case "$TARGET" in *[!0-9]*|0*)
+      fail "invalid_theme_id theme='$TARGET' (pin takes a numeric theme id without leading zeros — the id of an existing unpublished/preview theme; to create one use \`create --name \"<name>\" --reuse --pin-toml\`)" ;;
     esac
     load_theme_list
     # A pin PERSISTS in the config and a wrong one poisons every later run — so unlike
     # create/refresh, where a listing outage only risks one push, standalone `pin` must not
-    # fail open: no readable listing, no vetting, no pin. (create/refresh --pin-toml still
-    # proceed under an outage — their theme is real by pin time and the caller must not lose
-    # its id — but say so with warn=pin_unvetted.)
+    # fail open: no readable listing, no vetting, no pin. (create/refresh --pin-toml that got
+    # past refresh_unverifiable / reuse_unverifiable still pin under an outage — their theme is
+    # real by pin time and the caller must not lose its id — but say so with warn=pin_unvetted.)
     [ "$THEME_LIST_OK" -eq 1 ] || \
       fail "theme_unverifiable theme=$TARGET store=$STORE — \`shopify theme list --json\` gave no readable answer, so the id cannot be vetted, and a pin persists in the config; re-run when the store answers — nothing was changed"
     assert_not_live "$TARGET"
@@ -990,6 +1000,8 @@ case "$MODE" in
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
         --pin-toml) PIN=1; shift ;;
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
+        --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
+        --allow-dev-theme) ALLOW_DEV_THEME=1; shift ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
@@ -1006,7 +1018,8 @@ case "$MODE" in
       load_theme_list
       # "no match" out of a listing we cannot read is not "the theme does not exist" — creating here
       # would add a SECOND theme with this name, which the ambiguity check then blocks on every later
-      # run until a human deletes one in the admin
+      # run until a human deletes one in the admin. A listing that never answered is the same hazard.
+      [ "$THEME_LIST_SILENT" -eq 0 ] || [ "$ALLOW_UNVERIFIED" -eq 1 ] || fail "reuse_unverifiable name=\"$NAME\" — \`shopify theme list --json\` gave no answer, so the name cannot be resolved; re-running would create a duplicate theme of that name; re-run when the store answers, or pass --allow-unverified to create without the lookup"
       ! theme_list_unreadable || fail "cli_list_unreadable — \`shopify theme list --json\` returned output that is not JSON, so \"$NAME\" cannot be resolved; re-running would create a duplicate theme of that name"
       MATCHES_RAW="$(theme_ids_by_name "$NAME" || true)"
       # keep only digit ids, so a `null` from an odd list shape can never become a push target
@@ -1016,7 +1029,7 @@ case "$MODE" in
       [ "$NRAW" -eq "$NMATCH" ] || fail "unusable_theme_id — a theme named \"$NAME\" is listed with a non-numeric id ($(printf '%s' "$MATCHES_RAW" | tr '\n' ' ')); pass --theme <id> to \`refresh\` it instead of creating a duplicate"
       [ "$NMATCH" -le 1 ] || fail "ambiguous_name — $NMATCH themes on $STORE are named \"$NAME\" (ids: $(printf '%s' "$MATCHES" | tr '\n' ' ')); pass --theme <id> to \`refresh\` the one you mean"
       EXISTING="$(printf '%s' "$MATCHES" | head -1)"
-      if [ -n "$EXISTING" ]; then assert_not_live "$EXISTING"; fi
+      if [ -n "$EXISTING" ]; then assert_not_live "$EXISTING"; assert_not_dev_theme "$EXISTING" "$NAME"; fi
     fi
 
     start_settings_pull
@@ -1091,6 +1104,8 @@ case "$MODE" in
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
         --pin-toml) PIN=1; shift ;;
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
+        --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
+        --allow-dev-theme) ALLOW_DEV_THEME=1; shift ;;
         *) fail "unknown arg: $1" ;;
       esac
     done
@@ -1101,11 +1116,18 @@ case "$MODE" in
     # Numeric ids only: the CLI resolves a NAME here too, but assert_not_live vets by id — a name
     # target would sail past the guard with role="" and let the CLI resolve it to any theme,
     # the published one included. Names go through create --reuse, which resolves and vets them.
-    case "$TARGET" in *[!0-9]*)
-      fail "invalid_theme_id theme='$TARGET' (refresh takes a numeric theme id — for a theme NAME use \`create --name \"<name>\" --reuse\`, which resolves and vets it)" ;;
+    # `0*` too: every id-keyed guard below compares strings, so `0111` would clear nothing yet push
+    case "$TARGET" in *[!0-9]*|0*)
+      fail "invalid_theme_id theme='$TARGET' (refresh takes a numeric theme id without leading zeros — for a theme NAME use \`create --name \"<name>\" --reuse\`, which resolves and vets it)" ;;
     esac
     load_theme_list
+    if [ "$THEME_LIST_SILENT" -eq 1 ] && [ "$ALLOW_UNVERIFIED" -eq 0 ] && ! session_theme_recorded "$TARGET"; then
+      printf 'error=refresh_unverifiable theme=%s store=%s — `shopify theme list --json` gave no answer, so the live-theme guard cannot clear this id and no workspace under .claude/tasks records it as session-theme; nothing was pushed\n' "$TARGET" "$STORE"
+      printf 'hint=re-run when the store answers, or pass --allow-unverified to push to %s without the store check (developer decision, never unattended)\n' "$TARGET"
+      exit 1
+    fi
     assert_not_live "$TARGET"
+    assert_not_dev_theme "$TARGET" "$(theme_name_by_id "$TARGET")"
 
     run_build
     TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
@@ -1132,6 +1154,6 @@ case "$MODE" in
     ;;
 
   *)
-    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] | refresh --theme <id> [--no-build] [--build-script <name>] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] | pin --theme <id> [--env <name>]"
+    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme] | refresh --theme <id> [--no-build] [--build-script <name>] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme] | pin --theme <id> [--env <name>]"
     ;;
 esac
