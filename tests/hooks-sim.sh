@@ -1741,7 +1741,8 @@ assert_eq M85-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbe
 smallb="$(node -e 'const a=[];for(let i=0;i<60;i++)a.push({id:i,name:"row "+i,val:"vvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",dead:null});process.stdout.write(JSON.stringify(a))')"
 in="$(jq -n --arg o "$ovfmsg" --arg b "$smallb" '{tool_name:"mcp__plugin_fnd_chrome-devtools-mcp__evaluate_script",tool_response:{content:[{type:"text",text:$b},{type:"text",text:$o}]}}')"
 DBG="$TMP/dbg-m85b"; mkdir -p "$DBG"
-run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_BUDGET_MS=1 FND_MCP_SLIM_STUB_BYTES=1200 >/dev/null
+# -1 = expired before the first block: a few-KB sibling cannot trip a 1 ms budget on its own
+run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_BUDGET_MS=-1 FND_MCP_SLIM_STUB_BYTES=1200 >/dev/null
 assert_eq M85b-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "platform-overflow"
 assert_eq M85b-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "passthrough"
 assert_eq M85b-spill    "$(jq -r '.spill'    "$DBG/$DBGLOG" 2>/dev/null)" "$OVFP"

@@ -317,6 +317,9 @@ function budgetMs() {
   const raw = String(process.env.FND_MCP_SLIM_BUDGET_MS ?? '').trim();
   if (raw === '0') return 0;
   const n = Number(raw);
+  // Negative = already expired when the pipeline starts: the deterministic form of a tiny ceiling
+  // (a 1 ms budget on a small payload is a coin toss), for diagnostics and the sims.
+  if (Number.isFinite(n) && n < 0) return -1;
   return Number.isFinite(n) && n > 0 ? n : BUDGET_MS_DEFAULT;
 }
 
