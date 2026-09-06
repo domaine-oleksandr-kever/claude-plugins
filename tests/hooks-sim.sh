@@ -2645,15 +2645,15 @@ done
 
 
 # D11: the output-dir literal is spelled in THREE places — plugin.json's playwright args, the
-# guard's PLAYWRIGHT_OUT_REL (which decides where a relative filename resolves) and json-slim's
-# PLAYWRIGHT_OUT_REL (which decides what the TTL sweep prunes). Drift in any one of them means
+# guard's PLAYWRIGHT_OUT_REL (which decides where a relative filename resolves) and the one in
+# scripts/scratch-hygiene.cjs (which decides what the TTL sweep prunes). Drift in any one means
 # either the guard denies the server's own scratch dir or the sweep prunes nothing while the
 # checkout fills up. The literal is read out of the manifest, never copied here.
 PW_ARGS="$(jq -r '.mcpServers.playwright.args | join(" ")' "$MANIFEST")"
 PW_OUT="$(jq -r '.mcpServers.playwright.args | index("--output-dir") as $i | if $i == null then "" else .[$i+1] end' "$MANIFEST")"
 assert_contains D11-manifest-flag "$PW_ARGS" '--output-dir'
 if [ -n "$PW_OUT" ] && [ "$PW_OUT" != "null" ]; then ok; else bad D11-manifest-value "playwright args carry no --output-dir value"; fi
-assert_eq D11-json-slim "$(node -e 'process.stdout.write(require(process.argv[1]).PLAYWRIGHT_OUT_REL)' "$ROOT/plugins/fnd/scripts/json-slim.cjs")" "$PW_OUT"
+assert_eq D11-hygiene "$(node -e 'process.stdout.write(require(process.argv[1]).PLAYWRIGHT_OUT_REL)' "$ROOT/plugins/fnd/scripts/scratch-hygiene.cjs")" "$PW_OUT"
 if grep -Fq "'$PW_OUT'" "$SPG"; then ok; else bad D11-guard "scratch-path-guard.cjs does not carry the manifest's output dir '$PW_OUT'"; fi
 
 # D12: the bundled server's allow is bought with "swept AND git-excluded", and both halves used to
@@ -2679,6 +2679,25 @@ git -C "$DGIT2" init -q 2>/dev/null
 out="$(run_spg_at "$DGIT2" "$(spg_ev_at "$DGIT2" "$PWU" filename shot.png)")"
 assert_contains D12c-deny "$out" '"permissionDecision":"deny"'
 assert_eq       D12c-no-stamp "$(excl_hits "$DGIT2")" 0
+# D12d: the stamp moved out of json-slim.cjs into scripts/scratch-hygiene.cjs precisely so this
+# guard — PreToolUse on every screenshot — stops loading a ~230 KB compressor to call a 34-line
+# function. Nothing else measures module load, and a stray require would be silent, so probe it
+# with the M87 Module._load hook on the allow event that DOES owe a stamp — and re-assert the
+# stamp in the same breath, so 'no compressor' can never be bought by doing nothing at all.
+D12D="$TMP/d12d-probe.cjs"
+cat > "$D12D" <<'PROBEJS'
+const Module = require('module');
+const load = Module._load;
+Module._load = function (request) {
+  if (/json-slim\.cjs$/.test(request)) process.stderr.write('LOADED-JSON-SLIM\n');
+  return load.apply(this, arguments);
+};
+PROBEJS
+DGIT3="$TMP/dgit3"; mkdir -p "$DGIT3/.claude/fnd-tmp/playwright"
+git -C "$DGIT3" init -q 2>/dev/null
+d12d_err="$(printf '%s' "$(nopath_ev "$PW" | jq -c --arg cwd "$DGIT3" '.cwd = $cwd')" | (cd "$DGIT3" && node --require "$D12D" "$SPG" 2>&1 >/dev/null))"
+assert_absent D12d-guard-no-compressor "$d12d_err" "LOADED-JSON-SLIM"
+assert_eq     D12d-still-stamped "$(excl_hits "$DGIT3")" 1
 
 # ═══ A — hooks/spill-access.sh, the PreToolUse spill-read recorder ══════════
 # Measurement only: --report called a platform-overflow whale MISSED whenever the agent read the

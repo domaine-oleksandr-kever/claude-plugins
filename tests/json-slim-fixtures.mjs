@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-// Fixture suite for plugins/fnd/scripts/json-slim.cjs — the shape-driven JSON compressor.
+// Fixture suite for plugins/fnd/scripts/json-slim.cjs — the shape-driven JSON compressor — and for
+// plugins/fnd/scripts/scratch-hygiene.cjs, the project-side playwright sweep + `.git/info/exclude`
+// stamp that used to live inside it. The split is nearly invisible to the rows below: the project
+// pass is still reached through `J.sweepSpills`, so the pw-* rows assert the WIRING as well as the
+// code, while the excl-* rows and the PLAYWRIGHT_OUT_REL reads address `H` — scratch-hygiene — direct.
 // Three groups:
 //   parity:*   — the array-crush port vs Headroom's vendored SmartCrusher fixtures (byte-parity,
 //                or value-parity where JS number semantics prevent byte-parity);
@@ -29,10 +33,16 @@ delete process.env.FND_NOGAIN_MEMO;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SLIM = path.join(ROOT, 'plugins/fnd/scripts/json-slim.cjs');
+const HYG = path.join(ROOT, 'plugins/fnd/scripts/scratch-hygiene.cjs');
 const PARITY = path.join(ROOT, 'tests/parity/fixtures/smart_crusher');
 const FIX = path.join(ROOT, 'tests/fixtures');
 const require = createRequire(import.meta.url);
 const J = require(SLIM);
+const H = require(HYG);
+// A mis-rename in the 246-site J.→T. sweep would otherwise surface as a bare TypeError with no row
+// name, or — for a row that reads a symbol as a value — as a silent `undefined`. Fail at the call
+// site, named. Symbols pass straight through so util.inspect/`then`-probing cannot trip it.
+const T = new Proxy(J.__test, { get(o, k) { if (typeof k === 'symbol') return o[k]; if (!(k in o)) throw new Error(`unknown __test export: ${String(k)}`); return o[k]; } });
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -44,17 +54,90 @@ const eq = (name, actual, expected) =>
     `\n  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(actual)}`);
 const normJSON = (s) => { try { return JSON.stringify(JSON.parse(s)); } catch { return s; } };
 
+// ------------------------------------------------------------------- module surface --
+// Nothing else enumerates what json-slim.cjs publishes, so an export added by habit, or one deleted
+// with the row that used it, would leave nothing red. Two pins: the production half (what another
+// FILE may reach for) and the test half. TEST_EXPORTS is one named constant on purpose — later
+// changes to the __test list have a single edit site, which is the difference between a stale pin
+// and a green suite.
+const TEST_EXPORTS = ['DEFAULTS', 'FENCE_DOMINANCE', 'FENCE_PREAMBLE_MAX', 'FENCE_TRAILER_MAX', 'FIRST_FRACTION', 'LAST_FRACTION', 'MAX_ITEMS_AFTER_CRUSH', 'PRESERVE_CHANGE_POINTS', 'STREAM_GATE_BYTES', 'STRING_LIMIT', 'VARIANCE_THRESHOLD', 'adfStage', 'analyseDictArray', 'blockText', 'capOutput', 'classifyArray', 'computeOptimalK', 'crush', 'crushValue', 'debugEnabled', 'debugLevel', 'detectJsx', 'envelopeInner', 'evalJqExpr', 'findOpeningFence', 'foldSiblings', 'isErrorShape', 'jqExprWhole', 'nogainMemoEnabled', 'nogainStamp', 'nogainStatePath', 'noiseStage', 'normalizeJqPath', 'numberPrecisionLoss', 'parseJqExpr', 'parseJsonl', 'profileLines', 'soleBlockText', 'spillTtlHours', 'streamProfile', 'truncateStage', 'unwrapFence', 'whaleGuidance', 'whaleGuideEnabled', 'whaleGuideFullBlock', 'whaleGuideStamp', 'whaleGuideStatePath', 'whaleReminder'];
+// a new top-level export must declare itself production or move under __test
+eq('exports-surface', Object.keys(J).sort(), ['JQ_GRAMMAR_HINT', '__test', 'buildReport', 'debugLog', 'shapeHint', 'slim', 'sweepSpills', 'writeSpill']);
+// a deleted __test export silently turns its rows into TypeErrors; pin the list instead. Read
+// J.__test here, not the T Proxy, so the row measures the module and not the trap.
+eq('exports-test-surface', Object.keys(J.__test).sort(), TEST_EXPORTS);
+// The hygiene module's whole surface, for the same reason: it is small enough that an export added
+// by habit would never be noticed, and its only suite is this one.
+eq('hygiene-exports-surface', Object.keys(H).sort(), ['PLAYWRIGHT_OUT_REL', 'ensureFndTmpExcluded', 'sweepPlaywrightOut']);
+// …and it must not drag the compressor back in. The point of the split is that the PreToolUse
+// screenshot guard loads ~110 lines instead of a ~230 KB module graph, and a stray top-level require
+// here would undo that silently — nothing else measures module load. Same Module._load probe
+// hooks-sim M87 uses, in a child so the parent's already-loaded json-slim cannot mask it.
+{
+  const probe = `const M=require('module'),l=M._load;M._load=function(r){if(/json-slim\\.cjs$/.test(r))process.stderr.write('LOADED-JSON-SLIM\\n');return l.apply(this,arguments)};require(process.argv[1]);`;
+  const r = spawnSync(process.execPath, ['-e', probe, HYG], { encoding: 'utf8' });
+  check('hygiene-no-compressor', r.status === 0 && !/LOADED-JSON-SLIM/.test(r.stderr || ''),
+    `scratch-hygiene.cjs must not require json-slim.cjs (status ${r.status}): ${(r.stderr || '').trim()}`);
+}
+// DEFAULTS is the CONFIGURABLE surface: every key here must have a real override somewhere (the hook,
+// the CLI, or a fixture). Numbers the code merely reads belong in json-slim.cjs's tuning-constants
+// block, where they cost no property lookup per crushed item and read as what they are.
+eq('defaults-surface', Object.keys(T.DEFAULTS).sort(),
+  ['cliOutCap', 'deadline', 'dropRestLinks', 'enableMarker', 'envelope', 'fence', 'jsonl', 'jsx', 'log', 'markerMode', 'minItemsToAnalyze', 'preserveFields', 'spillDir', 'trace']);
+// The M11 tuning numbers are otherwise pinned only IMPLICITLY, by m11-dominance-guard /
+// m11-preamble-window / m11-long-trailer having been built around these exact values.
+check('fence-const-pinned', T.FENCE_DOMINANCE === 0.8 && T.FENCE_PREAMBLE_MAX === 3 && T.FENCE_TRAILER_MAX === 3,
+  `M11 fence constants drifted: dominance=${T.FENCE_DOMINANCE} preamble=${T.FENCE_PREAMBLE_MAX} trailer=${T.FENCE_TRAILER_MAX}`);
+// Without this row these two are pinned by nothing at all — STREAM_GATE_BYTES only implicitly, by the
+// cases that actually write an 8 MB file, and it is interpolated into two user-facing messages.
+check('tuning-consts-pinned', T.STRING_LIMIT === 200 && T.STREAM_GATE_BYTES === 8 * 1024 * 1024,
+  `stringLimit/stream-gate constants drifted: STRING_LIMIT=${T.STRING_LIMIT} STREAM_GATE_BYTES=${T.STREAM_GATE_BYTES}`);
+
 // ---------------------------------------------------------------- parity vs Headroom --
 // Every fixture: gate (was_modified) + strategy string must match exactly; the compressed body
 // must be byte-identical, OR (where JS 0.0→0 float re-serialization prevents it) value-identical.
+//
+// Every config key upstream recorded is CLASSIFIED, in exactly one of the three tables below. The
+// harness used to map two of the fifteen and ignore the rest, so five more passed only because
+// upstream's corpus happens to carry this port's own default values — a diet could have moved
+// firstFraction or varianceThreshold and stayed green. Mirrors the log side's LOG_CFG_MAP.
+const CRUSH_CFG_MAP = { min_items_to_analyze: 'minItemsToAnalyze' }; // still a DEFAULTS knob (the CLI overrides it)
+// Recorded upstream values this port keeps as tuning CONSTANTS: assert agreement, don't feed them in.
+const CRUSH_CONST_MAP = {
+  max_items_after_crush: 'MAX_ITEMS_AFTER_CRUSH', first_fraction: 'FIRST_FRACTION', last_fraction: 'LAST_FRACTION',
+  variance_threshold: 'VARIANCE_THRESHOLD', preserve_change_points: 'PRESERVE_CHANGE_POINTS',
+};
+// Recorded by upstream, with nothing on this side to pin them against — each with its reason.
+const CRUSH_UPSTREAM_ONLY = {
+  dedup_identical_items: "upstream's dedup switch — this port dedups unconditionally in the string sampler (json-slim.cjs sampleStringArray, \"dedup by raw string\") and never consults a flag, so there is nothing to pin",
+  enabled: 'upstream master switch — our port is only called when compression is wanted',
+  factor_out_constants: 'constant-factoring transform, not ported (false in every fixture)',
+  include_summaries: 'per-field summary emission, not ported (false in every fixture)',
+  min_tokens_to_crush: 'upstream pre-crush token budget — the recorded fixtures show it is NOT applied inside SmartCrusher.crush (a 9-byte input is recorded was_modified:true), so it is inert here; the fnd side gates by bytes at the hook',
+  similarity_threshold: 'query-similarity path — the non-deterministic half we did not port',
+  toin_confidence_threshold: 'ditto',
+  uniqueness_threshold: 'ditto',
+  use_feedback_hints: 'query/feedback path — deliberately not ported',
+};
+const seenCfgKeys = new Set();
+const unclassifiedCfgKeys = [];
+const constDisagreements = [];
 let byteExact = 0, valueOnly = 0;
 for (const f of readdirSync(PARITY).filter((x) => x.endsWith('.json')).sort()) {
   const fx = JSON.parse(readFileSync(path.join(PARITY, f), 'utf8'));
   const c = fx.config || {};
   const cfg = { markerMode: 'ccr' };
-  if (c.max_items_after_crush != null) cfg.maxItemsAfterCrush = c.max_items_after_crush;
-  if (c.min_items_to_analyze != null) cfg.minItemsToAnalyze = c.min_items_to_analyze;
-  const got = J.crush(fx.input.content, cfg);
+  for (const k of Object.keys(c)) {
+    seenCfgKeys.add(k);
+    if (CRUSH_CFG_MAP[k]) { if (c[k] != null) cfg[CRUSH_CFG_MAP[k]] = c[k]; continue; }
+    if (CRUSH_CONST_MAP[k]) {
+      if (c[k] !== T[CRUSH_CONST_MAP[k]]) constDisagreements.push(`${f}: ${k}=${JSON.stringify(c[k])} but ${CRUSH_CONST_MAP[k]}=${JSON.stringify(T[CRUSH_CONST_MAP[k]])}`);
+      continue;
+    }
+    if (k in CRUSH_UPSTREAM_ONLY) continue;
+    unclassifiedCfgKeys.push(`${f}: ${k}`);
+  }
+  const got = T.crush(fx.input.content, cfg);
   const exp = fx.output;
   const okMod = got.wasModified === exp.was_modified;
   const okStrat = got.strategy === exp.strategy;
@@ -68,41 +151,53 @@ for (const f of readdirSync(PARITY).filter((x) => x.endsWith('.json')).sort()) {
 }
 check('parity:byte-exact-count', byteExact === 16, `byte-exact ${byteExact}/17 (expected 16)`);
 check('parity:value-parity-count', valueOnly === 1, `value-only ${valueOnly}/17 (expected 1: time_series float)`);
+check('parity:cfg-keys-classified', unclassifiedCfgKeys.length === 0,
+  `unclassified fixture config key '${unclassifiedCfgKeys[0]}' — map it, pin it against a constant, or declare it upstream-only with a reason`);
+check('parity:const-agreement', constDisagreements.length === 0,
+  `this port's constant disagrees with upstream's recorded config — ${constDisagreements[0]}`);
+{
+  const mapped = [...Object.keys(CRUSH_CFG_MAP), ...Object.keys(CRUSH_CONST_MAP)];
+  const rotten = mapped.filter((k) => !seenCfgKeys.has(k));
+  check('parity:map-not-rotten', rotten.length === 0,
+    `mapping entries no fixture carries any more: ${rotten.join(', ')} — a refreshed corpus must not leave a dead mapping`);
+}
+check('parity:cfg-coverage-count', seenCfgKeys.size === 15,
+  `saw ${seenCfgKeys.size} distinct fixture config keys, expected 15 — a refreshed corpus that ADDS a knob must trip the classifier, not pass silently`);
 
 // ---------------------------------------------------------------- classifyArray --
-eq('classify-dict', J.classifyArray([{ a: 1 }, { a: 2 }]), 'DictArray');
-eq('classify-number', J.classifyArray([1, 2, 3]), 'NumberArray');
-eq('classify-string', J.classifyArray(['a', 'b']), 'StringArray');
-eq('classify-bool', J.classifyArray([true, false]), 'BoolArray');
-eq('classify-nested', J.classifyArray([[], [1]]), 'NestedArray');
-eq('classify-empty', J.classifyArray([]), 'Empty');
-eq('classify-mixed-scalar', J.classifyArray([1, 'a']), 'MixedArray');
-eq('classify-mixed-null', J.classifyArray([{ a: 1 }, null]), 'MixedArray'); // one null → Mixed
+eq('classify-dict', T.classifyArray([{ a: 1 }, { a: 2 }]), 'DictArray');
+eq('classify-number', T.classifyArray([1, 2, 3]), 'NumberArray');
+eq('classify-string', T.classifyArray(['a', 'b']), 'StringArray');
+eq('classify-bool', T.classifyArray([true, false]), 'BoolArray');
+eq('classify-nested', T.classifyArray([[], [1]]), 'NestedArray');
+eq('classify-empty', T.classifyArray([]), 'Empty');
+eq('classify-mixed-scalar', T.classifyArray([1, 'a']), 'MixedArray');
+eq('classify-mixed-null', T.classifyArray([{ a: 1 }, null]), 'MixedArray'); // one null → Mixed
 
 // ---------------------------------------------------------------- computeOptimalK --
-eq('optk-small', J.computeOptimalK(['a', 'b', 'c'], 1, 3, 15), 3); // n<=8 → n
-eq('optk-diverse', J.computeOptimalK(Array.from({ length: 40 }, (_, i) => `x${i}`), 1, 3, 15), 15);
-eq('optk-identical', J.computeOptimalK(Array.from({ length: 40 }, () => 'same'), 1, 3, 15), 3); // uniq=1 → clamp 3
+eq('optk-small', T.computeOptimalK(['a', 'b', 'c'], 1, 3, 15), 3); // n<=8 → n
+eq('optk-diverse', T.computeOptimalK(Array.from({ length: 40 }, (_, i) => `x${i}`), 1, 3, 15), 15);
+eq('optk-identical', T.computeOptimalK(Array.from({ length: 40 }, () => 'same'), 1, 3, 15), 3); // uniq=1 → clamp 3
 
 // ---------------------------------------------------------------- crush gates --
-check('crush-nonjson-passthrough', (() => { const r = J.crush('not json at all'); return !r.wasModified && r.strategy === 'passthrough' && r.compressed === 'not json at all'; })(), 'non-JSON must pass verbatim');
-check('crush-compact-nochange', (() => { const r = J.crush('[1,2,3]'); return !r.wasModified && r.strategy === 'passthrough'; })(), 'already-compact short array → unmodified');
-check('crush-reflow-modified', (() => { const r = J.crush('[1, 2, 3]'); return r.wasModified && r.strategy === 'passthrough'; })(), 'spaced short array → reflow flips wasModified');
-check('crush-small-array-passthrough', (() => { const r = J.crush(JSON.stringify([{ id: 1 }, { id: 2 }, { id: 3 }])); return normJSON(r.compressed) === normJSON(JSON.stringify([{ id: 1 }, { id: 2 }, { id: 3 }])); })(), 'array < minItemsToAnalyze not crushed');
+check('crush-nonjson-passthrough', (() => { const r = T.crush('not json at all'); return !r.wasModified && r.strategy === 'passthrough' && r.compressed === 'not json at all'; })(), 'non-JSON must pass verbatim');
+check('crush-compact-nochange', (() => { const r = T.crush('[1,2,3]'); return !r.wasModified && r.strategy === 'passthrough'; })(), 'already-compact short array → unmodified');
+check('crush-reflow-modified', (() => { const r = T.crush('[1, 2, 3]'); return r.wasModified && r.strategy === 'passthrough'; })(), 'spaced short array → reflow flips wasModified');
+check('crush-small-array-passthrough', (() => { const r = T.crush(JSON.stringify([{ id: 1 }, { id: 2 }, { id: 3 }])); return normJSON(r.compressed) === normJSON(JSON.stringify([{ id: 1 }, { id: 2 }, { id: 3 }])); })(), 'array < minItemsToAnalyze not crushed');
 
 // a 20-item same-shape dict array with an error signal → smart_sample + sentinel marker
 const errArray = Array.from({ length: 20 }, (_, i) => ({ id: i, status: i % 7 === 0 ? 'error' : 'ok', msg: `row ${i}` }));
-const crushed = J.crush(JSON.stringify(errArray), { markerMode: 'spill', spillDir: mkdtempSync(path.join(tmpdir(), 'jslim-')) });
+const crushed = T.crush(JSON.stringify(errArray), { markerMode: 'spill', spillDir: mkdtempSync(path.join(tmpdir(), 'jslim-')) });
 check('crush-smart-sample', crushed.strategy.startsWith('smart_sample('), `strategy=${crushed.strategy}`);
 const crushedOut = JSON.parse(crushed.compressed);
-check('crush-kept-under-budget', crushedOut.filter((x) => !x._ccr_dropped).length <= 15, 'kept ≤ maxItemsAfterCrush');
+check('crush-kept-under-budget', crushedOut.filter((x) => !x._ccr_dropped).length <= 15, 'kept ≤ MAX_ITEMS_AFTER_CRUSH');
 check('crush-marker-present', crushedOut.some((x) => x._ccr_dropped && /^<<full=.+ \d+_rows_offloaded>>$/.test(x._ccr_dropped)), 'spill marker shape');
 check('crush-error-rows-kept', [0, 7, 14].every((i) => crushedOut.some((x) => x.id === i && x.status === 'error')), 'error rows preserved');
 
 // ---------------------------------------------------------------- spill round-trip --
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-spill-'));
-  const r = J.crush(JSON.stringify(errArray), { markerMode: 'spill', spillDir: dir });
+  const r = T.crush(JSON.stringify(errArray), { markerMode: 'spill', spillDir: dir });
   const marker = JSON.parse(r.compressed).find((x) => x._ccr_dropped)._ccr_dropped;
   const m = marker.match(/^<<full=(.+) (\d+)_rows_offloaded>>$/);
   check('spill-marker-parses', !!m, marker);
@@ -119,28 +214,28 @@ check('crush-error-rows-kept', [0, 7, 14].every((i) => crushedOut.some((x) => x.
 // ---------------------------------------------------------------- ccr hash reproducible --
 {
   const items = Array.from({ length: 30 }, (_, i) => ({ id: i, status: i % 5 === 0 ? 'error' : 'ok', msg: `line ${i}` }));
-  const a = J.crush(JSON.stringify(items), { markerMode: 'ccr' });
-  const b = J.crush(JSON.stringify(items), { markerMode: 'ccr' });
+  const a = T.crush(JSON.stringify(items), { markerMode: 'ccr' });
+  const b = T.crush(JSON.stringify(items), { markerMode: 'ccr' });
   check('ccr-hash-deterministic', a.compressed === b.compressed, 'ccr marker must be stable across runs');
   check('ccr-hash-shape', /<<ccr:[0-9a-f]{12} \d+_rows_offloaded>>/.test(a.compressed), 'ccr marker shape');
 }
 
 // ---------------------------------------------------------------- pipeline stages --
 const adfDoc = { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello ' }, { type: 'text', text: 'world', marks: [{ type: 'strong' }] }] }] };
-eq('stage-adf', J.adfStage({ description: adfDoc }, J.DEFAULTS), { description: 'hello **world**' });
-eq('stage-noise-null', J.noiseStage({ a: 1, b: null }, J.DEFAULTS), { a: 1 });
-eq('stage-noise-empty', J.noiseStage({ a: 1, b: {}, c: [] }, J.DEFAULTS), { a: 1 });
-eq('stage-noise-avatar', J.noiseStage({ name: 'x', avatarUrls: { '48x48': 'http://a' }, iconUrl: 'http://i' }, J.DEFAULTS), { name: 'x' });
+eq('stage-adf', T.adfStage({ description: adfDoc }, T.DEFAULTS), { description: 'hello **world**' });
+eq('stage-noise-null', T.noiseStage({ a: 1, b: null }, T.DEFAULTS), { a: 1 });
+eq('stage-noise-empty', T.noiseStage({ a: 1, b: {}, c: [] }, T.DEFAULTS), { a: 1 });
+eq('stage-noise-avatar', T.noiseStage({ name: 'x', avatarUrls: { '48x48': 'http://a' }, iconUrl: 'http://i' }, T.DEFAULTS), { name: 'x' });
 
 // dropRestLinks (M3): a `self` REST-navigation URL is noise; a `self` holding real content is not.
-eq('stage-noise-self-rest', J.noiseStage({ id: '1', self: 'https://x.atlassian.net/rest/api/2/status/3' }, J.DEFAULTS), { id: '1' });
-eq('stage-noise-self-confluence', J.noiseStage({ _links: { self: 'https://x.atlassian.net/wiki/rest/api/content/9', webui: '/pages/9' } }, J.DEFAULTS), { _links: { webui: '/pages/9' } });
-eq('stage-noise-self-content', J.noiseStage({ self: 'my note about myself' }, J.DEFAULTS), { self: 'my note about myself' }); // non-REST string survives
-eq('stage-noise-self-nonatlassian', J.noiseStage({ name: 'hook', self: 'https://host/api/v2/webhooks/5' }, J.DEFAULTS), { name: 'hook', self: 'https://host/api/v2/webhooks/5' }); // bare /api/ (non-Atlassian actionable URL) survives
-eq('stage-noise-self-object', J.noiseStage({ self: { title: 'me' } }, J.DEFAULTS), { self: { title: 'me' } }); // non-string survives
-eq('stage-noise-self-off', J.noiseStage({ self: 'https://x.atlassian.net/rest/api/2/status/3' }, { ...J.DEFAULTS, dropRestLinks: false }), { self: 'https://x.atlassian.net/rest/api/2/status/3' });
-check('stage-truncate-datauri', (() => { const big = 'data:image/png;base64,' + 'A'.repeat(500); const r = J.truncateStage({ img: big }, J.DEFAULTS); return r.img.includes('…(len=') && r.img.length < 100; })(), 'data-uri clipped');
-eq('stage-truncate-short', J.truncateStage({ s: 'short string' }, J.DEFAULTS), { s: 'short string' });
+eq('stage-noise-self-rest', T.noiseStage({ id: '1', self: 'https://x.atlassian.net/rest/api/2/status/3' }, T.DEFAULTS), { id: '1' });
+eq('stage-noise-self-confluence', T.noiseStage({ _links: { self: 'https://x.atlassian.net/wiki/rest/api/content/9', webui: '/pages/9' } }, T.DEFAULTS), { _links: { webui: '/pages/9' } });
+eq('stage-noise-self-content', T.noiseStage({ self: 'my note about myself' }, T.DEFAULTS), { self: 'my note about myself' }); // non-REST string survives
+eq('stage-noise-self-nonatlassian', T.noiseStage({ name: 'hook', self: 'https://host/api/v2/webhooks/5' }, T.DEFAULTS), { name: 'hook', self: 'https://host/api/v2/webhooks/5' }); // bare /api/ (non-Atlassian actionable URL) survives
+eq('stage-noise-self-object', T.noiseStage({ self: { title: 'me' } }, T.DEFAULTS), { self: { title: 'me' } }); // non-string survives
+eq('stage-noise-self-off', T.noiseStage({ self: 'https://x.atlassian.net/rest/api/2/status/3' }, { ...T.DEFAULTS, dropRestLinks: false }), { self: 'https://x.atlassian.net/rest/api/2/status/3' });
+check('stage-truncate-datauri', (() => { const big = 'data:image/png;base64,' + 'A'.repeat(500); const r = T.truncateStage({ img: big }, T.DEFAULTS); return r.img.includes('…(len=') && r.img.length < 100; })(), 'data-uri clipped');
+eq('stage-truncate-short', T.truncateStage({ s: 'short string' }, T.DEFAULTS), { s: 'short string' });
 
 // ---------------------------------------------------------------- safety rails --
 check('safe-error-shape', (() => { const env = JSON.stringify({ errors: [{ message: 'boom' }], data: null }); const r = J.slim(env); return !r.wasModified && r.error === true && r.output === env; })(), 'GraphQL error envelope untouched');
@@ -151,44 +246,35 @@ check('safe-nonjson', (() => { const r = J.slim('plain text log line'); return !
 {
   // both arrays are crushable (a rare "error" status is the signal); preserving one exempts it
   const mk = (tag) => Array.from({ length: 30 }, (_, i) => ({ id: i, status: i % 6 === 0 ? 'error' : 'ok', v: `${tag}${i}` }));
-  const out = J.crushValue({ keepme: mk('x'), other: mk('y') }, { preserveFields: { keepme: true }, markerMode: 'ccr' });
+  const out = T.crushValue({ keepme: mk('x'), other: mk('y') }, { preserveFields: { keepme: true }, markerMode: 'ccr' });
   check('preserve-untouched', out.keepme.length === 30 && !out.keepme.some((x) => x._ccr_dropped), 'preserved key not crushed');
   check('preserve-other-crushed', out.other.length < 30, 'non-preserved key still crushed');
 }
 
-// ---------------------------------------------------------------- TOON flag --
-{
-  const uniform = Array.from({ length: 5 }, (_, i) => ({ a: i, b: `v${i}` }));
-  const on = J.toonStage(uniform);
-  check('toon-tabularizes', on && on._toon === 'a,b' && Array.isArray(on.rows) && on.rows.length === 5, 'uniform flat array → tabular');
-  const off = J.slim(JSON.stringify({ rows: uniform }));
-  check('toon-off-by-default', !off.output.includes('_toon'), 'toon must be off unless flagged');
-}
-
 // ---------------------------------------------------------------- review regressions --
 // finding 1: long prose / ADF-derived markdown is NEVER truncated (only opaque blobs are)
-check('trunc-prose-survives', (() => { const prose = 'Acceptance criteria: ' + 'word '.repeat(400); return J.truncateStage({ desc: prose }, J.DEFAULTS).desc === prose; })(), 'long prose must survive');
-check('trunc-datauri-clipped', (() => J.truncateStage({ img: 'data:image/png;base64,' + 'A'.repeat(400) }, J.DEFAULTS).img.includes('…(len='))(), 'data-uri still clipped');
-check('trunc-data-prose-survives', (() => { const s = 'data: ' + 'the following steps are required. '.repeat(12); return J.truncateStage({ note: s }, J.DEFAULTS).note === s; })(), 'prose starting "data:" is not a data-URI → survives');
+check('trunc-prose-survives', (() => { const prose = 'Acceptance criteria: ' + 'word '.repeat(400); return T.truncateStage({ desc: prose }, T.DEFAULTS).desc === prose; })(), 'long prose must survive');
+check('trunc-datauri-clipped', (() => T.truncateStage({ img: 'data:image/png;base64,' + 'A'.repeat(400) }, T.DEFAULTS).img.includes('…(len='))(), 'data-uri still clipped');
+check('trunc-data-prose-survives', (() => { const s = 'data: ' + 'the following steps are required. '.repeat(12); return T.truncateStage({ note: s }, T.DEFAULTS).note === s; })(), 'prose starting "data:" is not a data-URI → survives');
 check('slim-adf-desc-survives', (() => { const prose = 'Acceptance criteria for this ticket. '.repeat(60); const big = { fields: { description: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: prose }] }] } } }; return J.slim(JSON.stringify(big)).output.includes(prose.trim()); })(), 'ADF-derived prose survives slim (not clipped)');
 
 // finding 2: spill-write failure keeps the array uncrushed (no dangling handle to a missing file)
 {
   const badFile = path.join(mkdtempSync(path.join(tmpdir(), 'jslim-ro-')), 'not-a-dir');
   require('node:fs').writeFileSync(badFile, 'x'); // a FILE — using it as a spill parent dir fails
-  const r = J.crush(JSON.stringify(errArray), { markerMode: 'spill', spillDir: path.join(badFile, 'sub') });
+  const r = T.crush(JSON.stringify(errArray), { markerMode: 'spill', spillDir: path.join(badFile, 'sub') });
   const out = JSON.parse(r.compressed);
   check('spill-fail-keeps-rows', out.length === 20 && !out.some((x) => x._ccr_dropped), 'spill failure → rows kept, no dangling marker');
 }
 
 // finding 3: MCP isError envelope guarded; empty errors:[] is a success (still compressed)
-check('err-mcp-iserror', J.isErrorShape({ isError: true, content: [{ type: 'text', text: 'boom' }] }) === true, 'MCP isError envelope guarded');
-check('err-empty-errors-ok', J.isErrorShape({ data: { x: 1 }, errors: [] }) === false, 'empty errors:[] is not an envelope');
+check('err-mcp-iserror', T.isErrorShape({ isError: true, content: [{ type: 'text', text: 'boom' }] }) === true, 'MCP isError envelope guarded');
+check('err-empty-errors-ok', T.isErrorShape({ data: { x: 1 }, errors: [] }) === false, 'empty errors:[] is not an envelope');
 check('err-empty-errors-compresses', (() => { const big = { errors: [], rows: Array.from({ length: 30 }, (_, i) => ({ id: i, status: i % 5 ? 'ok' : 'error', v: `r${i}` })) }; const r = J.slim(JSON.stringify(big)); return !r.error && r.ratio > 0; })(), 'success payload with errors:[] still compressed');
 
 // finding 4: large arrays must not RangeError from Math.min/max spread
-check('big-number-array-nocrash', (() => { try { return typeof J.crush(JSON.stringify(Array.from({ length: 200000 }, (_, i) => i * 2))).compressed === 'string'; } catch { return false; } })(), '200k number array');
-check('big-dict-array-nocrash', (() => { try { return typeof J.crush(JSON.stringify(Array.from({ length: 120000 }, (_, i) => ({ id: i * 3, status: i % 100 ? 'ok' : 'error' })))).compressed === 'string'; } catch { return false; } })(), '120k dict array');
+check('big-number-array-nocrash', (() => { try { return typeof T.crush(JSON.stringify(Array.from({ length: 200000 }, (_, i) => i * 2))).compressed === 'string'; } catch { return false; } })(), '200k number array');
+check('big-dict-array-nocrash', (() => { try { return typeof T.crush(JSON.stringify(Array.from({ length: 120000 }, (_, i) => ({ id: i * 3, status: i % 100 ? 'ok' : 'error' })))).compressed === 'string'; } catch { return false; } })(), '120k dict array');
 
 // ---------------------------------------------------------------- reduction (M1 exit gate) --
 // Fixtures are committed alongside this suite — assert directly so a missing one fails loudly.
@@ -270,9 +356,6 @@ check('reduction:figma≥0.70', ratio('figma-node-rest.json') >= 0.70, `figma ra
   const pass = run('plain text, not json');
   check('b4.4-stdin-passthrough-no-spill', pass.originals.length === 0 && pass.stdout.trim() === 'plain text, not json',
     `a lossless passthrough must write no original: ${JSON.stringify(pass.originals)}`);
-  // --no-spill is the explicit opt-out (it already disables the crush marker's spill).
-  const off = run(lossy, ['--no-spill']);
-  check('b4.4-stdin-nospill-flag', off.originals.length === 0, `--no-spill must not write an original: ${JSON.stringify(off.originals)}`);
   // Under `--jq` the copy holds the NARROWED subtree the stages consumed, not the piped stream — it is
   // still the complete undo for the body being printed, but calling it "the original" sends a caller
   // that reads it looking for a stream it will not find.
@@ -304,13 +387,13 @@ check('reduction:figma≥0.70', ratio('figma-node-rest.json') >= 0.70, `figma ra
 // ---------------------------------------------------------------- spill-TTL sweep (M5) --
 // spillTtlHours contract: default 24, exactly 0 disables, ANY invalid/negative → 24 (never a
 // past cutoff that would mass-delete fresh spills).
-eq('ttl-default', J.spillTtlHours(undefined), 24);
-eq('ttl-empty', J.spillTtlHours(''), 24);
-eq('ttl-valid', J.spillTtlHours('12'), 12);
-eq('ttl-fractional', J.spillTtlHours('0.5'), 0.5);
-eq('ttl-zero-disables', J.spillTtlHours('0'), 0);
-eq('ttl-nonnumeric', J.spillTtlHours('abc'), 24);
-eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become "everything is old"
+eq('ttl-default', T.spillTtlHours(undefined), 24);
+eq('ttl-empty', T.spillTtlHours(''), 24);
+eq('ttl-valid', T.spillTtlHours('12'), 12);
+eq('ttl-fractional', T.spillTtlHours('0.5'), 0.5);
+eq('ttl-zero-disables', T.spillTtlHours('0'), 0);
+eq('ttl-nonnumeric', T.spillTtlHours('abc'), 24);
+eq('ttl-negative', T.spillTtlHours('-5'), 24); // a negative TTL must not become "everything is old"
 
 // sweepSpills: seed a stale spill (mtime 1970) + a fresh one + a foreign-named + the debug log,
 // then sweep with the default 24 h TTL. Only our-prefixed stale files go; the summary reports 1.
@@ -340,7 +423,7 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-pw-'));
   const proj = mkdtempSync(path.join(tmpdir(), 'jslim-pwproj-'));
-  const out = path.join(proj, J.PLAYWRIGHT_OUT_REL);
+  const out = path.join(proj, H.PLAYWRIGHT_OUT_REL);
   mkdirSync(path.join(out, 'session-1'), { recursive: true });
   const seed = (rel, old) => { const f = path.join(out, rel); writeFileSync(f, 'x'); if (old) utimesSync(f, 1000, 1000); return f; };
   const stale = seed('page-1970.png', true);
@@ -372,7 +455,7 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
 // the second call as on the first.
 {
   const proj = mkdtempSync(path.join(tmpdir(), 'jslim-pwproj-nospill-'));
-  const out = path.join(proj, J.PLAYWRIGHT_OUT_REL);
+  const out = path.join(proj, H.PLAYWRIGHT_OUT_REL);
   mkdirSync(out, { recursive: true });
   const stale = path.join(out, 'page-1970.png'); writeFileSync(stale, 'x'); utimesSync(stale, 1000, 1000);
   const missing = path.join(tmpdir(), 'jslim-does-not-exist-' + Date.now());
@@ -386,7 +469,7 @@ eq('ttl-negative', J.spillTtlHours('-5'), 24); // a negative TTL must not become
 // Symlinks are not followed on the way IN: the walk deletes by mtime with no name filter, so a
 // symlinked component would aim it at the link's target. The plugin's own worktree flow symlinks
 // `<wt>/.claude/tasks`, so a part-symlinked `.claude` subtree is a live shape, not a hypothetical.
-for (const [label, linkAt] of [['playwright', J.PLAYWRIGHT_OUT_REL], ['dotclaude', '.claude']]) {
+for (const [label, linkAt] of [['playwright', H.PLAYWRIGHT_OUT_REL], ['dotclaude', '.claude']]) {
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-pwlink-'));
   const proj = mkdtempSync(path.join(tmpdir(), 'jslim-pwlinkproj-'));
   const victim = mkdtempSync(path.join(tmpdir(), 'jslim-pwvictim-'));
@@ -414,11 +497,11 @@ if (gitOk) {
     const proj = mkdtempSync(path.join(tmpdir(), 'jslim-excl-'));
     gitInit(proj);
     const excl = path.join(proj, '.git/info/exclude');
-    J.ensureFndTmpExcluded(proj);
+    H.ensureFndTmpExcluded(proj);
     const body = readFileSync(excl, 'utf8');
     const hits = body.split('\n').filter((l) => l.trim() === '/.claude/fnd-tmp/').length;
     check('excl-appended', hits === 1, `exactly one exclude line expected, got ${hits}`);
-    J.ensureFndTmpExcluded(proj);
+    H.ensureFndTmpExcluded(proj);
     const hits2 = readFileSync(excl, 'utf8').split('\n').filter((l) => l.trim() === '/.claude/fnd-tmp/').length;
     check('excl-idempotent', hits2 === 1, `a second call must not append again, got ${hits2}`);
     rmSync(proj, { recursive: true, force: true });
@@ -432,14 +515,14 @@ if (gitOk) {
     gitInit(proj);
     const rel = 'packages/theme';
     mkdirSync(path.join(proj, rel, '.claude/fnd-tmp'), { recursive: true });
-    J.ensureFndTmpExcluded(path.join(proj, rel));
+    H.ensureFndTmpExcluded(path.join(proj, rel));
     const body = readFileSync(path.join(proj, '.git/info/exclude'), 'utf8');
     check('excl-subdir-prefixed', body.split('\n').some((l) => l.trim() === `/${rel}/.claude/fnd-tmp/`),
       `the stamp must carry the project's prefix inside the repo: ${JSON.stringify(body)}`);
     const ci = spawnSync('git', ['check-ignore', '-q', `${rel}/.claude/fnd-tmp`], { cwd: proj, encoding: 'utf8' });
     check('excl-subdir-ignored', ci.status === 0, `git must actually ignore the stamped dir, status ${ci.status}`);
     // …and a second call adds nothing — the stamp it just wrote is now git's own answer.
-    J.ensureFndTmpExcluded(path.join(proj, rel));
+    H.ensureFndTmpExcluded(path.join(proj, rel));
     const hits = readFileSync(path.join(proj, '.git/info/exclude'), 'utf8')
       .split('\n').filter((l) => l.trim() === `/${rel}/.claude/fnd-tmp/`).length;
     check('excl-subdir-idempotent', hits === 1, `a second call must not append again, got ${hits}`);
@@ -452,7 +535,7 @@ if (gitOk) {
     gitInit(proj);
     const excl = path.join(proj, '.git/info/exclude');
     writeFileSync(excl, '# mine\nscratch.txt');
-    J.ensureFndTmpExcluded(proj);
+    H.ensureFndTmpExcluded(proj);
     const lines = readFileSync(excl, 'utf8').split('\n');
     check('excl-bridges-newline', lines.includes('scratch.txt') && lines.includes('/.claude/fnd-tmp/'),
       `the developer's last pattern must survive intact: ${JSON.stringify(lines)}`);
@@ -463,7 +546,7 @@ if (gitOk) {
     const proj = mkdtempSync(path.join(tmpdir(), 'jslim-excl-ignored-'));
     gitInit(proj);
     writeFileSync(path.join(proj, '.gitignore'), '.claude\n');
-    J.ensureFndTmpExcluded(proj);
+    H.ensureFndTmpExcluded(proj);
     const body = readFileSync(path.join(proj, '.git/info/exclude'), 'utf8');
     check('excl-skips-ignored', !body.includes('fnd-tmp'), 'no line may be added when git already ignores the dir');
     rmSync(proj, { recursive: true, force: true });
@@ -473,7 +556,7 @@ if (gitOk) {
 {
   const proj = mkdtempSync(path.join(tmpdir(), 'jslim-excl-nogit-'));
   let threw = false;
-  try { J.ensureFndTmpExcluded(proj); } catch (_) { threw = true; }
+  try { H.ensureFndTmpExcluded(proj); } catch (_) { threw = true; }
   check('excl-nogit-silent', !threw && !existsSync(path.join(proj, '.git')), 'outside a repo the stamp is a silent no-op');
   rmSync(proj, { recursive: true, force: true });
 }
@@ -508,7 +591,7 @@ if (gitOk) {
   // `stages` is opt-in (cfg.trace) — the debug feed sets it; a plain slim() call leaves it empty.
   const r = J.slim(readFileSync(path.join(FIX, 'jira-issue-ELC-104.json'), 'utf8'), { trace: true });
   check('slim-stages-array', Array.isArray(r.stages) && r.stages.includes('adf') && r.stages.includes('crush'), `stages ${JSON.stringify(r.stages)}`);
-  check('slim-stages-subset', r.stages.every((s) => ['adf', 'noise', 'truncate', 'crush', 'toon'].includes(s)), `unexpected stage in ${JSON.stringify(r.stages)}`);
+  check('slim-stages-subset', r.stages.every((s) => ['adf', 'noise', 'truncate', 'crush'].includes(s)), `unexpected stage in ${JSON.stringify(r.stages)}`);
   eq('slim-stages-off-empty', J.slim(readFileSync(path.join(FIX, 'jira-issue-ELC-104.json'), 'utf8')).stages, []); // trace off ⇒ no bookkeeping
   eq('slim-nonjson-reason', J.slim('plain text, not json').reason, 'non-json');
   eq('slim-nonjson-stages', J.slim('plain text, not json').stages, []);
@@ -522,21 +605,21 @@ if (gitOk) {
 {
   const prev = process.env.FND_MCP_SLIM_DEBUG;
   const set = (v) => { if (v === undefined) delete process.env.FND_MCP_SLIM_DEBUG; else process.env.FND_MCP_SLIM_DEBUG = v; };
-  set(undefined); check('dbg-enabled-unset', J.debugEnabled() === false, 'unset → off');
-  set('1');       check('dbg-enabled-1', J.debugEnabled() === true, '1 → on');
-  set('true');    check('dbg-enabled-true', J.debugEnabled() === true, 'true → on');
-  set('0');       check('dbg-enabled-0', J.debugEnabled() === false, '0 → off');
-  set('false');   check('dbg-enabled-false', J.debugEnabled() === false, 'false → off');
+  set(undefined); check('dbg-enabled-unset', T.debugEnabled() === false, 'unset → off');
+  set('1');       check('dbg-enabled-1', T.debugEnabled() === true, '1 → on');
+  set('true');    check('dbg-enabled-true', T.debugEnabled() === true, 'true → on');
+  set('0');       check('dbg-enabled-0', T.debugEnabled() === false, '0 → off');
+  set('false');   check('dbg-enabled-false', T.debugEnabled() === false, 'false → off');
   // Any integer ≥ 2 must mean the full feed — never off.
-  set(undefined); check('b4.10c-level-unset', J.debugLevel() === 0, 'unset → level 0');
-  set('0');       check('b4.10c-level-0', J.debugLevel() === 0, '0 → level 0');
-  set('1');       check('b4.10c-level-1', J.debugLevel() === 1, '1 → level 1');
-  set('true');    check('b4.10c-level-true', J.debugLevel() === 1, 'true → level 1');
-  set('on');      check('b4.10c-level-on', J.debugLevel() === 1, 'on → level 1');
-  set('2');       check('b4.10c-level-2', J.debugLevel() === 2 && J.debugEnabled() === true, '2 → level 2 (and still enabled)');
-  set(' 2 ');     check('b4.10c-level-2-padded', J.debugLevel() === 2, 'whitespace-padded 2 → level 2');
-  set('3');       check('b4.10c-level-3', J.debugLevel() === 2, 'any integer ≥2 → the full feed, never off');
-  set('verbose'); check('b4.10c-level-junk', J.debugLevel() === 0, 'an unknown value → off (never a partial feed)');
+  set(undefined); check('b4.10c-level-unset', T.debugLevel() === 0, 'unset → level 0');
+  set('0');       check('b4.10c-level-0', T.debugLevel() === 0, '0 → level 0');
+  set('1');       check('b4.10c-level-1', T.debugLevel() === 1, '1 → level 1');
+  set('true');    check('b4.10c-level-true', T.debugLevel() === 1, 'true → level 1');
+  set('on');      check('b4.10c-level-on', T.debugLevel() === 1, 'on → level 1');
+  set('2');       check('b4.10c-level-2', T.debugLevel() === 2 && T.debugEnabled() === true, '2 → level 2 (and still enabled)');
+  set(' 2 ');     check('b4.10c-level-2-padded', T.debugLevel() === 2, 'whitespace-padded 2 → level 2');
+  set('3');       check('b4.10c-level-3', T.debugLevel() === 2, 'any integer ≥2 → the full feed, never off');
+  set('verbose'); check('b4.10c-level-junk', T.debugLevel() === 0, 'an unknown value → off (never a partial feed)');
   set(prev);
 }
 
@@ -805,7 +888,7 @@ check('m8-format-absent-on-error', J.slim(JSON.stringify({ errors: [{ message: '
   const r = J.slim(JSON.stringify({ rows: errArray }), { spillDir: dir, spillSink: sink });
   check('b4.10a-sink-crush', sink.length === 1 && existsSync(sink[0]) && path.basename(sink[0]).startsWith('fnd-crush-') &&
     r.output.includes(`full=${sink[0]}`), `the crush spill must reach the sink: ${JSON.stringify(sink)}`);
-  check('b4.10a-sink-not-in-defaults', J.DEFAULTS.spillSink === undefined, 'spillSink must never be a DEFAULTS key (shared array reference)');
+  check('b4.10a-sink-not-in-defaults', T.DEFAULTS.spillSink === undefined, 'spillSink must never be a DEFAULTS key (shared array reference)');
   // A fenced body's inner slim() gets `{...cfg, fence:false}` — the sink must survive that spread
   // (and every other one), or the fence path silently loses its spill paths. The subject is the SINK, so
   // the fence's byte WIN is deliberately not part of the assertion: this fixture wins by ~114 B, and the
@@ -818,7 +901,7 @@ check('m8-format-absent-on-error', J.slim(JSON.stringify({ errors: [{ message: '
     path.basename(fenceSink[0]).startsWith('fnd-crush-'), `a fenced body's inner crush spill must reach the caller's sink: ${JSON.stringify(fenceSink)}`);
   // Gate A's own spill lands there too (the CLI's exit line then names every file it wrote).
   const capSink = [];
-  const cap = J.capOutput({ output: JSON.stringify({ a: 'x'.repeat(200) }), bytesIn: 1000, bytesOut: 300, ratio: 0.7 },
+  const cap = T.capOutput({ output: JSON.stringify({ a: 'x'.repeat(200) }), bytesIn: 1000, bytesOut: 300, ratio: 0.7 },
     path.join(dir, 'src.json'), { cliOutCap: 50, spillDir: dir, spillSink: capSink });
   check('b4.10a-sink-gate-a', !!cap && capSink.length === 1 && capSink[0] === cap.spillOut, `Gate A's spill must reach the sink: ${JSON.stringify(capSink)}`);
   // A passthrough writes nothing, so the sink stays empty (an empty sink is what makes an ORPHAN
@@ -834,14 +917,14 @@ check('m8-format-absent-on-error', J.slim(JSON.stringify({ errors: [{ message: '
 // it into the normal pipeline instead of slim()'s non-json handback. Strict gate: every non-blank
 // line an object/array, ≥2 rows; one failing line rejects the whole payload (a truncated bulk file
 // falls back to the path handback — no partial salvage).
-check('m9-jsonl-all-objects', (() => { const r = J.parseJsonl('{"id":1,"h":"a"}\n{"id":2,"h":"b"}\n{"id":3,"h":"c"}'); return Array.isArray(r) && r.length === 3 && r[0].id === 1; })(), 'all-object lines → rows');
-check('m9-jsonl-array-rows', (() => { const r = J.parseJsonl('[1,2]\n[3,4]'); return Array.isArray(r) && r.length === 2; })(), 'object-or-array lines → rows (arrays count)');
-check('m9-jsonl-prose-line-null', J.parseJsonl('{"id":1}\nnot json here\n{"id":2}') === null, 'one prose line among JSON → null');
-check('m9-jsonl-bare-scalar-null', J.parseJsonl('42\ntrue\n7') === null, 'bare-scalar lines (42/true) → null, never swallowed as data');
-check('m9-jsonl-bare-null-null', J.parseJsonl('{"id":1}\nnull\n{"id":2}') === null, 'a bare null line is not a data row → null');
-check('m9-jsonl-single-line-null', J.parseJsonl('{"only":1}') === null, 'a single line → null (≥2 rows required)');
-check('m9-jsonl-blank-only-null', J.parseJsonl('\n  \n\t\n') === null, 'no non-blank lines → null');
-check('m9-jsonl-bom-trailing-blanks', (() => { const r = J.parseJsonl('\uFEFF{"id":1}\n{"id":2}\n\n   \n'); return Array.isArray(r) && r.length === 2; })(), 'BOM + trailing blank/whitespace lines → ok');
+check('m9-jsonl-all-objects', (() => { const r = T.parseJsonl('{"id":1,"h":"a"}\n{"id":2,"h":"b"}\n{"id":3,"h":"c"}'); return Array.isArray(r) && r.length === 3 && r[0].id === 1; })(), 'all-object lines → rows');
+check('m9-jsonl-array-rows', (() => { const r = T.parseJsonl('[1,2]\n[3,4]'); return Array.isArray(r) && r.length === 2; })(), 'object-or-array lines → rows (arrays count)');
+check('m9-jsonl-prose-line-null', T.parseJsonl('{"id":1}\nnot json here\n{"id":2}') === null, 'one prose line among JSON → null');
+check('m9-jsonl-bare-scalar-null', T.parseJsonl('42\ntrue\n7') === null, 'bare-scalar lines (42/true) → null, never swallowed as data');
+check('m9-jsonl-bare-null-null', T.parseJsonl('{"id":1}\nnull\n{"id":2}') === null, 'a bare null line is not a data row → null');
+check('m9-jsonl-single-line-null', T.parseJsonl('{"only":1}') === null, 'a single line → null (≥2 rows required)');
+check('m9-jsonl-blank-only-null', T.parseJsonl('\n  \n\t\n') === null, 'no non-blank lines → null');
+check('m9-jsonl-bom-trailing-blanks', (() => { const r = T.parseJsonl('\uFEFF{"id":1}\n{"id":2}\n\n   \n'); return Array.isArray(r) && r.length === 2; })(), 'BOM + trailing blank/whitespace lines → ok');
 
 // slim() on a JSONL string → the array flows through noise+crush; output is ONE JSON array, not
 // JSONL. Synthetic 500-row bulk-shape product dump (M1 pattern; no committed fixture) — repetitive
@@ -906,7 +989,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   const arr = Array.from({ length: 30 }, (_, i) => ({ id: i, name: `entity-${i}`, blob: 'x'.repeat(40) }));
   const output = JSON.stringify(arr);
   const res = { output, bytesIn: 500000, bytesOut: Buffer.byteLength(output), ratio: 1 - Buffer.byteLength(output) / 500000 };
-  const cap = J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 100, spillDir: dir });
+  const cap = T.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 100, spillDir: dir });
   check('m9b-capA-fires', !!cap && typeof cap.handback === 'string' && typeof cap.spillOut === 'string', `capOutput must fire over cap: ${JSON.stringify(cap)}`);
   check('m9b-capA-stats-line', /→ .*bytes/.test(cap.handback) && cap.handback.includes('30 rows kept'), `stats line / rows-kept missing:\n${cap.handback}`);
   check('m9b-capA-first-row', cap.handback.includes('first row') && cap.handback.includes('"id":0'), 'first-row shape sample missing');
@@ -919,8 +1002,8 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
     && /<jq-path>: dot paths \(\.a\.b, \.a\[0\]\), '\[\]' iteration, ',' multi-select, '\| keys' \/ '\| length'/.test(cap.handback),
     `--jq narrow hint missing/unreworded:\n${cap.handback}`);
   check('m9b-capA-spill-roundtrips', existsSync(cap.spillOut) && readFileSync(cap.spillOut, 'utf8') === output, 'spill must hold the exact slimmed output');
-  check('m9b-capA-undercap-null', J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10_000_000, spillDir: dir }) === null, '≤ cap → null (caller prints the body unchanged)');
-  check('m9b-capA-stdin-null', J.capOutput(res, null, { cliOutCap: 100, spillDir: dir }) === null, 'no fileArg (stdin) → null even over cap (no path to point at)');
+  check('m9b-capA-undercap-null', T.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10_000_000, spillDir: dir }) === null, '≤ cap → null (caller prints the body unchanged)');
+  check('m9b-capA-stdin-null', T.capOutput(res, null, { cliOutCap: 100, spillDir: dir }) === null, 'no fileArg (stdin) → null even over cap (no path to point at)');
   rmSync(dir, { recursive: true, force: true });
 }
 // spill-failure → null so the CLI falls back to printing (never lose the result)
@@ -929,7 +1012,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   writeFileSync(badParent, 'x'); // a FILE — using it as a spill parent dir fails
   const output = JSON.stringify(Array.from({ length: 10 }, (_, i) => ({ id: i })));
   const res = { output, bytesIn: 999999, bytesOut: Buffer.byteLength(output), ratio: 0.9 };
-  check('m9b-capA-spill-fail-null', J.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10, spillDir: path.join(badParent, 'sub') }) === null, 'a spill-write failure returns null → CLI prints the body (never lose the result)');
+  check('m9b-capA-spill-fail-null', T.capOutput(res, '/some/bulk.jsonl', { cliOutCap: 10, spillDir: path.join(badParent, 'sub') }) === null, 'a spill-write failure returns null → CLI prints the body (never lose the result)');
 }
 // M12: the one-token example is only emitted when the CLI's own dot-walk can actually address that
 // key. A key holding a dot/bracket splits or normalizes into something else (`weird.key` → two
@@ -940,7 +1023,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-capAkey-'));
   const capFor = (obj) => {
     const output = JSON.stringify(obj);
-    return J.capOutput({ output, bytesIn: 500000, bytesOut: Buffer.byteLength(output), ratio: 0.9 }, '/some/in.json', { cliOutCap: 2, spillDir: dir });
+    return T.capOutput({ output, bytesIn: 500000, bytesOut: Buffer.byteLength(output), ratio: 0.9 }, '/some/in.json', { cliOutCap: 2, spillDir: dir });
   };
   for (const [label, obj] of [
     ['dotted', { 'weird.key': 1, b: 2 }],
@@ -968,7 +1051,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
 {
   const good = Array.from({ length: 50 }, (_, i) => JSON.stringify({ id: i, status: i % 2 ? 'ACTIVE' : 'DRAFT', note: i % 5 === 0 ? null : `n${i}` }));
   const lines = good.concat(['', '   ', 'not json at all', '42', JSON.stringify({ id: 999, extra: 'x' })]);
-  const p = J.profileLines(lines, { file: '/x/bulk.jsonl', bytes: 12345 });
+  const p = T.profileLines(lines, { file: '/x/bulk.jsonl', bytes: 12345 });
   check('m9b-prof-meta', p.profile === true && p.file === '/x/bulk.jsonl' && p.bytes === 12345, `profile meta wrong: ${JSON.stringify({ profile: p.profile, file: p.file, bytes: p.bytes })}`);
   check('m9b-prof-rows', p.rows === 51, `object rows: got ${p.rows} (50 good + 1 extra; blanks skipped)`);
   check('m9b-prof-parsefail-tolerated', p.parseFailures === 2, `parse failures tolerated + counted: got ${p.parseFailures} (prose line + bare scalar 42)`);
@@ -980,14 +1063,14 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
 }
 // distinct cap at 1000: 1500 unique values → distinct reported as 1000 with the capped flag
 {
-  const p = J.profileLines(Array.from({ length: 1500 }, (_, i) => JSON.stringify({ v: `unique-${i}` })), {});
+  const p = T.profileLines(Array.from({ length: 1500 }, (_, i) => JSON.stringify({ v: `unique-${i}` })), {});
   check('m9b-prof-distinct-cap', p.keys.v.distinct === 1000 && p.keys.v.distinctCapped === true, `distinct cap: ${JSON.stringify(p.keys.v)}`);
 }
 // ARRAY-row JSONL (tuple rows, `[1,2,3]` per line) is legitimate bulk data — parseJsonl accepts object
 // OR array rows, so profileFeed must too. Regression: arrays were counted as parseFailures → a valid
 // array-row file profiled as rows:0/empty-keys. Now they profile by index-key ("0","1",…).
 {
-  const p = J.profileLines(['[1,2,3]', '[4,5,6]', '[7,8,9]'], { file: '/x/arr.jsonl' });
+  const p = T.profileLines(['[1,2,3]', '[4,5,6]', '[7,8,9]'], { file: '/x/arr.jsonl' });
   check('m9b-prof-array-rows', p.rows === 3 && p.parseFailures === 0, `array rows counted, not failed: ${JSON.stringify({ rows: p.rows, pf: p.parseFailures })}`);
   check('m9b-prof-array-index-keys', !!p.keys['0'] && p.keys['0'].present === 3 && p.keys['2'].type === 'number', `index-key stats: ${JSON.stringify(p.keys)}`);
   check('m9b-prof-array-samples', Array.isArray(p.samples.head[0]) && p.samples.head[0][0] === 1, `array rows appear verbatim in samples: ${JSON.stringify(p.samples.head[0])}`);
@@ -998,7 +1081,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
 {
   const wide = {}; for (let i = 0; i < 200; i++) wide[`key_${i}_${'x'.repeat(50)}`] = `v${i}`;
   const line = JSON.stringify(wide);
-  const p = J.profileLines([line, line, line], { file: '/x/wide.jsonl' });
+  const p = T.profileLines([line, line, line], { file: '/x/wide.jsonl' });
   const bytes = Buffer.byteLength(JSON.stringify(p), 'utf8');
   check('m9b-prof-wide-cap', bytes <= 8000, `wide profile must fit the byte cap: got ${bytes} B`);
   check('m9b-prof-wide-truncated', p.keysTruncated > 0 && Object.keys(p.keys).length < 200, `keysTruncated=${p.keysTruncated}, shown=${Object.keys(p.keys).length}`);
@@ -1009,7 +1092,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
 {
   const mega = { ['m'.repeat(20000)]: 1, b: 2 };
   const line = JSON.stringify(mega);
-  const p = J.profileLines([line, line], { file: '/x/mega.jsonl' });
+  const p = T.profileLines([line, line], { file: '/x/mega.jsonl' });
   const bytes = Buffer.byteLength(JSON.stringify(p), 'utf8');
   check('m9b-prof-mega-key-cap', bytes <= 8000 && Object.keys(p.keys).length === 0 && p.keysTruncated === 2, `mega key collapses under cap: ${bytes} B, shown ${Object.keys(p.keys).length}, trunc ${p.keysTruncated}`);
 }
@@ -1018,7 +1101,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-prof-'));
   const f = path.join(dir, 'rows.jsonl');
   writeFileSync(f, Array.from({ length: 12 }, (_, i) => JSON.stringify({ id: i, k: `v${i}` })).join('\n') + '\n');
-  const p = await J.streamProfile(f);
+  const p = await T.streamProfile(f);
   check('m9b-streamprofile', p.profile === true && p.rows === 12 && p.file === f && p.bytes > 0, `streamProfile: ${JSON.stringify({ rows: p.rows, file: p.file, bytes: p.bytes })}`);
   rmSync(dir, { recursive: true, force: true });
 }
@@ -1029,7 +1112,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
 // exists to make tractable.
 {
   function* uniqueKeyRows(n) { for (let i = 0; i < n; i++) yield JSON.stringify({ ['k' + i]: `v${i}`, id: i }); }
-  const p = J.profileLines(uniqueKeyRows(20000), { file: '/x/idmap.jsonl' });
+  const p = T.profileLines(uniqueKeyRows(20000), { file: '/x/idmap.jsonl' });
   check('b4.2-prof-key-build-cap',
     p.rows === 20000 && Object.keys(p.keys).length <= 200 && p.keysTruncatedAtLeast > 0 && p.keysCapped === true,
     `unbounded key set: rows=${p.rows} shown=${Object.keys(p.keys).length} trunc=${p.keysTruncatedAtLeast} capped=${p.keysCapped}`);
@@ -1040,14 +1123,14 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
     `a capped count must be emitted as a floor, never as an exact total: ${JSON.stringify({ exact: p.keysTruncated, floor: p.keysTruncatedAtLeast })}`);
   // Below the build cap the key set is EXACT, so a wide-but-finite row keeps reporting an exact count.
   const wide = {}; for (let i = 0; i < 200; i++) wide[`key_${i}`] = i;
-  const pw = J.profileLines([JSON.stringify(wide)], {});
+  const pw = T.profileLines([JSON.stringify(wide)], {});
   check('b4.2-prof-key-cap-exact-below-build', pw.keysCapped === undefined,
     `a 200-key row is under the build cap — no floor flag: ${JSON.stringify(pw.keysCapped)}`);
 }
 // 50 distinct 4 KB values are 200 KB of retained strings under a count cap of 1000 — the byte budget
 // must cap them and SAY it did (distinct then reads as a floor, like keysTruncated).
 {
-  const p = J.profileLines(Array.from({ length: 50 }, (_, i) => JSON.stringify({ v: `${'x'.repeat(4096)}${i}` })), {});
+  const p = T.profileLines(Array.from({ length: 50 }, (_, i) => JSON.stringify({ v: `${'x'.repeat(4096)}${i}` })), {});
   check('b4.2-prof-distinct-bytes', p.keys.v.distinct < 50 && p.keys.v.distinctCapped === true,
     `fat values must byte-cap the distinct set: ${JSON.stringify({ distinct: p.keys.v.distinct, capped: p.keys.v.distinctCapped })}`);
 }
@@ -1056,7 +1139,7 @@ check('m9-broken-json-preserved', (() => { const r = J.slim('{"id":1,\n"untermin
 // generated lazily so the OOM can only come from the accumulator, never from the input array.
 {
   const boundedProfile = (gen, n) => spawnSync('node', ['--max-old-space-size=64', '-e',
-    `const J=require(${JSON.stringify(SLIM)});function*g(){${gen}}` +
+    `const J=require(${JSON.stringify(SLIM)}).__test;function*g(){${gen}}` +
     `const p=J.profileLines(g(),{});process.stdout.write(String(p.rows))`], { encoding: 'utf8', maxBuffer: 1 << 20 });
   const keys = boundedProfile(`for(let i=0;i<${20e4};i++)yield JSON.stringify({['k'+i]:'v'+i,id:i});`);
   check('b4.2-prof-mem-keys', keys.status === 0 && keys.stdout === '200000',
@@ -1210,21 +1293,21 @@ const logParityTotal = logByteExact + logDeviation1.length;
 
 // --- detector truth table ---
 const mkLog = (line, n) => Array.from({ length: n }, () => line).join('\n');
-check('log-detect-pytest', J.detectLog(['=== FAILURES ===', 'FAILED tests/test_a.py::test_x', '    assert 1 == 2', '=== ERRORS ===', 'ERROR tests/test_b.py', '1 failed, 2 passed'].join('\n')).isLog, 'pytest output → log');
-check('log-detect-npm', J.detectLog(mkLog('npm ERR! code ELIFECYCLE', 10)).isLog, 'npm output → log');
-check('log-detect-console-spam', J.detectLog(mkLog('[WARNING] slow frame skipped', 20)).isLog, 'console WARN spam → log');
-check('log-detect-markdown-not', !J.detectLog(['## Heading', '', 'A paragraph of ordinary documentation prose describing an API.', 'Another sentence with a `code` span and a [link](http://x).', '', '- bullet one', '- bullet two', '', 'Closing remarks with no build keywords at all.'].join('\n')).isLog, 'markdown docs → NOT log');
-check('log-detect-docs-chunk-not', !J.detectLog(['## Fetching products', '', 'Use the products connection to page through a catalogue. Each edge exposes a cursor.', '```graphql', 'query { products(first: 10) { edges { node { id } } } }', '```', 'Pagination is cursor-based; keep requesting until hasNextPage is false.'].join('\n')).isLog, 'shopify docs-chunk → NOT log');
-check('log-detect-prose-not', !J.detectLog('The quick brown fox jumps over the lazy dog. '.repeat(30)).isLog, 'prose → NOT log');
-check('log-detect-xml-not', !J.detectLog('<frame id="1">' + '<node x="1"/>'.repeat(50) + '</frame>').isLog, 'figma XML → NOT log');
+check('log-detect-pytest', L.detectLog(['=== FAILURES ===', 'FAILED tests/test_a.py::test_x', '    assert 1 == 2', '=== ERRORS ===', 'ERROR tests/test_b.py', '1 failed, 2 passed'].join('\n')).isLog, 'pytest output → log');
+check('log-detect-npm', L.detectLog(mkLog('npm ERR! code ELIFECYCLE', 10)).isLog, 'npm output → log');
+check('log-detect-console-spam', L.detectLog(mkLog('[WARNING] slow frame skipped', 20)).isLog, 'console WARN spam → log');
+check('log-detect-markdown-not', !L.detectLog(['## Heading', '', 'A paragraph of ordinary documentation prose describing an API.', 'Another sentence with a `code` span and a [link](http://x).', '', '- bullet one', '- bullet two', '', 'Closing remarks with no build keywords at all.'].join('\n')).isLog, 'markdown docs → NOT log');
+check('log-detect-docs-chunk-not', !L.detectLog(['## Fetching products', '', 'Use the products connection to page through a catalogue. Each edge exposes a cursor.', '```graphql', 'query { products(first: 10) { edges { node { id } } } }', '```', 'Pagination is cursor-based; keep requesting until hasNextPage is false.'].join('\n')).isLog, 'shopify docs-chunk → NOT log');
+check('log-detect-prose-not', !L.detectLog('The quick brown fox jumps over the lazy dog. '.repeat(30)).isLog, 'prose → NOT log');
+check('log-detect-xml-not', !L.detectLog('<frame id="1">' + '<node x="1"/>'.repeat(50) + '</frame>').isLog, 'figma XML → NOT log');
 // ratio boundary: 3 rule-lines in 10 (ratio 0.3, no error hits) → conf 0.45 < 0.5; 4 in 10 → conf 0.5
 {
   const belowLines = ['===', '===', '==='].concat(Array.from({ length: 7 }, (_, i) => `plain text ${i}`));
   const aboveLines = ['===', '===', '===', '==='].concat(Array.from({ length: 6 }, (_, i) => `plain text ${i}`));
-  check('log-detect-conf-below', !J.detectLog(belowLines.join('\n')).isLog, `conf ${J.detectLog(belowLines.join('\n')).confidence.toFixed(3)} must be < 0.5`);
-  check('log-detect-conf-above', J.detectLog(aboveLines.join('\n')).isLog, `conf ${J.detectLog(aboveLines.join('\n')).confidence.toFixed(3)} must be ≥ 0.5`);
+  check('log-detect-conf-below', !L.detectLog(belowLines.join('\n')).isLog, `conf ${L.detectLog(belowLines.join('\n')).confidence.toFixed(3)} must be < 0.5`);
+  check('log-detect-conf-above', L.detectLog(aboveLines.join('\n')).isLog, `conf ${L.detectLog(aboveLines.join('\n')).confidence.toFixed(3)} must be ≥ 0.5`);
   // ratio gate: 1 match in 20 lines → ratio 0.05 < 0.1 → not a log regardless of the base 0.3
-  check('log-detect-ratio-gate', !J.detectLog(['ERROR boom'].concat(Array.from({ length: 19 }, (_, i) => `text ${i}`)).join('\n')).isLog, 'ratio < 0.1 → NOT log');
+  check('log-detect-ratio-gate', !L.detectLog(['ERROR boom'].concat(Array.from({ length: 19 }, (_, i) => `text ${i}`)).join('\n')).isLog, 'ratio < 0.1 → NOT log');
 }
 
 // --- scoring units ---
@@ -1290,7 +1373,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const md = base.slice();
   for (let i = 0; i < 44; i++) md.push(`Paragraph ${i}: the request occasionally fails and logs an error, but a warning here is expected and no failure is surfaced to the buyer.`);
   const doc = md.join('\n');
-  check('log-detect-prose-mentions-not', !J.detectLog(doc).isLog, `55-line error-discussing doc must NOT detect as log (conf ${J.detectLog(doc).confidence.toFixed(3)})`);
+  check('log-detect-prose-mentions-not', !L.detectLog(doc).isLog, `55-line error-discussing doc must NOT detect as log (conf ${L.detectLog(doc).confidence.toFixed(3)})`);
   const pr = J.slim(doc, { log: true });
   check('log-prose-mentions-passthrough', !pr.wasModified && pr.reason === 'non-json' && pr.output === doc, 'error-discussing prose → byte-identical passthrough');
   // a CHANGELOG-style doc (>=50 lines, headed "Fixed"/"Error handling") must also pass through
@@ -1302,7 +1385,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const cargo = [];
   for (let i = 0; i < 12; i++) cargo.push(`warning: unused variable: \`x${i}\``);
   cargo.push('error[E0308]: mismatched types');
-  check('log-detect-lowercase-levels', J.detectLog(cargo.join('\n')).isLog, 'lowercase cargo/gcc levels still detect as log');
+  check('log-detect-lowercase-levels', L.detectLog(cargo.join('\n')).isLog, 'lowercase cargo/gcc levels still detect as log');
 }
 
 // --- finding 2: the global cap must keep the guaranteed FIRST + LAST error, not the lowest line #s ---
@@ -1345,22 +1428,22 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const payload = JSON.stringify({ products: Array.from({ length: 40 }, (_, i) => ({ id: i, note: 'x'.repeat(40) })) });
   const wrapped = `Script ran on page and returned:\n\`\`\`json\n${payload}\n\`\`\``;
   // unwrapFence unit — a dominant fenced body: verbatim body, kept preamble, physical-line offset
-  const uw = J.unwrapFence(wrapped);
+  const uw = T.unwrapFence(wrapped);
   check('m11-unwrap-body', uw && uw.body === payload, 'dominant fence → body is the payload verbatim');
   check('m11-unwrap-preamble', uw && uw.preamble === 'Script ran on page and returned:', `preamble kept: ${JSON.stringify(uw && uw.preamble)}`);
   check('m11-unwrap-offset', uw && uw.offset === 2, `offset = physical lines before the body (prose + fence = 2), got ${uw && uw.offset}`);
   // no-preamble fence (opening fence is line 0) → empty preamble, offset 1
-  const uw0 = J.unwrapFence(`\`\`\`json\n${payload}\n\`\`\``);
+  const uw0 = T.unwrapFence(`\`\`\`json\n${payload}\n\`\`\``);
   check('m11-unwrap-no-preamble', uw0 && uw0.preamble === '' && uw0.offset === 1, `no-preamble: preamble=${JSON.stringify(uw0 && uw0.preamble)} offset=${uw0 && uw0.offset}`);
   // dominance guard — a docs chunk whose code block is a MINORITY of bytes → null (byte-identical doc)
   const doc = ['## Fetching products', '', 'Use the products connection to page through a catalogue. Each edge exposes a cursor and a node.', '```graphql', 'query { products(first: 10) { edges { node { id } } } }', '```', 'Pagination is cursor-based; keep requesting until hasNextPage is false. See the reference.'].join('\n');
-  check('m11-dominance-guard', J.unwrapFence(doc) === null, 'a small code block in a doc is not dominant → null');
+  check('m11-dominance-guard', T.unwrapFence(doc) === null, 'a small code block in a doc is not dominant → null');
   // unterminated fence → null (old behavior); tilde fence → null (unsupported, no crash); long trailer → null
-  check('m11-unterminated', J.unwrapFence(`intro\n\`\`\`json\n${payload}`) === null, 'no closing fence → null');
-  check('m11-tilde-null', J.unwrapFence(`intro\n~~~json\n${payload}\n~~~`) === null, 'tilde fence → null (no crash)');
-  check('m11-long-trailer', J.unwrapFence(`\`\`\`json\n${payload}\n\`\`\`\na\nb\nc\nd\ne`) === null, 'a long trailer → not a single dominant fence → null');
+  check('m11-unterminated', T.unwrapFence(`intro\n\`\`\`json\n${payload}`) === null, 'no closing fence → null');
+  check('m11-tilde-null', T.unwrapFence(`intro\n~~~json\n${payload}\n~~~`) === null, 'tilde fence → null (no crash)');
+  check('m11-long-trailer', T.unwrapFence(`\`\`\`json\n${payload}\n\`\`\`\na\nb\nc\nd\ne`) === null, 'a long trailer → not a single dominant fence → null');
   // opening fence past the preamble window → null (a deep-in-a-doc fence is never unwrapped)
-  check('m11-preamble-window', J.unwrapFence(`a\nb\nc\nd\n\`\`\`json\n${payload}\n\`\`\``) === null, 'opening fence after the preamble window → null');
+  check('m11-preamble-window', T.unwrapFence(`a\nb\nc\nd\n\`\`\`json\n${payload}\n\`\`\``) === null, 'opening fence after the preamble window → null');
 
   // slim() on a fenced JSON payload → compressed, preamble on top, trace stages lead with 'fence'
   const r = J.slim(wrapped, { trace: true });
@@ -1407,20 +1490,20 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // "Script ran…" preamble would be invalid JSON and sample `shape: (none)`.
   const capDir = mkdtempSync(path.join(tmpdir(), 'jslim-m11cap-'));
   const capRes = J.slim(`Script ran on page and returned:\n\`\`\`json\n${payload}\n\`\`\`\nNOTE: truncated.`, { spillDir: capDir });
-  const cap = J.capOutput(capRes, path.join(capDir, 'whale.txt'), { cliOutCap: 50, spillDir: capDir });
+  const cap = T.capOutput(capRes, path.join(capDir, 'whale.txt'), { cliOutCap: 50, spillDir: capDir });
   check('m11-cap-spill-valid-json', !!cap && (() => { try { return Array.isArray(JSON.parse(readFileSync(cap.spillOut, 'utf8')).products); } catch { return false; } })(), 'Gate-A spill of a fenced result is valid JSON (body only, preamble stripped)');
   check('m11-cap-sample-real', !!cap && /(shape|first row): \{/.test(cap.handback) && !cap.handback.includes('(none)'), `handback samples a real row, not (none): ${cap && cap.handback.split('\n').find((l) => /shape|first row/.test(l))}`);
   check('m11-cap-preamble-top', !!cap && cap.handback.startsWith('Script ran on page and returned:\n'), 'the tool prose preamble rides on top of the Gate-A handback');
   check('m11-cap-trailer-kept', !!cap && cap.handback.includes('NOTE: truncated.'), 'the fenced trailer rides on the Gate-A handback');
   // a NON-fenced result: capOutput spills res.output unchanged (no regression), no preamble line
   const plainRes = J.slim(JSON.stringify(Array.from({ length: 60 }, (_, i) => ({ id: i, note: 'y'.repeat(60) }))), { spillDir: capDir });
-  const capPlain = J.capOutput(plainRes, path.join(capDir, 'plain.json'), { cliOutCap: 50, spillDir: capDir });
+  const capPlain = T.capOutput(plainRes, path.join(capDir, 'plain.json'), { cliOutCap: 50, spillDir: capDir });
   check('m11-cap-plain-unchanged', !!capPlain && readFileSync(capPlain.spillOut, 'utf8') === plainRes.output && !/^\n/.test(capPlain.handback), 'a non-fenced result still spills res.output verbatim, no preamble prepended');
   rmSync(capDir, { recursive: true, force: true });
 
   // A CRLF-delimited fence still unwraps and compresses (the fence regex tolerates a trailing \r).
   const crlf = `Script ran on page and returned:\r\n\`\`\`json\r\n${payload}\r\n\`\`\``;
-  const uwc = J.unwrapFence(crlf);
+  const uwc = T.unwrapFence(crlf);
   check('m11-crlf-unwrap', !!uwc && (() => { try { return Array.isArray(JSON.parse(uwc.body).products); } catch { return false; } })(), 'CRLF-delimited fence unwraps, body parses');
   const rcrlf = J.slim(crlf, { trace: true });
   check('m11-crlf-compresses', rcrlf.wasModified && rcrlf.stages[0] === 'fence' && rcrlf.stages.includes('crush'), `CRLF fenced JSON compresses via the fence branch: ${JSON.stringify(rcrlf.stages)}`);
@@ -1428,11 +1511,11 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // A substantive trailer after the closing fence is captured and carried into the output; a
   // bare trailing newline is NOT a trailer.
   const withTrailer = `Result:\n\`\`\`json\n${payload}\n\`\`\`\nNOTE: truncated at 40 rows.`;
-  const uwt = J.unwrapFence(withTrailer);
+  const uwt = T.unwrapFence(withTrailer);
   check('m11-trailer-captured', !!uwt && uwt.trailer === 'NOTE: truncated at 40 rows.', `trailer captured: ${JSON.stringify(uwt && uwt.trailer)}`);
   const rt = J.slim(withTrailer);
   check('m11-trailer-in-output', rt.wasModified && rt.output.endsWith('NOTE: truncated at 40 rows.'), 'trailer carried into the compressed output');
-  const uwn = J.unwrapFence(`Result:\n\`\`\`json\n${payload}\n\`\`\`\n`);
+  const uwn = T.unwrapFence(`Result:\n\`\`\`json\n${payload}\n\`\`\`\n`);
   check('m11-trailing-newline-not-trailer', !!uwn && uwn.trailer === '', `a bare final newline is not a trailer: ${JSON.stringify(uwn && uwn.trailer)}`);
 
   // Offset-aware stream profiling (Gate B): skipLeading + fenceAware skip the fence wrapper so a
@@ -1442,8 +1525,8 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const spDir = mkdtempSync(path.join(tmpdir(), 'jslim-m11sp-'));
   const spFile = path.join(spDir, 'fenced.jsonl');
   writeFileSync(spFile, `Script returned:\n\`\`\`jsonl\n${Array.from({ length: 10 }, (_, i) => JSON.stringify({ id: i, handle: 'p' + i })).join('\n')}\n\`\`\`\n`);
-  const profFence = await J.streamProfile(spFile, {}, { skipLeading: 2, fenceAware: true });
-  const profRaw = await J.streamProfile(spFile, {});
+  const profFence = await T.streamProfile(spFile, {}, { skipLeading: 2, fenceAware: true });
+  const profRaw = await T.streamProfile(spFile, {});
   check('m11-streamprofile-fence-skips-wrapper', profFence.parseFailures === 0 && profFence.rows === 10, `fence-aware profile: failures=${profFence.parseFailures} rows=${profFence.rows}`);
   check('m11-streamprofile-raw-counts-wrapper', profRaw.parseFailures > 0, `raw profile counts the wrapper lines as failures: ${profRaw.parseFailures}`);
   rmSync(spDir, { recursive: true, force: true });
@@ -1452,8 +1535,8 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // leading BOM before matching) so the ≤8 MB unwrap path and the >8 MB Gate B scan classify a
   // BOM+fenced whale identically — the raw FENCE_OPEN regex alone misses the "﻿```json" line.
   const bomLines = ['﻿```json', JSON.stringify({ a: 1 }), '```'];
-  check('m11-bom-fence-helper', J.findOpeningFence(bomLines, 3) === 0, `findOpeningFence detects a BOM-prefixed fence at 0: ${J.findOpeningFence(bomLines, 3)}`);
-  const bomUnwrap = J.unwrapFence(`﻿\`\`\`json\n${payload}\n\`\`\``);
+  check('m11-bom-fence-helper', T.findOpeningFence(bomLines, 3) === 0, `findOpeningFence detects a BOM-prefixed fence at 0: ${T.findOpeningFence(bomLines, 3)}`);
+  const bomUnwrap = T.unwrapFence(`﻿\`\`\`json\n${payload}\n\`\`\``);
   check('m11-bom-fence-unwrap', !!bomUnwrap && (() => { try { return Array.isArray(JSON.parse(bomUnwrap.body).products); } catch { return false; } })(), 'unwrapFence unwraps a BOM-prefixed fenced body');
   // Gate B mirror at small scale: computing skipLeading with the shared helper over a BOM-prefixed
   // fenced JSONL head, then stream-profiling the body, sees zero parse failures — the >8 MB path no
@@ -1461,8 +1544,8 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const bomDir = mkdtempSync(path.join(tmpdir(), 'jslim-m11bom-'));
   const bomFile = path.join(bomDir, 'bom.jsonl');
   writeFileSync(bomFile, `﻿\`\`\`jsonl\n${Array.from({ length: 6 }, (_, i) => JSON.stringify({ id: i })).join('\n')}\n\`\`\`\n`);
-  const bomSkip = J.findOpeningFence(readFileSync(bomFile, 'utf8').split('\n', 4), 3) + 1; // Gate B: skipLeading = index + 1
-  const bomProf = await J.streamProfile(bomFile, {}, { skipLeading: bomSkip, fenceAware: true });
+  const bomSkip = T.findOpeningFence(readFileSync(bomFile, 'utf8').split('\n', 4), 3) + 1; // Gate B: skipLeading = index + 1
+  const bomProf = await T.streamProfile(bomFile, {}, { skipLeading: bomSkip, fenceAware: true });
   check('m11-bom-gateb-profiles-clean', bomSkip === 1 && bomProf.parseFailures === 0 && bomProf.rows === 6, `BOM+fence Gate B: skip=${bomSkip} failures=${bomProf.parseFailures} rows=${bomProf.rows}`);
   rmSync(bomDir, { recursive: true, force: true });
 }
@@ -1484,11 +1567,11 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     ['.a.', 'a.'], // a trailing dot survives normalization — the PARSER (M15) refuses it, exit 2
     ['["a.b"]', '["a.b"]'], // quoted keys are NOT supported (only [N] is rewritten) — documented, not a feature
   ];
-  for (const [input, want] of norm) eq(`m12-normjq:${input}`, J.normalizeJqPath(input), want);
+  for (const [input, want] of norm) eq(`m12-normjq:${input}`, T.normalizeJqPath(input), want);
   // …normalization is SPELLING only: both of those reach the M15 parser, which refuses them by name
   // rather than walking whatever the rewrite left behind
-  eq('m12-normjq-trailing-dot-refused', J.parseJqExpr('.a.').bad, '.');
-  eq('m12-normjq-quoted-refused', J.parseJqExpr('["a.b"]').bad, '["a.b"]');
+  eq('m12-normjq-trailing-dot-refused', T.parseJqExpr('.a.').bad, '.');
+  eq('m12-normjq-quoted-refused', T.parseJqExpr('["a.b"]').bad, '["a.b"]');
 
   const arrDir = mkdtempSync(path.join(tmpdir(), 'jslim-m12-'));
   const runJq = (p, file) => spawnSync('node', [SLIM, '--jq', p, file], { encoding: 'utf8' });
@@ -1578,21 +1661,21 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-m13-'));
 
   // --- detector: only Figma-generated JSX (data-node-id + className + var(--), each ≥3) ---
-  check('m13-detect-fixture', J.detectJsx(jsxFixture), 'the real design-context fixture detects as Figma JSX');
+  check('m13-detect-fixture', T.detectJsx(jsxFixture), 'the real design-context fixture detects as Figma JSX');
   const liquid = Array.from({ length: 200 }, (_, i) =>
     `{% if section.settings.show_${i} %}\n  <div class="card" style="color: var(--color-text-${i}, #000);">{{ product.title }}</div>\n{% endif %}`).join('\n');
-  check('m13-detect-liquid-not', !J.detectJsx(liquid), 'a Liquid section using var(--…) must NOT detect');
+  check('m13-detect-liquid-not', !T.detectJsx(liquid), 'a Liquid section using var(--…) must NOT detect');
   const lr = J.slim(liquid, { spillDir: dir });
   check('m13-liquid-passthrough', !lr.wasModified && lr.output === liquid && lr.reason === 'non-json', 'Liquid passes through byte-identical');
   const plainJsx = Array.from({ length: 200 }, (_, i) =>
     `  <div className="flex items-center gap-2" style={{ color: "var(--x, #fff)" }}>Item ${i}</div>`).join('\n');
-  check('m13-detect-plain-jsx-not', !J.detectJsx(plainJsx), 'hand-written JSX without data-node-id must NOT detect');
+  check('m13-detect-plain-jsx-not', !T.detectJsx(plainJsx), 'hand-written JSX without data-node-id must NOT detect');
   check('m13-plain-jsx-passthrough', J.slim(plainJsx, { spillDir: dir }).output === plainJsx, 'non-Figma JSX passes through byte-identical');
-  check('m13-detect-html-not', !J.detectJsx(`<!doctype html><html><body>${'<div class="a" style="color:var(--x)">hi</div>'.repeat(500)}</body></html>`), 'plain HTML must NOT detect');
+  check('m13-detect-html-not', !T.detectJsx(`<!doctype html><html><body>${'<div class="a" style="color:var(--x)">hi</div>'.repeat(500)}</body></html>`), 'plain HTML must NOT detect');
   // two hits of each signature is below the threshold
   const thin = ['<div className="a" data-node-id="1:1" style={{ c: "var(--x)" }} />',
     '<div className="b" data-node-id="1:2" style={{ c: "var(--y)" }} />'].join('\n');
-  check('m13-detect-threshold', !J.detectJsx(thin), '2 hits of each signature is below JSX_MIN_HITS');
+  check('m13-detect-threshold', !T.detectJsx(thin), '2 hits of each signature is below JSX_MIN_HITS');
 
   // --- slim() integration ---
   const r = J.slim(jsxFixture, { trace: true, spillDir: dir });
@@ -1602,7 +1685,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const off = J.slim(jsxFixture, { jsx: false, spillDir: dir });
   check('m13-jsx-off', !off.wasModified && off.reason === 'non-json' && off.output === jsxFixture, 'jsx:false → byte-identical non-json passthrough');
   check('m13-header-on-top', r.output.startsWith('<<fnd-jsx-slim>>'), 'the legend header leads the compacted body');
-  check('m13-detect-idempotent', !J.detectJsx(r.output), 'an already-compacted payload never compacts twice');
+  check('m13-detect-idempotent', !T.detectJsx(r.output), 'an already-compacted payload never compacts twice');
   check('reduction:figma-jsx≥0.60', r.ratio >= 0.60, `figma design-context ratio ${r.ratio.toFixed(3)}`);
 
   // --- className legend: complete, and every entry reconstructs BYTE-EXACTLY ---
@@ -1689,22 +1772,22 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // --- ×N sibling fold ---
   const card = (id, txt) => [`      <div class=C1 #n${id} data-name="Column">`, '        <p class=C2>', `          ${txt}`, '        </p>', '      </div>'];
   const same = ['  <div class=C0>', ...card(1, 'Copy'), ...card(2, 'Copy'), ...card(3, 'Copy'), '  </div>'].join('\n');
-  const fSame = J.foldSiblings(same);
+  const fSame = T.foldSiblings(same);
   check('m13-fold-node-id-only', fSame.folded === 2 && fSame.code.includes('×2 more, identical except (node-id): [#n2] [#n3]'),
     `identical-but-for-the-id siblings fold: ${fSame.code.split('\n').find((l) => l.includes('×'))}`);
   const diff = ['  <div class=C0>', ...card(1, 'Hydrating Serum'), ...card(2, 'Firming Cream'), ...card(3, 'Brightening Oil'), '  </div>'].join('\n');
-  const fDiff = J.foldSiblings(diff);
+  const fDiff = T.foldSiblings(diff);
   check('m13-fold-text-listed', fDiff.folded === 2 &&
     fDiff.code.includes('×2 more, identical except (node-id, text): [#n2, "Firming Cream"] [#n3, "Brightening Oil"]'),
     `siblings with real diffs fold WITH the diffs listed: ${fDiff.code.split('\n').find((l) => l.includes('×'))}`);
   const styled = ['  <div class=C0>', ...card(1, 'A'), ...card(2, 'B').map((l) => l.replace('class=C1', 'class=C9')), '  </div>'].join('\n');
-  check('m13-fold-class-differs-kept', J.foldSiblings(styled).folded === 0, 'a differing class ref keeps both siblings in full (conservative gate)');
+  check('m13-fold-class-differs-kept', T.foldSiblings(styled).folded === 0, 'a differing class ref keeps both siblings in full (conservative gate)');
   const runs = ['  <div class=C0>',
     ...Array.from({ length: 3 }, (_, i) => [`    <div class=C1 #n${i * 3 + 1}>`, `      <span class=C2 #n${i * 3 + 2}>`, `      <span class=C2 #n${i * 3 + 3}>`, '    </div>']).flat(),
     '  </div>'].join('\n');
-  check('m13-fold-id-range', J.foldSiblings(runs).code.includes('[#n4–#n6] [#n7–#n9]'),
-    `contiguous node-id runs collapse to a range: ${J.foldSiblings(runs).code.split('\n').find((l) => l.includes('×'))}`);
-  check('m13-fold-none', J.foldSiblings('  <a class=C1 #n1>\n  <b class=C2 #n2>').folded === 0, 'nothing to fold → the code comes back unchanged');
+  check('m13-fold-id-range', T.foldSiblings(runs).code.includes('[#n4–#n6] [#n7–#n9]'),
+    `contiguous node-id runs collapse to a range: ${T.foldSiblings(runs).code.split('\n').find((l) => l.includes('×'))}`);
+  check('m13-fold-none', T.foldSiblings('  <a class=C1 #n1>\n  <b class=C2 #n2>').folded === 0, 'nothing to fold → the code comes back unchanged');
 
   // Slot PRESENCE is part of the skeleton, so a sibling carrying a value can never fold into one
   // that carries none. Without that mark `>text<` canonicalized like `><` (and an own-line text node
@@ -1712,28 +1795,28 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // duplicates' values under a "nothing dropped" header, or indexed past the end and threw.
   const inline = (id, txt) => `    <p class=C1 #n${id} data-name="L">${txt}</p>`;
   const emptyFirst = ['  <div class=C0>', '    <p class=C1 #n1 data-name="L"></p>', inline(2, 'Hydrating Serum'), inline(3, 'Firming Cream'), '  </div>'].join('\n');
-  const fEmptyFirst = J.foldSiblings(emptyFirst);
+  const fEmptyFirst = T.foldSiblings(emptyFirst);
   check('m13-fold-empty-vs-text-nofold', !fEmptyFirst.code.includes('×1 more, identical */}') &&
     fEmptyFirst.code.includes('Hydrating Serum') && fEmptyFirst.code.includes('Firming Cream'),
     `an empty element never folds a text-bearing sibling away: ${JSON.stringify(fEmptyFirst.code)}`);
   const emptyLast = ['  <div class=C0>', inline(1, 'Hydrating Serum'), '    <p class=C1 #n2 data-name="L"></p>', '  </div>'].join('\n');
-  check('m13-fold-text-vs-empty-nothrow', J.foldSiblings(emptyLast).folded === 0 && J.foldSiblings(emptyLast).code === emptyLast,
+  check('m13-fold-text-vs-empty-nothrow', T.foldSiblings(emptyLast).folded === 0 && T.foldSiblings(emptyLast).code === emptyLast,
     'the reverse order does not throw either — the shapes simply differ');
   const blankLine = ['  <div class=C0>', '    <p class=C1 #n1>', '      ', '    </p>',
     '    <p class=C1 #n2>', '      Hello there', '    </p>', '    <p class=C1 #n3>', '      Hello there', '    </p>', '  </div>'].join('\n');
-  const fBlank = J.foldSiblings(blankLine);
+  const fBlank = T.foldSiblings(blankLine);
   check('m13-fold-blank-vs-textline', (fBlank.code.match(/Hello there/g) || []).length === 2 || fBlank.code.includes('"Hello there"'),
     `a whitespace-only line never folds an own-line text node away: ${JSON.stringify(fBlank.code)}`);
   // Trailing whitespace lives in the slot value, not the skeleton, so a repeat that differs only
   // there is listed rather than dropped under an "identical" claim.
   const trailing = ['  <div class=C0>', '    <p class=C1 #n1>', '      Copy', '    </p>',
     '    <p class=C1 #n2>', '      Copy   ', '    </p>', '  </div>'].join('\n');
-  const fTrail = J.foldSiblings(trailing);
+  const fTrail = T.foldSiblings(trailing);
   check('m13-fold-trailing-ws-listed', fTrail.folded === 0 || fTrail.code.includes('"Copy   "'),
     `a trailing-whitespace-only difference is never silently identical: ${JSON.stringify(fTrail.code)}`);
   // Two slots of the SAME kind in one subtree — the listed value names which one it came from.
   const twoNames = (inner) => ['    <div class=C1 data-name="Fixed">', `      <span class=C2 data-name="${inner}">`, '    </div>'];
-  const fTwo = J.foldSiblings(['  <div class=C0>', ...twoNames('A'), ...twoNames('B'), ...twoNames('C'), '  </div>'].join('\n'));
+  const fTwo = T.foldSiblings(['  <div class=C0>', ...twoNames('A'), ...twoNames('B'), ...twoNames('C'), '  </div>'].join('\n'));
   check('m13-fold-same-kind-qualified', fTwo.folded === 2 && fTwo.code.includes('[name#2:"B"] [name#2:"C"]'),
     `a repeated kind is listed with its ordinal: ${fTwo.code.split('\n').find((l) => l.includes('×'))}`);
 
@@ -1745,7 +1828,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     'a `$` in a className value skips the $N pass; entries stay verbatim');
 
   // --- Gate A on a compacted body that is NOT JSON (the first shape that can reach it) ---
-  const cap = J.capOutput(r, path.join(dir, 'design-context.jsx'), { cliOutCap: 50, spillDir: dir });
+  const cap = T.capOutput(r, path.join(dir, 'design-context.jsx'), { cliOutCap: 50, spillDir: dir });
   check('m13-cap-nonjson-handback', !!cap && cap.handback.includes('not JSON — read the slimmed body windowed') &&
     !cap.handback.includes('--jq <jq-path>') && !/\n {2}(first row|shape): /.test(cap.handback),
     `a non-JSON slimmed body must not sample a row or advertise --jq:\n${cap && cap.handback}`);
@@ -1948,7 +2031,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('b4.1-bom-fenced-compresses', bf.wasModified && bf.stages[0] === 'fence' && bf.ratio > 0.9,
     `BOM+fenced JSON compresses through the fence branch: ${JSON.stringify({ stages: bf.stages, ratio: bf.ratio })}`);
   // crush() parses independently of slim() — same rail there
-  check('b4.1-bom-crush', J.crush(bomJson, { spillDir: dir }).wasModified, 'crush() strips a leading BOM too');
+  check('b4.1-bom-crush', T.crush(bomJson, { spillDir: dir }).wasModified, 'crush() strips a leading BOM too');
   // A passthrough hands back the EXACT argument, BOM and all: the CLI prints res.output verbatim on the
   // never-lose-the-result branch, so a `wasModified:false` result that differs from its input is a
   // silent mutation — and bytesIn/bytesOut must describe that same argument (no phantom gain).
@@ -1961,7 +2044,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('b4.1-unimprovable-json-passthrough', !tiny.wasModified && tiny.output === tinyIn && tiny.bytesOut === tiny.bytesIn,
     `an unimprovable payload passes through byte-identical: ${JSON.stringify({ wasModified: tiny.wasModified, out: tiny.output, bytesIn: tiny.bytesIn, bytesOut: tiny.bytesOut })}`);
   const bcIn = `${BOM}not json at all`;
-  const bc = J.crush(bcIn, { spillDir: dir });
+  const bc = T.crush(bcIn, { spillDir: dir });
   check('b4.1-crush-passthrough-verbatim', !bc.wasModified && bc.compressed === bcIn, 'crush() hands back its exact argument on a passthrough');
   // a BOM-prefixed error envelope must reach the error rail, not the non-json branch
   const bomErr = BOM + errBody;
@@ -2033,7 +2116,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     title: `Product Title Number ${i}`,
     url: `https://shop.example.com/products/product-handle-${i}`,
   }));
-  const uq = J.analyseDictArray(uniqueEntities, J.DEFAULTS);
+  const uq = T.analyseDictArray(uniqueEntities, T.DEFAULTS);
   eq('b4.11-skip-unique-entities', [uq.crushable, uq.strategy, uq.reason], [false, 'skip', 'unique_entities_no_signal']);
   const rawUnique = JSON.stringify({ products: uniqueEntities });
   const rUnique = J.slim(rawUnique, { markerMode: 'ccr' });
@@ -2048,7 +2131,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     const j = i < 54 ? i : i - 54;
     return { handle: `handle-${j}`, title: `Title Number ${j}`, vendor: `Vendor ${j} Inc` };
   });
-  const nq = J.analyseDictArray(noIdField, J.DEFAULTS);
+  const nq = T.analyseDictArray(noIdField, T.DEFAULTS);
   eq('b4.11-skip-no-id-field', [nq.crushable, nq.strategy, nq.reason], [false, 'skip', 'medium_uniqueness_no_signal']);
   const rawNoId = JSON.stringify({ items: noIdField });
   check('b4.11-skip-no-id-byte-identical', J.slim(rawNoId, { markerMode: 'ccr' }).output === rawNoId, 'the id-less skip branch also passes through untouched');
@@ -2063,11 +2146,11 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     hasError: false,
     label: `Request number ${i} label`,
   }));
-  const fq = J.analyseDictArray(falseErrorFlag, J.DEFAULTS);
+  const fq = T.analyseDictArray(falseErrorFlag, T.DEFAULTS);
   check('b4.11-crushable-error-keyword-in-key-name',
     fq.crushable === true && fq.reason === 'unique_entities_with_signal' && fq.sig.errors.size === N,
     `a key name carrying "error" flags every row: ${JSON.stringify({ crushable: fq.crushable, reason: fq.reason, errors: fq.sig.errors.size })}`);
-  const flagOut = J.crushValue({ requests: falseErrorFlag }, { markerMode: 'ccr' });
+  const flagOut = T.crushValue({ requests: falseErrorFlag }, { markerMode: 'ccr' });
   check('b4.11-crushable-zero-drop',
     flagOut.requests.length === N && !flagOut.requests.some((x) => x && x._ccr_dropped)
       && JSON.stringify(flagOut.requests) === JSON.stringify(falseErrorFlag),
@@ -2081,9 +2164,9 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const withErrorRow = uniqueEntities.map((r, i) => (i === 41 ? { ...r, note: 'sync failed' } : r));
   const withOutlier = uniqueEntities.map((r, i) => ({ ...r, inventory: i === 17 ? 99999 : 3 + (i % 4) }));
   const repetitive = Array.from({ length: N }, (_, i) => ({ id: i, status: i % 2 ? 'ok' : 'pending', kind: 'widget' }));
-  check('b4.11-flip-error-row-crushes', J.analyseDictArray(withErrorRow, J.DEFAULTS).crushable === true && ratioOf(withErrorRow, 'products') > 0.5,
+  check('b4.11-flip-error-row-crushes', T.analyseDictArray(withErrorRow, T.DEFAULTS).crushable === true && ratioOf(withErrorRow, 'products') > 0.5,
     `one error row must flip the same shape to crushable: ${(ratioOf(withErrorRow, 'products') * 100).toFixed(1)} %`);
-  check('b4.11-flip-numeric-outlier-crushes', J.analyseDictArray(withOutlier, J.DEFAULTS).crushable === true && ratioOf(withOutlier, 'products') > 0.5,
+  check('b4.11-flip-numeric-outlier-crushes', T.analyseDictArray(withOutlier, T.DEFAULTS).crushable === true && ratioOf(withOutlier, 'products') > 0.5,
     `a 2σ numeric outlier must flip the same shape to crushable: ${(ratioOf(withOutlier, 'products') * 100).toFixed(1)} %`);
   check('b4.11-contrast-repetitive-crushes', ratioOf(repetitive, 'rows') > 0.5,
     `low-uniqueness rows must still crush: ${(ratioOf(repetitive, 'rows') * 100).toFixed(1)} %`);
@@ -2121,13 +2204,13 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // linear). detectLog is the observable seam: a lone frame line scores ratio 1.0 → confidence 0.8.
   const t0 = Date.now();
   const evil = '   at F' + ') in :line '.repeat(90728); // 998,007 B, one line, dense in `) in `, never matches
-  const evilIsLog = J.detectLog(evil).isLog;
+  const evilIsLog = L.detectLog(evil).isLog;
   const evilMs = Date.now() - t0;
   check('b4.6-dotnet-frame-linear', evilMs < 500, `detectLog over a 998 KB adversarial frame line took ${evilMs} ms (was ~37,700 ms)`);
   check('b4.6-dotnet-frame-no-false-log', evilIsLog === false, 'the adversarial line matches no pattern, so it is not a log');
   // Match equivalence on real frames. `[T]` in the method name is deliberate: it keeps the generic
   // JS/Java frame pattern (`at [\w.$/]+\(`) from matching, so `isLog` speaks for the .NET pattern alone.
-  const frame = (l) => J.detectLog(l).isLog;
+  const frame = (l) => L.detectLog(l).isLog;
   check('b4.6-dotnet-frame-windows-path',
     frame('   at MyApp.Service.Run[T](Int32 id) in C:\\Program Files\\App\\Service.cs:line 42'),
     'a PDB path containing SPACES must still match (the reason the tail stays `.+` instead of `\\S+`)');
@@ -2146,8 +2229,8 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const dotnetTrace = (arg) => ['Unhandled exception. System.InvalidOperationException: boom',
     ...Array.from({ length: 60 }, (_, i) => `   at MyApp.Svc.Run(${arg(i)}) in /src/Svc.cs:line ${i + 1}`)].join('\n');
   // Byte ratio is NOT the invariant here (the two argument texts differ in length) — the structure is.
-  const traceShape = (s) => [J.detectLog(s).isLog, L.parseLogLines(s.split('\n'), {}).filter((e) => e.isStackTrace).length,
-    J.compressLog(s, {}).compressed_line_count];
+  const traceShape = (s) => [L.detectLog(s).isLog, L.parseLogLines(s.split('\n'), {}).filter((e) => e.isStackTrace).length,
+    L.compressLog(s, {}).compressed_line_count];
   eq('b4.6-nested-parens-trace-still-compresses', traceShape(dotnetTrace((i) => `Nested(${i})`)), traceShape(dotnetTrace((i) => `Int32 i${i}`)));
 
   // `analyseDictArray` runs ~7 passes over rows × unionKeys. With per-row-unique key names that union
@@ -2162,13 +2245,13 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     return o;
   });
   const w0 = Date.now();
-  const wq = J.analyseDictArray(wide, J.DEFAULTS);
+  const wq = T.analyseDictArray(wide, T.DEFAULTS);
   const wms = Date.now() - w0;
   eq('b4.8-analyse-ops-gate', [wq.crushable, wq.strategy, wq.reason], [false, 'skip', 'analysis_too_wide']);
   check('b4.8-analyse-ops-gate-fast', wms < 1000, `a 2000×40 unique-key array must decline fast, took ${wms} ms (was ~45,000 ms)`);
   // …and the gate must sit far above every parity-sized array: the same shapes still analyse normally.
   const normal = Array.from({ length: 200 }, (_, i) => ({ id: i, status: i % 2 ? 'ok' : 'pending', kind: 'widget' }));
-  check('b4.8-analyse-gate-clears-normal', J.analyseDictArray(normal, J.DEFAULTS).crushable === true,
+  check('b4.8-analyse-gate-clears-normal', T.analyseDictArray(normal, T.DEFAULTS).crushable === true,
     'an ordinary array is nowhere near the ops cap');
   // The ops PRODUCT on its own, which nothing above reaches: the case above trips the union cap first
   // (per-row key names), and the tall-narrow dump below sits under the product. A SHARED but very wide
@@ -2180,7 +2263,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     return o;
   });
   const s0 = Date.now();
-  const sq = J.analyseDictArray(shapedWide, J.DEFAULTS);
+  const sq = T.analyseDictArray(shapedWide, T.DEFAULTS);
   const sms = Date.now() - s0;
   eq('dr2-analyse-ops-backstop', [sq.crushable, sq.strategy, sq.reason], [false, 'skip', 'analysis_too_wide']);
   check('dr2-analyse-ops-backstop-fast', sms < 700, `the ops backstop must decline before the passes, took ${sms} ms (ungated: ~2190 ms)`);
@@ -2239,7 +2322,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     status: i % 7 ? 'ACTIVE' : 'DRAFT', price: `${(i % 90) + 1}.00`, title: `Variant ${i % 900}`, vendor: 'acme',
   }));
   const t0tall = Date.now();
-  const tq = J.analyseDictArray(tall, J.DEFAULTS);
+  const tq = T.analyseDictArray(tall, T.DEFAULTS);
   check('dr2-analyse-tall-narrow-crushes', tq.crushable === true,
     `a 300k×7 fixed-schema dump must still analyse: ${tq.strategy}/${tq.reason} in ${Date.now() - t0tall} ms`);
 }
@@ -2276,7 +2359,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     `the reminder must be a single trailing line:\n${second}`);
   check('r6-profile-body-unchanged', bodyOf(first) === bodyOf(second) && bodyOf(first).includes('"profile":true'),
     'suppressing guidance must not change WHAT is profiled (the profile JSON must be byte-identical)');
-  check('r6-reminder-is-smaller', Buffer.byteLength(J.whaleReminder(fileA, 40)) < Buffer.byteLength(J.whaleGuidance(fileA, 40, 0)),
+  check('r6-reminder-is-smaller', Buffer.byteLength(T.whaleReminder(fileA, 40)) < Buffer.byteLength(T.whaleGuidance(fileA, 40, 0)),
     'the reminder must be shorter than the block it replaces');
 
   // a DIFFERENT whale in the same dir/session gets its own full block (the commands are path-specific)
@@ -2285,7 +2368,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('r6-per-path-isolation', isReminder(profile(fileA)), 'profiling another file must not re-arm the first file');
 
   // TTL: the stamp is a fixed window, so an old stamp re-prints the full block
-  const stateA = J.whaleGuideStatePath(dir, fileA);
+  const stateA = T.whaleGuideStatePath(dir, fileA);
   check('r6-state-file-is-a-dotfile', path.basename(stateA).startsWith('.') && readdirSync(dir).filter((f) => !f.startsWith('.') && !f.endsWith('.jsonl')).length === 0,
     `the state file must be a dotfile and the spill dir must gain no listed entry: ${JSON.stringify(readdirSync(dir))}`);
   writeFileSync(stateA, JSON.stringify({ p: fileA, t: Date.now() - 3 * 60 * 60 * 1000 }));
@@ -2306,10 +2389,10 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   {
     const prev = process.env.FND_WHALE_GUIDE;
     const states = {};
-    for (const v of ['0', 'false', 'NO', 'off', ' 0 ']) { process.env.FND_WHALE_GUIDE = v; states[v] = J.whaleGuideEnabled(); }
-    for (const v of ['1', 'true', 'on', '', 'junk']) { process.env.FND_WHALE_GUIDE = v; states[`+${v}`] = J.whaleGuideEnabled(); }
+    for (const v of ['0', 'false', 'NO', 'off', ' 0 ']) { process.env.FND_WHALE_GUIDE = v; states[v] = T.whaleGuideEnabled(); }
+    for (const v of ['1', 'true', 'on', '', 'junk']) { process.env.FND_WHALE_GUIDE = v; states[`+${v}`] = T.whaleGuideEnabled(); }
     delete process.env.FND_WHALE_GUIDE;
-    states['+unset'] = J.whaleGuideEnabled();
+    states['+unset'] = T.whaleGuideEnabled();
     if (prev === undefined) delete process.env.FND_WHALE_GUIDE; else process.env.FND_WHALE_GUIDE = prev;
     eq('r6-switch-parsing', Object.entries(states).map(([k, v]) => `${k}=${v}`).join(' '),
       '0=false false=false NO=false off=false  0 =false +1=true +true=true +on=true +=true +junk=true +unset=true');
@@ -2319,15 +2402,15 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   {
     const roDir = path.join(mkdtempSync(path.join(tmpdir(), 'jslim-whalero-')), 'not-a-dir');
     writeFileSync(roDir, 'x'); // a FILE used as the spill dir → mkdir/write both fail
-    check('r6-unwritable-state-full-block', J.whaleGuideFullBlock(path.join(roDir, 'sub'), fileA) === true,
+    check('r6-unwritable-state-full-block', T.whaleGuideFullBlock(path.join(roDir, 'sub'), fileA) === true,
       'a state file that cannot be written falls back to the full block, never to silence');
   }
 
   // the sweep prunes stale hint files (they are pure hints) while keeping fresh ones
   {
     const swDir = mkdtempSync(path.join(tmpdir(), 'jslim-whalesweep-'));
-    const stale = J.whaleGuideStatePath(swDir, '/tmp/stale.jsonl');
-    const fresh = J.whaleGuideStatePath(swDir, '/tmp/fresh.jsonl');
+    const stale = T.whaleGuideStatePath(swDir, '/tmp/stale.jsonl');
+    const fresh = T.whaleGuideStatePath(swDir, '/tmp/fresh.jsonl');
     writeFileSync(stale, '{}'); writeFileSync(fresh, '{}');
     const old = Date.now() / 1000 - 40 * 3600;
     utimesSync(stale, old, old);
@@ -2341,8 +2424,8 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // spawned subagent inherits the session id, a /compact drops the earlier transcript, concurrent
   // runs race the stamp), so the per-file FACTS — path, rows, sed/grep forms — ride on every one.
   check('r6-reminder-self-sufficient',
-    ["sed -n '<N>p'", 'grep <pattern>', 'FND_WHALE_GUIDE=0', 'never pull the file into context'].every((s) => J.whaleReminder(fileA, 40, 0).includes(s)),
-    `the reminder must carry the single-row commands, the don't-read-it imperative, and the switch on its own:\n${J.whaleReminder(fileA, 40, 0)}`);
+    ["sed -n '<N>p'", 'grep <pattern>', 'FND_WHALE_GUIDE=0', 'never pull the file into context'].every((s) => T.whaleReminder(fileA, 40, 0).includes(s)),
+    `the reminder must carry the single-row commands, the don't-read-it imperative, and the switch on its own:\n${T.whaleReminder(fileA, 40, 0)}`);
 
   // A fenced JSONL spill (the M11 shape) — the fence OFFSET is a per-file fact, not guidance prose:
   // dropping it on the repeat would make every `sed -n '<row>p'` off by the wrapper lines, silently.
@@ -2389,11 +2472,11 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     const sdir = mkdtempSync(path.join(tmpdir(), 'jslim-whalestamp-'));
     const sfile = path.join(sdir, 'stamp.jsonl');
     writeFileSync(sfile, rows(30, 's'));
-    const sstate = J.whaleGuideStatePath(sdir, sfile);
-    check('r6-decision-does-not-stamp', J.whaleGuideFullBlock(sdir, sfile) === true && !existsSync(sstate),
+    const sstate = T.whaleGuideStatePath(sdir, sfile);
+    check('r6-decision-does-not-stamp', T.whaleGuideFullBlock(sdir, sfile) === true && !existsSync(sstate),
       'whaleGuideFullBlock must decide only — no state file may appear before the block is delivered');
-    J.whaleGuideStamp(sdir, sfile);
-    check('r6-stamp-then-suppresses', existsSync(sstate) && J.whaleGuideFullBlock(sdir, sfile) === false,
+    T.whaleGuideStamp(sdir, sfile);
+    check('r6-stamp-then-suppresses', existsSync(sstate) && T.whaleGuideFullBlock(sdir, sfile) === false,
       'whaleGuideStamp must write the state that the next decision honors');
     rmSync(sdir, { recursive: true, force: true });
   }
@@ -2420,7 +2503,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     writeFileSync(lfile, rows(30, 'l'));
     const victim = path.join(ldir, 'victim.txt');
     writeFileSync(victim, 'IMPORTANT VICTIM CONTENT');
-    const lstate = J.whaleGuideStatePath(ldir, lfile);
+    const lstate = T.whaleGuideStatePath(ldir, lfile);
     symlinkSync(victim, lstate);
     const l1 = profile(lfile, { FND_MCP_SLIM_DIR: ldir });
     check('r6-symlink-state-not-followed',
@@ -2483,7 +2566,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     })),
   });
   // One pinned session id for the whole block, set on THIS process so the children inherit it and
-  // J.nogainStatePath() computes the same key the CLI does — a developer's real session id would
+  // T.nogainStatePath() computes the same key the CLI does — a developer's real session id would
   // otherwise make every planted-state case address a file the CLI never reads.
   const prevSid = process.env.CLAUDE_CODE_SESSION_ID;
   process.env.CLAUDE_CODE_SESSION_ID = 'b2-fixture-session';
@@ -2548,7 +2631,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('b2-second-run-refused', isRefusal(second) && second.stdout.includes('already passed through uncompressed this session')
     && second.stdout.includes('FND_NOGAIN_MEMO=0') && !second.stdout.includes('gid://'),
     `a repeat run must answer in one line, naming the recoveries and the off switch:\n${second.stdout.slice(0, 300)}`);
-  const memoState = J.nogainStatePath(dir, big);
+  const memoState = T.nogainStatePath(dir, big);
   check('b2-state-is-a-dotfile', path.basename(memoState).startsWith('.')
     && readdirSync(dir).filter((f) => !f.startsWith('.') && f !== 'unique-entities.json' && f !== 'fnd-mcp-slim-debug.log').length === 0,
     `the memo state must be a dotfile and add no listed entry: ${JSON.stringify(readdirSync(dir))}`);
@@ -2574,10 +2657,10 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     // …and the switch parses like FND_WHALE_GUIDE's (the shared falsey vocabulary)
     const prev = process.env.FND_NOGAIN_MEMO;
     const states = {};
-    for (const v of ['0', 'false', 'NO', 'off', ' 0 ']) { process.env.FND_NOGAIN_MEMO = v; states[v] = J.nogainMemoEnabled(); }
-    for (const v of ['1', 'true', 'on', '', 'junk']) { process.env.FND_NOGAIN_MEMO = v; states[`+${v}`] = J.nogainMemoEnabled(); }
+    for (const v of ['0', 'false', 'NO', 'off', ' 0 ']) { process.env.FND_NOGAIN_MEMO = v; states[v] = T.nogainMemoEnabled(); }
+    for (const v of ['1', 'true', 'on', '', 'junk']) { process.env.FND_NOGAIN_MEMO = v; states[`+${v}`] = T.nogainMemoEnabled(); }
     delete process.env.FND_NOGAIN_MEMO;
-    states['+unset'] = J.nogainMemoEnabled();
+    states['+unset'] = T.nogainMemoEnabled();
     if (prev === undefined) delete process.env.FND_NOGAIN_MEMO; else process.env.FND_NOGAIN_MEMO = prev;
     eq('b2-switch-parsing', Object.entries(states).map(([k, v]) => `${k}=${v}`).join(' '),
       '0=false false=false NO=false off=false  0 =false +1=true +true=true +on=true +=true +junk=true +unset=true');
@@ -2599,31 +2682,16 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     rmSync(jdir, { recursive: true, force: true });
   }
 
-  // 4b — the bypasses that are not `--jq`. A PIPELINE flag changes what slim() can produce: `--toon`
-  // re-serializes uniform arrays (16.6 % on this very payload — a real win the memo would have hidden)
-  // and `--no-spill` takes the crush's row offload away. `--stats` is a MEASUREMENT run that
-  // hooks/mcp-whale.md promises will report the 0.0 %; a refusal answers it with no measurement at all.
+  // 4b — the bypass that is not `--jq`. `--stats` is a MEASUREMENT run that hooks/mcp-whale.md
+  // promises will report the 0.0 %; a refusal answers it with no measurement at all.
   {
     const fdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2flags-'));
     const f = path.join(fdir, 'flags.json');
     writeFileSync(f, bigBody);
     run([f], { FND_MCP_SLIM_DIR: fdir }); // arm the memo with a PLAIN decline
-    const toon = run(['--toon', f], { FND_MCP_SLIM_DIR: fdir });
-    check('b2-toon-bypasses-memo', !isRefusal(toon) && Buffer.byteLength(toon.stdout) < Buffer.byteLength(bigBody),
-      `--toon squeezes what the plain pipeline declined, so the memo must not answer it: ${toon.stdout.slice(0, 160)}`);
-    check('b2-no-spill-bypasses-memo', !isRefusal(run(['--no-spill', f], { FND_MCP_SLIM_DIR: fdir })),
-      '--no-spill is a different pipeline; a plain decline says nothing about it');
     const stats = run(['--stats', f], { FND_MCP_SLIM_DIR: fdir });
     check('b2-stats-bypasses-memo', stats.stdout === `${bigBody}\n` && /0\.0% reduction/.test(stats.stderr),
       `--stats must still measure the decline it is asked about: ${JSON.stringify(stats.stderr)}`);
-    // …and the reverse: a decline UNDER a pipeline flag must not arm the memo for the plain run
-    const pdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2flagstamp-'));
-    const pf = path.join(pdir, 'toon-first.json');
-    writeFileSync(pf, JSON.stringify({ rows: Array.from({ length: 60 }, (_, i) => ({ k: `unique-value-${i}-${(i * 2654435761 >>> 0).toString(36)}`, n: i })) }));
-    run(['--toon', pf], { FND_MCP_SLIM_DIR: pdir });
-    check('b2-pipeline-decline-does-not-stamp', readdirSync(pdir).every((n) => !n.startsWith('.fnd-nogain-')),
-      `a --toon decline must not record a memo the plain pipeline would then be refused by: ${JSON.stringify(readdirSync(pdir))}`);
-    rmSync(pdir, { recursive: true, force: true });
     rmSync(fdir, { recursive: true, force: true });
   }
 
@@ -2672,7 +2740,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     const f = path.join(cdir, 'corrupt.json');
     writeFileSync(f, bigBody);
     const st = statSync(f);
-    const state = J.nogainStatePath(cdir, f);
+    const state = T.nogainStatePath(cdir, f);
     const stamps = {
       truncated: '{"p":"',
       garbage: 'not json at all',
@@ -2708,8 +2776,8 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // 7 — the sweep prunes aged memo dotfiles (they are pure hints) and keeps fresh ones
   {
     const swDir = mkdtempSync(path.join(tmpdir(), 'jslim-b2sweep-'));
-    const stale = J.nogainStatePath(swDir, '/tmp/stale-nogain.json');
-    const fresh = J.nogainStatePath(swDir, '/tmp/fresh-nogain.json');
+    const stale = T.nogainStatePath(swDir, '/tmp/stale-nogain.json');
+    const fresh = T.nogainStatePath(swDir, '/tmp/fresh-nogain.json');
     writeFileSync(stale, '{}'); writeFileSync(fresh, '{}');
     const old = Date.now() / 1000 - 40 * 3600;
     utimesSync(stale, old, old);
@@ -2736,6 +2804,80 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     check('b2-report-omits-fragment-when-zero', !clean.includes('refused by the no-gain/slim-out guard'),
       `a log with no refusals must not grow the cli line:\n${clean}`);
   }
+
+  // 9 — the split the shared state-file helper introduces. stateRead() answers null on every fault and
+  // never a caller's ANSWER: what null PRINTS is a one-line literal at each call site, and the two
+  // literals point OPPOSITE ways — the guide prints MORE, the memo does the WORK. No existing row can
+  // see that split (each side only ever exercised its own copy of the machinery), so pin both
+  // directions independently, through two different faults, plus the record shape and the write order.
+  {
+    const missing = path.join(mkdtempSync(path.join(tmpdir(), 'jslim-state-nx-')), 'nx', 'a', 'b');
+    check('state-safe-direction-guide', T.whaleGuideFullBlock(missing, big) === true && !existsSync(missing),
+      "the guide's safe direction is PRINT the full block: a state root that does not exist must not suppress, and must not be created");
+  }
+  {
+    const mdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2nostate-'));
+    const f = path.join(mdir, 'nostate.json');
+    writeFileSync(f, bigBody);
+    const missing = path.join(mdir, 'nx', 'root');
+    const a = run([f], { FND_MCP_SLIM_DIR: missing });
+    const b = run([f], { FND_MCP_SLIM_DIR: missing });
+    check('state-safe-direction-memo',
+      a.stdout === `${bigBody}\n` && b.stdout === `${bigBody}\n`
+      && /deliberate decline, not an error/.test(a.stderr) && /deliberate decline, not an error/.test(b.stderr)
+      && !existsSync(path.join(mdir, 'nx')),
+      `the memo's safe direction is DO THE WORK: with no state root BOTH runs must print the body and the decline notice, and neither may create the root: ${JSON.stringify(readdirSync(mdir))}`);
+    rmSync(mdir, { recursive: true, force: true });
+  }
+  // the mirror fault: a root that EXISTS but cannot be written, so stateRead's open failure and
+  // stateWrite's write failure are both exercised rather than only `existsSync` answering false.
+  if (!(typeof process.getuid === 'function' && process.getuid() === 0)) {
+    const rdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2ro-'));
+    const f = path.join(rdir, 'ro.json');
+    writeFileSync(f, bigBody);
+    const root = path.join(rdir, 'state');
+    mkdirSync(root);
+    chmodSync(root, 0o500); // searchable, NOT writable
+    const a = run([f], { FND_MCP_SLIM_DIR: root });
+    const b = run([f], { FND_MCP_SLIM_DIR: root });
+    check('state-safe-direction-memo-unwritable',
+      a.stdout === `${bigBody}\n` && b.stdout === `${bigBody}\n` && readdirSync(root).length === 0,
+      `an unwritable state root must still print the body on every run and leave no state: ${JSON.stringify(readdirSync(root))}`);
+    chmodSync(root, 0o700);
+    rmSync(rdir, { recursive: true, force: true });
+  }
+  {
+    const sdir = mkdtempSync(path.join(tmpdir(), 'jslim-state-shape-'));
+    const f = path.join(sdir, 'shape.json');
+    writeFileSync(f, bigBody);
+    T.whaleGuideStamp(sdir, f);
+    run([f], { FND_MCP_SLIM_DIR: sdir }); // a plain decline arms the memo
+    const gRec = JSON.parse(readFileSync(T.whaleGuideStatePath(sdir, f), 'utf8'));
+    const nRec = JSON.parse(readFileSync(T.nogainStatePath(sdir, f), 'utf8'));
+    eq('state-record-shapes-differ', `${Object.keys(gRec).sort().join(',')} | ${Object.keys(nRec).sort().join(',')}`,
+      'p,t | mtimeMs,p,size,t');
+    rmSync(sdir, { recursive: true, force: true });
+  }
+  {
+    const base = mkdtempSync(path.join(tmpdir(), 'jslim-state-mkdir-'));
+    const f = path.join(base, 'mk.json');
+    writeFileSync(f, bigBody);
+    const missing = path.join(base, 'nx', 'root');
+    T.whaleGuideStamp(missing, f);
+    const r = run([f], { FND_MCP_SLIM_DIR: missing });
+    check('state-stamp-never-mkdirs', !existsSync(path.join(base, 'nx')) && r.stdout === `${bigBody}\n`,
+      `neither stamp may materialize the spill tree — a typo'd FND_MCP_SLIM_DIR must not grow directories: ${JSON.stringify(readdirSync(base))}`);
+    rmSync(base, { recursive: true, force: true });
+  }
+  {
+    const tdir = mkdtempSync(path.join(tmpdir(), 'jslim-state-tmp-'));
+    // the stamp's `extra()` stats the file it pins; point it at a path that is not there, so the
+    // record cannot be built. Built FIRST, before the tmp is minted → nothing is left behind.
+    T.nogainStamp(tdir, path.join(tdir, 'gone.json'));
+    check('state-stamp-no-orphan-tmp', readdirSync(tdir).length === 0,
+      `the record is built before the tmp is minted, so a stat failure leaves nothing on disk (HEAD's nogainStamp order): ${JSON.stringify(readdirSync(tdir))}`);
+    rmSync(tdir, { recursive: true, force: true });
+  }
   if (prevSid === undefined) delete process.env.CLAUDE_CODE_SESSION_ID; else process.env.CLAUDE_CODE_SESSION_ID = prevSid;
   rmSync(dir, { recursive: true, force: true });
 }
@@ -2758,36 +2900,36 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const parseOut = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };
 
   // ---- envelopeInner: the purity gate and what counts as an inner payload
-  eq('m14-inner-array-shape', J.envelopeInner(JSON.parse(wrap('{"a":1}'))), { text: '{"a":1}', value: { a: 1 } });
-  eq('m14-inner-lone-block', J.envelopeInner({ type: 'text', text: '{"a":1}' }), { text: '{"a":1}', value: { a: 1 } });
-  eq('m14-inner-content-shape', J.envelopeInner({ content: [{ type: 'text', text: '{"a":1}' }] }), { text: '{"a":1}', value: { a: 1 } });
+  eq('m14-inner-array-shape', T.envelopeInner(JSON.parse(wrap('{"a":1}'))), { text: '{"a":1}', value: { a: 1 } });
+  eq('m14-inner-lone-block', T.envelopeInner({ type: 'text', text: '{"a":1}' }), { text: '{"a":1}', value: { a: 1 } });
+  eq('m14-inner-content-shape', T.envelopeInner({ content: [{ type: 'text', text: '{"a":1}' }] }), { text: '{"a":1}', value: { a: 1 } });
   // …and the shapes that are NOT an envelope for this purpose: unwrapping them would DROP a field
   // while the printed body claims to be the whole payload (the DR/M49 rule blockText already owns).
-  eq('m14-inner-meta-refused', J.envelopeInner([{ type: 'text', text: '{"a":1}', _meta: { nextCursor: 'c1' } }]), null);
-  eq('m14-inner-annotations-refused', J.envelopeInner([{ type: 'text', text: '{"a":1}', annotations: { audience: ['user'] } }]), null);
-  eq('m14-inner-structured-refused', J.envelopeInner({ content: [{ type: 'text', text: '{"a":1}' }], structuredContent: { a: 1 } }), null);
-  eq('m14-inner-mixed-blocks-refused', J.envelopeInner([{ type: 'text', text: '{"a":1}' }, { type: 'image', data: 'x' }]), null);
+  eq('m14-inner-meta-refused', T.envelopeInner([{ type: 'text', text: '{"a":1}', _meta: { nextCursor: 'c1' } }]), null);
+  eq('m14-inner-annotations-refused', T.envelopeInner([{ type: 'text', text: '{"a":1}', annotations: { audience: ['user'] } }]), null);
+  eq('m14-inner-structured-refused', T.envelopeInner({ content: [{ type: 'text', text: '{"a":1}' }], structuredContent: { a: 1 } }), null);
+  eq('m14-inner-mixed-blocks-refused', T.envelopeInner([{ type: 'text', text: '{"a":1}' }, { type: 'image', data: 'x' }]), null);
   // …and a MULTI-block PURE text envelope, which blockText would happily JOIN: an envelope's blocks
   // are independent results, so the join is not a document. Two compact JSON blocks read as two JSONL
   // rows and a prose+fence pair reads as one fenced payload — both describe something nobody sent.
-  eq('m14-inner-two-json-blocks-refused', J.envelopeInner([{ type: 'text', text: '{"a":1}' }, { type: 'text', text: '{"b":2}' }]), null);
+  eq('m14-inner-two-json-blocks-refused', T.envelopeInner([{ type: 'text', text: '{"a":1}' }, { type: 'text', text: '{"b":2}' }]), null);
   eq('m14-inner-two-fence-halves-refused',
-    J.envelopeInner([{ type: 'text', text: 'Script returned:\n```json' }, { type: 'text', text: `{"rows":[1,2,3]}\n\`\`\`` }]), null);
+    T.envelopeInner([{ type: 'text', text: 'Script returned:\n```json' }, { type: 'text', text: `{"rows":[1,2,3]}\n\`\`\`` }]), null);
   // the sole-block gate itself, and the join blockText keeps for the jsx stage (whose detector accepts
   // a joined text only when every signature of ONE Figma payload is in it)
-  eq('m14-sole-block-lone', J.soleBlockText({ type: 'text', text: 'a' }), 'a');
-  eq('m14-sole-block-one-element', J.soleBlockText([{ type: 'text', text: 'a' }]), 'a');
-  eq('m14-sole-block-content-shape', J.soleBlockText({ content: [{ type: 'text', text: 'a' }] }), 'a');
-  eq('m14-sole-block-two-refused', J.soleBlockText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]), null);
-  eq('m14-sole-block-impure-refused', J.soleBlockText([{ type: 'text', text: 'a', _meta: { nextCursor: 'c' } }]), null);
-  eq('m14-blocktext-still-joins', J.blockText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]), 'a\nb');
-  eq('m14-inner-prose-refused', J.envelopeInner(JSON.parse(wrap('PERMISSION DENIED: the token cannot read this issue'))), null);
+  eq('m14-sole-block-lone', T.soleBlockText({ type: 'text', text: 'a' }), 'a');
+  eq('m14-sole-block-one-element', T.soleBlockText([{ type: 'text', text: 'a' }]), 'a');
+  eq('m14-sole-block-content-shape', T.soleBlockText({ content: [{ type: 'text', text: 'a' }] }), 'a');
+  eq('m14-sole-block-two-refused', T.soleBlockText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]), null);
+  eq('m14-sole-block-impure-refused', T.soleBlockText([{ type: 'text', text: 'a', _meta: { nextCursor: 'c' } }]), null);
+  eq('m14-blocktext-still-joins', T.blockText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }]), 'a\nb');
+  eq('m14-inner-prose-refused', T.envelopeInner(JSON.parse(wrap('PERMISSION DENIED: the token cannot read this issue'))), null);
   // a JSONL inner is deliberately outside the rail — its rows must PROFILE, and a profile's line
   // recipes cannot address lines that only exist inside an escaped string (see the M1.5 case below)
-  eq('m14-inner-jsonl-refused', J.envelopeInner(JSON.parse(wrap('{"id":1}\n{"id":2}\n{"id":3}'))), null);
+  eq('m14-inner-jsonl-refused', T.envelopeInner(JSON.parse(wrap('{"id":1}\n{"id":2}\n{"id":3}'))), null);
   // an M11-fenced inner IS a payload — the fence is the tool's prose wrapper, not the data
   const fencedBody = JSON.stringify({ rows: Array.from({ length: 12 }, (_, i) => ({ id: i, name: `row-${i}` })) });
-  eq('m14-inner-fenced', J.envelopeInner(JSON.parse(wrap(`Script ran on page and returned:\n\`\`\`json\n${fencedBody}\n\`\`\``))).value,
+  eq('m14-inner-fenced', T.envelopeInner(JSON.parse(wrap(`Script ran on page and returned:\n\`\`\`json\n${fencedBody}\n\`\`\``))).value,
     JSON.parse(fencedBody));
 
   // ---- slim(): the win is the INNER body, measured against the ENVELOPE's bytes
@@ -3012,13 +3154,13 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   const jqOut = (expr) => { const r = run(['--jq', expr, plain]); return { v: JSON.parse(r.stdout), err: r.stderr, code: r.status }; };
 
   // ---- the grammar, parsed (no spawn): what the CLI accepts and what it names as unsupported
-  eq('m15-parse-identity', J.parseJqExpr('.').identity, true);
-  eq('m15-parse-identity-dotdot', J.parseJqExpr('..').identity, true);
-  eq('m15-parse-path-not-identity', J.parseJqExpr('.a').identity, false);
-  eq('m15-parse-filter-not-identity', J.parseJqExpr('. | keys').identity, false);
-  eq('m15-parse-terms', J.parseJqExpr('.a, .b.c').terms.length, 2);
-  eq('m15-parse-iteration-step', J.parseJqExpr('.a[].b').terms[0].segs, ['a', null, 'b']);
-  eq('m15-parse-bracket-index', J.parseJqExpr('.a[0].b').terms[0].segs, ['a', '0', 'b']);
+  eq('m15-parse-identity', T.parseJqExpr('.').identity, true);
+  eq('m15-parse-identity-dotdot', T.parseJqExpr('..').identity, true);
+  eq('m15-parse-path-not-identity', T.parseJqExpr('.a').identity, false);
+  eq('m15-parse-filter-not-identity', T.parseJqExpr('. | keys').identity, false);
+  eq('m15-parse-terms', T.parseJqExpr('.a, .b.c').terms.length, 2);
+  eq('m15-parse-iteration-step', T.parseJqExpr('.a[].b').terms[0].segs, ['a', null, 'b']);
+  eq('m15-parse-bracket-index', T.parseJqExpr('.a[0].b').terms[0].segs, ['a', '0', 'b']);
   // the unsupported families, each naming the token that put it out of scope
   for (const [expr, token] of [
     ['.a | map(.b)', 'map('],
@@ -3035,7 +3177,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     ['.a | keys_unsorted', 'keys_unsorted'],
     ['.a | length > 2', 'length > 2'],
   ]) {
-    eq(`m15-unsupported-token:${expr}`, J.parseJqExpr(expr).bad, token);
+    eq(`m15-unsupported-token:${expr}`, T.parseJqExpr(expr).bad, token);
     // …and every one of them reaches the CLI's refusal, not just the parser: a guard that read a body
     // before refusing, or a branch that swallowed `bad`, would keep the table above green.
     const r = run(['--jq', expr, plain]);
@@ -3045,14 +3187,14 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   // An EMPTY multi-select slot is a syntax error too — parsed as a path it would be the identity
   // selector, i.e. the whole document handed back in that slot (and `.a,` is exactly what the shell
   // leaves when an unquoted `--jq .a, .b` is split).
-  for (const expr of ['.a,', ',.a', '.a,,.obj', ',']) eq(`m15-empty-term:${expr}`, J.parseJqExpr(expr).bad, ',');
+  for (const expr of ['.a,', ',.a', '.a,,.obj', ',']) eq(`m15-empty-term:${expr}`, T.parseJqExpr(expr).bad, ',');
   // `.a.[0]` is jq's own spelling of `.a[0]` — the `[N]` rewrite glues a dot pair there, which is not
   // the recursive descent the refusal names
-  eq('m15-parse-dot-bracket', J.parseJqExpr('.a.[0]').terms[0].segs, ['a', '0']);
+  eq('m15-parse-dot-bracket', T.parseJqExpr('.a.[0]').terms[0].segs, ['a', '0']);
   // Keys the dot-walk this replaced could address stay addressable: a digit-LEADING key is ONE segment
   // (not `2` + `fa`, which reads a numeric sibling's value), and a key outside `\w` is still a key.
-  eq('m15-parse-digit-leading-key', J.parseJqExpr('.2fa').terms[0].segs, ['2fa']);
-  eq('m15-parse-nonword-keys', J.parseJqExpr('.@type.a:b.x/y').terms[0].segs, ['@type', 'a:b', 'x/y']);
+  eq('m15-parse-digit-leading-key', T.parseJqExpr('.2fa').terms[0].segs, ['2fa']);
+  eq('m15-parse-nonword-keys', T.parseJqExpr('.@type.a:b.x/y').terms[0].segs, ['@type', 'a:b', 'x/y']);
 
   // ---- paths, iteration, multi-select, filters — through the CLI, on a plain JSON file
   eq('m15-cli-keys-object', jqOut('.obj | keys').v, ['x', 'y']);
@@ -3181,7 +3323,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   {
     const wide = { a: [{ b: Array.from({ length: 130_000 }, (_, i) => i) }] };
     for (const expr of ['.a[].b[]', '.a[] | .b[]']) {
-      const r = J.evalJqExpr(wide, J.parseJqExpr(expr));
+      const r = T.evalJqExpr(wide, T.parseJqExpr(expr));
       check(`m15-fanout-no-arg-limit:${expr}`, r.ok && r.value.length === 130_000 && r.value[129_999] === 129_999,
         `a 130k fan-out must survive: ${r.ok} / ${r.value && r.value.length}`);
     }
@@ -3245,7 +3387,7 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     // …and the parser's own answer, so a future spelling is checked without a spawn
     for (const [expr, whole] of [['.', true], ['.[]', true], ['. | .', true], ['.[] | .', true], ['. | .[]', true],
       ['., .', true], ['.[], .[]', true], ['.a', false], ['. | keys', false], ['.[] | .k', false], ['.[][]', false]]) {
-      eq(`m15-parse-whole:${expr}`, J.jqExprWhole(J.parseJqExpr(expr)), whole);
+      eq(`m15-parse-whole:${expr}`, T.jqExprWhole(T.parseJqExpr(expr)), whole);
     }
   }
 
@@ -3325,6 +3467,103 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     rmSync(ddir, { recursive: true, force: true });
   }
   rmSync(dir, { recursive: true, force: true });
+}
+
+// ---- unknown arguments — the exit-2 usage contract ----------------------------------------------
+// `has()` matches an argument by NAME and `fileArg` used to resolve a `-`-prefixed token as the input
+// PATH, so before this contract a typo (`--jqq`), a retired flag (`--toon`, `--no-spill`) or `-h`
+// silently ran as something other than what was asked. Every unrecognized argument now writes ONE
+// diagnostic naming the token and the supported grammar, prints nothing, writes nothing, and exits 2.
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'jslim-uf-'));
+  const f = path.join(dir, 'body.json');
+  writeFileSync(f, JSON.stringify({ a: 1, b: [1, 2, 3] }));
+  // Debug OFF in this dir (the suite scrubs the four switches at the top) so `uf-writes-nothing`
+  // measures a refusal that touched the filesystem not at all — mirroring m15-refusal-writes-nothing.
+  const env = { ...process.env, FND_MCP_SLIM_DIR: dir };
+  const uf = (argv) => spawnSync('node', [SLIM, ...argv], { encoding: 'utf8', env });
+
+  const toon = uf(['--toon', f]);
+  check('uf-retired-toon', toon.status === 2 && /unknown option --toon/.test(toon.stderr) && toon.stdout === '',
+    `a retired flag must exit 2 naming the token, never run as a plain compression: ${toon.status} / ${JSON.stringify(toon.stdout.slice(0, 80))} / ${JSON.stringify(toon.stderr)}`);
+  const nosp = uf(['--no-spill', f]);
+  check('uf-retired-no-spill', nosp.status === 2 && /unknown option --no-spill/.test(nosp.stderr) && nosp.stdout === '',
+    `a retired flag must exit 2 naming the token, never run as a plain compression: ${nosp.status} / ${JSON.stringify(nosp.stdout.slice(0, 80))} / ${JSON.stringify(nosp.stderr)}`);
+  const typo = uf(['--jqq', '.a', f]);
+  check('uf-typo', typo.status === 2 && /unknown option --jqq/.test(typo.stderr) && typo.stdout === '',
+    `a typo'd flag must not fall through to a plain compression: ${typo.status} / ${JSON.stringify(typo.stderr)}`);
+  // A single-dash token used to be resolved as the input PATH (ENOENT, exit 1);
+  // md-to-adf.cjs:77 rejects the same way, for the same reason.
+  const dashFirst = uf(['-h', f]);
+  const dashLast = uf([f, '-h']);
+  check('uf-single-dash', dashFirst.status === 2 && /unknown option -h/.test(dashFirst.stderr) && dashFirst.stdout === ''
+    && dashLast.status === 2 && /unknown option -h/.test(dashLast.stderr) && dashLast.stdout === '',
+    `-h must be a usage error in either position: ${dashFirst.status}/${JSON.stringify(dashFirst.stderr)} ${dashLast.status}/${JSON.stringify(dashLast.stderr)}`);
+  // `--help` used to HANG on stdin (REVIEW-2026-09.md:271); a bare `--` was silently ignored, so
+  // `-- file.json` compressed the file. The whitelist's diagnostic names every supported argument,
+  // which IS the usage message — no second usage path is needed.
+  const helps = [['--help'], ['-h'], ['--', f]].map((argv) => {
+    const t0 = Date.now();
+    const r = uf(argv);
+    return { r, ms: Date.now() - t0 };
+  });
+  check('uf-help-and-double-dash', helps.every(({ r, ms }) => r.status === 2 && /unknown option/.test(r.stderr) && r.stdout === '' && ms < 1000),
+    `--help, -h and a bare -- must each exit 2 promptly with no stdout: ${JSON.stringify(helps.map(({ r, ms }) => [r.status, r.stderr.trim().slice(0, 60), ms]))}`);
+  check('uf-names-supported', /--jq <jq-path> \| --stats \| --report \[logfile\] \| --since <ISO>/.test(toon.stderr),
+    `the diagnostic must name every supported argument: ${JSON.stringify(toon.stderr)}`);
+  // Nothing read, nothing printed, nothing written: no spill, no `.fnd-nogain-*`, no
+  // `.fnd-whale-guide-*`, no debug log (debug is off in this dir).
+  const before = readdirSync(dir).sort();
+  uf(['--bogus', f]);
+  check('uf-writes-nothing', JSON.stringify(readdirSync(dir).sort()) === JSON.stringify(before),
+    `a usage error must leave the spill dir untouched: before=${JSON.stringify(before)} after=${JSON.stringify(readdirSync(dir).sort())}`);
+
+  // The other half of the whitelist: everything it names still RUNS.
+  {
+    const log = path.join(dir, 'known.log');
+    writeFileSync(log, JSON.stringify({ ts: '2026-08-28T10:00:00.000Z', entry: 'cli', tool: f, decision: 'compressed', reason: 'ok', bytes_in: 100, bytes_out: 50, pct: 50, stages: ['crush'] }) + '\n');
+    const runs = [uf(['--stats', f]), uf(['--jq', '.a', f]), uf(['--report', log]), uf(['--report', log, '--since', '2026-01-01T00:00:00.000Z'])];
+    check('uf-known-flags-run', runs.every((r) => r.status === 0),
+      `every whitelisted argument must still run: ${JSON.stringify(runs.map((r) => [r.status, r.stderr.trim().slice(0, 80)]))}`);
+    // A flag's VALUE is skipped by the same list `fileArg` uses, so it can never be mistaken for a
+    // flag; and `--since` after a valueless `--report` stays a FLAG (the report reads the default log
+    // path, not a file literally named `--since`).
+    const valueLast = uf([f, '--jq', '.a']);
+    const sinceNotPath = uf(['--report', '--since', '2026-01-01T00:00:00.000Z']);
+    check('uf-value-not-a-flag', valueLast.status === 0 && !/unknown option/.test(sinceNotPath.stderr)
+      && /no debug log at [^\n]*fnd-mcp-slim-debug\.log/.test(sinceNotPath.stderr),
+      `a flag value is not a flag, and --since is not --report's log path: ${valueLast.status}/${JSON.stringify(valueLast.stderr)} ${JSON.stringify(sinceNotPath.stderr)}`);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// The refused run's debug line, and what `--report` does with it: shaped exactly like the m15 block
+// above, because a usage error must be the SAME kind of event as the `jq-unsupported` refusal — not a
+// one-off rule in the owner's weekly readout.
+{
+  const ddir = mkdtempSync(path.join(tmpdir(), 'jslim-ufdbg-'));
+  const f = path.join(ddir, 'body.json');
+  writeFileSync(f, JSON.stringify({ a: 1 }));
+  const denv = { ...process.env, FND_MCP_SLIM_DIR: ddir, FND_MCP_SLIM_DEBUG: '1' };
+  const r = spawnSync('node', [SLIM, '--bogus', f], { encoding: 'utf8', env: denv });
+  const logPath = path.join(ddir, 'fnd-mcp-slim-debug.log');
+  const line = JSON.parse(readFileSync(logPath, 'utf8').trim().split('\n').pop());
+  check('uf-debug-reason', r.status === 2 && line.entry === 'cli' && line.reason === 'unknown-flag'
+    && line.decision === 'passthrough' && line.bytes_in === 0 && !line.narrowed,
+    `the usage error logs its own reason, not a narrowed no-gain: ${JSON.stringify(line)}`);
+  const rep = spawnSync('node', [SLIM, '--report', logPath], { encoding: 'utf8', env: { ...process.env, FND_MCP_SLIM_DIR: ddir } }).stdout;
+  check('uf-report-not-a-dump', /passthrough reasons:[^\n]*unknown-flag 1/.test(rep) && !/gained nothing/.test(rep),
+    `a usage error read no body — it must show as a reason, never as a run that gained nothing: ${rep}`);
+  // …and it is not the RECOVERY for a whale either. The cli line MUST carry a non-null `tool`, or the
+  // filter's own `e.tool` guard would make this row vacuous.
+  const whaleLog = path.join(ddir, 'whales.log');
+  writeFileSync(whaleLog, [
+    JSON.stringify({ ts: '2026-08-28T10:00:00.000Z', entry: 'hook', tool: 'mcp__x__y', decision: 'passthrough', reason: 'platform-overflow', spill: '/tmp/whale-a.json' }),
+    JSON.stringify({ ts: '2026-08-28T10:01:00.000Z', entry: 'cli', tool: '/tmp/whale-a.json', decision: 'passthrough', reason: 'unknown-flag' }),
+  ].join('\n'));
+  check('uf-report-refusal-is-no-recovery', /missed whales \(platform-overflow never read by any tool\): 1 of 1/.test(J.buildReport(readFileSync(whaleLog, 'utf8').split('\n'), {})),
+    `a usage error must not pair with the whale it followed: ${J.buildReport(readFileSync(whaleLog, 'utf8').split('\n'), {})}`);
+  rmSync(ddir, { recursive: true, force: true });
 }
 
 // ============================ M16 — spill-access events in `--report` (the missed-whale correction) ==
@@ -3469,8 +3708,8 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('sample-marker-number', !!mn && Number(mn[2]) === 400 && Number(mn[1]) === 400 - (outN.length - 1),
     `a sampled number array must say so too: ${JSON.stringify(outN.slice(-2))}`);
   // The switches: `ccr` is Headroom's byte-parity mode (marker-less by contract, the parity group
-  // above depends on it) and `--no-spill`/enableMarker:false opts out of every marker.
-  check('sample-marker-not-in-ccr-mode', !J.crush(JSON.stringify({ items: strs }), { markerMode: 'ccr' }).compressed.includes('omitted'),
+  // above depends on it) and the enableMarker:false library override opts out of every marker.
+  check('sample-marker-not-in-ccr-mode', !T.crush(JSON.stringify({ items: strs }), { markerMode: 'ccr' }).compressed.includes('omitted'),
     'ccr mode must stay marker-less (smart-crusher parity)');
   check('sample-marker-off-with-enablemarker-false', !J.slim(JSON.stringify({ items: strs }), { enableMarker: false }).output.includes('omitted'),
     'enableMarker:false must drop the sampling marker with the rest');
@@ -3481,8 +3720,8 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('sample-marker-not-in-mixed-subgroup', outM.includes('_ccr_dropped') && !outM.includes('omitted'),
     `a mixed array keeps its single sentinel: ${outM.slice(0, 120)}`);
   // …and the strategy string still counts REAL rows, not the marker.
-  check('sample-marker-not-counted-in-info', /string:adaptive\(400->(\d+)\)\(400->\1\)/.test(J.crush(JSON.stringify({ items: strs })).strategy),
-    `the info line must report kept rows, not kept+marker: ${J.crush(JSON.stringify({ items: strs })).strategy}`);
+  check('sample-marker-not-counted-in-info', /string:adaptive\(400->(\d+)\)\(400->\1\)/.test(T.crush(JSON.stringify({ items: strs })).strategy),
+    `the info line must report kept rows, not kept+marker: ${T.crush(JSON.stringify({ items: strs })).strategy}`);
   // The path the hook and the CLI share: the marker must survive to real stdout, not just to slim().
   const dir = mkdtempSync(path.join(tmpdir(), 'jslim-mark-'));
   const f = path.join(dir, 'strings.json');
@@ -3496,11 +3735,11 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
 // ====================================== avatar-key drop no longer eats text content ==
 // AVATAR_KEY is a SUBSTRING match, so `thumbnail_alt` / `image_thumbnail_text` — real copy — vanished
 // with the image references.
-eq('noise-thumbnail-alt-survives', J.noiseStage({ thumbnail_alt: 'A cat on a chair' }, J.DEFAULTS), { thumbnail_alt: 'A cat on a chair' });
-eq('noise-thumbnail-text-survives', J.noiseStage({ image_thumbnail_text: 'Caption copy' }, J.DEFAULTS), { image_thumbnail_text: 'Caption copy' });
-eq('noise-thumbnail-camel-alt-survives', J.noiseStage({ thumbnailAlt: 'alt copy', avatarDescription: 'who' }, J.DEFAULTS), { thumbnailAlt: 'alt copy', avatarDescription: 'who' });
-eq('noise-thumbnail-url-dropped', J.noiseStage({ thumbnailUrl: 'http://t', thumbnail: 'http://t', thumbnails: ['http://t'], keep: 1 }, J.DEFAULTS), { keep: 1 });
-eq('noise-avatar-icon-dropped', J.noiseStage({ avatarUrls: { '48x48': 'http://a' }, iconUrl: 'http://i', keep: 1 }, J.DEFAULTS), { keep: 1 });
+eq('noise-thumbnail-alt-survives', T.noiseStage({ thumbnail_alt: 'A cat on a chair' }, T.DEFAULTS), { thumbnail_alt: 'A cat on a chair' });
+eq('noise-thumbnail-text-survives', T.noiseStage({ image_thumbnail_text: 'Caption copy' }, T.DEFAULTS), { image_thumbnail_text: 'Caption copy' });
+eq('noise-thumbnail-camel-alt-survives', T.noiseStage({ thumbnailAlt: 'alt copy', avatarDescription: 'who' }, T.DEFAULTS), { thumbnailAlt: 'alt copy', avatarDescription: 'who' });
+eq('noise-thumbnail-url-dropped', T.noiseStage({ thumbnailUrl: 'http://t', thumbnail: 'http://t', thumbnails: ['http://t'], keep: 1 }, T.DEFAULTS), { keep: 1 });
+eq('noise-avatar-icon-dropped', T.noiseStage({ avatarUrls: { '48x48': 'http://a' }, iconUrl: 'http://i', keep: 1 }, T.DEFAULTS), { keep: 1 });
 
 // ============================================ a lossy FILE body names its original ==
 // On STDERR for the JSON branch: this stdout is a document callers pipe into jq (scripts-sim parses
@@ -3545,13 +3784,13 @@ eq('noise-avatar-icon-dropped', J.noiseStage({ avatarUrls: { '48x48': 'http://a'
   const rs = J.slim(safe);
   check('numgate-passes-safe-numbers', rs.reason === undefined && rs.wasModified === true && rs.bytesOut < rs.bytesIn,
     `ordinary numbers must still compress: reason=${rs.reason} modified=${rs.wasModified}`);
-  const tok = (t) => J.numberPrecisionLoss(`{"v":${t}}`);
+  const tok = (t) => T.numberPrecisionLoss(`{"v":${t}}`);
   check('numgate-token-matrix', [1.5, '1e5', '9007199254740991', '-0.25', '0', '-0', '1.0', '0.1', '1e308', '-1e-5'].every((t) => tok(t) === false)
     && ['1e400', '-1e400', '12345678901234567890', '0.12345678901234567890', '1e-400'].every((t) => tok(t) === true),
     'the token matrix must split exactly on what the double round trip loses');
   // A number INSIDE a string is not a number token — the scanner skips literals, so an envelope's
   // escaped payload is judged by the recursive slim() that actually compresses it.
-  check('numgate-string-digits-ignored', J.numberPrecisionLoss('{"v":"1e400 12345678901234567890"}') === false,
+  check('numgate-string-digits-ignored', T.numberPrecisionLoss('{"v":"1e400 12345678901234567890"}') === false,
     'digits inside a string literal must not trip the gate');
   // LINEAR: a backtracking regex over a 1 MB body cost this repo 43 s once, so the scan is hand-written.
   const urls = [];
@@ -3560,7 +3799,7 @@ eq('noise-avatar-icon-dropped', J.noiseStage({ avatarUrls: { '48x48': 'http://a'
   }
   const bigPayload = JSON.stringify({ urls });
   const t0 = Date.now();
-  const hit = J.numberPrecisionLoss(bigPayload);
+  const hit = T.numberPrecisionLoss(bigPayload);
   const ms = Date.now() - t0;
   check('numgate-linear-on-1mb', hit === false && ms < 500, `1 MB of URL-dense strings: hit=${hit} in ${ms} ms (must be well under a second)`);
   // …and the CLI names the real cause instead of the generic "no reduction possible" decline.
@@ -3674,7 +3913,7 @@ eq('noise-avatar-icon-dropped', J.noiseStage({ avatarUrls: { '48x48': 'http://a'
   const body = `{"v":1e400,"rows":${JSON.stringify(rows)}}`;
   const f = path.join(dir, 'whale.json');
   writeFileSync(f, body);
-  check('numgate-whale-over-cap', Buffer.byteLength(body, 'utf8') > J.DEFAULTS.cliOutCap, 'the fixture must exceed the inline cap');
+  check('numgate-whale-over-cap', Buffer.byteLength(body, 'utf8') > T.DEFAULTS.cliOutCap, 'the fixture must exceed the inline cap');
   const r = spawnSync('node', [SLIM, f], { encoding: 'utf8', env });
   check('numgate-cap-hands-the-path-back', r.stdout === `json-slim: nothing to compress (number precision); read the file directly: ${f}\n`,
     `an over-cap precision decline must hand the path back: ${JSON.stringify(r.stdout.slice(0, 200))}`);
@@ -3688,20 +3927,20 @@ eq('noise-avatar-icon-dropped', J.noiseStage({ avatarUrls: { '48x48': 'http://a'
 // ================================================= gate + noise carve-out edge cases ==
 // Subnormals defeat the "≤15 significant digits always round-trips" short-circuit: 2.5e-324 has two
 // digits and still lands on 5e-324, a 2× rewrite.
-check('numgate-subnormal-rewrite-declines', ['2.5e-324', '7.4e-324', '4.9e-324'].every((t) => J.numberPrecisionLoss(`{"v":${t}}`) === true),
+check('numgate-subnormal-rewrite-declines', ['2.5e-324', '7.4e-324', '4.9e-324'].every((t) => T.numberPrecisionLoss(`{"v":${t}}`) === true),
   'a subnormal that shifts value must not pass the digit-count short-circuit');
-check('numgate-subnormal-exact-passes', ['5e-324', '1e-323', '1.2e-320'].every((t) => J.numberPrecisionLoss(`{"v":${t}}`) === false),
+check('numgate-subnormal-exact-passes', ['5e-324', '1e-323', '1.2e-320'].every((t) => T.numberPrecisionLoss(`{"v":${t}}`) === false),
   'a subnormal that DOES round-trip must not be declined');
 // A token Number() cannot read at all (`1.2.3` in a fenced payload's prose) is not a number — the CLI
 // runs this gate on the raw text before `--jq`, where prose can still be in front of the fence.
-check('numgate-non-number-token-ignored', J.numberPrecisionLoss('see release 1.2.3.4 below') === false,
+check('numgate-non-number-token-ignored', T.numberPrecisionLoss('see release 1.2.3.4 below') === false,
   'a malformed token must never be read as a precision loss');
 // AVATAR_KEY is case-insensitive; its content carve-out must be too, or SHOUTING keys still lose copy.
 eq('noise-thumbnail-uppercase-tail-survives',
-  J.noiseStage({ THUMBNAIL_ALT: 'copy', thumbnail_ALT: 'copy', avatar_TITLE: 'copy', thumbnailALT: 'copy' }, J.DEFAULTS),
+  T.noiseStage({ THUMBNAIL_ALT: 'copy', thumbnail_ALT: 'copy', avatar_TITLE: 'copy', thumbnailALT: 'copy' }, T.DEFAULTS),
   { THUMBNAIL_ALT: 'copy', thumbnail_ALT: 'copy', avatar_TITLE: 'copy', thumbnailALT: 'copy' });
 // …without widening into words that merely END in one of them.
-eq('noise-thumbnail-context-still-dropped', J.noiseStage({ thumbnailContext: 'http://t', keep: 1 }, J.DEFAULTS), { keep: 1 });
+eq('noise-thumbnail-context-still-dropped', T.noiseStage({ thumbnailContext: 'http://t', keep: 1 }, T.DEFAULTS), { keep: 1 });
 
 // ============================ a symlink at the FINAL spill name is not handed back ==
 // The tmp name is now O_EXCL, which leaves the content-addressed FINAL name as the predictable target:

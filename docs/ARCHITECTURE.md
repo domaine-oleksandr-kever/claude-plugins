@@ -41,7 +41,7 @@ flowchart TB
 
   subgraph scripts["Scripts the skills invoke (plugins/fnd/scripts)"]
     P1["create-preview-theme.sh · theme-json.sh · worktree-setup.sh · shopify-admin-gql.sh"]
-    P2["json-slim.cjs · log-slim.cjs"]
+    P2["json-slim.cjs · log-slim.cjs · scratch-hygiene.cjs"]
     P3["md-to-adf.cjs · adf-to-md.cjs"]
     P4["doctor.cjs · domaine-env.cjs · env-file.cjs"]
   end
@@ -113,8 +113,8 @@ flowchart LR
   G -- no --> PT["passthrough"]
   G -- yes --> ERR{"error envelope?"}
   ERR -- yes --> PT
-  ERR -- no --> SHAPE["shape rails<br/>fenced payload unwrap · text-block envelope · JSONL → profile"]
-  SHAPE --> STAGES["stages, in order<br/>adf → jsx (Figma) → noise → crush → log"]
+  ERR -- no --> SHAPE["shape rails<br/>fenced payload unwrap · text-block envelope · JSONL → profile<br/>Figma JSX · log-slim"]
+  SHAPE --> STAGES["JSON stages, in order<br/>adf → noise → truncate → crush"]
   STAGES --> GAIN{"smaller, and lossless<br/>where it must be?"}
   GAIN -- yes --> C["compressed result<br/>+ full= spill handle for whales"]
   GAIN -- no, big --> STUB["spill-and-stub<br/>byte-exact original on disk, stub in context"]

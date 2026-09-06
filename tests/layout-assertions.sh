@@ -53,6 +53,9 @@ parses() { "$NODE_BIN" -e 'JSON.parse(require("fs").readFileSync(process.argv[1]
 # Every packaging and install-path file is listed here BY NAME: the per-host blocks below are
 # guarded on existence, so without this list a deleted manifest would take its own assertions
 # with it — and a bundled script deleted with its suite would leave nothing red anywhere.
+# NB the asymmetry: json-slim.cjs and log-slim.cjs are NOT listed here either — widening this list
+# to every bundled script is a separate change. scratch-hygiene.cjs is listed because it is NEW and
+# its only coverage lives inside ANOTHER module's suite (tests/json-slim-fixtures.mjs).
 for f in "$CANON" \
          "$ROOT/.claude-plugin/marketplace.json" \
          "$CURSOR_MANIFEST" \
@@ -63,6 +66,7 @@ for f in "$CANON" \
          "$PLUGIN_DIR/scripts/doctor.cjs" \
          "$PLUGIN_DIR/scripts/bump-version.cjs" \
          "$PLUGIN_DIR/scripts/opencode-config.cjs" \
+         "$PLUGIN_DIR/scripts/scratch-hygiene.cjs" \
          "$ROOT/tests/opencode-config-sim.sh"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done

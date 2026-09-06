@@ -358,5 +358,13 @@ for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
   esac
 done
 
+# json-slim's argv contract. `--toon` / `--no-spill` are RETIRED: an unrecognized argument writes one
+# diagnostic and exits 2, so a README that still advertises either would document a usage error as a
+# feature. The exit-code sentence is user-facing and otherwise drift-prone — this sweep only checks
+# FND_* switch NAMES.
+has "$README" 'unknown option' readme-json-slim-unknown-flag
+lacks "$README" '--toon' readme-no-toon
+lacks "$README" '--no-spill' readme-no-nospill
+
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

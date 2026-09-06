@@ -67,8 +67,8 @@ const ALWAYS_WRITES = /(^|__)browser_take_screenshot$/;
 // …and the exact name Claude Code gives THIS plugin's own playwright server, the only one whose
 // manifest pins `--output-dir`. Anything else is treated as a default-configured server.
 const BUNDLED_PLAYWRIGHT = /^mcp__plugin_fnd_playwright__browser_take_screenshot$/;
-// Keep in sync with the manifest's `--output-dir` arg and json-slim.cjs's PLAYWRIGHT_OUT_REL — a
-// hooks-sim case pins the three together.
+// Keep in sync with the manifest's `--output-dir` arg and scripts/scratch-hygiene.cjs's
+// PLAYWRIGHT_OUT_REL — a hooks-sim case pins the three together.
 const PLAYWRIGHT_OUT_REL = '.claude/fnd-tmp/playwright';
 const PLAYWRIGHT_OUT_SEGS = PLAYWRIGHT_OUT_REL.split('/');
 // Where @playwright/mcp writes with no --output-dir: straight into the checkout.
@@ -86,10 +86,12 @@ function resolveBase(root, kind) {
 // The bundled server's scratch dir is allowed BECAUSE it is swept and git-excluded. The sweep half
 // rides on the compressor's switches (a developer with FND_MCP_SLIM=0 or FND_MCP_SLIM_TTL=0 still
 // gets this allow), and the exclude half costs two git forks a session — so the guard makes that
-// half true itself rather than allowing on someone else's promise. Required lazily and inside the
-// allow branches only: no deny, and no other server, ever loads the compressor for this.
+// half true itself rather than allowing on someone else's promise. The stamp lives in its own small
+// module for this caller's sake: it used to be reached through json-slim.cjs, so a PreToolUse guard
+// on every screenshot loaded a ~230 KB compressor to call a 34-line function. Still required lazily
+// and inside the allow branches only — a deny owes nothing, so it should not pay even ~1 ms.
 function markExcluded(root) {
-  try { require('../scripts/json-slim.cjs').ensureFndTmpExcluded(root); } catch (_) {} // fail-open, like everything here
+  try { require('../scripts/scratch-hygiene.cjs').ensureFndTmpExcluded(root); } catch (_) {} // fail-open, like everything here
 }
 
 // Where to send the write instead. Absolute, because the playwright server resolves a relative
