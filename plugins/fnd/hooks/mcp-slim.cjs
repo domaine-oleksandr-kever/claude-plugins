@@ -682,6 +682,9 @@ function run(raw) {
   // One deadline for the whole flow, so N blocks share the ceiling instead of each getting a fresh one.
   // 0 (FND_MCP_SLIM_BUDGET_MS=0) ⇒ null ⇒ no budget, json-slim's own default.
   const budget = budgetMs();
+  // Loaded before the clock starts: a cold ~10 ms module load is not pipeline work, and on a slow
+  // machine it alone could spend a small budget before the first block ran.
+  jsonSlim();
   const deadline = budget ? Date.now() + budget : null;
   const slimmed = slimResult(result, dbg, sink, deadline); // dbg gates slim()'s per-stage `stages` bookkeeping
   // The bail is PER BLOCK by design: each block is either its byte-identical original or fully
