@@ -541,6 +541,100 @@ if [ -f "$INSTALLER" ]; then
   fi
 fi
 
+# --------------------------------------------------------------------------- --trace report --
+# The FND_HOST_TRACE readout: a report over the JSONL log the hooks append to, not a check. It
+# runs INSTEAD of the install assertions, reads only <spill root>/fnd-host-trace.log, and exits 0
+# whatever it finds — an absent log is the switch being off, which is the default.
+TD="$TMP/tracedir"; mkdir -p "$TD"
+TLOG="$TD/fnd-host-trace.log"
+NOW="$(node -e 'process.stdout.write(new Date().toISOString())')"
+OLD="$(node -e 'process.stdout.write(new Date(Date.now() - 86400000).toISOString())')"
+
+# runtrace [args ...] — the doctor with the sandbox spill root, never the developer's real one
+runtrace() { rc=0; FND_MCP_SLIM_DIR="$TD" node "$DOCTOR" --trace "$@" >"$O" 2>"$E" || rc=$?; }
+
+# DT1: no log at all — the switch is off, which is the default and not a failure. The one line
+# has to name both the path and the switch, or the reader has nothing to act on.
+runtrace
+expect DT1-trace-no-log 0 "no host trace at $TLOG" "FND_HOST_TRACE=1" "!FAIL" "!PASS"
+
+# DT2: an empty file is the same answer with a different reason (the switch was on, nothing fired).
+: > "$TLOG"
+runtrace
+expect DT2-trace-empty-log 0 "file is empty" "FND_HOST_TRACE=1"
+
+# the fixture log: two hosts, four hooks, one deny, one line outside a 2 h window, one torn line
+{
+  printf '{"ts":"%s","host":"claude","event":"PreToolUse","hook":"no-verify-bypass","decision":"deny","tool":"Bash","project":"elc"}\n' "$NOW"
+  printf '{"ts":"%s","host":"claude","event":"PreToolUse","hook":"no-verify-bypass","decision":"pass","tool":"Bash","project":"elc"}\n' "$NOW"
+  printf '{"ts":"%s","host":"claude","event":"SessionStart","hook":"session-start","decision":"inject","project":"elc"}\n' "$NOW"
+  printf '{"ts":"%s","host":"cursor","event":"SessionStart","hook":"cursor-shim","decision":"inject","project":"elc"}\n' "$NOW"
+  printf '{"ts":"%s","host":"claude","event":"PostToolUse","hook":"mcp-slim","decision":"compress","tool":"mcp__x__y","ms":12}\n' "$OLD"
+  printf '{"ts":"%s","event":"UserPromptSubmit","hook":"user-prompt","decision":"pass"}\n' "$NOW"
+  printf 'this line is not JSON\n'
+} > "$TLOG"
+
+# DT3: the matrix — one row per event/hook, one column per host seen, each cell a count plus its
+# decision breakdown. The deny is the row that matters: it is what "the guard fired" looks like.
+runtrace
+expect DT3-trace-matrix 0 "fnd doctor — host trace" "event/hook" "claude" "cursor" "unknown" \
+  "PreToolUse/no-verify-bypass" "2 (pass 1, deny 1)" "SessionStart/session-start" "1 (inject 1)" \
+  "PostToolUse/mcp-slim" "1 (compress 1)" "UserPromptSubmit/user-prompt"
+
+# DT3b: rows read in pipeline order (session → prompt → subagent → tool → result), not the order
+# the lines happen to land in the log.
+if [ "$(grep -n 'SessionStart/session-start' "$O" | cut -d: -f1)" -lt "$(grep -n 'PostToolUse/mcp-slim' "$O" | cut -d: -f1)" ]; then ok
+else bad DT3b-trace-row-order "out=$(tr '\n' ';' <"$O" | head -c 300)"; fi
+
+# DT4: the footer answers "which log, which window, which hosts, how many lines" — the four facts
+# a matrix alone cannot carry. A record with no `host` is a manual run or a test, hence `unknown`.
+runtrace
+expect DT4-trace-footer 0 "log:    $TLOG" "window: whole log" "hosts:  claude, cursor, unknown" \
+  "lines:  7 read" "1 malformed"
+
+# DT5: --since narrows the window; the line outside it is counted, not silently dropped, so a
+# thin matrix cannot be mistaken for "the hooks did not fire".
+runtrace --since 2h
+expect DT5-trace-since 0 "PreToolUse/no-verify-bypass" "1 before the window" "(--since 2h)" \
+  "!PostToolUse/mcp-slim"
+
+# DT5b: an absolute ISO stamp is the other accepted form — the smoke test passes its session start.
+runtrace --since "$OLD"
+expect DT5b-trace-since-iso 0 "PostToolUse/mcp-slim" "!before the window"
+
+# DT5c: a window later than every line reports emptiness in words rather than an empty table.
+AHEAD="$(node -e 'process.stdout.write(new Date(Date.now() + 3600000).toISOString())')"
+runtrace --since "$AHEAD"
+expect DT5c-trace-since-empty 0 "no lines in the window" "hosts:  none" "6 before the window"
+
+# DT6 (bug): a report must not create, extend or rotate the log it reads — the doctor is one of
+# the few things that runs while a session is appending to it.
+BEFORE="$(ls -A "$TD" | sort | tr '\n' ' ')$(wc -c <"$TLOG" | tr -d ' ')"
+runtrace
+AFTER="$(ls -A "$TD" | sort | tr '\n' ' ')$(wc -c <"$TLOG" | tr -d ' ')"
+if [ "$BEFORE" = "$AFTER" ]; then ok; else bad DT6-trace-read-only "spill root changed: '$BEFORE' -> '$AFTER'"; fi
+
+# DT7: --trace replaces the install checks — it is a report, so a broken --root neither adds rows
+# nor turns the exit code into 1.
+runtrace --root "$TMP/does-not-exist"
+expect DT7-trace-instead-of-checks 0 "fnd doctor — host trace" "!FAIL  manifest:claude" "!PASS  node"
+
+# DT8: --since is meaningless without --trace, and reading as a filter on the install checks is
+# exactly the misunderstanding that would hide a FAIL.
+rc=0; node "$DOCTOR" --since 2h >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 2 ] && grep -q "only applies to --trace" "$E"; then ok
+else bad DT8-since-needs-trace "rc=$rc err=$(head -c 200 "$E")"; fi
+
+# DT9: an unparseable window is a usage error, not a silently unfiltered report.
+runtrace --since notatime
+if [ "$rc" -eq 2 ] && grep -q "ISO timestamp" "$E"; then ok
+else bad DT9-since-invalid "rc=$rc err=$(head -c 200 "$E")"; fi
+
+# DT10: the usage string documents the mode, or nobody finds it.
+rc=0; node "$DOCTOR" --help >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qF -- "--trace" "$O" && grep -qF -- "--since" "$O"; then ok
+else bad DT10-usage-documents-trace "out=$(tr '\n' ';' <"$O" | head -c 200)"; fi
+
 # D46: the suite never advanced the checkout it is testing. Running the repo's own installer
 # would have fast-forwarded this tree from the network mid-run — invisible on an offline runner,
 # and a mutation of files the other suites in the same CI job are reading.

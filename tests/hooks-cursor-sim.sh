@@ -34,6 +34,9 @@
 #             plus X13, hooks/spill-access.sh riding the same event: it runs only AFTER the
 #             guards allow the command, records the spill read, changes no output, and this
 #             host has no read-file event, so shell reads are its whole coverage here
+#   H cases — FND_HOST_TRACE: the three events the SHIM composes record themselves (host
+#             `cursor`, hook `cursor-shim`, inject / pass), the guard events do not — their
+#             spawned script owns that line — and every spawned script inherits FND_HOST
 #   N cases — the ENTIRE tests/no-verify-bypass-matrix.sh case list, re-run through the Cursor
 #             dialect: the case lists are read out of that file (never copied), so a row added
 #             there is covered here on the next run
@@ -44,6 +47,9 @@ set -u
 # these cases exist to prove __dirname does. Debug switches are unset for the same reason
 # hooks-sim.sh unsets them — a developer watching the live log must not collect fixture noise.
 unset CLAUDE_PLUGIN_ROOT CURSOR_PLUGIN_ROOT FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_SPILL_ACCESS
+# The host-proof log for the same two reasons: a developer running with the switch on must not
+# collect fixture lines, and an exported FND_HOST would rewrite the column the H cases pin.
+export FND_HOST_TRACE=0; unset FND_HOST # `0`, not unset: unset falls through to the developer's real global env file
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN="$ROOT/plugins/fnd"
@@ -614,6 +620,59 @@ for kw in git commit push merge pull; do
   if grep -qF "*$kw*" "$PLUGIN/hooks/hooks-cursor.json"; then ok
   else bad X12-trigger-json "hooks-cursor.json's fallback case glob drops '$kw'"; fi
 done
+
+# ═══ H — FND_HOST_TRACE, the host-proof log ════════════════════════════════
+# On this host the session context, the prompt hooks' context and the subagent conventions are
+# composed by the SHIM, not by a hook command, so the shim is what records them — and every
+# canonical script it spawns has to inherit FND_HOST=cursor, or the Cursor column of
+# `doctor --trace` reads `unknown` while the host is plainly Cursor.
+HTD="$TMP/host-trace"; mkdir -p "$HTD/xdg"          # an XDG root with no domaine/env in it
+hrun() { # spill-dir event payload [VAR=val…] — one shim call, tracing into its own sandbox
+  local d="$1" event="$2" payload="$3"; shift 3
+  mkdir -p "$d"
+  printf '%s' "$payload" | env XDG_CONFIG_HOME="$HTD/xdg" FND_MCP_SLIM_DIR="$d" "$@" \
+    "$NODE_BIN" "$SHIM" "$event" 2>/dev/null
+}
+hlog() { cat "$1/fnd-host-trace.log" 2>/dev/null; }
+
+hrun "$HTD/h1" sessionStart "$(ss_in "$SS_STORE")" FND_HOST_TRACE=1 >/dev/null
+assert_eq       H1-one-line "$(hlog "$HTD/h1" | wc -l | tr -d ' ')" 1
+assert_contains H1-host     "$(hlog "$HTD/h1")" '"host":"cursor"'
+assert_contains H1-event    "$(hlog "$HTD/h1")" '"event":"SessionStart"'
+assert_contains H1-hook     "$(hlog "$HTD/h1")" '"hook":"cursor-shim"'
+assert_contains H1-decision "$(hlog "$HTD/h1")" '"decision":"inject"'
+assert_eq       H1-ms-integer "$(hlog "$HTD/h1" | jq -r '.ms | if . == floor then "int" else "not-int" end')" "int"
+
+# A shim that emitted nothing still fires — `pass` is what tells a reader the hook RAN and had
+# nothing to say, which is the whole difference from a hook that never ran at all.
+hrun "$HTD/h2" beforeSubmitPrompt '{"prompt":"hello"}' FND_HOST_TRACE=1 >/dev/null
+assert_contains H2-event    "$(hlog "$HTD/h2")" '"event":"UserPromptSubmit"'
+assert_contains H2-decision "$(hlog "$HTD/h2")" '"decision":"pass"'
+hrun "$HTD/h3" subagentStart '{"agent_type":"general-purpose"}' FND_HOST_TRACE=1 >/dev/null
+assert_contains H3-subagent-event "$(hlog "$HTD/h3")" '"event":"SubagentStart"'
+assert_contains H3-subagent-host  "$(hlog "$HTD/h3")" '"host":"cursor"'
+
+# Off is off, and the response is byte-identical either way — the log is a side effect, never
+# an output.
+on="$(hrun "$HTD/h4on" sessionStart "$(ss_in "$SS_STORE")" FND_HOST_TRACE=1)"
+off="$(hrun "$HTD/h4off" sessionStart "$(ss_in "$SS_STORE")")"
+assert_eq H4-identical-stdout "$on" "$off"
+if [ -e "$HTD/h4off/fnd-host-trace.log" ]; then bad H4-off-nofile "a trace line was written with the switch off"; else ok; fi
+
+# The guard events translate a spawned script's verdict, and that script writes its own line —
+# a second one from the shim would double every deny in the matrix.
+hrun "$HTD/h5" beforeShellExecution '{"command":"git commit --no-verify -m x"}' FND_HOST_TRACE=1 >/dev/null
+assert_absent H5-no-double-count "$(hlog "$HTD/h5")" '"hook":"cursor-shim"'
+
+# H6: FND_HOST reaches the SPAWNED script — it is the shim, not the wiring, that knows the host
+# here, and a canonical script left without the tag would file its own line under `unknown`.
+HOSTREC="$TMP/hostrec"; mkdir -p "$HOSTREC/hooks"
+cp "$SHIM" "$HOSTREC/hooks/"
+printf '#!/bin/sh\nprintf "FNDHOST=[%%s]\\n" "${FND_HOST:-}"\n' > "$HOSTREC/hooks/subagent-conventions.sh"
+chmod +x "$HOSTREC/hooks/subagent-conventions.sh"
+out="$(printf '%s' '{"agent_type":"general-purpose"}' | env -u FND_HOST "$NODE_BIN" \
+  "$HOSTREC/hooks/cursor-shim.cjs" subagentStart 2>/dev/null | jq -r '.additional_context' 2>/dev/null)"
+assert_contains H6-child-host "$out" "FNDHOST=[cursor]"
 
 # ═══ N — the whole commit-guard matrix, re-run through the Cursor dialect ═══
 # The case lists are READ from the matrix file, never copied: rows added there must be covered

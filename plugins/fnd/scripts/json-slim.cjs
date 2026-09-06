@@ -759,9 +759,13 @@ const NOGAIN_FLOOR_BYTES = 4096;
 // The FND_MCP_SLIM_DEBUG log basename (its writer + rotation live in the debug-log section below);
 // defined here so SWEEP_KEEP is the single source of truth — the sweep must never prune it.
 const DEBUG_LOG = 'fnd-mcp-slim-debug.log';
-// Files that share a spill prefix but must survive: the debug log + its one rotation, and the sweep
-// marker. Excluded by EXACT name, so `fnd-mcp-slim-debug.log` is never mistaken for a spill and swept.
-const SWEEP_KEEP = new Set([DEBUG_LOG, `${DEBUG_LOG}.1`, SWEEP_MARKER]);
+// The FND_HOST_TRACE log (hooks/host-trace.{sh,cjs}) lands in this same root. It is not a spill and
+// carries no prefix the sweep matches, but it is the evidence a host-proof run rests on, so it is
+// named here rather than left safe by accident.
+const HOST_TRACE_LOG = 'fnd-host-trace.log';
+// Files that share a spill prefix but must survive: the two logs + their one rotation each, and the
+// sweep marker. Excluded by EXACT name, so `fnd-mcp-slim-debug.log` is never mistaken for a spill.
+const SWEEP_KEEP = new Set([DEBUG_LOG, `${DEBUG_LOG}.1`, HOST_TRACE_LOG, `${HOST_TRACE_LOG}.1`, SWEEP_MARKER]);
 // The bundled @playwright/mcp server's `--output-dir`, PROJECT-relative: the server resolves it against
 // its own cwd, which every host launches in the project dir. The same literal is spelled in the manifest's
 // args and in hooks/scratch-path-guard.cjs; a hooks-sim case pins the three together. Without it the

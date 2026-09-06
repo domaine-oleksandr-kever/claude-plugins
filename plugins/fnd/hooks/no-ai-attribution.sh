@@ -24,6 +24,14 @@ set -u
 
 input="$(cat 2>/dev/null || true)"
 
+# Host-proof log via an EXIT trap: every path out (fast rejects included) is recorded from the
+# status this guard actually returned; a missing helper is simply never called. `${0%/*}`, not a
+# `dirname` fork — this hook runs on every Bash call.
+case "$0" in */*) _ht="${0%/*}/host-trace.sh" ;; *) _ht="./host-trace.sh" ;; esac
+[ -f "$_ht" ] && . "$_ht" 2>/dev/null
+command -v fnd_trace_on_exit >/dev/null 2>&1 \
+  && trap 'fnd_trace_on_exit PreToolUse no-ai-attribution' EXIT
+
 # Fast reject, before the jq/sed/grep pipeline this hook pays on EVERY Bash call: a
 # block needs BOTH a `git … commit` segment and one of the trailer words the matcher
 # below keys on, and neither can appear in the command without appearing in stdin

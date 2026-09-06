@@ -26,12 +26,17 @@
 //             session (and again after session.deleted), statics are never injected, a
 //             prompt-JSON block offloads each spilled blob in place byte-exactly, and
 //             FND_PROMPT_JSON=0 / assistant messages / empty parts are left alone
+//   H cases — FND_HOST_TRACE: the two events the adapter COMPOSES record themselves (host
+//             `opencode`, hook `fnd-plugin`), an assistant message records nothing, off writes
+//             no file, and every line a run produces — spawned scripts included — carries the
+//             host tag this adapter assigns
 // Not covered here: the context-monitor half of user-prompt.cjs has no producer on OpenCode
 // (it reads a Claude Code transcript path this host does not have), so the additionalContext
 // branch of chat.message is exercised only through the session-context path that shares its
 // injection helper. Bun-specific behavior (the plugin's real runtime) is M10c.
 // Exit 0 = all green.
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -427,6 +432,86 @@ assertContains('C18-context-still-injected', gated[0].text, 'live store access')
 assertContains('C19-no-guard-run', gated[0].text, blob.slice(0, 200));
 delete process.env.FND_PROMPT_JSON;
 delete process.env.FND_CTX_MONITOR;
+
+// H — FND_HOST_TRACE, the host-proof log ---------------------------------------------------
+// This host has no hook commands to carry the host tag, so the adapter assigns it and records the
+// two events it COMPOSES itself; a spawned canonical script writes its own line and must inherit
+// the same tag, or the OpenCode column of `doctor --trace` reads `unknown`.
+//
+// Driven in a CHILD process on purpose: the switch resolves once per process, and every case
+// above has already loaded the adapter with it off.
+{
+  const xdg = path.join(TMP, 'ht-xdg'); // an XDG root with no domaine/env in it
+  fs.mkdirSync(xdg, { recursive: true });
+  // Same symlink dance as loadModule(): a .js adapter is parsed as ESM only from Node 22.12 on.
+  const link = path.join(TMP, 'fnd-plugin.mjs');
+  try { fs.symlinkSync(PLUGIN_FILE, link); } catch (_) {}
+  const driver = path.join(TMP, 'ht-driver.mjs');
+  fs.writeFileSync(driver, [
+    "import { pathToFileURL } from 'node:url';",
+    "const [, , file, dir, role] = process.argv;",
+    "let mod;",
+    "try { mod = await import(pathToFileURL(file).href); }",
+    `catch (_) { mod = await import(pathToFileURL(${JSON.stringify(link)}).href); }`,
+    "const plugin = await mod.FndPlugin({ directory: dir });",
+    "const parts = [{ type: 'text', text: 'hello there' }];",
+    "await plugin['chat.message']({ sessionID: 'ht1' },",
+    "  { message: { role, sessionID: 'ht1' }, parts });",
+  ].join('\n'));
+
+  const drive = (dir, role = 'user', on = true) => {
+    fs.mkdirSync(dir, { recursive: true });
+    const env = { ...process.env, XDG_CONFIG_HOME: xdg, FND_MCP_SLIM_DIR: dir };
+    delete env.FND_HOST_TRACE;
+    delete env.FND_HOST;
+    if (on) env.FND_HOST_TRACE = '1';
+    spawnSync(process.execPath, [driver, PLUGIN_FILE, themeDir, role], { env, encoding: 'utf8' });
+    const log = path.join(dir, 'fnd-host-trace.log');
+    return fs.existsSync(log)
+      ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+      : [];
+  };
+
+  // The adapter's own module-level assignment is what makes every record say `opencode` — its
+  // own lines and, through the inherited spawn env, every canonical script's.
+  assertEq('H01-host-env', process.env.FND_HOST, 'opencode');
+
+  // First message in a store checkout: the session-context injection is this host's session
+  // start, and it gets its own line alongside the chat.message one.
+  const lines = drive(path.join(TMP, 'ht-on'));
+  const mine = lines.filter((l) => l.hook === 'fnd-plugin');
+  const start = mine.find((l) => l.event === 'SessionStart');
+  const prompt = mine.find((l) => l.event === 'UserPromptSubmit');
+  assert('H02-session-line', Boolean(start), `no SessionStart line: ${JSON.stringify(lines)}`);
+  assert('H03-prompt-line', Boolean(prompt), `no UserPromptSubmit line: ${JSON.stringify(lines)}`);
+  if (start) {
+    assertEq('H04-session-host', start.host, 'opencode');
+    assertEq('H05-session-decision', start.decision, 'inject');
+    assertEq('H06-session-project', typeof start.project, 'string');
+  }
+  if (prompt) {
+    assertEq('H07-prompt-decision', prompt.decision, 'pass');
+    assert('H08-prompt-ms', Number.isInteger(prompt.ms), 'ms must be an integer');
+  }
+  // Every line the run produced — the adapter's own and any spawned script's — carries the tag
+  // the adapter set. A script that lost it would file this host's proof under `unknown`.
+  assertEq('H09-all-opencode', lines.filter((l) => l.host !== 'opencode').length, 0);
+
+  // An assistant message is not a turn this adapter acts on — it must not fill the log with lines
+  // no hook fired for.
+  assertEq('H10-assistant-silent', drive(path.join(TMP, 'ht-assistant'), 'assistant')
+    .filter((l) => l.hook === 'fnd-plugin').length, 0);
+
+  // Off is off: no switch, no file.
+  assertEq('H11-off-nofile', drive(path.join(TMP, 'ht-off'), 'user', false).length, 0);
+
+  // The spawn env PINS the tag rather than relying on inheritance, so a canonical script keeps
+  // reporting the right host even if something upstream cleared it from this process.
+  const spawnEnv = fs.readFileSync(PLUGIN_FILE, 'utf8').split('\n')
+    .find((l) => l.includes('CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT'));
+  assert('H12-spawn-env-line', Boolean(spawnEnv), 'runScript no longer pins the plugin root in its spawn env');
+  assertContains('H13-spawn-host-pin', spawnEnv || '', "FND_HOST: 'opencode'");
+}
 
 // G-drift — the fast-reject list has three copies and hooks/no-verify-bypass.sh is the single
 // source (its `case "$input" in *git*|…` line). This adapter and hooks/cursor-shim.cjs must carry

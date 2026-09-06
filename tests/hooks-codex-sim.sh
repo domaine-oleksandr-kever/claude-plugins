@@ -12,7 +12,9 @@
 #             here fails the suite). Matchers are Codex regexes: the shell PreToolUse one covers
 #             all three spellings of the shell tool (Bash / shell / local_shell) and nothing
 #             else, and the scratch-path group's covers both host spellings of the two
-#             screenshot tools (Codex's MCP names carry no plugin_fnd_ prefix).
+#             screenshot tools (Codex's MCP names carry no plugin_fnd_ prefix). W12 is the
+#             host-proof log: every command exports FND_HOST=codex, and SessionStart — the one
+#             injection composed by a shell command — records itself.
 #   S cases — SessionStart through the wiring: per-file tolerance, FND_LEAN gate, store-access
 #             detection, always exit 0, the real plugin root's whale instruction — plus the two
 #             root env vars Codex sets (CLAUDE_PLUGIN_ROOT alias and PLUGIN_ROOT) and the
@@ -56,8 +58,10 @@
 set -u
 
 # A developer watching the live compressor log must not have fixture noise appended to it, and
-# their exported switches must not leak into the cases.
+# their exported switches must not leak into the cases. Same reason for the host-proof log — and
+# an exported FND_HOST would rewrite the `host` column the W12 cases pin.
 unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_MCP_SLIM_STUB FND_LEAN FND_CTX_MONITOR FND_PROMPT_JSON
+export FND_HOST_TRACE=0; unset FND_HOST # `0`, not unset: unset falls through to the developer's real global env file
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUG="$ROOT/plugins/fnd"
@@ -83,9 +87,15 @@ ccmd() { # event [hook-index] — the canonical Claude Code command
   jq -r --arg e "$1" --argjson i "${2:-0}" '.hooks[$e][0].hooks[$i].command' "$MANIFEST"
 }
 # The near-verbatim contract in one function: the Codex command IS the Claude command with the
-# root expansion swapped for a shell variable resolved from either env var Codex sets.
-codex_spelling() { printf '%s' "$1" | sed -e 's/\${CLAUDE_PLUGIN_ROOT}/$r/g'; }
-want_cmd() { printf 'r="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; %s' "$(codex_spelling "$1")"; }
+# root expansion swapped for a shell variable resolved from either env var Codex sets, and the
+# host tag swapped for this host's name — FND_HOST is what the trace log's `host` column reports,
+# so a command that kept `claude` here would file this host's proof under the wrong one.
+codex_spelling() { printf '%s' "$1" | sed -e 's/\${CLAUDE_PLUGIN_ROOT}/$r/g' -e 's/FND_HOST=claude/FND_HOST=codex/g'; }
+HOST_TAG='export FND_HOST=codex; '
+want_cmd() {
+  printf '%s%s%s' "$HOST_TAG" 'r="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; ' \
+    "$(codex_spelling "${1#export FND_HOST=claude; }")"
+}
 
 # ═══ W — the wiring file ════════════════════════════════════════════════════
 if jq -e . "$WIRING" >/dev/null 2>&1; then ok; else bad W0-json "hooks-codex.json is not valid JSON"; fi
@@ -155,7 +165,7 @@ scripts="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$WIRI
 for s in $scripts; do
   if [ -f "$PLUG/$s" ]; then ok; else bad "W5-$s" "wiring names a file that does not exist"; fi
 done
-assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 7
+assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 8
 
 # W6: PreToolUse matcher — Codex regex, covering every spelling of the shell tool and nothing else.
 pm="$(jq -r '.hooks.PreToolUse[0].matcher' "$WIRING")"
@@ -247,6 +257,43 @@ assert_contains W11-run-via  "$(cat "$SPA_D/fnd-mcp-slim-debug.log" 2>/dev/null)
 printf '%s' "$SPA_PAY" | env CLAUDE_PLUGIN_ROOT="$PLUG" FND_SPILL_ACCESS=0 FND_MCP_SLIM_DIR="$TMP/spa-off" \
   FND_MCP_SLIM_DEBUG=1 bash -c "$SPA_CMD" >/dev/null 2>&1
 if [ -e "$TMP/spa-off/fnd-mcp-slim-debug.log" ]; then bad W11-gate-off "the wiring ran the hook with FND_SPILL_ACCESS=0"; else ok; fi
+
+# W12: FND_HOST_TRACE — the host tag every command carries, and the SessionStart trace call. The
+# log answers "did this hook fire on THIS host", so a Codex command that shipped without the tag
+# would file its proof under `unknown` and leave the Codex column of `doctor --trace` empty.
+# `xdg` is an XDG root with no domaine/env in it: the OFF case must be off because the switch is
+# nowhere, not because this machine happens to say so.
+HTD="$TMP/host-trace"; mkdir -p "$HTD/ss" "$HTD/ss-off" "$HTD/xdg"
+ht_ss() { # spill-dir [VAR=val…] — the SessionStart command, tracing into its own sandbox
+  local d="$1"; shift
+  ( cd "$TMP" && env XDG_CONFIG_HOME="$HTD/xdg" FND_MCP_SLIM_DIR="$d" CLAUDE_PLUGIN_ROOT="$PLUG" "$@" \
+      bash -c "$(wcmd SessionStart)" 2>/dev/null )
+}
+for c in "$(wcmd SessionStart)" "$(wcmd UserPromptSubmit)" "$(wcmd SubagentStart)" \
+         "$(wcmd PreToolUse 0)" "$(wcmd PreToolUse 1)" "$SPG_CMD" "$SPA_CMD" "$(wcmd PostToolUse)"; do
+  assert_contains W12-host-tag "$c" 'export FND_HOST=codex;'
+done
+# the SessionStart command is the one injection composed by a shell command rather than a script,
+# so the command itself has to record it
+ht_ss "$HTD/ss" FND_HOST_TRACE=1 >/dev/null
+line="$(cat "$HTD/ss/fnd-host-trace.log" 2>/dev/null)"
+assert_contains W12-ss-host     "$line" '"host":"codex"'
+assert_contains W12-ss-event    "$line" '"event":"SessionStart"'
+assert_contains W12-ss-hook     "$line" '"hook":"session-start"'
+assert_contains W12-ss-decision "$line" '"decision":"inject"'
+# off is off: no switch, no file — and the session context is printed either way
+out="$(ht_ss "$HTD/ss-off")"; ec=$?
+assert_eq       W12-off-exit  "$ec" 0
+assert_contains W12-off-ctx   "$out" "oversized MCP results"
+if [ -e "$HTD/ss-off/fnd-host-trace.log" ]; then bad W12-off-nofile "the trace log was written with the switch off"; else ok; fi
+# …and the tag reaches the spawned script, which is what writes ITS line (the guard commands
+# resolve the bundle themselves, so a recorder root proves the export without the guard's help)
+htrec="$TMP/htrec"; mkdir -p "$htrec/hooks"
+printf '#!/bin/sh\nprintf "%%s" "${FND_HOST:-}" > "$HT_REC"\n' > "$htrec/hooks/no-verify-bypass.sh"
+chmod +x "$htrec/hooks/no-verify-bypass.sh"
+printf '%s' '{"tool_name":"shell","tool_input":{"command":"ls"}}' \
+  | env CLAUDE_PLUGIN_ROOT="$htrec" HT_REC="$TMP/htrec.out" bash -c "$(wcmd PreToolUse 1)" >/dev/null 2>&1
+assert_eq W12-child-host "$(cat "$TMP/htrec.out" 2>/dev/null)" "codex"
 
 # ═══ S — SessionStart through the Codex wiring ══════════════════════════════
 SS_CMD="$(wcmd SessionStart)"

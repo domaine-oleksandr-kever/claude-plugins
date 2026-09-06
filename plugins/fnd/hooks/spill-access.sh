@@ -49,6 +49,14 @@ set -uf
 
 input="$(cat 2>/dev/null || true)"
 
+# Host-proof log via an EXIT trap: every way out is a `pass` (this hook never denies), so the trap
+# records the invocation itself. `${tool:-}` because the fast rejects leave before tool_name is
+# read; `${0%/*}`, not a `dirname` fork — paid on every Bash/Read/Grep call.
+case "$0" in */*) _ht="${0%/*}/host-trace.sh" ;; *) _ht="./host-trace.sh" ;; esac
+[ -f "$_ht" ] && . "$_ht" 2>/dev/null
+command -v fnd_trace_on_exit >/dev/null 2>&1 \
+  && trap 'fnd_trace_on_exit PreToolUse spill-access "${tool:-}"' EXIT
+
 # Fast reject on the raw event, before any fork: only the two spill families are of interest, and a
 # json-slim run logs its own `entry:"cli"` line — recording it here would double-count the recovery.
 case "$input" in

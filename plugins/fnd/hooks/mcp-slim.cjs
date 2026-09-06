@@ -83,6 +83,18 @@ function jsonSlim() {
   return jsonSlimMod;
 }
 
+// FND_HOST_TRACE, the host-proof log. Required EAGERLY, unlike json-slim: it is a ~100-line
+// fs/os/path module with no graph behind it, and the below-gate fast path — the ~76 % of events
+// that load nothing else — is exactly the path whose firing the log has to prove.
+let hostTrace = { trace() {}, enabled() { return false; }, start() { return 0; } };
+try { hostTrace = require('./host-trace.cjs'); } catch (_) {} // stubbed on a partial install
+// One line per invocation, so the decision is carried out to the stdin handler rather than emitted
+// from the branch that made it: every exit path is traced, the throw included, without a call site
+// per return. `pass` covers every passthrough (the size gate included — the hook ran and chose
+// nothing); `skip` is the switch, FND_MCP_SLIM=0.
+let hostDecision = 'pass';
+let eventTool = null;
+
 // FND_MCP_SLIM_DEBUG, mirroring json-slim's debugLevel: `1|true|yes|on` = key events, any integer ≥ 2 =
 // everything. Anything else (unset / 0 / junk) is off, which is what keeps the default side-effect-free.
 // The LEVEL, not just on/off: json-slim drops a sub-gate `size-gate` record below 2, so a level-1 run
@@ -583,6 +595,7 @@ function run(raw) {
   const input = JSON.parse(raw);
   eventCwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : null;
   const tool = typeof input.tool_name === 'string' ? input.tool_name : null;
+  eventTool = tool;
   const result = input.tool_response !== undefined ? input.tool_response : input.tool_output;
 
   // Every spill file this invocation writes — this hook's own whole-original/stub copy plus the crush
@@ -690,6 +703,7 @@ function run(raw) {
     if (!s) return false;
     own(s.spill);
     emit(s.value);
+    hostDecision = 'stub';
     dropCreated(s.value);
     if (dbg) trace('stubbed', reason, bytesIn, bytesOf(s.value), stages, s.spill, s.format);
     return true;
@@ -712,6 +726,7 @@ function run(raw) {
     // another invocation's live handle.
     if (bytesOf(out) >= bytesIn) return false;
     emit(out);
+    hostDecision = 'stub';
     dropCreated(out);
     if (dbg) trace('stubbed', reason, bytesIn, bytesOf(out), stages, s.spill, s.format);
     return true;
@@ -784,6 +799,7 @@ function run(raw) {
   }
 
   emit(value);
+  hostDecision = 'compress';
   if (dbg) trace('compressed', null, bytesIn, outBytes, slimmed.stages, fullPath);
 }
 
@@ -793,15 +809,24 @@ function run(raw) {
 const chunks = [];
 process.stdin.on('data', (d) => chunks.push(d));
 process.stdin.on('end', () => {
+  const ht0 = hostTrace.start();
   try {
     const raw = Buffer.concat(chunks).toString('utf8');
     // With the compressor off the event is still parsed — for its cwd alone, so the sweep below can
     // find the project's playwright output dir. Nothing is emitted on this path, as before.
-    if (slimOff) { const ev = JSON.parse(raw); eventCwd = typeof ev.cwd === 'string' && ev.cwd ? ev.cwd : null; }
-    else run(raw);
+    if (slimOff) {
+      const ev = JSON.parse(raw);
+      eventCwd = typeof ev.cwd === 'string' && ev.cwd ? ev.cwd : null;
+      eventTool = typeof ev.tool_name === 'string' ? ev.tool_name : null;
+      hostDecision = 'skip';
+    } else run(raw);
   } catch (_) {
     // Any failure → emit nothing, original result passes through untouched.
+    hostDecision = 'error';
   }
+  // Before the sweep, so `ms` measures the decision the model waited on rather than the hygiene
+  // that follows it — and after the result is out, like everything else down here.
+  hostTrace.trace({ event: 'PostToolUse', hook: 'mcp-slim', decision: hostDecision, tool: eventTool, startedAt: ht0 });
   // Spill hygiene runs AFTER the result is emitted (or passed through) so it never delays what
   // the model sees; throttled and self-guarding, so it costs one stat on the hot path.
   try { if (sweepDue()) jsonSlim().sweepSpills(undefined, eventCwd || process.cwd()); } catch (_) {}

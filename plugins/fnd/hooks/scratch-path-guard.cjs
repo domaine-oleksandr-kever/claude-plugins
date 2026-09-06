@@ -236,15 +236,30 @@ module.exports = { scratchPathDecision };
 
 if (require.main === module) {
   try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps; absent in a partial install
+  // FND_HOST_TRACE, the host-proof log. Stubbed on require failure — a partial install must not
+  // cost the guard.
+  let hostTrace = { trace() {}, enabled() { return false; }, start() { return 0; } };
+  try { hostTrace = require('./host-trace.cjs'); } catch (_) {}
 
   const chunks = [];
   process.stdin.on('data', (d) => chunks.push(d));
   process.stdin.on('end', () => {
+    const t = hostTrace.start();
+    let verdict = 'pass';
+    let tool;
     try {
-      const decision = scratchPathDecision(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-      if (decision) process.stdout.write(JSON.stringify(decision));
+      const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (input && typeof input.tool_name === 'string') tool = input.tool_name;
+      const decision = scratchPathDecision(input);
+      if (decision) {
+        process.stdout.write(JSON.stringify(decision));
+        verdict = 'deny';
+      }
     } catch (_) {
       // Any failure → emit nothing, the tool call proceeds (fail-open).
+      verdict = 'error';
     }
+    // After the verdict is on stdout: bookkeeping never delays the tool call.
+    hostTrace.trace({ event: 'PreToolUse', hook: 'scratch-path-guard', decision: verdict, tool, startedAt: t });
   });
 }

@@ -19,7 +19,15 @@
 'use strict';
 
 try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps (env > project > global); absent in a partial install
+// FND_HOST_TRACE, the host-proof log. Stubbed on require failure: a partial install must not cost
+// the prompt its guard.
+let hostTrace = { trace() {}, enabled() { return false; }, start() { return 0; } };
+try { hostTrace = require('./host-trace.cjs'); } catch (_) {}
 
+// The decision the trace line reports, which is the merged contract read back out: a guard block is
+// `deny` (the prompt was erased), a monitor notice is `inject` (something reached the model), and a
+// silent run is `pass`. `skip` never applies — a half that is switched off leaves the OTHER half
+// speaking for the invocation, and the process still ran.
 function run(raw) {
   const input = JSON.parse(raw);
 
@@ -33,7 +41,7 @@ function run(raw) {
     } catch (_) {} // guard failure → the prompt proceeds, the monitor still gets its turn
     if (decision) {
       process.stdout.write(JSON.stringify(decision));
-      return;
+      return 'deny';
     }
   }
 
@@ -42,8 +50,12 @@ function run(raw) {
     try {
       notice = require('./context-stats.cjs').contextNotice(input);
     } catch (_) {}
-    if (notice) console.log(JSON.stringify(notice));
+    if (notice) {
+      console.log(JSON.stringify(notice));
+      return 'inject';
+    }
   }
+  return 'pass';
 }
 
 // Collect stdin as bytes, decode once — decoding per chunk would mangle a multibyte character
@@ -51,9 +63,14 @@ function run(raw) {
 const chunks = [];
 process.stdin.on('data', (d) => chunks.push(d));
 process.stdin.on('end', () => {
+  const t = hostTrace.start();
+  let decision = 'pass';
   try {
-    run(Buffer.concat(chunks).toString('utf8'));
+    decision = run(Buffer.concat(chunks).toString('utf8')) || 'pass';
   } catch (_) {
     // Any failure → emit nothing, the prompt proceeds untouched.
+    decision = 'error';
   }
+  // After the output, never before: the trace is bookkeeping and may not delay what the model sees.
+  hostTrace.trace({ event: 'UserPromptSubmit', hook: 'user-prompt', decision, startedAt: t });
 });

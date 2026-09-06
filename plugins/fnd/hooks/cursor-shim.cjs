@@ -77,7 +77,9 @@
 // HERE only: its hook rides inside beforeShellExecution, whose wiring must stay ungated because
 // the commit guard shares the event; FND_LEAN is honored by
 // subagent-conventions.sh, but NOT at sessionStart on this host — the lean-code convention
-// arrives as rules/fnd-lean-code.mdc there (README "Environment switches").
+// arrives as rules/fnd-lean-code.mdc there (README "Environment switches"). It WRITES one:
+// FND_HOST=cursor, for itself and for every script it spawns, which is the `host` column of the
+// FND_HOST_TRACE log.
 'use strict';
 
 const fs = require('fs');
@@ -90,6 +92,22 @@ const { spawnSync } = require('child_process');
 // Absent in a partial install — the shim must keep guarding without it.
 let DOMAINE_ENV = { applied: {}, files: {} };
 try { DOMAINE_ENV = require('../scripts/env-file.cjs').load(); } catch (_) {}
+
+// FND_HOST_TRACE, the host-proof log. Set on this process rather than by the wiring: the trace
+// helper reads the host out of the env, and hooks-cursor.json's commands are shared with the
+// no-node fallback that must stay a pure-shell deny. Assigning it here also carries `cursor` to
+// every spawned canonical script through the inherited env (runScript pins it explicitly too).
+process.env.FND_HOST = 'cursor';
+let hostTrace = { trace() {}, enabled() { return false; }, start() { return 0; } };
+try { hostTrace = require('./host-trace.cjs'); } catch (_) {} // partial install → no tracing, no crash
+// This host composes sessionStart / beforeSubmitPrompt / subagentStart HERE (the other events
+// only translate a spawned script's verdict, and that script writes its own line), so these three
+// are traced under the canonical event names the matrix's rows are keyed by.
+const TRACED_EVENTS = {
+  sessionStart: 'SessionStart',
+  beforeSubmitPrompt: 'UserPromptSubmit',
+  subagentStart: 'SubagentStart',
+};
 
 const HOOKS_DIR = __dirname;
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
@@ -149,7 +167,12 @@ function runScript(name, stdin) {
     timeout: SPAWN_TIMEOUT_MS,
     maxBuffer: SPAWN_MAX_BUFFER,
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CURSOR_PLUGIN_ROOT: PLUGIN_ROOT },
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+      CURSOR_PLUGIN_ROOT: PLUGIN_ROOT,
+      FND_HOST: 'cursor', // the child writes its own trace line, and only this shim knows the host
+    },
   };
   let r = name.endsWith('.cjs') ? spawnSync(process.execPath, [file], opts) : spawnSync(file, [], opts);
   if (r.error && !name.endsWith('.cjs') && ['EACCES', 'ENOEXEC', 'EPERM'].includes(r.error.code)) {
@@ -421,12 +444,21 @@ function parseJson(raw) {
 }
 
 function main(raw) {
+  const started = hostTrace.start();
   const payload = parseJson(raw) || {};
   const event = process.argv[2] || payload.hook_event_name || '';
   const handler = HANDLERS[event];
   if (!handler) return; // unknown / unwired event → nothing to say
   crossCheckRoot();
   const res = handler(payload);
+  if (TRACED_EVENTS[event]) {
+    hostTrace.trace({
+      event: TRACED_EVENTS[event],
+      hook: 'cursor-shim',
+      decision: res ? 'inject' : 'pass',
+      startedAt: started,
+    });
+  }
   if (!res) return;
   const exit = res.__exit;
   delete res.__exit;

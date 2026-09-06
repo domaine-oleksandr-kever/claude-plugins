@@ -60,6 +60,14 @@ input="$(cat 2>/dev/null || true)"
 # stdin in its place. No fork and no read on the normal path, where `input` already arrived.
 [ -n "$input" ] || IFS= read -r -d '' input || true
 
+# Host-proof log via an EXIT trap: every path out (fast rejects included) is recorded from the
+# status this guard actually returned; a missing helper is simply never called. `${0%/*}`, not a
+# `dirname` fork — this hook runs on every Bash call.
+case "$0" in */*) _ht="${0%/*}/host-trace.sh" ;; *) _ht="./host-trace.sh" ;; esac
+[ -f "$_ht" ] && . "$_ht" 2>/dev/null
+command -v fnd_trace_on_exit >/dev/null 2>&1 \
+  && trap 'fnd_trace_on_exit PreToolUse no-verify-bypass' EXIT
+
 # Fast reject, before the jq/sed/grep pipeline this hook pays on EVERY Bash call:
 # every block below sits behind a `git … commit|push|merge|am|pull` segment, so an event
 # naming none of these keywords can never reach one. `git` earns its place as a trigger

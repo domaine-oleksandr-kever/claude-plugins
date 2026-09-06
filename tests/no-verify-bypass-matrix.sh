@@ -14,6 +14,10 @@
 # Exit 0 = matrix green.
 set -u
 
+# The host-proof log stays off for the verdict passes: a developer running with FND_HOST_TRACE on
+# would otherwise have every row append to their real log. The pass at the end arms it deliberately.
+unset FND_HOST_TRACE FND_HOST
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$ROOT/plugins/fnd/hooks/no-verify-bypass.sh"
 HOOK_ATTR="$ROOT/plugins/fnd/hooks/no-ai-attribution.sh"
@@ -745,6 +749,46 @@ done
 for xq in 'g"it" com"mit" -n -m x' "g\$'it' com\$'mit' --no-verify -m x"; do
   CUR_HOOK="$HOOK";     check allow "XQ-split-git-prefiltered" "$xq"
   CUR_HOOK="$NV_NOPRE"; check block "XQ-split-git-matcher"     "$xq"
+done
+
+# The EXIT trap on both guards exists to OBSERVE a verdict, so it may not move one: the whole
+# case list a third time with FND_HOST_TRACE armed into a sandbox, and every row keeps the outcome
+# the two passes above pinned. The log is then read back for what it must and must not hold — the
+# `nojq`/`nocat` shims strip `date` as well, and a record the helper cannot timestamp is dropped
+# rather than written, so the line count is a ceiling and not an equality.
+HT_DIR="$TMPD/host-trace"; mkdir -p "$HT_DIR"
+HT_LOG="$HT_DIR/fnd-host-trace.log"
+before=$((pass + fail))
+export FND_HOST_TRACE=1 FND_HOST=claude FND_MCP_SLIM_DIR="$HT_DIR"
+CUR_HOOK="$HOOK";      LBL="trace-"; no_verify_cases; codex_argv_no_verify_cases
+CUR_HOOK="$HOOK_ATTR"; LBL="trace-"; attribution_cases; codex_argv_attribution_cases
+unset FND_HOST_TRACE FND_HOST FND_MCP_SLIM_DIR
+LBL=""
+runs=$((pass + fail - before))
+lines="$(wc -l < "$HT_LOG" 2>/dev/null | tr -d ' ')"; lines="${lines:-0}"
+if [ "$lines" -gt 0 ] && [ "$lines" -le "$runs" ]; then pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  failures="${failures}  [trace-line-count] $lines lines for $runs traced invocations
+"
+fi
+# Metadata only, this run's host, this matrix's own two guards, and the two verdicts it pins —
+# a command string or a message leaking into the log would show up as a record that fails this.
+stray="$(grep -vE '^\{"ts":"[0-9T:.Z-]+","host":"claude","event":"PreToolUse","hook":"(no-verify-bypass|no-ai-attribution)","decision":"(pass|deny)","project":"[^"]*"\}$' \
+  "$HT_LOG" 2>/dev/null | head -1)"
+if [ -z "$stray" ]; then pass=$((pass + 1))
+else
+  fail=$((fail + 1))
+  failures="${failures}  [trace-record-shape] $stray
+"
+fi
+for d in pass deny; do
+  if grep -q "\"decision\":\"$d\"" "$HT_LOG" 2>/dev/null; then pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    failures="${failures}  [trace-decision-$d] the traced pass logged no $d line
+"
+  fi
 done
 
 echo "commit-guard hooks matrix: $pass passed, $fail failed"

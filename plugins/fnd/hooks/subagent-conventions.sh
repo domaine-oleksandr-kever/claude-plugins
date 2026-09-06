@@ -23,6 +23,13 @@ fi
 # exactly the failure this rail exists for.
 cat "$root/hooks/untrusted-content.md" 2>/dev/null || true
 
+# Host-proof log, stated once AFTER the rail above went out: both paths out of this hook inject,
+# so one decision covers both, and it is recorded behind the act rather than ahead of it.
+case "$0" in */*) _ht="${0%/*}/host-trace.sh" ;; *) _ht="./host-trace.sh" ;; esac
+[ -f "$_ht" ] && . "$_ht" 2>/dev/null
+command -v fnd_trace >/dev/null 2>&1 \
+  && fnd_trace SubagentStart subagent-conventions inject "" "$agent_type"
+
 # Agents that don't write code — skip the CODE conventions below (they are also
 # the most frequent spawns; the rail above already reached them). The
 # readers/reviewers are read-only; jira-writer writes to Jira and doc-reader

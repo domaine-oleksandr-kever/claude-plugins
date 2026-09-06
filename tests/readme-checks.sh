@@ -338,7 +338,11 @@ done
 # ENV_IGNORE holds names the sweep proved are not switches:
 #   FND_VERSION — the installer's own version stamp (`FND_VERSION="<semver>"`, written by
 #                 bump-version.cjs and read back for the report line); nothing reads it as input.
-ENV_IGNORE=" FND_VERSION "
+#   FND_HOST    — the host name each host's own WIRING exports for the FND_HOST_TRACE log
+#                 (`claude`/`cursor`/`codex`/`opencode`). Set by the plugin, read by the plugin,
+#                 like CLAUDE_PLUGIN_ROOT: `domaine-env set` has no business writing one, and a
+#                 user-set value would only make the log lie about which host ran the hook.
+ENV_IGNORE=" FND_VERSION FND_HOST "
 ENV_SECTION="$(awk '/^### Environment switches/ { on = 1; next } on && /^## / { exit } on' "$README")"
 if [ -n "$ENV_SECTION" ]; then ok; else bad env-section "README has no '### Environment switches' section"; fi
 for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \

@@ -13,6 +13,7 @@
  *   node doctor.cjs --target opencode        # + the OpenCode install location
  *   node doctor.cjs --target codex           # + the Codex subagent links
  *   node doctor.cjs --root <dir> --home <dir>   # overrides (tests, non-standard installs)
+ *   node doctor.cjs --trace [--since 2h]     # the FND_HOST_TRACE readout, instead of the checks
  *
  * Every check prints exactly one PASS / FAIL / SKIP line. SKIP means "nothing to verify here yet"
  * (an optional manifest, a directory M4 has not generated) and never fails the run; the exit code
@@ -105,7 +106,9 @@ function out(line) {
   }
 }
 
-const USAGE = 'usage: doctor.cjs [--target cursor|opencode|codex|claude] [--root <dir>] [--home <dir>]\n';
+const USAGE =
+  'usage: doctor.cjs [--target cursor|opencode|codex|claude] [--root <dir>] [--home <dir>]\n' +
+  '       doctor.cjs --trace [--since <ISO timestamp | Nh | Nm | Nd>]\n';
 
 function usage(msg) {
   if (!msg) {
@@ -117,11 +120,12 @@ function usage(msg) {
 }
 
 function parseArgs(argv) {
-  const opts = { target: null, root: null, home: null };
+  const opts = { target: null, root: null, home: null, trace: false, since: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') usage('');
-    else if (a === '--target' || a === '--root' || a === '--home') {
+    else if (a === '--trace') opts.trace = true;
+    else if (a === '--target' || a === '--root' || a === '--home' || a === '--since') {
       const v = argv[++i];
       if (!v || v.startsWith('--')) usage(a + ' needs a value');
       opts[a.slice(2)] = v;
@@ -130,6 +134,8 @@ function parseArgs(argv) {
   if (opts.target && !HOST_INSTALLS[opts.target] && !CACHE_HOSTS[opts.target]) {
     usage('unknown target ' + opts.target);
   }
+  // A window over a report nobody asked for reads as a filter on the install checks, which it is not.
+  if (opts.since !== null && !opts.trace) usage('--since only applies to --trace');
   return opts;
 }
 
@@ -525,8 +531,181 @@ function checkCodexHooks(homeDir) {
   );
 }
 
+/*
+ * --trace: the FND_HOST_TRACE readout. Not a check — a report, so it runs INSTEAD of the install
+ * checks, writes nothing anywhere, and exits 0 whatever it finds ("no log" is an answer). It is
+ * the half of the smoke test a model cannot honestly self-report: which hooks actually fired on
+ * this host, and what each of them decided.
+ */
+const TRACE_SWITCH = 'FND_HOST_TRACE';
+const TRACE_LOG_FALLBACK = 'fnd-host-trace.log';
+// Pipeline order, so the matrix reads like a session: statics, prompt, subagent, tool, result.
+const TRACE_EVENTS = ['SessionStart', 'UserPromptSubmit', 'SubagentStart', 'PreToolUse', 'PostToolUse'];
+const TRACE_DECISIONS = ['pass', 'deny', 'inject', 'stub', 'compress', 'skip', 'error'];
+const TRACE_HOSTS = ['claude', 'cursor', 'codex', 'opencode', 'unknown'];
+
+function traceLogPath() {
+  let name = TRACE_LOG_FALLBACK;
+  try {
+    name = require('../hooks/host-trace.cjs').LOG || name;
+  } catch (_) {
+    /* a plugin dir without the hooks half still has a documented log name */
+  }
+  return path.join(process.env.FND_MCP_SLIM_DIR || os.tmpdir(), name);
+}
+
+// `2h` / `90m` / `7d`, or any timestamp Date.parse takes. Floored to the second on purpose: the
+// shell half of the tracer has no portable sub-second clock, so every line it writes ends `.000`
+// and a millisecond-precise window would drop the record the user just produced.
+function parseSince(value) {
+  const rel = /^([0-9]+)([hmd])$/i.exec(String(value).trim());
+  let ms;
+  if (rel) {
+    ms = Date.now() - Number(rel[1]) * { m: 60000, h: 3600000, d: 86400000 }[rel[2].toLowerCase()];
+  } else {
+    // `--since 2` (a dropped unit) must not parse as the year 2001 and silently widen the window
+    if (/^[0-9]+$/.test(String(value).trim())) return null;
+    ms = Date.parse(value);
+    if (!Number.isFinite(ms)) return null;
+  }
+  return Math.floor(ms / 1000) * 1000;
+}
+
+// Known vocabulary first, in the order the spec lists it; anything else a future hook writes is
+// still shown, sorted, rather than silently dropped.
+function decisionOrder(seen) {
+  const known = TRACE_DECISIONS.filter((d) => seen.has(d));
+  const extra = [...seen].filter((d) => !TRACE_DECISIONS.includes(d)).sort();
+  return known.concat(extra);
+}
+
+function orderedHosts(seen) {
+  const known = TRACE_HOSTS.filter((h) => seen.has(h));
+  const extra = [...seen].filter((h) => !TRACE_HOSTS.includes(h)).sort();
+  return known.concat(extra);
+}
+
+function traceRowOrder(a, b) {
+  const ea = TRACE_EVENTS.indexOf(a.event);
+  const eb = TRACE_EVENTS.indexOf(b.event);
+  const ia = ea === -1 ? TRACE_EVENTS.length : ea;
+  const ib = eb === -1 ? TRACE_EVENTS.length : eb;
+  if (ia !== ib) return ia - ib;
+  if (a.event !== b.event) return a.event < b.event ? -1 : 1;
+  return a.hook < b.hook ? -1 : a.hook > b.hook ? 1 : 0;
+}
+
+function reportTrace(sinceRaw) {
+  const file = traceLogPath();
+  let since = null;
+  if (sinceRaw !== null) {
+    since = parseSince(sinceRaw);
+    if (since === null) usage('--since wants an ISO timestamp or <N>h / <N>m / <N>d, not ' + sinceRaw);
+  }
+
+  let raw = null;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (_) {
+    /* no log is the normal state with the switch off — reported below, never a failure */
+  }
+  if (raw === null || !raw.trim()) {
+    out(
+      'no host trace at ' + file + (raw === null ? '' : ' (file is empty)') + ' — set ' + TRACE_SWITCH +
+        '=1 globally (domaine-env set ' + TRACE_SWITCH + '=1), then open a new session on the host'
+    );
+    process.exitCode = 0;
+    return;
+  }
+
+  const hosts = new Set();
+  const byRow = new Map();
+  let total = 0;
+  let malformed = 0;
+  let before = 0;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    total++;
+    let rec = null;
+    try {
+      rec = JSON.parse(line);
+    } catch (_) {
+      /* a torn line from a concurrent append is noise, not a reason to abandon the report */
+    }
+    if (!rec || typeof rec !== 'object' || Array.isArray(rec) || !rec.hook || !rec.event) {
+      malformed++;
+      continue;
+    }
+    if (since !== null) {
+      const ts = Date.parse(rec.ts);
+      if (!Number.isFinite(ts) || ts < since) {
+        before++;
+        continue;
+      }
+    }
+    const key = rec.event + '/' + rec.hook;
+    let row = byRow.get(key);
+    if (!row) {
+      // the log is a shared file: a name is rendered only through the vocabulary's own charset
+      const safe = (v) => String(v).replace(/[^A-Za-z0-9_.-]/g, '?').slice(0, 40);
+      row = { event: safe(rec.event), hook: safe(rec.hook), cells: new Map() };
+      byRow.set(key, row);
+    }
+    const host = typeof rec.host === 'string' && rec.host ? rec.host : 'unknown';
+    hosts.add(host);
+    let cell = row.cells.get(host);
+    if (!cell) {
+      cell = { n: 0, decisions: new Map() };
+      row.cells.set(host, cell);
+    }
+    cell.n++;
+    const decision = typeof rec.decision === 'string' && rec.decision ? rec.decision : '?';
+    cell.decisions.set(decision, (cell.decisions.get(decision) || 0) + 1);
+  }
+
+  const window = since === null ? 'whole log' : 'since ' + new Date(since).toISOString() + ' (--since ' + sinceRaw + ')';
+  if (!byRow.size) {
+    out('fnd doctor — host trace');
+    out('no lines in the window — nothing fired, or the window is narrower than the log');
+  } else {
+    const hostCols = orderedHosts(hosts);
+    const header = ['event/hook'].concat(hostCols);
+    const cells = [...byRow.values()].sort(traceRowOrder).map((row) => {
+      const line = [row.event + '/' + row.hook];
+      for (const host of hostCols) {
+        const cell = row.cells.get(host);
+        if (!cell) {
+          line.push('-');
+          continue;
+        }
+        const parts = decisionOrder(new Set(cell.decisions.keys())).map((d) => d + ' ' + cell.decisions.get(d));
+        line.push(cell.n + ' (' + parts.join(', ') + ')');
+      }
+      return line;
+    });
+    const widths = header.map((h, i) => cells.reduce((w, r) => Math.max(w, r[i].length), h.length));
+    // padEnd on every column but the last, so no row carries trailing blanks
+    const render = (cols) => cols.map((c, i) => (i === cols.length - 1 ? c : c.padEnd(widths[i]))).join('  ');
+    out('fnd doctor — host trace');
+    out(render(header));
+    for (const row of cells) out(render(row));
+  }
+
+  out('');
+  out('log:    ' + file);
+  out('window: ' + window);
+  out('hosts:  ' + (hosts.size ? orderedHosts(hosts).join(', ') : 'none'));
+  out(
+    'lines:  ' + total + ' read' + (malformed ? ', ' + malformed + ' malformed' : '') +
+      (before ? ', ' + before + ' before the window' : '')
+  );
+  process.exitCode = 0;
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
+  // A report, not a check: --trace answers from the trace log and runs no install assertion.
+  if (opts.trace) return reportTrace(opts.since);
   const pluginRoot = path.resolve(opts.root || path.join(__dirname, '..'));
   const repoRoot = findRepoRoot(pluginRoot);
   const homeDir = opts.home ? path.resolve(opts.home) : os.homedir();

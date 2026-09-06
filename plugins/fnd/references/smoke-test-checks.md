@@ -176,6 +176,53 @@ Two halves, reported separately and never inferred from each other:
   that carry only the plugin subdirectory the path does not exist — that is 🟡 "fixture not
   present in this install", not a failure. Do not substitute an invented input file.
 
+## Row 8 — Host trace (rows 5–7, read back from a log)
+
+With `FND_HOST_TRACE` on, every fnd hook appends one JSONL line per invocation to
+`<FND_MCP_SLIM_DIR>/fnd-host-trace.log` (the OS temp dir when that variable is unset) — metadata
+only: timestamp, host, event, hook, decision, tool/agent name, project basename. Row 8 reads that
+file back, which is the only row in this matrix that does not depend on a model reporting on
+itself:
+
+```bash
+node <plugin root>/scripts/doctor.cjs --trace --since <this session's start>
+```
+
+`--since` takes an ISO timestamp or a relative window (`2h`, `30m`, `1d`); pass this session's
+start, or the matrix covers other sessions, other days and other hosts' lines as well. The window
+is honoured to the second — the shell half of the tracer has no sub-second clock.
+
+The output is one row per `event/hook`, one column per host that logged, each cell a count plus
+its decision breakdown (`12 (pass 11, deny 1)`), then a footer naming the log path, the window,
+the hosts seen and the line count. **Report the cells in this host's column**, and compare them
+with what rows 3–7 claimed.
+
+| Host | Rows a healthy session shows in that host's column |
+| --- | --- |
+| Claude Code | `SessionStart/session-start` · `UserPromptSubmit/user-prompt` · `SubagentStart/subagent-conventions` (row 4) · `PreToolUse/no-ai-attribution` and `PreToolUse/no-verify-bypass` — one of them `deny` for row 5's probe · `PreToolUse/spill-access` · `PostToolUse/mcp-slim` (rows 3–4) |
+| Cursor | the same guard and result rows under host `cursor`, plus `SessionStart/cursor-shim`, `UserPromptSubmit/cursor-shim` and `SubagentStart/cursor-shim`: that host composes its contexts in the adapter, so the shim logs what it emitted and the scripts it spawns log their own verdicts |
+| Codex CLI | as Claude Code, plus `PostToolUse/codex-mcp-shim` next to `PostToolUse/mcp-slim` — that host cannot rewrite a tool result, so the wired command is the shim, and the `mcp-slim` it spawns logs its own line |
+| OpenCode | `UserPromptSubmit/fnd-plugin` from the adapter (and `SessionStart/fnd-plugin` only in a store project — a `shopify.theme.toml` or `.env` beside the repo root — since that is the adapter's one dynamic session context; elsewhere its absence is expected), plus `user-prompt`, the two shell guards, `spill-access` and `mcp-slim`; **no `SubagentStart` row** — that host has no subagent-start event, and its absence is expected, not a defect |
+
+`PreToolUse/scratch-path-guard` appears only when a screenshot call happened in this session, so
+its absence proves nothing either way.
+
+Reading it:
+
+- 🟢 — the switch is on and this host's column carries the rows above, matching what rows 5–7
+  reported.
+- 🔴 — a row you reported green has no line here (the guard denied but the trace never recorded
+  it → the tracing half is not loaded on this host), or its lines landed under a **different**
+  host column (the wrong wiring fired). Both are plugin defects worth filing.
+- 🟡 — no log, or a log with no line from this session: tracing is opt-in and **off by default**,
+  which is not a failure. Remediation: `node <plugin root>/scripts/domaine-env.cjs set
+  FND_HOST_TRACE=1` (global-only — a project env file cannot arm it), then start a new session on
+  this host and re-run the smoke test there.
+
+A row under host `unknown` is a hook that ran with no `FND_HOST` in its environment. A manual run
+or a test looks like that; a hook fired by the host's own wiring must not, so an `unknown` row in
+a live session is a wiring gap in that host's manifest or adapter.
+
 ## Report format
 
 One matrix, then remediation. Header line first: **host + host version · plugin version ·
@@ -191,6 +238,7 @@ doctor's install row when `--target` was passed).
 | 5 | Guard hook (`--no-verify`) | | blocked / allowed / blocked by something else |
 | 6 | Context injection | | which conventions are visible, via which mechanism |
 | 7 | MCP compression | | hook half + script half, separately |
+| 8 | Host trace (`doctor --trace`) | | which event/hook rows logged under this host, or 🟡 with the switch off |
 
 Remediation lines for non-green rows, most-blocking first:
 
@@ -203,6 +251,8 @@ Remediation lines for non-green rows, most-blocking first:
 | Subagent not spawnable | the host's agent directory for this install is missing or not discovered — reinstall, then start a new session. On Codex current CLIs load bundled TOML agents from the marketplace cache (measured 0.149.0); if yours does not, link them locally with `scripts/install.sh --target codex` — `doctor.cjs --target codex` says whether links are live |
 | Guard did not fire | the host's hook wiring is not loaded: check the install, and on hosts with a hook trust prompt, approve the plugin's hooks and start a new session |
 | No conventions in context | the host's injection path is not active — same wiring check as the guard row |
+| No host trace / no line from this session | tracing is off by default — `node <plugin root>/scripts/domaine-env.cjs set FND_HOST_TRACE=1` (global-only), then a new session on this host |
+| A green row with no trace line, or lines under another host's column | the trace helper is not loaded, or the wrong wiring fired → a plugin defect, offer to file it |
 | Any bundled script crashed | that is a plugin defect, not an environment gap → offer to file it |
 
 **Filing.** Environment gaps (missing auth, no browser, closed desktop app, server not

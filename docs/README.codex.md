@@ -114,6 +114,17 @@ skills with `$`, not `/`). It proves MCP connectivity, subagent delegation, the 
 firing and the session conventions arriving. Run it after installing or updating, not every
 session — `$preflight-checks` owns the recurring per-project role.
 
+**Proving the hooks fired.** Arm `FND_HOST_TRACE` globally
+(`node plugins/fnd/scripts/domaine-env.cjs set FND_HOST_TRACE=1`), start a session, use it, then
+run `node plugins/fnd/scripts/doctor.cjs --trace --since 2h`. Under host `codex` a healthy run
+shows `SessionStart/session-start`, `UserPromptSubmit/user-prompt`,
+`SubagentStart/subagent-conventions`, both `PreToolUse` commit guards (one of them `deny` for the
+probe), `PreToolUse/spill-access`, `PostToolUse/codex-mcp-shim` and `PostToolUse/mcp-slim` — the shim
+is the wired command, since this host cannot rewrite a tool result, and the `mcp-slim` it spawns
+logs its own line. An empty matrix here almost always means
+the `[features] hooks` gate or the `/hooks` trust review above is still pending. Full recipe:
+[Verifying any install](../README.md#verifying-any-install).
+
 ## Update
 
 ```text

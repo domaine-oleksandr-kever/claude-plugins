@@ -67,6 +67,16 @@ subagent spawning, the commit guards firing, the session conventions arriving. R
 installing or updating, not every session (`/preflight-checks` owns the recurring per-project
 role).
 
+**Proving the hooks fired.** The smoke test's last row reads a log instead of trusting the model:
+arm `FND_HOST_TRACE` globally (`node plugins/fnd/scripts/domaine-env.cjs set FND_HOST_TRACE=1`),
+reload the window, use the session normally, then run
+`node plugins/fnd/scripts/doctor.cjs --trace --since 2h`. Under host `cursor` a healthy run shows
+`SessionStart/cursor-shim`, `UserPromptSubmit/cursor-shim` and `SubagentStart/cursor-shim` — this
+host composes those contexts in the adapter — next to the rows the spawned scripts log for
+themselves (`user-prompt`, `subagent-conventions`, `no-verify-bypass`, `no-ai-attribution`,
+`spill-access`, `mcp-slim`). Full recipe:
+[Verifying any install](../README.md#verifying-any-install).
+
 ### Alternative: local checkout — script install
 
 Here the clone **is** the install: Cursor reads a symlink into `~/.cursor/plugins/local/fnd`,

@@ -32,6 +32,11 @@
 //     other host (Claude Code, Codex, and Cursor's beforeMCPExecution); on this one the
 //     task-workspace convention is the instruction-only rail (references/task-workspace.md).
 //
+// FND_HOST=opencode is set on the process — this host has no hook COMMANDS to carry the tag, and
+// it is the `host` column of the FND_HOST_TRACE log. The adapter traces the two events it
+// COMPOSES (the session-context injection, and each chat.message); every canonical script it
+// spawns writes its own line, so a guard verdict is never recorded twice.
+//
 // Fail-open everywhere except the commit guard: an explicit exit 2 from either git guard throws
 // (OpenCode's block primitive), and a no-verify guard that reaches NO verdict at all — no bash, a
 // missing file, a timeout — throws too, but only on the commands it would have inspected. A guard
@@ -69,6 +74,15 @@ const HOOKS = path.join(PLUGIN_ROOT, 'hooks');
 try {
   createRequire(import.meta.url)(path.join(PLUGIN_ROOT, 'scripts', 'env-file.cjs')).load();
 } catch (_) {} // a broken config file must never take the plugin down
+
+// FND_HOST_TRACE, the host-proof log. This host has no hook COMMANDS to carry the tag, so the
+// adapter assigns it — for its own records and, through the inherited spawn env, for every
+// canonical script it runs (runScript pins it explicitly too).
+process.env.FND_HOST = 'opencode';
+let hostTrace = { trace() {}, enabled() { return false; }, start() { return 0; } };
+try {
+  hostTrace = createRequire(import.meta.url)(path.join(HOOKS, 'host-trace.cjs'));
+} catch (_) {} // partial install → no tracing, no crash
 
 const GUARD_TIMEOUT_MS = 10000;
 // mcp-slim's own wall-clock budget defaults to 5 s and applies to the pipeline only, so the
@@ -148,7 +162,8 @@ function runScript(bin, args, stdin, timeoutMs) {
       // otherwise send a canonical script reading the wrong bundle.
       child = spawn(bin, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+        // FND_HOST: the child writes its own trace line, and only the adapter knows the host.
+        env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, FND_HOST: 'opencode' },
       });
     } catch (err) {
       resolve({ code: null, stdout: '', stderr: '', error: err });
@@ -267,10 +282,15 @@ export const FndPlugin = async (ctx = {}) => {
 
   return {
     'chat.message': async (input, output) => {
+      const started = hostTrace.start();
+      // Set once this turn is one the adapter acts on, so an assistant message — which returns
+      // before any of it runs — writes no line at all.
+      let traced = null;
       try {
         const parts = (output && output.parts) || (input && input.parts);
         const message = (output && output.message) || (input && input.message) || {};
         if (message.role && message.role !== 'user') return;
+        traced = 'pass';
 
         // Read before anything is injected: what the prompt hooks measure has to be what the
         // developer actually wrote, or a session-context block could tip a prompt over the
@@ -284,7 +304,11 @@ export const FndPlugin = async (ctx = {}) => {
           if (seen.size > 500) seen.clear();
           seen.add(sessionID);
           const context = dynamicSessionContext(cwd);
-          if (context) injectContext(parts, context);
+          // Its own line, under the event every other host spells SessionStart: this injection
+          // IS this host's session start, and the matrix has to be able to see it fire.
+          if (context && injectContext(parts, context)) {
+            hostTrace.trace({ event: 'SessionStart', hook: 'fnd-plugin', decision: 'inject', startedAt: started });
+          }
         }
 
         // Same short-circuit as the Claude Code wiring: with both halves off no node spawns.
@@ -302,13 +326,19 @@ export const FndPlugin = async (ctx = {}) => {
         if (!decision) return;
 
         if (decision.decision === 'block' && decision.reason) {
+          // The deny is user-prompt.cjs's own verdict and its own trace line; the adapter only
+          // carried it out, so this turn's adapter line stays `pass`.
           offloadSpilledBlobs(parts, decision.reason);
           return; // the reason is written for a prompt that got erased — it must not reach the model
         }
         const extra = decision.hookSpecificOutput && decision.hookSpecificOutput.additionalContext;
-        if (typeof extra === 'string' && extra) injectContext(parts, extra);
+        if (typeof extra === 'string' && extra && injectContext(parts, extra)) traced = 'inject';
       } catch (_) {
         // Injection is never worth losing a message over.
+      } finally {
+        if (traced) {
+          hostTrace.trace({ event: 'UserPromptSubmit', hook: 'fnd-plugin', decision: traced, startedAt: started });
+        }
       }
     },
 

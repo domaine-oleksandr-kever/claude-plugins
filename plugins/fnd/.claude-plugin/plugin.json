@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo \"fnd plugin root: ${CLAUDE_PLUGIN_ROOT}\"; for f in comment-discipline plugin-feedback task-workspace untrusted-content mcp-whale; do cat \"${CLAUDE_PLUGIN_ROOT}/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"${CLAUDE_PLUGIN_ROOT}/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"${CLAUDE_PLUGIN_ROOT}/hooks/lean-code.md\" 2>/dev/null; true"
+            "command": "export FND_HOST=claude; echo \"fnd plugin root: ${CLAUDE_PLUGIN_ROOT}\"; for f in comment-discipline plugin-feedback task-workspace untrusted-content mcp-whale; do cat \"${CLAUDE_PLUGIN_ROOT}/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"${CLAUDE_PLUGIN_ROOT}/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"${CLAUDE_PLUGIN_ROOT}/hooks/lean-code.md\" 2>/dev/null; \"${CLAUDE_PLUGIN_ROOT}/hooks/host-trace.sh\" SessionStart session-start inject 2>/dev/null; true"
           }
         ]
       }
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.cjs\" || true"
+            "command": "export FND_HOST=claude; [ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.cjs\" || true"
           }
         ]
       }
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-conventions.sh\""
+            "command": "export FND_HOST=claude; \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-conventions.sh\""
           }
         ]
       }
@@ -74,11 +74,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/no-ai-attribution.sh\""
+            "command": "export FND_HOST=claude; \"${CLAUDE_PLUGIN_ROOT}/hooks/no-ai-attribution.sh\""
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/no-verify-bypass.sh\""
+            "command": "export FND_HOST=claude; \"${CLAUDE_PLUGIN_ROOT}/hooks/no-verify-bypass.sh\""
           }
         ]
       },
@@ -87,7 +87,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${FND_SCRATCH_GUARD:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scratch-path-guard.cjs\" || true"
+            "command": "export FND_HOST=claude; [ \"${FND_SCRATCH_GUARD:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scratch-path-guard.cjs\" || true"
           }
         ]
       },
@@ -96,7 +96,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${FND_SPILL_ACCESS:-1}\" = \"0\" ] || \"${CLAUDE_PLUGIN_ROOT}/hooks/spill-access.sh\" || true"
+            "command": "export FND_HOST=claude; [ \"${FND_SPILL_ACCESS:-1}\" = \"0\" ] || \"${CLAUDE_PLUGIN_ROOT}/hooks/spill-access.sh\" || true"
           }
         ]
       }
@@ -107,7 +107,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ \"${FND_MCP_SLIM:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/mcp-slim.cjs\" || true"
+            "command": "export FND_HOST=claude; [ \"${FND_MCP_SLIM:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/mcp-slim.cjs\" || true"
           }
         ]
       }

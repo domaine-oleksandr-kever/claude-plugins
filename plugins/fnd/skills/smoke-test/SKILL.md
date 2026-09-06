@@ -74,6 +74,14 @@ shapes, the scratch-repo probe, the report format, and remediation per failure.
    compressor (stub, spill path, or in-place rewrite marker), report which path fired. Otherwise
    run the json-slim CLI on the bundled fixture so the script half is proven on this host, and
    mark the hook half 🟡 "not exercised" — do not claim it from the CLI result.
+8. **Host trace** — the same rows read back from a log instead of from memory. When
+   `FND_HOST_TRACE` is on, run `node <plugin root>/scripts/doctor.cjs --trace --since <this
+   session's start>` and report which `event/hook` rows logged under **this** host in this
+   session: that is rows 5–7 proven from disk rather than self-reported. A row you claimed green
+   above with no line in the trace is a finding, not a rounding error. Switch off → 🟡 with the
+   remediation `node <plugin root>/scripts/domaine-env.cjs set FND_HOST_TRACE=1` (global-only)
+   plus a new session, and re-run this skill there. Reference: *Row 8* for the expected rows per
+   host.
 
 ## Report
 

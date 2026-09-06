@@ -207,6 +207,15 @@ shim; OpenCode itself invokes skills by model choice only). It proves MCP connec
 delegation, the commit guards firing and the session context arriving. Run it after installing
 or updating, not every session — `/preflight-checks` owns the recurring per-project role.
 
+**Proving the hooks fired.** Arm `FND_HOST_TRACE` globally
+(`node plugins/fnd/scripts/domaine-env.cjs set FND_HOST_TRACE=1`), start a session, use it, then
+run `node plugins/fnd/scripts/doctor.cjs --trace --since 2h`. Under host `opencode` a healthy run
+shows `UserPromptSubmit/fnd-plugin` from the adapter (`SessionStart/fnd-plugin` too, but only in a
+store project — `shopify.theme.toml` or `.env` present — the adapter's one dynamic context), plus
+`user-prompt`, the two shell commit guards, `spill-access` and `mcp-slim`. There is no
+`SubagentStart` row — OpenCode exposes no subagent-start event — and that absence is expected, not
+a gap. Full recipe: [Verifying any install](../README.md#verifying-any-install).
+
 ## Update
 
 ```bash

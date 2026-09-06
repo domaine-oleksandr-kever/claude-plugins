@@ -29,6 +29,11 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps (env > project > global); absent in a partial install
+// FND_HOST_TRACE, the host-proof log. Stubbed on require failure — a partial install must not cost
+// the MCP result. No `tool` field: the shim hands stdin to the child as BYTES and never parses it,
+// and a whale is not worth parsing twice — mcp-slim's own line for the same event names the tool.
+let hostTrace = { trace() {}, enabled() { return false; }, start() { return 0; } };
+try { hostTrace = require('./host-trace.cjs'); } catch (_) {}
 
 // __dirname, never CLAUDE_PLUGIN_ROOT/PLUGIN_ROOT: Cursor leaks plugin-root env between concurrent
 // hooks and Claude Code has its own source-vs-cache inconsistency, so the env is a cross-check at
@@ -90,14 +95,19 @@ function run(raw) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: context },
   }));
+  return 'stub'; // the one outcome this host can act on; every other path above is a `pass`
 }
 
 const chunks = [];
 process.stdin.on('data', (d) => chunks.push(d));
 process.stdin.on('end', () => {
+  const t = hostTrace.start();
+  let decision = 'pass';
   try {
-    run(Buffer.concat(chunks));
+    decision = run(Buffer.concat(chunks)) || 'pass';
   } catch (_) {
     // Any failure → emit nothing; the tool result the host already delivered is untouched.
+    decision = 'error';
   }
+  hostTrace.trace({ event: 'PostToolUse', hook: 'codex-mcp-shim', decision, startedAt: t });
 });
