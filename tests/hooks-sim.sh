@@ -1965,7 +1965,8 @@ OVW="$TMP/ovf-whale"; mkdir -p "$OVW"
 whale="Error: result (307,533 characters) exceeds maximum allowed tokens. Output has been saved to $OVFP.
 $(printf 'z%.0s' $(seq 1 144000))"
 printf '%s' "$whale" > "$TMP/ovf-whale-payload.txt"
-in="$(jq -n --arg t "$whale" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+# --rawfile, not --arg: 144 KB exceeds Linux's per-argument limit (MAX_ARG_STRLEN), macOS never minded
+in="$(jq -n --rawfile t "$TMP/ovf-whale-payload.txt" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
 text="$(run_stub "$OVW" "$in" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
 assert_contains M101-stubbed "$text" "<<fnd-mcp-slim stub>>"
 p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
