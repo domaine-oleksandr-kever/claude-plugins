@@ -292,11 +292,14 @@ call, then read it back:
 
 ```bash
 node plugins/fnd/scripts/doctor.cjs --trace --since 2h
+node plugins/fnd/scripts/doctor.cjs --report --since 7d   # the compression statistics, same log root
 ```
 
 One row per `event/hook`, one column per host, each cell a count and its decision breakdown — the
 commit-guard row must carry a `deny`, and a hook that is silent there did not run. `smoke-test`
-row 8 runs exactly this from inside a session.
+row 8 runs exactly this from inside a session. `--report` is the other half of the proof — what the
+compression hook actually saved, per tool and per project, rendered by `json-slim.cjs --report`
+from the `FND_MCP_SLIM_DEBUG` log in the same root; the two flags combine.
 
 ### What's different per host
 

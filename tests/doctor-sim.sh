@@ -635,6 +635,52 @@ rc=0; node "$DOCTOR" --help >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -qF -- "--trace" "$O" && grep -qF -- "--since" "$O"; then ok
 else bad DT10-usage-documents-trace "out=$(tr '\n' ';' <"$O" | head -c 200)"; fi
 
+# --------------------------------------------------------------------------- --report --
+# The compression statistics: json-slim's own --report rendered from the doctor, over the SAME spill
+# root as --trace, with the doctor's window syntax. A report, never a check — exit 0 either way.
+RLOG="$TD/fnd-mcp-slim-debug.log"
+runreport() { rc=0; FND_MCP_SLIM_DIR="$TD" node "$DOCTOR" "$@" >"$O" 2>"$E" || rc=$?; }
+
+# DR1: no log — the switch is off; the line names the path and the switch, nothing else fails.
+runreport --report
+expect DR1-report-no-log 0 "no compression log at $RLOG" "FND_MCP_SLIM_DEBUG=1" "!FAIL" "!PASS"
+
+# the fixture log: two compressed calls of one tool (one a day old), one no-gain passthrough, one
+# torn line
+{
+  printf '{"ts":"%s","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__getJiraIssue","decision":"compressed","reason":null,"bytes_in":4458,"bytes_out":3064,"pct":31.3,"stages":["noise"],"ms":14}\n' "$NOW"
+  printf '{"ts":"%s","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__search_docs","decision":"passthrough","reason":"no-gain","bytes_in":5000,"bytes_out":5000,"pct":0,"stages":[],"ms":3}\n' "$NOW"
+  printf '{"ts":"%s","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__getJiraIssue","decision":"compressed","reason":null,"bytes_in":9000,"bytes_out":3000,"pct":66.7,"stages":["noise","crush"],"ms":20}\n' "$OLD"
+  printf 'not json\n'
+} > "$RLOG"
+
+# DR2: the aggregate — decisions, bytes saved per tool, per project, the torn line counted
+runreport --report
+expect DR2-report-aggregate 0 "fnd doctor — compression report" "json-slim: debug-log report — $RLOG" \
+  "3 events (+1 unparseable)" "18458 → 11064 B (40.1% saved)" "compressed 2 · passthrough 1" \
+  "7394 B over 2 calls — mcp__x__getJiraIssue" "elc: 3 events, 7394 B saved"
+
+# DR3: the doctor's window syntax (Nh) reaches json-slim as a timestamp — the old call drops out
+runreport --report --since 2h
+expect DR3-report-since 0 "2 events (+1 unparseable)" "compressed 1 · passthrough 1" "[since "
+
+# DR4: both readouts in one run — the trace matrix (DT3's fixture log is still there) first, the
+# compression report after it
+runreport --trace --report
+expect DR4-trace-and-report 0 "fnd doctor — host trace" "fnd doctor — compression report"
+if [ "$(grep -n 'fnd doctor — host trace' "$O" | cut -d: -f1)" -lt "$(grep -n 'compression report' "$O" | cut -d: -f1)" ]; then ok
+else bad DR4-order "out=$(tr '\n' ';' <"$O" | head -c 200)"; fi
+
+# DR5: --since without either readout is still a usage error naming both
+rc=0; node "$DOCTOR" --since 2h >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 2 ] && grep -qF -- '--trace / --report' "$E"; then ok
+else bad DR5-since-needs-readout "rc=$rc err=$(head -c 160 "$E")"; fi
+
+# DR6: usage documents --report
+rc=0; node "$DOCTOR" --help >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qF -- "--report" "$O"; then ok
+else bad DR6-usage-documents-report "out=$(tr '\n' ';' <"$O" | head -c 200)"; fi
+
 # D46: the suite never advanced the checkout it is testing. Running the repo's own installer
 # would have fast-forwarded this tree from the network mid-run — invisible on an offline runner,
 # and a mutation of files the other suites in the same CI job are reading.

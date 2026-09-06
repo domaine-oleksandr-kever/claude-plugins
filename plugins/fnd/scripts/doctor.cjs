@@ -14,6 +14,7 @@
  *   node doctor.cjs --target codex           # + the Codex subagent links
  *   node doctor.cjs --root <dir> --home <dir>   # overrides (tests, non-standard installs)
  *   node doctor.cjs --trace [--since 2h]     # the FND_HOST_TRACE readout, instead of the checks
+ *   node doctor.cjs --report [--since 7d]    # the compression statistics (FND_MCP_SLIM_DEBUG log)
  *
  * Every check prints exactly one PASS / FAIL / SKIP line. SKIP means "nothing to verify here yet"
  * (an optional manifest, a directory M4 has not generated) and never fails the run; the exit code
@@ -108,7 +109,8 @@ function out(line) {
 
 const USAGE =
   'usage: doctor.cjs [--target cursor|opencode|codex|claude] [--root <dir>] [--home <dir>]\n' +
-  '       doctor.cjs --trace [--since <ISO timestamp | Nh | Nm | Nd>]\n';
+  '       doctor.cjs --trace [--since <ISO timestamp | Nh | Nm | Nd>]\n' +
+  '       doctor.cjs --report [--since <ISO timestamp | Nh | Nm | Nd>]\n';
 
 function usage(msg) {
   if (!msg) {
@@ -120,11 +122,12 @@ function usage(msg) {
 }
 
 function parseArgs(argv) {
-  const opts = { target: null, root: null, home: null, trace: false, since: null };
+  const opts = { target: null, root: null, home: null, trace: false, report: false, since: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') usage('');
     else if (a === '--trace') opts.trace = true;
+    else if (a === '--report') opts.report = true;
     else if (a === '--target' || a === '--root' || a === '--home' || a === '--since') {
       const v = argv[++i];
       if (!v || v.startsWith('--')) usage(a + ' needs a value');
@@ -135,7 +138,7 @@ function parseArgs(argv) {
     usage('unknown target ' + opts.target);
   }
   // A window over a report nobody asked for reads as a filter on the install checks, which it is not.
-  if (opts.since !== null && !opts.trace) usage('--since only applies to --trace');
+  if (opts.since !== null && !opts.trace && !opts.report) usage('--since only applies to --trace / --report');
   return opts;
 }
 
@@ -702,10 +705,62 @@ function reportTrace(sinceRaw) {
   process.exitCode = 0;
 }
 
+// --report: the compression statistics, from the same spill root as --trace. The rendering IS
+// json-slim's own `--report` (buildReport), so the two entry points can never disagree; the doctor
+// only adds the same absent-log answer the trace readout gives, and one window syntax for both.
+const SLIM_SWITCH = 'FND_MCP_SLIM_DEBUG';
+const SLIM_LOG = 'fnd-mcp-slim-debug.log';
+
+function reportSlim(sinceRaw) {
+  const file = path.join(process.env.FND_MCP_SLIM_DIR || os.tmpdir(), SLIM_LOG);
+  let since = null;
+  if (sinceRaw !== null) {
+    since = parseSince(sinceRaw);
+    if (since === null) usage('--since wants an ISO timestamp or <N>h / <N>m / <N>d, not ' + sinceRaw);
+  }
+  let raw = null;
+  let bytes = 0;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+    bytes = fs.statSync(file).size;
+  } catch (_) {
+    /* no log is the normal state with the switch off — reported below, never a failure */
+  }
+  if (raw === null || !raw.trim()) {
+    out(
+      'no compression log at ' + file + (raw === null ? '' : ' (file is empty)') + ' — set ' + SLIM_SWITCH +
+        '=1 (domaine-env set ' + SLIM_SWITCH + '=1 or settings.json env), then make an MCP call'
+    );
+    process.exitCode = 0;
+    return;
+  }
+  let buildReport = null;
+  try {
+    buildReport = require('./json-slim.cjs').buildReport;
+  } catch (_) {
+    /* a plugin dir without json-slim has no report to render — said below */
+  }
+  if (typeof buildReport !== 'function') {
+    out('FAIL  json-slim.cjs missing or broken beside this doctor — --report renders its aggregate; reinstall the plugin');
+    process.exitCode = 1;
+    return;
+  }
+  out('fnd doctor — compression report');
+  out(buildReport(raw.split('\n'), { file, bytes, since: since === null ? null : new Date(since).toISOString() }));
+  process.exitCode = 0;
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
-  // A report, not a check: --trace answers from the trace log and runs no install assertion.
-  if (opts.trace) return reportTrace(opts.since);
+  // Reports, not checks: --trace and --report answer from their logs and run no install assertion.
+  if (opts.trace || opts.report) {
+    if (opts.trace) reportTrace(opts.since);
+    if (opts.report) {
+      if (opts.trace) out('');
+      reportSlim(opts.since);
+    }
+    return;
+  }
   const pluginRoot = path.resolve(opts.root || path.join(__dirname, '..'));
   const repoRoot = findRepoRoot(pluginRoot);
   const homeDir = opts.home ? path.resolve(opts.home) : os.homedir();
