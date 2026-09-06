@@ -10,6 +10,9 @@ See [Install — four hosts](#install--four-hosts).
 
 ## What's inside
 
+The map of how the pieces fit — hosts, adapters, hooks, the compression pipeline, the ship
+pipeline — is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Mermaid, renders on GitHub).
+
 This repo is a **marketplace** (a catalog) that hosts one or more **plugins**, each
 in its own subfolder under `plugins/`:
 
