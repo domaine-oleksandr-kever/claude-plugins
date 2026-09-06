@@ -384,12 +384,19 @@ export const FndPlugin = async (ctx = {}) => {
     },
 
     'tool.execute.after': async (input, output) => {
+      // The bail-outs below leave a line too: with no line at all, the host proof cannot tell an
+      // MCP result this adapter skipped from a hook the host never called.
+      const started = hostTrace.start();
+      let tool = null;
       try {
         if (process.env.FND_MCP_SLIM === '0') return;
-        const tool = (input && input.tool) || (output && output.tool);
+        tool = (input && input.tool) || (output && output.tool);
         if (!isMcpTool(tool)) return;
         const text = output && output.output;
-        if (typeof text !== 'string' || !text) return;
+        if (typeof text !== 'string' || !text) {
+          hostTrace.trace({ event: 'PostToolUse', hook: 'fnd-plugin', decision: 'skip', tool: claudeToolName(tool), startedAt: started });
+          return;
+        }
 
         // The size gate, the error rails and the whole spill-and-stub decision live in
         // mcp-slim; duplicating any of them here would fork the contract for one host.
@@ -400,6 +407,8 @@ export const FndPlugin = async (ctx = {}) => {
           cwd,
         });
         const r = await runScript(NODE_BIN, [path.join(HOOKS, 'mcp-slim.cjs')], event, SLIM_TIMEOUT_MS);
+        // A spawn that never ran leaves no child line — this one stands in for it.
+        if (r.error) hostTrace.trace({ event: 'PostToolUse', hook: 'fnd-plugin', decision: 'error', tool: claudeToolName(tool), startedAt: started });
         const emitted = parseHookOutput(r.stdout);
         const slimmed = emitted && emitted.hookSpecificOutput && emitted.hookSpecificOutput.updatedToolOutput;
         // A string result comes back a string; anything else means the shapes stopped
@@ -407,6 +416,7 @@ export const FndPlugin = async (ctx = {}) => {
         if (typeof slimmed === 'string' && slimmed.length < text.length) output.output = slimmed;
       } catch (_) {
         // Compression is an optimization — the original result always survives a failure.
+        if (tool) hostTrace.trace({ event: 'PostToolUse', hook: 'fnd-plugin', decision: 'error', tool: claudeToolName(tool), startedAt: started });
       }
     },
 

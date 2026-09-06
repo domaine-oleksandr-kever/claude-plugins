@@ -27,7 +27,7 @@
 //             prompt-JSON block offloads each spilled blob in place byte-exactly, and
 //             FND_PROMPT_JSON=0 / assistant messages / empty parts are left alone
 //   H cases — FND_HOST_TRACE: the two events the adapter COMPOSES record themselves (host
-//             `opencode`, hook `fnd-plugin`), an assistant message records nothing, off writes
+//             `opencode`, hook `fnd-plugin`), a skipped MCP result leaves a `skip` line, an assistant message records nothing, off writes
 //             no file, and every line a run produces — spawned scripts included — carries the
 //             host tag this adapter assigns
 // Not covered here: the context-monitor half of user-prompt.cjs has no producer on OpenCode
@@ -457,6 +457,8 @@ delete process.env.FND_CTX_MONITOR;
     "const parts = [{ type: 'text', text: 'hello there' }];",
     "await plugin['chat.message']({ sessionID: 'ht1' },",
     "  { message: { role, sessionID: 'ht1' }, parts });",
+    "if (role === 'user') await plugin['tool.execute.after']({ tool: 'atlassian_x', sessionID: 'ht1', callID: 'c' },",
+    "  { title: 't', output: { content: 'not a string' }, metadata: {} });",
   ].join('\n'));
 
   const drive = (dir, role = 'user', on = true) => {
@@ -496,6 +498,14 @@ delete process.env.FND_CTX_MONITOR;
   // Every line the run produced — the adapter's own and any spawned script's — carries the tag
   // the adapter set. A script that lost it would file this host's proof under `unknown`.
   assertEq('H09-all-opencode', lines.filter((l) => l.host !== 'opencode').length, 0);
+  // An MCP result this adapter cannot hand to mcp-slim (a non-string output) still leaves a line,
+  // or the host proof could not tell a skipped result from a hook the host never called.
+  const skipped = mine.find((l) => l.event === 'PostToolUse');
+  assert('H09b-after-skip-line', Boolean(skipped), `no PostToolUse line: ${JSON.stringify(lines)}`);
+  if (skipped) {
+    assertEq('H09c-after-skip-decision', skipped.decision, 'skip');
+    assertEq('H09d-after-skip-tool', skipped.tool, 'mcp__atlassian__x');
+  }
 
   // An assistant message is not a turn this adapter acts on — it must not fill the log with lines
   // no hook fired for.
