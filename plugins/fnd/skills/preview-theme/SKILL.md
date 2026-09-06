@@ -18,7 +18,7 @@ arguments:
   - name: preview_path
     description: Storefront path to deep-link the preview to (e.g. /products/group-lipglass). Optional.
   - name: build_overrides
-    description: --no-build (developer already built) / --build-cmd "<cmd>" (non-default build). Optional.
+    description: --no-build (developer already built) / --build-script <name> (a package.json script other than `build`). Optional.
 allowed-tools: Read, Glob, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*)
 ---
 
@@ -82,7 +82,9 @@ silently collides with the main checkout's server or overwrites the shared dev t
    push into an existing same-named theme instead of making a new one). The script runs
    `npm run build`, pushes the built code (settings ignored), then overlays the dev
    theme's settings — pass `--no-build` if the developer already built, or
-   `--build-cmd "<cmd>"` for a non-default build. **Any `error=` line** → report it plainly,
+   `--build-script <name>` when the production build is a different `package.json` script —
+   a script **name**, never a shell command (anything else is refused before any
+   push). **Any `error=` line** → report it plainly,
    then follow the errors reference's **`error=` outcomes** — it names, per code, whether
    anything was pushed, whether retrying is right, and the recovery. Don't improvise one.
    A run that exits 0 with `overlay=partial` + `warn=overlay_file_dropped` lines is NOT a
@@ -107,7 +109,7 @@ silently collides with the main checkout's server or overwrites the shared dev t
 2. **Confirm before mutating.** This rebuilds and overwrites the theme's **code**
    (settings are preserved). Show the target id and `[ update / cancel ]`.
 3. **Refresh.** Run `create-preview-theme.sh refresh --theme <id>` (add `--no-build` /
-   `--build-cmd "<cmd>"` as above). Any `error=` line → report it plainly and follow the
+   `--build-script <name>` as above). Any `error=` line → report it plainly and follow the
    errors reference's **`error=` outcomes**; don't read the toml yourself.
 4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`.
    Remind the developer that customizer settings were intentionally left as-is.

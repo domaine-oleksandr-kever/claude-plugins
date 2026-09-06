@@ -5,6 +5,7 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1012,6 +1013,98 @@ check('cli-stdout-unchanged',
   check('cli-missing-file-exit-nonzero', r.status !== 0, true);
   check('cli-missing-file-no-bytes-line', /md-to-adf: \d+ bytes/.test(r.stderr), false);
 }
+
+// ----------------------------------------------------- md-to-adf CLI input gates --
+// An empty source must NOT convert to `{"content":[]}` with exit 0. That document is invalid
+// ADF (a doc needs a block), and jira-writer's read-back check — "every heading of the source
+// is present, plus one distinctive sentence" — passes VACUOUSLY on a source that has neither.
+// So a stray empty or wrong path would wipe a Jira field and be reported `ok`.
+const M2A_USAGE = 'usage: md-to-adf.cjs [--no-tables] [--pretty] [file.md]\n';
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'fnd-m2a-'));
+const tmpMd = (name, body) => { const f = path.join(TMP, name); fs.writeFileSync(f, body); return f; };
+
+for (const [label, md] of [
+  ['empty', ''],
+  ['whitespace', '   \n\t\n  '],
+  ['crlf-only', '\r\n\r\n'],
+  // a leading BOM is an encoding artifact, not a paragraph of its own
+  ['bom', '\ufeff'],
+  ['bom-blank-lines', '\ufeff\n  \n'],
+]) {
+  const r = m2aCli(md);
+  check(`cli-empty-exit-2[${label}]`, r.status, 2);
+  check(`cli-empty-no-stdout[${label}]`, r.stdout, '');
+  check(`cli-empty-stderr[${label}]`, r.stderr, 'md-to-adf: error: empty input (stdin)\n');
+}
+
+// the message names the SOURCE, so a caller can tell an empty file from empty stdin
+{
+  const f = tmpMd('blank.md', '  \n\n');
+  const r = m2aCli('', [f]);
+  check('cli-empty-file-exit-2', r.status, 2);
+  check('cli-empty-file-no-stdout', r.stdout, '');
+  check('cli-empty-file-stderr', r.stderr, `md-to-adf: error: empty input (${f})\n`);
+  check('cli-empty-file-no-bytes-line', /md-to-adf: \d+ bytes/.test(r.stderr), false);
+}
+
+// Inspected, not assumed: the converter has no HTML-comment construct, so a comment-only
+// source is a paragraph of literal text — content, not a wipe — and stays exit 0. The
+// `no ADF blocks` gate is a backstop for a doc that really comes back blockless.
+{
+  const r = m2aCli('<!-- just a note -->\n');
+  check('cli-html-comment-only-exit-0', r.status, 0);
+  check('cli-html-comment-only-has-block', JSON.parse(r.stdout).content.length, 1);
+}
+// the invariant that backstop leans on: any non-blank line yields at least one block
+for (const [label, md] of [['nbsp', NB], ['bare-marker', '-'], ['bare-quote', '>'], ['empty-fence', '```\n```\n']]) {
+  check(`cli-nonblank-produces-block[${label}]`, JSON.parse(m2aCli(md).stdout).content.length > 0, true);
+}
+
+// An unrecognized flag used to be dropped on the floor (or read as the source path), so a typo
+// converted the wrong thing — or, with the file arg eaten, hung on stdin.
+for (const args of [['--bogus'], ['--notables'], ['-x'], ['-']]) {
+  const r = m2aCli('# H\n\nbody\n', args);
+  check(`cli-unknown-option-exit-2[${args[0]}]`, r.status, 2);
+  check(`cli-unknown-option-no-stdout[${args[0]}]`, r.stdout, '');
+  check(`cli-unknown-option-stderr[${args[0]}]`, r.stderr, `md-to-adf: unknown option ${args[0]}\n` + M2A_USAGE);
+}
+
+{
+  // `"$SRC"` with SRC unset: used to fall through to stdin and "succeed" on it
+  const r = m2aCli('# H\n\nbody\n', ['']);
+  check('cli-empty-file-arg-exit-2', r.status, 2);
+  check('cli-empty-file-arg-no-stdout', r.stdout, '');
+  check('cli-empty-file-arg-stderr', r.stderr, 'md-to-adf: empty file argument\n' + M2A_USAGE);
+}
+
+{
+  const a = tmpMd('a.md', '# A\n');
+  const b = tmpMd('b.md', '# B\n');
+  const r = m2aCli('', [a, b]);
+  check('cli-two-files-exit-2', r.status, 2);
+  check('cli-two-files-no-stdout', r.stdout, '');
+  check('cli-two-files-stderr', r.stderr, `md-to-adf: too many file arguments (${a}, ${b})\n` + M2A_USAGE);
+}
+
+// the gates must not disturb an ordinary run: exit 0, the byte line, and both flags intact
+{
+  const f = tmpMd('ok.md', '# H\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n');
+  const plain = m2aCli('', [f]);
+  check('cli-good-file-exit-0', plain.status, 0);
+  check('cli-good-file-bytes-line', /^md-to-adf: \d+ bytes$/m.test(plain.stderr), true);
+  check('cli-good-file-keeps-table', JSON.parse(plain.stdout).content[1].type, 'table');
+  check('cli-no-tables-still-works', JSON.parse(m2aCli('', ['--no-tables', f]).stdout).content[1].type, 'bulletList');
+  check('cli-flag-after-file-still-works', JSON.parse(m2aCli('', [f, '--no-tables']).stdout).content[1].type, 'bulletList');
+  const pretty = m2aCli('', ['--pretty', f]);
+  check('cli-pretty-still-indents', pretty.stdout.includes('\n  "type"'), true);
+  check('cli-pretty-same-doc', JSON.parse(pretty.stdout), JSON.parse(plain.stdout));
+  check('cli-both-flags-still-work', JSON.parse(m2aCli('', ['--pretty', '--no-tables', f]).stdout).content[1].type, 'bulletList');
+}
+
+// a BOM in front of real content is stripped, so the first line is still parsed as a block
+check('cli-bom-stripped-before-content', JSON.parse(m2aCli('\ufeff# H\n').stdout).content[0].type, 'heading');
+
+fs.rmSync(TMP, { recursive: true, force: true });
 
 // ---------------------------------------------------------- md-to-adf CLI EPIPE --
 // A reader that goes away mid-write (`| head`, a parent that destroys the pipe) is success, not

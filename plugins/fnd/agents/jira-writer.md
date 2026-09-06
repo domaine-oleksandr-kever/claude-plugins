@@ -57,6 +57,13 @@ Full mechanics + call shape: `${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md
 Both calls also require `cloudId`: pass the site host `meetdomaine.atlassian.net` (cloudId
 resolution: `jira-field-ids.md`).
 
+**Before any of it, check the source.** `Read` it: it must exist and hold at least one
+non-whitespace character. An empty source (or a path that is not the one that was approved)
+carries nothing to write, the field is left blank by the write, and the read-back below then
+passes on *nothing* — no headings and no sentence to miss — so the wipe would be reported as
+`ok`. Nothing there → `error: source is empty or missing (<path>) — nothing to write` and
+stop, with **no** MCP call.
+
 1. **Convert**: `node ${CLAUDE_PLUGIN_ROOT}/scripts/md-to-adf.cjs --no-tables <source>` (drop
    `--no-tables` only when the brief says `tables: keep`). **plugin root** = the plugin's own
    directory, the one holding `references/` and `scripts/`. On Claude Code the `node …` command
@@ -68,7 +75,10 @@ resolution: `jira-field-ids.md`).
    files. Do **not** redirect stdout to a file (`> adf.json`) or `cat` one back. If the
    converter prints a size warning and the ADF is large, the write is fragile: return
    `error: ADF too large (<n> bytes) — trim the source` rather than ship a fragile blob (the
-   caller decides how to trim). **Never** fall back to a raw markdown string.
+   caller decides how to trim). A **non-zero exit** means no ADF exists — its stderr says why
+   (`error: empty input …`, `unknown option …`, `cannot read input …`): return
+   `error: convert failed — <that stderr line>`, stop, **no** MCP call. **Never** fall back to
+   a raw markdown string.
 2. **Write** with ONE MCP call:
    - a **field**: `editJiraIssue` on `<ticket>` with `fields: { "<target>": <the ADF object> }`.
    - a **comment**: `addCommentToJiraIssue` on `<ticket>` with `commentBody: <the ADF JSON,

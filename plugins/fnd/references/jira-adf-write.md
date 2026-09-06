@@ -62,6 +62,10 @@ calls succeeding. On an `error:` line:
 - `… field_id_mismatch …` — the id is not on that issue: re-resolve it (`jira-field-ids.md`,
   Step B in `jira-custom-fields.md`) and re-run the writer with the new id; not a content
   mismatch.
+- `error: source is empty or missing (<path>)` / `error: convert failed — …` — nothing was
+  written: the brief pointed at the wrong or an empty file (a batch that stages one file per
+  ticket and passed the wrong path, typically); fix the path or the content and re-run that
+  writer alone.
 
 The approval gate stays in the calling skill — `jira-writer` only converts-if-needed, writes
 and verifies, it never authorizes or decides content. Resolve the field id yourself
@@ -88,6 +92,16 @@ to empty.
 ```bash
 node <plugin root>/scripts/md-to-adf.cjs --no-tables <approved.md>   # or pipe via stdin
 ```
+
+**Check the source before you convert** — it must exist and hold at least one non-whitespace
+character. An empty one has nothing to write, and the read-back check below passes on nothing
+(no headings, no sentence to miss), so the write silently blanks the field and looks like a
+success: `error: source is empty or missing (<path>) — nothing to write`, no write call. The
+converter refuses too — an empty or whitespace-only source exits **2** with
+`md-to-adf: error: empty input (<path>)` and an empty stdout, as does a usage error (unknown
+option, more than one file argument). **Any non-zero exit means there is no ADF**: report
+`error: convert failed — <the stderr line>` and stop; never write a hand-built or markdown
+fallback in its place.
 
 It prints the ADF document JSON to stdout; pass that object straight to `editJiraIssue`
 (or, for a comment, the same text as the `commentBody` string). Dependency-free Node,

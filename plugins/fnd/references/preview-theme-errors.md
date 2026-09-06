@@ -21,6 +21,14 @@ to empty. On other hosts substitute the same path.
   and take the manual path. Never read the toml to "check".
 - **`error=build_failed`** → surface the build output and **stop**: fix the branch, don't enter
   theme URLs by hand.
+- **`error=bad_build_script`** → nothing was built or pushed, and **retrying the same value is
+  pointless**: `--build-script` takes the NAME of a script in the repo's `package.json`
+  (`[A-Za-z0-9_.:-]`), never a command line — the script runs it as `npm run <name>`, never through
+  a shell. Re-run with a name `package.json` defines (or `--no-build` if the repo is already built).
+- **`error=build_script_missing`** → same: nothing was built or pushed, no retry. The named script
+  is absent from `scripts` in `./package.json` (or there is no readable `package.json` in the
+  project root the run started from). Read the repo's `package.json`, pick the script it defines
+  for a production build, and re-run — or ask the developer which one to use. Don't invent one.
 - **`error=theme_limit`** → the store is at its theme cap (20 / 100). Pass `--reuse` if this run
   didn't (it refreshes the same-named theme instead of stacking); otherwise delete an old theme.
 - **`error=settings_drift`** → **don't retry**. The recovery is manual and the same for both modes:

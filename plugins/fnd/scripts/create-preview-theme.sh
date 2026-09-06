@@ -42,13 +42,13 @@
 # Subcommands:
 #   info
 #       → store=… dev_theme_id=… dev_theme_name=…                       (no mutation)
-#   create --name "<NAME>" [--reuse] [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+#   create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #       → build repo → push code (settings ignored) to a new unpublished theme
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
 #         → read the overlay back (see verify_overlay)
 #       → theme_id=… name=… store=… preview_url=… editor_url=… reused=… built=… overlay=…
 #         [warn=overlay_file_dropped file=… [unknown_types=…]] [hint=…] | [warn=overlay_unverified …]
-#   refresh --theme <ID> [--no-build] [--build-cmd "<cmd>"] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+#   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
 #       → theme_id=… store=… preview_url=… editor_url=… built=…
@@ -60,6 +60,13 @@
 #         option here — retry when the store answers.
 #       → theme_id=… store=… pinned_toml=… pin=… pin_env=… commented_dupes=… [superseded_theme_id=…]
 #
+#   --build-script <name>  (create & refresh, default `build`) — the ./package.json script the
+#       build runs, as `npm run <name>`. A script NAME, never a command line: the skills that
+#       call this script pre-approve its whole argv, so anything that reached a shell here would
+#       run without a permission prompt. A value that is not a bare `[A-Za-z0-9_.:-]+` name, or is
+#       absent from package.json, is refused (`bad_build_script` / `build_script_missing`) before
+#       the store is touched. `--no-build` skips the build, and with it the package.json lookup —
+#       the shape of the name is still checked.
 #   --ignore-extra "<glob>"  (create & refresh, repeatable) — extra `--ignore` pattern passed
 #       through to `shopify theme push`, for a file inside a theme dir that must not ship.
 #   --pin-toml  (create & refresh) — after the push succeeds, pin the resulting theme id into
@@ -86,7 +93,7 @@
 # FND_CPT_OVERLAY_VERIFY=0 skips the read-back; FND_CPT_OVERLAY_VERIFY_WAIT sets its re-check pause.
 # The read-back pulls go through push_retry too, so on a throttled store they can add the
 # $FND_CPT_THROTTLE_WAITS pauses AFTER every piece of real work has already succeeded.
-# Requires: shopify CLI, jq; npm for the default build.
+# Requires: shopify CLI, jq; npm (and node, to read package.json) unless --no-build.
 
 set -euo pipefail
 
@@ -893,15 +900,31 @@ print_pin_keys() {
 }
 
 NO_BUILD=0
-BUILD_CMD="npm run build"
+BUILD_SCRIPT="build"
 BUILT="no"
+# Name-only, run as argv — the callers pre-approve this script's whole argv, so a value that
+# reached a shell would run with no permission prompt (rationale: header). Refuse before the store.
+vet_build_script() {
+  case "$BUILD_SCRIPT" in
+    ''|-*|*[!A-Za-z0-9_.:-]*)
+      fail "bad_build_script ($BUILD_SCRIPT) — --build-script takes the NAME of a script in ./package.json ([A-Za-z0-9_.:-], no leading dash), not a command; nothing was built or pushed" ;;
+  esac
+  # --no-build never reads package.json — the repo it runs in may legitimately not have one —
+  # but the name is still vetted above, so a bogus value is never silently pocketed.
+  [ "$NO_BUILD" -eq 1 ] && return 0
+  command -v node >/dev/null 2>&1 \
+    || fail "build_script_missing ($BUILD_SCRIPT) — node not found on PATH, so ./package.json cannot be read; install node or pass --no-build if the repo is already built"
+  node -e 'const fs=require("fs");let p;try{p=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const s=p&&p.scripts;process.exit(s&&typeof s[process.argv[2]]==="string"?0:1)' \
+    package.json "$BUILD_SCRIPT" 2>/dev/null \
+    || fail "build_script_missing ($BUILD_SCRIPT) — no such script under \`scripts\` in ./package.json (run from the project root); pick one it defines or pass --no-build; nothing was built or pushed"
+}
 run_build() {
   [ "$NO_BUILD" -eq 1 ] && { BUILT="skipped"; return 0; }
   local log; log="$(mk_tmpf)"
-  if ( eval "$BUILD_CMD" ) >"$log" 2>&1; then
+  if npm run "$BUILD_SCRIPT" >"$log" 2>&1; then
     BUILT="yes"; rm -f "$log"
   else
-    printf 'error=build_failed (%s):\n' "$BUILD_CMD"; tail -n 5 "$log"; rm -f "$log"; exit 1
+    printf 'error=build_failed (npm run %s):\n' "$BUILD_SCRIPT"; tail -n 5 "$log"; rm -f "$log"; exit 1
   fi
 }
 
@@ -957,7 +980,7 @@ case "$MODE" in
         --name) need_val $# "$1"; NAME="$2"; shift 2 ;;
         --reuse) REUSE=1; shift ;;
         --no-build) NO_BUILD=1; shift ;;
-        --build-cmd) need_val $# "$1"; BUILD_CMD="$2"; shift 2 ;;
+        --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; shift 2 ;;
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
         --pin-toml) PIN=1; shift ;;
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
@@ -968,6 +991,7 @@ case "$MODE" in
     # --env only ever feeds pin_toml — accepted without --pin-toml it would be a silent no-op
     # the caller reads as "the block I named was pinned"
     [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
+    vet_build_script
 
     # Resolve (and vet) the --reuse target BEFORE the build: a refusal after a several-minute npm
     # build is a refusal the developer waited for, and the live-theme guard must land before the push.
@@ -1057,7 +1081,7 @@ case "$MODE" in
       case "$1" in
         --theme) need_val $# "$1"; TARGET="$2"; shift 2 ;;
         --no-build) NO_BUILD=1; shift ;;
-        --build-cmd) need_val $# "$1"; BUILD_CMD="$2"; shift 2 ;;
+        --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; shift 2 ;;
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
         --pin-toml) PIN=1; shift ;;
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
@@ -1067,6 +1091,7 @@ case "$MODE" in
     [ -n "$TARGET" ] || fail "refresh requires --theme <existing theme id>"
     # same guard as create: --env without --pin-toml would be a silent no-op
     [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
+    vet_build_script
     # Numeric ids only: the CLI resolves a NAME here too, but assert_not_live vets by id — a name
     # target would sail past the guard with role="" and let the CLI resolve it to any theme,
     # the published one included. Names go through create --reuse, which resolves and vets them.
@@ -1101,6 +1126,6 @@ case "$MODE" in
     ;;
 
   *)
-    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-cmd \"<cmd>\"] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] | refresh --theme <id> [--no-build] [--build-cmd \"<cmd>\"] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] | pin --theme <id> [--env <name>]"
+    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] | refresh --theme <id> [--no-build] [--build-script <name>] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] | pin --theme <id> [--env <name>]"
     ;;
 esac

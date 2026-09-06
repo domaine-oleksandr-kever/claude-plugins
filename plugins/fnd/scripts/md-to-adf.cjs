@@ -18,6 +18,12 @@
  *   node md-to-adf.cjs --pretty f.md     # 2-space indented JSON (debugging only)
  * Prints the ADF document JSON to stdout (MINIFIED by default).
  *
+ * Exit codes: 0 = ADF written to stdout; 1 = the input could not be read; 2 = usage error
+ * (unknown option, more than one file) or an input that yields no ADF blocks. On 1 and 2
+ * stdout stays EMPTY. An empty source must not convert quietly: `{"content":[]}` is invalid
+ * ADF (a doc needs a block), and a caller that writes it wipes the Jira field while its
+ * read-back check — "every heading of the source is present" — passes vacuously on nothing.
+ *
  * KEEP IT COMPACT. The output goes straight into an editJiraIssue tool call; a huge ADF blob
  * is fragile to inline (one typo breaks the structure) — which tempts deviating to a raw
  * markdown string, which Jira custom fields REJECT ("Operation value must be an Atlassian
@@ -52,13 +58,31 @@
 const fs = require('fs');
 
 const ARGV = process.argv.slice(2);
-const OPT = {
-  noTables: ARGV.includes('--no-tables'),
-  pretty: ARGV.includes('--pretty'),
-};
-const FILE_ARG = ARGV.find((a) => !a.startsWith('--'));
+const USAGE = 'usage: md-to-adf.cjs [--no-tables] [--pretty] [file.md]';
 // Warn above this serialized size — large field values are fragile to write back via one tool call.
 const SIZE_WARN_BYTES = 30000;
+
+function usageError(msg) {
+  process.stderr.write('md-to-adf: ' + msg + '\n' + USAGE + '\n');
+  process.exit(2);
+}
+
+// A dashed argument this script does not know is a MISTAKE, not a filename: silently ignoring
+// it (or reading it as the source path) is how `--notables` or `--strip-comments` ends up
+// converting the wrong thing — or nothing at all.
+const OPT = { noTables: false, pretty: false };
+const FILES = [];
+for (const a of ARGV) {
+  if (a === '--no-tables') OPT.noTables = true;
+  else if (a === '--pretty') OPT.pretty = true;
+  else if (a.startsWith('-')) usageError('unknown option ' + a);
+  // `"$SRC"` with SRC unset is "" — a fall-through to stdin here converts whatever is on it
+  else if (a === '') usageError('empty file argument');
+  else FILES.push(a);
+}
+if (FILES.length > 1) usageError('too many file arguments (' + FILES.join(', ') + ')');
+const FILE_ARG = FILES[0];
+const SOURCE = FILE_ARG || 'stdin';
 
 // A reader that goes away mid-write (`| head`, a spawned parent that destroys the pipe) is
 // success, not failure: the EPIPE (Windows: `code: 'EOF'`) surfaces async and would otherwise
@@ -72,12 +96,19 @@ quietOnEpipe(process.stderr);
 
 function readInput() {
   try {
-    return FILE_ARG ? fs.readFileSync(FILE_ARG, 'utf8') : fs.readFileSync(0, 'utf8');
+    // A leading BOM is an encoding artifact, not content: left in, it becomes the first text
+    // node of the document (and makes a BOM-only file look like a paragraph).
+    const raw = FILE_ARG ? fs.readFileSync(FILE_ARG, 'utf8') : fs.readFileSync(0, 'utf8');
+    return raw.replace(/^\uFEFF/, '');
   } catch (e) {
     process.stderr.write('md-to-adf: cannot read input: ' + e.message + '\n');
     process.exit(1);
   }
 }
+
+// Blank by the block parser's own rule (BLANK_RE, ASCII-only — an NBSP is content the Jira
+// editor inserted, so an NBSP-only source is a real, if thin, document).
+const isBlank = (s) => !/[^ \t\r\n]/.test(s);
 
 function textNode(text, marks) {
   if (text === '') return null;
@@ -597,7 +628,20 @@ function toADF(md, quoted) {
   return { type: 'doc', version: 1, content };
 }
 
-const adf = toADF(readInput());
+const md = readInput();
+if (isBlank(md)) {
+  process.stderr.write('md-to-adf: error: empty input (' + SOURCE + ')\n');
+  process.exit(2);
+}
+
+const adf = toADF(md);
+// Backstop: every non-blank line the block parser sees pushes a node, so nothing reaches this
+// today — but a doc with no blocks is invalid ADF, and shipping one silently empties a field.
+if (adf.content.length === 0) {
+  process.stderr.write('md-to-adf: error: input produced no ADF blocks (' + SOURCE + ')\n');
+  process.exit(2);
+}
+
 const min = JSON.stringify(adf);
 const bytes = Buffer.byteLength(min, 'utf8');
 

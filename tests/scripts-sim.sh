@@ -1320,7 +1320,33 @@ cat > "$CPTD/markbuild.sh" <<'W'
 : > "${CPT_BUILD_MARK:-/dev/null}"
 exit 0
 W
-chmod +x "$CPTD/shim/shopify" "$CPTD/waitpull.sh" "$CPTD/overlap.sh" "$CPTD/markbuild.sh"
+# fake npm: `npm run <name>` resolves scripts.<name> out of ./package.json and runs it with sh,
+# the way real npm does. Every invocation is appended to $CPT_LOG as `npm=…`, so "the default
+# build ran" / "nothing was executed" are assertable rather than inferred.
+cat > "$CPTD/shim/npm" <<'NPM'
+#!/usr/bin/env bash
+[ -n "${CPT_LOG:-}" ] && printf 'npm=%s\n' "$*" >> "$CPT_LOG"
+[ "${1:-}" = "run" ] || { echo "npm shim: unhandled: $*" >&2; exit 1; }
+cmd="$(node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));const s=(p.scripts||{})[process.argv[1]];if(typeof s!=="string")process.exit(1);process.stdout.write(s)' "${2:-}")" \
+  || { echo "npm ERR! Missing script: \"${2:-}\"" >&2; exit 1; }
+sh -c "$cmd"
+NPM
+# The build targets the cases pass to --build-script; `build` is the one the script runs when no
+# flag is passed at all.
+cat > "$CPTD/repo/package.json" <<EOF
+{
+  "name": "cpt-fixture",
+  "private": true,
+  "scripts": {
+    "build": "$CPTD/markbuild.sh",
+    "markbuild": "$CPTD/markbuild.sh",
+    "waitpull": "$CPTD/waitpull.sh",
+    "overlap": "$CPTD/overlap.sh",
+    "failbuild": "exit 1"
+  }
+}
+EOF
+chmod +x "$CPTD/shim/shopify" "$CPTD/shim/npm" "$CPTD/waitpull.sh" "$CPTD/overlap.sh" "$CPTD/markbuild.sh"
 
 run_cpt() { # run_cpt <log-file> <env=val…> -- <args…>   ; stdout -> $O, stderr -> $E
   local log="$1"; shift
@@ -1445,7 +1471,7 @@ else bad P6-ambiguous-name "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' <
 # P7 (F3): the settings pull runs CONCURRENTLY with the build — the build command here only
 # succeeds once the pull has started, so a serial script fails this case
 rc=0; L="$TMP/cpt7"; : > "$L"; PM="$TMP/cpt7.pull"; rm -f "$PM"
-run_cpt "$L" CPT_PULL_MARK="$PM" -- create --name "PREVIEW-E" --build-cmd "$CPTD/waitpull.sh" || rc=$?
+run_cpt "$L" CPT_PULL_MARK="$PM" -- create --name "PREVIEW-E" --build-script waitpull || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^built=yes$' "$O" \
    && grep -q '^preview_url=https://' "$O" && [ -f "$PM" ]; then ok
 else bad P7-pull-concurrent-with-build "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
@@ -1453,7 +1479,7 @@ else bad P7-pull-concurrent-with-build "rc=$rc out=$(tr '\n' ';' < "$O") err=$(h
 # P7b (F3): a backgrounded pull that FAILS must never become a silent success, even when the
 # build outlives it (the `wait` status is the only evidence left by then)
 rc=0; L="$TMP/cpt7b"; : > "$L"; PM="$TMP/cpt7b.pull"; rm -f "$PM"
-run_cpt "$L" CPT_PULL_MARK="$PM" FAKE_PULL_FAIL=1 -- create --name "PREVIEW-F" --build-cmd "$CPTD/waitpull.sh" || rc=$?
+run_cpt "$L" CPT_PULL_MARK="$PM" FAKE_PULL_FAIL=1 -- create --name "PREVIEW-F" --build-script waitpull || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=overlay_pull_failed' "$O" && grep -q '^created_theme_deleted=yes$' "$O"; then ok
 else bad P7b-background-pull-failure-propagates "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
@@ -1532,7 +1558,7 @@ else bad P12-toml-crlf "rc=$rc out=$(tr '\n' ';' < "$O" | tr -d '\r')"; fi
 # ignores the variable otherwise, and the assertion would pass with cleanup deleted.
 CPTT="$TMP/cpt-tmpdir"; mkdir -p "$CPTT"
 rc=0; L="$TMP/cpt14"; : > "$L"
-run_cpt "$L" TMPDIR="$CPTT" FAKE_PULL_SLEEP=3 -- create --name "PREVIEW-J" --build-cmd "exit 1" || rc=$?
+run_cpt "$L" TMPDIR="$CPTT" FAKE_PULL_SLEEP=3 -- create --name "PREVIEW-J" --build-script failbuild || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=build_failed' "$O" \
    && ! grep -qi 'terminated' "$O" "$E" \
    && [ "$(ls -A "$CPTT" | wc -l | tr -d ' ')" -eq 0 ]; then ok
@@ -1544,7 +1570,7 @@ else bad P14-early-exit-clean "rc=$rc out=$(tr '\n' ';' < "$O") err=$(tr '\n' ';
 CPTT2="$TMP/cpt-tmpdir2"; mkdir -p "$CPTT2"
 rc=0; L="$TMP/cpt14b"; : > "$L"
 t0=$(date +%s)
-run_cpt "$L" TMPDIR="$CPTT2" FAKE_PULL_STUBBORN=1 FAKE_PULL_SLEEP=8 -- create --name "PREVIEW-K" --build-cmd "exit 1" || rc=$?
+run_cpt "$L" TMPDIR="$CPTT2" FAKE_PULL_STUBBORN=1 FAKE_PULL_SLEEP=8 -- create --name "PREVIEW-K" --build-script failbuild || rc=$?
 elapsed=$(( $(date +%s) - t0 ))
 if [ "$rc" -ne 0 ] && grep -q 'error=build_failed' "$O" && [ "$elapsed" -le 3 ] \
    && [ "$(ls -A "$CPTT2" | wc -l | tr -d ' ')" -eq 0 ]; then ok
@@ -1554,7 +1580,7 @@ else bad P14b-stubborn-pull-bounded "rc=$rc elapsed=${elapsed}s left=$(ls -A "$C
 # nothing else in the suite can tell it apart from a pull that completed before the build started
 rc=0; L="$TMP/cpt15"; : > "$L"; PM="$TMP/cpt15.start"; PD="$TMP/cpt15.done"; rm -f "$PM" "$PD"
 run_cpt "$L" CPT_PULL_MARK="$PM" CPT_PULL_DONE="$PD" FAKE_PULL_SLEEP=2 \
-  -- create --name "PREVIEW-L" --build-cmd "$CPTD/overlap.sh" || rc=$?
+  -- create --name "PREVIEW-L" --build-script overlap || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^built=yes$' "$O" && [ -f "$PD" ]; then ok
 else bad P15-pull-still-running-at-build-end "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
@@ -1632,14 +1658,77 @@ drift_case P18i-unworded-real-cause   'Request rejected by the upstream proxy' o
 # P19 (pin): a refusal must land BEFORE the build — a refusal a developer waited several minutes of
 # npm for is the whole reason the reuse/live block was moved above run_build
 rc=0; L="$TMP/cpt19"; : > "$L"; BM="$TMP/cpt19.build"; rm -f "$BM"
-run_cpt "$L" CPT_BUILD_MARK="$BM" -- create --name "Live Theme" --reuse --build-cmd "$CPTD/markbuild.sh" || rc=$?
+run_cpt "$L" CPT_BUILD_MARK="$BM" -- create --name "Live Theme" --reuse --build-script markbuild || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=live_theme_write_refused' "$O" && [ ! -f "$BM" ]; then ok
 else bad P19-refusal-before-build "rc=$rc built=$([ -f "$BM" ] && echo yes || echo no) out=$(head -c 120 "$O" | tr '\n' ' ')"; fi
 rc=0; L="$TMP/cpt19b"; : > "$L"; rm -f "$BM"
 run_cpt "$L" CPT_BUILD_MARK="$BM" FAKE_LIST='[{"id":301,"name":"PREVIEW-DUP","role":"unpublished"},{"id":302,"name":"PREVIEW-DUP","role":"unpublished"}]' \
-  -- create --name "PREVIEW-DUP" --reuse --build-cmd "$CPTD/markbuild.sh" || rc=$?
+  -- create --name "PREVIEW-DUP" --reuse --build-script markbuild || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=ambiguous_name' "$O" && [ ! -f "$BM" ]; then ok
 else bad P19b-ambiguous-before-build "rc=$rc built=$([ -f "$BM" ] && echo yes || echo no)"; fi
+
+# ------------------------------- create-preview-theme.sh --build-script: never a shell --
+# The preview-theme and worktree skills pre-approve this script's whole argv, so the build target
+# has to be a package.json script NAME run as argv: a value that reached a shell would be
+# arbitrary execution with no permission prompt. Each case below proves the refusal lands before
+# any store call AND that its payload never ran (the marker file is the only witness — an `error=`
+# line alone would still be printed by a script that executed the payload first).
+
+# P19c: the old `--build-cmd "<cmd>"` escape hatch is gone, and gone LOUDLY — silently ignoring it
+# would leave every caller that still passes one building the wrong thing
+rc=0; L="$TMP/cpt19c"; : > "$L"; INJ="$TMP/cpt19c.pwned"; rm -f "$INJ"
+run_cpt "$L" NO=1 -- create --name "PREVIEW-BC" --build-cmd ": > $INJ" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=unknown arg: --build-cmd' "$O" && [ ! -f "$INJ" ] \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19c-build-cmd-rejected "rc=$rc pwned=$([ -f "$INJ" ] && echo yes || echo no) out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P19d: a name carrying shell metacharacters is refused before the store is touched
+rc=0; L="$TMP/cpt19d"; : > "$L"; INJ="$TMP/cpt19d.pwned"; rm -f "$INJ"
+run_cpt "$L" NO=1 -- create --name "PREVIEW-BS1" --build-script "build; : > $INJ" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=bad_build_script' "$O" && [ ! -f "$INJ" ] \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19d-build-script-metachars "rc=$rc pwned=$([ -f "$INJ" ] && echo yes || echo no) out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P19e: …and so is a command substitution, which an `eval` would run before it ever looked at it
+rc=0; L="$TMP/cpt19e"; : > "$L"; INJ="$TMP/cpt19e.pwned"; rm -f "$INJ"
+run_cpt "$L" NO=1 -- create --name "PREVIEW-BS2" --build-script "\$(: > $INJ)" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=bad_build_script' "$O" && [ ! -f "$INJ" ] \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19e-build-script-substitution "rc=$rc pwned=$([ -f "$INJ" ] && echo yes || echo no) out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P19ee: a dash-leading value is a flag for `npm run`, not a script name — refused as well
+rc=0; L="$TMP/cpt19ee"; : > "$L"
+run_cpt "$L" NO=1 -- create --name "PREVIEW-BS2b" --build-script -f || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=bad_build_script' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19ee-build-script-leading-dash "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P19f: a well-formed name that package.json does not define is refused before the push, not left
+# to `npm run` after the theme already exists
+rc=0; L="$TMP/cpt19f"; : > "$L"
+run_cpt "$L" NO=1 -- create --name "PREVIEW-BS3" --build-script nope || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (nope)' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ] && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad P19f-build-script-missing "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+
+# P19g: with no flag at all the build is `npm run build` — argv, and the package.json script
+rc=0; L="$TMP/cpt19g"; : > "$L"; BM="$TMP/cpt19g.build"; rm -f "$BM"
+run_cpt "$L" CPT_BUILD_MARK="$BM" -- create --name "PREVIEW-BD" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^npm=run build$' "$L" && [ -f "$BM" ] && grep -q '^built=yes$' "$O"; then ok
+else bad P19g-default-build-script "rc=$rc built=$([ -f "$BM" ] && echo yes || echo no) log=$(grep '^npm=' "$L" | tr '\n' ';') out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# P19h/P19i: refresh takes the same flag and owes the same two refusals — its own arg loop, so a
+# fix applied to create alone leaves this path executing whatever it is handed
+rc=0; L="$TMP/cpt19h"; : > "$L"; INJ="$TMP/cpt19h.pwned"; rm -f "$INJ"
+run_cpt "$L" NO=1 -- refresh --theme 111 --build-script "build; : > $INJ" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=bad_build_script' "$O" && [ ! -f "$INJ" ] \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19h-refresh-build-script-metachars "rc=$rc pwned=$([ -f "$INJ" ] && echo yes || echo no) out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt19i"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme 111 --build-script nope || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (nope)' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad P19i-refresh-build-script-missing "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # P20 (bug): the project's own credential wins over an ambient $SHOPIFY_CLI_THEME_TOKEN — a token
 # exported for another project would otherwise authenticate this repo's pushes against that store
