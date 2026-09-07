@@ -203,6 +203,10 @@ fi
 # "succeeds" and produces no file (the unreadable-read-back path). TJ_PUSH_SAVE captures the
 # pushed bytes (point TJ_PULL_BODY at it for the round-trip); TJ_PUSH_JSON overrides the
 # --json envelope the push prints. TJ_PULL_FAIL makes every pull fail the way a 503 does.
+# TJ_LIST_FAIL / TJ_PULL_FAIL / TJ_PUSH_FAIL make that call fail: `401` reproduces the CLI's
+# box-drawing auth rejection (a Theme Access token minted for a DIFFERENT store); for list, `reqid`
+# and `ts` are plain failures whose text merely contains the digits 401; anything else is a plain
+# failure (a pull's is the 503 shape).
 path=""; only=""; prev=""
 for a in "$@"; do
   case "$prev" in --path) path="$a" ;; --only) only="$a" ;; esac
@@ -210,13 +214,26 @@ for a in "$@"; do
 done
 case "$*" in
   *"theme list"*)
+    case "${TJ_LIST_FAIL:-}" in
+      '') ;;
+      401) printf '%s\n' '╭─ error ───────────────────────────────╮' \
+                          '│                                       │' \
+                          '│  401 undefined                        │' \
+                          '│                                       │' \
+                          '╰───────────────────────────────────────╯' >&2; exit 1 ;;
+      reqid) echo 'Error: network unreachable (request_id: 7d401ef2-aaaa)' >&2; exit 1 ;;
+      ts)  echo 'Error: push failed at 12:34:56.401 (id ab-401-cd)' >&2; exit 1 ;;
+      *)   echo 'Error: getaddrinfo ENOTFOUND (network unreachable)' >&2; exit 1 ;;
+    esac
     if [ -n "${TJ_LIST_JSON:-}" ]; then printf '%s\n' "$TJ_LIST_JSON"
     else printf '[{"id":2,"name":"Dev","role":"development"}]\n'; fi ;;
   *"theme push"*)
+    [ "${TJ_PUSH_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
     if [ -n "${TJ_PUSH_SAVE:-}" ] && [ -n "$path" ] && [ -n "$only" ]; then cp "$path/$only" "$TJ_PUSH_SAVE"; fi
     pj="${TJ_PUSH_JSON:-}"; [ -n "$pj" ] || pj='{}'
     printf '%s\n' "$pj" ;;
   *"theme pull"*)
+    [ "${TJ_PULL_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
     [ -n "${TJ_PULL_FAIL:-}" ] && { echo "Error: could not pull (503)" >&2; exit 1; }
     n=1
     if [ -n "${TJ_PULL_COUNT:-}" ]; then
@@ -748,6 +765,77 @@ rc=0; TJ_LIST_JSON=' ' SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
 assert T51c-cli-list-empty 5 "$rc" "$E" "error=cli_list_failed"
 rc=0; TJ_LIST_JSON=' ' tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
 assert T51d-cli-list-empty-set 5 "$rc" "$E" "error=cli_list_failed"
+
+# --- themecli failure diagnostics: every cli_*_failed line names the store and the credential's
+# origin; an auth rejection (the CLI's box-drawing "401 undefined") also names the per-store
+# mismatch, since a Theme Access token is minted PER STORE.
+# T53: the toml-token variant — the error line carries both facts and the hint names the mismatch
+rc=0; TOML_PATH="$TT/single.toml" TJ_LIST_FAIL=401 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+assert T53-list-401-error-line 5 "$rc" "$E" "error=cli_list_failed store=acme-dev.myshopify.com token_source=toml"
+if grep -q '^hint=.*PER STORE' "$E" && grep -q "$TT/single.toml" "$E" \
+   && grep -q 'acme-dev.myshopify.com' "$E" && grep -q '401 undefined' "$E"; then ok
+else bad T53b-list-401-hint "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
+# T53d: store and token both out of the toml — the remedy is that toml's password=, not TOML_PATH
+if grep -q 'password= in .*single.toml is not acme-dev.myshopify.com' "$E" && ! grep -q 'TOML_PATH' "$E"; then ok
+else bad T53d-list-401-toml-remedy "err=$(grep '^hint=' "$E" | head -c 400)"; fi
+# T53c: verdict → fix → the CLI's own words; the raw tail is noise until the first two have run
+if [ "$(grep -n 'error=cli_list_failed' "$E" | head -1 | cut -d: -f1)" -lt "$(grep -n '^hint=' "$E" | head -1 | cut -d: -f1)" ] \
+   && [ "$(grep -n '^hint=' "$E" | head -1 | cut -d: -f1)" -lt "$(grep -n '401 undefined' "$E" | head -1 | cut -d: -f1)" ]; then ok
+else bad T53c-list-401-order "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
+
+# T54: any other failure keeps the shape but must NOT claim an auth mismatch — a hint that names
+# the wrong cause is worse than none
+rc=0; TOML_PATH="$TT/single.toml" TJ_LIST_FAIL=other PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+assert T54-list-other-error-line 5 "$rc" "$E" "error=cli_list_failed store=acme-dev.myshopify.com token_source=toml"
+if ! grep -q '^hint=' "$E" && grep -q 'ENOTFOUND' "$E"; then ok
+else bad T54b-list-other-no-hint "err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+
+# T54c: `401` inside a request id is not a status code — the same silence as any other failure
+rc=0; TOML_PATH="$TT/single.toml" TJ_LIST_FAIL=reqid PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+assert T54c-list-reqid-error-line 5 "$rc" "$E" "error=cli_list_failed store=acme-dev.myshopify.com token_source=toml"
+if ! grep -q '^hint=' "$E" && grep -q '7d401ef2' "$E"; then ok
+else bad T54d-list-reqid-no-hint "err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+
+# T54e: a timestamp `.401 ` or a dashed id `-401-` is not a status code either
+rc=0; TOML_PATH="$TT/single.toml" TJ_LIST_FAIL=ts PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+assert T54e-list-ts-error-line 5 "$rc" "$E" "error=cli_list_failed store=acme-dev.myshopify.com token_source=toml"
+if ! grep -q '^hint=' "$E" && grep -q 'ab-401-cd' "$E"; then ok
+else bad T54f-list-ts-no-hint "err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+
+# T55: the env-token variant — the hint has to send the reader to the variable, not to a toml
+rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_LIST_FAIL=401 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store test.myshopify.com >"$O" 2>"$E" || rc=$?
+assert T55-list-401-env-token 5 "$rc" "$E" "error=cli_list_failed store=test.myshopify.com token_source=env"
+if grep -qF 'came from $SHOPIFY_CLI_THEME_TOKEN' "$E" && ! grep -q 'came from .*\.toml' "$E"; then ok
+else bad T55b-list-401-env-hint "err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+# T55c: with --store overriding the toml the remedy is a token for THAT store, TOML_PATH included
+if grep -q 'TOML_PATH pointing at a toml whose store= is test.myshopify.com' "$E"; then ok
+else bad T55c-list-401-override-remedy "err=$(grep '^hint=' "$E" | head -c 400)"; fi
+
+# T59: the same rejection through get's pull and set's push carries the same two facts and the
+# same hint, in the same order, and still exits 5 — the hint helper must never eat the exit
+rc=0; TOML_PATH="$TT/single.toml" TJ_PULL_FAIL=401 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" get --engine themecli --theme 2 --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T59-pull-401-error-line 5 "$rc" "$E" "error=cli_pull_failed theme=2 store=acme-dev.myshopify.com token_source=toml"
+if grep -q '^hint=.*PER STORE' "$E" \
+   && [ "$(grep -n '^hint=' "$E" | head -1 | cut -d: -f1)" -lt "$(grep -n '401 undefined' "$E" | head -1 | cut -d: -f1)" ]; then ok
+else bad T59b-pull-401-hint "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
+rc=0; TOML_PATH="$TT/single.toml" TJ_PUSH_FAIL=401 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --theme 2 --file templates/product.json \
+  --from "$TMP/snap.json" >"$O" 2>"$E" || rc=$?
+assert T59c-push-401-error-line 5 "$rc" "$E" "error=cli_push_failed theme=2 store=acme-dev.myshopify.com token_source=toml"
+if grep -q '^hint=.*PER STORE' "$E" && grep -q '401 undefined' "$E"; then ok
+else bad T59d-push-401-hint "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
+# T59e: a pull that fails for any other reason names the facts and stays silent on auth
+rc=0; TOML_PATH="$TT/single.toml" TJ_PULL_FAIL=1 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" get --engine themecli --theme 2 --file templates/product.json >"$O" 2>"$E" || rc=$?
+assert T59e-pull-503-error-line 5 "$rc" "$E" "error=cli_pull_failed theme=2 store=acme-dev.myshopify.com token_source=toml"
+if ! grep -q '^hint=' "$E"; then ok; else bad T59f-pull-503-no-hint "err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+
 unset FND_THEME_JSON_VERIFY_WAIT
 
 # T49: themecli `get` — a pull of exactly the named file into a private dir, whose body reaches
@@ -882,6 +970,60 @@ for tf in --env --api-version; do
   assert "T52b-need-val[$tf]" 2 "$rc" "$E" "error=missing_value flag=$tf"
   if [ ! -s "$TJA" ]; then ok; else bad "T52b-no-engine[$tf]" "the runner ran before the usage error"; fi
 done
+
+# --- --help: `--help` / `-h` answers the call shape without a store, a runner or a parse — bare,
+# after a command, and among a command's args ---------------------------------------------------
+for ha in --help -h; do
+  rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" "$ha" >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q 'theme-json.sh get  --theme' "$O" && [ ! -s "$E" ]; then ok
+  else bad "T56-help[$ha]" "rc=$rc out=$(head -c 120 "$O") err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+done
+# T56b: …and after a command too, which is where a model reaches for it
+for hc in "get --help" "set -h" "themes --help"; do
+  rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" $hc >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q 'theme-json.sh get  --theme' "$O"; then ok
+  else bad "T56b-help[$hc]" "rc=$rc out=$(head -c 120 "$O") err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+done
+# T56c: --help among a command's other args is still a usage question — no store is ever touched
+rc=0; : > "$TJA"; TJ_GQL_LOG="$TJA" "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 \
+  --file templates/product.json --help >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'theme-json.sh get  --theme' "$O" && [ ! -s "$TJA" ]; then ok
+else bad T56c-help-mid-args "rc=$rc argv=$(tr '\n' ';' < "$TJA") out=$(head -c 120 "$O")"; fi
+
+# T57 (drift guard): --help prints the header's own `# Usage:` block. Two hand-maintained copies
+# of a call shape are two copies free to disagree, and the header is the one a reader lands on.
+TJH="$TMP/tj-usage-header"
+awk '/^# Usage:/ { f = 1 } f { if ($0 == "#" || $0 !~ /^#( |$)/) exit; sub(/^# ?/, ""); print }' \
+  "$TJ" > "$TJH"
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" --help >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(wc -l < "$TJH" | tr -d ' ')" -eq 6 ] && sed '$d' "$O" | diff -q - "$TJH" >/dev/null; then ok
+else bad T57-help-matches-header "rc=$rc diff=$(sed '$d' "$O" | diff - "$TJH" | head -c 300 | tr '\n' ';')"; fi
+# T57b: the pointer line that follows it names where the full contract lives
+if [ "$(tail -1 "$O")" = "Full contract: the header of $TJDIR/theme-json.sh" ]; then ok
+else bad T57b-help-pointer "tail=$(tail -1 "$O")"; fi
+# T57c: the reference's copy of the three command lines is the same text (the third copy)
+TJR="$ROOT/plugins/fnd/references/theme-customizer-state.md"
+if [ "$(grep -c '^theme-json.sh \(themes\|get\|set\) ' "$TJR")" -eq 3 ] \
+   && grep '^theme-json.sh \(themes\|get\|set\) ' "$TJR" | diff -q - <(grep '^  theme-json.sh ' "$TJH" | sed 's/^  //') >/dev/null; then ok
+else bad T57c-reference-matches-usage "diff=$(grep '^theme-json.sh ' "$TJR" | diff - <(sed 's/^  //' "$TJH" | grep '^theme-json.sh ') | head -c 300 | tr '\n' ';')"; fi
+# T57d: the unknown_arg trailer lists every flag the parser accepts — a `--foo)` arm added above
+# without a trailer update would leave the refusal lying about the accepted set
+TJF="$(awk '/^while \[ \$# -gt 0 \]; do/ { f = 1 } f && /^done/ { exit } f && match($0, /^ *--[a-z-]+\)/) { s = substr($0, RSTART, RLENGTH); sub(/^ */, "", s); sub(/\)$/, "", s); print s }' "$TJ")"
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" get --bogus >"$O" 2>"$E" || rc=$?
+missing=""; n=0
+for fl in $TJF; do n=$((n + 1)); grep -q -- "flags:.* $fl\( \|;\)" "$E" || missing="$missing $fl"; done
+if [ "$n" -ge 10 ] && [ -z "$missing" ]; then ok; else bad T57d-trailer-lists-flags "n=$n missing=[$missing] err=$(head -c 200 "$E")"; fi
+
+# T58: the refusals name the way out — a guessed flag has to self-correct in one step
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" bogus >"$O" 2>"$E" || rc=$?
+assert T58-unknown-command-trailer 2 "$rc" "$E" "error=unknown_command cmd='bogus' (use themes|get|set; --help prints usage)"
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" get --key sections >"$O" 2>"$E" || rc=$?
+assert T58b-unknown-arg-trailer 2 "$rc" "$E" "error=unknown_arg arg=--key (flags: --theme --file"
+if grep -q -- '--file' "$E" && grep -q -- '--help prints usage' "$E"; then ok
+else bad T58c-unknown-arg-names-flags "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# T58d: a positional path takes the same one-line correction
+rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 templates/product.json >"$O" 2>"$E" || rc=$?
+assert T58d-positional-refused 2 "$rc" "$E" "error=unknown_arg arg=templates/product.json (flags: --theme --file"
 
 # ------------------------------------- shopify-admin-gql.sh against PATH shims --
 SHIM="$TMP/shim"; mkdir -p "$SHIM"

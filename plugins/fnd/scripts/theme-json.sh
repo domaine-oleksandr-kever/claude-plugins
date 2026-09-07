@@ -71,6 +71,10 @@
 # Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
 #          [--api-version <v>]   (store domain defaults from shopify.theme.toml)
 #
+# `--help` / `-h` — bare or anywhere in a command's args — prints that Usage block to stdout and
+# exits 0, ahead of the lib/runner/jq checks so a usage question cannot die on a broken install.
+# Matched positionally, so a flag VALUE of `-h` reads as a usage question too.
+#
 # --file is a path INSIDE the theme, vetted before any engine runs: it must start with a theme
 # top-level dir (assets|blocks|config|layout|locales|sections|snippets|templates) and carry no
 # absolute, `~`, `.`/`..` or empty segment (`error=bad_file`, exit 2). `set` narrows that to the
@@ -98,11 +102,34 @@
 # the FULL envelope at a `log=<path>` mktemp (plus a scope hint when it looks like a missing
 # read_themes/write_themes grant).
 # Exit: 0 ok · 2 usage · 4 live-theme write refused · 5 GraphQL/user/CLI errors (on themecli also
-# `cli_list_failed` — the listing was empty or unparseable — and `live_role_unreadable` — the theme
-# is listed but carries no role, so the live guard cannot clear it) · 3 no engine credentials at
+# `cli_list_failed` — the listing failed, was empty or was unparseable — and `live_role_unreadable`
+# — the theme is listed but carries no role, so the live guard cannot clear it; every themecli
+# failure line — `cli_list_failed`, `cli_pull_failed`, `cli_push_failed` — carries
+# `store=<domain> token_source=<env|toml>`, and one whose stderr reads as an auth rejection adds
+# one `hint=` line naming the per-store nature of the Theme Access token, ahead of the CLI's own
+# stderr tail) · 3 no engine credentials at
 # all (hints name every remedy) · 6 the write reported success but the theme does not serve the
 # payload (read-back mismatch, or the read-back itself failed — state unconfirmed).
 set -euo pipefail
+
+# The `# Usage:` block above, verbatim — the suite pins it to the header and to the copy in
+# references/theme-customizer-state.md: the header is the human-readable contract, this is what
+# `--help` prints.
+USAGE='Usage:
+  theme-json.sh themes [--role main|development|unpublished|live|demo]
+  theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>] [--strip-comments]
+  theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
+Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
+         [--api-version <v>]   (store domain defaults from shopify.theme.toml)'
+
+# Answered before the install checks below: "how do I call this" must not depend on a runner, jq or
+# the shared lib being in place — the checks still gate every real command.
+for _a in ${1+"$@"}; do
+  case "$_a" in
+    --help|-h) printf '%s\n' "$USAGE" "Full contract: the header of $0"; exit 0 ;;
+  esac
+done
+unset _a
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 [ -f "$SCRIPT_DIR/_shopify-common.sh" ] || { echo "error=common_lib_not_found path=$SCRIPT_DIR/_shopify-common.sh" >&2; exit 2; }
@@ -112,7 +139,7 @@ RUNNER="$SCRIPT_DIR/shopify-admin-gql.sh"
 command -v jq >/dev/null 2>&1 || { echo "error=jq_not_found" >&2; exit 2; }
 
 CMD="${1:-}"; [ $# -gt 0 ] && shift
-case "$CMD" in themes|get|set) ;; *) echo "error=unknown_command cmd='$CMD' (use themes|get|set)" >&2; exit 2 ;; esac
+case "$CMD" in themes|get|set) ;; *) echo "error=unknown_command cmd='$CMD' (use themes|get|set; --help prints usage)" >&2; exit 2 ;; esac
 
 THEME=""; FILE=""; OUT=""; FROM=""; ROLE_FILTER=""; STRIP=0
 ENGINE="auto"; STORE_ARG=""; ENV_ARG=""; APIV_ARG=""
@@ -132,7 +159,9 @@ while [ $# -gt 0 ]; do
     --store)  need_val $# "$1"; STORE_ARG="$2"; shift 2 ;;
     --env)    need_val $# "$1"; ENV_ARG="$2"; shift 2 ;;
     --api-version) need_val $# "$1"; APIV_ARG="$2"; shift 2 ;;
-    *) echo "error=unknown_arg arg=$1" >&2; exit 2 ;;
+    # no positional is accepted either — naming the real flags is what turns a guessed `--key`
+    # (or a bare path where --file belongs) into a one-step correction
+    *) echo "error=unknown_arg arg=$1 (flags: --theme --file --out --from --role --strip-comments --store --engine --env --api-version; --help prints usage)" >&2; exit 2 ;;
   esac
 done
 case "$ENGINE" in auto|store|token|themecli) ;; *) echo "error=invalid_engine engine=$ENGINE (use auto|store|token|themecli)" >&2; exit 2 ;; esac
@@ -536,11 +565,11 @@ gql_set() {
 }
 
 # ----------------------------------------------------------- themecli engine --
-DOMAIN=""
+DOMAIN=""; DOMAIN_SOURCE=""
 resolve_domain() {
-  local s="$STORE_ARG"
-  [ -z "$s" ] && s="${SHOPIFY_STORE:-}"
-  if [ -z "$s" ]; then s="$(toml_value store)" || true; fi
+  local s="$STORE_ARG"; DOMAIN_SOURCE="arg"
+  if [ -z "$s" ]; then s="${SHOPIFY_STORE:-}"; DOMAIN_SOURCE="env"; fi
+  if [ -z "$s" ]; then s="$(toml_value store)" || true; DOMAIN_SOURCE="toml"; fi
   [ -n "$s" ] || { echo "error=no_store (pass --store or set store= in $TOML)" >&2; exit 2; }
   s="$(store_handle "$s")" \
     || { echo "error=invalid_store store='$s' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL)" >&2; exit 2; }
@@ -548,13 +577,44 @@ resolve_domain() {
 }
 
 # Theme Access token: env wins, else shopify.theme.toml (password=, else first shp*_…).
-# Read internally and exported ONLY for the `shopify` subprocess — never printed.
+# Read internally and exported ONLY for the `shopify` subprocess — never printed. WHERE it came
+# from is (see cli_auth_hint) the whole diagnosis of a 401, and it is recorded ONCE: the toml
+# branch EXPORTS the token, so a later call would otherwise re-report it as env.
+CLI_TOKEN_SOURCE=""
 cli_token_ready() {
-  [ -n "${SHOPIFY_CLI_THEME_TOKEN:-}" ] && return 0
+  if [ -n "${SHOPIFY_CLI_THEME_TOKEN:-}" ]; then
+    [ -n "$CLI_TOKEN_SOURCE" ] || CLI_TOKEN_SOURCE="env"
+    return 0
+  fi
   local t
   t="$(theme_token_from_toml)"
   [ -n "$t" ] || return 1
+  CLI_TOKEN_SOURCE="toml"
   export SHOPIFY_CLI_THEME_TOKEN="$t"
+}
+
+# A Theme Access token is minted PER STORE, so the CLI's auth rejection (a box-drawing frame around
+# "401 undefined" or "Invalid API key or access token") almost always means token-vs-store mismatch,
+# not a broken token — the one thing its raw output never says. A status code stands alone between
+# whitespace (or a line edge): a request id (`7d401ef2`, `ab-401-cd`) or a timestamp (`56.401`) is
+# not one, and `\b` is a GNU extension outside POSIX ERE.
+cli_auth_rejected() { # $1 = file holding the CLI's stderr
+  grep -qiE '(^|[[:space:]])401([[:space:]]|$)|unauthorized|invalid api key or access token' "$1"
+}
+# The remedy follows where the two halves came from: store and token both out of the toml means
+# that toml's password= is simply not this store's; a --store/SHOPIFY_STORE override means the toml
+# (or the env token) was minted for a different store than the one asked for.
+cli_auth_hint() { # $1 = file holding the CLI's stderr — one hint line, only when it IS an auth 401
+  cli_auth_rejected "$1" || return 0
+  local src fix
+  if [ "$CLI_TOKEN_SOURCE" = "toml" ]; then src="$TOML"; else src="\$SHOPIFY_CLI_THEME_TOKEN"; fi
+  if [ "$CLI_TOKEN_SOURCE" = "toml" ] && [ "$DOMAIN_SOURCE" = "toml" ]; then
+    fix="the password= in $TOML is not $DOMAIN's — mint $DOMAIN's own Theme Access password (Shopify admin → Apps → Theme Access) and put it there, or export it as SHOPIFY_CLI_THEME_TOKEN"
+  else
+    fix="export SHOPIFY_CLI_THEME_TOKEN with $DOMAIN's own Theme Access password, or run with TOML_PATH pointing at a toml whose store= is $DOMAIN and whose password= belongs to it"
+  fi
+  echo "hint=a Theme Access token is minted PER STORE — this one came from $src and the request went to $DOMAIN, so a token belonging to any other store cannot authenticate it: $fix" >&2
+  return 0
 }
 
 prep_cli() {
@@ -575,7 +635,11 @@ cli_list() {
   local err rc=0; err="$(mktemp)"; CLEAN+=("$err")
   CLI_LIST="$(shopify theme list --store "$DOMAIN" --json --no-color 2>"$err" | theme_list_trim)" || rc=$?
   if [ "$rc" -ne 0 ] || [ -z "$CLI_LIST" ] || ! printf '%s' "$CLI_LIST" | jq empty >/dev/null 2>&1; then
-    echo "error=cli_list_failed" >&2; tail -5 "$err" >&2; exit 5
+    # verdict, then the fix, then the CLI's own words — the raw box-drawing tail reads as noise
+    # until the two lines above have said which store and which credential produced it
+    echo "error=cli_list_failed store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2
+    cli_auth_hint "$err"
+    tail -5 "$err" >&2; exit 5
   fi
 }
 
@@ -592,7 +656,7 @@ cli_get() {
   tmp="$(mktemp -d)"; err="$(mktemp)"; CLEAN+=("$tmp" "$err")
   shopify theme pull --store "$DOMAIN" --theme "$nid" --path "$tmp" \
       --only "$FILE" --nodelete --no-color >/dev/null 2>"$err" \
-    || { echo "error=cli_pull_failed theme=$nid" >&2; tail -5 "$err" >&2; exit 5; }
+    || { echo "error=cli_pull_failed theme=$nid store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2; cli_auth_hint "$err"; tail -5 "$err" >&2; exit 5; }
   [ -f "$tmp/$FILE" ] || { echo "error=file_not_found file=$FILE theme=$nid (engine=themecli)" >&2; exit 5; }
   emit_file "$tmp/$FILE"
 }
@@ -644,7 +708,7 @@ cli_set() {
   cp "$FROM" "$tmp/$FILE"
   out="$(shopify theme push --store "$DOMAIN" --theme "$nid" --path "$tmp" \
       --only "$FILE" --nodelete --json --no-color 2>"$err")" \
-    || { echo "error=cli_push_failed theme=$nid" >&2; tail -8 "$err" >&2; exit 5; }
+    || { echo "error=cli_push_failed theme=$nid store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2; cli_auth_hint "$err"; tail -8 "$err" >&2; exit 5; }
   cli_push_report "$out" "$nid"
   # rc 0 is the transport's opinion, not the server's — read it back (exits 6 when it did not land)
   if [ "$VERIFY" -eq 1 ]; then
