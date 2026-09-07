@@ -68,17 +68,37 @@ const assertContains = (label, hay, needle) =>
 const assertAbsent = (label, hay, needle) =>
   (String(hay).includes(needle) ? bad(label, `unexpected: ${needle}`) : ok());
 
-// Node only detects ESM syntax in an extension-less-config .js file from 22.12 on; older
-// runtimes parse it as CommonJS and throw. A .mjs SYMLINK gets the right parse without a
-// copy — Node resolves symlinks before setting import.meta.url, so the plugin root the
-// module derives from it still points into the repo.
+// Node only detects ESM syntax in a .js file with no package.json from 22.7 on; older runtimes
+// parse it as CommonJS and throw. OpenCode loads the adapter under Bun, where the extension is
+// moot, so the shipped file stays .js and the harness adapts: a mirror of the plugin root in TMP
+// whose every entry is a symlink to the real one, except opencode/, a real directory holding the
+// adapter copied as .mjs. (A symlink named .mjs would not do — Node picks the format from the
+// resolved real path.) The module derives its root from import.meta.url, so it sees the mirror
+// and reaches the real hooks/ and scripts/ through the links.
+const PLUGIN_DIR = path.dirname(path.dirname(PLUGIN_FILE));
+let mirrorFile = null;
+function mirroredPlugin() {
+  if (mirrorFile) return mirrorFile;
+  const mirror = path.join(TMP, 'mirror');
+  fs.mkdirSync(path.join(mirror, 'opencode'), { recursive: true });
+  for (const entry of fs.readdirSync(PLUGIN_DIR)) {
+    if (entry === 'opencode') continue;
+    fs.symlinkSync(path.join(PLUGIN_DIR, entry), path.join(mirror, entry));
+  }
+  for (const entry of fs.readdirSync(path.dirname(PLUGIN_FILE))) {
+    if (entry === path.basename(PLUGIN_FILE)) continue;
+    fs.symlinkSync(path.join(path.dirname(PLUGIN_FILE), entry), path.join(mirror, 'opencode', entry));
+  }
+  mirrorFile = path.join(mirror, 'opencode', 'fnd-plugin.mjs');
+  fs.copyFileSync(PLUGIN_FILE, mirrorFile);
+  return mirrorFile;
+}
+// Any import failure retries through the mirror: the mirror's own error is the one reported.
 async function loadModule() {
   try {
     return await import(pathToFileURL(PLUGIN_FILE).href);
   } catch (_) {
-    const link = path.join(TMP, 'fnd-plugin.mjs');
-    try { fs.symlinkSync(PLUGIN_FILE, link); } catch (_) {}
-    return import(pathToFileURL(link).href);
+    return import(pathToFileURL(mirroredPlugin()).href);
   }
 }
 
@@ -458,16 +478,15 @@ delete process.env.FND_CTX_MONITOR;
 {
   const xdg = path.join(TMP, 'ht-xdg'); // an XDG root with no domaine/env in it
   fs.mkdirSync(xdg, { recursive: true });
-  // Same symlink dance as loadModule(): a .js adapter is parsed as ESM only from Node 22.12 on.
-  const link = path.join(TMP, 'fnd-plugin.mjs');
-  try { fs.symlinkSync(PLUGIN_FILE, link); } catch (_) {}
+  // Same fallback as loadModule(): the child runs on this process's Node, so the mirror exists
+  // exactly when loadModule() needed it — an empty path here means the .js import will succeed
   const driver = path.join(TMP, 'ht-driver.mjs');
   fs.writeFileSync(driver, [
     "import { pathToFileURL } from 'node:url';",
     "const [, , file, dir, role] = process.argv;",
     "let mod;",
     "try { mod = await import(pathToFileURL(file).href); }",
-    `catch (_) { mod = await import(pathToFileURL(${JSON.stringify(link)}).href); }`,
+    `catch (_) { mod = await import(pathToFileURL(${JSON.stringify(mirrorFile || '')}).href); }`,
     "const plugin = await mod.FndPlugin({ directory: dir });",
     "const parts = [{ type: 'text', text: 'hello there' }];",
     "await plugin['chat.message']({ sessionID: 'ht1' },",
