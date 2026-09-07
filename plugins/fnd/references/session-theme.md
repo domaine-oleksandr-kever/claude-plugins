@@ -108,7 +108,8 @@ a multi-environment toml the script still reads the file's first uncommented lin
 can differ; `refresh` is unaffected either way.
 
 - **Never `Read` or print that file, or any line of it** — the Theme Access token lives two
-  lines away. Report only the path and the id the script returned.
+  lines away. Report only the id the script returned; the path is the config the caller pointed
+  the script at (`TOML_PATH`, else `shopify.theme.toml` in the cwd).
 - Pin outcomes — `pin=failed` + `pin_error=` on a `create`/`refresh` (non-fatal: the theme
   stands, keep the explicit `--theme <id>`), the refusals under a silent store listing
   (`theme_unverifiable`, `refresh_unverifiable`, `reuse_unverifiable`, `warn=pin_unvetted`), the

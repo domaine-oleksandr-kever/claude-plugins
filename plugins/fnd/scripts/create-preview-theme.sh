@@ -67,7 +67,7 @@
 #         outage: the pin still proceeds when the run did — refresh for a recorded session theme or
 #         with --allow-unverified, --reuse only with the flag; otherwise refresh_unverifiable /
 #         reuse_unverifiable — and is flagged warn=pin_unvetted.)
-#       → theme_id=… store=… pinned_toml=… pin=… pin_env=… commented_dupes=… [superseded_theme_id=…]
+#       → theme_id=… store=… pin=… pin_env=… commented_dupes=… [superseded_theme_id=…]
 #
 #   --allow-unverified  (create & refresh) — overrides `refresh_unverifiable` and `reuse_unverifiable`
 #       ONLY: a `theme list` that never answered no longer blocks a `refresh --theme <ID>` of an id no
@@ -88,8 +88,8 @@
 #   --ignore-extra "<glob>"  (create & refresh, repeatable) — extra `--ignore` pattern passed
 #       through to `shopify theme push`, for a file inside a theme dir that must not ship.
 #   --pin-toml  (create & refresh) — after the push succeeds, pin the resulting theme id into
-#       the toml (see `pin`) and add `pinned_toml=… pin=… pin_env=… commented_dupes=…
-#       [superseded_theme_id=…]` to the output; on failure only `pinned_toml=`, `pin=failed`,
+#       the toml (see `pin`) and add `pin=… pin_env=… commented_dupes=…
+#       [superseded_theme_id=…]` to the output; on failure only `pin=failed` and
 #       `pin_error=…` are printed. A pin failure here is reported but never fails the run: the
 #       theme exists by then and a caller that lost its id cannot clean it up. When `theme list`
 #       gave no readable answer the pin still proceeds when the run did: refresh for a recorded
@@ -898,12 +898,10 @@ pin_toml() { # $1 = theme id → 0 + PIN_ACTION=rewritten|appended|unchanged; 1 
 # have the theme id in hand before it learns anything about the toml.
 PIN=0; PIN_ENV=""; PIN_FAIL=""
 print_pin_keys() {
-  [ -n "$PIN_PATH" ] || resolve_pin_path
   # `theme list` never gave a readable answer, so the pinned id could not be vetted against the
   # store — said BEFORE the pin keys, so a caller acting on pin= has already seen it. Standalone
   # `pin` refuses that state outright (error=theme_unverifiable) and never reaches this line.
   [ "$THEME_LIST_OK" -eq 1 ] || printf 'warn=pin_unvetted\n'
-  printf 'pinned_toml=%s\n' "$PIN_PATH"
   if [ -n "$PIN_FAIL" ]; then
     printf 'pin=failed\n'
     printf 'pin_error=%s\n' "$PIN_FAIL"

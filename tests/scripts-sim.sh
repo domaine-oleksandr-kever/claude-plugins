@@ -9,12 +9,13 @@ set -u
 # before/after directory diffs below read as an unexpected spill. Every case that needs either switch
 # sets it explicitly on the invocation. The store/token vars are unset for the same reason and one
 # more: both are read as an escape hatch by the scripts under test, so an exported real token would
-# reach the fake CLI (and the case's argv log) instead of the fixture value. Same for the two switches
-# README tells developers to keep in settings.json → "env" (which Claude Code exports to the Bash
-# tool): FND_GQL_PROBE_CACHE=0 turns the probe-cache cases red, and an ambient TOML_PATH re-targets
-# every case that relies on the repo fixture toml.
+# reach the fake CLI (and the case's argv log) instead of the fixture value; SHOPIFY_ADMIN_API_VERSION
+# is the same kind of hatch, and its whole point is to displace the default version G47c pins. Same
+# for the two switches README tells developers to keep in settings.json → "env" (which Claude Code
+# exports to the Bash tool): FND_GQL_PROBE_CACHE=0 turns the probe-cache cases red, and an ambient
+# TOML_PATH re-targets every case that relies on the repo fixture toml.
 unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR SHOPIFY_CLI_THEME_TOKEN SHOPIFY_STORE \
-      FND_GQL_PROBE_CACHE TOML_PATH
+      FND_GQL_PROBE_CACHE TOML_PATH SHOPIFY_ADMIN_API_VERSION
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GQL="$ROOT/plugins/fnd/scripts/shopify-admin-gql.sh"
@@ -61,11 +62,11 @@ cp "$COMMON" "$TJDIR/"   # sourced from the script's own dir — every fixture c
 cat > "$TJDIR/shopify-admin-gql.sh" <<'STUB'
 #!/usr/bin/env bash
 # stub runner — answers by query content; FAKE_ROLE controls the theme role,
-# FAKE_RUNNER_MODE simulates the runner's exit-3 stderr contracts. TJ_GQL_LOG records that the
-# runner was reached at all — the --file vetting cases assert the OPPOSITE (nothing was read or
-# written), and "no output" alone would also be what a broken stub looks like.
+# FAKE_RUNNER_MODE simulates the runner's exit-3 stderr contracts. TJ_GQL_LOG records one argv line
+# per call — the --file vetting cases assert the OPPOSITE (nothing was read or written), and "no
+# output" alone would also be what a broken stub looks like; T52 reads the line itself.
 set -u
-if [ -n "${TJ_GQL_LOG:-}" ]; then printf 'call\n' >> "$TJ_GQL_LOG"; fi
+if [ -n "${TJ_GQL_LOG:-}" ]; then printf '%s\n' "$*" >> "$TJ_GQL_LOG"; fi
 case "${FAKE_RUNNER_MODE:-ok}" in
   mutfail) echo "error=store_execute_failed_mutation (stub)" >&2; exit 3 ;;
   nocreds) echo "error=no_admin_token" >&2; exit 3 ;;
@@ -771,7 +772,7 @@ else bad T49d-cli-get-pull-failed-tail "err=$(head -c 160 "$E" | tr '\n' ' ') ou
 # and on BOTH engines a `set --file assets/… --from ~/.ssh/id_rsa` published a local secret on the
 # theme's public CDN. The gate runs at dispatch, before any engine, which is what the
 # runner/CLI-untouched half of each case pins: a refusal that already spoke to the store is not a
-# refusal. TJ_GQL_LOG only ever records the gql runner being REACHED, never a query.
+# refusal — an empty TJ_GQL_LOG is that assertion.
 TJV="$TMP/tjvet"; mkdir -p "$TJV"
 tjv_run() { # <label> <want-rc> <stderr-key> — rest is the theme-json.sh argv
   local label="$1" want="$2" key="$3"; shift 3
@@ -855,6 +856,20 @@ tjv_from_at T48p2-from-symlink-chain 2 error=from_file_refused "$FAKEHOME" \
 cp "$TMP/snap.json" "$FAKEHOME/good.json"
 tjv_from_at T48q-from-relative-ok 0 '"ok":"upserted"' "$FAKEHOME" \
   set --theme 2 --file templates/product.json --from good.json
+
+# T52: --env and --api-version do nothing in this script beyond reaching the runner — arriving in
+# any other spelling silently drops the caller's non-default env file or API version
+TJA="$TMP/tj-argv"; : > "$TJA"
+rc=0; TJ_GQL_LOG="$TJA" "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file templates/product.json \
+  --store test.myshopify.com --env alt.env --api-version 2099-01 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q -- '--env alt.env' "$TJA" && grep -q -- '--api-version 2099-01' "$TJA"; then ok
+else bad T52-runner-flags-forwarded "rc=$rc argv=$(tr '\n' ';' < "$TJA") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# T52b: and each takes a value, so as the last arg it hits need_val before the runner is reached
+for tf in --env --api-version; do
+  rc=0; : > "$TJA"; TJ_GQL_LOG="$TJA" "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 "$tf" >"$O" 2>"$E" || rc=$?
+  assert "T52b-need-val[$tf]" 2 "$rc" "$E" "error=missing_value flag=$tf"
+  if [ ! -s "$TJA" ]; then ok; else bad "T52b-no-engine[$tf]" "the runner ran before the usage error"; fi
+done
 
 # ------------------------------------- shopify-admin-gql.sh against PATH shims --
 SHIM="$TMP/shim"; mkdir -p "$SHIM"
@@ -1487,6 +1502,25 @@ else bad G46h-connect-failure-no-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; f
 rc=0; FAKE_CURL_RC=28 run_gql --engine token --query multi.graphql --operation FndB >"$O" 2>"$E" || rc=$?
 if grep -q 'hint=the mutation may already have been applied' "$E"; then ok
 else bad G46g-selected-mutation-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# G47: --api-version is the per-call way to a non-default Admin API version (SHOPIFY_ADMIN_API_VERSION
+# is the ambient one), and each engine spells it somewhere else — the URL path for curl, `--version` on the CLI argv
+A47="$TMP/curl-argv47"; : > "$A47"
+rc=0; CURL_ARGV="$A47" run_gql --engine token --api-version 2099-01 --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '/admin/api/2099-01/graphql.json' "$A47"; then ok
+else bad G47-token-api-version "rc=$rc argv=$(tr '\n' ';' < "$A47")"; fi
+L47="$TMP/sl47"; : > "$L47"
+rc=0; GQL_LOG="$L47" FAKE_EXEC_MODE=ok \
+  run_gql --engine store --api-version 2099-01 --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q -- '--version 2099-01' "$L47"; then ok
+else bad G47b-store-api-version "rc=$rc calls=$(tr '\n' ';' < "$L47")"; fi
+# G47c: with neither the flag nor SHOPIFY_ADMIN_API_VERSION the request still names a version —
+# an empty segment there is a 404 on every call
+A47C="$TMP/curl-argv47c"; : > "$A47C"
+DEFV="$(sed -n 's/^API_VERSION="${SHOPIFY_ADMIN_API_VERSION:-\(.*\)}"$/\1/p' "$GQL")"
+rc=0; CURL_ARGV="$A47C" run_gql --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ -n "$DEFV" ] && grep -q "/admin/api/$DEFV/graphql.json" "$A47C"; then ok
+else bad G47c-default-api-version "rc=$rc default=$DEFV argv=$(tr '\n' ';' < "$A47C")"; fi
 
 # ---------------------------------------- create-preview-theme.sh cap classifier --
 CAP_RE='theme limit|maximum number of themes|too many themes|may only have [0-9]+ themes'
@@ -2569,15 +2603,16 @@ PIN_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":222,"name"
 fhash() { cksum < "$1"; }
 
 # P29 (pin): the FIRST uncommented `theme =` line takes the session id — the VALUE only, with the
-# line's spacing and trailing comment intact — and nothing is pushed. The file two lines down
-# holds the Theme Access token: it must survive untouched and never reach the output.
+# line's spacing and trailing comment intact — and nothing is pushed. The config's own path is
+# not echoed back: the caller passed it in. The file two lines down holds the Theme Access
+# token: it must survive untouched and never reach the output.
 F="$CPTD/toml/pin-basic.toml"
 printf '# session config\n[environments.development]\nstore = "acme-dev"\ntheme = "111"   # dev theme\npassword = "shptka_fixture1234"\n' > "$F"
 rc=0; L="$TMP/cpt29"; : > "$L"
 run_cpt "$L" TOML_PATH="$F" FAKE_LIST="$PIN_LIST" -- pin --theme 222 || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^pin=rewritten$' "$O" \
    && grep -q '^pin_env=development$' "$O" \
-   && grep -q '^commented_dupes=0$' "$O" && grep -q '^pinned_toml=/.*pin-basic\.toml$' "$O" \
+   && grep -q '^commented_dupes=0$' "$O" && ! grep -q '^pinned_toml=' "$O" \
    && grep -qx 'theme = "222"   # dev theme' "$F" \
    && [ "$(grep -c 'shptka_fixture1234' "$F")" -eq 1 ] && ! grep -q 'shptka' "$O" "$E" \
    && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ] && [ "$(cpt_calls 'theme pull' "$L")" -eq 0 ]; then ok
@@ -2783,7 +2818,7 @@ rc=0; L="$TMP/cpt37b"; : > "$L"
 run_cpt "$L" TOML_PATH="$FO" FAKE_LIST_FAIL=1 -- refresh --theme 222 --no-build --pin-toml --allow-unverified || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^warn=pin_unvetted$' "$O" \
    && grep -q '^pin=rewritten$' "$O" && grep -qx 'theme = "222"' "$FO" \
-   && [ "$(grep -n '^warn=pin_unvetted$' "$O" | cut -d: -f1)" -lt "$(grep -n '^pinned_toml=' "$O" | cut -d: -f1)" ]; then ok
+   && [ "$(grep -n '^warn=pin_unvetted$' "$O" | cut -d: -f1)" -lt "$(grep -n '^pin=' "$O" | head -1 | cut -d: -f1)" ]; then ok
 else bad P37b-pin-toml-outage-unvetted "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FO" | tr '\n' ';')"; fi
 
 # P38 (pin): a Windows-edited config keeps its CRLF endings — a rewrite that dropped the CR on
@@ -2838,7 +2873,7 @@ rc=0; L="$TMP/cpt41"; : > "$L"
 run_cpt "$L" TOML_PATH="$FCR" -- create --name "PREVIEW-PIN" --no-build --pin-toml || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^pin=rewritten$' "$O" \
    && grep -qx 'theme = "222"' "$FCR" \
-   && [ "$(grep -n '^theme_id=' "$O" | cut -d: -f1)" -lt "$(grep -n '^pin=' "$O" | cut -d: -f1)" ]; then ok
+   && [ "$(grep -n '^theme_id=' "$O" | cut -d: -f1)" -lt "$(grep -n '^pin=' "$O" | head -1 | cut -d: -f1)" ]; then ok
 else bad P41-create-pin-toml "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FCR" | tr '\n' ';')"; fi
 
 # P41b (bug): `create --pin-toml` used to pin whatever `--json` handed back, unvetted. A
@@ -4084,6 +4119,20 @@ else bad W17-outside-repo "rc=$rc leak='$wt_leak' plug=$wt_plug_leak out=$(head 
 rc=0; wt_run || rc=$?
 if [ "$rc" -eq 1 ] && grep -q '^error=usage: worktree-setup.sh' "$O"; then ok
 else bad W18-usage "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# W18b: -h and --help print that same line on STDOUT and exit 0 — without their own arm the `-*`
+# guard would refuse them as an unknown arg (exit 1), so asking for help would look like a failure
+wt_wt_count_before="$(wt_git -C "$WTR/theme" worktree list | wc -l | tr -d ' ')"
+for hf in -h --help; do
+  rc=0; wt_run "$hf" || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q '^usage: worktree-setup.sh <WORK-ID>' "$O" && [ ! -s "$E" ] \
+     && [ "$(wt_git -C "$WTR/theme" worktree list | wc -l | tr -d ' ')" = "$wt_wt_count_before" ]; then ok
+  else bad "W18b-help[$hf]" "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+done
+# W18c: the match is exact — a near miss is an unknown flag (W8b's path), not silent help
+rc=0; wt_run --helpme ABC-9 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=unknown arg: --helpme' "$O" && [ ! -e "$WTR/theme-ABC-9" ]; then ok
+else bad W18c-near-miss-flag "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
 
 # W19 (bug): the hand-off line is pasted into a shell verbatim. Unquoted, a repo under a path
 # with a space makes `cd` a three-argument call — it errors, `claude` then starts in whatever
