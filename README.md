@@ -56,7 +56,8 @@ in its own subfolder under `plugins/`:
 │       │   ├── review-flow.md    #  shared contract for the review/marker flow
 │       │   ├── host-model-map.md #  GENERATED — tier → model, per host
 │       │   └── ...
-│       ├── rules/                # Cursor rule bundle (vendored foundation .mdc + fnd rules)
+│       ├── rules/                # Cursor rule bundle (vendored foundation .mdc + fnd rules,
+│       │                         #   the fnd-* session conventions GENERATED from hooks/)
 │       ├── agents-cursor/        # GENERATED per-host agent variants — never hand-edit;
 │       ├── agents-codex/         #   change agents/ (or the generator) and re-run
 │       ├── agents-opencode/      #   scripts/gen-host-adapters.cjs

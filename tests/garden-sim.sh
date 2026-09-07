@@ -290,6 +290,15 @@ for want in "macos-latest" "ubuntu-latest" "actions/checkout" "actions/setup-nod
   else bad "ci-workflow-content" "tests.yml does not mention: $want"; fi
 done
 
+# The Node floor has three homes: doctor.cjs refuses below it, install.sh prints it, and the matrix
+# has to actually run it. Read it once and hold the other two to it.
+MIN_NODE="$(grep -oE 'MIN_NODE_MAJOR = [0-9]+' "$ROOT/plugins/fnd/scripts/doctor.cjs" | head -1 | grep -oE '[0-9]+$')"
+if [ -n "$MIN_NODE" ]; then ok; else bad ci-node-floor "doctor.cjs declares no MIN_NODE_MAJOR"; fi
+if grep -qE "node(-version)?: '?${MIN_NODE:-x}(\.|'|\$)" "$WF"; then ok
+else bad ci-node-floor "tests.yml runs no job on node ${MIN_NODE:-?} — the floor is never exercised"; fi
+if grep -qF "Node ${MIN_NODE:-x}+" "$ROOT/scripts/install.sh"; then ok
+else bad install-node-floor "scripts/install.sh does not name Node ${MIN_NODE:-?}+ as the floor"; fi
+
 # Suites are discovered by glob, never listed — a hard-coded suite name would silently stop
 # covering whatever is added next.
 if grep -qE 'tests/[A-Za-z0-9_-]+\.(sh|mjs)' "$WF"; then

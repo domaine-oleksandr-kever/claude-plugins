@@ -38,8 +38,9 @@ const GENERATOR_REL = path.join('scripts', 'gen-host-adapters.cjs');
 const SIZE_WARN_BYTES = 8000;
 
 // Content directories whose prose is read verbatim by a model on every host: a dead path here is a
-// dead end for the reader. Generated dirs are deliberately absent — they are checked as a whole by
-// the generator's own --check, and their bodies are rewrites of agents/, not hand-maintained text.
+// dead end for the reader. The generated agent dirs are deliberately absent — they are checked as
+// a whole by the generator's own --check, and their bodies are rewrites of agents/. Hand-maintained
+// dirs stay in even where a generated file sits among them (rules/fnd-*.mdc, references/host-model-map.md).
 const LINK_DIRS = ['skills', 'references', 'rules', 'agents'];
 
 // Version stamps outside the manifests. Mirrors the marker contract in
