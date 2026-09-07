@@ -847,11 +847,13 @@ and a refresh pushes code only, leaving the settings untouched. And a new worktr
 deliberately starts **unpinned**: `worktree-setup.sh` copies the source checkout's config and
 reverts every pin it finds there, both shapes — `fnd:superseded` markers restored,
 `fnd:session-theme` lines deleted (`toml_unpinned=yes`; `=no` means the source was never
-pinned) — so a second work stream inherits the shared dev theme instead of the first
+pinned — unless `warn=toml_unpin_failed` says the revert did not land) — so a second work stream inherits the shared dev theme instead of the first
 stream's in-progress preview. (A hand-written theme id that `pin` reported `pin=unchanged`
 on carries no tag and is not reverted.) Restoring a pin by hand is that same edit: uncomment
 the `# … # fnd:superseded` line and drop the pinned line below it — an appended line tagged
-`# fnd:session-theme` is simply deleted.
+`# fnd:session-theme` is simply deleted. Pin and un-pin are one file —
+`plugins/fnd/scripts/session-theme.sh` — so the writer and the reverter of that grammar cannot
+disagree.
 
 ## Bundled MCP servers
 

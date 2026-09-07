@@ -17,8 +17,9 @@
 # through it).
 #
 # Run FROM the client theme repo (any checkout of it), never from the plugin repo: the
-# plugin is installed elsewhere, so the repo is resolved with `git rev-parse` and nothing
-# here is derived from $0.
+# plugin is installed elsewhere, so the repo is resolved with `git rev-parse`, never from $0;
+# the only thing $0 locates is the sibling `session-theme.sh` this script runs to un-pin the
+# copied config.
 #
 # The dev port is picked before `worktree add` and recorded in the shared workspace right
 # after it, before `npm ci` — a parallel setup started during the install sees the claim.
@@ -76,65 +77,6 @@ shq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}"
 mk_tmpf() { mktemp "$TMPROOT/fnd-wt.XXXXXX" 2>/dev/null || mktemp -t fnd-wt; }
 
-# Undo EVERY session-theme pin in a freshly copied shopify.theme.toml (see the copy site below) —
-# block-agnostic, because a multi-environment toml can carry one pin per block.
-# create-preview-theme.sh's pin leaves one of two shapes behind:
-#   - a REWRITE keeps the value it replaced on the line directly ABOVE the pinned one, commented
-#     and marked `# fnd:superseded` — the restore is purely local: uncomment that line (dropping
-#     the marker) and comment out the session id under it. Value-preserving both ways, so nothing
-#     is lost whichever theme the developer wants back. Only a real marker line (`# theme = …`
-#     carrying the string) counts — a stray comment merely mentioning fnd:superseded is not one.
-#   - an APPEND (the block had no `theme =` line) tags the inserted line `# fnd:session-theme` —
-#     the line is session-owned and the original state had no `theme =` at all, so the restore is
-#     DELETION of that line.
-# A copy with neither shape (never pinned) is left exactly as it came.
-# Returns 0 only when a pin was actually reverted. Never prints a line of the file: it holds the
-# Theme Access token.
-unpin_toml() { # $1 = the copied toml
-  local f="$1" tmp endnl
-  [ -f "$f" ] || return 1
-  grep -Eq 'fnd:(superseded|session-theme)' "$f" 2>/dev/null || return 1
-  endnl=1
-  if [ -s "$f" ] && [ -n "$(tail -c 1 "$f" 2>/dev/null)" ]; then endnl=0; fi
-  tmp="$(mk_tmpf)" || return 1
-  if ! awk -v endnl="$endnl" '
-    function emit(t) { if (started) printf "\n"; printf "%s", t; started = 1 }
-    { line[++n] = $0 }
-    END {
-      changed = 0
-      for (i = 1; i <= n; i++) {
-        s = line[i]; sub(/\r$/, "", s)
-        if (s ~ /^[ \t]*#?[ \t]*theme[ \t]*=/ && s ~ /#[ \t]*fnd:session-theme[ \t]*$/) {
-          del[i] = 1; changed = 1; continue
-        }
-        if (i == n || s !~ /fnd:superseded/ || s !~ /^[ \t]*#[ \t]*theme[ \t]*=/) continue
-        t = line[i + 1]; u = t; sub(/\r$/, "", u)
-        if (u ~ /^[ \t]*#/ || u !~ /^[ \t]*theme[ \t]*=/) continue
-        r = line[i]; cr = ""
-        if (r ~ /\r$/) { cr = "\r"; sub(/\r$/, "", r) }
-        sub(/[ \t]*#[ \t]*fnd:superseded[ \t]*$/, "", r)
-        sub(/^#[ \t]?/, "", r)
-        line[i] = r cr
-        line[i + 1] = "# " t
-        changed = 1
-        i++   # the pinned line is handled — do not re-read it as a marker candidate
-      }
-      if (changed == 0) exit 1
-      started = 0
-      for (i = 1; i <= n; i++) if (!(i in del)) emit(line[i])
-      if (started && endnl == 1) printf "\n"
-    }
-  ' "$f" > "$tmp" 2>/dev/null; then
-    rm -f "$tmp"; return 1
-  fi
-  [ -s "$tmp" ] || { rm -f "$tmp"; return 1; }
-  # cat->, never mv: mktemp lives in $TMPDIR (a rename could cross filesystems) and the in-place
-  # copy keeps the destination file's own inode and mode
-  cat "$tmp" > "$f" || { rm -f "$tmp"; return 1; }
-  rm -f "$tmp"
-  return 0
-}
-
 # --- args --------------------------------------------------------------------
 MODE="create"; WORK_ID=""; BASE=""; FORCE=0; POS=0
 while [ $# -gt 0 ]; do
@@ -186,6 +128,14 @@ esac
 
 # --- repo layout -------------------------------------------------------------
 command -v git >/dev/null 2>&1 || fail "git not found on PATH"
+
+# The pin's marker grammar has ONE home, next to this script. Without it the config copied
+# below would keep the source checkout's session theme — this worktree's first `create` would
+# then pull another stream's customizer settings — so a create that cannot un-pin stops here,
+# before anything is built, rather than reporting a worktree it silently mis-configured.
+SESSION_LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/session-theme.sh"
+[ "$MODE" != create ] || { [ -f "$SESSION_LIB" ] && bash -n "$SESSION_LIB" 2>/dev/null; } \
+  || fail "session_lib_not_found path=$SESSION_LIB"
 
 TOP="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "$TOP" ] || fail "not_a_git_repo — run this from the theme repo (no git checkout at $(pwd))"
@@ -587,7 +537,12 @@ elif [ -f "$MAIN/shopify.theme.toml" ]; then
   # half-edited preview would land on this one's theme (and a `create` after that theme was
   # deleted fails naming an id nobody here has heard of). The pin left the superseded line
   # behind for exactly this — restore it and re-comment the session id.
-  if unpin_toml "$WT/shopify.theme.toml"; then TOML_UNPINNED=yes; fi
+  st=0; bash "$SESSION_LIB" unpin "$WT/shopify.theme.toml" || st=$?
+  case "$st" in
+    0) TOML_UNPINNED=yes ;;
+    1) ;;
+    *) warn "toml_unpin_failed — the copied config still carries the source checkout's session pin; restore its superseded theme line by hand before the first create" ;;
+  esac
 else
   warn "no_shopify_theme_toml — the worktree has no store config; copy one in before pushing a preview theme"
 fi

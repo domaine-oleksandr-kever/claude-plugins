@@ -17,8 +17,10 @@ in the Bash tool's shell.
 
 - **`info` errors** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config) → report
   the line with the fix it names and take the manual path — never read the toml to "check".
-  `error=common_lib_not_found` is the plugin install (a partial copy of `scripts/` dropped
-  `_shopify-common.sh`), not the project — reinstall/update; nothing ran.
+  `error=common_lib_not_found` / `error=session_lib_not_found` is the plugin install (a partial
+  copy of `scripts/` dropped `_shopify-common.sh` or `session-theme.sh`), not the project —
+  reinstall/update; nothing ran (`worktree-setup.sh` refuses to create on the same key, a
+  truncated copy included).
 - **`error=build_failed`** → surface the build output and **stop**: fix the branch, don't enter
   theme URLs by hand.
 - **`error=bad_build_script`** / **`error=build_script_missing`** → nothing was built or pushed

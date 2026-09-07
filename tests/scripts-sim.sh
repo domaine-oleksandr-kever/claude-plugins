@@ -23,6 +23,7 @@ TJ="$ROOT/plugins/fnd/scripts/theme-json.sh"
 CPT="$ROOT/plugins/fnd/scripts/create-preview-theme.sh"
 COMMON="$ROOT/plugins/fnd/scripts/_shopify-common.sh"
 WTS_SRC="$ROOT/plugins/fnd/scripts/worktree-setup.sh"
+STL="$ROOT/plugins/fnd/scripts/session-theme.sh"
 FBC="$ROOT/plugins/fnd/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js"
 BASH_BIN="$(command -v bash)"
 
@@ -451,10 +452,10 @@ else bad T30-store-url-form "rc=$rc log=$(tr '\n' ';' < "$L") err=$(head -c 120 
 # scripts would let them disagree about which store/theme/token a toml resolves to, which is the
 # class of bug the shared reader fixes
 if [ "$(grep -c '^toml_value() {' "$COMMON")" -eq 1 ] \
-   && [ "$(cat "$TJ" "$CPT" "$GQL" "$WTS_SRC" | grep -c '^toml_value() {')" -eq 0 ]; then ok
+   && [ "$(cat "$TJ" "$CPT" "$GQL" "$WTS_SRC" "$STL" | grep -c '^toml_value() {')" -eq 0 ]; then ok
 else bad T31-toml-reader-single-home "toml_value() is defined outside _shopify-common.sh (or missing from it)"; fi
 # T31b: the three theme scripts source the lib from their own dir; worktree-setup.sh shares nothing
-# with it and stays lib-free (it derives nothing from $0 by design)
+# with it and stays lib-free — the only sibling it touches is run as a subprocess (T31f)
 if grep -q '^\. "\$SCRIPT_DIR/_shopify-common\.sh"$' "$TJ" && grep -q '^\. "\$SCRIPT_DIR/_shopify-common\.sh"$' "$CPT" \
    && grep -q '^\. "\$SCRIPT_DIR/_shopify-common\.sh"$' "$GQL" && ! grep -q '_shopify-common' "$WTS_SRC"; then ok
 else bad T31b-common-lib-sourced "expected cpt/tj/gql to source _shopify-common.sh and worktree-setup.sh not to"; fi
@@ -465,6 +466,17 @@ rc=0; "$BASH_BIN" "$LONE/theme-json.sh" themes >"$O" 2>"$E" || rc=$?
 assert T31c-tj-common-lib-missing 2 "$rc" "$E" "error=common_lib_not_found path=$LONE/_shopify-common.sh"
 rc=0; "$BASH_BIN" "$LONE/shopify-admin-gql.sh" --query "$TJDIR/theme-json.sh" >"$O" 2>"$E" || rc=$?
 assert T31d-gql-common-lib-missing 2 "$rc" "$E" "error=common_lib_not_found path=$LONE/_shopify-common.sh"
+# T31e (drift guard): the `# fnd:superseded` / `# fnd:session-theme` grammar has ONE home — a
+# second copy of the strings, or of either toml rewriter, is two writers free to disagree
+if [ "$(grep -lE 'fnd:(superseded|session-theme)' "$ROOT"/plugins/fnd/scripts/*.sh | wc -l | tr -d ' ')" -eq 1 ] \
+   && grep -qE 'fnd:(superseded|session-theme)' "$STL" \
+   && [ "$(grep -c '^pin_toml() {' "$STL")" -eq 1 ] && [ "$(grep -c '^unpin_toml() {' "$STL")" -eq 1 ] \
+   && [ "$(grep -c '^shared_dev_theme_ids() {' "$STL")" -eq 1 ] \
+   && [ "$(cat "$CPT" "$WTS_SRC" "$TJ" "$GQL" "$COMMON" | grep -cE '^(un)?pin_toml\(\) \{|^shared_dev_theme_ids\(\) \{')" -eq 0 ]; then ok
+else bad T31e-marker-grammar-single-home "the pin/un-pin marker grammar is written in more than one script"; fi
+# T31f: and both callers really reach that home — cpt sources it, worktree-setup.sh runs it
+if grep -q '^\. "\$SCRIPT_DIR/session-theme\.sh"$' "$CPT" && grep -q 'bash "\$SESSION_LIB" unpin' "$WTS_SRC"; then ok
+else bad T31f-session-lib-wired "expected cpt to source session-theme.sh and worktree-setup.sh to run it"; fi
 
 # T32 (pin): --strip-comments removes bytes and appends none — the stripped body is the base a jq
 # edit and then `set --from` upload, so a trailing newline would be a byte the theme did not have
@@ -1540,7 +1552,7 @@ else ok; fi
 # deleted" are assertable, not inferred from the report.
 # NB create-preview-theme.sh prints error= on STDOUT, not stderr — every case greps $O.
 CPTD="$TMP/cpt"; mkdir -p "$CPTD/shim" "$CPTD/repo/assets" "$CPTD/repo/sections" "$CPTD/toml"
-cp "$CPT" "$CPTD/cpt.sh"; cp "$COMMON" "$CPTD/"
+cp "$CPT" "$CPTD/cpt.sh"; cp "$COMMON" "$STL" "$CPTD/"
 printf 'x{}\n' > "$CPTD/repo/assets/app.css"
 # a real section schema, so the overlay read-back's unknown-type filter has a KNOWN type
 # (main-product, by filename; text, by schema block) to tell apart from an alien one
@@ -1720,6 +1732,14 @@ rc=0; L="$TMP/cpt0"; : > "$L"
 (cd "$CPTD/repo" && PATH="$CPTD/shim:$PATH" CPT_LOG="$L" "$BASH_BIN" "$LONE_CPT/cpt.sh" info) >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 1 ] && grep -q "^error=common_lib_not_found path=$LONE_CPT/_shopify-common.sh$" "$O" && [ ! -s "$L" ]; then ok
 else bad P0-common-lib-missing "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+
+# P0b: same contract for the pin library — the _shopify-common.sh copy is load-bearing here,
+# without it P0's guard answers first and this case proves nothing
+LONE_ST="$TMP/lonecpt-st"; mkdir -p "$LONE_ST"; cp "$CPT" "$LONE_ST/cpt.sh"; cp "$COMMON" "$LONE_ST/"
+rc=0; L="$TMP/cpt0b"; : > "$L"
+(cd "$CPTD/repo" && PATH="$CPTD/shim:$PATH" CPT_LOG="$L" "$BASH_BIN" "$LONE_ST/cpt.sh" info) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 1 ] && grep -q "^error=session_lib_not_found path=$LONE_ST/session-theme.sh$" "$O" && [ ! -s "$L" ]; then ok
+else bad P0b-session-lib-missing "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # P1 (bug): `refresh --theme <live id>` must be refused BEFORE any push — a mistyped id
 # otherwise ships branch code onto the storefront
@@ -4253,6 +4273,9 @@ else bad W25-exclude-trailing-newline "rc=$rc exclude=$(tr '\n' ';' < "$WT_NL_EX
 # script has no --port flag of its own). A bash built without net redirections cannot be
 # conjured here, so the copy under test has the probe's verdict line replaced by the message
 # such a bash prints, and a shim `nc` rejects -z the way ncat builds do.
+# The sed-derived copies below are run from $WTR, so the sibling library the script needs in
+# create mode has to sit beside them — they are complete installs, which is what they test.
+cp "$STL" "$WTR/"
 WTS_NP="$WTR/worktree-setup-noprobe.sh"
 sed 's#^DEVTCP_MSG=.*#DEVTCP_MSG="fnd-sim: No such file or directory"#' "$WTS" > "$WTS_NP"
 mkdir -p "$WTR/ncshim"
@@ -4368,6 +4391,18 @@ theme = "111"
 if [ "$rc" -eq 0 ] && grep -q '^toml_unpinned=yes$' "$O" \
    && [ "$(cat "$W28FT")" = "$WANT28F" ]; then ok
 else bad W28f-unpin-stray-comment "rc=$rc out=$(grep -E '^toml' "$O" | tr '\n' ';') copy=$(grep -v password "$W28FT" 2>/dev/null | tr '\n' ';')"; fi
+
+# W28g: a pinned source whose copy cannot be rewritten (the mode travels with `cp`) is reported as
+# a failed un-pin, not passed off as a clean `toml_unpinned=no` — the copy still carries the other
+# stream's session theme and the developer has to know
+printf '[environments.development]\nstore = "acme-dev"\n# theme = "111"  # fnd:superseded\ntheme = "777"\n' > "$WTR/theme/shopify.theme.toml"
+chmod 444 "$WTR/theme/shopify.theme.toml"
+rc=0; wt_run PIN-7 || rc=$?
+chmod 644 "$WTR/theme/shopify.theme.toml"
+if [ "$rc" -eq 0 ] && grep -q '^toml=copied$' "$O" && grep -q '^toml_unpinned=no$' "$O" \
+   && grep -q '^warn=toml_unpin_failed' "$O" \
+   && cmp -s "$WTR/theme/shopify.theme.toml" "$WTR/theme-PIN-7/shopify.theme.toml"; then ok
+else bad W28g-unpin-failed-warns "rc=$rc out=$(grep -E '^toml|^warn|^error' "$O" | tr '\n' ';')"; fi
 
 # W29 (bug): the hand-off block the skill relays VERBATIM must not advertise a dev-server command
 # without `--theme` — that is the one that syncs the branch into the shared dev theme
@@ -4550,6 +4585,89 @@ if [ "$rc" -ne 0 ] && grep -q '^error=no_free_port range=9293-9294' "$O" \
    && [ ! -d "$WTR/nar/theme-NAR-4" ] && ! grep -qs 'dev-port:' "$WTR/nar/theme/.claude/tasks/NAR-4/notes.md"; then ok
 else bad W32b-no-free-port "rc=$rc out=$(tr '\n' ';' < "$O") wt=$([ -d "$WTR/nar/theme-NAR-4" ] && echo yes || echo no)"; fi
 wt_unlisten
+
+# ---- session-theme.sh: the shared pin/un-pin library ----
+# The library is exercised in-process by every P* case (create-preview-theme.sh sources it) and by
+# every W28* case (worktree-setup.sh runs it). What is left is its own command surface: the exit
+# codes worktree-setup.sh reads, the silence its stdout owes a file holding the Theme Access token,
+# and the guard that stops a create that could not un-pin.
+STD="$TMP/st"; mkdir -p "$STD"
+
+# S1: the CLI reverts a rewrite, answers 0 and says nothing at all — worktree-setup.sh does not
+# redirect this stdout, so a printed line would land in the key=value stream a skill relays
+printf '[environments.development]\nstore = "acme-dev"\n# theme = "111"  # fnd:superseded\ntheme = "777"\npassword = "shptka_fixture1234"\n' > "$STD/s1.toml"
+rc=0; "$BASH_BIN" "$STL" unpin "$STD/s1.toml" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -s "$O" ] \
+   && grep -q '^theme = "111"$' "$STD/s1.toml" && grep -q '^# theme = "777"$' "$STD/s1.toml" \
+   && ! grep -q 'fnd:superseded' "$STD/s1.toml" \
+   && grep -q '^password = "shptka_fixture1234"$' "$STD/s1.toml"; then ok
+else bad S1-cli-unpin-reverts "rc=$rc out=$(head -c 120 "$O" | grep -v password | tr '\n' ' ') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+
+# S2: never pinned → 1, and the file is byte-identical (the copy a worktree keeps as it came)
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\n' > "$STD/s2.toml"
+st_before="$(fhash "$STD/s2.toml")"
+rc=0; "$BASH_BIN" "$STL" unpin "$STD/s2.toml" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 1 ] && [ ! -s "$O" ] && [ "$(fhash "$STD/s2.toml")" = "$st_before" ]; then ok
+else bad S2-cli-unpin-nothing-to-revert "rc=$rc out=$(head -c 120 "$O" | grep -v password | tr '\n' ' ')"; fi
+
+# S3: an absent config is "nothing to revert", not a crash — a worktree with no toml at all is a
+# state worktree-setup.sh reports and carries on from
+rc=0; "$BASH_BIN" "$STL" unpin "$STD/nope.toml" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 1 ] && [ ! -s "$O" ]; then ok
+else bad S3-cli-unpin-absent "rc=$rc out=$(head -c 120 "$O" | grep -v password | tr '\n' ' ')"; fi
+
+# S4: nothing else is dispatchable — a bare run, an unknown subcommand and a pathless `unpin` all
+# stop at the usage line, and the `pin` attempt writes nothing
+st_s1_before="$(fhash "$STD/s1.toml")"
+st_usage_ok=1
+for st_case in bare pin pathless; do
+  case "$st_case" in bare) set -- ;; pin) set -- pin "$STD/s1.toml" ;; pathless) set -- unpin ;; esac
+  rc=0; "$BASH_BIN" "$STL" "$@" >"$O" 2>"$E" || rc=$?
+  [ "$rc" -eq 2 ] || st_usage_ok=0
+  grep -q '^error=usage: session-theme.sh unpin <toml>$' "$O" || st_usage_ok=0
+done
+if [ "$st_usage_ok" -eq 1 ] && [ "$(fhash "$STD/s1.toml")" = "$st_s1_before" ]; then ok
+else bad S4-cli-usage "usage contract broken :: rc=$rc out=$(head -c 120 "$O" | grep -v password | tr '\n' ' ')"; fi
+
+# S5: a worktree-setup.sh installed without its sibling refuses BEFORE it builds anything — a
+# worktree left pinned to another stream's theme is the failure the un-pin exists to prevent, and
+# a hard stop at the call site would strand a fully built checkout instead
+LONE_W="$TMP/lonewts"; mkdir -p "$LONE_W"; cp "$WTS_SRC" "$LONE_W/worktree-setup.sh"
+mk_mig_repo "$WTR/lone"
+rc=0; (cd "$WTR/lone/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+   "$BASH_BIN" "$LONE_W/worktree-setup.sh" LONE-1) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 1 ] && grep -q "^error=session_lib_not_found path=$LONE_W/session-theme.sh$" "$O" \
+   && [ ! -d "$WTR/lone/theme-LONE-1" ] && [ ! -d "$WTR/lone/theme/.claude/tasks/LONE-1" ]; then ok
+else bad S5-wts-session-lib-missing "rc=$rc out=$(tr '\n' ';' < "$O") wt=$([ -d "$WTR/lone/theme-LONE-1" ] && echo yes || echo no)"; fi
+
+# S5b: a sibling that is there but cannot load (a truncated copy) is the same refusal — otherwise
+# its parse error would surface only on stderr, after the worktree was built
+head -n 100 "$STL" > "$LONE_W/session-theme.sh"
+rc=0; (cd "$WTR/lone/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+   "$BASH_BIN" "$LONE_W/worktree-setup.sh" LONE-2) >"$O" 2>"$E" || rc=$?
+rm -f "$LONE_W/session-theme.sh"
+if [ "$rc" -eq 1 ] && grep -q "^error=session_lib_not_found path=$LONE_W/session-theme.sh$" "$O" \
+   && [ ! -d "$WTR/lone/theme-LONE-2" ]; then ok
+else bad S5b-wts-session-lib-truncated "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# S6: … and that guard is scoped to create — a broken install must not block a teardown the
+# worktree skill is told not to hand-roll, nor the usage text
+rc=0; "$BASH_BIN" "$LONE_W/worktree-setup.sh" --help >"$O" 2>"$E" || rc=$?
+st_help_rc="$rc"
+rc=0; (cd "$WTR/lone/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+   "$BASH_BIN" "$LONE_W/worktree-setup.sh" --remove LONE-1) >"$O" 2>"$E" || rc=$?
+if [ "$st_help_rc" -eq 0 ] && [ "$rc" -ne 0 ] && ! grep -q 'session_lib_not_found' "$O" \
+   && grep -q '^error=' "$O"; then ok
+else bad S6-wts-guard-create-only "help_rc=$st_help_rc remove_rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# S7: a pin that is there but cannot be rewritten (read-only copy) is 3, not the 1 of "never
+# pinned" — the caller must be able to tell a config it still has to fix from one that was clean
+printf '[environments.development]\nstore = "acme-dev"\n# theme = "111"  # fnd:superseded\ntheme = "777"\npassword = "shptka_fixture7"\n' > "$STD/s7.toml"
+chmod 444 "$STD/s7.toml"; st_before="$(fhash "$STD/s7.toml")"
+rc=0; "$BASH_BIN" "$STL" unpin "$STD/s7.toml" >"$O" 2>"$E" || rc=$?
+chmod 644 "$STD/s7.toml"
+if [ "$rc" -eq 3 ] && [ ! -s "$O" ] && [ "$(fhash "$STD/s7.toml")" = "$st_before" ]; then ok
+else bad S7-cli-unpin-rewrite-failed "rc=$rc out=$(head -c 120 "$O" | grep -v password | tr '\n' ' ') err=$(head -c 120 "$E" | grep -v password | tr '\n' ' ')"; fi
 
 # ═══ EV — domaine env files: scripts/env-file.cjs loader + scripts/domaine-env.cjs CLI ═══
 EVR="$TMP/env"; mkdir -p "$EVR/cfg" "$EVR/repo/sub"

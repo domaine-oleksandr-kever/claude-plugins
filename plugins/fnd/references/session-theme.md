@@ -98,7 +98,10 @@ kept on a commented `# … # fnd:superseded` line right above it (and reported a
 and a block with none gets one appended, tagged `# fnd:session-theme`, so unpinning knows the
 block originally had no `theme =` line. Re-pinning the same id is byte-idempotent
 (`pin=unchanged`); re-pinning a **different** id onto a tagged line just replaces the value —
-the line stays session-owned, and no `fnd:superseded` marker is written for it.
+the line stays session-owned, and no `fnd:superseded` marker is written for it. Both directions
+of that grammar live in one file — `<plugin root>/scripts/session-theme.sh`, sourced by
+`create-preview-theme.sh` for the pin and run by `worktree-setup.sh` for the un-pin — so the two
+cannot drift.
 
 After a pin, the id the script *reads* as `dev_theme_id` **is** the session theme in the usual
 single-environment config — so a later `create` would overlay the session theme's own settings,
@@ -119,7 +122,8 @@ can differ; `refresh` is unaffected either way.
 - A **worktree starts unpinned on purpose.** `worktree-setup.sh` copies the source checkout's
   toml and then reverts every pin it finds in it, both shapes — `fnd:superseded` markers
   restored, `fnd:session-theme` lines deleted (`toml_unpinned=yes`; `=no` means the source was
-  never pinned) — so a new stream inherits the shared dev theme rather than another stream's
+  never pinned, unless `warn=toml_unpin_failed` says the revert did not land — then the copy
+  still carries another stream's pin: restore it by hand before the first `create`) — so a new stream inherits the shared dev theme rather than another stream's
   session theme — which is what its first `create` would have copied customizer settings from.
   One caveat: a hand-written theme id that `pin` reported as `pin=unchanged` carries no tag
   and is not reverted.
