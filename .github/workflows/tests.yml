@@ -1,10 +1,11 @@
 name: tests
 
-# The plugin is installed by git clone and runs on bare Node and bash on whatever machine a
-# developer has, so CI proves exactly that: no package manager, no third-party actions beyond
-# checkout and setup-node, no cached toolchain. Two runners because the suites drive real git,
-# real symlinks and BSD-vs-GNU-sensitive shell tools, and macOS is where the plugin is used while
-# Linux is where its assumptions break first.
+# The plugin is installed by git clone and runs on bare Node and bash, so CI proves exactly that:
+# no package manager, no third-party actions beyond checkout and setup-node, no cached toolchain.
+# Two runners because the suites drive real git, real symlinks and BSD-vs-GNU-sensitive shell
+# tools, and macOS is where the plugin is used while Linux is where its assumptions break first.
+# The matrix is also the whole supported set: native Windows has no POSIX shell for the .sh half
+# (WSL only), so there is no runner for it.
 
 on:
   push:

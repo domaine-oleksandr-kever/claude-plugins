@@ -40,8 +40,8 @@
 #             stubbed into additionalContext with a byte-exact spill, a merely-compressible
 #             result dropped (Codex cannot rewrite tool output — re-injecting the compressed
 #             body would GROW context), the rails (error shape, small result, malformed stdin,
-#             a broken mcp-slim) all silent, and __dirname resolution that ignores a wrong
-#             plugin-root env.
+#             a broken mcp-slim, a HUNG one bounded by the spawn timeout) all silent, and
+#             __dirname resolution that ignores a wrong plugin-root env.
 #
 # PROTOCOL ASSUMPTIONS recorded here because JSON carries no comments (all → verify at M1b):
 #   - hooks-codex.json is a {description, hooks: <event map>} envelope — MEASURED at M1b
@@ -244,7 +244,10 @@ done
 # …and it records through the wiring for real: an unresolvable root is silent, a resolved one writes
 # the access line the report pairs on.
 SPA_D="$TMP/spa-log"; mkdir -p "$SPA_D"
-SPA_PAY='{"tool_name":"shell","tool_input":{"command":["bash","-lc","jq . /p/tool-results/b1z10evqs.txt"]},"cwd":"/r/elc"}'
+# A REAL whale on disk: the recorder drops a path that is not a file, since PreToolUse fires only
+# after the platform wrote the spill.
+SPA_SP="$TMP/spa-spill/tool-results"; mkdir -p "$SPA_SP"; : > "$SPA_SP/b1z10evqs.txt"
+SPA_PAY='{"tool_name":"shell","tool_input":{"command":["bash","-lc","jq . '"$SPA_SP"'/b1z10evqs.txt"]},"cwd":"/r/elc"}'
 out="$(printf '%s' "$SPA_PAY" | env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT HOME="$TMP/nohome" \
   FND_MCP_SLIM_DIR="$SPA_D" FND_MCP_SLIM_DEBUG=1 bash -c "$SPA_CMD" 2>&1)"; ec=$?
 assert_eq W11-unresolved-exit   "$ec" 0
@@ -790,6 +793,26 @@ printf 'process.exit(3);\n' > "$brk/mcp-slim.cjs"
 out="$(printf '%s' "$in" | node "$brk/codex-mcp-shim.cjs" 2>/dev/null)"; ec=$?
 assert_eq M8b-crash-silent "$out" ""
 assert_eq M8b-crash-exit   "$ec" 0
+
+# M9: a HUNG mcp-slim must not hang Codex's hook — the spawn is bounded, and the timeout lands on
+# the same fail-open path as a crash (spawnSync sets child.error). The copy runs with the constant
+# sed'd down so the case costs a second instead of the production 30 s; the patch itself is
+# asserted, so a rename or an inlined literal fails here rather than silently untesting the rail.
+hang="$TMP/hang"; mkdir -p "$hang"
+sed 's/^const SPAWN_TIMEOUT_MS = 30000;$/const SPAWN_TIMEOUT_MS = 1000;/' "$SHIMJS" > "$hang/codex-mcp-shim.cjs"
+if grep -q '^const SPAWN_TIMEOUT_MS = 1000;$' "$hang/codex-mcp-shim.cjs"; then ok
+else bad M9-patch "no named SPAWN_TIMEOUT_MS = 30000 constant to bound the spawn"; fi
+printf 'setTimeout(function(){}, 20000);\n' > "$hang/mcp-slim.cjs"
+s=$(date +%s)
+out="$(printf '%s' "$in" | node "$hang/codex-mcp-shim.cjs" 2>/dev/null)"; ec=$?
+el=$(( $(date +%s) - s ))
+assert_eq M9-hang-silent "$out" ""
+assert_eq M9-hang-exit   "$ec" 0
+if [ "$el" -lt 8 ]; then ok; else bad M9-hang-bounded "the hook waited ${el}s on a child that never exits"; fi
+# M9b: the bound is a ceiling, not a budget — a child that answers in time still gets forwarded.
+printf 'var c=[];process.stdin.on("data",function(d){c.push(d)});process.stdin.on("end",function(){process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",updatedToolOutput:{content:[{type:"text",text:"<<fnd-mcp-slim stub>> full=/dev/null"}]}}}))});\n' > "$hang/mcp-slim.cjs"
+ctx="$(printf '%s' "$in" | node "$hang/codex-mcp-shim.cjs" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)"
+assert_contains M9b-fast-child "$ctx" "<<fnd-mcp-slim stub>>"
 
 echo "hooks-codex wiring sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then

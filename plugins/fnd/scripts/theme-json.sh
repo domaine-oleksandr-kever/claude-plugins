@@ -223,8 +223,8 @@ emit_file() {
   fi
 }
 
-live_refuse() { # $1 name
-  echo "error=live_theme_write_refused theme='$1' role=MAIN — the live theme is merchant-owned content; write to a development/unpublished theme instead" >&2
+live_refuse() { # $1 name, $2 role as the store reported it
+  echo "error=live_theme_write_refused theme='$1' role=$2 — the live theme is merchant-owned content; write to a development/unpublished theme instead" >&2
   exit 4
 }
 
@@ -390,7 +390,7 @@ gql() {
   status="$(printf '%s' "$RESP" | jq -r 'if type == "object" and has("errors") then "errors" else "ok" end' 2>/dev/null)" || jrc=$?
   # one line per input document, so a second line means this is not ONE envelope. Every check below
   # would then read the first document's answer glued to the rest — including `set`'s live-theme
-  # refusal, whose `.data.theme.role` comparison would silently stop matching MAIN.
+  # refusal, whose `.data.theme.role` check would silently stop recognizing the live role.
   case "$status" in *$'\n'*) jrc=1 ;; esac
   if [ "$jrc" -ne 0 ]; then
     # GQL_SOFT is gated FIRST, exactly as the errors branch below: inside the post-mutation
@@ -514,7 +514,7 @@ gql_set() {
   role="$(printf '%s' "$RESP" | jq -r '.data.theme.role // empty')"
   name="$(printf '%s' "$RESP" | jq -r '.data.theme.name // empty')"
   [ -n "$role" ] || { echo "error=theme_not_found theme=$gid" >&2; exit 5; }
-  [ "$role" = "MAIN" ] && live_refuse "$name"
+  if role_is_live "$role"; then live_refuse "$name" "$role"; fi
   gql 'mutation FndThemeFileSet($id: ID!, $files: [OnlineStoreThemeFilesUpsertFileInput!]!) {
     themeFilesUpsert(themeId: $id, files: $files) {
       upsertedThemeFiles { filename }
@@ -638,7 +638,7 @@ cli_set() {
   # listed but roleless is a list-shape drift, not a missing theme — a guard that cannot read the
   # role must not clear the target
   [ -n "$role" ] || { echo "error=live_role_unreadable theme=$nid (engine=themecli)" >&2; exit 5; }
-  if role_is_live "$role"; then live_refuse "$name"; fi
+  if role_is_live "$role"; then live_refuse "$name" "$role"; fi
   tmp="$(mktemp -d)"; err="$(mktemp)"; CLEAN+=("$tmp" "$err")
   mkdir -p "$tmp/$(dirname "$FILE")"
   cp "$FROM" "$tmp/$FILE"

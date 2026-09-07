@@ -573,7 +573,10 @@ assert_contains X11-second-guard-msg "$(printf '%s' "$out" | jq -r '.agentMessag
 # nothing to the response, run only once the guards have allowed the command, and honour its own
 # switch in-shim (the wiring cannot pre-gate it — the commit guard shares beforeShellExecution).
 SPA_D="$TMP/spa"; mkdir -p "$SPA_D"
-SPA_CMD='{"command":"jq -r .x /p/tool-results/b1z10evqs.txt","workspace_roots":["/r/elc"]}'
+# A REAL whale on disk: the recorder drops a path that is not a file, since PreToolUse fires only
+# after the platform wrote the spill.
+SPA_SP="$TMP/spa-spill/tool-results"; mkdir -p "$SPA_SP"; : > "$SPA_SP/b1z10evqs.txt"
+SPA_CMD='{"command":"jq -r .x '"$SPA_SP"'/b1z10evqs.txt","workspace_roots":["/r/elc"]}'
 out="$(run_shim beforeShellExecution "$SPA_CMD" FND_MCP_SLIM_DIR="$SPA_D" FND_MCP_SLIM_DEBUG=1)"; EC=$?
 assert_eq       X13-silent  "$out" ""
 assert_eq       X13-exit    "$EC" 0
@@ -582,7 +585,7 @@ assert_contains X13-via     "$(cat "$SPA_D/fnd-mcp-slim-debug.log" 2>/dev/null)"
 assert_contains X13-project "$(cat "$SPA_D/fnd-mcp-slim-debug.log" 2>/dev/null)" '"project":"elc"'
 # a DENIED command never ran, so it read no spill
 SPA_D2="$TMP/spa-denied"; mkdir -p "$SPA_D2"
-run_shim beforeShellExecution '{"command":"git commit --no-verify -m x /p/tool-results/b1z10evqs.txt"}' \
+run_shim beforeShellExecution '{"command":"git commit --no-verify -m x '"$SPA_SP"'/b1z10evqs.txt"}' \
   FND_MCP_SLIM_DIR="$SPA_D2" FND_MCP_SLIM_DEBUG=1 >/dev/null 2>&1
 if [ -e "$SPA_D2/fnd-mcp-slim-debug.log" ]; then bad X13-denied "a blocked command was recorded as a spill read"; else ok; fi
 # the in-shim switch

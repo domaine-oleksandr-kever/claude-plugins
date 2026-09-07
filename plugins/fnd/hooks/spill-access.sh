@@ -41,6 +41,9 @@
 #     `.git` ancestor) — no consumer aggregates access lines by project;
 #   * at most 8 distinct paths per call (json-slim's SPILL_LOG_MAX), and a token still carrying a glob
 #     metacharacter is dropped rather than recorded or expanded;
+#   * only the first 16 KB of the unescaped tool_input slice is harvested — a path-dense command (60 KB of
+#     `tool-results/` paths is ~700 of them) otherwise walks the grep and the loop below unbounded,
+#     on a hook that fires on every Bash call;
 #   * a relative spill token is joined to the PAYLOAD cwd textually — a `cd` earlier in the command is
 #     not followed — and a token carrying `../`, a `~`, a `$VAR` or a URL scheme is dropped, not recorded.
 # -f matters: the extracted tokens are word-split unquoted below, and pathname expansion on them would
@@ -83,8 +86,14 @@ esac
 # /Users/me/node.js/elc would classify the read as `via:"node"`. First occurrence to the end of the
 # event — parameter expansion, no fork — falling back to the whole event on a host that sends no
 # tool_input at all, where the envelope keys that mislead are absent anyway.
-scan="$input"
-case "$input" in *'"tool_input"'*) scan="${input#*\"tool_input\"}" ;; esac
+# `hd` = the envelope BEFORE the big value (see key_val): the tool_input object, or on a raw event
+# without one the `command` string — built only in the arm that knows the key is there, or the `%%`
+# scan walks the whole event for nothing.
+scan="$input"; hd=""
+case "$input" in
+  *'"tool_input"'*) scan="${input#*\"tool_input\"}"; hd="${input%%\"tool_input\"*}" ;;
+  *'"command"'*) hd="${input%%\"command\"*}" ;;
+esac
 case "$scan" in *'\'*)  # JSON string escapes: the solidus (Codex) and the ones every host writes
   # \n \t \r collapse to a SPACE, not to nothing — they are token boundaries in the command they came
   # from, so swallowing one glues the next word onto the path it follows ("<spill>\nwc -l" was recorded
@@ -95,11 +104,29 @@ esac
 # would mean re-injecting it into this pattern, and that is a fork on the hot path. A verb counts only
 # at a COMMAND position (start, or after a separator / quote / whitespace), so the `node` inside
 # /proj/node/fixture.json is a path component, not the reader.
-hits="$(printf '%s' "$scan" | grep -oE "[^\"' ,;|()=<>&]*(fnd-mcp-slim-[0-9a-f]{16}(-[0-9a-f]+)?\.json|tool-results/[^\"' ,;|()=<>&]+)|(^|[[:space:]|;&(){}\`\"'=])(jq|grep|rg|sed|awk|head|tail|cat|wc|less|node|rm|mv|cp|ln|touch|ls|echo|stat)([^[:alnum:]_-]|\$)" 2>/dev/null || true)"
+# LC_ALL=C because the 16 KB cap counts BYTES: a cut through the middle of a multibyte character
+# leaves invalid UTF-8 at the tail, and GNU grep answers a binary stdin with one "matches" line
+# instead of the -o matches — losing the whole call's record, the paths before the cut included. The
+# pattern is ASCII-only, and so is every path it may record, so byte matching changes nothing else.
+hits="$(printf '%.16384s' "$scan" | LC_ALL=C grep -oE "[^\"' ,;|()=<>&]*(fnd-mcp-slim-[0-9a-f]{16}(-[0-9a-f]+)?\.json|tool-results/[^\"' ,;|()=<>&]+)|(^|[[:space:]|;&(){}\`\"'=])(jq|grep|rg|sed|awk|head|tail|cat|wc|less|node|rm|mv|cp|ln|touch|ls|echo|stat)([^[:alnum:]_-]|\$)" 2>/dev/null || true)"
+# An envelope key is read off whichever SIDE of the command it sits on, because both expansions walk
+# one prefix per character until the key matches: `${input#*"cwd"}` over a key that TRAILS a 50 KB
+# command costs 1.8 s in bash and 11 s in dash, and `${input##*"cwd"}` is the mirror image, cheap
+# exactly there and slow at the front. In front of the command the FIRST occurrence is the envelope's
+# own, behind it the LAST is — so a `cwd` the TOOL was handed loses to the envelope's either way, and
+# an event carrying no `tool_input` key at all — every host documents one, so this is a raw event
+# that no shipped wiring produces, its command ahead of the envelope keys — leaves `hd` empty and so
+# takes `##`, the cheap side for that shape (and the slow one if such an event ever led with its keys).
+key_val() { # $1 = key → its string value in `_v` ("" when the event carries no such key)
+  case "$hd" in
+    *"\"$1\""*) _v="${hd#*\"$1\"}" ;;
+    *) case "$input" in *"\"$1\""*) _v="${input##*\"$1\"}" ;; *) _v=""; return 0 ;; esac ;;
+  esac
+  _v="${_v#*\"}"; _v="${_v%%\"*}"
+}
 # The payload cwd, read here rather than with the other envelope keys below: a relative token and its
 # absolute twin in the same command are ONE path, so the dedup has to see the resolved form.
-cwd=""
-case "$input" in *'"cwd"'*) t="${input#*\"cwd\"}"; t="${t#*\"}"; cwd="${t%%\"*}" ;; esac
+key_val cwd; cwd="$_v"
 [ -n "$cwd" ] || cwd="$PWD"
 cwd="${cwd%/}"
 
@@ -119,6 +146,9 @@ for h in $hits; do
       while :; do case "$h" in ./*) h="${h#./}" ;; *) break ;; esac; done
       case "$h" in /*) ;; *) h="$cwd/$h" ;; esac
       while :; do case "$h" in */./*) h="${h%%/./*}/${h#*/./}" ;; *) break ;; esac; done
+      # A spill exists before the call that reads it is proposed, so a path that is not a file was
+      # only spelled — a prose mention or an about-to-be-written name — and --report may not pair it.
+      [ -f "$h" ] || continue
       [ "$np" -lt 8 ] || continue
       case "$seen" in *"|$h|"*) continue ;; esac
       seen="$seen|$h|"; np=$((np+1)); paths="$paths$h$IFS" ;;
@@ -129,10 +159,8 @@ unset IFS
 [ -n "$paths" ] || exit 0
 
 # tool_name off the raw event with parameter expansion only — one fork saved on a path that is
-# already fork-bound. FIRST occurrence of the key, so a command quoting the key name loses to the
-# real field on every host whose payload puts the envelope keys first (same for `cwd`, above).
-tool=Bash
-case "$input" in *'"tool_name"'*) t="${input#*\"tool_name\"}"; t="${t#*\"}"; tool="${t%%\"*}" ;; esac
+# already fork-bound.
+key_val tool_name; tool="$_v"
 # Codex spells the shell tool `shell` / `local_shell`; everything that is not a file reader is a
 # command, which is the only `tool` value whose `via` has to be classified.
 case "$tool" in Read) tool=Read ;; Grep) tool=Grep ;; *) tool=Bash ;; esac

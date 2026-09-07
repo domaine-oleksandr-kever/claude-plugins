@@ -155,6 +155,19 @@ if [ "$rc" -eq 0 ] && [ "$(grep -c Dev "$O")" = 1 ] && ! grep -q Live "$O"; then
 rc=0; FAKE_ROLE=MAIN "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
   --from "$TMP/snap.json" >"$O" 2>"$E" || rc=$?
 assert T5-live-refused 4 "$rc" "$E" "live_theme_write_refused"
+# T5b (bug): the gql guard compared the role literally against MAIN, so every other spelling the
+# Admin API or a cached listing can carry walked straight into a live-theme write. It now shares
+# the themecli branch's rule (live|main, any case).
+for r in main Main live Live; do
+  rc=0; FAKE_ROLE="$r" "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+    --from "$TMP/snap.json" >"$O" 2>"$E" || rc=$?
+  assert "T5b-gql-live-refused-$r" 4 "$rc" "$E" "live_theme_write_refused"
+done
+# T5c: a non-live role still writes — the widened rule must not swallow the ordinary target
+rc=0; FAKE_ROLE=UNPUBLISHED "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
+  --from "$TMP/snap.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":"upserted"' "$O"; then ok
+else bad T5c-gql-unpublished-writes "rc=$rc out=$(head -c 160 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 
 # T6: dev-theme write goes through the stub (regression)
 rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 --file templates/product.json \
@@ -874,12 +887,20 @@ case "${FAKE_EXEC_MODE:-garbage}" in
   # box-drawing bars; `gqlfail-noisy` is the phrase with nothing parseable behind it
   gqlfail) printf 'GraphQL operation failed\n│ {"errors":[{"message":"Field x does not exist"}]} │\n' >&2; exit 1 ;;
   gqlfail-noisy) printf 'GraphQL operation failed\n│ see the logs │\n' >&2; exit 1 ;;
+  # a CLI that prints the FULL envelope instead of today's bare data — the runner's wrap must
+  # recognize it rather than nest it one level deeper
+  ok-envelope) echo '{"data":{"ok":true}}'; exit 0 ;;
+  ok-errors)   echo '{"errors":[{"message":"Field x does not exist"}]}'; exit 0 ;;
 esac
 FAKE
 cat > "$SHIM/curl" <<'FAKE'
 #!/usr/bin/env bash
 # emulates the exact flags the runner uses: -o <file>, -w '%{http_code}', --data @file, -K <cfg>
 touch "${CURL_MARKER:-/dev/null}"
+# CURL_ARGV records the argv as handed over — the transport timeouts live nowhere else.
+# FAKE_CURL_RC is a transport failure (28 = --max-time expired), which produces no response file.
+[ -n "${CURL_ARGV:-}" ] && printf '%s\n' "$*" >> "$CURL_ARGV"
+[ -n "${FAKE_CURL_RC:-}" ] && exit "$FAKE_CURL_RC"
 out=""; data=""; cfg=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -1412,6 +1433,60 @@ rc=0; M="$TMP/m44nm"; GQL_TMPDIR="$QT44" CURL_MARKER="$M" FAKE_EXEC_MODE=gqlfail
 assert G44d-gql-error-noisy-mutation-stops 3 "$rc" "$E" "store_execute_failed_mutation"
 if [ ! -f "$M" ] && [ ! -f "$(gql_state "$QT44")/store-skip-test-store.myshopify.com" ]; then ok
 else bad G44d-no-fallback-no-mark "curl=$([ -f "$M" ] && echo yes || echo no) mark=$([ -f "$(gql_state "$QT44")/store-skip-test-store.myshopify.com" ] && echo yes || echo no)"; fi
+
+# G45 (pin): today's `store execute --json` prints BARE data and the runner wraps it into the
+# classic envelope
+rc=0; FAKE_EXEC_MODE=ok run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(jq -c . "$O" 2>/dev/null)" = '{"data":{"ok":true}}' ]; then ok
+else bad G45-bare-data-wrapped "rc=$rc out=$(head -c 120 "$O")"; fi
+# G45b (bug): a CLI that starts printing the full envelope itself must not be wrapped twice —
+# {"data":{"data":…}} is not an envelope any caller parses
+rc=0; FAKE_EXEC_MODE=ok-envelope run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(jq -c . "$O" 2>/dev/null)" = '{"data":{"ok":true}}' ]; then ok
+else bad G45b-envelope-not-double-wrapped "rc=$rc out=$(head -c 120 "$O")"; fi
+# G45c: same for an {"errors":…} envelope — it passes through, so callers still gate on .errors
+rc=0; FAKE_EXEC_MODE=ok-errors run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(jq -c '.errors[0].message' "$O" 2>/dev/null)" = '"Field x does not exist"' ] \
+   && ! grep -q '"data"' "$O"; then ok
+else bad G45c-errors-envelope-passthrough "rc=$rc out=$(head -c 120 "$O")"; fi
+
+# G46 (bug): curl carried no timeouts, so a stalled Admin API call hung the caller — and every
+# skill waiting on it — forever
+A46="$TMP/curl-argv46"; : > "$A46"
+rc=0; M="$TMP/m46"; CURL_MARKER="$M" CURL_ARGV="$A46" \
+  run_gql --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q -- '--connect-timeout 20' "$A46" && grep -q -- '--max-time 120' "$A46"; then ok
+else bad G46-curl-timeouts "rc=$rc argv=$(tr '\n' ';' < "$A46")"; fi
+
+# G46b: the timeout itself is a transport failure — no half-response reaches stdout as data,
+# and a QUERY carries no double-execution warning
+rc=0; FAKE_CURL_RC=28 run_gql --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+assert G46b-curl-timeout-rc 5 "$rc" "$E" "error=curl_transport_failed"
+if [ ! -s "$O" ] && ! grep -q 'hint=' "$E"; then ok
+else bad G46c-query-no-mutation-hint "out=$(head -c 80 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# G46d: a MUTATION that times out mid-flight may already have committed server-side — the caller
+# gets the same "verify before re-running" warning the store engine gives (G1)
+rc=0; FAKE_CURL_RC=28 run_gql --engine token --query mutation.graphql >"$O" 2>"$E" || rc=$?
+assert G46d-mutation-timeout-rc 5 "$rc" "$E" "error=curl_transport_failed"
+if grep -q 'hint=the mutation may already have been applied' "$E"; then ok
+else bad G46e-mutation-timeout-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G46f (bug): the hazard was read off the WHOLE document, so a timed-out QUERY selected out of a
+# mixed document claimed a mutation may have landed. Under --operation only the named block counts.
+rc=0; FAKE_CURL_RC=28 run_gql --engine token --query multi.graphql --operation FndA >"$O" 2>"$E" || rc=$?
+assert G46f-selected-query-timeout-rc 5 "$rc" "$E" "error=curl_transport_failed"
+if ! grep -q 'hint=' "$E"; then ok
+else bad G46f-selected-query-no-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G46h: a failure that never put the request on the wire (DNS, connect refused, TLS) leaves nothing
+# to have been applied — no hint, even for a mutation
+rc=0; FAKE_CURL_RC=7 run_gql --engine token --query mutation.graphql >"$O" 2>"$E" || rc=$?
+assert G46h-connect-failure-rc 5 "$rc" "$E" "error=curl_transport_failed"
+if ! grep -q 'hint=' "$E"; then ok
+else bad G46h-connect-failure-no-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G46g: the mutation block from that same document still warns
+rc=0; FAKE_CURL_RC=28 run_gql --engine token --query multi.graphql --operation FndB >"$O" 2>"$E" || rc=$?
+if grep -q 'hint=the mutation may already have been applied' "$E"; then ok
+else bad G46g-selected-mutation-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
 # ---------------------------------------- create-preview-theme.sh cap classifier --
 CAP_RE='theme limit|maximum number of themes|too many themes|may only have [0-9]+ themes'
@@ -3450,10 +3525,14 @@ else bad R1-report "rc=$rc lines=$lines out=$(head -c 400 "$O") err=$(head -c 12
 # so the whale must come back paired; recorded truncated it never could.
 RPD2="$TMP/report-rel"; mkdir -p "$RPD2"
 RPLOG2="$RPD2/fnd-mcp-slim-debug.log"
-cat > "$RPLOG2" <<'RPEOF'
-{"ts":"2026-01-01T09:00:00.000Z","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__get_metadata","decision":"passthrough","reason":"platform-overflow","bytes_in":1400,"bytes_out":1400,"pct":0,"stages":[],"spill":"/r/elc/.claude/fnd-tmp/tool-results/b1z10evqs.txt","ms":1}
+# The whale is a REAL file under a real cwd: the recorder drops a path that is not on disk, since
+# PreToolUse fires only after the platform wrote the spill.
+RPCWD="$RPD2/elc"; mkdir -p "$RPCWD/.claude/fnd-tmp/tool-results"
+: > "$RPCWD/.claude/fnd-tmp/tool-results/b1z10evqs.txt"
+cat > "$RPLOG2" <<RPEOF
+{"ts":"2026-01-01T09:00:00.000Z","project":"elc","lvl":1,"entry":"hook","tool":"mcp__x__get_metadata","decision":"passthrough","reason":"platform-overflow","bytes_in":1400,"bytes_out":1400,"pct":0,"stages":[],"spill":"$RPCWD/.claude/fnd-tmp/tool-results/b1z10evqs.txt","ms":1}
 RPEOF
-printf '%s' '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"jq . .claude/fnd-tmp/tool-results/b1z10evqs.txt"}}' \
+printf '%s' '{"cwd":"'"$RPCWD"'","tool_name":"Bash","tool_input":{"command":"jq . .claude/fnd-tmp/tool-results/b1z10evqs.txt"}}' \
   | env FND_MCP_SLIM_DIR="$RPD2" FND_MCP_SLIM_DEBUG=1 "$ROOT/plugins/fnd/hooks/spill-access.sh" >/dev/null 2>&1
 rc=0; node "$SLIM" --report "$RPLOG2" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -Fq 'never read by any tool): 0 of 1' "$O" \

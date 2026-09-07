@@ -44,6 +44,9 @@ const STUB_MARK = '<<fnd-mcp-slim stub>>';
 // under Codex's ~2500-token additionalContext budget, and anything past the cap is spilled by the
 // host anyway. Truncating here keeps the FIRST stubs whole rather than half of every one.
 const CONTEXT_CAP = 4096;
+// A hung child would hang Codex's hook forever; the timeout turns that into child.error → the
+// silent passthrough below. Same outer ceiling as hooks/cursor-shim.cjs.
+const SPAWN_TIMEOUT_MS = 30000;
 const HEADER =
   'fnd mcp-slim — the MCP result above was too large for context and was written to disk in full. ' +
   'This host cannot replace a tool result, so the raw result still stands: do not re-read it whole, ' +
@@ -63,6 +66,7 @@ function texts(value) {
 function run(raw) {
   const child = spawnSync(process.execPath, [SLIM], {
     input: raw,
+    timeout: SPAWN_TIMEOUT_MS,
     // The child mirrors whatever arrived, so its stdout is bounded by the result the host already
     // held in memory. A blown buffer surfaces as an error → nothing emitted → original survives.
     maxBuffer: 128 * 1024 * 1024,

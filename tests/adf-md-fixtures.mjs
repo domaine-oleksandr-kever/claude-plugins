@@ -217,6 +217,20 @@ check('m2a-table-notables', m2a('| A | B |\n| --- | --- |\n| 1 | 2 |', ['--no-ta
   ul([li([p([t('A: 1 · B: 2')])])]),
 ]));
 
+// a header-only table has no bullet to make: the labels become one paragraph. An empty
+// listItem would reach Jira as a stray bullet.
+check('m2a-header-only-table-notables', m2a('| H1 | H2 |\n| --- | --- |', ['--no-tables']),
+  doc([p([t('H1 · H2')])]));
+check('m2a-header-only-table-notables-no-bullet',
+  JSON.stringify(m2a('| H1 | H2 |\n| --- | --- |', ['--no-tables'])).includes('listItem'), false);
+// all-blank header: nothing to keep, so no node at all (the CLI's no-blocks gate then refuses)
+check('m2a-blank-header-only-table-notables', m2a('Intro\n\n|  |  |\n| --- | --- |', ['--no-tables']),
+  doc([p([t('Intro')])]));
+// the table form is untouched by any of this
+check('m2a-header-only-table', m2a('| H1 | H2 |\n| --- | --- |'), doc([
+  tbl([trow([th([p([t('H1')])]), th([p([t('H2')])])])]),
+]));
+
 // regression: heading, blockquote, rule
 check('m2a-blocks', m2a('# H1\n\n> quoted\n\n---'), doc([
   { type: 'heading', attrs: { level: 1 }, content: [t('H1')] },
@@ -1159,6 +1173,14 @@ for (const [label, md] of [
 for (const [label, md] of [['nbsp', NB], ['bare-marker', '-'], ['bare-quote', '>'], ['empty-fence', '```\n```\n']]) {
   check(`cli-nonblank-produces-block[${label}]`, JSON.parse(m2aCli(md).stdout).content.length > 0, true);
 }
+// the one source that really comes back blockless: an all-blank table under --no-tables, which
+// has neither a row to bullet nor a label to keep. Refused, never written back as an empty doc.
+{
+  const r = m2aCli('|  |  |\n| --- | --- |\n', ['--no-tables']);
+  check('cli-blank-table-notables-exit-2', r.status, 2);
+  check('cli-blank-table-notables-no-stdout', r.stdout, '');
+  check('cli-blank-table-notables-stderr', r.stderr, 'md-to-adf: error: input produced no ADF blocks (stdin)\n');
+}
 
 // An unrecognized flag used to be dropped on the floor (or read as the source path), so a typo
 // converted the wrong thing — or, with the file arg eaten, hung on stdin.
@@ -1206,28 +1228,29 @@ check('cli-bom-stripped-before-content', JSON.parse(m2aCli('\ufeff# H\n').stdout
 
 fs.rmSync(TMP, { recursive: true, force: true });
 
-// ---------------------------------------------------------- md-to-adf CLI EPIPE --
+// -------------------------------------------------------------- CLI EPIPE --
 // A reader that goes away mid-write (`| head`, a parent that destroys the pipe) is success, not
 // failure — without the guard the async EPIPE turns a fully-written stdout into exit 1.
-const cliWithClosedPipe = (md, which, args = []) => new Promise((resolve) => {
-  const child = spawn('node', [M2A, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
-  let stdout = '';
+const cliWithClosedPipe = (script, input, which, args = []) => new Promise((resolve) => {
+  const child = spawn('node', [script, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let stdout = '', stderr = '';
   if (which === 'stderr') {
     child.stderr.destroy();
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (d) => { stdout += d; });
   } else {
     child.stdout.destroy();
-    child.stderr.resume();
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (d) => { stderr += d; });
   }
   child.stdin.on('error', () => {}); // the child may exit before stdin drains
-  child.stdin.end(md);
+  child.stdin.end(input);
   // the EPIPE surfaces a tick after 'exit' — settle on 'close', when the streams are done
-  child.on('close', (code) => resolve({ code, stdout }));
+  child.on('close', (code) => resolve({ code, stdout, stderr }));
 });
 
 {
-  const r = await cliWithClosedPipe(BYTES_MD, 'stderr', ['--no-tables']);
+  const r = await cliWithClosedPipe(M2A, BYTES_MD, 'stderr', ['--no-tables']);
   check('cli-epipe-stderr-exit-0', r.code, 0);
   check('cli-epipe-stderr-stdout-intact', JSON.parse(r.stdout), m2a(BYTES_MD, ['--no-tables']));
 }
@@ -1236,8 +1259,27 @@ const cliWithClosedPipe = (md, which, args = []) => new Promise((resolve) => {
   // > 64 KB of markdown, so the stdout write really reaches the closed pipe instead of the
   // kernel buffer
   const big = 'lorem ipsum dolor sit amet consectetur adipiscing elit\n\n'.repeat(1400);
-  const r = await cliWithClosedPipe(big, 'stdout', ['--no-tables']);
+  const r = await cliWithClosedPipe(M2A, big, 'stdout', ['--no-tables']);
   check('cli-epipe-stdout-exit-0', r.code, 0);
+}
+
+{
+  // ~3 MB of markdown out of one write(): the reading side is gone, so the guard is the only
+  // thing between the consumer's early exit and an unhandled EPIPE
+  const bigDoc = doc(Array.from({ length: 55000 },
+    () => p([t('lorem ipsum dolor sit amet consectetur adipiscing elit')])));
+  const r = await cliWithClosedPipe(A2M, JSON.stringify(bigDoc), 'stdout');
+  check('cli-epipe-a2m-stdout-exit-0', r.code, 0);
+  check('cli-epipe-a2m-stdout-no-stderr', r.stderr, '');
+}
+
+{
+  // json-slim require()s adf-to-md as a library: importing it must not attach anything to the
+  // host process's streams (a stray exit-0 listener would swallow the HOST's write errors)
+  const probe = `const c = () => process.stdout.listenerCount('error') + process.stderr.listenerCount('error');`
+    + `const before = c(); require(${JSON.stringify(A2M)}); console.log(before + ' ' + c());`;
+  const r = spawnSync('node', ['-e', probe], { encoding: 'utf8' });
+  check('lib-require-a2m-adds-no-error-listeners', r.stdout.trim(), '0 0');
 }
 
 console.log(`adf-md fixtures: ${pass} passed, ${fail} failed`);

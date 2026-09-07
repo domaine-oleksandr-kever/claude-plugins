@@ -538,6 +538,16 @@ function adfToMarkdown(input) {
 module.exports = { adfToMarkdown, findDoc, renderBlock, inline, renderText, cardUrl };
 
 if (require.main === module) {
+  // A reader that goes away mid-write (`| head`, a spawned parent that destroys the pipe) is
+  // success, not failure: the EPIPE (Windows: `code: 'EOF'`) surfaces async and would otherwise
+  // crash the process after the consumer already got its bytes. CLI only — as a library
+  // (json-slim require()s this one) it must not attach listeners to the host's streams.
+  const quietOnEpipe = (s) => s.on('error', (e) => {
+    if (e && (e.code === 'EPIPE' || e.code === 'EOF')) process.exit(0);
+    throw e;
+  });
+  quietOnEpipe(process.stdout);
+  quietOnEpipe(process.stderr);
   const md = adfToMarkdown(readJSON());
   if (md == null) { process.stderr.write('adf-to-md: no ADF doc node found in input\n'); process.exit(1); }
   process.stdout.write(md + '\n');

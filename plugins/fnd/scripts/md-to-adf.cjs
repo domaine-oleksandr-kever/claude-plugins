@@ -553,7 +553,14 @@ function toADF(md, quoted) {
             .filter((s) => s !== '');
           return { type: 'listItem', content: [para(inlineNodes(parts.join(' · ')))] };
         }).filter((it) => it.content[0].content && it.content[0].content.length);
-        content.push({ type: 'bulletList', content: items.length ? items : [{ type: 'listItem', content: [para([])] }] });
+        if (items.length) {
+          content.push({ type: 'bulletList', content: items });
+        } else {
+          // Nothing but labels left (a header-only table): keep them as a paragraph. An empty
+          // listItem would render in Jira as a stray bullet, and an empty paragraph as nothing.
+          const labels = header.filter((c) => c !== '').join(' · ');
+          if (labels) content.push(para(inlineNodes(labels)));
+        }
       } else {
         const rows = [{
           type: 'tableRow',
@@ -635,8 +642,8 @@ if (isBlank(md)) {
 }
 
 const adf = toADF(md);
-// Backstop: every non-blank line the block parser sees pushes a node, so nothing reaches this
-// today — but a doc with no blocks is invalid ADF, and shipping one silently empties a field.
+// A doc with no blocks is invalid ADF, and shipping one silently empties a field. Reachable
+// from a source that is only a table with blank cells under --no-tables — refuse it loudly.
 if (adf.content.length === 0) {
   process.stderr.write('md-to-adf: error: input produced no ADF blocks (' + SOURCE + ')\n');
   process.exit(2);

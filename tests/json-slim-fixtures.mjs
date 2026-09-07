@@ -3493,24 +3493,52 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
   check('uf-typo', typo.status === 2 && /unknown option --jqq/.test(typo.stderr) && typo.stdout === '',
     `a typo'd flag must not fall through to a plain compression: ${typo.status} / ${JSON.stringify(typo.stderr)}`);
   // A single-dash token used to be resolved as the input PATH (ENOENT, exit 1);
-  // md-to-adf.cjs:77 rejects the same way, for the same reason.
-  const dashFirst = uf(['-h', f]);
-  const dashLast = uf([f, '-h']);
-  check('uf-single-dash', dashFirst.status === 2 && /unknown option -h/.test(dashFirst.stderr) && dashFirst.stdout === ''
-    && dashLast.status === 2 && /unknown option -h/.test(dashLast.stderr) && dashLast.stdout === '',
-    `-h must be a usage error in either position: ${dashFirst.status}/${JSON.stringify(dashFirst.stderr)} ${dashLast.status}/${JSON.stringify(dashLast.stderr)}`);
-  // `--help` used to HANG on stdin (REVIEW-2026-09.md:271); a bare `--` was silently ignored, so
-  // `-- file.json` compressed the file. The whitelist's diagnostic names every supported argument,
-  // which IS the usage message — no second usage path is needed.
-  const helps = [['--help'], ['-h'], ['--', f]].map((argv) => {
-    const t0 = Date.now();
-    const r = uf(argv);
-    return { r, ms: Date.now() - t0 };
-  });
-  check('uf-help-and-double-dash', helps.every(({ r, ms }) => r.status === 2 && /unknown option/.test(r.stderr) && r.stdout === '' && ms < 1000),
-    `--help, -h and a bare -- must each exit 2 promptly with no stdout: ${JSON.stringify(helps.map(({ r, ms }) => [r.status, r.stderr.trim().slice(0, 60), ms]))}`);
-  check('uf-names-supported', /--jq <jq-path> \| --stats \| --report \[logfile\] \| --since <ISO>/.test(toon.stderr),
+  // md-to-adf.cjs:77 rejects the same way, for the same reason. `-h` is the one exception — it is a
+  // flag now, covered by the help rows below.
+  const dashFirst = uf(['-x', f]);
+  const dashLast = uf([f, '-x']);
+  check('uf-single-dash', dashFirst.status === 2 && /unknown option -x/.test(dashFirst.stderr) && dashFirst.stdout === ''
+    && dashLast.status === 2 && /unknown option -x/.test(dashLast.stderr) && dashLast.stdout === '',
+    `-x must be a usage error in either position: ${dashFirst.status}/${JSON.stringify(dashFirst.stderr)} ${dashLast.status}/${JSON.stringify(dashLast.stderr)}`);
+  // A bare `--` was silently ignored, so `-- file.json` compressed the file. It is not a help
+  // spelling either: it stays the usage error the whitelist makes of every unnamed dashed token.
+  const dashDashT0 = Date.now();
+  const dashDash = uf(['--', f]);
+  const dashDashMs = Date.now() - dashDashT0;
+  check('uf-double-dash', dashDash.status === 2 && /unknown option --/.test(dashDash.stderr) && dashDash.stdout === '' && dashDashMs < 1000,
+    `a bare -- must exit 2 promptly with no stdout: ${dashDash.status}/${JSON.stringify(dashDash.stderr.trim().slice(0, 60))} ${dashDashMs}ms`);
+  check('uf-names-supported', /--jq <jq-path> \| --stats \| --report \[logfile\] \| --since <ISO> \| --help/.test(toon.stderr),
     `the diagnostic must name every supported argument: ${JSON.stringify(toon.stderr)}`);
+  // ---- `--help` / `-h`: a request, not a run ----
+  // Both spellings print the usage to STDOUT and exit 0, with nothing on stderr and no debug line —
+  // a help read must never reach the owner's `--report` as an event. And the answer comes BEFORE any
+  // input is read: a bare invocation reads stdin, so `--help` used to HANG.
+  // Hence the async child with an stdin pipe nobody ever closes — spawnSync would EOF stdin for us
+  // and prove nothing. It is killed if it stalls, which reports as `hung` rather than wedging CI.
+  {
+    const hdir = mkdtempSync(path.join(tmpdir(), 'jslim-help-'));
+    const probe = "const{spawn}=require('child_process');const c=spawn(process.execPath,[process.argv[1],process.argv[2]],"
+      + "{stdio:['pipe','pipe','pipe'],env:{...process.env,FND_MCP_SLIM_DIR:process.argv[3],FND_MCP_SLIM_DEBUG:'1'}});"
+      + "let o='',e='';c.stdout.on('data',d=>{o+=d});c.stderr.on('data',d=>{e+=d});"
+      + "let hung=false;const t=setTimeout(()=>{hung=true;c.kill('SIGKILL')},5000);"
+      + "c.on('close',(code)=>{clearTimeout(t);process.stdout.write(JSON.stringify({code,o,e,hung}))});";
+    const helps = ['--help', '-h'].map((flag) =>
+      JSON.parse(spawnSync(process.execPath, ['-e', probe, SLIM, flag, hdir], { encoding: 'utf8' }).stdout));
+    check('uf-help-usage-exit-0', helps.every((h) => h.code === 0 && h.e === '' && /^json-slim: usage: node json-slim\.cjs /.test(h.o)),
+      `--help and -h must print the usage on stdout and exit 0 with an open stdin: ${JSON.stringify(helps)}`);
+    check('uf-help-no-debug-line', readdirSync(hdir).length === 0,
+      `a help request is not a run — it must log nothing even with FND_MCP_SLIM_DEBUG=1: ${JSON.stringify(readdirSync(hdir))}`);
+    // ONE grammar string feeds both messages, so the usage and the rejection cannot drift apart.
+    const flagList = helps[0].o.split('\n')[0].replace(/^.*\[<file>\] \[/, '').replace(/\]$/, '');
+    check('uf-help-shares-flag-list', /^--jq /.test(flagList) && /--help$/.test(flagList) && toon.stderr.includes(flagList),
+      `the usage and the unknown-option diagnostic must name the same flags: ${JSON.stringify(flagList)} vs ${JSON.stringify(toon.stderr)}`);
+    // A flag's VALUE is not a flag here either — `--jq -h` asks for a path, not for help.
+    const jqDashH = uf(['--jq', '-h', f]);
+    check('uf-help-not-a-value', !/usage:/.test(jqDashH.stdout) && /--jq: '-h' not found/.test(jqDashH.stderr),
+      `-h as a --jq value stays that flag's value, not a help request: ${jqDashH.status}/${JSON.stringify(jqDashH.stdout.slice(0, 80))}/${JSON.stringify(jqDashH.stderr)}`);
+    rmSync(hdir, { recursive: true, force: true });
+  }
+
   // Nothing read, nothing printed, nothing written: no spill, no `.fnd-nogain-*`, no
   // `.fnd-whale-guide-*`, no debug log (debug is off in this dir).
   const before = readdirSync(dir).sort();

@@ -27,6 +27,12 @@ bad() { fail=$((fail + 1)); failures="${failures}  [$1] $2
 rc=0
 run() { rc=0; node "$DOCTOR" "$@" >"$O" 2>"$E" || rc=$?; }
 
+# The doctor reads process.platform where it matters and takes no platform flag, so a Windows run
+# is simulated by preloading the one property override into the same process.
+WIN_SHIM="$TMP/as-win32.cjs"
+printf "Object.defineProperty(process, 'platform', { value: 'win32' });\n" > "$WIN_SHIM"
+runwin() { rc=0; node --require "$WIN_SHIM" "$DOCTOR" "$@" >"$O" 2>"$E" || rc=$?; }
+
 # expect <label> <want-rc> [pattern ...] — every pattern must appear in stdout as a literal;
 # a pattern prefixed with ! must NOT appear.
 expect() {
@@ -190,6 +196,24 @@ expect D11-hooks-missing 1 "FAIL  hooks" "hooks/ unreadable"
 EH="$TMP/emptyhooks"; mkroot "$EH" "${ALL3[@]}"; rm -f "$EH/hooks/no-verify-bypass.sh" "$EH/hooks/mcp-slim.cjs"
 run --root "$EH"
 expect D12-hooks-no-scripts 1 "FAIL  hooks" "no hook scripts"
+
+# --------------------------------------------------------------------------------- platform --
+# D47: native Windows has no POSIX sh, so the shell half of the plugin cannot run there at all —
+# one verdict row naming the way out, on an otherwise healthy bundle. WSL is the only way out the
+# row may name: Git Bash ships no jq, which the same sentence lists as required.
+runwin --root "$G"
+expect D47-win32-one-verdict 1 "FAIL  platform" "POSIX shell" "WSL" "!Git Bash" "PASS  hooks" \
+  ", 1 failed,"
+
+# D47b: and nothing of the sort on the platforms that do have a shell.
+run --root "$G"
+expect D47b-native-no-platform-row 0 "!platform" "!FAIL"
+
+# D48: NTFS carries no mode bits, so the exec-bit test is meaningless there — the D9 bundle
+# (a .sh hook at 644) must not produce a "chmod +x" remedy nobody on Windows can follow.
+runwin --root "$H"
+expect D48-win32-no-exec-bit-rows 1 "FAIL  platform" "PASS  hooks" "!not executable" "!chmod +x" \
+  ", 1 failed,"
 
 # ------------------------------------------------------------------------- generated dirs ----
 # D13: before M4 nothing is generated — four SKIPs and a skipped sync check, exit 0.

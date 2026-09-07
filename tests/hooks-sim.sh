@@ -53,7 +53,11 @@
 #             pass through, string-aware + conservative extraction, workspace placement,
 #             spill-failure never blocks, and FND_PROMPT_JSON=0 disables the guard
 #             in-process (P5) — the spawn gate itself is a G case, since one node
-#             process now serves both prompt halves
+#             process now serves both prompt halves; P18–P20 the `.git/info/exclude`
+#             stamp a workspace spill owes (a fresh clone has none, so `git add -A`
+#             would take the paste), in the one bare spelling that also covers a
+#             worktree's SYMLINKED workspace and dedupes with worktree-setup.sh's own
+#             line, and which nothing but that spill even LOADS (P21)
 #   U cases — hooks/user-prompt.cjs, the merged UserPromptSubmit entry point: a guard
 #             block is the whole output and stops the monitor dead (no band state
 #             recorded for a prompt that never ran), each half rides its own switch,
@@ -73,9 +77,12 @@
 #   A cases — hooks/spill-access.sh, the PreToolUse spill-read recorder: a Bash/Read/Grep call
 #             touching one of the two spill families appends ONE `entry:"access"` JSONL line per
 #             distinct path to the compressor's own debug log (via = the reader that did it), while
-#             the gate, the debug switch, a json-slim run, a non-spill command and the other fnd-
-#             prefixes write nothing; plus the domaine.env precedence, the 5 MB rotation, JSON
-#             escaping, the no-node rule and the wiring gate
+#             the gate, the debug switch, a json-slim run, a non-spill command, the other fnd-
+#             prefixes and a path that is not a file on disk write nothing; plus the domaine.env
+#             precedence, the 5 MB rotation, JSON escaping, the 16 KB harvest cap (and the record
+#             surviving the byte-cut it can leave through a multibyte character), the cost of a
+#             path-dense command in EITHER envelope order — an event carrying no tool_input key at
+#             all included — the no-node rule and the wiring gate
 #   T cases — hooks/subagent-conventions.sh: the untrusted-content rail reaches EVERY agent
 #             type; the code conventions only code-writing / unknown ones, with the read-only
 #             readers AND jira-writer exempt from those; FND_LEAN=0 drops lean-code, the hook
@@ -2293,6 +2300,86 @@ if [ "$(id -u)" = 0 ]; then ok; ok; else
   else bad P17-symlink-not-followed "a planted link was written through (victim='$(cat "$victim")' reason='$out17')"; fi
 fi
 
+# P18: the workspace spill lands INSIDE the repo tree, and `.claude/tasks/` is git-ignored only once
+# a skill has stamped `.git/info/exclude` — in a fresh clone nothing has, so the pasted blob (API
+# tokens, customer records) would ride along in the next `git add -A`. The guard stamps it itself.
+PJG="$TMP/pj-git"; mkdir -p "$PJG/.claude/tasks/ELC-500"
+git -C "$PJG" init -q 2>/dev/null
+in="$(mk 20000 25000 "$PJG" "$PJD/p18.json")"
+p="$(reason_path "$(run_guard "$in")")"
+case "$p" in *"/.claude/tasks/ELC-500/tmp/"*) ok ;; *) bad P18-workspace "blob not in workspace tmp (p='$p')" ;; esac
+if [ -n "$p" ] && [ "$(ls -l "$p" | cut -c1-10)" = "-rw-------" ]; then ok
+else bad P18-mode-0600 "spilled paste is not 0600 (p='$p' mode=$(ls -l "$p" 2>&1 | cut -c1-10))"; fi
+if git -C "$PJG" check-ignore -q .claude/tasks; then ok; else bad P18-excluded "git still sees the spill dir"; fi
+assert_eq P18-status-clean "$(git -C "$PJG" status --porcelain | grep -c '\.claude' | tr -d ' \n')" 0
+
+# P19: git's own verdict decides, so a second paste into an already-stamped workspace appends nothing
+in="$(mk 20000 25000 "$PJG" "$PJD/p19.json")"
+run_guard "$in" >/dev/null
+assert_eq P19-not-duplicated "$(grep -c '^\.claude/tasks$' "$PJG/.git/info/exclude" | tr -d ' \n')" 1
+
+# P19b: in a worktree the workspace is a SYMLINK to the main checkout's shared one (scripts/
+# worktree-setup.sh hangs it there), and an anchored, trailing-slashed pattern matches DIRECTORIES
+# only — a link is not one, so the stamp was a permanent no-op exactly where a spilled paste is most
+# exposed. The line written is worktree-setup.sh's own, bare, which matches the link.
+PJL="$TMP/pj-link"; PJLS="$TMP/pj-shared"
+mkdir -p "$PJL/.claude" "$PJLS/ELC-502"
+ln -s "$PJLS" "$PJL/.claude/tasks"
+git -C "$PJL" init -q 2>/dev/null
+p="$(reason_path "$(run_guard "$(mk 20000 25000 "$PJL" "$PJD/p19b.json")")")"
+case "$p" in *"/ELC-502/tmp/"*) ok ;; *) bad P19b-workspace "blob not in the linked workspace (p='$p')" ;; esac
+if git -C "$PJL" check-ignore -q .claude/tasks; then ok; else bad P19b-excluded "git still sees the linked workspace"; fi
+assert_eq P19b-one-line "$(grep -c '^\.claude/tasks$' "$PJL/.git/info/exclude" | tr -d ' \n')" 1
+
+# P19c: …and it is the line worktree-setup.sh writes byte for byte, so the two writers dedupe on each
+# other — a workspace that script already stamped gets nothing appended, in neither spelling.
+PJW="$TMP/pj-wt"; mkdir -p "$PJW/.claude/tasks/ELC-503"
+git -C "$PJW" init -q 2>/dev/null
+printf '.claude/tasks\n' >> "$PJW/.git/info/exclude"
+run_guard "$(mk 20000 25000 "$PJW" "$PJD/p19c.json")" >/dev/null
+assert_eq     P19c-not-duplicated "$(grep -c '^\.claude/tasks$' "$PJW/.git/info/exclude" | tr -d ' \n')" 1
+assert_absent P19c-one-spelling   "$(cat "$PJW/.git/info/exclude")" '/.claude/tasks/'
+
+# P19d: the session's project dir may sit BELOW the repo root (`cd packages/theme && claude`), and a
+# pattern carrying an interior slash is read from the root wherever it is written — the bare line
+# would name the ROOT's `.claude/tasks` and leave this one exposed, self-sealed by the scan that then
+# sees a stamp already there. Anchoring it at the prefix git reports for the dir is what makes it
+# match; still no trailing slash, so the worktree's symlinked workspace matches in this shape too.
+PJN="$TMP/pj-nested"; PJNS="$TMP/pj-nested-shared"
+mkdir -p "$PJN/packages/theme/.claude" "$PJNS/ELC-504"
+ln -s "$PJNS" "$PJN/packages/theme/.claude/tasks"
+git -C "$PJN" init -q 2>/dev/null
+p="$(reason_path "$(run_guard "$(mk 20000 25000 "$PJN/packages/theme" "$PJD/p19d.json")")")"
+case "$p" in *"/ELC-504/tmp/"*) ok ;; *) bad P19d-workspace "blob not in the nested workspace (p='$p')" ;; esac
+if git -C "$PJN/packages/theme" check-ignore -q .claude/tasks; then ok
+else bad P19d-excluded "git still sees the nested workspace"; fi
+assert_eq P19d-anchored "$(grep -c '^/packages/theme/\.claude/tasks$' "$PJN/.git/info/exclude" | tr -d ' \n')" 1
+
+# P20: outside a repo there is nothing to exclude from — the paste is still saved, and git's
+# complaint never reaches stderr (a hook that leaked it would be noisy on every pasted blob)
+PJNG="$TMP/pj-nogit"; mkdir -p "$PJNG/.claude/tasks/ELC-501"
+in="$(mk 20000 25000 "$PJNG" "$PJD/p20.json")"
+out="$(printf '%s' "$in" | env TMPDIR="$PJD" node "$GUARD" 2>"$TMP/pj-nogit.err")"
+p="$(reason_path "$out")"
+case "$p" in *"/.claude/tasks/ELC-501/tmp/"*) ok ;; *) bad P20-nogit-spill "blob not saved without a repo (p='$p')" ;; esac
+assert_eq P20-nogit-silent "$(cat "$TMP/pj-nogit.err")" ""
+
+# P21: the stamp costs two git forks, so only a spill into the tree may pay them — this hook runs on
+# EVERY prompt. Probe the module graph the way D12d does: neither a passing prompt nor the tmpdir
+# fallback may so much as LOAD the hygiene module.
+P21P="$TMP/p21-probe.cjs"
+cat > "$P21P" <<'PROBEJS'
+const Module = require('module');
+const load = Module._load;
+Module._load = function (request) {
+  if (/scratch-hygiene\.cjs$/.test(request)) process.stderr.write('LOADED-HYGIENE\n');
+  return load.apply(this, arguments);
+};
+PROBEJS
+probe_err() { printf '%s' "$1" | env TMPDIR="$PJD" node --require "$P21P" "$GUARD" 2>&1 >/dev/null; }
+assert_absent P21-passthrough-no-hygiene "$(probe_err "$(mk 4000 15000 "$PJD" "$PJD/p21.json")")" "LOADED-HYGIENE"
+assert_absent P21b-tmpdir-no-hygiene     "$(probe_err "$(mk 20000 25000 "$PJD/nowhere" "$PJD/p21b.json")")" "LOADED-HYGIENE"
+
 # ═══ U — UserPromptSubmit merged entry point (hooks/user-prompt.cjs) ════════
 # One node process runs both halves. The contract under test: a guard BLOCK is the whole
 # output and stops the monitor dead (a blocked prompt never reaches the model, so its band
@@ -2705,11 +2792,22 @@ assert_eq     D12d-still-stamped "$(excl_hits "$DGIT3")" 1
 # tool-results file). These cases pin the line this hook writes so that pairing can happen.
 SPA="$ROOT/plugins/fnd/hooks/spill-access.sh"
 SPA_HEX=0123456789abcdef
-SPA_HOOK="/h/fnd-mcp-slim-$SPA_HEX.json"     # our own content-addressed spill
+# Every spill a case names is a REAL file: PreToolUse fires after the platform wrote the whale, so a
+# path that is not on disk was only spelled and is not recorded (A27) — a fixture spelling one would
+# assert nothing. `elc-theme` / `elc` stand in for the payload cwd where a case names a spill
+# relative to it, and `x` for the envelope paths that must never be harvested.
+SPA_FS="$TMP/spa-fs"
+mkdir -p "$SPA_FS/h" "$SPA_FS/p/tool-results" "$SPA_FS/x/tool-results" "$SPA_FS/we\\ird" \
+  "$SPA_FS/elc-theme/.claude/fnd-tmp" "$SPA_FS/elc/.claude/fnd-tmp" "$SPA_FS/elc/tmp/tool-results"
+SPA_HOOK="$SPA_FS/h/fnd-mcp-slim-$SPA_HEX.json"   # our own content-addressed spill
 # The platform's overflow file: ANY name under a tool-results/ dir (the real ones are 9 random
 # characters). The recorder may never be narrower than mcp-slim.cjs's OVERFLOW_PATH, which is what
 # writes the `spill` value --report pairs this line with.
-SPA_PLAT="/p/tool-results/b1z10evqs.txt"
+SPA_PLAT="$SPA_FS/p/tool-results/b1z10evqs.txt"
+for f in "$SPA_HOOK" "$SPA_PLAT" "$SPA_FS/we\\ird/fnd-mcp-slim-$SPA_HEX.json" \
+  "$SPA_FS/x/tool-results/9ab3cdefg.jsonl" "$SPA_FS/elc/tmp/tool-results/b1z10evqs.txt" \
+  "$SPA_FS/elc-theme/.claude/fnd-tmp/fnd-mcp-slim-$SPA_HEX.json" \
+  "$SPA_FS/elc/.claude/fnd-tmp/fnd-mcp-slim-$SPA_HEX.json"; do : > "$f"; done
 spa_dir=0; spa_d=""; spa_ec=0
 spa_run() { # $1 = payload, rest = extra env → runs the hook into a fresh log dir ($spa_d)
   spa_dir=$((spa_dir+1))
@@ -2789,9 +2887,9 @@ assert_contains A10-argv-via   "$out" '"via":"grep"'
 
 # A11: a path carrying a backslash still produces PARSEABLE JSON — the log is machine-read by
 # --report, so a broken line would take the whole window with it.
-spa_run '{"tool_name":"Read","tool_input":{"file_path":"/we\\ird/fnd-mcp-slim-'"$SPA_HEX"'.json"},"cwd":"/r/elc"}'; d="$spa_d"
-if node -e 'const l=require("fs").readFileSync(process.argv[1],"utf8").trim();const o=JSON.parse(l);process.exit(o.spill==="/we\\ird/fnd-mcp-slim-0123456789abcdef.json"?0:1)' \
-     "$d/fnd-mcp-slim-debug.log" 2>/dev/null; then ok
+spa_run '{"tool_name":"Read","tool_input":{"file_path":"'"$SPA_FS"'/we\\ird/fnd-mcp-slim-'"$SPA_HEX"'.json"},"cwd":"/r/elc"}'; d="$spa_d"
+if node -e 'const l=require("fs").readFileSync(process.argv[1],"utf8").trim();const o=JSON.parse(l);process.exit(o.spill===process.argv[2]?0:1)' \
+     "$d/fnd-mcp-slim-debug.log" "$SPA_FS/we\\ird/fnd-mcp-slim-$SPA_HEX.json" 2>/dev/null; then ok
 else bad A11-json-escaping "the escaped path did not round-trip: $(spa_log "$d")"; fi
 
 # A12: no `cwd` in the payload → the project tag falls back to this process's own directory.
@@ -2884,22 +2982,26 @@ if [ -s "$TMP/spa.mark" ]; then ok; else bad A17-spawn "the wiring did not run t
 
 # A18: the platform names its overflow files opaquely — the pairing key is whatever mcp-slim's
 # OVERFLOW_PATH captured, so every filename under a tool-results/ dir counts, not just `mcp-*.txt`.
-for spill in /p/tool-results/b1z10evqs.txt /p/tool-results/webfetch-3.pdf /p/tool-results/bacboxujh; do
+for spill in "$SPA_FS/p/tool-results/b1z10evqs.txt" "$SPA_FS/p/tool-results/webfetch-3.pdf" "$SPA_FS/p/tool-results/bacboxujh"; do
+  : > "$spill"
   spa_run '{"tool_name":"Bash","tool_input":{"command":"jq . '"$spill"'"},"cwd":"/r/elc"}'
-  assert_contains "A18-$spill" "$(spa_log "$spa_d")" "\"spill\":\"$spill\""
+  assert_contains "A18-${spill##*/}" "$(spa_log "$spa_d")" "\"spill\":\"$spill\""
 done
 
 # A19: a glob is NOT a path. Left to the shell it would expand against the real directory and record
 # every whale in it as read — one `rm <dir>/tool-results/*` would clear a whole session's misses.
+# Files named literally `*.txt` and `$VAR.txt` sit in that directory, so the existence gate (A27)
+# accepts both tokens and only the metachar rail can still drop them.
 SPA_GLOB="$TMP/spa-glob/tool-results"; mkdir -p "$SPA_GLOB"
 for n in a b c; do : > "$SPA_GLOB/spill-$n.txt"; done
-spa_run '{"tool_name":"Bash","tool_input":{"command":"wc -c '"$SPA_GLOB"'/*.txt"},"cwd":"/r/elc"}'; d="$spa_d"
+: > "$SPA_GLOB/*.txt"; : > "$SPA_GLOB/\$VAR.txt"
+spa_run '{"tool_name":"Bash","tool_input":{"command":"wc -c '"$SPA_GLOB"'/*.txt '"$SPA_GLOB"'/$VAR.txt"},"cwd":"/r/elc"}'; d="$spa_d"
 if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A19-glob "a glob was expanded into $(spa_lines "$d") access lines"; else ok; fi
 
 # A20: a call may never append more than json-slim's own SPILL_LOG_MAX (8) lines to the shared log —
 # one path-rich command must not be able to grow it toward the rotation cap on its own.
 spa_cmd="cat"; i=0
-while [ "$i" -lt 12 ]; do spa_cmd="$spa_cmd /p/tool-results/w$i.txt"; i=$((i+1)); done
+while [ "$i" -lt 12 ]; do : > "$SPA_FS/p/tool-results/w$i.txt"; spa_cmd="$spa_cmd $SPA_FS/p/tool-results/w$i.txt"; i=$((i+1)); done
 spa_run '{"tool_name":"Bash","tool_input":{"command":"'"$spa_cmd"'"},"cwd":"/r/elc"}'
 assert_eq A20-cap "$(spa_lines "$spa_d")" 8
 
@@ -2950,7 +3052,7 @@ assert_contains A23-newline-verb "$(spa_log "$spa_d")" '"via":"named"'
 # dir is not a file anyone read, and the `node` inside a directory name is not the reader that read it.
 spa_run '{"session_id":"s","transcript_path":"/x/t.jsonl","cwd":"/Users/me/node.js/elc","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -f '"$SPA_PLAT"'"}}'
 assert_contains A24-cwd-not-a-verb "$(spa_log "$spa_d")" '"via":"named"'
-spa_run '{"session_id":"s","transcript_path":"/x/tool-results/9ab3cdefg.jsonl","cwd":"/r/elc","hook_event_name":"PreToolUse","tool_name":"Grep","tool_input":{"pattern":"error","path":"/repo/src"}}'; d="$spa_d"
+spa_run '{"session_id":"s","transcript_path":"'"$SPA_FS"'/x/tool-results/9ab3cdefg.jsonl","cwd":"/r/elc","hook_event_name":"PreToolUse","tool_name":"Grep","tool_input":{"pattern":"error","path":"/repo/src"}}'; d="$spa_d"
 if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A24-transcript "an envelope path was recorded as a read: $(spa_log "$d")"; else ok; fi
 spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cp '"$SPA_PLAT"' /proj/node/fixture.json"}}'
 assert_contains A24-arg-not-a-verb "$(spa_log "$spa_d")" '"via":"named"'
@@ -2968,12 +3070,12 @@ assert_contains A25-nohome-line   "$(spa_log "$d")" '"entry":"access"'
 # A26 (bug): a spill named RELATIVE to the payload cwd. The harvest used to demand a leading `/`, so
 # `.claude/fnd-tmp/fnd-mcp-slim-<hash>.json` was recorded as `/fnd-tmp/fnd-mcp-slim-<hash>.json` — a
 # path --report can never pair with the producer's absolute `spill`, i.e. the whale reads as unread.
-spa_run '{"cwd":"/r/elc-theme","tool_name":"Bash","tool_input":{"command":"wc -l .claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'; d="$spa_d"
+spa_run '{"cwd":"'"$SPA_FS"'/elc-theme","tool_name":"Bash","tool_input":{"command":"wc -l .claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'; d="$spa_d"
 assert_eq       A26-rel-one-line "$(spa_lines "$d")" 1
-assert_contains A26-rel-hook     "$(spa_log "$d")" "\"spill\":\"/r/elc-theme/.claude/fnd-tmp/fnd-mcp-slim-$SPA_HEX.json\""
+assert_contains A26-rel-hook     "$(spa_log "$d")" "\"spill\":\"$SPA_FS/elc-theme/.claude/fnd-tmp/fnd-mcp-slim-$SPA_HEX.json\""
 assert_contains A26-rel-via      "$(spa_log "$d")" '"via":"shell"'
-spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"jq . tmp/tool-results/b1z10evqs.txt"}}'
-assert_contains A26-rel-platform "$(spa_log "$spa_d")" '"spill":"/r/elc/tmp/tool-results/b1z10evqs.txt"'
+spa_run '{"cwd":"'"$SPA_FS"'/elc","tool_name":"Bash","tool_input":{"command":"jq . tmp/tool-results/b1z10evqs.txt"}}'
+assert_contains A26-rel-platform "$(spa_log "$spa_d")" "\"spill\":\"$SPA_FS/elc/tmp/tool-results/b1z10evqs.txt\""
 # …the absolute form is recorded untouched: neither a `full=` prefix nor a glued redirect may ride
 # along, or the record stops being the producer's path and the pairing is lost the other way round
 spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat full='"$SPA_PLAT"'"}}'
@@ -2984,14 +3086,106 @@ assert_contains A26-abs-redirect "$(spa_log "$spa_d")" "\"spill\":\"$SPA_PLAT\""
 spa_run '{"cwd":"'"${SPA_PLAT%/tool-results/*}"'","tool_name":"Bash","tool_input":{"command":"cat tool-results/b1z10evqs.txt '"$SPA_PLAT"'"}}'
 assert_eq A26-rel-dedup "$(spa_lines "$spa_d")" 1
 # …which holds for the `./` spelling too, and no `/./` survives into the record
-spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat ./.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'
-assert_contains A26-rel-dotslash "$(spa_log "$spa_d")" "\"spill\":\"/r/elc/.claude/fnd-tmp/fnd-mcp-slim-$SPA_HEX.json\""
-spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat ./.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json /r/elc/.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'
+spa_run '{"cwd":"'"$SPA_FS"'/elc","tool_name":"Bash","tool_input":{"command":"cat ./.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'
+assert_contains A26-rel-dotslash "$(spa_log "$spa_d")" "\"spill\":\"$SPA_FS/elc/.claude/fnd-tmp/fnd-mcp-slim-$SPA_HEX.json\""
+spa_run '{"cwd":"'"$SPA_FS"'/elc","tool_name":"Bash","tool_input":{"command":"cat ./.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json '"$SPA_FS"'/elc/.claude/fnd-tmp/fnd-mcp-slim-'"$SPA_HEX"'.json"}}'
 assert_eq A26-rel-dotslash-dedup "$(spa_lines "$spa_d")" 1
 # …but a token the shell would still have to expand is no path at all: joining `~`, a `$VAR`, a URL or
 # a parent-walk to the cwd invents a read of a file nobody named, so all four are dropped.
-spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat ~/.claude/projects/p/tool-results/abc.txt $TMPDIR/tool-results/x.txt ../tool-results/y.txt https://cdn.example/tool-results/z.txt"}}'; d="$spa_d"
+# Each token is planted on disk under its LITERAL spelling, so the existence gate cannot be what drops it.
+mkdir -p "$SPA_FS/elc/~/.claude/projects/p/tool-results" "$SPA_FS/elc/\$TMPDIR/tool-results" "$SPA_FS/tool-results" "$SPA_FS/elc/https:/cdn.example/tool-results"
+: > "$SPA_FS/elc/~/.claude/projects/p/tool-results/abc.txt"; : > "$SPA_FS/elc/\$TMPDIR/tool-results/x.txt"; : > "$SPA_FS/tool-results/y.txt"; : > "$SPA_FS/elc/https:/cdn.example/tool-results/z.txt"
+spa_run '{"cwd":"'"$SPA_FS"'/elc","tool_name":"Bash","tool_input":{"command":"cat ~/.claude/projects/p/tool-results/abc.txt $TMPDIR/tool-results/x.txt ../tool-results/y.txt https://cdn.example/tool-results/z.txt"}}'; d="$spa_d"
 if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A26-rel-dropped "an unresolvable token was recorded as a read: $(spa_log "$d")"; else ok; fi
+
+# A27 (bug): a path that is not on disk. PreToolUse fires AFTER the platform wrote the spill, so a
+# `tool-results/` string a command merely spells — prose in an `echo`, a name about to be created —
+# was never read, and recording it made --report count a recovery that never happened.
+spa_run '{"tool_name":"Bash","tool_input":{"command":"echo docs about '"$SPA_FS"'/p/tool-results/gone.txt"},"cwd":"/r/elc"}'; d="$spa_d"
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A27-ghost "a path that is not on disk was recorded: $(spa_log "$d")"; else ok; fi
+# …and a DIRECTORY under a tool-results/ dir is not the spill either
+mkdir -p "$SPA_FS/p/tool-results/nested"
+spa_run '{"tool_name":"Bash","tool_input":{"command":"wc -l '"$SPA_FS"'/p/tool-results/nested"},"cwd":"/r/elc"}'; d="$spa_d"
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A27-dir "a directory was recorded as a spill read: $(spa_log "$d")"; else ok; fi
+# …while the same command over a spill that IS on disk is recorded exactly as before
+spa_run '{"tool_name":"Bash","tool_input":{"command":"echo docs about '"$SPA_PLAT"'"},"cwd":"/r/elc"}'; d="$spa_d"
+assert_eq       A27-real-one-line "$(spa_lines "$d")" 1
+assert_contains A27-real-spill    "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
+assert_contains A27-real-via      "$(spa_log "$d")" '"via":"named"'
+
+# A28: only the first 16 KB of the tool_input slice is harvested, so a path-dense command cannot walk
+# the grep — and the loop over its output — unbounded on a hook that fires on every Bash call. A spill
+# that IS on disk but sits past the cap is what tells the cap apart from the existence gate above:
+# uncapped it is recorded too.
+: > "$SPA_FS/p/tool-results/far.txt"
+spa_pad=" zzzz"; while [ "${#spa_pad}" -lt 17000 ]; do spa_pad="$spa_pad$spa_pad"; done
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"cat '"$SPA_PLAT$spa_pad"' '"$SPA_FS"'/p/tool-results/far.txt"}}'; d="$spa_d"
+assert_eq       A28-one-line "$(spa_lines "$d")" 1
+assert_contains A28-in-cap   "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
+assert_absent   A28-past-cap "$(spa_log "$d")" "far.txt"
+
+# A29: the hook stays out of the way of the call it measures whichever ORDER the host writes the
+# envelope in. Every `${input#*"cwd"}` walks one prefix per character until the key matches, so a
+# `cwd` key BEHIND a 60 KB command cost 1.8 s in bash and 11 s in dash — reading each envelope key
+# off the side it sits on is what keeps both orders flat. The w0–w11 spills A20 created lead the
+# command, so the 8 the record cap admits still land, and `project` proves the cwd was still found.
+spa_cmd="cat"; i=0
+while [ "$i" -lt 12 ]; do spa_cmd="$spa_cmd $SPA_FS/p/tool-results/w$i.txt"; i=$((i+1)); done
+while [ "${#spa_cmd}" -lt 61440 ]; do spa_cmd="$spa_cmd $SPA_FS/p/tool-results/pad$i.txt"; i=$((i+1)); done
+for spa_shape in leading trailing; do
+  case "$spa_shape" in
+    leading) spa_pay='{"session_id":"s","cwd":"/r/elc","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"'"$spa_cmd"'"}}' ;;
+    *)       spa_pay='{"tool_name":"Bash","tool_input":{"command":"'"$spa_cmd"'"},"cwd":"/r/elc"}' ;;
+  esac
+  spa_tf="${TIMEFORMAT:-}"; TIMEFORMAT='%3R'   # timed in place: `$( )` would lose spa_run's state
+  { time spa_run "$spa_pay"; } 2>"$TMP/spa.time"
+  TIMEFORMAT="$spa_tf"; spa_el="$(cat "$TMP/spa.time")"; d="$spa_d"
+  if awk -v t="$spa_el" 'BEGIN { exit !(t + 0 < 0.75) }' </dev/null; then ok
+  else bad "A29-wall-clock-$spa_shape" "a 60 KB path-dense command took ${spa_el}s (budget 0.750)"; fi
+  assert_eq       "A29-exit-$spa_shape"    "$spa_ec" 0
+  assert_eq       "A29-cap-$spa_shape"     "$(spa_lines "$d")" 8
+  assert_contains "A29-first-$spa_shape"   "$(spa_log "$d")" "\"spill\":\"$SPA_FS/p/tool-results/w0.txt\""
+  assert_contains "A29-project-$spa_shape" "$(spa_log "$d")" '"project":"elc"'
+done
+# …and a `cwd` the TOOL was handed loses to the envelope's own, which is the one this hook documents
+spa_run '{"tool_name":"Bash","tool_input":{"cwd":"/nested","command":"jq . '"$SPA_PLAT"'"},"cwd":"/r/elc"}'
+assert_contains A29-envelope-cwd-wins "$(spa_log "$spa_d")" '"project":"elc"'
+# …and an event with NO `tool_input` key at all — a raw host event, the shape a shim that stopped
+# normalizing would hand over — is the same flat cost: `hd` is empty there, so the envelope keys
+# behind the command are read off the cheap side rather than scanned for from the front.
+spa_cmd="cat"; i=0
+while [ "$i" -lt 12 ]; do spa_cmd="$spa_cmd $SPA_FS/p/tool-results/w$i.txt"; i=$((i+1)); done
+while [ "${#spa_cmd}" -lt 61440 ]; do spa_cmd="$spa_cmd $SPA_FS/p/tool-results/pad$i.txt"; i=$((i+1)); done
+spa_tf="${TIMEFORMAT:-}"; TIMEFORMAT='%3R'
+{ time spa_run '{"command":"'"$spa_cmd"'","cwd":"/r/elc"}'; } 2>"$TMP/spa.time"
+TIMEFORMAT="$spa_tf"; spa_el="$(cat "$TMP/spa.time")"; d="$spa_d"
+if awk -v t="$spa_el" 'BEGIN { exit !(t + 0 < 0.75) }' </dev/null; then ok
+else bad A29-wall-clock-no-tool-input "a 60 KB command with no tool_input key took ${spa_el}s (budget 0.750)"; fi
+assert_eq       A29-cap-no-tool-input     "$(spa_lines "$d")" 8
+assert_contains A29-project-no-tool-input "$(spa_log "$d")" '"project":"elc"'
+# …and the same raw event with its envelope keys AHEAD of the command: `hd` is then built from the
+# `command` key, so those keys are read off the short prefix rather than scanned for from the end.
+spa_tf="${TIMEFORMAT:-}"; TIMEFORMAT='%3R'
+{ time spa_run '{"cwd":"/r/elc","tool_name":"Bash","command":"'"$spa_cmd"'"}'; } 2>"$TMP/spa.time"
+TIMEFORMAT="$spa_tf"; spa_el="$(cat "$TMP/spa.time")"; d="$spa_d"
+if awk -v t="$spa_el" 'BEGIN { exit !(t + 0 < 0.75) }' </dev/null; then ok
+else bad A29-wall-clock-no-tool-input-keys-first "a 60 KB command with no tool_input key and leading envelope keys took ${spa_el}s (budget 0.750)"; fi
+assert_eq       A29-cap-no-tool-input-keys-first     "$(spa_lines "$d")" 8
+assert_contains A29-project-no-tool-input-keys-first "$(spa_log "$d")" '"project":"elc"'
+
+# A30: the 16 KB cap counts BYTES, so it can cut through the middle of a multibyte character and hand
+# grep a tail that is not valid UTF-8. GNU grep answers a binary stdin with a single "matches" line
+# instead of the -o matches, which would drop the WHOLE call's record — the spill named long before
+# the cut included. LC_ALL=C on the harvest is what holds that off there; on this host the case is a
+# pin that the cut itself changes nothing. The `…` starts at byte 16382 of the tool_input slice, so
+# the cap keeps two of its three bytes.
+spa_pre=':{"command":"cat '"$SPA_PLAT"' '
+spa_pad="$(printf '%*s' "$(( 16382 - ${#spa_pre} ))" '' | tr ' ' z)"
+spa_run '{"tool_name":"Bash","tool_input":{"command":"cat '"$SPA_PLAT"' '"$spa_pad$(printf '\342\200\246')"'z"},"cwd":"/r/elc"}'; d="$spa_d"
+assert_eq       A30-exit      "$spa_ec" 0
+assert_eq       A30-stderr    "$(cat "$TMP/spa.err")" ""
+assert_eq       A30-one-line  "$(spa_lines "$d")" 1
+assert_contains A30-spill     "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
 
 # ── H1–H14: FND_HOST_TRACE, the host-proof log ───────────────────────────────
 # hooks/host-trace.{sh,cjs} are exercised DIRECTLY here — the guards and node hooks that call them
@@ -3418,7 +3612,7 @@ HGSP="$ROOT/plugins/fnd/hooks/spill-access.sh"
 HG_NVBLOCK='{"tool_name":"Bash","tool_input":{"command":"git commit --no-verify -m x"}}'
 HG_NVPASS='{"tool_name":"Bash","tool_input":{"command":"ls -la /tmp"}}'
 HG_ATBLOCK='{"tool_name":"Bash","tool_input":{"command":"git commit -m \"x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\""}}'
-HG_SPILL='{"cwd":"/r/elc","tool_name":"Read","tool_input":{"file_path":"/p/tool-results/b1z10evqs.txt"}}'
+HG_SPILL='{"cwd":"/r/elc","tool_name":"Read","tool_input":{"file_path":"'"$SPA_PLAT"'"}}'
 hg_n=0; hg_d=""; hg_ec=0
 hg_run() { # $1 = hook, $2 = stdin, rest = env assignments → $hg_d, $hg_ec, $TMP/hg.{out,err}
   hg_n=$((hg_n+1)); hg_d="$TMP/hg/$hg_n"; mkdir -p "$hg_d"
@@ -3529,7 +3723,7 @@ done
 d="$HTR/hg-all"; mkdir -p "$d"
 printf '%s' "$HG_NVPASS" | ht_exec "$d" "$HTR/nocfg" FND_HOST_TRACE=1 FND_HOST=claude bash "$HGNV" >/dev/null 2>&1
 printf '%s' "$HG_NVPASS" | ht_exec "$d" "$HTR/nocfg" FND_HOST_TRACE=1 FND_HOST=claude bash "$HGAT" >/dev/null 2>&1
-printf '%s' '{"cwd":"/r/elc","tool_name":"Grep","tool_input":{"pattern":"x","path":"/p/tool-results/b1z10evqs.txt"}}' \
+printf '%s' '{"cwd":"/r/elc","tool_name":"Grep","tool_input":{"pattern":"x","path":"'"$SPA_PLAT"'"}}' \
   | ht_exec "$d" "$HTR/nocfg" FND_HOST_TRACE=1 FND_HOST=claude bash "$HGSP" >/dev/null 2>&1
 printf '%s' '{"agent_type":"jira-reader"}' \
   | ht_exec "$d" "$HTR/nocfg" FND_HOST_TRACE=1 FND_HOST=claude CLAUDE_PLUGIN_ROOT="$fake" bash "$HGSC" >/dev/null 2>&1

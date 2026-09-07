@@ -350,9 +350,11 @@ try_store_execute() {
   [ -n "$tmpq" ] && rm -f "$tmpq"
   if [ "$rc" -eq 0 ]; then
     # `store execute --json` prints BARE data (no {"data":…} envelope, unlike the Admin API
-    # itself) — wrap it so both engines return the classic envelope
+    # itself) — wrap it so both engines return the classic envelope. Conditionally: a CLI that
+    # ever starts printing the envelope itself must not come back as {"data":{"data":…}}.
     local envf; envf="$(mktemp)"
-    jq -c '{data: .}' "$out" > "$envf" 2>/dev/null || cp "$out" "$envf"
+    jq -c 'if type == "object" and (has("data") or has("errors")) then . else {data: .} end' \
+      "$out" > "$envf" 2>/dev/null || cp "$out" "$envf"
     emit_envelope "$envf"
     rm -f "$out" "$err" "$envf"
     return 0
@@ -538,12 +540,35 @@ printf 'header = "X-Shopify-Access-Token: %s"\n' "$TOKEN" > "$HDR_CFG"
 
 # Capture the HTTP status: a 401/404/429/5xx body is HTML/JSON garbage, not a GraphQL
 # envelope — it must exit non-zero with error=http_<code>, never reach stdout as data.
+# The timeouts are bounds, not tuning: without them a stalled Admin API call hangs the caller
+# (and every skill waiting on it) forever. 120 s clears the slowest real write — a whole
+# settings_data.json upsert — with room to spare.
 HTTP_CODE="$(curl -sS -X POST "$URL" \
+  --connect-timeout 20 --max-time 120 \
   -K "$HDR_CFG" \
   -H "Content-Type: application/json" \
   --data @"$BODYF" \
   -o "$RESPF" -w '%{http_code}')" \
-  || { echo "error=curl_transport_failed" >&2; exit 5; }
+  || {
+    crc=$?
+    echo "error=curl_transport_failed" >&2
+    # Only a request that was on the wire can have committed server-side — a timeout or a dropped
+    # connection (28, 52, 55, 56), not a DNS/connect/TLS failure that never sent a byte. Under
+    # --operation only the SELECTED operation decides: a query carved out of a mixed document
+    # carries no such hazard. The name is compared literally, never as a regex; the awk is
+    # extract_operation's twin for spotting the operation line.
+    case "$crc" in 28|52|55|56) ;; *) exit 5 ;; esac
+    if awk -v op="$OPERATION" '
+         /^[[:space:]]*mutation([[:space:]]|[({]|$)/ {
+           name = $0
+           sub(/^[[:space:]]*mutation[[:space:]]*/, "", name); sub(/[^A-Za-z0-9_].*$/, "", name)
+           if (op == "" || name == op) { found = 1; exit }
+         }
+         END { exit found ? 0 : 1 }' "$QUERY_FILE"; then
+      echo "hint=the mutation may already have been applied. Verify the store state first; re-run only if the change is absent." >&2
+    fi
+    exit 5
+  }
 case "$HTTP_CODE" in
   2*) emit_envelope "$RESPF" ;;
   *)

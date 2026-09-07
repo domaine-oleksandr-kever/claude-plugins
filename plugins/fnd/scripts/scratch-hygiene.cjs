@@ -1,13 +1,15 @@
 /*
- * scratch-hygiene.cjs — PROJECT-side scratch hygiene for the bundled @playwright/mcp server's
- * output dir (`<project>/.claude/fnd-tmp/playwright`): the age-based sweep of the artefacts it
- * drops there, and the `.git/info/exclude` stamp that keeps the whole scratch root out of
- * `git status`. Both live here rather than in the compressor because neither compresses anything.
+ * scratch-hygiene.cjs — PROJECT-side scratch hygiene: the age-based sweep of the bundled
+ * @playwright/mcp server's output dir (`<project>/.claude/fnd-tmp/playwright`), and the
+ * `.git/info/exclude` stamp that keeps a caller-named scratch dir (the scratch root by default) out
+ * of `git status`. Both live here rather than in the compressor because neither compresses anything.
  *
- * Two callers:
- *   hooks/scratch-path-guard.cjs → ensureFndTmpExcluded — the stamp its allow of that scratch dir
+ * Three callers:
+ *   hooks/scratch-path-guard.cjs  → ensureFndTmpExcluded — the stamp its allow of that scratch dir
  *     is bought with. A PreToolUse guard on every screenshot, so it must not load a compressor.
- *   scripts/json-slim.cjs        → sweepPlaywrightOut, from sweepSpills' throttled project pass.
+ *   hooks/prompt-json-guard.cjs   → ensureFndTmpExcluded with the task workspace as `rel`, for the
+ *     pasted blob it spills into `.claude/tasks/<work-id>/tmp/`.
+ *   scripts/json-slim.cjs         → sweepPlaywrightOut, from sweepSpills' throttled project pass.
  *
  * Reads NO environment switch: the TTL cutoff is computed by the caller and handed in, so this
  * module adds no new reader of FND_MCP_SLIM_TTL (json-slim.cjs's spillTtlHours parses it;
@@ -27,11 +29,11 @@ const path = require('path');
 // and console log lands — 374 untracked files in one client checkout, gitignored by nobody. Pointing it
 // under `.claude/` puts that traffic in a directory this sweep prunes and git never sees.
 const PLAYWRIGHT_OUT_REL = '.claude/fnd-tmp/playwright';
-// The `.git/info/exclude` pattern that keeps the whole scratch root out of `git status` (and out of a
-// bulk `git add`). The written line is anchored (leading slash) and trailing-slashed: a directory,
+// Default subject of the stamp below: the scratch root, kept out of `git status` (and out of a bulk
+// `git add`). The line written for it is anchored (leading slash) and trailing-slashed: a directory,
 // never a stray match — and anchoring is at the REPO root, so the line is built with the project's
 // path prefix inside the repo rather than used as-is (see ensureFndTmpExcluded).
-const EXCLUDE_SUFFIX = '.claude/fnd-tmp/';
+const SCRATCH_ROOT_REL = '.claude/fnd-tmp';
 
 // Second sweep target: `<project>/.claude/fnd-tmp/playwright`, where the bundled server drops the
 // artefacts no tool call names a path for (page-<ts>.png, the .yml snapshot dumps, console-<ts>.log,
@@ -70,34 +72,42 @@ function sweepPlaywrightOut(projectDir, cutoff, summary) {
   ensureFndTmpExcluded(projectDir);
 }
 
-// Keep the scratch root invisible to git without editing anything the developer owns: `.gitignore` is
+// Keep a scratch dir invisible to git without editing anything the developer owns: `.gitignore` is
 // a tracked file of the client's repo, `.git/info/exclude` is local-only. Best-effort and silent —
-// this rides on a sweep, and a sweep may never influence a hook's output or exit code. Two callers:
-// the sweep, at most once per throttle window and only in a project playwright has written in, and
-// hooks/scratch-path-guard.cjs, whose allow of the bundled server's scratch dir is justified by this
-// stamp — so the guard makes it true itself rather than waiting on a compressor switch.
-function ensureFndTmpExcluded(projectDir) {
+// this rides on a sweep, and a sweep may never influence a hook's output or exit code. `rel` is the
+// PROJECT-relative dir to exclude: the scratch root by default, `.claude/tasks` for the prompt guard,
+// whose spilled paste (API tokens, customer records) is otherwise handed to the next `git add -A` in
+// a fresh clone. Callers that write into such a dir stamp it themselves rather than waiting on a
+// compressor switch a developer may have turned off.
+function ensureFndTmpExcluded(projectDir, rel = SCRATCH_ROOT_REL) {
   try {
     const { spawnSync } = require('child_process'); // required here so the hot path never loads it
     const opts = { cwd: projectDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000 };
     // 0 = git already ignores it (a repo-level rule, or a stamp from an earlier run); 1 = not ignored;
     // anything else (128, a spawn failure) = no repo / no git, where there is nothing to exclude from.
-    const ci = spawnSync('git', ['check-ignore', '-q', '.claude/fnd-tmp'], opts);
+    const ci = spawnSync('git', ['check-ignore', '-q', rel], opts);
     if (ci.status !== 1) return;
-    // An anchored pattern is read from the REPO root, but the session's project dir may sit deeper in it
-    // (`cd packages/theme && claude`) — there `/.claude/fnd-tmp/` would match nothing, and the "already
-    // stamped" scan below would then block the correct line forever. The prefix git reports for this dir
-    // is what puts the anchor in the right place; it already ends in `/` when non-empty.
+    // A pattern with an interior slash is read from the REPO root, but the session's project dir may sit
+    // deeper in it (`cd packages/theme && claude`) — there a bare `.claude/…` matches nothing, and the
+    // "already stamped" scan below would then block the correct line forever. The prefix git reports for
+    // this dir is what puts the anchor in the right place; it already ends in `/` when non-empty.
     const sp = spawnSync('git', ['rev-parse', '--show-prefix'], opts);
     if (sp.status !== 0 || typeof sp.stdout !== 'string') return;
-    const line = `/${sp.stdout.trim()}${EXCLUDE_SUFFIX}`;
+    const prefix = sp.stdout.trim();
+    // Only the scratch root — a real directory — is stamped trailing-slashed. A caller-named dir gets no
+    // slash: there the workspace is a SYMLINK into the main checkout, which a trailing slash never
+    // matches. At the repo root it also drops the anchor, so the line is the one scripts/worktree-setup.sh
+    // writes for `.claude/tasks` byte for byte and the two writers dedupe on each other's.
+    let line;
+    if (rel === SCRATCH_ROOT_REL) line = `/${prefix}${rel}/`;
+    else line = prefix === '' ? rel : `/${prefix}${rel}`;
     // --git-path answers with the COMMON dir's file, so one stamp serves every worktree of the repo —
     // the same rule scripts/worktree-setup.sh follows for `.claude/tasks`.
     const gp = spawnSync('git', ['rev-parse', '--git-path', 'info/exclude'], opts);
     if (gp.status !== 0 || typeof gp.stdout !== 'string') return;
-    const rel = gp.stdout.trim();
-    if (!rel) return;
-    const file = path.isAbsolute(rel) ? rel : path.join(projectDir, rel);
+    const excl = gp.stdout.trim();
+    if (!excl) return;
+    const file = path.isAbsolute(excl) ? excl : path.join(projectDir, excl);
     let body = '';
     try { body = fs.readFileSync(file, 'utf8'); } catch (_) {} // no exclude file yet → create it below
     const has = body.split('\n').some((l) => l.trim() === line);
@@ -110,5 +120,5 @@ function ensureFndTmpExcluded(projectDir) {
   } catch (_) {} // any failure → the dir stays visible in git status, which is not worth a broken hook
 }
 
-// EXCLUDE_SUFFIX stays private — nothing outside builds that line itself.
+// SCRATCH_ROOT_REL stays private — a caller names a dir, never the anchored line built from it.
 module.exports = { sweepPlaywrightOut, ensureFndTmpExcluded, PLAYWRIGHT_OUT_REL };

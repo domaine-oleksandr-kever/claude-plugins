@@ -276,6 +276,18 @@ function checkPointers(pluginRoot) {
   }
 }
 
+// Windows carries no exec bit and no POSIX sh, so the shell half of the plugin cannot run there
+// at all: say that once, instead of four meaningless mode-bit failures.
+function checkPlatform() {
+  if (process.platform !== 'win32') return;
+  fail(
+    'platform',
+    'native Windows is unsupported — the .sh hooks and the guard/theme scripts need a POSIX shell ' +
+      '(bash >= 3.2, git, jq): run the plugin from inside WSL and point the host there, or use ' +
+      'the Node-only pieces (json-slim, the ADF converters), which run anywhere Node does'
+  );
+}
+
 function checkHooks(pluginRoot) {
   const dir = path.join(pluginRoot, 'hooks');
   let entries;
@@ -307,7 +319,8 @@ function checkHooks(pluginRoot) {
       node++;
       continue; // node-invoked by every wiring — the exec bit is irrelevant
     }
-    if (st.mode & 0o111) shell++;
+    // NTFS has no mode bits — checkPlatform already owns the one Windows verdict
+    if (process.platform === 'win32' || st.mode & 0o111) shell++;
     else offenders.push(entry + ' (not executable)');
   }
   if (offenders.length) fail('hooks', offenders.join(', ') + ' — chmod +x');
@@ -768,6 +781,7 @@ function main() {
   const xdgConfigHome = opts.home ? null : process.env.XDG_CONFIG_HOME || null;
 
   checkNode();
+  checkPlatform();
   checkManifests(pluginRoot);
   checkPointers(pluginRoot);
   checkHooks(pluginRoot);

@@ -3220,7 +3220,9 @@ if (require.main === module) {
   // ONE flag list feeds the value-skipping, the file detection and the rejection below, so they
   // cannot drift apart: a flag is born here or it is a usage error.
   const VALUE_FLAGS = ['--jq', '--report', '--since']; // --report's value is optional
-  const KNOWN_FLAGS = new Set([...VALUE_FLAGS, '--stats']);
+  const KNOWN_FLAGS = new Set([...VALUE_FLAGS, '--stats', '--help', '-h']);
+  // One grammar string for the usage message and the rejection below, so the two cannot drift.
+  const SUPPORTED = '--jq <jq-path> | --stats | --report [logfile] | --since <ISO> | --help';
   const has = (f) => args.includes(f);
   // `opt()` deliberately keeps its `'--'` test: widening it to `'-'` would change which token
   // `--report` accepts as a log path, and the rejection below already covers the real mistake.
@@ -3228,17 +3230,26 @@ if (require.main === module) {
   const isStdinPath = (p) => p === '/dev/stdin' || p === '/dev/fd/0' || p === '/proc/self/fd/0';
   const fileArg = args.find((a, i) => !a.startsWith('-') && !VALUE_FLAGS.includes(args[i - 1]));
 
+  // A help request is not a run: answered on stdout BEFORE any stdin/file read (a bare invocation
+  // reads stdin, so `--help` used to hang on it) and before any debug line, so `--report` never
+  // counts it as an event. Skips a value-flag's value by the same list the rejection below uses.
+  if (args.some((a, i) => (a === '--help' || a === '-h') && !VALUE_FLAGS.includes(args[i - 1]))) {
+    process.stdout.write(`json-slim: usage: node json-slim.cjs [<file>] [${SUPPORTED}]\n` +
+      '  no <file>: reads stdin. Compressed body on stdout; --report aggregates the FND_MCP_SLIM_DEBUG log.\n');
+    return;
+  }
+
   // Every argument this CLI accepts lives in KNOWN_FLAGS above; a token that is the VALUE of a
   // value-flag is skipped by the same list `fileArg` uses, so a value can never be mistaken for a
   // flag. Anything else dashed is a USAGE error, not an ignorable token: `has()` matches by name and
-  // `fileArg` used to resolve `-h` as the input PATH, so a typo — or a flag retired in a later
+  // `fileArg` used to resolve a dashed token as the input PATH, so a typo — or a flag retired in a later
   // version — would otherwise run as a plain compression and silently do the opposite of what was
   // asked. Same shape as the --jq refusal below: empty stdout, one named diagnostic, its own debug
   // reason (so `--report` never counts a usage error as a run that gained nothing, and it can never
   // pair with a whale as a recovery), exit 2. Matches md-to-adf.cjs's `-`-prefixed rule.
   const unknown = args.find((a, i) => a.startsWith('-') && !KNOWN_FLAGS.has(a) && !VALUE_FLAGS.includes(args[i - 1]));
   if (unknown !== undefined) {
-    process.stderr.write(`json-slim: unknown option ${unknown} — supported: --jq <jq-path> | --stats | --report [logfile] | --since <ISO>\n`);
+    process.stderr.write(`json-slim: unknown option ${unknown} — supported: ${SUPPORTED}\n`);
     debugLog({ entry: 'cli', tool: fileArg || null, decision: 'passthrough', reason: 'unknown-flag', bytes_in: 0, bytes_out: 0, pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, null);
     process.exit(2);
   }

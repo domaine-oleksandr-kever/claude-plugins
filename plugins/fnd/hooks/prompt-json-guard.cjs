@@ -107,8 +107,9 @@ function spillBlob(blob, cwd) {
   const name = `fnd-prompt-json-${crypto.randomUUID()}.json`;
   try {
     // `.claude/fnd` is the workspace's pre-rename home — honored until the repo migrates.
-    const wsRoot = [path.join(cwd, '.claude', 'tasks'), path.join(cwd, '.claude', 'fnd')]
-      .find((d) => fs.existsSync(d));
+    const rel = ['.claude/tasks', '.claude/fnd'].find((r) => fs.existsSync(path.join(cwd, r)));
+    if (!rel) throw new Error('no workspace');
+    const wsRoot = path.join(cwd, rel);
     const dirs = fs
       .readdirSync(wsRoot, { withFileTypes: true })
       .filter((e) => e.isDirectory())
@@ -116,7 +117,12 @@ function spillBlob(blob, cwd) {
     if (dirs.length === 1) {
       const tmp = path.join(wsRoot, dirs[0], 'tmp');
       fs.mkdirSync(tmp, { recursive: true });
-      return writeBlobFile(tmp, name, blob);
+      const p = writeBlobFile(tmp, name, blob);
+      // This spill sits INSIDE the repo tree, where a clone with no workspace stamp yet would hand
+      // the paste to the next `git add -A`. Required lazily — only a spill owes those two git forks,
+      // never the prompt that passes through, and never the tmpdir fallback below.
+      try { require('../scripts/scratch-hygiene.cjs').ensureFndTmpExcluded(cwd, rel); } catch (_) {}
+      return p;
     }
   } catch (_) {} // no workspace, ambiguous, or unwritable → fall through to tmpdir
   try {

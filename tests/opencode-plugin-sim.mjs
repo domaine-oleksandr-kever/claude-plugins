@@ -185,7 +185,11 @@ assertContains('G39-unrunnable-warned', captured, 'no-verify-bypass.sh reached n
 // Measurement only: `json-slim --report` used to call a platform-overflow whale MISSED whenever
 // the agent read the spill with anything but json-slim. These cases pin that the adapter feeds
 // the recorder — for the shell tool AND for this host's file readers, which do carry a path.
-const SPILL = '/p/tool-results/b1z10evqs.txt';
+// A REAL whale on disk: the recorder drops a path that is not a file, since the event fires only
+// after the platform wrote the spill.
+const SPILL = path.join(TMP, 'spa-spill', 'tool-results', 'b1z10evqs.txt');
+fs.mkdirSync(path.dirname(SPILL), { recursive: true });
+fs.writeFileSync(SPILL, '');
 let accessDir = 0;
 async function runAccess(tool, args, env = {}) {
   accessDir += 1;
@@ -227,7 +231,7 @@ assertEq('A10-no-spill', (await runAccess('bash', { command: 'npm run lint' })).
 const aNoPath = await runAccess('read', { limit: 20 });
 assertEq('A11-read-no-path', aNoPath.line, '');
 assertEq('A12-read-no-throw', aNoPath.threw, false);
-const aBlocked = await runAccess('bash', { command: 'git commit --no-verify -m "x" /p/tool-results/b1z10evqs.txt' });
+const aBlocked = await runAccess('bash', { command: `git commit --no-verify -m "x" ${SPILL}` });
 assertEq('A13-blocked-not-recorded', aBlocked.line, '');
 assertEq('A14-blocked-still-blocks', aBlocked.threw, true);
 
