@@ -373,9 +373,9 @@ if [ "$RC" -eq 0 ] && [ ! -e "$H22/$OC/skills/alpha" ] && [ ! -f "$H22/$OCM" ]; 
 else bad P9-uninstall-after-fix "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
 
 # --------------------------------------------------------------------------- codex target --
-# Codex installs skills, hooks and MCP from its own marketplace; the TOML subagents have no
-# verified plugin channel (M1b), so this target links exactly those and says so — an install that
-# quietly skipped them would leave every delegating skill calling an agent the host never loaded.
+# Codex installs skills, hooks and MCP from its own marketplace, but reads custom roles from
+# ~/.codex/agents alone (measured 2026-09-08, CLI 0.153.4), so this target links exactly those and
+# says so — an install that skipped them leaves every delegating skill calling an absent agent.
 CX=".codex"
 REPO3="$TMP/repo3"; mkrepo "$REPO3"; mkbundle "$REPO3" 0.59.0
 mkdir -p "$REPO3/plugins/fnd/agents-codex"
@@ -388,8 +388,10 @@ if [ "$RC" -eq 0 ] && [ -L "$H30/$CX/agents/jira-reader.toml" ] && [ -L "$H30/$C
    && [ "$(readlink "$H30/$CX/agents/jira-reader.toml")" = "$REPO3/plugins/fnd/agents-codex/jira-reader.toml" ]; then ok
 else bad X1-codex-agents "rc=$RC err=$(head -c 200 "$E")"; fi
 
-# only the subagent layer, and the developer is told where the rest comes from
-if grep -q "subagent layer only" "$O" && grep -q "codex plugin marketplace add" "$O"; then ok
+# only the subagent layer, and the developer is told both why it is needed (Codex reads roles
+# from ~/.codex/agents alone) and where the rest comes from
+if grep -q "subagent layer only" "$O" && grep -qF "~/.codex/agents" "$O" \
+   && grep -q "codex plugin marketplace add" "$O"; then ok
 else bad X2-codex-partial-note "out=$(tr '\n' ';' < "$O")"; fi
 if [ -f "$H30/$CX/agents/mine.toml" ] && [ ! -L "$H30/$CX/agents" ]; then ok
 else bad X3-codex-user-agents-intact "the user's own agents dir was clobbered"; fi

@@ -3,11 +3,9 @@
 # (HARNESS-PORT-PLAN.md § Install stories). The clone IS the install: every entry points back
 # into this checkout, so a `git pull` updates the host live. Re-running the installer is the
 # update path; Claude Code installs from its marketplace and is not handled here.
-# Codex is a partial target on purpose: `codex plugin marketplace add` installs the whole bundle
-# — skills, hooks, MCP and the TOML subagents (measured 2026-08-23 on CLI 0.149.0: a cache-only
-# install spawned jira-reader with no local links) — so `--target codex` is the DEV channel, which
-# links agents-codex/*.toml into ~/.codex/agents/ and nothing else: it points Codex at a local
-# checkout's subagents, and is the fallback on an older CLI that does not serve them from cache.
+# Codex is a partial target on purpose: `codex plugin marketplace add` serves skills, hooks and
+# MCP but never a role: Codex reads those from ~/.codex/agents/ (measured 2026-09-08, CLI 0.153.4)
+# — so `--target codex` links agents-codex/*.toml there and is REQUIRED for the subagents.
 set -euo pipefail
 
 # Fallback stamp only: the canonical manifest in the checkout wins whenever it is readable,
@@ -28,7 +26,7 @@ usage: install.sh --target cursor|opencode|codex [--copy] [--uninstall]
 
   --target <host>   cursor  -> ~/.cursor/plugins/local/fnd
                     opencode-> ~/.config/opencode (skills, agents, commands, plugin)
-                    codex   -> ~/.codex/agents (subagents only — skills, hooks and MCP
+                    codex   -> ~/.codex/agents (subagents — required; skills, hooks and MCP
                                come from \`codex plugin marketplace add\`)
   --copy            copy instead of symlink (no-symlink environments); a --copy
                     install does not follow \`git pull\` — re-run to refresh it
@@ -99,9 +97,8 @@ build_entries() {
       fi
       ;;
     codex)
-      # Subagents only — the dev channel (see the header note). The marketplace install already
-      # serves the whole bundle from its cache, subagents included; these links are what points a
-      # Codex session at the TOML agents of THIS checkout instead.
+      # Subagents only, and nothing else installs them: the marketplace cache serves no role
+      # (see the header note).
       for f in "$PLUGIN"/agents-codex/*.toml; do
         [ -f "$f" ] || continue
         add_entry "$ROOT_DIR/agents/$(basename "$f")" "$f"
@@ -263,9 +260,11 @@ do_install() {
       echo "warning: no plugins/fnd/agents-codex/*.toml in this checkout — nothing to link;" >&2
       echo "         run plugins/fnd/scripts/gen-host-adapters.cjs, then re-run this installer" >&2
     fi
-    echo "note: this target installs the subagent layer only — run"
-    echo "      'codex plugin marketplace add domaine/claude-plugins' and install fnd via /plugins"
-    echo "      for skills, hooks and MCP (they update with 'codex plugin marketplace upgrade')"
+    echo "note: this target installs the subagent layer only — the half Codex loads from"
+    echo "      ~/.codex/agents, never from the cache. Run 'codex plugin marketplace add"
+    echo "      domaine-oleksandr-kever/claude-plugins' and install fnd via /plugins for skills,"
+    echo "      hooks and MCP"
+    echo "      (they update with 'codex plugin marketplace upgrade')"
   fi
 
   local i created=0 replaced=0 unchanged=0 pruned=0 rc link src stale

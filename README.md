@@ -181,7 +181,7 @@ remain the full story — the fast path is those same steps with the typing remo
 |---|---|---|---|
 | Claude Code | `/plugin marketplace add …` + `/plugin install fnd@domaine` | `/fnd:smoke-test` | below |
 | Cursor | Customize → Plugins → **Add Marketplace** (dev channel: `./scripts/install.sh --target cursor`; a Cursor bug currently ignores subagent model pins on every route — see the doc) | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
-| Codex CLI | `codex plugin marketplace add …` (dev channel: `./scripts/install.sh --target codex`) | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
+| Codex CLI | `codex plugin marketplace add …` **plus** `./scripts/install.sh --target codex` (subagents; Codex reads roles from `~/.codex/agents`, never from the plugin cache) | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
 | OpenCode | `./scripts/install.sh --target opencode` | `/smoke-test` (command shim) | [docs/README.opencode.md](docs/README.opencode.md) |
 
 `smoke-test` is a **run-once post-install check**, not a per-session routine: it runs the
@@ -242,21 +242,20 @@ host deltas: [docs/README.cursor.md](docs/README.cursor.md).
 
 ### Codex CLI
 
-One channel: the marketplace install carries the whole bundle — skills, hooks, MCP **and** the
-TOML subagents, measured live on Codex CLI 0.149.0 (a cache-only install spawned `jira-reader`
-with no local links). `install.sh --target codex` is the dev channel — point Codex at a local
-checkout's subagents — and the fallback on an older CLI that does not serve them from the cache.
+Two channels, both required: the marketplace install carries skills, hooks and MCP, and the
+installer links the TOML subagents into `~/.codex/agents/`: Codex reads custom roles from there,
+never from the plugin cache (measured 2026-09-08, CLI 0.153.4; the plugin manifest format has no
+key for agents).
 
 ```text
 codex plugin marketplace add domaine-oleksandr-kever/claude-plugins
 /plugins                                  # → install fnd
 ```
 
-Optionally, from a clone of this repo (dev channel — current Codex loads bundled subagents
-from the cache on its own):
+Then, from a clone of this repo (keep the clone — the links point into it):
 
 ```bash
-./scripts/install.sh --target codex       # link subagents to your local checkout
+./scripts/install.sh --target codex       # link the subagents into ~/.codex/agents
 ```
 
 Then two steps the install cannot perform for you — `[features] hooks = true` in
@@ -342,8 +341,8 @@ them in an interactive session**. What *is* proven, from disk rather than from a
 on itself: the hook layer fires on all four hosts (`FND_HOST_TRACE` matrix, 2026-09-06), the
 Cursor deny path and both key spellings were accepted by a headless `cursor-agent` run
 (2026-09-06), and the Codex and OpenCode install routes were exercised live once in August
-(a marketplace install on Codex CLI 0.149.0 spawning `jira-reader`; the OpenCode installer and
-host-trace columns). No full `smoke-test` session has ever been recorded on any of the three.
+(the Codex marketplace add and the OpenCode installer, plus both host-trace columns). No full
+`smoke-test` session has ever been recorded on any of the three.
 Known gaps that stay open with the freeze:
 
 - **Cursor** — `afterMCPExecution` is observe-only: the host documents no output-rewrite field

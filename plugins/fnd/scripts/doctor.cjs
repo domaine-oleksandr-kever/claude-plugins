@@ -48,10 +48,9 @@ const MANIFEST_POINTERS = {
     { key: 'skills' },
     { key: 'hooks', generated: true },
     { key: 'mcpServers', generated: true },
-    // The Codex manifest declares no `agents` pointer and does not need one: M1b measured
-    // 2026-08-23 (CLI 0.149.0) that the marketplace cache serves the bundled TOML subagents on
-    // its own — see the HOST_INSTALLS.codex note below. An undeclared key is skipped, so this row
-    // is the standing check for the day one IS added.
+    // The Codex manifest declares no `agents` pointer because the format has no such key: roles
+    // load from ~/.codex/agents/, never from the cache (the codex:agents row checks that). An
+    // undeclared key is skipped, so this stays the standing check for the day one IS added.
     { key: 'agents', generated: true },
   ],
 };
@@ -66,10 +65,9 @@ const GENERATOR_REL = 'scripts/gen-host-adapters.cjs';
 // `cacheRoot` marks a host whose marketplace clones the plugin into its own cache: a doctor
 // running from inside that cache IS the install (live-verified on Cursor 2026-08-22 —
 // ~/.cursor/plugins/cache/<marketplace>/fnd/<commit>), so no local record is expected.
-// Codex has one too — M1b re-measured 2026-08-23 (CLI 0.149.0, smoke row 4): the marketplace
-// cache carries the WHOLE bundle, TOML subagents included — jira-reader spawned on a cache-only
-// install with no local links. scripts/install.sh --target codex is therefore the dev channel
-// (run Codex against a local checkout's agents), not a required install step.
+// Codex has one too, but it carries skills/hooks/MCP only: Codex reads custom roles from
+// ~/.codex/agents/ alone (measured 2026-09-08, CLI 0.153.4), so scripts/install.sh --target codex
+// is the required second half — the codex:agents row is what proves it ran.
 const HOST_INSTALLS = {
   cursor: {
     root: (home) => path.join(home, '.cursor', 'plugins', 'local'),
@@ -81,7 +79,7 @@ const HOST_INSTALLS = {
     root: (home) => path.join(home, '.codex'),
     probe: ['agents/jira-reader.toml'],
     cacheRoot: (home) => path.join(home, '.codex', 'plugins', 'cache'),
-    note: 'local agent links are the dev channel — current Codex loads the whole bundle, agents included, from its marketplace cache',
+    note: 'the marketplace cache carries skills, hooks and MCP, never a role; the subagents load from ~/.codex/agents — see the codex:agents row',
   },
 };
 // Version-cache hosts: the host clones into its own cache, so there is no local install to inspect.
@@ -532,7 +530,7 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
         'not installed — this checkout is not linked (no ' + modeFile + '); a marketplace cache ' +
           'is present at ' + cached + ' — run `node ' + path.join(cached, 'scripts', 'doctor.cjs') +
           ' --target ' + target + '` to check it, or scripts/install.sh --target ' + target +
-          ' for the dev channel' + note
+          ' to link this checkout' + note
       );
       return;
     }
@@ -572,6 +570,76 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
     return;
   }
   pass(label, mode + ' install, ' + record.entries.length + ' entry(ies) live (root: ' + root + ')' + note);
+}
+
+/*
+ * Nothing in the marketplace cache is read as a role, and one bad role file empties the whole
+ * roster (both measured 2026-09-08, CLI 0.153.4). Without this row a bundle install looks complete
+ * while every delegating skill calls an agent the host never loaded. Only the personal dir is
+ * checked: a project .codex/agents/ is the user's own layer, not this install.
+ */
+function checkCodexAgents(homeDir, pluginRoot) {
+  const src = path.join(pluginRoot, 'agents-codex');
+  let names = [];
+  try {
+    names = fs.readdirSync(src).filter((f) => f.endsWith('.toml')).sort();
+  } catch (_) {
+    /* no generated dir — gen:agents-codex owns that verdict */
+  }
+  if (!names.length) {
+    skip('codex:agents', src + ' has no *.toml — nothing to link (run ' + GENERATOR_REL + ')');
+    return;
+  }
+
+  const dir = path.join(homeDir, '.codex', 'agents');
+  const broken = [];
+  const targets = new Set();
+  let found = 0;
+  for (const name of names) {
+    const entry = path.join(dir, name);
+    let lst;
+    try {
+      lst = fs.lstatSync(entry);
+    } catch (_) {
+      broken.push(name + ' (missing)');
+      continue;
+    }
+    found++;
+    let readable = false;
+    try {
+      fs.accessSync(entry, fs.constants.R_OK);
+      readable = isFile(entry);
+    } catch (_) {
+      /* an unreadable or dangling link is reported below, never thrown */
+    }
+    if (!readable) {
+      broken.push(name + (fs.existsSync(entry) ? ' (not a readable file)' : ' (broken symlink)'));
+      continue;
+    }
+    // A symlink is the install default and a copy (--copy) is equally valid — only where the
+    // links land is worth naming, so a checkout linked from elsewhere is visible.
+    targets.add(lst.isSymbolicLink() ? path.dirname(realpath(entry)) : 'copies');
+  }
+
+  if (!broken.length) {
+    pass('codex:agents', names.length + '/' + names.length + ' role files linked → ' + [...targets].sort().join(', '));
+    return;
+  }
+  if (!found) {
+    fail(
+      'codex:agents',
+      'no fnd roles in ' + dir + ' — nothing in the plugin cache is read as a role — run ' +
+        'scripts/install.sh --target codex'
+    );
+    return;
+  }
+  const shown = broken.slice(0, 3).join(', ');
+  const more = broken.length > 3 ? ' … +' + (broken.length - 3) + ' more' : '';
+  fail(
+    'codex:agents',
+    broken.length + '/' + names.length + ' role files missing or broken in ' + dir + ': ' + shown + more +
+      ' — re-run scripts/install.sh --target codex'
+  );
 }
 
 /*
@@ -857,7 +925,10 @@ function main() {
   checkHooks(pluginRoot);
   checkGenerated(pluginRoot, repoRoot);
   checkHost(opts.target, homeDir, xdgConfigHome, pluginRoot, repoRoot);
-  if (opts.target === 'codex') checkCodexHooks(homeDir);
+  if (opts.target === 'codex') {
+    checkCodexAgents(homeDir, pluginRoot);
+    checkCodexHooks(homeDir);
+  }
 
   const width = rows.reduce((w, r) => Math.max(w, r.name.length), 0);
   out('fnd doctor — plugin root: ' + pluginRoot);

@@ -419,7 +419,7 @@ else bad P2b-renderer-absent "out=$(tr '\n' ';' < "$O")"; fi
 
 run "$TMP/h10" "$FIXBOOT" --targets all
 if grep -qF "codex plugin marketplace add domaine-oleksandr-kever/claude-plugins" "$O" \
-   && grep -q "dev-channel subagents" "$O"; then ok
+   && grep -q "linked the subagents" "$O" && grep -qF "~/.codex/agents" "$O"; then ok
 else bad P3-report-codex-channel "out=$(tr '\n' ';' < "$O")"; fi
 
 if grep -q "run /smoke-test once in a live session" "$O"; then ok

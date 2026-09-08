@@ -167,7 +167,7 @@ pick_targets() {
 Which hosts should fnd be installed for?
 
   1) cursor     symlink this checkout into ~/.cursor/plugins/local
-  2) codex      link the dev-channel subagents into ~/.codex/agents
+  2) codex      link the required subagents into ~/.codex/agents
   3) opencode   link skills, agents, commands and the plugin adapter into ~/.config/opencode
   4) claude     print the slash commands to run inside a Claude Code session
   5) all        every host above
@@ -353,7 +353,7 @@ if [ "$ACTION" = "uninstall" ]; then
     echo "    Window) so the removed plugin stops loading."
   fi
   if [ "$SAW_CODEX" = "yes" ]; then
-    echo "  - Codex: this removed the dev-channel subagents only — the bundle itself goes with"
+    echo "  - Codex: this removed the subagent links only — the bundle itself goes with"
     echo "    'codex plugin marketplace remove domaine-oleksandr-kever/claude-plugins'"
   fi
   if [ "$SAW_OPENCODE" = "yes" ]; then
@@ -371,8 +371,9 @@ else
   fi
   if [ "$SAW_CODEX" = "yes" ]; then
     echo "  - Codex: 'codex plugin marketplace add domaine-oleksandr-kever/claude-plugins' is the"
-    echo "    primary channel (skills, hooks, MCP); --target codex linked the dev-channel subagents"
-    echo "    only. Then set [features] hooks = true in ~/.codex/config.toml and approve /hooks."
+    echo "    primary channel (skills, hooks, MCP); --target codex linked the subagents — the half"
+    echo "    Codex loads from ~/.codex/agents, never from the cache. Then set [features] hooks ="
+    echo "    true in ~/.codex/config.toml and approve /hooks."
   fi
   if [ "$SAW_OPENCODE" = "yes" ]; then
     echo "  - OpenCode: three pastes into your own opencode.json that no installer may write — the"

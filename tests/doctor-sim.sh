@@ -466,23 +466,26 @@ expect D37-claude-cache 0 "SKIP  install:claude" ".claude/plugins/cache" "!FAIL"
 # installed anywhere, and the row says where the real channels live.
 run --root "$G" --home "$H1" --target codex
 expect D37b-codex-not-linked 1 "FAIL  install:codex" ".codex/.fnd-install-mode" \
-  "install.sh --target codex" "dev channel"
+  "install.sh --target codex" "the subagents load from ~/.codex/agents"
 
-# D37c: linked subagents pass — the dev channel: Codex runs this checkout's agents.
+# D37c: linked subagents pass — Codex runs this checkout's agents.
 H16="$TMP/home16"; mkdir -p "$H16/$CX_REL/agents"
 mkdir -p "$G/agents-codex"; printf 'name = "jira-reader"\n' > "$G/agents-codex/jira-reader.toml"
 ln -s "$G/agents-codex/jira-reader.toml" "$H16/$CX_REL/agents/jira-reader.toml"
 record "$H16" "$CX_REL" symlink "$G" 0.59.0 "$H16/$CX_REL/agents/jira-reader.toml"
 run --root "$G" --home "$H16" --target codex
-expect D37d-codex-linked 0 "PASS  install:codex" "1 entry(ies) live" "dev channel" "!FAIL"
+expect D37d-codex-linked 0 "PASS  install:codex" "1 entry(ies) live" "PASS  codex:agents" \
+  "1/1 role files linked" "!FAIL"
 
-# D37d2 (M1b re-measured 2026-08-23, CLI 0.149.0 smoke row 4): a cache-only Codex install spawns
-# bundled TOML agents with no local links, so a doctor run from inside ~/.codex/plugins/cache IS
-# the install and must pass — not send the user to install.sh.
+# D37d2 (measured 2026-09-08, CLI 0.153.4): a doctor run from inside ~/.codex/plugins/cache IS the
+# marketplace half of the install and says so — but that half carries no roles (Codex reads them
+# from ~/.codex/agents only), so an unlinked cache install now fails on codex:agents.
 HCX="$TMP/home-codex-cache"; CACHE_CX="$HCX/.codex/plugins/cache/domaine/fnd/0.60.0"
 mkroot "$CACHE_CX" "${ALL3[@]}"
+mkdir -p "$CACHE_CX/agents-codex"; printf 'name = "jira-reader"\n' > "$CACHE_CX/agents-codex/jira-reader.toml"
 run --root "$CACHE_CX" --home "$HCX" --target codex
-expect D37d2-codex-marketplace-cache 0 "PASS  install:codex" "marketplace cache install" "!FAIL"
+expect D37d2-codex-marketplace-cache 1 "PASS  install:codex" "marketplace cache install" \
+  "FAIL  codex:agents" "no fnd roles in $HCX/.codex/agents" "install.sh --target codex"
 
 # D37d3: same guard as Cursor's D29c — the cache pass is keyed to the plugin root actually being
 # IN the cache; a checkout beside a bare cache dir still checks (and fails) the local install.
@@ -526,6 +529,66 @@ ln -s "$G/agents-codex/jira-reader.toml" "$H17/$CX_REL/agents/jira-reader.toml"
 run --root "$G" --home "$H17" --target codex
 expect D37f-codex-handmade 0 "PASS  install:codex" "(no installer record)" "!FAIL"
 
+# D37m1–D37m6: codex:agents — Codex discovers custom roles in ~/.codex/agents only (measured
+# 2026-09-08, CLI 0.153.4), so this row, not install:codex, is what proves the subagents exist on
+# the host. One bad role file empties the host's whole roster, hence the per-name reporting.
+CXR="$TMP/codexroles"; mkroot "$CXR" "${ALL3[@]}"
+mkdir -p "$CXR/agents-codex"
+printf 'name = "jira-reader"\n' > "$CXR/agents-codex/jira-reader.toml"
+printf 'name = "bug-hunter"\n' > "$CXR/agents-codex/bug-hunter.toml"
+
+# D37m1: every role linked — the install.sh default, and the row names where the links land.
+HR1="$TMP/home-roles-link"; mkdir -p "$HR1/$CX_REL/agents"
+ln -s "$CXR/agents-codex/jira-reader.toml" "$HR1/$CX_REL/agents/jira-reader.toml"
+ln -s "$CXR/agents-codex/bug-hunter.toml" "$HR1/$CX_REL/agents/bug-hunter.toml"
+run --root "$CXR" --home "$HR1" --target codex
+expect D37m1-roles-linked 0 "PASS  codex:agents" "2/2 role files linked → " "/codexroles/agents-codex" "!FAIL"
+
+# D37m2: a --copy install has plain files where the symlinks would be — equally loadable.
+HR2="$TMP/home-roles-copy"; mkdir -p "$HR2/$CX_REL/agents"
+cp "$CXR/agents-codex/jira-reader.toml" "$CXR/agents-codex/bug-hunter.toml" "$HR2/$CX_REL/agents/"
+record "$HR2" "$CX_REL" copy "$CXR" 0.59.0 "$HR2/$CX_REL/agents/jira-reader.toml" "$HR2/$CX_REL/agents/bug-hunter.toml"
+run --root "$CXR" --home "$HR2" --target codex
+expect D37m2-roles-copied 0 "PASS  codex:agents" "2/2 role files linked → copies" "!FAIL"
+
+# D37m3: a role the installer never linked (added since the last run) is named, not averaged away.
+HR3="$TMP/home-roles-partial"; mkdir -p "$HR3/$CX_REL/agents"
+ln -s "$CXR/agents-codex/jira-reader.toml" "$HR3/$CX_REL/agents/jira-reader.toml"
+run --root "$CXR" --home "$HR3" --target codex
+expect D37m3-role-missing 1 "FAIL  codex:agents" "1/2 role files missing or broken" \
+  "bug-hunter.toml (missing)" "install.sh --target codex"
+
+# D37m4: a dangling link (the checkout moved) reads as present to readdir — it is not.
+HR4="$TMP/home-roles-dangling"; mkdir -p "$HR4/$CX_REL/agents"
+ln -s "$CXR/agents-codex/jira-reader.toml" "$HR4/$CX_REL/agents/jira-reader.toml"
+ln -s "$CXR/agents-codex/gone.toml" "$HR4/$CX_REL/agents/bug-hunter.toml"
+run --root "$CXR" --home "$HR4" --target codex
+expect D37m4-role-dangling 1 "FAIL  codex:agents" "bug-hunter.toml (broken symlink)"
+
+# D37m4b: a link that resolves to a directory is a wrong target, not a missing one.
+HR4B="$TMP/home-roles-dir"; mkdir -p "$HR4B/$CX_REL/agents"
+ln -s "$CXR/agents-codex/jira-reader.toml" "$HR4B/$CX_REL/agents/jira-reader.toml"
+ln -s "$CXR/agents-codex" "$HR4B/$CX_REL/agents/bug-hunter.toml"
+run --root "$CXR" --home "$HR4B" --target codex
+expect D37m4b-role-is-dir 1 "FAIL  codex:agents" "bug-hunter.toml (not a readable file)"
+
+# D37m4c: a foreign role beside the fnd ones is the user's own business — never a FAIL.
+printf 'name = "zz-other"\n' > "$HR1/$CX_REL/agents/zz-other.toml"
+run --root "$CXR" --home "$HR1" --target codex
+expect D37m4c-foreign-role-ignored 0 "PASS  codex:agents" "2/2 role files linked" "!FAIL"
+rm "$HR1/$CX_REL/agents/zz-other.toml"
+
+# D37m5: nothing linked at all — the cache-only install; the row carries the one command that fixes it.
+HR5="$TMP/home-roles-none"; mkdir -p "$HR5"
+run --root "$CXR" --home "$HR5" --target codex
+expect D37m5-roles-none 1 "FAIL  codex:agents" "no fnd roles in $HR5/$CX_REL/agents" \
+  "install.sh --target codex" "!role files missing or broken"
+
+# D37m6: a checkout that never ran the generator has nothing to link — SKIP (gen:agents-codex owns
+# that verdict). The FAILing install row is this home having no Codex install at all.
+run --root "$O1" --home "$HR5" --target codex
+expect D37m6-roles-not-generated 1 "SKIP  codex:agents" "nothing to link" "!FAIL  codex:agents"
+
 # D37g–D37k: Codex arms hooks behind two user actions the installer cannot take. Linked subagents
 # are what "installed" means on this host, so without these rows a doctor run goes green while
 # every guard — the commit guards included — is dormant.
@@ -547,9 +610,9 @@ expect D37k-hooks-gate-other-table 0 "SKIP  codex:hooks-gate" "no [features] hoo
 rm -f "$H16/$CX_REL/config.toml"
 
 # the rows are Codex-only: another target must not print them (this home has no Cursor install,
-# hence the FAILing install row and exit 1 — the point here is the two absent codex rows)
+# hence the FAILing install row and exit 1 — the point here is the three absent codex rows)
 run --root "$G" --home "$H1" --target cursor
-expect D37l-hooks-gate-codex-only 1 "!codex:hooks-gate" "!codex:hooks-trust"
+expect D37l-hooks-gate-codex-only 1 "!codex:hooks-gate" "!codex:hooks-trust" "!codex:agents"
 
 # ------------------------------------------------------------------------------ CLI surface --
 # D38: usage errors exit 2 — distinct from a FAILing check (1), so install.sh can tell them apart.

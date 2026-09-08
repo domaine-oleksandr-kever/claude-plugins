@@ -6,24 +6,23 @@ Claude Code uses — only the wiring differs. Start at the
 
 > [!IMPORTANT]
 > **Verification status: unverified, frozen 2026-09-07.** The Codex wiring ships as last
-> measured (marketplace install on CLI 0.149.0 spawning `jira-reader`; hooks fire per the
-> `FND_HOST_TRACE` matrix), but no release since has been smoke-tested here in an interactive
-> session, and no full `smoke-test` run was ever recorded on this host. Known soft spots: the
-> `/hooks` trust that some updates drop, and a model map still marked PROPOSED. Details and what
-> "best-effort" means: [README → Host verification
+> measured (the marketplace install route exercised live; hooks fire per the `FND_HOST_TRACE`
+> matrix), but no release since has been smoke-tested here in an interactive session, and no full
+> `smoke-test` run was ever recorded on this host. Known soft spots: the `/hooks` trust that some
+> updates drop, and a model map still marked PROPOSED. Details and what "best-effort" means:
+> [README → Host verification
 > status](../README.md#host-verification-status--cursor-codex-cli-and-opencode-are-unverified).
 
-On a current CLI the install arrives through **one channel**: the marketplace plugin carries
-skills, hooks, MCP **and** the TOML subagents — measured live on Codex CLI 0.149.0, where a
-cache-only install spawned `jira-reader` with no local links. `install.sh --target codex` is an
-optional **dev channel** (run Codex against a local checkout's subagents), and the fallback on an
-older CLI that does not serve agents from the marketplace cache.
+The install arrives through **two channels, both required**: the marketplace plugin carries
+skills, hooks and MCP, and `install.sh --target codex` links the TOML subagents into
+`~/.codex/agents/`. Codex reads custom roles from there (or a project's `.codex/agents/`) and
+never from the plugin cache — measured 2026-09-08 on CLI 0.153.4, where the spawn tool offered no
+fnd role until the links existed, and the plugin manifest format has no key that could declare one.
 
 ## Install
 
 Fast path: the bootstrap one-liner from the [README](../README.md#install--four-hosts) does the
-clone plus step 4's optional dev-channel subagent link in one command; step 1's marketplace add
-stays manual.
+clone plus step 4's subagent link in one command; step 1's marketplace add stays manual.
 
 ### 0. Prerequisites — the host and the runtime
 
@@ -83,12 +82,10 @@ Nothing warns you if you skip steps 2 and 3: skills and MCP load either way, so 
 prompt-JSON guard, mcp-slim's spill-and-stub, and **both git guards**, including the
 `--no-verify` block.
 
-### 4. (Optional) Link the subagents from a checkout
+### 4. Link the subagents from a checkout
 
-Current Codex loads the whole bundle from the marketplace cache — TOML subagents included
-(measured on CLI 0.149.0: `jira-reader` delegated on a cache-only install). Skip this step
-unless subagent delegation fails on your CLI version, or you develop plugin content and want
-Codex running your local checkout's agents:
+Required: nothing in the marketplace cache is read as a role, so without this step every
+delegating skill calls an agent the host never loaded.
 
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git
@@ -105,21 +102,23 @@ target; a `--copy` install does not follow `git pull`, so re-run the installer t
 
 ### 5. Verify
 
-Run `doctor.cjs --target codex` (the installer finishes with it on the dev channel; on the
-cache-only route the smoke test runs it for you from the cached plugin path, where the install
-row reads `marketplace cache install`). Two of its rows exist only for this host:
+Run `doctor.cjs --target codex` (the installer finishes with it; the smoke test also runs it from
+inside a session). Four of its rows exist only for this host:
 
 ```text
 PASS  install:codex          marketplace cache install (root: ~/.codex/plugins/cache/…)
+PASS  codex:agents           7/7 role files linked → /path/to/claude-plugins/plugins/fnd/agents-codex
 SKIP  codex:hooks-gate       no [features] hooks entry in ~/.codex/config.toml — set it to true
 SKIP  codex:hooks-trust      not inspectable — prove it with `git commit --no-verify -m probe`
 ```
 
-`codex:hooks-trust` is always a reminder: the trust state is host state a script cannot read.
-Re-run the doctor any time with `node plugins/fnd/scripts/doctor.cjs --target codex`. On a
-marketplace-only machine the same command run from an unlinked checkout reports `install:codex`
-as **not installed** — that is the checkout, not the host — and names the cached bundle to re-run
-it from.
+`codex:agents` is step 4 proved from disk — it FAILs while `~/.codex/agents/` is missing any of
+them, whatever the marketplace half reports (it SKIPs only when the checkout has no generated
+roles at all). `codex:hooks-trust` is always a reminder: the trust
+state is host state a script cannot read. Re-run the doctor any time with
+`node plugins/fnd/scripts/doctor.cjs --target codex`. Run from an unlinked checkout on a
+marketplace-only machine, `install:codex` reads **not installed** — that is the checkout, not the
+host — and names the cached bundle to re-run it from.
 
 Then start a **new Codex session** and run the smoke test once: `$smoke-test` (Codex invokes
 skills with `$`, not `/`). It proves MCP connectivity, subagent delegation, the commit guards
@@ -145,7 +144,7 @@ codex plugin marketplace upgrade      # skills, hooks, MCP
 
 ```bash
 cd /path/to/claude-plugins
-./scripts/install.sh --target codex   # only if you linked subagents (= git pull + re-link + doctor)
+./scripts/install.sh --target codex   # subagents (= git pull + re-link + doctor)
 ```
 
 Then start a new session. Three things to expect:
@@ -158,8 +157,9 @@ Then start a new session. Three things to expect:
 - **Hook trust is re-requested** after any update that changes a hook command or script content.
   Re-approve in `/hooks`; until you do, the guard layer is dormant again.
 
-The subagent half is a live-checkout install (symlink into `~/.codex/agents/`), so it follows
-`git pull` — unless you installed with `--copy`.
+The subagent half is a live-checkout install (symlinks into `~/.codex/agents/`), so `git pull`
+alone updates it — re-run the installer only to pick up added or renamed roles, or after a
+`--copy` install, which does not follow the pull at all.
 
 ## What's different on Codex
 
