@@ -445,7 +445,7 @@ never gate a workflow.
 
 ## Releasing — one command stamps every version
 
-Current release: **fnd v0.78.1**.
+Current release: **fnd v0.79.0**.
 
 The version is duplicated across per-host packaging files, and a stamp that drifts
 reads to a host as "nothing to update". One script owns all of them — run it instead
