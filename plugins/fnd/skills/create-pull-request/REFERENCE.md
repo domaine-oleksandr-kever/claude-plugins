@@ -78,10 +78,10 @@ The Preview row needs an unpublished theme that shows **this branch's code** wit
 `config/settings_data.json`, `templates/**/*.json`, and section groups `sections/*.json`. It does
 **not** clone the dev theme's code (which may be stale or broken); code always comes from the
 branch. The script reads the store / dev-theme-id / Theme Access token from `shopify.theme.toml`
-(the **first uncommented** `theme = "…"` line — while the `pin` subcommand and the `--pin-toml`
-flag write this work stream's **session theme** into the `theme =` line of the one environment
-block the Shopify CLI resolves, keeping the value they replaced on a commented
-`# fnd:superseded` line: `<plugin root>/references/session-theme.md`). To redeploy code into an existing preview theme later
+out of the **one environment block** the Shopify CLI resolves — reported as `env=`, and the same
+block the `pin` subcommand and the `--pin-toml` flag write this work stream's **session theme**
+into, keeping the value they replaced on a commented `# fnd:superseded` line
+(`<plugin root>/references/session-theme.md`). To redeploy code into an existing preview theme later
 (e.g. after a fix) without disturbing its settings, the `refresh` mode (the
 `preview-theme` skill) pushes code only.
 
@@ -111,8 +111,8 @@ Decision flow (step 4 of the skill):
 
 1. **Args win.** If `theme_name` / `theme_url` / `theme_admin_url` were passed in, use them; skip creation.
 2. **Session theme wins over auto-creation.** The workspace `notes.md` records a `session-theme: <id>` line → that theme *is* this PR's preview theme (`<plugin root>/references/session-theme.md`). **`refresh`** it onto the branch's code (`<plugin root>/scripts/create-preview-theme.sh refresh --theme <id>`) — code only, the reviewer-facing settings stay put — and build the table from the returned `theme_id` / `preview_url` / `editor_url`. Skip creation; skip the ask (the developer already chose this theme). The name comes from the `notes.md` line when it recorded one — otherwise omit the **Theme name** row rather than inventing a name.
-3. **`info`** (`<plugin root>/scripts/create-preview-theme.sh info`) detects `store`, `dev_theme_id`, `dev_theme_name`.
-   - **`error=…`** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config) → **manual path**: ask the developer for the theme name + Preview / Admin URLs.
+3. **`info`** (`<plugin root>/scripts/create-preview-theme.sh info`) detects `store`, `env`, `dev_theme_id`, `dev_theme_name`.
+   - **`error=…`** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config, an unresolvable environment block) → **manual path**: ask the developer for the theme name + Preview / Admin URLs.
    - **success** → propose the new name (swap the role prefix for the Jira key: `[DEV] Kever | Domaine` → `[ELC-126] Kever | Domaine`; **multiple tickets** → one bracket, prefix once, slash-separated numbers: `[ELC-299/307/309/315/382] Kever | Domaine`) and **ask before mutating**: `create the preview theme now? [ yes / no ]`. One PR = one preview theme regardless of how many tickets it carries — the preview overlays the dev theme's **current** customizer settings, so it reflects the content configured right now, not one ticket in isolation.
 4. **`create`** (`<plugin root>/scripts/create-preview-theme.sh create --name "<name>" [--reuse]`) builds the branch, assembles the built code into a clean temp dir (working tree untouched), pushes it to a new unpublished theme, then overlays the dev theme's customizer settings. It prints `theme_id`, `preview_url`, `editor_url`, `reused`. The skill passes `--reuse` **by default — deliberate**: one PR = one preview theme, so a re-run refreshes the same `[ELC-…]` theme instead of stacking duplicates. Note it will overwrite a pre-existing theme that happens to carry the same name (the bracketed ticket naming keeps collisions ticket-scoped). Record the returned id as the workspace's `session-theme: <id>` line, so aftercare and every later refresh reuse this theme instead of stacking another — **recorded, not pinned**: like the qa phase's fallback this runs unattended, so it never passes `--pin-toml`; the Step 0 session-theme gate re-asserts the pin on the next entry (`<plugin root>/references/session-theme.md`). Any `error=` — and any `warn=overlay_file_dropped` on an exit-0 run (the preview's affected pages 404; not reviewable as-is) → `<plugin root>/references/preview-theme-errors.md → error= outcomes` (per key: was anything pushed, retry or not, the recovery — read that section, not the file).
 

@@ -12,9 +12,18 @@
 #     The stored token is ONLINE and expires — re-run `store auth` when execute reports the
 #     auth missing/expired. This script NEVER runs `store auth` itself (it is interactive and
 #     would hang a non-TTY run). Mutations: `store execute` refuses them unless
-#     --allow-mutations is passed; the script detects a mutation operation and opts in
-#     automatically. --operation is supported by extracting that named operation (plus all
-#     fragments) into a temp file, because `store execute` has no operationName flag.
+#     --allow-mutations is passed; the script detects a mutation in the text it actually sends and
+#     opts in automatically. `store execute` has no operationName flag and runs the WHOLE document
+#     it is given, so a --operation run is narrowed first: that named operation plus the fragments
+#     it reaches go into a temp file. Supported shape = top-level `query`/`mutation`/`subscription`/
+#     `fragment` definitions (anywhere on a line, `#` comments and "…" string contents ignored) with
+#     ordinary strings only. Anything that cannot be narrowed to exactly the one operation asked
+#     for — a name matching none or several, several operations with no --operation at all, a `"""`
+#     block string or another shape the reader refuses while narrowing — is REFUSED here rather
+#     than sent unnarrowed: under --engine auto the token engine takes over (it does pass
+#     operationName), under --engine store the run stops with error=store_execute_failed. Without
+#     --operation there is nothing to narrow, so a document the reader cannot read still goes over
+#     whole (as it always did) and the API judges it.
 #
 #   token — classic Admin API access token via curl. Mirrors the create-preview-theme.sh
 #     token discipline: the token (shpat_…, scopes like write_metaobjects / write_products) is
@@ -37,11 +46,15 @@
 # reason, never pin the engine. `--engine store` never consults that memory — it always attempts
 # and reports.
 #
-# The store domain comes from shopify.theme.toml's ($TOML_PATH's) FIRST uncommented `store=` line —
-# the same pick as create-preview-theme.sh, which matters when a multi-environment toml lists
-# several — unless overridden. An `https://` URL is accepted and normalized; anything else that
-# cannot be a myshopify handle is refused (exit 2) rather than spliced into the request URL. The
-# Theme Access token (shptka_) in shopify.theme.toml is NOT an admin token and is not used here.
+# The store domain comes from shopify.theme.toml's ($TOML_PATH's) `store=` line — unless
+# overridden — read out of the ONE environment block the shared resolver picks, the same pick
+# create-preview-theme.sh and theme-json.sh make: $SHOPIFY_FLAG_ENVIRONMENT (this script's --env
+# names the dotenv file, not a block), else `dev`, else `development`, else the top-level keys;
+# blocks naming different stores with none of those names is `error=ambiguous_env` (exit 2) before
+# any request, rather than a query silently sent to another environment's store. An `https://` URL
+# is accepted and normalized; anything else that cannot be a myshopify handle is refused (exit 2)
+# rather than spliced into the request URL. The Theme Access token (shptka_) in shopify.theme.toml
+# is NOT an admin token and is not used here.
 #
 # Usage:
 #   shopify-admin-gql.sh --query <file.graphql> [--operation <name>] [--variables <json>] \
@@ -50,7 +63,8 @@
 #                        [--engine auto|store|token]
 #
 #   --query          path to a .graphql file (may hold multiple named operations)
-#   --operation      operationName to run when the file has more than one operation
+#   --operation      operationName to run — REQUIRED as soon as the file holds more than one
+#                    operation, and it must name exactly one of them (see the store engine above)
 #   --variables      JSON string of GraphQL variables (optional)
 #   --variables-file file holding the variables JSON — use for large payloads (whole
 #                    theme-file bodies): argv has a per-argument kernel limit
@@ -133,8 +147,14 @@ fi
 TOML="${TOML_PATH:-shopify.theme.toml}"
 
 if [ -z "$STORE" ]; then STORE="${SHOPIFY_STORE:-}"; fi
-[ -n "$STORE" ] || STORE="$(toml_value store)" || true
-[ -n "$STORE" ] || { echo "error=no_store (pass --store or set store= in $TOML)" >&2; exit 2; }
+if [ -z "$STORE" ]; then
+  # This script's own --env is a DOTENV PATH (the Admin token file), so the toml block selector is
+  # $SHOPIFY_FLAG_ENVIRONMENT — the one `shopify theme dev -e` reads.
+  toml_env_ready \
+    || { echo "error=$(toml_env_error 'pass --store, export SHOPIFY_FLAG_ENVIRONMENT=<name> (this script'"'"'s --env names the dotenv file, not a toml block), or point TOML_PATH at a single-environment file')" >&2; exit 2; }
+  STORE="$(toml_value store)" || true
+fi
+[ -n "$STORE" ] || { echo "error=no_store (pass --store or set store= in $TOML, env=$TOML_ENV)" >&2; exit 2; }
 # the handle guard is also what keeps $DOMAIN safe to use as a state-file name below; it applies to
 # --store / $SHOPIFY_STORE / the toml alike
 STORE="$(store_handle "$STORE")" \
@@ -280,23 +300,173 @@ store_skip_cached() { # 0 = known-unavailable here; sets SKIP_REASON from the re
   return 0
 }
 
-# print only the named operation's block plus every fragment — `store execute` has no
+# ONE reader for every GraphQL question this script asks: which operations a document declares,
+# which text to hand `store execute` (it has no operationName flag, so a file must already BE the
+# one operation to run), whether that text is a mutation, and whether a timed-out request could
+# have been one. It finds definitions the way the language does — a `query`/`mutation`/
+# `subscription`/`fragment` keyword at brace and paren depth 0, ANYWHERE on a line, not only at the
+# start of one — after blanking `#` comments and the contents of "…" strings, so a brace or a
+# keyword inside either cannot move the depth counter or invent a declaration. Blanking is
+# length-preserving, which is what lets an offset in the sanitized text address the same character
+# in the original and a declaration be cut out mid-line. `"""` block strings are outside that
+# blanking, so a document holding a real one (a `"""` surviving the blanking, not one merely quoted
+# or commented) is reported unsupported instead of mis-parsed. This is not a GraphQL lexer and does
+# not try to be: every shape it cannot read confidently comes back as `unsupported <why>`, and the
+# callers decide — refusing where a wrong read would send the wrong text.
+GQL_AWK='
+function sanitize(s,   out, i, c, n, instr, esc) {
+  n = length(s); out = ""; instr = 0; esc = 0
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (instr) {
+      if (esc) { esc = 0; out = out " "; continue }
+      if (c == "\\") { esc = 1; out = out " "; continue }
+      if (c == "\"") { instr = 0; out = out "\""; continue }
+      out = out " "; continue
+    }
+    if (c == "\"") { instr = 1; out = out "\""; continue }
+    if (c == "#") { while (i <= n) { out = out " "; i++ }; return out }
+    out = out c
+  }
+  return out
+}
+function refuse(why) {
+  if (mode == "extract") exit 1
+  print "unsupported " why
+  exit 0
+}
+function spreads(k,   t, r) {   # fragment names the definition k spreads, into need[]
+  t = substr(san, dstart[k], dend[k] - dstart[k] + 1)
+  while (match(t, /\.\.\.[ \t\r\n]*[A-Za-z_][A-Za-z0-9_]*/)) {
+    r = substr(t, RSTART, RLENGTH)
+    sub(/^\.\.\.[ \t\r\n]*/, "", r)
+    # `... on Type` is an inline fragment; `on` is a reserved word, never a fragment name
+    if (r != "on") need[r] = 1
+    t = substr(t, RSTART + RLENGTH)
+  }
+}
+{
+  line = sanitize($0)
+  raw = raw $0 "\n"; san = san line "\n"
+  # a `"""` inside a # comment or a "…" string is text, not a block string — look at the
+  # sanitized line, where both are already blanked out
+  if (index(line, "\"\"\"")) block = 1
+}
+END {
+  if (block) refuse("block string (\"\"\") — this reader handles ordinary \"…\" strings only")
+  n = length(san); i = 1; depth = 0; pdepth = 0; ndef = 0; cur = 0
+  while (i <= n) {
+    c = substr(san, i, 1)
+    if (c == "(") { pdepth++; i++; continue }
+    if (c == ")") { if (pdepth > 0) pdepth--; i++; continue }
+    # inside variable definitions: a { } there is a default value, not a selection set
+    if (pdepth > 0) { i++; continue }
+    if (c == "{") {
+      if (cur == 0 && depth == 0) { ndef++; dstart[ndef] = i; dkind[ndef] = "query"; dname[ndef] = ""; cur = ndef }
+      depth++; i++; continue
+    }
+    if (c == "}") {
+      if (depth > 0) depth--
+      i++
+      if (depth == 0 && cur > 0) { dend[cur] = i - 1; cur = 0 }
+      continue
+    }
+    if (c ~ /[A-Za-z_]/) {
+      j = i
+      while (j <= n && substr(san, j, 1) ~ /[A-Za-z0-9_]/) j++
+      w = substr(san, i, j - i)
+      if (cur == 0 && depth == 0) {
+        rest = substr(san, j)
+        if (w == "query" || w == "mutation" || w == "subscription") {
+          # variable definitions `(`, a selection set `{`, or a directive `@` may follow the name
+          if (rest !~ /^[ \t\r\n]*([A-Za-z_][A-Za-z0-9_]*)?[ \t\r\n]*[({@]/) refuse("unreadable " w " declaration")
+          name = ""
+          if (match(rest, /^[ \t\r\n]*[A-Za-z_][A-Za-z0-9_]*/)) {
+            name = substr(rest, 1, RLENGTH); sub(/^[ \t\r\n]+/, "", name)
+          }
+          ndef++; dstart[ndef] = i; dkind[ndef] = w; dname[ndef] = name; cur = ndef
+        } else if (w == "fragment") {
+          if (rest !~ /^[ \t\r\n]*[A-Za-z_][A-Za-z0-9_]*[ \t\r\n]/) refuse("unreadable fragment declaration")
+          name = ""
+          if (match(rest, /^[ \t\r\n]*[A-Za-z_][A-Za-z0-9_]*/)) {
+            name = substr(rest, 1, RLENGTH); sub(/^[ \t\r\n]+/, "", name)
+          }
+          ndef++; dstart[ndef] = i; dkind[ndef] = "fragment"; dname[ndef] = name; cur = ndef
+        } else {
+          refuse("unrecognized top-level token \047" w "\047")
+        }
+      }
+      i = j; continue
+    }
+    i++
+  }
+  if (cur > 0) refuse("unterminated " dkind[cur] " definition")
+  if (mode == "extract") {
+    # only the fragments the chosen operation can actually reach: GraphQL rejects a document
+    # carrying a fragment nothing uses, and `store execute` reports that as a hard GraphQL
+    # error with no engine left to fall back to
+    for (k = 1; k <= ndef; k++) if (dkind[k] != "fragment" && want != "" && dname[k] == want) spreads(k)
+    grew = 1
+    while (grew) {
+      grew = 0
+      for (k = 1; k <= ndef; k++)
+        if (dkind[k] == "fragment" && (dname[k] in need) && !(k in used)) { used[k] = 1; spreads(k); grew = 1 }
+    }
+  }
+  for (k = 1; k <= ndef; k++) {
+    if (mode == "extract") {
+      if ((dkind[k] == "fragment" && (k in used)) || (dkind[k] != "fragment" && want != "" && dname[k] == want)) {
+        printf "%s\n", substr(raw, dstart[k], dend[k] - dstart[k] + 1)
+      }
+    } else if (dkind[k] == "fragment") {
+      print "frag"
+    } else {
+      print "op " dkind[k] " " dname[k]
+    }
+  }
+}
+'
+
+# LC_ALL=C on both entry points: the reader walks the document one character at a time and hands
+# byte offsets from the sanitized text back to the raw text, so it must count bytes, not runes —
+# and a stray non-UTF-8 byte or a leading BOM aborts a multibyte-locale awk mid-parse.
+gql_defs() { # $1 = file → one line per top-level definition: `op <kind> <name>` | `frag` | `unsupported <why>`
+  LC_ALL=C awk -v mode=scan -v want="" "$GQL_AWK" "$1"
+}
+
+# print only the named operation's block plus the fragments it reaches — `store execute` has no
 # operationName flag, so a multi-operation file must be narrowed before sending
-extract_operation() {
-  awk -v op="$1" '
-    /^[[:space:]]*(query|mutation|subscription)([[:space:]]|[({]|$)/ {
-      line = $0
-      sub(/^[[:space:]]*(query|mutation|subscription)[[:space:]]*/, "", line)
-      name = line; sub(/[^A-Za-z0-9_].*$/, "", name)
-      keep = (name == op)
-    }
-    /^[[:space:]]*fragment([[:space:]]|$)/ { keep = 1 }
-    {
-      if (keep) print
-      d += gsub(/{/, "{") - gsub(/}/, "}")
-      if (keep && d <= 0 && /}/) keep = 0
-    }
-  '
+gql_extract() { # $1 = file, $2 = operation name
+  LC_ALL=C awk -v mode=extract -v want="$2" "$GQL_AWK" "$1"
+}
+
+# Was the request that just died on the wire a mutation (which may already have committed)? The
+# name is compared literally, never as a regex. A document the reader refuses is the one place a
+# MISSED warning would hurt most, so it degrades to "does this file mention a mutation at all" —
+# over-warning is the safe direction.
+sent_could_be_mutation() {
+  local defs
+  defs="$(gql_defs "$QUERY_FILE" 2>/dev/null || true)"
+  case "$defs" in
+    ''|unsupported*) grep -q 'mutation' "$QUERY_FILE" ;;
+    *) printf '%s\n' "$defs" | awk -v op="$OPERATION" '
+         $1 == "op" && $2 == "mutation" && (op == "" || $3 == op) { found = 1 }
+         END { exit found ? 0 : 1 }' ;;
+  esac
+}
+
+OPS_TOTAL=0; OPS_NAMED=0; OPS_KIND=""
+count_ops() { # $1 = gql_defs output, $2 = wanted name ("" = any) → OPS_TOTAL / OPS_NAMED / OPS_KIND
+  local tag kind name
+  OPS_TOTAL=0; OPS_NAMED=0; OPS_KIND=""
+  while IFS=' ' read -r tag kind name; do
+    [ "$tag" = "op" ] || continue
+    OPS_TOTAL=$((OPS_TOTAL + 1))
+    if [ -z "$2" ]; then OPS_KIND="$kind"
+    elif [ "$name" = "$2" ]; then OPS_NAMED=$((OPS_NAMED + 1)); OPS_KIND="$kind"; fi
+  done <<< "$1"
+  # a counter, never a verdict: the caller decides — and under `set -e` a bare call must not abort
+  return 0
 }
 
 try_store_execute() {
@@ -326,23 +496,56 @@ try_store_execute() {
     return 1
   fi
 
-  local qfile="$QUERY_FILE" tmpq=""
+  # `store execute` runs the WHOLE document it is given, so the file handed over must already be
+  # the one operation to run. Every shape that cannot be narrowed to exactly that — a --operation
+  # name that does not resolve to exactly one declaration, a document the reader cannot read while
+  # narrowing, several confidently-counted operations with no --operation at all — steps aside
+  # HERE, before anything is sent: under --engine auto the token engine takes over (it passes
+  # operationName), under --engine store the run reports and stops. A document with no --operation
+  # needs no narrowing, so a shape the reader refuses is NOT a reason to withhold it — it goes over
+  # untouched exactly as it did before this reader existed, and the API judges the GraphQL.
+  local qfile="$QUERY_FILE" tmpq="" defs why
+  defs="$(gql_defs "$QUERY_FILE" 2>/dev/null || true)"
+  why=""
+  case "$defs" in unsupported*) why="${defs#unsupported }" ;; esac
+  count_ops "$defs" "$OPERATION"
   if [ -n "$OPERATION" ]; then
+    if [ -n "$why" ]; then
+      SKIP_REASON="store engine cannot isolate operation '$OPERATION' in $QUERY_FILE ($why)"
+      return 1
+    fi
+    if [ "$OPS_NAMED" -ne 1 ]; then
+      SKIP_REASON="store engine cannot isolate operation '$OPERATION' in $QUERY_FILE ($OPS_NAMED operations carry that name, $OPS_TOTAL in the document)"
+      return 1
+    fi
     tmpq="$(mktemp)"
-    extract_operation "$OPERATION" < "$QUERY_FILE" > "$tmpq"
-    if ! [ -s "$tmpq" ] || ! grep -q "$OPERATION" "$tmpq"; then
+    gql_extract "$QUERY_FILE" "$OPERATION" > "$tmpq" 2>/dev/null || true
+    # the gate is on the text that will actually be SENT, not on the document it came out of
+    defs="$(gql_defs "$tmpq" 2>/dev/null || true)"
+    count_ops "$defs" "$OPERATION"
+    if [ ! -s "$tmpq" ] || [ "$OPS_TOTAL" -ne 1 ] || [ "$OPS_NAMED" -ne 1 ]; then
       rm -f "$tmpq"
-      SKIP_REASON="could not extract operation '$OPERATION' from $QUERY_FILE"
+      SKIP_REASON="store engine cannot isolate operation '$OPERATION' in $QUERY_FILE (the narrowed text holds $OPS_TOTAL operations)"
       return 1
     fi
     qfile="$tmpq"
+  elif [ -z "$why" ] && [ "$OPS_TOTAL" -ne 1 ]; then
+    SKIP_REASON="store engine cannot pick an operation in $QUERY_FILE ($OPS_TOTAL operations found — pass --operation)"
+    return 1
   fi
 
   local args=(store execute --store "$DOMAIN" --query-file "$qfile" --json --no-color --version "$API_VERSION")
   [ -n "$VARIABLES" ] && args+=(--variables "$VARIABLES")
-  # the CLI refuses mutations unless explicitly opted in
+  # the CLI refuses mutations unless explicitly opted in — decided by the operation actually sent,
+  # so a query carved out of a document that also holds a mutation never opts in. On the one path
+  # that sends a document the reader could not read, the opt-in degrades to "does this file mention
+  # a mutation at all": --allow-mutations only PERMITS one, so granting it to a query changes
+  # nothing while withholding it from a mutation is a hard refusal.
   local is_mutation=0
-  if grep -qE '^[[:space:]]*mutation([[:space:]]|[({]|$)' "$qfile"; then is_mutation=1; args+=(--allow-mutations); fi
+  if [ "$OPS_KIND" = "mutation" ]; then is_mutation=1
+  elif [ -n "$why" ] && grep -qE '(^|[^A-Za-z0-9_])mutation([^A-Za-z0-9_]|$)' "$qfile"; then is_mutation=1
+  fi
+  if [ "$is_mutation" -eq 1 ]; then args+=(--allow-mutations); fi
 
   local out err rc=0
   out="$(mktemp)"; err="$(mktemp)"
@@ -555,16 +758,9 @@ HTTP_CODE="$(curl -sS -X POST "$URL" \
     # Only a request that was on the wire can have committed server-side — a timeout or a dropped
     # connection (28, 52, 55, 56), not a DNS/connect/TLS failure that never sent a byte. Under
     # --operation only the SELECTED operation decides: a query carved out of a mixed document
-    # carries no such hazard. The name is compared literally, never as a regex; the awk is
-    # extract_operation's twin for spotting the operation line.
+    # carries no such hazard.
     case "$crc" in 28|52|55|56) ;; *) exit 5 ;; esac
-    if awk -v op="$OPERATION" '
-         /^[[:space:]]*mutation([[:space:]]|[({]|$)/ {
-           name = $0
-           sub(/^[[:space:]]*mutation[[:space:]]*/, "", name); sub(/[^A-Za-z0-9_].*$/, "", name)
-           if (op == "" || name == op) { found = 1; exit }
-         }
-         END { exit found ? 0 : 1 }' "$QUERY_FILE"; then
+    if sent_could_be_mutation; then
       echo "hint=the mutation may already have been applied. Verify the store state first; re-run only if the change is absent." >&2
     fi
     exit 5

@@ -26,8 +26,12 @@
 #                    would authenticate this repo's pushes against that store)
 #   Values may be double-quoted, single-quoted or bare; a malformed store/theme id is a hard stop
 #   (it would otherwise reach the CLI and target the wrong store, or orphan a created theme).
-#   NB: the FIRST uncommented match wins — in a multi-environment toml ([environments.*])
-#   that is the first environment listed; point TOML_PATH at a single-env file to override.
+#   All three come out of ONE `[environments.*]` block (`--env`, else $SHOPIFY_FLAG_ENVIRONMENT,
+#   else `dev`/`development`, else the top-level keys — see --env below), reported as `env=`; a key
+#   the block does not carry falls back to the top-level keys and then to the file at large —
+#   except `store`/`password`, the two halves of one per-store credential, which leave the block
+#   only where every `store =` in the file names the same store. Blocks naming different stores
+#   with none of those names is `error=ambiguous_env` before anything is read from the store.
 #
 # SESSION THEME (`pin` / `--pin-toml`): one preview theme per work stream. Pinning rewrites the
 # `theme =` line of ONE environment block — the block `shopify theme dev -e <name>` actually reads
@@ -35,18 +39,17 @@
 # single-environment toml that is also the line THIS script reads, so a later `create` copies the
 # customizer settings from the SESSION theme rather than the shared dev theme: that is the point
 # (the session theme was seeded from the dev theme when it was created), and it is why the pin
-# belongs to a work stream, not to the repo. In a MULTI-environment toml the two can differ — the
-# CLI resolves per environment, this script still resolves the first uncommented line — so pin the
-# environment the dev server uses and pass a single-env $TOML_PATH if the settings source matters.
+# belongs to a work stream, not to the repo. In a MULTI-environment toml the block written is the
+# block read (same resolution, one `--env`), so that stays true there.
 #
 # Subcommands:
 #   info
-#       → store=… dev_theme_id=… dev_theme_name=…                       (no mutation)
+#       → store=… env=… dev_theme_id=… dev_theme_name=…                 (no mutation)
 #   create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push code (settings ignored) to a new unpublished theme
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
 #         → read the overlay back (see verify_overlay)
-#       → theme_id=… name=… store=… preview_url=… editor_url=… reused=… built=… overlay=…
+#       → theme_id=… name=… store=… env=… preview_url=… editor_url=… reused=… built=… overlay=…
 #         [warn=overlay_file_dropped file=… [unknown_types=…]] [hint=…] | [warn=overlay_unverified …] | [warn=overlay_empty …]
 #       `--reuse` resolves the name through `theme list`: a listing that never answered is refused
 #       (`error=reuse_unverifiable`), and a name that resolves to the shared dev theme is refused
@@ -54,7 +57,7 @@
 #   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
-#       → theme_id=… store=… preview_url=… editor_url=… built=…
+#       → theme_id=… store=… env=… preview_url=… editor_url=… built=…
 #       <ID> must clear the live-theme guard; when `theme list` never answered it must also be an id
 #       some workspace under ./.claude/tasks records as `session-theme:` (`error=refresh_unverifiable`
 #       otherwise), and it must not be the shared dev theme (`error=dev_theme_write_refused`).
@@ -67,7 +70,7 @@
 #         outage: the pin still proceeds when the run did — refresh for a recorded session theme or
 #         with --allow-unverified, --reuse only with the flag; otherwise refresh_unverifiable /
 #         reuse_unverifiable — and is flagged warn=pin_unvetted.)
-#       → theme_id=… store=… pin=… pin_env=… commented_dupes=… [superseded_theme_id=…]
+#       → theme_id=… store=… env=… pin=… pin_env=… commented_dupes=… [superseded_theme_id=…]
 #
 #   --allow-unverified  (create & refresh) — overrides `refresh_unverifiable` and `reuse_unverifiable`
 #       ONLY: a `theme list` that never answered no longer blocks a `refresh --theme <ID>` of an id no
@@ -97,11 +100,17 @@
 #       refresh_unverifiable / reuse_unverifiable); a fresh `create` always proceeds — the theme is
 #       real by pin time and its id must reach the config — flagged `warn=pin_unvetted` before the pin keys.
 #   --env <name>  (pin, and create/refresh WITH --pin-toml — without it the flag would be a silent
-#       no-op, so it is refused: `--env requires --pin-toml`) — the `[environments.<name>]` block
-#       to pin. Default: `dev`, else `development` — by NAME, never by count (a single block under
-#       any other name is not auto-picked) — else the top-level keys when an uncommented top-level
-#       `theme =`/`store =` precedes the first block (reported as `pin_env=-`), else refuse
-#       (`error=ambiguous_env`, pass --env <name>) rather than guess which one the dev server reads.
+#       no-op, so it is refused: `--env requires --pin-toml`) — the `[environments.<name>]` block,
+#       for the READ (store, dev theme id, token) and the pin alike: one name, one block, so a
+#       preview can never be pushed to one environment's store and pinned into another's. Default:
+#       $SHOPIFY_FLAG_ENVIRONMENT (the same selector `shopify theme dev -e` reads), else `dev`,
+#       else `development` — by NAME, never by count (a single block under any other name is not
+#       auto-picked) — else the top-level keys when an uncommented top-level `theme =`/`store =`
+#       precedes the first block (`env=-`), else refuse (`error=ambiguous_env`, naming the selector
+#       THIS subcommand accepts) rather than guess which one the dev server reads. The one relaxation is for READING: when
+#       every `store =` in the file is the same store no choice can target the wrong one, so the
+#       read falls back to file order (`env=*`) — the pin still refuses, since which block the dev
+#       server resolves is still unknown.
 #
 # Output is `key=value` lines on stdout. Errors print `error=<reason>` and exit non-zero.
 # Pushes retry on a Shopify `Throttled` answer (pauses: $FND_CPT_THROTTLE_WAITS, default "20 60");
@@ -159,6 +168,47 @@ command -v jq >/dev/null 2>&1 || fail "jq not found on PATH (install: brew insta
 # the two hard stops on that value below must not kill it before it runs.
 MODE="${1:-}"; shift || true
 
+# --env is parsed per mode below, but which `[environments.*]` block the config is READ from has to
+# be settled BEFORE the first read: the store, the dev theme id and the Theme Access token all come
+# out of one block, and a file-order read hands the CLI one environment's store with another's
+# token — a preview theme pushed to the production store. The scan mirrors the per-mode grammars
+# (a value-taking flag's value is skipped, so `--name --env` is a name), and the assert after each
+# of those loops is what keeps the two readings from drifting apart.
+CPT_ENV_ARG=""; CPT_PIN_ARG=0
+scan_env_arg() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --env) [ $# -ge 2 ] || return 0; CPT_ENV_ARG="$2"; shift 2 ;;
+      --pin-toml) CPT_PIN_ARG=1; shift ;;
+      --theme|--name|--build-script|--ignore-extra) [ $# -ge 2 ] || return 0; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+}
+scan_env_arg "$@"
+# `--env` without `--pin-toml` is refused by the create/refresh loops below, and that refusal is
+# the answer the developer needs — not a config error about a block the run would never use. So
+# that combination resolves the DEFAULT block, tolerating a failure it is about to moot.
+CPT_ENV_UNUSABLE=0
+case "$MODE" in
+  create|refresh) [ -z "$CPT_ENV_ARG" ] || [ "$CPT_PIN_ARG" -eq 1 ] || CPT_ENV_UNUSABLE=1 ;;
+esac
+# …and which escape hatch the refusal names has to be one THIS invocation can take: `--env` is a
+# pin flag, so naming it to a `create` that passed no --pin-toml only swaps one refusal for the
+# other, and `info` has no --env at all.
+case "$MODE" in
+  pin) CPT_ENV_FIX='re-run with --env <name>' ;;
+  create|refresh)
+    if [ "$CPT_PIN_ARG" -eq 1 ]; then CPT_ENV_FIX='re-run with --env <name>'
+    else CPT_ENV_FIX='export SHOPIFY_FLAG_ENVIRONMENT=<name>, or re-run with --pin-toml --env <name> (which also pins this theme into that block)'; fi ;;
+  *) CPT_ENV_FIX='export SHOPIFY_FLAG_ENVIRONMENT=<name> (this subcommand takes no --env)' ;;
+esac
+if [ "$CPT_ENV_UNUSABLE" -eq 1 ]; then
+  toml_env_ready "" || true
+else
+  toml_env_ready "$CPT_ENV_ARG" || fail "$(toml_env_error "$CPT_ENV_FIX")"
+fi
+
 # --- parse shopify.theme.toml (token is read but NEVER printed) ---------------
 DEV_THEME_ID="$(toml_value theme || true)"
 STORE="$(toml_value store || true)"
@@ -169,9 +219,9 @@ STORE="$(toml_value store || true)"
 TOKEN="$(theme_token_from_toml)"
 [ -n "$TOKEN" ] || TOKEN="${SHOPIFY_CLI_THEME_TOKEN:-}"
 
-[ "$MODE" = pin ] || [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML"
-[ -n "${STORE:-}" ]        || fail "no uncommented \`store = \"...\"\` line in $TOML"
-[ -n "${TOKEN:-}" ]        || fail "no access token (password / shp*_… in $TOML, or \$SHOPIFY_CLI_THEME_TOKEN)"
+[ "$MODE" = pin ] || [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML (env=$TOML_ENV)"
+[ -n "${STORE:-}" ]        || fail "no uncommented \`store = \"...\"\` line in $TOML (env=$TOML_ENV)"
+[ -n "${TOKEN:-}" ]        || fail "no access token (password / shp*_… in $TOML env=$TOML_ENV, or \$SHOPIFY_CLI_THEME_TOKEN)"
 
 # A value that cannot be what it claims to be is a typo or a mis-parse, and handing it to the CLI is
 # an opaque failure at best and the WRONG STORE at worst. A malformed dev theme id is the nastier
@@ -319,7 +369,9 @@ assert_not_live() { # $1 = target theme id
 ALLOW_UNVERIFIED=0; ALLOW_DEV_THEME=0
 assert_not_dev_theme() { # $1 = target id, $2 = context name for the message
   local dev hit=0
-  for dev in $(shared_dev_theme_ids "$TOML" "$DEV_THEME_ID"); do [ "$1" = "$dev" ] && hit=1; done
+  for dev in $(shared_dev_theme_ids "$TOML" "$DEV_THEME_ID" "$TOML_ENV_FROM" "$TOML_ENV_TO"); do
+    [ "$1" = "$dev" ] && hit=1
+  done
   [ "$hit" -eq 1 ] || return 0
   [ "$ALLOW_DEV_THEME" -eq 0 ] || return 0
   session_theme_recorded "$1" && return 0
@@ -632,6 +684,15 @@ print_overlay_keys() {
 # The pin keys, printed AFTER the theme keys on create/refresh: a caller reading the stream must
 # have the theme id in hand before it learns anything about the toml.
 PIN=0; PIN_ENV=""; PIN_FAIL=""
+# The block the pin writes is the block the config was READ from — a pin into another environment
+# would record a theme id that belongs to a store this run never touched. `-` (top-level keys) and
+# `*` (a single-store file with no block to prefer) stay empty on purpose: pin_toml resolves the
+# first itself and must keep REFUSING the second (error=ambiguous_env), which naming it would defeat.
+sync_pin_env() {
+  [ "$PIN_ENV" = "$CPT_ENV_ARG" ] || \
+    fail "env_scan_mismatch read='$CPT_ENV_ARG' pin='$PIN_ENV' — the --env pre-scan and the $MODE argument loop disagree about the environment block; nothing was changed"
+  [ -n "$PIN_ENV" ] || case "$TOML_ENV" in -|'*') ;; *) PIN_ENV="$TOML_ENV" ;; esac
+}
 print_pin_keys() {
   # `theme list` never gave a readable answer, so the pinned id could not be vetted against the
   # store — said BEFORE the pin keys, so a caller acting on pin= has already seen it. Standalone
@@ -644,6 +705,10 @@ print_pin_keys() {
   fi
   printf 'pin=%s\n' "$PIN_ACTION"
   printf 'pin_env=%s\n' "$PIN_ENV_USED"
+  # pin_toml resolves the block in its own pass over the file, so this is the one place the two
+  # resolvers can be seen to agree — a divergence means the id was written into a block whose
+  # store the run never touched
+  [ "$PIN_ENV_USED" = "$TOML_ENV" ] || printf 'warn=pin_env_mismatch read_env=%s\n' "$TOML_ENV"
   printf 'commented_dupes=%s\n' "$PIN_DUPES"
   [ -z "$PIN_OLD" ] || printf 'superseded_theme_id=%s\n' "$PIN_OLD"
 }
@@ -681,6 +746,7 @@ case "$MODE" in
   info)
     load_theme_list
     printf 'store=%s\n' "$STORE"
+    printf 'env=%s\n' "$TOML_ENV"
     printf 'dev_theme_id=%s\n' "$DEV_THEME_ID"
     printf 'dev_theme_name=%s\n' "$(theme_name_by_id "$DEV_THEME_ID")"
     ;;
@@ -694,6 +760,7 @@ case "$MODE" in
         *) fail "unknown arg: $1" ;;
       esac
     done
+    sync_pin_env
     [ -n "$TARGET" ] || fail "pin requires --theme <existing theme id>"
     # Numeric ids only, for the same reason refresh insists: assert_not_live vets by id, so a NAME
     # would sail past the guard with role="" — and here it would then be written into the config
@@ -719,6 +786,7 @@ case "$MODE" in
     pin_toml "$TARGET" || fail "$PIN_ERR_KEY $PIN_ERR_MSG; nothing was changed"
     printf 'theme_id=%s\n' "$TARGET"
     printf 'store=%s\n' "$STORE"
+    printf 'env=%s\n' "$TOML_ENV"
     print_pin_keys
     ;;
 
@@ -742,6 +810,7 @@ case "$MODE" in
     # --env only ever feeds pin_toml — accepted without --pin-toml it would be a silent no-op
     # the caller reads as "the block I named was pinned"
     [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
+    sync_pin_env
     vet_build_script
 
     # Resolve (and vet) the --reuse target BEFORE the build: a refusal after a several-minute npm
@@ -819,6 +888,7 @@ case "$MODE" in
     printf 'theme_id=%s\n' "$THEME_ID"
     printf 'name=%s\n' "$NAME"
     printf 'store=%s\n' "$STORE"
+    printf 'env=%s\n' "$TOML_ENV"
     printf 'preview_url=%s\n' "$PREVIEW"
     printf 'editor_url=%s\n' "$EDITOR"
     printf 'reused=%s\n' "$REUSED"
@@ -845,6 +915,7 @@ case "$MODE" in
     [ -n "$TARGET" ] || fail "refresh requires --theme <existing theme id>"
     # same guard as create: --env without --pin-toml would be a silent no-op
     [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
+    sync_pin_env
     vet_build_script
     # Numeric ids only: the CLI resolves a NAME here too, but assert_not_live vets by id — a name
     # target would sail past the guard with role="" and let the CLI resolve it to any theme,
@@ -880,6 +951,7 @@ case "$MODE" in
 
     printf 'theme_id=%s\n' "$(json_field "$OUT" id)"
     printf 'store=%s\n' "$STORE"
+    printf 'env=%s\n' "$TOML_ENV"
     printf 'preview_url=%s\n' "$(json_field "$OUT" preview_url)"
     printf 'editor_url=%s\n' "$(json_field "$OUT" editor_url)"
     printf 'built=%s\n' "$BUILT"

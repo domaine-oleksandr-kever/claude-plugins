@@ -334,22 +334,32 @@ unpin_toml() { # $1 = the copied toml
   return 0
 }
 
-# The shared dev theme ids: every id a pin superseded, plus the settings source (the first
-# uncommented `theme =`, file-wide) unless that line is itself pinned — a marker above it in its
-# block, or the uncommented `# fnd:session-theme` tag (pin_toml's `tagged` test). Third reader of
-# the marker/tag shapes in this file, after pin_toml writes them and unpin_toml reverts them.
-shared_dev_theme_ids() { # $1 = toml path, $2 = the file's uncommented `theme =` id
+# The shared dev theme ids: every id a pin superseded, plus EVERY block's settings source — its
+# first uncommented `theme =` — unless that line is itself pinned (a marker above it in the same
+# block, or the uncommented `# fnd:session-theme` tag, pin_toml's `tagged` test). Per block, because
+# each block names its own environment's shared theme and a session pin in one of them says nothing
+# about the others. Third reader of the marker/tag shapes in this file, after pin_toml writes them
+# and unpin_toml reverts them.
+shared_dev_theme_ids() { # $1 = toml, $2 = the id the caller read, $3/$4 = the line range it read it from
   local ids v
-  ids="$(awk -v dev="$2" '
-    { sub(/\r$/, "") }
-    /^[ \t]*\[/ { marked = 0; next }
-    /^[ \t]*#[ \t]*theme[ \t]*=/ && /fnd:superseded/ {
-      marked = 1; v = $0
-      sub(/^[ \t]*#[ \t]*theme[ \t]*=[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v); gsub(/["\047 ]/, "", v)
-      print v; next
+  ids="$(awk -v dev="$2" -v from="${3:-0}" -v to="${4:-0}" '
+    function val(s,   v) {
+      v = s
+      sub(/^[ \t]*#?[ \t]*theme[ \t]*=[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v); gsub(/["\047 ]/, "", v)
+      return v
     }
+    { sub(/\r$/, "") }
+    /^[ \t]*\[/ { marked = 0; first = 0; next }
+    /^[ \t]*#[ \t]*theme[ \t]*=/ && /fnd:superseded/ { marked = 1; print val($0); next }
     /^[ \t]*#/ { next }
-    /^[ \t]*theme[ \t]*=/ && !first { first = 1; if (!marked && $0 !~ /#[ \t]*fnd:session-theme[ \t]*$/) print dev }
+    /^[ \t]*theme[ \t]*=/ && !first {
+      first = 1
+      if (marked || $0 ~ /#[ \t]*fnd:session-theme[ \t]*$/) next
+      print val($0)
+      # the caller parsed the same line with the full scalar reader; on the block it read, its
+      # value is the authority — this line-shape parse only has to cover the OTHER blocks
+      if (from > 0 && NR >= from && (to == 0 || NR <= to)) print dev
+    }
   ' "$1" 2>/dev/null || true)"
   for v in $ids; do case "$v" in ''|*[!0-9]*) ;; *) printf '%s\n' "$v" ;; esac; done
 }

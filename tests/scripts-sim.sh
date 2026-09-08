@@ -15,7 +15,7 @@ set -u
 # exports to the Bash tool): FND_GQL_PROBE_CACHE=0 turns the probe-cache cases red, and an ambient
 # TOML_PATH re-targets every case that relies on the repo fixture toml.
 unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR SHOPIFY_CLI_THEME_TOKEN SHOPIFY_STORE \
-      FND_GQL_PROBE_CACHE TOML_PATH SHOPIFY_ADMIN_API_VERSION
+      FND_GQL_PROBE_CACHE TOML_PATH SHOPIFY_ADMIN_API_VERSION SHOPIFY_FLAG_ENVIRONMENT
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GQL="$ROOT/plugins/fnd/scripts/shopify-admin-gql.sh"
@@ -386,6 +386,81 @@ TOML_PATH="$TT/broken.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
   "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
 assert T22-bad-store-refused 2 "$rc" "$E" "error=invalid_store"
 if [ ! -s "$L" ]; then ok; else bad T22b-no-cli-call "the CLI ran with a garbage store :: $(tr '\n' ';' < "$L")"; fi
+
+# --- multi-environment toml: one block supplies the store AND the token -------------------
+# `--env` here names the DOTENV file, not a toml block, so the selector is $SHOPIFY_FLAG_ENVIRONMENT
+# (what `shopify theme dev -e` reads) with the same dev/development/top-level default as the pin.
+# A file-ordered read handed the CLI one environment's store with another's token — and a Theme
+# Access token is minted per store, so that is a 401 at best and the wrong store at worst.
+printf '[environments.production]\nstore = "store-a"\npassword = "shptka_prodAAA"\n\n[environments.dev]\nstore = "store-b"\npassword = "shptka_devBBB"\n' > "$TT/two.toml"
+rc=0; L="$TMP/tjl60"; : > "$L"
+TOML_PATH="$TT/two.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store store-b\.myshopify\.com ' "$L" \
+   && grep -q '^token=shptka_devBBB$' "$L" && ! grep -q 'shptka_prodAAA' "$L"; then ok
+else bad T60-toml-block-store-and-token "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T60b: $SHOPIFY_FLAG_ENVIRONMENT picks the other block, store and token together
+rc=0; L="$TMP/tjl60b"; : > "$L"
+TOML_PATH="$TT/two.toml" SHOPIFY_FLAG_ENVIRONMENT=production TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store store-a\.myshopify\.com ' "$L" \
+   && grep -q '^token=shptka_prodAAA$' "$L" && ! grep -q 'shptka_devBBB' "$L"; then ok
+else bad T60b-flag-environment "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T60c (blocker): blocks naming different stores and none of them dev/development — refused before
+# the CLI runs, with the escape hatches spelled out (this script's --env is not one of them)
+printf '[environments.production]\nstore = "store-a"\npassword = "shptka_prodAAA"\n\n[environments.staging]\nstore = "store-c"\npassword = "shptka_stgCCC"\n' > "$TT/diff.toml"
+rc=0; L="$TMP/tjl60c"; : > "$L"
+TOML_PATH="$TT/diff.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+assert T60c-tj-ambiguous-env 2 "$rc" "$E" "error=ambiguous_env envs=production staging"
+if [ ! -s "$L" ] && grep -q 'SHOPIFY_FLAG_ENVIRONMENT=<name>' "$E"; then ok
+else bad T60d-tj-ambiguous-no-cli "the CLI ran, or the hint named no selector :: $(tr '\n' ';' < "$L") $(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# T60e (bug): `pass --store` is the first escape hatch the refusal names, so it has to WORK — a
+# store the run is already fixed on answers the question the ambiguity was about, and the token
+# then comes from the block naming THAT store (never a borrowed one)
+rc=0; L="$TMP/tjl60e"; : > "$L"
+TOML_PATH="$TT/diff.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store store-a >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store store-a\.myshopify\.com ' "$L" \
+   && grep -q '^token=shptka_prodAAA$' "$L" && ! grep -q 'shptka_stgCCC' "$L"; then ok
+else bad T60e-store-flag-settles-block "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# T60f: …and only when a block actually names it — a --store no block carries leaves the token
+# question open, so the refusal stands and nothing is invoked with a borrowed token
+rc=0; L="$TMP/tjl60f"; : > "$L"
+TOML_PATH="$TT/diff.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store store-zzz >"$O" 2>"$E" || rc=$?
+assert T60f-tj-unknown-store-still-refused 2 "$rc" "$E" "error=ambiguous_env"
+if [ ! -s "$L" ]; then ok; else bad T60f2-tj-unknown-store-no-cli "the CLI ran with a borrowed token :: $(tr '\n' ';' < "$L")"; fi
+
+# T60h (bug): on the auto engine cli_token_ready is a PROBE — "is there a theme token to fall back
+# on?" — and an unresolvable block is "no", never a reason to abort. Aborting there replaced the
+# gql engine's own diagnosis (the credential lacks the theme scopes) with an unrelated config line.
+rc=0; L="$TMP/tjl60h"; : > "$L"
+TOML_PATH="$TT/diff.toml" FAKE_RUNNER_MODE=denied TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file templates/product.json >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'read_themes/write_themes' "$E" \
+   && ! grep -q 'ambiguous_env' "$E" && [ ! -s "$L" ]; then ok
+else bad T60h-probe-keeps-gql-diagnosis "rc=$rc err=$(head -c 220 "$E" | tr '\n' ' ')"; fi
+
+# T60i: and with the store fixed, that same probe answers YES — the fallback runs against store-a
+# with store-a's own token, exactly as it does on a single-environment toml
+rc=0; L="$TMP/tjl60i"; : > "$L"
+TOML_PATH="$TT/diff.toml" FAKE_RUNNER_MODE=nocreds TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --store store-a >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'note=gql engine unavailable' "$E" \
+   && grep -q 'argv=theme list --store store-a\.myshopify\.com ' "$L" \
+   && grep -q '^token=shptka_prodAAA$' "$L" && ! grep -q 'shptka_stgCCC' "$L"; then ok
+else bad T60i-probe-falls-back-with-store "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 220 "$E" | tr '\n' ' ')"; fi
+
+# T60g (drift guard): the block resolver has ONE home for the same reason the scalar reader does —
+# a second copy is two scripts free to disagree about which store a toml resolves to
+if [ "$(grep -cE '^toml_(resolve_env|env_pick_by_store)\(\) \{' "$COMMON")" -eq 2 ] \
+   && [ "$(cat "$TJ" "$CPT" "$GQL" "$WTS_SRC" "$STL" | grep -cE '^toml_(resolve_env|env_pick_by_store)\(\) \{')" -eq 0 ]; then ok
+else bad T60g-block-resolver-single-home "a block resolver is defined outside _shopify-common.sh (or missing from it)"; fi
 
 # --- envelope status pass (F7 pin): one jq pass, identical messages and ORDER --------------
 # T23: theme missing
@@ -1033,6 +1108,25 @@ printf 'query FndY { shop { name } }\n' > "$GQLDIR/query.graphql"
 printf '{"k":"v"}\n' > "$GQLDIR/vars.json"
 # a multi-operation document: --operation must carve out ONE named block plus every fragment
 printf 'query FndA {\n  shop { ...F }\n}\n\nmutation FndB {\n  thingCreate { id }\n}\n\nfragment F on Shop {\n  name\n}\n' > "$GQLDIR/multi.graphql"
+# two operations on ONE line — a declaration reader anchored to the start of a line sees neither
+printf 'query FndOne { shop { name } } query FndTwo { shop { id } }\n' > "$GQLDIR/oneline.graphql"
+# a signature split across lines, and braces hiding inside a "string" and a # comment
+printf 'query\n  FndSig($id: ID!) {\n  node(id: $id) { id }\n}\n' > "$GQLDIR/sig.graphql"
+printf 'query FndNoisy {\n  shop(k: "a } b") { name }\n  # a } in a comment\n  localization { country { isoCode } }\n  ...FndG\n}\n\nfragment FndG on Shop {\n  name\n}\n' > "$GQLDIR/noisy.graphql"
+# a """ block string is outside what the reader blanks out — the document is refused, not guessed at
+printf 'query FndBlock($d: String = """x""") {\n  shop { name }\n}\n' > "$GQLDIR/block.graphql"
+# a directive between the operation name and its selection set
+printf 'query FndDir @someDirective {\n  shop { name }\n}\n\nquery FndPlain {\n  shop { id }\n}\n' > "$GQLDIR/directive.graphql"
+# a """ written inside a # comment is text — blanking comments is what the sanitizer is for
+printf 'query FndHash {\n  # a """ here is prose, not a block string\n  shop { name }\n}\n\nquery FndOther {\n  shop { id }\n}\n' > "$GQLDIR/hashquotes.graphql"
+# ONE operation carrying a real block string: nothing to narrow, so nothing to refuse
+printf 'mutation FndSeed($x: String = """seed""") {\n  thingCreate { id }\n}\n' > "$GQLDIR/blockmut.graphql"
+# a top-level token the reader does not know (schema SDL in a document meant to be executed)
+printf 'type FndThing {\n  a: Int\n}\n\nquery FndSchema {\n  shop { name }\n}\n' > "$GQLDIR/schema.graphql"
+# a UTF-8 BOM ahead of the first keyword — a multibyte-locale awk aborts on it mid-parse
+printf '\357\273\277query FndBom {\n  shop { name }\n}\n' > "$GQLDIR/bom.graphql"
+# a query and a mutation on ONE line — the hazard read is line-anchored no more
+printf 'query FndML { shop { name } } mutation FndMM { thingCreate { id } }\n' > "$GQLDIR/onelinemix.graphql"
 
 cat > "$SHIM/shopify" <<'FAKE'
 #!/usr/bin/env bash
@@ -1370,6 +1464,31 @@ rc=0; FAKE_HTTP=401 gql_run_at "$TD2" --engine token --query query.graphql >"$O"
 if [ "$rc" -eq 5 ] && grep -q 'url=https://acme-dev.myshopify.com/admin/' "$E"; then ok
 else bad G29b-toml-quoted-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 
+# G48 (bug): the runner's toml read is block-scoped too — a file-ordered `store=` sent the query to
+# whichever environment happened to be listed first, which in a real config is production
+TD48="$TMP/gqltoml48"; mkdir -p "$TD48"; cp "$GQLDIR/query.graphql" "$TD48/"
+printf '[environments.production]\nstore = "store-a"\n\n[environments.dev]\nstore = "store-b"\n' > "$TD48/shopify.theme.toml"
+rc=0; FAKE_HTTP=401 gql_run_at "$TD48" --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'url=https://store-b.myshopify.com/admin/' "$E"; then ok
+else bad G48-toml-block-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+rc=0; FAKE_HTTP=401 SHOPIFY_FLAG_ENVIRONMENT=production \
+  gql_run_at "$TD48" --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'url=https://store-a.myshopify.com/admin/' "$E"; then ok
+else bad G48b-flag-environment "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# G48c (blocker): different stores, none of the blocks named dev/development — refused before the
+# request, since neither answer can be shown to be the one the developer meant
+TD48C="$TMP/gqltoml48c"; mkdir -p "$TD48C"; cp "$GQLDIR/query.graphql" "$TD48C/"
+printf '[environments.production]\nstore = "store-a"\n\n[environments.staging]\nstore = "store-c"\n' > "$TD48C/shopify.theme.toml"
+rc=0; M="$TMP/m48c"; rm -f "$M"; CURL_MARKER="$M" \
+  gql_run_at "$TD48C" --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+assert G48c-gql-ambiguous-env 2 "$rc" "$E" "error=ambiguous_env envs=production staging"
+if [ ! -f "$M" ]; then ok; else bad G48d-gql-ambiguous-no-request "a query went out on a guessed store"; fi
+# G48e: --store is the escape hatch the message names — the toml is not consulted at all then
+rc=0; gql_run_at "$TD48C" --engine token --store store-c --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O"; then ok
+else bad G48e-store-flag-bypasses-toml "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
 # G30: a store value that cannot be a myshopify handle is refused before any request
 rc=0; M="$TMP/m30"; CURL_MARKER="$M" \
   gql_run_at "$GQLDIR" --engine token --store "store = 'x'" --query query.graphql >"$O" 2>"$E" || rc=$?
@@ -1556,7 +1675,8 @@ rc=0; GQL_LOG="$L43" SHOPIFY_QF_SAVE="$QF43" FAKE_EXEC_MODE=ok \
   run_gql --query multi.graphql --operation FndA >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '"data":{"ok":true}' "$O" \
    && [ "$(grep -c 'store execute' "$L43")" -eq 1 ] && ! grep -q -- '--allow-mutations' "$L43" \
-   && grep -q '^query FndA' "$QF43" && grep -q '^fragment F on Shop' "$QF43" && ! grep -q 'FndB' "$QF43"; then ok
+   && grep -q '^query FndA' "$QF43" && grep -q '^fragment F on Shop' "$QF43" \
+   && ! grep -q 'FndB' "$QF43" && ! grep -q 'mutation' "$QF43"; then ok
 else bad G43-operation-extracted "rc=$rc out=$(head -c 80 "$O") log=$(tr '\n' ';' < "$L43") qf=$(tr '\n' ';' < "$QF43" 2>&1)"; fi
 # G43b: a name the document does not define — the store engine steps aside with the reason and
 # the token engine gets the WHOLE document (the Admin API takes operationName; the runner does not
@@ -1565,7 +1685,7 @@ L43b="$TMP/sl43b"; : > "$L43b"
 rc=0; M="$TMP/m43b"; GQL_LOG="$L43b" CURL_MARKER="$M" FAKE_EXEC_MODE=ok \
   run_gql --query multi.graphql --operation Nope >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ -f "$M" ] && ! grep -q 'store execute' "$L43b" \
-   && grep -q "could not extract operation 'Nope'" "$E"; then ok
+   && grep -q "cannot isolate operation 'Nope'" "$E"; then ok
 else bad G43b-operation-missing-falls-back "rc=$rc out=$(head -c 80 "$O") err=$(head -c 200 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L43b")"; fi
 # G43c: the mutation block from the same document does get --allow-mutations (the detection
 # runs on the EXTRACTED file, not the source document)
@@ -1573,6 +1693,118 @@ L43c="$TMP/sl43c"; : > "$L43c"
 rc=0; GQL_LOG="$L43c" FAKE_EXEC_MODE=ok run_gql --query multi.graphql --operation FndB >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '"data":{"ok":true}' "$O" && grep -q 'store execute.*--allow-mutations' "$L43c"; then ok
 else bad G43c-operation-mutation-flag "rc=$rc out=$(head -c 80 "$O") log=$(tr '\n' ';' < "$L43c")"; fi
+
+# G43d (bug): two operations on ONE line. The reader only recognized a declaration at the start of
+# a line, so --operation matched neither and the WHOLE document — both operations — went to the
+# store engine. The narrowed text now holds exactly the named one.
+L43d="$TMP/sl43d"; : > "$L43d"; QF43D="$TMP/qf43d.graphql"; rm -f "$QF43D"
+rc=0; GQL_LOG="$L43d" SHOPIFY_QF_SAVE="$QF43D" FAKE_EXEC_MODE=ok \
+  run_gql --query oneline.graphql --operation FndOne >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c 'store execute' "$L43d")" -eq 1 ] \
+   && [ "$(tr -d ' \n' < "$QF43D" 2>/dev/null)" = 'queryFndOne{shop{name}}' ]; then ok
+else bad G43d-one-line-two-ops "rc=$rc qf=$(tr '\n' ';' < "$QF43D" 2>&1) log=$(tr '\n' ';' < "$L43d")"; fi
+# G43e: the token engine is the one that CAN name an operation — it sends the whole document plus
+# operationName, which is exactly why the store engine may step aside instead of guessing
+rc=0; M="$TMP/m43e"; CURL_MARKER="$M" \
+  run_gql --engine token --query oneline.graphql --operation FndOne >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"operationName":"FndOne"' "$M.body"; then ok
+else bad G43e-token-operation-name "rc=$rc body=$(head -c 200 "$M.body" 2>/dev/null)"; fi
+# G43f: a declaration whose name sits on the next line is still one declaration
+L43f="$TMP/sl43f"; : > "$L43f"; QF43F="$TMP/qf43f.graphql"; rm -f "$QF43F"
+rc=0; GQL_LOG="$L43f" SHOPIFY_QF_SAVE="$QF43F" FAKE_EXEC_MODE=ok \
+  run_gql --query sig.graphql --operation FndSig >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c 'store execute' "$L43f")" -eq 1 ] \
+   && [ "$(tr -d ' \n' < "$QF43F" 2>/dev/null)" = 'queryFndSig($id:ID!){node(id:$id){id}}' ]; then ok
+else bad G43f-multiline-signature "rc=$rc qf=$(tr '\n' ';' < "$QF43F" 2>&1) log=$(tr '\n' ';' < "$L43f")"; fi
+# G43g (bug): a } inside a "string" and a } inside a # comment moved the brace counter, so the
+# extracted operation was cut off at the first of them — everything after it silently dropped,
+# fragment included
+QF43G="$TMP/qf43g.graphql"; rm -f "$QF43G"
+rc=0; SHOPIFY_QF_SAVE="$QF43G" FAKE_EXEC_MODE=ok \
+  run_gql --query noisy.graphql --operation FndNoisy >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'localization' "$QF43G" && grep -q '\.\.\.FndG' "$QF43G" \
+   && grep -q '^fragment FndG on Shop' "$QF43G"; then ok
+else bad G43g-braces-in-string-and-comment "rc=$rc qf=$(tr '\n' ';' < "$QF43G" 2>&1)"; fi
+# G43h: several operations and NO --operation — the store engine cannot pick one, and sending the
+# document whole would run every operation in it, so it steps aside before anything is sent
+L43h="$TMP/sl43h"; : > "$L43h"
+rc=0; M="$TMP/m43h"; GQL_LOG="$L43h" CURL_MARKER="$M" FAKE_EXEC_MODE=ok \
+  run_gql --query multi.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ -f "$M" ] && ! grep -q 'store execute' "$L43h" \
+   && grep -q '2 operations found' "$E"; then ok
+else bad G43h-multi-op-no-operation "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L43h")"; fi
+# G43i: a """ block string is a shape the reader will not parse — it refuses instead of narrowing
+# on a guess, and under --engine store that is a hard stop with nothing sent
+L43i="$TMP/sl43i"; : > "$L43i"
+rc=0; M="$TMP/m43i"; GQL_LOG="$L43i" CURL_MARKER="$M" FAKE_EXEC_MODE=ok \
+  run_gql --engine store --query block.graphql --operation FndBlock >"$O" 2>"$E" || rc=$?
+assert G43i-block-string-engine-store 3 "$rc" "$E" "error=store_execute_failed "
+if ! grep -q 'store execute' "$L43i" && [ ! -f "$M" ] && grep -q 'block string' "$E"; then ok
+else bad G43i-block-string-nothing-sent "log=$(tr '\n' ';' < "$L43i") curl=$([ -f "$M" ] && echo yes || echo no) err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G43j: the same document under --engine auto is a plain fallback — the token engine takes it
+rc=0; M="$TMP/m43j"; CURL_MARKER="$M" FAKE_EXEC_MODE=ok \
+  run_gql --query block.graphql --operation FndBlock >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O" && [ -f "$M" ]; then ok
+else bad G43j-block-string-falls-back "rc=$rc out=$(head -c 80 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G43k (pin): a single-operation document without --operation is handed over untouched — the
+# original path on the argv, no temp copy, no --allow-mutations for a query
+L43k="$TMP/sl43k"; : > "$L43k"
+rc=0; GQL_LOG="$L43k" FAKE_EXEC_MODE=ok run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q -- '--query-file query.graphql ' "$L43k" \
+   && ! grep -q -- '--allow-mutations' "$L43k"; then ok
+else bad G43k-single-op-argv-unchanged "rc=$rc log=$(tr '\n' ';' < "$L43k")"; fi
+# G43l: a directive between the operation name and its selection set is part of the declaration —
+# refusing it would push a store-engine-only setup (no admin token at all) onto the token engine
+QF43L="$TMP/qf43l.graphql"; rm -f "$QF43L"
+rc=0; SHOPIFY_QF_SAVE="$QF43L" FAKE_EXEC_MODE=ok \
+  run_gql --query directive.graphql --operation FndDir >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(tr -d ' \n' < "$QF43L" 2>/dev/null)" = 'queryFndDir@someDirective{shop{name}}' ]; then ok
+else bad G43l-operation-directive "rc=$rc qf=$(tr '\n' ';' < "$QF43L" 2>&1) err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# G43m (bug): the block-string refusal was raised off the RAW line, so a """ merely written inside
+# a # comment condemned a document the reader can in fact read
+L43m="$TMP/sl43m"; : > "$L43m"; QF43M="$TMP/qf43m.graphql"; rm -f "$QF43M"
+rc=0; GQL_LOG="$L43m" SHOPIFY_QF_SAVE="$QF43M" FAKE_EXEC_MODE=ok \
+  run_gql --query hashquotes.graphql --operation FndHash >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -c 'store execute' "$L43m")" -eq 1 ] && ! grep -q 'block string' "$E" \
+   && grep -q '^query FndHash' "$QF43M" && ! grep -q 'FndOther' "$QF43M"; then ok
+else bad G43m-quotes-in-comment "rc=$rc qf=$(tr '\n' ';' < "$QF43M" 2>&1) err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G43n (bug): a shape the reader refuses is only a reason to step aside when something has to be
+# NARROWED. With one operation and no --operation there is nothing to narrow, so the document goes
+# over untouched — refusing it pushed a store-auth-only setup (no admin token at all) onto curl
+L43n="$TMP/sl43n"; : > "$L43n"
+rc=0; GQL_LOG="$L43n" FAKE_EXEC_MODE=ok run_gql --engine store --query block.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q -- '--query-file block.graphql ' "$L43n" \
+   && ! grep -q -- '--allow-mutations' "$L43n"; then ok
+else bad G43n-block-string-no-narrowing "rc=$rc log=$(tr '\n' ';' < "$L43n") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G43o: and when that unreadable document is a MUTATION the opt-in still has to be there — the
+# kind cannot come from the reader, so it degrades to "does this file mention a mutation at all"
+L43o="$TMP/sl43o"; : > "$L43o"
+rc=0; GQL_LOG="$L43o" FAKE_EXEC_MODE=ok run_gql --engine store --query blockmut.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q -- '--query-file blockmut.graphql ' "$L43o" \
+   && grep -q -- '--allow-mutations' "$L43o"; then ok
+else bad G43o-block-string-mutation-optin "rc=$rc log=$(tr '\n' ';' < "$L43o")"; fi
+# G43p: a top-level token the reader does not know IS a refusal while narrowing — the reason names
+# the token instead of a bare "cannot parse"
+L43p="$TMP/sl43p"; : > "$L43p"
+rc=0; M="$TMP/m43p"; GQL_LOG="$L43p" CURL_MARKER="$M" FAKE_EXEC_MODE=ok \
+  run_gql --engine store --query schema.graphql --operation FndSchema >"$O" 2>"$E" || rc=$?
+assert G43p-unrecognized-token 3 "$rc" "$E" "unrecognized top-level token 'type'"
+if ! grep -q 'store execute' "$L43p" && [ ! -f "$M" ]; then ok
+else bad G43p-unrecognized-nothing-sent "log=$(tr '\n' ';' < "$L43p") curl=$([ -f "$M" ] && echo yes || echo no)"; fi
+# G43q (bug): a UTF-8 BOM aborted the reader (multibyte conversion failure), and the swallowed
+# stderr made that read as "0 operations" — a document that used to be sent became a refusal
+L43q="$TMP/sl43q"; : > "$L43q"
+rc=0; GQL_LOG="$L43q" FAKE_EXEC_MODE=ok run_gql --engine store --query bom.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q -- '--query-file bom.graphql ' "$L43q"; then ok
+else bad G43q-bom-still-sent "rc=$rc log=$(tr '\n' ';' < "$L43q") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G43r (bug): every fragment in the document rode along, so the narrowed text carried one the
+# operation never spreads — GraphQL rejects that outright, and a definitive GraphQL error is the
+# one store-engine failure with no fallback left
+QF43R="$TMP/qf43r.graphql"; rm -f "$QF43R"
+rc=0; SHOPIFY_QF_SAVE="$QF43R" FAKE_EXEC_MODE=ok \
+  run_gql --query multi.graphql --operation FndB >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^mutation FndB' "$QF43R" && ! grep -q 'fragment' "$QF43R"; then ok
+else bad G43r-unused-fragment-dropped "rc=$rc qf=$(tr '\n' ';' < "$QF43R" 2>&1)"; fi
 
 # G44: a definitive GraphQL error from `store execute` is an ANSWER, not an availability failure:
 # the boxed {"errors":…} is unboxed onto stdout with exit 0 (the curl engine's HTTP-200 contract),
@@ -1656,6 +1888,25 @@ else bad G46h-connect-failure-no-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; f
 rc=0; FAKE_CURL_RC=28 run_gql --engine token --query multi.graphql --operation FndB >"$O" 2>"$E" || rc=$?
 if grep -q 'hint=the mutation may already have been applied' "$E"; then ok
 else bad G46g-selected-mutation-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G46i (bug): the hazard read was anchored to the start of a line, so a mutation declared mid-line
+# timed out silently — the caller was never told the write may have landed
+rc=0; FAKE_CURL_RC=28 run_gql --engine token --query onelinemix.graphql --operation FndMM >"$O" 2>"$E" || rc=$?
+if grep -q 'hint=the mutation may already have been applied' "$E"; then ok
+else bad G46i-inline-mutation-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G46j: the query sharing that line stays quiet — the reader picks the named declaration, it does
+# not just scan the file for the word
+rc=0; FAKE_CURL_RC=28 run_gql --engine token --query onelinemix.graphql --operation FndML >"$O" 2>"$E" || rc=$?
+if ! grep -q 'hint=' "$E"; then ok
+else bad G46j-inline-query-no-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G46k: on a document the reader refuses there is no declaration to consult, so the warning
+# degrades to "does this file mention a mutation at all" — over-warning, never under-warning
+rc=0; FAKE_CURL_RC=28 run_gql --engine token --query blockmut.graphql >"$O" 2>"$E" || rc=$?
+if grep -q 'hint=the mutation may already have been applied' "$E"; then ok
+else bad G46k-unreadable-mutation-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# G46l: and the degrade still says nothing about a document that holds no mutation at all
+rc=0; FAKE_CURL_RC=28 run_gql --engine token --query block.graphql >"$O" 2>"$E" || rc=$?
+if ! grep -q 'hint=' "$E"; then ok
+else bad G46l-unreadable-query-no-hint "err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
 # G47: --api-version is the per-call way to a non-default Admin API version (SHOPIFY_ADMIN_API_VERSION
 # is the ambient one), and each engine spells it somewhere else — the URL path for curl, `--version` on the CLI argv
@@ -3203,6 +3454,247 @@ run_cpt "$L" TOML_PATH="$PSD/link.toml" FAKE_LIST="$PIN_LIST" -- pin --theme 222
 if [ "$rc" -eq 0 ] && [ -L "$PSD/link.toml" ] && grep -qx 'theme = "222"' "$PSD/real.toml" \
    && [ "$(ls -l "$PSD/real.toml" | cut -c1-10)" = "-rw-r-----" ]; then ok
 else bad P47-pin-symlinked-toml "rc=$rc link=$(ls -l "$PSD" | tr '\n' ';')"; fi
+
+# ------------------------------- create-preview-theme.sh multi-environment READS --
+# A multi-environment toml holds one store, token and theme id PER BLOCK. The store, the dev theme
+# id and the Theme Access token used to be the first uncommented match in the WHOLE file — read
+# before --env was even parsed — so `--env dev` listed and pushed against `[environments.production]`
+# with the PRODUCTION token and then pinned the id into the dev block. The read now resolves the
+# same block the pin does; the cases below assert WHICH store and token the CLI was handed.
+ENV_TWO='[environments.production]
+store = "store-a"
+password = "shptka_prodAAA"
+theme = "111"
+
+[environments.dev]
+store = "store-b"
+password = "shptka_devBBB"
+theme = "444"
+'
+# production + staging, two DIFFERENT stores and neither named dev/development
+ENV_DIFF='[environments.production]
+store = "store-a"
+password = "shptka_prodAAA"
+theme = "111"
+
+[environments.staging]
+store = "store-c"
+password = "shptka_stgCCC"
+theme = "333"
+'
+# the same two blocks naming ONE store: no choice can target the wrong one, so reading may stay
+# file-ordered — the pin, which still cannot tell which block the dev server reads, may not
+ENV_SAME='[environments.production]
+store = "store-a"
+password = "shptka_prodAAA"
+theme = "111"
+
+[environments.staging]
+store = "store-a"
+theme = "333"
+'
+ENV_LIST='[{"id":111,"name":"[PROD] theme","role":"unpublished"},{"id":222,"name":"[ELC-1] session","role":"unpublished"},{"id":444,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"[ELC-2] session","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]'
+env_toml() { printf '%s' "$2" > "$CPTD/toml/$1.toml"; printf '%s' "$CPTD/toml/$1.toml"; }
+
+# P59 (blocker): `pin --theme <id> --env dev` vets the id against the DEV block's store with the DEV
+# block's token, and the production block comes out byte-for-byte unchanged
+F59="$(env_toml env-two-pin "$ENV_TWO")"
+PROD59="$(sed -n '1,4p' "$F59" | cksum)"
+rc=0; L="$TMP/cpt59"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59" FAKE_LIST="$ENV_LIST" -- pin --theme 222 --env dev || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^argv=theme list --store store-b --json --no-color$' "$L" \
+   && grep -q '^token=shptka_devBBB$' "$L" && ! grep -q 'shptka_prodAAA' "$L" \
+   && grep -q '^store=store-b$' "$O" && grep -q '^env=dev$' "$O" && grep -q '^pin_env=dev$' "$O" \
+   && [ "$(sed -n '1,4p' "$F59" | cksum)" = "$PROD59" ] \
+   && grep -q '^superseded_theme_id=444$' "$O" \
+   && [ "$(grep -c '^theme = "222"$' "$F59")" -eq 1 ]; then ok
+else bad P59-pin-env-reads-that-block "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep -v token "$L" | tr '\n' ';') toml=$(grep -v password "$F59" | tr '\n' ';')"; fi
+
+# P59b (blocker): the same for `create --pin-toml --env dev` — the push itself must carry the dev
+# block's store and token, or the preview theme is created on the production store
+F59B="$(env_toml env-two-create "$ENV_TWO")"
+rc=0; L="$TMP/cpt59b"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59B" FAKE_LIST="$ENV_LIST" -- create --name "PREVIEW-ENV" --no-build --pin-toml --env dev || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^argv=theme push --store store-b --unpublished --theme PREVIEW-ENV .*--json$' "$L" \
+   && grep -q '^token=shptka_devBBB$' "$L" && ! grep -q 'shptka_prodAAA' "$L" \
+   && grep -q '^theme_id=222$' "$O" && grep -q '^env=dev$' "$O" && grep -q '^pin_env=dev$' "$O" \
+   && grep -q '^pin=rewritten$' "$O" \
+   && grep -q '^theme = "111"$' "$F59B" && [ "$(grep -c '^theme = "222"$' "$F59B")" -eq 1 ]; then ok
+else bad P59b-create-env-pushes-that-store "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep -v token "$L" | tr '\n' ';') toml=$(grep -v password "$F59B" | tr '\n' ';')"; fi
+
+# P59c (blocker): and for `refresh --pin-toml --env production` — the named block is the LAST one
+# here, so a reader that still resolved by file order could not pass this one either
+F59C="$(env_toml env-two-refresh '[environments.dev]
+store = "store-b"
+password = "shptka_devBBB"
+theme = "444"
+
+[environments.production]
+store = "store-a"
+password = "shptka_prodAAA"
+theme = "111"
+')"
+rc=0; L="$TMP/cpt59c"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59C" FAKE_LIST="$ENV_LIST" -- refresh --theme 555 --no-build --pin-toml --env production || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^argv=theme push --store store-a --theme 555 .*--json$' "$L" \
+   && grep -q '^token=shptka_prodAAA$' "$L" && ! grep -q 'shptka_devBBB' "$L" \
+   && grep -q '^env=production$' "$O" && grep -q '^pin_env=production$' "$O" \
+   && grep -q '^superseded_theme_id=111$' "$O" \
+   && grep -q '^theme = "444"$' "$F59C" && [ "$(grep -c '^theme = "555"$' "$F59C")" -eq 1 ]; then ok
+else bad P59c-refresh-env-production "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep -v token "$L" | tr '\n' ';') toml=$(grep -v password "$F59C" | tr '\n' ';')"; fi
+
+# P59d: with no --env at all the default resolution is the pin's — `dev`, by name — so the store
+# reported and listed against is the dev block's, not the file's first
+F59D="$(env_toml env-two-info "$ENV_TWO")"
+rc=0; L="$TMP/cpt59d"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59D" FAKE_LIST="$ENV_LIST" -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=store-b$' "$O" && grep -q '^env=dev$' "$O" \
+   && grep -q '^dev_theme_id=444$' "$O" \
+   && grep -q '^argv=theme list --store store-b --json --no-color$' "$L"; then ok
+else bad P59d-default-picks-dev "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep -v token "$L" | tr '\n' ';')"; fi
+
+# P59e (blocker): different stores and no block named dev/development — the run is refused BEFORE
+# the CLI is touched (a wrong-store push cannot be taken back) and nothing is written
+F59E="$(env_toml env-diff "$ENV_DIFF")"
+H59E="$(fhash "$F59E")"
+rc=0; L="$TMP/cpt59e"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59E" FAKE_LIST="$ENV_LIST" -- refresh --theme 555 --no-build || rc=$?
+OUT59E="$(cat "$O")"
+rc2=0; L2="$TMP/cpt59e2"; : > "$L2"
+run_cpt "$L2" TOML_PATH="$F59E" FAKE_LIST="$ENV_LIST" -- info || rc2=$?
+OUT59E2="$(cat "$O")"
+if [ "$rc" -ne 0 ] && [ "$rc2" -ne 0 ] \
+   && printf '%s' "$OUT59E" | grep -q '^error=ambiguous_env envs=production staging ' \
+   && grep -q '^error=ambiguous_env' "$O" \
+   && [ ! -s "$L" ] && [ ! -s "$L2" ] && [ "$(fhash "$F59E")" = "$H59E" ]; then ok
+else bad P59e-ambiguous-refused-before-cli "rc=$rc rc2=$rc2 out=$(printf '%s' "$OUT59E" | head -c 200 | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")$(tr '\n' ';' < "$L2")"; fi
+
+# P59e2 (bug): the escape hatch the refusal names has to be one THIS invocation can take —
+# `re-run with --env <name>` on a `refresh` without --pin-toml is refused by the very next run
+# (`--env requires --pin-toml`), so the message named a loop, not a fix
+if printf '%s' "$OUT59E" | grep -q 'SHOPIFY_FLAG_ENVIRONMENT=<name>' \
+   && printf '%s' "$OUT59E" | grep -q -- '--pin-toml --env <name>' \
+   && printf '%s' "$OUT59E2" | grep -q 'SHOPIFY_FLAG_ENVIRONMENT=<name> (this subcommand takes no --env)'; then ok
+else bad P59e2-fix-is-takeable "refresh=$(printf '%s' "$OUT59E" | head -c 260 | tr '\n' ' ') info=$(printf '%s' "$OUT59E2" | head -c 200 | tr '\n' ' ')"; fi
+
+# P59e3: and each named remedy actually runs — the env var for a plain refresh, `--pin-toml --env`
+# for the pinning one; both on the file that just refused
+rc=0; L="$TMP/cpt59e3"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59E" SHOPIFY_FLAG_ENVIRONMENT=staging FAKE_LIST="$ENV_LIST" -- refresh --theme 555 --no-build || rc=$?
+rc2=0; L2="$TMP/cpt59e4"; : > "$L2"
+run_cpt "$L2" TOML_PATH="$F59E" FAKE_LIST="$ENV_LIST" -- refresh --theme 555 --no-build --pin-toml --env production || rc2=$?
+if [ "$rc" -eq 0 ] && grep -q '^argv=theme push --store store-c --theme 555 ' "$L" \
+   && grep -q '^token=shptka_stgCCC$' "$L" \
+   && [ "$rc2" -eq 0 ] && grep -q '^argv=theme push --store store-a --theme 555 ' "$L2" \
+   && grep -q '^pin_env=production$' "$O"; then ok
+else bad P59e3-named-remedy-runs "rc=$rc rc2=$rc2 log=$(grep -v token "$L" | tr '\n' ';') log2=$(grep -v token "$L2" | tr '\n' ';') out=$(tr '\n' ';' < "$O")"; fi
+
+# P59f (pin): the same two blocks naming ONE store keep working exactly as they did — file-ordered
+# reads (`env=*`) — while the PIN still refuses: which block `shopify theme dev` reads is unknown,
+# and only the pin has to answer that
+F59F="$(env_toml env-same "$ENV_SAME")"
+H59F="$(fhash "$F59F")"
+rc=0; L="$TMP/cpt59f"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59F" FAKE_LIST="$ENV_LIST" -- info || rc=$?
+rc2=0; L2="$TMP/cpt59f2"; : > "$L2"
+run_cpt "$L2" TOML_PATH="$F59F" FAKE_LIST="$ENV_LIST" -- refresh --theme 555 --no-build || rc2=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=store-a$' "$O" && grep -q '^env=\*$' "$O" \
+   && [ "$rc2" -eq 0 ] && grep -q '^argv=theme push --store store-a --theme 555 ' "$L2" \
+   && grep -q '^token=shptka_prodAAA$' "$L2"; then ok
+else bad P59f-same-store-file-order "rc=$rc rc2=$rc2 out=$(tr '\n' ';' < "$O") log=$(grep -v token "$L2" | tr '\n' ';')"; fi
+rc=0; L="$TMP/cpt59f3"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59F" FAKE_LIST="$ENV_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=ambiguous_env' "$O" && [ "$(fhash "$F59F")" = "$H59F" ]; then ok
+else bad P59f2-same-store-pin-still-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P59g: $SHOPIFY_FLAG_ENVIRONMENT is the block selector `shopify theme dev -e` reads, so it is the
+# default here too — and an explicit --env still wins over it
+F59G="$(env_toml env-two-flag "$ENV_TWO")"
+rc=0; L="$TMP/cpt59g"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59G" SHOPIFY_FLAG_ENVIRONMENT=production FAKE_LIST="$ENV_LIST" -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=store-a$' "$O" && grep -q '^env=production$' "$O" \
+   && grep -q '^dev_theme_id=111$' "$O"; then ok
+else bad P59g-flag-environment-default "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/cpt59g2"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59G" SHOPIFY_FLAG_ENVIRONMENT=production FAKE_LIST="$ENV_LIST" -- pin --theme 222 --env dev || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^env=dev$' "$O" && grep -q '^pin_env=dev$' "$O" \
+   && grep -q '^token=shptka_devBBB$' "$L" && ! grep -q 'shptka_prodAAA' "$L"; then ok
+else bad P59g2-explicit-env-wins "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep -v token "$L" | tr '\n' ';')"; fi
+
+# P59h: a block name that is not in the file is a typo, not an invitation to fall back to another
+# block — refused before any CLI call, nothing written
+F59H="$(env_toml env-two-typo "$ENV_TWO")"
+H59H="$(fhash "$F59H")"
+rc=0; L="$TMP/cpt59h"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59H" FAKE_LIST="$ENV_LIST" -- pin --theme 222 --env nosuch || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=env_not_found env=nosuch ' "$O" \
+   && grep -q 'production dev' "$O" && [ ! -s "$L" ] && [ "$(fhash "$F59H")" = "$H59H" ]; then ok
+else bad P59h-env-not-found "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P59i: top-level keys before the first header are what a bare `shopify theme dev` reads, so they
+# win over a named block the file also carries (env=-)
+F59I="$(env_toml env-toplevel 'store = "store-top"
+theme = "444"
+password = "shptka_topTTT"
+
+[environments.production]
+store = "store-a"
+theme = "111"
+password = "shptka_prodAAA"
+')"
+rc=0; L="$TMP/cpt59i"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59I" FAKE_LIST="$ENV_LIST" -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=store-top$' "$O" && grep -q '^env=-$' "$O" \
+   && grep -q '^dev_theme_id=444$' "$O" && grep -q '^token=shptka_topTTT$' "$L"; then ok
+else bad P59i-toplevel-wins "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep -v token "$L" | tr '\n' ';')"; fi
+
+# P59j (blocker): a block that carries no password of its own must not borrow another STORE's
+# token — a Theme Access token is minted per store, so the borrowed one authenticates nothing here.
+# Refused with the config error, before the CLI.
+F59J="$(env_toml env-notoken '[environments.production]
+store = "store-a"
+password = "shptka_prodAAA"
+theme = "111"
+
+[environments.dev]
+store = "store-b"
+theme = "444"
+')"
+rc=0; L="$TMP/cpt59j"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59J" FAKE_LIST="$ENV_LIST" -- info || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=no access token' "$O" && [ ! -s "$L" ]; then ok
+else bad P59j-no-cross-store-token "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P59k (blocker): the same for the TOP-LEVEL keys — a block that omits `password` must not borrow
+# the store-a token sitting above the first header. The whole run (list, pull, two pushes) used to
+# go out against store-b carrying store-a's Theme Access token.
+F59K="$(env_toml env-topmix 'store = "store-a"
+password = "shptka_topAAA"
+theme = "111"
+
+[environments.dev]
+store = "store-b"
+theme = "444"
+')"
+rc=0; L="$TMP/cpt59k"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59K" FAKE_LIST="$ENV_LIST" -- create --name "PREVIEW-TOPMIX" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=no access token' "$O" && [ ! -s "$L" ]; then ok
+else bad P59k-no-toplevel-cross-store-token "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(grep -v token "$L" | tr '\n' ';') borrowed=$(grep -c 'shptka_topAAA' "$L" 2>/dev/null || true)"; fi
+
+# P59m: $SHOPIFY_FLAG_ENVIRONMENT selects the block the pin WRITES, not only the one it reads —
+# the two are one resolution, so an exported value redirects the rewrite into that block (here
+# production, while a `dev` block exists) and leaves the other one byte-identical
+F59M="$(env_toml env-two-flagpin "$ENV_TWO")"
+DEV59M="$(printf '[environments.dev]\nstore = "store-b"\npassword = "shptka_devBBB"\ntheme = "444"\n' | cksum)"
+rc=0; L="$TMP/cpt59m"; : > "$L"
+run_cpt "$L" TOML_PATH="$F59M" SHOPIFY_FLAG_ENVIRONMENT=production FAKE_LIST="$ENV_LIST" -- pin --theme 222 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^env=production$' "$O" && grep -q '^pin_env=production$' "$O" \
+   && ! grep -q '^warn=pin_env_mismatch' "$O" \
+   && grep -q '^superseded_theme_id=111$' "$O" \
+   && grep -q 'fnd:superseded' "$F59M" \
+   && [ "$(grep -c '^theme = "222"$' "$F59M")" -eq 1 ] \
+   && [ "$(sed -n '/^\[environments.dev\]/,$p' "$F59M" | cksum)" = "$DEV59M" ]; then ok
+else bad P59m-flag-environment-pin-target "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F59M" | tr '\n' ';')"; fi
 
 # ------------------------------------------- fix-breaking-changes banner handling --
 FB="$TMP/fb"; mkdir -p "$FB/templates/customers" "$FB/config" "$FB/scripts"

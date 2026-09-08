@@ -83,9 +83,13 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
 `--pin-toml` (on `create` and `refresh`) and the standalone `pin` subcommand rewrite the
 `theme =` line of **one environment block** in the session's `shopify.theme.toml` — the block
 the Shopify CLI resolves, since `shopify theme dev -e dev` reads `[environments.dev]` and not
-whichever block is listed first. The script pins the `--env <name>` block when given; else the
-block named `dev`, else `development` — by name only, so a lone block with any other name
-(`[environments.production]`) is refused, never auto-picked. A toml with no `[environments.*]`
+whichever block is listed first. The block it writes is the block the run READ its store, dev
+theme id and token from — one resolution for both, so a preview can never be pushed to one
+environment's store and pinned into another's. That resolution is the `--env <name>` block when
+given; else the block `$SHOPIFY_FLAG_ENVIRONMENT` names (the Shopify CLI's own selector — an
+exported value redirects the write as much as the read, `[environments.production]` included);
+else the block named `dev`, else `development` — by name only, so with none of those present a
+lone block under any other name is refused, never auto-picked. A toml with no `[environments.*]`
 blocks but uncommented top-level `theme =`/`store =` keys is pinned at the top level
 (`pin_env=-`). Anything else refuses (`error=ambiguous_env`) rather than guess. Other blocks
 are never touched — a `[environments.production]` id is often the live theme's. The reported
@@ -107,8 +111,8 @@ After a pin, the id the script *reads* as `dev_theme_id` **is** the session them
 single-environment config — so a later `create` would overlay the session theme's own settings,
 not the shared dev theme's. That is intended (the session theme was seeded from the dev theme
 when it was created) and one more reason the work stream creates once and `refresh`es after. In
-a multi-environment toml the script still reads the file's first uncommented line, so the two
-can differ; `refresh` is unaffected either way.
+a multi-environment toml the block written is the block read, so that holds there too;
+`refresh` is unaffected either way.
 
 - **Never `Read` or print that file, or any line of it** — the Theme Access token lives two
   lines away. Report only the id the script returned; the path is the config the caller pointed

@@ -15,7 +15,8 @@ in the Bash tool's shell.
 
 ## `error=` outcomes
 
-- **`info` errors** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config) → report
+- **`info` errors** (no `shopify.theme.toml`, missing `shopify`/`jq`, unparseable config, an
+  unresolvable environment block — `error=ambiguous_env` / `error=env_not_found`, below) → report
   the line with the fix it names and take the manual path — never read the toml to "check".
   `error=common_lib_not_found` / `error=session_lib_not_found` is the plugin install (a partial
   copy of `scripts/` dropped `_shopify-common.sh` or `session-theme.sh`), not the project —
@@ -88,6 +89,15 @@ in the Bash tool's shell.
   code** — say so, and tell the reviewer the preview is mid-update until a push succeeds. Fix the
   named cause, then re-run the same command (a re-push is idempotent — it overwrites, it never
   stacks).
+- **`error=ambiguous_env`** / **`error=env_not_found`** → a config refusal on **every**
+  subcommand (`info`, `create`, `refresh`, `pin` alike), raised before anything is read from the
+  store: nothing was created, nothing was pushed, nothing was written. The toml's
+  `[environments.*]` blocks name different stores and none is named `dev`/`development`
+  (`ambiguous_env`), or the `--env` name is in no block (`env_not_found`, which lists the names
+  that are). Never guess one — ask the developer which environment `npm run dev` uses, then take
+  the escape hatch the line itself names: `--env <name>` on `pin` and on `create`/`refresh
+  --pin-toml`, `SHOPIFY_FLAG_ENVIRONMENT=<name>` otherwise (and for `theme-json.sh` /
+  `shopify-admin-gql.sh`, whose own `--env` names a dotenv file).
 - **`error=invalid_dev_theme_id`** / **`error=invalid_store`** → nothing ran; manual path, the
   developer fixes the line the message names — never read the toml to "check". `pin` alone runs on
   such a config on purpose: `pin --theme <id>` is the fix for `invalid_dev_theme_id`.
@@ -99,11 +109,12 @@ in the Bash tool's shell.
     a recorded session theme or with `--allow-unverified`, `--reuse --pin-toml` only with
     `--allow-unverified` (else `refresh_unverifiable` / `reuse_unverifiable`, above), each flagging
     `warn=pin_unvetted` before the pin keys — a warning, not an error: the id was just pushed to.
-  - **`error=ambiguous_env`** → nothing was written; ask the developer which environment
-    `npm run dev` uses → `--env <name>`.
-  - **`error=env_not_found`** / **`error=pin_toml_failed`** → nothing was written; the line names
-    the fix.
-  - On `create` / `refresh` those same failures are **non-fatal** and arrive as
+  - **`error=pin_toml_failed`** → nothing was written; the line names the fix.
+  - **`pin_error=ambiguous_env`** (never `error=`) → the read resolved but the pin would not: a
+    file whose blocks all name ONE store is read in file order (`env=*`) and still refuses to be
+    written, since which block `shopify theme dev` resolves is what a pin has to answer. The theme
+    exists; `--env <name>` on the next run pins it.
+  - On `create` / `refresh` those failures are **non-fatal** and arrive as
     `pin=failed` + `pin_error=…` *after* a normal `theme_id=` line: the theme exists, only the
     config wasn't changed. Record the id, say the pin didn't land, and keep handing the
     developer the explicit `npm run dev -- --theme <id>` form. A `pin_error=` naming a
