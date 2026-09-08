@@ -4911,5 +4911,82 @@ o11="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" domaine_env FND_CPT_OVERLA
 if [ "$o9" = "/tmp/good" ] && [ "$o10" = "1" ] && [ "$o11" = "9" ]; then ok
 else bad EV7-bash-class-split "dir='$o9' verify='$o10' wait='$o11'"; fi
 
+# EV8: a hand-edited `KEY = v` is a live assignment to env-file.cjs's parse() (it trims the line,
+# then splits at the first '='), so `set` must REWRITE that line — appending a second one would
+# leave the OLD value winning under first-line-wins while the CLI printed success
+EV3R="$TMP/env3"; mkdir -p "$EV3R/cfg/domaine"
+printf '# tuning\n  FND_CTX_WARN = 75\nFND_WHALE_GUIDE=0\n' > "$EV3R/cfg/domaine/env"
+XDG_CONFIG_HOME="$EV3R/cfg" node "$EVC" set FND_CTX_WARN=40 >/dev/null
+o12="$(XDG_CONFIG_HOME="$EV3R/cfg" node -e \
+  'const e = require(process.argv[1]); const v = e.readVals(e.globalPath());
+   console.log(v.FND_CTX_WARN + "|" + v.FND_WHALE_GUIDE)' "$EVF")"
+if [ "$o12" = "40|0" ] && [ "$(grep -c FND_CTX_WARN "$EV3R/cfg/domaine/env")" -eq 1 ] \
+   && grep -qx '# tuning' "$EV3R/cfg/domaine/env" \
+   && grep -qx 'FND_WHALE_GUIDE=0' "$EV3R/cfg/domaine/env"; then ok
+else bad EV8-set-rewrites-spaced-line "o12=$o12 file=$(tr '\n' ';' < "$EV3R/cfg/domaine/env")"; fi
+
+# EV9: `unset` on the same shape — every assignment goes (a tab-padded one and a duplicate),
+# comments and unrelated keys stay
+printf '# keep\n\tFND_CTX_WARN\t=\t75\nFND_WHALE_GUIDE=0\nFND_CTX_WARN=9\n' > "$EV3R/cfg/domaine/env"
+rc=0; XDG_CONFIG_HOME="$EV3R/cfg" node "$EVC" unset FND_CTX_WARN >/dev/null 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q FND_CTX_WARN "$EV3R/cfg/domaine/env" \
+   && grep -qx '# keep' "$EV3R/cfg/domaine/env" \
+   && grep -qx 'FND_WHALE_GUIDE=0' "$EV3R/cfg/domaine/env"; then ok
+else bad EV9-unset-spaced-and-duplicate "rc=$rc file=$(tr '\n' ';' < "$EV3R/cfg/domaine/env")"; fi
+
+# EV10: `set` also drops the later duplicates it just made dead — otherwise the next `unset`
+# deletes the winning line and RESURRECTS the stale one
+printf 'FND_CTX_WARN=75\nFND_WHALE_GUIDE=0\nFND_CTX_WARN=9\n' > "$EV3R/cfg/domaine/env"
+XDG_CONFIG_HOME="$EV3R/cfg" node "$EVC" set FND_CTX_WARN=40 >/dev/null
+n1="$(grep -c FND_CTX_WARN "$EV3R/cfg/domaine/env")"
+XDG_CONFIG_HOME="$EV3R/cfg" node "$EVC" unset FND_CTX_WARN >/dev/null
+if [ "$n1" -eq 1 ] && ! grep -q FND_CTX_WARN "$EV3R/cfg/domaine/env" \
+   && grep -qx 'FND_WHALE_GUIDE=0' "$EV3R/cfg/domaine/env"; then ok
+else bad EV10-set-drops-dead-duplicate "n1=$n1 file=$(tr '\n' ';' < "$EV3R/cfg/domaine/env")"; fi
+
+# EV11: same, on a CRLF file — readLines splits on \r?\n, so the rewrite must still land on the
+# spaced line and the surviving keys must read back unchanged
+printf '# crlf\r\n  FND_CTX_WARN = 75\r\nFND_WHALE_GUIDE=0\r\n' > "$EV3R/cfg/domaine/env"
+XDG_CONFIG_HOME="$EV3R/cfg" node "$EVC" set FND_CTX_WARN=40 >/dev/null
+o13="$(XDG_CONFIG_HOME="$EV3R/cfg" node -e \
+  'const e = require(process.argv[1]); const v = e.readVals(e.globalPath());
+   console.log(v.FND_CTX_WARN + "|" + v.FND_WHALE_GUIDE)' "$EVF")"
+if [ "$o13" = "40|0" ] && [ "$(grep -c FND_CTX_WARN "$EV3R/cfg/domaine/env")" -eq 1 ] \
+   && grep -q '# crlf' "$EV3R/cfg/domaine/env"; then ok
+else bad EV11-set-crlf "o13=$o13 file=$(tr '\n' ';' < "$EV3R/cfg/domaine/env" | tr -d '\r')"; fi
+
+# EV12: bash `domaine_env` vs env-file.cjs on one file carrying every shape the dialect allows —
+# leading indent, spaces around '=', trailing spaces, a CRLF line, a duplicate (first wins), an
+# empty value, a comment, plus a key no layer carries. The two readers must agree key for key.
+EV4R="$TMP/env4"; mkdir -p "$EV4R/cfg/domaine" "$EV4R/repo/.claude" "$EV4R/repo/sub"
+printf '# comment\n  FND_CTX_WARN = 75\nFND_CPT_THROTTLE_WAITS=5 9   \nFND_WHALE_GUIDE = 1\r\nFND_CTX_WARN=9\nFND_NOGAIN_MEMO=\n' \
+  > "$EV4R/repo/.claude/domaine.env"
+printf 'FND_NOGAIN_MEMO=7\n  FND_MCP_SLIM_DIR = /tmp/g  \n' > "$EV4R/cfg/domaine/env"
+EVK="FND_CTX_WARN FND_CPT_THROTTLE_WAITS FND_WHALE_GUIDE FND_NOGAIN_MEMO FND_MCP_SLIM_DIR FND_LEAN"
+o14="$(cd "$EV4R/repo/sub" && XDG_CONFIG_HOME="$EV4R/cfg" env -u FND_CTX_WARN -u FND_CPT_THROTTLE_WAITS \
+  -u FND_WHALE_GUIDE -u FND_NOGAIN_MEMO -u FND_MCP_SLIM_DIR -u FND_LEAN node -e \
+  'require(process.argv[1]).load();
+   console.log(process.argv.slice(2).map((k) =>
+     k + "=[" + (process.env[k] === undefined ? "" : process.env[k]) + "]").join(" "))' "$EVF" $EVK)"
+o15=""
+for k in $EVK; do
+  o15="$o15$k=[$(cd "$EV4R/repo/sub" && XDG_CONFIG_HOME="$EV4R/cfg" domaine_env "$k")] "
+done
+o15="${o15% }"
+EVWANT='FND_CTX_WARN=[75] FND_CPT_THROTTLE_WAITS=[5 9] FND_WHALE_GUIDE=[1] FND_NOGAIN_MEMO=[] FND_MCP_SLIM_DIR=[/tmp/g] FND_LEAN=[]'
+if [ "$o14" = "$EVWANT" ] && [ "$o15" = "$EVWANT" ]; then ok
+else bad EV12-reader-dialect-parity "node='$o14' bash='$o15' want='$EVWANT'"; fi
+
+# EV13: the first layer that CARRIES the key wins even when its value is empty — a project
+# `FND_GQL_PROBE_CACHE=` shadows the global value in both readers (callers read empty as "no value")
+printf 'FND_GQL_PROBE_CACHE=\n' > "$EV4R/repo/.claude/domaine.env"
+printf 'FND_GQL_PROBE_CACHE=1\n' > "$EV4R/cfg/domaine/env"
+o16="$(cd "$EV4R/repo/sub" && XDG_CONFIG_HOME="$EV4R/cfg" env -u FND_GQL_PROBE_CACHE node -e \
+  'require(process.argv[1]).load();
+   console.log("[" + (process.env.FND_GQL_PROBE_CACHE === undefined ? "" : process.env.FND_GQL_PROBE_CACHE) + "]")' "$EVF")"
+o17="$(cd "$EV4R/repo/sub" && XDG_CONFIG_HOME="$EV4R/cfg" domaine_env FND_GQL_PROBE_CACHE)"
+if [ "$o16" = "[]" ] && [ "$o17" = "" ]; then ok
+else bad EV13-empty-value-shadows-global "node='$o16' bash='[$o17]'"; fi
+
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

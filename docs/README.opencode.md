@@ -264,7 +264,8 @@ after an update that touched them.
   survives compaction. Consequence: `FND_LEAN=0` cannot reach them here; remove the lean-code
   file from `instructions` instead.
 - **MCP output is rewritten in place.** `tool.execute.after` exposes a mutable `output.output`,
-  so `mcp-slim` both compresses and spills-and-stubs, as on Claude Code and Cursor.
+  so `mcp-slim` both compresses and spills-and-stubs, as on Claude Code (Cursor is the
+  observe-only host — nothing is compressed, stubbed or spilled there).
 - **A blocked prompt is rewritten, not erased.** Nothing can erase a message on this host, so
   when the prompt-JSON guard fires, each blob it spilled is replaced in place by its `full=`
   handle — the paste is offloaded exactly as on Claude Code instead of riding along every turn.

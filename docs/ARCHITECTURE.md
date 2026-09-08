@@ -135,7 +135,7 @@ Per host, the result rewrite is a capability of the host, not of the plugin:
 | Host | Session context | Prompt hook | Subagent conventions | Shell guards | Screenshot guard | Spill access | MCP result rewrite |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | hook | yes | yes | yes | yes | yes | **yes** — compressed or stubbed in place |
-| OpenCode | adapter (store projects) | yes | no event on this host | yes | yes | yes | **yes** — the adapter rewrites `output.content` |
+| OpenCode | adapter (store projects) | yes | no event on this host | yes | **no** — `tool.execute.before` reaches only the bash tool | yes | **yes** — the adapter rewrites `output.content` |
 | Codex CLI | hook | yes | yes | yes | yes | yes | stub only — the shim forwards the spill handle as `additionalContext`; a compressed copy would grow the context |
 | Cursor | rules + shim | shim | shim (unverified) | shim | shim | shell reads only | **no** — `afterMCPExecution` has no response schema; the shim only logs that it fired |
 

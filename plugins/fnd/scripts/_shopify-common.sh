@@ -29,28 +29,38 @@ toml_value() { # $1 = key, first uncommented value to stdout (empty when absent)
 }
 
 # Domaine env files (process env wins): nearest .claude/domaine.env above cwd — tuning keys only,
-# see below — then the global ~/.config/domaine/env; same dialect as scripts/env-file.cjs, read per
-# key, never sourced. Callers fill an UNSET variable only — a set-but-empty value stays exactly
-# that, and an empty value in the file cannot be expressed here.
+# see below — then the global ~/.config/domaine/env; read per key, never sourced. Same dialect as
+# scripts/env-file.cjs and hooks/spill-access.sh: leading whitespace and spaces around the `=` are
+# allowed, the value is trimmed on both sides (a CRLF file's \r with it), first line wins, and the
+# first layer that CARRIES the key wins even when its value is empty. Callers fill an UNSET
+# variable only, and read an empty answer as "no value".
 domaine_env() {
-  local d="$PWD" f v
+  local d="$PWD" f pf="" v
   # PROJECT_OK, mirrored by hand from scripts/env-file.cjs: the project file is committable by a
   # client repo, so only these tuning keys are read from it. Every other switch — the guards, the
   # spill dir, the verify gates — comes from the environment or the global file, default-deny.
   case "$1" in
     FND_LEAN|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET)
       while :; do
-        f="$d/.claude/domaine.env"
-        if [ -f "$f" ]; then
-          v="$(grep -m1 "^$1=" "$f" 2>/dev/null | cut -d= -f2-)"
-          [ -n "$v" ] && { printf '%s' "$v"; return; }
-          break
-        fi
+        if [ -f "$d/.claude/domaine.env" ]; then pf="$d/.claude/domaine.env"; break; fi
         [ "$d" = "/" ] && break
         d="$(dirname "$d")"
       done ;;
   esac
-  grep -m1 "^$1=" "${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env" 2>/dev/null | cut -d= -f2- || true
+  for f in "$pf" "${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env"; do
+    [ -n "$f" ] && [ -f "$f" ] || continue
+    # a carried-but-empty value has to be told apart from "no such line" — hence the `=` sentinel
+    # the value is printed behind and stripped off again
+    v="$(sed -n "/^[[:space:]]*$1[[:space:]]*=/{
+      s/^[^=]*=[[:space:]]*//
+      s/[[:space:]]*\$//
+      s/^/=/
+      p
+      q
+    }" "$f" 2>/dev/null || true)"
+    case "$v" in =*) printf '%s' "${v#=}"; return 0 ;; esac
+  done
+  return 0
 }
 
 # Theme Access token held by the toml: a token-shaped password=, else the first shp*_… anywhere in

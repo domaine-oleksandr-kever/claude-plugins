@@ -135,7 +135,7 @@ an explicit `preview_path`. A path that record names is **not a guess** — use 
   Carry every query param the feature needs to render (a market/locale switch like
   `&country=GB`, a variant selection) on **each storefront deep-link** — a link that lands on
   a page where the change is invisible is worse than no link. The Admin link never takes them.
-- **Admin** → the theme editor on that template: `https://<store>/admin/themes/<id>/editor?previewPath=<url-encoded path>`, or `?template=<name>` when the developer names the template (e.g. `product`, `product.lipglass`).
+- **Admin** → the theme editor on that template: the script's `editor_url` as printed (`https://admin.shopify.com/store/<handle>/themes/<id>/editor`) + `?previewPath=<url-encoded path>`, or `?template=<name>` when the developer names the template (e.g. `product`, `product.lipglass`). The bare `…/themes/<id>` admin page is never the link — it is not the editor.
 
 Ask the developer **only** when no verification record names a path and the surface is
 genuinely ambiguous — never guess a URL into the table.

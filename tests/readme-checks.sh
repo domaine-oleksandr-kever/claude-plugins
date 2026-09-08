@@ -153,6 +153,26 @@ has "$ROOT/docs/README.codex.md" '/hooks' codex-doc-trust-review
 has "$ROOT/docs/README.codex.md" './scripts/install.sh --target codex' codex-doc-agents-link
 has "$ROOT/docs/README.codex.md" '$smoke-test' codex-doc-verify
 
+# Host capability claims. Which host rewrites an MCP result is a property of the HOST, not of the
+# plugin, and the switch table plus the two capability matrices are where a reader decides whether
+# to expect a compressed body. Cursor's afterMCPExecution exposes no rewrite field, so the shim
+# only logs `skip` — a doc that promises compression there sends people hunting for a spill that
+# was never written. Pinned in every place the claim is made, including the negative form.
+has "$README" 'Claude Code and OpenCode rewrite the result in place' slim-rewrite-hosts
+has "$README" 'Cursor is observe-only' slim-cursor-observe-only
+lacks "$README" 'Claude Code, Cursor and OpenCode all rewrite' slim-no-cursor-rewrite-claim
+# …and with FND_MCP_SLIM=0 the wiring gate exits before node, so not even the `skip` line is
+# written (tests/hooks-cursor-sim.sh pins that silence) — the row must not promise it either way.
+has "$README" 'with `0` the wiring gate exits before node' slim-cursor-zero-no-trace
+has "$README" 'On Cursor there is no stub at all' slim-stub-cursor-absent
+has "$README" '**observe-only** — `afterMCPExecution` exposes no rewrite field' host-matrix-cursor-observe-only
+has "$ROOT/docs/README.opencode.md" 'observe-only host — nothing is compressed, stubbed or spilled there' opencode-doc-cursor-observe-only
+# The ARCHITECTURE host matrix carries the same per-host capability claims one table over: OpenCode
+# wires no screenshot guard (plugins/fnd/opencode/fnd-plugin.js spawns scratch-path-guard nowhere),
+# while its MCP rewrite is real.
+has "$ROOT/docs/ARCHITECTURE.md" '**no** — `tool.execute.before` reaches only the bash tool' arch-opencode-no-screenshot-guard
+has "$ROOT/docs/ARCHITECTURE.md" '**no** — `afterMCPExecution` has no response schema' arch-cursor-no-mcp-rewrite
+
 # Release form: nothing a user reads or runs may point at the harness-port work branch — every
 # install ref is branch-free (main) so it survives the merge without another pass. The installer
 # is in the sweep because it clones and reports paths, and the references because subagents read

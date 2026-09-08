@@ -9,7 +9,8 @@
 //
 // `--project` on set/unset/path targets `<git toplevel>/.claude/domaine.env` instead — the
 // per-repository layer ("debug for this project only"). Writes preserve every comment and
-// unrecognized line; `set` replaces the first matching line, `unset` removes every one.
+// unrecognized line; `set` rewrites the first assignment of the key (and drops later ones, dead
+// under the loader's first-line-wins), `unset` removes every one.
 //
 // That layer carries TUNING keys only (env-file.cjs's PROJECT_OK): a global-only switch is
 // refused by `set --project` and shown as ignored by `list`. `unset --project` still removes any
@@ -89,6 +90,13 @@ function writeLines(file, lines) {
   fs.writeFileSync(file, lines.length ? lines.join('\n') + '\n' : '');
 }
 
+// An assignment of `key` as env-file.cjs's parse() sees one: it trims the line and splits at the
+// first `=`, so `  KEY = v` is a live value. Writing against a bare `KEY=` prefix would leave such
+// a line in place and append a second one the first-wins parser never reaches.
+function assignRe(key) {
+  return new RegExp('^\\s*' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*=');
+}
+
 function cmdSet(pair, project) {
   const eq = (pair || '').indexOf('=');
   if (eq < 1) die('set expects KEY=VALUE');
@@ -104,9 +112,14 @@ function cmdSet(pair, project) {
   }
   const file = targetFile(project);
   const lines = readLines(file);
-  const at = lines.findIndex((l) => l.trim().startsWith(key + '='));
-  if (at >= 0) lines[at] = key + '=' + value;
-  else lines.push(key + '=' + value);
+  const re = assignRe(key);
+  const at = lines.findIndex((l) => re.test(l));
+  if (at >= 0) {
+    lines[at] = key + '=' + value;
+    // a later duplicate is already dead weight, but leaving it would resurrect the old value the
+    // moment someone unsets the key
+    for (let i = lines.length - 1; i > at; i--) if (re.test(lines[i])) lines.splice(i, 1);
+  } else lines.push(key + '=' + value);
   writeLines(file, lines);
   process.stdout.write(key + '=' + value + ' -> ' + file + '\n');
 }
@@ -115,7 +128,8 @@ function cmdUnset(key, project) {
   if (!key) die('unset expects KEY');
   const file = targetFile(project);
   const lines = readLines(file);
-  const kept = lines.filter((l) => !l.trim().startsWith(key + '='));
+  const re = assignRe(key);
+  const kept = lines.filter((l) => !re.test(l));
   if (kept.length === lines.length) die('"' + key + '" is not set in ' + file);
   writeLines(file, kept);
   process.stdout.write(key + ' removed from ' + file + '\n');

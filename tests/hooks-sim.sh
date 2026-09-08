@@ -57,7 +57,13 @@
 #             stamp a workspace spill owes (a fresh clone has none, so `git add -A`
 #             would take the paste), in the one bare spelling that also covers a
 #             worktree's SYMLINKED workspace and dedupes with worktree-setup.sh's own
-#             line, and which nothing but that spill even LOADS (P21)
+#             line, and which nothing but that spill even LOADS (P21); P12/P22–P28 the
+#             prose ahead of the paste (a stray quote, an unclosed brace/bracket, Liquid)
+#             no longer decides the outcome — not for one blob, two, or a pretty-printed
+#             one — while prose with no JSON at all still passes; P29–P31 what is stepped
+#             over instead of mined into a fragment (a ≥ gate span that closes but is not
+#             JSON, a truncated paste) plus the scan budget: all three pass through and
+#             write nothing
 #   U cases — hooks/user-prompt.cjs, the merged UserPromptSubmit entry point: a guard
 #             block is the whole output and stops the monitor dead (no band state
 #             recorded for a prompt that never ran), each half rides its own switch,
@@ -2226,12 +2232,19 @@ assert_contains P11-array-block "$out" '"decision":"block"'
 p="$(reason_path "$out")"
 if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP11"; then ok; else bad P11-array "array blob mis-extracted (p='$p')"; fi
 
-# P12: a stray unbalanced brace in prose BEFORE the blob → conservative passthrough (no false block)
+# P12: an unclosed '{' in prose BEFORE the blob left the scan at depth 1, so the real blob closed at
+# depth 1 and was never a candidate — matching starts fresh at the blob's own opener, which offloads it
+EXP12="$PJD/p12.json"
 in="$(node -e '
+  const fs=require("fs");
   const big=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"y".repeat(40)}))});
-  process.stdout.write(JSON.stringify({prompt:"prose with a stray { brace then "+big+" end",cwd:process.argv[1]}));
-' "$PJD")"
-assert_eq P12-conservative-passthrough "$(run_guard "$in")" ""
+  fs.writeFileSync(process.argv[1],big);
+  process.stdout.write(JSON.stringify({prompt:"prose with a stray { brace then "+big+" end",cwd:process.argv[2]}));
+' "$EXP12" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P12-open-brace-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP12"; then ok; else bad P12-byteexact "blob behind an unclosed brace not saved (p='$p')"; fi
 
 # P13: malformed stdin → passthrough, exit 0 (never break the prompt)
 out="$(printf 'not json at all' | env TMPDIR="$PJD" node "$GUARD" 2>/dev/null)"; ec=$?
@@ -2387,6 +2400,130 @@ PROBEJS
 probe_err() { printf '%s' "$1" | env TMPDIR="$PJD" node --require "$P21P" "$GUARD" 2>&1 >/dev/null; }
 assert_absent P21-passthrough-no-hygiene "$(probe_err "$(mk 4000 15000 "$PJD" "$PJD/p21.json")")" "LOADED-HYGIENE"
 assert_absent P21b-tmpdir-no-hygiene     "$(probe_err "$(mk 20000 25000 "$PJD/nowhere" "$PJD/p21b.json")")" "LOADED-HYGIENE"
+
+# P22: an odd stray '"' in the prose read the whole paste as string content — string state now starts
+# at the blob's own opener, so the blob is still blocked and spilled byte-exact
+EXP22="$PJD/p22.json"
+in="$(node -e '
+  const fs=require("fs");
+  const big=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"q".repeat(40)}))});
+  fs.writeFileSync(process.argv[1],big);
+  process.stdout.write(JSON.stringify({prompt:"A stray \" in the note, inspect: "+big+" end",cwd:process.argv[2]}));
+' "$EXP22" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P22-stray-quote-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP22"; then ok; else bad P22-byteexact "blob behind a stray quote not saved (p='$p')"; fi
+
+# P23: an unclosed '[' in the prose is the bracket half of P12 — same fresh scan, same block
+in="$(node -e '
+  const big=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"r".repeat(40)}))});
+  process.stdout.write(JSON.stringify({prompt:"Unclosed [ in prose. Inspect: "+big+" end",cwd:process.argv[1]}));
+' "$PJD")"
+assert_contains P23-open-bracket-block "$(run_guard "$in")" '"decision":"block"'
+
+# P24: a Liquid fragment ahead of the paste ('{%' … '{{') closes far under the gate, so it is stepped
+# over as prose — the blob behind it still blocks
+in="$(node -e '
+  const big=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"s".repeat(40)}))});
+  process.stdout.write(JSON.stringify({prompt:"{% if x %}{{ y }} — check "+big+" end",cwd:process.argv[1]}));
+' "$PJD")"
+assert_contains P24-liquid-block "$(run_guard "$in")" '"decision":"block"'
+
+# P25: prose with an unmatched '{' and a stray '"' but NO valid JSON — no opener yields a parseable
+# ≥ gate span, so the prompt passes through and no paste file is written
+PJ25="$TMP/pj-nojson"; mkdir -p "$PJ25"
+big="$(printf 'z%.0s' $(seq 1 12000)) and a { broken \" json"
+in="$(jq -n --arg p "$big" --arg c "$PJ25" '{prompt:$p,cwd:$c}')"
+assert_eq P25-no-json-passthrough "$(run_guard "$in" TMPDIR="$PJ25")" ""
+assert_eq P25-no-file "$(ls -1 "$PJ25" | wc -l | tr -d ' ')" 0
+
+# P26: the every-blob contract holds through prose — a stray quote ahead of TWO ≥ gate blobs must
+# still save both, since the block that follows erases the prompt carrying them
+EXP26A="$PJD/p26a.json"; EXP26B="$PJD/p26b.json"
+in="$(node -e '
+  const fs=require("fs");
+  const a=JSON.stringify({a:Array.from({length:400},(_,i)=>({id:i,pad:"x".repeat(40)}))});
+  const b=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"y".repeat(40)}))});
+  fs.writeFileSync(process.argv[1],a); fs.writeFileSync(process.argv[2],b);
+  process.stdout.write(JSON.stringify({prompt:"stray \" then "+a+" mid "+b+" end",cwd:process.argv[3]}));
+' "$EXP26A" "$EXP26B" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P26-block "$out" '"decision":"block"'
+paths="$(printf '%s' "$out" | jq -r '.reason' 2>/dev/null | grep -oE '/[^[:space:]]+fnd-prompt-json-[^[:space:]]+\.json')"
+assert_eq P26-two-paths "$(printf '%s\n' "$paths" | grep -c .)" 2
+for exp in "$EXP26A" "$EXP26B"; do
+  hit=no; for sp in $paths; do cmp -s "$sp" "$exp" && hit=yes; done
+  if [ "$hit" = yes ]; then ok; else bad "P26-saved-$(basename "$exp")" "blob not saved byte-exact"; fi
+done
+
+# P27: an unclosed '{' in prose AND a stray '"' between TWO ≥ gate blobs — the prose owns neither
+# scan, so both blobs are saved; a block that erased the second one would lose that paste
+EXP27A="$PJD/p27a.json"; EXP27B="$PJD/p27b.json"
+in="$(node -e '
+  const fs=require("fs");
+  const a=JSON.stringify({a:Array.from({length:400},(_,i)=>({id:i,pad:"x".repeat(40)}))});
+  const b=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"y".repeat(40)}))});
+  fs.writeFileSync(process.argv[1],a); fs.writeFileSync(process.argv[2],b);
+  process.stdout.write(JSON.stringify({prompt:"stray { then "+a+" and a \" here then "+b+" end",cwd:process.argv[3]}));
+' "$EXP27A" "$EXP27B" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P27-block "$out" '"decision":"block"'
+paths="$(printf '%s' "$out" | jq -r '.reason' 2>/dev/null | grep -oE '/[^[:space:]]+fnd-prompt-json-[^[:space:]]+\.json')"
+assert_eq P27-two-paths "$(printf '%s\n' "$paths" | grep -c .)" 2
+for exp in "$EXP27A" "$EXP27B"; do
+  hit=no; for sp in $paths; do cmp -s "$sp" "$exp" && hit=yes; done
+  if [ "$hit" = yes ]; then ok; else bad "P27-saved-$(basename "$exp")" "blob not saved byte-exact"; fi
+done
+
+# P28: a stray '"' on the SAME line as a PRETTY-printed blob — the saved file must be the whole
+# object (head fields included), never the first nested value big enough to clear the gate
+EXP28="$PJD/p28.json"
+in="$(node -e '
+  const fs=require("fs");
+  const pretty=JSON.stringify({apiKey:"sk-KEEP-ME",note:"head fields must survive",
+    data:Array.from({length:400},(_,i)=>({id:i,pad:"z".repeat(40)}))},null,2);
+  fs.writeFileSync(process.argv[1],pretty);
+  process.stdout.write(JSON.stringify({prompt:"he said \" — here: "+pretty+" thanks",cwd:process.argv[2]}));
+' "$EXP28" "$PJD")"
+out="$(run_guard "$in")"
+assert_contains P28-pretty-block "$out" '"decision":"block"'
+p="$(reason_path "$out")"
+if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$EXP28"; then ok; else bad P28-whole-object "pretty blob saved as a fragment (p='$p')"; fi
+
+# P29: a ≥ gate span that CLOSES but is not JSON (trailing comma) wrapping a valid ≥ gate array —
+# mining it would spill the child while the block erased the malformed bytes the developer is asking
+# about, so the span is stepped over whole and the prompt proceeds
+PJ29="$TMP/pj-invalid-wrap"; mkdir -p "$PJ29"
+in="$(node -e '
+  const arr=JSON.stringify(Array.from({length:600},(_,i)=>({id:i,pad:"z".repeat(40)})));
+  process.stdout.write(JSON.stringify({prompt:"Here is my config: {\"items\":"+arr+",} what is wrong?",cwd:process.argv[1]}));
+' "$PJ29")"
+assert_eq P29-invalid-wrap-passthrough "$(run_guard "$in" TMPDIR="$PJ29")" ""
+assert_eq P29-no-file "$(ls -1 "$PJ29" | wc -l | tr -d ' ')" 0
+
+# P30: a TRUNCATED paste — a ≥ gate opener that never closes, holding a valid ≥ gate child plus more
+# unsaved bytes than the gate — is the same trade, so it passes through too (P12/P23 prove the prose
+# half: an unclosed brace there leaves a remainder of a few bytes and is still mined)
+PJ30="$TMP/pj-truncated"; mkdir -p "$PJ30"
+in="$(node -e '
+  const arr=JSON.stringify(Array.from({length:600},(_,i)=>({id:i,pad:"z".repeat(40)})));
+  const cut="{\"pad\":\""+"q".repeat(20000)+"\",\"inner\":"+arr+",\"more\":[1,2,3";
+  process.stdout.write(JSON.stringify({prompt:"my truncated paste: "+cut,cwd:process.argv[1]}));
+' "$PJ30")"
+assert_eq P30-truncated-passthrough "$(run_guard "$in" TMPDIR="$PJ30")" ""
+assert_eq P30-no-file "$(ls -1 "$PJ30" | wc -l | tr -d ' ')" 0
+
+# P31: an opener per few bytes ('{"a":' × N) makes matching quadratic — the scan budget stops it, and
+# a scan that gave up may not block on the blob it HAD read (the part it never reached could hold
+# another one, and the block would erase that unsaved)
+PJ31="$TMP/pj-budget"; mkdir -p "$PJ31"
+in="$(node -e '
+  const good=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"z".repeat(40)}))});
+  process.stdout.write(JSON.stringify({prompt:good+" then "+"{\"a\":".repeat(3000),cwd:process.argv[1]}));
+' "$PJ31")"
+assert_eq P31-budget-passthrough "$(run_guard "$in" TMPDIR="$PJ31")" ""
+assert_eq P31-no-file "$(ls -1 "$PJ31" | wc -l | tr -d ' ')" 0
 
 # ═══ U — UserPromptSubmit merged entry point (hooks/user-prompt.cjs) ════════
 # One node process runs both halves. The contract under test: a guard BLOCK is the whole

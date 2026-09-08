@@ -15,8 +15,8 @@
 //
 // Rails (any doubt → emit nothing, prompt proceeds):
 //   - High thresholds (PROMPT_MIN / BLOB_MIN) so normal prompts never trip it;
-//   - conservative extraction — a balanced brace/bracket scan that ignores braces inside
-//     strings, then JSON.parse; nothing parses past the gate → no block;
+//   - conservative extraction — each `{`/`[` is matched to its closer with string state tracked
+//     from that opener, then JSON.parse; nothing parses past the gate → no block;
 //   - if ANY blob cannot be SAVED, never block (a block erases the whole prompt, so an
 //     unsaved blob would lose the developer's paste) — pass through instead;
 //   - any parse/scan/IO failure → pass through.
@@ -37,46 +37,70 @@ const crypto = require('crypto');
 const PROMPT_MIN = 10240; // only inspect prompts larger than ~10 KB
 const BLOB_MIN = 8192; //    only offload a JSON blob larger than ~8 KB
 
-// EVERY top-level JSON object/array embedded in `text` that clears BLOB_MIN, in order.
-// A block erases the WHOLE prompt, so we must save every offloadable blob, not just the
-// biggest — a second ≥ gate blob left un-spilled would be lost. Single pass: track string
-// state + escapes so braces inside strings never count, record each balanced top-level
-// span, JSON.parse it, keep every container that parses and clears the gate. Non-container
-// JSON (bare strings/numbers) is ignored. Bytes are measured on the raw span (what leaves
-// the prompt).
+// EVERY JSON object/array embedded in `text` that clears BLOB_MIN, in order and non-overlapping.
+// A block erases the WHOLE prompt, so we must save every offloadable blob, not just the biggest —
+// a second ≥ gate blob left un-spilled would be lost. Every scan starts fresh at a `{`/`[`, so prose
+// ahead of the paste (a stray quote, an unclosed brace, Liquid) cannot decide the outcome: match
+// that opener's closer with string state tracked from it, JSON.parse the span, keep it when it
+// clears the gate, and step over it either way — what is kept holds no separate blob, and what a
+// block would erase unsaved must not be traded for a fragment of itself. Non-container JSON (bare
+// strings/numbers) is ignored. Bytes are measured on the raw span (what leaves the prompt).
+// So two shapes are stepped over rather than mined: a ≥ gate span that closes but is not JSON (a
+// jsonc / JS-literal / trailing-comma paste), and — via the openAt rail below — a ≥ gate opener
+// left unclosed at end of text whose own remainder clears the gate (a truncated paste; an unclosed
+// brace in PROSE leaves a remainder of a few bytes, and is mined).
 function collectJsonBlobs(text) {
   const blobs = [];
-  let start = -1;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
+  let openAt = -1; // first ≥ gate opener that never closes
+  // Each opener costs a match scan, so adversarial prose (`{"a":` × N) is quadratic — bound the
+  // total and pass through if it is hit, since a partial read may miss a blob it must not lose.
+  let budget = text.length * 8 + 65536;
+  const matchEnd = (from) => {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = from; i < text.length; i++) {
+      if (--budget < 0) return -1;
+      const c = text[i];
+      if (inString) {
+        // No JSON string spans a raw line break, so one means this quote opened prose, not a value.
+        if (c === '\n' || c === '\r') { inString = false; escaped = false; continue; }
+        if (escaped) escaped = false;
+        else if (c === '\\') escaped = true;
+        else if (c === '"') inString = false;
+        continue;
+      }
+      if (c === '"') inString = true;
+      else if (c === '{' || c === '[') depth++;
+      else if (c === '}' || c === ']') { depth--; if (depth === 0) return i + 1; }
+    }
+    return -1;
+  };
+
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (c === '\\') escaped = true;
-      else if (c === '"') inString = false;
+    if (c !== '{' && c !== '[') continue;
+    const start = i;
+    const end = matchEnd(start);
+    if (budget < 0) return [];
+    if (end < 0) {
+      if (openAt < 0 && Buffer.byteLength(text.slice(start), 'utf8') >= BLOB_MIN) openAt = start;
       continue;
     }
-    if (c === '"') { inString = true; continue; }
-    if (c === '{' || c === '[') {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (c === '}' || c === ']') {
-      if (depth === 0) continue; // stray closer in prose — ignore
-      depth--;
-      if (depth === 0 && start >= 0) {
-        const span = text.slice(start, i + 1);
-        const bytes = Buffer.byteLength(span, 'utf8');
-        if (bytes >= BLOB_MIN) {
-          try {
-            const v = JSON.parse(span);
-            if (v && typeof v === 'object') blobs.push({ blob: span, bytes });
-          } catch (_) {} // balanced but not valid JSON → skip, keep scanning
-        }
-        start = -1;
-      }
-    }
+    i = end - 1;
+    const span = text.slice(start, end);
+    const bytes = Buffer.byteLength(span, 'utf8');
+    if (bytes < BLOB_MIN) continue;
+    try {
+      JSON.parse(span);
+      blobs.push({ start, blob: span, bytes });
+    } catch (_) {} // balanced but not valid JSON
+  }
+
+  if (openAt >= 0) {
+    const rest = Buffer.byteLength(text.slice(openAt), 'utf8') -
+      blobs.reduce((n, b) => (b.start > openAt ? n + b.bytes : n), 0);
+    if (rest >= BLOB_MIN) return blobs.filter((b) => b.start < openAt);
   }
   return blobs;
 }
