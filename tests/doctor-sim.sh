@@ -64,6 +64,12 @@ mkroot() {
   done
 }
 
+# A marketplace cache bundle: a full root plus the doctor the install row tells the user to run.
+mkbundle() {
+  mkroot "$1" "${ALL3[@]}"
+  mkdir -p "$1/scripts"; printf "'use strict';\n" > "$1/scripts/doctor.cjs"
+}
+
 ALL3=(".claude-plugin/plugin.json:0.59.0" ".cursor-plugin/plugin.json:0.59.0" ".codex-plugin/plugin.json:0.59.0")
 
 # ptrmanifest <file> <version> [key:value ...] — a host manifest carrying path pointers
@@ -364,10 +370,17 @@ run --root "$CACHE_PLUG" --home "$HC" --target cursor
 expect D29b-cursor-marketplace-cache 0 "PASS  install:cursor" "marketplace cache install" "!FAIL"
 
 # D29c: the cache pass is keyed to the plugin root actually being IN the cache — a doctor run
-# from a normal checkout on a machine that also has a cache dir still checks the local install.
-mkdir -p "$HC/.cursor/plugins/cache"
-run --root "$G" --home "$HC" --target cursor
+# from a normal checkout on a machine that has a bare cache dir still checks the local install.
+HCE="$TMP/home-cache-empty"; mkdir -p "$HCE/.cursor/plugins/cache"
+run --root "$G" --home "$HCE" --target cursor
 expect D29c-checkout-beside-cache 1 "FAIL  install:cursor" "not installed" "!marketplace cache"
+
+# D29d: same checkout, but the cache actually holds a bundle — the host IS installed, just not
+# from here, so the row names the cache path and the doctor that can check it.
+HCB="$TMP/home-cache-beside"; mkbundle "$HCB/.cursor/plugins/cache/domaine/fnd/0.60.0"
+run --root "$G" --home "$HCB" --target cursor
+expect D29d-cursor-cache-beside-checkout 1 "FAIL  install:cursor" "not installed" \
+  "$HCB/.cursor/plugins/cache/domaine/fnd/0.60.0" "doctor.cjs" "!marketplace cache install"
 
 # D30: a record with no entries at all (interrupted install).
 H10="$TMP/home10"
@@ -472,10 +485,40 @@ run --root "$CACHE_CX" --home "$HCX" --target codex
 expect D37d2-codex-marketplace-cache 0 "PASS  install:codex" "marketplace cache install" "!FAIL"
 
 # D37d3: same guard as Cursor's D29c — the cache pass is keyed to the plugin root actually being
-# IN the cache; a checkout beside a cache dir still checks (and fails) the local install.
-mkdir -p "$HCX/.codex/plugins/cache"
-run --root "$G" --home "$HCX" --target codex
+# IN the cache; a checkout beside a bare cache dir still checks (and fails) the local install.
+HCXE="$TMP/home-codex-cache-empty"; mkdir -p "$HCXE/.codex/plugins/cache"
+run --root "$G" --home "$HCXE" --target codex
 expect D37d3-checkout-beside-cache 1 "FAIL  install:codex" "not installed" "!marketplace cache install"
+
+# D37d4: the Codex twin of D29d — a populated cache beside an unlinked checkout is named, so the
+# user is not sent to install.sh for a host that already runs the plugin from its cache.
+HCXB="$TMP/home-codex-cache-beside"
+mkbundle "$HCXB/.codex/plugins/cache/domaine/fnd/0.60.0"
+run --root "$G" --home "$HCXB" --target codex
+expect D37d4-codex-cache-beside-checkout 1 "FAIL  install:codex" "not installed" \
+  "$HCXB/.codex/plugins/cache/domaine/fnd/0.60.0" "doctor.cjs" "!marketplace cache install"
+
+# D37d5: several cached versions — the newest is the one worth checking, and 0.61.0 sorts above
+# 0.60.0 numerically, not by the string order readdir happens to return.
+mkbundle "$HCXB/.codex/plugins/cache/domaine/fnd/0.61.0"
+run --root "$G" --home "$HCXB" --target codex
+expect D37d5-codex-cache-newest-version 1 "FAIL  install:codex" \
+  "$HCXB/.codex/plugins/cache/domaine/fnd/0.61.0" "!fnd/0.60.0"
+
+# D37d6: 0.10.0 beats 0.9.0 (string order says the opposite), and a version dir with no
+# scripts/doctor.cjs (interrupted clone) is not a bundle, however new its name.
+HCXN="$TMP/home-codex-cache-numeric"
+mkbundle "$HCXN/.codex/plugins/cache/domaine/fnd/0.9.0"
+mkbundle "$HCXN/.codex/plugins/cache/domaine/fnd/0.10.0"
+mkdir -p "$HCXN/.codex/plugins/cache/domaine/fnd/0.11.0"
+run --root "$G" --home "$HCXN" --target codex
+expect D37d6-codex-cache-numeric-order 1 "FAIL  install:codex" \
+  "$HCXN/.codex/plugins/cache/domaine/fnd/0.10.0/scripts/doctor.cjs" "!fnd/0.9.0" "!fnd/0.11.0"
+
+# D37d7: only hollow version dirs — nothing to point at, so the plain message stands.
+HCXH="$TMP/home-codex-cache-hollow"; mkdir -p "$HCXH/.codex/plugins/cache/domaine/fnd/0.60.0"
+run --root "$G" --home "$HCXH" --target codex
+expect D37d7-codex-cache-hollow 1 "FAIL  install:codex" "not installed" "!fnd/0.60.0"
 
 # D37e: a hand-made link at the documented path counts, same as the Cursor probe.
 H17="$TMP/home17"; mkdir -p "$H17/$CX_REL/agents"

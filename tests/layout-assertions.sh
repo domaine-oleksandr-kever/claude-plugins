@@ -211,14 +211,19 @@ if [ -f "$CODEX_MANIFEST" ]; then
   # interface block: what the /plugins browser shows and the prompts it seeds
   if [ -n "$(jval "$CODEX_MANIFEST" interface.displayName)" ]; then ok
   else bad codex-interface-displayname "empty or absent"; fi
-  n_prompts="$(jval "$CODEX_MANIFEST" interface.defaultPrompts.length)"
+  # Codex parses ONLY `defaultPrompt` (string or string array); a pluralised key is accepted by
+  # JSON and then silently ignored, so the typo has to fail here rather than at a user's prompt bar.
+  if [ -z "$(jval "$CODEX_MANIFEST" interface.defaultPrompts.length)" ] \
+    && [ -z "$(jval "$CODEX_MANIFEST" interface.defaultPrompts)" ]; then ok
+  else bad codex-interface-prompts-key "undocumented 'interface.defaultPrompts' — the key Codex reads is 'defaultPrompt'"; fi
+  n_prompts="$(jval "$CODEX_MANIFEST" interface.defaultPrompt.length)"
   case "$n_prompts" in
     [2-9]|[1-9][0-9]) ok ;;
-    *) bad codex-interface-prompts "want 2+ defaultPrompts, got '$n_prompts'" ;;
+    *) bad codex-interface-prompts "want 2+ defaultPrompt entries, got '$n_prompts'" ;;
   esac
   i=0
   while [ "$i" -lt "${n_prompts:-0}" ]; do
-    p="$(jval "$CODEX_MANIFEST" "interface.defaultPrompts.$i")"
+    p="$(jval "$CODEX_MANIFEST" "interface.defaultPrompt.$i")"
     i=$((i + 1))
     # Codex invokes skills as `$name`, not Claude Code's `/name`
     case "$p" in

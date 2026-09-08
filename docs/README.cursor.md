@@ -121,7 +121,9 @@ PASS  generator-sync         generated dirs match scripts/gen-host-adapters.cjs
 PASS  install:cursor         symlink install, 1 entry(ies) live (root: ~/.cursor/plugins/local)
 ```
 
-Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target cursor`.
+Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target cursor`. On a marketplace-only
+machine the same command run from an unlinked checkout reports `install:cursor` as **not
+installed** — that is the checkout, not the host — and names the cached bundle to re-run it from.
 
 `--copy` installs a real copy instead of the symlink (no-symlink environments); such an install
 does **not** follow `git pull` — re-run `./scripts/install.sh --target cursor --copy` to refresh

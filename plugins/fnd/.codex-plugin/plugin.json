@@ -13,7 +13,7 @@
   "mcpServers": "./mcp-codex.json",
   "interface": {
     "displayName": "fnd — Domaine Foundation workflows",
-    "defaultPrompts": [
+    "defaultPrompt": [
       "$ship ELC-123 — take the ticket end to end",
       "$develop-feature-or-fix ELC-123 from the approved technical approach",
       "$preview-theme — spin up a preview theme for this branch"

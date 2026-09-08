@@ -116,7 +116,10 @@ SKIP  codex:hooks-trust      not inspectable — prove it with `git commit --no-
 ```
 
 `codex:hooks-trust` is always a reminder: the trust state is host state a script cannot read.
-Re-run the doctor any time with `node plugins/fnd/scripts/doctor.cjs --target codex`.
+Re-run the doctor any time with `node plugins/fnd/scripts/doctor.cjs --target codex`. On a
+marketplace-only machine the same command run from an unlinked checkout reports `install:codex`
+as **not installed** — that is the checkout, not the host — and names the cached bundle to re-run
+it from.
 
 Then start a **new Codex session** and run the smoke test once: `$smoke-test` (Codex invokes
 skills with `$`, not `/`). It proves MCP connectivity, subagent delegation, the commit guards

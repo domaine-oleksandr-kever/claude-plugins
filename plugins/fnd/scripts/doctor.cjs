@@ -158,6 +158,14 @@ function isDir(p) {
   }
 }
 
+function isFile(p) {
+  try {
+    return fs.statSync(p).isFile();
+  } catch (_) {
+    return false;
+  }
+}
+
 // The repo root is what a host install must resolve INTO: the nearest ancestor holding .git.
 // A checkout without .git (tarball download, vendored copy, sparse export) still has the layout
 // scripts/install.sh assumes — <root>/plugins/fnd — and install.sh records THAT root, so fall
@@ -430,6 +438,55 @@ function entryProblem(entry, mode, repoReal) {
   return null;
 }
 
+// Cache layout every marketplace host shares: <cacheRoot>/<marketplace>/fnd/<version>/. Returns
+// the newest bundle path, or '' when the cache root holds none — a bare cache dir says nothing,
+// and neither does a version dir without the doctor the row tells the user to run.
+function newestCachedBundle(cacheRoot) {
+  let best = '';
+  let bestKey = null;
+  let markets;
+  try {
+    markets = fs.readdirSync(cacheRoot);
+  } catch (_) {
+    return '';
+  }
+  for (const market of markets) {
+    const fndDir = path.join(cacheRoot, market, 'fnd');
+    let versions;
+    try {
+      versions = fs.readdirSync(fndDir);
+    } catch (_) {
+      continue;
+    }
+    for (const version of versions) {
+      const bundle = path.join(fndDir, version);
+      if (!isFile(path.join(bundle, 'scripts', 'doctor.cjs'))) continue;
+      const key = versionKey(version);
+      if (bestKey === null || compareVersionKeys(key, bestKey) > 0) {
+        bestKey = key;
+        best = bundle;
+      }
+    }
+  }
+  return best;
+}
+
+// Cache dir names are usually semver but may be a commit sha, so compare the numeric segments and
+// keep the raw name as the tiebreak — enough to name the newest of several, never a version parser.
+function versionKey(name) {
+  return { nums: (name.match(/\d+/g) || []).map(Number), raw: name };
+}
+
+function compareVersionKeys(a, b) {
+  const len = Math.max(a.nums.length, b.nums.length);
+  for (let i = 0; i < len; i += 1) {
+    const d = (a.nums[i] || 0) - (b.nums[i] || 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  if (a.raw === b.raw) return 0;
+  return a.raw < b.raw ? -1 : 1;
+}
+
 function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
   if (!target) {
     skip('install', 'no --target given — host install location not checked');
@@ -464,6 +521,19 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
       const problem = entryProblem(entry, 'symlink', repoReal);
       if (problem) fail(label, entry + ': ' + problem);
       else pass(label, entry + ' → ' + realpath(entry) + ' (no installer record)' + note);
+      return;
+    }
+    // A cache bundle beside an unlinked checkout is the common confusion: the host IS installed,
+    // just not from here, and the doctor that can prove it lives in the cache.
+    const cached = host.cacheRoot ? newestCachedBundle(host.cacheRoot(homeDir)) : '';
+    if (cached) {
+      fail(
+        label,
+        'not installed — this checkout is not linked (no ' + modeFile + '); a marketplace cache ' +
+          'is present at ' + cached + ' — run `node ' + path.join(cached, 'scripts', 'doctor.cjs') +
+          ' --target ' + target + '` to check it, or scripts/install.sh --target ' + target +
+          ' for the dev channel' + note
+      );
       return;
     }
     fail(label, 'not installed — no ' + modeFile + ' (run scripts/install.sh --target ' + target + ')' + note);
