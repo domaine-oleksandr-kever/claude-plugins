@@ -297,30 +297,17 @@ const CURSOR_RULES = {
   'plugin-feedback': {
     description:
       'Foundation plugin feedback — an fnd component that misbehaves gets reported upstream, not worked around.',
-    subs: [
-      [
-        'offer\n`/fnd:report-plugin-issue` (sanitized debug',
-        'offer\nthe fnd `report-plugin-issue` skill — on Claude Code, `/fnd:report-plugin-issue` (sanitized debug',
-      ],
-    ],
+    subs: [],
   },
   'task-workspace': {
     description:
       'Per-ticket task workspace under .claude/tasks/<work-id>/ — read it before re-asking, write to it as you go.',
     subs: [
-      [
-        'offer the next unchecked step (its\n  `session` field',
-        'offer the next unchecked step (on Claude Code,\n  its `session` field',
-      ],
       ['so `/compact` and new sessions lose nothing.', 'so context compaction and new sessions lose nothing.'],
       [
         'Details + freshness rules: `references/task-workspace.md`.',
         'Details + freshness rules: `references/task-workspace.md` in\n' +
           '  the fnd plugin root (the directory above this rules directory).',
-      ],
-      [
-        '→ offer `/fnd:save-task-context` once.',
-        '→ offer the `save-task-context` skill once\n  (on Claude Code, `/fnd:save-task-context`).',
       ],
     ],
   },
@@ -478,16 +465,12 @@ const WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
 const TOOL_TOKEN = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 /*
- * The per-host capability facts, read off the canonical frontmatter rather than restated beside it.
- * `disallowedTools:` is Claude Code's key and no other host has an equivalent, so it is translated
- * here and dropped: `mcpServers` is the nearest Codex analogue. From an allowlist it is every
- * bundled server the fence names a tool of. From a denylist: [] = no MCP is reachable at all;
- * [name] = the one plugin server the denylist leaves, which Codex can scope to; null = no scoping,
- * because a denylist that leaves several servers also leaves the user's own equivalents reachable
- * and a fixed list would cut them.
- * M1B-VERIFY: Codex's reading of an empty `mcp_servers` array is unconfirmed until the M1b spike.
+ * The per-host capability fact, read off the canonical frontmatter rather than restated beside it.
+ * `readOnly` is the only one that translates: a Codex agent layer inherits the parent session's MCP
+ * servers with no per-agent way to scope them, and Claude Code's tool denylist has no host analogue —
+ * a denylist agent therefore ships unfenced on every other host; its prompt contract is the only fence.
  */
-function deriveCaps(name, data, serverNames) {
+function deriveCaps(name, data) {
   const listed = (key) => {
     const raw = data[key];
     if (raw === undefined) return [];
@@ -501,19 +484,12 @@ function deriveCaps(name, data, serverNames) {
   const allow = listed('tools');
   const deny = listed('disallowedTools');
   if (allow.length && deny.length) die(name + ': frontmatter carries both `tools:` and `disallowedTools:`');
-  if (allow.length) {
-    const ofServer = (t, s) => t === 'mcp__plugin_fnd_' + s || t.startsWith('mcp__plugin_fnd_' + s + '__');
-    return {
-      readOnly: !allow.some((t) => WRITE_TOOLS.includes(t)),
-      mcpServers: serverNames.filter((s) => allow.some((t) => ofServer(t, s))),
-    };
-  }
+  if (allow.length) return { readOnly: !allow.some((t) => WRITE_TOOLS.includes(t)) };
   if (!deny.length) die(name + ': frontmatter fences no tools — neither `tools:` nor `disallowedTools:`');
-  const reachable = serverNames.filter((s) => !deny.includes('mcp__plugin_fnd_' + s));
-  return { readOnly: false, mcpServers: reachable.length > 1 ? null : reachable };
+  return { readOnly: false };
 }
 
-function collectAgents(serverNames) {
+function collectAgents() {
   let files;
   try {
     files = fs.readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.md')).sort();
@@ -537,7 +513,7 @@ function collectAgents(serverNames) {
       effort: parsed.data.effort || DEFAULT_CODEX_EFFORT,
       body: bodyOf(parsed),
       model: tierOf(name),
-      caps: deriveCaps(name, parsed.data, serverNames),
+      caps: deriveCaps(name, parsed.data),
     };
   });
 }
@@ -667,9 +643,6 @@ function codexAgent(agent) {
     'model_reasoning_effort = ' + tomlBasicStr(effort || agent.effort),
   ];
   if (agent.caps.readOnly) lines.push('sandbox_mode = "read-only"');
-  if (agent.caps.mcpServers) {
-    lines.push('mcp_servers = [' + agent.caps.mcpServers.map(tomlBasicStr).join(', ') + ']');
-  }
   lines.push(
     'developer_instructions = ' + tomlMultiline(hostBody(agent, DIR_CODEX + '/' + agent.name + '.toml')),
     ''
@@ -1061,7 +1034,7 @@ function opencodeMcp(servers) {
 
 function buildOutputs() {
   const servers = collectMcpServers();
-  const agents = collectAgents(servers.map((s) => s.name));
+  const agents = collectAgents();
   const skills = collectSkills();
   checkRuleOwnership();
   const files = new Map();

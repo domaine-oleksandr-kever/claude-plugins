@@ -313,30 +313,38 @@ for n in $agents; do
   esac
 done
 
-# mcp_servers scoping — the readers/writer are pinned to the server their canonical tools imply
-[ "$(tval "$PLUGIN_DIR/agents-codex/jira-reader.toml" mcp_servers)" = "atlassian" ] && ok \
-  || bad mcp-jira-reader "jira-reader.toml is not scoped to the atlassian server"
-[ "$(tval "$PLUGIN_DIR/agents-codex/jira-writer.toml" mcp_servers)" = "atlassian" ] && ok \
-  || bad mcp-jira-writer "jira-writer.toml is not scoped to the atlassian server"
-[ "$(tval "$PLUGIN_DIR/agents-codex/figma-reader.toml" mcp_servers)" = "figma-dev-mode" ] && ok \
-  || bad mcp-figma-reader "figma-reader.toml is not scoped to the figma server"
-if toml "$PLUGIN_DIR/agents-codex/doc-reader.toml" 2>/dev/null | grep -q '^mcp_servers'; then
-  bad mcp-doc-reader "doc-reader.toml scopes MCP — it reads Confluence, Notion and the web"
-else ok; fi
-# every scoped server must exist in the canonical MCP list, or the scoping silently disables the agent
-for n in $agents; do
-  f="$PLUGIN_DIR/agents-codex/$n.toml"
+# Codex has no per-agent MCP scoping: an agent layer inherits the parent session's servers, and
+# `mcp_servers` there is a table, so an array of names makes the whole role file fail to load.
+for f in "$PLUGIN_DIR"/agents-codex/*.toml; do
   [ -f "$f" ] || continue
-  v="$(tval "$f" mcp_servers)"
-  [ -n "$v" ] || continue
-  for s in $(printf '%s' "$v" | tr ',' ' '); do
-    if "$NODE_BIN" -e '
-      const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-      process.exit(Object.keys(m.mcpServers || {}).includes(process.argv[2]) ? 0 : 1);
-    ' "$PLUGIN_DIR/.claude-plugin/plugin.json" "$s"; then ok
-    else bad "mcp-unknown-$n" "$n.toml scopes unknown MCP server '$s'"; fi
-  done
+  if grep -qE '^\[?mcp_servers' "$f"; then
+    bad "mcp-key-$(basename "$f")" "$(basename "$f") carries mcp_servers — Codex scopes no servers per agent"
+  else ok; fi
 done
+
+# Codex parses an agent role file with the config.toml deserializer, so every key we emit that
+# config.toml also knows has to survive it (`name`, `description`, `developer_instructions` are
+# ignored there, so only these four are probeable). `-c key=value` feeds one key through that same
+# parser; a temp CODEX_HOME keeps the probe off the user's config. CI has no codex binary — the
+# probe is skipped out loud there.
+if command -v codex >/dev/null 2>&1; then
+  mkdir -p "$TMP/codex-home"
+  for n in $agents; do
+    f="$PLUGIN_DIR/agents-codex/$n.toml"
+    [ -f "$f" ] || continue
+    grep -E '^(model|model_reasoning_effort|sandbox_mode|mcp_servers) = ' "$f" > "$TMP/codex-keys"
+    if [ -s "$TMP/codex-keys" ]; then ok
+    else bad "codex-keys-$n" "$n.toml has no probeable key — the probe would silently cover nothing"; fi
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      if CODEX_HOME="$TMP/codex-home" codex mcp list -c "${line%% = *}=${line#* = }" \
+        >"$TMP/codex.out" 2>&1; then ok
+      else bad "codex-parse-$n" "codex rejects \`$line\` from $n.toml: $(head -1 "$TMP/codex.out")"; fi
+    done < "$TMP/codex-keys"
+  done
+else
+  echo "gen-adapters-sim: SKIP codex-parse — codex not on PATH"
+fi
 
 # --------------------------------------------------------------- model table vs the plan tables --
 cursor_model() { fm "$PLUGIN_DIR/agents-cursor/$1.md" | awk -F': ' '$1 == "model" { print $2 }'; }
@@ -968,8 +976,8 @@ if [ "$(fingerprint "$COPY")" = "$after" ]; then ok
 else bad rule-exempt-restore "the exemption probe left the scratch tree changed"; fi
 
 # ------------------------------------------ scratch copy: capabilities follow the frontmatter --
-# The sandbox and MCP-scoping facts are read off each agent's canonical `tools:` / `disallowedTools:`
-# fence. A second home for them would let the fence and the emitted capability disagree — the agent
+# The sandbox fact is read off each agent's canonical `tools:` / `disallowedTools:`
+# fence. A second home for it would let the fence and the emitted capability disagree — the agent
 # then reads as fenced on Claude Code and is unfenced everywhere else, with nothing saying so.
 "$NODE_BIN" -e '
   const fs = require("fs"), p = process.argv[1];
@@ -987,21 +995,6 @@ cp "$PLUGIN_DIR/agents/theme-explorer.md" "$COPY/agents/theme-explorer.md"
 "$NODE_BIN" "$CGEN" >/dev/null 2>&1
 if [ "$(fingerprint "$COPY")" = "$after" ]; then ok
 else bad caps-readonly-restore "the sandbox probe left the scratch tree changed"; fi
-
-# Codex takes an exact server list, so scoping is only sound while the denylist leaves exactly one
-# plugin server: a second one reachable has to drop the key, not pin the agent to the stale name
-"$NODE_BIN" -e '
-  const fs = require("fs"), p = process.argv[1];
-  fs.writeFileSync(p, fs.readFileSync(p, "utf8").replace("mcp__plugin_fnd_notion-mcp, ", ""));
-' "$COPY/agents/jira-reader.md"
-"$NODE_BIN" "$CGEN" >/dev/null 2>&1
-if toml "$COPY/agents-codex/jira-reader.toml" 2>/dev/null | grep -q '^mcp_servers'; then
-  bad caps-mcp "a denylist leaving two servers still scoped the Codex adapter to one"
-else ok; fi
-cp "$PLUGIN_DIR/agents/jira-reader.md" "$COPY/agents/jira-reader.md"
-"$NODE_BIN" "$CGEN" >/dev/null 2>&1
-if [ "$(fingerprint "$COPY")" = "$after" ]; then ok
-else bad caps-mcp-restore "the MCP scoping probe left the scratch tree changed"; fi
 
 # an agent whose frontmatter fences nothing, or fences both ways, must stop the generator: on Claude
 # Code it reads as an ordinary agent, and everywhere else it would ship with no capability at all
@@ -1075,24 +1068,6 @@ cp "$PLUGIN_DIR/agents/theme-explorer.md" "$COPY/agents/theme-explorer.md"
 "$NODE_BIN" "$CGEN" >/dev/null 2>&1
 if [ "$(fingerprint "$COPY")" = "$after" ]; then ok
 else bad caps-list-restore "the list-spelling probes left the scratch tree changed"; fi
-
-# an allowlist naming a server's tools scopes Codex to that server by its exact name: a tool of a
-# server whose name merely extends a bundled one (`atlassianX`) belongs to no bundled server at all
-"$NODE_BIN" -e '
-  const fs = require("fs"), a = process.argv[1];
-  const src = fs.readFileSync(a, "utf8");
-  const out = src.replace("tools: Read, Grep, Glob, Bash", "tools: Read, Grep, Glob, Bash, mcp__plugin_fnd_atlassianX__search");
-  if (out === src) { process.stderr.write("fence not found\n"); process.exit(1); }
-  fs.writeFileSync(a, out);
-' "$COPY/agents/theme-explorer.md" || bad caps-server-exact "the theme-explorer fence line moved"
-"$NODE_BIN" "$CGEN" >"$TMP/c5" 2>&1
-rc=$?
-if [ "$rc" = 0 ] && grep -q '^mcp_servers = \[\]$' "$COPY/agents-codex/theme-explorer.toml"; then ok
-else bad caps-server-exact "a server name prefixing another was scoped along: $(grep '^mcp_servers' "$COPY/agents-codex/theme-explorer.toml") $(head -1 "$TMP/c5")"; fi
-cp "$PLUGIN_DIR/agents/theme-explorer.md" "$COPY/agents/theme-explorer.md"
-"$NODE_BIN" "$CGEN" >/dev/null 2>&1
-if [ "$(fingerprint "$COPY")" = "$after" ]; then ok
-else bad caps-server-restore "the server-name probe left the scratch tree changed"; fi
 
 # ------------------------------------------------- scratch copy: the MCP configs are drift-checked --
 # The host configs are generated like every adapter, but they sit among hand-written files at the

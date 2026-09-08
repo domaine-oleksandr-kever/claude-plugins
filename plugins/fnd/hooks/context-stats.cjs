@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook: one-line context notice in the Claude Code UI (hook
-// `systemMessage`, rendered above the input box — never appended to the assistant's
-// reply, never touching the status line). Mirrors /context: tokens used / window (%),
-// active model, effort. Effort comes straight from the hook input; model and token
-// counts are read verbatim from the transcript's last assistant `usage` entry —
-// Claude Code does not expose /context's own numbers to hooks. Above the warn
+// UserPromptSubmit hook: one-line context notice in the host UI (hook `systemMessage` +
+// `suppressOutput`, which Claude Code renders above the input box and Codex accepts on the
+// same wire — never appended to the assistant's reply, never touching the status line). Mirrors /context: tokens used / window (%),
+// active model, effort. Effort comes straight from the hook input; token counts are read
+// verbatim from the transcript's last usage record — Claude Code's assistant `usage` entry,
+// or a Codex rollout's `token_count` event (its model label comes from the hook input) —
+// because neither host exposes /context's own numbers to hooks. Above the warn
 // threshold the notice adds a /compact-or-/clear call-to-action on every prompt
 // (UI-only, free); the additionalContext flag for skills is emitted ONLY when the
 // usage BAND changes (ok → warn → 75 → 90, and back), tracked in a per-session
@@ -15,8 +16,9 @@
 // does the same for one event on stdin. Tunables:
 //   FND_CTX_MONITOR on by default; set to 0 to disable (checked by that entry point AND here;
 //                   node still spawns for the prompt-JSON guard unless it is off too)
-//   FND_CTX_WINDOW  context window in tokens (default: resolved from the session model,
-//                   200000 when the model is unknown)
+//   FND_CTX_WINDOW  context window in tokens (default: resolved from the Claude model family,
+//                   200000 when it is unknown; on Codex, the window the rollout states — and
+//                   with neither, no notice at all)
 //   FND_CTX_WARN    warn-from percentage (default 40; 0 = warn on every prompt)
 'use strict';
 
@@ -37,8 +39,29 @@ function windowFor(model) {
     : 200000;
 }
 
+// Codex rollouts record usage as `token_count` events, whose `last_token_usage` is the live
+// context (`cached_input_tokens` is a subset of `input_tokens`, so `total_tokens` is the whole
+// of it). `info` is null on some of those events, and the window may be stated on an older
+// event than the usage, so the walk keeps going for a window once it has the usage.
+function codexUsage(lines) {
+  let used = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"token_count"')) continue;
+    try {
+      const info = JSON.parse(lines[i]).payload.info;
+      if (!info) continue;
+      const u = info.last_token_usage;
+      if (used === null && u) {
+        used = u.total_tokens != null ? u.total_tokens : (u.input_tokens || 0) + (u.output_tokens || 0);
+      }
+      if (used !== null && info.model_context_window) return { used, window: info.model_context_window };
+    } catch (_) {}
+  }
+  return used === null ? null : { used, window: 0 };
+}
+
 // The notice for one UserPromptSubmit event, or null when there is nothing to say (no
-// transcript, no usage entry yet). Never throws for a caller: any failure is a null.
+// transcript, no usage entry yet, no window on Codex). Never throws for a caller: any failure is a null.
 function contextNotice(input) {
   try {
     if (process.env.FND_CTX_MONITOR === '0') return null; // belt-and-suspenders vs the entry-point gate
@@ -76,15 +99,25 @@ function contextNotice(input) {
         }
       } catch (_) {}
     }
-    if (!usage) return null;
-
-    const WINDOW = ENV_WINDOW || windowFor(model);
-
-    const used =
-      (usage.input_tokens || 0) +
-      (usage.cache_creation_input_tokens || 0) +
-      (usage.cache_read_input_tokens || 0) +
-      (usage.output_tokens || 0);
+    let WINDOW;
+    let used;
+    if (usage) {
+      WINDOW = ENV_WINDOW || windowFor(model);
+      used =
+        (usage.input_tokens || 0) +
+        (usage.cache_creation_input_tokens || 0) +
+        (usage.cache_read_input_tokens || 0) +
+        (usage.output_tokens || 0);
+    } else {
+      const codex = codexUsage(lines);
+      if (!codex) return null;
+      // The Claude family table would misreport a GPT session, so an unstated window means
+      // no readout rather than a made-up denominator.
+      WINDOW = ENV_WINDOW || codex.window;
+      if (!WINDOW) return null;
+      used = codex.used;
+      model = String(input.model || '');
+    }
     const pct = Math.round((used / WINDOW) * 100);
 
     const windowLabel =

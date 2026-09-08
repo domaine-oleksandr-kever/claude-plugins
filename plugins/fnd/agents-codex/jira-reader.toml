@@ -5,7 +5,6 @@ name = "jira-reader"
 description = "Reads ONE Jira ticket via the Atlassian MCP and returns its fields compactly, keeping the raw ADF out of the main context. Use PROACTIVELY whenever a whole ticket needs reading — e.g. when a Jira URL or key (ABC-123) is pasted. One per ticket, in parallel; skip tickets already in context. Writes `ticket.md` itself when given the workspace path. NOT for single-field lookups or JQL searches — use the MCP directly. Read-only toward Jira."
 model = "gpt-5.6-luna"
 model_reasoning_effort = "medium"
-mcp_servers = ["atlassian"]
 developer_instructions = '''
 **Plugin root** = the plugin's own directory — this agent is `<plugin root>/agents-codex/jira-reader.toml`, and every `<plugin root>/…` path below resolves the same way; substitute its absolute path when a command has to run.
 

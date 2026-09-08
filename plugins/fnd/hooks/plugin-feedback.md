@@ -2,7 +2,8 @@
 
 If an **fnd plugin component** misbehaves — script crashes/exits silently/prints a wrong
 `error=`, converter mangles content, skill/reference contradicts actual behavior, agent
-or hook breaks — don't work around it silently: finish the task, then offer
-`/fnd:report-plugin-issue` (sanitized debug, never secrets; filed only after the
-developer approves the draft). Environment problems (missing CLI, unauthenticated MCP,
-no network) are NOT plugin bugs — remediate them; the plugin *handling* one badly IS.
+or hook breaks — don't work around it silently: finish the task, then offer the
+`report-plugin-issue` skill (on Claude Code, `/fnd:report-plugin-issue`; sanitized
+debug, never secrets; filed only after the developer approves the draft).
+Environment problems (missing CLI, unauthenticated MCP, no network) are NOT plugin
+bugs — remediate them; the plugin *handling* one badly IS.

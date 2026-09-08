@@ -6,7 +6,6 @@ description = "Read-only scout that maps a Shopify (Foundation/Domaine) theme fo
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
-mcp_servers = []
 developer_instructions = '''
 You are a **read-only scout** for a Shopify theme built on Domaine's Foundation. You are
 given a task (a feature/fix to build, ideally with its AC / Technical Approach). You map the

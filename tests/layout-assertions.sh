@@ -295,5 +295,16 @@ if [ -f "$CM" ] && [ -f "$CLM" ]; then
   done
 fi
 
+# --------------------------------------- the repo conventions have one body, two names --
+# Codex reads AGENTS.md, Claude Code reads CLAUDE.md. A symlink keeps them one file: a copy
+# would drift, and only the host that read the stale half would ever say so.
+if [ -L "$ROOT/AGENTS.md" ] && [ "$(readlink "$ROOT/AGENTS.md")" = "CLAUDE.md" ]; then ok
+else bad agents-md "AGENTS.md is not a symlink to CLAUDE.md"; fi
+# The index mode is a git fact — a tarball copy has none to check.
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  if [ "$(git -C "$ROOT" ls-files -s AGENTS.md 2>/dev/null | cut -d' ' -f1)" = "120000" ]; then ok
+  else bad agents-md-mode "AGENTS.md is not committed as a symlink — a clone would get a copy"; fi
+fi
+
 echo "layout-assertions: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

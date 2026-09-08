@@ -6,7 +6,6 @@ description = "Adversarial correctness review of a branch's diff — hunts real 
 model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "read-only"
-mcp_servers = []
 developer_instructions = '''
 You are the Foundation **bug hunter** for a Shopify theme repo. Your one job: find where
 the branch's changes BREAK — not style, not comments, not conventions (`change-reviewer`

@@ -169,6 +169,10 @@ The subagent half is a live-checkout install (symlink into `~/.codex/agents/`), 
   only grow context) and forwards the **spill-and-stub** half as `additionalContext`: the spill
   path, the shape hint and the `json-slim` command to run on it. With `FND_MCP_SLIM=1` you get
   whale offloading here, never compression.
+- **The context monitor reads Codex's own numbers.** It takes the live figure from the rollout's
+  last `token_count` event and the window that event states; when the rollout states no window it
+  says nothing at all rather than report a percentage against a Claude-sized one — set
+  `FND_CTX_WINDOW=<tokens>` if you want a readout regardless.
 - **Skills are invoked with `$name`**, and implicitly by description like everywhere else.
   `~/.codex/prompts` custom prompts are deprecated upstream — nothing in fnd builds on them.
 - **Hooks do not exist on Windows.** Skills, MCP and subagents work; the guard layer does not.
@@ -177,8 +181,10 @@ The subagent half is a live-checkout install (symlink into `~/.codex/agents/`), 
 - **The MCP list is carried as-is** into `plugins/fnd/mcp-codex.json` — except the
   SSE→streamable-HTTP rewrite for `figma-dev-mode` (deliberately *not* `.mcp.json`: Claude Code
   reads that name as one of its own plugin components, so a Codex-only edit would change what
-  Claude Code loads). No tool-count cap is documented, so all six servers ship. Codex ships **no
-  SSE client** (measured 2026-08-23), so `figma-dev-mode` is pointed at Figma's streamable
+  Claude Code loads). No tool-count cap is documented, so all six servers ship, and every
+  subagent inherits that list — Codex has no per-agent server scoping, so no
+  `agents-codex/*.toml` names servers at all. Codex ships **no SSE client**
+  (measured 2026-08-23), so `figma-dev-mode` is pointed at Figma's streamable
   endpoint `http://127.0.0.1:3845/mcp` instead of `/sse`. If your Figma build serves only `/sse`,
   drop the server from `mcp-codex.json` and add it per-user:
   `codex mcp add figma-dev-mode --url http://127.0.0.1:3845/mcp`.

@@ -9,7 +9,7 @@
 #             spawning — one command serves both halves), node failure never fails the hook
 #   C cases — hooks/context-stats.cjs against transcript fixtures: synthetic
 #             (API-error) entries skipped, FND_CTX_WARN=0 honored, >100%
-#             window-override hint
+#             window-override hint, Codex rollouts read as themselves
 #   M cases — plugin.json PostToolUse gate (FND_MCP_SLIM) + hooks/mcp-slim.cjs:
 #             big result compressed with a real full= spill, error/small results
 #             and unrecognized shapes pass through, node never spawns when disabled;
@@ -355,6 +355,14 @@ assert_contains C9-warn-entry "$out" "additionalContext"
 # stop the spawn. C0 is the positive control: the same input speaks when the switch is unset.
 assert_eq       C10-off-in-process "$(run_ctx "$TMP/t0.jsonl" "c10-$$" FND_CTX_MONITOR=0)" ""
 assert_contains C10-on-speaks      "$(run_ctx "$TMP/t0.jsonl" "c10b-$$")" "Context"
+
+# C11: a Codex rollout must not fall through the Claude branch — its `last_token_usage` keys read
+# nothing like an assistant `usage` entry, so a Claude-shaped read would report a bogus figure
+# against a Claude-family window.
+printf '%s\n' '{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2030247,"output_tokens":15510,"total_tokens":2045757},"last_token_usage":{"input_tokens":151541,"cached_input_tokens":148864,"output_tokens":119,"total_tokens":151660},"model_context_window":258400}}}' > "$TMP/t5.jsonl"
+out="$(run_ctx "$TMP/t5.jsonl" "c11-$$")"
+assert_contains C11-codex-window "$out" "151.7k/258k"
+assert_absent   C11-no-claude    "$out" "claude"
 
 # ═══ M — PostToolUse mcp-slim (result compressor) ═══════════════════════════
 # Gate (FND_MCP_SLIM) tested via the extracted plugin.json command + node shim;

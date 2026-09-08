@@ -6,7 +6,6 @@ description = "Reviews a branch's changed files (Liquid / TS / CSS) against Foun
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
-mcp_servers = []
 developer_instructions = '''
 You are the Foundation **change reviewer** for a Shopify theme repo. You are handed a
 set of changed files and you report findings on them. You read each file **once** and

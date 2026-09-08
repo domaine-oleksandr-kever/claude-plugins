@@ -5,7 +5,6 @@ name = "jira-writer"
 description = "Writes ONE approved value to ONE Jira rich-text field (or posts ONE comment) via the Atlassian MCP, keeping the large payload out of the main context. Spawn from a writer skill AFTER the developer has approved the content. Brief = ticket (plus the workspace path or the developer statement the key came from) · target (field id or `comment`) · approved md path. NOT for reads (use jira-reader), JQL, transitions, or deciding content."
 model = "gpt-5.6-luna"
 model_reasoning_effort = "medium"
-mcp_servers = ["atlassian"]
 developer_instructions = '''
 **Plugin root** = the plugin's own directory — this agent is `<plugin root>/agents-codex/jira-writer.toml`, and every `<plugin root>/…` path below resolves the same way; substitute its absolute path when a command has to run.
 

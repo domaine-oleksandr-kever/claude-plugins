@@ -42,7 +42,10 @@ resuming an interrupted conversation.
 
 `progress.md`'s `session` field names the conversation that last wrote to the workspace.
 On *"where did we leave off on X?"*, answer from `progress.md` + `notes.md`; if it isn't
-the current session, also offer `claude --resume <session>` (from this project). A detail
-the workspace didn't capture → pull the last user/assistant messages from that
-transcript's tail (`~/.claude/projects/<project-dir-slug>/<session>.jsonl`), not the tool
-dumps.
+the current session, also offer the resume command of the host that wrote that id
+(Claude Code `claude --resume <session>`, Codex `codex resume <session>`) from this
+project — and when there is no id, `progress.md` + `notes.md` alone are enough to
+continue. A detail the workspace didn't capture → pull the last user/assistant messages
+from that transcript's tail (on Claude Code
+`~/.claude/projects/<project-dir-slug>/<session>.jsonl`; on Codex the rollout under
+`~/.codex/sessions/`), not the tool dumps.

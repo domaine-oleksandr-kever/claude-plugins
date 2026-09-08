@@ -430,14 +430,48 @@ assert_contains U1-block "$out" '"decision":"block"'
 p="$(printf '%s' "$out" | jq -r '.reason' 2>/dev/null | grep -oE '/[^[:space:]]+fnd-prompt-json-[^[:space:]]+\.json' | head -1)"
 if [ -n "$p" ] && [ -f "$p" ] && cmp -s "$p" "$PJD/u1.json"; then ok; else bad U1-spill "blocked prompt's blob not spilled byte-exact (p='$p')"; fi
 
-# U2: the context monitor's channel is hookSpecificOutput.additionalContext — the shape Codex
-# documents for UserPromptSubmit.
-printf '%s\n' '{"message":{"model":"claude-fable-5","usage":{"input_tokens":50000,"cache_read_input_tokens":100000,"output_tokens":1000}},"isSidechain":false}' > "$TMP/t0.jsonl"
-in="$(jq -n --arg t "$TMP/t0.jsonl" --arg s "codex-u2-$$" '{transcript_path:$t,session_id:$s,prompt:"hi",cwd:"/tmp"}')"
+# U2: the context monitor reads a Codex rollout — `token_count` events, the live figure from
+# `last_token_usage`, the window Codex states, the model from the hook input. An `info: null`
+# event after the real one must not win it, nor a prose line that merely mentions "token_count".
+# The notice rides `systemMessage`, the band flag `hookSpecificOutput.additionalContext` — both
+# shapes Codex accepts on UserPromptSubmit.
+ctx_line() { # totalTokens [windowKey]
+  printf '{"timestamp":"2026-09-08T07:55:52.626Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2030247,"output_tokens":15510,"total_tokens":2045757},"last_token_usage":{"input_tokens":%s,"cached_input_tokens":148864,"output_tokens":119,"total_tokens":%s}%s}}}\n' \
+    "$1" "$1" "${2:+,\"model_context_window\":258400}"
+}
+{ ctx_line 90000 win
+  ctx_line 151660 win
+  printf '%s\n' '{"type":"event_msg","payload":{"type":"token_count","info":null}}'
+  printf '%s\n' '{"type":"response_item","payload":{"type":"message","content":[{"type":"input_text","text":"the \"token_count\" event is not this line"}]}}'; } > "$TMP/t0.jsonl"
+in="$(jq -n --arg t "$TMP/t0.jsonl" --arg s "codex-u2-$$" \
+  '{transcript_path:$t,session_id:$s,prompt:"hi",cwd:"/tmp",model:"gpt-5.6-codex"}')"
 out="$(run_prompt "$in" FND_CTX_WARN=0)"; ec=$?
 assert_eq       U2-exit    "$ec" 0
 assert_contains U2-ctx     "$out" "additionalContext"
-assert_contains U2-usage   "$out" "151.0k"
+assert_contains U2-usage   "$out" "151.7k/258k"
+assert_contains U2-model   "$out" "gpt-5.6-codex"
+
+# U2b: no window in the rollout and no override → silence. Guessing Claude's 200k default for a
+# GPT session would report a percentage that is simply wrong.
+ctx_line 151660 > "$TMP/t1.jsonl"
+in="$(jq -n --arg t "$TMP/t1.jsonl" --arg s "codex-u2b-$$" '{transcript_path:$t,session_id:$s,prompt:"hi",cwd:"/tmp"}')"
+out="$(run_prompt "$in" FND_CTX_WARN=0)"; ec=$?
+assert_eq U2b-exit  "$ec" 0
+assert_eq U2b-quiet "$out" ""
+
+# U2c: …unless the operator states the window.
+out="$(run_prompt "$in" FND_CTX_WARN=0 FND_CTX_WINDOW=200000)"; ec=$?
+assert_eq       U2c-exit  "$ec" 0
+assert_contains U2c-usage "$out" "151.7k/200k"
+
+# U2d: no `total_tokens` on the live figure → input + output; the window stated only on an
+# OLDER event still counts.
+{ ctx_line 90000 win
+  printf '%s\n' '{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":151541,"cached_input_tokens":148864,"output_tokens":119}}}}'; } > "$TMP/t2.jsonl"
+in="$(jq -n --arg t "$TMP/t2.jsonl" --arg s "codex-u2d-$" '{transcript_path:$t,session_id:$s,prompt:"hi",cwd:"/tmp"}')"
+out="$(run_prompt "$in" FND_CTX_WARN=0)"; ec=$?
+assert_eq       U2d-exit  "$ec" 0
+assert_contains U2d-usage "$out" "151.7k/258k"
 
 # U3: a plain prompt → nothing on stdout, exit 0 (no context spent on a quiet turn).
 in="$(jq -n --arg s "codex-u3-$$" '{prompt:"just a question",cwd:"/tmp",session_id:$s}')"

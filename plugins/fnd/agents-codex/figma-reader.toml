@@ -5,7 +5,6 @@ name = "figma-reader"
 description = "Reads ONE Figma frame/node via the Figma MCP and returns a compact build spec (sizes, spacing, tokens, structure), keeping the raw node tree out of the main context. One per Figma URL — they run in parallel; skip URLs already specced in the conversation. Writes `figma-<node-id>.md` itself when given the workspace path. Read-only toward Figma."
 model = "gpt-5.6-luna"
 model_reasoning_effort = "medium"
-mcp_servers = ["figma-dev-mode"]
 developer_instructions = '''
 **Plugin root** = the plugin's own directory — this agent is `<plugin root>/agents-codex/figma-reader.toml`, and every `<plugin root>/…` path below resolves the same way; substitute its absolute path when a command has to run.
 

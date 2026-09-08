@@ -23,8 +23,9 @@
 #      list is read from skills/*/ so a new skill is covered the day it lands. A path segment
 #      (`<plugin root>/skills/create-pull-request/…`, `references/commit-message-format.md`) is
 #      not an invocation — the surrounding character classes exclude it.
-# Scope: plugins/fnd/references/*.md plus every skills/*/REFERENCE.md (same audience, same rules;
-# SKILL.md bodies belong to skill-neutral-lint.sh).
+# Scope: plugins/fnd/references/*.md, every skills/*/REFERENCE.md, and plugins/fnd/hooks/*.md —
+# the session conventions every host receives (Cursor's via rules/fnd-*.mdc, with the generator's
+# substitutions), so rules 1-3 and 5 bind them too (rule 4 does not: see its comment). SKILL.md bodies belong to skill-neutral-lint.sh.
 # Usage: reference-neutral-lint.sh [plugin-dir]   (default: plugins/fnd)
 # Exit 0 = references are host-neutral.
 set -u
@@ -97,11 +98,12 @@ REF_DIR="$PLUGIN_DIR/references"
 if [ -d "$REF_DIR" ]; then ok; else bad references-dir "not a directory: $REF_DIR"; fi
 
 found=0
-for f in "$REF_DIR"/*.md "$PLUGIN_DIR"/skills/*/REFERENCE.md; do
+for f in "$REF_DIR"/*.md "$PLUGIN_DIR"/skills/*/REFERENCE.md "$PLUGIN_DIR"/hooks/*.md; do
   [ -f "$f" ] || continue
   found=$((found + 1))
   case "$f" in
     */references/*) label="references/$(basename "$f")" ;;
+    */hooks/*) label="hooks/$(basename "$f")" ;;
     *) label="skills/$(basename "$(dirname "$f")")/$(basename "$f")" ;;
   esac
 
@@ -117,8 +119,10 @@ for f in "$REF_DIR"/*.md "$PLUGIN_DIR"/skills/*/REFERENCE.md; do
   # rule 5 — a bare `/<skill>` is the same slash command minus the prefix
   check_rule "$f" "$label" slash-skill "bare /<skill> invocation; name the skill instead"
 
-  # rule 4 — a file using the `<plugin root>` form defines it, for standalone readers
-  if grep -qF '<plugin root>/' "$f"; then
+  # rule 4 — a file using the `<plugin root>` form defines it, for standalone readers. Hook bodies
+  # are exempt: they are injected into a session that already announces the root, never opened alone.
+  if [ "${label#hooks/}" != "$label" ]; then :
+  elif grep -qF '<plugin root>/' "$f"; then
     # the anchor sentence often wraps, so match it against the whitespace-squashed file
     if tr '\n' ' ' < "$f" | tr -s ' ' |
        grep -qiE "plugin root[^.]{0,80}the plugin's own directory"; then ok

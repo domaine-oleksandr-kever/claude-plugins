@@ -142,4 +142,4 @@ cause: `- [x] ELC-301 — 2026-07-11, fixed: self-reference skipped in bundle re
   ticket that has a workspace, report where the series stands and offer the next unchecked step.
 - **Resuming a conversation:** `session` names the conversation that last wrote here —
   answer "where did we leave off?" from `progress.md` + `notes.md`; recovery mechanics
-  (`claude --resume`, transcript tail): `task-workspace-freshness.md` → Resuming.
+  (the host's resume command, transcript tail): `task-workspace-freshness.md` → Resuming.
