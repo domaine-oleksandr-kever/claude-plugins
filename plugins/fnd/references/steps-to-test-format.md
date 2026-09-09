@@ -20,7 +20,8 @@ this document, and two different QA engineers following it get identical results
 - **No absolute hosts** (`https://<store>.myshopify.com/…`) — relative paths only
   (`/products/group-lipglass`). If the store matters (fixtures live on one catalog), name
   it **once** in Setup. Never fork steps per store — `dev: X; UAT: Y` per step is banned;
-  write for the one store whose fixtures you name.
+  write for the one store whose fixtures you name — the QA engineer's store may still
+  differ, so catalog handles are examples, not requirements (see Fixtures).
 - **No document meta.** No title (the Jira field is already labeled), no summary paragraph
   restating the ticket, no revision history, no theory/rationale essays, no
   known-limitations walls. A needed operational fact ("validate with validator.schema.org,
@@ -55,10 +56,20 @@ Order and content:
    the definition must be pinned to show). List definitions as compact bullets
    (`owner · namespace.key · type · value`).
 3. **Fixtures (store-wide).** Name every entity by **handle/exact value** and the property
-   that makes it right: `Product with shades: /products/studio-fix-fluid (40+ shades, in
-   stock)`, `Empty-state product: /products/lip-pencil (no metafield value)`, customer
-   email + tag/state. "Any product that…" is banned — if a fixture doesn't exist, Setup
-   says how to create it.
+   that makes it right: `Product with shades: e.g. /products/studio-fix-fluid (40+ shades, in
+   stock)`, `Empty-state product: e.g. /products/lip-pencil (no metafield value)`, customer
+   email + tag/state. A product / collection handle is a **suggested example** from the
+   catalog the change was built against; the **properties are the requirement** — the QA
+   engineer's store (a different store of the same brand, or one the writer never saw)
+   may not carry that handle. So every catalog handle is prefixed `e.g.` and carries the
+   properties a stand-in must share (variant/shade count, stock, metafield set or empty,
+   tags, price band, template) — enough to pick one without asking. Setup states the
+   substitution rule once, right after the first handle: `Handles are examples from the
+   dev catalog — if one is missing on your store, use any product with the same
+   properties and note which one you used.` A bare `/products/foo` with no properties is
+   banned, as is "any product that…" with no example. If no product with those properties
+   can exist on the store, Setup says how to create it. Non-catalog entities (metaobject
+   entries, metafield keys, templates) are exact, not examples — Setup creates them.
 4. **Theme settings (per-theme).** Exact path with labels verbatim:
    `Theme settings > Cart > Cart type → Drawer → Save`. Note the default so the QA engineer can
    restore it.
@@ -75,9 +86,9 @@ Order and content:
    or the preview bar "View as", not the storefront country selector), customer state
    (log in as the named fixture), incognito window, viewport.
 
-Close with: `✅ Checkpoint: <what the QA engineer sees now, e.g. "the PDP for
-/products/studio-fix-fluid shows a Comparison table with 7 rows">. If not, stop and
-recheck step <n>.`
+Close with: `✅ Checkpoint: <what the QA engineer sees now, e.g. "the PDP of the
+shades product (e.g. /products/studio-fix-fluid) shows a Comparison table with 7 rows">.
+If not, stop and recheck step <n>.`
 
 ## Scenario rules
 
@@ -96,7 +107,13 @@ recheck step <n>.`
 - **No conditionals or hedges in steps** — no "if present", "if available", "roughly",
   "approximately", "skip if". A condition either moves to Setup (make the state exist) or
   the scenario is dropped. Never restate setup inside scenarios — reference it
-  ("as the member customer from Setup").
+  ("as the member customer from Setup"). Scenarios refer to catalog fixtures by their
+  Setup **role** (`Open the PDP of the shades product from Setup`), not by handle — the
+  handle is an example that may not exist on the QA store; the substitution rule lives in
+  Setup only, never per step. Expected values that depend on the catalog entity (a
+  price, a shade count, a title) are given for the example product with the property
+  they derive from (`**Expected:** 40 swatches — one per shade`), so a stand-in product
+  still has a checkable outcome.
 - **Edge cases:** ≤ 4, only ones the named fixtures can actually reach.
 - **A11y / responsive / performance:** only what the AC or the diff actually changed, as
   1–2 concrete steps inside a scenario (`Tab to the CTA. **Expected:** visible focus ring;
@@ -120,7 +137,9 @@ ADF write path flattens tables anyway.
 ```markdown
 **Setup** — do all of this once, before the scenarios.
 1. Open your own unpublished theme in the theme editor (Online Store > Themes > Customize).
-2. (store-wide) <data / fixtures — named handles, metafield defs + example values>
+2. (store-wide) <metafield defs + example values; fixtures — role: e.g. handle (properties
+   that make it right)>. Handles are examples from the dev catalog — if one is missing on
+   your store, use any product with the same properties and note which one you used.
 3. (per-theme) <theme settings → template > Add section > … > Save>
 ✅ Checkpoint: <observable result>. If not, stop and recheck step <n>.
 
@@ -151,6 +170,9 @@ fix, so **never instruct reproducing on an unfixed theme** — annotate instead:
 
 - Every AC has a scenario; every entity a scenario touches appears in Setup with a handle
   or exact value.
+- Every catalog handle in Setup is prefixed `e.g.` and carries the properties a stand-in
+  must share; the substitution rule is stated once in Setup; no scenario step names a
+  handle directly.
 - Setup ends with a ✅ Checkpoint that its own steps actually produce.
 - Within the size budget and step caps — prose trimmed, coverage intact.
 - No banned content: preview themes, absolute hosts, passwords, per-store forks, titles,

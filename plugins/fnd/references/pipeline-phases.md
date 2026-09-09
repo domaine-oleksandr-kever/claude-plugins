@@ -127,7 +127,9 @@ its brief says otherwise.
 5. **steps-to-test** — agent; fills the bot wait. Write per
    `<plugin root>/references/steps-to-test-format.md` from the AC + the branch
    diff (the format's setup inventory — sections/blocks/settings/metafields the QA engineer
-   must configure) + `qa.md` + `notes.md` repro values; save `steps-to-test.md`; policy allows → write the field via
+   must configure) + `qa.md` + `notes.md` repro values (catalog handles as `e.g.` examples
+   with the properties a stand-in must share — the QA store may not carry them); save
+   `steps-to-test.md`; policy allows → write the field via
    `node "<plugin root>/scripts/md-to-adf.cjs" --no-tables` + `editJiraIssue` on the
    workspace `ticket.md` key (`<plugin root>/references/jira-adf-write.md`).
 6. **aftercare** — `gh pr checks --watch`; a failing check → diagnose → fix agent → refresh
