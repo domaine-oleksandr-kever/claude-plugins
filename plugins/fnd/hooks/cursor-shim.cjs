@@ -250,15 +250,22 @@ function beforeSubmitPrompt(payload) {
   if (!decision) return null;
 
   // A guard block ERASES the prompt: `reason` is developer-facing (it names the files the
-  // pasted JSON was spilled to, which the developer has to re-reference), so it rides
-  // userMessage, never the model's context.
+  // pasted JSON was spilled to, which the developer has to re-reference), so it rides the
+  // user-message channel, never the model's context. BOTH key spellings for the same reason
+  // the deny path emits both: the docs schema is `user_message`, the camelCase alias is what
+  // the shell event documents, and an ignored key costs nothing while a wrong guess drops the
+  // only copy of the spill path.
   if (decision.decision === 'block') {
-    return { continue: false, userMessage: String(decision.reason || '') };
+    const reason = String(decision.reason || '');
+    return { continue: false, userMessage: reason, user_message: reason };
   }
   const out = {};
   const extra = decision.hookSpecificOutput && decision.hookSpecificOutput.additionalContext;
   if (extra) out.additional_context = String(extra);
-  if (decision.systemMessage) out.userMessage = String(decision.systemMessage);
+  if (decision.systemMessage) {
+    out.userMessage = String(decision.systemMessage);
+    out.user_message = out.userMessage;
+  }
   return Object.keys(out).length ? out : null;
 }
 

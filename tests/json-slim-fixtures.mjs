@@ -3668,6 +3668,55 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     'the header must say how many of its events are spill reads');
 }
 
+// ==================== `delivery` in `--report`: what the HOST did with a shrunk result (I1) ==
+// hooks/mcp-slim.cjs writes its debug record before any host adapter has decided what to do with the
+// result, so the record carries the host's delivery contract: `replace` (the default, and absent from
+// every line written before the field), `discard` (a compressed body a host that cannot rewrite a tool
+// result dropped) and `additional` (a stub forwarded as extra context BESIDE the raw result). Only
+// `replace` saved anything — the live Codex bug this pins reported "79.8% saved" for a dropped body.
+{
+  const ev = (extra) => JSON.stringify({ ts: '2026-09-08T10:00:00.000Z', project: 'elc', lvl: 2, entry: 'hook', tool: 'mcp__a__x', decision: 'compressed', reason: null, bytes_in: 19230, bytes_out: 3888, pct: 79.8, stages: ['noise'], spill: null, ...extra });
+
+  const replace = J.buildReport([ev({ delivery: 'replace' })], { file: '/x.log' });
+  check('i1-replace-is-a-real-saving', /totals: 19230 → 3888 B \(79\.8% saved\)/.test(replace)
+    && /15342 B over 1 call — mcp__a__x/.test(replace) && !/delivery:/.test(replace),
+    `a replaced result saves its bytes, and a log with nothing else in it grows no new line:\n${replace}`);
+
+  // Backward compatibility: the field is younger than the log, and a missing one means `replace`.
+  check('i1-missing-field-is-replace', J.buildReport([ev()], { file: '/x.log' }) === replace,
+    'a line written before the `delivery` field must report exactly what it always did');
+
+  const discard = J.buildReport([ev({ delivery: 'discard', host: 'codex' })], { file: '/x.log' });
+  check('i1-discard-saves-nothing', /totals: 19230 → 19230 B \(0\.0% saved\)/.test(discard)
+    && /delivery: discard 1/.test(discard) && /\(no hook compressions\)/.test(discard)
+    && /elc: 1 event, 0 B saved/.test(discard),
+    `a body the host dropped saved nothing — totals, ranking and project subtotal alike:\n${discard}`);
+  check('i1-discard-keeps-the-decision', /decisions: compressed 1/.test(discard),
+    `the compressor still DECIDED to compress; only the delivery line says it never landed:\n${discard}`);
+
+  // The stub rode back BESIDE the raw result, so the context grew by what the host could FORWARD —
+  // `delivered`, the marked stub texts, not the whole emitted envelope: a per-block stub also carries
+  // the compressed siblings such a host drops (measured 22,007 B emitted for 1,224 B delivered).
+  const stub = (extra) => ev({ decision: 'stubbed', reason: 'non-json', bytes_in: 40039, bytes_out: 22007, delivery: 'additional', host: 'codex', ...extra });
+  const additional = J.buildReport([stub({ delivered: 1224 })], { file: '/x.log' });
+  check('i1-additional-adds-what-landed', /totals: 40039 → 41263 B/.test(additional)
+    && /delivery: additional 1/.test(additional) && /elc: 1 event, 0 B saved/.test(additional),
+    `a stub delivered as extra context is an addition of its DELIVERED bytes, never a saving:\n${additional}`);
+
+  // Without the field (a line older than it, or a value that is not a byte count) the envelope is the
+  // only figure there is — the pre-`delivered` reading, kept as the fallback rather than dropped to 0.
+  for (const [name, e] of [['missing', stub({})], ['junk', stub({ delivered: 'lots' })], ['negative', stub({ delivered: -5 })]]) {
+    check(`i1-additional-fallback-${name}`, /totals: 40039 → 62046 B/.test(J.buildReport([e], { file: '/x.log' })),
+      'a delivered figure that is not a byte count falls back to bytes_out, never to a free addition');
+  }
+
+  // Mixed hosts in one log (the file is per USER): each event is counted on its own delivery.
+  const mixed = J.buildReport([ev({ delivery: 'replace' }), ev({ delivery: 'discard' }), ev()], { file: '/x.log' });
+  check('i1-mixed-hosts', /totals: 57690 → 27006 B/.test(mixed) && /delivery: replace 2 · discard 1/.test(mixed)
+    && /30684 B over 3 calls — mcp__a__x/.test(mixed),
+    `two delivered + one dropped: two savings over three calls:\n${mixed}`);
+}
+
 // ============================================== spill privacy: wx + 0600 tmp, 0700 spill dir ==
 // The final spill name is a content HASH, so `<final>.tmp-<pid>` is predictable: a plain write there
 // followed a planted symlink into a foreign file, and the payload (whole MCP results — tokens, PII)

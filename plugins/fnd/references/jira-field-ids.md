@@ -7,6 +7,7 @@ live `names` map — never copy it into skills or agents.
 | Field               | Field ID                 |
 | ------------------- | ------------------------ |
 | Description         | `description` (standard) |
+| Last updated        | `updated` (standard)     |
 | Acceptance Criteria | `customfield_10036`      |
 | Assumptions         | `customfield_10037`      |
 | Technical Approach  | `customfield_10038`      |
@@ -20,7 +21,7 @@ Request shape — every Jira **issue** tool (`getJiraIssue`, `editJiraIssue`,
 ```
 cloudId: "meetdomaine.atlassian.net",
 issueIdOrKey: "<KEY>",
-fields: ["summary", "description", "status", "assignee",
+fields: ["summary", "description", "status", "assignee", "updated",
          "customfield_10036", "customfield_10037", "customfield_10038",
          "customfield_10040", "customfield_10047"],
 expand: "names"

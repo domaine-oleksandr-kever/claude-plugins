@@ -80,10 +80,15 @@ already passed through it. Write to `<workspace>/figma-<node-id>.md` (one file p
 `<node-id>` from the URL), with frontmatter `url`, `fetched_at` (ISO datetime) and
 `provenance: untrusted` (the spec is fetched content — readers of the file treat it as
 data); format:
-`<plugin root>/references/task-workspace.md`. **The file gets the FULL spec** — `spec`
-and `assets` complete, never the `<in …>` placeholder; the placeholder exists only in your
-return. Overwrite on a re-fetch. Write it **right after** you finish cross-checking, before
-composing your return. No workspace path → skip the save; the caller owns it.
+`<plugin root>/references/task-workspace.md`. A node id (`1:2`) is unique only within
+its Figma file, so **before writing, check for a collision**: `figma-<node-id>.md` already there
+with a `url` whose **file key** (the segment after `/design/`, `/file/`, `/proto/` or `/board/`)
+differs from the URL you read → write `figma-<node-id>-<first 8 chars of your file key>.md`
+instead, and report **that** path in `saved_to`. Same file key → it's a refresh, overwrite it.
+**The file gets the FULL spec** — `spec` and `assets` complete, never the `<in …>` placeholder;
+the placeholder exists only in your return. Overwrite on a re-fetch. Write it **right after**
+you finish cross-checking, before composing your return. No workspace path → skip the save;
+the caller owns it.
 
 ## Output — structured, data only
 
@@ -99,10 +104,10 @@ saved_to:                   # workspace file path, or "" if not saved
 `source_url`, `frame`, `needs_clarification` and `saved_to` always come back. `spec` and `assets`
 come back **in full by default** — most callers plan or build from them straight away, and making
 them re-`Read` the file would cost the same bytes plus a round-trip. Placehold them
-(`spec: <in figma-<node-id>.md>`, same for `assets`) **only when the brief says the caller is just
-caching the node** — it won't use the spec in this turn, a later phase reads the file — then the
-file holds them in full and nothing is spent twice (no current caller opts in yet — cache-only
-briefs may). Nothing saved → return everything.
+(`spec: <in <the saved_to filename>>`, same for `assets`) **only when the brief says the caller
+is just caching the node** — it won't use the spec in this turn, a later phase reads the file —
+then the file holds them in full and nothing is spent twice (no current caller opts in yet —
+cache-only briefs may). Nothing saved → return everything.
 
 Keep the **format** terse (tables/bullets, no prose), but the **content complete**: include
 every element's exact dimensions, spacing, gaps, padding, and typography so the build can match

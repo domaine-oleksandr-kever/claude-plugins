@@ -10,6 +10,10 @@
 //         `{content:[…],isError?}`. We MIRROR whatever shape arrives.
 //   out — `hookSpecificOutput.updatedToolOutput` (hookEventName `PostToolUse`) REPLACES
 //         the result. Print nothing → the original passes through untouched.
+//   arg — `--delivery=replace|additional`, set by the host adapter that spawns this hook (absent =
+//         `replace`; an unrecognised token is read as `additional`, the reading that cannot overstate).
+//         It changes nothing that is emitted — it names what the HOST does with the emission, and only
+//         the debug record's `delivery`/`delivered` fields read it (see deliveryOf, deliveredBytes).
 //
 // Safety rails (any doubt → emit nothing, original survives):
 //   - MCP error results (`isError:true`) and per-block error envelopes are never touched
@@ -109,6 +113,43 @@ function debugLevel() {
   const v = String(raw).trim();
   if (/^\d+$/.test(v) && Number(v) >= 2) return 2;
   return /^(1|true|yes|on)$/i.test(v) ? 1 : 0;
+}
+
+// The host's DELIVERY contract, from the adapter that spawned this hook (`--delivery=<mode>`; an argv
+// flag rather than an env var, because nothing outside our own two scripts ever sets it). `replace` —
+// the default, and what a host with no adapter does — means `updatedToolOutput` REPLACES the result, so
+// a compression is a real saving. `additional` (hooks/codex-mcp-shim.cjs) means the host can only ADD
+// context: the adapter forwards a stub as `additionalContext` and DROPS a compressed body, while the
+// raw result still stands. Nothing this hook emits changes with the mode — only what the debug record
+// says was DELIVERED, because a line reporting bytes the host threw away is a `--report` that
+// overstates the whole plugin (measured on Codex: 79.8 % "saved" on a result nobody replaced).
+const DELIVERY_FLAG = '--delivery=';
+const DELIVERY_MODES = new Set(['replace', 'additional']);
+const DELIVERY_MODE = (() => {
+  const arg = process.argv.slice(2).find((a) => a.startsWith(DELIVERY_FLAG));
+  if (!arg) return 'replace'; // no adapter → the default contract, and the field stays off the line
+  // A PRESENT but unrecognised token is an adapter bug (a typo, a mode this build predates), and the
+  // two readings of it are not equally safe: falling back to `replace` is exactly the accounting this
+  // flag exists to end — savings claimed for bytes nobody delivered, with every suite still green.
+  // The pessimistic reading can only UNDERSTATE, and it shows up as a `delivery:` line on a host that
+  // should have none, which is how the typo gets found.
+  const v = arg.slice(DELIVERY_FLAG.length).trim();
+  return DELIVERY_MODES.has(v) ? v : 'additional';
+})();
+// `host` rides along on those same lines and only there: FND_HOST has its own home in the host-proof
+// log (hooks/host-trace.cjs), so it is duplicated into this one where it explains the delivery.
+const HOST_TAG = String(process.env.FND_HOST || '').trim() || null;
+// What the host does with a `decision`'s result. null wherever the answer is "the same thing every host
+// does with it" — the default contract, and any decision that emitted nothing for the adapter to
+// forward — so the field is ABSENT from a replace-host line, which is how every log written before it
+// already reads (buildReport reads a missing field as `replace`), and off the passthrough lines that
+// are ~3/4 of a real week's log and would carry a value no report reads. The mapping mirrors the
+// adapter, which forwards a result carrying the stub mark and drops every other emission.
+function deliveryOf(decision) {
+  if (DELIVERY_MODE === 'replace') return null;
+  if (decision === 'stubbed') return 'additional';
+  if (decision === 'compressed') return 'discard';
+  return null;
 }
 
 // The TTL sweep's own gates, read without loading json-slim: the disable switch (parsed exactly like
@@ -286,6 +327,10 @@ const pctOf = (inB, outB) => (inB ? Math.round((1 - outB / inB) * 1000) / 10 : 0
 const STUB_BYTES_DEFAULT = 32768;
 const STUB_CAP = 1200; // the stub must never become the next context problem
 const STUB_TOOL_MAX = 80;
+// The opening token of every stub text, and the ONLY handle an `additional` host has on one: the
+// adapter walks the emitted value and keeps the strings carrying this (hooks/codex-mcp-shim.cjs).
+// Kept single-copy so the two cannot drift into a stub no adapter can find.
+const STUB_MARK = '<<fnd-mcp-slim stub>>';
 // Only these passthrough reasons stub. `error-shape` is verbatim by contract, `platform-overflow`
 // is already a tiny platform-spilled notice, and `transform-error` / `unrecognized-shape` mean we did
 // not understand the payload — hand those back untouched rather than invent a shape for them.
@@ -386,14 +431,14 @@ function stubText(tool, bytes, format, hint, file, reason, perBlock) {
   // whole result — the other blocks came back in place and are still in context.
   const what = perBlock ? "this block's FULL text was written" : 'the FULL original was written';
   const lines = reRunRedumps ? [
-    `<<fnd-mcp-slim stub>> ${who} returned ${bytes} B (format=${format}) — too large for context, and the compressor already ran on it and gained nothing, so ${what} to disk instead of being shown:`,
+    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context, and the compressor already ran on it and gained nothing, so ${what} to disk instead of being shown:`,
     `full=${file}`,
     'Do NOT re-run the compressor over the whole file (it would print the same bytes back) and never raw-Read it. Narrow instead:',
     `  node ${SLIM_CLI} ${file} --jq '<jq-path>'   — ${jsonSlim().JQ_GRAMMAR_HINT}`,
     'For anything a sub-path cannot answer: grep the file, or Read it windowed (offset/limit).',
     sampleLine(hint),
   ] : [
-    `<<fnd-mcp-slim stub>> ${who} returned ${bytes} B (format=${format}) — too large for context and not compressible here, so ${what} to disk instead of being shown:`,
+    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context and not compressible here, so ${what} to disk instead of being shown:`,
     `full=${file}`,
     'Compress or inspect it — never raw-Read a whale:',
     `  node ${SLIM_CLI} ${file}`,
@@ -578,6 +623,19 @@ function emittedStrings(value) {
   return out;
 }
 
+// How many bytes of an emitted stub result an `additional` host can actually FORWARD: the texts
+// carrying STUB_MARK, which is precisely hooks/codex-mcp-shim.cjs's own selection (it walks the value
+// the same way and keeps the marked strings). Only that mode needs the figure — under `replace` the
+// whole emission lands — and only the per-block route makes it differ from bytes_out: that envelope
+// also holds the COMPRESSED sibling blocks the adapter drops, so charging bytes_out to context
+// overstated a real 3-block stub 18-fold (28,851 B logged, 1,153 B forwarded). null ⇒ no field.
+function deliveredBytes(value) {
+  if (DELIVERY_MODE !== 'additional') return null;
+  let n = 0;
+  for (const s of emittedStrings(value)) if (s.includes(STUB_MARK)) n += Buffer.byteLength(s, 'utf8');
+  return n;
+}
+
 // Is this spill path still named by something we emitted? An OCCURRENCE test, deliberately not a parse
 // of the `full=`/`ids=` handle tokens: a handle is delimited by whitespace, so any path holding a SPACE
 // ("Application Support", a macOS volume name) parsed as a truncated prefix, missed its own file, and
@@ -638,10 +696,13 @@ function run(raw) {
   // writing the result. `decision` is `compressed` or `stubbed` iff we emitted updatedToolOutput.
   // `spill` stays the ONE handback path the model was given (`--report` pairs missed whales on it);
   // `spills` is the full inventory, which is what makes an orphaned crush spill visible in the log.
-  const trace = (decision, reason, bytesIn, bytesOut, stages, spill, format) => {
+  const trace = (decision, reason, bytesIn, bytesOut, stages, spill, format, delivered) => {
     if (!dbg) return;
+    const delivery = deliveryOf(decision);
     jsonSlim().debugLog({
       entry: 'hook', tool, decision, reason: reason || null,
+      // What the host did with it, and — where it can only ADD — how much of the emission it can carry.
+      ...(delivery ? { delivery, ...(delivered == null ? {} : { delivered }), ...(HOST_TAG ? { host: HOST_TAG } : {}) } : {}),
       ...(format ? { format } : {}), // M8: only the non-json passthrough carries a format tag
       ...(budgetPartial ? { budget_partial: true } : {}), // B4.8: a mid-array expiry, invisible otherwise
       bytes_in: bytesIn, bytes_out: bytesOut, pct: pctOf(bytesIn, bytesOut),
@@ -711,7 +772,7 @@ function run(raw) {
     emit(s.value);
     hostDecision = 'stub';
     dropCreated(s.value);
-    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(s.value), stages, s.spill, s.format);
+    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(s.value), stages, s.spill, s.format, deliveredBytes(s.value));
     return true;
   };
 
@@ -734,7 +795,7 @@ function run(raw) {
     emit(out);
     hostDecision = 'stub';
     dropCreated(out);
-    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(out), stages, s.spill, s.format);
+    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(out), stages, s.spill, s.format, deliveredBytes(out));
     return true;
   };
 

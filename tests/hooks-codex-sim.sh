@@ -41,7 +41,9 @@
 #             result dropped (Codex cannot rewrite tool output — re-injecting the compressed
 #             body would GROW context), the rails (error shape, small result, malformed stdin,
 #             a broken mcp-slim, a HUNG one bounded by the spawn timeout) all silent, and
-#             __dirname resolution that ignores a wrong plugin-root env.
+#             __dirname resolution that ignores a wrong plugin-root env — plus M10/M11, the
+#             delivery accounting: the shim tells the child this host's contract, so the debug
+#             record (and `--report`) counts what was DELIVERED, not what the compressor achieved.
 #
 # PROTOCOL ASSUMPTIONS recorded here because JSON carries no comments (all → verify at M1b):
 #   - hooks-codex.json is a {description, hooks: <event map>} envelope — MEASURED at M1b
@@ -847,6 +849,86 @@ if [ "$el" -lt 8 ]; then ok; else bad M9-hang-bounded "the hook waited ${el}s on
 printf 'var c=[];process.stdin.on("data",function(d){c.push(d)});process.stdin.on("end",function(){process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",updatedToolOutput:{content:[{type:"text",text:"<<fnd-mcp-slim stub>> full=/dev/null"}]}}}))});\n' > "$hang/mcp-slim.cjs"
 ctx="$(printf '%s' "$in" | node "$hang/codex-mcp-shim.cjs" 2>/dev/null | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)"
 assert_contains M9b-fast-child "$ctx" "<<fnd-mcp-slim stub>>"
+
+# M10–M11: DELIVERY accounting. mcp-slim writes its debug record BEFORE this adapter has decided
+# anything, so the shim hands it this host's contract (`--delivery=additional`) and the record says what
+# was delivered, not merely what the compressor achieved. Without it `--report` read a dropped body as a
+# saving (measured: "79.8% saved" for a call that put nothing in front of the model).
+DBGLOG="fnd-mcp-slim-debug.log"
+REPORT() { node "$PLUG/scripts/json-slim.cjs" --report "$1" 2>/dev/null; }
+run_ptu_dbg() { # dir input-json [VAR=val…]
+  local d="$1" i="$2"; shift 2
+  printf '%s' "$i" | env CLAUDE_PLUGIN_ROOT="$PLUG" FND_MCP_SLIM_DIR="$d" FND_MCP_SLIM_DEBUG=2 "$@" bash -c "$PTU_CMD" 2>/dev/null
+}
+# The `delivered` field claims to measure what this adapter can FORWARD, so it is checked against the
+# additionalContext the run actually printed: the fixed header (~220 B) is the only slack between them.
+near_ctx() { local c; c="$(printf '%s' "$1" | wc -c | tr -d " ")"
+  if [ "$c" -ge "$2" ] && [ $(( c - $2 )) -le 400 ]; then echo yes; else echo "context $c B vs delivered $2 B"; fi; }
+
+# M10: a compressed body the adapter drops (M4) → decision `compressed`, delivery `discard`, and a
+# report that credits it with nothing.
+D1="$TMP/mcp-dbg-discard"; mkdir -p "$D1"
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}')"
+assert_eq M10-silent   "$(run_ptu_dbg "$D1" "$in" FND_MCP_SLIM_STUB=0)" ""
+assert_eq M10-decision "$(jq -r '.decision' "$D1/$DBGLOG" 2>/dev/null)" "compressed"
+assert_eq M10-delivery "$(jq -r '.delivery' "$D1/$DBGLOG" 2>/dev/null)" "discard"
+assert_eq M10-host     "$(jq -r '.host'     "$D1/$DBGLOG" 2>/dev/null)" "codex"
+bi="$(jq -r '.bytes_in' "$D1/$DBGLOG" 2>/dev/null)"
+rep="$(REPORT "$D1/$DBGLOG")"
+assert_contains M10-report-zero   "$rep" "totals: $bi → $bi B (0.0% saved)"
+assert_contains M10-report-line   "$rep" "delivery: discard 1"
+assert_contains M10-report-unranked "$rep" "(no hook compressions)"
+
+# M10b: the flag is the ONLY thing that moves the accounting — the same child, run the Claude way,
+# writes no `delivery` field and its saving is real there.
+D2="$TMP/mcp-dbg-replace"; mkdir -p "$D2"
+printf '%s' "$in" | env FND_MCP_SLIM_DIR="$D2" FND_MCP_SLIM_DEBUG=2 FND_MCP_SLIM_STUB=0 node "$PLUG/hooks/mcp-slim.cjs" >/dev/null 2>&1
+assert_eq     M10b-no-field "$(jq -r '.delivery // "absent"' "$D2/$DBGLOG" 2>/dev/null)" "absent"
+rep="$(REPORT "$D2/$DBGLOG")"
+assert_absent M10b-no-line  "$rep" "delivery:"
+assert_absent M10b-real-gain "$rep" "(0.0% saved)"
+
+# M10c: an adapter that mis-spells the flag (`discard` is a per-decision OUTCOME, never a mode) must not
+# land back on the default contract — that is the overstated accounting this whole flag removes, and it
+# would pass every suite silently. An unrecognised token reads as `additional`, which can only understate.
+D2b="$TMP/mcp-dbg-badflag"; mkdir -p "$D2b"
+printf '%s' "$in" | env FND_MCP_SLIM_DIR="$D2b" FND_MCP_SLIM_DEBUG=2 FND_MCP_SLIM_STUB=0 \
+  node "$PLUG/hooks/mcp-slim.cjs" --delivery=discard >/dev/null 2>&1
+assert_eq M10c-not-replace "$(jq -r '.delivery // "absent"' "$D2b/$DBGLOG" 2>/dev/null)" "discard"
+assert_contains M10c-report-zero "$(REPORT "$D2b/$DBGLOG")" "(0.0% saved)"
+
+# M11: a stub the adapter forwards as additionalContext → delivery `additional`, and the report counts
+# the DELIVERED bytes as an ADDITION (the raw result still stands beside them), never as a saving. The
+# delivered figure is the child's own measure of the stub texts — the same selection this adapter makes —
+# not bytes_out, which is the whole emitted envelope (M11b is the case where the two diverge).
+D3="$TMP/mcp-dbg-additional"; mkdir -p "$D3"
+in="$(jq -n --arg t "$WHALE" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+ctx="$(run_ptu_dbg "$D3" "$in" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)"
+assert_contains M11-context  "$ctx" "<<fnd-mcp-slim stub>>"
+assert_eq       M11-decision "$(jq -r '.decision' "$D3/$DBGLOG" 2>/dev/null)" "stubbed"
+assert_eq       M11-delivery "$(jq -r '.delivery' "$D3/$DBGLOG" 2>/dev/null)" "additional"
+bi="$(jq -r '.bytes_in' "$D3/$DBGLOG" 2>/dev/null)"; dv="$(jq -r '.delivered' "$D3/$DBGLOG" 2>/dev/null)"
+rep="$(REPORT "$D3/$DBGLOG")"
+assert_contains M11-report-added "$rep" "totals: $bi → $((bi + dv)) B"
+assert_contains M11-report-line  "$rep" "delivery: additional 1"
+assert_contains M11-report-unranked "$rep" "(no hook compressions)"
+# …and the figure is the context this run actually printed, bar the adapter's fixed header.
+assert_eq M11-tracks-context "$(near_ctx "$ctx" "$dv")" yes
+
+# M11b: the multi-block route (a rich block declines the single stub → blockStubs), where bytes_out and
+# what this adapter can deliver DIVERGE: the envelope also carries the COMPRESSED sibling blocks, which
+# are dropped here. Charging those to context reported a 13 % context COST for a guard that spent ~0.7 %.
+D4="$TMP/mcp-dbg-additional-blocks"; mkdir -p "$D4"
+rows="$(jq -nc '[range(300)|{id:.,label:("row "+(.|tostring)),avatarUrl:("https://cdn.example.com/"+("a"*80)),empty:null}]|tojson')"
+in="$(jq -n --arg t "$WHALE" --argjson r "$rows" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t,annotations:{audience:["user"]}},{type:"text",text:$r},{type:"text",text:$r}]}}')"
+ctx="$(run_ptu_dbg "$D4" "$in" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)"
+assert_contains M11b-context  "$ctx" "<<fnd-mcp-slim stub>>"
+assert_eq       M11b-delivery "$(jq -r '.delivery' "$D4/$DBGLOG" 2>/dev/null)" "additional"
+bi="$(jq -r '.bytes_in' "$D4/$DBGLOG" 2>/dev/null)"; bo="$(jq -r '.bytes_out' "$D4/$DBGLOG" 2>/dev/null)"
+dv="$(jq -r '.delivered' "$D4/$DBGLOG" 2>/dev/null)"
+assert_eq M11b-envelope-is-bigger "$([ "$dv" -lt $(( bo / 5 )) ] && echo yes || echo "delivered $dv B of $bo B emitted")" yes
+assert_contains M11b-report-added "$(REPORT "$D4/$DBGLOG")" "totals: $bi → $((bi + dv)) B"
+assert_eq M11b-tracks-context "$(near_ctx "$ctx" "$dv")" yes
 
 echo "hooks-codex wiring sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then

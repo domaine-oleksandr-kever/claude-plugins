@@ -168,7 +168,12 @@ alone updates it — re-run the installer only to pick up added or renamed roles
   compressed body (Codex already delivered the full result — adding the compressed copy would
   only grow context) and forwards the **spill-and-stub** half as `additionalContext`: the spill
   path, the shape hint and the `json-slim` command to run on it. With `FND_MCP_SLIM=1` you get
-  whale offloading here, never compression.
+  whale offloading here, never compression. The debug log says so per event — the shim runs
+  `mcp-slim.cjs --delivery=additional`, so each line carries `delivery` (`discard` for a dropped
+  body, `additional` for a forwarded stub, plus `delivered` — the bytes of the stub texts this shim
+  can carry, which on a multi-block result is a fraction of the emitted envelope) and
+  `node json-slim.cjs --report` counts what this host actually delivered: a dropped body saves
+  nothing, and a forwarded stub is context ADDED beside the raw result.
 - **The context monitor reads Codex's own numbers.** It takes the live figure from the rollout's
   last `token_count` event and the window that event states; when the rollout states no window it
   says nothing at all rather than report a percentage against a Claude-sized one — set

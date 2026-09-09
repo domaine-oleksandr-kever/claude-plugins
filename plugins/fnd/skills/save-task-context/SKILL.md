@@ -32,7 +32,9 @@ already known; missing data is reported as a gap, not fetched.
      record `jira_updated` when the ticket's updated timestamp appeared in the conversation —
      without it every later freshness check degrades to a full re-read; if it never appeared,
      note that gap in the file; a field you never saw stays absent and is listed as a gap);
-   - Figma build specs → `figma-<node-id>.md`;
+   - Figma build specs → `figma-<node-id>.md` — unless one is already there for a
+     **different** Figma file (its `url` carries another file key), which takes
+     `figma-<node-id>-<first 8 chars of your file key>.md` instead;
    - an approved plan / QA checklist + report / Steps to Test produced this session →
      `plan.md` / `qa.md` / `steps-to-test.md`;
    - decisions, gotchas, and — per bug — root cause, fix summary, how it was verified → dated

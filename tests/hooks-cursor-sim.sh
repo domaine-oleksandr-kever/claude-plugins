@@ -13,8 +13,9 @@
 #             that became rules/*.mdc in M4 must NOT be injected a second time here; paths
 #             resolve from the shim's own location, not from a leaked *_PLUGIN_ROOT
 #   U cases — beforeSubmitPrompt → user-prompt.cjs: a large-JSON block becomes
-#             `continue:false` + a developer-facing userMessage naming the spilled file (never
-#             model context), an ordinary prompt emits nothing, each switch honored in-shim
+#             `continue:false` + a developer-facing message naming the spilled file, in both key
+#             spellings (documented `user_message` + the camelCase alias) and never in model
+#             context; an ordinary prompt emits nothing, each switch honored in-shim
 #   T cases — subagentStart → subagent-conventions.sh: code-writing agents get the
 #             conventions as additional_context, read-only readers are skipped, every
 #             plausible Cursor spelling of the agent-type field is accepted, FND_LEAN honored
@@ -345,6 +346,9 @@ assert_eq       U1-exit     "$EC" 0
 assert_eq       U1-blocked  "$(printf '%s' "$out" | jq -r '.continue')" "false"
 msg="$(printf '%s' "$out" | jq -r '.userMessage')"
 assert_contains U1-message  "$msg" "was NOT sent to the model"
+# The documented schema key is snake_case; the camelCase alias rides along. A host reading only
+# the documented one must still get the spill path, so both must carry the SAME reason.
+assert_eq       U1b-snake   "$(printf '%s' "$out" | jq -r '.user_message')" "$msg"
 # The spilled file has to exist — the guard erases the prompt, so the path IS the recovery
 p="$(printf '%s' "$msg" | grep -o '/[^ ]*fnd-prompt-json-[^ ]*\.json' | head -1)"
 if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad U2-spill "no existing spill file (p='$p')"; fi
@@ -365,6 +369,18 @@ out="$(run_shim beforeSubmitPrompt 'not json')"; EC=$?
 assert_eq U7-malformed-out "$out" ""
 assert_eq U7-malformed-exit "$EC" 0
 assert_eq U8-no-prompt      "$(run_shim beforeSubmitPrompt '{"conversation_id":"c"}')" ""
+
+# U9: the non-block passthrough carries both message spellings too. The real notice comes from
+# the context monitor, which needs a transcript this host has no equivalent for, so the decision
+# is stubbed — the shim's translation of it is what is under test.
+UPS="$TMP/fakeprompt"; mkdir -p "$UPS/hooks"
+cp "$SHIM" "$UPS/hooks/"
+printf '%s\n' 'process.stdout.write(JSON.stringify({systemMessage:"MARK-notice",hookSpecificOutput:{additionalContext:"MARK-ctx"}}));' > "$UPS/hooks/user-prompt.cjs"
+out="$(printf '{"prompt":"hi"}' | "$NODE_BIN" "$UPS/hooks/cursor-shim.cjs" beforeSubmitPrompt 2>/dev/null)"; EC=$?
+assert_eq       U9-exit    "$EC" 0
+assert_eq       U9-camel   "$(printf '%s' "$out" | jq -r '.userMessage')"  "MARK-notice"
+assert_eq       U9-snake   "$(printf '%s' "$out" | jq -r '.user_message')" "MARK-notice"
+assert_contains U9-context "$(printf '%s' "$out" | jq -r '.additional_context')" "MARK-ctx"
 
 # ═══ T — subagentStart (code conventions) ═══════════════════════════════════
 tsub() { fshim subagentStart "$@"; }

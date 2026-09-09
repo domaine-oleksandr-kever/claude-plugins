@@ -2932,9 +2932,11 @@ function evalJqExpr(root, expr) {
 
 // ================================================================ debug-log report (M12) ==
 
-// Aggregate the FND_MCP_SLIM_DEBUG JSONL log (M6/M8) into a ≤ 40-line plain-text summary (34 lines with
+// Aggregate the FND_MCP_SLIM_DEBUG JSONL log (M6/M8) into a ≤ 40-line plain-text summary (35 lines with
 // every optional section populated): totals — labelled with the collection level, which decides what they
-// can be compared to — counts per decision / reason / stage, the top HOOK tools by bytes saved (CLI runs
+// can be compared to, and counting only what the HOST actually delivered (the `delivery` field: a body a
+// host cannot put in place of the original saved nothing, however well it compressed) —
+// counts per decision / reason / stage, the top HOOK tools by bytes saved (CLI runs
 // are keyed by file path, not tool name — they get one aggregate line), per-project subtotals, the count
 // of DISTINCT spill files left on disk, and the MISSED-WHALE list — `platform-overflow` events (the hook's
 // tag for a result the platform spilled to a tool-results file before the hook could see it) that no later
@@ -2979,7 +2981,7 @@ function buildReport(lines, opts) {
     `${o.since ? `  [since ${o.since}]` : ''}`);
   if (!events.length) { out.push('  no events in range.'); return out.join('\n'); }
 
-  const decisions = new Map(), reasons = new Map(), stages = new Map(), tools = new Map(), projects = new Map();
+  const decisions = new Map(), reasons = new Map(), stages = new Map(), tools = new Map(), projects = new Map(), deliveries = new Map();
   const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
   // Access lines are the only population that can survive a window with no compression in it (a session
   // that read spills and made no MCP call), and the body below is all bytes and decisions — rendering it
@@ -2995,7 +2997,13 @@ function buildReport(lines, opts) {
   // passthrough happened to log as bytes_out. One `shrunkOf` predicate, shared by the totals and
   // `savedOf`; `savedOf` feeds the per-tool/project/cli aggregates and the recovery pairing below.
   const shrunkOf = (e) => e.decision === 'compressed' || e.decision === 'stubbed';
-  const savedOf = (e) => (shrunkOf(e)
+  // …and what the HOST then DID with it (mcp-slim's `delivery`). A shrunk result is only a saving where
+  // the host can replace the original: `discard` (a compressed body a host that cannot rewrite a result
+  // dropped — the raw whale still stands) and `additional` (a stub forwarded as extra context beside the
+  // raw result) both saved NOTHING, and `additional` also GREW the context. Absent on every line written
+  // before the field and on every replace-host line, so an old log reads exactly as it always did.
+  const deliveryOf = (e) => String(e.delivery || 'replace');
+  const savedOf = (e) => (shrunkOf(e) && deliveryOf(e) === 'replace'
     ? Math.max(0, (Number(e.bytes_in) || 0) - (Number(e.bytes_out) || 0)) : 0);
   // A whole-file re-dump: the run printed the file back into context with no reduction. The designed
   // low-context recoveries are excluded by the marks their lines carry — a `--jq` narrowing, a JSONL
@@ -3022,11 +3030,25 @@ function buildReport(lines, opts) {
     const bi = Number(e.bytes_in) || 0;
     const bo = Number(e.bytes_out) || 0;
     // A `stubbed` event (M12b) shrank the payload as surely as a compressed one — the model got a
-    // ~1 KB stub instead of the whale — so it counts toward the savings, and its `reason` names the
-    // branch it replaced, not a passthrough (it is listed on its own line below).
+    // ~1 KB stub instead of the whale — so it counts toward the savings wherever the host put it in
+    // place of the whale (deliveryOf), and its `reason` names the branch it replaced, not a
+    // passthrough (it is listed on its own line below).
     const shrunk = shrunkOf(e);
+    const delivery = shrunk ? deliveryOf(e) : 'replace';
     bytesIn += bi;
-    bytesOut += shrunk ? bo : bi; // a passthrough saved nothing, whatever it logged as bytes_out
+    // A passthrough saved nothing, whatever it logged as bytes_out — and neither did a shrunk result the
+    // host could not put in place of the original: `discard` left the raw result standing (bi), while
+    // `additional` left it standing AND added something beside it (bi + what was delivered).
+    // That addition is `delivered`, the part of the emission an adding host can carry (mcp-slim's own
+    // measure of the stub texts), NOT bytes_out: a per-block stub envelope also holds the compressed
+    // sibling blocks such a host drops, and charging those read 22,007 added bytes for 1,224 delivered.
+    // It is still an approximation of the CONTEXT — the adapter wraps a header (~220 B) around the stubs
+    // and truncates the set at its own budget — so it reads one header LOW on a single stub and, past
+    // that budget, high on many. bytes_out is the fallback for a line written before the field.
+    if (shrunk) bump(deliveries, delivery);
+    const added = Number(e.delivered); // NaN on a line older than the field, or on a junk value
+    bytesOut += shrunk && delivery === 'replace' ? bo
+      : (delivery === 'additional' ? bi + (Number.isFinite(added) && added >= 0 ? added : bo) : bi);
     if (Number(e.lvl) === 1) lvl1++; else lvlFull++;
     bump(decisions, e.decision || 'unknown');
     if (!shrunk) bump(reasons, e.reason || 'unknown');
@@ -3069,6 +3091,13 @@ function buildReport(lines, opts) {
   // plugin save", hook and CLI alike. Only the RANKING is hook-only, because a cli `tool` is a path.
   out.push(`  totals: ${bytesIn} → ${bytesOut} B (${pct}% saved)${levelTag}`);
   out.push(`  decisions: ${fmtCounts(decisions)}`);
+  // Candidate vs effective, and only where they differ: a log whose every shrunk result was delivered
+  // by replacement (Claude Code, OpenCode, and every log written before the field) reads exactly as it
+  // did, while one line says how much of the work above a host threw away or bolted on beside the raw
+  // result. `stubbed`/`compressed` above are what the compressor DECIDED; this is what landed.
+  if ([...deliveries.keys()].some((k) => k !== 'replace')) {
+    out.push(`  delivery: ${fmtCounts(deliveries)}  [only replace saved bytes; discard/additional left the raw result standing]`);
+  }
   if (reasons.size) out.push(`  passthrough reasons: ${fmtCounts(reasons)}`);
   if (stages.size) out.push(`  stages: ${fmtCounts(stages)}`);
 

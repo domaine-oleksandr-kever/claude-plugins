@@ -10,6 +10,11 @@
 // pointer to them away. This shim runs the CANONICAL script unchanged and re-labels the one
 // outcome Codex can still act on.
 //
+// The one thing it TELLS the child: `--delivery=additional`, this host's delivery contract. mcp-slim
+// writes its debug record before this file has decided anything, so without the flag every dropped
+// body was logged as a saving and `--report` claimed compression this host never delivered. The flag
+// only labels the record — the child's compression, spills and stdout are identical with or without it.
+//
 // What it forwards, and what it deliberately drops:
 //   - STUBBED result (mcp-slim could not shrink a whale under FND_MCP_SLIM_STUB_BYTES and wrote
 //     the byte-exact original to a spill): the stub text — spill path, json-slim command, shape
@@ -39,6 +44,7 @@ try { hostTrace = require('./host-trace.cjs'); } catch (_) {}
 // hooks and Claude Code has its own source-vs-cache inconsistency, so the env is a cross-check at
 // most (HARNESS-PORT-PLAN.md, hazards ledger).
 const SLIM = path.join(__dirname, 'mcp-slim.cjs');
+const DELIVERY = '--delivery=additional'; // this host adds context, it cannot replace a result
 const STUB_MARK = '<<fnd-mcp-slim stub>>';
 // One whale can produce one stub per over-limit block; the header plus a handful of stubs stays far
 // under Codex's ~2500-token additionalContext budget, and anything past the cap is spilled by the
@@ -64,7 +70,7 @@ function texts(value) {
 }
 
 function run(raw) {
-  const child = spawnSync(process.execPath, [SLIM], {
+  const child = spawnSync(process.execPath, [SLIM, DELIVERY], {
     input: raw,
     timeout: SPAWN_TIMEOUT_MS,
     // The child mirrors whatever arrived, so its stdout is bounded by the result the host already

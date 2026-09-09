@@ -19,7 +19,7 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 | File | Holds | Written by |
 |---|---|---|
 | `ticket.md` — in a batch, `ticket-<KEY>.md` each | `jira-reader` structured output, **verbatim** (Description, AC, Assumptions, TA, Steps to Test, links) | `jira-reader` (the calling skill only on an inline fetch or a failed save) |
-| `figma-<node-id>.md` | one `figma-reader` build spec, **verbatim** — one file per node | `figma-reader` (the calling skill only on an inline fetch or a failed save) |
+| `figma-<node-id>.md` | one `figma-reader` build spec, **verbatim** — one file per node; a node id is unique only within its Figma file, so a second file's same node id lands as `figma-<node-id>-<file-key-prefix>.md` | `figma-reader` (the calling skill only on an inline fetch or a failed save) |
 | `doc-<slug>-<hash>.md` | one linked doc's **extracted** content (data models, copy, field lists — never the raw page); slug from the page title + a short URL hash (`doc-data-mapping-9f3c.md`), so same-titled docs don't collide | `doc-reader` (the calling skill only on the inline fallback) |
 | `plan.md` | the **approved implementation plan**, verbatim | `develop-feature-or-fix`, at its ✋ checkpoint |
 | `qa.md` | the **approved QA checklist**, then the pass/fail report + confirmed findings with their repro values | `qa-feature-or-fix` |
@@ -65,7 +65,12 @@ PR ground truth, not an authorization to act.
 ## Read rule — context-first order
 
 1. **This conversation** — the fields are already in context, in full (not summarized): use them.
-2. **The workspace files** — present and fresh (below): read them; don't spawn a reader.
+2. **The workspace files** — present and fresh (below): read them; don't spawn a reader. For a
+   Figma node, look at **every** `figma-<node-id>*.md` in the workspace — the plain name **and**
+   any `-<file-key-prefix>` variant: the hit is the one whose `url` frontmatter carries **both**
+   the requested URL's file key and its node id. A matching filename alone is not enough, and a
+   mismatch on the plain name doesn't mean the node is uncached; no match among them → spawn the
+   reader.
 3. **Fetch** — spawn `jira-reader` / `figma-reader` **with this workspace path** (they write their
    own file; what they return and what they placehold is the write rule below), or read the linked
    doc; anything fetched inline is yours to save (write rule).
@@ -87,7 +92,7 @@ is a log; it doesn't go stale.
   `jira-reader` placeholds the **body** fields you didn't name as `<in ticket.md>`
   (`<in ticket-<KEY>.md>` in a batch) — never the link lists, see its output contract;
   `figma-reader` returns `spec` **and** `assets` in full unless your brief says you are only
-  **caching** the node, and then placeholds both as `<in figma-<node-id>.md>`;
+  **caching** the node, and then placeholds both as `<in <its saved_to filename>>`;
   `doc-reader` always returns its extract. Read the file when you need a placeheld field.
 - **Check every `saved_to`.** Empty while you *did* pass a workspace path means the save never
   landed (a denied `Write` in plan mode, say) — the reader then returns every field, so write its

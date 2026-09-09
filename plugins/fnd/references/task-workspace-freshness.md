@@ -26,7 +26,11 @@ resuming an interrupted conversation.
 ## Design & doc files
 
 - `figma-*.md`: no cheap version probe exists — when in doubt, ask the developer whether
-  the design changed since `fetched_at`.
+  the design changed since `fetched_at`. Check the file's `url` first: it answers the node
+  you want only when **both** its file key and its node id match the requested URL —
+  otherwise it's a different design that happens to share a node id, so try the node's other
+  `figma-<node-id>*.md` variants (the collision suffix) and spawn the reader only when none
+  matches.
 - `doc-*.md`: same triggers as ticket files. Cheap probe, no full fetch — **Notion**:
   `notion-search` the stored `title` (small `page_size`, `max_highlight_length: 0`),
   match the result to the page id embedded in the stored `url`, read its `timestamp`: a
@@ -34,9 +38,11 @@ resuming an interrupted conversation.
   **Confluence**: `searchConfluenceUsingCql` with `cql: "id=<pageId>"` → precise
   `lastModified`. Probe date ≤ stored `last_edited` / `fetched_at` date → fresh: stamp
   `verified_at`; newer → re-fetch, re-extract, overwrite. Same-day edits (day
-  granularity) and plain-web links (no probe): ask, as with `figma-*.md`. An extract
-  that lacks something *this* task needs isn't stale, it's incomplete — re-read the
-  source.
+  granularity) and plain-web links (no probe): ask, as with `figma-*.md`. When the extract's
+  frontmatter carries a `sources:` list (folded sub-pages), the probe covers **every** listed
+  source, the same cheap probe each — the extract is only fresh when all of them are; a source
+  no probe reaches → ask, as with `figma-*.md`. An extract that lacks something *this* task
+  needs isn't stale, it's incomplete — re-read the source.
 
 ## Resuming a conversation
 
