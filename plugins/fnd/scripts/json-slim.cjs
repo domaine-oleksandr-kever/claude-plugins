@@ -2998,10 +2998,12 @@ function buildReport(lines, opts) {
   // `savedOf`; `savedOf` feeds the per-tool/project/cli aggregates and the recovery pairing below.
   const shrunkOf = (e) => e.decision === 'compressed' || e.decision === 'stubbed';
   // …and what the HOST then DID with it (mcp-slim's `delivery`). A shrunk result is only a saving where
-  // the host can replace the original: `discard` (a compressed body a host that cannot rewrite a result
-  // dropped — the raw whale still stands) and `additional` (a stub forwarded as extra context beside the
-  // raw result) both saved NOTHING, and `additional` also GREW the context. Absent on every line written
-  // before the field and on every replace-host line, so an old log reads exactly as it always did.
+  // the host can replace the original: `discard` (a body the host's adapter could not put in place of
+  // the result and dropped — the raw whale still stands) and `additional` (a stub forwarded as extra
+  // context beside the raw result) both saved NOTHING, and `additional` also GREW the context. Absent on
+  // every line written before the field and on every replace-host line, so an old log reads exactly as
+  // it always did — and `replace` covers every channel that really replaced, Codex's hook block
+  // (hooks/codex-mcp-shim.cjs) included.
   const deliveryOf = (e) => String(e.delivery || 'replace');
   const savedOf = (e) => (shrunkOf(e) && deliveryOf(e) === 'replace'
     ? Math.max(0, (Number(e.bytes_in) || 0) - (Number(e.bytes_out) || 0)) : 0);

@@ -158,7 +158,9 @@ so none-visible means that install step was skipped — the remediation is the p
 Two halves, reported separately and never inferred from each other:
 
 - **Hook half** — did any MCP call in rows 3–4 trip the compressor? Evidence: a spill path handed
-  back instead of a body, a stub block, or an in-place rewrite marker. Report which path fired.
+  back instead of a body, a stub block, or an in-place rewrite marker — on Codex that evidence arrives
+  as a `Script failed` / `Script error:` result whose first line is the `fnd mcp-slim — NOT an error`
+  header: that is the compressor delivering, a PASS, not a failed call. Report which path fired.
   Nothing tripped it → 🟡 "not exercised" (these calls are small by design; that is expected).
 - **Script half** — run the CLI on a bundled fixture:
 
@@ -201,7 +203,7 @@ with what rows 3–7 claimed.
 | --- | --- |
 | Claude Code | `SessionStart/session-start` · `UserPromptSubmit/user-prompt` · `SubagentStart/subagent-conventions` (row 4) · `PreToolUse/no-ai-attribution` and `PreToolUse/no-verify-bypass` — one of them `deny` for row 5's probe · `PreToolUse/spill-access` · `PostToolUse/mcp-slim` (rows 3–4) |
 | Cursor | the same guard rows under host `cursor`, plus `SessionStart/cursor-shim`, `UserPromptSubmit/cursor-shim` and `SubagentStart/cursor-shim`: that host composes its contexts in the adapter, so the shim logs what it emitted and the scripts it spawns log their own verdicts. The result row is `PostToolUse/cursor-shim` with `skip`, **never `mcp-slim`** — Cursor cannot rewrite an MCP result, so nothing is spawned and rows 3–4 (compression) do not apply on this host |
-| Codex CLI | as Claude Code, plus `PostToolUse/codex-mcp-shim` next to `PostToolUse/mcp-slim` — that host cannot rewrite a tool result, so the wired command is the shim, and the `mcp-slim` it spawns logs its own line |
+| Codex CLI | as Claude Code, plus `PostToolUse/codex-mcp-shim` next to `PostToolUse/mcp-slim` — that host replaces a result only through the block channel, so the wired command is the shim, and the `mcp-slim` it spawns logs its own line |
 | OpenCode | `UserPromptSubmit/fnd-plugin` from the adapter (and `SessionStart/fnd-plugin` only in a store project — a `shopify.theme.toml` or `.env` beside the repo root — since that is the adapter's one dynamic session context; elsewhere its absence is expected), plus `user-prompt`, the two shell guards, `spill-access` and `mcp-slim`; **no `SubagentStart` row** — that host has no subagent-start event, and its absence is expected, not a defect |
 
 `PreToolUse/scratch-path-guard` appears only when a screenshot call happened in this session, so

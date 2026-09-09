@@ -136,7 +136,7 @@ Per host, the result rewrite is a capability of the host, not of the plugin:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | hook | yes | yes | yes | yes | yes | **yes** — compressed or stubbed in place |
 | OpenCode | adapter (store projects) | yes | no event on this host | yes | **no** — `tool.execute.before` reaches only the bash tool | yes | **yes** — the adapter rewrites `output.content` |
-| Codex CLI | hook | yes | yes | yes | yes | yes | stub only — the shim forwards the spill handle as `additionalContext`; a compressed copy would grow the context |
+| Codex CLI | hook | yes | yes | yes | yes | yes | **yes** — compress **and** stub, returned as a PostToolUse `block` reason (capped 10 KB); over-cap ⇒ stub, a non-text block ⇒ `additionalContext` |
 | Cursor | rules + shim | shim | shim (unverified) | shim | shim | shell reads only | **no** — `afterMCPExecution` has no response schema; the shim only logs that it fired |
 
 ## 4. Skills, agents and the ship pipeline

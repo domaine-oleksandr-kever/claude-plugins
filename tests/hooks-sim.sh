@@ -400,6 +400,23 @@ p="$(printf '%s' "$text" | grep -o 'full=[^ >]*' | head -1 | sed 's/^full=//')"
 if [ -n "$p" ] && [ -f "$p" ]; then ok; else bad M1-fullfile "no existing full= file (p='$p')"; fi
 inb=$(printf '%s' "$in" | wc -c); outb=$(printf '%s' "$out" | wc -c)
 if [ "$outb" -lt "$inb" ]; then ok; else bad M1-smaller "output $outb not < input $inb"; fi
+# M1b: the block channel's instruction to the Codex adapter (`fndDelivery`) is a Codex-only sibling —
+# on the default `replace` contract this envelope must be exactly the two keys every host has read
+# since the hook existed, whatever the compressor decided. The stub half is checked on a run that
+# really stubs (the guard is pinned off for M1–M36 above), so the absence below is not vacuous.
+assert_eq M1b-envelope-keys "$(printf '%s' "$out" | jq -c '.hookSpecificOutput | keys' 2>/dev/null)" '["hookEventName","updatedToolOutput"]'
+w="$(jq -n --arg t "$(printf 'x%.0s' $(seq 1 40000))" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+out="$(run_slim "$w" FND_MCP_SLIM_STUB=1)"
+assert_contains M1b-stub-emitted "$out" "<<fnd-mcp-slim stub>>"
+assert_absent   M1b-stub-no-field "$out" "fndDelivery"
+# …and the shape the Codex block channel refuses — a text payload beside an envelope sibling that may
+# BE the payload — is replaced here as it always was, sibling and all: the refusal is a property of
+# that host's one capped string, never of the compressor.
+sib="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}],_meta:{nextCursor:"CURSOR-PAGE-2"}}}')"
+out="$(run_slim "$sib")"
+assert_contains M1b-sibling-replaced "$out" "updatedToolOutput"
+assert_eq       M1b-sibling-kept "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput._meta.nextCursor' 2>/dev/null)" "CURSOR-PAGE-2"
+assert_absent   M1b-sibling-no-field "$out" "fndDelivery"
 
 # M2: MCP error result (isError:true) → untouched, even when big
 in="$(jq -n --rawfile t "$JIRA" \
@@ -3698,14 +3715,14 @@ assert_eq       N12-out      "$out" ""
 assert_contains N12-error    "$(nt_line "$d" mcp-slim)" '"decision":"error"'
 assert_absent   N12-no-tool  "$(nt_line "$d" mcp-slim)" '"tool"'
 
-# N13/N14: the Codex adapter traces what IT emitted — the stub is the only outcome this host can
-# act on — while the canonical script it spawns traces itself. Two lines, two hook names, never the
-# adapter's decision written twice. The adapter carries no `tool`: it hands stdin to the child as
-# bytes and never parses it, and the child's line already names the tool.
+# N13/N14: the Codex adapter traces what IT emitted — a `block`, this host's one replacement channel
+# — while the canonical script it spawns traces itself (`stub`: what the COMPRESSOR decided). Two
+# lines, two hook names, never the adapter's decision written twice. The adapter carries no `tool`:
+# it hands stdin to the child as bytes and never parses it, and the child's line already names the tool.
 d="$NT/n13"; mkdir -p "$d"
 out="$(nt_run "$d" "$nt_whale" FND_HOST_TRACE=1 FND_HOST=codex FND_MCP_SLIM_STUB=1 node "$SHIMJS")"
-assert_contains N13-context      "$out" "additionalContext"
-assert_contains N13-shim-stub    "$(nt_line "$d" codex-mcp-shim)" '"decision":"stub"'
+assert_contains N13-context      "$out" '"decision":"block"'
+assert_contains N13-shim-stub    "$(nt_line "$d" codex-mcp-shim)" '"decision":"block"'
 assert_contains N13-shim-event   "$(nt_line "$d" codex-mcp-shim)" '"event":"PostToolUse"'
 assert_absent   N13-shim-no-tool "$(nt_line "$d" codex-mcp-shim)" '"tool"'
 assert_contains N13-child        "$(nt_line "$d" mcp-slim)" '"decision":"stub"'

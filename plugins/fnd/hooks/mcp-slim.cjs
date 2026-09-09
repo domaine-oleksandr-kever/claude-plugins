@@ -10,10 +10,13 @@
 //         `{content:[…],isError?}`. We MIRROR whatever shape arrives.
 //   out — `hookSpecificOutput.updatedToolOutput` (hookEventName `PostToolUse`) REPLACES
 //         the result. Print nothing → the original passes through untouched.
-//   arg — `--delivery=replace|additional`, set by the host adapter that spawns this hook (absent =
-//         `replace`; an unrecognised token is read as `additional`, the reading that cannot overstate).
-//         It changes nothing that is emitted — it names what the HOST does with the emission, and only
-//         the debug record's `delivery`/`delivered` fields read it (see deliveryOf, deliveredBytes).
+//   arg — `--delivery=replace|additional|block[:<capBytes>]`, set by the host adapter that spawns this
+//         hook (absent = `replace`; an unrecognised token, or a malformed cap, is read as `additional`,
+//         the reading that cannot overstate). `replace`/`additional` change nothing that is emitted —
+//         they name what the HOST does with it, for the debug record's `delivery`/`delivered` fields.
+//         `block` DOES change it: that channel carries one capped plain STRING, so whether an emission
+//         can go through it at all is a decision only this hook can make (blockFit), and it rides out
+//         beside the emission as `hookSpecificOutput.fndDelivery` for the adapter to obey.
 //
 // Safety rails (any doubt → emit nothing, original survives):
 //   - MCP error results (`isError:true`) and per-block error envelopes are never touched
@@ -118,24 +121,46 @@ function debugLevel() {
 // The host's DELIVERY contract, from the adapter that spawned this hook (`--delivery=<mode>`; an argv
 // flag rather than an env var, because nothing outside our own two scripts ever sets it). `replace` —
 // the default, and what a host with no adapter does — means `updatedToolOutput` REPLACES the result, so
-// a compression is a real saving. `additional` (hooks/codex-mcp-shim.cjs) means the host can only ADD
-// context: the adapter forwards a stub as `additionalContext` and DROPS a compressed body, while the
-// raw result still stands. Nothing this hook emits changes with the mode — only what the debug record
-// says was DELIVERED, because a line reporting bytes the host threw away is a `--report` that
-// overstates the whole plugin (measured on Codex: 79.8 % "saved" on a result nobody replaced).
+// a compression is a real saving. `additional` means the host can only ADD context: the adapter
+// forwards a stub as `additionalContext` and DROPS a compressed body, while the raw result still
+// stands. `block:<cap>` (hooks/codex-mcp-shim.cjs) is Codex's only replacement channel — a hook that
+// blocks the call swaps the model-visible result for one plain `reason` STRING, capped host-side — so
+// there the mode also decides WHETHER an emission can be delivered (blockFit) and says so on stdout.
+// Otherwise nothing this hook emits changes with the mode: only what the debug record says was
+// DELIVERED, because a line reporting bytes the host threw away is a `--report` that overstates the
+// whole plugin (measured on Codex: 79.8 % "saved" on a result nobody replaced).
 const DELIVERY_FLAG = '--delivery=';
 const DELIVERY_MODES = new Set(['replace', 'additional']);
-const DELIVERY_MODE = (() => {
+const BLOCK_PREFIX = 'block';
+// The adapter always states a cap (its host's ceiling, BLOCK_REASON_BYTES, less the header it prepends);
+// this is that ceiling itself for a bare `block` — a hand-run or a sim without the adapter, where no
+// header rides — kept as a duplicate rather than a shared module because one constant is not worth a
+// require on this hot path.
+const BLOCK_CAP_DEFAULT = 10000;
+// How a multi-block emission is spelled in the one string the block channel carries. The adapter joins
+// the same way, so the bytes measured against the cap here are the bytes it sends.
+const BLOCK_JOIN = '\n\n';
+const DELIVERY = (() => {
   const arg = process.argv.slice(2).find((a) => a.startsWith(DELIVERY_FLAG));
-  if (!arg) return 'replace'; // no adapter → the default contract, and the field stays off the line
-  // A PRESENT but unrecognised token is an adapter bug (a typo, a mode this build predates), and the
-  // two readings of it are not equally safe: falling back to `replace` is exactly the accounting this
-  // flag exists to end — savings claimed for bytes nobody delivered, with every suite still green.
-  // The pessimistic reading can only UNDERSTATE, and it shows up as a `delivery:` line on a host that
-  // should have none, which is how the typo gets found.
+  if (!arg) return { mode: 'replace', cap: 0 }; // no adapter → the default contract, field off the line
   const v = arg.slice(DELIVERY_FLAG.length).trim();
-  return DELIVERY_MODES.has(v) ? v : 'additional';
+  if (DELIVERY_MODES.has(v)) return { mode: v, cap: 0 };
+  if (v === BLOCK_PREFIX) return { mode: BLOCK_PREFIX, cap: BLOCK_CAP_DEFAULT };
+  if (v.startsWith(`${BLOCK_PREFIX}:`)) {
+    const n = Number(v.slice(BLOCK_PREFIX.length + 1));
+    if (Number.isFinite(n) && n > 0) return { mode: BLOCK_PREFIX, cap: Math.floor(n) };
+  }
+  // A PRESENT but unrecognised token — or a cap that is not a byte count — is an adapter bug (a typo, a
+  // mode this build predates), and the two readings of it are not equally safe: falling back to
+  // `replace` is exactly the accounting this flag exists to end — savings claimed for bytes nobody
+  // delivered, with every suite still green. Inventing a CAP is the same mistake one layer down: too
+  // large a guess is a reason the host truncates to its head. The pessimistic reading can only
+  // UNDERSTATE, and it shows up as a `delivery:` line on a host that should have none, which is how the
+  // typo gets found.
+  return { mode: 'additional', cap: 0 };
 })();
+const DELIVERY_MODE = DELIVERY.mode;
+const BLOCK_CAP = DELIVERY.cap;
 // `host` rides along on those same lines and only there: FND_HOST has its own home in the host-proof
 // log (hooks/host-trace.cjs), so it is duplicated into this one where it explains the delivery.
 const HOST_TAG = String(process.env.FND_HOST || '').trim() || null;
@@ -145,11 +170,14 @@ const HOST_TAG = String(process.env.FND_HOST || '').trim() || null;
 // already reads (buildReport reads a missing field as `replace`), and off the passthrough lines that
 // are ~3/4 of a real week's log and would carry a value no report reads. The mapping mirrors the
 // adapter, which forwards a result carrying the stub mark and drops every other emission.
-function deliveryOf(decision) {
+// Under `block` the adapter has no judgement left to mirror: `fnd` is the instruction it was GIVEN, so
+// a block delivery is a real replacement (`replace`, the same accounting Claude Code gets) and the two
+// fallbacks read exactly as they did before the channel existed.
+function deliveryOf(decision, fnd) {
   if (DELIVERY_MODE === 'replace') return null;
-  if (decision === 'stubbed') return 'additional';
-  if (decision === 'compressed') return 'discard';
-  return null;
+  if (decision !== 'stubbed' && decision !== 'compressed') return null; // nothing was emitted to deliver
+  if (DELIVERY_MODE === BLOCK_PREFIX) return fnd === 'block' ? 'replace' : (fnd === 'additional' ? 'additional' : 'discard');
+  return decision === 'stubbed' ? 'additional' : 'discard';
 }
 
 // The TTL sweep's own gates, read without loading json-slim: the disable switch (parsed exactly like
@@ -430,6 +458,12 @@ function stubText(tool, bytes, format, hint, file, reason, perBlock) {
   // The per-block route spills ONE block's text, not the joined payload, so it must not promise the
   // whole result — the other blocks came back in place and are still in context.
   const what = perBlock ? "this block's FULL text was written" : 'the FULL original was written';
+  // `block-cap` is the CHANNEL refusing the bytes, not the compressor: the body did compress and still
+  // did not fit the one capped string this host replaces a result with. Calling that "not compressible"
+  // would talk the model out of the CLI two lines below, which is exactly the tool for the file.
+  const why = reason === 'block-cap'
+    ? 'too large for the capped channel this host replaces a result through'
+    : 'too large for context and not compressible here';
   const lines = reRunRedumps ? [
     `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context, and the compressor already ran on it and gained nothing, so ${what} to disk instead of being shown:`,
     `full=${file}`,
@@ -438,7 +472,7 @@ function stubText(tool, bytes, format, hint, file, reason, perBlock) {
     'For anything a sub-path cannot answer: grep the file, or Read it windowed (offset/limit).',
     sampleLine(hint),
   ] : [
-    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context and not compressible here, so ${what} to disk instead of being shown:`,
+    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — ${why}, so ${what} to disk instead of being shown:`,
     `full=${file}`,
     'Compress or inspect it — never raw-Read a whale:',
     `  node ${SLIM_CLI} ${file}`,
@@ -481,6 +515,37 @@ function isBinaryBlock(b) {
   if (b.type === 'text') return false;
   if (BINARY_BLOCK_TYPES.has(b.type) || typeof b.data === 'string' || typeof b.blob === 'string') return true;
   return !!b.resource && typeof b.resource === 'object' && typeof b.resource.blob === 'string'; // an untyped embedded resource
+}
+
+// Can this emission ride in a hook BLOCK's `reason` — one plain string, capped host-side? Decides only:
+// the adapter does the joining, and measuring by SUM here keeps a whale-sized copy of it out of this
+// process. `why` names the refusal the caller falls back on — `non-text` (the join cannot spell it) or
+// `over-cap` (it would be truncated to its head, and a lossy body whose `full=` handle was cut off the
+// tail is worse than no delivery). What the join silently DROPS is what the two rails are about:
+//   - a per-block field (`annotations`, a per-block `_meta` cursor) is metadata beside text that IS the
+//     payload — folded in, a stated ceiling of this channel rather than a hidden one;
+//   - an ENVELOPE sibling (`structuredContent`, `_meta`) can BE the payload, exactly as payloadOf
+//     documents, and a block WITHHOLDS the raw result — so a join that leaves the sibling out makes it
+//     invisible, with nothing in the emission saying it existed. Refuse for BOTH kinds: the stub takes
+//     the adding fallback (it rides beside the raw result, which still carries the sibling) and the
+//     compressed body is dropped, which is precisely what happened before this channel existed;
+//   - a binary block has no spelling at all (isBinaryBlock).
+function blockFit(value) {
+  const isText = (b) => !!b && typeof b === 'object' && typeof b.text === 'string' && !isBinaryBlock(b);
+  const partsOf = () => {
+    if (typeof value === 'string') return [value];
+    if (Array.isArray(value)) return value.every(isText) ? value.map((b) => b.text) : null;
+    if (!value || typeof value !== 'object') return null;
+    if (!Object.keys(value).every((k) => k === 'content' || k === 'text' || k === 'type')) return null;
+    if (Array.isArray(value.content)) return value.content.every(isText) ? value.content.map((b) => b.text) : null;
+    if (typeof value.text === 'string') return isBinaryBlock(value) ? null : [value.text];
+    return null;
+  };
+  const parts = partsOf();
+  if (!parts) return { fits: false, why: 'non-text' };
+  let n = BLOCK_JOIN.length * Math.max(0, parts.length - 1);
+  for (const t of parts) n += Buffer.byteLength(t, 'utf8');
+  return n <= BLOCK_CAP ? { fits: true } : { fits: false, why: 'over-cap' };
 }
 
 // Replace the whole result with one stub text payload, mirroring the arriving shape. null = this
@@ -603,9 +668,12 @@ function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, kee
   return { blocks: out, spill, format: spillFormat };
 }
 
-function emit(value) {
+// `fnd` is the block channel's instruction to the adapter (blockFit / fndDeliveryFor) and rides as a
+// SIBLING of the emission, never inside it: under every other mode it is null and this stdout is
+// byte-identical to the one Claude Code and OpenCode have always read.
+function emit(value, fnd) {
   process.stdout.write(JSON.stringify({
-    hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: value },
+    hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: value, ...(fnd ? { fndDelivery: fnd } : {}) },
   }));
 }
 
@@ -629,8 +697,13 @@ function emittedStrings(value) {
 // whole emission lands — and only the per-block route makes it differ from bytes_out: that envelope
 // also holds the COMPRESSED sibling blocks the adapter drops, so charging bytes_out to context
 // overstated a real 3-block stub 18-fold (28,851 B logged, 1,153 B forwarded). null ⇒ no field.
-function deliveredBytes(value) {
-  if (DELIVERY_MODE !== 'additional') return null;
+// Under `block` the same figure answers the same question for the one emission that took the adding
+// FALLBACK (`fnd`); a block delivery replaced the result, so bytes_out already speaks for it — as an
+// APPROXIMATION from above: it measures the serialized envelope, while what lands is the joined text
+// plus the adapter's fixed header. Envelope braces and JSON escaping only ever add, so a block event
+// understates its own saving and can never claim one it did not make.
+function deliveredBytes(value, fnd) {
+  if (DELIVERY_MODE !== 'additional' && fnd !== 'additional') return null;
   let n = 0;
   for (const s of emittedStrings(value)) if (s.includes(STUB_MARK)) n += Buffer.byteLength(s, 'utf8');
   return n;
@@ -696,9 +769,9 @@ function run(raw) {
   // writing the result. `decision` is `compressed` or `stubbed` iff we emitted updatedToolOutput.
   // `spill` stays the ONE handback path the model was given (`--report` pairs missed whales on it);
   // `spills` is the full inventory, which is what makes an orphaned crush spill visible in the log.
-  const trace = (decision, reason, bytesIn, bytesOut, stages, spill, format, delivered) => {
+  const trace = (decision, reason, bytesIn, bytesOut, stages, spill, format, delivered, fnd) => {
     if (!dbg) return;
-    const delivery = deliveryOf(decision);
+    const delivery = deliveryOf(decision, fnd);
     jsonSlim().debugLog({
       entry: 'hook', tool, decision, reason: reason || null,
       // What the host did with it, and — where it can only ADD — how much of the emission it can carry.
@@ -765,24 +838,37 @@ function run(raw) {
   // The stub's own spill is the ONE file the model is handed here, so everything json-slim wrote for
   // the body being thrown away is dropped first — before trace(), so the line never names a removed
   // file, and after emit(), so cleanup never delays what the model sees.
-  const tryStub = (reason, stages) => {
-    const s = buildStub(result, tool, slimmed.format, stubLimit, reason);
+  // The one call the adapter cannot make for itself (blockFit): what the block channel may do with
+  // this emission. A stub that does not fit is still worth ADDING beside the raw whale — it is the
+  // pointer to the spill — while a compressed body beside the raw original only grows context, so that
+  // one is dropped, exactly as it was before the channel existed. null ⇒ no field on stdout.
+  const fndDeliveryFor = (value, kind) => {
+    if (DELIVERY_MODE !== BLOCK_PREFIX) return null;
+    if (blockFit(value).fits) return 'block';
+    return kind === 'stub' ? 'additional' : null;
+  };
+
+  // `limit` overrides the stub threshold for the one caller that has a smaller one than the payload
+  // gate: the block channel's cap (see the block-cap branch below).
+  const tryStub = (reason, stages, limit) => {
+    const s = buildStub(result, tool, slimmed.format, limit === undefined ? stubLimit : limit, reason);
     if (!s) return false;
     own(s.spill);
-    emit(s.value);
+    const fnd = fndDeliveryFor(s.value, 'stub');
+    emit(s.value, fnd);
     hostDecision = 'stub';
     dropCreated(s.value);
-    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(s.value), stages, s.spill, s.format, deliveredBytes(s.value));
+    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(s.value), stages, s.spill, s.format, deliveredBytes(s.value, fnd), fnd);
     return true;
   };
 
   // The per-block fallback (see blockStubs) — same gates, same cleanup, one stub per over-limit block.
   // `blocks` is what would have been emitted; the spills hold the ORIGINAL blocks' text.
-  const tryBlockStubs = (reason, stages, value) => {
+  const tryBlockStubs = (reason, stages, value, limit) => {
     const blocks = blocksOf(value);
     const originals = blocksOf(result);
     if (!blocks || !originals) return false;
-    const s = blockStubs(originals, blocks, tool, slimmed.format, stubLimit, reason, own);
+    const s = blockStubs(originals, blocks, tool, slimmed.format, limit === undefined ? stubLimit : limit, reason, own);
     if (!s) return false;
     const out = Array.isArray(value) ? s.blocks : { ...value, content: s.blocks };
     // The net gate the compressed path has, which this route lacked: on the weak-gain branch every KEPT
@@ -792,10 +878,11 @@ function run(raw) {
     // written stay on disk for the TTL sweep; they are content-addressed, so unlinking them could break
     // another invocation's live handle.
     if (bytesOf(out) >= bytesIn) return false;
-    emit(out);
+    const fnd = fndDeliveryFor(out, 'stub');
+    emit(out, fnd);
     hostDecision = 'stub';
     dropCreated(out);
-    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(out), stages, s.spill, s.format, deliveredBytes(out));
+    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(out), stages, s.spill, s.format, deliveredBytes(out, fnd), fnd);
     return true;
   };
 
@@ -865,9 +952,31 @@ function run(raw) {
     return;
   }
 
-  emit(value);
+  // The block channel carries one capped string, and a compressed body over that cap comes back
+  // truncated to its head — a lossy result whose `full=` handle was cut off, the one outcome worse than
+  // no delivery. Stub instead: the whale is withheld and the handle survives, at the size of the
+  // channel rather than the payload gate (a 20 KB body compressing to 17 KB is under the 32 KB gate and
+  // still undeliverable). Measured on what is actually EMITTED, marker included, so the reason the
+  // adapter builds is the thing that was checked. The compressed body is abandoned here, and with it
+  // the spill written for it — only a file this run CREATED, since the names are content-addressed.
+  const fit = DELIVERY_MODE === BLOCK_PREFIX ? blockFit(value) : null; // one pass over the emission
+  const fnd = fit && fit.fits ? 'block' : null;
+  if (fit && fit.why === 'over-cap' && stubOn && !slimmed.anyError) {
+    if (full.created) created.push(fullPath);
+    // Floored like stubBytes(): a threshold under the stub's own ~1.2 KB would build a "saving" bigger
+    // than the text it replaces. Unreachable from the shipped adapter's ~9.5 KB, reachable by hand.
+    const capLimit = Math.max(STUB_CAP, Math.min(stubLimit, BLOCK_CAP));
+    if (tryStub('block-cap', slimmed.stages, capLimit) ||
+      tryBlockStubs('block-cap', slimmed.stages, slimmed.value, capLimit)) return;
+    // Nothing small enough to send (a shape no stub can carry, or a spill that failed): the body goes
+    // out unlabelled, the adapter drops it, and the record says `discard` — the pre-block outcome.
+    const at = created.indexOf(fullPath);
+    if (at !== -1) created.splice(at, 1); // still named by what we are about to emit
+  }
+
+  emit(value, fnd);
   hostDecision = 'compress';
-  if (dbg) trace('compressed', null, bytesIn, outBytes, slimmed.stages, fullPath);
+  if (dbg) trace('compressed', null, bytesIn, outBytes, slimmed.stages, fullPath, undefined, undefined, fnd);
 }
 
 // Collect the whole stdin as bytes, then decode once — decoding per Buffer chunk would

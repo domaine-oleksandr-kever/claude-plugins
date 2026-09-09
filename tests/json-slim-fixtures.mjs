@@ -3671,9 +3671,10 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
 // ==================== `delivery` in `--report`: what the HOST did with a shrunk result (I1) ==
 // hooks/mcp-slim.cjs writes its debug record before any host adapter has decided what to do with the
 // result, so the record carries the host's delivery contract: `replace` (the default, and absent from
-// every line written before the field), `discard` (a compressed body a host that cannot rewrite a tool
-// result dropped) and `additional` (a stub forwarded as extra context BESIDE the raw result). Only
-// `replace` saved anything — the live Codex bug this pins reported "79.8% saved" for a dropped body.
+// every line written before the field, and what Codex's hook-block channel delivers), `discard` (a body
+// the host's adapter could not put in place of the result and dropped) and `additional` (a stub
+// forwarded as extra context BESIDE the raw result). Only `replace` saved anything — the live Codex bug
+// this pins reported "79.8% saved" for a dropped body.
 {
   const ev = (extra) => JSON.stringify({ ts: '2026-09-08T10:00:00.000Z', project: 'elc', lvl: 2, entry: 'hook', tool: 'mcp__a__x', decision: 'compressed', reason: null, bytes_in: 19230, bytes_out: 3888, pct: 79.8, stages: ['noise'], spill: null, ...extra });
 
@@ -3709,6 +3710,31 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     check(`i1-additional-fallback-${name}`, /totals: 40039 → 62046 B/.test(J.buildReport([e], { file: '/x.log' })),
       'a delivered figure that is not a byte count falls back to bytes_out, never to a free addition');
   }
+
+  // Codex's block channel (`--delivery=block:<cap>`): what the hook delivers THROUGH it is a real
+  // replacement, so the record says `replace` and the report credits it exactly as it credits Claude
+  // Code — a log where every event landed must not grow a `delivery:` line at all. The two fallbacks
+  // (an emission the one-string channel cannot carry, a stub over the cap) keep the readings they had
+  // before the channel existed, and they are the only thing that line exists to name.
+  const blockRun = J.buildReport([ev({ delivery: 'replace', host: 'codex' })], { file: '/x.log' });
+  check('i1-block-is-a-real-saving', /totals: 19230 → 3888 B \(79\.8% saved\)/.test(blockRun)
+    && /15342 B over 1 call — mcp__a__x/.test(blockRun) && !/delivery:/.test(blockRun),
+    `a body delivered through the block channel saves its bytes like any replacement:\n${blockRun}`);
+  const blockMixed = J.buildReport([
+    ev({ delivery: 'replace', host: 'codex' }),
+    ev({ delivery: 'discard', host: 'codex' }),
+    stub({ delivery: 'additional', host: 'codex', delivered: 1224 }),
+  ], { file: '/x.log' });
+  check('i1-block-fallbacks-named', /delivery: additional 1 · discard 1 · replace 1/.test(blockMixed)
+    && /totals: 78499 → 64381 B/.test(blockMixed),
+    `one host, three deliveries: 3888 delivered, 19230 dropped, 40039 + 1224 added:\n${blockMixed}`);
+
+  // `block-cap` — the stub reason for a body the channel's ceiling refused — needs no legend: the
+  // stubbed line counts whatever reasons the log holds, so a new one is visible the day it fires.
+  const capped = J.buildReport([stub({ reason: 'block-cap', delivery: 'replace', host: 'codex' })], { file: '/x.log' });
+  check('i1-block-cap-reason', /stubbed \(spill-and-stub guard\): 1 \(block-cap 1\), 1 never read/.test(capped)
+    && /totals: 40039 → 22007 B/.test(capped),
+    `a block-cap stub is a delivered saving, counted under its own reason:\n${capped}`);
 
   // Mixed hosts in one log (the file is per USER): each event is counted on its own delivery.
   const mixed = J.buildReport([ev({ delivery: 'replace' }), ev({ delivery: 'discard' }), ev()], { file: '/x.log' });
