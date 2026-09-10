@@ -22,10 +22,12 @@
 //             spill it hands back is real, small results / builtin tools / non-string output
 //             / FND_MCP_SLIM=0 are untouched, and the tool name reaches mcp-slim in the
 //             `mcp__server__tool` spelling the debug log and --report read on every host
-//   C cases — chat.message: the detection-gated store-access block is injected once per
-//             session (and again after session.deleted), statics are never injected, a
-//             prompt-JSON block offloads each spilled blob in place byte-exactly, and
-//             FND_PROMPT_JSON=0 / assistant messages / empty parts are left alone
+//   C cases — chat.message: the session context — the plugin-root and project-profile lines,
+//             which every session gets, plus the two detection-gated blocks (store access, the
+//             Foundation addendum) — is injected once per session (and again after
+//             session.deleted), statics are never injected, a prompt-JSON block offloads each
+//             spilled blob in place byte-exactly, and FND_PROMPT_JSON=0 / assistant messages
+//             are left alone
 //   H cases — FND_HOST_TRACE: the two events the adapter COMPOSES record themselves (host
 //             `opencode`, hook `fnd-plugin`), a skipped MCP result leaves a `skip` line, an assistant message records nothing, off writes
 //             no file, and every line a run produces — spawned scripts included — carries the
@@ -403,6 +405,9 @@ const themePlugin = await newPlugin(themeDir);
 const first = await chat(themePlugin, [textPart('what does the live theme use for the hero?')]);
 assertContains('C01-store-access', first[0].text, 'live store access');
 assertContains('C02-plugin-root', first[0].text, 'fnd plugin root:');
+// A store checkout is not a theme checkout: the store files gate store access, the theme's own
+// layout/snippets gate the profile, and this fixture has only the former.
+assertContains('C02b-profile-line', first[0].text, 'fnd project profile: none');
 // Statics belong in the user's instructions config on this host — injecting them per message
 // would pay for them twice.
 assertAbsent('C03-no-statics', first[0].text, 'comment discipline');
@@ -422,14 +427,24 @@ const plainDir = path.join(TMP, 'plain');
 fs.mkdirSync(plainDir, { recursive: true });
 const plainPlugin = await newPlugin(plainDir);
 const plain = await chat(plainPlugin, [textPart('hello')]);
-assertEq('C08-no-detection-no-inject', plain[0].text, 'hello');
+// Nothing is DETECTED here, but the two lines a static instructions file cannot answer still
+// ride: where this bundle is, and which kind of checkout the session stands in.
+assertAbsent('C08-no-detection-no-store', plain[0].text, 'live store access');
+assertContains('C08b-plugin-root', plain[0].text, 'fnd plugin root:');
+assertContains('C08c-profile-line', plain[0].text, 'fnd project profile: none');
 
 const assistant = await chat(plainPlugin, [textPart('assistant text')], 'c9', 'assistant');
 assertEq('C09-assistant-untouched', assistant[0].text, 'assistant text');
 
+// A user message with no text part still gets the context — as its own part, the adapter's
+// documented fallback — and still only once.
 const emptyParts = [];
 await chat(plainPlugin, emptyParts, 'c10');
-assertEq('C10-empty-parts', emptyParts.length, 0);
+assertEq('C10-empty-parts-injected', emptyParts.length, 1);
+assertContains('C10b-empty-parts-context', emptyParts[0] && emptyParts[0].text, 'fnd project profile:');
+const emptyPartsAgain = [];
+await chat(plainPlugin, emptyPartsAgain, 'c10');
+assertEq('C10c-empty-parts-once', emptyPartsAgain.length, 0);
 
 // A prompt-JSON block has no analogue here, so the adapter offloads what the guard spilled:
 // the blob leaves the message and its bytes stay recoverable from the file.
@@ -467,6 +482,35 @@ assertContains('C18-context-still-injected', gated[0].text, 'live store access')
 assertContains('C19-no-guard-run', gated[0].text, blob.slice(0, 200));
 delete process.env.FND_PROMPT_JSON;
 delete process.env.FND_CTX_MONITOR;
+
+// The profile is scripts/project-profile.sh's answer about the session's own directory, and the
+// Foundation addendum is the one static block that rides with it — a rule no instructions file
+// could gate, because the file cannot look at the checkout.
+const fndDir = path.join(TMP, 'foundation');
+fs.mkdirSync(path.join(fndDir, 'snippets'), { recursive: true });
+fs.writeFileSync(path.join(fndDir, 'snippets', '@card.liquid'), '{% doc %}{% enddoc %}\n');
+const fndPlugin = await newPlugin(fndDir);
+const fndFirst = await chat(fndPlugin, [textPart('where does the hero come from?')], 'c20');
+assertContains('C20-foundation-profile', fndFirst[0].text, 'fnd project profile: foundation');
+assertContains('C21-foundation-addendum', fndFirst[0].text, 'LiquidDoc');
+// …and the rest of comment-discipline is still the user's own instructions config, not ours
+assertAbsent('C22-no-statics', fndFirst[0].text, 'Minimize inline comments');
+const fndSecond = await chat(fndPlugin, [textPart('and the footer?')], 'c20');
+assertAbsent('C23-addendum-once-per-session', fndSecond[0].text, 'LiquidDoc');
+
+const themeOnlyDir = path.join(TMP, 'theme-only');
+fs.mkdirSync(path.join(themeOnlyDir, 'layout'), { recursive: true });
+fs.writeFileSync(path.join(themeOnlyDir, 'layout', 'theme.liquid'), '<html></html>\n');
+const themeOnly = await chat(await newPlugin(themeOnlyDir), [textPart('hi')], 'c24');
+assertContains('C24-theme-profile', themeOnly[0].text, 'fnd project profile: theme');
+assertAbsent('C25-theme-no-addendum', themeOnly[0].text, 'LiquidDoc');
+
+// FND_PROFILE forces it, through the env the adapter hands the probe
+process.env.FND_PROFILE = 'foundation';
+const forced = await chat(await newPlugin(plainDir), [textPart('hi')], 'c26');
+assertContains('C26-forced-profile', forced[0].text, 'fnd project profile: foundation');
+assertContains('C27-forced-addendum', forced[0].text, 'LiquidDoc');
+delete process.env.FND_PROFILE;
 
 // H — FND_HOST_TRACE, the host-proof log ---------------------------------------------------
 // This host has no hook commands to carry the host tag, so the adapter assigns it and records the

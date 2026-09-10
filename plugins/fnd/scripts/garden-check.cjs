@@ -523,22 +523,24 @@ function checkHookWirings(pluginRoot) {
   else pass('hook-wiring:js', jsFiles.length + ' hook/adapter script(s) parse');
 
   // Paths built at runtime (`$r/hooks/$f.md`) carry a `$` and are skipped: only literal spawns can
-  // be resolved from here, and those are the ones a rename breaks.
+  // be resolved from here, and those are the ones a rename breaks. `scripts/` is in scope beside
+  // `hooks/` because the wiring spawns one bundled script from there — the project-profile probe.
   const missing = [];
   let targets = 0;
   for (const { rel, raw } of wirings) {
-    const re = /hooks\/([A-Za-z0-9._-]+\.(?:cjs|sh|md|rules))/g;
+    const re = /(hooks|scripts)\/([A-Za-z0-9._-]+\.(?:cjs|sh|md|rules))/g;
     const seen = new Set();
     let m;
     while ((m = re.exec(raw))) {
-      if (seen.has(m[1])) continue;
-      seen.add(m[1]);
+      const target = m[1] + '/' + m[2];
+      if (seen.has(target)) continue;
+      seen.add(target);
       targets++;
-      if (!exists(path.join(pluginRoot, 'hooks', m[1]))) missing.push(rel + ' → hooks/' + m[1]);
+      if (!exists(path.join(pluginRoot, m[1], m[2]))) missing.push(rel + ' → ' + target);
     }
   }
   if (missing.length) fail('hook-wiring:targets', summarize(missing, 3) + ' — the wiring spawns a script that is gone');
-  else pass('hook-wiring:targets', targets + ' referenced hook script(s) exist');
+  else pass('hook-wiring:targets', targets + ' referenced script(s) exist');
 }
 
 function main() {

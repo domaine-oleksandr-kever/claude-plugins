@@ -245,7 +245,7 @@ domaine_env() {
   # client repo, so only these tuning keys are read from it. Every other switch — the guards, the
   # spill dir, the verify gates — comes from the environment or the global file, default-deny.
   case "$1" in
-    FND_LEAN|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET)
+    FND_LEAN|FND_PROFILE|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET)
       while :; do
         if [ -f "$d/.claude/domaine.env" ]; then pf="$d/.claude/domaine.env"; break; fi
         [ "$d" = "/" ] && break

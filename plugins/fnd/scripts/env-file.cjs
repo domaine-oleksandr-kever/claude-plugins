@@ -28,9 +28,11 @@ const ALLOW_EXTRA = new Set(['SHOPIFY_ADMIN_GQL_QUIET']);
 
 // Tuning and UX only — nothing here can disarm a guard, redirect a spill or shorten a TTL.
 // The bash `domaine_env()` in scripts/_shopify-common.sh and hooks/spill-access.sh carry this same
-// list, by hand.
+// list, by hand — tests/layout-assertions.sh holds the three copies equal. scripts/project-profile.sh
+// reads FND_PROFILE out of the same two files with the same layering, for that one key only.
 const PROJECT_OK = new Set([
   'FND_LEAN',
+  'FND_PROFILE',
   'FND_CTX_MONITOR',
   'FND_CTX_WARN',
   'FND_CTX_WINDOW',

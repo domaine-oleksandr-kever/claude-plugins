@@ -13,9 +13,12 @@ set -u
 # is the same kind of hatch, and its whole point is to displace the default version G47c pins. Same
 # for the two switches README tells developers to keep in settings.json → "env" (which Claude Code
 # exports to the Bash tool): FND_GQL_PROBE_CACHE=0 turns the probe-cache cases red, and an ambient
-# TOML_PATH re-targets every case that relies on the repo fixture toml.
+# TOML_PATH re-targets every case that relies on the repo fixture toml. FND_PROFILE is the same
+# hazard one level up: it is the profile probe's own override, so an exported one would answer
+# every PP case before detection ever ran.
 unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR SHOPIFY_CLI_THEME_TOKEN SHOPIFY_STORE \
-      FND_GQL_PROBE_CACHE TOML_PATH SHOPIFY_ADMIN_API_VERSION SHOPIFY_FLAG_ENVIRONMENT
+      FND_GQL_PROBE_CACHE TOML_PATH SHOPIFY_ADMIN_API_VERSION SHOPIFY_FLAG_ENVIRONMENT \
+      FND_PROFILE
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GQL="$ROOT/plugins/fnd/scripts/shopify-admin-gql.sh"
@@ -5392,6 +5395,21 @@ rc=0; (cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" node "$EVC" unset FND_MCP_
 if [ "$rc" -eq 0 ] && ! grep -q '^FND_MCP_SLIM=' "$EV2R/repo/.claude/domaine.env"; then ok
 else bad EV6d-unset-project-still-works "rc=$rc file=$(tr '\n' ';' < "$EV2R/repo/.claude/domaine.env")"; fi
 
+# EV6e: FND_PROFILE is a PROJECT_OK key, and the three readers of that list have to agree about
+# it — the CLI writes it into the project file, env-file.cjs applies it from there (never
+# `ignored`), and the bash domaine_env() mirror finds it in the same layer. Nothing else pins the
+# membership: the probe carries its own reader, so a key silently reclassified global-only would
+# leave every PP case green while a client repo's committed profile stopped reaching Node.
+rc=0; (cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" node "$EVC" set FND_PROFILE=foundation --project) \
+  >/dev/null 2>"$E" || rc=$?
+o7b="$(cd "$EV2R/repo/.claude" && XDG_CONFIG_HOME="$EV2R/cfg" node -e \
+  'const r = require(process.argv[1]).load();
+   console.log([process.env.FND_PROFILE, r.applied.FND_PROFILE || "not-applied",
+                r.ignored.map((i) => i.key).includes("FND_PROFILE") ? "ignored" : "kept"].join("|"))' "$EVF")"
+o7c="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" domaine_env FND_PROFILE)"
+if [ "$rc" -eq 0 ] && [ "$o7b" = "foundation|foundation|kept" ] && [ "$o7c" = "foundation" ]; then ok
+else bad EV6e-profile-project-layer "rc=$rc node='$o7b' bash='$o7c'"; fi
+
 # EV7: the bash reader carries the same split by hand — a global-only key is not even looked for in
 # the project file (the global value wins), a PROJECT_OK key still comes from the project layer
 printf 'FND_MCP_SLIM_DIR=/tmp/evil\nFND_CPT_OVERLAY_VERIFY=0\nFND_CPT_OVERLAY_VERIFY_WAIT=9\n' \
@@ -5479,6 +5497,216 @@ o16="$(cd "$EV4R/repo/sub" && XDG_CONFIG_HOME="$EV4R/cfg" env -u FND_GQL_PROBE_C
 o17="$(cd "$EV4R/repo/sub" && XDG_CONFIG_HOME="$EV4R/cfg" domaine_env FND_GQL_PROBE_CACHE)"
 if [ "$o16" = "[]" ] && [ "$o17" = "" ]; then ok
 else bad EV13-empty-value-shadows-global "node='$o16' bash='[$o17]'"; fi
+
+# ═══ PP — project-profile.sh: the session profile probe ═════════════════════════════════════
+# The one place the foundation/theme/none answer is derived; every host's session wiring and
+# hooks/subagent-conventions.sh gate the Foundation-only conventions on what it prints, so a
+# wrong answer here is a wrong convention set on four hosts. `PP`, not `P` — the P labels above
+# belong to create-preview-theme.sh.
+PPS="$ROOT/plugins/fnd/scripts/project-profile.sh"
+PPR="$TMP/pp"; mkdir -p "$PPR"
+pp_out=""; pp_rc=0
+pp_run() { # <dir-or-args…> — stdout in $pp_out, exit code in $pp_rc, stderr in $E
+  pp_rc=0
+  pp_out="$("$BASH_BIN" "$PPS" "$@" 2>"$E")" || pp_rc=$?
+}
+pp_eq() { # <label> <want-profile> <dir>
+  pp_run "$3"
+  if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = "$2" ]; then ok
+  else bad "$1" "rc=$pp_rc profile='$pp_out' want='$2' err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+}
+
+# PP1: each Foundation marker on its own — one is enough, and the four are the naming Foundation
+# core actually ships under (three globs and a directory)
+mkdir -p "$PPR/m-snippet/snippets"; : > "$PPR/m-snippet/snippets/@card.liquid"
+mkdir -p "$PPR/m-section/sections"; : > "$PPR/m-section/sections/core-hero.liquid"
+mkdir -p "$PPR/m-block/blocks";     : > "$PPR/m-block/blocks/core-text.liquid"
+mkdir -p "$PPR/m-entry/src/entry/core"
+for m in snippet section block entry; do
+  pp_eq "PP1-marker-$m" foundation "$PPR/m-$m"
+done
+
+# PP1b: a near-miss of each glob is NOT a marker — an ordinary snippet, a non-core section, a
+# section named core-* under the wrong extension
+mkdir -p "$PPR/near/snippets" "$PPR/near/sections"
+: > "$PPR/near/snippets/card.liquid"; : > "$PPR/near/sections/hero.liquid"
+: > "$PPR/near/sections/core-hero.json"
+pp_eq PP1b-near-miss none "$PPR/near"
+
+# PP2: precedence — a Foundation checkout has a layout/theme.liquid too, so the markers have to
+# win over it; a plain theme is `theme`; a directory that is neither is `none`
+mkdir -p "$PPR/both/snippets" "$PPR/both/layout"
+: > "$PPR/both/snippets/@card.liquid"; : > "$PPR/both/layout/theme.liquid"
+pp_eq PP2-foundation-wins foundation "$PPR/both"
+mkdir -p "$PPR/theme/layout"; : > "$PPR/theme/layout/theme.liquid"
+pp_eq PP2-theme theme "$PPR/theme"
+mkdir -p "$PPR/empty"
+pp_eq PP2-none none "$PPR/empty"
+# …and layout/theme.liquid as a DIRECTORY is not a theme marker either (the test is -f)
+mkdir -p "$PPR/dirlayout/layout/theme.liquid"
+pp_eq PP2b-layout-dir none "$PPR/dirlayout"
+
+# PP3: no argument at all → the working directory, which is what every wiring relies on (the
+# hook command runs in the session's cwd and passes no path)
+pp_rc=0
+pp_out="$(cd "$PPR/m-snippet" && "$BASH_BIN" "$PPS" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = foundation ]; then ok
+else bad PP3-default-cwd "rc=$pp_rc profile='$pp_out'"; fi
+
+# PP4: FND_PROFILE from the process env forces each valid value, detection notwithstanding
+for v in foundation theme none; do
+  pp_rc=0
+  pp_out="$(FND_PROFILE="$v" "$BASH_BIN" "$PPS" "$PPR/theme" 2>"$E")" || pp_rc=$?
+  if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = "$v" ]; then ok
+  else bad "PP4-override-$v" "rc=$pp_rc profile='$pp_out' want='$v'"; fi
+done
+
+# PP5: the same override out of a project `.claude/domaine.env`, found by walking UP from a
+# subdirectory — env-file.cjs's layer, in its dialect (comment, spaces around `=`)
+mkdir -p "$PPR/proj/.claude" "$PPR/proj/sub/deep" "$PPR/proj/layout"
+: > "$PPR/proj/layout/theme.liquid"
+printf '# per-project\nFND_PROFILE = foundation \n' > "$PPR/proj/.claude/domaine.env"
+pp_eq PP5-project-file foundation "$PPR/proj/sub/deep"
+# the process env still wins over the file
+pp_rc=0
+pp_out="$(FND_PROFILE=none "$BASH_BIN" "$PPS" "$PPR/proj/sub/deep" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = none ]; then ok
+else bad PP5b-env-beats-file "rc=$pp_rc profile='$pp_out'"; fi
+# …and the GLOBAL file is the last layer, below the project one
+PPG="$PPR/xdg"; mkdir -p "$PPG/domaine"
+printf 'FND_PROFILE=none\n' > "$PPG/domaine/env"
+pp_rc=0
+pp_out="$(XDG_CONFIG_HOME="$PPG" "$BASH_BIN" "$PPS" "$PPR/proj/sub/deep" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = foundation ]; then ok
+else bad PP5c-project-beats-global "rc=$pp_rc profile='$pp_out'"; fi
+pp_rc=0
+pp_out="$(XDG_CONFIG_HOME="$PPG" "$BASH_BIN" "$PPS" "$PPR/m-snippet" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = none ]; then ok
+else bad PP5d-global-file "rc=$pp_rc profile='$pp_out'"; fi
+
+# PP6: an override that is not one of the three words is not a verdict — it warns and detection
+# decides, because a typo in a config file may not silence a convention set
+pp_rc=0
+pp_out="$(FND_PROFILE=Foundation "$BASH_BIN" "$PPS" "$PPR/m-snippet" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = foundation ] && grep -q '^warn=bad_profile value=Foundation' "$E"; then ok
+else bad PP6-bad-value "rc=$pp_rc profile='$pp_out' err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+
+# PP7: the two argument errors — both exit 2, so a caller can tell "this directory is not a
+# Foundation theme" from "you asked about a directory that is not there"
+pp_run "$PPR/does-not-exist"
+if [ "$pp_rc" -eq 2 ] && [ -z "$pp_out" ] && grep -q "^error=no_such_dir dir=$PPR/does-not-exist$" "$E"; then ok
+else bad PP7-missing-dir "rc=$pp_rc out='$pp_out' err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+pp_run "$PPR/empty" "$PPR/theme"
+if [ "$pp_rc" -eq 2 ] && [ -z "$pp_out" ] && grep -q '^usage: project-profile.sh' "$E"; then ok
+else bad PP7b-two-args "rc=$pp_rc out='$pp_out' err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+# a FILE where a directory was named is the same refusal
+: > "$PPR/afile"
+pp_run "$PPR/afile"
+if [ "$pp_rc" -eq 2 ] && grep -q '^error=no_such_dir' "$E"; then ok
+else bad PP7c-file-arg "rc=$pp_rc err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+
+# PP8: a stripped environment — no HOME, no PATH, no XDG_CONFIG_HOME. The probe runs on every
+# session and subagent start, under `set -u`, and reads env files whose paths are built from
+# variables that are not always there.
+pp_rc=0
+pp_out="$(env -i "$BASH_BIN" "$PPS" "$PPR/m-snippet" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = foundation ] && [ ! -s "$E" ]; then ok
+else bad PP8-stripped-env "rc=$pp_rc profile='$pp_out' err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+pp_rc=0
+pp_out="$(env -i FND_PROFILE=theme "$BASH_BIN" "$PPS" "$PPR/empty" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = theme ]; then ok
+else bad PP8b-stripped-override "rc=$pp_rc profile='$pp_out'"; fi
+
+# PP9: a directory whose name carries a glob character still answers about ITSELF — the marker
+# patterns are globs, and only their own segment may expand
+mkdir -p "$PPR/od[d]/snippets"; : > "$PPR/od[d]/snippets/@card.liquid"
+pp_eq PP9-glob-in-path foundation "$PPR/od[d]"
+
+# PP10: the project layer is the NEAREST `.claude/domaine.env`, carrying the key or not — this is
+# env-file.cjs's projectPath(), and the two readers have to name the same file or one host's
+# session context contradicts what `domaine-env get` reports for the same checkout. A walk that
+# kept climbing to the first file that HAPPENS to set FND_PROFILE would let an ancestor govern
+# every checkout below it.
+mkdir -p "$PPR/stack/.claude" "$PPR/stack/repo/.claude" "$PPR/stack/repo/sub/snippets"
+: > "$PPR/stack/repo/sub/snippets/@card.liquid"       # detection would say `foundation` here
+printf 'FND_PROFILE=none\n' > "$PPR/stack/.claude/domaine.env"
+printf 'FND_LEAN=0\n'       > "$PPR/stack/repo/.claude/domaine.env"
+pp_eq PP10-nearest-file-only foundation "$PPR/stack/repo/sub"
+# …and when the nearest file is silent the GLOBAL layer decides, exactly as load() does — the
+# ancestor's file is not a layer at all here
+PPG2="$PPR/xdg2"; mkdir -p "$PPG2/domaine"
+printf 'FND_PROFILE=theme\n' > "$PPG2/domaine/env"
+pp_out="$(XDG_CONFIG_HOME="$PPG2" "$BASH_BIN" "$PPS" "$PPR/stack/repo/sub" 2>"$E")"
+if [ "$pp_out" = theme ]; then ok
+else bad PP10b-global-after-silent-project "profile='$pp_out' want='theme'"; fi
+# the same answer env-file.cjs computes for that directory, read out of the loader itself
+o_pp="$(cd "$PPR/stack/repo/sub" && XDG_CONFIG_HOME="$PPG2" node -e \
+  'require(process.argv[1]).load(); console.log(process.env.FND_PROFILE || "unset")' \
+  "$ROOT/plugins/fnd/scripts/env-file.cjs")"
+if [ "$o_pp" = theme ]; then ok; else bad PP10c-loader-parity "env-file says '$o_pp', probe says 'theme'"; fi
+# a nearest file that DOES carry the key wins over both the ancestor and the global layer
+printf 'FND_PROFILE=none\n' > "$PPR/stack/repo/.claude/domaine.env"
+pp_out="$(XDG_CONFIG_HOME="$PPG2" "$BASH_BIN" "$PPS" "$PPR/stack/repo/sub" 2>"$E")"
+if [ "$pp_out" = none ]; then ok
+else bad PP10d-nearest-key-wins "profile='$pp_out' want='none'"; fi
+
+# PP11: a checkout reached through a symlink resolves PHYSICALLY — env-file.cjs's projectPath()
+# resolves against process.cwd(), which the kernel reports with the links already gone, so a
+# lexical walk here would send the two readers to different files for one directory. Both call
+# shapes have to land on the same file: the wirings run the probe with the workspace as CWD, a
+# by-hand run names it as an argument.
+mkdir -p "$PPR/phys/repo" "$PPR/phys/.claude" "$PPR/logi/.claude"
+printf 'FND_PROFILE=theme\n'      > "$PPR/phys/.claude/domaine.env"
+printf 'FND_PROFILE=foundation\n' > "$PPR/logi/.claude/domaine.env"
+ln -s "$PPR/phys/repo" "$PPR/logi/repo"
+pp_eq PP11-physical-arg theme "$PPR/logi/repo"
+pp_rc=0
+pp_out="$(cd "$PPR/logi/repo" && "$BASH_BIN" "$PPS" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = theme ]; then ok
+else bad PP11b-physical-cwd "rc=$pp_rc profile='$pp_out' want='theme'"; fi
+# the loader, asked the way every wiring asks it — from that cwd — names the same file. `pwd -P`
+# for the wanted value because $TMP itself may sit behind a symlink (/var → /private/var).
+PP_PHYS="$(cd "$PPR/phys" && pwd -P)"
+o_pp="$(cd "$PPR/logi/repo" && node -e \
+  'const e = require(process.argv[1]); console.log(e.projectPath());' \
+  "$ROOT/plugins/fnd/scripts/env-file.cjs")"
+if [ "$o_pp" = "$PP_PHYS/.claude/domaine.env" ]; then ok
+else bad PP11c-loader-same-file "env-file resolved '$o_pp', want '$PP_PHYS/.claude/domaine.env'"; fi
+
+# PP12: detection climbs the way the env layer does — a hook started in a SUBDIRECTORY answers
+# about the checkout — and stops at the repo boundary, because a marker outside this repo
+# describes somebody else's project, not this one.
+pp_eq PP12-walk-up foundation "$PPR/m-section/sections"
+mkdir -p "$PPR/gitrepo/.git" "$PPR/gitrepo/sub" "$PPR/gitrepo/sibling/layout"
+: > "$PPR/gitrepo/sibling/layout/theme.liquid"
+pp_eq PP12b-sibling-is-not-an-ancestor none "$PPR/gitrepo/sub"
+mkdir -p "$PPR/outer/snippets" "$PPR/outer/inner/.git"
+: > "$PPR/outer/snippets/@card.liquid"
+pp_eq PP12c-marker-above-the-boundary none "$PPR/outer/inner"
+# a `.git` FILE (worktree, submodule) is the same boundary as the directory
+mkdir -p "$PPR/outer/wt"; printf 'gitdir: /elsewhere\n' > "$PPR/outer/wt/.git"
+pp_eq PP12d-git-file-boundary none "$PPR/outer/wt"
+
+# PP13: an EMPTY first argument is a caller whose variable did not resolve, not "use the working
+# directory" — answering about wherever the hook happened to start is the silent wrong answer
+pp_run ""
+if [ "$pp_rc" -eq 2 ] && [ -z "$pp_out" ] && grep -q '^error=no_such_dir dir=$' "$E"; then ok
+else bad PP13-empty-arg "rc=$pp_rc out='$pp_out' err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+
+# PP14: a BOM on the first line is invisible to the developer and to JS (String.trim() strips
+# U+FEFF) — one editor's save may not silently disarm an override on the bash side only
+mkdir -p "$PPR/bom/.claude" "$PPR/bom/snippets"; : > "$PPR/bom/snippets/@card.liquid"
+printf '\357\273\277FND_PROFILE=theme\n' > "$PPR/bom/.claude/domaine.env"
+pp_eq PP14-bom-first-line theme "$PPR/bom"
+
+# PP15: an exported-but-EMPTY FND_PROFILE is a value the process env CARRIES — env-file.cjs gates
+# on `=== undefined`, so the empty string shadows both files and detection has the last word
+mkdir -p "$PPR/emptyenv/.claude" "$PPR/emptyenv/snippets"; : > "$PPR/emptyenv/snippets/@card.liquid"
+printf 'FND_PROFILE=theme\n' > "$PPR/emptyenv/.claude/domaine.env"
+pp_rc=0
+pp_out="$(FND_PROFILE= "$BASH_BIN" "$PPS" "$PPR/emptyenv" 2>"$E")" || pp_rc=$?
+if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = foundation ]; then ok
+else bad PP15-exported-empty-shadows-file "rc=$pp_rc profile='$pp_out' want='foundation'"; fi
 
 echo "scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

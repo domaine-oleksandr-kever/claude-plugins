@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export FND_HOST=claude; echo \"fnd plugin root: ${CLAUDE_PLUGIN_ROOT}\"; for f in comment-discipline plugin-feedback task-workspace untrusted-content mcp-whale; do cat \"${CLAUDE_PLUGIN_ROOT}/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"${CLAUDE_PLUGIN_ROOT}/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"${CLAUDE_PLUGIN_ROOT}/hooks/lean-code.md\" 2>/dev/null; \"${CLAUDE_PLUGIN_ROOT}/hooks/host-trace.sh\" SessionStart session-start inject 2>/dev/null; true"
+            "command": "export FND_HOST=claude; echo \"fnd plugin root: ${CLAUDE_PLUGIN_ROOT}\"; p=\"$(bash \"${CLAUDE_PLUGIN_ROOT}/scripts/project-profile.sh\" 2>/dev/null)\"; case \"$p\" in foundation|theme|none) ;; *) p=none ;; esac; echo \"fnd project profile: $p\"; cat \"${CLAUDE_PLUGIN_ROOT}/hooks/comment-discipline.md\" 2>/dev/null; [ \"$p\" = foundation ] && cat \"${CLAUDE_PLUGIN_ROOT}/hooks/comment-discipline-foundation.md\" 2>/dev/null; for f in plugin-feedback task-workspace untrusted-content mcp-whale; do cat \"${CLAUDE_PLUGIN_ROOT}/hooks/$f.md\" 2>/dev/null; done; if [ -f shopify.theme.toml ] || [ -f .env ]; then cat \"${CLAUDE_PLUGIN_ROOT}/hooks/store-access.md\" 2>/dev/null; fi; [ \"${FND_LEAN:-1}\" = \"0\" ] || cat \"${CLAUDE_PLUGIN_ROOT}/hooks/lean-code.md\" 2>/dev/null; \"${CLAUDE_PLUGIN_ROOT}/hooks/host-trace.sh\" SessionStart session-start inject 2>/dev/null; true"
           }
         ]
       }

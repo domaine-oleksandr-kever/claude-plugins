@@ -256,12 +256,13 @@ const CURSOR_PRIORITY = [
  * generator instead of shipping Claude Code wording to another host.
  * Every row is always-on rather than glob-scoped: each governs how the session works (tool results,
  * comments, the workspace), not which files are edited, and none is project-specific.
- * `hooks/store-access.md` has no rule: the Cursor shim injects it where store files are detected,
- * and a rule cannot look at the workspace. Every other `hooks/*.md` must have a row here, and every
+ * `hooks/store-access.md` and `hooks/comment-discipline-foundation.md` have no rule: the Cursor
+ * shim injects them where store files, respectively Foundation markers, are detected, and a rule
+ * cannot look at the workspace. Every other `hooks/*.md` must have a row here, and every
  * row a hook — `checkRuleOwnership` holds the two sets equal, and holds every exempt name to a
  * mention in the shim, which is the only other way a hook reaches Cursor.
  */
-const RULE_EXEMPT_HOOKS = ['store-access'];
+const RULE_EXEMPT_HOOKS = ['store-access', 'comment-discipline-foundation'];
 const CURSOR_RULES = {
   'comment-discipline': {
     description: 'Foundation comment discipline — what to document, what never to write inline.',

@@ -961,7 +961,7 @@ printf '## Probe convention\n\nProbe body.\n' > "$COPY/hooks/probe-convention.md
 "$NODE_BIN" -e '
   const fs = require("fs"), p = process.argv[1];
   const src = fs.readFileSync(p, "utf8");
-  const out = src.replace("const RULE_EXEMPT_HOOKS = [\x27store-access\x27];", "const RULE_EXEMPT_HOOKS = [\x27store-access\x27, \x27probe-convention\x27];");
+  const out = src.replace("const RULE_EXEMPT_HOOKS = [", "const RULE_EXEMPT_HOOKS = [\x27probe-convention\x27, ");
   if (out === src) { process.stderr.write("exempt list not found\n"); process.exit(1); }
   fs.writeFileSync(p, out);
 ' "$CGEN" || bad rule-exempt-shim "the RULE_EXEMPT_HOOKS line moved"

@@ -333,8 +333,17 @@ done
 has "$README" 'domaine-env.cjs list' env-cli-documented
 has "$README" '.claude/domaine.env' env-project-file-documented
 has "$README" 'ask the agent in a session' env-ask-agent-documented
+# The rows of the switch TABLE, not the whole section: two paragraphs above it name switches in
+# prose (the project-layer list, the host-divergence list), and a name-anywhere sweep is answered
+# by either of them — the row carrying the default, the effect and the Host-divergence note could
+# then be deleted with this suite green.
+ENV_SECTION="$(awk '/^### Environment switches/ { on = 1; next } on && /^## / { exit } on' "$README")"
+ENV_ROWS="$(printf '%s\n' "$ENV_SECTION" | grep '^| `' || true)"
 for k in $(grep -oE "'(FND_[A-Z0-9_]+|SHOPIFY_ADMIN_GQL_QUIET)'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs" | tr -d "'" | sort -u); do
-  has "$README" "$k" "env-known-$k"
+  case "$ENV_ROWS" in
+    *'| `'"$k"'` |'*) ok ;;
+    *) bad "env-known-row-$k" "$k is in domaine-env.cjs's KNOWN list but has no '| \`$k\` |' row in the Environment switches table" ;;
+  esac
 done
 
 # The project/global class split is a security boundary (a client repo can commit the project
@@ -363,7 +372,6 @@ done
 #                 like CLAUDE_PLUGIN_ROOT: `domaine-env set` has no business writing one, and a
 #                 user-set value would only make the log lie about which host ran the hook.
 ENV_IGNORE=" FND_VERSION FND_HOST "
-ENV_SECTION="$(awk '/^### Environment switches/ { on = 1; next } on && /^## / { exit } on' "$README")"
 if [ -n "$ENV_SECTION" ]; then ok; else bad env-section "README has no '### Environment switches' section"; fi
 for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
              "$PLUGIN_DIR/scripts" "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/opencode" "$ROOT/scripts/install.sh" \
@@ -371,9 +379,9 @@ for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
   case "$ENV_IGNORE" in *" $k "*) continue ;; esac
   if grep -qF -- "'$k'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs"; then ok
   else bad "env-unregistered-$k" "$k is read by the bundle but missing from domaine-env.cjs's KNOWN list"; fi
-  # backtick-delimited so `FND_MCP_SLIM` cannot be answered by `FND_MCP_SLIM_DIR`'s row
-  case "$ENV_SECTION" in
-    *'`'"$k"'`'*) ok ;;
+  # the row itself, not a mention in the prose around it — see ENV_ROWS above
+  case "$ENV_ROWS" in
+    *'| `'"$k"'` |'*) ok ;;
     *) bad "env-undocumented-$k" "$k is read by the bundle but has no README → Environment switches row" ;;
   esac
 done

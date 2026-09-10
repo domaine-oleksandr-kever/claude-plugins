@@ -72,8 +72,10 @@ for f in "$CANON" \
 done
 
 # Both entry scripts are documented as `./scripts/<name>.sh`, so the mode bit git carries is part
-# of the packaging: a lost +x turns a documented install command into "permission denied".
-for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh"; do
+# of the packaging: a lost +x turns a documented install command into "permission denied". The
+# profile probe is here because it is documented as a by-hand diagnostic (README, FND_PROFILE) —
+# every wiring already runs it through `bash`, so the bit is a convenience, not the contract.
+for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" "$PLUGIN_DIR/scripts/project-profile.sh"; do
   if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
 done
 
@@ -241,9 +243,10 @@ fi
 # hardcoded wiring — except OpenCode, whose paste is derived from the directory itself. Without
 # this row a new convention file reaches OpenCode alone, and a stray .md dropped into hooks/
 # reaches OpenCode users as an instruction nobody wired.
-# store-access.md is the exception on Cursor only: the shim injects it where store credentials are
-# detected instead of shipping it as an always-applied rule.
-CURSOR_SHIM_INJECTED="store-access"
+# Two files are the exception on Cursor only: the shim injects them where the workspace says so
+# (store credentials; Foundation markers) instead of shipping them as always-applied rules —
+# gen-host-adapters.cjs's RULE_EXEMPT_HOOKS is the same pair.
+CURSOR_SHIM_INJECTED="store-access comment-discipline-foundation"
 for f in "$PLUGIN_DIR"/hooks/*.md; do
   [ -f "$f" ] || continue
   n="$(basename "$f" .md)"
@@ -253,9 +256,50 @@ for f in "$PLUGIN_DIR"/hooks/*.md; do
     if grep -qF "$n" "$PLUGIN_DIR/hooks/hooks-codex.json"; then ok
     else bad "convention-codex-$n" "hooks/$n.md is in no SessionStart command of hooks-codex.json"; fi
   fi
-  if [ "$n" = "$CURSOR_SHIM_INJECTED" ]; then continue; fi
+  case " $CURSOR_SHIM_INJECTED " in *" $n "*) continue ;; esac
   if [ -f "$PLUGIN_DIR/rules/fnd-$n.mdc" ]; then ok
   else bad "convention-cursor-$n" "no rules/fnd-$n.mdc — hooks/$n.md never reaches a Cursor session"; fi
+done
+
+# --------------------------- the detection-gated pair, held equal across its three literal homes --
+# One pair of conventions is injected on detection instead of shipped statically, and THREE
+# literals say so independently: gen-host-adapters.cjs's RULE_EXEMPT_HOOKS (no Cursor rule),
+# opencode-config.cjs's ADAPTER_INJECTED (kept out of the `instructions` paste) and the list
+# above. A name in only two of them is a convention delivered twice on one host and never on
+# another — and each name has to be reachable in the two adapters that inject it, or the
+# exemption is simply a deletion.
+RULE_EXEMPT_JS="$(grep -oE 'const RULE_EXEMPT_HOOKS = \[[^]]*\]' "$PLUGIN_DIR/scripts/gen-host-adapters.cjs" \
+  | grep -oE "'[A-Za-z0-9._-]+'" | tr -d "'" | sort | tr '\n' ' ')"
+ADAPTER_INJ_JS="$(grep -oE 'const ADAPTER_INJECTED = new Set\(\[[^]]*\]' "$PLUGIN_DIR/scripts/opencode-config.cjs" \
+  | grep -oE "'[A-Za-z0-9._-]+'" | tr -d "'" | sed 's/\.md$//' | sort | tr '\n' ' ')"
+SHIM_INJ_LIST="$(printf '%s\n' $CURSOR_SHIM_INJECTED | sort | tr '\n' ' ')"
+if [ -n "$RULE_EXEMPT_JS" ] && [ "$RULE_EXEMPT_JS" = "$SHIM_INJ_LIST" ] && [ "$ADAPTER_INJ_JS" = "$SHIM_INJ_LIST" ]; then ok
+else bad detection-gated-set "gen-host-adapters='$RULE_EXEMPT_JS' opencode-config='$ADAPTER_INJ_JS' suite='$SHIM_INJ_LIST'"; fi
+for n in $SHIM_INJ_LIST; do
+  for a in opencode/fnd-plugin.js hooks/cursor-shim.cjs; do
+    if grep -qF "$n.md" "$PLUGIN_DIR/$a"; then ok
+    else bad "detection-gated-${a##*/}-$n" "$n.md is detection-gated but $a never injects it"; fi
+  done
+done
+
+# ------------------------------------ the project-layer allowlist, mirrored into two bash readers --
+# scripts/env-file.cjs's PROJECT_OK is the class boundary a client repo's committed
+# `.claude/domaine.env` is read through, and the two shell readers of the same dialect
+# (scripts/_shopify-common.sh's domaine_env(), hooks/spill-access.sh's env_get()) carry that list
+# BY HAND — env-file.cjs says so in a comment nothing ran until here. A key added to one copy and
+# not the others is a switch that reaches Node from a project file and not bash, silently.
+PROJECT_OK_JS="$("$NODE_BIN" -e '
+  const s = require(process.argv[1]).PROJECT_OK;
+  process.stdout.write([...s].sort().join(" "));
+' "$PLUGIN_DIR/scripts/env-file.cjs" 2>/dev/null)"
+if [ -n "$PROJECT_OK_JS" ]; then ok
+else bad project-ok-read "cannot read PROJECT_OK out of scripts/env-file.cjs"; fi
+for m in scripts/_shopify-common.sh hooks/spill-access.sh; do
+  arm="$(grep -oE 'FND_LEAN\|[A-Z0-9_|]+' "$PLUGIN_DIR/$m" | head -1)"
+  got="$(printf '%s' "$arm" | tr '|' '\n' | sort | tr '\n' ' ')"
+  got="${got% }"
+  if [ "$got" = "$PROJECT_OK_JS" ]; then ok
+  else bad "project-ok-mirror-${m##*/}" "$m's case list is not env-file.cjs's PROJECT_OK: '$got' vs '$PROJECT_OK_JS'"; fi
 done
 
 # ------------------------------------------- smoke-test skill wired to what it verifies --

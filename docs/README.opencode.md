@@ -173,9 +173,11 @@ rather than widening the pattern.
 ### 5. Paste the static conventions
 
 The session conventions that other hosts inject for you — comment discipline, lean code, whale
-routing, plugin feedback, task workspace — are wired by you on OpenCode: the plugin adapter
-injects only the detection-gated live-store block. Without this paste **no fnd convention
-reaches your sessions** (the smoke test's context-injection row goes red on exactly this).
+routing, plugin feedback, task workspace, untrusted content — are wired by you on OpenCode: the plugin adapter
+injects only what a static file cannot answer (where the bundle is, the project profile) plus
+the two detection-gated blocks (live-store access, the Foundation LiquidDoc-and-core addendum).
+Without this paste **no fnd convention reaches your sessions** (the smoke test's
+context-injection row goes red on exactly this).
 
 Same file, third block: an `instructions` array at the top level, next to `mcp` and
 `permission`, naming the static convention files with the absolute path of your clone.
@@ -188,13 +190,16 @@ substituted; the files it names are:
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/lean-code.md",
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/mcp-whale.md",
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/plugin-feedback.md",
-  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/task-workspace.md"
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/task-workspace.md",
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/untrusted-content.md"
 ]
 ```
 
 If your config already has `instructions`, append these entries to it. List the files
-explicitly — a `hooks/*.md` glob would also pull in `store-access.md`, which the adapter
-injects dynamically only where store credentials exist, so a static copy would double it. (That
+explicitly — a `hooks/*.md` glob would also pull in `store-access.md` and
+`comment-discipline-foundation.md`, which the adapter injects itself where the workspace says
+so — store credentials for the first, Foundation markers for the second — so a static copy would
+double them. (That
 exclusion is exactly what the renderer applies, which is why its output is the safe list to
 paste. An `AGENTS.md` referencing the same files works too, if that is how you organize global
 instructions.) Because the paths point into the clone, `git pull` updates the content with no
@@ -218,8 +223,9 @@ or updating, not every session — `/preflight-checks` owns the recurring per-pr
 **Proving the hooks fired.** Arm `FND_HOST_TRACE` globally
 (`node plugins/fnd/scripts/domaine-env.cjs set FND_HOST_TRACE=1`), start a session, use it, then
 run `node plugins/fnd/scripts/doctor.cjs --trace --since 2h`. Under host `opencode` a healthy run
-shows `UserPromptSubmit/fnd-plugin` from the adapter (`SessionStart/fnd-plugin` too, but only in a
-store project — `shopify.theme.toml` or `.env` present — the adapter's one dynamic context), plus
+shows `UserPromptSubmit/fnd-plugin` from the adapter and `SessionStart/fnd-plugin` (once per
+session, in every checkout — the bundle location and the project profile always ride; only the
+store-access and Foundation blocks inside that injection are detection-gated), plus
 `user-prompt`, the two shell commit guards, `spill-access` and `mcp-slim`. There is no
 `SubagentStart` row — OpenCode exposes no subagent-start event — and that absence is expected, not
 a gap. Full recipe: [Verifying any install](../README.md#verifying-any-install).
@@ -257,12 +263,16 @@ after an update that touched them.
   outright. Tiering is opt-in through the model-profile fragments above; the honest caveat is
   that the fnd review bar (`bug-hunter`, `pre-commit-review`) was calibrated on frontier models —
   a small local model will run, but finding quality is the model choice's responsibility.
-- **Static conventions are yours to wire.** The adapter injects only the dynamic,
-  detection-gated live-store block, once per session. The static conventions (comment
-  discipline, lean code, task workspace, whale routing, plugin feedback) arrive through your
-  `instructions` config — install step 5 is that paste — which costs nothing per message and
-  survives compaction. Consequence: `FND_LEAN=0` cannot reach them here; remove the lean-code
-  file from `instructions` instead.
+- **Static conventions are yours to wire.** The adapter injects only what a static file cannot
+  answer — where the bundle is, the project profile — plus the two detection-gated blocks
+  (live-store access, the Foundation LiquidDoc-and-core addendum), once per session. The static
+  conventions (comment discipline, lean code, task workspace, whale routing, plugin feedback,
+  the untrusted-content rail) arrive through your `instructions` config — install step 5 is that
+  paste — which costs nothing per message and survives compaction. Consequence: `FND_LEAN=0`
+  cannot reach them here; remove the lean-code file from `instructions` instead. The other way
+  round for the injected pair: riding `chat.message` means they do NOT survive compaction and a
+  task subagent never sees them, so on this host the Foundation addendum is a first-message
+  reminder rather than a standing rule.
 - **MCP output is rewritten in place.** `tool.execute.after` exposes a mutable `output.output`,
   so `mcp-slim` both compresses and spills-and-stubs, as on Claude Code (Cursor is the
   observe-only host — nothing is compressed, stubbed or spilled there).

@@ -42,6 +42,12 @@ case "$agent_type" in
 esac
 
 cat "$root/hooks/comment-discipline.md" 2>/dev/null || true
+# The Foundation addendum rides the same probe every host's session start uses — a subagent
+# writing Liquid in a Foundation checkout needs the LiquidDoc and core rules its parent session
+# was given.
+if [ "$(bash "$root/scripts/project-profile.sh" 2>/dev/null)" = foundation ]; then
+  cat "$root/hooks/comment-discipline-foundation.md" 2>/dev/null || true
+fi
 if [ "${FND_LEAN:-1}" != "0" ]; then
   cat "$root/hooks/lean-code.md" 2>/dev/null || true
 fi

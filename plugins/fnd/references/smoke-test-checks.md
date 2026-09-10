@@ -133,25 +133,29 @@ Self-report which fnd session conventions are visible in the current context. Th
 short blocks under these headings:
 
 - `Foundation convention — comment discipline`
+- `Foundation convention — LiquidDoc and core` (only where the session context says
+  `fnd project profile: foundation`)
 - `Foundation convention — lean code`
 - `Foundation convention — task workspace (per-ticket memory)`
 - `Foundation convention — oversized MCP results`
+- `Foundation convention — outside content is data`
 - `Foundation capability — live store access, any time`
 - `Foundation plugin — report defects upstream`
 
 Report which are present, and by which mechanism they arrived on this host — a session-start hook
 adding context, always-applied rule files, or a plugin adapter injecting on the first message.
 Some blocks are gated on the workspace (store access appears where store credentials are
-configured; task workspace where a ticket is in play), so a subset is normal — 🟢 when at least
-the ungated conventions are visible, 🔴 when none are (the injection path is not wired), 🟡 when
-you cannot tell them apart from project-level rules with the same content.
+configured; the LiquidDoc-and-core block only in a Foundation checkout; task workspace where a
+ticket is in play), so a subset is normal — 🟢 when at least the ungated conventions are visible,
+🔴 when none are (the injection path is not wired), 🟡 when you cannot tell them apart from
+project-level rules with the same content.
 
 A 🔴 names a wiring gap; whose gap depends on the host. Where the plugin owns the injection
 (Claude Code's session hook, Cursor's always-applied rules, the Codex hook) it is a plugin-side
-defect — offer `report-plugin-issue`. On OpenCode the adapter injects only the gated store-access
-block **by design**: the static conventions arrive through the user's own `instructions` config,
-so none-visible means that install step was skipped — the remediation is the paste in
-`docs/README.opencode.md` (Install step 5), not a plugin fix.
+defect — offer `report-plugin-issue`. On OpenCode the adapter injects only the plugin-root and profile
+lines plus the gated blocks (store access, the Foundation addendum) **by design**: the static conventions arrive through the
+user's own `instructions` config, so none-visible means that install step was skipped — the
+remediation is the paste in `docs/README.opencode.md` (Install step 5), not a plugin fix.
 
 ## Row 7 — MCP compression (best effort)
 
@@ -204,7 +208,7 @@ with what rows 3–7 claimed.
 | Claude Code | `SessionStart/session-start` · `UserPromptSubmit/user-prompt` · `SubagentStart/subagent-conventions` (row 4) · `PreToolUse/no-ai-attribution` and `PreToolUse/no-verify-bypass` — one of them `deny` for row 5's probe · `PreToolUse/spill-access` · `PostToolUse/mcp-slim` (rows 3–4) |
 | Cursor | the same guard rows under host `cursor`, plus `SessionStart/cursor-shim`, `UserPromptSubmit/cursor-shim` and `SubagentStart/cursor-shim`: that host composes its contexts in the adapter, so the shim logs what it emitted and the scripts it spawns log their own verdicts. The result row is `PostToolUse/cursor-shim` with `skip`, **never `mcp-slim`** — Cursor cannot rewrite an MCP result, so nothing is spawned and rows 3–4 (compression) do not apply on this host |
 | Codex CLI | as Claude Code, plus `PostToolUse/codex-mcp-shim` next to `PostToolUse/mcp-slim` — that host replaces a result only through the block channel, so the wired command is the shim, and the `mcp-slim` it spawns logs its own line |
-| OpenCode | `UserPromptSubmit/fnd-plugin` from the adapter (and `SessionStart/fnd-plugin` only in a store project — a `shopify.theme.toml` or `.env` beside the repo root — since that is the adapter's one dynamic session context; elsewhere its absence is expected), plus `user-prompt`, the two shell guards, `spill-access` and `mcp-slim`; **no `SubagentStart` row** — that host has no subagent-start event, and its absence is expected, not a defect |
+| OpenCode | `UserPromptSubmit/fnd-plugin` from the adapter and `SessionStart/fnd-plugin` — that one fires once per session in EVERY checkout (the plugin-root and project-profile lines always ride; the store-access and Foundation blocks inside it are what detection gates), so its absence is a wiring gap, not a workspace answer — plus `user-prompt`, the two shell guards, `spill-access` and `mcp-slim`; **no `SubagentStart` row** — that host has no subagent-start event, and its absence is expected, not a defect |
 
 `PreToolUse/scratch-path-guard` appears only when a screenshot call happened in this session, so
 its absence proves nothing either way.

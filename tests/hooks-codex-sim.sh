@@ -17,8 +17,10 @@
 #             injection composed by a shell command — records itself.
 #   S cases — SessionStart through the wiring: per-file tolerance, FND_LEAN gate, store-access
 #             detection, always exit 0, the real plugin root's whale instruction — plus the two
-#             root env vars Codex sets (CLAUDE_PLUGIN_ROOT alias and PLUGIN_ROOT) and the
-#             injected size measured against Codex's ~2500-token additionalContextLimit.
+#             root env vars Codex sets (CLAUDE_PLUGIN_ROOT alias and PLUGIN_ROOT), the
+#             injected size measured against Codex's ~2500-token additionalContextLimit, and
+#             S11–S14 the project-profile line with the Foundation addendum it gates (including
+#             through PLUGIN_ROOT alone, this host's own root variable).
 #   G cases — UserPromptSubmit gate: FND_CTX_MONITOR / FND_PROMPT_JSON semantics through the
 #             Codex command, node failure never fails the hook.
 #   U cases — UserPromptSubmit end-to-end with real node: a guard block reaches stdout as
@@ -64,9 +66,12 @@
 set -u
 
 # A developer watching the live compressor log must not have fixture noise appended to it, and
-# their exported switches must not leak into the cases. Same reason for the host-proof log — and
-# an exported FND_HOST would rewrite the `host` column the W12 cases pin.
-unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_MCP_SLIM_STUB FND_LEAN FND_CTX_MONITOR FND_PROMPT_JSON
+# their exported switches must not leak into the cases — FND_PROFILE included: it overrides the
+# session-start profile probe, which decides whether the Foundation addendum is injected. Same
+# reason for the host-proof log — and an exported FND_HOST would rewrite the `host` column the
+# W12 cases pin.
+unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_MCP_SLIM_STUB FND_LEAN FND_CTX_MONITOR FND_PROMPT_JSON \
+      FND_PROFILE
 export FND_HOST_TRACE=0; unset FND_HOST # `0`, not unset: unset falls through to the developer's real global env file
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -77,6 +82,12 @@ RULES="$PLUG/hooks/no-verify.rules"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+# A real ~/.config/domaine/env on this machine would inject switches into every hook under test
+# (they load it via env-file.cjs, and the profile probe reads it by hand) — point the global layer
+# at a sandbox path under $TMP, so the trap above owns its removal.
+mkdir -p "$TMP/xdg"
+export XDG_CONFIG_HOME="$TMP/xdg"
 
 pass=0; fail=0; failures=""
 ok()  { pass=$((pass+1)); }
@@ -168,11 +179,11 @@ assert_eq W4-posttooluse "$(wcmd PostToolUse 0)" \
 
 # W5: every script the wiring names exists in the canonical hooks dir (single-copy: no forked
 # per-host copy of a guard or of the compressor).
-scripts="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$WIRING" | grep -oE 'hooks/[a-z0-9-]+\.(cjs|sh)' | sort -u)"
+scripts="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$WIRING" | grep -oE '(hooks|scripts)/[a-z0-9-]+\.(cjs|sh)' | sort -u)"
 for s in $scripts; do
   if [ -f "$PLUG/$s" ]; then ok; else bad "W5-$s" "wiring names a file that does not exist"; fi
 done
-assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 8
+assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 9
 
 # W6: PreToolUse matcher — Codex regex, covering every spelling of the shell tool and nothing else.
 pm="$(jq -r '.hooks.PreToolUse[0].matcher' "$WIRING")"
@@ -311,6 +322,9 @@ fake="$TMP/plugroot"; mkdir -p "$fake/hooks"
 for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
   echo "MARK-$f" > "$fake/hooks/$f.md"
 done
+# Its own sentinel word: the plain convention's marker is a PREFIX of this file's name, and an
+# `assert_absent MARK-comment-discipline` would then read the addendum as the block it denies.
+echo "MARK-foundation-addendum" > "$fake/hooks/comment-discipline-foundation.md"
 SS_STORE="$TMP/ss-store"; mkdir -p "$SS_STORE"; : > "$SS_STORE/shopify.theme.toml"
 SS_ENV="$TMP/ss-env";     mkdir -p "$SS_ENV";   : > "$SS_ENV/.env"
 SS_PLAIN="$TMP/ss-plain"; mkdir -p "$SS_PLAIN"
@@ -366,13 +380,77 @@ assert_absent   S8-no-shadow  "$out" "MARK-WRONG"
 out="$(cd "$SS_PLAIN" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S9-no-root-exit "$ec" 0
 
-# S10: injected size vs Codex's ~2500-token additionalContextLimit (its own spill dir catches the
+# Injected size vs Codex's ~2500-token additionalContextLimit (its own spill dir catches the
 # rest, but a session-start block that always spills is a design smell). 4 B/token is the
 # conservative reading for markdown prose.
+budget_lt() { # <label> <ceiling-bytes> <text>
+  _bl=$(printf '%s' "$3" | wc -c | tr -d ' ')
+  if [ "$_bl" -lt "$2" ]; then ok
+  else bad "$1" "injects $_bl B (~$((_bl / 4)) tok) — over Codex's ~2500-token additionalContextLimit"; fi
+}
+
+# S10: the ordinary store session.
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$PLUG" bash -c "$SS_CMD" 2>/dev/null)"
-bytes=$(printf '%s' "$out" | wc -c | tr -d ' ')
-if [ "$bytes" -lt 10000 ]; then ok
-else bad S10-context-budget "SessionStart injects $bytes B (~$((bytes / 4)) tok) — over Codex's ~2500-token additionalContextLimit"; fi
+budget_lt S10-context-budget 10000 "$out"
+
+# S11: the profile line before the probe is in the bundle — a partial install still prints one
+# (the fail-open `none`) and still says everything else it owes, on stderr as silently as ever
+SS_FND="$TMP/ss-foundation"; mkdir -p "$SS_FND/snippets"; : > "$SS_FND/snippets/@card.liquid"
+SS_THEME="$TMP/ss-theme";    mkdir -p "$SS_THEME/layout"; : > "$SS_THEME/layout/theme.liquid"
+out="$(cd "$SS_FND" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>"$TMP/ss-noprobe.err")"; ec=$?
+assert_eq       S11-no-probe-exit     "$ec" 0
+assert_eq       S11-no-probe-stderr   "$(cat "$TMP/ss-noprobe.err")" ""
+assert_contains S11-no-probe-profile  "$out" "fnd project profile: none"
+assert_absent   S11-no-probe-addendum "$out" "MARK-foundation-addendum"
+
+mkdir -p "$fake/scripts"
+cp "$PLUG/scripts/project-profile.sh" "$fake/scripts/project-profile.sh"
+
+# S12: a Foundation checkout gets the profile line and the addendum, right behind the block it
+# extends; a plain theme and a bare directory get the line alone
+out="$(cd "$SS_FND" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
+assert_eq       S12-foundation-exit     "$ec" 0
+assert_contains S12-foundation-profile  "$out" "fnd project profile: foundation"
+assert_contains S12-foundation-addendum "$out" "MARK-foundation-addendum"
+# Adjacency, not just order: the addendum EXTENDS the block above it, so another convention
+# landing between the two would read as a section of its own.
+s12_cd="$(printf '%s\n' "$out" | grep -n '^MARK-comment-discipline$' | cut -d: -f1 | head -1)"
+s12_ad="$(printf '%s\n' "$out" | grep -n '^MARK-foundation-addendum$' | cut -d: -f1 | head -1)"
+s12_between="$(printf '%s\n' "$out" | grep -n '^MARK-' | cut -d: -f1 \
+  | awk -v a="${s12_cd:-0}" -v b="${s12_ad:-0}" '$1 > a && $1 < b' | wc -l | tr -d ' ')"
+if [ -n "$s12_cd" ] && [ -n "$s12_ad" ] && [ "$s12_ad" -gt "$s12_cd" ] && [ "$s12_between" -eq 0 ]; then ok
+else bad S12-addendum-follows-comment "comment=$s12_cd addendum=$s12_ad blocks-between=$s12_between"; fi
+out="$(cd "$SS_THEME" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"
+assert_contains S12-theme-profile   "$out" "fnd project profile: theme"
+assert_absent   S12-theme-addendum  "$out" "MARK-foundation-addendum"
+out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"
+assert_contains S12-none-profile    "$out" "fnd project profile: none"
+assert_absent   S12-none-addendum   "$out" "MARK-foundation-addendum"
+
+# S13: through PLUGIN_ROOT alone — this host's own root variable has to reach the probe too, or
+# the profile silently reads `none` on every Codex session that only sets it
+out="$(cd "$SS_FND" && env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
+assert_eq       S13-plugin-root-exit     "$ec" 0
+assert_contains S13-plugin-root-profile  "$out" "fnd project profile: foundation"
+assert_contains S13-plugin-root-addendum "$out" "MARK-foundation-addendum"
+# …and with no root at all the command still exits 0 and still prints a profile
+out="$(cd "$SS_FND" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
+assert_eq       S13-no-root-exit    "$ec" 0
+assert_contains S13-no-root-profile "$out" "fnd project profile: none"
+
+# S14: FND_PROFILE forces the answer, and the REAL bundle stays inside Codex's ~2500-token
+# additionalContextLimit in the session that composes the MOST — both gates open at once. A
+# Foundation checkout is a Shopify theme repo, so it ships shopify.theme.toml too: measuring
+# either gate alone (S10 is the ordinary store session) leaves the real ceiling unwatched.
+out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" FND_PROFILE=foundation bash -c "$SS_CMD" 2>/dev/null)"
+assert_contains S14-forced-profile  "$out" "fnd project profile: foundation"
+assert_contains S14-forced-addendum "$out" "MARK-foundation-addendum"
+SS_MAX="$TMP/ss-max"; mkdir -p "$SS_MAX/snippets"
+: > "$SS_MAX/snippets/@card.liquid"; : > "$SS_MAX/shopify.theme.toml"
+out="$(cd "$SS_MAX" && CLAUDE_PLUGIN_ROOT="$PLUG" bash -c "$SS_CMD" 2>/dev/null)"
+assert_contains S14-max-profile   "$out" "fnd project profile: foundation"
+assert_contains S14-max-store     "$out" "live store access"
+budget_lt S14-context-budget 10000 "$out"
 
 # ═══ G — UserPromptSubmit gate ══════════════════════════════════════════════
 UPS_CMD="$(wcmd UserPromptSubmit)"

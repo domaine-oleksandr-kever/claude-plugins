@@ -31,6 +31,7 @@ flowchart TB
     H5["scratch-path-guard.cjs · spill-access.sh"]
     H6["mcp-slim.cjs"]
     H7["host-trace.sh / .cjs"]
+    H8["scripts/project-profile.sh (checkout profile probe)"]
   end
 
   subgraph model["What the model reads"]
@@ -56,6 +57,8 @@ flowchart TB
   CX --> W3 --> canon
   OC --> W4 --> canon
   canon --> H7
+  H1 --> H8
+  H3 --> H8
   S --> scripts
   A --> P3
   H6 --> P2
@@ -79,7 +82,7 @@ sequenceDiagram
   participant Tool as Tool / MCP server
 
   Host->>Hooks: SessionStart
-  Hooks-->>Model: plugin root + conventions (comment discipline, lean code, task workspace, whale routing, untrusted content, store access)
+  Hooks-->>Model: plugin root + project profile + conventions (comment discipline, LiquidDoc-and-core addendum in a foundation checkout, lean code, task workspace, whale routing, untrusted content, plugin feedback, store access)
   Host->>Hooks: UserPromptSubmit
   Hooks-->>Model: context-budget monitor, prompt-JSON guard (hands a pasted blob back as a file)
   Host->>Hooks: SubagentStart
@@ -135,7 +138,7 @@ Per host, the result rewrite is a capability of the host, not of the plugin:
 | Host | Session context | Prompt hook | Subagent conventions | Shell guards | Screenshot guard | Spill access | MCP result rewrite |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | hook | yes | yes | yes | yes | yes | **yes** — compressed or stubbed in place |
-| OpenCode | adapter (store projects) | yes | no event on this host | yes | **no** — `tool.execute.before` reaches only the bash tool | yes | **yes** — the adapter rewrites `output.content` |
+| OpenCode | adapter (every project) | yes | no event on this host | yes | **no** — `tool.execute.before` reaches only the bash tool | yes | **yes** — the adapter rewrites `output.content` |
 | Codex CLI | hook | yes | yes | yes | yes | yes | **yes** — compress **and** stub, returned as a PostToolUse `block` reason (capped 10 KB); over-cap ⇒ stub, a non-text block ⇒ `additionalContext` |
 | Cursor | rules + shim | shim | shim (unverified) | shim | shim | shell reads only | **no** — `afterMCPExecution` has no response schema; the shim only logs that it fired |
 
@@ -214,9 +217,10 @@ flowchart LR
   NOTE["global-only switches never read the project file<br/>(FND_HOST_TRACE)"] -.-> READ
 ```
 
-Every `FND_*` switch is listed in README → Environment switches; each is read through the
-same loader, and the hooks pre-gate on the cheap ones in the wiring so a disabled feature spawns
-no process.
+Every `FND_*` switch is listed in README → Environment switches; each is read through the same
+loader, or through a bash reader that mirrors it by hand (`project-profile.sh`,
+`_shopify-common.sh`, `spill-access.sh`) — `tests/layout-assertions.sh` holds the copies equal.
+The hooks pre-gate on the cheap ones in the wiring so a disabled feature spawns no process.
 
 ## 7. Tests, release, install
 

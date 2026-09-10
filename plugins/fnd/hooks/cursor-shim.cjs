@@ -19,9 +19,10 @@
 //                           (M4), so injecting them here too would duplicate every one of
 //                           them in context. What a rule file cannot do is look at the
 //                           workspace: the plugin-root line (store-access.md resolves its
-//                           script paths against it) and the store-access convention
-//                           itself, gated on the same store-file detection the Claude Code
-//                           wiring does.
+//                           script paths against it), the project-profile line, the
+//                           store-access convention itself — gated on the same store-file
+//                           detection the Claude Code wiring does — and the Foundation
+//                           addendum comment-discipline-foundation.md, gated on the profile.
 //   beforeSubmitPrompt    → hooks/user-prompt.cjs (context monitor + large-JSON guard).
 //   subagentStart         → hooks/subagent-conventions.sh.
 //   beforeShellExecution  → hooks/no-ai-attribution.sh + hooks/no-verify-bypass.sh, then
@@ -80,7 +81,8 @@
 // subagent-conventions.sh, but NOT at sessionStart on this host — the lean-code convention
 // arrives as rules/fnd-lean-code.mdc there (README "Environment switches"). It WRITES one:
 // FND_HOST=cursor, for itself and for every script it spawns, which is the `host` column of the
-// FND_HOST_TRACE log.
+// FND_HOST_TRACE log. And it UNSETS one: an FND_PROFILE that came from a domaine env FILE, which
+// the workspace probe re-derives (module scope, below).
 'use strict';
 
 const fs = require('fs');
@@ -93,6 +95,16 @@ const { spawnSync } = require('child_process');
 // Absent in a partial install — the shim must keep guarding without it.
 let DOMAINE_ENV = { applied: {}, files: {} };
 try { DOMAINE_ENV = require('../scripts/env-file.cjs').load(); } catch (_) {}
+// load() ran at module scope, where the cwd is the PLUGIN directory Cursor launches hook processes
+// from: on this host the project layer of every OTHER tuning key answers about the bundle, i.e. is
+// effectively global-only, and a repo's committed `.claude/domaine.env` never reaches them.
+// FND_PROFILE is the one key with a workspace-aware reader of its own (scripts/project-profile.sh,
+// same two files, read from the workspace), so the bundle's answer is dropped instead of carried
+// forward wrong. A value the user really exported was never `applied` and stays.
+if (DOMAINE_ENV.applied.FND_PROFILE !== undefined) {
+  delete DOMAINE_ENV.applied.FND_PROFILE;
+  delete process.env.FND_PROFILE;
+}
 
 // FND_HOST_TRACE, the host-proof log. Set on this process rather than by the wiring: the trace
 // helper reads the host out of the env, and hooks-cursor.json's commands are shared with the
@@ -147,7 +159,8 @@ function crossCheckRoot() {
   }
 }
 
-// Run one canonical hook script with Claude-protocol JSON on stdin. SPAWNED, not required:
+// Run one bundled script — a canonical hook with Claude-protocol JSON on stdin, or the
+// project-profile probe with none. SPAWNED, not required:
 // user-prompt.cjs and mcp-slim.cjs are entry points that read stdin and print a decision, and
 // requiring them would mean either editing them to export their entry (the one thing this
 // port may not do) or re-implementing it here — for the price of one extra node startup
@@ -161,13 +174,16 @@ function crossCheckRoot() {
 // under Cursor's leak bug that script would read another plugin's bundle, find no convention
 // files, and exit 0 with empty stdout — a silent no-injection nobody can see. Passing the root
 // we resolved keeps the single-copy scripts unedited and makes the env agree with reality.
-function runScript(name, stdin) {
+function runScript(name, stdin, cwd) {
   const file = path.join(HOOKS_DIR, name);
   const opts = {
     input: stdin,
     timeout: SPAWN_TIMEOUT_MS,
     maxBuffer: SPAWN_MAX_BUFFER,
     encoding: 'utf8',
+    // Only the probe passes one: every other script here reads the directory out of its stdin
+    // payload, while a shell probe answers about the directory it stands in.
+    cwd: cwd || undefined,
     env: {
       ...process.env,
       CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
@@ -198,7 +214,7 @@ function readFileOr(p, fallback) {
 // Cursor reports the open folders as `workspace_roots`; the store detection below needs the
 // same directory the Claude Code wiring reads with `[ -f shopify.theme.toml ]`, i.e. where
 // the session actually runs.
-function workspaceRoot(payload) {
+function pickWorkspaceRoot(payload) {
   const roots = payload.workspace_roots;
   if (Array.isArray(roots) && typeof roots[0] === 'string' && roots[0]) return roots[0];
   for (const k of ['workspace_root', 'cwd', 'project_root']) {
@@ -207,17 +223,42 @@ function workspaceRoot(payload) {
   return process.cwd();
 }
 
+// Absolute, and resolved exactly ONCE: main() chdirs into this directory, so re-resolving a
+// RELATIVE payload root afterwards would join it onto itself (`ws` → `ws/ws`) and every later
+// caller — the probe cwd, the store-file test — would ask about a directory that is not there.
+let WORKSPACE_ROOT = null;
+function workspaceRoot(payload) {
+  if (WORKSPACE_ROOT === null) WORKSPACE_ROOT = path.resolve(pickWorkspaceRoot(payload));
+  return WORKSPACE_ROOT;
+}
+
 function firstDefined(payload, keys) {
   for (const k of keys) if (payload[k] !== undefined) return payload[k];
   return undefined;
 }
 
 // ── sessionStart ────────────────────────────────────────────────────────────────────────
+// Which kind of checkout this is, straight from scripts/project-profile.sh — the one place the
+// detection lives, on every host. A probe that is missing or cannot run answers `none`: a
+// session start may not fail over an addendum, and one convention less is the harmless side.
+function projectProfile(cwd) {
+  const r = runScript(path.join('..', 'scripts', 'project-profile.sh'), '', cwd);
+  const value = String(r.stdout || '').trim();
+  return ['foundation', 'theme', 'none'].includes(value) ? value : 'none';
+}
+
 function sessionStart(payload) {
   const cwd = workspaceRoot(payload);
+  const profile = projectProfile(cwd);
   // store-access.md spells its runner paths "relative to the plugin root above", so the
   // root line is part of that block's contract, not a debug echo.
-  const parts = [`fnd plugin root: ${PLUGIN_ROOT}`];
+  const parts = [`fnd plugin root: ${PLUGIN_ROOT}`, `fnd project profile: ${profile}`];
+  // The rest of comment-discipline is an always-applied rule here; only this addendum depends
+  // on the workspace, which is what no rule file can look at.
+  if (profile === 'foundation') {
+    const text = readFileOr(path.join(HOOKS_DIR, 'comment-discipline-foundation.md'), '');
+    if (text) parts.push(text);
+  }
   const storeFiles = ['shopify.theme.toml', '.env'];
   if (storeFiles.some((f) => fs.existsSync(path.join(cwd, f)))) {
     const text = readFileOr(path.join(HOOKS_DIR, 'store-access.md'), '');

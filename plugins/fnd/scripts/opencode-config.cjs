@@ -22,9 +22,10 @@ const MCP_REL = 'plugins/fnd/opencode/mcp-fragment.json';
 const PERM_REL = 'plugins/fnd/opencode/permission-fragment.example.json';
 const GENERATOR = 'node plugins/fnd/scripts/gen-host-adapters.cjs';
 
-// The one static convention the adapter injects itself, wherever store credentials are detected.
-// A static copy would deliver it a second time in exactly the sessions that already have it.
-const ADAPTER_INJECTED = 'store-access.md';
+// The conventions the adapter injects itself, wherever it detects what gates them (store
+// credentials; Foundation markers). A static copy would deliver one a second time in exactly the
+// sessions that already have it.
+const ADAPTER_INJECTED = new Set(['store-access.md', 'comment-discipline-foundation.md']);
 
 function realOrSelf(p) {
   try {
@@ -111,7 +112,7 @@ function readInstructions() {
   // and an unordered render makes every re-run look like a config change. The stat drops entries
   // a host could not read anyway — a directory named `*.md`, a dangling link.
   const statics = names
-    .filter((n) => n.endsWith('.md') && n !== ADAPTER_INJECTED)
+    .filter((n) => n.endsWith('.md') && !ADAPTER_INJECTED.has(n))
     .sort()
     .map((n) => path.join(HOOKS_DIR, n))
     .filter(isFile);

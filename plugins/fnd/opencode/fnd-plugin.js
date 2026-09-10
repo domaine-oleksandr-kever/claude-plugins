@@ -17,9 +17,10 @@
 //     untrusted content, plugin feedback) are NOT injected here. On OpenCode they belong in the user's
 //     `instructions` config (or an AGENTS.md), which costs nothing per message and survives
 //     compaction; injecting them from a message hook would re-pay them per session at best.
-//     Only the detection-gated store-access block is dynamic, so it is the only one injected —
-//     once per session, on the first chat.message (session.created carries no message to
-//     attach context to).
+//     What is left is what a static file cannot answer — where this bundle is, which kind of
+//     checkout this is, and the two detection-gated blocks (store access, the Foundation
+//     addendum) — so that is what is injected, once per session, on the first chat.message
+//     (session.created carries no message to attach context to).
 //   - a blocked prompt has no analogue here (nothing can erase a message), but a message CAN
 //     be rewritten: when the prompt-JSON guard blocks, each blob it already spilled is
 //     replaced in place by its `full=` handle, so the paste is offloaded exactly as on Claude
@@ -86,6 +87,9 @@ try {
 } catch (_) {} // partial install → no tracing, no crash
 
 const GUARD_TIMEOUT_MS = 10000;
+// The profile probe is a handful of builtin `test`s with no network and no node startup, and it
+// sits in front of the first message of every session — a ceiling this tight still never fires.
+const PROBE_TIMEOUT_MS = 2000;
 // mcp-slim's own wall-clock budget defaults to 5 s and applies to the pipeline only, so the
 // process ceiling has to sit above it plus spawn and I/O of a multi-MB payload.
 const SLIM_TIMEOUT_MS = 30000;
@@ -154,7 +158,7 @@ async function recordSpillAccess(claudeTool, args, cwd) {
 
 // Run a hook script to completion. Never rejects: the caller decides what a failure means,
 // and for every caller here that decision is "carry on untouched".
-function runScript(bin, args, stdin, timeoutMs) {
+function runScript(bin, args, stdin, timeoutMs, cwd) {
   return new Promise((resolve) => {
     let child;
     try {
@@ -163,6 +167,9 @@ function runScript(bin, args, stdin, timeoutMs) {
       // otherwise send a canonical script reading the wrong bundle.
       child = spawn(bin, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Only the project-profile probe passes a cwd: every other script reads the directory out
+        // of its stdin payload, while a shell probe answers about the directory it stands in.
+        cwd: cwd || undefined,
         // FND_HOST: the child writes its own trace line, and only the adapter knows the host.
         env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, FND_HOST: 'opencode' },
       });
@@ -240,15 +247,28 @@ function injectContext(parts, text) {
   return false;
 }
 
-// store-access.md is the one sessionStart block Claude Code gates on project DETECTION rather
-// than on an env switch, so it is the one that cannot move into a static instructions file.
-// The plugin-root line comes with it because the block's paths are written relative to it.
-function dynamicSessionContext(cwd) {
-  const shopify = path.join(cwd, 'shopify.theme.toml');
-  const dotenv = path.join(cwd, '.env');
-  if (!fs.existsSync(shopify) && !fs.existsSync(dotenv)) return null;
-  const md = readFile(path.join(HOOKS, 'store-access.md'));
-  return md ? `fnd plugin root: ${PLUGIN_ROOT}\n\n${md}` : null;
+// The two sessionStart blocks Claude Code gates on project DETECTION rather than on an env
+// switch — store-access.md and the Foundation addendum — are the ones that cannot move into a
+// static instructions file. The plugin-root line ships with them (store-access.md's paths are
+// written relative to it) and so does the profile line, which is what the addendum's absence
+// otherwise leaves unexplained; both are cheap and deterministic, so they ride every session.
+// The profile itself comes from scripts/project-profile.sh, the single source on every host —
+// a probe that cannot run answers `none`, and the session simply carries one block less.
+async function dynamicSessionContext(cwd) {
+  const parts = [`fnd plugin root: ${PLUGIN_ROOT}`];
+  const r = await runScript('bash', [path.join(PLUGIN_ROOT, 'scripts', 'project-profile.sh')], '', PROBE_TIMEOUT_MS, cwd);
+  const printed = String(r.stdout || '').trim();
+  const profile = ['foundation', 'theme', 'none'].includes(printed) ? printed : 'none';
+  parts.push(`fnd project profile: ${profile}`);
+  if (profile === 'foundation') {
+    const md = readFile(path.join(HOOKS, 'comment-discipline-foundation.md'));
+    if (md) parts.push(md);
+  }
+  if (fs.existsSync(path.join(cwd, 'shopify.theme.toml')) || fs.existsSync(path.join(cwd, '.env'))) {
+    const md = readFile(path.join(HOOKS, 'store-access.md'));
+    if (md) parts.push(md);
+  }
+  return parts.join('\n\n');
 }
 
 // Offload what the guard already spilled. The guard's block reason names the files it wrote,
@@ -304,10 +324,10 @@ export const FndPlugin = async (ctx = {}) => {
           // arm the block for every later message in the session.
           if (seen.size > 500) seen.clear();
           seen.add(sessionID);
-          const context = dynamicSessionContext(cwd);
+          const context = await dynamicSessionContext(cwd);
           // Its own line, under the event every other host spells SessionStart: this injection
           // IS this host's session start, and the matrix has to be able to see it fire.
-          if (context && injectContext(parts, context)) {
+          if (injectContext(parts, context)) {
             hostTrace.trace({ event: 'SessionStart', hook: 'fnd-plugin', decision: 'inject', startedAt: started });
           }
         }

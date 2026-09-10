@@ -183,7 +183,7 @@ env_get() { # $1 = key → its effective value in `_g` (a variable, not stdout: 
   # repo could silence and re-aim its own measurement. Default-deny, the same list as the CLI's.
   _pf=""
   case "$1" in
-    FND_LEAN|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET) _pf="$envf" ;;
+    FND_LEAN|FND_PROFILE|FND_CTX_MONITOR|FND_CTX_WARN|FND_CTX_WINDOW|FND_MCP_SLIM_DEBUG|FND_WHALE_GUIDE|FND_NOGAIN_MEMO|FND_GQL_PROBE_CACHE|FND_CPT_THROTTLE_WAITS|FND_CPT_OVERLAY_VERIFY_WAIT|FND_THEME_JSON_VERIFY_WAIT|SHOPIFY_ADMIN_GQL_QUIET) _pf="$envf" ;;
   esac
   # ${HOME:-}, not $HOME: `set -u` would abort the whole hook on a stripped environment (cron, a
   # sandboxed exec), and a measurement hook may never write to stderr or exit non-zero.

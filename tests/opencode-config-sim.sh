@@ -146,16 +146,19 @@ if [ "$(printf '%s\n' "$BLOCKS" | sed -n 1p | cut -c1-8)" = '{"mcp":{' ] \
 else bad D5-block-keys "blocks=$(printf '%s' "$BLOCKS" | cut -c1-40 | tr '\n' ';')"; fi
 
 # ------------------------------------------------------------------------ the statics list --
-# The single source is the hooks directory itself, minus the one file the adapter injects.
+# The single source is the hooks directory itself, minus the files the adapter injects itself
+# (opencode-config.cjs's ADAPTER_INJECTED — each one is detection-gated, so a static copy would
+# deliver it a second time in exactly the sessions that already have it).
 if fence_to "$O" 3 "$TMP/step5.json"; then ok
 else bad S1-step5-extract "the third fenced block could not be read"; fi
 
 jlines "$TMP/step5.json" instructions > "$TMP/got-instructions" 2>/dev/null || : > "$TMP/got-instructions"
-ls "$PLUGIN"/hooks/*.md | sed 's#.*/##' | grep -v '^store-access\.md$' | LC_ALL=C sort |
+ls "$PLUGIN"/hooks/*.md | sed 's#.*/##' \
+  | grep -v -e '^store-access\.md$' -e '^comment-discipline-foundation\.md$' | LC_ALL=C sort |
   sed "s#^#$HOOKS_REAL/#" > "$TMP/want-instructions"
 
 if [ -s "$TMP/want-instructions" ] && cmp -s "$TMP/got-instructions" "$TMP/want-instructions"; then ok
-else bad S2-statics-list "instructions != sorted hooks/*.md minus store-access.md:
+else bad S2-statics-list "instructions != sorted hooks/*.md minus the adapter-injected pair:
       got=$(tr '\n' ';' < "$TMP/got-instructions")
       want=$(tr '\n' ';' < "$TMP/want-instructions")"; fi
 
@@ -190,6 +193,18 @@ if [ -z "$MISSING" ]; then ok; else bad S3-absolute-and-present "$MISSING"; fi
 # a static copy of it here would deliver the block twice in exactly those sessions.
 if ! grep -q 'store-access' "$O"; then ok
 else bad S4-no-store-access "the render names store-access anyway: $(grep -n 'store-access' "$O" | head -1)"; fi
+
+# S5: docs/README.opencode.md prints the same array by hand, one step above the sentence that
+# says which files the adapter injects instead. A reader who pastes the doc block rather than
+# running the renderer gets exactly the list written there — one entry short of this render is a
+# session missing that rail, and nothing else compares the two.
+DOC="$ROOT/docs/README.opencode.md"
+sed -n '/^"instructions": \[/,/^\]/p' "$DOC" | grep -oE '[a-z0-9-]+\.md' | LC_ALL=C sort > "$TMP/doc-instructions"
+sed 's#.*/##' "$TMP/want-instructions" | LC_ALL=C sort > "$TMP/want-basenames"
+if [ -s "$TMP/doc-instructions" ] && cmp -s "$TMP/doc-instructions" "$TMP/want-basenames"; then ok
+else bad S5-doc-example-matches "docs/README.opencode.md's instructions example is not this render:
+      doc=$(tr '\n' ';' < "$TMP/doc-instructions")
+      renderer=$(tr '\n' ';' < "$TMP/want-basenames")"; fi
 
 # ------------------------------------------------------------------------ cwd independence --
 # The paths land in a config file that outlives the terminal that printed them, so they may
@@ -292,9 +307,11 @@ if [ "$RC" -eq 0 ] && grep -qxF "$EXTRA_REAL/zz-new-convention.md" "$TMP/extra-i
         "$(( $(grep -c '' "$TMP/want-instructions" | tr -d ' ') + 1 ))" ]; then ok
 else bad N1-new-convention-file "rc=$RC list=$(tr '\n' ';' < "$TMP/extra-instructions")"; fi
 
-# …and the exclusion is by name, so a new file does not smuggle store-access back in
+# …and the exclusion is by name, so a new file does not smuggle either gated block back in
 if ! grep -q 'store-access' "$O"; then ok
 else bad N2-extra-still-excludes "store-access re-appeared once another hooks file was added"; fi
+if ! grep -q 'comment-discipline-foundation' "$O"; then ok
+else bad N2b-extra-still-excludes "comment-discipline-foundation re-appeared once another hooks file was added"; fi
 
 # A name ending in .md is not yet a file a host can read. An entry OpenCode silently drops belongs
 # in nobody's config, and the render must still succeed on the real conventions beside it.

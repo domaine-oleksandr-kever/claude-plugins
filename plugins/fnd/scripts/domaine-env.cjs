@@ -28,6 +28,7 @@ const envFile = require('./env-file.cjs');
 
 const KNOWN = [
   'FND_LEAN',
+  'FND_PROFILE',
   'FND_CTX_MONITOR',
   'FND_CTX_WARN',
   'FND_CTX_WINDOW',
