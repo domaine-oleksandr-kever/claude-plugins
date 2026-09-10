@@ -7,7 +7,10 @@ screenshots it brings) is still ticket content the cache has to catch up with. C
 before re-reading the whole ticket:
 
 1. `getJiraIssue` with `cloudId: "meetdomaine.atlassian.net"`,
-   `fields: ["updated", "status", "comment", "attachment"]`, `expand: "changelog"` — history,
+   `fields: ["updated", "status", "comment", "attachment"]`, `expand: "changelog"`,
+   `responseContentFormat: "adf"` (it fetches `comment`, and only that parameter makes the
+   bodies ADF with the filename in each `media` node's `attrs.alt` — omitting it returns
+   markdown strings with empty-alt `blob:` images) — history,
    the comment field, whose **bodies you never read here** (only its `total` and the newest
    `created`, both via `jq`), and the attachment metadata the attachments step of step 3 is
    built on (ids, filenames, mime types — no bodies, so it is cheap). Entries come **newest first**. The response is often huge; when
@@ -32,9 +35,13 @@ before re-reading the whole ticket:
    (or that file is missing while the ticket has comments) → **comment-only refresh**: run
    the comments step and the attachments step of your prompt, rewrite `comments.md` and
    `ticket.md`'s `## Attachments` section, leave every other cached field untouched, and
-   return. Step 1's response is the input for both — it requested no
-   `responseContentFormat`, so the comment bodies are already ADF (no second field read here),
-   and its `attachment` field is the metadata the attachments step decides on:
+   return. Step 1's response is the input for both — it requested
+   `responseContentFormat: "adf"`, so the comment bodies are already ADF (no second field read
+   here) and `adf-to-md.cjs <file> --comments` decodes them straight from it (the converter
+   unwraps the MCP envelope and `--comments` implies `--media`); its `attachment` field is the
+   metadata the attachments step decides on. The `comments` lines returned here follow the same
+   rule as a full read — the first 160 characters of each comment **verbatim**, never
+   paraphrased — and `comment_links` carries every URL they hold:
 
    ```
    no_content_change: true

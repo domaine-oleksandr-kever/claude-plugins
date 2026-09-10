@@ -16,7 +16,16 @@
  *   node adf-to-md.cjs <file.json> --media              # media nodes → ![<alt>](jira-media:<id>)
  *   cat adf.json | node adf-to-md.cjs                   # stdin
  * Prints Markdown to stdout. Unknown node types degrade gracefully (render their children/text).
- * --comments and --media combine; --comments with --field is an error (exit 2).
+ * --comments IMPLIES --media (a comment's images are the join key to the attachment rows, and a
+ * caller that forgets the flag would silently lose them); --media alone keeps its meaning for
+ * every other input, where the default stays `_(media omitted)_`. --comments with --field is an
+ * error (exit 2).
+ *
+ * --field and --comments accept the Atlassian MCP envelope as well as a plain getJiraIssue
+ * response: `{"issues":{"nodes":[<issue>]},"context":{…}}` is unwrapped to its single node
+ * (0 or >1 nodes → exit 2 naming the count). --comments on an input with no `fields.comment`
+ * exits 2 rather than printing nothing — an empty `comments` array is still "no comments",
+ * empty stdout and exit 0.
  *
  * The markdown is written so md-to-adf.cjs can read it BACK unchanged (the fnd flow reads a
  * field, edits it, writes it back): literal prose that starts with a structure marker is
@@ -50,6 +59,10 @@ const fs = require('fs');
 // printed inside readJSON: the CLI then has ONE stdout write and no process.exit racing it.
 let plainField = null;
 
+// The name of the input in error messages: a caller that converted the WRONG file (the inline
+// MCP text instead of the spill) has to see which one this was.
+let inputLabel = 'stdin';
+
 function readJSON() {
   const args = process.argv.slice(2);
   const fi = args.indexOf('--field');
@@ -60,6 +73,7 @@ function readJSON() {
   }
   // skip the --field VALUE when looking for the input file arg
   const fileArg = args.find((a, i) => !a.startsWith('--') && (fi === -1 || i !== fi + 1));
+  if (fileArg) inputLabel = fileArg;
   let raw;
   try {
     raw = fileArg ? fs.readFileSync(fileArg, 'utf8') : fs.readFileSync(0, 'utf8');
@@ -71,6 +85,25 @@ function readJSON() {
   try { data = JSON.parse(raw); } catch (e) {
     process.stderr.write('adf-to-md: input is not valid JSON: ' + e.message + '\n');
     process.exit(1);
+  }
+  // The Atlassian MCP wraps a getJiraIssue response as {"issues":{"nodes":[<issue>]},"context":{…}}
+  // — the issue's `fields` (and with them the ADF comment bodies) sit one level down, so a
+  // --field/--comments run against the raw response found nothing and printed nothing. Unwrap the
+  // single node; a count other than 1 is refused by name instead of guessed at. A response that
+  // already carries `fields` is used as-is, so plain getJiraIssue responses and bare ADF docs are
+  // untouched. (The node also carries a sibling top-level `comments[]` of MARKDOWN strings whose
+  // images are empty-alt blob: links — useless for the attachment join, deliberately ignored.)
+  if (fieldId || args.includes('--comments')) {
+    const wrapped = data && typeof data === 'object' && !data.fields
+      && data.issues && Array.isArray(data.issues.nodes) ? data.issues.nodes : null;
+    if (wrapped) {
+      if (wrapped.length !== 1) {
+        process.stderr.write('adf-to-md: expected 1 issue in issues.nodes, found '
+          + wrapped.length + ' in ' + inputLabel + '\n');
+        process.exit(2);
+      }
+      data = wrapped[0];
+    }
   }
   if (fieldId) {
     const has = (o, k) => o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
@@ -613,7 +646,10 @@ if (require.main === module) {
   quietOnEpipe(process.stdout);
   quietOnEpipe(process.stderr);
   const argv = process.argv.slice(2);
-  mediaMode = argv.includes('--media');
+  // --comments implies --media: the `![<filename>](jira-media:<id>)` refs ARE the join between a
+  // comment's inline image and its attachment row, so a caller that forgot --media must not get a
+  // thread of `_(media omitted)_` markers back.
+  mediaMode = argv.includes('--media') || argv.includes('--comments');
   if (argv.includes('--comments')) {
     // --field extracts ONE field's ADF; the comment walk needs the whole response, and silently
     // picking one of the two would hand the caller the wrong document. Checked before the read,
@@ -625,7 +661,16 @@ if (require.main === module) {
     // NO process.exit after the write: stdout to a pipe is async, and exiting discards everything
     // past one pipe buffer (64 KB) — a long comment thread lost its tail with exit 0 and no error.
     // Ending naturally keeps that, the empty-comments exit 0, and the EPIPE handling above.
-    const out = renderComments(readJSON());
+    const data = readJSON();
+    // No comment field at all = the wrong document was converted (the inline MCP text instead of
+    // the spill, or a read without fields:["comment"]). Silent empty stdout sent two live reads
+    // back to the useless markdown bodies; an empty `comments` ARRAY stays "no comments" (exit 0).
+    if (!data || typeof data !== 'object' || !data.fields
+      || !data.fields.comment || typeof data.fields.comment !== 'object') {
+      process.stderr.write('adf-to-md: no comment field in ' + inputLabel + '\n');
+      process.exit(2);
+    }
+    const out = renderComments(data);
     if (out) process.stdout.write(out + '\n');
   } else {
     const data = readJSON();

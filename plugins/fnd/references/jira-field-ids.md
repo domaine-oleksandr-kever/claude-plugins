@@ -33,9 +33,14 @@ expand: "names"
 **Comment bodies.** Under `responseContentFormat: "markdown"` the standard `description` and
 `comment` fields come back as pre-converted markdown **strings** — a comment's inline images are
 gone from them, and with them the filename that joins a comment to its attachment row. A read
-that needs those references (`jira-reader`'s attachments join) fetches the field once more
-**without** the format — `fields: ["comment"]`, same `cloudId` — and decodes it with
-`adf-to-md.cjs --comments --media`.
+that needs those references (`jira-reader`'s attachments join) fetches the field once more with
+`responseContentFormat: "adf"` — `fields: ["comment"]`, same `cloudId` — and decodes it with
+`adf-to-md.cjs --comments`. That parameter is **mandatory**: measured 2026-09-10, asking for
+`"adf"` gives every `media` node an `attrs.alt` holding the exact attachment filename, while
+OMITTING it is not "ADF by default" — the bodies arrive as markdown strings with empty-alt
+`![](blob:…)` images. The converter unwraps the MCP's `{"issues":{"nodes":[…]}}` envelope
+itself and `--comments` implies `--media`; no comment field in the file it is given is an
+exit-2 error naming the file (the wrong document was converted), not empty output.
 
 The site host works as `cloudId` directly; only if it is rejected call
 `getAccessibleAtlassianResources` (no params) for the site's UUID and use that instead.

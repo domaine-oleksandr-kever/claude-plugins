@@ -1119,23 +1119,14 @@ check('a2m-comments-media', run(A2M, JSON.stringify(commentSet), ['--comments', 
   'Fixed on develop.',
 ].join('\n'));
 
-// the same comments WITHOUT --media: the media marker, never a silently dropped image
-check('a2m-comments-default-media', run(A2M, JSON.stringify(commentSet), ['--comments']), [
-  '### 1. Ann Dev — 2026-09-10T09:15:00.000+0300',
-  'Broken on mobile:',
-  '',
-  '_(media omitted)_',
-  '',
-  'and _(media omitted)_ after the fix',
-  '',
-  '### 2. Bo QA — 2026-09-10T10:00:00.000+0300 (edited 2026-09-10T11:02:00.000+0300)',
-  'external:',
-  '',
-  '_(media omitted)_',
-  '',
-  '### 3. Cy Lead — 2026-09-11T08:00:00.000+0300',
-  'Fixed on develop.',
-].join('\n'));
+// the same comments WITHOUT --media: identical, because --comments IMPLIES --media. The refs are
+// the join between a comment's inline image and its attachment row, so a caller that forgot the
+// flag must not get a thread of `_(media omitted)_` markers back (a live reader did).
+check('a2m-comments-implies-media', run(A2M, JSON.stringify(commentSet), ['--comments']),
+  run(A2M, JSON.stringify(commentSet), ['--comments', '--media']));
+check('a2m-comments-implies-media-refs',
+  (run(A2M, JSON.stringify(commentSet), ['--comments']).match(/!\[[^\]]*\]\(jira-media:[^)]*\)/g) || []).join(' '),
+  '![Screenshot 1.png](jira-media:abc-1) ![Cart empty.png](jira-media:abc-2)');
 
 // Jira pages the comment field: the shortfall is reported, not hidden (there is no second-page
 // MCP tool, so the reader can only surface it)
@@ -1143,15 +1134,96 @@ check('a2m-comments-shortfall', run(A2M, JSON.stringify(
   issueComments([jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', doc([p([t('first')])]))], 42),
 ), ['--comments']), '### 1. Ann Dev — 2026-09-10T09:15:00.000+0300\nfirst\n\ncomments: 1/42');
 
+const mcpEnvelope = (nodes) => ({ issues: { nodes }, context: { cloudId: 'c-1' } });
+
 // a ticket with no discussion is not an error — a missing screenshot or comment must never fail
-// a ticket read (D10)
+// a ticket read (D10). A PRESENT comment field with an empty array is exactly that case.
 for (const [label, input] of [
   ['empty-list', issueComments([])],
-  ['no-comment-field', { key: 'ELC-1309', fields: { summary: 'S' } }],
+  ['empty-list-wrapped', mcpEnvelope([issueComments([])])],
 ]) {
   const r = a2mCli(JSON.stringify(input), ['--comments']);
   check(`a2m-comments-empty-stdout[${label}]`, r.stdout, '');
   check(`a2m-comments-empty-exit[${label}]`, r.status, 0);
+}
+
+// ------------------------------------------- the MCP envelope + the no-comment-field refusal --
+// MEASURED (ELC-1309, 2026-09-10): the Atlassian MCP wraps a getJiraIssue response as
+// {"issues":{"nodes":[<issue>]},"context":{…}} — `fields.comment` sits one level down, so the
+// converter found nothing and printed NOTHING (exit 0). Both live reader runs took that silence
+// for "no comments" and fell back to the node's sibling markdown `comments[]`, whose images are
+// empty-alt `blob:` links. Unwrapping the single node, and refusing an input with no comment
+// field at all, is what makes that failure loud.
+const wrappedSet = mcpEnvelope([{
+  key: 'ELC-1309',
+  fields: {
+    comment: {
+      comments: [
+        jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', doc([
+          p([t('two shots:')]),
+          mediaSingle({ id: 'w-1', type: 'file', collection: 'c', alt: 'Screenshot 1.png' }),
+          mediaSingle({ id: 'w-2', type: 'file', collection: 'c', alt: 'Screenshot 2.png' }),
+        ])),
+        jComment('Bo QA', '2026-09-10T10:00:00.000+0300', 'plain string body'),
+      ],
+      total: 2, startAt: 0, maxResults: 100,
+    },
+    customfield_10038: doc([p([t('the approach')])]),
+  },
+  comments: [{ body: '![](blob:https://x/y)' }],
+}]);
+
+// no --media: the wrapped response still renders the refs (--comments implies it)
+check('a2m-comments-wrapped', run(A2M, JSON.stringify(wrappedSet), ['--comments']), [
+  '### 1. Ann Dev — 2026-09-10T09:15:00.000+0300',
+  'two shots:',
+  '',
+  '![Screenshot 1.png](jira-media:w-1)',
+  '',
+  '![Screenshot 2.png](jira-media:w-2)',
+  '',
+  '### 2. Bo QA — 2026-09-10T10:00:00.000+0300',
+  'plain string body',
+].join('\n'));
+
+// --field reads through the same envelope
+check('a2m-field-wrapped', run(A2M, JSON.stringify(wrappedSet), ['--field', 'customfield_10038']),
+  'the approach');
+
+// a plain getJiraIssue response (fields at the top level) is untouched by the unwrap
+check('a2m-comments-unwrapped-still-works', run(A2M, JSON.stringify(commentSet), ['--comments']).split('\n')[0],
+  '### 1. Ann Dev — 2026-09-10T09:15:00.000+0300');
+
+// no comment field anywhere = the WRONG document was converted (the inline MCP text instead of
+// the spill, or a read without fields:["comment"]) — exit 2 naming the input, not silence
+{
+  const TMPC = fs.mkdtempSync(path.join(os.tmpdir(), 'fnd-a2m-'));
+  const f = path.join(TMPC, 'issue.json');
+  fs.writeFileSync(f, JSON.stringify({ key: 'ELC-1309', fields: { summary: 'S' } }));
+  const r = spawnSync('node', [A2M, f, '--comments'], { encoding: 'utf8' });
+  check('a2m-comments-no-field-exit', r.status, 2);
+  check('a2m-comments-no-field-stderr', r.stderr, `adf-to-md: no comment field in ${f}\n`);
+  check('a2m-comments-no-field-stdout', r.stdout, '');
+  fs.rmSync(TMPC, { recursive: true, force: true });
+}
+for (const [label, input] of [
+  ['plain', { key: 'ELC-1309', fields: { summary: 'S' } }],
+  ['wrapped', mcpEnvelope([{ key: 'ELC-1309', fields: { summary: 'S' } }])],
+]) {
+  const r = a2mCli(JSON.stringify(input), ['--comments']);
+  check(`a2m-comments-no-field-exit[${label}]`, r.status, 2);
+  check(`a2m-comments-no-field-stderr[${label}]`, r.stderr, 'adf-to-md: no comment field in stdin\n');
+}
+
+// 0 or >1 nodes: the converter refuses by count instead of picking one
+for (const [label, nodes] of [['0', []], ['2', [wrappedSet.issues.nodes[0], wrappedSet.issues.nodes[0]]]]) {
+  for (const args of [['--comments'], ['--field', 'customfield_10038']]) {
+    const r = a2mCli(JSON.stringify(mcpEnvelope(nodes)), args);
+    check(`a2m-nodes-count-exit[${label}${args[0]}]`, r.status, 2);
+    check(`a2m-nodes-count-stderr[${label}${args[0]}]`, r.stderr,
+      `adf-to-md: expected 1 issue in issues.nodes, found ${label} in stdin\n`);
+    check(`a2m-nodes-count-stdout[${label}${args[0]}]`, r.stdout, '');
+  }
 }
 
 // --field extracts ONE field's ADF; --comments needs the whole response
@@ -1208,10 +1280,11 @@ for (const [label, node] of [
     '### 1. Unknown\n\n### 2. Ann Dev — 2026-09-10T09:15:00.000+0300\nreal\n');
 }
 
-// A comment body that is ALREADY a string — what `responseContentFormat: "markdown"` hands back
-// for the standard comment field — passes through verbatim, and --media cannot recover the media
-// nodes the server-side conversion dropped. That is why the reader fetches the comment field
-// WITHOUT that format (references/jira-field-ids.md); this pins the degraded shape so it is
+// A comment body that is ALREADY a string — what the MCP hands back when
+// `responseContentFormat: "adf"` is OMITTED (measured: markdown strings, images as empty-alt
+// `![](blob:…)`) — passes through verbatim, and --media cannot recover the media nodes the
+// server-side conversion dropped. That is why the reader passes `responseContentFormat: "adf"`
+// on the comment read (references/jira-field-ids.md); this pins the degraded shape so it is
 // visible instead of silent.
 check('a2m-comments-string-body', run(A2M, JSON.stringify(issueComments([
   jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', '!Screenshot 2026-09-10 at 3.26.09 PM.png|width=600!'),

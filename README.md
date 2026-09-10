@@ -962,7 +962,12 @@ not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-
 
 `jira-reader` reads a ticket's **comments** on every run — that is where the QA verdicts,
 clarifications and reopen reasons live — and saves them in full to the workspace's
-`comments.md`, returning one line each. Its **attachments** need a second route: the Atlassian
+`comments.md`, returning one line each. That read asks the MCP for
+`responseContentFormat: "adf"` (without it the bodies arrive as markdown strings whose images
+are empty-alt `blob:` links) and decodes the response with `adf-to-md.cjs <file> --comments`,
+which unwraps the MCP's `{"issues":{"nodes":[…]}}` envelope and renders each inline image as a
+markdown image reference whose target is `jira-media:<id>` and whose label is the attachment's
+filename — that filename being the join to the attachment rows. Its **attachments** need a second route: the Atlassian
 MCP returns their metadata but exposes no tool that returns the bytes, so the reader runs the
 bundled `plugins/fnd/scripts/jira-attachments.sh`, which downloads every image and video into
 `.claude/tasks/<KEY>/tmp/attachments/` and, when `ffmpeg` is on PATH, cuts each video into 8
@@ -1386,8 +1391,9 @@ Two deliberate decisions, recorded so they don't read as omissions:
   read-only toward their sources (each writes only its own workspace file), `jira-writer`
   keeps exactly one approved write (`editJiraIssue` / `addCommentToJiraIssue`) plus its
   read-back. Their `Bash` exists for the bundled scripts alone — `adf-to-md.cjs`,
-  `json-slim.cjs` and, for `jira-reader`, `jira-attachments.sh`, which is how a ticket's
-  images reach disk without the agent running `curl` or `ffmpeg` itself. The code-reading
+  `json-slim.cjs` and, for `jira-reader`, `jira-attachments.sh` (which is how a ticket's
+  images reach disk without the agent running `curl` or `ffmpeg` itself) plus one
+  `date -u +%FT%TZ` for the workspace file's `fetched_at` stamp. The code-reading
   agents (`bug-hunter`, `change-reviewer`, `theme-explorer`) name no MCP, so they are pinned to
   `Read, Grep, Glob, Bash` instead.
 
