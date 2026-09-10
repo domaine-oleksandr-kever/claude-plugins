@@ -10,7 +10,7 @@ set -euo pipefail
 
 # Fallback stamp only: the canonical manifest in the checkout wins whenever it is readable,
 # so an update reports (and records) the version the `git pull` actually landed.
-FND_VERSION="0.84.0"
+FND_VERSION="0.85.0"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
