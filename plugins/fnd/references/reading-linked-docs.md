@@ -16,6 +16,11 @@ and **`other_links`**, plus any inline links inside `description` / `acceptance_
 smart links — `inlineCard` / `blockCard` / `embedCard` — as `<url>`, so they survive into the
 text). De-duplicate, then read **all** of them — not only the Notion ones.
 
+**`comment_links` is the exception**: links a commenter pasted come back in their own list and
+never auto-spawn a reader — decide per ticket which one is worth following (a designer's updated
+Figma frame usually is; a link in an unrelated side thread is not), and read it the same way as
+the rest once you have.
+
 **Reuse before fetching:** skip links whose content is already in this conversation **in full**
 (not summarized or truncated away) from an earlier workflow run, and links with a **fresh**
 task-workspace copy (`.claude/tasks/<work-id>/doc-*.md`, matched by `url` frontmatter —

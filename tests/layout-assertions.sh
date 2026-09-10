@@ -73,9 +73,11 @@ done
 
 # Both entry scripts are documented as `./scripts/<name>.sh`, so the mode bit git carries is part
 # of the packaging: a lost +x turns a documented install command into "permission denied". The
-# profile probe is here because it is documented as a by-hand diagnostic (README, FND_PROFILE) —
-# every wiring already runs it through `bash`, so the bit is a convenience, not the contract.
-for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" "$PLUGIN_DIR/scripts/project-profile.sh"; do
+# profile probe and the attachment fetcher are here because both are documented as by-hand
+# diagnostics (README, FND_PROFILE; the preflight `--check` row) — every wiring already runs them
+# through `bash`, so the bit is a convenience, not the contract.
+for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" \
+         "$PLUGIN_DIR/scripts/project-profile.sh" "$PLUGIN_DIR/scripts/jira-attachments.sh"; do
   if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
 done
 
@@ -319,6 +321,15 @@ for m in scripts/_shopify-common.sh hooks/spill-access.sh; do
   if [ "$got" = "$PROJECT_OK_JS" ]; then ok
   else bad "project-ok-mirror-${m##*/}" "$m's case list is not env-file.cjs's PROJECT_OK: '$got' vs '$PROJECT_OK_JS'"; fi
 done
+
+# --------------------------------------- one dotenv dialect for every bundled shell script --
+# The reader lives in _shopify-common.sh and the callers source it. A second definition is a second
+# dialect: the CRLF, quoted-value and trailing-comment bugs the shared one was written to fix come
+# back in the copy, and only the script holding the copy would ever say so.
+dv_homes="$(grep -l '^dotenv_value() {' "$PLUGIN_DIR"/scripts/*.sh 2>/dev/null \
+  | sed "s|^$PLUGIN_DIR/scripts/||" | sort | tr '\n' ' ')"
+if [ "$dv_homes" = "_shopify-common.sh " ]; then ok
+else bad dotenv-value-home "dotenv_value() is defined in '${dv_homes:-nothing}' — want _shopify-common.sh alone"; fi
 
 # ------------------------------------------- smoke-test skill wired to what it verifies --
 # The post-install exercise names things that live elsewhere: its reference file, the canonical

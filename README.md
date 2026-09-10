@@ -48,7 +48,8 @@ in its own subfolder under `plugins/`:
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
-│       │   ├── _shopify-common.sh   #  sourced by the three theme scripts (never run directly)
+│       │   ├── jira-attachments.sh  #  Jira attachments → task workspace (read-only token; ffmpeg frames)
+│       │   ├── _shopify-common.sh   #  sourced by the theme scripts + jira-attachments.sh (never run directly)
 │       │   ├── gen-host-adapters.cjs #  writes every generated dir below
 │       │   ├── doctor.cjs           #  static install verification, any host
 │       │   └── ...
@@ -79,6 +80,7 @@ in its own subfolder under `plugins/`:
 │   ├── no-verify-bypass-matrix.sh   #  FP/FN contract of the two commit guards
 │   ├── hooks-sim.sh                 #  SessionStart / monitor-gate / context-stats sims
 │   ├── scripts-sim.sh               #  runner + theme-json + converter-caller sims
+│   ├── jira-attachments-sim.sh      #  jira-attachments.sh: creds, gateway, downloads, frames
 │   ├── bootstrap-sim.sh             #  bootstrap: arg gates, clone, pty picker, uninstall
 │   ├── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
 │   ├── json-slim-fixtures.mjs       #  mcp-slim pipeline + CLI + hook fixtures
@@ -581,8 +583,9 @@ sources (`doc-reader` writes only its own workspace extract), plus the write-sid
   findings with concrete failure scenarios (races, merchant-invariant bypasses, state
   divergence). Spawned in parallel with `change-reviewer` (pre-commit), as the PR
   backstop, and alongside live QA in the ship pipeline.
-- **`jira-reader`** — fetches a Jira ticket via the Atlassian MCP and returns clean
-  structured fields (keeps raw ADF out of context).
+- **`jira-reader`** — fetches a Jira ticket via the Atlassian MCP — fields, comments and
+  attachments — and returns them as clean structured data, keeping the raw ADF and the
+  downloaded bytes out of context (see "Jira comments + attachments").
 - **`jira-writer`** — the write-side mirror: writes one **approved** value with a single
   call — a rich-text custom field via `editJiraIssue`, or a comment via
   `addCommentToJiraIssue` (`contentFormat: "adf"`), the markdown converted to ADF first — so
@@ -955,6 +958,26 @@ inspects real store state whenever that answers a question — research and debu
 not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-setup.md` and
 `plugins/fnd/references/theme-customizer-state.md`.
 
+## Jira comments + attachments
+
+`jira-reader` reads a ticket's **comments** on every run — that is where the QA verdicts,
+clarifications and reopen reasons live — and saves them in full to the workspace's
+`comments.md`, returning one line each. Its **attachments** need a second route: the Atlassian
+MCP returns their metadata but exposes no tool that returns the bytes, so the reader runs the
+bundled `plugins/fnd/scripts/jira-attachments.sh`, which downloads every image and video into
+`.claude/tasks/<KEY>/tmp/attachments/` and, when `ffmpeg` is on PATH, cuts each video into 8
+frames so a screen recording can be looked at. The bytes never reach a commit: under
+`.claude/tasks/` the script stamps the repo's `info/exclude` line itself, and any other `--out`
+git would track is refused before a single request goes out. The reader never `Read`s those
+files itself; it returns their paths and the caller opens the ones the task is about.
+
+The download authenticates as the developer with a **scoped read-only** Atlassian API token
+(`JIRA_EMAIL` + `JIRA_API_TOKEN` in the project's gitignored `.env`) — strictly less than the
+MCP already has, and created once per person. Without it nothing fails: the ticket read returns
+the attachment rows with no local paths plus one setup hint for the developer, and `ffmpeg`
+missing costs the frames, not the videos. Setup wizard, flags, exit codes and the degradation
+contract: `plugins/fnd/references/jira-attachments.md`.
+
 ## Hooks
 
 The plugin wires five hook events (`plugin.json` → `hooks`); every hook fails open — a
@@ -1314,6 +1337,9 @@ because the script that reads it is the same single copy on all four hosts.
 | `SHOPIFY_FLAG_ENVIRONMENT` | unset | *read, not set by fnd*: the Shopify CLI's own environment selector (what `shopify theme dev -e <name>` reads), honored as the default `[environments.<name>]` block of `shopify.theme.toml` by all three theme scripts — `create-preview-theme.sh` (store, dev theme id, Theme Access token AND the session-theme pin target; its `--env` flag overrides it), `theme-json.sh` and `shopify-admin-gql.sh` (store, and the Theme Access token on `--engine themecli`; in those two `--env` names the dotenv file, so this variable is the only way to name a block — though `--store`/`$SHOPIFY_STORE` settles an ambiguous file for `theme-json.sh` by picking the block that names that store). A name no block in the file carries is `error=env_not_found`, not a silent fallback |
 | `SHOPIFY_ADMIN_TOKEN` | unset | Admin API access token for the gql runner's token engine, ahead of the `--env` dotenv file — and the escape hatch for a credential that is not shp*_-shaped (only the file value is shape-gated) |
 | `SHOPIFY_ADMIN_API_VERSION` | `2026-04` | Admin API version the gql runner requests when `--api-version` is not passed |
+| `JIRA_EMAIL` | unset | Atlassian login `jira-attachments.sh` authenticates the attachment download as, ahead of the `--env` dotenv (default `./.env`). Half of one credential with `JIRA_API_TOKEN` — both absent ⇒ `error=no_jira_credentials` + the setup `hint=`, exit 3, and the ticket read degrades to metadata instead of failing. Shape-gated (no whitespace, quotes, backslash or control characters), never placed on the argv and never echoed |
+| `JIRA_API_TOKEN` | unset | the per-developer **scoped read-only** Atlassian API token the same script pairs with `JIRA_EMAIL`, ahead of the `--env` dotenv. Read only by design — it grants strictly less than the Atlassian MCP already has, and the plain (unscoped) token the token page offers first is both wrong and rejected by the `api.atlassian.com` gateway the script speaks to. Charset-gated (`[A-Za-z0-9_.+/=~-]`); it reaches curl through a `0600` config file deleted on exit, never the argv, and is never printed. Wizard and the degradation contract: `plugins/fnd/references/jira-attachments.md` |
+| `JIRA_SITE` | `meetdomaine.atlassian.net` | Atlassian site host `jira-attachments.sh` resolves the cloudId from (`https://<site>/_edge/tenant_info`, the one unauthenticated request and the only one that touches the site host — every authenticated call goes to the `api.atlassian.com` gateway). `--site` overrides it, `--cloud-id` skips the lookup entirely; read like the two credentials, process env ahead of the `--env` dotenv |
 | `FND_HOST` | set by the fnd wiring | *set and read by fnd, never by you*: the host name (`claude` / `cursor` / `codex` / `opencode`) each host's own hook wiring exports so a `FND_HOST_TRACE` line can say which host ran the hook. It is not a switch — `domaine-env` will not write one, and a hand-set value only makes the log lie. An absent or unrecognized value is logged as `unknown`, which is what a manual run or a test is |
 | `CLAUDE_CODE_SESSION_ID` | set by Claude Code | *read, not set by fnd*: scopes `FND_WHALE_GUIDE`'s one-shot state and `FND_NOGAIN_MEMO`'s no-gain memo to the conversation, so a new session sees the full guidance block — and the declined body — again. Absent (a bare shell) ⇒ both are keyed on the file path alone and the 2 h expiry bounds them |
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |
@@ -1359,8 +1385,11 @@ Two deliberate decisions, recorded so they don't read as omissions:
   this install is inert, and the prompt contract still holds: the three readers stay
   read-only toward their sources (each writes only its own workspace file), `jira-writer`
   keeps exactly one approved write (`editJiraIssue` / `addCommentToJiraIssue`) plus its
-  read-back. The code-reading agents (`bug-hunter`, `change-reviewer`, `theme-explorer`) name
-  no MCP, so they are pinned to `Read, Grep, Glob, Bash` instead.
+  read-back. Their `Bash` exists for the bundled scripts alone — `adf-to-md.cjs`,
+  `json-slim.cjs` and, for `jira-reader`, `jira-attachments.sh`, which is how a ticket's
+  images reach disk without the agent running `curl` or `ffmpeg` itself. The code-reading
+  agents (`bug-hunter`, `change-reviewer`, `theme-explorer`) name no MCP, so they are pinned to
+  `Read, Grep, Glob, Bash` instead.
 
 ## Reporting plugin issues
 

@@ -8,6 +8,8 @@ live `names` map — never copy it into skills or agents.
 | ------------------- | ------------------------ |
 | Description         | `description` (standard) |
 | Last updated        | `updated` (standard)     |
+| Attachments         | `attachment` (standard)  |
+| Comments            | `comment` (standard)     |
 | Acceptance Criteria | `customfield_10036`      |
 | Assumptions         | `customfield_10037`      |
 | Technical Approach  | `customfield_10038`      |
@@ -22,10 +24,18 @@ Request shape — every Jira **issue** tool (`getJiraIssue`, `editJiraIssue`,
 cloudId: "meetdomaine.atlassian.net",
 issueIdOrKey: "<KEY>",
 fields: ["summary", "description", "status", "assignee", "updated",
+         "attachment", "comment",
          "customfield_10036", "customfield_10037", "customfield_10038",
          "customfield_10040", "customfield_10047"],
 expand: "names"
 ```
+
+**Comment bodies.** Under `responseContentFormat: "markdown"` the standard `description` and
+`comment` fields come back as pre-converted markdown **strings** — a comment's inline images are
+gone from them, and with them the filename that joins a comment to its attachment row. A read
+that needs those references (`jira-reader`'s attachments join) fetches the field once more
+**without** the format — `fields: ["comment"]`, same `cloudId` — and decodes it with
+`adf-to-md.cjs --comments --media`.
 
 The site host works as `cloudId` directly; only if it is rejected call
 `getAccessibleAtlassianResources` (no params) for the site's UUID and use that instead.

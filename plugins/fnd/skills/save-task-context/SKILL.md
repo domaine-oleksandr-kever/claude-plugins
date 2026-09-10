@@ -32,6 +32,9 @@ already known; missing data is reported as a gap, not fetched.
      record `jira_updated` when the ticket's updated timestamp appeared in the conversation —
      without it every later freshness check degrades to a full re-read; if it never appeared,
      note that gap in the file; a field you never saw stays absent and is listed as a gap);
+   - comment text this conversation carries → `comments.md` (`comments-<KEY>.md` in a batch),
+     oldest first, with `comment_count` / `last_comment_at` frontmatter; attachment files are
+     the reader's to download — record the ones already on disk, never fetch them here;
    - Figma build specs → `figma-<node-id>.md` — unless one is already there for a
      **different** Figma file (its `url` carries another file key), which takes
      `figma-<node-id>-<first 8 chars of your file key>.md` instead;

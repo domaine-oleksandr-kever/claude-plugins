@@ -84,9 +84,11 @@ done
 
 UPDATE="$(section "$CHECKLIST" 'Plugin update check')"
 PINS="$(section "$CHECKLIST" 'Model pins')"
+JIRA="$(section "$CHECKLIST" 'Jira attachments')"
 
 if [ -n "$UPDATE" ]; then ok; else bad update-section "no '## Plugin update check' section in the checklist"; fi
 if [ -n "$PINS" ]; then ok; else bad pins-section "no '## Model pins' section in the checklist"; fi
+if [ -n "$JIRA" ]; then ok; else bad jira-section "no '## Jira attachments' section in the checklist"; fi
 
 # ------------------------------------------------------------------- the update row --
 # One update command per host, quoted verbatim so the report can hand it over as-is.
@@ -160,9 +162,30 @@ done
 # Generated output is never hand-patched as a workaround.
 sec_has pins-no-handedit "$PINS" 'Do not hand-edit'
 
-# Every plugin path the two rows point at exists in this checkout.
+# ----------------------------------------------------------- the Jira attachments row --
+# One read-only probe, and the credentials it needs are named — never Read out of the .env.
+sec_has jira-check-cmd "$JIRA" 'scripts/jira-attachments.sh --check'
+sec_has jira-email "$JIRA" 'JIRA_EMAIL'
+sec_has jira-token "$JIRA" 'JIRA_API_TOKEN'
+sec_has jira-no-read-env "$JIRA" 'never `Read` the `.env`'
+# Every outcome the probe can print carries a severity, and the setup walk-through has one home.
+sec_has jira-ok-line "$JIRA" 'ok=1 jira_user='
+sec_has jira-ffmpeg-warn "$JIRA" 'ffmpeg=no'
+sec_has jira-ffmpeg-fix "$JIRA" 'brew install ffmpeg'
+sec_has jira-exit3 "$JIRA" 'error=no_jira_credentials'
+sec_has jira-exit4 "$JIRA" 'error=jira_auth_rejected'
+sec_has jira-reference "$JIRA" 'references/jira-attachments.md'
+# A missing token never blocks a ticket read (the MCP still returns the fields), so no outcome
+# in this row is a 🔴 — the prose saying so is not enough, the outcome list has to hold to it.
+if printf '%s\n' "$JIRA" | grep -q '→ 🔴'; then
+  bad jira-severity 'the Jira attachments row hands out a 🔴 — a missing token degrades the read, it does not fail it'
+else ok; fi
+sec_has jira-never-red "$JIRA" 'Never 🔴'
+
+# Every plugin path the three rows point at exists in this checkout.
 for rel in agents-cursor agents-codex references/host-model-map.md scripts/gen-host-adapters.cjs \
-           scripts/doctor.cjs .claude-plugin/plugin.json; do
+           scripts/doctor.cjs .claude-plugin/plugin.json scripts/jira-attachments.sh \
+           references/jira-attachments.md; do
   if [ -e "$PLUGIN_DIR/$rel" ]; then ok; else bad path-missing "referenced path absent: plugins/fnd/$rel"; fi
 done
 
@@ -186,11 +209,18 @@ done <<EOF
 $fenced
 EOF
 sec_has pins-ask-first "$PINS" 'ask before running one'
+# The Jira row fences a bundled runner, so its allow-list entry spells the plugin root the way
+# frontmatter may (`${CLAUDE_PLUGIN_ROOT}`) while the prose keeps the host-neutral `<plugin root>`.
+case "$allowed" in
+  *'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/jira-attachments.sh --check'*) ok ;;
+  *) bad allow-list "checklist fences \`jira-attachments.sh --check\` but preflight's allowed-tools does not carry it" ;;
+esac
 
 # ------------------------------------------------------------ wiring into the report --
 # A row that never reaches the report format is dead prose.
 REPORT="$(section "$CHECKLIST" 'Report format')"
 sec_has report-update "$REPORT" 'plugin update'
+sec_has report-jira "$REPORT" 'Jira attachments'
 sec_has report-pins "$REPORT" 'model pins'
 # …and the four original groups still read as before — the additions are additive.
 for group in 'IDE/workspace' 'MCP servers' 'CLI tools' 'project skills & rules' 'local
@@ -237,7 +267,7 @@ check_original 'Local dev server' devserver \
   'npm run dev' 'npm run theme:shopify' 'in-browser validation'
 
 # The skill body names the new groups in its run order and pre-approves the one new command.
-has skill-order "$PREFLIGHT" 'local dev server → plugin update → model pins'
+has skill-order "$PREFLIGHT" 'local dev server → Jira attachments → plugin update → model pins'
 has skill-lsremote "$PREFLIGHT" 'Bash(git ls-remote*)'
 has skill-lsremote-bounded "$PREFLIGHT" 'Bash(timeout 8 git ls-remote*)'
 hasre skill-advisory "$PREFLIGHT" 'advisory'

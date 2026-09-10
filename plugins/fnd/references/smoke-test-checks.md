@@ -88,7 +88,11 @@ the agent's MCP access) — the spawn itself may still be reported 🟢 separate
 **Deeper variant** — the skill was given a ticket key: brief the same agent for its normal job,
 a full read of that ticket, and report whether the fields came back. This additionally exercises
 the ADF conversion and the whale/compression path on a real payload; it needs a ticket the
-authenticated account can read.
+authenticated account can read. The return must carry `comments`, `comment_links`,
+`attachments` and `attachments_note` alongside the fields — **empty is a pass** on a ticket
+with no discussion or media, and so is an `attachments_note` naming a missing Jira token
+(that credential is per-developer and its own preflight row); a return missing those keys
+altogether is 🔴 (a stale agent copy — the host is loading an older install).
 
 ## Row 5 — Guard-hook probe (scratch directory only)
 

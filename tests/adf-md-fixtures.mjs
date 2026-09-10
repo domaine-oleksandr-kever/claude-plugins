@@ -1072,6 +1072,163 @@ for (const [label, adf] of ADF_CORPUS) {
   check(`prop-adf-identity[${label}]`, sortMarks(m2a(a2m(adf))), sortMarks(adf));
 }
 
+// ---------------------------------------- adf-to-md --comments / --media (D12) --
+// The reading path renders a media node as `![<filename>](jira-media:<id>)`: the alt carries the
+// attachment's filename, which is the join key between a comment's inline image and its
+// attachment row. Only under --media — the DEFAULT stays `_(media omitted)_`, because md-to-adf
+// has no media form to read that back into and the written-back fields (TA, Steps to test) go
+// through the same converter.
+const mediaNode = (attrs) => ({ type: 'media', attrs });
+const mediaSingle = (attrs) => ({ type: 'mediaSingle', attrs: { layout: 'center' }, content: [mediaNode(attrs)] });
+const mediaInline = (attrs) => ({ type: 'mediaInline', attrs });
+const jComment = (author, created, body, updated) =>
+  ({ id: '1', author: { displayName: author }, created, updated: updated || created, body });
+const issueComments = (comments, total) => ({
+  key: 'ELC-1309',
+  fields: { comment: { comments, total: total == null ? comments.length : total, startAt: 0, maxResults: 100 } },
+});
+const a2mCli = (input, args = []) => spawnSync('node', [A2M, ...args], { input, encoding: 'utf8' });
+
+const commentSet = issueComments([
+  jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', doc([
+    p([t('Broken on mobile:')]),
+    mediaSingle({ id: 'abc-1', type: 'file', collection: 'c', alt: 'Screenshot 1.png' }),
+    p([t('and '), mediaInline({ id: 'abc-2', type: 'file', collection: 'c', alt: 'Cart empty.png' }), t(' after the fix')]),
+  ])),
+  jComment('Bo QA', '2026-09-10T10:00:00.000+0300', doc([
+    p([t('external:')]),
+    { type: 'mediaSingle', attrs: { layout: 'center' }, content: [mediaNode({ type: 'external', url: 'https://cdn.test/a.png', alt: 'a.png' })] },
+  ]), '2026-09-10T11:02:00.000+0300'),
+  jComment('Cy Lead', '2026-09-11T08:00:00.000+0300', doc([p([t('Fixed on develop.')])])),
+]);
+
+check('a2m-comments-media', run(A2M, JSON.stringify(commentSet), ['--comments', '--media']), [
+  '### 1. Ann Dev — 2026-09-10T09:15:00.000+0300',
+  'Broken on mobile:',
+  '',
+  '![Screenshot 1.png](jira-media:abc-1)',
+  '',
+  'and ![Cart empty.png](jira-media:abc-2) after the fix',
+  '',
+  '### 2. Bo QA — 2026-09-10T10:00:00.000+0300 (edited 2026-09-10T11:02:00.000+0300)',
+  'external:',
+  '',
+  '![a.png](https://cdn.test/a.png)',
+  '',
+  '### 3. Cy Lead — 2026-09-11T08:00:00.000+0300',
+  'Fixed on develop.',
+].join('\n'));
+
+// the same comments WITHOUT --media: the media marker, never a silently dropped image
+check('a2m-comments-default-media', run(A2M, JSON.stringify(commentSet), ['--comments']), [
+  '### 1. Ann Dev — 2026-09-10T09:15:00.000+0300',
+  'Broken on mobile:',
+  '',
+  '_(media omitted)_',
+  '',
+  'and _(media omitted)_ after the fix',
+  '',
+  '### 2. Bo QA — 2026-09-10T10:00:00.000+0300 (edited 2026-09-10T11:02:00.000+0300)',
+  'external:',
+  '',
+  '_(media omitted)_',
+  '',
+  '### 3. Cy Lead — 2026-09-11T08:00:00.000+0300',
+  'Fixed on develop.',
+].join('\n'));
+
+// Jira pages the comment field: the shortfall is reported, not hidden (there is no second-page
+// MCP tool, so the reader can only surface it)
+check('a2m-comments-shortfall', run(A2M, JSON.stringify(
+  issueComments([jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', doc([p([t('first')])]))], 42),
+), ['--comments']), '### 1. Ann Dev — 2026-09-10T09:15:00.000+0300\nfirst\n\ncomments: 1/42');
+
+// a ticket with no discussion is not an error — a missing screenshot or comment must never fail
+// a ticket read (D10)
+for (const [label, input] of [
+  ['empty-list', issueComments([])],
+  ['no-comment-field', { key: 'ELC-1309', fields: { summary: 'S' } }],
+]) {
+  const r = a2mCli(JSON.stringify(input), ['--comments']);
+  check(`a2m-comments-empty-stdout[${label}]`, r.stdout, '');
+  check(`a2m-comments-empty-exit[${label}]`, r.status, 0);
+}
+
+// --field extracts ONE field's ADF; --comments needs the whole response
+{
+  const r = a2mCli(JSON.stringify(commentSet), ['--comments', '--field', 'customfield_10038']);
+  check('a2m-comments-field-exit', r.status, 2);
+  check('a2m-comments-field-stderr', r.stderr,
+    'adf-to-md: --comments needs the full getJiraIssue response, not --field\n');
+  check('a2m-comments-field-stdout', r.stdout, '');
+}
+
+// --media on a description: mediaSingle, mediaGroup (several files on one line, a missing alt
+// falls back to `media`) and mediaInline
+const mediaDesc = doc([
+  p([t('before')]),
+  mediaSingle({ id: 'm1', type: 'file', collection: 'c', alt: 'one.png' }),
+  { type: 'mediaGroup', content: [mediaNode({ id: 'm2', type: 'file', alt: 'two.png' }), mediaNode({ id: 'm3', type: 'file' })] },
+  p([t('inline '), mediaInline({ id: 'm4', type: 'file', alt: 'four.png' }), t(' done')]),
+]);
+check('a2m-media-blocks', a2m(mediaDesc, ['--media']),
+  'before\n\n![one.png](jira-media:m1)\n\n![two.png](jira-media:m2) ![media](jira-media:m3)\n\ninline ![four.png](jira-media:m4) done');
+check('a2m-media-blocks-default', a2m(mediaDesc),
+  'before\n\n_(media omitted)_\n\n_(media omitted)_\n\ninline _(media omitted)_ done');
+
+// a bracket in the filename would end the label early
+check('a2m-media-alt-bracket', a2m(doc([mediaSingle({ id: 'm5', type: 'file', alt: 'a[1].png' })]), ['--media']),
+  '![a\\[1\\].png](jira-media:m5)');
+// nothing renderable inside: "there was media here" is the part the reader must not lose
+check('a2m-media-empty-content', a2m(doc([{ type: 'mediaSingle', content: [] }]), ['--media']), '_(media omitted)_');
+
+// CEILING, not a target (D12): md-to-adf has no image syntax, so an image reference written back
+// to a Jira field lands as a literal `!` plus a link on the label. Pinned so a converter change
+// cannot move it silently.
+check('m2a-media-ref-ceiling', m2a('![x](jira-media:abc)'), doc([
+  p([t('!'), t('x', [mLink('jira-media:abc')])]),
+]));
+
+// `content` that is not an array degrades to the marker like every other block — under --media it
+// used to throw, and one malformed node aborted the WHOLE document (no comments at all)
+for (const [label, node] of [
+  ['single-string', { type: 'mediaSingle', content: 'oops' }],
+  ['group-object', { type: 'mediaGroup', content: { id: 'x' } }],
+]) {
+  check(`a2m-media-nonarray-content[${label}]`, a2m(doc([node]), ['--media']), '_(media omitted)_');
+}
+
+// a null entry in the comment array is data off the wire, not a crash
+{
+  const r = a2mCli(JSON.stringify(issueComments(
+    [null, jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', doc([p([t('real')])]))],
+  )), ['--comments']);
+  check('a2m-comments-null-entry-exit', r.status, 0);
+  check('a2m-comments-null-entry', r.stdout,
+    '### 1. Unknown\n\n### 2. Ann Dev — 2026-09-10T09:15:00.000+0300\nreal\n');
+}
+
+// A comment body that is ALREADY a string — what `responseContentFormat: "markdown"` hands back
+// for the standard comment field — passes through verbatim, and --media cannot recover the media
+// nodes the server-side conversion dropped. That is why the reader fetches the comment field
+// WITHOUT that format (references/jira-field-ids.md); this pins the degraded shape so it is
+// visible instead of silent.
+check('a2m-comments-string-body', run(A2M, JSON.stringify(issueComments([
+  jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', '!Screenshot 2026-09-10 at 3.26.09 PM.png|width=600!'),
+])), ['--comments', '--media']),
+'### 1. Ann Dev — 2026-09-10T09:15:00.000+0300\n!Screenshot 2026-09-10 at 3.26.09 PM.png|width=600!');
+
+// stdout to a PIPE is async: a `process.exit()` after the write drops everything past one pipe
+// buffer (64 KB), which is exactly how the reader runs this (`node … --comments --media` through
+// Bash). execFileSync reads through a pipe, so the whole thread has to survive the round trip.
+{
+  const long = Array.from({ length: 4000 }, (_, i) => p([t(`line ${i} ` + 'x'.repeat(90))]));
+  const out = run(A2M, JSON.stringify(issueComments([
+    jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', doc(long)),
+  ])), ['--comments']);
+  check('a2m-comments-pipe-not-truncated', out.length > 300000 && out.trimEnd().endsWith('x'), true);
+}
+
 // -------------------------------------------------------- md-to-adf CLI stderr --
 // The `md-to-adf: <n> bytes` line is the writer agent's ONLY source for the `<n>` it reports;
 // two parallel writers once ESTIMATED it, so distinct documents were indistinguishable. It must

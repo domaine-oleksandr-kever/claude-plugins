@@ -62,6 +62,29 @@ On failure, report the **specific** error + remediation (auth, MCP config, serve
   `<plugin root>/references/session-theme.md` step 5.
 - If not running, it must be started before any **in-browser validation** (develop / QA workflows).
 
+## Jira attachments
+
+Ticket screenshots and screen recordings — including the ones hanging off comments — reach the
+workflows only when this checkout carries a per-developer **read-only** Atlassian API token
+(`JIRA_EMAIL` + `JIRA_API_TOKEN` in the gitignored `.env`): the Atlassian MCP reads the ticket,
+it has no tool for attachment bytes. One read-only probe; never `Read` the `.env` — the runner
+consumes the values without exposing them:
+
+```bash
+<plugin root>/scripts/jira-attachments.sh --check
+```
+
+- `ok=1 jira_user=… cloud_id=… ffmpeg=yes` → 🟢, naming the user it authenticated as.
+- The same line with `ffmpeg=no` → 🟡 videos are saved but not cut into frames, so a screen
+  recording stays unreadable to the model (`brew install ffmpeg`); images are unaffected.
+- exit 3 `error=no_jira_credentials` → 🟡 no token: ticket images stay invisible; setup walk-through
+  in `<plugin root>/references/jira-attachments.md` (the script's `hint=` line carries the short form).
+- exit 4 `error=jira_auth_rejected` → 🟡 the token was rejected — expired, or not the scoped
+  read-only kind the gateway accepts; regenerate per that same reference.
+
+Never 🔴: every workflow still reads the ticket and its comments without the token, and reports the
+missing media once.
+
 ## Plugin update check
 
 **Plugin root** = the plugin's own directory — this file is `<plugin root>/references/preflight-checklist.md`,
@@ -171,7 +194,7 @@ as a workaround — the fix belongs in the generator's tier table.
 ## Report format
 
 Summary table grouped by **IDE/workspace · MCP servers · CLI tools · project skills & rules · local
-dev server · plugin update · model pins**, status per row as **🟢 Pass / 🔴 Fail / 🟡 Warning**
+dev server · Jira attachments · plugin update · model pins**, status per row as **🟢 Pass / 🔴 Fail / 🟡 Warning**
 (exact values), with version or connection detail. List blockers + remediation separately — the
 plugin-update and model-pin rows are advisory and never enter the blocker list, with one exception:
 a 🔴 structural model-pin finding is a plugin defect worth naming there.

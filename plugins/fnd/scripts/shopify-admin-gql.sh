@@ -235,20 +235,6 @@ write_state() { # $1 = target, $2… = lines; atomic, and never fatal when the w
   return 0
 }
 
-# leading/trailing whitespace off, INNER whitespace untouched — exactly `read`'s trimming, which the
-# state files round-trip values through; the version probe and the token both must trim identically
-trim_ws() { # $1 = value, result on stdout
-  local v="$1"
-  while :; do
-    case "$v" in
-      [[:space:]]*) v="${v#?}" ;;
-      *[[:space:]]) v="${v%?}" ;;
-      *) break ;;
-    esac
-  done
-  printf '%s' "$v"
-}
-
 # Cached per RESOLVED binary path (the version differs between two installs), invalidated when that
 # binary is newer than the cache file — `find -L` because the CLI is a symlink into node_modules, so
 # the mtime that moves on an upgrade is behind it — and again after PROBE_TTL seconds, so a
@@ -635,35 +621,6 @@ fi
 
 # --- engine 2: admin token + curl -------------------------------------------------------------
 command -v curl >/dev/null 2>&1 || { echo "error=curl_not_found" >&2; exit 2; }
-
-# dotenv scalar reader: LAST assignment wins (a later line overrides an earlier one), `export KEY=`
-# is a legal line, values may be "…" / '…' / bare, and a bare value's trailing ` #comment` and any CR
-# are dropped. The CR matters because a CRLF .env defeats a plain `s/"$//`, leaving BOTH the closing
-# quote and the CR inside the token; either that or an inline comment reaching the auth header is an
-# opaque 401 from the API.
-dotenv_value() { # $1 = key, $2 = file
-  awk -v k="$1" '
-    BEGIN { SQ = "\047" }
-    /^[ \t]*#/ { next }
-    $0 ~ "^[ \t]*(export[ \t]+)?" k "[ \t]*=" {
-      v = $0
-      sub("^[ \t]*(export[ \t]+)?" k "[ \t]*=[ \t]*", "", v)
-      sub(/\r$/, "", v)
-      q = substr(v, 1, 1)
-      if (q == "\"" || q == SQ) {
-        v = substr(v, 2)
-        p = index(v, q)
-        if (p > 0) v = substr(v, 1, p - 1)
-      } else {
-        h = index(v, " #"); if (h > 0) v = substr(v, 1, h - 1)
-        h = index(v, "\t#"); if (h > 0) v = substr(v, 1, h - 1)
-        sub(/[ \t\r]+$/, "", v)
-      }
-      out = v; found = 1
-    }
-    END { if (found) print out }
-  ' "$2"
-}
 
 # token: env var wins, else read just the one line from the dotenv file (never echo it).
 # TOKEN_FROM_FILE drives the shape-gate decision below; TOKEN_SRC is display-only for `source=`

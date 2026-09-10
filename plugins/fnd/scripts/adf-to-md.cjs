@@ -12,8 +12,11 @@
  * Usage:
  *   node adf-to-md.cjs <file.json>                      # an ADF doc, OR a full getJiraIssue response
  *   node adf-to-md.cjs <issue.json> --field customfield_10038   # extract that field's ADF first
+ *   node adf-to-md.cjs <issue.json> --comments          # every comment of a full response, oldest first
+ *   node adf-to-md.cjs <file.json> --media              # media nodes → ![<alt>](jira-media:<id>)
  *   cat adf.json | node adf-to-md.cjs                   # stdin
  * Prints Markdown to stdout. Unknown node types degrade gracefully (render their children/text).
+ * --comments and --media combine; --comments with --field is an error (exit 2).
  *
  * The markdown is written so md-to-adf.cjs can read it BACK unchanged (the fnd flow reads a
  * field, edits it, writes it back): literal prose that starts with a structure marker is
@@ -42,6 +45,10 @@
  */
 'use strict';
 const fs = require('fs');
+
+// A --field value that is already markdown (a plain string) is handed back here instead of being
+// printed inside readJSON: the CLI then has ONE stdout write and no process.exit racing it.
+let plainField = null;
 
 function readJSON() {
   const args = process.argv.slice(2);
@@ -77,7 +84,7 @@ function readJSON() {
       process.stderr.write('adf-to-md: field ' + fieldId + ' is empty\n');
       process.exit(0);
     }
-    if (typeof val === 'string') { process.stdout.write(val + '\n'); process.exit(0); }
+    if (typeof val === 'string') { plainField = val; return null; }
     data = val;
   }
   return data;
@@ -285,6 +292,33 @@ function renderText(node, atLineStart, singleLine) {
   return t;
 }
 
+// The default rendering of every media node. Markdown has no form md-to-adf reads back as a
+// media node, so an image in a field the fnd flow writes back degrades to this text — which is
+// why the image form below is opt-in (--media) and the reading path is its only caller.
+const MEDIA_OMITTED = '_(media omitted)_';
+let mediaMode = false;
+
+// The `alt` attr carries the attachment's FILENAME — the join key between a comment's inline
+// image and its attachment row — so it is the label; an external media has a real URL instead
+// of an attachment id. A bracket in the label would end the label early.
+function mediaRef(node) {
+  const a = node.attrs || {};
+  const alt = String(a.alt || 'media').replace(/[[\]]/g, '\\$&');
+  const href = a.type === 'external' ? String(a.url || '') : 'jira-media:' + (a.id || '');
+  return '![' + alt + '](' + linkTarget(href) + ')';
+}
+
+// A mediaSingle/mediaGroup with nothing renderable keeps the omitted marker: "there was media
+// here" is the part the reader must not lose.
+function renderMediaBlock(node) {
+  if (!mediaMode) return MEDIA_OMITTED;
+  // `content` is only walkable as an ARRAY — json-slim feeds this converter raw MCP payloads, and a
+  // string/object there must degrade to the marker like every other block, not throw
+  const refs = (Array.isArray(node.content) ? node.content : [])
+    .filter((c) => c && c.type === 'media').map(mediaRef);
+  return refs.length ? refs.join(' ') : MEDIA_OMITTED;
+}
+
 // Pull a URL off a smart-link / card node (inlineCard, blockCard, embedCard).
 // Most carry attrs.url; some carry attrs.data.url (JSON-LD) instead. Never drop it.
 function cardUrl(node) {
@@ -349,6 +383,7 @@ function renderInline(n, atLineStart, singleLine) {
     const u = cardUrl(n);
     return u ? '<' + u + '>' : '';
   }
+  if (n.type === 'mediaInline') return mediaMode ? mediaRef(n) : MEDIA_OMITTED;
   if (n.type === 'status') return '[' + ((n.attrs && n.attrs.text) || '') + ']';
   if (n.type === 'date') {
     const ts = n.attrs && Number(n.attrs.timestamp);
@@ -394,7 +429,7 @@ function renderListItem(item, depth, marker) {
 
 // The inline node types renderInline knows. Everything else is a block: an unknown node that
 // carries content keeps degrading through renderBlock (children, then '\n\n'), as before.
-const INLINE_TYPE_RE = /^(text|hardBreak|emoji|mention|inlineCard|status|date)$/;
+const INLINE_TYPE_RE = /^(text|hardBreak|emoji|mention|inlineCard|status|date|mediaInline)$/;
 
 // Children that are INLINE go through the mark-aware inline(), never through textOf(): a
 // `text` node carrying a link mark would otherwise come out as bare label text with the href
@@ -510,7 +545,7 @@ function renderBlock(node, depth, singleLine) {
     }
     case 'mediaSingle':
     case 'mediaGroup':
-      return '_(media omitted)_';
+      return renderMediaBlock(node);
     default:
       // unknown block: try children, else inline text. Only an ARRAY is walkable — `content` as a
       // bare string used to throw (json-slim then handed the payload back intact), and iterating
@@ -535,7 +570,36 @@ function adfToMarkdown(input) {
     .join('\n\n').replace(/\n{3,}/g, '\n\n'));
 }
 
-module.exports = { adfToMarkdown, findDoc, renderBlock, inline, renderText, cardUrl };
+// A comment body is ADF, except when getJiraIssue was called with responseContentFormat
+// "markdown" — that one DOES convert the standard comment field, so a string comes through as is.
+function commentBody(body) {
+  if (body == null) return '';
+  if (typeof body === 'string') return trimAscii(body);
+  return trimAscii(adfToMarkdown(body) || '');
+}
+
+// The comments of a full getJiraIssue response, oldest first (the order Jira returns them in).
+// Jira PAGES the field, so a shortfall against `total` is reported rather than hidden — there is
+// no MCP tool for the second page. A response without comments renders empty, never an error:
+// a ticket read must not fail on a missing discussion.
+function renderComments(data) {
+  const field = (data && data.fields && data.fields.comment) || {};
+  const list = Array.isArray(field.comments) ? field.comments : [];
+  const blocks = list.map((entry, i) => {
+    const c = entry && typeof entry === 'object' ? entry : {};
+    const author = (c.author && c.author.displayName) || 'Unknown';
+    const edited = c.updated && c.updated !== c.created ? '(edited ' + c.updated + ')' : '';
+    const head = ['### ' + (i + 1) + '.', author, c.created ? '— ' + c.created : '', edited]
+      .filter(Boolean).join(' ');
+    const body = commentBody(c.body);
+    return body ? head + '\n' + body : head;
+  });
+  const total = Number(field.total);
+  if (Number.isFinite(total) && total > list.length) blocks.push('comments: ' + list.length + '/' + total);
+  return blocks.join('\n\n');
+}
+
+module.exports = { adfToMarkdown, renderComments, findDoc, renderBlock, inline, renderText, cardUrl };
 
 if (require.main === module) {
   // A reader that goes away mid-write (`| head`, a spawned parent that destroys the pipe) is
@@ -548,7 +612,28 @@ if (require.main === module) {
   });
   quietOnEpipe(process.stdout);
   quietOnEpipe(process.stderr);
-  const md = adfToMarkdown(readJSON());
-  if (md == null) { process.stderr.write('adf-to-md: no ADF doc node found in input\n'); process.exit(1); }
-  process.stdout.write(md + '\n');
+  const argv = process.argv.slice(2);
+  mediaMode = argv.includes('--media');
+  if (argv.includes('--comments')) {
+    // --field extracts ONE field's ADF; the comment walk needs the whole response, and silently
+    // picking one of the two would hand the caller the wrong document. Checked before the read,
+    // so a stdin caller is not left waiting on input that is about to be refused.
+    if (argv.includes('--field')) {
+      process.stderr.write('adf-to-md: --comments needs the full getJiraIssue response, not --field\n');
+      process.exit(2);
+    }
+    // NO process.exit after the write: stdout to a pipe is async, and exiting discards everything
+    // past one pipe buffer (64 KB) — a long comment thread lost its tail with exit 0 and no error.
+    // Ending naturally keeps that, the empty-comments exit 0, and the EPIPE handling above.
+    const out = renderComments(readJSON());
+    if (out) process.stdout.write(out + '\n');
+  } else {
+    const data = readJSON();
+    if (plainField !== null) { process.stdout.write(plainField + '\n'); }
+    else {
+      const md = adfToMarkdown(data);
+      if (md == null) { process.stderr.write('adf-to-md: no ADF doc node found in input\n'); process.exit(1); }
+      process.stdout.write(md + '\n');
+    }
+  }
 }

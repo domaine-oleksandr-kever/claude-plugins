@@ -173,13 +173,17 @@ As develop's Phase 1: context-first, then workspace, then fetch (layout + write 
 `<plugin root>/references/task-workspace.md`) — every reader gets the workspace path
 and writes its own file.
 Spawn concurrently: **`jira-reader`** (Description, AC, TA, Steps to Test, links,
-`figma_urls`), one **`figma-reader`** per Figma URL, **`theme-explorer`** seeded with the
+`figma_urls`, plus `comments` and `attachments` in full), one **`figma-reader`** per
+Figma URL, **`theme-explorer`** seeded with the
 task intent and `profile: <foundation|theme|none>` (the session context's
 `fnd project profile:` word — it gates the scout's core rules). Once `jira-reader` returns the links, spawn one **`doc-reader`** per
 remaining doc link, in parallel, per
 `<plugin root>/references/reading-linked-docs.md` (reuse-before-fetch; pass the
 workspace path; Notion mandatory — a reader naming a missing MCP → stop and tell the
-developer). Then **validate readiness**: Description, AC,
+developer). Read `comments.md` when the task depends on the discussion, `Read` only the
+screenshots/frames the ticket refers to, and hand a non-empty `attachments_note` to the
+developer once, verbatim, never as a blocker (`<plugin root>/references/task-workspace.md`
+→ Read rule, comments & attachments). Then **validate readiness**: Description, AC,
 approved **Technical Approach**, Figma node — any missing → **stop** and point at the gap
 (the fnd `write-technical-approach` skill for a missing TA). If the ticket/docs define
 metafields or metaobjects, plan the provisioning per
@@ -221,7 +225,9 @@ Ask in batches — ≤4 questions per batch, 2–3 batches as the target (on Cla
 AskUserQuestion call per batch) — but **every store-data
 gap always gets its question**; an extra call beats an unasked gap. Every question
 carries your
-recommended answer. Explore the codebase instead of asking whenever the code can answer.
+recommended answer. Explore the codebase instead of asking whenever the code can
+answer; the ticket's comments and media are ingested context too — an answer already in
+`comments.md` or visible in a downloaded screenshot is not a question.
 
 - **Ticket-specific:** the design-tree walk develop does one-at-a-time — batched here:
   AC ambiguities, component/pattern choices, data-source decisions; **every store-data
