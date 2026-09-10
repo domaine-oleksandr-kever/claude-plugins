@@ -26,6 +26,17 @@ const path = require('path');
 const { execSync } = require('child_process');
 const envFile = require('./env-file.cjs');
 
+// A reader that goes away mid-write (`list | head -1`) is success, not failure: the EPIPE
+// (Windows: `code: 'EOF'`) surfaces async and would otherwise crash the process after the
+// consumer already got its bytes. CLI-only file — nothing require()s it, and these listeners must
+// never be attached to a HOST process's streams (see adf-md-fixtures.mjs's library invariant).
+const quietOnEpipe = (s) => s.on('error', (e) => {
+  if (e && (e.code === 'EPIPE' || e.code === 'EOF')) process.exit(0);
+  throw e;
+});
+quietOnEpipe(process.stdout);
+quietOnEpipe(process.stderr);
+
 const KNOWN = [
   'FND_LEAN',
   'FND_PROFILE',

@@ -9,7 +9,8 @@ nested, as on Claude Code, the phase briefs run as written and this file is neve
 - **Every nested spawn a brief names is hoisted to the conductor**, which runs it at its own
   level and passes the findings *into* the phase brief: `bug-hunter` alongside the qa agent,
   `change-reviewer` before the finalize agent commits, the conformance and correctness passes
-  before the create-pr agent drafts. Gate semantics do not move — a blocking finding still
+  before the create-pr agent drafts. A hoisted brief carries what the nested one would have,
+  the checkout's `profile:` included. Gate semantics do not move — a blocking finding still
   stops the phase, and the phase agent still dispositions every finding it is handed. A phase
   agent that needs a helper it cannot spawn and was handed nothing `ESCALATE`s; it never
   improvises a nested spawn and never substitutes its own read of the diff for a missing pass.

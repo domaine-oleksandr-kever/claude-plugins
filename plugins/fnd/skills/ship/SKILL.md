@@ -87,11 +87,14 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    developer insists.
 3. **Environment** (the `preflight-checks` scope, inline and compact — classify here,
    not mid-run): Atlassian MCP up; Figma MCP when designs are involved; Chrome DevTools
-   MCP; the **local dev server** running (`npm run dev` — Turbo: `shopify theme dev -e dev`
-   + Vite — or `npm run theme:shopify`); not running → ask the developer to start it —
+   MCP; the **local dev server** running (per-profile command:
+   `<plugin root>/references/session-theme.md` step 5 — `foundation`: `npm run dev` — Turbo:
+   `shopify theme dev -e dev` + Vite — or `npm run theme:shopify`). Not running → ask the
+   developer to start it —
    a long-lived interactive process the developer owns; never start or kill it yourself.
-   The start command to give them is `npm run dev -- --theme <id> [--port <N>]`: `<id>` is
-   the session theme (never the shared dev theme), and `--port <N>` is added when port 9292
+   The start command is the one session-theme.md step 5 gives for this checkout's profile
+   (`foundation`: `npm run dev -- --theme <id> [--port <N>]`), with `<id>` =
+   the session theme (never the shared dev theme), and `--port <N>` added when port 9292
    is taken by another checkout or the workspace's `notes.md` records a `dev-port:` line.
    **A server that isn't running does not stop the run here** — it needs an id item 8 has
    not settled yet, and item 7 can end the run before that. Note it as pending, finish
@@ -171,7 +174,8 @@ As develop's Phase 1: context-first, then workspace, then fetch (layout + write 
 and writes its own file.
 Spawn concurrently: **`jira-reader`** (Description, AC, TA, Steps to Test, links,
 `figma_urls`), one **`figma-reader`** per Figma URL, **`theme-explorer`** seeded with the
-task intent. Once `jira-reader` returns the links, spawn one **`doc-reader`** per
+task intent and `profile: <foundation|theme|none>` (the session context's
+`fnd project profile:` word — it gates the scout's core rules). Once `jira-reader` returns the links, spawn one **`doc-reader`** per
 remaining doc link, in parallel, per
 `<plugin root>/references/reading-linked-docs.md` (reuse-before-fetch; pass the
 workspace path; Notion mandatory — a reader naming a missing MCP → stop and tell the

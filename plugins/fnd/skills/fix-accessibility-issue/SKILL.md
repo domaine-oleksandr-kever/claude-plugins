@@ -8,7 +8,7 @@ argument-hint: "<component-name | GitHub issue #>"
 arguments:
   - name: target
     description: The component to fix (e.g. mega-menu, cart-drawer) or a GitHub accessibility issue number.
-allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npx playwright test*), Bash(git status*), Bash(git diff*), Bash(git checkout*), Bash(git add*), Bash(git log*)
+allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npx playwright test*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/project-profile.sh*), Bash(git status*), Bash(git diff*), Bash(git checkout*), Bash(git add*), Bash(git log*)
 ---
 
 # Fix Accessibility Issue
@@ -40,7 +40,7 @@ Before implementing, **search the codebase for the existing ARIA pattern** for t
 - Native browser behaviour (`<details>`, `<dialog>`, `popover`) often suffices.
 - Use `aria-labelledby` to reference existing visible text instead of duplicating it in `aria-label`.
 - Avoid duplicate logic between keyboard and mouse handlers; separate ARIA-state management from focus management.
-- Toggle visual state via `data-*` attributes + Tailwind `data-[]:` selectors, not `classList`/`style.*` — the repo lints against those; if legacy code trips `no-restricted-syntax`, see `../../references/eslint-no-restricted-syntax.md` (relative to this skill's directory).
+- In a `foundation` checkout (session line `fnd project profile: foundation`), toggle visual state via `data-*` attributes + Tailwind `data-[]:` selectors, not `classList`/`style.*` — the repo lints against those; if legacy code trips `no-restricted-syntax`, see `../../references/eslint-no-restricted-syntax.md` (relative to this skill's directory). In any other checkout, follow the theme's existing patterns for state toggling. No such line in the session (a hook fails open, so it can be absent) → run `../../scripts/project-profile.sh <checkout root>` (path relative to this skill's directory; the checkout is its argument, so it answers about that repo whatever the working directory is) and use its answer; if that is not possible either, assume `foundation`.
 
 ## Performance
 

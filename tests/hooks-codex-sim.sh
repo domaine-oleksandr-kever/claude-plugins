@@ -14,7 +14,8 @@
 #             else, and the scratch-path group's covers both host spellings of the two
 #             screenshot tools (Codex's MCP names carry no plugin_fnd_ prefix). W12 is the
 #             host-proof log: every command exports FND_HOST=codex, and SessionStart — the one
-#             injection composed by a shell command — records itself.
+#             injection composed by a hook that prints — records itself from inside
+#             hooks/session-start.sh, the script both wirings spawn.
 #   S cases — SessionStart through the wiring: per-file tolerance, FND_LEAN gate, store-access
 #             detection, always exit 0, the real plugin root's whale instruction — plus the two
 #             root env vars Codex sets (CLAUDE_PLUGIN_ROOT alias and PLUGIN_ROOT), the
@@ -136,15 +137,31 @@ xev="$(jq -r '.hooks | keys[]' "$WIRING" | sort)"
 assert_eq W2-event-parity "$xev" "$cev"
 
 # W3: every shared command is the Claude command, verbatim, modulo the root expansion.
+# SessionStart:0 is carved out too — see W3c.
 # PreToolUse:0/1 are carved out — see W3b. They are the two commands that may NOT be a bare
 # root expansion: an unset root would run "/hooks/<guard>.sh", which exits 127, and Codex reads
 # a 127 as "the hook did not block" and runs the git command unchecked. A fail-closed probe is
 # not expressible as the Claude command plus a variable, so the contract for those two is the
 # set of properties below instead of byte-equality.
-for pair in "SessionStart:0" "UserPromptSubmit:0" "SubagentStart:0"; do
+for pair in "UserPromptSubmit:0" "SubagentStart:0"; do
   ev="${pair%%:*}"; idx="${pair#*:}"
   assert_eq "W3-$ev-$idx" "$(wcmd "$ev" "$idx")" "$(want_cmd "$(ccmd "$ev" "$idx")")"
 done
+
+# W3c: SessionStart is carved out from the other direction. `$r` resolves EMPTY where neither root
+# variable is set, and a bare `"$r/hooks/session-start.sh"` would then exec `/hooks/session-start.sh`
+# — a 127 plus a `No such file` line on stderr in every such session. Claude Code's
+# `${CLAUDE_PLUGIN_ROOT}` is always set, so its command execs the script; this one keeps the probe.
+ssg="$(wcmd SessionStart 0)"
+assert_contains W3c-ss-host  "$ssg" 'export FND_HOST=codex; '
+assert_contains W3c-ss-root  "$ssg" 'r="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}"; '
+assert_contains W3c-ss-probe "$ssg" '[ -f "$r/hooks/session-start.sh" ]'
+assert_contains W3c-ss-spawn "$ssg" 'bash "$r/hooks/session-start.sh"'
+assert_absent   W3c-ss-inline "$ssg" 'comment-discipline'
+case "$ssg" in
+  *'; true') ok ;;
+  *) bad W3c-ss-tail "the SessionStart command must end '; true' — a probe that finds nothing is not a failed session start" ;;
+esac
 
 # W3b: the guard commands' own contract — single-copy script, probe order, cache fallback,
 # deny-on-unresolved, and the git-verb gate in front of that deny.
@@ -183,7 +200,15 @@ scripts="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$WIRI
 for s in $scripts; do
   if [ -f "$PLUG/$s" ]; then ok; else bad "W5-$s" "wiring names a file that does not exist"; fi
 done
-assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 9
+assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 8
+# One hop further: the profile probe and the trace helper are spawned by hooks/session-start.sh
+# rather than by the wiring itself, and following the spawn is what keeps them covered here.
+ss_scripts="$(grep -oE '\$root/(hooks|scripts)/[a-z0-9-]+\.(cjs|sh)' "$PLUG/hooks/session-start.sh" \
+  | sed 's#^\$root/##' | sort -u)"
+for s in $ss_scripts; do
+  if [ -f "$PLUG/$s" ]; then ok; else bad "W5-ss-$s" "session-start.sh spawns a file that does not exist"; fi
+done
+assert_eq W5-ss-count "$(printf '%s\n' "$ss_scripts" | grep -c .)" 2
 
 # W6: PreToolUse matcher — Codex regex, covering every spelling of the shell tool and nothing else.
 pm="$(jq -r '.hooks.PreToolUse[0].matcher' "$WIRING")"
@@ -294,8 +319,8 @@ for c in "$(wcmd SessionStart)" "$(wcmd UserPromptSubmit)" "$(wcmd SubagentStart
          "$(wcmd PreToolUse 0)" "$(wcmd PreToolUse 1)" "$SPG_CMD" "$SPA_CMD" "$(wcmd PostToolUse)"; do
   assert_contains W12-host-tag "$c" 'export FND_HOST=codex;'
 done
-# the SessionStart command is the one injection composed by a shell command rather than a script,
-# so the command itself has to record it
+# the SessionStart injection is composed by a hook that prints rather than by one that decides, so
+# hooks/session-start.sh — the script this command spawns — has to record itself
 ht_ss "$HTD/ss" FND_HOST_TRACE=1 >/dev/null
 line="$(cat "$HTD/ss/fnd-host-trace.log" 2>/dev/null)"
 assert_contains W12-ss-host     "$line" '"host":"codex"'
@@ -318,7 +343,12 @@ assert_eq W12-child-host "$(cat "$TMP/htrec.out" 2>/dev/null)" "codex"
 
 # ═══ S — SessionStart through the Codex wiring ══════════════════════════════
 SS_CMD="$(wcmd SessionStart)"
+# The command spawns hooks/session-start.sh — the one script both wirings run — out of the root it
+# resolves, so the composition under test comes with the fake bundle, not with the wiring.
+assert_contains S0-spawns-script "$SS_CMD" 'hooks/session-start.sh'
+assert_absent   S0-no-inline     "$SS_CMD" 'comment-discipline'
 fake="$TMP/plugroot"; mkdir -p "$fake/hooks"
+cp "$PLUG/hooks/session-start.sh" "$fake/hooks/session-start.sh"
 for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
   echo "MARK-$f" > "$fake/hooks/$f.md"
 done
@@ -376,7 +406,8 @@ out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" PLUGIN_ROOT="$other" bash -c
 assert_contains S8-alias-wins "$out" "MARK-comment-discipline"
 assert_absent   S8-no-shadow  "$out" "MARK-WRONG"
 
-# S9: neither var set → the command still exits 0 (a hook may not break a session start).
+# S9: neither var set → the command still exits 0 (a hook may not break a session start). The
+# exit-only smoke; S13 asserts the same run's two streams as well.
 out="$(cd "$SS_PLAIN" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S9-no-root-exit "$ec" 0
 
@@ -433,10 +464,12 @@ out="$(cd "$SS_FND" && env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$fake" bash -c "$S
 assert_eq       S13-plugin-root-exit     "$ec" 0
 assert_contains S13-plugin-root-profile  "$out" "fnd project profile: foundation"
 assert_contains S13-plugin-root-addendum "$out" "MARK-foundation-addendum"
-# …and with no root at all the command still exits 0 and still prints a profile
-out="$(cd "$SS_FND" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
+# …and with no root at all nothing resolves, so the wiring prints nothing on either stream and
+# still exits 0.
+out="$(cd "$SS_FND" && env -u CLAUDE_PLUGIN_ROOT -u PLUGIN_ROOT bash -c "$SS_CMD" 2>"$TMP/ss-noroot.err")"; ec=$?
 assert_eq       S13-no-root-exit    "$ec" 0
-assert_contains S13-no-root-profile "$out" "fnd project profile: none"
+assert_eq       S13-no-root-stdout  "$out" ""
+assert_eq       S13-no-root-stderr  "$(cat "$TMP/ss-noroot.err")" ""
 
 # S14: FND_PROFILE forces the answer, and the REAL bundle stays inside Codex's ~2500-token
 # additionalContextLimit in the session that composes the MOST — both gates open at once. A

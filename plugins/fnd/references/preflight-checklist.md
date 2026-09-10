@@ -51,12 +51,15 @@ On failure, report the **specific** error + remediation (auth, MCP config, serve
 ## Project skills & rules
 
 - Project skills are present under `.claude/skills/` (and any documented sync locations).
-- The repo's coding rules / Foundation conventions are available. List anything missing and how to restore it.
+- The repo's coding rules are available — in a `foundation` checkout (session line `fnd project profile: foundation`) that includes the Foundation conventions. List anything missing and how to restore it.
 
 ## Local dev server
 
-- Determine whether a theme/dev server is running (`npm run dev` — Turbo: `shopify theme dev -e dev`
-  + Vite assets — or `npm run theme:shopify` for preview only).
+- Determine whether a theme/dev server is running — in a `foundation` checkout (`npm run dev` — Turbo:
+  `shopify theme dev -e dev` + Vite assets — or `npm run theme:shopify` for preview only); in any other
+  checkout the repo's own dev script when its `package.json` defines one, else `shopify theme dev`.
+  This row only DETECTS a server — the start command with its flags is
+  `<plugin root>/references/session-theme.md` step 5.
 - If not running, it must be started before any **in-browser validation** (develop / QA workflows).
 
 ## Plugin update check

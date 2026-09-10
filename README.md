@@ -40,6 +40,7 @@ in its own subfolder under `plugins/`:
 │       ├── hooks/                # injected conventions + git guards + context monitor
 │       │   ├── comment-discipline.md
 │       │   ├── lean-code.md      #  "lazy senior dev" ladder (FND_LEAN=0 to disable)
+│       │   ├── session-start.sh         # SessionStart composer both shell wirings spawn
 │       │   ├── subagent-conventions.sh  # outside-content rail → every subagent; the above → code-writing ones
 │       │   ├── no-verify-bypass.sh      # PreToolUse guard: no hook-bypassing commits
 │       │   ├── spill-access.sh          # PreToolUse recorder: which tool read an MCP spill
@@ -571,7 +572,10 @@ sources (`doc-reader` writes only its own workspace extract), plus the write-sid
 `jira-writer` — all used to keep heavy/noisy work out of the main context:
 
 - **`change-reviewer`** — reviews a diff (stale comments, refactors, project-rules
-  conformance). The review flow fans it out one agent per file-group on large diffs.
+  conformance). The review flow fans it out one agent per file-group on large diffs. Its
+  Foundation core rules (`protected-core`: `src/entry/core/*` a blocker, the Liquid core a
+  hand-sync warning) fire only when the brief's `profile:` says `foundation`; on a plain
+  Shopify theme it reports the project's own rules alone.
 - **`bug-hunter`** — adversarial correctness review of a diff: reads the base classes,
   event listeners, and sibling paths the change interacts with, and returns verified
   findings with concrete failure scenarios (races, merchant-invariant bypasses, state
@@ -594,7 +598,9 @@ sources (`doc-reader` writes only its own workspace extract), plus the write-sid
   never enter the main context (`references/reading-linked-docs.md`).
 - **`theme-explorer`** — a planning scout: reads the project's `.claude/rules` + theme
   layout and returns an impact map (relevant files, patterns, new files, rule constraints).
-  Finds breadth; the main loop reads the load-bearing files itself.
+  Finds breadth; the main loop reads the load-bearing files itself. Like `change-reviewer` it
+  is briefed with the checkout's `profile:`, so the Foundation core rules stay off a plain
+  Shopify theme.
 
 In `develop-feature-or-fix` these run **in parallel** during Phase 1 (ticket + design +
 codebase reads at once) when the task scope is already clear. The block above is roughly
@@ -622,8 +628,9 @@ codebase reads at once) when the task scope is already clear. The block above is
   `[ full / only changed files / skip ]`, so `commit` and PR creation don't
   redundantly re-review work that's already been checked.
 - **PR conformance gate.** `create-pull-request` runs the agent with a
-  conformance emphasis; a `protected-core` violation (a direct edit to Foundation
-  core) is a **blocker** that stops the PR until resolved.
+  conformance emphasis; on a `foundation` checkout a `protected-core` **blocker** (a
+  direct edit to `src/entry/core/*`) stops the PR until resolved — the Liquid core is a
+  hand-sync warning, and neither row is emitted on a plain Shopify theme.
 
 ## Auto mode — `/fnd:ship`
 
@@ -750,8 +757,11 @@ npm run dev -- --theme <session-theme-id> --port 9293   # from step 1's hand-off
 
 Step 2 is illustrative — paste the `cd` line the script prints (an absolute, quoted path)
 rather than retyping it. The dev-server line is the one step 1's hand-off gave you, with the
-id and port filled in: without `--theme` the server syncs the branch into the shared dev
-theme the copied config still names.
+id and port filled in — the hand-off prints the `npm run dev` form above in a `foundation`
+checkout and `shopify theme dev` in any other (same `scripts/project-profile.sh` probe as the
+session's `fnd project profile:` line; an unreadable probe falls back to the `npm run dev`
+form). Without `--theme` the server syncs the branch into the shared dev theme the copied
+config still names.
 
 A session cannot relocate itself into another directory, so the second terminal is yours
 to open — nothing is auto-spawned. `/fnd:ship` knows about the split: started **in a
@@ -786,7 +796,9 @@ checkout it is standing in is pinned too (the workspace is shared between checko
 recorded id is not by itself a pinned one; re-pinning is a byte-level no-op).
 
 From then on everything targets that one theme: the start command the skills hand you
-becomes `npm run dev -- --theme <id> [--port <N>]` (explicit flag *and* pinned toml — belt
+becomes `npm run dev -- --theme <id> [--port <N>]` in a `foundation` checkout —
+`shopify theme dev --theme <id> [--port <N>]`, or the repo's own dev script when its
+`package.json` defines one, in any other (explicit flag *and* pinned toml — belt
 and braces), the qa phase **refreshes** the session theme for its `preview-theme` rows
 instead of building a second one, and `create-pull-request` puts it in the theme-preview
 table rather than auto-creating (a recorded session theme now outranks auto-creation in the
@@ -948,7 +960,9 @@ not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-
 The plugin wires five hook events (`plugin.json` → `hooks`); every hook fails open — a
 hook error never blocks work:
 
-- **SessionStart** — injects the Foundation session conventions from `hooks/*.md`
+- **SessionStart** — `hooks/session-start.sh`, the one script both shell wirings
+  (`plugin.json`, `hooks/hooks-codex.json`) spawn, injects the session
+  conventions from `hooks/*.md`
   (comment discipline, lean code, live-store access, the task-workspace convention,
   report-plugin-defects-upstream, routing oversized MCP results through the
   `json-slim` CLI, and the untrusted-content rail — ticket, doc, Figma, PR-comment, page
@@ -1253,7 +1267,8 @@ Two caveats. The shell fast-gates in the hook wirings (the `[ "$FND_MCP_SLIM" = 
 short-circuits) see only the real process env — a `0` set in the global file still disables the
 feature (the Node side re-checks after loading the files), it just no longer skips the node
 spawn. And
-`FND_LEAN`'s session gate is pure shell (the sessionStart one-liners that `cat` the statics), so
+`FND_LEAN`'s session gate is pure shell (`hooks/session-start.sh`, the composer that `cat`s the
+statics for the two shell wirings), so
 that one switch is process-env-only where it is hook-gated — on Cursor our sessionStart hook
 also hands the file values back to the host, which then feeds them to every later hook of the
 session, shell gates included.
@@ -1269,7 +1284,7 @@ because the script that reads it is the same single copy on all four hosts.
 | Variable | Default | Effect |
 |---|---|---|
 | `FND_LEAN` | `1` | `0` disables the lean-code session convention. Hook-gated, so it applies where the convention arrives through a hook (Claude Code and Codex at session start; every host's subagent conventions on Claude Code, Cursor and Codex). **Host divergence:** on Cursor the SESSION copy ships as an always-applied rule instead — turn `rules/fnd-lean-code.mdc` off there — and on OpenCode the statics live in your own `instructions` config, which this switch cannot reach; either way, "normal mode" in the session still works |
-| `FND_PROFILE` | auto | overrides the **project profile** — `foundation` / `theme` / `none`, detected by `scripts/project-profile.sh` from the checkout itself (`snippets/@*.liquid`, `sections/core-*.liquid`, `blocks/core-*.liquid` or `src/entry/core/` ⇒ `foundation`; else `layout/theme.liquid` ⇒ `theme`; else `none`), walking up from the session's directory and stopping at the repo boundary — the level that holds `.git` — so a hook running in a subdirectory answers about its own checkout and never about a parent repo. Every host prints the answer as `fnd project profile: <value>` right under the plugin-root line, and `foundation` adds one block to the session: `hooks/comment-discipline-foundation.md` (LiquidDoc on every snippet param; `src/entry/core/*` is protected — extend or compose it; the Liquid core may be edited but has to be hand-synced from the foundation repo) — plus the same block for code-writing subagents. The three values are matched exactly, lowercase; an exported-but-EMPTY value still counts as set, so it shadows both env files and lands on detection; anything else falls back to detection, silently in a session (run `scripts/project-profile.sh` by hand to see the warning). **Host divergence:** on Cursor the comment-discipline convention is an always-applied rule and of that material only this addendum is detection-gated, injected by `hooks/cursor-shim.cjs`; on OpenCode both the profile line and the addendum ride the adapter's once-per-session `chat.message` injection, since the statics live in your own `instructions` config |
+| `FND_PROFILE` | auto | overrides the **project profile** — `foundation` / `theme` / `none`, detected by `scripts/project-profile.sh` from the checkout itself (`snippets/@*.liquid`, `sections/core-*.liquid`, `blocks/core-*.liquid` or `src/entry/core/` ⇒ `foundation`; else `layout/theme.liquid` ⇒ `theme`; else `none`), walking up from the session's directory and stopping at the repo boundary — the level that holds `.git` — so a hook running in a subdirectory answers about its own checkout and never about a parent repo. Every host prints the answer as `fnd project profile: <value>` right under the plugin-root line, and `foundation` adds one block to the session: `hooks/comment-discipline-foundation.md` (LiquidDoc on every snippet param; `src/entry/core/*` is protected — extend or compose it; the Liquid core may be edited but has to be hand-synced from the foundation repo) — plus the same block for code-writing subagents. Bundled scripts read the same answer where a Foundation-only command would otherwise be handed to a plain theme: `scripts/worktree-setup.sh` prints `npm run dev -- --theme …` in the worktree hand-off only on `foundation`, and `shopify theme dev --theme …` everywhere else. The three values are matched exactly, lowercase; an exported-but-EMPTY value still counts as set, so it shadows both env files and lands on detection; anything else falls back to detection, silently in a session (run `scripts/project-profile.sh` by hand to see the warning). **Host divergence:** on Cursor the comment-discipline convention is an always-applied rule and of that material only this addendum is detection-gated, injected by `hooks/cursor-shim.cjs`; on OpenCode both the profile line and the addendum ride the adapter's once-per-session `chat.message` injection, since the statics live in your own `instructions` config |
 | `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens). Auto = the Claude model family on Claude Code (200000 when the model is unrecognized) and the window the rollout states on Codex — where, if it states none, the monitor stays silent rather than guess |

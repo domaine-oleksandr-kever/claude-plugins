@@ -21,8 +21,10 @@ line in the TA describes **how** we deliver those requirements inside this repo.
 ## Target audience
 
 Write for a **senior Shopify developer** who already knows the CLI / dev server / deploy flow,
-Liquid + OS 2.0 sections/blocks, the theme editor, and Domaine / Foundation conventions
-(`src/entry/core/*` protection, `@`-prefixed core snippets, `t:` keys, `BaseElementWithoutShadowDOM`).
+Liquid + OS 2.0 sections/blocks, and the theme editor. In a `foundation` checkout (session line
+`fnd project profile: foundation`) they also know the Foundation conventions
+(`src/entry/core/*` protection, `@`-prefixed core snippets, `t:` keys,
+`BaseElementWithoutShadowDOM`); elsewhere, the project's own.
 
 **Goal:** a senior dev reads the TA in **~3 minutes** and gets a 90% understanding. Skip anything
 they can infer. Don't restate how Shopify/CLI/Liquid work. No generic validation boilerplate

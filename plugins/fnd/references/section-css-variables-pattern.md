@@ -1,5 +1,9 @@
 # Section → Block CSS Variables Pattern
 
+Applies only in a `foundation` checkout (session line `fnd project profile: foundation`, or the
+brief's `profile:`); anywhere else ignore this file — `core-section` / `core-image` and the
+`use_section_vars` wiring do not exist there, so follow the theme's own section/block patterns.
+
 A pattern where a **section** controls the dimensions of its child **blocks** via CSS custom properties. Blocks can opt in with a `use_section_vars` checkbox — when enabled, block-level inputs are hidden and the block reads CSS variables from the parent section instead.
 
 ## How It Works

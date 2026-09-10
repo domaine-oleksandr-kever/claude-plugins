@@ -1,5 +1,9 @@
 # ESLint: `no-restricted-syntax` for `classList` / `style.*` / `className`
 
+Applies only in a `foundation` checkout (session line `fnd project profile: foundation`, or the
+brief's `profile:`); anywhere else ignore this file — assume nothing about its lint setup, and
+follow the theme's own lint config and patterns.
+
 This repo uses `no-restricted-syntax` to discourage:
 
 - `element.classList.add/remove/toggle(...)`

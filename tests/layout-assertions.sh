@@ -246,16 +246,34 @@ fi
 # Two files are the exception on Cursor only: the shim injects them where the workspace says so
 # (store credentials; Foundation markers) instead of shipping them as always-applied rules —
 # gen-host-adapters.cjs's RULE_EXEMPT_HOOKS is the same pair.
+# The two shell wirings hold the composition one hop away: each SessionStart command spawns
+# hooks/session-start.sh and that script names the conventions, so both halves of the trail are
+# asserted — a wiring that stopped spawning the script, or a script that stopped naming a file,
+# is the same silent loss as an unwired convention was before the split.
+SS_SCRIPT="$PLUGIN_DIR/hooks/session-start.sh"
+if [ -f "$SS_SCRIPT" ]; then ok
+else bad session-start-script "hooks/session-start.sh missing — both shell wirings spawn it"; fi
+if grep -qF 'hooks/session-start.sh' "$CANON"; then ok
+else bad session-start-claude "the canonical manifest's SessionStart command does not spawn hooks/session-start.sh"; fi
+if [ -f "$PLUGIN_DIR/hooks/hooks-codex.json" ]; then
+  if grep -qF 'hooks/session-start.sh' "$PLUGIN_DIR/hooks/hooks-codex.json"; then ok
+  else bad session-start-codex "hooks-codex.json's SessionStart command does not spawn hooks/session-start.sh"; fi
+fi
 CURSOR_SHIM_INJECTED="store-access comment-discipline-foundation"
+# The conventions the script cats through `for f in … ; do cat "$root/hooks/$f.md"` — a runtime
+# path, so the file name never appears literally and the census has to read the loop's word list.
+SS_LOOP_NAMES="$(sed -n 's/^for f in \(.*\); do$/\1/p' "$SS_SCRIPT" | tr '\n' ' ')"
 for f in "$PLUGIN_DIR"/hooks/*.md; do
   [ -f "$f" ] || continue
   n="$(basename "$f" .md)"
-  if grep -qF "$n" "$CANON"; then ok
-  else bad "convention-claude-$n" "hooks/$n.md is in no SessionStart command of the canonical manifest"; fi
-  if [ -f "$PLUGIN_DIR/hooks/hooks-codex.json" ]; then
-    if grep -qF "$n" "$PLUGIN_DIR/hooks/hooks-codex.json"; then ok
-    else bad "convention-codex-$n" "hooks/$n.md is in no SessionStart command of hooks-codex.json"; fi
-  fi
+  # The full referenced path, or a whole word of the `for f in …` list — never a bare substring:
+  # `comment-discipline` matches inside the `comment-discipline-foundation.md` line, so a deleted
+  # plain-convention `cat` would otherwise still read as present.
+  named=0
+  grep -qF "hooks/$n.md" "$SS_SCRIPT" && named=1
+  case " $SS_LOOP_NAMES " in *" $n "*) named=1 ;; esac
+  if [ "$named" -eq 1 ]; then ok
+  else bad "convention-shell-$n" "hooks/$n.md is named nowhere in hooks/session-start.sh — the script both shell wirings spawn"; fi
   case " $CURSOR_SHIM_INJECTED " in *" $n "*) continue ;; esac
   if [ -f "$PLUGIN_DIR/rules/fnd-$n.mdc" ]; then ok
   else bad "convention-cursor-$n" "no rules/fnd-$n.mdc — hooks/$n.md never reaches a Cursor session"; fi
@@ -349,6 +367,59 @@ if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   if [ "$(git -C "$ROOT" ls-files -s AGENTS.md 2>/dev/null | cut -d' ' -f1)" = "120000" ]; then ok
   else bad agents-md-mode "AGENTS.md is not committed as a symlink — a clone would get a copy"; fi
 fi
+
+# ------------------------- the review agents' core rules ride the project profile (item 1) --
+# scripts/project-profile.sh is the ONE place that decides what kind of checkout this is, and
+# theme-explorer / change-reviewer sit in hooks/subagent-conventions.sh's EXEMPT list — the word
+# reaches them only through their brief or through that probe. Ungated, `protected-core` invents
+# findings on a Dawn/Horizon theme; gated wrongly, a Foundation checkout loses the blocker
+# silently, so the fail-safe rung ("assume foundation") is asserted too. A second marker list
+# inside an agent would be the same detection written twice: `layout/theme.liquid` is the probe's
+# own `theme` marker and must appear in neither agent.
+if [ -f "$PLUGIN_DIR/scripts/project-profile.sh" ]; then ok
+else bad profile-probe "scripts/project-profile.sh missing — the agents' fallback names it"; fi
+for a in theme-explorer change-reviewer; do
+  f="$PLUGIN_DIR/agents/$a.md"
+  if [ ! -f "$f" ]; then bad "profile-agent-$a" "agents/$a.md missing"; continue; fi
+  if grep -qF 'foundation|theme|none' "$f"; then ok
+  else bad "profile-brief-$a" "agents/$a.md never names the brief's profile: foundation|theme|none"; fi
+  if grep -qF 'scripts/project-profile.sh' "$f"; then ok
+  else bad "profile-fallback-$a" "agents/$a.md has no project-profile.sh fallback for a brief without a profile"; fi
+  if grep -qF 'assume `foundation`' "$f"; then ok
+  else bad "profile-failsafe-$a" "agents/$a.md does not fall back to foundation — a Foundation checkout could lose its core rule"; fi
+  if grep -qF '`theme` / `none`' "$f"; then ok
+  else bad "profile-plain-$a" "agents/$a.md has no theme/none branch — the core rules are still unconditional"; fi
+  if grep -qF 'always true' "$f"; then
+    bad "profile-invariant-$a" "agents/$a.md still calls a Foundation rule 'always true'"
+  else ok; fi
+  if grep -qF 'layout/theme.liquid' "$f"; then
+    bad "profile-second-list-$a" "agents/$a.md carries its own detection markers — project-profile.sh is the single source"
+  else ok; fi
+done
+# `protected-core` keeps its name and its blocker, scoped to the JS/TS core the vendored
+# rules/core.mdc actually protects (the Liquid core is a hand-sync warning, not a blocker).
+CR="$PLUGIN_DIR/agents/change-reviewer.md"
+if [ -f "$CR" ]; then
+  if grep -qF 'protected-core' "$CR" && grep -qF 'src/entry/core/*' "$CR"; then ok
+  else bad protected-core-name "change-reviewer.md lost the protected-core finding or its src/entry/core scope"; fi
+fi
+# Every caller that spawns one of these agents hands the word over, so the probe is a fallback and
+# not the normal path — review-flow §2 is the brief contract, the rest are the spawn sites.
+for f in references/review-flow.md \
+         skills/pre-commit-review/SKILL.md \
+         skills/create-pull-request/SKILL.md \
+         skills/develop-feature-or-fix/SKILL.md \
+         skills/ship/SKILL.md; do
+  [ -f "$PLUGIN_DIR/$f" ] || { bad "profile-caller-missing-$f" "missing"; continue; }
+  if grep -qF 'foundation|theme|none' "$PLUGIN_DIR/$f"; then ok
+  else bad "profile-caller-$f" "$f spawns a profile-gated agent without passing the profile"; fi
+  # A caller that restates the old binary rule re-blocks what the agent now returns as a
+  # hand-sync warning, at the gate that consumes the agent's rows — passing the profile down
+  # is worth nothing if the consumer overrides the severity on the way back.
+  if grep -qF '`protected-core` is always a blocker' "$PLUGIN_DIR/$f"; then
+    bad "profile-severity-$f" "$f still calls every protected-core row a blocker — it overrides the agent's warning"
+  else ok; fi
+done
 
 echo "layout-assertions: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

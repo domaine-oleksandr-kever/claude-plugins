@@ -241,11 +241,33 @@ run --root "$S"
 expect G23-wiring-target-gone 1 "FAIL  hook-wiring:targets" "hooks/cursor-shim.cjs" "spawns a script that is gone"
 
 # G23b: the same rule for the one bundled script the wiring spawns from outside hooks/ — the
-# project-profile probe every host's session start reads its answer from.
+# project-profile probe every host's session start reads its answer from. No wiring names it
+# directly any more, so this only bites if the census follows the hop into hooks/session-start.sh.
 S="$(sandbox missingprobe)"
 rm -f "$S/$PLUGIN/scripts/project-profile.sh"
 run --root "$S"
 expect G23b-wiring-probe-gone 1 "FAIL  hook-wiring:targets" "scripts/project-profile.sh" "spawns a script that is gone"
+
+# G23c: the statics the session-start script cats are hop-only targets too — before the extraction
+# the wiring one-liner named them itself, and the census must not have lost them with it.
+S="$(sandbox missingstatic)"
+rm -f "$S/$PLUGIN/hooks/lean-code.md"
+run --root "$S"
+expect G23c-wiring-static-gone 1 "FAIL  hook-wiring:targets" "hooks/lean-code.md" "spawns a script that is gone"
+
+# G23d: the hop is one level deep and reports the chain it walked, so the reader can see which
+# spawned script names the missing file.
+S="$(sandbox missinghop)"
+rm -f "$S/$PLUGIN/hooks/host-trace.sh"
+run --root "$S"
+expect G23d-wiring-hop-chain 1 "FAIL  hook-wiring:targets" "hooks/session-start.sh → hooks/host-trace.sh"
+
+# G23e: the hop reads shell, where a `#` line names a path for the reader and spawns nothing —
+# counting one as a target turns every explanatory comment into a rename the census can fail on.
+S="$(sandbox commenttarget)"
+printf '# see scripts/does-not-exist.cjs for the detection this reads\n' >> "$S/$PLUGIN/hooks/session-start.sh"
+run --root "$S"
+expect G23e-comment-not-a-target 0 "PASS  hook-wiring:targets" "!scripts/does-not-exist.cjs"
 
 # G24: the OpenCode adapter is JS, so "does it parse" means a syntax check, not JSON.parse.
 S="$(sandbox badjs)"

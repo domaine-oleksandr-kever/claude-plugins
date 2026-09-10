@@ -143,12 +143,20 @@ short blocks under these headings:
 - `Foundation plugin — report defects upstream`
 
 Report which are present, and by which mechanism they arrived on this host — a session-start hook
-adding context, always-applied rule files, or a plugin adapter injecting on the first message.
+adding context (the shell wirings spawn one script for it, `hooks/session-start.sh`),
+always-applied rule files, or a plugin adapter injecting on the first message.
 Some blocks are gated on the workspace (store access appears where store credentials are
 configured; the LiquidDoc-and-core block only in a Foundation checkout; task workspace where a
 ticket is in play), so a subset is normal — 🟢 when at least the ungated conventions are visible,
 🔴 when none are (the injection path is not wired), 🟡 when you cannot tell them apart from
 project-level rules with the same content.
+
+An **absent** `fnd plugin root:` line is its own reading: the script that composes this context
+never ran. On the two shell wirings that is the install path — the bundle did not resolve (Codex's
+probe then stays silent; on Claude Code the failed spawn leaves a line on stderr). On Cursor,
+whose shim derives the root from its own location, and on OpenCode, whose adapter injects the
+line, an absent line means the hook or adapter never fired at all — the injection path. Either
+way report it as 🔴 "plugin root unresolved" rather than as missing conventions.
 
 A 🔴 names a wiring gap; whose gap depends on the host. Where the plugin owns the injection
 (Claude Code's session hook, Cursor's always-applied rules, the Codex hook) it is a plugin-side

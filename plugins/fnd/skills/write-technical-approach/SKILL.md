@@ -28,7 +28,7 @@ Model: on Claude Code unchanged (whatever the session runs); on Cursor **Claude 
 - The developer owns Git, merges, and ticket updates; you assist.
 - **Never proceed past a ✋ checkpoint** without explicit developer confirmation.
 - Use **Atlassian MCP** for Jira: **reads are delegated to the `jira-reader` subagent**, and the optional Phase 2 write-back is **delegated to the `jira-writer` subagent** (the ✋ approval stays in the main loop).
-- Respect Foundation conventions: follow the repo's coding rules and **extend — never directly modify** `src/entry/core/*`.
+- Follow the repo's coding rules. In a `foundation` checkout (session line `fnd project profile: foundation`) that includes the Foundation conventions — **extend — never directly modify** `src/entry/core/*`; in any other checkout, the project's own rules and the theme's existing patterns. No such line in the session (a hook fails open, so it can be absent) → run `<plugin root>/scripts/project-profile.sh` from the checkout root and use its answer; if that is not possible either, assume `foundation`.
 - **Client-facing repo.** Never reference tickets, repos, or Figma files from other client accounts.
 - **No internal repo file links** in the TA — they render as plain text in Jira. Reference in-repo files/rules with **inline code** only (`` `sections/main-header.liquid` ``). External links (Jira, Figma, public Shopify/Domaine docs) are fine.
 

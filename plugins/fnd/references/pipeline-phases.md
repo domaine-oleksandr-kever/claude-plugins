@@ -31,12 +31,15 @@ its brief says otherwise.
 1. **implement** — one agent per plan milestone, sequential. Brief: the milestone from
    `plan.md`, the AC, `figma-<node>.md` specs, the `store-data:` map + interview answers
    from `notes.md` (provision the approved mock data first — the audit already named the
-   products and values); references:
+   products and values), and `profile: <foundation|theme|none>` — the session context's
+   `fnd project profile:` word, which a subagent never sees on its own; references:
    `metafield-metaobject-setup.md` (provision first when planned; every query/mutation
    you wrote passes `validate_graphql_codeblocks` before it runs),
-   `section-css-variables-pattern.md`, `eslint-no-restricted-syntax.md`,
-   `theme-customizer-state.md`. In-browser validation vs design + AC (Chrome DevTools
-   MCP), data/customizer state walks via the runners, `git add` every new file, test
+   `theme-customizer-state.md`, and — **on a `foundation` profile only** —
+   `section-css-variables-pattern.md`, `eslint-no-restricted-syntax.md` (both describe
+   Foundation's Tailwind + `core-*` wiring; off `foundation` they do not apply).
+   In-browser validation vs design + AC (Chrome DevTools MCP), data/customizer state walks
+   via the runners, `git add` every new file, test
    paths / gids / `ceiling:` entries for intentional simplifications → `notes.md`.
 2. **qa** — a fresh agent that did NOT implement, **plus a parallel `bug-hunter` spawn**
    over the diff as it stands at qa time (pre-finalize; pass the base branch and the
@@ -79,7 +82,8 @@ its brief says otherwise.
    read when it can't be reproduced live); **cap 2 cycles**, then ESCALATE with the report.
 3. **finalize** — review + commit in one pass. Review per
    `<plugin root>/references/review-flow.md` with `hygiene` emphasis
-   (`change-reviewer` subagent(s)) — §3's pre-existing-marker question is replaced by
+   (`change-reviewer` subagent(s), each briefed with the run's
+   `profile:` per that file's §2) — §3's pre-existing-marker question is replaced by
    the pipeline exception (current `diff_hash` → skip and say so; stale or absent →
    full re-review; never ask); apply the objective classes (comment accuracy,
    ticket-ref stripping, untracked referenced files) — C-class refactor findings are NOT
@@ -112,7 +116,8 @@ its brief says otherwise.
    preview-theme decision flow (`[ELC-…]` naming, `--reuse`). Escalations, verbatim in
    the brief: `error=build_failed` → ESCALATE with
    the build output; `error=settings_drift` → the reference's manual recovery;
-   conformance pass (`change-reviewer`, `conformance` emphasis) — a `protected-core`
+   conformance pass (`change-reviewer`, `conformance` emphasis, brief carrying the run's
+   `profile:`) — a `protected-core`
    blocker → ESCALATE; **correctness backstop** per
    `<plugin root>/references/review-flow.md` §3's create-pull-request entry —
    `correctness_hash` absent or ≠ the current diff hash → the conductor applies the gate and

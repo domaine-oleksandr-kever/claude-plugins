@@ -225,7 +225,9 @@ alone updates it — re-run the installer only to pick up added or renamed roles
   file under `agents-codex/`.
 - **Both plugin-root variables are set.** Codex exports `PLUGIN_ROOT` plus a `CLAUDE_PLUGIN_ROOT`
   compatibility alias; `hooks/hooks-codex.json` prefers the alias and falls back to
-  `PLUGIN_ROOT`, while the guard scripts resolve their own paths from `__dirname` regardless.
+  `PLUGIN_ROOT`, while the guard scripts resolve their own paths from `__dirname` regardless —
+  `hooks/session-start.sh`, the SessionStart composer this wiring spawns (the same one
+  `plugin.json` runs on Claude Code), reads either variable and falls back to its own location.
 
 ## Project layer
 

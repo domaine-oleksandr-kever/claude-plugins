@@ -24,7 +24,7 @@ flowchart TB
   end
 
   subgraph canon["Canonical hooks (plugins/fnd/hooks)"]
-    H1["session context *.md"]
+    H1["session-start.sh → session context *.md"]
     H2["user-prompt.cjs"]
     H3["subagent-conventions.sh"]
     H4["no-ai-attribution.sh · no-verify-bypass.sh"]
@@ -82,6 +82,7 @@ sequenceDiagram
   participant Tool as Tool / MCP server
 
   Host->>Hooks: SessionStart
+  Note over Hooks: plugin.json and hooks-codex.json both spawn hooks/session-start.sh
   Hooks-->>Model: plugin root + project profile + conventions (comment discipline, LiquidDoc-and-core addendum in a foundation checkout, lean code, task workspace, whale routing, untrusted content, plugin feedback, store access)
   Host->>Hooks: UserPromptSubmit
   Hooks-->>Model: context-budget monitor, prompt-JSON guard (hands a pasted blob back as a file)

@@ -46,10 +46,12 @@ only; the review agents read them (step 2).
 - **A and C are delegated to the `change-reviewer` agent** (`hygiene` emphasis) so the
   heavy file-reading stays out of the main context. Small vs large diff and the
   file-group split follow `review-flow.md` §2. Pass each agent its file group, the
-  `base`, and the raw B/D hits — **confirming hits is the agent's job** (it reads those
+  `base`, `profile: <foundation|theme|none>` (the session context's `fnd project profile:`
+  word — it gates check E's core rules), and the raw B/D hits — **confirming hits is the agent's job** (it reads those
   files anyway); inline you only gather candidates. The agent may also return **E rows**
-  (project-rules conformance — `protected-core` is always a blocker); they join the
-  step-3 plan like every other finding.
+  (project-rules conformance — a `protected-core` row on `src/entry/core/*` is a blocker;
+  the Liquid-core row is a hand-sync `warning`; neither exists off a `foundation`
+  checkout); they join the step-3 plan like every other finding.
 - **F is delegated to the `bug-hunter` agent, spawned in parallel with the
   change-reviewer(s)** when the review-flow correctness gate holds (the diff touches
   JS/TS logic, Liquid control flow, or request handling — pure copy/CSS/locale diffs

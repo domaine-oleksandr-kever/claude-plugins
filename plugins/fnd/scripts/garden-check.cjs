@@ -523,20 +523,55 @@ function checkHookWirings(pluginRoot) {
   else pass('hook-wiring:js', jsFiles.length + ' hook/adapter script(s) parse');
 
   // Paths built at runtime (`$r/hooks/$f.md`) carry a `$` and are skipped: only literal spawns can
-  // be resolved from here, and those are the ones a rename breaks. `scripts/` is in scope beside
-  // `hooks/` because the wiring spawns one bundled script from there — the project-profile probe.
+  // be resolved from here, and those are the ones a rename breaks. The census follows one hop into
+  // a bundled shell script the wiring spawns, because that script — not the wiring any more — is
+  // what names the project-profile probe and the static conventions under `scripts/` and `hooks/`.
+  // That hop reads shell, where a `#` comment names paths for the reader rather than spawning
+  // them — hence the strip below; the wirings themselves are JSON, so depth 0 is scanned whole.
+  const literalTargets = (raw) => {
+    const re = /(hooks|scripts)\/([A-Za-z0-9._-]+\.(?:cjs|sh|md|rules))/g;
+    const found = [];
+    let m;
+    while ((m = re.exec(raw))) found.push(m[1] + '/' + m[2]);
+    return found;
+  };
+  // A trailing `#` is dropped only where the text before it closes its quotes, so a `#` inside a
+  // string can never truncate a line that still names a real spawn target.
+  const stripShellComments = (src) =>
+    src
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .map((line) => {
+        const i = line.search(/\s#/);
+        if (i < 0) return line;
+        const head = line.slice(0, i);
+        const even = (ch) => (head.split(ch).length - 1) % 2 === 0;
+        return even('"') && even("'") ? head : line;
+      })
+      .join('\n');
   const missing = [];
   let targets = 0;
   for (const { rel, raw } of wirings) {
-    const re = /(hooks|scripts)\/([A-Za-z0-9._-]+\.(?:cjs|sh|md|rules))/g;
     const seen = new Set();
-    let m;
-    while ((m = re.exec(raw))) {
-      const target = m[1] + '/' + m[2];
+    const queue = literalTargets(raw).map((t) => ({ target: t, via: rel, depth: 0 }));
+    while (queue.length) {
+      const { target, via, depth } = queue.shift();
       if (seen.has(target)) continue;
       seen.add(target);
       targets++;
-      if (!exists(path.join(pluginRoot, m[1], m[2]))) missing.push(rel + ' → ' + target);
+      const abs = path.join(pluginRoot, target);
+      if (!exists(abs)) {
+        missing.push(via + ' → ' + target);
+        continue;
+      }
+      if (depth === 0 && target.startsWith('hooks/') && target.endsWith('.sh')) {
+        const src = readText(abs);
+        if (src !== null) {
+          for (const inner of literalTargets(stripShellComments(src))) {
+            queue.push({ target: inner, via: via + ' → ' + target, depth: 1 });
+          }
+        }
+      }
     }
   }
   if (missing.length) fail('hook-wiring:targets', summarize(missing, 3) + ' — the wiring spawns a script that is gone');

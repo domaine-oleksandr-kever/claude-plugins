@@ -59,6 +59,20 @@ assert() {
   ok
 }
 
+# A PATH of symlinks to exactly the tools a script uses is the only way to make `command -v <x>`
+# fail on a normal machine (the degradation cases: no perl, no node). The omitted tool is filtered
+# out of the list too, so a later edit of a list cannot silently put it back.
+path_without() { # path_without <dir> <tool-to-omit> <tools…>
+  local dir="$1" omit="$2" b p
+  shift 2
+  mkdir -p "$dir"
+  for b in "$@"; do
+    [ "$b" = "$omit" ] && continue
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$dir/$b"
+  done
+  return 0
+}
+
 # ---------------------------------------------- theme-json.sh against a stub runner --
 TJDIR="$TMP/tj"; mkdir -p "$TJDIR"
 cp "$TJ" "$TJDIR/theme-json.sh"
@@ -697,12 +711,10 @@ else bad T41-gql-not-applied "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "
 
 # T42 (degradation): the normalizer needs perl to strip the banner, and the `set` json guard
 # already degrades instead of refusing when perl is missing — the verify does the same, comparing
-# raw bytes and saying so on stderr. A PATH of symlinks to exactly the tools the script uses is
-# the only way to make `command -v perl` fail on a normal machine.
-NOPERL="$TMP/noperl-bin"; mkdir -p "$NOPERL"
-for b in jq mktemp cmp cat sed tr wc grep awk dirname mkdir head tail cp sleep rm touch bash; do
-  p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$NOPERL/$b"
-done
+# raw bytes and saying so on stderr.
+NOPERL="$TMP/noperl-bin"
+path_without "$NOPERL" perl \
+  jq mktemp cmp cat sed tr wc grep awk dirname mkdir head tail cp sleep rm touch bash
 rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/new.json" PATH="$TJSHIM:$NOPERL" \
   "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
   --theme 2 --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
@@ -2113,11 +2125,15 @@ cat > "$CPTD/repo/package.json" <<EOF
 EOF
 chmod +x "$CPTD/shim/shopify" "$CPTD/shim/npm" "$CPTD/waitpull.sh" "$CPTD/overlap.sh" "$CPTD/markbuild.sh"
 
-run_cpt() { # run_cpt <log-file> <env=val…> -- <args…>   ; stdout -> $O, stderr -> $E
-  local log="$1"; shift
+run_cpt_at() { # run_cpt_at <cwd> <path-prefix> <log-file> <env=val…> -- <args…>
+  local dir="$1" pfx="$2" log="$3"; shift 3
   local envs=(); while [ "$1" != "--" ]; do envs+=("$1"); shift; done; shift
-  (cd "$CPTD/repo" && PATH="$CPTD/shim:$PATH" CPT_LOG="$log" env "${envs[@]}" \
+  (cd "$dir" && PATH="$pfx" CPT_LOG="$log" env "${envs[@]}" \
      "$BASH_BIN" "$CPTD/cpt.sh" "$@") >"$O" 2>"$E"
+}
+# the same run pinned to the fixture repo and its shim PATH — what nearly every case below wants
+run_cpt() { # run_cpt <log-file> <env=val…> -- <args…>   ; stdout -> $O, stderr -> $E
+  run_cpt_at "$CPTD/repo" "$CPTD/shim:$PATH" "$@"
 }
 cpt_calls() { grep -c "argv=$1" "$2" 2>/dev/null || true; }
 
@@ -2559,6 +2575,177 @@ run_cpt "$L" NO=1 -- refresh --theme 111 --build-script nope || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (nope)' "$O" \
    && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
 else bad P19i-refresh-build-script-missing "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+
+# ------------------------- create-preview-theme.sh: a checkout with no ./package.json --
+# A plain theme repo has nothing to build, and refusing there (`build_script_missing`) blocked the
+# push over a build that does not exist. The build is SKIPPED instead and the working tree ships;
+# an EXPLICIT --build-script still refuses, because a build the caller asked for and we cannot run
+# must not be silently dropped. Two fixture repos, both carrying the same toml and theme dirs as
+# $CPTD/repo: one without package.json at all, one whose package.json lacks the default script.
+CPTNP="$CPTD/repo-nopkg"; CPTNS="$CPTD/repo-noscript"
+for d in "$CPTNP" "$CPTNS"; do
+  # the `.git` is the repo boundary the package.json walk-up stops at: without it the skip cases
+  # would answer about whatever sits above the harness's temp dir on the developer's machine
+  mkdir -p "$d/assets" "$d/sections" "$d/.git"
+  cp "$CPTD/repo/assets/app.css" "$d/assets/"
+  cp "$CPTD/repo/sections/main-product.liquid" "$d/sections/"
+  cp "$CPTD/repo/shopify.theme.toml" "$d/"
+done
+printf '{"name":"cpt-noscript","private":true,"scripts":{"lint":"true"}}\n' > "$CPTNS/package.json"
+
+# P19j: create with no flags in a package.json-less checkout skips the build and still pushes,
+# saying so in both the built= key and one warn= line (npm is never invoked)
+rc=0; L="$TMP/cpt19j"; : > "$L"
+run_cpt_at "$CPTNP" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-NP" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=skipped_no_package_json$' "$O" \
+   && [ "$(grep -c '^warn=build_skipped_no_package_json' "$O")" -eq 1 ] \
+   && [ "$(cpt_calls 'theme push' "$L")" -ge 1 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19j-create-no-package-json-skips "rc=$rc out=$(tr '\n' ';' < "$O") npm=$(grep '^npm=' "$L" | tr '\n' ';')"; fi
+
+# P19k: and it needs no node — the package.json lookup is what node was for, so a host without it
+# must still get the preview (T42's pattern, same helper).
+NONODE="$TMP/cpt-nonode-bin"
+path_without "$NONODE" node \
+  jq mktemp sed awk grep cat cp mv rm mkdir find sleep tail head tr sort uniq wc cmp \
+  chmod touch date basename dirname stat env ls bash sh
+if ( PATH="$CPTD/shim:$NONODE"; command -v node >/dev/null 2>&1 ); then
+  bad P19k-no-node-path "the no-node PATH still resolves node — the case below would prove nothing"
+else
+  rc=0; L="$TMP/cpt19k"; : > "$L"
+  run_cpt_at "$CPTNP" "$CPTD/shim:$NONODE" "$L" NO=1 -- refresh --theme 555 || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q '^built=skipped_no_package_json$' "$O" \
+     && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+  else bad P19k-refresh-no-node-skips "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+fi
+
+# P19l/P19m: an EXPLICIT --build-script in the same checkout is refused before the store instead —
+# both arg loops, since each mode parses the flag on its own
+rc=0; L="$TMP/cpt19l"; : > "$L"
+run_cpt_at "$CPTNP" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-NP2" --build-script build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (build)' "$O" && grep -q 'no ./package.json' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19l-create-explicit-script-no-package-json "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt19m"; : > "$L"
+run_cpt_at "$CPTNP" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 --build-script build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (build)' "$O" && grep -q 'no ./package.json' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19m-refresh-explicit-script-no-package-json "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P19n: --no-build is unchanged — it never looked at package.json, so its verdict stays `skipped`
+# and carries no warn line (a caller reading built= must be able to tell the two apart)
+rc=0; L="$TMP/cpt19n"; : > "$L"
+run_cpt_at "$CPTNP" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=skipped$' "$O" && ! grep -q 'no_package_json' "$O" \
+   && ! grep -q '^npm=' "$L"; then ok
+else bad P19n-no-build-unchanged "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P19o: the other half of the split — a package.json that EXISTS without the script is still the
+# refusal, before the store. Only "no package.json at all" is the skip.
+rc=0; L="$TMP/cpt19o"; : > "$L"
+run_cpt_at "$CPTNS" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-NS" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (build)' "$O" \
+   && grep -q 'scripts' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad P19o-package-json-without-script "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# P19p (bug): the wrong directory is not a build question. A cwd with no theme directory must be
+# refused before the store — assemble_theme would hand `theme push` an empty root, and a code push
+# carries no --nodelete, so the theme would be stripped. `theme` (not `theme push`) in the call
+# count: the guard runs before the listing too, so NOTHING may reach the CLI.
+CPTWD="$TMP/cpt-wrongdir"; mkdir -p "$CPTWD"
+rc=0; L="$TMP/cpt19p"; : > "$L"
+run_cpt_at "$CPTWD" "$CPTD/shim:$PATH" "$L" NO=1 TOML_PATH="$CPTNP/shopify.theme.toml" \
+  -- refresh --theme 555 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=not_a_theme_checkout' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19p-wrong-directory-refused "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') calls=$(cpt_calls 'theme' "$L")"; fi
+# and the same for `create`, which reaches the push through its own path
+rc=0; L="$TMP/cpt19p2"; : > "$L"
+run_cpt_at "$CPTWD" "$CPTD/shim:$PATH" "$L" NO=1 TOML_PATH="$CPTNP/shopify.theme.toml" \
+  -- create --name "PREVIEW-WD" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=not_a_theme_checkout' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19p2-wrong-directory-create-refused "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+
+# P19p3/P19p4 (bug): --no-build must not smuggle an empty push root past that guard. The
+# refusal is about the directory, so it lands in both modes with the flag on — a cwd carrying only
+# the toml (one `cd` too far, or the toml's own directory) is exactly where that happens.
+CPTWDT="$TMP/cpt-wrongdir-toml"; mkdir -p "$CPTWDT"; cp "$CPTNP/shopify.theme.toml" "$CPTWDT/"
+rc=0; L="$TMP/cpt19p3"; : > "$L"
+run_cpt_at "$CPTWDT" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=not_a_theme_checkout' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad P19p3-no-build-wrong-directory-refresh "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') calls=$(cpt_calls 'theme' "$L")"; fi
+rc=0; L="$TMP/cpt19p4"; : > "$L"
+run_cpt_at "$CPTWDT" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-WDNB" --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=not_a_theme_checkout' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad P19p4-no-build-wrong-directory-create "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+
+# P19p5 (bug): a package.json buys no way past it either — the directory refusal is settled before
+# the build decision, so a buildable cwd with no theme dirs must still be refused, and with no
+# build run.
+CPTWDP="$TMP/cpt-wrongdir-pkg"; mkdir -p "$CPTWDP"; cp "$CPTNP/shopify.theme.toml" "$CPTWDP/"
+printf '{"name":"cpt-wrongdir","private":true,"scripts":{"build":"true"}}\n' > "$CPTWDP/package.json"
+rc=0; L="$TMP/cpt19p5"; : > "$L"
+run_cpt_at "$CPTWDP" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-WDP" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=not_a_theme_checkout' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19p5-package-json-wrong-directory "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') npm=$(grep -c '^npm=' "$L")"; fi
+
+# P19q: "no package.json" means no such entry at all. One that is present but not a regular file
+# (a directory here) keeps the node-driven refusal it had before the skip existed — the skip may
+# not be reached by anything the old code would have refused.
+CPTPD="$TMP/cpt-pkgdir"; mkdir -p "$CPTPD/assets" "$CPTPD/sections" "$CPTPD/package.json"
+cp "$CPTD/repo/assets/app.css" "$CPTPD/assets/"; cp "$CPTD/repo/shopify.theme.toml" "$CPTPD/"
+rc=0; L="$TMP/cpt19q"; : > "$L"
+run_cpt_at "$CPTPD" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (build)' "$O" \
+   && ! grep -q 'skipped_no_package_json' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P19q-package-json-not-a-file "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+
+# P19r (bug): "no ./package.json" also describes a run started in a SUBDIRECTORY of a project whose
+# package.json sits above it — the build exists and was skipped, so the push would ship an unbuilt
+# subtree. That is the refusal it was before the skip existed, naming the directory to run from.
+CPTSUB="$TMP/cpt-monorepo"; mkdir -p "$CPTSUB/.git" "$CPTSUB/theme/assets" "$CPTSUB/theme/sections"
+printf '{"name":"cpt-monorepo","private":true,"scripts":{"build":"true"}}\n' > "$CPTSUB/package.json"
+cp "$CPTD/repo/assets/app.css" "$CPTSUB/theme/assets/"
+cp "$CPTD/repo/sections/main-product.liquid" "$CPTSUB/theme/sections/"
+cp "$CPTD/repo/shopify.theme.toml" "$CPTSUB/theme/"
+# the walk is physical (as project-profile.sh's is), so the path it names is the physical one —
+# the sim's own temp root already lives under a symlink on macOS (/var -> /private/var)
+CPTSUB_P="$(cd "$CPTSUB" && pwd -P)"
+rc=0; L="$TMP/cpt19r"; : > "$L"
+run_cpt_at "$CPTSUB/theme" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-SUB" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q "error=build_script_missing (build)" "$O" \
+   && grep -qF "./package.json is at $CPTSUB_P" "$O" \
+   && ! grep -q 'skipped_no_package_json' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19r-package-json-in-ancestor "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+
+# P19r2 (bug): the same subdirectory reached through a SYMLINK. A logical walk tests the link's
+# parent, finds no package.json, and pushes the unbuilt subtree; symlinked project roots are
+# ordinary (/Users/x/work -> /Volumes/…), so the answer must not depend on the route taken.
+CPTSUBL="$TMP/cpt-monorepo-link"; ln -s "$CPTSUB/theme" "$CPTSUBL"
+rc=0; L="$TMP/cpt19r2"; : > "$L"
+run_cpt_at "$CPTSUBL" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q "error=build_script_missing (build)" "$O" \
+   && grep -qF "./package.json is at $CPTSUB_P" "$O" \
+   && ! grep -q 'skipped_no_package_json' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19r2-package-json-in-ancestor-via-symlink "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+
+# P19s: a package.json that is a DANGLING symlink is a broken project, not a project without one —
+# the entry exists, so the skip may not claim it (it kept the node-driven refusal before the skip).
+CPTPL="$TMP/cpt-pkglink"; mkdir -p "$CPTPL/assets" "$CPTPL/sections"
+cp "$CPTD/repo/assets/app.css" "$CPTPL/assets/"
+cp "$CPTD/repo/sections/main-product.liquid" "$CPTPL/sections/"
+cp "$CPTD/repo/shopify.theme.toml" "$CPTPL/"; ln -s ./nowhere.json "$CPTPL/package.json"
+rc=0; L="$TMP/cpt19s"; : > "$L"
+run_cpt_at "$CPTPL" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=build_script_missing (build)' "$O" \
+   && ! grep -q 'skipped_no_package_json' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P19s-package-json-dangling-symlink "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
 
 # P20 (bug): the project's own credential wins over an ambient $SHOPIFY_CLI_THEME_TOKEN — a token
 # exported for another project would otherwise authenticate this repo's pushes against that store
@@ -5042,10 +5229,37 @@ if [ "$rc" -eq 0 ] && grep -q '^toml=copied$' "$O" && grep -q '^toml_unpinned=no
 else bad W28g-unpin-failed-warns "rc=$rc out=$(grep -E '^toml|^warn|^error' "$O" | tr '\n' ';')"; fi
 
 # W29 (bug): the hand-off block the skill relays VERBATIM must not advertise a dev-server command
-# without `--theme` — that is the one that syncs the branch into the shared dev theme
-if grep -q 'npm run dev -- --theme <session-theme-id> --port' "$O" \
+# without `--theme` — that is the one that syncs the branch into the shared dev theme. This
+# fixture carries no theme markers (profile `none`), so the line must also be the runnable CLI
+# form: `npm run dev` is Foundation's own wrapper and does not exist here.
+rc=0; wt_run WT-291 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '# dev server:  shopify theme dev --theme <session-theme-id> --port' "$O" \
+   && ! grep -q 'npm run dev' "$O" \
    && ! grep -q '(dev server: --port' "$O"; then ok
-else bad W29-handoff-names-theme "out=$(grep -n 'dev server' "$O" | tr '\n' ';')"; fi
+else bad W29-handoff-names-theme "rc=$rc out=$(grep -n 'dev server' "$O" | tr '\n' ';')"; fi
+
+# W29b: the same run on a `foundation` checkout keeps the pre-gate line byte for byte — the gate
+# may only change what a NON-Foundation checkout is told, so the whole line is asserted, port and
+# all. FND_PROFILE is the documented override, so this exercises the real probe rather than a stub.
+rc=0; FND_PROFILE=foundation wt_run WT-292 || rc=$?
+W29BP="$(wt_key dev_port)"
+if [ "$rc" -eq 0 ] \
+   && grep -qF "  # dev server:  npm run dev -- --theme <session-theme-id> --port $W29BP" "$O" \
+   && ! grep -q 'shopify theme dev --theme' "$O"; then ok
+else bad W29b-handoff-foundation "rc=$rc port=$W29BP out=$(grep -n 'dev server' "$O" | tr '\n' ';')"; fi
+
+# W29c (bug): the gate reads what the probe SAID, not whether it ran. An unreadable or silent probe
+# knows nothing about the checkout, so the hand-off keeps the Foundation form.
+WTSD="$WTR/wts-mute-probe"; mkdir -p "$WTSD"
+cp "$WTS" "$WTSD/worktree-setup.sh"; cp "$STL" "$WTSD/session-theme.sh"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$WTSD/project-profile.sh"; chmod +x "$WTSD/project-profile.sh"
+rc=0; (cd "$WTR/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+  "$BASH_BIN" "$WTSD/worktree-setup.sh" WT-293) >"$O" 2>"$E" || rc=$?
+W29CP="$(wt_key dev_port)"
+if [ "$rc" -eq 0 ] \
+   && grep -qF "  # dev server:  npm run dev -- --theme <session-theme-id> --port $W29CP" "$O" \
+   && ! grep -q 'shopify theme dev --theme' "$O"; then ok
+else bad W29c-handoff-mute-probe "rc=$rc port=$W29CP out=$(grep -n 'dev server' "$O" | tr '\n' ';')"; fi
 
 # W30 (rename migration): a main checkout still holding the legacy `.claude/fnd` workspace —
 # the run moves it to `.claude/tasks` once (never merging into an existing new home), so
@@ -5497,6 +5711,35 @@ o16="$(cd "$EV4R/repo/sub" && XDG_CONFIG_HOME="$EV4R/cfg" env -u FND_GQL_PROBE_C
 o17="$(cd "$EV4R/repo/sub" && XDG_CONFIG_HOME="$EV4R/cfg" domaine_env FND_GQL_PROBE_CACHE)"
 if [ "$o16" = "[]" ] && [ "$o17" = "" ]; then ok
 else bad EV13-empty-value-shadows-global "node='$o16' bash='[$o17]'"; fi
+
+# EV14: `list | head -1` — the consumer already has its bytes, so a stdout that goes away is
+# success, not an unhandled EPIPE (exit 1 plus a node stack on stderr). The harness destroys the
+# read end up front because a destroyed read end faults EVERY write regardless of pipe-buffer
+# size — the case cannot flake, and it pins the guard rather than the shell's timing.
+o18="$(cd "$EV4R/repo" && XDG_CONFIG_HOME="$EV4R/cfg" node -e '
+  const { spawn } = require("child_process");
+  const c = spawn(process.execPath, [process.argv[1], "list"], { stdio: ["ignore", "pipe", "pipe"] });
+  let err = "";
+  c.stdout.destroy();
+  c.stderr.setEncoding("utf8");
+  c.stderr.on("data", (d) => { err += d; });
+  c.on("close", (code) => console.log(code + "|" + (/EPIPE|Unhandled/.test(err) ? "noisy" : "quiet")));
+' "$EVC")"
+if [ "$o18" = "0|quiet" ]; then ok; else bad EV14-list-epipe-quiet "got='$o18'"; fi
+
+# EV14b: and the pipeline from the bug report itself — `head -1` exits after the first of ~30
+# separate writes, so the rest fault and a guard-less build prints a node stack here.
+(cd "$EV4R/repo" && XDG_CONFIG_HOME="$EV4R/cfg" node "$EVC" list 2>"$E" | head -1 >/dev/null)
+if [ ! -s "$E" ]; then ok; else bad EV14b-list-head-pipeline "stderr=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# EV15: and the guard is invisible to an ordinary run — a fully-read `list` still exits 0, keeps
+# stderr empty, and prints the same bytes down a pipe as into a capture
+rc=0; o19="$(cd "$EV4R/repo" && XDG_CONFIG_HOME="$EV4R/cfg" node "$EVC" list 2>"$E")" || rc=$?
+o20="$(cd "$EV4R/repo" && XDG_CONFIG_HOME="$EV4R/cfg" node "$EVC" list 2>/dev/null | cat)"
+if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ "$o19" = "$o20" ] \
+   && printf '%s\n' "$o19" | grep -q '^precedence: process env > project file > global file > default$' \
+   && printf '%s\n' "$o19" | grep -q '^FND_GQL_PROBE_CACHE .*(project file)'; then ok
+else bad EV15-list-plain-output "rc=$rc err=$(head -c 120 "$E" | tr '\n' ' ') out=$(printf '%s' "$o19" | tr '\n' ';' | head -c 200)"; fi
 
 # ═══ PP — project-profile.sh: the session profile probe ═════════════════════════════════════
 # The one place the foundation/theme/none answer is derived; every host's session wiring and

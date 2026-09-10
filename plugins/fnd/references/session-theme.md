@@ -11,7 +11,8 @@ in the Bash tool's shell.
 
 ## Why
 
-`npm run dev` (`shopify theme dev -e dev`) syncs into whatever theme the `[environments.dev]`
+The dev server (`shopify theme dev -e dev`, wrapped as `npm run dev` in a `foundation` checkout)
+syncs into whatever theme the `[environments.dev]`
 block of `shopify.theme.toml` names — normally the shared dev theme. Two parallel sessions (main
 checkout + worktree) would therefore sync two different branches into that one remote theme and
 overwrite each other. A **session theme** is one unpublished preview theme owned by this work
@@ -72,8 +73,16 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    rest** — never invent a name or a URL.
    Add `superseded: <id>` to the same bullet when the pin reported `superseded_theme_id=` (that
    is the environment's previous theme id, and the config is gitignored).
-5. **Then the dev server runs on it:** the start command the developer gets is
-   `npm run dev -- --theme <id> [--port <N>]` — `--theme` always (belt and braces: explicit even
+5. **Then the dev server runs on it.** Steps 1–4 already needed this checkout's
+   `shopify.theme.toml` (or `TOML_PATH`), so the store is resolved by the time the server
+   starts. The start command the developer gets is the line for this checkout's profile —
+   **this list is the single home of that mapping; every skill defers to it**:
+   - `foundation` checkout (session line `fnd project profile: foundation`) — `npm run dev -- --theme <id> [--port <N>]`
+   - any other checkout — `shopify theme dev --theme <id> [--port <N>]`, or the repo's own dev
+     script when its `package.json` defines one (same flags after `--`)
+
+   No profile line in the session (the hook fails open) → the `foundation` form.
+   `--theme` always (belt and braces: explicit even
    though the toml is pinned), `--port <N>` added when port 9292 is taken by another checkout or
    the workspace records a `dev-port:` line. A dev server already running against a different
    theme has to be restarted on this one — ask the developer; never start or kill it yourself.

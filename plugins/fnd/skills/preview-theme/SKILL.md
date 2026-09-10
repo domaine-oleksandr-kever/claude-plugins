@@ -42,9 +42,11 @@ section, not the file).
 
 When this checkout is a `git worktree` — or anything else already holds port 9292 — its dev
 server has to start on the theme the workspace's `notes.md` records as `session-theme:` and
-the port it records as `dev-port:` (`npm run dev -- --theme <id> --port <N>`), otherwise it
-silently collides with the main checkout's server or overwrites the shared dev theme
-(`<plugin root>/references/session-theme.md`).
+the port it records as `dev-port:` — the start command is the one
+`<plugin root>/references/session-theme.md` step 5 gives for this checkout's profile
+(`foundation`, session line `fnd project profile: foundation`: `npm run dev -- --theme <id> --port <N>`)
+— otherwise it silently collides with the main checkout's server or overwrites the shared dev
+theme.
 
 > **Security:** the Theme Access token lives in `shopify.theme.toml`. **Never read that
 > file** — the script consumes the token inside the `shopify` subprocess and never prints
@@ -85,7 +87,10 @@ silently collides with the main checkout's server or overwrites the shared dev t
    theme's settings — pass `--no-build` if the developer already built, or
    `--build-script <name>` when the production build is a different `package.json` script —
    a script **name**, never a shell command (anything else is refused before any
-   push). **Any `error=` line** → report it plainly,
+   push). A checkout with no `package.json` (in it or any parent up to the repo root) takes
+   neither flag — `--build-script` there is refused (`error=build_script_missing`) — the build
+   is skipped (`built=skipped_no_package_json` + `warn=build_skipped_no_package_json`, exit 0)
+   and the working tree is pushed as it stands. **Any `error=` line** → report it plainly,
    then follow the errors reference's **`error=` outcomes** — it names, per code, whether
    anything was pushed, whether retrying is right, and the recovery. Don't improvise one.
    A run that exits 0 with `overlay=partial` + `warn=overlay_file_dropped` lines is NOT a
@@ -115,7 +120,8 @@ silently collides with the main checkout's server or overwrites the shared dev t
 2. **Confirm before mutating.** This rebuilds and overwrites the theme's **code**
    (settings are preserved). Show the target id and `[ update / cancel ]`.
 3. **Refresh.** Run `create-preview-theme.sh refresh --theme <id>` (add `--no-build` /
-   `--build-script <name>` as above). Any `error=` line → report it plainly and follow the
+   `--build-script <name>` as above; with no `package.json` the build is skipped the same
+   way). Any `error=` line → report it plainly and follow the
    errors reference's **`error=` outcomes**; don't read the toml yourself. Two refusals need a
    distinct developer consent each: `error=refresh_unverifiable` / `error=reuse_unverifiable`
    (the store listing was silent) → report; ask the developer before re-running with

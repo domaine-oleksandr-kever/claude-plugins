@@ -74,8 +74,10 @@ script, relays what it printed, and — once the worktree exists — settles its
    must land on the
    worktree's own `shopify.theme.toml`, never the main checkout's. Then, on **both** paths,
    extend the hand-off you just relayed with the theme id, its preview/editor links when the
-   script returned them, and the dev-server line `npm run dev -- --theme <id> --port <N>` with
-   the id filled in — the script's own block deliberately leaves it as a placeholder. Any
+   script returned them, and the dev-server line **the script already printed** — fill
+   `<session-theme-id>` into it and never re-derive that line; its per-profile forms live in
+   `<plugin root>/references/session-theme.md` step 5 (`foundation`, session line
+   `fnd project profile: foundation`: `npm run dev -- --theme <id> --port <N>`). Any
    `error=` → report it, leave the worktree in place; it is usable, just unpinned. Never read
    or echo `shopify.theme.toml`. Close with the reminder above: new terminal, new session.
 5. **Remove:** `worktree-setup.sh --remove <WORK-ID>`. A refusal on a dirty tree is a real

@@ -124,8 +124,10 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   - **Small diff** (≲ 15 changed files / ≲ 1500 diff lines) → **one** `change-reviewer`.
   - **Large diff** → **one `change-reviewer` per file-group, in parallel** — each file is
     read once; wall-clock drops. Split the file list into a few balanced groups.
-  - Pass each agent: the `base`, its file group, the **emphasis** (see below), and the raw
-    B/D hits to confirm.
+  - Pass each agent: the `base`, its file group, the **emphasis** (see below),
+    `profile: <foundation|theme|none>` (the session context's `fnd project profile:` word —
+    it gates check E's core rules, and without it the agent probes or assumes `foundation`),
+    and the raw B/D hits to confirm.
 
 - **F (correctness) is delegated to the `bug-hunter` agent** — an adversarial pass that
   hunts for real bugs (races, merchant-invariant bypasses, state divergence between
@@ -206,8 +208,9 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
   `reviewed_before == no`, offer to run the `pre-commit-review` skill first (proceed if the dev
   declines); if `yes`, continue to the commit. (Its own untracked-file check still runs.)
   Around the commit itself it applies §1's **re-stamp** rule.
-- **`create-pull-request`** — final gate; emphasis **`conformance`** (lead E;
-  `protected-core` = blocker): first time on branch → full; else ask. Independently of
+- **`create-pull-request`** — final gate; emphasis **`conformance`** (lead E; a
+  `protected-core` row on `src/entry/core/*` = blocker, `foundation` profile only — the
+  Liquid-core row is a hand-sync warning): first time on branch → full; else ask. Independently of
   that choice, the **correctness backstop**: `correctness_hash` absent or ≠ the current
   diff hash → apply the gate and run `bug-hunter` before drafting. **Any `protected-core`
   blocker or blocking correctness finding stops the PR** until resolved or explicitly

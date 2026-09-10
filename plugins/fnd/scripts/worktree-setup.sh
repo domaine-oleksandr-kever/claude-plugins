@@ -133,7 +133,8 @@ command -v git >/dev/null 2>&1 || fail "git not found on PATH"
 # below would keep the source checkout's session theme — this worktree's first `create` would
 # then pull another stream's customizer settings — so a create that cannot un-pin stops here,
 # before anything is built, rather than reporting a worktree it silently mis-configured.
-SESSION_LIB="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/session-theme.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SESSION_LIB="$SCRIPT_DIR/session-theme.sh"
 [ "$MODE" != create ] || { [ -f "$SESSION_LIB" ] && bash -n "$SESSION_LIB" 2>/dev/null; } \
   || fail "session_lib_not_found path=$SESSION_LIB"
 
@@ -600,5 +601,15 @@ fi
 # The port alone is half the isolation — a dev server started without --theme syncs this branch
 # into the SHARED dev theme the copied config names. The skill fills the id in once the session
 # theme is settled; naming the flag here keeps the verbatim block from advertising the unsafe form.
-printf '  # dev server:  npm run dev -- --theme <session-theme-id> --port %s\n' "$PORT"
+# `npm run dev` is Foundation's own wrapper; a plain theme has no such script, so the line a
+# developer pastes into the new terminal is chosen by the same probe every host's session start
+# uses. Only a word the probe actually spoke switches the form: an unreadable or silent probe
+# keeps the Foundation line, the behaviour before this gate.
+DEV_CMD='npm run dev -- --theme <session-theme-id>'
+PROFILE_PROBE="$SCRIPT_DIR/project-profile.sh"
+prof="$(bash "$PROFILE_PROBE" "$WT" 2>/dev/null || true)"
+case "$prof" in
+  theme|none) DEV_CMD='shopify theme dev --theme <session-theme-id>' ;;
+esac
+printf '  # dev server:  %s --port %s\n' "$DEV_CMD" "$PORT"
 printf '  # this checkout (%s) stays free — the worktree needs its OWN terminal and session\n' "$MAIN"

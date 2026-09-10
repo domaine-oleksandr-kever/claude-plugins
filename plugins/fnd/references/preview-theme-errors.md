@@ -27,7 +27,20 @@ in the Bash tool's shell.
 - **`error=bad_build_script`** / **`error=build_script_missing`** → nothing was built or pushed
   and retrying the same value is pointless; the line names the rule. Don't invent a script name —
   read `package.json` for its production build script, or ask the developer (`--no-build` only when
-  the repo is already built).
+  the repo is already built). A checkout with **no `package.json` at all** is `build_script_missing`
+  in two cases: `--build-script <name>` asked for a build that cannot be run (drop the flag and
+  re-run), or the line says **`./package.json is at <dir>`** — the run started in a subdirectory of
+  that project, whose build was never run, so `cd <dir>` and re-run from there.
+- **`built=skipped_no_package_json` + `warn=build_skipped_no_package_json`** (create & refresh,
+  **exit 0**) → not a failure: the checkout has no `package.json`, here or in any parent up to the
+  repo root, so there was nothing to build and the working tree was pushed as it stands (a plain
+  theme repo). Report `built=` as it is; only if the repo really does need a build is the fix
+  `--build-script <name>` from a directory whose `package.json` defines it.
+- **`error=not_a_theme_checkout`** → the run started in the wrong directory: none of the theme
+  directories (`assets`, `layout`, `sections`, …) is there, so the push root would have been
+  empty — and a code push carries no `--nodelete`, so it would strip the theme it landed on.
+  Nothing was built or pushed, and no store call was made. `cd` to the theme repo root and re-run;
+  neither `--no-build` nor a `package.json` in the directory gets past it.
 - **`error=theme_limit`** → re-run with `--reuse` when this run didn't; never delete a theme on
   the store without the developer.
 - **`error=settings_drift`** → **don't retry**. The recovery is manual and the same for both modes:
@@ -94,7 +107,8 @@ in the Bash tool's shell.
   store: nothing was created, nothing was pushed, nothing was written. The toml's
   `[environments.*]` blocks name different stores and none is named `dev`/`development`
   (`ambiguous_env`), or the `--env` name is in no block (`env_not_found`, which lists the names
-  that are). Never guess one — ask the developer which environment `npm run dev` uses, then take
+  that are). Never guess one — ask the developer which environment their dev server (`npm run dev`
+  in a `foundation` checkout) uses, then take
   the escape hatch the line itself names: `--env <name>` on `pin` and on `create`/`refresh
   --pin-toml`, `SHOPIFY_FLAG_ENVIRONMENT=<name>` otherwise (and for `theme-json.sh` /
   `shopify-admin-gql.sh`, whose own `--env` names a dotenv file).
@@ -117,7 +131,9 @@ in the Bash tool's shell.
   - On `create` / `refresh` those failures are **non-fatal** and arrive as
     `pin=failed` + `pin_error=…` *after* a normal `theme_id=` line: the theme exists, only the
     config wasn't changed. Record the id, say the pin didn't land, and keep handing the
-    developer the explicit `npm run dev -- --theme <id>` form. A `pin_error=` naming a
+    developer the explicit `--theme <id>` form of the dev-server command
+    (`<plugin root>/references/session-theme.md` step 5 — `foundation`:
+    `npm run dev -- --theme <id>`). A `pin_error=` naming a
     **non-numeric theme id** means the push reported a gid — the theme is real, the config was
     correctly left alone.
   - **Restoring a pin by hand:** the superseded value sits on the `# theme = "…" #

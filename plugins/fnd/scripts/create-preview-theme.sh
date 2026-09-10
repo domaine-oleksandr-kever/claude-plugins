@@ -49,7 +49,8 @@
 #       → build repo → push code (settings ignored) to a new unpublished theme
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
 #         → read the overlay back (see verify_overlay)
-#       → theme_id=… name=… store=… env=… preview_url=… editor_url=… reused=… built=… overlay=…
+#       → theme_id=… name=… store=… env=… preview_url=… editor_url=… reused=…
+#         built=… [warn=build_skipped_no_package_json] overlay=…
 #         [warn=overlay_file_dropped file=… [unknown_types=…]] [hint=…] | [warn=overlay_unverified …] | [warn=overlay_empty …]
 #       `--reuse` resolves the name through `theme list`: a listing that never answered is refused
 #       (`error=reuse_unverifiable`), and a name that resolves to the shared dev theme is refused
@@ -57,7 +58,7 @@
 #   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
-#       → theme_id=… store=… env=… preview_url=… editor_url=… built=…
+#       → theme_id=… store=… env=… preview_url=… editor_url=… built=… [warn=build_skipped_no_package_json]
 #       <ID> must clear the live-theme guard; when `theme list` never answered it must also be an id
 #       some workspace under ./.claude/tasks records as `session-theme:` (`error=refresh_unverifiable`
 #       otherwise), and it must not be the shared dev theme (`error=dev_theme_write_refused`).
@@ -87,7 +88,18 @@
 #       run without a permission prompt. A value that is not a bare `[A-Za-z0-9_.:-]+` name, or is
 #       absent from package.json, is refused (`bad_build_script` / `build_script_missing`) before
 #       the store is touched. `--no-build` skips the build, and with it the package.json lookup —
-#       the shape of the name is still checked.
+#       the shape of the name is still checked. A checkout with NO ./package.json entry at all —
+#       and none in any ancestor up to the repo root — has nothing to build (a plain theme repo,
+#       unlike a foundation one): the build is SKIPPED — `built=skipped_no_package_json` +
+#       `warn=build_skipped_no_package_json`, no node needed — and the working tree is pushed as
+#       it stands. A package.json in an ANCESTOR means the run started below the project root and
+#       that project's build was never run: refused as `build_script_missing` naming the
+#       directory. Passing `--build-script <name>` where there is no package.json anywhere is
+#       still `build_script_missing`: an explicit build request that cannot be honoured must not
+#       be silently dropped.
+#       Independent of both the build decision and `--no-build`: a cwd with none of the theme
+#       directories is the wrong directory, refused as `not_a_theme_checkout` before any build
+#       and before the first store call (an empty push root would strip the theme it lands on).
 #   --ignore-extra "<glob>"  (create & refresh, repeatable) — extra `--ignore` pattern passed
 #       through to `shopify theme push`, for a file inside a theme dir that must not ship.
 #   --pin-toml  (create & refresh) — after the push succeeds, pin the resulting theme id into
@@ -125,7 +137,8 @@
 # FND_CPT_OVERLAY_VERIFY=0 skips the read-back; FND_CPT_OVERLAY_VERIFY_WAIT sets its re-check pause.
 # The read-back pulls go through push_retry too, so on a throttled store they can add the
 # $FND_CPT_THROTTLE_WAITS pauses AFTER every piece of real work has already succeeded.
-# Requires: shopify CLI, jq; npm (and node, to read package.json) unless --no-build.
+# Requires: shopify CLI, jq; npm (and node, to read package.json) unless --no-build or the
+# checkout has no ./package.json — that build is skipped, and skipped without looking for node.
 
 set -euo pipefail
 
@@ -713,8 +726,38 @@ print_pin_keys() {
   [ -z "$PIN_OLD" ] || printf 'superseded_theme_id=%s\n' "$PIN_OLD"
 }
 
+# A push root assembled from a cwd with no theme directory is EMPTY, and a code push carries no
+# --nodelete — the store would drop every file of the theme it lands on. The wrong directory is
+# not a build question, so this runs in both write modes before any of them.
+require_theme_checkout() {
+  local d
+  for d in "${THEME_DIRS[@]}"; do
+    if [ -d "$d" ]; then return 0; fi
+  done
+  fail "not_a_theme_checkout — $(pwd) has none of the theme directories (${THEME_DIRS[*]}), so there is nothing to push; run this from the theme repo root; nothing was built or pushed"
+}
+
+# The nearest ancestor holding a package.json, up to the repo boundary (the directory carrying
+# .git, else /) — a package.json outside this checkout describes somebody else's project.
+# Builtins only, so a no-node host still gets the answer. The walk starts at the PHYSICAL
+# directory, as scripts/project-profile.sh resolves it: a symlinked project root would
+# otherwise hide the parent package.json and push the subtree unbuilt.
+package_json_ancestor() {
+  local d i=0
+  d="$(pwd -P)"
+  while [ "$i" -lt 50 ]; do
+    [ -e "$d/.git" ] && return 1
+    [ "$d" = / ] && return 1
+    d="${d%/*}"; [ -n "$d" ] || d=/
+    [ -e "$d/package.json" ] && { printf '%s' "$d"; return 0; }
+    i=$((i + 1))
+  done
+  return 1
+}
+
 NO_BUILD=0
 BUILD_SCRIPT="build"
+BUILD_SCRIPT_SET=0
 BUILT="no"
 # Name-only, run as argv — the callers pre-approve this script's whole argv, so a value that
 # reached a shell would run with no permission prompt (rationale: header). Refuse before the store.
@@ -726,6 +769,21 @@ vet_build_script() {
   # --no-build never reads package.json — the repo it runs in may legitimately not have one —
   # but the name is still vetted above, so a bogus value is never silently pocketed.
   [ "$NO_BUILD" -eq 1 ] && return 0
+  # A checkout with no package.json here or above has nothing to build (a plain theme repo) —
+  # skipping keeps the push, and needs neither node nor npm. One in a PARENT is the opposite:
+  # the project has a build this subtree's push would ship stale, so the run is refused. An
+  # EXPLICIT --build-script that cannot be run is refused too, never silently dropped. The skip
+  # needs the ENTRY to be absent, not merely resolvable: a dangling package.json symlink is a
+  # broken project, so it keeps the refusal it has always had.
+  if [ ! -e package.json ] && [ ! -L package.json ]; then
+    _pkg_up="$(package_json_ancestor || true)"
+    [ -z "$_pkg_up" ] \
+      || fail "build_script_missing ($BUILD_SCRIPT) — ./package.json is at $_pkg_up, run from the project root; nothing was built or pushed"
+    [ "$BUILD_SCRIPT_SET" -eq 0 ] \
+      || fail "build_script_missing ($BUILD_SCRIPT) — no ./package.json in the current directory, so no script by that name can be run (run from the project root); drop --build-script to push without a build, or pass --no-build; nothing was built or pushed"
+    BUILT="skipped_no_package_json"
+    return 0
+  fi
   command -v node >/dev/null 2>&1 \
     || fail "build_script_missing ($BUILD_SCRIPT) — node not found on PATH, so ./package.json cannot be read; install node or pass --no-build if the repo is already built"
   node -e 'const fs=require("fs");let p;try{p=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch(e){process.exit(1)}const s=p&&p.scripts;process.exit(s&&typeof s[process.argv[2]]==="string"?0:1)' \
@@ -734,12 +792,18 @@ vet_build_script() {
 }
 run_build() {
   [ "$NO_BUILD" -eq 1 ] && { BUILT="skipped"; return 0; }
+  [ "$BUILT" = "skipped_no_package_json" ] && return 0
   local log; log="$(mk_tmpf)"
   if npm run "$BUILD_SCRIPT" >"$log" 2>&1; then
     BUILT="yes"; rm -f "$log"
   else
     printf 'error=build_failed (npm run %s):\n' "$BUILD_SCRIPT"; tail -n 5 "$log"; rm -f "$log"; exit 1
   fi
+}
+print_build_keys() {
+  printf 'built=%s\n' "$BUILT"
+  [ "$BUILT" = "skipped_no_package_json" ] || return 0
+  printf 'warn=build_skipped_no_package_json — no ./package.json in this checkout, so nothing was built and the working tree was pushed as it stands; pass --build-script <name> if this repo does need a build\n'
 }
 
 case "$MODE" in
@@ -797,7 +861,7 @@ case "$MODE" in
         --name) need_val $# "$1"; NAME="$2"; shift 2 ;;
         --reuse) REUSE=1; shift ;;
         --no-build) NO_BUILD=1; shift ;;
-        --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; shift 2 ;;
+        --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; BUILD_SCRIPT_SET=1; shift 2 ;;
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
         --pin-toml) PIN=1; shift ;;
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
@@ -811,6 +875,7 @@ case "$MODE" in
     # the caller reads as "the block I named was pinned"
     [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
     sync_pin_env
+    require_theme_checkout
     vet_build_script
 
     # Resolve (and vet) the --reuse target BEFORE the build: a refusal after a several-minute npm
@@ -892,7 +957,7 @@ case "$MODE" in
     printf 'preview_url=%s\n' "$PREVIEW"
     printf 'editor_url=%s\n' "$EDITOR"
     printf 'reused=%s\n' "$REUSED"
-    printf 'built=%s\n' "$BUILT"
+    print_build_keys
     print_overlay_keys
     [ "$PIN" -eq 0 ] || print_pin_keys
     ;;
@@ -903,7 +968,7 @@ case "$MODE" in
       case "$1" in
         --theme) need_val $# "$1"; TARGET="$2"; shift 2 ;;
         --no-build) NO_BUILD=1; shift ;;
-        --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; shift 2 ;;
+        --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; BUILD_SCRIPT_SET=1; shift 2 ;;
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;
         --pin-toml) PIN=1; shift ;;
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
@@ -916,6 +981,7 @@ case "$MODE" in
     # same guard as create: --env without --pin-toml would be a silent no-op
     [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
     sync_pin_env
+    require_theme_checkout
     vet_build_script
     # Numeric ids only: the CLI resolves a NAME here too, but assert_not_live vets by id — a name
     # target would sail past the guard with role="" and let the CLI resolve it to any theme,
@@ -954,7 +1020,7 @@ case "$MODE" in
     printf 'env=%s\n' "$TOML_ENV"
     printf 'preview_url=%s\n' "$(json_field "$OUT" preview_url)"
     printf 'editor_url=%s\n' "$(json_field "$OUT" editor_url)"
-    printf 'built=%s\n' "$BUILT"
+    print_build_keys
     [ "$PIN" -eq 0 ] || print_pin_keys
     ;;
 
