@@ -28,7 +28,7 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 | `metaobject-setup.graphql` | the Mode 2 living data-model setup file (`references/metafield-metaobject-setup.md`); inspection drafts and per-step hand-off copies go in `tmp/` | `develop-feature-or-fix` |
 | `notes.md` | append-only dated log: checkpoint decisions, gotchas, provisioned metafield/metaobject gids, preview theme name/id — incl. the work stream's `session-theme: <id>` line (`references/session-theme.md`) and the worktree's `dev-port: <N>`, both read back as the last match — test page paths; in a batch — root cause + fix summary per bug | any skill, at natural boundaries |
 | `progress.md` | work checklist — what's done, what's next (date + one-line status) | every series skill, at completion |
-| `tmp/attachments/` | the ticket's downloaded images and videos, `<attachment-id>-<sanitised-name>`, one `<file>.frames/` dir of PNGs per video | `jira-reader` (via `scripts/jira-attachments.sh`) |
+| `tmp/attachments/` | the ticket's downloaded images, `<attachment-id>-<sanitised-name>`; a **video is not kept** — it leaves one `<file>.frames/` dir of PNGs (timecoded, `05-00m20s.png`); `Read` cannot open a dir, so the caller lists it and `Read`s the `<NN>-<MM>m<SS>s.png` frames the task needs, never all of them by default | `jira-reader` (via `scripts/jira-attachments.sh`) |
 | `tmp/` | scratch made while working — test scripts, query drafts, JSON dumps, screenshots — instead of littering the project root | anyone; delete freely |
 
 Frontmatter on ticket files: `ticket`, `url`, `fetched_at` (ISO datetime), `jira_updated` (the

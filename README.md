@@ -48,7 +48,7 @@ in its own subfolder under `plugins/`:
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
-│       │   ├── jira-attachments.sh  #  Jira attachments → task workspace (read-only token; ffmpeg frames)
+│       │   ├── jira-attachments.sh  #  Jira attachments → task workspace (read-only token; videos → frames)
 │       │   ├── _shopify-common.sh   #  sourced by the theme scripts + jira-attachments.sh (never run directly)
 │       │   ├── gen-host-adapters.cjs #  writes every generated dir below
 │       │   ├── doctor.cjs           #  static install verification, any host
@@ -80,7 +80,7 @@ in its own subfolder under `plugins/`:
 │   ├── no-verify-bypass-matrix.sh   #  FP/FN contract of the two commit guards
 │   ├── hooks-sim.sh                 #  SessionStart / monitor-gate / context-stats sims
 │   ├── scripts-sim.sh               #  runner + theme-json + converter-caller sims
-│   ├── jira-attachments-sim.sh      #  jira-attachments.sh: creds, gateway, downloads, frames
+│   ├── jira-attachments-sim.sh      #  jira-attachments.sh: creds, gateway, downloads, transient video frames
 │   ├── bootstrap-sim.sh             #  bootstrap: arg gates, clone, pty picker, uninstall
 │   ├── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
 │   ├── json-slim-fixtures.mjs       #  mcp-slim pipeline + CLI + hook fixtures
@@ -969,9 +969,14 @@ which unwraps the MCP's `{"issues":{"nodes":[…]}}` envelope and renders each i
 markdown image reference whose target is `jira-media:<id>` and whose label is the attachment's
 filename — that filename being the join to the attachment rows. Its **attachments** need a second route: the Atlassian
 MCP returns their metadata but exposes no tool that returns the bytes, so the reader runs the
-bundled `plugins/fnd/scripts/jira-attachments.sh`, which downloads every image and video into
-`.claude/tasks/<KEY>/tmp/attachments/` and, when `ffmpeg` is on PATH, cuts each video into 8
-frames so a screen recording can be looked at. The bytes never reach a commit: under
+bundled `plugins/fnd/scripts/jira-attachments.sh`, which downloads every image into
+`.claude/tasks/<KEY>/tmp/attachments/`. A **video does not stay**: it is downloaded, cut with
+`ffmpeg` into 8–24 timecoded PNG frames beside it (`<file>.frames/05-00m20s.png`, sampled at bin
+centres so the end of the recording is covered too), and then deleted — the frames are what a model
+can look at, the tens of megabytes are not, and its row comes back with an empty `path` and a
+frames dir. No `ffmpeg` on PATH and screen recordings are skipped outright, images unaffected;
+`--keep-video` / `--no-frames` keep the file when it is the file you want. The bytes never reach a
+commit: under
 `.claude/tasks/` the script stamps the repo's `info/exclude` line itself, and any other `--out`
 git would track is refused before a single request goes out. The reader never `Read`s those
 files itself; it returns their paths and the caller opens the ones the task is about.
@@ -979,8 +984,9 @@ files itself; it returns their paths and the caller opens the ones the task is a
 The download authenticates as the developer with a **scoped read-only** Atlassian API token
 (`JIRA_EMAIL` + `JIRA_API_TOKEN` in the project's gitignored `.env`) — strictly less than the
 MCP already has, and created once per person. Without it nothing fails: the ticket read returns
-the attachment rows with no local paths plus one setup hint for the developer, and `ffmpeg`
-missing costs the frames, not the videos. Setup wizard, flags, exit codes and the degradation
+the attachment rows with no local paths plus one setup hint for the developer, and a missing
+`ffmpeg` costs the screen recordings, never the images. Setup wizard, flags, exit codes and the
+degradation
 contract: `plugins/fnd/references/jira-attachments.md`.
 
 ## Hooks

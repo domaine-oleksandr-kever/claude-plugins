@@ -75,8 +75,9 @@ consumes the values without exposing them:
 ```
 
 - `ok=1 jira_user=… cloud_id=… ffmpeg=yes` → 🟢, naming the user it authenticated as.
-- The same line with `ffmpeg=no` → 🟡 videos are saved but not cut into frames, so a screen
-  recording stays unreadable to the model (`brew install ffmpeg`); images are unaffected.
+- The same line with `ffmpeg=no` → 🟡 screen recordings are **skipped entirely** — with nothing to
+  cut them into frames with there is nothing a model could look at, so the bytes are never
+  downloaded (`brew install ffmpeg`); images are unaffected.
 - exit 3 `error=no_jira_credentials` → 🟡 no token: ticket images stay invisible; setup walk-through
   in `<plugin root>/references/jira-attachments.md` (the script's `hint=` line carries the short form).
 - exit 4 `error=jira_auth_rejected` → 🟡 the token was rejected — expired, or not the scoped

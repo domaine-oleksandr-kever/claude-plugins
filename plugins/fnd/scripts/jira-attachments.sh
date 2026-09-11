@@ -31,39 +31,72 @@
 # when that physical repo is the cwd's own (a worktree and its main checkout share one common
 # dir, so the symlink case still stamps) — and proceeds; any other unignored dir is refused.
 #
-# VIDEOS: a screen recording cannot be `Read`, so each one is additionally cut into evenly spaced
-# PNG frames when ffmpeg is on PATH — an OPTIONAL backend: absent, the video is still saved and one
-# `note=ffmpeg_not_found` line says why there are no frames. ffprobe supplies the duration; with no
-# ffprobe the spacing assumes 60 s.
+# VIDEOS ARE TRANSIENT: a screen recording cannot be `Read` — only its frames can — and one is tens
+# of MB, so the bytes are a means, never the deliverable. A video is downloaded to `<target>.part`,
+# cut into PNG frames under `<target>.frames/`, and the video is then DELETED: the row's path column
+# is EMPTY and the frames dir is the whole result (`frames=<dir>:<count>`). --keep-video keeps the
+# original next to the frames; --no-frames keeps it WITHOUT cutting (it implies --keep-video).
+#   · a failed cut (ffmpeg non-zero, or zero frames produced) takes the frames dir with it: the row
+#     is `failed` with an empty path and `note=frames_failed id=<id>` on stderr. Under --keep-video
+#     the file the caller asked for survives and the row stays `saved`, frames empty.
+#   · no ffmpeg on PATH → a video is NOT DOWNLOADED at all, because nothing here could turn it into
+#     something the model can look at: `skipped_no_ffmpeg`, empty path and frames, and one
+#     `note=ffmpeg_not_found videos=<N>` line. With --keep-video or --no-frames the developer asked
+#     for the FILE, so it is downloaded and kept, unframed (`note=ffmpeg_not_found_unframed`).
+#   · CACHE: a transient video is `cached` when `<target>.frames/done` records `size=<bytes>` equal
+#     to the attachment's metadata size — then no request and no cut. A done marker with no size
+#     line is a previous version's and counts as stale (re-download + re-cut). Images and a KEPT
+#     video keep the old rule: the file on disk, its size equal to the metadata size — and a kept
+#     video already there at that size is never re-fetched merely to redo a stale or missing cut,
+#     since those bytes ARE the bytes the request would bring back: only the cut is redone, off
+#     the file, and the row still says `cached`. A failed download only ever removes what THIS
+#     run judged stale — a frames dir whose marker still matches outlives it (row `failed`; the
+#     next plain run reports it `cached` again).
+#   · FRAMES: the count adapts to the duration — N = clamp(ceil(duration / 4), 8, 24), i.e. ≤32 s →
+#     8 frames, one more per 4 s above that, ≥96 s → 24; --frames <N> pins a fixed 1..99 instead
+#     (a frame's ordinal is two digits, so a 100th would sort ahead of the 99th). The instants
+#     are BIN CENTRES, t_i = (i + 0.5) · duration / N, so the last frame sits near the END of the
+#     recording (a plain grid starting at 0 never samples the last 1/N of it). Each frame is one
+#     `ffmpeg -ss <t> -i … -frames:v 1 -vf scale='min(1440,iw)':-2` — width capped at 1440, aspect
+#     kept, even height, no crop — landing as `<NN>-<MM>m<SS>s.png` (e.g. `05-00m20s.png`).
+#     The duration comes from ffprobe, else from the CONTAINER's own `Duration:` line in
+#     `ffmpeg -i <file>` (anchored: an attachment is untrusted, and a `title` metadata tag reading
+#     `Duration: 99:00:00.00` must not stand in for it — nor may anything above 24 h), else 60 s is
+#     ASSUMED and said out loud (`note=duration_unknown`); a cut that yields fewer frames than
+#     intended is reported too (`note=frames_short`), never silently shortened.
 #
 # Usage:
-#   jira-attachments.sh <ISSUE-KEY> [--out <dir>] [--ids <id,id>] [--all] [--max-mb <N>] [--force]
-#                       [--no-frames] [--frames <N>] [--env <dotenv>] [--site <host>]
-#                       [--cloud-id <uuid>] [--json]
+#   jira-attachments.sh <ISSUE-KEY> [--out <dir>] [--ids <id,id>] [--all] [--max-mb <N>]
+#                       [--max-video-mb <N>] [--force] [--no-frames] [--keep-video] [--frames <N>]
+#                       [--env <dotenv>] [--site <host>] [--cloud-id <uuid>] [--json]
 #   jira-attachments.sh --check [--env <dotenv>] [--site <host>] [--cloud-id <uuid>]
 #
-#   --out        download dir (default .claude/tasks/<KEY>/tmp/attachments)
-#   --ids        only these attachment ids (comma-separated)
-#   --all        lift the image/* + video/* type filter
-#   --max-mb     per-file size cap (default 25)
-#   --force      re-download and re-cut frames even when the file is already on disk
-#   --no-frames  leave videos unframed
-#   --frames     frames per video (default 8)
-#   --env        dotenv holding JIRA_EMAIL / JIRA_API_TOKEN (default ./.env)
-#   --site       site host for the cloudId lookup (default $JIRA_SITE, else meetdomaine.atlassian.net)
-#   --cloud-id   skip that lookup
-#   --check      probe the credentials only: `ok=1 jira_user=… cloud_id=… ffmpeg=…`
-#   --json       emit the rows as a JSON array (frames as a path list) instead of TSV
+#   --out           download dir (default .claude/tasks/<KEY>/tmp/attachments)
+#   --ids           only these attachment ids (comma-separated)
+#   --all           lift the image/* + video/* type filter
+#   --max-mb        per-file size cap for everything but videos (default 25)
+#   --max-video-mb  per-video size cap (default 200 — the video bytes are transient)
+#   --force         re-download and re-cut even when the frames (or the file) are already on disk
+#   --no-frames     keep the video, do not cut it (implies --keep-video)
+#   --keep-video    keep the video file next to its frames (default: delete it after a good cut)
+#   --frames        fixed frames per video, 1..99 (default: adaptive, 8…24 by duration)
+#   --env           dotenv holding JIRA_EMAIL / JIRA_API_TOKEN (default ./.env)
+#   --site          site host for the cloudId lookup (default $JIRA_SITE, else meetdomaine.atlassian.net)
+#   --cloud-id      skip that lookup
+#   --check         probe the credentials only: `ok=1 jira_user=… cloud_id=… ffmpeg=…`
+#   --json          emit the rows as a JSON array (frames as a path list) instead of TSV
 #
 # stdout — one row per attachment, header first:
 #   id  status  kind  mime  size  created  author  path  frames  filename
-#   status = saved | cached | skipped_type | skipped_size | failed; kind = image | video | other;
-#   path empty unless saved/cached; frames = `<dir>:<count>` or empty.
+#   status = saved | cached | skipped_type | skipped_size | skipped_no_ffmpeg | failed;
+#   kind = image | video | other; path = the file on disk — EMPTY for a transient video (its frames
+#   dir is the result) and for every row that is not saved/cached; frames = `<dir>:<count>` or empty.
 # stderr — notes, then always a last summary line:
 #   ok=1 saved=N cached=N skipped=N failed=N frames=N out=<dir>
 #
-# Exit: 0 ok · 1 at least one download failed (the rows name them) · 2 usage/precondition ·
-#       3 credentials missing or malformed · 4 the API rejected the request (auth, unknown issue) ·
+# Exit: 0 ok · 1 at least one attachment failed — a download or a frame cut (the rows name them) ·
+#       2 usage/precondition · 3 credentials missing or malformed ·
+#       4 the API rejected the request (auth, unknown issue) ·
 #       5 transport failure.
 set -euo pipefail
 
@@ -72,7 +105,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SCRIPT_DIR/_shopify-common.sh"
 REFERENCE="$(dirname "$SCRIPT_DIR")/references/jira-attachments.md"
 
-KEY=""; OUT_DIR=""; IDS=""; ALL=0; MAX_MB=25; FORCE=0; FRAMES=8; DO_FRAMES=1
+KEY=""; OUT_DIR=""; IDS=""; ALL=0; MAX_MB=25; MAX_VIDEO_MB=200; FORCE=0
+# FRAMES is the pinned count and only means anything with FRAMES_FIXED — the default is the
+# duration-adaptive rule, which no number could stand in for
+FRAMES=0; FRAMES_FIXED=0; DO_FRAMES=1; KEEP_VIDEO=0
 ENV_FILE=".env"; SITE=""; CLOUD_ID=""; CHECK=0; JSON=0
 US="$(printf '\037')"   # the row separator between the metadata fields (see the jq call below)
 
@@ -81,27 +117,41 @@ need_val() { [ "$1" -ge 2 ] || { echo "error=missing_value flag=$2" >&2; exit 2;
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --out)       need_val $# "$1"; OUT_DIR="$2"; shift 2 ;;
-    --ids)       need_val $# "$1"; IDS="$2"; shift 2 ;;
-    --all)       ALL=1; shift ;;
-    --max-mb)    need_val $# "$1"; MAX_MB="$2"; shift 2 ;;
-    --force)     FORCE=1; shift ;;
-    --no-frames) DO_FRAMES=0; shift ;;
-    --frames)    need_val $# "$1"; FRAMES="$2"; shift 2 ;;
-    --env)       need_val $# "$1"; ENV_FILE="$2"; shift 2 ;;
-    --site)      need_val $# "$1"; SITE="$2"; shift 2 ;;
-    --cloud-id)  need_val $# "$1"; CLOUD_ID="$2"; shift 2 ;;
-    --check)     CHECK=1; shift ;;
-    --json)      JSON=1; shift ;;
+    --out)          need_val $# "$1"; OUT_DIR="$2"; shift 2 ;;
+    --ids)          need_val $# "$1"; IDS="$2"; shift 2 ;;
+    --all)          ALL=1; shift ;;
+    --max-mb)       need_val $# "$1"; MAX_MB="$2"; shift 2 ;;
+    --max-video-mb) need_val $# "$1"; MAX_VIDEO_MB="$2"; shift 2 ;;
+    --force)        FORCE=1; shift ;;
+    --no-frames)    DO_FRAMES=0; shift ;;
+    --keep-video)   KEEP_VIDEO=1; shift ;;
+    --frames)       need_val $# "$1"; FRAMES="$2"; FRAMES_FIXED=1; shift 2 ;;
+    --env)          need_val $# "$1"; ENV_FILE="$2"; shift 2 ;;
+    --site)         need_val $# "$1"; SITE="$2"; shift 2 ;;
+    --cloud-id)     need_val $# "$1"; CLOUD_ID="$2"; shift 2 ;;
+    --check)        CHECK=1; shift ;;
+    --json)         JSON=1; shift ;;
     -*) echo "error=unknown_arg arg=$1" >&2; exit 2 ;;
     *) [ -z "$KEY" ] || { echo "error=unexpected_arg arg=$1" >&2; exit 2; }; KEY="$1"; shift ;;
   esac
 done
 
 case "$MAX_MB" in ''|*[!0-9]*) echo "error=invalid_max_mb value=$MAX_MB" >&2; exit 2 ;; esac
-case "$FRAMES" in ''|*[!0-9]*) echo "error=invalid_frames value=$FRAMES" >&2; exit 2 ;; esac
-[ "$FRAMES" -ge 1 ] || { echo "error=invalid_frames value=$FRAMES" >&2; exit 2; }
+case "$MAX_VIDEO_MB" in ''|*[!0-9]*) echo "error=invalid_max_video_mb value=$MAX_VIDEO_MB" >&2; exit 2 ;; esac
+if [ "$FRAMES_FIXED" -eq 1 ]; then
+  # 1..99, because the ordinal in a frame's name is TWO digits (`<NN>-<MM>m<SS>s.png`) and every
+  # reader of that dir — frame_files() here included — takes the lexical order for the chronological
+  # one: with a 100th frame `100-…` sorts ahead of `99-…` and the order silently stops being true.
+  case "$FRAMES" in ''|*[!0-9]*) echo "error=invalid_frames value=$FRAMES" >&2; exit 2 ;; esac
+  # the compound is the left side of `||`, so a value too large for the shell's integer compare
+  # fails it and lands in the same refusal instead of taking the script down under set -e
+  { [ "$FRAMES" -ge 1 ] && [ "$FRAMES" -le 99 ]; } 2>/dev/null \
+    || { echo "error=invalid_frames value=$FRAMES" >&2; exit 2; }
+fi
+# "do not cut" is a request for the FILE: nothing else would be left of the attachment
+[ "$DO_FRAMES" -eq 1 ] || KEEP_VIDEO=1
 MAX_BYTES=$((MAX_MB * 1024 * 1024))
+MAX_VIDEO_BYTES=$((MAX_VIDEO_MB * 1024 * 1024))
 
 # The key rides a URL path and each id rides one too — outside content, gated before anything is
 # built out of them. LC_ALL=C so a locale cannot widen A-Z into something a path separator fits in.
@@ -361,19 +411,99 @@ sanitize_name() { # $1 = raw filename, $2 = mime
 
 file_size() { wc -c < "$1" 2>/dev/null | tr -d ' '; }
 
-cut_frames() { # $1 = video file, $2 = frames dir
-  local dur=60 fps
+# The duration decides BOTH the frame count and where the instants fall, so a wrong one is not a
+# cosmetic slip: too long and half the timestamps land past the end of the recording. ffprobe first,
+# then the `Duration: HH:MM:SS.xx` line real ffmpeg prints on stderr when it is handed an input and
+# no output (and exits non-zero doing it); "" means neither could say.
+probe_duration() { # $1 = video file → seconds on stdout, "" when unknown
+  local d=""
   if [ "$HAVE_FFPROBE" -eq 1 ]; then
-    dur="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$1" 2>/dev/null | head -1 || true)"
+    d="$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$1" 2>/dev/null | head -1 || true)"
+    case "$d" in ''|*[!0-9.]*|.) d="" ;; esac
   fi
-  case "$dur" in ''|*[!0-9.]*) dur=60 ;; esac
-  fps="$(awk -v n="$FRAMES" -v d="$dur" 'BEGIN { if (d + 0 <= 0) d = 60; printf "%.6f", n / d }')"
-  ffmpeg -loglevel error -y -i "$1" -vf "fps=$fps,scale=960:-2" -frames:v "$FRAMES" "$2/%02d.png" >/dev/null 2>&1
+  if [ -z "$d" ]; then
+    # ANCHORED at the start of the line: ffmpeg prints the container's `Metadata:` block BEFORE its
+    # own `  Duration:` line, and an attachment is untrusted third-party content — a recording
+    # whose `title` tag reads `Duration: 99:00:00.00` would otherwise supply the first match and
+    # scatter every instant past the end of the file. A metadata key is padded ahead of its colon
+    # (`    title           : …`), so `^ *Duration:` can only ever be the container's own line.
+    # LC_ALL=C on the awk: `printf "%.3f"` honours LC_NUMERIC, and a comma decimal would fail the
+    # digits-and-dots gate below (silently becoming the 60 s assumption).
+    d="$(ffmpeg -hide_banner -i "$1" </dev/null 2>&1 \
+         | LC_ALL=C sed -n 's/^ *Duration: *\([0-9][0-9]*\):\([0-9][0-9]\):\([0-9][0-9]*\(\.[0-9]*\)\{0,1\}\).*/\1 \2 \3/p' \
+         | head -1 | LC_ALL=C awk 'NF == 3 { printf "%.3f", $1 * 3600 + $2 * 60 + $3 }' || true)"
+    case "$d" in ''|*[!0-9.]*|.) d="" ;; esac
+  fi
+  # a screen recording is minutes long, never a day: a duration outside (0, 24 h] is a misread or a
+  # forged one, and "unknown" — 60 s, said out loud — beats 24 instants past the end of the file
+  if [ -n "$d" ]; then
+    LC_ALL=C awk -v d="$d" 'BEGIN { exit !(d + 0 > 0 && d + 0 <= 86400) }' || d=""
+  fi
+  printf '%s' "$d"
 }
 
+adaptive_frames() { # $1 = duration in seconds → clamp(ceil(duration / 4), 8, 24)
+  LC_ALL=C awk -v d="$1" 'BEGIN {
+    d = d + 0; if (d <= 0) d = 60        # + 0 pins the numeric reading on every awk
+    n = int(d / 4); if (n * 4 < d) n++
+    if (n < 8) n = 8; if (n > 24) n = 24
+    print n }'
+}
+
+# One ffmpeg per frame with INPUT seeking (-ss before -i): the instants are bin CENTRES,
+# t_i = (i + 0.5) * duration / N, so the last one sits half a bin from the end instead of the whole
+# recording's tail going unsampled — which is what an fps filter grid starting at 0 does. A frame
+# ffmpeg refuses to produce is a gap, never fatal: the caller counts what actually landed.
+cut_frames() { # $1 = video file, $2 = frames dir, $3 = attachment id (for the notes)
+  local dur n plan t name got
+  dur="$(probe_duration "$1")"
+  if [ -z "$dur" ]; then
+    dur=60
+    echo "note=duration_unknown id=$3 assumed=${dur}s" >&2
+  fi
+  if [ "$FRAMES_FIXED" -eq 1 ]; then n="$FRAMES"; else n="$(adaptive_frames "$dur")"; fi
+  # LC_ALL=C is load-bearing, not hygiene: `printf "%.3f"` honours LC_NUMERIC, and on a machine
+  # whose region uses a comma decimal every instant would reach ffmpeg as `0,781` — which it
+  # refuses ("Invalid duration for option ss"), so EVERY frame fails and the recording is lost
+  plan="$(LC_ALL=C awk -v n="$n" -v d="$dur" 'BEGIN {
+            d = d + 0; n = n + 0; if (d <= 0) d = 60
+            for (i = 0; i < n; i++) {
+              t = (i + 0.5) * d / n; s = int(t)
+              printf "%.3f %02d-%02dm%02ds.png\n", t, i + 1, int(s / 60), s % 60
+            } }')"
+  # -nostdin, AND the `</dev/null` for builds predating it: this loop is fed by `<<< "$plan"`, so
+  # every ffmpeg inherits the here-string as its stdin — and ffmpeg without -nostdin reads stdin for
+  # keyboard commands, swallowing the rest of the plan. The `read` would then hit EOF and a whole
+  # recording would come out ONE frame long. (probe_duration guards its own ffmpeg the same way.)
+  while read -r t name; do
+    [ -n "$name" ] || continue
+    ffmpeg -nostdin -loglevel error -y -ss "$t" -i "$1" -frames:v 1 -vf "scale='min(1440,iw)':-2" \
+      "$2/$name" >/dev/null 2>&1 </dev/null || true
+  done <<< "$plan"
+  got="$(frame_files "$2" | wc -l | tr -d ' ')"
+  # the count is never allowed to come out short in silence — that is the symptom of a duration
+  # longer than the recording, and a caller reading the row would never see it otherwise
+  if [ "$got" -gt 0 ] && [ "$got" -lt "$n" ]; then
+    echo "note=frames_short id=$3 want=$n got=$got" >&2
+  fi
+}
+
+# `<NN>-<MM>m<SS>s.png`, so the ordinal prefix keeps the glob's lexical order the chronological one
 frame_files() { for f in "$1"/[0-9]*.png; do if [ -f "$f" ]; then printf '%s\n' "$f"; fi; done; }
 
-saved=0; cached=0; skipped=0; failed=0; frames_total=0; videos_unframed=0
+frames_cached() { # $1 = frames dir, $2 = the attachment's metadata size → 0 when this cut is current
+  [ -f "$1/done" ] || return 1
+  # a done marker with no size line is the previous version's: it says a cut happened, never of
+  # what — and the video it was cut from is long gone, so the only safe reading is "stale"
+  LC_ALL=C grep -qxF "size=$2" "$1/done" 2>/dev/null || return 1
+  [ -n "$(frame_files "$1" | head -1)" ] || return 1
+}
+
+file_cached() { # $1 = file, $2 = expected size — equality, not mere existence: it catches a
+  [ -f "$1" ] && [ "$(file_size "$1")" = "$2" ]  # run truncated halfway through
+}
+
+saved=0; cached=0; skipped=0; failed=0; frames_total=0; videos_no_ffmpeg=0; videos_unframed=0
 while IFS="$US" read -r id name mime size created author; do
   [ -n "$id" ] || continue
   # the id is outside content too, and it becomes BOTH a URL path segment and a filename prefix —
@@ -389,42 +519,108 @@ while IFS="$US" read -r id name mime size created author; do
   target="$OUT_ABS/$id-$fname"
   status=""; path=""; fdir=""; fcount=0
 
-  if [ "$ALL" -eq 0 ] && [ "$kind" = other ]; then status=skipped_type
-  elif [ "$size" -gt "$MAX_BYTES" ]; then status=skipped_size
+  # a video's bytes are transient, so they answer to their own (much larger) cap
+  cap="$MAX_BYTES"; [ "$kind" = video ] && cap="$MAX_VIDEO_BYTES"
+  # do_cut = this row's video is to be framed · keep = its bytes stay on disk afterwards
+  do_cut=0; keep=1
+  if [ "$kind" = video ]; then
+    keep="$KEEP_VIDEO"
+    if [ "$DO_FRAMES" -eq 1 ] && [ "$HAVE_FFMPEG" -eq 1 ]; then do_cut=1; fi
   fi
 
-  if [ -z "$status" ]; then
-    # size equality, not mere existence — it also catches a run truncated halfway through
-    if [ "$FORCE" -eq 0 ] && [ -f "$target" ] && [ "$(file_size "$target")" = "$size" ]; then
+  if [ "$ALL" -eq 0 ] && [ "$kind" = other ]; then status=skipped_type
+  elif [ "$size" -gt "$cap" ]; then status=skipped_size
+  elif [ "$kind" = video ] && [ "$do_cut" -eq 0 ] && [ "$keep" -eq 0 ]; then
+    # no ffmpeg and no request for the file itself: downloading tens of MB nothing on this machine
+    # can turn into frames would buy the caller exactly nothing
+    status=skipped_no_ffmpeg; videos_no_ffmpeg=$((videos_no_ffmpeg + 1))
+  fi
+
+  if [ -z "$status" ] && [ "$do_cut" -eq 1 ]; then
+    fd="$target.frames"
+    # WHY the cache missed decides what a failed download is allowed to destroy, so the verdict is
+    # taken BEFORE the request: only the marker makes a frames dir STALE. `--force`, and a
+    # --keep-video run whose file went missing, both walk past a cut that is still perfectly
+    # current — and a transient video's bytes are long gone, so those frames are the whole artifact
+    stale=0; frames_cached "$fd" "$size" || stale=1
+    have_file=0; if file_cached "$target" "$size"; then have_file=1; fi
+    if [ "$FORCE" -eq 0 ] && [ "$stale" -eq 0 ] \
+       && { [ "$keep" -eq 0 ] || [ "$have_file" -eq 1 ]; }; then
+      status=cached; fdir="$fd"
+      fcount="$(frame_files "$fd" | wc -l | tr -d ' ')"
+      # the `.part` of an interrupted run is reaped here or never: every later run takes this same
+      # cache-hit branch, and nothing ever reads a `.part` back — it would just sit there
+      if [ "$keep" -eq 1 ]; then path="$target"; rm -f "$target.part"
+      else rm -f "$target" "$target.part"; fi
+    elif [ "$FORCE" -eq 0 ] && [ "$keep" -eq 1 ] && [ "$have_file" -eq 1 ]; then
+      # --keep-video (or --no-frames' implied keep) with the video already here at the metadata
+      # size: those bytes ARE the bytes the request would bring back, so a stale — or missing —
+      # frames dir buys a re-CUT off the file on disk, never tens of MB over the network again.
+      # Nothing was fetched, so the row is `cached`.
+      rm -rf "$fd"; mkdir -p "$fd"
+      cut_frames "$target" "$fd" "$id"
+      fcount="$(frame_files "$fd" | wc -l | tr -d ' ')"
+      status=cached; path="$target"; rm -f "$target.part"
+      if [ "$fcount" -eq 0 ]; then
+        # a failed cut under a kept video, exactly as on the download path: the file the flag asked
+        # for survives, the empty dir does not, and the row carries no frames
+        rm -rf "$fd"; fcount=0
+        echo "note=frames_failed id=$id" >&2
+      else
+        printf 'size=%s\nframes=%s\n' "$size" "$fcount" > "$fd/done"
+        fdir="$fd"
+      fi
+    else
+      code="$(dl_get "attachment/content/$id" "$target.part")" || code=000
+      case "$code" in
+        2*)
+          # the cut reads the .part: until the frames exist there is nothing to keep the video for
+          rm -rf "$fd"; mkdir -p "$fd"
+          cut_frames "$target.part" "$fd" "$id"
+          fcount="$(frame_files "$fd" | wc -l | tr -d ' ')"
+          if [ "$fcount" -eq 0 ]; then
+            rm -rf "$fd"
+            echo "note=frames_failed id=$id" >&2
+            if [ "$keep" -eq 1 ]; then mv -f "$target.part" "$target"; status=saved; path="$target"
+            else rm -f "$target.part"; status=failed; fi
+          else
+            printf 'size=%s\nframes=%s\n' "$size" "$fcount" > "$fd/done"
+            status=saved; fdir="$fd"
+            if [ "$keep" -eq 1 ]; then mv -f "$target.part" "$target"; path="$target"
+            # transient: the frames are the deliverable, and an older run's video goes with the .part
+            else rm -f "$target.part" "$target"; fi
+          fi ;;
+        # one failed download is reported and never fatal to the others; the stub goes so a later
+        # run cannot read it back as a cached file, and so does a frames dir THIS run judged stale —
+        # leaving it would hand the caller frames of a video the row denies. A dir whose marker
+        # still matches survives: it is the only copy of a recording whose bytes were deleted on
+        # purpose, and the next plain run reports it `cached` again.
+        *) rm -f "$target.part"
+           [ "$stale" -eq 0 ] || rm -rf "$fd"
+           status=failed
+           echo "note=download_failed id=$id http=$code" >&2 ;;
+      esac
+    fi
+  elif [ -z "$status" ]; then
+    # images, the --all extras, and a video the caller asked to keep unframed: the file itself is
+    # the deliverable, so its size on disk is the cache
+    if [ "$FORCE" -eq 0 ] && file_cached "$target" "$size"; then
       status=cached; path="$target"
     else
       code="$(dl_get "attachment/content/$id" "$target.part")" || code=000
       case "$code" in
         2*) mv -f "$target.part" "$target"; status=saved; path="$target" ;;
-        # one failed download is reported and never fatal to the others; the stub is removed so a
-        # later run cannot read it back as a cached file
         *) rm -f "$target.part"; status=failed
            echo "note=download_failed id=$id http=$code" >&2 ;;
       esac
     fi
-  fi
-
-  if [ "$kind" = video ] && [ "$DO_FRAMES" -eq 1 ] && [ -n "$path" ]; then
-    if [ "$HAVE_FFMPEG" -eq 1 ]; then
-      fdir="$target.frames"
-      if [ "$FORCE" -eq 1 ] || [ ! -f "$fdir/done" ]; then
-        rm -rf "$fdir"; mkdir -p "$fdir"
-        if cut_frames "$target" "$fdir"; then touch "$fdir/done"; else rm -rf "$fdir"; fdir=""; fi
-      fi
-      if [ -n "$fdir" ]; then fcount="$(frame_files "$fdir" | wc -l | tr -d ' ')"; fi
-      # a cut that "succeeded" with no frames is a failed cut — the row must not point at an empty dir
-      if [ -n "$fdir" ] && [ "$fcount" -eq 0 ]; then rm -rf "$fdir"; fdir=""; fi
-      if [ -z "$fdir" ]; then echo "note=frames_failed id=$id" >&2
-      else frames_total=$((frames_total + fcount)); fi
-    else
+    # --keep-video (or --no-frames' implied keep) on a machine with no ffmpeg: the file is here, the
+    # frames the caller can actually look at are not
+    if [ "$kind" = video ] && [ "$DO_FRAMES" -eq 1 ] && [ "$HAVE_FFMPEG" -eq 0 ] && [ -n "$path" ]; then
       videos_unframed=$((videos_unframed + 1))
     fi
   fi
+  if [ -n "$fdir" ]; then frames_total=$((frames_total + fcount)); fi
 
   case "$status" in
     saved)  saved=$((saved + 1)) ;;
@@ -455,6 +651,7 @@ else
   cat "$ROWS_TSV"
 fi
 
-if [ "$videos_unframed" -gt 0 ]; then echo "note=ffmpeg_not_found videos=$videos_unframed" >&2; fi
+if [ "$videos_no_ffmpeg" -gt 0 ]; then echo "note=ffmpeg_not_found videos=$videos_no_ffmpeg" >&2; fi
+if [ "$videos_unframed" -gt 0 ]; then echo "note=ffmpeg_not_found_unframed videos=$videos_unframed" >&2; fi
 echo "ok=1 saved=$saved cached=$cached skipped=$skipped failed=$failed frames=$frames_total out=$OUT_ABS" >&2
 [ "$failed" -eq 0 ] || exit 1
