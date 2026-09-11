@@ -159,7 +159,8 @@ Read the node and return only what's needed to build it — **not** the raw node
 
 Given a task-workspace path, **you** write the file — the caller must never re-write bytes that
 already passed through it. Write to `<workspace>/figma-<node-id>.md` (one file per node,
-`<node-id>` from the URL), with frontmatter `url`, `fetched_at` (ISO datetime), `source` (the rung
+`<node-id>` from the URL), with frontmatter `url`, `fetched_at` (the output of ONE
+`date -u +%FT%TZ` Bash call — never a clock time you guess or estimate), `source` (the rung
 that answered — `mcp-connector` / `mcp-desktop` / `rest`), `last_modified` (rung 3 only: the
 `kind=meta … last_modified=` value the script printed — it is the baseline a later freshness probe
 compares against, so a spec saved without it can never be checked) and

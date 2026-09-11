@@ -454,6 +454,10 @@ for f in "$FIGMA_AGENT" "$PLUGIN_DIR/agents-cursor/figma-reader.md" \
   has "$f" '`source` (the rung' figma-ladder-frontmatter-source
   has "$f" '`last_modified` (rung 3 only' figma-ladder-frontmatter-stamp
 done
+# `fetched_at` with no stated source is a field an agent otherwise fills with a midnight
+# placeholder. The spec must name the one Bash call that produces a real stamp, exactly as
+# jira-reader does for `ticket.md`.
+has "$FIGMA_AGENT" 'date -u +%FT%TZ' figma-fetched-at-real-clock
 
 # The `source: rest` freshness probe has to ask FIGMA. A cached run reads `last_modified` off the
 # very file it would be comparing, so a probe built on a plain re-run can only ever say "fresh" —
