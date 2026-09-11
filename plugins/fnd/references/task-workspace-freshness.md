@@ -32,8 +32,20 @@ resuming an interrupted conversation.
 
 ## Design & doc files
 
-- `figma-*.md`: no cheap version probe exists — when in doubt, ask the developer whether
-  the design changed since `fetched_at`. Check the file's `url` first: it answers the node
+- `figma-*.md`: **`source: rest` has a cheap probe** — `scripts/figma-rest.sh "<the stored url>"
+  --probe` under the plugin root (the plugin's own directory, the one holding `references/` and
+  `scripts/`). It asks Figma when the **file** last changed (`GET /v1/files/<key>?depth=1` — the
+  file's meta, not its tree), writes nothing, and prints one line:
+  `ok=1 file_key=… node_id=… last_modified=…`. Compare that `last_modified` with the
+  `last_modified` in the file's own frontmatter (the reader stores the stamp it fetched). Same
+  stamp → fresh: stamp `verified_at`. Newer → spawn the reader (the file-level stamp moves when
+  **any** frame in that Figma file changes, so a newer value means "re-read", not "this node
+  definitely changed"). **No `last_modified` in the frontmatter** — a spec saved before the reader
+  stored one — → there is no baseline to compare with: treat it like the MCP rungs below. A plain
+  re-run of the fetch command is **not** a probe: on a cache hit its `last_modified` is the cached
+  payload's own stamp, so it can only ever report "unchanged". Anything else (`source:
+  mcp-connector` / `mcp-desktop`, or no `source` line at all) has **no** cheap version probe —
+  when in doubt, ask the developer whether the design changed since `fetched_at`. Check the file's `url` first: it answers the node
   you want only when **both** its file key and its node id match the requested URL —
   otherwise it's a different design that happens to share a node id, so try the node's other
   `figma-<node-id>*.md` variants (the collision suffix) and spawn the reader only when none

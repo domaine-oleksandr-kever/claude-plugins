@@ -270,6 +270,23 @@ for v in quoted bare crlf export comment; do
   else bad "J2-dotenv-$v" "rc=$rc cfg=$(head -c 200 "$CFGSAVE" 2>/dev/null | od -c | head -2 | tr '\n' ' ')"; fi
 done
 
+# The config file is a PRECONDITION, not a detail. A temp dir that refuses the 0600 stamp or the
+# write — a TMPDIR on a filesystem with no mode bits, a read-only mount — must take the run down
+# with a named refusal, never fall back to putting the credential on curl's argv to get through.
+# `chmod` is the first thing curl_config_write does, so a failing one IS that filesystem; the shim
+# is the only hermetic way to have one on a machine where /tmp works.
+BINNM="$TMP/bin-nochmod"; mkdir -p "$BINNM"
+for b in bash sh jq git awk sed tr grep head tail wc sort cat cp mv rm mkdir rmdir touch \
+         mktemp dirname basename ls env printf date; do
+  p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BINNM/$b"
+done
+printf '#!/usr/bin/env bash\nexit 1\n' > "$BINNM/chmod"; "$BIN/chmod" +x "$BINNM/chmod"
+ARGV="$TMP/argv-nocfg"; : > "$ARGV"
+rc=0; CURL_ARGV="$ARGV" JA_PATH_OVERRIDE="$SHIM_FULL:$BINNM" \
+  ja "$REPO" ELC-1309 --out "$OUT" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+assert J2-cfg-unwritable 2 "$rc" "$E" "error=curl_config_unwritable"
+if [ ! -s "$ARGV" ]; then ok; else bad J2-cfg-unwritable-quiet "a request went out with no config: $(cat "$ARGV")"; fi
+
 # ---------------------------------------- 3. a value that could inject a second curl directive --
 ARGV="$TMP/argv3"
 for bad_tok in 'ATATT"x' "$(printf 'ATATTx\nuser = "evil:evil"')" 'ATATT x'; do

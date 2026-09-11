@@ -29,6 +29,7 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 | `notes.md` | append-only dated log: checkpoint decisions, gotchas, provisioned metafield/metaobject gids, preview theme name/id — incl. the work stream's `session-theme: <id>` line (`references/session-theme.md`) and the worktree's `dev-port: <N>`, both read back as the last match — test page paths; in a batch — root cause + fix summary per bug | any skill, at natural boundaries |
 | `progress.md` | work checklist — what's done, what's next (date + one-line status) | every series skill, at completion |
 | `tmp/attachments/` | the ticket's downloaded images, `<attachment-id>-<sanitised-name>`; a **video is not kept** — it leaves one `<file>.frames/` dir of PNGs (timecoded, `05-00m20s.png`); `Read` cannot open a dir, so the caller lists it and `Read`s the `<NN>-<MM>m<SS>s.png` frames the task needs, never all of them by default | `jira-reader` (via `scripts/jira-attachments.sh`) |
+| `tmp/figma/` | the REST rung's payloads for one node — `<key>-<node>.nodes.json` (raw, never `Read` directly), its compact `<key>-<node>.nodes.json.md` build tree, `<key>.variables.json` and the `<key>-<node>@<scale>x.png` render; a **cache** keyed by those names, so a re-read is free, and safe to delete at any time. With no workspace path the script uses `.claude/tasks/_figma/tmp` instead | `figma-reader` (via `scripts/figma-rest.sh` + `scripts/figma-node-slim.cjs`) |
 | `tmp/` | scratch made while working — test scripts, query drafts, JSON dumps, screenshots — instead of littering the project root | anyone; delete freely |
 
 Frontmatter on ticket files: `ticket`, `url`, `fetched_at` (ISO datetime), `jira_updated` (the
@@ -36,7 +37,9 @@ ticket's `updated` field as Jira returned it), `verified_at` (last freshness pro
 matched) and `provenance: untrusted` (on every reader file, whoever writes it). On
 `comments.md` / `comments-<KEY>.md`: `ticket`, `url`, `fetched_at`, `comment_count`,
 `last_comment_at`, `provenance`. On
-`figma-*.md`: `url`, `fetched_at`, `provenance`. On `doc-*.md`: `url`, `title`, `fetched_at`, `provenance`,
+`figma-*.md`: `url`, `fetched_at`, `source` (which rung answered — `mcp-connector` /
+`mcp-desktop` / `rest`), `last_modified` (on the `rest` rung: the stamp `figma-rest.sh` reported,
+the baseline the `--probe` freshness check compares against), `provenance`. On `doc-*.md`: `url`, `title`, `fetched_at`, `provenance`,
 `last_edited` (the source's own last-edited stamp, when known) and — when sub-pages were folded
 into the extract — a `sources:` list of url + last-edited pairs. The TA
 itself isn't duplicated here — it already lives in

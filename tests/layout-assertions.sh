@@ -67,17 +67,20 @@ for f in "$CANON" \
          "$PLUGIN_DIR/scripts/bump-version.cjs" \
          "$PLUGIN_DIR/scripts/opencode-config.cjs" \
          "$PLUGIN_DIR/scripts/scratch-hygiene.cjs" \
-         "$ROOT/tests/opencode-config-sim.sh"; do
+         "$ROOT/tests/opencode-config-sim.sh" \
+         "$ROOT/tests/figma-rest-sim.sh" \
+         "$ROOT/tests/figma-node-slim-fixtures.mjs"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
 
 # Both entry scripts are documented as `./scripts/<name>.sh`, so the mode bit git carries is part
 # of the packaging: a lost +x turns a documented install command into "permission denied". The
-# profile probe and the attachment fetcher are here because both are documented as by-hand
-# diagnostics (README, FND_PROFILE; the preflight `--check` row) — every wiring already runs them
-# through `bash`, so the bit is a convenience, not the contract.
+# profile probe, the attachment fetcher and the Figma REST fallback are here because all three are
+# documented as by-hand diagnostics (README, FND_PROFILE; the preflight `--check` rows) — every
+# wiring already runs them through `bash`, so the bit is a convenience, not the contract.
 for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" \
-         "$PLUGIN_DIR/scripts/project-profile.sh" "$PLUGIN_DIR/scripts/jira-attachments.sh"; do
+         "$PLUGIN_DIR/scripts/project-profile.sh" "$PLUGIN_DIR/scripts/jira-attachments.sh" \
+         "$PLUGIN_DIR/scripts/figma-rest.sh"; do
   if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
 done
 

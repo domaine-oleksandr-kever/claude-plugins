@@ -86,7 +86,7 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    the ticket (on Claude Code: `/clear` + `/fnd:ship <ticket>`); proceed only if the
    developer insists.
 3. **Environment** (the `preflight-checks` scope, inline and compact — classify here,
-   not mid-run): Atlassian MCP up; Figma MCP when designs are involved; Chrome DevTools
+   not mid-run): Atlassian MCP up; Figma readable when designs are involved (an MCP, else the REST token); Chrome DevTools
    MCP; the **local dev server** running (per-profile command:
    `<plugin root>/references/session-theme.md` step 5 — `foundation`: `npm run dev` — Turbo:
    `shopify theme dev -e dev` + Vite — or `npm run theme:shopify`). Not running → ask the

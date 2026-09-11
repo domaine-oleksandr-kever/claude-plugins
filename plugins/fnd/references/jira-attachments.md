@@ -57,7 +57,12 @@ for one run. `JIRA_SITE` is read the same way (default `meetdomaine.atlassian.ne
 
 **Nobody reads that file but the script.** Skills and agents call the script; they never `Read`
 `.env`, and the script never prints or echoes either value — it hands them to curl through a
-private `0600` config file that is deleted when the process exits, never on the argv.
+private `0600` config file that is deleted when the process exits, never on the argv. Writing that
+file is a precondition, not a detail: a temp dir that refuses the `0600` stamp or the write (a
+`TMPDIR` on a filesystem with no mode bits, a read-only mount) is `error=curl_config_unwritable`,
+exit 2, before the first request — the credential is never demoted onto a command line to get the
+run through. The writer is shared with `figma-rest.sh` (`curl_config_write` in
+`_shopify-common.sh`), so both refuse the same way.
 
 ## One host: the api.atlassian.com gateway
 
@@ -140,7 +145,7 @@ stderr carries notes, and always ends with the summary
 |---|---|---|
 | 0 | every wanted attachment landed — images on disk, videos as frames | — |
 | 1 | at least one attachment failed — a download, or a frame cut; the rest landed | rows say `failed` |
-| 2 | usage or precondition | `invalid_issue_key`, `curl_not_found`, `jq_not_found`, `cloud_id_lookup_failed`, `out_dir_not_ignored`, `out_dir_not_in_repo` |
+| 2 | usage or precondition | `invalid_issue_key`, `curl_not_found`, `jq_not_found`, `cloud_id_lookup_failed`, `curl_config_unwritable`, `out_dir_not_ignored`, `out_dir_not_in_repo` |
 | 3 | credentials | `no_jira_credentials` (+ the setup `hint=`), `invalid_jira_credentials` |
 | 4 | the API rejected the request | `jira_auth_rejected http=401` (+ hint), `issue_not_found` |
 | 5 | curl transport failure | `curl_transport_failed` |

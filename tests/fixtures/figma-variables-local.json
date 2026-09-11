@@ -1,0 +1,136 @@
+{
+  "status": 200,
+  "error": false,
+  "meta": {
+    "variableCollections": {
+      "VariableCollectionId:1:100": {
+        "defaultModeId": "1:0",
+        "id": "VariableCollectionId:1:100",
+        "name": "Core",
+        "key": "0c1e5f2a9b7d4c8e6f3a1b2c3d4e5f60",
+        "modes": [
+          { "modeId": "1:0", "name": "Light" },
+          { "modeId": "1:1", "name": "Dark" }
+        ],
+        "variableIds": [
+          "VariableID:2:10",
+          "VariableID:2:11",
+          "VariableID:2:12",
+          "VariableID:2:13",
+          "VariableID:2:14"
+        ],
+        "remote": false,
+        "hiddenFromPublishing": false
+      },
+      "VariableCollectionId:1:200": {
+        "defaultModeId": "2:0",
+        "id": "VariableCollectionId:1:200",
+        "name": "Primitives",
+        "key": "7f2b8c1d3e4a5b6c7d8e9f0a1b2c3d4e",
+        "modes": [{ "modeId": "2:0", "name": "Value" }],
+        "variableIds": ["VariableID:3:10", "VariableID:3:11"],
+        "remote": false,
+        "hiddenFromPublishing": false
+      }
+    },
+    "variables": {
+      "VariableID:2:10": {
+        "id": "VariableID:2:10",
+        "name": "Brand/Primary",
+        "key": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "variableCollectionId": "VariableCollectionId:1:100",
+        "resolvedType": "COLOR",
+        "valuesByMode": {
+          "1:0": { "r": 0.1019607843137255, "g": 0.2470588235294118, "b": 0.8, "a": 1 },
+          "1:1": { "r": 0.5411764705882353, "g": 0.6392156862745098, "b": 1, "a": 1 }
+        },
+        "remote": false,
+        "description": "Primary brand colour",
+        "hiddenFromPublishing": false,
+        "scopes": ["ALL_SCOPES"],
+        "codeSyntax": {}
+      },
+      "VariableID:2:11": {
+        "id": "VariableID:2:11",
+        "name": "Surface/Card",
+        "key": "b2c3d4e5f60718293a4b5c6d7e8f90a1",
+        "variableCollectionId": "VariableCollectionId:1:100",
+        "resolvedType": "COLOR",
+        "valuesByMode": {
+          "1:0": { "type": "VARIABLE_ALIAS", "id": "VariableID:3:10" },
+          "1:1": { "type": "VARIABLE_ALIAS", "id": "VariableID:3:11" }
+        },
+        "remote": false,
+        "description": "Card background — aliases a primitive",
+        "hiddenFromPublishing": false,
+        "scopes": ["FRAME_FILL", "SHAPE_FILL"],
+        "codeSyntax": {}
+      },
+      "VariableID:2:12": {
+        "id": "VariableID:2:12",
+        "name": "Space/Gutter",
+        "key": "c3d4e5f60718293a4b5c6d7e8f90a1b2",
+        "variableCollectionId": "VariableCollectionId:1:100",
+        "resolvedType": "FLOAT",
+        "valuesByMode": { "1:0": 20, "1:1": 20 },
+        "remote": false,
+        "description": "",
+        "hiddenFromPublishing": false,
+        "scopes": ["GAP"],
+        "codeSyntax": {}
+      },
+      "VariableID:2:13": {
+        "id": "VariableID:2:13",
+        "name": "Radius/Card",
+        "key": "d4e5f60718293a4b5c6d7e8f90a1b2c3",
+        "variableCollectionId": "VariableCollectionId:1:100",
+        "resolvedType": "FLOAT",
+        "valuesByMode": { "1:0": 8, "1:1": 8 },
+        "remote": false,
+        "description": "",
+        "hiddenFromPublishing": false,
+        "scopes": ["CORNER_RADIUS"],
+        "codeSyntax": {}
+      },
+      "VariableID:2:14": {
+        "id": "VariableID:2:14",
+        "name": "Type/Body Size",
+        "key": "e5f60718293a4b5c6d7e8f90a1b2c3d4",
+        "variableCollectionId": "VariableCollectionId:1:100",
+        "resolvedType": "FLOAT",
+        "valuesByMode": { "1:0": 16, "1:1": 16 },
+        "remote": false,
+        "description": "",
+        "hiddenFromPublishing": false,
+        "scopes": ["FONT_SIZE"],
+        "codeSyntax": {}
+      },
+      "VariableID:3:10": {
+        "id": "VariableID:3:10",
+        "name": "White",
+        "key": "f60718293a4b5c6d7e8f90a1b2c3d4e5",
+        "variableCollectionId": "VariableCollectionId:1:200",
+        "resolvedType": "COLOR",
+        "valuesByMode": { "2:0": { "r": 1, "g": 1, "b": 1, "a": 1 } },
+        "remote": false,
+        "description": "",
+        "hiddenFromPublishing": false,
+        "scopes": ["ALL_SCOPES"],
+        "codeSyntax": {}
+      },
+      "VariableID:3:11": {
+        "id": "VariableID:3:11",
+        "name": "Ink",
+        "key": "0718293a4b5c6d7e8f90a1b2c3d4e5f6",
+        "variableCollectionId": "VariableCollectionId:1:200",
+        "resolvedType": "COLOR",
+        "valuesByMode": { "2:0": { "r": 0.0666666666666667, "g": 0.0666666666666667, "b": 0.0666666666666667, "a": 1 } },
+        "remote": false,
+        "description": "",
+        "hiddenFromPublishing": false,
+        "scopes": ["ALL_SCOPES"],
+        "codeSyntax": {}
+      }
+    }
+  }
+}

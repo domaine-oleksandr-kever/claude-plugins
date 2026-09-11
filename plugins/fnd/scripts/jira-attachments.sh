@@ -212,8 +212,10 @@ case "$SITE" in ''|*[!A-Za-z0-9.-]*) echo "error=invalid_site site=$SITE" >&2; e
 
 CFG="$(mktemp)"; LISTF="$(mktemp)"; ROWS_TSV="$(mktemp)"; ROWS_JSON="$(mktemp)"; SCRATCH="$(mktemp)"
 trap 'rm -f "$CFG" "$LISTF" "$ROWS_TSV" "$ROWS_JSON" "$SCRATCH"' EXIT
-chmod 600 "$CFG"
-printf 'user = "%s:%s"\n' "$EMAIL" "$TOKEN" > "$CFG"
+# the 0600 writer lives in _shopify-common.sh — figma-rest.sh holds a token the same way, and one
+# copy of "the credential rides a file, never the argv" is the only one that can be kept true
+curl_config_write "$CFG" "$(printf 'user = "%s:%s"' "$EMAIL" "$TOKEN")" \
+  || { echo "error=curl_config_unwritable" >&2; exit 2; }
 
 # --- requests ---------------------------------------------------------------------------------
 # The timeouts are bounds, not tuning: without them a stalled Jira call hangs every skill waiting
@@ -262,99 +264,12 @@ fi
 # --- the download dir must be a path git ignores (D5) ------------------------------------------
 [ -n "$OUT_DIR" ] || OUT_DIR=".claude/tasks/$KEY/tmp/attachments"
 
-# Absolute and lexically normalised — the dir need not exist yet (the gate runs before mkdir), and
-# `..` has to be folded away here, while the segments are still text: once resolve_phys() below
-# follows the symlinks, a `..` would climb the physical tree instead of the one the caller wrote.
-abs_dir() { # $1 = path
-  local p="$1" out="" seg reglob=0
-  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
-  # the split below is an unquoted expansion: without `set -f` a `*` or `[…]` in a segment (of
-  # --out or of $PWD) would glob against the cwd and silently re-point the download dir
-  case "$-" in *f*) ;; *) reglob=1; set -f ;; esac
-  local IFS=/
-  for seg in $p; do
-    case "$seg" in ''|.) ;; ..) out="${out%/*}" ;; *) out="$out/$seg" ;; esac
-  done
-  [ "$reglob" -eq 0 ] || set +f
-  printf '%s' "${out:-/}"
-}
-
-# WHERE THE DIR PHYSICALLY IS. `git check-ignore` cannot look past a symbolic link — asked about a
-# path under one it dies `fatal: pathspec '…' is beyond a symbolic link` (rc 128), which a bare
-# `if !` reads as "not ignored". A git worktree's `.claude/tasks` IS such a symlink (worktree-
-# setup.sh points it at the main checkout's), so the lexical question refused runs whose dir git
-# ignores perfectly well. The nearest EXISTING ancestor is therefore resolved with `cd … && pwd -P`
-# and the not-yet-existing segments are re-appended: the result names the repository that holds the
-# bytes, which is the only one whose answer means anything.
-resolve_phys() { # $1 = absolute lexical path → PHYS_BASE (existing, resolved) + PHYS_OUT
-  local base="$1" rest=""
-  while [ ! -d "$base" ]; do
-    case "$base" in
-      */?*) rest="${base##*/}${rest:+/$rest}"; base="${base%/*}"; [ -n "$base" ] || base=/ ;;
-      *) base=/; break ;;
-    esac
-  done
-  PHYS_BASE="$(cd "$base" 2>/dev/null && pwd -P)" || return 1
-  [ -n "$PHYS_BASE" ] || return 1
-  case "$rest" in
-    '') PHYS_OUT="$PHYS_BASE" ;;
-    *)  case "$PHYS_BASE" in /) PHYS_OUT="/$rest" ;; *) PHYS_OUT="$PHYS_BASE/$rest" ;; esac ;;
-  esac
-}
-
-# git prints the common dir relative to ITS cwd when that cwd is the repo top, absolute otherwise —
-# and it is resolved here too, so the two repositories the stamp rule compares are comparable.
-git_common_dir() { # $1 = a dir → its repo's physical common dir on stdout, non-zero if none
-  local out res
-  out="$(git -C "$1" rev-parse --git-common-dir 2>/dev/null)" || return 1
-  [ -n "$out" ] || return 1
-  case "$out" in /*) ;; *) out="$1/$out" ;; esac
-  res="$(cd "$out" 2>/dev/null && pwd -P)" || return 1
-  [ -n "$res" ] || return 1
-  printf '%s' "$res"
-}
-
-# the one-liner task-workspace.md prescribes, with the newline care worktree-setup.sh pays: an
-# exclude file whose last byte is not a newline is legal, and appending blind would glue the
-# pattern onto the developer's last rule — breaking theirs and never adding ours.
-stamp_exclude() { # $1 = the repo's physical common dir
-  local cdir="$1" exclude
-  mkdir -p "$cdir/info" 2>/dev/null || return 0
-  exclude="$cdir/info/exclude"
-  # the pattern is root-anchored: a deeper `.claude/tasks/` stays unignored and re-enters here on
-  # every retry, so a blind append would grow the developer's file one duplicate line per run
-  grep -qxF '.claude/tasks/' "$exclude" 2>/dev/null && return 0
-  if [ -s "$exclude" ] && [ -n "$(tail -c 1 "$exclude" 2>/dev/null)" ]; then printf '\n' >> "$exclude"; fi
-  printf '.claude/tasks/\n' >> "$exclude"
-}
-
-PHYS_BASE=""; PHYS_OUT=""
-resolve_phys "$(abs_dir "$OUT_DIR")" \
-  || { echo "error=out_dir_not_writable out=$(abs_dir "$OUT_DIR")" >&2; exit 2; }
-# every later path is the physical one: it is what the gate below cleared, and it says out loud
-# which checkout a worktree's symlinked .claude/tasks really wrote to
-OUT_ABS="$PHYS_OUT"
-
-OUT_COMMON="$(git_common_dir "$PHYS_BASE" || true)"
-[ -n "$OUT_COMMON" ] || {
-  echo "error=out_dir_not_in_repo out=$OUT_ABS (it resolves outside every git repository — use a path under .claude/tasks/ in a checkout)" >&2
-  exit 2
-}
-if ! git -C "$PHYS_BASE" check-ignore -q "$OUT_ABS" 2>/dev/null; then
-  # the stamp is this repo's to write, so it is offered only when the bytes land in the SAME
-  # repository the caller is standing in — a worktree and its main checkout share one common dir,
-  # a different checkout's `.claude/tasks` gets no line from us and is refused by the re-check
-  case "$OUT_ABS/" in
-    */.claude/tasks/*)
-      CWD_COMMON="$(git_common_dir "$PWD" || true)"
-      if [ -n "$CWD_COMMON" ] && [ "$CWD_COMMON" = "$OUT_COMMON" ]; then stamp_exclude "$OUT_COMMON"; fi ;;
-  esac
-  git -C "$PHYS_BASE" check-ignore -q "$OUT_ABS" 2>/dev/null || {
-    echo "error=out_dir_not_ignored out=$OUT_ABS (git would track it — use a path under .claude/tasks/, or ignore it first)" >&2
-    exit 2
-  }
-fi
-mkdir -p "$OUT_ABS" 2>/dev/null || { echo "error=out_dir_not_writable out=$OUT_ABS" >&2; exit 2; }
+# The whole gate — lexical normalisation, the physical resolution symlinked worktrees need, the
+# `.claude/tasks/` stamp and the three refusals — lives in _shopify-common.sh, because
+# figma-rest.sh writes into the same workspace under the same rule and a second copy would be a
+# second rule. Every later path is the PHYSICAL one the gate cleared.
+out_dir_gate "$OUT_DIR" || exit 2
+OUT_ABS="$OUT_DIR_ABS"
 
 # --- the attachment table ----------------------------------------------------------------------
 code="$(api_get "issue/$KEY?fields=attachment" "$LISTF")" || { echo "error=curl_transport_failed" >&2; exit 5; }

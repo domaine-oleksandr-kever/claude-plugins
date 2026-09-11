@@ -386,6 +386,87 @@ for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
   esac
 done
 
+# ------------------------------------------------- the Figma source ladder (the REST rung) --
+# `figma-reader` picks its own source — connector MCP → the local Dev Mode bridge → the REST API
+# with `FIGMA_TOKEN` — so a README that still reads "via a Figma MCP" sends a developer with a
+# closed desktop app to a dead end. Pinned in both places the claim is made, plus the credential,
+# the reference that owns the walk-through, and the switch that forces a rung.
+has "$README" 'source: mcp-connector | mcp-desktop | rest' figma-ladder-source-field
+has "$README" 'plugins/fnd/references/figma-rest.md' figma-ladder-reference
+has "$README" 'FND_FIGMA_SOURCE' figma-ladder-switch
+lacks "$README" 'reads **one** Figma frame via a Figma MCP' figma-ladder-no-mcp-only-claim
+# The two runners and their suites are named in the tree, and everything the tree names is in the
+# checkout — a documented runner that does not ship is an install that silently lacks the rung.
+has "$README" 'figma-rest.sh' figma-ladder-script-named
+has "$README" 'figma-node-slim.cjs' figma-ladder-compactor-named
+for f in plugins/fnd/scripts/figma-rest.sh plugins/fnd/scripts/figma-node-slim.cjs \
+         plugins/fnd/references/figma-rest.md tests/figma-rest-sim.sh \
+         tests/figma-node-slim-fixtures.mjs; do
+  if [ -e "$ROOT/$f" ]; then ok
+  else bad figma-ladder-file "README documents $f, which is not in this checkout"; fi
+done
+# FND_FIGMA_SOURCE is GLOBAL-ONLY by decision: which rung a design read may take is a fact about
+# this machine's Figma access, so a client repository must not be able to force one for everyone
+# who opens it. Both halves of that claim are checked — the code's project allow-list, and the
+# README paragraph that enumerates it.
+if grep -qF -- "'FND_FIGMA_SOURCE'" "$ROOT/plugins/fnd/scripts/env-file.cjs"; then
+  bad figma-switch-project-ok 'FND_FIGMA_SOURCE is in env-file.cjs PROJECT_OK but README documents it as global-only'
+else ok; fi
+case "$POK_PARA" in
+  *'FND_FIGMA_SOURCE'*) bad figma-switch-project-para 'README lists FND_FIGMA_SOURCE among the project-layer keys — it is global-only' ;;
+  *) ok ;;
+esac
+
+# Exit 1 is NOT "nothing reachable". The script prints no `error=` line on that path — the tree
+# landed and an optional artifact did not — so an agent told to quote one there would abort a read
+# it already has, and stop the calling skill to ask the developer for nothing. Both places that
+# spell the rung-4 rule are pinned, plus the three generated adapters (gen-host-adapters keeps them
+# byte-identical, and `--check` in gen-adapters-sim proves it).
+FIGMA_AGENT="$PLUGIN_DIR/agents/figma-reader.md"
+FIGMA_REF="$PLUGIN_DIR/references/figma-rest.md"
+for f in "$FIGMA_AGENT" "$FIGMA_REF" "$PLUGIN_DIR/agents-cursor/figma-reader.md" \
+         "$PLUGIN_DIR/agents-opencode/figma-reader.md" "$PLUGIN_DIR/agents-codex/figma-reader.toml"; do
+  lacks "$f" 'exit 1 / 4 / 5' figma-exit1-not-rung4
+done
+has "$FIGMA_AGENT" 'Exit **1** is **not** this rung' figma-exit1-carve-out
+has "$FIGMA_REF" 'Exit **1** is not one of those' figma-exit1-reference-carve-out
+
+# `policy=mcp` with neither MCP answering is the one dead end no script exit can describe: the REST
+# rung was never permitted, so there is nothing to run and no `error=` line to quote. Left
+# undefined, a reader either invents a refusal or — worse — runs the script the policy forbids.
+# Both homes must say so, and both must name the switch that would open the path.
+for f in "$FIGMA_AGENT" "$FIGMA_REF" "$PLUGIN_DIR/agents-cursor/figma-reader.md" \
+         "$PLUGIN_DIR/agents-opencode/figma-reader.md" "$PLUGIN_DIR/agents-codex/figma-reader.toml"; do
+  has "$f" 'policy forbids the token path' figma-policy-mcp-dead-end
+  has "$f" 'FND_FIGMA_SOURCE' figma-policy-mcp-names-switch
+done
+
+# The ladder contract itself — the part a caller reads off the reader's RETURN, not off a script.
+# rung 0 is a literal command, `source:` is the field that says which rung answered, and its three
+# values are the vocabulary every caller matches on; the saved spec carries `source:` AND the
+# rung-3 `last_modified` baseline. The three generated adapters are pinned with the canonical file,
+# exactly as the exit-1 rows above are — gen-host-adapters keeps them byte-identical.
+for f in "$FIGMA_AGENT" "$PLUGIN_DIR/agents-cursor/figma-reader.md" \
+         "$PLUGIN_DIR/agents-opencode/figma-reader.md" "$PLUGIN_DIR/agents-codex/figma-reader.toml"; do
+  has "$f" 'scripts/figma-rest.sh --policy' figma-ladder-rung0-command
+  has "$f" 'source:                     # mcp-connector | mcp-desktop | rest' figma-ladder-output-source-line
+  has "$f" 'mcp-connector` / `mcp-desktop` / `rest' figma-ladder-three-values
+  has "$f" '`source` (the rung' figma-ladder-frontmatter-source
+  has "$f" '`last_modified` (rung 3 only' figma-ladder-frontmatter-stamp
+done
+
+# The `source: rest` freshness probe has to ask FIGMA. A cached run reads `last_modified` off the
+# very file it would be comparing, so a probe built on a plain re-run can only ever say "fresh" —
+# and it needs a stored baseline, which is why the reader writes the stamp into the spec.
+FRESH="$PLUGIN_DIR/references/task-workspace-freshness.md"
+has "$FRESH" '--probe' figma-freshness-probe-flag
+has "$FRESH" 'is **not** a probe' figma-freshness-cache-hit-refused
+has "$FIGMA_REF" '| `--probe` |' figma-ref-probe-documented
+has "$FIGMA_AGENT" '`last_modified`' figma-agent-stores-the-stamp
+has "$PLUGIN_DIR/references/task-workspace.md" '`last_modified` (on the `rest` rung' figma-workspace-frontmatter-stamp
+if grep -qF -- '--probe' "$PLUGIN_DIR/scripts/figma-rest.sh"; then ok
+else bad figma-probe-implemented 'the docs promise figma-rest.sh --probe and the script has no such mode'; fi
+
 # json-slim's argv contract. `--toon` / `--no-spill` are RETIRED: an unrecognized argument writes one
 # diagnostic and exits 2, so a README that still advertises either would document a usage error as a
 # feature. The exit-code sentence is user-facing and otherwise drift-prone — this sweep only checks

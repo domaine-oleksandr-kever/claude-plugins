@@ -85,10 +85,12 @@ done
 UPDATE="$(section "$CHECKLIST" 'Plugin update check')"
 PINS="$(section "$CHECKLIST" 'Model pins')"
 JIRA="$(section "$CHECKLIST" 'Jira attachments')"
+FIGMA="$(section "$CHECKLIST" 'Figma access')"
 
 if [ -n "$UPDATE" ]; then ok; else bad update-section "no '## Plugin update check' section in the checklist"; fi
 if [ -n "$PINS" ]; then ok; else bad pins-section "no '## Model pins' section in the checklist"; fi
 if [ -n "$JIRA" ]; then ok; else bad jira-section "no '## Jira attachments' section in the checklist"; fi
+if [ -n "$FIGMA" ]; then ok; else bad figma-section "no '## Figma access' section in the checklist"; fi
 
 # ------------------------------------------------------------------- the update row --
 # One update command per host, quoted verbatim so the report can hand it over as-is.
@@ -182,10 +184,41 @@ if printf '%s\n' "$JIRA" | grep -q '→ 🔴'; then
 else ok; fi
 sec_has jira-never-red "$JIRA" 'Never 🔴'
 
+# ------------------------------------------------------------------ the Figma access row --
+# `figma-reader` has THREE sources — connector MCP, the desktop bridge, REST with a token — so the
+# row reports which of them this machine has, and the probe for the third is the same shape as the
+# Jira one: read-only, credentials named, never `Read` out of the .env.
+sec_has figma-check-cmd "$FIGMA" 'scripts/figma-rest.sh --check'
+sec_has figma-token "$FIGMA" 'FIGMA_TOKEN'
+sec_has figma-no-read-env "$FIGMA" 'never `Read` the `.env`'
+sec_has figma-ladder-connector "$FIGMA" 'connector MCP'
+sec_has figma-ladder-desktop "$FIGMA" 'figma-dev-mode'
+sec_has figma-ladder-rest "$FIGMA" 'REST'
+# Every outcome the probe can print carries a severity, and the setup walk-through has one home.
+sec_has figma-ok-line "$FIGMA" 'ok=1 figma_user='
+sec_has figma-rest-only "$FIGMA" 'REST only'
+sec_has figma-exit3 "$FIGMA" 'error=no_figma_token'
+sec_has figma-exit4 "$FIGMA" 'error=token_rejected'
+sec_has figma-reference "$FIGMA" 'references/figma-rest.md'
+sec_has figma-switch "$FIGMA" 'FND_FIGMA_SOURCE'
+# The 🔴 is reserved for "none of the three answered": a machine with no Figma MCP but a working
+# token still reads designs, and calling that a failure would send people installing a desktop app
+# they do not need.
+sec_has figma-red-only-when-none "$FIGMA" 'when none of the three'
+# …and the MCP-servers row must have handed that verdict over rather than keeping its own 🔴,
+# which predates the REST rung.
+MCPS="$(section "$CHECKLIST" 'MCP servers')"
+case "$MCPS" in
+  *'🔴 only when **neither** is reachable'*)
+    bad figma-mcp-row-stale 'the MCP servers row still fails on "neither MCP" — the REST rung is a third path' ;;
+  *) ok ;;
+esac
+sec_has figma-mcp-row-defers "$MCPS" 'Figma access'
+
 # Every plugin path the three rows point at exists in this checkout.
 for rel in agents-cursor agents-codex references/host-model-map.md scripts/gen-host-adapters.cjs \
            scripts/doctor.cjs .claude-plugin/plugin.json scripts/jira-attachments.sh \
-           references/jira-attachments.md; do
+           references/jira-attachments.md scripts/figma-rest.sh references/figma-rest.md; do
   if [ -e "$PLUGIN_DIR/$rel" ]; then ok; else bad path-missing "referenced path absent: plugins/fnd/$rel"; fi
 done
 
@@ -215,12 +248,17 @@ case "$allowed" in
   *'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/jira-attachments.sh --check'*) ok ;;
   *) bad allow-list "checklist fences \`jira-attachments.sh --check\` but preflight's allowed-tools does not carry it" ;;
 esac
+case "$allowed" in
+  *'Bash(${CLAUDE_PLUGIN_ROOT}/scripts/figma-rest.sh --check'*) ok ;;
+  *) bad allow-list "checklist fences \`figma-rest.sh --check\` but preflight's allowed-tools does not carry it" ;;
+esac
 
 # ------------------------------------------------------------ wiring into the report --
 # A row that never reaches the report format is dead prose.
 REPORT="$(section "$CHECKLIST" 'Report format')"
 sec_has report-update "$REPORT" 'plugin update'
 sec_has report-jira "$REPORT" 'Jira attachments'
+sec_has report-figma "$REPORT" 'Figma access'
 sec_has report-pins "$REPORT" 'model pins'
 # …and the four original groups still read as before — the additions are additive.
 for group in 'IDE/workspace' 'MCP servers' 'CLI tools' 'project skills & rules' 'local
@@ -267,7 +305,7 @@ check_original 'Local dev server' devserver \
   'npm run dev' 'npm run theme:shopify' 'in-browser validation'
 
 # The skill body names the new groups in its run order and pre-approves the one new command.
-has skill-order "$PREFLIGHT" 'local dev server → Jira attachments → plugin update → model pins'
+has skill-order "$PREFLIGHT" 'local dev server → Jira attachments → Figma access → plugin update → model pins'
 has skill-lsremote "$PREFLIGHT" 'Bash(git ls-remote*)'
 has skill-lsremote-bounded "$PREFLIGHT" 'Bash(timeout 8 git ls-remote*)'
 hasre skill-advisory "$PREFLIGHT" 'advisory'

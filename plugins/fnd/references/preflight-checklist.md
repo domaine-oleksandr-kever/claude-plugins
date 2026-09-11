@@ -38,7 +38,9 @@ fabricate a green check**:
 - **Figma MCP** — design extraction. **Either path counts** (`figma-reader` prefers the first):
   a remote/connector Figma server attached at user/project scope (tool names `mcp__figma__…`,
   no desktop app needed), or the plugin's local `figma-dev-mode` bridge with the Figma desktop
-  app open in Dev Mode. 🔴 only when **neither** is reachable — a connector-only setup is 🟢.
+  app open in Dev Mode. Report which of the two answered; the row's **severity** is decided in
+  **Figma access** below, because a third path (the REST token) can carry the read when neither
+  MCP is there — so neither MCP is never a 🔴 on its own.
 - **Chrome DevTools MCP** — attaches to a running browser for in-browser validation.
 - **Atlassian MCP** — Jira (and Confluence) auth; optionally verify read access with a known ticket key.
 - **Notion MCP** — linked-doc ingestion (`reading-linked-docs.md`); the TA / develop / QA /
@@ -85,6 +87,32 @@ consumes the values without exposing them:
 
 Never 🔴: every workflow still reads the ticket and its comments without the token, and reports the
 missing media once.
+
+## Figma access
+
+`figma-reader` reads a node through the **first source that answers**: the connector MCP → the
+local `figma-dev-mode` bridge → the **REST API** with a per-developer personal access token
+(`FIGMA_TOKEN` in the gitignored `.env`). This row says which of the three this machine has. The
+first two are the MCP rows above; the third is one read-only probe, and never `Read` the `.env` —
+the runner consumes the value without exposing it:
+
+```bash
+<plugin root>/scripts/figma-rest.sh --check
+```
+
+- **Either MCP answered** → 🟢, naming which one. `ok=1 figma_user=… token_source=env|file` on top
+  of that is worth reporting too: it is the fallback that keeps designs readable when the desktop
+  app is closed.
+- **No MCP, but `ok=1 figma_user=…`** → 🟡 REST only: designs are read through the token path
+  (`source: rest` in the reader's return), no desktop app needed. Nothing is blocked.
+- exit 3 `error=no_figma_token` → no token. 🟡 when an MCP answered; **🔴 when none of the three
+  did** — designs cannot be read at all. Quote the script's `hint=` line; the setup walk-through is
+  `<plugin root>/references/figma-rest.md`.
+- exit 4 `error=token_rejected` → the token was rejected — expired, revoked, or missing the
+  read-only scopes; same severity rule as the line above, regenerate per that same reference.
+
+Report `FND_FIGMA_SOURCE` whenever it is set (`auto` default; `mcp` forbids the token path, `rest`
+skips the MCP rungs) — a forced rung explains a row the machine could otherwise serve.
 
 ## Plugin update check
 
@@ -195,7 +223,7 @@ as a workaround — the fix belongs in the generator's tier table.
 ## Report format
 
 Summary table grouped by **IDE/workspace · MCP servers · CLI tools · project skills & rules · local
-dev server · Jira attachments · plugin update · model pins**, status per row as **🟢 Pass / 🔴 Fail / 🟡 Warning**
+dev server · Jira attachments · Figma access · plugin update · model pins**, status per row as **🟢 Pass / 🔴 Fail / 🟡 Warning**
 (exact values), with version or connection detail. List blockers + remediation separately — the
 plugin-update and model-pin rows are advisory and never enter the blocker list, with one exception:
 a 🔴 structural model-pin finding is a plugin defect worth naming there.

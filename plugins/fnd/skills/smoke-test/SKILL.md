@@ -89,7 +89,8 @@ Emit the matrix from the reference's **Report format**: host + host version, plu
 install mode, one row per check with 🟢/🔴/🟡 and a one-line detail, then remediation for every
 non-green row. Nothing else is written anywhere.
 
-Then triage: environment gaps (no auth, no browser, Figma desktop closed, no MCP configured) are
+Then triage: environment gaps (no auth, no browser, no Figma source at all — desktop app closed
+**and** no connector **and** no `FIGMA_TOKEN` for the REST rung — no MCP configured) are
 the developer's to fix and are named as such. A **genuine plugin defect** — a bundled script that
 crashes, a wiring pointer that resolves nowhere, a guard that does not fire where the host
 supports it, an instruction here that contradicts what happened — is worth filing: offer the fnd

@@ -64,8 +64,10 @@ Notes that decide 🔴 vs 🟡:
 - **Auth errors are 🔴 for that row** (the server is configured but unusable) — quote the error.
   Remediation is the server's own auth flow, not a plugin change.
 - **`figma-dev-mode` needs the Figma desktop app open in Dev Mode.** App closed → 🟡. A
-  remote/connector Figma server attached at user scope counts as the Figma row instead; say which
-  one answered.
+  remote/connector Figma server attached at user scope counts as the Figma row instead, and so does
+  the REST rung — `scripts/figma-rest.sh --check` answering `ok=1 figma_user=…` means
+  `figma-reader` can still read designs with no Figma MCP at all
+  (`references/figma-rest.md`). Say which of the three answered.
 - **The two browser servers need a browser to attach to or launch.** No browser available → 🟡.
   Do not navigate anywhere and do not open pages to make the row greener.
 - Fan the calls out in parallel where the host allows it; they are independent.

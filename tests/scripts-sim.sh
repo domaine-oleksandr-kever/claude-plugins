@@ -5741,6 +5741,142 @@ if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ "$o19" = "$o20" ] \
    && printf '%s\n' "$o19" | grep -q '^FND_GQL_PROBE_CACHE .*(project file)'; then ok
 else bad EV15-list-plain-output "rc=$rc err=$(head -c 120 "$E" | tr '\n' ' ') out=$(printf '%s' "$o19" | tr '\n' ';' | head -c 200)"; fi
 
+# ═══ CL — the credential + out-dir helpers _shopify-common.sh now owns ═══════════════════════
+# jira-attachments.sh and figma-rest.sh both hold a per-developer token and both write payloads
+# into the task workspace, so the 0600 config writer and the whole "the out dir must be a path git
+# ignores" gate live in ONE place. A second copy would be a second set of rules — and the one that
+# drifted would be the one nobody re-read. These cases run the SHIPPED library, not a paraphrase.
+JAS="$ROOT/plugins/fnd/scripts/jira-attachments.sh"
+FRS="$ROOT/plugins/fnd/scripts/figma-rest.sh"
+# physical, not logical: on macOS $TMP is a /var/… path whose real home is /private/var, and
+# resolve_phys/out_dir_gate answer with the PHYSICAL one by design
+CLD="$TMP/cl"; mkdir -p "$CLD"; CLD="$(cd "$CLD" && pwd -P)"
+CLH="$CLD/run.sh"
+cat > "$CLH" <<'CLEOF'
+#!/usr/bin/env bash
+# sources the shipped library and evaluates the snippet in $1 — `set -u` only, because a helper
+# that RETURNS non-zero (the gate's three refusals) is the thing under test
+set -u
+. "$COMMON_LIB"
+eval "$1"
+CLEOF
+clh() { # clh <cwd> <snippet> → stdout/stderr of the snippet, its exit code returned
+  ( cd "$1" && COMMON_LIB="$COMMON" "$BASH_BIN" "$CLH" "$2" )
+}
+
+# CL1: the config file is 0600 before the first byte lands, carries exactly the directives it was
+# handed, and a second call REPLACES them (an appended stale `user =` would authenticate as
+# somebody else)
+CLCFG="$CLD/curl.cfg"; : > "$CLCFG"; chmod 644 "$CLCFG"
+rc=0; clh "$CLD" 'curl_config_write "'"$CLCFG"'" "user = \"a:b\"" "header = \"X-T: 1\""' >"$O" 2>"$E" || rc=$?
+mode="$(ls -l "$CLCFG" | cut -c1-10)"
+if [ "$rc" -eq 0 ] && [ "$mode" = "-rw-------" ] \
+   && [ "$(cat "$CLCFG")" = "$(printf 'user = "a:b"\nheader = "X-T: 1"')" ]; then ok
+else bad CL1-curl-config "rc=$rc mode=$mode body=$(tr '\n' ';' < "$CLCFG")"; fi
+rc=0; clh "$CLD" 'curl_config_write "'"$CLCFG"'" "user = \"c:d\""' >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$CLCFG")" = 'user = "c:d"' ]; then ok
+else bad CL1b-curl-config-replaces "body=$(tr '\n' ';' < "$CLCFG")"; fi
+
+# CL2: abs_dir is LEXICAL — `..` is folded while the segments are still text (after resolve_phys
+# follows the symlinks a `..` would climb the physical tree instead of the written one), and the
+# unquoted split it does must not glob a `*` segment against the cwd
+CLG="$CLD/globdir"; mkdir -p "$CLG"; touch "$CLG/visible.txt" "$CLG/zz.txt"
+o="$(clh "$CLG" 'printf "%s" "$(abs_dir "a/../b/./c")"')"
+o2="$(clh "$CLG" 'printf "%s" "$(abs_dir "/x/y/../z")"')"
+o3="$(clh "$CLG" 'printf "%s" "$(abs_dir "*")"')"
+o4="$(clh "$CLG" 'printf "%s" "$(abs_dir "rel")"')"
+if [ "$o" = "$CLG/b/c" ] && [ "$o2" = "/x/z" ] && [ "$o3" = "$CLG/*" ] && [ "$o4" = "$CLG/rel" ]; then ok
+else bad CL2-abs-dir "fold='$o' absolute='$o2' glob='$o3' relative='$o4'"; fi
+
+# CL3: resolve_phys answers for the nearest EXISTING ancestor and re-appends the rest, so a dir
+# that does not exist yet still names the repository that will hold it
+CLP="$CLD/phys"; mkdir -p "$CLP/real"; ln -sf "$CLP/real" "$CLP/link"
+o="$(clh "$CLD" 'resolve_phys "'"$CLP"'/link/deeper/still" && printf "%s|%s" "$PHYS_BASE" "$PHYS_OUT"')"
+if [ "$o" = "$CLP/real|$CLP/real/deeper/still" ]; then ok
+else bad CL3-resolve-phys "'$o'"; fi
+
+# CL4: git_common_dir is silent and non-zero outside a repository — the gate reads that as
+# `out_dir_not_in_repo` rather than as an empty string that could pass a `-n` test
+CLR="$TMP/clrepo"; mkdir -p "$CLR"; CLR="$(cd "$CLR" && pwd -P)"; git init -q "$CLR" 2>/dev/null
+o="$(clh "$CLD" 'git_common_dir "'"$CLR"'"')"
+rc=0; clh "$CLD" 'git_common_dir "'"$CLD"'/phys" >/dev/null' >"$O" 2>"$E" || rc=$?
+if [ "$o" = "$(cd "$CLR/.git" && pwd -P)" ] && [ "$rc" -ne 0 ]; then ok
+else bad CL4-git-common-dir "repo='$o' outside-rc=$rc"; fi
+
+# CL5: stamp_exclude keeps the developer's last rule intact when their file has no closing
+# newline, and never grows a duplicate line on a retry
+CLX="$TMP/clstamp"; mkdir -p "$CLX/info"; CLX="$(cd "$CLX" && pwd -P)"
+printf '*.local' > "$CLX/info/exclude"
+clh "$CLD" 'stamp_exclude "'"$CLX"'"' >/dev/null 2>&1
+clh "$CLD" 'stamp_exclude "'"$CLX"'"' >/dev/null 2>&1
+if grep -qx '\*\.local' "$CLX/info/exclude" \
+   && [ "$(grep -cxF '.claude/tasks/' "$CLX/info/exclude")" = 1 ]; then ok
+else bad CL5-stamp-exclude "exclude=$(tr '\n' '|' < "$CLX/info/exclude")"; fi
+
+# CL6: the gate itself — the three refusals, each naming what the developer has to change, and
+# nothing created on the way out
+CLG1="$TMP/clgate1"; mkdir -p "$CLG1"; CLG1="$(cd "$CLG1" && pwd -P)"; git init -q "$CLG1" 2>/dev/null
+rc=0; clh "$CLG1" 'out_dir_gate "downloads"' >"$O" 2>"$E" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=out_dir_not_ignored ' "$E" && [ ! -d "$CLG1/downloads" ]; then ok
+else bad CL6-not-ignored "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+rc=0; clh "$CLG1" 'out_dir_gate "'"$TMP"'/cl-elsewhere"' >"$O" 2>"$E" || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=out_dir_not_in_repo ' "$E" && [ ! -d "$TMP/cl-elsewhere" ]; then ok
+else bad CL6b-not-in-repo "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# …and the success path: an ignored dir is created and OUT_DIR_ABS is the PHYSICAL path, which is
+# what a worktree's symlinked .claude/tasks makes different from the one the caller wrote
+printf '.claude/\n' > "$CLG1/.gitignore"
+rc=0; o="$(clh "$CLG1" 'out_dir_gate ".claude/tasks/K/tmp/x" && printf "%s" "$OUT_DIR_ABS"' 2>"$E")" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$o" = "$CLG1/.claude/tasks/K/tmp/x" ] && [ -d "$o" ]; then ok
+else bad CL6c-gate-ok "rc=$rc out='$o' err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# a `.claude/tasks/` path in a repo that ignores nothing is STAMPED and then allowed
+CLG2="$TMP/clgate2"; mkdir -p "$CLG2"; CLG2="$(cd "$CLG2" && pwd -P)"; git init -q "$CLG2" 2>/dev/null
+rc=0; clh "$CLG2" 'out_dir_gate ".claude/tasks/K/tmp/x"' >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(grep -cxF '.claude/tasks/' "$CLG2/.git/info/exclude")" = 1 ]; then ok
+else bad CL6d-gate-stamps "rc=$rc exclude=$(tr '\n' '|' < "$CLG2/.git/info/exclude" 2>&1)"; fi
+
+# CL7: ONE home for each helper, and both fetchers call the shared copies. A private definition in
+# either script is how the two credential disciplines would quietly stop being the same one.
+for fn in curl_config_write abs_dir resolve_phys git_common_dir stamp_exclude out_dir_gate; do
+  homes="$(grep -l "^$fn() {" "$ROOT"/plugins/fnd/scripts/*.sh 2>/dev/null \
+    | sed "s|^$ROOT/plugins/fnd/scripts/||" | sort | tr '\n' ' ')"
+  if [ "$homes" = "_shopify-common.sh " ]; then ok
+  else bad "CL7-single-home-$fn" "$fn() is defined in '${homes:-nothing}' — want _shopify-common.sh alone"; fi
+done
+for f in "$JAS" "$FRS"; do
+  if grep -q 'out_dir_gate' "$f" && grep -q 'curl_config_write' "$f" \
+     && grep -q '^\. "\$SCRIPT_DIR/_shopify-common\.sh"$' "$f"; then ok
+  else bad "CL7b-uses-shared-${f##*/}" "does not source the library or does not call the shared helpers"; fi
+done
+
+# ═══ EF — FND_FIGMA_SOURCE: registered, and GLOBAL-ONLY ══════════════════════════════════════
+# figma-rest.sh --policy is the reader's rung 0, and the switch decides whether the token path may
+# be taken at all — so a client repository's committable .claude/domaine.env has no say in it.
+# Default-deny does the work (it is simply absent from env-file.cjs's PROJECT_OK); these cases pin
+# that the absence is deliberate and that the CLI still knows the name.
+EFR="$TMP/efigma"; mkdir -p "$EFR/cfg/domaine" "$EFR/repo/.claude"
+git init -q "$EFR/repo"
+if grep -qF "'FND_FIGMA_SOURCE'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs"; then ok
+else bad EF1-known "FND_FIGMA_SOURCE is not in domaine-env.cjs's KNOWN list — 'domaine-env list' cannot show it"; fi
+printf 'FND_FIGMA_SOURCE=mcp\n' > "$EFR/repo/.claude/domaine.env"
+printf 'FND_FIGMA_SOURCE=rest\n' > "$EFR/cfg/domaine/env"
+o="$(cd "$EFR/repo" && XDG_CONFIG_HOME="$EFR/cfg" env -u FND_FIGMA_SOURCE node -e \
+  'const r = require(process.argv[1]).load();
+   console.log([process.env.FND_FIGMA_SOURCE,
+                r.ignored.map((i) => i.key).includes("FND_FIGMA_SOURCE") ? "ignored" : "kept"].join("|"))' "$EVF")"
+# domaine_env reads the FILES only (the caller fills an unset variable from what it returns), so
+# an exported switch cannot answer here either way
+ob="$(cd "$EFR/repo" && XDG_CONFIG_HOME="$EFR/cfg" domaine_env FND_FIGMA_SOURCE)"
+if [ "$o" = "rest|ignored" ] && [ "$ob" = "rest" ]; then ok
+else bad EF2-global-only "node='$o' bash='$ob' — the project file answered for a global-only switch"; fi
+# and the CLI refuses to write one into the project layer in the first place
+rc=0; (cd "$EFR/repo" && XDG_CONFIG_HOME="$EFR/cfg" node "$EVC" set FND_FIGMA_SOURCE=mcp --project) \
+  >/dev/null 2>"$E" || rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'global-only switch' "$E"; then ok
+else bad EF3-set-project-refused "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+rc=0; (cd "$EFR/repo" && XDG_CONFIG_HOME="$EFR/cfg" node "$EVC" set FND_FIGMA_SOURCE=mcp) >/dev/null 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'FND_FIGMA_SOURCE=mcp' "$EFR/cfg/domaine/env"; then ok
+else bad EF4-set-global "rc=$rc file=$(tr '\n' ';' < "$EFR/cfg/domaine/env")"; fi
+
 # ═══ PP — project-profile.sh: the session profile probe ═════════════════════════════════════
 # The one place the foundation/theme/none answer is derived; every host's session wiring and
 # hooks/subagent-conventions.sh gate the Foundation-only conventions on what it prints, so a

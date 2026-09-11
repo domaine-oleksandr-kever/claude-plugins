@@ -37,13 +37,13 @@ flowchart TB
   subgraph model["What the model reads"]
     S["skills/ (18)"]
     A["agents/ (7 readers, reviewers, one writer)"]
-    R["references/ (28)"]
+    R["references/ (29)"]
   end
 
   subgraph scripts["Scripts the skills invoke (plugins/fnd/scripts)"]
     P1["create-preview-theme.sh · theme-json.sh · worktree-setup.sh · shopify-admin-gql.sh"]
     P2["json-slim.cjs · log-slim.cjs · scratch-hygiene.cjs"]
-    P3["md-to-adf.cjs · adf-to-md.cjs · jira-attachments.sh"]
+    P3["md-to-adf.cjs · adf-to-md.cjs · jira-attachments.sh<br/>figma-rest.sh · figma-node-slim.cjs"]
     P4["doctor.cjs · domaine-env.cjs · env-file.cjs"]
   end
 
