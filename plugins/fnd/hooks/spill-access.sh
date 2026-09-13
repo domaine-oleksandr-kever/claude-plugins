@@ -98,7 +98,14 @@ case "$scan" in *'\'*)  # JSON string escapes: the solidus (Codex) and the ones 
   # \n \t \r collapse to a SPACE, not to nothing — they are token boundaries in the command they came
   # from, so swallowing one glues the next word onto the path it follows ("<spill>\nwc -l" was recorded
   # as a spill named "<spill>\nwc", which --report can never pair).
-  scan="$(printf '%s' "$scan" | sed 's:\\/:/:g; s:\\[ntr]: :g; s:\\\\:\\:g' 2>/dev/null || printf '%s' "$scan")" ;;
+  # \" matters as much: the harvest below stops at a `"` and never at a `\`, so a quoted path
+  # (`wc -l "<spill>"`, the usual spelling) reached it as `<spill>\` and failed the -f test — the
+  # read was dropped and --report called the whale missed. It runs LAST, after the \\ pair collapse:
+  # in valid JSON the backslashes before an escaped quote always come in pairs, so collapsing them
+  # first can neither fabricate nor swallow an escape, while a command whose last character is a
+  # literal backslash (`…\\` then the string's own closing quote) yields a clean delimiter instead
+  # of one glued to the path. Reversing the two puts that backslash back on the path.
+  scan="$(printf '%s' "$scan" | sed 's:\\/:/:g; s:\\[ntr]: :g; s:\\\\:\\:g; s:\\":":g' 2>/dev/null || printf '%s' "$scan")" ;;
 esac
 # Verb list twin #1, the ERE — kept in sync by hand with the `via=` ladder below; sharing one variable
 # would mean re-injecting it into this pattern, and that is a fork on the hot path. A verb counts only

@@ -42,6 +42,20 @@
 # belongs to a work stream, not to the repo. In a MULTI-environment toml the block written is the
 # block read (same resolution, one `--env`), so that stays true there.
 #
+# Usage:
+#   create-preview-theme.sh info
+#   create-preview-theme.sh create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>]
+#                                  [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+#                                  [--allow-unverified] [--allow-dev-theme]
+#   create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>]
+#                                   [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+#                                   [--allow-unverified] [--allow-dev-theme]
+#   create-preview-theme.sh pin --theme <ID> [--env <name>]
+#
+# `--help` / `-h` — bare or anywhere in a subcommand's args — prints that Usage block to stdout and
+# exits 0, ahead of the toml, store and CLI checks so a usage question cannot die outside a theme
+# checkout. Matched positionally, so a flag VALUE of `-h` reads as a usage question too.
+#
 # Subcommands:
 #   info
 #       → store=… env=… dev_theme_id=… dev_theme_name=…                 (no mutation)
@@ -62,6 +76,10 @@
 #       <ID> must clear the live-theme guard; when `theme list` never answered it must also be an id
 #       some workspace under ./.claude/tasks records as `session-theme:` (`error=refresh_unverifiable`
 #       otherwise), and it must not be the shared dev theme (`error=dev_theme_write_refused`).
+#       When the listing DID answer, names themes and spells their ids as numbers this script can
+#       match, an <ID> it does not carry — a deleted preview theme — is `error=theme_not_found`
+#       before the build, not a push failure after it; no flag lifts that (a recorded session theme
+#       and --allow-unverified answer an outage, not a deletion).
 #   pin --theme <ID> [--env <name>]
 #       → vet <ID> against the store (must exist, must not be the live theme) and pin it into
 #         the toml. No build, no push, no theme is created or changed on the store. A `theme list`
@@ -141,6 +159,27 @@
 # checkout has no ./package.json — that build is skipped, and skipped without looking for node.
 
 set -euo pipefail
+
+# The `# Usage:` block above, verbatim — the suite pins the two together: the header is the
+# human-readable contract, this is what `--help` prints.
+USAGE='Usage:
+  create-preview-theme.sh info
+  create-preview-theme.sh create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>]
+                                 [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+                                 [--allow-unverified] [--allow-dev-theme]
+  create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>]
+                                  [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+                                  [--allow-unverified] [--allow-dev-theme]
+  create-preview-theme.sh pin --theme <ID> [--env <name>]'
+
+# Answered before the install checks and the toml read below: "how do I call this" must not depend
+# on a shopify CLI, a config or a store — the checks still gate every real subcommand.
+for _a in ${1+"$@"}; do
+  case "$_a" in
+    --help|-h) printf '%s\n' "$USAGE" "Full contract: the header of $0"; exit 0 ;;
+  esac
+done
+unset _a
 
 TOML="${TOML_PATH:-shopify.theme.toml}"
 
@@ -342,7 +381,15 @@ theme_name_by_id() { load_theme_list; theme_list_field "$THEME_LIST" "$1" name; 
 theme_role_by_id() { load_theme_list; theme_list_field "$THEME_LIST" "$1" role; }
 theme_found_by_id() { # 0 = the parsed listing contains an object with this id
   load_theme_list
-  printf '%s' "$THEME_LIST" | jq -e --arg id "$1" 'any(.. | objects; (.id|tostring)==$id)' >/dev/null 2>&1
+  printf '%s' "$THEME_LIST" | jq -e --arg id "$1" 'any(.. | objects; (.id|tostring|sub(".*/";""))==$id)' >/dev/null 2>&1
+}
+# 0 = the listing spells at least one id the compare above can actually match. A refusal built on
+# "the listing does not carry this id" is only as good as the dialect it reads: a listing whose ids
+# are all `null` (or some future shape with no numeric tail) says nothing about a numeric target,
+# and treating that as proof of deletion would brick every refresh with no flag to lift it.
+theme_list_speaks_numeric_ids() {
+  load_theme_list
+  printf '%s' "$THEME_LIST" | jq -e 'any(.. | objects; (.id|tostring|sub(".*/";""))|test("^[0-9]+$"))' >/dev/null 2>&1
 }
 # Every id matching the name — Shopify allows duplicate theme names, so a single `head -1` here silently
 # picked whichever theme the API happened to list first and the push target flipped between runs.
@@ -821,7 +868,7 @@ case "$MODE" in
       case "$1" in
         --theme) need_val $# "$1"; TARGET="$2"; shift 2 ;;
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
-        *) fail "unknown arg: $1" ;;
+        *) fail "unknown arg: $1 (--help prints usage)" ;;
       esac
     done
     sync_pin_env
@@ -867,7 +914,7 @@ case "$MODE" in
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
         --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
         --allow-dev-theme) ALLOW_DEV_THEME=1; shift ;;
-        *) fail "unknown arg: $1" ;;
+        *) fail "unknown arg: $1 (--help prints usage)" ;;
       esac
     done
     [ -n "$NAME" ] || fail "create requires --name \"<new theme name>\""
@@ -974,7 +1021,7 @@ case "$MODE" in
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
         --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
         --allow-dev-theme) ALLOW_DEV_THEME=1; shift ;;
-        *) fail "unknown arg: $1" ;;
+        *) fail "unknown arg: $1 (--help prints usage)" ;;
       esac
     done
     [ -n "$TARGET" ] || fail "refresh requires --theme <existing theme id>"
@@ -998,6 +1045,21 @@ case "$MODE" in
     fi
     assert_not_live "$TARGET"
     assert_not_dev_theme "$TARGET" "$(theme_name_by_id "$TARGET")"
+    # A deleted (or mistyped) id used to reach `theme push` — after the whole build — and come back
+    # as the CLI's boxed "No themes on the store … match the ID" under error=refresh_push_failed,
+    # which reads like a push that might have landed. Same claim the pin branch already makes, and
+    # only a listing that ANSWERED and named themes may make it: an outage (silent, empty or
+    # unparseable) leaves absence meaningless, and the refresh_unverifiable gate above owns that
+    # case — with it the recorded session theme and --allow-unverified, neither of which is an
+    # answer to "the theme is gone", so neither lifts this refusal. This is refresh's ONLY
+    # unliftable refusal, so it also waits for a listing whose ids it can read: absence proves
+    # deletion only in a dialect the matcher speaks. It assumes `shopify theme list --json`
+    # enumerates the whole store in one answer (it takes no page argument and the store cap is
+    # small) — were it ever paginated, a theme listed on a later page would read as deleted here.
+    if [ "$THEME_LIST_SILENT" -eq 0 ] && [ "$THEME_LIST_OK" -eq 1 ] \
+       && theme_list_speaks_numeric_ids && ! theme_found_by_id "$TARGET"; then
+      fail "theme_not_found theme=$TARGET store=$STORE — no theme with that id is listed on the store (a deleted preview theme looks like this); nothing was built or pushed; check the id (a preview URL's \`?preview_theme_id=…\`) or make a fresh one with \`create --name \"<name>\" --reuse\` (add --pin-toml only if the id you lost was the one pinned in shopify.theme.toml)"
+    fi
 
     run_build
     TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
@@ -1025,6 +1087,8 @@ case "$MODE" in
     ;;
 
   *)
-    fail "usage: create-preview-theme.sh info | create --name \"<name>\" [--reuse] [--no-build] [--build-script <name>] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme] | refresh --theme <id> [--no-build] [--build-script <name>] [--ignore-extra \"<glob>\"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme] | pin --theme <id> [--env <name>]"
+    # One line, not the whole synopsis: the call shape lives in ONE place now, and `--help` is
+    # cheaper to name than to repeat.
+    fail "unknown_command cmd='$MODE' (use info|create|refresh|pin; --help prints usage)"
     ;;
 esac

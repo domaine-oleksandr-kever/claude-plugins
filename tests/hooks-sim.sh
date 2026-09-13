@@ -92,10 +92,11 @@
 #             distinct path to the compressor's own debug log (via = the reader that did it), while
 #             the gate, the debug switch, a json-slim run, a non-spill command, the other fnd-
 #             prefixes and a path that is not a file on disk write nothing; plus the domaine.env
-#             precedence, the 5 MB rotation, JSON escaping, the 16 KB harvest cap (and the record
-#             surviving the byte-cut it can leave through a multibyte character), the cost of a
-#             path-dense command in EITHER envelope order — an event carrying no tool_input key at
-#             all included — the no-node rule and the wiring gate
+#             precedence, the 5 MB rotation, JSON escaping, a QUOTED path (`\"` un-escaped, with the
+#             `\\` pair collapse ordered so a literal backslash is never read as one), the 16 KB
+#             harvest cap (and the record surviving the byte-cut it can leave through a multibyte
+#             character), the cost of a path-dense command in EITHER envelope order — an event
+#             carrying no tool_input key at all included — the no-node rule and the wiring gate
 #   T cases — hooks/subagent-conventions.sh: the untrusted-content rail reaches EVERY agent
 #             type; the code conventions only code-writing / unknown ones, with the read-only
 #             readers AND jira-writer exempt from those; FND_LEAN=0 drops lean-code, the hook
@@ -3563,6 +3564,44 @@ assert_eq       A30-exit      "$spa_ec" 0
 assert_eq       A30-stderr    "$(cat "$TMP/spa.err")" ""
 assert_eq       A30-one-line  "$(spa_lines "$d")" 1
 assert_contains A30-spill     "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
+
+# A31 (bug): the spill path QUOTED in the command — the ordinary spelling, and the shape most of a
+# week's Bash whale reads arrive in. The host sends `wc -l \"<spill>\"`, and with `\"` left
+# un-escaped the harvest stopped at a `"` that was not there and kept the backslash instead
+# (`<spill>\`), which is not a file on disk, so the read was dropped and --report called the whale
+# missed.
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"wc -l \"'"$SPA_PLAT"'\""}}'; d="$spa_d"
+assert_eq       A31-quoted-one-line "$(spa_lines "$d")" 1
+assert_contains A31-quoted-spill    "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
+assert_contains A31-quoted-via      "$(spa_log "$d")" '"via":"shell"'
+# …the recorded path is the path itself, not the path plus the escape that terminated it: --report
+# pairs on the producer's absolute path, so one stray byte is the same miss as no line at all.
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"jq -r .id \"'"$SPA_PLAT"'\" | head -1"}}'; d="$spa_d"
+if node -e 'const fs=require("fs");const o=JSON.parse(fs.readFileSync(process.argv[1],"utf8").trim());process.exit(o.spill===process.argv[2]&&fs.existsSync(o.spill)?0:1)' \
+     "$d/fnd-mcp-slim-debug.log" "$SPA_PLAT" 2>/dev/null; then ok
+else bad A31-quoted-exact "the quoted path did not round-trip to the file on disk: $(spa_log "$d")"; fi
+# …a quoted path assigned on one line and read on the next (the \n is a token boundary here too).
+# The platform-overflow path, not our own content-addressed one: that alternative of the harvest
+# regex ends at `.json`, so the stray backslash never reached the -f test and the case could not
+# fail — this one harvests to the end of the token, which is where the bug lived.
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"F=\"'"$SPA_PLAT"'\"\nhead -c 2000 \"$F\""}}'; d="$spa_d"
+assert_eq       A31-var-one-line "$(spa_lines "$d")" 1
+assert_contains A31-var-spill    "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
+assert_contains A31-var-via      "$(spa_log "$d")" '"via":"shell"'
+# …a literal backslash in the command stays one: the `\"` rule runs AFTER the `\\` pair collapse, so
+# an escaped pair can never be misread as an escaped quote (`grep -c "\\"` keeps both its quotes).
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"grep -c \"\\\\\" \"'"$SPA_PLAT"'\""}}'; d="$spa_d"
+assert_eq       A31-backslash-one-line "$(spa_lines "$d")" 1
+assert_contains A31-backslash-spill    "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
+assert_contains A31-backslash-via      "$(spa_log "$d")" '"via":"grep"'
+# …and that ordering is what keeps a command whose LAST character is a literal backslash readable:
+# the pair collapses into the string's own closing quote instead of gluing itself to the path.
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"wc -l '"$SPA_PLAT"'\\"}}'; d="$spa_d"
+assert_eq       A31-trailing-one-line "$(spa_lines "$d")" 1
+assert_contains A31-trailing-spill    "$(spa_log "$d")" "\"spill\":\"$SPA_PLAT\""
+# …and the existence gate still decides: a quoted path is not a read of a file that is not there
+spa_run '{"cwd":"/r/elc","tool_name":"Bash","tool_input":{"command":"echo docs about \"'"$SPA_FS"'/p/tool-results/gone.txt\""}}'; d="$spa_d"
+if [ -e "$d/fnd-mcp-slim-debug.log" ]; then bad A31-quoted-ghost "a quoted path that is not on disk was recorded: $(spa_log "$d")"; else ok; fi
 
 # ── H1–H14: FND_HOST_TRACE, the host-proof log ───────────────────────────────
 # hooks/host-trace.{sh,cjs} are exercised DIRECTLY here — the guards and node hooks that call them

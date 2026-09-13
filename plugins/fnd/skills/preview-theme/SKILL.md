@@ -71,7 +71,8 @@ theme.
 
 1. **Detect.** Run `create-preview-theme.sh info`. **Success** → show the detected `store`,
    `dev_theme_id`, and `dev_theme_name`. Any `error=` line → the errors reference's
-   **`error=` outcomes**, and never read the toml yourself.
+   **`error=` outcomes**, and never read the toml yourself. (`create-preview-theme.sh --help`
+   prints the full call shape from the script itself.)
 2. **Decide the name.**
    - If `theme_name` was given, use it verbatim.
    - Else if `jira_keys` were given, derive it by swapping the `[DEV]`/role prefix of
@@ -128,7 +129,9 @@ theme.
    `--allow-unverified`. `error=dev_theme_write_refused` (the target is the shared dev theme) →
    if the developer confirms the id is this stream's session theme, do step 5 (record the
    `session-theme:` line) FIRST and re-run without any flag; only an explicit "overwrite the dev
-   theme" gets `--allow-dev-theme`.
+   theme" gets `--allow-dev-theme`. `error=theme_not_found` is neither of those: the listing
+   answered and does not carry the id, so the theme was deleted — no flag lifts it; offer a fresh
+   `create` instead of re-running.
 4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`.
    Remind the developer that customizer settings were intentionally left as-is.
 5. **Record it when the workspace hasn't.** When a task workspace for this work-id exists

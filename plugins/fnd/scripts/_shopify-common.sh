@@ -354,9 +354,13 @@ theme_list_trim() { awk 'f{print;next} match($0,/[[{]/){print substr($0,RSTART);
 # object never yields a literal `null` that a `[ -n … ]` guard would accept. `.. | objects` reads a
 # bare array and a wrapped listing alike; `| head -1` is load-bearing (a `first(…)` rewrite returns
 # empty for the wrapping object).
+# The id is compared on its NUMERIC TAIL: the same listing may spell an id `222` or
+# `gid://shopify/OnlineStoreTheme/222`, and callers only ever hold the bare number (that is what a
+# preview URL and the toml carry). An exact compare answers "no such theme" for the gid dialect and
+# every id-keyed guard built on it — the live-theme one included — then reads that as cleared.
 theme_list_field() { # $1 = listing json, $2 = theme id, $3 = field
   printf '%s' "$1" | jq -r --arg id "$2" --arg f "$3" \
-    '.. | objects | select((.id|tostring)==$id) | .[$f] // empty' 2>/dev/null | head -1 || true
+    '.. | objects | select((.id|tostring|sub(".*/";""))==$id) | .[$f] // empty' 2>/dev/null | head -1 || true
 }
 
 # The CLI spells the published theme's role `live`; `main` (the GraphQL enum) is accepted too so a

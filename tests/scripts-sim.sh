@@ -828,6 +828,15 @@ else bad T50b-cli-set-main-refused "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')
 # T50c: an id the listing does not carry is theme_not_found …
 rc=0; TJ_LIST_JSON='[{"id":9,"name":"Other","role":"development"}]' tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
 assert T50c-cli-set-not-listed 5 "$rc" "$E" "error=theme_not_found theme=2 (engine=themecli)"
+# T50c2: the same listing spelled in the gid dialect is the SAME theme — the matcher these guards
+# share compares the numeric tail, so a store whose `theme list --json` answers in gids does not
+# read as a store with no themes at all
+rc=0; L="$TMP/tjl50c2"; : > "$L"
+TJ_CLI_LOG="$L" TJ_PUSH_SAVE="$TV/pushed50c2.json" TJ_PULL_BODY="$TV/pushed50c2.json" \
+  TJ_LIST_JSON='[{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"development"}]' \
+  tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q 'theme_not_found' "$E" && grep -q 'argv=theme push' "$L"; then ok
+else bad T50c2-cli-set-gid-listing "rc=$rc out=$(head -c 160 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 # T50d: … while a LISTED theme with no role is a list-shape drift — refused as unreadable, never
 # "not found" and never waved through (a literal jq `null` used to pass the emptiness check)
 rc=0; L="$TMP/tjl50d"; : > "$L"
@@ -1942,6 +1951,48 @@ rc=0; CURL_ARGV="$A47C" run_gql --engine token --query query.graphql >"$O" 2>"$E
 if [ "$rc" -eq 0 ] && [ -n "$DEFV" ] && grep -q "/admin/api/$DEFV/graphql.json" "$A47C"; then ok
 else bad G47c-default-api-version "rc=$rc default=$DEFV argv=$(tr '\n' ';' < "$A47C")"; fi
 
+# G49 (bug): `--help` used to be error=unknown_arg. It answers the call shape before the shared lib,
+# the store resolution and the token read — no config, no credential, nothing on the wire — and it
+# prints the header's own `# Usage:` block: two hand-maintained copies of a call shape are two
+# copies free to disagree, and the header is the one a reader lands on.
+GQLH="$TMP/gql-usage-header"
+awk '/^# Usage:/ { f = 1 } f { if ($0 == "#" || $0 !~ /^#( |$)/) exit; sub(/^# ?/, ""); print }' \
+  "$GQL" > "$GQLH"
+for ha in --help -h; do
+  rc=0; L49="$TMP/sl49"; : > "$L49"
+  GQL_LOG="$L49" gql_run_at "$GQLDIR" "$ha" >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ ! -s "$L49" ] \
+     && [ "$(wc -l < "$GQLH" | tr -d ' ')" -eq 5 ] && sed '$d' "$O" | diff -q - "$GQLH" >/dev/null; then ok
+  else bad "G49-help[$ha]" "rc=$rc diff=$(sed '$d' "$O" | diff - "$GQLH" | head -c 300 | tr '\n' ';') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+done
+# G49b: the pointer line that follows it names where the full contract lives
+if [ "$(tail -1 "$O")" = "Full contract: the header of $GQL" ]; then ok
+else bad G49b-help-pointer "tail=$(tail -1 "$O")"; fi
+# G49c: --help among a real call's args is still a usage question — nothing is sent
+rc=0; L49C="$TMP/sl49c"; : > "$L49C"; A49C="$TMP/curl-argv49c"; : > "$A49C"
+CURL_ARGV="$A49C" GQL_LOG="$L49C" gql_run_at "$GQLDIR" --store test-store --query query.graphql --help \
+  >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$L49C" ] && [ ! -s "$A49C" ]; then ok
+else bad G49c-help-mid-args "rc=$rc argv=$(tr '\n' ';' < "$A49C") log=$(tr '\n' ';' < "$L49C")"; fi
+# G49d: …and the refusal a guessed flag gets names the way out in one step
+rc=0; gql_run_at "$GQLDIR" --bogus >"$O" 2>"$E" || rc=$?
+assert G49d-unknown-arg-trailer 2 "$rc" "$E" "error=unknown_arg arg=--bogus (--help prints usage)"
+# G49e (drift guard): the usage block spells every flag the parse loop accepts — an arm added
+# without a block update leaves --help lying about the accepted set. The floor fails an extraction
+# that silently matched nothing.
+GQLF="$(awk '/^while \[ \$# -gt 0 \]; do/ { f = 1 } f && /^done$/ { exit } f && match($0, /^ *--[a-z-]+\)/) { s = substr($0, RSTART, RLENGTH); sub(/^ */, "", s); sub(/\)$/, "", s); print s }' "$GQL" | sort -u)"
+missing=""; n=0
+for fl in $GQLF; do n=$((n + 1)); grep -q -- "${fl}[^a-z-]" "$GQLH" || missing="$missing $fl"; done
+if [ "$n" -ge 9 ] && [ -z "$missing" ]; then ok
+else bad G49e-usage-lists-flags "n=$n missing=[$missing]"; fi
+# G49f: the scan is positional, which the header states outright — a flag VALUE of `-h` reads as a
+# usage question, and the request it rode in on is never sent
+rc=0; L49F="$TMP/sl49f"; : > "$L49F"; A49F="$TMP/curl-argv49f"; : > "$A49F"
+CURL_ARGV="$A49F" GQL_LOG="$L49F" gql_run_at "$GQLDIR" --store test-store --query query.graphql --operation -h \
+  >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$A49F" ] && grep -q 'VALUE of `-h`' "$GQL"; then ok
+else bad G49f-help-in-value-position "rc=$rc argv=$(tr '\n' ';' < "$A49F") out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
 # ---------------------------------------- create-preview-theme.sh cap classifier --
 CAP_RE='theme limit|maximum number of themes|too many themes|may only have [0-9]+ themes'
 if grep -qF "$CAP_RE" "$CPT"; then ok; else bad C1-pattern-in-script "cap regex in the test drifted from the script"; fi
@@ -2796,12 +2847,89 @@ if [ "$rc" -ne 0 ] && grep -q 'error=live_role_unreadable' "$O" \
    && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
 else bad P23-roleless-id-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
 
-# P23b (pin): an id ABSENT from a readable listing still proceeds — absence is what a fresh or
-# paginated-away theme looks like, and only found-but-roleless is the drift shape P23 refuses
+# P23b (bug): `refresh` onto an id ABSENT from a readable listing — what a DELETED preview theme
+# looks like. It used to build, push, and learn the truth from the CLI's boxed "No themes on the
+# store … match the ID" behind error=refresh_push_failed, which reads like a push that may have
+# landed. The pin branch already makes this call; refresh makes it too, before the build (no
+# --no-build here: `npm=` absent is the proof the refusal came first).
 rc=0; L="$TMP/cpt23b"; : > "$L"
-run_cpt "$L" FAKE_LIST='[{"id":222,"name":"Other","role":"unpublished"}]' -- refresh --theme 333 --no-build || rc=$?
-if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O"; then ok
-else bad P23b-absent-id-proceeds "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+run_cpt "$L" FAKE_LIST='[{"id":222,"name":"Other","role":"unpublished"}]' -- refresh --theme 333 || rc=$?
+RC23B="$rc"
+if [ "$rc" -eq 1 ] && grep -q '^error=theme_not_found theme=333 store=acme-dev' "$O" \
+   && grep -q 'create --name' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ] && ! grep -q '^npm=' "$L"; then ok
+else bad P23b-absent-id-refused "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# P23c: the same id through `pin` — one refusal, one exit code, whichever branch raises it
+rc=0; L="$TMP/cpt23c"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":222,"name":"Other","role":"unpublished"}]' -- pin --theme 333 || rc=$?
+if [ "$rc" -eq "$RC23B" ] && grep -q '^error=theme_not_found theme=333 store=acme-dev' "$O"; then ok
+else bad P23c-pin-exit-parity "pin rc=$rc refresh rc=$RC23B out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+# P23d: --allow-unverified answers a listing that gave no ANSWER, never one that answered and does
+# not carry the id — a deleted theme is not a verification problem, so the flag is not a lift
+rc=0; L="$TMP/cpt23d"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":222,"name":"Other","role":"unpublished"}]' \
+  -- refresh --theme 333 --no-build --allow-unverified || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=theme_not_found theme=333' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P23d-allow-unverified-no-lift "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# P23e (fail-open): a listing that PARSES but names no theme is an outage, not a store with no
+# themes (P11e) — absence means nothing there, so the recorded session theme still refreshes and
+# the id is never called not-found. The one gate that separates the two is THEME_LIST_SILENT.
+mkdir -p "$CPTD/repo/.claude/tasks/ELC-2"
+printf -- '- 2026-09-13 session-theme: 777 ([ELC-2] Kever) https://acme-dev.myshopify.com/?preview_theme_id=777\n' \
+  > "$CPTD/repo/.claude/tasks/ELC-2/notes.md"
+rc=0; L="$TMP/cpt23e"; : > "$L"
+run_cpt "$L" FAKE_LIST='[]' -- refresh --theme 777 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=777$' "$O" && ! grep -q 'theme_not_found' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad P23e-empty-listing-not-a-deletion "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# …and a listing the CLI never gave at all is the refresh_unverifiable path, untouched
+rc=0; L="$TMP/cpt23f"; : > "$L"
+run_cpt "$L" FAKE_LIST_FAIL=1 -- refresh --theme 777 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=777$' "$O" && ! grep -q 'theme_not_found' "$O"; then ok
+else bad P23f-outage-not-a-deletion "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+rm -rf "$CPTD/repo/.claude"
+
+# P23g (bug): the refusal above is refresh's only unliftable one, so it may not fire on a listing
+# whose ids it cannot read. `theme list --json` also spells ids as gids (P17b/P41b are the shapes
+# this store really produces), and an exact string compare answers "not on the store" for every one
+# of them — turning the routine refresh into a dead end whose own hint (`create --reuse`) then dies
+# on `unusable_theme_id`. The id is matched on its numeric tail instead.
+GIDL='[{"id":"gid://shopify/OnlineStoreTheme/555","name":"[ELC-1] Kever","role":"unpublished"},{"id":"gid://shopify/OnlineStoreTheme/999","name":"Live Theme","role":"live"}]'
+rc=0; L="$TMP/cpt23g"; : > "$L"
+run_cpt "$L" FAKE_LIST="$GIDL" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && ! grep -q 'theme_not_found' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad P23g-gid-listing-refreshes "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# …and the same dialect still catches a deletion: tolerance is in the compare, not in the gate
+rc=0; L="$TMP/cpt23h"; : > "$L"
+run_cpt "$L" FAKE_LIST="$GIDL" -- refresh --theme 333 --no-build || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=theme_not_found theme=333 store=acme-dev' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P23h-gid-listing-absent-id "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# …and the live-theme guard reads that dialect too — it used to clear the PUBLISHED theme, because
+# the role lookup compares the same id and a gid listing answered it with an empty role
+rc=0; L="$TMP/cpt23i"; : > "$L"
+run_cpt "$L" FAKE_LIST="$GIDL" -- refresh --theme 999 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=live_theme_write_refused theme=999 role=live' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P23i-gid-listing-live-guard "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# P23j (fail-open): a listing that parses and carries `id` keys the compare can make nothing of
+# (no numeric tail on any of them) is a dialect this script does not speak — absence there is not a
+# deletion, so the push goes ahead exactly as it did before the refusal existed
+rc=0; L="$TMP/cpt23j"; : > "$L"
+run_cpt "$L" FAKE_LIST='[{"id":null,"name":"X","role":"unpublished"}]' -- refresh --theme 333 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O" && ! grep -q 'theme_not_found' "$O"; then ok
+else bad P23j-unreadable-id-dialect "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# P23k: `pin` shares the matcher, so the gid listing vets there too — it used to refuse every id on
+# such a store and a pin is the one refusal that leaves the developer no working command at all
+FGP="$CPTD/toml/pin-gid-listing.toml"
+printf '[environments.development]\nstore = "acme-dev"\ntheme = "111"\npassword = "shptka_fixture1234"\n' > "$FGP"
+rc=0; L="$TMP/cpt23k"; : > "$L"
+run_cpt "$L" TOML_PATH="$FGP" FAKE_LIST="$GIDL" -- pin --theme 555 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && grep -q '^pin=rewritten$' "$O" \
+   && grep -qx 'theme = "555"' "$FGP"; then ok
+else bad P23k-pin-gid-listing "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FGP" | tr '\n' ';')"; fi
 
 # ------------------------------ create-preview-theme.sh shared dev theme guard --
 # P54 (bug): `refresh --theme <the toml's theme id>` overwrote the SHARED dev theme's code — the id
@@ -3885,6 +4013,69 @@ if [ "$rc" -eq 0 ] && grep -q '^env=production$' "$O" && grep -q '^pin_env=produ
    && [ "$(grep -c '^theme = "222"$' "$F59M")" -eq 1 ] \
    && [ "$(sed -n '/^\[environments.dev\]/,$p' "$F59M" | cksum)" = "$DEV59M" ]; then ok
 else bad P59m-flag-environment-pin-target "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$F59M" | tr '\n' ';')"; fi
+
+# P60 (bug): `--help` used to fall through to the unknown-command refusal — behind the CLI, jq and
+# shopify.theme.toml checks, so "how do I call this" could not be answered outside a theme repo at
+# all. It prints the header's own `# Usage:` block (two hand-maintained copies of a call shape are
+# two copies free to disagree) from a directory with no toml, and touches nothing.
+CPTH="$TMP/cpt-help"; mkdir -p "$CPTH"
+CPTHH="$TMP/cpt-usage-header"
+awk '/^# Usage:/ { f = 1 } f { if ($0 == "#" || $0 !~ /^#( |$)/) exit; sub(/^# ?/, ""); print }' \
+  "$CPT" > "$CPTHH"
+for ha in --help -h; do
+  rc=0; L="$TMP/cpt60$ha"; : > "$L"
+  run_cpt_at "$CPTH" "$CPTD/shim:$PATH" "$L" NO=1 -- "$ha" || rc=$?
+  if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ ! -s "$L" ] \
+     && [ "$(wc -l < "$CPTHH" | tr -d ' ')" -eq 9 ] && sed '$d' "$O" | diff -q - "$CPTHH" >/dev/null; then ok
+  else bad "P60-help[$ha]" "rc=$rc diff=$(sed '$d' "$O" | diff - "$CPTHH" | head -c 300 | tr '\n' ';') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+done
+# P60b: the pointer line that follows it names where the full contract lives
+if [ "$(tail -1 "$O")" = "Full contract: the header of $CPTD/cpt.sh" ]; then ok
+else bad P60b-help-pointer "tail=$(tail -1 "$O")"; fi
+# P60c: --help after a subcommand, and among its args, is still a usage question — the store is
+# never touched and the mutating argv it rode in on is not carried out
+for hc in "refresh --help" "pin -h" "refresh --theme 555 --help" "create --name X --pin-toml --help"; do
+  rc=0; L="$TMP/cpt60c"; : > "$L"
+  run_cpt "$L" NO=1 -- $hc || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$L" ]; then ok
+  else bad "P60c-help[$hc]" "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+done
+# P60d: a genuinely unknown command still gets its one-line refusal — now naming --help rather
+# than reprinting the synopsis
+rc=0; L="$TMP/cpt60d"; : > "$L"
+run_cpt "$L" NO=1 -- bogus || rc=$?
+if [ "$rc" -eq 1 ] \
+   && grep -q "^error=unknown_command cmd='bogus' (use info|create|refresh|pin; --help prints usage)$" "$O" \
+   && [ ! -s "$L" ]; then ok
+else bad P60d-unknown-command-trailer "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# …and so does no command at all
+rc=0; L="$TMP/cpt60e"; : > "$L"
+run_cpt "$L" NO=1 -- || rc=$?
+if [ "$rc" -eq 1 ] && grep -q "^error=unknown_command cmd='' (use info|create|refresh|pin; --help prints usage)$" "$O"; then ok
+else bad P60e-no-command-trailer "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# P60f: the per-subcommand refusals are the ones a real typo hits, so they name the way out too
+for uc in "refresh --thme 123" "create --name X --pintoml" "pin --theme 555 --nope"; do
+  rc=0; L="$TMP/cpt60f"; : > "$L"
+  run_cpt "$L" NO=1 -- $uc || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q '^error=unknown arg: --' "$O" && grep -q -- '--help prints usage' "$O" \
+     && [ ! -s "$L" ]; then ok
+  else bad "P60f-unknown-arg[$uc]" "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+done
+# P60g (drift guard): every flag the three parse loops accept is spelled in that usage block — a
+# `--foo)` arm added without a block update leaves --help lying about the accepted set. The floor
+# fails an extraction that silently matched nothing.
+CPTF="$(awk '/^ *while \[ \$# -gt 0 \]; do/ { f = 1 } f && /^ *done$/ { f = 0 } f && match($0, /^ *--[a-z-]+\)/) { s = substr($0, RSTART, RLENGTH); sub(/^ */, "", s); sub(/\)$/, "", s); print s }' "$CPT" | sort -u)"
+missing=""; n=0
+for fl in $CPTF; do n=$((n + 1)); grep -q -- "${fl}[^a-z-]" "$CPTHH" || missing="$missing $fl"; done
+if [ "$n" -ge 9 ] && [ -z "$missing" ]; then ok
+else bad P60g-usage-lists-flags "n=$n missing=[$missing]"; fi
+# P60h: the scan is positional, which the header states outright — a flag VALUE of `-h` reads as a
+# usage question, and the mutating argv it rode in on is not carried out
+rc=0; L="$TMP/cpt60h"; : > "$L"
+run_cpt "$L" NO=1 -- create --name -h --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$L" ] \
+   && grep -q 'VALUE of `-h`' "$CPT"; then ok
+else bad P60h-help-in-value-position "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # ------------------------------------------- fix-breaking-changes banner handling --
 FB="$TMP/fb"; mkdir -p "$FB/templates/customers" "$FB/config" "$FB/scripts"

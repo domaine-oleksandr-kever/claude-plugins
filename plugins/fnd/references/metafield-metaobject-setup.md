@@ -110,6 +110,7 @@ the placeholder below:
 ```bash
 <plugin root>/scripts/shopify-admin-gql.sh --query .claude/tasks/<work-id>/tmp/inspection.graphql \
   [--operation <Name>] --out .claude/tasks/<work-id>/tmp/inspection.json   # then pull fields with jq
+<plugin root>/scripts/shopify-admin-gql.sh --help   # the full call shape, from the script itself
 ```
 
 It tries `store execute` first (CLI ≥ 4.x), falls back to the token, takes the store domain from

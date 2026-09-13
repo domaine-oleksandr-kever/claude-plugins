@@ -78,6 +78,13 @@ in the Bash tool's shell.
   by-hand check the line names before any re-run. With no `theme=` on the line (a `create`
   resolving `--name`) a blind re-run stacks a **duplicate same-named theme** — resolve the name by
   hand, then `refresh --theme <id>`.
+- **`error=theme_not_found`** (`refresh`) → nothing was built and nothing was pushed:
+  `shopify theme list --json` answered, named themes with readable ids, and does not carry that
+  one — which is what a **deleted** preview theme looks like. Not an outage, so no flag lifts it —
+  a recorded `session-theme:` id and `--allow-unverified` both answer "the store did not answer",
+  not "the theme is gone". Confirm the id (a preview URL's `?preview_theme_id=…`), or make a fresh
+  preview with `create --name "<name>" --reuse` and hand the reviewer the new link (add
+  `--pin-toml` only when the lost id was the one pinned in `shopify.theme.toml`).
 - **`error=refresh_unverifiable`** / **`error=reuse_unverifiable`** → nothing was pushed or
   created. The recorded-id exemption is an **id lookup across every workspace under the current
   directory, not provenance** — the gate in `<plugin root>/references/session-theme.md` still
@@ -117,7 +124,10 @@ in the Bash tool's shell.
   such a config on purpose: `pin --theme <id>` is the fix for `invalid_dev_theme_id`.
 - **Session-theme pin outcomes** (`pin`, and `create` / `refresh` with `--pin-toml` —
   `<plugin root>/references/session-theme.md`):
-  - **`error=theme_not_found`** → nothing was written; the line names the check.
+  - **`error=theme_not_found`** → nothing was written; the line names the check. Same key as the
+    `refresh` refusal above, on a **wider** trigger: any listing that parses raises it here, the
+    theme-less `[]` shape refresh reads as an outage included, because a pin persists in the config
+    and must not fail open.
   - **`error=theme_unverifiable`** → nothing was written (a standalone `pin` never persists an
     unvetted id). Under the same outage `create --pin-toml` proceeds, `refresh --pin-toml` only for
     a recorded session theme or with `--allow-unverified`, `--reuse --pin-toml` only with
@@ -143,8 +153,11 @@ in the Bash tool's shell.
 - **`cause=throttled`** on any push failure → the rate limit held through the script's own retries
   (the store+token limit is shared with a running `shopify theme dev`) — stop the competing
   consumer, or wait, then re-run.
-- **Anything else** — the script also refuses uncoded, self-explaining states: a usage/argument error
-  (`unknown arg`, `refresh requires --theme <id>`, `create requires --name`), `error=invalid_theme_id`
+- **Anything else** — the script also refuses uncoded, self-explaining states: a usage/argument
+  error (`unknown arg: <flag>`, `error=unknown_command cmd='<x>'` for a subcommand that is not
+  `info|create|refresh|pin`, `refresh requires --theme <id>`, `create requires --name`) — each
+  names `--help`, which prints the call shape from the script itself, as does
+  `shopify-admin-gql.sh`'s `error=unknown_arg` — `error=invalid_theme_id`
   (`--theme` takes a numeric id), `no access token`,
   `code push succeeded but could not parse theme id from --json`. Nothing was pushed except in that
   last one (the code IS on the theme — find its id in the admin and continue with `refresh`). Report

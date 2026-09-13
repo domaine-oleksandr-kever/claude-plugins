@@ -4,7 +4,8 @@ Two bundled runners (paths relative to the plugin root above) — use whenever r
 state would answer a question; don't guess store state.
 
 - `scripts/shopify-admin-gql.sh --query <file.graphql> [--operation <Name>] [--variables <json>
-  | --variables-file <file>] [--store <domain>] [--out <file>]` — Admin GraphQL. Read-only
+  | --variables-file <file>] [--store <domain>] [--out <file>]` (`--help` prints the full call
+  shape) — Admin GraphQL. Read-only
   queries always fair game (big reads: `--out` + `jq`); mutations follow
   `references/metafield-metaobject-setup.md`. Both paths: every query or mutation you wrote
   clears a `validate_graphql_codeblocks` pass first (Shopify Dev MCP; needs a

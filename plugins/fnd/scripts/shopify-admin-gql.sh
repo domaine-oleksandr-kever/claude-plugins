@@ -78,6 +78,10 @@
 #   --api-version    Admin API version (default: 2026-04, or $SHOPIFY_ADMIN_API_VERSION)
 #   --engine         auto (default) | store | token
 #
+# `--help` / `-h` — bare or anywhere in the args — prints the Usage block above to stdout and exits
+# 0, ahead of the shared lib, the engine probe and the token read, so a usage question cannot die on
+# a missing credential. Matched positionally, so a flag VALUE of `-h` reads as a usage question too.
+#
 # The store→token fallback note prints in full once per store; later runs print
 # `note=engine=token`. SHOPIFY_ADMIN_GQL_QUIET set to anything but 0 forces the short form always.
 # That marker, the remembered store-engine verdict and the cached CLI version live in one private
@@ -98,6 +102,23 @@
 # exit non-zero with error=… on stderr. GraphQL errors never trigger the token fallback —
 # re-running a mutation elsewhere could execute it twice.
 set -euo pipefail
+
+# The `# Usage:` block above, verbatim — the suite pins the two together: the header is the
+# human-readable contract, this is what `--help` prints.
+USAGE='Usage:
+  shopify-admin-gql.sh --query <file.graphql> [--operation <name>] [--variables <json>] \
+                       [--variables-file <file.json>] [--out <file>] \
+                       [--env <path>] [--store <name|domain>] [--api-version <ver>] \
+                       [--engine auto|store|token]'
+
+# Answered before the shared lib, the engine probe and the token read below: "how do I call this"
+# must not depend on a store, a config or a credential being in place.
+for _a in ${1+"$@"}; do
+  case "$_a" in
+    --help|-h) printf '%s\n' "$USAGE" "Full contract: the header of $0"; exit 0 ;;
+  esac
+done
+unset _a
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 [ -f "$SCRIPT_DIR/_shopify-common.sh" ] || { echo "error=common_lib_not_found path=$SCRIPT_DIR/_shopify-common.sh" >&2; exit 2; }
@@ -121,7 +142,7 @@ while [ $# -gt 0 ]; do
     --store)        need_val $# "$1"; STORE="$2"; shift 2 ;;
     --api-version)  need_val $# "$1"; API_VERSION="$2"; shift 2 ;;
     --engine)       need_val $# "$1"; ENGINE="$2"; shift 2 ;;
-    *) echo "error=unknown_arg arg=$1" >&2; exit 2 ;;
+    *) echo "error=unknown_arg arg=$1 (--help prints usage)" >&2; exit 2 ;;
   esac
 done
 
