@@ -5,10 +5,16 @@
 // active model, effort. Effort comes straight from the hook input; token counts are read
 // verbatim from the transcript's last usage record — Claude Code's assistant `usage` entry,
 // or a Codex rollout's `token_count` event (its model label comes from the hook input) —
-// because neither host exposes /context's own numbers to hooks. Above the warn
-// threshold the notice adds a /compact-or-/clear call-to-action on every prompt
-// (UI-only, free); the additionalContext flag for skills is emitted ONLY when the
-// usage BAND changes (ok → warn → 75 → 90, and back), tracked in a per-session
+// because neither host exposes /context's own numbers to hooks, and the hook input carries
+// no model either. A `/model` switch the new model has not answered yet is read from the
+// command's own transcript record and shown as `<old id> → <new name>`: the count is still
+// the old model's last turn (the same conversation, so a fair estimate), the window is the
+// new model's. A compaction nobody has answered yet is read the same way, from its
+// `compact_boundary` record: the count becomes the summary's `postTokens` shown as a floor
+// (`≥14.6k`), because the fixed system prompt and tool schemas on top of it are not in the
+// transcript. Above the warn threshold the notice adds a /compact-or-/clear call-to-action
+// on every prompt (UI-only, free); the additionalContext flag for skills is emitted ONLY
+// when the usage BAND changes (ok → warn → 75 → 90, and back), tracked in a per-session
 // tmpdir state file — steady-state prompts inject zero model context.
 //
 // Runs inside hooks/user-prompt.cjs (the one node process the UserPromptSubmit event pays
@@ -32,11 +38,31 @@ const ENV_WARN = parseInt(process.env.FND_CTX_WARN || '', 10);
 const WARN_AT = Number.isNaN(ENV_WARN) ? 40 : ENV_WARN;
 
 // 1M-window families: Fable/Mythos, Opus ≥4.6, Sonnet ≥4.6. Haiku and anything
-// unrecognized keep the conservative 200k default.
+// unrecognized keep the conservative 200k default. Takes an API id (`claude-opus-5`) or a
+// /model display name (`Opus 5 (1M context)`, `Sonnet 4.6`) — spaces and dots fold to dashes.
 function windowFor(model) {
-  return /fable|mythos|opus-4-[6-9]|opus-[5-9]|sonnet-4-[6-9]|sonnet-[5-9]/.test(model)
+  const m = String(model).toLowerCase().replace(/[\s.]+/g, '-');
+  return /fable|mythos|opus-4-[6-9]|opus-[5-9]|sonnet-4-[6-9]|sonnet-[5-9]|1m-context/.test(m)
     ? 1000000
     : 200000;
+}
+
+// The model a `/model` command switched to, from its transcript record — a user entry whose
+// content is the command's own stdout string (a tool result echoing the same words is an array).
+function switchedModel(entry) {
+  if (entry.type !== 'user' || !entry.message) return '';
+  const c = entry.message.content;
+  const m = typeof c === 'string' && c.match(/^<local-command-stdout>Set model to `([^`]+)`/);
+  return m ? m[1].replace(/\s*\(default\)$/, '') : '';
+}
+
+// A compaction's transcript record: `{pre, post, trigger}` token counts around the summary, or
+// null for any other entry.
+function compaction(entry) {
+  const c = entry.type === 'system' && entry.subtype === 'compact_boundary' && entry.compactMetadata;
+  return c && typeof c.postTokens === 'number'
+    ? { pre: c.preTokens, post: c.postTokens, trigger: c.trigger === 'auto' ? 'auto-compact' : '/compact' }
+    : null;
 }
 
 // Codex rollouts record usage as `token_count` events, whose `last_token_usage` is the live
@@ -81,7 +107,15 @@ function contextNotice(input) {
 
     let usage = null;
     let model = '';
+    let switched = ''; // newest /model record with no answer from the new model yet
+    let compacted = null; // newest compaction with no answer after it yet
     for (let i = lines.length - 1; i >= 0; i--) {
+      if (!usage && !switched && lines[i].includes('Set model to')) {
+        try { switched = switchedModel(JSON.parse(lines[i])); } catch (_) {}
+      }
+      if (!usage && !compacted && lines[i].includes('"compact_boundary"')) {
+        try { compacted = compaction(JSON.parse(lines[i])); } catch (_) {}
+      }
       if (!lines[i].includes('"usage"')) continue;
       try {
         const entry = JSON.parse(lines[i]);
@@ -102,12 +136,14 @@ function contextNotice(input) {
     let WINDOW;
     let used;
     if (usage) {
-      WINDOW = ENV_WINDOW || windowFor(model);
-      used =
-        (usage.input_tokens || 0) +
-        (usage.cache_creation_input_tokens || 0) +
-        (usage.cache_read_input_tokens || 0) +
-        (usage.output_tokens || 0);
+      WINDOW = ENV_WINDOW || windowFor(switched || model);
+      if (switched) model = model ? `${model} → ${switched}` : switched;
+      used = compacted
+        ? compacted.post
+        : (usage.input_tokens || 0) +
+          (usage.cache_creation_input_tokens || 0) +
+          (usage.cache_read_input_tokens || 0) +
+          (usage.output_tokens || 0);
     } else {
       const codex = codexUsage(lines);
       if (!codex) return null;
@@ -125,8 +161,11 @@ function contextNotice(input) {
     const usedLabel = `${(used / 1000).toFixed(1)}k`;
     const icon = pct >= 90 ? '🔴' : pct >= 75 ? '🟠' : pct >= WARN_AT ? '🟡' : '🟢';
 
+    const wasLabel = compacted && typeof compacted.pre === 'number' ? ` (was ${(compacted.pre / 1000).toFixed(1)}k)` : '';
     let msg = [
-      `${icon} Context ${usedLabel}/${windowLabel} (${pct}%)`,
+      compacted
+        ? `${icon} Context ≥${usedLabel}/${windowLabel} (${pct}%) after ${compacted.trigger}${wasLabel}`
+        : `${icon} Context ${usedLabel}/${windowLabel} (${pct}%)`,
       model,
       effort && `effort ${effort}`,
     ]

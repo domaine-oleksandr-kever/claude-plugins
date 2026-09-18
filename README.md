@@ -1072,7 +1072,10 @@ hook error never blocks work:
   Bash / Read / Grep call.
 - **UserPromptSubmit** — one node process (`user-prompt.cjs`) running two independently
   gated halves; a block from the guard wins over the monitor's notice. `context-stats.cjs` monitors
-  context-window usage and warns (recommending `/compact`) past a threshold. Knobs, set
+  context-window usage and warns (recommending `/compact`) past a threshold. Its numbers are the
+  last answer's usage record (hooks see neither `/context` nor the active model), so a `/model`
+  switch or a compaction nobody has answered yet is read from the command's own transcript
+  record instead: `claude-opus-5 → Fable 5.1`, `≥14.6k/1M after /compact (was 147.9k)`. Knobs, set
   like `FND_LEAN` in `settings.json` → `env`: `FND_CTX_MONITOR=0` turns it off,
   `FND_CTX_WARN` sets the warn threshold in % (default 40), `FND_CTX_WINDOW` overrides the
   assumed window size (e.g. for 1M-token sessions). `prompt-json-guard.cjs` keeps a large

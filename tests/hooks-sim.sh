@@ -556,6 +556,57 @@ out="$(run_ctx "$TMP/t5.jsonl" "c11-$$")"
 assert_contains C11-codex-window "$out" "151.7k/258k"
 assert_absent   C11-no-claude    "$out" "claude"
 
+# C12: `/model` after the last answer — the hook input carries no model, so the switch is read
+# from the command's own transcript record: label `<old id> → <new name>` ("(default)" suffix
+# dropped), window from the NEW family (haiku 200k → opus 1M), count still the last turn's.
+OPUS='{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":50000,"cache_read_input_tokens":100000,"output_tokens":1000}},"isSidechain":false}'
+SWITCH='{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to `Fable 5.1` and saved as your default for new sessions</local-command-stdout>"},"isSidechain":false}'
+printf '%s\n' "$OPUS" '{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>"}}' "$SWITCH" > "$TMP/t6.jsonl"
+out="$(run_ctx "$TMP/t6.jsonl" "c12-$$")"
+assert_contains C12-switched-label "$out" "claude-opus-5 → Fable 5.1"
+assert_contains C12-count-kept     "$out" "151.0k/1M (15%)"
+printf '%s\n' "$BIG" '{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to `Opus 5 (1M context) (default)` and saved as your default for new sessions</local-command-stdout>"}}' > "$TMP/t7.jsonl"
+out="$(run_ctx "$TMP/t7.jsonl" "c12b-$$")"
+assert_contains C12-new-window   "$out" "500.0k/1M (50%)"
+assert_contains C12-name-trimmed "$out" "claude-haiku-4-5-20251001 → Opus 5 (1M context) ·"
+
+# C13: a `/model` the new model has already answered is history — the answer's own id wins.
+printf '%s\n' "$SWITCH" "$REAL" > "$TMP/t8.jsonl"
+out="$(run_ctx "$TMP/t8.jsonl" "c13-$$")"
+assert_contains C13-answered-id "$out" "· claude-fable-5 ·"
+assert_absent   C13-no-arrow    "$out" "→"
+
+# C14: the same words inside a tool result (array content, e.g. a grep over a transcript) are
+# payload, not a switch; nor is a display name matched loosely inside prose.
+ECHO='{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"<local-command-stdout>Set model to `Sonnet 4.6`</local-command-stdout>"}]},"isSidechain":false}'
+printf '%s\n' "$REAL" "$ECHO" > "$TMP/t9.jsonl"
+out="$(run_ctx "$TMP/t9.jsonl" "c14-$$")"
+assert_absent C14-tool-result-ignored "$out" "→"
+
+# C15: windowFor takes display names — dots and spaces fold to dashes, so `Sonnet 4.6` is 1M
+# and `Haiku 4.5` stays 200k.
+printf '%s\n' "$BIG" '{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to `Sonnet 4.6`</local-command-stdout>"}}' > "$TMP/t10.jsonl"
+assert_contains C15-sonnet-name-1m "$(run_ctx "$TMP/t10.jsonl" "c15-$$")" "500.0k/1M"
+printf '%s\n' "$REAL" '{"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to `Haiku 4.5`</local-command-stdout>"}}' > "$TMP/t11.jsonl"
+assert_contains C15-haiku-name-200k "$(run_ctx "$TMP/t11.jsonl" "c15b-$$")" "151.0k/200k (76%)"
+
+# C16: a compaction nobody has answered yet — the last usage entry is pre-compact, so the count
+# comes from the boundary's postTokens as a floor (system prompt + tools sit on top of it, and
+# are not in the transcript); the trigger names /compact vs auto-compact. An answer after the
+# boundary is a fresh usage entry and wins.
+CB='{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"manual","preTokens":147940,"postTokens":14603},"isSidechain":false}'
+printf '%s\n' "$OPUS" "$CB" "$SWITCH" > "$TMP/t12.jsonl"
+out="$(run_ctx "$TMP/t12.jsonl" "c16-$$")"
+assert_contains C16-floor    "$out" "≥14.6k/1M (1%) after /compact (was 147.9k)"
+assert_contains C16-switched "$out" "claude-opus-5 → Fable 5.1"
+assert_absent   C16-not-pre  "$out" "151.0k"
+printf '%s\n' "$OPUS" "${CB/manual/auto}" > "$TMP/t13.jsonl"
+assert_contains C16-auto "$(run_ctx "$TMP/t13.jsonl" "c16b-$$")" "after auto-compact"
+printf '%s\n' "$OPUS" "$CB" "$REAL" > "$TMP/t14.jsonl"
+out="$(run_ctx "$TMP/t14.jsonl" "c16c-$$")"
+assert_contains C16-answered "$out" "Context 151.0k/1M (15%) · claude-fable-5"
+assert_absent   C16-no-floor "$out" "after /compact"
+
 # ═══ M — PostToolUse mcp-slim (result compressor) ═══════════════════════════
 # Gate (FND_MCP_SLIM) tested via the extracted plugin.json command + node shim;
 # hook behavior tested by invoking mcp-slim.cjs directly on PostToolUse-shaped input.
