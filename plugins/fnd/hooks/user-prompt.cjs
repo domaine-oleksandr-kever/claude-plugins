@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook: the ONE node process this event pays for. It runs both halves of the
-// prompt-time work — the context monitor (context-stats.cjs) and the large-JSON guard
-// (prompt-json-guard.cjs) — because wiring them as two plugin.json commands meant two node
-// startups (~18 ms each) on every prompt. Each half keeps its own switch (FND_CTX_MONITOR /
-// FND_PROMPT_JSON) with unchanged meaning, its own require and its own try/catch, so a half that
-// is off or that throws cannot touch the other. plugin.json still short-circuits: with BOTH
-// switches at 0 no node spawns at all.
+// UserPromptSubmit hook: the ONE node process this event pays for. It runs the three halves of
+// the prompt-time work — the context monitor (context-stats.cjs), the large-JSON guard
+// (prompt-json-guard.cjs) and the session title (session-title.cjs) — because wiring them as
+// separate plugin.json commands meant a node startup (~18 ms) each on every prompt. Each half
+// keeps its own switch (FND_CTX_MONITOR / FND_PROMPT_JSON / FND_SESSION_TITLE) with unchanged
+// meaning, its own require and its own try/catch, so a half that is off or that throws cannot
+// touch the others. plugin.json still short-circuits: with ALL THREE switches at 0 no node spawns
+// at all.
 //
 // Merged output contract — the event accepts exactly ONE JSON object on stdout:
 //   - the guard runs FIRST and, when it returns a block, that object IS the whole output. A block
-//     ERASES the prompt, so the monitor must not run at all: its notice would describe a prompt
-//     that never happened, and its band-state file would record an additionalContext the model
-//     never received, silencing the next prompt's real notice.
+//     ERASES the prompt, so the other halves must not run at all: the monitor's notice would
+//     describe a prompt that never happened, and its band-state file would record an
+//     additionalContext the model never received, silencing the next prompt's real notice; the
+//     title would spend its one shot on an erased prompt.
 //   - otherwise the monitor's object goes out exactly as it did when it owned the process
-//     (suppressOutput + systemMessage [+ hookSpecificOutput.additionalContext]), or nothing.
+//     (suppressOutput + systemMessage [+ hookSpecificOutput.additionalContext]), with the title
+//     merged INTO its hookSpecificOutput — or alone in one, when the monitor is silent — or
+//     nothing.
 // Exit is always 0: neither half signals through the exit code, and a hook failure must never
 // break a prompt.
 'use strict';
@@ -25,9 +29,9 @@ let hostTrace = { trace() {}, enabled() { return false; }, start() { return 0; }
 try { hostTrace = require('./host-trace.cjs'); } catch (_) {}
 
 // The decision the trace line reports, which is the merged contract read back out: a guard block is
-// `deny` (the prompt was erased), a monitor notice is `inject` (something reached the model), and a
-// silent run is `pass`. `skip` never applies — a half that is switched off leaves the OTHER half
-// speaking for the invocation, and the process still ran.
+// `deny` (the prompt was erased), an emitted object — a monitor notice, a title, or both — is
+// `inject` (something reached the host), and a silent run is `pass`. `skip` never applies — a half
+// that is switched off leaves the OTHERS speaking for the invocation, and the process still ran.
 function run(raw) {
   const input = JSON.parse(raw);
 
@@ -45,15 +49,31 @@ function run(raw) {
     }
   }
 
+  let out = null;
   if (process.env.FND_CTX_MONITOR !== '0') {
-    let notice = null;
     try {
-      notice = require('./context-stats.cjs').contextNotice(input);
+      out = require('./context-stats.cjs').contextNotice(input);
     } catch (_) {}
-    if (notice) {
-      console.log(JSON.stringify(notice));
-      return 'inject';
+  }
+
+  // The title half, merged INTO the monitor's object rather than printed beside it — the event
+  // accepts one object. Claude Code is the only host that reads a title, and this file also runs
+  // on Codex.
+  if (process.env.FND_SESSION_TITLE !== '0' && process.env.FND_HOST === 'claude') {
+    let title = null;
+    try {
+      title = require('./session-title.cjs').promptTitle(input);
+    } catch (_) {}
+    if (title) {
+      if (!out) out = {};
+      if (!out.hookSpecificOutput) out.hookSpecificOutput = { hookEventName: 'UserPromptSubmit' };
+      out.hookSpecificOutput.sessionTitle = title;
     }
+  }
+
+  if (out) {
+    console.log(JSON.stringify(out));
+    return 'inject';
   }
   return 'pass';
 }

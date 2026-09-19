@@ -86,11 +86,13 @@ UPDATE="$(section "$CHECKLIST" 'Plugin update check')"
 PINS="$(section "$CHECKLIST" 'Model pins')"
 JIRA="$(section "$CHECKLIST" 'Jira attachments')"
 FIGMA="$(section "$CHECKLIST" 'Figma access')"
+TASKS="$(section "$CHECKLIST" 'Task list tools')"
 
 if [ -n "$UPDATE" ]; then ok; else bad update-section "no '## Plugin update check' section in the checklist"; fi
 if [ -n "$PINS" ]; then ok; else bad pins-section "no '## Model pins' section in the checklist"; fi
 if [ -n "$JIRA" ]; then ok; else bad jira-section "no '## Jira attachments' section in the checklist"; fi
 if [ -n "$FIGMA" ]; then ok; else bad figma-section "no '## Figma access' section in the checklist"; fi
+if [ -n "$TASKS" ]; then ok; else bad tasks-section "no '## Task list tools' section in the checklist"; fi
 
 # ------------------------------------------------------------------- the update row --
 # One update command per host, quoted verbatim so the report can hand it over as-is.
@@ -215,6 +217,36 @@ case "$MCPS" in
 esac
 sec_has figma-mcp-row-defers "$MCPS" 'Figma access'
 
+# ------------------------------------------------------- the Task list tools row --
+# The row exists to say whether the workspace checklist can be MIRRORED where the developer can
+# watch it — so it names the tools, the switch that turns them on, the file that carries it and
+# the convention that owns the mirroring. It is advisory on every host, and the remedy is a
+# snippet handed over, never a setting the skill writes.
+sec_has tasks-tool "$TASKS" 'TaskCreate'
+sec_has tasks-switch "$TASKS" 'CLAUDE_CODE_ENABLE_TODO_TOOLS'
+sec_has tasks-probe "$TASKS" 'printenv CLAUDE_CODE_ENABLE_TODO_TOOLS'
+sec_has tasks-settings-file "$TASKS" '~/.claude/settings.json'
+sec_has tasks-desktop "$TASKS" "desktop app's Code tab"
+sec_has tasks-readme "$TASKS" 'Recommended Claude
+    Code settings'
+# The 🟢 rule may not rest on the env var: the switch is read on machines where the tools are
+# absent (an older CLI), and a row that called that a pass would send the developer away with a
+# green light and no task list. The version floor is the other half of that answer.
+sec_has tasks-evidence "$TASKS" 'exposed to THIS session'
+sec_has tasks-version-floor "$TASKS" '2.1.233'
+sec_has tasks-convention "$TASKS" 'references/task-workspace.md'
+sec_has tasks-advisory "$TASKS" 'never a blocker'
+sec_has tasks-off-by-default "$TASKS" 'off by default'
+# The other three hosts have no such tool, and saying so is the row — not a 🟡 for a capability
+# that host never had.
+sec_has tasks-other-hosts "$TASKS" 'not applicable on this host'
+# Never a 🔴: nothing in the workflows depends on a task list existing.
+if printf '%s\n' "$TASKS" | grep -q '🔴'; then
+  bad tasks-severity 'the task-list row hands out a 🔴 — the mirror is advisory, its absence changes nothing'
+else ok; fi
+# …and the skill must not answer a 🟡 by editing the developer's settings for them.
+sec_has tasks-no-self-edit "$TASKS" 'never a reason to change a setting on the developer'
+
 # Every plugin path the three rows point at exists in this checkout.
 for rel in agents-cursor agents-codex references/host-model-map.md scripts/gen-host-adapters.cjs \
            scripts/doctor.cjs .claude-plugin/plugin.json scripts/jira-attachments.sh \
@@ -225,7 +257,7 @@ done
 # ------------------------------------------------------- instructions vs allow-list --
 # Every shell command fenced in the two new sections has to be pre-approved in the skill's
 # frontmatter; the model-listing commands are deliberately NOT, and the prose says to ask first.
-fenced="$(printf '%s\n%s\n' "$UPDATE" "$PINS" | awk '
+fenced="$(printf '%s\n%s\n%s\n' "$UPDATE" "$PINS" "$TASKS" | awk '
   /^```/ { fence = !fence; next }
   fence && $0 ~ /[^ \t]/ { print }
 ')"
@@ -260,6 +292,7 @@ sec_has report-update "$REPORT" 'plugin update'
 sec_has report-jira "$REPORT" 'Jira attachments'
 sec_has report-figma "$REPORT" 'Figma access'
 sec_has report-pins "$REPORT" 'model pins'
+sec_has report-tasks "$REPORT" 'task list tools'
 # …and the four original groups still read as before — the additions are additive.
 for group in 'IDE/workspace' 'MCP servers' 'CLI tools' 'project skills & rules' 'local
 dev server'; do
@@ -305,7 +338,7 @@ check_original 'Local dev server' devserver \
   'npm run dev' 'npm run theme:shopify' 'in-browser validation'
 
 # The skill body names the new groups in its run order and pre-approves the one new command.
-has skill-order "$PREFLIGHT" 'local dev server → Jira attachments → Figma access → plugin update → model pins'
+has skill-order "$PREFLIGHT" 'local dev server → Jira attachments → Figma access → plugin update → task list tools → model pins'
 has skill-lsremote "$PREFLIGHT" 'Bash(git ls-remote*)'
 has skill-lsremote-bounded "$PREFLIGHT" 'Bash(timeout 8 git ls-remote*)'
 hasre skill-advisory "$PREFLIGHT" 'advisory'

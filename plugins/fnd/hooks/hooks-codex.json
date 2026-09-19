@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export FND_HOST=codex; r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] || node \"$r/hooks/user-prompt.cjs\" || true"
+            "command": "export FND_HOST=codex; r=\"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-}}\"; [ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] && [ \"${FND_SESSION_TITLE:-1}\" = \"0\" ] || node \"$r/hooks/user-prompt.cjs\" || true"
           }
         ]
       }

@@ -178,3 +178,39 @@ cause: `- [x] ELC-301 — 2026-07-11, fixed: self-reference skipped in bundle re
 - **Resuming a conversation:** `session` names the conversation that last wrote here —
   answer "where did we leave off?" from `progress.md` + `notes.md`; recovery mechanics
   (the host's resume command, transcript tail): `task-workspace-freshness.md` → Resuming.
+
+### Mirroring the checklist into the host's task list
+
+Some hosts offer a **task-list tool** the developer can watch while the work runs — on Claude
+Code `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`, shown in the CLI with **Ctrl+T** and
+surviving `/compact`. Where one exists, `progress.md` stays the source of truth and the tool is a
+**mirror** of it, so the developer sees what is done and what is left without reading the file.
+Codex, Cursor and OpenCode expose no such tool: there the rule is inert — nothing is created and
+nothing is said about it.
+
+- **When.** On first contact in this session with a ticket that has a `progress.md` — reading
+  the workspace, or writing the file for the first time. Not at session start, and never as a
+  reason to create a workspace that the work does not otherwise need.
+- **What.** One task per row, created for the rows that are still unchecked: `subject` = the row
+  text verbatim (`develop-feature-or-fix`, or the batch's `ELC-301 — <one-line>`), `activeForm` =
+  the same step in present-continuous form (`Developing the feature or fix`). Rows already checked
+  off are not back-filled — the file carries their history, and a list that opens full of
+  completed items hides the two rows that matter.
+- **How it tracks.** `TaskUpdate` to `in_progress` when that step starts, to `completed` in the
+  same turn the row is checked off in `progress.md` — including a step done **ad hoc**, without
+  its skill: the row is checked off and its task is completed either way. A skill **re-run**
+  updates the existing row in place, so its task goes back to `in_progress` and then `completed`
+  again rather than becoming a second task. A step that turns out not to apply is `deleted`, not
+  left hanging.
+- **Batches.** The rows are the tickets plus the shared tail, so the mirror is one task per
+  ticket plus one per tail step — the same list the file holds, never one list per ticket.
+- **Without the tools.** Nothing changes: `progress.md` is still written and still offered from.
+  Do not announce the absence, and never make a skill's completion depend on a task existing.
+
+**Prerequisite on Claude Code.** The task-list tools are **off by default** on current models
+(Opus 5, Sonnet 5, Fable) and are switched on per user with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` in
+the `"env"` block of `~/.claude/settings.json` — the file the CLI and the desktop app's Code tab
+both read (`CLAUDE_CODE_TASK_LIST_ID=<name>` additionally carries one list across sessions). The
+copy-paste settings example lives in the plugin's README → "Recommended Claude Code settings";
+the `preflight-checks` skill reports the switch as an advisory row. A session where the tools are
+absent is the "without the tools" case above — it is never an error to report.

@@ -194,6 +194,35 @@ Rules that keep this row honest and cheap:
 - An available update is also context for every other finding: stale plugin content explains itself,
   so update first before filing anything against the plugin.
 
+## Task list tools
+
+Whether this session can mirror the task workspace's `progress.md` into a host task list the
+developer can watch while the work runs (`references/task-workspace.md` → Progress tracking).
+**Advisory — never a blocker**, and never a reason to change a setting on the developer's behalf.
+
+- **Claude Code.** 🟢 only when `TaskCreate` is among the tools exposed to THIS session — the
+  switch being set is not the same thing, and reporting 🟢 off the environment alone is exactly
+  the false pass a developer on an older CLI would get. The env read is context for the remedy,
+  not evidence of the tools — one pre-approved read:
+
+```bash
+printenv CLAUDE_CODE_ENABLE_TODO_TOOLS
+```
+
+  🟡 otherwise, with the remedy the reading picks:
+  - **empty** → add `"CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"` to the `"env"` block of
+    `~/.claude/settings.json` (the file the CLI and the desktop app's Code tab both read) and
+    restart the session — the copy-paste example is the plugin README's "Recommended Claude
+    Code settings" section.
+  - **already `1`, tools still absent** → the switch needs **Claude Code 2.1.233 or newer**
+    (`claude --version` says which this is); below that floor it is read and nothing is exposed,
+    so the remedy is updating the CLI, not editing settings again.
+
+  The tools are **off by default** on Opus 5 / Sonnet 5 / Fable, so a 🟡 here is the ordinary
+  state of a machine nobody has configured, not a fault.
+- **Codex CLI, Cursor, OpenCode** — 🟢 `not applicable on this host`: none of them expose a
+  task-list tool, and the workflows never depend on one.
+
 ## Model pins
 
 **Claude Code and OpenCode pin no versioned model ids** (aliases that do not churn; nothing at all,
@@ -223,7 +252,7 @@ as a workaround — the fix belongs in the generator's tier table.
 ## Report format
 
 Summary table grouped by **IDE/workspace · MCP servers · CLI tools · project skills & rules · local
-dev server · Jira attachments · Figma access · plugin update · model pins**, status per row as **🟢 Pass / 🔴 Fail / 🟡 Warning**
+dev server · Jira attachments · Figma access · plugin update · task list tools · model pins**, status per row as **🟢 Pass / 🔴 Fail / 🟡 Warning**
 (exact values), with version or connection detail. List blockers + remediation separately — the
-plugin-update and model-pin rows are advisory and never enter the blocker list, with one exception:
+plugin-update, task-list and model-pin rows are advisory and never enter the blocker list, with one exception:
 a 🔴 structural model-pin finding is a plugin defect worth naming there.

@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "export FND_HOST=claude; [ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.cjs\" || true"
+            "command": "export FND_HOST=claude; [ \"${FND_CTX_MONITOR:-1}\" = \"0\" ] && [ \"${FND_PROMPT_JSON:-1}\" = \"0\" ] && [ \"${FND_SESSION_TITLE:-1}\" = \"0\" ] || node \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt.cjs\" || true"
           }
         ]
       }

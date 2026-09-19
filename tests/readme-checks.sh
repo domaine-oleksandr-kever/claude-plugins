@@ -386,6 +386,79 @@ for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
   esac
 done
 
+# ------------------------------------- the copy-paste settings section + the title switch --
+# The progress checklist needs a HOST switch the plugin cannot set, so the README has to carry
+# the file to edit, the key to paste and what it buys — a switch documented only as prose is a
+# feature nobody turns on. The section is pinned by its heading (the anchor two other places
+# link to), by the file paths, by every key of the example, and by the caveats that keep the
+# claims honest.
+has "$README" '### Recommended Claude Code settings (copy-paste)' settings-section
+has "$README" '~/.claude/settings.json' settings-user-file
+has "$README" '<repo>/.claude/settings.local.json' settings-project-file
+has "$README" '"CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"' settings-todo-key
+has "$README" '"MAX_MCP_OUTPUT_TOKENS": "50000"' settings-mcp-key
+has "$README" 'desktop app' settings-desktop-scope
+has "$README" 'Ctrl+T' settings-ctrl-t
+has "$README" 'survives `/compact`' settings-survives-compact
+# The switch needs a CLI new enough to have it; without the floor a developer pastes the key,
+# sees no tools and has nothing to check.
+has "$README" '2.1.233' settings-version-floor
+# The two links into it — from the Hooks section and from the Environment-switches intro —
+# use the heading's own anchor, which the link family below resolves.
+if [ "$(grep -cF '(#recommended-claude-code-settings-copy-paste)' "$README")" -ge 2 ]; then ok
+else bad settings-linked "the settings section is linked from fewer than two places"; fi
+# The example's env values are STRINGS — a number there is silently ignored by the host.
+if awk '/^### Recommended Claude Code settings/ { on = 1 } on && /^## / { exit }
+        on && /"(CLAUDE_CODE_ENABLE_TODO_TOOLS|MAX_MCP_OUTPUT_TOKENS|FND_MCP_SLIM_DEBUG)": [^"]/ { hit = 1 }
+        END { exit !hit }' "$README"; then
+  bad settings-string-values 'an "env" value in the example is not quoted as a string'
+else ok; fi
+
+# The session-title switch: its own row (the sweep above proves a row EXISTS for every switch the
+# bundle reads; these pin what that row has to say), and the host-divergence note that keeps a
+# Codex/Cursor reader from expecting a renamed session.
+case "$ENV_ROWS" in
+  *'| `FND_SESSION_TITLE` | `1` |'*) ok ;;
+  *) bad env-session-title-row 'no "| `FND_SESSION_TITLE` | `1` |" row in the Environment switches table' ;;
+esac
+SESSION_TITLE_ROW="$(printf '%s\n' "$ENV_ROWS" | grep -F '| `FND_SESSION_TITLE` |' || true)"
+# `UTF-8` and `SHA-256` match a Jira key's shape, and the prompt half deliberately ignores a key
+# nothing corroborates — a row that promised to title on any key would be describing a hook that
+# renames sessions after encodings. The env-file layer and the settled-name rule are the other two
+# claims a reader acts on, so they are pinned here too.
+for claim in 'Claude Code only' 'one shot per session' 'session-start.sh' 'session-title.cjs' \
+             'CORROBORATE' 'UTF-8' '~/.config/domaine/env' 'left alone by BOTH halves'; do
+  case "$SESSION_TITLE_ROW" in
+    *"$claim"*) ok ;;
+    *) bad env-session-title-claim "the FND_SESSION_TITLE row does not state: $claim" ;;
+  esac
+done
+# The three-switch short-circuit: the two rows that used to promise "both at 0 and no node runs"
+# describe the SAME command, so a stale one of them is a developer paying a node spawn per prompt
+# for a half they thought they had turned off.
+for row in FND_CTX_MONITOR FND_PROMPT_JSON; do
+  r="$(printf '%s\n' "$ENV_ROWS" | grep -F "| \`$row\` |" || true)"
+  case "$r" in
+    *'FND_SESSION_TITLE'*) ok ;;
+    *) bad "env-$row-third-half" "the $row row does not mention the third UserPromptSubmit half" ;;
+  esac
+  case "$r" in
+    *'with both at `0` no node process runs at all'*|*'unless `FND_PROMPT_JSON=0` too (both halves'*)
+      bad "env-$row-stale" "the $row row still describes the two-switch short-circuit" ;;
+    *) ok ;;
+  esac
+done
+
+# CLAUDE_CODE_ENABLE_TODO_TOOLS is the HOST's switch — documented as read-only, never as an
+# fnd knob, and deliberately absent from domaine-env's registry.
+case "$ENV_ROWS" in
+  *'| `CLAUDE_CODE_ENABLE_TODO_TOOLS` |'*) ok ;;
+  *) bad env-todo-tools-row 'no CLAUDE_CODE_ENABLE_TODO_TOOLS row in the Environment switches table' ;;
+esac
+if grep -qF "'CLAUDE_CODE_ENABLE_TODO_TOOLS'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs"; then
+  bad env-todo-tools-registry 'CLAUDE_CODE_ENABLE_TODO_TOOLS is in domaine-env.cjs KNOWN — that is the host switch, not an fnd one'
+else ok; fi
+
 # ------------------------------------------------- the Figma source ladder (the REST rung) --
 # `figma-reader` picks its own source — connector MCP → the local Dev Mode bridge → the REST API
 # with `FIGMA_TOKEN` — so a README that still reads "via a Figma MCP" sends a developer with a

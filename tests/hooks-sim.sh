@@ -500,14 +500,150 @@ budget_lt() { # <label> <ceiling-chars> <text>
   if [ "$_bl" -lt "$2" ]; then ok
   else bad "$1" "delivers $_bl chars — over the host's 10,000-char SessionStart cap"; fi
 }
+ss_title() { # <raw stdout> — the sessionTitle field, empty when the envelope carries none
+  printf '%s' "$1" | node -e 'let s="";process.stdin.on("data",d=>{s+=d}).on("end",()=>{let v="";try{v=JSON.parse(s).hookSpecificOutput.sessionTitle||""}catch(e){}process.stdout.write(v)})' 2>/dev/null
+}
 SS_MAX="$TMP/ss-max"; mkdir -p "$SS_MAX/snippets"
 : > "$SS_MAX/snippets/@card.liquid"; : > "$SS_MAX/shopify.theme.toml"; : > "$SS_MAX/.env"
-raw="$(cd "$SS_MAX" && env CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_CMD" 2>/dev/null)"
+# The envelope carries the session TITLE as well, so the worst case is also a ticket BRANCH with
+# a workspace to read the summary from: a fixture with no key composes no title and would guard a
+# budget no real session delivers. The summary is Cyrillic and longer than the clamp allows —
+# the title is bounded in BYTES, and two bytes per character is the expensive spelling.
+( cd "$SS_MAX" && git init -q . && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init \
+    && git checkout -q -b feature/ELC-1309-mini-cart-samples ) >/dev/null 2>&1
+mkdir -p "$SS_MAX/.claude/tasks/ELC-1309"
+{ printf '# ELC-1309 — '
+  i=0; while [ $i -lt 10 ]; do printf 'Некорректное поведение панели сэмплов '; i=$((i + 1)); done
+  printf '\n'; } > "$SS_MAX/.claude/tasks/ELC-1309/ticket.md"
+raw="$(printf '%s' '{"session_id":"s25","source":"startup"}' \
+  | (cd "$SS_MAX" && env CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_CMD" 2>/dev/null))"
 ss_max_ctx="$(ss_ctx "$raw")"
+ss_max_title="$(ss_title "$raw")"
 assert_contains S25-max-profile "$ss_max_ctx" "fnd project profile: foundation"
 assert_contains S25-max-store   "$ss_max_ctx" "live store access"
+# …and the title really is in there, clamped — otherwise this is the old measurement under a new name.
+case "$ss_max_title" in 'ELC-1309 — Некорректное'*) ok ;; *) bad S25-max-title "the worst case composes no title: '$ss_max_title'" ;; esac
+ss_max_title_bytes=$(printf '%s' "$ss_max_title" | wc -c | tr -d ' ')
+if [ "$ss_max_title_bytes" -le 100 ]; then ok
+else bad S25-title-clamp "the title is $ss_max_title_bytes bytes — the 100-byte clamp did not hold"; fi
 budget_lt S25-envelope-budget 10000 "$raw"
 budget_lt S25-context-budget  10000 "$ss_max_ctx"
+
+# S26: the session title, SessionStart half. The branch names the work, so a checkout on a
+# ticket branch opens a session already called after the ticket instead of after the first
+# thing the developer typed. It rides in the SAME envelope object as the context — the event
+# takes one JSON document — so the title must never cost a session its conventions.
+run_ss() { # <cwd> <stdin-json> [VAR=val…] — the Claude wiring command, stdin as the host sends it
+  printf '%s' "$2" | (cd "$1" && env CLAUDE_PLUGIN_ROOT="$realroot" "${@:3}" bash -c "$SS_CMD" 2>/dev/null)
+}
+# A throwaway repo, because the branch is the input under test — never this checkout's own.
+SS_GIT="$TMP/ss-git"; mkdir -p "$SS_GIT"
+( cd "$SS_GIT" && git init -q . && git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init \
+    && git checkout -q -b feature/ELC-1309-mini-cart-samples ) >/dev/null 2>&1
+if [ -d "$SS_GIT/.git" ]; then ok; else bad S26-scaffold "could not build the throwaway git repo"; fi
+
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26","source":"startup"}')"
+assert_eq       S26-key-only     "$(ss_title "$raw")" "ELC-1309"
+assert_contains S26-ctx-intact   "$(ss_ctx "$raw")"   "oversized MCP results"
+assert_eq       S26-one-doc      "$(printf '%s\n' "$raw" | wc -l | tr -d ' ')" "1"
+case "$raw" in '{'*'}') ok ;; *) bad S26-delimiters "stdout is not a bare JSON object" ;; esac
+
+# With the workspace's ticket.md in place the title carries the summary — the same line
+# `jira-reader` writes as that file's H1.
+mkdir -p "$SS_GIT/.claude/tasks/ELC-1309"
+cat > "$SS_GIT/.claude/tasks/ELC-1309/ticket.md" <<'TICKET'
+---
+ticket: ELC-1309
+provenance: untrusted
+---
+
+# ELC-1309 — OOS samples break the sample panel on mini cart
+
+## Status
+TICKET
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26b","source":"startup"}')"
+assert_eq S26-with-summary "$(ss_title "$raw")" "ELC-1309 — OOS samples break the sample panel on mini cart"
+
+# A session the developer already named keeps that name: the input says so, and a hook that
+# overwrote it would undo a deliberate `--name` / `/rename` on every resume.
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26c","source":"resume","session_title":"my own name"}')"
+assert_eq       S26-user-named    "$(ss_title "$raw")" ""
+assert_contains S26-user-named-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+
+# The switch, the other hosts, and a branch that names no ticket — all silent, all still
+# carrying the whole session context.
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26d","source":"startup"}' FND_SESSION_TITLE=0)"
+assert_eq       S26-switch-off     "$(ss_title "$raw")" ""
+assert_contains S26-switch-off-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+
+out="$(printf '%s' '{"session_id":"s26e","source":"startup"}' | (cd "$SS_GIT" && env FND_HOST=codex \
+  CLAUDE_PLUGIN_ROOT="$realroot" bash "$realroot/hooks/session-start.sh" 2>/dev/null))"
+assert_absent   S26-codex-no-envelope "$out" "hookSpecificOutput"
+assert_absent   S26-codex-no-title    "$out" "ELC-1309"
+assert_contains S26-codex-ctx         "$out" "oversized MCP results"
+
+( cd "$SS_GIT" && git checkout -q -b chore/tidy-up ) >/dev/null 2>&1
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26f","source":"startup"}')"
+assert_eq       S26-no-key     "$(ss_title "$raw")" ""
+assert_contains S26-no-key-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+
+# Outside a repo there is no branch to read, and `git` failing is an ordinary state — never a
+# session that lost its conventions over a title it could not compose.
+raw="$(run_ss "$SS_PLAIN" '{"session_id":"s26g","source":"startup"}')"
+assert_eq       S26-no-repo     "$(ss_title "$raw")" ""
+assert_contains S26-no-repo-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+
+# Empty stdin — a by-hand run, a host that sends nothing — must not stall or break the envelope.
+raw="$(printf '' | (cd "$SS_GIT" && env CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_CMD" 2>/dev/null))"
+assert_contains S26-empty-stdin-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+case "$raw" in '{'*'}') ok ;; *) bad S26-empty-stdin-doc "stdout is not a bare JSON object" ;; esac
+
+# The switch is read the way the node halves read it — process env, then the GLOBAL Domaine env
+# file. A gate that only looked at the process env would keep renaming sessions for a developer
+# who switched the feature off with `domaine-env set FND_SESSION_TITLE=0`.
+( cd "$SS_GIT" && git checkout -q feature/ELC-1309-mini-cart-samples ) >/dev/null 2>&1
+SS_CFG="$TMP/ss-cfg"; mkdir -p "$SS_CFG/domaine"
+printf 'FND_SESSION_TITLE=0\n' > "$SS_CFG/domaine/env"
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26h","source":"startup"}' XDG_CONFIG_HOME="$SS_CFG")"
+assert_eq       S26-envfile-off     "$(ss_title "$raw")" ""
+assert_contains S26-envfile-off-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+# …and the prompt half, which reads the same file through scripts/env-file.cjs, agrees
+out="$(printf '{"session_id":"s26h2","cwd":"%s","prompt":"look at ELC-1309"}' "$SS_GIT" \
+  | env TMPDIR="$TMP/ss-marker" XDG_CONFIG_HOME="$SS_CFG" FND_HOST=claude node "$ROOT/plugins/fnd/hooks/user-prompt.cjs" 2>/dev/null)"
+assert_eq S26-envfile-off-prompt "$(ss_title "$out")" ""
+# A COMMENTED line is not a setting: the sed that reads the file must not match one.
+printf '# FND_SESSION_TITLE=0\n' > "$SS_CFG/domaine/env"
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26i","source":"startup"}' XDG_CONFIG_HOME="$SS_CFG")"
+assert_eq S26-envfile-comment "$(ss_title "$raw")" "ELC-1309 — OOS samples break the sample panel on mini cart"
+
+# The name this half settles is settled for the SESSION: it spends the one shot, so the prompt
+# half — which cannot see a session's name, its input carries none — has nothing left to
+# overwrite it with. Both settling outcomes are covered: a title of our own, and a session the
+# developer named.
+SSM="$TMP/ss-marker"; mkdir -p "$SSM"
+up_after_ss() { # <session-id> <prompt> — the prompt half of the SAME session, same temp dir
+  printf '{"session_id":"%s","cwd":"%s","prompt":"%s"}' "$1" "$SS_GIT" "$2" \
+    | env TMPDIR="$SSM" FND_HOST=claude node "$ROOT/plugins/fnd/hooks/user-prompt.cjs" 2>/dev/null
+}
+rm -f "$SSM"/fnd-ses-title-*
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26j","source":"startup"}' TMPDIR="$SSM")"
+assert_eq S26-branch-titled  "$(ss_title "$raw")" "ELC-1309 — OOS samples break the sample panel on mini cart"
+assert_eq S26-branch-one-shot "$(ss_title "$(up_after_ss s26j "now also ELC-206 please")")" ""
+
+raw="$(run_ss "$SS_GIT" '{"session_id":"s26k","source":"resume","session_title":"release prep"}' TMPDIR="$SSM")"
+assert_eq S26-named-no-title "$(ss_title "$raw")" ""
+assert_eq S26-named-one-shot "$(ss_title "$(up_after_ss s26k "look at ELC-658")")" ""
+# The control: a session this half never settled is still the prompt half's to name.
+assert_eq S26-unsettled-titles "$(ss_title "$(up_after_ss s26l "look at ELC-658")")" "ELC-658"
+
+# S27: the title is composed by the same node call as the envelope, so a host without node
+# degrades exactly as S24 says — plain text, no title, every convention still delivered.
+out="$(printf '%s' '{"session_id":"s27","source":"startup"}' | (cd "$SS_GIT" && env PATH="$SS_NONODE:$PATH" \
+  FND_HOST=claude CLAUDE_PLUGIN_ROOT="$realroot" bash "$realroot/hooks/session-start.sh" 2>"$TMP/ss-t-nonode.err"))"; ec=$?
+assert_eq       S27-nonode-exit   "$ec" 0
+assert_eq       S27-nonode-stderr "$(cat "$TMP/ss-t-nonode.err")" ""
+assert_absent   S27-nonode-title  "$out" "sessionTitle"
+assert_contains S27-nonode-ctx    "$out" "oversized MCP results"
 
 # ═══ G — UserPromptSubmit FND_CTX_MONITOR gate ══════════════════════════════
 UPS_CMD="$(jq -r '.hooks.UserPromptSubmit[0].hooks[0].command' "$MANIFEST")"
@@ -525,8 +661,8 @@ run_gate() { # [VAR=val…] — extra env for the gate command
     bash -c "$UPS_CMD" >/dev/null 2>&1
 }
 
-# One command runs both prompt hooks, so a single switch at 0 still spawns node for the
-# other half — only BOTH at 0 short-circuits the process away.
+# One command runs all three prompt halves, so a single switch at 0 still spawns node for the
+# others — only ALL of them at 0 short-circuits the process away.
 run_gate FND_CTX_MONITOR=0; ec=$?
 assert_eq G1-ctx-off-exit "$ec" 0
 if [ -s "$TMP/node.log" ]; then ok; else bad G1-ctx-off "node did not run with only the monitor off"; fi
@@ -534,9 +670,18 @@ if [ -s "$TMP/node.log" ]; then ok; else bad G1-ctx-off "node did not run with o
 run_gate FND_PROMPT_JSON=0
 if [ -s "$TMP/node.log" ]; then ok; else bad G1b-json-off "node did not run with only the guard off"; fi
 
+run_gate FND_SESSION_TITLE=0
+if [ -s "$TMP/node.log" ]; then ok; else bad G1b2-title-off "node did not run with only the title off"; fi
+
+# The title half joined the gate, so the two-switch form no longer short-circuits: a developer
+# who silenced the monitor and the guard still gets their session named.
 run_gate FND_CTX_MONITOR=0 FND_PROMPT_JSON=0; ec=$?
-assert_eq G1c-both-off-exit "$ec" 0
-if [ -s "$TMP/node.log" ]; then bad G1c-both-off "node ran with both switches off"; else ok; fi
+assert_eq G1c-two-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then ok; else bad G1c-two-off "node did not run with the title half still on"; fi
+
+run_gate FND_CTX_MONITOR=0 FND_PROMPT_JSON=0 FND_SESSION_TITLE=0; ec=$?
+assert_eq G1d-all-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad G1d-all-off "node ran with all three switches off"; else ok; fi
 
 run_gate; ec=$?
 assert_eq G2-default-exit "$ec" 0
@@ -3008,6 +3153,128 @@ assert_eq U7b-quiet-out  "$out" ""
 out="$(printf 'not json' | env TMPDIR="$UPD" node "$MERGED" 2>/dev/null)"; ec=$?
 assert_eq U8-malformed-out  "$out" ""
 assert_eq U8-malformed-exit "$ec" 0
+
+# U9–U16: the title half. It runs LAST and merges into whatever the monitor said, because the
+# event takes one JSON object — and it fires once per session, so a developer who pastes the
+# same ticket twice is not renamed twice, and a session whose opening prompts held no key is
+# still named by the first that does.
+up_prompt() { # session-id prompt cwd — one event carrying a chosen prompt
+  node -e '
+    const [t,sid,prompt,cwd]=process.argv.slice(1);
+    process.stdout.write(JSON.stringify({transcript_path:t,session_id:sid,effort:{level:"high"},cwd,prompt}));
+  ' "$TMP/t0.jsonl" "$1" "$2" "$3"
+}
+up_title() { # <stdout> — the sessionTitle field, empty when none
+  printf '%s' "$1" | node -e 'let s="";process.stdin.on("data",d=>{s+=d}).on("end",()=>{let v="";try{v=JSON.parse(s).hookSpecificOutput.sessionTitle||""}catch(e){}process.stdout.write(v)})' 2>/dev/null
+}
+marker_files() { ls "$UPD" 2>/dev/null | grep -c '^fnd-ses-title-'; }
+
+UPT="$TMP/up-ticket"; mkdir -p "$UPT/.claude/tasks/ELC-658"
+cat > "$UPT/.claude/tasks/ELC-658/ticket.md" <<'TICKET'
+---
+ticket: ELC-658
+---
+
+# ELC-658: FHR Recommendations Block does not allow campaign configuration
+TICKET
+
+# U9: the monitor speaks and the title rides INSIDE its object — one document, both fields,
+# the notice unchanged.
+rm -f "$UPD"/fnd-ses-title-* "$UPD"/fnd-ctx-band-*
+out="$(run_up "$(up_prompt "u9-$$" "please look at ELC-658 today" "$UPT")" FND_CTX_WARN=10 FND_HOST=claude)"
+assert_eq       U9-exit-title     "$(up_title "$out")" "ELC-658 — FHR Recommendations Block does not allow campaign configuration"
+assert_contains U9-systemmessage  "$out" "systemMessage"
+assert_contains U9-additionalctx  "$out" "additionalContext"
+assert_eq       U9-one-doc        "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1"
+assert_eq       U9-marker-written "$(marker_files)" 1
+
+# U10: the monitor switched off → the title is the WHOLE object, and it still names the event.
+# The checkout has an `ELC-*` workspace, which is what makes a bare `ELC-…` a ticket here.
+rm -f "$UPD"/fnd-ses-title-* "$UPD"/fnd-ctx-band-*
+out="$(run_up "$(up_prompt "u10-$$" "start on ELC-1309 please" "$UPT")" FND_HOST=claude FND_CTX_MONITOR=0)"
+assert_eq       U10-title  "$(up_title "$out")" "ELC-1309"
+assert_contains U10-event  "$out" '"hookEventName":"UserPromptSubmit"'
+assert_absent   U10-no-sys "$out" "systemMessage"
+
+# U11: the SAME session titles once. The second prompt carries a different key and changes
+# nothing — a re-run of the first would otherwise re-title on every replay.
+out="$(run_up "$(up_prompt "u10-$$" "and now ELC-999 as well" "$UPT")" FND_HOST=claude)"
+assert_eq U11-second-prompt "$(up_title "$out")" ""
+assert_eq U11-one-marker    "$(marker_files)" 1
+
+# U12: a browse URL corroborates a key on its own — this cwd has no workspace at all, so the URL
+# is the only thing saying `ELC-1215` is a ticket, and the bare `ELC-77` beside it says nothing.
+rm -f "$UPD"/fnd-ses-title-*
+out="$(run_up "$(up_prompt "u12-$$" "https://meetdomaine.atlassian.net/browse/ELC-1215 then ELC-77" "$UPCWD")" FND_HOST=claude)"
+assert_eq U12-browse-url "$(up_title "$out")" "ELC-1215"
+
+# U13: a blocked prompt is ERASED, so it may not spend the session's one shot — no title, no
+# marker, and the next prompt that carries a key still gets to name the session.
+rm -f "$UPD"/fnd-ses-title-* "$UPD"/fnd-ctx-band-*
+blob="$(up_in "u13-$$" 1)"
+blob="$(printf '%s' "$blob" | node -e 'let s="";process.stdin.on("data",d=>{s+=d}).on("end",()=>{const o=JSON.parse(s);o.prompt="ELC-500 "+o.prompt;process.stdout.write(JSON.stringify(o))})')"
+out="$(run_up "$blob" FND_CTX_WARN=10 FND_HOST=claude)"
+assert_contains U13-block      "$out" '"decision":"block"'
+assert_absent   U13-no-title   "$out" "sessionTitle"
+assert_eq       U13-no-marker  "$(marker_files)" 0
+out="$(run_up "$(up_prompt "u13-$$" "ok, ELC-500 again" "$UPT")" FND_HOST=claude)"
+assert_eq       U13-later-titles "$(up_title "$out")" "ELC-500"
+
+# U14: the switch, and the hosts that do not read a title at all — this file runs on Codex too
+rm -f "$UPD"/fnd-ses-title-*
+out="$(run_up "$(up_prompt "u14-$$" "ELC-658 please" "$UPT")" FND_HOST=claude FND_SESSION_TITLE=0)"
+assert_eq U14-switch-off     "$(up_title "$out")" ""
+assert_eq U14-switch-marker  "$(marker_files)" 0
+out="$(run_up "$(up_prompt "u14b-$$" "ELC-658 please" "$UPT")" FND_HOST=codex)"
+assert_eq U14-codex-silent   "$(up_title "$out")" ""
+assert_eq U14-codex-marker   "$(marker_files)" 0
+out="$(run_up "$(up_prompt "u14c-$$" "nothing ticket-shaped here" "$UPCWD")" FND_HOST=claude FND_CTX_MONITOR=0)"
+assert_eq U14-no-key         "$out" ""
+assert_eq U14-no-key-marker  "$(marker_files)" 0
+
+# U15: a throwing title half leaves the other two exactly as they were — the monitor's object
+# goes out whole, and the guard still blocks.
+cat > "$TMP/up-throw-title.cjs" <<JS
+require('$ROOT/plugins/fnd/hooks/session-title.cjs').promptTitle = () => { throw new Error('boom'); };
+JS
+rm -f "$UPD"/fnd-ctx-band-*
+out="$(run_up_probe "$TMP/up-throw-title.cjs" "$(up_prompt "u15-$$" "ELC-658 please" "$UPT")" FND_CTX_WARN=10 FND_HOST=claude)"; ec=$?
+assert_eq       U15-exit        "$ec" 0
+assert_absent   U15-no-title    "$out" "sessionTitle"
+assert_contains U15-monitor-ran "$out" "systemMessage"
+out="$(run_up_probe "$TMP/up-throw-title.cjs" "$blob" FND_CTX_WARN=10 FND_HOST=claude)"
+assert_contains U15-guard-still-blocks "$out" '"decision":"block"'
+
+# U16: the trace line reads the merged contract back out — a run that emitted only a title is
+# still `inject`, since something reached the host.
+rm -f "$UPD"/fnd-ses-title-*
+UPTRACE="$TMP/up-trace"; mkdir -p "$UPTRACE"
+out="$(run_up "$(up_prompt "u16-$$" "ELC-1309 next" "$UPT")" FND_HOST=claude FND_HOST_TRACE=1 FND_MCP_SLIM_DIR="$UPTRACE")"
+assert_eq       U16-title        "$(up_title "$out")" "ELC-1309"
+assert_contains U16-trace-decision "$(cat "$UPTRACE/fnd-host-trace.log" 2>/dev/null)" '"decision":"inject"'
+assert_contains U16-trace-hook     "$(cat "$UPTRACE/fnd-host-trace.log" 2>/dev/null)" '"hook":"user-prompt"'
+
+# U17: a key SHAPE is not a ticket. `UTF-8`, `SHA-256` and `ISO-8601` all match the pattern, and
+# a session titled `UTF-8` would ALSO spend the one shot the real ticket needs — so a key counts
+# only once something corroborates it: a workspace for that project, or a Jira browse URL.
+rm -f "$UPD"/fnd-ses-title-*
+n=0
+for junk in "first, re-save the locales as UTF-8" "switch the hash to SHA-256" "use ISO-8601 dates"; do
+  n=$((n + 1))
+  out="$(run_up "$(up_prompt "u17-$n-$$" "$junk" "$UPT")" FND_HOST=claude FND_CTX_MONITOR=0)"
+  assert_eq "U17-shape-only-$n" "$out" ""
+done
+assert_eq U17-no-marker "$(marker_files)" 0
+# The same prompt going on to name the ticket is titled by the TICKET, not by the token it opened
+# with — every match is walked, not just the first.
+out="$(run_up "$(up_prompt "u17d-$$" "re-save the locales as UTF-8, then start ELC-658" "$UPT")" FND_HOST=claude FND_CTX_MONITOR=0)"
+assert_eq U17-ticket-wins "$(up_title "$out")" "ELC-658 — FHR Recommendations Block does not allow campaign configuration"
+# A project this checkout has never worked is not corroborated either — until the URL says so.
+rm -f "$UPD"/fnd-ses-title-*
+out="$(run_up "$(up_prompt "u17e-$$" "look at ZZZ-9 for me" "$UPT")" FND_HOST=claude FND_CTX_MONITOR=0)"
+assert_eq U17-unknown-project "$out" ""
+out="$(run_up "$(up_prompt "u17f-$$" "look at https://meetdomaine.atlassian.net/browse/ZZZ-9" "$UPT")" FND_HOST=claude FND_CTX_MONITOR=0)"
+assert_eq U17-unknown-via-url "$(up_title "$out")" "ZZZ-9"
 
 # ═══ T — SubagentStart subagent-conventions (convention injection) ══════════
 # Reuses $fake (CLAUDE_PLUGIN_ROOT with hooks/comment-discipline.md + lean-code.md +

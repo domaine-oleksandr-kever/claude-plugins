@@ -427,6 +427,58 @@ layers, so keep plugin rules generic-Foundation and let projects own their delta
 /plugin marketplace remove domaine    # remove the marketplace
 ```
 
+### Recommended Claude Code settings (copy-paste)
+
+Two files, two scopes — both plain JSON, and every value inside `"env"` is a **string**:
+
+- **`~/.claude/settings.json`** — yours, all projects. The CLI and the desktop app's **Code tab**
+  read the same files, so one edit covers both.
+- **`<repo>/.claude/settings.local.json`** — this project only, and gitignored by convention:
+  the right home for anything that names a path inside the repo.
+
+Paste this into the user file (merge the `"env"` block if you already have one) — or just ask
+Claude Code to add these keys to `~/.claude/settings.json`; it can edit its own settings:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "MAX_MCP_OUTPUT_TOKENS": "50000",
+    "FND_MCP_SLIM_DEBUG": "1"
+  }
+}
+```
+
+- `CLAUDE_CODE_ENABLE_TODO_TOOLS` — **required for the progress checklist**, and it needs
+  **Claude Code 2.1.233 or newer** (`claude --version`; on an older CLI the key is read and
+  nothing appears). The task-list tools (`TaskCreate` / `TaskUpdate`) are **off by default** on
+  Opus 5, Sonnet 5 and Fable, and the session convention mirrors the task workspace's
+  `progress.md` into them only when they exist.
+  With it on, **Ctrl+T** shows the list in the CLI and the list survives `/compact`
+  (`CLAUDE_CODE_TASK_LIST_ID=<name>` also carries one list across sessions). Verified on the CLI;
+  in the desktop app's Code tab and in Cowork the tools are expected to work the same way, but
+  that is unverified.
+- `MAX_MCP_OUTPUT_TOKENS` — **optional, and your call.** The platform default is 25000 tokens;
+  above it Claude Code spills the result to a file instead of handing it over, so the fnd
+  compressor never sees it. Raising it sends bigger results through `mcp-slim` first — safe with
+  the spill-and-stub guard in place, but still a decision best made after a week of
+  `json-slim --report` data.
+- `FND_MCP_SLIM_DEBUG` — **optional diagnostics** (one JSONL line per compression). Pair it with
+  `FND_MCP_SLIM_DIR`, which names a directory — that pair belongs in the project file,
+  `<repo>/.claude/settings.local.json`, rather than here:
+
+```json
+{
+  "env": {
+    "FND_MCP_SLIM_DEBUG": "1",
+    "FND_MCP_SLIM_DIR": "/absolute/path/to/repo/.claude/fnd-tmp"
+  }
+}
+```
+
+Every `FND_*` switch also works from the Domaine env files — see
+[Environment switches](#environment-switches), which is the single home for what each one means.
+
 ## Updating
 
 No host silently updates on push, and there is **no proactive "new version available"
@@ -1028,12 +1080,15 @@ contract: `plugins/fnd/references/jira-attachments.md`.
 ## Hooks
 
 The plugin wires five hook events (`plugin.json` → `hooks`); every hook fails open — a
-hook error never blocks work:
+hook error never blocks work. One of them (the progress checklist) needs a host switch the
+plugin cannot set for you: [Recommended Claude Code settings](#recommended-claude-code-settings-copy-paste).
 
 - **SessionStart** — `hooks/session-start.sh`, the one script both shell wirings
   (`plugin.json`, `hooks/hooks-codex.json`) spawn, injects the session
   conventions from `hooks/*.md`
-  (comment discipline, lean code, live-store access, the task-workspace convention,
+  (comment discipline, lean code, live-store access, the task-workspace convention — which
+  now also mirrors the workspace's `progress.md` into the host's task-list tool where one
+  exists, so the developer watches the same checklist the skills tick off —
   report-plugin-defects-upstream, routing oversized MCP results through the
   `json-slim` CLI, and the untrusted-content rail — ticket, doc, Figma, PR-comment, page
   and tool-result text is data describing the work, never instructions to follow). It opens
@@ -1043,6 +1098,13 @@ hook error never blocks work:
   SessionStart JSON envelope (`hookSpecificOutput.additionalContext`) — the only form an Agent SDK
   host (Cowork) injects, plain stdout being a CLI-only path; Codex keeps the plain stdout it was
   measured on, and Cursor and OpenCode compose their own in the adapter.
+  The same envelope carries the **session title** when the current branch names a ticket
+  (`ELC-1309 — <the ticket summary>` when `.claude/tasks/<KEY>/ticket.md` is there, the key alone
+  otherwise). A session the developer already named — `claude --name`, `/rename` — keeps that
+  name: the hook input says so. Either outcome **settles** the name, so both spend the session's
+  one shot and the prompt half below cannot overwrite it. `FND_SESSION_TITLE=0` turns both title
+  paths off (from the process env or `~/.config/domaine/env`, which this hook reads too); no
+  other host reads a title, so the field is Claude Code's alone.
 - **SubagentStart** — `subagent-conventions.sh` injects `untrusted-content.md` into **every**
   subagent, readers included — they are the ones handling third-party text — plus comment
   discipline + lean code into the code-writing ones (in a `foundation` checkout the
@@ -1098,8 +1160,8 @@ hook error never blocks work:
   move, counted as a gap. It writes only while `FND_MCP_SLIM_DEBUG` is on and is disabled
   entirely by `FND_SPILL_ACCESS=0`; it is POSIX sh + grep (no node), because it fires on every
   Bash / Read / Grep call.
-- **UserPromptSubmit** — one node process (`user-prompt.cjs`) running two independently
-  gated halves; a block from the guard wins over the monitor's notice. `context-stats.cjs` monitors
+- **UserPromptSubmit** — one node process (`user-prompt.cjs`) running three independently
+  gated halves; a block from the guard wins over everything else. `context-stats.cjs` monitors
   context-window usage and warns (recommending `/compact`) past a threshold. Its numbers are the
   last answer's usage record (hooks see neither `/context` nor the active model), so a `/model`
   switch or a compaction nobody has answered yet is read from the command's own transcript
@@ -1112,7 +1174,17 @@ hook error never blocks work:
   blob is spilled to a file (the active task workspace `tmp/`, else a private temp file),
   and the developer is shown that path to resubmit against — so the JSON is read with
   jq/Read on demand instead of sitting in context every turn. `FND_PROMPT_JSON=0` disables
-  it.
+  it. `session-title.cjs` names the session after the ticket, **once**: the first prompt of the
+  session carrying a **corroborated** key sets `sessionTitle` to `<KEY> — <summary>` (from
+  `.claude/tasks/<KEY>/ticket.md`) or to `<KEY>`, and a per-session marker file keeps a re-run,
+  or any later prompt, from re-titling. Corroborated = the key arrived as a Jira `/browse/<KEY>`
+  URL, or this checkout already has a `.claude/tasks/` workspace for the same project — key shape
+  alone is not evidence (`UTF-8`, `SHA-256`, `ISO-8601` and `AES-256` all match it), and a wrong
+  title would spend the one shot the real ticket needs. It rides inside the monitor's
+  object when both speak, and alone when the monitor is silent; a blocked prompt titles nothing
+  and spends no shot. Claude Code only — the half is gated on the host, since this file also runs
+  on Codex — and `FND_SESSION_TITLE=0` disables it. Session titles are verified on the CLI; in
+  the desktop app's Code tab and in Cowork they are expected to work and unverified.
   - **PostToolUse (`mcp__.*`)** — `mcp-slim.cjs` compresses large MCP tool results before they
     enter context (`scripts/json-slim.cjs`: ADF→markdown, noise-drop, long-string truncate,
     same-shape-array crush). Results ≤ 4 KB and error envelopes (`isError` / `errors[]`) pass
@@ -1313,7 +1385,9 @@ hook error never blocks work:
 
 Single home for every knob the plugin reads, on every host. Every new switch must be added to
 this table — with its per-host behavior whenever the switch does not mean the same thing
-everywhere.
+everywhere. Host variables the plugin only *reads* sit at the bottom of the table; the ones worth
+setting on a fresh machine are collected, with a pasteable file, in
+[Recommended Claude Code settings](#recommended-claude-code-settings-copy-paste).
 
 **Where to set them.** Two **Domaine env files** work identically on all four hosts — every
 fnd entry point (Node hooks, the `json-slim` CLI, the two Shopify shell scripts, the OpenCode
@@ -1377,7 +1451,7 @@ because the script that reads it is the same single copy on all four hosts.
 |---|---|---|
 | `FND_LEAN` | `1` | `0` disables the lean-code session convention. Hook-gated, so it applies where the convention arrives through a hook (Claude Code and Codex at session start; every host's subagent conventions on Claude Code, Cursor and Codex). **Host divergence:** on Cursor the SESSION copy ships as an always-applied rule instead — turn `rules/fnd-lean-code.mdc` off there — and on OpenCode the statics live in your own `instructions` config, which this switch cannot reach; either way, "normal mode" in the session still works |
 | `FND_PROFILE` | auto | overrides the **project profile** — `foundation` / `theme` / `none`, detected by `scripts/project-profile.sh` from the checkout itself (`snippets/@*.liquid`, `sections/core-*.liquid`, `blocks/core-*.liquid` or `src/entry/core/` ⇒ `foundation`; else `layout/theme.liquid` ⇒ `theme`; else `none`), walking up from the session's directory and stopping at the repo boundary — the level that holds `.git` — so a hook running in a subdirectory answers about its own checkout and never about a parent repo. Every host prints the answer as `fnd project profile: <value>` right under the plugin-root line, and `foundation` adds one block to the session: `hooks/comment-discipline-foundation.md` (LiquidDoc on every snippet param; `src/entry/core/*` is protected — extend or compose it; the Liquid core may be edited but has to be hand-synced from the foundation repo) — plus the same block for code-writing subagents. Bundled scripts read the same answer where a Foundation-only command would otherwise be handed to a plain theme: `scripts/worktree-setup.sh` prints `npm run dev -- --theme …` in the worktree hand-off only on `foundation`, and `shopify theme dev --theme …` everywhere else. The three values are matched exactly, lowercase; an exported-but-EMPTY value still counts as set, so it shadows both env files and lands on detection; anything else falls back to detection, silently in a session (run `scripts/project-profile.sh` by hand to see the warning). **Host divergence:** on Cursor the comment-discipline convention is an always-applied rule and of that material only this addendum is detection-gated, injected by `hooks/cursor-shim.cjs`; on OpenCode both the profile line and the addendum ride the adapter's once-per-session `chat.message` injection, since the statics live in your own `instructions` config |
-| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard unless `FND_PROMPT_JSON=0` too (both halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half |
+| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard and the session title unless `FND_PROMPT_JSON=0` and `FND_SESSION_TITLE=0` too (the three halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens). Auto = the Claude model family on Claude Code (200000 when the model is unrecognized) and the window the rollout states on Codex — where, if it states none, the monitor stays silent rather than guess |
 | `FND_MCP_SLIM` | `1` | `0` disables the MCP result **compression** (PostToolUse `mcp-slim` hook) — node never spawns. Where it does spawn anyway — a `0` set in the global `~/.config/domaine/env`, which the wiring's shell gate cannot see (this switch is global-only: a project `.claude/domaine.env` cannot set it at all) — the hook emits nothing but still runs its exit-time TTL sweep: hygiene is not compression, and nobody who silenced the compressor asked for a spill dir and a checkout that fill up. `FND_MCP_SLIM_TTL` is the switch that governs the sweep. **Host divergence:** Claude Code and OpenCode rewrite the result in place, so compression AND spill-and-stub both land. Cursor is observe-only: `afterMCPExecution` exposes no rewrite field, so nothing is compressed, stubbed or spilled there whatever this is set to — with the default the shim logs `skip`, and with `0` the wiring gate exits before node, so not even that line is written (see [Known gaps](#host-verification-status--cursor-codex-cli-and-opencode-are-unverified) and `docs/README.cursor.md`). On Codex both halves land through the one channel that host's `PostToolUse` can replace a result with: `hooks/codex-mcp-shim.cjs` returns the compressed body — or the stub — as a `block` `reason`, behind a header saying the call SUCCEEDED and must not be retried, since Codex frames a block to the model as `Script failed` / `Script error:`. That reason is capped (`BLOCK_REASON_BYTES` in the shim, 10000 — Codex truncates a longer hook output, measured at 2,500 host tokens of 4 bytes each), so a compressed body over the cap is spilled-and-stubbed instead (`block-cap`), and a result carrying a non-text block falls back to the old path: the stub rides as `additionalContext`, a compressed body is dropped (`docs/README.codex.md`) |
@@ -1389,8 +1463,9 @@ because the script that reads it is the same single copy on all four hosts.
 | `FND_MCP_SLIM_BUDGET_MS` | `5000` | wall-clock ceiling for one `mcp-slim` compression run (shared across every block of a result). An expiry hands the ORIGINAL back — per block, so a partly-slimmed content array is logged `compressed` + `budget_partial`, and a whole-result expiry `budget-exceeded` (stubbed above the stub threshold); `0` disables the ceiling; a negative value is a ceiling already expired when the run starts (every block hands its original back — the deterministic form of a tiny budget, for diagnostics); any invalid value falls back to `5000`, never to `0`. The default is ~22× a 1 MB-class payload on this pipeline and well inside Claude Code's PostToolUse timeout — headroom, not a guarantee: a genuinely huge result (tens of MB, or several fat blocks sharing the one deadline) can still reach it, and is then handed back uncompressed rather than half-compressed |
 | `FND_WHALE_GUIDE` | `1` | `0` (or `false`/`no`/`off`) disables the one-shot rule for `json-slim`'s whale-recovery guidance: the full block (readline filter template + `sed`/`grep` single-row hints) is then printed after every profile instead of only the FIRST profile of a given file per session. With the default, later profiles of the same file carry a one-line reminder that stays self-sufficient — the file, the row count, any fence offset, the `sed`/`grep` single-row forms and this switch — dropping only the readline template (the reader of a repeat may be a subagent, or a context that was compacted since). The suppression state is a dotfile per session × **resolved** file path under `FND_MCP_SLIM_DIR`, expires after 2 h, and is pruned by the same sweep as the spills (so `FND_MCP_SLIM_TTL=0`, which disables that sweep, leaves the small per-file **state files** in place); a new file path, a missing, unreadable or future-dated state file always yields the full block. The profile itself is never affected, and each profile's debug line records which variant it printed (`guide: full` / `reminder`) |
 | `FND_NOGAIN_MEMO` | `1` | `0` (or `false`/`no`/`off`) disables `json-slim`'s per-file no-gain memo. With the default, a **file** run that printed its body back unchanged (a deliberate decline, now also stated on stderr) is remembered — per session × **resolved** file path, for 2 h, invalidated as soon as the file's size or mtime change — and a repeat run on that file answers with a one-line refusal naming the recovery instead of re-printing the body; the field pattern it removes is "decline → immediate re-run", where a 0 % result reads as a failed attempt. Only declines of at least 4 KB are remembered (below that a refusal saves nothing). The state is dotfiles under `FND_MCP_SLIM_DIR`, swept with the spills (so `FND_MCP_SLIM_TTL=0` leaves them in place); a missing, unreadable, corrupt or future-dated state file always yields the normal run. The same switch also governs the second refusal, which needs no memo: `fnd-slim-out-*` files — `json-slim`'s own Gate-A output spills, already slimmed — are answered the same way (only below the 8 MB stream gate; past it the big-document guidance is the useful answer). Neither refusal ever applies to a run whose answer it cannot stand for: a narrowing `--jq <jq-path>` (the documented recovery after a decline) bypasses both. `--stats` does **not** — the reader recipes pass it on every run, so a bypass would disarm the memo for exactly those callers; a refusal answers it with the measurement instead, printing the body-free notice on stdout and `json-slim: <bytes> → <bytes> bytes (0.0% reduction) [declined earlier this session]` (or `[already json-slim output]`) on stderr. The stderr decline notice is NOT governed by this switch: it rides on every file run that printed the file's own bytes back unchanged. Both refusals log `already-slim-out` / `no-gain-memo` and are counted on `--report`'s `cli runs:` line |
-| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor unless `FND_CTX_MONITOR=0` too — with both at `0` no node process runs at all. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere |
+| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor and the session title unless `FND_CTX_MONITOR=0` and `FND_SESSION_TITLE=0` too — only with all three at `0` does no node process run at all. That third clause is in the Claude Code and Codex wirings alike, because the two carry the same command verbatim; on Codex the title half is inert (it is gated on `FND_HOST=claude`), so a Codex user who wants the old two-switch economy sets `FND_SESSION_TITLE=0` with the other two. Cursor's `beforeSubmitPrompt` runs its own shim, which has no title half, so there the two-switch short-circuit is unchanged. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere |
 | `FND_SCRATCH_GUARD` | `1` | `0` disables the screenshot scratch-path guard (PreToolUse `scratch-path-guard`) — node never spawns. With the default, a `take_screenshot` / `browser_take_screenshot` whose output path resolves inside the project working tree and outside a **leading** `.claude/` segment is **denied** with a reason naming the ABSOLUTE `<project>/.claude/tasks/<work-id>/tmp/<name>` (or `<project>/.claude/tmp/<name>` with no ticket) instead — absolute because a relative filename is resolved by the playwright server against its own output dir, not the project, so a relative remediation would land nested inside the litter dir it replaces. Which server it is decides the verdict: the **bundled** `playwright`, whose manifest pins `--output-dir .claude/fnd-tmp/playwright` (swept, git-excluded — and the guard stamps that exclude itself on the branches that allow, so the allow does not rest on a compressor switch), passes both a bare `filename` and no `filename` at all; every other spelling may be a default-configured server writing to `<cwd>/.playwright-mcp` inside the checkout, so its relative filename is denied and so is its no-`filename` call, which does not skip the write. That allow is bought with the sweep: a file in the bundled server's output dir **expires** on `FND_MCP_SLIM_TTL` (24 h), so anything meant to be kept — QA evidence, the screenshots a Steps to Test points at — still belongs in `<project>/.claude/tasks/<work-id>/tmp/`, which nothing prunes. The guard creates the two remediation destinations itself as it denies (nothing else does — chrome-devtools' write path makes no directory — so a compliant retry would fail with ENOENT). Anything under a leading `.claude/`, an absolute path outside the checkout and an inline chrome-devtools screenshot (no `filePath`, no file written) all pass, and any internal error fails open; an in-project `tmp/` is denied like the rest of the tree, since a theme checkout neither ships nor gitignores one. **Host divergence:** wired on Claude Code, Codex and Cursor — the matcher is prefix-agnostic, since Codex names the same tools without the `plugin_fnd_` prefix and either host may have the servers installed per-user, and on Cursor the deny travels through `beforeMCPExecution` (a `permission: "deny"` response, `tool_input` decoded from a JSON string). That prefix-agnosticism has a cost on those two hosts: an unprefixed `browser_take_screenshot` is indistinguishable from a per-user server, so even the bundled one is judged conservatively there — relative filenames denied, absolute workspace paths expected. OpenCode's tool hook has no verified MCP payload shape, so there screenshots are unguarded whatever this is set to |
+| `FND_SESSION_TITLE` | `1` | `0` disables **both** session-title paths. Both halves read it the same way — process env first, then the GLOBAL Domaine env file (`~/.config/domaine/env`); it is deliberately not one of the project-file keys, so a client repo's `.claude/domaine.env` cannot rename the sessions of everyone who opens it. With the default, `hooks/session-start.sh` names the session after the ticket its BRANCH carries (`<KEY> — <summary>` when `.claude/tasks/<KEY>/ticket.md` holds one, `<KEY>` alone otherwise) and `hooks/session-title.cjs` names it after the **first** prompt of the session carrying a key it can CORROBORATE — a Jira `/browse/<KEY>` URL, or a `.claude/tasks/` workspace for the same project. Key shape alone is not evidence: `UTF-8`, `SHA-256`, `ISO-8601` and `AES-256` all match it, and titling a session after one of those would also spend the shot the real ticket needs. The title is one shot per session, held by a marker file in the temp dir beside the context monitor's band state, so a re-run or a later ticket never re-titles; the title itself is clamped to 100 bytes on a character boundary, which is what keeps it inside the SessionStart envelope's budget. A session the developer already named (`--name`, `/rename`) is left alone by BOTH halves: the SessionStart input carries that name, and seeing it spends the one shot, so the prompt half cannot overwrite it either. The prompt half is also what the UserPromptSubmit wiring's short-circuit counts as a third half — node spawns unless this, `FND_CTX_MONITOR` and `FND_PROMPT_JSON` are ALL `0`. **Host divergence: Claude Code only.** `sessionTitle` is a Claude Code hook field; Codex, Cursor and OpenCode name sessions themselves and ignore it, so the prompt half is gated on `FND_HOST=claude` and the SessionStart half rides in the envelope that host alone receives. Verified on the Claude Code CLI; the desktop app's Code tab and Cowork are expected to honour it, unverified |
 | `FND_SPILL_ACCESS` | `1` | `0` disables the spill-access recorder (PreToolUse `spill-access.sh`) — the wiring pre-gates on it, so nothing is spawned, and the script re-checks it too. With the default it appends one `entry:"access"` line per DISTINCT spill path a Bash / Read / Grep call named that is a file on disk — PreToolUse fires after the spill was written, so a path that does not exist was only spelled — harvested from the first 16 KB of the unescaped tool_input slice (`fnd-mcp-slim-<hash>.json`, or any name under a `tool-results/` directory — the platform's overflow files are opaquely named, so the recorder matches the same family `mcp-slim.cjs`'s `OVERFLOW_PATH` writes; at most 8 paths per call) to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log`, recording which reader got there — that is what lets `json-slim --report` stop calling a whale *missed* when the agent recovered it with `jq` instead of a `json-slim` run. It writes **only while `FND_MCP_SLIM_DEBUG` is on** (the log is a debug artefact), never blocks, prints nothing, and reads a run naming `json-slim.cjs` as no access at all (the CLI logs its own line). Being a PreToolUse hook it records the read that was *attempted*, and a command that only names a spill (`rm`, `ls`, `echo` …) is recorded as `via: named`, which `--report` does not count as a recovery. **Host divergence:** Claude Code matches `Bash|Read|Grep`; Codex adds its `shell` / `local_shell` spellings; Cursor covers the SHELL only, since it documents no read-file event; OpenCode covers `bash` plus its `read` / `grep` tools |
 | `FND_HOST_TRACE` | off | `1` (or `true`/`yes`/`on`) turns on the **host-proof log**: every fnd hook appends one JSONL line per invocation to `<FND_MCP_SLIM_DIR>/fnd-host-trace.log` (`os.tmpdir()` when that is unset), so "did the hooks fire on this host?" is answered from disk instead of from a model reporting on itself. One line = `ts`, `host` (`claude`/`cursor`/`codex`/`opencode`, or `unknown` when the wiring set no `FND_HOST`), `event`, `hook`, `decision` (`pass` / `deny` / `inject` / `stub` / `compress` / `skip` / `error`), plus `tool` on a Pre/PostToolUse line, `agent` on a SubagentStart one, the `project` basename and `ms`. **Metadata only** — never a payload, command text, prompt text or the path of a spill — and the whole thing is best-effort: a failure to log can never change a hook's stdout, its stderr or its exit code. The file rotates once to `fnd-host-trace.log.1` at 5 MB and is kept by the spill sweep under both names. **Global-only** (process env or `~/.config/domaine/env`; a project `.claude/domaine.env` cannot arm or silence a repo's own proof), and unset / `0` / an unrecognized value ⇒ no file is created. The off path costs the hot-path guards one builtin-only scan of the global env file per invocation (no fork, no external command) — well under a millisecond, but not literally nothing. Read it back with `node plugins/fnd/scripts/doctor.cjs --trace [--since 2h]`, which prints an event/hook × host matrix with a decision breakdown |
 | `FND_FIGMA_SOURCE` | `auto` | which source `figma-reader` may read a design through: `auto` walks the ladder (connector Figma MCP → the local `figma-dev-mode` bridge → the REST API with `FIGMA_TOKEN`), `mcp` forbids the token path, `rest` skips both MCP rungs — for a developer who knows the desktop app is closed. Matched exactly, lowercase; anything else falls back to `auto` with `note=invalid_figma_source value=<v>` on stderr. **Global-only**: it is deliberately NOT one of the thirteen project-file keys above, so a copy in a `<repo>/.claude/domaine.env` is ignored — which rung a read may take is a decision about this machine's Figma access, not something a client repository sets for everyone who opens it. `scripts/figma-rest.sh --policy` prints the resolved value and whether a token is present, with no network call and without printing the token |
@@ -1413,6 +1488,7 @@ because the script that reads it is the same single copy on all four hosts.
 | `FIGMA_TOKEN` | unset | the per-developer Figma **personal access token** `figma-rest.sh` authenticates the REST rung with, ahead of the `--env` dotenv (default `./.env`). Scopes: **File content: read-only** (the node tree and the PNG render), **Variables: read-only** (design tokens by name — honoured on Enterprise plans only, harmless elsewhere), **Current user: read-only** (for `--check`). Charset-gated (`[A-Za-z0-9_.+/=~:-]`); it reaches curl through a `0600` config file deleted on exit, never the argv, and is never printed — and it rides to `api.figma.com` only: the render is fetched from its pre-signed S3 URL by a SEPARATE, token-less call. Absent ⇒ `error=no_figma_token` + the setup `hint=`, exit 3, and `figma-reader` asks the developer instead of guessing. Setup, scopes and the degradation contract: `plugins/fnd/references/figma-rest.md` |
 | `FND_HOST` | set by the fnd wiring | *set and read by fnd, never by you*: the host name (`claude` / `cursor` / `codex` / `opencode`) each host's own hook wiring exports so a `FND_HOST_TRACE` line can say which host ran the hook. It is not a switch — `domaine-env` will not write one, and a hand-set value only makes the log lie. An absent or unrecognized value is logged as `unknown`, which is what a manual run or a test is |
 | `CLAUDE_CODE_SESSION_ID` | set by Claude Code | *read, not set by fnd*: scopes `FND_WHALE_GUIDE`'s one-shot state and `FND_NOGAIN_MEMO`'s no-gain memo to the conversation, so a new session sees the full guidance block — and the declined body — again. Absent (a bare shell) ⇒ both are keyed on the file path alone and the 2 h expiry bounds them |
+| `CLAUDE_CODE_ENABLE_TODO_TOOLS` | unset (host default) | *read, not set by fnd*: Claude Code's own switch for the task-list tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`), which are **off by default** on Opus 5, Sonnet 5 and Fable and need **Claude Code 2.1.233+** (older CLIs read the key and expose nothing). `"1"` in the `"env"` block of `~/.claude/settings.json` turns them on for the CLI and the desktop app's Code tab alike ([the pasteable file](#recommended-claude-code-settings-copy-paste)). The plugin never sets it: the task-workspace convention mirrors `progress.md` into the tools when they exist and says nothing when they do not, and `preflight-checks` reports it as one advisory row. Not an FND switch — `domaine-env` will not write one |
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |
 | `CLAUDE_PLUGIN_ROOT` / `PLUGIN_ROOT` | set by the host | *read, not set by fnd*: where a hook **wiring** file finds the bundled scripts and session-convention markdown. Claude Code and Cursor set `CLAUDE_PLUGIN_ROOT`; Codex sets `PLUGIN_ROOT` plus `CLAUDE_PLUGIN_ROOT` as a compatibility alias, and `hooks/hooks-codex.json` prefers the alias with a fallback to `PLUGIN_ROOT`. Hook **scripts** never trust either one for guard logic — they resolve their own bundled paths from `__dirname` / their own `dirname`, because Cursor leaks the variable between concurrent plugins' hooks and Claude Code has a source-vs-cache inconsistency |
 

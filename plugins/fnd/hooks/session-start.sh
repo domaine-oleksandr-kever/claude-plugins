@@ -13,6 +13,11 @@
 # a stray quote in a convention cannot malform it: a host that fails to parse the object drops the
 # whole context silently. Either form is capped host-side at 10,000 chars, unconfigurably.
 #
+# The Claude envelope also carries the SESSION TITLE (`FND_SESSION_TITLE`, hooks/session-title.cjs),
+# derived from the branch's ticket key — inside the same object, because the event takes one JSON
+# document. It is the only thing here that reads stdin, and it reads it defensively: the context
+# delivery may never depend on the hook input arriving.
+#
 # stderr stays empty and the exit status is always 0: a partial install may cost a session a
 # convention, never the session itself.
 set -u
@@ -44,9 +49,32 @@ compose() {
   [ "${FND_LEAN:-1}" = "0" ] || cat "$root/hooks/lean-code.md" 2>/dev/null
 }
 
+# FND_SESSION_TITLE the way the node entry points read it: process env, then the GLOBAL Domaine
+# env file. A gate that consulted the process env alone would keep renaming sessions for a
+# developer who switched the feature off in that file. Global-only, mirroring env-file.cjs — the
+# project layer carries tuning keys only, and what a session is CALLED is not a repo's to set.
+title_on() {
+  _v="${FND_SESSION_TITLE-}"
+  if [ -z "${FND_SESSION_TITLE+x}" ]; then
+    _f="${XDG_CONFIG_HOME:-${HOME:-}/.config}/domaine/env"
+    [ -f "$_f" ] && _v="$(sed -n '/^[[:space:]]*FND_SESSION_TITLE[[:space:]]*=/{s/^[^=]*=[[:space:]]*//;s/[[:space:]]*$//;p;q;}' "$_f" 2>/dev/null || true)"
+  fi
+  [ "$_v" != "0" ]
+}
+
 if [ "${FND_HOST:-}" = claude ]; then
   ctx="$(compose)"
-  wrapped="$(printf '%s' "$ctx" | node -e 'let s="";process.stdin.on("data",d=>{s+=d}).on("end",()=>{process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:s}}))})' 2>/dev/null)" || wrapped=""
+  # The session title rides in the same envelope object (Claude Code is the only host that reads
+  # one). Reading the hook input is bounded and skipped on a terminal: a by-hand run must not
+  # stall the session waiting for stdin that never closes.
+  hook_input=""; branch=""
+  if title_on; then
+    [ -t 0 ] || IFS= read -r -d '' -t 1 hook_input || true
+    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" || branch=""
+  fi
+  # FNDSS_*, not FND_*: these are one call's arguments, not switches the env files or the
+  # domaine-env registry know about.
+  wrapped="$(printf '%s' "$ctx" | FNDSS_BRANCH="$branch" FNDSS_INPUT="$hook_input" FNDSS_MOD="$root/hooks/session-title.cjs" node -e 'let s="";process.stdin.on("data",d=>{s+=d}).on("end",()=>{const o={hookSpecificOutput:{hookEventName:"SessionStart",additionalContext:s}};try{let i={};try{i=JSON.parse(process.env.FNDSS_INPUT||"{}")||{}}catch(e){}const t=require(process.env.FNDSS_MOD).startTitle(process.env.FNDSS_BRANCH,process.cwd(),i);if(t)o.hookSpecificOutput.sessionTitle=t}catch(e){}process.stdout.write(JSON.stringify(o))})' 2>/dev/null)" || wrapped=""
   # No node, or node unhappy: the plain text still reaches the CLI, which is where this path runs
   # when it is not an SDK host.
   if [ -n "$wrapped" ]; then printf '%s\n' "$wrapped"; else printf '%s\n' "$ctx"; fi

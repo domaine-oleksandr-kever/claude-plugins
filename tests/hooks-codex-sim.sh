@@ -201,14 +201,15 @@ for s in $scripts; do
   if [ -f "$PLUG/$s" ]; then ok; else bad "W5-$s" "wiring names a file that does not exist"; fi
 done
 assert_eq W5-count "$(printf '%s\n' "$scripts" | grep -c .)" 8
-# One hop further: the profile probe and the trace helper are spawned by hooks/session-start.sh
-# rather than by the wiring itself, and following the spawn is what keeps them covered here.
+# One hop further: the profile probe, the trace helper and the session-title module are reached
+# by hooks/session-start.sh rather than by the wiring itself, and following the spawn is what
+# keeps them covered here.
 ss_scripts="$(grep -oE '\$root/(hooks|scripts)/[a-z0-9-]+\.(cjs|sh)' "$PLUG/hooks/session-start.sh" \
   | sed 's#^\$root/##' | sort -u)"
 for s in $ss_scripts; do
   if [ -f "$PLUG/$s" ]; then ok; else bad "W5-ss-$s" "session-start.sh spawns a file that does not exist"; fi
 done
-assert_eq W5-ss-count "$(printf '%s\n' "$ss_scripts" | grep -c .)" 2
+assert_eq W5-ss-count "$(printf '%s\n' "$ss_scripts" | grep -c .)" 3
 
 # W6: PreToolUse matcher — Codex regex, covering every spelling of the shell tool and nothing else.
 pm="$(jq -r '.hooks.PreToolUse[0].matcher' "$WIRING")"
@@ -508,9 +509,15 @@ if [ -s "$TMP/node.log" ]; then ok; else bad G1-ctx-off "node did not run with o
 run_gate FND_PROMPT_JSON=0
 if [ -s "$TMP/node.log" ]; then ok; else bad G1b-json-off "node did not run with only the guard off"; fi
 
+# The title half joined the gate on both wirings — it is inert on this host (the cjs gates it on
+# FND_HOST=claude), but the SHELL condition is the Claude command verbatim, which W3 requires.
 run_gate FND_CTX_MONITOR=0 FND_PROMPT_JSON=0; ec=$?
-assert_eq G1c-both-off-exit "$ec" 0
-if [ -s "$TMP/node.log" ]; then bad G1c-both-off "node ran with both switches off"; else ok; fi
+assert_eq G1c-two-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then ok; else bad G1c-two-off "node did not run with the third switch still on"; fi
+
+run_gate FND_CTX_MONITOR=0 FND_PROMPT_JSON=0 FND_SESSION_TITLE=0; ec=$?
+assert_eq G1d-all-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad G1d-all-off "node ran with all three switches off"; else ok; fi
 
 run_gate; ec=$?
 assert_eq G2-default-exit "$ec" 0
