@@ -67,6 +67,11 @@
 #                   `ok=1 file_key=… [node_id=…] last_modified=…`; nothing is written, no out-dir
 #                   gate, and the node-id in the link is optional. This is the freshness probe.
 #
+# `--help` / `-h` — bare or anywhere in the args — prints that Usage block to stdout and exits 0,
+# ahead of the shared lib, the token read and the mode precedence below, so a usage question
+# cannot die on a missing token. Matched positionally, so a flag VALUE of `-h` reads as a usage
+# question too.
+#
 # MODE PRECEDENCE — checked right after parsing, before the credential is even looked up, because a
 # swallowed flag is worse than a refusal: an agent that asked one question and silently got another
 # answer has no way to notice.
@@ -96,6 +101,24 @@
 #       5 transport failure on the one request that is not optional.
 set -euo pipefail
 
+# The `# Usage:` block above, verbatim — the suite pins the two together: the header is the
+# human-readable contract, this is what `--help` prints.
+USAGE='Usage:
+  figma-rest.sh <figma-url | --file <key> --node <id>> [--out <dir>] [--env <dotenv>]
+                [--scale <N>] [--no-variables] [--no-image] [--force] [--json]
+  figma-rest.sh --check  [--env <dotenv>]
+  figma-rest.sh --policy [--env <dotenv>]
+  figma-rest.sh --probe  <figma-url | --file <key>> [--env <dotenv>]'
+
+# Answered before the shared lib, the token read and the mode gate below: "how do I call this" must
+# not depend on a token, a dotenv or a complete install being in place.
+for _a in ${1+"$@"}; do
+  case "$_a" in
+    --help|-h) printf '%s\n' "$USAGE" "Full contract: the header of $0"; exit 0 ;;
+  esac
+done
+unset _a
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 [ -f "$SCRIPT_DIR/_shopify-common.sh" ] || { echo "error=common_lib_not_found path=$SCRIPT_DIR/_shopify-common.sh" >&2; exit 2; }
 . "$SCRIPT_DIR/_shopify-common.sh"
@@ -122,7 +145,7 @@ while [ $# -gt 0 ]; do
     --check)        CHECK=1; shift ;;
     --policy)       POLICY=1; shift ;;
     --probe)        PROBE=1; shift ;;
-    -*) echo "error=unknown_arg arg=$1" >&2; exit 2 ;;
+    -*) echo "error=unknown_arg arg=$1 (--help prints usage)" >&2; exit 2 ;;
     *) [ -z "$URL" ] || { echo "error=unexpected_arg arg=$1" >&2; exit 2; }; URL="$1"; shift ;;
   esac
 done

@@ -82,9 +82,14 @@
 #   --frames        fixed frames per video, 1..99 (default: adaptive, 8…24 by duration)
 #   --env           dotenv holding JIRA_EMAIL / JIRA_API_TOKEN (default ./.env)
 #   --site          site host for the cloudId lookup (default $JIRA_SITE, else meetdomaine.atlassian.net)
-#   --cloud-id      skip that lookup
+#   --cloud-id      <uuid>, skips the lookup
 #   --check         probe the credentials only: `ok=1 jira_user=… cloud_id=… ffmpeg=…`
 #   --json          emit the rows as a JSON array (frames as a path list) instead of TSV
+#
+# `--help` / `-h` — bare or anywhere in the args — prints that Usage block to stdout and exits 0,
+# ahead of the shared lib, the credential read and the cloudId lookup, so a usage question cannot
+# die on a missing token. Matched positionally, so a flag VALUE of `-h` reads as a usage question
+# too.
 #
 # stdout — one row per attachment, header first:
 #   id  status  kind  mime  size  created  author  path  frames  filename
@@ -99,6 +104,23 @@
 #       4 the API rejected the request (auth, unknown issue) ·
 #       5 transport failure.
 set -euo pipefail
+
+# The `# Usage:` block above, verbatim — the suite pins the two together: the header is the
+# human-readable contract, this is what `--help` prints.
+USAGE='Usage:
+  jira-attachments.sh <ISSUE-KEY> [--out <dir>] [--ids <id,id>] [--all] [--max-mb <N>]
+                      [--max-video-mb <N>] [--force] [--no-frames] [--keep-video] [--frames <N>]
+                      [--env <dotenv>] [--site <host>] [--cloud-id <uuid>] [--json]
+  jira-attachments.sh --check [--env <dotenv>] [--site <host>] [--cloud-id <uuid>]'
+
+# Answered before the shared lib, the credential read and the cloudId lookup below: "how do I call
+# this" must not depend on a token, a dotenv or a complete install being in place.
+for _a in ${1+"$@"}; do
+  case "$_a" in
+    --help|-h) printf '%s\n' "$USAGE" "Full contract: the header of $0"; exit 0 ;;
+  esac
+done
+unset _a
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 [ -f "$SCRIPT_DIR/_shopify-common.sh" ] || { echo "error=common_lib_not_found path=$SCRIPT_DIR/_shopify-common.sh" >&2; exit 2; }
@@ -131,7 +153,7 @@ while [ $# -gt 0 ]; do
     --cloud-id)     need_val $# "$1"; CLOUD_ID="$2"; shift 2 ;;
     --check)        CHECK=1; shift ;;
     --json)         JSON=1; shift ;;
-    -*) echo "error=unknown_arg arg=$1" >&2; exit 2 ;;
+    -*) echo "error=unknown_arg arg=$1 (--help prints usage)" >&2; exit 2 ;;
     *) [ -z "$KEY" ] || { echo "error=unexpected_arg arg=$1" >&2; exit 2; }; KEY="$1"; shift ;;
   esac
 done
@@ -240,7 +262,13 @@ if [ -z "$CLOUD_ID" ]; then
     exit 2
   fi
 fi
-case "$CLOUD_ID" in *[!A-Za-z0-9-]*) echo "error=invalid_cloud_id" >&2; exit 2 ;; esac
+case "$CLOUD_ID" in *[!A-Za-z0-9-]*)
+  # the value a caller reaches for first is the site host, which is a DIFFERENT flag — say so here;
+  # trimmed on the way out because a looked-up id is remote data and may not forge a second line
+  _cid="$(printf '%s' "$CLOUD_ID" | tr -d '[:cntrl:]')"
+  echo "error=invalid_cloud_id value=${_cid:0:80} — --cloud-id takes the Atlassian cloud UUID (getAccessibleAtlassianResources → id, or \`--check\` prints cloud_id=…); a site host like meetdomaine.atlassian.net belongs to --site; drop the flag to let the script look it up" >&2
+  exit 2 ;;
+esac
 
 reject_auth() { # $1 = http code
   echo "error=jira_auth_rejected http=$1" >&2

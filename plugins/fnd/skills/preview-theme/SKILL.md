@@ -131,7 +131,9 @@ theme.
    `session-theme:` line) FIRST and re-run without any flag; only an explicit "overwrite the dev
    theme" gets `--allow-dev-theme`. `error=theme_not_found` is neither of those: the listing
    answered and does not carry the id, so the theme was deleted — no flag lifts it; offer a fresh
-   `create` instead of re-running.
+   `create` instead of re-running. `error=dev_theme_not_found` (on `create` too) says the same
+   about the toml's settings SOURCE — no flag lifts that either, and every fix rewrites
+   `shopify.theme.toml`, so ask which theme is the new source before running `pin --theme <ID>`.
 4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`.
    Remind the developer that customizer settings were intentionally left as-is.
 5. **Record it when the workspace hasn't.** When a task workspace for this work-id exists

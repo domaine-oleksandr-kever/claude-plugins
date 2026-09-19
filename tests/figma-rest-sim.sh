@@ -876,6 +876,72 @@ rc=0; CURL_ARGV="$PRARGV" FR_TOKEN="" fr "$NOTOK" "$URL_D" --probe >"$O" 2>"$E" 
 assert F12-probe-no-token 3 "$rc" "$E" "error=no_figma_token"
 if [ ! -s "$PRARGV" ]; then ok; else bad F12-probe-no-token-request "a probe went out with no token"; fi
 
+# ============================================================ 12b. --help ====================
+# `--help` used to be error=unknown_arg, so the one question a model asks before its first call was
+# the one call that could not be answered. It answers before the shared lib, the token read and the
+# mode gate — no dotenv, no credential, nothing on the wire — and it prints the header's own
+# `# Usage:` block: two hand-maintained copies of a call shape are two copies free to disagree, and
+# the header is the one a reader lands on.
+FRH="$TMP/fr-usage-header"
+awk '/^# Usage:/ { f = 1 } f { if ($0 == "#" || $0 !~ /^#( |$)/) exit; sub(/^# ?/, ""); print }' \
+  "$FR" > "$FRH"
+for ha in --help -h; do
+  rc=0; HARGV="$TMP/argv12b$ha"; : > "$HARGV"
+  CURL_ARGV="$HARGV" FR_TOKEN="" fr "$NOTOK" "$ha" >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ ! -s "$HARGV" ] \
+     && [ "$(wc -l < "$FRH" | tr -d ' ')" -eq 6 ] && sed '$d' "$O" | diff -q - "$FRH" >/dev/null; then ok
+  else bad "F12b-help[$ha]" "rc=$rc diff=$(sed '$d' "$O" | diff - "$FRH" | head -c 300 | tr '\n' ';') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+done
+# F12b2: the pointer line that follows it names where the full contract lives
+if [ "$(tail -1 "$O")" = "Full contract: the header of $FR" ]; then ok
+else bad F12b2-help-pointer "tail=$(tail -1 "$O")"; fi
+# F12b3: it is answered before the shared lib is even sourced — a broken install still says how to
+# call the script (F11-no-common-lib is the same copy, asked a real question)
+LONEH="$TMP/lone-help"; mkdir -p "$LONEH"; cp "$FR" "$LONEH/figma-rest.sh"
+rc=0; ( cd "$REPO" && PATH="$FR_PATH" "$BASH_BIN" "$LONEH/figma-rest.sh" --help ) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && ! grep -q 'common_lib_not_found' "$O"; then ok
+else bad F12b3-help-without-lib "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# F12b4: --help among a real call's args is still a usage question — nothing is fetched, and the
+# mode gate below (which would refuse `--check <url>`) never gets to answer instead
+for hc in "$URL_D --out $OUT --help" "--check -h" "--probe $URL_D --help" "--check --policy --help"; do
+  rc=0; HARGV="$TMP/argv12b4"; : > "$HARGV"
+  CURL_ARGV="$HARGV" fr "$REPO" $hc >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$HARGV" ]; then ok
+  else bad "F12b4-help-mid-args[$hc]" "rc=$rc out=$(head -c 120 "$O" | tr '\n' ' ') argv=$(tr '\n' ';' < "$HARGV")"; fi
+done
+# F12b5: …and the refusal a guessed flag gets names the way out in one step
+rc=0; HARGV="$TMP/argv12b5"; : > "$HARGV"
+CURL_ARGV="$HARGV" fr "$REPO" "$URL_D" --bogus >"$O" 2>"$E" || rc=$?
+assert F12b5-unknown-arg-trailer 2 "$rc" "$E" "error=unknown_arg arg=--bogus (--help prints usage)"
+if [ ! -s "$HARGV" ]; then ok; else bad F12b5-unknown-arg-request "a refused flag still reached the network"; fi
+
+# F12b6: a flag VALUE of `-h` is a usage question too — positional matching is what makes the arm
+# answer before the shared lib, and the header says so where a reader of the pointer line lands
+rc=0; HARGV="$TMP/argv12b6"; : > "$HARGV"
+CURL_ARGV="$HARGV" fr "$REPO" --file abc --out -h >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$HARGV" ] && grep -q 'VALUE of `-h`' "$FR"; then ok
+else bad F12b6-help-in-value-position "rc=$rc argv=$(tr '\n' ';' < "$HARGV") out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# F12b7 (drift guard): the REFERENCE carries a third copy of the call shapes, and a third copy is a
+# third thing free to disagree. Column alignment is presentation; the flag SET and ORDER are the
+# contract, so both copies are squeezed to one line per call shape before the diff.
+norm_usage() { # <file> — strips the `<plugin root>/scripts/` prefix and joins continuation lines
+  sed 's/^[[:space:]]*//; s|^<plugin root>/scripts/||' "$1" \
+    | awk '
+        index($0, "figma-rest.sh ") == 1 { if (c != "") print c; c = $0; next }
+        c != "" && NF { c = c " " $0; next }
+        { if (c != "") print c; c = "" }
+        END { if (c != "") print c }' \
+    | sed 's/  */ /g; s/[[:space:]]*$//'
+}
+FRR="$ROOT/plugins/fnd/references/figma-rest.md"
+FRRB="$TMP/fr-ref-block"
+awk '/^## The script$/ { f = 1 } f && /^```bash$/ { b = 1; next } b && /^```$/ { exit } b { print }' \
+  "$FRR" > "$FRRB"
+if [ "$(norm_usage "$FRRB" | grep -c .)" -eq 4 ] \
+   && norm_usage "$FRRB" | diff -q - <(norm_usage "$FRH") >/dev/null; then ok
+else bad F12b7-reference-matches-usage "diff=$(norm_usage "$FRRB" | diff - <(norm_usage "$FRH") | head -c 300 | tr '\n' ';')"; fi
+
 # ============================================================ 13. the credential sweep =======
 # Nothing above may have written the fixture token anywhere a human or a log can read it.
 leaked=""

@@ -87,8 +87,8 @@ signature). `--location-trusted`, which would not drop them, is never passed.
 ## The script
 
 ```bash
-<plugin root>/scripts/jira-attachments.sh <ISSUE-KEY> [--out <dir>] [--ids <id,id>] [--all]
-    [--max-mb <N>] [--max-video-mb <N>] [--force] [--no-frames] [--frames <N>] [--keep-video]
+<plugin root>/scripts/jira-attachments.sh <ISSUE-KEY> [--out <dir>] [--ids <id,id>] [--all] [--max-mb <N>]
+    [--max-video-mb <N>] [--force] [--no-frames] [--keep-video] [--frames <N>]
     [--env <dotenv>] [--site <host>] [--cloud-id <uuid>] [--json]
 <plugin root>/scripts/jira-attachments.sh --check [--env <dotenv>] [--site <host>] [--cloud-id <uuid>]
 ```
@@ -105,9 +105,10 @@ signature). `--location-trusted`, which would not drop them, is never passed.
 | `--no-frames` | off | download the video and **keep** it, don't cut — implies `--keep-video` |
 | `--keep-video` | off | keep the video file next to its frames dir (rare — by default it is deleted) |
 | `--env <dotenv>` | `./.env` | where `JIRA_EMAIL` / `JIRA_API_TOKEN` / `JIRA_SITE` are read from |
-| `--site <host>` / `--cloud-id <uuid>` | `$JIRA_SITE`, else `meetdomaine.atlassian.net` | the cloudId lookup, or skipping it |
+| `--site <host>` / `--cloud-id <uuid>` | `$JIRA_SITE`, else `meetdomaine.atlassian.net` | the host the cloudId is looked up on / the cloud **UUID** itself, which skips that lookup — a site host passed to `--cloud-id` is `error=invalid_cloud_id` |
 | `--json` | TSV | the same rows as a JSON array — what the reader consumes |
 | `--check` | — | probe the credentials only |
+| `--help` / `-h` | — | print the call shapes above and exit 0 — the script's own copy, answered before the credentials, and matched anywhere in the args (so a flag VALUE of `-h` reads as a usage question too) |
 
 stdout is one row per attachment, header first:
 `id  status  kind  mime  size  created  author  path  frames  filename` — `status` is

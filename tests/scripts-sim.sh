@@ -2045,12 +2045,12 @@ done
 case "$1 ${2:-}" in
   "theme list")
     [ -n "${FAKE_LIST_FAIL:-}" ] && { echo "Error: could not reach the Admin API" >&2; exit 1; }
-    # FAKE_LIST2 + FAKE_LIST_MARK: the FIRST list call answers FAKE_LIST (and drops the mark file);
-    # every later call answers FAKE_LIST2 — how a test shows a theme "appearing" mid-run.
+    # FAKE_LIST2 + FAKE_LIST_MARK: a list answers FAKE_LIST while the mark file is absent and
+    # FAKE_LIST2 once it exists — how a test shows a theme "appearing" mid-run. The CODE push drops
+    # the mark (`--unpublished` creates the theme server-side before uploading, so even a failed
+    # push leaves one behind); a build script dropping it instead plays a CONCURRENT run.
     if [ -n "${FAKE_LIST2:-}" ] && [ -f "${FAKE_LIST_MARK:-/dev/null}" ]; then printf '%s\n' "$FAKE_LIST2"
-    elif [ -n "${FAKE_LIST:-}" ]; then
-      [ -n "${FAKE_LIST_MARK:-}" ] && : > "$FAKE_LIST_MARK"
-      printf '%s\n' "$FAKE_LIST"
+    elif [ -n "${FAKE_LIST:-}" ]; then printf '%s\n' "$FAKE_LIST"
     else cat <<'J'
 [{"id":111,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"[ELC-1] Kever","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]
 J
@@ -2091,6 +2091,7 @@ J
       fi
     fi ;;
   "theme push")
+    [ "$is_only" -eq 0 ] && [ -n "${FAKE_LIST_MARK:-}" ] && : > "$FAKE_LIST_MARK"
     # FAKE_PUSH_THROTTLE_N throttles the first N CODE pushes (429-style stderr) then succeeds —
     # the retry loop's counterpart; FAKE_PUSH_COUNT is its cross-invocation counter file.
     if [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_THROTTLE_N:-}" ]; then
@@ -2142,6 +2143,12 @@ done
 [ -f "${CPT_PULL_DONE:-/dev/null}" ] && { echo "the settings pull had already finished" >&2; exit 1; }
 exit 0
 W
+# plays a CONCURRENT run: the listing changes (FAKE_LIST → FAKE_LIST2) while THIS run is building
+cat > "$CPTD/dropmark.sh" <<'W'
+#!/usr/bin/env bash
+: > "${FAKE_LIST_MARK:?}"
+exit 0
+W
 # records that it ran, so a case can assert a refusal landed BEFORE the build
 cat > "$CPTD/markbuild.sh" <<'W'
 #!/usr/bin/env bash
@@ -2168,13 +2175,14 @@ cat > "$CPTD/repo/package.json" <<EOF
   "scripts": {
     "build": "$CPTD/markbuild.sh",
     "markbuild": "$CPTD/markbuild.sh",
+    "dropmark": "$CPTD/dropmark.sh",
     "waitpull": "$CPTD/waitpull.sh",
     "overlap": "$CPTD/overlap.sh",
     "failbuild": "exit 1"
   }
 }
 EOF
-chmod +x "$CPTD/shim/shopify" "$CPTD/shim/npm" "$CPTD/waitpull.sh" "$CPTD/overlap.sh" "$CPTD/markbuild.sh"
+chmod +x "$CPTD/shim/shopify" "$CPTD/shim/npm" "$CPTD/waitpull.sh" "$CPTD/overlap.sh" "$CPTD/markbuild.sh" "$CPTD/dropmark.sh"
 
 run_cpt_at() { # run_cpt_at <cwd> <path-prefix> <log-file> <env=val…> -- <args…>
   local dir="$1" pfx="$2" log="$3"; shift 3
@@ -2220,7 +2228,7 @@ else bad P1b-reuse-live-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') ca
 
 # P1c (pin): a non-live reuse target still goes through
 rc=0; L="$TMP/cpt1c"; : > "$L"
-run_cpt "$L" FAKE_LIST='[{"id":555,"name":"PREVIEW-X","role":"unpublished"}]' \
+run_cpt "$L" FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"PREVIEW-X","role":"unpublished"}]' \
   -- create --name "PREVIEW-X" --reuse --no-build || rc=$?
 # the name lookup, the ambiguity count and the role guard share ONE `theme list` call
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && grep -q '^reused=true$' "$O" \
@@ -2298,7 +2306,7 @@ else bad P5c-real-drift-kept "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 # The theme pre-existed this run, so it is reported as `theme=`: `created_theme=` +
 # `created_theme_deleted=no` reads as "an orphan I created is still on the store, clean it up".
 rc=0; L="$TMP/cpt5d"; : > "$L"
-run_cpt "$L" FAKE_LIST='[{"id":555,"name":"PREVIEW-X","role":"unpublished"}]' FAKE_PUSH_ONLY_FAIL='Error: socket hang up' \
+run_cpt "$L" FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"PREVIEW-X","role":"unpublished"}]' FAKE_PUSH_ONLY_FAIL='Error: socket hang up' \
   -- create --name "PREVIEW-X" --reuse --no-build || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=overlay_push_failed' "$O" && grep -q '^theme=555$' "$O" \
    && ! grep -q '^created_theme' "$O" \
@@ -2895,7 +2903,7 @@ rm -rf "$CPTD/repo/.claude"
 # this store really produces), and an exact string compare answers "not on the store" for every one
 # of them — turning the routine refresh into a dead end whose own hint (`create --reuse`) then dies
 # on `unusable_theme_id`. The id is matched on its numeric tail instead.
-GIDL='[{"id":"gid://shopify/OnlineStoreTheme/555","name":"[ELC-1] Kever","role":"unpublished"},{"id":"gid://shopify/OnlineStoreTheme/999","name":"Live Theme","role":"live"}]'
+GIDL='[{"id":"gid://shopify/OnlineStoreTheme/111","name":"[DEV] Kever","role":"development"},{"id":"gid://shopify/OnlineStoreTheme/555","name":"[ELC-1] Kever","role":"unpublished"},{"id":"gid://shopify/OnlineStoreTheme/999","name":"Live Theme","role":"live"}]'
 rc=0; L="$TMP/cpt23g"; : > "$L"
 run_cpt "$L" FAKE_LIST="$GIDL" -- refresh --theme 555 --no-build || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && ! grep -q 'theme_not_found' "$O" \
@@ -2930,6 +2938,51 @@ run_cpt "$L" TOML_PATH="$FGP" FAKE_LIST="$GIDL" -- pin --theme 555 || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && grep -q '^pin=rewritten$' "$O" \
    && grep -qx 'theme = "555"' "$FGP"; then ok
 else bad P23k-pin-gid-listing "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v password "$FGP" | tr '\n' ';')"; fi
+
+# P61 (bug): the OVERLAY SOURCE is as deletable as the target, and nothing vetted it — the code
+# push does not use the toml's `theme =`, so a deleted dev theme let the push land and only the
+# background settings pull fail (error=overlay_pull_failed + mixed_state=…, a theme carrying this
+# branch's code over the settings it already had). Same evidence bar as theme_not_found, before
+# the build: nothing built, nothing pushed, nothing pulled.
+DEVLESS='[{"id":555,"name":"PREVIEW-X","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]'
+for cmd in "create --name PREVIEW-X --reuse" "create --name PREVIEW-FRESH" "refresh --theme 555"; do
+  rc=0; L="$TMP/cpt61"; : > "$L"
+  run_cpt "$L" FAKE_LIST="$DEVLESS" -- $cmd || rc=$?
+  if [ "$rc" -eq 1 ] \
+     && grep -q '^error=dev_theme_not_found dev_theme=111 store=acme-dev — the theme pinned in ' "$O" \
+     && grep -q 'pin an existing theme with `pin --theme <ID>` or fix the toml$' "$O" \
+     && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ] && [ "$(cpt_calls 'theme pull' "$L")" -eq 0 ] \
+     && ! grep -q '^npm=' "$L"; then ok
+  else bad "P61-dev-theme-not-found[$cmd]" "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(grep -v token "$L" | tr '\n' ';')"; fi
+done
+# P61b: a listing that DOES carry it is the unchanged path — the run goes all the way through
+rc=0; L="$TMP/cpt61b"; : > "$L"
+run_cpt "$L" FAKE_LIST="[{\"id\":111,\"name\":\"[DEV] Kever\",\"role\":\"development\"},{\"id\":555,\"name\":\"PREVIEW-X\",\"role\":\"unpublished\"}]" \
+  -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && ! grep -q 'dev_theme_not_found' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad P61b-dev-theme-listed "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+# P61c (fail-open): every shape of "the listing said nothing about ids" leaves absence meaningless,
+# exactly as it does for theme_not_found — a silent call, output that is not JSON, a parseable
+# listing naming no theme, and one whose ids carry no numeric tail. The run proceeds to its usual
+# outcome and overlay_pull_failed stays the backstop.
+i=0
+for lst in "FAIL" "<html>503 Service Unavailable</html>" "[]" '[{"id":null,"name":"X","role":"unpublished"}]'; do
+  i=$((i + 1)); rc=0; L="$TMP/cpt61c$i"; : > "$L"
+  if [ "$lst" = FAIL ]; then run_cpt "$L" FAKE_LIST_FAIL=1 -- create --name "PREVIEW-FO$i" --no-build || rc=$?
+  else run_cpt "$L" FAKE_LIST="$lst" -- create --name "PREVIEW-FO$i" --no-build || rc=$?; fi
+  if ! grep -q 'dev_theme_not_found' "$O" && [ "$(cpt_calls 'theme push' "$L")" -ge 1 ]; then ok
+  else bad "P61c-fail-open[$i]" "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+done
+# P61d: a toml with no `theme =` at all never reaches the check — that config is refused first,
+# and a refusal about the overlay source would name a value the file does not have
+F61="$CPTD/toml/no-dev-theme.toml"
+printf '[environments.development]\nstore = "acme-dev"\npassword = "shptka_fixture1234"\n' > "$F61"
+rc=0; L="$TMP/cpt61d"; : > "$L"
+run_cpt "$L" TOML_PATH="$F61" FAKE_LIST="$DEVLESS" -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=no uncommented ' "$O" && ! grep -q 'dev_theme_not_found' "$O" \
+   && [ ! -s "$L" ]; then ok
+else bad P61d-no-theme-line "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # ------------------------------ create-preview-theme.sh shared dev theme guard --
 # P54 (bug): `refresh --theme <the toml's theme id>` overwrote the SHARED dev theme's code — the id
@@ -3112,8 +3165,8 @@ else bad P24-throttle-retry-succeeds "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' 
 # slot burns toward the 20/100 cap with no `created_theme=` line
 rc=0; L="$TMP/cpt25"; : > "$L"; MK="$TMP/cpt25.mark"; rm -f "$MK"
 run_cpt "$L" FND_CPT_THROTTLE_WAITS="0" FAKE_PUSH_CODE_FAIL='│  Throttled' FAKE_LIST_MARK="$MK" \
-  FAKE_LIST='[{"id":999,"name":"Live Theme","role":"live"}]' \
-  FAKE_LIST2='[{"id":999,"name":"Live Theme","role":"live"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
+  FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"}]' \
+  FAKE_LIST2='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
   -- create --name "PREVIEW-T" --no-build || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=push_code_failed' "$O" && grep -q 'cause=throttled' "$O" \
    && grep -q '^created_theme=777$' "$O" && grep -q '^created_theme_deleted=yes$' "$O" \
@@ -3124,12 +3177,25 @@ else bad P25-throttled-orphan-reaped "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' 
 # the same name is never deleted (Shopify allows duplicate names)
 rc=0; L="$TMP/cpt25b"; : > "$L"; MK="$TMP/cpt25b.mark"; rm -f "$MK"
 run_cpt "$L" FND_CPT_THROTTLE_WAITS="0" FAKE_PUSH_CODE_FAIL='│  Throttled' FAKE_LIST_MARK="$MK" \
-  FAKE_LIST='[{"id":600,"name":"PREVIEW-T","role":"unpublished"}]' \
-  FAKE_LIST2='[{"id":600,"name":"PREVIEW-T","role":"unpublished"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
+  FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":600,"name":"PREVIEW-T","role":"unpublished"}]' \
+  FAKE_LIST2='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":600,"name":"PREVIEW-T","role":"unpublished"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
   -- create --name "PREVIEW-T" --no-build || rc=$?
 if [ "$rc" -ne 0 ] && grep -q '^created_theme=777$' "$O" \
    && grep -q 'argv=theme delete.*777' "$L" && ! grep -q 'argv=theme delete.*600' "$L"; then ok
 else bad P25b-preexisting-name-kept "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
+
+# P25c (bug): attribution is "appeared ACROSS THE PUSH", and the snapshot is only worth that if it
+# is taken across the push. The overlay-source check now loads the listing before the build, so a
+# cached snapshot would be minutes stale — old enough for a parallel run to have created a theme
+# wearing this name, which would then read as this run's orphan and be hard-deleted.
+rc=0; L="$TMP/cpt25c"; : > "$L"; MK="$TMP/cpt25c.mark"; rm -f "$MK"
+run_cpt "$L" FND_CPT_THROTTLE_WAITS="" FAKE_PUSH_CODE_FAIL='Error: socket hang up' FAKE_LIST_MARK="$MK" \
+  FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"}]' \
+  FAKE_LIST2='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
+  -- create --name "PREVIEW-T" --build-script dropmark || rc=$?
+if [ "$rc" -ne 0 ] && grep -q 'error=push_code_failed' "$O" && ! grep -q '^created_theme' "$O" \
+   && ! grep -q 'argv=theme delete' "$L"; then ok
+else bad P25c-concurrent-theme-kept "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
 
 # P26 (pin): a throttle that fired BEFORE the server-side create (no new id in the fresh list) must
 # not invent a `created_theme=` claim or delete anything
@@ -3238,7 +3304,7 @@ else bad P53h-bare-warn "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 # P53i (bug): the read-back runs on the --reuse path too — the drop is likeliest there, and a
 # reused theme must still not be deleted over a warning
 rc=0; L="$TMP/cpt53i"; : > "$L"
-run_cpt "$L" FAKE_LIST='[{"id":555,"name":"PREVIEW-V","role":"unpublished"}]' \
+run_cpt "$L" FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"PREVIEW-V","role":"unpublished"}]' \
   FND_CPT_OVERLAY_VERIFY_WAIT=0 FAKE_PULL_TPL=1 FAKE_VERIFY_DROP="templates/product.json" \
   -- create --name "PREVIEW-V" --reuse --no-build || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && grep -q '^reused=true$' "$O" \
@@ -3300,8 +3366,8 @@ else bad P57-delete-failed-overlay "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\
 # … and the throttled-create orphan reap (P25 shape)
 rc=0; L="$TMP/cpt57b"; : > "$L"; MK="$TMP/cpt57b.mark"; rm -f "$MK"
 run_cpt "$L" FND_CPT_THROTTLE_WAITS="0" FAKE_PUSH_CODE_FAIL='│  Throttled' FAKE_LIST_MARK="$MK" FAKE_DELETE_FAIL=1 \
-  FAKE_LIST='[{"id":999,"name":"Live Theme","role":"live"}]' \
-  FAKE_LIST2='[{"id":999,"name":"Live Theme","role":"live"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
+  FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"}]' \
+  FAKE_LIST2='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":999,"name":"Live Theme","role":"live"},{"id":777,"name":"PREVIEW-T","role":"unpublished"}]' \
   -- create --name "PREVIEW-T" --no-build || rc=$?
 if [ "$rc" -ne 0 ] && grep -q 'error=push_code_failed' "$O" && grep -q 'cause=throttled' "$O" \
    && grep -q '^created_theme=777$' "$O" && grep -q '^created_theme_deleted=failed$' "$O" \
@@ -3811,7 +3877,7 @@ theme = "111"
 store = "store-a"
 theme = "333"
 '
-ENV_LIST='[{"id":111,"name":"[PROD] theme","role":"unpublished"},{"id":222,"name":"[ELC-1] session","role":"unpublished"},{"id":444,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"[ELC-2] session","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]'
+ENV_LIST='[{"id":111,"name":"[PROD] theme","role":"unpublished"},{"id":333,"name":"[STG] theme","role":"unpublished"},{"id":222,"name":"[ELC-1] session","role":"unpublished"},{"id":444,"name":"[DEV] Kever","role":"development"},{"id":555,"name":"[ELC-2] session","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]'
 env_toml() { printf '%s' "$2" > "$CPTD/toml/$1.toml"; printf '%s' "$CPTD/toml/$1.toml"; }
 
 # P59 (blocker): `pin --theme <id> --env dev` vets the id against the DEV block's store with the DEV

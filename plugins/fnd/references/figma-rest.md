@@ -87,8 +87,8 @@ script does not.
 ## The script
 
 ```bash
-<plugin root>/scripts/figma-rest.sh <figma-url | --file <key> --node <id>> [--out <dir>]
-    [--env <dotenv>] [--scale <N>] [--no-variables] [--no-image] [--force] [--json]
+<plugin root>/scripts/figma-rest.sh <figma-url | --file <key> --node <id>> [--out <dir>] [--env <dotenv>]
+    [--scale <N>] [--no-variables] [--no-image] [--force] [--json]
 <plugin root>/scripts/figma-rest.sh --check [--env <dotenv>]
 <plugin root>/scripts/figma-rest.sh --policy [--env <dotenv>]
 <plugin root>/scripts/figma-rest.sh --probe <figma-url | --file <key>> [--env <dotenv>]
@@ -108,6 +108,7 @@ script does not.
 | `--check` | — | probe the credential only: `GET /v1/me`. Takes no target |
 | `--policy` | — | print the resolved source policy; no network, no out-dir gate. Takes no target |
 | `--probe` | — | **the freshness probe**: ask Figma when the FILE last changed (`GET /v1/files/<key>?depth=1`) and print `ok=1 file_key=… [node_id=…] last_modified=…`. Nothing is written, no out-dir gate, and the link's `node-id` is optional |
+| `--help` / `-h` | — | print the call shapes above and exit 0 — the script's own copy, answered before the token read and the mode gate, and matched anywhere in the args (so a flag VALUE of `-h` reads as a usage question too) |
 
 **Mode precedence.** The three mode flags are three different questions, and the gate runs right
 after parsing — before the credential, before the target, before anything is fetched:

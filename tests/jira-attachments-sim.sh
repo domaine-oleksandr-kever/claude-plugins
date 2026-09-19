@@ -1035,5 +1035,81 @@ if [ "$rc" -eq 0 ] && [ "$(field 102 2 "$O")" = cached ] && [ ! -s "$CONTENT" ] 
    && [ ! -d "$OUT14U2/102-recording.mov.frames" ]; then ok
 else bad J14u2-noframes-cached "rc=$rc row=$(grep '^102' "$O") content=$(tr '\n' ' ' < "$CONTENT") ffmpeg=$(wc -l < "$FFLOG" | tr -d ' ')"; fi
 
+# ------------------------------------------------------- 15. --help, and the flags that name it --
+# `--help` used to be error=unknown_arg, so the one question a model asks before its first call was
+# the one call that could not be answered. It answers before the shared lib, the credential read
+# and the cloudId lookup — no dotenv, no token, nothing on the wire — and it prints the header's own
+# `# Usage:` block: two hand-maintained copies of a call shape are two copies free to disagree, and
+# the header is the one a reader lands on.
+JAH="$TMP/ja-usage-header"
+awk '/^# Usage:/ { f = 1 } f { if ($0 == "#" || $0 !~ /^#( |$)/) exit; sub(/^# ?/, ""); print }' \
+  "$JA" > "$JAH"
+for ha in --help -h; do
+  rc=0; ARGV="$TMP/argv15$ha"; : > "$ARGV"
+  CURL_ARGV="$ARGV" JA_EMAIL="" JA_TOKEN="" ja "$NOCRED" "$ha" >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ ! -s "$ARGV" ] \
+     && [ "$(wc -l < "$JAH" | tr -d ' ')" -eq 5 ] && sed '$d' "$O" | diff -q - "$JAH" >/dev/null; then ok
+  else bad "J15-help[$ha]" "rc=$rc diff=$(sed '$d' "$O" | diff - "$JAH" | head -c 300 | tr '\n' ';') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+done
+# J15b: the pointer line that follows it names where the full contract lives
+if [ "$(tail -1 "$O")" = "Full contract: the header of $JA" ]; then ok
+else bad J15b-help-pointer "tail=$(tail -1 "$O")"; fi
+# J15c: --help among a real call's args is still a usage question — no lookup, no download
+for hc in "ELC-1309 --out $OUT --help" "--check -h" "ELC-1309 --ids 101 --help"; do
+  rc=0; ARGV="$TMP/argv15c"; : > "$ARGV"; CONTENT="$TMP/content15c"; : > "$CONTENT"
+  CURL_ARGV="$ARGV" CONTENT_LOG="$CONTENT" ja "$REPO" $hc >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$ARGV" ] && [ ! -s "$CONTENT" ]; then ok
+  else bad "J15c-help-mid-args[$hc]" "rc=$rc out=$(head -c 120 "$O" | tr '\n' ' ') argv=$(tr '\n' ';' < "$ARGV")"; fi
+done
+# J15d: …and the refusal a guessed flag gets names the way out in one step
+rc=0; ARGV="$TMP/argv15d"; : > "$ARGV"
+CURL_ARGV="$ARGV" ja "$REPO" ELC-1309 --bogus >"$O" 2>"$E" || rc=$?
+assert J15d-unknown-arg-trailer 2 "$rc" "$E" "error=unknown_arg arg=--bogus (--help prints usage)"
+if [ ! -s "$ARGV" ]; then ok; else bad J15d-unknown-arg-request "a refused flag still reached the network"; fi
+
+# J15g: a flag VALUE of `-h` is a usage question too — positional matching is what makes the arm
+# answer before the parse loop, and the header says so where a reader of the pointer line lands
+rc=0; ARGV="$TMP/argv15g"; : > "$ARGV"
+CURL_ARGV="$ARGV" ja "$REPO" ELC-1309 --site -h >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$ARGV" ] && grep -q 'VALUE of `-h`' "$JA"; then ok
+else bad J15g-help-in-value-position "rc=$rc argv=$(tr '\n' ';' < "$ARGV") out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+
+# J15h (drift guard): the REFERENCE carries a third copy of the call shapes, and a third copy is a
+# third thing free to disagree. Column alignment is presentation; the flag SET and ORDER are the
+# contract, so both copies are squeezed to one line per call shape before the diff.
+norm_usage() { # <file> — strips the `<plugin root>/scripts/` prefix and joins continuation lines
+  sed 's/^[[:space:]]*//; s|^<plugin root>/scripts/||' "$1" \
+    | awk '
+        index($0, "jira-attachments.sh ") == 1 { if (c != "") print c; c = $0; next }
+        c != "" && NF { c = c " " $0; next }
+        { if (c != "") print c; c = "" }
+        END { if (c != "") print c }' \
+    | sed 's/  */ /g; s/[[:space:]]*$//'
+}
+JAR="$ROOT/plugins/fnd/references/jira-attachments.md"
+JARB="$TMP/ja-ref-block"
+awk '/^## The script$/ { f = 1 } f && /^```bash$/ { b = 1; next } b && /^```$/ { exit } b { print }' \
+  "$JAR" > "$JARB"
+if [ "$(norm_usage "$JARB" | grep -c .)" -eq 2 ] \
+   && norm_usage "$JARB" | diff -q - <(norm_usage "$JAH") >/dev/null; then ok
+else bad J15h-reference-matches-usage "diff=$(norm_usage "$JARB" | diff - <(norm_usage "$JAH") | head -c 300 | tr '\n' ';')"; fi
+
+# J15e (bug): `--cloud-id <site host>` — the value a caller reaches for first, since the site host is
+# the id they have — used to be a bare `error=invalid_cloud_id` with nothing to act on. The line
+# names the value, what the flag takes, and the flag the site host belongs to.
+rc=0; ARGV="$TMP/argv15e"; : > "$ARGV"
+CURL_ARGV="$ARGV" ja "$REPO" ELC-1309 --out "$OUT" --cloud-id meetdomaine.atlassian.net >"$O" 2>"$E" || rc=$?
+assert J15e-invalid-cloud-id 2 "$rc" "$E" "error=invalid_cloud_id value=meetdomaine.atlassian.net"
+for want in "cloud UUID" "--site" "--check" "drop the flag"; do
+  if grep -qF -- "$want" "$E"; then ok; else bad J15e-hint "the refusal never mentions '$want': $(head -c 200 "$E" | tr '\n' ' ')"; fi
+done
+if [ ! -s "$ARGV" ]; then ok; else bad J15e-no-request "a malformed cloud id still reached the network"; fi
+# J15f: the value is echoed back, so it may not forge a line of its own — a cloudId carrying a
+# newline reaches this printf from the site's OWN `tenant_info` answer, which is remote data
+rc=0; NL="$(printf 'a\nerror=forged')"
+ja "$REPO" ELC-1309 --out "$OUT" --cloud-id "$NL" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 2 ] && [ "$(grep -c '^error=' "$E")" -eq 1 ] && ! grep -q '^error=forged' "$E"; then ok
+else bad J15f-value-cannot-forge "rc=$rc err=$(head -c 200 "$E" | tr '\n' ';')"; fi
+
 echo "jira-attachments-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

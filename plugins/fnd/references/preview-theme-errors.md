@@ -85,6 +85,17 @@ in the Bash tool's shell.
   not "the theme is gone". Confirm the id (a preview URL's `?preview_theme_id=…`), or make a fresh
   preview with `create --name "<name>" --reuse` and hand the reviewer the new link (add
   `--pin-toml` only when the lost id was the one pinned in `shopify.theme.toml`).
+- **`error=dev_theme_not_found`** (`create` and `refresh`) → nothing was built and nothing was
+  pushed. Same evidence and same unliftability as `theme_not_found`, about the **overlay source**
+  instead of the target: the `theme =` id in `shopify.theme.toml` — the theme the customizer
+  settings are copied from — is not on the store. Every fix REWRITES `shopify.theme.toml` and
+  repoints every later preview's settings at a different theme, so it is the developer's call and
+  never a silent recovery: report the line, ask which theme is the new source, then `pin --theme
+  <ID>` (which vets it) or let them edit the toml, and re-run. An autonomous phase ESCALATEs — it
+  pins nothing. Before this check the code push landed
+  and only the settings pull failed, leaving the theme with this branch's code over whatever
+  settings it already had (`error=overlay_pull_failed` + `mixed_state=…`, still the backstop when
+  the listing could not answer).
 - **`error=refresh_unverifiable`** / **`error=reuse_unverifiable`** → nothing was pushed or
   created. The recorded-id exemption is an **id lookup across every workspace under the current
   directory, not provenance** — the gate in `<plugin root>/references/session-theme.md` still

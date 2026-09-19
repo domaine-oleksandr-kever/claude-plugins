@@ -152,6 +152,11 @@
 # A dev-theme pull that wrote no *.json at all is `error=overlay_pull_failed` on a fresh create
 # (the theme is deleted) and `overlay=empty` + `warn=overlay_empty` on --reuse (nothing overlaid,
 # the theme keeps its settings) — gated before the read-back, independent of the switch below.
+# The overlay SOURCE is vetted before either build: when the listing answered, names themes and
+# spells ids this script can match but does NOT carry the toml's `theme =` id, create and refresh
+# both refuse `error=dev_theme_not_found` — nothing built, nothing pushed. Same evidence bar and
+# same unliftability as refresh's `theme_not_found`; without it a deleted dev theme let the code
+# push land and only the settings pull fail, leaving the theme in that mixed state.
 # FND_CPT_OVERLAY_VERIFY=0 skips the read-back; FND_CPT_OVERLAY_VERIFY_WAIT sets its re-check pause.
 # The read-back pulls go through push_retry too, so on a throttled store they can add the
 # $FND_CPT_THROTTLE_WAITS pauses AFTER every piece of real work has already succeeded.
@@ -438,6 +443,23 @@ assert_not_dev_theme() { # $1 = target id, $2 = context name for the message
   printf 'error=dev_theme_write_refused theme=%s name=%s — the shopify.theme.toml of this checkout names this id as the shared dev theme (its settings source, or an id a pin superseded — unless you pinned this id by hand) and no workspace under .claude/tasks records it as session-theme; nothing was pushed\n' "$1" "$2"
   printf 'hint=if this IS your session theme, record it first — `- <date> session-theme: %s (<name>) <preview_url>` in .claude/tasks/<work-id>/notes.md (session-theme.md step 4) — and re-run; otherwise push to a session/preview theme (`create --name "<name>" --reuse --pin-toml` makes one), or pass --allow-dev-theme to overwrite the shared dev theme deliberately\n' "$1"
   exit 1
+}
+
+# The overlay SOURCE is as deletable as the target, and nothing used to vet it: the code push does
+# not use DEV_THEME_ID, so a stale `theme =` line let the push land and only the settings pull fail
+# — the theme then carried this branch's code over the settings it already had. Same evidence bar
+# as refresh's theme_not_found: only a listing that answered, parsed and spells ids this matcher
+# can read may claim absence, and no flag lifts it (absence is deletion, not an outage).
+assert_dev_theme_listed() {
+  # `pin` never gets here and every other mode has already refused an empty or non-numeric value —
+  # but a claim about an id has to be about an id
+  case "${DEV_THEME_ID:-}" in ''|*[!0-9]*) return 0 ;; esac
+  load_theme_list
+  if [ "$THEME_LIST_SILENT" -eq 0 ] && [ "$THEME_LIST_OK" -eq 1 ] \
+     && theme_list_speaks_numeric_ids && ! theme_found_by_id "$DEV_THEME_ID"; then
+    fail "dev_theme_not_found dev_theme=$DEV_THEME_ID store=$STORE — the theme pinned in $TOML (the overlay source) is not listed on the store (a deleted theme looks like this); nothing was built or pushed; pin an existing theme with \`pin --theme <ID>\` or fix the toml"
+  fi
+  return 0
 }
 # Tolerant: `2>/dev/null` swallows jq parse errors (load_theme_list decides what an unparseable
 # listing means), and `|| true` neutralizes a no-match / SIGPIPE pipeline status so a
@@ -946,6 +968,7 @@ case "$MODE" in
       if [ -n "$EXISTING" ]; then assert_not_live "$EXISTING"; assert_not_dev_theme "$EXISTING" "$NAME"; fi
     fi
 
+    assert_dev_theme_listed
     start_settings_pull
     run_build
     TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
@@ -961,7 +984,10 @@ case "$MODE" in
     else
       # Snapshot the ids already wearing this name BEFORE the push: `--unpublished` creates the
       # theme server-side before uploading, so a failed upload needs to know which id APPEARED to
-      # reap it — and must never touch a same-named theme that pre-existed.
+      # reap it — and must never touch a same-named theme that pre-existed. The cached listing is
+      # older than the build, so it is dropped first: a same-named theme a CONCURRENT run created
+      # while this one was building would otherwise read as this run's orphan and be deleted.
+      THEME_LIST_LOADED=0; THEME_LIST_OK=0; THEME_LIST_SILENT=1; THEME_LIST=""
       load_theme_list
       PRE_NAME_IDS="$(theme_ids_by_name "$NAME" | grep '^[0-9][0-9]*$' | tr '\n' ' ' || true)"
       if ! push_retry "$ERR" shopify theme push --store "$STORE" --unpublished --theme "$NAME" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json; then
@@ -1060,6 +1086,7 @@ case "$MODE" in
        && theme_list_speaks_numeric_ids && ! theme_found_by_id "$TARGET"; then
       fail "theme_not_found theme=$TARGET store=$STORE — no theme with that id is listed on the store (a deleted preview theme looks like this); nothing was built or pushed; check the id (a preview URL's \`?preview_theme_id=…\`) or make a fresh one with \`create --name \"<name>\" --reuse\` (add --pin-toml only if the id you lost was the one pinned in shopify.theme.toml)"
     fi
+    assert_dev_theme_listed
 
     run_build
     TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
