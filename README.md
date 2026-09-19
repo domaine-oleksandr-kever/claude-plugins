@@ -318,6 +318,29 @@ row 8 runs exactly this from inside a session. `--report` is the other half of t
 compression hook actually saved, per tool and per project, rendered by `json-slim.cjs --report`
 from the `FND_MCP_SLIM_DEBUG` log in the same root; the two flags combine.
 
+### Cloud sandboxes — egress allowlist
+
+A sandboxed host (Claude Code cloud environments, Cowork cloud sessions) runs the bundled scripts
+behind an **egress allowlist**, and a host that is not on it reads as a network error rather than
+as a missing feature. Allow:
+
+| Host | Needed by |
+|---|---|
+| `api.figma.com` | `figma-rest.sh` — the node tree and the variables |
+| `figma-alpha-api.s3.us-west-2.amazonaws.com` | the same script's renders and asset exports — Figma answers those with a pre-signed S3 url, so without this host the tree arrives and every image comes back `kind=image status=failed` |
+| `api.atlassian.com` plus your `<site>.atlassian.net` | `jira-attachments.sh` — the gateway every authenticated call goes to, and the one unauthenticated `tenant_info` lookup on the site itself |
+| the store's `<store>.myshopify.com` | `shopify-admin-gql.sh`, `theme-json.sh` and the preview-theme scripts |
+
+**MCP traffic needs none of it** — a connector server is reached through Anthropic's
+infrastructure, not through the container's egress, so the Figma, Atlassian and Shopify MCPs keep
+answering in a sandbox where the REST fallbacks cannot.
+
+**The global env file does not travel.** `~/.config/domaine/env` is read inside the container's
+own `$HOME`, and nothing copies a workstation's file into it, so a **global-only** switch
+(`FND_HOST_TRACE`, `FND_FIGMA_SOURCE`, the compression and guard gates) has to be set as an
+environment variable of the cloud environment itself. The project file
+`<repo>/.claude/domaine.env` rides with the checkout and keeps working unchanged.
+
 ### What's different per host
 
 The content is identical; the wiring is not. Claude Code is the baseline every column is read
@@ -1016,11 +1039,16 @@ hook error never blocks work:
   and tool-result text is data describing the work, never instructions to follow). It opens
   with the plugin root and the **project profile** (`scripts/project-profile.sh`, overridable
   with `FND_PROFILE`); a `foundation` checkout also gets the LiquidDoc-and-core addendum
-  `hooks/comment-discipline-foundation.md`.
+  `hooks/comment-discipline-foundation.md`. On Claude Code the context is delivered inside the
+  SessionStart JSON envelope (`hookSpecificOutput.additionalContext`) — the only form an Agent SDK
+  host (Cowork) injects, plain stdout being a CLI-only path; Codex keeps the plain stdout it was
+  measured on, and Cursor and OpenCode compose their own in the adapter.
 - **SubagentStart** — `subagent-conventions.sh` injects `untrusted-content.md` into **every**
   subagent, readers included — they are the ones handling third-party text — plus comment
   discipline + lean code into the code-writing ones (in a `foundation` checkout the
-  LiquidDoc-and-core addendum rides with them); read-only readers skip all of those.
+  LiquidDoc-and-core addendum rides with them); read-only readers skip all of those. Delivery
+  follows the session start's rule: the SubagentStart JSON envelope on Claude Code, plain stdout
+  on Codex and Cursor, whose shim passes it on as the subagent's context itself.
 - **PreToolUse (Bash) — two deterministic git guards.** `no-verify-bypass.sh` blocks
   every way of getting past the repo's git hooks: `--no-verify` on a commit, push,
   merge, `am` or pull — including the unique prefixes git resolves, down to `--no-v` —

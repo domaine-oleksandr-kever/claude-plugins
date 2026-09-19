@@ -267,7 +267,8 @@ fi
 CURSOR_SHIM_INJECTED="store-access comment-discipline-foundation"
 # The conventions the script cats through `for f in … ; do cat "$root/hooks/$f.md"` — a runtime
 # path, so the file name never appears literally and the census has to read the loop's word list.
-SS_LOOP_NAMES="$(sed -n 's/^for f in \(.*\); do$/\1/p' "$SS_SCRIPT" | tr '\n' ' ')"
+# Indented: the composition sits inside the function whose output the Claude host gets as JSON.
+SS_LOOP_NAMES="$(sed -n 's/^[[:space:]]*for f in \(.*\); do$/\1/p' "$SS_SCRIPT" | tr '\n' ' ')"
 for f in "$PLUGIN_DIR"/hooks/*.md; do
   [ -f "$f" ] || continue
   n="$(basename "$f" .md)"

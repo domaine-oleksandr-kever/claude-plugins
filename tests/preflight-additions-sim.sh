@@ -380,11 +380,13 @@ else bad gate-implement-profile "pipeline-phases.md's implement brief does not c
 # half that fails when a future edit drops the conditional from the flagship skills.
 # The per-profile START command has ONE home: session-theme.md step 5 carries both branches, and
 # every other file names the gate word, keeps its Foundation form verbatim, and points back there.
-# These clauses wrap mid-sentence, so they are matched with the file's newlines joined.
+# These clauses wrap mid-sentence, so they are matched with the file's newlines joined. The
+# separator is `[^ ]*`, not `.`: the em dash the docs use is three bytes, and in the C locale
+# these suites run under, `.` is one — spelling it `.` failed on a file nobody had touched.
 hasjoin gate-sessiontheme-spot   "$REFS/session-theme.md" \
-  '.foundation. checkout \(session line .fnd project profile: foundation.\) . .npm run dev -- --theme <id> \[--port <N>\].'
+  '.foundation. checkout \(session line .fnd project profile: foundation.\) [^ ]* .npm run dev -- --theme <id> \[--port <N>\].'
 hasjoin gate-sessiontheme-plain  "$REFS/session-theme.md" \
-  'any other checkout . .shopify theme dev --theme <id> \[--port <N>\].'
+  'any other checkout [^ ]* .shopify theme dev --theme <id> \[--port <N>\].'
 has     gate-sessiontheme-home   "$REFS/session-theme.md" 'single home of that mapping'
 hasjoin gate-sessiontheme-noline "$REFS/session-theme.md" \
   'No profile line in the session[^|]{0,60}the .foundation. form'
