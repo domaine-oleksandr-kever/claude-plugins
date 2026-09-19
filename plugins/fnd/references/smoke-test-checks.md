@@ -190,7 +190,9 @@ Two halves, reported separately and never inferred from each other:
   discarded here. Healthy output ends with a reduction line of the shape
   `json-slim: <bytes> → <bytes> bytes (<pct>% reduction)`, preceded by the
   `unwrapped MCP text envelope` notice for this fixture. 🟢 on that pair, 🔴 on a crash or a
-  non-zero exit.
+  non-zero exit. A re-run on this fixture prints the same pair: it compresses, so neither of
+  json-slim's refusals (`[declined earlier this session]`, `[already json-slim output]`) can
+  answer for it — a bracketed tag here means the wrong path was measured.
 
   The fixture ships with the repository checkout, not inside the plugin directory: on installs
   that carry only the plugin subdirectory the path does not exist — that is 🟡 "fixture not

@@ -2682,17 +2682,55 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     rmSync(jdir, { recursive: true, force: true });
   }
 
-  // 4b — the bypass that is not `--jq`. `--stats` is a MEASUREMENT run that hooks/mcp-whale.md
-  // promises will report the 0.0 %; a refusal answers it with no measurement at all.
+  // 4b — `--stats` is NOT a bypass. Every reader recipe passes it now, so a bypass would disarm the
+  // memo for the callers it was written for — and the flag's own promise (a measurement, never
+  // silence) is kept without re-dumping a body this session already printed once.
   {
     const fdir = mkdtempSync(path.join(tmpdir(), 'jslim-b2flags-'));
     const f = path.join(fdir, 'flags.json');
     writeFileSync(f, bigBody);
-    run([f], { FND_MCP_SLIM_DIR: fdir }); // arm the memo with a PLAIN decline
+    const first = run(['--stats', f], { FND_MCP_SLIM_DIR: fdir }); // arm the memo with a PLAIN decline
+    check('b2-stats-fresh-prints-body', first.stdout === `${bigBody}\n`
+      && new RegExp(`json-slim: ${Buffer.byteLength(bigBody)} → ${Buffer.byteLength(bigBody)} bytes \\(0\\.0% reduction\\)`).test(first.stderr),
+      `a fresh file still gets the body AND the stats line: ${JSON.stringify(first.stderr)}`);
     const stats = run(['--stats', f], { FND_MCP_SLIM_DIR: fdir });
-    check('b2-stats-bypasses-memo', stats.stdout === `${bigBody}\n` && /0\.0% reduction/.test(stats.stderr),
-      `--stats must still measure the decline it is asked about: ${JSON.stringify(stats.stderr)}`);
+    check('b2-stats-under-memo-refuses', isRefusal(stats) && !stats.stdout.includes('product-handle-1'),
+      `--stats must not re-dump a body the memo already declined: ${stats.stdout.slice(0, 160)}`);
+    check('b2-stats-under-memo-measures',
+      new RegExp(`^json-slim: ${Buffer.byteLength(bigBody)} → ${Buffer.byteLength(bigBody)} bytes \\(0\\.0% reduction\\) \\[declined earlier this session\\]$`, 'm').test(stats.stderr),
+      `…and must still answer with the 0.0 % it was asked for, tagged: ${JSON.stringify(stats.stderr)}`);
+    // the same pair for layer 1 — json-slim's OWN Gate-A output spill, which needs no memo
+    const slimOut = path.join(fdir, 'fnd-slim-out-deadbeef.json');
+    writeFileSync(slimOut, bigBody);
+    const so = run(['--stats', slimOut], { FND_MCP_SLIM_DIR: fdir });
+    check('b2-stats-slim-out-refuses', isRefusal(so) && !so.stdout.includes('product-handle-1'),
+      `an already-slimmed output is refused under --stats too: ${so.stdout.slice(0, 160)}`);
+    check('b2-stats-slim-out-measures',
+      new RegExp(`^json-slim: ${Buffer.byteLength(bigBody)} → ${Buffer.byteLength(bigBody)} bytes \\(0\\.0% reduction\\) \\[already json-slim output\\]$`, 'm').test(so.stderr),
+      `…with its own tag, so the reader knows which refusal spoke: ${JSON.stringify(so.stderr)}`);
+    // FND_NOGAIN_MEMO=0 is still the escape hatch both refusals name: the body comes back, once
+    const forced = run(['--stats', f], { FND_MCP_SLIM_DIR: fdir, FND_NOGAIN_MEMO: '0' });
+    check('b2-stats-memo-off-prints-body', forced.stdout === `${bigBody}\n` && !/\[declined earlier/.test(forced.stderr),
+      `the off switch must still force the measured run: ${forced.stdout.slice(0, 120)}`);
     rmSync(fdir, { recursive: true, force: true });
+  }
+
+  // 4c — the smoke test's own row. references/smoke-test-checks.md tells an installer that a healthy
+  // run of THIS fixture ends in a plain reduction line, and that a bracketed refusal tag there means
+  // the wrong path was measured. That claim holds only while the fixture actually compresses: a
+  // swapped-in fixture that declined would arm the memo on a second run and make the documented
+  // outcome unreachable, with nothing but the checklist's prose to say so.
+  {
+    const sdir = mkdtempSync(path.join(tmpdir(), 'jslim-smokerow-'));
+    const fx = path.join(FIX, 'mcp-envelope-jira.json');
+    const one = run(['--stats', fx], { FND_MCP_SLIM_DIR: sdir });
+    const two = run(['--stats', fx], { FND_MCP_SLIM_DIR: sdir });
+    const pct = (r) => Number((/json-slim: \d+ → \d+ bytes \(([\d.]+)% reduction\)/.exec(r.stderr) || [])[1]);
+    check('smoke-row-fixture-compresses', pct(one) > 0 && /unwrapped MCP text envelope/.test(one.stderr),
+      `the documented pair — reduction + envelope notice — must be what the row's command prints: ${JSON.stringify(one.stderr)}`);
+    check('smoke-row-rerun-is-identical', pct(two) === pct(one) && !/\[/.test(two.stderr.replace(/\[0\]/g, '')),
+      `a re-run must print the same pair, never a bracketed refusal tag: ${JSON.stringify(two.stderr)}`);
+    rmSync(sdir, { recursive: true, force: true });
   }
 
   // 4c — an identity `--jq .` prints a RE-SERIALIZED value, not the file's bytes: a pretty-printed file

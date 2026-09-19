@@ -280,7 +280,9 @@ to stdout. `--file-key <key>` supplies the header's file key when the input is n
 `<key>-<node>.nodes.json`. Vector geometry, render bounds, export settings, the instance `overrides`
 array and the other non-buildable fields are dropped by design (the PNG beside the payload is the
 visual ground truth). `--stats` adds
-`figma-node-slim: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N` on stderr. Input that is not
+`figma-node-slim: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N` on stderr — `figma-reader`
+passes it on every run and carries that reduction back as its `compression` field, so the session
+sees what the compaction saved without opening a log. Input that is not
 JSON, or not this shape, exits 2 with an `error=` line — never a stack trace.
 
 ## Degradation — a missing token never fails a design read

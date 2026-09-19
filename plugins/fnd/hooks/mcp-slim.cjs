@@ -9,7 +9,10 @@
 //         a string, a `{type:'text',text}` block, an array of such blocks, or
 //         `{content:[…],isError?}`. We MIRROR whatever shape arrives.
 //   out — `hookSpecificOutput.updatedToolOutput` (hookEventName `PostToolUse`) REPLACES
-//         the result. Print nothing → the original passes through untouched.
+//         the result. Print nothing → the original passes through untouched. Anything that IS
+//         replaced carries one `fnd-mcp-slim: <decision> <in> B → <out> B (<pct>)` line, so the
+//         compression is visible in the session and not only in the opt-in debug log (statsLine).
+//         Not host-gated: its few dozen bytes are inside every cap and net-gain gate here.
 //   arg — `--delivery=replace|additional|block[:<capBytes>]`, set by the host adapter that spawns this
 //         hook (absent = `replace`; an unrecognised token, or a malformed cap, is read as `additional`,
 //         the reading that cannot overstate). `replace`/`additional` change nothing that is emitted —
@@ -347,6 +350,41 @@ function bytesOf(v) {
 }
 const pctOf = (inB, outB) => (inB ? Math.round((1 - outB / inB) * 1000) / 10 : 0);
 
+// ------------------------------------------------------------------- in-session visibility --
+// The debug JSONL already records every decision, but it is an opt-in FILE: a session whose 260 KB
+// Jira read was cut by 77 % had no way to see that from the transcript. So every emission this hook
+// CHANGES carries one short line naming the decision and the reduction. Deliberately a line of its
+// OWN, beside the `<<full=…>>` / `ids=` handle grammar that spill-access.sh, json-slim and
+// hooks/untrusted-content.md parse — that grammar is untouched. Never on a passthrough: nothing
+// changed there, and a line claiming otherwise would be the only thing that did.
+// Not host-gated: on Codex the line rides inside the same block/stub text the adapter forwards, and
+// its few dozen bytes are charged to the channel cap like any other (an emission they push over the
+// cap takes the stub branch that cap exists for).
+const GROUP3 = /\B(?=(\d{3})+(?!\d))/g;
+function statsLine(decision, bytesIn, bytesOut) {
+  const pct = pctOf(bytesIn, bytesOut);
+  const n = (b) => String(b).replace(GROUP3, ',');
+  return `fnd-mcp-slim: ${decision} ${n(bytesIn)} B → ${n(bytesOut)} B (${pct < 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%)`;
+}
+// The line states the size of the value it is PART of, so it is built to a fixed point: measure
+// without it, re-measure with it, stop when the figure stops moving. Each pass can only lengthen the
+// number, so it settles in one or two — and what the reader sees is then the emission's real size,
+// which is also the figure the net-bigger-than-input guards check. `build(line)` renders the
+// candidate value (`null` line = the shape as it would be without the stats line); a build that
+// returns null means the shape cannot carry it and the caller falls back as before.
+function withStats(build, decision, bytesIn) {
+  let claim = null;
+  for (let i = 0; i < 4; i++) {
+    const v = build(claim === null ? null : statsLine(decision, bytesIn, claim));
+    if (v === null) return null;
+    const bytes = bytesOf(v);
+    if (claim !== null && bytes === claim) return { value: v, bytes };
+    claim = bytes;
+  }
+  const v = build(statsLine(decision, bytesIn, claim));
+  return v === null ? null : { value: v, bytes: bytesOf(v) };
+}
+
 // -------------------------------------------------------------- spill-and-stub guard (M12b) --
 
 // Default ON — only a literal `0` turns the guard off (the escape hatch: a stub is more invasive
@@ -450,7 +488,10 @@ function sampleLine(hint) {
 // `weak-gain` hands back the compressed body the stub replaced, and a non-JSON payload goes through the
 // CLI's own shape router (JSONL profiles instead of dumping rows, logs compress, anything else hands the
 // path back) — a JSONL whale is `format`-tagged broken-json/text, never `json`.
-function stubText(tool, bytes, format, hint, file, reason, perBlock) {
+// `stats` (the in-session line) rides as the SECOND line — inside the cap check below, so a stub can
+// still never outgrow the payload it replaces, and above the quoted sample, so the plugin's own voice
+// stays contiguous and the untrusted payload head stays last.
+function stubText(tool, bytes, format, hint, file, reason, perBlock, stats) {
   // The name comes from the registered MCP server, not from the payload, but it is interpolated into
   // a line written in the plugin's voice — folded so a newline in it cannot add one of its own.
   const who = String(tool || 'MCP tool').replace(LINE_BREAKS, ' ').slice(0, STUB_TOOL_MAX);
@@ -479,6 +520,7 @@ function stubText(tool, bytes, format, hint, file, reason, perBlock) {
     'That CLI handles every shape: JSON slims, JSONL profiles (never rows), logs compress, anything else hands the path back — then Read the file windowed (offset/limit) or grep it.',
     sampleLine(hint),
   ];
+  if (stats) lines.splice(1, 0, stats);
   const text = lines.join('\n');
   // Measured in BYTES, the unit the threshold and the payload gate speak.
   return Buffer.byteLength(text, 'utf8') > STUB_CAP ? lines.slice(0, -1).join('\n') : text;
@@ -602,7 +644,9 @@ function buildStub(result, tool, format, stubLimit, reason) {
   if (!s) return null; // no recovery copy → RAW passthrough (never lose the only copy)
   const h = jsonSlim().shapeHint(p.payload);
   const fmt = format || h.format;
-  return { value: stubValue(result, stubText(tool, p.bytes, fmt, h.hint, s.path, reason)), spill: s.path, format: fmt };
+  // `make` rather than a finished value: the stats line states the size of the emission it sits in, so
+  // the caller renders the stub once per fixed-point pass — over the spill that was written ONCE here.
+  return { make: (stats) => stubValue(result, stubText(tool, p.bytes, fmt, h.hint, s.path, reason, false, stats)), spill: s.path, format: fmt };
 }
 
 // The content array inside either block-array shape — a bare array of blocks, or `{content:[…]}` —
@@ -633,6 +677,10 @@ function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, kee
   let spill = null;
   let spillBytes = 0;
   let spillFormat = format;
+  // Where the ONE whole-result stats line goes, and how to re-render that block for each fixed-point
+  // pass without writing its spill again. The first stub, not the biggest: it is the one a reader
+  // meets first, and every stub after it speaks for its own block anyway.
+  let firstStub = null;
   const out = blocks.map((b, i) => {
     if (!isText(b)) return b;
     const bytes = Buffer.byteLength(b.text, 'utf8');
@@ -646,7 +694,9 @@ function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, kee
     // `spill` is the ONE path the debug line reports (`--report` pairs a later CLI run on it), so it
     // names the biggest block replaced — the whale the model is most likely to go after.
     if (bytes > spillBytes) { spill = s.path; spillBytes = bytes; spillFormat = fmt; }
-    return { ...b, text: stubText(tool, Buffer.byteLength(text, 'utf8'), fmt, h.hint, s.path, reason, true) };
+    const render = (stats) => stubText(tool, Buffer.byteLength(text, 'utf8'), fmt, h.hint, s.path, reason, true, stats);
+    if (!firstStub) firstStub = { index: i, render };
+    return { ...b, text: render() };
   });
   if (!spill) return null;
   // On the weak-gain branch `blocks` are the COMPRESSED bodies, so a block that landed under the
@@ -665,7 +715,7 @@ function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, kee
     keep(s.path);
     out[i] = { ...out[i], text: `${out[i].text}\n\n<<full=${s.path} original_block>>` };
   }
-  return { blocks: out, spill, format: spillFormat };
+  return { blocks: out, spill, format: spillFormat, firstStub };
 }
 
 // `fnd` is the block channel's instruction to the adapter (blockFit / fndDeliveryFor) and rides as a
@@ -854,11 +904,13 @@ function run(raw) {
     const s = buildStub(result, tool, slimmed.format, limit === undefined ? stubLimit : limit, reason);
     if (!s) return false;
     own(s.spill);
-    const fnd = fndDeliveryFor(s.value, 'stub');
-    emit(s.value, fnd);
+    const built = withStats(s.make, 'stub', bytesIn);
+    if (!built) return false;
+    const fnd = fndDeliveryFor(built.value, 'stub');
+    emit(built.value, fnd);
     hostDecision = 'stub';
-    dropCreated(s.value);
-    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(s.value), stages, s.spill, s.format, deliveredBytes(s.value, fnd), fnd);
+    dropCreated(built.value);
+    if (dbg) trace('stubbed', reason, bytesIn, built.bytes, stages, s.spill, s.format, deliveredBytes(built.value, fnd), fnd);
     return true;
   };
 
@@ -870,19 +922,23 @@ function run(raw) {
     if (!blocks || !originals) return false;
     const s = blockStubs(originals, blocks, tool, slimmed.format, limit === undefined ? stubLimit : limit, reason, own);
     if (!s) return false;
-    const out = Array.isArray(value) ? s.blocks : { ...value, content: s.blocks };
+    const shape = (bs) => (Array.isArray(value) ? bs : { ...value, content: bs });
+    const built = withStats((stats) => shape(stats === null ? s.blocks
+      : s.blocks.map((b, i) => (i === s.firstStub.index ? { ...b, text: s.firstStub.render(stats) } : b))), 'stub', bytesIn);
+    if (!built) return false;
+    const out = built.value;
     // The net gate the compressed path has, which this route lacked: on the weak-gain branch every KEPT
     // block pays a ~130 B `original_block` handle, so a long array of thin blocks can come out BIGGER
     // than what arrived while still logging `stubbed`. Passthrough (or the caller's compressed path)
     // wins there — the guard exists to protect context, never to grow it. The per-block spills already
     // written stay on disk for the TTL sweep; they are content-addressed, so unlinking them could break
     // another invocation's live handle.
-    if (bytesOf(out) >= bytesIn) return false;
+    if (built.bytes >= bytesIn) return false;
     const fnd = fndDeliveryFor(out, 'stub');
     emit(out, fnd);
     hostDecision = 'stub';
     dropCreated(out);
-    if (dbg) trace('stubbed', reason, bytesIn, bytesOf(out), stages, s.spill, s.format, deliveredBytes(out, fnd), fnd);
+    if (dbg) trace('stubbed', reason, bytesIn, built.bytes, stages, s.spill, s.format, deliveredBytes(out, fnd), fnd);
     return true;
   };
 
@@ -929,13 +985,18 @@ function run(raw) {
   if (!full) { dropCreated(); trace('passthrough', 'spill-write-failure', bytesIn, bytesIn, [], null); return; }
   const fullPath = own(full.path);
 
-  const value = attachMarker(slimmed, `\n\n<<full=${fullPath} original_result>>`);
-  if (value === null) { // could not attach a handle safely → passthrough (no orphan)
+  // The stats line goes on its own line ABOVE the handle, so the handle's own grammar is byte-identical
+  // to what every reader of it has always parsed.
+  const built = withStats(
+    (stats) => attachMarker(slimmed, `${stats ? `\n\n${stats}` : ''}\n\n<<full=${fullPath} original_result>>`),
+    'compressed', bytesIn);
+  if (built === null) { // could not attach a handle safely → passthrough (no orphan)
     if (full.created) created.push(fullPath);
     dropCreated();
     trace('passthrough', 'transform-error', bytesIn, bytesIn, [], null);
     return;
   }
+  const value = built.value;
 
   // Final net check: every gain gate upstream measures the BLOCK, before this ~130 B recovery handle and
   // the re-escaping the envelope adds around it, so a thin win (one dropped null in a big object) can
@@ -944,7 +1005,7 @@ function run(raw) {
   // it — including the crush spills inside slim(), whose markers left with the body. `full.created` is
   // the rule's second half: spill names are content-addressed, so a file this run merely REUSED may
   // still be the target of an EARLIER invocation's live handle, and deleting it would break that.
-  const outBytes = bytesOf(value);
+  const outBytes = built.bytes;
   if (outBytes >= bytesIn) {
     if (full.created) created.push(fullPath);
     dropCreated();

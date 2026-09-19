@@ -63,7 +63,10 @@ or more links, or any Notion doc with sub-pages, always delegate.
 `doc-reader` saves its own extract when briefed with the workspace path — always pass it.
 When the readers return, check every `saved_to`: empty while you *did* pass a workspace
 path means the save never landed (a denied `Write` in plan mode, say) — write the returned
-extract to the workspace yourself before proceeding.
+extract to the workspace yourself before proceeding. Each reader's `compression` joins the
+one line the ingest step reports to the developer
+(`task-workspace.md` → Read rule, compression) — a doc that compressed is part of what the
+plugin saved on this task.
 Only an inline read (the §2 fallback) saves manually: the **extract** (§2's "what the
 task needs" — never the raw page) to `.claude/tasks/<work-id>/doc-<slug>-<hash>.md` — file format
 and frontmatter: `<plugin root>/references/task-workspace.md`; freshness probes:

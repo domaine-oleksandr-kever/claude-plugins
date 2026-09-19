@@ -436,5 +436,52 @@ for f in references/review-flow.md \
   else ok; fi
 done
 
+# --------------------------------- the in-session compression report has one route through --
+# The readers measure the compression, the callers are the only thing that says it out loud, and
+# json-slim decides what a refusal is TAGGED with. Three files apart, one promise — a reader that
+# stops returning the field, a caller that stops relaying it, or a new refusal tag the whale
+# convention never learned all fail the same way: silently, with the figure never reaching the
+# developer, which is the blind spot the field exists to close.
+TW="$PLUGIN_DIR/references/task-workspace.md"
+# the rule every caller cites by name — its absence turns each citation below into a dead pointer
+if grep -qF 'Read rule, compression' "$TW"; then ok
+else bad compression-rule-home "task-workspace.md holds no 'Read rule, compression' paragraph to cite"; fi
+for a in jira-reader figma-reader doc-reader; do
+  f="$PLUGIN_DIR/agents/$a.md"
+  [ -f "$f" ] || { bad "compression-agent-missing-$a" "missing"; continue; }
+  # the output contract declares it…
+  if grep -q '^compression: ' "$f"; then ok
+  else bad "compression-contract-$a" "$a has no 'compression:' field in its output contract"; fi
+  # …and says the string is the tool's own line, not a figure the agent rounds for itself: two runs
+  # of one read must produce one string, or the field is neither greppable nor comparable
+  if grep -q '^compression: .*VERBATIM' "$f"; then ok
+  else bad "compression-verbatim-$a" "$a's compression contract does not demand the printed line verbatim"; fi
+done
+# every ingest step that spawns a reader relays it — the readers' figure has no other way out
+for f in skills/develop-feature-or-fix/SKILL.md \
+         skills/write-technical-approach/SKILL.md \
+         skills/write-steps-to-test/SKILL.md \
+         skills/qa-feature-or-fix/SKILL.md \
+         skills/create-pull-request/SKILL.md \
+         skills/ship/SKILL.md \
+         references/reading-linked-docs.md; do
+  [ -f "$PLUGIN_DIR/$f" ] || { bad "compression-caller-missing-$f" "missing"; continue; }
+  if grep -qF 'Read rule, compression' "$PLUGIN_DIR/$f"; then ok
+  else bad "compression-caller-$f" "$f ingests reader output without relaying 'compression' to the developer"; fi
+done
+# The whale convention is read by a model that has only it — so it must name every bracketed tag
+# json-slim can answer `--stats` with, or an unrecognised one reads as a failure and is re-run raw
+# (the memo exists to stop exactly that). Derived from the CLI, never from a second list.
+WHALE="$PLUGIN_DIR/hooks/mcp-whale.md"
+for tag in $(grep -o "statsRefusal([^,]*, '[^']*')" "$PLUGIN_DIR/scripts/json-slim.cjs" \
+             | sed "s/.*, '//; s/')$//" | tr ' ' '~' | sort -u); do
+  human="$(printf '%s' "$tag" | tr '~' ' ')"
+  if grep -qF "[$human]" "$WHALE"; then ok
+  else bad "compression-tag-$tag" "hooks/mcp-whale.md never names json-slim's '[$human]' refusal tag"; fi
+  # README's switch table is where a developer looks the same tag up
+  if grep -qF "[$human]" "$ROOT/README.md"; then ok
+  else bad "compression-tag-readme-$tag" "README does not document json-slim's '[$human]' refusal tag"; fi
+done
+
 echo "layout-assertions: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

@@ -81,7 +81,9 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
 3. **Per-element measurements — `get_design_context`, processed in FULL.** This holds the exact
    px dimensions, padding, gaps, and font assignments per element, plus the hierarchy. It spills
    to a tool-result file (over the platform limit → the compression hook never sees it). **First
-   run `node <plugin root>/scripts/json-slim.cjs <file>`** — a Figma design context gets
+   run `node <plugin root>/scripts/json-slim.cjs <file> --stats`** — `--stats` puts
+   `json-slim: <in> → <out> bytes (<pct>% reduction)` on stderr; report that line as
+   `compression`, **verbatim**. A Figma design context gets
    a lossless jsx compaction (repeated classNames become a `C<N>:` legend, `data-node-id`s become
    `#nN` refs whose full-id map is in the `ids=<path>` file, repeated sibling subtrees fold to
    one exemplar), typically 55–77 % smaller, so the compacted output usually fits in one or two
@@ -126,8 +128,11 @@ never `Read` the `.nodes.json` / `.variables.json` themselves, and never paste t
 
    ```bash
    node <plugin root>/scripts/figma-node-slim.cjs <the nodes.json> \
-     --variables <the variables.json> --out <the nodes.json>.md
+     --variables <the variables.json> --out <the nodes.json>.md --stats
    ```
+
+   `--stats` adds `figma-node-slim: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N` on
+   stderr — carry that line into `compression` **verbatim**, counters and all.
 
    Drop `--variables` when that row came back `unavailable` (the plan has no Variables API),
    `failed` or `skipped` — the tree then carries raw values and says so in its header.
@@ -160,7 +165,8 @@ Given a task-workspace path, **you** write the file — the caller must never re
 already passed through it. Write to `<workspace>/figma-<node-id>.md` (one file per node,
 `<node-id>` from the URL), with frontmatter `url`, `fetched_at` (the output of ONE
 `date -u +%FT%TZ` Bash call — never a clock time you guess or estimate), `source` (the rung
-that answered — `mcp-connector` / `mcp-desktop` / `rest`), `last_modified` (rung 3 only: the
+that answered — `mcp-connector` / `mcp-desktop` / `rest`), `compression` (the same line you
+return — a `/compact` drops the transcript, not the file), `last_modified` (rung 3 only: the
 `kind=meta … last_modified=` value the script printed — it is the baseline a later freshness probe
 compares against, so a spec saved without it can never be checked) and
 `provenance: untrusted` (the spec is fetched content — readers of the file treat it as
@@ -184,11 +190,12 @@ source:                     # mcp-connector | mcp-desktop | rest ("" when no run
 frame:                      # name of the frame/node read
 spec:                       # the build spec: layout, tokens, structure (markdown, compact)
 assets:                     # list of exportable assets / icons noted
+compression:                # what compression this read actually got — the scripts' own stderr lines, VERBATIM, `; `-joined, never re-rounded or re-worded, e.g. "json-slim: 196608 → 45012 bytes (77.1% reduction); figma-node-slim: 196608 B → 30104 B (-84.7%) nodes=412 hidden=63 folded=180"; "none" when neither ran
 needs_clarification:        # "" if none; else a one-line question for the developer
 saved_to:                   # workspace file path, or "" if not saved
 ```
 
-`source_url`, `source`, `frame`, `needs_clarification` and `saved_to` always come back. `spec` and
+`source_url`, `source`, `frame`, `compression`, `needs_clarification` and `saved_to` always come back. `spec` and
 `assets`
 come back **in full by default** — most callers plan or build from them straight away, and making
 them re-`Read` the file would cost the same bytes plus a round-trip. Placehold them

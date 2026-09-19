@@ -3353,15 +3353,25 @@ if (require.main === module) {
   // B2 — the two re-run guards, before ANY body is read (a refusal that first slurps the file has
   // already paid the cost it exists to avoid). FILE runs only: a stdin stream has no identity to
   // recognize or remember, so those paths are untouched. A NARROWING `--jq` bypasses both — it is the
-  // documented recovery after a decline and answers a sub-path, not the file. So does `--stats`: that
-  // is a MEASUREMENT run, and mcp-whale.md promises it reports the 0.0 % — a refusal would answer it
-  // with no measurement at all. FND_NOGAIN_MEMO=0 turns
+  // documented recovery after a decline and answers a sub-path, not the file. FND_NOGAIN_MEMO=0 turns
   // BOTH refusals off, which is the escape hatch each of them names. Both print ONE line and exit 0:
   // a refusal is not an error, and a non-zero exit would read as "json-slim broke".
+  // `--stats` does NOT bypass them — the reader recipes pass it on every run now, and a bypass there
+  // would disarm the guard for exactly the callers it was written for. It keeps its own promise
+  // instead: the refusal is answered WITH the measurement it asks for (statsRefusal below), which is
+  // the same 0.0 % the re-run would have printed after re-dumping the body.
   // NB any FUTURE flag that changes what the pipeline can PRODUCE must re-add a bypass here and at
   // the stamp below: a decline under one pipeline says nothing about another, in either direction.
   // KNOWN_FLAGS above is the single place such a flag is born.
-  if (fileArg && !narrowed && nogainMemoEnabled() && !has('--stats')) {
+  //
+  // The stats line a refusal answers `--stats` with: the same `<in> → <out> bytes (<pct>% reduction)`
+  // shape every other run prints (smoke-test-checks.md greps it), plus a bracketed tag naming which
+  // refusal spoke — the numbers alone would read as a run that happened.
+  const statsRefusal = (bytes, tag) => {
+    if (!has('--stats')) return;
+    process.stderr.write(`json-slim: ${bytes} → ${bytes} bytes (0.0% reduction) [${tag}]\n`);
+  };
+  if (fileArg && !narrowed && nogainMemoEnabled()) {
     let sz = -1;
     try { sz = fs.statSync(fileArg).size; } catch (_) {} // unreadable → no guard; the normal read below reports it
     // Layer 1 — our own Gate-A output spill (see SLIM_OUT_PREFIX for why no other prefix qualifies).
@@ -3371,6 +3381,7 @@ if (require.main === module) {
     if (sz >= 0 && sz <= STREAM_GATE_BYTES && path.basename(fileArg).startsWith(SLIM_OUT_PREFIX)) {
       const notice = slimOutRefusal(fileArg, sz) + '\n';
       process.stdout.write(notice);
+      statsRefusal(sz, 'already json-slim output');
       debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'already-slim-out', bytes_in: sz, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
       sweepSpills(cfg.spillDir, process.cwd());
       return;
@@ -3380,6 +3391,7 @@ if (require.main === module) {
     if (memoBytes !== null) {
       const notice = nogainRefusal(fileArg, memoBytes) + '\n';
       process.stdout.write(notice);
+      statsRefusal(memoBytes, 'declined earlier this session');
       debugLog({ entry: 'cli', tool: fileArg, decision: 'passthrough', reason: 'no-gain-memo', bytes_in: memoBytes, bytes_out: Buffer.byteLength(notice, 'utf8'), pct: 0, stages: [], spill: null, spill_out: null, ms: Date.now() - t0 }, cfg.spillDir);
       sweepSpills(cfg.spillDir, process.cwd());
       return;

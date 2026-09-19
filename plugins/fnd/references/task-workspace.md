@@ -41,7 +41,10 @@ matched) and `provenance: untrusted` (on every reader file, whoever writes it). 
 `mcp-desktop` / `rest`), `last_modified` (on the `rest` rung: the stamp `figma-rest.sh` reported,
 the baseline the `--probe` freshness check compares against), `provenance`. On `doc-*.md`: `url`, `title`, `fetched_at`, `provenance`,
 `last_edited` (the source's own last-edited stamp, when known) and — when sub-pages were folded
-into the extract — a `sources:` list of url + last-edited pairs. The TA
+into the extract — a `sources:` list of url + last-edited pairs. Every reader file also carries
+`compression`: the compressors' own printed lines for that fetch, verbatim and `; `-joined
+(`json-slim: 41008 → 9012 bytes (78.0% reduction)`), or `none` — the transcript line that said so
+is the first thing a `/compact` drops, the file is not. The TA
 itself isn't duplicated here — it already lives in
 `docs/technical-approaches/<KEY>-technical-approach.md` (gitignored) and on the ticket.
 
@@ -90,6 +93,14 @@ screenshots and frames the task refers to, never all of them by default; `attach
 non-empty → show it to the developer once, verbatim, and go on (never a blocker). Links a
 commenter pasted come back as `comment_links`, kept out of the field-derived lists — nothing is
 spawned from them automatically (`reading-linked-docs.md` → step 1).
+
+**Read rule, compression.** Every reader also returns `compression` — the compressors' own printed lines for that fetch
+(`fnd-mcp-slim:` from the hook, `json-slim:` / `figma-node-slim:` from the CLIs), or `none`. **Say
+it in the session, once, when the reads are done**: one line naming each reader that compressed
+something and what it printed, and nothing at all when every reader returned `none`. Nobody reads
+it back off the file, and the debug JSONL is an opt-in file — spoken here is the only place the
+developer sees what the plugin saved on their ticket. It is a report, never a gate: a reader that
+returned nothing for it is not re-run, and an unexpected figure is not a reason to stop.
 
 ### Freshness
 

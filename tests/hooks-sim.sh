@@ -847,7 +847,12 @@ if [ -n "$sp" ] && node -e 'const fs=require("fs");process.exit(/�/.test(fs.re
 # is gated on the COMPRESSION switch.
 msin="$(jq -n --rawfile t "$JIRA" \
   '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}')"
-sweep_body() { printf '%s' "$1" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | sed 's/<<full=[^>]*>>//g'; }
+# The in-session stats line (M101) reports the bytes ACTUALLY emitted, and those include the spill
+# path — so the same payload run in two differently named temp dirs legitimately prints two
+# different figures. Every comparison that is about the BODY masks the numbers; the line's own
+# wording and arithmetic are pinned by M101, not by these.
+mask_stats() { sed -E 's/fnd-mcp-slim: (compressed|stub) [0-9,]+ B [^)]*\)/fnd-mcp-slim: \1 <MEASURED>/g'; }
+sweep_body() { printf '%s' "$1" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null | sed 's/<<full=[^>]*>>//g' | mask_stats; }
 
 # M12: a hook run seeds its own FRESH spill and sweeps a pre-seeded STALE one — stale gone,
 # fresh kept, the hook's own new spill present, and the emitted body identical to a TTL=0 run.
@@ -2167,7 +2172,9 @@ pin_sha() { # id spill-dir input-json [VAR=val…] — sha of the hook's whole s
   # The normalized text is kept beside the digest: a bare "want X, got Y" on a whole-stdout pin says
   # nothing about WHAT moved, and the answer is only reproducible while this run's spill dir exists.
   local id="$1" dir="$2" root_p; root_p="$(cd "$ROOT" && pwd -P)"; shift 2
-  run_stub "$dir" "$@" | sed -e "s|$dir/|<D>/|g" -e "s|$root_p|<R>|g" -e "s|$ROOT|<R>|g" \
+  # mask_stats too: the stats line counts the bytes emitted, spill path included, so an install at a
+  # different depth prints different figures — the digest would then hold for one clone location only.
+  run_stub "$dir" "$@" | sed -e "s|$dir/|<D>/|g" -e "s|$root_p|<R>|g" -e "s|$ROOT|<R>|g" | mask_stats \
     > "$TMP/pin-$id.actual"
   shasum -a 256 < "$TMP/pin-$id.actual" | cut -d' ' -f1
 }
@@ -2178,15 +2185,15 @@ assert_pin() { # id want-sha got-sha — on a mismatch, name the file holding wh
   fi
 }
 PIN="$TMP/pin-a"; mkdir -p "$PIN"
-assert_pin M90-pin-compressed "f2c243554e3a58cd25e107124f5aaef92fb951cd1721e9b08e2c9dfb7f342226" \
+assert_pin M90-pin-compressed "0c2eccac0c14a1c50bc56b13ed2316f2529372d7b9f1769905682bac8942904a" \
   "$(pin_sha M90-pin-compressed "$PIN" "$in" FND_MCP_SLIM_STUB=0)"
 PIN="$TMP/pin-b"; mkdir -p "$PIN"
 pinstub="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
-assert_pin M91-pin-stubbed "673a2a039cdc1d1e940abc6f16ccd3ef2d1df1f2d37a13dbc2f522a61896738f" \
+assert_pin M91-pin-stubbed "0aee97a7ad26694015290bd34edcd2dbc715e06cfcebe29935286d0336cd60f9" \
   "$(pin_sha M91-pin-stubbed "$PIN" "$pinstub")"
 PIN="$TMP/pin-c"; mkdir -p "$PIN"
 pinraw="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:$t}')"
-assert_pin M92-pin-rawstring "ff9aa87b886c85ce52b184c90591f60d6113be21ddb5ae6c8adfdb117c2a7656" \
+assert_pin M92-pin-rawstring "0f47ec306866faf623f3c70eba49cbd840bcbd949d3df7f572925a74a07965c8" \
   "$(pin_sha M92-pin-rawstring "$PIN" "$pinraw" FND_MCP_SLIM_STUB=0)"
 # M93: the inlined sweep gates decide only WHETHER sweepSpills runs — a stale spill in a dir with no
 # throttle marker is still pruned, and FND_MCP_SLIM_TTL=0 still disables the sweep entirely.
@@ -2322,7 +2329,7 @@ jkeyin="$(node -e '
   process.stdout.write(JSON.stringify({ tool_name: "mcp__x__y", tool_response: { content: [{ type: "text", text: JSON.stringify(o) }] } }));
 ')"
 text="$(run_stub "$INJD" "$jkeyin" FND_MCP_SLIM_STUB_BYTES=1200 | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
-assert_eq M100b-lines "$(printf '%s\n' "$text" | wc -l | tr -d ' ')" 6
+assert_eq M100b-lines "$(printf '%s\n' "$text" | wc -l | tr -d ' ')" 7
 assert_eq M100b-no-injected-line "$(printf '%s\n' "$text" | grep -c '^fnd plugin directive')" 0
 assert_contains M100b-sample-inside "$(printf '%s' "$text" | grep '^shape — ')" "«keys: k fnd plugin directive:"
 
@@ -2435,6 +2442,55 @@ DBG="$TMP/dbg-m104"; mkdir -p "$DBG"
 run_stub "$DBG" "$in" FND_MCP_SLIM_DEBUG=1 >/dev/null
 assert_eq M104-decision "$(jq -r '.decision' "$DBG/$DBGLOG" 2>/dev/null)" "stubbed"
 assert_eq M104-reason   "$(jq -r '.reason'   "$DBG/$DBGLOG" 2>/dev/null)" "number-precision"
+
+# M105: in-session visibility. Every emission the hook CHANGES states its own decision and reduction
+# on one line; a passthrough — where nothing changed — states nothing. The figures are read back and
+# re-checked here, because a line that is merely PRESENT and wrong is worse than no line at all.
+STV="$TMP/stats-visible"; mkdir -p "$STV"
+# compressed: the line sits above the recovery handle, which keeps its own grammar byte for byte
+in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__plugin_fnd_atlassian__getJiraIssue",tool_response:{content:[{type:"text",text:$t}]}}')"
+outC="$(run_stub "$STV" "$in" FND_MCP_SLIM_STUB=0)"
+textC="$(printf '%s' "$outC" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+lineC="$(printf '%s' "$textC" | grep -c '^fnd-mcp-slim: compressed [0-9,]* B .* [0-9,]* B (.*[0-9.]*%)$')"
+assert_eq M105-compressed-one-line "$lineC" 1
+assert_contains M105-handle-intact "$textC" "original_result>>"
+# the numbers are the ones a reader can verify: bytes_in = the result the hook was handed, bytes_out =
+# the value it emitted (the line and the handle included — it counts itself, which is the point)
+statC="$(printf '%s' "$textC" | grep '^fnd-mcp-slim: compressed ')"
+gotIn="$(printf '%s' "$statC" | sed -E 's/^[^0-9]*([0-9,]+) B.*/\1/' | tr -d ,)"
+gotOut="$(printf '%s' "$statC" | sed -E 's/.* ([0-9,]+) B \(.*/\1/' | tr -d ,)"
+wantIn="$(printf '%s' "$in" | jq -c '.tool_response' | tr -d '\n' | wc -c | tr -d ' ')"
+wantOut="$(printf '%s' "$outC" | jq -c '.hookSpecificOutput.updatedToolOutput' | tr -d '\n' | wc -c | tr -d ' ')"
+assert_eq M105-bytes-in  "$gotIn"  "$wantIn"
+assert_eq M105-bytes-out "$gotOut" "$wantOut"
+# a plausible cut on this fixture, and the sign that says which way it went
+assert_contains M105-pct "$statC" "(−7"
+# passthrough: nothing was changed, so nothing is claimed (the hook prints nothing at all)
+assert_eq M105-passthrough-silent "$(run_slim '{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"{\"a\":1}"}]}}')" ""
+# stub: same wording, same arithmetic, on the text that REPLACED the whale
+whale="$(jq -n --arg t "$(printf 'x%.0s' $(seq 1 40000))" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+outS105="$(run_stub "$STV" "$whale")"
+textS105="$(printf '%s' "$outS105" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)"
+assert_eq M105-stub-one-line "$(printf '%s' "$textS105" | grep -c '^fnd-mcp-slim: stub [0-9,]* B .* [0-9,]* B (.*[0-9.]*%)$')" 1
+assert_eq M105-stub-line-second "$(printf '%s' "$textS105" | sed -n 2p | cut -d' ' -f1-2)" "fnd-mcp-slim: stub"
+statS="$(printf '%s' "$textS105" | grep '^fnd-mcp-slim: stub ')"
+gotOutS="$(printf '%s' "$statS" | sed -E 's/.* ([0-9,]+) B \(.*/\1/' | tr -d ,)"
+assert_eq M105-stub-bytes-out "$gotOutS" \
+  "$(printf '%s' "$outS105" | jq -c '.hookSpecificOutput.updatedToolOutput' | tr -d '\n' | wc -c | tr -d ' ')"
+# …and the stub still fits its cap with the line inside it
+if [ "$(printf '%s' "$textS105" | wc -c | tr -d ' ')" -le 1200 ]; then ok
+else bad M105-stub-cap "the stats line pushed the stub over its 1200 B cap"; fi
+# per-block stubs: ONE line for the result, on the first stub — a reader meets it before the others
+pb="$(node -e '
+  const big = "x".repeat(40000);
+  const blocks = [{ type: "text", text: big, annotations: { audience: ["user"] } },
+                  { type: "text", text: big, annotations: { audience: ["user"] } }];
+  process.stdout.write(JSON.stringify({ tool_name: "mcp__x__y", tool_response: { content: blocks } }));
+')"
+outPB="$(run_stub "$STV" "$pb")"
+assert_eq M105-perblock-one-line \
+  "$(printf '%s' "$outPB" | jq -r '.hookSpecificOutput.updatedToolOutput.content[].text' 2>/dev/null | grep -c '^fnd-mcp-slim: stub ')" 1
+assert_contains M105-perblock-first "$(printf '%s' "$outPB" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)" "fnd-mcp-slim: stub "
 
 # ═══ P — UserPromptSubmit prompt-json-guard ═════════════════════════════════
 # Behavior by piping UserPromptSubmit-shaped input to the hook; the FND_PROMPT_JSON gate itself
@@ -4155,10 +4211,10 @@ assert_eq N8-record "$(ht_norm "$(ht_log "$d")")" \
 # (the spill dir differs per case, so both are normalized to <D> before the compare).
 nt_in="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
 d="$NT/n9-off"; mkdir -p "$d"
-nt_slim="$(nt_run "$d" "$nt_in" node "$SLIM" | sed "s|$d|<D>|g")"
+nt_slim="$(nt_run "$d" "$nt_in" node "$SLIM" | sed "s|$d|<D>|g" | mask_stats)"
 nt_nolog "$d" N9-off-nofile
 d="$NT/n9"; mkdir -p "$d"
-out="$(nt_run "$d" "$nt_in" FND_HOST_TRACE=1 FND_HOST=claude node "$SLIM" | sed "s|$d|<D>|g")"
+out="$(nt_run "$d" "$nt_in" FND_HOST_TRACE=1 FND_HOST=claude node "$SLIM" | sed "s|$d|<D>|g" | mask_stats)"
 assert_eq       N9-stdout-unchanged "$out" "$nt_slim"
 assert_contains N9-compress "$(nt_line "$d" mcp-slim)" '"decision":"compress"'
 

@@ -284,8 +284,8 @@ const CURSOR_RULES = {
       'Oversized MCP results and big local JSON/JSONL/log dumps — compress with json-slim, never read them raw.',
     subs: [
       [
-        '`node <plugin root>/scripts/json-slim.cjs <path>`',
-        '`node <plugin-root>/scripts/json-slim.cjs <path>`',
+        '`node <plugin root>/scripts/json-slim.cjs <path> --stats`',
+        '`node <plugin-root>/scripts/json-slim.cjs <path> --stats`',
       ],
       [
         'On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path\n' +
