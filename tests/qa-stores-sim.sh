@@ -33,8 +33,8 @@ bad() { fail=$((fail + 1)); failures="${failures}  [$1] $2
 O="$TMP/out"; E="$TMP/err"
 run() { rc=0; node "$QS" "$@" > "$O" 2> "$E" || rc=$?; }
 
-# mode <path> — octal permission bits, macOS (stat -f) or GNU coreutils (stat -c)
-mode() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+# mode <path> — octal permission bits; GNU coreutils (stat -c) first, since GNU `stat -f` reports the filesystem and exits 0
+mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 # jsonfield <file> <expr> — a field of the JSON document in <file>, without jq on the PATH
 jsonfield() {
   node -e 'const o=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
