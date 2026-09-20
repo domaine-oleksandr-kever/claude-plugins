@@ -13,8 +13,7 @@
 //         replaced carries one `fnd-mcp-slim: <decision> <in> B → <out> B (<pct>)` line, so the
 //         compression is visible in the session and not only in the opt-in debug log (statsLine).
 //         Not host-gated: its few dozen bytes are inside every cap and net-gain gate here.
-//         That same line ALSO rides OUT of band — `systemMessage` on the terminal CLI,
-//         `hookSpecificOutput.additionalContext` on every other host (hooks/compression-notice.cjs),
+//         That same line ALSO rides OUT of band as `systemMessage` (hooks/compression-notice.cjs),
 //         because the desktop app collapses the tool result the in-body copy lives in. Claude Code
 //         only (`FND_HOST=claude`): the Codex and Cursor adapters re-read this emission against
 //         their own channels and byte budgets, so the extra field never reaches them.
@@ -733,9 +732,9 @@ function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, kee
 // `fnd` is the block channel's instruction to the adapter (blockFit / fndDeliveryFor) and rides as a
 // SIBLING of the emission, never inside it: under every other mode it is null and this stdout is
 // byte-identical to the one Claude Code and OpenCode have always read.
-// The stats line ALSO leaves out of band, on the one surface that shows it (hooks/compression-notice.cjs):
-// the desktop app collapses the tool result the in-body line rides in, so a developer there never saw
-// a figure that was always being printed. Claude Code only — hooks/codex-mcp-shim.cjs and
+// The stats line ALSO leaves out of band as `systemMessage` (hooks/compression-notice.cjs): the
+// desktop app collapses the tool result the in-body line rides in, so a developer there never saw a
+// figure that was always being printed. Claude Code only — hooks/codex-mcp-shim.cjs and
 // hooks/cursor-shim.cjs re-read this emission against their own channels and byte budgets, so the
 // extra field is never put in front of them. A subagent's own MCP call is silent here too — the
 // notice module drops it on the transcript, since nothing a subagent is told reaches the developer.
@@ -750,7 +749,6 @@ function emit(value, fnd, stats) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PostToolUse', updatedToolOutput: value, ...(fnd ? { fndDelivery: fnd } : {}),
-      ...(notice && notice.additionalContext ? { additionalContext: notice.additionalContext } : {}),
     },
     ...(notice && notice.systemMessage ? { systemMessage: notice.systemMessage } : {}),
   }));

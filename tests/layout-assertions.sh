@@ -466,21 +466,23 @@ case "$PTU_AGENT" in
 esac
 if [ -f "$PLUGIN_DIR/hooks/reader-compression.cjs" ]; then ok
 else bad compression-hook-missing "hooks/reader-compression.cjs does not exist"; fi
-# …and the session-start convention must name a hook's system reminder a LEGITIMATE instruction
-# channel. Without that sentence the model reads "repeat this line verbatim" as payload claiming
-# plugin authority — which the very same file tells it to report and never obey.
+# …and the session-start convention must still name a hook's system reminder a LEGITIMATE
+# instruction channel: other hooks (mcp-whale) do address the model, and a convention that named
+# none would have it refuse them as payload.
 UC="$PLUGIN_DIR/hooks/untrusted-content.md"
 if grep -qF "hook's own system reminder" "$UC"; then ok
 else bad compression-hook-channel "untrusted-content.md never names a hook's system reminder as a real fnd instruction"; fi
-# …and say WHEN: the hook asks for the line before the next tool call, and the convention must ask
-# for the same moment, or the model reads the two as disagreeing and picks the later one — which
-# is what lost the line live (it went to "the next message", two minutes and a hundred tools away).
-if tr "\n" " " < "$UC" | grep -qF "before your next tool call" && grep -qF "BEFORE your next tool call" "$PLUGIN_DIR/hooks/compression-notice.cjs"; then ok
-else bad compression-hook-timing "untrusted-content.md and hooks/compression-notice.cjs do not both ask for the figure before the next tool call"; fi
-# Parity, derived rather than re-listed: every compressor grammar the relay can forward must be a
-# compressor the convention names as legitimate, in BOTH copies of it. A prefix in one file and not
-# the other is a figure the model is asked to repeat from a source it was told to refuse.
+# The figure rides systemMessage on EVERY host and the model is never addressed, so neither file may
+# ask for it back: a standing "print this line verbatim" is the shape an injected tool result wears.
 RCJ="$PLUGIN_DIR/hooks/compression-notice.cjs"
+if grep -q "additionalContext" "$RCJ"; then bad compression-hook-one-channel "hooks/compression-notice.cjs still knows an additionalContext surface"; else ok; fi
+if grep -qE "print (it|this line)|repeat .*verbatim|next tool call" "$RCJ"; then bad compression-hook-no-instruction "hooks/compression-notice.cjs still instructs the model"; else ok; fi
+for f in "$UC" "$PLUGIN_DIR/rules/fnd-untrusted-content.mdc"; do
+  if tr "\n" " " < "$f" | grep -qE "print it before your next tool call"; then
+    bad "compression-hook-no-instruction-$(basename "$f")" "$(basename "$f") still asks the model to print a compression figure"
+  else ok; fi
+done
+# The grammars are what gates a relay at all — an empty list would relay nothing and say nothing.
 RELAYED="$(sed -n 's/.*new RegExp(`^\([a-z][a-z-]*\):.*/\1/p' "$RCJ" | sort -u)"
 if [ -n "$RELAYED" ]; then ok
 else bad compression-hook-channel-line "no compressor grammar found in hooks/compression-notice.cjs"; fi
@@ -493,12 +495,6 @@ case "$(jq -r '.hooks.UserPromptSubmit[0].hooks[0].command' "$CANON" 2>/dev/null
   *'FND_READER_COMPRESSION'*'user-prompt.cjs'*) ok ;;
   *) bad compression-notification-gate "the UserPromptSubmit wiring does not count FND_READER_COMPRESSION in its short-circuit" ;;
 esac
-for c in $RELAYED; do
-  for f in "$UC" "$PLUGIN_DIR/rules/fnd-untrusted-content.mdc"; do
-    if grep -qF "\`$c:\`" "$f"; then ok
-    else bad "compression-hook-channel-line-$c" "$(basename "$f") does not name \`$c:\` as relayable"; fi
-  done
-done
 # The whale convention is read by a model that has only it — so it must name every bracketed tag
 # json-slim can answer `--stats` with, or an unrecognised one reads as a failure and is re-run raw
 # (the memo exists to stop exactly that). Derived from the CLI, never from a second list.

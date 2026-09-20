@@ -13,14 +13,13 @@
 //         the reader); `tool_response` MIRRORS the tool_result content — a string, a
 //         {type:'text',text} block, an array of those, or {content:[…]} — and a host that hands it
 //         over JSON-encoded is read one level deeper.
-//   out — hooks/compression-notice.cjs's surface-chosen field (systemMessage on the CLI,
-//         hookSpecificOutput.additionalContext everywhere else), or nothing at all.
+//   out — the `systemMessage` hooks/compression-notice.cjs composes, or nothing at all.
 //   arg — none. Claude Code only, by wiring: no other host spawns subagents through a tool whose
 //         PostToolUse this plugin sees, so the host gate mcp-slim.cjs needs would be dead code here.
 //
 // A subagent's return is DATA, and a ticket body it echoes is data quoted inside data, so TWO gates
-// stand between it and a channel the model is told to obey — the agent must be one of the three
-// readers, and the value must parse END TO END as a compressor's printed line — both shared with
+// stand between it and a channel that speaks in the plugin's name — the agent must be one of
+// the three readers, and the value must parse END TO END as a compressor's printed line — both shared with
 // the background half (hooks/reader-notification.cjs) through hooks/compression-notice.cjs.
 // Everything else — an unparseable event, a `none`/empty/absent field, any other agent — exits 0
 // in silence: a relay must never be able to delay or block a tool.
@@ -70,12 +69,7 @@ function run(raw) {
   if (!value) return 'skip';
   const out = shared.notice(`${who} → ${value}`, input.transcript_path);
   if (!out) return 'skip';
-  process.stdout.write(JSON.stringify({
-    ...(out.additionalContext
-      ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: out.additionalContext } }
-      : {}),
-    ...(out.systemMessage ? { systemMessage: out.systemMessage } : {}),
-  }));
+  process.stdout.write(JSON.stringify({ systemMessage: out.systemMessage }));
   return 'inject';
 }
 

@@ -1,30 +1,21 @@
 #!/usr/bin/env node
 // The one out-of-band channel that carries an fnd compression figure to the DEVELOPER, shared by
 // the two hooks that produce one — hooks/mcp-slim.cjs (an MCP result it rewrote) and
-// hooks/reader-compression.cjs (a reader subagent's `compression` field) — so the surface choice
-// and the wording cannot drift apart between them.
+// hooks/reader-compression.cjs (a reader subagent's `compression` field) — so the channel and the
+// wording cannot drift apart between them.
 //
-// Two surfaces, never both. The terminal CLI renders `systemMessage` itself, so there the line
-// goes straight to the developer and the model is told nothing (a model repeating what the user
-// already read is a duplicate). Every other host — the desktop app's Code tab, Cowork, cloud, the
-// SDK — does NOT display `systemMessage`, so the model is the only screen and gets the line as
-// PostToolUse `additionalContext` plus the one instruction that makes it reach the developer.
-// CLAUDE_CODE_ENTRYPOINT is the HOST's own variable (`cli` in the terminal, `claude-desktop` in
-// the app), not a plugin switch — unset means "some other host", which is the additionalContext
-// branch, because the surface that cannot show it must never be the silent default.
-// hooks/untrusted-content.md names this channel legitimate by hand: without that the model reads
-// "repeat this verbatim" as payload authority and refuses it.
+// One surface, every host: `systemMessage`. The terminal CLI prints it inline and the desktop app
+// renders it under its collapsible hook notice, so the developer reads the figure either way and
+// the model is told nothing at all — asking a model to repeat a line teaches it to obey "repeat
+// this verbatim", which is the exact shape an injected tool result wears.
 'use strict';
 
-// "Before your next tool call", not "in your next message": a model mid-flow reads the latter as the
-// next message to the user, runs a hundred tool calls first and has forgotten the line by then.
-const REPEAT = 'fnd hook — print this line to the developer verbatim as text, once, BEFORE your next tool call, then continue:';
 // A reader's field is `; `-joined and arrives from a subagent, i.e. as data: bounded here so one
 // relayed line can never become a payload of its own.
 const LINE_CAP = 300;
-// A PostToolUse inside a SUBAGENT gets no channel to the developer: its "say this out loud" would
-// land in an agent whose only output is its contract-bound return, so the line would either be lost
-// or smuggled into that return. Claude Code keeps a subagent's transcript beside the session's own
+// A PostToolUse inside a SUBAGENT gets no channel to the developer: a subagent's systemMessage
+// reaches nobody, and the only thing that leaves an agent is its contract-bound return. Claude
+// Code keeps a subagent's transcript beside the session's own
 // (`<session>/subagents/agent-<id>.jsonl`), which is the one thing the hook input tells us apart by
 // — an unrecognised path is read as the main session, so a future layout fails toward speaking.
 const SUBAGENT_TRANSCRIPT = /[\\/]subagents[\\/]agent-[^\\/]*$/;
@@ -77,14 +68,11 @@ exports.readerFigure = function readerFigure(text) {
   return null;
 };
 
-// → { systemMessage } | { additionalContext } | null. The caller places the field, because the
-// two live at different depths of the hook envelope (top level vs. hookSpecificOutput), and passes
-// the event's own `transcript_path`.
+// → { systemMessage } | null. The caller places the field and passes the event's own
+// `transcript_path`.
 exports.notice = function notice(line, transcriptPath) {
   if (SUBAGENT_TRANSCRIPT.test(String(transcriptPath == null ? '' : transcriptPath))) return null;
   const s = String(line == null ? '' : line).replace(/\s+/g, ' ').trim();
   if (!s) return null;
-  const one = s.length > LINE_CAP ? `${s.slice(0, LINE_CAP - 1)}…` : s;
-  if (String(process.env.CLAUDE_CODE_ENTRYPOINT || '').trim() === 'cli') return { systemMessage: one };
-  return { additionalContext: `${REPEAT}\n${one}` };
+  return { systemMessage: s.length > LINE_CAP ? `${s.slice(0, LINE_CAP - 1)}…` : s };
 };

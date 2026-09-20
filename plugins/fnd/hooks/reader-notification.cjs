@@ -2,7 +2,7 @@
 // tool with launch metadata only; its return arrives later as a `<task-notification>` prompt the
 // host queues on the developer's behalf — which fires UserPromptSubmit, not PostToolUse, so
 // hooks/reader-compression.cjs never sees it. This module reads that prompt for the same
-// `compression` field and hands hooks/user-prompt.cjs the same surface-chosen notice.
+// `compression` field and hands hooks/user-prompt.cjs the same notice.
 //
 // The reader gate has no `subagent_type` here: the notification names only the task id, so the
 // agent's identity is read off the host's own `agent-<id>.meta.json` beside the session transcript
@@ -29,7 +29,7 @@ function metaFor(transcriptPath, id) {
   } catch (_) { return null; }
 }
 
-// → { systemMessage } | { additionalContext } | null
+// → { systemMessage } | null
 exports.notificationNotice = function notificationNotice(input) {
   const prompt = input && typeof input.prompt === 'string' ? input.prompt : '';
   if (!prompt.trimStart().startsWith('<task-notification>')) return null;

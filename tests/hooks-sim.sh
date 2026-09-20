@@ -2648,32 +2648,27 @@ assert_eq M105-perblock-one-line \
 assert_contains M105-perblock-first "$(printf '%s' "$outPB" | jq -r '.hookSpecificOutput.updatedToolOutput.content[0].text' 2>/dev/null)" "fnd-mcp-slim: stub "
 
 # M106: the out-of-band copy of that same line. The in-body line above rides INSIDE the tool result,
-# which the desktop app collapses — so the hook also emits it on whichever surface the host shows,
-# and on exactly one of them. `FND_HOST=claude` is set per case here because the suite unsets it
-# globally (see the top): the field is Claude-Code-only by design, which M106e re-proves.
+# which the desktop app collapses — so the hook also emits it as `systemMessage`, the ONE surface,
+# on every host: the CLI prints it inline, the desktop app under its collapsible hook notice.
+# `FND_HOST=claude` is set per case here because the suite unsets it globally (see the top): the
+# field is Claude-Code-only by design, which M106e re-proves.
 OOB="$TMP/oob"; mkdir -p "$OOB"
 oob_sys() { printf '%s' "$1" | jq -r '.systemMessage // empty' 2>/dev/null; }
 oob_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null; }
 oob_body() { printf '%s' "$1" | jq -r '[.hookSpecificOutput.updatedToolOutput.content[].text] | join("\n")' 2>/dev/null; }
-# (a) terminal CLI — the CLI renders systemMessage itself, so the line goes there and the model is
-# told nothing (an additionalContext beside it would have the model repeat what the user just read)
-outA="$(run_stub "$OOB" "$in" FND_MCP_SLIM_STUB=0 FND_HOST=claude CLAUDE_CODE_ENTRYPOINT=cli)"
-assert_eq M106a-cli-systemmessage "$(oob_sys "$outA")" \
-  "$(oob_body "$outA" | grep '^fnd-mcp-slim: compressed ')"
-assert_eq M106a-cli-no-context "$(oob_ctx "$outA")" ""
-# (b) desktop app — systemMessage is not displayed there, so the model is the only screen: it gets
-# the line plus the one instruction that makes it reach the developer, and nothing goes out of band
-outB="$(run_stub "$OOB" "$in" FND_MCP_SLIM_STUB=0 FND_HOST=claude CLAUDE_CODE_ENTRYPOINT=claude-desktop)"
-assert_eq       M106b-desktop-no-systemmessage "$(oob_sys "$outB")" ""
-assert_contains M106b-desktop-context "$(oob_ctx "$outB")" "$(oob_body "$outB" | grep '^fnd-mcp-slim: compressed ')"
-assert_contains M106b-desktop-instruction "$(oob_ctx "$outB")" "verbatim"
-# the timing is the instruction: "in your next message" was lost behind a hundred tool calls live
-assert_contains M106b-desktop-before-tool "$(oob_ctx "$outB")" "BEFORE your next tool call"
-# (c) an unset entrypoint is "some host that is not the CLI" — the surface that cannot show a
-# systemMessage must never be the silent default
-outC106="$(run_stub "$OOB" "$in" FND_MCP_SLIM_STUB=0 FND_HOST=claude)"
-assert_contains M106c-unset-context "$(oob_ctx "$outC106")" "fnd-mcp-slim: compressed "
-assert_eq       M106c-unset-no-systemmessage "$(oob_sys "$outC106")" ""
+# The host's own CLAUDE_CODE_ENTRYPOINT no longer picks a surface: cli, claude-desktop and an unset
+# value all get the same systemMessage, never an additionalContext, and the model is addressed
+# nowhere in the emission (a standing "print this verbatim" is the shape an injected result wears).
+for ep in cli claude-desktop unset; do
+  case "$ep" in unset) outEP="$(run_stub "$OOB" "$in" FND_MCP_SLIM_STUB=0 FND_HOST=claude)" ;;
+                *)     outEP="$(run_stub "$OOB" "$in" FND_MCP_SLIM_STUB=0 FND_HOST=claude CLAUDE_CODE_ENTRYPOINT="$ep")" ;; esac
+  assert_eq "M106a-$ep-systemmessage" "$(oob_sys "$outEP")" \
+    "$(oob_body "$outEP" | grep '^fnd-mcp-slim: compressed ')"
+  assert_eq "M106b-$ep-no-context" "$(oob_ctx "$outEP")" ""
+  if printf '%s' "$outEP" | grep -qiE 'print (it|this line)|verbatim|next tool call'; then
+    bad "M106c-$ep-no-instruction" "the emission asks the model to print the figure"
+  else ok; fi
+done
 # (d) passthrough — nothing was changed, so neither channel says anything (the hook is silent)
 assert_eq M106d-passthrough-silent \
   "$(run_slim '{"tool_name":"mcp__x__y","tool_response":{"content":[{"type":"text","text":"{\"a\":1}"}]}}' FND_HOST=claude CLAUDE_CODE_ENTRYPOINT=cli)" ""
@@ -2706,7 +2701,7 @@ assert_contains M106f-main-systemmessage \
 # ═══ R — PostToolUse reader-compression (the reader relay) ══════════════════
 # The readers measure their own compression and return it as one field; only the skill that spawned
 # them ever said it out loud, so an ad-hoc reader spawn surfaced nothing. This hook is the route out
-# of a reader's context — same two surfaces as M106, prefixed with the agent that measured it.
+# of a reader's context — the same one surface as M106, prefixed with the agent that measured it.
 RC="$ROOT/plugins/fnd/hooks/reader-compression.cjs"
 run_rc() { # input-json [VAR=val…]
   local in="$1"; shift
@@ -2720,17 +2715,17 @@ rc_in() { # compression-value [subagent_type]
     '{tool_name:"Agent",tool_input:{subagent_type:$a,description:"Read Jira ELC-1266",prompt:"…"},
       tool_response:[{type:"text",text:("key: ELC-1266\nsummary: Sticky ATC\ncompression: \"" + $c + "\"\nsaved_to: /x/ticket.md")}]}'
 }
-# R1: CLI — systemMessage, the reader's identity in front of its own line, nothing for the model
-outR="$(run_rc "$(rc_in "$RC_LINE")" CLAUDE_CODE_ENTRYPOINT=cli)"
-assert_eq R1-cli-systemmessage "$(oob_sys "$outR")" "fnd:jira-reader → $RC_LINE"
-assert_eq R1-cli-no-context    "$(oob_ctx "$outR")" ""
-# R2: desktop — additionalContext under a PostToolUse envelope, carrying the line and the instruction
-outR2="$(run_rc "$(rc_in "$RC_LINE")" CLAUDE_CODE_ENTRYPOINT=claude-desktop)"
-assert_eq       R2-desktop-no-systemmessage "$(oob_sys "$outR2")" ""
-assert_contains R2-desktop-line        "$(oob_ctx "$outR2")" "fnd:jira-reader → $RC_LINE"
-assert_contains R2-desktop-instruction "$(oob_ctx "$outR2")" "verbatim"
-assert_contains R2-desktop-before-tool  "$(oob_ctx "$outR2")" "BEFORE your next tool call"
-assert_eq       R2-desktop-event "$(printf '%s' "$outR2" | jq -r '.hookSpecificOutput.hookEventName')" "PostToolUse"
+# R1/R2: systemMessage on every host — the reader's identity in front of its own line, nothing for
+# the model, and no additionalContext the entrypoint could have switched to
+for ep in cli claude-desktop unset; do
+  case "$ep" in unset) outR="$(run_rc "$(rc_in "$RC_LINE")")" ;;
+                *)     outR="$(run_rc "$(rc_in "$RC_LINE")" CLAUDE_CODE_ENTRYPOINT="$ep")" ;; esac
+  assert_eq "R1-$ep-systemmessage" "$(oob_sys "$outR")" "fnd:jira-reader → $RC_LINE"
+  assert_eq "R2-$ep-no-context"    "$(oob_ctx "$outR")" ""
+  if printf '%s' "$outR" | grep -qiE 'print (it|this line)|verbatim|next tool call'; then
+    bad "R2-$ep-no-instruction" "the relay asks the model to print the figure"
+  else ok; fi
+done
 # R3: the shapes a tool_response can arrive in — a bare string, a single block, and a JSON-encoded
 # string — all reach the same field (the hook mirrors whatever the host hands it)
 body="compression: $RC_LINE"
@@ -3505,17 +3500,17 @@ un_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // em
 un_sys() { printf '%s' "$1" | jq -r '.systemMessage // empty' 2>/dev/null; }
 
 un_meta abc fnd:jira-reader
-# UN1: CLI — systemMessage carries the reader's identity and its own line; nothing for the model
-outUN="$(run_un "$(un_in abc "$UN_LINE")" CLAUDE_CODE_ENTRYPOINT=cli)"
-assert_eq UN1-cli-systemmessage "$(un_sys "$outUN")" "fnd:jira-reader → $UN_LINE"
-assert_eq UN1-cli-no-context    "$(un_ctx "$outUN")" ""
-# UN2: desktop — additionalContext under a UserPromptSubmit envelope, line + instruction, no systemMessage
-outUN2="$(run_un "$(un_in abc "$UN_LINE")" CLAUDE_CODE_ENTRYPOINT=claude-desktop)"
-assert_eq       UN2-desktop-no-systemmessage "$(un_sys "$outUN2")" ""
-assert_contains UN2-desktop-line        "$(un_ctx "$outUN2")" "fnd:jira-reader → $UN_LINE"
-assert_contains UN2-desktop-instruction "$(un_ctx "$outUN2")" "verbatim"
-assert_contains UN2-desktop-before-tool  "$(un_ctx "$outUN2")" "BEFORE your next tool call"
-assert_eq       UN2-desktop-event "$(printf '%s' "$outUN2" | jq -r '.hookSpecificOutput.hookEventName')" "UserPromptSubmit"
+# UN1/UN2: systemMessage on every host — the reader's identity and its own line, nothing for the
+# model, and the entrypoint no longer moves it to an additionalContext
+for ep in cli claude-desktop unset; do
+  case "$ep" in unset) outUN="$(run_un "$(un_in abc "$UN_LINE")")" ;;
+                *)     outUN="$(run_un "$(un_in abc "$UN_LINE")" CLAUDE_CODE_ENTRYPOINT="$ep")" ;; esac
+  assert_eq "UN1-$ep-systemmessage" "$(un_sys "$outUN")" "fnd:jira-reader → $UN_LINE"
+  assert_eq "UN2-$ep-no-context"    "$(un_ctx "$outUN")" ""
+  if printf '%s' "$outUN" | grep -qiE 'print (it|this line)|verbatim|next tool call'; then
+    bad "UN2-$ep-no-instruction" "the relay asks the model to print the figure"
+  else ok; fi
+done
 # UN3: the false `compression:` line the ticket body put above the real one is read past
 assert_eq UN3-reads-past-ticket-text "$(un_sys "$(run_un "$(un_in abc "$UN_LINE")" CLAUDE_CODE_ENTRYPOINT=cli)")" "fnd:jira-reader → $UN_LINE"
 # UN4: the value gate — `none`, a prefix followed by free text, an unknown compressor → silence

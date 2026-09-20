@@ -16,8 +16,8 @@
 //     title would spend its one shot on an erased prompt.
 //   - otherwise the monitor's object goes out exactly as it did when it owned the process
 //     (suppressOutput + systemMessage [+ hookSpecificOutput.additionalContext]), with the title
-//     merged INTO its hookSpecificOutput and the reader relay's line APPENDED to whichever field
-//     the surface shows — or alone in one, when the monitor is silent — or nothing.
+//     merged INTO its hookSpecificOutput and the reader relay's line APPENDED to its
+//     systemMessage — or alone in one, when the monitor is silent — or nothing.
 // Exit is always 0: neither half signals through the exit code, and a hook failure must never
 // break a prompt.
 'use strict';
@@ -81,13 +81,7 @@ function run(raw) {
     } catch (_) {}
     if (relay) {
       if (!out) out = {};
-      if (relay.systemMessage) {
-        out.systemMessage = out.systemMessage ? `${out.systemMessage}\n${relay.systemMessage}` : relay.systemMessage;
-      } else {
-        if (!out.hookSpecificOutput) out.hookSpecificOutput = { hookEventName: 'UserPromptSubmit' };
-        const h = out.hookSpecificOutput;
-        h.additionalContext = h.additionalContext ? `${h.additionalContext}\n${relay.additionalContext}` : relay.additionalContext;
-      }
+      out.systemMessage = out.systemMessage ? `${out.systemMessage}\n${relay.systemMessage}` : relay.systemMessage;
     }
   }
 
