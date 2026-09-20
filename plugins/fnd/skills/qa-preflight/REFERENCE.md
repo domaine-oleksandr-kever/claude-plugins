@@ -213,15 +213,15 @@ readers expect to see, so keep it even when it feels repetitive:
 _Preflight — automated pre-run via fnd `qa-preflight`, not the QA sign-off; rows below were checked
 by the agent at the viewports named._
 
-**Testing Status: Pass**
+**Testing Status: {color:green}Pass{color}**
 * Tested in Desktop on Chrome
 * Tested in Mobile on Chrome (375x812 emulation)
 * Tested in theme build: <theme label> <store alias> (theme <id>)
 
 **Evidence on the criteria that pass verification:**
-1. <AC or step restated as an observed fact — what was done, what the page did>
+1. {color:green}Pass{color} — <AC or step restated as an observed fact — what was done, what the page did>
    screenshot: 01-<slug>-desktop.png, 01-<slug>-mobile.png
-2. <…>
+2. {color:green}Pass{color} — <…>
    screenshot: 02-<slug>-desktop.png, 02-<slug>-mobile.png
 
 ## Block 2 — Preflight notes (not for Jira)
@@ -236,6 +236,15 @@ marker `<string>` <found|absent|not given>
 **Route:** ready for hands-on QA | back to developer | nothing to test in the theme → deploy owner
 ```
 
+**Colour** is the house style's own: the verdict word is green for Pass and red for Fail, on the
+status line and at the **start** of every numbered row (`{color:green}Pass{color}` /
+`{color:red}Fail{color}` — `md-to-adf.cjs` turns the Jira wiki form into the editor's palette
+colour). Leading, not trailing, so the column of verdicts scans at a glance and a long row never
+hides its outcome below the fold. Only Pass and Fail rows are coloured; a Block verdict and the
+label line stay plain. The wiki form is what `preflight.md` and the chat output carry — a terminal
+renders no colour, so the reader sees `{color:green}Pass{color}` literally there and the green only
+once the comment lands in Jira.
+
 The label line above the status is the one deliberate deviation from the surveyed shape, and it
 always stays — in the Fail and Block forms too. A `Testing Status: …` posted without it reads as the
 QA engineer's own verdict and invites a `Ready for QA → Ready for UAT` transition on agent evidence,
@@ -248,20 +257,24 @@ verdict from the rows, never to be helpful. A run with **no Block 1** — a non-
 nothing to test — has no Testing Status line at all: the four values apply only to a theme change
 that was actually exercised.
 
-**Fail** keeps the same header and replaces the evidence list with a numbered defect list — one item
-per defect, expected vs actual, plus its screenshot:
+**Fail** keeps the same header and lists every row that ran — the passing ones as above, each
+defect as a red row with expected vs actual, plus its screenshot — so the reader sees what still
+holds next to what broke. **Partially pass** uses the Pass shape (green rows only; the rows left
+for human eyes or waiting on data are Block 2 material, never listed here):
 
 ```markdown
 _Preflight — automated pre-run via fnd `qa-preflight`, not the QA sign-off; rows below were checked
 by the agent at the viewports named._
 
-**Testing Status: Fail**
+**Testing Status: {color:red}Fail{color}**
 * Tested in Desktop on Chrome
 * Tested in Mobile on Chrome (375x812 emulation)
 * Tested in theme build: <theme label> <store alias> (theme <id>)
 
-**Defects:**
-1. <where> — expected <what the AC says>, actual <what the page did>
+**Evidence:**
+1. {color:green}Pass{color} — <observed fact>
+   screenshot: 01-<slug>-desktop.png, 01-<slug>-mobile.png
+2. {color:red}Fail{color} — <where> — expected <what the AC says>, actual <what the page did>
    screenshot: 03-<slug>-mobile.png
 ```
 

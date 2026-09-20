@@ -38,7 +38,9 @@
  *
  * Supported: headings (#..######), paragraphs, **bold**, *italic*, ***bold-italic***, `inline code`,
  * [links](url), <autolinks>, bare https:// http:// mailto: URLs (GFM extended autolinks —
- * trailing sentence punctuation stays prose), ~~strike~~, nested inline marks (**bold `code`**, **[link](u)**),
+ * trailing sentence punctuation stays prose), ~~strike~~, {color:green}text{color} (Jira wiki
+ * colour — a palette name from adf-colors.cjs or a `#rrggbb` hex — as an ADF textColor mark; an
+ * unknown name or a missing `{color}` closer stays literal), nested inline marks (**bold `code`**, **[link](u)**),
  * hard line breaks (two trailing spaces or a trailing backslash), bullet/ordered lists,
  * ``` fenced code blocks ```, --- horizontal rules, > blockquotes (which hold BLOCKS — a quoted
  * fence, list or second paragraph survives; a construct ADF forbids inside a quote degrades to
@@ -47,7 +49,7 @@
  * snake_case identifiers survive; use * / ** for emphasis.
  *
  * Backslash escapes follow CommonMark: the backslash is dropped in front of any of
- * \ ` * _ # + - . > | ~ [ ] anywhere in the input. That covers every marker adf-to-md.cjs
+ * \ ` * _ # + - . > | ~ [ ] { anywhere in the input. That covers every marker adf-to-md.cjs
  * escapes on the way out (\# \- 1\. \> \` \| …), so an ADF → markdown → ADF round trip keeps
  * literal prose literal instead of promoting it to a heading/list/fence — and it means a
  * backslash an author typed in front of one of those characters (`\.` in a regex, `\[`) is
@@ -56,6 +58,7 @@
  */
 'use strict';
 const fs = require('fs');
+const { toHex } = require('./adf-colors.cjs');
 
 const ARGV = process.argv.slice(2);
 const USAGE = 'usage: md-to-adf.cjs [--no-tables] [--pretty] [file.md]';
@@ -121,8 +124,8 @@ function textNode(text, marks) {
 // front of a character OUTSIDE this set (a regex `\d`, LaTeX `\(`, a Windows path separator) is
 // left alone; in front of one INSIDE it the backslash is consumed, which is why adf-to-md
 // doubles a literal backslash standing there — that is what makes the round trip lossless.
-const ESCAPABLE = '\\`*_#+-.>|~[]';
-const UNESCAPE_RE = /\\([\\`*_#+\-.>|~[\]])/g;
+const ESCAPABLE = '\\`*_#+-.>|~[]{';
+const UNESCAPE_RE = /\\([\\`*_#+\-.>|~[\]{])/g;
 // JS `\s` matches U+00A0, but the NBSP the Jira editor inserts is content, not padding — so
 // every trim here is ASCII-only. The class is `[ \t]`, narrower than adf-to-md's `[ \t\n]`,
 // because this side only ever trims a single line (the input is split on newlines first).
@@ -138,6 +141,20 @@ function mergeMarks(marks, ...add) {
   const out = [];
   for (const m of marks.concat(add)) if (!out.some((x) => x.type === m.type)) out.push(m);
   return out.some((m) => m.type === 'code') ? out.filter((m) => CODE_COMPATIBLE.includes(m.type)) : out;
+}
+
+// `{color:green}…{color}` — Jira wiki-markup colour; the first `{color}` after the opener
+// closes it. An unknown name is prose, never a guessed colour.
+const COLOR_OPEN_RE = /^\{color:([a-z-]+|#[0-9a-f]{6})\}/i;
+function scanColor(s, i) {
+  const m = COLOR_OPEN_RE.exec(s.slice(i, i + 24));
+  if (!m) return null;
+  const color = toHex(m[1]);
+  if (!color) return null;
+  const start = i + m[0].length;
+  const close = s.indexOf('{color}', start);
+  if (close < 0) return null;
+  return { inner: s.slice(start, close), end: close + 7, mark: { type: 'textColor', attrs: { color } } };
 }
 
 // the length bound matters at `i >= s.length`, where `undefined === undefined` would spin forever
@@ -365,6 +382,14 @@ function inlineNodes(input, marks, depth) {
         const n = textNode(a.href, mergeMarks(marks, { type: 'link', attrs: { href: a.href } }));
         if (n) out.push(n);
         i = a.end;
+        continue;
+      }
+    } else if (ch === '{') {
+      const c = scanColor(input, i);
+      if (c) {
+        flush();
+        out.push(...inlineNodes(c.inner, mergeMarks(marks, c.mark), depth + 1));
+        i = c.end;
         continue;
       }
     } else if (ch === '*' || ch === '~') {

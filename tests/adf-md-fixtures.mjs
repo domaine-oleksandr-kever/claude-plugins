@@ -440,6 +440,56 @@ for (const [label, adf] of [
   ['cell', doc([tbl([trow([th([p([t('H')])])]), trow([td([p([t('a\\', [mStrong])])])])])])],
 ]) check(`bug-roundtrip-trailing-backslash-${label}`, m2a(a2m(adf)), adf);
 
+// --------------------------------------- colour: {color:name}…{color} ↔ textColor mark --
+// Jira wiki-markup colour is the one inline form the QA house style needs (green Pass / red
+// Fail); names come from adf-colors.cjs, whose hex values are the editor palette's own.
+{
+  const { toHex, toLabel, PALETTE } = await import(path.join(ROOT, 'plugins/fnd/scripts/adf-colors.cjs'));
+  const mColor = (color) => ({ type: 'textColor', attrs: { color } });
+  check('colors-palette-size', PALETTE.length, 30);
+  check('colors-toHex-name', toHex('green'), '#36b37e');
+  check('colors-toHex-name-case', toHex('Dark-Red'), '#bf2600');
+  check('colors-toHex-hex-lowercases', toHex('#ABCDEF'), '#abcdef');
+  check('colors-toHex-unknown', toHex('nope'), null);
+  check('colors-toHex-short-hex', toHex('#abc'), null);
+  check('colors-toLabel-palette', toLabel('#FF5630'), 'red');
+  check('colors-toLabel-other', toLabel('#123ABC'), '#123abc');
+  check('colors-toLabel-malformed', toLabel('red'), null);
+  for (const [name, hex] of PALETTE) check(`colors-roundtrip-name-${name}`, toLabel(toHex(name)), name) || check(`colors-hex-shape-${name}`, /^#[0-9a-f]{6}$/.test(hex), true);
+
+  check('m2a-color-name', m2a('{color:green}Pass{color} ok'), doc([p([t('Pass', [mColor('#36b37e')]), t(' ok')])]));
+  check('m2a-color-hex', m2a('{color:#123ABC}x{color}'), doc([p([t('x', [mColor('#123abc')])])]));
+  check('m2a-color-hyphen-name', m2a('{color:dark-red}x{color}'), doc([p([t('x', [mColor('#bf2600')])])]));
+  check('m2a-color-unknown-name-literal', m2a('{color:nope}z{color}'), doc([p([t('{color:nope}z{color}')])]));
+  check('m2a-color-unclosed-literal', m2a('{color:red}open'), doc([p([t('{color:red}open')])]));
+  check('m2a-color-escaped-opener', m2a('\\{color:red}x{color}'), doc([p([t('{color:red}x{color}')])]));
+  check('m2a-color-inside-strong', m2a('**Status: {color:green}Pass{color}**'), doc([p([
+    t('Status: ', [mStrong]), t('Pass', [mStrong, mColor('#36b37e')])])]));
+  check('m2a-color-wrapping-strong', m2a('{color:red}**Fail** — x{color}'), doc([p([
+    t('Fail', [mColor('#ff5630'), mStrong]), t(' — x', [mColor('#ff5630')])])]));
+  // ADF rejects textColor on a code span, like strong — the outer mark is dropped, not leaked
+  check('m2a-color-code-drops-color', m2a('{color:red}`x`{color}'), doc([p([t('x', [mCode])])]));
+  check('m2a-color-in-list', m2a('1. {color:green}Pass{color} — hover ok'), doc([ol([li([p([
+    t('Pass', [mColor('#36b37e')]), t(' — hover ok')])])])]));
+  check('m2a-color-first-closer-wins', m2a('{color:red}a{color:green}b{color}c{color}'), doc([p([
+    t('a{color:green}b', [mColor('#ff5630')]), t('c{color}')])]));
+
+  check('a2m-color-palette-name', a2m(doc([p([t('Pass', [mColor('#36B37E')])])])), '{color:green}Pass{color}');
+  check('a2m-color-hex', a2m(doc([p([t('x', [mColor('#123ABC')])])])), '{color:#123abc}x{color}');
+  check('a2m-color-malformed-attr-dropped', a2m(doc([p([t('x', [mColor('red')])])])), 'x');
+  check('a2m-color-padding-outside', a2m(doc([p([t('a'), t(' x ', [mColor('#ff5630')]), t('b')])])), 'a {color:red}x{color} b');
+  check('a2m-color-literal-opener-escaped', a2m(doc([p([t('{color:red}x{color}')])])), '\\{color:red}x{color}');
+  check('a2m-color-backslash-before-brace', a2m(doc([p([t('a\\{color:red}')])])), 'a\\\\\\{color:red}');
+  for (const [label, adf] of [
+    ['name', doc([p([t('Pass', [mColor('#36b37e')]), t(' ok')])])],
+    ['hex', doc([p([t('x', [mColor('#123abc')])])])],
+    ['strong-inside', doc([p([t('Status:', [mStrong]), t(' '), t('Pass', [mColor('#36b37e'), mStrong])])])],
+    ['literal', doc([p([t('{color:red}x{color}')])])],
+    ['literal-backslash', doc([p([t('a\\{color:red}')])])],
+    ['list', doc([ol([li([p([t('Fail', [mColor('#ff5630')]), t(' — expected a, actual b')])])])])],
+  ]) check(`roundtrip-color-${label}`, m2a(a2m(adf)), adf);
+}
+
 // ------------------------------ bug-15: a pipeless GFM table directly under prose --
 
 // a table OPENER (a pipe row followed by a separator row) ends the paragraph even without

@@ -2330,7 +2330,7 @@ assert_pin() { # id want-sha got-sha — on a mismatch, name the file holding wh
   fi
 }
 PIN="$TMP/pin-a"; mkdir -p "$PIN"
-assert_pin M90-pin-compressed "0c2eccac0c14a1c50bc56b13ed2316f2529372d7b9f1769905682bac8942904a" \
+assert_pin M90-pin-compressed "cfa53aabb76a4cea5734b790a097ccadb8eb22d1403c3e6b60af53a0fa2898c2" \
   "$(pin_sha M90-pin-compressed "$PIN" "$in" FND_MCP_SLIM_STUB=0)"
 PIN="$TMP/pin-b"; mkdir -p "$PIN"
 pinstub="$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
@@ -2338,7 +2338,7 @@ assert_pin M91-pin-stubbed "0aee97a7ad26694015290bd34edcd2dbc715e06cfcebe2993528
   "$(pin_sha M91-pin-stubbed "$PIN" "$pinstub")"
 PIN="$TMP/pin-c"; mkdir -p "$PIN"
 pinraw="$(jq -n --rawfile t "$JIRA" '{tool_name:"mcp__x__y",tool_response:$t}')"
-assert_pin M92-pin-rawstring "0f47ec306866faf623f3c70eba49cbd840bcbd949d3df7f572925a74a07965c8" \
+assert_pin M92-pin-rawstring "79535c9024522d6b417cf7ef32f5d5a484616e5f586ba54dd7c42bd5e67347f1" \
   "$(pin_sha M92-pin-rawstring "$PIN" "$pinraw" FND_MCP_SLIM_STUB=0)"
 # M93: the inlined sweep gates decide only WHETHER sweepSpills runs — a stale spill in a dir with no
 # throttle marker is still pruned, and FND_MCP_SLIM_TTL=0 still disables the sweep entirely.

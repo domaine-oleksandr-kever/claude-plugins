@@ -121,7 +121,7 @@ expect G8-skill-size-warn 0 "WARN  skill-size:commit" "over the 8000 B Codex wat
 # G9: the watchlist row reports the real skill count, so a skills/ that stopped being discovered
 # cannot masquerade as "nothing oversized".
 run --root "$BASE"
-expect G9-skill-size-count 0 "PASS  skill-size" "18 skill(s)"
+expect G9-skill-size-count 0 "PASS  skill-size" "19 skill(s)"
 
 # -------------------------------------------------------------------------- generated drift --
 # G10: a hand-edited generated adapter — the one failure mode "never hand-edit generated dirs"

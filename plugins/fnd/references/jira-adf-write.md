@@ -104,7 +104,9 @@ fallback in its place.
 
 It prints the ADF document JSON to stdout; pass that object straight to `editJiraIssue`
 (or, for a comment, the same text as the `commentBody` string). Dependency-free Node,
-deterministic; supports headings, **bold**/*italic*/`code`/~~strike~~, links in all three
+deterministic; supports headings, **bold**/*italic*/`code`/~~strike~~, Jira wiki colour
+`{color:green}text{color}` (a palette name — `green`, `red`, `dark-green`, … per
+`scripts/adf-colors.cjs` — or a `#rrggbb` hex; unknown name or no closer = literal text), links in all three
 forms — `[text](url)`, `<url>`, and a bare `https://…` pasted in prose (trailing sentence
 punctuation stays prose) — bullet & ordered lists, fenced code blocks, `---` rules,
 blockquotes, and GFM tables. (Underscore emphasis is deliberately ignored so

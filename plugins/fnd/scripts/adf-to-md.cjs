@@ -32,9 +32,10 @@
  * backslash-escaped, code spans/fences use a delimiter longer than any run inside them,
  * a hard break ends a line with two spaces (or with a backslash where the line it starts would
  * otherwise be blank), and a cell's own pipes are escaped. Escaping covers the LEADING structure
- * markers, every backtick, and a `*`/`~` at a marked node's edge — not a `**`/`~~` standing in
- * prose, which deliberately comes back as a mark. Every escape here has its counterpart in
- * md-to-adf.cjs — change the two together.
+ * markers, every backtick, a `*`/`~` at a marked node's edge, and a literal `{color:` opener — not
+ * a `**`/`~~` standing in prose, which deliberately comes back as a mark. A textColor mark is
+ * written as Jira wiki colour, `{color:green}…{color}` (names per adf-colors.cjs, else hex).
+ * Every escape here has its counterpart in md-to-adf.cjs — change the two together.
  *
  * Nodes markdown cannot express INSIDE a single-line construct degrade instead of leaking their
  * delimiter: a hard break in a heading / list item / table cell becomes a space, and a code block
@@ -53,6 +54,7 @@
  * inert prose (an API writer that never linkified it) becomes clickable on the first write-back.
  */
 'use strict';
+const { toLabel } = require('./adf-colors.cjs');
 const fs = require('fs');
 
 // A --field value that is already markdown (a plain string) is handed back here instead of being
@@ -172,9 +174,9 @@ function codeBlockSpan(node) {
 // Emphasis delimiters can't hug whitespace (`** bold **` is literal markdown), so the
 // padding moves outside the marks instead of silently losing them on the way back.
 const PADDED_RE = /^([ \t]*)([\s\S]*?)([ \t]*)$/;
-function wrap(text, delim) {
+function wrap(text, delim, closer) {
   const m = PADDED_RE.exec(text);
-  return m[2] ? m[1] + delim + m[2] + delim + m[3] : text;
+  return m[2] ? m[1] + delim + m[2] + (closer || delim) + m[3] : text;
 }
 
 // A `*` or `~` at the very EDGE of marked text fuses with the delimiter run wrap() puts there
@@ -212,7 +214,11 @@ const AUTOLINK_RE = /^[a-z][a-z0-9+.\-]*:[^\s<>]+$/i;
 // come back as an escape, so it is doubled. It is doubled at the node's END too: the renderer
 // appends its own delimiter (`]`, a backtick, `*`, `~`) right there, and a lone backslash
 // before a newline reads back as a hard line break.
-const LITERAL_BACKSLASH_RE = /\\(?=[\\`*_#+\-.>|~[\]\n]|$)/g;
+const LITERAL_BACKSLASH_RE = /\\(?=[\\`*_#+\-.>|~[\]{\n]|$)/g;
+
+// A textColor mark comes out as Jira wiki colour, `{color:green}…{color}`, the form md-to-adf
+// reads back — a palette colour by its adf-colors.cjs name, any other as hex. A literal
+// `{color:` in prose would read back as an opener, so it is escaped like a marker.
 
 // A GFM separator row promotes the line ABOVE it to a table header — and md-to-adf accepts a
 // pipeless table — so a line that merely LOOKS like a separator has to be escaped too, or a
@@ -305,6 +311,7 @@ function renderText(node, atLineStart, singleLine) {
     // a literal backtick would open a code span and swallow everything up to the next one
     // — including whole link nodes — so unlike the other inline delimiters it is escaped
     t = t.replace(/`/g, '\\`');
+    t = t.replace(/\{color:/g, '\\{color:');
     // md-to-adf parses each break-separated segment on its own, so no mark can span a break:
     // inside MARKED text the newline has to degrade to a space or the mark is lost outright
     t = marks.length ? t.replace(/\n/g, ' ') : breakLines(t, atLineStart, singleLine);
@@ -317,6 +324,9 @@ function renderText(node, atLineStart, singleLine) {
   if (has('strike')) t = wrap(t, '~~');
   if (has('em')) t = wrap(t, '*');
   if (has('strong')) t = wrap(t, '**');
+  const color = marks.find((m) => m.type === 'textColor');
+  const label = color && color.attrs ? toLabel(color.attrs.color) : null;
+  if (label) t = wrap(t, '{color:' + label + '}', '{color}');
   const link = marks.find((m) => m.type === 'link');
   if (link && link.attrs && link.attrs.href) {
     if (marks.length === 1 && raw === link.attrs.href && AUTOLINK_RE.test(raw)) return '<' + raw + '>';
