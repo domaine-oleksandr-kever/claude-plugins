@@ -113,6 +113,7 @@ To add another plugin later: create `plugins/<name>/` (with its own
 | `write-technical-approach`        | `/fnd:write-technical-approach` |
 | `develop-feature-or-fix`          | `/fnd:develop-feature-or-fix` |
 | `qa-feature-or-fix`               | `/fnd:qa-feature-or-fix` |
+| `qa-preflight`                    | `/fnd:qa-preflight` |
 | `write-steps-to-test`             | `/fnd:write-steps-to-test` |
 | `create-pull-request`             | `/fnd:create-pull-request` |
 | `ship`                            | `/fnd:ship` |
@@ -1046,6 +1047,32 @@ inspects real store state whenever that answers a question — research and debu
 not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-setup.md` and
 `plugins/fnd/references/theme-customizer-state.md`.
 
+## QA preflight — the store registry
+
+`/fnd:qa-preflight` is the QA engineer's entry point, ahead of hands-on testing:
+given one or more ticket keys it reads the tickets, finds the PR and the theme id it was
+deployed to, unlocks the storefront in the browser, proves `Shopify.theme` is the theme under
+test, pre-runs every Steps-to-Test scenario and AC at desktop (`1440x900`) and mobile
+(`375x812`) with a screenshot each, and writes the brief in Domaine's Jira house style — a
+copy-paste block for the ticket plus agent-only preflight notes. It is read-only toward Jira,
+Admin and the storefront; posting the block as a comment needs an explicit yes.
+Store facts come from a per-developer registry at `~/.config/domaine/qa-stores.json` (dir
+`0700`, file `0600`), managed by `plugins/fnd/scripts/qa-stores.cjs`:
+`list [--json]`, `get <store>`, `find <text>`, `set <domain> [--alias …] [--password …]
+[--theme <id>[:<label>]] [--default-theme <id>] [--note …]`, `unset <store>` and `path`.
+A `<store>` selector is the exact domain (in any URL shape — scheme, userinfo, port and path
+are dropped) or the exact alias, case-insensitively; `set` takes a host only, refuses an alias
+another store already carries, and serialises its read-modify-write under a lock file, so two
+parallel runs cannot lose each other's store. `--password ''` records an open storefront by
+dropping the field, and exit codes are `0` ok · `1` no such store or an ambiguous alias · `2`
+usage · `3` unreadable, unlockable or corrupt registry (never overwritten).
+A store the registry has never seen costs one round of questions — domain, theme id, plus an
+optional alias and notes — and the skill prints the `set` line for the QA engineer to run in
+their own terminal, so the password stays off the command lines the run composes.
+Passwords never leave that file: `get` is the only command that prints one, and the skill feeds
+it straight into the storefront's password form — never into the brief, the chat, Jira, a
+workspace file or a screenshot frame. Detail: `plugins/fnd/skills/qa-preflight/REFERENCE.md`.
+
 ## Jira comments + attachments
 
 `jira-reader` reads a ticket's **comments** on every run — that is where the QA verdicts,
@@ -1512,14 +1539,15 @@ durably with `FND_LEAN=0` (project or global `settings.json` → `env`), or say
 Two deliberate decisions, recorded so they don't read as omissions:
 
 - **The big workflow skills ship without `allowed-tools`.** `write-technical-approach`,
-  `develop-feature-or-fix`, `qa-feature-or-fix`, `write-steps-to-test`, `pre-commit-review`,
-  `create-pull-request`, `ship`, and `save-task-context` orchestrate open-ended
+  `develop-feature-or-fix`, `qa-feature-or-fix`, `qa-preflight`, `write-steps-to-test`,
+  `pre-commit-review`, `create-pull-request`, `ship`, and `save-task-context` orchestrate
+  open-ended
   work (editing, store runners, browser MCPs, subagents), so they run under the session's
   normal permission
   flow instead of a frozen allowlist — a frozen list that misses one instructed tool blocks
-  the skill's own workflow. The other eight are narrow utilities (translations,
-  breaking-changes ×2, preview themes, commit, a11y fixes, preflight checks, issue reports)
-  and do declare tight allowlists.
+  the skill's own workflow. The other ten are narrow utilities (translations,
+  breaking-changes ×2, preview themes, worktrees, commit, a11y fixes, preflight checks,
+  smoke test, issue reports) and do declare tight allowlists.
 - **The reader/writer agents are fenced with `disallowedTools:`, not `tools:`.**
   `jira-reader`, `jira-writer`, `figma-reader`, and `doc-reader` must work whether the
   Atlassian / Figma / Notion MCP comes from this plugin or from the user's own config, and
