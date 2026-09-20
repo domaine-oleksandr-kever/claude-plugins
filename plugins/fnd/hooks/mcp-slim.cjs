@@ -13,6 +13,11 @@
 //         replaced carries one `fnd-mcp-slim: <decision> <in> B → <out> B (<pct>)` line, so the
 //         compression is visible in the session and not only in the opt-in debug log (statsLine).
 //         Not host-gated: its few dozen bytes are inside every cap and net-gain gate here.
+//         That same line ALSO rides OUT of band — `systemMessage` on the terminal CLI,
+//         `hookSpecificOutput.additionalContext` on every other host (hooks/compression-notice.cjs),
+//         because the desktop app collapses the tool result the in-body copy lives in. Claude Code
+//         only (`FND_HOST=claude`): the Codex and Cursor adapters re-read this emission against
+//         their own channels and byte budgets, so the extra field never reaches them.
 //   arg — `--delivery=replace|additional|block[:<capBytes>]`, set by the host adapter that spawns this
 //         hook (absent = `replace`; an unrecognised token, or a malformed cap, is read as `additional`,
 //         the reading that cannot overstate). `replace`/`additional` change nothing that is emitted —
@@ -104,6 +109,9 @@ try { hostTrace = require('./host-trace.cjs'); } catch (_) {} // stubbed on a pa
 // nothing); `skip` is the switch, FND_MCP_SLIM=0.
 let hostDecision = 'pass';
 let eventTool = null;
+// The event's own transcript, read only to tell a MAIN-session invocation from one inside a
+// subagent (hooks/compression-notice.cjs): the out-of-band notice has no reader in a subagent.
+let eventTranscript = null;
 
 // FND_MCP_SLIM_DEBUG, mirroring json-slim's debugLevel: `1|true|yes|on` = key events, any integer ≥ 2 =
 // everything. Anything else (unset / 0 / junk) is off, which is what keeps the default side-effect-free.
@@ -375,14 +383,18 @@ function statsLine(decision, bytesIn, bytesOut) {
 function withStats(build, decision, bytesIn) {
   let claim = null;
   for (let i = 0; i < 4; i++) {
-    const v = build(claim === null ? null : statsLine(decision, bytesIn, claim));
+    const line = claim === null ? null : statsLine(decision, bytesIn, claim);
+    const v = build(line);
     if (v === null) return null;
     const bytes = bytesOf(v);
-    if (claim !== null && bytes === claim) return { value: v, bytes };
+    if (claim !== null && bytes === claim) return { value: v, bytes, line };
     claim = bytes;
   }
-  const v = build(statsLine(decision, bytesIn, claim));
-  return v === null ? null : { value: v, bytes: bytesOf(v) };
+  const line = statsLine(decision, bytesIn, claim);
+  const v = build(line);
+  // `line` is the string the returned VALUE carries, handed back rather than re-derived: the
+  // out-of-band copy emit() sends must be the same bytes the body shows, fixed point or not.
+  return v === null ? null : { value: v, bytes: bytesOf(v), line };
 }
 
 // -------------------------------------------------------------- spill-and-stub guard (M12b) --
@@ -721,9 +733,26 @@ function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, kee
 // `fnd` is the block channel's instruction to the adapter (blockFit / fndDeliveryFor) and rides as a
 // SIBLING of the emission, never inside it: under every other mode it is null and this stdout is
 // byte-identical to the one Claude Code and OpenCode have always read.
-function emit(value, fnd) {
+// The stats line ALSO leaves out of band, on the one surface that shows it (hooks/compression-notice.cjs):
+// the desktop app collapses the tool result the in-body line rides in, so a developer there never saw
+// a figure that was always being printed. Claude Code only — hooks/codex-mcp-shim.cjs and
+// hooks/cursor-shim.cjs re-read this emission against their own channels and byte budgets, so the
+// extra field is never put in front of them. A subagent's own MCP call is silent here too — the
+// notice module drops it on the transcript, since nothing a subagent is told reaches the developer.
+// Required lazily: ~76 % of invocations never emit.
+function statsNotice(stats) {
+  if (!stats || HOST_TAG !== 'claude') return null;
+  try { return require('./compression-notice.cjs').notice(stats, eventTranscript); } catch (_) { return null; }
+}
+
+function emit(value, fnd, stats) {
+  const notice = statsNotice(stats);
   process.stdout.write(JSON.stringify({
-    hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput: value, ...(fnd ? { fndDelivery: fnd } : {}) },
+    hookSpecificOutput: {
+      hookEventName: 'PostToolUse', updatedToolOutput: value, ...(fnd ? { fndDelivery: fnd } : {}),
+      ...(notice && notice.additionalContext ? { additionalContext: notice.additionalContext } : {}),
+    },
+    ...(notice && notice.systemMessage ? { systemMessage: notice.systemMessage } : {}),
   }));
 }
 
@@ -778,6 +807,7 @@ function run(raw) {
   const dbg = dbgLevel > 0; // cache: disabled → every trace() is a no-op and the metrics below are skipped
   const input = JSON.parse(raw);
   eventCwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : null;
+  eventTranscript = typeof input.transcript_path === 'string' ? input.transcript_path : null;
   const tool = typeof input.tool_name === 'string' ? input.tool_name : null;
   eventTool = tool;
   const result = input.tool_response !== undefined ? input.tool_response : input.tool_output;
@@ -907,7 +937,7 @@ function run(raw) {
     const built = withStats(s.make, 'stub', bytesIn);
     if (!built) return false;
     const fnd = fndDeliveryFor(built.value, 'stub');
-    emit(built.value, fnd);
+    emit(built.value, fnd, built.line);
     hostDecision = 'stub';
     dropCreated(built.value);
     if (dbg) trace('stubbed', reason, bytesIn, built.bytes, stages, s.spill, s.format, deliveredBytes(built.value, fnd), fnd);
@@ -935,7 +965,7 @@ function run(raw) {
     // another invocation's live handle.
     if (built.bytes >= bytesIn) return false;
     const fnd = fndDeliveryFor(out, 'stub');
-    emit(out, fnd);
+    emit(out, fnd, built.line);
     hostDecision = 'stub';
     dropCreated(out);
     if (dbg) trace('stubbed', reason, bytesIn, built.bytes, stages, s.spill, s.format, deliveredBytes(out, fnd), fnd);
@@ -1035,7 +1065,7 @@ function run(raw) {
     if (at !== -1) created.splice(at, 1); // still named by what we are about to emit
   }
 
-  emit(value, fnd);
+  emit(value, fnd, built.line);
   hostDecision = 'compress';
   if (dbg) trace('compressed', null, bytesIn, outBytes, slimmed.stages, fullPath, undefined, undefined, fnd);
 }

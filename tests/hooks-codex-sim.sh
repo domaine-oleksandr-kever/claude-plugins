@@ -124,12 +124,27 @@ if [ "$(jq -r 'keys | sort | join(",")' "$WIRING")" = "description,hooks" ]; the
 else bad W0b-envelope "top level must be exactly {description, hooks}"; fi
 
 # W1: one matcher group per event on each side — a group added to plugin.json and forgotten here
-# (or the reverse) is a hook that silently does not exist on this host.
+# (or the reverse) is a hook that silently does not exist on this host. ONE carve-out, counted
+# rather than skipped so every other group still has to match: plugin.json's second PostToolUse
+# group is the reader-compression relay, matched on the tool Claude Code spawns subagents with.
+# Codex has no such tool and no PostToolUse for it, so a group here would be wiring that can never
+# fire — W1b pins the divergence, so a group vanishing from plugin.json is still caught.
+CLAUDE_ONLY_POSTTOOLUSE=1
 for ev in SessionStart UserPromptSubmit SubagentStart PreToolUse PostToolUse; do
   n="$(jq -r --arg e "$ev" '.hooks[$e] | length' "$WIRING" 2>/dev/null)"
   c="$(jq -r --arg e "$ev" '.hooks[$e] | length' "$MANIFEST" 2>/dev/null)"
+  [ "$ev" = PostToolUse ] && c=$((c - CLAUDE_ONLY_POSTTOOLUSE))
   if [ "$n" = "$c" ]; then ok; else bad "W1-$ev" "want $c entr(ies) like plugin.json, got '$n'"; fi
 done
+
+# W1b: the carve-out itself — the Claude-only group is the Agent relay and nothing else, and it
+# exists on neither side of this host's wiring.
+assert_eq W1b-relay-matcher \
+  "$(jq -r '.hooks.PostToolUse[1].matcher' "$MANIFEST")" '^(Agent|Task)$'
+assert_contains W1b-relay-script \
+  "$(jq -r '.hooks.PostToolUse[1].hooks[0].command' "$MANIFEST")" 'hooks/reader-compression.cjs'
+assert_absent W1b-relay-not-on-codex \
+  "$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command' "$WIRING")" 'reader-compression'
 
 # W2: same events as the canonical block — no fnd hook may exist on Claude Code and not on Codex.
 cev="$(jq -r '.hooks | keys[]' "$MANIFEST" | sort)"
@@ -515,9 +530,15 @@ run_gate FND_CTX_MONITOR=0 FND_PROMPT_JSON=0; ec=$?
 assert_eq G1c-two-off-exit "$ec" 0
 if [ -s "$TMP/node.log" ]; then ok; else bad G1c-two-off "node did not run with the third switch still on"; fi
 
+# The reader-relay half is the fourth clause (inert on Codex, FND_HOST=claude gated — but the
+# shell condition is still the Claude command verbatim): three off keeps node, all four stop it.
 run_gate FND_CTX_MONITOR=0 FND_PROMPT_JSON=0 FND_SESSION_TITLE=0; ec=$?
-assert_eq G1d-all-off-exit "$ec" 0
-if [ -s "$TMP/node.log" ]; then bad G1d-all-off "node ran with all three switches off"; else ok; fi
+assert_eq G1d-three-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then ok; else bad G1d-three-off "node did not run with the fourth switch still on"; fi
+
+run_gate FND_CTX_MONITOR=0 FND_PROMPT_JSON=0 FND_SESSION_TITLE=0 FND_READER_COMPRESSION=0; ec=$?
+assert_eq G1e-all-off-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad G1e-all-off "node ran with all four switches off"; else ok; fi
 
 run_gate; ec=$?
 assert_eq G2-default-exit "$ec" 0

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook: the ONE node process this event pays for. It runs the three halves of
+// UserPromptSubmit hook: the ONE node process this event pays for. It runs the four halves of
 // the prompt-time work — the context monitor (context-stats.cjs), the large-JSON guard
-// (prompt-json-guard.cjs) and the session title (session-title.cjs) — because wiring them as
-// separate plugin.json commands meant a node startup (~18 ms) each on every prompt. Each half
-// keeps its own switch (FND_CTX_MONITOR / FND_PROMPT_JSON / FND_SESSION_TITLE) with unchanged
-// meaning, its own require and its own try/catch, so a half that is off or that throws cannot
-// touch the others. plugin.json still short-circuits: with ALL THREE switches at 0 no node spawns
-// at all.
+// (prompt-json-guard.cjs), the session title (session-title.cjs) and the background reader relay
+// (reader-notification.cjs) — because wiring them as separate plugin.json commands meant a node
+// startup (~18 ms) each on every prompt. Each half keeps its own switch (FND_CTX_MONITOR /
+// FND_PROMPT_JSON / FND_SESSION_TITLE / FND_READER_COMPRESSION) with unchanged meaning, its own
+// require and its own try/catch, so a half that is off or that throws cannot touch the others.
+// plugin.json still short-circuits: with ALL FOUR switches at 0 no node spawns at all.
 //
 // Merged output contract — the event accepts exactly ONE JSON object on stdout:
 //   - the guard runs FIRST and, when it returns a block, that object IS the whole output. A block
@@ -16,8 +16,8 @@
 //     title would spend its one shot on an erased prompt.
 //   - otherwise the monitor's object goes out exactly as it did when it owned the process
 //     (suppressOutput + systemMessage [+ hookSpecificOutput.additionalContext]), with the title
-//     merged INTO its hookSpecificOutput — or alone in one, when the monitor is silent — or
-//     nothing.
+//     merged INTO its hookSpecificOutput and the reader relay's line APPENDED to whichever field
+//     the surface shows — or alone in one, when the monitor is silent — or nothing.
 // Exit is always 0: neither half signals through the exit code, and a hook failure must never
 // break a prompt.
 'use strict';
@@ -68,6 +68,26 @@ function run(raw) {
       if (!out) out = {};
       if (!out.hookSpecificOutput) out.hookSpecificOutput = { hookEventName: 'UserPromptSubmit' };
       out.hookSpecificOutput.sessionTitle = title;
+    }
+  }
+
+  // The background reader relay: a `<task-notification>` prompt is the host delivering a subagent's
+  // return, and a reader's `compression` figure in it has no other way to the developer. Claude
+  // Code only — no other host spawns subagents this plugin can identify.
+  if (process.env.FND_READER_COMPRESSION !== '0' && process.env.FND_HOST === 'claude') {
+    let relay = null;
+    try {
+      relay = require('./reader-notification.cjs').notificationNotice(input);
+    } catch (_) {}
+    if (relay) {
+      if (!out) out = {};
+      if (relay.systemMessage) {
+        out.systemMessage = out.systemMessage ? `${out.systemMessage}\n${relay.systemMessage}` : relay.systemMessage;
+      } else {
+        if (!out.hookSpecificOutput) out.hookSpecificOutput = { hookEventName: 'UserPromptSubmit' };
+        const h = out.hookSpecificOutput;
+        h.additionalContext = h.additionalContext ? `${h.additionalContext}\n${relay.additionalContext}` : relay.additionalContext;
+      }
     }
   }
 

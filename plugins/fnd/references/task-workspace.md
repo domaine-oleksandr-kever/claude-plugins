@@ -96,13 +96,12 @@ non-empty → show it to the developer once, verbatim, and go on (never a blocke
 commenter pasted come back as `comment_links`, kept out of the field-derived lists — nothing is
 spawned from them automatically (`reading-linked-docs.md` → step 1).
 
-**Read rule, compression.** Every reader also returns `compression` — the compressors' own printed lines for that fetch
-(`fnd-mcp-slim:` from the hook, `json-slim:` / `figma-node-slim:` from the CLIs), or `none`. **Say
-it in the session, once, when the reads are done**: one line naming each reader that compressed
-something and what it printed, and nothing at all when every reader returned `none`. Nobody reads
-it back off the file, and the debug JSONL is an opt-in file — spoken here is the only place the
-developer sees what the plugin saved on their ticket. It is a report, never a gate: a reader that
-returned nothing for it is not re-run, and an unexpected figure is not a reason to stop.
+**Read rule, compression.** Every reader returns `compression` — the compressors' own printed
+lines for that fetch (`fnd-mcp-slim:` from the hook, `json-slim:` / `figma-node-slim:` from the
+CLIs), or `none` — and writes it into its workspace file's frontmatter. **You do not relay it.**
+The `reader-compression` hook reads the same field off the reader's return and puts the figure in
+front of the developer itself, on every spawn — including the ad-hoc ones no skill drives. Keep
+returning it and keep writing it down; say nothing about it unless the developer asks.
 
 ### Freshness
 

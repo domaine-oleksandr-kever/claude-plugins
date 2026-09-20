@@ -437,9 +437,9 @@ for f in references/review-flow.md \
 done
 
 # --------------------------------- the in-session compression report has one route through --
-# The readers measure the compression, the callers are the only thing that says it out loud, and
+# The readers measure the compression, the HOOK is the only thing that says it out loud, and
 # json-slim decides what a refusal is TAGGED with. Three files apart, one promise — a reader that
-# stops returning the field, a caller that stops relaying it, or a new refusal tag the whale
+# stops returning the field, a wiring that stops spawning the relay, or a new refusal tag the whale
 # convention never learned all fail the same way: silently, with the figure never reaching the
 # developer, which is the blind spot the field exists to close.
 TW="$PLUGIN_DIR/references/task-workspace.md"
@@ -457,17 +457,42 @@ for a in jira-reader figma-reader doc-reader; do
   if grep -q '^compression: .*VERBATIM' "$f"; then ok
   else bad "compression-verbatim-$a" "$a's compression contract does not demand the printed line verbatim"; fi
 done
-# every ingest step that spawns a reader relays it — the readers' figure has no other way out
-for f in skills/develop-feature-or-fix/SKILL.md \
-         skills/write-technical-approach/SKILL.md \
-         skills/write-steps-to-test/SKILL.md \
-         skills/qa-feature-or-fix/SKILL.md \
-         skills/create-pull-request/SKILL.md \
-         skills/ship/SKILL.md \
-         references/reading-linked-docs.md; do
-  [ -f "$PLUGIN_DIR/$f" ] || { bad "compression-caller-missing-$f" "missing"; continue; }
-  if grep -qF 'Read rule, compression' "$PLUGIN_DIR/$f"; then ok
-  else bad "compression-caller-$f" "$f ingests reader output without relaying 'compression' to the developer"; fi
+# The route out of a reader's context is the hook, not the skill that spawned it: an ad-hoc reader
+# spawn has no skill to relay anything. So the wiring must name the relay…
+PTU_AGENT="$(jq -r '.hooks.PostToolUse[] | select(.matcher | test("Agent")) | .hooks[].command' "$CANON" 2>/dev/null)"
+case "$PTU_AGENT" in
+  *hooks/reader-compression.cjs*) ok ;;
+  *) bad compression-hook-wiring "plugin.json wires no PostToolUse Agent hook spawning hooks/reader-compression.cjs" ;;
+esac
+if [ -f "$PLUGIN_DIR/hooks/reader-compression.cjs" ]; then ok
+else bad compression-hook-missing "hooks/reader-compression.cjs does not exist"; fi
+# …and the session-start convention must name a hook's system reminder a LEGITIMATE instruction
+# channel. Without that sentence the model reads "repeat this line verbatim" as payload claiming
+# plugin authority — which the very same file tells it to report and never obey.
+UC="$PLUGIN_DIR/hooks/untrusted-content.md"
+if grep -qF "hook's own system reminder" "$UC"; then ok
+else bad compression-hook-channel "untrusted-content.md never names a hook's system reminder as a real fnd instruction"; fi
+# Parity, derived rather than re-listed: every compressor grammar the relay can forward must be a
+# compressor the convention names as legitimate, in BOTH copies of it. A prefix in one file and not
+# the other is a figure the model is asked to repeat from a source it was told to refuse.
+RCJ="$PLUGIN_DIR/hooks/compression-notice.cjs"
+RELAYED="$(sed -n 's/.*new RegExp(`^\([a-z][a-z-]*\):.*/\1/p' "$RCJ" | sort -u)"
+if [ -n "$RELAYED" ]; then ok
+else bad compression-hook-channel-line "no compressor grammar found in hooks/compression-notice.cjs"; fi
+# A background spawn never answers the Agent tool with its return — it arrives as a task
+# notification, i.e. a prompt — so the relay has a second half on UserPromptSubmit, and the
+# wiring's short-circuit must count it, or turning the other three halves off silences it.
+if [ -f "$PLUGIN_DIR/hooks/reader-notification.cjs" ]; then ok
+else bad compression-notification-missing "hooks/reader-notification.cjs does not exist"; fi
+case "$(jq -r '.hooks.UserPromptSubmit[0].hooks[0].command' "$CANON" 2>/dev/null)" in
+  *'FND_READER_COMPRESSION'*'user-prompt.cjs'*) ok ;;
+  *) bad compression-notification-gate "the UserPromptSubmit wiring does not count FND_READER_COMPRESSION in its short-circuit" ;;
+esac
+for c in $RELAYED; do
+  for f in "$UC" "$PLUGIN_DIR/rules/fnd-untrusted-content.mdc"; do
+    if grep -qF "\`$c:\`" "$f"; then ok
+    else bad "compression-hook-channel-line-$c" "$(basename "$f") does not name \`$c:\` as relayable"; fi
+  done
 done
 # The whale convention is read by a model that has only it — so it must name every bracketed tag
 # json-slim can answer `--stats` with, or an unrecognised one reads as a failure and is re-run raw

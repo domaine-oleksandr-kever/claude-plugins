@@ -227,7 +227,12 @@ with what rows 3–7 claimed.
 | OpenCode | `UserPromptSubmit/fnd-plugin` from the adapter and `SessionStart/fnd-plugin` — that one fires once per session in EVERY checkout (the plugin-root and project-profile lines always ride; the store-access and Foundation blocks inside it are what detection gates), so its absence is a wiring gap, not a workspace answer — plus `user-prompt`, the two shell guards, `spill-access` and `mcp-slim`; **no `SubagentStart` row** — that host has no subagent-start event, and its absence is expected, not a defect |
 
 `PreToolUse/scratch-path-guard` appears only when a screenshot call happened in this session, so
-its absence proves nothing either way.
+its absence proves nothing either way. So does `PostToolUse/reader-compression` (Claude Code only):
+one line per subagent spawn, `inject` when it put a reader's compression figure in front of the
+developer and `skip` on every other return — which is what separates a relay that ran and stayed
+silent from one that never fired. A background spawn never reaches that hook: its return arrives as
+a task notification, and the relay's other half rides inside `UserPromptSubmit/user-prompt`, whose
+line does not say which half spoke.
 
 Reading it:
 

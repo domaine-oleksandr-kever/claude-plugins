@@ -183,9 +183,7 @@ workspace path; Notion mandatory — a reader naming a missing MCP → stop and 
 developer). Read `comments.md` when the task depends on the discussion, `Read` only the
 screenshots/frames the ticket refers to, and hand a non-empty `attachments_note` to the
 developer once, verbatim, never as a blocker (`<plugin root>/references/task-workspace.md`
-→ Read rule, comments & attachments). Every reader also returns `compression` — once
-the ingest reads are done, report in **one line** what the compressors saved on them
-(same reference → Read rule, compression); every reader `none` → say nothing. Then
+→ Read rule, comments & attachments). Then
 **validate readiness**: Description, AC,
 approved **Technical Approach**, Figma node — any missing → **stop** and point at the gap
 (the fnd `write-technical-approach` skill for a missing TA). If the ticket/docs define
