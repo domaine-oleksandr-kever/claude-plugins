@@ -19,6 +19,9 @@ the plugin's answer: domain, storefront password, known themes and free-text not
   "defaultTheme":"156379611322","notes":"free text","updatedAt":"2026-09-20T09:00:00Z"}}}
 ```
 
+`defaultTheme` is the store's usual theme — a **candidate** the theme question offers (Theme under
+test and page URLs below), never the theme under test on its own.
+
 Commands — `node <plugin root>/scripts/qa-stores.cjs <cmd>`:
 
 | Command | Use in this skill |
@@ -73,13 +76,15 @@ gh pr list --repo <owner/name> --search "<KEY>" --state all \
 
 | Outcome | What it means |
 |---|---|
-| non-zero exit | **not** "no PR" — `gh` is missing, unauthenticated, or has no access to the org. Record `gh unavailable: <first stderr line>` in Block 2 and take the theme id from the registry |
+| non-zero exit | **not** "no PR" — `gh` is missing, unauthenticated, or has no access to the org. Record `gh unavailable: <first stderr line>` in Block 2; with no PR table there is no PR candidate, so the theme question (Theme under test and page URLs below) offers the live theme, the registry's `defaultTheme` and **Other** only — the question still decides |
 | empty list | try the PR URL from the ticket's Development panel; still nothing → the PR is not the proof (Phase 2.1) |
 | `headRepository` is not this checkout | the PR lives elsewhere: skip the `git fetch` / `git branch -r --contains` rungs and say so in Block 2 |
 
 **Theme id** comes from the PR body's theme-preview table — the **Theme ID** row, else
-`preview_theme_id=` in its **Preview** row. Keep that Preview URL **whole**: it carries the share
-`key` and the `_ab` / `_fd` / `_sc` params the gate below needs.
+`preview_theme_id=` in its **Preview** row — and it is a **candidate** the theme question offers
+(Phase 2.3), never the theme under test on its own. Keep that Preview URL **whole** so it can be used
+verbatim if the engineer picks that theme: it carries the share `key` and the `_ab` / `_fd` / `_sc`
+params the gate below needs.
 
 **Store** comes from the ticket / PR wording — a domain, or a brand word (MAC, CL, Clinique, KIKO)
 resolved with `node <plugin root>/scripts/qa-stores.cjs find "<text>"`. Exactly one match → use it.
@@ -96,6 +101,62 @@ so the current branch and working tree do not matter.
 - **non-theme** (app, proxy, content, data) or **nothing to test** — the storefront cannot show it,
   or there is nothing to show. Write **Block 2 only**: no Block 1, no Phase 6 offer, Route
   `nothing to test in the theme → <deploy/content owner>`.
+
+## Theme under test and page URLs
+
+QA tests on the theme **they** pick, so the theme under test is asked for, never inferred: a PR's
+preview theme may be deleted or stale by the time the ticket reaches QA, which makes the PR a
+candidate and nothing more. Per store, before any browser work, ask once (on Claude Code one
+AskUserQuestion, elsewhere a plain question):
+
+> Which theme do you test `<store alias>` on?
+
+| Option | When offered | What it means for URLs |
+|---|---|---|
+| the live theme | always | plain store URLs, no preview params; the gate expects `role` `main` |
+| theme `<id>` from the PR table (its label when known) | the PR body has a theme-preview table | that Preview URL verbatim, target path swapped in |
+| the registry's `defaultTheme` `<id>` | set, and not already offered as the PR's | `?preview_theme_id=<id>` on each path |
+| Other — paste the preview link you test on | always | that link verbatim, target path swapped in |
+
+**Live** → no preview link is needed, every page URL is the plain store URL, and the gate checks `role`
+`main` and records the id it read; nothing is compared against the PR's or the registry's id. **Not
+live** → the run needs a way onto that theme: the PR's Preview URL when they picked the PR's theme,
+`?preview_theme_id=<id>` when they picked a registry theme, otherwise the link they paste — a theme
+share link, or any URL carrying `?preview_theme_id=<id>`. It does **not** start the browser phase
+without one. A free-form answer that names a theme the run has neither a link nor an id for is asked
+once more; still none → **Block**, reason `no preview link for theme under test`. The PR's Preview URL
+is never the silent fallback. A PR theme id that differs from the engineer's choice is an Observation in
+Block 2, not a Block. Record the choice — `live`, or the preview link — and that the QA engineer made
+it, on Block 2's Deployed line.
+
+**Page URL.** One absolute URL per page, built from what their answer **is**:
+
+- live → `https://<domain><path>`;
+- any URL the engineer pasted, or the PR's Preview URL when they picked the PR's theme → **their URL
+  verbatim**, with only the path swapped for the target path and every param kept
+  (`preview_theme_id`, `key`, `_ab`, `_fd`, `_sc`) — its host too, when it differs from the registry
+  domain;
+- a bare theme id, picked from the question (the PR table's **Theme ID** row, or the registry's
+  `defaultTheme`) → `https://<domain><path>?preview_theme_id=<id>`, joined with `&` when the path
+  already has a query. Choosing an offered id counts as supplying the theme: the URL is constructible
+  from it, so that answer never hits the Block above.
+
+`<path>` is the **real** path the run opened — the resolved product / collection / page handle, never a
+template name and never "the PDP" — and it carries its leading `/`, so the built URL never doubles it.
+The theme under test's id is the `preview_theme_id` of the link they gave, or the id they picked: it is
+the id the gate compares `Shopify.theme.id` against and the id Block 1 and Block 2 print. A theme share
+link always carries it; a pasted URL with none is not a preview link — ask once more, then **Block**,
+reason `no preview link for theme under test`.
+
+**The hard rule for the brief.** Every URL the brief carries — the Deployed line, every **For human
+eyes** row, a **Needs data** row that names a page — is absolute, resolved and clickable: one URL per
+page, comma-separated when a row spans several. The tester clicks and lands there, never hunting a
+handle, an id or a link. Forbidden, all of them: `PR preview URL`, `(in preflight.md)`, `see Deployed
+line`, a path without scheme and domain, a template name in place of the page, and a handle the tester
+would have to look up.
+
+The storefront password is never part of a URL: it lives in the password cookie of the run's isolated
+context, and the tester enters it themselves.
 
 ## Unlock and deployed gate
 
@@ -133,11 +194,11 @@ and `id: null` below is the `Shopify`-undefined row of the table.
    the current one, store it with `qa-stores.cjs set <domain> --password '<new>'`, then retry.
    Two failures → **Block**, reason `storefront password rejected`; never brute-force a third.
    A storefront with no password answers `locked: false` on the first navigation — fine, go on.
-2. **Theme gate.** Open the target page on the theme under test: when the PR Preview row has a URL,
-   use it **verbatim** (keep every param — `_ab` / `_fd` / `_sc` / `key` — and only swap in the
-   target path); otherwise append `?preview_theme_id=<id>` to the target path. A bare
-   `preview_theme_id` works anonymously for any theme of the store once the storefront is unlocked —
-   it is what a theme share link is. Then read:
+2. **Theme gate.** Open the target page at the page URL built from the engineer's answer (Theme
+   under test and page URLs above): the plain store URL when they test live, their preview link with
+   the target path swapped in and every param kept when they do not. A bare `preview_theme_id` works
+   anonymously for any theme of the store once the storefront is unlocked — it is what a theme share
+   link is. Then read:
 
    ```js
    () => (typeof Shopify === 'undefined' || !Shopify.theme)
@@ -147,16 +208,18 @@ and `id: null` below is the `Shopify`-undefined row of the table.
 
    | Reading | Meaning for the brief |
    |---|---|
-   | `id` matches, `role: "main"` | **live on this store** — the change is published; the preview params are redundant but harmless |
-   | `id` matches, `role: "unpublished"` | **preview active** — the share link put us on the theme under test |
+   | `role: "main"`, whatever `id` reads | the expected reading when the engineer chose **live** — the published theme *is* the theme under test: record the `id` and `name` read as the theme under test. Nothing is compared, and a PR or registry candidate id that differs is an Observation, not a mismatch |
+   | `id` matches the engineer's theme, `role: "unpublished"` | the expected reading when they gave a **preview link** — it put us on the theme under test |
+   | a preview link, but `role: "main"` — the id read is the published theme's | their link points at the live theme: say so in **Observations** and continue; this row wins over `id` differs below |
    | `id: null` | not a Shopify storefront render (a 404, a challenge page, a redirect to the password page): treat as a mismatch |
-   | `id` differs | re-navigate **once** (a first hit can land before the preview cookie is set); still different → **Block**, reason `theme <id> not reachable` (the id may be wrong or the theme deleted — say which store answered and what `Shopify.theme` returned) |
+   | `id` differs from the engineer's preview theme and the row above does not apply | re-navigate **once** (a first hit can land before the preview cookie is set); still different → **Block**, reason `theme <id> not reachable`, naming the theme the engineer's link points at (the id may be wrong or the theme deleted — say which store answered and what `Shopify.theme` returned) |
 
    **Target page.** Precedence, in order: a URL or path in Steps to test → a path in the ticket or
    in the PR Preview row's deep-links → the template the diff touches (`templates/<name>.json` →
    that template's storefront path) → ask the QA engineer. Never guess a handle. Record the chosen
    path and which rung answered on Block 2's Deployed line — a gate passed on the home page proves
-   nothing about a PDP change.
+   nothing about a PDP change. This precedence decides the **path**; Theme under test and page URLs
+   decides the URL around it.
 3. **Marker check, when the ticket gives one.** A string the change introduces (a class name, a
    `data-` attribute, a locale string) confirms the *code*, not just the theme id —
    `document.querySelector` for it once and record the result on the Deployed line. Absent while the
@@ -192,10 +255,10 @@ and `id: null` below is the `Shopify`-undefined row of the table.
   where it would be configured, so the developer or the QA engineer can provision it.
 - **`for human eyes`** is a first-class outcome, not a failure: visual polish against a design,
   hover and transition feel, copy tone, animation timing, anything where the brief would be guessing.
-  Its Block 2 line carries the **URL of every page where the person checks it** — the exact address
-  the run opened (PR preview URL, or the path with `?preview_theme_id=<id>`), one per page when the
-  row spans several, so the engineer lands on the theme under test with one click, not on the live
-  theme.
+  Its Block 2 line carries the **absolute page URL of every page where the person checks it**, built
+  per Theme under test and page URLs, one per page when the row spans several, so the engineer clicks
+  once and lands on the theme under test. The forbidden forms listed there bind this line: no
+  `PR preview URL`, no `(in preflight.md)`, no `see Deployed line`, no path without scheme and domain.
 - **`not-executable: access`** marks a derived break-it or data row whose hostile value needs a write
   this read-only run doesn't have (`../../references/break-it-qa.md` → Read-only store ≠ reduced
   mode). Derived, reported, never silently dropped and never "pass".
@@ -231,14 +294,20 @@ by the agent at the viewports named._
 ## Block 2 — Preflight notes (not for Jira)
 
 **Deployed:** PR #<n> <url> · <headRef> → <baseRef> · merged <date> · on <branches carrying it> ·
-theme <id> role <main|unpublished> · target path <path> (<which rung chose it>) ·
-marker `<string>` <found|absent|not given>
-**For human eyes:** <row> — <what a person has to judge> — <page URL as opened>[, <second page URL>]
-**Needs data:** <row> — <what is missing, where it is configured>
+theme <id> role <main|unpublished> (<live | preview link>, chosen by the QA engineer) ·
+target page <page URL as opened> (<which rung chose the path>) · marker `<string>` <found|absent|not given>
+**For human eyes:** <row> — <what a person has to judge> — <page URL as opened, per Theme under test
+and page URLs, preview params and all>[, <second page URL as opened>]
+**Needs data:** <row> — <what is missing, where it is configured>[ — <page URL as opened>]
 **Developer gaps:** <Steps/AC contradiction, missing page, absent AC, ticket question>
 **Observations:** <anything true but not derivable from the ticket — never a verdict>
 **Route:** ready for hands-on QA | back to developer | nothing to test in the theme → deploy owner
 ```
+
+`<theme label>` is the registry's label for that theme id, else the `name` the gate read
+(`Shopify.theme.name`), else `preview` — never invented. Every `<page URL as opened>` is the URL built
+per Theme under test and page URLs, params and all — e.g.
+`https://<domain>/products/<handle>?preview_theme_id=<id>`.
 
 **Colour** is the house style's own: the verdict word is green for Pass and red for Fail, on the
 status line and at the **start** of every numbered row (`{color:green}Pass{color}` /
@@ -283,8 +352,10 @@ by the agent at the viewports named._
 ```
 
 **Block** is the shortest form: the label line, the three bullets, then one line of reason
-(`theme 156379611322 not reachable on elc-us-mc-uat.myshopify.com — Shopify.theme.id is 150843719862`)
-and nothing else. No partial evidence list under a Block — the run has no ground to stand on.
+(`theme 156379611322 not reachable on
+https://elc-us-mc-uat.myshopify.com/products/<handle>?preview_theme_id=156379611322 —
+Shopify.theme.id is 150843719862`) and nothing else. No partial evidence list under a Block — the
+run has no ground to stand on.
 
 ### What never goes in Block 1
 

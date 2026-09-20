@@ -49,8 +49,8 @@ developer-side counterpart. Output: a brief — where to test, what is verified,
 3. **PR facts from local `gh`**, one call per ticket, scoped with `--repo <owner/name>` from
    `git remote get-url origin` — the call and its branches: `REFERENCE.md` → PR discovery. A non-zero
    exit is **not** "no PR".
-4. **Theme id and store** — from the PR body's theme-preview table and the ticket / PR wording
-   (`REFERENCE.md` → PR discovery); keep the Preview URL whole, it carries the share `key`.
+4. **Candidate theme id and store** — from the PR body's theme-preview table and the ticket / PR
+   wording (`REFERENCE.md` → PR discovery); keep the Preview URL whole, it carries the share `key`.
 5. **Classify the change** — theme · non-theme (app, proxy, content, data) · nothing to test; the last
    two skip Block 1 and the Phase 6 offer (`REFERENCE.md` → PR discovery).
 
@@ -58,24 +58,42 @@ developer-side counterpart. Output: a brief — where to test, what is verified,
 
 1. **Is it on a theme at all?** PR merged → `git fetch`, then `git branch -r --contains <mergeCommit>`
    — which release / UAT branches carry it. PR open, absent or unfindable → the PR is not the proof; the
-   Phase 3 theme gate and the marker check decide: marker on the target theme → continue, naming the rung
-   on Block 2's Deployed line; marker absent or none given → **Block**, `not proven on theme <id>`.
+   Phase 3 theme gate and the marker check decide: marker on the theme under test → continue, naming on
+   Block 2's Deployed line which proof answered (the PR, or the marker); marker absent or none given →
+   **Block**, `not proven on theme <id>`.
 2. **Resolve the store** — `node <plugin root>/scripts/qa-stores.cjs get <store>` (exact domain or
    alias, case-insensitive). Exit 1 = unknown → ask **once** for domain, password, theme id, optional
    label and notes (on Claude Code one AskUserQuestion, elsewhere a plain question), then run the
    `qa-stores.cjs set …` line yourself (`REFERENCE.md` → Store registry) and continue; next runs ask
    nothing. Exit 3 = corrupt registry → report its stderr line verbatim and stop.
-3. **Theme id precedence:** PR table → the registry's `defaultTheme` → ask; the rung goes in Block 2.
+3. **Theme under test — ask the QA engineer, per store, before any browser work.** One question per
+   store (on Claude Code one AskUserQuestion, elsewhere a plain question) — "Which theme do you test
+   <store alias> on?" — offering: the **live** theme · theme `<id>` from the PR table, with its label
+   when known (when there is one) · the registry's `defaultTheme` `<id>` (when set and different) ·
+   **Other** = paste the preview link you test on. The PR table's theme id and `defaultTheme` are
+   candidates the question offers, never the answer by themselves, and the PR's Preview URL is never
+   the fallback: that theme may be gone by the time QA looks. **Live** → every page URL is the plain
+   store URL, no preview params, and Phase 3 expects `role` `main`. **Not live** → the run needs the
+   preview link the engineer tests on (a theme share link, or any URL carrying
+   `?preview_theme_id=<id>`, or an offered id it can build one from) and does not start Phase 3 without
+   it; an answer naming a non-live theme the run has neither a link nor an id for is asked once more,
+   still none → **Block**, reason `no preview link for theme under test`. A PR theme id that differs
+   from their choice is an Observation in Block 2, not a Block. Record the choice (live | preview link)
+   and who chose it on Block 2's Deployed line; URL shapes: `REFERENCE.md` → Theme under test and page
+   URLs.
 
 ## Phase 3 — Browser: unlock + theme gate
 
 Read `REFERENCE.md` → Unlock and deployed gate first — mechanics, snippets, target-page precedence,
 failure branches. Per store, one **isolated context**: `new_page` → `/password` → submit the password →
 confirm with a read that the page is no longer the password gate → open the **target page** (precedence
-there; never guess a handle) on the theme under test → read `Shopify.theme`. Record the path and the rung
-that answered on Block 2's Deployed line. A matching id with `role` `main` → **live on this store**,
-`unpublished` → **preview active**; either passes. Mismatch → `REFERENCE.md`'s branches, then **Block**,
-`theme <id> not reachable`.
+there; never guess a handle) at the page URL built per `REFERENCE.md` → Theme under test and page URLs
+(live: the plain store URL; a preview link: the engineer's link with the target path swapped in, every
+param kept) → read `Shopify.theme`. The expected reading follows their Phase 2 answer: live → `role`
+`main`, and the id read **is** the theme under test (a candidate id that differs is the Phase 2.3
+Observation); a preview link → the `preview_theme_id` of their link with `role` `unpublished`. Record
+the URL as opened and the rung that chose its path on Block 2's Deployed line. Mismatch →
+`REFERENCE.md`'s branches, then **Block**, `theme <id> not reachable`.
 
 ## Phase 4 — Execute
 
@@ -98,9 +116,13 @@ the claim is checkable there, plus **one screenshot per viewport**, at
 Write `.claude/tasks/<KEY>/preflight.md` — **two blocks**, filled from `REFERENCE.md` → Brief template.
 **Block 1** is the house-style part and the only part that may reach Jira. **Block 2 — "Preflight
 notes"**, agent-only, never posted: **Deployed**, **For human eyes**, **Needs data**, **Developer
-gaps**, **Observations** (never a verdict), **Route**.
+gaps**, **Observations** (never a verdict), **Route**. Every **For human eyes** row carries the
+absolute page URL of each page where the person checks it, one per page, built per `REFERENCE.md` →
+Theme under test and page URLs — never a placeholder and never a pointer to another file.
 
-**Chat output:** the batch table `Ticket | Store / theme | Status | Verified n/m | For human | Needs data`, then both blocks per ticket.
+**Chat output:** the batch table `Ticket | Store / theme | Status | Verified n/m | For human | Needs
+data`, then both blocks per ticket, printed verbatim with their URLs — never abbreviated to
+"(in preflight.md)" or to a pointer at the file.
 
 ## Phase 6 — Jira comment (opt-in)
 

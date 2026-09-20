@@ -1050,13 +1050,15 @@ not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-
 ## QA preflight — the store registry
 
 `/fnd:qa-preflight` is the QA engineer's entry point, ahead of hands-on testing:
-given one or more ticket keys it reads the tickets, finds the PR and the theme id it was
-deployed to, unlocks the storefront in the browser, proves `Shopify.theme` is the theme under
-test, pre-runs every Steps-to-Test scenario and AC at desktop (`1440x900`) and mobile
-(`375x812`) with a screenshot each, and writes the brief in Domaine's Jira house style — a
-copy-paste block for the ticket plus agent-only preflight notes. It is read-only toward Jira,
-Admin and the storefront; posting the block as a comment needs an explicit yes.
-Store facts come from a per-developer registry at `~/.config/domaine/qa-stores.json` (dir
+given one or more ticket keys it reads the tickets, finds the PR, asks the QA engineer
+which theme they test on per store — the live theme, or a preview link they supply; the PR's
+theme is only a candidate, since it may be gone by the time QA looks — unlocks the storefront
+in the browser, proves `Shopify.theme` is that theme, pre-runs every Steps-to-Test scenario and
+AC at desktop (`1440x900`) and mobile (`375x812`) with a screenshot each, and writes the brief
+in Domaine's Jira house style — a copy-paste block for the ticket plus agent-only preflight
+notes whose for-human-eyes rows carry the absolute page URLs the run opened, one per page. It is
+read-only toward Jira, Admin and the storefront; posting the block as a comment needs an explicit
+yes. Store facts come from a per-developer registry at `~/.config/domaine/qa-stores.json` (dir
 `0700`, file `0600`), managed by `plugins/fnd/scripts/qa-stores.cjs`:
 `list [--json]`, `get <store>`, `find <text>`, `set <domain> [--alias …] [--password …]
 [--theme <id>[:<label>]] [--default-theme <id>] [--note …]`, `unset <store>` and `path`.
