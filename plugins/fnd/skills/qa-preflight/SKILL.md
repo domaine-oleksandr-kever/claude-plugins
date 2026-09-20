@@ -105,8 +105,8 @@ there; never guess a handle) at the page URL built per `REFERENCE.md` → Theme 
 (live: the plain store URL; a preview link: the engineer's link with the target path swapped in, every
 param kept) → read `Shopify.theme`. The expected reading follows their Phase 2 answer: live → `role`
 `main`, and the id read **is** the theme under test; a preview link → the `preview_theme_id` of their
-link with `role` `unpublished`. Record the URL as opened and the rung that chose its path on Block 2's
-Deployed line. Mismatch → `REFERENCE.md`'s branches, then **Block**, `theme <id> not reachable`.
+link with `role` `unpublished`. Mismatch → `REFERENCE.md`'s branches, then **Block**, `theme <id> not
+reachable`.
 
 **The chosen theme does not carry the change** — the marker is absent (stop here, before Phase 4),
 or Phase 4 ran and every row shows the pre-change behaviour (stop there, run no further rows) → look
@@ -143,8 +143,9 @@ the claim is checkable there, plus **one screenshot per viewport**, at
 
 Write `.claude/tasks/<KEY>/preflight.md` — **two blocks**, filled from `REFERENCE.md` → Brief template.
 **Block 1** is the house-style part and the only part that may reach Jira. **Block 2 — "Preflight
-notes"**, agent-only, never posted: **Deployed**, **For human eyes**, **Needs data**, **Developer
-gaps**, **Observations** (never a verdict), **Route**. Every **For human eyes** row carries the
+notes"**, agent-only, never posted: **For human eyes**, **Needs data**, **Developer gaps**,
+**Observations** (never a verdict), **Route**, and last **Deployed** — one short line (theme · marker ·
+PR link), the developer's trace, not reading matter for the QA engineer. Every **For human eyes** row carries the
 absolute page URL of each page where the person checks it, one per page, built per `REFERENCE.md` →
 Theme under test and page URLs — never a placeholder and never a pointer to another file.
 

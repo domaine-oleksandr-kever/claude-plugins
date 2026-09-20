@@ -203,8 +203,8 @@ link always carries it; a pasted URL with no `preview_theme_id` but a theme id i
 `https://<domain><path>?preview_theme_id=<id>` from it. Only a URL carrying no id at all is not a
 preview link — ask once more, then **Block**, reason `no preview link for theme under test`.
 
-**The hard rule for the brief.** Every URL the brief carries — the Deployed line, every **For human
-eyes** row, a **Needs data** row that names a page — is absolute, resolved and clickable: one URL per
+**The hard rule for the brief.** Every URL the brief carries — the PR link on the Deployed line, every
+**For human eyes** row, a **Needs data** row that names a page — is absolute, resolved and clickable: one URL per
 page, comma-separated when a row spans several. The tester clicks and lands there, never hunting a
 handle, an id or a link. Forbidden, all of them: `PR preview URL`, `(in preflight.md)`, `see Deployed
 line`, a path without scheme and domain, a template name in place of the page, and a handle the tester
@@ -274,10 +274,9 @@ and `id: null` below is the `Shopify`-undefined row of the table.
    there, and a bare `/` does not satisfy this rung → a storefront path the PR body names in prose,
    never its Preview URL or the deep-links under it (discarded at PR discovery, so no path is taken
    from them) → the template the diff touches (`templates/<name>.json` → that template's storefront
-   path; the diff comes from the call in PR discovery) → ask the QA engineer. Never guess a handle.
-   Record the chosen path and which rung answered on Block 2's Deployed line — a gate passed on the
-   home page proves nothing about a PDP change. This precedence decides the **path**; Theme under test and page URLs
-   decides the URL around it.
+   path; the diff comes from the call in PR discovery) → ask the QA engineer. Never guess a handle —
+   a gate passed on the home page proves nothing about a PDP change. This precedence decides the
+   **path**; Theme under test and page URLs decides the URL around it.
 3. **Marker check — on the chosen theme only.** The marker is a string the change introduces: from
    the ticket when it gives one, else derived from the PR diff (the call in PR discovery) — a class, a
    `data-` attribute, a CSS custom-property name, a locale string the diff adds. Read it the way its
@@ -373,10 +372,6 @@ by the agent at the viewports named._
 
 ## Block 2 — Preflight notes (not for Jira)
 
-**Deployed:** PR #<n> <url> · <headRef> → <baseRef> · merged <date> · on <branches carrying it> ·
-theme <id> role <main|unpublished> (<live | preview link>, chosen by the QA engineer) ·
-target page <page URL as opened> (<which rung chose the path>) ·
-marker <`<string>` found|absent | no marker — the rows are the proof>
 **For human eyes:** <row> — <what a person has to judge> — <page URL as opened, per Theme under test
 and page URLs, preview params and all>[, <second page URL as opened>]
 **Needs data:** <row> — <what is missing, where it is configured>[ — <page URL as opened>]
@@ -384,7 +379,14 @@ and page URLs, preview params and all>[, <second page URL as opened>]
 **Observations:** <anything true but not derivable from the ticket — never a verdict>
 **Route:** ready for hands-on QA | back to developer | back to the QA engineer's theme choice / deploy
 owner | nothing to test in the theme → deploy owner
+**Deployed:** theme <id> <label> (<live | preview link>, chosen by the QA engineer) · marker
+<`<string>` found|absent | no marker — the rows are the proof> · PR #<n> <url>
 ```
+
+**Deployed** closes Block 2 and stays that one short line — the theme examined, the marker read and
+the PR link: a developer's trace, not something the QA engineer reads. Head and base branch, merge
+date, the branches carrying the merge, the target page and which rung chose its path are not written
+into the brief at all.
 
 `<theme label>` is the registry's label for that theme id, else the `name` the gate read
 (`Shopify.theme.name`), else `live` for the published theme and `preview` otherwise — never invented.
