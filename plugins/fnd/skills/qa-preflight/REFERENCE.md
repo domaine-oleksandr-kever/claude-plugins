@@ -82,7 +82,13 @@ gh pr list --repo <owner/name> --search "<KEY>" --state all \
 `key` and the `_ab` / `_fd` / `_sc` params the gate below needs.
 
 **Store** comes from the ticket / PR wording — a domain, or a brand word (MAC, CL, Clinique, KIKO)
-resolved with `node <plugin root>/scripts/qa-stores.cjs find "<text>"`.
+resolved with `node <plugin root>/scripts/qa-stores.cjs find "<text>"`. Exactly one match → use it.
+None, several, or no store signal in the ticket at all → ask the QA engineer, showing
+`qa-stores.cjs list` (plus "a store not on this list" → the registration questions). A ticket that
+names several brands or stores runs every phase once per store, one isolated context each.
+The local checkout is never the source of what is tested: the storefront theme is. The checkout
+only supplies `origin` for the `gh` call and the fetched remote refs for `git branch -r --contains`,
+so the current branch and working tree do not matter.
 
 **Classify the change** from the PR file list and the ticket:
 
