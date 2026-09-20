@@ -372,21 +372,39 @@ by the agent at the viewports named._
 
 ## Block 2 — Preflight notes (not for Jira)
 
-**For human eyes:** <row> — <what a person has to judge> — <page URL as opened, per Theme under test
-and page URLs, preview params and all>[, <second page URL as opened>]
-**Needs data:** <row> — <what is missing, where it is configured>[ — <page URL as opened>]
-**Developer gaps:** <Steps/AC contradiction, missing page, absent AC, ticket question>
-**Observations:** <anything true but not derivable from the ticket — never a verdict>
+**For human eyes**
+- row <n> — <what a person has to judge> — <page URL as opened, per Theme under test and page URLs,
+  preview params and all>[, <second page URL as opened>]
+
+**Needs data**
+- row <n> — <what is missing> — <where it is configured>[ — <page URL as opened>]
+
+**Developer gaps**
+- <one gap per bullet: a Steps/AC contradiction, a missing page, an absent AC, a ticket question>
+
+**Observations**
+- <one fact per bullet — anything true but not derivable from the ticket, never a verdict>
+
 **Route:** ready for hands-on QA | back to developer | back to the QA engineer's theme choice / deploy
 owner | nothing to test in the theme → deploy owner
+
 **Deployed:** theme <id> <label> (<live | preview link>, chosen by the QA engineer) · marker
-<`<string>` found|absent | no marker — the rows are the proof> · PR #<n> <url>
+<`<string>` found|absent | no marker — the rows are the proof> · PR <url>
 ```
 
+**Block 2 is read top to bottom by a person, so it is laid out for scanning**: every label is its own
+paragraph with a blank line before and after; under a label, one bullet per row or per fact — a row
+whose story needs several facts (what was seen, why it cannot be reproduced here, what would prove
+it) gets one bullet per fact, never one long sentence chain; a bullet is two sentences at most; a
+label with nothing under it stays as one line, `**Needs data:** none`, so the reader still sees every
+heading. Labels never run into each other on adjacent lines — markdown folds adjacent lines into one
+paragraph, and the brief then reads as a wall of text. **Route** and **Deployed** are single lines.
+
 **Deployed** closes Block 2 and stays that one short line — the theme examined, the marker read and
-the PR link: a developer's trace, not something the QA engineer reads. Head and base branch, merge
-date, the branches carrying the merge, the target page and which rung chose its path are not written
-into the brief at all.
+the PR link: a developer's trace, not something the QA engineer reads. The PR appears once, as its
+URL — no `#<n>` beside it, a renderer that turns the URL into a chip would show the number twice.
+Head and base branch, merge date, the branches carrying the merge, the target page and which rung
+chose its path are not written into the brief at all.
 
 `<theme label>` is the registry's label for that theme id, else the `name` the gate read
 (`Shopify.theme.name`), else `live` for the published theme and `preview` otherwise — never invented.

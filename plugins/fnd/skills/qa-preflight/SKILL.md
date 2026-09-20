@@ -145,9 +145,11 @@ Write `.claude/tasks/<KEY>/preflight.md` — **two blocks**, filled from `REFERE
 **Block 1** is the house-style part and the only part that may reach Jira. **Block 2 — "Preflight
 notes"**, agent-only, never posted: **For human eyes**, **Needs data**, **Developer gaps**,
 **Observations** (never a verdict), **Route**, and last **Deployed** — one short line (theme · marker ·
-PR link), the developer's trace, not reading matter for the QA engineer. Every **For human eyes** row carries the
-absolute page URL of each page where the person checks it, one per page, built per `REFERENCE.md` →
-Theme under test and page URLs — never a placeholder and never a pointer to another file.
+PR link), the developer's trace, not reading matter for the QA engineer. Laid out for scanning: each
+label is its own paragraph, blank line before and after; one bullet per row or fact beneath it, two
+sentences a bullet at most; an empty label stays as `**Needs data:** none`. Every **For human eyes**
+row carries the absolute page URL of each page where the person checks it, one per page, built per
+`REFERENCE.md` → Theme under test and page URLs — never a placeholder and never a pointer to another file.
 
 **Chat output:** the batch table `Ticket | Store / theme | Status | Verified n/m | For human | Needs
 data`, then both blocks per ticket, printed verbatim with their URLs — never abbreviated to
