@@ -49,38 +49,52 @@ developer-side counterpart. Output: a brief — where to test, what is verified,
 3. **PR facts from local `gh`**, one call per ticket, scoped with `--repo <owner/name>` from
    `git remote get-url origin` — the call and its branches: `REFERENCE.md` → PR discovery. A non-zero
    exit is **not** "no PR".
-4. **Candidate theme id and store** — from the PR body's theme-preview table and the ticket / PR
-   wording (`REFERENCE.md` → PR discovery); keep the Preview URL whole, it carries the share `key`.
+4. **Store** — from the ticket / PR wording and, in the PR body's theme-preview table, its store
+   domain only: the table's Preview URL is discarded, and its theme id is never opened, probed,
+   offered or printed — it is kept for one use, the Phase 2.3 comparison against a ticket link's id
+   (`REFERENCE.md` → PR discovery).
 5. **Classify the change** — theme · non-theme (app, proxy, content, data) · nothing to test; the last
    two skip Block 1 and the Phase 6 offer (`REFERENCE.md` → PR discovery).
 
 ## Phase 2 — Deployed gate + registry
 
 1. **Is it on a theme at all?** PR merged → `git fetch`, then `git branch -r --contains <mergeCommit>`
-   — which release / UAT branches carry it. PR open, absent or unfindable → the PR is not the proof; the
-   Phase 3 theme gate and the marker check decide: marker on the theme under test → continue, naming on
-   Block 2's Deployed line which proof answered (the PR, or the marker); marker absent or none given →
-   **Block**, `not proven on theme <id>`.
+   — which release / UAT branches carry it. A merged PR proves the change is on a branch, never on the
+   theme under test, so the marker check on the theme the engineer chose (Phase 3) always runs and is
+   what the Deployed line's verdict rests on. The **marker** is a string the change introduces — from
+   the ticket when it gives one, else derived from the PR diff (`gh pr diff`, `REFERENCE.md` → PR
+   discovery: a class, a `data-` attribute, a CSS custom property name, a locale string the diff
+   adds); with neither, or with a marker the page can't be read for, the Steps-to-test rows and their
+   pass/fail are the proof and nothing Blocks for a missing marker. Marker absent (Phase 3), or every
+   row showing the pre-change behaviour (Phase 4) → the Phase 3 question (**The chosen theme does not
+   carry the change**): another preview link → restart Phase 3 on it; a confirm, or no answer →
+   **Block**, `change not on theme <id> <label>`.
 2. **Resolve the store** — `node <plugin root>/scripts/qa-stores.cjs get <store>` (exact domain or
-   alias, case-insensitive). Exit 1 = unknown → ask **once** for domain, password, theme id, optional
-   label and notes (on Claude Code one AskUserQuestion, elsewhere a plain question), then run the
-   `qa-stores.cjs set …` line yourself (`REFERENCE.md` → Store registry) and continue; next runs ask
-   nothing. Exit 3 = corrupt registry → report its stderr line verbatim and stop.
+   alias, case-insensitive). Exit 1 = unknown → ask **once** for domain, password, theme id (recorded
+   as your saved theme for that store), optional label and notes (on Claude Code one
+   AskUserQuestion, elsewhere a plain question), then run the `qa-stores.cjs set …` line yourself
+   (`REFERENCE.md` → Store registry) and continue; next runs ask nothing. Exit 3 = corrupt registry →
+   report its stderr line verbatim and stop.
 3. **Theme under test — ask the QA engineer, per store, before any browser work.** One question per
    store (on Claude Code one AskUserQuestion, elsewhere a plain question) — "Which theme do you test
-   <store alias> on?" — offering: the **live** theme · theme `<id>` from the PR table, with its label
-   when known (when there is one) · the registry's `defaultTheme` `<id>` (when set and different) ·
-   **Other** = paste the preview link you test on. The PR table's theme id and `defaultTheme` are
-   candidates the question offers, never the answer by themselves, and the PR's Preview URL is never
-   the fallback: that theme may be gone by the time QA looks. **Live** → every page URL is the plain
-   store URL, no preview params, and Phase 3 expects `role` `main`. **Not live** → the run needs the
-   preview link the engineer tests on (a theme share link, or any URL carrying
-   `?preview_theme_id=<id>`, or an offered id it can build one from) and does not start Phase 3 without
-   it; an answer naming a non-live theme the run has neither a link nor an id for is asked once more,
-   still none → **Block**, reason `no preview link for theme under test`. A PR theme id that differs
-   from their choice is an Observation in Block 2, not a Block. Record the choice (live | preview link)
-   and who chose it on Block 2's Deployed line; URL shapes: `REFERENCE.md` → Theme under test and page
-   URLs.
+   <store alias> on?" — offering exactly four options: the **live** theme · the theme the **ticket**
+   names (a preview link or theme id in the Description, Steps to test, AC or comments, on this
+   store's host, with its id and label when known), unless it is evidently the PR's preview · the
+   registry's `defaultTheme` as "your saved theme `<id>` `<label>`", when set and not already the
+   ticket's · **Other** = paste the preview link you test on. The PR's own theme — the theme-preview
+   table's id, its Preview URL — is **never** offered, opened or probed *by this run*: by the time
+   QA looks, the developer's preview theme may be deleted, and QA tests on their own theme. A link
+   the QA engineer pastes themselves — here or at the Phase 3 question — is their choice and is
+   opened like any **Other** answer even when it is the PR's preview. **Live** → every page URL is
+   the plain store URL, no preview params, and Phase 3 expects `role` `main`. **Not live** → the run
+   needs the preview link they test on (a theme share link, a URL carrying `?preview_theme_id=<id>`,
+   or an offered id it can build one from) and does not start Phase 3 without it; an answer naming a
+   theme it has neither a link nor an id for is asked once more, still none → **Block**, reason `no
+   preview link for theme under test`. **Exactly one theme is examined per store per run** — the
+   chosen one, or the replacement link pasted at the Phase 3 question, which supersedes it. Record
+   the choice (live | preview link) and who chose it on Block 2's Deployed line. The three
+   "evidently the PR's preview" tests, the no-PR-body fallback and the URL shapes:
+   `REFERENCE.md` → Theme under test and page URLs.
 
 ## Phase 3 — Browser: unlock + theme gate
 
@@ -90,10 +104,20 @@ confirm with a read that the page is no longer the password gate → open the **
 there; never guess a handle) at the page URL built per `REFERENCE.md` → Theme under test and page URLs
 (live: the plain store URL; a preview link: the engineer's link with the target path swapped in, every
 param kept) → read `Shopify.theme`. The expected reading follows their Phase 2 answer: live → `role`
-`main`, and the id read **is** the theme under test (a candidate id that differs is the Phase 2.3
-Observation); a preview link → the `preview_theme_id` of their link with `role` `unpublished`. Record
-the URL as opened and the rung that chose its path on Block 2's Deployed line. Mismatch →
-`REFERENCE.md`'s branches, then **Block**, `theme <id> not reachable`.
+`main`, and the id read **is** the theme under test; a preview link → the `preview_theme_id` of their
+link with `role` `unpublished`. Record the URL as opened and the rung that chose its path on Block 2's
+Deployed line. Mismatch → `REFERENCE.md`'s branches, then **Block**, `theme <id> not reachable`.
+
+**The chosen theme does not carry the change** — the marker is absent (stop here, before Phase 4),
+or Phase 4 ran and every row shows the pre-change behaviour (stop there, run no further rows) → look
+nowhere else and ask the QA engineer one question (on Claude Code one AskUserQuestion, elsewhere a
+plain question): "Theme `<id> <label>` on `<store>` does not carry the change
+(`<one-line evidence>`). Is this the theme you test on? Paste another preview link where the change
+is deployed, or confirm this theme." Paste a link → restart Phase 3 on it, same page-URL rules, one
+restart only. Confirm, no answer, or a second theme without the change → **Block**, reason `change
+not on theme <id> <label>`, Route `back to the QA engineer's theme choice / deploy owner`; that
+brief carries no **For human eyes** rows, no **Needs data** rows and no link to any other theme.
+Details and the Deployed line: `REFERENCE.md` → Unlock and deployed gate, step 4.
 
 ## Phase 4 — Execute
 
@@ -106,6 +130,10 @@ Every row runs at **both** viewports, desktop `1440x900` and mobile `375x812` wi
 the claim is checkable there, plus **one screenshot per viewport**, at
 `.claude/tasks/<KEY>/preflight/NN-<slug>-<desktop|mobile>.png`.
 
+- **Every row showing the pre-change behaviour** = the theme does not carry the change: stop, ask the
+  Phase 3 question, and on a confirm or no answer the run is **Block**, `change not on theme <id>
+  <label>` — the rows are not listed in Block 1 (a Block carries no evidence list) and their
+  screenshots stay on disk, uncited.
 - **Checkout to the payment step is in scope** — line items, quantities, bundles, discounts, totals.
 - The non-pass/fail outcomes (`needs data: <what, where>`, `for human eyes`, `not-executable: access`),
   break-it rows (`../../references/break-it-qa.md`, non-destructive only), test identity, where checkout

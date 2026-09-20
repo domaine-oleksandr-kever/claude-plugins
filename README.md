@@ -1050,11 +1050,14 @@ not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-
 ## QA preflight — the store registry
 
 `/fnd:qa-preflight` is the QA engineer's entry point, ahead of hands-on testing:
-given one or more ticket keys it reads the tickets, finds the PR, asks the QA engineer
-which theme they test on per store — the live theme, or a preview link they supply; the PR's
-theme is only a candidate, since it may be gone by the time QA looks — unlocks the storefront
-in the browser, proves `Shopify.theme` is that theme, pre-runs every Steps-to-Test scenario and
-AC at desktop (`1440x900`) and mobile (`375x812`) with a screenshot each, and writes the brief
+given one or more ticket keys it reads the tickets, finds the PR, and asks the QA engineer which
+theme they test on per store — the live theme, the theme the ticket names when that link is not
+evidently the developer's PR preview, their own saved theme, or a preview link they paste. The PR's
+theme is never offered or opened, since it may be gone by the time QA looks. It unlocks the storefront in the browser, proves `Shopify.theme` is that one theme —
+the only theme the run examines, and a theme that turns out not to carry the change sends the run
+back to the engineer's choice instead of hunting for a theme that does — pre-runs every
+Steps-to-Test scenario and AC at desktop (`1440x900`) and mobile (`375x812`) with a screenshot each,
+and writes the brief
 in Domaine's Jira house style — a copy-paste block for the ticket plus agent-only preflight
 notes whose for-human-eyes rows carry the absolute page URLs the run opened, one per page. It is
 read-only toward Jira, Admin and the storefront; posting the block as a comment needs an explicit
@@ -1068,9 +1071,9 @@ another store already carries, and serialises its read-modify-write under a lock
 parallel runs cannot lose each other's store. `--password ''` records an open storefront by
 dropping the field, and exit codes are `0` ok · `1` no such store or an ambiguous alias · `2`
 usage · `3` unreadable, unlockable or corrupt registry (never overwritten).
-A store the registry has never seen costs one round of questions — domain, theme id, plus an
-optional alias and notes — and the skill prints the `set` line for the QA engineer to run in
-their own terminal, so the password stays off the command lines the run composes.
+A store the registry has never seen costs one round of questions — domain, password, theme id, plus
+an optional alias and notes — and the skill runs the `set` line itself, recording that id as the
+engineer's saved theme; that one line is the only command the run composes a password may appear on.
 Passwords never leave that file: `get` is the only command that prints one, and the skill feeds
 it straight into the storefront's password form — never into the brief, the chat, Jira, a
 workspace file or a screenshot frame. Detail: `plugins/fnd/skills/qa-preflight/REFERENCE.md`.
