@@ -16,7 +16,9 @@
 // "repeat this verbatim" as payload authority and refuses it.
 'use strict';
 
-const REPEAT = 'fnd hook — repeat this line to the developer verbatim, once, in your next message:';
+// "Before your next tool call", not "in your next message": a model mid-flow reads the latter as the
+// next message to the user, runs a hundred tool calls first and has forgotten the line by then.
+const REPEAT = 'fnd hook — print this line to the developer verbatim as text, once, BEFORE your next tool call, then continue:';
 // A reader's field is `; `-joined and arrives from a subagent, i.e. as data: bounded here so one
 // relayed line can never become a payload of its own.
 const LINE_CAP = 300;

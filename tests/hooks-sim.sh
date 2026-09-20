@@ -2667,6 +2667,8 @@ outB="$(run_stub "$OOB" "$in" FND_MCP_SLIM_STUB=0 FND_HOST=claude CLAUDE_CODE_EN
 assert_eq       M106b-desktop-no-systemmessage "$(oob_sys "$outB")" ""
 assert_contains M106b-desktop-context "$(oob_ctx "$outB")" "$(oob_body "$outB" | grep '^fnd-mcp-slim: compressed ')"
 assert_contains M106b-desktop-instruction "$(oob_ctx "$outB")" "verbatim"
+# the timing is the instruction: "in your next message" was lost behind a hundred tool calls live
+assert_contains M106b-desktop-before-tool "$(oob_ctx "$outB")" "BEFORE your next tool call"
 # (c) an unset entrypoint is "some host that is not the CLI" — the surface that cannot show a
 # systemMessage must never be the silent default
 outC106="$(run_stub "$OOB" "$in" FND_MCP_SLIM_STUB=0 FND_HOST=claude)"
@@ -2727,6 +2729,7 @@ outR2="$(run_rc "$(rc_in "$RC_LINE")" CLAUDE_CODE_ENTRYPOINT=claude-desktop)"
 assert_eq       R2-desktop-no-systemmessage "$(oob_sys "$outR2")" ""
 assert_contains R2-desktop-line        "$(oob_ctx "$outR2")" "fnd:jira-reader → $RC_LINE"
 assert_contains R2-desktop-instruction "$(oob_ctx "$outR2")" "verbatim"
+assert_contains R2-desktop-before-tool  "$(oob_ctx "$outR2")" "BEFORE your next tool call"
 assert_eq       R2-desktop-event "$(printf '%s' "$outR2" | jq -r '.hookSpecificOutput.hookEventName')" "PostToolUse"
 # R3: the shapes a tool_response can arrive in — a bare string, a single block, and a JSON-encoded
 # string — all reach the same field (the hook mirrors whatever the host hands it)
@@ -3511,6 +3514,7 @@ outUN2="$(run_un "$(un_in abc "$UN_LINE")" CLAUDE_CODE_ENTRYPOINT=claude-desktop
 assert_eq       UN2-desktop-no-systemmessage "$(un_sys "$outUN2")" ""
 assert_contains UN2-desktop-line        "$(un_ctx "$outUN2")" "fnd:jira-reader → $UN_LINE"
 assert_contains UN2-desktop-instruction "$(un_ctx "$outUN2")" "verbatim"
+assert_contains UN2-desktop-before-tool  "$(un_ctx "$outUN2")" "BEFORE your next tool call"
 assert_eq       UN2-desktop-event "$(printf '%s' "$outUN2" | jq -r '.hookSpecificOutput.hookEventName')" "UserPromptSubmit"
 # UN3: the false `compression:` line the ticket body put above the real one is read past
 assert_eq UN3-reads-past-ticket-text "$(un_sys "$(run_un "$(un_in abc "$UN_LINE")" CLAUDE_CODE_ENTRYPOINT=cli)")" "fnd:jira-reader → $UN_LINE"

@@ -472,6 +472,11 @@ else bad compression-hook-missing "hooks/reader-compression.cjs does not exist";
 UC="$PLUGIN_DIR/hooks/untrusted-content.md"
 if grep -qF "hook's own system reminder" "$UC"; then ok
 else bad compression-hook-channel "untrusted-content.md never names a hook's system reminder as a real fnd instruction"; fi
+# …and say WHEN: the hook asks for the line before the next tool call, and the convention must ask
+# for the same moment, or the model reads the two as disagreeing and picks the later one — which
+# is what lost the line live (it went to "the next message", two minutes and a hundred tools away).
+if tr "\n" " " < "$UC" | grep -qF "before your next tool call" && grep -qF "BEFORE your next tool call" "$PLUGIN_DIR/hooks/compression-notice.cjs"; then ok
+else bad compression-hook-timing "untrusted-content.md and hooks/compression-notice.cjs do not both ask for the figure before the next tool call"; fi
 # Parity, derived rather than re-listed: every compressor grammar the relay can forward must be a
 # compressor the convention names as legitimate, in BOTH copies of it. A prefix in one file and not
 # the other is a figure the model is asked to repeat from a source it was told to refuse.

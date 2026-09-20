@@ -1228,7 +1228,9 @@ plugin cannot set for you: [Recommended Claude Code settings](#recommended-claud
     `systemMessage` and the CLI prints it itself; the model is told nothing, so nothing is repeated
     twice. On **every other host** — the desktop app's Code tab, Cowork, cloud, the SDK, which all
     drop `systemMessage` — it rides as PostToolUse `additionalContext` with a one-sentence
-    instruction to repeat it verbatim once, because there the model is the only screen. The hook
+    instruction to print it verbatim once as text before its next tool call, because there the model
+    is the only screen and a line deferred to "the next message" is lost behind the tool calls in
+    between. The hook
     reads the host's own `CLAUDE_CODE_ENTRYPOINT` (`cli` in the terminal, `claude-desktop` in the
     app) to tell them apart — that is Claude Code's variable, not a plugin switch, and an unset or
     unknown value takes the `additionalContext` branch, since the surface that cannot show a
