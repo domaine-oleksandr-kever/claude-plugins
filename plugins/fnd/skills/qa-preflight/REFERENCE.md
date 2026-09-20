@@ -192,6 +192,10 @@ and `id: null` below is the `Shopify`-undefined row of the table.
   where it would be configured, so the developer or the QA engineer can provision it.
 - **`for human eyes`** is a first-class outcome, not a failure: visual polish against a design,
   hover and transition feel, copy tone, animation timing, anything where the brief would be guessing.
+  Its Block 2 line carries the **URL of every page where the person checks it** — the exact address
+  the run opened (PR preview URL, or the path with `?preview_theme_id=<id>`), one per page when the
+  row spans several, so the engineer lands on the theme under test with one click, not on the live
+  theme.
 - **`not-executable: access`** marks a derived break-it or data row whose hostile value needs a write
   this read-only run doesn't have (`../../references/break-it-qa.md` → Read-only store ≠ reduced
   mode). Derived, reported, never silently dropped and never "pass".
@@ -229,7 +233,7 @@ by the agent at the viewports named._
 **Deployed:** PR #<n> <url> · <headRef> → <baseRef> · merged <date> · on <branches carrying it> ·
 theme <id> role <main|unpublished> · target path <path> (<which rung chose it>) ·
 marker `<string>` <found|absent|not given>
-**For human eyes:** <row> — <what a person has to judge>
+**For human eyes:** <row> — <what a person has to judge> — <page URL as opened>[, <second page URL>]
 **Needs data:** <row> — <what is missing, where it is configured>
 **Developer gaps:** <Steps/AC contradiction, missing page, absent AC, ticket question>
 **Observations:** <anything true but not derivable from the ticket — never a verdict>
