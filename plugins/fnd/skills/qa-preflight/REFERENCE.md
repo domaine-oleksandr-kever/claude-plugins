@@ -257,9 +257,13 @@ and `id: null` below is the `Shopify`-undefined row of the table.
 
    ```js
    () => (typeof Shopify === 'undefined' || !Shopify.theme)
-     ? { id: null, role: null, name: null }
-     : { id: String(Shopify.theme.id), role: Shopify.theme.role, name: Shopify.theme.name }
+     ? { id: null, role: null, name: null, shop: null }
+     : { id: String(Shopify.theme.id), role: Shopify.theme.role, name: Shopify.theme.name,
+         shop: Shopify.shop }
    ```
+
+   `shop` is the store's `<handle>.myshopify.com`; its handle builds the admin URLs of Block 2's
+   **Needs data** recipes and is never a gate criterion.
 
    | Reading | Meaning for the brief |
    |---|---|
@@ -330,8 +334,11 @@ and `id: null` below is the `Shopify`-undefined row of the table.
   abandon the checkout before the next row so it starts clean. A test order is the QA engineer's
   call on their own account, never this skill's.
 - **`needs data: <what, where>`** replaces a verdict when the fixture the row needs is absent (no
-  product with the required metafield, no discount code, empty metaobject). Name what is missing and
-  where it would be configured, so the developer or the QA engineer can provision it.
+  product with the required metafield, no discount code, empty metaobject, no block on a dark colour
+  scheme). Its Block 2 row is a **recipe** the QA engineer follows click by click — admin URL, the
+  section / block / setting or metafield as the editor names it, the exact value, Save, the page URL
+  to reopen — never a one-line diagnosis of what the store lacks: Block 2 → A Needs data row is a
+  recipe.
 - **`for human eyes`** is a first-class outcome, not a failure: visual polish against a design,
   hover and transition feel, copy tone, animation timing, anything where the brief would be guessing.
   Its Block 2 line carries the **absolute page URL of every page where the person checks it**, built
@@ -377,7 +384,12 @@ by the agent at the viewports named._
   preview params and all>[, <second page URL as opened>]
 
 **Needs data**
-- row <n> — <what is missing> — <where it is configured>[ — <page URL as opened>]
+- row <n> — <what is missing, one line>
+  1. <store alias> — open <absolute admin URL: the theme editor on the theme under test, landing on
+     the page the row opens, or the product / collection / metafield-definition admin page>
+  2. <Section — its editor name and position on the page> → <block> → <setting label> → <exact value
+     or option label>[; <next setting> → <value>]
+  3. Save, reopen <page URL as opened> — <what the row then shows>
 
 **Developer gaps**
 - <one gap per bullet: a Steps/AC contradiction, a missing page, an absent AC, a ticket question>
@@ -399,6 +411,40 @@ it) gets one bullet per fact, never one long sentence chain; a bullet is two sen
 label with nothing under it stays as one line, `**Needs data:** none`, so the reader still sees every
 heading. Labels never run into each other on adjacent lines — markdown folds adjacent lines into one
 paragraph, and the brief then reads as a wall of text. **Route** and **Deployed** are single lines.
+
+**A Needs data row is a recipe, not a diagnosis.** The QA engineer reads it and provisions the
+fixture without looking anything up: "the store has no card group on a dark scheme with a primary
+button" is a finding they cannot act on; "Home page → section *Card group* (third on the page) →
+*Colour scheme* → *Scheme 2* → block *Card* → *Button style* → *Primary* → Save" is one they can.
+Every recipe names:
+
+- **Where** — the store by its alias, then one absolute admin URL the engineer clicks and lands on.
+  A theme setting: the editor on the theme under test, opened on the page the row opens,
+  `https://admin.shopify.com/store/<handle>/themes/<theme id>/editor?previewPath=<url-encoded path>`
+  (`<handle>` = the `shop` the gate read, minus `.myshopify.com`). A product / collection / page
+  fixture: its admin page when the run read the numeric id (`…/store/<handle>/products/<id>`), else
+  the admin list filtered on the handle (`…/store/<handle>/products?query=<handle>`). A metafield
+  definition: `…/store/<handle>/settings/custom_data/<owner>/metafields`.
+- **What** — the section by its editor name and its position on the page (`templates/<name>.json`
+  lists the page's sections in order; `{% schema %}` → `name`), the block by its name, every setting
+  by its **label** and the value by its **option label** — the names the editor shows, read from the
+  section's or block's `{% schema %}` (`t:` keys resolved through `locales/en.default.schema.json`),
+  never the code's (`variant="secondary"`, a setting id, a scheme number the editor does not show).
+  A metafield: the definition name, `namespace.key`, type, the owner (a product by title and handle),
+  the value to enter. A discount / customer / order fixture: the admin object and its fields.
+- **Then** — Save, the page URL as opened (per Theme under test and page URLs) and what the row
+  shows once the fixture is there.
+
+Sources are the theme code in the working tree (the PR's branch, or the branch the merge landed on)
+and, for numeric ids and metafield definitions, Admin API **reads** through
+`node <plugin root>/scripts/shopify-admin-gql.sh --query <file.graphql>` when the repo carries
+credentials — reads only; the run's posture stays read-only, the QA engineer makes the change.
+Nothing is guessed: a label the schema does not hold, a section the template does not carry, a
+metafield with no definition → the row is a **Developer gap** ("no setting exposes X"), not a
+recipe. Prefer the cheapest fixture: one setting on a block already on the page the row opens over
+a new section; a value on an existing product over a new product. The recipe edits the theme under
+test — when that theme is live or a shared UAT theme, say so on the row ("<theme label> is shared:
+change it, or test on your own copy") and leave the choice to the engineer.
 
 **Deployed** closes Block 2 and stays that one short line — the theme examined, the marker read and
 the PR link: a developer's trace, not something the QA engineer reads. The PR appears once, as its

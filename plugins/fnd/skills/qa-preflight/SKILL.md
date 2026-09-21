@@ -147,7 +147,10 @@ notes"**, agent-only, never posted: **For human eyes**, **Needs data**, **Develo
 **Observations** (never a verdict), **Route**, and last **Deployed** — one short line (theme · marker ·
 PR link), the developer's trace, not reading matter for the QA engineer. Laid out for scanning: each
 label is its own paragraph, blank line before and after; one bullet per row or fact beneath it, two
-sentences a bullet at most; an empty label stays as `**Needs data:** none`. Every **For human eyes**
+sentences a bullet at most; an empty label stays as `**Needs data:** none`. A **Needs data** row is a
+recipe the engineer follows click by click — admin URL, the section / block / setting or metafield as
+the editor names it, the exact value, Save, the page URL — read from the theme's schemas, templates
+and locales, never a diagnosis of what the store lacks (`REFERENCE.md` → Block 2). Every **For human eyes**
 row carries the absolute page URL of each page where the person checks it, one per page, built per
 `REFERENCE.md` → Theme under test and page URLs — never a placeholder and never a pointer to another file.
 
