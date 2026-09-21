@@ -373,9 +373,7 @@ by the agent at the viewports named._
 
 **Evidence on the criteria that pass verification:**
 1. {color:green}Pass{color} — <AC or step restated as an observed fact — what was done, what the page did>
-   screenshot: 01-<slug>-desktop.png, 01-<slug>-mobile.png
 2. {color:green}Pass{color} — <…>
-   screenshot: 02-<slug>-desktop.png, 02-<slug>-mobile.png
 
 ## Block 2 — Preflight notes (not for Jira)
 
@@ -481,8 +479,8 @@ nothing to test — has no Testing Status line at all: the four values apply onl
 that was actually exercised.
 
 **Fail** keeps the same header and lists every row that ran — the passing ones as above, each
-defect as a red row with expected vs actual, plus its screenshot — so the reader sees what still
-holds next to what broke. **Partially pass** uses the Pass shape (green rows only; the rows left
+defect as a red row with expected vs actual — so the reader sees what still holds next to what
+broke; its screenshot reaches the engineer in chat (Screenshots in chat below), not as a line here. **Partially pass** uses the Pass shape (green rows only; the rows left
 for human eyes or waiting on data are Block 2 material, never listed here):
 
 ```markdown
@@ -496,9 +494,7 @@ by the agent at the viewports named._
 
 **Evidence:**
 1. {color:green}Pass{color} — <observed fact>
-   screenshot: 01-<slug>-desktop.png, 01-<slug>-mobile.png
 2. {color:red}Fail{color} — <where> — expected <what the AC says>, actual <what the page did>
-   screenshot: 03-<slug>-mobile.png
 ```
 
 **Block** is the shortest form: the label line, the `Tested in theme build:` bullet, then one line of
@@ -510,6 +506,17 @@ list under a Block — the run has no ground to stand on, and the screenshots of
 on disk, uncited. When the reason is that the chosen theme does not carry the change, that
 one line says so plainly (`the change is not on theme 156379611322 develop — <one-line evidence>`), so
 the QA engineer can post it as the ticket's answer; it names no other theme.
+
+**Screenshots in chat.** Block 1 carries no `screenshot:` lines: the skill has no attachment upload,
+and a filename or a local path in the client's ticket points at nothing. The frames reach the QA
+engineer in the chat instead, right after the two blocks of their ticket, **one message per row** —
+the row's desktop and mobile frames together, captioned `<KEY> row <n> — <slug>` — so they copy the
+image and paste it into the Jira comment themselves. On a host with a file-send tool (on Claude
+Code in the desktop app: `SendUserFile`, `display: render`) send the files; on a host without one,
+print each file's absolute path, one line per row. Say once per run, before the first image:
+`screenshots are not uploaded to Jira — copy the ones you need into the comment yourself.` The `NN`
+prefix ties every file to its Block 1 row. A **Block** sends nothing — its frames stay on disk,
+uncited.
 
 ### What never goes in Block 1
 
@@ -538,9 +545,10 @@ Opt-in and one comment per ticket at most.
    separate `.claude/tasks/<KEY>/preflight-comment.md` holding Block 1 and nothing else — no
    `# <KEY>` heading, no Block 2 — and that is the path the writer is briefed with. Handing it
    `preflight.md` posts Block 2 to the client's ticket. Block 2 never goes, not even summarized.
-3. Screenshot references become plain `screenshot: <file>` lines. The QA engineer attaches the files
-   by hand from `.claude/tasks/<KEY>/preflight/` — there is no attachment upload in this skill, and
-   inventing one by pasting a local path as a link is worse than the plain line.
+3. No screenshot references in the comment — no `screenshot:` line, no filename, no local path: the
+   skill has no attachment upload, and a name the reader cannot open is noise in the client's ticket.
+   The frames were shown in chat (Brief template → Screenshots in chat); the QA engineer pastes the
+   ones they want into the comment by hand.
 4. The write goes through the **`jira-writer`** subagent — brief it with the ticket key **plus the
    workspace path the key came from**, target `comment`, and the path of the approved
    `preflight-comment.md` (`../../references/jira-adf-write.md`). It converts to ADF, posts once and

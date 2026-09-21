@@ -156,7 +156,11 @@ row carries the absolute page URL of each page where the person checks it, one p
 
 **Chat output:** the batch table `Ticket | Store / theme | Status | Verified n/m | For human | Needs
 data`, then both blocks per ticket, printed verbatim with their URLs — never abbreviated to
-"(in preflight.md)" or to a pointer at the file.
+"(in preflight.md)" or to a pointer at the file — then the ticket's screenshots, one message per row
+(desktop + mobile, captioned `<KEY> row <n>`): through the host's file-send tool when it has one (on
+Claude Code in the desktop app: `SendUserFile`, `display: render`), else as absolute paths. Block 1
+carries no `screenshot:` lines — nothing is uploaded to Jira; the engineer pastes the images into the
+comment by hand (`REFERENCE.md` → Screenshots in chat).
 
 ## Phase 6 — Jira comment (opt-in)
 
