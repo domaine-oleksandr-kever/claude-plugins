@@ -55,6 +55,11 @@ developer-side counterpart. Output: a brief — where to test, what is verified,
    (`REFERENCE.md` → PR discovery).
 5. **Classify the change** — theme · non-theme (app, proxy, content, data) · nothing to test; the last
    two skip Block 1 and the Phase 6 offer (`REFERENCE.md` → PR discovery).
+6. **Name the session after the ticket** — on Claude Code in the desktop app (the
+   `mcp__ccd_session_mgmt__set_session_title` tool exists) rename this session, once, to
+   `QA preflight <KEY>` (several tickets: keys comma-separated, in the order given), `session_id: "self"`;
+   the app's own auto-title drops the key. A title the engineer set by hand is left alone (the tool asks
+   them). On any other host nothing — the host's own name stands.
 
 ## Phase 2 — Deployed gate + registry
 
