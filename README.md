@@ -528,7 +528,7 @@ never gate a workflow.
 
 ## Releasing — one command stamps every version
 
-Current release: **fnd v0.99.2**.
+Current release: **fnd v0.100.0**.
 
 The version is duplicated across per-host packaging files, and a stamp that drifts
 reads to a host as "nothing to update". One script owns all of them — run it instead
@@ -1051,13 +1051,16 @@ not just AC verification. Details: `plugins/fnd/references/metafield-metaobject-
 
 `/fnd:qa-preflight` is the QA engineer's entry point, ahead of hands-on testing:
 given one or more ticket keys it reads the tickets, finds the PR, and asks the QA engineer which
-theme they test on per store — the live theme, the theme the ticket names when that link is not
-evidently the developer's PR preview, their own saved theme, or a preview link they paste. The PR's
+theme they test on per store — the live theme, the theme the ticket names (Steps to Test leads
+with it) when that link is not evidently the developer's PR preview, their own saved theme, or a
+preview link they paste. The PR's
 theme is never offered or opened, since it may be gone by the time QA looks. It unlocks the storefront in the browser, proves `Shopify.theme` is that one theme —
 the only theme the run examines, and a theme that turns out not to carry the change sends the run
-back to the engineer's choice instead of hunting for a theme that does — pre-runs every
-Steps-to-Test scenario and AC at desktop (`1440x900`) and mobile (`375x812`) with a screenshot each,
-and writes the brief
+back to the engineer's choice instead of hunting for a theme that does — pre-runs the Steps to
+Test (the numbered steps that carry an expectation and each edge case — item 2's setup and data become
+Needs-data recipes for the engineer, never rows the run performs — in either field shape, the numbered
+list new tickets carry or the headed scenarios older ones still hold) plus each AC at desktop (`1440x900`) and mobile (`375x812`) with a screenshot
+each, and writes the brief
 in Domaine's Jira house style — a copy-paste block for the ticket plus agent-only preflight
 notes whose for-human-eyes rows carry the absolute page URLs the run opened, one per page. It is
 read-only toward Jira, Admin and the storefront; posting the block as a comment needs an explicit

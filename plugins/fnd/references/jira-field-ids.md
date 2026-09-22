@@ -23,7 +23,7 @@ Request shape — every Jira **issue** tool (`getJiraIssue`, `editJiraIssue`,
 ```
 cloudId: "meetdomaine.atlassian.net",
 issueIdOrKey: "<KEY>",
-fields: ["summary", "description", "status", "assignee", "updated",
+fields: ["summary", "description", "status", "issuetype", "assignee", "updated",
          "attachment", "comment",
          "customfield_10036", "customfield_10037", "customfield_10038",
          "customfield_10040", "customfield_10047"],

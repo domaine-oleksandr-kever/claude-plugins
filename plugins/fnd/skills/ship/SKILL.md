@@ -334,7 +334,9 @@ there inherits the protocol above.
 ## Final report
 
 PR URL · checks/threads state · QA pass/fail table · Jira writes made · preview-theme
-links · judgment-call digest · anything pending (bots). Set `pipeline.md` →
+links · judgment-call digest · anything pending (bots) · any screenshot or short video the
+steps-to-test phase asked for by name, verbatim from its report — the plugin uploads nothing,
+so an ask that does not reach the developer here is lost. Set `pipeline.md` →
 `status: done`; every `progress.md` row **this run owns** ticked with dates (rows ship
 never runs — e.g. the pre-existing `write-technical-approach` — stay as they were). Offer workspace cleanup once
 the ticket is Done. Nothing else to offer — the series is complete.

@@ -236,6 +236,7 @@ the ticket leaves empty, and the `<in ticket.md>` placeholder below for a body f
 key:
 summary:
 status:
+issue_type:                 # the `issuetype` field's NAME verbatim (`Bug`, `Story`, `Task`, …) — it selects the Steps-to-Test template downstream; "" when the field is absent
 updated:                    # Jira's `updated` timestamp verbatim
 description:                # clean text/markdown
 acceptance_criteria:
@@ -261,7 +262,7 @@ field above becomes the literal `<in ticket.md>` (`<in ticket-<KEY>.md>` in a ba
 holds it in full, and repeating it spends the main context on the same bytes twice. Only these
 five body fields are ever placeheld: `description`, `acceptance_criteria`, `assumptions`,
 `technical_approach`, `steps_to_test`. Everything else comes back **in full whether or not the
-caller named it**: `key`, `summary`, `status`, `updated`, **all four link lists**
+caller named it**: `key`, `summary`, `status`, `issue_type`, `updated`, **all four link lists**
 (`documentation_links`, `figma_urls`, `notion_urls`, `other_links` — the caller spawns readers
 from them, and a placeheld list silently costs it a doc), **`comments`, `comment_links`,
 `attachments` and `attachments_note`** (the caller decides which discussion and which

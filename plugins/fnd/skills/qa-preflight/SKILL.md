@@ -126,9 +126,17 @@ Details and the Deployed line: `REFERENCE.md` → Unlock and deployed gate, step
 
 ## Phase 4 — Execute
 
-Rows come from **Steps to test**, one per scenario, plus one per **AC**. Steps to test empty → derive
-them from the AC and record `Developer gaps: Steps to test empty`. Both empty (field empty, nothing
-AC-shaped in the Description) → **Block**, reason `no acceptance criteria to verify`, Route back to the
+Rows come from **Steps to test**, and **both shapes are accepted** — the old headed one
+(Setup · ✅ Checkpoint · scenarios · regression · edge cases: a row per scenario), or the
+numbered list of `../../references/steps-to-test-format.md` (a row per walk-through step carrying
+an expectation, one per edge case — a step whose action is an editor or Admin write is setup, never a
+row; Bug template: item 4's expectations) — plus one per **AC**.
+In the numbered shape item 1 is the primary source for Phase 2.3's "theme the **ticket** names" (the
+PR's preview stays never offered), item 2's setup / data sub-bullets feed **Needs data**, never
+rows, and the trailing `n+2` context / out-of-scope lines never do (`REFERENCE.md` → Rows from
+Steps to test).
+Steps to test empty → derive them from the AC and record `Developer gaps: Steps to test empty`.
+Both empty (field empty, nothing AC-shaped in the Description) → **Block**, reason `no acceptance criteria to verify`, Route back to the
 developer — never invent rows from the diff.
 Every row runs at **both** viewports, desktop `1440x900` and mobile `375x812` with mobile emulation
 (the house style reports them as separate bullets). Per row: DOM evidence via `evaluate_script` where

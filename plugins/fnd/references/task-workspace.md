@@ -18,7 +18,7 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 
 | File | Holds | Written by |
 |---|---|---|
-| `ticket.md` — in a batch, `ticket-<KEY>.md` each | `jira-reader` structured output, **verbatim** (Description, AC, Assumptions, TA, Steps to Test, links) plus its `## Attachments` section (the attachment table with local paths) | `jira-reader` (the calling skill only on an inline fetch or a failed save) |
+| `ticket.md` — in a batch, `ticket-<KEY>.md` each | `jira-reader` structured output, **verbatim** (issue type, Description, AC, Assumptions, TA, Steps to Test, links) plus its `## Attachments` section (the attachment table with local paths) | `jira-reader` (the calling skill only on an inline fetch or a failed save) |
 | `comments.md` — in a batch, `comments-<KEY>.md` each | the ticket's comments in full, oldest first, images as `![…](jira-media:…)` followed by the downloaded file's path; frontmatter `comment_count` / `last_comment_at` is what the freshness probe compares | `jira-reader` |
 | `figma-<node-id>.md` | one `figma-reader` build spec, **verbatim** — one file per node; a node id is unique only within its Figma file, so a second file's same node id lands as `figma-<node-id>-<file-key-prefix>.md` | `figma-reader` (the calling skill only on an inline fetch or a failed save) |
 | `doc-<slug>-<hash>.md` | one linked doc's **extracted** content (data models, copy, field lists — never the raw page); slug from the page title + a short URL hash (`doc-data-mapping-9f3c.md`), so same-titled docs don't collide | `doc-reader` (the calling skill only on the inline fallback) |

@@ -1122,6 +1122,56 @@ for (const [label, adf] of ADF_CORPUS) {
   check(`prop-adf-identity[${label}]`, sortMarks(m2a(a2m(adf))), sortMarks(adf));
 }
 
+// ---------------------- Steps to Test: the General template through the Jira write path --
+
+// The field is written with `md-to-adf --no-tables`, so the whole document has to survive as ONE
+// ordered list: numbered items carrying bold labels and inline code, and nested bullets under items 2,
+// 5 and 6 — one level deep, the only depth `references/steps-to-test-format.md` allows in the field. A
+// split list or a lost bullet reaches Jira as prose detached from its item.
+const STT_GENERAL_MD = [
+  '1. **Theme:** the QA theme the TL deploys to (id `100000000001` — confirm with the TL). Preview: `/?preview_theme_id=100000000001`.',
+  '2. **Where:** page `/pages/sample` (admin: Online Store > Pages > **Sample**). The section is **Sample block** — set it up:',
+  '  - Online Store > Themes > **QA** > **Customize** > **Page** > **Add section** > **Sample block**;',
+  '  - **Heading** → `Sample heading`; **Add block** > **Item**, then **Save**;',
+  '  - data you need, created in Settings > Custom data: metafield **Sample** · `custom.sample` · single line text; a product with it set: e.g. `/products/sample-item`.',
+  '3. On `/pages/sample`, load the page. You should see **Sample block** with `Sample heading`.',
+  "4. Click **Show more**. The panel lists every item in the admin's order.",
+  '5. **Edge cases:**',
+  '  - **Heading** blank → the section renders without a heading;',
+  '  - a product without `custom.sample` → that item is skipped.',
+  '6. **Context / out of scope:**',
+  '  - **Heading** defaults to `Sample heading`, from the section setting;',
+  '  - not in this ticket: the metafield definition — it ships with the store.',
+].join('\n');
+{
+  const adf = m2a(STT_GENERAL_MD, ['--no-tables']);
+  check('stt-general-one-ordered-list', adf.content.map((b) => b.type), ['orderedList']);
+  const items = adf.content[0].content;
+  check('stt-general-item-count', items.length, 6);
+  // item 2: the bold label and the inline path on the item's own line, the recipe nested under it
+  check('stt-general-item2-children', items[1].content.map((b) => b.type), ['paragraph', 'bulletList']);
+  check('stt-general-item2-label-and-code', items[1].content[0].content.slice(0, 3),
+    [t('Where:', [mStrong]), t(' page '), t('/pages/sample', [mCode])]);
+  check('stt-general-item2-bullets', items[1].content[1].content.length, 3);
+  // the data bullet: the whole dependency chain on ONE bullet, its marks intact, no second level
+  const dataBullet = items[1].content[1].content[2];
+  check('stt-general-data-bullet-flat', dataBullet.content.map((b) => b.type), ['paragraph']);
+  check('stt-general-data-bullet-marks', dataBullet.content[0].content,
+    [t('data you need, created in Settings > Custom data: metafield '), t('Sample', [mStrong]), t(' · '),
+      t('custom.sample', [mCode]), t(' · single line text; a product with it set: e.g. '),
+      t('/products/sample-item', [mCode]), t('.')]);
+  for (const [label, idx] of [['edge-cases', 4], ['context', 5]]) {
+    check(`stt-general-nested-bullets-${label}`, items[idx].content.map((b) => b.type),
+      ['paragraph', 'bulletList']);
+  }
+  // the whole document comes back byte-identical, the stored ADF is a fixpoint, and no delimiter
+  // survives as literal text in the field
+  const md1 = noEOL(a2m(adf));
+  check('stt-general-roundtrip-canonical', md1, STT_GENERAL_MD);
+  check('stt-general-adf-stable', m2a(md1, ['--no-tables']), adf);
+  check('stt-general-no-leak', leakedText(adf), []);
+}
+
 // ---------------------------------------- adf-to-md --comments / --media (D12) --
 // The reading path renders a media node as `![<filename>](jira-media:<id>)`: the alt carries the
 // attachment's filename, which is the join key between a comment's inline image and its

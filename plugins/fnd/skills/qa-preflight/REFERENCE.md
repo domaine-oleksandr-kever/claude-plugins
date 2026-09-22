@@ -125,7 +125,7 @@ before any browser work, ask once (on Claude Code one AskUserQuestion, elsewhere
 | Option | When offered | What it means for URLs |
 |---|---|---|
 | the live theme | always | plain store URLs, no preview params; the gate expects `role` `main` |
-| the theme the **ticket** names (its id and label when known) | the Description, Steps to test, AC or a comment carries a preview link or a theme id, **and** its host is the store this run resolved, **and** it is not evidently the PR's preview (below) | that link verbatim with the target path swapped in, else `?preview_theme_id=<id>` on each path |
+| the theme the **ticket** names (its id and label when known) | the Description, Steps to test, AC or a comment carries a preview link or a theme id, **and** it is on the store this run resolved — the link's host, or, for a bare theme id or a label + id with no link, the store that Steps to test item 1 names alongside it — **and** it is not evidently the PR's preview (below) | that link verbatim with the target path swapped in, else `?preview_theme_id=<id>` on each path |
 | "your saved theme `<id>` `<label>`" — the registry's `defaultTheme` | set, and not already offered as the ticket's | `?preview_theme_id=<id>` on each path |
 | Other — paste the preview link you test on | always | that link verbatim, target path swapped in |
 
@@ -311,6 +311,44 @@ and `id: null` below is the `Shopify`-undefined row of the table.
    ticket's answer.
 5. **Never** publish, duplicate or edit a theme, change its settings, create a preview theme, or
    make any Admin write. The gate is three reads and a navigation.
+
+## Rows from Steps to test
+
+The field arrives in **either** of two shapes and **both are accepted** — old tickets keep the shape
+they were written in, and nothing here asks for a field to be rewritten:
+
+- **Headed** (the pre-2026-09 shape): a Setup block, a `✅ Checkpoint` line, per-AC scenarios, a
+  regression sweep, edge cases. One row per **scenario**; the Setup block feeds **Needs data** rather
+  than rows, the checkpoint is the theme proof the gate already ran, and the regression sweep's
+  scenarios are rows like any other.
+- **Numbered** (`../../references/steps-to-test-format.md`, the company templates): one ordered list
+  — item 1 the theme, item 2 where + setup, items 3…n the walk-through with each expectation inside
+  its own step, then Edge cases and Context / out of scope as the last two items.
+
+Detecting which: a numbered field opens with `1.` and its item 1 names the theme; a headed field
+carries `Setup`, `✅` or `Scenario` headings. A field that mixes them is read item by item under the
+mapping below, and neither shape is ever "fixed" — a shape complaint is at most a **Developer gaps**
+line, never a Block.
+
+| Item (numbered shape) | What it gives this run |
+|---|---|
+| **1 — Theme** | the primary source for the Phase 2.3 option "the theme the **ticket** names": its label + id — a bare label + id is offered against the store item 1 names in the same line; no store named and no link → not offered — or its `preview_theme_id` link, plus the market / locale / customer state / incognito conditions the rows then run under: a condition this run cannot set read-only is `not-executable: access` on the rows that need it, and a viewport item 1 names never narrows the two-viewport rule below. The three "evidently the PR's preview" tests above still decide, so the PR's own theme is never offered or opened from here; an unconfirmed placeholder (`[QA] theme — confirm with the TL`) names no theme, and the question falls back to live · saved theme · **Other**. Never a row. |
+| **2 — Where + setup** | the target page — its `<path>` is the "a URL or path in Steps to test" rung of the target-page precedence — and the material for **Needs data** recipes: the editor route or deep link, every setting by its verbatim label with its value, the data sub-bullets in their dependency order, the closing **Save**. Copied into a Block 2 recipe when the fixture or the setup is absent, **never turned into a row**: this run is read-only, and building the section is the QA engineer's own step. A `(restore: …)` clause travels with the recipe line it belongs to. |
+| **3…n — walk-through** | **one row per step this run can perform read-only** — a storefront action carrying an expectation ("You should see …", "The panel shows …"), in field order, the expectation quoted as the row's expected result. A step whose action is an **editor or Admin write** (**Add section** / **Add block** / a setting set to a value / **Save** / a fixture issued or deactivated) is **never a row, even when it carries an expectation** — it feeds a **Needs data** recipe like item 2, and where the run therefore cannot observe what that step produces, the row it would have produced is reported `not-executable: access` with what would have to be written and its restore. A read-only step with no expectation of its own — pure navigation — is folded into the next row. |
+| **n+1 — Edge cases** | **one row per bullet**, its stated behaviour as the expected result. A bullet a read-only run cannot reach (it needs an admin write, a deactivated fixture, a market switch this run may not perform) is `not-executable: access` or `needs data: <what, where>`, reported with its restore, never performed. A platform limitation the bullet states as *not a bug* is a row that confirms the stated behaviour — never a Fail. |
+| **n+2 — Context / out of scope** | **never rows.** Defaults, what was deliberately left unchanged, known limits and what is not in this ticket are read as context for the other rows' expectations: a known limit named here is not a Fail, and an out-of-scope area is not tested to prove it is out of scope. A choice stated here that contradicts the AC is an **Observations** line, not a verdict. |
+
+**Bug template** (theme · why the bug happened · what was changed to fix it · what to expect): item 1
+plays the same role as above, items 2 and 3 are context for the expectations, and the rows come from
+**item 4** — the data, viewport, locale or path that used to trigger the defect, what it does now, the
+new boundary and what past it looks like, what a regression would look like: one row per expectation.
+The click-level recipe item 4 carries when the fix touches a setting or needs data feeds **Needs data**
+exactly as item 2 does above.
+
+**Plus one row per AC**, for either shape. The numbered shape is written so every AC is exercised by at
+least one walk-through step, so the two sets usually coincide — check which AC each row covers and add
+a row only for an AC no step reaches; never list the same check twice. Row numbers run through the
+brief in its own order whatever each row came from, and `NN` in a screenshot path is that number.
 
 ## Evidence rules
 
