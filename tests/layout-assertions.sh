@@ -69,6 +69,7 @@ for f in "$CANON" \
          "$PLUGIN_DIR/scripts/scratch-hygiene.cjs" \
          "$ROOT/tests/opencode-config-sim.sh" \
          "$ROOT/tests/figma-rest-sim.sh" \
+         "$ROOT/tests/external-screenshots-sim.sh" \
          "$ROOT/tests/figma-node-slim-fixtures.mjs"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
@@ -80,7 +81,7 @@ done
 # wiring already runs them through `bash`, so the bit is a convenience, not the contract.
 for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" \
          "$PLUGIN_DIR/scripts/project-profile.sh" "$PLUGIN_DIR/scripts/jira-attachments.sh" \
-         "$PLUGIN_DIR/scripts/figma-rest.sh"; do
+         "$PLUGIN_DIR/scripts/external-screenshots.sh" "$PLUGIN_DIR/scripts/figma-rest.sh"; do
   if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
 done
 

@@ -255,6 +255,88 @@ even height, aspect preserved, no cropping. Names carry the ordinal and the time
 it came from. Beside them sits the `done` marker with its `size=<bytes>` line — the cache rule
 above.
 
+## Linked screenshots — prnt.sc, imgur, Gyazo, CleanShot, snipboard
+
+QA often pastes a screenshot as a **link** instead of attaching it: `https://prnt.sc/<id>`
+(Lightshot) is the common one, rendered by Jira as an `inlineCard` smart-link, and the ticket's
+`attachment` field stays `[]`. `jira-attachments.sh` has no row to fetch, so a sibling script
+resolves such pages to their image and downloads it into the same directory — no credential is
+involved, these are public pages:
+
+```bash
+<plugin root>/scripts/external-screenshots.sh --out <dir> [--max-mb <N>] [--max-width <px>] [--delay <s>] [--force] [--json] <url> [<url> …]
+<plugin root>/scripts/external-screenshots.sh --hosts
+```
+
+| flag | default | what it does |
+|---|---|---|
+| `--out <dir>` | — (required) | download dir; the same git-ignore gate as above |
+| `--max-mb <N>` | `25` | per-image size cap, re-checked on disk after the download |
+| `--max-width <px>` | `1600` | a PNG / JPEG wider than this is resampled **in place** to that width (never upscaled) — ffmpeg when on PATH, else macOS `sips`, else it is left as downloaded with `note=downscale_skipped`; `0` keeps every original. GIF / WebP / SVG are never resampled |
+| `--delay <s>` | `1` | whole seconds between two requests — never before the first, none for a cached or skipped row |
+| `--force` | off | re-download an image already on disk |
+| `--json` | TSV | the same rows as a JSON array — what the reader consumes |
+| `--hosts` | — | print the hosts the script fetches from, one per line, and exit 0 |
+| `--help` / `-h` | — | the two call shapes above, exit 0 |
+
+**The allow-list is the security boundary.** A URL is outside content — a ticket can carry any
+link, and a fetcher that followed arbitrary ones would be an SSRF / exfiltration surface driven by
+ticket text. So a URL is fetched only when **all** of these hold, and anything else is a
+`skipped_host` row with **no request**:
+
+- `https://` only — an `http://` link, even to an allow-listed host, is skipped;
+- the host is **exactly** one of the **page hosts** `prnt.sc`, `prntscr.com`, `imgur.com`,
+  `gyazo.com`, `share.cleanshot.com`, `snipboard.io` (the URL is an HTML page whose `og:image` is
+  the screenshot) or the **direct hosts** `img.lightshot.app`, `i.imgur.com`, `i.gyazo.com` (the
+  URL *is* the image) — no subdomain wildcards, so `prnt.sc.evil.example` is not `prnt.sc`;
+- the `og:image` a page resolves to is itself `https://` on a host under `lightshot.app`,
+  `prnt.sc`, `prntscr.com`, `imgur.com`, `gyazo.com`, `cleanshot.com`, `cleanshot.cloud` or
+  `snipboard.io` — the service's own CDN, never an arbitrary host (`failed`,
+  `note=image_host_not_allowed`);
+- the answer carries an `image/*` content type (`failed`, `note=not_an_image` otherwise — a
+  bot-challenge page served as 200 is refused here), and its bytes fit `--max-mb`.
+
+Every request carries a **browser User-Agent**: prnt.sc answers curl's default agent with a
+bot-challenge page (HTTP 520, `text/plain`, no `og:image` — measured 2026-09-25) and a browser
+one with the real page. prnt.sc answers an **unknown id** with a 200 page whose `og:image` is a
+protocol-relative placeholder (`//st.prntscr.com/…`): that is `failed`, `note=image_url_not_https`
+with the value, i.e. "no such screenshot".
+
+stdout is one row per URL in argv order, header first:
+`url  host  status  image_url  mime  size  path  filename` — `status` is `saved` / `cached` /
+`skipped_host` / `failed`; `image_url` is what was actually fetched (the `og:image`, or the URL
+itself on a direct host), empty for a skipped row; `path` is the file on disk, empty unless
+saved / cached; `size` is its bytes on disk, after the downscale. The file is
+`<host>-<slug>.<ext>` — `prnt.sc-XlDYChfQ0Wyw.png` — the slug being the URL's path with everything
+but `[A-Za-z0-9._-]` folded to `_`, so a page URL can never name a path outside the out dir; the
+extension comes from the content type. A URL whose `<host>-<slug>.*` file is already on disk is
+`cached` — no request.
+
+stderr carries notes, then always the summary `ok=1 saved=N cached=N skipped=N failed=N out=<dir>`:
+
+| note | what it says |
+|---|---|
+| `note=page_fetch_failed url=… http=…` | the page itself did not come back 2xx (a 404, a 520 challenge) |
+| `note=no_og_image url=…` | the page carries no `og:image` tag — a bot-challenge page in most cases |
+| `note=image_url_not_https url=… image=…` | the `og:image` is not an `https://` URL — prnt.sc's "unknown id" placeholder |
+| `note=image_host_not_allowed url=… host=…` | the `og:image` points outside the service's CDNs; nothing was fetched from it |
+| `note=image_fetch_failed url=… http=…` | the image request did not come back 2xx |
+| `note=not_an_image url=… type=…` | a 2xx that is not `image/*`; the bytes were discarded |
+| `note=over_cap url=… size=… max_mb=…` | over `--max-mb` on disk; the bytes were discarded |
+| `note=downscale_skipped path=…` / `note=downscale_tool_not_found images=<N>` | neither ffmpeg nor `sips` is on PATH — the originals were kept at full size |
+
+| exit | meaning |
+|---|---|
+| 0 | every allow-listed URL landed (a `skipped_host` row is never a failure) |
+| 1 | at least one allow-listed URL failed — the rows and notes name them |
+| 2 | usage or precondition: `missing_out`, `missing_url`, `unknown_arg`, `invalid_delay`, `curl_not_found`, `jq_not_found`, `out_dir_not_ignored`, `out_dir_not_in_repo` |
+
+The reader (`agents/jira-reader.md`) runs it once with every allow-listed URL it found in the
+ticket's fields and comments, reports each row as an attachment whose `source` names the comment
+and the link, and drops those URLs from `comment_links` / `other_links`. A screenshot that lives
+only in a **Slack thread** ("see the screenshot in the source thread") is out of reach without a
+Slack token — the reader names it in `attachments_note` and moves on.
+
 ## What this token cannot do
 
 No write scope was selected, so `POST`/`PUT`/`DELETE` come back **403**: no comment, no field

@@ -49,6 +49,7 @@ in its own subfolder under `plugins/`:
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
 │       │   ├── jira-attachments.sh  #  Jira attachments → task workspace (read-only token; videos → frames)
+│       │   ├── external-screenshots.sh #  screenshots a ticket LINKS (prnt.sc, imgur, …) → the same dir, allow-listed hosts only
 │       │   ├── figma-rest.sh        #  one Figma node via the REST API (FIGMA_TOKEN) when no Figma MCP answers
 │       │   ├── figma-node-slim.cjs  #  that REST node tree → compact markdown build tree
 │       │   ├── _shopify-common.sh   #  sourced by the theme scripts + the two token runners (never run directly)
@@ -83,6 +84,7 @@ in its own subfolder under `plugins/`:
 │   ├── hooks-sim.sh                 #  SessionStart / monitor-gate / context-stats sims
 │   ├── scripts-sim.sh               #  runner + theme-json + converter-caller sims
 │   ├── jira-attachments-sim.sh      #  jira-attachments.sh: creds, gateway, downloads, transient video frames
+│   ├── external-screenshots-sim.sh  #  external-screenshots.sh: host allow-list, og:image, caps, downscale, cache
 │   ├── figma-rest-sim.sh            #  figma-rest.sh: url parsing, token, degradation, out-dir gate
 │   ├── figma-node-slim-fixtures.mjs #  REST node tree → build tree: lossless folds, size gate
 │   ├── bootstrap-sim.sh             #  bootstrap: arg gates, clone, pty picker, uninstall
@@ -330,6 +332,7 @@ as a missing feature. Allow:
 | `api.figma.com` | `figma-rest.sh` — the node tree and the variables |
 | `figma-alpha-api.s3.us-west-2.amazonaws.com` | the same script's renders and asset exports — Figma answers those with a pre-signed S3 url, so without this host the tree arrives and every image comes back `kind=image status=failed` |
 | `api.atlassian.com` plus your `<site>.atlassian.net` | `jira-attachments.sh` — the gateway every authenticated call goes to, and the one unauthenticated `tenant_info` lookup on the site itself |
+| `prnt.sc`, `prntscr.com`, `img.lightshot.app`, `imgur.com`, `i.imgur.com`, `gyazo.com`, `i.gyazo.com`, `share.cleanshot.com`, `snipboard.io` | `external-screenshots.sh` — the screenshot pages a ticket links and the CDNs their `og:image` points at; the script never fetches any other host |
 | the store's `<store>.myshopify.com` | `shopify-admin-gql.sh`, `theme-json.sh` and the preview-theme scripts |
 
 **MCP traffic needs none of it** — a connector server is reached through Anthropic's
@@ -528,7 +531,7 @@ never gate a workflow.
 
 ## Releasing — one command stamps every version
 
-Current release: **fnd v0.100.0**.
+Current release: **fnd v0.101.0**.
 
 The version is duplicated across per-host packaging files, and a stamp that drifts
 reads to a host as "nothing to update". One script owns all of them — run it instead
@@ -1111,6 +1114,18 @@ the attachment rows with no local paths plus one setup hint for the developer, a
 `ffmpeg` costs the screen recordings, never the images. Setup wizard, flags, exit codes and the
 degradation
 contract: `plugins/fnd/references/jira-attachments.md`.
+
+A screenshot the ticket **links** instead of attaching — a `https://prnt.sc/<id>` (Lightshot),
+imgur, Gyazo, CleanShot or snipboard page pasted into a comment, the `attachment` field empty —
+is fetched too, by the bundled `plugins/fnd/scripts/external-screenshots.sh`: the page's
+`og:image` (or the URL itself on a direct image host) is downloaded into the same
+`tmp/attachments/` dir as `<host>-<slug>.<ext>`, downscaled to at most 1600 px wide (ffmpeg, else
+macOS `sips`), and the reader reports it as an attachment row whose source names the comment and
+the link. No credential is involved, and the allow-list is the boundary: `https://` only, exactly
+those hosts, an `og:image` only on the service's own CDN, an `image/*` answer only, a size cap —
+every other link in a ticket stays a link (`comment_links`), and a screenshot that lives only in a
+Slack thread is named in the note, not fetched. The hosts are documented in the reference above and
+in the egress table for cloud sandboxes.
 
 ## Hooks
 
