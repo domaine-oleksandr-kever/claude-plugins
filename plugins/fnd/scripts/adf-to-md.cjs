@@ -23,9 +23,12 @@
  *
  * --field and --comments accept the Atlassian MCP envelope as well as a plain getJiraIssue
  * response: `{"issues":{"nodes":[<issue>]},"context":{…}}` is unwrapped to its single node
- * (0 or >1 nodes → exit 2 naming the count). --comments on an input with no `fields.comment`
- * exits 2 rather than printing nothing — an empty `comments` array is still "no comments",
- * empty stdout and exit 0.
+ * (0 or >1 nodes → exit 2 naming the count). So is the MCP content array a whole-result spill
+ * holds — `[{"type":"text","text":"<response JSON>"}]`, also as `{"content":[…]}` or one bare
+ * block: one block's text is parsed (not JSON → exit 1); of several, the first that parses to an
+ * object with `fields` or `issues` is used (none → exit 2 naming the count). --comments on an
+ * input with no `fields.comment` exits 2 rather than printing nothing — an empty `comments` array
+ * is still "no comments", empty stdout and exit 0.
  *
  * The markdown is written so md-to-adf.cjs can read it BACK unchanged (the fnd flow reads a
  * field, edits it, writes it back): literal prose that starts with a structure marker is
@@ -96,6 +99,7 @@ function readJSON() {
   // untouched. (The node also carries a sibling top-level `comments[]` of MARKDOWN strings whose
   // images are empty-alt blob: links — useless for the attachment join, deliberately ignored.)
   if (fieldId || args.includes('--comments')) {
+    data = unwrapContent(data);
     const wrapped = data && typeof data === 'object' && !data.fields
       && data.issues && Array.isArray(data.issues.nodes) ? data.issues.nodes : null;
     if (wrapped) {
@@ -123,6 +127,33 @@ function readJSON() {
     data = val;
   }
   return data;
+}
+
+// The MCP tool-result content array carries the response as a STRING. Only reached with --field /
+// --comments: without them a lone `{type:"text",text}` is an ADF text node, not a wrapper.
+function unwrapContent(data) {
+  const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
+  const blocks = Array.isArray(data) ? data
+    : isObj(data) && data.type === 'text' && typeof data.text === 'string' ? [data]
+    : isObj(data) && !data.type && !data.fields && Array.isArray(data.content) ? data.content
+    : null;
+  if (!blocks || !blocks.length
+    || !blocks.every((b) => isObj(b) && b.type === 'text' && typeof b.text === 'string')) return data;
+  if (blocks.length === 1) {
+    try { return JSON.parse(blocks[0].text); } catch (e) {
+      process.stderr.write('adf-to-md: input is not valid JSON: ' + e.message
+        + ' (tried the text of the one MCP content block in ' + inputLabel + ')\n');
+      process.exit(1);
+    }
+  }
+  for (const b of blocks) {
+    let v;
+    try { v = JSON.parse(b.text); } catch (_) { continue; }
+    if (isObj(v) && (v.fields || v.issues)) return v;
+  }
+  process.stderr.write('adf-to-md: none of the ' + blocks.length + ' MCP content blocks in '
+    + inputLabel + ' holds an issue (JSON with fields or issues)\n');
+  process.exit(2);
 }
 
 // Find the ADF doc node if a wrapper object was passed.

@@ -34,6 +34,10 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 | `tmp/figma/` | the REST rung's payloads for one node — `<key>-<node>.nodes.json` (raw, never `Read` directly), its compact `<key>-<node>.nodes.json.md` build tree, `<key>.variables.json` and the `<key>-<node>@<scale>x.png` render; a **cache** keyed by those names, so a re-read is free, and safe to delete at any time. With no workspace path the script uses `.claude/tasks/_figma/tmp` instead | `figma-reader` (via `scripts/figma-rest.sh` + `scripts/figma-node-slim.cjs`) |
 | `tmp/` | scratch made while working — test scripts, query drafts, JSON dumps, screenshots — instead of littering the project root | anyone; delete freely |
 
+In a git worktree, screenshots (`preflight/`, `tmp/`) go to `<worktree>/.claude/tmp/<work-id>/`
+instead: the screenshot servers refuse the symlinked `.claude/tasks`, and the scratch-path guard
+denies it with that remediation.
+
 Frontmatter on ticket files: `ticket`, `url`, `fetched_at` (ISO datetime), `jira_updated` (the
 ticket's `updated` field as Jira returned it), `verified_at` (last freshness probe that
 matched) and `provenance: untrusted` (on every reader file, whoever writes it). On

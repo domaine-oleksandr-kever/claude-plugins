@@ -362,9 +362,10 @@ brief in its own order whatever each row came from, and `NN` in a screenshot pat
   `.claude/tasks/<KEY>/preflight/NN-<slug>-<desktop|mobile>.png` — `NN` is the row number in the
   brief, `<slug>` a few kebab-case words from the row. Create the directory once before the first
   shot — `mkdir -p .claude/tasks/<KEY>/preflight` — `take_screenshot`'s `filePath` does not create
-  it. The frame must show the thing the row is about; a full-page shot of a long template proves
-  nothing, so scroll the target into view first. Never capture a frame with the password field
-  filled.
+  it. In a git worktree use `.claude/tmp/<KEY>/` instead (same names, same `mkdir -p`): its
+  `.claude/tasks` is a symlink the screenshot servers refuse. The frame must show the thing the row
+  is about; a full-page shot of a long template proves nothing, so scroll the target into view
+  first. Never capture a frame with the password field filled.
 - **Checkout** is walked only to the payment step: line items, quantities, bundle composition,
   discounts, shipping options, totals. Contact and address values come from the ticket, the
   workspace `notes.md`, or the QA engineer — ask once; never a real person's details and never the

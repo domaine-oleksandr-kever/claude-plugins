@@ -141,7 +141,7 @@ developer — never invent rows from the diff.
 Every row runs at **both** viewports, desktop `1440x900` and mobile `375x812` with mobile emulation
 (the house style reports them as separate bullets). Per row: DOM evidence via `evaluate_script` where
 the claim is checkable there, plus **one screenshot per viewport**, at
-`.claude/tasks/<KEY>/preflight/NN-<slug>-<desktop|mobile>.png`.
+`.claude/tasks/<KEY>/preflight/NN-<slug>-<desktop|mobile>.png` (in a git worktree: `.claude/tmp/<KEY>/`).
 
 - **Every row showing the pre-change behaviour** = the theme does not carry the change: stop, ask the
   Phase 3 question, and on a confirm or no answer the run is **Block**, `change not on theme <id>

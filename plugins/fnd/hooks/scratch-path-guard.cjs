@@ -35,7 +35,15 @@
 // `tmp/shot.png` is exactly where a denied model puts the file on its second attempt — same
 // litter, one directory deeper. `.claude` has to be the FIRST segment, too: a path that reaches it
 // through litter (`.playwright-mcp/.claude/tmp/x.png`) is still litter. "Project working tree" =
-// the event's `cwd` — the session's project dir.
+// the session's project dir, the root the screenshot servers run in — NOT always the event's
+// `cwd`: the Bash tool's cwd persists, so after a `cd .claude/tasks/<id>/tmp` the event's cwd is
+// that directory (see projectRoot).
+//
+// A git worktree (scripts/worktree-setup.sh) is the one exception to "anything under `.claude/` is
+// fine": its `.claude/tasks` is a symlink into the MAIN checkout, and the screenshot servers
+// canonicalize a path and refuse whatever lands outside this project — so a candidate that resolves
+// into that symlinked dir is DENIED (the server would hard-fail it), and every remediation there
+// names `<worktree>/.claude/tmp/<work-id>/` instead of the task workspace.
 //
 // NO path field is not automatically an allow. chrome-devtools' take_screenshot without `filePath`
 // returns the image inline and writes nothing — allowed. The bundled playwright writes to its
@@ -54,6 +62,7 @@
 //
 // Env: FND_SCRATCH_GUARD — 0 disables the guard (each host's wiring short-circuits on it too,
 // so node does not even spawn; re-checked here for a direct invocation).
+// CLAUDE_PROJECT_DIR (set by Claude Code for hooks) — the project root, see projectRoot.
 'use strict';
 
 const fs = require('fs');
@@ -94,17 +103,72 @@ function markExcluded(root) {
   try { require('../scripts/scratch-hygiene.cjs').ensureFndTmpExcluded(root); } catch (_) {} // fail-open, like everything here
 }
 
+function outside(rel) {
+  return rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel);
+}
+
+function within(base, p) {
+  const rel = path.relative(base, p);
+  return rel === '' || !outside(rel);
+}
+
+// The `.claude` subdirs a model `cd`s into; the project is the dir above that `.claude`.
+const SCRATCH_SUBDIRS = new Set(['tasks', 'tmp', 'fnd-tmp']);
+
+// The session's project dir. Claude Code exports it to hooks as CLAUDE_PROJECT_DIR, and it is the
+// only rail that survives the PHYSICAL cwd Claude Code persists — from a worktree's symlinked
+// `.claude/tasks` that cwd sits in the MAIN checkout — so it wins whenever the cwd is inside it,
+// lexically, physically, or through that link. Otherwise (Codex, Cursor): the cwd, cut back above a
+// `.claude/{tasks,tmp,fnd-tmp}` segment. Never the git toplevel: a session opened in a monorepo
+// subdir keeps its `.claude` there.
+function projectRoot(cwd) {
+  const abs = path.resolve(cwd);
+  const env = String(process.env.CLAUDE_PROJECT_DIR || '').trim();
+  if (path.isAbsolute(env)) {
+    const cwdReal = real(abs);
+    const viaLink = within(real(path.join(env, '.claude', 'tasks')), cwdReal);
+    if (within(env, abs) || within(real(env), cwdReal) || viaLink) return env;
+  }
+  const segs = abs.split(path.sep);
+  for (let i = 1; i < segs.length; i++) {
+    if (segs[i] === '.claude' && (i === segs.length - 1 || SCRATCH_SUBDIRS.has(segs[i + 1]))) {
+      return segs.slice(0, i).join(path.sep) || path.sep;
+    }
+  }
+  return abs;
+}
+
+// The realpath of `<root>/.claude/tasks` when it points OUTSIDE the checkout (a worktree's shared
+// workspace), else null.
+function linkedTasks(root) {
+  const tasks = real(path.join(root, '.claude', 'tasks'));
+  return outside(path.relative(real(root), tasks)) ? tasks : null;
+}
+
 // Where to send the write instead. Absolute, because the playwright server resolves a relative
 // filename against its output dir; and inside the workspace, because it rejects anything outside
-// its allowed roots.
-function whereInstead(root, name) {
+// its allowed roots. `workId` is only known when the denied path itself named one. `optOut` false
+// drops the FND_SCRATCH_GUARD hint: past a deny the server refuses that write anyway.
+function whereInstead(root, name, linked, workId, optOut = true) {
+  const hint = optOut ? `\n\n(To allow project scratch anyway, set FND_SCRATCH_GUARD=0.)` : '';
+  if (linked) {
+    return (
+      `Write it to ${path.join(root, '.claude/tmp', workId || '<work-id>', name)}` +
+      (workId ? '' : ` (the work-id of the ticket you are on), or ${path.join(root, '.claude/tmp', name)} when there is no ticket`) +
+      `. This checkout is a git worktree: its task workspace is a symlink into the main checkout, ` +
+      `and the screenshot servers resolve the link and refuse any file outside this project. Give ` +
+      `the tool the ABSOLUTE path — the playwright server resolves a relative filename against its ` +
+      `own output dir, not the project.` +
+      hint
+    );
+  }
   return (
     `Write it to the task workspace instead: ${path.join(root, '.claude/tasks/<work-id>/tmp', name)} ` +
     `(the work-id dir of the ticket you are on), or ${path.join(root, '.claude/tmp', name)} when ` +
     `there is no ticket. Give the tool the ABSOLUTE path — the playwright server resolves a ` +
     `relative filename against its own output dir, not the project — and keep it inside the ` +
-    `project, which the screenshot servers require, and outside every diff.\n\n` +
-    `(To allow project scratch anyway, set FND_SCRATCH_GUARD=0.)`
+    `project, which the screenshot servers require, and outside every diff.` +
+    hint
   );
 }
 
@@ -116,14 +180,18 @@ function whereInstead(root, name) {
 // Creating them is this guard's ONLY side effect and may never take it down: every failure
 // (read-only tree, permissions, a `.claude` file in the way) is swallowed and the deny is emitted
 // regardless.
-function ensureScratchDirs(root) {
+function ensureScratchDirs(root, linked, workId) {
   const claude = path.join(root, '.claude');
   const targets = [path.join(claude, 'tmp')];
-  try {
-    for (const e of fs.readdirSync(path.join(claude, 'tasks'), { withFileTypes: true })) {
-      if (e.isDirectory()) targets.push(path.join(claude, 'tasks', e.name, 'tmp'));
-    }
-  } catch (_) {} // no task workspaces yet → the no-ticket answer is the only one to prepare
+  if (linked) {
+    if (workId) targets.push(path.join(claude, 'tmp', workId));
+  } else {
+    try {
+      for (const e of fs.readdirSync(path.join(claude, 'tasks'), { withFileTypes: true })) {
+        if (e.isDirectory()) targets.push(path.join(claude, 'tasks', e.name, 'tmp'));
+      }
+    } catch (_) {} // no task workspaces yet → the no-ticket answer is the only one to prepare
+  }
   for (const t of targets) {
     try {
       fs.mkdirSync(t, { recursive: true });
@@ -131,8 +199,8 @@ function ensureScratchDirs(root) {
   }
 }
 
-function deny(reason, root) {
-  ensureScratchDirs(root);
+function deny(reason, root, linked, workId) {
+  ensureScratchDirs(root, linked, workId);
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -177,7 +245,8 @@ function scratchPathDecision(input) {
     }
   }
 
-  const root = typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd();
+  const root = projectRoot(typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd());
+  const linked = linkedTasks(root);
   const tool = typeof input.tool_name === 'string' ? input.tool_name : '';
   // The one classification both halves of the rule read: which base a relative candidate resolves
   // against, and what a call with no path at all means.
@@ -196,16 +265,33 @@ function scratchPathDecision(input) {
         `the plugin's own (which pins one), so that dir is ${path.join(root, PLAYWRIGHT_DEFAULT_OUT)}, ` +
         `i.e. inside the project working tree. That directory is untracked litter in every later ` +
         `diff and PR.\n\n` +
-        whereInstead(root, '<name>.png'),
-      root
+        whereInstead(root, '<name>.png', linked),
+      root,
+      linked
     );
   }
 
   const resolved = path.resolve(resolveBase(root, kind), candidate);
-  const rel = path.relative(real(root), real(resolved));
+  const resolvedReal = real(resolved);
+  if (linked) {
+    const inTasks = path.relative(linked, resolvedReal);
+    if (inTasks !== '' && !outside(inTasks)) {
+      const segs = inTasks.split(path.sep);
+      const workId = segs.length > 1 ? segs[0] : undefined;
+      return deny(
+        `fnd scratch-path guard: that path resolves into the task workspace, where the ` +
+          `screenshot server would refuse the file.\n\n` +
+          whereInstead(root, path.basename(resolved), linked, workId, false),
+        root,
+        linked,
+        workId
+      );
+    }
+  }
+  const rel = path.relative(real(root), resolvedReal);
   // Outside the working tree (`..`, another drive) → not our business. An empty rel means the
   // path IS the project dir, which no screenshot can be written to anyway.
-  if (rel === '' || rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) return null;
+  if (rel === '' || outside(rel)) return null;
 
   // Only the DIRECTORY segments decide — a file merely named `.claude` is still litter. And only
   // the FIRST one: `.playwright-mcp/.claude/tmp/x.png` reaches `.claude` through the very litter
@@ -229,8 +315,9 @@ function scratchPathDecision(input) {
         `(${resolved}). QA screenshots and other `) +
       `scratch never live in a checkout — they show up ` +
       `as untracked litter in every later diff and PR.\n\n` +
-      whereInstead(root, path.basename(resolved)),
-    root
+      whereInstead(root, path.basename(resolved), linked),
+    root,
+    linked
   );
 }
 

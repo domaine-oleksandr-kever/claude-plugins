@@ -2,11 +2,43 @@
 # install.sh only ever symlinks whole directories, so a caller finds this file next to itself
 # without a readlink loop). Two families live here:
 #   · the Shopify readers (create-preview-theme.sh, theme-json.sh, shopify-admin-gql.sh), which
-#     read the caller's $TOML through the ONE environment block toml_resolve_env picked — every
-#     caller settles that before its first read of the file;
+#     locate their $TOML with default_toml_path and read it through the ONE environment block
+#     toml_resolve_env picked — every caller settles that before its first read of the file;
 #   · the credential + out-dir discipline the two FETCHERS share (jira-attachments.sh,
 #     figma-rest.sh): the 0600 curl-config writer and the "--out must be a path git ignores"
 #     gate, at the bottom of this file.
+
+# The readers' default $TOML (TOML_PATH always wins): `shopify.theme.toml` in the cwd, else the
+# nearest ancestor holding one, up to the checkout root (the first ancestor with a `.git` entry) —
+# the Bash tool's cwd persists, so a run started inside `.claude/tasks/<id>` must still find the
+# project's config. The walk is over the LOGICAL $PWD: git's own toplevel follows a worktree's
+# symlinked `.claude/tasks` into the MAIN checkout, i.e. the other store config. No checkout above
+# the cwd, or no file in it → the cwd-relative name, as before. The Bash tool persists a PHYSICAL
+# cwd, though: from a checkout with linked worktrees, a cwd in its (shared) `.claude/tasks` may
+# belong to either checkout, so that walk picks nothing and says so on stderr.
+default_toml_path() {
+  local d="${PWD:-}" hit="" in_tasks=0
+  [ -f shopify.theme.toml ] && { printf 'shopify.theme.toml'; return 0; }
+  case "$d" in /*) ;; *) d="$(pwd)" ;; esac
+  case "$d/" in */.claude/tasks/*) in_tasks=1 ;; esac
+  while :; do
+    [ -n "$hit" ] || [ ! -f "$d/shopify.theme.toml" ] || hit="$d/shopify.theme.toml"
+    if [ -e "$d/.git" ]; then
+      if [ -n "$hit" ] && [ "$in_tasks" = 1 ] && [ -n "$(ls -A "$d/.git/worktrees" 2>/dev/null)" ]; then
+        printf 'note=toml_walk_skipped dir=%s — %s; %s\n' "$d" \
+          "this checkout has linked worktrees and the cwd sits in the shared .claude/tasks" \
+          "run from the checkout root or set TOML_PATH" >&2
+        hit=""
+      fi
+      printf '%s' "${hit:-shopify.theme.toml}"; return 0
+    fi
+    [ "$d" = / ] && break
+    d="${d%/*}"; [ -n "$d" ] || d=/
+  done
+  printf 'shopify.theme.toml'
+}
+# $TOML as an absolute path, for a message that has to say where the file was looked for.
+toml_abs() { case "$TOML" in /*) printf '%s' "$TOML" ;; *) printf '%s/%s' "${PWD:-$(pwd)}" "$TOML" ;; esac; }
 
 # WHICH `[environments.<name>]` block the readers below take their keys from. A multi-environment
 # shopify.theme.toml holds one store, token and theme id PER BLOCK, so a file-order read hands the

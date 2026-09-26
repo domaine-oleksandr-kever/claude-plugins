@@ -89,7 +89,9 @@
 #             inline chrome-devtools screenshot, FND_SCRATCH_GUARD=0 and malformed stdin all pass
 #             through; plus the deny ENVELOPE shape, symlinked prefixes, the wiring gate, the
 #             matcher's tool coverage, the three-way output-dir literal pin, and the
-#             `.git/info/exclude` stamp the bundled allow owes and a deny does not
+#             `.git/info/exclude` stamp the bundled allow owes and a deny does not; the project
+#             root is the checkout above a persisted subdirectory cwd, and in a git worktree
+#             (symlinked `.claude/tasks`) the workspace path is denied for `.claude/tmp/<work-id>/`
 #   A cases — hooks/spill-access.sh, the PreToolUse spill-read recorder: a Bash/Read/Grep call
 #             touching one of the two spill families appends ONE `entry:"access"` JSONL line per
 #             distinct path to the compressor's own debug log (via = the reader that did it), while
@@ -3961,6 +3963,83 @@ git -C "$DGIT3" init -q 2>/dev/null
 d12d_err="$(printf '%s' "$(nopath_ev "$PW" | jq -c --arg cwd "$DGIT3" '.cwd = $cwd')" | (cd "$DGIT3" && node --require "$D12D" "$SPG" 2>&1 >/dev/null))"
 assert_absent D12d-guard-no-compressor "$d12d_err" "LOADED-JSON-SLIM"
 assert_eq     D12d-still-stamped "$(excl_hits "$DGIT3")" 1
+
+# D13 (bug): the Bash tool's cwd persists, so after `cd .claude/tasks/<id>/tmp` the event's cwd is
+# that directory. Taken as the project root, it denied the workspace path itself and recommended
+# `<cwd>/.claude/tasks/<work-id>/tmp/…` — `.claude/tasks` doubled. The root is now
+# CLAUDE_PROJECT_DIR when the cwd is inside it, else the cwd cut back above its `.claude/` segment.
+DG13="$TMP/dg13"; mkdir -p "$DG13/.claude/tasks/ELC-1/tmp"; git -C "$DG13" init -q 2>/dev/null
+DG13C="$DG13/.claude/tasks/ELC-1/tmp"
+out="$(run_spg_at "$DG13C" "$(spg_ev_at "$DG13C" "$CDT" filePath "$DG13C/shot.png")")"; ec=$?
+assert_eq D13-subdir-cwd-exit "$ec" 0
+if [ -z "$out" ]; then ok; else bad D13-subdir-cwd-workspace-allowed "the workspace path was denied from inside it: $out"; fi
+out="$(run_spg_at "$DG13C" "$(spg_ev_at "$DG13C" "$CDT" filePath "$DG13/shot.png")")"
+assert_contains D13b-root-litter-deny "$out" '"permissionDecision":"deny"'
+assert_contains D13b-toplevel-where   "$out" "$DG13/.claude/tasks/<work-id>/tmp/shot.png"
+assert_absent   D13b-no-doubled-tasks "$out" '.claude/tasks/ELC-1/tmp/.claude'
+if [ -e "$DG13C/.claude" ]; then bad D13c-no-nested-scratch "the deny created $DG13C/.claude"; else ok; fi
+# D13d: the `.claude` cut needs no git — with no checkout above, the root is still `dn13`
+DN13="$TMP/dn13"; mkdir -p "$DN13/.claude/tasks/ELC-1/tmp"; DN13C="$DN13/.claude/tasks/ELC-1/tmp"
+out="$(run_spg_at "$DN13C" "$(spg_ev_at "$DN13C" "$CDT" filePath "$DN13C/shot.png")")"
+if [ -z "$out" ]; then ok; else bad D13d-no-git-workspace-allowed "the workspace path was denied without git: $out"; fi
+out="$(run_spg_at "$DN13C" "$(spg_ev_at "$DN13C" "$CDT" filePath "$DN13/shot.png")")"
+assert_contains D13d-no-git-root-is-cut "$out" "$DN13/.claude/tasks/<work-id>/tmp/shot.png"
+assert_absent   D13d-no-doubled-tasks   "$out" '.claude/tasks/ELC-1/tmp/.claude'
+
+# D14 (bug): in a git worktree `.claude/tasks` is a symlink into the MAIN checkout
+# (worktree-setup.sh), and the screenshot servers canonicalize a path and refuse anything outside
+# the project — so the workspace path the guard allowed (and recommended) hard-failed every time.
+# A candidate that resolves into that link is denied with `<worktree>/.claude/tmp/<work-id>/`, a
+# real dir inside the checkout, and the remediation never names the task workspace.
+DM14="$TMP/dm14"; DW14="$TMP/dw14"
+mkdir -p "$DM14/.claude/tasks/ELC-1/tmp" "$DW14/.claude/fnd-tmp/playwright"; git -C "$DM14" init -q 2>/dev/null
+printf 'gitdir: %s/.git/worktrees/dw14\n' "$DM14" > "$DW14/.git"
+ln -s "$DM14/.claude/tasks" "$DW14/.claude/tasks"
+out="$(run_spg_at "$DW14" "$(spg_ev_at "$DW14" "$CDT" filePath "$DW14/.claude/tasks/ELC-1/tmp/shot.png")")"; ec=$?
+assert_eq       D14-wt-exit       "$ec" 0
+assert_contains D14-wt-link-deny  "$out" '"permissionDecision":"deny"'
+assert_contains D14-wt-where      "$out" "$DW14/.claude/tmp/ELC-1/shot.png"
+assert_absent   D14-wt-no-tasks   "$out" '.claude/tasks'
+if [ -d "$DW14/.claude/tmp/ELC-1" ]; then ok; else bad D14b-wt-dir "the deny did not create .claude/tmp/ELC-1"; fi
+out="$(run_spg_at "$DW14" "$(spg_ev_at "$DW14" "$CDT" filePath "$DW14/.claude/tmp/ELC-1/shot.png")")"
+if [ -z "$out" ]; then ok; else bad D14c-wt-remediation-allowed "the guard denies its own worktree remediation: $out"; fi
+# the same workspace reached by its real path in the main checkout — refused by the server all the same
+out="$(run_spg_at "$DW14" "$(spg_ev_at "$DW14" "$PWU" filename "$DM14/.claude/tasks/ELC-1/tmp/shot.png")")"
+assert_contains D14d-wt-main-path-deny "$out" "$DW14/.claude/tmp/ELC-1/shot.png"
+# root litter in a worktree leads with the worktree remediation, not the task workspace
+out="$(run_spg_at "$DW14" "$(spg_ev_at "$DW14" "$CDT" filePath "$DW14/shot.png")")"
+assert_contains D14e-wt-litter-where "$out" "$DW14/.claude/tmp/<work-id>/shot.png"
+assert_absent   D14e-wt-litter-no-tasks "$out" '.claude/tasks'
+# …the bundled server's own scratch dir is still a real dir in the worktree — allowed
+out="$(run_spg_at "$DW14" "$(spg_ev_at "$DW14" "$PW" filename shot.png)")"
+if [ -z "$out" ]; then ok; else bad D14f-wt-bundled-allowed "the bundled output dir was denied in a worktree: $out"; fi
+
+run_spg_env() { # cwd payload [VAR=val…] — run_spg_at with an explicit hook environment
+  _c="$1"; _p="$2"; shift 2
+  printf '%s' "$_p" | (cd "$_c" && env -u CLAUDE_PROJECT_DIR "$@" node "$SPG" 2>/dev/null)
+}
+# D15: a session opened in a monorepo subdir — `.claude/` and the screenshot servers live in
+# `mono/web`, so the git toplevel `mono` is the wrong root, with or without CLAUDE_PROJECT_DIR.
+DMO="$TMP/mono"; mkdir -p "$DMO/web/.claude/tasks/X/tmp"; git -C "$DMO" init -q 2>/dev/null
+out="$(run_spg_env "$DMO/web" "$(spg_ev_at "$DMO/web" "$CDT" filePath "$DMO/web/.claude/tasks/X/tmp/s.png")" CLAUDE_PROJECT_DIR="$DMO/web")"
+if [ -z "$out" ]; then ok; else bad D15-mono-env-allowed "the subdir workspace was denied: $out"; fi
+out="$(run_spg_env "$DMO/web" "$(spg_ev_at "$DMO/web" "$CDT" filePath "$DMO/web/.claude/tasks/X/tmp/s.png")")"
+if [ -z "$out" ]; then ok; else bad D15b-mono-noenv-allowed "the subdir workspace was denied without the env: $out"; fi
+if [ -e "$DMO/.claude" ]; then bad D15c-mono-no-toplevel-scratch "the guard created $DMO/.claude"; else ok; fi
+# D16: Claude Code persists the Bash cwd physically, so after `cd .claude/tasks/ELC-1` in a worktree
+# the event's cwd is the MAIN checkout's workspace while CLAUDE_PROJECT_DIR still names the worktree.
+DM16="$TMP/dm16"; DW16="$TMP/dw16"
+mkdir -p "$DM16/.claude/tasks/ELC-1" "$DW16/.claude"; git -C "$DM16" init -q 2>/dev/null
+printf 'gitdir: %s/.git/worktrees/dw16\n' "$DM16" > "$DW16/.git"
+ln -s "$DM16/.claude/tasks" "$DW16/.claude/tasks"
+DP16="$(cd "$DM16/.claude/tasks/ELC-1" && pwd -P)"
+out="$(run_spg_env "$DP16" "$(spg_ev_at "$DP16" "$CDT" filePath "$DW16/.claude/tasks/ELC-1/tmp/x.png")" CLAUDE_PROJECT_DIR="$DW16")"
+assert_contains D16-phys-cwd-deny  "$out" '"permissionDecision":"deny"'
+assert_contains D16-phys-cwd-where "$out" "$DW16/.claude/tmp/ELC-1/x.png"
+out="$(run_spg_env "$DP16" "$(spg_ev_at "$DP16" "$CDT" filePath "$DW16/.claude/tmp/ELC-1/x.png")" CLAUDE_PROJECT_DIR="$DW16")"
+if [ -z "$out" ]; then ok; else bad D16b-phys-cwd-remediation-allowed "the worktree remediation was denied: $out"; fi
+out="$(run_spg_env "$DP16" "$(spg_ev_at "$DP16" "$CDT" filePath "$DW16/x.png")" CLAUDE_PROJECT_DIR="$DW16")"
+assert_contains D16c-phys-cwd-litter-deny "$out" '"permissionDecision":"deny"'
 
 # ═══ A — hooks/spill-access.sh, the PreToolUse spill-read recorder ══════════
 # Measurement only: --report called a platform-overflow whale MISSED whenever the agent read the

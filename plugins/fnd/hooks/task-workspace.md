@@ -14,6 +14,7 @@ When work is tied to a Jira ticket (key in the conversation or in the branch nam
   workspace, so `/compact` and new sessions lose nothing.
 - **Placement:** scratch (test scripts, drafts, dumps) → `.claude/tasks/<work-id>/tmp/`;
   durable artifacts → workspace root — never the project root or `docs/`.
+  In a git worktree, screenshots go to `.claude/tmp/<work-id>/` (the browser servers refuse its symlinked `.claude/tasks`).
   Details + freshness rules: `references/task-workspace.md`.
 - No workspace yet on non-trivial ticket work → offer the `save-task-context` skill once
   (on Claude Code, `/fnd:save-task-context`).

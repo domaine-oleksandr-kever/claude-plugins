@@ -54,7 +54,8 @@
 # any request, rather than a query silently sent to another environment's store. An `https://` URL
 # is accepted and normalized; anything else that cannot be a myshopify handle is refused (exit 2)
 # rather than spliced into the request URL. The Theme Access token (shptka_) in shopify.theme.toml
-# is NOT an admin token and is not used here.
+# is NOT an admin token and is not used here. The file is the cwd's, else the nearest one up to
+# the checkout root (_shopify-common.sh default_toml_path).
 #
 # Usage:
 #   shopify-admin-gql.sh --query <file.graphql> [--operation <name>] [--variables <json>] \
@@ -165,7 +166,7 @@ if [ -n "$VARIABLES_FILE" ]; then
 fi
 
 # --- store domain: --store, else $SHOPIFY_STORE, else uncommented store= in shopify.theme.toml ---
-TOML="${TOML_PATH:-shopify.theme.toml}"
+TOML="${TOML_PATH:-$(default_toml_path)}"
 
 if [ -z "$STORE" ]; then STORE="${SHOPIFY_STORE:-}"; fi
 if [ -z "$STORE" ]; then
@@ -175,7 +176,7 @@ if [ -z "$STORE" ]; then
     || { echo "error=$(toml_env_error 'pass --store, export SHOPIFY_FLAG_ENVIRONMENT=<name> (this script'"'"'s --env names the dotenv file, not a toml block), or point TOML_PATH at a single-environment file')" >&2; exit 2; }
   STORE="$(toml_value store)" || true
 fi
-[ -n "$STORE" ] || { echo "error=no_store (pass --store or set store= in $TOML, env=$TOML_ENV)" >&2; exit 2; }
+[ -n "$STORE" ] || { echo "error=no_store (pass --store or set store= in $TOML, env=$TOML_ENV; looked for $(toml_abs) — run from the project root or set TOML_PATH)" >&2; exit 2; }
 # the handle guard is also what keeps $DOMAIN safe to use as a state-file name below; it applies to
 # --store / $SHOPIFY_STORE / the toml alike
 STORE="$(store_handle "$STORE")" \

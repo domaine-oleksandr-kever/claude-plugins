@@ -22,6 +22,9 @@
 #              theme scopes (ACCESS_DENIED), falls back to themecli when a Theme Access token
 #              is available, with a note on stderr.
 #
+# WHICH TOML FILE: $TOML_PATH, else shopify.theme.toml in the cwd or in the nearest ancestor up to
+# the checkout root (_shopify-common.sh default_toml_path).
+#
 # WHICH TOML BLOCK: the store (when neither --store nor $SHOPIFY_STORE is given) and the Theme
 # Access token both come out of ONE `[environments.*]` block — $SHOPIFY_FLAG_ENVIRONMENT (the
 # selector `shopify theme dev -e` reads; this script's own --env names the dotenv file, not a
@@ -152,7 +155,8 @@ case "$CMD" in themes|get|set) ;; *) echo "error=unknown_command cmd='$CMD' (use
 
 THEME=""; FILE=""; OUT=""; FROM=""; ROLE_FILTER=""; STRIP=0
 ENGINE="auto"; STORE_ARG=""; ENV_ARG=""; APIV_ARG=""
-TOML="${TOML_PATH:-shopify.theme.toml}"
+TOML="${TOML_PATH:-$(default_toml_path)}"
+export TOML_PATH="$TOML"   # the gql runner reads this same file, and walks (and notes) nothing twice
 # This script's own --env is a DOTENV PATH (the Admin token file), so it cannot also name a toml
 # block: the selector here is $SHOPIFY_FLAG_ENVIRONMENT, the one `shopify theme dev -e` reads.
 TJ_ENV_FIX="pass --store, export SHOPIFY_FLAG_ENVIRONMENT=<name> (this script's --env names the dotenv file, not a toml block), or point TOML_PATH at a single-environment file"
@@ -585,7 +589,7 @@ resolve_domain() {
     toml_env_ready || { echo "error=$(toml_env_error "$TJ_ENV_FIX")" >&2; exit 2; }
     s="$(toml_value store)" || true; DOMAIN_SOURCE="toml"
   fi
-  [ -n "$s" ] || { echo "error=no_store (pass --store or set store= in $TOML, env=$TOML_ENV)" >&2; exit 2; }
+  [ -n "$s" ] || { echo "error=no_store (pass --store or set store= in $TOML, env=$TOML_ENV; looked for $(toml_abs) — run from the project root or set TOML_PATH)" >&2; exit 2; }
   s="$(store_handle "$s")" \
     || { echo "error=invalid_store store='$s' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL)" >&2; exit 2; }
   DOMAIN="$(store_domain "$s")"

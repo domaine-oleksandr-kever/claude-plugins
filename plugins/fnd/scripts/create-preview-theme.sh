@@ -18,7 +18,8 @@
 # NEVER enters Claude's context and is never printed. The calling skill must NOT read
 # shopify.theme.toml itself.
 #
-# Config source (project root, or $TOML_PATH): shopify.theme.toml
+# Config source (project root, or $TOML_PATH): shopify.theme.toml — from a subdirectory of the
+# checkout the nearest one above the cwd is used (the other paths below stay cwd-relative)
 #   - dev theme id : the UNCOMMENTED `theme = "..."` line, digits (commented variants ignored)
 #   - store        : the UNCOMMENTED `store = "..."` line, a myshopify handle, full domain or https:// URL
 #   - token        : `password = "..."`, else first shp*_… in the file, else $SHOPIFY_CLI_THEME_TOKEN
@@ -186,8 +187,6 @@ for _a in ${1+"$@"}; do
 done
 unset _a
 
-TOML="${TOML_PATH:-shopify.theme.toml}"
-
 # Customizer content copied from the dev theme; everything else is code from the repo.
 SETTINGS_PATTERNS=(
   "config/settings_data.json"
@@ -210,6 +209,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SCRIPT_DIR/_shopify-common.sh"
 [ -f "$SCRIPT_DIR/session-theme.sh" ] || { printf 'error=session_lib_not_found path=%s\n' "$SCRIPT_DIR/session-theme.sh"; exit 1; }
 . "$SCRIPT_DIR/session-theme.sh"
+TOML="${TOML_PATH:-$(default_toml_path)}"
 
 fail() { printf 'error=%s\n' "$1"; exit 1; }
 # a flag that takes a value must not be the last arg — a bare `shift 2` past the end of $@

@@ -38,9 +38,10 @@ that needs those references (`jira-reader`'s attachments join) fetches the field
 `adf-to-md.cjs --comments`. That parameter is **mandatory**: measured 2026-09-10, asking for
 `"adf"` gives every `media` node an `attrs.alt` holding the exact attachment filename, while
 OMITTING it is not "ADF by default" — the bodies arrive as markdown strings with empty-alt
-`![](blob:…)` images. The converter unwraps the MCP's `{"issues":{"nodes":[…]}}` envelope
-itself and `--comments` implies `--media`; no comment field in the file it is given is an
-exit-2 error naming the file (the wrong document was converted), not empty output.
+`![](blob:…)` images. The converter unwraps the MCP's `{"issues":{"nodes":[…]}}` envelope (and
+a spill's `[{"type":"text","text":"…"}]` content array) itself and `--comments` implies
+`--media`; no comment field in the file it is given is an exit-2 error naming the file (the
+wrong document was converted), not empty output.
 
 The site host works as `cloudId` directly; only if it is rejected call
 `getAccessibleAtlassianResources` (no params) for the site's UUID and use that instead.

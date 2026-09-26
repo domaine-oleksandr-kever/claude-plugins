@@ -101,8 +101,9 @@ the file to convert, because the text you were handed inline has had its media f
 node <plugin root>/scripts/adf-to-md.cjs <file> --comments
 ```
 
-The converter unwraps the MCP's `{"issues":{"nodes":[…]}}` envelope itself, and `--comments`
-implies `--media` — so the raw response is the right input and no extra flag is needed.
+The converter unwraps the MCP's `{"issues":{"nodes":[…]}}` envelope itself — and the
+`[{"type":"text","text":"…"}]` content array a spill holds — and `--comments` implies `--media`,
+so the raw response or the spill as-is is the right input and no extra flag is needed.
 
 `adf-to-md: no comment field in <file>` (exit 2) means the **wrong file** was converted — the
 inline text instead of the `<<full=…>>` spill, or a response fetched without

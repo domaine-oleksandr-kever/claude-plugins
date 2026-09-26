@@ -610,6 +610,70 @@ chmod 644 "$UT33"
 if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && ! grep -qi "awk: can't open" "$E"; then ok
 else bad T33-unreadable-toml-no-store "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 
+# T61 (bug): the Bash tool's cwd persists, so a run started inside `.claude/tasks/<id>/tmp` looked
+# for ./shopify.theme.toml there and died `error=no_store`. With no TOML_PATH the nearest toml up
+# to the checkout root (the first `.git` above the cwd) is the one read.
+T61="$TMP/t61"; mkdir -p "$T61/repo/.claude/tasks/ELC-1/tmp" "$T61/nogit/.claude/tasks/ELC-1/tmp"
+git -C "$T61/repo" init -q 2>/dev/null
+printf '[environments.development]\nstore = "acme-root"\npassword = "shptka_fixture1234"\n' > "$T61/repo/shopify.theme.toml"
+cp "$T61/repo/shopify.theme.toml" "$T61/nogit/shopify.theme.toml"
+rc=0; L="$TMP/tjl61"; : > "$L"
+(cd "$T61/repo/.claude/tasks/ELC-1/tmp" && TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store acme-root\.myshopify\.com ' "$L"; then ok
+else bad T61-toml-from-task-subdir "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# T61b: an explicit TOML_PATH still wins over the walk
+rc=0; L="$TMP/tjl61b"; : > "$L"
+(cd "$T61/repo/.claude/tasks/ELC-1/tmp" && TOML_PATH="$TT/bare.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store acme-bare\.myshopify\.com ' "$L"; then ok
+else bad T61b-toml-path-wins "rc=$rc log=$(grep -v token "$L" | tr '\n' ';')"; fi
+# T61c: outside any checkout nothing is walked — the cwd-relative lookup and its refusal, which now
+# names the absolute path it tried and the two ways out
+rc=0; L="$TMP/tjl61c"; : > "$L"
+(cd "$T61/nogit/.claude/tasks/ELC-1/tmp" && TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && [ ! -s "$L" ] \
+   && grep -q "looked for $(cd "$T61/nogit/.claude/tasks/ELC-1/tmp" && pwd)/shopify.theme.toml" "$E" \
+   && grep -q 'run from the project root or set TOML_PATH' "$E"; then ok
+else bad T61c-no-git-unchanged "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# T61d: in a git worktree whose `.claude/tasks` is a symlink into the MAIN checkout (worktree-setup.sh),
+# `git rev-parse --show-toplevel` from there answers the MAIN checkout — the other store config. The
+# walk is over the logical cwd, so it stays in the worktree.
+mkdir -p "$T61/main/.claude/tasks/ELC-1/tmp" "$T61/wt/.claude"
+git -C "$T61/main" init -q 2>/dev/null
+printf '[environments.development]\nstore = "acme-main"\npassword = "shptka_fixture1234"\n' > "$T61/main/shopify.theme.toml"
+printf '[environments.development]\nstore = "acme-wt"\npassword = "shptka_fixture1234"\n' > "$T61/wt/shopify.theme.toml"
+printf 'gitdir: %s/main/.git/worktrees/wt\n' "$T61" > "$T61/wt/.git"
+ln -s "$T61/main/.claude/tasks" "$T61/wt/.claude/tasks"
+rc=0; L="$TMP/tjl61d"; : > "$L"
+(cd "$T61/wt/.claude/tasks/ELC-1/tmp" && TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store acme-wt\.myshopify\.com ' "$L"; then ok
+else bad T61d-worktree-stays-in-worktree "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# T61e/T61f: the Bash tool persists the PHYSICAL cwd, so `cd .claude/tasks/ELC-1` in that worktree
+# lands in main's workspace — a walk from there reads main's toml, the other store. With linked
+# worktrees under main/.git/worktrees the walk picks nothing and says why; without them it walks.
+T61M="$(cd "$T61/main/.claude/tasks/ELC-1" && pwd -P)"
+rc=0; L="$TMP/tjl61f"; : > "$L"
+(cd "$T61M" && TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=.*--store acme-main\.myshopify\.com ' "$L" && ! grep -q toml_walk_skipped "$E"; then ok
+else bad T61f-no-linked-worktrees-walks "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+mkdir -p "$T61/main/.git/worktrees/wt"
+rc=0; L="$TMP/tjl61e"; : > "$L"
+(cd "$T61M" && TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'error=no_store' "$E" && [ ! -s "$L" ] \
+   && [ "$(grep -c '^note=toml_walk_skipped dir=' "$E")" -eq 1 ] && ! grep -q acme-main "$O" "$E"; then ok
+else bad T61e-linked-worktrees-skip-walk "rc=$rc err=$(head -c 240 "$E" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# T61g: the auto engine also runs the REAL gql runner, which inherits theme-json's pick — ONE note
+T61G="$TMP/tj61g"; mkdir -p "$T61G"; cp "$TJ" "$COMMON" "$GQL" "$T61G/"
+rc=0; L="$TMP/tjl61g"; : > "$L"
+(cd "$T61M" && TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" "$BASH_BIN" "$T61G/theme-json.sh" themes) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -ne 0 ] && [ "$(grep -c '^note=toml_walk_skipped dir=' "$E")" -eq 1 ] && ! grep -q acme-main "$O" "$E"; then ok
+else bad T61g-auto-engine-one-note "rc=$rc err=$(head -c 320 "$E" | tr '\n' ' ')"; fi
+
 # --- `set` read-back verify: Shopify keeps the PREVIOUS content for payloads it rejects
 # server-side while the write reports success — push exit 0, no userErrors. Every case
 # below drives that divergence through the stubs; the themecli set runs with --engine themecli so
@@ -1513,6 +1577,15 @@ rc=0; gql_run_at "$TD48C" --engine token --store store-c --query query.graphql >
 if [ "$rc" -eq 0 ] && grep -q '"ok":true' "$O"; then ok
 else bad G48e-store-flag-bypasses-toml "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 
+# G50 (bug): the runner's own toml lookup is the shared walk too — theme-json's gql engine calls it
+# from the same persisted cwd, so from `.claude/tasks/<id>/tmp` it has to reach the checkout's toml
+TD50="$TMP/gqltoml50"; mkdir -p "$TD50/.claude/tasks/ELC-1/tmp"; git -C "$TD50" init -q 2>/dev/null
+cp "$GQLDIR/query.graphql" "$TD50/.claude/tasks/ELC-1/tmp/"
+printf '[environments.development]\nstore = "acme-root"\n' > "$TD50/shopify.theme.toml"
+rc=0; FAKE_HTTP=401 gql_run_at "$TD50/.claude/tasks/ELC-1/tmp" --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q 'url=https://acme-root.myshopify.com/admin/' "$E"; then ok
+else bad G50-toml-from-task-subdir "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
 # G30: a store value that cannot be a myshopify handle is refused before any request
 rc=0; M="$TMP/m30"; CURL_MARKER="$M" \
   gql_run_at "$GQLDIR" --engine token --store "store = 'x'" --query query.graphql >"$O" 2>"$E" || rc=$?
@@ -2248,6 +2321,38 @@ else bad P2-toml-single-quoted "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' '
 # which also skipped the shp*_ fallback (fixture token, never a real secret)
 if grep -q '^token=shptka_fixture1234$' "$L"; then ok
 else bad P2b-toml-single-quoted-token "log=$(tr '\n' ';' < "$L")"; fi
+
+# P62 (bug): run from inside a task workspace, the config was `not found` — the toml is now the
+# nearest one up to the checkout root; everything else stays cwd-relative, so a write mode from
+# there is still refused as the wrong directory before anything is built or pushed
+P62="$TMP/cpt62"; mkdir -p "$P62/.claude/tasks/ELC-1/tmp" "$P62/assets"; git -C "$P62" init -q 2>/dev/null
+cp "$CPTD/repo/shopify.theme.toml" "$P62/"
+rc=0; L="$TMP/cpt62l"; : > "$L"
+run_cpt_at "$P62/.claude/tasks/ELC-1/tmp" "$CPTD/shim:$PATH" "$L" NO=1 -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-dev$' "$O" && grep -q '^dev_theme_id=111$' "$O"; then ok
+else bad P62-toml-from-task-subdir "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/cpt62b"; : > "$L"
+run_cpt_at "$P62/.claude/tasks/ELC-1/tmp" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -ne 0 ] && grep -q '^error=not_a_theme_checkout' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P62b-subdir-write-still-refused "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+# P62c: outside a checkout the lookup is the cwd's alone, message unchanged
+rc=0; L="$TMP/cpt62c"; : > "$L"; mkdir -p "$TMP/cpt62-nogit/sub"; cp "$CPTD/repo/shopify.theme.toml" "$TMP/cpt62-nogit/"
+run_cpt_at "$TMP/cpt62-nogit/sub" "$CPTD/shim:$PATH" "$L" NO=1 -- info || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=config not found: shopify.theme.toml (run from the project root, or set TOML_PATH)$' "$O"; then ok
+else bad P62c-no-git-unchanged "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
+# P62d/P62e: from the physical `.claude/tasks/<id>` of a checkout with linked worktrees the walk
+# picks nothing, so `pin` / `--pin-toml` can never rewrite a toml that may be the other checkout's
+P62W="$TMP/cpt62w"; mkdir -p "$P62W/.claude/tasks/ELC-1" "$P62W/assets"; git -C "$P62W" init -q 2>/dev/null
+mkdir -p "$P62W/.git/worktrees/wt"; cp "$CPTD/repo/shopify.theme.toml" "$P62W/"
+P62H="$(cksum < "$P62W/shopify.theme.toml")"; P62C="$(cd "$P62W/.claude/tasks/ELC-1" && pwd -P)"
+for P62A in "pin --theme 222" "create --name X --no-build --pin-toml"; do
+  rc=0; L="$TMP/cpt62d"; : > "$L"
+  # shellcheck disable=SC2086
+  run_cpt_at "$P62C" "$CPTD/shim:$PATH" "$L" FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":222,"name":"[ELC-1] session","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]' -- $P62A || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ] && grep -q '^note=toml_walk_skipped dir=' "$E" \
+     && [ "$(cksum < "$P62W/shopify.theme.toml")" = "$P62H" ]; then ok
+  else bad "P62d-linked-worktrees-no-write ($P62A)" "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+done
 
 # P2c: bare values with a trailing comment
 rc=0; L="$TMP/cpt2c"; : > "$L"

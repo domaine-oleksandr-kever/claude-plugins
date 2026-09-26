@@ -1326,6 +1326,36 @@ for (const [label, nodes] of [['0', []], ['2', [wrappedSet.issues.nodes[0], wrap
   }
 }
 
+// MEASURED (2026-09-25 ELC readout): json-slim's whole-result spill is the MCP content array,
+// [{"type":"text","text":"<getJiraIssue response JSON>"}] — the issue is a STRING one level down,
+// so --comments said "no comment field" (exit 2) and the reader hand-rolled a parser. The block's
+// text is unwrapped first, then the issues.nodes envelope as before.
+const contentArray = (...objs) => objs.map((o) => ({ type: 'text', text: typeof o === 'string' ? o : JSON.stringify(o, null, 2) }));
+const wrappedComments = run(A2M, JSON.stringify(wrappedSet), ['--comments']);
+check('a2m-content-plain-issue', run(A2M, JSON.stringify(contentArray(commentSet)), ['--comments']),
+  run(A2M, JSON.stringify(commentSet), ['--comments']));
+check('a2m-content-issues-nodes', run(A2M, JSON.stringify(contentArray(wrappedSet)), ['--comments']), wrappedComments);
+check('a2m-content-two-blocks', run(A2M, JSON.stringify(contentArray('Fetched 1 issue.', wrappedSet)), ['--comments']),
+  wrappedComments);
+check('a2m-content-field', run(A2M, JSON.stringify(contentArray(wrappedSet)), ['--field', 'customfield_10038']),
+  'the approach');
+// the same array as a tool-result object and as one bare block
+check('a2m-content-result-object', run(A2M, JSON.stringify({ content: contentArray(wrappedSet) }), ['--comments']),
+  wrappedComments);
+check('a2m-content-bare-block', run(A2M, JSON.stringify(contentArray(wrappedSet)[0]), ['--comments']), wrappedComments);
+{
+  const r = a2mCli(JSON.stringify(contentArray('not json {')), ['--comments']);
+  check('a2m-content-not-json-exit', r.status, 1);
+  check('a2m-content-not-json-stderr', /^adf-to-md: input is not valid JSON: .*\(tried the text of the one MCP content block in stdin\)\n$/.test(r.stderr), true);
+  const r2 = a2mCli(JSON.stringify(contentArray('Fetched.', 'no issue here')), ['--comments']);
+  check('a2m-content-no-issue-exit', r2.status, 2);
+  check('a2m-content-no-issue-stderr', r2.stderr,
+    'adf-to-md: none of the 2 MCP content blocks in stdin holds an issue (JSON with fields or issues)\n');
+}
+// without --field/--comments a lone {type:"text"} is an ADF text node, never a wrapper
+check('a2m-content-plain-mode-untouched', run(A2M, JSON.stringify(doc([p([{ type: 'text', text: '{"fields":{}}' }])]))),
+  '{"fields":{}}');
+
 // --field extracts ONE field's ADF; --comments needs the whole response
 {
   const r = a2mCli(JSON.stringify(commentSet), ['--comments', '--field', 'customfield_10038']);
