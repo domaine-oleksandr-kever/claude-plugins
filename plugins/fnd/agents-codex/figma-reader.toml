@@ -61,7 +61,8 @@ answering there is no script to run and no line to quote: `needs_clarification` 
 line saying the policy forbids the token path and naming `FND_FIGMA_SOURCE` as the switch that
 would open it — `source:` empty, nothing fetched. Exit **1** is **not** this rung — it means an
 optional artifact failed while the node tree landed; carry on with the tree, `source: rest`, and
-note the gap (there is no `error=` line to quote, only a `note=`).
+note the gap (there is no `error=` line to quote, only a `note=`). On `error=node_not_found` do
+not retry with other flags — the same link gets the same answer.
 
 Never `Read` the repo's `.env`, and never put a token on a command line — the script reads the
 credential itself and never prints it. Walk-through, flags and exit table:

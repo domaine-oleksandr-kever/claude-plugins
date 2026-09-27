@@ -450,6 +450,13 @@ else bad F4-policy-no-outdir "rc=$rc dirs=$(ls -a "$D4c" | tr '\n' ' ')"; fi
 D5="$(new_repo nodes '.claude/')"; OUT5="$D5/.claude/tasks/ELC-1/tmp/figma"
 rc=0; FAKE_HTTP_NODES=404 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
 assert F5-404 4 "$rc" "$E" "error=node_not_found"
+# F5b: a stale link answers the same to every flag — the hint says so, so the caller asks for a
+# fresh link instead of re-running; the 404 variant points at --probe to tell file from node
+F5B_REMEDY='not retryable, no flag changes this answer; ask for a fresh link — select the layer, Copy link'
+if grep -qF "error=node_not_found file_key=$KEY node_id=1:2 http=404 (Figma finds neither this file nor this node" "$E" \
+   && grep -qF '`--probe` tells them apart: ok=1 = the file answers, so it is the node, error=file_not_found = the file itself is gone' "$E" \
+   && grep -qF "$F5B_REMEDY)" "$E"; then ok
+else bad F5b-404-hint "err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 rc=0; FAKE_HTTP_NODES=403 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
 assert F5-403 4 "$rc" "$E" "error=token_rejected http=403"
 if grep -qF 'references/figma-rest.md' "$E"; then ok
@@ -459,11 +466,16 @@ assert F5-500 4 "$rc" "$E" "error=figma_request_failed http=500"
 # 200 with a null node: a body that parses perfectly and carries no design at all
 rc=0; FAKE_NODE_NULL=1 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
 assert F5-null-node 4 "$rc" "$E" "error=node_not_found"
+if grep -qF "error=node_not_found file_key=$KEY node_id=1:2 (the response carries no such node — the token sees the file, but this node id is not in it" "$E" \
+   && grep -qF "$F5B_REMEDY)" "$E" && ! grep -qF 'http=404' "$E"; then ok
+else bad F5b-null-node-hint "err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 if [ -z "$(find "$OUT5" -name '*.part' 2>/dev/null)" ] \
    && [ -z "$(find "$OUT5" -name '*.nodes.json' 2>/dev/null)" ]; then ok
 else bad F5-null-node-file "a null-node answer was left on disk: $(ls "$OUT5" | tr '\n' ' ')"; fi
 rc=0; FAKE_NODES_RAW='<html>nope</html>' fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
-assert F5-nonjson 4 "$rc" "$E" "error=node_not_found"
+assert F5-nonjson 4 "$rc" "$E" "error=figma_request_failed http=200 path=files/$KEY/nodes (the response is empty or not JSON"
+if ! grep -qF 'not retryable' "$E" && ! grep -qF 'error=node_not_found' "$E"; then ok
+else bad F5b-nonjson-hint "err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 
 # 429 once, honouring Retry-After, then a good answer
 SLP="$TMP/sleep5"; : > "$SLP"

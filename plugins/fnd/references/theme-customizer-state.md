@@ -109,9 +109,11 @@ against, or a preview/sandbox theme. Then:
    Shopify validates theme JSON server-side and, for a payload it rejects, **keeps the previous
    content while the write reports success** — `error=not_applied` + **exit 6**, its hint naming
    the two known triggers (a schema-unsupported attribute; a dynamic source without `.value` after
-   every reference hop — write `{{ ….value }}` from the start). Treat exit 6 as *the theme
-   diverged*, not *nothing happened*: no pre-image is read, so `get` the file and restore the
-   snapshot (step 5) if what comes back is neither the payload nor what you started from.
+   every reference hop — write `{{ ….value }}` from the start); a `note=verify_diff` line ahead of
+   it names the differing leaf keys (`only_in_payload=` / `only_in_theme=` / `changed=`) — start
+   there. Treat exit 6 as *the theme diverged*, not *nothing happened*: no pre-image is read, so
+   `get` the file and restore the snapshot (step 5) if what comes back is neither the payload nor
+   what you started from.
    `error=verify_read_failed` (also exit 6) = the state is unconfirmed — `get` before assuming
    either outcome. On a host with no working `perl` the compare degrades to raw bytes and a
    difference is `verified=unverified` + exit 0: confirming is yours.

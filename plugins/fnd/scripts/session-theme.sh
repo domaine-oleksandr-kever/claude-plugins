@@ -22,6 +22,12 @@
 #   session-theme.sh unpin <toml>
 #       → 0 = a pin was reverted; 1 = nothing to revert / absent file; 2 = usage;
 #         3 = a pin is present but the rewrite failed (the file is left as it came)
+#   session-theme.sh --help
+#       → 0, prints this block
+#
+# `--help` / `-h` — bare or anywhere in the args — prints that Usage block to stdout and exits 0;
+# only an executed copy answers it. Matched positionally, so a flag VALUE of `-h` reads as a usage
+# question too.
 #
 # Sourced into a `set -euo pipefail` caller, so no shell option is set at file scope (that would
 # mutate the sourcing shell) and the dispatch at the end reads nothing such a caller has not set.
@@ -367,8 +373,21 @@ shared_dev_theme_ids() { # $1 = toml, $2 = the id the caller read, $3/$4 = the l
 # Only an executed copy dispatches: sourced, BASH_SOURCE names this file and $0 the caller, so
 # the CLI never fires inside create-preview-theme.sh's shell.
 if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  # The `# Usage:` block above, verbatim — the suite pins the two together. Set here, not at file
+  # scope, so a sourcing caller's own USAGE survives.
+  USAGE='Usage:
+  session-theme.sh unpin <toml>
+      → 0 = a pin was reverted; 1 = nothing to revert / absent file; 2 = usage;
+        3 = a pin is present but the rewrite failed (the file is left as it came)
+  session-theme.sh --help
+      → 0, prints this block'
+  for _a in ${1+"$@"}; do
+    case "$_a" in
+      --help|-h) printf '%s\n' "$USAGE" "Full contract: the header of $0"; exit 0 ;;
+    esac
+  done
   if [ "${1:-}" = unpin ] && [ $# -eq 2 ]; then
     unpin_toml "$2"; exit $?
   fi
-  printf 'error=usage: session-theme.sh unpin <toml>\n'; exit 2
+  printf 'error=usage: session-theme.sh unpin <toml> (--help prints usage)\n'; exit 2
 fi

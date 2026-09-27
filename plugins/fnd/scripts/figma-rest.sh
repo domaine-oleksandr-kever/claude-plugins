@@ -482,13 +482,15 @@ if [ "$FORCE" -eq 0 ] && nodes_cached "$NODES_FILE"; then
 else
   NODES_PART="$(mkpart "$NODES_FILE")" \
     || { echo "error=out_dir_not_writable out=$OUT_ABS" >&2; exit 2; }
+  # Same link, same answer: agents otherwise loop through --force / --out variants.
+  STALE_NODE='not retryable, no flag changes this answer; ask for a fresh link — select the layer, Copy link'
   code="$(api_get_retry "$API/v1/files/$FILE_KEY/nodes?ids=$NODE_Q" "$NODES_PART")" \
     || { rm -f "$NODES_PART"; echo "error=curl_transport_failed" >&2; exit 5; }
   case "$code" in
     2*) ;;
     401|403) rm -f "$NODES_PART"; reject_auth "$code" ;;
     404) rm -f "$NODES_PART"
-         echo "error=node_not_found file_key=$FILE_KEY node_id=$NODE_ID http=404" >&2; exit 4 ;;
+         echo "error=node_not_found file_key=$FILE_KEY node_id=$NODE_ID http=404 (Figma finds neither this file nor this node — deleted, moved, or a stale link; \`--probe\` tells them apart: ok=1 = the file answers, so it is the node, error=file_not_found = the file itself is gone; $STALE_NODE)" >&2; exit 4 ;;
     429) rm -f "$NODES_PART"
          echo "error=rate_limited http=429 (Figma is throttling this token — try again in a minute)" >&2; exit 4 ;;
     *)   rm -f "$NODES_PART"
@@ -496,9 +498,14 @@ else
   esac
   # Figma answers 200 with `{"nodes":{"<id>":null}}` for an id that is not in the file — a body
   # that parses perfectly and carries no design at all. Unknown node, not a successful read.
+  if ! json_cached "$NODES_PART"; then
+    rm -f "$NODES_PART"
+    echo "error=figma_request_failed http=$code path=files/$FILE_KEY/nodes (the response is empty or not JSON — a proxy or transport artifact; re-run once)" >&2
+    exit 4
+  fi
   if ! nodes_cached "$NODES_PART"; then
     rm -f "$NODES_PART"
-    echo "error=node_not_found file_key=$FILE_KEY node_id=$NODE_ID (the response carries no such node)" >&2
+    echo "error=node_not_found file_key=$FILE_KEY node_id=$NODE_ID (the response carries no such node — the token sees the file, but this node id is not in it: deleted, moved to another file, or a stale link; $STALE_NODE)" >&2
     exit 4
   fi
   mv -f "$NODES_PART" "$NODES_FILE" \

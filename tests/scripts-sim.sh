@@ -715,6 +715,26 @@ if grep -q 'get --theme 2 --file templates/product.json' "$E" \
    && ! grep -qi 'old content is still in place' "$E"; then ok
 else bad T35d-hint-no-preimage-claim "err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 if [ "$(cat "$C35")" = 2 ]; then ok; else bad T35c-retried-once "pulls=$(cat "$C35") want 2"; fi
+# T35e: the verdict says WHAT differs — leaf key paths of the normalized pair on stderr, ahead of
+# the hint, never a value and never the token
+rc=0; SHOPIFY_CLI_THEME_TOKEN=shptka_verifydiff9876 TJ_PULL_BODY="$TV/old.json" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && [ "$(wc -l < "$O" | tr -d ' ')" -eq 1 ] \
+   && grep -qx 'note=verify_diff only_in_payload=- only_in_theme=- changed=sections.main.settings.test_parent diff_lines=[0-9]*' "$E" \
+   && [ "$(grep -n '^note=verify_diff' "$E" | cut -d: -f1)" -lt "$(grep -n '^hint=' "$E" | cut -d: -f1)" ] \
+   && ! grep -q 'shptka_verifydiff9876' "$E" \
+   && ! grep '^note=verify_diff' "$E" | grep -qe 'old' -e 'metafields'; then ok
+else bad T35e-verify-diff-keys "rc=$rc out=$(head -c 160 "$O") err=$(grep -v shptka "$E" | head -c 300 | tr '\n' ' ')"; fi
+# T35f: each key list caps at 8 plus a `+N_more` count — a whole settings_data.json that did not
+# land must not flood the caller's context
+printf '{"sections":{"main":{"settings":{%s}}}}' \
+  "$(for i in 0 1 2 3 4 5 6 7 8 9 10 11; do printf '"k%02d":"v",' "$i"; done | sed 's/,$//')" > "$TV/many.json"
+printf '%s' '{"sections":{"main":{"type":"main"}}}' > "$TV/few.json"
+rc=0; TJ_PULL_BODY="$TV/few.json" tj_set_cli "$TV/many.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] \
+   && grep -qx 'note=verify_diff only_in_payload=sections.main.settings.k00,sections.main.settings.k01,sections.main.settings.k02,sections.main.settings.k03,sections.main.settings.k04,sections.main.settings.k05,sections.main.settings.k06,sections.main.settings.k07,+4_more only_in_theme=sections.main.type changed=- diff_lines=[0-9]*' "$E"; then ok
+else bad T35f-verify-diff-capped "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 
 # T36 (race guard): a read issued right after a write can still be served the old copy — the
 # FIRST pull-back is stale, the retry sees the payload, and the set succeeds
@@ -772,6 +792,8 @@ rc=0; FAKE_BODY_FILE="$TV/old.json" "$BASH_BIN" "$TJDIR/theme-json.sh" set --the
 if [ "$rc" -eq 6 ] && grep -q 'error=not_applied engine=gql theme=gid://shopify/OnlineStoreTheme/2 file=templates/product.json' "$O" \
    && grep -qF '.value' "$E"; then ok
 else bad T41-gql-not-applied "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+if grep -q '^note=verify_diff .*changed=sections.main.settings.test_parent diff_lines=' "$E"; then ok
+else bad T41b-gql-verify-diff "err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
 
 # T42 (degradation): the normalizer needs perl to strip the banner, and the `set` json guard
 # already degrades instead of refusing when perl is missing — the verify does the same, comparing
@@ -796,6 +818,9 @@ rc=0; SHOPIFY_CLI_THEME_TOKEN=fake TJ_PULL_BODY="$TV/reserialized.json" PATH="$T
 if [ "$rc" -eq 0 ] && grep -q '"ok":"upserted"' "$O" && grep -q '"verified":"unverified"' "$O" \
    && grep -q 'note=verify_unverified' "$E" && ! grep -q 'error=not_applied' "$O"; then ok
 else bad T43-no-perl-mismatch-fails-open "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T43b: an unverified verdict is not a mismatch, so it carries no diff to judge by
+if ! grep -q 'note=verify_diff' "$E"; then ok
+else bad T43b-unverified-no-diff "err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 
 # T44 (bug): the note was gated on `command -v perl` FAILING, so a perl that EXISTS but errors
 # degraded to the same raw compare with an empty note channel — nothing pointing at the cause.
@@ -859,6 +884,8 @@ rc=0; TJ_PULL_BODY="$TV/garbled.json" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || 
 if [ "$rc" -eq 6 ] && grep -q 'error=not_applied engine=themecli' "$O" \
    && grep -q 'note=verify_body_not_json' "$E" && ! grep -q '"verified":"unverified"' "$O"; then ok
 else bad T47-body-not-json-is-mismatch "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+if grep -qx 'note=verify_diff diff_lines=[0-9][0-9]*' "$E" && ! grep -q 'Shopify was unhappy' "$E"; then ok
+else bad T47e-body-not-json-diff-count "err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 # T47b (bug): and that verdict is per ATTEMPT. The flag was sticky for the whole run, so one
 # garbled first read poisoned a clean, MATCHING second one into `unverified`.
 rc=0; C47="$TMP/tj47-pulls"; : > "$C47"
@@ -5837,10 +5864,34 @@ for st_case in bare pin pathless; do
   case "$st_case" in bare) set -- ;; pin) set -- pin "$STD/s1.toml" ;; pathless) set -- unpin ;; esac
   rc=0; "$BASH_BIN" "$STL" "$@" >"$O" 2>"$E" || rc=$?
   [ "$rc" -eq 2 ] || st_usage_ok=0
-  grep -q '^error=usage: session-theme.sh unpin <toml>$' "$O" || st_usage_ok=0
+  grep -q '^error=usage: session-theme.sh unpin <toml> (--help prints usage)$' "$O" || st_usage_ok=0
 done
 if [ "$st_usage_ok" -eq 1 ] && [ "$(fhash "$STD/s1.toml")" = "$st_s1_before" ]; then ok
 else bad S4-cli-usage "usage contract broken :: rc=$rc out=$(head -c 120 "$O" | grep -v password | tr '\n' ' ')"; fi
+
+# S4b (drift guard): `--help` / `-h` answer with the header's own `# Usage:` block, rc 0
+STH="$TMP/st-usage-header"
+awk '/^# Usage:/ { f = 1 } f { if ($0 == "#" || $0 !~ /^#( |$)/) exit; sub(/^# ?/, ""); print }' \
+  "$STL" > "$STH"
+for ha in --help -h; do
+  rc=0; "$BASH_BIN" "$STL" "$ha" >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ "$(head -1 "$O")" = "Usage:" ] \
+     && [ "$(wc -l < "$STH" | tr -d ' ')" -ge 4 ] && sed '$d' "$O" | diff -q - "$STH" >/dev/null \
+     && [ "$(tail -1 "$O")" = "Full contract: the header of $STL" ]; then ok
+  else bad "S4b-help[$ha]" "rc=$rc diff=$(sed '$d' "$O" | diff - "$STH" | head -c 300 | tr '\n' ';') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
+done
+
+# S4c: `--help` among a real unpin's args is a usage question — the pinned file is not rewritten
+st_s1_before="$(fhash "$STD/s1.toml")"
+rc=0; "$BASH_BIN" "$STL" unpin "$STD/s1.toml" --help >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(head -1 "$O")" = "Usage:" ] && [ "$(fhash "$STD/s1.toml")" = "$st_s1_before" ]; then ok
+else bad S4c-help-mid-args "rc=$rc out=$(head -c 120 "$O" | grep -v password | tr '\n' ' ')"; fi
+
+# S4d: a SOURCED copy never answers — create-preview-theme.sh sources the file with its own args in
+# "$@", and a usage block (or an exit) there would land in its key=value stream
+rc=0; ( set -- --help; . "$STL"; printf 'still-here\n' ) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = "still-here" ] && [ ! -s "$E" ]; then ok
+else bad S4d-sourced-help-silent "rc=$rc out=$(head -c 160 "$O" | tr '\n' ';') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
 
 # S5: a worktree-setup.sh installed without its sibling refuses BEFORE it builds anything — a
 # worktree left pinned to another stream's theme is the failure the un-pin exists to prevent, and

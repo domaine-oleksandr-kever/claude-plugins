@@ -69,6 +69,9 @@
 # push's own --json envelope is gated FIRST, so a failed upload is never reported as not_applied:
 # a non-empty `.errors` is `error=cli_push_reported_errors` + exit 5 before any read-back, while
 # `.warnings` only print `note=cli_push_warnings` and let the read-back decide.
+# A not_applied verdict also prints `note=verify_diff only_in_payload=… only_in_theme=… changed=…
+# diff_lines=N` on stderr — leaf key paths of the normalized pair (8 per list), never a value
+# (the count alone when the read-back is not JSON).
 # FND_THEME_JSON_VERIFY=0 skips the read-back and prints `verified=skipped`.
 #
 # What verify does NOT establish: no pre-image is read before the write, so a mismatch proves
@@ -347,13 +350,37 @@ normalize_body() {
 
 # bodies_match <intended> <read-back> — 0 when the write landed. Called with redirects (never
 # in a command substitution) so normalize_body's flags and one-shot notes survive the call.
+# The normalized pair is left in VERIFY_NORM_A / VERIFY_NORM_B for verify_diff_note.
 bodies_match() {
   local a b
   a="$(mktemp)"; b="$(mktemp)"; CLEAN+=("$a" "$b")
   NORM_SIDE=intended;  normalize_body "$1" > "$a"
   NORM_SIDE=read_back; normalize_body "$2" > "$b"
   NORM_SIDE=intended
+  VERIFY_NORM_A="$a"; VERIFY_NORM_B="$b"
   cmp -s "$a" "$b"
+}
+
+# verify_diff_note — stderr only: WHICH leaf keys differ between the last normalized pair, never a
+# value (a settings body is the caller's content, and keys are enough to judge a normalization
+# diff from a dropped write). Lists cap at 8 plus `+N_more`; a side that is not JSON gets the
+# line count alone.
+verify_diff_note() {
+  local n keys
+  n="$({ diff "$VERIFY_NORM_A" "$VERIFY_NORM_B" 2>/dev/null || true; } | wc -l | tr -d ' ')"
+  keys="$(jq -n -r --slurpfile a "$VERIFY_NORM_A" --slurpfile b "$VERIFY_NORM_B" '
+    def leafy: if type == "object" or type == "array" then length == 0 else true end;
+    def leaves: . as $r | reduce paths(leafy) as $p ({}; .[$p | tojson] = ($r | getpath($p)));
+    def fmt: map(fromjson | map(tostring) | join(".") | gsub("[[:cntrl:][:space:],=]"; "_")) as $l
+      | if ($l | length) == 0 then "-"
+        elif ($l | length) > 8 then ($l[:8] | join(",")) + ",+\(($l | length) - 8)_more"
+        else $l | join(",") end;
+    ($a[0] | leaves) as $x | ($b[0] | leaves) as $y
+    | "only_in_payload=\([$x | keys[] | select(. as $k | $y | has($k) | not)] | fmt)"
+      + " only_in_theme=\([$y | keys[] | select(. as $k | $x | has($k) | not)] | fmt)"
+      + " changed=\([$x | keys[] | select(. as $k | ($y | has($k)) and $x[$k] != $y[$k])] | fmt)"
+  ' 2>/dev/null)" || keys=""
+  echo "note=verify_diff ${keys:+$keys }diff_lines=${n:-0}" >&2
 }
 
 # verify_applied <engine> <theme-id> <reader-fn>: reader-fn <dest> writes the theme's current
@@ -388,6 +415,7 @@ verify_applied() {
     return 2
   fi
   echo "error=not_applied engine=$engine theme=$theme file=$FILE"
+  verify_diff_note
   # No pre-image is read before the write, so the ONE proven statement is "the theme does not
   # serve the payload" — claiming the previous content survived would waive the restore step on
   # a theme that may well have changed.

@@ -177,9 +177,13 @@ stderr carries `note=` lines and always ends with the summary
 | 5 | curl transport failure | `curl_transport_failed` |
 
 A **404**, and a `200` whose `nodes.<id>` is null or absent, are both `node_not_found`: Figma
-answers 200 with a null node for an id that does not exist in that file. A **429** is retried
-**once**, honouring `Retry-After` clamped into 1–60 s (`Retry-After: 0` means "retry now", an hour
-means "run this later, not now"); a second 429 on the node request is `error=rate_limited`, exit 4.
+answers 200 with a null node for an id that does not exist in that file. It is not retryable — no
+flag changes the answer for the same link; a fresh link (select the layer, Copy link) is the only
+remedy. A 404 can also mean the file itself is gone — `--probe` tells them apart. A `2xx` body
+that is empty or not JSON is `figma_request_failed http=<code>` (a proxy or transport artifact;
+re-run once). A **429** is retried **once**, honouring `Retry-After` clamped into 1–60 s
+(`Retry-After: 0` means "retry now", an hour means "run this later, not now"); a second 429 on the
+node request is `error=rate_limited`, exit 4.
 
 Runs are **idempotent**. A `<key>-<node>.nodes.json` already on disk that is non-empty valid JSON
 carrying the node is `cached` — no request — and the same rule covers the variables file and a
