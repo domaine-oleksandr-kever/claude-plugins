@@ -160,7 +160,11 @@ notes"**, agent-only, never posted: **For human eyes**, **Needs data**, **Develo
 **Observations** (never a verdict), **Route**, and last **Deployed** — one short line (theme · marker ·
 PR link), the developer's trace, not reading matter for the QA engineer. Laid out for scanning: each
 label is its own paragraph, blank line before and after; one bullet per row or fact beneath it, two
-sentences a bullet at most; an empty label stays as `**Needs data:** none`. A **Needs data** row is a
+sentences a bullet at most; an empty label stays as `**Needs data:** none` — except **For human eyes**,
+which is never `none`: a screenshot proves what the agent saw, the engineer still looks with their own
+eyes, so when no row was left for human eyes the label carries the hands-on pass instead — one bullet
+per row: the exact product / collection / page the run used, as an absolute URL, then the clicks to the
+result (add to bag, open the drawer, …), then what to look at (`REFERENCE.md` → Block 2). A **Needs data** row is a
 recipe the engineer follows click by click — admin URL, the section / block / setting or metafield as
 the editor names it, the exact value, Save, the page URL — read from the theme's schemas, templates
 and locales, never a diagnosis of what the store lacks (`REFERENCE.md` → Block 2). Every **For human eyes**

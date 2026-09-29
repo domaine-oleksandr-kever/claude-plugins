@@ -382,8 +382,12 @@ brief in its own order whatever each row came from, and `NN` in a screenshot pat
   hover and transition feel, copy tone, animation timing, anything where the brief would be guessing.
   Its Block 2 line carries the **absolute page URL of every page where the person checks it**, built
   per Theme under test and page URLs, one per page when the row spans several, so the engineer clicks
-  once and lands on the theme under test. The forbidden forms listed there bind this line: no
+  once and lands on the theme under test. The URL names the **fixture the run used** — the product,
+  collection or page the agent opened — and a result that lives in the cart, checkout, a drawer or a
+  modal adds the clicks from that fixture to the result (`add to bag`, `open the cart drawer`), so the
+  engineer repeats the run instead of hunting for a product that shows it. The forbidden forms listed there bind this line: no
   `PR preview URL`, no `(in preflight.md)`, no `see Deployed line`, no path without scheme and domain.
+  The label is **never `none`** (Block 2 → For human eyes is never empty).
 - **`not-executable: access`** marks a derived break-it or data row whose hostile value needs a write
   this read-only run doesn't have (`../../references/break-it-qa.md` → Read-only store ≠ reduced
   mode). Derived, reported, never silently dropped and never "pass".
@@ -419,6 +423,10 @@ by the agent at the viewports named._
 **For human eyes**
 - row <n> — <what a person has to judge> — <page URL as opened, per Theme under test and page URLs,
   preview params and all>[, <second page URL as opened>]
+- hands-on pass — row <n> — open <URL of the exact page the run started the row on — the product /
+  collection / page it used, as opened>, <the clicks the run made: add to bag, open the cart
+  drawer, apply code `<value>`, …> — look at <what the row proves>   ← when no row is left for
+  human eyes: one bullet per row, never `none`
 
 **Needs data**
 - row <n> — <what is missing, one line>
@@ -448,6 +456,24 @@ it) gets one bullet per fact, never one long sentence chain; a bullet is two sen
 label with nothing under it stays as one line, `**Needs data:** none`, so the reader still sees every
 heading. Labels never run into each other on adjacent lines — markdown folds adjacent lines into one
 paragraph, and the brief then reads as a wall of text. **Route** and **Deployed** are single lines.
+
+**For human eyes is never empty.** A screenshot proves what the agent saw at one moment on one
+viewport; the preflight precedes the QA engineer's sign-off and never replaces it, so the brief
+always hands the person somewhere to click. When rows were judged `for human eyes`, they are the
+bullets. When none were — every row passed on evidence — the label carries the **hands-on pass**
+instead: one bullet per row, `hands-on pass — row <n> — open <URL>, <clicks> — look at <what the
+row proves>`. The URL is the **exact fixture the run used** — the product, collection, page or
+variant the agent opened for that row, as opened (Theme under test and page URLs, preview params
+and all) — never the storefront root, never a page where the result only appears after the engineer
+finds a fixture of their own. A row seen in the cart, checkout, a drawer or a modal starts at the
+product the run added and spells the clicks that get there (`add to bag`, `open the cart drawer`,
+`apply code SAVE10`), the same way a Needs data row is a recipe: the engineer clicks the link, repeats
+the clicks and sees the result, with no searching. Rows that share a fixture and a path collapse into
+one bullet naming both rows. `**For human eyes:** none`, `nothing to check`, `all rows verified` and
+any wording that tells the engineer they need not look are forbidden forms. The one brief without this label's bullets is the **Block** for `change not on theme` — there
+is nothing on that theme to look at, and Route already sends the engineer elsewhere. The batch
+table's **For human** column still counts only the rows judged `for human eyes`; the hands-on pass
+does not raise it.
 
 **A Needs data row is a recipe, not a diagnosis.** The QA engineer reads it and provisions the
 fixture without looking anything up: "the store has no card group on a dark scheme with a primary
