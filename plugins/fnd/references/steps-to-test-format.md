@@ -42,7 +42,7 @@ recipe and the expectations all live in item 4.
 1. **Theme:** <as above — store, theme, how to open it>.
 2. **Why the bug happened:** <root cause in terms the tester can observe, 1–2 sentences>.
 3. **What was changed to fix it:** <the change in plain terms, new limits / values; a setting by its verbatim editor label>.
-4. **What to expect:** on `<path>` (admin: <editor route>), <the data / viewport / locale that used to trigger it>; <what it does now>; <the new boundary and what happens past it>; <what a regression looks like>. <Touches a setting or needs data → item 2's recipe + that setting's blank / overflow / boundary expectation.>
+4. **What to expect:** on the <role> product, e.g. `<path>` (<the counts / values that made it trigger>) (admin: <editor route>), <the viewport / locale that used to trigger it>; <what it does now>; <the new boundary and what happens past it — on a second `e.g.` handle with its properties when another product shows it>; <what a regression looks like>. Handles are examples — if one is missing on your store, use any product with the same properties and say which one you used. <Touches a setting or needs data → item 2's recipe + that setting's blank / overflow / boundary expectation.>
 ```
 
 ## Item-by-item rules
@@ -79,9 +79,11 @@ and raise it in the presentation — marked, never dropped. Sub-bullets, one act
 - **Restore** — a store-wide mutation ends with its restore in the same bullet (`(restore: Activate)`);
   per-theme settings need none.
 - **Fixtures** — handle plus the property that makes it right: `e.g. /products/studio-fix-fluid (40+ shades,
-  in stock)`; the handle is the example, the properties the requirement. Once, after the first handle:
-  `Handles are examples — if one is missing on your store, use any product with the same properties and say
-  which one you used.`
+  in stock)`; the handle is the example, the properties the requirement. Once, after the first handle, as its
+  own sentence: `Handles are examples — if one is missing on your store, use any product with the same
+  properties and say which one you used.` Never folded into a parenthesis behind one product, where it reads
+  as a remark on that product instead of a rule for all of them. Both templates: on Bug item 4 the trigger
+  product and the boundary product are each an `e.g.` handle carrying the counts that make them trigger.
 - **Created in setup** — an entity that exists only once QA makes it (an issued gift card, a discount) is
   named by its role, with where its value appears and whether it shows once. A state only time reaches is
   a dated instruction (`**Expiration date** = today, check it the next calendar day`); the steps needing it
@@ -167,8 +169,8 @@ and anything else the General one.
   steps that build it.
 - Item 2 names every page by path, the section as the admin sees it, and every entity the walk-through
   starts from.
-- Every handle carries `e.g.` plus the properties a stand-in must share, the substitution rule appears once,
-  and no step names a handle instead of its role.
+- Every catalog handle, in either template, carries `e.g.` plus the properties a stand-in must share; the
+  substitution rule appears once, as its own sentence; no step names a handle instead of its role.
 - Every AC is exercised by a step, or discharged in n+2 in the AC's own words — never simply absent.
 - Every step that changes or checks state carries its expectation inline, concrete where observable.
 - Every new or changed setting has its blank / overflow / boundary expectation somewhere; every edge case is
@@ -181,5 +183,5 @@ and anything else the General one.
   there genuinely are none; items 1, 2 and n+2 are complete, nothing cut to a word count — this field plus
   admin access is enough.
 
-On the **Bug template** these apply through item 4 — the location, the trigger data / viewport / locale, the
-setup recipe, a new setting's boundary expectation, what a regression looks like.
+On the **Bug template** these apply through item 4 — the location, the trigger data / viewport / locale (the
+trigger and boundary products as `e.g.` handles with their properties), the setup recipe, a new setting's boundary expectation, what a regression looks like.

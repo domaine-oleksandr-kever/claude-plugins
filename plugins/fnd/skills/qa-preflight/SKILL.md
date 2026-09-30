@@ -106,7 +106,8 @@ developer-side counterpart. Output: a brief — where to test, what is verified,
 Read `REFERENCE.md` → Unlock and deployed gate first — mechanics, snippets, target-page precedence,
 failure branches. Per store, one **isolated context**: `new_page` → `/password` → submit the password →
 confirm with a read that the page is no longer the password gate → open the **target page** (precedence
-there; never guess a handle) at the page URL built per `REFERENCE.md` → Theme under test and page URLs
+there; never guess a handle — an example handle the store 404s on gets a stand-in matched on its stated
+properties, `REFERENCE.md` → Stand-in fixtures) at the page URL built per `REFERENCE.md` → Theme under test and page URLs
 (live: the plain store URL; a preview link: the engineer's link with the target path swapped in, every
 param kept) → read `Shopify.theme`. The expected reading follows their Phase 2 answer: live → `role`
 `main`, and the id read **is** the theme under test; a preview link → the `preview_theme_id` of their
@@ -135,6 +136,10 @@ In the numbered shape item 1 is the primary source for Phase 2.3's "theme the **
 PR's preview stays never offered), item 2's setup / data sub-bullets feed **Needs data**, never
 rows, and the trailing `n+2` context / out-of-scope lines never do (`REFERENCE.md` → Rows from
 Steps to test).
+A catalog handle Steps to test gives as `e.g.` is an example the store may lack: the run finds a stand-in
+with the stated properties itself — storefront product JSON or an Admin API read, never a guess — tests on
+it and names the swap in **Observations**; `needs data` only when nothing matches (`REFERENCE.md` → Stand-in
+fixtures).
 Steps to test empty → derive them from the AC and record `Developer gaps: Steps to test empty`.
 Both empty (field empty, nothing AC-shaped in the Description) → **Block**, reason `no acceptance criteria to verify`, Route back to the
 developer — never invent rows from the diff.

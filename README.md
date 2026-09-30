@@ -1065,7 +1065,11 @@ Needs-data recipes for the engineer, never rows the run performs — in either f
 list new tickets carry or the headed scenarios older ones still hold) plus each AC at desktop (`1440x900`) and mobile (`375x812`) with a screenshot
 each, and writes the brief
 in Domaine's Jira house style — a copy-paste block for the ticket plus agent-only preflight
-notes whose for-human-eyes rows carry the absolute page URLs the run opened, one per page. It is
+notes whose for-human-eyes rows carry the absolute page URLs the run opened, one per page. A
+product or collection Steps to Test names as an example (`e.g. /products/…`, with its properties)
+that the QA store lacks is not a Needs-data row: the run finds a stand-in with the same stated
+properties — the storefront's product JSON, or an Admin API read when the repo has credentials —
+tests on it, and names the swap in Observations. It is
 read-only toward Jira, Admin and the storefront; posting the block as a comment needs an explicit
 yes. Store facts come from a per-developer registry at `~/.config/domaine/qa-stores.json` (dir
 `0700`, file `0600`), managed by `plugins/fnd/scripts/qa-stores.cjs`:

@@ -270,7 +270,7 @@ and `id: null` below is the `Shopify`-undefined row of the table.
    | `role: "main"`, whatever `id` reads | the expected reading when the engineer chose **live** — the published theme *is* the theme under test: record the `id` and `name` read as the theme under test. Nothing is compared against any other id |
    | `id` matches the engineer's theme, `role: "unpublished"` | the expected reading when they gave a **preview link** — it put us on the theme under test |
    | a preview link, but `role: "main"` — the id read is the published theme's | their link does not put us on that theme — an id that no longer exists renders the published theme. Say so in **Observations**, ask once (paste another preview link, or test live), then rerun the gate; no answer → **Block**, reason `theme <id> not reachable`. The run never continues on a theme the engineer did not choose; this row wins over `id` differs below |
-   | `id: null` | not a Shopify storefront render (a 404, a challenge page, a redirect to the password page): treat as a mismatch |
+   | `id: null` | not a Shopify storefront render (a 404, a challenge page, a redirect to the password page): treat as a mismatch — except a 404 on an example handle from Steps to test, which is a missing fixture: pick a stand-in (Stand-in fixtures) and rerun the gate on it |
    | `id` differs from the engineer's preview theme and the row above does not apply | re-navigate **once** (a first hit can land before the preview cookie is set); still different → **Block**, reason `theme <id> not reachable`, naming the theme the engineer's link points at (the id may be wrong or the theme deleted — say which store answered and what `Shopify.theme` returned) |
 
    **Target page.** Precedence, in order: a URL or path in Steps to test → a path in the ticket —
@@ -279,7 +279,10 @@ and `id: null` below is the `Shopify`-undefined row of the table.
    never its Preview URL or the deep-links under it (discarded at PR discovery, so no path is taken
    from them) → the template the diff touches (`templates/<name>.json` → that template's storefront
    path; the diff comes from the call in PR discovery) → ask the QA engineer. Never guess a handle —
-   a gate passed on the home page proves nothing about a PDP change. This precedence decides the
+   a gate passed on the home page proves nothing about a PDP change. A handle Steps to test gives as
+   an example (`e.g. /products/…`) that the store answers 404 on is a missing fixture, never a wrong
+   theme: swap in a stand-in matched on its stated properties (Stand-in fixtures below) and run the
+   gate there — a match on properties is not a guess. This precedence decides the
    **path**; Theme under test and page URLs decides the URL around it.
 3. **Marker check — on the chosen theme only.** The marker is a string the change introduces: from
    the ticket when it gives one, else derived from the PR diff (the call in PR discovery) — a class, a
@@ -350,6 +353,53 @@ least one walk-through step, so the two sets usually coincide — check which AC
 a row only for an AC no step reaches; never list the same check twice. Row numbers run through the
 brief in its own order whatever each row came from, and `NN` in a screenshot path is that number.
 
+## Stand-in fixtures
+
+Steps to test names catalog fixtures as examples — `e.g. /products/studio-fix-fluid (40+ shades, in
+stock)`, the substitution sentence once — because the store QA tests on need not be the catalog the change
+was built against (`../../references/steps-to-test-format.md` → Fixtures). The properties are the
+requirement, the handle a suggestion. So a product / collection handle the store does not carry is a
+**missing example — never a wrong theme, and not yet `needs data`**: this run finds the stand-in, the way
+the field tells the QA engineer to.
+
+1. **Confirm it is missing** — on the unlocked storefront, `https://<domain>/products/<handle>.js`
+   (a collection: `/collections/<handle>/products.json`) answers 404. A page that renders is a gate
+   question (Unlock and deployed gate), not this one.
+2. **Find candidates, read-only, first source that answers wins:**
+   - storefront JSON: `https://<domain>/collections/all/products.json?limit=250`, then `&page=2` … until
+     `products` comes back empty — per product `handle`, `variants` (count, `available`, `price`),
+     `options` (a shade / colour option), `tags`, `product_type`, `vendor`;
+     `…/collections/<handle>/products.json` narrows to a collection the field names;
+   - `https://<domain>/search/suggest.json?q=<word>&resources[type]=product&resources[limit]=10` when the
+     property is a word — a tag, a type, a title fragment;
+   - Admin API **reads** via `node <plugin root>/scripts/shopify-admin-gql.sh --query <file.graphql>`
+     when the repo carries credentials — the only read that filters on a metafield
+     (`products(first: 50, query: "status:active") { nodes { handle metafield(namespace: …, key: …) {
+     value } templateSuffix } }`) or a template suffix.
+   Never the Admin UI, never a write, never a product picked because it loaded first.
+3. **Match every stated property** — variant / shade count, stock (`available` on the variant the row
+   uses), the metafield set or empty, the tag, the template, a second grouping the field names (colour
+   families: read the option values, or the candidate's page). A property no read exposes is checked by
+   opening the candidate's page and looking for what the row expects of the fixture — that is the row's
+   own test, so a candidate that lacks it is discarded, not failed. The field's substitution sentence
+   binds the match: "same properties", not "similar product".
+4. **Use it wherever the example was used** — the gate's target page, every row that names the fixture
+   by its role, the hands-on-pass / **For human eyes** URLs (the exact fixture the run used). Record it
+   once, in **Observations**: `stand-in: /products/<used> for e.g. /products/<named> (<properties
+   matched>)`. One line per example handle the store lacked; the Block 1 evidence names the stand-in's
+   URL, never the missing handle.
+5. **Nothing matches** — every candidate misses a property, or the storefront JSON answers 404 / empty
+   and no Admin read is available — then the row is `needs data: <what, where>`, its Block 2 recipe
+   creates or edits a product with the stated properties (A Needs data row is a recipe), and the recipe's
+   first line says what was searched: `searched 412 products for 5+ shades in 2+ families: none`.
+
+Only catalog fixtures are substituted — products, collections, a page by handle. A metafield
+`namespace.key`, a metaobject type or entry, a template name, a discount code, a section or block name is
+what the change is built on: absent, it is a **Developer gap** or `needs data`, never a stand-in. A handle
+written without `e.g.` — a headed pre-2026-09 field, a hand-written one — is read the same way: its
+properties are the ones its own bullet states, else what the rows expect the fixture to show; with
+neither there is nothing to match on, and the row is `needs data`, naming the missing handle.
+
 ## Evidence rules
 
 - **Every row gets both viewports** — the two `emulate` strings under Mechanics above, not a
@@ -374,7 +424,8 @@ brief in its own order whatever each row came from, and `NN` in a screenshot pat
   call on their own account, never this skill's.
 - **`needs data: <what, where>`** replaces a verdict when the fixture the row needs is absent (no
   product with the required metafield, no discount code, empty metaobject, no block on a dark colour
-  scheme). Its Block 2 row is a **recipe** the QA engineer follows click by click — admin URL, the
+  scheme) — and, for a catalog fixture Steps to test named as an example, only after a stand-in
+  search found nothing (Stand-in fixtures). Its Block 2 row is a **recipe** the QA engineer follows click by click — admin URL, the
   section / block / setting or metafield as the editor names it, the exact value, Save, the page URL
   to reopen — never a one-line diagnosis of what the store lacks: Block 2 → A Needs data row is a
   recipe.
@@ -441,6 +492,8 @@ by the agent at the viewports named._
 
 **Observations**
 - <one fact per bullet — anything true but not derivable from the ticket, never a verdict>
+- stand-in: `/products/<used>` for e.g. `/products/<named>` (<properties matched>)   ← one per example
+  handle the store lacked (Stand-in fixtures)
 
 **Route:** ready for hands-on QA | back to developer | back to the QA engineer's theme choice / deploy
 owner | nothing to test in the theme → deploy owner
@@ -463,7 +516,8 @@ always hands the person somewhere to click. When rows were judged `for human eye
 bullets. When none were — every row passed on evidence — the label carries the **hands-on pass**
 instead: one bullet per row, `hands-on pass — row <n> — open <URL>, <clicks> — look at <what the
 row proves>`. The URL is the **exact fixture the run used** — the product, collection, page or
-variant the agent opened for that row, as opened (Theme under test and page URLs, preview params
+variant the agent opened for that row — the stand-in, when one replaced an example handle — as
+opened (Theme under test and page URLs, preview params
 and all) — never the storefront root, never a page where the result only appears after the engineer
 finds a fixture of their own. A row seen in the cart, checkout, a drawer or a modal starts at the
 product the run added and spells the clicks that get there (`add to bag`, `open the cart drawer`,
