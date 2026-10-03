@@ -630,6 +630,37 @@ describe('command and pane', () => {
     }
   })
 
+  t('Pane: ◌ dim for an unchecked row above the frontier, digest picks the frontier row', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ELC-1591', ['- [x] Read the ticket', '- [ ] Owner: reinstall', '- [x] Branch', '- [ ] Preview themes', '- [ ] QA'].join('\n'))
+    await start($)
+    const progress = (await peek($)).progress
+    expect(digestText(progress.workId, progress)).toBe('ELC-1591 2/5 ▶ Preview themes')
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount({ plugin: 'fnd', surface, component: 'Pane', requestId: PANE, props: PANE_PROPS as any })
+      const waiting = await ui.find({ type: 'Text', text: '◌ Owner: reinstall' })
+      expect(waiting?.props).toMatchObject({ dimColor: true })
+      expect(waiting?.props.bold).toBeFalsy()
+      expect((await ui.find({ type: 'Text', text: '▶ Preview themes' }))?.props).toMatchObject({ bold: true })
+      expect(await ui.find({ type: 'Text', text: '☐ QA' })).toBeTruthy()
+      await ui.unmount()
+    }
+  })
+
+  t('Pane fallback: an unchecked row above a trailing checked row stays ☐, not ◌', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ELC-1591', ['- [x] a', '- [ ] b', '- [ ] c', '- [x] d'].join('\n'))
+    await start($)
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount({ plugin: 'fnd', surface, component: 'Pane', requestId: PANE, props: PANE_PROPS as any })
+      expect((await ui.find({ type: 'Text', text: '▶ b' }))?.props).toMatchObject({ bold: true })
+      const todo = await ui.find({ type: 'Text', text: '☐ c' })
+      expect(todo?.props.dimColor).toBeFalsy()
+      expect(await ui.find({ type: 'Text', text: /^◌/ })).toBeFalsy()
+      await ui.unmount()
+    }
+  })
+
   t('Pane with no workspace: one line', async ($, on) => {
     world(on)
     await start($)

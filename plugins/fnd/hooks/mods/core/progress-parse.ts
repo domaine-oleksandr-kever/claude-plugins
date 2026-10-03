@@ -7,26 +7,31 @@ const NOTES_TAIL = 3
 
 export type ParsedProgress = { done: number; total: number; current: string | null; rows: FndRow[] }
 
-/** Checkbox rows; the first unchecked one is `current`, cut to 28 code points plus `…`. */
+/**
+ * Checkbox rows. `current` is the first unchecked row below the last checked one (the frontier),
+ * else the first unchecked row; it is cut to 28 code points plus `…`. Unchecked rows above the
+ * frontier are `waiting`, the rest `todo`.
+ */
 export function parseProgress(md: string): ParsedProgress {
   const rows: FndRow[] = []
-  let done = 0
-  let current: string | null = null
   for (const line of md.split(/\r?\n/)) {
     const m = ROW.exec(line)
-    if (!m) continue
-    const text = (m[2] ?? '').trim()
-    if (m[1] !== ' ') {
-      done++
-      rows.push({ mark: 'done', text })
-    } else if (current === null) {
-      current = cut(text, CURRENT_MAX)
-      rows.push({ mark: 'current', text })
-    } else {
-      rows.push({ mark: 'todo', text })
-    }
+    if (m) rows.push({ mark: m[1] === ' ' ? 'todo' : 'done', text: (m[2] ?? '').trim() })
   }
-  return { done, total: rows.length, current, rows }
+  const lastDone = rows.map(r => r.mark).lastIndexOf('done')
+  let at = rows.findIndex((r, i) => i > lastDone && r.mark === 'todo')
+  if (at === -1) at = rows.findIndex(r => r.mark === 'todo')
+  rows.forEach((r, i) => {
+    if (i < at && r.mark === 'todo') r.mark = 'waiting'
+  })
+  const row = rows[at]
+  if (row) row.mark = 'current'
+  return {
+    done: rows.filter(r => r.mark === 'done').length,
+    total: rows.length,
+    current: row ? cut(row.text, CURRENT_MAX) : null,
+    rows,
+  }
 }
 
 /** The last three `- ` bullet lines of notes.md. */

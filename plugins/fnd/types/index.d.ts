@@ -15,7 +15,8 @@ export type FndCache = {
   isCold: boolean
 }
 
-export type FndRow = { mark: 'done' | 'current' | 'todo'; text: string }
+/** `waiting`: unchecked above the `current` row (waits on someone, not the queue). */
+export type FndRow = { mark: 'done' | 'current' | 'waiting' | 'todo'; text: string }
 
 /** The resolved task workspace digest, or `{ workId: null }` when no workspace answers. */
 export type FndProgress =

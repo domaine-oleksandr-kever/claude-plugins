@@ -1658,7 +1658,7 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 | ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`), and the next response replaces that with a measured reading. Mid-turn it refreshes on a 30 s tick. |
 | rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
 | cost | `cost $12.40` | Opt-in: drawn only with `FND_BAND_COST=1` in the session's environment. What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
-| digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the first unchecked row (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet. Hidden while the progress pane is open, and when no workspace resolves. |
+| digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the current row (cut to 28 characters): the first unchecked row below the last checked one, else the first unchecked row; `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet. Hidden while the progress pane is open, and when no workspace resolves. |
 | Compact | `[ Compact ]`, `c: Compact` | Hidden at ≤ 30 % context and while a turn runs. From 31 % it is drawn dim; from 80 % it is `[ Compact ]` in the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). |
 | Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
 | Log | `[ Log ]`, `l: Log` | Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
@@ -1728,7 +1728,8 @@ ELC-1591 · feature/ELC-1591-preview-themes · 3/5
 ```
 
 The header is the work id · branch · checked/total. Below it come every `progress.md` row (✓ done
-dimmed, ▶ the first unchecked one in bold, ☐ the rest) and the last three `- ` lines of
+dimmed, ▶ the digest's current row in bold, ◌ unchecked rows above ▶ dimmed — they
+wait on someone, not the queue — ☐ the rest) and the last three `- ` lines of
 `notes.md`, dimmed. A workspace without `progress.md` shows its id, the branch, one dim line
 `no progress.md yet — /fnd:save-task-context` and the notes tail. With no workspace the pane is
 one line: `no task workspace — /fnd:save-task-context`.

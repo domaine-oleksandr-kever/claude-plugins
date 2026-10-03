@@ -20,6 +20,7 @@ const FRESH_MS = 12 * 60 * 60_000
 const CHECKOUT = /\bgit\s+(checkout|switch|worktree)\b/
 const NO_WORKSPACE = 'no task workspace — /fnd:save-task-context'
 const NO_PROGRESS = 'no progress.md yet — /fnd:save-task-context'
+const GLYPH = { done: '✓', current: '▶', waiting: '◌', todo: '☐' } as const
 /** Prompt origins a person wrote; notifications, peers and schedules never set the conversation key. */
 const PERSON = new Set(['composer', 'bridge', 'sdk'])
 
@@ -302,8 +303,8 @@ export function registerProgress(on: On): void {
         {p.total === 0 ? <Text dimColor wrap="truncate-end">{NO_PROGRESS}</Text> : null}
         {p.rows.map((row, i) => (
           <Box key={`row-${i}`}>
-            <Text wrap="truncate-end" dimColor={row.mark === 'done'} bold={row.mark === 'current'}>
-              {`${row.mark === 'done' ? '✓' : row.mark === 'current' ? '▶' : '☐'} ${row.text}`}
+            <Text wrap="truncate-end" dimColor={row.mark === 'done' || row.mark === 'waiting'} bold={row.mark === 'current'}>
+              {`${GLYPH[row.mark]} ${row.text}`}
             </Text>
           </Box>
         ))}

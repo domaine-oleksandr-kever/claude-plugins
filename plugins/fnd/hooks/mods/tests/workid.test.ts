@@ -85,6 +85,25 @@ describe('progress parse', () => {
     expect(digestText('fnd-mods', p)).toBe('fnd-mods')
   })
 
+  test('frontier: an unchecked row above the last checked one waits, current is below it', () => {
+    const p = parseProgress(['- [x] a', '- [ ] Owner: reinstall cache', '- [x] b', '- [ ] Pilot E', '- [ ] Ship'].join('\n'))
+    expect(p.rows.map(r => r.mark)).toEqual(['done', 'waiting', 'done', 'current', 'todo'])
+    expect(p.done).toBe(2)
+    expect(digestText('fnd-mods', p)).toBe('fnd-mods 2/5 ▶ Pilot E')
+  })
+
+  test('frontier: no checked rows → the first unchecked row', () => {
+    const p = parseProgress('- [ ] a\n- [ ] b')
+    expect(p.rows.map(r => r.mark)).toEqual(['current', 'todo'])
+    expect(p.current).toBe('a')
+  })
+
+  test('frontier: trailing checked rows → falls back to the first unchecked row', () => {
+    const p = parseProgress('- [x] a\n- [ ] b\n- [ ] c\n- [x] d')
+    expect(p.rows.map(r => r.mark)).toEqual(['done', 'current', 'todo', 'done'])
+    expect(digestText('fnd-mods', p)).toBe('fnd-mods 2/4 ▶ b')
+  })
+
   test('notes tail = last three bullet lines', () => {
     const notes = ['## 1', '- one', '  - nested', '- two', 'prose', '- three', '- four  '].join('\n')
     expect(notesTail(notes)).toEqual(['- two', '- three', '- four'])
