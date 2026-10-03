@@ -1,8 +1,7 @@
-// MCP result slimming as a mod: host-stub replacement and the savings toast (FND_SLIM_TOAST=0 silences it).
+// MCP result slimming as a mod: host-stub replacement and the savings toast (FND_SLIM_TOAST=0 silences it,
+// FND_SLIM_TOAST_MS sets how long it stays).
 import type { On } from 'claude-code'
-import { buildHookRun, omit, parseHookOut, slimFigureIn, stubBytes, stubText } from './node-hook.ts'
-
-const TOAST_MS = 10_000 // the savings figure; a click takes it off, the pointer over it holds it
+import { buildHookRun, omit, parseHookOut, slimFigureIn, stubBytes, stubText, toastMs } from './node-hook.ts'
 
 export function registerSlim(on: On): void {
   on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {
@@ -17,7 +16,9 @@ export function registerSlim(on: On): void {
       if (!isMain) return r
       const limit = stubBytes(await $.env.get('FND_MCP_SLIM_STUB_BYTES'))
       const figure = slimFigureIn(r.result, limit, r.text)
-      if (figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') $.ui.toast(figure, { timeoutMs: TOAST_MS })
+      if (figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
+        $.ui.toast(figure, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS')) })
+      }
       return r
     }
 
@@ -41,7 +42,7 @@ export function registerSlim(on: On): void {
     const result = hso?.updatedMCPToolOutput ?? hso?.updatedToolOutput
     if (result === undefined) return r
     if (isMain && typeof out?.systemMessage === 'string' && out.systemMessage && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
-      $.ui.toast(out.systemMessage, { timeoutMs: TOAST_MS })
+      $.ui.toast(out.systemMessage, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS')) })
     }
     // A fresh object: returning `r` itself would make core reuse its own messages verbatim.
     return r.context?.length ? { result, context: r.context } : { result }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { buildHookRun, omit, parseHookOut, slimFigure, slimFigureIn, stubBytes, stubText } from '../fnd/node-hook.ts'
+import { buildHookRun, omit, parseHookOut, slimFigure, slimFigureIn, stubBytes, stubText, toastMs } from '../fnd/node-hook.ts'
 
 const run = (stdout: string, over: Partial<{ exitCode: number; isStdoutTruncated: boolean }> = {}) => ({
   exitCode: 0,
@@ -131,6 +131,17 @@ describe('slimFigureIn', () => {
     expect(slimFigureIn(quoted, LIMIT)).toBeNull()
     expect(slimFigureIn([{ type: 'text', text: 'y'.repeat(34_000) }, { type: 'text', text: SLIM }], LIMIT)).toBeNull()
     expect(slimFigureIn(quoted, 64_000)).toBe(STATS)
+  })
+})
+
+describe('toastMs', () => {
+  test('default 5 s, floor 1 s, invalid values', () => {
+    expect(toastMs(null)).toBe(5000)
+    expect(toastMs('')).toBe(5000)
+    expect(toastMs('10s')).toBe(5000)
+    expect(toastMs('0')).toBe(5000)
+    expect(toastMs(' 10000 ')).toBe(10_000)
+    expect(toastMs('200')).toBe(1000)
   })
 })
 

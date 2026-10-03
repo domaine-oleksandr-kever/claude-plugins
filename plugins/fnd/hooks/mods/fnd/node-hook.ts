@@ -82,6 +82,15 @@ export function slimFigure(text: string): string | null {
   return m ? m[0] : null
 }
 
+const TOAST_MS_DEFAULT = 5000
+const TOAST_MS_MIN = 1000
+
+/** How long a savings toast stays, from a raw FND_SLIM_TOAST_MS: a whole number of ms, floored at 1 s; invalid → 5 s. */
+export function toastMs(raw: string | null | undefined): number {
+  const n = Number(String(raw ?? '').trim())
+  return Number.isFinite(n) && n > 0 ? Math.max(Math.round(n), TOAST_MS_MIN) : TOAST_MS_DEFAULT
+}
+
 // hooks/mcp-slim.cjs STUB_BYTES_DEFAULT and STUB_CAP.
 const STUB_BYTES_DEFAULT = 32768
 const STUB_CAP = 1200

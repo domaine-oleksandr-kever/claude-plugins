@@ -81,7 +81,7 @@ describe('rewrite', () => {
     const { runs, toasts, bottom } = world(on)
     await submit($, BIG)
     expect(bottom).toEqual([{ text: RW.text, context: [RW.context], turnId: undefined, wait: false }])
-    expect(toasts).toEqual([{ text: RW.summary, timeoutMs: 10_000 }])
+    expect(toasts).toEqual([{ text: RW.summary, timeoutMs: 5000 }])
     expect(runs.length).toBe(1)
     const [run] = runs
     expect(run.argv[0]).toBe('node')
@@ -172,6 +172,12 @@ describe('fallback to the typed text', () => {
       expect(toasts).toEqual([])
     })
   }
+
+  test('FND_SLIM_TOAST_MS sets how long the toast stays', async ($, on) => {
+    const { toasts } = world(on, ok(), { env: { FND_SLIM_TOAST_MS: '10000' } })
+    await submit($, BIG)
+    expect(toasts).toEqual([{ text: RW.summary, timeoutMs: 10_000 }])
+  })
 
   test('FND_SLIM_TOAST=0 → the rewrite still applies, no toast', async ($, on) => {
     const { runs, toasts, bottom } = world(on, ok(), { env: { FND_SLIM_TOAST: '0' } })

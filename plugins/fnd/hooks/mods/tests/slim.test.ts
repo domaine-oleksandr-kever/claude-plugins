@@ -71,7 +71,7 @@ describe('C1 host-stub replacement', () => {
       cwd: '/repo',
       session_id: SID,
     })
-    expect(toasts).toEqual([{ text: STATS, timeoutMs: 10_000 }])
+    expect(toasts).toEqual([{ text: STATS, timeoutMs: 5000 }])
   })
 
   test('in a subagent: the same answer, no toast, stdin session_id = the session id', async ($, on) => {
@@ -179,7 +179,7 @@ describe('C2-toast (classic hook slimmed it beneath)', () => {
     const r = await $.tool.call({ tool: TOOL } as any)
     expect(r.result).toBe(SLIMMED)
     expect(runs.length).toBe(0)
-    expect(toasts).toEqual([{ text: STATS, timeoutMs: 10_000 }])
+    expect(toasts).toEqual([{ text: STATS, timeoutMs: 5000 }])
   })
 
   test('read from the result blocks when core gives no text', async ($, on) => {
@@ -195,6 +195,12 @@ describe('C2-toast (classic hook slimmed it beneath)', () => {
     expect(toasts.length).toBe(0)
   })
 
+  test('FND_SLIM_TOAST_MS sets how long the figure stays', async ($, on) => {
+    const { toasts } = setup(on, { result: SLIMMED, text: SLIMMED }, undefined, { FND_SLIM_TOAST_MS: '10000' })
+    await $.tool.call({ tool: TOOL } as any)
+    expect(toasts).toEqual([{ text: STATS, timeoutMs: 10_000 }])
+  })
+
   test('FND_SLIM_TOAST=0 → the figure is not toasted', async ($, on) => {
     const { runs, toasts } = setup(on, { result: SLIMMED, text: SLIMMED }, undefined, { FND_SLIM_TOAST: '0' })
     expect((await $.tool.call({ tool: TOOL } as any)).result).toBe(SLIMMED)
@@ -206,7 +212,7 @@ describe('C2-toast (classic hook slimmed it beneath)', () => {
     const big = `${'x'.repeat(34_000)}\n${SLIMMED}`
     const { toasts } = setup(on, { result: big, text: big }, undefined, { FND_MCP_SLIM_STUB_BYTES: '65536' })
     await $.tool.call({ tool: TOOL } as any)
-    expect(toasts).toEqual([{ text: STATS, timeoutMs: 10_000 }])
+    expect(toasts).toEqual([{ text: STATS, timeoutMs: 5000 }])
   })
 
   test('the stats line and the handle in different blocks → no toast', async ($, on) => {

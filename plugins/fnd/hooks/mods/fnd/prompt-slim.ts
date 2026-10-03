@@ -1,10 +1,9 @@
 // Pasted JSON as a mod: prompt-json-guard.cjs --from-mod spills each big blob and replaces it in place instead of blocking the prompt.
 import type { On } from 'claude-code'
-import { buildHookRun, parseHookOut } from './node-hook.ts'
+import { buildHookRun, parseHookOut, toastMs } from './node-hook.ts'
 
 const PROMPT_MIN = 10240 // prompt-json-guard.cjs's gate in UTF-8 bytes (layout-assertions pins it); one UTF-16 unit is at most 3 of them
 const RUN_MS = 20_000
-const TOAST_MS = 10_000 // as slim.ts: the two figures stack when both fire
 const CONTEXT_MAX = 100_000 // past this the engine gives the model a head and a path, not the line
 
 type Rewrite = { text: string; context: string; summary: string }
@@ -34,7 +33,7 @@ export function registerPromptSlim(on: On): void {
     const r = await next({ ...e, text: rw.text, context: [...(e.context ?? []), rw.context] })
     // After next: a failing env read must not turn the accepted prompt into an error.
     if (r.drop === undefined && (await $.env.get('FND_SLIM_TOAST').catch(() => undefined)) !== '0') {
-      $.ui.toast(rw.summary, { timeoutMs: TOAST_MS })
+      $.ui.toast(rw.summary, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS').catch(() => undefined)) })
     }
     return r
   })
