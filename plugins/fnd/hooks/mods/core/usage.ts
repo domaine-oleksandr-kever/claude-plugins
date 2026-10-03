@@ -4,6 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import type { FndUsage } from '../../../types'
 import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
+import { lastRender } from './band.tsx'
 
 const TICK_MS = 30_000
 const ALARM_TOAST_MS = 8000
@@ -14,6 +15,7 @@ const usage = atom({ plugin: 'fnd', key: 'usage' } as const, USAGE_INIT)
 const model = atom({ plugin: 'fnd', key: 'model' } as const, null)
 const cache = atom({ plugin: 'fnd', key: 'cache' } as const, CACHE_INIT)
 const tick = atom({ plugin: 'fnd', key: 'tick' } as const, 0)
+const progress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 const rateAlarmed = atom({ plugin: 'fnd', key: 'rateAlarmed' } as const, false)
 
 type $ = EngineInterface
@@ -85,9 +87,21 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   on('command.run', { command: DEBUG_COMMAND.name }, async ($) => {
     const raw = await $.session.usage().catch(err => ({ error: String(err) }))
+    const root = await $.session.root().catch(err => `error: ${String(err)}`)
     const c = await read($, cache)
     const u = await read($, usage)
-    return { text: `fnd band debug\nusage(): ${JSON.stringify(raw)}\ncache: ${JSON.stringify(c)}\nusage atom: ${JSON.stringify(u)}\nnow: ${await $.clock.now()}` }
+    const p = await read($, progress)
+    const lines = [
+      'fnd band debug',
+      `usage(): ${JSON.stringify(raw)}`,
+      `cache: ${JSON.stringify(c)}`,
+      `usage atom: ${JSON.stringify(u)}`,
+      `progress: ${JSON.stringify(p === null ? null : { workId: p.workId, branch: p.branch })}`,
+      `root: ${root}`,
+      `render: ${JSON.stringify(lastRender)}`,
+      `now: ${await $.clock.now()}`,
+    ]
+    return { text: lines.join('\n') }
   })
 
   on('session.measure', async ($, e, next) => {

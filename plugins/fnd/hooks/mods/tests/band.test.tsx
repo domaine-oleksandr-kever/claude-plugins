@@ -173,13 +173,14 @@ describe('band', () => {
       expect(progress?.props.plain).toBeUndefined()
     })
 
-    test(`${surface}: a rule above the row; dim label, bold value; the cache hides in overage`, async ($, on) => {
+    test(`${surface}: a rule above the row (terminal only); dim label, bold value; the cache hides in overage`, async ($, on) => {
       world(on)
       await start($, surface)
       const ui = await mount($, surface, { bodyColumns: 120 })
       await mainTurn($)
       await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }])
-      expect(await textOf(ui, /^─+$/)).toBe('─'.repeat(120))
+      // The desktop frames its panel itself, so the band adds no rule there.
+      expect(await textOf(ui, /^─+$/)).toBe(isDesktop ? undefined : '─'.repeat(120))
       const value = await valueOf(ui, cacheRe)
       expect(strOf(value)).toBe('60m')
       expect(value?.props).toMatchObject({ bold: true })
@@ -356,10 +357,10 @@ describe('band', () => {
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      expect(await textOf(ui, /fable-5-1/)).toBe('fable-5-1')
+      expect(await textOf(ui, /fable-5-1/)).toBe(isDesktop ? '🤖 fable-5-1' : 'fable-5-1')
       w.model = 'claude-opus-5-5'
       await $.classic.PostModelSwitch(modelSwitch({ prompt_cache_warm: true }))
-      expect(await textOf(ui, /opus-5-5/)).toBe('opus-5-5')
+      expect(await textOf(ui, /opus-5-5/)).toBe(isDesktop ? '🤖 opus-5-5' : 'opus-5-5')
       expect(await textOf(ui, /fable-5-1/)).toBeUndefined()
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
     })
@@ -439,15 +440,24 @@ describe('band', () => {
       expect(cards.map(c => c.props.width)).toContain(cells(cacheCard))
     })
 
-    test(`${surface}: a narrow band keeps cache, ctx and Compact`, async ($, on) => {
+    test(`${surface}: a narrow band keeps cache, ctx and Compact; a desktop drops nothing`, async ($, on) => {
       world(on)
+      workspace(on)
       await start($, surface)
       await measure($, { window: 200_000, percent: 60 }, [{ kind: 'five_hour', percentUsed: 61 }])
       const ui = await mount($, surface, { bodyColumns: 30 })
       expect(await textOf(ui, cacheRe)).toBe(L('cache —'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 60%'))
       expect(await ui.find({ key: 'compact' })).toBeDefined()
-      expect(await textOf(ui, /fable-5-1|^5h|^⏳/)).toBeUndefined()
+      if (isDesktop) {
+        // Proportional text: bodyColumns do not measure the row, so the width model stays out of it.
+        expect(await textOf(ui, /^🤖 /)).toBe('🤖 fable-5-1')
+        expect(await textOf(ui, /^5h /)).toBe('5h 61%')
+        expect(await textOf(ui, /^📋 /)).toBe('📋 ELC-1591 3/5 ▶ Preview themes')
+        expect(await ui.find({ key: 'progress' })).toBeDefined()
+        return
+      }
+      expect(await textOf(ui, /fable-5-1|^5h|^⏳|ELC-1591/)).toBeUndefined()
       expect(await ui.find({ key: 'progress' })).toBeUndefined()
     })
 
@@ -457,15 +467,16 @@ describe('band', () => {
       await start($, surface)
       await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }])
       const ui = await mount($, surface)
-      const digest = 'ELC-1591 3/5 ▶ Preview themes'
+      const digest = isDesktop ? '📋 ELC-1591 3/5 ▶ Preview themes' : 'ELC-1591 3/5 ▶ Preview themes'
+      const digestRe = /ELC-1591/
       const others = async () => (await ui.findAll({ type: 'Text' })).map((t: any) => t.text).filter((t: string) => t !== digest)
-      expect(await textOf(ui, /^ELC-1591/)).toBe(digest)
+      expect(await textOf(ui, digestRe)).toBe(digest)
       const before = await others()
       await ui.press({ key: 'progress' })
-      expect(await textOf(ui, /^ELC-1591/)).toBeUndefined()
+      expect(await textOf(ui, digestRe)).toBeUndefined()
       // The test $ has no ui.close: the second press closes it through the plugin (origin plugin).
       await ui.press({ key: 'progress' })
-      expect(await textOf(ui, /^ELC-1591/)).toBe(digest)
+      expect(await textOf(ui, digestRe)).toBe(digest)
       expect(await others()).toEqual(before)
     })
   }
@@ -479,9 +490,25 @@ describe('band', () => {
     expect(await textOf(desk, /^⏱ /)).toBe('⏱ 60m')
     expect(await textOf(desk, /^🧠 /)).toBe('🧠 47%')
     expect(await textOf(desk, /^⏳/)).toBe('⏳ ')
+    expect(await textOf(desk, /^🤖 /)).toBe('🤖 fable-5-1')
     const term = await mount($, 'terminal')
     expect(await textOf(term, /^cache /)).toBe('cache 60m')
-    expect(await term.find({ type: 'Text', text: /^[⏱🧠⏳]/u })).toBeUndefined()
+    expect(await textOf(term, /fable-5-1/)).toBe('fable-5-1')
+    expect(await term.find({ type: 'Text', text: /^[⏱🧠⏳🤖📋]/u })).toBeUndefined()
+  })
+
+  test('/fnd-band prints the raw usage, the atoms, the workspace and the last render', async ($, on) => {
+    const { w } = world(on)
+    workspace(on)
+    w.rateLimits = [{ kind: 'five_hour', percentUsed: 61 }]
+    await start($, 'desktop')
+    await mount($, 'desktop', { bodyColumns: 77 })
+    const { text } = await $.command.run({ command: 'fnd-band', args: '' })
+    expect(text).toContain('usage(): {"startedAt":')
+    expect(text).toContain('"rateLimits":[{"kind":"five_hour","percentUsed":61}]')
+    expect(text).toContain('progress: {"workId":"ELC-1591","branch":"feature/ELC-1591-x"}')
+    expect(text).toContain('root: /repo')
+    expect(text).toContain('render: {"surface":"desktop","bodyColumns":77,"maxRows":10}')
   })
 })
 

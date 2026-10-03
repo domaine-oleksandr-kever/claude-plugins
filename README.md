@@ -1642,7 +1642,7 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 | Compact | `[ Compact ]`, `c: Compact` | Hidden at ≤ 30 % context and while a turn runs. From 31 % it is drawn dim; from 80 % it is `[ Compact ]` in the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). |
 | Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
 
-**Look.** A dim rule (`────`) separates the band from the transcript above it. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain, the digest's work id is bold and the separators are dim.
+**Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the desktop frames its panel itself, so no rule is drawn there. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain, the digest's work id is bold and the separators are dim.
 
 **Colors.** ctx and every rate window are plain up to 30 %, use the theme's `warning` color above
 30 % and the alarm look from 80 %. The cache is plain at 10 min or more, `warning` below 10 min and
@@ -1650,8 +1650,10 @@ the alarm below 2 min (a 5 min TTL scales both: warning below 2 min, the alarm b
 theme keys are used, so the band follows light, dark and high-contrast themes. The alarm look is
 `warning` + bold + inverse until a dedicated error key is proven to draw on every theme.
 
-**Desktop and hover.** In the desktop app's Code tab the labels become single glyphs
-(`⏱ 42m │ … │ 🧠 47% │ ⏳ 5h 61% · 7d 34% …`), and Compact / Progress are native buttons. When the
+**Desktop and hover.** In the desktop app's Code tab every segment carries a glyph instead of a word
+(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 📋 ELC-1591 3/5 ▶ …`), and Compact / Progress are native
+buttons. The desktop draws proportional text, so the width model above does not apply there: nothing is
+dropped, the row clips at the panel's edge. When the
 pointer rests on the cache, ctx or a rate window, a one-line card appears. This is meant for desktop
 and for terminals that pass the pointer through (kitty, Ghostty, iTerm2, WezTerm; tmux passes
 none). The glyph labels, the native buttons and hover are still a live check (desktop and
@@ -1681,7 +1683,7 @@ shows one dim line above the prompt, `plugin panel hidden · ctrl+x ctrl+a or cl
 chord or a click on the line brings it back. The collapsed state is the engine's and persists across
 reloads; the plugin cannot and does not reopen the band by itself.
 
-**Debug.** `/fnd-band` prints the raw figures behind the band: the session's `usage()` answer, the cache state and the usage atom. Paste its output when a segment looks wrong on some surface.
+**Debug.** `/fnd-band` prints the raw figures behind the band: the session's `usage()` answer, the cache state, the usage atom, the resolved workspace and session root, and the last render's surface and measured columns. Paste its output when a segment looks wrong on some surface.
 
 ### Progress pane
 

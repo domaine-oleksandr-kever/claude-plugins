@@ -238,7 +238,7 @@ export function ctxCard(u: FndUsage): string {
 }
 
 /** Single code points only: a VS16/ZWJ sequence has no settled cell width. */
-export const GLYPH = { cache: '⏱', ctx: '\u{1F9E0}', rates: '⏳' } as const
+export const GLYPH = { cache: '⏱', ctx: '\u{1F9E0}', rates: '⏳', model: '\u{1F916}', digest: '\u{1F4CB}' } as const
 
 /** The desktop label: the leading word of `cache 42m` / `ctx 47%` becomes its glyph. */
 export function glyphText(text: string): string {

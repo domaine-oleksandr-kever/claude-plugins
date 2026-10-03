@@ -46,6 +46,13 @@ function pressCompact($: $): void {
 /** The surface the band last drew on; a desktop has no hotkey letters, so focus moves must not redraw it. */
 let drawnOn: string = 'terminal'
 
+/** The last render's surface and measured props, for /fnd-band. */
+export const lastRender: { surface: string | null; bodyColumns: number | undefined; maxRows: number | undefined } = {
+  surface: null,
+  bodyColumns: undefined,
+  maxRows: undefined,
+}
+
 /** Guarded write: a redraw between a click's focus-in and its press would swallow the press. */
 async function setFocused($: $, to: boolean): Promise<void> {
   if (drawnOn !== 'desktop' && (await read($, bandFocused)) !== to) await update($, bandFocused, () => to)
@@ -84,9 +91,13 @@ export function registerBand(on: On, options: PluginOptions): void {
 
     const isWorking = e.props.isWorking
     const digest = p !== null && p.workId !== null && !isPaneShown ? digestText(p.workId, p) : null
-    const segs = layout(bandSegs({ usage: u, model: m, cache: c, nowMs: now, isWorking, digest }), e.props.bodyColumns)
     const isDesktop = e.surface === 'desktop'
     drawnOn = e.surface
+    lastRender.surface = e.surface
+    lastRender.bodyColumns = e.props.bodyColumns
+    lastRender.maxRows = e.props.maxRows
+    // A desktop draws proportional text: its bodyColumns do not measure the row, so nothing is dropped there.
+    const segs = layout(bandSegs({ usage: u, model: m, cache: c, nowMs: now, isWorking, digest }), isDesktop ? undefined : e.props.bodyColumns)
     const { Box, Text, Button } = $.ui.resolve(e)
 
     const label = (text: string) => (isDesktop ? glyphText(text) : text)
@@ -138,14 +149,21 @@ export function registerBand(on: On, options: PluginOptions): void {
       groups.push([hoverable('seg-cache', labeled(label(segs.cache), dimLabel, { bold: true, ...level }), cacheCard(c, now))])
     }
     if (segs.model !== null) {
-      groups.push([<Text wrap="truncate-end">{segs.model}</Text>])
+      groups.push([<Text wrap="truncate-end">{isDesktop ? `${GLYPH.model} ${segs.model}` : segs.model}</Text>])
     }
     const ctxLevel = u.ctxPct === null ? {} : LEVEL_PROPS[pctLevel(u.ctxPct)]
     groups.push([hoverable('seg-ctx', labeled(label(segs.ctx), dimLabel, { bold: true, ...ctxLevel }), ctxCard(u))])
     if (segs.rates.length) {
       groups.push([...(isDesktop ? [<Text>{`${GLYPH.rates} `}</Text>] : []), ...segs.rates.flatMap(rate)])
     }
-    if (segs.digest !== null) groups.push([<Box key="seg-digest">{labeled(segs.digest, { bold: true }, {})}</Box>])
+    if (segs.digest !== null) {
+      groups.push([
+        <Box key="seg-digest" flexDirection="row">
+          {isDesktop ? <Text>{`${GLYPH.digest} `}</Text> : null}
+          {labeled(segs.digest, { bold: true }, {})}
+        </Box>,
+      ])
+    }
     const buttons: RenderNode[] = []
     // A desktop draws a hotkey as a badge on its native button, and its buttons are clicked: no hotkeys there.
     const letters = focused && !isDesktop ? { plain: true as const } : null
@@ -161,14 +179,18 @@ export function registerBand(on: On, options: PluginOptions): void {
     if (buttons.length) groups.push(buttons)
 
     const row = groups.flatMap((g, i) => (i === 0 ? g : [<Text dimColor>{SEP}</Text>, ...g]))
-    // A dim rule separates the band from the transcript above it.
+    const rowBox = (
+      <Box flexDirection="row" overflow="hidden">
+        {row}
+      </Box>
+    )
+    // A dim rule separates the band from the transcript above it; the desktop frames its panel itself.
+    if (isDesktop) return rowBox
     const ruleCols = e.props.bodyColumns && e.props.bodyColumns > 0 ? Math.min(e.props.bodyColumns, 400) : 80
     return (
       <Box flexDirection="column">
         <Text dimColor>{RULE.repeat(ruleCols)}</Text>
-        <Box flexDirection="row" overflow="hidden">
-          {row}
-        </Box>
+        {rowBox}
       </Box>
     )
   })
