@@ -1786,7 +1786,11 @@ A prompt the classic `prompt-json-guard.cjs` would block (over ~10 KB, carrying 
 blob over ~8 KB) is handed to `prompt-json-guard.cjs --from-mod` instead. The script saves every
 blob to a file first and replaces each one in place by `mcp-slim.cjs`'s compressed body with a
 `<<full=…>>` handle on that file, or by its stub when compression does not pay off (no gain, a
-body still 8 KB or more, or the prompt's 32 KB replacement budget spent). The model gets the rewritten prompt plus one context line naming the files and the
+body still 8 KB or more, or the prompt's 32 KB replacement budget spent). A pasted blob's stub
+leads with a runnable `json-slim.cjs <file> --jq` over a sub-path derived from the blob's shape (for a
+Jira search: `--jq '.issues[].key'`, then `'.issues[].fields.status.name'`), so a one-field question
+costs a few hundred bytes; the whole-file profile is named after it, with its size, for what a
+sub-path cannot answer. The model gets the rewritten prompt plus one context line naming the files and the
 `json-slim.cjs --jq` recipe to narrow them, and a toast shows the figure, e.g.
 `fnd-prompt-slim: 48,210 B → 2,104 B (−95.6%)`: the paste against what the model reads after fnd. For a
 stubbed blob that is the profile `json-slim.cjs` hands it on demand, not the stub's own size, and the

@@ -100,8 +100,7 @@ function collectJsonBlobs(text) {
     const bytes = Buffer.byteLength(span, 'utf8');
     if (bytes < BLOB_MIN) continue;
     try {
-      JSON.parse(span);
-      blobs.push({ start, blob: span, bytes });
+      blobs.push({ start, blob: span, bytes, value: JSON.parse(span) });
     } catch (_) {} // balanced but not valid JSON
   }
 
@@ -111,6 +110,56 @@ function collectJsonBlobs(text) {
     if (rest >= BLOB_MIN) return blobs.filter((b) => b.start < openAt);
   }
   return blobs;
+}
+
+// Up to two `--jq` paths a stub can lead with, derived from the blob's shape: the first array of
+// objects within 3 keys of the root, by a label key of its first item (`.issues[].key`), then a scalar
+// nested under that item (`.issues[].fields.status.name`). Key names are PAYLOAD interpolated into the
+// plugin's voice, so only plain names (no quote, dot, bracket, space or line break; ≤ 40 chars) are
+// used — json-slim's `--jq` cannot address the rest anyway (it refuses quoted keys).
+const SAFE_KEY = /^[A-Za-z_$@][\w$@-]{0,39}$/;
+const LABEL_KEYS = ['key', 'name', 'title', 'summary', 'id']; // a readable label before an opaque id
+const SCAN_KEYS = 64; // keys looked at per object, so a wide object costs nothing
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isScalar = (v) => v === null || (typeof v !== 'object' && !(typeof v === 'string' && v.length > 200));
+const safeKeys = (o) => Object.keys(o).slice(0, SCAN_KEYS).filter((k) => SAFE_KEY.test(k));
+function labelKey(o, labelsOnly) {
+  const ks = safeKeys(o).filter((k) => isScalar(o[k]));
+  return LABEL_KEYS.find((k) => ks.includes(k)) || (labelsOnly ? null : ks[0] || null);
+}
+// The deepest reach wins (`fields.status.name` over `fields.summary`): it shows the model a path can walk.
+function nestedScalar(o, room) {
+  if (room < 2) return null;
+  let shallow = null;
+  for (const k of safeKeys(o)) {
+    if (!isObj(o[k])) continue;
+    const deep = nestedScalar(o[k], room - 1);
+    if (deep) return `${k}.${deep}`;
+    const l = labelKey(o[k], true);
+    if (l && !shallow) shallow = `${k}.${l}`;
+  }
+  return shallow;
+}
+function jqExamples(value) {
+  let queue = [['', value]];
+  for (let depth = 0; depth <= 3 && queue.length; depth++) {
+    const next = [];
+    for (const [at, v] of queue) {
+      if (Array.isArray(v)) {
+        const item = v.find(isObj);
+        if (!item) continue;
+        const fan = `${at || '.'}[]`;
+        const l = labelKey(item, false);
+        const n = nestedScalar(item, 3);
+        return [l && `${fan}.${l}`, n && `${fan}.${n}`].filter(Boolean);
+      }
+      if (isObj(v) && depth < 3) for (const k of safeKeys(v)) if (next.length < 1024) next.push([`${at}.${k}`, v[k]]);
+    }
+    queue = next;
+  }
+  if (Array.isArray(value)) return ['. | length'];
+  const l = isObj(value) && labelKey(value, false);
+  return ['. | keys', ...(l ? [`.${l}`] : [])];
 }
 
 // `wx` + 0600: the blob IS the developer's paste (API tokens, customer records) and the tmpdir
@@ -267,9 +316,10 @@ function promptJsonRewrite(input) {
         unlinkAll(mine);
         mine.length = 0;
         const h = js.shapeHint(b.blob);
-        // Only weak-gain and budget-exceeded keep the plain CLI line; every other reason gets the narrowing `--jq` one.
+        // Only weak-gain and budget-exceeded offer the whole-file run after the narrowing one; a no-gain run would re-dump the blob.
         const why = r && r.wasModified ? 'weak-gain' : r && r.reason === 'budget-exceeded' ? 'budget-exceeded' : 'no-gain';
-        built = ms.withStats((st) => ms.stubText('pasted JSON', b.bytes, h.format, h.hint, p, why, false, st), 'stub', b.bytes);
+        const narrow = { paths: jqExamples(b.value), profile: why === 'weak-gain' ? r.bytesOut : null };
+        built = ms.withStats((st) => ms.stubText('pasted JSON', b.bytes, h.format, h.hint, p, why, false, st, narrow), 'stub', b.bytes);
       }
       created.push(...mine);
       if (!built || built.bytes >= b.bytes) return abort();
@@ -284,11 +334,12 @@ function promptJsonRewrite(input) {
     // The classic guard beneath sees this text; it must pass there, which also makes a re-run a no-op.
     if (Buffer.byteLength(out, 'utf8') >= PROMPT_MIN && collectJsonBlobs(out).length) return abort();
 
+    const eg = jqExamples(blobs[0].value)[0];
     const context =
       `fnd prompt-slim: the developer's prompt carried ${blobs.length} pasted JSON blob${blobs.length === 1 ? '' : 's'} ` +
       `(${inB.toLocaleString('en-US')} B); each was saved to a file and replaced in place by its ` +
       `compressed body or a stub — ${paths.map((x) => `full=${x}`).join(', ')}. These files are the paste: narrow with ` +
-      `node ${ms.SLIM_CLI} <file> --jq '<jq-path>' (${js.JQ_GRAMMAR_HINT}) or grep; never raw-Read them.`;
+      `node ${ms.SLIM_CLI} <file> --jq '<jq-path>' (${eg ? `e.g. '${eg}' on the first; ` : ''}${js.JQ_GRAMMAR_HINT}) or grep; never raw-Read them.`;
     const summary = ms.statsLine('compressed', inB, readB).replace(/^fnd-mcp-slim: \S+ /, 'fnd-prompt-slim: ') +
       (stubs ? `, ${stubs}/${blobs.length} stubbed` : '');
     const res = { text: out, context, summary };

@@ -569,7 +569,12 @@ function sampleLine(hint) {
 // `stats` (the in-session line) rides as the SECOND line — inside the cap check below, so a stub can
 // still never outgrow the payload it replaces, and above the quoted sample, so the plugin's own voice
 // stays contiguous and the untrusted payload head stays last.
-function stubText(tool, bytes, format, hint, file, reason, perBlock, stats) {
+// `narrow` ({ paths, profile }) is the pasted-blob layout, passed only by prompt-json-guard.cjs: it leads
+// with a runnable `--jq` over a sub-path the caller derived, because a model handed the whole-file line
+// reads the whole profile (12.5 KB for a 25 KB Jira search) to answer a one-field question. `paths` must
+// already be valid for json-slim's `--jq` subset and free of quotes and line breaks; `profile` is the
+// whole-file run's size in bytes, or null when unknown.
+function stubText(tool, bytes, format, hint, file, reason, perBlock, stats, narrow) {
   // The name comes from the registered MCP server, not from the payload, but it is interpolated into
   // a line written in the plugin's voice — folded so a newline in it cannot add one of its own.
   const who = String(tool || 'MCP tool').replace(LINE_BREAKS, ' ').slice(0, STUB_TOOL_MAX);
@@ -583,7 +588,7 @@ function stubText(tool, bytes, format, hint, file, reason, perBlock, stats) {
   const why = reason === 'block-cap'
     ? 'too large for the capped channel this host replaces a result through'
     : 'too large for context and not compressible here';
-  const lines = reRunRedumps ? [
+  const lines = narrow ? narrowLines(who, bytes, format, file, reason, what, narrow, hint) : reRunRedumps ? [
     `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context, and the compressor already ran on it and gained nothing, so ${what} to disk instead of being shown:`,
     `full=${file}`,
     'Do NOT re-run the compressor over the whole file (it would print the same bytes back) and never raw-Read it. Narrow instead:',
@@ -602,6 +607,29 @@ function stubText(tool, bytes, format, hint, file, reason, perBlock, stats) {
   const text = lines.join('\n');
   // Measured in BYTES, the unit the threshold and the payload gate speak.
   return Buffer.byteLength(text, 'utf8') > STUB_CAP ? lines.slice(0, -1).join('\n') : text;
+}
+
+function narrowLines(who, bytes, format, file, reason, what, narrow, hint) {
+  const grammar = jsonSlim().JQ_GRAMMAR_HINT;
+  const paths = (narrow.paths || []).slice(0, 2);
+  const why = reason === 'weak-gain' ? 'too large for context even compressed'
+    : reason === 'budget-exceeded' ? 'too large for context, and compressing it ran past the time budget here'
+      : 'too large for context, and the compressor already ran on it and gained nothing';
+  const cmd = (p) => `  node ${SLIM_CLI} ${file} --jq '${p}'`;
+  const profile = Number.isFinite(narrow.profile) ? `, ${narrow.profile.toLocaleString('en-US')} B` : '';
+  return [
+    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — ${why}, so ${what} to disk instead of being shown:`,
+    `full=${file}`,
+    'Narrow first — one sub-path answers most questions:',
+    ...(paths.length ? [
+      cmd(paths[0]),
+      `  ${paths[1] ? `then '${paths[1]}', or` : 'or'} any --jq '<jq-path>': ${grammar}`,
+    ] : [`${cmd('<jq-path>')}   — ${grammar}`]),
+    reason === 'no-gain'
+      ? 'Never drop --jq (it prints the same bytes back) or raw-Read it: grep the file, or Read it windowed (offset/limit).'
+      : `Only for what a sub-path cannot answer: drop --jq (the whole profile${profile}), or grep / Read it windowed (offset/limit) — never raw-Read it.`,
+    sampleLine(hint),
+  ];
 }
 
 // A block array a stub may replace: every block must be a PLAIN text block — `type:'text'` plus
