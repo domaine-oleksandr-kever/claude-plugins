@@ -1563,6 +1563,7 @@ because the script that reads it is the same single copy on all four hosts.
 | `FND_NOGAIN_MEMO` | `1` | `0` (or `false`/`no`/`off`) disables `json-slim`'s per-file no-gain memo. With the default, a **file** run that printed its body back unchanged (a deliberate decline, now also stated on stderr) is remembered — per session × **resolved** file path, for 2 h, invalidated as soon as the file's size or mtime change — and a repeat run on that file answers with a one-line refusal naming the recovery instead of re-printing the body; the field pattern it removes is "decline → immediate re-run", where a 0 % result reads as a failed attempt. Only declines of at least 4 KB are remembered (below that a refusal saves nothing). The state is dotfiles under `FND_MCP_SLIM_DIR`, swept with the spills (so `FND_MCP_SLIM_TTL=0` leaves them in place); a missing, unreadable, corrupt or future-dated state file always yields the normal run. The same switch also governs the second refusal, which needs no memo: `fnd-slim-out-*` files — `json-slim`'s own Gate-A output spills, already slimmed — are answered the same way (only below the 8 MB stream gate; past it the big-document guidance is the useful answer). Neither refusal ever applies to a run whose answer it cannot stand for: a narrowing `--jq <jq-path>` (the documented recovery after a decline) bypasses both. `--stats` does **not** — the reader recipes pass it on every run, so a bypass would disarm the memo for exactly those callers; a refusal answers it with the measurement instead, printing the body-free notice on stdout and `json-slim: <bytes> → <bytes> bytes (0.0% reduction) [declined earlier this session]` (or `[already json-slim output]`) on stderr. The stderr decline notice is NOT governed by this switch: it rides on every file run that printed the file's own bytes back unchanged. Both refusals log `already-slim-out` / `no-gain-memo` and are counted on `--report`'s `cli runs:` line |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor, the session title and the background reader relay unless `FND_CTX_MONITOR=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too — only with all four at `0` does no node process run at all. Those clauses are in the Claude Code and Codex wirings alike, because the two carry the same command verbatim; on Codex the title and reader-relay halves are inert (both gated on `FND_HOST=claude`), so a Codex user who wants the old two-switch economy sets `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` with the other two. Cursor's `beforeSubmitPrompt` runs its own shim, which has no title half, so there the two-switch short-circuit is unchanged. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere. **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s rewrite. The module reads only the session's environment (shell, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the `prompt-json-guard.cjs --from-mod` the module spawns, which then prints nothing, so the effect is the same one spawn later. Confirmed live on the desktop app's Code tab too. |
 | `FND_BAND_COST` | off | `1` (or `true`/`yes`/`on`) adds the session-cost segment to the status band (`cost $12.40`, `💰 $12.40` on the desktop): the `/cost` total at API prices, a measure of work on a subscription. Read once at session start through the hooks module's `$.env`, so set it where Claude Code's own environment is built — the `env` block of `~/.claude/settings.json` reaches the terminal and the desktop app alike. **Host divergence: Claude Code only** (the band is a mod). |
+| `FND_EVENT_LOG` | `1` | `0` keeps the hooks module's event log (the `Log` pane, `/fnd-log`) empty: nothing is recorded, and the pane reads `no events yet`. Toasts are untouched. Read through the hooks module's `$.env`, so set it in the session's environment (`~/.claude/settings.json` → `env`). **Host divergence: Claude Code only.** |
 | `FND_SLIM_TOAST` | `1` | `0` silences the hooks module's savings toasts: the MCP-slimming figure (`fnd-mcp-slim: compressed …`) and the pasted-JSON figure (`fnd-prompt-slim: …`). Slimming and the rewrite themselves are untouched, and so are the Compact-press result toast and the 90 % rate-window alarm (answers to the developer's own action and a warning). Read through the hooks module's `$.env`, so set it in the session's environment (`~/.claude/settings.json` → `env`). **Host divergence: Claude Code only** (toasts are a mod). |
 | `FND_SLIM_TOAST_MS` | `5000` | How long the hooks module's savings toasts stay, in milliseconds (a whole number, floored at 1,000; anything else → the default). Set it where the module reads its environment (`~/.claude/settings.json` → `env`). **Host divergence: Claude Code only.** |
 | `FND_SCRATCH_GUARD` | `1` | `0` disables the screenshot scratch-path guard (PreToolUse `scratch-path-guard`) — node never spawns. With the default, a `take_screenshot` / `browser_take_screenshot` / `take_snapshot` / `get_network_request` / `browser_run_code_unsafe` whose path resolves **outside** the project (scratchpad, another checkout — the servers refuse those anyway; a chrome-devtools write under its OS temp dir passes, since that server accepts it), or a written file that resolves inside the project working tree and outside a **leading** `.claude/` segment, is **denied** with a reason naming the ABSOLUTE `<project>/.claude/tasks/<work-id>/tmp/<name>` (or `<project>/.claude/tmp/<name>` with no ticket) instead — absolute because a relative filename is resolved by the playwright server against its own output dir, not the project, so a relative remediation would land nested inside the litter dir it replaces. Which server it is decides the verdict: the **bundled** `playwright`, whose manifest pins `--output-dir .claude/fnd-tmp/playwright` (swept, git-excluded — and the guard stamps that exclude itself on the branches that allow, so the allow does not rest on a compressor switch), passes both a bare `filename` and no `filename` at all; every other spelling may be a default-configured server writing to `<cwd>/.playwright-mcp` inside the checkout, so its relative filename is denied and so is its no-`filename` call, which does not skip the write. That allow is bought with the sweep: a file in the bundled server's output dir **expires** on `FND_MCP_SLIM_TTL` (24 h), so anything meant to be kept — QA evidence, the screenshots a Steps to Test points at — still belongs in `<project>/.claude/tasks/<work-id>/tmp/`, which nothing prunes. The guard creates the two remediation destinations itself as it denies (nothing else does — chrome-devtools' write path makes no directory — so a compliant retry would fail with ENOENT). The project root is the session's project dir (`CLAUDE_PROJECT_DIR`, else the checkout the cwd's `.claude/` sits in); in a git worktree a path resolving into the symlinked `.claude/tasks` is denied, and the remediation is `<worktree>/.claude/tmp/<work-id>/<name>`. Anything under a leading `.claude/`, an inline chrome-devtools screenshot / snapshot / network body (no path, no file written) and `browser_run_code_unsafe` with inline `code` or an in-tree script all pass, and any internal error fails open; an in-project `tmp/` is denied like the rest of the tree, since a theme checkout neither ships nor gitignores one. **Host divergence:** wired on Claude Code, Codex and Cursor — the matcher is prefix-agnostic, since Codex names the same tools without the `plugin_fnd_` prefix and either host may have the servers installed per-user, and on Cursor the deny travels through `beforeMCPExecution` (a `permission: "deny"` response, `tool_input` decoded from a JSON string). That prefix-agnosticism has a cost on those two hosts: an unprefixed `browser_take_screenshot` is indistinguishable from a per-user server, so even the bundled one is judged conservatively there — relative filenames denied, absolute workspace paths expected. OpenCode's tool hook has no verified MCP payload shape, so there screenshots are unguarded whatever this is set to. **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s guard: no deny on the tool call and no path note in the five tools' descriptions. The module reads the session's environment (and, for the description note, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the spawned `scratch-path-guard.cjs` alone, which then allows, so nothing is denied, but the description note stays for that session. |
@@ -1601,10 +1602,12 @@ because the script that reads it is the same single copy on all four hosts.
 session itself as function hooks. Function hooks can do what a command hook cannot. They draw UI
 above the prompt and in a side pane. They replace a tool result after the host has already cut it
 down to an overflow notice. They add a note to a tool's description before the model sees it. They
-rewrite a prompt before the model reads it. The module adds five things. The **status band** is
+rewrite a prompt before the model reads it. The module adds six things. The **status band** is
 one row above the prompt with the prompt-cache countdown, model, context use, every rate-limit
 window, the session's cost and the task digest. The **progress pane** shows the task workspace's
-checklist. The **scratch-path guard** answers on the tool call itself. **MCP slimming** also
+checklist. The **event log pane** keeps the last 50 things the module did or noticed (savings
+figures, guard refusals, compactions, model switches, rate alarms, workspace changes, session start
+and resume), one timestamped line each. The **scratch-path guard** answers on the tool call itself. **MCP slimming** also
 reaches results over the platform limit, which the classic `mcp-slim` hook never sees. **Pasted
 JSON** over the classic guard's gate is replaced in place by its compressed body or a stub, so the
 prompt goes through in one submission instead of being blocked. Guard, slimming and pasted JSON do
@@ -1624,18 +1627,18 @@ docs/img/mods-pane.png) are added after the live check.
 
 ### Status band
 
-One row, most important first. 160 columns, context at 47 %, an account reporting three
+One row, most important first. 170 columns, context at 47 %, an account reporting three
 windows, a task workspace open:
 
 ```text
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Progress ]
+cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Progress ]  [ Log ]
 ```
 
-120 columns, same session. The row is 154 cells, so the digest goes first, then the cost:
+120 columns, same session. The row is 161 cells, so the Log button goes first, then the digest:
 
 ```text
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ [ Compact ]  [ Progress ]
+cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ [ Compact ]  [ Progress ]
 ```
 
 60 columns. The rate windows go next, the least full one first, then the model:
@@ -1644,8 +1647,8 @@ cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ [ 
 cache 42m │ ctx 47% │ [ Compact ]  [ Progress ]
 ```
 
-The full drop order is: the digest, the cost, then the rate windows beyond the fullest (least full first),
-then the last window, then the model, then the Progress button. Cache, ctx and Compact are never
+The full drop order is: the Log button (`/fnd-log` still opens the pane), the digest, the cost, then the
+rate windows beyond the fullest (least full first), then the last window, then the model, then the Progress button. Cache, ctx and Compact are never
 dropped. The row's text truncates as a backstop, so the band never takes a second row.
 
 | Segment | Shows | Rule |
@@ -1658,6 +1661,7 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 | digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the first unchecked row (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet. Hidden while the progress pane is open, and when no workspace resolves. |
 | Compact | `[ Compact ]`, `c: Compact` | Hidden at ≤ 30 % context and while a turn runs. From 31 % it is drawn dim; from 80 % it is `[ Compact ]` in the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). |
 | Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
+| Log | `[ Log ]`, `l: Log` | Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
 
 **Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the desktop frames its panel itself, so no rule is drawn there. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain, the digest's work id is bold and the separators are dim.
 
@@ -1668,7 +1672,7 @@ theme keys are used, so the band follows light, dark and high-contrast themes. T
 `warning` + bold + inverse until a dedicated error key is proven to draw on every theme.
 
 **Desktop and hover.** In the desktop app's Code tab every segment carries a glyph instead of a word
-(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`), and Compact / Progress are native
+(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`), and Compact / Progress / Log are native
 buttons. The desktop draws proportional text, so the width model above does not apply there: nothing is
 dropped, the row clips at the panel's edge. When the
 pointer rests on the cache, ctx, a rate window or the cost, a one-line card appears. This is meant for desktop
@@ -1688,9 +1692,9 @@ stack; a click takes one off and the pointer over it holds it (there is no close
 touch the transcript or what the model reads. They keep showing while the progress pane is open (it is
 not a dialog and does not hold toasts).
 
-**Hotkeys.** `c` and `p` work only while the band holds the keyboard: after **ctrl+x tab** or a
+**Hotkeys.** `c`, `p` and `l` work only while the band holds the keyboard: after **ctrl+x tab** or a
 click on the band. They never fire from the composer, so typing a `c` is just a `c`. The letters are
-drawn only then too (`c: Compact  p: Progress`): at rest the buttons read `[ Compact ]  [ Progress ]`,
+drawn only then too (`c: Compact  p: Progress  l: Log`): at rest the buttons read `[ Compact ]  [ Progress ]  [ Log ]`,
 so the band never suggests a key the composer would swallow. The letters go away again on a press,
 when a turn starts and on `/clear` (there is no focus-out event, so Esc alone leaves them until the
 next of those). On a terminal
@@ -1740,6 +1744,41 @@ one line: `no task workspace — /fnd:save-task-context`.
 The band and the pane redraw on a Write or Edit under `.claude/tasks/`. A 30 s tick also notices
 edits made from Bash (`sed`, a script). A `git checkout` / `switch` / `worktree` and a directory
 change re-resolve the id; `/clear` forgets the conversation key (a pin stays).
+
+### Event log pane
+
+Toasts flash and go. `l: Log`, or `/fnd-log`, opens a pane that keeps them: the last 50 things the
+module did or noticed, one line each, oldest first and newest last. Esc, a second press or the
+engine's close mark closes it. The progress pane and the log pane can be open at once; the engine
+shows one and keeps the other as a tab. Pressing the button or running the command of the pane behind the tab brings that pane forward instead of closing it.
+
+```text
+14:02  session    start
+14:05  workspace  ELC-1588
+14:21  slim       getJiraIssue: compressed 118,203 B → 29,412 B (−75.1%)
+14:33  guard      take_screenshot: path outside the project
+14:40  compact    manual 412k → 38k
+```
+
+The time is local `HH:MM`; the kind is dim. A line too long for the pane is cut at its end. When the
+pane is shorter than the log, its first line reads `… 12 earlier` and the newest lines fill the rest.
+
+| Kind | Written when | Text |
+|---|---|---|
+| `session` | The module starts (launch and reload), on a resume or fork, and on `/clear` | `start`, `resume`, `fork`, `clear` (a resume can log both `start` and `resume`) |
+| `model` | A `/model` switch to another model | The full model id, `claude-opus-5-5` |
+| `compact` | A compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them |
+| `rate` | A rate window first reaches 90 % | The alarm toast's text, `5h window: 92% used, resets in 1h 05m` |
+| `workspace` | The resolved task workspace differs from the last one logged (re-resolving the same one after `/clear` logs nothing) | The work id, or `none` |
+| `slim` | The module toasts an MCP savings figure (main thread only) | The tool (the part after the last `__`) and the toast's figure without its `fnd-mcp-slim:` prefix |
+| `prompt` | A pasted JSON prompt is rewritten and accepted | The toast's figure without its `fnd-prompt-slim:` prefix |
+| `guard` | The scratch-path guard refuses a tool call | The tool (the part after the last `__`) and the first line of the reason without the guard's own prefix |
+
+At 50 lines the oldest `slim` or `prompt` line makes room first, so a session busy with MCP calls keeps its rarer lines.
+The log lives in the session's state only: nothing is written to disk, and a new launch starts empty.
+`/clear` keeps the lines and adds `session clear` where the conversation restarted.
+Toasts are unchanged by it, and `FND_SLIM_TOAST=0` silences a savings toast without dropping its line.
+`FND_EVENT_LOG=0` records nothing.
 
 ### Scratch-path guard on the tool call
 
@@ -1844,14 +1883,14 @@ they appear is still a live check. They are stored in
 
 | Field | Default | Effect |
 |---|---|---|
-| `statusBand` | `true` | `false` draws no band. The pane, `/fnd-progress`, the guard, slimming and the pasted-JSON rewrite keep working. |
+| `statusBand` | `true` | `false` draws no band. The panes, `/fnd-progress`, `/fnd-log`, the guard, slimming and the pasted-JSON rewrite keep working. |
 | `cacheTtl` | `auto` | The prompt-cache TTL behind the countdown. `auto` learns it from the session: a `/model` switch reports it, and a subagent result with 1 h cache writes proves 1 h. It is remembered across sessions. Until then the estimate is 1 h on a claude.ai account and 5 min when the session bills an API key or a cloud provider (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` present in the session's environment; only their presence is read). Rate-limit windows arriving also mean a subscription, so they set 1 h too. A subscription in overage drops to 5 min, which the band cannot see; the cache segment is hidden while a window is at 100 %. `5m` or `1h` forces it. |
 
 ### Fallbacks and other hosts
 
 - A module hook that fails is skipped, and the session goes on as without it. A failure in one fnd
   hook skips the module's other hooks on the same event (the guard re-latches its root on the
-  first tool call; `/fnd-progress` is re-registered on the next prompt). The classic hooks stay
+  first tool call; `/fnd-progress` and `/fnd-log` are re-registered on the next prompt). The classic hooks stay
   wired underneath, so the guard and slimming lose nothing; a pasted-JSON prompt meets the classic
   block instead of the rewrite.
 - Where commands cannot be spawned (the module's process API is documented as CLI-only, though the

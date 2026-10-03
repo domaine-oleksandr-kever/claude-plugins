@@ -1,5 +1,8 @@
 // Pasted JSON as a mod: prompt-json-guard.cjs --from-mod spills each big blob and replaces it in place instead of blocking the prompt.
-import type { On } from 'claude-code'
+import { atom, update } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
+import type { FndEvent, FndEventKind } from '../../../types'
+import { bare, pushEvent } from '../core/events.ts'
 import { buildHookRun, parseHookOut, toastMs } from './node-hook.ts'
 
 const PROMPT_MIN = 10240 // prompt-json-guard.cjs's gate in UTF-8 bytes (layout-assertions pins it); one UTF-16 unit is at most 3 of them
@@ -7,6 +10,18 @@ const RUN_MS = 20_000
 const CONTEXT_MAX = 100_000 // past this the engine gives the model a head and a path, not the line
 
 type Rewrite = { text: string; context: string; summary: string }
+
+const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
+
+type $ = EngineInterface
+
+async function logEvent($: $, kind: FndEventKind, text: string): Promise<void> {
+  try {
+    if ((await $.env.get('FND_EVENT_LOG')) === '0') return
+    const atMs = await $.clock.now()
+    await update($, events, l => pushEvent(l, { atMs, kind, text }))
+  } catch {}
+}
 
 export function registerPromptSlim(on: On): void {
   on('prompt.submit', { origin: { kind: ['composer', 'bridge', 'sdk'] } }, async ($, e, next) => {
@@ -35,6 +50,7 @@ export function registerPromptSlim(on: On): void {
     if (r.drop === undefined && (await $.env.get('FND_SLIM_TOAST').catch(() => undefined)) !== '0') {
       $.ui.toast(rw.summary, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS').catch(() => undefined)) })
     }
+    if (r.drop === undefined) await logEvent($, 'prompt', bare(rw.summary))
     return r
   })
 }

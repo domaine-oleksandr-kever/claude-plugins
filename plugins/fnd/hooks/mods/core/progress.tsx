@@ -2,7 +2,8 @@
 // Writes the `progress` and `paneShown` atoms the band draws from.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { FndProgress } from '../../../types'
+import type { FndEvent, FndProgress } from '../../../types'
+import { LOG_COMMAND, pushEvent } from './events.ts'
 import { notesTail, parseProgress } from './progress-parse.ts'
 import { isWorkId, keyFromBranch, keysFromText, slugFromBranch } from './workid.ts'
 
@@ -27,8 +28,22 @@ const pin = atom({ plugin: 'fnd', key: 'pin' } as const, null)
 const lastKey = atom({ plugin: 'fnd', key: 'lastKey' } as const, null)
 const sessionId = atom({ plugin: 'fnd', key: 'sessionId' } as const, null)
 const paneShown = atom({ plugin: 'fnd', key: 'paneShown' } as const, false)
+const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
 
 type $ = EngineInterface
+
+/** Compared with the last logged workspace, not the atom: /clear nulls the atom while the work stays. */
+async function logWorkspace($: $, text: string): Promise<void> {
+  try {
+    if ((await $.env.get('FND_EVENT_LOG')) === '0') return
+    const atMs = await $.clock.now()
+    await update($, events, l => {
+      let last = 'none'
+      for (const ev of l) if (ev.kind === 'workspace') last = ev.text
+      return last === text ? l : pushEvent(l, { atMs, kind: 'workspace', text })
+    })
+  } catch {}
+}
 
 const tasksDir = (root: string) => `${root}/.claude/tasks`
 const workDir = (root: string, id: string) => `${tasksDir(root)}/${id}`
@@ -142,7 +157,8 @@ async function refresh($: $, resolve: boolean): Promise<void> {
   // A pin or key change (or /clear) during the awaits started its own, newer resolve.
   const now = await readInputs($)
   if (now.pin !== inputs.pin || now.lastKey !== inputs.lastKey) return
-  await update($, progress, prev => (!reload || prev?.workId === next.workId ? next : prev))
+  const after = await update($, progress, prev => (!reload || prev?.workId === next.workId ? next : prev))
+  await logWorkspace($, after?.workId ?? 'none')
 }
 
 async function tick($: $, resolve: boolean): Promise<void> {
@@ -190,6 +206,7 @@ export function registerProgress(on: On): void {
       await update($, sessionId, () => id)
     } catch {}
     await $.command.register(COMMAND).catch(() => undefined)
+    await $.command.register(LOG_COMMAND).catch(() => undefined)
     await refresh($, true).catch(() => undefined)
     return r
   })
@@ -201,6 +218,7 @@ export function registerProgress(on: On): void {
     if (id !== (await read($, sessionId))) {
       await update($, sessionId, () => id)
       await $.command.register(COMMAND)
+      await $.command.register(LOG_COMMAND)
       resolve = true
     }
     const key = PERSON.has(e.origin.kind) ? await conversationKey($, e.text) : null

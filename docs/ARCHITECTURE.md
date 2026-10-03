@@ -338,9 +338,10 @@ own files and `plugins/fnd/types/index.d.ts`, with no npm, `require`, `import()`
 
 ```
 hooks/hooks.json            { "modules": ["./mods/register.tsx"] }
-hooks/mods/register.tsx     register(on, options) → registerUsage, registerBand, registerProgress, registerGuard, registerSlim, registerPromptSlim
+hooks/mods/register.tsx     register(on, options) → registerMarker, registerUsage, registerBand, registerProgress, registerLog, registerGuard, registerSlim, registerPromptSlim
 hooks/mods/core/            usage.ts (atoms + 30 s tick) · band.tsx (AbovePrompt) · progress.tsx (resolver, /fnd-progress, Pane)
-                            lib.ts · workid.ts · progress-parse.ts (pure)
+                            log.tsx (/fnd-log, Pane: the event log)
+                            lib.ts · workid.ts · progress-parse.ts · events.ts (pure)
 hooks/mods/fnd/             guard.ts (tool.describe note + tool.call deny) · slim.ts (overflow expansion + toast)
                             prompt-slim.ts (prompt.submit: pasted JSON rewritten in place + toast)
                             node-hook.ts (pure: builds the node call, reads its answer)
@@ -354,10 +355,13 @@ types/index.d.ts            the $.state contract: every key the module reads or 
 - **Each feature file declares the atoms it touches** with literal `{ plugin: 'fnd', key }` refs.
   The same literal in two files shares the value, and `types/index.d.ts` is the one list of
   allowed keys.
-- **Shared code is pure** (`lib.ts`, `workid.ts`, `progress-parse.ts`, `node-hook.ts`) and is
-  imported freely, by tests too.
+- **Shared code is pure** (`lib.ts`, `workid.ts`, `progress-parse.ts`, `events.ts`, `node-hook.ts`) and is
+  imported freely, by tests too. A `$` helper several files need (the event log's `logEvent`) is
+  copied as a top-level function into each writer file; the shared parts (`pushEvent`, `bare`,
+  `toolName`) are pure.
 - **Render paths only read atoms.** Writers update them from events, timers and presses. The
   band learns the pane is open from the `paneShown` atom, never from a pane listing while drawing.
+  The log pane draws the `events` atom only; usage, progress, guard, slim and prompt-slim append to it.
 - **One unmatched hook per event per plugin.** A second `on('session.start', …)` without a
   matcher fails validation and module load, so `usage.ts` and `guard.ts` register theirs with
   match-all matchers. All of a plugin's hooks on one event act as one hook: one that throws skips
@@ -384,7 +388,9 @@ with them.
 - `hooks/mods/core/` (band, pane, usage, resolver) can move to a future core plugin as one folder.
 - `hooks/mods/fnd/` (guard, slim, prompt-slim, Node adapter) stays in fnd.
 - Imports run one way only: `register.tsx → core` and `register.tsx → fnd`. `core` never imports
-  `fnd`.
+  `fnd`. The one exception is `fnd → core/events.ts` (pure `pushEvent`, `bare`, `toolName`) for the event log's guard,
+  slim and prompt-slim lines. At the split those files lose write access to core's `events` key
+  (a plugin writes only its own state), so they would publish through an fnd key the log pane reads.
 - Only `core` draws `AbovePrompt`, which has one instance per chain. A future fnd-only segment
   (theme, store) would publish through its own state key, which any plugin may read.
 - At the split, the `'fnd'` literal in `core/**` becomes `'fnd-core'`. Whether the shared contract

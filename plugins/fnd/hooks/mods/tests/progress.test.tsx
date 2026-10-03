@@ -32,7 +32,7 @@ function addWorkspace(w: World, id: string, text = MD, mtimeMs = NOW - 60_000): 
 /** Stubs every op the module calls over an in-memory repo; `calls` records what reached the bottom. */
 function world(on: On, over: Partial<World> = {}) {
   const w: World = { branch: 'feature/ELC-1591-x', gitRejects: false, gitDelayMs: 0, sid: 's1', files: {}, panes: [], openResult: { isPlaced: true }, ...over }
-  const calls = { git: 0, fs: [] as string[], reads: [] as string[], registers: 0, opens: [] as unknown[], closes: [] as unknown[], toasts: [] as string[] }
+  const calls = { git: 0, fs: [] as string[], reads: [] as string[], registers: 0, logRegisters: 0, opens: [] as unknown[], closes: [] as unknown[], toasts: [] as string[] }
   const clock = mock.clock(on, { now: NOW })
   mock.store(on)
   mock.env(on, {})
@@ -88,6 +88,7 @@ function world(on: On, over: Partial<World> = {}) {
   })
   on('command.register', async (_$, e) => {
     if (e.name === 'fnd-progress') calls.registers++
+    if (e.name === 'fnd-log') calls.logRegisters++
     return { value: { command: e.name } }
   })
   on('ui.open', async (_$, e) => {
@@ -126,6 +127,7 @@ const PEEK = {
         pin: (await $.state.get({ plugin: 'fnd', key: 'pin' })).value ?? null,
         lastKey: (await $.state.get({ plugin: 'fnd', key: 'lastKey' })).value ?? null,
         sessionId: (await $.state.get({ plugin: 'fnd', key: 'sessionId' })).value ?? null,
+        events: (await $.state.get({ plugin: 'fnd', key: 'events' })).value ?? [],
       }),
     }))
   },
@@ -339,13 +341,16 @@ describe('refresh', () => {
     addWorkspace(w, 'ELC-1591')
     await start($)
     expect(calls.registers).toBe(1)
+    expect(calls.logRegisters).toBe(1)
     reset(calls)
     await submit($, 'hello')
     expect(calls.registers).toBe(1)
+    expect(calls.logRegisters).toBe(1)
     expect(calls.git).toBe(0)
     w.sid = 's2'
     await submit($, 'hello again')
     expect(calls.registers).toBe(2)
+    expect(calls.logRegisters).toBe(2)
     expect(calls.git).toBe(1)
     const s = await peek($)
     expect(s.sessionId).toBe('s2')
@@ -473,6 +478,51 @@ describe('refresh', () => {
     reset(calls)
     await $.classic.CwdChanged({ old_cwd: ROOT, new_cwd: `${ROOT}/sub` })
     expect(calls.git).toBe(1)
+  })
+})
+
+describe('workspace event', () => {
+  const workspaceEvents = async ($: any) =>
+    ((await peek($)).events as { atMs: number; kind: string; text: string }[]).filter(ev => ev.kind === 'workspace')
+
+  t('the first resolve logs the work id; a re-read of the same workspace logs nothing', async ($, on) => {
+    const { w, clock } = world(on)
+    addWorkspace(w, 'ELC-1591')
+    await start($)
+    expect(await workspaceEvents($)).toEqual([{ atMs: NOW, kind: 'workspace', text: 'ELC-1591' }])
+    await $.tool.call({ tool: 'Write', file_path: progressMd('ELC-1591'), content: MD })
+    await clock.advance(4 * 30_000)
+    expect(await workspaceEvents($)).toHaveLength(1)
+  })
+
+  t('a branch switch to another workspace logs it; leaving every workspace logs none', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ELC-1591')
+    addWorkspace(w, 'ELC-77')
+    await start($)
+    await $.tool.call({ tool: 'Bash', command: 'git checkout feature/ELC-77-y' })
+    w.files = {}
+    await $.tool.call({ tool: 'Bash', command: 'git checkout main' })
+    expect((await workspaceEvents($)).map(ev => ev.text)).toEqual(['ELC-1591', 'ELC-77', 'none'])
+  })
+
+  t('/clear and the re-resolve on the next prompt log no second line for the same workspace', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ELC-1591')
+    addWorkspace(w, 'ELC-77')
+    await start($)
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    w.sid = 's2'
+    await submit($, 'hi')
+    expect((await workspaceEvents($)).map(ev => ev.text)).toEqual(['ELC-1591'])
+    await $.tool.call({ tool: 'Bash', command: 'git checkout feature/ELC-77-y' })
+    expect((await workspaceEvents($)).map(ev => ev.text)).toEqual(['ELC-1591', 'ELC-77'])
+  })
+
+  t('no workspace at start → no workspace event', async ($, on) => {
+    world(on)
+    await start($)
+    expect(await workspaceEvents($)).toEqual([])
   })
 })
 

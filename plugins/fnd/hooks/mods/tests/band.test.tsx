@@ -112,9 +112,16 @@ const peek = {
       const { value } = await $.state.get({ plugin: 'fnd', key: 'cache' } as const)
       return { text: JSON.stringify(value ?? null) }
     })
+    on('command.run', { command: 'peek-events' }, async ($: any) => {
+      const { value } = await $.state.get({ plugin: 'fnd', key: 'events' } as const)
+      return { text: JSON.stringify(value ?? []) }
+    })
   },
 }
 const peekCache = async ($: any) => JSON.parse((await $.command.run({ command: 'peek-cache', args: '' })).text)
+const peekEvents = async ($: any): Promise<{ atMs: number; kind: string; text: string }[]> =>
+  JSON.parse((await $.command.run({ command: 'peek-events', args: '' })).text)
+const logged = async ($: any) => (await peekEvents($)).map(ev => `${ev.kind} ${ev.text}`)
 
 function modelSwitch(over: Record<string, unknown>) {
   return {
@@ -173,6 +180,12 @@ describe('band', () => {
       // A desktop draws a hotkey as a badge on its native button, so none is set there.
       expect(progress?.props.hotkey).toBe(isDesktop ? undefined : 'p')
       expect(progress?.props.plain).toBeUndefined()
+      const log = await ui.find({ key: 'log' })
+      expect(log?.props).toMatchObject({ label: 'Log', dimColor: true })
+      expect(log?.props.hotkey).toBe(isDesktop ? undefined : 'l')
+      expect(log?.props.plain).toBeUndefined()
+      const keys = nodes(await ui.drawn()).filter(n => n.type === 'Button').map(n => n.props.key)
+      expect(keys).toEqual(['progress', 'log'])
     })
 
     test(`${surface}: a rule above the row (terminal only); dim label, bold value; the cache hides in overage`, async ($, on) => {
@@ -258,6 +271,7 @@ describe('band', () => {
       }
       expect((await ui.find({ key: 'compact' }))?.props).toMatchObject({ plain: true, hotkey: 'c' })
       expect((await ui.find({ key: 'progress' }))?.props).toMatchObject({ plain: true, hotkey: 'p' })
+      expect((await ui.find({ key: 'log' }))?.props).toMatchObject({ plain: true, hotkey: 'l' })
       await $.turn.start({ text: 'hi', turnId: 't1' })
       expect((await ui.find({ key: 'compact' }))?.props.plain).toBeUndefined()
       expect((await ui.find({ key: 'compact' }))?.props.dimColor).toBe(true)
@@ -480,10 +494,28 @@ describe('band', () => {
         expect(await textOf(ui, /^5h /)).toBe('5h 61%')
         expect(await textOf(ui, /^📋 /)).toBe('📋 ELC-1591 3/5 ▶ Preview themes')
         expect(await ui.find({ key: 'progress' })).toBeDefined()
+        expect(await ui.find({ key: 'log' })).toBeDefined()
         return
       }
       expect(await textOf(ui, /fable-5-1|^5h|^⏳|ELC-1591/)).toBeUndefined()
       expect(await ui.find({ key: 'progress' })).toBeUndefined()
+      expect(await ui.find({ key: 'log' })).toBeUndefined()
+    })
+
+    test(`${surface}: Log drops first, before the model`, async ($, on) => {
+      world(on)
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 60 })
+      // `cache — │ fable-5-1 │ ctx 60% │ c: Compact  p: Progress  l: Log` is 63 cells; without Log 55.
+      const ui = await mount($, surface, { bodyColumns: 58 })
+      expect(await ui.find({ key: 'compact' })).toBeDefined()
+      expect(await ui.find({ key: 'progress' })).toBeDefined()
+      expect(await textOf(ui, /fable-5-1/)).toBeDefined()
+      if (isDesktop) {
+        expect(await ui.find({ key: 'log' })).toBeDefined()
+        return
+      }
+      expect(await ui.find({ key: 'log' })).toBeUndefined()
     })
 
     test(`${surface}: the digest hides while the pane is shown and returns when it closes`, async ($, on) => {
@@ -584,6 +616,77 @@ describe('rate alarm', () => {
     const resetsAt = new Date(T0 + 125 * MIN).toISOString()
     await measure($, { window: 200_000, percent: 10 }, [{ kind: 'seven_day', percentUsed: 95, resetsAt }])
     expect(w.toasts).toEqual(['7d window: 95% used, resets in 2h 05m'])
+  })
+})
+
+describe('event log writers', () => {
+  const at = (kind: string, text: string) => ({ atMs: T0, kind, text })
+
+  test('session.start → session start, stamped with the clock', { plugins: [peek] }, async ($, on) => {
+    world(on)
+    await start($)
+    expect(await peekEvents($)).toEqual([at('session', 'start')])
+  })
+
+  test('classic.SessionStart resume and fork log their source; startup logs nothing', { plugins: [peek] }, async ($, on) => {
+    world(on)
+    on('classic.SessionStart', async () => ({}) as never)
+    await start($)
+    await $.classic.SessionStart({ source: 'startup', seconds_since_last_response: 600 } as any)
+    await $.classic.SessionStart({ source: 'resume' } as any)
+    await $.classic.SessionStart({ source: 'fork', seconds_since_last_response: 60 } as any)
+    expect(await logged($)).toEqual(['session start', 'session resume', 'session fork'])
+  })
+
+  test('session.end clear → session clear; other reasons log nothing', { plugins: [peek] }, async ($, on) => {
+    world(on)
+    await start($)
+    await $.session.end({ reason: 'resume', sessionId: 's1', resume: {} } as any)
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
+    expect(await logged($)).toEqual(['session start', 'session clear'])
+  })
+
+  test('session.compact → trigger and token sizes; unknown sizes → the trigger alone; precompute, skip, subagent → nothing', { plugins: [peek] }, async ($, on) => {
+    const { w } = world(on)
+    await start($)
+    await $.session.compact({ trigger: 'precompute', messages: KEPT } as any)
+    await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: KEPT } as any)
+    w.compact = async () => ({ skip: 'blocked' })
+    await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+    w.compact = async () => ({ messages: KEPT, tokensBefore: 412_345, tokensAfter: 38_000 })
+    await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+    w.compact = async () => ({ messages: KEPT })
+    await $.session.compact({ trigger: 'auto', messages: KEPT } as any)
+    expect(await logged($)).toEqual(['session start', 'compact manual 412k → 38k', 'compact auto'])
+  })
+
+  test('PostModelSwitch logs the new model once; the same model again logs nothing', { plugins: [peek] }, async ($, on) => {
+    const { w } = world(on)
+    on('classic.PostModelSwitch', async () => ({}) as never)
+    await start($)
+    w.model = 'claude-opus-5-5'
+    await $.classic.PostModelSwitch(modelSwitch({}))
+    await $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-opus-5-5' }))
+    expect(await logged($)).toEqual(['session start', 'model claude-opus-5-5'])
+  })
+
+  test('the rate alarm logs its toast text once per alarm', { plugins: [peek] }, async ($, on) => {
+    const { w } = world(on)
+    await start($)
+    await measure($, { window: 200_000, percent: 10 }, [{ kind: 'five_hour', percentUsed: 91 }])
+    await measure($, { window: 200_000, percent: 10 }, [{ kind: 'five_hour', percentUsed: 92 }])
+    expect(w.toasts).toEqual(['5h window: 91% used'])
+    expect(await peekEvents($)).toEqual([at('session', 'start'), at('rate', '5h window: 91% used')])
+  })
+
+  test('FND_EVENT_LOG=0 → nothing recorded, the toasts unchanged', { plugins: [peek] }, async ($, on) => {
+    const { w } = world(on, {}, { FND_EVENT_LOG: '0' })
+    await start($)
+    w.compact = async () => ({ messages: KEPT, tokensBefore: 412_345, tokensAfter: 38_000 })
+    await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+    await measure($, { window: 200_000, percent: 10 }, [{ kind: 'five_hour', percentUsed: 91 }])
+    expect(w.toasts).toEqual(['5h window: 91% used'])
+    expect(await peekEvents($)).toEqual([])
   })
 })
 

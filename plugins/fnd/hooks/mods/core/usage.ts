@@ -2,7 +2,8 @@
 // Nothing here draws; the band reads these atoms.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
-import type { FndUsage } from '../../../types'
+import type { FndEvent, FndEventKind, FndUsage } from '../../../types'
+import { fmtK, pushEvent } from './events.ts'
 import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender } from './band.tsx'
 
@@ -17,8 +18,19 @@ const cache = atom({ plugin: 'fnd', key: 'cache' } as const, CACHE_INIT)
 const tick = atom({ plugin: 'fnd', key: 'tick' } as const, 0)
 const progress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 const rateAlarmed = atom({ plugin: 'fnd', key: 'rateAlarmed' } as const, false)
+const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
 
 type $ = EngineInterface
+
+/** Appends one event-log line. FND_EVENT_LOG=0 skips the write. It never throws, because a throwing
+ *  session.start hook would skip every fnd session.start hook. */
+async function logEvent($: $, kind: FndEventKind, text: string): Promise<void> {
+  try {
+    if ((await $.env.get('FND_EVENT_LOG')) === '0') return
+    const atMs = await $.clock.now()
+    await update($, events, l => pushEvent(l, { atMs, kind, text }))
+  } catch {}
+}
 
 /** FND_BAND_COST=1 (true/yes/on) shows the session's cost; off, the figure is dropped before it reaches the atom. */
 let costShown = false
@@ -91,6 +103,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
       await update($, model, () => m)
     } catch {}
     await refresh($).catch(() => undefined)
+    await logEvent($, 'session', 'start')
     return next(e)
   })
 
@@ -123,7 +136,9 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const isAlarmed = await read($, rateAlarmed)
     if (hot && !isAlarmed) {
       await update($, rateAlarmed, () => true)
-      $.ui.toast(rateCard(hot, await $.clock.now()), { timeoutMs: ALARM_TOAST_MS })
+      const card = rateCard(hot, await $.clock.now())
+      $.ui.toast(card, { timeoutMs: ALARM_TOAST_MS })
+      await logEvent($, 'rate', card)
     } else if (!hot && isAlarmed) {
       await update($, rateAlarmed, () => false)
     }
@@ -144,6 +159,9 @@ export function registerUsage(on: On, options: PluginOptions): void {
     if (r.skip === undefined && r.messages && e.trigger !== 'precompute' && e.agentId === undefined) {
       await update($, cache, c => ({ ...c, isCold: true }))
       await update($, usage, u => compactedUsage(u, r.tokensAfter))
+      const { tokensBefore: b, tokensAfter: a } = r
+      const sizes = typeof b === 'number' && typeof a === 'number' ? ` ${fmtK(b)} → ${fmtK(a)}` : ''
+      await logEvent($, 'compact', `${e.trigger}${sizes}`)
     }
     return r
   })
@@ -155,12 +173,16 @@ export function registerUsage(on: On, options: PluginOptions): void {
       await update($, usage, u => ({ ...u, ctxPct: null, ctxTokens: null }))
       await update($, rateAlarmed, () => false)
     }
+    // No session.start follows a /clear: this line marks where the conversation restarted.
+    if (e.reason === 'clear') await logEvent($, 'session', 'clear')
     return next(e)
   })
 
   on('classic.PostModelSwitch', async ($, e, next) => {
     const m = await $.session.model()
+    const prev = await read($, model)
     await update($, model, () => m)
+    if (m !== prev) await logEvent($, 'model', m)
     const ttlMs = ttlMsOf(e.cache_ttl)
     if (forcedTtl === null && ttlMs !== null) await learnTtl($, ttlMs, 'model-switch')
     // Caches are per model: a real switch forfeits the warm one. On resume the SessionStart seed decides.
@@ -171,6 +193,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   on('classic.SessionStart', { source: /^(resume|fork)$/ }, async ($, e, next) => {
+    await logEvent($, 'session', e.source)
     const secs = e.seconds_since_last_response
     if (typeof secs === 'number') {
       const now = await $.clock.now()

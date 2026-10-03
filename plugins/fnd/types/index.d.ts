@@ -31,6 +31,10 @@ export type FndProgress =
     }
   | { workId: null; branch: string | null }
 
+export type FndEventKind = 'session' | 'model' | 'compact' | 'rate' | 'workspace' | 'slim' | 'prompt' | 'guard'
+/** One event-log line; `atMs` = `$.clock.now()` when written, `text` one line, no kind prefix. */
+export type FndEvent = { atMs: number; kind: FndEventKind; text: string }
+
 declare module 'claude-code' {
   interface PluginState {
     fnd: {
@@ -51,6 +55,8 @@ declare module 'claude-code' {
       sessionId: string | null
       /** launch root latched once for the guard */
       guardRoot: string | null
+      /** event-log ring buffer, oldest first, at most 50; stays [] under FND_EVENT_LOG=0 */
+      events: FndEvent[]
     }
   }
 }

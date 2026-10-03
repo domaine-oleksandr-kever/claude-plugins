@@ -21,6 +21,18 @@ const slimJson = (value: unknown, systemMessage?: string) =>
     ...(systemMessage ? { systemMessage } : {}),
   })
 
+/** Reads fnd's event log from beside it: any plugin reads any value. */
+const PEEK_EVENTS = {
+  name: 'peek-events',
+  register(on: On) {
+    on('command.run', { command: 'peek-events' } as any, async ($: any) => ({
+      text: JSON.stringify((await $.state.get({ plugin: 'fnd', key: 'events' })).value ?? []),
+    }))
+  },
+}
+const logged = async ($: any, kind: string): Promise<{ atMs: number; kind: string; text: string }[]> =>
+  (JSON.parse((await $.command.run({ command: 'peek-events', args: '' })).text) as any[]).filter(ev => ev.kind === kind)
+
 /** Mocks plus op stubs; `below` is what the tool itself answers, `answer` the mcp-slim child's run. */
 function setup(
   on: On,
@@ -227,5 +239,42 @@ describe('C2-toast (classic hook slimmed it beneath)', () => {
     await $.tool.call({ tool: TOOL } as any)
     expect(runs.length).toBe(0)
     expect(toasts.length).toBe(0)
+  })
+})
+
+describe('event log', () => {
+  test('a stub expansion logs one slim line: the tool and the toast without its prefix', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = setup(on, { result: NOTICE }, () => out(slimJson(SLIMMED, STATS)))
+    await $.tool.call({ tool: TOOL } as any)
+    expect(toasts.map(t => t.text)).toEqual([STATS])
+    expect(await logged($, 'slim')).toEqual([{ atMs: 1_000_000, kind: 'slim', text: 'searchJiraIssuesUsingJql: compressed 3,197,763 B → 41,000 B (−98.7%)' }])
+  })
+
+  test('the figure of a result slimmed beneath logs one slim line', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    setup(on, { result: SLIMMED, text: SLIMMED })
+    await $.tool.call({ tool: TOOL } as any)
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual(['searchJiraIssuesUsingJql: compressed 3,197,763 B → 41,000 B (−98.7%)'])
+  })
+
+  for (const [name, below] of [['an expansion', { result: NOTICE }], ['a figure', { result: SLIMMED, text: SLIMMED }]] as const) {
+    test(`in a subagent ${name} logs nothing`, { plugins: [PEEK_EVENTS] }, async ($, on) => {
+      setup(on, below, () => out(slimJson(SLIMMED, STATS)))
+      await $.tool.call({ tool: TOOL, agentId: 'agent-7' } as any)
+      expect(await logged($, 'slim')).toEqual([])
+    })
+  }
+
+  test('FND_SLIM_TOAST=0 → no toast, the line is still logged', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = setup(on, { result: NOTICE }, () => out(slimJson(SLIMMED, STATS)), { FND_SLIM_TOAST: '0' })
+    await $.tool.call({ tool: TOOL } as any)
+    expect(toasts).toEqual([])
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual(['searchJiraIssuesUsingJql: compressed 3,197,763 B → 41,000 B (−98.7%)'])
+  })
+
+  test('FND_EVENT_LOG=0 → the toast unchanged, nothing logged', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = setup(on, { result: NOTICE }, () => out(slimJson(SLIMMED, STATS)), { FND_EVENT_LOG: '0' })
+    await $.tool.call({ tool: TOOL } as any)
+    expect(toasts).toEqual([{ text: STATS, timeoutMs: 5000 }])
+    expect(await logged($, 'slim')).toEqual([])
   })
 })

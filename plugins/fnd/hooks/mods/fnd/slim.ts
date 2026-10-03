@@ -1,7 +1,22 @@
 // MCP result slimming as a mod: host-stub replacement and the savings toast (FND_SLIM_TOAST=0 silences it,
 // FND_SLIM_TOAST_MS sets how long it stays).
-import type { On } from 'claude-code'
+import { atom, update } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
+import type { FndEvent, FndEventKind } from '../../../types'
+import { bare, pushEvent, toolName } from '../core/events.ts'
 import { buildHookRun, omit, parseHookOut, slimFigureIn, stubBytes, stubText, toastMs } from './node-hook.ts'
+
+const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
+
+type $ = EngineInterface
+
+async function logEvent($: $, kind: FndEventKind, text: string): Promise<void> {
+  try {
+    if ((await $.env.get('FND_EVENT_LOG')) === '0') return
+    const atMs = await $.clock.now()
+    await update($, events, l => pushEvent(l, { atMs, kind, text }))
+  } catch {}
+}
 
 export function registerSlim(on: On): void {
   on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {
@@ -19,6 +34,7 @@ export function registerSlim(on: On): void {
       if (figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
         $.ui.toast(figure, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS')) })
       }
+      if (figure) await logEvent($, 'slim', `${toolName(e.tool)}: ${bare(figure)}`)
       return r
     }
 
@@ -41,9 +57,11 @@ export function registerSlim(on: On): void {
     const hso = out?.hookSpecificOutput
     const result = hso?.updatedMCPToolOutput ?? hso?.updatedToolOutput
     if (result === undefined) return r
-    if (isMain && typeof out?.systemMessage === 'string' && out.systemMessage && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
-      $.ui.toast(out.systemMessage, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS')) })
+    const figure = isMain && typeof out?.systemMessage === 'string' ? out.systemMessage : ''
+    if (figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
+      $.ui.toast(figure, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS')) })
     }
+    if (figure) await logEvent($, 'slim', `${toolName(e.tool)}: ${bare(figure)}`)
     // A fresh object: returning `r` itself would make core reuse its own messages verbatim.
     return r.context?.length ? { result, context: r.context } : { result }
   })

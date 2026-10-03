@@ -68,6 +68,18 @@ const PEEK = {
   },
 }
 
+/** Reads fnd's event log from beside it: any plugin reads any value. */
+const PEEK_EVENTS = {
+  name: 'peek-events',
+  register(on: On) {
+    on('command.run', { command: 'peek-events' } as any, async ($: any) => ({
+      text: JSON.stringify((await $.state.get({ plugin: 'fnd', key: 'events' })).value ?? []),
+    }))
+  },
+}
+const logged = async ($: any, kind: string): Promise<{ atMs: number; kind: string; text: string }[]> =>
+  (JSON.parse((await $.command.run({ command: 'peek-events', args: '' })).text) as any[]).filter(ev => ev.kind === kind)
+
 async function lastKey($: any): Promise<unknown> {
   const r = await $.tool.call({ tool: 'PeekState' })
   return JSON.parse(r.result)
@@ -263,3 +275,32 @@ describe('co-resident hooks', () => {
 
 // An aborted next.signal after the spawn (→ no second dispatch beneath, no toast) is checked live only: the kit has no
 // interrupt, and an inline test plugin sits beneath the plugin under test, so nothing here can abort fnd's dispatch.
+
+describe('event log', () => {
+  test('a rewritten paste logs one prompt line: the toast without its prefix', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = world(on)
+    await submit($, BIG)
+    expect(toasts.map(t => t.text)).toEqual([RW.summary])
+    expect(await logged($, 'prompt')).toEqual([{ atMs: 1_000_000, kind: 'prompt', text: '12,010 B → 300 B (−97.5%)' }])
+  })
+
+  test('a drop beneath logs nothing', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    world(on, ok(), { drop: true })
+    await submit($, BIG)
+    expect(await logged($, 'prompt')).toEqual([])
+  })
+
+  test('FND_SLIM_TOAST=0 → no toast, the line is still logged', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = world(on, ok(), { env: { FND_SLIM_TOAST: '0' } })
+    await submit($, BIG)
+    expect(toasts).toEqual([])
+    expect((await logged($, 'prompt')).map(ev => ev.text)).toEqual(['12,010 B → 300 B (−97.5%)'])
+  })
+
+  test('FND_EVENT_LOG=0 → the toast unchanged, nothing logged', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = world(on, ok(), { env: { FND_EVENT_LOG: '0' } })
+    await submit($, BIG)
+    expect(toasts.map(t => t.text)).toEqual([RW.summary])
+    expect(await logged($, 'prompt')).toEqual([])
+  })
+})

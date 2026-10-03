@@ -159,6 +159,7 @@ describe('layout', () => {
     digest: 'ELC-1591 3/5 ▶ Preview themes',
     compact: { key: 'compact', label: 'Compact', hotkey: 'c', plain: true },
     progress: { key: 'progress', label: 'Progress', hotkey: 'p', plain: true },
+    log: { key: 'log', label: 'Log', hotkey: 'l', plain: true },
   }
   const at = (w: number) => rowText(layout(full, w))
 
@@ -166,14 +167,15 @@ describe('layout', () => {
     expect(buttonText({ key: 'compact', label: 'Compact', hotkey: 'c', plain: true })).toBe('c: Compact')
     expect(buttonText({ key: 'compact', label: 'Compact', hotkey: 'c', plain: false })).toBe('[ Compact ]')
     expect(rowText(full)).toBe(
-      'cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress',
+      'cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress  l: Log',
     )
-    expect(cells(rowText(full))).toBe(137)
+    expect(cells(rowText(full))).toBe(145)
   })
 
-  test('drop order 1→6', () => {
+  test('drop order 1→7', () => {
     expect(at(160)).toBe(rowText(full))
-    expect(at(137)).toBe(rowText(full))
+    expect(at(145)).toBe(rowText(full))
+    expect(at(137)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress')
     expect(at(110)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ c: Compact  p: Progress')
     expect(at(100)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ c: Compact  p: Progress')
     expect(at(80)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% │ c: Compact  p: Progress')
@@ -184,7 +186,7 @@ describe('layout', () => {
   })
 
   test('the fullest window outlives the others wherever it sits', () => {
-    const s = { ...full, digest: null, cost: null, rates: toRates([
+    const s = { ...full, log: null, digest: null, cost: null, rates: toRates([
       { kind: 'five_hour', percentUsed: 10 },
       { kind: 'seven_day', percentUsed: 90 },
     ]) }
@@ -209,6 +211,7 @@ describe('layout', () => {
     expect(narrow.cost).toBeNull()
     expect(narrow.digest).toBeNull()
     expect(narrow.progress).toBeNull()
+    expect(narrow.log).toBeNull()
   })
 
   test('an unmeasured width keeps the row whole', () => {
@@ -334,7 +337,7 @@ describe('segments', () => {
       digest: 'ELC-1591 3/5 ▶ Preview themes',
     })
     expect(rowText(s)).toBe(
-      'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress',
+      'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress  l: Log',
     )
   })
 })

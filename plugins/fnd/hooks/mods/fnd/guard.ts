@@ -1,6 +1,8 @@
 // Scratch-path guard as a mod: tool.describe note + tool.call deny by delegation to scratch-path-guard.cjs.
 import { atom, read, update } from 'claude-code'
-import type { On } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
+import type { FndEvent, FndEventKind } from '../../../types'
+import { bare, pushEvent, toolName } from '../core/events.ts'
 import { buildHookRun, omit, parseHookOut } from './node-hook.ts'
 
 /** Same source as the plugin.json PreToolUse matcher of scratch-path-guard.cjs (layout-assertions pins it). */
@@ -21,6 +23,17 @@ export const DENY_FALLBACK = 'fnd scratch-path-guard: path outside the project'
 
 /** The launch root, latched once: the MCP servers' roots were fixed where they launched. */
 const guardRoot = atom({ plugin: 'fnd', key: 'guardRoot' } as const, null)
+const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
+
+type $ = EngineInterface
+
+async function logEvent($: $, kind: FndEventKind, text: string): Promise<void> {
+  try {
+    if ((await $.env.get('FND_EVENT_LOG')) === '0') return
+    const atMs = await $.clock.now()
+    await update($, events, l => pushEvent(l, { atMs, kind, text }))
+  } catch {}
+}
 
 export function guardNote(tool: string): string {
   return TMPDIR_OK_RE.test(tool) ? NOTE_TMPDIR : NOTE
@@ -66,7 +79,9 @@ export function registerGuard(on: On): void {
     const out = await $.process.run(argv, init).then(parseHookOut, () => null)
     const hso = out?.hookSpecificOutput
     if (hso?.permissionDecision !== 'deny') return next(e)
-    const reason = hso.permissionDecisionReason
-    return { deny: typeof reason === 'string' && reason.trim() ? reason : DENY_FALLBACK }
+    const raw = hso.permissionDecisionReason
+    const reason = typeof raw === 'string' && raw.trim() ? raw : DENY_FALLBACK
+    await logEvent($, 'guard', `${toolName(e.tool)}: ${bare(reason.split('\n')[0] ?? '')}`)
+    return { deny: reason }
   })
 }

@@ -115,6 +115,7 @@ export type BandSegs = {
   digest: string | null
   compact: BandButton | null
   progress: BandButton | null
+  log: BandButton | null
 }
 
 export const SEP = ' │ '
@@ -136,7 +137,7 @@ export function rowText(s: BandSegs): string {
   if (s.rates.length) groups.push(s.rates.map(rateText).join(RATE_GAP))
   if (s.cost !== null) groups.push(s.cost)
   if (s.digest !== null) groups.push(s.digest)
-  const buttons = [s.compact, s.progress].filter((b): b is BandButton => b !== null)
+  const buttons = [s.compact, s.progress, s.log].filter((b): b is BandButton => b !== null)
   if (buttons.length) groups.push(buttons.map(buttonText).join(BUTTON_GAP))
   return groups.join(SEP)
 }
@@ -147,16 +148,17 @@ export function cells(text: string): number {
 }
 
 /**
- * Drops segments until the row fits `bodyColumns`: the digest, the cost, then rate windows beyond the
- * fullest (least full first), then the last rate, the model, the Progress button. Cache, ctx and
- * Compact are never dropped. 0 or absent columns = a surface that did not measure: kept whole.
+ * Drops segments until the row fits `bodyColumns`: the Log button (/fnd-log stays), the digest, the cost,
+ * then rate windows beyond the fullest (least full first), then the last rate, the model, the Progress button.
+ * Cache, ctx and Compact are never dropped. 0 or absent columns = a surface that did not measure: kept whole.
  */
 export function layout(segs: BandSegs, bodyColumns: number | undefined): BandSegs {
   if (!bodyColumns || bodyColumns <= 0) return segs
   let s: BandSegs = segs
   const fits = () => cells(rowText(s)) <= bodyColumns
   if (fits()) return s
-  if (s.digest !== null) s = { ...s, digest: null }
+  if (s.log !== null) s = { ...s, log: null }
+  if (!fits() && s.digest !== null) s = { ...s, digest: null }
   if (!fits() && s.cost !== null) s = { ...s, cost: null }
   while (!fits() && s.rates.length > 1) {
     const fullest = s.rates.reduce((a, b) => (b.pct > a.pct ? b : a))
@@ -293,6 +295,7 @@ export function compactButton(ctxPct: number | null, isWorking: boolean): BandBu
 }
 
 export const PROGRESS_BUTTON: BandButton = { key: 'progress', label: 'Progress', hotkey: 'p', plain: true }
+export const LOG_BUTTON: BandButton = { key: 'log', label: 'Log', hotkey: 'l', plain: true }
 
 export type CompactOutcome = { skip?: string; tokensBefore?: number; tokensAfter?: number }
 
@@ -333,6 +336,7 @@ export function bandSegs(i: BandInput): BandSegs {
     digest: i.digest,
     compact: compactButton(i.usage.ctxPct, i.isWorking),
     progress: PROGRESS_BUTTON,
+    log: LOG_BUTTON,
   }
 }
 

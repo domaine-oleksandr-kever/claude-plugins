@@ -1,6 +1,6 @@
 // Status band: the AbovePrompt row drawn from the atoms, and the Compact press.
-// Render only reads atoms; usage.ts and progress.tsx write them. The Progress button's press is
-// answered by progress.tsx's `ui.press` hook on element `progress`.
+// Render only reads atoms; usage.ts and progress.tsx write them. The Progress and Log presses are
+// answered by the `ui.press` hooks on elements `progress` (progress.tsx) and `log` (log.tsx).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, RenderNode } from 'claude-code'
 import type { FndRate } from '../../../types'
@@ -180,6 +180,10 @@ export function registerBand(on: On, options: PluginOptions): void {
     if (segs.progress !== null) {
       if (buttons.length) buttons.push(<Text>{'  '}</Text>)
       buttons.push(<Button key="progress" label="Progress" {...hot('p')} {...(letters ?? { dimColor: true })} onPress={() => {}} />)
+    }
+    if (segs.log !== null) {
+      if (buttons.length) buttons.push(<Text>{'  '}</Text>)
+      buttons.push(<Button key="log" label="Log" {...hot('l')} {...(letters ?? { dimColor: true })} onPress={() => {}} />)
     }
     if (buttons.length) groups.push(buttons)
 

@@ -67,6 +67,18 @@ function setup(
   return { runs, below, live }
 }
 
+/** Reads fnd's event log from beside it: any plugin reads any value. */
+const PEEK_EVENTS = {
+  name: 'peek-events',
+  register(on: On) {
+    on('command.run', { command: 'peek-events' } as any, async ($: any) => ({
+      text: JSON.stringify((await $.state.get({ plugin: 'fnd', key: 'events' })).value ?? []),
+    }))
+  },
+}
+const logged = async ($: any, kind: string): Promise<{ atMs: number; kind: string; text: string }[]> =>
+  (JSON.parse((await $.command.run({ command: 'peek-events', args: '' })).text) as any[]).filter(ev => ev.kind === kind)
+
 const noSettings = (on: On, env?: Record<string, string>) =>
   on('settings.read', async () => ({ value: env ? { env } : {} }))
 
@@ -224,5 +236,33 @@ describe('B2 tool.call delegation', () => {
     expect(r.result).toBe('shot saved')
     expect(runs.length).toBe(0)
     expect(below.length).toBe(1)
+  })
+})
+
+describe('event log', () => {
+  test('a deny logs one guard line: the tool after the last __ and the first line of the reason without the guard prefix', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    setup(on, () => out(denyJson('fnd scratch-path-guard: /etc/x.png is outside the project\nUse .claude/tmp/')))
+    await $.tool.call({ tool: SHOT, filePath: '/etc/x.png' } as any)
+    expect(await logged($, 'guard')).toEqual([
+      { atMs: 1_000_000, kind: 'guard', text: 'take_screenshot: /etc/x.png is outside the project' },
+    ])
+  })
+
+  test('the fallback reason is logged as denied', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    setup(on, () => out(denyJson()))
+    await $.tool.call({ tool: GUARDED[4], code: 'x' } as any)
+    expect((await logged($, 'guard')).map(ev => ev.text)).toEqual(['browser_run_code_unsafe: path outside the project'])
+  })
+
+  test('a pass logs nothing', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    setup(on, () => out('{}'))
+    await $.tool.call({ tool: SHOT, filePath: '/repo/.claude/tmp/x.png' } as any)
+    expect(await logged($, 'guard')).toEqual([])
+  })
+
+  test('FND_EVENT_LOG=0 → the deny stands, nothing logged', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    setup(on, () => out(denyJson('outside the project')), { env: { FND_EVENT_LOG: '0' } })
+    expect((await $.tool.call({ tool: SHOT, filePath: '/etc/x.png' } as any)).deny).toBe('outside the project')
+    expect(await logged($, 'guard')).toEqual([])
   })
 })
