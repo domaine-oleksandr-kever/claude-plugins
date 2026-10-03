@@ -173,6 +173,15 @@ describe('fallback to the typed text', () => {
     })
   }
 
+  test('FND_SLIM_TOAST=0 → the rewrite still applies, no toast', async ($, on) => {
+    const { runs, toasts, bottom } = world(on, ok(), { env: { FND_SLIM_TOAST: '0' } })
+    await submit($, BIG)
+    expect(runs.length).toBe(1)
+    expect(bottom.length).toBe(1)
+    expect(bottom[0].text).not.toBe(BIG)
+    expect(toasts).toEqual([])
+  })
+
   test('FND_PROMPT_JSON=0 → no spawn', async ($, on) => {
     const { runs, bottom } = world(on, ok(), { env: { FND_PROMPT_JSON: '0' } })
     await submit($, BIG)

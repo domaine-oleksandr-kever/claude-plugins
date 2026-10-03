@@ -158,6 +158,13 @@ describe('passthrough', () => {
     expect(toasts.length).toBe(0)
   })
 
+  test('FND_SLIM_TOAST=0 → the stub is still replaced, no toast', async ($, on) => {
+    const { runs, toasts } = setup(on, { result: NOTICE }, () => out(slimJson(SLIMMED, STATS)), { FND_SLIM_TOAST: '0' })
+    expect(await $.tool.call({ tool: TOOL } as any)).toEqual({ result: SLIMMED })
+    expect(runs.length).toBe(1)
+    expect(toasts).toEqual([])
+  })
+
   test('a non-MCP tool is not touched', async ($, on) => {
     const { runs, toasts } = setup(on, { result: NOTICE }, () => out(slimJson(SLIMMED, STATS)))
     expect((await $.tool.call({ tool: 'Read', file_path: '/repo/a' } as any)).result).toBe(NOTICE)
@@ -186,6 +193,13 @@ describe('C2-toast (classic hook slimmed it beneath)', () => {
     const { toasts } = setup(on, { result: quoted, text: quoted })
     await $.tool.call({ tool: TOOL } as any)
     expect(toasts.length).toBe(0)
+  })
+
+  test('FND_SLIM_TOAST=0 → the figure is not toasted', async ($, on) => {
+    const { runs, toasts } = setup(on, { result: SLIMMED, text: SLIMMED }, undefined, { FND_SLIM_TOAST: '0' })
+    expect((await $.tool.call({ tool: TOOL } as any)).result).toBe(SLIMMED)
+    expect(runs.length).toBe(0)
+    expect(toasts).toEqual([])
   })
 
   test('FND_MCP_SLIM_STUB_BYTES raises that bound', async ($, on) => {

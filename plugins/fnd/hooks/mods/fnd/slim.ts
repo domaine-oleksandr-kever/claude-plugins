@@ -1,4 +1,4 @@
-// MCP result slimming as a mod: host-stub replacement and the savings toast.
+// MCP result slimming as a mod: host-stub replacement and the savings toast (FND_SLIM_TOAST=0 silences it).
 import type { On } from 'claude-code'
 import { buildHookRun, omit, parseHookOut, slimFigureIn, stubBytes, stubText } from './node-hook.ts'
 
@@ -17,7 +17,7 @@ export function registerSlim(on: On): void {
       if (!isMain) return r
       const limit = stubBytes(await $.env.get('FND_MCP_SLIM_STUB_BYTES'))
       const figure = slimFigureIn(r.result, limit, r.text)
-      if (figure) $.ui.toast(figure, { timeoutMs: TOAST_MS })
+      if (figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') $.ui.toast(figure, { timeoutMs: TOAST_MS })
       return r
     }
 
@@ -40,7 +40,7 @@ export function registerSlim(on: On): void {
     const hso = out?.hookSpecificOutput
     const result = hso?.updatedMCPToolOutput ?? hso?.updatedToolOutput
     if (result === undefined) return r
-    if (isMain && typeof out?.systemMessage === 'string' && out.systemMessage) {
+    if (isMain && typeof out?.systemMessage === 'string' && out.systemMessage && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
       $.ui.toast(out.systemMessage, { timeoutMs: TOAST_MS })
     }
     // A fresh object: returning `r` itself would make core reuse its own messages verbatim.

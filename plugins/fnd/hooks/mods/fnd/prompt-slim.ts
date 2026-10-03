@@ -32,7 +32,10 @@ export function registerPromptSlim(on: On): void {
     if (next.signal.aborted) return { drop: 'interrupted' }
     if (!rw) return next(e)
     const r = await next({ ...e, text: rw.text, context: [...(e.context ?? []), rw.context] })
-    if (r.drop === undefined) $.ui.toast(rw.summary, { timeoutMs: TOAST_MS })
+    // After next: a failing env read must not turn the accepted prompt into an error.
+    if (r.drop === undefined && (await $.env.get('FND_SLIM_TOAST').catch(() => undefined)) !== '0') {
+      $.ui.toast(rw.summary, { timeoutMs: TOAST_MS })
+    }
     return r
   })
 }
