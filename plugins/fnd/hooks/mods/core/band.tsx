@@ -6,6 +6,7 @@ import type { EngineInterface, On, PluginOptions, RenderNode } from 'claude-code
 import type { FndRate } from '../../../types'
 import {
   CACHE_INIT,
+  CTX_PROPS,
   GLYPH,
   LEVEL_PROPS,
   RULE,
@@ -152,7 +153,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     if (segs.model !== null) {
       groups.push([<Text wrap="truncate-end">{isDesktop ? `${GLYPH.model} ${segs.model}` : segs.model}</Text>])
     }
-    const ctxLevel = u.ctxPct === null ? {} : LEVEL_PROPS[pctLevel(u.ctxPct)]
+    const ctxLevel = u.ctxPct === null ? {} : CTX_PROPS[pctLevel(u.ctxPct)]
     groups.push([hoverable('seg-ctx', labeled(label(segs.ctx), dimLabel, { bold: true, ...ctxLevel }), ctxCard(u))])
     if (segs.rates.length) {
       groups.push([...(isDesktop ? [<Text>{`${GLYPH.rates} `}</Text>] : []), ...segs.rates.flatMap(rate)])

@@ -235,6 +235,9 @@ describe('band', () => {
       expect(quiet?.props.variant).toBeUndefined()
       expect(quiet?.props.plain).toBeUndefined()
       expect((await valueOf(ui, ctxRe))?.props).toMatchObject({ color: 'warning', bold: true })
+      await measure($, { window: 200_000, percent: 25 })
+      expect((await valueOf(ui, ctxRe))?.props).toMatchObject({ color: 'success', bold: true })
+      expect(await ui.find({ key: 'compact' })).toBeUndefined()
     })
 
     test(`${surface}: hotkey letters only while the band holds the keyboard`, async ($, on) => {

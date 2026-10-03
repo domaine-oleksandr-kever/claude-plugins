@@ -14,6 +14,8 @@ export const LEVEL_PROPS: Record<Level, { color?: string; bold?: boolean; invers
   warning: { color: 'warning' },
   crit: CRIT,
 }
+/** The ctx value alone is green while fine, as the classic notice's 🟢 was; the rest of the band stays plain there. */
+export const CTX_PROPS: typeof LEVEL_PROPS = { ...LEVEL_PROPS, plain: { color: 'success' } }
 
 /** ctx % and every rate window: ≤ 30 plain, > 30 warning, ≥ 80 crit, judged on the rounded figure the band shows. */
 export function pctLevel(pct: number): Level {

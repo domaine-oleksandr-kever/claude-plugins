@@ -3603,7 +3603,7 @@ ctx1="$(printf '%s' "$out1" | jq -r '.context' 2>/dev/null)"
 assert_contains PM1-ctx-path "$ctx1" "full=$p1"
 assert_contains PM1-ctx-cli  "$ctx1" "node $JS <file> --jq '<jq-path>'"
 assert_absent   PM1-ctx-no-sweep "$ctx1" "swept"
-if printf '%s' "$out1" | jq -r '.summary' 2>/dev/null | grep -qE '^fnd-prompt-slim: [0-9,]+ B → [0-9,]+ B \(−[0-9]+\.[0-9]%\)$'; then ok
+if printf '%s' "$out1" | jq -r '.summary' 2>/dev/null | grep -qE '^fnd-prompt-slim: [0-9,]+ B → [0-9,]+ B \([-−+]?[0-9]+\.[0-9]%\)(, [0-9]+/[0-9]+ stubbed)?$'; then ok
 else bad PM1-summary "summary shape: $(printf '%s' "$out1" | jq -r '.summary' 2>/dev/null)"; fi
 
 # PM2: the classic guard beneath sees the rewrite and lets it through
@@ -3815,13 +3815,17 @@ else bad PM27-precondition "fixture body did not crush past 8 KB"; fi
 # PM28: thirty compressible blobs → crush files exist only for the bodies kept, and a blob past the
 # cap is never slimmed: its stub carries the narrowing --jq recipe, not the whole-file CLI line
 C28="$(pm_cwd 28)"; crush28="$(pm_count "$PMD" 'fnd-crush-*')"
-t28="$(run_mod "$(pm_in thirty "$C28" "$TMP")" | jq -r '.text')"
+o28="$(run_mod "$(pm_in thirty "$C28" "$TMP")")"
+t28="$(printf '%s' "$o28" | jq -r '.text')"
 nc28=$(printf '%s\n' "$t28" | grep -c '^fnd-mcp-slim: compressed ')
 ns28=$(printf '%s\n' "$t28" | grep -c '^<<fnd-mcp-slim stub>>')
 if [ "$nc28" -gt 0 ] && [ "$ns28" -gt 0 ] && [ $((nc28 + ns28)) = 30 ]; then ok; else bad PM28-split "compressed=$nc28 stub=$ns28"; fi
 assert_eq PM28-crush-kept-only "$(( $(pm_count "$PMD" 'fnd-crush-*') - crush28 ))" "$nc28"
 assert_eq PM28-stub-jq "$(printf '%s\n' "$t28" | grep -c "^  node .*json-slim.cjs .* --jq '<jq-path>'")" "$ns28"
 assert_absent PM28-no-plain-cli "$t28" "not compressible here"
+# the toast's figure counts a stubbed blob at the profile json-slim hands over, and says how many were stubbed
+if printf '%s' "$o28" | jq -r '.summary' | grep -qE ", $ns28/30 stubbed$"; then ok
+else bad PM28-summary-stubbed "summary: $(printf '%s' "$o28" | jq -r '.summary')"; fi
 
 # PM29: two blobs, the second cannot be saved → nothing printed, and the first spill is unlinked
 C29="$(pm_cwd 29)"; mkdir -p "$C29/b"

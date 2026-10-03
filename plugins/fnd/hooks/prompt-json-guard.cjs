@@ -247,6 +247,10 @@ function promptJsonRewrite(input) {
     let at = 0;
     let inB = 0;
     let outB = 0;
+    // The toast's figure: what the model reads after fnd — the in-place body, or for a stubbed blob
+    // the profile json-slim hands it on demand (the blob itself when nothing compressed).
+    let readB = 0;
+    let stubs = 0;
     for (let i = 0; i < blobs.length; i++) {
       const b = blobs[i];
       const p = paths[i];
@@ -269,6 +273,8 @@ function promptJsonRewrite(input) {
       }
       created.push(...mine);
       if (!built || built.bytes >= b.bytes) return abort();
+      if (fits) readB += built.bytes;
+      else { stubs++; readB += r && !r.error && r.wasModified ? r.bytesOut : b.bytes; }
       out += prompt.slice(at, b.start) + built.value;
       at = b.start + b.blob.length;
       inB += b.bytes;
@@ -283,7 +289,8 @@ function promptJsonRewrite(input) {
       `(${inB.toLocaleString('en-US')} B); each was saved to a file and replaced in place by its ` +
       `compressed body or a stub — ${paths.map((x) => `full=${x}`).join(', ')}. These files are the paste: narrow with ` +
       `node ${ms.SLIM_CLI} <file> --jq '<jq-path>' (${js.JQ_GRAMMAR_HINT}) or grep; never raw-Read them.`;
-    const summary = ms.statsLine('compressed', inB, outB).replace(/^fnd-mcp-slim: \S+ /, 'fnd-prompt-slim: ');
+    const summary = ms.statsLine('compressed', inB, readB).replace(/^fnd-mcp-slim: \S+ /, 'fnd-prompt-slim: ') +
+      (stubs ? `, ${stubs}/${blobs.length} stubbed` : '');
     const res = { text: out, context, summary };
     // An answer the mod would drop leaves spills that nothing references.
     if (context.length > CONTEXT_MAX || Buffer.byteLength(JSON.stringify(res), 'utf8') > OUT_MAX) return abort();

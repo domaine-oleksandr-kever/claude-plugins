@@ -2,6 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import {
   CACHE_INIT,
   CRIT,
+  CTX_PROPS,
   LEVEL_PROPS,
   USAGE_INIT,
   alarmRate,
@@ -53,6 +54,10 @@ describe('ladders', () => {
     expect(pctLevel(30.4)).toBe('plain')
     expect(pctLevel(30.5)).toBe('warning')
     expect(pctLevel(79.6)).toBe('crit')
+    expect(CTX_PROPS.plain).toEqual({ color: 'success' })
+    expect(CTX_PROPS.warning).toEqual(LEVEL_PROPS.warning)
+    expect(CTX_PROPS.crit).toEqual(LEVEL_PROPS.crit)
+    expect(LEVEL_PROPS.plain).toEqual({})
   })
 
   test('cache ladder at 10/9/2/1 min for a 1 h TTL', () => {

@@ -1654,8 +1654,8 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 
 **Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the desktop frames its panel itself, so no rule is drawn there. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain, the digest's work id is bold and the separators are dim.
 
-**Colors.** ctx and every rate window are plain up to 30 %, use the theme's `warning` color above
-30 % and the alarm look from 80 %. The cache is plain at 10 min or more, `warning` below 10 min and
+**Colors.** ctx is green (the theme's `success`) up to 30 %, as the classic notice's 🟢 was; the rate
+windows are plain there. Both use the theme's `warning` color above 30 % and the alarm look from 80 %. The cache is plain at 10 min or more, `warning` below 10 min and
 the alarm below 2 min (a 5 min TTL scales both: warning below 2 min, the alarm below 24 s). Only
 theme keys are used, so the band follows light, dark and high-contrast themes. The alarm look is
 `warning` + bold + inverse until a dedicated error key is proven to draw on every theme.
@@ -1788,7 +1788,9 @@ blob to a file first and replaces each one in place by `mcp-slim.cjs`'s compress
 `<<full=…>>` handle on that file, or by its stub when compression does not pay off (no gain, a
 body still 8 KB or more, or the prompt's 32 KB replacement budget spent). The model gets the rewritten prompt plus one context line naming the files and the
 `json-slim.cjs --jq` recipe to narrow them, and a toast shows the figure, e.g.
-`fnd-prompt-slim: 48,210 B → 2,104 B (−95.6%)`, for 5 s (`FND_SLIM_TOAST_MS` sets it, `FND_SLIM_TOAST=0` silences it). One submission, nothing is blocked.
+`fnd-prompt-slim: 48,210 B → 2,104 B (−95.6%)`: the paste against what the model reads after fnd. For a
+stubbed blob that is the profile `json-slim.cjs` hands it on demand, not the stub's own size, and the
+toast says so: `fnd-prompt-slim: 25,072 B → 12,522 B (−50.1%), 1/1 stubbed`. It stays for 5 s (`FND_SLIM_TOAST_MS` sets it, `FND_SLIM_TOAST=0` silences it). One submission, nothing is blocked.
 - **The row shows the rewrite.** The transcript row holds the rewritten text, not the paste. The
   original lives only in the saved files.
 - **The saved files are durable.** They go to the task workspace `tmp/` when there is exactly one
