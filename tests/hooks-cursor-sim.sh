@@ -586,32 +586,46 @@ assert_contains P1-camel-user  "$(printf '%s' "$out" | jq -r '.userMessage')"  '
 assert_eq P1b-obj-shape "$(printf '%s' "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename elc-1.jpeg obj)")" | jq -r '.permission')" "deny"
 # a prefixed tool name (another host's spelling reaching this event) is covered as well
 assert_eq P1c-prefixed "$(printf '%s' "$(run_shim beforeMCPExecution "$(pev mcp__playwright__browser_take_screenshot filename elc-1.jpeg)")" | jq -r '.permission')" "deny"
-# P2: the sanctioned destination, an out-of-tree path, and a non-screenshot MCP tool are silent.
+# P2: the sanctioned destination and a non-screenshot MCP tool are silent; an out-of-tree path is
+# denied, since the servers refuse any file outside the project anyway.
 # The workspace path is ABSOLUTE (v0.64.1): Cursor's tool names carry no server prefix, so the guard
 # cannot tell this from a per-user playwright and judges it as a default-configured one — which
 # resolves a relative filename against `<cwd>/.playwright-mcp`, inside the checkout.
 assert_eq P2-workspace  "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename "$PPROJ/.claude/tasks/ELC-1/tmp/shot.png")")" ""
-assert_eq P2b-outside   "$(run_shim beforeMCPExecution "$(pev take_screenshot filePath "$TMP/outside.png")")" ""
+# $TMP sits under the real TMPDIR, which chrome-devtools accepts — the guard gets its own.
+POSTMP="$TMP/ostmp"; mkdir -p "$POSTMP"
+assert_eq P2b-outside   "$(run_shim beforeMCPExecution "$(pev take_screenshot filePath "$TMP/outside.png")" TMPDIR="$POSTMP" | jq -r '.permission')" "deny"
+# the tools wired beside the screenshots ride the same event: a snapshot / network body / script
+# path outside the project is denied, inline run_code_unsafe code is not
+assert_eq P2d-snapshot  "$(run_shim beforeMCPExecution "$(pev take_snapshot filePath "$TMP/snap.txt")" TMPDIR="$POSTMP" | jq -r '.permission')" "deny"
+assert_eq P2e-network   "$(run_shim beforeMCPExecution "$(pev get_network_request responseFilePath "$TMP/body.json")" TMPDIR="$POSTMP" | jq -r '.permission')" "deny"
+assert_eq P2f-runcode   "$(run_shim beforeMCPExecution "$(pev browser_run_code_unsafe filename "$TMP/measure.js")" | jq -r '.permission')" "deny"
+assert_eq P2h-cdt-ostmp  "$(run_shim beforeMCPExecution "$(pev take_screenshot filePath "$POSTMP/shot.png")" TMPDIR="$POSTMP")" ""
+assert_eq P2g-runcode-inline "$(run_shim beforeMCPExecution "$(pev browser_run_code_unsafe code 'async (page) => 1')")" ""
 assert_eq P2c-other-tool "$(run_shim beforeMCPExecution "$(pev browser_navigate url https://example.com)")" ""
 # P3: the switch (in-shim; the wiring gate is G3b) and the fail-open rails
 assert_eq P3-off        "$(run_shim beforeMCPExecution "$(pev browser_take_screenshot filename elc-1.jpeg)" FND_SCRATCH_GUARD=0)" ""
 assert_eq P3b-malformed "$(run_shim beforeMCPExecution 'not json at all')" ""
 assert_eq P3c-no-input  "$(run_shim beforeMCPExecution '{"hook_event_name":"beforeMCPExecution","tool_name":"take_screenshot"}')" ""
 
-# P4: the screenshot-tool SET is spelled in four places — plugin.json's matcher, hooks-codex.json's
-# matcher, this shim's SCREENSHOT_TOOL (Cursor has no per-event matcher, so the filter lives in
-# code) and the guard's own ALWAYS_WRITES. The first two are pinned against each other by
-# hooks-codex-sim W10b and against the tool names by hooks-sim D8; nothing pinned this one, so a
-# tool renamed in the manifests would go on being guarded everywhere BUT Cursor. The literal is
+# P4: the guarded-tool SET is spelled in three places — plugin.json's matcher, hooks-codex.json's
+# matcher and this shim's SCREENSHOT_TOOL (Cursor has no per-event matcher, so the filter lives in
+# code). The first two are pinned against each other by hooks-codex-sim W10b and against the tool
+# names by hooks-sim D8; this one is pinned here, against the names and the manifest, so a tool
+# renamed or added in the manifests cannot go unguarded on Cursor alone. The literal is
 # read out of the shim, never copied here.
 SPT="$(grep 'const SCREENSHOT_TOOL = ' "$SHIM" | head -1 | sed 's|.*= /||; s|/;[[:space:]]*$||')"
 if [ -n "$SPT" ]; then ok; else bad P4-literal "cursor-shim.cjs has no SCREENSHOT_TOOL regex literal"; fi
-for t in take_screenshot browser_take_screenshot \
+for t in take_screenshot browser_take_screenshot take_snapshot get_network_request browser_run_code_unsafe \
          mcp__plugin_fnd_chrome-devtools-mcp__take_screenshot mcp__plugin_fnd_playwright__browser_take_screenshot \
-         mcp__chrome-devtools-mcp__take_screenshot mcp__playwright__browser_take_screenshot; do
-  if printf '%s\n' "$t" | grep -Eq "$SPT"; then ok; else bad "P4-$t" "SCREENSHOT_TOOL '$SPT' misses a screenshot tool"; fi
+         mcp__chrome-devtools-mcp__take_screenshot mcp__playwright__browser_take_screenshot \
+         mcp__chrome-devtools-mcp__take_snapshot mcp__playwright__browser_run_code_unsafe; do
+  if printf '%s\n' "$t" | grep -Eq "$SPT"; then ok; else bad "P4-$t" "SCREENSHOT_TOOL '$SPT' misses a guarded tool"; fi
 done
-for t in take_snapshot get_screenshot mcp__chrome-devtools-mcp__take_snapshot mcp__figma-dev-mode__get_screenshot browser_navigate; do
+# …and the set is the manifest's, not just a superset of this list
+assert_eq P4-manifest-parity "^mcp__.*__$(printf '%s' "$SPT" | sed 's/^(^|__)//')" \
+  "$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .matcher' "$ROOT/plugins/fnd/.claude-plugin/plugin.json")"
+for t in take_heapsnapshot get_screenshot list_network_requests browser_run_code mcp__figma-dev-mode__get_screenshot browser_navigate; do
   if printf '%s\n' "$t" | grep -Eq "$SPT"; then bad "P4-not-$t" "SCREENSHOT_TOOL '$SPT' over-matches"; else ok; fi
 done
 

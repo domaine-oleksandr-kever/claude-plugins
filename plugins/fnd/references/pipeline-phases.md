@@ -68,7 +68,8 @@ its brief says otherwise.
    keeps its previous settings); follow
    `<plugin root>/references/preview-theme-errors.md` and never book those 404s as branch
    defects. `error=refresh_unverifiable`, `error=reuse_unverifiable`,
-   `error=dev_theme_write_refused`, `error=theme_not_found` (the recorded theme was deleted),
+   `error=dev_theme_write_refused`, `error=theme_not_found` (the recorded theme was deleted, or lives on another store — the
+   `session-theme:` line's preview_url host names it),
    `error=dev_theme_not_found` (the toml's settings source was deleted) →
    ESCALATE; the pipeline never passes `--allow-unverified` or `--allow-dev-theme`, and never
    creates a replacement theme on its own. **No `--pin-toml` here** — this phase is past the ✋

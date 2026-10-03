@@ -735,6 +735,25 @@ rc=0; TJ_PULL_BODY="$TV/few.json" tj_set_cli "$TV/many.json" >"$O" 2>"$E" || rc=
 if [ "$rc" -eq 6 ] \
    && grep -qx 'note=verify_diff only_in_payload=sections.main.settings.k00,sections.main.settings.k01,sections.main.settings.k02,sections.main.settings.k03,sections.main.settings.k04,sections.main.settings.k05,sections.main.settings.k06,sections.main.settings.k07,+4_more only_in_theme=sections.main.type changed=- diff_lines=[0-9]*' "$E"; then ok
 else bad T35f-verify-diff-capped "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+# T35g: the payload's extra keys are the ONLY difference (a setting the section schema dropped) —
+# the rest landed, so the hint names the dropped keys instead of claiming nothing is served; still
+# not_applied + exit 6, since the theme diverged from the payload
+printf '%s' '{"sections":{"main":{"type":"main","settings":{"a":"1","aspect_ratio":"square"}}}}' > "$TV/stale-key.json"
+printf '%s' '{"sections":{"main":{"type":"main","settings":{"a":"1"}}}}' > "$TV/stale-key-served.json"
+rc=0; TJ_PULL_BODY="$TV/stale-key-served.json" tj_set_cli "$TV/stale-key.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied engine=themecli theme=2 file=templates/product.json' "$O" \
+   && grep -qxF 'hint=applied except 1 key(s) Shopify dropped (sections.main.settings.aspect_ratio) — a setting the section schema no longer has, or an unsupported attribute; the rest of the payload is live. Remove them from the payload to make the write clean. If these keys ARE the change you meant to make, the whole write was refused instead — check the two known triggers: a schema-unsupported attribute, and a dynamic source without '\''{{ ….value }}'\''.' "$E" \
+   && ! grep -q 'does NOT serve' "$E"; then ok
+else bad T35g-dropped-keys-hint "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+# T35h: the count covers the keys folded into `+N_more`, not just the 8 listed
+printf '%s' '{"sections":{"main":{"settings":{"k00":"v"}}}}' > "$TV/one.json"
+rc=0; TJ_PULL_BODY="$TV/one.json" tj_set_cli "$TV/many.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q '^hint=applied except 11 key(s) Shopify dropped (sections.main.settings.k01,.*,+3_more) — ' "$E"; then ok
+else bad T35h-dropped-keys-count "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+# T35i: any other mix keeps the general hint — a theme-only key means the write did not simply drop
+rc=0; TJ_PULL_BODY="$TV/few.json" tj_set_cli "$TV/many.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'does NOT serve the payload' "$E" && ! grep -q 'applied except' "$E"; then ok
+else bad T35i-mixed-diff-general-hint "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 
 # T36 (race guard): a read issued right after a write can still be served the old copy — the
 # FIRST pull-back is stale, the retry sees the payload, and the set succeeds
@@ -2134,6 +2153,14 @@ cat > "$CPTD/shim/shopify" <<'FAKE'
 if [ -n "${CPT_LOG:-}" ]; then
   printf 'argv=%s\n' "$*" >> "$CPT_LOG"
   printf 'token=%s\n' "${SHOPIFY_CLI_THEME_TOKEN:-}" >> "$CPT_LOG"
+fi
+# FAKE_REJECT_STORE: every call at that store is the CLI's auth rejection — a token minted for another store
+if [ -n "${FAKE_REJECT_STORE:-}" ]; then
+  prev=""; for a in "$@"; do
+    [ "$prev" = "--store" ] && [ "$a" = "$FAKE_REJECT_STORE" ] \
+      && { printf '│  Invalid API key or access token (unrecognized login or wrong password)  │\n' >&2; exit 1; }
+    prev="$a"
+  done
 fi
 is_only=0; case "$*" in *"--only"*) is_only=1 ;; esac
 # a push at an EXISTING theme reports that theme back; a new (--unpublished) one gets a fresh id
@@ -4224,7 +4251,7 @@ for ha in --help -h; do
   rc=0; L="$TMP/cpt60$ha"; : > "$L"
   run_cpt_at "$CPTH" "$CPTD/shim:$PATH" "$L" NO=1 -- "$ha" || rc=$?
   if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ ! -s "$L" ] \
-     && [ "$(wc -l < "$CPTHH" | tr -d ' ')" -eq 9 ] && sed '$d' "$O" | diff -q - "$CPTHH" >/dev/null; then ok
+     && [ "$(wc -l < "$CPTHH" | tr -d ' ')" -eq 10 ] && sed '$d' "$O" | diff -q - "$CPTHH" >/dev/null; then ok
   else bad "P60-help[$ha]" "rc=$rc diff=$(sed '$d' "$O" | diff - "$CPTHH" | head -c 300 | tr '\n' ';') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
 done
 # P60b: the pointer line that follows it names where the full contract lives
@@ -4274,6 +4301,131 @@ run_cpt "$L" NO=1 -- create --name -h --no-build || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^Usage:' "$O" && [ ! -s "$L" ] \
    && grep -q 'VALUE of `-h`' "$CPT"; then ok
 else bad P60h-help-in-value-position "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+
+# P63: --store names the store to talk to (theme-json.sh's flag and precedence). A preview theme on a
+# brand's OTHER regional store used to be unreachable: refresh listed the toml's store, died
+# theme_not_found, and the caller fell back to a raw `shopify theme push` with no guard at all.
+UK_LIST='[{"id":777,"name":"[ELC-1] UK","role":"unpublished"},{"id":888,"name":"Live UK","role":"live"}]'
+# P63a: a foreign store gets every call and only the env token — the toml's password is the other
+# store's — and the dev theme (absent from this listing) is not vetted there: refresh is code only
+rc=0; L="$TMP/cpt63a"; : > "$L"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- refresh --store acme-uk --theme 777 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=777$' "$O" && grep -q '^store=acme-uk$' "$O" \
+   && [ "$(grep -c '^argv=' "$L")" -ge 2 ] && ! grep '^argv=' "$L" | grep -qv -- '--store acme-uk ' \
+   && ! grep '^token=' "$L" | grep -qv '^token=shptka_uk$' && ! grep -q 'dev_theme_not_found' "$O"; then ok
+else bad P63a-store-handle-refresh "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# P63b: the domain / https:// URL forms parse too, and one naming the TOML's store in another
+# spelling is that store — its token, its dev theme, no note
+rc=0; L="$TMP/cpt63b"; : > "$L"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- refresh --theme 777 --no-build --store https://acme-uk.myshopify.com/ || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-uk.myshopify.com$' "$O" \
+   && grep -q -- '^argv=theme push --store acme-uk.myshopify.com --theme 777 ' "$L"; then ok
+else bad P63b-store-domain-refresh "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+rc=0; L="$TMP/cpt63b2"; : > "$L"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_uk -- info --store acme-dev.myshopify.com || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^dev_theme_id=111$' "$O" && ! grep -q '^note=dev_theme_other_store' "$O" \
+   && grep -q '^token=shptka_fixture1234$' "$L"; then ok
+else bad P63b2-toml-store-other-spelling "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# P63c: $SHOPIFY_STORE is the default, --store wins over it; `info` on a foreign store says where
+# the dev theme lives
+rc=0; L="$TMP/cpt63c"; : > "$L"
+run_cpt "$L" SHOPIFY_STORE=acme-uk SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- info || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-uk$' "$O" && grep -q '^note=dev_theme_other_store toml_store=acme-dev ' "$O"; then ok
+else bad P63c-shopify-store-env "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt63c2"; : > "$L"
+run_cpt "$L" SHOPIFY_STORE=acme-other SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- info --store acme-uk || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-uk$' "$O"; then ok
+else bad P63c2-flag-beats-env "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+# P63d: no env token for a foreign store is refused before any CLI call — the toml's password would
+# only reach the CLI as an opaque 401
+rc=0; L="$TMP/cpt63d"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --store acme-uk --theme 777 --no-build || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=no access token for store=acme-uk (--store) — a Theme Access token is minted PER STORE' "$O" \
+   && grep -q 'export SHOPIFY_CLI_THEME_TOKEN with acme-uk' "$O" && [ ! -s "$L" ]; then ok
+else bad P63d-foreign-store-needs-env-token "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# P63e: a token the store rejects says it is minted PER STORE and where it came from — on the
+# listing refusal and on the push failure alike; a toml token is told to fix the toml
+H63E='^hint=a Theme Access token is minted PER STORE — this one came from \$SHOPIFY_CLI_THEME_TOKEN and the request went to acme-uk.myshopify.com, .*export SHOPIFY_CLI_THEME_TOKEN with acme-uk.myshopify.com'"'"'s own'
+rc=0; L="$TMP/cpt63e"; : > "$L"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_wrong FAKE_REJECT_STORE=acme-uk -- refresh --store acme-uk --theme 777 --no-build || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=refresh_unverifiable theme=777 store=acme-uk' "$O" && grep -q "$H63E" "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad P63e-auth-hint-listing "rc=$rc out=$(head -c 400 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt63e2"; : > "$L"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_wrong FAKE_REJECT_STORE=acme-uk -- refresh --store acme-uk --theme 777 --no-build --allow-unverified || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=refresh_push_failed' "$O" && grep -q "$H63E" "$O"; then ok
+else bad P63e2-auth-hint-push "rc=$rc out=$(head -c 400 "$O" | tr '\n' ' ')"; fi
+rc=0; L="$TMP/cpt63e3"; : > "$L"
+run_cpt "$L" FAKE_REJECT_STORE=acme-dev -- refresh --theme 555 --no-build --allow-unverified || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=refresh_push_failed' "$O" \
+   && grep -q '^hint=a Theme Access token is minted PER STORE — this one came from shopify.theme.toml and the request went to acme-dev.myshopify.com, .*the password= in shopify.theme.toml is not' "$O"; then ok
+else bad P63e3-auth-hint-toml-token "rc=$rc out=$(head -c 400 "$O" | tr '\n' ' ')"; fi
+# P63f: create on a foreign store is refused before the build — the settings source is on the toml's
+# store, and a fresh theme without its settings has no templates (every page 404s)
+rc=0; L="$TMP/cpt63f"; : > "$L"; BM="$TMP/cpt63f.build"; rm -f "$BM"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_uk CPT_BUILD_MARK="$BM" -- create --name "[ELC-1] UK" --reuse --store acme-uk || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=overlay_store_mismatch store=acme-uk (--store) toml_store=acme-dev dev_theme=111 ' "$O" \
+   && grep -q 'refresh --store acme-uk --theme <id>' "$O" && [ ! -s "$L" ] && [ ! -e "$BM" ]; then ok
+else bad P63f-create-foreign-refused "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# P63g: a pin on a foreign store is refused — the block it writes names the other store
+TOMLH63="$(cksum < "$CPTD/repo/shopify.theme.toml")"
+for pc in "pin --theme 777 --store acme-uk" "refresh --theme 777 --no-build --pin-toml --store acme-uk"; do
+  rc=0; L="$TMP/cpt63g"; : > "$L"
+  run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- $pc || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q '^error=pin_store_mismatch store=acme-uk (--store) toml_store=acme-dev ' "$O" && [ ! -s "$L" ] \
+     && [ "$(cksum < "$CPTD/repo/shopify.theme.toml")" = "$TOMLH63" ]; then ok
+  else bad "P63g-pin-foreign-refused[$pc]" "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+done
+# P63f2: a refusal caused by an exported $SHOPIFY_STORE says so — a stale export for another project
+# otherwise reads as an unexplained refusal — and names a block selector this subcommand takes
+rc=0; L="$TMP/cpt63f2"; : > "$L"
+run_cpt "$L" SHOPIFY_STORE=acme-uk SHOPIFY_CLI_THEME_TOKEN=shptka_uk -- create --name "[ELC-1] UK" --no-build || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=overlay_store_mismatch store=acme-uk (\$SHOPIFY_STORE — unset it if it was exported for another project) toml_store=acme-dev ' "$O" \
+   && grep -q 'whose store is acme-uk: export SHOPIFY_FLAG_ENVIRONMENT=<name>' "$O" && [ ! -s "$L" ]; then ok
+else bad P63f2-overlay-refusal-names-source "rc=$rc out=$(head -c 400 "$O" | tr '\n' ' ')"; fi
+# P63h: theme_not_found names the other-store way out — refresh re-runs with --store; a pin can only
+# land in the block naming that store, so it is pointed there instead of into pin_store_mismatch
+H63H_REFRESH='pass --store <handle> (a `\*.myshopify.com` preview URL'"'"'s host or the editor URL'"'"'s `/store/<handle>/` names it)$'
+H63H_PIN='a pin can only go into the toml block whose store it is (`--env <that block>`, or `--store <handle>` when a block names that store)$'
+for nc in "refresh --theme 333 --no-build" "pin --theme 333"; do
+  case "$nc" in refresh*) H="$H63H_REFRESH" ;; *) H="$H63H_PIN" ;; esac
+  rc=0; L="$TMP/cpt63h"; : > "$L"
+  run_cpt "$L" FAKE_LIST='[{"id":111,"name":"[DEV] Kever","role":"development"}]' -- $nc || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q '^error=theme_not_found theme=333 store=acme-dev — .* or the id lives on another store: ' "$O" \
+     && grep -q -- "$H" "$O"; then ok
+  else bad "P63h-not-found-store-hint[$nc]" "rc=$rc out=$(head -c 400 "$O" | tr '\n' ' ')"; fi
+done
+# P63i: in a toml whose blocks name different stores, --store picks the block that names it — its
+# token and its dev theme — where the bare run is ambiguous_env
+F63I="$TMP/cpt63i.toml"
+printf '[environments.us]\nstore = "acme-us"\ntheme = "111"\npassword = "shptka_us"\n\n[environments.uk]\nstore = "acme-uk"\ntheme = "444"\npassword = "shptka_ukblock"\n' > "$F63I"
+rc=0; L="$TMP/cpt63i"; : > "$L"
+run_cpt "$L" TOML_PATH="$F63I" -- info --store acme-uk.myshopify.com || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^env=uk$' "$O" && grep -q '^dev_theme_id=444$' "$O" && ! grep -q '^note=' "$O" \
+   && grep -q '^token=shptka_ukblock$' "$L"; then ok
+else bad P63i-store-picks-block "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+rc=0; L="$TMP/cpt63i2"; : > "$L"
+run_cpt "$L" TOML_PATH="$F63I" -- info || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=ambiguous_env' "$O"; then ok
+else bad P63i2-bare-still-ambiguous "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
+# P63k: a toml with no `store =` line has no store to be foreign to — --store fills it, and the
+# toml's own password still authenticates
+F63K="$TMP/cpt63k.toml"
+printf 'theme = "111"\npassword = "shptka_nostore"\n' > "$F63K"
+rc=0; L="$TMP/cpt63k"; : > "$L"
+run_cpt "$L" TOML_PATH="$F63K" -- info --store acme-uk || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=acme-uk$' "$O" && ! grep -q '^note=dev_theme_other_store' "$O" \
+   && grep -q '^token=shptka_nostore$' "$L"; then ok
+else bad P63k-storeless-toml-not-foreign "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# P63l: the auth-rejection matcher is theme-json.sh's, byte for byte — a fix to one must reach both
+AUTH_RE="$(grep -o "grep -qiE '[^']*401[^']*'" "$CPT" | head -1)"
+if [ -n "$AUTH_RE" ] && grep -qF -- "$AUTH_RE" "$TJ"; then ok
+else bad P63l-auth-matcher-drift "cpt=[$AUTH_RE]"; fi
+# P63j: --store as the last arg is a usage error, not a silent run against the toml store
+rc=0; L="$TMP/cpt63j"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme 777 --no-build --store || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=missing value for --store$' "$O" && [ ! -s "$L" ]; then ok
+else bad P63j-store-missing-value "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # ------------------------------------------- fix-breaking-changes banner handling --
 FB="$TMP/fb"; mkdir -p "$FB/templates/customers" "$FB/config" "$FB/scripts"

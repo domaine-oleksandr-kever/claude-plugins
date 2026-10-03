@@ -483,7 +483,7 @@ else
   NODES_PART="$(mkpart "$NODES_FILE")" \
     || { echo "error=out_dir_not_writable out=$OUT_ABS" >&2; exit 2; }
   # Same link, same answer: agents otherwise loop through --force / --out variants.
-  STALE_NODE='not retryable, no flag changes this answer; ask for a fresh link — select the layer, Copy link'
+  STALE_NODE='not retryable, no flag changes this answer; ask for a fresh link — select the layer, Copy link; do not probe neighbouring ids'
   code="$(api_get_retry "$API/v1/files/$FILE_KEY/nodes?ids=$NODE_Q" "$NODES_PART")" \
     || { rm -f "$NODES_PART"; echo "error=curl_transport_failed" >&2; exit 5; }
   case "$code" in

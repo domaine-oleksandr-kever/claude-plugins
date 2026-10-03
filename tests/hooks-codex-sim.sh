@@ -267,16 +267,18 @@ assert_contains W10-gate      "$SPG_CMD" '"${FND_SCRATCH_GUARD:-1}" = "0"'
 assert_contains W10-failopen  "$SPG_CMD" '|| true'
 # W10b: the matcher is prefix-agnostic on both hosts — Codex names an MCP tool
 # mcp__<server>__<tool> from mcp-codex.json, without the plugin_fnd_ prefix Claude Code adds, and
-# on Claude Code the same servers are often installed per-user — so BOTH spellings of the two
-# screenshot tools must match, and the two hosts' matchers must not drift apart.
+# on Claude Code the same servers are often installed per-user — so BOTH spellings of every
+# guarded tool must match, and the two hosts' matchers must not drift apart.
 spm="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .matcher' "$WIRING")"
 assert_eq W10b-matcher-parity "$spm" \
   "$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .matcher' "$MANIFEST")"
 for t in mcp__plugin_fnd_chrome-devtools-mcp__take_screenshot mcp__plugin_fnd_playwright__browser_take_screenshot \
-         mcp__chrome-devtools-mcp__take_screenshot mcp__playwright__browser_take_screenshot; do
-  if printf '%s\n' "$t" | grep -Eq "$spm"; then ok; else bad "W10b-$t" "scratch matcher '$spm' misses a screenshot tool"; fi
+         mcp__chrome-devtools-mcp__take_screenshot mcp__playwright__browser_take_screenshot \
+         mcp__chrome-devtools-mcp__take_snapshot mcp__chrome-devtools-mcp__get_network_request \
+         mcp__playwright__browser_run_code_unsafe; do
+  if printf '%s\n' "$t" | grep -Eq "$spm"; then ok; else bad "W10b-$t" "scratch matcher '$spm' misses a guarded tool"; fi
 done
-for t in Bash shell mcp__chrome-devtools-mcp__take_snapshot mcp__figma-dev-mode__get_screenshot; do
+for t in Bash shell mcp__chrome-devtools-mcp__take_heapsnapshot mcp__playwright__browser_run_code mcp__figma-dev-mode__get_screenshot; do
   if printf '%s\n' "$t" | grep -Eq "$spm"; then bad "W10b-not-$t" "scratch matcher '$spm' over-matches"; else ok; fi
 done
 
@@ -804,6 +806,10 @@ if [ -z "$out" ]; then ok; else bad B12b-workspace "a workspace path was denied:
 out="$(spg_run filename elc-123-cart.jpeg FND_SCRATCH_GUARD=0)"; ec=$?
 assert_eq B12c-off-exit "$ec" 0
 if [ -z "$out" ]; then ok; else bad B12c-off "FND_SCRATCH_GUARD=0 still denied: $out"; fi
+# a path outside the project is denied through the same channel — the server would refuse it anyway
+out="$(spg_run filename "$TMP/scratchpad/measure.png")"
+assert_contains B12e-outside-deny  "$out" 'outside this project'
+assert_contains B12e-outside-where "$out" "$SPGP/.claude/tmp/measure.png"
 # an unresolvable plugin root is a fail-open here (the guard denies through JSON, not exit 2) —
 # node cannot load the file, `|| true` swallows it, the screenshot proceeds
 out="$(jq -cn --arg cwd "$SPGP" '{hook_event_name:"PreToolUse",tool_input:{filename:"x.png"},cwd:$cwd}' \

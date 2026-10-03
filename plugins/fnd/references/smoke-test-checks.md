@@ -226,7 +226,8 @@ with what rows 3–7 claimed.
 | Codex CLI | as Claude Code, plus `PostToolUse/codex-mcp-shim` next to `PostToolUse/mcp-slim` — that host replaces a result only through the block channel, so the wired command is the shim, and the `mcp-slim` it spawns logs its own line |
 | OpenCode | `UserPromptSubmit/fnd-plugin` from the adapter and `SessionStart/fnd-plugin` — that one fires once per session in EVERY checkout (the plugin-root and project-profile lines always ride; the store-access and Foundation blocks inside it are what detection gates), so its absence is a wiring gap, not a workspace answer — plus `user-prompt`, the two shell guards, `spill-access` and `mcp-slim`; **no `SubagentStart` row** — that host has no subagent-start event, and its absence is expected, not a defect |
 
-`PreToolUse/scratch-path-guard` appears only when a screenshot call happened in this session, so
+`PreToolUse/scratch-path-guard` appears only when a guarded browser call (screenshot, snapshot, network
+request, run_code_unsafe) happened in this session, so
 its absence proves nothing either way. So does `PostToolUse/reader-compression` (Claude Code only):
 one line per subagent spawn, `inject` when it put a reader's compression figure in front of the
 developer and `skip` on every other return — which is what separates a relay that ran and stayed

@@ -111,9 +111,12 @@ against, or a preview/sandbox theme. Then:
    the two known triggers (a schema-unsupported attribute; a dynamic source without `.value` after
    every reference hop — write `{{ ….value }}` from the start); a `note=verify_diff` line ahead of
    it names the differing leaf keys (`only_in_payload=` / `only_in_theme=` / `changed=`) — start
-   there. Treat exit 6 as *the theme diverged*, not *nothing happened*: no pre-image is read, so
-   `get` the file and restore the snapshot (step 5) if what comes back is neither the payload nor
-   what you started from.
+   there. When `only_in_payload=` is the only difference, the hint says `applied except <n> key(s)
+   Shopify dropped` instead: the rest is live, and dropping those keys (typically a setting the
+   section schema no longer has) makes the write clean — unless those keys ARE your change: then
+   the whole write was refused, so check the two triggers above. Treat exit 6 as *the theme
+   diverged*, not *nothing happened*: no pre-image is read, so `get` the file and restore the
+   snapshot (step 5) if what comes back is neither the payload nor what you started from.
    `error=verify_read_failed` (also exit 6) = the state is unconfirmed — `get` before assuming
    either outcome. On a host with no working `perl` the compare degrades to raw bytes and a
    difference is `verified=unverified` + exit 0: confirming is yours.

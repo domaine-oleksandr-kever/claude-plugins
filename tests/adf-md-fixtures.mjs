@@ -1188,6 +1188,8 @@ const issueComments = (comments, total) => ({
   fields: { comment: { comments, total: total == null ? comments.length : total, startAt: 0, maxResults: 100 } },
 });
 const a2mCli = (input, args = []) => spawnSync('node', [A2M, ...args], { input, encoding: 'utf8' });
+const A2M_SHAPES = ' (accepted: a getJiraIssue response with fields.comment, a /comment response'
+  + ' {comments:[…]}, or a bare array of comment objects)';
 
 const commentSet = issueComments([
   jComment('Ann Dev', '2026-09-10T09:15:00.000+0300', doc([
@@ -1302,17 +1304,35 @@ check('a2m-comments-unwrapped-still-works', run(A2M, JSON.stringify(commentSet),
   fs.writeFileSync(f, JSON.stringify({ key: 'ELC-1309', fields: { summary: 'S' } }));
   const r = spawnSync('node', [A2M, f, '--comments'], { encoding: 'utf8' });
   check('a2m-comments-no-field-exit', r.status, 2);
-  check('a2m-comments-no-field-stderr', r.stderr, `adf-to-md: no comment field in ${f}\n`);
+  check('a2m-comments-no-field-stderr', r.stderr, `adf-to-md: no comment field in ${f}${A2M_SHAPES}\n`);
   check('a2m-comments-no-field-stdout', r.stdout, '');
   fs.rmSync(TMPC, { recursive: true, force: true });
 }
+// the node's sibling markdown `comments[]` beside `fields` is not a comment field either
 for (const [label, input] of [
   ['plain', { key: 'ELC-1309', fields: { summary: 'S' } }],
   ['wrapped', mcpEnvelope([{ key: 'ELC-1309', fields: { summary: 'S' } }])],
+  ['markdown-sibling', mcpEnvelope([{ key: 'ELC-1309', fields: { summary: 'S' }, comments: [{ body: '![](blob:https://x/y)', created: 'x' }] }])],
+  ['adf-doc', doc([p([t('not a comment')])])],
+  ['empty-array', []],
+  ['fieldless-markdown-node', { key: 'ELC-1', comments: [{ body: '![](blob:x)', created: 'x' }] }],
+  ['comments-without-paging', { comments: [{ body: 'x', created: 'x' }] }],
 ]) {
   const r = a2mCli(JSON.stringify(input), ['--comments']);
   check(`a2m-comments-no-field-exit[${label}]`, r.status, 2);
-  check(`a2m-comments-no-field-stderr[${label}]`, r.stderr, 'adf-to-md: no comment field in stdin\n');
+  check(`a2m-comments-no-field-stderr[${label}]`, r.stderr, `adf-to-md: no comment field in stdin${A2M_SHAPES}\n`);
+}
+
+// the Jira /comment endpoint answers the comment page object itself, and a caller may hand over
+// just its array — both render exactly like the full response (shortfall line included)
+{
+  const page = commentSet.fields.comment;
+  const full = run(A2M, JSON.stringify(commentSet), ['--comments']);
+  check('a2m-comments-endpoint-shape', run(A2M, JSON.stringify(page), ['--comments']), full);
+  check('a2m-comments-endpoint-shape-spill', run(A2M, JSON.stringify([{ type: 'text', text: JSON.stringify(page) }]), ['--comments']), full);
+  check('a2m-comments-bare-array', run(A2M, JSON.stringify(page.comments), ['--comments']), full);
+  check('a2m-comments-endpoint-shortfall', run(A2M, JSON.stringify({ ...page, total: 9 }), ['--comments']),
+    full.trimEnd() + '\n\ncomments: 3/9');
 }
 
 // 0 or >1 nodes: the converter refuses by count instead of picking one

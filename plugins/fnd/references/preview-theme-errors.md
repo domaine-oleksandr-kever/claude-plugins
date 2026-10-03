@@ -84,7 +84,25 @@ in the Bash tool's shell.
   a recorded `session-theme:` id and `--allow-unverified` both answer "the store did not answer",
   not "the theme is gone". Confirm the id (a preview URL's `?preview_theme_id=…`), or make a fresh
   preview with `create --name "<name>" --reuse` and hand the reviewer the new link (add
-  `--pin-toml` only when the lost id was the one pinned in `shopify.theme.toml`).
+  `--pin-toml` only when the lost id was the one pinned in `shopify.theme.toml`). Or the id lives
+  on **another store** (a brand with a store per region): a preview URL whose `*.myshopify.com`
+  host differs from the line's `store=` → re-run with `--store <that handle>`; with a bare id,
+  ask the developer whether it lives on another store (which handle) before offering `create`.
+  A `store=` followed by `($SHOPIFY_STORE …)` came from an export, not the toml — ask whether it
+  was meant for this project.
+- **Another store (`--store` / `$SHOPIFY_STORE` naming a store other than the toml's)** — the
+  toml's token, dev theme and pin target all belong to the toml's store:
+  - **`error=overlay_store_mismatch`** (`create`, `--reuse` too) → nothing was built or pushed: the
+    settings source is out of reach and a theme without settings has no templates. Refresh an
+    existing preview theme on that store instead, or select the toml block that names it
+    (`SHOPIFY_FLAG_ENVIRONMENT=<name>`).
+  - **`error=pin_store_mismatch`** (`pin`, `refresh --pin-toml`) → nothing was written; drop the
+    pin (record the id in `notes.md` only) or `--env` the block that names that store.
+  - **`error=no access token for store=…`** → that store's own Theme Access password has to be
+    exported as `SHOPIFY_CLI_THEME_TOKEN` — the developer does it; never read or paste a token.
+  - **`hint=a Theme Access token is minted PER STORE …`** (with any `error=` — a push failure or a
+    listing refusal) → the CLI rejected the token: it belongs to another store. The line names
+    where the token came from and the fix — a developer action, like the one above.
 - **`error=dev_theme_not_found`** (`create` and `refresh`) → nothing was built and nothing was
   pushed. Same evidence and same unliftability as `theme_not_found`, about the **overlay source**
   instead of the target: the `theme =` id in `shopify.theme.toml` — the theme the customizer

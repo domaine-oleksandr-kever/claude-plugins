@@ -22,6 +22,7 @@
 # checkout the nearest one above the cwd is used (the other paths below stay cwd-relative)
 #   - dev theme id : the UNCOMMENTED `theme = "..."` line, digits (commented variants ignored)
 #   - store        : the UNCOMMENTED `store = "..."` line, a myshopify handle, full domain or https:// URL
+#                    (`--store` / $SHOPIFY_STORE override it — see --store below)
 #   - token        : `password = "..."`, else first shp*_… in the file, else $SHOPIFY_CLI_THEME_TOKEN
 #                    (the repo's own credential wins — an env token exported for another project
 #                    would authenticate this repo's pushes against that store)
@@ -52,6 +53,7 @@
 #                                   [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #                                   [--allow-unverified] [--allow-dev-theme]
 #   create-preview-theme.sh pin --theme <ID> [--env <name>]
+#   Common: [--store <handle|domain>]   (default: $SHOPIFY_STORE, else the toml store)
 #
 # `--help` / `-h` — bare or anywhere in a subcommand's args — prints that Usage block to stdout and
 # exits 0, ahead of the toml, store and CLI checks so a usage question cannot die outside a theme
@@ -142,6 +144,23 @@
 #       every `store =` in the file is the same store no choice can target the wrong one, so the
 #       read falls back to file order (`env=*`) — the pin still refuses, since which block the dev
 #       server resolves is still unknown.
+#   --store <handle|domain>  (every subcommand) — the store to talk to: a myshopify handle,
+#       <handle>.myshopify.com or its https:// URL; default $SHOPIFY_STORE, else the toml's `store =`
+#       (theme-json.sh's flag and precedence). In a toml whose blocks name different stores with
+#       none named dev/development it also picks the block naming that store (a store no block
+#       names is still `error=ambiguous_env` there). A store other than
+#       the resolved block's is a FOREIGN store, and the toml's other values do not reach it:
+#         token   — a Theme Access token is minted PER STORE, so only $SHOPIFY_CLI_THEME_TOKEN is
+#                   used (`no access token for store=…` when it is unset); a CLI auth rejection
+#                   adds a `hint=` naming where the token came from and which store refused it.
+#         overlay — the dev theme (the settings source) lives on the toml's store, out of the
+#                   token's reach: `create` is refused before the build (`error=overlay_store_mismatch`
+#                   — a fresh theme without settings has no templates and 404s); `refresh` pushes
+#                   code only anyway and skips the dev_theme_not_found check; `info` adds
+#                   `note=dev_theme_other_store`.
+#         pin     — `pin` and `--pin-toml` are refused (`error=pin_store_mismatch`): the block names
+#                   another store, so `shopify theme dev` would look for the pinned id there.
+#       `--env` naming the block whose store it is makes that store the toml's own — no longer foreign.
 #
 # Output is `key=value` lines on stdout. Errors print `error=<reason>` and exit non-zero.
 # Pushes retry on a Shopify `Throttled` answer (pauses: $FND_CPT_THROTTLE_WAITS, default "20 60");
@@ -176,7 +195,8 @@ USAGE='Usage:
   create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>]
                                   [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
                                   [--allow-unverified] [--allow-dev-theme]
-  create-preview-theme.sh pin --theme <ID> [--env <name>]'
+  create-preview-theme.sh pin --theme <ID> [--env <name>]
+  Common: [--store <handle|domain>]   (default: $SHOPIFY_STORE, else the toml store)'
 
 # Answered before the install checks and the toml read below: "how do I call this" must not depend
 # on a shopify CLI, a config or a store — the checks still gate every real subcommand.
@@ -231,11 +251,12 @@ MODE="${1:-}"; shift || true
 # token — a preview theme pushed to the production store. The scan mirrors the per-mode grammars
 # (a value-taking flag's value is skipped, so `--name --env` is a name), and the assert after each
 # of those loops is what keeps the two readings from drifting apart.
-CPT_ENV_ARG=""; CPT_PIN_ARG=0
+CPT_ENV_ARG=""; CPT_PIN_ARG=0; CPT_STORE_ARG=""
 scan_env_arg() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --env) [ $# -ge 2 ] || return 0; CPT_ENV_ARG="$2"; shift 2 ;;
+      --store) [ $# -ge 2 ] || return 0; CPT_STORE_ARG="$2"; shift 2 ;;
       --pin-toml) CPT_PIN_ARG=1; shift ;;
       --theme|--name|--build-script|--ignore-extra) [ $# -ge 2 ] || return 0; shift 2 ;;
       *) shift ;;
@@ -243,6 +264,11 @@ scan_env_arg() {
   done
 }
 scan_env_arg "$@"
+STORE_OVERRIDE="${CPT_STORE_ARG:-${SHOPIFY_STORE:-}}"
+if [ -n "$CPT_STORE_ARG" ]; then STORE_FROM="--store"; elif [ -n "$STORE_OVERRIDE" ]; then STORE_FROM="\$SHOPIFY_STORE"; else STORE_FROM="the \`store =\` line in $TOML"; fi
+# an override the caller may not know is in effect (a stale export) must be named in every refusal it causes
+SRC_NOTE="${STORE_OVERRIDE:+ ($STORE_FROM)}"
+[ -n "$CPT_STORE_ARG" ] || SRC_NOTE="${SRC_NOTE:+ (\$SHOPIFY_STORE — unset it if it was exported for another project)}"
 # `--env` without `--pin-toml` is refused by the create/refresh loops below, and that refusal is
 # the answer the developer needs — not a config error about a block the run would never use. So
 # that combination resolves the DEFAULT block, tolerating a failure it is about to moot.
@@ -261,24 +287,29 @@ case "$MODE" in
   *) CPT_ENV_FIX='export SHOPIFY_FLAG_ENVIRONMENT=<name> (this subcommand takes no --env)' ;;
 esac
 if [ "$CPT_ENV_UNUSABLE" -eq 1 ]; then
-  toml_env_ready "" || true
+  toml_env_ready "" || toml_env_pick_by_store "$STORE_OVERRIDE" || true
 else
-  toml_env_ready "$CPT_ENV_ARG" || fail "$(toml_env_error "$CPT_ENV_FIX")"
+  toml_env_ready "$CPT_ENV_ARG" || toml_env_pick_by_store "$STORE_OVERRIDE" || fail "$(toml_env_error "$CPT_ENV_FIX")"
 fi
 
 # --- parse shopify.theme.toml (token is read but NEVER printed) ---------------
 DEV_THEME_ID="$(toml_value theme || true)"
-STORE="$(toml_value store || true)"
+TOML_STORE="$(toml_value store || true)"
+STORE="${STORE_OVERRIDE:-$TOML_STORE}"
+FOREIGN=0
+if [ -n "$STORE_OVERRIDE" ] && [ -n "$TOML_STORE" ] && [ "$(toml_store_key "$STORE_OVERRIDE")" != "$(toml_store_key "$TOML_STORE")" ]; then
+  FOREIGN=1; TOML_STORE="$(store_handle "$TOML_STORE" || true)"
+fi
 # The project's own credential wins: a $SHOPIFY_CLI_THEME_TOKEN exported for ANOTHER project (a common
 # `theme dev` habit) would otherwise authenticate this repo's pushes against that store and die as an
 # opaque CLI 401 naming neither source. The env var is the last resort — which is also the escape
-# hatch for a token this file cannot supply.
-TOKEN="$(theme_token_from_toml)"
-[ -n "$TOKEN" ] || TOKEN="${SHOPIFY_CLI_THEME_TOKEN:-}"
+# hatch for a token this file cannot supply, and the only token a foreign store can take.
+TOKEN=""; TOKEN_SOURCE="env"
+if [ "$FOREIGN" -eq 0 ]; then TOKEN="$(theme_token_from_toml)"; TOKEN_SOURCE="toml"; fi
+[ -n "$TOKEN" ] || { TOKEN="${SHOPIFY_CLI_THEME_TOKEN:-}"; TOKEN_SOURCE="env"; }
 
 [ "$MODE" = pin ] || [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML (env=$TOML_ENV)"
 [ -n "${STORE:-}" ]        || fail "no uncommented \`store = \"...\"\` line in $TOML (env=$TOML_ENV)"
-[ -n "${TOKEN:-}" ]        || fail "no access token (password / shp*_… in $TOML env=$TOML_ENV, or \$SHOPIFY_CLI_THEME_TOKEN)"
 
 # A value that cannot be what it claims to be is a typo or a mis-parse, and handing it to the CLI is
 # an opaque failure at best and the WRONG STORE at worst. A malformed dev theme id is the nastier
@@ -291,7 +322,18 @@ if [ "$MODE" != pin ]; then
 fi
 # the bare handle is what the CLI gets and what `store=` reports — never the .myshopify.com form
 STORE="$(store_handle "$STORE")" \
-  || fail "invalid_store store='$STORE' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL — check the \`store =\` line in $TOML)"
+  || fail "invalid_store store='$STORE' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL — check $STORE_FROM)"
+
+# Refused before the token check: no token makes either of these runnable.
+if [ "$FOREIGN" -eq 1 ]; then
+  [ "$MODE" != create ] || fail "overlay_store_mismatch store=$STORE$SRC_NOTE toml_store=$TOML_STORE dev_theme=$DEV_THEME_ID — create copies the customizer settings from the dev theme in $TOML, which lives on $TOML_STORE, and a fresh theme without them has no templates; nothing was built or pushed; refresh an existing preview theme on $STORE instead (\`refresh --store $STORE --theme <id>\`), or select the toml block whose store is $STORE: $CPT_ENV_FIX"
+  [ "$MODE" != pin ] && { [ "$MODE" != refresh ] || [ "$CPT_PIN_ARG" -eq 0 ]; } \
+    || fail "pin_store_mismatch store=$STORE$SRC_NOTE toml_store=$TOML_STORE — a pin writes the id into $TOML (env=$TOML_ENV), whose store is $TOML_STORE, so \`shopify theme dev\` would look for it on the wrong store; nothing was built, pushed or written; pass --env <the block whose store is $STORE>, or drop the pin"
+fi
+[ -n "${TOKEN:-}" ] || {
+  [ "$FOREIGN" -eq 0 ] || fail "no access token for store=$STORE ($STORE_FROM) — a Theme Access token is minted PER STORE and the one in $TOML belongs to $TOML_STORE; export SHOPIFY_CLI_THEME_TOKEN with $STORE's own Theme Access password (Shopify admin → Apps → Theme Access)"
+  fail "no access token (password / shp*_… in $TOML env=$TOML_ENV, or \$SHOPIFY_CLI_THEME_TOKEN)"
+}
 
 export SHOPIFY_CLI_THEME_TOKEN="$TOKEN"   # consumed by `shopify`; never echoed
 
@@ -357,12 +399,13 @@ assemble_theme() {
 # One `theme list` call per run, shared by the name / id / role lookups below (each of those runs in a
 # command substitution, i.e. a subshell, so the cache only survives if load_theme_list is called from
 # the PARENT shell first — every call site does).
-THEME_LIST=""; THEME_LIST_LOADED=0; THEME_LIST_OK=0; THEME_LIST_SILENT=1
+THEME_LIST=""; THEME_LIST_LOADED=0; THEME_LIST_OK=0; THEME_LIST_SILENT=1; LIST_ERR=""
 load_theme_list() {
   [ "$THEME_LIST_LOADED" -eq 1 ] && return 0
   THEME_LIST_LOADED=1
   local raw
-  raw="$(shopify theme list --store "$STORE" --json --no-color 2>/dev/null || true)"
+  [ -n "$LIST_ERR" ] || { LIST_ERR="$(mk_tmpf)"; CLEAN_DIRS+=("$LIST_ERR"); }
+  raw="$(shopify theme list --store "$STORE" --json --no-color 2>"$LIST_ERR" || true)"
   [ -z "$raw" ] || THEME_LIST_SILENT=0
   # A banner before the JSON would leave every lookup below (the live-theme guard included) blind, so
   # it is trimmed first; then record whether what remains actually parses: a listing the callers
@@ -402,6 +445,21 @@ theme_ids_by_name() {
   load_theme_list
   printf '%s' "$THEME_LIST" | jq -r --arg n "$1" '.. | objects | select(.name==$n) | .id' 2>/dev/null || true
 }
+
+# A Theme Access token is minted PER STORE, so the CLI's auth rejection almost always means the token
+# belongs to another store — the one thing its raw output never says (theme-json.sh's wording).
+auth_hint() { # $1 = file holding the CLI's stderr — one hint line, only when it IS an auth rejection
+  grep -qiE '(^|[[:space:]])401([[:space:]]|$)|unauthorized|invalid api key or access token' "$1" 2>/dev/null || return 0
+  local domain src fix; domain="$(store_domain "$STORE")"
+  if [ "$TOKEN_SOURCE" = toml ]; then
+    src="$TOML"; fix="the password= in $TOML is not $domain's — mint $domain's own Theme Access password (Shopify admin → Apps → Theme Access) and put it there"
+  else
+    src="\$SHOPIFY_CLI_THEME_TOKEN"; fix="export SHOPIFY_CLI_THEME_TOKEN with $domain's own Theme Access password"
+  fi
+  printf 'hint=a Theme Access token is minted PER STORE — this one came from %s and the request went to %s, so a token belonging to any other store cannot authenticate it: %s\n' "$src" "$domain" "$fix"
+}
+# a refusal caused by a listing that never answered — which an auth rejection is
+fail_listing() { printf 'error=%s\n' "$1"; auth_hint "${LIST_ERR:-/dev/null}"; exit 1; }
 
 # Never write to the PUBLISHED theme: a mistyped `refresh --theme <id>` or a `--reuse` name colliding
 # with the live theme would push branch code (and then the dev theme's settings) onto the storefront.
@@ -452,7 +510,8 @@ assert_not_dev_theme() { # $1 = target id, $2 = context name for the message
 # can read may claim absence, and no flag lifts it (absence is deletion, not an outage).
 assert_dev_theme_listed() {
   # `pin` never gets here and every other mode has already refused an empty or non-numeric value —
-  # but a claim about an id has to be about an id
+  # but a claim about an id has to be about an id. A foreign store's listing cannot carry it at all.
+  [ "$FOREIGN" -eq 0 ] || return 0
   case "${DEV_THEME_ID:-}" in ''|*[!0-9]*) return 0 ;; esac
   load_theme_list
   if [ "$THEME_LIST_SILENT" -eq 0 ] && [ "$THEME_LIST_OK" -eq 1 ] \
@@ -474,6 +533,7 @@ json_field() { printf '%s' "$1" | jq -r --arg f "$2" '.. | objects | .[$f]? // e
 # offending file is named a few lines above the ruby trace, so show enough context.
 push_fail() { # $1 = error code; $2 (create only) = theme name to scan for a this-run-created orphan
   printf 'error=%s\n' "$1"
+  auth_hint "$ERR"
   # A throttle that held through the retries is an actionable state of its own: the fix is outside
   # this run (stop the competing consumer or wait), not "check the asset the trace names".
   if grep -qi 'throttled' "$ERR"; then
@@ -882,6 +942,7 @@ case "$MODE" in
     printf 'env=%s\n' "$TOML_ENV"
     printf 'dev_theme_id=%s\n' "$DEV_THEME_ID"
     printf 'dev_theme_name=%s\n' "$(theme_name_by_id "$DEV_THEME_ID")"
+    [ "$FOREIGN" -eq 0 ] || printf 'note=dev_theme_other_store toml_store=%s — the dev theme (the settings source) lives on the toml store, so create is refused on %s; refresh works\n' "$TOML_STORE" "$STORE"
     ;;
 
   pin)
@@ -890,6 +951,7 @@ case "$MODE" in
       case "$1" in
         --theme) need_val $# "$1"; TARGET="$2"; shift 2 ;;
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
+        --store) need_val $# "$1"; shift 2 ;;
         *) fail "unknown arg: $1 (--help prints usage)" ;;
       esac
     done
@@ -908,13 +970,13 @@ case "$MODE" in
     # past refresh_unverifiable / reuse_unverifiable still pin under an outage — their theme is
     # real by pin time and the caller must not lose its id — but say so with warn=pin_unvetted.)
     [ "$THEME_LIST_OK" -eq 1 ] || \
-      fail "theme_unverifiable theme=$TARGET store=$STORE — \`shopify theme list --json\` gave no readable answer, so the id cannot be vetted, and a pin persists in the config; re-run when the store answers — nothing was changed"
+      fail_listing "theme_unverifiable theme=$TARGET store=$STORE — \`shopify theme list --json\` gave no readable answer, so the id cannot be vetted, and a pin persists in the config; re-run when the store answers — nothing was changed"
     assert_not_live "$TARGET"
     # Pinning an id that is not on the store poisons every later run (the settings pull, `info`
     # and `shopify theme dev` all resolve it) with an error naming the config, not the typo. Only
     # a listing we could actually READ can make that claim — and by here it always was.
     if [ "$THEME_LIST_OK" -eq 1 ] && ! theme_found_by_id "$TARGET"; then
-      fail "theme_not_found theme=$TARGET store=$STORE — no theme with that id is listed on the store; check the id (a preview URL's \`?preview_theme_id=…\`) or create one with \`create --name \"<name>\"\`"
+      fail "theme_not_found theme=$TARGET store=$STORE$SRC_NOTE — no theme with that id is listed on the store; check the id (a preview URL's \`?preview_theme_id=…\`) or create one with \`create --name \"<name>\"\` — or the id lives on another store: a pin can only go into the toml block whose store it is (\`--env <that block>\`, or \`--store <handle>\` when a block names that store)"
     fi
     pin_toml "$TARGET" || fail "$PIN_ERR_KEY $PIN_ERR_MSG; nothing was changed"
     printf 'theme_id=%s\n' "$TARGET"
@@ -936,6 +998,7 @@ case "$MODE" in
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
         --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
         --allow-dev-theme) ALLOW_DEV_THEME=1; shift ;;
+        --store) need_val $# "$1"; shift 2 ;;
         *) fail "unknown arg: $1 (--help prints usage)" ;;
       esac
     done
@@ -955,7 +1018,7 @@ case "$MODE" in
       # "no match" out of a listing we cannot read is not "the theme does not exist" — creating here
       # would add a SECOND theme with this name, which the ambiguity check then blocks on every later
       # run until a human deletes one in the admin. A listing that never answered is the same hazard.
-      [ "$THEME_LIST_SILENT" -eq 0 ] || [ "$ALLOW_UNVERIFIED" -eq 1 ] || fail "reuse_unverifiable name=\"$NAME\" — \`shopify theme list --json\` gave no answer, so the name cannot be resolved; re-running would create a duplicate theme of that name; re-run when the store answers, or pass --allow-unverified to create without the lookup"
+      [ "$THEME_LIST_SILENT" -eq 0 ] || [ "$ALLOW_UNVERIFIED" -eq 1 ] || fail_listing "reuse_unverifiable name=\"$NAME\" — \`shopify theme list --json\` gave no answer, so the name cannot be resolved; re-running would create a duplicate theme of that name; re-run when the store answers, or pass --allow-unverified to create without the lookup"
       ! theme_list_unreadable || fail "cli_list_unreadable — \`shopify theme list --json\` returned output that is not JSON, so \"$NAME\" cannot be resolved; re-running would create a duplicate theme of that name"
       MATCHES_RAW="$(theme_ids_by_name "$NAME" || true)"
       # keep only digit ids, so a `null` from an odd list shape can never become a push target
@@ -1047,6 +1110,7 @@ case "$MODE" in
         --env) need_val $# "$1"; PIN_ENV="$2"; shift 2 ;;
         --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
         --allow-dev-theme) ALLOW_DEV_THEME=1; shift ;;
+        --store) need_val $# "$1"; shift 2 ;;
         *) fail "unknown arg: $1 (--help prints usage)" ;;
       esac
     done
@@ -1066,6 +1130,7 @@ case "$MODE" in
     load_theme_list
     if [ "$THEME_LIST_SILENT" -eq 1 ] && [ "$ALLOW_UNVERIFIED" -eq 0 ] && ! session_theme_recorded "$TARGET"; then
       printf 'error=refresh_unverifiable theme=%s store=%s — `shopify theme list --json` gave no answer, so the live-theme guard cannot clear this id and no workspace under .claude/tasks records it as session-theme; nothing was pushed\n' "$TARGET" "$STORE"
+      auth_hint "$LIST_ERR"
       printf 'hint=re-run when the store answers, or pass --allow-unverified to push to %s without the store check (developer decision, never unattended)\n' "$TARGET"
       exit 1
     fi
@@ -1084,7 +1149,7 @@ case "$MODE" in
     # small) — were it ever paginated, a theme listed on a later page would read as deleted here.
     if [ "$THEME_LIST_SILENT" -eq 0 ] && [ "$THEME_LIST_OK" -eq 1 ] \
        && theme_list_speaks_numeric_ids && ! theme_found_by_id "$TARGET"; then
-      fail "theme_not_found theme=$TARGET store=$STORE — no theme with that id is listed on the store (a deleted preview theme looks like this); nothing was built or pushed; check the id (a preview URL's \`?preview_theme_id=…\`) or make a fresh one with \`create --name \"<name>\" --reuse\` (add --pin-toml only if the id you lost was the one pinned in shopify.theme.toml)"
+      fail "theme_not_found theme=$TARGET store=$STORE$SRC_NOTE — no theme with that id is listed on the store (a deleted preview theme looks like this); nothing was built or pushed; check the id (a preview URL's \`?preview_theme_id=…\`) or make a fresh one with \`create --name \"<name>\" --reuse\` (add --pin-toml only if the id you lost was the one pinned in shopify.theme.toml) — or the id lives on another store: pass --store <handle> (a \`*.myshopify.com\` preview URL's host or the editor URL's \`/store/<handle>/\` names it)"
     fi
     assert_dev_theme_listed
 

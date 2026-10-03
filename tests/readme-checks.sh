@@ -526,7 +526,10 @@ for f in "$FIGMA_AGENT" "$PLUGIN_DIR/agents-cursor/figma-reader.md" \
   has "$f" 'mcp-connector` / `mcp-desktop` / `rest' figma-ladder-three-values
   has "$f" '`source` (the rung' figma-ladder-frontmatter-source
   has "$f" '`last_modified` (rung 3 only' figma-ladder-frontmatter-stamp
+  has "$f" 'ONE probe' figma-rung2-single-probe
+  has "$f" 'neighbouring or sequential id' figma-no-neighbour-ids
 done
+has "$FIGMA_REF" 'Never probe neighbouring or sequential ids' figma-ref-no-neighbour-ids
 # `fetched_at` with no stated source is a field an agent otherwise fills with a midnight
 # placeholder. The spec must name the one Bash call that produces a real stamp, exactly as
 # jira-reader does for `ticket.md`.

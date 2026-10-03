@@ -26,9 +26,10 @@
  * (0 or >1 nodes → exit 2 naming the count). So is the MCP content array a whole-result spill
  * holds — `[{"type":"text","text":"<response JSON>"}]`, also as `{"content":[…]}` or one bare
  * block: one block's text is parsed (not JSON → exit 1); of several, the first that parses to an
- * object with `fields` or `issues` is used (none → exit 2 naming the count). --comments on an
- * input with no `fields.comment` exits 2 rather than printing nothing — an empty `comments` array
- * is still "no comments", empty stdout and exit 0.
+ * object with `fields` or `issues` is used (none → exit 2 naming the count). --comments also takes
+ * the Jira /comment endpoint's `{comments:[…]}` and a bare array of comment objects; an input with
+ * none of these exits 2 rather than printing nothing — an empty `comments` array is still
+ * "no comments", empty stdout and exit 0.
  *
  * The markdown is written so md-to-adf.cjs can read it BACK unchanged (the fnd flow reads a
  * field, edits it, writes it back): literal prose that starts with a structure marker is
@@ -652,12 +653,31 @@ function commentBody(body) {
   return trimAscii(adfToMarkdown(body) || '');
 }
 
+const COMMENT_SHAPES = 'a getJiraIssue response with fields.comment, a /comment response {comments:[…]},'
+  + ' or a bare array of comment objects';
+
+// The comment page object from any accepted shape, or null. A top-level `comments` counts only
+// as the endpoint's page (paging markers, no issue `key`/`fields`): the MCP issue node carries a
+// `comments[]` of markdown bodies whose images are empty-alt blob: links — useless for the join.
+function commentField(data) {
+  const isObj = (o) => o && typeof o === 'object' && !Array.isArray(o);
+  if (isObj(data) && data.fields) {
+    return data.fields.comment && typeof data.fields.comment === 'object' ? data.fields.comment : null;
+  }
+  if (isObj(data) && Array.isArray(data.comments) && !('key' in data)
+    && ('startAt' in data || 'maxResults' in data)) return data;
+  if (Array.isArray(data) && data.length && data.every((c) => isObj(c) && 'body' in c && ('author' in c || 'created' in c))) {
+    return { comments: data };
+  }
+  return null;
+}
+
 // The comments of a full getJiraIssue response, oldest first (the order Jira returns them in).
 // Jira PAGES the field, so a shortfall against `total` is reported rather than hidden — there is
 // no MCP tool for the second page. A response without comments renders empty, never an error:
 // a ticket read must not fail on a missing discussion.
 function renderComments(data) {
-  const field = (data && data.fields && data.fields.comment) || {};
+  const field = commentField(data) || {};
   const list = Array.isArray(field.comments) ? field.comments : [];
   const blocks = list.map((entry, i) => {
     const c = entry && typeof entry === 'object' ? entry : {};
@@ -706,9 +726,8 @@ if (require.main === module) {
     // No comment field at all = the wrong document was converted (the inline MCP text instead of
     // the spill, or a read without fields:["comment"]). Silent empty stdout sent two live reads
     // back to the useless markdown bodies; an empty `comments` ARRAY stays "no comments" (exit 0).
-    if (!data || typeof data !== 'object' || !data.fields
-      || !data.fields.comment || typeof data.fields.comment !== 'object') {
-      process.stderr.write('adf-to-md: no comment field in ' + inputLabel + '\n');
+    if (!commentField(data)) {
+      process.stderr.write('adf-to-md: no comment field in ' + inputLabel + ' (accepted: ' + COMMENT_SHAPES + ')\n');
       process.exit(2);
     }
     const out = renderComments(data);

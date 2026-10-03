@@ -428,9 +428,9 @@ function afterMCPExecution(payload) {
 
 // ── beforeMCPExecution ──────────────────────────────────────────────────────────────────
 // The screenshot scratch-path deny. Cursor runs this for EVERY MCP call — there is no matcher
-// in its wiring — so the two tools the guard covers are selected here, on the bare spelling as
+// in its wiring — so the tools the guard covers are selected here, on the bare spelling as
 // well as the prefixed one (`mcp_server_name` is a separate field on this host).
-const SCREENSHOT_TOOL = /(^|__)(take_screenshot|browser_take_screenshot)$/;
+const SCREENSHOT_TOOL = /(^|__)(take_screenshot|browser_take_screenshot|take_snapshot|get_network_request|browser_run_code_unsafe)$/;
 
 function beforeMCPExecution(payload) {
   if (process.env.FND_SCRATCH_GUARD === '0') return null;

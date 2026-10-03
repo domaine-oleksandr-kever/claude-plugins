@@ -5,7 +5,7 @@ description: >
   the user asks to create / make / spin up a preview theme, test the preview script, or
   update / refresh / redeploy / rebuild a preview / push a fix to one. A bare theme id
   means refresh that theme.
-argument-hint: "[create|refresh] [theme-id] [--name \"[TICKET] …\"] [--reuse] [--no-build]"
+argument-hint: "[create|refresh] [theme-id|preview-url] [--name \"[TICKET] …\"] [--reuse] [--no-build] [--store <handle>]"
 arguments:
   - name: mode
     description: create | refresh. Omitted → auto-routing (see Route the mode).
@@ -56,6 +56,11 @@ theme.
 
 - Explicit `create` / `refresh` → that mode.
 - A bare **theme id** → **refresh** that theme.
+- **Which store:** a preview URL (or store) the developer gives whose `*.myshopify.com` host is not
+  the `store=` the script reports → add `--store <that handle>` to every call (brands often have a
+  store per region; a custom-domain URL → ask which store). There `create` is refused
+  (`error=overlay_store_mismatch`) — refresh an existing theme. Never fall back to a raw
+  `shopify theme push`.
 - Neither: a preview-theme id for this ticket is already known (the workspace `notes.md`
   `session-theme: <id>` line **wins** — that is this work stream's theme, refresh it rather
   than creating a second one; then the conversation, the PR preview table, a preview URL's
@@ -130,8 +135,9 @@ theme.
    if the developer confirms the id is this stream's session theme, do step 5 (record the
    `session-theme:` line) FIRST and re-run without any flag; only an explicit "overwrite the dev
    theme" gets `--allow-dev-theme`. `error=theme_not_found` is neither of those: the listing
-   answered and does not carry the id, so the theme was deleted — no flag lifts it; offer a fresh
-   `create` instead of re-running. `error=dev_theme_not_found` (on `create` too) says the same
+   answered and does not carry the id — deleted, or on another store: with a preview URL whose host
+   differs, re-run with `--store <host>`; with a bare id, ask the developer whether it lives on
+   another store (which handle) and re-run with `--store <handle>` — only then offer a fresh `create`. `error=dev_theme_not_found` (on `create` too) says the same
    about the toml's settings SOURCE — no flag lifts that either, and every fix rewrites
    `shopify.theme.toml`, so ask which theme is the new source before running `pin --theme <ID>`.
 4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`.

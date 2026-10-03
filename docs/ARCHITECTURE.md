@@ -92,9 +92,9 @@ sequenceDiagram
   Host->>Hooks: PreToolUse
   Note over Hooks: no-ai-attribution → no-verify-bypass<br/>exit 2 = deny (--no-verify, hooksPath, HUSKY=0, alias tricks)
   Hooks-->>Host: allow / deny + reason
-  Model->>Host: mcp__…__take_screenshot(path)
+  Model->>Host: mcp__…__take_screenshot / take_snapshot / … (path)
   Host->>Hooks: PreToolUse
-  Hooks-->>Host: deny when the path lands inside the checkout (scratch-path-guard)
+  Hooks-->>Host: deny a path outside the project, or inside it outside .claude/ (scratch-path-guard)
   Model->>Host: mcp__…__getJiraIssue
   Host->>Tool: call
   Tool-->>Host: result

@@ -83,7 +83,7 @@
         ]
       },
       {
-        "matcher": "^mcp__.*__(take_screenshot|browser_take_screenshot)$",
+        "matcher": "^mcp__.*__(take_screenshot|browser_take_screenshot|take_snapshot|get_network_request|browser_run_code_unsafe)$",
         "hooks": [
           {
             "type": "command",

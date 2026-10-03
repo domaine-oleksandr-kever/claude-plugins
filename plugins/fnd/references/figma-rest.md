@@ -16,7 +16,7 @@ in the Bash tool's shell.
 | rung | source | taken when |
 |---|---|---|
 | 1 | `mcp-connector` | the remote/connector Figma server's tools (`mcp__figma__…`) are listed — URL-driven, no desktop app |
-| 2 | `mcp-desktop` | the local `figma-dev-mode` bridge is listed **and** its first call succeeds — it needs the Figma desktop app running with the page loaded |
+| 2 | `mcp-desktop` | the local `figma-dev-mode` bridge is listed **and** one `get_metadata` probe on the URL's node id succeeds — it answers only for the file in the desktop app's active tab |
 | 3 | `rest` | no Figma MCP tool is available at all, or a rung-1/2 call failed the way a closed app fails: connection refused, "node not found", "page not loaded" |
 | — | `""` | nothing answered — one `hint=` / `error=` line in `needs_clarification`, nothing else |
 
@@ -179,7 +179,8 @@ stderr carries `note=` lines and always ends with the summary
 A **404**, and a `200` whose `nodes.<id>` is null or absent, are both `node_not_found`: Figma
 answers 200 with a null node for an id that does not exist in that file. It is not retryable — no
 flag changes the answer for the same link; a fresh link (select the layer, Copy link) is the only
-remedy. A 404 can also mean the file itself is gone — `--probe` tells them apart. A `2xx` body
+remedy. Never probe neighbouring or sequential ids instead — they are guesses, and the burst ends in
+a 429. A 404 can also mean the file itself is gone — `--probe` tells them apart. A `2xx` body
 that is empty or not JSON is `figma_request_failed http=<code>` (a proxy or transport artifact;
 re-run once). A **429** is retried **once**, honouring `Retry-After` clamped into 1–60 s
 (`Retry-After: 0` means "retry now", an hour means "run this later, not now"); a second 429 on the

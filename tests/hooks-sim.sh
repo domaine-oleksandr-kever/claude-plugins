@@ -85,8 +85,11 @@
 #             per-user playwright call with NO filename (its default output dir is
 #             <cwd>/.playwright-mcp, inside the tree) — while the BUNDLED playwright, whose
 #             manifest pins --output-dir .claude/fnd-tmp/playwright, is allowed both a bare
-#             filename and no filename at all, and a `.claude/` path, an out-of-tree path, an
-#             inline chrome-devtools screenshot, FND_SCRATCH_GUARD=0 and malformed stdin all pass
+#             filename and no filename at all; a path OUTSIDE the project (scratchpad, another
+#             checkout, the main checkout from a worktree) is denied for the same remediation, since
+#             the servers refuse it anyway; a `.claude/` path, an inline chrome-devtools
+#             screenshot / snapshot / network body, inline run_code_unsafe code, an in-tree script
+#             the server only reads, FND_SCRATCH_GUARD=0 and malformed stdin all pass
 #             through; plus the deny ENVELOPE shape, symlinked prefixes, the wiring gate, the
 #             matcher's tool coverage, the three-way output-dir literal pin, and the
 #             `.git/info/exclude` stamp the bundled allow owes and a deny does not; the project
@@ -3716,10 +3719,13 @@ if [ -z "$out" ]; then ok; else bad U9-global-file-disables-guard "out=$(printf 
 SPG="$ROOT/plugins/fnd/hooks/scratch-path-guard.cjs"
 DPROJ="$TMP/dproj"; mkdir -p "$DPROJ/.claude/tasks/ELC-1/tmp" "$DPROJ/sections" "$DPROJ/tmp"
 DOUT="$TMP/dscratch"; mkdir -p "$DOUT"   # a directory OUTSIDE the project working tree
+# The guard's own os.tmpdir() — chrome-devtools accepts files under it — kept apart from $DOUT,
+# which otherwise sits under the mktemp'd $TMP and so under the real TMPDIR.
+DOSTMP="$TMP/dostmp"; mkdir -p "$DOSTMP"
 
 run_spg() { # payload [VAR=val…] — the guard as the host runs it, from the project cwd
   payload="$1"; shift
-  printf '%s' "$payload" | (cd "$DPROJ" && env "$@" node "$SPG" 2>/dev/null)
+  printf '%s' "$payload" | (cd "$DPROJ" && env TMPDIR="$DOSTMP" "$@" node "$SPG" 2>/dev/null)
 }
 spg_ev() { # tool key path — a PreToolUse event for one screenshot tool
   jq -cn --arg t "$1" --arg k "$2" --arg p "$3" --arg cwd "$DPROJ" \
@@ -3792,12 +3798,27 @@ assert_contains D3c-retry-deny "$out" '"permissionDecision":"deny"'
 out="$(run_spg "$(spg_ev "$PWU" filename "$DPROJ/.claude/tasks/ELC-1/tmp/shot.png")")"
 if [ -z "$out" ]; then ok; else bad D3d-abs-workspace "the absolute workspace path was denied: $out"; fi
 
-# D4: absolute path outside the project (system tmp, a scratchpad) — not this guard's business.
-out="$(run_spg "$(spg_ev "$PW" filename "$DOUT/shot.png")")"; ec=$?
-assert_eq D4-outside-exit "$ec" 0
-if [ -z "$out" ]; then ok; else bad D4-outside "an out-of-tree path was denied: $out"; fi
+# D4: a path outside the project (system tmp, the host's scratchpad, another checkout) is DENIED —
+# both servers canonicalize it and refuse any file outside their roots (chrome-devtools' one extra
+# root, its OS temp dir, is D20) ("Access denied: … not
+# within any of the configured workspace roots", "File access denied: … outside allowed roots"),
+# so passing it only bought a failed round-trip. The reason says why and hands over the same
+# absolute in-project remediation; no FND_SCRATCH_GUARD hint, since the server refuses it anyway.
+mkdir -p "$DOUT/scratchpad"
+out="$(run_spg "$(spg_ev "$PW" filename "$DOUT/scratchpad/elc-1395-bundle-pdp.png")")"; ec=$?
+assert_eq       D4-outside-exit  "$ec" 0
+assert_contains D4-outside-deny  "$out" '"permissionDecision":"deny"'
+assert_contains D4-outside-why   "$out" 'accept only files inside this project'
+assert_contains D4-outside-where "$out" "$DPROJ/.claude/tasks/<work-id>/tmp/elc-1395-bundle-pdp.png"
+assert_contains D4-outside-noticket "$out" "$DPROJ/.claude/tmp/elc-1395-bundle-pdp.png"
+assert_absent   D4-outside-no-optout "$out" 'FND_SCRATCH_GUARD=0'
 out="$(run_spg "$(spg_ev "$CDT" filePath ../shot.png)")"
-if [ -z "$out" ]; then ok; else bad D4b-parent "a ../ path was denied: $out"; fi
+assert_contains D4b-parent-deny "$out" 'outside this project'
+# a foreign checkout's own scratch dir is still outside THIS project
+DFOR="$TMP/dforeign"; mkdir -p "$DFOR/.claude/tmp"
+out="$(run_spg "$(spg_ev "$CDT" filePath "$DFOR/.claude/tmp/shot.png")")"
+assert_contains D4c-foreign-checkout-deny "$out" 'outside this project'
+assert_contains D4c-foreign-where "$out" "$DPROJ/.claude/tmp/shot.png"
 
 # D5 (bug): "no path field → allow" rests on a false premise for a playwright server with no
 # --output-dir: its default output dir is <cwd>/.playwright-mcp — INSIDE the checkout (live
@@ -3869,7 +3890,7 @@ assert_contains D9-symlink-deny "$out" '"permissionDecision":"deny"'
 # is created by nothing in the bundle, so a model that followed the reason got ENOENT and went
 # back to writing in the checkout. The guard now creates them as it denies.
 run_spg_at() { # cwd payload — the guard from an arbitrary project dir
-  printf '%s' "$2" | (cd "$1" && node "$SPG" 2>/dev/null)
+  printf '%s' "$2" | (cd "$1" && env TMPDIR="$DOSTMP" node "$SPG" 2>/dev/null)
 }
 spg_ev_at() { # cwd tool key path
   jq -cn --arg t "$2" --arg k "$3" --arg p "$4" --arg cwd "$1" \
@@ -3901,10 +3922,13 @@ fi
 # routinely installed per-user rather than from the plugin (`claude mcp add playwright …`), and a
 # matcher pinned to `plugin_fnd_` would leave the guard silently inert for exactly those users.
 SPG_MATCHER="$(jq -r '.hooks.PreToolUse[] | select(.matcher | test("take_screenshot")) | .matcher' "$MANIFEST")"
-for t in "$PW" "$CDT" mcp__playwright__browser_take_screenshot mcp__chrome-devtools-mcp__take_screenshot; do
-  if printf '%s\n' "$t" | grep -Eq "$SPG_MATCHER"; then ok; else bad "D8-$t" "matcher misses the screenshot tool"; fi
+for t in "$PW" "$CDT" mcp__playwright__browser_take_screenshot mcp__chrome-devtools-mcp__take_screenshot \
+         mcp__plugin_fnd_chrome-devtools-mcp__take_snapshot mcp__plugin_fnd_chrome-devtools-mcp__get_network_request \
+         mcp__plugin_fnd_playwright__browser_run_code_unsafe mcp__playwright__browser_run_code_unsafe; do
+  if printf '%s\n' "$t" | grep -Eq "$SPG_MATCHER"; then ok; else bad "D8-$t" "matcher misses a guarded tool"; fi
 done
-for t in Bash mcp__plugin_fnd_chrome-devtools-mcp__take_snapshot mcp__plugin_fnd_figma-dev-mode__get_screenshot; do
+for t in Bash mcp__plugin_fnd_chrome-devtools-mcp__take_heapsnapshot mcp__plugin_fnd_chrome-devtools-mcp__list_network_requests \
+         mcp__plugin_fnd_playwright__browser_run_code mcp__plugin_fnd_figma-dev-mode__get_screenshot; do
   if printf '%s\n' "$t" | grep -Eq "$SPG_MATCHER"; then bad "D8-not-$t" "matcher over-matches"; else ok; fi
 done
 
@@ -4016,7 +4040,7 @@ if [ -z "$out" ]; then ok; else bad D14f-wt-bundled-allowed "the bundled output 
 
 run_spg_env() { # cwd payload [VAR=val…] — run_spg_at with an explicit hook environment
   _c="$1"; _p="$2"; shift 2
-  printf '%s' "$_p" | (cd "$_c" && env -u CLAUDE_PROJECT_DIR "$@" node "$SPG" 2>/dev/null)
+  printf '%s' "$_p" | (cd "$_c" && env -u CLAUDE_PROJECT_DIR TMPDIR="$DOSTMP" "$@" node "$SPG" 2>/dev/null)
 }
 # D15: a session opened in a monorepo subdir — `.claude/` and the screenshot servers live in
 # `mono/web`, so the git toplevel `mono` is the wrong root, with or without CLAUDE_PROJECT_DIR.
@@ -4040,6 +4064,75 @@ out="$(run_spg_env "$DP16" "$(spg_ev_at "$DP16" "$CDT" filePath "$DW16/.claude/t
 if [ -z "$out" ]; then ok; else bad D16b-phys-cwd-remediation-allowed "the worktree remediation was denied: $out"; fi
 out="$(run_spg_env "$DP16" "$(spg_ev_at "$DP16" "$CDT" filePath "$DW16/x.png")" CLAUDE_PROJECT_DIR="$DW16")"
 assert_contains D16c-phys-cwd-litter-deny "$out" '"permissionDecision":"deny"'
+
+# D17: the three tools wired beside the screenshots. chrome-devtools' take_snapshot and
+# get_network_request write a file only when handed a path (inline otherwise); playwright's
+# browser_run_code_unsafe READS its `filename` script, resolved against the workspace root.
+CDS=mcp__plugin_fnd_chrome-devtools-mcp__take_snapshot
+CDN=mcp__plugin_fnd_chrome-devtools-mcp__get_network_request
+PRC=mcp__plugin_fnd_playwright__browser_run_code_unsafe
+out="$(run_spg "$(spg_ev "$CDS" filePath "$DOUT/scratchpad/snap-desktop.txt")")"
+assert_contains D17-snapshot-outside-deny  "$out" 'outside this project'
+assert_contains D17-snapshot-outside-where "$out" "$DPROJ/.claude/tmp/snap-desktop.txt"
+out="$(run_spg "$(spg_ev "$CDS" filePath snap-desktop.txt)")"
+assert_contains D17b-snapshot-litter-deny "$out" 'would write into the project working tree'
+out="$(run_spg "$(nopath_ev "$CDS")")"
+if [ -z "$out" ]; then ok; else bad D17c-snapshot-inline "an inline snapshot was denied: $out"; fi
+out="$(run_spg "$(spg_ev "$CDN" responseFilePath "$DOUT/scratchpad/fhr-minis.json")")"
+assert_contains D17d-network-outside-deny  "$out" 'outside this project'
+assert_contains D17d-network-outside-where "$out" "$DPROJ/.claude/tmp/fhr-minis.json"
+out="$(run_spg "$(spg_ev "$CDN" requestFilePath req.json)")"
+assert_contains D17e-network-request-litter-deny "$out" 'would write into the project working tree'
+out="$(run_spg "$(spg_ev "$CDN" responseFilePath "$DPROJ/.claude/tmp/fhr-minis.json")")"
+if [ -z "$out" ]; then ok; else bad D17f-network-workspace "a .claude/tmp body path was denied: $out"; fi
+# every path key present is judged — a clean first key does not launder the second
+out="$(run_spg "$(jq -cn --arg t "$CDN" --arg a "$DPROJ/.claude/tmp/req.json" --arg b "$DOUT/scratchpad/res.json" --arg cwd "$DPROJ" \
+  '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{requestFilePath:$a, responseFilePath:$b}, cwd:$cwd}')")"
+assert_contains D17g-network-second-key-deny "$out" "$DOUT/scratchpad/res.json"
+out="$(run_spg "$(nopath_ev "$CDN")")"
+if [ -z "$out" ]; then ok; else bad D17h-network-inline "an inline network body was denied: $out"; fi
+out="$(run_spg "$(spg_ev "$PRC" filename "$DOUT/scratchpad/measure.js")")"
+assert_contains D17i-runcode-outside-deny  "$out" 'outside this project'
+assert_contains D17i-runcode-outside-where "$out" "$DPROJ/.claude/tmp/measure.js"
+out="$(run_spg "$(jq -cn --arg t "$PRC" --arg cwd "$DPROJ" \
+  '{hook_event_name:"PreToolUse", tool_name:$t, tool_input:{code:"async (page) => page.title()"}, cwd:$cwd}')")"
+if [ -z "$out" ]; then ok; else bad D17j-runcode-inline "inline run_code_unsafe code was denied: $out"; fi
+# an in-tree script is READ, not written: no litter. And it resolves against the project, not the
+# bundled output dir — through that dir `../measure.js` would have stayed inside `.claude/`.
+out="$(run_spg "$(spg_ev "$PRC" filename sections/measure.js)")"
+if [ -z "$out" ]; then ok; else bad D17k-runcode-in-tree "an in-tree script the server only reads was denied: $out"; fi
+out="$(run_spg "$(spg_ev "$PRC" filename ../measure.js)")"
+assert_contains D17l-runcode-base-is-project "$out" 'outside this project'
+
+# D18: from a worktree the MAIN checkout's `.claude/tmp/` is outside the project the servers run in
+# — the remediation is the worktree's own `.claude/tmp/<work-id>/`, never the task workspace.
+mkdir -p "$DM14/.claude/tmp/small-bugs-2"
+out="$(run_spg_at "$DW14" "$(spg_ev_at "$DW14" "$CDT" filePath "$DM14/.claude/tmp/small-bugs-2/761-accordions-1200.png")")"
+assert_contains D18-wt-main-tmp-deny     "$out" 'outside this project'
+assert_contains D18-wt-main-tmp-where    "$out" "$DW14/.claude/tmp/<work-id>/761-accordions-1200.png"
+assert_absent   D18-wt-main-tmp-no-tasks "$out" '.claude/tasks'
+
+# D19: under Claude Code's own wiring CLAUDE_PROJECT_DIR is the root even after a Bash `cd` out of
+# the project (into the scratchpad) — taken from that cwd, the outside deny would call the real
+# workspace foreign and hand back a remediation inside the scratchpad.
+out="$(run_spg_env "$DOUT/scratchpad" "$(spg_ev_at "$DOUT/scratchpad" "$CDT" filePath "$DPROJ/.claude/tmp/x.png")" CLAUDE_PROJECT_DIR="$DPROJ" FND_HOST=claude)"
+if [ -z "$out" ]; then ok; else bad D19-claude-env-root "the workspace was denied from a cwd outside the project: $out"; fi
+out="$(run_spg_env "$DOUT/scratchpad" "$(spg_ev_at "$DOUT/scratchpad" "$CDT" filePath "$DOUT/scratchpad/x.png")" CLAUDE_PROJECT_DIR="$DPROJ" FND_HOST=claude)"
+assert_contains D19b-claude-scratchpad-where "$out" "$DPROJ/.claude/tmp/x.png"
+# …while on another host an inherited CLAUDE_PROJECT_DIR naming a different tree does not take over
+out="$(run_spg_env "$DPROJ" "$(spg_ev "$CDT" filePath "$DPROJ/.claude/tmp/x.png")" CLAUDE_PROJECT_DIR="$DFOR" FND_HOST=codex)"
+if [ -z "$out" ]; then ok; else bad D19c-inherited-env-ignored "a stale CLAUDE_PROJECT_DIR moved the root: $out"; fi
+
+# D20: chrome-devtools-mcp always adds os.tmpdir() to its roots (the only one, for a client that
+# negotiates none), so its writing tools pass there; playwright has no such root and stays denied.
+out="$(run_spg "$(spg_ev "$CDT" filePath "$DOSTMP/shot.png")")"
+if [ -z "$out" ]; then ok; else bad D20-cdt-ostmp-allowed "a chrome-devtools path under the OS temp dir was denied: $out"; fi
+out="$(run_spg "$(spg_ev "$CDS" filePath "$DOSTMP/snap.txt")")"
+if [ -z "$out" ]; then ok; else bad D20b-snapshot-ostmp-allowed "a snapshot under the OS temp dir was denied: $out"; fi
+out="$(run_spg "$(spg_ev "$PWU" filename "$DOSTMP/shot.png")")"
+assert_contains D20c-playwright-ostmp-deny "$out" 'outside this project'
+out="$(run_spg "$(spg_ev "$PRC" filename "$DOSTMP/measure.js")")"
+assert_contains D20d-runcode-ostmp-deny "$out" 'outside this project'
 
 # ═══ A — hooks/spill-access.sh, the PreToolUse spill-read recorder ══════════
 # Measurement only: --report called a platform-overflow whale MISSED whenever the agent read the
@@ -4801,10 +4894,16 @@ assert_eq N6-stdout-unchanged "$out" "$nt_spg"
 assert_eq N6-record "$(ht_norm "$(ht_log "$d")")" \
   '{"ts":"T","host":"codex","event":"PreToolUse","hook":"scratch-path-guard","decision":"deny","tool":"'"$PWU"'","project":"proj","ms":N}'
 d="$NT/n7"; mkdir -p "$d"
-out="$(nt_run "$d" "$(spg_ev "$CDT" filePath "$DOUT/x.png")" FND_HOST_TRACE=1 FND_HOST=claude node "$SPGJS")"
+out="$(nt_run "$d" "$(nopath_ev "$CDT")" FND_HOST_TRACE=1 FND_HOST=claude node "$SPGJS")"
 assert_eq       N7-silent "$out" ""
 assert_contains N7-pass   "$(ht_log "$d")" '"decision":"pass"'
 assert_contains N7-tool   "$(ht_log "$d")" "\"tool\":\"$CDT\""
+# the outside-the-project deny on a newly wired tool is traced under that tool's name too
+d="$NT/n7b"; mkdir -p "$d"
+out="$(nt_run "$d" "$(spg_ev "$CDS" filePath "$DOUT/scratchpad/snap.txt")" FND_HOST_TRACE=1 FND_HOST=codex node "$SPGJS")"
+assert_contains N7b-deny-out "$out" 'outside this project'
+assert_contains N7b-deny     "$(ht_log "$d")" '"decision":"deny"'
+assert_contains N7b-tool     "$(ht_log "$d")" "\"tool\":\"$CDS\""
 
 # N8: mcp-slim's below-gate fast path — the ~76 % of events that load no json-slim at all. The
 # require probe must stay silent AND the line must still be written: this path is the one whose

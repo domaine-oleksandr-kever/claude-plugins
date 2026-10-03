@@ -452,7 +452,7 @@ rc=0; FAKE_HTTP_NODES=404 fr "$D5" "$URL_D" --out "$OUT5" >"$O" 2>"$E" || rc=$?
 assert F5-404 4 "$rc" "$E" "error=node_not_found"
 # F5b: a stale link answers the same to every flag — the hint says so, so the caller asks for a
 # fresh link instead of re-running; the 404 variant points at --probe to tell file from node
-F5B_REMEDY='not retryable, no flag changes this answer; ask for a fresh link — select the layer, Copy link'
+F5B_REMEDY='not retryable, no flag changes this answer; ask for a fresh link — select the layer, Copy link; do not probe neighbouring ids'
 if grep -qF "error=node_not_found file_key=$KEY node_id=1:2 http=404 (Figma finds neither this file nor this node" "$E" \
    && grep -qF '`--probe` tells them apart: ok=1 = the file answers, so it is the node, error=file_not_found = the file itself is gone' "$E" \
    && grep -qF "$F5B_REMEDY)" "$E"; then ok

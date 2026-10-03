@@ -1,16 +1,20 @@
 #!/usr/bin/env node
-// PreToolUse hook (matcher: the two browser screenshot tools) — keep QA scratch out of the
-// working tree. A screenshot tool writes wherever its path argument points, and for the servers
-// installed per-user that argument resolves inside the checkout, so `filename: "elc-123-cart.jpeg"`
-// lands 78 stray binaries in a theme repo (live evidence, elc-theme 2026-08).
+// PreToolUse hook (matcher: the browser MCP tools that take a file path) — keep QA scratch out of
+// the working tree, and every path inside the project the servers will accept. A screenshot tool
+// writes wherever its path argument points, and for the servers installed per-user that argument
+// resolves inside the checkout, so `filename: "elc-123-cart.jpeg"` lands 78 stray binaries in a
+// theme repo (live evidence, elc-theme 2026-08).
 // references/task-workspace.md already forbids it in prose; this is the mechanical half.
 //
 // Contract (Claude Code):
-//   in  — PreToolUse event JSON on stdin: {tool_name, tool_input:{…}, cwd}. The candidate path
-//         is `tool_input.filePath` (chrome-devtools take_screenshot) or `tool_input.filename`
-//         (playwright browser_take_screenshot). `tool_name` decides two things: WHICH DIRECTORY a
-//         relative candidate resolves against, and the verdict when there is NO path at all (below);
-//         the matcher in each host's wiring is the routing.
+//   in  — PreToolUse event JSON on stdin: {tool_name, tool_input:{…}, cwd}. The candidate paths
+//         are `tool_input.filePath` (chrome-devtools take_screenshot / take_snapshot),
+//         `requestFilePath` / `responseFilePath` (chrome-devtools get_network_request) and
+//         `filename` (playwright browser_take_screenshot, and browser_run_code_unsafe's script —
+//         a file the server READS); every one present is judged. `tool_name` decides three things:
+//         WHICH DIRECTORY a relative candidate resolves against, whether an in-tree path is litter
+//         (a file the tool only reads is not), and the verdict when there is NO path at all
+//         (below); the matcher in each host's wiring is the routing.
 //   out — a deny is `hookSpecificOutput:{hookEventName:"PreToolUse", permissionDecision:"deny",
 //         permissionDecisionReason:<text>}` on stdout, exit 0; the reason reaches the MODEL, so
 //         it names where to write instead. Print nothing → the call proceeds.
@@ -27,11 +31,15 @@
 // anything meant to be kept — QA evidence, the screenshots a steps-to-test doc points at — still
 // belongs in `<project>/.claude/tasks/<work-id>/tmp/`, which nothing prunes.
 //
-// Deny rule — narrow on purpose. DENY only when the resolved path lands inside the project working
-// tree AND outside a first-segment `.claude/`. Everything else is allowed: anything under
-// `.claude/` (the task workspaces, `.claude/tmp/`, the swept playwright output dir), and any
-// absolute path outside the tree (system tmp, a scratchpad). An in-project `tmp/` is NOT one of
-// the allowed dirs: a theme checkout does not carry one and does not gitignore one, so
+// Deny rule, two halves. A path that resolves OUTSIDE the project root (the host's scratchpad,
+// system tmp, another checkout) is DENIED: both servers canonicalize it and refuse any file outside
+// their roots, so the deny only saves the failed round-trip and names a path that works. The one
+// outside root a server does accept — chrome-devtools' OS temp dir (`os.tmpdir()`) — passes for
+// its writing tools. Inside the
+// tree the rule is narrow on purpose: DENY only when the path lands outside a first-segment
+// `.claude/`. Allowed: anything under `.claude/` (the task workspaces, `.claude/tmp/`, the swept
+// playwright output dir), and any in-tree file the tool only reads. An in-project `tmp/` is NOT
+// one of the allowed dirs: a theme checkout does not carry one and does not gitignore one, so
 // `tmp/shot.png` is exactly where a denied model puts the file on its second attempt — same
 // litter, one directory deeper. `.claude` has to be the FIRST segment, too: a path that reaches it
 // through litter (`.playwright-mcp/.claude/tmp/x.png`) is still litter. "Project working tree" =
@@ -45,8 +53,9 @@
 // into that symlinked dir is DENIED (the server would hard-fail it), and every remediation there
 // names `<worktree>/.claude/tmp/<work-id>/` instead of the task workspace.
 //
-// NO path field is not automatically an allow. chrome-devtools' take_screenshot without `filePath`
-// returns the image inline and writes nothing — allowed. The bundled playwright writes to its
+// NO path field is not automatically an allow. chrome-devtools without a path returns the image,
+// snapshot or body inline and writes nothing, and browser_run_code_unsafe with inline `code` reads
+// no file — allowed. The bundled playwright writes to its
 // pinned output dir — allowed. A per-user playwright writes to `<cwd>/.playwright-mcp`, inside the
 // checkout (live evidence: 374 untracked files, 29 MB, not gitignored) — denied, with the
 // remediation below.
@@ -66,10 +75,13 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
-// The tool_input keys the two wired screenshot tools use for their output path, in probe order.
-const PATH_KEYS = ['filePath', 'filename'];
+// The tool_input keys the wired tools carry a file path in.
+const PATH_KEYS = ['filePath', 'filename', 'requestFilePath', 'responseFilePath'];
+// The wired tool whose path is a script the server reads: an in-tree file is no litter.
+const READS_FILE = /(^|__)browser_run_code_unsafe$/;
 // Playwright's screenshot tool, whatever server prefix a host puts in front of it. It is the one
 // wired tool that writes a file even when the model names no path (see the header).
 const ALWAYS_WRITES = /(^|__)browser_take_screenshot$/;
@@ -84,8 +96,9 @@ const PLAYWRIGHT_OUT_SEGS = PLAYWRIGHT_OUT_REL.split('/');
 const PLAYWRIGHT_DEFAULT_OUT = '.playwright-mcp';
 
 // The directory a RELATIVE candidate actually resolves against — the server's output dir for
-// playwright (it resolves `filename` against its own, not the project), the project itself for
-// chrome-devtools (its `filePath` is a plain path resolved by the tool's own cwd).
+// playwright's screenshot (it resolves `filename` against its own, not the project), the project
+// itself for chrome-devtools (a plain path resolved by the tool's own cwd) and for
+// browser_run_code_unsafe (resolved against the workspace root).
 function resolveBase(root, kind) {
   if (kind === 'bundled') return path.join(root, PLAYWRIGHT_OUT_REL);
   if (kind === 'playwright') return path.join(root, PLAYWRIGHT_DEFAULT_OUT);
@@ -118,13 +131,17 @@ const SCRATCH_SUBDIRS = new Set(['tasks', 'tmp', 'fnd-tmp']);
 // The session's project dir. Claude Code exports it to hooks as CLAUDE_PROJECT_DIR, and it is the
 // only rail that survives the PHYSICAL cwd Claude Code persists — from a worktree's symlinked
 // `.claude/tasks` that cwd sits in the MAIN checkout — so it wins whenever the cwd is inside it,
-// lexically, physically, or through that link. Otherwise (Codex, Cursor): the cwd, cut back above a
+// lexically, physically, or through that link, and always under Claude Code's own wiring
+// (FND_HOST=claude sets it per hook): a Bash `cd` into a scratchpad must not move the root the
+// outside-the-project deny measures against. Elsewhere it may be inherited from another session,
+// so otherwise (Codex, Cursor): the cwd, cut back above a
 // `.claude/{tasks,tmp,fnd-tmp}` segment. Never the git toplevel: a session opened in a monorepo
 // subdir keeps its `.claude` there.
 function projectRoot(cwd) {
   const abs = path.resolve(cwd);
   const env = String(process.env.CLAUDE_PROJECT_DIR || '').trim();
   if (path.isAbsolute(env)) {
+    if (process.env.FND_HOST === 'claude') return env;
     const cwdReal = real(abs);
     const viaLink = within(real(path.join(env, '.claude', 'tasks')), cwdReal);
     if (within(env, abs) || within(real(env), cwdReal) || viaLink) return env;
@@ -236,14 +253,7 @@ function scratchPathDecision(input) {
   const ti = input && input.tool_input;
   if (!ti || typeof ti !== 'object') return null;
 
-  let candidate = null;
-  for (const key of PATH_KEYS) {
-    const v = ti[key];
-    if (typeof v === 'string' && v.trim() !== '') {
-      candidate = v;
-      break;
-    }
-  }
+  const candidates = PATH_KEYS.map((k) => ti[k]).filter((v) => typeof v === 'string' && v.trim() !== '');
 
   const root = projectRoot(typeof input.cwd === 'string' && input.cwd ? input.cwd : process.cwd());
   const linked = linkedTasks(root);
@@ -252,8 +262,8 @@ function scratchPathDecision(input) {
   // against, and what a call with no path at all means.
   const kind = BUNDLED_PLAYWRIGHT.test(tool) ? 'bundled' : ALWAYS_WRITES.test(tool) ? 'playwright' : 'other';
 
-  if (candidate === null) {
-    // chrome-devtools without filePath writes nothing (the image comes back inline), and the
+  if (candidates.length === 0) {
+    // chrome-devtools without a path writes nothing (the result comes back inline), and the
     // bundled playwright's fallback name lands in its pinned, swept output dir — both allowed.
     if (kind !== 'playwright') {
       if (kind === 'bundled') markExcluded(root); // this allow is the one that owes git the stamp
@@ -271,6 +281,14 @@ function scratchPathDecision(input) {
     );
   }
 
+  for (const candidate of candidates) {
+    const decision = pathDecision(candidate, root, linked, kind, READS_FILE.test(tool));
+    if (decision) return decision;
+  }
+  return null;
+}
+
+function pathDecision(candidate, root, linked, kind, readsOnly) {
   const resolved = path.resolve(resolveBase(root, kind), candidate);
   const resolvedReal = real(resolved);
   if (linked) {
@@ -289,9 +307,22 @@ function scratchPathDecision(input) {
     }
   }
   const rel = path.relative(real(root), resolvedReal);
-  // Outside the working tree (`..`, another drive) → not our business. An empty rel means the
-  // path IS the project dir, which no screenshot can be written to anyway.
-  if (rel === '' || outside(rel)) return null;
+  // An empty rel means the path IS the project dir, which no file can be written to anyway.
+  if (rel === '') return null;
+  if (outside(rel)) {
+    // chrome-devtools-mcp always adds the OS temp dir to its roots; playwright never does.
+    if (kind === 'other' && !readsOnly && within(real(os.tmpdir()), resolvedReal)) return null;
+    return deny(
+      `fnd scratch-path guard: "${candidate}" resolves to ${resolved}, outside this project ` +
+        `(${root}). The screenshot and browser servers accept only files inside this project ` +
+        `(chrome-devtools also its OS temp dir), ` +
+        `so the call would fail with an access-denied error.\n\n` +
+        whereInstead(root, path.basename(resolved), linked, undefined, false),
+      root,
+      linked
+    );
+  }
+  if (readsOnly) return null;
 
   // Only the DIRECTORY segments decide — a file merely named `.claude` is still litter. And only
   // the FIRST one: `.playwright-mcp/.claude/tmp/x.png` reaches `.claude` through the very litter

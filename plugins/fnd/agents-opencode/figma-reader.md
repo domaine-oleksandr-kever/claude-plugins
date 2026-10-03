@@ -43,14 +43,20 @@ shell variable carries it. On any other host, substitute the absolute path your 
 **1. Connector MCP** — tool names `mcp__figma__…`, no `plugin_` prefix; URL-driven, no desktop
 app needed. Take it when those tools are listed → `source: mcp-connector`.
 
-**2. Local `figma-dev-mode` MCP** — `mcp__plugin_fnd_figma-dev-mode__…`, local SSE; it needs the
-Figma **desktop app** running with the page loaded. Take it when its tools are listed **and** the
-first call succeeds; pass the node-id from the URL → `source: mcp-desktop`.
-Tools and payloads are identical on rungs 1 and 2.
+**2. Local `figma-dev-mode` MCP** — `mcp__plugin_fnd_figma-dev-mode__…`, local SSE; it answers
+only for the file open in the **active tab** of the Figma **desktop app**. Take it when its tools
+are listed **and** ONE probe — `get_metadata` with the URL's node id — succeeds →
+`source: mcp-desktop`. The probe decides alone: "No node could be found" → straight to rung 3.
+Never fire the other tools for that node alongside or after a failed probe, and never call
+`get_design_context` before a probe succeeded — on an unavailable node it hangs for minutes.
+The probe is a yes/no: do not page its spill unless you need the metadata itself. Tools and
+payloads are identical on rungs 1 and 2. Pass the **URL's id** (`123-456` / `123:456`), never an
+instance sub-id copied from metadata (`I282:15216;21573:22999`) — the MCP rejects those; when the
+URL itself carries an `I…;…` id, go straight to rung 3 (REST accepts it).
 
 **3. REST** — the script + compactor below → `source: rest`. Take it when **no** Figma MCP tool is
 available to you, or when a rung-1/2 call fails the way a closed app fails: connection refused,
-"node not found", "page not loaded". Do not narrate the MCP error — quote it in
+"node not found", "page not loaded" — or rejects the id ("Node ID must be in the format"). Do not narrate the MCP error — quote it in
 `needs_clarification` only if REST also fails.
 
 **4. Nothing reachable.** `figma-rest.sh` exit 3 (no token / malformed token) → your
@@ -63,7 +69,7 @@ line saying the policy forbids the token path and naming `FND_FIGMA_SOURCE` as t
 would open it — `source:` empty, nothing fetched. Exit **1** is **not** this rung — it means an
 optional artifact failed while the node tree landed; carry on with the tree, `source: rest`, and
 note the gap (there is no `error=` line to quote, only a `note=`). On `error=node_not_found` do
-not retry with other flags — the same link gets the same answer.
+not retry with other flags or neighbouring ids — the same link gets the same answer.
 
 Never `Read` the repo's `.env`, and never put a token on a command line — the script reads the
 credential itself and never prints it. Walk-through, flags and exit table:
@@ -91,7 +97,8 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
    one exemplar), typically 55–77 % smaller, so the compacted output usually fits in one or two
    `Read`s. Work from the compacted output — nothing is
    dropped; resolve a `#nN` via the `ids=` map when you need a real node-id (e.g. for
-   `get_screenshot`). If json-slim only hands the path back (no byte win), page through the
+   `get_screenshot` — a plain `123:456` only; for an `I…;…` instance id use its nearest
+   non-instance ancestor or the URL id). If json-slim only hands the path back (no byte win), page through the
    ORIGINAL file instead — never stop at the first chunk:
    - `wc -l <file>` to get its length, then
    - `Read` it in **sequential** chunks from `offset` 0 to EOF, each with `limit` (~400–500
@@ -102,7 +109,8 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
    Cover the whole compacted output (or all pages of the original) before you write the spec.
    **`get_metadata` spills the same way** on a big frame; its XML does not compress (json-slim
    declines it or hands back a ~0 % spill) — page the ORIGINAL with the same ladder, and never
-   proceed on a guessed node id.
+   proceed on a guessed node id — a neighbouring or sequential id (`282:27008`, `…:27009`) is a
+   guess too, on every rung.
 4. **Cross-check** the assembled spec against the screenshot. If a measurement is missing or a
    region wouldn't parse, put that in `needs_clarification` — never silently drop it.
 5. **Distil, don't echo.** Build the compact spec from what you extracted; never paste raw

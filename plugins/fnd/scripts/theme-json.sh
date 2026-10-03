@@ -71,7 +71,9 @@
 # `.warnings` only print `note=cli_push_warnings` and let the read-back decide.
 # A not_applied verdict also prints `note=verify_diff only_in_payload=… only_in_theme=… changed=…
 # diff_lines=N` on stderr — leaf key paths of the normalized pair (8 per list), never a value
-# (the count alone when the read-back is not JSON).
+# (the count alone when the read-back is not JSON). When the payload's own extra keys are the only
+# difference, the hint names them as dropped and the rest as live — unless they ARE the intended
+# change, which reads identically on a fully refused write; still not_applied, exit 6.
 # FND_THEME_JSON_VERIFY=0 skips the read-back and prints `verified=skipped`.
 #
 # What verify does NOT establish: no pre-image is read before the write, so a mismatch proves
@@ -364,9 +366,10 @@ bodies_match() {
 # verify_diff_note — stderr only: WHICH leaf keys differ between the last normalized pair, never a
 # value (a settings body is the caller's content, and keys are enough to judge a normalization
 # diff from a dropped write). Lists cap at 8 plus `+N_more`; a side that is not JSON gets the
-# line count alone.
+# line count alone. Sets DROPPED_KEYS / DROPPED_COUNT when the payload's extra leaves are the ONLY
+# difference.
 verify_diff_note() {
-  local n keys
+  local n keys more=0
   n="$({ diff "$VERIFY_NORM_A" "$VERIFY_NORM_B" 2>/dev/null || true; } | wc -l | tr -d ' ')"
   keys="$(jq -n -r --slurpfile a "$VERIFY_NORM_A" --slurpfile b "$VERIFY_NORM_B" '
     def leafy: if type == "object" or type == "array" then length == 0 else true end;
@@ -381,6 +384,13 @@ verify_diff_note() {
       + " changed=\([$x | keys[] | select(. as $k | ($y | has($k)) and $x[$k] != $y[$k])] | fmt)"
   ' 2>/dev/null)" || keys=""
   echo "note=verify_diff ${keys:+$keys }diff_lines=${n:-0}" >&2
+  case "$keys" in
+    "only_in_payload=- "*) ;;
+    *" only_in_theme=- changed=-")
+      DROPPED_KEYS="${keys%% *}"; DROPPED_KEYS="${DROPPED_KEYS#only_in_payload=}"
+      case "$DROPPED_KEYS" in *,+*_more) more="${DROPPED_KEYS##*,+}"; more="${more%_more}" ;; esac
+      DROPPED_COUNT=$(( $(printf '%s' "${DROPPED_KEYS%,+*_more}" | tr -cd , | wc -c) + 1 + more )) ;;
+  esac
 }
 
 # verify_applied <engine> <theme-id> <reader-fn>: reader-fn <dest> writes the theme's current
@@ -415,7 +425,11 @@ verify_applied() {
     return 2
   fi
   echo "error=not_applied engine=$engine theme=$theme file=$FILE"
-  verify_diff_note
+  DROPPED_KEYS=""; verify_diff_note
+  if [ -n "$DROPPED_KEYS" ]; then
+    echo "hint=applied except $DROPPED_COUNT key(s) Shopify dropped ($DROPPED_KEYS) — a setting the section schema no longer has, or an unsupported attribute; the rest of the payload is live. Remove them from the payload to make the write clean. If these keys ARE the change you meant to make, the whole write was refused instead — check the two known triggers: a schema-unsupported attribute, and a dynamic source without '{{ ….value }}'." >&2
+    exit 6
+  fi
   # No pre-image is read before the write, so the ONE proven statement is "the theme does not
   # serve the payload" — claiming the previous content survived would waive the restore step on
   # a theme that may well have changed.
