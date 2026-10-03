@@ -20,10 +20,18 @@ const rateAlarmed = atom({ plugin: 'fnd', key: 'rateAlarmed' } as const, false)
 
 type $ = EngineInterface
 
+/** FND_BAND_COST=1 (true/yes/on) shows the session's cost; off, the figure is dropped before it reaches the atom. */
+let costShown = false
+const ON = new Set(['1', 'true', 'yes', 'on'])
+
+function withCost(u: FndUsage): FndUsage {
+  return costShown ? u : { ...u, costUsd: null }
+}
+
 async function refresh($: $): Promise<void> {
   const now = await $.clock.now()
   await update($, tick, () => now)
-  const u = toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const)))
+  const u = withCost(toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const))))
   await update($, usage, () => u)
   await adoptSubscriptionTtl($, u)
 }
@@ -74,6 +82,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
       } catch {}
     }
     const ttlMs = forcedTtl ?? learned ?? (await defaultTtl($).catch(() => CACHE_INIT.ttlMs))
+    costShown = ON.has((await $.env.get('FND_BAND_COST').catch(() => undefined))?.trim().toLowerCase() ?? '')
     const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
     await $.command.register(DEBUG_COMMAND).catch(() => undefined)
     await update($, cache, c => ({ ...c, ttlMs, ttlSource }))
@@ -106,7 +115,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
-    const u = toUsage(e.context, e.rateLimits, e.cost)
+    const u = withCost(toUsage(e.context, e.rateLimits, e.cost))
     await update($, usage, () => u)
     await adoptSubscriptionTtl($, u)
     const hot = alarmRate(u.rates)

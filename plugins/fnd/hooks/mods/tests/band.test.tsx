@@ -203,8 +203,8 @@ describe('band', () => {
       expect(await ui.find({ key: 'compact' })).toBeDefined()
     })
 
-    test(`${surface}: the cost sits between the rate windows and the digest, with its card; hidden at zero`, async ($, on) => {
-      world(on)
+    test(`${surface}: FND_BAND_COST=1 → the cost sits between the rate windows and the digest, with its card; hidden at zero`, async ($, on) => {
+      world(on, {}, { FND_BAND_COST: '1' })
       workspace(on)
       await start($, surface)
       const ui = await mount($, surface)
@@ -528,6 +528,16 @@ describe('band', () => {
     expect(text).toContain('progress: {"workId":"ELC-1591","branch":"feature/ELC-1591-x"}')
     expect(text).toContain('root: /repo')
     expect(text).toContain('render: {"surface":"desktop","bodyColumns":77,"maxRows":10}')
+  })
+
+  test('without FND_BAND_COST the cost never reaches the band', async ($, on) => {
+    const { w } = world(on)
+    w.cost = { usd: 139.14 }
+    await start($, 'terminal')
+    const ui = await mount($, 'terminal')
+    await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }], { usd: 139.14 })
+    expect(await textOf(ui, /^cost /)).toBeUndefined()
+    expect((await $.command.run({ command: 'fnd-band', args: '' })).text).toContain('"costUsd":null')
   })
 })
 
