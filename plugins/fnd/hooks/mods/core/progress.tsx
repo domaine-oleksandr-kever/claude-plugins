@@ -18,6 +18,7 @@ const RESOLVE_EVERY = 4
 const FRESH_MS = 12 * 60 * 60_000
 const CHECKOUT = /\bgit\s+(checkout|switch|worktree)\b/
 const NO_WORKSPACE = 'no task workspace — /fnd:save-task-context'
+const NO_PROGRESS = 'no progress.md yet — /fnd:save-task-context'
 /** Prompt origins a person wrote; notifications, peers and schedules never set the conversation key. */
 const PERSON = new Set(['composer', 'bridge', 'sdk'])
 
@@ -41,10 +42,11 @@ async function branchOf($: $, root: string): Promise<string | null> {
   }
 }
 
+/** The workspace directory itself: a ticket dir without progress.md still names the work (digest = the bare id). */
 async function hasWorkspace($: $, root: string, id: string | null): Promise<boolean> {
   if (!id) return false
   try {
-    return await $.fs.exists(`${workDir(root, id)}/progress.md`)
+    return (await $.fs.stat(workDir(root, id))).kind === 'dir'
   } catch {
     return false
   }
@@ -76,7 +78,7 @@ type Inputs = { pin: string | null; lastKey: string | null }
 
 const readInputs = async ($: $): Promise<Inputs> => ({ pin: await read($, pin), lastKey: await read($, lastKey) })
 
-/** pin → branch key → conversation key → branch slug → newest progress.md within 12 h → null. */
+/** pin → branch key → conversation key → branch slug (each an existing dir) → newest progress.md within 12 h → null. */
 async function resolveWorkId($: $, root: string, branch: string | null, inputs: Inputs): Promise<string | null> {
   const candidates = [inputs.pin, keyFromBranch(branch), inputs.lastKey, slugFromBranch(branch)]
   for (const id of candidates) if (await hasWorkspace($, root, id)) return id
@@ -273,12 +275,13 @@ export function registerProgress(on: On): void {
         </Box>
       )
     }
-    const header = [p.workId, p.branch, `${p.done}/${p.total}`].filter(Boolean).join(' · ')
+    const header = [p.workId, p.branch, p.total ? `${p.done}/${p.total}` : null].filter(Boolean).join(' · ')
     return (
       <Box flexDirection="column" width={e.props.bodyColumns}>
         <Text bold wrap="truncate-end">
           {header}
         </Text>
+        {p.total === 0 ? <Text dimColor wrap="truncate-end">{NO_PROGRESS}</Text> : null}
         {p.rows.map((row, i) => (
           <Box key={`row-${i}`}>
             <Text wrap="truncate-end" dimColor={row.mark === 'done'} bold={row.mark === 'current'}>

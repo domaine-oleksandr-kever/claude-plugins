@@ -60,13 +60,16 @@ function world(on: On, over: Partial<World> = {}) {
     const ok = w.branch !== null
     return { value: { exitCode: ok ? 0 : 128, stdout: ok ? `${w.branch}\n` : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
+  // A directory exists while a file lies under it, as on disk.
+  const isDir = (path: string) => Object.keys(w.files).some(p => p.startsWith(`${path}/`))
   on('fs.exists', async (_$, e) => {
     calls.fs.push(`exists ${e.path}`)
-    return { value: e.path in w.files }
+    return { value: e.path in w.files || isDir(e.path) }
   })
   on('fs.stat', async (_$, e) => {
     calls.fs.push(`stat ${e.path}`)
     const f = w.files[e.path]
+    if (!f && isDir(e.path)) return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false } }
     if (!f) throw enoent(e.path)
     return { value: { kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false } }
   })
@@ -261,6 +264,31 @@ describe('resolver', () => {
     addWorkspace(w, 'fnd-mods', MD, NOW - 13 * HOUR)
     await start($)
     expect((await peek($)).progress).toEqual({ workId: null, branch: 'main' })
+  })
+
+  t('a ticket dir without progress.md → the bare id, no rows, the notes tail', async ($, on) => {
+    const { w } = world(on, { branch: 'bugfix/ELC-1588' })
+    w.files[`${TASKS}/ELC-1588/notes.md`] = { text: NOTES, mtimeMs: NOW - HOUR }
+    w.files[`${TASKS}/ELC-1588/ticket.md`] = { text: '# ELC-1588', mtimeMs: NOW - HOUR }
+    addWorkspace(w, 'fnd-mods', MD, NOW - HOUR)
+    await start($)
+    const { progress } = await peek($)
+    expect(progress.workId).toBe('ELC-1588')
+    expect(progress.total).toBe(0)
+    expect(progress.rows).toEqual([])
+    expect(progress.notesTail).toEqual(['- two', '- three', '- four'])
+    expect(digestText(progress.workId, progress)).toBe('ELC-1588')
+    // progress.md written later is picked up by the tick.
+    w.files[progressMd('ELC-1588')] = { text: MD, mtimeMs: NOW + 1 }
+    await $.tool.call({ tool: 'Write', file_path: progressMd('ELC-1588'), content: MD })
+    expect(digestText('ELC-1588', (await peek($)).progress)).toBe('ELC-1588 3/5 ▶ Preview themes')
+  })
+
+  t('a stray file named like a key is not a workspace', async ($, on) => {
+    const { w } = world(on)
+    w.files[`${TASKS}/ELC-1591`] = { text: 'x', mtimeMs: NOW }
+    await start($)
+    expect((await peek($)).progress).toEqual({ workId: null, branch: 'feature/ELC-1591-x' })
   })
 
   t('no workspace at all → no digest', async ($, on) => {

@@ -141,7 +141,7 @@ function workspace(on: On) {
     value: { exitCode: 0, stdout: 'feature/ELC-1591-x\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
   on('fs.exists', async (_$, e) => ({ value: e.path.endsWith('/ELC-1591/progress.md') }))
-  on('fs.stat', async () => ({ value: { kind: 'file' as const, size: 1, mtimeMs: T0, isLink: false } }) as never)
+  on('fs.stat', async (_$, e) => ({ value: { kind: e.path.endsWith('/ELC-1591') ? ('dir' as const) : ('file' as const), size: 1, mtimeMs: T0, isLink: false } }) as never)
   on('fs.read', async (_$, e) => ({ value: e.path.endsWith('progress.md') ? md : '' }))
   on('ui.panes', async () => ({ value: shown }) as never)
   on('ui.open', async (_$, e) => {
