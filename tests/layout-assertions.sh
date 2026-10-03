@@ -510,5 +510,46 @@ for tag in $(grep -o "statsRefusal([^,]*, '[^']*')" "$PLUGIN_DIR/scripts/json-sl
   else bad "compression-tag-readme-$tag" "README does not document json-slim's '[$human]' refusal tag"; fi
 done
 
+# ------------------------------------------------ Claude Code hooks module (mods) wiring --
+# hooks/hooks.json is Claude Code's function-hooks file: anything beside `modules` there would be a
+# second, untested hook wiring, and a module path that moved fails the whole module load.
+MODS_JSON="$PLUGIN_DIR/hooks/hooks.json"
+mods_check="$("$NODE_BIN" -e '
+  const fs = require("fs"), path = require("path");
+  let m;
+  try { m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { console.log("unparseable: " + e.message); process.exit(0); }
+  const keys = Object.keys(m || {});
+  if (keys.length !== 1 || keys[0] !== "modules") { console.log("keys " + JSON.stringify(keys) + " != [\"modules\"]"); process.exit(0); }
+  if (!Array.isArray(m.modules) || !m.modules.length) { console.log("modules is not a non-empty list"); process.exit(0); }
+  for (const p of m.modules) {
+    if (typeof p !== "string" || p.startsWith("/") || p.includes("..")) { console.log("module path must be relative, no ..: " + p); process.exit(0); }
+    if (!fs.existsSync(path.join(path.dirname(process.argv[1]), p))) { console.log("module missing: " + p); process.exit(0); }
+  }
+' "$MODS_JSON" 2>&1)"
+if [ -z "$mods_check" ]; then ok; else bad mods-hooks-json "hooks/hooks.json: $mods_check"; fi
+# validate --strict holds every $.state key to this contract, so a manifest pointing at nothing
+# would make the module fail its own validation
+MODS_TYPES="$(jval "$CANON" types)"
+if [ -n "$MODS_TYPES" ] && [ -f "$PLUGIN_DIR/$MODS_TYPES" ]; then ok
+else bad mods-types "plugin.json types '$MODS_TYPES' does not name an existing file"; fi
+# Cursor and Codex read their own wiring files; naming the Claude-only modules file would hand them
+# a format they do not parse
+for m in "$CURSOR_MANIFEST" "$CODEX_MANIFEST"; do
+  [ -f "$m" ] || continue
+  if grep -qF 'hooks/hooks.json' "$m"; then bad "mods-host-$(basename "$(dirname "$m")")" "$(basename "$(dirname "$m")")/plugin.json names hooks/hooks.json"
+  else ok; fi
+done
+# The mod guard and the classic guard must guard the same five tools: the regex in guard.ts is held
+# to the manifest's PreToolUse matcher for scratch-path-guard.cjs, read from the manifest.
+GUARD_TS="$PLUGIN_DIR/hooks/mods/fnd/guard.ts"
+manifest_re="$(jq -r '.hooks.PreToolUse[] | select(any(.hooks[]; .command | test("scratch-path-guard\\.cjs"))) | .matcher' "$CANON" 2>/dev/null)"
+mod_re="$("$NODE_BIN" -e '
+  const src = require("fs").readFileSync(process.argv[1], "utf8");
+  const m = /GUARDED_RE\s*=\s*\/(.+)\/[a-z]*\s*$/m.exec(src);
+  process.stdout.write(m ? m[1] : "");
+' "$GUARD_TS" 2>/dev/null)"
+if [ -n "$manifest_re" ] && [ "$mod_re" = "$manifest_re" ]; then ok
+else bad mods-guard-regex "guard.ts GUARDED_RE '/$mod_re/' != plugin.json scratch-path-guard matcher '$manifest_re'"; fi
+
 echo "layout-assertions: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

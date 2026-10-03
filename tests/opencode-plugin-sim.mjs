@@ -372,6 +372,21 @@ const disabled = await runAfter('atlassian_searchJiraIssuesUsingJql', whale);
 assertEq('M10-switch-off', disabled.output, whale);
 delete process.env.FND_MCP_SLIM;
 
+// M-idem: mcp-slim's own emission arriving a second time passes through untouched as `already-slim`
+// — the one default change every host shares (a slimmed result is never slimmed again).
+const avatarRows = JSON.stringify(Array.from({ length: 300 }, (_, id) =>
+  ({ id, label: `row ${id}`, avatarUrl: `https://cdn.example.com/${'a'.repeat(80)}`, empty: null })));
+const slimmedOnce = await runAfter('atlassian_searchJiraIssuesUsingJql', avatarRows);
+assertContains('M-idem-fixture', slimmedOnce.output, 'fnd-mcp-slim: compressed ');
+process.env.FND_MCP_SLIM_DEBUG = '1';
+process.env.FND_MCP_SLIM_DIR = path.join(TMP, 'idem');
+const again = await runAfter('atlassian_searchJiraIssuesUsingJql', slimmedOnce.output);
+assertEq('M-idem-passthrough', again.output, slimmedOnce.output);
+const idemLog = path.join(TMP, 'idem', 'fnd-mcp-slim-debug.log');
+assertContains('M-idem-reason', fs.existsSync(idemLog) ? fs.readFileSync(idemLog, 'utf8') : '', '"reason":"already-slim"');
+delete process.env.FND_MCP_SLIM_DEBUG;
+process.env.FND_MCP_SLIM_DIR = path.join(TMP, 'spill');
+
 // The tool name mcp-slim receives decides how the debug log and `json-slim --report` read, so
 // it has to arrive in the cross-host `mcp__server__tool` spelling.
 process.env.FND_MCP_SLIM_DEBUG = '1';

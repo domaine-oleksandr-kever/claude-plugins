@@ -56,7 +56,12 @@
 #             ceiling on the platform-overflow re-label (a whale merely CARRYING the phrase is stubbed
 #             like any other; the real ~1.5 KB notice is untouched);
 #             M104 a whale the compressor DECLINED over a number JSON.parse cannot round-trip is
-#             stubbed like any other, its payload spilled byte-exact
+#             stubbed like any other, its payload spilled byte-exact;
+#             M-exp1–5 the mod's `--overflow=expand` seat (the host notice → its own session's
+#             tool-results file slimmed in place, that file as `full=`, forged / missing / over-budget
+#             → silent, the default unchanged without the flag), M-report its `mod-expand` debug line
+#             and `--report` pairing, M-idem1–2 this hook's own emission passing through `already-slim`
+#             while a quoted or forged mark is still slimmed
 #   P cases — hooks/prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact and 0600 (never through a planted symlink, P17),
 #             below-gate / no-json / small prompts
@@ -94,7 +99,9 @@
 #             matcher's tool coverage, the three-way output-dir literal pin, and the
 #             `.git/info/exclude` stamp the bundled allow owes and a deny does not; the project
 #             root is the checkout above a persisted subdirectory cwd, and in a git worktree
-#             (symlinked `.claude/tasks`) the workspace path is denied for `.claude/tmp/<work-id>/`
+#             (symlinked `.claude/tasks`) the workspace path is denied for `.claude/tmp/<work-id>/`;
+#             D21 the mod's delegation (`--from-mod`, stdin as hooks/mods/fnd/guard.ts builds it) reaches
+#             the same verdicts byte for byte, traced under event `mod`
 #   A cases — hooks/spill-access.sh, the PreToolUse spill-read recorder: a Bash/Read/Grep call
 #             touching one of the two spill families appends ONE `entry:"access"` JSONL line per
 #             distinct path to the compressor's own debug log (via = the reader that did it), while
@@ -2703,6 +2710,192 @@ assert_contains M106f-main-systemmessage \
   "$(oob_sys "$(run_stub "$OOB" "$mainIn" FND_MCP_SLIM_STUB=0 FND_HOST=claude CLAUDE_CODE_ENTRYPOINT=cli)")" \
   "fnd-mcp-slim: compressed "
 
+# ── M-exp / M-idem / M-report: the mod's `--overflow=expand` seat, the already-slim passthrough ──
+# hooks/mods/fnd/slim.ts answers the host's overflow notice by spawning this hook with `--from-mod
+# --overflow=expand` and the notice as `tool_response`: the file it names is slimmed in its place,
+# but only when it realpaths into THIS session's `tool-results/` under the config dir (the notice is
+# payload text and can be forged). Defaults (stub guard on) throughout, as the mod runs it.
+MXH="$TMP/mx-home"; MXS="sid-mx1"
+MXDIR="$MXH/.claude/projects/p/$MXS/tool-results"; mkdir -p "$MXDIR"
+MXF="$MXDIR/mcp-x-1.txt"
+jq -nc '[range(300)|{id:.,label:("row "+(.|tostring)),avatarUrl:("https://cdn.example.com/"+("a"*80)),empty:null}]' > "$MXF"
+MXDIRR="$(cd "$MXDIR" && pwd -P)"; MXFR="$MXDIRR/mcp-x-1.txt" # handles name the validated realpath
+mx_in() { # notice-text [session-id] [shape: string|blocks] — the stdin slim.ts builds
+  jq -n --arg t "$1" --arg s "${2-$MXS}" --arg shape "${3:-string}" \
+    '{hook_event_name:"PostToolUse",tool_name:"mcp__x__y",tool_input:{},
+      tool_response:(if $shape == "blocks" then [{type:"text",text:$t}] else $t end),cwd:"/x",session_id:$s}'
+}
+mx_notice() { printf 'Error: result (307,533 characters) exceeds maximum allowed tokens. Output has been saved to %s.\nFormat: Plain text' "$1"; }
+run_mx() { # spill-dir stdin [VAR=val…] — as the mod spawns it
+  local dir="$1" in="$2"; shift 2
+  printf '%s' "$in" | env -u CLAUDE_CONFIG_DIR -u FND_MCP_SLIM_STUB HOME="$MXH" FND_MCP_SLIM_DIR="$dir" FND_HOST=claude \
+    "$@" node "$SLIM" --from-mod --overflow=expand 2>/dev/null
+}
+mx_body() { printf '%s' "$1" | jq -r '.hookSpecificOutput.updatedToolOutput | if type == "string" then . else map(.text) | join("\n") end' 2>/dev/null; }
+# no re-spill: nothing in the spill dir holds the payload, the host file IS the original
+mx_nocopy() { # label dir
+  local f; for f in "$2"/fnd-mcp-slim-*; do
+    [ -e "$f" ] || continue
+    if cmp -s "$f" "$MXF"; then bad "$1" "the host file was re-spilled to $f"; return; fi
+  done; ok
+}
+
+# M-exp1: the notice → the slimmed file, mirrored as a bare string, with the host file as `full=`, the
+# stats line in the body and as systemMessage (the mod's savings toast), and no copy of the payload.
+MX1="$TMP/mx1"; mkdir -p "$MX1"
+out="$(run_mx "$MX1" "$(mx_in "$(mx_notice "$MXF")")")"; ec=$?
+body="$(mx_body "$out")"
+assert_eq       M-exp1-exit   "$ec" 0
+assert_eq       M-exp1-shape  "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput | type' 2>/dev/null)" "string"
+assert_contains M-exp1-handle "$body" "<<full=$MXFR original_result>>"
+assert_contains M-exp1-rows   "$body" '"label":"row 299"'
+assert_eq       M-exp1-stats  "$(printf '%s' "$body" | grep -c '^fnd-mcp-slim: compressed ')" 1
+assert_eq       M-exp1-toast  "$(printf '%s' "$out" | jq -r '.systemMessage' 2>/dev/null)" "$(printf '%s' "$body" | grep '^fnd-mcp-slim: compressed ')"
+if [ "$(printf '%s' "$body" | wc -c)" -lt "$(wc -c < "$MXF")" ]; then ok; else bad M-exp1-smaller "the expanded body is not smaller than the file"; fi
+mx_nocopy M-exp1-no-respill "$MX1"
+# a block-array notice comes back as a block array
+out="$(run_mx "$MX1" "$(mx_in "$(mx_notice "$MXF")" "$MXS" blocks)")"
+assert_eq       M-exp1b-blocks "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput | type' 2>/dev/null)" "array"
+assert_contains M-exp1b-handle "$(mx_body "$out")" "<<full=$MXFR original_result>>"
+# CLAUDE_CONFIG_DIR moves the config root, as it does for the host
+out="$(printf '%s' "$(mx_in "$(mx_notice "$MXF")")" | env -u FND_MCP_SLIM_STUB HOME="$TMP/mx-elsewhere" \
+  CLAUDE_CONFIG_DIR="$MXH/.claude" FND_MCP_SLIM_DIR="$MX1" node "$SLIM" --from-mod --overflow=expand 2>/dev/null)"
+assert_contains M-exp1c-config-dir "$(mx_body "$out")" "<<full=$MXFR original_result>>"
+# a body still over the stub threshold gets the stub, naming the host file — still no re-spill
+MXW="$MXDIR/mcp-plugin_fnd_atlassian-getJiraIssue-1784908372707.txt"; cp "$JIRA" "$MXW"
+MX1D="$TMP/mx1d"; mkdir -p "$MX1D"
+out="$(run_mx "$MX1D" "$(mx_in "$(mx_notice "$MXW")")")"
+body="$(mx_body "$out")"
+assert_contains M-exp1d-stub "$body" "<<fnd-mcp-slim stub>>"
+assert_contains M-exp1d-host "$body" "full=$MXDIRR/$(basename "$MXW")"
+for f in "$MX1D"/fnd-mcp-slim-*; do [ -e "$f" ] || continue; if cmp -s "$f" "$MXW"; then bad M-exp1d-no-respill "re-spilled to $f"; fi; done; ok
+# FND_MCP_SLIM_STUB=0 does not reach the expand seat: the host already kept this whale out of context
+out="$(run_mx "$MX1D" "$(mx_in "$(mx_notice "$MXW")")" FND_MCP_SLIM_STUB=0)"
+assert_contains M-exp1e-stub-forced "$(mx_body "$out")" "<<fnd-mcp-slim stub>>"
+if [ "$(printf '%s' "$out" | wc -c)" -lt 5000 ]; then ok; else bad M-exp1e-small "the escape hatch let the expanded body out"; fi
+# M-exp7: a multi-block result's host file is its content array, serialized — the blocks are slimmed
+# one by one, as the classic hook slims them, with the host file as `full=` and no re-spill
+MXB="$MXDIR/mcp-x_y-124.txt"; MX7="$TMP/mx7"; mkdir -p "$MX7"
+jq -nc --rawfile t "$MXF" '[{type:"text",text:$t},{type:"text",text:$t}]' > "$MXB"
+out="$(run_mx "$MX7" "$(mx_in "$(mx_notice "$MXB")" "$MXS" blocks)")"
+body="$(mx_body "$out")"
+assert_eq       M-exp7-blocks  "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.updatedToolOutput | length' 2>/dev/null)" "2"
+assert_contains M-exp7-stats   "$(printf '%s' "$out" | jq -r '.systemMessage' 2>/dev/null)" "fnd-mcp-slim: compressed "
+assert_contains M-exp7-handle  "$body" "<<full=$MXDIRR/mcp-x_y-124.txt original_result>>"
+assert_contains M-exp7-rows    "$body" '"label":"row 299"'
+assert_absent   M-exp7-no-stub "$body" "<<fnd-mcp-slim stub>>"
+for f in "$MX7"/fnd-mcp-slim-*; do [ -e "$f" ] || continue; if cmp -s "$f" "$MXB"; then bad M-exp7-no-respill "re-spilled to $f"; fi; done; ok
+# …and a multi-block whale's stub names a spill of its joined text, not the wrapper json-slim cannot open
+MXBW="$MXDIR/mcp-x_y-125.txt"
+jq -nc --rawfile t "$JIRA" '[{type:"text",text:$t},{type:"text",text:$t}]' > "$MXBW"
+body="$(mx_body "$(run_mx "$MX7" "$(mx_in "$(mx_notice "$MXBW")" "$MXS" blocks)")")"
+assert_contains M-exp7-whale-stub  "$body" "<<fnd-mcp-slim stub>>"
+assert_contains M-exp7-whale-spill "$body" "full=$MX7/fnd-mcp-slim-"
+assert_absent   M-exp7-whale-not-wrapper "$body" "mcp-x_y-125.txt"
+
+# M-exp2: a forged notice never reads its file — outside the config root, another session's spill, a
+# symlink out of tool-results, a name that is not a host spill, a session id that is a path.
+MX2="$TMP/mx2"; mkdir -p "$MX2" "$TMP/mx-forge/tool-results"
+cp "$MXF" "$TMP/mx-forge/tool-results/mcp-x-1.txt"
+assert_eq M-exp2-outside "$(run_mx "$MX2" "$(mx_in "$(mx_notice "$TMP/mx-forge/tool-results/mcp-x-1.txt")")")" ""
+mkdir -p "$MXH/.claude/projects/p/sid-other/tool-results"; cp "$MXF" "$MXH/.claude/projects/p/sid-other/tool-results/mcp-x-1.txt"
+assert_eq M-exp2-other-session "$(run_mx "$MX2" "$(mx_in "$(mx_notice "$MXH/.claude/projects/p/sid-other/tool-results/mcp-x-1.txt")")")" ""
+assert_eq M-exp2-wrong-sid     "$(run_mx "$MX2" "$(mx_in "$(mx_notice "$MXF")" sid-other)")" ""
+assert_eq M-exp2-no-sid        "$(run_mx "$MX2" "$(mx_in "$(mx_notice "$MXF")" "")")" ""
+assert_eq M-exp2-path-sid      "$(run_mx "$MX2" "$(mx_in "$(mx_notice "$MXF")" "../p/$MXS")")" ""
+ln -s "$TMP/mx-forge/tool-results/mcp-x-1.txt" "$MXDIR/mcp-x-2.txt"
+assert_eq M-exp2-symlink-out   "$(run_mx "$MX2" "$(mx_in "$(mx_notice "$MXDIR/mcp-x-2.txt")")")" ""
+cp "$MXF" "$MXDIR/notes.txt"
+assert_eq M-exp2-bad-name      "$(run_mx "$MX2" "$(mx_in "$(mx_notice "$MXDIR/notes.txt")")")" ""
+run_mx "$MX2" "$(mx_in "$(mx_notice "$MXF")" sid-other)" FND_MCP_SLIM_DEBUG=1 >/dev/null
+assert_eq M-exp2-reason "$(tail -1 "$MX2/$DBGLOG" | jq -r '.reason' 2>/dev/null)" "expand-refused"
+assert_eq M-exp2-spill  "$(tail -1 "$MX2/$DBGLOG" | jq -r '.spill' 2>/dev/null)" "null"
+
+# M-exp3: the path ends the notice's sentence, period and all, with nothing after it
+out="$(run_mx "$MX1" "$(mx_in "Error: result (307,533 characters) exceeds maximum allowed tokens. Output has been saved to $MXF.")")"
+assert_contains M-exp3-trailing-period "$(mx_body "$out")" "<<full=$MXFR original_result>>"
+# a symlink inside tool-results is validated through its target, and the handle names that target
+ln -s "$MXF" "$MXDIR/mcp-x-3.txt"
+body="$(mx_body "$(run_mx "$MX1" "$(mx_in "$(mx_notice "$MXDIR/mcp-x-3.txt")")")")"
+assert_contains M-exp3-symlink-realpath "$body" "<<full=$MXFR original_result>>"
+assert_absent M-exp3-symlink-not-link "$body" "mcp-x-3.txt"
+
+# M-exp4: a missing file, or a budget the pipeline cannot meet → nothing, so the host notice stands
+MX4="$TMP/mx4"; mkdir -p "$MX4"
+assert_eq M-exp4-missing "$(run_mx "$MX4" "$(mx_in "$(mx_notice "$MXDIR/mcp-x-9.txt")")" FND_MCP_SLIM_DEBUG=1)" ""
+assert_eq M-exp4-missing-reason "$(tail -1 "$MX4/$DBGLOG" | jq -r '.reason' 2>/dev/null)" "expand-missing"
+assert_eq M-exp4-budget  "$(run_mx "$MX4" "$(mx_in "$(mx_notice "$MXF")")" FND_MCP_SLIM_BUDGET_MS=-1 FND_MCP_SLIM_DEBUG=1)" ""
+assert_eq M-exp4-budget-reason "$(tail -1 "$MX4/$DBGLOG" | jq -r '.reason' 2>/dev/null)" "budget-exceeded"
+assert_eq M-exp4-budget-whale  "$(run_mx "$MX4" "$(mx_in "$(mx_notice "$MXW")")" FND_MCP_SLIM_BUDGET_MS=-1)" ""
+
+# M-exp5: without the flag the notice is the platform-overflow passthrough it always was — the
+# default every other host runs, `--from-mod` alone included.
+MX5="$TMP/mx5"; mkdir -p "$MX5"
+for args in "" "--from-mod"; do
+  out="$(printf '%s' "$(mx_in "$(mx_notice "$MXF")")" | env -u CLAUDE_CONFIG_DIR -u FND_MCP_SLIM_STUB HOME="$MXH" \
+    FND_MCP_SLIM_DIR="$MX5" FND_MCP_SLIM_DEBUG=1 node "$SLIM" $args 2>/dev/null)"
+  assert_eq "M-exp5-silent${args}" "$out" ""
+  assert_eq "M-exp5-reason${args}" "$(tail -1 "$MX5/$DBGLOG" | jq -r '.reason' 2>/dev/null)" "platform-overflow"
+  assert_eq "M-exp5-spill${args}"  "$(tail -1 "$MX5/$DBGLOG" | jq -r '.spill' 2>/dev/null)" "$MXF"
+done
+
+# M-report: the expand line pairs with that overflow — `entry:"hook"`, reason `mod-expand`, `spill` =
+# the host file, `from:"mod"` — and `--report` then counts the whale recovered, not missed. The host
+# trace files the run under `mod`, never as a PostToolUse the classic wiring fired.
+run_mx "$MX5" "$(mx_in "$(mx_notice "$MXF")")" FND_MCP_SLIM_DEBUG=1 FND_HOST_TRACE=1 >/dev/null
+mxl="$(tail -1 "$MX5/$DBGLOG")"
+assert_eq M-report-entry    "$(printf '%s' "$mxl" | jq -r '.entry' 2>/dev/null)" "hook"
+assert_eq M-report-reason   "$(printf '%s' "$mxl" | jq -r '.reason' 2>/dev/null)" "mod-expand"
+assert_eq M-report-decision "$(printf '%s' "$mxl" | jq -r '.decision' 2>/dev/null)" "compressed"
+assert_eq M-report-spill    "$(printf '%s' "$mxl" | jq -r '.spill' 2>/dev/null)" "$MXFR"
+assert_eq M-report-from     "$(printf '%s' "$mxl" | jq -r '.from' 2>/dev/null)" "mod"
+assert_contains M-report-recovered "$(node "$ROOT/plugins/fnd/scripts/json-slim.cjs" --report "$MX5/$DBGLOG" 2>/dev/null)" \
+  "missed whales (platform-overflow never read by any tool): 0 of 2"
+assert_contains M-report-trace-event "$(cat "$MX5/fnd-host-trace.log" 2>/dev/null)" '"event":"mod","hook":"mcp-slim","decision":"compress"'
+# a plain run carries no `from` field
+assert_eq M-report-classic-no-from "$(sed -n 1p "$MX5/$DBGLOG" | jq -r '.from' 2>/dev/null)" "null"
+
+# M-idem1: this hook's own emission fed back — a compressed body (stats line + handle) and a stub —
+# passes through as `already-slim`, whatever host or order delivers it a second time.
+MXI="$TMP/mxi"; mkdir -p "$MXI"
+rows_in="$(jq -n --rawfile t "$MXF" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+first="$(run_stub "$MXI" "$rows_in")"
+assert_contains M-idem1-first-compressed "$first" "original_result>>"
+again="$(printf '%s' "$first" | jq -c '{tool_name:"mcp__x__y",tool_response:.hookSpecificOutput.updatedToolOutput}')"
+: > "$MXI/$DBGLOG"
+assert_eq M-idem1-compressed-passthrough "$(run_stub "$MXI" "$again" FND_MCP_SLIM_DEBUG=1)" ""
+assert_eq M-idem1-reason "$(tail -1 "$MXI/$DBGLOG" | jq -r '.reason' 2>/dev/null)" "already-slim"
+stubbed="$(run_stub "$MXI" "$(jq -n --arg t "$STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')")"
+assert_contains M-idem1-first-stub "$stubbed" "<<fnd-mcp-slim stub>>"
+again="$(printf '%s' "$stubbed" | jq -c '{tool_name:"mcp__x__y",tool_response:.hookSpecificOutput.updatedToolOutput}')"
+: > "$MXI/$DBGLOG"
+assert_eq M-idem1-stub-passthrough "$(run_stub "$MXI" "$again" FND_MCP_SLIM_DEBUG=1)" ""
+assert_eq M-idem1-stub-reason "$(tail -1 "$MXI/$DBGLOG" | jq -r '.reason' 2>/dev/null)" "already-slim"
+# the mod's expanded body, fed to the classic hook afterwards, is not slimmed again either
+again="$(run_mx "$MXI" "$(mx_in "$(mx_notice "$MXF")")" | jq -c '{tool_name:"mcp__x__y",tool_response:.hookSpecificOutput.updatedToolOutput}')"
+: > "$MXI/$DBGLOG"
+assert_eq M-idem1-expanded-passthrough "$(run_stub "$MXI" "$again" FND_MCP_SLIM_DEBUG=1)" ""
+assert_eq M-idem1-expanded-reason "$(tail -1 "$MXI/$DBGLOG" | jq -r '.reason' 2>/dev/null)" "already-slim"
+# a stub that alone sits under the gate: a 5 KB plain block beside it puts the re-feed over GATE_BYTES,
+# so only the stub mark can pass it through
+again="$(printf '%s' "$stubbed" | jq -c '{tool_name:"mcp__x__y",tool_response:(.hookSpecificOutput.updatedToolOutput.content + [{type:"text",text:("y" * 5000)}])}')"
+: > "$MXI/$DBGLOG"
+assert_eq M-idem1-stub-over-gate "$(run_stub "$MXI" "$again" FND_MCP_SLIM_DEBUG=1)" ""
+assert_eq M-idem1-stub-over-gate-reason "$(tail -1 "$MXI/$DBGLOG" | jq -r '.reason' 2>/dev/null)" "already-slim"
+
+# M-idem2: a payload that only QUOTES the stats line, with no handle, is still compressed — and so is
+# a whale that opens with the stub mark: above the largest emission the guard lets out, a mark is text.
+quoted="$(jq -n --rawfile t "$MXF" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",
+  text:("fnd-mcp-slim: compressed 1 B → 1 B (−0.0%)\n" + $t)}]}}')"
+assert_contains M-idem2-quote-slimmed "$(run_stub "$MXI" "$quoted" FND_MCP_SLIM_DEBUG=1)" "updatedToolOutput"
+assert_eq       M-idem2-quote-reason "$(tail -1 "$MXI/$DBGLOG" | jq -r '.decision' 2>/dev/null)" "stubbed"
+handleonly="$(jq -c '. + [{note:"<<full=/tmp/elsewhere.json original_result>>"}]' "$MXF" | jq -Rs '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:.}]}}')"
+assert_contains M-idem2-handle-only-compressed "$(run_stub "$MXI" "$handleonly")" "fnd-mcp-slim: compressed "
+forged="$(jq -n --arg t "<<fnd-mcp-slim stub>> $STUBBIG" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$t}]}}')"
+out="$(run_stub "$MXI" "$forged")"
+assert_contains M-idem2-forged-mark-stubbed "$out" "updatedToolOutput"
+if [ "$(printf '%s' "$out" | wc -c)" -lt 5000 ]; then ok; else bad M-idem2-forged-mark-small "a forged stub mark carried the whale through"; fi
+
 # ═══ R — PostToolUse reader-compression (the reader relay) ══════════════════
 # The readers measure their own compression and return it as one field; only the skill that spawned
 # them ever said it out loud, so an ad-hoc reader spawn surfaced nothing. This hook is the route out
@@ -4133,6 +4326,32 @@ out="$(run_spg "$(spg_ev "$PWU" filename "$DOSTMP/shot.png")")"
 assert_contains D20c-playwright-ostmp-deny "$out" 'outside this project'
 out="$(run_spg "$(spg_ev "$PRC" filename "$DOSTMP/measure.js")")"
 assert_contains D20d-runcode-ostmp-deny "$out" 'outside this project'
+
+# D21: the mod's delegation (hooks/mods/fnd/guard.ts) runs this same script: stdin as buildHookRun
+# builds it (tool_input = the MCP arguments alone), `--from-mod`, the env the mod passes and the
+# host's own cwd. Same verdicts as the classic run, byte for byte; only the trace label differs.
+run_spg_mod() { # payload [VAR=val…]
+  payload="$1"; shift
+  printf '%s' "$payload" | (cd "$DOUT" && env TMPDIR="$DOSTMP" FND_HOST=claude CLAUDE_PROJECT_DIR="$DPROJ" \
+    CLAUDE_PLUGIN_ROOT="$ROOT/plugins/fnd" "$@" node "$SPG" --from-mod 2>/dev/null)
+}
+d21ev="$(spg_ev "$PWU" filename elc-123-cart.jpeg)"
+out="$(run_spg_mod "$d21ev")"; ec=$?
+assert_eq       D21-d1-exit "$ec" 0
+assert_contains D21-d1-deny "$out" '"permissionDecision":"deny"'
+assert_eq       D21-d1-same "$out" "$(run_spg "$d21ev")"
+d21ev="$(spg_ev "$PW" filename "$DOUT/scratchpad/elc-1395-bundle-pdp.png")"
+out="$(run_spg_mod "$d21ev")"
+assert_contains D21-d4-deny "$out" 'accept only files inside this project'
+assert_eq       D21-d4-same "$out" "$(run_spg "$d21ev")"
+out="$(run_spg_mod "$(spg_ev "$CDT" filePath "$DOSTMP/shot.png")")"
+if [ -z "$out" ]; then ok; else bad D21-d20-allowed "a chrome-devtools path under the OS temp dir was denied via the mod: $out"; fi
+D21T="$TMP/d21-trace"; mkdir -p "$D21T"
+run_spg_mod "$(spg_ev "$PWU" filename elc-123-cart.jpeg)" FND_HOST_TRACE=1 FND_MCP_SLIM_DIR="$D21T" >/dev/null
+d21line="$(cat "$D21T/fnd-host-trace.log" 2>/dev/null)"
+assert_contains D21-trace-event    "$d21line" '"event":"mod"'
+assert_contains D21-trace-hook     "$d21line" '"hook":"scratch-path-guard"'
+assert_contains D21-trace-decision "$d21line" '"decision":"deny"'
 
 # ═══ A — hooks/spill-access.sh, the PreToolUse spill-read recorder ══════════
 # Measurement only: --report called a platform-overflow whale MISSED whenever the agent read the

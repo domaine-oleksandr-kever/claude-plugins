@@ -24,6 +24,16 @@
 //         `block` DOES change it: that channel carries one capped plain STRING, so whether an emission
 //         can go through it at all is a decision only this hook can make (blockFit), and it rides out
 //         beside the emission as `hookSpecificOutput.fndDelivery` for the adapter to obey.
+//   arg — `--from-mod` and `--overflow=expand`, passed only by the mod's tool.call hook
+//         (hooks/mods/fnd/slim.ts), never by a host wiring. `--from-mod` labels the run (debug
+//         record `from:"mod"`, host-trace event `mod`). `--overflow=expand` makes a platform-overflow
+//         notice slim the file it names instead of passing through: the file must realpath into
+//         `<CLAUDE_CONFIG_DIR|~/.claude>/projects/<dir>/<session_id>/tool-results/mcp-<name>-<n>.txt`
+//         (payload text can forge a notice), the host file is the `full=` original (no re-spill), and
+//         the debug line says reason `mod-expand` with `spill` = that file. Any refusal, a missing
+//         file, the budget or a transform failure prints nothing, so the host's own notice stands.
+//   in  — this hook's own emission fed back (its stub, or its stats line beside a `<<full=` handle)
+//         passes through as `already-slim` on every host, so no result is ever slimmed twice.
 //
 // Safety rails (any doubt → emit nothing, original survives):
 //   - MCP error results (`isError:true`) and per-block error envelopes are never touched
@@ -171,6 +181,8 @@ const DELIVERY = (() => {
 })();
 const DELIVERY_MODE = DELIVERY.mode;
 const BLOCK_CAP = DELIVERY.cap;
+const FROM_MOD = process.argv.includes('--from-mod');
+const EXPAND = process.argv.includes('--overflow=expand');
 // `host` rides along on those same lines and only there: FND_HOST has its own home in the host-proof
 // log (hooks/host-trace.cjs), so it is duplicated into this one where it explains the delivery.
 const HOST_TAG = String(process.env.FND_HOST || '').trim() || null;
@@ -327,12 +339,13 @@ function spillOriginal(text) {
 // `size-gate` passthrough, indistinguishable from a genuinely small result. Recognize the notice and
 // return the saved whale's path, so the debug log names the event `--report` pairs against a later CLI
 // run (M12). Both signals are required — a payload that merely quotes the phrase is not an overflow.
-// Deliberately consulted ONLY on paths that are ALREADY passing through — the size gate (a real
-// notice is ~1.5 KB, always under GATE_BYTES) and the `non-json` no-gain branch (an oversized notice,
-// e.g. one quoting a long payload preamble, lands there): this is a re-LABEL of a passthrough that was
-// happening anyway, never a new reason to skip compression. Probing BEFORE the gate/slim would hand a
-// big compressible result — one that merely contains the phrase and any tool-results path — straight
-// through uncompressed AND fabricate a missed whale in `--report`.
+// Consulted only on paths that are ALREADY passing through — the size gate (a real notice is ~1.5 KB,
+// always under GATE_BYTES) and the `non-json` no-gain branch (an oversized notice, e.g. one quoting a
+// long payload preamble, lands there): a re-LABEL of a passthrough that was happening anyway, never a
+// new reason to skip compression. Probing BEFORE the gate/slim would hand a big compressible result —
+// one that merely contains the phrase and any tool-results path — straight through uncompressed AND
+// fabricate a missed whale in `--report`. The one exception is `--overflow=expand` (mod only), where a
+// notice names the file to slim in its place and hostSpillFile is the boundary.
 const OVERFLOW_MSG = 'exceeds maximum allowed tokens';
 const OVERFLOW_PATH = /(\/[^\s"'\\]*tool-results\/[^\s"'\\]+)/;
 // In a real notice the path follows the phrase within a sentence; scanning only that window keeps the
@@ -349,6 +362,44 @@ function overflowSpill(text) {
   if (at === -1) return null;
   const m = OVERFLOW_PATH.exec(text.slice(at, at + OVERFLOW_WINDOW));
   return m ? m[1].replace(/[.,;:)\]]+$/, '') : null; // the path ends the sentence — drop its period
+}
+
+// `--overflow=expand`: the file a notice names, if it is this session's own host spill. → {file}
+// (its realpath, the one to read) or {why} for the debug line.
+const HOST_SPILL_NAME = /^mcp-[\w.-]+-\d+\.txt$/;
+function hostSpillFile(notice, sessionId) {
+  if (!/^[\w-]+$/.test(sessionId)) return { why: 'expand-refused' };
+  const cfg = String(process.env.CLAUDE_CONFIG_DIR || '').trim();
+  const base = path.isAbsolute(cfg) ? cfg : path.join(os.homedir(), '.claude');
+  let file;
+  try { file = fs.realpathSync(notice); } catch (_) { return { why: 'expand-missing' }; }
+  let projects;
+  try { projects = fs.realpathSync(path.join(base, 'projects')); } catch (_) { return { why: 'expand-refused' }; }
+  const segs = path.relative(projects, file).split(path.sep);
+  const inside = segs.length === 4 && segs[0] !== '' && segs[0] !== '..' && !path.isAbsolute(segs[0]) &&
+    segs[1] === sessionId && segs[2] === 'tool-results' && HOST_SPILL_NAME.test(segs[3]);
+  if (!inside) return { why: 'expand-refused' };
+  try { return fs.statSync(file).isFile() ? { file } : { why: 'expand-refused' }; } catch (_) { return { why: 'expand-missing' }; }
+}
+
+// The host spill of a multi-block result is the content array itself, serialized; null for raw text.
+function hostBlocks(text) {
+  if (!text.startsWith('[')) return null;
+  let v;
+  try { v = JSON.parse(text); } catch (_) { return null; }
+  return Array.isArray(v) && v.length && v.every((b) => b && typeof b === 'object' && b.type === 'text' &&
+    typeof b.text === 'string') ? v : null;
+}
+
+// The host file's payload in the shape the notice arrived in (the mirror rule above). A string or lone
+// block cannot carry several blocks, so there the file's text goes in whole.
+function expandedShape(original, text, blocks) {
+  if (Array.isArray(original)) return blocks || [{ type: 'text', text }];
+  if (original && typeof original === 'object') {
+    if (Array.isArray(original.content)) return { ...original, content: blocks || [{ type: 'text', text }] };
+    if (typeof original.text === 'string') return { ...original, text: blocks && blocks.length === 1 ? blocks[0].text : text };
+  }
+  return blocks && blocks.length === 1 ? blocks[0].text : text;
 }
 
 // Byte length of a result value (best-effort; a non-serializable object → 0).
@@ -373,6 +424,7 @@ function statsLine(decision, bytesIn, bytesOut) {
   const n = (b) => String(b).replace(GROUP3, ',');
   return `fnd-mcp-slim: ${decision} ${n(bytesIn)} B → ${n(bytesOut)} B (${pct < 0 ? '+' : '−'}${Math.abs(pct).toFixed(1)}%)`;
 }
+const STATS_LINE_RE = /^fnd-mcp-slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m;
 // The line states the size of the value it is PART of, so it is built to a fixed point: measure
 // without it, re-measure with it, stop when the figure stops moving. Each pass can only lengthen the
 // number, so it settles in one or two — and what the reader sees is then the emission's real size,
@@ -459,6 +511,19 @@ function stubBytes() {
   // be evicted AND grow the result once the threshold is set below the stub's own size.
   const n = Number(String(process.env.FND_MCP_SLIM_STUB_BYTES ?? '').trim());
   return Number.isFinite(n) && n > 0 ? Math.max(n, STUB_CAP) : STUB_BYTES_DEFAULT;
+}
+
+// This hook's own emission: a stub, or the stats line beside a `<<full=` handle. Above the largest
+// emission the stub guard lets out, a mark is payload text and the result is slimmed as usual — a
+// forged mark must not carry a whale past the guard.
+function alreadySlim(result) {
+  const texts = (typeof result === 'string' ? [result] : (blocksOf(result) || [result]))
+    .map((b) => (typeof b === 'string' ? b : (b && typeof b === 'object' ? b.text : undefined)))
+    .filter((t) => typeof t === 'string');
+  let bytes = 0;
+  for (const t of texts) bytes += Buffer.byteLength(t, 'utf8');
+  if (!texts.length || bytes > stubBytes() + STUB_CAP) return false;
+  return texts.some((t) => t.startsWith(STUB_MARK) || (t.includes('<<full=') && STATS_LINE_RE.test(t)));
 }
 
 // The stub's last line is the only part built from PAYLOAD bytes (a preview of the head, or the JSON
@@ -648,10 +713,10 @@ function payloadOf(result) {
 // path untouched. Only the payload is replaced: `payload > stubLimit >= STUB_CAP` (the floor in
 // stubBytes), and the stub text sits comfortably under the cap at any realistic path length
 // (see stubText), so a stub comes out smaller than the payload it replaces.
-function buildStub(result, tool, format, stubLimit, reason) {
+function buildStub(result, tool, format, stubLimit, reason, hostFile) {
   const p = payloadOf(result); // shape probe BEFORE any file is written
   if (p === null || p.bytes <= stubLimit) return null;
-  const s = spillOriginal(p.payload);
+  const s = hostFile ? { path: hostFile } : spillOriginal(p.payload);
   if (!s) return null; // no recovery copy → RAW passthrough (never lose the only copy)
   const h = jsonSlim().shapeHint(p.payload);
   const fmt = format || h.format;
@@ -808,7 +873,10 @@ function run(raw) {
   eventTranscript = typeof input.transcript_path === 'string' ? input.transcript_path : null;
   const tool = typeof input.tool_name === 'string' ? input.tool_name : null;
   eventTool = tool;
-  const result = input.tool_response !== undefined ? input.tool_response : input.tool_output;
+  let result = input.tool_response !== undefined ? input.tool_response : input.tool_output;
+  // `--overflow=expand`: the notice the host swapped in → the payload it names (set below).
+  let hostFile = null;
+  let stubSpills = false; // expand: a stub spills its own payload copy instead of naming hostFile
 
   // Every spill file this invocation writes — this hook's own whole-original/stub copy plus the crush
   // markers and jsx node-id map json-slim writes inside slim(). Read by trace() rather than passed to
@@ -856,6 +924,7 @@ function run(raw) {
       ...(delivery ? { delivery, ...(delivered == null ? {} : { delivered }), ...(HOST_TAG ? { host: HOST_TAG } : {}) } : {}),
       ...(format ? { format } : {}), // M8: only the non-json passthrough carries a format tag
       ...(budgetPartial ? { budget_partial: true } : {}), // B4.8: a mid-array expiry, invisible otherwise
+      ...(FROM_MOD ? { from: 'mod' } : {}),
       bytes_in: bytesIn, bytes_out: bytesOut, pct: pctOf(bytesIn, bytesOut),
       stages: stages || [], spill: spill || null, spills, ms: Date.now() - t0,
     }, undefined, input.cwd); // the event's own cwd names the project (B4.10b)
@@ -877,12 +946,32 @@ function run(raw) {
     trace('passthrough', 'transform-error', 0, 0, [], null);
     return;
   }
-  const bytesIn = Buffer.byteLength(serialized, 'utf8');
+  let bytesIn = Buffer.byteLength(serialized, 'utf8');
+
+  const notice = EXPAND ? overflowSpill(serialized) : null;
+  if (notice) {
+    const host = hostSpillFile(notice, typeof input.session_id === 'string' ? input.session_id : '');
+    let text = null;
+    if (host.file) { try { text = fs.readFileSync(host.file, 'utf8'); } catch (_) {} }
+    if (text === null) { trace('passthrough', host.why || 'expand-missing', bytesIn, bytesIn, [], null); return; }
+    hostFile = host.file;
+    const blocks = hostBlocks(text);
+    result = expandedShape(result, text, blocks);
+    // A stub's recipe runs json-slim on the file it names, and over a block wrapper that recovers nothing;
+    // a string notice carries the wrapper itself, so naming the file is as good as a copy there.
+    if (blocks && blocks.length > 1 && blocksOf(result)) stubSpills = true;
+    serialized = typeof result === 'string' ? result : JSON.stringify(result);
+    bytesIn = Buffer.byteLength(serialized, 'utf8');
+  } else if (alreadySlim(result)) {
+    trace('passthrough', 'already-slim', bytesIn, bytesIn, [], null);
+    return;
+  }
+
   if (bytesIn <= GATE_BYTES) {
     // Below the gate nothing gets compressed either way, so this is pure debug vocabulary (M12): a
     // platform overflow notice is named `platform-overflow` and carries the saved whale's path in
     // `spill`, instead of hiding among the generic `size-gate` lines.
-    const overflow = dbg ? overflowSpill(serialized) : null; // probe's only consumer is the debug log
+    const overflow = dbg && !hostFile ? overflowSpill(serialized) : null; // probe's only consumer is the debug log
     // A plain `size-gate` record is the one json-slim discards below level 2 — writing it there would
     // load the compressor to produce nothing. The overflow line survives at every level, so it still goes.
     if (overflow || dbgLevel >= 2) {
@@ -891,7 +980,8 @@ function run(raw) {
     return;
   }
 
-  const stubOn = stubEnabled();
+  // The host already ruled this payload too big for context: the escape hatch never applies to it.
+  const stubOn = stubEnabled() || !!hostFile;
   const stubLimit = stubBytes();
 
   // One deadline for the whole flow, so N blocks share the ceiling instead of each getting a fresh one.
@@ -929,16 +1019,17 @@ function run(raw) {
   // `limit` overrides the stub threshold for the one caller that has a smaller one than the payload
   // gate: the block channel's cap (see the block-cap branch below).
   const tryStub = (reason, stages, limit) => {
-    const s = buildStub(result, tool, slimmed.format, limit === undefined ? stubLimit : limit, reason);
+    const stubHost = stubSpills ? null : hostFile;
+    const s = buildStub(result, tool, slimmed.format, limit === undefined ? stubLimit : limit, reason, stubHost);
     if (!s) return false;
-    own(s.spill);
+    if (!stubHost) own(s.spill);
     const built = withStats(s.make, 'stub', bytesIn);
     if (!built) return false;
     const fnd = fndDeliveryFor(built.value, 'stub');
     emit(built.value, fnd, built.line);
     hostDecision = 'stub';
     dropCreated(built.value);
-    if (dbg) trace('stubbed', reason, bytesIn, built.bytes, stages, s.spill, s.format, deliveredBytes(built.value, fnd), fnd);
+    if (dbg) trace('stubbed', hostFile ? 'mod-expand' : reason, bytesIn, built.bytes, stages, s.spill, s.format, deliveredBytes(built.value, fnd), fnd);
     return true;
   };
 
@@ -966,7 +1057,7 @@ function run(raw) {
     emit(out, fnd, built.line);
     hostDecision = 'stub';
     dropCreated(out);
-    if (dbg) trace('stubbed', reason, bytesIn, built.bytes, stages, s.spill, s.format, deliveredBytes(out, fnd), fnd);
+    if (dbg) trace('stubbed', hostFile ? 'mod-expand' : reason, bytesIn, built.bytes, stages, s.spill, s.format, deliveredBytes(out, fnd), fnd);
     return true;
   };
 
@@ -978,8 +1069,10 @@ function run(raw) {
     // only on a branch that is already passing through.
     // `!anyError` is the error rail for the blocks `reason` cannot speak for: it names only the FIRST
     // non-modifying block, so [whale, error envelope] would read as a plain `non-json` passthrough.
-    const stubbable = stubOn && bytesIn > stubLimit && STUB_REASONS.has(slimmed.reason) && !slimmed.anyError;
-    const overflow = (dbg || stubbable) && OVERFLOW_PROBE_REASONS.has(slimmed.reason) ? overflowSpill(serialized) : null;
+    // An expanded payload the budget stopped hands back nothing: the host's own notice still names it.
+    const stubbable = stubOn && bytesIn > stubLimit && STUB_REASONS.has(slimmed.reason) && !slimmed.anyError &&
+      !(hostFile && slimmed.reason === 'budget-exceeded');
+    const overflow = !hostFile && (dbg || stubbable) && OVERFLOW_PROBE_REASONS.has(slimmed.reason) ? overflowSpill(serialized) : null;
     // M12b: without this, a whale the pipeline cannot shrink (non-JSON text, HTML, already-minimal
     // JSON) lands in context RAW. Hand back the stub + spill instead; the model decides what to do
     // with the file. Any decline falls through to the passthrough that was happening anyway.
@@ -1001,17 +1094,23 @@ function run(raw) {
   // is the cheap pre-filter — it is never smaller than the payload inside it. `!anyError` again: a
   // content array can compress one block while another is an error envelope kept verbatim — stubbing
   // there would swallow the failure the write-gating reads.
-  if (stubOn && !slimmed.anyError && bytesOf(slimmed.value) > stubLimit) {
+  if (stubOn && (!slimmed.anyError || hostFile) && bytesOf(slimmed.value) > stubLimit) {
     const body = payloadOf(slimmed.value); // the COMPRESSED body, not the whale — buildStub re-reads the original
     if (body !== null) {
-      if (body.bytes > stubLimit && tryStub('weak-gain', slimmed.stages)) return;
-    } else if (tryBlockStubs('weak-gain', slimmed.stages, slimmed.value)) return; // rich blocks: one stub each
+      if (body.bytes > stubLimit && !slimmed.anyError && tryStub('weak-gain', slimmed.stages)) return;
+    } else if (!slimmed.anyError && tryBlockStubs('weak-gain', slimmed.stages, slimmed.value)) return; // rich blocks: one stub each
+    // Expanded and still over the threshold with no stub to carry it: the host's notice stands.
+    if (hostFile && (body === null || body.bytes > stubLimit)) {
+      dropCreated();
+      trace('passthrough', 'expand-oversize', bytesIn, bytesIn, slimmed.stages, null);
+      return;
+    }
   }
 
   // Recovery net: spill the original before handing back a lossy result. No spill → passthrough.
-  const full = spillOriginal(serialized);
+  const full = hostFile ? { path: hostFile, created: false } : spillOriginal(serialized);
   if (!full) { dropCreated(); trace('passthrough', 'spill-write-failure', bytesIn, bytesIn, [], null); return; }
-  const fullPath = own(full.path);
+  const fullPath = hostFile || own(full.path);
 
   // The stats line goes on its own line ABOVE the handle, so the handle's own grammar is byte-identical
   // to what every reader of it has always parsed.
@@ -1065,7 +1164,7 @@ function run(raw) {
 
   emit(value, fnd, built.line);
   hostDecision = 'compress';
-  if (dbg) trace('compressed', null, bytesIn, outBytes, slimmed.stages, fullPath, undefined, undefined, fnd);
+  if (dbg) trace('compressed', hostFile ? 'mod-expand' : null, bytesIn, outBytes, slimmed.stages, fullPath, undefined, undefined, fnd);
 }
 
 // Collect the whole stdin as bytes, then decode once — decoding per Buffer chunk would
@@ -1091,7 +1190,7 @@ process.stdin.on('end', () => {
   }
   // Before the sweep, so `ms` measures the decision the model waited on rather than the hygiene
   // that follows it — and after the result is out, like everything else down here.
-  hostTrace.trace({ event: 'PostToolUse', hook: 'mcp-slim', decision: hostDecision, tool: eventTool, startedAt: ht0 });
+  hostTrace.trace({ event: FROM_MOD ? 'mod' : 'PostToolUse', hook: 'mcp-slim', decision: hostDecision, tool: eventTool, startedAt: ht0 });
   // Spill hygiene runs AFTER the result is emitted (or passed through) so it never delays what
   // the model sees; throttled and self-guarding, so it costs one stat on the hot path.
   try { if (sweepDue()) jsonSlim().sweepSpills(undefined, eventCwd || process.cwd()); } catch (_) {}

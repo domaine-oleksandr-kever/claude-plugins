@@ -3706,6 +3706,34 @@ eq('log-score-in-trace-boost', L.scoreLogLine({ level: 'info', isStackTrace: tru
     'the header must say how many of its events are spill reads');
 }
 
+// ==================== `mod-expand` in `--report`: a whale the mod slimmed out of its host file ==
+// hooks/mcp-slim.cjs `--from-mod --overflow=expand` logs reason `mod-expand` with `spill` = the host's
+// tool-results file. A platform-overflow over the same file followed by it was recovered, not missed.
+{
+  const SPILL = '/h/.claude/projects/p/sid/tool-results/mcp-plugin_fnd_atlassian-searchJiraIssuesUsingJql-1784908372707.txt';
+  const ov = (extra) => JSON.stringify({ ts: '2026-10-03T09:00:00.000Z', project: 'elc', lvl: 1, entry: 'hook', tool: 'mcp__a__search', decision: 'passthrough', reason: 'platform-overflow', bytes_in: 1465, bytes_out: 1465, pct: 0, stages: [], spill: SPILL, ...extra });
+  const mod = (extra) => JSON.stringify({ ts: '2026-10-03T09:00:01.000Z', project: 'elc', lvl: 1, entry: 'hook', tool: 'mcp__a__search', decision: 'compressed', reason: 'mod-expand', from: 'mod', bytes_in: 3197763, bytes_out: 28000, pct: 99.1, stages: ['crush'], spill: SPILL, ...extra });
+  const MISSED = (n, of) => new RegExp(`missed whales \\(platform-overflow never read by any tool\\): ${n} of ${of}`);
+
+  const paired = J.buildReport([ov(), mod()], { file: '/x.log' });
+  check('mx-report-mod-expand-recovers', MISSED(0, 1).test(paired) && /whale recoveries via: mod 1/.test(paired),
+    `a later mod-expand over the same host file is a recovery:\n${paired}`);
+  const alone = J.buildReport([ov()], { file: '/x.log' });
+  check('mx-report-without-it-missed', MISSED(1, 1).test(alone), `no mod-expand line, the whale is missed:\n${alone}`);
+  const early = J.buildReport([ov(), mod({ ts: '2026-10-03T08:59:00.000Z' })], { file: '/x.log' });
+  check('mx-report-earlier-is-no-recovery', MISSED(1, 1).test(early), `a mod-expand before the overflow pairs nothing:\n${early}`);
+  const other = J.buildReport([ov(), mod({ spill: SPILL.replace('1784908372707', '1784908372999') })], { file: '/x.log' });
+  check('mx-report-other-file-is-no-recovery', MISSED(1, 1).test(other), `another host file pairs nothing:\n${other}`);
+  // A mod-expand STUB names the host file too; it must not count as its own reader.
+  const stub = J.buildReport([mod({ decision: 'stubbed', bytes_out: 1191 })], { file: '/x.log' });
+  check('mx-report-stub-not-self-read', /stubbed \(spill-and-stub guard\): 1 \(mod-expand 1\), 1 never read/.test(stub),
+    `a mod-expand stub is not read by itself:\n${stub}`);
+  // …nor a recovery: it hands back the same host file the notice already named.
+  const stubbedAfter = J.buildReport([ov(), mod({ decision: 'stubbed', bytes_out: 1191 })], { file: '/x.log' });
+  check('mx-report-stubbed-mod-no-recovery', MISSED(1, 1).test(stubbedAfter) && !/via: mod/.test(stubbedAfter),
+    `a stubbed mod-expand leaves the whale missed:\n${stubbedAfter}`);
+}
+
 // ==================== `delivery` in `--report`: what the HOST did with a shrunk result (I1) ==
 // hooks/mcp-slim.cjs writes its debug record before any host adapter has decided what to do with the
 // result, so the record carries the host's delivery contract: `replace` (the default, and absent from

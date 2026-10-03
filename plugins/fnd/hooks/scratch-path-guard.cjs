@@ -72,6 +72,10 @@
 // Env: FND_SCRATCH_GUARD — 0 disables the guard (each host's wiring short-circuits on it too,
 // so node does not even spawn; re-checked here for a direct invocation).
 // CLAUDE_PROJECT_DIR (set by Claude Code for hooks) — the project root, see projectRoot.
+//
+// Arg: `--from-mod` — passed only by the mod's tool.call delegation (hooks/mods/fnd/guard.ts). The
+// verdict is unchanged; the host-trace line is filed under event `mod`, so a mod-spawned run never
+// reads as the classic PreToolUse wiring having fired.
 'use strict';
 
 const fs = require('fs');
@@ -380,6 +384,7 @@ if (require.main === module) {
       verdict = 'error';
     }
     // After the verdict is on stdout: bookkeeping never delays the tool call.
-    hostTrace.trace({ event: 'PreToolUse', hook: 'scratch-path-guard', decision: verdict, tool, startedAt: t });
+    const event = process.argv.includes('--from-mod') ? 'mod' : 'PreToolUse';
+    hostTrace.trace({ event, hook: 'scratch-path-guard', decision: verdict, tool, startedAt: t });
   });
 }

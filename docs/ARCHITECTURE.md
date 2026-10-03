@@ -34,6 +34,11 @@ flowchart TB
     H8["scripts/project-profile.sh (checkout profile probe)"]
   end
 
+  subgraph mods["Claude Code hooks module (hooks/hooks.json → hooks/mods/register.tsx)"]
+    M1["core/ — usage.ts · band.tsx · progress.tsx<br/>(status band, progress pane)"]
+    M2["fnd/ — guard.ts · slim.ts<br/>(node-hook.ts adapter)"]
+  end
+
   subgraph model["What the model reads"]
     S["skills/ (18)"]
     A["agents/ (7 readers, reviewers, one writer)"]
@@ -53,6 +58,9 @@ flowchart TB
   end
 
   CC --> W1 --> canon
+  CC --> mods
+  M2 -. "spawns node (--from-mod)" .-> H5
+  M2 -. "spawns node (--from-mod)" .-> H6
   CU --> W2 --> canon
   CX --> W3 --> canon
   OC --> W4 --> canon
@@ -70,6 +78,13 @@ The rule behind the picture: a behaviour is implemented once, in `canon` or `scr
 host reaches it through its adapter. The adapters translate payload keys and response shapes and
 never re-implement a decision; `tests/hooks-cursor-sim.sh`, `tests/hooks-codex-sim.sh` and
 `tests/opencode-plugin-sim.mjs` replay the same fixtures through each dialect.
+
+Claude Code also loads a **hooks module**, function hooks that run inside the session engine
+beside the classic command hooks (§8). It is Claude Code's alone. The Cursor and Codex manifests
+name their own hook files (`hooks/hooks-cursor.json`, `hooks/hooks-codex.json`) and never
+`hooks/hooks.json`. OpenCode loads only `opencode/fnd-plugin.js`. The module keeps the same rule
+as the adapters: its guard and slim halves spawn the canonical `scratch-path-guard.cjs` and
+`mcp-slim.cjs` and never re-implement their decisions.
 
 ## 2. A session, hook by hook
 
@@ -105,9 +120,36 @@ sequenceDiagram
   Note over Hooks: spill-access records the read (measurement only)
 ```
 
+On Claude Code the module wraps every tool call. Its `tool.call` hooks run first, and the classic
+`PreToolUse` command hooks fire **inside** that call, beneath every plugin's `tool.call` hook:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Model
+  participant Mod as module tool.call (guard.ts, slim.ts)
+  participant Node as hooks/*.cjs --from-mod
+  participant Classic as classic PreToolUse / PostToolUse
+  participant Tool as MCP server
+
+  Model->>Mod: mcp__…__take_screenshot {filePath}
+  Mod->>Node: scratch-path-guard.cjs (stdin built as the classic wiring builds it)
+  alt deny
+    Node-->>Mod: permissionDecision deny + reason
+    Mod-->>Model: { deny: reason } (nothing beneath runs)
+  else allow, error or timeout (fail-open)
+    Mod->>Classic: next(e) → classic PreToolUse (scratch-path-guard.cjs again, the backstop)
+    Classic->>Tool: call
+    Tool-->>Mod: result (or the host's overflow notice)
+    Mod-->>Model: result, or slim.ts's replacement of a notice (§3)
+  end
+```
+
 Every hook appends one metadata line to `fnd-host-trace.log` when `FND_HOST_TRACE=1`;
 `doctor.cjs --trace` renders it as an event/hook × host matrix — the proof the hooks fired on
-a host, from disk rather than from the model's own report.
+a host, from disk rather than from the model's own report. A run the module spawned is filed
+under event `mod` (and `from:"mod"` in the compressor's debug log), so it never counts as proof that
+a classic wiring fired.
 
 ## 3. MCP result compression (mcp-slim + json-slim)
 
@@ -136,12 +178,34 @@ stdout is the recipe). Spill files carry a TTL and are swept by the hook itself.
 
 Per host, the result rewrite is a capability of the host, not of the plugin:
 
-| Host | Session context | Prompt hook | Subagent conventions | Shell guards | Screenshot guard | Spill access | MCP result rewrite |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Claude Code | hook | yes | yes | yes | yes | yes | **yes** — compressed or stubbed in place |
-| OpenCode | adapter (every project) | yes | no event on this host | yes | **no** — `tool.execute.before` reaches only the bash tool | yes | **yes** — the adapter rewrites `output.content` |
-| Codex CLI | hook | yes | yes | yes | yes | yes | **yes** — compress **and** stub, returned as a PostToolUse `block` reason (capped 10 KB); over-cap ⇒ stub, a non-text block ⇒ `additionalContext` |
-| Cursor | rules + shim | shim | shim (unverified) | shim | shim | shell reads only | **no** — `afterMCPExecution` has no response schema; the shim only logs that it fired |
+| Host | Session context | Prompt hook | Subagent conventions | Shell guards | Screenshot guard | Spill access | MCP result rewrite | Hooks module |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Claude Code | hook | yes | yes | yes | yes | yes | **yes** — compressed or stubbed in place | **yes** — band, pane, guard on the call, over-limit expansion |
+| OpenCode | adapter (every project) | yes | no event on this host | yes | **no** — `tool.execute.before` reaches only the bash tool | yes | **yes** — the adapter rewrites `output.content` | no |
+| Codex CLI | hook | yes | yes | yes | yes | yes | **yes** — compress **and** stub, returned as a PostToolUse `block` reason (capped 10 KB); over-cap ⇒ stub, a non-text block ⇒ `additionalContext` | no |
+| Cursor | rules + shim | shim | shim (unverified) | shim | shim | shell reads only | **no** — `afterMCPExecution` has no response schema; the shim only logs that it fired | no |
+
+On Claude Code the module closes the one gap in the picture above: a result over the platform
+limit, which the classic hook only ever sees as the host's overflow notice.
+
+```mermaid
+flowchart LR
+  N["tool.call result = host overflow notice<br/>(names …/tool-results/mcp-x-n.txt)"] --> M["slim.ts → mcp-slim.cjs<br/>--from-mod --overflow=expand"]
+  M --> B{"realpath under<br/>projects/*/&lt;session id&gt;/tool-results/,<br/>name mcp-*-n.txt?"}
+  B -- no / missing --> KEEP["empty stdout → the notice stands<br/>(whale convention routes it)"]
+  B -- yes --> SL["slim the file, which is the full= original"]
+  SL --> FIT{"≤ FND_MCP_SLIM_STUB_BYTES?"}
+  FIT -- yes --> BODY["slimmed body + &lt;&lt;full=host file&gt;&gt;<br/>debug reason mod-expand"]
+  FIT -- no --> HB["stub naming the host file<br/>+ json-slim / --jq recipe"]
+  FIT -->|"no, and no stub can carry it<br/>(expand-oversize, budget)"| KEEP
+  BODY --> T["savings toast (main thread only)"]
+```
+
+**Idempotence.** `mcp-slim.cjs` recognises its own emission, a stub or its stats line beside a
+`<<full=` handle, and passes it through with reason `already-slim` on every host. A forged mark
+on a body larger than any emission does not count. So a result is never slimmed twice, whichever
+order the module and the classic PostToolUse hook run in. `json-slim --report` pairs a
+`platform-overflow` event with a later compressed `mod-expand` event on the same file as a recovery.
 
 ## 4. Skills, agents and the ship pipeline
 
@@ -223,6 +287,14 @@ loader, or through a bash reader that mirrors it by hand (`project-profile.sh`,
 `_shopify-common.sh`, `spill-access.sh`) — `tests/layout-assertions.sh` holds the copies equal.
 The hooks pre-gate on the cheap ones in the wiring so a disabled feature spawns no process.
 
+The hooks module sits outside that loader. It reads `FND_SCRATCH_GUARD`, `FND_MCP_SLIM` and
+`FND_MCP_SLIM_STUB_BYTES` from the session's own environment (the shell and `settings.json` →
+`env`). The env files reach only the `.cjs` it spawns, which re-checks its switch itself, so a
+switch set in a file still holds, one spawn later. The module's own settings are `plugin.json` →
+`userConfig`: `statusBand` (draw the band) and `cacheTtl` (`auto` / `5m` / `1h`). Claude Code
+documents them as `/config` rows (where they appear is still a live check), stores them under `pluginConfigs` in `~/.claude/settings.json` and
+hands them to `register(on, options)`. A change reloads the module.
+
 ## 7. Tests, release, install
 
 ```mermaid
@@ -233,6 +305,7 @@ flowchart LR
     T3["scripts-sim.sh (stub runner + PATH shims)"]
     T4["json-slim-fixtures.mjs · adf-md-fixtures.mjs"]
     T5["doctor-sim · install-sim · garden-sim · readme-checks · lints"]
+    T6["mods-sim.sh → claude plugin validate --strict + claude plugin test<br/>(hooks/mods/tests/*.test.ts(x), local only)"]
   end
   CI["GitHub Actions: macOS + Ubuntu"] --> tests
   CI --> GEN["gen-host-adapters.cjs --check"]
@@ -247,3 +320,67 @@ flowchart LR
 The plugin installs from the GitHub remote, so an unpushed commit is invisible to every host.
 `doctor.cjs` says whether a host will load the checkout; `smoke-test` proves what a script cannot
 reach from inside a session; `doctor.cjs --trace` and `--report` read the two logs back.
+
+The hooks module is tested by the engine's own kit. Each `hooks/mods/tests/*.test.ts(x)` mounts the
+band and pane on the terminal and desktop surfaces, raises the events, and stubs every engine op it
+touches. `tests/mods-sim.sh` wraps `claude plugin validate --strict` and `claude plugin test`. CI has
+no `claude` binary, so the suite prints SKIP there; run it locally before a release (the README
+release checks list it). The Node
+halves the module spawns stay covered by `tests/hooks-sim.sh` (guard D cases, mcp-slim M-exp and
+M-idem cases) and the three host sims.
+
+## 8. Mods
+
+The module is one ES module tree, compiled by the engine. It imports only from `claude-code`, its
+own files and `plugins/fnd/types/index.d.ts`, with no npm, `require`, `import()` or Node globals.
+
+```
+hooks/hooks.json            { "modules": ["./mods/register.tsx"] }
+hooks/mods/register.tsx     register(on, options) → registerUsage, registerBand, registerProgress, registerGuard, registerSlim
+hooks/mods/core/            usage.ts (atoms + 30 s tick) · band.tsx (AbovePrompt) · progress.tsx (resolver, /fnd-progress, Pane)
+                            lib.ts · workid.ts · progress-parse.ts (pure)
+hooks/mods/fnd/             guard.ts (tool.describe note + tool.call deny) · slim.ts (overflow expansion + toast)
+                            node-hook.ts (pure: builds the node call, reads its answer)
+types/index.d.ts            the $.state contract: every key the module reads or writes
+```
+
+**Layout rule.** `claude plugin validate --strict` enforces these:
+- **`$`-code never crosses a file boundary.** The validator follows `$` only into functions
+  declared in the same file. Passing `$` to an imported helper, or an atom imported from another
+  file, fails.
+- **Each feature file declares the atoms it touches** with literal `{ plugin: 'fnd', key }` refs.
+  The same literal in two files shares the value, and `types/index.d.ts` is the one list of
+  allowed keys.
+- **Shared code is pure** (`lib.ts`, `workid.ts`, `progress-parse.ts`, `node-hook.ts`) and is
+  imported freely, by tests too.
+- **Render paths only read atoms.** Writers update them from events, timers and presses. The
+  band learns the pane is open from the `paneShown` atom, never from a pane listing while drawing.
+- **One unmatched hook per event per plugin.** A second `on('session.start', …)` without a
+  matcher fails validation and module load, so `usage.ts` and `guard.ts` register theirs with
+  match-all matchers. All of a plugin's hooks on one event act as one hook: one that throws skips
+  the rest. That is why the guard also latches its root on the first tool call.
+
+**Classic hooks on Claude Code, with the module loaded:**
+
+| Classic hook | With the module | Mechanism |
+|---|---|---|
+| `scratch-path-guard.cjs` (PreToolUse, 5 tools) | keeps running as the backstop | The module's deny pre-empts it for that call (classic PreToolUse fires beneath `tool.call`). A skipped module hook fails open, and the classic guard still guards. |
+| `mcp-slim.cjs` (PostToolUse `mcp__.*`) | keeps running | `already-slim` idempotence makes double processing impossible. The session-bound marker that would let it drop its own notice when the module toasts (`FND_MOD_SESSION`) is not built: it waits for two live checks (where classic PostToolUse runs relative to `tool.call`; whether command hooks inherit an env the module sets). Until then the figure can show twice. |
+| `compression-notice.cjs` systemMessage | shown beside the module's toast | Replaced by the toast once the marker exists |
+| `user-prompt.cjs` context monitor | unchanged | Overlaps the band's ctx figure; `FND_CTX_MONITOR=0` silences it |
+| session-start, subagent conventions, git guards, spill-access, reader-compression | unchanged | Out of the module's scope |
+| Cursor / Codex / OpenCode | unchanged except `already-slim` and one whale-convention sentence | Every other module-specific Node behaviour sits behind an argv flag (`--from-mod`, `--overflow=expand`) only the module passes. `hooks/mcp-whale.md` reaches every host (Codex via `session-start.sh`, OpenCode via the adapter's statics, Cursor via `rules/fnd-mcp-whale.mdc`), so its "On Claude Code an over-limit result often arrives already slimmed or stubbed" line is read there too, guarded as Claude-Code-only |
+
+Rejected: answering `classic.PostToolUse` for `mcp__` tools without calling `next`. That would
+silence every user, project and other-plugin PostToolUse hook on MCP tools, and the spill TTL sweep
+with them.
+
+**Split readiness** (the core/fnd plugin split stays parked):
+- `hooks/mods/core/` (band, pane, usage, resolver) can move to a future core plugin as one folder.
+- `hooks/mods/fnd/` (guard, slim, Node adapter) stays in fnd.
+- Imports run one way only: `register.tsx → core` and `register.tsx → fnd`. `core` never imports
+  `fnd`.
+- Only `core` draws `AbovePrompt`, which has one instance per chain. A future fnd-only segment
+  (theme, store) would publish through its own state key, which any plugin may read.
+- At the split, the `'fnd'` literal in `core/**` becomes `'fnd-core'`. Whether the shared contract
+  moves to `dependencies` is decided then.

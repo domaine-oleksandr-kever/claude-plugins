@@ -1229,6 +1229,16 @@ hb=$(printf '%s' "$hdr" | wc -c | tr -d ' ')
 if [ "$hb" -gt 100 ] && [ "$hb" -lt 1000 ]; then ok; else bad M13b-header "header of $hb B read off the reason"; fi
 assert_eq M13b-body-cap "$(cat "$argv_dir/mcp-slim.cjs.flag" 2>/dev/null)" "--delivery=block:$(( BLOCK_BYTES - hb - 2 ))"
 
+# M-idem: mcp-slim's own emission arriving a second time (the one default every host shares) passes
+# through: no block, and the record says `already-slim`. The control is M4 — the same rows, raw, block.
+DI="$TMP/mcp-dbg-idem"; mkdir -p "$DI"
+in="$(jq -n --argjson r "$ROWS" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$r}]}}')"
+again="$(printf '%s' "$in" | env FND_MCP_SLIM_DIR="$MSD" node "$PLUG/hooks/mcp-slim.cjs" 2>/dev/null \
+  | jq -c '{tool_name:"mcp__x__y",tool_response:.hookSpecificOutput.updatedToolOutput}')"
+assert_contains M-idem-fixture "$again" "original_result>>"
+assert_eq M-idem-passthrough "$(run_ptu "$again" FND_MCP_SLIM_DEBUG=1 FND_MCP_SLIM_DIR="$DI")" ""
+assert_eq M-idem-reason "$(tail -1 "$DI/$DBGLOG" 2>/dev/null | jq -r '.reason' 2>/dev/null)" "already-slim"
+
 echo "hooks-codex wiring sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then
   printf '%s' "$failures"

@@ -38,6 +38,7 @@ in its own subfolder under `plugins/`:
 │       │   ├── doc-reader.md        #  reads one linked doc (Notion/Confluence/web) → extract
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
 │       ├── hooks/                # injected conventions + git guards + context monitor
+│       │   ├── mods/             #  Claude Code hooks module: status band, progress pane, guard, slim
 │       │   ├── comment-discipline.md
 │       │   ├── lean-code.md      #  "lazy senior dev" ladder (FND_LEAN=0 to disable)
 │       │   ├── session-start.sh         # SessionStart composer both shell wirings spawn
@@ -45,6 +46,7 @@ in its own subfolder under `plugins/`:
 │       │   ├── no-verify-bypass.sh      # PreToolUse guard: no hook-bypassing commits
 │       │   ├── spill-access.sh          # PreToolUse recorder: which tool read an MCP spill
 │       │   └── ...               # see "Hooks" below for the full set
+│       ├── types/index.d.ts      # the hooks module's state contract (plugin.json "types")
 │       ├── scripts/              # bundled runners the skills call
 │       │   ├── shopify-admin-gql.sh #  Admin GraphQL (store execute → token)
 │       │   ├── theme-json.sh        #  theme JSON / customizer state
@@ -90,6 +92,7 @@ in its own subfolder under `plugins/`:
 │   ├── bootstrap-sim.sh             #  bootstrap: arg gates, clone, pty picker, uninstall
 │   ├── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
 │   ├── json-slim-fixtures.mjs       #  mcp-slim pipeline + CLI + hook fixtures
+│   ├── mods-sim.sh                  #  hooks module: validate --strict + plugin test (SKIP without claude)
 │   ├── readme-checks.sh             #  README/docs: commands, paths, links, version markers
 │   ├── fixtures/                    #  real captured payloads (secrets scrubbed)
 │   └── parity/                      #  upstream-port parity fixtures + license NOTICE
@@ -360,6 +363,7 @@ per-host doc it belongs to:
 | Subagents | 1 level → hoisted ship shape | hoisted, genuinely concurrent | hoisted unless `subagent_depth` raised |
 | Models | pinned per the Domaine guidelines | pinned (PROPOSED map, sign-off pending) | **no pins** — session model; optional profile fragment |
 | Skill invocation | `/name` | `$name` | model-invoked + `/name` shims |
+| Mods (status band, progress pane) | none — the manifest names `hooks/hooks-cursor.json` | none — the manifest names `hooks/hooks-codex.json` | none — only `opencode/fnd-plugin.js` loads |
 
 Losses that hold on all three: no adversarial verify fan-out, no per-phase workflow telemetry,
 and the context-usage monitor is inert wherever the host hands a prompt hook no transcript
@@ -566,6 +570,7 @@ Then verify the packaging before committing:
 node plugins/fnd/scripts/doctor.cjs      # manifests present, versions equal, hooks runnable
 bash tests/layout-assertions.sh
 bash tests/readme-checks.sh              # install commands, referenced paths, links, stamps
+bash tests/mods-sim.sh                   # hooks module: validate --strict + kit tests (local only; SKIP without claude)
 ```
 
 ## How global skills use project rules
@@ -1136,6 +1141,8 @@ in the egress table for cloud sandboxes.
 The plugin wires five hook events (`plugin.json` → `hooks`); every hook fails open — a
 hook error never blocks work. One of them (the progress checklist) needs a host switch the
 plugin cannot set for you: [Recommended Claude Code settings](#recommended-claude-code-settings-copy-paste).
+On Claude Code a hooks module of function hooks runs beside them (status band, progress pane, and
+the guard and compressor on the tool call itself): [Mods](#mods-claude-code-function-hooks).
 
 - **SessionStart** — `hooks/session-start.sh`, the one script both shell wirings
   (`plugin.json`, `hooks/hooks-codex.json`) spawn, injects the session
@@ -1542,17 +1549,17 @@ because the script that reads it is the same single copy on all four hosts.
 | `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard, the session title and the background reader relay unless `FND_PROMPT_JSON=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too (the four halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens). Auto = the Claude model family on Claude Code (200000 when the model is unrecognized) and the window the rollout states on Codex — where, if it states none, the monitor stays silent rather than guess |
-| `FND_MCP_SLIM` | `1` | `0` disables the MCP result **compression** (PostToolUse `mcp-slim` hook) — node never spawns. Where it does spawn anyway — a `0` set in the global `~/.config/domaine/env`, which the wiring's shell gate cannot see (this switch is global-only: a project `.claude/domaine.env` cannot set it at all) — the hook emits nothing but still runs its exit-time TTL sweep: hygiene is not compression, and nobody who silenced the compressor asked for a spill dir and a checkout that fill up. `FND_MCP_SLIM_TTL` is the switch that governs the sweep. **Host divergence:** Claude Code and OpenCode rewrite the result in place, so compression AND spill-and-stub both land. Cursor is observe-only: `afterMCPExecution` exposes no rewrite field, so nothing is compressed, stubbed or spilled there whatever this is set to — with the default the shim logs `skip`, and with `0` the wiring gate exits before node, so not even that line is written (see [Known gaps](#host-verification-status--cursor-codex-cli-and-opencode-are-unverified) and `docs/README.cursor.md`). On Codex both halves land through the one channel that host's `PostToolUse` can replace a result with: `hooks/codex-mcp-shim.cjs` returns the compressed body — or the stub — as a `block` `reason`, behind a header saying the call SUCCEEDED and must not be retried, since Codex frames a block to the model as `Script failed` / `Script error:`. That reason is capped (`BLOCK_REASON_BYTES` in the shim, 10000 — Codex truncates a longer hook output, measured at 2,500 host tokens of 4 bytes each), so a compressed body over the cap is spilled-and-stubbed instead (`block-cap`), and a result carrying a non-text block falls back to the old path: the stub rides as `additionalContext`, a compressed body is dropped (`docs/README.codex.md`) |
+| `FND_MCP_SLIM` | `1` | `0` disables the MCP result **compression** (PostToolUse `mcp-slim` hook) — node never spawns. Where it does spawn anyway — a `0` set in the global `~/.config/domaine/env`, which the wiring's shell gate cannot see (this switch is global-only: a project `.claude/domaine.env` cannot set it at all) — the hook emits nothing but still runs its exit-time TTL sweep: hygiene is not compression, and nobody who silenced the compressor asked for a spill dir and a checkout that fill up. `FND_MCP_SLIM_TTL` is the switch that governs the sweep. **Host divergence:** Claude Code and OpenCode rewrite the result in place, so compression AND spill-and-stub both land. Cursor is observe-only: `afterMCPExecution` exposes no rewrite field, so nothing is compressed, stubbed or spilled there whatever this is set to — with the default the shim logs `skip`, and with `0` the wiring gate exits before node, so not even that line is written (see [Known gaps](#host-verification-status--cursor-codex-cli-and-opencode-are-unverified) and `docs/README.cursor.md`). On Codex both halves land through the one channel that host's `PostToolUse` can replace a result with: `hooks/codex-mcp-shim.cjs` returns the compressed body — or the stub — as a `block` `reason`, behind a header saying the call SUCCEEDED and must not be retried, since Codex frames a block to the model as `Script failed` / `Script error:`. That reason is capped (`BLOCK_REASON_BYTES` in the shim, 10000 — Codex truncates a longer hook output, measured at 2,500 host tokens of 4 bytes each), so a compressed body over the cap is spilled-and-stubbed instead (`block-cap`), and a result carrying a non-text block falls back to the old path: the stub rides as `additionalContext`, a compressed body is dropped (`docs/README.codex.md`). **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s slimming: no over-limit expansion and no savings toast. The module reads only the session's environment (shell, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the `mcp-slim.cjs` the module spawns, which then emits nothing, so the host's notice stands and the effect is the same one spawn later. |
 | `FND_MCP_SLIM_DIR` | `os.tmpdir()` | directory where `json-slim` and the `mcp-slim` hook spill offloaded rows / the original result (the `full=<path>` handle) |
 | `FND_MCP_SLIM_TTL` | `24` | hours a file survives before the exit-time sweep prunes it (by mtime, so `full=` handles outlive same-day resume). Two directories ride this clock: the spill dir, and the bundled playwright server's project output dir `.claude/fnd-tmp/playwright` — pruned recursively, files only, with directories left standing since a live browser session may own one. The sweep runs even with `FND_MCP_SLIM=0` (that switch turns off compression, not hygiene). `0` disables both prunes — but not the `/.claude/fnd-tmp/` line in `.git/info/exclude`, which the scratch-path guard stamps itself on the first bundled screenshot it allows. Any invalid value falls back to `24` |
 | `FND_MCP_SLIM_DEBUG` | off | opt-in: append one JSONL trace line per `mcp-slim` / `json-slim` invocation to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log` (project, `lvl`, decision, reason, `format` on non-json, `narrowed` on a `--jq` CLI run, `guide` (`full`/`reminder`) on a JSONL profile, `budget_partial` on a mid-array wall-clock expiry, `delivery`/`delivered` + `host` on a host whose adapter decides what can be delivered (see below), bytes, %, stages, `spills` — never any payload); rotates one generation at ~5 MB. `1` (or `true`/`yes`/`on`) = **key events**: everything except the sub-gate `size-gate` lines for results under the 4 KB gate, which were ~76 % of a real week's log. `2` (any integer ≥ 2) = **everything**, sub-gate lines included. Unset / `0` / `false` / an unrecognized value ⇒ no file written. The level rides on each line as `lvl`, so `--report` can say which of its numbers cover a partial event set — a `1` window's totals % is not comparable with a `2` window's. **Host divergence:** where the host adapter decides delivery (Codex), the shrunk lines also carry what was DELIVERED — `delivery` (`replace` = the body or stub went back as the block reason, `discard` = the compressed body was dropped, `additional` = a stub rode back beside the raw result) plus `delivered`, the bytes of that stub — and `--report` credits a `replace` as the saving it is while counting the other two as 0 saved (and, for `additional`, as context ADDED), with a `delivery:` line naming the split whenever any event took a fallback |
 | `FND_MCP_SLIM_STUB` | `1` | `0` disables the spill-and-stub guard: a result the compressor cannot bring under the threshold is then handed to the model raw again, instead of as a ~1 KB stub + spill. **Host divergence:** on Codex the stub is also what an over-cap compressed body degrades to (the block reason cannot carry a longer one), so `0` costs more there: the whale lands raw AND that compression is dropped rather than stubbed, with nothing said about the spill holding either. On Cursor there is no stub at all: `afterMCPExecution` is observe-only, so neither half of `mcp-slim` lands and this switch changes nothing there |
-| `FND_MCP_SLIM_STUB_BYTES` | `32768` | bytes above which the `mcp-slim` hook spills-and-stubs instead of passing a whale through (also applies to a compressed body that is still this large); any invalid value falls back to `32768`, never to `0`, and any value below the stub's own ~1.2 KB is raised to it (a smaller gate could emit a stub bigger than the text it replaces) |
+| `FND_MCP_SLIM_STUB_BYTES` | `32768` | bytes above which the `mcp-slim` hook spills-and-stubs instead of passing a whale through (also applies to a compressed body that is still this large); any invalid value falls back to `32768`, never to `0`, and any value below the stub's own ~1.2 KB is raised to it (a smaller gate could emit a stub bigger than the text it replaces). The [hooks module](#mods-claude-code-function-hooks) reads it from the session's environment to tell the hook's own output from payload before it toasts a figure; a value set only in `~/.config/domaine/env` leaves the module at `32768`, which can cost a toast, never a result. |
 | `FND_MCP_SLIM_BUDGET_MS` | `5000` | wall-clock ceiling for one `mcp-slim` compression run (shared across every block of a result). An expiry hands the ORIGINAL back — per block, so a partly-slimmed content array is logged `compressed` + `budget_partial`, and a whole-result expiry `budget-exceeded` (stubbed above the stub threshold); `0` disables the ceiling; a negative value is a ceiling already expired when the run starts (every block hands its original back — the deterministic form of a tiny budget, for diagnostics); any invalid value falls back to `5000`, never to `0`. The default is ~22× a 1 MB-class payload on this pipeline and well inside Claude Code's PostToolUse timeout — headroom, not a guarantee: a genuinely huge result (tens of MB, or several fat blocks sharing the one deadline) can still reach it, and is then handed back uncompressed rather than half-compressed |
 | `FND_WHALE_GUIDE` | `1` | `0` (or `false`/`no`/`off`) disables the one-shot rule for `json-slim`'s whale-recovery guidance: the full block (readline filter template + `sed`/`grep` single-row hints) is then printed after every profile instead of only the FIRST profile of a given file per session. With the default, later profiles of the same file carry a one-line reminder that stays self-sufficient — the file, the row count, any fence offset, the `sed`/`grep` single-row forms and this switch — dropping only the readline template (the reader of a repeat may be a subagent, or a context that was compacted since). The suppression state is a dotfile per session × **resolved** file path under `FND_MCP_SLIM_DIR`, expires after 2 h, and is pruned by the same sweep as the spills (so `FND_MCP_SLIM_TTL=0`, which disables that sweep, leaves the small per-file **state files** in place); a new file path, a missing, unreadable or future-dated state file always yields the full block. The profile itself is never affected, and each profile's debug line records which variant it printed (`guide: full` / `reminder`) |
 | `FND_NOGAIN_MEMO` | `1` | `0` (or `false`/`no`/`off`) disables `json-slim`'s per-file no-gain memo. With the default, a **file** run that printed its body back unchanged (a deliberate decline, now also stated on stderr) is remembered — per session × **resolved** file path, for 2 h, invalidated as soon as the file's size or mtime change — and a repeat run on that file answers with a one-line refusal naming the recovery instead of re-printing the body; the field pattern it removes is "decline → immediate re-run", where a 0 % result reads as a failed attempt. Only declines of at least 4 KB are remembered (below that a refusal saves nothing). The state is dotfiles under `FND_MCP_SLIM_DIR`, swept with the spills (so `FND_MCP_SLIM_TTL=0` leaves them in place); a missing, unreadable, corrupt or future-dated state file always yields the normal run. The same switch also governs the second refusal, which needs no memo: `fnd-slim-out-*` files — `json-slim`'s own Gate-A output spills, already slimmed — are answered the same way (only below the 8 MB stream gate; past it the big-document guidance is the useful answer). Neither refusal ever applies to a run whose answer it cannot stand for: a narrowing `--jq <jq-path>` (the documented recovery after a decline) bypasses both. `--stats` does **not** — the reader recipes pass it on every run, so a bypass would disarm the memo for exactly those callers; a refusal answers it with the measurement instead, printing the body-free notice on stdout and `json-slim: <bytes> → <bytes> bytes (0.0% reduction) [declined earlier this session]` (or `[already json-slim output]`) on stderr. The stderr decline notice is NOT governed by this switch: it rides on every file run that printed the file's own bytes back unchanged. Both refusals log `already-slim-out` / `no-gain-memo` and are counted on `--report`'s `cli runs:` line |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor, the session title and the background reader relay unless `FND_CTX_MONITOR=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too — only with all four at `0` does no node process run at all. Those clauses are in the Claude Code and Codex wirings alike, because the two carry the same command verbatim; on Codex the title and reader-relay halves are inert (both gated on `FND_HOST=claude`), so a Codex user who wants the old two-switch economy sets `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` with the other two. Cursor's `beforeSubmitPrompt` runs its own shim, which has no title half, so there the two-switch short-circuit is unchanged. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere |
-| `FND_SCRATCH_GUARD` | `1` | `0` disables the screenshot scratch-path guard (PreToolUse `scratch-path-guard`) — node never spawns. With the default, a `take_screenshot` / `browser_take_screenshot` / `take_snapshot` / `get_network_request` / `browser_run_code_unsafe` whose path resolves **outside** the project (scratchpad, another checkout — the servers refuse those anyway; a chrome-devtools write under its OS temp dir passes, since that server accepts it), or a written file that resolves inside the project working tree and outside a **leading** `.claude/` segment, is **denied** with a reason naming the ABSOLUTE `<project>/.claude/tasks/<work-id>/tmp/<name>` (or `<project>/.claude/tmp/<name>` with no ticket) instead — absolute because a relative filename is resolved by the playwright server against its own output dir, not the project, so a relative remediation would land nested inside the litter dir it replaces. Which server it is decides the verdict: the **bundled** `playwright`, whose manifest pins `--output-dir .claude/fnd-tmp/playwright` (swept, git-excluded — and the guard stamps that exclude itself on the branches that allow, so the allow does not rest on a compressor switch), passes both a bare `filename` and no `filename` at all; every other spelling may be a default-configured server writing to `<cwd>/.playwright-mcp` inside the checkout, so its relative filename is denied and so is its no-`filename` call, which does not skip the write. That allow is bought with the sweep: a file in the bundled server's output dir **expires** on `FND_MCP_SLIM_TTL` (24 h), so anything meant to be kept — QA evidence, the screenshots a Steps to Test points at — still belongs in `<project>/.claude/tasks/<work-id>/tmp/`, which nothing prunes. The guard creates the two remediation destinations itself as it denies (nothing else does — chrome-devtools' write path makes no directory — so a compliant retry would fail with ENOENT). The project root is the session's project dir (`CLAUDE_PROJECT_DIR`, else the checkout the cwd's `.claude/` sits in); in a git worktree a path resolving into the symlinked `.claude/tasks` is denied, and the remediation is `<worktree>/.claude/tmp/<work-id>/<name>`. Anything under a leading `.claude/`, an inline chrome-devtools screenshot / snapshot / network body (no path, no file written) and `browser_run_code_unsafe` with inline `code` or an in-tree script all pass, and any internal error fails open; an in-project `tmp/` is denied like the rest of the tree, since a theme checkout neither ships nor gitignores one. **Host divergence:** wired on Claude Code, Codex and Cursor — the matcher is prefix-agnostic, since Codex names the same tools without the `plugin_fnd_` prefix and either host may have the servers installed per-user, and on Cursor the deny travels through `beforeMCPExecution` (a `permission: "deny"` response, `tool_input` decoded from a JSON string). That prefix-agnosticism has a cost on those two hosts: an unprefixed `browser_take_screenshot` is indistinguishable from a per-user server, so even the bundled one is judged conservatively there — relative filenames denied, absolute workspace paths expected. OpenCode's tool hook has no verified MCP payload shape, so there screenshots are unguarded whatever this is set to |
+| `FND_SCRATCH_GUARD` | `1` | `0` disables the screenshot scratch-path guard (PreToolUse `scratch-path-guard`) — node never spawns. With the default, a `take_screenshot` / `browser_take_screenshot` / `take_snapshot` / `get_network_request` / `browser_run_code_unsafe` whose path resolves **outside** the project (scratchpad, another checkout — the servers refuse those anyway; a chrome-devtools write under its OS temp dir passes, since that server accepts it), or a written file that resolves inside the project working tree and outside a **leading** `.claude/` segment, is **denied** with a reason naming the ABSOLUTE `<project>/.claude/tasks/<work-id>/tmp/<name>` (or `<project>/.claude/tmp/<name>` with no ticket) instead — absolute because a relative filename is resolved by the playwright server against its own output dir, not the project, so a relative remediation would land nested inside the litter dir it replaces. Which server it is decides the verdict: the **bundled** `playwright`, whose manifest pins `--output-dir .claude/fnd-tmp/playwright` (swept, git-excluded — and the guard stamps that exclude itself on the branches that allow, so the allow does not rest on a compressor switch), passes both a bare `filename` and no `filename` at all; every other spelling may be a default-configured server writing to `<cwd>/.playwright-mcp` inside the checkout, so its relative filename is denied and so is its no-`filename` call, which does not skip the write. That allow is bought with the sweep: a file in the bundled server's output dir **expires** on `FND_MCP_SLIM_TTL` (24 h), so anything meant to be kept — QA evidence, the screenshots a Steps to Test points at — still belongs in `<project>/.claude/tasks/<work-id>/tmp/`, which nothing prunes. The guard creates the two remediation destinations itself as it denies (nothing else does — chrome-devtools' write path makes no directory — so a compliant retry would fail with ENOENT). The project root is the session's project dir (`CLAUDE_PROJECT_DIR`, else the checkout the cwd's `.claude/` sits in); in a git worktree a path resolving into the symlinked `.claude/tasks` is denied, and the remediation is `<worktree>/.claude/tmp/<work-id>/<name>`. Anything under a leading `.claude/`, an inline chrome-devtools screenshot / snapshot / network body (no path, no file written) and `browser_run_code_unsafe` with inline `code` or an in-tree script all pass, and any internal error fails open; an in-project `tmp/` is denied like the rest of the tree, since a theme checkout neither ships nor gitignores one. **Host divergence:** wired on Claude Code, Codex and Cursor — the matcher is prefix-agnostic, since Codex names the same tools without the `plugin_fnd_` prefix and either host may have the servers installed per-user, and on Cursor the deny travels through `beforeMCPExecution` (a `permission: "deny"` response, `tool_input` decoded from a JSON string). That prefix-agnosticism has a cost on those two hosts: an unprefixed `browser_take_screenshot` is indistinguishable from a per-user server, so even the bundled one is judged conservatively there — relative filenames denied, absolute workspace paths expected. OpenCode's tool hook has no verified MCP payload shape, so there screenshots are unguarded whatever this is set to. **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s guard: no deny on the tool call and no path note in the five tools' descriptions. The module reads the session's environment (and, for the description note, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the spawned `scratch-path-guard.cjs` alone, which then allows, so nothing is denied, but the description note stays for that session. |
 | `FND_SESSION_TITLE` | `1` | `0` disables **both** session-title paths. Both halves read it the same way — process env first, then the GLOBAL Domaine env file (`~/.config/domaine/env`); it is deliberately not one of the project-file keys, so a client repo's `.claude/domaine.env` cannot rename the sessions of everyone who opens it. With the default, `hooks/session-start.sh` names the session after the ticket its BRANCH carries (`<KEY> — <summary>` when `.claude/tasks/<KEY>/ticket.md` holds one, `<KEY>` alone otherwise) and `hooks/session-title.cjs` names it after the **first** prompt of the session carrying a key it can CORROBORATE — a Jira `/browse/<KEY>` URL, or a `.claude/tasks/` workspace for the same project. Key shape alone is not evidence: `UTF-8`, `SHA-256`, `ISO-8601` and `AES-256` all match it, and titling a session after one of those would also spend the shot the real ticket needs. The title is one shot per session, held by a marker file in the temp dir beside the context monitor's band state, so a re-run or a later ticket never re-titles; the title itself is clamped to 100 bytes on a character boundary, which is what keeps it inside the SessionStart envelope's budget. A session the developer already named (`--name`, `/rename`) is left alone by BOTH halves: the SessionStart input carries that name, and seeing it spends the one shot, so the prompt half cannot overwrite it either. The prompt half is also one of the four halves the UserPromptSubmit wiring's short-circuit counts — node spawns unless this, `FND_CTX_MONITOR`, `FND_PROMPT_JSON` and `FND_READER_COMPRESSION` are ALL `0`. **Host divergence: Claude Code only.** `sessionTitle` is a Claude Code hook field; Codex, Cursor and OpenCode name sessions themselves and ignore it, so the prompt half is gated on `FND_HOST=claude` and the SessionStart half rides in the envelope that host alone receives. Verified on the Claude Code CLI; the desktop app's Code tab and Cowork are expected to honour it, unverified |
 | `FND_SPILL_ACCESS` | `1` | `0` disables the spill-access recorder (PreToolUse `spill-access.sh`) — the wiring pre-gates on it, so nothing is spawned, and the script re-checks it too. With the default it appends one `entry:"access"` line per DISTINCT spill path a Bash / Read / Grep call named that is a file on disk — PreToolUse fires after the spill was written, so a path that does not exist was only spelled — harvested from the first 16 KB of the unescaped tool_input slice (`fnd-mcp-slim-<hash>.json`, or any name under a `tool-results/` directory — the platform's overflow files are opaquely named, so the recorder matches the same family `mcp-slim.cjs`'s `OVERFLOW_PATH` writes; at most 8 paths per call) to `<FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log`, recording which reader got there — that is what lets `json-slim --report` stop calling a whale *missed* when the agent recovered it with `jq` instead of a `json-slim` run. It writes **only while `FND_MCP_SLIM_DEBUG` is on** (the log is a debug artefact), never blocks, prints nothing, and reads a run naming `json-slim.cjs` as no access at all (the CLI logs its own line). Being a PreToolUse hook it records the read that was *attempted*, and a command that only names a spill (`rm`, `ls`, `echo` …) is recorded as `via: named`, which `--report` does not count as a recovery. **Host divergence:** Claude Code matches `Bash|Read|Grep`; Codex adds its `shell` / `local_shell` spellings; Cursor covers the SHELL only, since it documents no read-file event; OpenCode covers `bash` plus its `read` / `grep` tools |
 | `FND_READER_COMPRESSION` | `1` | `0` disables the reader-compression relay, both halves: PostToolUse `reader-compression.cjs` (matcher `^(Agent|Task)$`, a foreground spawn's tool result — the wiring pre-gates on it, so node never spawns) and the `reader-notification` half of UserPromptSubmit `user-prompt.cjs` (a background spawn's `<task-notification>` prompt, the agent proven by the host's `agent-<id>.meta.json` beside the session transcript; counted in that wiring's four-switch short-circuit). With the default, a return from one of the three readers (`jira-reader`, `figma-reader`, `doc-reader`, with or without the `fnd:` prefix — **no other agent**, whatever its return quotes) is scanned for the contract's `compression:` field and the figure is put in front of the developer as `systemMessage` — one surface on every host (the CLI prints it inline, the desktop app under its collapsible hook notice), and the model is never asked to print or repeat it. It is the ONLY route out of a reader's own context: the skills no longer relay the field, so an ad-hoc reader spawn — a pasted ticket key, no skill — surfaces the figure too. A subagent return is data, and the ticket text it echoes is data quoted inside data, so the value is relayed only when it parses **end to end** as the printed line of a compressor this plugin ships — `fnd-mcp-slim: <decision> <n> B → <n> B (<pct>)`, json-slim's `<in> → <out> bytes (<pct>% reduction)` with its optional bracketed refusal tag, `figma-node-slim: … nodes= hidden= folded=` — `; `-joined, single-line and capped; a prefix followed by free text is not a figure and is dropped whole, and the field is read past any earlier `compression:` line the ticket body put above it. `none`, an absent field, a non-reader agent, a relay firing inside a subagent (no developer to reach) and an unparseable event all print nothing and exit 0, and so does any internal error — a relay may never delay or block a tool. **Host divergence:** Claude Code only — no other host spawns subagents through a tool whose PostToolUse this plugin sees, so nothing is wired there and this switch changes nothing |
@@ -1580,6 +1587,231 @@ because the script that reads it is the same single copy on all four hosts.
 | `CLAUDE_CODE_ENABLE_TODO_TOOLS` | unset (host default) | *read, not set by fnd*: Claude Code's own switch for the task-list tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`), which are **off by default** on Opus 5, Sonnet 5 and Fable and need **Claude Code 2.1.233+** (older CLIs read the key and expose nothing). `"1"` in the `"env"` block of `~/.claude/settings.json` turns them on for the CLI and the desktop app's Code tab alike ([the pasteable file](#recommended-claude-code-settings-copy-paste)). The plugin never sets it: the task-workspace convention mirrors `progress.md` into the tools when they exist and says nothing when they do not, and `preflight-checks` reports it as one advisory row. Not an FND switch — `domaine-env` will not write one |
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |
 | `CLAUDE_PLUGIN_ROOT` / `PLUGIN_ROOT` | set by the host | *read, not set by fnd*: where a hook **wiring** file finds the bundled scripts and session-convention markdown. Claude Code and Cursor set `CLAUDE_PLUGIN_ROOT`; Codex sets `PLUGIN_ROOT` plus `CLAUDE_PLUGIN_ROOT` as a compatibility alias, and `hooks/hooks-codex.json` prefers the alias with a fallback to `PLUGIN_ROOT`. Hook **scripts** never trust either one for guard logic — they resolve their own bundled paths from `__dirname` / their own `dirname`, because Cursor leaks the variable between concurrent plugins' hooks and Claude Code has a source-vs-cache inconsistency |
+
+## Mods (Claude Code function hooks)
+
+**Claude Code only.** Besides the classic command hooks above, fnd ships a **hooks module**:
+`plugins/fnd/hooks/hooks.json` names `hooks/mods/register.tsx`, which Claude Code loads into the
+session itself as function hooks. Function hooks can do what a command hook cannot. They draw
+UI above the prompt and in a side pane. They replace a tool result after the host has already
+cut it down to an overflow notice. They add a note to a tool's description before the model
+sees it. The module adds four things. The **status band** is one row above the prompt with the
+prompt-cache countdown, model, context use, every rate-limit window and the task digest. The
+**progress pane** shows the task workspace's checklist. The **scratch-path guard** answers on the
+tool call itself. **MCP slimming** also reaches results over the platform limit, which the
+classic `mcp-slim` hook never sees. Guard and slimming do not duplicate the Node hooks. They
+spawn the same `scratch-path-guard.cjs` and `mcp-slim.cjs`, so the D and M cases in
+`tests/hooks-sim.sh` keep testing the code that decides.
+
+Screenshots of the band and the pane on terminal and desktop (docs/img/mods-band.png,
+docs/img/mods-pane.png) are added after the live check.
+
+### Status band
+
+One row, most important first. 160 columns, context at 47 %, an account reporting three
+windows, a task workspace open:
+
+```text
+cache 42m │ claude-fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Progress ]
+```
+
+120 columns, same session. The row is 139 cells, so the digest goes first:
+
+```text
+cache 42m │ claude-fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ [ Compact ]  [ Progress ]
+```
+
+60 columns. The rate windows go next, the least full one first, then the model:
+
+```text
+cache 42m │ ctx 47% │ [ Compact ]  [ Progress ]
+```
+
+The full drop order is: the digest, then the rate windows beyond the fullest (least full first),
+then the last window, then the model, then the Progress button. Cache, ctx and Compact are never
+dropped. The row's text truncates as a backstop, so the band never takes a second row.
+
+| Segment | Shows | Rule |
+|---|---|---|
+| cache | `cache 42m`, `<1m`, `cache cold`, `cache —`, `cache ●` | Minutes left of the prompt cache: the last main-thread response plus the TTL. `●` while a turn runs; `—` before the first response and after `/clear` or resume; `cold` once the TTL has passed, after a compaction, or after a `/model` switch that forfeits the cache (another model, or the host reports it cold). A resumed session takes its state from the time since the last response. **It is an estimate.** The host reports no cache state, only the events it is derived from. |
+| model | `claude-fable-5-1` | The model id as the session reports it, dimmed |
+| ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session and after every compaction until the next response arrives. Mid-turn it refreshes on a 30 s tick. |
+| rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
+| digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the first unchecked row (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done. Hidden while the progress pane is open, and when no workspace resolves. |
+| Compact | `[ Compact ]`, `c: Compact` | Hidden at ≤ 30 % context and while a turn runs. From 31 % it is drawn dim; from 80 % it is `[ Compact ]` in the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). |
+| Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
+
+**Colors.** ctx and every rate window are plain up to 30 %, use the theme's `warning` color above
+30 % and the alarm look from 80 %. The cache is plain at 10 min or more, `warning` below 10 min and
+the alarm below 2 min (a 5 min TTL scales both: warning below 2 min, the alarm below 24 s). Only
+theme keys are used, so the band follows light, dark and high-contrast themes. The alarm look is
+`warning` + bold + inverse until a dedicated error key is proven to draw on every theme.
+
+**Desktop and hover.** In the desktop app's Code tab the labels become single glyphs
+(`⏱ 42m │ … │ 🧠 47% │ ⏳ 5h 61% · 7d 34% …`), and Compact / Progress are native buttons. When the
+pointer rests on the cache, ctx or a rate window, a one-line card appears. This is meant for desktop
+and for terminals that pass the pointer through (kitty, Ghostty, iTerm2, WezTerm; tmux passes
+none). The glyph labels, the native buttons and hover are still a live check (desktop and
+terminal paint). The cards read:
+`prompt cache: ~42 min left (estimate: last response + 1 h TTL)`,
+`context: 47% of 200,000 tokens, 94,000 used`, `5h window: 61% used, resets in 2h 05m`.
+
+**Toasts.** When a rate window first reaches 90 %, one toast shows that window's card for 8 s
+(`5h window: 91% used, resets in 1h 05m`). It re-arms once every window is back under the line, and
+after `/clear`. The slimming path below adds a savings toast. Toasts sit at the transcript's
+top-right in fullscreen, or on the notification line under the prompt otherwise. They never touch
+the transcript or what the model reads. They keep showing while the progress pane is open (it is
+not a dialog and does not hold toasts).
+
+**Hotkeys.** `c` and `p` work only while the band holds the keyboard: after **ctrl+x tab** or a
+click on the band. They never fire from the composer, so typing a `c` is just a `c`. The letters are
+drawn only then too (`c: Compact  p: Progress`): at rest the buttons read `[ Compact ]  [ Progress ]`,
+so the band never suggests a key the composer would swallow. The letters go away again on a press,
+when a turn starts and on `/clear` (there is no focus-out event, so Esc alone leaves them until the
+next of those). On a terminal
+the buttons are mainly clicked (pointer-capable terminals) or reached as ctrl+x tab then the
+letter, and Esc gives the keyboard back to the prompt. To focus the band with a single chord,
+rebind `abovePrompt:focus` (default ctrl+x tab) in `~/.claude/keybindings.json`, then press the
+letter. On
+desktop they are ordinary buttons. ctrl+x ctrl+a collapses the band; while it is collapsed the engine
+shows one dim line above the prompt, `plugin panel hidden · ctrl+x ctrl+a or click to show`, and that
+chord or a click on the line brings it back. The collapsed state is the engine's and persists across
+reloads; the plugin cannot and does not reopen the band by itself.
+
+### Progress pane
+
+`p: Progress`, or `/fnd-progress`, opens a pane with the resolved task workspace: docked beside the
+transcript in a wide fullscreen terminal, inline otherwise (the surface decides). Esc or a second
+press closes it.
+
+```text
+ELC-1591 · feature/ELC-1591-preview-themes · 3/5
+✓ Read the ticket
+✓ Plan approved
+✓ Header markup
+▶ Preview themes for QA review
+☐ Steps to Test
+- preview theme 141234567890 created for QA
+- decision: keep the old toggle behind a setting
+- open: confirm the empty-state copy with design
+```
+
+The header is the work id · branch · checked/total. Below it come every `progress.md` row (✓ done
+dimmed, ▶ the first unchecked one in bold, ☐ the rest) and the last three `- ` lines of
+`notes.md`, dimmed. With no workspace the pane is one line:
+`no task workspace — /fnd:save-task-context`.
+
+**Which workspace.** The first candidate that has a `.claude/tasks/<id>/progress.md` wins:
+1. an id pinned with `/fnd-progress <id>` (`/fnd-progress -` clears the pin);
+2. the ticket key in the branch name;
+3. the last ticket key you typed in a prompt that has a workspace (prompts only, not the model's
+   replies; notifications and scheduled prompts do not count);
+4. the branch slug;
+5. the newest `progress.md` changed in the last 12 h, which covers slug workspaces on `main`.
+
+The band and the pane redraw on a Write or Edit under `.claude/tasks/`. A 30 s tick also notices
+edits made from Bash (`sed`, a script). A `git checkout` / `switch` / `worktree` and a directory
+change re-resolve the id; `/clear` forgets the conversation key (a pin stays).
+
+### Scratch-path guard on the tool call
+
+The five tools the classic guard covers (`take_screenshot`, `browser_take_screenshot`,
+`take_snapshot`, `get_network_request`, `browser_run_code_unsafe`) get two things from the module:
+- **A description note.** The model reads where paths must go (`.claude/tasks/<work-id>/tmp/`,
+  `.claude/tmp/<work-id>/` in a worktree, or `.claude/tmp/`, absolute) before it picks one. The
+  note is a constant, so it never spends the prompt cache. Whether the note also reaches a
+  deferred tool loaded through ToolSearch is still a live check.
+- **A deny on the call.** The tool call is handed to `scratch-path-guard.cjs` with the same input
+  the classic wiring builds. Its deny becomes the call's answer, with the same remediation text.
+  This adds no new rule. The deny now lands above other plugins' PreToolUse hooks, and the classic
+  guard stays wired beneath as the backstop. The project root is latched at session start, as the
+  MCP servers' own roots are, so a later `/cd` does not move it.
+
+### MCP slimming on the tool call
+
+- **Results over the platform limit.** Claude Code cuts a result over `MAX_MCP_OUTPUT_TOKENS` down
+  to a notice naming a `tool-results/` file, and the classic PostToolUse hook only sees that
+  notice. The module hands the notice to `mcp-slim.cjs --overflow=expand`, which slims the file it
+  names. Payload text can forge a notice, so only this session's own host spill is accepted:
+  `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<dir>/<session id>/tool-results/mcp-<name>-<n>.txt`
+  after realpath. The model gets the
+  slimmed body with a `<<full=…>>` handle on that file. A refusal, a missing file or an error
+  leaves the host's notice as it was.
+- **Whale ceiling.** A whale that slims under `FND_MCP_SLIM_STUB_BYTES` (32 KB) arrives as content.
+  A bigger one still comes back as a stub naming the host file, with a `node json-slim` / `--jq`
+  recipe, or, when no stub can carry it, the host's notice stands. The 3.2 MB, 100-issue `*all` JQL slims to about 540 KB, so it stays a handback. It is a
+  slimmed one, though, and the model queries it instead of reading 3 MB in chunks. Raising the stub
+  bytes for this path is an open owner decision.
+- **Savings toast.** Every slimmed main-thread result toasts the same figure the classic notice
+  prints, e.g. `fnd-mcp-slim: compressed 118,203 B → 29,412 B (−75.1%)`, for 5 s. Results under the
+  limit are still slimmed in place by the classic hook, and the module only toasts the figure it
+  finds in the result.
+  A reader subagent's result is slimmed but never toasted, as with the classic notice. Until a
+  session marker lets the classic hook drop its own notice, a slimmed result can show the figure
+  twice: the notice line and the toast.
+- **Never twice.** `mcp-slim.cjs` passes its own output through untouched on every host (debug
+  reason `already-slim`), whatever order the module and the classic hook run in.
+- **Counted as recovered.** `json-slim --report` counts a whale the module expanded into a
+  compressed body as recovered (`whale recoveries via: … mod`), not missed. A stub handed back by
+  the module is recovered only when its recipe is run, as before.
+- **Subagent whales.** A whale inside a reader subagent is expanded only if the host spills it
+  under this session's own `tool-results/`, which is still a live check. When it is refused, the
+  host's notice stands and the whale convention routes it through json-slim as before.
+
+### How mods load
+
+- **Users:** install `fnd@domaine` as in [Install](#claude-code--from-the-published-git-marketplace-team-use).
+  The module loads in the terminal CLI and in the desktop app's Code tab. There is nothing to
+  configure and no env entry to add. `/plugin disable fnd@domaine` turns it off with the rest of
+  the plugin, and `statusBand` (below) hides only the band.
+- **Development only:** `claude --plugin-dir plugins/fnd` loads the checkout for one terminal
+  session, which watches it and reloads on save. A desktop session cannot take that flag. There,
+  `CLAUDE_CODE_PLUGIN_DIRS` (an absolute path) plus `CLAUDE_CODE_PLUGIN_DIR_WATCH=1`, both in the
+  `env` block of `~/.claude/settings.json`, load and watch a folder. That setting is user-global,
+  so it also loads into every terminal session, client projects included. Point it at a mod-only
+  sandbox copy, never at `plugins/fnd` beside the installed plugin (that loads every skill, MCP
+  server and classic hook twice), and **remove both entries after the sitting**. Delete any
+  sandbox copy before installing a release that carries the module, or you get two bands and
+  double hooks.
+- `claude plugin validate --strict plugins/fnd` and `claude plugin test plugins/fnd` (wrapped by
+  `tests/mods-sim.sh`) check the module without a session.
+
+### Mods settings (userConfig)
+
+Two fields in `plugin.json` → `userConfig`. The engine documents them as rows in `/config`; where
+they appear is still a live check. They are stored in
+`~/.claude/settings.json` → `pluginConfigs`, and a change reloads the module.
+
+| Field | Default | Effect |
+|---|---|---|
+| `statusBand` | `true` | `false` draws no band. The pane, `/fnd-progress`, the guard and slimming keep working. |
+| `cacheTtl` | `auto` | The prompt-cache TTL behind the countdown. `auto` learns it from the session: a `/model` switch reports it, and a subagent result with 1 h cache writes proves 1 h. It is remembered across sessions. Until then the estimate is 1 h when the account reports rate-limit windows (a claude.ai subscription) and 5 min otherwise (an API key; a subscription in overage also drops to 5 min, which the band cannot see). `5m` or `1h` forces it. |
+
+### Fallbacks and other hosts
+
+- A module hook that fails is skipped, and the session goes on as without it. A failure in one fnd
+  hook skips the module's other hooks on the same event (the guard re-latches its root on the
+  first tool call; `/fnd-progress` is re-registered on the next prompt). The classic hooks stay
+  wired underneath, so the guard and slimming lose nothing.
+- Where commands cannot be spawned (the module's process API is documented as CLI-only; desktop
+  is still a live check), the guard and slimming fall back to the classic hooks: the deny comes
+  from the PreToolUse guard, and an over-limit result keeps the host's notice for the whale
+  convention to route. The progress resolver then has no branch name and falls back to the
+  conversation key and the newest workspace.
+- Kill switches: `FND_SCRATCH_GUARD=0` and `FND_MCP_SLIM=0` turn off the module's guard and
+  slimming too. The module reads only the session's environment (the shell and `settings.json` →
+  `env`). A value set only in `~/.config/domaine/env` reaches just the spawned `.cjs`, which then
+  allows or emits nothing, so the effect is the same one spawn later. See the two rows in
+  [Environment switches](#environment-switches).
+- The context monitor (`FND_CTX_MONITOR`) still runs, so its warning and the band's ctx figure
+  both show. `FND_CTX_MONITOR=0` silences the monitor if the band is enough.
+- **Cursor, Codex CLI and OpenCode do not load the module.** Their manifests name their own hook
+  files (`hooks/hooks-cursor.json`, `hooks/hooks-codex.json`), and OpenCode loads only
+  `opencode/fnd-plugin.js`. Two shared changes reach them: `mcp-slim.cjs` passes its own output
+  through untouched, which `tests/hooks-codex-sim.sh`, `tests/hooks-cursor-sim.sh` and
+  `tests/opencode-plugin-sim.mjs` pin, and the whale convention (`hooks/mcp-whale.md`, read by
+  every host, Cursor through `rules/fnd-mcp-whale.mdc`) gained one sentence guarded "On Claude
+  Code" about over-limit results arriving already slimmed or stubbed.
 
 ## Lean-code convention
 

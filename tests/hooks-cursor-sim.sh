@@ -557,6 +557,23 @@ out="$(mrun "$in" FND_MCP_SLIM=0)"; EC=$?
 assert_eq M3-slim-off "$out" ""
 assert_eq M3-exit     "$EC" 0
 
+# M-idem: mcp-slim's own emission arriving a second time. The shim stays the silent observer it is
+# (no spawn, no spill), and the canonical script itself, run under this host's tag, passes it through
+# as `already-slim` — the one default change every host shares.
+MSI="$TMP/slim-idem"; mkdir -p "$MSI"
+ROWS="$(jq -nc '[range(300)|{id:.,label:("row "+(.|tostring)),avatarUrl:("https://cdn.example.com/"+("a"*80)),empty:null}]|tojson')"
+emitted="$(jq -n --argjson r "$ROWS" '{tool_name:"mcp__x__y",tool_response:{content:[{type:"text",text:$r}]}}' \
+  | env FND_MCP_SLIM_DIR="$MSI" "$NODE_BIN" "$PLUGIN/hooks/mcp-slim.cjs" 2>/dev/null | jq -c '.hookSpecificOutput.updatedToolOutput')"
+assert_contains M-idem-fixture "$emitted" "original_result>>"
+in="$(jq -n --argjson e "$emitted" '{tool_name:"getJiraIssue",mcp_server_name:"plugin-fnd-atlassian",result_json:($e|tojson)}')"
+before="$(ls "$MSD" | wc -l | tr -d ' ')"
+assert_eq M-idem-shim-silent   "$(mrun "$in")" ""
+assert_eq M-idem-shim-no-spill "$(ls "$MSD" | wc -l | tr -d ' ')" "$before"
+out="$(jq -n --argjson e "$emitted" '{tool_name:"mcp__x__y",tool_response:$e}' \
+  | env FND_HOST=cursor FND_MCP_SLIM_DIR="$MSI" FND_MCP_SLIM_DEBUG=1 "$NODE_BIN" "$PLUGIN/hooks/mcp-slim.cjs" 2>/dev/null)"
+assert_eq M-idem-passthrough "$out" ""
+assert_eq M-idem-reason "$(tail -1 "$MSI/fnd-mcp-slim-debug.log" 2>/dev/null | jq -r '.reason' 2>/dev/null)" "already-slim"
+
 # ═══ P — beforeMCPExecution (the screenshot scratch-path deny) ══════════════
 # This host documents a before-MCP event with a deny primitive (cursor.com/docs/agent/hooks), so
 # the screenshot guard reaches Cursor sessions too. Two payload divergences are pinned here:

@@ -2940,8 +2940,8 @@ function evalJqExpr(root, expr) {
 // are keyed by file path, not tool name — they get one aggregate line), per-project subtotals, the count
 // of DISTINCT spill files left on disk, and the MISSED-WHALE list — `platform-overflow` events (the hook's
 // tag for a result the platform spilled to a tool-results file before the hook could see it) that no later
-// `entry:"cli"` run AND no `entry:"access"` read (hooks/spill-access.sh) ever touched, i.e. the whale
-// nobody ever opened at all. Pure over an array of raw lines (`opts.file`/`bytes` only decorate the
+// `entry:"cli"` run, no `entry:"access"` read (hooks/spill-access.sh) and no `mod-expand` hook run ever
+// touched, i.e. the whale nobody ever opened at all. Pure over an array of raw lines (`opts.file`/`bytes` only decorate the
 // header), so tests feed a synthetic log and the CLI feeds a real one.
 const REPORT_TOP_TOOLS = 5;
 const REPORT_TOP_PROJECTS = 5;
@@ -3160,8 +3160,18 @@ function buildReport(lines, opts) {
     return found;
   };
   const unpaired = (e) => recoveries(e).length === 0;
+  // A whale the mod's tool.call hook slimmed out of its host file (mcp-slim `--overflow=expand`) was
+  // recovered before the model read the notice — only when it went out compressed: a `mod-expand` stub
+  // hands back the same file the notice named. Kept out of `runs`, so such a stub is not its own reader.
+  const modExpanded = new Map();
+  for (const e of comp) {
+    if (e.reason !== 'mod-expand' || !e.spill || e.decision !== 'compressed') continue;
+    const b = path.basename(String(e.spill));
+    modExpanded.set(b, (modExpanded.get(b) || []).concat(Date.parse(e.ts) || 0));
+  }
+  const byMod = (e) => !!e.spill && (modExpanded.get(path.basename(String(e.spill))) || []).some((at) => at >= (Date.parse(e.ts) || 0));
   const overflows = comp.filter((e) => e.reason === 'platform-overflow');
-  const missed = overflows.filter(unpaired);
+  const missed = overflows.filter((e) => unpaired(e) && !byMod(e));
   out.push(`  missed whales (platform-overflow never read by any tool): ${missed.length} of ${overflows.length}`);
   for (const e of missed.slice(0, REPORT_MISSED)) out.push(`    ${e.ts || '(no ts)'}  ${e.tool || '(unknown tool)'}  →  ${e.spill || '(no path)'}`);
   if (missed.length > REPORT_MISSED) out.push(`    …(+${missed.length - REPORT_MISSED} more)`);
@@ -3186,6 +3196,7 @@ function buildReport(lines, opts) {
   for (const e of overflows.concat(stubbed)) {
     for (const v of new Set(recoveries(e).map((c) => c.via))) bump(recoveryVias, v);
   }
+  for (const e of overflows) if (byMod(e)) bump(recoveryVias, 'mod');
   if (recoveryVias.size) out.push(`  whale recoveries via: ${fmtCounts(recoveryVias)}`);
   if (spills.events) {
     out.push(`  spill files: ${spills.paths.size} named by ${spills.events} event${spills.events === 1 ? '' : 's'}` +
