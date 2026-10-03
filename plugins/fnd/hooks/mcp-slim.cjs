@@ -32,6 +32,8 @@
 //         (payload text can forge a notice), the host file is the `full=` original (no re-spill), and
 //         the debug line says reason `mod-expand` with `spill` = that file. Any refusal, a missing
 //         file, the budget or a transform failure prints nothing, so the host's own notice stands.
+//   lib — required by prompt-json-guard.cjs --from-mod for statsLine, withStats, stubText, SLIM_CLI; as a
+//         module nothing reads stdin and the requirer's argv is read (FROM_MOD only labels trace()).
 //   in  — this hook's own emission fed back (its stub, or its stats line beside a `<<full=` handle)
 //         passes through as `already-slim` on every host, so no result is ever slimmed twice.
 //
@@ -1167,31 +1169,35 @@ function run(raw) {
   if (dbg) trace('compressed', hostFile ? 'mod-expand' : null, bytesIn, outBytes, slimmed.stages, fullPath, undefined, undefined, fnd);
 }
 
-// Collect the whole stdin as bytes, then decode once — decoding per Buffer chunk would
-// mangle any multibyte character split across a read boundary (U+FFFD corruption on the
-// large non-ASCII payloads this hook targets).
-const chunks = [];
-process.stdin.on('data', (d) => chunks.push(d));
-process.stdin.on('end', () => {
-  const ht0 = hostTrace.start();
-  try {
-    const raw = Buffer.concat(chunks).toString('utf8');
-    // With the compressor off the event is still parsed — for its cwd alone, so the sweep below can
-    // find the project's playwright output dir. Nothing is emitted on this path, as before.
-    if (slimOff) {
-      const ev = JSON.parse(raw);
-      eventCwd = typeof ev.cwd === 'string' && ev.cwd ? ev.cwd : null;
-      eventTool = typeof ev.tool_name === 'string' ? ev.tool_name : null;
-      hostDecision = 'skip';
-    } else run(raw);
-  } catch (_) {
-    // Any failure → emit nothing, original result passes through untouched.
-    hostDecision = 'error';
-  }
-  // Before the sweep, so `ms` measures the decision the model waited on rather than the hygiene
-  // that follows it — and after the result is out, like everything else down here.
-  hostTrace.trace({ event: FROM_MOD ? 'mod' : 'PostToolUse', hook: 'mcp-slim', decision: hostDecision, tool: eventTool, startedAt: ht0 });
-  // Spill hygiene runs AFTER the result is emitted (or passed through) so it never delays what
-  // the model sees; throttled and self-guarding, so it costs one stat on the hot path.
-  try { if (sweepDue()) jsonSlim().sweepSpills(undefined, eventCwd || process.cwd()); } catch (_) {}
-});
+module.exports = { statsLine, withStats, stubText, SLIM_CLI };
+
+if (require.main === module) {
+  // Collect the whole stdin as bytes, then decode once — decoding per Buffer chunk would
+  // mangle any multibyte character split across a read boundary (U+FFFD corruption on the
+  // large non-ASCII payloads this hook targets).
+  const chunks = [];
+  process.stdin.on('data', (d) => chunks.push(d));
+  process.stdin.on('end', () => {
+    const ht0 = hostTrace.start();
+    try {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      // With the compressor off the event is still parsed — for its cwd alone, so the sweep below can
+      // find the project's playwright output dir. Nothing is emitted on this path, as before.
+      if (slimOff) {
+        const ev = JSON.parse(raw);
+        eventCwd = typeof ev.cwd === 'string' && ev.cwd ? ev.cwd : null;
+        eventTool = typeof ev.tool_name === 'string' ? ev.tool_name : null;
+        hostDecision = 'skip';
+      } else run(raw);
+    } catch (_) {
+      // Any failure → emit nothing, original result passes through untouched.
+      hostDecision = 'error';
+    }
+    // Before the sweep, so `ms` measures the decision the model waited on rather than the hygiene
+    // that follows it — and after the result is out, like everything else down here.
+    hostTrace.trace({ event: FROM_MOD ? 'mod' : 'PostToolUse', hook: 'mcp-slim', decision: hostDecision, tool: eventTool, startedAt: ht0 });
+    // Spill hygiene runs AFTER the result is emitted (or passed through) so it never delays what
+    // the model sees; throttled and self-guarding, so it costs one stat on the hot path.
+    try { if (sweepDue()) jsonSlim().sweepSpills(undefined, eventCwd || process.cwd()); } catch (_) {}
+  });
+}

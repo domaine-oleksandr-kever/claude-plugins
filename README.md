@@ -38,7 +38,7 @@ in its own subfolder under `plugins/`:
 │       │   ├── doc-reader.md        #  reads one linked doc (Notion/Confluence/web) → extract
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
 │       ├── hooks/                # injected conventions + git guards + context monitor
-│       │   ├── mods/             #  Claude Code hooks module: status band, progress pane, guard, slim
+│       │   ├── mods/             #  Claude Code hooks module: status band, progress pane, guard, slim, pasted JSON
 │       │   ├── comment-discipline.md
 │       │   ├── lean-code.md      #  "lazy senior dev" ladder (FND_LEAN=0 to disable)
 │       │   ├── session-start.sh         # SessionStart composer both shell wirings spawn
@@ -1246,7 +1246,10 @@ the guard and compressor on the tool call itself): [Mods](#mods-claude-code-func
   blob is spilled to a file (the active task workspace `tmp/`, else a private temp file),
   and the developer is shown that path to resubmit against — so the JSON is read with
   jq/Read on demand instead of sitting in context every turn. `FND_PROMPT_JSON=0` disables
-  it. `session-title.cjs` names the session after the ticket, **once**: the first prompt of the
+  it. On Claude Code the hooks module rewrites the prompt in place instead of blocking it (see
+  [Pasted JSON on the prompt](#pasted-json-on-the-prompt)); the block remains the fallback, and it is
+  the behaviour on Codex and Cursor (OpenCode rewrites with a handle, see `FND_PROMPT_JSON`).
+  `session-title.cjs` names the session after the ticket, **once**: the first prompt of the
   session carrying a **corroborated** key sets `sessionTitle` to `<KEY> — <summary>` (from
   `.claude/tasks/<KEY>/ticket.md`) or to `<KEY>`, and a per-session marker file keeps a re-run,
   or any later prompt, from re-titling. Corroborated = the key arrived as a Jira `/browse/<KEY>`
@@ -1558,7 +1561,7 @@ because the script that reads it is the same single copy on all four hosts.
 | `FND_MCP_SLIM_BUDGET_MS` | `5000` | wall-clock ceiling for one `mcp-slim` compression run (shared across every block of a result). An expiry hands the ORIGINAL back — per block, so a partly-slimmed content array is logged `compressed` + `budget_partial`, and a whole-result expiry `budget-exceeded` (stubbed above the stub threshold); `0` disables the ceiling; a negative value is a ceiling already expired when the run starts (every block hands its original back — the deterministic form of a tiny budget, for diagnostics); any invalid value falls back to `5000`, never to `0`. The default is ~22× a 1 MB-class payload on this pipeline and well inside Claude Code's PostToolUse timeout — headroom, not a guarantee: a genuinely huge result (tens of MB, or several fat blocks sharing the one deadline) can still reach it, and is then handed back uncompressed rather than half-compressed |
 | `FND_WHALE_GUIDE` | `1` | `0` (or `false`/`no`/`off`) disables the one-shot rule for `json-slim`'s whale-recovery guidance: the full block (readline filter template + `sed`/`grep` single-row hints) is then printed after every profile instead of only the FIRST profile of a given file per session. With the default, later profiles of the same file carry a one-line reminder that stays self-sufficient — the file, the row count, any fence offset, the `sed`/`grep` single-row forms and this switch — dropping only the readline template (the reader of a repeat may be a subagent, or a context that was compacted since). The suppression state is a dotfile per session × **resolved** file path under `FND_MCP_SLIM_DIR`, expires after 2 h, and is pruned by the same sweep as the spills (so `FND_MCP_SLIM_TTL=0`, which disables that sweep, leaves the small per-file **state files** in place); a new file path, a missing, unreadable or future-dated state file always yields the full block. The profile itself is never affected, and each profile's debug line records which variant it printed (`guide: full` / `reminder`) |
 | `FND_NOGAIN_MEMO` | `1` | `0` (or `false`/`no`/`off`) disables `json-slim`'s per-file no-gain memo. With the default, a **file** run that printed its body back unchanged (a deliberate decline, now also stated on stderr) is remembered — per session × **resolved** file path, for 2 h, invalidated as soon as the file's size or mtime change — and a repeat run on that file answers with a one-line refusal naming the recovery instead of re-printing the body; the field pattern it removes is "decline → immediate re-run", where a 0 % result reads as a failed attempt. Only declines of at least 4 KB are remembered (below that a refusal saves nothing). The state is dotfiles under `FND_MCP_SLIM_DIR`, swept with the spills (so `FND_MCP_SLIM_TTL=0` leaves them in place); a missing, unreadable, corrupt or future-dated state file always yields the normal run. The same switch also governs the second refusal, which needs no memo: `fnd-slim-out-*` files — `json-slim`'s own Gate-A output spills, already slimmed — are answered the same way (only below the 8 MB stream gate; past it the big-document guidance is the useful answer). Neither refusal ever applies to a run whose answer it cannot stand for: a narrowing `--jq <jq-path>` (the documented recovery after a decline) bypasses both. `--stats` does **not** — the reader recipes pass it on every run, so a bypass would disarm the memo for exactly those callers; a refusal answers it with the measurement instead, printing the body-free notice on stdout and `json-slim: <bytes> → <bytes> bytes (0.0% reduction) [declined earlier this session]` (or `[already json-slim output]`) on stderr. The stderr decline notice is NOT governed by this switch: it rides on every file run that printed the file's own bytes back unchanged. Both refusals log `already-slim-out` / `no-gain-memo` and are counted on `--report`'s `cli runs:` line |
-| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor, the session title and the background reader relay unless `FND_CTX_MONITOR=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too — only with all four at `0` does no node process run at all. Those clauses are in the Claude Code and Codex wirings alike, because the two carry the same command verbatim; on Codex the title and reader-relay halves are inert (both gated on `FND_HOST=claude`), so a Codex user who wants the old two-switch economy sets `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` with the other two. Cursor's `beforeSubmitPrompt` runs its own shim, which has no title half, so there the two-switch short-circuit is unchanged. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere |
+| `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor, the session title and the background reader relay unless `FND_CTX_MONITOR=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too — only with all four at `0` does no node process run at all. Those clauses are in the Claude Code and Codex wirings alike, because the two carry the same command verbatim; on Codex the title and reader-relay halves are inert (both gated on `FND_HOST=claude`), so a Codex user who wants the old two-switch economy sets `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` with the other two. Cursor's `beforeSubmitPrompt` runs its own shim, which has no title half, so there the two-switch short-circuit is unchanged. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere. **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s rewrite. The module reads only the session's environment (shell, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the `prompt-json-guard.cjs --from-mod` the module spawns, which then prints nothing, so the effect is the same one spawn later. On desktop the module's process API is documented as CLI-only, so the classic block is expected to apply (a live check). |
 | `FND_BAND_COST` | off | `1` (or `true`/`yes`/`on`) adds the session-cost segment to the status band (`cost $12.40`, `💰 $12.40` on the desktop): the `/cost` total at API prices, a measure of work on a subscription. Read once at session start through the hooks module's `$.env`, so set it where Claude Code's own environment is built — the `env` block of `~/.claude/settings.json` reaches the terminal and the desktop app alike. **Host divergence: Claude Code only** (the band is a mod). |
 | `FND_SCRATCH_GUARD` | `1` | `0` disables the screenshot scratch-path guard (PreToolUse `scratch-path-guard`) — node never spawns. With the default, a `take_screenshot` / `browser_take_screenshot` / `take_snapshot` / `get_network_request` / `browser_run_code_unsafe` whose path resolves **outside** the project (scratchpad, another checkout — the servers refuse those anyway; a chrome-devtools write under its OS temp dir passes, since that server accepts it), or a written file that resolves inside the project working tree and outside a **leading** `.claude/` segment, is **denied** with a reason naming the ABSOLUTE `<project>/.claude/tasks/<work-id>/tmp/<name>` (or `<project>/.claude/tmp/<name>` with no ticket) instead — absolute because a relative filename is resolved by the playwright server against its own output dir, not the project, so a relative remediation would land nested inside the litter dir it replaces. Which server it is decides the verdict: the **bundled** `playwright`, whose manifest pins `--output-dir .claude/fnd-tmp/playwright` (swept, git-excluded — and the guard stamps that exclude itself on the branches that allow, so the allow does not rest on a compressor switch), passes both a bare `filename` and no `filename` at all; every other spelling may be a default-configured server writing to `<cwd>/.playwright-mcp` inside the checkout, so its relative filename is denied and so is its no-`filename` call, which does not skip the write. That allow is bought with the sweep: a file in the bundled server's output dir **expires** on `FND_MCP_SLIM_TTL` (24 h), so anything meant to be kept — QA evidence, the screenshots a Steps to Test points at — still belongs in `<project>/.claude/tasks/<work-id>/tmp/`, which nothing prunes. The guard creates the two remediation destinations itself as it denies (nothing else does — chrome-devtools' write path makes no directory — so a compliant retry would fail with ENOENT). The project root is the session's project dir (`CLAUDE_PROJECT_DIR`, else the checkout the cwd's `.claude/` sits in); in a git worktree a path resolving into the symlinked `.claude/tasks` is denied, and the remediation is `<worktree>/.claude/tmp/<work-id>/<name>`. Anything under a leading `.claude/`, an inline chrome-devtools screenshot / snapshot / network body (no path, no file written) and `browser_run_code_unsafe` with inline `code` or an in-tree script all pass, and any internal error fails open; an in-project `tmp/` is denied like the rest of the tree, since a theme checkout neither ships nor gitignores one. **Host divergence:** wired on Claude Code, Codex and Cursor — the matcher is prefix-agnostic, since Codex names the same tools without the `plugin_fnd_` prefix and either host may have the servers installed per-user, and on Cursor the deny travels through `beforeMCPExecution` (a `permission: "deny"` response, `tool_input` decoded from a JSON string). That prefix-agnosticism has a cost on those two hosts: an unprefixed `browser_take_screenshot` is indistinguishable from a per-user server, so even the bundled one is judged conservatively there — relative filenames denied, absolute workspace paths expected. OpenCode's tool hook has no verified MCP payload shape, so there screenshots are unguarded whatever this is set to. **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s guard: no deny on the tool call and no path note in the five tools' descriptions. The module reads the session's environment (and, for the description note, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the spawned `scratch-path-guard.cjs` alone, which then allows, so nothing is denied, but the description note stays for that session. |
 | `FND_SESSION_TITLE` | `1` | `0` disables **both** session-title paths. Both halves read it the same way — process env first, then the GLOBAL Domaine env file (`~/.config/domaine/env`); it is deliberately not one of the project-file keys, so a client repo's `.claude/domaine.env` cannot rename the sessions of everyone who opens it. With the default, `hooks/session-start.sh` names the session after the ticket its BRANCH carries (`<KEY> — <summary>` when `.claude/tasks/<KEY>/ticket.md` holds one, `<KEY>` alone otherwise) and `hooks/session-title.cjs` names it after the **first** prompt of the session carrying a key it can CORROBORATE — a Jira `/browse/<KEY>` URL, or a `.claude/tasks/` workspace for the same project. Key shape alone is not evidence: `UTF-8`, `SHA-256`, `ISO-8601` and `AES-256` all match it, and titling a session after one of those would also spend the shot the real ticket needs. The title is one shot per session, held by a marker file in the temp dir beside the context monitor's band state, so a re-run or a later ticket never re-titles; the title itself is clamped to 100 bytes on a character boundary, which is what keeps it inside the SessionStart envelope's budget. A session the developer already named (`--name`, `/rename`) is left alone by BOTH halves: the SessionStart input carries that name, and seeing it spends the one shot, so the prompt half cannot overwrite it either. The prompt half is also one of the four halves the UserPromptSubmit wiring's short-circuit counts — node spawns unless this, `FND_CTX_MONITOR`, `FND_PROMPT_JSON` and `FND_READER_COMPRESSION` are ALL `0`. **Host divergence: Claude Code only.** `sessionTitle` is a Claude Code hook field; Codex, Cursor and OpenCode name sessions themselves and ignore it, so the prompt half is gated on `FND_HOST=claude` and the SessionStart half rides in the envelope that host alone receives. Verified on the Claude Code CLI; the desktop app's Code tab and Cowork are expected to honour it, unverified |
@@ -1593,16 +1596,19 @@ because the script that reads it is the same single copy on all four hosts.
 
 **Claude Code only.** Besides the classic command hooks above, fnd ships a **hooks module**:
 `plugins/fnd/hooks/hooks.json` names `hooks/mods/register.tsx`, which Claude Code loads into the
-session itself as function hooks. Function hooks can do what a command hook cannot. They draw
-UI above the prompt and in a side pane. They replace a tool result after the host has already
-cut it down to an overflow notice. They add a note to a tool's description before the model
-sees it. The module adds four things. The **status band** is one row above the prompt with the
-prompt-cache countdown, model, context use, every rate-limit window, the session's cost and the task digest. The
-**progress pane** shows the task workspace's checklist. The **scratch-path guard** answers on the
-tool call itself. **MCP slimming** also reaches results over the platform limit, which the
-classic `mcp-slim` hook never sees. Guard and slimming do not duplicate the Node hooks. They
-spawn the same `scratch-path-guard.cjs` and `mcp-slim.cjs`, so the D and M cases in
-`tests/hooks-sim.sh` keep testing the code that decides.
+session itself as function hooks. Function hooks can do what a command hook cannot. They draw UI
+above the prompt and in a side pane. They replace a tool result after the host has already cut it
+down to an overflow notice. They add a note to a tool's description before the model sees it. They
+rewrite a prompt before the model reads it. The module adds five things. The **status band** is
+one row above the prompt with the prompt-cache countdown, model, context use, every rate-limit
+window, the session's cost and the task digest. The **progress pane** shows the task workspace's
+checklist. The **scratch-path guard** answers on the tool call itself. **MCP slimming** also
+reaches results over the platform limit, which the classic `mcp-slim` hook never sees. **Pasted
+JSON** over the classic guard's gate is replaced in place by its compressed body or a stub, so the
+prompt goes through in one submission instead of being blocked. Guard, slimming and pasted JSON do
+not duplicate the Node hooks. They spawn the same `scratch-path-guard.cjs`, `mcp-slim.cjs` and
+`prompt-json-guard.cjs`, so the D, M and P cases in `tests/hooks-sim.sh` keep testing the code
+that decides.
 
 Screenshots of the band and the pane on terminal and desktop (docs/img/mods-band.png,
 docs/img/mods-pane.png) are added after the live check.
@@ -1768,6 +1774,31 @@ The five tools the classic guard covers (`take_screenshot`, `browser_take_screen
   under this session's own `tool-results/`, which is still a live check. When it is refused, the
   host's notice stands and the whale convention routes it through json-slim as before.
 
+### Pasted JSON on the prompt
+
+A prompt the classic `prompt-json-guard.cjs` would block (over ~10 KB, carrying a parseable JSON
+blob over ~8 KB) is handed to `prompt-json-guard.cjs --from-mod` instead. The script saves every
+blob to a file first and replaces each one in place by `mcp-slim.cjs`'s compressed body with a
+`<<full=…>>` handle on that file, or by its stub when compression does not pay off (no gain, a
+body still 8 KB or more, or the prompt's 32 KB replacement budget spent). The model gets the rewritten prompt plus one context line naming the files and the
+`json-slim.cjs --jq` recipe to narrow them, and a toast shows the figure, e.g.
+`fnd-prompt-slim: 48,210 B → 2,104 B (−95.6%)`, for 5 s. One submission, nothing is blocked.
+- **The row shows the rewrite.** The transcript row holds the rewritten text, not the paste. The
+  original lives only in the saved files.
+- **The saved files are durable.** They go to the task workspace `tmp/` when there is exactly one
+  work-id, else to the project's `.claude/fnd-tmp/prompt-json/` (git-excluded through
+  `.git/info/exclude`), never to system temp. Nothing sweeps them, so a handle survives a resume
+  days later. Delete them by hand.
+- **What it leaves alone.** Prompts with no JSON blob over the gate (prose, HTML, logs) pass as
+  typed. Slash commands, `!` commands and prompts that do not come from a person (peer messages,
+  task notifications, plugin prompts) are not rewritten, so a big JSON paste in them meets the
+  classic block as before.
+- **On failure the classic block applies.** If the rewrite cannot be built (a failed save, a
+  timeout, a too-large prompt), the prompt goes down unchanged and the classic guard blocks it as
+  before. The classic guard always runs beneath the rewrite and passes it (a live check).
+- **Desktop.** The module's process API is documented as CLI-only, so in the desktop app's Code
+  tab the classic block is expected to apply; this is still a live check.
+
 ### How mods load
 
 - **Users:** install `fnd@domaine` as in [Install](#claude-code--from-the-published-git-marketplace-team-use).
@@ -1794,7 +1825,7 @@ they appear is still a live check. They are stored in
 
 | Field | Default | Effect |
 |---|---|---|
-| `statusBand` | `true` | `false` draws no band. The pane, `/fnd-progress`, the guard and slimming keep working. |
+| `statusBand` | `true` | `false` draws no band. The pane, `/fnd-progress`, the guard, slimming and the pasted-JSON rewrite keep working. |
 | `cacheTtl` | `auto` | The prompt-cache TTL behind the countdown. `auto` learns it from the session: a `/model` switch reports it, and a subagent result with 1 h cache writes proves 1 h. It is remembered across sessions. Until then the estimate is 1 h on a claude.ai account and 5 min when the session bills an API key or a cloud provider (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` present in the session's environment; only their presence is read). Rate-limit windows arriving also mean a subscription, so they set 1 h too. A subscription in overage drops to 5 min, which the band cannot see; the cache segment is hidden while a window is at 100 %. `5m` or `1h` forces it. |
 
 ### Fallbacks and other hosts
@@ -1802,26 +1833,31 @@ they appear is still a live check. They are stored in
 - A module hook that fails is skipped, and the session goes on as without it. A failure in one fnd
   hook skips the module's other hooks on the same event (the guard re-latches its root on the
   first tool call; `/fnd-progress` is re-registered on the next prompt). The classic hooks stay
-  wired underneath, so the guard and slimming lose nothing.
+  wired underneath, so the guard and slimming lose nothing; a pasted-JSON prompt meets the classic
+  block instead of the rewrite.
 - Where commands cannot be spawned (the module's process API is documented as CLI-only; desktop
   is still a live check), the guard and slimming fall back to the classic hooks: the deny comes
-  from the PreToolUse guard, and an over-limit result keeps the host's notice for the whale
-  convention to route. The progress resolver then has no branch name and falls back to the
-  conversation key and the newest workspace.
-- Kill switches: `FND_SCRATCH_GUARD=0` and `FND_MCP_SLIM=0` turn off the module's guard and
-  slimming too. The module reads only the session's environment (the shell and `settings.json` →
-  `env`). A value set only in `~/.config/domaine/env` reaches just the spawned `.cjs`, which then
-  allows or emits nothing, so the effect is the same one spawn later. See the two rows in
+  from the PreToolUse guard, an over-limit result keeps the host's notice for the whale convention
+  to route, and a big JSON paste is blocked by `prompt-json-guard.cjs` as before. The progress
+  resolver then has no branch name and falls back to the conversation key and the newest workspace.
+- Kill switches: `FND_SCRATCH_GUARD=0`, `FND_MCP_SLIM=0` and `FND_PROMPT_JSON=0` turn off the
+  module's guard, slimming and pasted-JSON rewrite too. The module reads only the session's
+  environment (the shell and `settings.json` → `env`). A value set only in `~/.config/domaine/env` reaches just the spawned `.cjs`, which then
+  allows or emits nothing, so the effect is the same one spawn later. See the three rows in
   [Environment switches](#environment-switches).
 - The context monitor (`FND_CTX_MONITOR`) still runs, so its warning and the band's ctx figure
   both show. `FND_CTX_MONITOR=0` silences the monitor if the band is enough.
 - **Cursor, Codex CLI and OpenCode do not load the module.** Their manifests name their own hook
   files (`hooks/hooks-cursor.json`, `hooks/hooks-codex.json`), and OpenCode loads only
-  `opencode/fnd-plugin.js`. Two shared changes reach them: `mcp-slim.cjs` passes its own output
-  through untouched, which `tests/hooks-codex-sim.sh`, `tests/hooks-cursor-sim.sh` and
-  `tests/opencode-plugin-sim.mjs` pin, and the whale convention (`hooks/mcp-whale.md`, read by
-  every host, Cursor through `rules/fnd-mcp-whale.mdc`) gained one sentence guarded "On Claude
-  Code" about over-limit results arriving already slimmed or stubbed.
+  `opencode/fnd-plugin.js`. Three shared changes reach them: `mcp-slim.cjs` passes its own output
+  through untouched and is also loadable as a module without reading stdin, tracing or sweeping
+  (`tests/hooks-codex-sim.sh`, `tests/hooks-cursor-sim.sh` and `tests/opencode-plugin-sim.mjs` pin
+  the passthrough and that their spawn is unchanged, `tests/hooks-sim.sh` M-req the module load);
+  the whale convention (`hooks/mcp-whale.md`, read by every host, Cursor through
+  `rules/fnd-mcp-whale.mdc`) gained one sentence guarded "On Claude Code" about over-limit results
+  arriving already slimmed or stubbed; and the untrusted-content convention names the prompt
+  spills (task workspace `tmp/`, `.claude/fnd-tmp/prompt-json/`) as real handles, which
+  OpenCode's own `<<fnd-prompt-json full=…>>` rewrite (`opencode/fnd-plugin.js`) also produces.
 
 ## Lean-code convention
 

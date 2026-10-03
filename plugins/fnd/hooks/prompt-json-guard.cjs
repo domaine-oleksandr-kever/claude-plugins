@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // UserPromptSubmit hook: keep a large pasted JSON blob out of the conversation forever.
-// A prompt cannot be REWRITTEN by a hook, but UserPromptSubmit CAN block it — so when a
+// A UserPromptSubmit hook cannot REWRITE a prompt, but it CAN block it — so when a
 // prompt is big AND carries parseable JSON blob(s) past the gate, we spill EACH to a file
 // and BLOCK the prompt with a reason naming the path(s). The developer resubmits their
 // question referencing the file(s); the model reads them with jq/Read instead of carrying
@@ -24,9 +24,13 @@
 // Runs inside hooks/user-prompt.cjs (the one node process the UserPromptSubmit event pays for),
 // which calls promptJsonDecision() and prints what it returns; invoked directly, this file does
 // the same for one event on stdin.
+//   arg — `--from-mod`, passed only by hooks/mods/fnd/prompt-slim.ts: the same spills, kept durable
+//         (never system temp), each blob replaced in place by mcp-slim's compressed body or stub;
+//         out = `{text, context, summary}` or nothing.
 //
 // Env: FND_PROMPT_JSON — 0 disables the guard (checked by that entry point AND here; node still
-// spawns for the context monitor unless it is off too).
+// spawns for the context monitor unless it is off too); the hooks module checks it too before
+// spawning `--from-mod`.
 'use strict';
 
 const fs = require('fs');
@@ -34,8 +38,12 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-const PROMPT_MIN = 10240; // only inspect prompts larger than ~10 KB
-const BLOB_MIN = 8192; //    only offload a JSON blob larger than ~8 KB
+const PROMPT_MIN = 10240;   // only inspect prompts larger than ~10 KB
+const BLOB_MIN = 8192;      // only offload a JSON blob larger than ~8 KB
+const SLIM_MS = 8000;       // inside the mod's 20 s spawn timeout; an expiry stubs, it never fails the rewrite
+const REWRITE_MAX = 32768;  // mcp-slim's stub threshold: once compressed replacements total this much, the rest are stubbed
+const OUT_MAX = 4194304;    // the engine's stdout cap for a spawn; the mod drops a longer answer as truncated
+const CONTEXT_MAX = 100000; // the mod drops a longer context line (prompt-slim.ts CONTEXT_MAX)
 
 // EVERY JSON object/array embedded in `text` that clears BLOB_MIN, in order and non-overlapping.
 // A block erases the WHOLE prompt, so we must save every offloadable blob, not just the biggest —
@@ -123,11 +131,24 @@ function writeBlobFile(dir, name, blob) {
   return retry;
 }
 
+// A linked worktree is deleted with its ignored files on removal, so durable spills go to its main checkout.
+function durableRoot(cwd) {
+  try {
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(path.join(cwd, '.git'), 'utf8'));
+    const wt = path.resolve(cwd, m[1]);
+    const dotGit = path.dirname(path.dirname(wt));
+    if (path.basename(path.dirname(wt)) === 'worktrees' && path.basename(dotGit) === '.git') return path.dirname(dotGit);
+  } catch (_) {} // `.git` is a directory, absent, or not a worktree's pointer
+  return cwd;
+}
+
 // Spill the blob so the developer can re-reference it. Prefer the active task workspace
 // (`.claude/tasks/<work-id>/tmp/`) when exactly one work-id dir exists — co-located with the
-// task, durable across sessions — else fall back to a private tmp file. Returns the path,
-// or null on any failure (caller must NOT block without a saved file).
-function spillBlob(blob, cwd) {
+// task, durable across sessions — else fall back to a private tmp file, or, when `durable`, to
+// the project's `.claude/fnd-tmp/prompt-json/` (never system temp: --from-mod's rewrite consumes
+// the paste, so its spill must never land where the TTL sweep reaches). Returns the path, or null
+// on any failure (caller must NOT block without a saved file).
+function spillBlob(blob, cwd, durable) {
   const name = `fnd-prompt-json-${crypto.randomUUID()}.json`;
   try {
     // `.claude/fnd` is the workspace's pre-rename home — honored until the repo migrates.
@@ -148,16 +169,33 @@ function spillBlob(blob, cwd) {
       try { require('../scripts/scratch-hygiene.cjs').ensureFndTmpExcluded(cwd, rel); } catch (_) {}
       return p;
     }
-  } catch (_) {} // no workspace, ambiguous, or unwritable → fall through to tmpdir
+  } catch (_) {} // no workspace, ambiguous, or unwritable → fall through to the fallback dir
   try {
+    if (durable) {
+      const root = durableRoot(cwd);
+      // A committed symlink among these would carry the paste into a tracked dir the stamp does not cover.
+      let dir = root;
+      for (const part of ['.claude', 'fnd-tmp', 'prompt-json']) {
+        dir = path.join(dir, part);
+        let st = null;
+        try { st = fs.lstatSync(dir); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+        if (st && !st.isDirectory()) return null;
+      }
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const p = writeBlobFile(dir, name, blob);
+      try { require('../scripts/scratch-hygiene.cjs').ensureFndTmpExcluded(root); } catch (_) {}
+      return p;
+    }
     return writeBlobFile(os.tmpdir(), name, blob);
   } catch (_) {
     return null;
   }
 }
 
-// The block decision for one UserPromptSubmit event, or null when the prompt proceeds untouched.
-function promptJsonDecision(input) {
+const unlinkAll = (paths) => { for (const p of paths) try { fs.unlinkSync(p); } catch (_) {} };
+
+// Every ≥ gate blob of the prompt, each spilled; null when the prompt passes untouched or any spill failed.
+function spillAll(input, durable) {
   if (process.env.FND_PROMPT_JSON === '0') return null; // belt-and-suspenders vs the entry-point gate
   const prompt = input.prompt;
   if (typeof prompt !== 'string' || Buffer.byteLength(prompt, 'utf8') < PROMPT_MIN) return null;
@@ -165,15 +203,22 @@ function promptJsonDecision(input) {
   const blobs = collectJsonBlobs(prompt);
   if (!blobs.length) return null;
 
-  // The block erases the whole prompt, so spill EVERY offloadable blob first — if any
-  // spill fails, don't block (never lose a paste): pass through instead.
+  // Every blob is saved before anything is decided; one failed save → null, never lose a paste.
   const cwd = input.cwd || process.cwd();
   const paths = [];
   for (const b of blobs) {
-    const p = spillBlob(b.blob, cwd);
-    if (!p) return null;
+    const p = spillBlob(b.blob, cwd, durable);
+    if (!p) { unlinkAll(paths); return null; }
     paths.push(p);
   }
+  return { prompt, blobs, paths };
+}
+
+// The block decision for one UserPromptSubmit event, or null when the prompt proceeds untouched.
+function promptJsonDecision(input) {
+  const s = spillAll(input, false);
+  if (!s) return null;
+  const { blobs, paths } = s;
 
   const kb = Math.round(blobs.reduce((n, b) => n + b.bytes, 0) / 1024);
   const single = paths.length === 1;
@@ -185,6 +230,67 @@ function promptJsonDecision(input) {
     `it'll be read with jq/Read instead of carrying ~${kb} KB of JSON in context every turn.\n\n` +
     `(To send JSON inline instead, set FND_PROMPT_JSON=0.)`;
   return { decision: 'block', reason };
+}
+
+// --from-mod: the same spills, each blob replaced in place by mcp-slim's compressed body or stub instead of blocking.
+function promptJsonRewrite(input) {
+  const s = spillAll(input, true);
+  if (!s) return null;
+  const created = [];
+  const abort = () => { unlinkAll(s.paths); unlinkAll(created); return null; };
+  try {
+    const js = require('../scripts/json-slim.cjs');
+    const ms = require('./mcp-slim.cjs');
+    const { prompt, blobs, paths } = s;
+    const deadline = Date.now() + SLIM_MS;
+    let out = '';
+    let at = 0;
+    let inB = 0;
+    let outB = 0;
+    for (let i = 0; i < blobs.length; i++) {
+      const b = blobs[i];
+      const p = paths[i];
+      const mine = [];
+      let r = null;
+      // Past the cap no body can be used, and the `no-gain` stub's narrowing `--jq` line is the right recipe.
+      if (outB < REWRITE_MAX) try { r = js.slim(b.blob, { deadline, spillSink: [], spillCreatedSink: mine }); } catch (_) {}
+      const fits = r && !r.error && r.wasModified && r.bytesOut < r.bytesIn && r.bytesOut < BLOB_MIN;
+      let built = fits
+        ? ms.withStats((st) => `${r.output}${st ? `\n\n${st}` : ''}\n\n<<full=${p} original_result>>`, 'compressed', b.bytes)
+        : null;
+      // A compressed block that does not shrink the blob (the stats line and handle cost ~200 B) is stubbed instead.
+      if (!built || built.bytes >= b.bytes) {
+        unlinkAll(mine);
+        mine.length = 0;
+        const h = js.shapeHint(b.blob);
+        // Only weak-gain and budget-exceeded keep the plain CLI line; every other reason gets the narrowing `--jq` one.
+        const why = r && r.wasModified ? 'weak-gain' : r && r.reason === 'budget-exceeded' ? 'budget-exceeded' : 'no-gain';
+        built = ms.withStats((st) => ms.stubText('pasted JSON', b.bytes, h.format, h.hint, p, why, false, st), 'stub', b.bytes);
+      }
+      created.push(...mine);
+      if (!built || built.bytes >= b.bytes) return abort();
+      out += prompt.slice(at, b.start) + built.value;
+      at = b.start + b.blob.length;
+      inB += b.bytes;
+      outB += built.bytes;
+    }
+    out += prompt.slice(at);
+    // The classic guard beneath sees this text; it must pass there, which also makes a re-run a no-op.
+    if (Buffer.byteLength(out, 'utf8') >= PROMPT_MIN && collectJsonBlobs(out).length) return abort();
+
+    const context =
+      `fnd prompt-slim: the developer's prompt carried ${blobs.length} pasted JSON blob${blobs.length === 1 ? '' : 's'} ` +
+      `(${inB.toLocaleString('en-US')} B); each was saved to a file and replaced in place by its ` +
+      `compressed body or a stub — ${paths.map((x) => `full=${x}`).join(', ')}. These files are the paste: narrow with ` +
+      `node ${ms.SLIM_CLI} <file> --jq '<jq-path>' (${js.JQ_GRAMMAR_HINT}) or grep; never raw-Read them.`;
+    const summary = ms.statsLine('compressed', inB, outB).replace(/^fnd-mcp-slim: \S+ /, 'fnd-prompt-slim: ');
+    const res = { text: out, context, summary };
+    // An answer the mod would drop leaves spills that nothing references.
+    if (context.length > CONTEXT_MAX || Buffer.byteLength(JSON.stringify(res), 'utf8') > OUT_MAX) return abort();
+    return res;
+  } catch (_) {
+    return abort();
+  }
 }
 
 module.exports = { promptJsonDecision };
@@ -199,8 +305,9 @@ if (require.main === module) {
   process.stdin.on('data', (d) => chunks.push(d));
   process.stdin.on('end', () => {
     try {
-      const decision = promptJsonDecision(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-      if (decision) process.stdout.write(JSON.stringify(decision));
+      const run = process.argv.includes('--from-mod') ? promptJsonRewrite : promptJsonDecision;
+      const out = run(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      if (out) process.stdout.write(JSON.stringify(out));
     } catch (_) {
       // Any failure → emit nothing, the prompt proceeds untouched.
     }

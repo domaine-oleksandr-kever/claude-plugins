@@ -61,7 +61,8 @@
 #             tool-results file slimmed in place, that file as `full=`, forged / missing / over-budget
 #             → silent, the default unchanged without the flag), M-report its `mod-expand` debug line
 #             and `--report` pairing, M-idem1–2 this hook's own emission passing through `already-slim`
-#             while a quoted or forged mark is still slimmed
+#             while a quoted or forged mark is still slimmed; M-req mcp-slim required as a module
+#             (prompt-json-guard `--from-mod`): no stdin read, no sweep, no trace
 #   P cases — hooks/prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact and 0600 (never through a planted symlink, P17),
 #             below-gate / no-json / small prompts
@@ -78,7 +79,13 @@
 #             one — while prose with no JSON at all still passes; P29–P31 what is stepped
 #             over instead of mined into a fragment (a ≥ gate span that closes but is not
 #             JSON, a truncated paste) plus the scan budget: all three pass through and
-#             write nothing
+#             write nothing; P32 a later blob that cannot be saved unlinks the earlier spills;
+#             PM cases — `--from-mod`: the same spills, kept durable (task workspace, else
+#             `.claude/fnd-tmp/prompt-json/` — the main checkout's for a linked worktree — never
+#             system temp, never through a planted dir symlink); each blob is replaced in place by
+#             mcp-slim's compressed body (< 8 KB, total capped) or its stub; the rewrite is re-checked
+#             against the classic predicate; any failure, or an answer the mod would drop, prints
+#             nothing and leaves no file (spill or crush)
 #   U cases — hooks/user-prompt.cjs, the merged UserPromptSubmit entry point: a guard
 #             block is the whole output and stops the monitor dead (no band state
 #             recorded for a prompt that never ran), each half rides its own switch,
@@ -2896,6 +2903,18 @@ out="$(run_stub "$MXI" "$forged")"
 assert_contains M-idem2-forged-mark-stubbed "$out" "updatedToolOutput"
 if [ "$(printf '%s' "$out" | wc -c)" -lt 5000 ]; then ok; else bad M-idem2-forged-mark-small "a forged stub mark carried the whale through"; fi
 
+# M-req: required as a module (prompt-json-guard --from-mod), the hook reads no stdin, sweeps nothing
+# and traces nothing — while its exports are the four the rewrite uses
+MRQ="$TMP/m-req"; mkdir -p "$MRQ"
+out="$(FND_HOST_TRACE=1 FND_MCP_SLIM_DIR="$MRQ" node -e "require('$SLIM')" </dev/null 2>&1)"; ec=$?
+assert_eq M-req-silent "$out" ""
+assert_eq M-req-exit "$ec" 0
+assert_eq M-req-no-trace "$([ -e "$MRQ/fnd-host-trace.log" ] && echo yes || echo no)" no
+assert_eq M-req-no-sweep "$([ -e "$MRQ/.fnd-mcp-slim-sweep" ] && echo yes || echo no)" no
+assert_eq M-req-exports "$(FND_MCP_SLIM_DIR="$MRQ" node -e "
+  const m=require('$SLIM');
+  console.log([typeof m.statsLine,typeof m.withStats,typeof m.stubText,/\/scripts\/json-slim\.cjs$/.test(m.SLIM_CLI)].join(' '))" </dev/null 2>&1)" "function function function true"
+
 # ═══ R — PostToolUse reader-compression (the reader relay) ══════════════════
 # The readers measure their own compression and return it as one field; only the skill that spawned
 # them ever said it out loud, so an ad-hoc reader spawn surfaced nothing. This hook is the route out
@@ -3467,6 +3486,355 @@ in="$(node -e '
 ' "$PJ31")"
 assert_eq P31-budget-passthrough "$(run_guard "$in" TMPDIR="$PJ31")" ""
 assert_eq P31-no-file "$(ls -1 "$PJ31" | wc -l | tr -d ' ')" 0
+
+# P32: two blobs, the second cannot be saved → pass through, and the first spill is not left behind
+PJ32="$TMP/pj-partial"; mkdir -p "$PJ32"
+FAIL2="$TMP/fail-second-spill.cjs"
+cat > "$FAIL2" <<'FAILJS'
+const fs = require('fs');
+const write = fs.writeFileSync;
+let n = 0;
+fs.writeFileSync = function (p, d, o) {
+  if (/fnd-prompt-json-[^/]*\.json$/.test(String(p)) && o && o.flag === 'wx' && ++n === 2) {
+    const e = new Error('EIO: injected'); e.code = 'EIO'; throw e;
+  }
+  return write.apply(this, arguments);
+};
+FAILJS
+in="$(node -e '
+  const b=(t)=>JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:t.repeat(40)}))});
+  process.stdout.write(JSON.stringify({prompt:"one "+b("a")+" two "+b("b"),cwd:process.argv[1]}));
+' "$PJ32")"
+assert_eq P32-partial-passthrough "$(run_guard "$in" TMPDIR="$PJ32" NODE_OPTIONS="--require $FAIL2")" ""
+assert_eq P32-no-file "$(ls -1 "$PJ32" | wc -l | tr -d ' ')" 0
+
+# ═══ PM — prompt-json-guard `--from-mod` (the hooks module's in-place rewrite) ═══
+# The same spills, durable (task workspace, else <cwd>/.claude/fnd-tmp/prompt-json/), each blob
+# replaced by mcp-slim's compressed body or stub; stdout `{text, context, summary}` or nothing.
+# $PMD is the TMPDIR of every run here: a `--from-mod` spill must never land in it.
+PMD="$TMP/pm-tmpdir"; mkdir -p "$PMD"
+JS="$ROOT/plugins/fnd/scripts/json-slim.cjs"
+run_mod() { printf '%s' "$1" | env TMPDIR="$PMD" "${@:2}" node "$GUARD" --from-mod 2>/dev/null; }
+ctx_paths() { jq -r '.context' 2>/dev/null | grep -oE '/[^ ]*fnd-prompt-json-[0-9a-f-]+\.json'; }
+pm_cwd() { local d="$TMP/pm-$1"; rm -rf "$d"; mkdir -p "$d"; printf '%s' "$d"; }
+pm_count() { find "$1" -name "$2" -type f 2>/dev/null | wc -l | tr -d ' '; }
+# Fixture builder: `pm_in <case> <cwd> <outdir>` prints the event and writes each blob to
+# <outdir>/blob<N>.json; a case whose fixture depends on json-slim's verdict checks it and exits 3.
+PMB="$TMP/pm-build.cjs"
+cat > "$PMB" <<'PMJS'
+const fs = require('fs');
+const [, , kase, cwd, out, js] = process.argv;
+const slim = (b, made = []) => require(js).slim(b, { spillDir: out, spillSink: [], spillCreatedSink: made });
+const need = (ok, why) => { if (!ok) { process.stderr.write(`precondition: ${why}\n`); process.exit(3); } };
+const rows = (n, tag = 'x') => JSON.stringify({ items: Array.from({ length: n }, (_, i) => ({ id: i, pad: tag.repeat(40) })) });
+const flat = (n, k = 'k', v = 'v') => { const o = {}; for (let i = 0; i < n; i++) o[k + i] = v.repeat(10) + i; return o; };
+let blobs; let prompt;
+switch (kase) {
+  case 'compress': blobs = [rows(400)]; prompt = 'z'.repeat(5000) + '\n' + blobs[0]; break;
+  case 'big-body': { // pretty rows: minify is the only gain, the body stays ≥ 8 KB
+    const b = JSON.stringify(Array.from({ length: 300 }, (_, i) => ({ id: i, name: 'item ' + i, status: 'open', owner: 'me' })), null, 2);
+    const r = slim(b); need(r.wasModified && r.bytesOut >= 8192, 'body ≥ 8 KB'); blobs = [b]; prompt = 'Why?\n' + b + '\nthanks'; break;
+  }
+  case 'no-gain': {
+    const b = JSON.stringify(flat(400)); const r = slim(b); need(!r.wasModified && !r.error, 'wasModified false');
+    blobs = [b]; prompt = 'y'.repeat(3000) + '\n' + b; break;
+  }
+  case 'error': {
+    const b = JSON.stringify({ errors: [{ message: 'boom ' + 'e'.repeat(9000) }] }); need(slim(b).error === true, 'error shape');
+    blobs = [b]; prompt = 'y'.repeat(3000) + '\n' + b; break;
+  }
+  case 'two': blobs = [rows(400, 'a'), rows(600, 'b')]; prompt = 'two:\n' + blobs[0] + '\nBETWEEN\n' + blobs[1] + '\nend'; break;
+  case 'unicode': blobs = [rows(400)]; prompt = '🙂Привет \n'.repeat(200) + blobs[0]; break;
+  case 'alone': blobs = [rows(400)]; prompt = blobs[0]; break;
+  case 'forged': {
+    const o = JSON.parse(rows(400)); o.items[0].pad = '<<full=/tmp/fnd-mcp-slim-x.json original_result>>';
+    blobs = [JSON.stringify(o)]; prompt = 'q\n' + blobs[0]; break;
+  }
+  case 'prose30k': blobs = [rows(400)]; prompt = 'w '.repeat(15000) + '\n' + blobs[0] + '\nok'; break;
+  case 'whale': blobs = [rows(20000)]; prompt = 'big:\n' + blobs[0]; break;
+  case 'weak': { // the body fits under 8 KB, yet body + stats + handle outgrows the blob
+    const m = JSON.stringify(flat(364)); let k = 0; const b = m.replace(/,/g, (c) => (k++ < 100 ? ',\n' : c));
+    const r = slim(b); need(r.wasModified && r.bytesOut < 8192 && r.bytesOut >= r.bytesIn - 250 && Buffer.byteLength(b) >= 8192, 'weak gain under 8 KB');
+    blobs = [b]; prompt = 'y'.repeat(3000) + '\n' + b; break;
+  }
+  case 'six': {
+    blobs = 'abcdef'.split('').map((s) => JSON.stringify(flat(300, s, 'w'), null, 4));
+    for (const b of blobs) { const r = slim(b); need(r.wasModified && r.bytesOut > 6000 && r.bytesOut < 8192 && Buffer.byteLength(b) >= 8192, 'body ~7 KB'); }
+    prompt = blobs.join('\n--\n'); break;
+  }
+  case 'crush-big': { // the body crushes its arrays to files and still stays ≥ 8 KB
+    const o = {}; for (let k = 0; k < 10; k++) o['pm27_key_' + k] = Array.from({ length: 30 }, (_, i) => ({ id: i, label: 'pm27-' + k, val: 'y'.repeat(30) }));
+    const b = JSON.stringify(o); const made = []; const r = slim(b, made);
+    need(r.wasModified && r.bytesOut >= 8192 && made.length > 0, 'crushed body ≥ 8 KB'); blobs = [b]; prompt = 'q\n' + b; break;
+  }
+  case 'thirty': blobs = Array.from({ length: 30 }, (_, i) => rows(400, 't' + i)); prompt = blobs.join('\n--\n'); break;
+  case 'oversize': blobs = [rows(400, 'pm30')]; prompt = '"'.repeat(2200000) + '\n' + blobs[0]; break;
+  case 'small': blobs = [rows(100)]; need(blobs[0].length < 8192, 'blob under 8 KB'); prompt = 'z'.repeat(12000 - blobs[0].length) + '\n' + blobs[0]; break;
+  default: process.exit(2);
+}
+blobs.forEach((b, i) => fs.writeFileSync(`${out}/blob${i + 1}.json`, b));
+process.stdout.write(JSON.stringify({ prompt, cwd }));
+PMJS
+pm_in() { node "$PMB" "$1" "$2" "$3" "$JS"; }
+# `node -e` over the rewrite: prints `ok` or what failed.
+pm_js() { printf '%s' "$1" | node -e "$2" "${@:3}" 2>&1; }
+
+# PM1: compressible rows, no workspace, a git repo → compressed body + handle; spill durable, 0600,
+# git-excluded, byte-identical; nothing in the TMPDIR; context names the file and the --jq recipe
+C1="$(pm_cwd 1)"; git -C "$C1" init -q 2>/dev/null
+in1="$(pm_in compress "$C1" "$TMP")"; cp "$TMP/blob1.json" "$TMP/pm1-blob.json"
+out1="$(run_mod "$in1")"
+p1="$(printf '%s' "$out1" | ctx_paths)"
+case "$p1" in "$C1/.claude/fnd-tmp/prompt-json/fnd-prompt-json-"*) ok ;; *) bad PM1-durable-dir "spill not under .claude/fnd-tmp/prompt-json (p='$p1')" ;; esac
+if [ -n "$p1" ] && cmp -s "$p1" "$TMP/pm1-blob.json"; then ok; else bad PM1-byteexact "spill != blob (p='$p1')"; fi
+if [ -n "$p1" ] && [ "$(ls -l "$p1" | cut -c1-10)" = "-rw-------" ]; then ok; else bad PM1-mode-0600 "spill not 0600"; fi
+assert_contains PM1-excluded "$(cat "$C1/.git/info/exclude" 2>/dev/null)" "/.claude/fnd-tmp/"
+assert_eq PM1-status-clean "$(git -C "$C1" status --porcelain 2>/dev/null)" ""
+assert_eq PM1-no-tmpdir-spill "$(pm_count "$PMD" 'fnd-prompt-json-*')" 0
+assert_eq PM1-shape "$(pm_js "$out1" '
+  let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s),t=o.text,fs=require("fs");
+  const blob=fs.readFileSync(process.argv[1],"utf8"),p=process.argv[2];
+  const pre="z".repeat(5000)+"\n";const i=t.indexOf("\n\nfnd-mcp-slim: compressed ");
+  const bad=[];if(!t.startsWith(pre))bad.push("prefix");if(t.includes(blob))bad.push("blob kept");
+  if(i<0)bad.push("no stats line");else if(Buffer.byteLength(t.slice(pre.length,i))>=8192)bad.push("body>=8K");
+  if(!t.endsWith(`\n\n<<full=${p} original_result>>`))bad.push("handle");
+  console.log(bad.length?bad.join(","):"ok")})' "$TMP/pm1-blob.json" "$p1")" ok
+ctx1="$(printf '%s' "$out1" | jq -r '.context' 2>/dev/null)"
+assert_contains PM1-ctx-path "$ctx1" "full=$p1"
+assert_contains PM1-ctx-cli  "$ctx1" "node $JS <file> --jq '<jq-path>'"
+assert_absent   PM1-ctx-no-sweep "$ctx1" "swept"
+if printf '%s' "$out1" | jq -r '.summary' 2>/dev/null | grep -qE '^fnd-prompt-slim: [0-9,]+ B → [0-9,]+ B \(−[0-9]+\.[0-9]%\)$'; then ok
+else bad PM1-summary "summary shape: $(printf '%s' "$out1" | jq -r '.summary' 2>/dev/null)"; fi
+
+# PM2: the classic guard beneath sees the rewrite and lets it through
+t1="$(printf '%s' "$out1" | jq -r '.text')"
+assert_eq PM2-classic-passes "$(run_guard "$(jq -n --arg p "$t1" --arg c "$C1" '{prompt:$p,cwd:$c}')")" ""
+# PM3: --from-mod over its own rewrite is a no-op
+n1="$(pm_count "$C1/.claude/fnd-tmp/prompt-json" '*')"
+assert_eq PM3-idempotent "$(run_mod "$(jq -n --arg p "$t1" --arg c "$C1" '{prompt:$p,cwd:$c}')")" ""
+assert_eq PM3-no-new-spill "$(pm_count "$C1/.claude/fnd-tmp/prompt-json" '*')" "$n1"
+
+# PM4: one task workspace → its tmp/, stamped the same way a classic workspace spill is
+C4="$(pm_cwd 4)"; mkdir -p "$C4/.claude/tasks/ELC-1"; git -C "$C4" init -q 2>/dev/null
+p4="$(run_mod "$(pm_in compress "$C4" "$TMP")" | ctx_paths)"
+case "$p4" in "$C4/.claude/tasks/ELC-1/tmp/fnd-prompt-json-"*) ok ;; *) bad PM4-workspace "spill not in workspace tmp (p='$p4')" ;; esac
+if [ -n "$p4" ] && [ "$(ls -l "$p4" | cut -c1-10)" = "-rw-------" ]; then ok; else bad PM4-mode-0600 "spill not 0600"; fi
+if git -C "$C4" check-ignore -q .claude/tasks; then ok; else bad PM4-excluded "workspace not git-excluded"; fi
+assert_eq PM4-status-clean "$(git -C "$C4" status --porcelain 2>/dev/null)" ""
+
+# PM5: a body still ≥ 8 KB after slimming → the stub, and the discarded body leaves no crush file
+C5="$(pm_cwd 5)"; in5="$(pm_in big-body "$C5" "$TMP")"
+if [ -n "$in5" ]; then
+  crush0="$(pm_count "$PMD" 'fnd-crush-*')"
+  out5="$(run_mod "$in5")"; t5="$(printf '%s' "$out5" | jq -r '.text')"; p5="$(printf '%s' "$out5" | ctx_paths)"
+  assert_contains PM5-stub "$t5" "<<fnd-mcp-slim stub>>"
+  assert_contains PM5-full "$t5" "full=$p5"
+  assert_absent   PM5-no-handle "$t5" "<<full="
+  assert_eq PM5-classic-passes "$(run_guard "$(jq -n --arg p "$t5" --arg c "$C5" '{prompt:$p,cwd:$c}')")" ""
+  assert_eq PM5-no-crush-left "$(pm_count "$PMD" 'fnd-crush-*')" "$crush0"
+else bad PM5-precondition "fixture body not ≥ 8 KB"; fi
+
+# PM6: a payload the compressor declines → the stub names the narrowing --jq recipe, ≤ 1200 B
+C6="$(pm_cwd 6)"; in6="$(pm_in no-gain "$C6" "$TMP")"
+if [ -n "$in6" ]; then
+  t6="$(run_mod "$in6" | jq -r '.text')"
+  assert_contains PM6-jq "$t6" "--jq '<jq-path>'"
+  assert_contains PM6-stats "$t6" "fnd-mcp-slim: stub "
+  stub6="${t6#"$(printf 'y%.0s' $(seq 1 3000))"}"
+  if [ "$(printf '%s' "$stub6" | wc -c | tr -d ' ')" -le 1201 ]; then ok; else bad PM6-stub-cap "stub $(printf '%s' "$stub6" | wc -c) B"; fi
+else bad PM6-precondition "fixture compressed"; fi
+
+# PM7: an error envelope gets the stub with the --jq line, never the plain whole-file CLI line
+C7="$(pm_cwd 7)"; in7="$(pm_in error "$C7" "$TMP")"
+if [ -n "$in7" ]; then
+  out7="$(run_mod "$in7")"; t7="$(printf '%s' "$out7" | jq -r '.text')"; p7="$(printf '%s' "$out7" | ctx_paths)"
+  assert_contains PM7-jq "$t7" "--jq '<jq-path>'"
+  if printf '%s\n' "$t7" | grep -qxF "  node $JS $p7"; then bad PM7-no-plain-cli "plain CLI line present"; else ok; fi
+  assert_eq PM7-classic-passes "$(run_guard "$(jq -n --arg p "$t7" --arg c "$C7" '{prompt:$p,cwd:$c}')")" ""
+else bad PM7-precondition "fixture not an error shape"; fi
+
+# PM8: two blobs → two distinct spills, each its own blob, handles in prompt order around the prose
+C8="$(pm_cwd 8)"; mkdir -p "$C8/b"; out8="$(run_mod "$(pm_in two "$C8" "$C8/b")")"
+ps8="$(printf '%s' "$out8" | ctx_paths)"
+assert_eq PM8-two-paths "$(printf '%s\n' "$ps8" | sort -u | grep -c .)" 2
+pa8="$(printf '%s\n' "$ps8" | sed -n 1p)"; pb8="$(printf '%s\n' "$ps8" | sed -n 2p)"
+if cmp -s "$pa8" "$C8/b/blob1.json" && cmp -s "$pb8" "$C8/b/blob2.json"; then ok; else bad PM8-byteexact "spills != blobs"; fi
+assert_eq PM8-order "$(pm_js "$out8" '
+  let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const t=JSON.parse(s).text;
+  const a=t.indexOf(`<<full=${process.argv[1]} `),m=t.indexOf("\nBETWEEN\n"),b=t.indexOf(`<<full=${process.argv[2]} `);
+  console.log(a>=0&&a<m&&m<b?"ok":`a=${a} m=${m} b=${b}`)})' "$pa8" "$pb8")" ok
+
+# PM9: multibyte prose ahead of the blob is kept verbatim (UTF-16 slicing), the spill round-trips
+C9="$(pm_cwd 9)"; mkdir -p "$C9/b"; out9="$(run_mod "$(pm_in unicode "$C9" "$C9/b")")"
+assert_eq PM9-prefix "$(pm_js "$out9" '
+  let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const t=JSON.parse(s).text;
+  console.log(t.startsWith("🙂Привет \n".repeat(200))&&!t.includes("�")?"ok":"mangled")})')" ok
+if cmp -s "$(printf '%s' "$out9" | ctx_paths)" "$C9/b/blob1.json"; then ok; else bad PM9-byteexact "spill != blob"; fi
+
+# PM10: the prompt IS the blob → the text is the replacement alone
+C10="$(pm_cwd 10)"; out10="$(run_mod "$(pm_in alone "$C10" "$TMP")")"
+assert_eq PM10-alone "$(pm_js "$out10" '
+  let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const o=JSON.parse(s),t=o.text;
+  const p=o.context.match(/full=(\S+fnd-prompt-json-[0-9a-f-]+\.json)/)[1];
+  console.log(t.startsWith("{")&&t.endsWith(`\n\n<<full=${p} original_result>>`)?"ok":t.slice(0,40))})')" ok
+
+# PM11: a blob quoting a handle is spilled as-is, and the handle the rewrite ends with is the new file
+C11="$(pm_cwd 11)"; mkdir -p "$C11/b"; out11="$(run_mod "$(pm_in forged "$C11" "$C11/b")")"
+p11="$(printf '%s' "$out11" | ctx_paths)"
+if cmp -s "$p11" "$C11/b/blob1.json"; then ok; else bad PM11-byteexact "spill != blob"; fi
+assert_eq PM11-last-handle "$(printf '%s' "$out11" | jq -r '.text' | tail -1)" "<<full=$p11 original_result>>"
+
+# PM12: a rewrite still over the prompt gate passes the classic guard
+C12="$(pm_cwd 12)"; t12="$(run_mod "$(pm_in prose30k "$C12" "$TMP")" | jq -r '.text')"
+if [ "$(printf '%s' "$t12" | wc -c | tr -d ' ')" -ge 10240 ]; then ok; else bad PM12-still-big "rewrite under the gate"; fi
+assert_eq PM12-classic-passes "$(run_guard "$(jq -n --arg p "$t12" --arg c "$C12" '{prompt:$p,cwd:$c}')")" ""
+
+# PM13: a ~1 MB paste is rewritten in one pass, well inside the mod's 20 s spawn timeout
+C13="$(pm_cwd 13)"; in13="$(pm_in whale "$C13" "$TMP")"; s13=$SECONDS
+t13="$(run_mod "$in13" | jq -r '.text')"
+if [ $((SECONDS - s13)) -lt 10 ]; then ok; else bad PM13-time "took $((SECONDS - s13)) s"; fi
+case "$t13" in *"fnd-mcp-slim: compressed "*|*"<<fnd-mcp-slim stub>>"*) ok ;; *) bad PM13-shape "no compressed/stub replacement" ;; esac
+
+# PM14: the durable dir cannot be written → nothing, and no fallback to system temp
+if [ "$(id -u)" = 0 ]; then ok; ok; ok; else
+  C14="$(pm_cwd 14)"; mkdir -p "$C14/.claude"; chmod 500 "$C14/.claude"
+  n14="$(pm_count "$PMD" 'fnd-prompt-json-*')"
+  assert_eq PM14-silent "$(run_mod "$(pm_in compress "$C14" "$TMP")")" ""
+  assert_eq PM14-no-file "$(find "$C14" -type f | wc -l | tr -d ' ')" 0
+  assert_eq PM14-no-tmpdir "$(pm_count "$PMD" 'fnd-prompt-json-*')" "$n14"
+  chmod 755 "$C14/.claude"
+fi
+
+# PM15: FND_PROMPT_JSON=0 in the env, and in the global env file alone, prints nothing
+C15="$(pm_cwd 15)"; in15="$(pm_in compress "$C15" "$TMP")"
+assert_eq PM15-env "$(run_mod "$in15" FND_PROMPT_JSON=0)" ""
+mkdir -p "$TMP/pm15-xdg/domaine"; printf 'FND_PROMPT_JSON=0\n' > "$TMP/pm15-xdg/domaine/env"
+assert_eq PM15-env-file "$(run_mod "$in15" XDG_CONFIG_HOME="$TMP/pm15-xdg")" ""
+assert_eq PM15-no-file "$(find "$C15" -type f | wc -l | tr -d ' ')" 0
+
+# PM16: big prompts with no JSON (prose, HTML, a log) pass untouched
+C16="$(pm_cwd 16)"
+for kind in prose html log; do
+  case "$kind" in
+    prose) body="$(printf 'plain words here %.0s' $(seq 1 1200))" ;;
+    html)  body="$(printf '<div class="row"><p>cell</p></div>%.0s' $(seq 1 600))" ;;
+    log)   body="$(printf '2026-10-03T10:00:00Z INFO worker started job ok\n%.0s' $(seq 1 450))" ;;
+  esac
+  assert_eq "PM16-$kind" "$(run_mod "$(jq -n --arg p "$body" --arg c "$C16" '{prompt:$p,cwd:$c}')")" ""
+done
+assert_eq PM16-no-file "$(find "$C16" -type f | wc -l | tr -d ' ')" 0
+
+# PM17: a blob under the 8 KB gate passes untouched
+C17="$(pm_cwd 17)"; assert_eq PM17-below-gate "$(run_mod "$(pm_in small "$C17" "$TMP")")" ""
+
+# PM18: a scan that hit its budget passes untouched and writes nothing (P31's input)
+C18="$(pm_cwd 18)"
+in18="$(node -e '
+  const good=JSON.stringify({b:Array.from({length:600},(_,i)=>({id:i,pad:"z".repeat(40)}))});
+  process.stdout.write(JSON.stringify({prompt:good+" then "+"{\"a\":".repeat(3000),cwd:process.argv[1]}));
+' "$C18")"
+assert_eq PM18-budget "$(run_mod "$in18")" ""
+assert_eq PM18-no-file "$(find "$C18" -type f | wc -l | tr -d ' ')" 0
+
+# PM19: without the flag the same script still blocks, spilling to system temp
+out19="$(run_guard "$(mk 20000 25000 "$PJD" "$PJD/pm19.json")")"
+assert_eq PM19-classic-block "$(printf '%s' "$out19" | jq -r '.decision' 2>/dev/null)" block
+case "$(reason_path "$out19")" in "$PJD/fnd-prompt-json-"*) ok ;; *) bad PM19-tmpdir "classic spill not in TMPDIR" ;; esac
+
+# PM20: a passing prompt loads neither the compressor nor mcp-slim
+PM20P="$TMP/pm20-probe.cjs"
+cat > "$PM20P" <<'PROBEJS'
+const Module = require('module');
+const load = Module._load;
+Module._load = function (request) {
+  if (/(json-slim|mcp-slim)\.cjs$/.test(request)) process.stderr.write(`LOADED ${request}\n`);
+  return load.apply(this, arguments);
+};
+PROBEJS
+C20="$(pm_cwd 20)"
+assert_absent PM20-no-load "$(printf '%s' "$(mk 4000 15000 "$C20" "$TMP/pm20.json")" | env TMPDIR="$PMD" node --require "$PM20P" "$GUARD" --from-mod 2>&1 >/dev/null)" "LOADED"
+
+# PM21: two work-id dirs → the project's durable dir, still never system temp
+C21="$(pm_cwd 21)"; mkdir -p "$C21/.claude/tasks/ELC-1" "$C21/.claude/tasks/ELC-2"
+p21="$(run_mod "$(pm_in compress "$C21" "$TMP")" | ctx_paths)"
+case "$p21" in "$C21/.claude/fnd-tmp/prompt-json/fnd-prompt-json-"*) ok ;; *) bad PM21-durable "p='$p21'" ;; esac
+
+# PM22: the spill sweep never reaches a durable prompt spill, however old
+PJ22="$TMP/pm22-sweep"; mkdir -p "$PJ22"; : > "$PJ22/fnd-prompt-json-decoy.json"
+touch -t 200001010000 "$PJ22/fnd-prompt-json-decoy.json" "$p1"
+FND_MCP_SLIM_TTL=1 node -e "require('$JS').sweepSpills('$PJ22', '$C1')" 2>/dev/null
+assert_eq PM22-sweep-ran "$(ls "$PJ22" | grep -c decoy | tr -d ' ')" 0
+if [ -f "$p1" ]; then ok; else bad PM22-durable "durable spill swept"; fi
+
+# PM23: a body under 8 KB whose stats line + handle outgrow the blob → the stub, never nothing
+C23="$(pm_cwd 23)"; in23="$(pm_in weak "$C23" "$TMP")"
+if [ -n "$in23" ]; then
+  t23="$(run_mod "$in23" | jq -r '.text')"
+  assert_contains PM23-stub "$t23" "<<fnd-mcp-slim stub>>"
+  assert_eq PM23-classic-passes "$(run_guard "$(jq -n --arg p "$t23" --arg c "$C23" '{prompt:$p,cwd:$c}')")" ""
+else bad PM23-precondition "fixture gain not weak"; fi
+
+# PM24: compressed replacements stop once their total reaches 32,768 B; the rest are stubs
+C24="$(pm_cwd 24)"; in24="$(pm_in six "$C24" "$TMP")"
+if [ -n "$in24" ]; then
+  t24="$(run_mod "$in24" | jq -r '.text')"
+  nc=$(printf '%s\n' "$t24" | grep -c '^fnd-mcp-slim: compressed ')
+  ns=$(printf '%s\n' "$t24" | grep -c '^<<fnd-mcp-slim stub>>')
+  assert_eq PM24-split "$nc+$ns" "5+1"
+  if [ "$(printf '%s' "$t24" | wc -c | tr -d ' ')" -lt $((6 * 8192)) ]; then ok; else bad PM24-total "rewrite not capped"; fi
+else bad PM24-precondition "fixture bodies not ~7 KB"; fi
+
+# PM25: a linked worktree whose symlinked `.claude/tasks` lists two work-ids → the MAIN checkout's
+# durable dir, so removing the worktree (ignored files and all) keeps the spill
+M25="$(pm_cwd 25)"; W25="$TMP/pm-25-wt"; rm -rf "$W25"
+git -C "$M25" init -q 2>/dev/null; git -C "$M25" -c user.email=t@t -c user.name=t commit -q --allow-empty -m i 2>/dev/null
+mkdir -p "$M25/.claude/tasks/ELC-1" "$M25/.claude/tasks/ELC-2"
+git -C "$M25" worktree add -q -b pm25 "$W25" 2>/dev/null; mkdir -p "$W25/.claude"; ln -s "$M25/.claude/tasks" "$W25/.claude/tasks"
+p25="$(run_mod "$(pm_in compress "$W25" "$TMP")" | ctx_paths)"
+case "$(cd "$(dirname "$p25" 2>/dev/null)" 2>/dev/null && pwd -P)" in "$(cd "$M25" && pwd -P)/.claude/fnd-tmp/prompt-json") ok ;;
+  *) bad PM25-main-checkout "spill not in the main checkout's durable dir (p='$p25')" ;; esac
+git -C "$M25" worktree remove --force "$W25" 2>/dev/null
+if [ -n "$p25" ] && [ -f "$p25" ]; then ok; else bad PM25-survives-teardown "spill gone with the worktree"; fi
+assert_eq PM25-main-clean "$(git -C "$M25" status --porcelain 2>/dev/null)" ""
+
+# PM26: a committed dir symlink on the durable path never carries the paste into its target
+C26="$(pm_cwd 26)"; mkdir -p "$C26/docs" "$C26/.claude/fnd-tmp"; ln -s ../../docs "$C26/.claude/fnd-tmp/prompt-json"
+assert_eq PM26-silent "$(run_mod "$(pm_in compress "$C26" "$TMP")")" ""
+assert_eq PM26-target-untouched "$(ls -A "$C26/docs" | wc -l | tr -d ' ')" 0
+assert_eq PM26-no-tmpdir "$(pm_count "$PMD" 'fnd-prompt-json-*')" 0
+
+# PM27: a body that crushed arrays to files yet stays ≥ 8 KB → the stub, and those crush files go
+C27="$(pm_cwd 27)"; in27="$(pm_in crush-big "$C27" "$C27")"
+if [ -n "$in27" ]; then
+  crush27="$(pm_count "$PMD" 'fnd-crush-*')"
+  t27="$(run_mod "$in27" | jq -r '.text')"
+  assert_contains PM27-stub "$t27" "<<fnd-mcp-slim stub>>"
+  assert_eq PM27-no-crush-left "$(pm_count "$PMD" 'fnd-crush-*')" "$crush27"
+else bad PM27-precondition "fixture body did not crush past 8 KB"; fi
+
+# PM28: thirty compressible blobs → crush files exist only for the bodies kept, and a blob past the
+# cap is never slimmed: its stub carries the narrowing --jq recipe, not the whole-file CLI line
+C28="$(pm_cwd 28)"; crush28="$(pm_count "$PMD" 'fnd-crush-*')"
+t28="$(run_mod "$(pm_in thirty "$C28" "$TMP")" | jq -r '.text')"
+nc28=$(printf '%s\n' "$t28" | grep -c '^fnd-mcp-slim: compressed ')
+ns28=$(printf '%s\n' "$t28" | grep -c '^<<fnd-mcp-slim stub>>')
+if [ "$nc28" -gt 0 ] && [ "$ns28" -gt 0 ] && [ $((nc28 + ns28)) = 30 ]; then ok; else bad PM28-split "compressed=$nc28 stub=$ns28"; fi
+assert_eq PM28-crush-kept-only "$(( $(pm_count "$PMD" 'fnd-crush-*') - crush28 ))" "$nc28"
+assert_eq PM28-stub-jq "$(printf '%s\n' "$t28" | grep -c "^  node .*json-slim.cjs .* --jq '<jq-path>'")" "$ns28"
+assert_absent PM28-no-plain-cli "$t28" "not compressible here"
+
+# PM29: two blobs, the second cannot be saved → nothing printed, and the first spill is unlinked
+C29="$(pm_cwd 29)"; mkdir -p "$C29/b"
+assert_eq PM29-silent "$(run_mod "$(pm_in two "$C29" "$C29/b")" NODE_OPTIONS="--require $FAIL2")" ""
+assert_eq PM29-no-spill "$(find "$C29" -name 'fnd-prompt-json-*' | wc -l | tr -d ' ')" 0
+assert_eq PM29-no-tmpdir "$(pm_count "$PMD" 'fnd-prompt-json-*')" 0
+
+# PM30: an answer past the engine's 4 MiB stdout cap would be dropped by the mod → nothing printed,
+# and the run's spill and crush files are unlinked rather than left unreferenced
+C30="$(pm_cwd 30)"; pm_in oversize "$C30" "$TMP" > "$TMP/pm30-in.json"; crush30="$(pm_count "$PMD" 'fnd-crush-*')"
+assert_eq PM30-silent "$(env TMPDIR="$PMD" node "$GUARD" --from-mod < "$TMP/pm30-in.json" 2>/dev/null)" ""
+assert_eq PM30-no-spill "$(find "$C30" -name 'fnd-prompt-json-*' | wc -l | tr -d ' ')" 0
+assert_eq PM30-no-crush-left "$(pm_count "$PMD" 'fnd-crush-*')" "$crush30"
 
 # ═══ U — UserPromptSubmit merged entry point (hooks/user-prompt.cjs) ════════
 # One node process runs both halves. The contract under test: a guard BLOCK is the whole

@@ -2,8 +2,9 @@
 /*
  * json-slim.cjs — shape-driven compressor for large JSON (MCP tool results, saved dumps).
  *
- * THREE entry points, one home for the transform:
+ * FOUR entry points, one home for the transform:
  *   hooks/mcp-slim.cjs           → slim, writeSpill, shapeHint, debugLog, sweepSpills, JQ_GRAMMAR_HINT
+ *   hooks/prompt-json-guard.cjs  → slim, shapeHint, JQ_GRAMMAR_HINT
  *   scripts/doctor.cjs           → buildReport
  *   the CLI:  node json-slim.cjs <file.json> [--jq <jq-path>] [--stats]
  *             cat big.json | node json-slim.cjs
@@ -723,8 +724,9 @@ function buildMarker(originalItems, droppedItems, droppedCount, cfg) {
 // here (fnd-jsx-ids-), `spillOriginal` in hooks/mcp-slim.cjs (fnd-mcp-slim-) — all four go through
 // writeSpill, which appends a content hash — and `spillBlob` in hooks/prompt-json-guard.cjs
 // (fnd-prompt-json-), the ONE exception: it still mints a `<uuid>` name with a plain writeFileSync, so it
-// neither dedups nor appears in any `spills` telemetry, and it writes to the task workspace or a bare
-// os.tmpdir() (this sweep reaches it only when that tmpdir IS the sweep dir). Prefix matching identifies
+// neither dedups nor appears in any `spills` telemetry, and it writes to the task workspace, a bare
+// os.tmpdir() (this sweep reaches it only when that tmpdir IS the sweep dir) or, under `--from-mod`,
+// `.claude/fnd-tmp/prompt-json/`, which no sweep may ever reach. Prefix matching identifies
 // all five either way. The literals are duplicated on purpose — importing this module into a per-prompt
 // hook just for a string would drag the whole compressor into every UserPromptSubmit.
 const SPILL_PREFIXES = ['fnd-crush-', 'fnd-slim-out-', 'fnd-jsx-ids-', 'fnd-mcp-slim-', 'fnd-prompt-json-'];
@@ -780,7 +782,10 @@ function spillTtlHours(raw) {
 // Called by BOTH entry points (the mcp-slim hook after it writes stdout, the CLI at exit) so one
 // implementation covers every writer. NB the prompt-json guard's WORKSPACE-placed spills ride with
 // the task workspace, outside this dir; its tmpdir spills are swept only when the sweep dir is the
-// default os.tmpdir() (FND_MCP_SLIM_DIR unset — the common case). Returns a small summary for tests.
+// default os.tmpdir() (FND_MCP_SLIM_DIR unset — the common case); its `--from-mod` spills sit in
+// `.claude/fnd-tmp/prompt-json/` and are the only copy of a consumed paste, so neither pass may walk
+// there (the top-level scan skips subdirectories, the project pass is playwright/-only). Returns a
+// small summary for tests.
 // `projectDir` adds the second pass: the playwright output dir lives in the PROJECT, not in the
 // shared spill dir, so it can only be reached from here with the project in hand. Omitting it keeps
 // the old single-dir behaviour. The hook passes the EVENT's cwd, which names the project exactly;
@@ -3215,8 +3220,9 @@ function buildReport(lines, opts) {
 
 module.exports = {
   // Production surface — the only names another file may reach for.
-  //   hooks/mcp-slim.cjs        slim, writeSpill, shapeHint, debugLog, sweepSpills, JQ_GRAMMAR_HINT
-  //   scripts/doctor.cjs        buildReport
+  //   hooks/mcp-slim.cjs           slim, writeSpill, shapeHint, debugLog, sweepSpills, JQ_GRAMMAR_HINT
+  //   hooks/prompt-json-guard.cjs  slim, shapeHint, JQ_GRAMMAR_HINT
+  //   scripts/doctor.cjs           buildReport
   // Project-side hygiene (ensureFndTmpExcluded, PLAYWRIGHT_OUT_REL) is no longer re-exported here:
   // it never belonged to the compressor, and lives in scripts/scratch-hygiene.cjs.
   slim, writeSpill, shapeHint, debugLog, sweepSpills, JQ_GRAMMAR_HINT, buildReport,

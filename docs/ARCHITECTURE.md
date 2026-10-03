@@ -25,7 +25,7 @@ flowchart TB
 
   subgraph canon["Canonical hooks (plugins/fnd/hooks)"]
     H1["session-start.sh → session context *.md"]
-    H2["user-prompt.cjs"]
+    H2["user-prompt.cjs · prompt-json-guard.cjs"]
     H3["subagent-conventions.sh"]
     H4["no-ai-attribution.sh · no-verify-bypass.sh"]
     H5["scratch-path-guard.cjs · spill-access.sh"]
@@ -36,7 +36,7 @@ flowchart TB
 
   subgraph mods["Claude Code hooks module (hooks/hooks.json → hooks/mods/register.tsx)"]
     M1["core/ — usage.ts · band.tsx · progress.tsx<br/>(status band, progress pane)"]
-    M2["fnd/ — guard.ts · slim.ts<br/>(node-hook.ts adapter)"]
+    M2["fnd/ — guard.ts · slim.ts · prompt-slim.ts<br/>(node-hook.ts adapter)"]
   end
 
   subgraph model["What the model reads"]
@@ -61,6 +61,7 @@ flowchart TB
   CC --> mods
   M2 -. "spawns node (--from-mod)" .-> H5
   M2 -. "spawns node (--from-mod)" .-> H6
+  M2 -. "spawns node (--from-mod)" .-> H2
   CU --> W2 --> canon
   CX --> W3 --> canon
   OC --> W4 --> canon
@@ -83,8 +84,9 @@ Claude Code also loads a **hooks module**, function hooks that run inside the se
 beside the classic command hooks (§8). It is Claude Code's alone. The Cursor and Codex manifests
 name their own hook files (`hooks/hooks-cursor.json`, `hooks/hooks-codex.json`) and never
 `hooks/hooks.json`. OpenCode loads only `opencode/fnd-plugin.js`. The module keeps the same rule
-as the adapters: its guard and slim halves spawn the canonical `scratch-path-guard.cjs` and
-`mcp-slim.cjs` and never re-implement their decisions.
+as the adapters: its guard, slim and prompt-slim halves spawn the canonical
+`scratch-path-guard.cjs`, `mcp-slim.cjs` and `prompt-json-guard.cjs` and never re-implement their
+decisions.
 
 ## 2. A session, hook by hook
 
@@ -100,7 +102,7 @@ sequenceDiagram
   Note over Hooks: plugin.json and hooks-codex.json both spawn hooks/session-start.sh
   Hooks-->>Model: plugin root + project profile + conventions (comment discipline, LiquidDoc-and-core addendum in a foundation checkout, lean code, task workspace, whale routing, untrusted content, plugin feedback, store access)
   Host->>Hooks: UserPromptSubmit
-  Hooks-->>Model: context-budget monitor, prompt-JSON guard (hands a pasted blob back as a file)
+  Hooks-->>Model: context-budget monitor, prompt-JSON guard (hands a pasted blob back as a file; on Claude Code the module first rewrites the blob in place, §8)
   Host->>Hooks: SubagentStart
   Hooks-->>Model: conventions for code-writing agents (readers skipped)
   Model->>Host: Bash(git commit …)
@@ -326,8 +328,8 @@ band and pane on the terminal and desktop surfaces, raises the events, and stubs
 touches. `tests/mods-sim.sh` wraps `claude plugin validate --strict` and `claude plugin test`. CI has
 no `claude` binary, so the suite prints SKIP there; run it locally before a release (the README
 release checks list it). The Node
-halves the module spawns stay covered by `tests/hooks-sim.sh` (guard D cases, mcp-slim M-exp and
-M-idem cases) and the three host sims.
+halves the module spawns stay covered by `tests/hooks-sim.sh` (guard D cases, mcp-slim M-exp, M-idem and
+M-req cases, prompt-json-guard `--from-mod` PM cases) and the three host sims.
 
 ## 8. Mods
 
@@ -336,10 +338,11 @@ own files and `plugins/fnd/types/index.d.ts`, with no npm, `require`, `import()`
 
 ```
 hooks/hooks.json            { "modules": ["./mods/register.tsx"] }
-hooks/mods/register.tsx     register(on, options) → registerUsage, registerBand, registerProgress, registerGuard, registerSlim
+hooks/mods/register.tsx     register(on, options) → registerUsage, registerBand, registerProgress, registerGuard, registerSlim, registerPromptSlim
 hooks/mods/core/            usage.ts (atoms + 30 s tick) · band.tsx (AbovePrompt) · progress.tsx (resolver, /fnd-progress, Pane)
                             lib.ts · workid.ts · progress-parse.ts (pure)
 hooks/mods/fnd/             guard.ts (tool.describe note + tool.call deny) · slim.ts (overflow expansion + toast)
+                            prompt-slim.ts (prompt.submit: pasted JSON rewritten in place + toast)
                             node-hook.ts (pure: builds the node call, reads its answer)
 types/index.d.ts            the $.state contract: every key the module reads or writes
 ```
@@ -358,7 +361,8 @@ types/index.d.ts            the $.state contract: every key the module reads or 
 - **One unmatched hook per event per plugin.** A second `on('session.start', …)` without a
   matcher fails validation and module load, so `usage.ts` and `guard.ts` register theirs with
   match-all matchers. All of a plugin's hooks on one event act as one hook: one that throws skips
-  the rest. That is why the guard also latches its root on the first tool call.
+  the rest. That is why the guard also latches its root on the first tool call. prompt-slim
+  matches on `origin.kind` because progress holds the one unmatched `prompt.submit` hook.
 
 **Classic hooks on Claude Code, with the module loaded:**
 
@@ -367,9 +371,10 @@ types/index.d.ts            the $.state contract: every key the module reads or 
 | `scratch-path-guard.cjs` (PreToolUse, 5 tools) | keeps running as the backstop | The module's deny pre-empts it for that call (classic PreToolUse fires beneath `tool.call`). A skipped module hook fails open, and the classic guard still guards. |
 | `mcp-slim.cjs` (PostToolUse `mcp__.*`) | keeps running | `already-slim` idempotence makes double processing impossible. The session-bound marker that would let it drop its own notice when the module toasts (`FND_MOD_SESSION`) is not built: it waits for two live checks (where classic PostToolUse runs relative to `tool.call`; whether command hooks inherit an env the module sets). Until then the figure can show twice. |
 | `compression-notice.cjs` systemMessage | shown beside the module's toast | Replaced by the toast once the marker exists |
+| `prompt-json-guard.cjs` (UserPromptSubmit half) | keeps running beneath the rewrite | It runs inside the module's `next` and sees the rewritten prompt, which `--from-mod` has already re-checked against the classic predicate, so it passes. Prompts the module skips (slash and `!` commands; peer, task-notification and plugin origins) and any module failure still meet the block. |
 | `user-prompt.cjs` context monitor | unchanged | Overlaps the band's ctx figure; `FND_CTX_MONITOR=0` silences it |
 | session-start, subagent conventions, git guards, spill-access, reader-compression | unchanged | Out of the module's scope |
-| Cursor / Codex / OpenCode | unchanged except `already-slim` and one whale-convention sentence | Every other module-specific Node behaviour sits behind an argv flag (`--from-mod`, `--overflow=expand`) only the module passes. `hooks/mcp-whale.md` reaches every host (Codex via `session-start.sh`, OpenCode via the adapter's statics, Cursor via `rules/fnd-mcp-whale.mdc`), so its "On Claude Code an over-limit result often arrives already slimmed or stubbed" line is read there too, guarded as Claude-Code-only |
+| Cursor / Codex / OpenCode | unchanged except `already-slim`, the `mcp-slim.cjs` require guard, one whale-convention sentence and the untrusted-content clause on prompt spills | Every other module-specific Node behaviour sits behind an argv flag (`--from-mod`, `--overflow=expand`) only the module passes. `hooks/mcp-whale.md` reaches every host (Codex via `session-start.sh`, OpenCode via the adapter's statics, Cursor via `rules/fnd-mcp-whale.mdc`), so its "On Claude Code an over-limit result often arrives already slimmed or stubbed" line is read there too, guarded as Claude-Code-only. `mcp-slim.cjs` runs its stdin entry only as `require.main`, so every host's spawn behaves as before, and `hooks/untrusted-content.md` names `.claude/tasks/<work-id>/tmp/` and `.claude/fnd-tmp/prompt-json/` as real homes of `fnd-prompt-json-*` handles on every host |
 
 Rejected: answering `classic.PostToolUse` for `mcp__` tools without calling `next`. That would
 silence every user, project and other-plugin PostToolUse hook on MCP tools, and the spill TTL sweep
@@ -377,7 +382,7 @@ with them.
 
 **Split readiness** (the core/fnd plugin split stays parked):
 - `hooks/mods/core/` (band, pane, usage, resolver) can move to a future core plugin as one folder.
-- `hooks/mods/fnd/` (guard, slim, Node adapter) stays in fnd.
+- `hooks/mods/fnd/` (guard, slim, prompt-slim, Node adapter) stays in fnd.
 - Imports run one way only: `register.tsx → core` and `register.tsx → fnd`. `core` never imports
   `fnd`.
 - Only `core` draws `AbovePrompt`, which has one instance per chain. A future fnd-only segment

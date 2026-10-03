@@ -8,7 +8,8 @@
  *   hooks/scratch-path-guard.cjs  → ensureFndTmpExcluded — the stamp its allow of that scratch dir
  *     is bought with. A PreToolUse guard on every screenshot, so it must not load a compressor.
  *   hooks/prompt-json-guard.cjs   → ensureFndTmpExcluded with the task workspace as `rel`, for the
- *     pasted blob it spills into `.claude/tasks/<work-id>/tmp/`.
+ *     pasted blob it spills into `.claude/tasks/<work-id>/tmp/`; with the default scratch root for its
+ *     `--from-mod` fallback dir, `.claude/fnd-tmp/prompt-json/`.
  *   scripts/json-slim.cjs         → sweepPlaywrightOut, from sweepSpills' throttled project pass.
  *
  * Reads NO environment switch: the TTL cutoff is computed by the caller and handed in, so this

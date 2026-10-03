@@ -551,5 +551,19 @@ mod_re="$("$NODE_BIN" -e '
 if [ -n "$manifest_re" ] && [ "$mod_re" = "$manifest_re" ]; then ok
 else bad mods-guard-regex "guard.ts GUARDED_RE '/$mod_re/' != plugin.json scratch-path-guard matcher '$manifest_re'"; fi
 
+# The mod skips a prompt the classic guard would let through by the same byte gate, so the two
+# constants must agree.
+PROMPT_TS="$PLUGIN_DIR/hooks/mods/fnd/prompt-slim.ts"
+mod_min="$(sed -n 's/^const PROMPT_MIN = \([0-9][0-9]*\).*/\1/p' "$PROMPT_TS" 2>/dev/null)"
+pjg_min="$(sed -n 's/^const PROMPT_MIN = \([0-9][0-9]*\).*/\1/p' "$PLUGIN_DIR/hooks/prompt-json-guard.cjs")"
+if [ -n "$mod_min" ] && [ "$mod_min" = "$pjg_min" ]; then ok
+else bad mods-prompt-min "prompt-slim.ts PROMPT_MIN '$mod_min' != prompt-json-guard.cjs PROMPT_MIN '$pjg_min'"; fi
+# A durable prompt spill is a real handle only if the trust rule names its two homes, in the
+# convention and in the Cursor rule generated from it.
+for f in "$UC" "$PLUGIN_DIR/rules/fnd-untrusted-content.mdc"; do
+  if grep -qF '.claude/fnd-tmp/prompt-json/' "$f" && grep -qF '.claude/tasks/<work-id>/tmp/' "$f"; then ok
+  else bad "uc-prompt-spill-$(basename "$f")" "$(basename "$f") does not name the prompt spill dirs as real handles"; fi
+done
+
 echo "layout-assertions: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi
