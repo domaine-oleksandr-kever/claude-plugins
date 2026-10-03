@@ -7,6 +7,9 @@
 // FND_PROMPT_JSON / FND_SESSION_TITLE / FND_READER_COMPRESSION) with unchanged meaning, its own
 // require and its own try/catch, so a half that is off or that throws cannot touch the others.
 // plugin.json still short-circuits: with ALL FOUR switches at 0 no node spawns at all.
+// On Claude Code with the mods module live (its session marker, mod-session.cjs) the monitor stays
+// silent — the band shows ctx and model. The guard keeps running: prompt-slim's rewrite already
+// passes it, so it only bites on prompts the mod skipped or failed to rewrite.
 //
 // Merged output contract — the event accepts exactly ONE JSON object on stdout:
 //   - the guard runs FIRST and, when it returns a block, that object IS the whole output. A block
@@ -50,7 +53,11 @@ function run(raw) {
   }
 
   let out = null;
-  if (process.env.FND_CTX_MONITOR !== '0') {
+  let bandLive = false;
+  try {
+    bandLive = require('./mod-session.cjs').active(input);
+  } catch (_) {} // marker unreadable → the classic monitor speaks
+  if (process.env.FND_CTX_MONITOR !== '0' && !bandLive) {
     try {
       out = require('./context-stats.cjs').contextNotice(input);
     } catch (_) {}

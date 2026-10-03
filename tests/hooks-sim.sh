@@ -4159,6 +4159,72 @@ assert_contains UN8-relay-added  "$(un_sys "$outUN8")" "fnd:jira-reader → $UN_
 # UN9: an unreadable event → exit 0, nothing on stdout
 assert_eq UN9-garbage "$(printf 'not json' | env TMPDIR="$UN/tmp" FND_HOST=claude FND_CTX_MONITOR=0 FND_PROMPT_JSON=0 FND_SESSION_TITLE=0 CLAUDE_CODE_ENTRYPOINT=cli node "$MERGED" 2>/dev/null)" ""
 
+# ═══ UM — the mods-module session marker (hooks/mod-session.cjs) ═══════════
+# On Claude Code the mods module rewrites <tmpdir>/fnd-mod-session-<sid> on every prompt; while
+# that file is fresh the band mod shows ctx, so the monitor goes silent. The guard, title and relay
+# keep running; other hosts have no mods and ignore the file.
+um_mark() { : > "$1/fnd-mod-session-$2"; }
+
+# UM1: fresh marker → the monitor is silent and records no band state; exit 0
+rm -f "$UPD"/fnd-ctx-band-* "$UPD"/fnd-mod-session-*
+um_mark "$UPD" "um1-$$"
+out="$(run_up "$(up_in "um1-$$" 0)" FND_CTX_WARN=10 FND_HOST=claude)"; ec=$?
+assert_eq     UM1-exit          "$ec" 0
+assert_eq     UM1-silent        "$out" ""
+assert_eq     UM1-no-band       "$(band_files)" 0
+# …but the guard is the backstop for prompts prompt-slim skipped or failed to rewrite: it still blocks
+assert_contains UM1-guard-blocks "$(run_up "$(up_in "um1-$$" 1)" FND_CTX_WARN=10 FND_HOST=claude)" '"decision":"block"'
+
+# UM2: the same event with no marker is the positive control — the monitor speaks
+rm -f "$UPD"/fnd-mod-session-*
+assert_contains UM2-no-marker-monitor "$(run_up "$(up_in "um1-$$" 0)" FND_CTX_WARN=10 FND_HOST=claude)" "systemMessage"
+
+# UM3: the title half still rides — alone, with no monitor notice beside it
+rm -f "$UPD"/fnd-ses-title-* "$UPD"/fnd-ctx-band-*
+um_mark "$UPD" "um3-$$"
+out="$(run_up "$(up_prompt "um3-$$" "please look at ELC-658 today" "$UPT")" FND_CTX_WARN=10 FND_HOST=claude)"
+assert_eq     UM3-title         "$(up_title "$out")" "ELC-658 — FHR Recommendations Block does not allow campaign configuration"
+assert_absent UM3-no-sysmsg     "$out" "systemMessage"
+assert_absent UM3-no-additional "$out" "additionalContext"
+assert_eq     UM3-no-band       "$(band_files)" 0
+UMTRACE="$TMP/um-trace"; mkdir -p "$UMTRACE"
+rm -f "$UPD"/fnd-ses-title-*
+run_up "$(up_prompt "um3-$$" "please look at ELC-658 today" "$UPT")" FND_HOST=claude FND_HOST_TRACE=1 FND_MCP_SLIM_DIR="$UMTRACE" >/dev/null
+run_up "$(up_in "um3-$$" 0)" FND_HOST=claude FND_HOST_TRACE=1 FND_MCP_SLIM_DIR="$UMTRACE" >/dev/null
+assert_eq UM3-trace-decisions "$(grep -o '"decision":"[a-z]*"' "$UMTRACE/fnd-host-trace.log" 2>/dev/null | tr '\n' ' ')" '"decision":"inject" "decision":"pass" '
+
+# UM4: the relay half still appends — its line alone, the monitor's notice gone
+rm -f "$UN/tmp"/fnd-mod-session-*
+cp "$TMP/t0.jsonl" "$UN/sess/sid.jsonl"
+um_mark "$UN/tmp" sid
+outUM4="$(printf '%s' "$(un_in abc "$UN_LINE")" | env TMPDIR="$UN/tmp" FND_HOST=claude FND_SESSION_TITLE=0 FND_CTX_WARN=10 CLAUDE_CODE_ENTRYPOINT=cli node "$MERGED" 2>/dev/null)"
+assert_eq UM4-relay-only "$(un_sys "$outUM4")" "fnd:jira-reader → $UN_LINE"
+rm -f "$UN/tmp"/fnd-mod-session-*
+: > "$UN/sess/sid.jsonl"
+
+# UM5: a host without mods ignores the marker — Codex keeps the classic monitor
+rm -f "$UPD"/fnd-ctx-band-* "$UPD"/fnd-mod-session-*
+um_mark "$UPD" "um5-$$"
+assert_contains UM5-codex-monitor "$(run_up "$(up_in "um5-$$" 0)" FND_CTX_WARN=10 FND_HOST=codex)" "systemMessage"
+
+# UM6: a marker belongs to ONE session — another session's file changes nothing here
+rm -f "$UPD"/fnd-mod-session-*
+um_mark "$UPD" "um6-other-$$"
+assert_contains UM6-other-session "$(run_up "$(up_in "um6-$$" 0)" FND_CTX_WARN=10 FND_HOST=claude)" "systemMessage"
+
+# UM7: the session id is sanitised to [A-Za-z0-9_.-] — the same file name the mod writes
+rm -f "$UPD"/fnd-mod-session-* "$UPD"/fnd-ctx-band-*
+um_mark "$UPD" "um7ab.c-$$"
+assert_eq UM7-sanitised "$(run_up "$(up_in "um7/a b:.c-$$" 0)" FND_CTX_WARN=10 FND_HOST=claude)" ""
+assert_eq UM7-no-band   "$(band_files)" 0
+
+# UM8: a stale marker (a resumed session whose module no longer loads) silences nothing
+rm -f "$UPD"/fnd-mod-session-* "$UPD"/fnd-ctx-band-*
+um_mark "$UPD" "um8-$$"
+node -e 'const t=(Date.now()-120000)/1000;require("fs").utimesSync(process.argv[1],t,t)' "$UPD/fnd-mod-session-um8-$$"
+assert_contains UM8-stale-marker "$(run_up "$(up_in "um8-$$" 0)" FND_CTX_WARN=10 FND_HOST=claude)" "systemMessage"
+rm -f "$UPD"/fnd-mod-session-*
+
 # ═══ T — SubagentStart subagent-conventions (convention injection) ══════════
 # Reuses $fake (CLAUDE_PLUGIN_ROOT with hooks/comment-discipline.md + lean-code.md +
 # untrusted-content.md holding MARK-… sentinels) from the S scaffolding.
