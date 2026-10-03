@@ -103,7 +103,8 @@ export type BandButton = { key: string; label: string; hotkey: string; plain: bo
 
 /** The band's segments in row order; null/empty = not drawn. */
 export type BandSegs = {
-  cache: string
+  /** null while a rate window is at or past 100 %: in overage the TTL is unknown, so nothing is shown. */
+  cache: string | null
   model: string | null
   ctx: string
   rates: FndRate[]
@@ -113,6 +114,8 @@ export type BandSegs = {
 }
 
 export const SEP = ' │ '
+/** The dim rule drawn above the row, one cell repeated across the band. */
+export const RULE = '─'
 const RATE_GAP = ' · '
 const BUTTON_GAP = '  '
 
@@ -123,7 +126,7 @@ export function buttonText(b: BandButton): string {
 
 /** The row as the terminal draws it: groups joined by ` │ `. */
 export function rowText(s: BandSegs): string {
-  const groups: string[] = [s.cache]
+  const groups: string[] = s.cache === null ? [] : [s.cache]
   if (s.model !== null) groups.push(s.model)
   groups.push(s.ctx)
   if (s.rates.length) groups.push(s.rates.map(rateText).join(RATE_GAP))
@@ -272,11 +275,22 @@ export type BandInput = {
   digest: string | null
 }
 
+/** `claude-fable-5-1` → `fable-5-1`: every model id carries the prefix, so it says nothing. */
+export function shortModel(m: string | null): string | null {
+  return m === null ? null : m.replace(/^claude-/, '')
+}
+
+/** `cache 42m` → [`cache`, `42m`]: the dim label and the bold value; no space → the whole text is the label. */
+export function splitLabel(text: string): [string, string] {
+  const i = text.indexOf(' ')
+  return i < 0 ? [text, ''] : [text.slice(0, i), text.slice(i + 1)]
+}
+
 /** Every segment before the width drop. */
 export function bandSegs(i: BandInput): BandSegs {
   return {
-    cache: cacheView(i.cache, i.nowMs, i.isWorking).text,
-    model: i.model,
+    cache: i.usage.rates.some(r => r.pct >= 100) ? null : cacheView(i.cache, i.nowMs, i.isWorking).text,
+    model: shortModel(i.model),
     ctx: ctxText(i.usage.ctxPct),
     rates: i.usage.rates,
     digest: i.digest,

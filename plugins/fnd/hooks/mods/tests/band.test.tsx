@@ -76,7 +76,31 @@ const mainTurn = ($: any, agentId?: string) =>
 const nodes = (n: any): any[] =>
   n && typeof n === 'object' ? [n, ...(n.children ?? []).flatMap(nodes)] : []
 
-const textOf = async (ui: any, re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
+/**
+ * The band's readable units: a keyed `seg-*` Box reads as one string (dim label + bold value, its hover card
+ * excluded; the card's own Text is a unit of its own), every other Text as itself. `node` is the value Text.
+ */
+type Unit = { text: string; node: any }
+const strOf = (n: any): string => (n?.children ?? []).filter((c: any) => typeof c === 'string').join('')
+const texts = (n: any, inCard = false): { node: any; inCard: boolean }[] => {
+  if (!n || typeof n !== 'object') return []
+  if (n.type === 'Text') return [{ node: n, inCard }]
+  return (n.children ?? []).flatMap((c: any) => texts(c, inCard || n.props?.position === 'absolute'))
+}
+const units = (n: any): Unit[] => {
+  if (!n || typeof n !== 'object') return []
+  if (n.type === 'Box' && typeof n.props?.key === 'string' && n.props.key.startsWith('seg-')) {
+    const all = texts(n)
+    const own = all.filter(t => !t.inCard).map(t => t.node)
+    const cards = all.filter(t => t.inCard).map(t => ({ text: strOf(t.node), node: t.node }))
+    return [{ text: own.map(strOf).join(''), node: own[own.length - 1] }, ...cards]
+  }
+  if (n.type === 'Text') return [{ text: strOf(n), node: n }]
+  return (n.children ?? []).flatMap(units)
+}
+const unitsOf = async (ui: any): Promise<Unit[]> => units(await ui.drawn())
+const textOf = async (ui: any, re: RegExp) => (await unitsOf(ui)).find(u => re.test(u.text))?.text
+const valueOf = async (ui: any, re: RegExp) => (await unitsOf(ui)).find(u => re.test(u.text))?.node
 
 /** Reads fnd's own state from beside it: any plugin reads any value. */
 const peek = {
@@ -147,6 +171,24 @@ describe('band', () => {
       expect(progress?.props.plain).toBeUndefined()
     })
 
+    test(`${surface}: a rule above the row; dim label, bold value; the cache hides in overage`, async ($, on) => {
+      world(on)
+      await start($, surface)
+      const ui = await mount($, surface, { bodyColumns: 120 })
+      await mainTurn($)
+      await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }])
+      expect(await textOf(ui, /^─+$/)).toBe('─'.repeat(120))
+      const value = await valueOf(ui, cacheRe)
+      expect(strOf(value)).toBe('60m')
+      expect(value?.props).toMatchObject({ bold: true })
+      const labelNode = (await unitsOf(ui)).length && texts(await ui.drawn()).map(t => t.node).find((n: any) => /^(cache|⏱) $/.test(strOf(n)))
+      expect(labelNode?.props.dimColor).toBe(isDesktop ? undefined : true)
+      await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 100 }])
+      expect(await textOf(ui, cacheRe)).toBeUndefined()
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 47%'))
+      expect(await textOf(ui, /^5h /)).toBe('5h 100%')
+    })
+
     test(`${surface}: a measurement redraws ctx and shows Compact`, async ($, on) => {
       world(on)
       await start($, surface)
@@ -164,13 +206,13 @@ describe('band', () => {
       const loud = await ui.find({ key: 'compact' })
       expect(loud?.props.plain).toBeUndefined()
       expect(loud?.props.variant).toBe('primary')
-      expect((await ui.find({ type: 'Text', text: ctxRe }))?.props).toMatchObject(CRIT)
+      expect((await valueOf(ui, ctxRe))?.props).toMatchObject(CRIT)
       await measure($, { window: 200_000, percent: 50 })
       const quiet = await ui.find({ key: 'compact' })
       expect(quiet?.props).toMatchObject({ dimColor: true, hotkey: 'c', label: 'Compact' })
       expect(quiet?.props.variant).toBeUndefined()
       expect(quiet?.props.plain).toBeUndefined()
-      expect((await ui.find({ type: 'Text', text: ctxRe }))?.props).toMatchObject({ color: 'warning' })
+      expect((await valueOf(ui, ctxRe))?.props).toMatchObject({ color: 'warning', bold: true })
     })
 
     test(`${surface}: hotkey letters only while the band holds the keyboard`, async ($, on) => {
@@ -228,9 +270,9 @@ describe('band', () => {
         { kind: 'seven_day', percentUsed: 34 },
         { kind: 'seven_day_fable', percentUsed: 12 },
       ])
-      const rates = await ui.findAll({ type: 'Text', text: /^(5h|7d|7d·fable) \d+%$/ })
-      expect(rates.map((t: any) => t.text)).toEqual(['5h 61%', '7d 34%', '7d·fable 12%'])
-      expect(rates[0].props).toMatchObject({ color: 'warning' })
+      const rates = (await unitsOf(ui)).filter(u => /^(5h|7d|7d·fable) \d+%$/.test(u.text))
+      expect(rates.map(u => u.text)).toEqual(['5h 61%', '7d 34%', '7d·fable 12%'])
+      expect(rates[0].node.props).toMatchObject({ color: 'warning', bold: true })
     })
 
     test(`${surface}: main turn + 18 min with a 1 h TTL → 42m; +59 → CRIT; +61 → cold`, { options: { cacheTtl: '1h' } }, async ($, on) => {
@@ -240,11 +282,11 @@ describe('band', () => {
       await mainTurn($)
       await clock.advance(18 * MIN)
       expect(await textOf(ui, cacheRe)).toBe(L('cache 42m'))
-      expect((await ui.find({ type: 'Text', text: cacheRe }))?.props.color).toBeUndefined()
+      expect((await valueOf(ui, cacheRe))?.props.color).toBeUndefined()
       await clock.advance(41 * MIN)
-      const crit = await ui.find({ type: 'Text', text: cacheRe })
+      const crit = (await unitsOf(ui)).find(u => cacheRe.test(u.text))
       expect(crit?.text).toBe(L('cache 1m'))
-      expect(crit?.props).toMatchObject(CRIT)
+      expect(crit?.node.props).toMatchObject(CRIT)
       await clock.advance(2 * MIN)
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
     })
@@ -305,11 +347,11 @@ describe('band', () => {
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      expect(await textOf(ui, /claude-fable/)).toBe('claude-fable-5-1')
+      expect(await textOf(ui, /fable-5-1/)).toBe('fable-5-1')
       w.model = 'claude-opus-5-5'
       await $.classic.PostModelSwitch(modelSwitch({ prompt_cache_warm: true }))
-      expect(await textOf(ui, /claude-opus/)).toBe('claude-opus-5-5')
-      expect(await ui.find({ type: 'Text', text: /claude-fable/ })).toBeUndefined()
+      expect(await textOf(ui, /opus-5-5/)).toBe('opus-5-5')
+      expect(await textOf(ui, /fable-5-1/)).toBeUndefined()
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
     })
 
@@ -396,7 +438,7 @@ describe('band', () => {
       expect(await textOf(ui, cacheRe)).toBe(L('cache —'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 60%'))
       expect(await ui.find({ key: 'compact' })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /claude-fable|^5h|^⏳/ })).toBeUndefined()
+      expect(await textOf(ui, /fable-5-1|^5h|^⏳/)).toBeUndefined()
       expect(await ui.find({ key: 'progress' })).toBeUndefined()
     })
 
@@ -411,7 +453,7 @@ describe('band', () => {
       expect(await textOf(ui, /^ELC-1591/)).toBe(digest)
       const before = await others()
       await ui.press({ key: 'progress' })
-      expect(await ui.find({ type: 'Text', text: /^ELC-1591/ })).toBeUndefined()
+      expect(await textOf(ui, /^ELC-1591/)).toBeUndefined()
       // The test $ has no ui.close: the second press closes it through the plugin (origin plugin).
       await ui.press({ key: 'progress' })
       expect(await textOf(ui, /^ELC-1591/)).toBe(digest)

@@ -29,6 +29,8 @@ import {
   pctLevel,
   rateLabel,
   rowText,
+  shortModel,
+  splitLabel,
   toRates,
 } from '../core/lib.ts'
 import type { BandSegs } from '../core/lib.ts'
@@ -178,6 +180,16 @@ describe('layout', () => {
     expect(layout(s, cells(rowText(s)) - 1).rates.map(r => r.label)).toEqual(['7d'])
   })
 
+  test('overage hides the cache; the model drops its claude- prefix', () => {
+    expect(rowText({ ...full, cache: null })).toStartWith('Fable 5.1 │ ctx 47% │')
+    expect(shortModel('claude-fable-5-1')).toBe('fable-5-1')
+    expect(shortModel('claude-opus-5-5')).toBe('opus-5-5')
+    expect(shortModel(null)).toBeNull()
+    expect(splitLabel('cache 42m')).toEqual(['cache', '42m'])
+    expect(splitLabel('ELC-1591 3/5 ▶ Preview')).toEqual(['ELC-1591', '3/5 ▶ Preview'])
+    expect(splitLabel('fnd-mods')).toEqual(['fnd-mods', ''])
+  })
+
   test('cache, ctx and Compact survive 30 columns', () => {
     const narrow = layout({ ...full, compact: { ...full.compact!, plain: false } }, 30)
     expect(rowText(narrow)).toBe('cache 42m │ ctx 47% │ [ Compact ]')
@@ -293,7 +305,7 @@ describe('segments', () => {
       digest: 'ELC-1591 3/5 ▶ Preview themes',
     })
     expect(rowText(s)).toBe(
-      'cache 42m │ claude-fable-5-1 │ ctx 47% │ 5h 61% │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress',
+      'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress',
     )
   })
 })

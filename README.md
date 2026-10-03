@@ -1612,13 +1612,14 @@ One row, most important first. 160 columns, context at 47 %, an account reportin
 windows, a task workspace open:
 
 ```text
-cache 42m │ claude-fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Progress ]
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Progress ]
 ```
 
 120 columns, same session. The row is 139 cells, so the digest goes first:
 
 ```text
-cache 42m │ claude-fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ [ Compact ]  [ Progress ]
+cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ [ Compact ]  [ Progress ]
 ```
 
 60 columns. The rate windows go next, the least full one first, then the model:
@@ -1633,13 +1634,15 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 
 | Segment | Shows | Rule |
 |---|---|---|
-| cache | `cache 42m`, `<1m`, `cache cold`, `cache —`, `cache ●` | Minutes left of the prompt cache: the last main-thread response plus the TTL. `●` while a turn runs; `—` before the first response and after `/clear` or resume; `cold` once the TTL has passed, after a compaction, or after a `/model` switch that forfeits the cache (another model, or the host reports it cold). A resumed session takes its state from the time since the last response. **It is an estimate.** The host reports no cache state, only the events it is derived from. |
-| model | `claude-fable-5-1` | The model id as the session reports it, dimmed |
+| cache | `cache 42m`, `<1m`, `cache cold`, `cache —`, `cache ●` | Minutes left of the prompt cache: the last main-thread response plus the TTL. `●` while a turn runs; `—` before the first response and after `/clear` or resume; `cold` once the TTL has passed, after a compaction, or after a `/model` switch that forfeits the cache (another model, or the host reports it cold). A resumed session takes its state from the time since the last response. Hidden while any rate window is at or past 100 %: in overage the TTL is unknown. **It is an estimate.** The host reports no cache state, only the events it is derived from. |
+| model | `fable-5-1` | The model id as the session reports it, without the `claude-` prefix every id carries |
 | ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session and after every compaction until the next response arrives. Mid-turn it refreshes on a 30 s tick. |
 | rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
 | digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the first unchecked row (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done. Hidden while the progress pane is open, and when no workspace resolves. |
 | Compact | `[ Compact ]`, `c: Compact` | Hidden at ≤ 30 % context and while a turn runs. From 31 % it is drawn dim; from 80 % it is `[ Compact ]` in the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). |
 | Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
+
+**Look.** A dim rule (`────`) separates the band from the transcript above it. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain, the digest's work id is bold and the separators are dim.
 
 **Colors.** ctx and every rate window are plain up to 30 %, use the theme's `warning` color above
 30 % and the alarm look from 80 %. The cache is plain at 10 min or more, `warning` below 10 min and

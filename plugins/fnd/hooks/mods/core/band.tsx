@@ -8,6 +8,7 @@ import {
   CACHE_INIT,
   GLYPH,
   LEVEL_PROPS,
+  RULE,
   SEP,
   USAGE_INIT,
   bandSegs,
@@ -21,6 +22,7 @@ import {
   pctLevel,
   rateCard,
   rateText,
+  splitLabel,
 } from './lib.ts'
 import { digestText } from './progress-parse.ts'
 
@@ -79,6 +81,23 @@ export function registerBand(on: On, options: PluginOptions): void {
     const { Box, Text, Button } = $.ui.resolve(e)
 
     const label = (text: string) => (isDesktop ? glyphText(text) : text)
+    // Dim label, bold value (`cache` dim, `42m` bold); a desktop glyph label stays at full strength.
+    const dimLabel = isDesktop ? {} : { dimColor: true }
+    const labeled = (text: string, labelProps: Record<string, unknown>, valueProps: Record<string, unknown>): RenderNode => {
+      const [l, v] = splitLabel(text)
+      return (
+        <Box flexDirection="row">
+          <Text {...labelProps} wrap="truncate-end">
+            {v ? `${l} ` : l}
+          </Text>
+          {v ? (
+            <Text {...valueProps} wrap="truncate-end">
+              {v}
+            </Text>
+          ) : null}
+        </Box>
+      )
+    }
     const cardMax = e.props.bodyColumns && e.props.bodyColumns > 0 ? e.props.bodyColumns : Infinity
     // A keyed Box is a hover scope; its hidden child is the card. A surface without a pointer never reveals it.
     // The card gets its own width: an absolute Box would otherwise shrink to its segment.
@@ -101,45 +120,23 @@ export function registerBand(on: On, options: PluginOptions): void {
     )
     const rate = (r: FndRate, i: number): RenderNode[] => [
       ...(i > 0 ? [<Text dimColor> · </Text>] : []),
-      hoverable(
-        `seg-rate-${r.kind}`,
-        <Text wrap="truncate-end" {...LEVEL_PROPS[pctLevel(r.pct)]}>
-          {rateText(r)}
-        </Text>,
-        rateCard(r, now),
-      ),
+      hoverable(`seg-rate-${r.kind}`, labeled(rateText(r), dimLabel, { bold: true, ...LEVEL_PROPS[pctLevel(r.pct)] }), rateCard(r, now)),
     ]
 
     const groups: RenderNode[][] = []
-    groups.push([
-      hoverable(
-        'seg-cache',
-        <Text wrap="truncate-end" {...LEVEL_PROPS[cacheView(c, now, isWorking).level]}>
-          {label(segs.cache)}
-        </Text>,
-        cacheCard(c, now),
-      ),
-    ])
-    if (segs.model !== null) {
-      groups.push([
-        <Text dimColor wrap="truncate-end">
-          {segs.model}
-        </Text>,
-      ])
+    if (segs.cache !== null) {
+      const level = LEVEL_PROPS[cacheView(c, now, isWorking).level]
+      groups.push([hoverable('seg-cache', labeled(label(segs.cache), dimLabel, { bold: true, ...level }), cacheCard(c, now))])
     }
-    groups.push([
-      hoverable(
-        'seg-ctx',
-        <Text wrap="truncate-end" {...(u.ctxPct === null ? {} : LEVEL_PROPS[pctLevel(u.ctxPct)])}>
-          {label(segs.ctx)}
-        </Text>,
-        ctxCard(u),
-      ),
-    ])
+    if (segs.model !== null) {
+      groups.push([<Text wrap="truncate-end">{segs.model}</Text>])
+    }
+    const ctxLevel = u.ctxPct === null ? {} : LEVEL_PROPS[pctLevel(u.ctxPct)]
+    groups.push([hoverable('seg-ctx', labeled(label(segs.ctx), dimLabel, { bold: true, ...ctxLevel }), ctxCard(u))])
     if (segs.rates.length) {
       groups.push([...(isDesktop ? [<Text>{`${GLYPH.rates} `}</Text>] : []), ...segs.rates.flatMap(rate)])
     }
-    if (segs.digest !== null) groups.push([<Text wrap="truncate-end">{segs.digest}</Text>])
+    if (segs.digest !== null) groups.push([<Box key="seg-digest">{labeled(segs.digest, { bold: true }, {})}</Box>])
     const buttons: RenderNode[] = []
     const letters = focused ? { plain: true as const } : null
     if (segs.compact !== null) {
@@ -153,9 +150,14 @@ export function registerBand(on: On, options: PluginOptions): void {
     if (buttons.length) groups.push(buttons)
 
     const row = groups.flatMap((g, i) => (i === 0 ? g : [<Text dimColor>{SEP}</Text>, ...g]))
+    // A dim rule separates the band from the transcript above it.
+    const ruleCols = e.props.bodyColumns && e.props.bodyColumns > 0 ? Math.min(e.props.bodyColumns, 400) : 80
     return (
-      <Box flexDirection="row" overflow="hidden">
-        {row}
+      <Box flexDirection="column">
+        <Text dimColor>{RULE.repeat(ruleCols)}</Text>
+        <Box flexDirection="row" overflow="hidden">
+          {row}
+        </Box>
       </Box>
     )
   })
