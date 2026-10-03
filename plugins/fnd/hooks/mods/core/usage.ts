@@ -23,7 +23,7 @@ type $ = EngineInterface
 async function refresh($: $): Promise<void> {
   const now = await $.clock.now()
   await update($, tick, () => now)
-  const u = toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits] as const)))
+  const u = toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const)))
   await update($, usage, () => u)
   await adoptSubscriptionTtl($, u)
 }
@@ -106,7 +106,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
-    const u = toUsage(e.context, e.rateLimits)
+    const u = toUsage(e.context, e.rateLimits, e.cost)
     await update($, usage, () => u)
     await adoptSubscriptionTtl($, u)
     const hot = alarmRate(u.rates)

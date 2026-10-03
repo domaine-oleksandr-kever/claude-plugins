@@ -4,8 +4,8 @@
 /** One rate-limit window as the band draws it; `pct` is the raw percentUsed (may pass 100). */
 export type FndRate = { kind: string; label: string; pct: number; resetsAt: string | null }
 
-/** Context and rate figures; `ctxPct`/`ctxTokens` are null until the first reading and after a compaction. */
-export type FndUsage = { ctxPct: number | null; ctxTokens: number | null; window: number; rates: FndRate[] }
+/** Context, rate and cost figures; `ctxPct`/`ctxTokens` are null until the first reading and after a compaction; `costUsd` null where the host keeps no ledger. */
+export type FndUsage = { ctxPct: number | null; ctxTokens: number | null; window: number; rates: FndRate[]; costUsd: number | null }
 
 /** Prompt-cache estimate: `anchorMs` = clock time of the last main-thread response, null before one. */
 export type FndCache = {

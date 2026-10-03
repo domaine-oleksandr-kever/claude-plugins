@@ -10,12 +10,14 @@ type Surface = (typeof SURFACES)[number]
 
 type Ctx = { window: number; percent?: number; tokens?: number }
 type Rate = { kind: string; percentUsed: number; resetsAt?: string }
+type Cost = { usd: number }
 
 /** The engine beneath the plugin: clock, a recording store, env, the session ops usage.ts calls and a toast recorder. */
 function world(on: On, store: Record<string, unknown> = {}, env: Record<string, string> = {}) {
   const w = {
     context: { window: 200_000 } as Ctx,
     rateLimits: [] as Rate[],
+    cost: undefined as Cost | undefined,
     model: 'claude-fable-5-1',
     toasts: [] as string[],
     storeSets: [] as { key: string; value: unknown }[],
@@ -32,7 +34,7 @@ function world(on: On, store: Record<string, unknown> = {}, env: Record<string, 
   })
   mock.env(on, env)
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-  on('session.usage', async () => ({ value: { startedAt: T0, context: w.context, rateLimits: w.rateLimits } }))
+  on('session.usage', async () => ({ value: { startedAt: T0, context: w.context, rateLimits: w.rateLimits, cost: w.cost } }))
   on('session.model', async () => ({ value: w.model }))
   on('session.measure', async (_$, e) => ({ changed: e.changed }))
   on('session.compact', async () => (await w.compact()) as never)
@@ -59,8 +61,8 @@ const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200
 const mount = ($: any, surface: Surface, props: Partial<typeof BAND> = {}) =>
   $.ui.mount({ plugin: 'fnd', surface, component: 'AbovePrompt', props: { ...BAND, ...props } as any })
 
-const measure = ($: any, context: Ctx, rateLimits: Rate[] = []) =>
-  $.session.measure({ context, rateLimits, changed: ['context', 'rateLimits'] })
+const measure = ($: any, context: Ctx, rateLimits: Rate[] = [], cost?: Cost) =>
+  $.session.measure({ context, rateLimits, ...(cost ? { cost } : {}), changed: ['context', 'rateLimits'] })
 
 const mainTurn = ($: any, agentId?: string) =>
   $.turn.complete({
@@ -199,6 +201,22 @@ describe('band', () => {
       await measure($, { window: 200_000, percent: 47, tokens: 94_000 })
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 47%'))
       expect(await ui.find({ key: 'compact' })).toBeDefined()
+    })
+
+    test(`${surface}: the cost sits between the rate windows and the digest, with its card; hidden at zero`, async ($, on) => {
+      world(on)
+      workspace(on)
+      await start($, surface)
+      const ui = await mount($, surface)
+      const costRe = isDesktop ? /^💰 / : /^cost /
+      await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }], { usd: 0 })
+      expect(await textOf(ui, costRe)).toBeUndefined()
+      await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }], { usd: 139.1386989 })
+      expect(await textOf(ui, costRe)).toBe(L('cost $139.14'))
+      expect((await valueOf(ui, costRe))?.props).toMatchObject({ bold: true })
+      expect(await textOf(ui, /^session cost: /)).toBe('session cost: $139.14 at API prices, as /cost counts it (a subscription is not billed per request)')
+      const order = (await unitsOf(ui)).map(u => u.text).filter(t => /^(5h \d|cost |💰 |📋 |ELC-1591)/.test(t))
+      expect(order).toEqual(['5h 61%', L('cost $139.14'), isDesktop ? '📋 ELC-1591 3/5 ▶ Preview themes' : 'ELC-1591 3/5 ▶ Preview themes'])
     })
 
     test(`${surface}: 85 % → primary Compact and CRIT ctx; 50 % → dim Compact`, async ($, on) => {
@@ -506,6 +524,7 @@ describe('band', () => {
     const { text } = await $.command.run({ command: 'fnd-band', args: '' })
     expect(text).toContain('usage(): {"startedAt":')
     expect(text).toContain('"rateLimits":[{"kind":"five_hour","percentUsed":61}]')
+    expect(text).toContain('"costUsd":null')
     expect(text).toContain('progress: {"workId":"ELC-1591","branch":"feature/ELC-1591-x"}')
     expect(text).toContain('root: /repo')
     expect(text).toContain('render: {"surface":"desktop","bodyColumns":77,"maxRows":10}')

@@ -16,6 +16,7 @@ import {
   cells,
   cacheView,
   compactToast,
+  costCard,
   ctxCard,
   glyphText,
   layout,
@@ -155,6 +156,9 @@ export function registerBand(on: On, options: PluginOptions): void {
     groups.push([hoverable('seg-ctx', labeled(label(segs.ctx), dimLabel, { bold: true, ...ctxLevel }), ctxCard(u))])
     if (segs.rates.length) {
       groups.push([...(isDesktop ? [<Text>{`${GLYPH.rates} `}</Text>] : []), ...segs.rates.flatMap(rate)])
+    }
+    if (segs.cost !== null && u.costUsd !== null) {
+      groups.push([hoverable('seg-cost', labeled(label(segs.cost), dimLabel, { bold: true }), costCard(u.costUsd))])
     }
     if (segs.digest !== null) {
       groups.push([

@@ -108,6 +108,8 @@ export type BandSegs = {
   model: string | null
   ctx: string
   rates: FndRate[]
+  /** `cost $1.23`; null without a ledger or at zero. */
+  cost: string | null
   digest: string | null
   compact: BandButton | null
   progress: BandButton | null
@@ -130,6 +132,7 @@ export function rowText(s: BandSegs): string {
   if (s.model !== null) groups.push(s.model)
   groups.push(s.ctx)
   if (s.rates.length) groups.push(s.rates.map(rateText).join(RATE_GAP))
+  if (s.cost !== null) groups.push(s.cost)
   if (s.digest !== null) groups.push(s.digest)
   const buttons = [s.compact, s.progress].filter((b): b is BandButton => b !== null)
   if (buttons.length) groups.push(buttons.map(buttonText).join(BUTTON_GAP))
@@ -142,7 +145,7 @@ export function cells(text: string): number {
 }
 
 /**
- * Drops segments until the row fits `bodyColumns`: the digest, then rate windows beyond the
+ * Drops segments until the row fits `bodyColumns`: the digest, the cost, then rate windows beyond the
  * fullest (least full first), then the last rate, the model, the Progress button. Cache, ctx and
  * Compact are never dropped. 0 or absent columns = a surface that did not measure: kept whole.
  */
@@ -152,6 +155,7 @@ export function layout(segs: BandSegs, bodyColumns: number | undefined): BandSeg
   const fits = () => cells(rowText(s)) <= bodyColumns
   if (fits()) return s
   if (s.digest !== null) s = { ...s, digest: null }
+  if (!fits() && s.cost !== null) s = { ...s, cost: null }
   while (!fits() && s.rates.length > 1) {
     const fullest = s.rates.reduce((a, b) => (b.pct > a.pct ? b : a))
     const victim = s.rates.reduce((a, b) => (b !== fullest && (a === fullest || b.pct <= a.pct) ? b : a))
@@ -166,7 +170,7 @@ export function layout(segs: BandSegs, bodyColumns: number | undefined): BandSeg
 const HOUR = 60 * MIN
 export const DEFAULT_TTL_MS = 5 * MIN
 
-export const USAGE_INIT: FndUsage = { ctxPct: null, ctxTokens: null, window: 0, rates: [] }
+export const USAGE_INIT: FndUsage = { ctxPct: null, ctxTokens: null, window: 0, rates: [], costUsd: null }
 export const CACHE_INIT: FndCache = { anchorMs: null, ttlMs: DEFAULT_TTL_MS, ttlSource: 'default', isCold: false }
 
 /** `5m` / `1h` (the userConfig picker and the API's `cache_ttl`) in ms; anything else (`auto`) → null. */
@@ -178,14 +182,32 @@ export function ttlMsOf(v: unknown): number | null {
 
 export type RawContext = { tokens?: number; window: number; percent?: number }
 
+export type RawCost = { usd: number }
+
 /** `$.session.usage()` / `session.measure` figures as the usage atom holds them. */
-export function toUsage(context: RawContext, rateLimits: readonly RawRate[] | undefined): FndUsage {
+export function toUsage(context: RawContext, rateLimits: readonly RawRate[] | undefined, cost?: RawCost): FndUsage {
   return {
     ctxPct: context.percent ?? null,
     ctxTokens: context.tokens ?? null,
     window: context.window,
     rates: toRates(rateLimits),
+    costUsd: typeof cost?.usd === 'number' ? cost.usd : null,
   }
+}
+
+/** `$0.49`, `$139.14`: the host's /cost total, cents kept so a small session still moves. */
+export function fmtUsd(usd: number): string {
+  return `$${usd.toFixed(2)}`
+}
+
+/** `cost $139.14`; null without a ledger and while the session has cost nothing. */
+export function costText(usd: number | null): string | null {
+  return usd === null || usd <= 0 ? null : `cost ${fmtUsd(usd)}`
+}
+
+/** The cost hover card. */
+export function costCard(usd: number): string {
+  return `session cost: ${fmtUsd(usd)} at API prices, as /cost counts it (a subscription is not billed per request)`
 }
 
 /** `1,234,567`. */
@@ -238,11 +260,14 @@ export function ctxCard(u: FndUsage): string {
 }
 
 /** Single code points only: a VS16/ZWJ sequence has no settled cell width. */
-export const GLYPH = { cache: '⏱', ctx: '\u{1F9E0}', rates: '⏳', model: '\u{1F916}', digest: '\u{1F4CB}' } as const
+export const GLYPH = { cache: '⏱', ctx: '\u{1F9E0}', rates: '⏳', model: '\u{1F916}', digest: '\u{1F4CB}', cost: '\u{1F4B0}' } as const
 
-/** The desktop label: the leading word of `cache 42m` / `ctx 47%` becomes its glyph. */
+/** The desktop label: the leading word of `cache 42m` / `ctx 47%` / `cost $1.23` becomes its glyph. */
 export function glyphText(text: string): string {
-  return text.replace(/^cache /, `${GLYPH.cache} `).replace(/^ctx /, `${GLYPH.ctx} `)
+  return text
+    .replace(/^cache /, `${GLYPH.cache} `)
+    .replace(/^ctx /, `${GLYPH.ctx} `)
+    .replace(/^cost /, `${GLYPH.cost} `)
 }
 
 export const COMPACT_SHOW_PCT = 30
@@ -293,6 +318,7 @@ export function bandSegs(i: BandInput): BandSegs {
     model: shortModel(i.model),
     ctx: ctxText(i.usage.ctxPct),
     rates: i.usage.rates,
+    cost: costText(i.usage.costUsd),
     digest: i.digest,
     compact: compactButton(i.usage.ctxPct, i.isWorking),
     progress: PROGRESS_BUTTON,

@@ -10,8 +10,11 @@ import {
   cacheCard,
   compactButton,
   compactToast,
+  costCard,
+  costText,
   ctxCard,
   fmtInt,
+  fmtUsd,
   fmtResetIn,
   glyphText,
   oneHourCacheTokens,
@@ -146,6 +149,7 @@ describe('layout', () => {
       { kind: 'seven_day', percentUsed: 34 },
       { kind: 'seven_day_fable', percentUsed: 12 },
     ]),
+    cost: 'cost $139.14',
     digest: 'ELC-1591 3/5 ▶ Preview themes',
     compact: { key: 'compact', label: 'Compact', hotkey: 'c', plain: true },
     progress: { key: 'progress', label: 'Progress', hotkey: 'p', plain: true },
@@ -156,14 +160,15 @@ describe('layout', () => {
     expect(buttonText({ key: 'compact', label: 'Compact', hotkey: 'c', plain: true })).toBe('c: Compact')
     expect(buttonText({ key: 'compact', label: 'Compact', hotkey: 'c', plain: false })).toBe('[ Compact ]')
     expect(rowText(full)).toBe(
-      'cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress',
+      'cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress',
     )
-    expect(cells(rowText(full))).toBe(122)
+    expect(cells(rowText(full))).toBe(137)
   })
 
-  test('drop order 1→5', () => {
+  test('drop order 1→6', () => {
     expect(at(160)).toBe(rowText(full))
-    expect(at(122)).toBe(rowText(full))
+    expect(at(137)).toBe(rowText(full))
+    expect(at(110)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ c: Compact  p: Progress')
     expect(at(100)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ c: Compact  p: Progress')
     expect(at(80)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% │ c: Compact  p: Progress')
     expect(at(70)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% │ c: Compact  p: Progress')
@@ -173,7 +178,7 @@ describe('layout', () => {
   })
 
   test('the fullest window outlives the others wherever it sits', () => {
-    const s = { ...full, digest: null, rates: toRates([
+    const s = { ...full, digest: null, cost: null, rates: toRates([
       { kind: 'five_hour', percentUsed: 10 },
       { kind: 'seven_day', percentUsed: 90 },
     ]) }
@@ -195,6 +200,7 @@ describe('layout', () => {
     expect(rowText(narrow)).toBe('cache 42m │ ctx 47% │ [ Compact ]')
     expect(narrow.model).toBeNull()
     expect(narrow.rates).toEqual([])
+    expect(narrow.cost).toBeNull()
     expect(narrow.digest).toBeNull()
     expect(narrow.progress).toBeNull()
   })
@@ -214,15 +220,25 @@ describe('usage and TTL', () => {
   })
 
   test('initial atoms: no reading, 5 min default TTL', () => {
-    expect(USAGE_INIT).toEqual({ ctxPct: null, ctxTokens: null, window: 0, rates: [] })
+    expect(USAGE_INIT).toEqual({ ctxPct: null, ctxTokens: null, window: 0, rates: [], costUsd: null })
     expect(CACHE_INIT).toEqual({ anchorMs: null, ttlMs: 5 * MIN, ttlSource: 'default', isCold: false })
   })
 
-  test('toUsage: absent percent and tokens stay null', () => {
-    expect(toUsage({ window: 200_000 }, [])).toEqual({ ctxPct: null, ctxTokens: null, window: 200_000, rates: [] })
-    const u = toUsage({ window: 200_000, percent: 47, tokens: 94_000 }, [{ kind: 'five_hour', percentUsed: 61 }])
-    expect(u).toMatchObject({ ctxPct: 47, ctxTokens: 94_000, window: 200_000 })
+  test('toUsage: absent percent, tokens and cost stay null', () => {
+    expect(toUsage({ window: 200_000 }, [])).toEqual({ ctxPct: null, ctxTokens: null, window: 200_000, rates: [], costUsd: null })
+    const u = toUsage({ window: 200_000, percent: 47, tokens: 94_000 }, [{ kind: 'five_hour', percentUsed: 61 }], { usd: 139.1386989 })
+    expect(u).toMatchObject({ ctxPct: 47, ctxTokens: 94_000, window: 200_000, costUsd: 139.1386989 })
     expect(u.rates.map(r => r.label)).toEqual(['5h'])
+  })
+
+  test('cost: two decimals, hidden at zero or without a ledger; a glyph on desktop', () => {
+    expect(fmtUsd(139.1386989)).toBe('$139.14')
+    expect(fmtUsd(0.4920822)).toBe('$0.49')
+    expect(costText(139.1386989)).toBe('cost $139.14')
+    expect(costText(0)).toBeNull()
+    expect(costText(null)).toBeNull()
+    expect(costCard(0.4920822)).toBe('session cost: $0.49 at API prices, as /cost counts it (a subscription is not billed per request)')
+    expect(glyphText('cost $0.49')).toBe('\u{1F4B0} $0.49')
   })
 
   test('oneHourCacheTokens reads an Agent result defensively', () => {
@@ -297,7 +313,7 @@ describe('segments', () => {
 
   test('bandSegs from the atoms', () => {
     const s = bandSegs({
-      usage: { ...USAGE_INIT, ctxPct: 47, rates: toRates([{ kind: 'five_hour', percentUsed: 61 }]) },
+      usage: { ...USAGE_INIT, ctxPct: 47, rates: toRates([{ kind: 'five_hour', percentUsed: 61 }]), costUsd: 0.4920822 },
       model: 'claude-fable-5-1',
       cache: { ...CACHE_INIT, anchorMs: 0, ttlMs: HOUR },
       nowMs: 18 * MIN,
@@ -305,7 +321,7 @@ describe('segments', () => {
       digest: 'ELC-1591 3/5 ▶ Preview themes',
     })
     expect(rowText(s)).toBe(
-      'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress',
+      'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress',
     )
   })
 })

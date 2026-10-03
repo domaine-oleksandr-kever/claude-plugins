@@ -1596,7 +1596,7 @@ session itself as function hooks. Function hooks can do what a command hook cann
 UI above the prompt and in a side pane. They replace a tool result after the host has already
 cut it down to an overflow notice. They add a note to a tool's description before the model
 sees it. The module adds four things. The **status band** is one row above the prompt with the
-prompt-cache countdown, model, context use, every rate-limit window and the task digest. The
+prompt-cache countdown, model, context use, every rate-limit window, the session's cost and the task digest. The
 **progress pane** shows the task workspace's checklist. The **scratch-path guard** answers on the
 tool call itself. **MCP slimming** also reaches results over the platform limit, which the
 classic `mcp-slim` hook never sees. Guard and slimming do not duplicate the Node hooks. They
@@ -1613,10 +1613,10 @@ windows, a task workspace open:
 
 ```text
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Progress ]
+cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Progress ]
 ```
 
-120 columns, same session. The row is 139 cells, so the digest goes first:
+120 columns, same session. The row is 154 cells, so the digest goes first, then the cost:
 
 ```text
 cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ [ Compact ]  [ Progress ]
@@ -1628,7 +1628,7 @@ cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ [ 
 cache 42m │ ctx 47% │ [ Compact ]  [ Progress ]
 ```
 
-The full drop order is: the digest, then the rate windows beyond the fullest (least full first),
+The full drop order is: the digest, the cost, then the rate windows beyond the fullest (least full first),
 then the last window, then the model, then the Progress button. Cache, ctx and Compact are never
 dropped. The row's text truncates as a backstop, so the band never takes a second row.
 
@@ -1638,6 +1638,7 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 | model | `fable-5-1` | The model id as the session reports it, without the `claude-` prefix every id carries |
 | ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session and after every compaction until the next response arrives. Mid-turn it refreshes on a 30 s tick. |
 | rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
+| cost | `cost $12.40` | What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
 | digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the first unchecked row (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done. Hidden while the progress pane is open, and when no workspace resolves. |
 | Compact | `[ Compact ]`, `c: Compact` | Hidden at ≤ 30 % context and while a turn runs. From 31 % it is drawn dim; from 80 % it is `[ Compact ]` in the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). |
 | Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
@@ -1651,15 +1652,16 @@ theme keys are used, so the band follows light, dark and high-contrast themes. T
 `warning` + bold + inverse until a dedicated error key is proven to draw on every theme.
 
 **Desktop and hover.** In the desktop app's Code tab every segment carries a glyph instead of a word
-(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 📋 ELC-1591 3/5 ▶ …`), and Compact / Progress are native
+(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`), and Compact / Progress are native
 buttons. The desktop draws proportional text, so the width model above does not apply there: nothing is
 dropped, the row clips at the panel's edge. When the
-pointer rests on the cache, ctx or a rate window, a one-line card appears. This is meant for desktop
+pointer rests on the cache, ctx, a rate window or the cost, a one-line card appears. This is meant for desktop
 and for terminals that pass the pointer through (kitty, Ghostty, iTerm2, WezTerm; tmux passes
 none). The glyph labels, the native buttons and hover are still a live check (desktop and
 terminal paint). The cards read:
 `prompt cache: ~42 min left (estimate: last response + 1 h TTL)`,
-`context: 47% of 200,000 tokens, 94,000 used`, `5h window: 61% used, resets in 2h 05m`.
+`context: 47% of 200,000 tokens, 94,000 used`, `5h window: 61% used, resets in 2h 05m`,
+`session cost: $12.40 at API prices, as /cost counts it (a subscription is not billed per request)`.
 
 **Toasts.** When a rate window first reaches 90 %, one toast shows that window's card for 8 s
 (`5h window: 91% used, resets in 1h 05m`). It re-arms once every window is back under the line, and
