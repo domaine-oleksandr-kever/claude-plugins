@@ -253,6 +253,15 @@ export function cacheCard(cache: FndCache, nowMs: number): string {
   return `prompt cache: ${mins} min left (estimate: last response + ${ttlText(cache.ttlMs)} TTL)`
 }
 
+/**
+ * The context right after a compaction: the engine's own count of the kept conversation over the
+ * window already known. The next response replaces it with a measured reading.
+ */
+export function compactedUsage(u: FndUsage, tokensAfter: number | undefined): FndUsage {
+  const known = typeof tokensAfter === 'number' && tokensAfter >= 0
+  return { ...u, ctxTokens: known ? tokensAfter : null, ctxPct: known && u.window > 0 ? (tokensAfter / u.window) * 100 : null }
+}
+
 export function ctxCard(u: FndUsage): string {
   if (u.ctxPct === null) return 'context: no reading yet (fresh session or just compacted)'
   const used = u.ctxTokens === null ? '' : `, ${fmtInt(u.ctxTokens)} used`

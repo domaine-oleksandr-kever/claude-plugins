@@ -12,6 +12,7 @@ import {
   compactToast,
   costCard,
   costText,
+  compactedUsage,
   ctxCard,
   fmtInt,
   fmtUsd,
@@ -222,6 +223,13 @@ describe('usage and TTL', () => {
   test('initial atoms: no reading, 5 min default TTL', () => {
     expect(USAGE_INIT).toEqual({ ctxPct: null, ctxTokens: null, window: 0, rates: [], costUsd: null })
     expect(CACHE_INIT).toEqual({ anchorMs: null, ttlMs: 5 * MIN, ttlSource: 'default', isCold: false })
+  })
+
+  test('compactedUsage: tokensAfter over the known window; absent count or window → no reading', () => {
+    const u = toUsage({ window: 200_000, percent: 47, tokens: 94_000 }, [])
+    expect(compactedUsage(u, 26_300)).toEqual({ ...u, ctxPct: 13.15, ctxTokens: 26_300 })
+    expect(compactedUsage(u, undefined)).toEqual({ ...u, ctxPct: null, ctxTokens: null })
+    expect(compactedUsage(USAGE_INIT, 26_300)).toEqual({ ...USAGE_INIT, ctxPct: null, ctxTokens: 26_300 })
   })
 
   test('toUsage: absent percent, tokens and cost stay null', () => {

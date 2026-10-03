@@ -327,7 +327,7 @@ describe('band', () => {
       expect(await textOf(ui, cacheRe)).toBe(L('cache —'))
     })
 
-    test(`${surface}: session.compact manual → cold and ctx —; precompute and skip → no change`, async ($, on) => {
+    test(`${surface}: session.compact manual → cold and ctx from tokensAfter; precompute and skip → no change`, async ($, on) => {
       const { w } = world(on)
       await start($, surface)
       const ui = await mount($, surface)
@@ -340,9 +340,13 @@ describe('band', () => {
       await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
       expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 47%'))
-      w.compact = async () => ({ messages: KEPT })
+      w.compact = async () => ({ messages: KEPT, tokensBefore: 94_000, tokensAfter: 26_300 })
       await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
+      expect(await ui.find({ key: 'compact' })).toBeUndefined()
+      w.compact = async () => ({ messages: KEPT })
+      await $.session.compact({ trigger: 'auto', messages: KEPT } as any)
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
     })
 
@@ -528,6 +532,7 @@ describe('band', () => {
     expect(text).toContain('progress: {"workId":"ELC-1591","branch":"feature/ELC-1591-x"}')
     expect(text).toContain('root: /repo')
     expect(text).toContain('render: {"surface":"desktop","bodyColumns":77,"maxRows":10}')
+    expect(text).toMatch(/^tick: \d+$/m)
   })
 
   test('without FND_BAND_COST the cost never reaches the band', async ($, on) => {

@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import type { FndUsage } from '../../../types'
-import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
+import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender } from './band.tsx'
 
 const TICK_MS = 30_000
@@ -108,6 +108,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
       `progress: ${JSON.stringify(p === null ? null : { workId: p.workId, branch: p.branch })}`,
       `root: ${root}`,
       `render: ${JSON.stringify(lastRender)}`,
+      `tick: ${await read($, tick)}`,
       `now: ${await $.clock.now()}`,
     ]
     return { text: lines.join('\n') }
@@ -142,7 +143,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const r = await next(e)
     if (r.skip === undefined && r.messages && e.trigger !== 'precompute' && e.agentId === undefined) {
       await update($, cache, c => ({ ...c, isCold: true }))
-      await update($, usage, u => ({ ...u, ctxPct: null, ctxTokens: null }))
+      await update($, usage, u => compactedUsage(u, r.tokensAfter))
     }
     return r
   })
