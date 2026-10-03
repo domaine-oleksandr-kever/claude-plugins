@@ -5,7 +5,7 @@ import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import type { FndEvent, FndEventKind, FndUsage } from '../../../types'
 import { fmtK, pushEvent } from './events.ts'
 import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
-import { lastRender } from './band.tsx'
+import { lastRender, turn } from './band.tsx'
 
 const TICK_MS = 30_000
 const ALARM_TOAST_MS = 8000
@@ -146,6 +146,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined) turn.running = false
     if (e.agentId === undefined && e.usage) {
       const now = await $.clock.now()
       await update($, cache, c => ({ ...c, anchorMs: now, isCold: false }))

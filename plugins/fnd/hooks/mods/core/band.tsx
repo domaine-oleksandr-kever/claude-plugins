@@ -38,7 +38,14 @@ const bandFocused = atom({ plugin: 'fnd', key: 'bandFocused' } as const, false)
 
 type $ = EngineInterface
 
+/** Main-loop turn in flight: turn events flip it, each band draw syncs it; usage.ts clears it, as the engine allows one unmatched turn.complete hook. */
+export const turn = { running: false }
+
 function pressCompact($: $): void {
+  if (turn.running) {
+    $.ui.toast('turn is running — press Compact again when it ends')
+    return
+  }
   $.session.compact().then(
     r => $.ui.toast(compactToast(r)),
     err => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`),
@@ -72,15 +79,19 @@ export function registerBand(on: On, options: PluginOptions): void {
     return next(e)
   })
   on('turn.start', async ($, e, next) => {
+    turn.running = true
     await setFocused($, false)
     return next(e)
   })
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
+    turn.running = false
     await setFocused($, false)
     return next(e)
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    // The engine's own truth: every draw re-aligns a flag a missed turn.complete or a hot reload left wrong.
+    turn.running = e.props.isWorking
     if (options.statusBand === false || e.props.hasSurvey) return next(e)
     const u = await read($, usage)
     const m = await read($, model)

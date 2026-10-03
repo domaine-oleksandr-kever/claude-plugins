@@ -471,6 +471,59 @@ describe('band', () => {
       expect(w.toasts).toHaveLength(3)
     })
 
+    test(`${surface}: Compact pressed during a main turn only toasts; a subagent turn's end keeps it; the main end re-arms it`, async ($, on) => {
+      const { w } = world(on)
+      let calls = 0
+      w.compact = async () => {
+        calls++
+        return { messages: KEPT, tokensBefore: 90_000, tokensAfter: 10_000 }
+      }
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 45 })
+      const ui = await mount($, surface)
+      await $.turn.start({ text: 'hi', turnId: 't' })
+      await ui.press({ key: 'compact' })
+      await mainTurn($, 'agent-1')
+      await ui.press({ key: 'compact' })
+      expect(calls).toBe(0)
+      await mainTurn($)
+      await ui.press({ key: 'compact' })
+      expect(calls).toBe(1)
+      const busy = 'turn is running — press Compact again when it ends'
+      expect(w.toasts).toEqual([busy, busy, 'compacted 90,000 → 10,000 tokens'])
+    })
+
+    test(`${surface}: a draw with isWorking false clears a flag stuck by a missed turn.complete`, async ($, on) => {
+      const { w } = world(on)
+      let calls = 0
+      w.compact = async () => {
+        calls++
+        return { messages: KEPT, tokensBefore: 90_000, tokensAfter: 10_000 }
+      }
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 45 })
+      await $.turn.start({ text: 'hi', turnId: 't' })
+      const ui = await mount($, surface, { isWorking: false })
+      await ui.press({ key: 'compact' })
+      expect(calls).toBe(1)
+      expect(w.toasts).toEqual(['compacted 90,000 → 10,000 tokens'])
+    })
+
+    test(`${surface}: a draw with isWorking true and no turn.start seen (a reload mid-turn) → the busy toast`, async ($, on) => {
+      const { w } = world(on)
+      let calls = 0
+      w.compact = async () => {
+        calls++
+        return { messages: KEPT }
+      }
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 45 })
+      const ui = await mount($, surface, { isWorking: true })
+      await ui.press({ key: 'compact' })
+      expect(calls).toBe(0)
+      expect(w.toasts).toEqual(['turn is running — press Compact again when it ends'])
+    })
+
     test(`${surface}: a Compact press at 10 % still runs /compact`, async ($, on) => {
       const { w } = world(on)
       let calls = 0

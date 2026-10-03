@@ -557,6 +557,7 @@ lacks "$README" '--no-spill' readme-no-nospill
 
 # The band's Compact button never hides, so the row stays put; the README row must not bring back the old threshold.
 has "$README" '| Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable' band-compact-always-first
+has "$README" 'Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued.' band-compact-busy-toast
 lacks "$README" 'Hidden at ≤ 30 % context' band-compact-no-hide-threshold
 if grep -qF 'COMPACT_SHOW_PCT' "$PLUGIN_DIR/hooks/mods/core/lib.ts"; then bad band-compact-no-show-threshold 'lib.ts still gates the Compact button on COMPACT_SHOW_PCT'
 else ok; fi
