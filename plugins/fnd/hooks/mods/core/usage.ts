@@ -8,6 +8,7 @@ import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, oneHourCacheTokens, rateCar
 const TICK_MS = 30_000
 const ALARM_TOAST_MS = 8000
 const STORE_TTL = 'cacheTtlMs'
+const DEBUG_COMMAND = { name: 'fnd-band', description: 'Show the raw figures behind the fnd status band (debug)' }
 
 const usage = atom({ plugin: 'fnd', key: 'usage' } as const, USAGE_INIT)
 const model = atom({ plugin: 'fnd', key: 'model' } as const, null)
@@ -23,6 +24,20 @@ async function refresh($: $): Promise<void> {
   const u = toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits] as const)))
   await update($, usage, () => u)
   await adoptSubscriptionTtl($, u)
+}
+
+/**
+ * An API key or a cloud provider bills per request and gets the 5 min cache; without them the session
+ * runs on a claude.ai account, whose cache lives 1 h. Only the presence of the variables is read.
+ */
+async function defaultTtl($: $): Promise<number> {
+  const billed = [
+    await $.env.get('ANTHROPIC_API_KEY'),
+    await $.env.get('CLAUDE_CODE_USE_BEDROCK'),
+    await $.env.get('CLAUDE_CODE_USE_VERTEX'),
+    await $.env.get('CLAUDE_CODE_USE_FOUNDRY'),
+  ].some(v => v !== undefined)
+  return billed ? CACHE_INIT.ttlMs : HOUR_MS
 }
 
 /**
@@ -56,8 +71,9 @@ export function registerUsage(on: On, options: PluginOptions): void {
         learned = typeof stored === 'number' && stored > 0 ? stored : null
       } catch {}
     }
-    const ttlMs = forcedTtl ?? learned ?? CACHE_INIT.ttlMs
+    const ttlMs = forcedTtl ?? learned ?? (await defaultTtl($).catch(() => CACHE_INIT.ttlMs))
     const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
+    await $.command.register(DEBUG_COMMAND).catch(() => undefined)
     await update($, cache, c => ({ ...c, ttlMs, ttlSource }))
     try {
       const m = await $.session.model()
@@ -65,6 +81,13 @@ export function registerUsage(on: On, options: PluginOptions): void {
     } catch {}
     await refresh($).catch(() => undefined)
     return next(e)
+  })
+
+  on('command.run', { command: DEBUG_COMMAND.name }, async ($) => {
+    const raw = await $.session.usage().catch(err => ({ error: String(err) }))
+    const c = await read($, cache)
+    const u = await read($, usage)
+    return { text: `fnd band debug\nusage(): ${JSON.stringify(raw)}\ncache: ${JSON.stringify(c)}\nusage atom: ${JSON.stringify(u)}\nnow: ${await $.clock.now()}` }
   })
 
   on('session.measure', async ($, e, next) => {

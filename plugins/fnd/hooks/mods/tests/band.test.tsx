@@ -12,7 +12,7 @@ type Ctx = { window: number; percent?: number; tokens?: number }
 type Rate = { kind: string; percentUsed: number; resetsAt?: string }
 
 /** The engine beneath the plugin: clock, a recording store, env, the session ops usage.ts calls and a toast recorder. */
-function world(on: On, store: Record<string, unknown> = {}) {
+function world(on: On, store: Record<string, unknown> = {}, env: Record<string, string> = {}) {
   const w = {
     context: { window: 200_000 } as Ctx,
     rateLimits: [] as Rate[],
@@ -30,7 +30,7 @@ function world(on: On, store: Record<string, unknown> = {}) {
     mem[e.key] = e.value
     return { value: undefined }
   })
-  mock.env(on, {})
+  mock.env(on, env)
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('session.usage', async () => ({ value: { startedAt: T0, context: w.context, rateLimits: w.rateLimits } }))
   on('session.model', async () => ({ value: w.model }))
@@ -167,7 +167,9 @@ describe('band', () => {
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
       expect(await ui.find({ key: 'compact' })).toBeUndefined()
       const progress = await ui.find({ key: 'progress' })
-      expect(progress?.props).toMatchObject({ label: 'Progress', hotkey: 'p', dimColor: true })
+      expect(progress?.props).toMatchObject({ label: 'Progress', dimColor: true })
+      // A desktop draws a hotkey as a badge on its native button, so none is set there.
+      expect(progress?.props.hotkey).toBe(isDesktop ? undefined : 'p')
       expect(progress?.props.plain).toBeUndefined()
     })
 
@@ -209,7 +211,8 @@ describe('band', () => {
       expect((await valueOf(ui, ctxRe))?.props).toMatchObject(CRIT)
       await measure($, { window: 200_000, percent: 50 })
       const quiet = await ui.find({ key: 'compact' })
-      expect(quiet?.props).toMatchObject({ dimColor: true, hotkey: 'c', label: 'Compact' })
+      expect(quiet?.props).toMatchObject({ dimColor: true, label: 'Compact' })
+      expect(quiet?.props.hotkey).toBe(isDesktop ? undefined : 'c')
       expect(quiet?.props.variant).toBeUndefined()
       expect(quiet?.props.plain).toBeUndefined()
       expect((await valueOf(ui, ctxRe))?.props).toMatchObject({ color: 'warning', bold: true })
@@ -225,6 +228,12 @@ describe('band', () => {
       const focusIn = { component: 'AbovePrompt', requestId: 'band', origin: { kind: 'person' } }
       const r = await $.ui.focus({ ...focusIn, element: 'compact' } as never)
       expect(r.deny).toBeUndefined()
+      if (isDesktop) {
+        // No letters on a desktop, and no redraw either: the focus-in before a click must not swallow the press.
+        expect((await ui.find({ key: 'compact' }))?.props).toMatchObject({ dimColor: true })
+        expect((await ui.find({ key: 'compact' }))?.props.plain).toBeUndefined()
+        return
+      }
       expect((await ui.find({ key: 'compact' }))?.props).toMatchObject({ plain: true, hotkey: 'c' })
       expect((await ui.find({ key: 'progress' }))?.props).toMatchObject({ plain: true, hotkey: 'p' })
       await $.turn.start({ text: 'hi', turnId: 't1' })
@@ -306,11 +315,11 @@ describe('band', () => {
       await mainTurn($)
       await measure($, { window: 200_000, percent: 47 })
       await $.session.compact({ trigger: 'precompute', messages: KEPT } as any)
-      expect(await textOf(ui, cacheRe)).toBe(L('cache 5m'))
+      expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 47%'))
       w.compact = async () => ({ skip: 'blocked by PreCompact' })
       await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
-      expect(await textOf(ui, cacheRe)).toBe(L('cache 5m'))
+      expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 47%'))
       w.compact = async () => ({ messages: KEPT })
       await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
@@ -324,7 +333,7 @@ describe('band', () => {
       const ui = await mount($, surface)
       await mainTurn($)
       await $.session.compact({ trigger: 'auto', agentId: 'agent-1', messages: KEPT } as any)
-      expect(await textOf(ui, cacheRe)).toBe(L('cache 5m'))
+      expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
     })
 
     for (const reason of ['clear', 'resume'] as const) {
@@ -558,11 +567,19 @@ describe('TTL learning (A4)', () => {
     expect((await peekCache($)).ttlMs).toBe(3_600_000)
   })
 
-  test('without a stored TTL, auto starts at 5 min', { plugins: [peek] }, async ($, on) => {
+  test('without a stored TTL, auto starts at 1 h on a claude.ai account and 5 min under an API key', { plugins: [peek] }, async ($, on) => {
     world(on)
     await start($)
-    expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'default' })
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'default' })
   })
+
+  for (const name of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']) {
+    test(`${name} set → auto starts at 5 min`, { plugins: [peek] }, async ($, on) => {
+      world(on, {}, { [name]: '1' })
+      await start($)
+      expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'default' })
+    })
+  }
 
   test('rate windows mean a subscription → 1 h, from the start reading or a measurement', { plugins: [peek] }, async ($, on) => {
     const { w } = world(on)
@@ -572,7 +589,7 @@ describe('TTL learning (A4)', () => {
   })
 
   test('a measurement with rate windows adopts 1 h once; a stored, forced or reported TTL wins', { plugins: [peek] }, async ($, on) => {
-    world(on)
+    world(on, {}, { ANTHROPIC_API_KEY: 'k' })
     await start($)
     expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'default' })
     await measure($, { window: 200_000, percent: 10 }, [{ kind: 'seven_day', percentUsed: 17 }])

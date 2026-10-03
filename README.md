@@ -1676,10 +1676,12 @@ the buttons are mainly clicked (pointer-capable terminals) or reached as ctrl+x 
 letter, and Esc gives the keyboard back to the prompt. To focus the band with a single chord,
 rebind `abovePrompt:focus` (default ctrl+x tab) in `~/.claude/keybindings.json`, then press the
 letter. On
-desktop they are ordinary buttons. ctrl+x ctrl+a collapses the band; while it is collapsed the engine
+desktop they are ordinary buttons with no hotkey at all (a desktop draws a hotkey as a badge on its native button, and a click is the way there). ctrl+x ctrl+a collapses the band; while it is collapsed the engine
 shows one dim line above the prompt, `plugin panel hidden · ctrl+x ctrl+a or click to show`, and that
 chord or a click on the line brings it back. The collapsed state is the engine's and persists across
 reloads; the plugin cannot and does not reopen the band by itself.
+
+**Debug.** `/fnd-band` prints the raw figures behind the band: the session's `usage()` answer, the cache state and the usage atom. Paste its output when a segment looks wrong on some surface.
 
 ### Progress pane
 
@@ -1788,7 +1790,7 @@ they appear is still a live check. They are stored in
 | Field | Default | Effect |
 |---|---|---|
 | `statusBand` | `true` | `false` draws no band. The pane, `/fnd-progress`, the guard and slimming keep working. |
-| `cacheTtl` | `auto` | The prompt-cache TTL behind the countdown. `auto` learns it from the session: a `/model` switch reports it, and a subagent result with 1 h cache writes proves 1 h. It is remembered across sessions. Until then the estimate is 1 h when the account reports rate-limit windows (a claude.ai subscription) and 5 min otherwise (an API key; a subscription in overage also drops to 5 min, which the band cannot see). `5m` or `1h` forces it. |
+| `cacheTtl` | `auto` | The prompt-cache TTL behind the countdown. `auto` learns it from the session: a `/model` switch reports it, and a subagent result with 1 h cache writes proves 1 h. It is remembered across sessions. Until then the estimate is 1 h on a claude.ai account and 5 min when the session bills an API key or a cloud provider (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` present in the session's environment; only their presence is read). Rate-limit windows arriving also mean a subscription, so they set 1 h too. A subscription in overage drops to 5 min, which the band cannot see; the cache segment is hidden while a window is at 100 %. `5m` or `1h` forces it. |
 
 ### Fallbacks and other hosts
 

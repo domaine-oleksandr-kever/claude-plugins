@@ -43,23 +43,31 @@ function pressCompact($: $): void {
   )
 }
 
+/** The surface the band last drew on; a desktop has no hotkey letters, so focus moves must not redraw it. */
+let drawnOn: string = 'terminal'
+
+/** Guarded write: a redraw between a click's focus-in and its press would swallow the press. */
+async function setFocused($: $, to: boolean): Promise<void> {
+  if (drawnOn !== 'desktop' && (await read($, bandFocused)) !== to) await update($, bandFocused, () => to)
+}
+
 export function registerBand(on: On, options: PluginOptions): void {
   // Hotkey letters are drawn only while the band holds the keyboard. A focus-in sets the flag; a
   // press, a turn or /clear clears it, as there is no focus-out event. The hotkeys stay armed.
   on('ui.focus', { component: 'AbovePrompt' }, async ($, e, next) => {
-    await update($, bandFocused, () => true)
+    await setFocused($, true)
     return next(e)
   })
   on('ui.press', { plugin: 'fnd' }, async ($, e, next) => {
-    await update($, bandFocused, () => false)
+    await setFocused($, false)
     return next(e)
   })
   on('turn.start', async ($, e, next) => {
-    await update($, bandFocused, () => false)
+    await setFocused($, false)
     return next(e)
   })
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
-    await update($, bandFocused, () => false)
+    await setFocused($, false)
     return next(e)
   })
 
@@ -78,6 +86,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     const digest = p !== null && p.workId !== null && !isPaneShown ? digestText(p.workId, p) : null
     const segs = layout(bandSegs({ usage: u, model: m, cache: c, nowMs: now, isWorking, digest }), e.props.bodyColumns)
     const isDesktop = e.surface === 'desktop'
+    drawnOn = e.surface
     const { Box, Text, Button } = $.ui.resolve(e)
 
     const label = (text: string) => (isDesktop ? glyphText(text) : text)
@@ -138,14 +147,16 @@ export function registerBand(on: On, options: PluginOptions): void {
     }
     if (segs.digest !== null) groups.push([<Box key="seg-digest">{labeled(segs.digest, { bold: true }, {})}</Box>])
     const buttons: RenderNode[] = []
-    const letters = focused ? { plain: true as const } : null
+    // A desktop draws a hotkey as a badge on its native button, and its buttons are clicked: no hotkeys there.
+    const letters = focused && !isDesktop ? { plain: true as const } : null
+    const hot = (k: string) => (isDesktop ? {} : { hotkey: k })
     if (segs.compact !== null) {
       const look = letters ?? (segs.compact.plain ? { dimColor: true } : { variant: 'primary' as const })
-      buttons.push(<Button key="compact" label="Compact" hotkey="c" {...look} onPress={() => pressCompact($)} />)
+      buttons.push(<Button key="compact" label="Compact" {...hot('c')} {...look} onPress={() => pressCompact($)} />)
     }
     if (segs.progress !== null) {
       if (buttons.length) buttons.push(<Text>{'  '}</Text>)
-      buttons.push(<Button key="progress" label="Progress" hotkey="p" {...(letters ?? { dimColor: true })} onPress={() => {}} />)
+      buttons.push(<Button key="progress" label="Progress" {...hot('p')} {...(letters ?? { dimColor: true })} onPress={() => {}} />)
     }
     if (buttons.length) groups.push(buttons)
 

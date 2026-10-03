@@ -84,7 +84,7 @@ function world(on: On, over: Partial<World> = {}) {
     return { value: f.text }
   })
   on('command.register', async (_$, e) => {
-    calls.registers++
+    if (e.name === 'fnd-progress') calls.registers++
     return { value: { command: e.name } }
   })
   on('ui.open', async (_$, e) => {
