@@ -168,13 +168,16 @@ describe('band', () => {
     const ctxRe = isDesktop ? /^🧠 / : /^ctx /
     const L = (text: string) => (isDesktop ? glyphText(text) : text)
 
-    test(`${surface}: fresh → cache —, ctx —, no Compact`, async ($, on) => {
+    test(`${surface}: fresh → cache —, ctx —, Compact first and pressable`, async ($, on) => {
       world(on)
       await start($, surface)
       const ui = await mount($, surface)
       expect(await textOf(ui, cacheRe)).toBe(L('cache —'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
-      expect(await ui.find({ key: 'compact' })).toBeUndefined()
+      const compact = await ui.find({ key: 'compact' })
+      expect(compact?.props.label).toBe('Compact')
+      expect(compact?.props.dimColor).toBeUndefined()
+      expect(compact?.props.variant).toBeUndefined()
       const progress = await ui.find({ key: 'progress' })
       expect(progress?.props).toMatchObject({ label: 'Progress', dimColor: true })
       // A desktop draws a hotkey as a badge on its native button, so none is set there.
@@ -185,7 +188,7 @@ describe('band', () => {
       expect(log?.props.hotkey).toBe(isDesktop ? undefined : 'l')
       expect(log?.props.plain).toBeUndefined()
       const keys = nodes(await ui.drawn()).filter(n => n.type === 'Button').map(n => n.props.key)
-      expect(keys).toEqual(['progress', 'log'])
+      expect(keys).toEqual(['compact', 'progress', 'log'])
     })
 
     test(`${surface}: a rule above the row (terminal only); dim label, bold value; the cache hides in overage`, async ($, on) => {
@@ -232,7 +235,7 @@ describe('band', () => {
       expect(order).toEqual(['5h 61%', L('cost $139.14'), isDesktop ? '📋 ELC-1591 3/5 ▶ Preview themes' : 'ELC-1591 3/5 ▶ Preview themes'])
     })
 
-    test(`${surface}: 85 % → primary Compact and CRIT ctx; 50 % → dim Compact`, async ($, on) => {
+    test(`${surface}: 85 % → primary Compact and CRIT ctx; 50 % and 10 % → normal Compact`, async ($, on) => {
       world(on)
       await start($, surface)
       const ui = await mount($, surface)
@@ -243,14 +246,18 @@ describe('band', () => {
       expect((await valueOf(ui, ctxRe))?.props).toMatchObject(CRIT)
       await measure($, { window: 200_000, percent: 50 })
       const quiet = await ui.find({ key: 'compact' })
-      expect(quiet?.props).toMatchObject({ dimColor: true, label: 'Compact' })
+      expect(quiet?.props.label).toBe('Compact')
+      expect(quiet?.props.dimColor).toBeUndefined()
       expect(quiet?.props.hotkey).toBe(isDesktop ? undefined : 'c')
       expect(quiet?.props.variant).toBeUndefined()
       expect(quiet?.props.plain).toBeUndefined()
       expect((await valueOf(ui, ctxRe))?.props).toMatchObject({ color: 'warning', bold: true })
-      await measure($, { window: 200_000, percent: 25 })
+      await measure($, { window: 200_000, percent: 10 })
       expect((await valueOf(ui, ctxRe))?.props).toMatchObject({ color: 'success', bold: true })
-      expect(await ui.find({ key: 'compact' })).toBeUndefined()
+      const low = await ui.find({ key: 'compact' })
+      expect(low?.props.label).toBe('Compact')
+      expect(low?.props.dimColor).toBeUndefined()
+      expect(low?.props.variant).toBeUndefined()
     })
 
     test(`${surface}: hotkey letters only while the band holds the keyboard`, async ($, on) => {
@@ -265,7 +272,7 @@ describe('band', () => {
       expect(r.deny).toBeUndefined()
       if (isDesktop) {
         // No letters on a desktop, and no redraw either: the focus-in before a click must not swallow the press.
-        expect((await ui.find({ key: 'compact' }))?.props).toMatchObject({ dimColor: true })
+        expect((await ui.find({ key: 'compact' }))?.props.label).toBe('Compact')
         expect((await ui.find({ key: 'compact' }))?.props.plain).toBeUndefined()
         return
       }
@@ -274,19 +281,22 @@ describe('band', () => {
       expect((await ui.find({ key: 'log' }))?.props).toMatchObject({ plain: true, hotkey: 'l' })
       await $.turn.start({ text: 'hi', turnId: 't1' })
       expect((await ui.find({ key: 'compact' }))?.props.plain).toBeUndefined()
-      expect((await ui.find({ key: 'compact' }))?.props.dimColor).toBe(true)
+      expect((await ui.find({ key: 'compact' }))?.props.dimColor).toBeUndefined()
       await $.ui.focus({ ...focusIn, element: 'progress' } as never)
       expect((await ui.find({ key: 'progress' }))?.props.plain).toBe(true)
       await ui.press({ key: 'compact' })
       expect((await ui.find({ key: 'progress' }))?.props.plain).toBeUndefined()
     })
 
-    test(`${surface}: isWorking hides Compact and shows cache ●`, async ($, on) => {
+    test(`${surface}: isWorking keeps Compact first and pressable, no accent, and shows cache ●`, async ($, on) => {
       world(on)
       await start($, surface)
-      await measure($, { window: 200_000, percent: 60 })
+      await measure($, { window: 200_000, percent: 85 })
       const ui = await mount($, surface, { isWorking: true })
-      expect(await ui.find({ key: 'compact' })).toBeUndefined()
+      const compact = await ui.find({ key: 'compact' })
+      expect(compact?.props.dimColor).toBeUndefined()
+      expect(compact?.props.variant).toBeUndefined()
+      expect(nodes(await ui.drawn()).filter(n => n.type === 'Button').map(n => n.props.key)[0]).toBe('compact')
       expect(await textOf(ui, cacheRe)).toBe(L('cache ●'))
     })
 
@@ -361,7 +371,7 @@ describe('band', () => {
       await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
-      expect(await ui.find({ key: 'compact' })).toBeUndefined()
+      expect((await ui.find({ key: 'compact' }))?.props.variant).toBeUndefined()
       w.compact = async () => ({ messages: KEPT })
       await $.session.compact({ trigger: 'auto', messages: KEPT } as any)
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
@@ -377,7 +387,7 @@ describe('band', () => {
     })
 
     for (const reason of ['clear', 'resume'] as const) {
-      test(`${surface}: session.end ${reason} → cache —, ctx —, no Compact`, async ($, on) => {
+      test(`${surface}: session.end ${reason} → cache —, ctx —, Compact loses its accent`, async ($, on) => {
         world(on)
         await start($, surface)
         const ui = await mount($, surface)
@@ -386,7 +396,9 @@ describe('band', () => {
         await $.session.end({ reason, sessionId: 's1', resume: {} } as any)
         expect(await textOf(ui, cacheRe)).toBe(L('cache —'))
         expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
-        expect(await ui.find({ key: 'compact' })).toBeUndefined()
+        const compact = await ui.find({ key: 'compact' })
+        expect(compact?.props.label).toBe('Compact')
+        expect(compact?.props.variant).toBeUndefined()
       })
     }
 
@@ -457,6 +469,21 @@ describe('band', () => {
       expect(w.toasts[1]).toMatch(/^compact refused: \S/)
       expect(w.toasts[2]).toBe('compacted 150,000 → 20,000 tokens')
       expect(w.toasts).toHaveLength(3)
+    })
+
+    test(`${surface}: a Compact press at 10 % still runs /compact`, async ($, on) => {
+      const { w } = world(on)
+      let calls = 0
+      w.compact = async () => {
+        calls++
+        return { messages: KEPT, tokensBefore: 20_000, tokensAfter: 8_000 }
+      }
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 10 })
+      const ui = await mount($, surface)
+      await ui.press({ key: 'compact' })
+      expect(calls).toBe(1)
+      expect(w.toasts).toEqual(['compacted 20,000 → 8,000 tokens'])
     })
 
     test(`${surface}: keyed hover Boxes with hidden, card-wide cards`, async ($, on) => {

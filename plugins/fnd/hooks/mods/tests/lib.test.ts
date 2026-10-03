@@ -204,7 +204,7 @@ describe('layout', () => {
   })
 
   test('cache, ctx and Compact survive 30 columns', () => {
-    const narrow = layout({ ...full, compact: { ...full.compact!, plain: false } }, 30)
+    const narrow = layout({ ...full, compact: { ...full.compact, plain: false } }, 30)
     expect(rowText(narrow)).toBe('cache 42m │ ctx 47% │ [ Compact ]')
     expect(narrow.model).toBeNull()
     expect(narrow.rates).toEqual([])
@@ -316,15 +316,14 @@ describe('cards and toasts', () => {
 })
 
 describe('segments', () => {
-  test('Compact: hidden ≤ 30 and mid-turn, plain below 80, loud from 80', () => {
-    expect(compactButton(null, false)).toBeNull()
-    expect(compactButton(30, false)).toBeNull()
-    expect(compactButton(31, false)).toMatchObject({ key: 'compact', hotkey: 'c', plain: true })
-    expect(compactButton(79, false)?.plain).toBe(true)
-    expect(compactButton(80, false)?.plain).toBe(false)
-    expect(compactButton(90, true)).toBeNull()
-    expect(compactButton(30.4, false)).toBeNull()
-    expect(compactButton(79.6, false)?.plain).toBe(false)
+  test('Compact: always drawn, normal look until 80 % between turns, loud from 80', () => {
+    for (const pct of [null, 0, 10, 30, 50, 79, 79.4]) {
+      expect(compactButton(pct, false)).toEqual({ key: 'compact', label: 'Compact', hotkey: 'c', plain: true })
+    }
+    expect(compactButton(80, false).plain).toBe(false)
+    expect(compactButton(79.6, false).plain).toBe(false)
+    expect(compactButton(90, true).plain).toBe(true)
+    expect(compactButton(null, true).plain).toBe(true)
   })
 
   test('bandSegs from the atoms', () => {
@@ -339,5 +338,14 @@ describe('segments', () => {
     expect(rowText(s)).toBe(
       'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress  l: Log',
     )
+  })
+
+  test('Compact leads the buttons before the first reading, at 10 % and mid-turn', () => {
+    const base = { model: null, cache: CACHE_INIT, nowMs: 0, digest: null }
+    for (const [ctxPct, isWorking] of [[null, false], [10, false], [50, true], [85, true]] as const) {
+      const s = bandSegs({ ...base, usage: { ...USAGE_INIT, ctxPct }, isWorking })
+      expect(s.compact.key).toBe('compact')
+      expect(rowText(s)).toEndWith('│ c: Compact  p: Progress  l: Log')
+    }
   })
 })

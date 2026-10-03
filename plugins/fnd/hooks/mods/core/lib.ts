@@ -113,7 +113,7 @@ export type BandSegs = {
   /** `cost $1.23`; null without a ledger or at zero. */
   cost: string | null
   digest: string | null
-  compact: BandButton | null
+  compact: BandButton
   progress: BandButton | null
   log: BandButton | null
 }
@@ -138,7 +138,7 @@ export function rowText(s: BandSegs): string {
   if (s.cost !== null) groups.push(s.cost)
   if (s.digest !== null) groups.push(s.digest)
   const buttons = [s.compact, s.progress, s.log].filter((b): b is BandButton => b !== null)
-  if (buttons.length) groups.push(buttons.map(buttonText).join(BUTTON_GAP))
+  groups.push(buttons.map(buttonText).join(BUTTON_GAP))
   return groups.join(SEP)
 }
 
@@ -283,15 +283,12 @@ export function glyphText(text: string): string {
     .replace(/^cost /, `${GLYPH.cost} `)
 }
 
-export const COMPACT_SHOW_PCT = 30
 export const COMPACT_LOUD_PCT = 80
 
-/** Shown past 30 % between turns; `plain` = quiet look below 80 %, from 80 % the band draws it as the primary button. */
-export function compactButton(ctxPct: number | null, isWorking: boolean): BandButton | null {
-  if (ctxPct === null || isWorking) return null
-  const shown = Math.round(ctxPct)
-  if (shown <= COMPACT_SHOW_PCT) return null
-  return { key: 'compact', label: 'Compact', hotkey: 'c', plain: shown < COMPACT_LOUD_PCT }
+/** Always drawn first and always pressable, so the buttons never shift; `plain` = the normal look (never dim), the primary button from 80 % between turns. */
+export function compactButton(ctxPct: number | null, isWorking: boolean): BandButton {
+  const loud = ctxPct !== null && !isWorking && Math.round(ctxPct) >= COMPACT_LOUD_PCT
+  return { key: 'compact', label: 'Compact', hotkey: 'c', plain: !loud }
 }
 
 export const PROGRESS_BUTTON: BandButton = { key: 'progress', label: 'Progress', hotkey: 'p', plain: true }

@@ -173,19 +173,17 @@ export function registerBand(on: On, options: PluginOptions): void {
     // A desktop draws a hotkey as a badge on its native button, and its buttons are clicked: no hotkeys there.
     const letters = focused && !isDesktop ? { plain: true as const } : null
     const hot = (k: string) => (isDesktop ? {} : { hotkey: k })
-    if (segs.compact !== null) {
-      const look = letters ?? (segs.compact.plain ? { dimColor: true } : { variant: 'primary' as const })
-      buttons.push(<Button key="compact" label="Compact" {...hot('c')} {...look} onPress={() => pressCompact($)} />)
-    }
+    const look = letters ?? (segs.compact.plain ? {} : { variant: 'primary' as const })
+    buttons.push(<Button key="compact" label="Compact" {...hot('c')} {...look} onPress={() => pressCompact($)} />)
     if (segs.progress !== null) {
-      if (buttons.length) buttons.push(<Text>{'  '}</Text>)
+      buttons.push(<Text>{'  '}</Text>)
       buttons.push(<Button key="progress" label="Progress" {...hot('p')} {...(letters ?? { dimColor: true })} onPress={() => {}} />)
     }
     if (segs.log !== null) {
-      if (buttons.length) buttons.push(<Text>{'  '}</Text>)
+      buttons.push(<Text>{'  '}</Text>)
       buttons.push(<Button key="log" label="Log" {...hot('l')} {...(letters ?? { dimColor: true })} onPress={() => {}} />)
     }
-    if (buttons.length) groups.push(buttons)
+    groups.push(buttons)
 
     const row = groups.flatMap((g, i) => (i === 0 ? g : [<Text dimColor>{SEP}</Text>, ...g]))
     const rowBox = (

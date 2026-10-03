@@ -555,5 +555,11 @@ has "$README" 'unknown option' readme-json-slim-unknown-flag
 lacks "$README" '--toon' readme-no-toon
 lacks "$README" '--no-spill' readme-no-nospill
 
+# The band's Compact button never hides, so the row stays put; the README row must not bring back the old threshold.
+has "$README" '| Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable' band-compact-always-first
+lacks "$README" 'Hidden at ≤ 30 % context' band-compact-no-hide-threshold
+if grep -qF 'COMPACT_SHOW_PCT' "$PLUGIN_DIR/hooks/mods/core/lib.ts"; then bad band-compact-no-show-threshold 'lib.ts still gates the Compact button on COMPACT_SHOW_PCT'
+else ok; fi
+
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi
