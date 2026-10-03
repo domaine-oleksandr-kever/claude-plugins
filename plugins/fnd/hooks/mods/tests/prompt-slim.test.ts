@@ -81,7 +81,7 @@ describe('rewrite', () => {
     const { runs, toasts, bottom } = world(on)
     await submit($, BIG)
     expect(bottom).toEqual([{ text: RW.text, context: [RW.context], turnId: undefined, wait: false }])
-    expect(toasts).toEqual([{ text: RW.summary, timeoutMs: 5000 }])
+    expect(toasts).toEqual([{ text: RW.summary, timeoutMs: 10_000 }])
     expect(runs.length).toBe(1)
     const [run] = runs
     expect(run.argv[0]).toBe('node')

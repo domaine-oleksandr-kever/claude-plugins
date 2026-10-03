@@ -2,7 +2,7 @@
 import type { On } from 'claude-code'
 import { buildHookRun, omit, parseHookOut, slimFigureIn, stubBytes, stubText } from './node-hook.ts'
 
-const TOAST_MS = 5000
+const TOAST_MS = 10_000 // the savings figure; a click takes it off, the pointer over it holds it
 
 export function registerSlim(on: On): void {
   on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {

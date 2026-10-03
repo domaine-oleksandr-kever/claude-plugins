@@ -1675,8 +1675,9 @@ terminal paint). The cards read:
 (`5h window: 91% used, resets in 1h 05m`). It re-arms once every window is back under the line, and
 after `/clear`. The slimming path below adds a savings toast (`FND_SLIM_TOAST=0` silences the savings
 toasts alone). Toasts sit at the transcript's
-top-right in fullscreen, or on the notification line under the prompt otherwise. They never touch
-the transcript or what the model reads. They keep showing while the progress pane is open (it is
+top-right in fullscreen, or on the notification line under the prompt otherwise. Several toasts
+stack; a click takes one off and the pointer over it holds it (there is no close button). They never
+touch the transcript or what the model reads. They keep showing while the progress pane is open (it is
 not a dialog and does not hold toasts).
 
 **Hotkeys.** `c` and `p` work only while the band holds the keyboard: after **ctrl+x tab** or a
@@ -1762,7 +1763,7 @@ The five tools the classic guard covers (`take_screenshot`, `browser_take_screen
   slimmed one, though, and the model queries it instead of reading 3 MB in chunks. Raising the stub
   bytes for this path is an open owner decision.
 - **Savings toast.** Every slimmed main-thread result toasts the same figure the classic notice
-  prints, e.g. `fnd-mcp-slim: compressed 118,203 B → 29,412 B (−75.1%)`, for 5 s. Results under the
+  prints, e.g. `fnd-mcp-slim: compressed 118,203 B → 29,412 B (−75.1%)`, for 10 s. Results under the
   limit are still slimmed in place by the classic hook, and the module only toasts the figure it
   finds in the result.
   A reader subagent's result is slimmed but never toasted, as with the classic notice.
@@ -1786,7 +1787,7 @@ blob to a file first and replaces each one in place by `mcp-slim.cjs`'s compress
 `<<full=…>>` handle on that file, or by its stub when compression does not pay off (no gain, a
 body still 8 KB or more, or the prompt's 32 KB replacement budget spent). The model gets the rewritten prompt plus one context line naming the files and the
 `json-slim.cjs --jq` recipe to narrow them, and a toast shows the figure, e.g.
-`fnd-prompt-slim: 48,210 B → 2,104 B (−95.6%)`, for 5 s (`FND_SLIM_TOAST=0` silences it). One submission, nothing is blocked.
+`fnd-prompt-slim: 48,210 B → 2,104 B (−95.6%)`, for 10 s (`FND_SLIM_TOAST=0` silences it). One submission, nothing is blocked.
 - **The row shows the rewrite.** The transcript row holds the rewritten text, not the paste. The
   original lives only in the saved files.
 - **The saved files are durable.** They go to the task workspace `tmp/` when there is exactly one

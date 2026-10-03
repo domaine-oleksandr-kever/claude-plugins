@@ -4,7 +4,7 @@ import { buildHookRun, parseHookOut } from './node-hook.ts'
 
 const PROMPT_MIN = 10240 // prompt-json-guard.cjs's gate in UTF-8 bytes (layout-assertions pins it); one UTF-16 unit is at most 3 of them
 const RUN_MS = 20_000
-const TOAST_MS = 5000
+const TOAST_MS = 10_000 // as slim.ts: the two figures stack when both fire
 const CONTEXT_MAX = 100_000 // past this the engine gives the model a head and a path, not the line
 
 type Rewrite = { text: string; context: string; summary: string }
