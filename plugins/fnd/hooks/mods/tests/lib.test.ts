@@ -19,6 +19,7 @@ import {
   fmtUsd,
   fmtResetIn,
   glyphText,
+  keepCtx,
   oneHourCacheTokens,
   rateCard,
   toUsage,
@@ -238,6 +239,15 @@ describe('usage and TTL', () => {
     expect(compactedUsage(u, 26_300)).toEqual({ ...u, ctxPct: 13.15, ctxTokens: 26_300 })
     expect(compactedUsage(u, undefined)).toEqual({ ...u, ctxPct: null, ctxTokens: null })
     expect(compactedUsage(USAGE_INIT, 26_300)).toEqual({ ...USAGE_INIT, ctxPct: null, ctxTokens: 26_300 })
+  })
+
+  test('keepCtx: a reading without a fill keeps the last fill; a measured one replaces it', () => {
+    const prev = compactedUsage(toUsage({ window: 200_000, percent: 47 }, []), 26_300)
+    const bare = toUsage({ window: 200_000 }, [{ kind: 'five_hour', percentUsed: 61 }], { usd: 1 })
+    expect(keepCtx(prev, bare)).toEqual({ ...bare, ctxPct: 13.15, ctxTokens: 26_300 })
+    const measured = toUsage({ window: 200_000, percent: 15, tokens: 30_000 }, [])
+    expect(keepCtx(prev, measured)).toBe(measured)
+    expect(keepCtx(USAGE_INIT, bare)).toEqual(bare)
   })
 
   test('toUsage: absent percent, tokens and cost stay null', () => {

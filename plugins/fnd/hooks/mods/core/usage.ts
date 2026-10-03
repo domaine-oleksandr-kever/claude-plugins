@@ -4,7 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import type { FndEvent, FndEventKind, FndUsage } from '../../../types'
 import { fmtK, pushEvent } from './events.ts'
-import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
+import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 
 const TICK_MS = 30_000
@@ -44,7 +44,7 @@ async function refresh($: $): Promise<void> {
   const now = await $.clock.now()
   await update($, tick, () => now)
   const u = withCost(toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const))))
-  await update($, usage, () => u)
+  await update($, usage, prev => keepCtx(prev, u))
   await adoptSubscriptionTtl($, u)
 }
 
@@ -130,7 +130,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
     const u = withCost(toUsage(e.context, e.rateLimits, e.cost))
-    await update($, usage, () => u)
+    await update($, usage, prev => keepCtx(prev, u))
     await adoptSubscriptionTtl($, u)
     const hot = alarmRate(u.rates)
     const isAlarmed = await read($, rateAlarmed)

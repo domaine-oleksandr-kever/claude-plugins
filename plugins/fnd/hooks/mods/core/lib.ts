@@ -259,11 +259,16 @@ export function cacheCard(cache: FndCache, nowMs: number): string {
 
 /**
  * The context right after a compaction: the engine's own count of the kept conversation over the
- * window already known. The next response replaces it with a measured reading.
+ * window already known. It holds until a response reports a measured reading.
  */
 export function compactedUsage(u: FndUsage, tokensAfter: number | undefined): FndUsage {
   const known = typeof tokensAfter === 'number' && tokensAfter >= 0
   return { ...u, ctxTokens: known ? tokensAfter : null, ctxPct: known && u.window > 0 ? (tokensAfter / u.window) * 100 : null }
+}
+
+/** A measurement without a context reading (window only, as right after a compaction) keeps the last one. */
+export function keepCtx(prev: FndUsage, next: FndUsage): FndUsage {
+  return next.ctxPct === null ? { ...next, ctxPct: prev.ctxPct, ctxTokens: prev.ctxTokens } : next
 }
 
 export function ctxCard(u: FndUsage): string {

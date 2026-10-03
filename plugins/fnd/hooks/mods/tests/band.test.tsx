@@ -377,6 +377,34 @@ describe('band', () => {
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
     })
 
+    test(`${surface}: a window-only measure or tick after a compaction keeps its count; a measured fill replaces it`, async ($, on) => {
+      const { w, clock } = world(on)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await measure($, { window: 200_000, percent: 47 })
+      w.compact = async () => ({ messages: KEPT, tokensBefore: 94_000, tokensAfter: 26_300 })
+      await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
+      await measure($, { window: 200_000 })
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
+      w.context = { window: 200_000 }
+      await clock.advance(MIN)
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
+      await measure($, { window: 200_000, percent: 15 })
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 15%'))
+    })
+
+    test(`${surface}: after /clear a window-only measure leaves ctx —`, async ($, on) => {
+      world(on)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      await measure($, { window: 200_000, percent: 85 })
+      await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
+      await measure($, { window: 200_000 })
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
+    })
+
     test(`${surface}: a subagent compaction leaves the main figures`, async ($, on) => {
       world(on)
       await start($, surface)
@@ -469,6 +497,32 @@ describe('band', () => {
       expect(w.toasts[1]).toMatch(/^compact refused: \S/)
       expect(w.toasts[2]).toBe('compacted 150,000 → 20,000 tokens')
       expect(w.toasts).toHaveLength(3)
+    })
+
+    test(`${surface}: Compact press in a headless session falls back to /compact; its refusal toasts`, async ($, on) => {
+      const { w } = world(on)
+      const runs: string[] = []
+      let fails = false
+      on('command.run', { command: 'compact' }, async (_$, e) => {
+        runs.push(e.args)
+        if (fails) throw new Error('compact unavailable')
+        return { text: 'Compacted (ctrl+o to see full summary)' }
+      })
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 60 })
+      const ui = await mount($, surface)
+      w.compact = async () => {
+        throw new Error('$.session.compact: not available in a headless (-p / SDK) session yet')
+      }
+      await ui.press({ key: 'compact' })
+      expect(runs).toEqual([''])
+      expect(w.toasts).toEqual(['Compacted (ctrl+o to see full summary)'])
+      fails = true
+      await ui.press({ key: 'compact' })
+      expect(runs).toHaveLength(2)
+      expect(w.toasts[1]).toMatch(/^compact refused: \S/)
+      expect(w.toasts[1]).not.toContain('headless')
+      expect(w.toasts).toHaveLength(2)
     })
 
     test(`${surface}: Compact pressed during a main turn only toasts; a subagent turn's end keeps it; the main end re-arms it`, async ($, on) => {

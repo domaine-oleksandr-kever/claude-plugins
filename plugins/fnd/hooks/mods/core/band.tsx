@@ -46,9 +46,11 @@ function pressCompact($: $): void {
     $.ui.toast('turn is running — press Compact again when it ends')
     return
   }
+  const refused = (err: unknown) => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`)
+  // A headless (SDK, desktop app) session refuses the op but still runs a typed /compact.
   $.session.compact().then(
     r => $.ui.toast(compactToast(r)),
-    err => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`),
+    () => $.command.run({ command: 'compact' }).then(r => $.ui.toast(r.text || 'compacted'), refused),
   )
 }
 
