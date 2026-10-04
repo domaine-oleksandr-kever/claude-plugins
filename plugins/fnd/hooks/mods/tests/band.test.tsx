@@ -825,13 +825,34 @@ describe('event log writers', () => {
 })
 
 describe('TTL learning (A4)', () => {
-  test('PostModelSwitch under auto learns 5m and stores it', { plugins: [peek] }, async ($, on) => {
+  test('PostModelSwitch under auto learns 5m for the session and stores nothing', { plugins: [peek] }, async ($, on) => {
     const { w } = world(on)
     on('classic.PostModelSwitch', async () => ({}) as never)
     await start($)
     await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '5m' }))
     expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'model-switch', isCold: false })
-    expect(w.storeSets).toEqual([{ key: 'cacheTtlMs', value: 300_000 }])
+    expect(w.storeSets).toEqual([])
+  })
+
+  test('PostModelSwitch reporting 1h learns it and stores it', { plugins: [peek] }, async ($, on) => {
+    const { w } = world(on, {}, { ANTHROPIC_API_KEY: 'k' })
+    on('classic.PostModelSwitch', async () => ({}) as never)
+    await start($)
+    expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'default' })
+    await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '1h' }))
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'model-switch' })
+    expect(w.storeSets).toEqual([{ key: 'cacheTtlMs', value: 3_600_000 }])
+  })
+
+  test('on a subscription a reported 5m is ignored: the host reports it before any 1 h write', { plugins: [peek] }, async ($, on) => {
+    const { w } = world(on)
+    w.rateLimits = [{ kind: 'five_hour', percentUsed: 2 }]
+    on('classic.PostModelSwitch', async () => ({}) as never)
+    await start($)
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'subscription' })
+    await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '5m' }))
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'subscription' })
+    expect(w.storeSets).toEqual([])
   })
 
   test('PostModelSwitch with a forced TTL keeps it and stores nothing', { plugins: [peek], options: { cacheTtl: '1h' } }, async ($, on) => {
@@ -899,10 +920,18 @@ describe('TTL learning (A4)', () => {
     expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'subscription' })
   })
 
-  test('a stored TTL is not overridden by the subscription rule', { plugins: [peek] }, async ($, on) => {
+  test('a stored 5m TTL yields to the subscription rule; a reported or forced one does not', { plugins: [peek] }, async ($, on) => {
     world(on, { cacheTtlMs: 300_000 })
     await start($)
-    await measure($, { window: 200_000, percent: 10 }, [{ kind: 'five_hour', percentUsed: 2 }])
     expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'store' })
+    await measure($, { window: 200_000, percent: 10 }, [{ kind: 'five_hour', percentUsed: 2 }])
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'subscription' })
+  })
+
+  test('a forced 5m TTL survives rate windows', { plugins: [peek], options: { cacheTtl: '5m' } }, async ($, on) => {
+    world(on)
+    await start($)
+    await measure($, { window: 200_000, percent: 10 }, [{ kind: 'five_hour', percentUsed: 2 }])
+    expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'option' })
   })
 })

@@ -64,17 +64,23 @@ async function defaultTtl($: $): Promise<number> {
 
 /**
  * Rate-limit windows arrive only on a claude.ai subscription, whose prompt cache lives 1 h (5 min
- * under an API key or in overage). Until the session reports a TTL itself, that is the best estimate.
+ * under an API key or in overage). Live evidence beats the default and a remembered value alike.
  */
 async function adoptSubscriptionTtl($: $, u: FndUsage): Promise<void> {
   if (u.rates.length === 0) return
-  await update($, cache, c => (c.ttlSource === 'default' ? { ...c, ttlMs: HOUR_MS, ttlSource: 'subscription' } : c))
+  await update($, cache, c =>
+    c.ttlSource === 'default' || c.ttlSource === 'store' ? { ...c, ttlMs: HOUR_MS, ttlSource: 'subscription' } : c,
+  )
 }
 
-/** Remembers a TTL the session reported, for this session and the next ones. */
+/**
+ * Adopts a TTL the session reported. Only 1 h is remembered for the next sessions: a 5 min report is
+ * the host's fallback when it has seen no 1 h cache write yet (every session start on 2.1.289), and
+ * remembered it would outlive the session that made it.
+ */
 async function learnTtl($: $, ttlMs: number, ttlSource: 'model-switch' | 'agent'): Promise<void> {
   await update($, cache, c => ({ ...c, ttlMs, ttlSource }))
-  await $.store.set(STORE_TTL, ttlMs)
+  if (ttlMs === HOUR_MS) await $.store.set(STORE_TTL, ttlMs)
 }
 
 export function registerUsage(on: On, options: PluginOptions): void {
@@ -184,8 +190,11 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const prev = await read($, model)
     await update($, model, () => m)
     if (m !== prev) await logEvent($, 'model', m)
+    // On a subscription (rate windows seen) the cache lives 1 h; a 5 min report there is the host's
+    // fallback, not a measurement. Overage does drop it to 5 min, and the band hides the segment then.
     const ttlMs = ttlMsOf(e.cache_ttl)
-    if (forcedTtl === null && ttlMs !== null) await learnTtl($, ttlMs, 'model-switch')
+    const subscribed = (await read($, usage)).rates.length > 0
+    if (forcedTtl === null && ttlMs !== null && !(subscribed && ttlMs !== HOUR_MS)) await learnTtl($, ttlMs, 'model-switch')
     // Caches are per model: a real switch forfeits the warm one. On resume the SessionStart seed decides.
     if (e.source !== 'resume' && (e.from_model !== e.to_model || !e.prompt_cache_warm)) {
       await update($, cache, c => ({ ...c, isCold: true }))
