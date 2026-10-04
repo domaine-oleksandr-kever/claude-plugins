@@ -387,29 +387,22 @@ for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
 done
 
 # ------------------------------------- the copy-paste settings section + the title switch --
-# The progress checklist needs a HOST switch the plugin cannot set, so the README has to carry
-# the file to edit, the key to paste and what it buys — a switch documented only as prose is a
-# feature nobody turns on. The section is pinned by its heading (the anchor two other places
-# link to), by the file paths, by every key of the example, and by the caveats that keep the
-# claims honest.
+# Host switches the plugin cannot set need the file to edit, the key to paste and what it buys —
+# a switch documented only as prose is a feature nobody turns on. The section is pinned by its
+# heading (the anchor the Environment-switches intro links to), by the file paths and by every
+# key of the example.
 has "$README" '### Recommended Claude Code settings (copy-paste)' settings-section
 has "$README" '~/.claude/settings.json' settings-user-file
 has "$README" '<repo>/.claude/settings.local.json' settings-project-file
-has "$README" '"CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"' settings-todo-key
 has "$README" '"MAX_MCP_OUTPUT_TOKENS": "50000"' settings-mcp-key
 has "$README" 'desktop app' settings-desktop-scope
-has "$README" 'Ctrl+T' settings-ctrl-t
-has "$README" 'survives `/compact`' settings-survives-compact
-# The switch needs a CLI new enough to have it; without the floor a developer pastes the key,
-# sees no tools and has nothing to check.
-has "$README" '2.1.233' settings-version-floor
-# The two links into it — from the Hooks section and from the Environment-switches intro —
-# use the heading's own anchor, which the link family below resolves.
-if [ "$(grep -cF '(#recommended-claude-code-settings-copy-paste)' "$README")" -ge 2 ]; then ok
-else bad settings-linked "the settings section is linked from fewer than two places"; fi
+# The link into it from the Environment-switches intro uses the heading's own anchor, which the
+# link family below resolves.
+if [ "$(grep -cF '(#recommended-claude-code-settings-copy-paste)' "$README")" -ge 1 ]; then ok
+else bad settings-linked "the settings section is not linked from the Environment switches intro"; fi
 # The example's env values are STRINGS — a number there is silently ignored by the host.
 if awk '/^### Recommended Claude Code settings/ { on = 1 } on && /^## / { exit }
-        on && /"(CLAUDE_CODE_ENABLE_TODO_TOOLS|MAX_MCP_OUTPUT_TOKENS|FND_MCP_SLIM_DEBUG)": [^"]/ { hit = 1 }
+        on && /"(MAX_MCP_OUTPUT_TOKENS|FND_MCP_SLIM_DEBUG)": [^"]/ { hit = 1 }
         END { exit !hit }' "$README"; then
   bad settings-string-values 'an "env" value in the example is not quoted as a string'
 else ok; fi
@@ -449,12 +442,12 @@ for row in FND_CTX_MONITOR FND_PROMPT_JSON; do
   esac
 done
 
-# CLAUDE_CODE_ENABLE_TODO_TOOLS is the HOST's switch — documented as read-only, never as an
-# fnd knob, and deliberately absent from domaine-env's registry.
-case "$ENV_ROWS" in
-  *'| `CLAUDE_CODE_ENABLE_TODO_TOOLS` |'*) ok ;;
-  *) bad env-todo-tools-row 'no CLAUDE_CODE_ENABLE_TODO_TOOLS row in the Environment switches table' ;;
-esac
+# The task-list mirror is gone (the mods' Progress pane reads progress.md directly), so nothing
+# the plugin ships may send a developer to turn the host's task-list tools on again.
+if grep -rqE --exclude-dir=mods 'CLAUDE_CODE_ENABLE_TODO_TOOLS|CLAUDE_CODE_TASK_LIST_ID|Task(Create|Update|List|Get)\b' \
+     "$README" "$ROOT/plugins/fnd" "$ROOT/docs"; then
+  bad todo-tools-gone 'the README or plugin content still mentions the removed task-list mirror'
+else ok; fi
 if grep -qF "'CLAUDE_CODE_ENABLE_TODO_TOOLS'" "$ROOT/plugins/fnd/scripts/domaine-env.cjs"; then
   bad env-todo-tools-registry 'CLAUDE_CODE_ENABLE_TODO_TOOLS is in domaine-env.cjs KNOWN — that is the host switch, not an fnd one'
 else ok; fi

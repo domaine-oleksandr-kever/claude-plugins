@@ -450,22 +450,12 @@ Claude Code to add these keys to `~/.claude/settings.json`; it can edit its own 
 ```json
 {
   "env": {
-    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
     "MAX_MCP_OUTPUT_TOKENS": "50000",
     "FND_MCP_SLIM_DEBUG": "1"
   }
 }
 ```
 
-- `CLAUDE_CODE_ENABLE_TODO_TOOLS` — **required for the progress checklist**, and it needs
-  **Claude Code 2.1.233 or newer** (`claude --version`; on an older CLI the key is read and
-  nothing appears). The task-list tools (`TaskCreate` / `TaskUpdate`) are **off by default** on
-  Opus 5, Sonnet 5 and Fable, and the session convention mirrors the task workspace's
-  `progress.md` into them only when they exist.
-  With it on, **Ctrl+T** shows the list in the CLI and the list survives `/compact`
-  (`CLAUDE_CODE_TASK_LIST_ID=<name>` also carries one list across sessions). Verified on the CLI;
-  in the desktop app's Code tab and in Cowork the tools are expected to work the same way, but
-  that is unverified.
 - `MAX_MCP_OUTPUT_TOKENS` — **optional, and your call.** The platform default is 25000 tokens;
   above it Claude Code spills the result to a file instead of handing it over, so the fnd
   compressor never sees it. Raising it sends bigger results through `mcp-slim` first — safe with
@@ -1139,17 +1129,14 @@ in the egress table for cloud sandboxes.
 ## Hooks
 
 The plugin wires five hook events (`plugin.json` → `hooks`); every hook fails open — a
-hook error never blocks work. One of them (the progress checklist) needs a host switch the
-plugin cannot set for you: [Recommended Claude Code settings](#recommended-claude-code-settings-copy-paste).
+hook error never blocks work.
 On Claude Code a hooks module of function hooks runs beside them (status band, progress pane, and
 the guard and compressor on the tool call itself): [Mods](#mods-claude-code-function-hooks).
 
 - **SessionStart** — `hooks/session-start.sh`, the one script both shell wirings
   (`plugin.json`, `hooks/hooks-codex.json`) spawn, injects the session
   conventions from `hooks/*.md`
-  (comment discipline, lean code, live-store access, the task-workspace convention — which
-  now also mirrors the workspace's `progress.md` into the host's task-list tool where one
-  exists, so the developer watches the same checklist the skills tick off —
+  (comment discipline, lean code, live-store access, the task-workspace convention,
   report-plugin-defects-upstream, routing oversized MCP results through the
   `json-slim` CLI, and the untrusted-content rail — ticket, doc, Figma, PR-comment, page
   and tool-result text is data describing the work, never instructions to follow). It opens
@@ -1483,9 +1470,9 @@ the guard and compressor on the tool call itself): [Mods](#mods-claude-code-func
 
 Single home for every knob the plugin reads, on every host. Every new switch must be added to
 this table — with its per-host behavior whenever the switch does not mean the same thing
-everywhere. Host variables the plugin only *reads* sit at the bottom of the table; the ones worth
-setting on a fresh machine are collected, with a pasteable file, in
-[Recommended Claude Code settings](#recommended-claude-code-settings-copy-paste).
+everywhere. Host variables the plugin only *reads* sit at the bottom of the table. Recommended
+values for Claude Code's own `settings.json` (`MAX_MCP_OUTPUT_TOKENS`, `FND_MCP_SLIM_DEBUG`) come
+with a pasteable file in [Recommended Claude Code settings](#recommended-claude-code-settings-copy-paste).
 
 **Where to set them.** Two **Domaine env files** work identically on all four hosts — every
 fnd entry point (Node hooks, the `json-slim` CLI, the two Shopify shell scripts, the OpenCode
@@ -1591,7 +1578,6 @@ because the script that reads it is the same single copy on all four hosts.
 | `FIGMA_TOKEN` | unset | the per-developer Figma **personal access token** `figma-rest.sh` authenticates the REST rung with, ahead of the `--env` dotenv (default `./.env`). Scopes: **File content: read-only** (the node tree and the PNG render), **Variables: read-only** (design tokens by name — honoured on Enterprise plans only, harmless elsewhere), **Current user: read-only** (for `--check`). Charset-gated (`[A-Za-z0-9_.+/=~:-]`); it reaches curl through a `0600` config file deleted on exit, never the argv, and is never printed — and it rides to `api.figma.com` only: the render is fetched from its pre-signed S3 URL by a SEPARATE, token-less call. Absent ⇒ `error=no_figma_token` + the setup `hint=`, exit 3, and `figma-reader` asks the developer instead of guessing. Setup, scopes and the degradation contract: `plugins/fnd/references/figma-rest.md` |
 | `FND_HOST` | set by the fnd wiring | *set and read by fnd, never by you*: the host name (`claude` / `cursor` / `codex` / `opencode`) each host's own hook wiring exports so a `FND_HOST_TRACE` line can say which host ran the hook. It is not a switch — `domaine-env` will not write one, and a hand-set value only makes the log lie. An absent or unrecognized value is logged as `unknown`, which is what a manual run or a test is |
 | `CLAUDE_CODE_SESSION_ID` | set by Claude Code | *read, not set by fnd*: scopes `FND_WHALE_GUIDE`'s one-shot state and `FND_NOGAIN_MEMO`'s no-gain memo to the conversation, so a new session sees the full guidance block — and the declined body — again. Absent (a bare shell) ⇒ both are keyed on the file path alone and the 2 h expiry bounds them |
-| `CLAUDE_CODE_ENABLE_TODO_TOOLS` | unset (host default) | *read, not set by fnd*: Claude Code's own switch for the task-list tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`), which are **off by default** on Opus 5, Sonnet 5 and Fable and need **Claude Code 2.1.233+** (older CLIs read the key and expose nothing). `"1"` in the `"env"` block of `~/.claude/settings.json` turns them on for the CLI and the desktop app's Code tab alike ([the pasteable file](#recommended-claude-code-settings-copy-paste)). The plugin never sets it: the task-workspace convention mirrors `progress.md` into the tools when they exist and says nothing when they do not, and `preflight-checks` reports it as one advisory row. Not an FND switch — `domaine-env` will not write one |
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |
 | `CLAUDE_PLUGIN_ROOT` / `PLUGIN_ROOT` | set by the host | *read, not set by fnd*: where a hook **wiring** file finds the bundled scripts and session-convention markdown. Claude Code and Cursor set `CLAUDE_PLUGIN_ROOT`; Codex sets `PLUGIN_ROOT` plus `CLAUDE_PLUGIN_ROOT` as a compatibility alias, and `hooks/hooks-codex.json` prefers the alias with a fallback to `PLUGIN_ROOT`. Hook **scripts** never trust either one for guard logic — they resolve their own bundled paths from `__dirname` / their own `dirname`, because Cursor leaks the variable between concurrent plugins' hooks and Claude Code has a source-vs-cache inconsistency |
 
