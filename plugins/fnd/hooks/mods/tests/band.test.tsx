@@ -18,7 +18,7 @@ function world(on: On, store: Record<string, unknown> = {}, env: Record<string, 
     context: { window: 200_000 } as Ctx,
     rateLimits: [] as Rate[],
     cost: undefined as Cost | undefined,
-    model: 'claude-fable-5-1',
+    model: 'claude-fable-5-1' as string | null,
     toasts: [] as string[],
     storeSets: [] as { key: string; value: unknown }[],
     compact: (async () => ({ messages: KEPT })) as () => Promise<unknown>,
@@ -403,6 +403,18 @@ describe('band', () => {
       await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
       await measure($, { window: 200_000 })
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
+    })
+
+    test(`${surface}: a seed with no model → the first measure fills the model segment`, async ($, on) => {
+      const { w } = world(on)
+      w.model = null
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      expect(await textOf(ui, /fable-5-1/)).toBeUndefined()
+      w.model = 'claude-fable-5-1'
+      await measure($, { window: 200_000, percent: 11 })
+      expect(await textOf(ui, /fable-5-1/)).toBe(isDesktop ? '🤖 fable-5-1' : 'fable-5-1')
     })
 
     test(`${surface}: a subagent compaction leaves the main figures`, async ($, on) => {

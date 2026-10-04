@@ -138,6 +138,13 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const u = withCost(toUsage(e.context, e.rateLimits, e.cost))
     await update($, usage, prev => keepCtx(prev, u))
     await adoptSubscriptionTtl($, u)
+    // No session.start follows a /clear and the seed may read null: the first measure fills the gap.
+    if ((await read($, model)) === null) {
+      try {
+        const m = await $.session.model()
+        if (m) await update($, model, () => m)
+      } catch {}
+    }
     const hot = alarmRate(u.rates)
     const isAlarmed = await read($, rateAlarmed)
     if (hot && !isAlarmed) {
