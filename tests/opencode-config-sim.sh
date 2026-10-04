@@ -148,17 +148,18 @@ else bad D5-block-keys "blocks=$(printf '%s' "$BLOCKS" | cut -c1-40 | tr '\n' ';
 # ------------------------------------------------------------------------ the statics list --
 # The single source is the hooks directory itself, minus the files the adapter injects itself
 # (opencode-config.cjs's ADAPTER_INJECTED — each one is detection-gated, so a static copy would
-# deliver it a second time in exactly the sessions that already have it).
+# deliver it a second time in exactly the sessions that already have it) and the `*-claude.md`
+# Claude Code variants, whose plain stem is already in the list.
 if fence_to "$O" 3 "$TMP/step5.json"; then ok
 else bad S1-step5-extract "the third fenced block could not be read"; fi
 
 jlines "$TMP/step5.json" instructions > "$TMP/got-instructions" 2>/dev/null || : > "$TMP/got-instructions"
 ls "$PLUGIN"/hooks/*.md | sed 's#.*/##' \
-  | grep -v -e '^store-access\.md$' -e '^comment-discipline-foundation\.md$' | LC_ALL=C sort |
+  | grep -v -e '^store-access\.md$' -e '^comment-discipline-foundation\.md$' -e '-claude\.md$' | LC_ALL=C sort |
   sed "s#^#$HOOKS_REAL/#" > "$TMP/want-instructions"
 
 if [ -s "$TMP/want-instructions" ] && cmp -s "$TMP/got-instructions" "$TMP/want-instructions"; then ok
-else bad S2-statics-list "instructions != sorted hooks/*.md minus the adapter-injected pair:
+else bad S2-statics-list "instructions != sorted hooks/*.md minus the adapter-injected pair and Claude Code variants:
       got=$(tr '\n' ';' < "$TMP/got-instructions")
       want=$(tr '\n' ';' < "$TMP/want-instructions")"; fi
 

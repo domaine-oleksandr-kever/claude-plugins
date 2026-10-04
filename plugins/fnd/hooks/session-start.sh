@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # SessionStart hook — the Foundation session context: the plugin root, the checkout's project
-# profile, and the hooks/*.md conventions that profile and the workspace gate. Every host wiring
-# spawns this one script instead of carrying its own copy of the same shell, so a convention added
-# here reaches Claude Code and Codex from one edit (Cursor and OpenCode compose theirs in JS).
+# profile, and the hooks/*.md conventions that profile, the workspace, the host and their switches
+# gate. Every host wiring spawns this one script instead of carrying its own copy of the same shell,
+# so a convention added here reaches Claude Code and Codex from one edit (Cursor and OpenCode
+# compose theirs in JS).
 #
 # FND_HOST is taken from the wiring that spawned this, never set here — it is the `host` column of
 # the FND_HOST_TRACE log, and the wiring is the only layer that knows which host is running.
+#
+# On Claude Code the whale convention ships as hooks/mcp-whale-claude.md: the fnd-slim mod and the
+# classic mcp-slim hook already hand the model slimmed or stubbed MCP results there, so the full
+# spill recipe in hooks/mcp-whale.md is dead weight that only eats the context cap below.
 #
 # The composed context becomes the session context. On the Claude host it rides in the SessionStart
 # JSON envelope, the one delivery form an Agent SDK host (Cowork) injects — plain stdout reaches the
@@ -40,13 +45,19 @@ compose() {
   # Immediately behind the block it extends — a convention landing between the two would read as a
   # section of its own.
   [ "$p" = foundation ] && cat "$root/hooks/comment-discipline-foundation.md" 2>/dev/null
-  for f in plugin-feedback task-workspace untrusted-content mcp-whale; do
+  for f in plugin-feedback task-workspace untrusted-content; do
     cat "$root/hooks/$f.md" 2>/dev/null
   done
+  if [ "${FND_HOST:-}" = claude ]; then
+    cat "$root/hooks/mcp-whale-claude.md" 2>/dev/null
+  else
+    cat "$root/hooks/mcp-whale.md" 2>/dev/null
+  fi
   if [ -f shopify.theme.toml ] || [ -f .env ]; then
     cat "$root/hooks/store-access.md" 2>/dev/null || true
   fi
   [ "${FND_LEAN:-1}" = "0" ] || cat "$root/hooks/lean-code.md" 2>/dev/null
+  [ "${FND_STE:-1}" = "0" ] || cat "$root/hooks/writing-style.md" 2>/dev/null
 }
 
 # FND_SESSION_TITLE the way the node entry points read it: process env, then the GLOBAL Domaine

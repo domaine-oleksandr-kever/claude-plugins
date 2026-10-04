@@ -32,6 +32,7 @@ const ALLOW_EXTRA = new Set(['SHOPIFY_ADMIN_GQL_QUIET']);
 // reads FND_PROFILE out of the same two files with the same layering, for that one key only.
 const PROJECT_OK = new Set([
   'FND_LEAN',
+  'FND_STE',
   'FND_PROFILE',
   'FND_CTX_MONITOR',
   'FND_CTX_WARN',

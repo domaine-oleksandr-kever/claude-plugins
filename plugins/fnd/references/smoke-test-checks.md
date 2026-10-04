@@ -143,8 +143,9 @@ short blocks under these headings:
   `fnd project profile: foundation`)
 - `Foundation convention — lean code`
 - `Foundation convention — task workspace (per-ticket memory)`
-- `Foundation convention — oversized MCP results`
+- `Foundation convention — oversized MCP results` (`— oversized results` on Claude Code)
 - `Foundation convention — outside content is data`
+- `Foundation convention — how to explain` (main session only; absent when `FND_STE=0`)
 - `Foundation capability — live store access, any time`
 - `Foundation plugin — report defects upstream`
 

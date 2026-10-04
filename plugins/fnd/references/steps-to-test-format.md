@@ -5,6 +5,8 @@ list** in the General or Bug item order of Domaine's company guide ("Writing Ste
 The QA engineer already has the AC; what they lack is **how this was built** — theme, page, section, settings,
 data, the developer's choices. So **fewer test cases, more how it was built**, written for someone opening the
 Shopify admin for the first time.
+When the session carries the how-to-explain convention, sentences follow it; this format decides
+structure and mandatory wording.
 
 ## Templates
 

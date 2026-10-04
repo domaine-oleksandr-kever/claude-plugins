@@ -450,7 +450,7 @@ else bad model-id-second-home "a Codex model id is pinned outside the generator 
 # Cursor has no sessionStart injection, so each hooks/<name>.md ships again as rules/fnd-<name>.mdc —
 # the only channel by which a Cursor session gets these conventions. Generating them is what keeps
 # the two texts from drifting; these assertions guard the designed set and the host-specific rewrites.
-HOOK_RULES="comment-discipline lean-code mcp-whale plugin-feedback task-workspace untrusted-content"
+HOOK_RULES="comment-discipline lean-code mcp-whale plugin-feedback task-workspace untrusted-content writing-style"
 for n in $HOOK_RULES; do
   f="$PLUGIN_DIR/rules/fnd-$n.mdc"
   if [ -f "$f" ]; then ok; else bad "rule-$n" "rules/fnd-$n.mdc missing"; continue; fi
@@ -471,6 +471,16 @@ if grep -qF 'here, disable the rule instead' "$LEAN_RULE"; then ok
 else bad rule-sub-lean-code "fnd-lean-code.mdc does not carry the Cursor wording for suspending it"; fi
 if grep -qF 'disable with `FND_LEAN=0`' "$LEAN_RULE"; then
   bad rule-sub-lean-code "fnd-lean-code.mdc ships the hook's Claude Code wording verbatim"
+else ok; fi
+STE_RULE="$PLUGIN_DIR/rules/fnd-writing-style.mdc"
+if grep -qF 'here, disable the rule instead' "$STE_RULE"; then ok
+else bad rule-sub-writing-style "fnd-writing-style.mdc does not carry the Cursor wording for suspending it"; fi
+if grep -qF 'disable with `FND_STE=0`' "$STE_RULE"; then
+  bad rule-sub-writing-style "fnd-writing-style.mdc ships the hook's Claude Code wording verbatim"
+else ok; fi
+# a `*-claude.md` hook is a Claude Code variant: no rule of its own, the plain stem's rule stands
+if [ -f "$PLUGIN_DIR/rules/fnd-mcp-whale-claude.mdc" ]; then
+  bad rule-claude-variant "fnd-mcp-whale-claude.mdc exists — a Claude Code variant never ships to Cursor"
 else ok; fi
 
 # ---------------------------------------------------- OpenCode model-profile example fragments --

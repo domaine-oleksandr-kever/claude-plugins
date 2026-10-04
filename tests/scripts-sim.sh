@@ -6188,6 +6188,16 @@ o7b="$(cd "$EV2R/repo/.claude" && XDG_CONFIG_HOME="$EV2R/cfg" node -e \
 o7c="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" domaine_env FND_PROFILE)"
 if [ "$rc" -eq 0 ] && [ "$o7b" = "foundation|foundation|kept" ] && [ "$o7c" = "foundation" ]; then ok
 else bad EV6e-profile-project-layer "rc=$rc node='$o7b' bash='$o7c'"; fi
+# EV6f: the same three readers for FND_STE — a repo may turn the how-to-explain convention off
+rc=0; (cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" node "$EVC" set FND_STE=0 --project) \
+  >/dev/null 2>"$E" || rc=$?
+o7d="$(cd "$EV2R/repo/.claude" && XDG_CONFIG_HOME="$EV2R/cfg" node -e \
+  'const r = require(process.argv[1]).load();
+   console.log([process.env.FND_STE, r.applied.FND_STE || "not-applied",
+                r.ignored.map((i) => i.key).includes("FND_STE") ? "ignored" : "kept"].join("|"))' "$EVF")"
+o7e="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" domaine_env FND_STE)"
+if [ "$rc" -eq 0 ] && [ "$o7d" = "0|0|kept" ] && [ "$o7e" = "0" ]; then ok
+else bad EV6f-ste-project-layer "rc=$rc node='$o7d' bash='$o7e'"; fi
 
 # EV7: the bash reader carries the same split by hand — a global-only key is not even looked for in
 # the project file (the global value wins), a PROJECT_OK key still comes from the project layer

@@ -261,8 +261,11 @@ const CURSOR_PRIORITY = [
  * cannot look at the workspace. Every other `hooks/*.md` must have a row here, and every
  * row a hook — `checkRuleOwnership` holds the two sets equal, and holds every exempt name to a
  * mention in the shim, which is the only other way a hook reaches Cursor.
+ * A `*-claude.md` hook is the Claude Code variant of the convention of the same stem: it reaches
+ * Claude Code alone, so it has no rule and no OpenCode paste.
  */
 const RULE_EXEMPT_HOOKS = ['store-access', 'comment-discipline-foundation'];
+const CLAUDE_VARIANT = /-claude$/;
 const CURSOR_RULES = {
   'comment-discipline': {
     description: 'Foundation comment discipline — what to document, what never to write inline.',
@@ -288,10 +291,8 @@ const CURSOR_RULES = {
         '`node <plugin-root>/scripts/json-slim.cjs <path> --stats`',
       ],
       [
-        'On Claude Code the session context opens with `fnd plugin root: <absolute path>` — write that path\n' +
-          "into commands; the Bash tool's shell does not set `${CLAUDE_PLUGIN_ROOT}`, so a literal one expands\n" +
-          'to empty.',
-        '`<plugin-root>` is the directory above this rules directory.',
+        'it would measure a sub-path, not a\ncompression.',
+        'it would measure a sub-path, not a\ncompression.\n`<plugin-root>` is the directory above this rules directory.',
       ],
     ],
   },
@@ -309,6 +310,17 @@ const CURSOR_RULES = {
         'Details + freshness rules: `references/task-workspace.md`.',
         'Details + freshness rules: `references/task-workspace.md` in\n' +
           '  the fnd plugin root (the directory above this rules directory).',
+      ],
+    ],
+  },
+  'writing-style': {
+    description:
+      'Foundation how-to-explain convention — plain ASD-STE100-style sentences when explaining code, plans, errors or changes.',
+    subs: [
+      [
+        '"normal writing"; disable with `FND_STE=0`.',
+        '"normal writing"; on Claude Code the sessionStart hook drops this text entirely when\n' +
+          '`FND_STE=0` — here, disable the rule instead.',
       ],
     ],
   },
@@ -702,7 +714,7 @@ function checkRuleOwnership() {
     die('cannot read hooks/: ' + e.message);
   }
   const sources = hooks.filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3))
-    .filter((n) => !RULE_EXEMPT_HOOKS.includes(n)).sort();
+    .filter((n) => !RULE_EXEMPT_HOOKS.includes(n) && !CLAUDE_VARIANT.test(n)).sort();
   const shim = readText(path.join(PLUGIN_ROOT, 'hooks', 'cursor-shim.cjs'));
   for (const n of RULE_EXEMPT_HOOKS) {
     if (!shim.includes("'" + n + ".md'")) die('hooks/' + n + '.md is exempt from CURSOR_RULES but hooks/cursor-shim.cjs never injects it');

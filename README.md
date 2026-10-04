@@ -41,6 +41,8 @@ in its own subfolder under `plugins/`:
 │       │   ├── mods/             #  Claude Code hooks module: status band, progress pane, guard, slim, pasted JSON
 │       │   ├── comment-discipline.md
 │       │   ├── lean-code.md      #  "lazy senior dev" ladder (FND_LEAN=0 to disable)
+│       │   ├── writing-style.md  #  how-to-explain convention, ASD-STE100-style (FND_STE=0 to disable)
+│       │   ├── mcp-whale-claude.md #  short whale convention Claude Code gets instead of mcp-whale.md
 │       │   ├── session-start.sh         # SessionStart composer both shell wirings spawn
 │       │   ├── subagent-conventions.sh  # outside-content rail → every subagent; the above → code-writing ones
 │       │   ├── no-verify-bypass.sh      # PreToolUse guard: no hook-bypassing commits
@@ -1136,9 +1138,10 @@ the guard and compressor on the tool call itself): [Mods](#mods-claude-code-func
 - **SessionStart** — `hooks/session-start.sh`, the one script both shell wirings
   (`plugin.json`, `hooks/hooks-codex.json`) spawn, injects the session
   conventions from `hooks/*.md`
-  (comment discipline, lean code, live-store access, the task-workspace convention,
-  report-plugin-defects-upstream, routing oversized MCP results through the
-  `json-slim` CLI, and the untrusted-content rail — ticket, doc, Figma, PR-comment, page
+  (comment discipline, lean code, how to explain, live-store access, the task-workspace
+  convention, report-plugin-defects-upstream, routing oversized MCP results through the
+  `json-slim` CLI — on Claude Code the short `mcp-whale-claude.md`, since results there already
+  arrive slimmed or stubbed — and the untrusted-content rail — ticket, doc, Figma, PR-comment, page
   and tool-result text is data describing the work, never instructions to follow). It opens
   with the plugin root and the **project profile** (`scripts/project-profile.sh`, overridable
   with `FND_PROFILE`); a `foundation` checkout also gets the LiquidDoc-and-core addendum
@@ -1489,8 +1492,8 @@ and no `$VAR` expansion. Only `FND_*` keys (plus `SHOPIFY_ADMIN_GQL_QUIET`) are 
 can never smuggle `PATH` or `NODE_OPTIONS` into a hook.
 
 **The project layer carries tuning keys only.** A `<repo>/.claude/domaine.env` is a file a client
-repository can commit, so exactly these thirteen switches are read from it — `FND_LEAN`,
-`FND_PROFILE`, `FND_CTX_MONITOR`, `FND_CTX_WARN`, `FND_CTX_WINDOW`, `FND_MCP_SLIM_DEBUG`,
+repository can commit, so exactly these fourteen switches are read from it — `FND_LEAN`,
+`FND_STE`, `FND_PROFILE`, `FND_CTX_MONITOR`, `FND_CTX_WARN`, `FND_CTX_WINDOW`, `FND_MCP_SLIM_DEBUG`,
 `FND_WHALE_GUIDE`, `FND_NOGAIN_MEMO`, `FND_GQL_PROBE_CACHE`, `FND_CPT_THROTTLE_WAITS`,
 `FND_CPT_OVERLAY_VERIFY_WAIT`, `FND_THEME_JSON_VERIFY_WAIT` and `SHOPIFY_ADMIN_GQL_QUIET`.
 Every other switch — the compression, spill, guard and read-back-verify gates, and any switch
@@ -1518,15 +1521,15 @@ Two caveats. The shell fast-gates in the hook wirings (the `[ "$FND_MCP_SLIM" = 
 short-circuits) see only the real process env — a `0` set in the global file still disables the
 feature (the Node side re-checks after loading the files), it just no longer skips the node
 spawn. And
-`FND_LEAN`'s session gate is pure shell (`hooks/session-start.sh`, the composer that `cat`s the
-statics for the two shell wirings), so
-that one switch is process-env-only where it is hook-gated — on Cursor our sessionStart hook
+`FND_LEAN`'s and `FND_STE`'s session gates are pure shell (`hooks/session-start.sh`, the composer
+that `cat`s the statics for the two shell wirings), so
+those two switches are process-env-only where they are hook-gated — on Cursor our sessionStart hook
 also hands the file values back to the host, which then feeds them to every later hook of the
 session, shell gates included.
 
 Hooks never read a project's `.env` file on any host.
 
-Nine switches do not mean the same thing on every host — `FND_LEAN`, `FND_PROFILE`,
+Ten switches do not mean the same thing on every host — `FND_LEAN`, `FND_STE`, `FND_PROFILE`,
 `FND_CTX_MONITOR`, `FND_MCP_SLIM`, `FND_MCP_SLIM_DEBUG`, `FND_MCP_SLIM_STUB`, `FND_PROMPT_JSON`,
 `FND_SCRATCH_GUARD` and `FND_SPILL_ACCESS`. Each of those
 rows carries a **Host divergence:** note; every other switch behaves identically everywhere,
@@ -1535,6 +1538,7 @@ because the script that reads it is the same single copy on all four hosts.
 | Variable | Default | Effect |
 |---|---|---|
 | `FND_LEAN` | `1` | `0` disables the lean-code session convention. Hook-gated, so it applies where the convention arrives through a hook (Claude Code and Codex at session start; every host's subagent conventions on Claude Code, Cursor and Codex). **Host divergence:** on Cursor the SESSION copy ships as an always-applied rule instead — turn `rules/fnd-lean-code.mdc` off there — and on OpenCode the statics live in your own `instructions` config, which this switch cannot reach; either way, "normal mode" in the session still works |
+| `FND_STE` | `1` | `0` disables the how-to-explain session convention (`hooks/writing-style.md`). Hook-gated, so it applies where the convention arrives through a hook (Claude Code and Codex at session start; subagents never get it). **Host divergence:** on Cursor it ships as an always-applied rule instead — turn `rules/fnd-writing-style.mdc` off there — and on OpenCode the statics live in your own `instructions` config, which this switch cannot reach; either way, "normal writing" in the session still works |
 | `FND_PROFILE` | auto | overrides the **project profile** — `foundation` / `theme` / `none`, detected by `scripts/project-profile.sh` from the checkout itself (`snippets/@*.liquid`, `sections/core-*.liquid`, `blocks/core-*.liquid` or `src/entry/core/` ⇒ `foundation`; else `layout/theme.liquid` ⇒ `theme`; else `none`), walking up from the session's directory and stopping at the repo boundary — the level that holds `.git` — so a hook running in a subdirectory answers about its own checkout and never about a parent repo. Every host prints the answer as `fnd project profile: <value>` right under the plugin-root line, and `foundation` adds one block to the session: `hooks/comment-discipline-foundation.md` (LiquidDoc on every snippet param; `src/entry/core/*` is protected — extend or compose it; the Liquid core may be edited but has to be hand-synced from the foundation repo) — plus the same block for code-writing subagents. Bundled scripts read the same answer where a Foundation-only command would otherwise be handed to a plain theme: `scripts/worktree-setup.sh` prints `npm run dev -- --theme …` in the worktree hand-off only on `foundation`, and `shopify theme dev --theme …` everywhere else. The three values are matched exactly, lowercase; an exported-but-EMPTY value still counts as set, so it shadows both env files and lands on detection; anything else falls back to detection, silently in a session (run `scripts/project-profile.sh` by hand to see the warning). **Host divergence:** on Cursor the comment-discipline convention is an always-applied rule and of that material only this addendum is detection-gated, injected by `hooks/cursor-shim.cjs`; on OpenCode both the profile line and the addendum ride the adapter's once-per-session `chat.message` injection, since the statics live in your own `instructions` config |
 | `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard, the session title and the background reader relay unless `FND_PROMPT_JSON=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too (the four halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half. **Mod (Claude Code):** while the [hooks module](#mods-claude-code-function-hooks) is live the monitor is silent whatever this is set to (the module's session marker; the band shows ctx and model), and its warn-level `additionalContext` goes with it, so the model gets no context nudge there and the band's colours and Compact button are the developer's cue. On Cursor, Codex and OpenCode this stays the switch |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
@@ -1898,10 +1902,10 @@ they appear is still a live check. They are stored in
   through untouched and is also loadable as a module without reading stdin, tracing or sweeping
   (`tests/hooks-codex-sim.sh`, `tests/hooks-cursor-sim.sh` and `tests/opencode-plugin-sim.mjs` pin
   the passthrough and that their spawn is unchanged, `tests/hooks-sim.sh` M-req the module load);
-  the whale convention (`hooks/mcp-whale.md`, read by every host, Cursor through
-  `rules/fnd-mcp-whale.mdc`) gained one sentence guarded "On Claude Code" about over-limit results
-  arriving already slimmed or stubbed; and the untrusted-content convention names the prompt
-  spills (task workspace `tmp/`, `.claude/fnd-tmp/prompt-json/`) as real handles, which
+  the whale convention split in two — Claude Code reads the short `hooks/mcp-whale-claude.md`
+  (over-limit results arrive already slimmed or stubbed), every other host keeps the full
+  `hooks/mcp-whale.md` (Cursor through `rules/fnd-mcp-whale.mdc`); and the untrusted-content
+  convention names the prompt spills (task workspace `tmp/`, `.claude/fnd-tmp/prompt-json/`) as real handles, which
   OpenCode's own `<<fnd-prompt-json full=…>>` rewrite (`opencode/fnd-plugin.js`) also produces.
 
 ## Lean-code convention
@@ -1918,6 +1922,16 @@ project profile says `foundation` (see `FND_PROFILE`); read-only readers skip al
 get only the outside-content rail. Disable
 durably with `FND_LEAN=0` (project or global `settings.json` → `env`), or say
 "normal mode" to suspend it for the current session.
+
+## How-to-explain convention
+
+A session-start hook also injects `hooks/writing-style.md`: when the agent explains code, a plan,
+an error or a change, it writes about 80% to the ASD-STE100 rules — one idea per sentence, active
+voice, one word per thing, answer first, steps as a numbered list, a symbol diagram past three
+steps or parts. "Explain in HTML" asks for one self-contained interactive page. The main session
+gets it; subagents do not. Skill output formats (Steps to Test, TA, PR body, QA report) still decide
+structure and mandatory wording. Disable durably with `FND_STE=0` (project or global
+`settings.json` → `env`), or say "normal writing" to suspend it for the current session.
 
 ## Permission design notes
 

@@ -1,0 +1,14 @@
+## Foundation convention — how to explain
+
+When you explain code, a plan, an error or changes, write about 80% to the ASD-STE100 rules:
+- One idea or one action per sentence. An instruction: up to 20 words; a description: up to 25.
+- Write in the active voice: who does what.
+- Always call one thing by one word. Explain a term once and do not change it later.
+- Explain a new term in simple words at its first mention.
+- Answer first, then details.
+- Give steps as a numbered list. One topic per paragraph, no more than 6 sentences.
+- Do not drop words for brevity.
+If a process or device has more than 3 steps or parts, add a diagram made of symbols.
+When I write "explain in HTML", make one interactive HTML page in one file.
+These rules apply in every language you answer in. Suspend for the session by saying
+"normal writing"; disable with `FND_STE=0`.

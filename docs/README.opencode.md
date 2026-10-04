@@ -172,8 +172,8 @@ rather than widening the pattern.
 
 ### 5. Paste the static conventions
 
-The session conventions that other hosts inject for you — comment discipline, lean code, whale
-routing, plugin feedback, task workspace, untrusted content — are wired by you on OpenCode: the plugin adapter
+The session conventions that other hosts inject for you — comment discipline, lean code, how to
+explain, whale routing, plugin feedback, task workspace, untrusted content — are wired by you on OpenCode: the plugin adapter
 injects only what a static file cannot answer (where the bundle is, the project profile) plus
 the two detection-gated blocks (live-store access, the Foundation LiquidDoc-and-core addendum).
 Without this paste **no fnd convention reaches your sessions** (the smoke test's
@@ -191,7 +191,8 @@ substituted; the files it names are:
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/mcp-whale.md",
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/plugin-feedback.md",
   "/absolute/path/to/claude-plugins/plugins/fnd/hooks/task-workspace.md",
-  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/untrusted-content.md"
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/untrusted-content.md",
+  "/absolute/path/to/claude-plugins/plugins/fnd/hooks/writing-style.md"
 ]
 ```
 
@@ -199,7 +200,8 @@ If your config already has `instructions`, append these entries to it. List the 
 explicitly — a `hooks/*.md` glob would also pull in `store-access.md` and
 `comment-discipline-foundation.md`, which the adapter injects itself where the workspace says
 so — store credentials for the first, Foundation markers for the second — so a static copy would
-double them. (That
+double them; it would also pull in `mcp-whale-claude.md`, the Claude Code variant of
+`mcp-whale.md`. (That
 exclusion is exactly what the renderer applies, which is why its output is the safe list to
 paste. An `AGENTS.md` referencing the same files works too, if that is how you organize global
 instructions.) Because the paths point into the clone, `git pull` updates the content with no
@@ -266,10 +268,11 @@ after an update that touched them.
 - **Static conventions are yours to wire.** The adapter injects only what a static file cannot
   answer — where the bundle is, the project profile — plus the two detection-gated blocks
   (live-store access, the Foundation LiquidDoc-and-core addendum), once per session. The static
-  conventions (comment discipline, lean code, task workspace, whale routing, plugin feedback,
-  the untrusted-content rail) arrive through your `instructions` config — install step 5 is that
+  conventions (comment discipline, lean code, how to explain, task workspace, whale routing,
+  plugin feedback, the untrusted-content rail) arrive through your `instructions` config — install step 5 is that
   paste — which costs nothing per message and survives compaction. Consequence: `FND_LEAN=0`
-  cannot reach them here; remove the lean-code file from `instructions` instead. The other way
+  and `FND_STE=0` cannot reach them here; remove the lean-code or writing-style file from
+  `instructions` instead. The other way
   round for the injected pair: riding `chat.message` means they do NOT survive compaction and a
   task subagent never sees them, so on this host the Foundation addendum is a first-message
   reminder rather than a standing rule.

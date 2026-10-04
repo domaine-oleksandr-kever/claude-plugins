@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Simulation harness for the fnd plugin's session-level hooks:
 #   S cases — plugin.json SessionStart command: per-file tolerance (one broken
-#             md must not discard the rest), FND_LEAN gate, always exit 0, the
+#             md must not discard the rest), FND_LEAN / FND_STE gates, the host-picked whale
+#             variant (S3c: Claude Code the short one, every other host the full), always exit 0, the
 #             real plugin root emitting the json-slim whale-routing instruction, and
 #             the host tag + the trace call this command carries (S7); S11–S16 the
 #             project-profile line and the Foundation addendum it gates (detection per
@@ -155,7 +156,7 @@ set -u
 # must not leak into the cases — the debug ones set both switches on the invocation themselves, and
 # the rest would otherwise append fixture noise to the developer's real log. FND_PROFILE overrides
 # the session-start profile probe, which decides whether the Foundation addendum is injected.
-unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_SPILL_ACCESS FND_PROFILE
+unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_SPILL_ACCESS FND_PROFILE FND_STE
 # Same reason for the host-proof log: a developer running with FND_HOST_TRACE on would otherwise
 # have every case in this file append to their real trace log, and an exported FND_HOST would
 # rewrite the `host` column the H cases pin.
@@ -211,9 +212,12 @@ fake="$TMP/plugroot"; mkdir -p "$fake/hooks"
 # The wiring command spawns hooks/session-start.sh out of the root it is handed, so a fake bundle
 # needs the real script — the composition under test lives there, not in the manifest.
 cp "$realroot/hooks/session-start.sh" "$fake/hooks/session-start.sh"
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content writing-style; do
   echo "MARK-$f" > "$fake/hooks/$f.md"
 done
+# The Claude Code variant of the whale convention: its own word, because MARK-mcp-whale would be a
+# prefix of MARK-mcp-whale-claude and an absence check on the full one would read the variant.
+echo "MARK-claude-whale" > "$fake/hooks/mcp-whale-claude.md"
 # Its own sentinel word, not MARK-comment-discipline-foundation: the plain convention's marker is
 # a PREFIX of that name, so an `assert_absent MARK-comment-discipline` would read the addendum as
 # the block it is asserting is gone.
@@ -225,9 +229,10 @@ SS_PLAIN="$TMP/ss-plain"; mkdir -p "$SS_PLAIN"
 
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?; out="$(ss_ctx "$out")"
 assert_eq S1-all-present-exit "$ec" 0
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code writing-style untrusted-content claude-whale; do
   assert_contains "S1-$f" "$out" "MARK-$f"
 done
+assert_absent S1-no-full-whale "$out" "MARK-mcp-whale"
 
 rm "$fake/hooks/plugin-feedback.md"
 SS_TOL_ERR="$TMP/ss-tol.err"
@@ -237,7 +242,7 @@ assert_eq S2-missing-file-exit "$ec" 0
 # costs the session that convention and NOTHING on stderr. A dropped `2>/dev/null` on one `cat`
 # would leak `cat: …/hooks/plugin-feedback.md: No such file or directory` into every session.
 assert_eq S2-missing-file-stderr "$(cat "$SS_TOL_ERR")" ""
-for f in comment-discipline store-access task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline store-access task-workspace lean-code writing-style claude-whale untrusted-content; do
   assert_contains "S2-$f" "$out" "MARK-$f"
 done
 # Restored right here: every case below asserts against a COMPLETE bundle, and a convention left
@@ -249,23 +254,69 @@ echo "MARK-plugin-feedback" > "$fake/hooks/plugin-feedback.md"
 mv "$fake/hooks/comment-discipline.md" "$TMP/ss-cd.md"
 mv "$fake/hooks/lean-code.md" "$TMP/ss-lc.md"
 mv "$fake/hooks/store-access.md" "$TMP/ss-sa.md"
+mv "$fake/hooks/writing-style.md" "$TMP/ss-ws.md"
+mv "$fake/hooks/mcp-whale.md" "$TMP/ss-mw.md"
+mv "$fake/hooks/mcp-whale-claude.md" "$TMP/ss-mwc.md"
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>"$SS_TOL_ERR")"; ec=$?; out="$(ss_ctx "$out")"
 assert_eq S2b-statics-gone-exit "$ec" 0
 assert_eq S2b-statics-gone-stderr "$(cat "$SS_TOL_ERR")" ""
-assert_contains S2b-still-composes "$out" "MARK-mcp-whale"
+assert_contains S2b-still-composes "$out" "MARK-task-workspace"
+# the plain-host branch of the whale `if` has a `cat` of its own
+out="$(cd "$SS_STORE" && env FND_HOST=codex CLAUDE_PLUGIN_ROOT="$fake" bash "$fake/hooks/session-start.sh" 2>"$SS_TOL_ERR" </dev/null)"; ec=$?
+assert_eq S2b-plain-statics-gone-exit "$ec" 0
+assert_eq S2b-plain-statics-gone-stderr "$(cat "$SS_TOL_ERR")" ""
+assert_contains S2b-plain-still-composes "$out" "MARK-task-workspace"
 mv "$TMP/ss-cd.md" "$fake/hooks/comment-discipline.md"
 mv "$TMP/ss-lc.md" "$fake/hooks/lean-code.md"
 mv "$TMP/ss-sa.md" "$fake/hooks/store-access.md"
+mv "$TMP/ss-ws.md" "$fake/hooks/writing-style.md"
+mv "$TMP/ss-mw.md" "$fake/hooks/mcp-whale.md"
+mv "$TMP/ss-mwc.md" "$fake/hooks/mcp-whale-claude.md"
 
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" FND_LEAN=0 bash -c "$SS_CMD" 2>/dev/null)"; ec=$?; out="$(ss_ctx "$out")"
 assert_eq S3-lean-off-exit "$ec" 0
 assert_absent S3-no-lean "$out" "MARK-lean-code"
+assert_contains S3-lean-off-keeps-ste "$out" "MARK-writing-style"
+
+# S3b: FND_STE gates the how-to-explain block the same way — only a literal `0` drops it, and
+# dropping it costs no other convention
+out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" FND_STE=0 bash -c "$SS_CMD" 2>/dev/null)"; ec=$?; out="$(ss_ctx "$out")"
+assert_eq       S3b-ste-off-exit  "$ec" 0
+assert_absent   S3b-no-ste        "$out" "MARK-writing-style"
+assert_contains S3b-ste-off-lean  "$out" "MARK-lean-code"
+assert_contains S3b-ste-off-whale "$out" "MARK-claude-whale"
+out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" FND_STE=1 bash -c "$SS_CMD" 2>/dev/null)"; out="$(ss_ctx "$out")"
+assert_contains S3b-ste-on "$out" "MARK-writing-style"
+# …right behind lean-code, the last block of the session context
+s3_lc="$(printf '%s\n' "$out" | grep -n '^MARK-lean-code$' | cut -d: -f1 | head -1)"
+s3_ws="$(printf '%s\n' "$out" | grep -n '^MARK-writing-style$' | cut -d: -f1 | head -1)"
+if [ -n "$s3_lc" ] && [ "$s3_ws" = "$((s3_lc + 1))" ]; then ok
+else bad S3b-ste-after-lean "lean-code=$s3_lc writing-style=$s3_ws"; fi
+
+# S3c: the whale convention is picked by host — Claude Code gets the short variant (its MCP
+# results already arrive slimmed or stubbed), every other host the full recipe, never both
+for h in claude codex cursor nohost; do
+  if [ "$h" = nohost ]; then
+    out="$(cd "$SS_STORE" && env -u FND_HOST CLAUDE_PLUGIN_ROOT="$fake" bash "$fake/hooks/session-start.sh" 2>/dev/null </dev/null)"
+  else
+    out="$(cd "$SS_STORE" && env FND_HOST="$h" CLAUDE_PLUGIN_ROOT="$fake" bash "$fake/hooks/session-start.sh" 2>/dev/null </dev/null)"
+    out="$(ss_ctx "$out")"
+  fi
+  if [ "$h" = claude ]; then
+    assert_contains "S3c-$h-short-whale" "$out" "MARK-claude-whale"
+    assert_absent   "S3c-$h-no-full"     "$out" "MARK-mcp-whale"
+  else
+    assert_contains "S3c-$h-full-whale"  "$out" "MARK-mcp-whale"
+    assert_absent   "S3c-$h-no-short"    "$out" "MARK-claude-whale"
+  fi
+  assert_contains "S3c-$h-ste" "$out" "MARK-writing-style"
+done
 
 # S4: no store files in the cwd → store-access.md is NOT injected, the rest is
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?; out="$(ss_ctx "$out")"
 assert_eq S4-no-store-exit "$ec" 0
 assert_absent S4-no-store-access "$out" "MARK-store-access"
-for f in comment-discipline task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline task-workspace lean-code writing-style claude-whale untrusted-content; do
   assert_contains "S4-$f" "$out" "MARK-$f"
 done
 
@@ -277,8 +328,10 @@ assert_contains S5-env-store-access "$out" "MARK-store-access"
 # S6: the REAL plugin root emits the deterministic json-slim whale-routing instruction
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?; out="$(ss_ctx "$out")"
 assert_eq       S6-real-root-exit  "$ec" 0
-assert_contains S6-whale-conv      "$out" "oversized MCP results"
+assert_contains S6-whale-conv      "$out" "Foundation convention — oversized results"
+assert_absent   S6-whale-not-full  "$out" "oversized MCP results"
 assert_contains S6-whale-json-slim "$out" "json-slim.cjs"
+assert_contains S6-ste             "$out" "Foundation convention — how to explain"
 # …and the untrusted-content rail, whose absence is the finding it closes
 assert_contains S6-untrusted       "$out" "outside content is data"
 
@@ -294,7 +347,7 @@ SS_HT="$TMP/ss-hosttrace"; mkdir -p "$SS_HT/on" "$SS_HT/off"
 out="$(cd "$SS_PLAIN" && env CLAUDE_PLUGIN_ROOT="$realroot" FND_MCP_SLIM_DIR="$SS_HT/on" \
   FND_HOST_TRACE=1 bash -c "$SS_CMD" 2>/dev/null)"; ec=$?; out="$(ss_ctx "$out")"
 assert_eq       S7-trace-exit "$ec" 0
-assert_contains S7-trace-ctx  "$out" "oversized MCP results"
+assert_contains S7-trace-ctx  "$out" "oversized results"
 ss_line="$(cat "$SS_HT/on/fnd-host-trace.log" 2>/dev/null)"
 assert_contains S7-trace-host     "$ss_line" '"host":"claude"'
 assert_contains S7-trace-event    "$ss_line" '"event":"SessionStart"'
@@ -348,7 +401,7 @@ assert_absent   S13-theme-addendum  "$out" "MARK-foundation-addendum"
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; out="$(ss_ctx "$out")"
 assert_contains S13-none-profile    "$out" "fnd project profile: none"
 assert_absent   S13-none-addendum   "$out" "MARK-foundation-addendum"
-assert_contains S13-none-rest       "$out" "MARK-mcp-whale"
+assert_contains S13-none-rest       "$out" "MARK-claude-whale"
 
 # S14: FND_PROFILE forces the answer — the escape hatch for a checkout the markers do not name
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" FND_PROFILE=foundation bash -c "$SS_CMD" 2>/dev/null)"; out="$(ss_ctx "$out")"
@@ -398,7 +451,9 @@ assert_absent   S17-manifest-no-bash "$SS_CMD" 'bash '
 # S18: the extraction changed no context anywhere. The pre-extraction one-liner is pinned verbatim
 # below and both are run over the branch matrix the composition has — project profile × store
 # files × FND_LEAN — with the delivered context (the envelope unwrapped, S21), stderr and exit
-# status compared as a whole.
+# status compared as a whole. The two later additions are neutralised so the pin stays verbatim:
+# FND_STE=0 drops the how-to-explain block, and a root whose Claude whale variant is the full file
+# (everything else symlinked to the real bundle) makes the host pick invisible; S3b/S3c pin both.
 # Not "$(cat <<…)": bash 3.2 ends a command substitution at the first unbalanced `)` in a heredoc
 # body, and this one carries a `case` pattern. `read` then keeps only the FIRST line, so the pin
 # is checked whole before use — a second line would leave the matrix comparing a truncated
@@ -412,6 +467,10 @@ case "$SS_OLD" in
   *'; true') ok ;;
   *) bad S18-pin-ends-true "the pinned one-liner no longer ends with '; true' — it exited on the last command's status" ;;
 esac
+s18root="$TMP/s18root"; mkdir -p "$s18root/hooks"
+for f in "$realroot"/hooks/*; do ln -s "$f" "$s18root/hooks/${f##*/}"; done
+rm -f "$s18root/hooks/mcp-whale-claude.md"; cp "$realroot/hooks/mcp-whale.md" "$s18root/hooks/mcp-whale-claude.md"
+ln -s "$realroot/scripts" "$s18root/scripts"
 for prof in foundation theme none; do
   for store in store nostore; do
     d="$TMP/ss-matrix/$prof-$store"; mkdir -p "$d"
@@ -422,11 +481,11 @@ for prof in foundation theme none; do
     [ "$store" = store ] && : > "$d/shopify.theme.toml"
     for lean in unset 0; do
       if [ "$lean" = 0 ]; then
-        old="$(cd "$d" && env CLAUDE_PLUGIN_ROOT="$realroot" FND_LEAN=0 bash -c "$SS_OLD" 2>"$TMP/ss-old.err")"; old_ec=$?
-        new="$(cd "$d" && env CLAUDE_PLUGIN_ROOT="$realroot" FND_LEAN=0 bash -c "$SS_CMD" 2>"$TMP/ss-new.err")"; new_ec=$?; new="$(ss_ctx "$new")"
+        old="$(cd "$d" && env CLAUDE_PLUGIN_ROOT="$s18root" FND_LEAN=0 bash -c "$SS_OLD" 2>"$TMP/ss-old.err")"; old_ec=$?
+        new="$(cd "$d" && env CLAUDE_PLUGIN_ROOT="$s18root" FND_LEAN=0 FND_STE=0 bash -c "$SS_CMD" 2>"$TMP/ss-new.err")"; new_ec=$?; new="$(ss_ctx "$new")"
       else
-        old="$(cd "$d" && env -u FND_LEAN CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_OLD" 2>"$TMP/ss-old.err")"; old_ec=$?
-        new="$(cd "$d" && env -u FND_LEAN CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_CMD" 2>"$TMP/ss-new.err")"; new_ec=$?; new="$(ss_ctx "$new")"
+        old="$(cd "$d" && env -u FND_LEAN CLAUDE_PLUGIN_ROOT="$s18root" bash -c "$SS_OLD" 2>"$TMP/ss-old.err")"; old_ec=$?
+        new="$(cd "$d" && env -u FND_LEAN CLAUDE_PLUGIN_ROOT="$s18root" FND_STE=0 bash -c "$SS_CMD" 2>"$TMP/ss-new.err")"; new_ec=$?; new="$(ss_ctx "$new")"
       fi
       assert_eq "S18-$prof-$store-lean-$lean-stdout" "$new" "$old"
       assert_eq "S18-$prof-$store-lean-$lean-exit"   "$new_ec" "$old_ec"
@@ -477,7 +536,7 @@ ss_env_ctx="$(ss_ctx "$raw")"
 assert_contains S21-envelope-root    "$ss_env_ctx" "fnd plugin root: $realroot"
 assert_contains S21-envelope-profile "$ss_env_ctx" "fnd project profile: foundation"
 assert_contains S21-envelope-heading "$ss_env_ctx" "## Foundation convention"
-assert_contains S21-envelope-whale   "$ss_env_ctx" "oversized MCP results"
+assert_contains S21-envelope-whale   "$ss_env_ctx" "Foundation convention — oversized results"
 ss_env_line="$(cat "$SS_ENVDIR/fnd-host-trace.log" 2>/dev/null)"
 assert_contains S22-envelope-trace-hook     "$ss_env_line" '"hook":"session-start"'
 assert_contains S22-envelope-trace-host     "$ss_env_line" '"host":"claude"'
@@ -510,7 +569,7 @@ assert_eq     S24-nonode-exit     "$ec" 0
 assert_eq     S24-nonode-stderr   "$(cat "$TMP/ss-nonode.err")" ""
 assert_absent S24-nonode-envelope "$out" "hookSpecificOutput"
 assert_contains S24-nonode-root   "$out" "fnd plugin root: $realroot"
-assert_contains S24-nonode-ctx    "$out" "oversized MCP results"
+assert_contains S24-nonode-ctx    "$out" "Foundation convention — oversized results"
 
 # S25: the delivered size against the host's 10,000-char cap — the assertion tests/hooks-codex-sim.sh
 # carries for its own path and this suite did not. The envelope is measured, not just the context
@@ -544,6 +603,7 @@ ss_max_ctx="$(ss_ctx "$raw")"
 ss_max_title="$(ss_title "$raw")"
 assert_contains S25-max-profile "$ss_max_ctx" "fnd project profile: foundation"
 assert_contains S25-max-store   "$ss_max_ctx" "live store access"
+assert_contains S25-max-ste     "$ss_max_ctx" "how to explain"
 # …and the title really is in there, clamped — otherwise this is the old measurement under a new name.
 case "$ss_max_title" in 'ELC-1309 — Некорректное'*) ok ;; *) bad S25-max-title "the worst case composes no title: '$ss_max_title'" ;; esac
 ss_max_title_bytes=$(printf '%s' "$ss_max_title" | wc -c | tr -d ' ')
@@ -567,7 +627,7 @@ if [ -d "$SS_GIT/.git" ]; then ok; else bad S26-scaffold "could not build the th
 
 raw="$(run_ss "$SS_GIT" '{"session_id":"s26","source":"startup"}')"
 assert_eq       S26-key-only     "$(ss_title "$raw")" "ELC-1309"
-assert_contains S26-ctx-intact   "$(ss_ctx "$raw")"   "oversized MCP results"
+assert_contains S26-ctx-intact   "$(ss_ctx "$raw")"   "Foundation convention — oversized results"
 assert_eq       S26-one-doc      "$(printf '%s\n' "$raw" | wc -l | tr -d ' ')" "1"
 case "$raw" in '{'*'}') ok ;; *) bad S26-delimiters "stdout is not a bare JSON object" ;; esac
 
@@ -591,13 +651,13 @@ assert_eq S26-with-summary "$(ss_title "$raw")" "ELC-1309 — OOS samples break 
 # overwrote it would undo a deliberate `--name` / `/rename` on every resume.
 raw="$(run_ss "$SS_GIT" '{"session_id":"s26c","source":"resume","session_title":"my own name"}')"
 assert_eq       S26-user-named    "$(ss_title "$raw")" ""
-assert_contains S26-user-named-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+assert_contains S26-user-named-ctx "$(ss_ctx "$raw")" "Foundation convention — oversized results"
 
 # The switch, the other hosts, and a branch that names no ticket — all silent, all still
 # carrying the whole session context.
 raw="$(run_ss "$SS_GIT" '{"session_id":"s26d","source":"startup"}' FND_SESSION_TITLE=0)"
 assert_eq       S26-switch-off     "$(ss_title "$raw")" ""
-assert_contains S26-switch-off-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+assert_contains S26-switch-off-ctx "$(ss_ctx "$raw")" "Foundation convention — oversized results"
 
 out="$(printf '%s' '{"session_id":"s26e","source":"startup"}' | (cd "$SS_GIT" && env FND_HOST=codex \
   CLAUDE_PLUGIN_ROOT="$realroot" bash "$realroot/hooks/session-start.sh" 2>/dev/null))"
@@ -608,17 +668,17 @@ assert_contains S26-codex-ctx         "$out" "oversized MCP results"
 ( cd "$SS_GIT" && git checkout -q -b chore/tidy-up ) >/dev/null 2>&1
 raw="$(run_ss "$SS_GIT" '{"session_id":"s26f","source":"startup"}')"
 assert_eq       S26-no-key     "$(ss_title "$raw")" ""
-assert_contains S26-no-key-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+assert_contains S26-no-key-ctx "$(ss_ctx "$raw")" "Foundation convention — oversized results"
 
 # Outside a repo there is no branch to read, and `git` failing is an ordinary state — never a
 # session that lost its conventions over a title it could not compose.
 raw="$(run_ss "$SS_PLAIN" '{"session_id":"s26g","source":"startup"}')"
 assert_eq       S26-no-repo     "$(ss_title "$raw")" ""
-assert_contains S26-no-repo-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+assert_contains S26-no-repo-ctx "$(ss_ctx "$raw")" "Foundation convention — oversized results"
 
 # Empty stdin — a by-hand run, a host that sends nothing — must not stall or break the envelope.
 raw="$(printf '' | (cd "$SS_GIT" && env CLAUDE_PLUGIN_ROOT="$realroot" bash -c "$SS_CMD" 2>/dev/null))"
-assert_contains S26-empty-stdin-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+assert_contains S26-empty-stdin-ctx "$(ss_ctx "$raw")" "Foundation convention — oversized results"
 case "$raw" in '{'*'}') ok ;; *) bad S26-empty-stdin-doc "stdout is not a bare JSON object" ;; esac
 
 # The switch is read the way the node halves read it — process env, then the GLOBAL Domaine env
@@ -629,7 +689,7 @@ SS_CFG="$TMP/ss-cfg"; mkdir -p "$SS_CFG/domaine"
 printf 'FND_SESSION_TITLE=0\n' > "$SS_CFG/domaine/env"
 raw="$(run_ss "$SS_GIT" '{"session_id":"s26h","source":"startup"}' XDG_CONFIG_HOME="$SS_CFG")"
 assert_eq       S26-envfile-off     "$(ss_title "$raw")" ""
-assert_contains S26-envfile-off-ctx "$(ss_ctx "$raw")" "oversized MCP results"
+assert_contains S26-envfile-off-ctx "$(ss_ctx "$raw")" "Foundation convention — oversized results"
 # …and the prompt half, which reads the same file through scripts/env-file.cjs, agrees
 out="$(printf '{"session_id":"s26h2","cwd":"%s","prompt":"look at ELC-1309"}' "$SS_GIT" \
   | env TMPDIR="$TMP/ss-marker" XDG_CONFIG_HOME="$SS_CFG" FND_HOST=claude node "$ROOT/plugins/fnd/hooks/user-prompt.cjs" 2>/dev/null)"
@@ -666,7 +726,7 @@ out="$(printf '%s' '{"session_id":"s27","source":"startup"}' | (cd "$SS_GIT" && 
 assert_eq       S27-nonode-exit   "$ec" 0
 assert_eq       S27-nonode-stderr "$(cat "$TMP/ss-t-nonode.err")" ""
 assert_absent   S27-nonode-title  "$out" "sessionTitle"
-assert_contains S27-nonode-ctx    "$out" "oversized MCP results"
+assert_contains S27-nonode-ctx    "$out" "Foundation convention — oversized results"
 
 # ═══ G — UserPromptSubmit FND_CTX_MONITOR gate ══════════════════════════════
 UPS_CMD="$(jq -r '.hooks.UserPromptSubmit[0].hooks[0].command' "$MANIFEST")"
@@ -4238,6 +4298,8 @@ out="$(run_subc '{"agent_type":"general-purpose"}')"
 assert_contains T1-comment   "$out" "MARK-comment-discipline"
 assert_contains T1-lean      "$out" "MARK-lean-code"
 assert_contains T1-untrusted "$out" "MARK-untrusted-content"
+# the how-to-explain convention is the main session's alone
+assert_absent   T1-no-ste    "$out" "MARK-writing-style"
 
 # T2: unknown / unparsable type errs toward injecting (a code agent without them is the costly miss)
 assert_contains T2-unknown   "$(run_subc '{"agent_type":"some-new-writer"}')" "MARK-comment-discipline"

@@ -39,6 +39,7 @@ quietOnEpipe(process.stderr);
 
 const KNOWN = [
   'FND_LEAN',
+  'FND_STE',
   'FND_PROFILE',
   'FND_CTX_MONITOR',
   'FND_CTX_WARN',

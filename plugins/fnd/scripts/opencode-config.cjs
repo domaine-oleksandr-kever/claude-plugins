@@ -26,6 +26,8 @@ const GENERATOR = 'node plugins/fnd/scripts/gen-host-adapters.cjs';
 // credentials; Foundation markers). A static copy would deliver one a second time in exactly the
 // sessions that already have it.
 const ADAPTER_INJECTED = new Set(['store-access.md', 'comment-discipline-foundation.md']);
+// `*-claude.md` is a convention's Claude Code variant; this host reads the plain file of that stem.
+const CLAUDE_VARIANT = /-claude\.md$/;
 
 function realOrSelf(p) {
   try {
@@ -112,7 +114,7 @@ function readInstructions() {
   // and an unordered render makes every re-run look like a config change. The stat drops entries
   // a host could not read anyway — a directory named `*.md`, a dangling link.
   const statics = names
-    .filter((n) => n.endsWith('.md') && !ADAPTER_INJECTED.has(n))
+    .filter((n) => n.endsWith('.md') && !ADAPTER_INJECTED.has(n) && !CLAUDE_VARIANT.test(n))
     .sort()
     .map((n) => path.join(HOOKS_DIR, n))
     .filter(isFile);

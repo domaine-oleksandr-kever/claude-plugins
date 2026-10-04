@@ -13,8 +13,8 @@
 //
 // Event map (wiring: hooks/hooks-cursor.json):
 //   sessionStart          → the DYNAMIC session context only. The static conventions
-//                           (comment-discipline, lean-code, task-workspace, mcp-whale,
-//                           untrusted-content, plugin-feedback) ship as always-applied
+//                           (comment-discipline, lean-code, writing-style, task-workspace,
+//                           mcp-whale, untrusted-content, plugin-feedback) ship as always-applied
 //                           rules/*.mdc on Cursor
 //                           (M4), so injecting them here too would duplicate every one of
 //                           them in context. What a rule file cannot do is look at the
@@ -79,7 +79,8 @@
 // HERE only: its hook rides inside beforeShellExecution, whose wiring must stay ungated because
 // the commit guard shares the event; FND_LEAN is honored by
 // subagent-conventions.sh, but NOT at sessionStart on this host — the lean-code convention
-// arrives as rules/fnd-lean-code.mdc there (README "Environment switches"). It WRITES one:
+// arrives as rules/fnd-lean-code.mdc there (README "Environment switches"); FND_STE likewise
+// never reaches rules/fnd-writing-style.mdc. It WRITES one:
 // FND_HOST=cursor, for itself and for every script it spawns, which is the `host` column of the
 // FND_HOST_TRACE log. And it UNSETS one: an FND_PROFILE that came from a domaine env FILE, which
 // the workspace probe re-derives (module scope, below).

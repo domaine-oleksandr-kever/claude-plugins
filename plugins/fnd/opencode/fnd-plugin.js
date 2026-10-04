@@ -13,8 +13,8 @@
 //   event                → session bookkeeping only
 //
 // Deliberate divergences from the Claude Code wiring (HARNESS-PORT-PLAN M5):
-//   - the sessionStart STATICS (comment discipline, lean code, task workspace, mcp-whale,
-//     untrusted content, plugin feedback) are NOT injected here. On OpenCode they belong in the user's
+//   - the sessionStart STATICS (comment discipline, lean code, writing style, task workspace,
+//     mcp-whale, untrusted content, plugin feedback) are NOT injected here. On OpenCode they belong in the user's
 //     `instructions` config (or an AGENTS.md), which costs nothing per message and survives
 //     compaction; injecting them from a message hook would re-pay them per session at best.
 //     What is left is what a static file cannot answer — where this bundle is, which kind of

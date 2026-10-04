@@ -249,6 +249,7 @@ fi
 # hardcoded wiring — except OpenCode, whose paste is derived from the directory itself. Without
 # this row a new convention file reaches OpenCode alone, and a stray .md dropped into hooks/
 # reaches OpenCode users as an instruction nobody wired.
+# A `*-claude.md` file is the Claude Code variant of the convention of the same stem and has no rule.
 # Two files are the exception on Cursor only: the shim injects them where the workspace says so
 # (store credentials; Foundation markers) instead of shipping them as always-applied rules —
 # gen-host-adapters.cjs's RULE_EXEMPT_HOOKS is the same pair.
@@ -282,6 +283,12 @@ for f in "$PLUGIN_DIR"/hooks/*.md; do
   if [ "$named" -eq 1 ]; then ok
   else bad "convention-shell-$n" "hooks/$n.md is named nowhere in hooks/session-start.sh — the script both shell wirings spawn"; fi
   case " $CURSOR_SHIM_INJECTED " in *" $n "*) continue ;; esac
+  # a `*-claude.md` variant reaches Claude Code alone; Cursor keeps the plain stem's rule
+  case "$n" in *-claude)
+    if [ -f "$PLUGIN_DIR/hooks/${n%-claude}.md" ]; then ok
+    else bad "convention-variant-$n" "hooks/$n.md is a Claude Code variant of hooks/${n%-claude}.md, which does not exist"; fi
+    continue ;;
+  esac
   if [ -f "$PLUGIN_DIR/rules/fnd-$n.mdc" ]; then ok
   else bad "convention-cursor-$n" "no rules/fnd-$n.mdc — hooks/$n.md never reaches a Cursor session"; fi
 done

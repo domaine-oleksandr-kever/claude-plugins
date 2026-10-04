@@ -278,9 +278,10 @@ assert_eq G6-guard-exit-survives "$ec" 2
 FAKE="$TMP/fakeroot"; mkdir -p "$FAKE/hooks"
 cp "$SHIM" "$FAKE/hooks/"
 cp "$PLUGIN/hooks/subagent-conventions.sh" "$FAKE/hooks/"
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content writing-style; do
   echo "MARK-$f" > "$FAKE/hooks/$f.md"
 done
+echo "MARK-claude-whale" > "$FAKE/hooks/mcp-whale-claude.md"
 # Its own sentinel word: the plain convention's marker is a PREFIX of this file's name, and the
 # S2 loop below asserts that one is ABSENT.
 echo "MARK-foundation-addendum" > "$FAKE/hooks/comment-discipline-foundation.md"
@@ -307,9 +308,18 @@ assert_contains S1-store-access  "$ctx" "MARK-store-access"
 assert_contains S1-root-line     "$ctx" "fnd plugin root: $FAKE_REAL"
 # The statics became always-applied rules on Cursor (M4) — injecting them here too would put
 # every one of them in context twice.
-for f in comment-discipline plugin-feedback task-workspace mcp-whale lean-code untrusted-content; do
+for f in comment-discipline plugin-feedback task-workspace mcp-whale lean-code untrusted-content writing-style claude-whale; do
   assert_absent "S2-no-static-$f" "$ctx" "MARK-$f"
 done
+# …and the how-to-explain convention is one of those rules, always applied; the Claude Code whale
+# variant has none — this host keeps the full whale rule
+WS_RULE="$PLUGIN/rules/fnd-writing-style.mdc"
+if [ -f "$WS_RULE" ] && grep -qx 'alwaysApply: true' "$WS_RULE"; then ok
+else bad S2-ste-rule "rules/fnd-writing-style.mdc missing or not alwaysApply: true"; fi
+assert_contains S2-ste-rule-cursor-wording "$(cat "$WS_RULE" 2>/dev/null)" "here, disable the rule instead"
+if [ -f "$PLUGIN/rules/fnd-mcp-whale-claude.mdc" ]; then bad S2-no-claude-whale-rule "rules/fnd-mcp-whale-claude.mdc exists"
+else ok; fi
+if [ -f "$PLUGIN/rules/fnd-mcp-whale.mdc" ]; then ok; else bad S2-whale-rule "rules/fnd-mcp-whale.mdc missing"; fi
 
 # A .env alone is enough (same detection as the Claude Code wiring)
 assert_contains S3-env-store "$(fshim sessionStart "$(ss_in "$SS_ENV")" | jq -r '.additional_context')" "MARK-store-access"
@@ -489,6 +499,7 @@ assert_eq       T1-exit    "$EC" 0
 ctx="$(printf '%s' "$out" | jq -r '.additional_context')"
 assert_contains T1-comment "$ctx" "MARK-comment-discipline"
 assert_contains T1-lean    "$ctx" "MARK-lean-code"
+assert_absent   T1-no-ste  "$ctx" "MARK-writing-style"
 
 # Read-only agents skip the CODE conventions, but every subagent still gets the
 # untrusted-content rail — so the reader payload is that file and nothing else

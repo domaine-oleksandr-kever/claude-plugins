@@ -19,6 +19,9 @@ Examples:
 
 ## Body sections
 
+When the session carries the how-to-explain convention, sentences follow it; this format decides
+structure and mandatory wording.
+
 **Readability budget — governs every section:** the whole body must be readable in under a
 minute. The description tells the reviewer why the PR exists and where to look; the diff shows
 the what. Evidence (measurement tables, per-file prose walkthroughs, full verification lists) lives in

@@ -29,6 +29,7 @@ fnd-task-workspace:true:hook:task-workspace
 fnd-mcp-whale:true:hook:mcp-whale
 fnd-untrusted-content:true:hook:untrusted-content
 fnd-plugin-feedback:true:hook:plugin-feedback
+fnd-writing-style:true:hook:writing-style
 fnd-model-policy:true:doc:guidelines
 fnd-agent-usage:true:doc:guidelines"
 

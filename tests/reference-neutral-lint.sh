@@ -23,8 +23,8 @@
 #      list is read from skills/*/ so a new skill is covered the day it lands. A path segment
 #      (`<plugin root>/skills/create-pull-request/…`, `references/commit-message-format.md`) is
 #      not an invocation — the surrounding character classes exclude it.
-# Scope: plugins/fnd/references/*.md, every skills/*/REFERENCE.md, and plugins/fnd/hooks/*.md —
-# the session conventions every host receives (Cursor's via rules/fnd-*.mdc, with the generator's
+# Scope: plugins/fnd/references/*.md, every skills/*/REFERENCE.md, and plugins/fnd/hooks/*.md minus
+# the `*-claude.md` Claude Code variants — the session conventions every host receives (Cursor's via rules/fnd-*.mdc, with the generator's
 # substitutions), so rules 1-3 and 5 bind them too (rule 4 does not: see its comment). SKILL.md bodies belong to skill-neutral-lint.sh.
 # Usage: reference-neutral-lint.sh [plugin-dir]   (default: plugins/fnd)
 # Exit 0 = references are host-neutral.
@@ -100,6 +100,8 @@ if [ -d "$REF_DIR" ]; then ok; else bad references-dir "not a directory: $REF_DI
 found=0
 for f in "$REF_DIR"/*.md "$PLUGIN_DIR"/skills/*/REFERENCE.md "$PLUGIN_DIR"/hooks/*.md; do
   [ -f "$f" ] || continue
+  # a `*-claude.md` hook is a convention's Claude Code variant: no other host ever receives it
+  case "$f" in */hooks/*-claude.md) continue ;; esac
   found=$((found + 1))
   case "$f" in
     */references/*) label="references/$(basename "$f")" ;;

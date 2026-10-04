@@ -100,7 +100,7 @@ sequenceDiagram
 
   Host->>Hooks: SessionStart
   Note over Hooks: plugin.json and hooks-codex.json both spawn hooks/session-start.sh
-  Hooks-->>Model: plugin root + project profile + conventions (comment discipline, LiquidDoc-and-core addendum in a foundation checkout, lean code, task workspace, whale routing, untrusted content, plugin feedback, store access)
+  Hooks-->>Model: plugin root + project profile + conventions (comment discipline, LiquidDoc-and-core addendum in a foundation checkout, lean code, how to explain, task workspace, whale routing, untrusted content, plugin feedback, store access)
   Host->>Hooks: UserPromptSubmit
   Hooks-->>Model: context-budget monitor, prompt-JSON guard (hands a pasted blob back as a file; on Claude Code the module first rewrites the blob in place, §8)
   Host->>Hooks: SubagentStart
@@ -175,7 +175,7 @@ flowchart LR
 
 Two guards sit around the pipeline: a no-gain memo refuses to re-run the same file for two hours
 when the first run gained nothing, and the whale-guide is a one-shot instruction layer that tells
-the model how to read a spill (the `mcp-whale.md` session context is the trigger, json-slim's own
+the model how to read a spill (the `mcp-whale.md` session context (`mcp-whale-claude.md` on Claude Code) is the trigger, json-slim's own
 stdout is the recipe). Spill files carry a TTL and are swept by the hook itself.
 
 Per host, the result rewrite is a capability of the host, not of the plugin:
@@ -378,7 +378,7 @@ types/index.d.ts            the $.state contract: every key the module reads or 
 | `prompt-json-guard.cjs` (UserPromptSubmit half) | keeps running beneath the rewrite | It runs inside the module's `next` and sees the rewritten prompt, which `--from-mod` has already re-checked against the classic predicate, so it passes. Prompts the module skips (slash and `!` commands; peer, task-notification and plugin origins) and any module failure still meet the block. |
 | `user-prompt.cjs` context monitor | silent while the session marker is fresh | The module's `fnd/marker.ts` (registered first) rewrites `<tmpdir>/fnd-mod-session-<sid>` (sid stripped to `[A-Za-z0-9_.-]`) before `next` on every prompt, bounded at 500 ms; `hooks/mod-session.cjs` counts it only under 60 s old, so a resume without the module brings the monitor back. The band shows ctx and model; the warn-level `additionalContext` is dropped with it. The mod cannot delete files, so old markers stay in tmpdir. |
 | session-start, subagent conventions, git guards, spill-access, reader-compression | unchanged | Out of the module's scope |
-| Cursor / Codex / OpenCode | unchanged except `already-slim`, the `mcp-slim.cjs` require guard, one whale-convention sentence and the untrusted-content clause on prompt spills | Every other module-specific Node behaviour sits behind an argv flag (`--from-mod`, `--overflow=expand`) only the module passes. `hooks/mcp-whale.md` reaches every host (Codex via `session-start.sh`, OpenCode via the adapter's statics, Cursor via `rules/fnd-mcp-whale.mdc`), so its "On Claude Code an over-limit result often arrives already slimmed or stubbed" line is read there too, guarded as Claude-Code-only. `mcp-slim.cjs` runs its stdin entry only as `require.main`, so every host's spawn behaves as before, and `hooks/untrusted-content.md` names `.claude/tasks/<work-id>/tmp/` and `.claude/fnd-tmp/prompt-json/` as real homes of `fnd-prompt-json-*` handles on every host |
+| Cursor / Codex / OpenCode | unchanged except `already-slim`, the `mcp-slim.cjs` require guard, the whale-convention split and the untrusted-content clause on prompt spills | Every other module-specific Node behaviour sits behind an argv flag (`--from-mod`, `--overflow=expand`) only the module passes. Claude Code reads the short `hooks/mcp-whale-claude.md` ("an over-limit MCP result arrives already slimmed or stubbed"); every other host keeps the full `hooks/mcp-whale.md` (Codex via `session-start.sh`, OpenCode via the adapter's statics, Cursor via `rules/fnd-mcp-whale.mdc`), which no longer carries Claude-Code-only lines. `mcp-slim.cjs` runs its stdin entry only as `require.main`, so every host's spawn behaves as before, and `hooks/untrusted-content.md` names `.claude/tasks/<work-id>/tmp/` and `.claude/fnd-tmp/prompt-json/` as real homes of `fnd-prompt-json-*` handles on every host |
 
 Rejected: answering `classic.PostToolUse` for `mcp__` tools without calling `next`. That would
 silence every user, project and other-plugin PostToolUse hook on MCP tools, and the spill TTL sweep

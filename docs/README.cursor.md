@@ -161,15 +161,15 @@ unless your filesystem forbids it.
 ## What's different on Cursor
 
 - **Statics arrive as rules, not as a session hook.** The Foundation session conventions
-  (comment discipline, lean code, task workspace, whale routing, plugin feedback, outside content
-  as data) ship as always-applied `rules/fnd-*.mdc`, generated from `plugins/fnd/hooks/*.md` by
+  (comment discipline, lean code, how to explain, task workspace, whale routing, plugin feedback,
+  outside content as data) ship as always-applied `rules/fnd-*.mdc`, generated from `plugins/fnd/hooks/*.md` by
   `gen-host-adapters.cjs` — never hand-edit one; change the hook and re-run the generator. They
   sit alongside the vendored `meetdomaine/foundation` theme rules (13 `.mdc`, provenance in
   `plugins/fnd/rules/SOURCE.md`). The `sessionStart` hook keeps only the dynamic part — what a
   rule file cannot answer (the plugin-root and project-profile lines) plus the detection-gated
   blocks (live-store access and, in a `foundation` checkout, the LiquidDoc-and-core addendum
-  `hooks/comment-discipline-foundation.md`), because a rule cannot look at the workspace. Consequence: `FND_LEAN=0` does not reach the session copy here — turn
-  `rules/fnd-lean-code.mdc` off instead.
+  `hooks/comment-discipline-foundation.md`), because a rule cannot look at the workspace. Consequence: `FND_LEAN=0` and `FND_STE=0` do not reach the session copy here — turn
+  `rules/fnd-lean-code.mdc` or `rules/fnd-writing-style.mdc` off instead.
 - **MCP output is NOT compressed here.** Cursor's `afterMCPExecution` has no response schema
   (the docs list none; measured 2026.09.02: `updated_mcp_tool_output` and every other key are
   ignored), so a tool result cannot be rewritten or stubbed — the model reads it raw, and

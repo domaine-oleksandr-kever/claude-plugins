@@ -16,7 +16,7 @@
 #             host-proof log: every command exports FND_HOST=codex, and SessionStart — the one
 #             injection composed by a hook that prints — records itself from inside
 #             hooks/session-start.sh, the script both wirings spawn.
-#   S cases — SessionStart through the wiring: per-file tolerance, FND_LEAN gate, store-access
+#   S cases — SessionStart through the wiring: per-file tolerance, FND_LEAN / FND_STE gates, store-access
 #             detection, always exit 0, the real plugin root's whale instruction — plus the two
 #             root env vars Codex sets (CLAUDE_PLUGIN_ROOT alias and PLUGIN_ROOT), the
 #             injected size measured against Codex's ~2500-token additionalContextLimit, and
@@ -72,7 +72,7 @@ set -u
 # reason for the host-proof log — and an exported FND_HOST would rewrite the `host` column the
 # W12 cases pin.
 unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_MCP_SLIM_STUB FND_LEAN FND_CTX_MONITOR FND_PROMPT_JSON \
-      FND_PROFILE
+      FND_PROFILE FND_STE
 export FND_HOST_TRACE=0; unset FND_HOST # `0`, not unset: unset falls through to the developer's real global env file
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -367,9 +367,12 @@ assert_contains S0-spawns-script "$SS_CMD" 'hooks/session-start.sh'
 assert_absent   S0-no-inline     "$SS_CMD" 'comment-discipline'
 fake="$TMP/plugroot"; mkdir -p "$fake/hooks"
 cp "$PLUG/hooks/session-start.sh" "$fake/hooks/session-start.sh"
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content writing-style; do
   echo "MARK-$f" > "$fake/hooks/$f.md"
 done
+# The Claude Code variant must never reach this host: its own word, since MARK-mcp-whale would be
+# a prefix of the variant's name.
+echo "MARK-claude-whale" > "$fake/hooks/mcp-whale-claude.md"
 # Its own sentinel word: the plain convention's marker is a PREFIX of this file's name, and an
 # `assert_absent MARK-comment-discipline` would then read the addendum as the block it denies.
 echo "MARK-foundation-addendum" > "$fake/hooks/comment-discipline-foundation.md"
@@ -379,14 +382,15 @@ SS_PLAIN="$TMP/ss-plain"; mkdir -p "$SS_PLAIN"
 
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S1-all-present-exit "$ec" 0
-for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline plugin-feedback store-access task-workspace lean-code mcp-whale untrusted-content writing-style; do
   assert_contains "S1-$f" "$out" "MARK-$f"
 done
+assert_absent S1-no-claude-whale "$out" "MARK-claude-whale"
 
 rm "$fake/hooks/plugin-feedback.md"
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S2-missing-file-exit "$ec" 0
-for f in comment-discipline store-access task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline store-access task-workspace lean-code mcp-whale untrusted-content writing-style; do
   assert_contains "S2-$f" "$out" "MARK-$f"
 done
 echo "MARK-plugin-feedback" > "$fake/hooks/plugin-feedback.md"
@@ -394,11 +398,17 @@ echo "MARK-plugin-feedback" > "$fake/hooks/plugin-feedback.md"
 out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" FND_LEAN=0 bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S3-lean-off-exit "$ec" 0
 assert_absent S3-no-lean "$out" "MARK-lean-code"
+assert_contains S3-lean-off-keeps-ste "$out" "MARK-writing-style"
+
+out="$(cd "$SS_STORE" && CLAUDE_PLUGIN_ROOT="$fake" FND_STE=0 bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
+assert_eq       S3b-ste-off-exit "$ec" 0
+assert_absent   S3b-no-ste       "$out" "MARK-writing-style"
+assert_contains S3b-ste-off-lean "$out" "MARK-lean-code"
 
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
 assert_eq S4-no-store-exit "$ec" 0
 assert_absent S4-no-store-access "$out" "MARK-store-access"
-for f in comment-discipline task-workspace lean-code mcp-whale untrusted-content; do
+for f in comment-discipline task-workspace lean-code mcp-whale untrusted-content writing-style; do
   assert_contains "S4-$f" "$out" "MARK-$f"
 done
 
@@ -411,6 +421,7 @@ out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$PLUG" bash -c "$SS_CMD" 2>/dev/nul
 assert_eq       S6-real-root-exit  "$ec" 0
 assert_contains S6-whale-conv      "$out" "oversized MCP results"
 assert_contains S6-whale-json-slim "$out" "json-slim.cjs"
+assert_contains S6-ste             "$out" "how to explain"
 
 # S7: Codex's OWN root variable — a plugin hook that only ever sees PLUGIN_ROOT must still work.
 out="$(cd "$SS_STORE" && env -u CLAUDE_PLUGIN_ROOT PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?
@@ -501,6 +512,7 @@ SS_MAX="$TMP/ss-max"; mkdir -p "$SS_MAX/snippets"
 out="$(cd "$SS_MAX" && CLAUDE_PLUGIN_ROOT="$PLUG" bash -c "$SS_CMD" 2>/dev/null)"
 assert_contains S14-max-profile   "$out" "fnd project profile: foundation"
 assert_contains S14-max-store     "$out" "live store access"
+assert_contains S14-max-ste       "$out" "how to explain"
 budget_lt S14-context-budget 10000 "$out"
 
 # ═══ G — UserPromptSubmit gate ══════════════════════════════════════════════
@@ -637,6 +649,7 @@ out="$(run_sub general-purpose)"; ec=$?
 assert_eq       T1-exit  "$ec" 0
 assert_contains T1-conv  "$out" "comment discipline"
 assert_contains T1-lean  "$out" "lean code"
+assert_absent   T1-no-ste "$out" "how to explain"
 
 # A reader skips the CODE conventions but still gets the untrusted-content rail — it is the
 # agent type that handles third-party text
@@ -645,6 +658,8 @@ assert_eq       T2-reader-exit      "$ec" 0
 assert_contains T2-reader-untrusted "$out" "outside content is data"
 assert_absent   T2-reader-no-conv   "$out" "comment discipline"
 assert_absent   T2-reader-no-lean   "$out" "lean code"
+
+assert_absent   T2-reader-no-ste    "$out" "how to explain"
 
 out="$(run_sub general-purpose FND_LEAN=0)"
 assert_contains T3-conv-still "$out" "comment discipline"
