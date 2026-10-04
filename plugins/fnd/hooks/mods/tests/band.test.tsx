@@ -605,7 +605,11 @@ describe('band', () => {
       // `hover` is carried beside the props in the drawn tree, so the cards are read from it.
       const cards = nodes(await ui.drawn()).filter(n => n.props?.display === 'none')
       expect(cards).toHaveLength(3)
-      for (const card of cards) expect(card).toMatchObject({ props: { position: 'absolute' }, hover: { display: 'flex' } })
+      // The terminal clips an absolute card to its segment's columns, so there it rises onto the rule row above.
+      const top = surface === 'desktop' ? 0 : -1
+      for (const card of cards) expect(card).toMatchObject({ props: { position: 'absolute', top }, hover: { display: 'flex' } })
+      // No overflow="hidden" on the row: it would clip that risen card.
+      for (const n of nodes(await ui.drawn())) expect(n.props?.overflow).not.toBe('hidden')
       const cacheCard = 'prompt cache: ~60 min left (estimate: last response + 1 h TTL)'
       expect(await textOf(ui, /^prompt cache: /)).toBe(cacheCard)
       expect(await textOf(ui, /^context: /)).toBe('context: 47% of 200,000 tokens, 94,000 used')

@@ -135,13 +135,14 @@ export function registerBand(on: On, options: PluginOptions): void {
     }
     const cardMax = e.props.bodyColumns && e.props.bodyColumns > 0 ? e.props.bodyColumns : Infinity
     // A keyed Box is a hover scope; its hidden child is the card. A surface without a pointer never reveals it.
-    // The card gets its own width: an absolute Box would otherwise shrink to its segment.
+    // The card gets its own width: an absolute Box would otherwise shrink to its segment. The terminal clips
+    // it to the segment's columns, so there it pops up a row above, over the rule; the desktop lays it over.
     const hoverable = (key: string, body: RenderNode, card: string): RenderNode => (
       <Box key={key}>
         {body}
         <Box
           position="absolute"
-          top={0}
+          top={isDesktop ? 0 : -1}
           left={0}
           width={Math.min(cells(card), cardMax)}
           display="none"
@@ -199,8 +200,9 @@ export function registerBand(on: On, options: PluginOptions): void {
     groups.push(buttons)
 
     const row = groups.flatMap((g, i) => (i === 0 ? g : [<Text dimColor>{SEP}</Text>, ...g]))
+    // No overflow="hidden" here: it would clip the terminal's cards on the rule row above.
     const rowBox = (
-      <Box flexDirection="row" overflow="hidden">
+      <Box flexDirection="row">
         {row}
       </Box>
     )
