@@ -454,6 +454,10 @@ TW="$PLUGIN_DIR/references/task-workspace.md"
 # the rule every caller cites by name — its absence turns each citation below into a dead pointer
 if grep -qF 'Read rule, compression' "$TW"; then ok
 else bad compression-rule-home "task-workspace.md holds no 'Read rule, compression' paragraph to cite"; fi
+# progress.md grain: one row per step, in the reference AND the session-start context the model
+# actually reads — the band digest and the progress pane count rows, so a bundled row hides a step
+if grep -qF 'One row = one step' "$TW" && grep -qF 'never two steps in one' "$PLUGIN_DIR/hooks/task-workspace.md"; then ok
+else bad progress-row-grain "task-workspace.md (reference + hooks context) lacks the one-row-per-step rule"; fi
 for a in jira-reader figma-reader doc-reader; do
   f="$PLUGIN_DIR/agents/$a.md"
   [ -f "$f" ] || { bad "compression-agent-missing-$a" "missing"; continue; }

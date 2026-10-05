@@ -172,6 +172,13 @@ For a **batch** (`<work-id>` = branch slug) the rows are the tickets plus the sa
 (pre-commit-review → … → create-pull-request) — check each bug off as it's fixed, with its root
 cause: `- [x] ELC-301 — 2026-07-11, fixed: self-reference skipped in bundle resolve`.
 
+- **One row = one step**, one the developer could be asked "is it done?" about: a skill run, a
+  Jira write (comment, Steps to Test, TA), a commit, a PR, a preview theme, a decision taken.
+  Never bundle two in a row (`Jira comment, Steps to Test` → two rows); ad-hoc work outside the
+  series gets rows of the same grain. Only `- [ ]` and `- [x]` are rows: the band and the
+  progress pane parse nothing else (`[~]` vanishes), so a step in flight stays `- [ ]` with
+  `— running` after it. Detail (sub-findings, per-file notes) goes after `—` on the row or
+  into `notes.md`, never as plain `- ` bullets under the checklist.
 - On completing its workflow (final report delivered and, where applicable, approved), a skill
   checks off its row and appends `— <date>, <one-line status>` (branch, PR URL, "QA: 2 blocking
   bugs", …). Re-runs update the row in place; stamp `updated` and `session` (from
