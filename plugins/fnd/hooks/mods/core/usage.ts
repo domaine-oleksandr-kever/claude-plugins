@@ -40,6 +40,13 @@ function withCost(u: FndUsage): FndUsage {
   return costShown ? u : { ...u, costUsd: null }
 }
 
+/** Writes the model atom and logs the change once; the same id again is a no-op. */
+async function adoptModel($: $, m: string): Promise<void> {
+  if ((await read($, model)) === m) return
+  await update($, model, () => m)
+  await logEvent($, 'model', m)
+}
+
 async function refresh($: $): Promise<void> {
   const now = await $.clock.now()
   await update($, tick, () => now)
@@ -138,13 +145,12 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const u = withCost(toUsage(e.context, e.rateLimits, e.cost))
     await update($, usage, prev => keepCtx(prev, u))
     await adoptSubscriptionTtl($, u)
-    // No session.start follows a /clear and the seed may read null: the first measure fills the gap.
-    if ((await read($, model)) === null) {
-      try {
-        const m = await $.session.model()
-        if (m) await update($, model, () => m)
-      } catch {}
-    }
+    // No session.start follows a /clear and the seed may read null: the first measure fills the gap. A
+    // switch whose PostModelSwitch never reached the mod is caught here too.
+    try {
+      const m = await $.session.model()
+      if (m) await adoptModel($, m)
+    } catch {}
     const hot = alarmRate(u.rates)
     const isAlarmed = await read($, rateAlarmed)
     if (hot && !isAlarmed) {
@@ -193,10 +199,8 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   on('classic.PostModelSwitch', async ($, e, next) => {
-    const m = await $.session.model()
-    const prev = await read($, model)
-    await update($, model, () => m)
-    if (m !== prev) await logEvent($, 'model', m)
+    // The event's own field: $.session.model() may still answer the model before the switch here.
+    await adoptModel($, e.to_model)
     // On a subscription (rate windows seen) the cache lives 1 h; a 5 min report there is the host's
     // fallback, not a measurement. Overage does drop it to 5 min, and the band hides the segment then.
     const ttlMs = ttlMsOf(e.cache_ttl)

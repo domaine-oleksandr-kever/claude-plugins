@@ -1622,10 +1622,10 @@ windows, a task workspace open:
 
 ```text
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Progress ]  [ Log ]
+cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Clear ]  [ Progress ]  [ Log ]
 ```
 
-120 columns, same session. The row is 161 cells, so the Log button goes first, then the digest:
+120 columns, same session. The row is 172 cells, so the Log button goes first, then Clear, then the digest:
 
 ```text
 cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ [ Compact ]  [ Progress ]
@@ -1637,19 +1637,20 @@ cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ co
 cache 42m │ ctx 47% │ [ Compact ]  [ Progress ]
 ```
 
-The full drop order is: the Log button (`/fnd-log` still opens the pane), the digest, the cost, then the
+The full drop order is: the Log button (`/fnd-log` still opens the pane), the Clear button (`/clear` still works), the digest, the cost, then the
 rate windows beyond the fullest (least full first), then the last window, then the model, then the Progress button. Cache, ctx and Compact are never
 dropped. The row's text truncates as a backstop, so the band never takes a second row.
 
 | Segment | Shows | Rule |
 |---|---|---|
 | cache | `cache 42m`, `<1m`, `cache cold`, `cache —`, `cache ●` | Minutes left of the prompt cache: the last main-thread response plus the TTL. `●` while a turn runs; `—` before the first response and after `/clear` or resume; `cold` once the TTL has passed, after a compaction, or after a `/model` switch that forfeits the cache (another model, or the host reports it cold). A resumed session takes its state from the time since the last response. Hidden while any rate window is at or past 100 %: in overage the TTL is unknown. **It is an estimate.** The host reports no cache state, only the events it is derived from. |
-| model | `fable-5-1` | The model id as the session reports it, without the `claude-` prefix every id carries |
+| model | `fable-5-1` | The model id as the session reports it, without the `claude-` prefix every id carries. A `/model` switch updates it from the switch event itself; every measurement re-reads it, so a switch the event missed shows by the next response. |
 | ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`); that count holds until a response reports a measured fill, as a reading with no fill (only the window) keeps the last one. Mid-turn it refreshes on a 30 s tick. |
 | rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
 | cost | `cost $12.40` | Opt-in: drawn only with `FND_BAND_COST=1` in the session's environment. What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
 | digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the current row (cut to 28 characters): the first unchecked row below the last checked one, else the first unchecked row; `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet. Hidden while the progress pane is open, and when no workspace resolves. |
 | Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable, so the other buttons never shift: before the first reading, while a turn runs and at any context. From 80 % between turns it switches to the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). Where the engine refuses compaction from a plugin (a headless / SDK session such as the desktop app), the press runs the `/compact` slash command as if typed instead and toasts its output. Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued. |
+| Clear | `[ Clear ]`, `x: Clear` | Runs `/clear` behind the engine's own Yes/No dialog (`Clear the conversation?`), always: the dialog takes the keyboard, so a stray click or hotkey never clears, and a dismissed dialog is a No. Toasts the command's output. Pressed while a turn runs it only toasts `turn is running — press Clear again when it ends`. Dim at rest, `x: Clear` while the band holds the keyboard. |
 | Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
 | Log | `[ Log ]`, `l: Log` | Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
 
@@ -1662,7 +1663,7 @@ theme keys are used, so the band follows light, dark and high-contrast themes. T
 `warning` + bold + inverse until a dedicated error key is proven to draw on every theme.
 
 **Desktop and hover.** In the desktop app's Code tab every segment carries a glyph instead of a word
-(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`), and Compact / Progress / Log are native
+(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`), and Compact / Clear / Progress / Log are native
 buttons. The desktop draws proportional text, so the width model above does not apply there: nothing is
 dropped, the row clips at the panel's edge. When the
 pointer rests on the cache, ctx, a rate window or the cost, a one-line card appears. This is meant for desktop
@@ -1682,9 +1683,9 @@ stack; a click takes one off and the pointer over it holds it (there is no close
 touch the transcript or what the model reads. They keep showing while the progress pane is open (it is
 not a dialog and does not hold toasts).
 
-**Hotkeys.** `c`, `p` and `l` work only while the band holds the keyboard: after **ctrl+x tab** or a
+**Hotkeys.** `c`, `x`, `p` and `l` work only while the band holds the keyboard: after **ctrl+x tab** or a
 click on the band. They never fire from the composer, so typing a `c` is just a `c`. The letters are
-drawn only then too (`c: Compact  p: Progress  l: Log`): at rest the buttons read `[ Compact ]  [ Progress ]  [ Log ]`,
+drawn only then too (`c: Compact  x: Clear  p: Progress  l: Log`): at rest the buttons read `[ Compact ]  [ Clear ]  [ Progress ]  [ Log ]`,
 so the band never suggests a key the composer would swallow. The letters go away again on a press,
 when a turn starts and on `/clear` (there is no focus-out event, so Esc alone leaves them until the
 next of those). On a terminal

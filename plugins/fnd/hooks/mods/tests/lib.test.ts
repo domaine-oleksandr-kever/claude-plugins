@@ -159,6 +159,7 @@ describe('layout', () => {
     cost: 'cost $139.14',
     digest: 'ELC-1591 3/5 ▶ Preview themes',
     compact: { key: 'compact', label: 'Compact', hotkey: 'c', plain: true },
+    clear: { key: 'clear', label: 'Clear', hotkey: 'x', plain: true },
     progress: { key: 'progress', label: 'Progress', hotkey: 'p', plain: true },
     log: { key: 'log', label: 'Log', hotkey: 'l', plain: true },
   }
@@ -168,14 +169,15 @@ describe('layout', () => {
     expect(buttonText({ key: 'compact', label: 'Compact', hotkey: 'c', plain: true })).toBe('c: Compact')
     expect(buttonText({ key: 'compact', label: 'Compact', hotkey: 'c', plain: false })).toBe('[ Compact ]')
     expect(rowText(full)).toBe(
-      'cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress  l: Log',
+      'cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log',
     )
-    expect(cells(rowText(full))).toBe(145)
+    expect(cells(rowText(full))).toBe(155)
   })
 
-  test('drop order 1→7', () => {
+  test('drop order 1→8', () => {
     expect(at(160)).toBe(rowText(full))
-    expect(at(145)).toBe(rowText(full))
+    expect(at(155)).toBe(rowText(full))
+    expect(at(147)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress')
     expect(at(137)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress')
     expect(at(110)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ c: Compact  p: Progress')
     expect(at(100)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ c: Compact  p: Progress')
@@ -187,7 +189,7 @@ describe('layout', () => {
   })
 
   test('the fullest window outlives the others wherever it sits', () => {
-    const s = { ...full, log: null, digest: null, cost: null, rates: toRates([
+    const s = { ...full, log: null, clear: null, digest: null, cost: null, rates: toRates([
       { kind: 'five_hour', percentUsed: 10 },
       { kind: 'seven_day', percentUsed: 90 },
     ]) }
@@ -211,6 +213,7 @@ describe('layout', () => {
     expect(narrow.rates).toEqual([])
     expect(narrow.cost).toBeNull()
     expect(narrow.digest).toBeNull()
+    expect(narrow.clear).toBeNull()
     expect(narrow.progress).toBeNull()
     expect(narrow.log).toBeNull()
   })
@@ -346,7 +349,7 @@ describe('segments', () => {
       digest: 'ELC-1591 3/5 ▶ Preview themes',
     })
     expect(rowText(s)).toBe(
-      'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress  l: Log',
+      'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log',
     )
   })
 
@@ -355,7 +358,7 @@ describe('segments', () => {
     for (const [ctxPct, isWorking] of [[null, false], [10, false], [50, true], [85, true]] as const) {
       const s = bandSegs({ ...base, usage: { ...USAGE_INIT, ctxPct }, isWorking })
       expect(s.compact.key).toBe('compact')
-      expect(rowText(s)).toEndWith('│ c: Compact  p: Progress  l: Log')
+      expect(rowText(s)).toEndWith('│ c: Compact  x: Clear  p: Progress  l: Log')
     }
   })
 })

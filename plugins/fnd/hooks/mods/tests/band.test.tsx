@@ -178,9 +178,12 @@ describe('band', () => {
       expect(compact?.props.label).toBe('Compact')
       expect(compact?.props.dimColor).toBeUndefined()
       expect(compact?.props.variant).toBeUndefined()
+      const clear = await ui.find({ key: 'clear' })
+      expect(clear?.props).toMatchObject({ label: 'Clear', dimColor: true })
+      // A desktop draws a hotkey as a badge on its native button, so none is set there.
+      expect(clear?.props.hotkey).toBe(isDesktop ? undefined : 'x')
       const progress = await ui.find({ key: 'progress' })
       expect(progress?.props).toMatchObject({ label: 'Progress', dimColor: true })
-      // A desktop draws a hotkey as a badge on its native button, so none is set there.
       expect(progress?.props.hotkey).toBe(isDesktop ? undefined : 'p')
       expect(progress?.props.plain).toBeUndefined()
       const log = await ui.find({ key: 'log' })
@@ -188,7 +191,7 @@ describe('band', () => {
       expect(log?.props.hotkey).toBe(isDesktop ? undefined : 'l')
       expect(log?.props.plain).toBeUndefined()
       const keys = nodes(await ui.drawn()).filter(n => n.type === 'Button').map(n => n.props.key)
-      expect(keys).toEqual(['compact', 'progress', 'log'])
+      expect(keys).toEqual(['compact', 'clear', 'progress', 'log'])
     })
 
     test(`${surface}: a rule above the row (terminal only); dim label, bold value; the cache hides in overage`, async ($, on) => {
@@ -277,6 +280,7 @@ describe('band', () => {
         return
       }
       expect((await ui.find({ key: 'compact' }))?.props).toMatchObject({ plain: true, hotkey: 'c' })
+      expect((await ui.find({ key: 'clear' }))?.props).toMatchObject({ plain: true, hotkey: 'x' })
       expect((await ui.find({ key: 'progress' }))?.props).toMatchObject({ plain: true, hotkey: 'p' })
       expect((await ui.find({ key: 'log' }))?.props).toMatchObject({ plain: true, hotkey: 'l' })
       await $.turn.start({ text: 'hi', turnId: 't1' })
@@ -456,6 +460,28 @@ describe('band', () => {
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
     })
 
+    test(`${surface}: a switch takes the event's to_model while session.model() still lags`, async ($, on) => {
+      world(on)
+      on('classic.PostModelSwitch', async () => ({}) as never)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      await $.classic.PostModelSwitch(modelSwitch({ source: 'picker' }))
+      expect(await textOf(ui, /opus-5-5/)).toBe(isDesktop ? '🤖 opus-5-5' : 'opus-5-5')
+    })
+
+    test(`${surface}: a measure adopts a model the session changed without a PostModelSwitch`, async ($, on) => {
+      const { w } = world(on)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      expect(await textOf(ui, /fable-5-1/)).toBeDefined()
+      w.model = 'claude-opus-5-5'
+      await measure($, { window: 200_000, percent: 12 })
+      expect(await textOf(ui, /opus-5-5/)).toBe(isDesktop ? '🤖 opus-5-5' : 'opus-5-5')
+      expect(await textOf(ui, /fable-5-1/)).toBeUndefined()
+    })
+
     test(`${surface}: a cold switch to the same model → cache cold`, async ($, on) => {
       world(on)
       on('classic.PostModelSwitch', async () => ({}) as never)
@@ -590,6 +616,62 @@ describe('band', () => {
       expect(w.toasts).toEqual(['turn is running — press Compact again when it ends'])
     })
 
+    test(`${surface}: Clear press asks Yes/No first; only Yes runs /clear`, async ($, on) => {
+      const { w } = world(on)
+      const asked: { question: string; options: string[] }[] = []
+      let answer: string | null = 'No'
+      on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e: any) => {
+        const q = e.questions[0]
+        asked.push({ question: q.question, options: q.options.map((o: any) => o.label) })
+        if (answer === null) throw new Error('dismissed')
+        return { result: { questions: e.questions, answers: { [q.question]: answer } } } as any
+      })
+      const runs: string[] = []
+      on('command.run', { command: 'clear' }, async () => {
+        runs.push('clear')
+        return { text: 'cleared' }
+      })
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 60 })
+      const ui = await mount($, surface)
+      await ui.press({ key: 'clear' })
+      expect(asked).toEqual([{ question: 'Clear the conversation?', options: ['Yes', 'No'] }])
+      expect(runs).toEqual([])
+      answer = null
+      await ui.press({ key: 'clear' })
+      expect(runs).toEqual([])
+      expect(w.toasts).toEqual([])
+      answer = 'Yes'
+      await ui.press({ key: 'clear' })
+      expect(asked).toHaveLength(3)
+      expect(runs).toEqual(['clear'])
+      expect(w.toasts).toEqual(['cleared'])
+    })
+
+    test(`${surface}: Clear pressed during a turn only toasts; a refused /clear toasts`, async ($, on) => {
+      const { w } = world(on)
+      let asks = 0
+      on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e: any) => {
+        asks++
+        return { result: { questions: e.questions, answers: { [e.questions[0].question]: 'Yes' } } } as any
+      })
+      on('command.run', { command: 'clear' }, async () => {
+        throw new Error('clear unavailable')
+      })
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 60 })
+      const ui = await mount($, surface)
+      await $.turn.start({ text: 'hi', turnId: 't' })
+      await ui.press({ key: 'clear' })
+      expect(asks).toBe(0)
+      expect(w.toasts).toEqual(['turn is running — press Clear again when it ends'])
+      await mainTurn($)
+      await ui.press({ key: 'clear' })
+      expect(asks).toBe(1)
+      expect(w.toasts[1]).toMatch(/^clear refused: \S/)
+      expect(w.toasts).toHaveLength(2)
+    })
+
     test(`${surface}: a Compact press at 10 % still runs /compact`, async ($, on) => {
       const { w } = world(on)
       let calls = 0
@@ -614,7 +696,7 @@ describe('band', () => {
       const rows = nodes(drawn).filter(n => n.type === 'Box' && n.props?.flexDirection === 'row' && nodes(n).some(c => c.type === 'Button'))
       const buttonRow = rows[rows.length - 1]
       const buttonKeys = (buttonRow.children ?? []).filter((c: any) => c?.type === 'Button').map((c: any) => c.props.key)
-      expect(buttonKeys).toEqual(['compact', 'progress', 'log'])
+      expect(buttonKeys).toEqual(['compact', 'clear', 'progress', 'log'])
       if (isDesktop) {
         // A column of two rows: the figures, then the buttons alone, with no separator before Compact.
         expect(drawn.props).toMatchObject({ flexDirection: 'column', gap: 1, padding: 1 })
@@ -667,28 +749,36 @@ describe('band', () => {
         expect(await textOf(ui, /^🤖 /)).toBe('🤖 fable-5-1')
         expect(await textOf(ui, /^5h /)).toBe('5h 61%')
         expect(await textOf(ui, /^📋 /)).toBe('📋 ELC-1591 3/5 ▶ Preview themes')
+        expect(await ui.find({ key: 'clear' })).toBeDefined()
         expect(await ui.find({ key: 'progress' })).toBeDefined()
         expect(await ui.find({ key: 'log' })).toBeDefined()
         return
       }
       expect(await textOf(ui, /fable-5-1|^5h|^⏳|ELC-1591/)).toBeUndefined()
+      expect(await ui.find({ key: 'clear' })).toBeUndefined()
       expect(await ui.find({ key: 'progress' })).toBeUndefined()
       expect(await ui.find({ key: 'log' })).toBeUndefined()
     })
 
-    test(`${surface}: Log drops first, before the model`, async ($, on) => {
+    test(`${surface}: Log drops first, then Clear, before the model`, async ($, on) => {
       world(on)
       await start($, surface)
       await measure($, { window: 200_000, percent: 60 })
-      // `cache — │ fable-5-1 │ ctx 60% │ c: Compact  p: Progress  l: Log` is 63 cells; without Log 55.
+      // `cache — │ fable-5-1 │ ctx 60% │ c: Compact  x: Clear  p: Progress  l: Log` is 73 cells; without Log 65, without Clear too 55.
+      const wide = await mount($, surface, { bodyColumns: 66 })
+      expect(await wide.find({ key: 'clear' })).toBeDefined()
+      if (isDesktop) expect(await wide.find({ key: 'log' })).toBeDefined()
+      else expect(await wide.find({ key: 'log' })).toBeUndefined()
       const ui = await mount($, surface, { bodyColumns: 58 })
       expect(await ui.find({ key: 'compact' })).toBeDefined()
       expect(await ui.find({ key: 'progress' })).toBeDefined()
       expect(await textOf(ui, /fable-5-1/)).toBeDefined()
       if (isDesktop) {
+        expect(await ui.find({ key: 'clear' })).toBeDefined()
         expect(await ui.find({ key: 'log' })).toBeDefined()
         return
       }
+      expect(await ui.find({ key: 'clear' })).toBeUndefined()
       expect(await ui.find({ key: 'log' })).toBeUndefined()
     })
 

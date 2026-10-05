@@ -1,5 +1,5 @@
-// Status band: the AbovePrompt row drawn from the atoms, and the Compact press. A desktop draws the buttons
-// on a second row under the figures.
+// Status band: the AbovePrompt row drawn from the atoms, and the Compact and Clear presses. A desktop draws
+// the buttons on a second row under the figures.
 // Render only reads atoms; usage.ts and progress.tsx write them. The Progress and Log presses are
 // answered by the `ui.press` hooks on elements `progress` (progress.tsx) and `log` (log.tsx).
 import { atom, read, update } from 'claude-code'
@@ -52,6 +52,26 @@ function pressCompact($: $): void {
   $.session.compact().then(
     r => $.ui.toast(compactToast(r)),
     () => $.command.run({ command: 'compact' }).then(r => $.ui.toast(r.text || 'compacted'), refused),
+  )
+}
+
+const CLEAR_QUESTION = 'Clear the conversation?'
+const CLEAR_YES = 'Yes'
+
+/** Always behind the engine's own Yes/No dialog: it takes the keyboard, so a stray click or hotkey never clears. */
+function pressClear($: $): void {
+  if (turn.running) {
+    $.ui.toast('turn is running — press Clear again when it ends')
+    return
+  }
+  const refused = (err: unknown) => $.ui.toast(`clear refused: ${err instanceof Error ? err.message : String(err)}`)
+  // A dismissed dialog rejects: that is a No.
+  $.ui.ask(CLEAR_QUESTION, [CLEAR_YES, 'No']).then(
+    answer => {
+      if (answer !== CLEAR_YES) return
+      $.command.run({ command: 'clear' }).then(r => $.ui.toast(r.text || 'cleared'), refused)
+    },
+    () => undefined,
   )
 }
 
@@ -190,6 +210,10 @@ export function registerBand(on: On, options: PluginOptions): void {
     const hot = (k: string) => (isDesktop ? {} : { hotkey: k })
     const look = letters ?? (segs.compact.plain ? {} : { variant: 'primary' as const })
     buttons.push(<Button key="compact" label="Compact" {...hot('c')} {...look} onPress={() => pressCompact($)} />)
+    if (segs.clear !== null) {
+      buttons.push(<Text>{'  '}</Text>)
+      buttons.push(<Button key="clear" label="Clear" {...hot('x')} {...(letters ?? { dimColor: true })} onPress={() => pressClear($)} />)
+    }
     if (segs.progress !== null) {
       buttons.push(<Text>{'  '}</Text>)
       buttons.push(<Button key="progress" label="Progress" {...hot('p')} {...(letters ?? { dimColor: true })} onPress={() => {}} />)
