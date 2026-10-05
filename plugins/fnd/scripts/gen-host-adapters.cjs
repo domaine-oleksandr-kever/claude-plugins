@@ -307,8 +307,8 @@ const CURSOR_RULES = {
     subs: [
       ['so `/compact` and new sessions lose nothing.', 'so context compaction and new sessions lose nothing.'],
       [
-        'Details + freshness rules: `references/task-workspace.md`.',
-        'Details + freshness rules: `references/task-workspace.md` in\n' +
+        'Details, freshness: `references/task-workspace.md`.',
+        'Details, freshness: `references/task-workspace.md` in\n' +
           '  the fnd plugin root (the directory above this rules directory).',
       ],
     ],
