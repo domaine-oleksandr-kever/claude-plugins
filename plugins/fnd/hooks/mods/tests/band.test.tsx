@@ -137,6 +137,10 @@ function modelSwitch(over: Record<string, unknown>) {
   } as any
 }
 
+function postCompact(over: Record<string, unknown>) {
+  return { session_id: 's1', transcript_path: '/t.jsonl', cwd: '/repo', trigger: 'manual', compact_summary: 'summary', ...over } as any
+}
+
 /** progress.tsx's ops over one workspace, so the band draws its digest. */
 function workspace(on: On) {
   const md = ['- [x] Read', '- [x] Plan', '- [x] Branch', '- [ ] Preview themes', '- [ ] QA'].join('\n')
@@ -359,7 +363,7 @@ describe('band', () => {
     })
 
     test(`${surface}: session.compact manual → cold and ctx from tokensAfter; precompute and skip → no change`, async ($, on) => {
-      const { w } = world(on)
+      const { w, clock } = world(on)
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
@@ -376,9 +380,39 @@ describe('band', () => {
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
       expect((await ui.find({ key: 'compact' }))?.props.variant).toBeUndefined()
+      await clock.advance(MIN)
       w.compact = async () => ({ messages: KEPT })
       await $.session.compact({ trigger: 'auto', messages: KEPT } as any)
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
+    })
+
+    test(`${surface}: classic.PostCompact alone → cold and ctx —; with the session.compact chain in either order it is one compaction`, { plugins: [peek] }, async ($, on) => {
+      const { w, clock } = world(on)
+      on('classic.PostCompact', async () => ({}) as never)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      await measure($, { window: 200_000, percent: 47 })
+      await $.classic.PostCompact(postCompact({ trigger: 'auto', agent_id: 'a1' }))
+      expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 47%'))
+      await $.classic.PostCompact(postCompact({ trigger: 'manual' }))
+      expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
+      // The chain's report of the same compaction refines the context and logs nothing more.
+      w.compact = async () => ({ messages: KEPT, tokensBefore: 94_000, tokensAfter: 26_300 })
+      await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
+      // Chain first, classic second: the count stays.
+      await clock.advance(MIN)
+      await mainTurn($)
+      await measure($, { window: 200_000, percent: 60 })
+      expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
+      await $.session.compact({ trigger: 'auto', messages: KEPT } as any)
+      await $.classic.PostCompact(postCompact({ trigger: 'auto' }))
+      expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
+      expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
+      expect(await logged($)).toEqual(['session start', 'compact manual', 'compact auto 94k → 26k'])
     })
 
     test(`${surface}: a window-only measure or tick after a compaction keeps its count; a measured fill replaces it`, async ($, on) => {
@@ -911,7 +945,7 @@ describe('event log writers', () => {
   })
 
   test('session.compact → trigger and token sizes; unknown sizes → the trigger alone; precompute, skip, subagent → nothing', { plugins: [peek] }, async ($, on) => {
-    const { w } = world(on)
+    const { w, clock } = world(on)
     await start($)
     await $.session.compact({ trigger: 'precompute', messages: KEPT } as any)
     await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: KEPT } as any)
@@ -919,6 +953,7 @@ describe('event log writers', () => {
     await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
     w.compact = async () => ({ messages: KEPT, tokensBefore: 412_345, tokensAfter: 38_000 })
     await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+    await clock.advance(MIN)
     w.compact = async () => ({ messages: KEPT })
     await $.session.compact({ trigger: 'auto', messages: KEPT } as any)
     expect(await logged($)).toEqual(['session start', 'compact manual 412k → 38k', 'compact auto'])

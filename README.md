@@ -527,7 +527,7 @@ never gate a workflow.
 
 ## Releasing — one command stamps every version
 
-Current release: **fnd v0.124.0**.
+Current release: **fnd v0.124.1**.
 
 The version is duplicated across per-host packaging files, and a stamp that drifts
 reads to a host as "nothing to update". One script owns all of them — run it instead
@@ -1645,7 +1645,7 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 |---|---|---|
 | cache | `cache 42m`, `<1m`, `cache cold`, `cache —`, `cache ●` | Minutes left of the prompt cache: the last main-thread response plus the TTL. `●` while a turn runs; `—` before the first response and after `/clear` or resume; `cold` once the TTL has passed, after a compaction, or after a `/model` switch that forfeits the cache (another model, or the host reports it cold). A resumed session takes its state from the time since the last response. Hidden while any rate window is at or past 100 %: in overage the TTL is unknown. **It is an estimate.** The host reports no cache state, only the events it is derived from. |
 | model | `fable-5-1` | The model id as the session reports it, without the `claude-` prefix every id carries. A `/model` switch updates it from the switch event itself; every measurement re-reads it, so a switch the event missed shows by the next response. |
-| ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`); that count holds until a response reports a measured fill, as a reading with no fill (only the window) keeps the last one. Mid-turn it refreshes on a 30 s tick. |
+| ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`), or `—` when the engine reported no count; that count holds until a response reports a measured fill, as a reading with no fill (only the window) keeps the last one. A compaction reaches the band two ways, the `session.compact` chain and the engine's own `PostCompact` report (the settings-hook event, which arrives even when the chain skips the mod, as it did for a Compact press on Claude Code 2.1.289); reports within 30 s of each other are one compaction. Mid-turn it refreshes on a 30 s tick. |
 | rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
 | cost | `cost $12.40` | Opt-in: drawn only with `FND_BAND_COST=1` in the session's environment. What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
 | digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the current row (cut to 28 characters): the first unchecked row below the last checked one, else the first unchecked row; `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet. Hidden while the progress pane is open, and when no workspace resolves. |
@@ -1759,7 +1759,7 @@ pane is shorter than the log, its first line reads `… 12 earlier` and the newe
 |---|---|---|
 | `session` | The module starts (launch and reload), on a resume or fork, and on `/clear` | `start`, `resume`, `fork`, `clear` (a resume can log both `start` and `resume`) |
 | `model` | A `/model` switch to another model | The full model id, `claude-opus-5-5` |
-| `compact` | A compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them |
+| `compact` | A compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them. One line per compaction, whichever of its two reports (the `session.compact` chain, the `PostCompact` event) arrives first |
 | `rate` | A rate window first reaches 90 % | The alarm toast's text, `5h window: 92% used, resets in 1h 05m` |
 | `workspace` | The resolved task workspace differs from the last one logged (re-resolving the same one after `/clear` logs nothing) | The work id, or `none` |
 | `slim` | The module toasts an MCP savings figure (main thread only) | The tool (the part after the last `__`) and the toast's figure without its `fnd-mcp-slim:` prefix |

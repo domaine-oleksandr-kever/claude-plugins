@@ -47,6 +47,26 @@ async function adoptModel($: $, m: string): Promise<void> {
   await logEvent($, 'model', m)
 }
 
+const SAME_COMPACTION_MS = 30_000
+let lastCompactMs = 0
+
+/**
+ * Cold cache, the context from the engine's count (absent = no reading), one log line. The
+ * session.compact chain and the classic PostCompact both report one compaction, in either order: a
+ * report within 30 s of the last is the same compaction, and then only a token count refines the context.
+ */
+async function applyCompaction($: $, trigger: string, tokensAfter?: number, tokensBefore?: number): Promise<void> {
+  const now = await $.clock.now()
+  const same = now - lastCompactMs < SAME_COMPACTION_MS
+  lastCompactMs = now
+  await update($, cache, c => ({ ...c, isCold: true }))
+  if (same && tokensAfter === undefined) return
+  await update($, usage, u => compactedUsage(u, tokensAfter))
+  if (same) return
+  const sizes = typeof tokensBefore === 'number' && typeof tokensAfter === 'number' ? ` ${fmtK(tokensBefore)} → ${fmtK(tokensAfter)}` : ''
+  await logEvent($, 'compact', `${trigger}${sizes}`)
+}
+
 async function refresh($: $): Promise<void> {
   const now = await $.clock.now()
   await update($, tick, () => now)
@@ -177,13 +197,16 @@ export function registerUsage(on: On, options: PluginOptions): void {
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
     if (r.skip === undefined && r.messages && e.trigger !== 'precompute' && e.agentId === undefined) {
-      await update($, cache, c => ({ ...c, isCold: true }))
-      await update($, usage, u => compactedUsage(u, r.tokensAfter))
-      const { tokensBefore: b, tokensAfter: a } = r
-      const sizes = typeof b === 'number' && typeof a === 'number' ? ` ${fmtK(b)} → ${fmtK(a)}` : ''
-      await logEvent($, 'compact', `${e.trigger}${sizes}`)
+      await applyCompaction($, e.trigger, r.tokensAfter, r.tokensBefore)
     }
     return r
+  })
+
+  // The engine's own report of a main-thread compaction. It reaches the mod when the session.compact
+  // chain does not (a Compact press on 2.1.289 left the band warm at the old ctx).
+  on('classic.PostCompact', async ($, e, next) => {
+    if (e.agent_id === undefined) await applyCompaction($, e.trigger)
+    return next(e)
   })
 
   // Atom writes only: one 1.5 s bound covers every session.end hook and aborts a $ call in flight.
