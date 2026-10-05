@@ -1653,7 +1653,7 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 | Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
 | Log | `[ Log ]`, `l: Log` | Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
 
-**Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the desktop frames its panel itself, so no rule is drawn there. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain, the digest's work id is bold and the separators are dim.
+**Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the desktop frames its panel itself, so no rule is drawn there. The desktop draws the buttons on a second row under the figures, left-aligned: its native buttons are tall, and in the figures' row they squashed it and sat far right. The terminal keeps one row, as its height is the scarce side there. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain, the digest's work id is bold and the separators are dim.
 
 **Colors.** ctx is green (the theme's `success`) up to 30 %, as the classic notice's 🟢 was; the rate
 windows are plain there. Both use the theme's `warning` color above 30 % and the alarm look from 80 %. The cache is plain at 10 min or more, `warning` below 10 min and

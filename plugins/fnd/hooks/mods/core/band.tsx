@@ -1,4 +1,5 @@
-// Status band: the AbovePrompt row drawn from the atoms, and the Compact press.
+// Status band: the AbovePrompt row drawn from the atoms, and the Compact press. A desktop draws the buttons
+// on a second row under the figures.
 // Render only reads atoms; usage.ts and progress.tsx write them. The Progress and Log presses are
 // answered by the `ui.press` hooks on elements `progress` (progress.tsx) and `log` (log.tsx).
 import { atom, read, update } from 'claude-code'
@@ -197,7 +198,9 @@ export function registerBand(on: On, options: PluginOptions): void {
       buttons.push(<Text>{'  '}</Text>)
       buttons.push(<Button key="log" label="Log" {...hot('l')} {...(letters ?? { dimColor: true })} onPress={() => {}} />)
     }
-    groups.push(buttons)
+    // A desktop draws native buttons: in the figures' row they squash it and sit far right, so they get a row of
+    // their own below, left-aligned. The terminal keeps one row: its height is the scarce side there.
+    if (!isDesktop) groups.push(buttons)
 
     const row = groups.flatMap((g, i) => (i === 0 ? g : [<Text dimColor>{SEP}</Text>, ...g]))
     // No overflow="hidden" here: it would clip the terminal's cards on the rule row above.
@@ -207,7 +210,14 @@ export function registerBand(on: On, options: PluginOptions): void {
       </Box>
     )
     // A dim rule separates the band from the transcript above it; the desktop frames its panel itself.
-    if (isDesktop) return rowBox
+    if (isDesktop) {
+      return (
+        <Box flexDirection="column">
+          {rowBox}
+          <Box flexDirection="row">{buttons}</Box>
+        </Box>
+      )
+    }
     const ruleCols = e.props.bodyColumns && e.props.bodyColumns > 0 ? Math.min(e.props.bodyColumns, 400) : 80
     return (
       <Box flexDirection="column">

@@ -605,6 +605,30 @@ describe('band', () => {
       expect(w.toasts).toEqual(['compacted 20,000 → 8,000 tokens'])
     })
 
+    test(`${surface}: a desktop draws the buttons on their own row under the figures; the terminal keeps one row`, async ($, on) => {
+      world(on)
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 47 }, [{ kind: 'five_hour', percentUsed: 61 }])
+      const ui = await mount($, surface)
+      const drawn = await ui.drawn()
+      const rows = nodes(drawn).filter(n => n.type === 'Box' && n.props?.flexDirection === 'row' && nodes(n).some(c => c.type === 'Button'))
+      const buttonRow = rows[rows.length - 1]
+      const buttonKeys = (buttonRow.children ?? []).filter((c: any) => c?.type === 'Button').map((c: any) => c.props.key)
+      expect(buttonKeys).toEqual(['compact', 'progress', 'log'])
+      if (isDesktop) {
+        // A column of two rows: the figures, then the buttons alone, with no separator before Compact.
+        expect(drawn.props?.flexDirection).toBe('column')
+        expect(drawn.children).toHaveLength(2)
+        expect(drawn.children[1]).toBe(buttonRow)
+        expect(nodes(buttonRow).some(n => n.type === 'Text' && /│/.test(strOf(n)))).toBe(false)
+        expect(nodes(drawn.children[0]).some(n => n.type === 'Button')).toBe(false)
+        return
+      }
+      // One row: `cache — │ fable-5-1 │ ctx 47% │ 5h 61% │ [ Compact ] …`, the buttons after the last separator.
+      expect(nodes(buttonRow).some(n => n.type === 'Text' && /ctx/.test(strOf(n)))).toBe(true)
+      expect(nodes(buttonRow).filter(n => n.type === 'Text' && /│/.test(strOf(n)))).toHaveLength(4)
+    })
+
     test(`${surface}: keyed hover Boxes with hidden, card-wide cards`, async ($, on) => {
       world(on)
       await start($, surface)
