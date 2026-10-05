@@ -617,7 +617,7 @@ describe('band', () => {
       expect(buttonKeys).toEqual(['compact', 'progress', 'log'])
       if (isDesktop) {
         // A column of two rows: the figures, then the buttons alone, with no separator before Compact.
-        expect(drawn.props?.flexDirection).toBe('column')
+        expect(drawn.props).toMatchObject({ flexDirection: 'column', gap: 1, padding: 1 })
         expect(drawn.children).toHaveLength(2)
         expect(drawn.children[1]).toBe(buttonRow)
         expect(nodes(buttonRow).some(n => n.type === 'Text' && /│/.test(strOf(n)))).toBe(false)

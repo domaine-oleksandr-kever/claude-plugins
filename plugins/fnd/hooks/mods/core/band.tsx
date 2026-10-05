@@ -211,8 +211,9 @@ export function registerBand(on: On, options: PluginOptions): void {
     )
     // A dim rule separates the band from the transcript above it; the desktop frames its panel itself.
     if (isDesktop) {
+      // A row of air between the figures and the buttons, and around the whole, so the panel is not one dense block.
       return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" gap={1} padding={1}>
           {rowBox}
           <Box flexDirection="row">{buttons}</Box>
         </Box>
