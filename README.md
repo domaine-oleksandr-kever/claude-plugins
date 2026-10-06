@@ -1760,6 +1760,9 @@ shows one and keeps the other as a tab. Pressing the button or running the comma
 The time is local `HH:MM`; the kind is dim. A line too long for the pane continues on the next row,
 under its own text column, on the terminal and the desktop alike. When the pane is shorter than the
 log, its first line reads `… 12 earlier` and the newest lines fill the rest, wrapped rows counted.
+Where nothing draws a pane — a cloud session (the browser at claude.ai/code, the Desktop app's
+cloud sessions), the VS Code chat panel, `claude -p` — `/fnd-log` answers with the log as text
+instead, one line per event, and the `Log` button is not there to press.
 
 | Kind | Written when | Text |
 |---|---|---|

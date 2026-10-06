@@ -19,6 +19,7 @@ function world(on: On, env: Record<string, string> = {}) {
     opens: [] as unknown[],
     closes: [] as unknown[],
     toasts: [] as string[],
+    surfaces: ['terminal'] as string[],
   }
   mock.clock(on, { now: NOW })
   mock.store(on)
@@ -30,6 +31,7 @@ function world(on: On, env: Record<string, string> = {}) {
   on('session.id', async () => ({ value: 's1' }))
   on('session.model', async () => ({ value: w.model }))
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] } }))
+  on('session.surfaces', async () => ({ value: w.surfaces }))
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
   on('classic.PostModelSwitch', async () => ({}) as never)
   on('ui.panes', async () => ({ value: w.panes }))
@@ -150,6 +152,21 @@ describe('/fnd-log', () => {
     expect(await run($, 'fnd-log')).toEqual({ text: 'Log pane opened.' })
     expect(w.opens).toHaveLength(2)
     expect(w.closes).toHaveLength(1)
+  })
+
+  test('where no surface draws panes (cloud, VS Code chat, -p) the command answers with the log as text', async ($, on) => {
+    const w = world(on)
+    w.surfaces = []
+    await start($)
+    expect((await run($, 'fnd-log')).text).toBe('09:05  session    start')
+    await switches($, w, 2)
+    expect((await run($, 'fnd-log')).text).toBe(
+      ['09:05  session    start', '09:05  model      claude-opus-5-5', '09:05  model      claude-fable-5-1'].join('\n'),
+    )
+    expect(w.opens).toEqual([])
+    w.surfaces = ['mobile']
+    expect((await run($, 'fnd-log')).text).toContain('claude-fable-5-1')
+    expect(w.opens).toEqual([])
   })
 
   test('an unplaced open → one toast', async ($, on) => {

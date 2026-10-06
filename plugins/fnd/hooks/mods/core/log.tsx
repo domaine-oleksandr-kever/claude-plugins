@@ -8,7 +8,19 @@ const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
 
 type $ = EngineInterface
 
+/** Only the terminal and the Desktop app draw a mod's panes; elsewhere the log goes out as text. */
+async function drawsPanes($: $): Promise<boolean> {
+  return (await $.session.surfaces()).some(s => s === 'terminal' || s === 'desktop')
+}
+
+async function logText($: $): Promise<string> {
+  const list = await read($, events)
+  if (list.length === 0) return 'no events yet'
+  return list.map(ev => `${hhmm(ev.atMs)}  ${kindCell(ev.kind)}  ${ev.text}`).join('\n')
+}
+
 async function togglePane($: $): Promise<string> {
+  if (!(await drawsPanes($))) return await logText($)
   if ((await $.ui.panes()).some(p => p.id === LOG_PANE && p.isShown)) {
     await $.ui.close({ id: LOG_PANE })
     return 'Log pane closed.'
