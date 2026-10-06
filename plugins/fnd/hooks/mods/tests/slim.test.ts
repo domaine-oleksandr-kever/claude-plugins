@@ -256,13 +256,40 @@ describe('event log', () => {
     expect((await logged($, 'slim')).map(ev => ev.text)).toEqual(['searchJiraIssuesUsingJql: compressed 3,197,763 B → 41,000 B (−98.7%)'])
   })
 
+  const AGENTS = [{ id: 'agent-7', description: 'read ELC-1', type: 'fnd:jira-reader', status: 'running' }]
   for (const [name, below] of [['an expansion', { result: NOTICE }], ['a figure', { result: SLIMMED, text: SLIMMED }]] as const) {
-    test(`in a subagent ${name} logs nothing`, { plugins: [PEEK_EVENTS] }, async ($, on) => {
-      setup(on, below, () => out(slimJson(SLIMMED, STATS)))
+    test(`in a subagent ${name} logs one line prefixed with its type, no toast`, { plugins: [PEEK_EVENTS] }, async ($, on) => {
+      const { toasts } = setup(on, below, () => out(slimJson(SLIMMED, STATS)))
+      on('agent.list', async () => ({ value: AGENTS as any }))
       await $.tool.call({ tool: TOOL, agentId: 'agent-7' } as any)
-      expect(await logged($, 'slim')).toEqual([])
+      expect(toasts).toEqual([])
+      expect((await logged($, 'slim')).map(ev => ev.text)).toEqual(['jira-reader · searchJiraIssuesUsingJql: compressed 3,197,763 B → 41,000 B (−98.7%)'])
     })
   }
+
+  test('an agent id the list does not name → `agent · `', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    setup(on, { result: SLIMMED, text: SLIMMED })
+    on('agent.list', async () => ({ value: AGENTS as any }))
+    await $.tool.call({ tool: TOOL, agentId: 'agent-fork' } as any)
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual(['agent · searchJiraIssuesUsingJql: compressed 3,197,763 B → 41,000 B (−98.7%)'])
+  })
+
+  test('a failing agent list → `agent · `, the result unchanged', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    setup(on, { result: NOTICE }, () => out(slimJson(SLIMMED, STATS)))
+    on('agent.list', async () => {
+      throw new Error('boom')
+    })
+    expect(await $.tool.call({ tool: TOOL, agentId: 'agent-7' } as any)).toEqual({ result: SLIMMED })
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual(['agent · searchJiraIssuesUsingJql: compressed 3,197,763 B → 41,000 B (−98.7%)'])
+  })
+
+  test('on the main loop the line stays unprefixed beside its toast', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = setup(on, { result: SLIMMED, text: SLIMMED })
+    on('agent.list', async () => ({ value: AGENTS as any }))
+    await $.tool.call({ tool: TOOL } as any)
+    expect(toasts).toEqual([{ text: STATS, timeoutMs: 5000 }])
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual(['searchJiraIssuesUsingJql: compressed 3,197,763 B → 41,000 B (−98.7%)'])
+  })
 
   test('FND_SLIM_TOAST=0 → no toast, the line is still logged', { plugins: [PEEK_EVENTS] }, async ($, on) => {
     const { toasts } = setup(on, { result: NOTICE }, () => out(slimJson(SLIMMED, STATS)), { FND_SLIM_TOAST: '0' })

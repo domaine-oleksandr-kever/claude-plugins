@@ -1762,7 +1762,7 @@ pane is shorter than the log, its first line reads `… 12 earlier` and the newe
 | `compact` | A compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them. One line per compaction, whichever of its two reports (the `session.compact` chain, the `PostCompact` event) arrives first |
 | `rate` | A rate window first reaches 90 % | The alarm toast's text, `5h window: 92% used, resets in 1h 05m` |
 | `workspace` | The resolved task workspace differs from the last one logged (re-resolving the same one after `/clear` logs nothing) | The work id, or `none` |
-| `slim` | The module toasts an MCP savings figure (main thread only) | The tool (the part after the last `__`) and the toast's figure without its `fnd-mcp-slim:` prefix |
+| `slim` | The module slims an MCP result and finds its savings figure, on the main thread or in a subagent | The tool (the part after the last `__`) and the figure without its `fnd-mcp-slim:` prefix. A subagent's line starts with its agent type (`fnd:` dropped, `agent` when the engine does not list it): `jira-reader · getJiraIssue: compressed …` |
 | `prompt` | A pasted JSON prompt is rewritten and accepted | The toast's figure without its `fnd-prompt-slim:` prefix |
 | `guard` | The scratch-path guard refuses a tool call | The tool (the part after the last `__`) and the first line of the reason without the guard's own prefix |
 
@@ -1805,7 +1805,8 @@ The five tools the classic guard covers (`take_screenshot`, `browser_take_screen
   prints, e.g. `fnd-mcp-slim: compressed 118,203 B → 29,412 B (−75.1%)`, for 5 s (`FND_SLIM_TOAST_MS`). Results under the
   limit are still slimmed in place by the classic hook, and the module only toasts the figure it
   finds in the result.
-  A reader subagent's result is slimmed but never toasted, as with the classic notice.
+  A reader subagent's result is slimmed but never toasted, as with the classic notice; its figure still
+  goes to the Log pane as a `slim` line prefixed with the agent type.
   `FND_SLIM_TOAST=0` turns the toast off; the slimming stays. Until a
   session marker lets the classic hook drop its own notice, a slimmed result can show the figure
   twice: the notice line and the toast.

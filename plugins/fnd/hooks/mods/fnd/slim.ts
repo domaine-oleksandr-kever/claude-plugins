@@ -18,6 +18,16 @@ async function logEvent($: $, kind: FndEventKind, text: string): Promise<void> {
   } catch {}
 }
 
+/** `<type> · ` for a subagent's line (`fnd:` dropped, `agent` when unlisted); '' on the main loop. */
+async function loopLabel($: $, agentId: string | undefined): Promise<string> {
+  if (agentId === undefined) return ''
+  try {
+    const type = (await $.agent.list()).find(a => a.id === agentId)?.type
+    if (type) return `${type.replace(/^fnd:/, '')} · `
+  } catch {}
+  return 'agent · '
+}
+
 export function registerSlim(on: On): void {
   on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {
     // Never race next: returning while it is pending aborts what runs beneath.
@@ -28,13 +38,12 @@ export function registerSlim(on: On): void {
     const stub = stubText(r.result)
     if (!stub) {
       // The classic hook already slimmed it beneath us: only the figure is left to show.
-      if (!isMain) return r
       const limit = stubBytes(await $.env.get('FND_MCP_SLIM_STUB_BYTES'))
       const figure = slimFigureIn(r.result, limit, r.text)
-      if (figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
+      if (isMain && figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
         $.ui.toast(figure, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS')) })
       }
-      if (figure) await logEvent($, 'slim', `${toolName(e.tool)}: ${bare(figure)}`)
+      if (figure) await logEvent($, 'slim', `${await loopLabel($, e.agentId)}${toolName(e.tool)}: ${bare(figure)}`)
       return r
     }
 
@@ -57,11 +66,11 @@ export function registerSlim(on: On): void {
     const hso = out?.hookSpecificOutput
     const result = hso?.updatedMCPToolOutput ?? hso?.updatedToolOutput
     if (result === undefined) return r
-    const figure = isMain && typeof out?.systemMessage === 'string' ? out.systemMessage : ''
-    if (figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
+    const figure = typeof out?.systemMessage === 'string' ? out.systemMessage : ''
+    if (isMain && figure && (await $.env.get('FND_SLIM_TOAST')) !== '0') {
       $.ui.toast(figure, { timeoutMs: toastMs(await $.env.get('FND_SLIM_TOAST_MS')) })
     }
-    if (figure) await logEvent($, 'slim', `${toolName(e.tool)}: ${bare(figure)}`)
+    if (figure) await logEvent($, 'slim', `${await loopLabel($, e.agentId)}${toolName(e.tool)}: ${bare(figure)}`)
     // A fresh object: returning `r` itself would make core reuse its own messages verbatim.
     return r.context?.length ? { result, context: r.context } : { result }
   })
