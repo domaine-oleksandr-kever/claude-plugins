@@ -1,5 +1,6 @@
 // Status band: the AbovePrompt row drawn from the atoms, the Compact and Clear presses and the terminal's model
-// picker. A desktop draws the buttons on a second row under the figures.
+// picker, which unfolds into the row itself: the band region clips anything drawn outside its own rows, so no
+// list can pop over the transcript. A desktop draws the buttons on a second row under the figures.
 // Render only reads atoms; usage.ts and progress.tsx write them. The Progress and Log presses are
 // answered by the `ui.press` hooks on elements `progress` (progress.tsx) and `log` (log.tsx).
 import { atom, read, update } from 'claude-code'
@@ -10,6 +11,7 @@ import {
   CTX_PROPS,
   GLYPH,
   LEVEL_PROPS,
+  MODEL_MARK,
   RULE,
   SEP,
   USAGE_INIT,
@@ -37,6 +39,7 @@ const tick = atom({ plugin: 'fnd', key: 'tick' } as const, 0)
 const progress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 const paneShown = atom({ plugin: 'fnd', key: 'paneShown' } as const, false)
 const bandFocused = atom({ plugin: 'fnd', key: 'bandFocused' } as const, false)
+const modelPicker = atom({ plugin: 'fnd', key: 'modelPicker' } as const, false)
 
 type $ = EngineInterface
 
@@ -76,8 +79,10 @@ function pressClear($: $): void {
   )
 }
 
-/** A pick on the terminal's model picker runs `/model <id>` as typed; the switch event then moves the segment. */
-function pickModel($: $, id: string): void {
+/** A pick folds the picker and runs `/model <id>` as typed; the switch event then moves the segment. The current id only folds. */
+function pickModel($: $, id: string, current: string): void {
+  void setPicker($, false)
+  if (id === current) return
   $.command.run({ command: 'model', args: id }).then(
     r => $.ui.toast(r.text || `model ${id}`),
     err => $.ui.toast(`model refused: ${err instanceof Error ? err.message : String(err)}`),
@@ -99,6 +104,11 @@ async function setFocused($: $, to: boolean): Promise<void> {
   if (drawnOn !== 'desktop' && (await read($, bandFocused)) !== to) await update($, bandFocused, () => to)
 }
 
+/** Guarded write, as setFocused; the desktop never unfolds. */
+async function setPicker($: $, to: boolean): Promise<void> {
+  if (drawnOn !== 'desktop' && (await read($, modelPicker)) !== to) await update($, modelPicker, () => to)
+}
+
 export function registerBand(on: On, options: PluginOptions): void {
   // Hotkey letters are drawn only while the band holds the keyboard. A focus-in sets the flag; a
   // press, a turn or /clear clears it, as there is no focus-out event. The hotkeys stay armed.
@@ -106,22 +116,21 @@ export function registerBand(on: On, options: PluginOptions): void {
     await setFocused($, true)
     return next(e)
   })
+  // Unfolding the model picker keeps the keyboard on the band: its models take hotkey letters of their own.
   on('ui.press', { plugin: 'fnd' }, async ($, e, next) => {
-    await setFocused($, false)
-    return next(e)
-  })
-  on('ui.select', { plugin: 'fnd' }, async ($, e, next) => {
-    await setFocused($, false)
+    if (e.element !== 'model') await setFocused($, false)
     return next(e)
   })
   on('turn.start', async ($, e, next) => {
     turn.running = true
     await setFocused($, false)
+    await setPicker($, false)
     return next(e)
   })
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     turn.running = false
     await setFocused($, false)
+    await setPicker($, false)
     return next(e)
   })
 
@@ -136,6 +145,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     const p = await read($, progress)
     const isPaneShown = await read($, paneShown)
     const focused = await read($, bandFocused)
+    const unfolded = await read($, modelPicker)
     if (u.ctxPct === null && u.rates.length === 0 && m === null && c.anchorMs === null) return next(e)
 
     const isWorking = e.props.isWorking
@@ -147,7 +157,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     lastRender.maxRows = e.props.maxRows
     // A desktop draws proportional text: its bodyColumns do not measure the row, so nothing is dropped there.
     const segs = layout(bandSegs({ usage: u, model: m, cache: c, nowMs: now, isWorking, digest }), isDesktop ? undefined : e.props.bodyColumns)
-    const { Box, Text, Button, Select } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
 
     const label = (text: string) => (isDesktop ? glyphText(text) : text)
     // Dim label, bold value (`cache` dim, `42m` bold); a desktop glyph label stays at full strength.
@@ -193,18 +203,49 @@ export function registerBand(on: On, options: PluginOptions): void {
       hoverable(`seg-rate-${r.kind}`, labeled(rateText(r), dimLabel, { bold: true, ...LEVEL_PROPS[pctLevel(r.pct)] }), rateCard(r, now)),
     ]
 
+    // A desktop draws a hotkey as a badge on its native button, and its buttons are clicked: no hotkeys there.
+    const letters = focused && !isDesktop ? { plain: true as const } : null
+    const hot = (k: string) => (isDesktop ? {} : { hotkey: k })
+
+    // Unfolded, the row holds the models alone: four names plus letters outgrow a row that also holds the figures.
+    // The current one is at full strength and only folds; no Esc, as the engine raises no focus-out.
+    if (unfolded && !isDesktop && m !== null) {
+      const options = modelOptions(m)
+      const row: RenderNode[] = [<Text dimColor>model </Text>]
+      options.forEach((o, i) => {
+        if (i > 0) row.push(<Text>{'  '}</Text>)
+        row.push(
+          <Button
+            key={`model:${o.value}`}
+            label={o.label}
+            plain
+            {...(letters && o.hotkey ? { hotkey: o.hotkey } : {})}
+            {...(o.value === m ? {} : { dimColor: true })}
+            onPress={() => pickModel($, o.value, m)}
+          />,
+        )
+      })
+      const ruleCols = e.props.bodyColumns && e.props.bodyColumns > 0 ? Math.min(e.props.bodyColumns, 400) : 80
+      return (
+        <Box flexDirection="column">
+          <Text dimColor>{RULE.repeat(ruleCols)}</Text>
+          <Box flexDirection="row">{row}</Box>
+        </Box>
+      )
+    }
+
     const groups: RenderNode[][] = []
     if (segs.cache !== null) {
       const level = LEVEL_PROPS[cacheView(c, now, isWorking).level]
       groups.push([hoverable('seg-cache', labeled(label(segs.cache), dimLabel, { bold: true, ...level }), cacheCard(c, now))])
     }
-    // The terminal has no model menu of its own in reach, so its segment is the picker; the desktop app has one.
+    // The terminal has no model menu of its own in reach, so its segment is the picker's button; the desktop app has one.
     if (segs.model !== null && m !== null) {
       groups.push([
         isDesktop ? (
           <Text wrap="truncate-end">{`${GLYPH.model} ${segs.model}`}</Text>
         ) : (
-          <Select key="model" options={modelOptions(m)} value={m} onSelect={id => pickModel($, id)} />
+          <Button key="model" label={`${segs.model}${MODEL_MARK}`} plain {...(letters ? { hotkey: 'm' } : {})} onPress={() => setPicker($, true)} />
         ),
       ])
     }
@@ -225,9 +266,6 @@ export function registerBand(on: On, options: PluginOptions): void {
       ])
     }
     const buttons: RenderNode[] = []
-    // A desktop draws a hotkey as a badge on its native button, and its buttons are clicked: no hotkeys there.
-    const letters = focused && !isDesktop ? { plain: true as const } : null
-    const hot = (k: string) => (isDesktop ? {} : { hotkey: k })
     const look = letters ?? (segs.compact.plain ? {} : { variant: 'primary' as const })
     buttons.push(<Button key="compact" label="Compact" {...hot('c')} {...look} onPress={() => pressCompact($)} />)
     if (segs.clear !== null) {

@@ -103,12 +103,14 @@ const units = (n: any): Unit[] => {
 const unitsOf = async (ui: any): Promise<Unit[]> => units(await ui.drawn())
 const textOf = async (ui: any, re: RegExp) => (await unitsOf(ui)).find(u => re.test(u.text))?.text
 const valueOf = async (ui: any, re: RegExp) => (await unitsOf(ui)).find(u => re.test(u.text))?.node
-/** The model the band shows, short: the desktop's text, or the terminal picker's current option. */
+/** The model the band shows, short: the desktop's text, or the label of the terminal picker's folded button. */
 const shownModel = async (ui: any, surface: Surface): Promise<string | undefined> => {
   if (surface === 'desktop') return (await textOf(ui, /^🤖 /))?.replace(/^🤖 /, '')
-  const sel = await ui.find({ key: 'model' })
-  return sel?.props.options.find((o: any) => o.value === sel.props.value)?.label
+  return (await ui.find({ key: 'model' }))?.props.label?.replace(/ ▾$/, '')
 }
+/** The unfolded picker's model buttons, in row order; none while folded. */
+const modelButtons = async (ui: any): Promise<any[]> =>
+  nodes(await ui.drawn()).filter(n => n.type === 'Button' && String(n.props.key).startsWith('model:'))
 
 /** Reads fnd's own state from beside it: any plugin reads any value. */
 const peek = {
@@ -200,8 +202,9 @@ describe('band', () => {
       expect(log?.props).toMatchObject({ label: 'Log', dimColor: true })
       expect(log?.props.hotkey).toBe(isDesktop ? undefined : 'l')
       expect(log?.props.plain).toBeUndefined()
+      // On the terminal the model segment is a Button too, before the action buttons.
       const keys = nodes(await ui.drawn()).filter(n => n.type === 'Button').map(n => n.props.key)
-      expect(keys).toEqual(['compact', 'clear', 'progress', 'log'])
+      expect(keys).toEqual(isDesktop ? ['compact', 'clear', 'progress', 'log'] : ['model', 'compact', 'clear', 'progress', 'log'])
     })
 
     test(`${surface}: a rule above the row (terminal only); dim label, bold value; the cache hides in overage`, async ($, on) => {
@@ -301,9 +304,13 @@ describe('band', () => {
       await ui.press({ key: 'compact' })
       expect((await ui.find({ key: 'progress' }))?.props.plain).toBeUndefined()
       await $.ui.focus({ ...focusIn, element: 'model' } as never)
-      expect((await ui.find({ key: 'progress' }))?.props.plain).toBe(true)
-      await $.ui.select({ plugin: 'fnd', key: 'model', value: 'claude-fable-5-1' })
+      expect((await ui.find({ key: 'model' }))?.props).toMatchObject({ plain: true, hotkey: 'm', label: 'fable-5-1 ▾' })
+      // Unfolding keeps the keyboard on the band: the models take letters of their own; a pick lets go.
+      await ui.press({ key: 'model' })
+      expect((await modelButtons(ui)).map(b => b.props.hotkey)).toEqual(['f', 'o', 's', 'h'])
+      await ui.press({ key: 'model:claude-fable-5-1' })
       expect((await ui.find({ key: 'progress' }))?.props.plain).toBeUndefined()
+      expect((await ui.find({ key: 'model' }))?.props.hotkey).toBeUndefined()
     })
 
     test(`${surface}: isWorking keeps Compact first and pressable, no accent, and shows cache ●`, async ($, on) => {
@@ -314,7 +321,7 @@ describe('band', () => {
       const compact = await ui.find({ key: 'compact' })
       expect(compact?.props.dimColor).toBeUndefined()
       expect(compact?.props.variant).toBeUndefined()
-      expect(nodes(await ui.drawn()).filter(n => n.type === 'Button').map(n => n.props.key)[0]).toBe('compact')
+      expect(nodes(await ui.drawn()).filter(n => n.type === 'Button' && n.props.key !== 'model').map(n => n.props.key)[0]).toBe('compact')
       expect(await textOf(ui, cacheRe)).toBe(L('cache ●'))
     })
 
@@ -465,7 +472,7 @@ describe('band', () => {
       expect(await shownModel(ui, surface)).toBe('fable-5-1')
     })
 
-    test(`${surface}: the model segment is a picker on the terminal, text on the desktop`, async ($, on) => {
+    test(`${surface}: the model segment unfolds into a row of models on the terminal, text on the desktop`, async ($, on) => {
       const { w } = world(on)
       const runs: string[] = []
       on('command.run', { command: 'model' }, async (_$, e) => {
@@ -475,21 +482,40 @@ describe('band', () => {
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      const sel = await ui.find({ key: 'model' })
+      const btn = await ui.find({ key: 'model' })
       if (isDesktop) {
-        expect(sel).toBeUndefined()
+        expect(btn).toBeUndefined()
         expect(await textOf(ui, /^🤖 /)).toBe('🤖 fable-5-1')
         return
       }
-      expect(sel?.type).toBe('Select')
-      expect(sel?.props.value).toBe('claude-fable-5-1')
-      expect(sel?.props.options.map((o: any) => o.label)).toEqual(['fable-5-1', 'opus-5-5', 'sonnet-5-5', 'haiku-4-5-20251001'])
-      await $.ui.select({ plugin: 'fnd', key: 'model', value: 'claude-opus-5-5' })
+      expect(btn?.type).toBe('Button')
+      expect(btn?.props).toMatchObject({ label: 'fable-5-1 ▾', plain: true })
+      expect(btn?.props.hotkey).toBeUndefined()
+      await ui.press({ key: 'model' })
+      // Unfolded: the band stays two rows and the row holds the models alone, the current at full strength.
+      expect(await ui.find({ key: 'model' })).toBeUndefined()
+      expect(await textOf(ui, /ctx/)).toBeUndefined()
+      expect(await ui.find({ key: 'compact' })).toBeUndefined()
+      expect(nodes(await ui.drawn()).filter(n => n.type === 'Text' && /^─+$/.test(strOf(n)))).toHaveLength(1)
+      const opts = await modelButtons(ui)
+      expect(opts.map(b => b.props.label)).toEqual(['fable-5-1', 'opus-5-5', 'sonnet-5-5', 'haiku-4-5-20251001'])
+      expect(opts.map(b => b.props.dimColor)).toEqual([undefined, true, true, true])
+      expect(opts.every(b => b.props.plain === true && b.props.hotkey === undefined)).toBe(true)
+      await ui.press({ key: 'model:claude-opus-5-5' })
       expect(runs).toEqual(['claude-opus-5-5'])
       expect(w.toasts).toEqual(['Set model to claude-opus-5-5'])
+      // Folded again; the segment moves with the switch event, not the press.
+      expect(await modelButtons(ui)).toHaveLength(0)
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
+      expect(await textOf(ui, /ctx/)).toBeDefined()
+      // The current model only folds: no /model run.
+      await ui.press({ key: 'model' })
+      await ui.press({ key: 'model:claude-fable-5-1' })
+      expect(runs).toEqual(['claude-opus-5-5'])
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
     })
 
-    test(`${surface}: a pinned id the picker does not list leads its options; a refused /model toasts`, async ($, on) => {
+    test(`${surface}: a pinned id the picker does not list leads its row; a refused /model toasts`, async ($, on) => {
       const { w } = world(on)
       w.model = 'claude-opus-5-5[1m]'
       // No command.run hook beneath: the engine rejects the run, as it does an unknown command.
@@ -498,12 +524,32 @@ describe('band', () => {
       await mainTurn($)
       expect(await shownModel(ui, surface)).toBe('opus-5-5[1m]')
       if (isDesktop) return
-      const sel = await ui.find({ key: 'model' })
-      expect(sel?.props.options[0]).toEqual({ value: 'claude-opus-5-5[1m]', label: 'opus-5-5[1m]' })
-      expect(sel?.props.options).toHaveLength(5)
-      await $.ui.select({ plugin: 'fnd', key: 'model', value: 'claude-sonnet-5-5' })
+      await ui.press({ key: 'model' })
+      const opts = await modelButtons(ui)
+      expect(opts).toHaveLength(5)
+      expect(opts[0].props).toMatchObject({ key: 'model:claude-opus-5-5[1m]', label: 'opus-5-5[1m]' })
+      expect(opts[0].props.dimColor).toBeUndefined()
+      await ui.press({ key: 'model:claude-sonnet-5-5' })
       expect(w.toasts).toHaveLength(1)
       expect(w.toasts[0]).toStartWith('model refused: ')
+      expect(await modelButtons(ui)).toHaveLength(0)
+    })
+
+    test(`${surface}: a turn and /clear fold the picker`, async ($, on) => {
+      world(on)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      if (isDesktop) return
+      await ui.press({ key: 'model' })
+      expect(await modelButtons(ui)).toHaveLength(4)
+      await $.turn.start({ text: 'hi', turnId: 't1' })
+      expect(await modelButtons(ui)).toHaveLength(0)
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
+      await ui.press({ key: 'model' })
+      expect(await modelButtons(ui)).toHaveLength(4)
+      await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
+      expect(await modelButtons(ui)).toHaveLength(0)
     })
 
     test(`${surface}: a subagent compaction leaves the main figures`, async ($, on) => {
@@ -779,7 +825,8 @@ describe('band', () => {
       const rows = nodes(drawn).filter(n => n.type === 'Box' && n.props?.flexDirection === 'row' && nodes(n).some(c => c.type === 'Button'))
       const buttonRow = rows[rows.length - 1]
       const buttonKeys = (buttonRow.children ?? []).filter((c: any) => c?.type === 'Button').map((c: any) => c.props.key)
-      expect(buttonKeys).toEqual(['compact', 'clear', 'progress', 'log'])
+      // The terminal's one row carries the model Button among the figures, before the action buttons.
+      expect(buttonKeys).toEqual(isDesktop ? ['compact', 'clear', 'progress', 'log'] : ['model', 'compact', 'clear', 'progress', 'log'])
       if (isDesktop) {
         // A column of two rows: the figures, then the buttons alone, with no separator before Compact.
         expect(drawn.props).toMatchObject({ flexDirection: 'column', gap: 1, padding: 1 })
@@ -848,8 +895,8 @@ describe('band', () => {
       world(on)
       await start($, surface)
       await measure($, { window: 200_000, percent: 60 })
-      // `cache — │ fable-5-1 │ ctx 60% │ c: Compact  x: Clear  p: Progress  l: Log` is 73 cells; without Log 65, without Clear too 55.
-      const wide = await mount($, surface, { bodyColumns: 66 })
+      // `cache — │ fable-5-1 ▾ │ ctx 60% │ c: Compact  x: Clear  p: Progress  l: Log` is 75 cells; without Log 67, without Clear too 57.
+      const wide = await mount($, surface, { bodyColumns: 68 })
       expect(await wide.find({ key: 'clear' })).toBeDefined()
       if (isDesktop) expect(await wide.find({ key: 'log' })).toBeDefined()
       else expect(await wide.find({ key: 'log' })).toBeUndefined()

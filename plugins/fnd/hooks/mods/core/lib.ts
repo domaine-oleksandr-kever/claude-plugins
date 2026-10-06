@@ -133,7 +133,7 @@ export function buttonText(b: BandButton): string {
 /** The row as the terminal draws it: groups joined by ` │ `. */
 export function rowText(s: BandSegs): string {
   const groups: string[] = s.cache === null ? [] : [s.cache]
-  if (s.model !== null) groups.push(s.model)
+  if (s.model !== null) groups.push(`${s.model}${MODEL_MARK}`)
   groups.push(s.ctx)
   if (s.rates.length) groups.push(s.rates.map(rateText).join(RATE_GAP))
   if (s.cost !== null) groups.push(s.cost)
@@ -328,10 +328,25 @@ export function shortModel(m: string | null): string | null {
 /** The ids the terminal's model picker offers, as `/model <id>` takes them; the engine lists no models itself. */
 export const MODEL_IDS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001'] as const
 
-/** The picker's options: the known ids plus the session's own when it is none of them (a pinned or dated id). */
-export function modelOptions(current: string | null): { value: string; label: string }[] {
+/** The mark after the model id on the terminal: the segment is the picker's button. */
+export const MODEL_MARK = ' ▾'
+
+export type ModelOption = { value: string; label: string; hotkey?: string }
+
+/**
+ * The picker's options: the known ids plus the session's own when it is none of them (a pinned or dated id).
+ * Each takes its label's first letter as hotkey when it is one and still free (`f`, `o`, `s`, `h`).
+ */
+export function modelOptions(current: string | null): ModelOption[] {
   const ids: string[] = current !== null && !MODEL_IDS.includes(current as (typeof MODEL_IDS)[number]) ? [current, ...MODEL_IDS] : [...MODEL_IDS]
-  return ids.map(value => ({ value, label: shortModel(value) as string }))
+  const taken = new Set<string>()
+  return ids.map(value => {
+    const label = shortModel(value) as string
+    const letter = label[0]
+    if (!/^[a-z]$/.test(letter) || taken.has(letter)) return { value, label }
+    taken.add(letter)
+    return { value, label, hotkey: letter }
+  })
 }
 
 /** `cache 42m` → [`cache`, `42m`]: the dim label and the bold value; no space → the whole text is the label. */

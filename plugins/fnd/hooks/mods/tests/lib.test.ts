@@ -170,21 +170,21 @@ describe('layout', () => {
     expect(buttonText({ key: 'compact', label: 'Compact', hotkey: 'c', plain: true })).toBe('c: Compact')
     expect(buttonText({ key: 'compact', label: 'Compact', hotkey: 'c', plain: false })).toBe('[ Compact ]')
     expect(rowText(full)).toBe(
-      'cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log',
+      'cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log',
     )
-    expect(cells(rowText(full))).toBe(155)
+    expect(cells(rowText(full))).toBe(157)
   })
 
   test('drop order 1→8', () => {
     expect(at(160)).toBe(rowText(full))
-    expect(at(155)).toBe(rowText(full))
-    expect(at(147)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress')
-    expect(at(137)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress')
-    expect(at(110)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ c: Compact  p: Progress')
-    expect(at(100)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ c: Compact  p: Progress')
-    expect(at(80)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% · 7d 34% │ c: Compact  p: Progress')
-    expect(at(70)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ 5h 61% │ c: Compact  p: Progress')
-    expect(at(60)).toBe('cache 42m │ Fable 5.1 │ ctx 47% │ c: Compact  p: Progress')
+    expect(at(157)).toBe(rowText(full))
+    expect(at(149)).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress')
+    expect(at(139)).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress')
+    expect(at(110)).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ c: Compact  p: Progress')
+    expect(at(100)).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ c: Compact  p: Progress')
+    expect(at(80)).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% · 7d 34% │ c: Compact  p: Progress')
+    expect(at(70)).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% │ c: Compact  p: Progress')
+    expect(at(60)).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ c: Compact  p: Progress')
     expect(at(50)).toBe('cache 42m │ ctx 47% │ c: Compact  p: Progress')
     expect(at(40)).toBe('cache 42m │ ctx 47% │ c: Compact')
   })
@@ -198,13 +198,17 @@ describe('layout', () => {
   })
 
   test('overage hides the cache; the model drops its claude- prefix', () => {
-    expect(rowText({ ...full, cache: null })).toStartWith('Fable 5.1 │ ctx 47% │')
+    expect(rowText({ ...full, cache: null })).toStartWith('Fable 5.1 ▾ │ ctx 47% │')
     expect(shortModel('claude-fable-5-1')).toBe('fable-5-1')
     expect(shortModel('claude-opus-5-5')).toBe('opus-5-5')
     expect(shortModel(null)).toBeNull()
     expect(modelOptions('claude-opus-5-5').map(o => o.label)).toEqual(['fable-5-1', 'opus-5-5', 'sonnet-5-5', 'haiku-4-5-20251001'])
+    expect(modelOptions('claude-opus-5-5').map(o => o.hotkey)).toEqual(['f', 'o', 's', 'h'])
     expect(modelOptions(null)).toHaveLength(4)
-    expect(modelOptions('claude-opus-5-5[1m]')[0]).toEqual({ value: 'claude-opus-5-5[1m]', label: 'opus-5-5[1m]' })
+    // A pinned id leads and takes its letter; the listed id it shadows goes without one.
+    const pinned = modelOptions('claude-opus-5-5[1m]')
+    expect(pinned[0]).toEqual({ value: 'claude-opus-5-5[1m]', label: 'opus-5-5[1m]', hotkey: 'o' })
+    expect(pinned[2]).toEqual({ value: 'claude-opus-5-5', label: 'opus-5-5' })
     expect(splitLabel('cache 42m')).toEqual(['cache', '42m'])
     expect(splitLabel('ELC-1591 3/5 ▶ Preview')).toEqual(['ELC-1591', '3/5 ▶ Preview'])
     expect(splitLabel('fnd-mods')).toEqual(['fnd-mods', ''])
@@ -353,7 +357,7 @@ describe('segments', () => {
       digest: 'ELC-1591 3/5 ▶ Preview themes',
     })
     expect(rowText(s)).toBe(
-      'cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log',
+      'cache 42m │ fable-5-1 ▾ │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log',
     )
   })
 

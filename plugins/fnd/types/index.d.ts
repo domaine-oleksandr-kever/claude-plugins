@@ -50,6 +50,8 @@ declare module 'claude-code' {
       paneShown: boolean
       /** the band holds the keyboard (ui.focus landed on it); hotkey letters are drawn only then */
       bandFocused: boolean
+      /** the terminal's model picker is unfolded: the band row holds the models alone */
+      modelPicker: boolean
       /** last ticket key seen in a prompt */
       lastKey: string | null
       /** last seen $.session.id(), to spot a /clear */
