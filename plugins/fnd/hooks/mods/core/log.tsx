@@ -2,7 +2,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { FndEvent } from '../../../types'
-import { LOG_PANE, hhmm, kindCell } from './events.ts'
+import { LOG_PANE, PREFIX_COLS, hhmm, kindCell, newestFitting } from './events.ts'
 
 const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
 
@@ -42,18 +42,24 @@ export function registerLog(on: On): void {
         </Box>
       )
     }
-    // The engine's window starts at the top and never follows the end: keep the newest rows in view.
+    // The engine's window starts at the top and never follows the end: keep the newest rows in view,
+    // counting the rows a wrapped text takes.
     const rows = e.props.scroll?.bodyRows ?? 0
-    const fit = rows > 0 && list.length > rows
-    const shown = fit ? list.slice(list.length - (rows - 1)) : list
+    const textCols = Math.max(1, e.props.bodyColumns - PREFIX_COLS)
+    const shown = newestFitting(list, rows, textCols)
+    const cut = shown.length < list.length
     return (
       <Box flexDirection="column" width={e.props.bodyColumns}>
-        {fit ? <Text dimColor wrap="truncate-end">{`… ${list.length - shown.length} earlier`}</Text> : null}
+        {cut ? <Text dimColor wrap="truncate-end">{`… ${list.length - shown.length} earlier`}</Text> : null}
         {shown.map((ev, i) => (
           <Box key={`ev-${i}`} flexDirection="row">
-            <Text dimColor>{`${hhmm(ev.atMs)}  `}</Text>
-            <Text dimColor>{`${kindCell(ev.kind)}  `}</Text>
-            <Text wrap="truncate-end">{ev.text}</Text>
+            <Box width={PREFIX_COLS} flexShrink={0}>
+              <Text dimColor>{`${hhmm(ev.atMs)}  `}</Text>
+              <Text dimColor>{`${kindCell(ev.kind)}  `}</Text>
+            </Box>
+            <Box width={textCols}>
+              <Text wrap="wrap">{ev.text}</Text>
+            </Box>
           </Box>
         ))}
       </Box>

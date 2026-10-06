@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { FndEvent } from '../../../types'
-import { EVENT_CAP, bare, fmtK, hhmm, kindCell, pushEvent, toolName } from '../core/events.ts'
+import { EVENT_CAP, PREFIX_COLS, bare, fmtK, hhmm, kindCell, newestFitting, pushEvent, textRows, toolName } from '../core/events.ts'
 
 const NOW = new Date(2027, 0, 15, 9, 5).getTime()
 const PANE = 'fnd-log'
@@ -65,11 +65,17 @@ const BAND = { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 200,
 const mountPane = ($: any, surface: (typeof SURFACES)[number], props: Partial<typeof PANE_PROPS> = {}) =>
   $.ui.mount({ plugin: 'fnd', surface, component: 'Pane', requestId: PANE, props: { ...PANE_PROPS, ...props } as any })
 
+/** Every Text under an element, in drawing order. */
+function texts(el: any): any[] {
+  if (el?.type === 'Text') return [el]
+  return (el?.children ?? []).flatMap((c: any) => (c && typeof c === 'object' ? texts(c) : []))
+}
+
 /** A row Box's three Texts as [time, kind, text]. */
 async function rows(ui: any): Promise<{ texts: string[]; props: any[] }[]> {
   const boxes = (await ui.findAll({ type: 'Box' })).filter((b: any) => typeof b.props.key === 'string' && b.props.key.startsWith('ev-'))
   return boxes.map((b: any) => {
-    const ts = b.children.filter((c: any) => c?.type === 'Text')
+    const ts = texts(b)
     return { texts: ts.map((t: any) => t.children.join('')), props: ts.map((t: any) => t.props) }
   })
 }
@@ -112,6 +118,22 @@ describe('event helpers', () => {
     expect(fmtK(950)).toBe('950')
     expect(kindCell('rate')).toBe('rate     ')
     expect(kindCell('workspace')).toBe('workspace')
+  })
+
+  test('wrapped rows: a text takes ceil(len / cols) rows, the newest that fit are kept, one row for the "earlier" line', () => {
+    expect(PREFIX_COLS).toBe(18)
+    expect(textRows('', 10)).toBe(1)
+    expect(textRows('a'.repeat(10), 10)).toBe(1)
+    expect(textRows('a'.repeat(11), 10)).toBe(2)
+    const ev = (n: number, len: number) => ({ atMs: n, kind: 'slim' as const, text: `${n}`.padEnd(len, 'x') })
+    const list = [ev(1, 5), ev(2, 25), ev(3, 5), ev(4, 15)]
+    expect(newestFitting(list, 0, 10)).toEqual(list)
+    expect(newestFitting(list, 10, 10)).toEqual(list)
+    // 4 rows: #4 (2) + #3 (1) = 3, #2 (3) would overflow; the "earlier" row still fits.
+    expect(newestFitting(list, 4, 10)).toEqual([ev(3, 5), ev(4, 15)])
+    // 3 rows: #4 + #3 fill all three, so #3 gives way to the "earlier" row.
+    expect(newestFitting(list, 3, 10)).toEqual([ev(4, 15)])
+    expect(newestFitting(list, 1, 10)).toEqual([])
   })
 })
 
@@ -167,7 +189,7 @@ describe('Log button', () => {
 
 describe('Log pane', () => {
   for (const surface of SURFACES) {
-    test(`${surface}: one row per event, oldest first; dim time and kind, the text truncated`, async ($, on) => {
+    test(`${surface}: one row per event, oldest first; dim time and kind, the text wraps`, async ($, on) => {
       const w = world(on)
       await start($)
       await switches($, w, 2)
@@ -180,7 +202,7 @@ describe('Log pane', () => {
       ])
       expect(r[0]?.props[0]).toMatchObject({ dimColor: true })
       expect(r[0]?.props[1]).toMatchObject({ dimColor: true })
-      expect(r[0]?.props[2]).toMatchObject({ wrap: 'truncate-end' })
+      expect(r[0]?.props[2]).toMatchObject({ wrap: 'wrap' })
       expect(r[0]?.props[2].dimColor).toBeFalsy()
       await ui.unmount()
     })
@@ -193,6 +215,23 @@ describe('Log pane', () => {
       const more = await ui.find({ type: 'Text', text: '… 3 earlier' })
       expect(more?.props).toMatchObject({ dimColor: true })
       expect((await rows(ui)).map(x => x.texts[2])).toEqual(['claude-opus-5-5', 'claude-fable-5-1'])
+      await ui.unmount()
+    })
+
+    test(`${surface}: a text wider than the pane wraps and counts as two rows in the window`, async ($, on) => {
+      const w = world(on)
+      await start($)
+      await switches($, w, 2)
+      // bodyColumns 30 → 12 text cells: each model name wraps onto a second row, `start` does not.
+      // 4 rows: fable (2) + opus (2) fill them, so opus gives way to the "earlier" row.
+      const ui = await mountPane($, surface, { bodyColumns: 30, scroll: { offset: 0, bodyRows: 4 } })
+      const more = await ui.find({ type: 'Text', text: '… 2 earlier' })
+      expect(more?.props).toMatchObject({ dimColor: true })
+      const r = await rows(ui)
+      expect(r.map(x => x.texts[2])).toEqual(['claude-fable-5-1'])
+      expect(r[0]?.props[2]).toMatchObject({ wrap: 'wrap' })
+      const text = (await ui.findAll({ type: 'Box' })).find((b: any) => b.props.width === 12)
+      expect(text).toBeTruthy()
       await ui.unmount()
     })
 

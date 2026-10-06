@@ -43,3 +43,25 @@ export function fmtK(n: number): string {
 export function kindCell(kind: string): string {
   return kind.padEnd(9)
 }
+
+/** Cells the time and kind columns take before the text: `09:05  ` and `workspace  `. */
+export const PREFIX_COLS = 7 + 9 + 2
+
+/** Rows one text takes wrapped at `cols` cells, at least one. */
+export function textRows(text: string, cols: number): number {
+  return Math.max(1, Math.ceil(text.length / Math.max(1, cols)))
+}
+
+/**
+ * The newest events whose wrapped rows fit in `rows` (all of them when `rows` is 0 or they all fit);
+ * when some are left out, one row is kept for the `… N earlier` line.
+ */
+export function newestFitting<T extends { text: string }>(list: readonly T[], rows: number, cols: number): T[] {
+  if (rows <= 0) return [...list]
+  let used = 0
+  let i = list.length
+  while (i > 0 && used + textRows(list[i - 1]!.text, cols) <= rows) used += textRows(list[--i]!.text, cols)
+  if (i === 0) return [...list]
+  while (i < list.length && used > rows - 1) used -= textRows(list[i++]!.text, cols)
+  return list.slice(i)
+}

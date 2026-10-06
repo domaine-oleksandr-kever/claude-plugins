@@ -1757,8 +1757,9 @@ shows one and keeps the other as a tab. Pressing the button or running the comma
 14:40  compact    manual 412k → 38k
 ```
 
-The time is local `HH:MM`; the kind is dim. A line too long for the pane is cut at its end. When the
-pane is shorter than the log, its first line reads `… 12 earlier` and the newest lines fill the rest.
+The time is local `HH:MM`; the kind is dim. A line too long for the pane continues on the next row,
+under its own text column, on the terminal and the desktop alike. When the pane is shorter than the
+log, its first line reads `… 12 earlier` and the newest lines fill the rest, wrapped rows counted.
 
 | Kind | Written when | Text |
 |---|---|---|
