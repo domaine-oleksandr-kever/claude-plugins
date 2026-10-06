@@ -2,7 +2,7 @@
 // its own `logEvent` wrapper, as the validator follows `$` only within one file.
 import type { FndEvent, FndEventKind } from '../../../types'
 
-export const EVENT_CAP = 50
+export const EVENT_CAP = 200
 export const LOG_PANE = 'fnd-log'
 export const LOG_COMMAND = { name: 'fnd-log', description: 'Open the fnd event log pane', immediate: true } as const
 

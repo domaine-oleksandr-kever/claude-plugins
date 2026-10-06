@@ -1595,7 +1595,7 @@ down to an overflow notice. They add a note to a tool's description before the m
 rewrite a prompt before the model reads it. The module adds six things. The **status band** is
 one row above the prompt with the prompt-cache countdown, model, context use, every rate-limit
 window, the session's cost and the task digest. The **progress pane** shows the task workspace's
-checklist. The **event log pane** keeps the last 50 things the module did or noticed (savings
+checklist. The **event log pane** keeps the last 200 things the module did or noticed (savings
 figures, guard refusals, compactions, model switches, rate alarms, workspace changes, session start
 and resume), one timestamped line each. The **scratch-path guard** answers on the tool call itself. **MCP slimming** also
 reaches results over the platform limit, which the classic `mcp-slim` hook never sees. **Pasted
@@ -1739,7 +1739,7 @@ change re-resolve the id; `/clear` forgets the conversation key (a pin stays).
 
 ### Event log pane
 
-Toasts flash and go. `l: Log`, or `/fnd-log`, opens a pane that keeps them: the last 50 things the
+Toasts flash and go. `l: Log`, or `/fnd-log`, opens a pane that keeps them: the last 200 things the
 module did or noticed, one line each, oldest first and newest last. Esc, a second press or the
 engine's close mark closes it. The progress pane and the log pane can be open at once; the engine
 shows one and keeps the other as a tab. Pressing the button or running the command of the pane behind the tab brings that pane forward instead of closing it.
@@ -1766,7 +1766,7 @@ pane is shorter than the log, its first line reads `… 12 earlier` and the newe
 | `prompt` | A pasted JSON prompt is rewritten and accepted | The toast's figure without its `fnd-prompt-slim:` prefix |
 | `guard` | The scratch-path guard refuses a tool call | The tool (the part after the last `__`) and the first line of the reason without the guard's own prefix |
 
-At 50 lines the oldest `slim` or `prompt` line makes room first, so a session busy with MCP calls keeps its rarer lines.
+At 200 lines the oldest `slim` or `prompt` line makes room first, so a session busy with MCP calls keeps its rarer lines.
 The log lives in the session's state only: nothing is written to disk, and a new launch starts empty.
 `/clear` keeps the lines and adds `session clear` where the conversation restarted.
 Toasts are unchanged by it, and `FND_SLIM_TOAST=0` silences a savings toast without dropping its line.

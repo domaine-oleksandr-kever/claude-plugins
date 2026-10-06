@@ -75,25 +75,25 @@ async function rows(ui: any): Promise<{ texts: string[]; props: any[] }[]> {
 }
 
 describe('event helpers', () => {
-  test('the buffer keeps the newest 50, oldest first', () => {
+  test('the buffer keeps the newest 200, oldest first', () => {
     let list: FndEvent[] = []
-    for (let i = 1; i <= 51; i++) list = pushEvent(list, { atMs: i, kind: 'guard', text: `#${i}` })
+    for (let i = 1; i <= EVENT_CAP + 1; i++) list = pushEvent(list, { atMs: i, kind: 'guard', text: `#${i}` })
     expect(list).toHaveLength(EVENT_CAP)
-    expect(EVENT_CAP).toBe(50)
+    expect(EVENT_CAP).toBe(200)
     expect(list[0]?.text).toBe('#2')
-    expect(list[49]?.text).toBe('#51')
+    expect(list[EVENT_CAP - 1]?.text).toBe(`#${EVENT_CAP + 1}`)
   })
 
   test('over the cap routine slim/prompt lines go first, so rare lines between them stay', () => {
     let list: FndEvent[] = []
     list = pushEvent(list, { atMs: 0, kind: 'guard', text: 'first' })
-    for (let i = 1; i <= 60; i++) list = pushEvent(list, { atMs: i, kind: i % 2 ? 'slim' : 'prompt', text: `#${i}` })
-    list = pushEvent(list, { atMs: 61, kind: 'compact', text: 'last' })
+    for (let i = 1; i <= EVENT_CAP + 10; i++) list = pushEvent(list, { atMs: i, kind: i % 2 ? 'slim' : 'prompt', text: `#${i}` })
+    list = pushEvent(list, { atMs: EVENT_CAP + 11, kind: 'compact', text: 'last' })
     expect(list).toHaveLength(EVENT_CAP)
     expect(list[0]?.text).toBe('first')
     expect(list[1]?.text).toBe('#13')
-    expect(list[48]?.text).toBe('#60')
-    expect(list[49]?.text).toBe('last')
+    expect(list[EVENT_CAP - 2]?.text).toBe(`#${EVENT_CAP + 10}`)
+    expect(list[EVENT_CAP - 1]?.text).toBe('last')
     expect(list.map(e => e.atMs)).toEqual([...list.map(e => e.atMs)].sort((x, y) => x - y))
   })
 
