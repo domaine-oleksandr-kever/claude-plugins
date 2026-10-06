@@ -350,9 +350,24 @@ const PLUGIN_ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}';
 
 // ------------------------------------------------------------------ frontmatter parsing --
 
+/*
+ * A quoted scalar is read the way YAML does: a double-quoted one takes JSON's escape set, a
+ * single-quoted one only `''`. The claude.ai plugin sync re-serialises a folded `description: >`
+ * as `"…\n"`, so the escapes are decoded and the text folded like a block scalar, or the
+ * generated adapters would read as drifted on every synced install.
+ */
 function unquote(v) {
-  if (v.length > 1 && ((v[0] === '"' && v.endsWith('"')) || (v[0] === "'" && v.endsWith("'")))) {
-    return v.slice(1, -1);
+  if (v.length > 1 && v[0] === '"' && v.endsWith('"')) {
+    let s;
+    try {
+      s = JSON.parse(v);
+    } catch (_) {
+      s = v.slice(1, -1);
+    }
+    return s.replace(/\s+/g, ' ').trim();
+  }
+  if (v.length > 1 && v[0] === "'" && v.endsWith("'")) {
+    return v.slice(1, -1).replace(/''/g, "'").replace(/\s+/g, ' ').trim();
   }
   return v;
 }

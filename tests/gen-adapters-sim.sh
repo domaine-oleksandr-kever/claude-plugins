@@ -1079,6 +1079,40 @@ cp "$PLUGIN_DIR/agents/theme-explorer.md" "$COPY/agents/theme-explorer.md"
 if [ "$(fingerprint "$COPY")" = "$after" ]; then ok
 else bad caps-list-restore "the list-spelling probes left the scratch tree changed"; fi
 
+# ------------------------------------------ scratch copy: quoted frontmatter is the same text --
+# the claude.ai plugin sync re-serialises a folded `description: >` as a double-quoted scalar with
+# an escaped trailing newline (`"… PR.\n"`); the generator must read that as the same description,
+# or doctor reports drift on every synced install (seen live, cloud session 2026-10-06, 0.131.0)
+"$NODE_BIN" -e '
+  const fs = require("fs"), p = process.argv[1];
+  const src = fs.readFileSync(p, "utf8");
+  const m = /^description: >\n((?:[ \t]+\S.*\n)+)/m.exec(src);
+  if (!m) { process.stderr.write("folded description not found\n"); process.exit(1); }
+  const text = m[1].split("\n").map(l => l.trim()).filter(Boolean).join(" ");
+  fs.writeFileSync(p, src.replace(m[0], "description: " + JSON.stringify(text + "\n") + "\n"));
+' "$COPY/skills/create-pull-request/SKILL.md" || bad quoted-desc "the create-pull-request description is not a folded scalar"
+"$NODE_BIN" "$CGEN" --check >"$TMP/q1" 2>&1
+rc=$?
+if [ "$rc" = 0 ] && ! grep -q 'differs' "$TMP/q1"; then ok
+else bad quoted-desc "a double-quoted description with \\n read as drift (exit $rc): $(grep -m1 differs "$TMP/q1")"; fi
+# and a single-quoted one with a doubled apostrophe decodes to one apostrophe, folded the same way
+"$NODE_BIN" -e '
+  const fs = require("fs"), p = process.argv[1];
+  const src = fs.readFileSync(p, "utf8");
+  const m = /^description: "(.*)"$/m.exec(src);
+  if (!m) { process.stderr.write("quoted description not found\n"); process.exit(1); }
+  const text = JSON.parse("\"" + m[1] + "\"").trim();
+  fs.writeFileSync(p, src.replace(m[0], "description: " + "\u0027" + text.replace(/\u0027/g, "\u0027\u0027") + "\u0027"));
+' "$COPY/skills/create-pull-request/SKILL.md" || bad single-quoted-desc "could not rewrite the description single-quoted"
+"$NODE_BIN" "$CGEN" --check >"$TMP/q2" 2>&1
+rc=$?
+if [ "$rc" = 0 ] && ! grep -q 'differs' "$TMP/q2"; then ok
+else bad single-quoted-desc "a single-quoted description read as drift (exit $rc): $(grep -m1 differs "$TMP/q2")"; fi
+cp "$PLUGIN_DIR/skills/create-pull-request/SKILL.md" "$COPY/skills/create-pull-request/SKILL.md"
+"$NODE_BIN" "$CGEN" >/dev/null 2>&1
+if [ "$(fingerprint "$COPY")" = "$after" ]; then ok
+else bad quoted-desc-restore "the quoted-description probes left the scratch tree changed"; fi
+
 # ------------------------------------------------- scratch copy: the MCP configs are drift-checked --
 # The host configs are generated like every adapter, but they sit among hand-written files at the
 # plugin root, where "just add the server here" is the obvious thing to do — and an edit that only
