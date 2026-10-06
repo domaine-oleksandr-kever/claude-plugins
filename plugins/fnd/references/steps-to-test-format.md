@@ -38,13 +38,18 @@ n+2. **Context / out of scope:**
 ```
 
 **Bug (defect fix)** — the guide's four items; no scenarios, no regression sweep. The location, the setup
-recipe and the expectations all live in item 4.
+recipe and the expectations all live in item 4: a lead line naming the trigger fixture, then **one nested
+bullet per case** — never one paragraph that runs the cases together.
 
 ```markdown
 1. **Theme:** <as above — store, theme, how to open it>.
 2. **Why the bug happened:** <root cause in terms the tester can observe, 1–2 sentences>.
 3. **What was changed to fix it:** <the change in plain terms, new limits / values; a setting by its verbatim editor label>.
-4. **What to expect:** on the <role> product, e.g. `<path>` (<the counts / values that made it trigger>) (admin: <editor route>), <the viewport / locale that used to trigger it>; <what it does now>; <the new boundary and what happens past it — on a second `e.g.` handle with its properties when another product shows it>; <what a regression looks like>. Handles are examples — if one is missing on your store, use any product with the same properties and say which one you used. <Touches a setting or needs data → item 2's recipe + that setting's blank / overflow / boundary expectation.>
+4. **What to expect:** on the <role> product, e.g. `<path>` (<the counts / values that made it trigger>) (admin: <editor route>). Handles are examples — if one is missing on your store, use any product with the same properties and say which one you used. <Touches a setting or needs data → item 2's recipe.>
+   - **<Case that used to break — viewport with its breakpoint / page / data state>:** <action, location first>. You should see <what it does now — exact values>;
+   - **<Next surface or viewport the fix reaches>:** <action>. <Expectation clause>;
+   - **<Boundary — second `e.g.` handle with its properties, or the setting blank / past its limit>:** <action>. <Expectation> (restore: <how>);
+   - **Regression:** <what a failure looks like — one clause per sign>.
 ```
 
 ## Item-by-item rules
@@ -53,7 +58,9 @@ recipe and the expectations all live in item 4.
 every later path resolves against it: confirmed id, no editor work → the preview link
 `https://<store>.myshopify.com/?preview_theme_id=<id>`; else `Online Store > Themes > *<theme>* >
 **Preview**`; either way, "stay in that preview session". Never the PR's own preview theme. Market / viewport
-/ locale / customer state only when the behaviour depends on them, with how to set each. No storefront
+/ locale / customer state only when the behaviour depends on them, with how to set each — a viewport-dependent
+change names both ranges with the breakpoint in px ("check both a mobile viewport (under 1024px) and desktop
+(1024px and up)"), never "mobile" alone. No storefront
 passwords, no deploy or CI mechanics (workflows, pushes, tags, PR links); naming the branch a theme receives
 ("the theme the TL deploys `develop` to") is allowed.
 
@@ -113,6 +120,19 @@ that should stay default, and what is **not** in this ticket — including an AC
 theme, named as the AC names it. Up to five bullets, a clause each; omit the item only when the change made
 no choice worth stating.
 
+**Bug item 4 — What to expect.** A lead line plus one nested bullet per case, never one paragraph: a QA
+engineer reading one block of prose cannot tell which page, viewport or product each expectation belongs
+to. The **lead line** names the trigger fixture by role with its `e.g.` handle, the counts / values that
+made it trigger and the admin route, then the substitution sentence; a fix whose rendering does not depend
+on viewport says `any viewport` here once. Each **bullet** is one case, opened by a bold label naming what
+sets it apart — the viewport with its breakpoint (`**Mobile (under 1024px):**`), the page or surface
+(`**Search card:**`), the data state (`**Bundle without a campaign:**`) — then the action, location first,
+and its expectation with exact values, as a walk-through step would carry it. Cases, in order: the state
+that used to break; every further surface or viewport the fix reaches, one bullet each; the boundary — the
+second `e.g.` handle with its properties, or a setting blank / past its limit — with its restore; last,
+`**Regression:**` — what a failure looks like, one clause per sign. Two cases never share a bullet, and
+no bullet repeats the lead line's fixture.
+
 **Visual aids.** Where a location or setup step is not obvious from text, ask the developer **in the
 presentation**, never as a line in the field, to attach a screenshot or short video by hand; the plugin
 uploads nothing.
@@ -124,7 +144,7 @@ These bind both templates; n+1 / n+2 and the walk-through rules name General ite
 - **One physical line per item.** Never wrap an item or a nested bullet: `md-to-adf --no-tables` reads a
   continuation line as a new paragraph and splits the list. Fold a second paragraph in or nest it.
 - **One ordered list, end to end** — numbering runs through, Edge cases and Context last. No headings, no `✅`
-  markers, no tables; nested bullets one level deep, under items 2, n+1 and n+2.
+  markers, no tables; nested bullets one level deep, under items 2, n+1 and n+2 (General) and item 4 (Bug).
 - **No document meta** — no title, summary, revision history or rationale.
 - **Observable words only** — labels as the UI spells them, copy as it renders; no setting ids, DOM
   attributes, ARIA roles, class names, file paths or locale keys. An a11y expectation says what a screen
@@ -162,8 +182,8 @@ and anything else the General one.
 
 ## Self-check before presenting
 
-- One ordered list, numbered through, nothing wrapped; bullets one level deep under items 2, n+1, n+2; no
-  headings, tables, `✅` markers or document meta.
+- One ordered list, numbered through, nothing wrapped; bullets one level deep under items 2, n+1, n+2
+  (Bug: item 4); no headings, tables, `✅` markers or document meta.
 - Item 1 first, naming a theme (ticket, developer's answer, or unconfirmed — never the PR's preview) and
   opening it; store host and preview link at most once.
 - Everything the change adds or reconfigures has its editor route, every non-default setting with its value
@@ -186,4 +206,7 @@ and anything else the General one.
   admin access is enough.
 
 On the **Bug template** these apply through item 4 — the location, the trigger data / viewport / locale (the
-trigger and boundary products as `e.g.` handles with their properties), the setup recipe, a new setting's boundary expectation, what a regression looks like.
+trigger and boundary products as `e.g.` handles with their properties), the setup recipe, a new setting's
+boundary expectation, what a regression looks like — and item 4 is a lead line plus one bold-labelled bullet
+per case (trigger · each further surface or viewport · boundary with its restore · **Regression**), never one
+paragraph; a viewport-dependent fix carries the breakpoint in px in item 1 and in the bullet labels.

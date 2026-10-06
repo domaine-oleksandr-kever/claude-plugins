@@ -1126,8 +1126,8 @@ for (const [label, adf] of ADF_CORPUS) {
 
 // The field is written with `md-to-adf --no-tables`, so the whole document has to survive as ONE
 // ordered list: numbered items carrying bold labels and inline code, and nested bullets under items 2,
-// 5 and 6 — one level deep, the only depth `references/steps-to-test-format.md` allows in the field. A
-// split list or a lost bullet reaches Jira as prose detached from its item.
+// 5 and 6 (General) or item 4 (Bug) — one level deep, the only depth `references/steps-to-test-format.md`
+// allows in the field. A split list or a lost bullet reaches Jira as prose detached from its item.
 const STT_GENERAL_MD = [
   '1. **Theme:** the QA theme the TL deploys to (id `100000000001` — confirm with the TL). Preview: `/?preview_theme_id=100000000001`.',
   '2. **Where:** page `/pages/sample` (admin: Online Store > Pages > **Sample**). The section is **Sample block** — set it up:',
@@ -1170,6 +1170,43 @@ const STT_GENERAL_MD = [
   check('stt-general-roundtrip-canonical', md1, STT_GENERAL_MD);
   check('stt-general-adf-stable', m2a(md1, ['--no-tables']), adf);
   check('stt-general-no-leak', leakedText(adf), []);
+}
+
+// Bug template: item 4 is a lead line (fixture + substitution rule) and one bold-labelled bullet per
+// case. Each case must reach Jira as its own bullet under item 4 — the cases run together in one
+// paragraph is exactly the shape the format forbids.
+const STT_BUG_MD = [
+  '1. **Theme:** the QA theme the TL deploys to (id `100000000001` — confirm with the TL). Preview: `/?preview_theme_id=100000000001`. Check both a mobile viewport (under 1024px) and desktop (1024px and up).',
+  '2. **Why the bug happened:** the **Sample banner** read **Mobile layout** from the entry and defaulted to Overlay.',
+  '3. **What was changed to fix it:** on mobile the section always stacks the image above the copy; desktop is unchanged.',
+  '4. **What to expect:** on a product with a filled banner, e.g. `/products/sample-item` (both images set). Handles are examples — if one is missing on your store, use any product with the same properties and say which one you used.',
+  '  - **Mobile (under 1024px):** open the PDP. You should see the image above the heading, no scrim;',
+  '  - **Desktop (1024px and up):** open the PDP. The image sits behind the copy; **Show overlay** True → a dark scrim;',
+  '  - **No background image:** clear both images and **Save** — both viewports show just the copy (restore: set both images back and **Save**);',
+  '  - **Regression:** copy over the image on mobile, or a scrim on mobile.',
+].join('\n');
+{
+  const adf = m2a(STT_BUG_MD, ['--no-tables']);
+  check('stt-bug-one-ordered-list', adf.content.map((b) => b.type), ['orderedList']);
+  const items = adf.content[0].content;
+  check('stt-bug-item-count', items.length, 4);
+  // item 4: the lead line as its own paragraph, the four cases as four bullets under it
+  check('stt-bug-item4-children', items[3].content.map((b) => b.type), ['paragraph', 'bulletList']);
+  check('stt-bug-item4-label', items[3].content[0].content.slice(0, 2),
+    [t('What to expect:', [mStrong]), t(' on a product with a filled banner, e.g. ')]);
+  check('stt-bug-item4-bullets', items[3].content[1].content.length, 4);
+  // every case bullet opens with its bold label, and no bullet nests a second level
+  check('stt-bug-item4-case-labels',
+    items[3].content[1].content.map((li) => li.content[0].content[0]),
+    [t('Mobile (under 1024px):', [mStrong]), t('Desktop (1024px and up):', [mStrong]),
+      t('No background image:', [mStrong]), t('Regression:', [mStrong])]);
+  check('stt-bug-item4-bullets-flat',
+    items[3].content[1].content.map((li) => li.content.map((b) => b.type)),
+    [['paragraph'], ['paragraph'], ['paragraph'], ['paragraph']]);
+  const md1 = noEOL(a2m(adf));
+  check('stt-bug-roundtrip-canonical', md1, STT_BUG_MD);
+  check('stt-bug-adf-stable', m2a(md1, ['--no-tables']), adf);
+  check('stt-bug-no-leak', leakedText(adf), []);
 }
 
 // ---------------------------------------- adf-to-md --comments / --media (D12) --

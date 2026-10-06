@@ -131,7 +131,7 @@ Rows come from **Steps to test**, and **both shapes are accepted** — the old h
 (Setup · ✅ Checkpoint · scenarios · regression · edge cases: a row per scenario), or the
 numbered list of `../../references/steps-to-test-format.md` (a row per walk-through step carrying
 an expectation, one per edge case — a step whose action is an editor or Admin write is setup, never a
-row; Bug template: item 4's expectations) — plus one per **AC**.
+row; Bug template: one per item-4 bullet, the **Regression** bullet excepted) — plus one per **AC**.
 In the numbered shape item 1 is the primary source for Phase 2.3's "theme the **ticket** names" (the
 PR's preview stays never offered), item 2's setup / data sub-bullets feed **Needs data**, never
 rows, and the trailing `n+2` context / out-of-scope lines never do (`REFERENCE.md` → Rows from

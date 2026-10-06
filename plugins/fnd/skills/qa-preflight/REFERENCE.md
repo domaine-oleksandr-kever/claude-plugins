@@ -343,10 +343,12 @@ line, never a Block.
 
 **Bug template** (theme · why the bug happened · what was changed to fix it · what to expect): item 1
 plays the same role as above, items 2 and 3 are context for the expectations, and the rows come from
-**item 4** — the data, viewport, locale or path that used to trigger the defect, what it does now, the
-new boundary and what past it looks like, what a regression would look like: one row per expectation.
-The click-level recipe item 4 carries when the fix touches a setting or needs data feeds **Needs data**
-exactly as item 2 does above.
+**item 4**: its lead line names the trigger fixture (the `e.g.` handle with its properties, the admin
+route) and feeds **Needs data** exactly as item 2 does above, never a row; then **one row per nested
+bullet** — the bullet's bold label (a viewport with its breakpoint, a page or surface, a data state) is
+the condition the row runs under, its expectation the row's expected result. The **Regression** bullet
+adds no row: each sign it lists is checked inside the row whose case it names, and is how that row's
+Fail is worded. An older field whose item 4 is one paragraph is read one row per expectation clause.
 
 **Plus one row per AC**, for either shape. The numbered shape is written so every AC is exercised by at
 least one walk-through step, so the two sets usually coincide — check which AC each row covers and add
