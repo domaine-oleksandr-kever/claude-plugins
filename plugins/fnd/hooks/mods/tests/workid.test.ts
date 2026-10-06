@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { digestText, notesTail, parseProgress } from '../core/progress-parse.ts'
-import { isWorkId, keyFromBranch, keyFromText, keysFromText, slugFromBranch } from '../core/workid.ts'
+import { isWorkId, keyFromBranch, keyFromText, projectOf, slugFromBranch, ticketKeys } from '../core/workid.ts'
 
 describe('work id', () => {
   test('keyFromBranch', () => {
@@ -30,10 +30,21 @@ describe('work id', () => {
     expect(keyFromText('')).toBeNull()
   })
 
-  test('keysFromText lists every key, the most recent first', () => {
-    expect(keysFromText('see ELC-77, then UTF-8 and ELC-1591')).toEqual(['ELC-1591', 'UTF-8', 'ELC-77'])
-    expect(keysFromText('no key here')).toEqual([])
-    expect(keysFromText(null)).toEqual([])
+  test('ticketKeys: a known project or a /browse/ URL corroborates a key, the most recent first', () => {
+    const known = new Set(['ELC'])
+    expect(ticketKeys('see ELC-77, then UTF-8 and ELC-1591', known)).toEqual(['ELC-1591', 'ELC-77'])
+    expect(ticketKeys('format as ISO-8601, save as UTF-8, hash SHA-256', known)).toEqual([])
+    expect(ticketKeys('https://x.atlassian.net/browse/ABC-9 look', known)).toEqual(['ABC-9'])
+    expect(ticketKeys('https://x.atlassian.net/BROWSE/ABC-9', new Set())).toEqual(['ABC-9'])
+    expect(ticketKeys('see ABC-9', new Set())).toEqual([])
+    expect(ticketKeys('no key here', known)).toEqual([])
+    expect(ticketKeys(null, known)).toEqual([])
+  })
+
+  test('projectOf', () => {
+    expect(projectOf('ELC-1591')).toBe('ELC')
+    expect(projectOf('fnd-mods')).toBeNull()
+    expect(projectOf('ELC-1591-x')).toBeNull()
   })
 
   test('isWorkId accepts a key or a slug, never a path', () => {

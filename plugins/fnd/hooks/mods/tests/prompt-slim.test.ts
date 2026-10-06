@@ -209,7 +209,8 @@ describe('fallback to the typed text', () => {
 
   test('a throwing session.root → the typed text once, progress still sees it', { plugins: [PEEK] }, async ($, on) => {
     const { runs, toasts, bottom } = world(on, ok(), { rootThrows: true })
-    const text = `ELC-77 ${BIG}`
+    // No root → no known projects: the URL is what corroborates the key.
+    const text = `https://x.atlassian.net/browse/ELC-77 ${BIG}`
     await submit($, text)
     expect(runs.length).toBe(0)
     expect(toasts).toEqual([])

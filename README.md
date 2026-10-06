@@ -1648,7 +1648,7 @@ dropped. The row's text truncates as a backstop, so the band never takes a secon
 | ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`), or `—` when the engine reported no count; that count holds until a response reports a measured fill, as a reading with no fill (only the window) keeps the last one. A compaction reaches the band two ways, the `session.compact` chain and the engine's own `PostCompact` report (the settings-hook event, which arrives even when the chain skips the mod, as it did for a Compact press on Claude Code 2.1.289); reports within 30 s of each other are one compaction. Mid-turn it refreshes on a 30 s tick. |
 | rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
 | cost | `cost $12.40` | Opt-in: drawn only with `FND_BAND_COST=1` in the session's environment. What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
-| digest | `ELC-1591 3/5 ▶ Preview themes` | work id · checked/total rows of the workspace's `progress.md` · the current row (cut to 28 characters): the first unchecked row below the last checked one, else the first unchecked row; `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet. Hidden while the progress pane is open, and when no workspace resolves. |
+| digest | `ELC-1591 3/5 ▶ Preview themes` | the task you are on, same on the terminal and the desktop: work id · checked/total rows of the workspace's `progress.md` · the current row (cut to 28 characters): the first unchecked row below the last checked one, else the first unchecked row; `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet, or while the ticket you named has no workspace at all. Hidden while the progress pane is open, and when nothing resolves. |
 | Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable, so the other buttons never shift: before the first reading, while a turn runs and at any context. From 80 % between turns it switches to the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). Where the engine refuses compaction from a plugin (a headless / SDK session such as the desktop app), the press runs the `/compact` slash command as if typed instead and toasts its output. Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued. |
 | Clear | `[ Clear ]`, `x: Clear` | Runs `/clear` behind the engine's own Yes/No dialog (`Clear the conversation?`), always: the dialog takes the keyboard, so a stray click or hotkey never clears, and a dismissed dialog is a No. Toasts the command's output. Pressed while a turn runs it only toasts `turn is running — press Clear again when it ends`. Dim at rest, `x: Clear` while the band holds the keyboard. |
 | Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
@@ -1722,15 +1722,20 @@ The header is the work id · branch · checked/total. Below it come every `progr
 dimmed, ▶ the digest's current row in bold, ◌ unchecked rows above ▶ dimmed — they
 wait on someone, not the queue — ☐ the rest) and the last three `- ` lines of
 `notes.md`, dimmed. A workspace without `progress.md` shows its id, the branch, one dim line
-`no progress.md yet — /fnd:save-task-context` and the notes tail. With no workspace the pane is
-one line: `no task workspace — /fnd:save-task-context`.
+`no progress.md yet — /fnd:save-task-context` and the notes tail. A ticket you named that has no
+workspace shows its id, the branch and `no task workspace — /fnd:save-task-context`. With nothing
+resolved the pane is that one line.
 
-**Which workspace.** The first candidate whose `.claude/tasks/<id>/` directory exists wins:
-1. an id pinned with `/fnd-progress <id>` (`/fnd-progress -` clears the pin);
-2. the ticket key in the branch name;
-3. the last ticket key you typed in a prompt that has a workspace (prompts only, not the model's
-   replies; notifications and scheduled prompts do not count);
-4. the branch slug;
+**Which task.** In order:
+1. an id pinned with `/fnd-progress <id>` whose `.claude/tasks/<id>/` exists (`/fnd-progress -`
+   clears the pin);
+2. the last ticket you named in a prompt, with or without a workspace: that is the task you are on,
+   whatever the branch says. Prompts only, not the model's replies; notifications and scheduled
+   prompts do not count. A bare key counts only when something corroborates it, the same way the
+   session title decides: a Jira `/browse/<KEY>` URL, or a `.claude/tasks/` workspace for the same
+   project (`UTF-8`, `SHA-256` and `ISO-8601` have the key shape and are not tickets);
+3. the ticket key in the branch name, when its workspace exists;
+4. the branch slug, when its workspace exists;
 5. the newest `progress.md` changed in the last 12 h, which covers slug workspaces on `main`.
 
 The band and the pane redraw on a Write or Edit under `.claude/tasks/`. A 30 s tick also notices

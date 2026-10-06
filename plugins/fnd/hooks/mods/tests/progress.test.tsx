@@ -171,15 +171,17 @@ describe('resolver', () => {
     expect((await peek($)).progress.workId).toBe('OTHER-1')
   })
 
-  t('branch key beats the conversation key', async ($, on) => {
+  t('the conversation key beats the branch key', async ($, on) => {
     const { w } = world(on)
     addWorkspace(w, 'ELC-1591')
     addWorkspace(w, 'ELC-77')
     await start($)
+    expect((await peek($)).progress.workId).toBe('ELC-1591')
     await submit($, 'see ELC-77')
     const s = await peek($)
     expect(s.lastKey).toBe('ELC-77')
-    expect(s.progress.workId).toBe('ELC-1591')
+    expect(s.progress.workId).toBe('ELC-77')
+    expect(s.progress.hasWorkspace).toBe(true)
   })
 
   t('conversation key on main', async ($, on) => {
@@ -192,13 +194,32 @@ describe('resolver', () => {
     expect((await peek($)).progress.workId).toBe('ELC-77')
   })
 
-  t('conversation key without a workspace is ignored', async ($, on) => {
-    const { w } = world(on, { branch: 'main' })
+  t('a conversation key without a workspace still names the task: the bare id, over the branch key', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ELC-1591')
     await start($)
     await submit($, 'see ELC-77')
     const s = await peek($)
     expect(s.lastKey).toBe('ELC-77')
+    expect(s.progress).toMatchObject({ workId: 'ELC-77', branch: 'feature/ELC-1591-x', hasWorkspace: false, total: 0, rows: [], notesTail: [] })
+    expect(digestText(s.progress.workId, s.progress)).toBe('ELC-77')
+    // Its workspace written later is picked up: the band gains the rows.
+    addWorkspace(w, 'ELC-77', MD, NOW + 1)
+    await $.tool.call({ tool: 'Write', file_path: progressMd('ELC-77'), content: MD })
+    expect((await peek($)).progress).toMatchObject({ workId: 'ELC-77', hasWorkspace: true, total: 5 })
+  })
+
+  t('a bare key of an unknown project is not a ticket; a /browse/ URL makes it one', async ($, on) => {
+    world(on, { branch: 'main' })
+    await start($)
+    await submit($, 'see ELC-77')
+    let s = await peek($)
+    expect(s.lastKey).toBeNull()
     expect(s.progress).toEqual({ workId: null, branch: 'main' })
+    await submit($, 'https://meetdomaine.atlassian.net/browse/ELC-77 look at the comment')
+    s = await peek($)
+    expect(s.lastKey).toBe('ELC-77')
+    expect(s.progress).toMatchObject({ workId: 'ELC-77', hasWorkspace: false })
   })
 
   t('conversation key beats the branch slug', async ($, on) => {
@@ -659,6 +680,17 @@ describe('command and pane', () => {
       expect(await ui.find({ type: 'Text', text: /^◌/ })).toBeFalsy()
       await ui.unmount()
     }
+  })
+
+  t('Pane for a named ticket without a workspace: header, then the no-workspace line', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ELC-1591')
+    await start($)
+    await submit($, 'see ELC-77')
+    const ui = await $.ui.mount({ plugin: 'fnd', surface: 'terminal', component: 'Pane', requestId: PANE, props: PANE_PROPS as any })
+    const texts = await ui.findAll({ type: 'Text' })
+    expect(texts.map(x => x.text)).toEqual(['ELC-77 · feature/ELC-1591-x', 'no task workspace — /fnd:save-task-context'])
+    await ui.unmount()
   })
 
   t('Pane with no workspace: one line', async ($, on) => {

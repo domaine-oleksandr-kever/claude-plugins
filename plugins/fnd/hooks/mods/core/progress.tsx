@@ -5,7 +5,7 @@ import type { EngineInterface, On } from 'claude-code'
 import type { FndEvent, FndProgress } from '../../../types'
 import { LOG_COMMAND, pushEvent } from './events.ts'
 import { notesTail, parseProgress } from './progress-parse.ts'
-import { isWorkId, keyFromBranch, keysFromText, slugFromBranch } from './workid.ts'
+import { KEY, isWorkId, keyFromBranch, projectOf, slugFromBranch, ticketKeys } from './workid.ts'
 
 const PANE = 'fnd-progress'
 const COMMAND = {
@@ -94,21 +94,34 @@ type Inputs = { pin: string | null; lastKey: string | null }
 
 const readInputs = async ($: $): Promise<Inputs> => ({ pin: await read($, pin), lastKey: await read($, lastKey) })
 
-/** pin → branch key → conversation key → branch slug (each an existing dir) → newest progress.md within 12 h → null. */
+/** The projects of the `.claude/tasks/<KEY>` dirs: what corroborates a bare key in a prompt. */
+async function knownProjects($: $, root: string): Promise<Set<string>> {
+  const out = new Set<string>()
+  try {
+    for (const d of await $.fs.list(tasksDir(root))) {
+      const project = d.kind === 'dir' ? projectOf(d.name) : null
+      if (project) out.add(project)
+    }
+  } catch {}
+  return out
+}
+
+/**
+ * pin (an existing dir) → conversation key, workspace or not: the ticket the developer named is the task →
+ * branch key → branch slug (existing dirs) → newest progress.md within 12 h → null.
+ */
 async function resolveWorkId($: $, root: string, branch: string | null, inputs: Inputs): Promise<string | null> {
-  const candidates = [inputs.pin, keyFromBranch(branch), inputs.lastKey, slugFromBranch(branch)]
-  for (const id of candidates) if (await hasWorkspace($, root, id)) return id
+  if (await hasWorkspace($, root, inputs.pin)) return inputs.pin
+  if (inputs.lastKey) return inputs.lastKey
+  for (const id of [keyFromBranch(branch), slugFromBranch(branch)]) if (await hasWorkspace($, root, id)) return id
   return newestWorkspace($, root)
 }
 
-/** The most recent key in the prompt that has a workspace; a key without one only replaces a held key without one. */
+/** The most recent ticket the prompt names (`ticketKeys`), else null: the held key stays. */
 async function conversationKey($: $, text: string): Promise<string | null> {
-  const keys = keysFromText(text)
-  if (keys.length === 0) return null
-  const root = await $.session.root()
-  for (const k of keys) if (await hasWorkspace($, root, k)) return k
-  const held = await read($, lastKey)
-  return (await hasWorkspace($, root, held)) ? held : keys[0] ?? null
+  if (!KEY.test(text)) return null
+  const keys = ticketKeys(text, await knownProjects($, await $.session.root()))
+  return keys[0] ?? null
 }
 
 async function readText($: $, path: string): Promise<string> {
@@ -135,10 +148,11 @@ async function workspaceMtime($: $, root: string, id: string): Promise<number> {
 
 async function load($: $, root: string, workId: string, branch: string | null): Promise<FndProgress> {
   const dir = workDir(root, workId)
+  const workspace = await hasWorkspace($, root, workId)
   const mtimeMs = await workspaceMtime($, root, workId)
   const parsed = parseProgress(await readText($, `${dir}/progress.md`))
   const notes = notesTail(await readText($, `${dir}/notes.md`))
-  return { workId, branch, ...parsed, notesTail: notes, mtimeMs }
+  return { workId, branch, hasWorkspace: workspace, ...parsed, notesTail: notes, mtimeMs }
 }
 
 /** `resolve` re-runs git and the resolver; otherwise only the current workspace is re-read while it exists. */
@@ -300,7 +314,15 @@ export function registerProgress(on: On): void {
         <Text bold wrap="truncate-end">
           {header}
         </Text>
-        {p.total === 0 ? <Text dimColor wrap="truncate-end">{NO_PROGRESS}</Text> : null}
+        {!p.hasWorkspace ? (
+          <Text dimColor wrap="truncate-end">
+            {NO_WORKSPACE}
+          </Text>
+        ) : p.total === 0 ? (
+          <Text dimColor wrap="truncate-end">
+            {NO_PROGRESS}
+          </Text>
+        ) : null}
         {p.rows.map((row, i) => (
           <Box key={`row-${i}`}>
             <Text wrap="truncate-end" dimColor={row.mark === 'done' || row.mark === 'waiting'} bold={row.mark === 'current'}>

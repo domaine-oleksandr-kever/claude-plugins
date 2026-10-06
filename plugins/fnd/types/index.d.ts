@@ -18,11 +18,13 @@ export type FndCache = {
 /** `waiting`: unchecked above the `current` row (waits on someone, not the queue). */
 export type FndRow = { mark: 'done' | 'current' | 'waiting' | 'todo'; text: string }
 
-/** The resolved task workspace digest, or `{ workId: null }` when no workspace answers. */
+/** The resolved task digest, or `{ workId: null }` when nothing answers. */
 export type FndProgress =
   | {
       workId: string
       branch: string | null
+      /** `.claude/tasks/<workId>/` exists; false = a ticket the conversation named that has no workspace yet */
+      hasWorkspace: boolean
       done: number
       total: number
       current: string | null
@@ -52,7 +54,7 @@ declare module 'claude-code' {
       bandFocused: boolean
       /** the terminal's model picker is unfolded: the band row holds the models alone */
       modelPicker: boolean
-      /** last ticket key seen in a prompt */
+      /** last ticket a person's prompt named (a `/browse/` URL or a known project corroborates the key) */
       lastKey: string | null
       /** last seen $.session.id(), to spot a /clear */
       sessionId: string | null

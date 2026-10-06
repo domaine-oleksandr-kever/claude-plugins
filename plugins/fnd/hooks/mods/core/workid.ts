@@ -25,12 +25,30 @@ export function keyFromText(text: string | null | undefined): string | null {
   return all ? all[all.length - 1] ?? null : null
 }
 
-/** Every ticket key in a text, the most recent mention first. */
-export function keysFromText(text: string | null | undefined): string[] {
-  return ((text ?? '').match(KEY_ALL) ?? []).reverse()
+/**
+ * The tickets a prompt names, the most recent first — corroborated as hooks/session-title.cjs promptKey does:
+ * a Jira `/browse/<KEY>` URL, or a project this checkout has worked (`known` = the projects of its
+ * `.claude/tasks/<KEY>` dirs). Key shape alone is not evidence: UTF-8, SHA-256 and ISO-8601 match it.
+ */
+export function ticketKeys(text: string | null | undefined, known: ReadonlySet<string>): string[] {
+  const s = text ?? ''
+  const out: string[] = []
+  const re = new RegExp(KEY.source, 'g')
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s)) !== null) {
+    const key = m[0]
+    const browse = /browse\/$/i.test(s.slice(Math.max(0, m.index - 7), m.index))
+    if (browse || known.has(key.slice(0, key.indexOf('-')))) out.push(key)
+  }
+  return out.reverse()
 }
 
 const KEY_WHOLE = new RegExp(`^${KEY.source.replace(/\\b/g, '')}$`)
+
+/** `ELC-1591` → `ELC`; a slug → null. */
+export function projectOf(id: string): string | null {
+  return KEY_WHOLE.test(id) ? id.slice(0, id.indexOf('-')) : null
+}
 
 /** A ticket key or a kebab slug: the only names the resolver turns into a workspace path. */
 export function isWorkId(id: string): boolean {
