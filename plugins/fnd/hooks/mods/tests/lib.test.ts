@@ -32,6 +32,7 @@ import {
   fmtPct,
   fmtRemaining,
   layout,
+  modelOptions,
   pctLevel,
   rateLabel,
   rowText,
@@ -201,6 +202,9 @@ describe('layout', () => {
     expect(shortModel('claude-fable-5-1')).toBe('fable-5-1')
     expect(shortModel('claude-opus-5-5')).toBe('opus-5-5')
     expect(shortModel(null)).toBeNull()
+    expect(modelOptions('claude-opus-5-5').map(o => o.label)).toEqual(['fable-5-1', 'opus-5-5', 'sonnet-5-5', 'haiku-4-5-20251001'])
+    expect(modelOptions(null)).toHaveLength(4)
+    expect(modelOptions('claude-opus-5-5[1m]')[0]).toEqual({ value: 'claude-opus-5-5[1m]', label: 'opus-5-5[1m]' })
     expect(splitLabel('cache 42m')).toEqual(['cache', '42m'])
     expect(splitLabel('ELC-1591 3/5 ▶ Preview')).toEqual(['ELC-1591', '3/5 ▶ Preview'])
     expect(splitLabel('fnd-mods')).toEqual(['fnd-mods', ''])

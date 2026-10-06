@@ -325,6 +325,15 @@ export function shortModel(m: string | null): string | null {
   return m === null ? null : m.replace(/^claude-/, '')
 }
 
+/** The ids the terminal's model picker offers, as `/model <id>` takes them; the engine lists no models itself. */
+export const MODEL_IDS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001'] as const
+
+/** The picker's options: the known ids plus the session's own when it is none of them (a pinned or dated id). */
+export function modelOptions(current: string | null): { value: string; label: string }[] {
+  const ids: string[] = current !== null && !MODEL_IDS.includes(current as (typeof MODEL_IDS)[number]) ? [current, ...MODEL_IDS] : [...MODEL_IDS]
+  return ids.map(value => ({ value, label: shortModel(value) as string }))
+}
+
 /** `cache 42m` → [`cache`, `42m`]: the dim label and the bold value; no space → the whole text is the label. */
 export function splitLabel(text: string): [string, string] {
   const i = text.indexOf(' ')

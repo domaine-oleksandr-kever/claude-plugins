@@ -1,5 +1,5 @@
-// Status band: the AbovePrompt row drawn from the atoms, and the Compact and Clear presses. A desktop draws
-// the buttons on a second row under the figures.
+// Status band: the AbovePrompt row drawn from the atoms, the Compact and Clear presses and the terminal's model
+// picker. A desktop draws the buttons on a second row under the figures.
 // Render only reads atoms; usage.ts and progress.tsx write them. The Progress and Log presses are
 // answered by the `ui.press` hooks on elements `progress` (progress.tsx) and `log` (log.tsx).
 import { atom, read, update } from 'claude-code'
@@ -22,6 +22,7 @@ import {
   ctxCard,
   glyphText,
   layout,
+  modelOptions,
   pctLevel,
   rateCard,
   rateText,
@@ -75,6 +76,14 @@ function pressClear($: $): void {
   )
 }
 
+/** A pick on the terminal's model picker runs `/model <id>` as typed; the switch event then moves the segment. */
+function pickModel($: $, id: string): void {
+  $.command.run({ command: 'model', args: id }).then(
+    r => $.ui.toast(r.text || `model ${id}`),
+    err => $.ui.toast(`model refused: ${err instanceof Error ? err.message : String(err)}`),
+  )
+}
+
 /** The surface the band last drew on; a desktop has no hotkey letters, so focus moves must not redraw it. */
 let drawnOn: string = 'terminal'
 
@@ -98,6 +107,10 @@ export function registerBand(on: On, options: PluginOptions): void {
     return next(e)
   })
   on('ui.press', { plugin: 'fnd' }, async ($, e, next) => {
+    await setFocused($, false)
+    return next(e)
+  })
+  on('ui.select', { plugin: 'fnd' }, async ($, e, next) => {
     await setFocused($, false)
     return next(e)
   })
@@ -134,7 +147,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     lastRender.maxRows = e.props.maxRows
     // A desktop draws proportional text: its bodyColumns do not measure the row, so nothing is dropped there.
     const segs = layout(bandSegs({ usage: u, model: m, cache: c, nowMs: now, isWorking, digest }), isDesktop ? undefined : e.props.bodyColumns)
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text, Button, Select } = $.ui.resolve(e)
 
     const label = (text: string) => (isDesktop ? glyphText(text) : text)
     // Dim label, bold value (`cache` dim, `42m` bold); a desktop glyph label stays at full strength.
@@ -185,8 +198,15 @@ export function registerBand(on: On, options: PluginOptions): void {
       const level = LEVEL_PROPS[cacheView(c, now, isWorking).level]
       groups.push([hoverable('seg-cache', labeled(label(segs.cache), dimLabel, { bold: true, ...level }), cacheCard(c, now))])
     }
-    if (segs.model !== null) {
-      groups.push([<Text wrap="truncate-end">{isDesktop ? `${GLYPH.model} ${segs.model}` : segs.model}</Text>])
+    // The terminal has no model menu of its own in reach, so its segment is the picker; the desktop app has one.
+    if (segs.model !== null && m !== null) {
+      groups.push([
+        isDesktop ? (
+          <Text wrap="truncate-end">{`${GLYPH.model} ${segs.model}`}</Text>
+        ) : (
+          <Select key="model" options={modelOptions(m)} value={m} onSelect={id => pickModel($, id)} />
+        ),
+      ])
     }
     const ctxLevel = u.ctxPct === null ? {} : CTX_PROPS[pctLevel(u.ctxPct)]
     groups.push([hoverable('seg-ctx', labeled(label(segs.ctx), dimLabel, { bold: true, ...ctxLevel }), ctxCard(u))])

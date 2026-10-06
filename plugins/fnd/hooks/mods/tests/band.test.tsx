@@ -103,6 +103,12 @@ const units = (n: any): Unit[] => {
 const unitsOf = async (ui: any): Promise<Unit[]> => units(await ui.drawn())
 const textOf = async (ui: any, re: RegExp) => (await unitsOf(ui)).find(u => re.test(u.text))?.text
 const valueOf = async (ui: any, re: RegExp) => (await unitsOf(ui)).find(u => re.test(u.text))?.node
+/** The model the band shows, short: the desktop's text, or the terminal picker's current option. */
+const shownModel = async (ui: any, surface: Surface): Promise<string | undefined> => {
+  if (surface === 'desktop') return (await textOf(ui, /^🤖 /))?.replace(/^🤖 /, '')
+  const sel = await ui.find({ key: 'model' })
+  return sel?.props.options.find((o: any) => o.value === sel.props.value)?.label
+}
 
 /** Reads fnd's own state from beside it: any plugin reads any value. */
 const peek = {
@@ -294,6 +300,10 @@ describe('band', () => {
       expect((await ui.find({ key: 'progress' }))?.props.plain).toBe(true)
       await ui.press({ key: 'compact' })
       expect((await ui.find({ key: 'progress' }))?.props.plain).toBeUndefined()
+      await $.ui.focus({ ...focusIn, element: 'model' } as never)
+      expect((await ui.find({ key: 'progress' }))?.props.plain).toBe(true)
+      await $.ui.select({ plugin: 'fnd', key: 'model', value: 'claude-fable-5-1' })
+      expect((await ui.find({ key: 'progress' }))?.props.plain).toBeUndefined()
     })
 
     test(`${surface}: isWorking keeps Compact first and pressable, no accent, and shows cache ●`, async ($, on) => {
@@ -449,10 +459,51 @@ describe('band', () => {
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      expect(await textOf(ui, /fable-5-1/)).toBeUndefined()
+      expect(await shownModel(ui, surface)).toBeUndefined()
       w.model = 'claude-fable-5-1'
       await measure($, { window: 200_000, percent: 11 })
-      expect(await textOf(ui, /fable-5-1/)).toBe(isDesktop ? '🤖 fable-5-1' : 'fable-5-1')
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
+    })
+
+    test(`${surface}: the model segment is a picker on the terminal, text on the desktop`, async ($, on) => {
+      const { w } = world(on)
+      const runs: string[] = []
+      on('command.run', { command: 'model' }, async (_$, e) => {
+        runs.push(e.args)
+        return { text: `Set model to ${e.args}` }
+      })
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      const sel = await ui.find({ key: 'model' })
+      if (isDesktop) {
+        expect(sel).toBeUndefined()
+        expect(await textOf(ui, /^🤖 /)).toBe('🤖 fable-5-1')
+        return
+      }
+      expect(sel?.type).toBe('Select')
+      expect(sel?.props.value).toBe('claude-fable-5-1')
+      expect(sel?.props.options.map((o: any) => o.label)).toEqual(['fable-5-1', 'opus-5-5', 'sonnet-5-5', 'haiku-4-5-20251001'])
+      await $.ui.select({ plugin: 'fnd', key: 'model', value: 'claude-opus-5-5' })
+      expect(runs).toEqual(['claude-opus-5-5'])
+      expect(w.toasts).toEqual(['Set model to claude-opus-5-5'])
+    })
+
+    test(`${surface}: a pinned id the picker does not list leads its options; a refused /model toasts`, async ($, on) => {
+      const { w } = world(on)
+      w.model = 'claude-opus-5-5[1m]'
+      // No command.run hook beneath: the engine rejects the run, as it does an unknown command.
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      expect(await shownModel(ui, surface)).toBe('opus-5-5[1m]')
+      if (isDesktop) return
+      const sel = await ui.find({ key: 'model' })
+      expect(sel?.props.options[0]).toEqual({ value: 'claude-opus-5-5[1m]', label: 'opus-5-5[1m]' })
+      expect(sel?.props.options).toHaveLength(5)
+      await $.ui.select({ plugin: 'fnd', key: 'model', value: 'claude-sonnet-5-5' })
+      expect(w.toasts).toHaveLength(1)
+      expect(w.toasts[0]).toStartWith('model refused: ')
     })
 
     test(`${surface}: a subagent compaction leaves the main figures`, async ($, on) => {
@@ -486,11 +537,10 @@ describe('band', () => {
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      expect(await textOf(ui, /fable-5-1/)).toBe(isDesktop ? '🤖 fable-5-1' : 'fable-5-1')
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
       w.model = 'claude-opus-5-5'
       await $.classic.PostModelSwitch(modelSwitch({ prompt_cache_warm: true }))
-      expect(await textOf(ui, /opus-5-5/)).toBe(isDesktop ? '🤖 opus-5-5' : 'opus-5-5')
-      expect(await textOf(ui, /fable-5-1/)).toBeUndefined()
+      expect(await shownModel(ui, surface)).toBe('opus-5-5')
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
     })
 
@@ -501,7 +551,7 @@ describe('band', () => {
       const ui = await mount($, surface)
       await mainTurn($)
       await $.classic.PostModelSwitch(modelSwitch({ source: 'picker' }))
-      expect(await textOf(ui, /opus-5-5/)).toBe(isDesktop ? '🤖 opus-5-5' : 'opus-5-5')
+      expect(await shownModel(ui, surface)).toBe('opus-5-5')
     })
 
     test(`${surface}: a measure adopts a model the session changed without a PostModelSwitch`, async ($, on) => {
@@ -509,11 +559,10 @@ describe('band', () => {
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      expect(await textOf(ui, /fable-5-1/)).toBeDefined()
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
       w.model = 'claude-opus-5-5'
       await measure($, { window: 200_000, percent: 12 })
-      expect(await textOf(ui, /opus-5-5/)).toBe(isDesktop ? '🤖 opus-5-5' : 'opus-5-5')
-      expect(await textOf(ui, /fable-5-1/)).toBeUndefined()
+      expect(await shownModel(ui, surface)).toBe('opus-5-5')
     })
 
     test(`${surface}: a cold switch to the same model → cache cold`, async ($, on) => {
@@ -788,7 +837,8 @@ describe('band', () => {
         expect(await ui.find({ key: 'log' })).toBeDefined()
         return
       }
-      expect(await textOf(ui, /fable-5-1|^5h|^⏳|ELC-1591/)).toBeUndefined()
+      expect(await textOf(ui, /^5h|^⏳|ELC-1591/)).toBeUndefined()
+      expect(await shownModel(ui, surface)).toBeUndefined()
       expect(await ui.find({ key: 'clear' })).toBeUndefined()
       expect(await ui.find({ key: 'progress' })).toBeUndefined()
       expect(await ui.find({ key: 'log' })).toBeUndefined()
@@ -806,7 +856,7 @@ describe('band', () => {
       const ui = await mount($, surface, { bodyColumns: 58 })
       expect(await ui.find({ key: 'compact' })).toBeDefined()
       expect(await ui.find({ key: 'progress' })).toBeDefined()
-      expect(await textOf(ui, /fable-5-1/)).toBeDefined()
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
       if (isDesktop) {
         expect(await ui.find({ key: 'clear' })).toBeDefined()
         expect(await ui.find({ key: 'log' })).toBeDefined()
@@ -848,7 +898,7 @@ describe('band', () => {
     expect(await textOf(desk, /^🤖 /)).toBe('🤖 fable-5-1')
     const term = await mount($, 'terminal')
     expect(await textOf(term, /^cache /)).toBe('cache 60m')
-    expect(await textOf(term, /fable-5-1/)).toBe('fable-5-1')
+    expect(await shownModel(term, 'terminal')).toBe('fable-5-1')
     expect(await term.find({ type: 'Text', text: /^[⏱🧠⏳🤖📋]/u })).toBeUndefined()
   })
 
