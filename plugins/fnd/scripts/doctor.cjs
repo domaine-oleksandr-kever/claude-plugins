@@ -16,9 +16,10 @@
  *   node doctor.cjs --trace [--since 2h]     # the FND_HOST_TRACE readout, instead of the checks
  *   node doctor.cjs --report [--since 7d]    # the compression statistics (FND_MCP_SLIM_DEBUG log)
  *
- * Every check prints exactly one PASS / FAIL / SKIP line. SKIP means "nothing to verify here yet"
- * (an optional manifest, a directory M4 has not generated) and never fails the run; the exit code
- * is 1 if and only if at least one check FAILed. This script only reports — it never repairs.
+ * Every check prints exactly one PASS / FAIL / SKIP / WARN line. SKIP means "nothing to verify here
+ * yet" (an optional manifest, a directory M4 has not generated) and never fails the run; WARN is a
+ * working install configured against itself (`--target claude`'s compression-backend row). The exit
+ * code is 1 if and only if at least one check FAILed. This script only reports — it never repairs.
  */
 'use strict';
 
@@ -96,6 +97,7 @@ function report(status, name, detail) {
 const pass = (n, d) => report('PASS', n, d);
 const fail = (n, d) => report('FAIL', n, d);
 const skip = (n, d) => report('SKIP', n, d);
+const warn = (n, d) => report('WARN', n, d);
 
 function out(line) {
   try {
@@ -572,6 +574,91 @@ function checkHost(target, homeDir, xdgConfigHome, pluginRoot, repoRoot) {
   pass(label, mode + ' install, ' + record.entries.length + ' entry(ies) live (root: ' + root + ')' + note);
 }
 
+// FND_COMPRESSION on Claude Code: `proxy` hands MCP compression to the slim plugin, which must be
+// installed, enabled and new enough to publish the slim.info snapshot the hooks module looks for.
+// Read like the wiring reads it — process env, then settings.json `env`; the domaine env file is
+// never consulted for this key, so a value there is reported as ignored.
+const SLIM_MIN_VERSION = '0.3.0';
+
+function readJson(file) {
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function envFileSets(file, key) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (_) {
+    return false;
+  }
+  return raw.split('\n').some((line) => new RegExp('^\\s*' + key + '\\s*=').test(line));
+}
+
+// The slim install this session would load: a user-scope entry, or one for this project.
+function installedSlim(claudeDir, settings) {
+  const record = readJson(path.join(claudeDir, 'plugins', 'installed_plugins.json'));
+  const plugins = record && record.plugins && typeof record.plugins === 'object' ? record.plugins : {};
+  const enabled = (settings && settings.enabledPlugins) || {};
+  let disabled = null;
+  for (const [key, entries] of Object.entries(plugins)) {
+    if (!/^slim@/.test(key) || !Array.isArray(entries)) continue;
+    const entry = entries.find((e) => e && (e.scope === 'user' || e.projectPath === process.cwd()));
+    if (!entry) continue;
+    if (enabled[key] === false) {
+      disabled = { key, version: String(entry.version || '') };
+      continue;
+    }
+    return { key, version: String(entry.version || ''), disabled: false };
+  }
+  return disabled ? { ...disabled, disabled: true } : null;
+}
+
+function checkCompressionBackend(homeDir, xdgConfigHome, claudeConfigDir) {
+  const name = 'compression-backend';
+  const claudeDir = claudeConfigDir || path.join(homeDir, '.claude');
+  const settings = readJson(path.join(claudeDir, 'settings.json'));
+  const fromEnv = process.env.FND_COMPRESSION;
+  const fromSettings = settings && settings.env && typeof settings.env === 'object' ? settings.env.FND_COMPRESSION : undefined;
+  const value = fromEnv !== undefined && fromEnv !== '' ? fromEnv : fromSettings;
+  const inEnvFile = envFileSets(path.join(xdgConfigHome || path.join(homeDir, '.config'), 'domaine', 'env'), 'FND_COMPRESSION');
+  const ignored = 'FND_COMPRESSION is set in ~/.config/domaine/env, which fnd ignores for this key — set it in settings.json env';
+
+  if (value === undefined || value === null || value === '' || value === 'builtin') {
+    if (inEnvFile) warn(name, ignored);
+    else pass(name, 'builtin (fnd compresses MCP results)');
+    return;
+  }
+  if (value !== 'proxy') {
+    warn(name, 'FND_COMPRESSION=' + value + ' is not builtin|proxy — treated as builtin');
+    return;
+  }
+  const slim = installedSlim(claudeDir, settings);
+  if (!slim || slim.disabled) {
+    warn(name, 'FND_COMPRESSION=proxy but slim is not installed or disabled — fnd keeps compressing; ' +
+      '/plugin install slim@domaine or unset FND_COMPRESSION');
+    return;
+  }
+  if (compareVersionKeys(versionKey(slim.version), versionKey(SLIM_MIN_VERSION)) < 0) {
+    warn(name, 'FND_COMPRESSION=proxy but slim ' + slim.version + ' predates ' + SLIM_MIN_VERSION +
+      ' — fnd keeps compressing; update slim');
+    return;
+  }
+  const envMcp = process.env.SLIM_MCP;
+  const slimMcp = envMcp !== undefined && envMcp !== '' ? envMcp : (settings && settings.env && settings.env.SLIM_MCP);
+  if (String(slimMcp).trim() === '0') {
+    warn(name, 'FND_COMPRESSION=proxy but SLIM_MCP=0 turns slim ' + slim.version +
+      "'s MCP channel off — fnd keeps compressing MCP results; unset SLIM_MCP or FND_COMPRESSION");
+    return;
+  }
+  if (inEnvFile) warn(name, 'proxy → slim ' + slim.version + '; ' + ignored);
+  else pass(name, 'proxy → slim ' + slim.version);
+}
+
 /*
  * Nothing in the marketplace cache is read as a role, and one bad role file empties the whole
  * roster (both measured 2026-09-08, CLI 0.153.4). Without this row a bundle install looks complete
@@ -898,7 +985,37 @@ function reportSlim(sinceRaw) {
   }
   out('fnd doctor — compression report');
   out(buildReport(raw.split('\n'), { file, bytes, since: since === null ? null : new Date(since).toISOString() }));
+  const bySrc = bytesBySrc(raw, since);
+  if (bySrc) out(bySrc);
   process.exitCode = 0;
+}
+
+// Which plugin compressed what, side by side while fnd and the slim plugin share this log. A line
+// without `src` is fnd's; slim's lookup lines carry model tokens, not result bytes, and stay out.
+function bytesBySrc(raw, since) {
+  const groups = new Map();
+  for (const line of raw.split('\n')) {
+    let r;
+    try {
+      r = JSON.parse(line);
+    } catch (_) {
+      continue;
+    }
+    if (!r || typeof r !== 'object' || Array.isArray(r) || r.channel === 'lookup') continue;
+    if (since !== null && !(Date.parse(r.ts) >= since)) continue;
+    const bin = Number(r.bytes_seen ?? r.bytes_in);
+    const bout = Number(r.bytes_out);
+    if (!Number.isFinite(bin) || !Number.isFinite(bout)) continue;
+    const src = typeof r.src === 'string' && r.src ? r.src : 'fnd';
+    const g = groups.get(src) || { in: 0, out: 0 };
+    g.in += bin;
+    g.out += bout;
+    groups.set(src, g);
+  }
+  if (!groups.size) return '';
+  const cells = [...groups].map(([src, g]) =>
+    src + ' ' + g.in + ' → ' + g.out + ' B (' + (g.in ? ((g.in - g.out) / g.in) * 100 : 0).toFixed(1) + '% saved)');
+  return '  by src: ' + cells.join(' · ');
 }
 
 function main() {
@@ -917,6 +1034,7 @@ function main() {
   const homeDir = opts.home ? path.resolve(opts.home) : os.homedir();
   // --home is the whole override: an ambient XDG_CONFIG_HOME must not re-target a sandboxed run.
   const xdgConfigHome = opts.home ? null : process.env.XDG_CONFIG_HOME || null;
+  const claudeConfigDir = opts.home ? null : process.env.CLAUDE_CONFIG_DIR || null;
 
   checkNode();
   checkPlatform();
@@ -929,14 +1047,16 @@ function main() {
     checkCodexAgents(homeDir, pluginRoot);
     checkCodexHooks(homeDir);
   }
+  if (opts.target === 'claude') checkCompressionBackend(homeDir, xdgConfigHome, claudeConfigDir);
 
   const width = rows.reduce((w, r) => Math.max(w, r.name.length), 0);
   out('fnd doctor — plugin root: ' + pluginRoot);
   for (const r of rows) out(r.status + '  ' + r.name.padEnd(width) + '  ' + r.detail);
 
-  const counts = { PASS: 0, FAIL: 0, SKIP: 0 };
+  const counts = { PASS: 0, FAIL: 0, SKIP: 0, WARN: 0 };
   for (const r of rows) counts[r.status]++;
-  out('doctor: ' + counts.PASS + ' passed, ' + counts.FAIL + ' failed, ' + counts.SKIP + ' skipped');
+  out('doctor: ' + counts.PASS + ' passed, ' + counts.FAIL + ' failed, ' + counts.SKIP + ' skipped' +
+    (counts.WARN ? ', ' + counts.WARN + ' warned' : ''));
   // exitCode, not exit(): a piped stdout write can still be in flight when exit() tears the process down
   process.exitCode = counts.FAIL > 0 ? 1 : 0;
 }

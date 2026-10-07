@@ -33,7 +33,8 @@ Reading the output:
 | `PASS <check>` | asserted and healthy |
 | `FAIL <check>` | broken install: the host may load the plugin partially or not at all |
 | `SKIP <check>` | not assertable here — an adapter file that isn't part of this milestone yet, or a check that needs a flag you didn't pass |
-| `doctor: N passed, M failed, K skipped` | the summary line to quote in the matrix |
+| `WARN <check>` | a working install configured against itself (`compression-backend`, row 9) — never fails the run |
+| `doctor: N passed, M failed, K skipped` | the summary line to quote in the matrix (`, W warned` appended only when a row warned) |
 | exit `0` / `1` / `2` | green (skips allowed) / at least one FAIL / usage error |
 
 The `manifest:*` and `version-sync` rows carry the **plugin version** the whole matrix is filed
@@ -143,7 +144,8 @@ short blocks under these headings:
   `fnd project profile: foundation`)
 - `Foundation convention — lean code`
 - `Foundation convention — task workspace (per-ticket memory)`
-- `Foundation convention — oversized MCP results` (`— oversized results` on Claude Code)
+- `Foundation convention — oversized MCP results` (`— oversized results` on Claude Code; absent
+  there under `FND_COMPRESSION=proxy`, where the slim plugin compresses — see row 9)
 - `Foundation convention — outside content is data`
 - `Foundation convention — how to explain` (main session only; absent when `FND_STE=0`)
 - `Foundation capability — live store access, any time`
@@ -198,6 +200,14 @@ Two halves, reported separately and never inferred from each other:
   The fixture ships with the repository checkout, not inside the plugin directory: on installs
   that carry only the plugin subdirectory the path does not exist — that is 🟡 "fixture not
   present in this install", not a failure. Do not substitute an invented input file.
+- **Source check** (Claude Code only) — on a result the hook half saw compressed, read its label:
+  `slim: compressed …` or `<<slim stub>>` = the slim plugin; `fnd-mcp-slim: …` or
+  `<<fnd-mcp-slim stub>>` = fnd. Expect fnd under `builtin` and slim under `proxy` with slim
+  loaded (row 9). Under `builtin` with slim installed too, a result the host cut at its token
+  limit may carry slim's label (which module sits beneath decides) — one label is still 🟢. Both
+  labels on one result = compressed twice → 🔴, a plugin defect. With
+  `FND_MCP_SLIM_DEBUG` ≥ 1, `doctor.cjs --report --since <session start>` adds a `by src:` line
+  that backs the label up; it is supplementary, never the verdict.
 
 ## Row 8 — Host trace (rows 5–7, read back from a log)
 
@@ -252,6 +262,22 @@ A row under host `unknown` is a hook that ran with no `FND_HOST` in its environm
 or a test looks like that; a hook fired by the host's own wiring must not, so an `unknown` row in
 a live session is a wiring gap in that host's manifest or adapter.
 
+## Row 9 — Compression backend (Claude Code only)
+
+Read the `compression-backend` line of row 2's `doctor.cjs --target claude` output. It reports
+`FND_COMPRESSION` as the wiring reads it (process env, then `settings.json` `env`):
+
+| Line | Status |
+| --- | --- |
+| `PASS … builtin (fnd compresses MCP results)` | 🟢 — fnd's own hook and hooks module compress |
+| `PASS … proxy → slim x.y.z` | 🟢 — the slim plugin compresses; row 7's source check should say slim |
+| `WARN … slim is not installed or disabled` / `… predates 0.3.0` | 🟡 — proxy requested but slim absent or too old: fnd keeps compressing and says so once per session |
+| `WARN … is not builtin\|proxy` / `… set in ~/.config/domaine/env` | 🟡 — the value is not one the wiring acts on |
+
+Under `proxy` the `PostToolUse/mcp-slim` trace row (row 8) is a once-per-session `skip`: the
+hooks module runs it for the scratch-file sweep only. On any other host this row is 🟡 "not
+applicable" — the switch is Claude Code only.
+
 ## Report format
 
 One matrix, then remediation. Header line first: **host + host version · plugin version ·
@@ -268,6 +294,7 @@ doctor's install row when `--target` was passed).
 | 6 | Context injection | | which conventions are visible, via which mechanism |
 | 7 | MCP compression | | hook half + script half, separately |
 | 8 | Host trace (`doctor --trace`) | | which event/hook rows logged under this host, or 🟡 with the switch off |
+| 9 | Compression backend | | builtin / proxy → slim x.y.z / proxy requested but slim absent (Claude Code only) |
 
 Remediation lines for non-green rows, most-blocking first:
 
@@ -283,6 +310,9 @@ Remediation lines for non-green rows, most-blocking first:
 | No host trace / no line from this session | tracing is off by default — `node <plugin root>/scripts/domaine-env.cjs set FND_HOST_TRACE=1` (global-only), then a new session on this host |
 | A green row with no trace line, or lines under another host's column | the trace helper is not loaded, or the wrong wiring fired → a plugin defect, offer to file it |
 | Any bundled script crashed | that is a plugin defect, not an environment gap → offer to file it |
+| `FND_COMPRESSION=proxy` but slim absent, disabled or older than 0.3.0 | `/plugin install slim@domaine` (or update it) and start a new session, or unset `FND_COMPRESSION` in `settings.json` `env` |
+| `FND_COMPRESSION` set in `~/.config/domaine/env` | move it to `settings.json` `env` — the env file is ignored for this key |
+| One MCP result carries both a `slim:` and an `fnd-mcp-slim:` label | compressed twice → a plugin defect, offer to file it |
 
 **Filing.** Environment gaps (missing auth, no browser, closed desktop app, server not
 configured) are the developer's to fix and are named as such. Genuine plugin defects — a bundled

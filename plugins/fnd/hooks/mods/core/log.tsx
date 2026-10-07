@@ -1,10 +1,12 @@
-// Event log pane: /fnd-log and the band's Log button toggle it; it draws the events atom, never writes it.
+// Event log pane: /fnd-log and the band's Log button toggle it; it draws fnd's events merged with the slim
+// plugin's (an empty list when slim is not loaded), never writes either.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { FndEvent } from '../../../types'
-import { LOG_PANE, PREFIX_COLS, hhmm, kindCell, newestFitting } from './events.ts'
+import type { FndEvent, FndForeignEvent } from '../../../types'
+import { LOG_PANE, PREFIX_COLS, hhmm, kindCell, merged, newestFitting } from './events.ts'
 
 const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
+const slimEvents = atom({ plugin: 'slim', key: 'events' } as const, [] as FndForeignEvent[])
 
 type $ = EngineInterface
 
@@ -13,8 +15,12 @@ async function drawsPanes($: $): Promise<boolean> {
   return (await $.session.surfaces()).some(s => s === 'terminal' || s === 'desktop')
 }
 
+async function allEvents($: $): Promise<FndForeignEvent[]> {
+  return merged(await read($, events), await read($, slimEvents))
+}
+
 async function logText($: $): Promise<string> {
-  const list = await read($, events)
+  const list = await allEvents($)
   if (list.length === 0) return 'no events yet'
   return list.map(ev => `${hhmm(ev.atMs)}  ${kindCell(ev.kind)}  ${ev.text}`).join('\n')
 }
@@ -44,7 +50,7 @@ export function registerLog(on: On): void {
 
   on('ui.render', { component: 'Pane', requestId: 'fnd-log' }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
-    const list = await read($, events)
+    const list = await allEvents($)
     if (list.length === 0) {
       return (
         <Box flexDirection="column" width={e.props.bodyColumns}>

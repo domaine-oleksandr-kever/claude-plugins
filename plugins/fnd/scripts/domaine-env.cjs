@@ -3,7 +3,8 @@
 // fnd entry point (precedence: process env > project file > global file > default).
 //
 //   node domaine-env.cjs list             switches with their effective value and source
-//   node domaine-env.cjs set KEY=VALUE    write into the global file (~/.config/domaine/env)
+//   node domaine-env.cjs set KEY=VALUE    write into the global file (~/.config/domaine/env); a
+//                                         session-only key (FND_COMPRESSION) is refused, exit 2
 //   node domaine-env.cjs unset KEY        remove from the global file
 //   node domaine-env.cjs path             print the target file path
 //
@@ -51,6 +52,7 @@ const KNOWN = [
   'FND_MCP_SLIM_STUB',
   'FND_MCP_SLIM_STUB_BYTES',
   'FND_MCP_SLIM_BUDGET_MS',
+  'FND_COMPRESSION',
   'FND_WHALE_GUIDE',
   'FND_NOGAIN_MEMO',
   'FND_PROMPT_JSON',
@@ -72,6 +74,10 @@ const KNOWN = [
   'FND_CPT_OVERLAY_VERIFY_WAIT',
   'SHOPIFY_ADMIN_GQL_QUIET',
 ];
+
+// Read from the session env only (settings.json `env` or the shell): the MCP wiring gate decides in
+// plain shell before any env file is loaded, so a value in either file could never take effect.
+const SESSION_ONLY = new Set(['FND_COMPRESSION']);
 
 function die(msg) {
   process.stderr.write('domaine-env: ' + msg + '\n');
@@ -123,6 +129,11 @@ function cmdSet(pair, project) {
   const key = pair.slice(0, eq).trim();
   const value = pair.slice(eq + 1).trim();
   if (!envFile.allowed(key)) die('"' + key + '" is not an fnd switch (FND_* plus SHOPIFY_ADMIN_GQL_QUIET)');
+  if (SESSION_ONLY.has(key)) {
+    process.stderr.write('domaine-env: "' + key + '" is read from the session env only, never from an env file — '
+      + 'set it in settings.json → "env" (or the shell) and restart\n');
+    process.exit(2);
+  }
   if (project && !envFile.projectAllowed(key)) {
     // exit 2, not die()'s 1: a caller can tell "refused by policy" from "bad usage"
     process.stderr.write('domaine-env: "' + key + '" is a global-only switch (the project file is '
@@ -176,6 +187,9 @@ function cmdList() {
     else [value, source] = ['', 'default'];
     let cell = source === 'default' ? '(default — see README "Environment switches")'
       : '= ' + value + '   (' + source + ')';
+    if (SESSION_ONLY.has(key)) {
+      cell = source === 'process env' ? cell : '(session env only: settings.json "env"; an env-file value is ignored)';
+    }
     if (dead && source !== 'project (ignored: global-only switch)') {
       cell += '   [project (ignored: global-only switch): ' + projVals[key] + ']';
     }

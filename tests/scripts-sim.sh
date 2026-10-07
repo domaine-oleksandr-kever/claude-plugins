@@ -6210,6 +6210,18 @@ o11="$(cd "$EV2R/repo" && XDG_CONFIG_HOME="$EV2R/cfg" domaine_env FND_CPT_OVERLA
 if [ "$o9" = "/tmp/good" ] && [ "$o10" = "1" ] && [ "$o11" = "9" ]; then ok
 else bad EV7-bash-class-split "dir='$o9' verify='$o10' wait='$o11'"; fi
 
+# EV7b: FND_COMPRESSION is read from the session env only (the MCP wiring decides in plain shell,
+# before any env file loads), so `set` refuses it with exit 2 and `list` never shows a file value as live
+EV4R="$TMP/env4"; mkdir -p "$EV4R/cfg/domaine"
+rc=0; (cd "$EV4R" && env -u FND_COMPRESSION XDG_CONFIG_HOME="$EV4R/cfg" node "$EVC" set FND_COMPRESSION=proxy) >/dev/null 2>"$E" || rc=$?
+printf 'FND_COMPRESSION=proxy\n' > "$EV4R/cfg/domaine/env"
+o13="$(cd "$EV4R" && env -u FND_COMPRESSION XDG_CONFIG_HOME="$EV4R/cfg" node "$EVC" list | grep '^FND_COMPRESSION ')"
+o14="$(cd "$EV4R" && FND_COMPRESSION=proxy XDG_CONFIG_HOME="$EV4R/cfg" node "$EVC" list | grep '^FND_COMPRESSION ')"
+if [ "$rc" -eq 2 ] && grep -q 'session env only' "$E" && grep -q 'settings.json' "$E" \
+   && printf '%s' "$o13" | grep -q 'session env only' && ! printf '%s' "$o13" | grep -q '= proxy' \
+   && printf '%s' "$o14" | grep -q '= proxy.*(process env)'; then ok
+else bad EV7b-session-only "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ') o13=$o13 o14=$o14"; fi
+
 # EV8: a hand-edited `KEY = v` is a live assignment to env-file.cjs's parse() (it trims the line,
 # then splits at the first '='), so `set` must REWRITE that line — appending a second one would
 # leave the OLD value winning under first-line-wins while the CLI printed success

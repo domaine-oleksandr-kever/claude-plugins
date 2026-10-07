@@ -2,7 +2,8 @@
 # Simulation harness for the fnd plugin's session-level hooks:
 #   S cases — plugin.json SessionStart command: per-file tolerance (one broken
 #             md must not discard the rest), FND_LEAN / FND_STE gates, the host-picked whale
-#             variant (S3c: Claude Code the short one, every other host the full), always exit 0, the
+#             variant (S3c: Claude Code the short one, every other host the full; S3d none on
+#             Claude Code under FND_COMPRESSION=proxy), always exit 0, the
 #             real plugin root emitting the json-slim whale-routing instruction, and
 #             the host tag + the trace call this command carries (S7); S11–S16 the
 #             project-profile line and the Foundation addendum it gates (detection per
@@ -63,7 +64,10 @@
 #             → silent, the default unchanged without the flag), M-report its `mod-expand` debug line
 #             and `--report` pairing, M-idem1–2 this hook's own emission passing through `already-slim`
 #             while a quoted or forged mark is still slimmed; M-req mcp-slim required as a module
-#             (prompt-json-guard `--from-mod`): no stdin read, no sweep, no trace
+#             (prompt-json-guard `--from-mod`): no stdin read, no sweep, no trace; M-proxy1–6
+#             FND_COMPRESSION=proxy — the wiring gate stops node, a direct Claude run skips (one
+#             skip/proxy line at debug 2 only) yet still sweeps, --from-mod and other hosts still
+#             compress, and a value set only in the domaine env file is ignored
 #   P cases — hooks/prompt-json-guard.cjs: a big prompt carrying a big JSON blob is blocked
 #             with the blob spilled byte-exact and 0600 (never through a planted symlink, P17),
 #             below-gate / no-json / small prompts
@@ -161,6 +165,9 @@ unset FND_MCP_SLIM_DEBUG FND_MCP_SLIM_DIR FND_SPILL_ACCESS FND_PROFILE FND_STE
 # have every case in this file append to their real trace log, and an exported FND_HOST would
 # rewrite the `host` column the H cases pin.
 unset FND_HOST_TRACE FND_HOST
+# FND_COMPRESSION=proxy (a developer trying the slim plugin) stops the MCP wiring and drops the whale
+# block; the M-proxy and S3d cases set it per invocation.
+unset FND_COMPRESSION
 # CLAUDE_CODE_ENTRYPOINT is the HOST's own variable — this very suite runs under a session that
 # sets it — and it picks which surface the compression notice goes out on (M106, R). Unset here so
 # each case states the host it is testing, and so the "unknown host" case is really unknown.
@@ -311,6 +318,29 @@ for h in claude codex cursor nohost; do
   fi
   assert_contains "S3c-$h-ste" "$out" "MARK-writing-style"
 done
+
+# S3d: FND_COMPRESSION=proxy hands MCP results to the slim plugin on Claude Code, so with slim
+# installed neither whale block rides there (the plugin-root line stays); without slim, or with it
+# disabled, the short block stays; every other host ignores the switch.
+SCFG="$TMP/ss-claude-cfg"; mkdir -p "$SCFG/plugins"
+printf '{"version":2,"plugins":{"slim@domaine":[{"scope":"user","version":"0.3.0"}]}}\n' > "$SCFG/plugins/installed_plugins.json"
+out="$(cd "$SS_STORE" && env FND_HOST=claude FND_COMPRESSION=proxy CLAUDE_CONFIG_DIR="$SCFG" CLAUDE_PLUGIN_ROOT="$fake" bash "$fake/hooks/session-start.sh" 2>/dev/null </dev/null)"
+out="$(ss_ctx "$out")"
+assert_absent   S3d-claude-proxy-no-short "$out" "MARK-claude-whale"
+assert_absent   S3d-claude-proxy-no-full  "$out" "MARK-mcp-whale"
+assert_contains S3d-claude-proxy-root     "$out" "fnd plugin root: $fake"
+assert_contains S3d-claude-proxy-ste      "$out" "MARK-writing-style"
+assert_contains S3d-claude-proxy-untrusted "$out" "MARK-untrusted-content"
+out="$(cd "$SS_STORE" && env FND_HOST=claude FND_COMPRESSION=builtin CLAUDE_CONFIG_DIR="$SCFG" CLAUDE_PLUGIN_ROOT="$fake" bash "$fake/hooks/session-start.sh" 2>/dev/null </dev/null)"
+assert_contains S3d-claude-builtin-short "$(ss_ctx "$out")" "MARK-claude-whale"
+out="$(cd "$SS_STORE" && env FND_HOST=claude FND_COMPRESSION=proxy CLAUDE_CONFIG_DIR="$TMP/ss-claude-none" CLAUDE_PLUGIN_ROOT="$fake" bash "$fake/hooks/session-start.sh" 2>/dev/null </dev/null)"
+assert_contains S3d-claude-proxy-no-slim-short "$(ss_ctx "$out")" "MARK-claude-whale"
+printf '{"enabledPlugins":{"slim@domaine": false}}\n' > "$SCFG/settings.json"
+out="$(cd "$SS_STORE" && env FND_HOST=claude FND_COMPRESSION=proxy CLAUDE_CONFIG_DIR="$SCFG" CLAUDE_PLUGIN_ROOT="$fake" bash "$fake/hooks/session-start.sh" 2>/dev/null </dev/null)"
+assert_contains S3d-claude-proxy-slim-disabled-short "$(ss_ctx "$out")" "MARK-claude-whale"
+rm -f "$SCFG/settings.json"
+out="$(cd "$SS_STORE" && env FND_HOST=codex FND_COMPRESSION=proxy CLAUDE_PLUGIN_ROOT="$fake" bash "$fake/hooks/session-start.sh" 2>/dev/null </dev/null)"
+assert_contains S3d-codex-proxy-full "$out" "MARK-mcp-whale"
 
 # S4: no store files in the cwd → store-access.md is NOT injected, the rest is
 out="$(cd "$SS_PLAIN" && CLAUDE_PLUGIN_ROOT="$fake" bash -c "$SS_CMD" 2>/dev/null)"; ec=$?; out="$(ss_ctx "$out")"
@@ -1208,6 +1238,63 @@ assert_eq M16f-silent    "$outO" ""
 assert_eq M16f-no-stderr "$(cat "$TMP/m16f.err")" ""
 if [ ! -f "$offstale" ]; then ok; else bad M16f-spill-swept "FND_MCP_SLIM=0 skipped the spill sweep"; fi
 if [ ! -f "$opwold" ]; then ok; else bad M16f-pw-swept "FND_MCP_SLIM=0 skipped the playwright prune"; fi
+
+# M-proxy1: FND_COMPRESSION=proxy at the wiring — the slim plugin compresses, so node never spawns;
+# builtin, unset and any other value spawn it as before.
+run_ptu_gate FND_COMPRESSION=proxy; ec=$?
+assert_eq M-proxy1-exit "$ec" 0
+if [ -s "$TMP/node.log" ]; then bad M-proxy1-off "node ran with FND_COMPRESSION=proxy"; else ok; fi
+for v in builtin junk; do
+  run_ptu_gate FND_COMPRESSION="$v"
+  if [ -s "$TMP/node.log" ]; then ok; else bad "M-proxy1-$v" "node did not run with FND_COMPRESSION=$v"; fi
+done
+
+# M-proxy2: a direct Claude run under proxy (the hooks module's sweep run) emits nothing; at debug 2
+# it writes one skip/proxy line, at debug 1 none.
+for lvl in 1 2; do
+  PXD="$TMP/proxy-dbg$lvl"; mkdir -p "$PXD"
+  outP="$(printf '%s' "$msin" | env FND_HOST=claude FND_COMPRESSION=proxy FND_MCP_SLIM_DIR="$PXD" \
+    FND_MCP_SLIM_DEBUG=$lvl node "$SLIM" 2>"$TMP/mproxy.err")"; ec=$?
+  assert_eq "M-proxy2-silent-$lvl"    "$outP" ""
+  assert_eq "M-proxy2-exit-$lvl"      "$ec" 0
+  assert_eq "M-proxy2-no-stderr-$lvl" "$(cat "$TMP/mproxy.err")" ""
+  if [ "$lvl" = 1 ]; then
+    if [ -f "$PXD/fnd-mcp-slim-debug.log" ]; then bad M-proxy2-lvl1 "a level-1 run logged: $(cat "$PXD/fnd-mcp-slim-debug.log")"; else ok; fi
+  else
+    assert_eq M-proxy2-one-line "$(wc -l < "$PXD/fnd-mcp-slim-debug.log" 2>/dev/null | tr -d ' ')" 1
+    assert_eq M-proxy2-line "$(jq -c '[.decision,.reason,.entry,.tool]' "$PXD/fnd-mcp-slim-debug.log" 2>/dev/null)" \
+      '["skip","proxy","hook","mcp__plugin_fnd_atlassian__getJiraIssue"]'
+  fi
+done
+
+# M-proxy3: the switch is the WIRING's — the mod's own --from-mod run and every other host compress.
+outP="$(printf '%s' "$msin" | env FND_HOST=claude FND_COMPRESSION=proxy FND_MCP_SLIM_DIR="$MSD" node "$SLIM" --from-mod --overflow=expand 2>/dev/null)"
+assert_contains M-proxy3-from-mod "$outP" "updatedToolOutput"
+outP="$(printf '%s' "$msin" | env FND_HOST=codex FND_COMPRESSION=proxy FND_MCP_SLIM_DIR="$MSD" node "$SLIM" 2>/dev/null)"
+assert_contains M-proxy3-codex "$outP" "updatedToolOutput"
+
+# M-proxy4: a value only in the domaine env file is ignored here, as it is by the wiring gate and
+# the hooks module — the hook stopping while they still read builtin would compress nothing.
+PXG="$TMP/proxy-envglobal"; mkdir -p "$PXG/domaine"; printf 'FND_COMPRESSION=proxy\n' > "$PXG/domaine/env"
+outP="$(printf '%s' "$msin" | env -u FND_COMPRESSION FND_HOST=claude XDG_CONFIG_HOME="$PXG" FND_MCP_SLIM_DIR="$MSD" node "$SLIM" 2>/dev/null)"
+assert_contains M-proxy4-envfile-ignored "$outP" "updatedToolOutput"
+
+# M-proxy5: hygiene under proxy — the skip still sweeps an aged spill and the playwright output dir.
+PXS="$TMP/sweep-proxy"; mkdir -p "$PXS"
+pxstale="$PXS/fnd-prompt-json-STALE.json"; : > "$pxstale"; touch -t 200001010000 "$pxstale"
+PPROJ="$TMP/pwproxy"; mkdir -p "$PPROJ/.claude/fnd-tmp/playwright"
+ppwold="$PPROJ/.claude/fnd-tmp/playwright/page-old.png"; : > "$ppwold"; touch -t 200001010000 "$ppwold"
+outP="$(printf '%s' "$(jq -cn --arg cwd "$PPROJ" '{cwd:$cwd,tool_name:"mcp__x__y"}')" \
+  | env FND_HOST=claude FND_COMPRESSION=proxy FND_MCP_SLIM_DIR="$PXS" node "$SLIM" 2>/dev/null)"; ec=$?
+assert_eq M-proxy5-exit "$ec" 0
+assert_eq M-proxy5-silent "$outP" ""
+if [ ! -f "$pxstale" ]; then ok; else bad M-proxy5-spill-swept "proxy skipped the spill sweep"; fi
+if [ ! -f "$ppwold" ]; then ok; else bad M-proxy5-pw-swept "proxy skipped the playwright prune"; fi
+
+# M-proxy6: the value is read before the env files load — the hook source says so in one place.
+if grep -q "^const COMPRESSION = process.env.FND_COMPRESSION;" "$SLIM" \
+  && [ "$(grep -n '^const COMPRESSION' "$SLIM" | cut -d: -f1)" -lt "$(grep -n "env-file.cjs').load()" "$SLIM" | head -1 | cut -d: -f1)" ]; then ok
+else bad M-proxy6-snapshot-first "FND_COMPRESSION is not captured before the env-file load"; fi
 
 # ── M17–M24: FND_MCP_SLIM_DEBUG log (M6, + M8 format/project) ─────────────────
 # One JSONL metadata line per invocation → <FND_MCP_SLIM_DIR>/fnd-mcp-slim-debug.log; opt-in, never

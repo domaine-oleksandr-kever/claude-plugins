@@ -10,7 +10,9 @@
 #
 # On Claude Code the whale convention ships as hooks/mcp-whale-claude.md: the fnd-slim mod and the
 # classic mcp-slim hook already hand the model slimmed or stubbed MCP results there, so the full
-# spill recipe in hooks/mcp-whale.md is dead weight that only eats the context cap below.
+# spill recipe in hooks/mcp-whale.md is dead weight that only eats the context cap below. Under
+# FND_COMPRESSION=proxy (process env, as the wiring gate reads it) with the slim plugin installed and
+# not disabled, slim compresses and neither block rides; without slim the short block stays.
 #
 # The composed context becomes the session context. On the Claude host it rides in the SessionStart
 # JSON envelope, the one delivery form an Agent SDK host (Cowork) injects — plain stdout reaches the
@@ -32,6 +34,14 @@ set -u
 # that would have exported one is not in play.
 root="${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)}}"
 
+# The slim plugin installed (user or project scope) and not switched off in settings.json — a grep,
+# not a parse: a wrong answer only costs or keeps one convention block.
+slim_on() {
+  _cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  grep -q '"slim@' "$_cfg/plugins/installed_plugins.json" 2>/dev/null || return 1
+  ! grep -Eq '"slim@[^"]*"[[:space:]]*:[[:space:]]*false' "$_cfg/settings.json" 2>/dev/null
+}
+
 compose() {
   echo "fnd plugin root: $root"
 
@@ -49,7 +59,7 @@ compose() {
     cat "$root/hooks/$f.md" 2>/dev/null
   done
   if [ "${FND_HOST:-}" = claude ]; then
-    cat "$root/hooks/mcp-whale-claude.md" 2>/dev/null
+    { [ "${FND_COMPRESSION:-builtin}" = proxy ] && slim_on; } || cat "$root/hooks/mcp-whale-claude.md" 2>/dev/null
   else
     cat "$root/hooks/mcp-whale.md" 2>/dev/null
   fi

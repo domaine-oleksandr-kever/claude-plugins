@@ -305,3 +305,178 @@ describe('event log', () => {
     expect(await logged($, 'slim')).toEqual([])
   })
 })
+
+/**
+ * The slim plugin beside fnd, as far as fnd can see it: the slim.info snapshot it owns, taken from the
+ * test's SLIM_INFO_JSON (an inline plugin's register cannot close over the test's values).
+ */
+const SLIM_SIBLING = {
+  name: 'slim',
+  register(on: On) {
+    on('session.start', async ($: any, e: any, next: any) => {
+      const raw = await $.env.get('SLIM_INFO_JSON')
+      await $.state.set({ plugin: 'slim', key: 'info' }, raw ? JSON.parse(raw) : null)
+      return next(e)
+    })
+  },
+}
+const withInfo = (info: unknown, env: Record<string, string> = {}) => ({ ...env, SLIM_INFO_JSON: JSON.stringify(info) })
+const PROXY = { FND_COMPRESSION: 'proxy' }
+const PROXY_ON = withInfo({ v: 1, version: '0.3.0', channels: ['mcp', 'bash', 'read'] }, PROXY)
+async function startSession($: any, on: On): Promise<void> {
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('session.root', async () => {
+    throw new Error('no repo')
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+}
+const PLAIN = 'line of plain text\n'.repeat(2800)
+const NOT_LOADED = 'FND_COMPRESSION=proxy, but slim is not loaded (or older than 0.3.0) — fnd compresses'
+const MCP_OFF = "FND_COMPRESSION=proxy, but slim's MCP channel is off (SLIM_MCP=0) — fnd compresses"
+const compressRuns = (runs: Run[]) => runs.filter(r => r.argv.includes('--from-mod'))
+const sweepRuns = (runs: Run[]) => runs.filter(r => !r.argv.includes('--from-mod'))
+
+describe('builtin with slim beneath', () => {
+  test("a small slim output quoting the overflow phrase above this session's spill path is no host stub: no run", async ($, on) => {
+    const quoting = [{ type: 'text', text: `{"note":"${NOTICE.replace(/"/g, "'").replace(/\n/g, ' ')}"}\n\nslim: compressed 9,000 B → 900 B (−90.0%)\n\n<<full=/tmp/fnd-mcp-slim-0123456789abcdef.json original_result>>` }]
+    const { runs, toasts } = setup(on, { result: quoting, text: quoting[0]!.text }, () => out(slimJson(SLIMMED, STATS)))
+    expect((await $.tool.call({ tool: TOOL } as any)).result).toEqual(quoting)
+    expect(runs).toEqual([])
+    expect(toasts).toEqual([])
+  })
+
+  test("fnd's own figure beneath is still toasted (fnd's label is not slim's)", async ($, on) => {
+    const { runs, toasts } = setup(on, { result: SLIMMED, text: SLIMMED }, () => out(''))
+    expect((await $.tool.call({ tool: TOOL } as any)).result).toBe(SLIMMED)
+    expect(runs).toEqual([])
+    expect(toasts.map(t => t.text)).toEqual([STATS])
+  })
+})
+
+describe('FND_COMPRESSION=proxy', () => {
+  test('slim.info lists mcp → the result untouched, no compression, no toast; one sweep run per session', { plugins: [SLIM_SIBLING, PEEK_EVENTS] }, async ($, on) => {
+    const { runs, toasts } = setup(on, { result: NOTICE, text: NOTICE }, () => out(slimJson(SLIMMED, STATS)), PROXY_ON)
+    await startSession($, on)
+    const r = await $.tool.call({ tool: TOOL } as any)
+    expect(r.result).toBe(NOTICE)
+    await $.tool.call({ tool: TOOL } as any)
+    expect(compressRuns(runs)).toEqual([])
+    expect(toasts).toEqual([])
+    const sweeps = sweepRuns(runs)
+    expect(sweeps.length).toBe(1)
+    expect(sweeps[0]!.argv.slice(2)).toEqual([])
+    expect(sweeps[0]!.init?.env?.FND_HOST).toBe('claude')
+    expect(sweeps[0]!.init?.env?.FND_COMPRESSION).toBe('proxy')
+    expect(JSON.parse(sweeps[0]!.init?.stdin ?? '')).toEqual({ cwd: '/repo', tool_name: TOOL })
+    expect(await logged($, 'slim')).toEqual([])
+  })
+
+  test('a failing sweep run never reaches the result', { plugins: [SLIM_SIBLING] }, async ($, on) => {
+    const { runs } = setup(on, { result: NOTICE, text: NOTICE }, 'reject', PROXY_ON)
+    await startSession($, on)
+    expect((await $.tool.call({ tool: TOOL } as any)).result).toBe(NOTICE)
+    expect(sweepRuns(runs).length).toBe(1)
+  })
+
+  test('slim not loaded → fnd compresses the whole result, one notice toast + one event per session', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { runs, toasts } = setup(on, { result: PLAIN, text: PLAIN }, () => out(slimJson(SLIMMED)), PROXY)
+    expect(await $.tool.call({ tool: TOOL, jql: 'x' } as any)).toEqual({ result: SLIMMED })
+    expect(await $.tool.call({ tool: TOOL, jql: 'y' } as any)).toEqual({ result: SLIMMED })
+    expect(runs.length).toBe(2)
+    expect(runs[0]!.argv.slice(2)).toEqual(['--from-mod', '--overflow=expand'])
+    expect(JSON.parse(runs[0]!.init?.stdin ?? '').tool_response).toBe(PLAIN)
+    expect(toasts).toEqual([{ text: NOT_LOADED }])
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual([NOT_LOADED])
+  })
+
+  test('slim not loaded: the compression figure is still toasted beside the notice', async ($, on) => {
+    const { toasts } = setup(on, { result: PLAIN, text: PLAIN }, () => out(slimJson(SLIMMED, STATS)), PROXY)
+    await $.tool.call({ tool: TOOL } as any)
+    expect(toasts.map(t => t.text)).toEqual([NOT_LOADED, STATS])
+  })
+
+  test('slim not loaded, the host stub → expanded as under builtin', async ($, on) => {
+    const { runs } = setup(on, { result: NOTICE }, () => out(slimJson(SLIMMED)), PROXY)
+    expect(await $.tool.call({ tool: TOOL } as any)).toEqual({ result: SLIMMED })
+    expect(runs.length).toBe(1)
+  })
+
+  test('slim not loaded, a result at or under 4 KB → no run, no notice', async ($, on) => {
+    const small = 'x'.repeat(2048)
+    const { runs, toasts } = setup(on, { result: small, text: small }, () => out(slimJson(SLIMMED)), PROXY)
+    expect((await $.tool.call({ tool: TOOL } as any)).result).toBe(small)
+    expect(runs.length).toBe(0)
+    expect(toasts).toEqual([])
+  })
+
+  for (const [name, text] of [
+    ["slim's stats line + handle", `${'{"a":1}\n'.repeat(800)}\nslim: compressed 90,000 B → 7,000 B (−92.2%)\n\n<<full=/tmp/fnd-mcp-slim-0123456789abcdef.json original_result>>`],
+    ["slim's stub", `<<slim stub>> ${'y'.repeat(6000)}`],
+  ] as const) {
+    test(`slim not loaded, ${name} → passes through, no run`, async ($, on) => {
+      const { runs } = setup(on, { result: text, text }, () => out(slimJson(SLIMMED)), PROXY)
+      expect((await $.tool.call({ tool: TOOL } as any)).result).toBe(text)
+      expect(runs.length).toBe(0)
+    })
+  }
+
+  test("slim not loaded, slim's tail inside a text block → passes through, no run", async ($, on) => {
+    const block = [{ type: 'text', text: `${'{"a":1}\n'.repeat(800)}\n\nslim: compressed 50,000 B → 2,000 B (−96.0%)\n\n<<full=/tmp/fnd-mcp-slim-0123456789abcdef.json original_result>>` }]
+    const { runs } = setup(on, { result: block, text: block[0]!.text }, () => out(slimJson(SLIMMED)), PROXY)
+    expect((await $.tool.call({ tool: TOOL } as any)).result).toEqual(block)
+    expect(runs.length).toBe(0)
+  })
+
+  test('a subagent first, then the main loop: one Log line, and the toast still shown once on the main call', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = setup(on, { result: PLAIN, text: PLAIN }, () => out(slimJson(SLIMMED)), PROXY)
+    await $.tool.call({ tool: TOOL, agentId: 'agent-7' } as any)
+    await $.tool.call({ tool: TOOL } as any)
+    await $.tool.call({ tool: TOOL } as any)
+    await $.tool.call({ tool: TOOL, agentId: 'agent-8' } as any)
+    expect(toasts).toEqual([{ text: NOT_LOADED }])
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual([NOT_LOADED])
+  })
+
+  test('two first calls in parallel: one toast, one Log line', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = setup(on, { result: PLAIN, text: PLAIN }, () => out(slimJson(SLIMMED)), PROXY)
+    await Promise.all([$.tool.call({ tool: TOOL, jql: 'a' } as any), $.tool.call({ tool: TOOL, jql: 'b' } as any)])
+    expect(toasts).toEqual([{ text: NOT_LOADED }])
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual([NOT_LOADED])
+  })
+
+  test("slim loaded with its MCP channel off → fnd compresses, the SLIM_MCP=0 notice", { plugins: [SLIM_SIBLING, PEEK_EVENTS] }, async ($, on) => {
+    const env = withInfo({ v: 1, version: '0.3.0', channels: ['bash'] }, PROXY)
+    const { runs, toasts } = setup(on, { result: PLAIN, text: PLAIN }, () => out(slimJson(SLIMMED)), env)
+    await startSession($, on)
+    expect(await $.tool.call({ tool: TOOL } as any)).toEqual({ result: SLIMMED })
+    expect(compressRuns(runs).length).toBe(1)
+    expect(sweepRuns(runs)).toEqual([])
+    expect(toasts).toEqual([{ text: MCP_OFF }])
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual([MCP_OFF])
+  })
+
+  test('in a subagent the notice is logged, never toasted', { plugins: [PEEK_EVENTS] }, async ($, on) => {
+    const { toasts } = setup(on, { result: PLAIN, text: PLAIN }, () => out(slimJson(SLIMMED)), PROXY)
+    await $.tool.call({ tool: TOOL, agentId: 'agent-7' } as any)
+    expect(toasts).toEqual([])
+    expect((await logged($, 'slim')).map(ev => ev.text)).toEqual([NOT_LOADED])
+  })
+
+  test('FND_MCP_SLIM=0 still wins: no run, no sweep, no notice', { plugins: [SLIM_SIBLING] }, async ($, on) => {
+    const { runs, toasts } = setup(on, { result: PLAIN, text: PLAIN }, () => out(slimJson(SLIMMED)), { ...PROXY_ON, FND_MCP_SLIM: '0' })
+    await startSession($, on)
+    expect((await $.tool.call({ tool: TOOL } as any)).result).toBe(PLAIN)
+    expect(runs).toEqual([])
+    expect(toasts).toEqual([])
+  })
+
+  for (const value of ['builtin', 'junk', '']) {
+    test(`FND_COMPRESSION=${JSON.stringify(value)} reads as builtin: a big plain result is left to the classic hook, even with slim loaded`, { plugins: [SLIM_SIBLING] }, async ($, on) => {
+      const { runs, toasts } = setup(on, { result: PLAIN, text: PLAIN }, () => out(slimJson(SLIMMED, STATS)), withInfo({ v: 1, version: '0.3.0', channels: ['mcp'] }, { FND_COMPRESSION: value }))
+      await startSession($, on)
+      expect((await $.tool.call({ tool: TOOL } as any)).result).toBe(PLAIN)
+      expect(runs).toEqual([])
+      expect(toasts).toEqual([])
+    })
+  }
+})

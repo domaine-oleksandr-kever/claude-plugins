@@ -53,7 +53,7 @@ shapes, the scratch-repo probe, the report format, and remediation per failure.
    invocation form the developer actually used (slash command, `$name`, command shim, or
    model-invoked by description) — that is the datum, not the fact that it worked.
 2. **Bundle integrity** — run `node <plugin root>/scripts/doctor.cjs` (add `--target <host>` for
-   the host named in the global rules, off Claude Code). Proves the bundled scripts are reachable
+   the host named in the global rules; `claude` on Claude Code). Proves the bundled scripts are reachable
    and runnable from the host's own process, and reports the version stamp every other row is
    filed under. Reference: *Row 2* for reading PASS/FAIL/SKIP and exit codes.
 3. **MCP servers** — ONE cheap read-only call per server this host has configured, per the call
@@ -73,7 +73,8 @@ shapes, the scratch-repo probe, the report format, and remediation per failure.
 7. **MCP compression** — best effort, per *Row 7*. If any MCP call in rows 3–4 tripped the
    compressor (stub, spill path, or in-place rewrite marker), report which path fired. Otherwise
    run the json-slim CLI on the bundled fixture so the script half is proven on this host, and
-   mark the hook half 🟡 "not exercised" — do not claim it from the CLI result.
+   mark the hook half 🟡 "not exercised" — do not claim it from the CLI result. On Claude Code
+   also name which plugin compressed, from the result's label (*Row 7*, source check).
 8. **Host trace** — the same rows read back from a log instead of from memory. When
    `FND_HOST_TRACE` is on, run `node <plugin root>/scripts/doctor.cjs --trace --since <this
    session's start>` and report which `event/hook` rows logged under **this** host in this
@@ -82,6 +83,8 @@ shapes, the scratch-repo probe, the report format, and remediation per failure.
    remediation `node <plugin root>/scripts/domaine-env.cjs set FND_HOST_TRACE=1` (global-only)
    plus a new session, and re-run this skill there. Reference: *Row 8* for the expected rows per
    host.
+9. **Compression backend** (Claude Code only; other hosts 🟡 "not applicable") — read row 2's
+   `compression-backend` line per *Row 9*: builtin, or proxy to the slim plugin.
 
 ## Report
 

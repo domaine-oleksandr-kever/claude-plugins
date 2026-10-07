@@ -38,6 +38,11 @@ export type FndEventKind = 'session' | 'model' | 'compact' | 'rate' | 'workspace
 /** One event-log line; `atMs` = `$.clock.now()` when written, `text` one line, no kind prefix. */
 export type FndEvent = { atMs: number; kind: FndEventKind; text: string }
 
+/** A line from another plugin's event log (slim's `slim` / `lookup`); fnd reads only these fields. */
+export type FndForeignEvent = { atMs: number; kind: string; text: string }
+/** The slim plugin's session.start snapshot: present iff slim is loaded; `channels` = its channels not switched off. */
+export type FndSlimInfo = { v: 1; version: string; channels: string[] }
+
 declare module 'claude-code' {
   interface PluginState {
     fnd: {
@@ -60,8 +65,17 @@ declare module 'claude-code' {
       sessionId: string | null
       /** launch root latched once for the guard */
       guardRoot: string | null
-      /** event-log ring buffer, oldest first, at most 50; stays [] under FND_EVENT_LOG=0 */
+      /** event-log ring buffer, oldest first, at most 200; stays [] under FND_EVENT_LOG=0 */
       events: FndEvent[]
+      /** the FND_COMPRESSION=proxy fallback notice this session: `<session id>` once logged, `<session id>:toast` once toasted too */
+      proxyNotice: string | null
+      /** session id the FND_COMPRESSION=proxy scratch-file sweep was started for (once per session) */
+      proxySweep: string | null
+    }
+    /** Owned and written by the separate slim plugin; fnd only reads it, and both stay null/[] without slim. */
+    slim: {
+      events: FndForeignEvent[]
+      info: FndSlimInfo | null
     }
   }
 }

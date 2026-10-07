@@ -205,9 +205,11 @@ done
 # W4: the ONE deliberate divergence — PostToolUse routes through the Codex adapter instead of
 # mcp-slim directly, because this host replaces a result only through a hook BLOCK, whose reason the
 # adapter builds. Everything else about the command (the FND_MCP_SLIM gate, the `|| true` fail-open)
-# is unchanged.
+# is unchanged, less the FND_COMPRESSION=proxy gate: the slim plugin it hands off to is Claude Code only.
 assert_eq W4-posttooluse "$(wcmd PostToolUse 0)" \
-  "$(printf '%s' "$(want_cmd "$(ccmd PostToolUse 0)")" | sed -e 's#hooks/mcp-slim.cjs#hooks/codex-mcp-shim.cjs#')"
+  "$(printf '%s' "$(want_cmd "$(ccmd PostToolUse 0)")" | sed -e 's#hooks/mcp-slim.cjs#hooks/codex-mcp-shim.cjs#' \
+    -e 's# || \[ "\${FND_COMPRESSION:-builtin}" = "proxy" \]##')"
+assert_absent W4-no-proxy-gate "$(wcmd PostToolUse 0)" 'FND_COMPRESSION'
 
 # W5: every script the wiring names exists in the canonical hooks dir (single-copy: no forked
 # per-host copy of a guard or of the compressor).

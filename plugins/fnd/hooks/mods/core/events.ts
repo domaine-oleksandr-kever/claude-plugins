@@ -1,6 +1,6 @@
 // Pure event-log helpers shared by the writer files and the log pane. No `$` here: each writer keeps
 // its own `logEvent` wrapper, as the validator follows `$` only within one file.
-import type { FndEvent, FndEventKind } from '../../../types'
+import type { FndEvent, FndEventKind, FndForeignEvent } from '../../../types'
 
 export const EVENT_CAP = 200
 export const LOG_PANE = 'fnd-log'
@@ -14,6 +14,22 @@ export function pushEvent(list: readonly FndEvent[], ev: FndEvent): FndEvent[] {
   if (list.length < EVENT_CAP) return [...list, ev]
   const i = Math.max(0, list.findIndex(e => ROUTINE.has(e.kind)))
   return [...list.slice(0, i), ...list.slice(i + 1), ev]
+}
+
+/**
+ * fnd's log and another plugin's in one list, oldest first; on equal times fnd's line comes first.
+ * A foreign entry without a finite `atMs` or a string `kind`/`text` is dropped: another plugin writes it.
+ * Beside slim's lines fnd's own compression lines read `fnd-slim`, so the kind cell names who compressed.
+ */
+export function merged(fnd: readonly FndEvent[], foreign: readonly unknown[]): FndForeignEvent[] {
+  const ok = (ev: unknown): ev is FndForeignEvent => {
+    const e = ev as Partial<FndForeignEvent> | null
+    return !!e && Number.isFinite(e.atMs) && typeof e.kind === 'string' && typeof e.text === 'string'
+  }
+  const theirs = Array.isArray(foreign) ? foreign.filter(ok).map(e => ({ atMs: e.atMs, kind: e.kind, text: e.text })) : []
+  if (theirs.length === 0) return [...fnd]
+  const mine = fnd.map(e => (e.kind === 'slim' ? { ...e, kind: 'fnd-slim' } : e))
+  return [...mine, ...theirs].map((e, i) => ({ e, i })).sort((a, b) => a.e.atMs - b.e.atMs || a.i - b.i).map(x => x.e)
 }
 
 /** `fnd-mcp-slim: compressed …` → `compressed …`: the kind column already names the source. */

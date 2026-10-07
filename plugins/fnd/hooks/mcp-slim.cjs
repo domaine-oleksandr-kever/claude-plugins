@@ -78,13 +78,18 @@
 //      `1` = key events, `2` = everything, sub-gate size-gate lines included);
 //      FND_MCP_SLIM_STUB (0 disables the spill-and-stub guard) + FND_MCP_SLIM_STUB_BYTES (its
 //      threshold; default 32768);
-//      FND_MCP_SLIM_BUDGET_MS (wall-clock ceiling for the pipeline; default 5000, 0 disables).
+//      FND_MCP_SLIM_BUDGET_MS (wall-clock ceiling for the pipeline; default 5000, 0 disables);
+//      FND_COMPRESSION (`proxy` hands MCP compression to the slim plugin: gated in plugin.json, and
+//      honoured here on a Claude Code wiring run — not with --from-mod — as a skip that still sweeps).
 'use strict';
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// Taken before the env files load: the wiring's shell gate and the hooks module never see those files,
+// so a value only there must not stop this hook while they still read `builtin`.
+const COMPRESSION = process.env.FND_COMPRESSION;
 try { require('../scripts/env-file.cjs').load(); } catch (_) {} // domaine env files fill process.env gaps (env > project > global); absent in a partial install
 // The shell gates in the hook wirings see only the real process env — a file-set 0 must
 // still disable the hook, so it is honored here too (no output = the original passes through).
@@ -1207,15 +1212,25 @@ if (require.main === module) {
   process.stdin.on('data', (d) => chunks.push(d));
   process.stdin.on('end', () => {
     const ht0 = hostTrace.start();
+    const ht0Ms = Date.now();
     try {
       const raw = Buffer.concat(chunks).toString('utf8');
       // With the compressor off the event is still parsed — for its cwd alone, so the sweep below can
       // find the project's playwright output dir. Nothing is emitted on this path, as before.
-      if (slimOff) {
+      // Under FND_COMPRESSION=proxy the slim plugin compresses; the wiring gate already stops node, so
+      // this is the belt-and-braces copy, and the hooks module's once-per-session sweep run lands here.
+      const proxyOff = COMPRESSION === 'proxy' && HOST_TAG === 'claude' && !FROM_MOD;
+      if (slimOff || proxyOff) {
         const ev = JSON.parse(raw);
         eventCwd = typeof ev.cwd === 'string' && ev.cwd ? ev.cwd : null;
         eventTool = typeof ev.tool_name === 'string' ? ev.tool_name : null;
         hostDecision = 'skip';
+        if (proxyOff && !slimOff && debugLevel() >= 2) {
+          jsonSlim().debugLog({
+            entry: 'hook', tool: eventTool, decision: 'skip', reason: 'proxy',
+            bytes_in: null, bytes_out: null, pct: null, stages: [], spill: null, ms: Date.now() - ht0Ms,
+          }, undefined, eventCwd);
+        }
       } else run(raw);
     } catch (_) {
       // Any failure → emit nothing, original result passes through untouched.

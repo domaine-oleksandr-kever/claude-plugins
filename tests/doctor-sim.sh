@@ -7,6 +7,9 @@ set -u
 # --home is the whole override, but only because the doctor ignores XDG_CONFIG_HOME when it is
 # given; an ambient export would otherwise re-target the OpenCode cases on a developer machine.
 unset XDG_CONFIG_HOME
+# The compression-backend row reads FND_COMPRESSION from the process env first; a developer trying
+# the slim plugin must not flip the cases below.
+unset FND_COMPRESSION CLAUDE_CONFIG_DIR SLIM_MCP
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCTOR="$ROOT/plugins/fnd/scripts/doctor.cjs"
@@ -462,6 +465,76 @@ expect D36-home-beats-xdg 0 "PASS  install:opencode" "!FAIL"
 run --root "$G" --home "$H1" --target claude
 expect D37-claude-cache 0 "SKIP  install:claude" ".claude/plugins/cache" "!FAIL"
 
+# DC: the compression-backend row (Claude Code only) — FND_COMPRESSION from the process env, else
+# settings.json env; slim from installed_plugins.json (user scope or this project), enabledPlugins
+# false = disabled, at least 0.3.0. A WARN never fails the run; the summary names it only then.
+expect D37-claude-builtin 0 "PASS  compression-backend" "builtin (fnd compresses MCP results)" "!warned"
+if grep -qE '^doctor: [0-9]+ passed, 0 failed, [0-9]+ skipped$' "$O"; then ok
+else bad DC-summary-unchanged "out=$(tr '\n' ';' <"$O" | head -c 300)"; fi
+run --root "$G" --home "$H1"
+expect DC-no-target-no-row 0 "!compression-backend"
+
+# mkclaude <home> <settings-json> [installed-json] — a sandbox ~/.claude for the compression row
+mkclaude() {
+  mkdir -p "$1/.claude/plugins"
+  printf '%s\n' "$2" > "$1/.claude/settings.json"
+  if [ -n "${3:-}" ]; then printf '%s\n' "$3" > "$1/.claude/plugins/installed_plugins.json"; fi
+}
+slim_entry() { # <version> [scope] [projectPath]
+  printf '{"version":2,"plugins":{"slim@domaine":[{"scope":"%s","installPath":"/x","version":"%s"%s}]}}' \
+    "${2:-user}" "$1" "${3:+,\"projectPath\":\"$3\"}"
+}
+runc() { rc=0; env "$@" node "$DOCTOR" --root "$G" --home "$HC" --target claude >"$O" 2>"$E" || rc=$?; }
+
+HC="$TMP/home-c1"; mkclaude "$HC" '{}'
+runc FND_COMPRESSION=proxy
+expect DC1-env-proxy-no-slim 0 "WARN  compression-backend" \
+  "FND_COMPRESSION=proxy but slim is not installed or disabled — fnd keeps compressing; /plugin install slim@domaine or unset FND_COMPRESSION" \
+  ", 1 warned" "!FAIL"
+
+HC="$TMP/home-c2"; mkclaude "$HC" '{"env":{"FND_COMPRESSION":"proxy"}}' "$(slim_entry 0.3.0)"
+runc
+expect DC2-settings-proxy-slim 0 "PASS  compression-backend" "proxy → slim 0.3.0" "!warned"
+
+HC="$TMP/home-c2m"; mkclaude "$HC" '{"env":{"FND_COMPRESSION":"proxy","SLIM_MCP":"0"}}' "$(slim_entry 0.3.0)"
+runc
+expect DC2-slim-mcp-off 0 "WARN  compression-backend" "SLIM_MCP=0 turns slim 0.3.0's MCP channel off — fnd keeps compressing MCP results" ", 1 warned"
+HC="$TMP/home-c2"
+runc SLIM_MCP=0
+expect DC2-slim-mcp-off-env 0 "WARN  compression-backend" "SLIM_MCP=0"
+
+HC="$TMP/home-c3"; mkclaude "$HC" '{"env":{"FND_COMPRESSION":"proxy"}}' "$(slim_entry 0.2.0)"
+runc
+expect DC3-old-slim 0 "WARN  compression-backend" "FND_COMPRESSION=proxy but slim 0.2.0 predates 0.3.0 — fnd keeps compressing; update slim"
+
+HC="$TMP/home-c4"; mkclaude "$HC" '{"env":{"FND_COMPRESSION":"proxy"},"enabledPlugins":{"slim@domaine":false}}' "$(slim_entry 0.3.0)"
+runc
+expect DC4-disabled 0 "WARN  compression-backend" "slim is not installed or disabled"
+
+HC="$TMP/home-c5"; mkclaude "$HC" '{"env":{"FND_COMPRESSION":"proxy"}}' "$(slim_entry 0.3.1 project "$TMP/elsewhere-project")"
+runc
+expect DC5-other-project 0 "WARN  compression-backend" "slim is not installed or disabled"
+rc=0; (cd "$TMP" && node "$DOCTOR" --root "$G" --home "$HC" --target claude >"$O" 2>"$E") || rc=$?
+expect DC5-other-project-still 0 "WARN  compression-backend"
+HP="$TMP/this-project"; mkdir -p "$HP"; HC="$TMP/home-c5b"
+mkclaude "$HC" '{"env":{"FND_COMPRESSION":"proxy"}}' "$(slim_entry 0.3.1 project "$(cd "$HP" && pwd -P)")"
+rc=0; (cd "$HP" && node "$DOCTOR" --root "$G" --home "$HC" --target claude >"$O" 2>"$E") || rc=$?
+expect DC5-this-project 0 "PASS  compression-backend" "proxy → slim 0.3.1"
+
+HC="$TMP/home-c6"; mkclaude "$HC" '{}'; mkdir -p "$HC/.config/domaine"; printf 'FND_COMPRESSION=proxy\n' > "$HC/.config/domaine/env"
+runc
+expect DC6-envfile-ignored 0 "WARN  compression-backend" \
+  "FND_COMPRESSION is set in ~/.config/domaine/env, which fnd ignores for this key — set it in settings.json env"
+
+HC="$TMP/home-c7"; mkclaude "$HC" '{}'
+runc FND_COMPRESSION=maybe
+expect DC7-junk 0 "WARN  compression-backend" "FND_COMPRESSION=maybe is not builtin|proxy — treated as builtin"
+
+# DC8: the process env wins over settings.json, as it does for the wiring.
+HC="$TMP/home-c8"; mkclaude "$HC" '{"env":{"FND_COMPRESSION":"proxy"}}'
+runc FND_COMPRESSION=builtin
+expect DC8-env-beats-settings 0 "PASS  compression-backend" "builtin (fnd compresses MCP results)"
+
 # D37b: a doctor run from a plain checkout with nothing linked still fails — that checkout is not
 # installed anywhere, and the row says where the real channels live.
 run --root "$G" --home "$H1" --target codex
@@ -788,11 +861,25 @@ expect DR1-report-no-log 0 "no compression log at $RLOG" "FND_MCP_SLIM_DEBUG=1" 
 runreport --report
 expect DR2-report-aggregate 0 "fnd doctor — compression report" "json-slim: debug-log report — $RLOG" \
   "3 events (+1 unparseable)" "18458 → 11064 B (40.1% saved)" "compressed 2 · passthrough 1" \
-  "7394 B over 2 calls — mcp__x__getJiraIssue" "elc: 3 events, 7394 B saved"
+  "7394 B over 2 calls — mcp__x__getJiraIssue" "elc: 3 events, 7394 B saved" \
+  "  by src: fnd 18458 → 11064 B (40.1% saved)"
 
 # DR3: the doctor's window syntax (Nh) reaches json-slim as a timestamp — the old call drops out
 runreport --report --since 2h
-expect DR3-report-since 0 "2 events (+1 unparseable)" "compressed 1 · passthrough 1" "[since "
+expect DR3-report-since 0 "2 events (+1 unparseable)" "compressed 1 · passthrough 1" "[since " \
+  "  by src: fnd 9458 → 8064 B (14.7% saved)"
+
+# DR3b: slim's lines beside fnd's in the one shared log — grouped by src (bytes_seen when present),
+# slim's lookup line (tokens, not result bytes) left out of the byte totals.
+cp "$RLOG" "$TMP/rlog.bak"
+{
+  printf '{"ts":"%s","lvl":1,"src":"slim","channel":"bash","entry":"mod","tool":"Bash","decision":"compressed","reason":null,"bytes_in":70000,"bytes_seen":3000,"bytes_out":1500,"pct":50,"stages":[],"ms":9}\n' "$NOW"
+  printf '{"ts":"%s","lvl":1,"src":"slim","channel":"mcp","entry":"mod","tool":"mcp__x__getJiraIssue","decision":"compressed","reason":null,"bytes_in":9000,"bytes_out":1000,"pct":88.9,"stages":[],"ms":9}\n' "$NOW"
+  printf '{"ts":"%s","lvl":1,"src":"slim","channel":"lookup","entry":"mod","tool":"mcp__slim__lookup","decision":"answered","bytes_in":40000,"bytes_out":300,"ms":900}\n' "$NOW"
+} >> "$RLOG"
+runreport --report
+expect DR3b-report-by-src 0 "  by src: fnd 18458 → 11064 B (40.1% saved) · slim 12000 → 2500 B (79.2% saved)"
+cp "$TMP/rlog.bak" "$RLOG"
 
 # DR4: both readouts in one run — the trace matrix (DT3's fixture log is still there) first, the
 # compression report after it

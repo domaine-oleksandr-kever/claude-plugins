@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { FndEvent } from '../../../types'
-import { EVENT_CAP, PREFIX_COLS, bare, fmtK, hhmm, kindCell, newestFitting, pushEvent, textRows, toolName } from '../core/events.ts'
+import { EVENT_CAP, PREFIX_COLS, bare, fmtK, hhmm, kindCell, merged, newestFitting, pushEvent, textRows, toolName } from '../core/events.ts'
 
 const NOW = new Date(2027, 0, 15, 9, 5).getTime()
 const PANE = 'fnd-log'
@@ -20,8 +20,8 @@ function world(on: On, env: Record<string, string> = {}) {
     closes: [] as unknown[],
     toasts: [] as string[],
     surfaces: ['terminal'] as string[],
+    clock: mock.clock(on, { now: NOW }),
   }
-  mock.clock(on, { now: NOW })
   mock.store(on)
   mock.env(on, env)
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
@@ -261,5 +261,112 @@ describe('Log pane', () => {
       expect((await ui.find({ type: 'Text', text: 'no events yet' }))?.props).toMatchObject({ dimColor: true })
       await ui.unmount()
     })
+  }
+})
+
+/**
+ * The slim plugin beside fnd: at session start it writes the slim.events list it owns from the test's
+ * SLIM_EVENTS_JSON (an inline plugin's register cannot close over the test's values); unset, nothing.
+ */
+const SLIM_SIBLING = {
+  name: 'slim',
+  register(on: On) {
+    on('session.start', async ($: any, e: any, next: any) => {
+      const raw = await $.env.get('SLIM_EVENTS_JSON')
+      if (raw) await $.state.set({ plugin: 'slim', key: 'events' }, JSON.parse(raw))
+      return next(e)
+    })
+  },
+}
+const SLIM_LINE = 'getJiraIssue: compressed 90,000 B → 7,000 B (−92.2%)'
+const LOOKUP_LINE = 'lookup: is the widget loaded? · haiku · 1.2k tok'
+const SLIM_EVENTS = [
+  { v: 1, atMs: NOW + 30_000, kind: 'slim', text: SLIM_LINE, src: 'slim', tool: 'mcp__x__getJiraIssue', ms: 40, channel: 'mcp', bytesIn: 90_000, bytesOut: 7000, engine: 'json' },
+  { v: 1, atMs: NOW + 90_000, kind: 'lookup', text: LOOKUP_LINE, src: 'slim', tool: 'mcp__slim__lookup', ms: 900, model: 'haiku', tokens: null, answered: true },
+]
+const MERGED_TEXT = [
+  '09:05  session    start',
+  `09:05  slim       ${SLIM_LINE}`,
+  '09:06  model      claude-opus-5-5',
+  `09:06  lookup     ${LOOKUP_LINE}`,
+].join('\n')
+
+/** fnd's session line at NOW, slim's line at +30 s, fnd's model line at +60 s, slim's lookup at +90 s. */
+async function interleave($: any, w: ReturnType<typeof world>): Promise<void> {
+  await start($)
+  await w.clock.advance(60_000)
+  await switches($, w, 1)
+}
+
+describe('slim.events in the log', () => {
+  test('merged: oldest first, fnd first on a tie, malformed foreign entries dropped', () => {
+    const fnd = [
+      { atMs: 10, kind: 'session' as const, text: 'start' },
+      { atMs: 30, kind: 'model' as const, text: 'm' },
+    ]
+    const foreign = [
+      { atMs: 30, kind: 'slim', text: 'tie' },
+      { atMs: 20, kind: 'lookup', text: 'mid', extra: 1 },
+      { atMs: 'x', kind: 'slim', text: 'bad time' },
+      { atMs: 5, kind: 3, text: 'bad kind' },
+      { atMs: Number.NaN, kind: 'slim', text: 'nan' },
+      null,
+    ]
+    expect(merged(fnd, foreign).map(e => e.text)).toEqual(['start', 'mid', 'm', 'tie'])
+    expect(merged(fnd, foreign)[1]).toEqual({ atMs: 20, kind: 'lookup', text: 'mid' })
+    expect(merged(fnd, [])).toEqual(fnd)
+    expect(merged(fnd, null as any)).toEqual(fnd)
+  })
+
+  test("merged: beside slim's lines fnd's own compression line reads fnd-slim; alone it stays slim", () => {
+    const fnd = [{ atMs: 10, kind: 'slim' as const, text: 'getJiraIssue: compressed 9 B → 1 B' }]
+    expect(merged(fnd, [{ atMs: 20, kind: 'slim', text: 'Bash: compressed' }]).map(e => e.kind)).toEqual(['fnd-slim', 'slim'])
+    expect(merged(fnd, []).map(e => e.kind)).toEqual(['slim'])
+    expect(kindCell('fnd-slim')).toBe('fnd-slim ')
+  })
+
+  test('where no surface draws panes the text answer interleaves both logs', { plugins: [SLIM_SIBLING] }, async ($, on) => {
+    const w = world(on, { SLIM_EVENTS_JSON: JSON.stringify(SLIM_EVENTS) })
+    w.surfaces = []
+    await interleave($, w)
+    expect((await run($, 'fnd-log')).text).toBe(MERGED_TEXT)
+  })
+
+  for (const surface of SURFACES) {
+    test(`${surface}: slim's lines sit between fnd's by time, their kind in the kind cell`, { plugins: [SLIM_SIBLING] }, async ($, on) => {
+      const w = world(on, { SLIM_EVENTS_JSON: JSON.stringify(SLIM_EVENTS) })
+      await interleave($, w)
+      const ui = await mountPane($, surface)
+      expect((await rows(ui)).map(x => x.texts)).toEqual([
+        ['09:05  ', 'session    ', 'start'],
+        ['09:05  ', 'slim       ', SLIM_LINE],
+        ['09:06  ', 'model      ', 'claude-opus-5-5'],
+        ['09:06  ', 'lookup     ', LOOKUP_LINE],
+      ])
+      await ui.unmount()
+    })
+
+    test(`${surface}: "… N earlier" counts the merged list`, { plugins: [SLIM_SIBLING] }, async ($, on) => {
+      const w = world(on, { SLIM_EVENTS_JSON: JSON.stringify(SLIM_EVENTS) })
+      await interleave($, w)
+      const ui = await mountPane($, surface, { bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 } })
+      expect(await ui.find({ type: 'Text', text: '… 2 earlier' })).toBeTruthy()
+      expect((await rows(ui)).map(x => x.texts[2])).toEqual(['claude-opus-5-5', LOOKUP_LINE])
+      await ui.unmount()
+    })
+
+    for (const [name, env] of [
+      ['slim absent', {}],
+      ['slim.events empty', { SLIM_EVENTS_JSON: '[]' }],
+      ['slim.events malformed', { SLIM_EVENTS_JSON: JSON.stringify([{ atMs: 'x', kind: 'slim', text: 'bad' }, { kind: 'slim' }]) }],
+    ] as const) {
+      test(`${surface}: ${name} → fnd's lines only`, { plugins: [SLIM_SIBLING] }, async ($, on) => {
+        const w = world(on, env)
+        await interleave($, w)
+        const ui = await mountPane($, surface)
+        expect((await rows(ui)).map(x => x.texts[1])).toEqual(['session    ', 'model      '])
+        await ui.unmount()
+      })
+    }
   }
 })
