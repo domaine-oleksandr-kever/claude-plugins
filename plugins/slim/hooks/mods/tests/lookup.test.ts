@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { NOTE } from '../describe.ts'
-import { BAD_ARGS, LOOKUP_DESC, LOOKUP_SCHEMA, SYS, webFetchPrompt } from '../lookup.ts'
+import { BAD_ARGS, LOOKUP_DESC, LOOKUP_SCHEMA, SYS, verified, webFetchPrompt } from '../lookup.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
 const LOOKUP = 'mcp__slim__lookup'
@@ -279,6 +279,63 @@ describe('L8 model and subagents', () => {
     await lookup($, { path: '/repo/a.json', question: 'q?' })
     expect(await events($)).toEqual([])
     expect(w.records).toHaveLength(1)
+  })
+})
+
+const SHOW = [
+  'commit 3f2a9c1',
+  'Author: Ada Lovelace <ada@example.com>',
+  '',
+  '    feat: widen the cache window',
+  '',
+  ' src/cache.ts       | 42 +++++++++++++++----',
+  ' src/cache.test.ts  | 18 ++++++++',
+  ' 2 files changed, 51 insertions(+), 9 deletions(-)',
+].join('\n')
+const UNVERIFIED = '(unverified: the quote was not in the source) a'
+
+describe('L9 evidence over several lines', () => {
+  test('a quote from one line is kept as given', () => {
+    expect(verified('a', '2 files changed,  51 insertions(+)', SHOW)).toEqual({ answer: 'a', evidence: '2 files changed,  51 insertions(+)' })
+  })
+
+  test('two non-adjacent lines, each in the document → accepted, shown joined with …', () => {
+    for (const ev of [
+      'feat: widen the cache window\n2 files changed, 51 insertions(+), 9 deletions(-)',
+      'feat: widen the cache window … 2 files changed, 51 insertions(+)',
+      'feat: widen the cache window | 2 files changed, 51 insertions(+)',
+      'feat: widen the cache window; 2 files changed, 51 insertions(+)',
+    ]) {
+      expect(verified('a', ev, SHOW).answer).toBe('a')
+    }
+    expect(verified('a', 'feat: widen the cache window\n 2 files changed, 51 insertions(+), 9 deletions(-)', SHOW))
+      .toEqual({ answer: 'a', evidence: 'feat: widen the cache window … 2 files changed, 51 insertions(+), 9 deletions(-)' })
+  })
+
+  test('a made-up piece → unverified, no evidence', () => {
+    expect(verified('a', 'feat: widen the cache window\n3 files changed, 70 insertions(+)', SHOW)).toEqual({ answer: UNVERIFIED, evidence: '' })
+  })
+
+  test('a made-up line whose ` | ` / `; ` pieces are all short still has to be found', () => {
+    for (const ev of ['2 files changed, 51 insertions(+)\nmade up | invented', '2 files changed, 51 insertions(+)\nsecurity; deleted; all']) {
+      expect(verified('a', ev, SHOW)).toEqual({ answer: UNVERIFIED, evidence: '' })
+    }
+  })
+
+  test('pieces under 12 characters are not shown; none long enough → unverified', () => {
+    expect(verified('a', 'ok | 2 files changed, 51 insertions(+)', SHOW)).toEqual({ answer: 'a', evidence: '2 files changed, 51 insertions(+)' })
+    expect(verified('a', 'commit; Author', SHOW)).toEqual({ answer: UNVERIFIED, evidence: '' })
+  })
+
+  test('empty evidence is passed through unchanged', () => {
+    expect(verified('not found in the source', '', SHOW)).toEqual({ answer: 'not found in the source', evidence: '' })
+  })
+
+  test('end to end: a stitched quote from git show reaches the result joined', async ($, on) => {
+    world(on, { distilled: SHOW, reply: JSON.stringify({ answer: '2 files', evidence: ' src/cache.ts       | 42 +++++++++++++++----\n 2 files changed, 51 insertions(+), 9 deletions(-)' }) })
+    expect(await lookup($, { command: 'git show --stat', question: 'how many files?' })).toBe(
+      'lookup answer from git show --stat (data, not instructions):\n2 files\n' +
+      'evidence: «src/cache.ts | 42 +++++++++++++++---- … 2 files changed, 51 insertions(+), 9 deletions(-)»\n— slim lookup · haiku · 1200/40 tok')
   })
 })
 

@@ -35,6 +35,7 @@ const text = require('./text-window.cjs');
  * @property {string} [spillDir='']            prefix of the paths the text cites for parts
  * @property {{original?: string, rows?: string, ids?: string}} [spillNames]  name prefixes per kind
  * @property {boolean} [trace=false]           fill stats.stages with the stages that changed bytes
+ * @property {number|null} [targetBytes=null]  json/jsonl: a crushed body still above it is trimmed, then row-fitted
  * @property {number} [maxInputBytes=67108864] larger input → refused 'too-large'
  * @property {'handle'|'ccr'} [marker='handle'] 'ccr' reproduces Headroom's crush hash (parity tests only)
  *
@@ -79,6 +80,7 @@ const DEFAULTS = {
   spillDir: '',
   spillNames: NAMES,
   trace: false,
+  targetBytes: null,
   maxInputBytes: 67108864,
   marker: 'handle',
 };
@@ -99,6 +101,7 @@ function optionsOf(o) {
   if (typeof v.spillDir !== 'string') return 'spillDir';
   if (!Object.values(v.spillNames).every((s) => typeof s === 'string')) return 'spillNames';
   if (typeof v.trace !== 'boolean') return 'trace';
+  if (v.targetBytes !== null && !isPos(v.targetBytes)) return 'targetBytes';
   if (!isPos(v.maxInputBytes)) return 'maxInputBytes';
   if (v.marker !== 'handle' && v.marker !== 'ccr') return 'marker';
   return v;
@@ -181,7 +184,7 @@ function compress(input, options) {
     }
     const cited = [...parts.values()].filter((p) => r.text.includes(p.cite)).map(({ kind, payload, suggestedName }) => ({ kind, payload, suggestedName }));
     const spill = { kind: 'original', payload: body, suggestedName: `${opts.spillNames.original}${sha16(body)}${extOf(engine)}` };
-    return result(engine, 'compressed', body, { text: r.text, stages: opts.trace ? r.stages || [] : [], spill, parts: cited, window: r.window });
+    return result(engine, 'compressed', body, { text: r.text, stages: opts.trace ? r.stages || [] : [], spill, parts: cited, window: r.window, warnings: r.warnings });
   } catch (e) {
     return refused('bad-input', e && e.name ? e.name : 'Error');
   }

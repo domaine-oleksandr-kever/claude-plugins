@@ -37,6 +37,7 @@ One call: `compress(input, options)`.
 | `spillDir` | `''` | prefix of the paths the text cites for parts (`<<full=<spillDir>/<name> …>>`). Empty → the bare name. |
 | `spillNames` | `{ original: 'slim-original-', rows: 'slim-rows-', ids: 'slim-ids-' }` | name prefix per spill kind. |
 | `trace` | `false` | fill `stats.stages` with the pipeline stages that changed bytes. |
+| `targetBytes` | `null` | json / jsonl only: the size the caller can show. A body still above it after the crush runs the `trim` and `fit` stages (see **json**). Other engines ignore it. |
 | `maxInputBytes` | `67108864` | larger input → `refused` / `too-large`. |
 | `marker` | `'handle'` | `'ccr'` reproduces Headroom's content-hash crush marker; parity tests only. |
 
@@ -82,8 +83,17 @@ Headroom's SmartCrusher): an array of 5+ same-shape objects keeps about 15 posit
 over its front, middle and back, plus every error row, structural outlier, numeric anomaly and change
 point (so more than 15 rows can stay, and the first row is not guaranteed), and the dropped rows leave as
 a `rows` part cited by `{"_ccr_dropped":"<<full=<path> N_rows_offloaded>>"}`; number and string arrays
-are sampled with a `…N more of M omitted` element. It also unwraps a dominant markdown fence and a pure
-MCP text-block envelope and slims what is inside. Never touches: error envelopes (`isError`, non-empty
+are sampled with a `…N more of M omitted` element. With `targetBytes` set and the crushed body still
+above it, two more stages run on its row arrays (arrays of objects): `trim` cuts the long prose
+strings in the rows of every row array (over 340 chars, holding whitespace, not under an
+`id`/`key`-named field) to their first 300 chars plus `… [+N chars]`, longest first across arrays,
+until the body fits; `fit`, if it still does not, keeps an evenly spaced subset of the largest row
+array's rows (first and last included) and moves the rest, as
+their untrimmed originals, to another `rows` part cited the same way. Each leaves a warning (`trim: N
+long strings cut to 300 chars`, `fit: N of M rows offloaded to meet targetBytes`), and a body that
+still misses the target says so (`targetBytes T not met: B B`). Keys, numbers and short strings are
+never touched; `spill` is the untouched input as always. It also unwraps a dominant markdown fence and a pure
+MCP text-block envelope and slims what is inside; the prose around a fence counts against `targetBytes`. Never touches: error envelopes (`isError`, non-empty
 `errors`/`userErrors`, `error`) — `passthrough` / `error-shape`; numbers `JSON.parse` cannot round-trip
 — `passthrough` / `number-precision`. A result that is not smaller is `passthrough` / `no-gain`.
 

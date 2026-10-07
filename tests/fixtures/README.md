@@ -41,7 +41,9 @@ Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs` and the per-channe
 | `app.log` | **synthetic** — `plugins/slim/evals/_shared/make-log.cjs` | 2000-line application log, mixed levels, repeated warnings, six ERROR lines and a `java.lang.IllegalStateException` with an 8-frame trace at line 1412 | the log engine (every error and the whole trace kept, ` ×N` dedupe); EF holds it equal to the generator's output |
 | `test-output.txt` | **synthetic** — hand-written jest run | 8 suites, one failing assertion with its code frame, console noise, the `Tests:` totals | must stay untouched: the test-output guard sends it to the plain-text window only, and only above `SLIM_PLAIN_BYTES` |
 | `git-diff.txt` | **synthetic** — hand-written | 15 file diffs, the first an HTML/Liquid hunk with `<head` in its first 2 KB | must stay untouched (the diff guard runs before the html rule) |
+| `jql-nodes-ELC.json` | **synthetic** — `plugins/slim/evals/_shared/make-jql-nodes.cjs` | ~297 KB Atlassian MCP JQL search in the `{issues:{nodes:[50]},context}` shape: ELC-1401…ELC-1450, each with a 1.5–4.2 KB lorem markdown `description`, invented people and hosts | no crush signal (unique rows), so only the `targetBytes` trim and fit stages bring it under the 32,768 B stub limit; EF holds it equal to the generator's output |
 
 The 300 KB Read row and the eval's `orders.json` come from `plugins/slim/evals/_shared/make-orders.cjs`
-at run time; nothing of that size is committed.
+at run time; `jql-nodes-ELC.json` is the one fixture of that size committed, because the delivery
+suite reads it as a file.
 

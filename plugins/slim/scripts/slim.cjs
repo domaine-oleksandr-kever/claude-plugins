@@ -140,9 +140,9 @@ function mcpTexts(result) {
 }
 
 // One text through the json pipeline (the engine that handles every MCP shape: JSON, JSONL, fences,
-// envelopes, Figma JSX, logs).
-function slimText(text, deadline, parts) {
-  const r = compress({ data: text }, engineOptions(deadline, { engine: 'json' }));
+// envelopes, Figma JSX, logs). `target` is the size above which the caller would stub the text.
+function slimText(text, deadline, parts, target) {
+  const r = compress({ data: text }, engineOptions(deadline, { engine: 'json', targetBytes: target || null }));
   if (r.decision !== 'compressed') return { text, modified: false, reason: r.reason || 'no-gain', stages: r.stats.stages, format: r.format };
   for (const p of r.parts || []) parts.push(p);
   return { text: r.text, modified: true, reason: null, stages: r.stats.stages, engine: r.engine };
@@ -150,7 +150,7 @@ function slimText(text, deadline, parts) {
 
 // Every text block of a content array; non-text and unchanged blocks stay byte-for-byte. `markIndex` is
 // the last COMPRESSED block, so the handle never lands on a verbatim error block.
-function slimBlocks(blocks, deadline, parts) {
+function slimBlocks(blocks, deadline, parts, target) {
   let modified = false;
   let markIndex = -1;
   let reason = null;
@@ -159,9 +159,11 @@ function slimBlocks(blocks, deadline, parts) {
   let format;
   const engines = new Set();
   const stages = [];
+  // The stub limit applies to the blocks' joined text, so each block gets its share.
+  const share = target ? Math.floor(target / Math.max(1, blocks.filter((b) => b && typeof b === 'object' && typeof b.text === 'string').length)) : null;
   const out = blocks.map((b, i) => {
     if (b && typeof b === 'object' && typeof b.text === 'string') {
-      const r = slimText(b.text, deadline, parts);
+      const r = slimText(b.text, deadline, parts, share);
       if (r.modified) {
         modified = true;
         markIndex = i;
@@ -178,13 +180,13 @@ function slimBlocks(blocks, deadline, parts) {
   return { blocks: out, modified, markIndex, anyError, budgetBailed, reason: modified ? null : (reason || 'no-gain'), stages, format: modified ? undefined : format, engines };
 }
 
-function slimResult(result, deadline, parts) {
+function slimResult(result, deadline, parts, target) {
   const one = (r, kind, value) => ({ value, modified: r.modified, kind, reason: r.reason, anyError: r.reason === 'error-shape', stages: r.stages, format: r.format, engines: new Set(r.engine ? [r.engine] : []) });
-  if (typeof result === 'string') { const r = slimText(result, deadline, parts); return one(r, 'string', r.text); }
-  if (Array.isArray(result)) { const r = slimBlocks(result, deadline, parts); return { ...r, value: r.blocks, kind: 'array' }; }
+  if (typeof result === 'string') { const r = slimText(result, deadline, parts, target); return one(r, 'string', r.text); }
+  if (Array.isArray(result)) { const r = slimBlocks(result, deadline, parts, target); return { ...r, value: r.blocks, kind: 'array' }; }
   if (result && typeof result === 'object') {
-    if (Array.isArray(result.content)) { const r = slimBlocks(result.content, deadline, parts); return { ...r, value: { ...result, content: r.blocks }, kind: 'content' }; }
-    if (typeof result.text === 'string') { const r = slimText(result.text, deadline, parts); return one(r, 'single', { ...result, text: r.text }); }
+    if (Array.isArray(result.content)) { const r = slimBlocks(result.content, deadline, parts, target); return { ...r, value: { ...result, content: r.blocks }, kind: 'content' }; }
+    if (typeof result.text === 'string') { const r = slimText(result.text, deadline, parts, target); return one(r, 'single', { ...result, text: r.text }); }
   }
   return { value: result, modified: false, kind: 'none', reason: 'unrecognized-shape', anyError: false, stages: [], engines: new Set() };
 }
@@ -310,7 +312,7 @@ function runMcp(input, base) {
   const stubLimit = env.stubBytes();
   const budget = env.budgetMs();
   const deadline = budget === 0 ? null : (budget < 0 ? Date.now() - 1 : Date.now() + budget);
-  const slimmed = slimResult(result, deadline, parts);
+  const slimmed = slimResult(result, deadline, parts, stubOn ? stubLimit : null);
   const budgetPartial = slimmed.modified && slimmed.budgetBailed > 0;
   const x = (o) => ({ budgetPartial, ...o });
 
@@ -416,7 +418,9 @@ function slimChannelText(channel, text, opts) {
   const bytes = utf8(text);
   const gate = ch.structuredGate(channel, engine, opts.plainBytes);
   if (gate !== null && bytes <= gate) return { pass: 'size-gate' };
-  const r = compress({ data: text }, engineOptions(opts.deadline, { engine, budgetBytes: opts.window, plainBytes: ch.plainGate(channel, opts.plainBytes) }));
+  // A JSON view over the egress cap is stubbed, so the engine is asked to fit under it first.
+  const targetBytes = engine === 'json' || engine === 'jsonl' ? ch.EGRESS[channel] || null : null;
+  const r = compress({ data: text }, engineOptions(opts.deadline, { engine, budgetBytes: opts.window, plainBytes: ch.plainGate(channel, opts.plainBytes), targetBytes }));
   if (r.decision !== 'compressed') return { pass: r.reason || 'no-gain', format: r.format, engine };
   return { out: r.text, engine: r.engine, stages: r.stats.stages, parts: r.parts || [], window: r.window, json: r.engine === 'json' || r.engine === 'jsonl' };
 }

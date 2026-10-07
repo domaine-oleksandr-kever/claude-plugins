@@ -153,15 +153,47 @@ let F1_OUT = null;
   const a = call('F3', T, envelope(T, [{ type: 'text', text: F3 }]));
   eq('F3-decision', [a.decision, a.record.engine], ['compressed', 'figma']);
 }
+// A stub limit no row fit can meet still stubs; the default one is met by the trim and fit stages.
 {
   const T = newT();
-  const a = call('F4', T, envelope(T, F4));
+  const a = call('F4', T, envelope(T, F4), { SLIM_STUB_BYTES: '4000' });
   eq('F4-decision', [a.decision, a.reason, a.record.engine], ['stubbed', 'weak-gain', 'stub']);
   const res = typeof a.result === 'string' ? a.result : '';
   check('F4-stub-header', res.startsWith('<<slim stub>> mcp__x__y returned '), res.slice(0, 80));
   check('F4-recipe-own-cli', res.includes(`node ${SLIM_JSON_CLI} `), 'recipe does not name slim\'s json-slim.cjs');
   check('F4-figure', (a.figure || '').startsWith('slim: stub ') && res.includes(a.figure), a.figure);
   check('F4-no-fnd-marks', !res.includes('<<fnd-mcp-slim stub>>') && !/^fnd-mcp-slim:/m.test(res), 'fnd mark in a slim stub');
+  const f = call('F4-fit', T, envelope(T, F4));
+  eq('F4-fit-decision', [f.decision, f.reason, f.record.engine], ['compressed', null, 'json']);
+  check('F4-fit-stages', ['trim', 'fit'].every((x) => (f.record.stages || []).includes(x)), JSON.stringify(f.record.stages));
+}
+// The Atlassian MCP's {issues:{nodes}} search: long markdown rows, no crush signal. Fitted under the stub limit, not stubbed.
+{
+  const T = newT();
+  const JN = readFileSync(path.join(FIX, 'jql-nodes-ELC.json'), 'utf8');
+  const tool = 'mcp__plugin_fnd_atlassian__searchJiraIssuesUsingJql';
+  const a = call('JN', T, envelope(T, { content: [{ type: 'text', text: JN }] }, { tool }));
+  eq('JN-decision', [a.decision, a.reason, a.record.engine], ['compressed', null, 'json']);
+  const res = ((a.result || {}).content || [{}])[0].text || '';
+  check('JN-not-stub', !res.includes('<<slim stub>>'), res.slice(0, 80));
+  check('JN-stats-line', /^slim: compressed [\d,]+ B → [\d,]+ B \(−\d+\.\d%\)$/m.test(res) && res.includes(a.figure), a.figure);
+  const h = handleOf(res);
+  check('JN-handle', !!h && readFileSync(h, 'utf8') === JSON.stringify({ content: [{ type: 'text', text: JN }] }), `spill ${h}`);
+  check('JN-stages', ['noise', 'trim', 'fit'].every((x) => (a.record.stages || []).includes(x)), JSON.stringify(a.record.stages));
+  const body = res.slice(0, res.indexOf('\n\nslim: '));
+  check('JN-under-limit', bytes(body) <= 32768, String(bytes(body)));
+  const v = JSON.parse(body);
+  const nodes = v.issues.nodes;
+  const kept = nodes.filter((n) => n.key);
+  const rowsCite = /<<full=(\S+) (\d+)_rows_offloaded>>/.exec(nodes[nodes.length - 1]._ccr_dropped || '');
+  check('JN-rows-part', !!rowsCite && JSON.parse(readFileSync(rowsCite[1], 'utf8')).length === Number(rowsCite[2]) && kept.length + Number(rowsCite[2]) === 50, rowsCite && rowsCite[0]);
+  eq('JN-ends-kept', [kept[0].key, kept[kept.length - 1].key], ['ELC-1401', 'ELC-1450']);
+  const L = logLines(`${T}/spill`).filter((r) => r.tool === tool);
+  check('JN-record-stages', L.length === 1 && L[0].stages.includes('trim') && L[0].decision === 'compressed', JSON.stringify(L.map((r) => [r.decision, r.stages])));
+  // Two blocks share the limit: each is fitted to half, so their joined text is not stubbed either.
+  const two = call('JN-two', T, envelope(T, { content: [{ type: 'text', text: JN }, { type: 'text', text: JN }] }, { tool }));
+  const texts = ((two.result || {}).content || []).map((b) => b.text || '');
+  check('JN-two-blocks', two.decision === 'compressed' && texts.length === 2 && bytes(texts[0]) <= 16384 && !texts.join('').includes('<<slim stub>>'), `${two.decision} ${texts.map(bytes)}`);
 }
 {
   const T = newT();
@@ -636,7 +668,10 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
 
   const rows = [];
   for (let i = 0; rows.join(',').length < 300000; i++) rows.push({ id: `${i}-${'abcdef0123456789'.repeat(1 + (i % 5)).slice(i % 7)}`, body: `unique text ${i} ${'lorem ipsum '.repeat(8 + (i % 13))}${i * 7919}`, a: null, b: null, c: {}, d: [] });
-  const big = JSON.stringify({ rows });
+  const fit = call('Cb12-fit', T, chEnv(T, 'bash', 'Bash', { command: 'curl -s https://api.example/rows' }, BASH(JSON.stringify({ rows }))));
+  eq('Cb12-fit', [fit.decision, fit.record.engine, (fit.record.stages || []).includes('fit')], ['compressed', 'json', true]);
+  // No row array to fit: the compressed view stays over the egress cap and is stubbed.
+  const big = JSON.stringify(Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`k${i}`, { token: `${i}-`.repeat(400), gone: null }])));
   const st = call('Cb12', T, chEnv(T, 'bash', 'Bash', { command: 'curl -s https://api.example/rows' }, BASH(big)));
   eq('Cb12-egress-stub', [st.decision, st.reason, st.record.engine], ['stubbed', 'egress-cap', 'stub']);
   const ss = (st.result || {}).stdout || '';
@@ -770,6 +805,37 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const r = spawn(T, '', { args: ['--report'] });
   check('Rp-by-channel', /^ {2}by channel: bash \d+ → \d+ B \([\d.]+% saved\) · mcp \d+ → \d+ B \([\d.]+% saved\) · webfetch \d+ → \d+ B \([\d.]+% saved\)$/m.test(r.stdout), r.stdout);
   check('Rp-by-src', /^ {2}by src: slim \d+ → \d+ B/m.test(r.stdout), r.stdout);
+}
+// A summary of a persisted Bash output outgrows the host's preview: worded as a grown view, never as a negative saving.
+{
+  const T = newT();
+  const log = path.join(T, 'r.log');
+  const line = (o) => JSON.stringify({ ts: '2026-10-07T10:00:00.000Z', lvl: 2, src: 'slim', entry: 'hook', ...o });
+  writeFileSync(log, `${[
+    line({ channel: 'bash', decision: 'compressed', bytes_in: 300000, bytes_seen: 2300, bytes_out: 7000 }),
+    line({ channel: 'bash', decision: 'compressed', bytes_in: 260779, bytes_seen: 2346, bytes_out: 7935 }),
+    line({ channel: 'mcp', decision: 'compressed', bytes_in: 10000, bytes_out: 2500 }),
+    line({ channel: 'read', decision: 'compressed', bytes_in: 90000, bytes_seen: 90000, bytes_out: 30000 }),
+    line({ src: 'fnd', channel: 'mcp', decision: 'passthrough', reason: 'size-gate', bytes_in: 800, bytes_out: 800 }),
+  ].join('\n')}\n`);
+  const r = spawn(T, '', { args: ['--report', log] });
+  const byChannel = (/^ {2}by channel: (.*)$/m.exec(r.stdout) || [])[1];
+  eq('Rg-by-channel', byChannel, 'bash: 2 results, 560,779 B of output summarised into 14,935 B (host preview would have shown 4,646 B; the view grew ×3.2)'
+    + ' · mcp 10800 → 3300 B (69.4% saved) · read 90000 → 30000 B (66.7% saved)');
+  const bySrc = (/^ {2}by src: (.*)$/m.exec(r.stdout) || [])[1];
+  eq('Rg-by-src', bySrc, 'fnd 800 → 800 B (0.0% saved) · slim 104646 → 47435 B (54.7% saved)');
+  check('Rg-no-negative', !/-\d[\d.]*% saved/.test(r.stdout), r.stdout);
+  writeFileSync(log, `${line({ channel: 'bash', decision: 'compressed', bytes_in: 300000, bytes_seen: 2300, bytes_out: 7000 })}\n`);
+  const one = spawn(T, '', { args: ['--report', log] });
+  check('Rg-one-result', /^ {2}by src: slim: 1 result, 300,000 B of output summarised into 7,000 B \(host preview would have shown 2,300 B; the view grew ×3\.0\)$/m.test(one.stdout), one.stdout);
+  // Under ×1.1 the growth is given in bytes; a passthrough is counted apart, never as summarised output.
+  writeFileSync(log, `${[
+    line({ channel: 'bash', decision: 'compressed', bytes_in: 300000, bytes_seen: 2048, bytes_out: 2100 }),
+    line({ channel: 'bash', decision: 'passthrough', reason: 'size-gate', bytes_in: 500, bytes_out: 500 }),
+  ].join('\n')}\n`);
+  const small = spawn(T, '', { args: ['--report', log] });
+  eq('Rg-small-growth', (/^ {2}by channel: (.*)$/m.exec(small.stdout) || [])[1],
+    'bash: 1 result, 300,000 B of output summarised into 2,100 B (host preview would have shown 2,048 B; the view grew by 52 B) + 1 passed through (500 B)');
 }
 
 // S13 last: every line any row above wrote.

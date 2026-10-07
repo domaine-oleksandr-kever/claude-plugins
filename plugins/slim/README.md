@@ -128,7 +128,13 @@ unchanged.
 
   The `→` figure is the exact byte size of what the model receives; the handle names the spilled
   original (`.json` for JSON, `.txt` for text).
-- **stubbed** — an MCP result the compressor cannot bring under the stub threshold (32,768 B) is
+- **stubbed** — before stubbing, a JSON result still over the threshold gets two more passes on its
+  arrays of rows (a JQL search's 50 issues, say): long prose in those rows (descriptions, comment
+  bodies) is cut to its first 300 characters plus `… [+N chars]`, longest first, and if that is not
+  enough an evenly spaced subset of the largest array's rows stays (first and last included) while the rest
+  leave to a rows file cited by a `{"_ccr_dropped":"<<full=… N_rows_offloaded>>"}` row. Ids, keys,
+  numbers and short strings are never cut, and the handle still names the untouched original. An MCP
+  result the compressor still cannot bring under the stub threshold (32,768 B) is
   spilled and replaced by a ~1 KB stub that opens `<<slim stub>> <tool> returned <N> B (format=…)`
   and gives `node …/plugins/slim/scripts/json-slim.cjs <file> …` recovery recipes. On the other
   channels a JSON or JSONL output still over the channel's egress cap (Read 65,536 B, Grep and Glob
@@ -175,7 +181,9 @@ instructions):`, so it reads as the source's content, not as slim's own word. Th
 a verbatim evidence quote of at most 200 characters, and a footer naming the model and its token
 usage. The model is `haiku` unless `SLIM_LOOKUP_MODEL` names another. The document goes to the model
 inside a `<document>` quote that its own text cannot close, and a quote the model returns that the
-document does not hold is dropped, with the answer marked `(unverified …)`.
+document does not hold is dropped, with the answer marked `(unverified …)`. A quote stitched from
+several lines (joined by a newline, ` … `, ` | ` or `; `) still counts when every piece of 12 or
+more characters is in the document; it is then shown as those pieces joined with ` … `.
 
 **The cost is visible.** The `path` and `command` rungs are the only new spend slim adds, so every
 lookup writes an event
@@ -290,7 +298,16 @@ node plugins/slim/scripts/slim.cjs --report [logfile] [--since <ISO>]
 ```
 
 It prints the totals plus a `by src:` line (`fnd … · slim …`), a `by channel:` line and, when
-lookup ran, a `lookup:` line (calls, answered, tokens in and out, models).
+lookup ran, a `lookup:` line (calls, answered, tokens in and out, models). A group whose summaries are
+bigger than what the model would have seen — Bash outputs the host saved to a file, where the
+baseline is its 2 KB preview — reads as a grown view rather than a negative saving:
+
+```
+bash: 2 results, 560,779 B of output summarised into 14,935 B (host preview would have shown 4,646 B; the view grew ×3.2)
+```
+
+Below ×1.1 the growth is given in bytes, and results that passed through untouched are counted apart
+(`+ 1 passed through (500 B)`).
 
 ## Layout
 
@@ -302,6 +319,8 @@ slim has two layers with a hard boundary between them.
   embed it — a microservice, a CLI, a hook on another harness. The versioned contract — input,
   detection rules, each engine's algorithm, output, guarantees and runnable examples — is
   `plugins/slim/scripts/engines/CONTRACT.md`.
+  How the layers fit together, with diagrams of one tool result's path, the five destinations and the
+  lookup rungs: `plugins/slim/ARCHITECTURE.md`.
 - **Delivery** — `plugins/slim/scripts/slim.cjs` and `plugins/slim/scripts/delivery/`: the only
   Claude Code-specific code. It knows the channel envelopes (`plugins/slim/scripts/delivery/channels.cjs`),
   host overflow files, the `SLIM_*` switches, spill files and their sweep, the shared report log and

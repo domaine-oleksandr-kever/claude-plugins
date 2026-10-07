@@ -341,21 +341,41 @@ function buildReport(lines, opts) {
 
 const seenBytes = (e) => Number(e.bytes_seen ?? e.bytes_in) || 0;
 const shrunk = (e) => e.decision === 'compressed' || e.decision === 'stubbed';
-const saving = (e) => `${e.in} → ${e.out} B (${e.in ? (100 * (1 - e.out / e.in)).toFixed(1) : '0.0'}% saved)`;
+const commas = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+// A summary of a persisted output is bigger than the host's preview of it: that is a grown view, not a
+// negative saving, so it is worded as one, over the shrunk events only; passthroughs are named apart.
+function saving(k, t) {
+  if (t.out <= t.in) return `${k} ${t.in} → ${t.out} B (${t.in ? (100 * (1 - t.out / t.in)).toFixed(1) : '0.0'}% saved)`;
+  const grew = !t.sIn ? '' : t.sOut / t.sIn >= 1.1 ? `; the view grew ×${(t.sOut / t.sIn).toFixed(1)}` : `; the view grew by ${commas(t.sOut - t.sIn)} B`;
+  const rest = t.n - t.sn;
+  return `${k}: ${t.sn} result${t.sn === 1 ? '' : 's'}, ${commas(t.whole)} B of output summarised into ${commas(t.sOut)} B ` +
+    `(host preview would have shown ${commas(t.sIn)} B${grew})${rest ? ` + ${rest} passed through (${commas(t.out - t.sOut)} B)` : ''}`;
+}
 
-// Totals per key: what went in (bytes_seen when the host had already moved the output to a file)
-// and what the model got (the output for a shrunk event, else the input).
+// Totals per key: what the model would have seen (bytes_seen when the host had already moved the
+// output to a file and shows a preview) and what the model got (the output for a shrunk event, else
+// the input); for the shrunk events alone, the same two plus the whole output.
 function totalsBy(events, keyOf) {
   const m = new Map();
   for (const e of events) {
     const k = keyOf(e);
-    const t = m.get(k) || { in: 0, out: 0 };
+    const t = m.get(k) || { n: 0, in: 0, out: 0, sn: 0, sIn: 0, sOut: 0, whole: 0 };
     const bi = seenBytes(e);
+    t.n++;
     t.in += bi;
-    t.out += shrunk(e) ? Number(e.bytes_out) || 0 : bi;
+    if (shrunk(e)) {
+      const bo = Number(e.bytes_out) || 0;
+      t.sn++;
+      t.sIn += bi;
+      t.sOut += bo;
+      t.whole += Number(e.bytes_in) || 0;
+      t.out += bo;
+    } else {
+      t.out += bi;
+    }
     m.set(k, t);
   }
-  return [...m.keys()].sort().map((k) => `${k} ${saving(m.get(k))}`).join(' · ');
+  return [...m.keys()].sort().map((k) => saving(k, m.get(k))).join(' · ');
 }
 
 // The --report text for the log's raw lines.

@@ -191,6 +191,90 @@ function ecRows() {
 }
 const EC = ecRows();
 
+// ET — targetBytes: the trim and fit stages on a crushed body still above the target
+{
+  const JN = fx('jql-nodes-ELC.json');
+  const src = JSON.parse(JN).issues.nodes;
+  const target = 32768;
+  const spillDir = '/spill/root';
+  const r = compress({ data: JN }, { ...O, trace: true, spillDir, targetBytes: target });
+  eq('ET-decision', [r.decision, r.engine], ['compressed', 'json']);
+  check('ET-stages', ['noise', 'trim', 'fit'].every((s) => r.stats.stages.includes(s)), r.stats.stages.join(' '));
+  check('ET-under-target', r.stats.bytesOut <= target && bytes(r.text) === r.stats.bytesOut, String(r.stats.bytesOut));
+  check('ET-warnings', r.warnings.some((w) => /^trim: \d+ long strings cut to 300 chars$/.test(w)) && r.warnings.some((w) => /^fit: \d+ of 50 rows offloaded/.test(w)), JSON.stringify(r.warnings));
+  const v = JSON.parse(r.text);
+  const nodes = v.issues.nodes;
+  const kept = nodes.filter((n) => !('_ccr_dropped' in n));
+  const byKey = new Map(src.map((n) => [n.key, n]));
+  eq('ET-ends-kept', [kept[0].key, kept[0].id, kept[kept.length - 1].key, kept[kept.length - 1].id], ['ELC-1401', src[0].id, 'ELC-1450', src[49].id]);
+  check('ET-rows-scalars-intact', kept.every((n) => { const o = byKey.get(n.key); return o && n.id === o.id && n.webUrl === o.webUrl && n.fields.summary === o.fields.summary && n.fields.created === o.fields.created; }), 'an id, url or short string changed');
+  const cutRe = /^([\s\S]{299,300})… \[\+(\d+) chars\]$/;
+  check('ET-trimmed-form', kept.every((n) => { const o = byKey.get(n.key).fields.description; const m = cutRe.exec(n.fields.description); return m && o.startsWith(m[1]) && o.length === m[1].length + Number(m[2]); }), 'a cut description is not head + [+N chars]');
+  const cite = /<<full=(\S+) (\d+)_rows_offloaded>>/.exec(nodes[nodes.length - 1]._ccr_dropped || '');
+  const part = cite && (r.parts || []).find((p) => `${spillDir}/${p.suggestedName}` === cite[1]);
+  check('ET-rows-part-untrimmed', !!part && JSON.parse(part.payload).every((n) => JSON.stringify(n.fields.description) === JSON.stringify(byKey.get(n.key).fields.description)) && kept.length + Number(cite[2]) === 50, cite && cite[0]);
+  check('ET-spill-original', r.spill.payload === JN, 'the original spill changed');
+  const again = compress({ data: JN }, { ...O, trace: true, spillDir, targetBytes: target });
+  eq('ET-deterministic', { ...again, stats: { ...again.stats, ms: 0 } }, { ...r, stats: { ...r.stats, ms: 0 } });
+
+  const plain = compress({ data: JN }, { ...O, trace: true });
+  check('ET-no-target-no-trim', plain.decision === 'compressed' && !plain.stats.stages.includes('trim') && !plain.stats.stages.includes('fit') && plain.warnings.length === 0, plain.stats.stages.join(' '));
+  const fieldNames = new Set();
+  const names = (x) => { if (x && typeof x === 'object') for (const k of Object.keys(x)) { if (!Array.isArray(x)) fieldNames.add(k); names(x[k]); } };
+  names(JSON.parse(plain.text).issues.nodes);
+  const missing = [...fieldNames].filter((k) => k !== '_ccr_dropped' && !r.text.includes(`"${k}":`));
+  check('ET-field-names-kept', fieldNames.size > 20 && missing.length === 0, missing.join(' '));
+  const roomy = compress({ data: JN }, { ...O, trace: true, targetBytes: 1e9 });
+  eq('ET-target-met-untouched', roomy.text, plain.text);
+  const jql = compress({ data: JQL }, { ...O, spillDir, targetBytes: 1e9 });
+  eq('ET-crush-unchanged', jql.text, EC.jql.text);
+  // The text cannot reach the target: the row fit stops at two rows and says so.
+  const tight = compress({ data: JN }, { ...O, targetBytes: 2000 });
+  check('ET-target-not-met', tight.decision === 'compressed' && JSON.parse(tight.text).issues.nodes.filter((n) => n.key).length === 2 && tight.warnings.some((w) => /^targetBytes 2000 not met: \d+ B$/.test(w)), JSON.stringify(tight.warnings));
+
+  // Only prose leaves are cut: an id-named field and a whitespace-free token keep every char.
+  const prose = (i) => `row ${i} ${'some words here '.repeat(60)}`;
+  const synth = JSON.stringify({ items: Array.from({ length: 6 }, (_, i) => ({ id: i, sortKey: prose(i), token: `${i}-`.repeat(300), body: prose(i) })) });
+  const s6 = compress({ data: synth }, { ...O, trace: true, targetBytes: Math.floor(bytes(synth) * 0.8) });
+  const items = s6.decision === 'compressed' ? JSON.parse(s6.text).items : [];
+  check('ET-only-prose-cut', items.length === 6 && s6.stats.stages.join(' ') === 'trim' && items.every((x, i) => x.sortKey === prose(i) && x.token === `${i}-`.repeat(300))
+    && items.some((x) => / \[\+\d+ chars\]$/.test(x.body)), `${s6.decision} ${s6.stats.stages}`);
+
+  for (const bad of [0, -1, '32k', NaN, Infinity]) {
+    const b = compress({ data: JN }, { ...O, targetBytes: bad });
+    eq(`ET-bad-option-${String(bad)}`, [b.decision, b.reason, b.warnings], ['refused', 'bad-option', ['invalid option: targetBytes']]);
+  }
+  const strip = (x) => ({ ...x, stats: { ...x.stats, ms: 0 } });
+  for (const [name, data, o] of [['html', PAGE], ['log', APPLOG], ['figma', fx('figma-design-context.jsx')], ['text', TESTOUT, { plainBytes: 8192, budgetBytes: 8192 }]]) {
+    eq(`ET-ignored-by-${name}`, strip(compress({ data }, { ...O, ...(o || {}), targetBytes: 1024 })), strip(compress({ data }, { ...O, ...(o || {}) })));
+  }
+
+  // The prose around a dominant fence counts against the target, so the whole text fits.
+  const fenced = `${'The search returned these issues for the requested project and sprint. '.repeat(14)}\n\`\`\`json\n${JN}\n\`\`\`\nNOTE: results are paged.`;
+  const fr = compress({ data: fenced }, { ...O, trace: true, spillDir, targetBytes: target });
+  check('ET-fenced-under-target', fr.decision === 'compressed' && fr.stats.stages.includes('fence') && fr.stats.bytesOut <= target && !fr.warnings.some((w) => /not met/.test(w)), `${fr.decision} ${fr.stats.bytesOut} ${JSON.stringify(fr.warnings)}`);
+
+  // Trim cuts prose in every row array before fit offloads any row.
+  const para = (tag, i, n) => `${tag} ${i} ${'plain words about the change '.repeat(n)}`;
+  const two = JSON.stringify({
+    issues: Array.from({ length: 20 }, (_, i) => ({ key: `I-${i}`, body: para('issue', i, 140) })),
+    comments: Array.from({ length: 20 }, (_, i) => ({ id: `c${i}`, body: para('comment', i, 88) })),
+  });
+  const tw = compress({ data: two }, { ...O, trace: true, spillDir, targetBytes: target });
+  const twv = tw.decision === 'compressed' ? JSON.parse(tw.text) : { issues: [], comments: [] };
+  check('ET-trim-every-array', tw.stats.bytesOut <= target && !tw.stats.stages.includes('fit') && twv.issues.length === 20 && twv.comments.length === 20
+    && twv.issues.every((x) => / \[\+\d+ chars\]$/.test(x.body)) && twv.comments.some((x) => / \[\+\d+ chars\]$/.test(x.body)), `${tw.stats.stages} ${twv.issues.length}/${twv.comments.length} ${tw.stats.bytesOut}`);
+
+  // A first row alone above the target walks fit down to two rows; it registers at most two rows
+  // parts on the way (plus the crush's one), not one per subset it tries.
+  const json = require(path.join(ENGINES, 'json.cjs'));
+  const heavy = JSON.parse(JN);
+  heavy.issues.nodes[0].labels = Array.from({ length: 4000 }, (_, i) => `label-${i}`);
+  let calls = 0;
+  const fitRun = json.run(JSON.stringify(heavy), { targetBytes: target }, { deadline: null, part: (kind) => { calls++; return `/spill/${kind}-0123456789abcdef.json`; } });
+  check('ET-fit-parts-bounded', fitRun.decision === 'compressed' && calls <= 3 && JSON.parse(fitRun.text).issues.nodes.filter((n) => n.key).length === 2, `${calls} part calls`);
+}
+
 // EG — guarantees
 {
   const circular = {};
@@ -286,6 +370,7 @@ const EC = ecRows();
 // EF — the committed fixtures are the generators' output
 eq('EF-page', gen('make-page.cjs') === PAGE, true);
 eq('EF-app-log', gen('make-log.cjs') === APPLOG, true);
+eq('EF-jql-nodes', gen('make-jql-nodes.cjs') === fx('jql-nodes-ELC.json'), true);
 check('EF-orders-size', bytes(ORDERS) < 256 * 1024 && bytes(ORDERS) > 150 * 1024 && JSON.parse(ORDERS).orders.length === 240, String(bytes(ORDERS)));
 
 // EL — the layer is pure

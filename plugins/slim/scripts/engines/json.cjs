@@ -6,7 +6,8 @@
  * 1 ADF/rich-doc → markdown (engines/adf.cjs); 2 noise drop (nulls / empty containers / avatar
  * decoration / self REST links); 3 long-string truncation (base64 / data-URIs / long URLs); 4
  * repetitive same-shape-array crush (a port of Headroom's SmartCrusher), whose dropped rows leave as a
- * `rows` part cited by a `full=<path>` handle so nothing is lost. Non-JSON input takes a sibling
+ * `rows` part cited by a `full=<path>` handle so nothing is lost; 5–6 only under a caller's
+ * targetBytes: trim long prose in the dominant rows, then fit by offloading rows. Non-JSON input takes a sibling
  * branch: a DOMINANT markdown fence is unwrapped and its body re-run; a JSONL stream is crushed as the
  * row array it is; Figma design-context JSX goes to engines/figma.cjs; log-shaped text to
  * engines/log.cjs. A pure text-block envelope is unwrapped and its payload slimmed.
@@ -44,6 +45,7 @@ const DEFAULTS = {
   fence: true, // unwrap a DOMINANT markdown fence (tool prose + ```json…```) and re-run on its body
   envelope: true, // unwrap a PURE MCP text-block envelope ([{type:'text',text:'<json>'}]) and slim the inner payload
   trace: false, // record `stages` (which stages changed bytes); off ⇒ a single final serialization
+  targetBytes: null, // a body still above this after the crush runs the trim and fit stages; null ⇒ never
   // preserveFields { keyName: true } leaves the value/subtree under those keys uncrushed. Name an
   // ARRAY's own key to keep it whole — a field inside crushable rows does NOT shield those rows.
   preserveFields: {},
@@ -899,8 +901,8 @@ function noiseStage(value, cfg, depth) {
 
 // Only OPAQUE long strings are truncated: data-URIs (anchored to a real `type/subtype;|,` shape so
 // prose that merely starts "data: …" is NOT matched), pure base64 blobs, and single-token URLs.
-// Prose / markdown (incl. ADF-derived descriptions) is NEVER clipped by length alone — clipping it
-// would be unrecoverable data loss, and stage 1 has already converted ADF to compact markdown.
+// Prose / markdown (incl. ADF-derived descriptions) is not clipped here: only the trim stage cuts it,
+// and only when the caller's targetBytes would otherwise turn the whole result into a stub.
 const LONG_STRING = /^data:[\w.+-]+\/[\w.+-]+[;,]|^[A-Za-z0-9+/]{200,}={0,2}$|^https?:\/\/\S{160,}$/;
 
 // Stage 4 — clip data-URIs / base64 / very long URLs to head + a length note.
@@ -921,6 +923,132 @@ function truncateStage(value, cfg, depth) {
       out[k] = truncateStage(value[k], cfg, depth + 1);
     }
     return out;
+  }
+  return value;
+}
+
+// Stages 5–6 run only when the caller sets `targetBytes` and the crushed body is still above it, so
+// the crush and its parity fixtures never see them. Trim works on every row array, fit on the largest.
+const TRIM_HEAD = 300; // chars a cut string keeps
+const TRIM_MIN = TRIM_HEAD + 40; // below this the ` [+N chars]` note eats most of the saving
+const ID_KEY = /(?:^|[_-])(?:id|key|uuid|gid)$|[a-z](?:Id|Key|Uuid|Gid)$/;
+const isPlain = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const isSentinel = (v) => isPlain(v) && Object.prototype.hasOwnProperty.call(v, '_ccr_dropped');
+const bytesOf = (v) => Buffer.byteLength(compact(v), 'utf8');
+
+// Paths to the row arrays: arrays whose elements are all objects, at least two of them real rows. An
+// array of rows is not searched further, so no path lies inside another.
+function rowArrays(value) {
+  const found = [];
+  const walk = (v, p, depth) => {
+    if (depth >= MAX_DEPTH) return;
+    if (Array.isArray(v)) {
+      if (v.length >= 2 && v.every(isPlain) && v.filter((r) => !isSentinel(r)).length >= 2) { found.push(p); return; }
+      v.forEach((x, i) => walk(x, [...p, i], depth + 1));
+    } else if (isPlain(v)) {
+      for (const k of Object.keys(v)) walk(v[k], [...p, k], depth + 1);
+    }
+  };
+  walk(value, [], 0);
+  return found;
+}
+// The largest row array's path (the first on a tie), or null.
+function dominantRows(value) {
+  let best = null;
+  let bestBytes = -1;
+  for (const p of rowArrays(value)) {
+    const b = bytesOf(getAt(value, p));
+    if (b > bestBytes) { best = p; bestBytes = b; }
+  }
+  return best;
+}
+const getAt = (v, p) => p.reduce((o, k) => o[k], v);
+function setAt(v, p, x) {
+  if (!p.length) return x;
+  const [k, ...rest] = p;
+  const copy = Array.isArray(v) ? v.slice() : { ...v };
+  copy[k] = setAt(v[k], rest, x);
+  return copy;
+}
+
+// Stage 5 — cut long prose strings inside the rows of every row array to TRIM_HEAD chars, longest
+// first, until the body fits targetBytes. Keys, numbers, id-named fields and strings without
+// whitespace (tokens, URLs, base64) are never touched. `orig` maps each rewritten row to its source.
+function trimStage(value, cfg, state) {
+  let total = bytesOf(value);
+  if (total <= cfg.targetBytes) return value;
+  const arrays = rowArrays(value).map((p) => ({ p, rows: getAt(value, p).map((r) => (isSentinel(r) ? r : JSON.parse(compact(r)))), touched: new Set() }));
+  const cands = [];
+  const collect = (holder, k, a, row, depth) => {
+    const v = holder[k];
+    if (typeof v === 'string') {
+      if (v.length > TRIM_MIN && /\s/.test(v) && !(typeof k === 'string' && ID_KEY.test(k))) cands.push({ holder, k, a, row, len: v.length, at: cands.length });
+    } else if (depth < MAX_DEPTH && v && typeof v === 'object') {
+      for (const kk of Object.keys(v)) collect(v, Array.isArray(v) ? Number(kk) : kk, a, row, depth + 1);
+    }
+  };
+  for (const a of arrays) a.rows.forEach((r, i) => { if (!isSentinel(r)) for (const k of Object.keys(r)) collect(r, k, a, i, 1); });
+  cands.sort((a, b) => (b.len - a.len) || (a.at - b.at));
+  let cut = 0;
+  for (const c of cands) {
+    if (total <= cfg.targetBytes) break;
+    if (budgetExpired(cfg)) throw budgetStop();
+    const s = c.holder[c.k];
+    const end = /[\uD800-\uDBFF]/.test(s[TRIM_HEAD - 1]) ? TRIM_HEAD - 1 : TRIM_HEAD;
+    const next = `${s.slice(0, end)}… [+${s.length - end} chars]`;
+    total -= bytesOf(s) - bytesOf(next);
+    c.holder[c.k] = next;
+    c.a.touched.add(c.row);
+    cut++;
+  }
+  if (!cut) return value;
+  let out = value;
+  for (const a of arrays) {
+    if (!a.touched.size) continue;
+    const src = getAt(value, a.p);
+    for (const i of a.touched) state.orig.set(a.rows[i], src[i]);
+    out = setAt(out, a.p, a.rows);
+  }
+  state.warnings.push(`trim: ${cut} long strings cut to ${TRIM_HEAD} chars`);
+  return out;
+}
+
+// Stage 6 — still above targetBytes: keep an evenly spaced subset of the largest row array's rows (the
+// first and last always) and move the rest, as their untrimmed originals, to a `rows` part cited by a
+// sentinel like the crush's. Without a part function the rows stay. Only the chosen subset registers a
+// part: the others are sized with a stand-in marker of the same length.
+function fitStage(value, cfg, state) {
+  const p = dominantRows(value);
+  if (!p || typeof cfg.part !== 'function' || bytesOf(value) <= cfg.targetBytes) return value;
+  const arr = getAt(value, p);
+  const rows = arr.filter((r) => !isSentinel(r));
+  const tail = arr.filter(isSentinel);
+  const m = rows.length;
+  const rowBytes = rows.reduce((s, r) => s + bytesOf(r) + 1, 0);
+  const fixed = bytesOf(value) - rowBytes;
+  let k = Math.min(m - 1, Math.max(2, Math.floor(m * (cfg.targetBytes - fixed - 160) / rowBytes)));
+  const pick = (n) => {
+    const keep = new Set(Array.from({ length: n }, (_, j) => Math.round((j * (m - 1)) / (n - 1))));
+    return { kept: rows.filter((_, i) => keep.has(i)), dropped: rows.filter((_, i) => !keep.has(i)).map((r) => state.orig.get(r) || r) };
+  };
+  const withMarker = (kept, marker) => setAt(value, p, [...kept, ...tail, { _ccr_dropped: marker }]);
+  let first = null;
+  for (; k >= 2; k--) {
+    if (budgetExpired(cfg)) throw budgetStop();
+    const { kept, dropped } = pick(k);
+    let marker;
+    if (!first) {
+      marker = buildMarker(arr, dropped, dropped.length, cfg);
+      if (marker === null) return value;
+      first = { k, marker };
+    } else {
+      marker = first.marker.replace(/ \d+_rows_offloaded>>$/, ` ${dropped.length}_rows_offloaded>>`);
+    }
+    const next = withMarker(kept, marker);
+    if (bytesOf(next) <= cfg.targetBytes || k === 2) {
+      state.warnings.push(`fit: ${dropped.length} of ${m} rows offloaded to meet targetBytes`);
+      return k === first.k ? next : withMarker(kept, buildMarker(arr, dropped, dropped.length, cfg));
+    }
   }
   return value;
 }
@@ -1186,14 +1314,16 @@ function slim(content, config) {
     if (cfg.fence) {
       const f = unwrapFence(content);
       if (f) {
-        const inner = slim(f.body, { ...cfg, fence: false });
+        // The prose around the fence counts against the target too.
+        const wrap = [f.preamble, f.trailer].filter((s) => s !== '').reduce((n, s) => n + Buffer.byteLength(s, 'utf8') + 1, 0);
+        const inner = slim(f.body, { ...cfg, fence: false, targetBytes: cfg.targetBytes ? Math.max(1, cfg.targetBytes - wrap) : cfg.targetBytes });
         if (inner.wasModified && inner.bytesOut < inner.bytesIn) {
           // Re-emit the tool's prose preamble on top and any trailer (e.g. "NOTE: truncated at N rows")
           // below the slimmed body so neither is silently dropped.
           const output = [f.preamble, inner.output, f.trailer].filter((s) => s !== '').join('\n');
           const bytesOut = Buffer.byteLength(output, 'utf8');
           if (bytesOut < bytesIn) {
-            return { output, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['fence', ...inner.stages] : [], ...(inner.logCompressed ? { logCompressed: true } : {}), ...(inner.jsxCompressed ? { jsxCompressed: true } : {}), ...(inner.jsonl ? { jsonl: true } : {}) };
+            return { output, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['fence', ...inner.stages] : [], warnings: inner.warnings || [], ...(inner.logCompressed ? { logCompressed: true } : {}), ...(inner.jsxCompressed ? { jsxCompressed: true } : {}), ...(inner.jsonl ? { jsonl: true } : {}) };
           }
         }
         // A fenced ERROR envelope (a tool wraps its failures the way it wraps its payloads) declines
@@ -1294,6 +1424,7 @@ function slim(content, config) {
           bytesOut: inner.bytesOut,
           ratio: bytesIn ? 1 - inner.bytesOut / bytesIn : 0,
           stages: cfg.trace ? ['envelope', ...inner.stages] : [],
+          warnings: inner.warnings || [],
           envelopeUnwrapped: true,
           // No `logCompressed` twin: the inner parsed as JSON by construction, so the log stage — a
           // NON-JSON text detector — cannot have run on it. A nested envelope of Figma JSX can.
@@ -1304,6 +1435,7 @@ function slim(content, config) {
   }
   let value = parsed;
   const stages = [];
+  const warnings = [];
   if (fromJsonl && cfg.trace) stages.push('jsonl'); // trace-only bookkeeping, like the other stages
   try {
     // The pipeline always runs; the compact()-per-stage byte-delta bookkeeping is opt-in (cfg.trace).
@@ -1319,6 +1451,11 @@ function slim(content, config) {
     runStage('noise', () => noiseStage(value, cfg));
     runStage('truncate', () => truncateStage(value, cfg));
     runStage('crush', () => crushValue(value, cfg));
+    if (cfg.targetBytes) {
+      const state = { orig: new Map(), warnings };
+      runStage('trim', () => trimStage(value, cfg, state));
+      runStage('fit', () => fitStage(value, cfg, state));
+    }
     const output = compact(value);
     const wasModified = output !== content.trim();
     // Not modified ⇒ the argument itself is the result (same rail as the passthrough returns above):
@@ -1333,6 +1470,7 @@ function slim(content, config) {
       bytesOut,
       ratio: bytesIn ? 1 - bytesOut / bytesIn : 0,
       stages,
+      warnings,
       ...(fromJsonl ? { jsonl: true } : {}),
     };
   } catch (e) {
@@ -1360,6 +1498,7 @@ function run(text, opts, ctx) {
     deadline: ctx.deadline,
     markerMode: opts.marker === 'ccr' ? 'ccr' : 'spill',
     part: ctx.part,
+    targetBytes: opts.targetBytes,
   };
   const r = slim(text, cfg);
   if (r.error) return { decision: 'passthrough', reason: 'error-shape', text };
@@ -1367,7 +1506,9 @@ function run(text, opts, ctx) {
     return { decision: 'passthrough', reason: r.reason || 'no-gain', text, ...(r.format ? { format: r.format } : {}) };
   }
   const engine = r.jsxCompressed ? 'figma' : r.logCompressed ? 'log' : r.jsonl ? 'jsonl' : 'json';
-  return { decision: 'compressed', text: r.output, stages: r.stages || [], engine };
+  const warnings = r.warnings || [];
+  if (opts.targetBytes && (engine === 'json' || engine === 'jsonl') && r.bytesOut > opts.targetBytes) warnings.push(`targetBytes ${opts.targetBytes} not met: ${r.bytesOut} B`);
+  return { decision: 'compressed', text: r.output, stages: r.stages || [], engine, warnings };
 }
 
 module.exports = {
