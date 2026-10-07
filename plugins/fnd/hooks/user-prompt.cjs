@@ -7,8 +7,8 @@
 // FND_PROMPT_JSON / FND_SESSION_TITLE / FND_READER_COMPRESSION) with unchanged meaning, its own
 // require and its own try/catch, so a half that is off or that throws cannot touch the others.
 // plugin.json still short-circuits: with ALL FOUR switches at 0 no node spawns at all.
-// On Claude Code with the mods module live (its session marker, mod-session.cjs) the monitor stays
-// silent — the band shows ctx and model. The guard keeps running: prompt-slim's rewrite already
+// On Claude Code with a status band live (the session marker that band's module, or fnd's without
+// band, rewrites — mod-session.cjs) the monitor stays silent — the band shows ctx and model. The guard keeps running: prompt-slim's rewrite already
 // passes it, so it only bites on prompts the mod skipped or failed to rewrite.
 //
 // Merged output contract — the event accepts exactly ONE JSON object on stdout:

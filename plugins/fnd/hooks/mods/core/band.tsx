@@ -3,9 +3,11 @@
 // list can pop over the transcript. A desktop draws the buttons on a second row under the figures.
 // Render only reads atoms; usage.ts and progress.tsx write them. The Progress and Log presses are
 // answered by the `ui.press` hooks on elements `progress` (progress.tsx) and `log` (log.tsx).
+// While the band plugin is loaded it draws the band, so this one passes (one plugin draws AbovePrompt).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, RenderNode } from 'claude-code'
-import type { FndRate } from '../../../types'
+import type { FndBandInfo, FndRate } from '../../../types'
+import { bandLive } from './events.ts'
 import {
   CACHE_INIT,
   CTX_PROPS,
@@ -40,6 +42,7 @@ const progress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 const paneShown = atom({ plugin: 'fnd', key: 'paneShown' } as const, false)
 const bandFocused = atom({ plugin: 'fnd', key: 'bandFocused' } as const, false)
 const modelPicker = atom({ plugin: 'fnd', key: 'modelPicker' } as const, false)
+const bandInfo = atom({ plugin: 'band', key: 'info' } as const, null as FndBandInfo | null)
 
 type $ = EngineInterface
 
@@ -113,6 +116,7 @@ export function registerBand(on: On, options: PluginOptions): void {
   // Hotkey letters are drawn only while the band holds the keyboard. A focus-in sets the flag; a
   // press, a turn or /clear clears it, as there is no focus-out event. The hotkeys stay armed.
   on('ui.focus', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (bandLive(await read($, bandInfo))) return next(e)
     await setFocused($, true)
     return next(e)
   })
@@ -137,6 +141,7 @@ export function registerBand(on: On, options: PluginOptions): void {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // The engine's own truth: every draw re-aligns a flag a missed turn.complete or a hot reload left wrong.
     turn.running = e.props.isWorking
+    if (bandLive(await read($, bandInfo))) return next(e)
     if (options.statusBand === false || e.props.hasSurvey) return next(e)
     const u = await read($, usage)
     const m = await read($, model)

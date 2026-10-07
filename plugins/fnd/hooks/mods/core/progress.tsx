@@ -1,9 +1,10 @@
 // Progress: work-id resolver, digest refresh, /fnd-progress and its pane.
-// Writes the `progress` and `paneShown` atoms the band draws from.
+// Writes the `progress` and `paneShown` atoms the band draws from. Under the band plugin band draws the pane
+// from fnd.progress: /fnd-progress then only pins and points at /band-progress.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { FndEvent, FndProgress } from '../../../types'
-import { LOG_COMMAND, pushEvent } from './events.ts'
+import type { FndBandInfo, FndEvent, FndProgress } from '../../../types'
+import { LOG_COMMAND, MOVED, bandLive, pushEvent } from './events.ts'
 import { notesTail, parseProgress } from './progress-parse.ts'
 import { KEY, isWorkId, keyFromBranch, projectOf, slugFromBranch, ticketKeys } from './workid.ts'
 
@@ -30,6 +31,7 @@ const lastKey = atom({ plugin: 'fnd', key: 'lastKey' } as const, null)
 const sessionId = atom({ plugin: 'fnd', key: 'sessionId' } as const, null)
 const paneShown = atom({ plugin: 'fnd', key: 'paneShown' } as const, false)
 const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
+const bandInfo = atom({ plugin: 'band', key: 'info' } as const, null as FndBandInfo | null)
 
 type $ = EngineInterface
 
@@ -276,11 +278,12 @@ export function registerProgress(on: On): void {
 
   on('command.run', { command: 'fnd-progress' }, async ($, e) => {
     const arg = e.args.trim()
-    if (!arg) return { text: await togglePane($) }
+    const moved = bandLive(await read($, bandInfo).catch(() => null))
+    if (!arg) return { text: moved ? MOVED.progress : await togglePane($) }
     if (arg !== '-' && !isWorkId(arg)) return { text: `Not a work id: ${arg}` }
     await update($, pin, () => (arg === '-' ? null : arg))
     await refresh($, true)
-    const text = await openPane($)
+    const text = moved ? `${arg === '-' ? 'Unpinned.' : `Pinned ${arg}.`} ${MOVED.progress}` : await openPane($)
     const cur = await read($, progress)
     if (arg !== '-' && cur?.workId !== arg) return { text: `${text} ${arg} has no task workspace.` }
     return { text }

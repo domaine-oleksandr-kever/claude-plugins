@@ -1,7 +1,8 @@
-// The mods-module session marker, read side. On Claude Code the fnd mods module (hooks/mods/**)
-// rewrites `<tmpdir>/fnd-mod-session-<sid>` at the top of every prompt; a marker touched within
-// FRESH_MS means the band mod is live in this session and already shows ctx and model, so
-// user-prompt.cjs skips its context monitor. Other hosts have no mods: always inactive.
+// The mods-module session marker, read side. On Claude Code the band plugin's module (or fnd's own
+// hooks/mods/** when band is not installed) rewrites `<tmpdir>/fnd-mod-session-<sid>` at the top of
+// every prompt; a marker touched within FRESH_MS means a status band is live in this session and
+// already shows ctx and model, so user-prompt.cjs skips its context monitor. A disabled band writes
+// none, so the monitor speaks again. Other hosts have no mods: always inactive.
 // The mod cannot delete files, so markers outlive their session; the mtime window is what keeps a
 // resumed session whose module no longer loads from being silenced by its old marker.
 'use strict';

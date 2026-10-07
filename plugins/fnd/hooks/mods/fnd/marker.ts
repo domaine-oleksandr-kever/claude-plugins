@@ -2,16 +2,23 @@
 // context monitor goes silent — the band shows ctx and model. Rewritten on every prompt, because the classic
 // side trusts only a fresh mtime: a resumed session whose module no longer loads must not inherit a stale file.
 // Never deleted ($.fs cannot remove); old empty markers stay in tmpdir.
+// Under the band plugin band writes the same file, or nobody does while band is disabled.
+import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
+import type { FndBandInfo } from '../../../types'
+import { bandLive } from '../core/events.ts'
 
 type $ = EngineInterface
 
 const MARK_MS = 500 // a stalled fs.write must not hold the prompt
 
+const bandInfo = atom({ plugin: 'band', key: 'info' } as const, null as FndBandInfo | null)
+
 export function registerMarker(on: On): void {
   let broken: string | null = null // a session whose tmpdir failed once is not retried on every prompt
   // Matches every prompt: a module holds one matcherless prompt.submit hook, and progress has it.
   on('prompt.submit', { text: /^/ }, async ($, e, next) => {
+    if (bandLive(await read($, bandInfo).catch(() => null))) return next(e)
     const sid = await sessionId($).catch(() => '')
     if (sid && sid !== broken) {
       const ok = await Promise.race([

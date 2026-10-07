@@ -1,12 +1,14 @@
 // Event log pane: /fnd-log and the band's Log button toggle it; it draws fnd's events merged with the slim
-// plugin's (an empty list when slim is not loaded), never writes either.
+// plugin's (an empty list when slim is not loaded), never writes either. Under the band plugin /fnd-log only
+// points at /band-log and fnd draws no Log button; a pane opened before band loaded keeps drawing until closed.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { FndEvent, FndForeignEvent } from '../../../types'
-import { LOG_PANE, PREFIX_COLS, hhmm, kindCell, merged, newestFitting } from './events.ts'
+import type { FndBandInfo, FndEvent, FndForeignEvent } from '../../../types'
+import { LOG_PANE, MOVED, PREFIX_COLS, bandLive, hhmm, kindCell, merged, newestFitting } from './events.ts'
 
 const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
 const slimEvents = atom({ plugin: 'slim', key: 'events' } as const, [] as FndForeignEvent[])
+const bandInfo = atom({ plugin: 'band', key: 'info' } as const, null as FndBandInfo | null)
 
 type $ = EngineInterface
 
@@ -40,7 +42,10 @@ async function togglePane($: $): Promise<string> {
 }
 
 export function registerLog(on: On): void {
-  on('command.run', { command: 'fnd-log' }, async $ => ({ text: await togglePane($) }))
+  on('command.run', { command: 'fnd-log' }, async $ => {
+    if (bandLive(await read($, bandInfo).catch(() => null))) return { text: MOVED.log }
+    return { text: await togglePane($) }
+  })
 
   // Answers without next, so the band Button's own closure never runs and the pane toggles once.
   on('ui.press', { plugin: 'fnd', element: 'log' }, async ($, e) => {

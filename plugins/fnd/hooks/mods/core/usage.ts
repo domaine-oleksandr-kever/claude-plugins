@@ -1,9 +1,10 @@
 // Status band writers: usage, model, cache and tick atoms plus the tick timer.
-// Nothing here draws; the band reads these atoms.
+// Nothing here draws; the band reads these atoms. While the band plugin is loaded it keeps these figures
+// itself, so every hook here stands down: two writers would toast the rate alarm and log each line twice.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
-import type { FndEvent, FndEventKind, FndUsage } from '../../../types'
-import { fmtK, pushEvent } from './events.ts'
+import type { FndBandInfo, FndEvent, FndEventKind, FndUsage } from '../../../types'
+import { MOVED, bandLive, fmtK, pushEvent } from './events.ts'
 import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, rateCard, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 
@@ -19,8 +20,11 @@ const tick = atom({ plugin: 'fnd', key: 'tick' } as const, 0)
 const progress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 const rateAlarmed = atom({ plugin: 'fnd', key: 'rateAlarmed' } as const, false)
 const events = atom({ plugin: 'fnd', key: 'events' } as const, [] as FndEvent[])
+const bandInfo = atom({ plugin: 'band', key: 'info' } as const, null as FndBandInfo | null)
 
 type $ = EngineInterface
+
+const yielded = async ($: $): Promise<boolean> => bandLive(await read($, bandInfo).catch(() => null))
 
 /** Appends one event-log line. FND_EVENT_LOG=0 skips the write. It never throws, because a throwing
  *  session.start hook would skip every fnd session.start hook. */
@@ -115,9 +119,14 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   // Matches every cwd: validate refuses a second unmatched session.start in one plugin.
   on('session.start', { cwd: /./ }, async ($, e, next) => {
+    // /fnd-band answers a pointer under band, and the timer is armed either way: band may load after this start.
+    await $.command.register(DEBUG_COMMAND).catch(() => undefined)
     $.clock.every(TICK_MS, () => {
-      void refresh($).catch(() => undefined)
+      void (async () => {
+        if (!(await yielded($))) await refresh($)
+      })().catch(() => undefined)
     })
+    if (await yielded($)) return next(e)
     // One throwing session.start hook skips every fnd session.start hook: each $ call fails alone.
     let learned: number | null = null
     if (forcedTtl === null) {
@@ -129,7 +138,6 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const ttlMs = forcedTtl ?? learned ?? (await defaultTtl($).catch(() => CACHE_INIT.ttlMs))
     costShown = ON.has((await $.env.get('FND_BAND_COST').catch(() => undefined))?.trim().toLowerCase() ?? '')
     const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
-    await $.command.register(DEBUG_COMMAND).catch(() => undefined)
     await update($, cache, c => ({ ...c, ttlMs, ttlSource }))
     try {
       const m = await $.session.model()
@@ -141,6 +149,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   on('command.run', { command: DEBUG_COMMAND.name }, async ($) => {
+    if (await yielded($)) return { text: MOVED.debug }
     const raw = await $.session.usage().catch(err => ({ error: String(err) }))
     const root = await $.session.root().catch(err => `error: ${String(err)}`)
     const c = await read($, cache)
@@ -162,6 +171,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
+    if (await yielded($)) return r
     const u = withCost(toUsage(e.context, e.rateLimits, e.cost))
     await update($, usage, prev => keepCtx(prev, u))
     await adoptSubscriptionTtl($, u)
@@ -186,6 +196,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) turn.running = false
+    if (await yielded($)) return next(e)
     if (e.agentId === undefined && e.usage) {
       const now = await $.clock.now()
       await update($, cache, c => ({ ...c, anchorMs: now, isCold: false }))
@@ -196,6 +207,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   on('session.compact', async ($, e, next) => {
     const r = await next(e)
+    if (await yielded($)) return r
     if (r.skip === undefined && r.messages && e.trigger !== 'precompute' && e.agentId === undefined) {
       await applyCompaction($, e.trigger, r.tokensAfter, r.tokensBefore)
     }
@@ -205,12 +217,14 @@ export function registerUsage(on: On, options: PluginOptions): void {
   // The engine's own report of a main-thread compaction. It reaches the mod when the session.compact
   // chain does not (a Compact press on 2.1.289 left the band warm at the old ctx).
   on('classic.PostCompact', async ($, e, next) => {
+    if (await yielded($)) return next(e)
     if (e.agent_id === undefined) await applyCompaction($, e.trigger)
     return next(e)
   })
 
   // Atom writes only: one 1.5 s bound covers every session.end hook and aborts a $ call in flight.
   on('session.end', async ($, e, next) => {
+    if (await yielded($)) return next(e)
     if (e.reason === 'clear' || e.reason === 'resume') {
       await update($, cache, c => ({ ...c, anchorMs: null, isCold: false }))
       await update($, usage, u => ({ ...u, ctxPct: null, ctxTokens: null }))
@@ -222,6 +236,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   on('classic.PostModelSwitch', async ($, e, next) => {
+    if (await yielded($)) return next(e)
     // The event's own field: $.session.model() may still answer the model before the switch here.
     await adoptModel($, e.to_model)
     // On a subscription (rate windows seen) the cache lives 1 h; a 5 min report there is the host's
@@ -237,6 +252,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   on('classic.SessionStart', { source: /^(resume|fork)$/ }, async ($, e, next) => {
+    if (await yielded($)) return next(e)
     await logEvent($, 'session', e.source)
     const secs = e.seconds_since_last_response
     if (typeof secs === 'number') {
@@ -250,6 +266,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const r = await next(e)
+    if (await yielded($)) return r
     if (forcedTtl === null && oneHourCacheTokens(r.result) > 0) await learnTtl($, HOUR_MS, 'agent')
     return r
   })

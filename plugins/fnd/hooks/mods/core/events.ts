@@ -1,10 +1,22 @@
-// Pure event-log helpers shared by the writer files and the log pane. No `$` here: each writer keeps
-// its own `logEvent` wrapper, as the validator follows `$` only within one file.
+// Pure event-log helpers shared by the writer files and the log pane, plus the band-plugin yield test.
+// No `$` here: each writer keeps its own `logEvent` wrapper, as the validator follows `$` only within one file.
 import type { FndEvent, FndEventKind, FndForeignEvent } from '../../../types'
 
 export const EVENT_CAP = 200
 export const LOG_PANE = 'fnd-log'
 export const LOG_COMMAND = { name: 'fnd-log', description: 'Open the fnd event log pane', immediate: true } as const
+
+/** band.info is written at band's every session.start, so any object means band is loaded and draws instead of fnd. */
+export function bandLive(info: unknown): boolean {
+  return info !== null && typeof info === 'object'
+}
+
+/** What fnd's commands answer while band draws the band and the panes. */
+export const MOVED = {
+  log: 'band draws the panes now: /band-log',
+  progress: 'band draws the panes now: /band-progress',
+  debug: 'band draws the band now: /band-debug',
+} as const
 
 /** Kinds written once per MCP call or prompt: they would otherwise rotate the rare kinds out. */
 const ROUTINE: ReadonlySet<FndEventKind> = new Set(['slim', 'prompt'])

@@ -42,6 +42,8 @@ export type FndEvent = { atMs: number; kind: FndEventKind; text: string }
 export type FndForeignEvent = { atMs: number; kind: string; text: string }
 /** The slim plugin's session.start snapshot: present iff slim is loaded; `channels` = its channels not switched off. */
 export type FndSlimInfo = { v: 1; version: string; channels: string[] }
+/** The band plugin's session.start snapshot: non-null iff band is loaded; fnd then yields the band, the panes and the marker to it. */
+export type FndBandInfo = { v: 1; version: string; disabled: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -76,6 +78,10 @@ declare module 'claude-code' {
     slim: {
       events: FndForeignEvent[]
       info: FndSlimInfo | null
+    }
+    /** Owned and written by the separate band plugin; fnd only reads it (null without band). */
+    band: {
+      info: FndBandInfo | null
     }
   }
 }
