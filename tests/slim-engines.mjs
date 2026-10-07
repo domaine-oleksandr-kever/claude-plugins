@@ -31,7 +31,12 @@ function check(name, cond, detail) {
 const eq = (name, actual, expected) => check(name, JSON.stringify(actual) === JSON.stringify(expected),
   `\n  expected: ${JSON.stringify(expected)}\n  actual:   ${JSON.stringify(actual)}`);
 const bytes = (s) => Buffer.byteLength(s, 'utf8');
-const fx = (f) => readFileSync(path.join(FIX, f), 'utf8');
+// Memoised: the no-fs-writes block re-runs ecRows() with fs patched, and Node 18's readFileSync goes through fs.openSync.
+const fxCache = new Map();
+const fx = (f) => {
+  if (!fxCache.has(f)) fxCache.set(f, readFileSync(path.join(FIX, f), 'utf8'));
+  return fxCache.get(f);
+};
 const gen = (f, ...args) => spawnSync('node', [path.join(SHARED, f), ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout;
 const O = { maxMs: 0 };
 
