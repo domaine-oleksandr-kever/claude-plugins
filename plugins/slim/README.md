@@ -9,7 +9,7 @@ tool answers one question about a page, a command's output or a file without loa
 hooks run wherever the plugin loads; the drawing (the ToolResult line, the ToolGroup suffix and the
 toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.2.0**.
+Current release: **slim v0.3.0**.
 
 ## Status
 
