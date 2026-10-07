@@ -1,6 +1,9 @@
-// slim hooks module: a pass-through placeholder until the result proxy lands.
+// slim hooks module: MCP tool results through slim's core, and the line it draws under them.
 import type { Register } from 'claude-code'
+import { registerMcp } from './mcp.ts'
+import { registerRender } from './render.tsx'
 
 export const register: Register = (on) => {
-  on('session.start', async (_$, e, next) => next(e))
+  registerMcp(on)
+  registerRender(on)
 }

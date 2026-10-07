@@ -405,12 +405,14 @@ for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
 done
 # Sibling plugins in the monorepo own a `<NAME>_` prefix (slim → SLIM_*) and document their
 # switches in the same table.
+SIB_IGNORE=" SLIM_OUT_PREFIX "  # json-slim.cjs's spill-prefix constant, carried byte-identical — not a switch
 for d in "$ROOT"/plugins/*/; do
   name="$(basename "$d")"
   [ "$name" = fnd ] && continue
   prefix="$(printf '%s' "$name" | tr 'a-z-' 'A-Z_')_"
   for k in $(grep -rhoE "(^|[^A-Za-z0-9_])${prefix}[A-Z0-9_]+" "$d" 2>/dev/null |
                sed "s/^[^A-Z]*\(${prefix}\)/\1/" | sort -u); do
+    case "$SIB_IGNORE" in *" $k "*) continue ;; esac
     case "$ENV_ROWS" in
       *'| `'"$k"'` |'*) ok ;;
       *) bad "env-undocumented-$k" "$k is read by plugins/$name but has no README → Environment switches row" ;;

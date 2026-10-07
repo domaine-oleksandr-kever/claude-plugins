@@ -3,10 +3,11 @@
   "name": "slim",
   "displayName": "Slim",
   "version": "0.1.0",
-  "description": "Universal tool-result compression proxy for Claude Code — stub, not yet functional (see fnd)",
+  "description": "Universal tool-result compression proxy for Claude Code — compresses MCP tool results today; Bash, Read, WebFetch and Agent channels are planned",
   "author": {
     "name": "Oleksandr Kever",
     "email": "oleksandr.kever@meetdomaine.com"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "types": "./types/index.d.ts"
 }

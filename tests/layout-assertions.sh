@@ -81,7 +81,10 @@ for f in "$CANON" \
          "$ROOT/tests/opencode-config-sim.sh" \
          "$ROOT/tests/figma-rest-sim.sh" \
          "$ROOT/tests/external-screenshots-sim.sh" \
-         "$ROOT/tests/figma-node-slim-fixtures.mjs"; do
+         "$ROOT/tests/figma-node-slim-fixtures.mjs" \
+         "$ROOT/plugins/slim/scripts/slim.cjs" \
+         "$ROOT/plugins/slim/types/index.d.ts" \
+         "$ROOT/tests/slim-fixtures.mjs"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
 
@@ -603,6 +606,14 @@ if [ -z "$mods_check" ]; then ok; else bad mods-hooks-json "hooks/hooks.json: $m
 MODS_TYPES="$(jval "$CANON" types)"
 if [ -n "$MODS_TYPES" ] && [ -f "$PLUGIN_DIR/$MODS_TYPES" ]; then ok
 else bad mods-types "plugin.json types '$MODS_TYPES' does not name an existing file"; fi
+for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
+  d="$(dirname "$(dirname "$m")")"; name="$(basename "$d")"
+  [ "$name" = fnd ] && continue
+  t="$(jval "$m" types)"
+  [ -n "$t" ] || continue
+  if [ -f "$d/$t" ]; then ok
+  else bad "mods-types-$name" "plugins/$name plugin.json types '$t' does not name an existing file"; fi
+done
 # Cursor and Codex read their own wiring files; naming the Claude-only modules file would hand them
 # a format they do not parse
 for m in "$CURSOR_MANIFEST" "$CODEX_MANIFEST"; do
