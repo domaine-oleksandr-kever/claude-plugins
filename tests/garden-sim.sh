@@ -110,6 +110,12 @@ printf '\n\nSee [gone.mdc](gone.mdc).\n' >> "$S/$PLUGIN/rules/liquid.mdc"
 run --root "$S"
 expect G7-rule-cross-link 1 "FAIL  links:$PLUGIN/rules/liquid.mdc" "gone.mdc"
 
+# G7b: every plugin's own README in the monorepo is walked, not only fnd's prose dirs.
+S="$(sandbox siblingreadme)"
+printf '\n\nSee [the plan](docs/gone.md).\n' >> "$S/plugins/slim/README.md"
+run --root "$S"
+expect G7b-sibling-plugin-readme 1 "FAIL  links:plugins/slim/README.md" "docs/gone.md"
+
 # --------------------------------------------------------------------- skill size watchlist --
 # G8: the Codex cap is unconfirmed (M1b), so an oversized skill WARNs and the run still exits 0 —
 # a size watchlist that blocked CI would be a guess enforced as a rule.
@@ -170,7 +176,7 @@ mv "$S/tmp.sh" "$S/scripts/install.sh"
 run --root "$S"
 expect G15-installer-stamp-drift 1 "FAIL  version:stamps" "scripts/install.sh:" "0.0.1"
 
-# G15b: …but only on the marker bump-version.cjs actually stamps there. That script's TARGETS row
+# G15b: …but only on the marker bump-version.cjs actually stamps there. That script's fnd target row
 # for install.sh carries FND_VERSION= alone, so an `fnd v<semver>` line in the installer's prose is
 # text no bump can reach — flagging it would be a FAIL whose own remediation cannot clear it.
 S="$(sandbox installprose)"

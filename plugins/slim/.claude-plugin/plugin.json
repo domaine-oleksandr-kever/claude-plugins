@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "slim",
+  "displayName": "Slim",
+  "version": "0.1.0",
+  "description": "Universal tool-result compression proxy for Claude Code — stub, not yet functional (see fnd)",
+  "author": {
+    "name": "Oleksandr Kever",
+    "email": "oleksandr.kever@meetdomaine.com"
+  },
+  "license": "MIT"
+}

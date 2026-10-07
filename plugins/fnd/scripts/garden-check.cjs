@@ -45,7 +45,7 @@ const LINK_DIRS = ['skills', 'references', 'rules', 'agents'];
 
 // Version stamps outside the manifests. Mirrors the marker contract in
 // plugins/fnd/scripts/bump-version.cjs — re-derived rather than imported, so this file has no
-// runtime dependency on that script. Per FILE, because that script's TARGETS table is per file too:
+// runtime dependency on that script. Per FILE, because that script's fnd target table is per file too:
 // install.sh is stamped on its `FND_VERSION="…"` assignment only, so an `fnd v<semver>` line in it
 // is prose the bump would never touch — asserting it here would be a FAIL no bump could clear.
 const MARK_ENV = /FND_VERSION="([^"\n]*)"/g;
@@ -188,6 +188,14 @@ function checkLinks(repoRoot, pluginRoot) {
     if (exists(f)) files.push(f);
   }
   walkMarkdown(path.join(repoRoot, 'docs'), files);
+  let siblings = [];
+  try {
+    siblings = fs.readdirSync(path.join(repoRoot, 'plugins')).sort();
+  } catch (_) {}
+  for (const name of siblings) {
+    const f = path.join(repoRoot, 'plugins', name, 'README.md');
+    if (exists(f)) files.push(f);
+  }
 
   if (!files.length) {
     fail('links', 'no markdown found under ' + PLUGIN_REL + ' — wrong --root?');

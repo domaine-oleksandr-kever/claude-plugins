@@ -4,9 +4,14 @@
  * (multi-harness port, M2). The Shopify-AI-Toolkit cautionary tale: version stamps
  * duplicated across per-harness manifests drift unless one script owns all of them.
  *
- *   node bump-version.cjs <new-version|major|minor|patch> [--root <dir>] [--dry-run]
+ *   node bump-version.cjs <new-version|major|minor|patch> [--plugin <name>] [--root <dir>] [--dry-run]
  *
- * Targets and their contracts:
+ * --plugin defaults to fnd. Any other plugin stamps plugins/<name>/.claude-plugin/plugin.json
+ * (required, canonical; absent = unknown plugin, exit 1), the optional .cursor-plugin and
+ * .codex-plugin manifests, and the `<name> v<semver>` marker in the optional README.md and
+ * plugins/<name>/README.md.
+ *
+ * fnd targets and their contracts:
  *   plugins/fnd/.claude-plugin/plugin.json   required, canonical — its `version` is the
  *                                            base for major/minor/patch keyword bumps
  *   plugins/fnd/.cursor-plugin/plugin.json   required
@@ -39,21 +44,45 @@ const KEYWORDS = ['major', 'minor', 'patch'];
 
 // Documented text markers. Each entry replaces capture group 2 only.
 const MARK_ENV = /(FND_VERSION=")([^"\n]*)(")/g;
+const SEMVER_MARK = '\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?';
 const MARK_FND_V = /(\bfnd v)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(\b)/g;
 
-const TARGETS = [
-  { rel: 'plugins/fnd/.claude-plugin/plugin.json', kind: 'json', required: true, canonical: true },
-  { rel: 'plugins/fnd/.cursor-plugin/plugin.json', kind: 'json', required: true },
-  { rel: 'plugins/fnd/.codex-plugin/plugin.json', kind: 'json', required: true },
-  { rel: 'README.md', kind: 'text', required: true, marks: [MARK_FND_V, MARK_ENV] },
-  { rel: 'scripts/install.sh', kind: 'text', required: false, marks: [MARK_ENV] },
-];
+const DEFAULT_PLUGIN = 'fnd';
+const PLUGIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function markFor(name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(\\b${escaped} v)(${SEMVER_MARK})(\\b)`, 'g');
+}
+
+function targetsFor(name) {
+  if (name === DEFAULT_PLUGIN) {
+    return [
+      { rel: 'plugins/fnd/.claude-plugin/plugin.json', kind: 'json', required: true, canonical: true },
+      { rel: 'plugins/fnd/.cursor-plugin/plugin.json', kind: 'json', required: true },
+      { rel: 'plugins/fnd/.codex-plugin/plugin.json', kind: 'json', required: true },
+      { rel: 'README.md', kind: 'text', required: true, marks: [MARK_FND_V, MARK_ENV] },
+      { rel: 'scripts/install.sh', kind: 'text', required: false, marks: [MARK_ENV] },
+    ];
+  }
+  const mark = markFor(name);
+  return [
+    { rel: `plugins/${name}/.claude-plugin/plugin.json`, kind: 'json', required: true, canonical: true },
+    { rel: `plugins/${name}/.cursor-plugin/plugin.json`, kind: 'json', required: false },
+    { rel: `plugins/${name}/.codex-plugin/plugin.json`, kind: 'json', required: false },
+    { rel: 'README.md', kind: 'text', required: false, marks: [mark] },
+    { rel: `plugins/${name}/README.md`, kind: 'text', required: false, marks: [mark] },
+  ];
+}
 
 const USAGE = [
-  'usage: node bump-version.cjs <new-version|major|minor|patch> [--root <dir>] [--dry-run]',
+  'usage: node bump-version.cjs <new-version|major|minor|patch> [--plugin <name>] [--root <dir>] [--dry-run]',
   '',
   '  <new-version>  explicit semver, e.g. 0.60.0',
   '  major|minor|patch  bump the canonical .claude-plugin/plugin.json version',
+  `  --plugin <name>  plugin under plugins/ to stamp (default: ${DEFAULT_PLUGIN}); other plugins stamp`,
+  '                 their manifests plus the "<name> v<semver>" markers in README.md and',
+  '                 plugins/<name>/README.md',
   '  --root <dir>   repo root to stamp (default: the repo this script ships in)',
   '  --dry-run      report what would change, write nothing',
 ].join('\n');
@@ -64,11 +93,16 @@ function fail(code, message) {
 }
 
 function parseArgs(argv) {
-  const out = { version: null, root: null, dryRun: false };
+  const out = { version: null, root: null, plugin: DEFAULT_PLUGIN, dryRun: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--dry-run') out.dryRun = true;
-    else if (a === '--root') {
+    else if (a === '--plugin') {
+      out.plugin = argv[i + 1];
+      if (!out.plugin) fail(1, `--plugin needs a name\n${USAGE}`);
+      if (!PLUGIN_NAME.test(out.plugin)) fail(1, `"${out.plugin}" is not a plugin folder name\n${USAGE}`);
+      i += 1;
+    } else if (a === '--root') {
       out.root = argv[i + 1];
       if (!out.root) fail(1, `--root needs a directory\n${USAGE}`);
       i += 1;
@@ -191,7 +225,7 @@ function planText(target, next) {
       return `${pre}${next}${post}`;
     });
   }
-  if (hits === 0) return { ...target, status: 'skipped', note: 'no fnd version markers' };
+  if (hits === 0) return { ...target, status: 'skipped', note: `no ${target.plugin} version markers` };
   if (changed === 0) return { ...target, status: 'unchanged', note: `${hits} marker(s)` };
   const blocker = writeBlocker(target.abs);
   if (blocker) return { ...target, error: blocker };
@@ -264,8 +298,23 @@ function main() {
     fail(1, `--root "${root}" is not a directory`);
   }
 
-  const targets = TARGETS.map((t) => ({ ...t, abs: path.join(root, t.rel) }));
+  const plugin = args.plugin;
+  const targets = targetsFor(plugin).map((t) => ({ ...t, plugin, abs: path.join(root, t.rel) }));
   const canonical = targets.find((t) => t.canonical);
+  // fnd keeps its historical exit 2 for a missing manifest; any other name must already exist
+  if (plugin !== DEFAULT_PLUGIN && !fs.existsSync(canonical.abs)) {
+    let present = [];
+    try {
+      present = fs
+        .readdirSync(path.join(root, 'plugins'), { withFileTypes: true })
+        .filter((d) => d.isDirectory() && fs.existsSync(path.join(root, 'plugins', d.name, '.claude-plugin', 'plugin.json')))
+        .map((d) => d.name)
+        .sort();
+    } catch (_) {
+      present = [];
+    }
+    fail(1, `unknown plugin "${plugin}" — no ${canonical.rel}; plugins present: ${present.join(', ') || 'none'}`);
+  }
   let current = null;
   if (fs.existsSync(canonical.abs)) {
     try {
@@ -326,7 +375,7 @@ function main() {
     .join(', ');
   const from = current === null ? 'unknown' : current;
   process.stdout.write(
-    `bump-version: ${from} -> ${next}${args.dryRun ? '  (dry run — nothing written)' : ''}\n` +
+    `bump-version: ${from} -> ${next}${args.dryRun ? `  (dry run — nothing written${plugin === DEFAULT_PLUGIN ? '' : `; plugin ${plugin}`})` : ''}\n` +
       `${lines.join('\n')}\n` +
       `${plans.length} targets: ${summary}\n`
   );

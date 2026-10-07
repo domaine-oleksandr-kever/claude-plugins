@@ -45,6 +45,14 @@ mkrepo() {
   # has to hold it for the pointer assert to be about anything.
   mkdir -p "$d/plugins/fnd/scripts"
   printf '#!/usr/bin/env node\n' > "$d/plugins/fnd/scripts/opencode-config.cjs"
+  # The installer accepts a plugin only by its Claude Code manifest and a host only by the
+  # plugin's adapter for it — the real fnd ships all four.
+  mkdir -p "$d/plugins/fnd/.claude-plugin" "$d/plugins/fnd/.cursor-plugin" "$d/plugins/fnd/.codex-plugin" \
+           "$d/plugins/fnd/opencode"
+  for h in .claude-plugin .cursor-plugin .codex-plugin; do
+    printf '{"name":"fnd","version":"%s"}\n' "$INSTALL_VER" > "$d/plugins/fnd/$h/plugin.json"
+  done
+  echo '{}' > "$d/plugins/fnd/opencode/mcp-fragment.json"  # git keeps no empty dir
 }
 
 # mkbundle <repo-dir> <version> — the packaging a real install carries: three manifests, a hook
@@ -120,7 +128,49 @@ run "$TMP/h-args" "$REPO1" --target
 if [ "$RC" -eq 2 ]; then ok; else bad A4-target-needs-value "rc=$RC"; fi
 
 run "$TMP/h-args" "$REPO1" --help
-if [ "$RC" -eq 0 ] && grep -q -- '--uninstall' "$O"; then ok; else bad A5-help "rc=$RC out=$(head -c 120 "$O")"; fi
+if [ "$RC" -eq 0 ] && grep -q -- '--uninstall' "$O" && grep -q -- '--plugin <name>' "$O"; then ok
+else bad A5-help "rc=$RC out=$(head -c 120 "$O")"; fi
+
+# ----------------------------------------------------------------------- --plugin gates --
+# P1: an explicit --plugin fnd (both spellings) lands exactly what the default does.
+for spelling in "--plugin fnd" "--plugin=fnd"; do
+  HP="$TMP/h-plugin-$(echo "$spelling" | tr -c 'a-z' '_')"
+  # shellcheck disable=SC2086
+  run "$HP" "$REPO1" --target cursor $spelling
+  if [ "$RC" -eq 0 ] && [ "$(readlink "$HP/$CURSOR_LINK")" = "$REPO1/plugins/fnd" ] \
+     && grep -q "^repo=$REPO1$" "$HP/$CURSOR_MODE" \
+     && [ "$(grep -c '^entry=' "$HP/$CURSOR_MODE")" -eq 1 ] \
+     && grep -q "fnd $INSTALL_VER installed for cursor" "$O"; then ok
+  else bad "P1-explicit-fnd($spelling)" "rc=$RC out=$(tr '\n' ';' < "$O") err=$(head -c 160 "$E")"; fi
+done
+
+# P2: an unknown name exits 2 and names what plugins/ does hold, before touching HOME.
+run "$TMP/h-plugin-nope" "$REPO1" --target cursor --plugin nope
+if [ "$RC" -eq 2 ] && grep -q "unknown plugin 'nope'" "$E" && grep -q "plugins/ holds: fnd" "$E" \
+   && [ ! -e "$TMP/h-plugin-nope/.cursor" ]; then ok
+else bad P2-unknown-plugin "rc=$RC err=$(head -c 200 "$E")"; fi
+
+# P3: a path-shaped name never escapes plugins/ (../plugins/fnd resolves to a real manifest).
+run "$TMP/h-plugin-dots" "$REPO1" --target cursor --plugin ../plugins/fnd
+if [ "$RC" -eq 2 ] && grep -q "unknown plugin" "$E"; then ok
+else bad P3-path-name-refused "rc=$RC err=$(head -c 200 "$E")"; fi
+
+# P4: a Claude-Code-only plugin (manifest, no host adapter) is refused per host with the
+# marketplace route — the shape plugins/slim ships in.
+REPOP="$TMP/repo-plugins"; mkrepo "$REPOP"
+mkdir -p "$REPOP/plugins/slim/.claude-plugin"
+printf '{"name":"slim","version":"0.0.1"}\n' > "$REPOP/plugins/slim/.claude-plugin/plugin.json"
+for host in cursor codex opencode; do
+  run "$TMP/h-plugin-slim-$host" "$REPOP" --target "$host" --plugin slim
+  if [ "$RC" -eq 2 ] && grep -q "plugin 'slim' ships no $host adapter" "$E" \
+     && grep -q "Claude Code only" "$E" && grep -q "/plugin install slim@domaine" "$E" \
+     && [ -z "$(ls -A "$TMP/h-plugin-slim-$host" 2>/dev/null)" ]; then ok
+  else bad "P4-claude-only-plugin($host)" "rc=$RC err=$(tr '\n' ';' < "$E")"; fi
+done
+
+run "$TMP/h-plugin-list" "$REPOP" --target cursor --plugin nope
+if [ "$RC" -eq 2 ] && grep -q "plugins/ holds: fnd slim" "$E"; then ok
+else bad P5-unknown-lists-all "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # --------------------------------------------------------------- cursor: fresh install ----
 H1="$TMP/h1"

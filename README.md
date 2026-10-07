@@ -8,6 +8,13 @@ breaking-changes, preview themes, etc.) for Shopify theme work.
 CLI** and **OpenCode** through thin, committed adapters generated from it — one repo, no fork.
 See [Install — four hosts](#install--four-hosts).
 
+The repo is a marketplace (`domaine`, `.claude-plugin/marketplace.json`) that holds two plugins.
+`plugins/fnd` is the Foundation plugin this README describes: skills, agents, scripts, classic
+hooks and the Claude Code hooks module. `plugins/slim` is a **stub** of the universal tool-result
+compression proxy — one pass-through Claude Code mod, not yet functional; the compression it will
+take over still lives in fnd. `tests/` covers both, and `tests/mods-sim.sh` validates and tests
+every `plugins/*/hooks/hooks.json` module.
+
 ## What's inside
 
 The map of how the pieces fit — hosts, adapters, hooks, the compression pipeline, the ship
@@ -205,6 +212,10 @@ spawns one subagent, attempts a `--no-verify` commit in a scratch repo expecting
 block it, and reports a pass/fail matrix with remediation. `preflight-checks` keeps the
 recurring per-project role.
 
+`install.sh` takes `--plugin <name>` (default `fnd`). `slim` is Claude Code only — it ships no
+Cursor, Codex or OpenCode adapter, so `install.sh --plugin slim` exits 2 and points at
+`/plugin marketplace add …` + `/plugin install slim@domaine`.
+
 ### Claude Code — from the published Git marketplace (team use)
 
 ```text
@@ -226,6 +237,9 @@ marketplace can ship hooks, commands, and MCP servers that run on your machine.
 Review the source, then confirm to add it to your trusted marketplaces. To make
 it trusted for a whole team without each person confirming, an admin can
 predeclare it in managed settings under `extraKnownMarketplaces`.
+
+`/plugin install slim@domaine` installs the second plugin, a stub that is not yet functional
+(Claude Code only).
 
 ### Claude Code — local development (from this folder on disk)
 
@@ -507,7 +521,7 @@ codex plugin marketplace upgrade         # Codex, then a new session
 at your clone, so re-running the installer *is* the update — it pulls and re-links in one pass:
 
 ```bash
-./scripts/install.sh --target <cursor|opencode|codex>
+./scripts/install.sh --target <cursor|opencode|codex> [--plugin <name>]   # --plugin defaults to fnd; slim is Claude Code only
 ```
 
 - Skills, references, agents and scripts apply on the **next read**; manifest, hook-wiring, MCP
@@ -527,7 +541,7 @@ never gate a workflow.
 
 ## Releasing — one command stamps every version
 
-Current release: **fnd v0.132.0**.
+Current release: **fnd v0.133.0**.
 
 The version is duplicated across per-host packaging files, and a stamp that drifts
 reads to a host as "nothing to update". One script owns all of them — run it instead
@@ -536,7 +550,15 @@ of hand-editing any manifest:
 ```bash
 node plugins/fnd/scripts/bump-version.cjs minor      # or major | patch | 0.60.0
 node plugins/fnd/scripts/bump-version.cjs 0.60.0 --dry-run   # report, write nothing
+node plugins/fnd/scripts/bump-version.cjs 0.2.0 --plugin slim   # another plugin in the monorepo
 ```
+
+`--plugin` defaults to `fnd`, and the table below lists fnd's targets. Any other plugin stamps
+`plugins/<name>/.claude-plugin/plugin.json` (required and canonical; if it is missing the run
+exits 1 as an unknown plugin and lists the plugins present), plus these optional targets when
+they exist: `plugins/<name>/.cursor-plugin/plugin.json`, `plugins/<name>/.codex-plugin/plugin.json`,
+and the `<name> v<semver>` marker in `README.md` and `plugins/<name>/README.md`. It never touches
+fnd's stamps.
 
 It stamps, all-or-nothing (a failure on any target writes nothing):
 
@@ -562,7 +584,7 @@ Then verify the packaging before committing:
 node plugins/fnd/scripts/doctor.cjs      # manifests present, versions equal, hooks runnable
 bash tests/layout-assertions.sh
 bash tests/readme-checks.sh              # install commands, referenced paths, links, stamps
-bash tests/mods-sim.sh                   # hooks module: validate --strict + kit tests (local only; SKIP without claude)
+bash tests/mods-sim.sh                   # every plugin's hooks module: validate --strict + kit tests (local only; SKIP without claude)
 ```
 
 ## How global skills use project rules

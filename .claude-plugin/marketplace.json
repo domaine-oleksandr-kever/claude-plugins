@@ -12,6 +12,12 @@
       "source": "./plugins/fnd",
       "description": "Domaine Foundation skills — Agentic Assisted Development workflow for Shopify theme work.",
       "license": "MIT"
+    },
+    {
+      "name": "slim",
+      "source": "./plugins/slim",
+      "description": "Universal tool-result compression proxy for Claude Code — stub, not yet functional (see fnd).",
+      "license": "MIT"
     }
   ]
 }

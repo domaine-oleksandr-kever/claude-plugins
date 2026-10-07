@@ -226,7 +226,8 @@ else bad C8-drift-heal "rc=$rc cursor=$(ver "$C8/plugins/fnd/.cursor-plugin/plug
 C9="$TMP/c9"; sandbox "$C9"; BEFORE="$(snap "$C9")"
 rc=0; run 1.0.0 --root "$C9" --dry-run || rc=$?
 if [ "$rc" -eq 0 ] && [ "$(snap "$C9")" = "$BEFORE" ] \
-   && grep -q 'dry run — nothing written' "$O" && grep -q '^  stamped   README.md' "$O"; then ok
+   && grep -qE '^bump-version: [0-9.]+ -> 1\.0\.0  \(dry run — nothing written\)$' "$O" \
+   && grep -q '^  stamped   README.md' "$O"; then ok
 else bad C9-dry-run "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # ------------------------------------------------------------------- C10 usage paths --
@@ -322,6 +323,60 @@ rc=0; run 0.60.0 --root "$C15B" || rc=$?
 if [ "$rc" -eq 2 ] && [ "$(snap "$C15B")" = "$BEFORE" ] \
    && grep -q 'could not locate the "version" line' "$E"; then ok
 else bad C15b-minified-ambiguous "rc=$rc err=$(tr '\n' ';' < "$E")"; fi
+
+# ------------------------------------------------------ C17 --plugin fnd is the default --
+C17A="$TMP/c17a"; sandbox "$C17A"; C17B="$TMP/c17b"; sandbox "$C17B"
+rc=0; run 0.60.0 --root "$C17A" || rc=$?; OUT_A="$(cat "$O")"
+rcb=0; run 0.60.0 --root "$C17B" --plugin fnd || rcb=$?; OUT_B="$(cat "$O")"
+if [ "$rc" -eq 0 ] && [ "$rcb" -eq 0 ] && [ "$OUT_A" = "$OUT_B" ] && [ "$(snap "$C17A")" = "$(snap "$C17B")" ]; then ok
+else bad C17-default-is-fnd "rc=$rc/$rcb a=$(printf '%s' "$OUT_A" | tr '\n' ';') b=$(printf '%s' "$OUT_B" | tr '\n' ';')"; fi
+
+# ------------------------------------------- C18 another plugin stamps only its own files --
+# slim_sandbox <dir> — the fnd layout plus a stub plugins/slim and a root README naming both
+slim_sandbox() {
+  local d="$1"
+  sandbox "$d"
+  mkdir -p "$d/plugins/slim/.claude-plugin"
+  printf '{\n  "name": "slim",\n  "version": "0.1.0"\n}\n' > "$d/plugins/slim/.claude-plugin/plugin.json"
+  printf '# plugins\n\nslim v0.1.0\nfnd v0.132.0\nFND_VERSION="0.132.0"\n' > "$d/README.md"
+  printf '# slim\n\nInstalled build: slim v0.1.0\n' > "$d/plugins/slim/README.md"
+}
+C18="$TMP/c18"; slim_sandbox "$C18"
+FND_BEFORE="$(cksum < "$C18/plugins/fnd/.claude-plugin/plugin.json")"
+rc=0; run 0.2.0 --root "$C18" --plugin slim || rc=$?
+if [ "$rc" -eq 0 ] \
+   && [ "$(ver "$C18/plugins/slim/.claude-plugin/plugin.json")" = "0.2.0" ] \
+   && grep -q '^slim v0.2.0$' "$C18/README.md" \
+   && grep -q 'slim v0.2.0' "$C18/plugins/slim/README.md" \
+   && grep -q '^fnd v0.132.0$' "$C18/README.md" \
+   && grep -q 'FND_VERSION="0.132.0"' "$C18/README.md" \
+   && [ "$(cksum < "$C18/plugins/fnd/.claude-plugin/plugin.json")" = "$FND_BEFORE" ] \
+   && grep -q '^  missing   plugins/slim/.cursor-plugin/plugin.json' "$O" \
+   && ! grep -q 'plugins/fnd/' "$O"; then ok
+else bad C18-plugin-slim "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E") readme=$(tr '\n' ';' < "$C18/README.md")"; fi
+
+# C18b a dry run names the plugin it would stamp, and writes nothing
+C18B="$TMP/c18b"; slim_sandbox "$C18B"; BEFORE="$(snap "$C18B")"
+rc=0; run minor --root "$C18B" --plugin slim --dry-run || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(snap "$C18B")" = "$BEFORE" ] \
+   && grep -q '^bump-version: 0.1.0 -> 0.2.0  (dry run — nothing written; plugin slim)' "$O"; then ok
+else bad C18b-dry-run-names-plugin "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# C18c an unknown plugin is a usage refusal that lists the plugins present
+C18C="$TMP/c18c"; slim_sandbox "$C18C"; BEFORE="$(snap "$C18C")"
+rc=0; run 0.2.0 --root "$C18C" --plugin nope || rc=$?
+if [ "$rc" -eq 1 ] && [ "$(snap "$C18C")" = "$BEFORE" ] \
+   && grep -q 'unknown plugin "nope"' "$E" && grep -q 'plugins present: fnd, slim' "$E"; then ok
+else bad C18c-unknown-plugin "rc=$rc err=$(tr '\n' ';' < "$E")"; fi
+
+# C18d a plugin name is a folder name, never a path
+rc=0; run 0.2.0 --root "$C18C" --plugin ../slim || rc=$?
+if [ "$rc" -eq 1 ] && grep -q 'is not a plugin folder name' "$E" && [ "$(snap "$C18C")" = "$BEFORE" ]; then ok
+else bad C18d-plugin-path "rc=$rc err=$(head -c 160 "$E")"; fi
+
+rc=0; run 0.2.0 --root "$C18C" --plugin || rc=$?
+if [ "$rc" -eq 1 ] && grep -q -- '--plugin needs a name' "$E"; then ok
+else bad C18e-plugin-without-value "rc=$rc err=$(head -c 160 "$E")"; fi
 
 # ------------------------------------------------- C16 staging files never survive a run --
 LEFTOVERS="$(find "$TMP" -name '*.bump-version-tmp' 2>/dev/null | tr '\n' ';')"

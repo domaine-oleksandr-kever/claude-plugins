@@ -188,6 +188,21 @@ has "$README" '/plugin marketplace update domaine' update-claude
 has "$README" 'Unpushed commits are invisible' update-unpushed-warning
 has "$README" '`--copy` installs do not follow `git pull`' update-copy-caveat
 
+# Every plugin the marketplace lists needs its install line, read from the manifest so a third
+# plugin cannot land undocumented; and the installer's plugin switch is part of the install story.
+MKT_PLUGINS="$("$NODE_BIN" -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  for (const p of m.plugins || []) console.log(p.name);
+' "$ROOT/.claude-plugin/marketplace.json" 2>/dev/null)"
+if [ -n "$MKT_PLUGINS" ]; then ok
+else bad marketplace-plugins "no plugin names readable from .claude-plugin/marketplace.json"; fi
+for p in $MKT_PLUGINS; do has "$README" "/plugin install $p@domaine" "readme-install-$p"; done
+# Codex reads the Claude Code marketplace file, so it lists slim too; its quickstart must say why not to install it
+has "$ROOT/docs/README.codex.md" 'do not install it from Codex `/plugins`' codex-slim-warning
+if grep -qE -- '--plugin' "$ROOT/scripts/install.sh"; then
+  has "$README" 'install.sh` takes `--plugin <name>`' readme-installer-plugin-flag
+fi
+
 # Every target the installer accepts must be documented, and vice versa — the two lists drifting
 # is how a host loses its install path. The accepted set is READ from the installer (the accept arm
 # of the `case "$TARGET"` validator), never hard-coded here: hard-coding passes a target added there
@@ -220,7 +235,7 @@ done
 # addressed to the reader's machine, not to this checkout.
 check_paths() {
   local file="$1" label="$2" p
-  for p in $(grep -ohE '`(plugins/fnd|scripts|tests|docs)/[A-Za-z0-9._/-]+`' "$file" |
+  for p in $(grep -ohE '`(plugins/[a-z0-9-]+|scripts|tests|docs)/[A-Za-z0-9._/-]+`' "$file" |
                tr -d '`' | sort -u); do
     case "$p" in *'*'*|*'<'*) continue ;; esac
     # `scripts/json-slim.cjs` addresses the plugin root, `scripts/install.sh` the repo root;
@@ -230,6 +245,9 @@ check_paths() {
   done
 }
 check_paths "$README" path-readme
+for f in "$ROOT"/plugins/*/README.md; do
+  [ -f "$f" ] && check_paths "$f" "path-${f#$ROOT/}"
+done
 while IFS= read -r d; do
   [ -n "$d" ] || continue
   check_paths "$d" "path-${d##*/}"
@@ -384,6 +402,20 @@ for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
     *'| `'"$k"'` |'*) ok ;;
     *) bad "env-undocumented-$k" "$k is read by the bundle but has no README → Environment switches row" ;;
   esac
+done
+# Sibling plugins in the monorepo own a `<NAME>_` prefix (slim → SLIM_*) and document their
+# switches in the same table.
+for d in "$ROOT"/plugins/*/; do
+  name="$(basename "$d")"
+  [ "$name" = fnd ] && continue
+  prefix="$(printf '%s' "$name" | tr 'a-z-' 'A-Z_')_"
+  for k in $(grep -rhoE "(^|[^A-Za-z0-9_])${prefix}[A-Z0-9_]+" "$d" 2>/dev/null |
+               sed "s/^[^A-Z]*\(${prefix}\)/\1/" | sort -u); do
+    case "$ENV_ROWS" in
+      *'| `'"$k"'` |'*) ok ;;
+      *) bad "env-undocumented-$k" "$k is read by plugins/$name but has no README → Environment switches row" ;;
+    esac
+  done
 done
 
 # ------------------------------------- the copy-paste settings section + the title switch --

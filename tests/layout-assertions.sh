@@ -49,6 +49,17 @@ jsources() {
 
 parses() { "$NODE_BIN" -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$1" 2>/dev/null; }
 
+# missing_modules <hooks.json> — one line per `modules` path that does not exist; exit 1 = unparseable
+missing_modules() {
+  "$NODE_BIN" -e '
+    const fs = require("fs"), path = require("path");
+    let m;
+    try { m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(1); }
+    for (const rel of Array.isArray(m.modules) ? m.modules : [])
+      if (!fs.existsSync(path.join(path.dirname(process.argv[1]), rel))) console.log(rel);
+  ' "$1" 2>/dev/null
+}
+
 # ------------------------------------------------------------------ required files --
 # Every packaging and install-path file is listed here BY NAME: the per-host blocks below are
 # guarded on existence, so without this list a deleted manifest would take its own assertions
@@ -126,10 +137,11 @@ for mk in "$ROOT"/.*-plugin/marketplace.json; do
   if parses "$mk"; then ok; else bad "parse-marketplace-$label" "not valid JSON"; continue; fi
   rows="$(jsources "$mk")"
   if [ -n "$rows" ]; then ok; else bad "marketplace-$label" "no plugin entries"; continue; fi
-  saw_fnd=no
+  saw_fnd=no; listed=""
   while IFS="$(printf '\t')" read -r name src; do
     [ -n "$name" ] || continue
     [ "$name" = fnd ] && saw_fnd=yes
+    listed="$listed $name"
     case "$src" in
       /*|*..*) bad "source-$label-$name" "source must be relative and free of '..': '$src'" ;;
       *) ok ;;
@@ -139,11 +151,59 @@ for mk in "$ROOT"/.*-plugin/marketplace.json; do
     # a marketplace source is only installable if the dir carries a manifest for SOME host
     if ls "$target"/.*-plugin/plugin.json >/dev/null 2>&1; then ok
     else bad "source-$label-$name" "no */plugin.json under '$src'"; fi
+    # one broken entry breaks the whole marketplace sync, and CI has no claude binary to run
+    # `plugin validate`, so every entry's packaging is parsed here
+    ver0=""
+    for m in "$target"/.*-plugin/plugin.json; do
+      [ -f "$m" ] || continue
+      h="$(basename "$(dirname "$m")")"
+      if parses "$m"; then ok; else bad "entry-$label-$name-parse-$h" "$src/$h/plugin.json is not valid JSON"; continue; fi
+      n="$(jval "$m" name)"
+      if [ "$n" = "$name" ]; then ok; else bad "entry-$label-$name-name-$h" "$h manifest name '$n' != marketplace entry '$name'"; fi
+      v="$(jval "$m" version)"
+      case "$v" in
+        [0-9]*.[0-9]*.[0-9]*) ok ;;
+        *) bad "entry-$label-$name-version-$h" "$h manifest version not semver: '$v'" ;;
+      esac
+      if [ -z "$ver0" ]; then ver0="$v"
+      elif [ "$v" = "$ver0" ]; then ok
+      else bad "entry-$label-$name-version-sync" "$h manifest version '$v' != '$ver0'"; fi
+    done
+    hj="$target/hooks/hooks.json"
+    if [ -f "$hj" ]; then
+      if miss="$(missing_modules "$hj")"; then ok
+      else bad "entry-$label-$name-hooks" "$src/hooks/hooks.json is not valid JSON"; continue; fi
+      if [ -z "$miss" ]; then ok
+      else bad "entry-$label-$name-modules" "hooks.json lists missing module(s): $(printf '%s' "$miss" | tr '\n' ' ')"; fi
+    fi
+    # fnd's marker is checked above together with its install.sh stamp
+    if [ "$name" != fnd ] && [ -f "$target/.claude-plugin/plugin.json" ]; then
+      want="$(jval "$target/.claude-plugin/plugin.json" version)"
+      for r in "$ROOT/README.md" "$target/README.md"; do
+        [ -f "$r" ] || continue
+        for got in $(grep -oE "(^|[^A-Za-z0-9_])$name v[0-9]+\.[0-9]+\.[0-9]+" "$r" | sed "s/.*$name v//" | sort -u); do
+          if [ "$got" = "$want" ]; then ok
+          else bad "entry-$name-readme-version" "${r#$ROOT/} says '$name v$got', manifest says '$want'"; fi
+        done
+      done
+    fi
   done <<EOF
 $rows
 EOF
   if [ "$saw_fnd" = yes ]; then ok; else bad "marketplace-$label" "no 'fnd' plugin entry"; fi
+  # which plugins each host lists is a decision, not an accident: slim is Claude Code only
+  case "$label" in
+    .claude-plugin) want_list=" fnd slim" ;;
+    .cursor-plugin) want_list=" fnd" ;;
+    *) want_list="$listed" ;;
+  esac
+  if [ "$listed" = "$want_list" ]; then ok
+  else bad "marketplace-$label-plugins" "lists '$listed', want '$want_list'"; fi
 done
+
+# slim's release marker is required, not only compared where present
+if grep -qE 'slim v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/slim/README.md" 2>/dev/null; then ok
+else bad slim-readme-marker "plugins/slim/README.md has no 'slim v<semver>' release marker"; fi
 
 # --------------------------------------------------------- Cursor manifest pointers --
 if [ -f "$CURSOR_MANIFEST" ]; then

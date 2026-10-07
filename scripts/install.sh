@@ -10,11 +10,11 @@ set -euo pipefail
 
 # Fallback stamp only: the canonical manifest in the checkout wins whenever it is readable,
 # so an update reports (and records) the version the `git pull` actually landed.
-FND_VERSION="0.132.0"
+FND_VERSION="0.133.0"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
-PLUGIN="$REPO/plugins/fnd"
+NAME="fnd"
 
 TARGET=""
 MODE="symlink"
@@ -22,12 +22,14 @@ ACTION="install"
 
 usage() {
   cat <<EOF
-usage: install.sh --target cursor|opencode|codex [--copy] [--uninstall]
+usage: install.sh --target cursor|opencode|codex [--plugin <name>] [--copy] [--uninstall]
 
-  --target <host>   cursor  -> ~/.cursor/plugins/local/fnd
+  --target <host>   cursor  -> ~/.cursor/plugins/local/<plugin>
                     opencode-> ~/.config/opencode (skills, agents, commands, plugin)
                     codex   -> ~/.codex/agents (subagents — required; skills, hooks and MCP
                                come from \`codex plugin marketplace add\`)
+  --plugin <name>   the plugins/<name> folder to install (default: fnd); a plugin with no
+                    adapter for the host installs on Claude Code only, via its marketplace
   --copy            copy instead of symlink (no-symlink environments); a --copy
                     install does not follow \`git pull\` — re-run to refresh it
   --uninstall       remove only the entries this installer created
@@ -38,6 +40,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --target) [ $# -ge 2 ] || { echo "error: --target needs a value" >&2; exit 2; }; TARGET="$2"; shift 2 ;;
     --target=*) TARGET="${1#--target=}"; shift ;;
+    --plugin) [ $# -ge 2 ] || { echo "error: --plugin needs a value" >&2; exit 2; }; NAME="$2"; shift 2 ;;
+    --plugin=*) NAME="${1#--plugin=}"; shift ;;
     --copy) MODE="copy"; shift ;;
     --uninstall) ACTION="uninstall"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -51,7 +55,27 @@ case "$TARGET" in
   *) echo "error: unknown target '$TARGET' (expected cursor|opencode|codex)" >&2; exit 2 ;;
 esac
 
-[ -d "$PLUGIN" ] || { echo "error: $PLUGIN not found — run this script from its place in the repo" >&2; exit 1; }
+PLUGIN="$REPO/plugins/$NAME"
+case "$NAME" in
+  ""|.|..|*/*) NAME_OK=0 ;;
+  *) [ -f "$PLUGIN/.claude-plugin/plugin.json" ] && NAME_OK=1 || NAME_OK=0 ;;
+esac
+if [ "$NAME_OK" -eq 0 ]; then
+  echo "error: unknown plugin '$NAME' — plugins/ holds: $(ls -1 "$REPO/plugins" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')" >&2
+  exit 2
+fi
+
+case "$TARGET" in
+  cursor)   ADAPTER="$PLUGIN/.cursor-plugin/plugin.json" ;;
+  opencode) ADAPTER="$PLUGIN/opencode" ;;
+  codex)    ADAPTER="$PLUGIN/.codex-plugin/plugin.json" ;;
+esac
+if [ ! -e "$ADAPTER" ]; then
+  echo "error: plugin '$NAME' ships no $TARGET adapter (${ADAPTER#"$PLUGIN"/}) — it installs on Claude Code only," >&2
+  echo "       through the marketplace: /plugin marketplace add domaine-oleksandr-kever/claude-plugins" >&2
+  echo "       then /plugin install $NAME@domaine" >&2
+  exit 2
+fi
 
 case "$TARGET" in
   cursor)   ROOT_DIR="$HOME/.cursor/plugins/local" ;;
@@ -59,7 +83,7 @@ case "$TARGET" in
   codex)    ROOT_DIR="$HOME/.codex" ;;
 esac
 
-MODE_FILE="$ROOT_DIR/.fnd-install-mode"
+MODE_FILE="$ROOT_DIR/.$NAME-install-mode"
 
 LINKS=()
 SRCS=()
@@ -72,7 +96,7 @@ build_entries() {
   SRCS=()
   case "$TARGET" in
     cursor)
-      add_entry "$ROOT_DIR/fnd" "$PLUGIN"
+      add_entry "$ROOT_DIR/$NAME" "$PLUGIN"
       ;;
     opencode)
       # M1C-DEFAULT: the OpenCode install lever is provisional. Spike M1c picks between
@@ -257,12 +281,12 @@ do_install() {
   fi
   if [ "$TARGET" = "codex" ]; then
     if [ "${#LINKS[@]}" -eq 0 ]; then
-      echo "warning: no plugins/fnd/agents-codex/*.toml in this checkout — nothing to link;" >&2
-      echo "         run plugins/fnd/scripts/gen-host-adapters.cjs, then re-run this installer" >&2
+      echo "warning: no plugins/$NAME/agents-codex/*.toml in this checkout — nothing to link;" >&2
+      echo "         run plugins/$NAME/scripts/gen-host-adapters.cjs, then re-run this installer" >&2
     fi
     echo "note: this target installs the subagent layer only — the half Codex loads from"
     echo "      ~/.codex/agents, never from the cache. Run 'codex plugin marketplace add"
-    echo "      domaine-oleksandr-kever/claude-plugins' and install fnd via /plugins for skills,"
+    echo "      domaine-oleksandr-kever/claude-plugins' and install $NAME via /plugins for skills,"
     echo "      hooks and MCP"
     echo "      (they update with 'codex plugin marketplace upgrade')"
   fi
@@ -351,7 +375,7 @@ EOF
     echo "note: --copy installs do not follow git pull — re-run this script to refresh them"
   fi
   run_doctor
-  echo "fnd $FND_VERSION installed for $TARGET (mode: $MODE, repo: $REPO)"
+  echo "$NAME $FND_VERSION installed for $TARGET (mode: $MODE, repo: $REPO)"
 }
 
 do_uninstall() {
@@ -391,7 +415,7 @@ EOF
   for d in "$ROOT_DIR/skills" "$ROOT_DIR/agents" "$ROOT_DIR/commands" "$ROOT_DIR/plugins" "$ROOT_DIR"; do
     rmdir "$d" 2>/dev/null || true
   done
-  echo "fnd $FND_VERSION uninstalled from $TARGET ($removed removed, $kept kept)"
+  echo "$NAME $FND_VERSION uninstalled from $TARGET ($removed removed, $kept kept)"
   if [ "$stuck" -gt 0 ]; then
     echo "warning: $stuck entry/entries could not be removed — the install record was kept so a re-run can finish" >&2
     return 1
