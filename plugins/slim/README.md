@@ -7,7 +7,7 @@ log or build text to `log-slim`, Figma design-context JSX to the JSX compactor, 
 the spill-and-stub guard or straight through. The hooks run wherever the plugin loads; the drawing
 (the ToolResult line and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.1.0**.
+Current release: **slim v0.2.0**.
 
 ## Status
 
