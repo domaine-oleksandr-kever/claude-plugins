@@ -51,8 +51,8 @@ Codex reads `.claude-plugin/marketplace.json` as a legacy-compatible marketplace
 this repo is already a Codex marketplace — nothing separate is published. Then run `/plugins`
 in Codex, find **fnd**, and install it.
 
-The same marketplace also lists **slim**. It is Claude Code only (a Claude Code hooks module,
-no Codex manifest), so do not install it from Codex `/plugins`.
+The same marketplace also lists **slim** and **band**. Both are Claude Code only (Claude Code hooks
+modules, no Codex manifest), so do not install either from Codex `/plugins`.
 
 To undo a registration: `codex plugin marketplace list` shows the configured name,
 `codex plugin marketplace remove <name>` drops it. A registration also pins the git ref it

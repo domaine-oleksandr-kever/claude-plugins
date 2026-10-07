@@ -18,6 +18,12 @@
       "source": "./plugins/slim",
       "description": "Universal tool-result compression proxy for Claude Code — compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and Agent results by content (JSON, logs, HTML, plain-text windows) and adds a lookup tool that answers one question about a page, command or file.",
       "license": "MIT"
+    },
+    {
+      "name": "band",
+      "source": "./plugins/band",
+      "description": "Status band, Log pane and Progress pane for Claude Code: draws the session's figures above the prompt and the event log and task checklist that fnd and slim publish; reads fnd and slim state.",
+      "license": "MIT"
     }
   ]
 }

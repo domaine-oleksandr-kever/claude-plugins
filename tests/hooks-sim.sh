@@ -4307,9 +4307,9 @@ assert_contains UN8-relay-added  "$(un_sys "$outUN8")" "fnd:jira-reader → $UN_
 assert_eq UN9-garbage "$(printf 'not json' | env TMPDIR="$UN/tmp" FND_HOST=claude FND_CTX_MONITOR=0 FND_PROMPT_JSON=0 FND_SESSION_TITLE=0 CLAUDE_CODE_ENTRYPOINT=cli node "$MERGED" 2>/dev/null)" ""
 
 # ═══ UM — the mods-module session marker (hooks/mod-session.cjs) ═══════════
-# On Claude Code the mods module rewrites <tmpdir>/fnd-mod-session-<sid> on every prompt; while
-# that file is fresh the band mod shows ctx, so the monitor goes silent. The guard, title and relay
-# keep running; other hosts have no mods and ignore the file.
+# On Claude Code the band plugin's module (fnd's own without band) rewrites <tmpdir>/fnd-mod-session-<sid>
+# on every prompt; while that file is fresh the band shows ctx, so the monitor goes silent. The guard,
+# title and relay keep running; other hosts have no mods and ignore the file.
 um_mark() { : > "$1/fnd-mod-session-$2"; }
 
 # UM1: fresh marker → the monitor is silent and records no band state; exit 0

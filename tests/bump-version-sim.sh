@@ -332,16 +332,16 @@ if [ "$rc" -eq 0 ] && [ "$rcb" -eq 0 ] && [ "$OUT_A" = "$OUT_B" ] && [ "$(snap "
 else bad C17-default-is-fnd "rc=$rc/$rcb a=$(printf '%s' "$OUT_A" | tr '\n' ';') b=$(printf '%s' "$OUT_B" | tr '\n' ';')"; fi
 
 # ------------------------------------------- C18 another plugin stamps only its own files --
-# slim_sandbox <dir> — the fnd layout plus a stub plugins/slim and a root README naming both
-slim_sandbox() {
-  local d="$1"
+# plugin_sandbox <dir> <name> — the fnd layout plus a stub plugins/<name> and a root README naming both
+plugin_sandbox() {
+  local d="$1" p="$2"
   sandbox "$d"
-  mkdir -p "$d/plugins/slim/.claude-plugin"
-  printf '{\n  "name": "slim",\n  "version": "0.1.0"\n}\n' > "$d/plugins/slim/.claude-plugin/plugin.json"
-  printf '# plugins\n\nslim v0.1.0\nfnd v0.132.0\nFND_VERSION="0.132.0"\n' > "$d/README.md"
-  printf '# slim\n\nInstalled build: slim v0.1.0\n' > "$d/plugins/slim/README.md"
+  mkdir -p "$d/plugins/$p/.claude-plugin"
+  printf '{\n  "name": "%s",\n  "version": "0.1.0"\n}\n' "$p" > "$d/plugins/$p/.claude-plugin/plugin.json"
+  printf '# plugins\n\n%s v0.1.0\nfnd v0.132.0\nFND_VERSION="0.132.0"\n' "$p" > "$d/README.md"
+  printf '# %s\n\nInstalled build: %s v0.1.0\n' "$p" "$p" > "$d/plugins/$p/README.md"
 }
-C18="$TMP/c18"; slim_sandbox "$C18"
+C18="$TMP/c18"; plugin_sandbox "$C18" slim
 FND_BEFORE="$(cksum < "$C18/plugins/fnd/.claude-plugin/plugin.json")"
 rc=0; run 0.2.0 --root "$C18" --plugin slim || rc=$?
 if [ "$rc" -eq 0 ] \
@@ -356,14 +356,14 @@ if [ "$rc" -eq 0 ] \
 else bad C18-plugin-slim "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E") readme=$(tr '\n' ';' < "$C18/README.md")"; fi
 
 # C18b a dry run names the plugin it would stamp, and writes nothing
-C18B="$TMP/c18b"; slim_sandbox "$C18B"; BEFORE="$(snap "$C18B")"
+C18B="$TMP/c18b"; plugin_sandbox "$C18B" slim; BEFORE="$(snap "$C18B")"
 rc=0; run minor --root "$C18B" --plugin slim --dry-run || rc=$?
 if [ "$rc" -eq 0 ] && [ "$(snap "$C18B")" = "$BEFORE" ] \
    && grep -q '^bump-version: 0.1.0 -> 0.2.0  (dry run — nothing written; plugin slim)' "$O"; then ok
 else bad C18b-dry-run-names-plugin "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # C18c an unknown plugin is a usage refusal that lists the plugins present
-C18C="$TMP/c18c"; slim_sandbox "$C18C"; BEFORE="$(snap "$C18C")"
+C18C="$TMP/c18c"; plugin_sandbox "$C18C" slim; BEFORE="$(snap "$C18C")"
 rc=0; run 0.2.0 --root "$C18C" --plugin nope || rc=$?
 if [ "$rc" -eq 1 ] && [ "$(snap "$C18C")" = "$BEFORE" ] \
    && grep -q 'unknown plugin "nope"' "$E" && grep -q 'plugins present: fnd, slim' "$E"; then ok
@@ -377,6 +377,19 @@ else bad C18d-plugin-path "rc=$rc err=$(head -c 160 "$E")"; fi
 rc=0; run 0.2.0 --root "$C18C" --plugin || rc=$?
 if [ "$rc" -eq 1 ] && grep -q -- '--plugin needs a name' "$E"; then ok
 else bad C18e-plugin-without-value "rc=$rc err=$(head -c 160 "$E")"; fi
+
+# C19 band stamps its own manifest and README; the root README names only fnd, so it stays as is
+C19="$TMP/c19"; plugin_sandbox "$C19" band
+printf '# plugins\n\nfnd v0.132.0\nFND_VERSION="0.132.0"\n' > "$C19/README.md"
+FND_BEFORE="$(cksum < "$C19/plugins/fnd/.claude-plugin/plugin.json")"; ROOT_BEFORE="$(cksum < "$C19/README.md")"
+rc=0; run 0.1.1 --root "$C19" --plugin band || rc=$?
+if [ "$rc" -eq 0 ] \
+   && [ "$(ver "$C19/plugins/band/.claude-plugin/plugin.json")" = "0.1.1" ] \
+   && grep -q 'band v0.1.1' "$C19/plugins/band/README.md" \
+   && [ "$(cksum < "$C19/plugins/fnd/.claude-plugin/plugin.json")" = "$FND_BEFORE" ] \
+   && [ "$(cksum < "$C19/README.md")" = "$ROOT_BEFORE" ] \
+   && ! grep -q 'plugins/fnd/' "$O"; then ok
+else bad C19-plugin-band "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E") readme=$(tr '\n' ';' < "$C19/README.md")"; fi
 
 # ------------------------------------------------- C16 staging files never survive a run --
 LEFTOVERS="$(find "$TMP" -name '*.bump-version-tmp' 2>/dev/null | tr '\n' ';')"

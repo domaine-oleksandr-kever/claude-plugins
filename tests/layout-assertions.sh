@@ -84,7 +84,12 @@ for f in "$CANON" \
          "$ROOT/tests/figma-node-slim-fixtures.mjs" \
          "$ROOT/plugins/slim/scripts/slim.cjs" \
          "$ROOT/plugins/slim/types/index.d.ts" \
-         "$ROOT/tests/slim-fixtures.mjs"; do
+         "$ROOT/tests/slim-fixtures.mjs" \
+         "$ROOT/plugins/band/.claude-plugin/plugin.json" \
+         "$ROOT/plugins/band/hooks/hooks.json" \
+         "$ROOT/plugins/band/hooks/mods/register.tsx" \
+         "$ROOT/plugins/band/types/index.d.ts" \
+         "$ROOT/plugins/band/README.md"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
 
@@ -194,9 +199,9 @@ for mk in "$ROOT"/.*-plugin/marketplace.json; do
 $rows
 EOF
   if [ "$saw_fnd" = yes ]; then ok; else bad "marketplace-$label" "no 'fnd' plugin entry"; fi
-  # which plugins each host lists is a decision, not an accident: slim is Claude Code only
+  # which plugins each host lists is a decision, not an accident: slim and band are Claude Code only
   case "$label" in
-    .claude-plugin) want_list=" fnd slim" ;;
+    .claude-plugin) want_list=" fnd slim band" ;;
     .cursor-plugin) want_list=" fnd" ;;
     *) want_list="$listed" ;;
   esac
@@ -207,6 +212,8 @@ done
 # slim's release marker is required, not only compared where present
 if grep -qE 'slim v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/slim/README.md" 2>/dev/null; then ok
 else bad slim-readme-marker "plugins/slim/README.md has no 'slim v<semver>' release marker"; fi
+if grep -qE 'band v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/band/README.md" 2>/dev/null; then ok
+else bad band-readme-marker "plugins/band/README.md has no 'band v<semver>' release marker"; fi
 
 # --------------------------------------------------------- Cursor manifest pointers --
 if [ -f "$CURSOR_MANIFEST" ]; then
@@ -587,20 +594,24 @@ done
 # ------------------------------------------------ Claude Code hooks module (mods) wiring --
 # hooks/hooks.json is Claude Code's function-hooks file: anything beside `modules` there would be a
 # second, untested hook wiring, and a module path that moved fails the whole module load.
-MODS_JSON="$PLUGIN_DIR/hooks/hooks.json"
-mods_check="$("$NODE_BIN" -e '
-  const fs = require("fs"), path = require("path");
-  let m;
-  try { m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { console.log("unparseable: " + e.message); process.exit(0); }
-  const keys = Object.keys(m || {});
-  if (keys.length !== 1 || keys[0] !== "modules") { console.log("keys " + JSON.stringify(keys) + " != [\"modules\"]"); process.exit(0); }
-  if (!Array.isArray(m.modules) || !m.modules.length) { console.log("modules is not a non-empty list"); process.exit(0); }
-  for (const p of m.modules) {
-    if (typeof p !== "string" || p.startsWith("/") || p.includes("..")) { console.log("module path must be relative, no ..: " + p); process.exit(0); }
-    if (!fs.existsSync(path.join(path.dirname(process.argv[1]), p))) { console.log("module missing: " + p); process.exit(0); }
-  }
-' "$MODS_JSON" 2>&1)"
-if [ -z "$mods_check" ]; then ok; else bad mods-hooks-json "hooks/hooks.json: $mods_check"; fi
+for MODS_JSON in "$ROOT"/plugins/*/hooks/hooks.json; do
+  [ -f "$MODS_JSON" ] || continue
+  name="$(basename "$(dirname "$(dirname "$MODS_JSON")")")"
+  id=mods-hooks-json; [ "$name" = fnd ] || id="mods-hooks-json-$name"
+  mods_check="$("$NODE_BIN" -e '
+    const fs = require("fs"), path = require("path");
+    let m;
+    try { m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { console.log("unparseable: " + e.message); process.exit(0); }
+    const keys = Object.keys(m || {});
+    if (keys.length !== 1 || keys[0] !== "modules") { console.log("keys " + JSON.stringify(keys) + " != [\"modules\"]"); process.exit(0); }
+    if (!Array.isArray(m.modules) || !m.modules.length) { console.log("modules is not a non-empty list"); process.exit(0); }
+    for (const p of m.modules) {
+      if (typeof p !== "string" || p.startsWith("/") || p.includes("..")) { console.log("module path must be relative, no ..: " + p); process.exit(0); }
+      if (!fs.existsSync(path.join(path.dirname(process.argv[1]), p))) { console.log("module missing: " + p); process.exit(0); }
+    }
+  ' "$MODS_JSON" 2>&1)"
+  if [ -z "$mods_check" ]; then ok; else bad "$id" "plugins/$name/hooks/hooks.json: $mods_check"; fi
+done
 # validate --strict holds every $.state key to this contract, so a manifest pointing at nothing
 # would make the module fail its own validation
 MODS_TYPES="$(jval "$CANON" types)"
@@ -645,6 +656,88 @@ else bad mods-prompt-min "prompt-slim.ts PROMPT_MIN '$mod_min' != prompt-json-gu
 for f in "$UC" "$PLUGIN_DIR/rules/fnd-untrusted-content.mdc"; do
   if grep -qF '.claude/fnd-tmp/prompt-json/' "$f" && grep -qF '.claude/tasks/<work-id>/tmp/' "$f"; then ok
   else bad "uc-prompt-spill-$(basename "$f")" "$(basename "$f") does not name the prompt spill dirs as real handles"; fi
+done
+
+# ------------------------------------------------------------------ band: mods boundary --
+# The engine compiles band's modules itself: an npm specifier, a require/import() or a Node/DOM
+# global fails there, not here. Tests run under the testing kit, so only the import rule binds them.
+BAND_MODS="$ROOT/plugins/band/hooks/mods"
+if [ -d "$BAND_MODS" ]; then
+  band_check="$("$NODE_BIN" -e '
+    const fs = require("fs"), path = require("path");
+    const out = [];
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p); else if (/\.tsx?$/.test(e.name)) check(p);
+    } };
+    const check = (p) => {
+      const rel = path.relative(process.argv[1], p);
+      const src = fs.readFileSync(p, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+      const isTest = /\.test\.tsx?$/.test(p);
+      for (const m of src.matchAll(/(?:\bfrom|^\s*import)\s*["\x27]([^"\x27]+)["\x27]/gm)) {
+        const spec = m[1];
+        if (spec === "claude-code" || spec === "claude-code/testing" || spec.startsWith("./") || spec.startsWith("../")) continue;
+        out.push(rel + ": import \x27" + spec + "\x27");
+      }
+      if (/\brequire\s*\(|\bimport\s*\(/.test(src)) out.push(rel + ": require( / import(");
+      if (isTest) return;
+      const glob = /(^|[^$.\x27"\w])process\.|\bBuffer\b|\bglobalThis\b|\bwindow\.|\bdocument\./m.exec(src);
+      if (glob) out.push(rel + ": Node/DOM global near \x27" + glob[0].trim() + "\x27");
+    };
+    walk(process.argv[1]);
+    process.stdout.write(out.join("\n"));
+  ' "$BAND_MODS" 2>&1)"
+  if [ -z "$band_check" ]; then ok
+  else bad band-mods-imports "$(printf '%s' "$band_check" | head -5 | tr '\n' ';')"; fi
+
+  # band only reads fnd.* and slim.*: a write to a foreign key fails at run time, never at validate
+  band_writes="$("$NODE_BIN" -e '
+    const fs = require("fs"), path = require("path");
+    const out = [];
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== "tests") walk(p); }
+      else if (/\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) check(p);
+    } };
+    const check = (p) => {
+      const rel = path.relative(process.argv[1], p);
+      const src = fs.readFileSync(p, "utf8");
+      const names = [...src.matchAll(/const\s+(\w+)\s*=\s*atom\(\s*\{\s*plugin:\s*["\x27](?:fnd|slim)["\x27]/g)].map((m) => m[1]);
+      for (const n of names) {
+        if (new RegExp("\\bupdate\\(\\s*\\$\\s*,\\s*" + n + "\\b").test(src)) out.push(rel + ": update($, " + n + ")");
+        if (new RegExp("\\$\\.state\\.(set|update|delete)\\(\\s*" + n + "\\b").test(src)) out.push(rel + ": $.state write to " + n);
+      }
+      if (/\$\.state\.(set|update|delete)\(\s*\{\s*plugin:\s*["\x27](fnd|slim)["\x27]/.test(src)) out.push(rel + ": $.state write to a literal fnd/slim ref");
+    };
+    walk(process.argv[1]);
+    process.stdout.write(out.join("\n"));
+  ' "$BAND_MODS" 2>&1)"
+  if [ -z "$band_writes" ]; then ok
+  else bad band-no-foreign-writes "$(printf '%s' "$band_writes" | head -5 | tr '\n' ';')"; fi
+
+  # the yield is fnd's half of the pairing; band never reads its own info to decide whether to draw
+  yield_code="$(grep -rnwE 'bandLive|MOVED' "$ROOT/plugins/band" 2>/dev/null)"
+  for f in band.tsx marker.ts; do
+    [ -f "$BAND_MODS/$f" ] || continue
+    hit="$(grep -nE "key:[[:space:]]*['\"]info['\"]" "$BAND_MODS/$f")"
+    [ -n "$hit" ] && yield_code="$yield_code
+$f: $hit"
+  done
+  if [ -z "$yield_code" ]; then ok
+  else bad band-no-yield-code "$(printf '%s' "$yield_code" | sed "s#$ROOT/##" | head -5 | tr '\n' ';')"; fi
+else
+  bad band-mods-imports "plugins/band/hooks/mods missing"
+fi
+
+# The classic ctx monitor (a node process that cannot read $.state) finds the module's marker by this
+# file name, whichever plugin writes it. Matched in the write and the path build themselves, so a doc
+# comment naming the file cannot hold the row green.
+WRITE_RE='\$\.fs\.write\(.*fnd-mod-session-'
+for pair in "$ROOT/plugins/band/hooks/mods/marker.ts|$WRITE_RE" "$PLUGIN_DIR/hooks/mods/fnd/marker.ts|$WRITE_RE" \
+            "$PLUGIN_DIR/hooks/mod-session.cjs|path\.join\(.*fnd-mod-session-"; do
+  f="${pair%%|*}"
+  if grep -qE -- "${pair#*|}" "$f" 2>/dev/null; then ok
+  else bad "marker-name-${f#$ROOT/}" "${f#$ROOT/} does not build the 'fnd-mod-session-' marker path in code"; fi
 done
 
 # ------------------------------------------------------- slim: engines vs delivery + evals --

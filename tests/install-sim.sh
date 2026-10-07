@@ -156,20 +156,24 @@ if [ "$RC" -eq 2 ] && grep -q "unknown plugin" "$E"; then ok
 else bad P3-path-name-refused "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # P4: a Claude-Code-only plugin (manifest, no host adapter) is refused per host with the
-# marketplace route — the shape plugins/slim ships in.
+# marketplace route — the shape plugins/slim and plugins/band ship in.
 REPOP="$TMP/repo-plugins"; mkrepo "$REPOP"
-mkdir -p "$REPOP/plugins/slim/.claude-plugin"
-printf '{"name":"slim","version":"0.0.1"}\n' > "$REPOP/plugins/slim/.claude-plugin/plugin.json"
-for host in cursor codex opencode; do
-  run "$TMP/h-plugin-slim-$host" "$REPOP" --target "$host" --plugin slim
-  if [ "$RC" -eq 2 ] && grep -q "plugin 'slim' ships no $host adapter" "$E" \
-     && grep -q "Claude Code only" "$E" && grep -q "/plugin install slim@domaine" "$E" \
-     && [ -z "$(ls -A "$TMP/h-plugin-slim-$host" 2>/dev/null)" ]; then ok
-  else bad "P4-claude-only-plugin($host)" "rc=$RC err=$(tr '\n' ';' < "$E")"; fi
+for p in slim band; do
+  mkdir -p "$REPOP/plugins/$p/.claude-plugin"
+  printf '{"name":"%s","version":"0.0.1"}\n' "$p" > "$REPOP/plugins/$p/.claude-plugin/plugin.json"
+done
+for p in slim band; do
+  for host in cursor codex opencode; do
+    run "$TMP/h-plugin-$p-$host" "$REPOP" --target "$host" --plugin "$p"
+    if [ "$RC" -eq 2 ] && grep -q "plugin '$p' ships no $host adapter" "$E" \
+       && grep -q "Claude Code only" "$E" && grep -q "/plugin install $p@domaine" "$E" \
+       && [ -z "$(ls -A "$TMP/h-plugin-$p-$host" 2>/dev/null)" ]; then ok
+    else bad "P4-claude-only-plugin($p,$host)" "rc=$RC err=$(tr '\n' ';' < "$E")"; fi
+  done
 done
 
 run "$TMP/h-plugin-list" "$REPOP" --target cursor --plugin nope
-if [ "$RC" -eq 2 ] && grep -q "plugins/ holds: fnd slim" "$E"; then ok
+if [ "$RC" -eq 2 ] && grep -q "plugins/ holds: band fnd slim" "$E"; then ok
 else bad P5-unknown-lists-all "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # --------------------------------------------------------------- cursor: fresh install ----

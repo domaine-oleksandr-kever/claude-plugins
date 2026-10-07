@@ -20,6 +20,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PLUGIN_DIR="$ROOT/plugins/fnd"
 CANON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README="$ROOT/README.md"
+BAND_README="$ROOT/plugins/band/README.md"
 NODE_BIN="$(command -v node)"
 
 pass=0; fail=0; failures=""
@@ -47,7 +48,7 @@ done
 
 # --------------------------------------------------------------- 0. the files exist --
 for f in "$README" "$ROOT/docs/README.cursor.md" "$ROOT/docs/README.codex.md" \
-         "$ROOT/docs/README.opencode.md"; do
+         "$ROOT/docs/README.opencode.md" "$BAND_README"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
 
@@ -197,11 +198,21 @@ MKT_PLUGINS="$("$NODE_BIN" -e '
 if [ -n "$MKT_PLUGINS" ]; then ok
 else bad marketplace-plugins "no plugin names readable from .claude-plugin/marketplace.json"; fi
 for p in $MKT_PLUGINS; do has "$README" "/plugin install $p@domaine" "readme-install-$p"; done
-# Codex reads the Claude Code marketplace file, so it lists slim too; its quickstart must say why not to install it
-has "$ROOT/docs/README.codex.md" 'do not install it from Codex `/plugins`' codex-slim-warning
+# Codex reads the Claude Code marketplace file, so it lists every Claude-Code-only plugin too; its
+# quickstart must name each one in the warning
+has "$ROOT/docs/README.codex.md" 'do not install either from Codex `/plugins`' codex-claude-only-warning
+for p in $MKT_PLUGINS; do
+  [ "$p" = fnd ] && continue
+  grep -qF -- "**$p**" "$ROOT/docs/README.codex.md" && ok || bad "codex-warning-$p" "docs/README.codex.md does not name **$p** among the Claude-Code-only plugins"
+done
 if grep -qE -- '--plugin' "$ROOT/scripts/install.sh"; then
   has "$README" 'install.sh` takes `--plugin <name>`' readme-installer-plugin-flag
+  has "$README" '`install.sh --plugin band`' readme-installer-band
 fi
+has "$BAND_README" '/plugin install band@domaine' band-readme-install
+# A marketplace install reads pluginConfigs under its full id; the bare name is a --plugin-dir key only
+has "$BAND_README" '"pluginConfigs": { "band@domaine": { "options": { "disabled": true } } }' band-readme-settings-key
+lacks "$BAND_README" '"pluginConfigs": { "band":' band-readme-settings-bare-key
 
 # Every target the installer accepts must be documented, and vice versa — the two lists drifting
 # is how a host loses its install path. The accepted set is READ from the installer (the accept arm
@@ -344,6 +355,10 @@ for f in "$README" $ROOT/docs/README.*.md; do
   if out="$(link_check "$f")"; then ok
   else bad "links-${f##*/}" "$out"; fi
 done
+if [ -f "$BAND_README" ]; then
+  if out="$(link_check "$BAND_README")"; then ok
+  else bad links-band-README.md "$out"; fi
+fi
 
 # Domaine env files (2026-08-23): the mechanism is documented where the switches live, and the
 # CLI's KNOWN registry (names only by design) can never drift from the README table — every
@@ -583,14 +598,21 @@ lacks "$README" '--toon' readme-no-toon
 lacks "$README" '--no-spill' readme-no-nospill
 
 # The band's Compact button never hides, so the row stays put; the README row must not bring back the old threshold.
-has "$README" '| Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable' band-compact-always-first
-has "$README" 'Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued.' band-compact-busy-toast
-has "$README" 'the press runs the `/compact` slash command as if typed instead and toasts its output.' band-compact-desktop-fallback
+# band's README owns the band reference; fnd keeps its own drawer until step 2, so both code trees are held.
+has "$BAND_README" '| Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable' band-compact-always-first
+has "$BAND_README" 'Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued.' band-compact-busy-toast
+has "$BAND_README" 'the press runs the `/compact` slash command as if typed instead and toasts its output.' band-compact-desktop-fallback
 if grep -qF "command: 'compact'" "$PLUGIN_DIR/hooks/mods/core/band.tsx"; then ok
 else bad band-compact-desktop-fallback-code 'band.tsx no longer falls back to the /compact slash command'; fi
-has "$README" 'that count holds until a response reports a measured fill' band-ctx-holds-after-compact
+if grep -qF "command: 'compact'" "$ROOT/plugins/band/hooks/mods/band.tsx"; then ok
+else bad band-compact-desktop-fallback-code-band 'plugins/band band.tsx no longer falls back to the /compact slash command'; fi
+has "$BAND_README" 'that count holds until a response reports a measured fill' band-ctx-holds-after-compact
 lacks "$README" 'Hidden at ≤ 30 % context' band-compact-no-hide-threshold
+lacks "$BAND_README" 'Hidden at ≤ 30 % context' band-compact-no-hide-threshold-band
 if grep -qF 'COMPACT_SHOW_PCT' "$PLUGIN_DIR/hooks/mods/core/lib.ts"; then bad band-compact-no-show-threshold 'lib.ts still gates the Compact button on COMPACT_SHOW_PCT'
+else ok; fi
+if [ ! -f "$ROOT/plugins/band/hooks/mods/lib.ts" ]; then bad band-compact-no-show-threshold-band 'plugins/band/hooks/mods/lib.ts missing'
+elif grep -qF 'COMPACT_SHOW_PCT' "$ROOT/plugins/band/hooks/mods/lib.ts"; then bad band-compact-no-show-threshold-band 'plugins/band lib.ts gates the Compact button on COMPACT_SHOW_PCT'
 else ok; fi
 
 echo "readme-checks: $pass passed, $fail failed"

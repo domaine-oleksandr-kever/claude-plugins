@@ -8,13 +8,16 @@ breaking-changes, preview themes, etc.) for Shopify theme work.
 CLI** and **OpenCode** through thin, committed adapters generated from it — one repo, no fork.
 See [Install — four hosts](#install--four-hosts).
 
-The repo is a marketplace (`domaine`, `.claude-plugin/marketplace.json`) that holds two plugins.
+The repo is a marketplace (`domaine`, `.claude-plugin/marketplace.json`) that holds three plugins.
 `plugins/fnd` is the Foundation plugin this README describes: skills, agents, scripts, classic
 hooks and the Claude Code hooks module. `plugins/slim` is the universal tool-result compression
 proxy: one Claude Code mod that compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and
 Agent results by content, plus a `lookup` tool that answers one question about a page, command or
 file; while fnd compresses MCP results too, slim stands down on what fnd already slimmed.
-`tests/` covers both, and `tests/mods-sim.sh` validates and tests
+`plugins/band` draws the status band, the Progress pane and the event log pane from what fnd and
+slim publish; while it is installed, fnd's own band stands down
+([Which plugins to install](#which-plugins-to-install)).
+`tests/` covers all three, and `tests/mods-sim.sh` validates and tests
 every `plugins/*/hooks/hooks.json` module.
 
 ## What's inside
@@ -32,6 +35,8 @@ in its own subfolder under `plugins/`:
 ├── plugins/
 │   ├── slim/                     # the tool-result compression proxy (Claude Code only;
 │   │                             #   plugins/slim/README.md)
+│   ├── band/                     # the status band, Log and Progress panes (Claude Code only;
+│   │                             #   plugins/band/README.md)
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # plugin manifest (+ bundled mcpServers) — canonical
@@ -49,7 +54,8 @@ in its own subfolder under `plugins/`:
 │       │   ├── doc-reader.md        #  reads one linked doc (Notion/Confluence/web) → extract
 │       │   └── theme-explorer.md    #  scouts the theme → impact map
 │       ├── hooks/                # injected conventions + git guards + context monitor
-│       │   ├── mods/             #  Claude Code hooks module: status band, progress pane, guard, slim, pasted JSON
+│       │   ├── mods/             #  Claude Code hooks module: guard, slim, pasted JSON, task resolver; status band
+│       │   │                     #    and panes only while the band plugin is not installed
 │       │   ├── comment-discipline.md
 │       │   ├── lean-code.md      #  "lazy senior dev" ladder (FND_LEAN=0 to disable)
 │       │   ├── writing-style.md  #  how-to-explain convention, ASD-STE100-style (FND_STE=0 to disable)
@@ -219,9 +225,9 @@ spawns one subagent, attempts a `--no-verify` commit in a scratch repo expecting
 block it, and reports a pass/fail matrix with remediation. `preflight-checks` keeps the
 recurring per-project role.
 
-`install.sh` takes `--plugin <name>` (default `fnd`). `slim` is Claude Code only — it ships no
-Cursor, Codex or OpenCode adapter, so `install.sh --plugin slim` exits 2 and points at
-`/plugin marketplace add …` + `/plugin install slim@domaine`.
+`install.sh` takes `--plugin <name>` (default `fnd`). `slim` and `band` are Claude Code only — they
+ship no Cursor, Codex or OpenCode adapter, so `install.sh --plugin slim` and `install.sh --plugin band`
+exit 2 and point at `/plugin marketplace add …` + `/plugin install <name>@domaine`.
 
 ### Claude Code — from the published Git marketplace (team use)
 
@@ -248,6 +254,30 @@ predeclare it in managed settings under `extraKnownMarketplaces`.
 `/plugin install slim@domaine` installs the second plugin, which compresses large tool results —
 MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and Agent — and adds a `lookup` tool (Claude Code
 only; see [plugins/slim/README.md](plugins/slim/README.md)).
+
+`/plugin install band@domaine` installs the third, which draws the status band above the prompt, the
+event log pane and the Progress pane (Claude Code only; see
+[plugins/band/README.md](plugins/band/README.md)). Update fnd first: an fnd release older than the one
+that yields to band (0.134.0 and earlier) still draws its own band, and only one plugin's band can show
+above the prompt, so load order decides which. fnd's `FND_BAND_COST` does not carry over: set
+`BAND_COST=1` in `~/.claude/settings.json` → `env` to keep the cost segment.
+
+### Which plugins to install
+
+fnd works alone; slim and band add to it and also load without it. slim and band are Claude Code
+mods and nothing else, so on Cursor, Codex and OpenCode only fnd applies.
+
+| Installed | Status band | Event log pane | Progress pane | Classic context monitor | MCP compression |
+|---|---|---|---|---|---|
+| fnd | fnd draws it (`statusBand: false` hides it) | `/fnd-log`: fnd's lines | `/fnd-progress` | silent while fnd's module writes the session marker | fnd |
+| fnd + slim | fnd draws it | `/fnd-log`: fnd's and slim's lines (fnd's compression lines read `fnd-slim`) | `/fnd-progress` | silent, as above | fnd, or slim with `FND_COMPRESSION=proxy` |
+| fnd + slim + band | band draws it, fnd stands down; band's `disabled: true` hides it | `/band-log`: band's, fnd's and slim's lines | `/band-progress`; pin with `/fnd-progress <KEY>` | silent wherever band is loaded, drawn or not (a cloud session or `claude -p` too); speaks again under band's `disabled: true` | fnd, or slim with `FND_COMPRESSION=proxy` |
+| band alone | band draws the figures and buttons; no digest, no Progress button | `/band-log`: band's lines (session, model, compact, rate) | none (`/band-progress` says no plugin publishes a checklist) | not installed (it is fnd's) | none |
+
+fnd + band without slim is the third row with fnd compressing. Under band, `/fnd-log` and
+`/fnd-progress` answer with a pointer to the band commands. fnd decides once per process: after
+`/plugin disable band` or `/plugin uninstall band` mid-session it keeps standing down and keeps
+pointing at the band commands until the next session.
 
 ### Claude Code — local development (from this folder on disk)
 
@@ -387,7 +417,7 @@ per-host doc it belongs to:
 | Subagents | 1 level → hoisted ship shape | hoisted, genuinely concurrent | hoisted unless `subagent_depth` raised |
 | Models | pinned per the Domaine guidelines | pinned (PROPOSED map, sign-off pending) | **no pins** — session model; optional profile fragment |
 | Skill invocation | `/name` | `$name` | model-invoked + `/name` shims |
-| Mods (status band, progress pane) | none — the manifest names `hooks/hooks-cursor.json` | none — the manifest names `hooks/hooks-codex.json` | none — only `opencode/fnd-plugin.js` loads |
+| Mods (fnd's module; the slim and band plugins) | none — the manifest names `hooks/hooks-cursor.json` | none — the manifest names `hooks/hooks-codex.json` | none — only `opencode/fnd-plugin.js` loads |
 
 Losses that hold on all three: no adversarial verify fan-out, no per-phase workflow telemetry,
 and the context-usage monitor is inert wherever the host hands a prompt hook no transcript
@@ -529,7 +559,7 @@ codex plugin marketplace upgrade         # Codex, then a new session
 at your clone, so re-running the installer *is* the update — it pulls and re-links in one pass:
 
 ```bash
-./scripts/install.sh --target <cursor|opencode|codex> [--plugin <name>]   # --plugin defaults to fnd; slim is Claude Code only
+./scripts/install.sh --target <cursor|opencode|codex> [--plugin <name>]   # --plugin defaults to fnd; slim and band are Claude Code only
 ```
 
 - Skills, references, agents and scripts apply on the **next read**; manifest, hook-wiring, MCP
@@ -1163,8 +1193,9 @@ in the egress table for cloud sandboxes.
 
 The plugin wires five hook events (`plugin.json` → `hooks`); every hook fails open — a
 hook error never blocks work.
-On Claude Code a hooks module of function hooks runs beside them (status band, progress pane, and
-the guard and compressor on the tool call itself): [Mods](#mods-claude-code-function-hooks).
+On Claude Code a hooks module of function hooks runs beside them (status band and panes, which the
+band plugin draws instead when it is installed, and the guard and compressor on the tool call
+itself): [Mods](#mods-claude-code-function-hooks).
 
 - **SessionStart** — `hooks/session-start.sh`, the one script both shell wirings
   (`plugin.json`, `hooks/hooks-codex.json`) spawn, injects the session
@@ -1507,8 +1538,8 @@ the guard and compressor on the tool call itself): [Mods](#mods-claude-code-func
     sweep still runs once per session. If slim is missing, disabled, older than 0.3.0 or has `SLIM_MCP=0`,
     the module keeps compressing every MCP result and says so once per session — MCP only: a local JSON
     dump read below Read's token cap is covered by neither plugin under `proxy`. `doctor --target claude`
-    reports the backend (`compression-backend`) and warns on each of those mismatches. The `/fnd-log`
-    pane shows slim's events next to fnd's either way, fnd's own compression lines then reading
+    reports the backend (`compression-backend`) and warns on each of those mismatches. The Log pane
+    (`/band-log` with band, `/fnd-log` without) shows slim's events next to fnd's either way, fnd's own compression lines then reading
     `fnd-slim`. Under `builtin` with slim installed too, a result the host cut at its token limit may still
     reach the model with slim's label rather than fnd's, depending on which plugin's module sits beneath.
 
@@ -1586,7 +1617,7 @@ because the script that reads it is the same single copy on all four hosts.
 | `FND_LEAN` | `1` | `0` disables the lean-code session convention. Hook-gated, so it applies where the convention arrives through a hook (Claude Code and Codex at session start; every host's subagent conventions on Claude Code, Cursor and Codex). **Host divergence:** on Cursor the SESSION copy ships as an always-applied rule instead — turn `rules/fnd-lean-code.mdc` off there — and on OpenCode the statics live in your own `instructions` config, which this switch cannot reach; either way, "normal mode" in the session still works |
 | `FND_STE` | `1` | `0` disables the how-to-explain session convention (`hooks/writing-style.md`). Hook-gated, so it applies where the convention arrives through a hook (Claude Code and Codex at session start; subagents never get it). **Host divergence:** on Cursor it ships as an always-applied rule instead — turn `rules/fnd-writing-style.mdc` off there — and on OpenCode the statics live in your own `instructions` config, which this switch cannot reach; either way, "normal writing" in the session still works |
 | `FND_PROFILE` | auto | overrides the **project profile** — `foundation` / `theme` / `none`, detected by `scripts/project-profile.sh` from the checkout itself (`snippets/@*.liquid`, `sections/core-*.liquid`, `blocks/core-*.liquid` or `src/entry/core/` ⇒ `foundation`; else `layout/theme.liquid` ⇒ `theme`; else `none`), walking up from the session's directory and stopping at the repo boundary — the level that holds `.git` — so a hook running in a subdirectory answers about its own checkout and never about a parent repo. Every host prints the answer as `fnd project profile: <value>` right under the plugin-root line, and `foundation` adds one block to the session: `hooks/comment-discipline-foundation.md` (LiquidDoc on every snippet param; `src/entry/core/*` is protected — extend or compose it; the Liquid core may be edited but has to be hand-synced from the foundation repo) — plus the same block for code-writing subagents. Bundled scripts read the same answer where a Foundation-only command would otherwise be handed to a plain theme: `scripts/worktree-setup.sh` prints `npm run dev -- --theme …` in the worktree hand-off only on `foundation`, and `shopify theme dev --theme …` everywhere else. The three values are matched exactly, lowercase; an exported-but-EMPTY value still counts as set, so it shadows both env files and lands on detection; anything else falls back to detection, silently in a session (run `scripts/project-profile.sh` by hand to see the warning). **Host divergence:** on Cursor the comment-discipline convention is an always-applied rule and of that material only this addendum is detection-gated, injected by `hooks/cursor-shim.cjs`; on OpenCode both the profile line and the addendum ride the adapter's once-per-session `chat.message` injection, since the statics live in your own `instructions` config |
-| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard, the session title and the background reader relay unless `FND_PROMPT_JSON=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too (the four halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half. **Mod (Claude Code):** while the [hooks module](#mods-claude-code-function-hooks) is live the monitor is silent whatever this is set to (the module's session marker; the band shows ctx and model), and its warn-level `additionalContext` goes with it, so the model gets no context nudge there and the band's colours and Compact button are the developer's cue. On Cursor, Codex and OpenCode this stays the switch |
+| `FND_CTX_MONITOR` | `1` | `0` disables the context-usage monitor; node still spawns for the prompt-JSON guard, the session title and the background reader relay unless `FND_PROMPT_JSON=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too (the four halves share one UserPromptSubmit process). **Host divergence:** the monitor reads the session transcript, which only Claude Code and Codex hand a hook — on Cursor (`beforeSubmitPrompt`) and OpenCode (`chat.message`) there is no transcript path, so the monitor is inert there whatever this is set to, and the switch only governs the prompt-JSON half. **Mod (Claude Code):** while a session marker is fresh the monitor is silent whatever this is set to, and its warn-level `additionalContext` goes with it, so the model gets no context nudge there and the band's colours and Compact button are the developer's cue. The marker is written by the band plugin while it draws the band, or by fnd's [hooks module](#mods-claude-code-function-hooks) when band is not installed (whatever `statusBand` says); with band installed and its `disabled` option on, nobody writes it and the monitor speaks again. On Cursor, Codex and OpenCode this stays the switch |
 | `FND_CTX_WARN` | `40` | context warn threshold, % of the window |
 | `FND_CTX_WINDOW` | auto | override the assumed context window size (tokens). Auto = the Claude model family on Claude Code (200000 when the model is unrecognized) and the window the rollout states on Codex — where, if it states none, the monitor stays silent rather than guess |
 | `FND_MCP_SLIM` | `1` | `0` disables the MCP result **compression** (PostToolUse `mcp-slim` hook) — node never spawns. Where it does spawn anyway — a `0` set in the global `~/.config/domaine/env`, which the wiring's shell gate cannot see (this switch is global-only: a project `.claude/domaine.env` cannot set it at all) — the hook emits nothing but still runs its exit-time TTL sweep: hygiene is not compression, and nobody who silenced the compressor asked for a spill dir and a checkout that fill up. `FND_MCP_SLIM_TTL` is the switch that governs the sweep. **Host divergence:** Claude Code and OpenCode rewrite the result in place, so compression AND spill-and-stub both land. Cursor is observe-only: `afterMCPExecution` exposes no rewrite field, so nothing is compressed, stubbed or spilled there whatever this is set to — with the default the shim logs `skip`, and with `0` the wiring gate exits before node, so not even that line is written (see [Known gaps](#host-verification-status--cursor-codex-cli-and-opencode-are-unverified) and `docs/README.cursor.md`). On Codex both halves land through the one channel that host's `PostToolUse` can replace a result with: `hooks/codex-mcp-shim.cjs` returns the compressed body — or the stub — as a `block` `reason`, behind a header saying the call SUCCEEDED and must not be retried, since Codex frames a block to the model as `Script failed` / `Script error:`. That reason is capped (`BLOCK_REASON_BYTES` in the shim, 10000 — Codex truncates a longer hook output, measured at 2,500 host tokens of 4 bytes each), so a compressed body over the cap is spilled-and-stubbed instead (`block-cap`), and a result carrying a non-text block falls back to the old path: the stub rides as `additionalContext`, a compressed body is dropped (`docs/README.codex.md`). **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s slimming: no over-limit expansion and no savings toast. The module reads only the session's environment (shell, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the `mcp-slim.cjs` the module spawns, which then emits nothing, so the host's notice stands and the effect is the same one spawn later. To hand MCP compression to the separate slim plugin, set `FND_COMPRESSION=proxy` instead (see [plugins/slim/README.md](plugins/slim/README.md)). |
@@ -1600,8 +1631,8 @@ because the script that reads it is the same single copy on all four hosts.
 | `FND_WHALE_GUIDE` | `1` | `0` (or `false`/`no`/`off`) disables the one-shot rule for `json-slim`'s whale-recovery guidance: the full block (readline filter template + `sed`/`grep` single-row hints) is then printed after every profile instead of only the FIRST profile of a given file per session. With the default, later profiles of the same file carry a one-line reminder that stays self-sufficient — the file, the row count, any fence offset, the `sed`/`grep` single-row forms and this switch — dropping only the readline template (the reader of a repeat may be a subagent, or a context that was compacted since). The suppression state is a dotfile per session × **resolved** file path under `FND_MCP_SLIM_DIR`, expires after 2 h, and is pruned by the same sweep as the spills (so `FND_MCP_SLIM_TTL=0`, which disables that sweep, leaves the small per-file **state files** in place); a new file path, a missing, unreadable or future-dated state file always yields the full block. The profile itself is never affected, and each profile's debug line records which variant it printed (`guide: full` / `reminder`) |
 | `FND_NOGAIN_MEMO` | `1` | `0` (or `false`/`no`/`off`) disables `json-slim`'s per-file no-gain memo. With the default, a **file** run that printed its body back unchanged (a deliberate decline, now also stated on stderr) is remembered — per session × **resolved** file path, for 2 h, invalidated as soon as the file's size or mtime change — and a repeat run on that file answers with a one-line refusal naming the recovery instead of re-printing the body; the field pattern it removes is "decline → immediate re-run", where a 0 % result reads as a failed attempt. Only declines of at least 4 KB are remembered (below that a refusal saves nothing). The state is dotfiles under `FND_MCP_SLIM_DIR`, swept with the spills (so `FND_MCP_SLIM_TTL=0` leaves them in place); a missing, unreadable, corrupt or future-dated state file always yields the normal run. The same switch also governs the second refusal, which needs no memo: `fnd-slim-out-*` files — `json-slim`'s own Gate-A output spills, already slimmed — are answered the same way (only below the 8 MB stream gate; past it the big-document guidance is the useful answer). Neither refusal ever applies to a run whose answer it cannot stand for: a narrowing `--jq <jq-path>` (the documented recovery after a decline) bypasses both. `--stats` does **not** — the reader recipes pass it on every run, so a bypass would disarm the memo for exactly those callers; a refusal answers it with the measurement instead, printing the body-free notice on stdout and `json-slim: <bytes> → <bytes> bytes (0.0% reduction) [declined earlier this session]` (or `[already json-slim output]`) on stderr. The stderr decline notice is NOT governed by this switch: it rides on every file run that printed the file's own bytes back unchanged. Both refusals log `already-slim-out` / `no-gain-memo` and are counted on `--report`'s `cli runs:` line |
 | `FND_PROMPT_JSON` | `1` | `0` disables the prompt-JSON guard (UserPromptSubmit `prompt-json-guard` half); node still spawns for the context monitor, the session title and the background reader relay unless `FND_CTX_MONITOR=0`, `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` too — only with all four at `0` does no node process run at all. Those clauses are in the Claude Code and Codex wirings alike, because the two carry the same command verbatim; on Codex the title and reader-relay halves are inert (both gated on `FND_HOST=claude`), so a Codex user who wants the old two-switch economy sets `FND_SESSION_TITLE=0` and `FND_READER_COMPRESSION=0` with the other two. Cursor's `beforeSubmitPrompt` runs its own shim, which has no title half, so there the two-switch short-circuit is unchanged. **Host divergence:** on OpenCode nothing can erase a message, so a blocking verdict **rewrites** the prompt instead — every blob the guard spilled is replaced in place by its `full=` handle, which offloads the paste exactly as elsewhere. **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s rewrite. The module reads only the session's environment (shell, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the `prompt-json-guard.cjs --from-mod` the module spawns, which then prints nothing, so the effect is the same one spawn later. Confirmed live on the desktop app's Code tab too. |
-| `FND_BAND_COST` | off | `1` (or `true`/`yes`/`on`) adds the session-cost segment to the status band (`cost $12.40`, `💰 $12.40` on the desktop): the `/cost` total at API prices, a measure of work on a subscription. Read once at session start through the hooks module's `$.env`, so set it where Claude Code's own environment is built — the `env` block of `~/.claude/settings.json` reaches the terminal and the desktop app alike. **Host divergence: Claude Code only** (the band is a mod). |
-| `FND_EVENT_LOG` | `1` | `0` stops the hooks module recording fnd's own events in the event log (the `Log` pane, `/fnd-log`); with nothing else recorded the pane reads `no events yet`. The slim plugin's lines still show there unless `SLIM_EVENT_LOG=0`. Toasts are untouched. Read through the hooks module's `$.env`, so set it in the session's environment (`~/.claude/settings.json` → `env`). **Host divergence: Claude Code only.** |
+| `FND_BAND_COST` | off | `1` (or `true`/`yes`/`on`) adds the session-cost segment to the status band fnd draws (`cost $12.40`, `💰 $12.40` on the desktop): the `/cost` total at API prices, a measure of work on a subscription. Read once at session start through the hooks module's `$.env`, so set it where Claude Code's own environment is built — the `env` block of `~/.claude/settings.json` reaches the terminal and the desktop app alike. Ignored while the band plugin is loaded; band reads `BAND_COST`. **Host divergence: Claude Code only** (the band is a mod). |
+| `FND_EVENT_LOG` | `1` | `0` stops the hooks module recording fnd's own events in the event log (the `Log` pane: `/band-log` with the band plugin, `/fnd-log` without); with nothing else recorded the pane reads `no events yet`. With band, the `session`, `model`, `compact` and `rate` lines are band's and `BAND_EVENT_LOG` gates them. The slim plugin's lines still show there unless `SLIM_EVENT_LOG=0`. Toasts are untouched. Read through the hooks module's `$.env`, so set it in the session's environment (`~/.claude/settings.json` → `env`). **Host divergence: Claude Code only.** |
 | `FND_SLIM_TOAST` | `1` | `0` silences the hooks module's savings toasts: the MCP-slimming figure (`fnd-mcp-slim: compressed …`) and the pasted-JSON figure (`fnd-prompt-slim: …`). Under `FND_COMPRESSION=proxy` the MCP savings toast is the slim plugin's, silenced by `SLIM_TOAST=0` instead. Slimming and the rewrite themselves are untouched, and so are the Compact-press result toast and the 90 % rate-window alarm (answers to the developer's own action and a warning). Read through the hooks module's `$.env`, so set it in the session's environment (`~/.claude/settings.json` → `env`). **Host divergence: Claude Code only** (toasts are a mod). |
 | `FND_SLIM_TOAST_MS` | `5000` | How long the hooks module's savings toasts stay, in milliseconds (a whole number, floored at 1,000; anything else → the default). Set it where the module reads its environment (`~/.claude/settings.json` → `env`). **Host divergence: Claude Code only.** |
 | `FND_SCRATCH_GUARD` | `1` | `0` disables the screenshot scratch-path guard (PreToolUse `scratch-path-guard`) — node never spawns. With the default, a `take_screenshot` / `browser_take_screenshot` / `take_snapshot` / `get_network_request` / `browser_run_code_unsafe` whose path resolves **outside** the project (scratchpad, another checkout — the servers refuse those anyway; a chrome-devtools write under its OS temp dir passes, since that server accepts it), or a written file that resolves inside the project working tree and outside a **leading** `.claude/` segment, is **denied** with a reason naming the ABSOLUTE `<project>/.claude/tasks/<work-id>/tmp/<name>` (or `<project>/.claude/tmp/<name>` with no ticket) instead — absolute because a relative filename is resolved by the playwright server against its own output dir, not the project, so a relative remediation would land nested inside the litter dir it replaces. Which server it is decides the verdict: the **bundled** `playwright`, whose manifest pins `--output-dir .claude/fnd-tmp/playwright` (swept, git-excluded — and the guard stamps that exclude itself on the branches that allow, so the allow does not rest on a compressor switch), passes both a bare `filename` and no `filename` at all; every other spelling may be a default-configured server writing to `<cwd>/.playwright-mcp` inside the checkout, so its relative filename is denied and so is its no-`filename` call, which does not skip the write. That allow is bought with the sweep: a file in the bundled server's output dir **expires** on `FND_MCP_SLIM_TTL` (24 h), so anything meant to be kept — QA evidence, the screenshots a Steps to Test points at — still belongs in `<project>/.claude/tasks/<work-id>/tmp/`, which nothing prunes. The guard creates the two remediation destinations itself as it denies (nothing else does — chrome-devtools' write path makes no directory — so a compliant retry would fail with ENOENT). The project root is the session's project dir (`CLAUDE_PROJECT_DIR`, else the checkout the cwd's `.claude/` sits in); in a git worktree a path resolving into the symlinked `.claude/tasks` is denied, and the remediation is `<worktree>/.claude/tmp/<work-id>/<name>`. Anything under a leading `.claude/`, an inline chrome-devtools screenshot / snapshot / network body (no path, no file written) and `browser_run_code_unsafe` with inline `code` or an in-tree script all pass, and any internal error fails open; an in-project `tmp/` is denied like the rest of the tree, since a theme checkout neither ships nor gitignores one. **Host divergence:** wired on Claude Code, Codex and Cursor — the matcher is prefix-agnostic, since Codex names the same tools without the `plugin_fnd_` prefix and either host may have the servers installed per-user, and on Cursor the deny travels through `beforeMCPExecution` (a `permission: "deny"` response, `tool_input` decoded from a JSON string). That prefix-agnosticism has a cost on those two hosts: an unprefixed `browser_take_screenshot` is indistinguishable from a per-user server, so even the bundled one is judged conservatively there — relative filenames denied, absolute workspace paths expected. OpenCode's tool hook has no verified MCP payload shape, so there screenshots are unguarded whatever this is set to. **Mod (Claude Code):** `0` also turns off the [hooks module](#mods-claude-code-function-hooks)'s guard: no deny on the tool call and no path note in the five tools' descriptions. The module reads the session's environment (and, for the description note, `settings.json` → `env`); a `0` that lives only in `~/.config/domaine/env` is seen by the spawned `scratch-path-guard.cjs` alone, which then allows, so nothing is denied, but the description note stays for that session. |
@@ -1651,6 +1682,8 @@ because the script that reads it is the same single copy on all four hosts.
 | `SLIM_LOOKUP_MODEL` | `haiku` | **slim plugin.** Model the lookup tool asks its one question with — an alias or a model id, checked like `--model`. Every lookup writes its model and token usage to the report log at every debug level. |
 | `SLIM_HINT` | `1` | **slim plugin.** `0` drops the one line slim adds to an HTML page it compressed from a Bash fetch (`slim hint: for one fact about this page, call mcp__slim__lookup(…)`). |
 | `SLIM_CURL` | unset | **slim plugin.** `deny` refuses a bare `curl <url>` in Bash with a pointer to the lookup tool and WebFetch; a curl with a pipe, an output file or headers is never refused. Any other value does nothing. |
+| `BAND_COST` | off | **band plugin.** `1` (or `true`/`yes`/`on`) adds the session-cost segment to the band plugin's status band (`cost $12.40`, `💰 $12.40` on the desktop): the `/cost` total at API prices, a measure of work on a subscription. Read at session start through the module's `$.env` (session environment only: shell or `settings.json` → `env`); the Domaine env files do not reach it. **Host divergence: Claude Code only.** |
+| `BAND_EVENT_LOG` | `1` | **band plugin.** `0` stops band recording its own lines (`session`, `model`, `compact`, `rate`) in the event log; fnd's and slim's lines still show in `/band-log` unless `FND_EVENT_LOG=0` or `SLIM_EVENT_LOG=0`. Toasts are untouched. Read through the module's `$.env` (session environment only: shell or `settings.json` → `env`); the Domaine env files do not reach it. **Host divergence: Claude Code only.** |
 
 ## Mods (Claude Code function hooks)
 
@@ -1667,13 +1700,16 @@ figures, guard refusals, compactions, model switches, rate alarms, workspace cha
 and resume), one timestamped line each. The **scratch-path guard** answers on the tool call itself. **MCP slimming** also
 reaches results over the platform limit, which the classic `mcp-slim` hook never sees. **Pasted
 JSON** over the classic guard's gate is replaced in place by its compressed body or a stub, so the
-prompt goes through in one submission instead of being blocked. Guard, slimming and pasted JSON do
-not duplicate the Node hooks. They spawn the same `scratch-path-guard.cjs`, `mcp-slim.cjs` and
+prompt goes through in one submission instead of being blocked. When the separate band plugin is
+installed, band draws the status band and both panes and fnd's module stands down on those three
+(below); fnd keeps resolving the task and recording its own events, which band reads. Guard, slimming
+and pasted JSON do not duplicate the Node hooks. They spawn the same `scratch-path-guard.cjs`, `mcp-slim.cjs` and
 `prompt-json-guard.cjs`, so the D, M and P cases in `tests/hooks-sim.sh` keep testing the code
-that decides. At the top of every prompt the module rewrites an empty
-`<tmpdir>/fnd-mod-session-<session id>`; while that marker is under a minute old the classic
-UserPromptSubmit hook skips its context monitor (the band covers it) and still runs the
-pasted-JSON block, the session title and the reader relay. The block stays because the rewrite
+that decides. At the top of every prompt a module rewrites an empty
+`<tmpdir>/fnd-mod-session-<session id>`: the band plugin's while it draws the band, fnd's when band
+is not installed, and nobody's while band is installed with `disabled: true`. While that marker is
+under a minute old the classic UserPromptSubmit hook skips its context monitor (the band covers it)
+and still runs the pasted-JSON block, the session title and the reader relay. The block stays because the rewrite
 already passes it, so it only catches what the module skipped or failed to rewrite. A marker
 older than a minute counts for nothing, so a resumed session whose module no longer loads gets
 the classic monitor back. The module cannot delete files, so old 0-byte markers stay in the temp
@@ -1684,114 +1720,37 @@ docs/img/mods-pane.png) are added after the live check.
 
 ### Status band
 
-One row, most important first. 170 columns, context at 47 %, an account reporting three
-windows, a task workspace open:
+fnd draws this when the band plugin is not installed; with band, band draws it and fnd yields. It is
+the same drawing either way, and its reference — the row at each width, the drop order, every segment
+and button, look, colors, hover cards, toasts and hotkeys — is
+[plugins/band/README.md → Status band](plugins/band/README.md#status-band). What differs in fnd's copy:
 
-```text
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Clear ]  [ Progress ]  [ Log ]
-```
-
-120 columns, same session. The row is 172 cells, so the Log button goes first, then Clear, then the digest:
-
-```text
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ [ Compact ]  [ Progress ]
-```
-
-60 columns. The rate windows go next, the least full one first, then the model:
-
-```text
-cache 42m │ ctx 47% │ [ Compact ]  [ Progress ]
-```
-
-The full drop order is: the Log button (`/fnd-log` still opens the pane), the Clear button (`/clear` still works), the digest, the cost, then the
-rate windows beyond the fullest (least full first), then the last window, then the model, then the Progress button. Cache, ctx and Compact are never
-dropped. The row's text truncates as a backstop, so the band never takes a second row.
-
-| Segment | Shows | Rule |
-|---|---|---|
-| cache | `cache 42m`, `<1m`, `cache cold`, `cache —`, `cache ●` | Minutes left of the prompt cache: the last main-thread response plus the TTL. `●` while a turn runs; `—` before the first response and after `/clear` or resume; `cold` once the TTL has passed, after a compaction, or after a `/model` switch that forfeits the cache (another model, or the host reports it cold). A resumed session takes its state from the time since the last response. Hidden while any rate window is at or past 100 %: in overage the TTL is unknown. **It is an estimate.** The host reports no cache state, only the events it is derived from. |
-| model | `fable-5-1` | The model id as the session reports it, without the `claude-` prefix every id carries. A `/model` switch updates it from the switch event itself; every measurement re-reads it, so a switch the event missed shows by the next response. **On the terminal it is a picker:** the segment reads `fable-5-1 ▾` and is a button (hotkey `m` while the band holds the keyboard: ctrl+x tab, or a click). Pressed, the row folds its figures away and holds the models alone, in place: `model fable-5-1  opus-5-5  sonnet-5-5  haiku-4-5-20251001` (plus the session's own id first when it is none of these, say a pinned `[1m]` id), the current one bright and the rest dim, each with its first letter as hotkey (`f`, `o`, `s`, `h`). Tab or a letter picks one; the pick runs `/model <id>` as typed, toasts its output and folds the row back, which then follows the switch event. The current model only folds the row; a turn or `/clear` folds it too. The band never grows: its region clips anything drawn outside its own two rows, so no list can pop over the transcript. The desktop app has its own model menu, so there the segment stays text. |
-| ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`), or `—` when the engine reported no count; that count holds until a response reports a measured fill, as a reading with no fill (only the window) keeps the last one. A compaction reaches the band two ways, the `session.compact` chain and the engine's own `PostCompact` report (the settings-hook event, which arrives even when the chain skips the mod, as it did for a Compact press on Claude Code 2.1.289); reports within 30 s of each other are one compaction. Mid-turn it refreshes on a 30 s tick. |
-| rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
-| cost | `cost $12.40` | Opt-in: drawn only with `FND_BAND_COST=1` in the session's environment. What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
-| digest | `ELC-1591 3/5 ▶ Preview themes` | the task you are on, same on the terminal and the desktop: work id · checked/total rows of the workspace's `progress.md` · the current row (cut to 28 characters): the first unchecked row below the last checked one, else the first unchecked row; `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet, or while the ticket you named has no workspace at all. Hidden while the progress pane is open, and when nothing resolves. |
-| Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable, so the other buttons never shift: before the first reading, while a turn runs and at any context. From 80 % between turns it switches to the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). Where the engine refuses compaction from a plugin (a headless / SDK session such as the desktop app), the press runs the `/compact` slash command as if typed instead and toasts its output. Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued. |
-| Clear | `[ Clear ]`, `x: Clear` | Runs `/clear` behind the engine's own Yes/No dialog (`Clear the conversation?`), always: the dialog takes the keyboard, so a stray click or hotkey never clears, and a dismissed dialog is a No. Toasts the command's output. Pressed while a turn runs it only toasts `turn is running — press Clear again when it ends`. Dim at rest, `x: Clear` while the band holds the keyboard. |
-| Progress | `[ Progress ]`, `p: Progress` | Opens or closes the progress pane; dim at rest, `p: Progress` while the band holds the keyboard |
-| Log | `[ Log ]`, `l: Log` | Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
-
-**Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the desktop frames its panel itself, so no rule is drawn there. The desktop draws the buttons on a second row under the figures, left-aligned, with a row of air between the two and padding around the panel: its native buttons are tall, and in the figures' row they squashed it and sat far right. The terminal keeps one row, as its height is the scarce side there. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain (on the terminal with the picker's `▾` mark), the digest's work id is bold and the separators are dim.
-
-**Colors.** ctx is green (the theme's `success`) up to 30 %, as the classic notice's 🟢 was; the rate
-windows are plain there. Both use the theme's `warning` color above 30 % and the alarm look from 80 %. The cache is plain at 10 min or more, `warning` below 10 min and
-the alarm below 2 min (a 5 min TTL scales both: warning below 2 min, the alarm below 24 s). Only
-theme keys are used, so the band follows light, dark and high-contrast themes. The alarm look is
-`warning` + bold + inverse until a dedicated error key is proven to draw on every theme.
-
-**Desktop and hover.** In the desktop app's Code tab every segment carries a glyph instead of a word
-(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`), and Compact / Clear / Progress / Log are native
-buttons. The desktop draws proportional text, so the width model above does not apply there: nothing is
-dropped, the row clips at the panel's edge. When the
-pointer rests on the cache, ctx, a rate window or the cost, a one-line card appears. This is meant for desktop
-and for terminals that pass the pointer through (kitty, Ghostty, iTerm2, WezTerm; tmux passes
-none). The glyph labels, the native buttons and hover are still a live check (desktop and
-terminal paint). The cards read:
-`prompt cache: ~42 min left (estimate: last response + 1 h TTL)`,
-`context: 47% of 200,000 tokens, 94,000 used`, `5h window: 61% used, resets in 2h 05m`,
-`session cost: $12.40 at API prices, as /cost counts it (a subscription is not billed per request)`.
-
-**Toasts.** When a rate window first reaches 90 %, one toast shows that window's card for 8 s
-(`5h window: 91% used, resets in 1h 05m`). It re-arms once every window is back under the line, and
-after `/clear`. The slimming path below adds a savings toast (`FND_SLIM_TOAST=0` silences the savings
-toasts alone). Toasts sit at the transcript's
-top-right in fullscreen, or on the notification line under the prompt otherwise. Several toasts
-stack; a click takes one off and the pointer over it holds it (there is no close button). They never
-touch the transcript or what the model reads. They keep showing while the progress pane is open (it is
-not a dialog and does not hold toasts).
-
-**Hotkeys.** `c`, `x`, `p` and `l` work only while the band holds the keyboard: after **ctrl+x tab** or a
-click on the band. They never fire from the composer, so typing a `c` is just a `c`. The letters are
-drawn only then too (`c: Compact  x: Clear  p: Progress  l: Log`): at rest the buttons read `[ Compact ]  [ Clear ]  [ Progress ]  [ Log ]`,
-so the band never suggests a key the composer would swallow. The letters go away again on a press,
-when a turn starts and on `/clear` (there is no focus-out event, so Esc alone leaves them until the
-next of those). On a terminal
-the buttons are mainly clicked (pointer-capable terminals) or reached as ctrl+x tab then the
-letter, and Esc gives the keyboard back to the prompt. To focus the band with a single chord,
-rebind `abovePrompt:focus` (default ctrl+x tab) in `~/.claude/keybindings.json`, then press the
-letter. On
-desktop they are ordinary buttons with no hotkey at all (a desktop draws a hotkey as a badge on its native button, and a click is the way there). ctrl+x ctrl+a collapses the band; while it is collapsed the engine
-shows one dim line above the prompt, `plugin panel hidden · ctrl+x ctrl+a or click to show`, and that
-chord or a click on the line brings it back. The collapsed state is the engine's and persists across
-reloads; the plugin cannot and does not reopen the band by itself.
-
-**Debug.** `/fnd-band` prints the raw figures behind the band: the session's `usage()` answer, the cache state, the usage atom, the resolved workspace and session root, and the last render's surface and measured columns. Paste its output when a segment looks wrong on some surface.
+- **Debug.** `/fnd-band` prints the raw figures behind fnd's band: the session's `usage()` answer, the
+  cache state, the usage atom, the resolved workspace and session root, and the last render's surface
+  and measured columns. With band loaded it answers `band draws the band now: /band-debug`.
+- **Cost.** fnd's cost segment is `FND_BAND_COST=1`; band reads `BAND_COST` and ignores fnd's switch.
+- **Hiding it.** fnd's `statusBand: false` hides fnd's band (see [Mods settings](#mods-settings-userconfig));
+  band's own switch is its `disabled` option. While band is loaded fnd draws no band whatever
+  `statusBand` says.
+- **Buttons.** fnd draws the Progress and Log buttons always; band draws each only while it has
+  something to show. The Log button's fallback is `/fnd-log`, the Progress button's `/fnd-progress`.
+- **Rate alarm.** Without band, the 90 % rate toast and its `rate` log line are fnd's; with band they
+  are band's, and fnd's figures stand down so nothing toasts twice.
 
 ### Progress pane
 
-`p: Progress`, or `/fnd-progress`, opens a pane with the resolved task workspace: docked beside the
-transcript in a wide fullscreen terminal, inline otherwise (the surface decides). Esc or a second
-press closes it.
+fnd draws this when the band plugin is not installed; with band, band draws it and fnd yields. The
+pane — header, rows, glyphs, notes tail and the two hints — is described in
+[plugins/band/README.md → Progress pane](plugins/band/README.md#progress-pane). Which task it shows is
+always fnd's decision: fnd resolves the task and publishes it, and whichever plugin draws reads that.
 
-```text
-ELC-1591 · feature/ELC-1591-preview-themes · 3/5
-✓ Read the ticket
-✓ Plan approved
-✓ Header markup
-▶ Preview themes for QA review
-☐ Steps to Test
-- preview theme 141234567890 created for QA
-- decision: keep the old toggle behind a setting
-- open: confirm the empty-state copy with design
-```
-
-The header is the work id · branch · checked/total. Below it come every `progress.md` row (✓ done
-dimmed, ▶ the digest's current row in bold, ◌ unchecked rows above ▶ dimmed — they
-wait on someone, not the queue — ☐ the rest) and the last three `- ` lines of
-`notes.md`, dimmed. A workspace without `progress.md` shows its id, the branch, one dim line
-`no progress.md yet — /fnd:save-task-context` and the notes tail. A ticket you named that has no
-workspace shows its id, the branch and `no task workspace — /fnd:save-task-context`. With nothing
-resolved the pane is that one line.
+- **Without band:** `p: Progress` or `/fnd-progress` opens fnd's pane (`fnd-progress`). With nothing
+  resolved it is one line, `no task workspace — /fnd:save-task-context`. `/fnd-progress <id>` pins a
+  task and opens the pane; `/fnd-progress -` clears the pin.
+- **With band:** `/fnd-progress` alone answers `band draws the panes now: /band-progress` and opens
+  nothing. `/fnd-progress <id>` still pins (`Pinned <id>. band draws the panes now: /band-progress`,
+  plus `<id> has no task workspace.` when it does not resolve) and `/fnd-progress -` still clears the
+  pin; band redraws from the new snapshot. `/band-progress` takes no argument, so pinning stays here.
 
 **Which task.** In order:
 1. an id pinned with `/fnd-progress <id>` whose `.claude/tasks/<id>/` exists (`/fnd-progress -`
@@ -1811,42 +1770,35 @@ change re-resolve the id; `/clear` forgets the conversation key (a pin stays).
 
 ### Event log pane
 
-Toasts flash and go. `l: Log`, or `/fnd-log`, opens a pane that keeps them: the last 200 things the
-module did or noticed, one line each, oldest first and newest last. Esc, a second press or the
-engine's close mark closes it. The progress pane and the log pane can be open at once; the engine
-shows one and keeps the other as a tab. Pressing the button or running the command of the pane behind the tab brings that pane forward instead of closing it.
+fnd draws this when the band plugin is not installed; with band, band draws it and fnd yields. The
+pane — merge order, wrapping, `… N earlier`, the text answer where nothing draws a pane — is described
+in [plugins/band/README.md → Event log pane](plugins/band/README.md#event-log-pane). fnd always records
+its own lines in `fnd.events`, which both panes read.
 
-```text
-14:02  session    start
-14:05  workspace  ELC-1588
-14:21  slim       getJiraIssue: compressed 118,203 B → 29,412 B (−75.1%)
-14:33  guard      take_screenshot: path outside the project
-14:40  compact    manual 412k → 38k
-```
+- **Without band:** `l: Log` or `/fnd-log` opens fnd's pane (`fnd-log`) with fnd's lines and slim's,
+  and where nothing draws a pane `/fnd-log` answers with the log as text.
+- **With band:** `/fnd-log` answers `band draws the panes now: /band-log`; `/band-log` shows band's,
+  fnd's and slim's lines together.
 
-The time is local `HH:MM`; the kind is dim. A line too long for the pane continues on the next row,
-under its own text column, on the terminal and the desktop alike. When the pane is shorter than the
-log, its first line reads `… 12 earlier` and the newest lines fill the rest, wrapped rows counted.
-Where nothing draws a pane — a cloud session (the browser at claude.ai/code, the Desktop app's
-cloud sessions), the VS Code chat panel, `claude -p` — `/fnd-log` answers with the log as text
-instead, one line per event, and the `Log` button is not there to press.
+fnd's lines:
 
 | Kind | Written when | Text |
 |---|---|---|
-| `session` | The module starts (launch and reload), on a resume or fork, and on `/clear` | `start`, `resume`, `fork`, `clear` (a resume can log both `start` and `resume`) |
-| `model` | A `/model` switch to another model | The full model id, `claude-opus-5-5` |
-| `compact` | A compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them. One line per compaction, whichever of its two reports (the `session.compact` chain, the `PostCompact` event) arrives first |
-| `rate` | A rate window first reaches 90 % | The alarm toast's text, `5h window: 92% used, resets in 1h 05m` |
+| `session` | Without band (see below): the module starts (launch and reload), on a resume or fork, and on `/clear` | `start`, `resume`, `fork`, `clear` (a resume can log both `start` and `resume`) |
+| `model` | Without band (see below): a `/model` switch to another model | The full model id, `claude-opus-5-5` |
+| `compact` | Without band (see below): a compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them. One line per compaction, whichever of its two reports (the `session.compact` chain, the `PostCompact` event) arrives first |
+| `rate` | Without band (see below): a rate window first reaches 90 % | The alarm toast's text, `5h window: 92% used, resets in 1h 05m` |
 | `workspace` | The resolved task workspace differs from the last one logged (re-resolving the same one after `/clear` logs nothing) | The work id, or `none` |
-| `slim` | The module slims an MCP result and finds its savings figure, on the main thread or in a subagent | The tool (the part after the last `__`) and the figure without its `fnd-mcp-slim:` prefix. A subagent's line starts with its agent type (`fnd:` dropped, `agent` when the engine does not list it): `jira-reader · getJiraIssue: compressed …` |
+| `slim` | The module slims an MCP result and finds its savings figure, on the main thread or in a subagent | The tool (the part after the last `__`) and the figure without its `fnd-mcp-slim:` prefix. A subagent's line starts with its agent type (`fnd:` dropped, `agent` when the engine does not list it): `jira-reader · getJiraIssue: compressed …`. The pane shows it as `fnd-slim` once slim has lines of its own |
 | `prompt` | A pasted JSON prompt is rewritten and accepted | The toast's figure without its `fnd-prompt-slim:` prefix |
 | `guard` | The scratch-path guard refuses a tool call | The tool (the part after the last `__`) and the first line of the reason without the guard's own prefix |
 
-At 200 lines the oldest `slim` or `prompt` line makes room first, so a session busy with MCP calls keeps its rarer lines.
-The log lives in the session's state only: nothing is written to disk, and a new launch starts empty.
-`/clear` keeps the lines and adds `session clear` where the conversation restarted.
-Toasts are unchanged by it, and `FND_SLIM_TOAST=0` silences a savings toast without dropping its line.
-`FND_EVENT_LOG=0` records nothing.
+With band loaded the first four are band's lines in `band.events`, with the same texts, and band does
+not show those kinds from fnd's list. fnd stops writing them once it reads `band.info`, which band
+writes at its own session start, so an fnd hook that runs first may still log `session start` once. At 200 lines the oldest `slim` or `prompt` line makes room first,
+so a session busy with MCP calls keeps its rarer lines. The log lives in the session's state only:
+nothing is written to disk, and a new launch starts empty. `FND_SLIM_TOAST=0` silences a savings toast
+without dropping its line. `FND_EVENT_LOG=0` records none of fnd's lines; band's are `BAND_EVENT_LOG`'s.
 
 ### Scratch-path guard on the tool call
 
@@ -1931,7 +1883,9 @@ toast says so: `fnd-prompt-slim: 25,072 B → 12,522 B (−50.1%), 1/1 stubbed`.
 - **Users:** install `fnd@domaine` as in [Install](#claude-code--from-the-published-git-marketplace-team-use).
   The module loads in the terminal CLI and in the desktop app's Code tab. There is nothing to
   configure and no env entry to add. `/plugin disable fnd@domaine` turns it off with the rest of
-  the plugin, and `statusBand` (below) hides only the band.
+  the plugin, and `statusBand` (below) hides only fnd's band. With `band@domaine` installed too, band
+  draws the band and the panes and fnd's module stands down on them by itself; band's own switch is
+  its `disabled` option ([plugins/band/README.md](plugins/band/README.md#settings-userconfig)).
 - **Development only:** `claude --plugin-dir plugins/fnd` loads the checkout for one terminal
   session, which watches it and reloads on save. A desktop session cannot take that flag. There,
   `CLAUDE_CODE_PLUGIN_DIRS` (an absolute path) plus `CLAUDE_CODE_PLUGIN_DIR_WATCH=1`, both in the
@@ -1942,17 +1896,22 @@ toast says so: `fnd-prompt-slim: 25,072 B → 12,522 B (−50.1%), 1/1 stubbed`.
   sandbox copy before installing a release that carries the module, or you get two bands and
   double hooks.
 - `claude plugin validate --strict plugins/fnd` and `claude plugin test plugins/fnd` (wrapped by
-  `tests/mods-sim.sh`) check the module without a session.
+  `tests/mods-sim.sh`, which runs both for every plugin, band included) check the module without a
+  session.
 
 ### Mods settings (userConfig)
 
 Two fields in `plugin.json` → `userConfig`. The engine documents them as rows in `/config`; where
 they appear is still a live check. They are stored in
-`~/.claude/settings.json` → `pluginConfigs`, and a change reloads the module.
+`~/.claude/settings.json` → `pluginConfigs`, and a change reloads the module. Both stay fnd's until
+fnd's copy of the band is removed, and both govern fnd's band only: while the band plugin is loaded,
+fnd draws nothing whatever `statusBand` says, and the band's TTL comes from band's own `cacheTtl`.
+band's settings (`disabled`, `cacheTtl`) are in
+[plugins/band/README.md](plugins/band/README.md#settings-userconfig).
 
 | Field | Default | Effect |
 |---|---|---|
-| `statusBand` | `true` | `false` draws no band. The panes, `/fnd-progress`, `/fnd-log`, the guard, slimming and the pasted-JSON rewrite keep working. |
+| `statusBand` | `true` | `false` draws no fnd band. The panes, `/fnd-progress`, `/fnd-log`, the guard, slimming and the pasted-JSON rewrite keep working, and the session marker is still written. Ignored while the band plugin is loaded. |
 | `cacheTtl` | `auto` | The prompt-cache TTL behind the countdown. `auto` learns it from the session: a `/model` switch reports it, and a subagent result with 1 h cache writes proves 1 h. A learned 1 h is remembered across sessions; a reported 5 min is not (the host reports 5 min before it has seen a 1 h cache write, so remembered it would outlive the session that made it). Until then the estimate is 1 h on a claude.ai account and 5 min when the session bills an API key or a cloud provider (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` present in the session's environment; only their presence is read). Rate-limit windows arriving also mean a subscription, so they set 1 h too, over the default and over a remembered value, and a 5 min report on a subscription is ignored. A subscription in overage drops to 5 min, which the band cannot see; the cache segment is hidden while a window is at 100 %. `5m` or `1h` forces it. |
 
 ### Fallbacks and other hosts
@@ -1972,8 +1931,10 @@ they appear is still a live check. They are stored in
   environment (the shell and `settings.json` → `env`). A value set only in `~/.config/domaine/env` reaches just the spawned `.cjs`, which then
   allows or emits nothing, so the effect is the same one spawn later. See the three rows in
   [Environment switches](#environment-switches).
-- The context monitor (`FND_CTX_MONITOR`) still runs, so its warning and the band's ctx figure
-  both show. `FND_CTX_MONITOR=0` silences the monitor if the band is enough.
+- The classic context monitor (`FND_CTX_MONITOR`) stays wired. It is silent while a session marker is
+  fresh — band writes it while it draws, fnd's module when band is not installed — and speaks again
+  when the marker goes stale (the module no longer loads) or when band is installed with
+  `disabled: true`, which writes none.
 - **Cursor, Codex CLI and OpenCode do not load the module.** Their manifests name their own hook
   files (`hooks/hooks-cursor.json`, `hooks/hooks-codex.json`), and OpenCode loads only
   `opencode/fnd-plugin.js`. Three shared changes reach them: `mcp-slim.cjs` passes its own output
