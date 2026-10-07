@@ -1,9 +1,15 @@
-// slim hooks module: MCP tool results through slim's core, and the line it draws under them.
+// slim hooks module: tool results through slim's core, the lookup tool, and the lines slim draws.
 import type { Register } from 'claude-code'
-import { registerMcp } from './mcp.ts'
+import { registerDescribe } from './describe.ts'
+import { registerInfo } from './info.ts'
+import { registerIntake } from './intake.ts'
+import { registerLookup } from './lookup.ts'
 import { registerRender } from './render.tsx'
 
 export const register: Register = (on) => {
-  registerMcp(on)
+  registerIntake(on)
+  registerLookup(on)
+  registerDescribe(on)
+  registerInfo(on)
   registerRender(on)
 }

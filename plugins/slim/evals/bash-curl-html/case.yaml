@@ -1,0 +1,33 @@
+schema_version: "1.0"
+name: bash-curl-html
+description: A curl of a ~60 KB HTML page through Bash reaches the model as html-slim text (title, links, script list) without inline styles.
+runs: 1
+context:
+  scaffold_script: scaffold.sh
+execution:
+  prompt: "Run `curl -s file://$PWD/page.html` with the Bash tool (do not use Read) and tell me the page title and how many external scripts the page loads."
+  max_turns: 6
+  timeout_seconds: 300
+  allowed_tools: [Bash]
+graders:
+  - name: used-bash
+    type: tool_used
+    tool: Bash
+    min: 1
+    arm: both
+  - name: html-evidence
+    type: regex
+    target: trace
+    pattern: 'scripts \(6\):|slim: compressed'
+    arm: with-only
+  - name: style-dropped
+    type: regex
+    target: trace
+    match: not_contains
+    pattern: 'SENTINEL-STYLE-9Q'
+    arm: with-only
+  - name: judge
+    type: llm
+    focus: last_message
+    arm: both
+    criteria: "The answer gives the title 'Northwind Ceramics — Spring Catalogue' and says the page loads 6 external scripts."

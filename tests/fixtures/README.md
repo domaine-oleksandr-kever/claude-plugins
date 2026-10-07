@@ -29,3 +29,19 @@ Anything smaller drops the excerpt's ratio to ~0.3 and the assertions with it. T
 
 `../parity/fixtures/smart_crusher/` holds Headroom's 17 SmartCrusher parity fixtures (vendored
 verbatim, Apache-2.0 — see `../parity/NOTICE`); they are the array-crush porting contract.
+
+## slim channel fixtures
+
+Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs` and the per-channel rows of
+`../slim-fixtures.mjs`. All synthetic; none is derived from third-party content.
+
+| File | Source | Shape | Notes |
+|---|---|---|---|
+| `page.html` | **synthetic** — `plugins/slim/evals/_shared/make-page.cjs` | ~60 KB storefront page: 40-link nav, article (h1–h3, lists, a table, `pre`), 30 distinct article links plus repeats, 6 `<script src>`, an inline style carrying `SENTINEL-STYLE-9Q`, an inline script, an svg, a footer | the html engine (~68% saved) and the Bash curl / WebFetch rows; `slim-engines.mjs` EF holds it equal to the generator's output |
+| `app.log` | **synthetic** — `plugins/slim/evals/_shared/make-log.cjs` | 2000-line application log, mixed levels, repeated warnings, six ERROR lines and a `java.lang.IllegalStateException` with an 8-frame trace at line 1412 | the log engine (every error and the whole trace kept, ` ×N` dedupe); EF holds it equal to the generator's output |
+| `test-output.txt` | **synthetic** — hand-written jest run | 8 suites, one failing assertion with its code frame, console noise, the `Tests:` totals | must stay untouched: the test-output guard sends it to the plain-text window only, and only above `SLIM_PLAIN_BYTES` |
+| `git-diff.txt` | **synthetic** — hand-written | 15 file diffs, the first an HTML/Liquid hunk with `<head` in its first 2 KB | must stay untouched (the diff guard runs before the html rule) |
+
+The 300 KB Read row and the eval's `orders.json` come from `plugins/slim/evals/_shared/make-orders.cjs`
+at run time; nothing of that size is committed.
+

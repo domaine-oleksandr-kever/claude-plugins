@@ -11,8 +11,9 @@ See [Install — four hosts](#install--four-hosts).
 The repo is a marketplace (`domaine`, `.claude-plugin/marketplace.json`) that holds two plugins.
 `plugins/fnd` is the Foundation plugin this README describes: skills, agents, scripts, classic
 hooks and the Claude Code hooks module. `plugins/slim` is the universal tool-result compression
-proxy: one Claude Code mod that compresses MCP tool results today (Bash, Read, WebFetch and Agent
-results are planned); while fnd compresses too, slim stands down on what fnd already slimmed.
+proxy: one Claude Code mod that compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and
+Agent results by content, plus a `lookup` tool that answers one question about a page, command or
+file; while fnd compresses MCP results too, slim stands down on what fnd already slimmed.
 `tests/` covers both, and `tests/mods-sim.sh` validates and tests
 every `plugins/*/hooks/hooks.json` module.
 
@@ -29,6 +30,8 @@ in its own subfolder under `plugins/`:
 ├── .claude-plugin/
 │   └── marketplace.json         # marketplace catalog (lists the plugins)
 ├── plugins/
+│   ├── slim/                     # the tool-result compression proxy (Claude Code only;
+│   │                             #   plugins/slim/README.md)
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # plugin manifest (+ bundled mcpServers) — canonical
@@ -102,6 +105,9 @@ in its own subfolder under `plugins/`:
 │   ├── bootstrap-sim.sh             #  bootstrap: arg gates, clone, pty picker, uninstall
 │   ├── adf-md-fixtures.mjs          #  ADF ↔ markdown converter fixtures
 │   ├── json-slim-fixtures.mjs       #  mcp-slim pipeline + CLI + hook fixtures
+│   ├── slim-engines.mjs             #  slim's engine library as pure functions + its contract
+│   ├── html-slim-fixtures.mjs       #  slim's HTML engine
+│   ├── slim-fixtures.mjs            #  slim's delivery: every channel end to end
 │   ├── mods-sim.sh                  #  hooks module: validate --strict + plugin test (SKIP without claude)
 │   ├── readme-checks.sh             #  README/docs: commands, paths, links, version markers
 │   ├── fixtures/                    #  real captured payloads (secrets scrubbed)
@@ -239,8 +245,9 @@ Review the source, then confirm to add it to your trusted marketplaces. To make
 it trusted for a whole team without each person confirming, an admin can
 predeclare it in managed settings under `extraKnownMarketplaces`.
 
-`/plugin install slim@domaine` installs the second plugin, which compresses MCP tool results
-(Claude Code only; see [plugins/slim/README.md](plugins/slim/README.md)).
+`/plugin install slim@domaine` installs the second plugin, which compresses large tool results —
+MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and Agent — and adds a `lookup` tool (Claude Code
+only; see [plugins/slim/README.md](plugins/slim/README.md)).
 
 ### Claude Code — local development (from this folder on disk)
 
@@ -1608,16 +1615,26 @@ because the script that reads it is the same single copy on all four hosts.
 | `CLAUDE_CODE_SESSION_ID` | set by Claude Code | *read, not set by fnd*: scopes `FND_WHALE_GUIDE`'s one-shot state and `FND_NOGAIN_MEMO`'s no-gain memo to the conversation, so a new session sees the full guidance block — and the declined body — again. Absent (a bare shell) ⇒ both are keyed on the file path alone and the 2 h expiry bounds them |
 | `CLAUDE_PROJECT_DIR` | set by Claude Code | *read, not set by fnd*: its basename becomes the `project` tag on a debug line only when the invocation's cwd has no `.git` ancestor — the `.git` walk wins because Claude Code exports this variable to hooks but not to the Bash tool; no ancestor and unset ⇒ that cwd's basename |
 | `CLAUDE_PLUGIN_ROOT` / `PLUGIN_ROOT` | set by the host | *read, not set by fnd*: where a hook **wiring** file finds the bundled scripts and session-convention markdown. Claude Code and Cursor set `CLAUDE_PLUGIN_ROOT`; Codex sets `PLUGIN_ROOT` plus `CLAUDE_PLUGIN_ROOT` as a compatibility alias, and `hooks/hooks-codex.json` prefers the alias with a fallback to `PLUGIN_ROOT`. Hook **scripts** never trust either one for guard logic — they resolve their own bundled paths from `__dirname` / their own `dirname`, because Cursor leaks the variable between concurrent plugins' hooks and Claude Code has a source-vs-cache inconsistency |
-| `SLIM_MCP` | `1` | **slim plugin.** `0` turns slim's MCP compression off: its hooks module hands every MCP result through untouched, spawns nothing and writes no report line. Read through the module's `$.env` (session environment only). **Host divergence: Claude Code only.** |
+| `SLIM_MCP` | `1` | **slim plugin.** `0` turns slim's MCP compression off: its hooks module hands every MCP result through untouched, spawns nothing and writes no report line. Read through the module's `$.env` (session environment only). With fnd's `FND_COMPRESSION=proxy`, a `0` here makes fnd keep compressing MCP results itself. **Host divergence: Claude Code only.** |
+| `SLIM_BASH` | `1` | **slim plugin.** `0` turns slim's Bash channel off (stdout of large JSON, HTML-fetch, log and plain-text outputs); no spawn, no report line. Read by the module only. |
+| `SLIM_READ` | `1` | **slim plugin.** `0` turns slim's Read channel off (whole-file reads of big `.log`/`.jsonl`/`.ndjson` files and of `.json` data files the host cut at its token cap). Read by the module only. |
+| `SLIM_WEB` | `1` | **slim plugin.** `0` turns slim's WebFetch and WebSearch channels off. Read by the module only. |
+| `SLIM_GREP` | `1` | **slim plugin.** `0` turns slim's Grep and Glob channels off (the listing window; the counts are never changed either way). Read by the module only. |
+| `SLIM_AGENT` | `1` | **slim plugin.** `0` turns slim's Agent channel off (the window over a completed subagent's long report). Read by the module only. |
+| `SLIM_PLAIN_BYTES` | `65536` | **slim plugin.** Size above which slim windows plain text — code, diffs, test output, prose — to its head and tail with a hidden-lines marker and a `<<full=` handle; below it plain text passes byte-identical. About twice Bash's 30,000-character inline cap, so anything the host would show inline is never touched. A whole number, floored at 8,192; anything else → the default. Read by the module and the core. |
 | `SLIM_DIR` | `FND_MCP_SLIM_DIR`, else the system temp dir | **slim plugin.** Spill root for original copies, stub payloads and the shared report log `fnd-mcp-slim-debug.log`. With fnd installed leave it unset or equal to `FND_MCP_SLIM_DIR` — fnd trusts `<<full=` handles only there and in system temp. |
-| `SLIM_TTL` | `24` | **slim plugin.** Hours a spill file lives before slim's sweep removes it; `0` stops slim's sweeps. The sweep marker is shared with fnd, so the shorter TTL wins. Falls back to `FND_MCP_SLIM_TTL`. |
-| `SLIM_DEBUG` | off | **slim plugin.** `1` writes one report line per MCP call slim handles; `2` adds the size-gate and already-slim passthroughs. Error lines are written at every level. Falls back to `FND_MCP_SLIM_DEBUG`. |
-| `SLIM_STUB` | `1` | **slim plugin.** `0` turns slim's spill-and-stub guard off; a host-overflow result is still stubbed. |
+| `SLIM_TTL` | `24` | **slim plugin.** Hours a spill file lives before slim's sweep removes it; `0` stops slim's sweeps. The sweep prunes only the names slim writes (`fnd-mcp-slim-*`, `fnd-crush-*`, `fnd-jsx-ids-*`) and keeps its own throttle marker (`.slim-sweep`). fnd writes the same names, so while `FND_MCP_SLIM_TTL` is set the longer of the two TTLs wins, and a `0` in either stops slim's sweep. |
+| `SLIM_DEBUG` | off | **slim plugin.** `1` writes one report line per call slim handles, on every channel; `2` adds the module's stand-downs (MCP size-gate, already-slim, plain-gate, read-guard, …) and the attachment probe line. Error lines and lookup lines are written at every level. Falls back to `FND_MCP_SLIM_DEBUG`. |
+| `SLIM_STUB` | `1` | **slim plugin.** `0` turns slim's spill-and-stub guard off for MCP results; a host-overflow result is still stubbed. |
 | `SLIM_STUB_BYTES` | `32768` | **slim plugin.** Payload size above which an incompressible or weakly compressed result becomes a stub (whole bytes, floored at 1,200; anything else → the default). |
 | `SLIM_BUDGET_MS` | `5000` | **slim plugin.** Wall-clock ceiling for one compression in ms; `0` removes it; past it the result passes through or is stubbed. |
-| `SLIM_TOAST` | `1` | **slim plugin.** `0` silences the savings toast (main conversation only); compression and the ToolResult line are untouched. **Host divergence: Claude Code only.** |
+| `SLIM_TOAST` | `1` | **slim plugin.** `0` silences the savings toast, which slim shows for MCP results on the main conversation only; compression, the ToolResult line and the ToolGroup suffix are untouched. **Host divergence: Claude Code only.** |
 | `SLIM_TOAST_MS` | `5000` | **slim plugin.** How long the savings toast stays, in ms (whole number, floored at 1,000). |
 | `SLIM_EVENT_LOG` | `1` | **slim plugin.** `0` stops writing the `slim.events` state other plugins read; the ToolResult line still draws. |
+| `SLIM_LOOKUP` | `1` | **slim plugin.** `0` removes the `mcp__slim__lookup` tool, the one-sentence pointer to it in the Bash and WebFetch tool descriptions, and the lookup hint line together. |
+| `SLIM_LOOKUP_MODEL` | `haiku` | **slim plugin.** Model the lookup tool asks its one question with — an alias or a model id, checked like `--model`. Every lookup writes its model and token usage to the report log at every debug level. |
+| `SLIM_HINT` | `1` | **slim plugin.** `0` drops the one line slim adds to an HTML page it compressed from a Bash fetch (`slim hint: for one fact about this page, call mcp__slim__lookup(…)`). |
+| `SLIM_CURL` | unset | **slim plugin.** `deny` refuses a bare `curl <url>` in Bash with a pointer to the lookup tool and WebFetch; a curl with a pipe, an output file or headers is never refused. Any other value does nothing. |
 
 ## Mods (Claude Code function hooks)
 

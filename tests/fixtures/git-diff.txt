@@ -1,0 +1,280 @@
+diff --git a/layout/theme.liquid b/layout/theme.liquid
+index 3f2a1c0..9b7e4d2 100644
+--- a/layout/theme.liquid
++++ b/layout/theme.liquid
+@@ -4,9 +4,11 @@
+   <head>
+     <meta charset="utf-8">
+     <meta name="viewport" content="width=device-width,initial-scale=1">
+-    <link rel="preconnect" href="https://cdn.shopify.com">
++    <link rel="preconnect" href="https://cdn.shopify.com" crossorigin>
++    <link rel="preload" href="{{ 'theme.css' | asset_url }}" as="style">
+     <title>{{ page_title }}</title>
+   </head>
+   <body class="template-{{ template.name }}">
+diff --git a/assets/component-0.js b/assets/component-0.js
+index f4240..1e8480 100644
+--- a/assets/component-0.js
++++ b/assets/component-0.js
+@@ -10,12 +10,14 @@ class Component0 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-1.js b/assets/component-1.js
+index f612f..201d99 100644
+--- a/assets/component-1.js
++++ b/assets/component-1.js
+@@ -11,12 +11,14 @@ class Component1 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-2.js b/assets/component-2.js
+index f801e..21b6b2 100644
+--- a/assets/component-2.js
++++ b/assets/component-2.js
+@@ -12,12 +12,14 @@ class Component2 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-3.js b/assets/component-3.js
+index f9f0d..234fcb 100644
+--- a/assets/component-3.js
++++ b/assets/component-3.js
+@@ -13,12 +13,14 @@ class Component3 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-4.js b/assets/component-4.js
+index fbdfc..24e8e4 100644
+--- a/assets/component-4.js
++++ b/assets/component-4.js
+@@ -14,12 +14,14 @@ class Component4 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-5.js b/assets/component-5.js
+index fdceb..2681fd 100644
+--- a/assets/component-5.js
++++ b/assets/component-5.js
+@@ -15,12 +15,14 @@ class Component5 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-6.js b/assets/component-6.js
+index ffbda..281b16 100644
+--- a/assets/component-6.js
++++ b/assets/component-6.js
+@@ -16,12 +16,14 @@ class Component6 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-7.js b/assets/component-7.js
+index 101ac9..29b42f 100644
+--- a/assets/component-7.js
++++ b/assets/component-7.js
+@@ -17,12 +17,14 @@ class Component7 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-8.js b/assets/component-8.js
+index 1039b8..2b4d48 100644
+--- a/assets/component-8.js
++++ b/assets/component-8.js
+@@ -18,12 +18,14 @@ class Component8 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-9.js b/assets/component-9.js
+index 1058a7..2ce661 100644
+--- a/assets/component-9.js
++++ b/assets/component-9.js
+@@ -19,12 +19,14 @@ class Component9 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-10.js b/assets/component-10.js
+index 107796..2e7f7a 100644
+--- a/assets/component-10.js
++++ b/assets/component-10.js
+@@ -20,12 +20,14 @@ class Component10 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-11.js b/assets/component-11.js
+index 109685..301893 100644
+--- a/assets/component-11.js
++++ b/assets/component-11.js
+@@ -21,12 +21,14 @@ class Component11 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-12.js b/assets/component-12.js
+index 10b574..31b1ac 100644
+--- a/assets/component-12.js
++++ b/assets/component-12.js
+@@ -22,12 +22,14 @@ class Component12 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();
+diff --git a/assets/component-13.js b/assets/component-13.js
+index 10d463..334ac5 100644
+--- a/assets/component-13.js
++++ b/assets/component-13.js
+@@ -23,12 +23,14 @@ class Component13 extends HTMLElement {
+     const value0 = this.querySelector('[data-part="0"]');
+     const value1 = this.querySelector('[data-part="1"]');
+-    const value2 = this.querySelector('[data-part="2"]');
++    this.abortController?.abort();
+     const value4 = this.querySelector('[data-part="4"]');
+     const value5 = this.querySelector('[data-part="5"]');
+     const value6 = this.querySelector('[data-part="6"]');
+-    const value7 = this.querySelector('[data-part="7"]');
++    this.abortController?.abort();
+     const value9 = this.querySelector('[data-part="9"]');
+     const value10 = this.querySelector('[data-part="10"]');
+     const value11 = this.querySelector('[data-part="11"]');
+-    const value12 = this.querySelector('[data-part="12"]');
++    this.abortController?.abort();

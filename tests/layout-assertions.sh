@@ -647,5 +647,60 @@ for f in "$UC" "$PLUGIN_DIR/rules/fnd-untrusted-content.mdc"; do
   else bad "uc-prompt-spill-$(basename "$f")" "$(basename "$f") does not name the prompt spill dirs as real handles"; fi
 done
 
+# ------------------------------------------------------- slim: engines vs delivery + evals --
+# The engines are an embeddable library: a file under engines/ that reaches the process, the
+# filesystem, the network or a timer is no longer requirable from a plain Node program, so the
+# boundary is held here by grep. CONTRACT.md is excluded — its microservice example uses `http`.
+SLIM_DIR_P="$ROOT/plugins/slim"
+ENGINES="$SLIM_DIR_P/scripts/engines"
+for f in "$ENGINES/index.cjs" "$ENGINES/CONTRACT.md" "$ENGINES/html.cjs" \
+         "$SLIM_DIR_P/scripts/delivery/channels.cjs" \
+         "$ROOT/tests/slim-engines.mjs" "$ROOT/tests/html-slim-fixtures.mjs"; do
+  if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
+done
+impure="$(grep -rnE --include='*.cjs' "\bprocess\.|require\(['\"](node:)?(fs|fs/promises|os|child_process|net|http|https|worker_threads|readline)['\"]\)|\bset(Timeout|Interval|Immediate)\b|\bglobalThis\b" "$ENGINES" 2>/dev/null)"
+if [ -z "$impure" ]; then ok
+else bad slim-engines-purity "engines/ reaches the host: $(printf '%s' "$impure" | head -3 | sed "s#$ROOT/##" | tr '\n' ' ')"; fi
+# the only modules an engine may load are crypto and its siblings
+foreign="$(grep -rnoE --include='*.cjs' "require\(['\"][^'\"]*['\"]\)" "$ENGINES" 2>/dev/null |
+           grep -vE "require\(['\"](node:)?crypto['\"]\)$|require\(['\"]\./[A-Za-z0-9_-]+(\.cjs)?['\"]\)$")"
+if [ -z "$foreign" ]; then ok
+else bad slim-engines-requires "engines/ requires beyond crypto + siblings: $(printf '%s' "$foreign" | head -3 | sed "s#$ROOT/##" | tr '\n' ' ')"; fi
+
+# Every eval case is a directory the owner's `claude plugin eval plugins/slim` run picks up: its
+# case.yaml names itself, and a scaffold it names must exist, be runnable and reach a generator
+# that exists. The mocked Jira server answers with the committed fixture, byte for byte.
+EVALS="$SLIM_DIR_P/evals"
+for c in read-big-json bash-curl-html bash-log mcp-jql lookup-one-fact; do
+  y="$EVALS/$c/case.yaml"
+  [ -f "$y" ] || { bad "eval-$c" "plugins/slim/evals/$c/case.yaml missing"; continue; }
+  if grep -qE '^schema_version: "1\.[0-9]+"$' "$y" && grep -qxF "name: $c" "$y"; then ok
+  else bad "eval-$c-head" "case.yaml lacks schema_version \"1.x\" or 'name: $c'"; fi
+  if grep -qE '^graders:$' "$y" && grep -qE '^ +type: llm$' "$y"; then ok
+  else bad "eval-$c-graders" "case.yaml has no graders list or no llm grader"; fi
+  sc="$(sed -n 's/^  scaffold_script: *//p' "$y")"
+  [ -n "$sc" ] || continue
+  if [ -x "$EVALS/$c/$sc" ]; then ok; else bad "eval-$c-scaffold" "$c/$sc missing or not executable"; fi
+  gen="$(grep -oE '_shared/[A-Za-z0-9_-]+\.cjs' "$EVALS/$c/$sc" 2>/dev/null | head -1)"
+  if [ -n "$gen" ] && [ -f "$EVALS/$gen" ]; then ok
+  else bad "eval-$c-generator" "$c/$sc names no generator under evals/_shared/ that exists ('$gen')"; fi
+done
+mock_check="$("$NODE_BIN" -e '
+  const fs = require("fs"), path = require("path");
+  const [dir, fixture] = process.argv.slice(1);
+  let listing;
+  try { listing = JSON.parse(fs.readFileSync(path.join(dir, "_tools.json"), "utf8")); } catch (e) { console.log("_tools.json: " + e.message); process.exit(0); }
+  for (const t of listing.tools || []) {
+    const f = path.join(dir, t.name + ".md");
+    if (!fs.existsSync(f)) { console.log("no responder for " + t.name); continue; }
+    const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(fs.readFileSync(f, "utf8"));
+    if (!m || !/^type: fixed$/m.test(m[1])) { console.log(t.name + ".md is not a type: fixed responder"); continue; }
+    if (m[2].trim() !== fs.readFileSync(fixture, "utf8").trim()) console.log(t.name + ".md body != " + path.basename(fixture));
+  }
+' "$EVALS/mocks/atlassian" "$ROOT/tests/fixtures/jql-search-ELC.json" 2>&1)"
+if [ -z "$mock_check" ]; then ok; else bad eval-mock-atlassian "$mock_check"; fi
+if grep -qxF 'plugins/slim/evals/results/' "$ROOT/.gitignore"; then ok
+else bad eval-results-ignored ".gitignore does not ignore plugins/slim/evals/results/ (eval runs write there)"; fi
+
 echo "layout-assertions: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

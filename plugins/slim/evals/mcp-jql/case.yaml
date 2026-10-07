@@ -1,0 +1,25 @@
+schema_version: "1.0"
+name: mcp-jql
+description: A mocked Jira JQL search (110 KB) reaches the model compressed by slim's MCP channel, and the issue order survives.
+runs: 1
+execution:
+  prompt: "Use the searchJiraIssuesUsingJql tool with jql `project = ELC ORDER BY updated DESC` and list the keys of the first three issues it returns."
+  max_turns: 6
+  timeout_seconds: 300
+  allowed_tools: [mcp__atlassian__searchJiraIssuesUsingJql]
+graders:
+  - name: used-tool
+    type: tool_used
+    tool: mcp__atlassian__searchJiraIssuesUsingJql
+    min: 1
+    arm: both
+  - name: slim-evidence
+    type: regex
+    target: trace
+    pattern: 'slim: compressed'
+    arm: with-only
+  - name: judge
+    type: llm
+    focus: last_message
+    arm: both
+    criteria: "The answer lists exactly ELC-633, ELC-686 and ELC-113, in that order."

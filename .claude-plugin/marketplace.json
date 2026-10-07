@@ -16,7 +16,7 @@
     {
       "name": "slim",
       "source": "./plugins/slim",
-      "description": "Universal tool-result compression proxy for Claude Code — compresses MCP tool results today; Bash, Read, WebFetch and Agent channels are planned.",
+      "description": "Universal tool-result compression proxy for Claude Code — compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and Agent results by content (JSON, logs, HTML, plain-text windows) and adds a lookup tool that answers one question about a page, command or file.",
       "license": "MIT"
     }
   ]

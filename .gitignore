@@ -17,3 +17,6 @@ npm-debug.log*
 
 # Work-in-progress planning notes (kept untracked on purpose)
 AGENTS_PLAN.md
+
+# claude plugin eval output (local runs on the owner's credential)
+plugins/slim/evals/results/

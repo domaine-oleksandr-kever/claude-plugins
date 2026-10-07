@@ -30,6 +30,10 @@ function world(on: On, core = answer(30_000)) {
     const { Text } = $.ui.resolve(e)
     return <Text>engine row</Text>
   })
+  on('ui.render', { component: 'ToolGroup' }, async ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>Ran 3 shell commands</Text>
+  })
   return ids
 }
 
@@ -72,10 +76,49 @@ describe('ToolResult line', () => {
       expect(await shown(await mount($, surface, ids[0]!, { isErrored: true }))).toEqual(['engine row'])
     })
 
-    test(`${surface}: R5 a non-MCP tool → only the engine's row`, async ($, on) => {
+    test(`${surface}: R5 a Bash row with a member draws the line too`, async ($, on) => {
       const ids = world(on)
       await $.tool.call({ tool: TOOL } as any)
-      expect(await shown(await mount($, surface, ids[0]!, { tool: 'Read' }))).toEqual(['engine row'])
+      const texts = await shown(await mount($, surface, ids[0]!, { tool: 'Bash' }))
+      expect(texts[0]).toBe('engine row')
+      expect(texts[1]).toMatch(LINE)
+    })
+  }
+})
+
+const call = (id: string | undefined) => ({ ...(id ? { tool_use_id: id } : {}), tool: 'Bash', input: { command: 'x' }, isRunning: false, isErrored: false, isInterrupted: false })
+const group = ($: any, surface: string, calls: unknown[], isExpanded = false) =>
+  $.ui.mount({ plugin: 'slim', surface, component: 'ToolGroup', requestId: 'g1', props: { calls, isActive: false, isExpanded } })
+
+describe('ToolGroup line', () => {
+  for (const surface of SURFACES) {
+    test(`${surface}: G1 two compressed calls of three → the engine's line, then the count and the saving`, async ($, on) => {
+      const ids = world(on)
+      await $.tool.call({ tool: TOOL } as any)
+      await $.tool.call({ tool: TOOL } as any)
+      const ui = await group($, surface, [call(ids[0]), call('toolu_plain'), call(ids[1])])
+      expect(await shown(ui)).toEqual(['Ran 3 shell commands', ' · 2 compressed, −180 KB'])
+      const suffix = (await ui.findAll({ type: 'Text' }))[1]
+      expect(suffix?.props.dimColor).toBe(true)
+    })
+
+    test(`${surface}: G4 a window bigger than the host preview is not counted as compressed`, async ($, on) => {
+      const ids = world(on, answer(4_096, 2_300))
+      await $.tool.call({ tool: TOOL } as any)
+      expect(await shown(await group($, surface, [call(ids[0])]))).toEqual(['Ran 3 shell commands'])
+      expect((await shown(await mount($, surface, ids[0]!)))[1]).toBe('slim  json  2 KB → 4 KB  +78%')
+    })
+
+    test(`${surface}: G2 an expanded group → the engine's own`, async ($, on) => {
+      const ids = world(on)
+      await $.tool.call({ tool: TOOL } as any)
+      expect(await shown(await group($, surface, [call(ids[0])], true))).toEqual(['Ran 3 shell commands'])
+    })
+
+    test(`${surface}: G3 calls without a tool_use_id or a row → the engine's own`, async ($, on) => {
+      world(on)
+      await $.tool.call({ tool: TOOL } as any)
+      expect(await shown(await group($, surface, [call(undefined), call('toolu_other')]))).toEqual(['Ran 3 shell commands'])
     })
   }
 })

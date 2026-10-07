@@ -1,0 +1,1 @@
+{"tools":[{"name":"searchJiraIssuesUsingJql","description":"Search Jira issues with JQL","inputSchema":{"type":"object","properties":{"jql":{"type":"string"},"cloudId":{"type":"string"}},"required":["jql"]}}]}

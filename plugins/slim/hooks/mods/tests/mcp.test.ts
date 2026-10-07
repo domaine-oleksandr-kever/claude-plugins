@@ -96,7 +96,7 @@ describe('M1 a big result goes through the core', () => {
     expect(w.errors).toEqual([])
     const seen = await peek($, w.ids[0])
     expect(seen.events).toEqual([
-      { v: 1, atMs: 1_000_000, kind: 'slim', text: TEXT, src: 'slim', tool: TOOL, bytesIn: 120_030, bytesOut: 30_000, engine: 'json', ms: 12 },
+      { v: 1, atMs: 1_000_000, kind: 'slim', text: TEXT, src: 'slim', tool: TOOL, channel: 'mcp', bytesIn: 120_030, bytesOut: 30_000, engine: 'json', ms: 12 },
     ])
     expect(seen.row).toEqual({ engine: 'json', bytesIn: 120_030, bytesOut: 30_000 })
   })
@@ -165,10 +165,11 @@ describe('M3 passthrough without a spawn', () => {
     expect(w.runs.length).toBe(0)
   })
 
-  test('a non-MCP tool is not touched', async ($, on) => {
-    const w = world(on, { result: BIG, text: BIG })
-    expect((await $.tool.call({ tool: 'Read', file_path: '/repo/a' } as any)).result).toBe(BIG)
-    expect(w.runs.length).toBe(0)
+  test('a non-channel tool (Edit, 200 KB) never spawns', async ($, on) => {
+    const huge = 'e'.repeat(200_000)
+    const w = world(on, { result: huge, text: huge }, answer(), { SLIM_DEBUG: '2' })
+    expect((await $.tool.call({ tool: 'Edit', file_path: '/repo/a', old_string: 'a', new_string: 'b' } as any)).result).toBe(huge)
+    expect(w.runs.length + w.errors.length).toBe(0)
   })
 })
 

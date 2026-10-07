@@ -1,0 +1,480 @@
+> northwind-theme@2.4.0 test
+> jest --ci
+
+PASS src/components/cart-drawer/cart-drawer.test.ts
+  cart-drawer
+    ✓ renders the cart drawer state for case 1 (3 ms)
+    ✓ updates the cart drawer state for case 2 (10 ms)
+    ✓ announces the cart drawer state for case 3 (17 ms)
+    ✓ disables the cart drawer state for case 4 (24 ms)
+    ✓ restores the cart drawer state for case 5 (31 ms)
+    ✓ debounces the cart drawer state for case 6 (38 ms)
+    ✓ renders the cart drawer state for case 7 (5 ms)
+    ✓ updates the cart drawer state for case 8 (12 ms)
+    ✓ announces the cart drawer state for case 9 (19 ms)
+    ✓ disables the cart drawer state for case 10 (26 ms)
+    ✓ restores the cart drawer state for case 11 (33 ms)
+    ✓ debounces the cart drawer state for case 12 (40 ms)
+    ✓ renders the cart drawer state for case 13 (7 ms)
+    ✓ updates the cart drawer state for case 14 (14 ms)
+    ✓ announces the cart drawer state for case 15 (21 ms)
+    ✓ disables the cart drawer state for case 16 (28 ms)
+    ✓ restores the cart drawer state for case 17 (35 ms)
+    ✓ debounces the cart drawer state for case 18 (42 ms)
+    ✓ renders the cart drawer state for case 19 (9 ms)
+    ✓ updates the cart drawer state for case 20 (16 ms)
+    ✓ announces the cart drawer state for case 21 (23 ms)
+    ✓ disables the cart drawer state for case 22 (30 ms)
+    ✓ restores the cart drawer state for case 23 (37 ms)
+    ✓ debounces the cart drawer state for case 24 (4 ms)
+
+PASS src/components/product-form/product-form.test.ts
+  product-form
+    ✓ renders the product form state for case 1 (3 ms)
+    ✓ updates the product form state for case 2 (10 ms)
+    ✓ announces the product form state for case 3 (17 ms)
+    ✓ disables the product form state for case 4 (24 ms)
+    ✓ restores the product form state for case 5 (31 ms)
+    ✓ debounces the product form state for case 6 (38 ms)
+    ✓ renders the product form state for case 7 (5 ms)
+    ✓ updates the product form state for case 8 (12 ms)
+    ✓ announces the product form state for case 9 (19 ms)
+    ✓ disables the product form state for case 10 (26 ms)
+    ✓ restores the product form state for case 11 (33 ms)
+    ✓ debounces the product form state for case 12 (40 ms)
+    ✓ renders the product form state for case 13 (7 ms)
+    ✓ updates the product form state for case 14 (14 ms)
+    ✓ announces the product form state for case 15 (21 ms)
+    ✓ disables the product form state for case 16 (28 ms)
+    ✓ restores the product form state for case 17 (35 ms)
+    ✓ debounces the product form state for case 18 (42 ms)
+    ✓ renders the product form state for case 19 (9 ms)
+    ✓ updates the product form state for case 20 (16 ms)
+    ✓ announces the product form state for case 21 (23 ms)
+    ✓ disables the product form state for case 22 (30 ms)
+    ✓ restores the product form state for case 23 (37 ms)
+    ✓ debounces the product form state for case 24 (4 ms)
+
+FAIL src/components/variant-picker/variant-picker.test.ts
+  variant-picker
+    ✓ renders the variant picker state for case 1 (3 ms)
+    ✓ updates the variant picker state for case 2 (10 ms)
+    ✓ announces the variant picker state for case 3 (17 ms)
+    ✓ disables the variant picker state for case 4 (24 ms)
+    ✓ restores the variant picker state for case 5 (31 ms)
+    ✓ debounces the variant picker state for case 6 (38 ms)
+    ✓ renders the variant picker state for case 7 (5 ms)
+    ✕ updates the variant picker state for case 8 (12 ms)
+    ✓ announces the variant picker state for case 9 (19 ms)
+    ✓ disables the variant picker state for case 10 (26 ms)
+    ✓ restores the variant picker state for case 11 (33 ms)
+    ✓ debounces the variant picker state for case 12 (40 ms)
+    ✓ renders the variant picker state for case 13 (7 ms)
+    ✓ updates the variant picker state for case 14 (14 ms)
+    ✓ announces the variant picker state for case 15 (21 ms)
+    ✓ disables the variant picker state for case 16 (28 ms)
+    ✓ restores the variant picker state for case 17 (35 ms)
+    ✓ debounces the variant picker state for case 18 (42 ms)
+    ✓ renders the variant picker state for case 19 (9 ms)
+    ✓ updates the variant picker state for case 20 (16 ms)
+    ✓ announces the variant picker state for case 21 (23 ms)
+    ✓ disables the variant picker state for case 22 (30 ms)
+    ✓ restores the variant picker state for case 23 (37 ms)
+    ✓ debounces the variant picker state for case 24 (4 ms)
+
+  ● variant-picker › updates the variant picker state for case 8
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "gid://shopify/ProductVariant/42"
+    Received: "gid://shopify/ProductVariant/41"
+
+      140 |     picker.select("Colour", "Cobalt");
+      141 |     await flush();
+    > 142 |     expect(form.variantId).toBe("gid://shopify/ProductVariant/42");
+          |                            ^
+      143 |   });
+
+      at Object.<anonymous> (src/components/variant-picker/variant-picker.test.ts:142:28)
+
+
+PASS src/components/predictive-search/predictive-search.test.ts
+  predictive-search
+    ✓ renders the predictive search state for case 1 (3 ms)
+    ✓ updates the predictive search state for case 2 (10 ms)
+    ✓ announces the predictive search state for case 3 (17 ms)
+    ✓ disables the predictive search state for case 4 (24 ms)
+    ✓ restores the predictive search state for case 5 (31 ms)
+    ✓ debounces the predictive search state for case 6 (38 ms)
+    ✓ renders the predictive search state for case 7 (5 ms)
+    ✓ updates the predictive search state for case 8 (12 ms)
+    ✓ announces the predictive search state for case 9 (19 ms)
+    ✓ disables the predictive search state for case 10 (26 ms)
+    ✓ restores the predictive search state for case 11 (33 ms)
+    ✓ debounces the predictive search state for case 12 (40 ms)
+    ✓ renders the predictive search state for case 13 (7 ms)
+    ✓ updates the predictive search state for case 14 (14 ms)
+    ✓ announces the predictive search state for case 15 (21 ms)
+    ✓ disables the predictive search state for case 16 (28 ms)
+    ✓ restores the predictive search state for case 17 (35 ms)
+    ✓ debounces the predictive search state for case 18 (42 ms)
+    ✓ renders the predictive search state for case 19 (9 ms)
+    ✓ updates the predictive search state for case 20 (16 ms)
+    ✓ announces the predictive search state for case 21 (23 ms)
+    ✓ disables the predictive search state for case 22 (30 ms)
+    ✓ restores the predictive search state for case 23 (37 ms)
+    ✓ debounces the predictive search state for case 24 (4 ms)
+
+PASS src/components/quantity-input/quantity-input.test.ts
+  quantity-input
+    ✓ renders the quantity input state for case 1 (3 ms)
+    ✓ updates the quantity input state for case 2 (10 ms)
+    ✓ announces the quantity input state for case 3 (17 ms)
+    ✓ disables the quantity input state for case 4 (24 ms)
+    ✓ restores the quantity input state for case 5 (31 ms)
+    ✓ debounces the quantity input state for case 6 (38 ms)
+    ✓ renders the quantity input state for case 7 (5 ms)
+    ✓ updates the quantity input state for case 8 (12 ms)
+    ✓ announces the quantity input state for case 9 (19 ms)
+    ✓ disables the quantity input state for case 10 (26 ms)
+    ✓ restores the quantity input state for case 11 (33 ms)
+    ✓ debounces the quantity input state for case 12 (40 ms)
+    ✓ renders the quantity input state for case 13 (7 ms)
+    ✓ updates the quantity input state for case 14 (14 ms)
+    ✓ announces the quantity input state for case 15 (21 ms)
+    ✓ disables the quantity input state for case 16 (28 ms)
+    ✓ restores the quantity input state for case 17 (35 ms)
+    ✓ debounces the quantity input state for case 18 (42 ms)
+    ✓ renders the quantity input state for case 19 (9 ms)
+    ✓ updates the quantity input state for case 20 (16 ms)
+    ✓ announces the quantity input state for case 21 (23 ms)
+    ✓ disables the quantity input state for case 22 (30 ms)
+    ✓ restores the quantity input state for case 23 (37 ms)
+    ✓ debounces the quantity input state for case 24 (4 ms)
+
+PASS src/components/price-per-item/price-per-item.test.ts
+  price-per-item
+    ✓ renders the price per-item state for case 1 (3 ms)
+    ✓ updates the price per-item state for case 2 (10 ms)
+    ✓ announces the price per-item state for case 3 (17 ms)
+    ✓ disables the price per-item state for case 4 (24 ms)
+    ✓ restores the price per-item state for case 5 (31 ms)
+    ✓ debounces the price per-item state for case 6 (38 ms)
+    ✓ renders the price per-item state for case 7 (5 ms)
+    ✓ updates the price per-item state for case 8 (12 ms)
+    ✓ announces the price per-item state for case 9 (19 ms)
+    ✓ disables the price per-item state for case 10 (26 ms)
+    ✓ restores the price per-item state for case 11 (33 ms)
+    ✓ debounces the price per-item state for case 12 (40 ms)
+    ✓ renders the price per-item state for case 13 (7 ms)
+    ✓ updates the price per-item state for case 14 (14 ms)
+    ✓ announces the price per-item state for case 15 (21 ms)
+    ✓ disables the price per-item state for case 16 (28 ms)
+    ✓ restores the price per-item state for case 17 (35 ms)
+    ✓ debounces the price per-item state for case 18 (42 ms)
+    ✓ renders the price per-item state for case 19 (9 ms)
+    ✓ updates the price per-item state for case 20 (16 ms)
+    ✓ announces the price per-item state for case 21 (23 ms)
+    ✓ disables the price per-item state for case 22 (30 ms)
+    ✓ restores the price per-item state for case 23 (37 ms)
+    ✓ debounces the price per-item state for case 24 (4 ms)
+
+PASS src/components/facets/facets.test.ts
+  facets
+    ✓ renders the facets state for case 1 (3 ms)
+    ✓ updates the facets state for case 2 (10 ms)
+    ✓ announces the facets state for case 3 (17 ms)
+    ✓ disables the facets state for case 4 (24 ms)
+    ✓ restores the facets state for case 5 (31 ms)
+    ✓ debounces the facets state for case 6 (38 ms)
+    ✓ renders the facets state for case 7 (5 ms)
+    ✓ updates the facets state for case 8 (12 ms)
+    ✓ announces the facets state for case 9 (19 ms)
+    ✓ disables the facets state for case 10 (26 ms)
+    ✓ restores the facets state for case 11 (33 ms)
+    ✓ debounces the facets state for case 12 (40 ms)
+    ✓ renders the facets state for case 13 (7 ms)
+    ✓ updates the facets state for case 14 (14 ms)
+    ✓ announces the facets state for case 15 (21 ms)
+    ✓ disables the facets state for case 16 (28 ms)
+    ✓ restores the facets state for case 17 (35 ms)
+    ✓ debounces the facets state for case 18 (42 ms)
+    ✓ renders the facets state for case 19 (9 ms)
+    ✓ updates the facets state for case 20 (16 ms)
+    ✓ announces the facets state for case 21 (23 ms)
+    ✓ disables the facets state for case 22 (30 ms)
+    ✓ restores the facets state for case 23 (37 ms)
+    ✓ debounces the facets state for case 24 (4 ms)
+
+PASS src/components/recipient-form/recipient-form.test.ts
+  recipient-form
+    ✓ renders the recipient form state for case 1 (3 ms)
+    ✓ updates the recipient form state for case 2 (10 ms)
+    ✓ announces the recipient form state for case 3 (17 ms)
+    ✓ disables the recipient form state for case 4 (24 ms)
+    ✓ restores the recipient form state for case 5 (31 ms)
+    ✓ debounces the recipient form state for case 6 (38 ms)
+    ✓ renders the recipient form state for case 7 (5 ms)
+    ✓ updates the recipient form state for case 8 (12 ms)
+    ✓ announces the recipient form state for case 9 (19 ms)
+    ✓ disables the recipient form state for case 10 (26 ms)
+    ✓ restores the recipient form state for case 11 (33 ms)
+    ✓ debounces the recipient form state for case 12 (40 ms)
+    ✓ renders the recipient form state for case 13 (7 ms)
+    ✓ updates the recipient form state for case 14 (14 ms)
+    ✓ announces the recipient form state for case 15 (21 ms)
+    ✓ disables the recipient form state for case 16 (28 ms)
+    ✓ restores the recipient form state for case 17 (35 ms)
+    ✓ debounces the recipient form state for case 18 (42 ms)
+    ✓ renders the recipient form state for case 19 (9 ms)
+    ✓ updates the recipient form state for case 20 (16 ms)
+    ✓ announces the recipient form state for case 21 (23 ms)
+    ✓ disables the recipient form state for case 22 (30 ms)
+    ✓ restores the recipient form state for case 23 (37 ms)
+    ✓ debounces the recipient form state for case 24 (4 ms)
+
+  console.log
+    [theme] hydrate cart-drawer section 0 with 0 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 1 with 13 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 2 with 26 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 3 with 39 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 4 with 52 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 5 with 65 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 6 with 78 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 7 with 91 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 8 with 7 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 9 with 20 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 10 with 33 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 11 with 46 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 12 with 59 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 13 with 72 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 14 with 85 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 15 with 1 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 16 with 14 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 17 with 27 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 18 with 40 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 19 with 53 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 20 with 66 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 21 with 79 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 22 with 92 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 23 with 8 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 24 with 21 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 25 with 34 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 26 with 47 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 27 with 60 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 28 with 73 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 29 with 86 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 30 with 2 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 31 with 15 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 32 with 28 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 33 with 41 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 34 with 54 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 35 with 67 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 36 with 80 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 37 with 93 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 38 with 9 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 39 with 22 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 40 with 35 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 41 with 48 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 42 with 61 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 43 with 74 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 44 with 87 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 45 with 3 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 46 with 16 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 47 with 29 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 48 with 42 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 49 with 55 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 50 with 68 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 51 with 81 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 52 with 94 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 53 with 10 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 54 with 23 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 55 with 36 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 56 with 49 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate cart-drawer section 57 with 62 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate facets section 58 with 75 nodes
+      at log (src/lib/debug.ts:12:11)
+
+  console.log
+    [theme] hydrate product-form section 59 with 88 nodes
+      at log (src/lib/debug.ts:12:11)
+
+Test Suites: 1 failed, 7 passed, 8 total
+Tests:       1 failed, 191 passed, 192 total
+Snapshots:   0 total
+Time:        7.412 s
+Ran all test suites.

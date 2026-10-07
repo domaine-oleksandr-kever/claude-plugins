@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Suite for plugins/slim/scripts/slim.cjs — slim's core — run on the real fixtures in tests/fixtures/
-// and on synthetic inputs built inline. Every case spawns the core in its own temp dir with an explicit
+// Suite for plugins/slim/scripts/slim.cjs — slim's Claude Code delivery — run end to end on the real
+// fixtures in tests/fixtures/ and on synthetic inputs built inline: decisions, restored result shapes,
+// records and the report, per channel. Every case spawns the core in its own temp dir with an explicit
 // env, so a developer's exported FND_MCP_SLIM_* / SLIM_* never reaches it and no row writes to the real
-// report log. Also the drift gate: the compressors slim carries must stay byte-identical to fnd's.
+// report log. The engines themselves are tested as pure functions in tests/slim-engines.mjs.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -18,6 +19,7 @@ const SCRIPTS = path.join(ROOT, 'plugins/slim/scripts');
 const SLIM = path.join(SCRIPTS, 'slim.cjs');
 const SLIM_JSON_CLI = path.join(SCRIPTS, 'json-slim.cjs');
 const FND_SCRIPTS = path.join(ROOT, 'plugins/fnd/scripts');
+const FROZEN_JSON = path.join(SCRIPTS, 'json-slim.cjs');
 const FND_HOOK = path.join(ROOT, 'plugins/fnd/hooks/mcp-slim.cjs');
 const MODS = path.join(ROOT, 'plugins/slim/hooks/mods');
 const BOUND = 32768 + 1200;
@@ -27,7 +29,8 @@ const LOG = 'fnd-mcp-slim-debug.log';
 // The envelope the hooks module sends, keys in its order (agentId, pre, bytes_in only when set).
 const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in'];
 const M1_KEYS = ENVELOPE_KEYS.slice(0, 9);
-const ENGINES = ['json', 'log', 'jsx', 'stub'];
+const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment', 'lookup'];
+const ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'adf', 'text', 'stub'];
 
 const F1 = readFileSync(path.join(FIX, 'jql-search-ELC.json'), 'utf8');
 const F2 = JSON.parse(readFileSync(path.join(FIX, 'mcp-envelope-jira.json'), 'utf8'));
@@ -148,7 +151,7 @@ let F1_OUT = null;
 {
   const T = newT();
   const a = call('F3', T, envelope(T, [{ type: 'text', text: F3 }]));
-  eq('F3-decision', [a.decision, a.record.engine], ['compressed', 'jsx']);
+  eq('F3-decision', [a.decision, a.record.engine], ['compressed', 'figma']);
 }
 {
   const T = newT();
@@ -187,7 +190,7 @@ let F1_OUT = null;
   for (let i = 0; i < 600; i++) rows.push(JSON.stringify({ id: i, sku: `SKU-${i % 40}`, status: i % 50 ? 'ok' : 'error', qty: i % 9, price: 19.99 }));
   const T = newT();
   const a = call('S2', T, envelope(T, rows.join('\n')));
-  eq('S2-jsonl', [a.decision, a.record.engine, a.record.stages], ['compressed', 'json', ['jsonl', 'crush']]);
+  eq('S2-jsonl', [a.decision, a.record.engine, a.record.stages], ['compressed', 'jsonl', ['jsonl', 'crush']]);
 }
 {
   const T = newT();
@@ -353,7 +356,9 @@ let STUB0_OUT = null;
 {
   const T = newT();
   mkdirSync(path.join(T, 'p/scripts'), { recursive: true });
+  mkdirSync(path.join(T, 'p/scripts/delivery'), { recursive: true });
   for (const f of ['slim.cjs', 'env-file.cjs']) copyFileSync(path.join(SCRIPTS, f), path.join(T, 'p/scripts', f));
+  for (const f of readdirSync(path.join(SCRIPTS, 'delivery'))) copyFileSync(path.join(SCRIPTS, 'delivery', f), path.join(T, 'p/scripts/delivery', f));
   const r = spawn(T, JSON.stringify(envelope(T, F1)), { script: path.join(T, 'p/scripts/slim.cjs') });
   let a = null;
   try { a = JSON.parse(r.stdout); } catch (_) {}
@@ -378,7 +383,13 @@ let STUB0_OUT = null;
   const u = spawn(T, '', { args: ['--bogus'] });
   check('S14-unknown-flag', u.status === 2 && u.stdout === '' && u.stderr.includes('usage'), `exit ${u.status}`);
   const h = spawn(T, '', { args: ['--help'] });
-  check('S14-help', h.status === 0 && h.stdout.trim().split('\n').length === 3, h.stdout);
+  check('S14-help', h.status === 0 && h.stdout.trim().split('\n').length === 5, h.stdout);
+  check('S14-by-channel', /^ {2}by channel: mcp \d+ → \d+ B \([\d.]+% saved\)$/m.test(r.stdout), r.stdout);
+  const rec = spawn(T, JSON.stringify({ tool_use_id: 'toolu_l', decision: 'answered', rung: 'url', engine: 'html', model: 'haiku', tokens: { input: 1200, output: 40 }, bytes_in: 60000, bytes_out: 300, ms: 900, cwd: T }), { args: ['--record'] });
+  check('S14-record-silent', rec.status === 0 && rec.stdout === '', `exit ${rec.status}`);
+  const l = spawn(T, '', { args: ['--report', log] });
+  check('S14-lookup-line', /^ {2}lookup: 1 calls \(1 answered\) · 1200 in \/ 40 out tokens · haiku×1$/m.test(l.stdout), l.stdout);
+  check('S14-lookup-not-in-totals', (/^ {2}by channel: (.*)$/m.exec(l.stdout) || [])[1] === (/^ {2}by channel: (.*)$/m.exec(r.stdout) || [])[1], 'a lookup line moved the byte totals');
 }
 {
   const T = newT();
@@ -409,6 +420,8 @@ let STUB0_OUT = null;
     mkdirSync(`${T}/spill`, { recursive: true });
     writeFileSync(`${T}/spill/fnd-crush-dead.json`, '[]');
     old(`${T}/spill/fnd-crush-dead.json`);
+    writeFileSync(`${T}/spill/fnd-prompt-json-dead.json`, '[]');
+    old(`${T}/spill/fnd-prompt-json-dead.json`);
     mkdirSync(`${T}/.claude/fnd-tmp/playwright`, { recursive: true });
     writeFileSync(`${T}/.claude/fnd-tmp/playwright/old.png`, 'png');
     old(`${T}/.claude/fnd-tmp/playwright/old.png`);
@@ -416,17 +429,23 @@ let STUB0_OUT = null;
   const T = newT();
   seed(T);
   call('S17', T, envelope(T, F1));
-  check('S17-swept', !existsSync(`${T}/spill/fnd-crush-dead.json`) && existsSync(`${T}/spill/.fnd-mcp-slim-sweep`), 'stale spill kept or no marker');
+  check('S17-swept', !existsSync(`${T}/spill/fnd-crush-dead.json`) && existsSync(`${T}/spill/.slim-sweep`), 'stale spill kept or no marker');
+  check('S17-fnd-marker-untouched', !existsSync(`${T}/spill/.fnd-mcp-slim-sweep`), 'slim wrote fnd\'s throttle marker');
+  check('S17-fnd-only-kept', existsSync(`${T}/spill/fnd-prompt-json-dead.json`), 'slim swept a file only fnd writes');
   check('S17-no-project-pass', existsSync(`${T}/.claude/fnd-tmp/playwright/old.png`), 'the playwright dir was pruned');
   const T2 = newT();
   seed(T2);
   call('S17-ttl0', T2, envelope(T2, F1), { SLIM_TTL: '0' });
   check('S17-ttl0-kept', existsSync(`${T2}/spill/fnd-crush-dead.json`), 'SLIM_TTL=0 still swept');
-}
-for (const f of ['json-slim', 'log-slim', 'adf-to-md', 'adf-colors', 'figma-node-slim', 'env-file']) {
-  const a = readFileSync(path.join(FND_SCRIPTS, `${f}.cjs`));
-  const b = readFileSync(path.join(SCRIPTS, `${f}.cjs`));
-  check(`S18-identical-${f}`, a.equals(b), `plugins/slim/scripts/${f}.cjs drifted from plugins/fnd/scripts/${f}.cjs — copy it again`);
+  // A shared name lives as long as the longer TTL says: SLIM_TTL=1 cannot cut fnd's 72 h short.
+  const T3 = newT();
+  seed(T3);
+  call('S17-ttl-longer', T3, envelope(T3, F1), { SLIM_TTL: '1', FND_MCP_SLIM_TTL: '72' });
+  check('S17-ttl-longer-kept', existsSync(`${T3}/spill/fnd-crush-dead.json`), 'SLIM_TTL=1 swept a 48 h file fnd keeps for 72 h');
+  const T4 = newT();
+  seed(T4);
+  call('S17-ttl-fnd0', T4, envelope(T4, F1), { FND_MCP_SLIM_TTL: '0' });
+  check('S17-ttl-fnd0-kept', existsSync(`${T4}/spill/fnd-crush-dead.json`), 'FND_MCP_SLIM_TTL=0 still swept');
 }
 {
   const T = newT();
@@ -477,13 +496,280 @@ for (const f of ['json-slim', 'log-slim', 'adf-to-md', 'adf-colors', 'figma-node
 {
   const kit = /const ENVELOPE_KEYS = (\[[^\]]*\])/.exec(readFileSync(path.join(MODS, 'tests/mcp.test.ts'), 'utf8'));
   eq('S23-kit-keys', kit && JSON.parse(kit[1].replace(/'/g, '"')), ENVELOPE_KEYS);
-  const src = readFileSync(path.join(MODS, 'mcp.ts'), 'utf8');
+  const src = readFileSync(path.join(MODS, 'intake.ts'), 'utf8');
   const block = /const envelope = \{\n([\s\S]*?)\n {4}\}\n/.exec(src);
   const keys = [];
   for (const line of (block ? block[1] : '').split('\n')) for (const m of line.matchAll(/(?:^\s*|[{,]\s*)([A-Za-z_]\w*)\s*(?=[:,}])/g)) keys.push(m[1]);
   eq('S23-mod-keys', keys, ENVELOPE_KEYS);
   const T = newT();
   eq('S23-envelope-keys', Object.keys(envelope(T, F1)), M1_KEYS);
+}
+
+// The hooks module's pre-filter sizes and the core's channel table must agree.
+{
+  const lit = /export const GATES = (\{[^}]*\}) as const/.exec(readFileSync(path.join(MODS, 'channels.ts'), 'utf8'));
+  const mod = lit ? JSON.parse(lit[1].replace(/(\w+):/g, '"$1":')) : null;
+  const require = createRequire(import.meta.url);
+  eq('S24-gates', mod, require(path.join(SCRIPTS, 'delivery/channels.cjs')).GATES);
+  const fetchLit = /export const FETCH_CMD = (\/.*\/)\n/.exec(readFileSync(path.join(MODS, 'channels.ts'), 'utf8'));
+  eq('S24-fetch-cmd', fetchLit && fetchLit[1], String(require(path.join(SCRIPTS, 'delivery/channels.cjs')).FETCH_CMD));
+}
+
+// P: the engines produce exactly what the frozen compressor did on the real fixtures.
+{
+  const require = createRequire(import.meta.url);
+  const { compress } = require(path.join(SCRIPTS, 'engines/index.cjs'));
+  const frozen = require(FROZEN_JSON);
+  const T = newT();
+  const spillDir = path.join(T, 'p');
+  const names = { original: 'fnd-mcp-slim-', rows: 'fnd-crush-', ids: 'fnd-jsx-ids-' };
+  const inputs = { F1, F3, F4, F5, REST: readFileSync(path.join(FIX, 'figma-node-rest.json'), 'utf8') };
+  F2.forEach((b, i) => { if (b && typeof b.text === 'string') inputs[`F2-${i}`] = b.text; });
+  for (const [k, text] of Object.entries(inputs)) {
+    const old = frozen.slim(text, { spillDir });
+    const r = compress({ data: text }, { engine: 'json', spillDir, spillNames: names, maxMs: 0 });
+    const oldOut = old.wasModified && old.bytesOut < old.bytesIn ? old.output : null;
+    eq(`P-${k}`, r.decision === 'compressed' ? r.text : null, oldOut);
+    // The parts the text cites carry exactly the bytes the frozen compressor wrote under those names.
+    for (const p of r.parts || []) {
+      const file = path.join(spillDir, p.suggestedName);
+      check(`P-${k}-part-${p.kind}`, existsSync(file) && readFileSync(file, 'utf8') === p.payload, file);
+    }
+  }
+}
+
+const HOST = (T) => path.join(T, 'cfg/projects/p/s1/tool-results');
+const hostFile = (T, name, text) => { mkdirSync(HOST(T), { recursive: true }); const f = path.join(HOST(T), name); writeFileSync(f, text); return f; };
+function chEnv(T, channel, tool, toolInput, response, extra = {}) {
+  return envelope(T, response, { channel, tool, tool_input: toolInput, ...extra });
+}
+const bodyOf = (s) => String(s).split('\n\nslim: compressed ')[0];
+const ORDERS = (n) => spawnSync('node', [path.join(ROOT, 'plugins/slim/evals/_shared/make-orders.cjs'), String(n)], { encoding: 'utf8' }).stdout;
+const PAGE = readFileSync(path.join(FIX, 'page.html'), 'utf8');
+const APPLOG = readFileSync(path.join(FIX, 'app.log'), 'utf8');
+const TESTOUT = readFileSync(path.join(FIX, 'test-output.txt'), 'utf8');
+const DIFF = readFileSync(path.join(FIX, 'git-diff.txt'), 'utf8');
+const GO_TEST = (() => {
+  const l = [];
+  for (let i = 0; l.join('\n').length < 70000; i++) {
+    l.push(`=== RUN   TestCheckout/case_${i}`, `    checkout_test.go:${40 + (i % 90)}: cart total ${(i * 7) % 300}`, `--- PASS: TestCheckout/case_${i} (0.0${i % 9}s)`);
+  }
+  l.push('FAIL', 'FAIL\tgithub.com/northwind/shop/checkout\t3.412s', 'ok  \tgithub.com/northwind/shop/catalog\t0.981s');
+  return l.join('\n');
+})();
+const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, isImage: false, ...extra });
+
+// C-bash
+{
+  const T = newT();
+  const a = call('Cb1', T, chEnv(T, 'bash', 'Bash', { command: 'curl -s https://elc.atlassian.net/rest/api/3/search' }, BASH(F1, { stderr: 'warn: slow', interrupted: false })));
+  eq('Cb1-json', [a.decision, a.reason, a.record.engine, a.record.channel], ['compressed', null, 'json', 'bash']);
+  const res = a.result || {};
+  eq('Cb1-shape', [res.stderr, res.interrupted, 'persistedOutputPath' in res, 'persistedOutputSize' in res, typeof res.stdout], ['warn: slow', false, false, false, 'string']);
+  check('Cb1-handle', !!handleOf(res.stdout || '') && readFileSync(handleOf(res.stdout), 'utf8') === F1, String(res.stdout).slice(-160));
+  eq('Cb1-figure', figureOf(res.stdout || ''), bytes(res.stdout || ''));
+
+  const b = call('Cb2', T, chEnv(T, 'bash', 'Bash', { command: 'npx jest --ci' }, BASH(TESTOUT)));
+  eq('Cb2-test-output-untouched', [b.decision, b.reason], ['passthrough', 'plain-gate']);
+  const b8 = call('Cb2-8k', T, chEnv(T, 'bash', 'Bash', { command: 'npx jest --ci' }, BASH(TESTOUT)), { SLIM_PLAIN_BYTES: '8192' });
+  const w = bodyOf((b8.result || {}).stdout);
+  const lines = TESTOUT.replace(/\n$/, '').split('\n');
+  eq('Cb2-8k-window', [b8.decision, b8.record.engine], ['compressed', 'text']);
+  check('Cb2-8k-head-tail-verbatim', w.startsWith(lines.slice(0, 5).join('\n')) && w.includes(lines.slice(-5).join('\n')) && /\n\[slim: [\d,]+ of [\d,]+ lines hidden \([\d,]+ B\)\]\n/.test(w), w.slice(0, 200));
+  check('Cb2-8k-lines-unchanged', w.split('\n').filter((l) => !l.startsWith('[slim: ')).every((l) => lines.includes(l)), 'a line was rewritten');
+  check('Cb2-8k-record-window', b8.record.window && b8.record.window.lines_total === TESTOUT.split('\n').length && b8.record.window.lines_hidden > 0, JSON.stringify(b8.record.window));
+
+  const d = call('Cb3', T, chEnv(T, 'bash', 'Bash', { command: 'git diff main' }, BASH(DIFF)));
+  eq('Cb3-diff-untouched', [d.decision, d.reason], ['passthrough', 'plain-gate']);
+  const d8 = call('Cb3-8k', T, chEnv(T, 'bash', 'Bash', { command: 'git diff main' }, BASH(DIFF)), { SLIM_PLAIN_BYTES: '8192' });
+  const dl = DIFF.split('\n');
+  check('Cb3-8k-window-only', d8.record.engine === 'text' && bodyOf(d8.result.stdout).split('\n').filter((l) => !l.startsWith('[slim: ')).every((l) => dl.includes(l)), d8.record.engine);
+
+  const go = hostFile(T, 'b0.txt', GO_TEST);
+  const g = call('Cb4', T, chEnv(T, 'bash', 'Bash', { command: 'go test ./...' }, BASH(GO_TEST.slice(0, 2048), { persistedOutputPath: go, persistedOutputSize: bytes(GO_TEST) })));
+  eq('Cb4-persisted', [g.decision, g.reason, g.record.engine], ['compressed', 'mod-expand', 'text']);
+  const gs = (g.result || {}).stdout || '';
+  check('Cb4-window-4096', bytes(bodyOf(gs)) <= 4096 && gs.includes('ok  \tgithub.com/northwind/shop/catalog\t0.981s'), String(bytes(bodyOf(gs))));
+  check('Cb4-seen', Number.isFinite(g.record.bytes_seen) && g.record.bytes_seen < 2600 && g.record.pct === Math.round((1 - g.record.bytes_out / g.record.bytes_seen) * 1000) / 10, JSON.stringify(g.record));
+  eq('Cb4-no-persisted-keys', ['persistedOutputPath' in (g.result || {}), 'persistedOutputSize' in (g.result || {})], [false, false]);
+  eq('Cb4-handle-is-host-file', handleOf(gs), realpathSync(go));
+
+  const pg = hostFile(T, 'b1.txt', PAGE);
+  const persistedPage = BASH(PAGE.slice(0, 2048), { persistedOutputPath: pg, persistedOutputSize: bytes(PAGE) });
+  const h = call('Cb5', T, chEnv(T, 'bash', 'Bash', { command: 'curl -s https://shop.example/p' }, persistedPage));
+  eq('Cb5-html', [h.decision, h.reason, h.record.engine, h.record.hint], ['compressed', 'mod-expand', 'html', true]);
+  const hs = (h.result || {}).stdout || '';
+  check('Cb5-hint', hs.includes('\n\nslim hint: for one fact about this page, call mcp__slim__lookup({ url: "https://shop.example/p", question: "…" }) instead of reading it whole\n\nslim: compressed '), hs.slice(-400));
+  check('Cb5-html-body', hs.includes('# Northwind Ceramics — Spring Catalogue') && hs.includes('scripts (6):') && !hs.includes('SENTINEL-STYLE-9Q'), hs.slice(0, 200));
+  for (const [k, v] of [['SLIM_HINT', '0'], ['SLIM_LOOKUP', '0']]) {
+    const n = call(`Cb5-${k}`, T, chEnv(T, 'bash', 'Bash', { command: 'curl -s https://shop.example/p' }, persistedPage), { [k]: v });
+    check(`Cb5-${k}-no-hint`, n.decision === 'compressed' && !((n.result || {}).stdout || '').includes('slim hint:') && !n.record.hint, n.decision);
+  }
+  const c = call('Cb6', T, chEnv(T, 'bash', 'Bash', { command: 'cat page.html' }, persistedPage));
+  check('Cb6-cat-page-is-text', c.record.engine !== 'html', `${c.decision} ${c.record.engine}`);
+  for (const cmd of ['cat src/http/page.html', 'cat docs/https-setup.html', 'cat ~/work/http-server/public/index.html']) {
+    const x = call('Cb6-path-word', T, chEnv(T, 'bash', 'Bash', { command: cmd }, persistedPage));
+    check(`Cb6-path-word-${cmd}`, x.record.engine !== 'html', `${x.decision} ${x.record.engine}`);
+  }
+  const fu = call('Cb5-file', T, chEnv(T, 'bash', 'Bash', { command: 'curl -s file://$PWD/page.html' }, persistedPage));
+  check('Cb5-file-hint-absolute', fu.record.engine === 'html' && ((fu.result || {}).stdout || '').includes(`lookup({ path: ${JSON.stringify(path.join(T, 'page.html'))}, question`), ((fu.result || {}).stdout || '').slice(-400));
+  const fx2 = call('Cb5-file-x', T, chEnv(T, 'bash', 'Bash', { command: 'curl -s file://$HOME/page.html' }, persistedPage));
+  check('Cb5-file-unresolved-no-hint', fx2.record.engine === 'html' && !fx2.record.hint, JSON.stringify(fx2.record));
+
+  const lg = hostFile(T, 'b2.txt', APPLOG);
+  const l = call('Cb7', T, chEnv(T, 'bash', 'Bash', { command: 'cat app.log' }, BASH(APPLOG.slice(0, 2048), { persistedOutputPath: lg, persistedOutputSize: bytes(APPLOG) })));
+  eq('Cb7-log', [l.decision, l.record.engine], ['compressed', 'log']);
+
+  const evil = path.join(T, 'evil.txt');
+  writeFileSync(evil, GO_TEST);
+  const f = call('Cb8', T, chEnv(T, 'bash', 'Bash', { command: 'go test ./...' }, BASH('x', { persistedOutputPath: evil, persistedOutputSize: bytes(GO_TEST) })));
+  eq('Cb8-forged', [f.decision, f.reason], ['passthrough', 'expand-refused']);
+  eq('Cb8-image', call('Cb8-img', T, chEnv(T, 'bash', 'Bash', { command: 'cat a.png' }, BASH(F1, { isImage: true }))).reason, 'not-text');
+
+  mkdirSync(path.join(T, 'spill'), { recursive: true });
+  const sp = path.join(T, 'spill', 'fnd-mcp-slim-0123456789abcdef.json');
+  writeFileSync(sp, F1);
+  eq('Cb9-spill-read', call('Cb9', T, chEnv(T, 'bash', 'Bash', { command: `cat ${sp}` }, BASH(F1))).reason, 'spill-read');
+  eq('Cb9-host-read', call('Cb9h', T, chEnv(T, 'bash', 'Bash', { command: `head -c 99999 ${go}` }, BASH(GO_TEST))).reason, 'spill-read');
+  eq('Cb10-own-cli', call('Cb10', T, chEnv(T, 'bash', 'Bash', { command: `node ${FROZEN_JSON} f.json --jq .a` }, BASH(F1))).reason, 'own-cli');
+  eq('Cb11-source-json', call('Cb11', T, chEnv(T, 'bash', 'Bash', { command: 'cat templates/product.json' }, BASH(F1))).reason, 'read-guard');
+
+  const rows = [];
+  for (let i = 0; rows.join(',').length < 300000; i++) rows.push({ id: `${i}-${'abcdef0123456789'.repeat(1 + (i % 5)).slice(i % 7)}`, body: `unique text ${i} ${'lorem ipsum '.repeat(8 + (i % 13))}${i * 7919}`, a: null, b: null, c: {}, d: [] });
+  const big = JSON.stringify({ rows });
+  const st = call('Cb12', T, chEnv(T, 'bash', 'Bash', { command: 'curl -s https://api.example/rows' }, BASH(big)));
+  eq('Cb12-egress-stub', [st.decision, st.reason, st.record.engine], ['stubbed', 'egress-cap', 'stub']);
+  const ss = (st.result || {}).stdout || '';
+  check('Cb12-stub-text', ss.startsWith('<<slim stub>> Bash returned ') && /^slim: stub [\d,]+ B → [\d,]+ B/m.test(ss) && bytes(ss) <= 1300, ss.slice(0, 200));
+  const sf = /^full=(\S+)$/m.exec(ss);
+  check('Cb12-stub-spill', !!sf && readFileSync(sf[1], 'utf8') === big, sf && sf[1]);
+
+  const slimmed = (a.result || {}).stdout || '';
+  const back = call('Cb13', T, chEnv(T, 'bash', 'Bash', { command: 'cat out.txt' }, BASH(`${slimmed}`)), { SLIM_STUB_BYTES: '1200' });
+  eq('Cb13-already-slim', [back.decision, back.reason], ['passthrough', 'already-slim']);
+}
+
+// C-read
+{
+  const T = newT();
+  const orders = ORDERS(380);
+  check('Cr-orders-300k', bytes(orders) > 300000, String(bytes(orders)));
+  mkdirSync(path.join(T, 'data'), { recursive: true });
+  const fp = path.join(T, 'data', 'orders.json');
+  writeFileSync(fp, orders);
+  const page = orders.slice(0, 20000);
+  const readRec = (filePath, content, x = {}) => ({ type: 'text', file: { filePath, content, numLines: content.split('\n').length, startLine: 1, totalLines: orders.split('\n').length, ...x } });
+  const a = call('Cr1', T, chEnv(T, 'read', 'Read', { file_path: fp }, readRec(fp, page, { truncatedByTokenCap: true })));
+  eq('Cr1-compressed', [a.decision, a.record.engine, a.record.channel, a.record.bytes_in], ['compressed', 'json', 'read', bytes(orders)]);
+  const f = (a.result || {}).file || {};
+  eq('Cr1-shape', [a.result && a.result.type, f.filePath, f.startLine, f.numLines === String(f.content).split('\n').length, 'truncatedByTokenCap' in f, f.totalLines], ['text', fp, 1, true, false, orders.split('\n').length]);
+  check('Cr1-note', String(f.content).includes(`\n\nslim: this view of ${fp} is compressed and its line numbers are not file lines — Read it with offset/limit for exact bytes before an Edit or Write\n\nslim: compressed `), String(f.content).slice(-400));
+  const h = handleOf(String(f.content));
+  check('Cr1-copy', !!h && /\/spill\/fnd-mcp-slim-[0-9a-f]{16}\.json$/.test(h) && readFileSync(h, 'utf8') === orders, h);
+  check('Cr1-sentinel-dropped', !String(f.content).includes('SENTINEL-ORDER-0217'), 'sentinel kept');
+  eq('Cr2-not-truncated', call('Cr2', T, chEnv(T, 'read', 'Read', { file_path: fp }, readRec(fp, orders))).reason, 'read-guard');
+  const tpl = path.join(T, 'templates');
+  mkdirSync(tpl, { recursive: true });
+  writeFileSync(path.join(tpl, 'x.json'), orders);
+  eq('Cr3-source-json', call('Cr3', T, chEnv(T, 'read', 'Read', { file_path: path.join(tpl, 'x.json') }, readRec(path.join(tpl, 'x.json'), page, { truncatedByTokenCap: true }))).reason, 'read-guard');
+  const code = readFileSync(SLIM, 'utf8');
+  eq('Cr3-code', call('Cr3c', T, chEnv(T, 'read', 'Read', { file_path: SLIM }, readRec(SLIM, code, { truncatedByTokenCap: true }))).reason, 'read-guard');
+  eq('Cr4-offset', call('Cr4', T, chEnv(T, 'read', 'Read', { file_path: fp, offset: 10 }, readRec(fp, page, { truncatedByTokenCap: true }))).reason, 'windowed-read');
+  eq('Cr5-spill-read', call('Cr5', T, chEnv(T, 'read', 'Read', { file_path: h }, readRec(h, page, { truncatedByTokenCap: true }))).reason, 'spill-read');
+  const logp = path.join(T, 'data', 'app.log');
+  const log60 = APPLOG.slice(0, 61440);
+  writeFileSync(logp, log60);
+  const l = call('Cr6', T, chEnv(T, 'read', 'Read', { file_path: logp }, readRec(logp, log60)));
+  eq('Cr6-log', [l.decision, l.record.engine], ['compressed', 'log']);
+  eq('Cr7-page', call('Cr7', T, chEnv(T, 'read', 'Read', { file_path: path.join(FIX, 'page.html') }, readRec(path.join(FIX, 'page.html'), PAGE))).reason, 'read-guard');
+  eq('Cr8-image', call('Cr8', T, chEnv(T, 'read', 'Read', { file_path: '/x.png' }, { type: 'image', file: { base64: 'AAAA', type: 'image/png', originalSize: 4 } })).reason, 'not-text');
+}
+
+// C-webfetch, C-websearch, C-grep, C-glob, C-agent
+{
+  const T = newT();
+  const wf = { bytes: bytes(PAGE), code: 200, codeText: 'OK', result: PAGE, durationMs: 120, url: 'https://shop.example/p' };
+  const a = call('Cw1', T, chEnv(T, 'webfetch', 'WebFetch', { url: 'https://shop.example/p', prompt: 'list the scripts' }, wf));
+  eq('Cw1-html', [a.decision, a.record.engine, a.record.channel], ['compressed', 'html', 'webfetch']);
+  eq('Cw1-keys', Object.keys(a.result || {}), Object.keys(wf));
+  check('Cw1-result', String((a.result || {}).result).startsWith('# Northwind Ceramics') && (a.result || {}).url === wf.url, String((a.result || {}).result).slice(0, 80));
+
+  const huge = Array.from({ length: 2500 }, (_, i) => `Result ${i}: northwind ceramics review number ${i} — ${'text '.repeat(6)}`).join('\n');
+  const ws = { query: 'northwind ceramics', results: [{ tool_use_id: 'srv_1', content: [{ title: 'x', url: 'https://a.example' }] }, huge, 'short summary'], durationSeconds: 2.1 };
+  const b = call('Cs1', T, chEnv(T, 'websearch', 'WebSearch', { query: 'northwind ceramics' }, ws));
+  eq('Cs1-window', [b.decision, b.record.engine, b.record.channel], ['compressed', 'text', 'websearch']);
+  const br = b.result || {};
+  check('Cs1-others-untouched', JSON.stringify(br.results[0]) === JSON.stringify(ws.results[0]) && br.results[2] === 'short summary' && /\[slim: [\d,]+ of 2,500 lines hidden/.test(br.results[1]) && br.query === ws.query, JSON.stringify(br).slice(0, 200));
+
+  const content = Array.from({ length: 3000 }, (_, i) => `src/components/card-${i % 40}/index-${i}.ts:${10 + (i % 300)}:  const price = item.price * qty; // ${i}`).join('\n');
+  const g = call('Cg1', T, chEnv(T, 'grep', 'Grep', { pattern: 'price', output_mode: 'content' }, { mode: 'content', numFiles: 40, filenames: [], content, numLines: 3000, numMatches: 3000 }));
+  eq('Cg1-window', [g.decision, g.record.engine, (g.result || {}).numMatches, (g.result || {}).numLines, (g.result || {}).numFiles], ['compressed', 'text', 3000, 3000, 40]);
+  check('Cg1-marker', /\[slim: [\d,]+ of 3,000 lines hidden/.test((g.result || {}).content) && bytes(bodyOf((g.result || {}).content)) <= 8192, '');
+  const files = Array.from({ length: 3000 }, (_, i) => `/repo/src/components/card-${i % 40}/part-${i}.liquid`);
+  const gf = call('Cg2', T, chEnv(T, 'grep', 'Grep', { pattern: 'price' }, { mode: 'files_with_matches', numFiles: 3000, filenames: files }));
+  const fl = (gf.result || {}).filenames || [];
+  check('Cg2-files', gf.decision === 'compressed' && Array.isArray(fl) && fl[0] === files[0] && fl.some((x) => /^\[slim: [\d,]+ of 3,000 lines hidden/.test(x)) && (gf.result || {}).numFiles === 3000, `${gf.decision} ${fl.length}`);
+  const gl = call('Cl1', T, chEnv(T, 'glob', 'Glob', { pattern: '**/*.liquid' }, { durationMs: 40, numFiles: 3000, filenames: files, truncated: false }));
+  check('Cl1-glob', gl.decision === 'compressed' && gl.record.channel === 'glob' && (gl.result || {}).numFiles === 3000 && (gl.result || {}).truncated === false && ((gl.result || {}).filenames || []).some((x) => x.startsWith('[slim: ')), gl.decision);
+
+  const report = Array.from({ length: 2400 }, (_, i) => `- checked section ${i}: header, cart drawer, price per item ${'ok '.repeat(4)}`).join('\n');
+  const ag = { status: 'completed', content: [{ type: 'text', text: report }], totalDurationMs: 9000, totalTokens: 12000, totalToolUseCount: 7 };
+  const c = call('Ca1', T, chEnv(T, 'agent', 'Agent', { prompt: 'audit', subagent_type: 'general-purpose' }, ag));
+  check('Ca1-window', c.decision === 'compressed' && c.record.channel === 'agent' && /\[slim: [\d,]+ of 2,400 lines hidden/.test((c.result || {}).content[0].text) && (c.result || {}).totalTokens === 12000, c.decision);
+  eq('Ca2-async', call('Ca2', T, chEnv(T, 'agent', 'Agent', { prompt: 'audit' }, { status: 'async_launched', agentId: 'a1', description: 'audit', prompt: 'audit' })).reason, 'not-text');
+}
+
+// C-attachment, C-distill, C-record
+{
+  const T = newT();
+  const env2 = chEnv(T, 'attachment', 'Attachment', { type: 'file', origin: 'user', shape: 'numbered' }, null, { pre: 'not-covered', bytes_in: 70000 });
+  const a = call('Ct1', T, env2);
+  eq('Ct1-pre', [a.decision, a.reason], ['passthrough', 'not-covered']);
+  eq('Ct1-line-at-2', logLines(`${T}/spill`).map((l) => [l.channel, l.reason, l.format, l.bytes_in]), [['attachment', 'not-covered', 'numbered', 70000]]);
+  const T1 = newT();
+  call('Ct1b', T1, chEnv(T1, 'attachment', 'Attachment', { type: 'file', origin: 'user', shape: 'raw' }, null, { pre: 'not-covered', bytes_in: 70000 }), { SLIM_DEBUG: '1' });
+  eq('Ct1-none-at-1', logLines(`${T1}/spill`).length, 0);
+
+  const T2 = newT();
+  const d = spawn(T2, JSON.stringify({ v: 1, text: PAGE, hint: { source: 'https://shop.example/p' }, cwd: T2, session_id: 's1' }), { args: ['--distill'] });
+  let dj = null;
+  try { dj = JSON.parse(d.stdout); } catch (_) {}
+  check('Cd1-html', d.status === 0 && dj && dj.v === 1 && dj.engine === 'html' && dj.decision === 'compressed' && dj.text.startsWith('# Northwind') && dj.bytesOut <= 49152, d.stdout.slice(0, 200));
+  check('Cd1-writes-nothing', !existsSync(path.join(T2, 'spill')), 'distill wrote into the spill dir');
+  const big = APPLOG + APPLOG;
+  const host = hostFile(T2, 'd1.txt', big);
+  const d2 = spawn(T2, JSON.stringify({ v: 1, host_path: host, budgetBytes: 8192, cwd: T2, session_id: 's1' }), { args: ['--distill'] });
+  let d2j = null;
+  try { d2j = JSON.parse(d2.stdout); } catch (_) {}
+  check('Cd2-host', d2j && d2j.engine === 'log' && d2j.bytesIn === bytes(big) && d2j.bytesOut <= 8192, d2.stdout.slice(0, 200));
+  const d3 = spawn(T2, JSON.stringify({ v: 1, host_path: path.join(T2, 'x.txt'), cwd: T2, session_id: 's1' }), { args: ['--distill'] });
+  check('Cd3-forged-host', JSON.parse(d3.stdout || '{}').decision === 'refused', d3.stdout);
+  const d4 = spawn(T2, JSON.stringify({ v: 1, path: path.join(FIX, 'git-diff.txt'), budgetBytes: 8192, cwd: T2, session_id: 's1' }), { args: ['--distill'] });
+  check('Cd4-path', JSON.parse(d4.stdout || '{}').bytesOut <= 8192, d4.stdout.slice(0, 120));
+  check('Cd5-no-log', !existsSync(path.join(T2, 'spill', LOG)), 'distill logged');
+  // A crush would cite rows by a file distill never writes: the rows come back inline, windowed.
+  const d6 = spawn(T2, JSON.stringify({ v: 1, text: ORDERS(240), cwd: T2, session_id: 's1' }), { args: ['--distill'] });
+  let d6j = null;
+  try { d6j = JSON.parse(d6.stdout); } catch (_) {}
+  check('Cd6-rows-inline', d6j && d6j.decision === 'compressed' && d6j.reason === 'rows-inline' && d6j.bytesOut <= 49152
+    && d6j.text.includes('ORD-0001') && d6j.text.includes('SENTINEL-ORDER-0217') && !d6j.text.includes('<<full='), d6.stdout.slice(0, 200));
+
+  const T3 = newT();
+  const r = spawn(T3, JSON.stringify({ tool_use_id: 'toolu_r', decision: 'failed', reason: 'timeout', rung: 'url', engine: 'html', model: 'haiku', tokens: null, bytes_in: 5, bytes_out: 0, ms: 30000, cwd: T3 }), { args: ['--record'], extra: { SLIM_DEBUG: undefined } });
+  check('Cr-record-exit', r.status === 0 && r.stdout === '', `exit ${r.status}`);
+  eq('Cr-record-line', logLines(`${T3}/spill`).map((l) => [l.src, l.channel, l.entry, l.tool, l.tool_use_id, l.decision, l.reason, l.rung, l.engine, l.model, l.tokens, l.lvl]),
+    [['slim', 'lookup', 'mod', 'mcp__slim__lookup', 'toolu_r', 'failed', 'timeout', 'url', 'html', 'haiku', null, 0]]);
+}
+
+// --report groups the channels written above.
+{
+  const T = newT();
+  call('Rp-mcp', T, envelope(T, F1));
+  call('Rp-bash', T, chEnv(T, 'bash', 'Bash', { command: 'curl -s https://x.example/a' }, BASH(F1)));
+  call('Rp-web', T, chEnv(T, 'webfetch', 'WebFetch', { url: 'https://shop.example/p' }, { bytes: 1, code: 200, codeText: 'OK', result: PAGE, durationMs: 1, url: 'https://shop.example/p' }));
+  const r = spawn(T, '', { args: ['--report'] });
+  check('Rp-by-channel', /^ {2}by channel: bash \d+ → \d+ B \([\d.]+% saved\) · mcp \d+ → \d+ B \([\d.]+% saved\) · webfetch \d+ → \d+ B \([\d.]+% saved\)$/m.test(r.stdout), r.stdout);
+  check('Rp-by-src', /^ {2}by src: slim \d+ → \d+ B/m.test(r.stdout), r.stdout);
 }
 
 // S13 last: every line any row above wrote.
@@ -498,7 +784,7 @@ for (const f of ['json-slim', 'log-slim', 'adf-to-md', 'adf-colors', 'figma-node
       if (l.tool === 't') continue; // S14's synthetic fnd line
       n++;
       const keys = Object.keys(l).filter((k) => !['ts', 'project', 'lvl'].includes(k));
-      if (keys[0] !== 'src' || keys[1] !== 'channel' || l.src !== 'slim' || l.channel !== 'mcp') bad.push(JSON.stringify(l).slice(0, 160));
+      if (keys[0] !== 'src' || keys[1] !== 'channel' || l.src !== 'slim' || !CHANNELS.includes(l.channel)) bad.push(JSON.stringify(l).slice(0, 160));
     }
   }
   check('S13-provenance', n > 20 && bad.length === 0, `${n} lines, bad: ${bad.slice(0, 3).join(' | ')}`);
