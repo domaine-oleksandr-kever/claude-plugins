@@ -51,8 +51,8 @@ Codex reads `.claude-plugin/marketplace.json` as a legacy-compatible marketplace
 this repo is already a Codex marketplace — nothing separate is published. Then run `/plugins`
 in Codex, find **fnd**, and install it.
 
-The same marketplace also lists **slim** and **band**. Both are Claude Code only (Claude Code hooks
-modules, no Codex manifest), so do not install either from Codex `/plugins`.
+The same marketplace also lists **slim**, **band** and **base**. All three are Claude Code only (Claude
+Code hooks modules, no Codex manifest), so do not install any of them from Codex `/plugins`.
 
 To undo a registration: `codex plugin marketplace list` shows the configured name,
 `codex plugin marketplace remove <name>` drops it. A registration also pins the git ref it
@@ -173,7 +173,7 @@ alone updates it — re-run the installer only to pick up added or renamed roles
   its emission — the compressed body, or the spill-and-stub text with the `full=<path>` handle — as
   that `reason`, behind one short fixed header. The header is load-bearing: Codex frames every
   block to the model as `Script failed` / `Script error:` (and logs one
-  `ERROR codex_core::tools::router` line per replacement), so the header states that the call
+  `ERROR codex_base::tools::router` line per replacement), so the header states that the call
   SUCCEEDED, that this is its compressed result, and that it must not be retried.
 - **Two fallbacks, both visible in the log.** The reason is capped by `BLOCK_REASON_BYTES` in the
   shim (10000) — past Codex's `tool_output_token_limit` a hook's output is truncated (head and

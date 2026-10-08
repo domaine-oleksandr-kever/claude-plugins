@@ -51,11 +51,12 @@ mkboot() {
   chmod +x "$1"
 }
 
-# mkcheckout <dir> — a minimal claude-plugins checkout: bootstrap, the install.sh stub, and
-# enough plugin content that the in-checkout detection fires
+# mkcheckout <dir> — a minimal claude-plugins checkout: bootstrap, the install.sh stub, the
+# marketplace file the in-checkout detection looks for, and enough plugin content to install
 mkcheckout() {
   local d="$1"
-  mkdir -p "$d/scripts" "$d/plugins/fnd/skills/alpha" "$d/docs"
+  mkdir -p "$d/scripts" "$d/plugins/fnd/skills/alpha" "$d/docs" "$d/.claude-plugin"
+  printf '{ "name": "domaine", "plugins": [] }\n' > "$d/.claude-plugin/marketplace.json"
   mkboot "$d/scripts/bootstrap.sh" "$TMP/origin.git"
   cat > "$d/scripts/install.sh" <<'STUB'
 #!/usr/bin/env bash
@@ -279,7 +280,7 @@ runpiped "$TMP/h-piped2" "$BOOT" --targets claude
 if [ "$TIMED_OUT" = "no" ] && [ "$RC" -eq 0 ] && grep -q '/plugin install fnd@domaine' "$O"; then ok
 else bad B3-piped-with-targets "timed_out=$TIMED_OUT rc=$RC out=$(head -c 200 "$O")"; fi
 
-# …and it stayed a print: the claude target is four lines of text, so a claude-only run has
+# …and it stayed a print: the claude target is a few lines of text, so a claude-only run has
 # nothing to install and therefore nothing to clone. Dropping that exemption would hand a
 # developer who only wanted the slash commands a full checkout in $HOME they never asked for.
 if [ ! -e "$TMP/h-piped2/tools" ] && ! grep -q '^clone' "$GIT_LOG" \
@@ -339,7 +340,7 @@ if [ "$RC" -eq 0 ] && [ "$(argv_line 1)" = "--target cursor --copy" ]; then ok
 else bad C9-copy-passthrough "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG")"; fi
 
 # In-checkout detection must hold when scripts/ is itself a symlink (shared-tooling layouts):
-# the -d probe and the recorded path resolve through the same logical cd, so bootstrap installs
+# the -f probe and the recorded path resolve through the same logical cd, so bootstrap installs
 # the tree the developer ran from instead of cloning a second copy.
 SYMCO="$TMP/co-sym"; mkcheckout "$SYMCO"
 mv "$SYMCO/scripts" "$TMP/shared-scripts"
@@ -351,18 +352,75 @@ else bad C10-symlinked-scripts-dir "rc=$RC out=$(tr '\n' ';' < "$O") git=$(tr '\
 
 # ------------------------------------------------------------------------- the claude target --
 # Claude Code installs from inside a live session and cannot be driven from outside, so this
-# target prints and says so. The four commands are the README block, verbatim.
+# target prints and says so. Until base and a team plugin are ready for team use the default is fnd,
+# and the slash commands are the README's team-use block, line for line.
 run "$TMP/h8" "$FIXBOOT" --targets claude
 if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 0 ]; then ok
 else bad L1-claude-no-installer "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG")"; fi
 
-if grep -qF "/plugin marketplace add domaine-oleksandr-kever/claude-plugins" "$O" \
-   && grep -qF "/plugin install fnd@domaine" "$O" \
-   && grep -qF "/reload-plugins" "$O" && grep -qF "/fnd:smoke-test" "$O"; then ok
-else bad L2-claude-block "out=$(tr '\n' ';' < "$O")"; fi
+README_CMDS="$(awk '/^### Claude Code — from the published Git marketplace \(team use\)/ { s = 1; next }
+  s && /^```/ { if (inb) exit; inb = 1; next }
+  inb && /^\// { print }' "$ROOT/README.md")"
+BOOT_CMDS="$(sed -n 's/^ *\(\/[a-z][^ ].*\)$/\1/p' "$O" | sed 's/ *$//')"
+if [ -n "$README_CMDS" ] && [ "$README_CMDS" = "$BOOT_CMDS" ]; then ok
+else bad L2-claude-block-is-readme "readme='$(printf '%s' "$README_CMDS" | tr '\n' ';')' boot='$(printf '%s' "$BOOT_CMDS" | tr '\n' ';')'"; fi
 
 if grep -q "cannot be driven from outside" "$O"; then ok
 else bad L3-claude-informational "the claude target does not say it is informational"; fi
+
+if ! grep -q "base" "$O"; then ok
+else bad L4-default-names-no-base "out=$(tr '\n' ';' < "$O")"; fi
+
+# --plugins names the set instead of fnd; base's set verifies with /base-doctor after the reload,
+# carries the migration line and no fnd verify step
+run "$TMP/h8a" "$FIXBOOT" --targets claude --plugins slim,band,base
+INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$RC" -eq 0 ] && [ "$INSTALLS" = "slim@domaine band@domaine base@domaine " ] \
+   && grep -qF "Moving from fnd: run /plugin uninstall fnd@domaine first" "$O" \
+   && [ "$(grep -A1 '/reload-plugins' "$O" | tail -1 | tr -d ' ')" = "/base-doctor" ] \
+   && ! grep -qF "/fnd:smoke-test" "$O"; then ok
+else bad L4b-claude-base-set "rc=$RC installs='$INSTALLS' out=$(tr '\n' ';' < "$O")"; fi
+
+# a repeat is one line, and a team plugin keeps its place after the three
+run "$TMP/h8b" "$FIXBOOT" --targets claude --plugins slim,band,base,fe,base
+INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$RC" -eq 0 ] && [ "$INSTALLS" = "slim@domaine band@domaine base@domaine fe@domaine " ]; then ok
+else bad L5-claude-plugins-set "rc=$RC installs='$INSTALLS'"; fi
+
+# fnd beside base is refused with the reason, before anything is printed or installed
+for spelling in "--plugins fnd,base" "--plugins=base,fe,fnd"; do
+  # shellcheck disable=SC2086
+  run "$TMP/h8c" "$FIXBOOT" --targets claude,cursor $spelling
+  if [ "$RC" -eq 2 ] && grep -qF "fnd and base must not run together" "$E" \
+     && ! grep -q '/plugin ' "$O" && [ "$(argv_count)" -eq 0 ]; then ok
+  else bad "L6-claude-fnd-base-refused($spelling)" "rc=$RC out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E")"; fi
+done
+
+# a plugin name is a name: a path or a flag is refused
+for name in "../x" "-y" "Base"; do
+  run "$TMP/h8d" "$FIXBOOT" --targets claude --plugins "$name"
+  if [ "$RC" -eq 2 ] && grep -qF "'$name' is not a plugin name" "$E"; then ok
+  else bad "L7-claude-plugin-name($name)" "rc=$RC err=$(head -c 200 "$E")"; fi
+done
+
+# --plugins without the claude target installs nothing differently and says it was ignored
+run "$TMP/h8e" "$FIXBOOT" --targets cursor --plugins fe
+if [ "$RC" -eq 0 ] && grep -q "note: --plugins ignored" "$O" && [ "$(argv_line 1)" = "--target cursor" ]; then ok
+else bad L8-plugins-without-claude "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+# ---------------------------------------------------------------- the checkout test ---
+# A checkout is recognised by its marketplace file, not by any one plugin: a copy that carries the
+# marketplace but no plugins/fnd is still this repo, a folder with plugins/fnd but no marketplace
+# file is not.
+NOFND="$TMP/co-nofnd"; mkcheckout "$NOFND"; rm -rf "$NOFND/plugins/fnd"
+run "$TMP/h8f" "$NOFND/scripts/bootstrap.sh" --targets cursor
+if [ "$RC" -eq 0 ] && grep -q "from $NOFND" "$O" && ! grep -q '^clone' "$GIT_LOG"; then ok
+else bad K1-checkout-by-marketplace "rc=$RC out=$(tr '\n' ';' < "$O") git=$(tr '\n' ';' < "$GIT_LOG")"; fi
+
+NOMKT="$TMP/co-nomkt"; mkcheckout "$NOMKT"; rm -rf "$NOMKT/.claude-plugin"
+run "$TMP/h8g" "$NOMKT/scripts/bootstrap.sh" --targets cursor --uninstall --dir "$NOMKT"
+if [ "$RC" -eq 2 ] && grep -q "is not one" "$E" && [ "$(argv_count)" -eq 0 ]; then ok
+else bad K2-no-marketplace-not-a-checkout "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # ------------------------------------------------------------------------ rc propagation ---
 # One failing host does not cancel the others — they are independent installs — but its rc
@@ -429,7 +487,7 @@ else bad P4-report-smoke-test "out=$(tr '\n' ';' < "$O")"; fi
 # lines have to say so: an "OK" row would claim work that never happened, and a leftovers section
 # that skips it drops the only instruction that target ever produces.
 if grep -q "^claude PRINTED (run the slash commands in a session)$" "$O" \
-   && grep -q "Claude Code: run the four slash commands printed above in a live session" "$O"; then ok
+   && grep -q "Claude Code: run the slash commands printed above in a live session" "$O"; then ok
 else bad P5-report-claude-rows "out=$(tr '\n' ';' < "$O")"; fi
 
 # a host that was not selected contributes no leftovers
@@ -621,14 +679,33 @@ run "$TMP/h18" "$BOOT" --targets cursor --uninstall
 if [ "$RC" -eq 2 ] && ! grep -q '^clone' "$GIT_LOG" && [ ! -e "$TMP/h18/tools" ]; then ok
 else bad U4-uninstall-default-dir "rc=$RC err=$(head -c 200 "$E")"; fi
 
+# the default uninstall removes what the default install installed: fnd, and nothing else
 run "$TMP/h19" "$FIXBOOT" --targets claude --uninstall
+REMOVES="$(grep -oE '/plugin uninstall [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
 if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 0 ] \
-   && grep -qF "/plugin uninstall fnd@domaine" "$O" \
+   && [ "$REMOVES" = "fnd@domaine " ] \
    && grep -qF "/plugin marketplace remove domaine" "$O"; then ok
-else bad U5-uninstall-claude-block "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+else bad U5-uninstall-claude-block "rc=$RC removes='$REMOVES' out=$(tr '\n' ';' < "$O")"; fi
 
-if ! grep -qF "/plugin install fnd@domaine" "$O"; then ok
+if ! grep -qF "/plugin install " "$O"; then ok
 else bad U6-uninstall-not-install-block "the uninstall run printed the INSTALL slash commands"; fi
+
+# the first step of a migration removes fnd alone, never the slim and band the developer keeps
+run "$TMP/h19b" "$FIXBOOT" --targets claude --uninstall --plugins fnd
+REMOVES="$(grep -oE '/plugin uninstall [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$RC" -eq 0 ] && [ "$REMOVES" = "fnd@domaine " ]; then ok
+else bad U5b-uninstall-fnd-only "rc=$RC removes='$REMOVES' err=$(head -c 200 "$E")"; fi
+
+# dependents first: base before slim, which it requires
+run "$TMP/h19c" "$FIXBOOT" --targets claude --uninstall --plugins slim,band,base
+REMOVES="$(grep -oE '/plugin uninstall [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$RC" -eq 0 ] && [ "$REMOVES" = "base@domaine band@domaine slim@domaine " ]; then ok
+else bad U5c-uninstall-named-reversed "rc=$RC removes='$REMOVES'"; fi
+
+# removing both is no co-install
+run "$TMP/h19d" "$FIXBOOT" --targets claude --uninstall --plugins fnd,base
+if [ "$RC" -eq 0 ] && ! grep -q "must not run together" "$E"; then ok
+else bad U5d-uninstall-fnd-and-base "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # The report's two uninstall-only facts: the clone is the user's to delete, and a Cursor
 # marketplace copy is out of every script's reach.

@@ -5,8 +5,9 @@ prompt (prompt-cache countdown, model, context use, every rate-limit window, the
 the task digest and the Compact / Clear / Progress / Log buttons), the **Progress pane** with the
 task checklist and the **event log pane**. It draws and nothing else. The figures come from the
 session itself; the checklist and most log lines come from the other plugins in this marketplace,
-which publish them through `$.state`: fnd publishes the resolved task and its own events, slim
-publishes its compression events. Band reads them; it never writes another plugin's state.
+which publish them through `$.state`: base (or fnd, on an install that has not moved to base yet)
+publishes the resolved task and its own events, slim publishes its compression events. Band reads
+them; it never writes another plugin's state.
 
 Current release: **band v0.1.0**.
 
@@ -14,8 +15,8 @@ Current release: **band v0.1.0**.
 
 - Claude Code only: band is a hooks module (mods), which other hosts do not run. It ships no
   Cursor, Codex or OpenCode adapter, and `scripts/install.sh --plugin band` exits 2.
-- Works alone. With fnd it adds the task digest, the Progress pane and fnd's log lines; with slim it
-  adds slim's log lines. Neither is a dependency.
+- Works alone. With base or fnd it adds the task digest, the Progress pane and that plugin's log
+  lines; with slim it adds slim's log lines. None of them is a dependency.
 - The drawing shows in the terminal and in the desktop app's Code tab. Where nothing draws (a cloud
   session, the VS Code chat panel, `claude -p`) the hooks still run and `/band-log` and
   `/band-progress` answer as text.
@@ -37,7 +38,7 @@ keep the cost segment. Which plugins to install for what is the matrix in
 ## Status band
 
 One row, most important first. 170 columns, context at 47 %, an account reporting three
-windows, fnd resolving a task:
+windows, base resolving a task:
 
 ```text
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -68,11 +69,11 @@ The row's text truncates as a backstop, so the band never takes a second row.
 | ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`), or `—` when the engine reported no count; that count holds until a response reports a measured fill, as a reading with no fill (only the window) keeps the last one. A compaction reaches the band two ways, the `session.compact` chain and the engine's own `PostCompact` report (the settings-hook event, which arrives even when the chain skips the mod, as it did for a Compact press on Claude Code 2.1.289); reports within 30 s of each other are one compaction. Mid-turn it refreshes on a 30 s tick. |
 | rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
 | cost | `cost $12.40` | Opt-in: drawn only with `BAND_COST=1` in the session's environment. What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
-| digest | `ELC-1591 3/5 ▶ Preview themes` | The task fnd resolved, same on the terminal and the desktop: work id · checked/total rows of the workspace's `progress.md` · the current row as fnd publishes it (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet, or while the ticket you named has no workspace at all. Hidden while the Progress pane is open, when fnd resolves nothing, and without fnd. |
+| digest | `ELC-1591 3/5 ▶ Preview themes` | The task base (or fnd) resolved, same on the terminal and the desktop: work id · checked/total rows of the workspace's `progress.md` · the current row as the publisher writes it (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet, or while the ticket you named has no workspace at all. Hidden while the Progress pane is open, when the publisher resolves nothing, and without base or fnd. |
 | Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable, so the other buttons never shift: before the first reading, while a turn runs and at any context. From 80 % between turns it switches to the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). Where the engine refuses compaction from a plugin (a headless / SDK session such as the desktop app), the press runs the `/compact` slash command as if typed instead and toasts its output. Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued. |
 | Clear | `[ Clear ]`, `x: Clear` | Runs `/clear` behind the engine's own Yes/No dialog (`Clear the conversation?`), always: the dialog takes the keyboard, so a stray click or hotkey never clears, and a dismissed dialog is a No. Toasts the command's output. Pressed while a turn runs it only toasts `turn is running — press Clear again when it ends`. Dim at rest, `x: Clear` while the band holds the keyboard. |
-| Progress | `[ Progress ]`, `p: Progress` | Drawn only while fnd resolves a task (its `fnd.progress` carries a work id). Opens or closes the [Progress pane](#progress-pane); dim at rest, `p: Progress` while the band holds the keyboard |
-| Log | `[ Log ]`, `l: Log` | Drawn only while some event list (band's, fnd's or slim's) holds a line. Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
+| Progress | `[ Progress ]`, `p: Progress` | Drawn only while base or fnd resolves a task (its `base.progress` or `fnd.progress` carries a work id). Opens or closes the [Progress pane](#progress-pane); dim at rest, `p: Progress` while the band holds the keyboard |
+| Log | `[ Log ]`, `l: Log` | Drawn only while some event list (band's, base's, fnd's or slim's) holds a line. Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
 
 **Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the
 desktop frames its panel itself, so no rule is drawn there. The desktop draws the buttons on a second
@@ -125,13 +126,13 @@ and that chord or a click on the line brings it back. The collapsed state is the
 across reloads; the plugin cannot and does not reopen the band by itself.
 
 **Debug.** `/band-debug` prints the raw figures behind the band: `band.info`, the session's `usage()`
-answer, the cache state, the usage atom, the task fnd resolved (work id and branch, or `null`), the
-session root and the last render's surface and measured columns. Paste its output when a segment looks wrong on some
-surface.
+answer, the cache state, the usage atom, the task the publisher resolved (work id and branch, or
+`null`), the publisher (`base`, `fnd` or `none`), the session root and the last render's surface and
+measured columns. Paste its output when a segment looks wrong on some surface.
 
 ## Progress pane
 
-`p: Progress`, or `/band-progress`, opens a pane with the task fnd resolved: docked beside the
+`p: Progress`, or `/band-progress`, opens a pane with the task base or fnd resolved: docked beside the
 transcript in a wide fullscreen terminal, inline otherwise (the surface decides). Esc or a second
 press closes it.
 
@@ -151,20 +152,26 @@ The header is the work id · branch · checked/total, in bold. Below it come eve
 (✓ done dimmed, ▶ the digest's current row in bold, ◌ unchecked rows above ▶ dimmed — they wait on
 someone, not the queue — ☐ the rest) and the last three `- ` lines of `notes.md`, dimmed. A workspace
 without `progress.md` shows its id, the branch, one dim line
-`no progress.md yet — /fnd:save-task-context` and the notes tail. A ticket you named that has no
-workspace shows its id, the branch and `no task workspace — /fnd:save-task-context`.
+`no progress.md yet — /base:save-task-context` and the notes tail. A ticket you named that has no
+workspace shows its id, the branch and `no task workspace — /base:save-task-context`. The hint names
+the publisher's own skill: under fnd it reads `/fnd:save-task-context`.
 
-- **Which task** is fnd's decision, not band's: fnd's resolver (pin, the ticket you named, the branch,
-  the newest `progress.md`) publishes the result and band draws it. The order is in the root README's
+- **Whose task.** band takes `base.progress` when it holds a value, else `fnd.progress`. base and fnd
+  never run together, so one of them publishes; with both loaded, base's value wins, even one that
+  resolves no task.
+- **Which task** is the publisher's decision, not band's: its resolver (pin, the ticket you named, the
+  branch, the newest `progress.md`) publishes the result and band draws it. base's order is in
+  [base's README](../base/README.md#workspace), fnd's in the root README's
   [Progress pane](../../README.md#progress-pane) section.
-- **Pinning** stays an fnd command: `/fnd-progress <KEY>` pins a task, `/fnd-progress -` clears the
-  pin. `/band-progress` takes no argument.
-- **No task.** The Progress button is not drawn while fnd resolves nothing (or fnd is not installed),
-  and `/band-progress` then answers
-  `No task checklist: none of the loaded plugins publishes one (with fnd: /fnd-progress <KEY> pins one).`
+- **Pinning** stays the publisher's command: `/base-progress <KEY>` (fnd: `/fnd-progress <KEY>`) pins
+  a task, `/base-progress -` (fnd: `/fnd-progress -`) clears the pin. `/band-progress` takes no
+  argument.
+- **No task.** The Progress button is not drawn while the publisher resolves nothing (or neither base
+  nor fnd is installed), and `/band-progress` then answers
+  `No task checklist: none of the loaded plugins publishes one (with base: /base-progress <KEY> pins one; with fnd: /fnd-progress <KEY>).`
   and opens nothing. If the task goes away while the pane is open, the pane reads `no task checklist`.
-- **Redraw.** The pane and the digest redraw whenever fnd publishes a new snapshot (a Write or Edit
-  under `.claude/tasks/`, its 30 s tick, a branch or directory change, a pin).
+- **Redraw.** The pane and the digest redraw whenever the publisher writes a new snapshot (a Write or
+  Edit under `.claude/tasks/`, its 30 s tick, a branch or directory change, a pin).
 - Where the surface cannot place the pane, the command toasts `progress pane not placed: <reason>` and
   answers with the same reason.
 - Where nothing draws a pane (a cloud session, the VS Code chat panel, `claude -p`), `/band-progress`
@@ -173,8 +180,8 @@ workspace shows its id, the branch and `no task workspace — /fnd:save-task-con
 
 ## Event log pane
 
-Toasts flash and go. `l: Log`, or `/band-log`, opens a pane that keeps them: what band, fnd and slim
-did or noticed, one line each, oldest first and newest last. Esc, a second press or the engine's
+Toasts flash and go. `l: Log`, or `/band-log`, opens a pane that keeps them: what band, base, fnd and
+slim did or noticed, one line each, oldest first and newest last. Esc, a second press or the engine's
 close mark closes it. The Progress pane and the log pane can be open at once; the engine shows one and
 keeps the other as a tab. Pressing the button or running the command of the pane behind the tab
 brings that pane forward instead of closing it.
@@ -188,8 +195,8 @@ brings that pane forward instead of closing it.
 14:40  compact    manual 412k → 38k
 ```
 
-The three lists are merged by time; lines written in the same millisecond keep the order band → fnd →
-slim. The kind cell names the writer, so there is no source column. The time is local `HH:MM`; the
+The lists are merged by time; lines written in the same millisecond keep the order band → base → fnd
+→ slim. The kind cell names the writer, so there is no source column. The time is local `HH:MM`; the
 kind is dim. A line too long for the pane continues on the next row, under its own text column, on the
 terminal and the desktop alike. When the pane is shorter than the log, its first line reads
 `… 12 earlier` and the newest lines fill the rest, wrapped rows counted. With no line anywhere the pane
@@ -204,22 +211,27 @@ as text instead, one line per event, and the `Log` button is not there to press.
 | `model` | band | A `/model` switch to another model | The full model id, `claude-opus-5-5` |
 | `compact` | band | A compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them. One line per compaction, whichever of its two reports (the `session.compact` chain, the `PostCompact` event) arrives first |
 | `rate` | band | A rate window first reaches 90 % | The alarm toast's text, `5h window: 92% used, resets in 1h 05m` |
-| `workspace` | fnd | The task fnd resolved differs from the last one logged | The work id, or `none` |
+| `start` | base | base's module starts a session, once per session id | `base <version>` |
+| `install` | base | slim is missing, or fnd is loaded beside base | The install pointer, or the advice to uninstall fnd |
+| `workspace` | base, fnd | The task the plugin resolved differs from the last one logged | The work id, or `none` |
+| `refuse` | base | base refuses a reader spawn because slim is missing | `<agent>: slim is not loaded` |
+| `title` | base | base titles the session after the ticket key | The title |
+| `doctor` | base | `/base-doctor` runs | The run's counts |
 | `fnd-slim` | fnd | fnd's own MCP slimming finds a savings figure | As fnd writes it; the kind reads `slim` while slim has written no line, `fnd-slim` once it has |
 | `prompt` | fnd | fnd rewrites a pasted JSON prompt | The toast's figure |
-| `guard` | fnd | fnd's scratch-path guard refuses a tool call | The tool and the first line of the reason |
+| `guard` | base, fnd | A guard of the plugin refuses a tool call | The tool and the first line of the reason |
 | `slim` | slim | slim compresses or stubs a result | `<tool>: compressed … · <engine>`, a subagent's call prefixed with its agent type |
 | `lookup` | slim | slim's `lookup` tool answers a question | `lookup: <question…> · <model> · <tokens>` |
 
-fnd lines of kind `session`, `model`, `compact` or `rate` are not shown: those kinds are band's, and an
-fnd that still writes them (a release that does not yield, or the moment before fnd sees band loaded)
-would show each one twice.
+base or fnd lines of kind `session`, `model`, `compact` or `rate` are not shown: those kinds are band's,
+and an fnd that still writes them (a release that does not yield, or the moment before fnd sees band
+loaded) would show each one twice.
 
-Each publisher keeps its own list of at most 200 lines. Past 200, band drops its oldest line; fnd drops
-its oldest `slim` or `prompt` line first. The log lives in the session's state only: nothing is written
+Each publisher keeps its own list of at most 200 lines. Past 200, band and base drop their oldest line;
+fnd drops its oldest `slim` or `prompt` line first. The log lives in the session's state only: nothing is written
 to disk, and a new launch starts empty. `/clear` keeps the lines and adds `session clear` where the
-conversation restarted. Each plugin gates its own lines: `BAND_EVENT_LOG=0`, `FND_EVENT_LOG=0`,
-`SLIM_EVENT_LOG=0`. Toasts are unchanged by any of them.
+conversation restarted. Each plugin gates its own lines: `BAND_EVENT_LOG=0`, `BASE_EVENT_LOG=0`,
+`FND_EVENT_LOG=0`, `SLIM_EVENT_LOG=0`. Toasts are unchanged by any of them.
 
 ## Settings (userConfig)
 
@@ -272,15 +284,17 @@ finite `atMs` or a string `kind` or `text` is dropped):
 
 | Key | Publisher | Used for |
 |---|---|---|
-| `fnd.progress` | fnd | the digest, the Progress button, the Progress pane |
+| `base.progress` | base | the digest, the Progress button, the Progress pane (before `fnd.progress`) |
+| `base.events` | base | the event log pane |
+| `fnd.progress` | fnd | the digest, the Progress button, the Progress pane (when `base.progress` is null) |
 | `fnd.events` | fnd | the event log pane |
 | `slim.events` | slim | the event log pane |
 
 `$.state` refs are literals, so band names each publisher in its code: a fourth publisher is a band
 release. The Progress pane draws a generic checklist shape,
 `{ v: 1, title, subtitle?, rows: { mark: 'done' | 'current' | 'waiting' | 'todo', text }[], footer? }`;
-band maps fnd's snapshot into it (title = work id, subtitle = branch · done/total, footer = the hint and
-the notes tail).
+band maps the publisher's snapshot into it (title = work id, subtitle = branch · done/total, footer =
+the hint naming the publisher's skill and the notes tail). base and fnd write the same snapshot shape.
 
 ## Next to fnd
 
@@ -315,7 +329,7 @@ Without band, fnd draws the band and the panes itself, as before; the root READM
 - **New pane ids.** The panes are `band-log` and `band-progress`. The engine docks a pane beside the
   transcript from 144 columns, or from 110 once that id has been asked for; band's ids start without
   that history, so open each once on a wide terminal.
-- **No argument to `/band-progress`.** Pinning a task is `/fnd-progress <KEY>`.
+- **No argument to `/band-progress`.** Pinning a task is `/base-progress <KEY>` (fnd: `/fnd-progress <KEY>`).
 - **An fnd that does not yield** (0.134.0 and earlier) draws its band and writes the marker too;
   only one band can show, and load order decides which. Update fnd first.
 

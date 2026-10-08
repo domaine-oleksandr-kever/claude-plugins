@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# Simulation harness for plugins/base/scripts/doctor.cjs: every case runs the doctor against a sandbox
+# plugin root (--root), a sandbox home (--home) and a sandbox project (--project). No host, no
+# network, nothing written outside $TMPDIR. The session rows (slim's view tool, fnd loaded, the MCP
+# servers) are the mod's and live in plugins/base/hooks/mods/tests/doctor.test.ts. Exit 0 = all green.
+set -u
+unset CLAUDE_CONFIG_DIR BASE_TMP_TTL
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DOCTOR="$ROOT/plugins/base/scripts/doctor.cjs"
+HYGIENE="$ROOT/plugins/base/scripts/scratch-hygiene.cjs"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+HEAD_BEFORE="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)"
+O="$TMP/out"; E="$TMP/err"
+
+pass=0; fail=0; failures=""
+ok() { pass=$((pass + 1)); }
+bad() { fail=$((fail + 1)); failures="${failures}  [$1] $2
+"; }
+
+rc=0
+run() { rc=0; node "$DOCTOR" "$@" >"$O" 2>"$E" || rc=$?; }
+WIN_SHIM="$TMP/as-win32.cjs"
+printf "Object.defineProperty(process, 'platform', { value: 'win32' });\n" > "$WIN_SHIM"
+runwin() { rc=0; node --require "$WIN_SHIM" "$DOCTOR" "$@" >"$O" 2>"$E" || rc=$?; }
+
+# expect <label> <want-rc> [pattern ...] — every pattern must appear in stdout as a literal;
+# a pattern prefixed with ! must NOT appear.
+expect() {
+  local label="$1" want="$2" p; shift 2
+  if [ "$rc" -ne "$want" ]; then
+    bad "$label" "exit $rc, want $want :: $(tr '\n' ';' <"$O" | head -c 400) err=$(head -c 160 "$E")"; return
+  fi
+  for p in "$@"; do
+    if [ "${p#!}" != "$p" ]; then
+      if grep -qF -- "${p#!}" "$O"; then bad "$label" "stdout has forbidden '${p#!}' :: $(tr '\n' ';' <"$O" | head -c 400)"; return; fi
+    elif ! grep -qF -- "$p" "$O"; then
+      bad "$label" "stdout missing '$p' :: $(tr '\n' ';' <"$O" | head -c 400)"; return
+    fi
+  done
+  ok
+}
+
+# mkplugin <dir> — a plugin root that passes the manifest, hooks and scripts rows.
+mkplugin() {
+  local d="$1"
+  mkdir -p "$d/.claude-plugin" "$d/hooks/mods" "$d/scripts"
+  printf '{"name":"kit","version":"0.9.1","dependencies":["slim"]}\n' > "$d/.claude-plugin/plugin.json"
+  printf '{ "modules": ["./mods/register.ts"] }\n' > "$d/hooks/hooks.json"
+  printf 'export const register = () => {}\n' > "$d/hooks/mods/register.ts"
+  printf '#!/bin/sh\nexit 0\n' > "$d/scripts/fetch.sh"; chmod 755 "$d/scripts/fetch.sh"
+  printf 'trim_ws() { :; }\n' > "$d/scripts/_common.sh"; chmod 644 "$d/scripts/_common.sh"
+}
+
+# mkhome <dir> [installed-json] [settings-json] — a home with `.claude/plugins/installed_plugins.json`.
+mkhome() {
+  local d="$1"
+  mkdir -p "$d/.claude/plugins"
+  if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/.claude/plugins/installed_plugins.json"; fi
+  if [ -n "${3:-}" ]; then printf '%s\n' "$3" > "$d/.claude/settings.json"; fi
+}
+
+SLIM_USER='"slim@domaine":[{"scope":"user","version":"0.5.0"}]'
+FND_USER='"fnd@domaine":[{"scope":"user","version":"0.135.0"}]'
+installed() { printf '{"version":2,"plugins":{%s}}' "$1"; }
+
+P="$TMP/plugin"; mkplugin "$P"
+H="$TMP/home"; mkhome "$H" "$(installed "$SLIM_USER")"
+PRJ="$TMP/project"; mkdir -p "$PRJ"
+git -C "$PRJ" init -q 2>/dev/null
+PRJ_REAL="$(cd "$PRJ" && pwd -P)"
+
+# ----------------------------------------------------------------------------------- green --
+run --root "$P" --home "$H" --project "$PRJ"
+expect CD1-green 0 "base doctor — plugin root: $P" "PASS  node" "PASS  manifest  kit 0.9.1, depends on slim" \
+  "PASS  hooks     1 module(s): ./mods/register.ts" "PASS  scripts   1 shell script(s) executable" \
+  "PASS  slim      slim@domaine 0.5.0 installed and enabled" "PASS  fnd       not installed" \
+  "PASS  base-tmp  .claude/base-tmp absent — nothing written there yet" "doctor: 7 passed, 0 failed, 0 skipped" "!platform"
+
+# The shipped plugin passes its own static rows.
+run --home "$H" --project "$PRJ"
+expect CD2-shipped-plugin 0 "plugin root: $ROOT/plugins/base" "PASS  manifest  " "PASS  hooks     1 module(s): ./mods/register.ts" \
+  "PASS  scripts   " "!FAIL"
+
+run --root "$P" --home "$H" --project "$PRJ" --json
+if node -e '
+  const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const names = j.rows.map((r) => r.name).join(",");
+  if (j.root !== process.argv[2] || names !== "node,manifest,hooks,scripts,slim,fnd,base-tmp") process.exit(1);
+  if (!j.rows.every((r) => ["PASS","FAIL","SKIP","WARN"].includes(r.status) && typeof r.detail === "string")) process.exit(1);
+' "$O" "$P" 2>/dev/null && [ "$rc" -eq 0 ] && [ "$(wc -l < "$O" | tr -d ' ')" = "1" ]; then ok
+else bad CD3-json "rc=$rc out=$(head -c 300 "$O")"; fi
+
+# ----------------------------------------------------------------------------------- usage --
+run --help; expect CD4-help 0 "usage: doctor.cjs"
+run --bogus; if [ "$rc" -eq 2 ] && grep -q 'unknown argument --bogus' "$E"; then ok; else bad CD5-unknown-arg "rc=$rc err=$(head -c 200 "$E")"; fi
+run --root; if [ "$rc" -eq 2 ] && grep -q -- '--root needs a value' "$E"; then ok; else bad CD5b-missing-value "rc=$rc"; fi
+
+# -------------------------------------------------------------------------------- platform --
+runwin --root "$P" --home "$H" --project "$PRJ"
+expect CD6-windows 1 "FAIL  platform" "native Windows is unsupported" "SKIP  scripts   no exec bits on Windows"
+
+# -------------------------------------------------------------------------------- manifest --
+M="$TMP/m1"; mkplugin "$M"; rm "$M/.claude-plugin/plugin.json"
+run --root "$M" --home "$H" --project "$PRJ"; expect CD7-manifest-missing 1 "FAIL  manifest  .claude-plugin/plugin.json missing — this is not a plugin root"
+printf '{ not json' > "$M/.claude-plugin/plugin.json"
+run --root "$M" --home "$H" --project "$PRJ"; expect CD8-manifest-invalid 1 "FAIL  manifest  .claude-plugin/plugin.json invalid JSON"
+printf '{"name":"kit"}' > "$M/.claude-plugin/plugin.json"
+run --root "$M" --home "$H" --project "$PRJ"; expect CD9-manifest-no-version 1 'has no "version" string'
+printf '{"name":"kit","version":"1.0.0"}' > "$M/.claude-plugin/plugin.json"
+run --root "$M" --home "$H" --project "$PRJ"; expect CD10-manifest-no-slim-dep 1 'version 1.0.0 does not declare slim in "dependencies"'
+# The engine loads no hooks module for its own chain member's name, while validate passes: only this
+# row, which runs without the module, can say so.
+for n in core engine; do
+  printf '{"name":"%s","version":"1.0.0","dependencies":["slim"]}' "$n" > "$M/.claude-plugin/plugin.json"
+  run --root "$M" --home "$H" --project "$PRJ"
+  expect "CD10b-manifest-reserved-$n" 1 "FAIL  manifest  .claude-plugin/plugin.json name \"$n\" is the engine's own chain member" "the hooks module never loads" "!PASS  manifest"
+done
+printf '{"name":"corex","version":"1.0.0","dependencies":["slim"]}' > "$M/.claude-plugin/plugin.json"
+run --root "$M" --home "$H" --project "$PRJ"; expect CD10c-manifest-near-reserved 0 "PASS  manifest  corex 1.0.0, depends on slim"
+
+# ----------------------------------------------------------------------------------- hooks --
+K="$TMP/k1"; mkplugin "$K"; rm "$K/hooks/hooks.json"
+run --root "$K" --home "$H" --project "$PRJ"; expect CD11-hooks-missing 1 "FAIL  hooks     hooks/hooks.json missing or not a JSON object"
+printf '{ "modules": [] }' > "$K/hooks/hooks.json"
+run --root "$K" --home "$H" --project "$PRJ"; expect CD12-hooks-empty 1 "hooks/hooks.json lists no modules"
+printf '{ "modules": ["./mods/register.ts", "./mods/gone.ts"] }' > "$K/hooks/hooks.json"
+run --root "$K" --home "$H" --project "$PRJ"; expect CD13-hooks-module-missing 1 "FAIL  hooks     module(s) missing: ./mods/gone.ts"
+
+# --------------------------------------------------------------------------------- scripts --
+S="$TMP/s1"; mkplugin "$S"; chmod 644 "$S/scripts/fetch.sh"
+run --root "$S" --home "$H" --project "$PRJ"
+expect CD14-script-not-exec 1 "FAIL  scripts   fetch.sh not executable — chmod +x" "!_common.sh"
+
+# ------------------------------------------------------------------------------------ slim --
+H2="$TMP/h-noslim"; mkhome "$H2" "$(installed '')"
+run --root "$P" --home "$H2" --project "$PRJ"
+expect CD15-slim-absent 1 "FAIL  slim      not installed" "claude plugin install slim@domaine"
+H3="$TMP/h-noinstalled"; mkhome "$H3"
+run --root "$P" --home "$H3" --project "$PRJ"; expect CD15b-no-install-record 1 "FAIL  slim      not installed"
+H4="$TMP/h-slimoff"; mkhome "$H4" "$(installed "$SLIM_USER")" '{"enabledPlugins":{"slim@domaine":false}}'
+run --root "$P" --home "$H4" --project "$PRJ"
+expect CD16-slim-disabled-user 1 "FAIL  slim      slim@domaine 0.5.0 is installed but disabled — enable it in /plugin"
+PRJ2="$TMP/project2"; mkdir -p "$PRJ2/.claude"; printf '{"enabledPlugins":{"slim@domaine":false}}\n' > "$PRJ2/.claude/settings.local.json"
+run --root "$P" --home "$H" --project "$PRJ2"; expect CD17-slim-disabled-project-local 1 "is installed but disabled"
+printf '{"enabledPlugins":{"slim@domaine":true}}\n' > "$PRJ2/.claude/settings.json"
+run --root "$P" --home "$H" --project "$PRJ2"; expect CD17b-local-beats-shared 1 "is installed but disabled"
+SLIM_PROJ="\"slim@domaine\":[{\"scope\":\"project\",\"projectPath\":\"$PRJ\",\"version\":\"0.5.1\"}]"
+H5="$TMP/h-slimproj"; mkhome "$H5" "$(installed "$SLIM_PROJ")"
+run --root "$P" --home "$H5" --project "$PRJ"; expect CD18-slim-this-project 0 "PASS  slim      slim@domaine 0.5.1 installed and enabled"
+run --root "$P" --home "$H5" --project "$PRJ2"; expect CD19-slim-other-project 1 "FAIL  slim      not installed"
+
+# ------------------------------------------------------------------------------------- fnd --
+H6="$TMP/h-fnd"; mkhome "$H6" "$(installed "$SLIM_USER,$FND_USER")"
+run --root "$P" --home "$H6" --project "$PRJ"
+expect CD20-fnd-enabled 1 "FAIL  fnd       fnd@domaine 0.135.0 is installed and enabled — fnd and base must not run together: claude plugin uninstall fnd@domaine"
+H7="$TMP/h-fndoff"; mkhome "$H7" "$(installed "$SLIM_USER,$FND_USER")" '{"enabledPlugins":{"fnd@domaine":false}}'
+run --root "$P" --home "$H7" --project "$PRJ"
+expect CD21-fnd-disabled 0 "WARN  fnd       fnd@domaine 0.135.0 is installed but disabled" ", 1 warned"
+
+# CLAUDE_CONFIG_DIR stands in for ~/.claude without --home, and --home overrides it.
+rc=0; CLAUDE_CONFIG_DIR="$H6/.claude" node "$DOCTOR" --root "$P" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD22-claude-config-dir 1 "FAIL  fnd       fnd@domaine 0.135.0"
+rc=0; CLAUDE_CONFIG_DIR="$H6/.claude" node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD23-home-beats-config-dir 0 "PASS  fnd       not installed"
+
+# -------------------------------------------------------------------------------- base-tmp --
+CT="$PRJ/.claude/base-tmp/playwright"; mkdir -p "$CT"
+printf '12345' > "$CT/fresh.png"
+printf '1234567890' > "$CT/old.png"; touch -t 202001010000 "$CT/old.png"
+run --root "$P" --home "$H" --project "$PRJ"
+expect CD24-base-tmp-unignored 0 "WARN  base-tmp  .claude/base-tmp: 2 file(s), 15 B; 1 older than 24 h (the next session sweeps them); not ignored by git"
+node "$HYGIENE" --sweep "$PRJ" --ttl-hours 0 >/dev/null 2>&1
+run --root "$P" --home "$H" --project "$PRJ"
+expect CD25-base-tmp-ignored 0 "PASS  base-tmp  .claude/base-tmp: 2 file(s), 15 B; 1 older than 24 h (the next session sweeps them); ignored by git"
+if grep -qx '/.claude/base-tmp/' "$PRJ_REAL/.git/info/exclude"; then ok; else bad CD25b-stamp "exclude=$(tr '\n' ';' < "$PRJ_REAL/.git/info/exclude" 2>&1)"; fi
+rc=0; BASE_TMP_TTL=0 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD26-ttl-off 0 "2 file(s), 15 B; the sweep is off (BASE_TMP_TTL=0)" "!older than"
+rc=0; BASE_TMP_TTL=junk node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD27-ttl-junk-default 0 "1 older than 24 h"
+NOGIT="$TMP/nogit"; mkdir -p "$NOGIT/.claude/base-tmp"; printf 'x' > "$NOGIT/.claude/base-tmp/a"
+rc=0; (cd "$TMP" && GIT_CEILING_DIRECTORIES="$TMP" node "$DOCTOR" --root "$P" --home "$H" --project "$NOGIT") >"$O" 2>"$E" || rc=$?
+expect CD28-base-tmp-no-git 0 "PASS  base-tmp  .claude/base-tmp: 1 file(s), 1 B" "!not ignored" "!ignored by git"
+# A symlinked component is never walked: the count would be someone else's files.
+LNK="$TMP/linked"; mkdir -p "$LNK/.claude" "$TMP/elsewhere"; printf 'x' > "$TMP/elsewhere/f"
+ln -s "$TMP/elsewhere" "$LNK/.claude/base-tmp"
+run --root "$P" --home "$H" --project "$LNK"; expect CD29-base-tmp-symlink 0 "PASS  base-tmp  .claude/base-tmp absent"
+
+# The suite never touched the real checkout.
+if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad CD-head "HEAD moved"; fi
+
+echo "base-doctor-sim: $pass passed, $fail failed"
+if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

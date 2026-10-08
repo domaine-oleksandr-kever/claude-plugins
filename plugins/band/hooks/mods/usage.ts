@@ -4,7 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import type { BandEvent, BandEventKind, BandUsage } from '../../types'
 import { DEBUG_COMMAND, fmtK, pushEvent } from './events.ts'
-import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, rateCard, seedsTtl, toUsage, ttlMsOf } from './lib.ts'
+import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, pickProgress, rateCard, seedsTtl, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 
 const TICK_MS = 30_000
@@ -18,7 +18,8 @@ const tick = atom({ plugin: 'band', key: 'tick' } as const, 0)
 const rateAlarmed = atom({ plugin: 'band', key: 'rateAlarmed' } as const, false)
 const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[])
 const info = atom({ plugin: 'band', key: 'info' } as const, null)
-const progress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
+const baseProgress = atom({ plugin: 'base', key: 'progress' } as const, null)
+const fndProgress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 
 type $ = EngineInterface
 
@@ -110,7 +111,7 @@ async function learnTtl($: $, ttlMs: number, ttlSource: 'model-switch' | 'agent'
   if (ttlMs === HOUR_MS) await $.store.set(STORE_TTL, ttlMs)
 }
 
-/** fnd writes the snapshot: only a string or null id and branch are shown. */
+/** Another plugin writes the snapshot: only a string or null id and branch are shown. */
 function progressLine(p: unknown): { workId: string | null; branch: string | null } | null {
   if (p === null || typeof p !== 'object') return null
   const s = p as { workId?: unknown; branch?: unknown }
@@ -157,13 +158,15 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const root = await $.session.root().catch(err => `error: ${String(err)}`)
     const c = await read($, cache)
     const u = await read($, usage)
+    const picked = pickProgress(await read($, baseProgress), await read($, fndProgress))
     const lines = [
       'band debug',
       `info: ${JSON.stringify(await read($, info))}`,
       `usage(): ${JSON.stringify(raw)}`,
       `cache: ${JSON.stringify(c)}`,
       `usage atom: ${JSON.stringify(u)}`,
-      `progress: ${JSON.stringify(progressLine(await read($, progress)))}`,
+      `progress: ${JSON.stringify(progressLine(picked?.snapshot ?? null))}`,
+      `publisher: ${picked?.publisher ?? 'none'}`,
       `root: ${root}`,
       `render: ${JSON.stringify(lastRender)}`,
       `tick: ${await read($, tick)}`,

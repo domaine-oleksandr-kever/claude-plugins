@@ -392,14 +392,27 @@ export function oneHourCacheTokens(result: unknown): number {
   return typeof n === 'number' ? n : 0
 }
 
-export const NO_WORKSPACE_HINT = 'no task workspace — /fnd:save-task-context'
-export const NO_PROGRESS_HINT = 'no progress.md yet — /fnd:save-task-context'
+/** The two plugins that publish a task snapshot; fnd and base never run together. */
+export type Publisher = 'base' | 'fnd'
+
+/** The publisher's own skill in each hint: a base task is saved by base's, an fnd task by fnd's. */
+export const HINTS: Record<Publisher, { workspace: string; progress: string }> = {
+  base: { workspace: 'no task workspace — /base:save-task-context', progress: 'no progress.md yet — /base:save-task-context' },
+  fnd: { workspace: 'no task workspace — /fnd:save-task-context', progress: 'no progress.md yet — /fnd:save-task-context' },
+}
+
+/** base.progress ?? fnd.progress: the first non-null snapshot and who wrote it; null when neither publishes. */
+export function pickProgress(base: unknown, fnd: unknown): { snapshot: unknown; publisher: Publisher } | null {
+  if (base !== null && base !== undefined) return { snapshot: base, publisher: 'base' }
+  if (fnd !== null && fnd !== undefined) return { snapshot: fnd, publisher: 'fnd' }
+  return null
+}
 
 const MARKS: ReadonlySet<string> = new Set<ChecklistMark>(['done', 'current', 'waiting', 'todo'])
 
 type Snapshot = Record<string, unknown> & { workId: string }
 
-/** fnd writes the snapshot, so every field is checked: a value that is not a finite number reads 0. */
+/** Another plugin writes the snapshot, so every field is checked: a value that is not a finite number reads 0. */
 function snapshotOf(p: unknown): Snapshot | null {
   if (p === null || typeof p !== 'object') return null
   const s = p as Record<string, unknown>
@@ -408,8 +421,8 @@ function snapshotOf(p: unknown): Snapshot | null {
 
 const num = (x: unknown): number => (typeof x === 'number' && Number.isFinite(x) ? x : 0)
 
-/** fnd's resolved task as the generic checklist the Progress pane draws; null while no task resolves. */
-export function toChecklist(p: unknown): Checklist | null {
+/** The published task as the generic checklist the Progress pane draws, hints naming `publisher`'s skill; null while no task resolves. */
+export function toChecklist(p: unknown, publisher: Publisher = 'fnd'): Checklist | null {
   const s = snapshotOf(p)
   if (s === null) return null
   const done = num(s.done)
@@ -419,7 +432,7 @@ export function toChecklist(p: unknown): Checklist | null {
   const rows: ChecklistRow[] = (Array.isArray(s.rows) ? s.rows : [])
     .filter((r): r is { mark?: unknown; text: string } => r !== null && typeof r === 'object' && typeof (r as { text?: unknown }).text === 'string')
     .map(r => ({ mark: typeof r.mark === 'string' && MARKS.has(r.mark) ? (r.mark as ChecklistMark) : 'todo', text: r.text }))
-  const hint = s.hasWorkspace === false ? NO_WORKSPACE_HINT : total === 0 ? NO_PROGRESS_HINT : null
+  const hint = s.hasWorkspace === false ? HINTS[publisher].workspace : total === 0 ? HINTS[publisher].progress : null
   const notes = Array.isArray(s.notesTail) ? s.notesTail.filter((l): l is string => typeof l === 'string') : []
   const footer = [...(hint === null ? [] : [hint]), ...notes]
   return { v: 1, title: s.workId, ...(subtitle ? { subtitle } : {}), rows, ...(footer.length ? { footer } : {}) }

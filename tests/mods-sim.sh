@@ -53,6 +53,10 @@ case "$checked" in
   *" band "*) ok ;;
   *) bad discovery-band "plugins/band/hooks/hooks.json not found — no band module was validated (checked:$checked)" ;;
 esac
+case "$checked" in
+  *" base "*) ok ;;
+  *) bad discovery-base "plugins/base/hooks/hooks.json not found — no base module was validated (checked:$checked)" ;;
+esac
 
 echo "mods-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

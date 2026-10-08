@@ -1,15 +1,15 @@
 import { describe, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { NO_CHECKLIST_TEXT } from '../checklist.tsx'
-import { SNAP, SURFACES, peek, sibFnd, test } from './world.tsx'
+import { SNAP, SURFACES, baseState, peek, sibFnd, test } from './world.tsx'
 
 const NOW = 1_800_000_000_000
 const PANE = 'band-progress'
 
 type Pane = { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }
 
-/** The engine beneath band, with fnd's task snapshot fed from `vars` and a pane host that records opens, closes and toasts. */
-function world(on: On, o: { progress?: unknown; panes?: Pane[] } = {}) {
+/** The engine beneath band, with fnd's task snapshot fed from `vars`, base's from `base`, and a pane host that records opens, closes and toasts. */
+function world(on: On, o: { progress?: unknown; base?: unknown; panes?: Pane[] } = {}) {
   const w = {
     vars: (o.progress === undefined ? {} : { SIB_FND_PROGRESS: JSON.stringify(o.progress) }) as Record<string, string>,
     panes: o.panes ?? ([] as Pane[]),
@@ -21,6 +21,7 @@ function world(on: On, o: { progress?: unknown; panes?: Pane[] } = {}) {
   }
   mock.clock(on, { now: NOW })
   mock.store(on)
+  if (o.base !== undefined) baseState(on, { progress: o.base })
   on('env.get', async (_$, e) => ({ value: w.vars[e.name] }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('session.id', async () => ({ value: 's1' }))
@@ -236,6 +237,57 @@ describe('the pane', () => {
       w.vars.SIB_FND_PROGRESS = JSON.stringify({ ...SNAP, workId: 'ELC-9', done: 5, current: null })
       await sibFnd($)
       expect((await textsOf(ui))[0]).toBe('ELC-9 · feature/ELC-1591-x · 5/5')
+      await ui.unmount()
+    })
+  }
+})
+
+describe('base publishes the task', () => {
+  const BASE = { ...SNAP, workId: 'ABC-7', branch: 'feature/ABC-7-x' }
+
+  test('NO_CHECKLIST_TEXT names both pin commands', () => {
+    expect(NO_CHECKLIST_TEXT).toContain('/base-progress <KEY>')
+    expect(NO_CHECKLIST_TEXT).toContain('/fnd-progress <KEY>')
+  })
+
+  for (const [name, base, progress] of [
+    ['base and fnd both empty', null, null],
+    ['base resolved no task, no fnd', { workId: null, branch: 'main' }, undefined],
+    ['base resolved no task beside an fnd task', { workId: null, branch: 'main' }, SNAP],
+  ] as const) {
+    test(`${name} → the no-checklist answer, nothing opened`, async ($, on) => {
+      const w = world(on, { base, ...(progress === undefined ? {} : { progress }) })
+      await start($)
+      expect(await run($)).toEqual({ text: NO_CHECKLIST_TEXT })
+      expect(w.opens).toEqual([])
+    })
+  }
+
+  test("a base task opens the pane; where no surface draws panes the text is base's checklist", async ($, on) => {
+    const w = world(on, { base: BASE })
+    await start($)
+    expect(await run($)).toEqual({ text: 'Progress pane opened.' })
+    expect((await peek($)).paneShown).toBe(true)
+    w.panes = []
+    w.surfaces = []
+    expect((await run($)).text.split('\n')[0]).toBe('ABC-7 · feature/ABC-7-x · 3/5')
+  })
+
+  for (const surface of SURFACES) {
+    test(`${surface}: base's task wins over fnd's; its hints name /base:save-task-context`, async ($, on) => {
+      const base = { ...BASE, branch: null, hasWorkspace: false, done: 0, total: 0, current: null, rows: [], notesTail: [] }
+      world(on, { base, progress: SNAP })
+      await start($)
+      const ui = await mountPane($, surface)
+      expect(await textsOf(ui)).toEqual(['ABC-7', 'no task workspace — /base:save-task-context'])
+      await ui.unmount()
+    })
+
+    test(`${surface}: a base workspace without progress.md → the base no-progress.md hint`, async ($, on) => {
+      world(on, { base: { ...BASE, branch: null, done: 0, total: 0, current: null, rows: [], notesTail: [] } })
+      await start($)
+      const ui = await mountPane($, surface)
+      expect(await textsOf(ui)).toEqual(['ABC-7', 'no progress.md yet — /base:save-task-context'])
       await ui.unmount()
     })
   }

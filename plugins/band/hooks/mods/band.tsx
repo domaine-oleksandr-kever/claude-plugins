@@ -1,8 +1,8 @@
 // Status band: the AbovePrompt row drawn from the atoms, the Compact and Clear presses and the terminal's model
 // picker, which unfolds into the row itself: the band region clips anything drawn outside its own rows, so no
 // list can pop over the transcript. A desktop draws the buttons on a second row under the figures.
-// Render only reads: band's atoms (usage.ts and checklist.tsx write them), fnd's task snapshot for the digest
-// and the Progress button, every publisher's event list for the Log button. The Progress and Log presses are
+// Render only reads: band's atoms (usage.ts and checklist.tsx write them), base's or fnd's task snapshot for the
+// digest and the Progress button, every publisher's event list for the Log button. The Progress and Log presses are
 // answered by the `ui.press` hooks on elements `progress` (checklist.tsx) and `log` (log.tsx).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, RenderNode } from 'claude-code'
@@ -28,6 +28,7 @@ import {
   layout,
   modelOptions,
   pctLevel,
+  pickProgress,
   rateCard,
   rateText,
   splitLabel,
@@ -43,7 +44,9 @@ const paneShown = atom({ plugin: 'band', key: 'paneShown' } as const, false)
 const bandFocused = atom({ plugin: 'band', key: 'bandFocused' } as const, false)
 const modelPicker = atom({ plugin: 'band', key: 'modelPicker' } as const, false)
 const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[])
-const progress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
+const baseProgress = atom({ plugin: 'base', key: 'progress' } as const, null)
+const fndProgress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
+const baseEvents = atom({ plugin: 'base', key: 'events' } as const, [] as ForeignEvent[])
 const fndEvents = atom({ plugin: 'fnd', key: 'events' } as const, [] as ForeignEvent[])
 const slimEvents = atom({ plugin: 'slim', key: 'events' } as const, [] as ForeignEvent[])
 
@@ -155,11 +158,11 @@ export function registerBand(on: On, options: PluginOptions): void {
     if (u.ctxPct === null && u.rates.length === 0 && m === null && c.anchorMs === null) return next(e)
 
     const isWorking = e.props.isWorking
-    const snapshot = await read($, progress)
+    const snapshot = pickProgress(await read($, baseProgress), await read($, fndProgress))?.snapshot ?? null
     const digest = !isPaneShown ? digestOf(snapshot) : null
     const hasChecklist = toChecklist(snapshot) !== null
     // Short-circuit: while band's own list holds a line the foreign lists are not read, so their writes do not redraw the band.
-    const hasEvents = take(await read($, events)).length > 0 || merged([], await read($, fndEvents), await read($, slimEvents)).length > 0
+    const hasEvents = take(await read($, events)).length > 0 || merged([], await read($, baseEvents), await read($, fndEvents), await read($, slimEvents)).length > 0
     const isDesktop = e.surface === 'desktop'
     drawnOn = e.surface
     lastRender.surface = e.surface

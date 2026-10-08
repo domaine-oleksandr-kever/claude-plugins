@@ -27,11 +27,11 @@ export type ForeignEvent = { atMs: number; kind: string; text: string }
 
 export type ChecklistMark = 'done' | 'current' | 'waiting' | 'todo'
 export type ChecklistRow = { mark: ChecklistMark; text: string }
-/** The generic shape the Progress pane draws; step 1 maps fnd's snapshot into it. */
+/** The generic shape the Progress pane draws; band maps the published task snapshot into it. */
 export type Checklist = { v: 1; title: string; subtitle?: string; rows: ChecklistRow[]; footer?: string[] }
 
-/** fnd's resolved task (its FndProgress) as band reads it; every field is checked before use. */
-export type FndProgressSnapshot =
+/** A publisher's resolved task (base's BaseProgress, fnd's FndProgress) as band reads it; every field is checked before use. */
+export type ProgressSnapshot =
   | { workId: string; branch: string | null; hasWorkspace: boolean; done: number; total: number; current: string | null; rows: ChecklistRow[]; notesTail: string[]; mtimeMs: number }
   | { workId: null; branch: string | null }
 
@@ -54,10 +54,15 @@ declare module 'claude-code' {
       /** band's own event lines, oldest first, at most 200; stays [] under BAND_EVENT_LOG=0 */
       events: BandEvent[]
     }
+    /** Owned and written by the base plugin; band only reads it (null / [] without base). */
+    base: {
+      events: ForeignEvent[]
+      progress: ProgressSnapshot | null
+    }
     /** Owned and written by the fnd plugin; band only reads it (null / [] without fnd). */
     fnd: {
       events: ForeignEvent[]
-      progress: FndProgressSnapshot | null
+      progress: ProgressSnapshot | null
     }
     /** Owned and written by the slim plugin; band only reads it. */
     slim: {

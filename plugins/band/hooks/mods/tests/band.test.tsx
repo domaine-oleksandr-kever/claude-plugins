@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { CRIT, cells, glyphText } from '../lib.ts'
-import { KEPT, MIN, SNAP, SURFACES, T0, TASK, logged, mainTurn, measure, modelSwitch, peek, peekCache, postCompact, sibFnd, sibSlim, start, test, world } from './world.tsx'
+import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, modelSwitch, peek, peekCache, postCompact, sibFnd, sibSlim, start, test, world } from './world.tsx'
 import type { Surface } from './world.tsx'
 
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { bodyRows: 10 }, view: {} }
@@ -916,6 +916,39 @@ describe('buttons from published state', () => {
       await sibSlim($)
       expect(await ui.find({ key: 'log' })).toBeUndefined()
     })
+
+    test(`${surface}: a base task draws Progress and the digest; base's task wins over fnd's`, async ($, on) => {
+      world(on, {}, TASK)
+      baseState(on, { progress: { ...SNAP, workId: 'ABC-7', done: 1, current: 'Plan' } })
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 47 })
+      const ui = await mount($, surface)
+      expect(await keys(ui)).toEqual(['compact', 'clear', 'progress', 'log'])
+      expect(await textOf(ui, /ABC-7/)).toBe(`${surface === 'desktop' ? '📋 ' : ''}ABC-7 1/5 ▶ Plan`)
+      expect(await textOf(ui, /ELC-1591/)).toBeUndefined()
+    })
+
+    test(`${surface}: base resolving no task and no fnd → no Progress button, no digest`, async ($, on) => {
+      world(on)
+      baseState(on, { progress: { workId: null, branch: 'main' }, events: [] })
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 47 })
+      expect(await keys(await mount($, surface))).toEqual(['compact', 'clear', 'log'])
+    })
+
+    for (const [name, events, shown] of [
+      ["a base line", [{ atMs: T0, kind: 'guard', text: 'Bash: --no-verify' }], true],
+      ["base's band-kind lines only", [{ atMs: T0, kind: 'session', text: 'start' }], false],
+      ['an empty base list', [], false],
+    ] as const) {
+      test(`${surface}: ${name} with BAND_EVENT_LOG=0 → Log ${shown ? 'drawn' : 'not drawn'}`, async ($, on) => {
+        world(on, {}, { BAND_EVENT_LOG: '0' })
+        baseState(on, { events })
+        await start($, surface)
+        await measure($, { window: 200_000, percent: 47 })
+        expect((await (await mount($, surface)).find({ key: 'log' })) !== undefined).toBe(shown)
+      })
+    }
 
     test(`${surface}: band's own session line alone draws Log`, async ($, on) => {
       world(on)

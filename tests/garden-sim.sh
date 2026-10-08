@@ -116,6 +116,12 @@ printf '\n\nSee [the plan](docs/gone.md).\n' >> "$S/plugins/slim/README.md"
 run --root "$S"
 expect G7b-sibling-plugin-readme 1 "FAIL  links:plugins/slim/README.md" "docs/gone.md"
 
+# G7c: base's README is one of them (garden walks a sibling plugin's README only, not its other prose).
+S="$(sandbox corereadme)"
+printf '\n\nSee [the contract](ARCHITECTURE-gone.md).\n' >> "$S/plugins/base/README.md"
+run --root "$S"
+expect G7c-base-readme 1 "FAIL  links:plugins/base/README.md" "ARCHITECTURE-gone.md"
+
 # --------------------------------------------------------------------- skill size watchlist --
 # G8: the Codex cap is unconfirmed (M1b), so an oversized skill WARNs and the run still exits 0 —
 # a size watchlist that blocked CI would be a guess enforced as a rule.
@@ -156,8 +162,8 @@ S="$(sandbox verdrift)"
 sed 's/"version": "[^"]*"/"version": "0.1.2"/' "$S/$PLUGIN/.cursor-plugin/plugin.json" > "$S/tmp.json"
 mv "$S/tmp.json" "$S/$PLUGIN/.cursor-plugin/plugin.json"
 run --root "$S"
-# The remediation is asserted as the full runnable path: `scripts/bump-version.cjs` does not exist
-# from the repo root, and a fix line that MODULE_NOT_FOUNDs leaves a red garden with no way out.
+# The remediation is asserted as the full runnable path: fnd's own copy defaults to fnd, while the
+# repo-level `scripts/bump-version.cjs` refuses a run without --plugin, so only the former clears it.
 expect G13-manifest-drift 1 "FAIL  version:manifests" "drift:" ".cursor-plugin/plugin.json=0.1.2" \
   "node plugins/fnd/scripts/bump-version.cjs"
 

@@ -200,7 +200,7 @@ else bad marketplace-plugins "no plugin names readable from .claude-plugin/marke
 for p in $MKT_PLUGINS; do has "$README" "/plugin install $p@domaine" "readme-install-$p"; done
 # Codex reads the Claude Code marketplace file, so it lists every Claude-Code-only plugin too; its
 # quickstart must name each one in the warning
-has "$ROOT/docs/README.codex.md" 'do not install either from Codex `/plugins`' codex-claude-only-warning
+has "$ROOT/docs/README.codex.md" 'do not install any of them from Codex `/plugins`' codex-claude-only-warning
 for p in $MKT_PLUGINS; do
   [ "$p" = fnd ] && continue
   grep -qF -- "**$p**" "$ROOT/docs/README.codex.md" && ok || bad "codex-warning-$p" "docs/README.codex.md does not name **$p** among the Claude-Code-only plugins"
@@ -245,19 +245,20 @@ done
 # Backticked repo-relative paths only: globs, host paths (~/…), placeholders (<…>) and URLs are
 # addressed to the reader's machine, not to this checkout.
 check_paths() {
-  local file="$1" label="$2" p
+  local file="$1" label="$2" base="${3:-$PLUGIN_DIR}" p
   for p in $(grep -ohE '`(plugins/[a-z0-9-]+|scripts|tests|docs)/[A-Za-z0-9._/-]+`' "$file" |
                tr -d '`' | sort -u); do
     case "$p" in *'*'*|*'<'*) continue ;; esac
     # `scripts/json-slim.cjs` addresses the plugin root, `scripts/install.sh` the repo root;
-    # both spellings are correct in their own context, so either resolution counts.
-    if [ -e "$ROOT/$p" ] || [ -e "$PLUGIN_DIR/$p" ]; then ok
+    # both spellings are correct in their own context, so either resolution counts. A plugin's own
+    # README addresses its own root, never fnd's.
+    if [ -e "$ROOT/$p" ] || [ -e "$base/$p" ]; then ok
     else bad "$label" "${file#$ROOT/} names a path that does not exist: $p"; fi
   done
 }
 check_paths "$README" path-readme
 for f in "$ROOT"/plugins/*/README.md; do
-  [ -f "$f" ] && check_paths "$f" "path-${f#$ROOT/}"
+  [ -f "$f" ] && check_paths "$f" "path-${f#$ROOT/}" "$(dirname "$f")"
 done
 while IFS= read -r d; do
   [ -n "$d" ] || continue

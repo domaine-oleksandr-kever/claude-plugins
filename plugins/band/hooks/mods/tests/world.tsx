@@ -1,5 +1,5 @@
 // Shared test kit for band's suites: the engine beneath band, the fnd and slim plugins beside it (inline, fed
-// from env), and a reader of band's own state. Not a test file itself: only *.test.ts(x) run.
+// from env), base's published state, and a reader of band's own state. Not a test file itself: only *.test.ts(x) run.
 import { mock, test as kitTest } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -49,6 +49,16 @@ export const SLIM_SIBLING = {
       return { text: 'ok' }
     })
   },
+}
+
+/**
+ * base's published state, answered beneath band as state.get, so the test needs no sibling plugin that writes
+ * base.*. Change the returned values and read again; no write happens, so nothing redraws on its own.
+ */
+export function baseState(on: On, values: { progress?: unknown; events?: unknown } = {}): Record<string, unknown> {
+  const base: Record<string, unknown> = { ...values }
+  on('state.get', { plugin: 'base' } as any, async (_$: any, e: any) => ({ value: { value: base[e.key], version: base[e.key] === undefined ? 0 : 1 } }) as any)
+  return base
 }
 
 /** Reads band's own state from beside it: any plugin reads any value. */

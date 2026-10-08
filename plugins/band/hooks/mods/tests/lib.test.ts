@@ -35,6 +35,7 @@ import {
   layout,
   modelOptions,
   pctLevel,
+  pickProgress,
   rateLabel,
   rowText,
   shortModel,
@@ -450,6 +451,35 @@ describe('toChecklist', () => {
     expect(c?.subtitle).toBe('feature/ELC-1591-x')
     expect(c?.footer).toEqual(['no progress.md yet — /fnd:save-task-context', '- ok'])
     expect(toChecklist({ workId: 'ELC-1', rows: 'x', notesTail: 'y' })).toEqual({ v: 1, title: 'ELC-1', rows: [], footer: ['no progress.md yet — /fnd:save-task-context'] })
+  })
+
+  test("a base snapshot's hints name base's skill; the rows and figures read the same", () => {
+    const bare = { workId: 'ABC-7', branch: 'main', hasWorkspace: false, done: 0, total: 0, current: null, rows: [], notesTail: [], mtimeMs: 0 }
+    expect(toChecklist(bare, 'base')?.footer).toEqual(['no task workspace — /base:save-task-context'])
+    expect(toChecklist({ ...SNAP, done: 0, total: 0, rows: [] }, 'base')?.footer).toEqual(['no progress.md yet — /base:save-task-context', '- two', '- three'])
+    expect(toChecklist(bare, 'fnd')?.footer).toEqual(['no task workspace — /fnd:save-task-context'])
+    expect(toChecklist(SNAP, 'base')).toEqual(toChecklist(SNAP, 'fnd'))
+    expect(toChecklist({ workId: null, branch: 'main' }, 'base')).toBeNull()
+  })
+})
+
+describe('pickProgress', () => {
+  const BASE = { ...SNAP, workId: 'ABC-7' }
+
+  test('base.progress ?? fnd.progress: the first non-null snapshot, tagged with its publisher', () => {
+    expect(pickProgress(BASE, null)).toEqual({ snapshot: BASE, publisher: 'base' })
+    expect(pickProgress(null, SNAP)).toEqual({ snapshot: SNAP, publisher: 'fnd' })
+    expect(pickProgress(undefined, SNAP)).toEqual({ snapshot: SNAP, publisher: 'fnd' })
+    expect(pickProgress(BASE, SNAP)).toEqual({ snapshot: BASE, publisher: 'base' })
+  })
+
+  test("base resolving no task still wins over fnd's task: one publisher runs at a time", () => {
+    expect(pickProgress({ workId: null, branch: 'main' }, SNAP)).toEqual({ snapshot: { workId: null, branch: 'main' }, publisher: 'base' })
+  })
+
+  test('both empty → null', () => {
+    expect(pickProgress(null, null)).toBeNull()
+    expect(pickProgress(undefined, undefined)).toBeNull()
   })
 })
 

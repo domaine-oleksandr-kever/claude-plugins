@@ -15,7 +15,7 @@ export function pushEvent(list: readonly BandEvent[], ev: BandEvent): BandEvent[
   return list.length < EVENT_CAP ? [...list, ev] : [...list.slice(1), ev]
 }
 
-/** The kinds band writes itself; an fnd that predates the yield writes them too, and they would show twice. */
+/** The kinds band writes itself; an fnd that predates the yield writes them too, and they would show twice. Dropped from base's list as well. */
 const OWN_KINDS: ReadonlySet<string> = new Set(['session', 'model', 'compact', 'rate'])
 
 /** Another plugin writes the list: an entry without a finite `atMs` or a string `kind`/`text` is dropped, extra fields too. */
@@ -32,16 +32,17 @@ export function take(list: unknown): ForeignEvent[] {
 }
 
 /**
- * band's, fnd's and slim's lines in one list, oldest first; on equal times band → fnd → slim, each list in
- * its own order. Beside slim's lines fnd's own compression lines read `fnd-slim`, so the kind cell names
- * who compressed.
+ * band's, base's, fnd's and slim's lines in one list, oldest first; on equal times band → base → fnd → slim,
+ * each list in its own order. Beside slim's lines fnd's own compression lines read `fnd-slim`, so the kind
+ * cell names who compressed.
  */
-export function merged(own: unknown, fnd: unknown, slim: unknown): ForeignEvent[] {
+export function merged(own: unknown, base: unknown, fnd: unknown, slim: unknown): ForeignEvent[] {
   const s = take(slim)
+  const c = take(base).filter(e => !OWN_KINDS.has(e.kind))
   const f = take(fnd)
     .filter(e => !OWN_KINDS.has(e.kind))
     .map(e => (s.length && e.kind === 'slim' ? { ...e, kind: 'fnd-slim' } : e))
-  return [...take(own), ...f, ...s].map((e, i) => ({ e, i })).sort((a, b) => a.e.atMs - b.e.atMs || a.i - b.i).map(x => x.e)
+  return [...take(own), ...c, ...f, ...s].map((e, i) => ({ e, i })).sort((a, b) => a.e.atMs - b.e.atMs || a.i - b.i).map(x => x.e)
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0')

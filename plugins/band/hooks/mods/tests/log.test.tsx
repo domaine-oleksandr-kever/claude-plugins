@@ -2,7 +2,7 @@ import { describe, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { BandEvent } from '../../types'
 import { EVENT_CAP, PREFIX_COLS, fmtK, hhmm, kindCell, merged, newestFitting, pushEvent, take, textRows } from '../events.ts'
-import { SNAP, sibFnd, sibSlim, test } from './world.tsx'
+import { SNAP, baseState, sibFnd, sibSlim, test } from './world.tsx'
 
 const NOW = new Date(2027, 0, 15, 9, 5).getTime()
 const PANE = 'band-log'
@@ -126,23 +126,31 @@ describe('event helpers', () => {
 })
 
 describe('merged', () => {
-  test('oldest first; on a tie band → fnd → slim, each list in its own order', () => {
+  test('oldest first; on a tie band → base → fnd → slim, each list in its own order', () => {
     const own = [{ atMs: 10, kind: 'session', text: 'start' }, { atMs: 30, kind: 'model', text: 'm' }]
+    const base = [{ atMs: 30, kind: 'refuse', text: 'c1' }, { atMs: 2, kind: 'start', text: 'base 0.1.0' }]
     const fnd = [{ atMs: 30, kind: 'guard', text: 'g1' }, { atMs: 30, kind: 'workspace', text: 'w' }, { atMs: 5, kind: 'prompt', text: 'p' }]
     const slim = [{ atMs: 30, kind: 'lookup', text: 'tie' }, { atMs: 20, kind: 'lookup', text: 'mid' }]
-    expect(merged(own, fnd, slim).map(e => e.text)).toEqual(['p', 'start', 'mid', 'm', 'g1', 'w', 'tie'])
+    expect(merged(own, base, fnd, slim).map(e => e.text)).toEqual(['base 0.1.0', 'p', 'start', 'mid', 'm', 'c1', 'g1', 'w', 'tie'])
+    expect(merged(own, [], fnd, slim).map(e => e.text)).toEqual(['p', 'start', 'mid', 'm', 'g1', 'w', 'tie'])
   })
 
-  test("fnd's session, model, compact and rate lines are dropped: band writes those itself", () => {
-    const fnd = ['session', 'model', 'compact', 'rate', 'workspace'].map((kind, i) => ({ atMs: i, kind, text: kind }))
-    expect(merged([], fnd, []).map(e => e.kind)).toEqual(['workspace'])
+  test("base's and fnd's session, model, compact and rate lines are dropped: band writes those itself", () => {
+    const list = ['session', 'model', 'compact', 'rate', 'workspace'].map((kind, i) => ({ atMs: i, kind, text: kind }))
+    expect(merged([], [], list, []).map(e => e.kind)).toEqual(['workspace'])
+    expect(merged([], list, [], []).map(e => e.kind)).toEqual(['workspace'])
+  })
+
+  test("base's lines keep their kinds beside slim's: only fnd's own compression line is renamed", () => {
+    const base = [{ atMs: 10, kind: 'guard', text: 'g' }, { atMs: 11, kind: 'slim', text: 'not base' }]
+    expect(merged([], base, [], [{ atMs: 20, kind: 'slim', text: 'Bash: compressed' }]).map(e => e.kind)).toEqual(['guard', 'slim', 'slim'])
   })
 
   test("beside slim's lines fnd's own compression line reads fnd-slim; alone it stays slim", () => {
     const fnd = [{ atMs: 10, kind: 'slim', text: 'getJiraIssue: compressed 9 B → 1 B' }]
-    expect(merged([], fnd, [{ atMs: 20, kind: 'slim', text: 'Bash: compressed' }]).map(e => e.kind)).toEqual(['fnd-slim', 'slim'])
-    expect(merged([], fnd, []).map(e => e.kind)).toEqual(['slim'])
-    expect(merged([], fnd, [{ atMs: 'x', kind: 'slim', text: 'malformed' }]).map(e => e.kind)).toEqual(['slim'])
+    expect(merged([], [], fnd, [{ atMs: 20, kind: 'slim', text: 'Bash: compressed' }]).map(e => e.kind)).toEqual(['fnd-slim', 'slim'])
+    expect(merged([], [], fnd, []).map(e => e.kind)).toEqual(['slim'])
+    expect(merged([], [], fnd, [{ atMs: 'x', kind: 'slim', text: 'malformed' }]).map(e => e.kind)).toEqual(['slim'])
   })
 
   test('malformed entries are dropped and extra fields stripped; absent, null or non-array lists add nothing', () => {
@@ -158,10 +166,11 @@ describe('merged', () => {
     ]
     expect(take(bad)).toEqual([{ atMs: 20, kind: 'lookup', text: 'mid' }])
     for (const absent of [undefined, null, {}, 'x', 3]) {
-      expect(merged(absent, absent, absent)).toEqual([])
+      expect(merged(absent, absent, absent, absent)).toEqual([])
       expect(take(absent)).toEqual([])
     }
-    expect(merged([{ atMs: 1, kind: 'session', text: 'start' }], null, undefined)).toEqual([{ atMs: 1, kind: 'session', text: 'start' }])
+    expect(merged([{ atMs: 1, kind: 'session', text: 'start' }], null, null, undefined)).toEqual([{ atMs: 1, kind: 'session', text: 'start' }])
+    expect(merged([], bad, [], [])).toEqual([{ atMs: 20, kind: 'lookup', text: 'mid' }])
   })
 })
 
@@ -382,5 +391,54 @@ describe("band's, fnd's and slim's lines in one log", () => {
       expect((await rows(ui)).map(x => x.texts[2])).toEqual(MERGED.filter(([, k]) => k !== 'session' && k !== 'model').map(([, , x]) => x))
       await ui.unmount()
     })
+  }
+})
+
+/** base's lines as base writes them: its start line, a guard tie with fnd's and a session line band drops. */
+const BASE_EVENTS = [
+  { atMs: NOW, kind: 'start', text: 'base 0.1.0' },
+  { atMs: NOW, kind: 'session', text: 'start' },
+  { atMs: NOW + 90_000, kind: 'guard', text: 'Bash: --no-verify' },
+]
+
+describe("base's lines in the log", () => {
+  test('where no surface draws panes the text answer puts base between band and fnd on a tie', async ($, on) => {
+    const w = world(on, SIBLING_ENV)
+    baseState(on, { events: BASE_EVENTS })
+    w.surfaces = []
+    await interleave($, w)
+    const expected = [
+      ['09:05', 'session', 'start · band 9.9.9'],
+      ['09:05', 'start', 'base 0.1.0'],
+      ...MERGED.slice(1, 5),
+      ['09:06', 'guard', 'Bash: --no-verify'],
+      ...MERGED.slice(5),
+    ]
+    expect((await run($, 'band-log')).text).toBe(expected.map(([t, k, x]) => `${t}  ${kindCell(k!)}  ${x}`).join('\n'))
+  })
+
+  for (const surface of SURFACES) {
+    test(`${surface}: base alone (no fnd, no slim) fills the pane beside band's lines`, async ($, on) => {
+      const w = world(on)
+      baseState(on, { events: BASE_EVENTS })
+      await interleave($, w)
+      const ui = await mountPane($, surface)
+      expect((await rows(ui)).map(x => x.texts[2])).toEqual(['start · band 9.9.9', 'base 0.1.0', 'claude-opus-5-5', 'Bash: --no-verify'])
+      await ui.unmount()
+    })
+
+    for (const [name, events] of [
+      ['an empty base list', []],
+      ['a malformed base list', { not: 'a list' }],
+    ] as const) {
+      test(`${surface}: ${name} and no fnd → band's lines only`, async ($, on) => {
+        const w = world(on)
+        baseState(on, { events })
+        await interleave($, w)
+        const ui = await mountPane($, surface)
+        expect((await rows(ui)).map(x => x.texts[1])).toEqual(['session    ', 'model      '])
+        await ui.unmount()
+      })
+    }
   }
 })

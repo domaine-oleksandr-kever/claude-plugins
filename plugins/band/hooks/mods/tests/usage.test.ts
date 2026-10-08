@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { HOUR_MS, seedsTtl } from '../lib.ts'
-import { KEPT, MIN, SNAP, T0, logged, measure, modelSwitch, peekCache, peekEvents, sibFnd, start, test, world } from './world.tsx'
+import { KEPT, MIN, SNAP, T0, baseState, logged, measure, modelSwitch, peekCache, peekEvents, sibFnd, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -247,12 +247,25 @@ describe('/band-debug', () => {
     expect(text).toMatch(/^cache: \{/m)
     expect(text).toMatch(/^usage atom: \{"ctxPct":null/m)
     expect(text).toContain('progress: {"workId":"ELC-1591","branch":"feature/ELC-1591-x"}')
+    expect(text).toMatch(/^publisher: fnd$/m)
   })
 
-  test('without fnd the task line is null; a malformed snapshot shows nulls, never throws', async ($, on) => {
+  test("base's task beats fnd's and names base as the publisher", async ($, on) => {
+    world(on, {}, { SIB_FND_PROGRESS: JSON.stringify(SNAP) })
+    const base = baseState(on, { progress: { workId: 'ABC-7', branch: 'feature/ABC-7-x' } })
+    await start($)
+    const text = await debug($)
+    expect(text).toContain('progress: {"workId":"ABC-7","branch":"feature/ABC-7-x"}')
+    expect(text).toMatch(/^publisher: base$/m)
+    base.progress = null
+    expect(await debug($)).toMatch(/^publisher: fnd$/m)
+  })
+
+  test('without base and fnd the task line is null; a malformed snapshot shows nulls, never throws', async ($, on) => {
     const { w } = world(on)
     await start($)
     expect(await debug($)).toContain('progress: null')
+    expect(await debug($)).toMatch(/^publisher: none$/m)
     w.vars.SIB_FND_PROGRESS = JSON.stringify({ workId: 5, branch: ['x'] })
     await sibFnd($)
     expect(await debug($)).toContain('progress: {"workId":null,"branch":null}')

@@ -8,16 +8,21 @@ breaking-changes, preview themes, etc.) for Shopify theme work.
 CLI** and **OpenCode** through thin, committed adapters generated from it — one repo, no fork.
 See [Install — four hosts](#install--four-hosts).
 
-The repo is a marketplace (`domaine`, `.claude-plugin/marketplace.json`) that holds three plugins.
+The repo is a marketplace (`domaine`, `.claude-plugin/marketplace.json`) that holds four plugins.
 `plugins/fnd` is the Foundation plugin this README describes: skills, agents, scripts, classic
 hooks and the Claude Code hooks module. `plugins/slim` is the universal tool-result compression
 proxy: one Claude Code mod that compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and
 Agent results by content, plus a `lookup` tool that answers one question about a page, command or
 file; while fnd compresses MCP results too, slim stands down on what fnd already slimmed.
-`plugins/band` draws the status band, the Progress pane and the event log pane from what fnd and
-slim publish; while it is installed, fnd's own band stands down
-([Which plugins to install](#which-plugins-to-install)).
-`tests/` covers all three, and `tests/mods-sim.sh` validates and tests
+`plugins/band` draws the status band, the Progress pane and the event log pane from what base (or
+fnd) and slim publish; while it is installed, fnd's own band stands down
+([Which plugins to install](#which-plugins-to-install)). `plugins/base` is the shared plugin built
+beside fnd for Claude Code only: the readers, the Jira writer, the review agents, the task workspace,
+the guards, the conventions, a doctor and the shared MCP servers, reading large results through slim,
+which it requires ([plugins/base/README.md](plugins/base/README.md)). fnd is frozen; once a team
+plugin ships, new installs are slim + band + base + that team plugin, and fnd and base never run
+together.
+`tests/` covers all four, and `tests/mods-sim.sh` validates and tests
 every `plugins/*/hooks/hooks.json` module.
 
 ## What's inside
@@ -225,9 +230,10 @@ spawns one subagent, attempts a `--no-verify` commit in a scratch repo expecting
 block it, and reports a pass/fail matrix with remediation. `preflight-checks` keeps the
 recurring per-project role.
 
-`install.sh` takes `--plugin <name>` (default `fnd`). `slim` and `band` are Claude Code only — they
-ship no Cursor, Codex or OpenCode adapter, so `install.sh --plugin slim` and `install.sh --plugin band`
-exit 2 and point at `/plugin marketplace add …` + `/plugin install <name>@domaine`.
+`install.sh` takes `--plugin <name>` (default `fnd`). `slim`, `band` and `base` are Claude Code only —
+they ship no Cursor, Codex or OpenCode adapter, so `install.sh --plugin slim`, `install.sh --plugin band`
+and `install.sh --plugin base` exit 2 and point at `/plugin marketplace add …` +
+`/plugin install <name>@domaine`.
 
 ### Claude Code — from the published Git marketplace (team use)
 
@@ -263,7 +269,18 @@ that yields to band (0.134.0 and earlier) still draws its own band, and only one
 above the prompt, so load order decides which. fnd's `FND_BAND_COST` does not carry over: set
 `BAND_COST=1` in `~/.claude/settings.json` → `env` to keep the cost segment.
 
+`/plugin install base@domaine` installs the fourth, the shared plugin that replaces fnd together with
+a team plugin (Claude Code only; see [plugins/base/README.md](plugins/base/README.md)). It requires
+slim, and it never runs with fnd: uninstall fnd first (`/plugin uninstall fnd@domaine`). It is not
+ready for team use yet, so the team-use block above and `scripts/bootstrap.sh --targets claude` still
+install fnd; `--plugins slim,band,base` prints the new set instead, followed by `/base-doctor`,
+which checks the install from inside the session, and an install that names fnd beside base is refused.
+
 ### Which plugins to install
+
+fnd is frozen. Once a team plugin ships, new installs are slim + band + base + that team plugin;
+until then the team-use block installs fnd. fnd and base never run together: they ship the same
+agents and MCP servers. The table below is the fnd side.
 
 fnd works alone; slim and band add to it and also load without it. slim and band are Claude Code
 mods and nothing else, so on Cursor, Codex and OpenCode only fnd applies.
@@ -279,6 +296,9 @@ fnd + band without slim is the third row with fnd compressing. Under band, `/fnd
 `/fnd-progress` answer with a pointer to the band commands. fnd decides once per process: after
 `/plugin disable band` or `/plugin uninstall band` mid-session it keeps standing down and keeps
 pointing at the band commands until the next session.
+
+On the base side band draws the task base publishes and merges base's lines into `/band-log`; pin a
+task with `/base-progress <KEY>`. band takes `base.progress` before `fnd.progress`.
 
 ### Claude Code — local development (from this folder on disk)
 
@@ -587,12 +607,15 @@ reads to a host as "nothing to update". One script owns all of them — run it i
 of hand-editing any manifest:
 
 ```bash
-node plugins/fnd/scripts/bump-version.cjs minor      # or major | patch | 0.60.0
-node plugins/fnd/scripts/bump-version.cjs 0.60.0 --dry-run   # report, write nothing
-node plugins/fnd/scripts/bump-version.cjs 0.2.0 --plugin slim   # another plugin in the monorepo
+node scripts/bump-version.cjs minor --plugin fnd       # or major | patch | 0.60.0
+node scripts/bump-version.cjs 0.60.0 --plugin fnd --dry-run   # report, write nothing
+node scripts/bump-version.cjs 0.2.0 --plugin base      # another plugin in the monorepo
 ```
 
-`--plugin` defaults to `fnd`, and the table below lists fnd's targets. Any other plugin stamps
+`--plugin` is required: a bare run exits 1 with the usage, because every marketplace plugin
+auto-updates on its own version and a guessed plugin would ship a release nobody meant. fnd's own
+copy, `plugins/fnd/scripts/bump-version.cjs`, still defaults to `fnd`. The table below lists fnd's
+targets. Any other plugin stamps
 `plugins/<name>/.claude-plugin/plugin.json` (required and canonical; if it is missing the run
 exits 1 as an unknown plugin and lists the plugins present), plus these optional targets when
 they exist: `plugins/<name>/.cursor-plugin/plugin.json`, `plugins/<name>/.codex-plugin/plugin.json`,
@@ -1669,7 +1692,7 @@ because the script that reads it is the same single copy on all four hosts.
 | `SLIM_WEB` | `1` | **slim plugin.** `0` turns slim's WebFetch and WebSearch channels off. Read by the module only. |
 | `SLIM_GREP` | `1` | **slim plugin.** `0` turns slim's Grep and Glob channels off (the listing window; the counts are never changed either way). Read by the module only. |
 | `SLIM_AGENT` | `1` | **slim plugin.** `0` turns slim's Agent channel off (the window over a completed subagent's long report). Read by the module only. |
-| `SLIM_PLAIN_BYTES` | `65536` | **slim plugin.** Size above which slim windows plain text — code, diffs, test output, prose — to its head and tail with a hidden-lines marker and a `<<full=` handle; below it plain text passes byte-identical. About twice Bash's 30,000-character inline cap, so anything the host would show inline is never touched. A whole number, floored at 8,192; anything else → the default. Read by the module and the core. |
+| `SLIM_PLAIN_BYTES` | `65536` | **slim plugin.** Size above which slim windows plain text — code, diffs, test output, prose — to its head and tail with a hidden-lines marker and a `<<full=` handle; below it plain text passes byte-identical. About twice Bash's 30,000-character inline cap, so anything the host would show inline is never touched. A whole number, floored at 8,192; anything else → the default. Read by the module and the base. |
 | `SLIM_DIR` | the system temp dir | **slim plugin.** Spill root for original copies, stub payloads and slim's report log `fnd-mcp-slim-debug.log`. slim never reads `FND_MCP_SLIM_DIR`; with fnd installed too, leave both unset or set them equal — fnd trusts `<<full=` handles only in its own dir and in system temp. |
 | `SLIM_TTL` | `24` | **slim plugin.** Hours a spill file lives before slim's sweep removes it; `0` stops slim's sweeps. The sweep prunes only the names slim writes (`fnd-mcp-slim-*`, `fnd-crush-*`, `fnd-jsx-ids-*`) and keeps its own throttle marker (`.slim-sweep`). `FND_MCP_SLIM_TTL` does not reach it: in a spill dir both plugins use, a file lives by the shorter TTL. |
 | `SLIM_DEBUG` | off | **slim plugin.** `1` writes one report line per call slim handles, on every channel; `2` adds the module's stand-downs (MCP size-gate, already-slim, plain-gate, read-guard, …) and the attachment probe line. Error, lookup and view lines are written at every level. `FND_MCP_SLIM_DEBUG` does not reach it. |

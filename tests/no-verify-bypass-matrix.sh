@@ -3,6 +3,9 @@
 # (the flag in any spelling, a config redirect, a disabled hook file) and AI attribution:
 #   plugins/fnd/hooks/no-verify-bypass.sh   (B/A/R/J/D cases; XP/XQ pin the fast rejects)
 #   plugins/fnd/hooks/no-ai-attribution.sh  (N/M/NJ cases)
+#   plugins/base/hooks/no-verify-bypass.sh  (the B/A/R/J/D and XP/XQ rows again, `base-` labels;
+#     base has no argv-array payload, so no V rows; base's attribution guard is TypeScript, and its
+#     N/M rows live in plugins/base/hooks/mods/tests/guards.test.ts)
 # Every regex change to either hook re-runs this matrix: `block` rows are the
 # bypasses that must stay closed (false negatives), `allow` rows are the
 # legitimate commands that must stay unblocked (false positives).
@@ -21,6 +24,7 @@ unset FND_HOST_TRACE FND_HOST
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$ROOT/plugins/fnd/hooks/no-verify-bypass.sh"
 HOOK_ATTR="$ROOT/plugins/fnd/hooks/no-ai-attribution.sh"
+HOOK_BASE="$ROOT/plugins/base/hooks/no-verify-bypass.sh"
 CUR_HOOK="$HOOK"
 BASH_BIN="$(command -v bash)"
 LBL=""
@@ -406,7 +410,7 @@ no_verify_cases() {
   check allow A46-hooksPath-bare-scoped 'git config --local core.hooksPath; git commit -m x'
   # git reads config keys case-insensitively, and so does the matcher — the read exemption must too
   check allow A46a-hooksPath-lower-read  'git commit -m x && git config core.hookspath'
-  check allow A46b-hooksPath-mixed-read  'git config --local core.HooksPath && git commit -m x'
+  check allow A46b-hooksPath-mixed-read  'git config --local base.HooksPath && git commit -m x'
   # symbolic chmod modes that KEEP the execute bit are the repair, not the bypass
   check allow A47-chmod-a-plus-x    'chmod a+x .husky/pre-commit && git commit -m x'
   check allow A48-chmod-setuid-755  'chmod 4755 .husky/pre-commit && git commit -m x'
@@ -465,7 +469,7 @@ no_verify_cases() {
   check allow A69-alias-log-n       'git -c alias.lg="log --oneline -n 5" lg'
   check allow A70-alias-amend-noedit 'git config alias.cane "commit --amend --no-edit" && git cane'
   check allow A71-alias-pull-rebase 'git config alias.up "pull --rebase" && git up'
-  check allow A72-c-non-alias       'git -c core.editor=true commit -m x'
+  check allow A72-c-non-alias       'git -c base.editor=true commit -m x'
   # the message span is stripped before the alias matcher reads it (A02's rule, this family)
   check allow A73-alias-in-msg      'git commit -m "alias.z=commit --no-verify"'
   # `--no-verbose` is another flag entirely, and the prefix rule must stop short of swallowing it
@@ -750,6 +754,22 @@ for xq in 'g"it" com"mit" -n -m x' "g\$'it' com\$'mit' --no-verify -m x"; do
   CUR_HOOK="$HOOK";     check allow "XQ-split-git-prefiltered" "$xq"
   CUR_HOOK="$NV_NOPRE"; check block "XQ-split-git-matcher"     "$xq"
 done
+
+# base's copy (Claude Code only: no argv-array payload, no host trace) keeps every verdict above.
+NV_BASE_NOPRE="$TMPD/base-no-verify-bypass-noprefilter.sh"
+CUR_HOOK="$HOOK_BASE"; LBL="base-"; no_verify_cases
+strip_prefilter "$HOOK_BASE" "$NV_BASE_NOPRE" 2
+CUR_HOOK="$NV_BASE_NOPRE"; LBL="base-nopre-"; no_verify_cases
+LBL="base-"
+for xp in 'git com"mit" -n -m x' "git com\$'mit' -n -m x" 'git pu"sh" --no-verify' 'HUSKY=0 git com"mit" -m x'; do
+  CUR_HOOK="$HOOK_BASE";     check block "XP-split-kw-prefiltered" "$xp"
+  CUR_HOOK="$NV_BASE_NOPRE"; check block "XP-split-kw-matcher"     "$xp"
+done
+for xq in 'g"it" com"mit" -n -m x' "g\$'it' com\$'mit' --no-verify -m x"; do
+  CUR_HOOK="$HOOK_BASE";     check allow "XQ-split-git-prefiltered" "$xq"
+  CUR_HOOK="$NV_BASE_NOPRE"; check block "XQ-split-git-matcher"     "$xq"
+done
+LBL=""
 
 # The EXIT trap on both guards exists to OBSERVE a verdict, so it may not move one: the whole
 # case list a third time with FND_HOST_TRACE armed into a sandbox, and every row keeps the outcome

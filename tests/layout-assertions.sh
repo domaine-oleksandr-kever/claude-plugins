@@ -89,7 +89,24 @@ for f in "$CANON" \
          "$ROOT/plugins/band/hooks/hooks.json" \
          "$ROOT/plugins/band/hooks/mods/register.tsx" \
          "$ROOT/plugins/band/types/index.d.ts" \
-         "$ROOT/plugins/band/README.md"; do
+         "$ROOT/plugins/band/README.md" \
+         "$ROOT/plugins/base/.claude-plugin/plugin.json" \
+         "$ROOT/plugins/base/hooks/hooks.json" \
+         "$ROOT/plugins/base/hooks/mods/register.ts" \
+         "$ROOT/plugins/base/types/index.d.ts" \
+         "$ROOT/plugins/base/README.md" \
+         "$ROOT/plugins/base/ARCHITECTURE.md" \
+         "$ROOT/plugins/base/scripts/doctor.cjs" \
+         "$ROOT/plugins/base/scripts/worktree-setup.sh" \
+         "$ROOT/plugins/base/hooks/mods/doctor.ts" \
+         "$ROOT/plugins/base/skills/commit/SKILL.md" \
+         "$ROOT/plugins/base/skills/pre-commit-review/SKILL.md" \
+         "$ROOT/plugins/base/skills/save-task-context/SKILL.md" \
+         "$ROOT/plugins/base/skills/report-plugin-issue/SKILL.md" \
+         "$ROOT/plugins/base/skills/worktree/SKILL.md" \
+         "$ROOT/tests/base-doctor-sim.sh" \
+         "$ROOT/tests/base-scripts-sim.sh" \
+         "$ROOT/scripts/bump-version.cjs"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
 
@@ -97,10 +114,13 @@ done
 # of the packaging: a lost +x turns a documented install command into "permission denied". The
 # profile probe, the attachment fetcher and the Figma REST fallback are here because all three are
 # documented as by-hand diagnostics (README, FND_PROFILE; the preflight `--check` rows) — every
-# wiring already runs them through `bash`, so the bit is a convenience, not the contract.
-for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" \
+# wiring already runs them through `bash`, so the bit is a convenience, not the contract. base's
+# /base:worktree runs worktree-setup.sh by path, and /base-doctor's scripts row fails on a lost bit.
+for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" "$ROOT/scripts/bump-version.cjs" \
          "$PLUGIN_DIR/scripts/project-profile.sh" "$PLUGIN_DIR/scripts/jira-attachments.sh" \
-         "$PLUGIN_DIR/scripts/external-screenshots.sh" "$PLUGIN_DIR/scripts/figma-rest.sh"; do
+         "$PLUGIN_DIR/scripts/external-screenshots.sh" "$PLUGIN_DIR/scripts/figma-rest.sh" \
+         "$ROOT/plugins/base/scripts/worktree-setup.sh" "$ROOT/plugins/base/scripts/jira-attachments.sh" \
+         "$ROOT/plugins/base/scripts/external-screenshots.sh" "$ROOT/plugins/base/scripts/figma-rest.sh"; do
   if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
 done
 
@@ -199,9 +219,9 @@ for mk in "$ROOT"/.*-plugin/marketplace.json; do
 $rows
 EOF
   if [ "$saw_fnd" = yes ]; then ok; else bad "marketplace-$label" "no 'fnd' plugin entry"; fi
-  # which plugins each host lists is a decision, not an accident: slim and band are Claude Code only
+  # which plugins each host lists is a decision, not an accident: slim, band and base are Claude Code only
   case "$label" in
-    .claude-plugin) want_list=" fnd slim band" ;;
+    .claude-plugin) want_list=" fnd slim band base" ;;
     .cursor-plugin) want_list=" fnd" ;;
     *) want_list="$listed" ;;
   esac
@@ -214,6 +234,8 @@ if grep -qE 'slim v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/slim/README.md" 2>/dev
 else bad slim-readme-marker "plugins/slim/README.md has no 'slim v<semver>' release marker"; fi
 if grep -qE 'band v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/band/README.md" 2>/dev/null; then ok
 else bad band-readme-marker "plugins/band/README.md has no 'band v<semver>' release marker"; fi
+if grep -qE 'base v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/base/README.md" 2>/dev/null; then ok
+else bad base-readme-marker "plugins/base/README.md has no 'base v<semver>' release marker"; fi
 
 # --------------------------------------------------------- Cursor manifest pointers --
 if [ -f "$CURSOR_MANIFEST" ]; then
@@ -479,7 +501,7 @@ for a in theme-explorer change-reviewer; do
   if grep -qF 'scripts/project-profile.sh' "$f"; then ok
   else bad "profile-fallback-$a" "agents/$a.md has no project-profile.sh fallback for a brief without a profile"; fi
   if grep -qF 'assume `foundation`' "$f"; then ok
-  else bad "profile-failsafe-$a" "agents/$a.md does not fall back to foundation — a Foundation checkout could lose its core rule"; fi
+  else bad "profile-failsafe-$a" "agents/$a.md does not fall back to foundation — a Foundation checkout could lose its base rule"; fi
   if grep -qF '`theme` / `none`' "$f"; then ok
   else bad "profile-plain-$a" "agents/$a.md has no theme/none branch — the core rules are still unconditional"; fi
   if grep -qF 'always true' "$f"; then
@@ -489,7 +511,7 @@ for a in theme-explorer change-reviewer; do
     bad "profile-second-list-$a" "agents/$a.md carries its own detection markers — project-profile.sh is the single source"
   else ok; fi
 done
-# `protected-core` keeps its name and its blocker, scoped to the JS/TS core the vendored
+# `protected-core` keeps its name and its blocker, scoped to the JS/TS base the vendored
 # rules/core.mdc actually protects (the Liquid core is a hand-sync warning, not a blocker).
 CR="$PLUGIN_DIR/agents/change-reviewer.md"
 if [ -f "$CR" ]; then
@@ -690,7 +712,7 @@ if [ -d "$BAND_MODS" ]; then
   if [ -z "$band_check" ]; then ok
   else bad band-mods-imports "$(printf '%s' "$band_check" | head -5 | tr '\n' ';')"; fi
 
-  # band only reads fnd.* and slim.*: a write to a foreign key fails at run time, never at validate
+  # band only reads base.*, fnd.* and slim.*: a write to a foreign key fails at run time, never at validate
   band_writes="$("$NODE_BIN" -e '
     const fs = require("fs"), path = require("path");
     const out = [];
@@ -702,12 +724,12 @@ if [ -d "$BAND_MODS" ]; then
     const check = (p) => {
       const rel = path.relative(process.argv[1], p);
       const src = fs.readFileSync(p, "utf8");
-      const names = [...src.matchAll(/const\s+(\w+)\s*=\s*atom\(\s*\{\s*plugin:\s*["\x27](?:fnd|slim)["\x27]/g)].map((m) => m[1]);
+      const names = [...src.matchAll(/const\s+(\w+)\s*=\s*atom\(\s*\{\s*plugin:\s*["\x27](?:base|fnd|slim)["\x27]/g)].map((m) => m[1]);
       for (const n of names) {
         if (new RegExp("\\bupdate\\(\\s*\\$\\s*,\\s*" + n + "\\b").test(src)) out.push(rel + ": update($, " + n + ")");
         if (new RegExp("\\$\\.state\\.(set|update|delete)\\(\\s*" + n + "\\b").test(src)) out.push(rel + ": $.state write to " + n);
       }
-      if (/\$\.state\.(set|update|delete)\(\s*\{\s*plugin:\s*["\x27](fnd|slim)["\x27]/.test(src)) out.push(rel + ": $.state write to a literal fnd/slim ref");
+      if (/\$\.state\.(set|update|delete)\(\s*\{\s*plugin:\s*["\x27](base|fnd|slim)["\x27]/.test(src)) out.push(rel + ": $.state write to a literal base/fnd/slim ref");
     };
     walk(process.argv[1]);
     process.stdout.write(out.join("\n"));
@@ -727,6 +749,105 @@ $f: $hit"
   else bad band-no-yield-code "$(printf '%s' "$yield_code" | sed "s#$ROOT/##" | head -5 | tr '\n' ';')"; fi
 else
   bad band-mods-imports "plugins/band/hooks/mods missing"
+fi
+
+# ------------------------------------------------------------------ base: packaging + mods boundary --
+# base is Claude Code only: no adapter for another host, and slim declared as the dependency its
+# readers require.
+BASE_P="$ROOT/plugins/base"
+BASE_CANON="$BASE_P/.claude-plugin/plugin.json"
+for d in .cursor-plugin .codex-plugin opencode agents-cursor agents-codex agents-opencode commands-opencode rules; do
+  if [ -e "$BASE_P/$d" ]; then bad "base-claude-only-$d" "plugins/base/$d exists; base ships for Claude Code only"; else ok; fi
+done
+base_manifest="$("$NODE_BIN" -e '
+  const fs = require("fs");
+  const out = [];
+  let base, fnd;
+  try { base = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); fnd = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); }
+  catch (e) { console.log("unparseable: " + e.message); process.exit(0); }
+  if (JSON.stringify(base.dependencies) !== JSON.stringify(["slim"])) out.push("dependencies " + JSON.stringify(base.dependencies) + " != [\"slim\"]");
+  if ("hooks" in base) out.push("a classic hooks key: base hooks through its module only");
+  const want = JSON.parse(JSON.stringify(fnd.mcpServers || {}).split(".claude/fnd-tmp/").join(".claude/base-tmp/"));
+  if (JSON.stringify(base.mcpServers) !== JSON.stringify(want)) out.push("mcpServers differ from fnd\x27s definitions (fnd-tmp renamed base-tmp)");
+  const pw = ((base.mcpServers || {}).playwright || {}).args || [];
+  const i = pw.indexOf("--output-dir");
+  if (i < 0 || pw[i + 1] !== ".claude/base-tmp/playwright") out.push("playwright --output-dir is not .claude/base-tmp/playwright");
+  process.stdout.write(out.join("; "));
+' "$BASE_CANON" "$CANON" 2>&1)"
+if [ -z "$base_manifest" ]; then ok; else bad base-manifest "plugins/base plugin.json: $base_manifest"; fi
+
+# The engine compiles base's modules itself: an npm specifier, a require/import() or a Node/DOM global
+# fails there, not here. base writes only base.* atoms: a write to fnd, slim or band fails at run time.
+BASE_MODS="$BASE_P/hooks/mods"
+if [ -d "$BASE_MODS" ]; then
+  base_check="$("$NODE_BIN" -e '
+    const fs = require("fs"), path = require("path");
+    const out = [];
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p); else if (/\.tsx?$/.test(e.name)) check(p);
+    } };
+    const check = (p) => {
+      const rel = path.relative(process.argv[1], p);
+      const src = fs.readFileSync(p, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+      const isTest = /\.test\.tsx?$/.test(p);
+      for (const m of src.matchAll(/(?:\bfrom|^\s*import)\s*["\x27]([^"\x27]+)["\x27]/gm)) {
+        const spec = m[1];
+        if (spec === "claude-code" || spec === "claude-code/testing" || spec.startsWith("./") || spec.startsWith("../")) continue;
+        out.push(rel + ": import \x27" + spec + "\x27");
+      }
+      if (/\brequire\s*\(|\bimport\s*\(/.test(src)) out.push(rel + ": require( / import(");
+      if (isTest) return;
+      const glob = /(^|[^$.\x27"\w])process\.|\bBuffer\b|\bglobalThis\b|\bwindow\.|\bdocument\./m.exec(src);
+      if (glob) out.push(rel + ": Node/DOM global near \x27" + glob[0].trim() + "\x27");
+      const names = [...src.matchAll(/const\s+(\w+)\s*=\s*atom\(\s*\{\s*plugin:\s*["\x27](?:fnd|slim|band)["\x27]/g)].map((m) => m[1]);
+      for (const n of names) {
+        if (new RegExp("\\bupdate\\(\\s*\\$\\s*,\\s*" + n + "\\b").test(src)) out.push(rel + ": update($, " + n + ")");
+        if (new RegExp("\\$\\.state\\.(set|update|delete)\\(\\s*" + n + "\\b").test(src)) out.push(rel + ": $.state write to " + n);
+      }
+      if (/\$\.state\.(set|update|delete)\(\s*\{\s*plugin:\s*["\x27](fnd|slim|band)["\x27]/.test(src)) out.push(rel + ": $.state write to a literal fnd/slim/band ref");
+    };
+    walk(process.argv[1]);
+    process.stdout.write(out.join("\n"));
+  ' "$BASE_MODS" 2>&1)"
+  if [ -z "$base_check" ]; then ok
+  else bad base-mods-boundary "$(printf '%s' "$base_check" | head -5 | tr '\n' ';')"; fi
+else
+  bad base-mods-boundary "plugins/base/hooks/mods missing"
+fi
+# The contract declares base's keys only; slim's arrive from the laid dependency contract, and a
+# second declaration of a dependency's key is a type conflict.
+if grep -qE '^[[:space:]]+(slim|band|fnd):[[:space:]]*\{' "$BASE_P/types/index.d.ts"; then
+  bad base-types-own-keys "plugins/base/types/index.d.ts declares another plugin's PluginState key"
+else ok; fi
+
+# The engine refuses a plugin named after its own chain member: validate passes, the hooks module
+# never loads.
+for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
+  n="$(jval "$m" name)"
+  case "$n" in
+    core|engine) bad "plugin-name-reserved-$n" "${m#$ROOT/}: '$n' is the engine's own chain member — its hooks module never loads" ;;
+    *) ok ;;
+  esac
+done
+
+# Each load from a folder the developer owns lays every dependency's contract into
+# .claude-plugin/types/<dep>/: a committed copy goes stale without anything failing.
+if command -v git >/dev/null 2>&1 && git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  laid="$(git -C "$ROOT" ls-files -- 'plugins/*/.claude-plugin/types/*')"
+  if [ -z "$laid" ]; then ok
+  else bad laid-contract-tracked "$(printf '%s' "$laid" | head -3 | tr '\n' ';')"; fi
+  for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
+    pdir="${m%/.claude-plugin/plugin.json}"
+    for dep in $("$NODE_BIN" -e '
+      try { const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).dependencies;
+            if (Array.isArray(d)) process.stdout.write(d.map((x) => typeof x === "string" ? x : x.name).join(" ")); } catch {}
+    ' "$m"); do
+      p="${pdir#$ROOT/}/.claude-plugin/types/$dep/index.d.ts"
+      if git -C "$ROOT" check-ignore -q --no-index "$p"; then ok
+      else bad "laid-contract-ignored-${pdir##*/}-$dep" "$p is not gitignored"; fi
+    done
+  done
 fi
 
 # The classic ctx monitor (a node process that cannot read $.state) finds the module's marker by this
