@@ -1,5 +1,5 @@
-// slim.info: the snapshot that tells another plugin (fnd's FND_COMPRESSION=proxy) that slim is loaded,
-// which version, and which channels it compresses this session.
+// slim.info: the snapshot that tells another plugin that slim is loaded, which version, and which
+// channels it compresses this session.
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimChannel } from '../../types'
 
@@ -17,6 +17,8 @@ async function channelsOn($: $): Promise<SlimChannel[]> {
   const grep = !(await off($.env.get('SLIM_GREP')))
   if (grep) out.push('grep', 'glob')
   if (!(await off($.env.get('SLIM_AGENT')))) out.push('agent')
+  if (!(await off($.env.get('SLIM_ATTACH')))) out.push('attachment')
+  if (!(await off($.env.get('SLIM_PROMPT')))) out.push('prompt')
   return out
 }
 

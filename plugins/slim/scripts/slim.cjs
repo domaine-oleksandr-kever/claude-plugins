@@ -6,7 +6,10 @@
 //
 //   node slim.cjs                    one tool result; envelope on stdin:
 //       {v:1, channel, tool, tool_use_id, tool_input, tool_response, is_error, cwd, session_id,
-//        agentId?, pre?, bytes_in?}     channel ∈ mcp|bash|read|webfetch|websearch|grep|glob|agent|attachment
+//        agentId?, pre?, bytes_in?, record?}  channel ∈ mcp|bash|read|webfetch|websearch|grep|glob|agent|attachment
+//     (attachment: tool_response {text} = an @-mentioned file as the host framed it)
+//     `record: false`: the same content was answered and logged before (an attachment asked again), so no
+//     report line unless the run failed.
 //     stdout, exactly one JSON object:
 //       {decision:'compressed'|'stubbed', reason, result, figure, record}   replace the result
 //       {decision:'passthrough', reason, record}                            keep it
@@ -14,7 +17,16 @@
 //     `pre` (with `bytes_in`) is a passthrough the hooks module already decided: only its line is written.
 //   node slim.cjs --distill          {v:1, text?|path?|host_path?, hint?, budgetBytes?, cwd, session_id}
 //                                    → {v:1, decision, engine, reason?, text, bytesIn, bytesOut}; writes nothing
-//   node slim.cjs --record           one lookup record on stdin → one report line, at every debug level
+//   node slim.cjs --view             {v:1, path?|text?|host_path?, command?, jq?, engine?, out?, allowed_out?,
+//                                     root, cwd, session_id} → the view tool's reply (delivery/view.cjs);
+//                                    writes parts, spills and media outputs, never `out` itself
+//   node slim.cjs --prompt           {v:1, text, root, cwd, session_id} → the prompt with its data spans
+//                                    replaced in place (delivery/prompt.cjs); spills under <root>/.claude/slim/prompt/
+//   node slim.cjs --prompt-drop      {v:1, root, files} → removes those slim-prompt files of root's prompt dir
+//   node slim.cjs --access           {v:1, tool, via, spills, cwd, denied?} → one entry:"access" line per spill
+//                                    file a Read, Bash or Grep call named (denied: the guard refused it),
+//                                    at debug level 1 or 2
+//   node slim.cjs --record           one lookup or view record on stdin → one report line, at every debug level
 //   node slim.cjs --error            the hooks module's own failure → one error line
 //   node slim.cjs --report [logfile] [--since ISO]
 //
@@ -35,9 +47,11 @@ let enginesMod = null;
 const engines = () => enginesMod || (enginesMod = require('./engines/index.cjs'));
 const compress = (input, options) => engines().compress(input, options);
 const sniff = (input) => engines().sniff(input);
+const viewCore = () => require('./delivery/view.cjs');
+const promptCore = () => require('./delivery/prompt.cjs');
 
 const OUTPUT_CAP = 4_194_304 - 65_536; // the hooks module's stdout ceiling, less headroom
-const PRE_REASONS = new Set(['error-shape', 'already-slim', 'size-gate', 'plain-gate', 'spill-read', 'own-cli', 'windowed-read', 'read-guard', 'not-text', 'not-covered']);
+const PRE_REASONS = new Set(['error-shape', 'already-slim', 'size-gate', 'plain-gate', 'spill-read', 'own-cli', 'windowed-read', 'read-guard', 'not-text']);
 const STUB_REASONS = new Set(['non-json', 'no-gain', 'budget-exceeded', 'number-precision']);
 const OVERFLOW_PROBE_REASONS = new Set(['non-json', 'budget-exceeded']);
 const DISTILL_BUDGET = 49152;
@@ -396,6 +410,10 @@ function channelGuard(channel, input) {
     if (ti.offset !== undefined || ti.limit !== undefined || ti.pages !== undefined) return 'windowed-read';
     if (spill.isSpillOrHostFile(ti.file_path)) return 'spill-read';
   }
+  if (channel === 'attachment' && typeof ti.path === 'string') {
+    if (spill.isSpillOrHostFile(ti.path)) return 'spill-read';
+    if (ch.isSourceJson(ti.path)) return 'read-guard';
+  }
   return null;
 }
 
@@ -419,10 +437,15 @@ function slimChannelText(channel, text, opts) {
   const gate = ch.structuredGate(channel, engine, opts.plainBytes);
   if (gate !== null && bytes <= gate) return { pass: 'size-gate' };
   // A JSON view over the egress cap is stubbed, so the engine is asked to fit under it first.
-  const targetBytes = engine === 'json' || engine === 'jsonl' ? ch.EGRESS[channel] || null : null;
-  const r = compress({ data: text }, engineOptions(opts.deadline, { engine, budgetBytes: opts.window, plainBytes: ch.plainGate(channel, opts.plainBytes), targetBytes }));
+  const run = (e) => compress({ data: text }, engineOptions(opts.deadline, {
+    engine: e, budgetBytes: opts.window, plainBytes: ch.plainGate(channel, opts.plainBytes),
+    targetBytes: e === 'json' || e === 'jsonl' ? ch.EGRESS[channel] || null : null,
+  }));
+  let r = run(engine);
+  // A node tree over the cap would pass through raw; the JSON route can still fit it or stub it.
+  if (r.decision === 'compressed' && r.engine === 'figma-nodes' && utf8(r.text) > (ch.EGRESS[channel] || Infinity)) r = run('json');
   if (r.decision !== 'compressed') return { pass: r.reason || 'no-gain', format: r.format, engine };
-  return { out: r.text, engine: r.engine, stages: r.stats.stages, parts: r.parts || [], window: r.window, json: r.engine === 'json' || r.engine === 'jsonl' };
+  return { out: r.text, engine: r.engine, stages: r.stats.stages, parts: r.parts || [], window: r.window, json: r.engine === 'json' || r.engine === 'jsonl', ext: ['json', 'jsonl', 'figma-nodes'].includes(r.engine) ? '.json' : '.txt' };
 }
 
 function runChannel(input, base) {
@@ -444,7 +467,9 @@ function runChannel(input, base) {
   const command = typeof ti.command === 'string' ? ti.command : '';
   const plainBytes = env.plainBytes();
   const budget = env.budgetMs();
-  const deadline = budget === 0 ? null : (budget < 0 ? Date.now() - 1 : Date.now() + budget);
+  // The host caches an attachment's answer and asks again after a compaction: no deadline, so it is
+  // the same answer every time.
+  const deadline = budget === 0 || channel === 'attachment' ? null : (budget < 0 ? Date.now() - 1 : Date.now() + budget);
   const window = channel === 'grep' || channel === 'glob' ? ch.WINDOW.grep : ch.WINDOW.other;
   const opts = { command, plainBytes, deadline, window };
 
@@ -464,6 +489,8 @@ function runChannel(input, base) {
     const whole = spill.readLocal(ti.file_path || rec.file.filePath);
     if (!whole.file) return pass(whole.why, visible);
     text = whole.text;
+  } else if (channel === 'attachment') {
+    bytesSeen = visible;
   }
   const bytesIn = utf8(text);
   const s = slimChannelText(channel, text, opts);
@@ -471,9 +498,10 @@ function runChannel(input, base) {
 
   const egress = ch.EGRESS[channel];
   const hint = channel === 'bash' && s.engine === 'html' && env.hintOn() && ch.FETCH_CMD.test(command) ? emit.hintLine(command, cwdOf(input)) : null;
-  const note = channel === 'read' ? emit.readNote(rec.file.filePath || ti.file_path) : null;
+  const note = channel === 'read' ? emit.readNote(rec.file.filePath || ti.file_path)
+    : channel === 'attachment' ? emit.readNote(typeof ti.path === 'string' ? ti.path : 'the attached file') : null;
   const extras = [note, hint].filter(Boolean).map((l) => `\n\n${l}`).join('');
-  const original = hostFile ? { path: hostFile } : keep(spill.writeOriginal(text, s.json ? '.json' : '.txt'));
+  const original = hostFile ? { path: hostFile } : keep(spill.writeOriginal(text, s.ext));
   if (!original) return pass('spill-write-failure', bytesIn);
   if (!hostFile) spills.push(original.path);
   const reason = hostFile ? 'mod-expand' : null;
@@ -595,7 +623,7 @@ function handleResult(raw) {
     answer.record = errorRecord('hook', input, answer.reason, e && e.message, Date.now() - t0);
   }
   process.stdout.write(JSON.stringify(answer));
-  rep.writeLine(answer.record, cwdOf(input));
+  if (input.record !== false || answer.decision === 'error') rep.writeLine(answer.record, cwdOf(input));
   spill.sweep();
 }
 
@@ -617,10 +645,34 @@ function handleError(raw) {
 
 const LOOKUP_DECISIONS = new Set(['answered', 'failed', 'refused']);
 const LOOKUP_RUNGS = new Set(['url', 'webfetch', 'path', 'command']);
+const VIEW_DECISIONS = new Set(['compressed', 'narrowed', 'passthrough', 'cached', 'refused']);
 function handleRecord(raw) {
   let input = {};
   try { input = parseEnvelope(raw); } catch (_) { return; }
   const num = (v) => (Number.isFinite(v) ? v : 0);
+  if (input.channel === 'view') {
+    // Image and video bytes never head for the context: kept apart, they would swamp the savings totals.
+    const media = input.engine === 'media';
+    const bytesIn = media ? 0 : num(input.bytes_in);
+    const bytesOut = media ? 0 : num(input.bytes_out);
+    rep.writeLine({
+      src: 'slim', channel: 'view', entry: 'mod', tool: 'mcp__slim__view',
+      ...(typeof input.tool_use_id === 'string' && input.tool_use_id ? { tool_use_id: input.tool_use_id } : {}),
+      decision: VIEW_DECISIONS.has(input.decision) ? input.decision : 'refused',
+      reason: typeof input.reason === 'string' ? input.reason.slice(0, 80)
+        : input.decision === 'narrowed' ? 'jq-narrowed' : input.decision === 'cached' ? 'cached' : null,
+      rung: input.rung === 'path' || input.rung === 'command' ? input.rung : null,
+      engine: typeof input.engine === 'string' ? input.engine.slice(0, 16) : null,
+      bytes_in: bytesIn, bytes_out: bytesOut, pct: input.narrowed === true ? 0 : pctOf(bytesIn, bytesOut),
+      stages: Array.isArray(input.stages) ? input.stages.filter((x) => typeof x === 'string').slice(0, 16) : [],
+      spill: typeof input.spill === 'string' ? input.spill : null,
+      ...(input.narrowed === true ? { narrowed: true } : {}),
+      ...(Number.isFinite(input.frames) && input.frames > 0 ? { frames: input.frames } : {}),
+      ...(media ? { media_in: num(input.bytes_in), media_out: num(input.bytes_out) } : {}),
+      ms: num(input.ms),
+    }, cwdOf(input));
+    return;
+  }
   const t = input.tokens && typeof input.tokens === 'object' ? input.tokens : null;
   const bytesIn = num(input.bytes_in);
   const bytesOut = num(input.bytes_out);
@@ -693,6 +745,86 @@ function handleDistill(raw) {
   reply({ decision: r.decision, engine: r.engine, ...(r.reason ? { reason: r.reason } : {}), text: r.text, bytesIn: utf8(text), bytesOut: utf8(r.text) });
 }
 
+// The view tool's core: the reply on stdout; a reply over the hooks module's ceiling is refused and
+// the files it named are removed.
+function handleView(raw) {
+  const created = [];
+  let input = {};
+  let reply;
+  try {
+    input = parseEnvelope(raw);
+    const budget = env.budgetMs();
+    const deadline = budget === 0 ? null : (budget < 0 ? Date.now() - 1 : Date.now() + budget);
+    reply = viewCore().view(input, { created, engineOptions: engineOptions(deadline, {}) });
+    if (utf8(JSON.stringify(reply)) > OUTPUT_CAP) {
+      spill.unlinkAll(created);
+      const message = reply.write
+        ? 'view: the compact text is over 4 MiB even for out — narrow with jq, or Read the source windowed'
+        : 'view: the compact text is over 4 MiB — pass out (under .claude/tasks/<id>/) or narrow with jq';
+      reply = { v: 1, decision: 'refused', reason: 'output-cap', engine: reply.engine, figure: message, text: message, bytesIn: reply.bytesIn, bytesOut: 0, stages: [] };
+    }
+  } catch (e) {
+    try { spill.unlinkAll(created); } catch (_) {}
+    const message = `view: failed (${(e && e.name) || 'Error'})`;
+    reply = { v: 1, decision: 'refused', reason: 'error', engine: null, figure: message, text: message, bytesIn: 0, bytesOut: 0, stages: [] };
+  }
+  process.stdout.write(JSON.stringify(reply));
+  spill.sweep();
+}
+
+// The prompt channel: the rewritten prompt on stdout, one report line; a reply that is not a rewrite,
+// or one over the hooks module's ceiling, leaves no spill behind.
+function handlePrompt(raw) {
+  const t0 = Date.now();
+  const run = { created: [], journal: null };
+  let input = {};
+  let reply;
+  try {
+    input = parseEnvelope(raw);
+    reply = promptCore().rewrite(input, run);
+    if (reply.decision === 'rewritten' && utf8(JSON.stringify(reply)) > OUTPUT_CAP) reply = { v: 1, decision: 'passthrough', reason: 'output-cap', bytesIn: reply.bytesIn, bytesOut: reply.bytesIn, spans: [] };
+  } catch (e) {
+    reply = { v: 1, decision: 'passthrough', reason: String((e && e.name) || 'Error'), bytesIn: 0, bytesOut: 0, spans: [] };
+  }
+  const rewritten = reply.decision === 'rewritten';
+  if (!rewritten) promptCore().settle(run, false);
+  process.stdout.write(JSON.stringify(reply));
+  if (rewritten) promptCore().settle(run, true);
+  const spills = rewritten ? reply.spans.map((x) => x.spill) : [];
+  rep.writeLine({
+    src: 'slim', channel: 'prompt', entry: 'mod', tool: 'prompt', decision: rewritten ? (reply.form === 'head' ? 'stubbed' : 'compressed') : 'passthrough',
+    reason: rewritten ? null : reply.reason, engine: rewritten ? reply.engine : null, bytes_in: reply.bytesIn, bytes_out: reply.bytesOut,
+    pct: pctOf(reply.bytesIn, reply.bytesOut), stages: reply.stages || [], spill: spills[0] || null, spills, ms: Date.now() - t0,
+    ...(rewritten ? { spans: reply.spans.length } : {}),
+  }, cwdOf(input));
+}
+
+// A rewrite the session never took: its spills go (delivery/prompt.cjs `drop`).
+function handlePromptDrop(raw) {
+  try { promptCore().drop(parseEnvelope(raw)); } catch (_) {}
+}
+
+const ACCESS_TOOLS = { Read: 'read', Bash: 'bash', Grep: 'grep' };
+const ACCESS_MAX = 8;
+// A model's Read, Bash or Grep that named slim's spills: one access line per file that exists, so
+// --report pairs the recovery with the whale it followed; a read the guard denied is marked `denied`
+// and never paired. Debug artefact: nothing at level 0.
+function handleAccess(raw) {
+  let input = {};
+  try { input = parseEnvelope(raw); } catch (_) { return; }
+  if (!env.debugLevel()) return;
+  const channel = ACCESS_TOOLS[input.tool];
+  if (!channel || !Array.isArray(input.spills)) return;
+  const via = typeof input.via === 'string' && /^[\w-]{1,16}$/.test(input.via) ? input.via : 'other';
+  const seen = new Set();
+  for (const p of input.spills.slice(0, ACCESS_MAX)) {
+    if (typeof p !== 'string' || !path.isAbsolute(p) || seen.has(p)) continue;
+    seen.add(p);
+    if (!fs.existsSync(p)) continue;
+    rep.appendLine({ src: 'slim', channel, entry: 'access', tool: input.tool, via, spill: p, ...(input.denied === true ? { denied: true } : {}) }, cwdOf(input));
+  }
+}
+
 function handleReport(args) {
   let file = null;
   let since = null;
@@ -723,7 +855,11 @@ function usage(stream) {
   stream.write([
     'usage: node slim.cjs < envelope.json                   compress one tool result (JSON answer on stdout)',
     '       node slim.cjs --distill < request.json          distill a text, file or host file for a lookup',
-    '       node slim.cjs --record < lookup.json            log one lookup',
+    '       node slim.cjs --view < request.json             the view tool: one file or output, compact',
+    '       node slim.cjs --prompt < request.json           a pasted prompt with its data spans compacted in place',
+    '       node slim.cjs --prompt-drop < drop.json         remove the spills of a rewrite the session never took',
+    '       node slim.cjs --access < access.json            log a model\'s read of slim\'s spill files',
+    '       node slim.cjs --record < record.json            log one lookup or view',
     '       node slim.cjs --error < error.json              log the hooks module\'s own failure',
     '       node slim.cjs --report [logfile] [--since ISO]  report by src and by channel',
   ].join('\n') + '\n');
@@ -741,7 +877,7 @@ module.exports = { capAnswer, OUTPUT_CAP };
 if (require.main === module) {
   const args = process.argv.slice(2);
   process.exitCode = 0;
-  const modes = { '--error': handleError, '--distill': handleDistill, '--record': handleRecord };
+  const modes = { '--error': handleError, '--distill': handleDistill, '--view': handleView, '--prompt': handlePrompt, '--prompt-drop': handlePromptDrop, '--access': handleAccess, '--record': handleRecord };
   if (args.length === 0) readStdin(handleResult);
   else if (args.length === 1 && modes[args[0]]) readStdin(modes[args[0]]);
   else if (args[0] === '--report') handleReport(args.slice(1));

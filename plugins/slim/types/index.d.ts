@@ -1,9 +1,9 @@
 // slim's $.state contract. Values are JSON, so an absent value is null, never undefined.
 
-export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'adf' | 'text' | 'stub'
+export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'stub'
 
-/** The tool results slim reads: MCP calls and the built-in tools it has an intake for. */
-export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'glob' | 'agent'
+/** What slim reads: MCP calls, the built-in tools it has an intake for, @-mentioned files and pasted prompts. */
+export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'glob' | 'agent' | 'attachment' | 'prompt'
 
 /** atMs = $.clock.now() when written; text is one line. */
 export type SlimEventBase = {
@@ -18,7 +18,10 @@ export type SlimEventBase = {
   ms: number
 }
 
-/** One compressed or stubbed tool result; bytesIn is what the host would have shown (bytes_seen ?? bytes_in). */
+/**
+ * One compressed or stubbed tool result, @-mentioned file or pasted prompt; bytesIn is what the host would
+ * have shown (bytes_seen ?? bytes_in). tool is 'Attachment' for a file, 'prompt' for a prompt.
+ */
 export type SlimCompressEvent = SlimEventBase & {
   kind: 'slim'
   channel: SlimChannel
@@ -35,7 +38,17 @@ export type SlimLookupEvent = SlimEventBase & {
   answered: boolean
 }
 
-export type SlimEvent = SlimCompressEvent | SlimLookupEvent
+/** One view call; engine is 'media' for an image or a video, null when refused before an engine ran. */
+export type SlimViewEvent = SlimEventBase & {
+  kind: 'view'
+  channel: 'view'
+  decision: 'compressed' | 'narrowed' | 'passthrough' | 'cached' | 'refused'
+  engine: string | null
+  bytesIn: number
+  bytesOut: number
+}
+
+export type SlimEvent = SlimCompressEvent | SlimLookupEvent | SlimViewEvent
 
 /** What the ToolResult and ToolGroup lines draw for one tool_use_id; bytesIn = bytes_seen ?? bytes_in. */
 export type SlimRow = { engine: SlimEngine; bytesIn: number; bytesOut: number }
@@ -52,6 +65,8 @@ declare module 'claude-code' {
       rows: StateFamily<SlimRow | null>
       /** null until slim's session.start ran; channels lists those whose SLIM_<CHANNEL> switch is not 0. */
       info: SlimInfo | null
+      /** One member per @-mentioned file content slim compressed this session (keyed by its hash): the Log line is written once. */
+      seen: StateFamily<true | null>
     }
   }
 }

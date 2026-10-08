@@ -14,16 +14,19 @@ const json = require('./json.cjs');
 const log = require('./log.cjs');
 const html = require('./html.cjs');
 const figma = require('./figma.cjs');
+const figmaNodes = require('./figma-nodes.cjs');
 const adf = require('./adf.cjs');
 const text = require('./text-window.cjs');
+const { spans, jsonBlobs } = require('./spans.cjs');
 
 /**
- * @typedef {'json'|'jsonl'|'log'|'html'|'figma'|'adf'|'text'} EngineId
+ * @typedef {'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'} EngineId
  * @typedef {EngineId|'binary'|'none'} SniffEngine
  *
  * @typedef {object} Input
  * @property {string|Buffer|object} data      the payload; an object is serialized with JSON.stringify
- * @property {{mime?: string, filename?: string, source?: string}} [hint]  carried for the caller; detection is content-based
+ * @property {{mime?: string, filename?: string, source?: string, variables?: object}} [hint]  detection never reads it;
+ *   figma-nodes reads `variables` and `filename`
  *
  * @typedef {object} Options
  * @property {number|null} [budgetBytes=null]  text window budget (null → 12288); clips html output when set
@@ -54,6 +57,7 @@ const text = require('./text-window.cjs');
  * @property {{bytesIn: number, bytesOut: number, pct: number, ms: number, stages: string[]}} stats
  * @property {Spill} [spill]                   the original, for the caller to store (compressed only)
  * @property {Spill[]} [parts]                 payloads the text cites by path (crush rows, Figma id map)
+ * @property {{nodes: number, hidden: number, folded: number}} [meta]  figma-nodes counters
  * @property {{lines_total: number, lines_hidden: number, bytes_hidden: number}} [window]
  * @property {string[]} warnings
  */
@@ -65,6 +69,7 @@ const ENGINES = {
   log,
   html,
   figma,
+  'figma-nodes': figmaNodes,
   adf,
   text,
 };
@@ -124,7 +129,8 @@ function textOf(input) {
   return { reason: 'bad-input' };
 }
 
-const extOf = (engine) => (engine === 'json' || engine === 'jsonl' || engine === 'adf' ? '.json' : '.txt');
+// The extension of the original's spill name: figma-nodes prints markdown but its input is JSON.
+const extOf = (engine) => (['json', 'jsonl', 'adf', 'figma-nodes'].includes(engine) ? '.json' : '.txt');
 
 /**
  * Compress one payload. Never throws; never writes anything.
@@ -142,7 +148,7 @@ function compress(input, options) {
       text: x.text ?? body,
       stats: { bytesIn, bytesOut, pct: pct(bytesIn, bytesOut), ms: Date.now() - t0, stages: x.stages || [] },
       ...(x.spill ? { spill: x.spill } : {}), ...(x.parts && x.parts.length ? { parts: x.parts } : {}),
-      ...(x.window ? { window: x.window } : {}),
+      ...(x.window ? { window: x.window } : {}), ...(x.meta ? { meta: x.meta } : {}),
       warnings: x.warnings || [],
     };
   };
@@ -162,7 +168,9 @@ function compress(input, options) {
 
     const parts = new Map();
     const dir = opts.spillDir.replace(/\/+$/, '');
+    const hint = input.hint && typeof input.hint === 'object' && !Array.isArray(input.hint) ? input.hint : {};
     const ctx = {
+      hint,
       deadline: opts.maxMs === 0 ? null : (opts.maxMs < 0 ? Date.now() - 1 : Date.now() + opts.maxMs),
       part: (kind, payload) => {
         const name = `${opts.spillNames[kind] || `slim-${kind}-`}${sha16(payload)}.json`;
@@ -184,7 +192,7 @@ function compress(input, options) {
     }
     const cited = [...parts.values()].filter((p) => r.text.includes(p.cite)).map(({ kind, payload, suggestedName }) => ({ kind, payload, suggestedName }));
     const spill = { kind: 'original', payload: body, suggestedName: `${opts.spillNames.original}${sha16(body)}${extOf(engine)}` };
-    return result(engine, 'compressed', body, { text: r.text, stages: opts.trace ? r.stages || [] : [], spill, parts: cited, window: r.window, warnings: r.warnings });
+    return result(engine, 'compressed', body, { text: r.text, stages: opts.trace ? r.stages || [] : [], spill, parts: cited, window: r.window, meta: r.meta, warnings: r.warnings });
   } catch (e) {
     return refused('bad-input', e && e.name ? e.name : 'Error');
   }
@@ -195,4 +203,4 @@ function peek(t) {
   return json.shapeHint(typeof t === 'string' ? t : '');
 }
 
-module.exports = { compress, sniff, peek, VERSION, ENGINES: IDS };
+module.exports = { compress, sniff, peek, spans, jsonBlobs, VERSION, ENGINES: IDS };

@@ -4,7 +4,7 @@
 import type { ProcessRunInit, ProcessRunResult } from 'claude-code'
 import type { SlimEngine } from '../../types'
 
-export const ENGINES: readonly SlimEngine[] = ['json', 'jsonl', 'log', 'html', 'figma', 'adf', 'text', 'stub']
+export const ENGINES: readonly SlimEngine[] = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'stub']
 
 export type Run = { argv: string[]; init: ProcessRunInit }
 
@@ -28,7 +28,31 @@ export function buildDistillRun(root: string, payload: unknown): Run {
   return { argv: [...run.argv, '--distill'], init: run.init }
 }
 
-/** `node <root>/scripts/slim.cjs --record`: the core writes lookup's report line at every debug level. */
+/** `node <root>/scripts/slim.cjs --view`: the view tool's core; the media backend bounds itself under this. */
+export function buildViewRun(root: string, payload: unknown): Run {
+  const run = buildRun(root, payload, 120_000)
+  return { argv: [...run.argv, '--view'], init: run.init }
+}
+
+/** `node <root>/scripts/slim.cjs --prompt`: a pasted prompt with its data spans compacted in place. */
+export function buildPromptRun(root: string, payload: unknown): Run {
+  const run = buildRun(root, payload, 20_000)
+  return { argv: [...run.argv, '--prompt'], init: run.init }
+}
+
+/** `node <root>/scripts/slim.cjs --prompt-drop`: the spills of a rewrite the session never took are removed. */
+export function buildPromptDropRun(root: string, payload: unknown): Run {
+  const run = buildRun(root, payload, 10_000)
+  return { argv: [...run.argv, '--prompt-drop'], init: run.init }
+}
+
+/** `node <root>/scripts/slim.cjs --access`: one access line per spill file a model's call named. */
+export function buildAccessRun(root: string, payload: unknown): Run {
+  const run = buildRun(root, payload, 10_000)
+  return { argv: [...run.argv, '--access'], init: run.init }
+}
+
+/** `node <root>/scripts/slim.cjs --record`: the core writes a lookup or view report line at every debug level. */
 export function buildRecordRun(root: string, rec: unknown): Run {
   const run = buildRun(root, rec, 10_000)
   return { argv: [...run.argv, '--record'], init: run.init }
@@ -111,6 +135,91 @@ export function parseDistill(run: ProcessRunResult): { ok: true; out: Distilled 
   }
 }
 
+export type ViewDecision = 'compressed' | 'narrowed' | 'passthrough' | 'cached' | 'refused'
+export type Viewed = {
+  decision: ViewDecision
+  reason?: string
+  engine: string | null
+  figure: string
+  text: string
+  bytesIn: number
+  bytesOut: number
+  stages: string[]
+  narrowed?: true
+  out?: string
+  lines?: number
+  /** The file `out` names: the hooks module writes `marker`, a newline, then `text`. */
+  write?: { path: string; marker: string; exists: boolean }
+  pointer?: string
+  original?: string
+  frames?: number
+}
+const VIEW_DECISIONS: readonly string[] = ['compressed', 'narrowed', 'passthrough', 'cached', 'refused']
+
+/** The --view reply, or why view cannot use it. */
+export function parseView(run: ProcessRunResult): { ok: true; out: Viewed } | { ok: false; reason: string } {
+  if (run.exitCode !== 0) return { ok: false, reason: `exit-${run.exitCode}` }
+  if (run.isStdoutTruncated) return { ok: false, reason: 'stdout-truncated' }
+  let v: Partial<Viewed> | null
+  try {
+    v = JSON.parse(run.stdout.trim()) as Partial<Viewed> | null
+  } catch {
+    return { ok: false, reason: 'bad-output' }
+  }
+  if (!v || typeof v !== 'object' || !VIEW_DECISIONS.includes(String(v.decision)) || typeof v.text !== 'string' || typeof v.figure !== 'string') {
+    return { ok: false, reason: 'bad-output' }
+  }
+  const w = v.write
+  if (w !== undefined && (!w || typeof w.path !== 'string' || typeof w.marker !== 'string')) return { ok: false, reason: 'bad-output' }
+  return {
+    ok: true,
+    out: {
+      ...(v as Viewed),
+      engine: typeof v.engine === 'string' ? v.engine : null,
+      bytesIn: typeof v.bytesIn === 'number' ? v.bytesIn : 0,
+      bytesOut: typeof v.bytesOut === 'number' ? v.bytesOut : utf8Bytes(v.text),
+      stages: Array.isArray(v.stages) ? v.stages : [],
+      ...(w ? { write: { path: w.path, marker: w.marker, exists: w.exists === true } } : {}),
+    },
+  }
+}
+
+export type Prompted = { text: string; engine: SlimEngine; form: 'inline' | 'head'; bytesIn: number; bytesOut: number; spans: number; created: string[] }
+
+/** The --prompt answer when it is a rewrite, else null: anything else leaves the prompt as typed. */
+export function parsePrompt(run: ProcessRunResult): Prompted | null {
+  if (run.exitCode !== 0 || run.isStdoutTruncated) return null
+  let v: Record<string, unknown> | null
+  try {
+    v = JSON.parse(run.stdout.trim()) as Record<string, unknown> | null
+  } catch {
+    return null
+  }
+  if (!v || v.decision !== 'rewritten' || typeof v.text !== 'string' || !v.text) return null
+  if (typeof v.bytesIn !== 'number' || typeof v.bytesOut !== 'number' || !Array.isArray(v.spans) || !v.spans.length) return null
+  return {
+    text: v.text,
+    engine: ENGINES.includes(v.engine as SlimEngine) ? (v.engine as SlimEngine) : 'json',
+    form: v.form === 'head' ? 'head' : 'inline',
+    bytesIn: v.bytesIn,
+    bytesOut: v.bytesOut,
+    spans: v.spans.length,
+    created: Array.isArray(v.created) ? v.created.filter((p): p is string => typeof p === 'string') : [],
+  }
+}
+
+/** A 16-hex key for a text: two FNV-1a passes over its UTF-16 units with different seeds; stable, not cryptographic. */
+export function textKey(s: string): string {
+  let a = 0x811c9dc5
+  let b = 0x9e3779b9
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    a = Math.imul(a ^ c, 0x01000193) >>> 0
+    b = Math.imul(b ^ c, 0x01000193) >>> 0
+  }
+  return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0')
+}
+
 /** A shallow copy of `obj` without `keys`: a tool.call input less the engine's own fields. */
 export function omit<T extends object>(obj: T, keys: readonly string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -166,7 +275,7 @@ const OVERFLOW_MSG = 'exceeds maximum allowed tokens'
 const OVERFLOW_PATH = /(\/[^\s"'\\]*tool-results\/[^\s"'\\]+)/
 const OVERFLOW_WINDOW = 4096
 const OVERFLOW_MAX_BYTES = 8192
-const FND_STATS = /^fnd-mcp-slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m
+const LEGACY_STATS = /^fnd-mcp-slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m
 const OWN_STATS = /^slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m
 const MARKS = ['<<fnd-mcp-slim stub>>', '<<slim stub>>', '<<fnd-jsx-slim>>']
 
@@ -223,7 +332,7 @@ export function alreadySlimTexts(ts: readonly string[], bound: number): boolean 
   let sum = 0
   for (const t of ts) sum += utf8Bytes(t)
   if (sum > bound) return false
-  const isStats = (t: string) => FND_STATS.test(t) || OWN_STATS.test(t)
+  const isStats = (t: string) => LEGACY_STATS.test(t) || OWN_STATS.test(t)
   return ts.some(t => MARKS.some(m => t.startsWith(m)) || (t.includes('<<full=') && isStats(t)))
 }
 

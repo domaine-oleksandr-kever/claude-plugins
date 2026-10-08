@@ -746,11 +746,21 @@ done
 # boundary is held here by grep. CONTRACT.md is excluded — its microservice example uses `http`.
 SLIM_DIR_P="$ROOT/plugins/slim"
 ENGINES="$SLIM_DIR_P/scripts/engines"
-for f in "$ENGINES/index.cjs" "$ENGINES/CONTRACT.md" "$ENGINES/html.cjs" \
-         "$SLIM_DIR_P/scripts/delivery/channels.cjs" \
+for f in "$ENGINES/index.cjs" "$ENGINES/CONTRACT.md" "$ENGINES/html.cjs" "$ENGINES/media.cjs" "$ENGINES/spans.cjs" \
+         "$ENGINES/figma-nodes.cjs" "$ENGINES/jq.cjs" \
+         "$SLIM_DIR_P/scripts/delivery/channels.cjs" "$SLIM_DIR_P/scripts/delivery/media.cjs" \
+         "$SLIM_DIR_P/scripts/delivery/env.cjs" "$SLIM_DIR_P/scripts/delivery/view.cjs" "$SLIM_DIR_P/scripts/delivery/prompt.cjs" \
          "$ROOT/tests/slim-engines.mjs" "$ROOT/tests/html-slim-fixtures.mjs"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
+# slim stands alone: the single-file compressors it was carved from live in fnd only, and nothing in
+# the plugin reads an fnd switch or names an fnd tool (the `fnd-` spill-name prefixes are lowercase).
+for f in json-slim log-slim figma-node-slim adf-to-md adf-colors env-file; do
+  if [ -e "$SLIM_DIR_P/scripts/$f.cjs" ]; then bad "slim-no-copy-$f" "plugins/slim/scripts/$f.cjs is back; the engines replace it"; else ok; fi
+done
+fndref="$(grep -rnE 'FND_|plugin_fnd_' "$SLIM_DIR_P" 2>/dev/null)"
+if [ -z "$fndref" ]; then ok
+else bad slim-no-fnd-refs "plugins/slim names an fnd switch or tool: $(printf '%s' "$fndref" | head -3 | sed "s#$ROOT/##" | tr '\n' ' ')"; fi
 impure="$(grep -rnE --include='*.cjs' "\bprocess\.|require\(['\"](node:)?(fs|fs/promises|os|child_process|net|http|https|worker_threads|readline)['\"]\)|\bset(Timeout|Interval|Immediate)\b|\bglobalThis\b" "$ENGINES" 2>/dev/null)"
 if [ -z "$impure" ]; then ok
 else bad slim-engines-purity "engines/ reaches the host: $(printf '%s' "$impure" | head -3 | sed "s#$ROOT/##" | tr '\n' ' ')"; fi

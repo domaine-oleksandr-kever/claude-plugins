@@ -1,7 +1,6 @@
 // Files on disk: the spills slim writes (originals and the parts an engine's text cites), their TTL
 // sweep, and the rules for which existing files a handle or a host notice may name.
-// Spill names keep the `fnd-` prefixes: fnd's spill-access hook and untrusted-content rule accept
-// `<<full=` handles by them, and fnd's sweep prunes them.
+// Spill names keep the `fnd-` prefixes for now; CONTRACT.md §7 holds the name set and the handle grammar.
 'use strict';
 
 const fs = require('fs');
@@ -14,8 +13,7 @@ const NAMES = { original: 'fnd-mcp-slim-', rows: 'fnd-crush-', ids: 'fnd-jsx-ids
 const SPILL_NAME = /^fnd-mcp-slim-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/;
 const HOST_NAME = /^[\w.-]+\.(?:txt|json)$/;
 const HOST_MAX = 33554432;
-// Only the names slim writes. fnd writes them too, so they age by the longer of the two TTLs; fnd's
-// other files and its own throttle marker are fnd's sweep's business.
+// Only the names slim writes; any other file in the spill root is left alone.
 const SWEEP_PREFIXES = ['fnd-mcp-slim-', 'fnd-crush-', 'fnd-jsx-ids-'];
 const SWEEP_MARKER = '.slim-sweep';
 const SWEEP_KEEP = new Set(['fnd-mcp-slim-debug.log', 'fnd-mcp-slim-debug.log.1']);
@@ -54,10 +52,11 @@ function reuse(p, bytes) {
 }
 
 // A part at exactly the name the engine's text cites → {path, created}, or null when that name holds
-// foreign bytes or cannot be written (the text would then cite the wrong file).
-function writePart(name, payload) {
+// foreign bytes or cannot be written (the text would then cite the wrong file). `dir` defaults to the
+// spill root.
+function writePart(name, payload, dir) {
   try {
-    const root = env.spillRoot();
+    const root = dir || env.spillRoot();
     fs.mkdirSync(root, { recursive: true, mode: 0o700 });
     const p = path.join(root, name);
     const r = reuse(p, Buffer.byteLength(payload, 'utf8'));
@@ -71,20 +70,22 @@ function writePart(name, payload) {
 }
 
 // A whole original under a content-addressed name; a name holding foreign bytes moves to a second
-// content-addressed name, then to a random one, so nothing foreign is ever handed back.
-function writeOriginal(text, ext = '.json') {
+// content-addressed name, then to a random one, so nothing foreign is ever handed back. `at` names
+// another directory and prefix (the prompt channel's durable dir); the default is the spill root.
+function writeOriginal(text, ext = '.json', at) {
   try {
-    const root = env.spillRoot();
+    const root = (at && at.dir) || env.spillRoot();
+    const prefix = (at && at.prefix) || NAMES.original;
     fs.mkdirSync(root, { recursive: true, mode: 0o700 });
     const bytes = Buffer.byteLength(text, 'utf8');
     const hash = sha(text, 16);
-    for (const name of [`${NAMES.original}${hash}${ext}`, `${NAMES.original}${hash}-${sha(`${hash}:${bytes}`, 8)}${ext}`]) {
+    for (const name of [`${prefix}${hash}${ext}`, `${prefix}${hash}-${sha(`${hash}:${bytes}`, 8)}${ext}`]) {
       const p = path.join(root, name);
       const r = reuse(p, bytes);
       if (r === true) return { path: p, created: false };
       if (r === null) { writeAtomic(p, text); return { path: p, created: true }; }
     }
-    const p = path.join(root, `${NAMES.original}${hash}-${crypto.randomUUID().slice(0, 8)}${ext}`);
+    const p = path.join(root, `${prefix}${hash}-${crypto.randomUUID().slice(0, 8)}${ext}`);
     writeAtomic(p, text);
     return { path: p, created: true };
   } catch (_) {
@@ -101,9 +102,8 @@ function spillTtlHours(raw) {
 // Age-based sweep of the spill root, at most once per throttle window. Every error is swallowed.
 function sweep() {
   try {
-    const ttls = env.ttlRaws().map(spillTtlHours);
-    if (ttls.includes(0)) return;
-    const ttl = Math.max(...ttls);
+    const ttl = spillTtlHours(env.ttlRaw());
+    if (ttl === 0) return;
     const root = env.spillRoot();
     const marker = path.join(root, SWEEP_MARKER);
     const now = Date.now();
@@ -171,7 +171,12 @@ function readLocal(p) {
   try { return { text: fs.readFileSync(file, 'utf8'), file }; } catch (_) { return { why: 'expand-missing' }; }
 }
 
-const spillDirs = () => [env.spillRoot(), env.fndDir(), os.tmpdir()].filter(Boolean).map(real).filter(Boolean);
+const spillDirs = () => [env.spillRoot(), os.tmpdir()].filter(Boolean).map(real).filter(Boolean);
+
+// The prompt channel's durable spills: `<project root>/.claude/slim/prompt/slim-prompt-*`.
+const PROMPT_DIR_TAIL = path.join('.claude', 'slim', 'prompt');
+const PROMPT_SPILL_NAME = /^slim-prompt-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/;
+const isPromptSpill = (file, name) => name.test(path.basename(file)) && path.dirname(file).endsWith(path.sep + PROMPT_DIR_TAIL);
 
 // A path that is one of the plugins' own spills, or a host tool-results file of any session: reading
 // one is how the model follows a handle, so it always passes through.
@@ -179,21 +184,23 @@ function isSpillOrHostFile(p) {
   const file = typeof p === 'string' ? real(p) : null;
   if (!file) return false;
   if (/^fnd-[\w.-]+$/.test(path.basename(file)) && spillDirs().includes(path.dirname(file))) return true;
+  if (isPromptSpill(file, /^slim-prompt-[\w.-]+$/)) return true;
   const segs = projectSegs(file);
   return !!segs && segs.length === 4 && segs[2] === 'tool-results';
 }
 
-// A handle naming a regular file this user owns: a whole-original spill in a spill dir, or this
-// session's host tool-results file.
+// A handle naming a regular file this user owns: a whole-original spill in a spill dir or the prompt
+// channel's durable dir, or this session's host tool-results file.
 function trustedHandle(file, sessionId) {
   if (!path.isAbsolute(file)) return false;
   let st;
   try { st = fs.lstatSync(file); } catch (_) { return false; }
   if (!st.isFile() || !owned(st)) return false;
+  if (PROMPT_SPILL_NAME.test(path.basename(file))) { const r = real(file); return !!r && isPromptSpill(r, PROMPT_SPILL_NAME); }
   if (!SPILL_NAME.test(path.basename(file))) return !!hostFile(file, sessionId).file;
   return spillDirs().includes(real(path.dirname(file)));
 }
 
 const unlinkAll = (paths) => { for (const p of paths) { try { fs.unlinkSync(p); } catch (_) {} } };
 
-module.exports = { NAMES, writePart, writeOriginal, sweep, hostFile, readHost, readLocal, isSpillOrHostFile, trustedHandle, unlinkAll, SWEEP_MARKER };
+module.exports = { NAMES, PROMPT_DIR_TAIL, writePart, writeOriginal, sweep, hostFile, readHost, readLocal, isSpillOrHostFile, trustedHandle, unlinkAll, SWEEP_MARKER };

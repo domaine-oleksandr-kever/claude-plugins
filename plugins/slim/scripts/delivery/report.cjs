@@ -10,7 +10,7 @@ const DEBUG_LOG = 'fnd-mcp-slim-debug.log';
 const DEBUG_LOG_MAX = 5 * 1024 * 1024;
 const SPILL_LOG_MAX = 8;
 // Lines kept for level 2: the in==out ballast, and every passthrough the hooks module decided itself.
-const LEVEL2 = new Set(['size-gate', 'already-slim', 'plain-gate', 'spill-read', 'own-cli', 'windowed-read', 'read-guard', 'not-text', 'not-covered']);
+const LEVEL2 = new Set(['size-gate', 'already-slim', 'plain-gate', 'spill-read', 'own-cli', 'windowed-read', 'read-guard', 'not-text', 'no-span']);
 
 // The nearest ancestor of `cwd` holding `.git`, else CLAUDE_PROJECT_DIR, else the cwd — basename only.
 const projectMemo = new Map();
@@ -61,10 +61,10 @@ function appendLine(record, cwd) {
   } catch (_) {}
 }
 
-// One invocation's line, by level: errors and lookups always; a non-MCP size gate never (below the
+// One invocation's line, by level: errors, lookups and views always; a non-MCP size gate never (below the
 // gate a Bash or Read call is not a slim invocation); the LEVEL2 reasons at 2; the rest at 1.
 function writeLine(record, cwd) {
-  if (record.decision === 'error' || record.channel === 'lookup') { appendLine(record, cwd); return; }
+  if (record.decision === 'error' || record.channel === 'lookup' || record.channel === 'view') { appendLine(record, cwd); return; }
   if (record.reason === 'no-result') return;
   if (record.reason === 'size-gate' && record.channel && record.channel !== 'mcp') return;
   const level = env.debugLevel();
@@ -80,6 +80,29 @@ function fmtCounts(map) {
   return [...map.entries()].sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k} ${v}`).join(' · ');
 }
 
+// With fnd and slim both loaded, fnd's PreToolUse hook and slim's guard each log the same read: a slim
+// line with an fnd twin (same tool and spill, within this window) is not counted again.
+const ACCESS_TWIN_MS = 10000;
+function dropTwins(access) {
+  const others = new Map();
+  for (const e of access) {
+    if (e.src === 'slim') continue;
+    const k = `${e.tool}|${e.spill}`;
+    if (!others.has(k)) others.set(k, []);
+    others.get(k).push(Date.parse(e.ts) || 0);
+  }
+  if (!others.size) return access;
+  return access.filter((e) => {
+    const ats = e.src === 'slim' ? others.get(`${e.tool}|${e.spill}`) : null;
+    if (!ats) return true;
+    const at = Date.parse(e.ts) || 0;
+    const i = ats.findIndex((t) => Math.abs(t - at) <= ACCESS_TWIN_MS);
+    if (i < 0) return true;
+    ats.splice(i, 1);
+    return false;
+  });
+}
+
 function buildReport(lines, opts) {
   const o = opts || {};
   const since = o.since ? Date.parse(o.since) : null;
@@ -93,18 +116,21 @@ function buildReport(lines, opts) {
     if (since != null && !(Date.parse(r.ts) >= since)) continue;
     events.push(r);
   }
-  // An `entry:"access"` line (hooks/spill-access.sh) is not a compression event: it measures that a
+  // An `entry:"access"` line (slim's spill-read guard, fnd's hooks/spill-access.sh) is not a compression event: it measures that a
   // tool READ a spill. It carries no bytes, no decision and no stages, so every aggregate below runs
   // over `comp` and the access lines are only counted on their own line and paired as recoveries —
   // a log written before the hook existed therefore reports exactly the numbers it always did.
-  const access = events.filter((e) => e.entry === 'access');
+  const accessLines = events.filter((e) => e.entry === 'access');
+  const denied = accessLines.filter((e) => e.denied === true);
+  const access = dropTwins(accessLines.filter((e) => e.denied !== true));
+  const twins = accessLines.length - denied.length - access.length;
   const comp = events.filter((e) => e.entry !== 'access');
   const out = [`slim: debug-log report — ${o.file || '(stdin)'}`];
   const stamps = events.map((e) => e.ts).filter(Boolean).sort();
   // The header counts the whole window; every aggregate below counts `comp`. Naming the split on the
   // line is what keeps the two populations reconcilable (`140 events` vs `100 events here came from…`).
   out.push(`  log: ${o.bytes != null ? `${o.bytes} B, ` : ''}${events.length} events` +
-    `${access.length ? ` (${access.length} spill read${access.length === 1 ? '' : 's'})` : ''}` +
+    `${accessLines.length ? ` (${accessLines.length} spill read${accessLines.length === 1 ? '' : 's'})` : ''}` +
     `${skipped ? ` (+${skipped} unparseable)` : ''}` +
     `${stamps.length ? `, ${stamps[0]} → ${stamps[stamps.length - 1]}` : ''}` +
     `${o.since ? `  [since ${o.since}]` : ''}`);
@@ -116,10 +142,12 @@ function buildReport(lines, opts) {
   // that read spills and made no MCP call), and the body below is all bytes and decisions — rendering it
   // over an empty `comp` printed a bare `decisions:` line and a headerless `projects:` block.
   let spillReads = '';
-  if (access.length) {
+  if (accessLines.length) {
     const vias = new Map();
     for (const e of access) bump(vias, e.via || 'other');
-    spillReads = `  spill reads (access hook): ${access.length}  (via: ${fmtCounts(vias)})`;
+    spillReads = `  spill reads (access hook): ${access.length}  (via: ${vias.size ? fmtCounts(vias) : 'none'})` +
+      `${twins ? ` [+${twins} logged by both fnd and slim]` : ''}` +
+      `${denied.length ? ` · denied by the spill-read guard: ${denied.length}` : ''}`;
   }
   if (!comp.length) { out.push('  no compression events in range.', spillReads); return out.join('\n'); }
   // What an event actually saved — only a `compressed`/`stubbed` decision shrank anything, whatever a
@@ -333,7 +361,7 @@ function buildReport(lines, opts) {
   // those events are logged at every level. Read off `lvl`, so a =2 log gets no caveat and a level-1 log
   // keeps it even when a foreign `size-gate` line from another project shares the file.
   if (lvl1) {
-    out.push('  note: sub-gate results (≤4 KB, reason size-gate) are logged only at SLIM_DEBUG=2 (or FND_MCP_SLIM_DEBUG=2) — ' +
+    out.push('  note: sub-gate results (≤4 KB, reason size-gate) are logged only at SLIM_DEBUG=2 — ' +
       `${lvl1} of ${comp.length} events here came from level 1, so totals and call counts cover logged events.`);
   }
   return out.join('\n');

@@ -78,13 +78,15 @@ The three enumerated deviations, and where each is asserted:
      whole original as the recovery net at runtime). The fixtures run with `ccrStore:true`, so the
      marker is reproduced and pinned byte-for-byte; the runtime omits it.
 
-slim plugin copies
-==================
+slim plugin engines
+===================
 
-plugins/slim/scripts/json-slim.cjs and plugins/slim/scripts/log-slim.cjs are byte-identical
-copies of the two ports above, carried by the sibling slim plugin under the same Apache-2.0
-attribution. tests/slim-fixtures.mjs holds each copy equal to its plugins/fnd/scripts/ original,
-so every statement in this NOTICE applies to both copies unchanged.
+plugins/slim/scripts/engines/json.cjs (the SmartCrusher port) and plugins/slim/scripts/engines/log.cjs
+(the LogCompressor port) are library rewrites of the two ports above, carried by the sibling slim
+plugin under the same Apache-2.0 attribution. tests/slim-engines.mjs runs the same vendored fixtures
+against them (EP-crush, EP-log, the latter also against plugins/fnd/scripts/log-slim.cjs) and
+tests/slim-fixtures.mjs compares the json engine with plugins/fnd/scripts/json-slim.cjs on the real
+fixtures (P rows).
 
 A full copy of the Apache License, Version 2.0 is available at
 https://www.apache.org/licenses/LICENSE-2.0 . This project as a whole is MIT-licensed

@@ -1,9 +1,9 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-const ALL = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent']
+const ALL = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment', 'prompt']
 
-/** A sibling plugin reading slim.info, as fnd's FND_COMPRESSION=proxy check does. */
+/** A sibling plugin reading slim.info. */
 const PEEK = {
   name: 'peek',
   register(on: On) {
@@ -45,9 +45,9 @@ describe('slim.info at session.start', () => {
   })
 
   test('I2 a switch at 0 drops its channels', { plugins: [PEEK] }, async ($, on) => {
-    world(on, { SLIM_BASH: '0', SLIM_WEB: '0' })
+    world(on, { SLIM_BASH: '0', SLIM_WEB: '0', SLIM_PROMPT: '0' })
     await start($)
-    expect((await info($)).channels).toEqual(['mcp', 'read', 'grep', 'glob', 'agent'])
+    expect((await info($)).channels).toEqual(['mcp', 'read', 'grep', 'glob', 'agent', 'attachment'])
   })
 
   test("I3 an unreadable manifest → version 'unknown', the snapshot still written", { plugins: [PEEK] }, async ($, on) => {

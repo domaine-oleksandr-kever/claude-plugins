@@ -1518,6 +1518,7 @@ module.exports = {
   isErrorShape,
   parseJsonl,
   unwrapFence,
+  numberPrecisionLoss,
   // Seams for tests/slim-engines.mjs: the parity rows run the crush alone.
   __test: { crush, crushValue, DEFAULTS, MAX_ITEMS_AFTER_CRUSH, FIRST_FRACTION, LAST_FRACTION, VARIANCE_THRESHOLD, PRESERVE_CHANGE_POINTS },
 };

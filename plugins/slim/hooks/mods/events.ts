@@ -13,7 +13,7 @@ export function pushEvent(list: readonly SlimEvent[], ev: SlimEvent): SlimEvent[
   return [...list.slice(0, i), ...list.slice(i + 1), ev]
 }
 
-/** `mcp__plugin_fnd_atlassian__getJiraIssue` → `getJiraIssue`; a built-in tool keeps its name. */
+/** `mcp__plugin_acme_atlassian__getJiraIssue` → `getJiraIssue`; a built-in tool keeps its name. */
 export function toolName(tool: string): string {
   return tool.split('__').pop() ?? tool
 }
@@ -69,6 +69,19 @@ export function lookupText(prefix: string, question: string, model: string, toke
   const shown = q.length > 60 ? `${q.slice(0, 60)}…` : q
   const tail = failed !== undefined ? `failed (${failed})` : tokens === null ? 'no tokens' : `${fmtTokens(tokens)} tok`
   return `${prefix}lookup: ${shown} · ${model} · ${tail}`
+}
+
+/**
+ * `jira-reader · view issues.json: 118 KB → 29 KB (−75%) · json`; `… (narrowed by jq) · json`,
+ * `… cached 29 KB · json` and `… refused (<reason>)` for the other outcomes.
+ */
+export function viewText(prefix: string, source: string, decision: string, engine: string | null, bytesIn: number, bytesOut: number, reason?: string | null): string {
+  const s = source.replace(/\s+/g, ' ').trim()
+  const head = `${prefix}view ${s.length > 48 ? `${s.slice(0, 48)}…` : s}:`
+  if (decision === 'refused') return `${head} refused (${reason ?? 'refused'})`
+  if (decision === 'cached') return `${head} cached ${fmtSize(bytesOut)} · ${engine ?? '?'}`
+  const how = decision === 'narrowed' ? 'narrowed by jq' : pctCell(bytesIn, bytesOut)
+  return `${head} ${fmtSize(bytesIn)} → ${fmtSize(bytesOut)} (${how}) · ${engine ?? '?'}`
 }
 
 /** `slim  json  118 KB → 29 KB  −75%`. */

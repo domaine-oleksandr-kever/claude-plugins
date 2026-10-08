@@ -1,14 +1,14 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-const TOOL = 'mcp__plugin_fnd_atlassian__searchJiraIssuesUsingJql'
+const TOOL = 'mcp__plugin_acme_atlassian__searchJiraIssuesUsingJql'
 const BIG = `{"issues":[${'{"key":"ELC-1","fields":{"summary":"x"}},'.repeat(2900)}{}]}`
 const SPILL = '/tmp/fnd-mcp-slim-0123456789abcdef.json'
 const FIGURE = 'slim: compressed 120,030 B → 30,000 B (−75.0%)'
 const SLIMMED = `{"issues":[{"key":"ELC-1"}]}\n\n${FIGURE}\n\n<<full=${SPILL} original_result>>`
 const NOTICE =
   'Error: result (3,196,806 characters) exceeds maximum allowed tokens. Output has been saved to ' +
-  '/Users/me/.claude/projects/-repo/S/tool-results/mcp-plugin_fnd_atlassian-searchJiraIssuesUsingJql-1791010865179.txt.'
+  '/Users/me/.claude/projects/-repo/S/tool-results/mcp-plugin_acme_atlassian-searchJiraIssuesUsingJql-1791010865179.txt.'
 const TEXT = 'searchJiraIssuesUsingJql: compressed 120 KB → 30 KB (−75%) · json'
 /** The core's stdin keys, in order; agentId, pre and bytes_in only when set. */
 const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in']
@@ -119,7 +119,7 @@ describe('M3 passthrough without a spawn', () => {
   const fndSlim = `{"a":"${'1'.repeat(5000)}"}\n\nfnd-mcp-slim: compressed 110,794 B → 22,179 B (−80.0%)\n\n${HANDLE}`
   const ownSlim = `{"a":"${'1'.repeat(5000)}"}\n\nslim: compressed 110,794 B → 22,179 B (−80.0%)\n\n${HANDLE}`
   const fndStub = `<<fnd-mcp-slim stub>> ${TOOL} returned 50,000 B (format=json) — ${'s'.repeat(6000)}`
-  // fnd's FND_MCP_SLIM_STUB=0 output: bigger than any stub, its figure its own size.
+  // fnd's output with its stub off: bigger than any stub, its figure its own size.
   let exact = ''
   for (let n = 0, i = 0; i < 10; i++) {
     exact = `${'y'.repeat(50_000)}\n\nfnd-mcp-slim: compressed 200,000 B → ${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} B (−75.0%)\n\n${HANDLE}`
@@ -182,7 +182,6 @@ describe('M4 debug levels spawn the core to log a pre-decided passthrough', () =
     ['SLIM_DEBUG=2, already slim', slimmed, { SLIM_DEBUG: '2' }, 'already-slim'],
     ['SLIM_DEBUG=1, small', small, { SLIM_DEBUG: '1' }, null],
     ['SLIM_DEBUG=2, small', small, { SLIM_DEBUG: '2' }, 'size-gate'],
-    ['FND_MCP_SLIM_DEBUG=2 alone, small', small, { FND_MCP_SLIM_DEBUG: '2' }, 'size-gate'],
   ]
   for (const [name, below, env, pre] of cases) {
     test(name, async ($, on) => {

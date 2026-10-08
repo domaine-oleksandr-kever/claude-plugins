@@ -136,7 +136,7 @@ describe('event helpers', () => {
     expect(pctSaved(120_030, 30_000)).toBe(75)
     expect(pctSaved(100, 120)).toBe(0)
     expect(pctSaved(0, 0)).toBe(0)
-    expect(toolName('mcp__plugin_fnd_atlassian__getJiraIssue')).toBe('getJiraIssue')
+    expect(toolName('mcp__plugin_acme_atlassian__getJiraIssue')).toBe('getJiraIssue')
   })
 
   test('agentPrefix, eventText, rowLine', () => {
@@ -203,9 +203,9 @@ describe('the core run', () => {
 })
 
 describe('channels', () => {
-  test('channelOf: MCP, the built-ins, lookup, everything else null', () => {
+  test('channelOf: MCP, the built-ins, lookup and view, everything else null', () => {
     const rows: [string, string | null][] = [
-      ['mcp__slim__lookup', 'lookup'], ['mcp__plugin_fnd_atlassian__getJiraIssue', 'mcp'], ['Bash', 'bash'], ['Read', 'read'],
+      ['mcp__slim__lookup', 'lookup'], ['mcp__slim__view', 'view'], ['mcp__plugin_acme_atlassian__getJiraIssue', 'mcp'], ['Bash', 'bash'], ['Read', 'read'],
       ['WebFetch', 'webfetch'], ['WebSearch', 'websearch'], ['Grep', 'grep'], ['Glob', 'glob'], ['Agent', 'agent'], ['Task', 'agent'],
       ['Edit', null], ['Write', null], ['bash', null],
     ]
@@ -213,9 +213,9 @@ describe('channels', () => {
   })
 
   test('GATES, LOG_GATE and ENGINES are the contract', () => {
-    expect(GATES).toEqual({ mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, glob: 16384, agent: 0 })
+    expect(GATES).toEqual({ mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, glob: 16384, agent: 0, attachment: 32768 })
     expect(LOG_GATE).toBe(16384)
-    expect(ENGINES).toEqual(['json', 'jsonl', 'log', 'html', 'figma', 'adf', 'text', 'stub'])
+    expect(ENGINES).toEqual(['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'stub'])
   })
 
   test('structured: JSON or a page at the start; a template or prose is not', () => {

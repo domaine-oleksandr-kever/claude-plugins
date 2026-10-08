@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { NOTE } from '../describe.ts'
 import { BAD_ARGS, LOOKUP_DESC, LOOKUP_SCHEMA, SYS, verified, webFetchPrompt } from '../lookup.ts'
+import { VIEW_DESC, VIEW_SCHEMA } from '../view.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
 const LOOKUP = 'mcp__slim__lookup'
@@ -90,16 +91,19 @@ const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', i
 const lookup = async ($: any, args: Record<string, unknown>) => String((await $.tool.call({ tool: LOOKUP, ...args })).result)
 
 describe('L1 registration', () => {
-  test('session.start registers lookup with its schema', async ($, on) => {
+  test('session.start registers lookup and view with their schemas', async ($, on) => {
     const w = world(on)
     await start($)
-    expect(w.regs).toEqual([{ name: 'lookup', description: LOOKUP_DESC, inputSchema: LOOKUP_SCHEMA }])
+    expect(w.regs).toEqual([
+      { name: 'lookup', description: LOOKUP_DESC, inputSchema: LOOKUP_SCHEMA },
+      { name: 'view', description: VIEW_DESC, inputSchema: VIEW_SCHEMA },
+    ])
   })
 
-  test('SLIM_LOOKUP=0: not registered, no note on Bash', async ($, on) => {
+  test('SLIM_LOOKUP=0: lookup not registered (view still is), no note on Bash', async ($, on) => {
     const w = world(on, { env: { SLIM_LOOKUP: '0' } })
     await start($)
-    expect(w.regs).toEqual([])
+    expect(w.regs.map(r => r.name)).toEqual(['view'])
     expect((await $.tool.describe({ tool: 'Bash', description: 'Run.', provider: PROVIDER })).description).toBe('Run.')
   })
 })

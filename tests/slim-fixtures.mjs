@@ -2,8 +2,7 @@
 // Suite for plugins/slim/scripts/slim.cjs — slim's Claude Code delivery — run end to end on the real
 // fixtures in tests/fixtures/ and on synthetic inputs built inline: decisions, restored result shapes,
 // records and the report, per channel. Every case spawns the core in its own temp dir with an explicit
-// env, so a developer's exported FND_MCP_SLIM_* / SLIM_* never reaches it and no row writes to the real
-// report log. The engines themselves are tested as pure functions in tests/slim-engines.mjs.
+// env, so a developer's exported SLIM_* never reaches it and no row writes to the real report log. The engines themselves are tested as pure functions in tests/slim-engines.mjs.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -17,9 +16,9 @@ import path from 'node:path';
 const ROOT = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const SCRIPTS = path.join(ROOT, 'plugins/slim/scripts');
 const SLIM = path.join(SCRIPTS, 'slim.cjs');
-const SLIM_JSON_CLI = path.join(SCRIPTS, 'json-slim.cjs');
 const FND_SCRIPTS = path.join(ROOT, 'plugins/fnd/scripts');
-const FROZEN_JSON = path.join(SCRIPTS, 'json-slim.cjs');
+// fnd's frozen json-slim: the compressor slim's json engine was ported from.
+const FROZEN_JSON = path.join(FND_SCRIPTS, 'json-slim.cjs');
 const FND_HOOK = path.join(ROOT, 'plugins/fnd/hooks/mcp-slim.cjs');
 const MODS = path.join(ROOT, 'plugins/slim/hooks/mods');
 const BOUND = 32768 + 1200;
@@ -29,14 +28,23 @@ const LOG = 'fnd-mcp-slim-debug.log';
 // The envelope the hooks module sends, keys in its order (agentId, pre, bytes_in only when set).
 const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in'];
 const M1_KEYS = ENVELOPE_KEYS.slice(0, 9);
-const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment', 'lookup'];
-const ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'adf', 'text', 'stub'];
+const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment', 'prompt', 'lookup', 'view'];
+const ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'stub'];
 
 const F1 = readFileSync(path.join(FIX, 'jql-search-ELC.json'), 'utf8');
 const F2 = JSON.parse(readFileSync(path.join(FIX, 'mcp-envelope-jira.json'), 'utf8'));
 const F3 = readFileSync(path.join(FIX, 'figma-design-context.jsx'), 'utf8');
 const F4 = readFileSync(path.join(FIX, 'jira-issue-ELC-104.json'), 'utf8');
 const F5 = readFileSync(path.join(FIX, 'figma-metadata-3326-39542.xml'), 'utf8');
+const REST = readFileSync(path.join(FIX, 'figma-node-rest.json'), 'utf8');
+// Three re-id'd copies of the fixture's frame: its node tree (~90 KB) is over every egress cap.
+const REST_BIG = (() => {
+  const v = JSON.parse(REST);
+  const doc = Object.values(v.nodes)[0].document;
+  const reid = (n, k) => ({ ...n, id: `${n.id}~${k}`, children: (n.children || []).map((c) => reid(c, k)) });
+  doc.children = [0, 1, 2].flatMap((k) => doc.children.map((c) => reid(c, k)));
+  return JSON.stringify(v);
+})();
 
 let pass = 0;
 let fail = 0;
@@ -160,7 +168,7 @@ let F1_OUT = null;
   eq('F4-decision', [a.decision, a.reason, a.record.engine], ['stubbed', 'weak-gain', 'stub']);
   const res = typeof a.result === 'string' ? a.result : '';
   check('F4-stub-header', res.startsWith('<<slim stub>> mcp__x__y returned '), res.slice(0, 80));
-  check('F4-recipe-own-cli', res.includes(`node ${SLIM_JSON_CLI} `), 'recipe does not name slim\'s json-slim.cjs');
+  check('F4-recipe-view', res.includes('mcp__slim__view({ path: ') && res.includes('windowed (offset/limit)') && !res.includes('json-slim'), 'recipe does not name the view tool and a windowed Read');
   check('F4-figure', (a.figure || '').startsWith('slim: stub ') && res.includes(a.figure), a.figure);
   check('F4-no-fnd-marks', !res.includes('<<fnd-mcp-slim stub>>') && !/^fnd-mcp-slim:/m.test(res), 'fnd mark in a slim stub');
   const f = call('F4-fit', T, envelope(T, F4));
@@ -254,19 +262,23 @@ let STUB0_OUT = null;
   STUB0_OUT = typeof x.result === 'string' ? x.result : null;
   check('S6d-over-bound', x.decision === 'compressed' && !!STUB0_OUT && bytes(STUB0_OUT) > 32768 + 1200, `${x.decision} ${STUB0_OUT && bytes(STUB0_OUT)}`);
   shapes.d = STUB0_OUT;
-  // Over the bound only a handle this user owns in a spill dir counts: S6d's sits in fnd's dir.
-  const dirOf = (k) => (k === 'd' ? { FND_MCP_SLIM_DIR: `${T}/spill` } : {});
+  // Over the bound only a handle this user owns in the spill root counts: S6d's sits in S6d-make's root.
+  const rootOf = (k, T2) => (k === 'd' ? `${T}/spill` : `${T2}/spill`);
   for (const k of Object.keys(shapes)) {
     const T2 = newT();
-    const a = call(`S6${k}`, T2, envelope(T2, shapes[k]), dirOf(k));
+    const d2 = rootOf(k, T2);
+    const n2 = logLines(d2).length;
+    const a = call(`S6${k}`, T2, envelope(T2, shapes[k]), { SLIM_DIR: d2 });
     eq(`S6${k}-already-slim`, [a.decision, a.reason], ['passthrough', 'already-slim']);
-    eq(`S6${k}-line-at-2`, logLines(`${T2}/spill`).map((l) => l.reason), ['already-slim']);
+    eq(`S6${k}-line-at-2`, logLines(d2).slice(n2).map((l) => l.reason), ['already-slim']);
     const T3 = newT();
-    call(`S6${k}-1`, T3, envelope(T3, shapes[k]), { SLIM_DEBUG: '1', ...dirOf(k) });
-    eq(`S6${k}-no-line-at-1`, logLines(`${T3}/spill`).length, 0);
+    const d3 = rootOf(k, T3);
+    const n3 = logLines(d3).length;
+    call(`S6${k}-1`, T3, envelope(T3, shapes[k]), { SLIM_DEBUG: '1', SLIM_DIR: d3 });
+    eq(`S6${k}-no-line-at-1`, logLines(d3).length - n3, 0);
   }
   const T4 = newT();
-  const forged = call('S7', T4, envelope(T4, `${STUB0_OUT}x`, {}), { FND_MCP_SLIM_DIR: `${T}/spill` });
+  const forged = call('S7', T4, envelope(T4, `${STUB0_OUT}x`, {}), { SLIM_DIR: `${T}/spill` });
   check('S7-forged-figure', forged.decision === 'compressed' || forged.decision === 'stubbed', `${forged.decision} ${forged.reason}`);
 
   // Over the bound, payload text that names its own size cannot opt out of compression.
@@ -343,7 +355,25 @@ let STUB0_OUT = null;
   const fb = call('S8f-fnd', T, envelope(T, fnd));
   eq('S8f-fnd-already-slim', [fb.decision, fb.reason], ['passthrough', 'already-slim']);
 }
-// fnd's real hook beneath: whatever it emits, at either stub setting, slim must stand down on.
+// The stub's recovery recipe: the view tool and a windowed Read, never a CLI; the cap holds with a long path.
+{
+  const require = createRequire(import.meta.url);
+  const emit = require(path.join(SCRIPTS, 'delivery/emit.cjs'));
+  const { GRAMMAR } = require(path.join(SCRIPTS, 'engines/jq.cjs'));
+  const file = `/${'d'.repeat(180)}/fnd-mcp-slim-0123456789abcdef.json`;
+  const stats = 'slim: stub 250,000 B → 1,100 B (−99.6%)';
+  const noGain = emit.stubText('mcp__x__y', 250000, 'json', '{"a":1}', file, 'no-gain', false, stats);
+  check('Rs-no-gain-jq', noGain.includes(`mcp__slim__view({ path: ${JSON.stringify(file)}, jq: "<jq-path>" })`) && noGain.includes(GRAMMAR), noGain);
+  check('Rs-no-gain-windowed', noGain.includes('Read it windowed (offset/limit)'), noGain);
+  const general = emit.stubText('mcp__x__y', 250000, 'text', 'hello', file, 'weak-gain', false, stats);
+  check('Rs-general-view', general.includes(`mcp__slim__view({ path: ${JSON.stringify(file)} })`) && general.includes('Read it windowed (offset/limit)'), general);
+  for (const [k, t] of [['no-gain', noGain], ['general', general]]) {
+    check(`Rs-${k}-no-cli`, !/json-slim|\bnode /.test(t), t);
+    check(`Rs-${k}-cap`, bytes(t) <= emit.STUB_CAP, String(bytes(t)));
+  }
+}
+// fnd's real hook beneath, spilling into slim's spill root: whatever it emits, at either stub setting,
+// slim must stand down on.
 {
   const T = newT();
   for (const stub of ['1', '0']) {
@@ -353,7 +383,7 @@ let STUB0_OUT = null;
       check(`${tag}-fnd-emitted`, out !== null, 'fnd emitted nothing');
       if (out === null) continue;
       if (stub === '0' && name === 'F4') check(`${tag}-over-bound`, bytes(out) > BOUND, String(bytes(out)));
-      const a = call(tag, T, envelope(T, out), { FND_MCP_SLIM_DIR: `${T}/fspill` });
+      const a = call(tag, T, envelope(T, out), { SLIM_DIR: `${T}/fspill` });
       eq(`${tag}-already-slim`, [a.decision, a.reason], ['passthrough', 'already-slim']);
     }
   }
@@ -389,7 +419,7 @@ let STUB0_OUT = null;
   const T = newT();
   mkdirSync(path.join(T, 'p/scripts'), { recursive: true });
   mkdirSync(path.join(T, 'p/scripts/delivery'), { recursive: true });
-  for (const f of ['slim.cjs', 'env-file.cjs']) copyFileSync(path.join(SCRIPTS, f), path.join(T, 'p/scripts', f));
+  copyFileSync(path.join(SCRIPTS, 'slim.cjs'), path.join(T, 'p/scripts/slim.cjs'));
   for (const f of readdirSync(path.join(SCRIPTS, 'delivery'))) copyFileSync(path.join(SCRIPTS, 'delivery', f), path.join(T, 'p/scripts/delivery', f));
   const r = spawn(T, JSON.stringify(envelope(T, F1)), { script: path.join(T, 'p/scripts/slim.cjs') });
   let a = null;
@@ -415,7 +445,7 @@ let STUB0_OUT = null;
   const u = spawn(T, '', { args: ['--bogus'] });
   check('S14-unknown-flag', u.status === 2 && u.stdout === '' && u.stderr.includes('usage'), `exit ${u.status}`);
   const h = spawn(T, '', { args: ['--help'] });
-  check('S14-help', h.status === 0 && h.stdout.trim().split('\n').length === 5, h.stdout);
+  check('S14-help', h.status === 0 && h.stdout.trim().split('\n').length === 9 && ['--view', '--prompt', '--prompt-drop', '--access'].every((m) => h.stdout.includes(m)), h.stdout);
   check('S14-by-channel', /^ {2}by channel: mcp \d+ → \d+ B \([\d.]+% saved\)$/m.test(r.stdout), r.stdout);
   const rec = spawn(T, JSON.stringify({ tool_use_id: 'toolu_l', decision: 'answered', rung: 'url', engine: 'html', model: 'haiku', tokens: { input: 1200, output: 40 }, bytes_in: 60000, bytes_out: 300, ms: 900, cwd: T }), { args: ['--record'] });
   check('S14-record-silent', rec.status === 0 && rec.stdout === '', `exit ${rec.status}`);
@@ -425,17 +455,19 @@ let STUB0_OUT = null;
 }
 {
   const T = newT();
-  const a = call('S15a', T, envelope(T, F1), { SLIM_DIR: undefined, FND_MCP_SLIM_DIR: `${T}/fdir` });
-  check('S15a-fallback-dir', (handleOf(a.result || '') || '').startsWith(`${T}/fdir/`) && logLines(`${T}/fdir`).length === 1, handleOf(a.result || ''));
+  // fnd's switches never reach slim: with SLIM_DIR unset the spill root is the system temp dir.
+  mkdirSync(`${T}/tmp`);
+  const a = call('S15a', T, envelope(T, F1), { SLIM_DIR: undefined, TMPDIR: `${T}/tmp`, FND_MCP_SLIM_DIR: `${T}/fdir` });
+  check('S15a-fnd-dir-ignored', (handleOf(a.result || '') || '').startsWith(`${T}/tmp/`) && logLines(`${T}/tmp`).length === 1 && !existsSync(`${T}/fdir`), handleOf(a.result || ''));
   const T2 = newT();
   const b = call('S15b', T2, envelope(T2, F1), { FND_MCP_SLIM_DIR: `${T2}/fdir` });
-  check('S15b-own-dir-wins', (handleOf(b.result || '') || '').startsWith(`${T2}/spill/`) && logLines(`${T2}/spill`).length === 1 && !existsSync(`${T2}/fdir`), handleOf(b.result || ''));
+  check('S15b-own-dir', (handleOf(b.result || '') || '').startsWith(`${T2}/spill/`) && logLines(`${T2}/spill`).length === 1 && !existsSync(`${T2}/fdir`), handleOf(b.result || ''));
   const T3 = newT();
   call('S15c', T3, envelope(T3, [{ type: 'text', text: F5 }]), { SLIM_DEBUG: undefined, FND_MCP_SLIM_DEBUG: '1' });
-  eq('S15c-fallback-debug', logLines(`${T3}/spill`).map((l) => [l.reason, l.lvl]), [['non-json', 1]]);
+  eq('S15c-fnd-debug-ignored', logLines(`${T3}/spill`), []);
   const T4 = newT();
   call('S15d', T4, envelope(T4, F1), { SLIM_DEBUG: '0', FND_MCP_SLIM_DEBUG: '2' });
-  check('S15d-own-debug-wins', !existsSync(path.join(T4, 'spill', LOG)), 'a log was written at SLIM_DEBUG=0');
+  check('S15d-own-debug-only', !existsSync(path.join(T4, 'spill', LOG)), 'a log was written at SLIM_DEBUG=0');
   const T5 = newT();
   const e = call('S15e', T5, envelope(T5, F1), { FND_MCP_SLIM: '0' });
   eq('S15e-fnd-switch-ignored', e.decision, 'compressed');
@@ -469,15 +501,15 @@ let STUB0_OUT = null;
   seed(T2);
   call('S17-ttl0', T2, envelope(T2, F1), { SLIM_TTL: '0' });
   check('S17-ttl0-kept', existsSync(`${T2}/spill/fnd-crush-dead.json`), 'SLIM_TTL=0 still swept');
-  // A shared name lives as long as the longer TTL says: SLIM_TTL=1 cannot cut fnd's 72 h short.
+  // fnd's TTL is not slim's: neither a longer one nor a 0 keeps a file past SLIM_TTL.
   const T3 = newT();
   seed(T3);
-  call('S17-ttl-longer', T3, envelope(T3, F1), { SLIM_TTL: '1', FND_MCP_SLIM_TTL: '72' });
-  check('S17-ttl-longer-kept', existsSync(`${T3}/spill/fnd-crush-dead.json`), 'SLIM_TTL=1 swept a 48 h file fnd keeps for 72 h');
+  call('S17-ttl-own', T3, envelope(T3, F1), { SLIM_TTL: '1', FND_MCP_SLIM_TTL: '72' });
+  check('S17-ttl-own-swept', !existsSync(`${T3}/spill/fnd-crush-dead.json`), 'SLIM_TTL=1 kept a 48 h file');
   const T4 = newT();
   seed(T4);
   call('S17-ttl-fnd0', T4, envelope(T4, F1), { FND_MCP_SLIM_TTL: '0' });
-  check('S17-ttl-fnd0-kept', existsSync(`${T4}/spill/fnd-crush-dead.json`), 'FND_MCP_SLIM_TTL=0 still swept');
+  check('S17-ttl-fnd0-ignored', !existsSync(`${T4}/spill/fnd-crush-dead.json`), 'FND_MCP_SLIM_TTL=0 stopped slim\'s sweep');
 }
 {
   const T = newT();
@@ -506,23 +538,6 @@ let STUB0_OUT = null;
   const T = newT();
   spawn(T, '{not json', { extra: { SLIM_DEBUG: undefined } });
   eq('S21-error-at-level-0', logLines(`${T}/spill`).map((l) => [l.decision, l.lvl]), [['error', 0]]);
-}
-{
-  const T = newT();
-  call('S22-make', T, envelope(T, F1), { SLIM_TTL: '0' });
-  const spill = mcpSpills(`${T}/spill`)[0];
-  mkdirSync(`${T}/.claude/fnd-tmp/playwright`, { recursive: true });
-  writeFileSync(`${T}/.claude/fnd-tmp/playwright/old.png`, 'png');
-  old(`${T}/.claude/fnd-tmp/playwright/old.png`);
-  check('S22-no-marker', !existsSync(`${T}/spill/.fnd-mcp-slim-sweep`), 'marker present before the CLI run');
-  const cli = { extra: { SLIM_DIR: undefined, SLIM_DEBUG: undefined, FND_MCP_SLIM_DIR: `${T}/spill` } };
-  const r = spawn(T, '', { ...cli, args: [path.join(T, 'spill', spill || 'missing')], script: SLIM_JSON_CLI });
-  check('S22-cli-runs', r.status === 0 && existsSync(`${T}/spill/.fnd-mcp-slim-sweep`), `exit ${r.status} ${r.stderr}`);
-  check('S22-project-pass-skipped', existsSync(`${T}/.claude/fnd-tmp/playwright/old.png`), 'slim\'s recovery CLI pruned the project');
-  // Control: fnd's own CLI does run that pass, so the row above has teeth.
-  unlinkSync(`${T}/spill/.fnd-mcp-slim-sweep`);
-  const c = spawn(T, '', { ...cli, args: [path.join(T, 'spill', spill || 'missing')], script: path.join(FND_SCRIPTS, 'json-slim.cjs') });
-  check('S22-control', c.status === 0 && !existsSync(`${T}/.claude/fnd-tmp/playwright/old.png`), 'fnd\'s CLI left the stale file: the S22 row proves nothing');
 }
 // The envelope keys as the hooks module writes them and as its kit test pins them, against this suite's.
 {
@@ -665,6 +680,10 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cb9-host-read', call('Cb9h', T, chEnv(T, 'bash', 'Bash', { command: `head -c 99999 ${go}` }, BASH(GO_TEST))).reason, 'spill-read');
   eq('Cb10-own-cli', call('Cb10', T, chEnv(T, 'bash', 'Bash', { command: `node ${FROZEN_JSON} f.json --jq .a` }, BASH(F1))).reason, 'own-cli');
   eq('Cb11-source-json', call('Cb11', T, chEnv(T, 'bash', 'Bash', { command: 'cat templates/product.json' }, BASH(F1))).reason, 'read-guard');
+  const rn = call('Cb14', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST)));
+  check('Cb14-figma-nodes', rn.decision === 'compressed' && rn.record.engine === 'figma-nodes' && String((rn.result || {}).stdout).startsWith('# figma node 3326:39542'), `${rn.decision} ${rn.record.engine}`);
+  const rb = call('Cb15', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-1.nodes.json' }, BASH(REST_BIG)));
+  check('Cb15-big-nodes', ['compressed', 'stubbed'].includes(rb.decision) && rb.record.engine !== 'figma-nodes' && bytes(String((rb.result || {}).stdout)) <= 32768 + 1024, `${rb.decision} ${rb.reason} ${rb.record.engine} ${rb.record.bytes_out}`);
 
   const rows = [];
   for (let i = 0; rows.join(',').length < 300000; i++) rows.push({ id: `${i}-${'abcdef0123456789'.repeat(1 + (i % 5)).slice(i % 7)}`, body: `unique text ${i} ${'lorem ipsum '.repeat(8 + (i % 13))}${i * 7919}`, a: null, b: null, c: {}, d: [] });
@@ -718,6 +737,23 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cr6-log', [l.decision, l.record.engine], ['compressed', 'log']);
   eq('Cr7-page', call('Cr7', T, chEnv(T, 'read', 'Read', { file_path: path.join(FIX, 'page.html') }, readRec(path.join(FIX, 'page.html'), PAGE))).reason, 'read-guard');
   eq('Cr8-image', call('Cr8', T, chEnv(T, 'read', 'Read', { file_path: '/x.png' }, { type: 'image', file: { base64: 'AAAA', type: 'image/png', originalSize: 4 } })).reason, 'not-text');
+  // A Figma REST nodes response is JSON the read channel admits, compressed by its own engine.
+  const np = path.join(T, 'data', 'AbC123-3326-39542.nodes.json');
+  writeFileSync(np, REST);
+  const n = call('Cr9', T, chEnv(T, 'read', 'Read', { file_path: np }, { type: 'text', file: { filePath: np, content: REST.slice(0, 20000), numLines: 1, startLine: 1, totalLines: 1, truncatedByTokenCap: true } }));
+  eq('Cr9-figma-nodes', [n.decision, n.record.engine, n.record.bytes_in], ['compressed', 'figma-nodes', bytes(REST)]);
+  const nc = String(((n.result || {}).file || {}).content);
+  const nh = handleOf(nc);
+  check('Cr9-tree', nc.startsWith('# figma node 3326:39542 — ') && nc.includes('\nnodes: 303 visible · 0 hidden dropped · 0 folded\n'), nc.slice(0, 300));
+  check('Cr9-spill-json', !!nh && /\/spill\/fnd-mcp-slim-[0-9a-f]{16}\.json$/.test(nh) && readFileSync(nh, 'utf8') === REST, nh);
+  // A node tree still over the egress cap takes the JSON route (fit, else stub), never raw passthrough.
+  const bp = path.join(T, 'data', 'AbC123-3326-1.nodes.json');
+  writeFileSync(bp, REST_BIG);
+  const bn = call('Cr10', T, chEnv(T, 'read', 'Read', { file_path: bp }, { type: 'text', file: { filePath: bp, content: REST_BIG.slice(0, 20000), numLines: 1, startLine: 1, totalLines: 1, truncatedByTokenCap: true } }));
+  const bc = String(((bn.result || {}).file || {}).content);
+  check('Cr10-big-nodes', ['compressed', 'stubbed'].includes(bn.decision) && bn.record.engine !== 'figma-nodes' && bn.record.bytes_out <= 65536 && bytes(bc) <= 65536 + 1024, `${bn.decision} ${bn.reason} ${bn.record.engine} ${bn.record.bytes_out}`);
+  const bh = handleOf(bc) || (/^full=(\S+)$/m.exec(bc) || [])[1];
+  check('Cr10-spill-json', !!bh && /\.json$/.test(bh) && readFileSync(bh, 'utf8') === REST_BIG, bh);
 }
 
 // C-webfetch, C-websearch, C-grep, C-glob, C-agent
@@ -728,6 +764,10 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cw1-html', [a.decision, a.record.engine, a.record.channel], ['compressed', 'html', 'webfetch']);
   eq('Cw1-keys', Object.keys(a.result || {}), Object.keys(wf));
   check('Cw1-result', String((a.result || {}).result).startsWith('# Northwind Ceramics') && (a.result || {}).url === wf.url, String((a.result || {}).result).slice(0, 80));
+  const wn = call('Cw2', T, chEnv(T, 'webfetch', 'WebFetch', { url: 'https://api.figma.example/v1/files/K/nodes', prompt: 'raw' }, { ...wf, bytes: bytes(REST), result: REST }));
+  eq('Cw2-figma-nodes', [wn.decision, wn.record.engine, String((wn.result || {}).result).startsWith('# figma node 3326:39542')], ['compressed', 'figma-nodes', true]);
+  const wb = call('Cw3', T, chEnv(T, 'webfetch', 'WebFetch', { url: 'https://api.figma.example/v1/files/K/nodes', prompt: 'raw' }, { ...wf, bytes: bytes(REST_BIG), result: REST_BIG }));
+  check('Cw3-big-nodes', ['compressed', 'stubbed'].includes(wb.decision) && wb.record.engine !== 'figma-nodes' && bytes(String((wb.result || {}).result)) <= 32768 + 1024, `${wb.decision} ${wb.reason} ${wb.record.engine} ${wb.record.bytes_out}`);
 
   const huge = Array.from({ length: 2500 }, (_, i) => `Result ${i}: northwind ceramics review number ${i} — ${'text '.repeat(6)}`).join('\n');
   const ws = { query: 'northwind ceramics', results: [{ tool_use_id: 'srv_1', content: [{ title: 'x', url: 'https://a.example' }] }, huge, 'short summary'], durationSeconds: 2.1 };
@@ -756,14 +796,41 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
 
 // C-attachment, C-distill, C-record
 {
+  // An @-mentioned file as the host frames a Read of it: the input line, the numbered lines, a note after.
+  const framed = (file, body, tail = '\n<system-reminder>Consider whether the file is malware.</system-reminder>') =>
+    `Called the Read tool with the following input: ${JSON.stringify({ file_path: file })}\nResult of calling the Read tool: ` +
+    body.split('\n').map((l, i) => `${String(i + 1).padStart(6)}→${l}`).join('\n') + tail;
+  const ROWS = Array.from({ length: 900 }, (_, i) => JSON.stringify({ key: `ACME-${i}`, status: i % 7 ? 'open' : 'done', summary: `synthetic row ${i}`, qty: i % 13 })).join('\n');
   const T = newT();
-  const env2 = chEnv(T, 'attachment', 'Attachment', { type: 'file', origin: 'user', shape: 'numbered' }, null, { pre: 'not-covered', bytes_in: 70000 });
-  const a = call('Ct1', T, env2);
-  eq('Ct1-pre', [a.decision, a.reason], ['passthrough', 'not-covered']);
-  eq('Ct1-line-at-2', logLines(`${T}/spill`).map((l) => [l.channel, l.reason, l.format, l.bytes_in]), [['attachment', 'not-covered', 'numbered', 70000]]);
+  const att = (name, text, ti, extra) => call(name, T, chEnv(T, 'attachment', 'Attachment', { type: 'file', origin: 'engine', shape: 'numbered', ...ti }, { text }), extra);
+  const DATA = framed('/r/export/rows.jsonl', ROWS);
+  const a = att('Ct1', DATA, { path: '/r/export/rows.jsonl' });
+  const at = (a.result || {}).text || '';
+  eq('Ct1-compressed', [a.decision, a.record.channel, a.record.engine, a.record.bytes_in, a.record.bytes_seen], ['compressed', 'attachment', 'jsonl', bytes(ROWS), bytes(DATA)]);
+  check('Ct1-framing-kept', at.startsWith('Called the Read tool with the following input: {"file_path":"/r/export/rows.jsonl"}\nResult of calling the Read tool: ')
+    && at.endsWith('original_result>>\n<system-reminder>Consider whether the file is malware.</system-reminder>'), at.slice(0, 200) + ' … ' + at.slice(-200));
+  check('Ct1-read-note', at.includes('slim: this view of /r/export/rows.jsonl is compressed and its line numbers are not file lines'), at.slice(-600));
+  const ah = /<<full=(\S+) original_result>>/.exec(at);
+  check('Ct1-handle-is-the-file', !!ah && readFileSync(ah[1], 'utf8') === ROWS, ah && ah[1]);
+  check('Ct1-smaller', bytes(at) < bytes(DATA) / 2, `${bytes(at)} of ${bytes(DATA)}`);
+  eq('Ct2-deterministic', (att('Ct2', DATA, { path: '/r/export/rows.jsonl' }).result || {}).text, at);
+  // Asked again after a compaction: the mod sends record:false, so the answer comes back with no second line.
+  const linesBefore = logLines(`${T}/spill`).length;
+  const again = call('Ct7', T, { ...chEnv(T, 'attachment', 'Attachment', { type: 'file', origin: 'engine', shape: 'numbered', path: '/r/export/rows.jsonl' }, { text: DATA }), record: false });
+  eq('Ct7-asked-again-no-line', [(again.result || {}).text === at, logLines(`${T}/spill`).length - linesBefore], [true, 0]);
+  const pretty = framed('/r/export/orders.json', JSON.stringify(JSON.parse(ORDERS(240)), null, 2));
+  eq('Ct3-json', [att('Ct3', pretty, { path: '/r/export/orders.json' }).decision], ['compressed']);
+  const src = framed('/r/src/big.ts', Array.from({ length: 3000 }, (_, i) => `const v${i} = ${i};`).join('\n'));
+  const pkg = framed('/r/package.json', JSON.stringify(JSON.parse(ORDERS(240)), null, 2));
+  eq('Ct4-passes', [att('Ct4a', src, { path: '/r/src/big.ts' }).reason, att('Ct4b', pkg, { path: '/r/package.json' }).reason, att('Ct4c', ROWS, { shape: 'raw' }).reason],
+    ['read-guard', 'read-guard', 'read-guard']);
+  eq('Ct5-no-framing-by-content', att('Ct5', DATA.slice(DATA.indexOf('\n') + 1), {}).decision, 'compressed');
   const T1 = newT();
-  call('Ct1b', T1, chEnv(T1, 'attachment', 'Attachment', { type: 'file', origin: 'user', shape: 'raw' }, null, { pre: 'not-covered', bytes_in: 70000 }), { SLIM_DEBUG: '1' });
-  eq('Ct1-none-at-1', logLines(`${T1}/spill`).length, 0);
+  call('Ct6', T1, chEnv(T1, 'attachment', 'Attachment', { type: 'file', origin: 'engine', shape: 'raw' }, null, { pre: 'read-guard', bytes_in: 70000 }));
+  eq('Ct6-pre-line-at-2', logLines(`${T1}/spill`).map((l) => [l.channel, l.reason, l.bytes_in]), [['attachment', 'read-guard', 70000]]);
+  const T1b = newT();
+  call('Ct6b', T1b, chEnv(T1b, 'attachment', 'Attachment', { type: 'file', origin: 'engine', shape: 'raw' }, null, { pre: 'read-guard', bytes_in: 70000 }), { SLIM_DEBUG: '1' });
+  eq('Ct6-none-at-1', logLines(`${T1b}/spill`).length, 0);
 
   const T2 = newT();
   const d = spawn(T2, JSON.stringify({ v: 1, text: PAGE, hint: { source: 'https://shop.example/p' }, cwd: T2, session_id: 's1' }), { args: ['--distill'] });
@@ -794,6 +861,176 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   check('Cr-record-exit', r.status === 0 && r.stdout === '', `exit ${r.status}`);
   eq('Cr-record-line', logLines(`${T3}/spill`).map((l) => [l.src, l.channel, l.entry, l.tool, l.tool_use_id, l.decision, l.reason, l.rung, l.engine, l.model, l.tokens, l.lvl]),
     [['slim', 'lookup', 'mod', 'mcp__slim__lookup', 'toolu_r', 'failed', 'timeout', 'url', 'html', 'haiku', null, 0]]);
+}
+
+// Cp — the prompt channel (--prompt): data spans of a pasted prompt replaced in place, spilled to the
+// project's durable .claude/slim/prompt/, prose kept byte for byte; Cx — the spill access lines.
+{
+  const { jsonBlobs } = createRequire(import.meta.url)(path.join(SCRIPTS, 'engines/index.cjs'));
+  const prompt = (T, text, root = T, extra = {}) => {
+    const r = spawn(T, JSON.stringify({ v: 1, text, root, cwd: root, session_id: 's1' }), { args: ['--prompt'], extra });
+    check(`Cp-exit-${T.slice(-6)}`, r.status === 0, `exit ${r.status} ${r.stderr}`);
+    try { return JSON.parse(r.stdout); } catch (_) { return {}; }
+  };
+  const dirOf = (root) => path.join(root, '.claude/slim/prompt');
+  const files = (root) => (existsSync(dirOf(root)) ? readdirSync(dirOf(root)).sort() : []);
+  const ISSUES = JSON.stringify({ total: 400, issues: Array.from({ length: 400 }, (_, i) => ({ key: `ACME-${i}`, fields: { summary: `synthetic issue ${i}`, status: { name: i % 3 ? 'Open' : 'Done' } } })) }, null, 2);
+  const HEAD = 'Hi — the search below returns the wrong total. Can you see why?\n\n';
+  const TAIL = '\n\nWhich field is off? Thanks!';
+
+  const T = newT();
+  const p1 = prompt(T, HEAD + ISSUES + TAIL);
+  eq('Cp1-rewritten', [p1.decision, p1.spans && p1.spans.map((x) => [x.kind, x.engine, x.form])], ['rewritten', [['json', 'json', 'inline']]]);
+  check('Cp1-prose-byte-equal', typeof p1.text === 'string' && p1.text.startsWith(HEAD) && p1.text.endsWith(TAIL), String(p1.text).slice(0, 120));
+  const h1 = /<<full=(\S+) original_result>>/.exec(p1.text || '');
+  check('Cp1-spill-durable', !!h1 && path.dirname(h1[1]) === dirOf(T) && readFileSync(h1[1], 'utf8') === ISSUES && (statSync(h1[1]).mode & 0o777) === 0o600, h1 && h1[1]);
+  check('Cp1-stats', /\n\nslim: compressed [\d,]+ B → [\d,]+ B \(−\d+\.\d%\)\n\n<<full=/.test(p1.text || ''), String(p1.text).slice(-400));
+  check('Cp1-bound', jsonBlobs(p1.text || '', 8192).blobs.length === 0 && p1.bytesOut < p1.bytesIn / 2, `${p1.bytesOut} of ${p1.bytesIn}`);
+  const line = logLines(`${T}/spill`).filter((l) => l.channel === 'prompt');
+  eq('Cp1-report', line.map((l) => [l.src, l.channel, l.entry, l.tool, l.decision, l.engine, l.spans, l.spill]), [['slim', 'prompt', 'mod', 'prompt', 'compressed', 'json', 1, h1 && h1[1]]]);
+  const p1b = prompt(T, HEAD + ISSUES + TAIL);
+  eq('Cp1-same-paste-same-spill', [p1b.text === p1.text, files(T).filter((f) => /^slim-prompt-[0-9a-f]{16}\.json$/.test(f)).length], [true, 1]);
+  eq('Cp1-created', [(p1.created || []).map((f) => path.basename(f).replace(/[0-9a-f]{16}/, 'H')), p1.created && p1.created[0] === (h1 && h1[1]), p1b.created],
+    [['slim-prompt-H.json', 'slim-prompt-rows-H.json'], true, []]);
+  eq('Cp1-no-journal-left', files(T).filter((f) => f.startsWith('.pending-')), []);
+  // slim's own folder ignores itself, so `git add -A` never stages a paste; an existing .gitignore is kept.
+  const ign = path.join(T, '.claude/slim/.gitignore');
+  spawnSync('git', ['init', '-q', T], { encoding: 'utf8' });
+  const ci = spawnSync('git', ['-C', T, 'check-ignore', '-q', h1 ? h1[1] : ''], { encoding: 'utf8' });
+  eq('Cp1-gitignored', [existsSync(ign) && readFileSync(ign, 'utf8'), ci.status], ['*\n', 0]);
+  writeFileSync(ign, '# mine\n');
+  prompt(T, HEAD + ISSUES + TAIL);
+  eq('Cp1-gitignore-kept', readFileSync(ign, 'utf8'), '# mine\n');
+
+  // A JSON object the engine cannot bring under 8 KB: its head (cut, not parseable) and the handle.
+  const WIDE = JSON.stringify(Object.fromEntries(Array.from({ length: 700 }, (_, i) => [`field_${i}_${(i * 7919).toString(36)}`, (i * 104729).toString(16).padStart(24, 'f')])), null, 1);
+  const T2 = newT();
+  const p2 = prompt(T2, `${HEAD}${WIDE}${TAIL}`);
+  eq('Cp2-head', [p2.decision, p2.spans && p2.spans[0].form, p2.spans && p2.spans[0].engine], ['rewritten', 'head', 'stub']);
+  check('Cp2-head-text', /\[slim: the rest of this pasted json is in the file below — [\d,]+ B in all; Read it windowed \(offset\/limit\) or call mcp__slim__view\(\{ path, jq \}\)\]\n\nslim: stub /.test(p2.text || ''), String(p2.text).slice(0, 300));
+  check('Cp2-bound', jsonBlobs(p2.text || '', 8192).blobs.length === 0 && p2.text.startsWith(HEAD) && p2.text.endsWith(TAIL), 'a parseable span survived');
+  eq('Cp2-report-stubbed', logLines(`${T2}/spill`).filter((l) => l.channel === 'prompt').map((l) => l.decision), ['stubbed']);
+
+  // A log and a page between prose, each in place; the order of the spans holds.
+  const LOGTXT = Array.from({ length: 500 }, (_, i) => `2026-10-08T10:${String(i % 60).padStart(2, '0')}:${String(i % 59).padStart(2, '0')}Z ${i % 9 ? 'INFO' : 'ERROR'} worker-${i % 4} job ${i % 17} ${i % 9 ? 'done' : 'failed: timeout'}`).join('\n');
+  const T3 = newT();
+  const p3 = prompt(T3, `Log:\n${LOGTXT}\n\nPage:\n${PAGE}\nWhat broke?`);
+  eq('Cp3-log-and-html', [p3.decision, p3.spans && p3.spans.map((x) => [x.kind, x.form])], ['rewritten', [['log', 'inline'], ['html', 'inline']]]);
+  check('Cp3-prose', p3.text.startsWith('Log:\n') && p3.text.includes('original_result>>\n\nPage:\n') && /original_result>>\n+What broke\?$/.test(p3.text), p3.text.slice(-300));
+  eq('Cp3-spills', files(T3).filter((f) => /^slim-prompt-[0-9a-f]{16}\.txt$/.test(f)).length, 2);
+
+  // A log, then a question typed indented on the next line: the question stays outside the span.
+  const ASK = '    why does worker-3 keep timing out here? please check';
+  const T8 = newT();
+  const p8 = prompt(T8, `${LOGTXT}\n${ASK}`);
+  check('Cp8-indented-question-kept', p8.decision === 'rewritten' && p8.text.endsWith(`original_result>>\n${ASK}`) && p8.spans.length === 1 && p8.spans[0].kind === 'log', String(p8.text).slice(-300));
+
+  // A run killed at its timeout leaves a journal; once it is stale the next run removes what it lists,
+  // except a file a later prompt reused (re-dated) and anything outside the prompt dir.
+  const T9 = newT();
+  prompt(T9, HEAD + ISSUES + TAIL);
+  const d9 = dirOf(T9);
+  const orphan = path.join(d9, 'slim-prompt-aaaaaaaaaaaaaaaa.json');
+  const reused = path.join(d9, 'slim-prompt-bbbbbbbbbbbbbbbb.json');
+  const fresh = path.join(d9, 'slim-prompt-cccccccccccccccc.txt');
+  const outside = path.join(T9, 'slim-prompt-dddddddddddddddd.json');
+  for (const f of [orphan, reused, fresh, outside]) writeFileSync(f, 'synthetic');
+  writeFileSync(path.join(d9, '.pending-1-stale'), `${orphan}\n${reused}\n${outside}\n`);
+  writeFileSync(path.join(d9, '.pending-2-fresh'), `${fresh}\n`);
+  const hourAgo = new Date(Date.now() - 3600 * 1000);
+  const twoHoursAgo = new Date(Date.now() - 2 * 3600 * 1000);
+  utimesSync(orphan, twoHoursAgo, twoHoursAgo);
+  utimesSync(path.join(d9, '.pending-1-stale'), hourAgo, hourAgo);
+  prompt(T9, `${HEAD}${WIDE}${TAIL}`);
+  eq('Cp9-stale-journal-swept', [existsSync(orphan), existsSync(reused), existsSync(fresh), existsSync(outside), files(T9).filter((f) => f.startsWith('.pending-'))],
+    [false, true, true, true, ['.pending-2-fresh']]);
+
+  // --prompt-drop: a rewrite the session never took; only that root's prompt spills go.
+  const T10 = newT();
+  const p10 = prompt(T10, HEAD + ISSUES + TAIL);
+  const keep10 = path.join(T10, 'slim-prompt-eeeeeeeeeeeeeeee.json');
+  writeFileSync(keep10, 'synthetic');
+  const dr = spawn(T10, JSON.stringify({ v: 1, root: T10, files: [...(p10.created || []), keep10, '../x'] }), { args: ['--prompt-drop'] });
+  check('Cp10-drop', dr.status === 0 && dr.stdout === '' && (p10.created || []).length === 2 && !(p10.created || []).some((f) => existsSync(f)) && existsSync(keep10),
+    `exit ${dr.status} ${JSON.stringify(p10.created)}`);
+
+  // Worktree: the spill lands in the main checkout, which outlives the linked tree.
+  const T4 = newT();
+  const main = path.join(T4, 'main');
+  const wt = path.join(T4, 'wt');
+  mkdirSync(path.join(main, '.git/worktrees/x'), { recursive: true });
+  mkdirSync(wt, { recursive: true });
+  writeFileSync(path.join(wt, '.git'), `gitdir: ${path.join(main, '.git/worktrees/x')}\n`);
+  const p4 = prompt(T4, HEAD + ISSUES + TAIL, wt);
+  check('Cp4-worktree', p4.decision === 'rewritten' && files(main).length > 0 && !existsSync(dirOf(wt)), JSON.stringify(files(main)));
+
+  // Left as typed: a small prompt, prose only, an already-slim span, a linked folder in the dir path.
+  const T5 = newT();
+  eq('Cp5-small', [prompt(T5, 'short').reason, existsSync(dirOf(T5))], ['size-gate', false]);
+  eq('Cp5-prose', prompt(T5, 'plain words and nothing else. '.repeat(600)).reason, 'no-span');
+  const slimmed = `${LOGTXT}\n\nslim: compressed 40,000 B → 900 B (−97.8%)\n\n<<full=/x/.claude/slim/prompt/slim-prompt-0123456789abcdef.txt original_result>>\nok?`;
+  const fndSlimmed = `${HEAD}${ISSUES.replace('"total": 400', '"total": 400, "note": "fnd-prompt-json-1.json"')}${TAIL}`;
+  eq('Cp5-already-slim', [prompt(T5, slimmed).reason, prompt(T5, fndSlimmed).reason, existsSync(dirOf(T5))], ['no-span', 'no-span', false]);
+  const T6 = newT();
+  mkdirSync(path.join(T6, '.claude'), { recursive: true });
+  mkdirSync(path.join(T6, 'elsewhere'), { recursive: true });
+  symlinkSync(path.join(T6, 'elsewhere'), path.join(T6, '.claude/slim'));
+  eq('Cp6-link-refused', [prompt(T6, HEAD + ISSUES + TAIL).reason, readdirSync(path.join(T6, 'elsewhere')).length], ['spill-dir-refused', 0]);
+
+  // The spill root's sweep never reaches the prompt dir.
+  const old48 = new Date(Date.now() - 48 * 3600 * 1000);
+  utimesSync(h1[1], old48, old48);
+  call('Cp7-sweep', T, envelope(T, F1), { SLIM_DIR: dirOf(T), SLIM_TTL: '1' });
+  check('Cp7-prompt-spill-kept', existsSync(h1[1]), h1[1]);
+
+  // Cx — --access: one line per spill file that exists, levels 1 and 2 only; --report pairs it.
+  const T7 = newT();
+  const spillDir = path.join(T7, 'spill');
+  mkdirSync(spillDir, { recursive: true });
+  const sp = path.join(spillDir, 'fnd-mcp-slim-0123456789abcdef.json');
+  writeFileSync(sp, F1);
+  const access = (payload, extra) => spawn(T7, JSON.stringify({ v: 1, cwd: T7, ...payload }), { args: ['--access'], extra });
+  const ax = access({ tool: 'Bash', via: 'jq', spills: [sp, sp, path.join(spillDir, 'fnd-mcp-slim-ffffffffffffffff.json')] });
+  check('Cx1-exit', ax.status === 0 && ax.stdout === '', `exit ${ax.status}`);
+  access({ tool: 'Read', via: 'Read', spills: [sp] }, { SLIM_DEBUG: '1' });
+  access({ tool: 'Grep', via: 'Grep', spills: [sp] }, { SLIM_DEBUG: undefined });
+  access({ tool: 'Edit', via: 'x', spills: [sp] });
+  eq('Cx1-lines', logLines(spillDir).map((l) => [l.src, l.channel, l.entry, l.tool, l.via, l.spill, l.lvl]),
+    [['slim', 'bash', 'access', 'Bash', 'jq', sp, 2], ['slim', 'read', 'access', 'Read', 'Read', sp, 1]]);
+  const rlog = path.join(T7, 'pair.log');
+  const ts = (s) => `2026-10-08T10:00:0${s}.000Z`;
+  writeFileSync(rlog, [
+    { ts: ts(0), lvl: 1, src: 'slim', channel: 'mcp', entry: 'hook', tool: 'mcp__x__y', decision: 'passthrough', reason: 'platform-overflow', bytes_in: 300, bytes_out: 300, spill: sp },
+    { ts: ts(1), lvl: 1, src: 'slim', channel: 'bash', entry: 'access', tool: 'Bash', via: 'jq', spill: sp },
+  ].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const rp = spawn(T7, '', { args: ['--report', rlog] });
+  check('Cx2-report-pairs', /missed whales \(platform-overflow never read by any tool\): 0 of 1/.test(rp.stdout) && /spill reads \(access hook\): 1 {2}\(via: jq 1\)/.test(rp.stdout), rp.stdout);
+
+  // A read the guard denied: marked, counted on its own, never a recovery.
+  const T8x = newT();
+  const spill8 = path.join(T8x, 'spill');
+  mkdirSync(spill8, { recursive: true });
+  const sp8 = path.join(spill8, 'fnd-mcp-slim-0123456789abcdef.json');
+  writeFileSync(sp8, F1);
+  spawn(T8x, JSON.stringify({ v: 1, cwd: T8x, tool: 'Read', via: 'Read', spills: [sp8], denied: true }), { args: ['--access'] });
+  eq('Cx3-denied-line', logLines(spill8).map((l) => [l.entry, l.tool, l.denied]), [['access', 'Read', true]]);
+  writeFileSync(rlog, [
+    { ts: ts(0), lvl: 1, src: 'slim', channel: 'mcp', entry: 'hook', tool: 'mcp__x__y', decision: 'passthrough', reason: 'platform-overflow', bytes_in: 300, bytes_out: 300, spill: sp },
+    { ts: ts(1), lvl: 1, src: 'slim', channel: 'read', entry: 'access', tool: 'Read', via: 'Read', spill: sp, denied: true },
+  ].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const rd = spawn(T7, '', { args: ['--report', rlog] });
+  check('Cx3-denied-not-a-recovery', /missed whales \(platform-overflow never read by any tool\): 1 of 1/.test(rd.stdout)
+    && /spill reads \(access hook\): 0 {2}\(via: none\) · denied by the spill-read guard: 1/.test(rd.stdout), rd.stdout);
+
+  // fnd's PreToolUse hook and slim's guard both logged one read: counted once.
+  writeFileSync(rlog, [
+    { ts: ts(0), lvl: 1, src: 'slim', channel: 'mcp', entry: 'hook', tool: 'mcp__x__y', decision: 'passthrough', reason: 'platform-overflow', bytes_in: 300, bytes_out: 300, spill: sp },
+    { ts: ts(1), project: 'p', lvl: 1, entry: 'access', tool: 'Bash', via: 'jq', spill: sp },
+    { ts: ts(2), lvl: 1, src: 'slim', channel: 'bash', entry: 'access', tool: 'Bash', via: 'jq', spill: sp },
+    { ts: '2026-10-08T10:05:00.000Z', lvl: 1, src: 'slim', channel: 'bash', entry: 'access', tool: 'Bash', via: 'jq', spill: sp },
+  ].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  const rt = spawn(T7, '', { args: ['--report', rlog] });
+  check('Cx4-twins-once', /spill reads \(access hook\): 2 {2}\(via: jq 2\) \[\+1 logged by both fnd and slim\]/.test(rt.stdout), rt.stdout);
 }
 
 // --report groups the channels written above.
@@ -836,6 +1073,334 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const small = spawn(T, '', { args: ['--report', log] });
   eq('Rg-small-growth', (/^ {2}by channel: (.*)$/m.exec(small.stdout) || [])[1],
     'bash: 1 result, 300,000 B of output summarised into 2,100 B (host preview would have shown 2,048 B; the view grew by 52 B) + 1 passed through (500 B)');
+}
+
+// Cm — the media backend (delivery/media.cjs) with fake ffprobe / ffmpeg / sips: each row's PATH is
+// one fake bin dir only, so a real ffmpeg or macOS sips never runs. The fakes use shell builtins only.
+{
+  const require = createRequire(import.meta.url);
+  const dm = require(path.join(SCRIPTS, 'delivery/media.cjs'));
+  const T = newT();
+  const bin = (dir, files) => {
+    mkdirSync(dir, { recursive: true });
+    for (const [n, body] of Object.entries(files)) writeFileSync(path.join(dir, n), `#!/bin/sh\n${body}`, { mode: 0o755 });
+    return dir;
+  };
+  const FFPROBE = `for a; do f=$a; done
+printf '%s\\n' "$*" > "$FAKE_LOG.probe"
+case "$f" in
+  *broken*) exit 1 ;;
+  *hang*) while :; do :; done ;;
+  *portrait*.mp4) printf '{"frames":[{"side_data_list":[{"rotation":-90},{}]}],"streams":[{"width":1920,"height":1080,"duration":"7.0"}],"format":{"duration":"7.000000"}}\\n' ;;
+  *turned*.mp4) printf '{"streams":[{"width":1920,"height":1080,"side_data_list":[{"rotation":90}]}],"format":{"duration":"7.000000"}}\\n' ;;
+  *.mp4) printf '{"streams":[{"width":1920,"height":1080,"duration":"7.0"}],"format":{"duration":"7.000000"}}\\n' ;;
+  *portrait*) printf '{"frames":[{"side_data_list":[{"rotation":-90}]}],"streams":[{"width":4000,"height":3000}],"format":{}}\\n' ;;
+  *) printf '{"streams":[{"width":4000,"height":3000}],"format":{}}\\n' ;;
+esac
+`;
+  const FFMPEG = `n=1; prev=; for a; do [ "$prev" = "-frames:v" ] && n=$a; prev=$a; out=$a; done
+printf '%s\\n' "$*" >> "$FAKE_LOG"
+[ -n "$FAKE_FAIL" ] && { printf 'fake failure\\n' >&2; exit 1; }
+case "$out" in
+  *%03d*) i=1; while [ $i -le $n ]; do printf 'FRAME' > "$(printf "$out" $i)"; [ -n "$FAKE_HANG" ] && while :; do :; done; i=$((i+1)); done ;;
+  *) printf 'IMG' > "$out" ;;
+esac
+`;
+  const SIPS = `for a; do last=$a; done
+[ "$1" = "-g" ] && { printf '%s\\n  pixelWidth: 3000\\n  pixelHeight: 2000\\n' "$last"; exit 0; }
+printf '%s\\n' "$*" >> "$FAKE_LOG"
+printf 'SIPSIMG' > "$last"
+`;
+  const FF = bin(path.join(T, 'ff'), { ffprobe: FFPROBE, ffmpeg: FFMPEG });
+  const SB = bin(path.join(T, 'sb'), { sips: SIPS });
+  const LOGF = path.join(T, 'argv.log');
+  const argv = () => (existsSync(LOGF) ? readFileSync(LOGF, 'utf8') : '');
+  const at = (rel) => path.join(T, rel);
+  const media = (name, bytes) => { const p = at(name); writeFileSync(p, bytes); return p; };
+  const PNG_IN = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(4992, 1)]);
+  const JPG_IN = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1]), Buffer.alloc(996, 3)]);
+  const WEBP_IN = Buffer.concat([Buffer.from('RIFF', 'latin1'), Buffer.alloc(4, 1), Buffer.from('WEBPVP8 ', 'latin1'), Buffer.alloc(988, 4)]);
+  const MP4_IN = Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from('ftypisom', 'latin1'), Buffer.alloc(19988, 2)]);
+  const run = (file, PATH, out, extra = {}) => {
+    rmSync(LOGF, { force: true });
+    return dm.normalize(file, { allowedOut: out && at(out), env: { PATH, FAKE_LOG: LOGF, ...extra.env }, ...extra.opts });
+  };
+  const ls = (rel) => readdirSync(at(rel)).sort();
+
+  const png = media('photo.png', PNG_IN);
+  const r1 = run(png, FF, 'photo.1568.png');
+  eq('Cm-image-ffmpeg', [r1.decision, r1.figure, r1.frames, r1.backend, r1.outputs.map((o) => path.basename(o.path)), readFileSync(at('photo.1568.png'), 'utf8')],
+    ['compressed', 'media: 5000 B → 3 B (-100%) frames=1', 1, 'ffmpeg', ['photo.1568.png'], 'IMG']);
+  check('Cm-image-ffmpeg-argv', /-map_metadata -1 -vf scale=1568:1568:force_original_aspect_ratio=decrease -frames:v 1 .*photo\.1568\.png$/m.test(argv()) && r1.text.startsWith('image png 4000×3000 → 1568×1176, metadata stripped (ffmpeg)\n'), argv() + r1.text);
+  check('Cm-probe-argv', readFileSync(`${LOGF}.probe`, 'utf8').startsWith('-v error -select_streams v:0 -read_intervals %+#1 -show_entries stream=width,height,duration:stream_side_data=rotation:frame_side_data=rotation:format=duration -of json '),
+    readFileSync(`${LOGF}.probe`, 'utf8'));
+
+  const mp4 = media('clip.mp4', MP4_IN);
+  mkdirSync(at('clip.frames'));
+  writeFileSync(at('clip.frames/.slim-frames'), '');
+  writeFileSync(at('clip.frames/009.jpg'), 'STALE');
+  writeFileSync(at('clip.frames/keep.txt'), 'NOT OURS');
+  const r2 = run(mp4, FF, 'clip.frames/001.jpg');
+  eq('Cm-video-frames', [r2.decision, r2.figure, ls('clip.frames'), r2.outputs.map((o) => o.t)],
+    ['compressed', 'media: 20000 B → 20 B (-100%) frames=4', ['.slim-frames', '001.jpg', '002.jpg', '003.jpg', '004.jpg', 'keep.txt'], [0, 2, 4, 6]]);
+  check('Cm-video-argv', /-vf fps=1\/2,scale=1568:1568:force_original_aspect_ratio=decrease -frames:v 4 -q:v 4 .*clip\.frames\/%03d\.jpg$/m.test(argv()) && r2.text.includes(`${at('clip.frames/004.jpg')}  t=6s`), argv() + r2.text);
+  const r2s = run(mp4, FF, 'clip.frames/001.jpg', { opts: { scene: true } });
+  check('Cm-video-scene', r2s.frames === 24 && /-vf select='eq\(n,0\)\+gt\(scene,0\.3\)',scale=1568:1568:force_original_aspect_ratio=decrease -fps_mode vfr -frames:v 24/.test(argv()) && !r2s.text.includes('t='), argv());
+  const r2n = run(media('fresh.mp4', MP4_IN), FF, 'fresh.frames/001.jpg');
+  eq('Cm-video-fresh-dir-marked', [r2n.frames, ls('fresh.frames')], [4, ['.slim-frames', '001.jpg', '002.jpg', '003.jpg', '004.jpg']]);
+
+  mkdirSync(at('user.frames'));
+  writeFileSync(at('user.frames/001.jpg'), 'MINE');
+  const r2u = run(media('user.mp4', MP4_IN), FF, 'user.frames/001.jpg');
+  eq('Cm-video-foreign-dir', [r2u.decision, r2u.reason, r2u.figure, ls('user.frames'), readFileSync(at('user.frames/001.jpg'), 'utf8'), argv()],
+    ['refused', 'out-taken', `media: ${at('user.frames')} holds files slim did not write`, ['001.jpg'], 'MINE', '']);
+  mkdirSync(at('elsewhere'));
+  writeFileSync(at('elsewhere/001.jpg'), 'MINE');
+  writeFileSync(at('elsewhere/.slim-frames'), '');
+  symlinkSync(at('elsewhere'), at('linked.frames'));
+  const r2l = run(media('linked.mp4', MP4_IN), FF, 'linked.frames/001.jpg');
+  eq('Cm-video-linked-dir', [r2l.reason, ls('elsewhere'), readFileSync(at('elsewhere/001.jpg'), 'utf8'), argv()], ['out-taken', ['.slim-frames', '001.jpg'], 'MINE', '']);
+  mkdirSync(at('empty.frames'));
+  eq('Cm-video-empty-dir', [run(media('empty.mp4', MP4_IN), FF, 'empty.frames/001.jpg').frames, ls('empty.frames').length], [4, 5]);
+
+  const r2p = run(media('portrait.mp4', MP4_IN), FF, 'portrait.frames/001.jpg');
+  check('Cm-video-rotated-frame-side-data', r2p.text.startsWith('video mp4 7s 1080×1920 → frames every 2s at 882×1568 (ffmpeg)\n') && argv().includes('scale=1568:1568:force_original_aspect_ratio=decrease') && !argv().includes('1568:882'), argv() + r2p.text);
+  const r2t = run(media('turned.mp4', MP4_IN), FF, 'turned.frames/001.jpg');
+  check('Cm-video-rotated-stream-side-data', r2t.text.startsWith('video mp4 7s 1080×1920 → frames every 2s at 882×1568 (ffmpeg)\n'), r2t.text);
+  const r1p = run(media('portrait.jpg', JPG_IN), FF, 'portrait.1568.jpg');
+  check('Cm-image-exif-rotated', r1p.text.startsWith('image jpeg 3000×4000 → 1176×1568, metadata stripped (ffmpeg)\n') && /-vf scale=1568:1568:force_original_aspect_ratio=decrease -frames:v 1 -q:v 3 /.test(argv()), argv() + r1p.text);
+
+  const r3 = run(media('fail.mp4', MP4_IN), FF, 'fail.frames/001.jpg', { env: { FAKE_FAIL: '1' } });
+  eq('Cm-backend-failed', [r3.decision, r3.reason, r3.figure, existsSync(at('fail.frames'))],
+    ['refused', 'backend-failed', 'media: ffmpeg failed on fail.mp4: fake failure', false]);
+  const r3b = run(media('broken.png', PNG_IN), FF, 'broken.1568.png');
+  eq('Cm-probe-failed', [r3b.reason, existsSync(at('broken.1568.png')), argv()], ['no-probe', false, '']);
+
+  let t0 = Date.now();
+  const r3h = run(media('hang.mp4', MP4_IN), FF, 'hang.frames/001.jpg', { opts: { timeoutMs: 400 } });
+  const probeMs = Date.now() - t0;
+  eq('Cm-deadline-bounds-probe', [r3h.reason, probeMs < 5000, existsSync(at('hang.frames')), argv()], ['no-probe', true, false, '']);
+  t0 = Date.now();
+  const r3r = run(media('slow.mp4', MP4_IN), FF, 'slow.frames/001.jpg', { env: { FAKE_HANG: '1' }, opts: { timeoutMs: 600 } });
+  const runMs = Date.now() - t0;
+  eq('Cm-deadline-bounds-run', [r3r.decision, r3r.reason, runMs < 5000, existsSync(at('slow.frames'))], ['refused', 'backend-failed', true, false]);
+
+  const r4 = run(media('shot.png', PNG_IN), SB, 'shot.1568.png');
+  eq('Cm-sips-image', [r4.decision, r4.backend, readFileSync(at('shot.1568.png'), 'utf8'), argv().trim()],
+    ['compressed', 'sips', 'SIPSIMG', `-s format png -Z 1568 ${at('shot.png')} --out ${at('shot.1568.png')}`]);
+  check('Cm-sips-metadata-honest', r4.text.includes('metadata kept (sips cannot strip it) (sips)'), r4.text);
+  const r5 = run(media('sipsclip.mp4', MP4_IN), SB, 'sipsclip.frames/001.jpg');
+  eq('Cm-sips-video', [r5.decision, r5.reason, r5.figure, existsSync(at('sipsclip.frames'))], ['refused', 'no-backend', 'media: no backend (install ffmpeg)', false]);
+  eq('Cm-no-backend', [run(png, '', 'photo.1568.png').figure, run(png, at('nowhere'), 'photo.1568.png').reason, run(png, `${at('ff')}/ffmpeg`, 'photo.1568.png').reason],
+    ['media: no backend (install ffmpeg)', 'no-backend', 'no-backend']);
+
+  const r7 = run(media('web.jpg', WEBP_IN), FF, 'web.1568.jpg');
+  eq('Cm-name-from-ext-webp-as-jpg', [r7.decision, r7.format, r7.outputs.map((o) => path.basename(o.path)), existsSync(at('web.1568.png'))], ['compressed', 'webp', ['web.1568.jpg'], false]);
+  const r7b = run(media('pic.jpg', WEBP_IN), FF, 'pic.1568.png');
+  eq('Cm-name-mismatch-denied', [r7b.reason, r7b.figure, existsSync(at('pic.1568.png')), existsSync(at('pic.1568.jpg')), argv()],
+    ['write-denied', `media: writing ${at('pic.1568.jpg')} is not permitted`, false, false, '']);
+  const r7c = run(media('screenshot', PNG_IN), FF, 'screenshot.1568.png');
+  eq('Cm-name-no-ext', [r7c.decision, r7c.outputs.map((o) => path.basename(o.path))], ['compressed', ['screenshot.1568.png']]);
+  const r7d = run(media('clip.png', MP4_IN), FF, 'clip.1568.png');
+  eq('Cm-name-kind-mismatch', [r7d.kind, r7d.reason, existsSync(at('clip.1568.png')), argv()], ['video', 'write-denied', false, '']);
+  rmSync(at('photo.1568.png'));
+  const r7e = run(png, FF, 'photo.1568.png', { opts: { longEdge: 800 } });
+  eq('Cm-long-edge-mismatch', [r7e.reason, existsSync(at('photo.800.png')), existsSync(at('photo.1568.png'))], ['write-denied', false, false]);
+  symlinkSync(at('elsewhere/001.jpg'), at('linked.1568.png'));
+  const r7f = run(media('linked.png', PNG_IN), FF, 'linked.1568.png');
+  writeFileSync(at('dir.png'), PNG_IN);
+  mkdirSync(at('dir.1568.png'));
+  eq('Cm-image-out-taken', [r7f.reason, readFileSync(at('elsewhere/001.jpg'), 'utf8'), run(at('dir.png'), FF, 'dir.1568.png').reason, argv()], ['out-taken', 'MINE', 'out-taken', '']);
+
+  const r6 = dm.normalize(png, { env: { PATH: FF, FAKE_LOG: LOGF } });
+  eq('Cm-write-not-ok', [r6.decision, r6.reason, existsSync(at('photo.1568.png')), r6.outputs], ['refused', 'write-denied', false, []]);
+  eq('Cm-not-media', [run(media('notes.txt', 'plain text'), FF, 'x').reason, run(media('pic.heic', Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic', 'latin1'), Buffer.alloc(64)])), FF, 'x').reason,
+    run(media('empty.png', ''), FF, 'x').reason, run(at('missing.png'), FF, 'x').reason], ['not-media', 'not-media', 'unreadable', 'unreadable']);
+}
+
+// Cv — the view tool's core (--view): a file, a command's output or its host file → compact text, jq
+// narrowing first, `out` handed back as a write with its cache marker, media through the backend.
+{
+  const T = newT();
+  const proj = path.join(T, 'proj');
+  const tasks = path.join(proj, '.claude/tasks/T1');
+  mkdirSync(tasks, { recursive: true });
+  const ISSUES = JSON.stringify({ total: 400, issues: Array.from({ length: 400 }, (_, i) => ({ key: `ACME-${i}`, id: String(10000 + i), fields: { summary: `Summary number ${i} ${'x'.repeat(40)}`, status: { name: i % 3 ? 'Open' : 'Done' }, labels: ['a', 'b'] } })) });
+  const src = path.join(proj, 'issues.json');
+  writeFileSync(src, ISSUES);
+  old(src);
+  const view = (name, req, extra) => {
+    const r = spawn(T, JSON.stringify({ v: 1, root: proj, cwd: proj, session_id: 's1', ...req }), { args: ['--view'], extra });
+    check(`${name}-exit`, r.status === 0 && r.stderr === '', `exit ${r.status} ${r.stderr}`);
+    try { return JSON.parse(r.stdout); } catch (_) { return { decision: 'unparsed', text: r.stdout }; }
+  };
+  const spillDir = path.join(T, 'spill');
+
+  const v1 = view('Cv1', { path: src });
+  eq('Cv1-json', [v1.v, v1.decision, v1.engine, v1.bytesIn, v1.pointer], [1, 'compressed', 'json', bytes(ISSUES), undefined]);
+  check('Cv1-figure', /^slim: compressed 63,\d{3} B → [\d,]+ B \(−\d+\.\d%\)$/.test(v1.figure) && v1.bytesOut === bytes(v1.text) && v1.bytesOut <= 16384, v1.figure);
+  const part = (/<<full=(\S+) \d+_rows_offloaded>>/.exec(v1.text) || [])[1];
+  check('Cv1-part-written', !!part && part.startsWith(`${spillDir}/fnd-crush-`) && existsSync(part), String(part));
+
+  const nodes = path.join(proj, 'K1-1-2.nodes.json');
+  writeFileSync(nodes, REST);
+  const v2a = view('Cv2a', { path: nodes });
+  copyFileSync(path.join(FIX, 'figma-variables-local.json'), path.join(proj, 'K1.variables.json'));
+  const v2 = view('Cv2', { path: nodes });
+  eq('Cv2-figma-nodes', [v2.decision, v2.engine], ['compressed', 'figma-nodes']);
+  check('Cv2-figure', /^figma-nodes: 192234 B → \d+ B \(-\d+\.\d%\) nodes=\d+ hidden=\d+ folded=\d+$/.test(v2.figure), v2.figure);
+  check('Cv2-variables-beside', v2.text.includes('tokens: variables') && !v2a.text.includes('tokens: variables'), 'K1.variables.json not read');
+  check('Cv2-pointer', typeof v2.pointer === 'string' && v2.pointer.startsWith(`${spillDir}/fnd-mcp-slim-`) && readFileSync(v2.pointer, 'utf8') === v2.text, String(v2.pointer));
+
+  const v3 = view('Cv3', { path: src, jq: '.issues[].key' });
+  eq('Cv3-narrowed', [v3.decision, v3.narrowed, v3.engine, JSON.parse(v3.text).length, JSON.parse(v3.text)[399]], ['narrowed', true, 'json', 400, 'ACME-399']);
+  check('Cv3-figure', v3.figure === `slim view: narrowed by jq to ${bytes(v3.text).toLocaleString('en-US')} B of a ${bytes(ISSUES).toLocaleString('en-US')} B source (no saving figure: jq changed the measured object)`, v3.figure);
+  const v3b = view('Cv3b', { path: src, jq: '.issues' });
+  check('Cv3b-big-narrowed-compressed', v3b.decision === 'narrowed' && v3b.figure.includes(', compressed to ') && v3b.bytesOut <= 16384, v3b.figure);
+  eq('Cv3c-refusals', [view('Cv3c', { path: src, jq: '.issues[] | select(.id)' }).reason, view('Cv3d', { path: src, jq: '.nope' }).reason, view('Cv3e', { path: path.join(FIX, 'app.log'), jq: '.a' }).reason],
+    ['jq-unsupported', 'jq-miss', 'jq-not-json']);
+  eq('Cv3f-whole-is-no-narrowing', view('Cv3f', { path: src, jq: '.' }).decision, 'compressed');
+  // A big narrowed value the engine cannot shrink is kept in the spill root, never pointed at the source.
+  writeFileSync(path.join(proj, 'blob.json'), JSON.stringify({ blob: 'word '.repeat(8000), n: 1 }));
+  const v3g = view('Cv3g', { path: 'blob.json', jq: '.blob' });
+  check('Cv3g-relative-path-and-pointer', v3g.decision === 'narrowed' && typeof v3g.pointer === 'string' && v3g.pointer.startsWith(`${spillDir}/fnd-mcp-slim-`)
+    && readFileSync(v3g.pointer, 'utf8') === v3g.text && JSON.parse(v3g.text).length === 40000, JSON.stringify({ ...v3g, text: undefined }));
+
+  const out = path.join(tasks, 'issues.view.json');
+  const v4 = view('Cv4', { path: src, out });
+  const marker = /^<<slim view k=[0-9a-f]{12} engine=json v=[\w.+-]+>>$/;
+  // Uniform rows give the json engine nothing to crush, and with out the fit target is 64 KB: a 63 KB source stays whole.
+  eq('Cv4-write', [v4.decision, v4.out, v4.pointer, v4.write && v4.write.path, v4.write && v4.write.exists, existsSync(out)], ['passthrough', out, out, out, false, false]);
+  // The text travels once: the mod writes the marker line, then the text.
+  const content4 = v4.write ? `${v4.write.marker}\n${v4.text}` : '';
+  check('Cv4-content', !!v4.write && marker.test(v4.write.marker) && v4.write.content === undefined && v4.lines === content4.split('\n').length, v4.write && v4.write.marker);
+  check('Cv4-out-not-fitted', v4.bytesOut > 16384, `${v4.bytesOut}`);
+  writeFileSync(out, content4);
+  const v5 = view('Cv5', { path: src, out });
+  eq('Cv5-cached', [v5.decision, v5.figure, v5.engine, v5.text === v4.text, v5.out, v5.write, v5.lines], ['cached', 'cached', 'json', true, out, undefined, v4.lines]);
+  eq('Cv5-other-jq-recomputes', view('Cv5b', { path: src, out, jq: '.total' }).decision, 'narrowed');
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(src, later, later);
+  const v6 = view('Cv6', { path: src, out });
+  eq('Cv6-input-newer-recomputes', [v6.decision, v6.write && v6.write.exists], ['passthrough', true]);
+  old(src);
+  writeFileSync(out, `<<slim view k=000000000000 engine=json v=0.0.0>>\n{}`);
+  eq('Cv6b-foreign-marker-recomputes', view('Cv6b', { path: src, out }).decision, 'passthrough');
+
+  mkdirSync(path.join(tasks, 'adir'));
+  eq('Cv7-out-refusals', [
+    view('Cv7a', { path: src, out: path.join(T, 'elsewhere.json') }).reason,
+    view('Cv7b', { path: src, out: path.join(proj, '.claude/tasks/top.json') }).reason,
+    view('Cv7c', { path: src, out: path.join(tasks, 'adir') }).reason,
+    view('Cv7d', { path: src, out: path.join(tasks, '..', '..', '..', 'issues.view.json') }).reason,
+  ], ['out-outside-roots', 'out-outside-roots', 'out-taken', 'out-outside-roots']);
+  const vs = view('Cv7e', { path: src, out: path.join(spillDir, 'mine.json') });
+  eq('Cv7e-spill-root-ok', [vs.decision, vs.write && vs.write.path], ['passthrough', path.join(spillDir, 'mine.json')]);
+  const vr = view('Cv7f', { path: src, out: 'issues.rel.json', cwd: tasks });
+  eq('Cv7f-relative-to-cwd', vr.write && vr.write.path, path.join(tasks, 'issues.rel.json'));
+  // The OUTPUT_CAP (4 MiB less headroom) measures the text once, out or not.
+  const words = (n) => JSON.stringify({ ids: Array.from({ length: n }, (_, i) => `w${i.toString(36).padStart(4, '0')}${'z'.repeat(i % 50)}`).join(' ') });
+  writeFileSync(path.join(proj, 'wide.json'), words(80_000));
+  const vw = view('Cv7g', { path: path.join(proj, 'wide.json'), out: path.join(tasks, 'wide.view.json') });
+  check('Cv7g-out-2-to-4-MiB-fits', vw.decision === 'passthrough' && vw.bytesOut > 2_200_000 && vw.bytesOut < 4_000_000 && !!vw.write, JSON.stringify({ ...vw, text: undefined }));
+  writeFileSync(path.join(proj, 'huge.json'), words(140_000));
+  const vh = view('Cv7h', { path: path.join(proj, 'huge.json'), out: path.join(tasks, 'huge.view.json') });
+  eq('Cv7h-out-over-cap', [vh.decision, vh.reason, vh.text], ['refused', 'output-cap', 'view: the compact text is over 4 MiB even for out — narrow with jq, or Read the source windowed']);
+
+  // A whale of unique rows is still fitted with out: the task file gets the compact text, never the source.
+  const whale = JSON.stringify({ total: 8000, issues: Array.from({ length: 8000 }, (_, i) => ({ key: `ACME-${i}`, id: String(10000 + i), fields: { summary: `Summary number ${i} ${'x'.repeat(40)}`, status: { name: i % 3 ? 'Open' : 'Done' }, labels: ['a', 'b'] } })) });
+  writeFileSync(path.join(proj, 'whale.json'), whale);
+  const wo = path.join(tasks, 'whale.view.md');
+  const vwh = view('Cv7w', { path: path.join(proj, 'whale.json'), out: wo });
+  check('Cv7w-out-whale-fitted', bytes(whale) > 1_000_000 && vwh.decision === 'compressed' && !!vwh.write && vwh.write.path === wo
+    && vwh.bytesOut <= 65536 && vwh.bytesOut === bytes(vwh.text) && /<<full=\S+ \d+_rows_offloaded>>/.test(vwh.text), JSON.stringify({ ...vwh, text: undefined }));
+
+  const big = JSON.stringify(Array.from({ length: 600 }, (_, i) => ({ sku: `SKU-${i}`, qty: i % 7, note: 'y'.repeat(60) })));
+  // An out cites its offloaded rows in the spill root: once the sweep took them, the cache recomputes.
+  const exp = path.join(proj, 'export.json');
+  writeFileSync(exp, big);
+  old(exp);
+  const xo = path.join(tasks, 'export.view.json');
+  const x1 = view('Cv7i', { path: exp, out: xo });
+  const xpart = (/<<full=(\S+) \d+_rows_offloaded>>/.exec(x1.text) || [])[1];
+  check('Cv7i-out-cites-part', x1.decision === 'compressed' && !!xpart && existsSync(xpart) && !!x1.write, JSON.stringify({ ...x1, text: undefined }));
+  writeFileSync(xo, `${x1.write.marker}\n${x1.text}`);
+  eq('Cv7i-cached', view('Cv7j', { path: exp, out: xo }).decision, 'cached');
+  rmSync(xpart);
+  const x3 = view('Cv7k', { path: exp, out: xo });
+  eq('Cv7k-part-gone-recomputes', [x3.decision, x3.write && x3.write.exists, existsSync(xpart)], ['compressed', true, true]);
+  const v8 = view('Cv8', { text: big, command: 'cat export.json' });
+  check('Cv8-command-original', v8.decision === 'compressed' && typeof v8.original === 'string' && readFileSync(v8.original, 'utf8') === big, JSON.stringify({ ...v8, text: undefined }));
+  const host = hostFile(T, 'v1.txt', big);
+  const v9 = view('Cv9', { host_path: host, command: 'cat export.json' }, { CLAUDE_CONFIG_DIR: `${T}/cfg` });
+  eq('Cv9-host', [v9.decision, v9.original, v9.bytesIn], ['compressed', host, bytes(big)]);
+  writeFileSync(path.join(T, 'x.txt'), big);
+  eq('Cv9-forged-host', view('Cv9b', { host_path: path.join(T, 'x.txt') }).reason, 'expand-refused');
+
+  const pdf = path.join(proj, 'doc.pdf');
+  writeFileSync(pdf, `%PDF-1.7\n${'x'.repeat(100)}`);
+  eq('Cv10-misc', [view('Cv10a', { path: pdf }).reason, view('Cv10b', { path: src, engine: 'zip' }).reason, view('Cv10c', { path: src, engine: 'media' }).reason,
+    view('Cv10d', { path: path.join(proj, 'missing.json') }).reason, view('Cv10e', {}).reason], ['binary', 'bad-engine', 'not-media', 'expand-missing', 'bad-input']);
+  const small = path.join(proj, 'small.json');
+  writeFileSync(small, '{"a":1}');
+  const v11 = view('Cv11', { path: small });
+  eq('Cv11-small-as-is', [v11.decision, v11.text, v11.figure], ['passthrough', '{"a":1}', 'slim view: 7 B, not compressed (no-gain)']);
+
+  // A view of a spill file is a recovery: one access line, as the old spill-access hook wrote.
+  view('Cv12', { path: part });
+  const access = logLines(spillDir).filter((l) => l.entry === 'access');
+  eq('Cv12-access', access.map((l) => [l.src, l.channel, l.via, l.tool, l.spill]), [['slim', 'view', 'view', 'mcp__slim__view', part]]);
+
+  const rec = spawn(T, JSON.stringify({ channel: 'view', tool_use_id: 'toolu_v', decision: 'narrowed', reason: null, rung: 'path', engine: 'json', bytes_in: 63004, bytes_out: 40, stages: [], spill: out, narrowed: true, ms: 12, cwd: proj }), { args: ['--record'], extra: { SLIM_DEBUG: undefined } });
+  check('Cv13-record-exit', rec.status === 0 && rec.stdout === '', `exit ${rec.status}`);
+  const row = logLines(spillDir).filter((l) => l.channel === 'view' && l.entry === 'mod');
+  eq('Cv13-record-line', row.map((l) => [l.src, l.channel, l.tool, l.tool_use_id, l.decision, l.rung, l.engine, l.bytes_in, l.bytes_out, l.pct, l.spill, l.narrowed, l.lvl]),
+    [['slim', 'view', 'mcp__slim__view', 'toolu_v', 'narrowed', 'path', 'json', 63004, 40, 0, out, true, 0]]);
+  const rp = spawn(T, '', { args: ['--report'] });
+  check('Cv13-report', /^ {2}by channel: view 63004 → 63004 B \(0\.0% saved\)$/m.test(rp.stdout) && /^ {2}passthrough reasons: jq-narrowed 1$/m.test(rp.stdout), rp.stdout);
+  // A video's bytes never head for the context: its row keeps them apart from the savings totals.
+  spawn(T, JSON.stringify({ channel: 'view', tool_use_id: 'toolu_m', decision: 'compressed', reason: null, rung: 'path', engine: 'media', bytes_in: 200_000_000, bytes_out: 3_000_000, stages: [], spill: null, frames: 24, ms: 900, cwd: proj }), { args: ['--record'], extra: { SLIM_DEBUG: undefined } });
+  const mrow = logLines(spillDir).filter((l) => l.tool_use_id === 'toolu_m');
+  eq('Cv13-media-row', mrow.map((l) => [l.engine, l.bytes_in, l.bytes_out, l.media_in, l.media_out, l.frames]), [['media', 0, 0, 200_000_000, 3_000_000, 24]]);
+  const rp2 = spawn(T, '', { args: ['--report'] });
+  const totals = (t) => (/^ {2}totals: .*$/m.exec(t) || [''])[0];
+  check('Cv13-media-not-in-totals', totals(rp2.stdout) === totals(rp.stdout) && !rp2.stdout.includes('200000000') && /^ {2}by channel: view 63004 → 63004 B/m.test(rp2.stdout), rp2.stdout);
+
+  // Media: the backend is a fake ffprobe/ffmpeg on a one-dir PATH; node is spawned by its own path.
+  const fake = path.join(T, 'fakebin');
+  mkdirSync(fake);
+  writeFileSync(path.join(fake, 'ffprobe'), '#!/bin/sh\nprintf \'{"streams":[{"width":4000,"height":3000}],"format":{}}\\n\'\n', { mode: 0o755 });
+  writeFileSync(path.join(fake, 'ffmpeg'), '#!/bin/sh\nfor a; do out=$a; done\nprintf IMG > "$out"\n', { mode: 0o755 });
+  const media = path.join(T, 'media');
+  mkdirSync(media);
+  symlinkSync(media, path.join(T, 'linked'));
+  writeFileSync(path.join(media, 'shot.png'), Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(992, 1)]));
+  const viewMedia = (req, PATH) => {
+    const r = spawnSync(process.execPath, [SLIM, '--view'], { cwd: T, env: envFor(T, { PATH }), input: JSON.stringify({ v: 1, root: proj, cwd: T, session_id: 's1', ...req }), encoding: 'utf8' });
+    try { return JSON.parse(r.stdout); } catch (_) { return { decision: 'unparsed', text: r.stdout + r.stderr }; }
+  };
+  const viaLink = path.join(T, 'linked', 'shot.png');
+  const m1 = viewMedia({ path: viaLink, allowed_out: path.join(T, 'linked', 'shot.1568.png') }, fake);
+  eq('Cv14-image', [m1.decision, m1.engine, m1.figure, m1.frames, readFileSync(path.join(media, 'shot.1568.png'), 'utf8')], ['compressed', 'media', 'media: 1000 B → 3 B (-100%) frames=1', 1, 'IMG']);
+  check('Cv14-text-lists-output', m1.text.endsWith(`\n${path.join(media, 'shot.1568.png')}`), m1.text);
+  eq('Cv14-refusals', [
+    viewMedia({ path: viaLink }, fake).reason,
+    viewMedia({ path: viaLink, allowed_out: path.join(media, 'other.png') }, fake).reason,
+    viewMedia({ path: viaLink, allowed_out: path.join(media, 'shot.1568.png') }, path.join(T, 'nobin')).figure,
+    viewMedia({ path: viaLink, jq: '.a' }, fake).reason,
+    viewMedia({ path: viaLink, out: path.join(tasks, 'x.md') }, fake).reason,
+  ], ['write-denied', 'write-denied', 'media: no backend (install ffmpeg)', 'media-args', 'media-args']);
+  // A media request whose bytes are text is refused, never read as text: no Read probe ruled on it.
+  writeFileSync(path.join(T, 'creds'), 'SECRET=synthetic-value\n');
+  writeFileSync(path.join(proj, 'notes.mp4'), 'SECRET=synthetic-value\n');
+  symlinkSync(path.join(T, 'creds'), path.join(proj, 'demo.mp4'));
+  const textAsMedia = [
+    viewMedia({ path: path.join(proj, 'notes.mp4'), allowed_out: path.join(proj, 'notes.frames', '001.jpg') }, fake),
+    viewMedia({ path: path.join(proj, 'demo.mp4'), allowed_out: path.join(proj, 'demo.frames', '001.jpg') }, fake),
+    viewMedia({ path: path.join(proj, 'notes.mp4'), media: true }, fake),
+  ];
+  eq('Cv15-text-as-media-refused', textAsMedia.map((r) => [r.decision, r.reason, String(r.text).includes('SECRET')]),
+    [['refused', 'not-media', false], ['refused', 'not-media', false], ['refused', 'not-media', false]]);
 }
 
 // S13 last: every line any row above wrote.

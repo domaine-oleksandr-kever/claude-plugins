@@ -4,7 +4,7 @@ import type { SlimChannel } from '../../types'
 import { PLAIN_MIN, utf8Bytes } from './node-hook.ts'
 
 /** Bytes over which a channel's result is a candidate; 0 = SLIM_PLAIN_BYTES. scripts/delivery/channels.cjs holds the same table. */
-export const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, glob: 16384, agent: 0 } as const
+export const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, glob: 16384, agent: 0, attachment: 32768 } as const
 /** A Bash command that reads a log is a candidate from here on, plain or not. */
 export const LOG_GATE = 16384
 /** A fetching command word at the start of a pipeline segment; `cat src/http/page.html` is not one. */
@@ -17,8 +17,8 @@ const STRUCTURED = /^﻿?\s*(?:\{\s*["}[]|\[|<(?:!doctype|html|head|body)\b)/i
 const MARKUP = /^﻿?\s*<(?:!doctype|html|head|body)\b/i
 const LOG_EXT = new Set(['.log', '.jsonl', '.ndjson'])
 
-/** Every channel but MCP, which keeps its own pre-spawn rules. */
-export type Intake = Exclude<SlimChannel, 'mcp'>
+/** The tool-result channels but MCP, which keeps its own pre-spawn rules. */
+export type Intake = Exclude<SlimChannel, 'mcp' | 'attachment' | 'prompt'>
 export type Pre = 'error-shape' | 'already-slim' | 'size-gate' | 'not-text' | 'windowed-read' | 'spill-read' | 'read-guard'
 
 /** What the mod reads of one result: sizes and the facts the gates need, never the content's meaning. */
@@ -35,8 +35,10 @@ export type View = {
   truncated?: true
 }
 
-export function channelOf(tool: string): SlimChannel | 'lookup' | null {
+/** 'lookup' and 'view' are slim's own tools: their answers are already compact and never go through intake. */
+export function channelOf(tool: string): Intake | 'mcp' | 'lookup' | 'view' | null {
   if (tool === 'mcp__slim__lookup') return 'lookup'
+  if (tool === 'mcp__slim__view') return 'view'
   if (tool.startsWith('mcp__')) return 'mcp'
   switch (tool) {
     case 'Bash': return 'bash'
@@ -170,7 +172,7 @@ export function guardOf(ch: Intake, v: View): Pre | null {
   if (ch !== 'read') return null
   if (v.windowed) return 'windowed-read'
   // How the model follows a handle: a Read of a spill always passes through.
-  if (/^fnd-/.test(baseName(v.path ?? ''))) return 'spill-read'
+  if (/^fnd-/.test(baseName(v.path ?? '')) || PROMPT_SPILL.test(v.path ?? '')) return 'spill-read'
   return readEligible(v) ? null : 'read-guard'
 }
 
@@ -198,9 +200,82 @@ export function candidate(ch: Intake, v: View, plain: number): boolean {
   return floor(ch, v) && guardOf(ch, v) === null && sizeOk(ch, v, plain)
 }
 
+const DATA_EXT = new Set(['.json', '.jsonl', '.ndjson', '.log', '.txt'])
+
+/** The file the host's framing of an @-mentioned file names (`Called the Read tool with the following input: {…}`), or null. */
+export function attachmentPath(text: string): string | null {
+  const m = /^Called the Read tool with the following input: (\{.*\})$/m.exec(text.slice(0, 8192))
+  if (!m) return null
+  try {
+    const v = JSON.parse(m[1]!) as { file_path?: unknown }
+    return typeof v.file_path === 'string' ? v.file_path : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether an @-mentioned file may be a data file worth the core: numbered lines, and, when the framing
+ * names the file, a data extension and no source JSON. Without a name the core decides by content.
+ */
+export function attachmentEligible(text: string, path: string | null): boolean {
+  if (attachmentShape(text) !== 'numbered') return false
+  return path === null || (DATA_EXT.has(ext(path)) && !isSourceJson(path))
+}
+
 /** How an @-mentioned file reached the model: as the Read mapper's numbered lines, or raw. */
 export function attachmentShape(text: string): 'numbered' | 'raw' {
   let n = 0
   for (const line of text.slice(0, 4096).split('\n')) if (/^\s*\d+(?:\t|→)/.test(line) && ++n >= 3) return 'numbered'
   return 'raw'
+}
+
+/** A spill slim (or fnd) writes, by name: `fnd-*` in the spill root, `slim-prompt-*` in the prompt channel's dir. */
+const SPILL_NAME = /^fnd-(mcp-slim|crush|jsx-ids)-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/
+const PROMPT_SPILL = /\/\.claude\/slim\/prompt\/slim-prompt-(?:(rows|ids)-)?[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/
+const HOST_FILE = /\/tool-results\/[^/]+$/
+
+export type SpillKind = 'original' | 'rows' | 'ids' | 'host'
+
+/** What a path is to slim: a whole original, a rows part, an id map, a host tool-results file, or null. */
+export function spillKind(path: string): SpillKind | null {
+  const s = SPILL_NAME.exec(baseName(path))
+  if (s) return s[1] === 'mcp-slim' ? 'original' : s[1] === 'crush' ? 'rows' : 'ids'
+  const p = PROMPT_SPILL.exec(path)
+  if (p) return p[1] === 'rows' ? 'rows' : p[1] === 'ids' ? 'ids' : 'original'
+  return HOST_FILE.test(path) ? 'host' : null
+}
+
+/** The words of a shell command that look like paths, as delivery/channels.cjs splits them. */
+export function commandWords(cmd: string): string[] {
+  return cmd.split(/[\s'"|;&<>()=]+/).filter(Boolean)
+}
+
+/** Which reader a Bash command is, by the command words it carries: a word that only names a file is `named`. */
+export function bashVia(cmd: string): string {
+  const w = new Set(commandWords(cmd).map(baseName))
+  const any = (...names: string[]) => names.some(n => w.has(n))
+  if (any('jq')) return 'jq'
+  if (any('grep', 'rg', 'egrep')) return 'grep'
+  if (any('sed', 'awk', 'head', 'tail', 'cat', 'wc', 'less')) return 'shell'
+  if (any('node')) return 'node'
+  if (any('rm', 'mv', 'cp', 'ln', 'touch', 'ls', 'echo', 'stat')) return 'named'
+  return 'other'
+}
+
+export const ACCESS_MAX = 8
+
+export type SpillAccess = { tool: 'Read' | 'Bash' | 'Grep'; via: string; paths: string[] }
+
+/** The spill files a Read, Bash or Grep call names (absolute paths, at most ACCESS_MAX), or null when none. */
+export function spillAccess(tool: string, e: Record<string, unknown>): SpillAccess | null {
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  let paths: string[]
+  let via: string
+  if (tool === 'Read') { paths = [str(e.file_path)]; via = 'Read' }
+  else if (tool === 'Grep') { paths = [str(e.path)]; via = 'Grep' }
+  else if (tool === 'Bash') { const c = str(e.command); paths = commandWords(c); via = bashVia(c) }
+  else return null
+  const hit = [...new Set(paths.filter(p => p.startsWith('/') && spillKind(p) !== null))].slice(0, ACCESS_MAX)
+  return hit.length ? { tool, via, paths: hit } : null
 }

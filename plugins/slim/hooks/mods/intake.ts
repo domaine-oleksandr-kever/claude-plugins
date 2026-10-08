@@ -1,10 +1,10 @@
 // Every tool result slim reads goes through scripts/slim.cjs here: the result replaced with the core's
 // answer, one slim.events entry, the row the ToolResult and ToolGroup lines draw, and a savings toast
-// for MCP calls on the main loop. Also the @-mention probe, which only reports.
+// for MCP calls on the main loop. An @-mentioned data file goes the same way, as the read channel's.
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimChannel, SlimEvent } from '../../types'
-import { GATES, attachmentShape, candidate, channelOf, floor, guardOf, viewOf } from './channels.ts'
+import { GATES, attachmentEligible, attachmentPath, attachmentShape, candidate, channelOf, floor, guardOf, viewOf } from './channels.ts'
 import type { Pre } from './channels.ts'
 import { agentPrefix, eventText, pushEvent } from './events.ts'
 import {
@@ -21,6 +21,7 @@ import {
   plainBytes,
   resultBytes,
   stubBytes,
+  textKey,
   toastMs,
   utf8Bytes,
 } from './node-hook.ts'
@@ -44,16 +45,18 @@ async function switchOf($: $, ch: SlimChannel): Promise<string | undefined> {
     case 'grep':
     case 'glob': return $.env.get('SLIM_GREP')
     case 'agent': return $.env.get('SLIM_AGENT')
+    case 'attachment': return $.env.get('SLIM_ATTACH')
+    case 'prompt': return $.env.get('SLIM_PROMPT')
   }
 }
 
 async function level($: $): Promise<0 | 1 | 2> {
-  return debugLevel((await $.env.get('SLIM_DEBUG')) || (await $.env.get('FND_MCP_SLIM_DEBUG')))
+  return debugLevel(await $.env.get('SLIM_DEBUG'))
 }
 
 /** Within this many bytes a stub mark or a stats line beside a handle is trusted without the core. */
 async function slimBound($: $): Promise<number> {
-  return Math.max(stubBytes(await $.env.get('SLIM_STUB_BYTES')), stubBytes(await $.env.get('FND_MCP_SLIM_STUB_BYTES'))) + 1200
+  return stubBytes(await $.env.get('SLIM_STUB_BYTES')) + 1200
 }
 
 /** Asks the core to append the error line: `$.fs` has no append, and the spill root is the core's to resolve. */
@@ -95,7 +98,7 @@ export function registerIntake(on: On): void {
     const r = await next(e)
     if (r.deny !== undefined) return r
     const ch = channelOf(tool)
-    if (ch === null || ch === 'lookup') return r
+    if (ch === null || ch === 'lookup' || ch === 'view') return r
 
     // Passthroughs the mod can tell alone; the core is spawned for them only to write the report line.
     let pre: Pre | null = null
@@ -180,29 +183,62 @@ export function registerIntake(on: On): void {
     return r.context?.length ? { result: out.result, context: r.context } : { result: out.result }
   })
 
-  // No rewrite: an @-mentioned file reaches the model as the Read mapper framed it. Large ones are
-  // reported at SLIM_DEBUG=2 with their shape, the data for deciding whether to compress them later.
+  // An @-mentioned file reaches the model as the host frames a Read of it. A data file's numbered lines
+  // are compressed the way the read channel's are; source and prose pass. The host caches the answer
+  // and asks again after a compaction, so the core answers the same text the same way, and the Log
+  // line and the report line are written once per content.
   on('prompt.attachment', { type: 'file' }, async ($, e, next) => {
     const d = await next(e)
-    const bytes = utf8Bytes(e.text)
-    if (bytes <= GATES.read) return d
+    const text = d.text
+    if (typeof text !== 'string' || utf8Bytes(text) <= GATES.attachment) return d
     try {
-      if ((await level($)) < 2) return d
-      const probe = {
+      if ((await switchOf($, 'attachment')) === '0') return d
+      const path = attachmentPath(text)
+      const pre: Pre | null = attachmentEligible(text, path) ? null : 'read-guard'
+      if (pre !== null && (await level($)) < 2) return d
+      const seenKey = { plugin: 'slim', key: 'seen', id: textKey(text) } as const
+      const seen = pre === null && (await $.state.get(seenKey).then(r => r.value === true, () => false))
+      const request = {
         v: 1,
         channel: 'attachment',
         tool: 'Attachment',
-        tool_input: { type: e.type, origin: e.origin.kind, shape: attachmentShape(e.text) },
-        tool_response: null,
+        tool_input: { type: e.type, origin: e.origin.kind, shape: attachmentShape(text), ...(path !== null ? { path } : {}) },
+        tool_response: pre ? null : { text },
         is_error: false,
         cwd: await $.session.cwd(),
         session_id: await $.session.id(),
-        pre: 'not-covered',
-        bytes_in: bytes,
+        ...(e.agentId !== undefined ? { agentId: e.agentId } : {}),
+        ...(pre ? { pre, bytes_in: utf8Bytes(text) } : {}),
+        ...(seen ? { record: false } : {}),
       }
-      const { argv, init } = buildRun($.plugin.root, probe, 10_000)
-      await $.process.run(argv, init)
-    } catch {}
-    return d
+      const { argv, init } = buildRun($.plugin.root, request, 30_000)
+      const parsed = parseOut(await $.process.run(argv, init))
+      if (!parsed.ok) {
+        await reportError($, 'attachment', 'Attachment', undefined, parsed.reason, parsed.message)
+        return d
+      }
+      const out = parsed.out
+      const res = out.result as { text?: unknown } | undefined
+      if (pre || (out.decision !== 'compressed' && out.decision !== 'stubbed') || typeof res?.text !== 'string') return d
+      const rec = out.record
+      try {
+        if (!seen) await $.state.set(seenKey, true)
+        if (!seen && (await $.env.get('SLIM_EVENT_LOG')) !== '0') {
+          const isSub = e.agentId !== undefined
+          const listed = isSub ? await agentType($, e.agentId!) : undefined
+          const name = path !== null ? `@${path.slice(path.lastIndexOf('/') + 1)}` : '@file'
+          const ev: SlimEvent = {
+            v: 1, atMs: await $.clock.now(), kind: 'slim', src: 'slim', tool: 'Attachment', channel: 'attachment',
+            text: eventText(agentPrefix(listed, isSub), name, out.decision as 'compressed' | 'stubbed', rec.engine!, bytesSeen(rec), rec.bytes_out),
+            ...(isSub ? { agentType: listed ?? 'agent' } : {}),
+            bytesIn: bytesSeen(rec), bytesOut: rec.bytes_out, engine: rec.engine!, ms: rec.ms,
+          }
+          await update($, EVENTS, l => pushEvent(l, ev))
+        }
+      } catch {}
+      return { text: res.text }
+    } catch {
+      return d
+    }
   })
 }

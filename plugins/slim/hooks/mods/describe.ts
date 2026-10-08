@@ -1,5 +1,5 @@
 // Points the model at lookup where it would otherwise pull a whole page or output into context, and
-// keeps lookup's schema in the prompt's list so it is called without a ToolSearch first.
+// keeps lookup's and view's schemas in the prompt's list so they are called without a ToolSearch first.
 import type { On } from 'claude-code'
 
 // Constant on purpose: the describe answer is cached per session and any change spends the prompt cache.
@@ -18,4 +18,6 @@ export function registerDescribe(on: On): void {
     if ((await $.env.get('SLIM_LOOKUP')) === '0') return next(e)
     return { ...(await next(e)), isDeferred: false }
   })
+
+  on('tool.describe', { tool: 'mcp__slim__view' }, async (_$, e, next) => ({ ...(await next(e)), isDeferred: false }))
 }

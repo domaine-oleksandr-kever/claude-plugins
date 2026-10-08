@@ -8,6 +8,7 @@ import type { EngineInterface, ModelUsage, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
 import { agentPrefix, lookupText, pushEvent } from './events.ts'
 import { buildDistillRun, buildRecordRun, parseDistill, utf8Bytes } from './node-hook.ts'
+import { VIEW_DESC, VIEW_SCHEMA } from './view.ts'
 
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 
@@ -236,12 +237,16 @@ async function answerCommand($: $, command: string, question: string, model: str
 }
 
 export function registerLookup(on: On): void {
-  // The engine allows one unmatched session.start per plugin (info.ts holds it); this matcher takes every session.
+  // The engine allows one unmatched session.start per plugin (info.ts holds it); this matcher takes every
+  // session and registers view too.
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
     try {
       if ((await $.env.get('SLIM_LOOKUP')) !== '0') {
         await $.tool.register({ name: 'lookup', description: LOOKUP_DESC, inputSchema: LOOKUP_SCHEMA })
       }
+    } catch {}
+    try {
+      await $.tool.register({ name: 'view', description: VIEW_DESC, inputSchema: VIEW_SCHEMA })
     } catch {}
     return next(e)
   })

@@ -3,7 +3,7 @@
   "name": "slim",
   "displayName": "Slim",
   "version": "0.4.0",
-  "description": "Universal tool-result compression proxy for Claude Code — compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and Agent results by content (JSON, logs, HTML, plain-text windows) and adds a lookup tool that answers one question about a page, command or file",
+  "description": "Universal result proxy for Claude Code — compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and Agent results, pasted prompt data and @-mentioned files by content (JSON, logs, HTML, Figma REST node trees, plain-text windows), guards spill reads, and adds two tools: lookup answers one question about a page, command or file; view compacts a file or a command output (with jq narrowing, media resize and video frames) into a workspace file",
   "author": {
     "name": "Oleksandr Kever",
     "email": "oleksandr.kever@meetdomaine.com"

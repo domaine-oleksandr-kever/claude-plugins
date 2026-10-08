@@ -2,16 +2,18 @@
  * engines/sniff.cjs — content-based detection: which engine a payload belongs to, and why.
  *
  * Order (first match wins): binary (magic bytes / NUL) → none (empty) → JSON (`adf` for a bare ADF
- * doc) → figma (Figma design-context JSX markers) → the guards that keep text untouched (diff, test
- * output, template, shebang, XML → `text`) → a dominant markdown fence (the body's engine) → JSONL →
- * code by line openings (`text`) → HTML → log (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a
- * test run must not be deduped as a log, a theme template must not be stripped as a page. Pure.
+ * doc, `figma-nodes` for a Figma REST nodes response) → figma (Figma design-context JSX markers) →
+ * the guards that keep text untouched (diff, test output, template, shebang, XML → `text`) → a
+ * dominant markdown fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → log
+ * (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
+ * must not be deduped as a log, a theme template must not be stripped as a page. Pure.
  */
 'use strict';
 
 const { stripBom } = require('./util.cjs');
 const { detectLog } = require('./log.cjs');
 const { detectJsx } = require('./figma.cjs');
+const { isNodesResponse } = require('./figma-nodes.cjs');
 const { parseJsonl, unwrapFence } = require('./json.cjs');
 
 const SCAN = 65536;
@@ -108,6 +110,7 @@ function sniffJson(text) {
   if (v && typeof v === 'object' && !Array.isArray(v) && v.type === 'doc' && Array.isArray(v.content)) {
     return { engine: 'adf', confidence: 1, reason: 'adf-doc' };
   }
+  if (isNodesResponse(v)) return { engine: 'figma-nodes', confidence: 0.95, reason: 'figma-rest-nodes' };
   return { engine: 'json', confidence: 1, reason: 'json' };
 }
 

@@ -418,19 +418,23 @@ for k in $(grep -rhoE '(^|[^A-Za-z0-9_])FND_[A-Z0-9_]+' \
     *) bad "env-undocumented-$k" "$k is read by the bundle but has no README → Environment switches row" ;;
   esac
 done
-# Sibling plugins in the monorepo own a `<NAME>_` prefix (slim → SLIM_*) and document their
-# switches in the same table.
-SIB_IGNORE=" SLIM_OUT_PREFIX "  # json-slim.cjs's spill-prefix constant, carried byte-identical — not a switch
+# Sibling plugins in the monorepo own a `<NAME>_` prefix (slim → SLIM_*). A sibling whose own README
+# carries an `## Environment switches` table documents every switch there (slim); one without (band)
+# documents them in the root table.
+SIB_IGNORE=" "
 for d in "$ROOT"/plugins/*/; do
   name="$(basename "$d")"
   [ "$name" = fnd ] && continue
   prefix="$(printf '%s' "$name" | tr 'a-z-' 'A-Z_')_"
+  SIB_ROWS="$(awk '/^## Environment switches/ { on = 1; next } on && /^## / { exit } on' "$d/README.md" 2>/dev/null | grep '^| `' || true)"
+  where="README.md → Environment switches"
+  if [ -n "$SIB_ROWS" ]; then where="plugins/$name/README.md → Environment switches"; else SIB_ROWS="$ENV_ROWS"; fi
   for k in $(grep -rhoE "(^|[^A-Za-z0-9_])${prefix}[A-Z0-9_]+" "$d" 2>/dev/null |
                sed "s/^[^A-Z]*\(${prefix}\)/\1/" | sort -u); do
     case "$SIB_IGNORE" in *" $k "*) continue ;; esac
-    case "$ENV_ROWS" in
+    case "$SIB_ROWS" in
       *'| `'"$k"'` |'*) ok ;;
-      *) bad "env-undocumented-$k" "$k is read by plugins/$name but has no README → Environment switches row" ;;
+      *) bad "env-undocumented-$k" "$k is read by plugins/$name but has no $where row" ;;
     esac
   done
 done

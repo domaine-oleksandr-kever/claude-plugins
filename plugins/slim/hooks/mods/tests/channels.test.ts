@@ -38,7 +38,7 @@ const peek = async ($: any, id = ''): Promise<{ events: any[]; row: any }> =>
   JSON.parse((await $.command.run({ command: 'peek-slim', args: id })).text)
 
 /** The world beneath slim, its env counted read by read. */
-function world(on: On, below: Below | ((e: any) => Below), core: () => ReturnType<typeof ok> = compressed('bash'), env: Record<string, string> = {}) {
+function world(on: On, below: Below | ((e: any) => Below), core: () => ReturnType<typeof ok> = compressed('bash'), env: Record<string, string> = {}, agents: any[] = []) {
   mock.clock(on, { now: 5_000 })
   mock.store(on)
   const w = { runs: [] as Run[], other: [] as Run[], toasts: [] as unknown[], calls: [] as any[], envReads: [] as string[] }
@@ -48,7 +48,7 @@ function world(on: On, below: Below | ((e: any) => Below), core: () => ReturnTyp
   })
   on('session.id', async () => ({ value: 'S' }))
   on('session.cwd', async () => ({ value: '/repo' }))
-  on('agent.list', async () => ({ value: [] as any }))
+  on('agent.list', async () => ({ value: agents as any }))
   on('ui.toast', async (_$, e) => {
     w.toasts.push(e)
     return { value: undefined }
@@ -195,26 +195,106 @@ describe('K6–K9 WebFetch, WebSearch, Grep/Glob, Agent', () => {
 })
 
 describe('K10 @-mentioned files', () => {
-  const big = Array.from({ length: 3000 }, (_, i) => `${String(i + 1).padStart(6)}\tconst v${i} = ${i}`).join('\n')
+  const framed = (file: string, body: string) =>
+    `Called the Read tool with the following input: {"file_path":"${file}"}\nResult of calling the Read tool: ` +
+    body.split('\n').map((l, i) => `${String(i + 1).padStart(6)}→${l}`).join('\n')
+  const rows = Array.from({ length: 900 }, (_, i) => `{"key":"ACME-${i}","status":"open","summary":"row ${i}"}`).join('\n')
+  const DATA = framed('/repo/export/issues.jsonl', rows)
+  const SOURCE = framed('/repo/src/big.ts', Array.from({ length: 3000 }, (_, i) => `const v${i} = ${i}`).join('\n'))
+  const attached = (text: string, extra: Record<string, unknown> = {}) => ({ type: 'file', text, origin: { kind: 'engine' }, ...extra }) as any
+  const COMPACT = 'Called the Read tool …\nResult of calling the Read tool: [compact]\n\nslim: compressed 60,000 B → 900 B (−98.5%)'
+  const core = () => ok(JSON.stringify({
+    decision: 'compressed', reason: null, result: { text: COMPACT }, figure: 'slim: compressed',
+    record: { src: 'slim', channel: 'attachment', entry: 'hook', decision: 'compressed', reason: null, engine: 'jsonl', bytes_in: 55_000, bytes_seen: 61_000, bytes_out: 900, pct: 98.5, stages: [], spill: null, spills: [], ms: 7 },
+  }))
+  const echo = (on: On) => on('prompt.attachment', async (_$, e) => ({ text: e.text }))
+
+  test('a data file: one core run with the framed text and its path, the compact text back, one Log line', { plugins: [PEEK] }, async ($, on) => {
+    const w = world(on, {}, core)
+    echo(on)
+    const d = await $.prompt.attachment(attached(DATA))
+    expect(d.text).toBe(COMPACT)
+    expect(w.runs.length).toBe(1)
+    expect(stdinOf(w.runs[0])).toEqual({
+      v: 1, channel: 'attachment', tool: 'Attachment',
+      tool_input: { type: 'file', origin: 'engine', shape: 'numbered', path: '/repo/export/issues.jsonl' },
+      tool_response: { text: DATA }, is_error: false, cwd: '/repo', session_id: 'S',
+    })
+    expect((await peek($)).events.map((e: any) => [e.kind, e.channel, e.tool, e.text, e.bytesIn, e.bytesOut, e.engine])).toEqual([
+      ['slim', 'attachment', 'Attachment', '@issues.jsonl: compressed 61 KB → 900 B (−99%) · jsonl', 61_000, 900, 'jsonl'],
+    ])
+  })
+
+  test('the same content asked again (a compaction, an invalidate): the same answer, one Log line, no second report line', { plugins: [PEEK] }, async ($, on) => {
+    const w = world(on, {}, core)
+    echo(on)
+    expect((await $.prompt.attachment(attached(DATA))).text).toBe(COMPACT)
+    expect((await $.prompt.attachment(attached(DATA))).text).toBe(COMPACT)
+    expect(w.runs.length).toBe(2)
+    expect([stdinOf(w.runs[0]).record, stdinOf(w.runs[1]).record]).toEqual([undefined, false])
+    expect((await peek($)).events).toHaveLength(1)
+  })
+
+  test('SLIM_EVENT_LOG=0: no Log line, and a second ask still skips the report line', { plugins: [PEEK] }, async ($, on) => {
+    const w = world(on, {}, core, { SLIM_EVENT_LOG: '0' })
+    echo(on)
+    await $.prompt.attachment(attached(DATA))
+    await $.prompt.attachment(attached(DATA))
+    expect([stdinOf(w.runs[0]).record, stdinOf(w.runs[1]).record]).toEqual([undefined, false])
+    expect((await peek($)).events).toEqual([])
+  })
+
+  test('a subagent\'s attachment carries its type', { plugins: [PEEK] }, async ($, on) => {
+    world(on, {}, core, {}, [{ id: 'a9', description: 'd', type: 'core:jira-reader', status: 'running' }])
+    echo(on)
+    await $.prompt.attachment(attached(DATA, { agentId: 'a9' }))
+    const ev = (await peek($)).events[0]
+    expect([ev.text, ev.agentType]).toEqual(['jira-reader · @issues.jsonl: compressed 61 KB → 900 B (−99%) · jsonl', 'core:jira-reader'])
+  })
+
   for (const level of ['', '1', '2']) {
-    test(`SLIM_DEBUG=${level || 'unset'}: text unchanged; a not-covered line only at 2`, async ($, on) => {
-      const w = world(on, {}, compressed('bash'), level ? { SLIM_DEBUG: level } : {})
-      on('prompt.attachment', async (_$, e) => ({ text: e.text }))
-      const d = await $.prompt.attachment({ type: 'file', text: big, origin: { kind: 'engine' } } as any)
-      expect(d.text).toBe(big)
+    test(`a source file at SLIM_DEBUG=${level || 'unset'}: unchanged; a read-guard line only at 2`, async ($, on) => {
+      const w = world(on, {}, core, level ? { SLIM_DEBUG: level } : {})
+      echo(on)
+      expect((await $.prompt.attachment(attached(SOURCE))).text).toBe(SOURCE)
       expect(w.runs.length).toBe(level === '2' ? 1 : 0)
       if (level === '2') {
         expect(stdinOf(w.runs[0])).toEqual({
-          v: 1, channel: 'attachment', tool: 'Attachment', tool_input: { type: 'file', origin: 'engine', shape: 'numbered' },
-          tool_response: null, is_error: false, cwd: '/repo', session_id: 'S', pre: 'not-covered', bytes_in: new TextEncoder().encode(big).length,
+          v: 1, channel: 'attachment', tool: 'Attachment', tool_input: { type: 'file', origin: 'engine', shape: 'numbered', path: '/repo/src/big.ts' },
+          tool_response: null, is_error: false, cwd: '/repo', session_id: 'S', pre: 'read-guard', bytes_in: new TextEncoder().encode(SOURCE).length,
         })
       }
     })
   }
 
+  test('no framing: numbered lines go to the core, which decides by content; its passthrough keeps the text', async ($, on) => {
+    const bare = DATA.slice(DATA.indexOf('\n') + 1)
+    const w = world(on, {}, () => ok(JSON.stringify({ decision: 'passthrough', reason: 'read-guard', record: { engine: null, bytes_in: 1, bytes_out: 1, ms: 1 } })))
+    echo(on)
+    expect((await $.prompt.attachment(attached(bare))).text).toBe(bare)
+    expect(stdinOf(w.runs[0]).tool_input).toEqual({ type: 'file', origin: 'engine', shape: 'numbered' })
+  })
+
+  test('raw text, SLIM_ATTACH=0, a failed core: unchanged', async ($, on) => {
+    const raw = rows
+    const w = world(on, {}, () => ({ ...ok(''), exitCode: 1 }))
+    echo(on)
+    expect((await $.prompt.attachment(attached(raw))).text).toBe(raw)
+    expect(w.runs.length).toBe(0)
+    expect((await $.prompt.attachment(attached(DATA))).text).toBe(DATA)
+    expect(w.runs.length).toBe(1)
+  })
+
+  test('SLIM_ATTACH=0: no spawn', async ($, on) => {
+    const w = world(on, {}, core, { SLIM_ATTACH: '0' })
+    echo(on)
+    expect((await $.prompt.attachment(attached(DATA))).text).toBe(DATA)
+    expect(w.runs.length + w.other.length).toBe(0)
+  })
+
   test('a small attachment reads no env', async ($, on) => {
     const w = world(on, {})
-    on('prompt.attachment', async (_$, e) => ({ text: e.text }))
+    echo(on)
     await $.prompt.attachment({ type: 'file', text: 'tiny', origin: { kind: 'engine' } } as any)
     expect(w.envReads).toEqual([])
   })

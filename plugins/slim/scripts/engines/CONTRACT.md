@@ -22,7 +22,7 @@ One call: `compress(input, options)`.
 | field | type | meaning |
 |---|---|---|
 | `data` | `string \| Buffer \| object` | the payload. A Buffer is checked for binary magic bytes, then decoded as UTF-8. An object is serialized with `JSON.stringify` (a circular one is refused). |
-| `hint` | `{ mime?, filename?, source? }` | optional, carried for the caller. Detection is content-based and does not read it. |
+| `hint` | `{ mime?, filename?, source?, variables? }` | optional. Detection is content-based and never reads it. An engine may read documented fields: **figma-nodes** reads `variables` (the Figma `/v1/variables/local` payload, an object) and `filename` (a `<key>-<node>.nodes.json` name gives the file key). A hint that is not a plain object is ignored. |
 
 `options` (all optional)
 
@@ -46,14 +46,17 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
 ## 2. Detection
 
 `sniff(input)` → `{ engine, confidence, reason }`, where `engine` is one of `json | jsonl | log | html
-| figma | adf | text | binary | none` and `confidence` is 0..1. Content only; first match wins:
+| figma | figma-nodes | adf | text | binary | none` and `confidence` is 0..1. Content only; first match wins:
 
 1. **binary** — a Buffer starting with PNG, JPEG, GIF8, `%PDF-`, zip (`PK\x03\x04`), gzip (`1F 8B`),
    `RIFF…WEBP`, wasm (`\0asm`), ELF or Mach-O magic, or holding a NUL byte in its first 8192 bytes; a
    string holding a NUL there, or starting with `%PDF-` or `\u0089PNG`.
 2. **none** — empty or whitespace only.
-3. **json / adf** — the text (BOM stripped) opens with `{` or `[` and `JSON.parse` accepts it; a bare
-   `{type:'doc', content:[…]}` Atlassian document is `adf`.
+3. **json / adf / figma-nodes** — the text (BOM stripped) opens with `{` or `[` and `JSON.parse` accepts it;
+   a bare `{type:'doc', content:[…]}` Atlassian document is `adf`; a Figma REST nodes response — an
+   object whose non-empty `nodes` map holds, for every id, a `document` with a string `type`, at least
+   one of them with `absoluteBoundingBox` or `children` — is `figma-nodes` (confidence 0.95, reason
+   `figma-rest-nodes`). Anything else, including a `nodes` map with a null or document-less entry, is `json`.
 4. **figma** — Figma design-context JSX: `data-node-id="`, `className="` and `var(--` each at least 3 times.
 5. **guards → text** — text no transforming engine may touch, checked in the first 64 KB:
    `diff` (two or more `diff --git` / `--- a/` / `+++ b/` / `@@ -n,n +n,n @@` lines), `test-output`
@@ -118,6 +121,21 @@ to a `C17:` legend (repeated `var(--…)` tokens inside it to `$N`), `data-node-
 with the map leaving as an `ids` part (`ids=<path>` in the header), and identical sibling subtrees fold
 to one exemplar plus a line listing what differed. The output starts with `<<fnd-jsx-slim>>`.
 
+**figma-nodes** — a Figma REST `GET /v1/files/:key/nodes` response as a markdown build tree, one line
+per visible node: `[TYPE] "name" #id WxH @x,y`, then the TEXT content (in full), a `T<n>` type style
+from a document-wide table, and the attributes (auto-layout, sizing, fills, strokes, radius, effects,
+grids, constraints when not TOP/LEFT, named styles, component props).
+Measurements round to 0.5 px. Dropped: vector geometry, `absoluteRenderBounds`, `exportSettings`,
+thumbnails, the instance `overrides` array, and `visible:false` subtrees (counted). Adjacent siblings
+identical apart from id, position, image ref and text fold into one exemplar with a `×N` mark and a
+`folds ×N` block listing, per folded sibling, every id and what differed — so every visible node id and
+every text value stays in the output. With `hint.variables` a bound value reads `$Collection/Name
+(<node value>)` and the header says `tokens: variables`; without it bindings read `$var:<short id>`. A
+dominant markdown fence around the response is unwrapped, its preamble and trailer kept. The result
+carries `meta: { nodes, hidden, folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by
+`figma-nodes.cjs` prints `figma-nodes: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N`. The
+original's spill name ends `.json`.
+
 **adf** — a bare Atlassian document converted to markdown (media render as `_(media omitted)_`).
 
 **text** — the plain-text window, the only thing slim ever does to code, diffs, test output or prose:
@@ -132,7 +150,7 @@ rewritten.
 ```ts
 {
   v: 1,
-  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'adf'|'text'|'binary'|'none',  // the engine that produced the text
+  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'binary'|'none',  // the engine that produced the text
   decision: 'compressed' | 'passthrough' | 'refused',
   reason?: string,      // why not compressed
   format?: string,      // diagnostic tag of a non-JSON passthrough (html | xml | broken-json | text)
@@ -141,6 +159,7 @@ rewritten.
   spill?: { kind: 'original', payload, suggestedName },      // compressed only: the input, to keep
   parts?: [{ kind: 'rows' | 'ids', payload, suggestedName }],// payloads the text cites by path
   window?: { lines_total, lines_hidden, bytes_hidden },      // text engine only
+  meta?: { nodes, hidden, folded },                         // figma-nodes only: visible, hidden-dropped, folded node counts
   warnings: string[],
 }
 ```
@@ -152,7 +171,7 @@ reply — is the caller's decision.
 
 Passthrough reasons: `empty`, `engine-not-allowed`, `plain-gate`, `no-gain`, `non-json`, `error-shape`,
 `number-precision`, `budget-exceeded`, `transform-error`, and per engine `non-log`, `non-figma`,
-`non-adf`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
+`non-figma-nodes`, `non-adf`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
 
 ## 5. Guarantees
 
@@ -165,11 +184,102 @@ Passthrough reasons: `empty`, `engine-not-allowed`, `plain-gate`, `no-gain`, `no
   is read only for `maxMs` and `stats.ms`; no timers are started; no global is touched.
 - **Memory**: about 6× the input at peak (the text, its parse, and the per-stage copies).
 
+## 5a. Media planning (`media.cjs`, beside compress())
+
+Images and video are binary, so `compress()` refuses them (`binary`). `media.cjs` is a separate pure
+module that only **plans** what a media file becomes for a model; a caller with a backend (ffmpeg,
+sips) runs the plan. It reads no file and runs nothing.
+
+- `kindOf(head: Buffer) → { kind: 'image'|'video', format } | null` from the first bytes (64 are
+  enough): images `png`, `jpeg`, `gif`, `webp`; video `mp4`, `mov` (ISO-BMFF `ftyp`, still-image
+  brands such as `heic`/`avif` excluded → `null`), `webm`, `mkv`, `avi`.
+- `target(facts, opts) → rel | null`: the first output's path relative to the input's directory,
+  from `kind`, `name` and `ext` alone (no probe, no bytes beyond the kind), so a caller can run its
+  Write permission check on exactly the path the backend will write: an image is
+  `<name>.<longEdge>.<ext>` where `<ext>` is the input's own extension lowercased when it is `png`,
+  `jpg`, `jpeg` or `gif`, and `png` otherwise (WebP, no extension, anything else); a video is
+  `<name>.frames/001.jpg`. `null` without a name or a media kind.
+- `plan(facts, opts)` with `facts = { kind, format, name, ext, width, height, durationS, rotation }`
+  (what a probe measured; `name` is the basename without its extension; `width × height` are the
+  stored dimensions and a quarter-turn `rotation` in degrees, from a display matrix or EXIF
+  orientation, swaps them to the displayed ones) and
+  `opts = { longEdge = 1568, everyS = 2, maxFrames = 24, scene = false }`:
+  - image → `{ kind, outputs: [{ rel: target(facts, opts) }], source: { w, h }, scale: { w, h },
+    resized }` (`source` is the displayed size, `scale` the output size): long edge capped, aspect
+    kept, never upscaled (an image already within the cap is still re-encoded, to drop its metadata).
+  - video → `{ kind, dir: '<name>.frames', outputs: [{ rel: '<name>.frames/NNN.jpg', t }], source,
+    scale, resized, interval, scene }`: one frame every `everyS` seconds from t = 0, at most
+    `maxFrames`; a clip longer than `everyS × maxFrames` widens the interval to
+    `duration / maxFrames` so the frames span the whole clip. `scene: true` lists `maxFrames` slots with `t: null` and `interval: null` (the
+    backend writes as many as the cuts give).
+  - missing or non-positive dimensions, or a video without a duration → `{ refused: 'no-probe' }`;
+    a kind other than image / video → `{ refused: 'not-media' }`.
+- `figureLine(bytesIn, bytesOut, frames)` → `media: <in> B → <out> B (-NN%) frames=N` (whole percent,
+  `+` when the outputs outweigh the input; an image is `frames=1`).
+
+## 5b. JSON narrowing (`jq.cjs`, beside compress())
+
+A caller that wants one part of a JSON document asks `jq.cjs` for it before any engine runs (slim's
+view tool does, for its `jq` argument). Pure; it requires only its siblings.
+
+- `narrow(text, src)` →
+  - `{ decision: 'narrowed', text, value, diags }`: `value` is what the expression selects and `text`
+    is `JSON.stringify(value)`; `diags` name the terms that resolved nothing (each one `null` in the
+    value);
+  - `{ decision: 'whole' }`: the expression selects the whole document (`.`, `..`, `.[]`, `. | .`,
+    `., .`), so there is nothing to narrow;
+  - `{ decision: 'refused', reason, message }` with `reason` one of `jq-unsupported` (the message
+    names the first unsupported token), `jq-not-json`, `number-precision` (the source holds integers
+    `JSON.parse` would round, so a re-serialized value would carry different numbers) and `jq-miss`
+    (no term resolved anything; the message names where the walk died and what was addressable
+    there: `jq: 'issuez' not found at top level; keys: total, issues`).
+- The source is JSON, JSON lines (an array of the rows) or one dominant markdown fence holding either.
+- The grammar: `expr := term (',' term)*` — a multi-select answers with one array, one slot per
+  term; `term := path ('|' filter)*`; `path` is a dot path (`.a.b`, `.a[0]`, `.a.[0]`, a leading
+  `.` optional) with `[]` fan-out at any segment (an object fans out to its values);
+  `filter := 'keys' | 'length' | a leading-dot path` (`.a | .b` ≡ `.a.b`). A filter after a fan-out
+  applies per element. `keys` sorts an object's names and gives an array's indices; `length` counts
+  elements, keys or code points, is a number's magnitude and 0 for null. A path segment names an
+  object's own key or an array's index only (`.constructor`, `.__proto__` on an object without that
+  key, or `.length` on an array or a string, is a miss). Inside a fan-out a missing key is `null`,
+  as in jq. Recursive descent, `//`, `?`, function calls, quoted keys, literals and
+  comparisons are refused, never guessed at.
+- `parse(src)`, `whole(expr)` and `evaluate(root, expr)` are the steps `narrow` runs; `GRAMMAR` is
+  the one-line grammar the refusal quotes.
+
+## 5c. Data spans in a mixed text (`spans.cjs`, beside compress())
+
+A caller holding text that mixes prose with pasted data (slim's prompt channel) asks `spans.cjs`
+where the data is, compresses each span with `compress()`, and splices the results back. Pure.
+
+- `spans(text, { min = 8192 }) → [{ start, end, kind }]`, ordered and non-overlapping, offsets in
+  UTF-16 code units, each span at least `min` UTF-8 bytes; `kind` is
+  - `json` — a `{` / `[` matched to its closer (string state tracked from the opener; a raw line
+    break ends a string, since no JSON string spans one) that `JSON.parse` accepts;
+  - `jsonl` — two or more consecutive lines that each parse as an object or array;
+  - `html` — a line opening `<!doctype html` / `<html` through the end of the first `</html>` tag
+    (text after the tag on its line stays outside);
+  - `log` — a run of timestamp- or level-led lines that `log.cjs`'s detector scores at 0.5 or more.
+    Stack frames (`    at fn (file:1:2)`, `  File "x.py", line 3`, `Caused by`, `... N more`) join
+    and may end the run; a tab- or `...`-led line only joins it, and the run ends at its last log line
+    or stack frame, so an indented line of prose after the paste is never inside it;
+  - any of the four for the body of a fenced block (```` ``` ```` / `~~~`), by `sniff()`; the fence
+    lines are not part of the span, and a fence whose body is anything else is not mined at all.
+- Never a span: prose; anything under `min`; a span holding `<<full=`, a stub mark, `fnd-prompt-json-`
+  or a `slim:` / `fnd-mcp-slim:` / `fnd-prompt-slim:` stats line, or followed within 400 characters by
+  such a stats line or handle (already compacted text); JSON after an opener of at least `min` bytes of
+  remainder that never closes (a truncated paste).
+- The JSON scan's work is bounded by `8 × text.length + 65536` steps; an adversarial text that
+  exhausts it gives `[]`. `jsonBlobs(text, min) → { blobs: [{ start, end }], openAt, bailed }` is that
+  scan alone (a caller re-checks its output with it: slim's prompt channel refuses a rewrite that
+  still holds a parseable JSON span of `min` bytes).
+
 ## 6. Versioning
 
 `Result.v` is the contract version. A new engine, a new option or a new result field is a minor change
 and keeps `v: 1`; changing the meaning or shape of an existing field bumps `v`. Adding an engine is one
-file exporting `{ id, run(text, opts, ctx) }` (`ctx.deadline`, `ctx.part(kind, payload) → citePath`),
+file exporting `{ id, run(text, opts, ctx) }` (`ctx.deadline`, `ctx.part(kind, payload) → citePath`,
+`ctx.hint` — the input's hint, `{}` when absent),
 one row in the `ENGINES` table of `index.cjs` and one rule in `sniff.cjs`.
 
 ## 7. Examples
@@ -215,3 +325,37 @@ else {
   process.stdout.write(`${result.text}\n\n<<full=${path.join(dir, result.spill.suggestedName)} original_result>>\n`);
 }
 ```
+
+## 8. Handles and trusted dirs (slim's delivery, not the library)
+
+The library returns spills and parts; where they land and how text cites them is the caller's. slim's
+Claude Code delivery uses this grammar, and slim itself treats a handle as real only when its path
+names one of these files (a sibling plugin's untrusted-content rule should use the same set; see the
+note on fnd below):
+
+- `<<full=<abs path> original_result>>` — the whole original (a stats line sits right before it);
+  `<<full=<abs path> original_block>>` — one block's original in a multi-block result;
+  `<<full=<abs path> N_rows_offloaded>>` — the rows the crusher dropped; `ids=<abs path>` — Figma's
+  id map; `full=<abs path>` — the line after a `<<slim stub>>` head and its stats line.
+- Trusted dirs: the spill root (`SLIM_DIR`, else the OS temp dir), the host's
+  `<config>/projects/<dir>/<session id>/tool-results/`, and the prompt channel's durable
+  `<project root>/.claude/slim/prompt/` (the main checkout's root for a linked worktree; slim writes
+  `.claude/slim/.gitignore` holding `*` when it creates the dir, and never overwrites one already there).
+- Names: `fnd-mcp-slim-<sha16>[-<8 hex>].json|txt` (originals), `fnd-crush-<sha16>.json` (rows),
+  `fnd-jsx-ids-<sha16>.json` (id maps) in the spill root; `slim-prompt-<sha16>[-<8 hex>].json|txt`,
+  `slim-prompt-rows-<sha16>.json`, `slim-prompt-ids-<sha16>.json` in the prompt dir; the report log
+  is `fnd-mcp-slim-debug.log` in the spill root. The `fnd-` prefixes are part of this contract until a
+  later version renames them; a reader keys on these names, so a rename changes this section first.
+- fnd's untrusted-content convention does not use this set yet: it trusts only `fnd-*` files in the
+  system temp dir or fnd's own spill-dir setting, its own prompt dirs and the host's `tool-results/`.
+  With fnd loaded, a `slim-prompt-*` handle in `.claude/slim/prompt/`, and every spill handle once
+  `SLIM_DIR` names a dir fnd's setting does not, reads as payload text to fnd's agents until fnd's
+  convention lists them (a change on fnd's side, outside slim).
+- Stats line, right before a handle or as a stub's second line:
+  `slim: compressed|stub <in> B → <out> B (−NN.N%)` (`+` when it grew; thousands with commas). The
+  `→` figure is the exact byte size of the value it sits in. Lines reading `fnd-mcp-slim:` instead of
+  `slim:` and the `<<fnd-mcp-slim stub>>` mark are the legacy forms a reader still recognises as
+  already compact; slim never writes them. `<<fnd-jsx-slim>>` opens the figma engine's output (§3) and
+  counts as already compact too.
+- A `<<slim stub>>` names its recovery as `mcp__slim__view({ path: "<file>" })` (with
+  `jq: "<jq-path>"` in §5b's grammar for JSON) or a windowed Read (offset/limit) of the `full=` file.

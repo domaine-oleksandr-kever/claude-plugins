@@ -1,50 +1,33 @@
-#!/usr/bin/env node
 /*
- * figma-node-slim.cjs — Figma REST node tree → compact markdown build tree.
+ * engines/figma-nodes.cjs — Figma REST node tree (`GET /v1/files/:key/nodes`) → compact markdown
+ * build tree.
  *
- * WHY a script: `figma-rest.sh` saves the raw `/v1/files/<key>/nodes` response, and one frame is
- * 200–280 KB of JSON (a page is ~1 MB). None of that may enter the model's context. This turns the
- * payload into a build tree a reader can `Read` in one or two calls — LOSSLESS FOR BUILD-RELEVANT
- * DATA: every visible node keeps its measurements, layout, colours, typography and effects, and
- * every visible node id appears in the output either on its own line or inside a fold's id list.
+ * One frame is 200–280 KB of JSON (a page is ~1 MB); the build tree is read in one or two calls and
+ * is LOSSLESS FOR BUILD-RELEVANT DATA: every visible node keeps its measurements, layout, colours,
+ * typography and effects, and every visible node id appears in the output either on its own line or
+ * inside a fold's id list.
  *
- * What it deliberately drops (the PNG next to the payload is the visual ground truth, and none of
- * this is buildable data): `fillGeometry` / `strokeGeometry` vector paths, `absoluteRenderBounds`
- * (a duplicate of the bounding box after effects), `exportSettings`, `scrollBehavior`, `locked`,
- * `layoutVersion`, thumbnails, the instance `overrides` array — plus `visible:false` subtrees, which
- * are counted in the header.
+ * Dropped by design (a screenshot is the visual ground truth, and none of this is buildable data):
+ * `fillGeometry` / `strokeGeometry` vector paths, `absoluteRenderBounds`, `exportSettings`,
+ * `scrollBehavior`, `locked`, `layoutVersion`, thumbnails, the instance `overrides` array, and
+ * `visible:false` subtrees, which are counted in the header.
  *
- * `overrides` is the one that looks buildable and is not: it is a per-descendant list of WHICH fields
- * an instance overrode, never the values. Every descendant is walked and printed with its actual
- * values anyway, so the array restates the tree in ids and field names — on a real page it was 51% of
- * the whole output. `componentProperties` (`props:{…}`) is a different thing and stays: it is the
- * instance's variant/text properties, with their values, and nothing else carries them.
+ * `overrides` looks buildable and is not: it lists WHICH fields an instance overrode, never the
+ * values. Every descendant is printed with its actual values anyway, so the array restates the tree
+ * in ids and field names (51% of the output on a real page). `componentProperties` (`props:{…}`) is
+ * different and stays: the instance's variant/text properties with their values.
  *
- * USAGE
- *   node figma-node-slim.cjs <nodes.json> [--variables <variables.json>] [--out <file.md>]
- *                            [--stats] [--max-text <N>] [--file-key <key>]
- *   --variables  the `/v1/variables/local` payload: it NAMES the `boundVariables` ids, so a bound
- *                value reads `$Collection/Group/Name (<node value>)` — the node's own value stays the
- *                render truth, and `; var default <v>` is appended only when the file resolves that
- *                variable to something else. Without the flag the header says the tokens are raw
- *                values (the Variables API is Enterprise-only) and bindings read `$var:<short id>`.
- *   --out        write the markdown there and print `saved=<path> bytes=<n>`; the path's directory
- *                must already exist — this script creates nothing outside that one file.
- *   --max-text   truncate TEXT `characters` at N (default 200); the full length is always noted.
- *   --file-key   the file key for the header when the input is not named `<key>-<node>.nodes.json`.
- *   Without --out the markdown goes to stdout.
- *
- * STDERR / EXIT
- *   --stats → `figma-node-slim: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N`.
- *   0 ok · 2 usage, unreadable input, non-JSON or a payload that is not a nodes response
- *   (one `figma-node-slim: error=<reason>` line on stderr, never a stack trace).
- *
- * Pure Node built-ins only (repo policy): fs and path.
+ * Hint fields read by `run`: `hint.variables` — the `/v1/variables/local` payload (an object): it
+ * NAMES the `boundVariables` ids, so a bound value reads `$Collection/Group/Name (<node value>)`, and
+ * `; var default <v>` is appended only when the file resolves that variable to something else;
+ * without it the header says the tokens are raw values and bindings read `$var:<short id>`.
+ * `hint.filename` — a `<key>-<node>.nodes.json` name gives the header its file key.
+ * A dominant markdown fence around the response is unwrapped; its preamble and trailer stay. Pure.
  */
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
+const { utf8, stripBom } = require('./util.cjs');
+const { unwrapFence } = require('./json.cjs');
 
 const DEFAULT_MAX_TEXT = 200;
 // A variant-heavy instance carries a `props:{…}` list longer than the node line it rides on (209
@@ -690,23 +673,23 @@ function subtreeLen(recs, i) {
   return j - i;
 }
 
-// --------------------------------------------------------------------------------- main --
+// ------------------------------------------------------------------------------- engine --
 
 class SlimError extends Error {
   constructor(reason, detail) { super(reason); this.reason = reason; this.detail = detail || ''; }
 }
 
-// `<key>-<node>.nodes.json` is what figma-rest.sh writes; a file key is `[A-Za-z0-9]+`, so the key is
+// `<key>-<node>.nodes.json` is what a REST fetch is saved as; a file key is `[A-Za-z0-9]+`, so the key is
 // everything before the first dash. Anything else → no claim about the key.
 function keyFromName(file) {
-  const m = /^([A-Za-z0-9]+)-.+\.nodes\.json$/.exec(path.basename(String(file || '')));
+  const m = /^([A-Za-z0-9]+)-.+\.nodes\.json$/.exec(String(file || '').replace(/^.*[\\/]/, ''));
   return m ? m[1] : '';
 }
 
 function compact(payload, opts) {
   const o = opts || {};
-  // `--max-text 0` is a real answer ("count the characters, print none of them"), not a missing value.
-  const maxText = typeof o.maxText === 'number' && isFinite(o.maxText) && o.maxText >= 0 ? Math.floor(o.maxText) : DEFAULT_MAX_TEXT;
+  // `maxText: 0` is a real answer ("count the characters, print none of them"), not a missing value.
+  const maxText = typeof o.maxText === 'number' && o.maxText >= 0 ? Math.floor(o.maxText) : DEFAULT_MAX_TEXT;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new SlimError('not_a_node_response', 'top level is not an object');
   const nodes = payload.nodes;
   if (!nodes || typeof nodes !== 'object' || Array.isArray(nodes)) throw new SlimError('not_a_node_response', 'no `nodes` object — this is not a /v1/files/<key>/nodes response');
@@ -746,6 +729,8 @@ function compact(payload, opts) {
   const fileKey = o.fileKey || '';
   const hasVars = !!(o.variables && o.variables.meta);
   const bytesIn = typeof o.bytesIn === 'number' ? o.bytesIn : 0;
+  // Bytes the caller wraps around the tree (a fence's preamble and trailer), so the header counts them.
+  const wrapBytes = typeof o.wrapBytes === 'number' && o.wrapBytes > 0 ? o.wrapBytes : 0;
 
   const assemble = (bytesOut) => {
     const pct = bytesIn > 0 ? ((1 - bytesOut / bytesIn) * 100) : 0;
@@ -781,92 +766,58 @@ function compact(payload, opts) {
 
   // The header states the output's own byte count, so it is a fixed point: assemble, measure,
   // re-assemble until the number stops moving (digit width is the only thing that can shift).
-  let n = Buffer.byteLength(assemble(0), 'utf8');
+  let n = Buffer.byteLength(assemble(0), 'utf8') + wrapBytes;
   for (let i = 0; i < 12; i++) {
-    const m = Buffer.byteLength(assemble(n), 'utf8');
+    const m = Buffer.byteLength(assemble(n), 'utf8') + wrapBytes;
     if (m === n) break;
     n = m;
   }
   const md = assemble(n);
-  return { md, stats: { ...stats, bytesIn, bytesOut: Buffer.byteLength(md, 'utf8') } };
+  return { md, stats: { ...stats, bytesIn, bytesOut: Buffer.byteLength(md, 'utf8') + wrapBytes } };
 }
 
-function readJson(file, reason) {
-  let raw;
-  try { raw = fs.readFileSync(file, 'utf8'); } catch (e) { throw new SlimError(reason.read, `${file}: ${e.code || e.message}`); }
-  try { return { json: JSON.parse(raw), bytes: Buffer.byteLength(raw, 'utf8') }; } catch (e) { throw new SlimError(reason.parse, `${file}: ${e.message}`); }
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+// The REST nodes response shape `compact` accepts: a non-empty `nodes` map whose every entry carries a
+// typed `document`, at least one of them with a bounding box or children.
+function isNodesResponse(v) {
+  if (!isObj(v) || !isObj(v.nodes)) return false;
+  const entries = Object.values(v.nodes);
+  if (!entries.length) return false;
+  if (!entries.every((e) => isObj(e) && isObj(e.document) && typeof e.document.type === 'string')) return false;
+  return entries.some((e) => isObj(e.document.absoluteBoundingBox) || Array.isArray(e.document.children));
 }
 
-const USAGE = 'node figma-node-slim.cjs <nodes.json> [--variables <variables.json>] [--out <file.md>] [--stats] [--max-text <N>] [--file-key <key>]';
+/** `figma-nodes: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N` for a compressed result. */
+function figureLine(bytesIn, bytesOut, meta) {
+  const p = bytesIn > 0 ? (1 - bytesOut / bytesIn) * 100 : 0;
+  const m = meta || {};
+  return `figma-nodes: ${bytesIn} B → ${bytesOut} B (${p >= 0 ? '-' : '+'}${Math.abs(Math.round(p * 10) / 10).toFixed(1)}%) `
+    + `nodes=${m.nodes || 0} hidden=${m.hidden || 0} folded=${m.folded || 0}`;
+}
 
-function main(argv) {
-  const VALUE_FLAGS = ['--variables', '--out', '--max-text', '--file-key'];
-  const KNOWN = new Set([...VALUE_FLAGS, '--stats', '--help', '-h']);
-  const args = argv.slice();
-  if (args.some((a, i) => (a === '--help' || a === '-h') && !VALUE_FLAGS.includes(args[i - 1]))) {
-    process.stdout.write(`figma-node-slim: usage: ${USAGE}\n`);
-    return 0;
-  }
-  const unknown = args.find((a, i) => a.startsWith('-') && !KNOWN.has(a) && !VALUE_FLAGS.includes(args[i - 1]));
-  if (unknown !== undefined) {
-    process.stderr.write(`figma-node-slim: error=usage detail=unknown option ${unknown} — ${USAGE}\n`);
-    return 2;
-  }
-  const opt = (f) => { const i = args.indexOf(f); return i !== -1 && args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[i + 1] : null; };
-  const file = args.find((a, i) => !a.startsWith('-') && !VALUE_FLAGS.includes(args[i - 1]));
-  if (!file) {
-    process.stderr.write(`figma-node-slim: error=usage detail=no <nodes.json> — ${USAGE}\n`);
-    return 2;
-  }
-  const maxTextRaw = opt('--max-text');
-  if (maxTextRaw !== null && !/^[0-9]+$/.test(maxTextRaw)) {
-    process.stderr.write(`figma-node-slim: error=usage detail=--max-text takes a non-negative integer, got ${maxTextRaw}\n`);
-    return 2;
-  }
+function run(text, opts, ctx) {
+  const pass = (reason) => ({ decision: 'passthrough', reason, text });
+  const parse = (t) => { try { return JSON.parse(stripBom(t)); } catch (_) { return undefined; } };
+  let v = parse(text);
+  const fence = v === undefined ? unwrapFence(text) : null;
+  if (fence) v = parse(fence.body);
+  if (!isNodesResponse(v)) return pass('non-figma-nodes');
+  const hint = isObj(ctx.hint) ? ctx.hint : {};
+  const wrapBytes = fence ? [fence.preamble, fence.trailer].filter(Boolean).reduce((n, s) => n + utf8(s) + 2, 0) : 0;
+  let res;
   try {
-    const input = readJson(file, { read: 'input_unreadable', parse: 'invalid_json' });
-    const varsFile = opt('--variables');
-    let variables = null;
-    if (varsFile) variables = readJson(varsFile, { read: 'variables_unreadable', parse: 'invalid_variables_json' }).json;
-    const res = compact(input.json, {
-      variables,
-      bytesIn: input.bytes,
-      maxText: maxTextRaw !== null ? Number(maxTextRaw) : DEFAULT_MAX_TEXT,
-      fileKey: opt('--file-key') || keyFromName(file),
-    });
-    const out = opt('--out');
-    if (out) {
-      try { fs.writeFileSync(out, res.md); } catch (e) { throw new SlimError('out_unwritable', `${out}: ${e.code || e.message}`); }
-      process.stdout.write(`saved=${path.resolve(out)} bytes=${res.stats.bytesOut}\n`);
-    } else {
-      process.stdout.write(res.md);
-    }
-    if (args.includes('--stats')) {
-      const pct = res.stats.bytesIn > 0 ? (1 - res.stats.bytesOut / res.stats.bytesIn) * 100 : 0;
-      process.stderr.write(`figma-node-slim: ${res.stats.bytesIn} B → ${res.stats.bytesOut} B ` +
-        `(${pct >= 0 ? '-' : '+'}${Math.abs(Math.round(pct * 10) / 10).toFixed(1)}%) ` +
-        `nodes=${res.stats.visible} hidden=${res.stats.hidden} folded=${res.stats.folded}\n`);
-    }
-    return 0;
+    res = compact(v, { variables: isObj(hint.variables) ? hint.variables : null, bytesIn: utf8(text), fileKey: keyFromName(hint.filename), maxText: Infinity, wrapBytes });
   } catch (e) {
-    if (e instanceof SlimError) {
-      process.stderr.write(`figma-node-slim: error=${e.reason}${e.detail ? ` detail=${e.detail}` : ''}\n`);
-      return 2;
-    }
-    // Nothing here is expected to throw anything else; a bug still leaves one named line, never a stack.
-    process.stderr.write(`figma-node-slim: error=internal detail=${e && e.message ? e.message : String(e)}\n`);
-    return 2;
+    if (e instanceof SlimError) return pass('non-figma-nodes');
+    throw e;
   }
+  // One uninterruptible pass: a result that lands after the deadline is still discarded.
+  if (ctx.deadline != null && Date.now() > ctx.deadline) return pass('budget-exceeded');
+  const out = fence ? [fence.preamble, res.md, fence.trailer].filter(Boolean).join('\n\n') : res.md;
+  if (utf8(out) >= utf8(text)) return pass('no-gain');
+  const s = res.stats;
+  return { decision: 'compressed', text: out, stages: ['nodes'], meta: { nodes: s.visible, hidden: s.hidden, folded: s.folded } };
 }
 
-module.exports = { compact, __test: { num, fine, hex, quote, quoteText, buildVars, bindLabel, shortVarId, sizing, fontLine, propValue, rleRuns, keyFromName, skelKey, foldDelta, paintSummary, gradientGeometry, effectSummary, DEFAULT_MAX_TEXT, PROPS_INLINE_MAX } };
-
-if (require.main === module) {
-  // A downstream `| head` closes stdout mid-write; the EPIPE (Windows: `code: 'EOF'`) surfaces on a
-  // later tick and would crash the process AFTER the consumer already got its bytes. Reader-side
-  // truncation is success — exit quietly; other stream errors still throw.
-  const quietOnEpipe = (s) => s.on('error', (e) => { if (e && (e.code === 'EPIPE' || e.code === 'EOF')) process.exit(0); throw e; });
-  quietOnEpipe(process.stdout);
-  quietOnEpipe(process.stderr);
-  process.exitCode = main(process.argv.slice(2));
-}
+module.exports = { id: 'figma-nodes', run, isNodesResponse, compact, keyFromName, figureLine };

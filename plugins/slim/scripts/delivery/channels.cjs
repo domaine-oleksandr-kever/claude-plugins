@@ -8,12 +8,12 @@ const path = require('path');
 
 // Pre-filter sizes, held equal to the hooks module's GATES literal (tests/slim-fixtures.mjs S24).
 // 0 = the plain-text threshold (SLIM_PLAIN_BYTES).
-const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, glob: 16384, agent: 0 };
+const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, glob: 16384, agent: 0, attachment: 32768 };
 const LOG_GATE = 16384;
 // A json/jsonl output still over this is stubbed; any other output over it passes through.
-const EGRESS = { bash: 32768, webfetch: 32768, websearch: 32768, agent: 32768, grep: 16384, glob: 16384, read: 65536 };
+const EGRESS = { bash: 32768, webfetch: 32768, websearch: 32768, agent: 32768, grep: 16384, glob: 16384, read: 65536, attachment: 65536 };
 const WINDOW = { bashPersisted: 4096, grep: 8192, glob: 8192, other: 12288 };
-const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent'];
+const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment'];
 
 // A fetching command word at the start of a pipeline segment; `cat src/http/page.html` is not one.
 const FETCH_CMD = /(?:^|[;&|(`]|\$\()\s*(?:curl|wget|https?|xh|lynx)(?=\s|$)/;
@@ -31,7 +31,8 @@ const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const commandWords = (cmd) => String(cmd || '').split(/[\s'"|;&<>()=]+/).filter(Boolean);
 
 // The engine a channel lets run on a sniffed payload: html and log need a command that fetches or
-// reads a log, everything a channel does not admit is treated as plain text.
+// reads a log, everything a channel does not admit is treated as plain text. A Figma REST nodes
+// response goes wherever JSON goes.
 function admit(channel, engine, command) {
   switch (channel) {
     case 'bash':
@@ -39,9 +40,11 @@ function admit(channel, engine, command) {
       if (engine === 'log') return LOG_CMD.test(command) ? 'log' : 'text';
       return engine;
     case 'read':
-      return engine === 'json' || engine === 'jsonl' || engine === 'log' ? engine : null;
+      return ['json', 'jsonl', 'figma-nodes', 'log'].includes(engine) ? engine : null;
+    case 'attachment':
+      return ['json', 'jsonl', 'log'].includes(engine) ? engine : null;
     case 'webfetch':
-      return engine === 'json' || engine === 'jsonl' || engine === 'html' ? engine : 'text';
+      return ['json', 'jsonl', 'figma-nodes', 'html'].includes(engine) ? engine : 'text';
     default:
       return 'text';
   }
@@ -59,6 +62,38 @@ const plainGate = (channel, plainBytes) => (channel === 'grep' || channel === 'g
 function bashSeen(persistedPath, size) {
   const kb = `${(size / 1024).toFixed(1)}KB`;
   return utf8(`Output too large (${kb}). Full output saved to: ${persistedPath}\n\nPreview (first 2KB):\n`) + Math.min(2048, size) + 40;
+}
+
+// An @-mentioned file as the host frames it: `Called the Read tool with the following input: {…}`, then
+// `Result of calling the Read tool: ` and the file as numbered lines (`     1→…`), maybe a note after.
+// → { before, body, after } with the numbers stripped from body, or null when no numbered run of at
+// least three consecutive lines is there.
+const NUMBERED = /^(Result of calling the \w+ tool: )?\s*(\d+)(?:→|\t)/;
+function numberedBody(text) {
+  const lines = text.split('\n');
+  let i = 0;
+  let m = null;
+  for (; i < lines.length; i++) if ((m = NUMBERED.exec(lines[i]))) break;
+  if (!m) return null;
+  const first = Number(m[2]);
+  const body = [lines[i].slice(m[0].length)];
+  let k = i + 1;
+  for (; k < lines.length; k++) {
+    const n = /^\s*(\d+)(?:→|\t)/.exec(lines[k]);
+    if (!n || Number(n[1]) !== first + (k - i)) break;
+    body.push(lines[k].slice(n[0].length));
+  }
+  if (body.length < 3) return null;
+  const before = lines.slice(0, i).map((l) => `${l}\n`).join('') + (m[1] || '');
+  const after = k < lines.length ? `\n${lines.slice(k).join('\n')}` : '';
+  return { before, body: body.join('\n'), after };
+}
+
+// The file path the framing's Read input names, or null.
+function attachmentPath(text) {
+  const m = /^Called the Read tool with the following input: (\{.*\})$/m.exec(text.slice(0, 8192));
+  if (!m) return null;
+  try { const v = JSON.parse(m[1]); return typeof v.file_path === 'string' ? v.file_path : null; } catch (_) { return null; }
 }
 
 // One channel's record → { pass } or { texts, items }, where every item is
@@ -85,6 +120,12 @@ function extract(channel, rec, input) {
         return { ...rec, file };
       };
       return { texts: [rec.file.content], single: { text: rec.file.content, rebuild } };
+    }
+    case 'attachment': {
+      if (typeof rec.text !== 'string') return { pass: 'unrecognized-shape' };
+      const b = numberedBody(rec.text);
+      if (!b) return { texts: [rec.text], pass: 'read-guard' };
+      return { texts: [rec.text], single: { text: b.body, rebuild: (out) => ({ text: `${b.before}${out}${b.after}` }) } };
     }
     case 'webfetch':
       if (typeof rec.result !== 'string') return { pass: 'unrecognized-shape' };
@@ -134,5 +175,5 @@ function extract(channel, rec, input) {
 
 module.exports = {
   GATES, LOG_GATE, EGRESS, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, OWN_CLI, READ_LOG_EXT,
-  isSourceJson, commandWords, admit, structuredGate, plainGate, bashSeen, extract,
+  isSourceJson, commandWords, admit, structuredGate, plainGate, bashSeen, extract, numberedBody, attachmentPath,
 };

@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-const TOOL = 'mcp__plugin_fnd_atlassian__searchJiraIssuesUsingJql'
+const TOOL = 'mcp__plugin_acme_atlassian__searchJiraIssuesUsingJql'
 const BIG = 'x'.repeat(120_000)
 const SURFACES = ['terminal', 'desktop'] as const
 const LINE = /^slim {2}json {2}120 KB → 30 KB {2}−75%$/

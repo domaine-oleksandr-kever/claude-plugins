@@ -58,8 +58,8 @@ const longestTickRun = (text) => (text.match(/`+/g) || []).reduce((n, r) => Math
 // mirrors md-to-adf's runLength
 const tickRun = (s, i) => /^`+/.exec(s.slice(i))[0].length;
 
-// json-slim feeds this converter ADF straight off an MCP response, so `text` may be absent, null
-// or not a string — and a crash there means NO markdown at all.
+// The json engine feeds this converter ADF straight off an MCP response, so `text` may be absent,
+// null or not a string — and a crash there means NO markdown at all.
 const textOf = (node) => (node && node.text != null ? String(node.text) : '');
 const codeText = (node) => (node.content || []).map(textOf).join('');
 
@@ -127,7 +127,7 @@ const AUTOLINK_RE = /^[a-z][a-z0-9+.\-]*:[^\s<>]+$/i;
 const LITERAL_BACKSLASH_RE = /\\(?=[\\`*_#+\-.>|~[\]{\n]|$)/g;
 
 // A textColor mark comes out as Jira wiki colour, `{color:green}…{color}`, the form md-to-adf
-// reads back — a palette colour by its adf-colors.cjs name, any other as hex. A literal
+// reads back — a palette colour by its name, any other as hex. A literal
 // `{color:` in prose would read back as an opener, so it is escaped like a marker.
 
 // A GFM separator row promotes the line ABOVE it to a table header — and md-to-adf accepts a
@@ -192,7 +192,7 @@ function escapeCell(s) {
 
 // A newline a text node carries is line structure, so it is emitted as a hard BREAK: as a raw
 // newline it would be a soft break, which comes back as a space, and read-edit-write would
-// flatten the line. json-slim feeds this converter ADF straight off an MCP response, where a
+// flatten the line. The json engine feeds this converter ADF straight off an MCP response, where a
 // text node can carry newlines the Jira editor would never produce.
 // Every line after the first begins a line by construction; the first one only when the caller
 // says so — and a single-LINE construct has no break to emit at all.
@@ -477,7 +477,7 @@ function renderBlock(node, depth, singleLine) {
       return MEDIA_OMITTED;
     default:
       // unknown block: try children, else inline text. Only an ARRAY is walkable — `content` as a
-      // bare string used to throw (json-slim then handed the payload back intact), and iterating
+      // bare string used to throw (the caller then handed the payload back intact), and iterating
       // it would render the node EMPTY, so it is read as the node's text.
       if (Array.isArray(node.content)) return renderMixed(node.content, depth, singleLine, '\n\n');
       if (typeof node.content === 'string') return renderText({ type: 'text', text: node.content }, true, singleLine);

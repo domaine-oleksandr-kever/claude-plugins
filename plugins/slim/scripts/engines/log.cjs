@@ -457,7 +457,7 @@ function collapseTraceFrames(stack, headFrames, appFrames) {
 
 // Adaptive total-lines budget: distinct-count uniqueness → knee fraction, clamped to [minK, maxK].
 // A faithful-in-spirit port of Headroom's compute_optimal_k (SimHash + Kneedle + zlib) — the same
-// distinct-count stand-in json-slim's array crush uses. Only bounds the FINAL cap; the fixtures never
+// distinct-count stand-in the json engine's array crush uses. Only bounds the FINAL cap; the fixtures never
 // exercise the cap boundary (their sole compressing case selects 8 < minK=10), so this cannot affect
 // parity, only how hard a real over-budget log compresses.
 function computeOptimalKLog(strings, bias, minK, maxK) {
