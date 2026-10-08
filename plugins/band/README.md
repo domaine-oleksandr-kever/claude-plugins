@@ -9,7 +9,7 @@ which publish them through `$.state`: base (or fnd, on an install that has not m
 publishes the resolved task and its own events, slim publishes its compression events. Band reads
 them; it never writes another plugin's state.
 
-Current release: **band v0.1.0**.
+Current release: **band v0.2.0**.
 
 ## Status
 
