@@ -404,23 +404,56 @@ type SlimEventBase = { v: 1; atMs: number; text: string; src: 'slim'; tool: stri
 export type SlimCompressEvent = SlimEventBase & { kind: 'slim'; channel: SlimChannel; bytesIn: number; bytesOut: number; engine: SlimEngine }
 export type SlimLookupEvent = SlimEventBase & { kind: 'lookup'; model: string; tokens: { input: number; output: number } | null; answered: boolean }
 export type SlimViewEvent = SlimEventBase & { kind: 'view'; channel: 'view'; decision: 'compressed' | 'narrowed' | 'passthrough' | 'cached' | 'refused'; engine: string | null; bytesIn: number; bytesOut: number }
-export type SlimEvent = SlimCompressEvent | SlimLookupEvent | SlimViewEvent
+export type SlimStartEvent = { v: 1; atMs: number; kind: 'start'; text: string; src: 'slim' }
+export type SlimEvent = SlimCompressEvent | SlimLookupEvent | SlimViewEvent | SlimStartEvent
 export type SlimInfo = { v: 1; version: string; channels: SlimChannel[] }
 ```
 
 - **`slim.info`** — a snapshot written at session start: slim's version (read from its manifest)
   and the channels whose switch is on. A plugin that finds it non-null knows slim is loaded and
   which channels it compresses.
-- **`slim.events`** — one event per compressed or stubbed result and per lookup or view call,
-  oldest first, at most 200. `text` is one line, e.g. `<agent type> · Bash: compressed 120 KB → 11 KB (−91%) · json`
+- **`slim.events`** — the start line `slim <version>` (kind `start`, once per session), then one event
+  per compressed or stubbed result and per lookup or view call, oldest first, at most 200. `text` is one line, e.g. `<agent type> · Bash: compressed 120 KB → 11 KB (−91%) · json`
   (the agent prefix only for a subagent's call) or `lookup: <question…> · haiku · 1.2k tok`.
   `agentType` is absent on the main conversation, the subagent's type (`core:jira-reader`) when it is
   listed, and `agent` when it is not. `SLIM_EVENT_LOG=0` stops the writes, and the list stays `[]`.
-  A Log pane (band's) merges these events with its own.
+  A Log pane (band's) merges these events with its own; each one also goes to `slim.jsonl` (see
+  Event log on disk).
 - **`slim.rows`** — one member per compressed tool_use_id; internal to the ToolResult line and the
   ToolGroup suffix.
 - **`slim.seen`** — one member per @-mentioned file content slim compressed this session; internal
   to the once-per-content Log line.
+
+## Event log on disk
+
+base, band and slim each write the lines they publish themselves to their own file, so the origin of
+a line is on the line, written by that plugin, not inferred from a pane:
+
+- **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
+  `slim.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
+  `<session-id>/` folder is still made under it. With neither (a cloud session) no file is written.
+  Never under the project.
+- **Line:** one JSON object per line, oldest first:
+  `{"ts":"2026-10-08T12:34:56.789Z","plugin":"slim","version":"0.5.0","session":"<id>","kind":"slim","agent":"jira-reader","text":"jira-reader · getJiraIssue: compressed 118 KB → 29 KB (−75%) · json"}`.
+  `ts` is the event's time in UTC, `plugin` and `version` the writer's own name and release, `agent`
+  the subagent type that caused the line or `main`, `kind` and `text` the line as `slim.events` has it.
+- **Start line:** the first line a plugin writes for a session id is `start` / `<plugin> <version>`,
+  also under the new id a `/clear` opens, where no session start runs. A session whose lines already
+  hold a start line gets no second one: a module reload or a resume in a fresh process goes on from
+  the file.
+- **slim's lines:** every `slim.events` entry — kind `slim` (a compressed or stubbed result, file or
+  prompt), `lookup` or `view`; `agent` is the type the text is prefixed with (`jira-reader`, plugin
+  prefix dropped; `agent` for an unlisted subagent). The first line of a session is `start` /
+  `slim <version>`, also in `slim.events`.
+- **Writing:** the whole file is rewritten after every line (the engine has no append), at most 2000
+  lines or 256 KB, oldest dropped first. A reload of the module picks up the file of the same session
+  and goes on. A write that fails never reaches the hook; the first failure in a session toasts
+  `slim: event log not written: <reason>`.
+- **Off:** `SLIM_EVENT_LOG=0` stops slim's file and its `slim.events` lines alike. The report log
+  below is separate and keeps its own switch, `SLIM_DEBUG`.
+- **Clean-up:** base sweeps session folders whose newest file is older than 7 days, and its
+  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. band and
+  slim never delete.
 
 ## Report log
 
@@ -524,7 +557,8 @@ environment), and the core reads its own process environment, which the module's
 | `SLIM_BUDGET_MS` | `5000` | Wall-clock ceiling for one compression in ms; `0` removes it; past it the result passes through or is stubbed. |
 | `SLIM_TOAST` | `1` | `0` silences the savings toast (MCP results and rewritten prompts, main conversation only); compression, the ToolResult line and the ToolGroup suffix are untouched. |
 | `SLIM_TOAST_MS` | `5000` | How long the toast stays, in ms (whole number, floored at 1,000). |
-| `SLIM_EVENT_LOG` | `1` | `0` stops writing the `slim.events` state other plugins read; the ToolResult line still draws. |
+| `SLIM_EVENT_LOG` | `1` | `0` stops writing the `slim.events` state other plugins read and the `slim.jsonl` event log on disk; the ToolResult line still draws. |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where base, band and slim write their event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
 | `SLIM_LOOKUP` | `1` | `0` removes the `mcp__slim__lookup` tool, the one-sentence pointer to it in the Bash and WebFetch tool descriptions and the lookup hint line together. The view tool stays. |
 | `SLIM_LOOKUP_MODEL` | `haiku` | Model the lookup tool asks its one question with — an alias or a model id. Every lookup writes its model and token usage to the report log at every debug level. |
 | `SLIM_HINT` | `1` | `0` drops the one line slim adds to an HTML page it compressed from a Bash fetch (`slim hint: for one fact about this page, call mcp__slim__lookup(…)`). |

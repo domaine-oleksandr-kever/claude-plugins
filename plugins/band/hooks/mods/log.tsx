@@ -2,8 +2,8 @@
 // and slim's straight from their state (a plugin not loaded adds nothing), and never writes any of them.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { BandEvent, ForeignEvent } from '../../types'
-import { LOG_COMMAND, LOG_PANE, PREFIX_COLS, hhmm, kindCell, merged, newestFitting } from './events.ts'
+import type { BandEvent, ForeignEvent, LogLine } from '../../types'
+import { LOG_COMMAND, LOG_PANE, PREFIX_COLS, hhmm, kindCell, logRow, merged, newestFitting, pluginCell } from './events.ts'
 
 const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[])
 const baseEvents = atom({ plugin: 'base', key: 'events' } as const, [] as ForeignEvent[])
@@ -17,14 +17,14 @@ async function drawsPanes($: $): Promise<boolean> {
   return (await $.session.surfaces()).some(s => s === 'terminal' || s === 'desktop')
 }
 
-async function allEvents($: $): Promise<ForeignEvent[]> {
+async function allEvents($: $): Promise<LogLine[]> {
   return merged(await read($, events), await read($, baseEvents), await read($, fndEvents), await read($, slimEvents))
 }
 
 async function logText($: $): Promise<string> {
   const list = await allEvents($)
   if (list.length === 0) return 'no events yet'
-  return list.map(ev => `${hhmm(ev.atMs)}  ${kindCell(ev.kind)}  ${ev.text}`).join('\n')
+  return list.map(logRow).join('\n')
 }
 
 async function togglePane($: $): Promise<string> {
@@ -75,6 +75,7 @@ export function registerLog(on: On): void {
           <Box key={`ev-${i}`} flexDirection="row">
             <Box width={PREFIX_COLS} flexShrink={0}>
               <Text dimColor>{`${hhmm(ev.atMs)}  `}</Text>
+              <Text dimColor>{`${pluginCell(ev.plugin)}  `}</Text>
               <Text dimColor>{`${kindCell(ev.kind)}  `}</Text>
             </Box>
             <Box width={textCols}>

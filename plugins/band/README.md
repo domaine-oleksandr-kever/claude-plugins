@@ -187,17 +187,19 @@ keeps the other as a tab. Pressing the button or running the command of the pane
 brings that pane forward instead of closing it.
 
 ```text
-14:02  session    start
-14:05  workspace  ELC-1588
-14:21  fnd-slim   getJiraIssue: compressed 118,203 B → 29,412 B (−75.1%)
-14:22  slim       Bash: compressed 120 KB → 11 KB (−91%) · json
-14:33  guard      take_screenshot: path outside the project
-14:40  compact    manual 412k → 38k
+14:02  band   session    start · band 0.2.0
+14:02  base   start      base 0.1.0
+14:05  base   workspace  ELC-1588
+14:21  fnd    fnd-slim   getJiraIssue: compressed 118,203 B → 29,412 B (−75.1%)
+14:22  slim   slim       Bash: compressed 120 KB → 11 KB (−91%) · json
+14:33  base   guard      Bash: --no-verify
+14:40  band   compact    manual 412k → 38k
 ```
 
 The lists are merged by time; lines written in the same millisecond keep the order band → base → fnd
-→ slim. The kind cell names the writer, so there is no source column. The time is local `HH:MM`; the
-kind is dim. A line too long for the pane continues on the next row, under its own text column, on the
+→ slim. The plugin column, between the time and the kind, names the list a line came from (`band`,
+`base`, `fnd`, `slim`, padded to 5), so a kind two plugins share (`guard`, `workspace`, `start`) still
+says whose it is. The time is local `HH:MM`; time, plugin and kind are dim. A line too long for the pane continues on the next row, under its own text column, on the
 terminal and the desktop alike. When the pane is shorter than the log, its first line reads
 `… 12 earlier` and the newest lines fill the rest, wrapped rows counted. With no line anywhere the pane
 reads `no events yet`. A surface that cannot place the pane toasts `log pane not placed: <reason>`.
@@ -211,7 +213,7 @@ as text instead, one line per event, and the `Log` button is not there to press.
 | `model` | band | A `/model` switch to another model | The full model id, `claude-opus-5-5` |
 | `compact` | band | A compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them. One line per compaction, whichever of its two reports (the `session.compact` chain, the `PostCompact` event) arrives first |
 | `rate` | band | A rate window first reaches 90 % | The alarm toast's text, `5h window: 92% used, resets in 1h 05m` |
-| `start` | base | base's module starts a session, once per session id | `base <version>` |
+| `start` | base, slim | The plugin's session start, once per session id | `base <version>`, `slim <version>` |
 | `install` | base | slim is missing, or fnd is loaded beside base | The install pointer, or the advice to uninstall fnd |
 | `workspace` | base, fnd | The task the plugin resolved differs from the last one logged | The work id, or `none` |
 | `refuse` | base | base refuses a reader spawn because slim is missing | `<agent>: slim is not loaded` |
@@ -222,16 +224,49 @@ as text instead, one line per event, and the `Log` button is not there to press.
 | `guard` | base, fnd | A guard of the plugin refuses a tool call | The tool and the first line of the reason |
 | `slim` | slim | slim compresses or stubs a result | `<tool>: compressed … · <engine>`, a subagent's call prefixed with its agent type |
 | `lookup` | slim | slim's `lookup` tool answers a question | `lookup: <question…> · <model> · <tokens>` |
+| `view` | slim | slim's `view` tool returns a file, URL or command output | `view <source>: <size> → <size> (<saving>) · <engine>`, or `cached`, `narrowed by jq`, `refused (<reason>)`; a subagent's call prefixed with its agent type |
 
 base or fnd lines of kind `session`, `model`, `compact` or `rate` are not shown: those kinds are band's,
 and an fnd that still writes them (a release that does not yield, or the moment before fnd sees band
 loaded) would show each one twice.
 
 Each publisher keeps its own list of at most 200 lines. Past 200, band and base drop their oldest line;
-fnd drops its oldest `slim` or `prompt` line first. The log lives in the session's state only: nothing is written
-to disk, and a new launch starts empty. `/clear` keeps the lines and adds `session clear` where the
-conversation restarted. Each plugin gates its own lines: `BAND_EVENT_LOG=0`, `BASE_EVENT_LOG=0`,
-`FND_EVENT_LOG=0`, `SLIM_EVENT_LOG=0`. Toasts are unchanged by any of them.
+fnd drops its oldest `slim` or `prompt` line first. The pane reads the session's state, so a new launch
+starts it empty; the record that outlives the session is each plugin's own file, below. `/clear` keeps
+the lines and adds `session clear` where the conversation restarted. Each plugin gates its own lines,
+in the pane and in its file: `BAND_EVENT_LOG=0`, `BASE_EVENT_LOG=0`, `FND_EVENT_LOG=0`,
+`SLIM_EVENT_LOG=0`. Toasts are unchanged by any of them.
+
+### Event log on disk
+
+base, band and slim each write the lines they publish themselves to their own file, so the origin of
+a line is on the line, written by that plugin, not inferred from the pane:
+
+- **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
+  `slim.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
+  `<session-id>/` folder is still made under it. With neither (a cloud session) no file is written.
+  Never under the project.
+- **Line:** one JSON object per line, oldest first:
+  `{"ts":"2026-10-08T12:34:56.789Z","plugin":"band","version":"0.2.0","session":"<id>","kind":"model","agent":"main","text":"claude-opus-5-5"}`.
+  `ts` is the event's time in UTC, `plugin` and `version` the writer's own name and release, `agent`
+  the subagent type that caused the line or `main`, `kind` and `text` the line as the pane shows it.
+- **Start line:** the first line a plugin writes for a session id is `start` / `<plugin> <version>`,
+  also under the new id a `/clear` opens, where no session start runs. A session whose lines already
+  hold a start line gets no second one: a module reload or a resume in a fresh process goes on from
+  the file.
+- **band's lines:** `session`, `model`, `compact` and `rate`, `agent` always `main`. The first line
+  of a session is `start` / `band <version>` (the pane's `session` / `start · band <version>`), also
+  in the file a `/clear` or a resume opens under the new session id, where no session start runs.
+  `session clear` closes the old session's file; it is written only while the exit's short bound has
+  time left, and a failure there never toasts mid-`/clear`.
+- **Writing:** the whole file is rewritten after every line (the engine has no append), at most 2000
+  lines or 256 KB, oldest dropped first. A reload of the module (a `/config` change) picks up the
+  file of the same session and goes on. A write that fails never reaches the hook; the first failure
+  in a session toasts `band: event log not written: <reason>`.
+- **Off:** `BAND_EVENT_LOG=0` stops band's file and its pane lines alike.
+- **Clean-up:** base sweeps session folders whose newest file is older than 7 days, and its
+  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. band and
+  slim never delete.
 
 ## Settings (userConfig)
 
@@ -335,10 +370,15 @@ Without band, fnd draws the band and the panes itself, as before; the root READM
 
 ## Environment switches
 
-band's switches — `BAND_COST` and `BAND_EVENT_LOG` — are documented in
-[the root README's Environment switches table](../../README.md#environment-switches), next to fnd's and
-slim's. They are read through the module's `$.env`, so only the session environment reaches them (the
-shell, or `~/.claude/settings.json` → `env`); the Domaine env files do not.
+band reads these through the module's `$.env`, so only the session environment reaches them (the
+shell, or `~/.claude/settings.json` → `env`); the Domaine env files do not. `tests/readme-checks.sh`
+fails on a `BAND_*` name under `plugins/band/` without a row here.
+
+| Switch | Default | Effect |
+|---|---|---|
+| `BAND_COST` | off | `1` (or `true`/`yes`/`on`) adds the session-cost segment to the status band (`cost $12.40`, `💰 $12.40` on the desktop): the `/cost` total at API prices, a measure of work on a subscription. Read at session start. |
+| `BAND_EVENT_LOG` | `1` | `0` stops band recording its own lines (`session`, `model`, `compact`, `rate`): none in the Log pane and no `band.jsonl`. base's, fnd's and slim's lines still show in `/band-log` unless their own switch is `0`. Toasts are untouched. |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where base, band and slim write their event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
 
 ## Tests
 

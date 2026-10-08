@@ -1,15 +1,18 @@
 // Status band writers: usage, model, cache and tick atoms plus the tick timer, band's own event lines
-// (session, model, compact, rate) and /band-debug. Nothing here draws; the band reads these atoms.
+// (session, model, compact, rate) with their file on disk, and /band-debug. Nothing here draws; the band
+// reads these atoms.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import type { BandEvent, BandEventKind, BandUsage } from '../../types'
-import { DEBUG_COMMAND, fmtK, pushEvent } from './events.ts'
+import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events.ts'
 import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, pickProgress, rateCard, seedsTtl, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 
 const TICK_MS = 30_000
 const ALARM_TOAST_MS = 8000
 const STORE_TTL = 'cacheTtlMs'
+/** Below this much of session.end's shared bound, `session clear` stays off the disk rather than risk an abort. */
+const END_FILE_MIN_MS = 500
 
 const usage = atom({ plugin: 'band', key: 'usage' } as const, USAGE_INIT)
 const model = atom({ plugin: 'band', key: 'model' } as const, null)
@@ -23,13 +26,66 @@ const fndProgress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 
 type $ = EngineInterface
 
-/** Appends one event-log line. BAND_EVENT_LOG=0 skips the write. It never throws, because a throwing
- *  session.start hook would skip every band session.start hook. */
-async function logEvent($: $, kind: BandEventKind, text: string): Promise<void> {
+/** This session's lines of band.jsonl as last written; `path` tells a new session (or a reload) apart. */
+let file: { path: string; lines: string[] } | null = null
+let fileVersion: string | null = null
+let toastedFor: string | null = null
+/** Whole-file writes, one at a time: two hooks writing at once would each drop the other's line. */
+let fileQueue: Promise<void> = Promise.resolve()
+
+/**
+ * Appends one line to `<dir>/<session-id>/band.jsonl`, rewriting the whole file (the engine writes no
+ * append). The first write of a module or of a new session id seeds from the file, so a reload keeps the
+ * record. A session's first line is a start line, as no session.start follows a /clear or a resume; a
+ * start line comes once per session, so a fresh process resuming an id whose file has one adds none. `sid`
+ * pins the session (session.end names the ending one). No HOME and no DOMAINE_LOG_DIR → no file. A
+ * failure toasts once per session unless `quiet`, and goes no further.
+ */
+async function writeFileLine($: $, atMs: number, kind: string, text: string, sid?: string, quiet = false): Promise<void> {
+  let id = sid ?? ''
+  try {
+    id = sid ?? String(await $.session.id())
+    const dir = logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), id)
+    if (dir === null) return
+    const path = `${dir}/band.jsonl`
+    fileVersion ??= (await read($, info).catch(() => null))?.version ?? null
+    const version = fileVersion ?? 'unknown'
+    let prior = file?.path === path ? file.lines : seedLines((await $.fs.exists(path)) ? String(await $.fs.read(path)) : '', id)
+    if (kind === 'start' && prior.some(l => JSON.parse(l).kind === 'start')) {
+      file = { path, lines: prior }
+      return
+    }
+    if (kind !== 'start' && !prior.length) prior = [fileLine(atMs, version, id, 'start', `band ${version}`)]
+    const lines = capLines([...prior, fileLine(atMs, version, id, kind, text)])
+    file = { path, lines }
+    await $.fs.write(path, `${lines.join('\n')}\n`)
+  } catch (err) {
+    if (quiet || toastedFor === id) return
+    toastedFor = id
+    try {
+      $.ui.toast(`band: event log not written: ${err instanceof Error ? err.message : String(err)}`)
+    } catch {}
+  }
+}
+
+/** Queues one file line behind the writes in flight, so no whole-file write drops another's line. */
+function persist($: $, atMs: number, kind: string, text: string, sid?: string, quiet = false): Promise<void> {
+  const job = fileQueue.then(() => writeFileLine($, atMs, kind, text, sid, quiet))
+  fileQueue = job.catch(() => undefined)
+  return job
+}
+
+/**
+ * Appends one event-log line to band.events and band.jsonl; `onDisk` replaces kind and text in the file only.
+ * BAND_EVENT_LOG=0 skips both. It never throws, because a throwing session.start hook would skip every
+ * band session.start hook.
+ */
+async function logEvent($: $, kind: BandEventKind, text: string, onDisk?: { kind: string; text: string }): Promise<void> {
   try {
     if ((await $.env.get('BAND_EVENT_LOG')) === '0') return
     const atMs = await $.clock.now()
     await update($, events, l => pushEvent(l, { atMs, kind, text }))
+    await persist($, atMs, onDisk?.kind ?? kind, onDisk?.text ?? text)
   } catch {}
 }
 
@@ -149,7 +205,10 @@ export function registerUsage(on: On, options: PluginOptions): void {
     } catch {}
     await refresh($).catch(() => undefined)
     // The start line names the drawer: fnd's own line reads `start`, so /band-log tells the two apart.
-    if (!reloaded) await logEvent($, 'session', `start · band ${(await read($, info).catch(() => null))?.version ?? '?'}`)
+    if (!reloaded) {
+      const v = (await read($, info).catch(() => null))?.version ?? '?'
+      await logEvent($, 'session', `start · band ${v}`, { kind: 'start', text: `band ${v}` })
+    }
     return next(e)
   })
 
@@ -224,7 +283,8 @@ export function registerUsage(on: On, options: PluginOptions): void {
     return next(e)
   })
 
-  // Atom writes only: one 1.5 s bound covers every session.end hook and aborts a $ call in flight.
+  // One short wall-clock bound covers the whole session.end chain, $ waits included: the atoms and the
+  // pane line go first, the disk write only after the chain beneath has run and while time is left.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') {
       await update($, cache, c => ({ ...c, anchorMs: null, isCold: false }))
@@ -232,8 +292,21 @@ export function registerUsage(on: On, options: PluginOptions): void {
       await update($, rateAlarmed, () => false)
     }
     // No session.start follows a /clear: this line marks where the conversation restarted.
-    if (e.reason === 'clear') await logEvent($, 'session', 'clear')
-    return next(e)
+    let clearedAt: number | null = null
+    if (e.reason === 'clear') {
+      try {
+        if ((await $.env.get('BAND_EVENT_LOG')) !== '0') {
+          const atMs = await $.clock.now()
+          await update($, events, l => pushEvent(l, { atMs, kind: 'session', text: 'clear' }))
+          clearedAt = atMs
+        }
+      } catch {}
+    }
+    const r = await next(e)
+    if (clearedAt !== null && next.budget.remainingMs >= END_FILE_MIN_MS) {
+      await persist($, clearedAt, 'session', 'clear', e.sessionId, true).catch(() => undefined)
+    }
+    return r
   })
 
   on('classic.PostModelSwitch', async ($, e, next) => {

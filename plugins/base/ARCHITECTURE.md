@@ -38,9 +38,9 @@ across an import, so a `$` helper is never shared between files (`doctor.ts` rep
 | `guards/bash.ts` | `tool.call {tool:/^Bash$/}`: the attribution rule (pure, `guards/attribution.ts`), then `hooks/no-verify-bypass.sh` for a command naming a git verb | `base.events` |
 | `guards/scratch.ts` | `session.start {cwd:/./}` latches the launch root · `tool.describe` + `tool.call` on the browser tools that take a path → `hooks/scratch-path-guard.cjs` | `base.guardRoot`, `base.events` |
 | `conventions.ts` | `prompt.compose`: the `base:<name>` sections · `classic.SubagentStart`: the subagents' share as `additionalContext` | — |
-| `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit {text:/$/}`: register `/base-doctor` (every start, and a new session id), start the base-tmp sweep unawaited, once per session id · `command.run base-doctor` | `base.swept`, `base.events` |
+| `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit {text:/$/}`: register `/base-doctor` (every start, and a new session id), start the base-tmp and event-log sweeps unawaited, once per session id · `command.run base-doctor` (passes `--log-dir` to `doctor.cjs`) | `base.swept`, `base.events` |
 
-Pure helpers carry no `$`: `events.ts` (the 200-line cap), `node-hook.ts` (the argv/stdin a delegated
+Pure helpers carry no `$`: `events.ts` (the 200-line cap, and the `base.jsonl` writer, §3), `node-hook.ts` (the argv/stdin a delegated
 script gets, its JSON answer), `workspace/progress-parse.ts`, `workspace/workid.ts`,
 `conventions/text.ts`, `guards/attribution.ts`.
 
@@ -73,7 +73,15 @@ Engine rules this layout follows:
 - **`base.events`** — `{ atMs, kind, text }`, oldest first, at most 200; band's Log pane merges it with
   its own, fnd's and slim's lines. Kinds fit band's 9-cell kind column and never take the kinds band
   and slim own (`session`, `model`, `compact`, `rate`, `slim`, `lookup`). `BASE_EVENT_LOG=0` keeps it
-  empty.
+  empty and writes no file.
+- **`base.jsonl`** — every line pushed to `base.events` is also handed to `events.ts`'s `logLine` with a
+  `Disk` the writing file builds from its own `$` (`diskOf`: the validator rejects `$` passed across an
+  import), and each pushEvent site awaits that write itself rather than leaving the file to a
+  `state.set` hook (slim's way). The writer keeps the session's lines module-local, seeds them from the
+  file after a reload, and rewrites `<log dir>/<session-id>/base.jsonl` whole (2000 lines / 256 KB)
+  inside one write queue, so concurrent events never share a snapshot. `doctor.ts` sweeps session-id-named
+  `$HOME/.claude/domaine/log/<id>/` folders of `*.jsonl` past 7 days with `rm -rf` (`$.fs` has no
+  delete), never when the root resolves elsewhere.
 - **`base.pin`**, **`base.lastKey`**, **`base.sessionId`** — the resolver's inputs.
 - **`base.started`**, **`base.checked`**, **`base.titled`**, **`base.swept`** — per-session-id
   latches, so a module reload or a repeated start does each thing once.

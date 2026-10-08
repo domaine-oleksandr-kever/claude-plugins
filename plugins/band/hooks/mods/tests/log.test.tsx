@@ -1,7 +1,7 @@
 import { describe, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { BandEvent } from '../../types'
-import { EVENT_CAP, PREFIX_COLS, fmtK, hhmm, kindCell, merged, newestFitting, pushEvent, take, textRows } from '../events.ts'
+import { EVENT_CAP, PREFIX_COLS, fmtK, hhmm, kindCell, logRow, merged, newestFitting, pluginCell, pushEvent, take, textRows } from '../events.ts'
 import { SNAP, baseState, sibFnd, sibSlim, test } from './world.tsx'
 
 const NOW = new Date(2027, 0, 15, 9, 5).getTime()
@@ -77,7 +77,7 @@ function texts(el: any): any[] {
   return (el?.children ?? []).flatMap((c: any) => (c && typeof c === 'object' ? texts(c) : []))
 }
 
-/** A row Box's three Texts as [time, kind, text]. */
+/** A row Box's four Texts as [time, plugin, kind, text]. */
 async function rows(ui: any): Promise<{ texts: string[]; props: any[] }[]> {
   const boxes = (await ui.findAll({ type: 'Box' })).filter((b: any) => typeof b.props.key === 'string' && b.props.key.startsWith('ev-'))
   return boxes.map((b: any) => {
@@ -97,7 +97,7 @@ describe('event helpers', () => {
     expect(list.map(e => e.atMs)).toEqual([...list.map(e => e.atMs)].sort((x, y) => x - y))
   })
 
-  test('local HH:MM, k-rounded tokens, a fixed kind column', () => {
+  test('local HH:MM, k-rounded tokens, fixed plugin and kind columns', () => {
     expect(hhmm(NOW)).toBe('09:05')
     expect(hhmm(new Date(2027, 0, 15, 23, 59).getTime())).toBe('23:59')
     expect(fmtK(412_345)).toBe('412k')
@@ -106,10 +106,14 @@ describe('event helpers', () => {
     expect(kindCell('rate')).toBe('rate     ')
     expect(kindCell('workspace')).toBe('workspace')
     expect(kindCell('fnd-slim')).toBe('fnd-slim ')
+    expect(pluginCell('band')).toBe('band ')
+    expect(pluginCell('slim')).toBe('slim ')
+    expect(pluginCell('fnd')).toBe('fnd  ')
+    expect(logRow({ atMs: NOW, plugin: 'base', kind: 'guard', text: 'Bash: --no-verify' })).toBe('09:05  base   guard      Bash: --no-verify')
   })
 
   test('wrapped rows: a text takes ceil(len / cols) rows, the newest that fit are kept, one row for the "earlier" line', () => {
-    expect(PREFIX_COLS).toBe(18)
+    expect(PREFIX_COLS).toBe(25)
     expect(textRows('', 10)).toBe(1)
     expect(textRows('a'.repeat(10), 10)).toBe(1)
     expect(textRows('a'.repeat(11), 10)).toBe(2)
@@ -133,6 +137,19 @@ describe('merged', () => {
     const slim = [{ atMs: 30, kind: 'lookup', text: 'tie' }, { atMs: 20, kind: 'lookup', text: 'mid' }]
     expect(merged(own, base, fnd, slim).map(e => e.text)).toEqual(['base 0.1.0', 'p', 'start', 'mid', 'm', 'c1', 'g1', 'w', 'tie'])
     expect(merged(own, [], fnd, slim).map(e => e.text)).toEqual(['p', 'start', 'mid', 'm', 'g1', 'w', 'tie'])
+  })
+
+  test('each line is tagged with the list it came from, renamed fnd-slim lines included', () => {
+    const own = [{ atMs: 1, kind: 'session', text: 'start · band 9.9.9' }]
+    const base = [{ atMs: 2, kind: 'start', text: 'base 0.1.0' }]
+    const fnd = [{ atMs: 3, kind: 'slim', text: 'fnd compressed' }]
+    const slim = [{ atMs: 4, kind: 'start', text: 'slim 0.5.1' }]
+    expect(merged(own, base, fnd, slim).map(e => [e.plugin, e.kind])).toEqual([
+      ['band', 'session'],
+      ['base', 'start'],
+      ['fnd', 'fnd-slim'],
+      ['slim', 'start'],
+    ])
   })
 
   test("base's and fnd's session, model, compact and rate lines are dropped: band writes those itself", () => {
@@ -169,8 +186,8 @@ describe('merged', () => {
       expect(merged(absent, absent, absent, absent)).toEqual([])
       expect(take(absent)).toEqual([])
     }
-    expect(merged([{ atMs: 1, kind: 'session', text: 'start' }], null, null, undefined)).toEqual([{ atMs: 1, kind: 'session', text: 'start' }])
-    expect(merged([], bad, [], [])).toEqual([{ atMs: 20, kind: 'lookup', text: 'mid' }])
+    expect(merged([{ atMs: 1, kind: 'session', text: 'start' }], null, null, undefined)).toEqual([{ atMs: 1, kind: 'session', text: 'start', plugin: 'band' }])
+    expect(merged([], bad, [], [])).toEqual([{ atMs: 20, kind: 'lookup', text: 'mid', plugin: 'base' }])
   })
 })
 
@@ -193,10 +210,10 @@ describe('/band-log', () => {
     const w = world(on)
     w.surfaces = []
     await start($)
-    expect((await run($, 'band-log')).text).toBe('09:05  session    start · band 9.9.9')
+    expect((await run($, 'band-log')).text).toBe('09:05  band   session    start · band 9.9.9')
     await switches($, w, 2)
     expect((await run($, 'band-log')).text).toBe(
-      ['09:05  session    start · band 9.9.9', '09:05  model      claude-opus-5-5', '09:05  model      claude-fable-5-1'].join('\n'),
+      ['09:05  band   session    start · band 9.9.9', '09:05  band   model      claude-opus-5-5', '09:05  band   model      claude-fable-5-1'].join('\n'),
     )
     expect(w.opens).toEqual([])
     w.surfaces = ['mobile']
@@ -241,21 +258,23 @@ describe('Log button', () => {
 
 describe('Log pane', () => {
   for (const surface of SURFACES) {
-    test(`${surface}: one row per event, oldest first; dim time and kind, the text wraps`, async ($, on) => {
+    test(`${surface}: one row per event, oldest first; dim time, plugin and kind, the text wraps`, async ($, on) => {
       const w = world(on)
       await start($)
       await switches($, w, 2)
       const ui = await mountPane($, surface)
       const r = await rows(ui)
       expect(r.map(x => x.texts)).toEqual([
-        ['09:05  ', 'session    ', 'start · band 9.9.9'],
-        ['09:05  ', 'model      ', 'claude-opus-5-5'],
-        ['09:05  ', 'model      ', 'claude-fable-5-1'],
+        ['09:05  ', 'band   ', 'session    ', 'start · band 9.9.9'],
+        ['09:05  ', 'band   ', 'model      ', 'claude-opus-5-5'],
+        ['09:05  ', 'band   ', 'model      ', 'claude-fable-5-1'],
       ])
       expect(r[0]?.props[0]).toMatchObject({ dimColor: true })
       expect(r[0]?.props[1]).toMatchObject({ dimColor: true })
-      expect(r[0]?.props[2]).toMatchObject({ wrap: 'wrap' })
-      expect(r[0]?.props[2].dimColor).toBeFalsy()
+      expect(r[0]?.props[2]).toMatchObject({ dimColor: true })
+      expect(r[0]?.props[3]).toMatchObject({ wrap: 'wrap' })
+      expect(r[0]?.props[3].dimColor).toBeFalsy()
+      expect((await ui.findAll({ type: 'Box' })).find((b: any) => b.props.width === PREFIX_COLS)).toBeTruthy()
       await ui.unmount()
     })
 
@@ -266,7 +285,7 @@ describe('Log pane', () => {
       const ui = await mountPane($, surface, { scroll: { offset: 0, bodyRows: 3 } })
       const more = await ui.find({ type: 'Text', text: '… 3 earlier' })
       expect(more?.props).toMatchObject({ dimColor: true })
-      expect((await rows(ui)).map(x => x.texts[2])).toEqual(['claude-opus-5-5', 'claude-fable-5-1'])
+      expect((await rows(ui)).map(x => x.texts[3])).toEqual(['claude-opus-5-5', 'claude-fable-5-1'])
       await ui.unmount()
     })
 
@@ -274,14 +293,14 @@ describe('Log pane', () => {
       const w = world(on)
       await start($)
       await switches($, w, 2)
-      // bodyColumns 30 → 12 text cells: each model name wraps onto a second row, `start` does not.
+      // bodyColumns 37 → 12 text cells after the 25-cell prefix: each model name wraps onto a second row.
       // 4 rows: fable (2) + opus (2) fill them, so opus gives way to the "earlier" row.
-      const ui = await mountPane($, surface, { bodyColumns: 30, scroll: { offset: 0, bodyRows: 4 } })
+      const ui = await mountPane($, surface, { bodyColumns: 37, scroll: { offset: 0, bodyRows: 4 } })
       const more = await ui.find({ type: 'Text', text: '… 2 earlier' })
       expect(more?.props).toMatchObject({ dimColor: true })
       const r = await rows(ui)
-      expect(r.map(x => x.texts[2])).toEqual(['claude-fable-5-1'])
-      expect(r[0]?.props[2]).toMatchObject({ wrap: 'wrap' })
+      expect(r.map(x => x.texts[3])).toEqual(['claude-fable-5-1'])
+      expect(r[0]?.props[3]).toMatchObject({ wrap: 'wrap' })
       const text = (await ui.findAll({ type: 'Box' })).find((b: any) => b.props.width === 12)
       expect(text).toBeTruthy()
       await ui.unmount()
@@ -314,14 +333,15 @@ const FND_EVENTS = [
 ]
 const SIBLING_ENV = { SIB_FND_EVENTS: JSON.stringify(FND_EVENTS), SIB_SLIM_EVENTS: JSON.stringify(SLIM_EVENTS) }
 const MERGED = [
-  ['09:05', 'session', 'start · band 9.9.9'],
-  ['09:05', 'workspace', 'ELC-1591'],
-  ['09:05', 'fnd-slim', 'getJiraIssue: compressed 9 B → 1 B'],
-  ['09:05', 'slim', SLIM_LINE],
-  ['09:06', 'model', 'claude-opus-5-5'],
-  ['09:06', 'guard', 'outside the project: /etc/hosts'],
-  ['09:06', 'lookup', LOOKUP_LINE],
+  ['09:05', 'band', 'session', 'start · band 9.9.9'],
+  ['09:05', 'fnd', 'workspace', 'ELC-1591'],
+  ['09:05', 'fnd', 'fnd-slim', 'getJiraIssue: compressed 9 B → 1 B'],
+  ['09:05', 'slim', 'slim', SLIM_LINE],
+  ['09:06', 'band', 'model', 'claude-opus-5-5'],
+  ['09:06', 'fnd', 'guard', 'outside the project: /etc/hosts'],
+  ['09:06', 'slim', 'lookup', LOOKUP_LINE],
 ]
+const textLine = ([t, p, k, x]: string[]) => `${t}  ${pluginCell(p!)}  ${kindCell(k!)}  ${x}`
 
 /** band's session line at NOW, its model line at +60 s; the siblings' lines as above. */
 async function interleave($: any, w: ReturnType<typeof world>): Promise<void> {
@@ -335,15 +355,15 @@ describe("band's, fnd's and slim's lines in one log", () => {
     const w = world(on, SIBLING_ENV)
     w.surfaces = []
     await interleave($, w)
-    expect((await run($, 'band-log')).text).toBe(MERGED.map(([t, k, x]) => `${t}  ${kindCell(k!)}  ${x}`).join('\n'))
+    expect((await run($, 'band-log')).text).toBe(MERGED.map(textLine).join('\n'))
   })
 
   for (const surface of SURFACES) {
-    test(`${surface}: the siblings' lines sit between band's by time, their kind in the kind cell`, async ($, on) => {
+    test(`${surface}: the siblings' lines sit between band's by time, their source in the plugin cell, their kind in the kind cell`, async ($, on) => {
       const w = world(on, SIBLING_ENV)
       await interleave($, w)
       const ui = await mountPane($, surface)
-      expect((await rows(ui)).map(x => x.texts)).toEqual(MERGED.map(([t, k, x]) => [`${t}  `, `${kindCell(k!)}  `, x]))
+      expect((await rows(ui)).map(x => x.texts)).toEqual(MERGED.map(([t, p, k, x]) => [`${t}  `, `${pluginCell(p!)}  `, `${kindCell(k!)}  `, x]))
       await ui.unmount()
     })
 
@@ -352,7 +372,7 @@ describe("band's, fnd's and slim's lines in one log", () => {
       await interleave($, w)
       const ui = await mountPane($, surface, { bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 } })
       expect(await ui.find({ type: 'Text', text: '… 5 earlier' })).toBeTruthy()
-      expect((await rows(ui)).map(x => x.texts[2])).toEqual(['outside the project: /etc/hosts', LOOKUP_LINE])
+      expect((await rows(ui)).map(x => x.texts[3])).toEqual(['outside the project: /etc/hosts', LOOKUP_LINE])
       await ui.unmount()
     })
 
@@ -360,13 +380,13 @@ describe("band's, fnd's and slim's lines in one log", () => {
       const w = world(on)
       await start($)
       const ui = await mountPane($, surface)
-      expect((await rows(ui)).map(x => x.texts[2])).toEqual(['start · band 9.9.9'])
+      expect((await rows(ui)).map(x => x.texts[3])).toEqual(['start · band 9.9.9'])
       w.vars.SIB_SLIM_EVENTS = JSON.stringify(SLIM_EVENTS)
       await sibSlim($)
-      expect((await rows(ui)).map(x => x.texts[2])).toEqual(['start · band 9.9.9', SLIM_LINE, LOOKUP_LINE])
+      expect((await rows(ui)).map(x => x.texts[3])).toEqual(['start · band 9.9.9', SLIM_LINE, LOOKUP_LINE])
       w.vars.SIB_FND_EVENTS = JSON.stringify([{ atMs: NOW + 60_000, kind: 'guard', text: 'g' }])
       await sibFnd($)
-      expect((await rows(ui)).map(x => x.texts[2])).toEqual(['start · band 9.9.9', SLIM_LINE, 'g', LOOKUP_LINE])
+      expect((await rows(ui)).map(x => x.texts[3])).toEqual(['start · band 9.9.9', SLIM_LINE, 'g', LOOKUP_LINE])
       await ui.unmount()
     })
 
@@ -379,7 +399,7 @@ describe("band's, fnd's and slim's lines in one log", () => {
         const w = world(on, env)
         await interleave($, w)
         const ui = await mountPane($, surface)
-        expect((await rows(ui)).map(x => x.texts[1])).toEqual(['session    ', 'model      '])
+        expect((await rows(ui)).map(x => x.texts[2])).toEqual(['session    ', 'model      '])
         await ui.unmount()
       })
     }
@@ -388,7 +408,7 @@ describe("band's, fnd's and slim's lines in one log", () => {
       const w = world(on, { BAND_EVENT_LOG: '0', ...SIBLING_ENV })
       await interleave($, w)
       const ui = await mountPane($, surface)
-      expect((await rows(ui)).map(x => x.texts[2])).toEqual(MERGED.filter(([, k]) => k !== 'session' && k !== 'model').map(([, , x]) => x))
+      expect((await rows(ui)).map(x => x.texts[3])).toEqual(MERGED.filter(([, p]) => p !== 'band').map(([, , , x]) => x))
       await ui.unmount()
     })
   }
@@ -408,13 +428,14 @@ describe("base's lines in the log", () => {
     w.surfaces = []
     await interleave($, w)
     const expected = [
-      ['09:05', 'session', 'start · band 9.9.9'],
-      ['09:05', 'start', 'base 0.1.0'],
+      ['09:05', 'band', 'session', 'start · band 9.9.9'],
+      ['09:05', 'base', 'start', 'base 0.1.0'],
       ...MERGED.slice(1, 5),
-      ['09:06', 'guard', 'Bash: --no-verify'],
+      ['09:06', 'base', 'guard', 'Bash: --no-verify'],
       ...MERGED.slice(5),
     ]
-    expect((await run($, 'band-log')).text).toBe(expected.map(([t, k, x]) => `${t}  ${kindCell(k!)}  ${x}`).join('\n'))
+    expect((await run($, 'band-log')).text).toBe(expected.map(textLine).join('\n'))
+    expect((await run($, 'band-log')).text).toContain('09:06  base   guard      Bash: --no-verify')
   })
 
   for (const surface of SURFACES) {
@@ -423,7 +444,12 @@ describe("base's lines in the log", () => {
       baseState(on, { events: BASE_EVENTS })
       await interleave($, w)
       const ui = await mountPane($, surface)
-      expect((await rows(ui)).map(x => x.texts[2])).toEqual(['start · band 9.9.9', 'base 0.1.0', 'claude-opus-5-5', 'Bash: --no-verify'])
+      expect((await rows(ui)).map(x => [x.texts[1], x.texts[3]])).toEqual([
+        ['band   ', 'start · band 9.9.9'],
+        ['base   ', 'base 0.1.0'],
+        ['band   ', 'claude-opus-5-5'],
+        ['base   ', 'Bash: --no-verify'],
+      ])
       await ui.unmount()
     })
 
@@ -436,7 +462,7 @@ describe("base's lines in the log", () => {
         baseState(on, { events })
         await interleave($, w)
         const ui = await mountPane($, surface)
-        expect((await rows(ui)).map(x => x.texts[1])).toEqual(['session    ', 'model      '])
+        expect((await rows(ui)).map(x => x.texts[2])).toEqual(['session    ', 'model      '])
         await ui.unmount()
       })
     }

@@ -39,10 +39,15 @@ export function pctCell(bytesIn: number, bytesOut: number): string {
   return `+${Math.round((bytesOut / bytesIn - 1) * 100)}%`
 }
 
+/** `core:jira-reader` → `jira-reader`: a subagent type as slim labels its lines with it. */
+export function agentLabel(type: string): string {
+  return type.replace(/^[^:]+:/, '')
+}
+
 /** `<type> · ` for a subagent (plugin prefix dropped), `agent · ` when unlisted, '' on the main loop. */
 export function agentPrefix(type: string | undefined, isSub: boolean): string {
   if (!isSub) return ''
-  return type ? `${type.replace(/^[^:]+:/, '')} · ` : 'agent · '
+  return type ? `${agentLabel(type)} · ` : 'agent · '
 }
 
 /** `jira-reader · getJiraIssue: compressed 118 KB → 29 KB (−75%) · json`; `windowed … (+74%)` when the view grew. */

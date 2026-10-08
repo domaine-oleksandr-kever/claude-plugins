@@ -3,7 +3,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent } from '../../../types'
-import { bare, pushEvent, toolName } from '../events.ts'
+import { bare, logLine, pushEvent, toolName } from '../events.ts'
+import type { Disk } from '../events.ts'
 import { buildHookRun, omit, parseHookOut } from '../node-hook.ts'
 
 /** Server-agnostic: a per-user `claude mcp add` of the same servers is guarded too. */
@@ -28,11 +29,25 @@ const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[
 
 type $ = EngineInterface
 
+/** events.ts's file writer reaches `$` through this: the validator follows `$` only within one file. */
+function diskOf($: $): Disk {
+  return {
+    session: () => $.session.id(),
+    home: () => $.env.get('HOME'),
+    override: () => $.env.get('DOMAINE_LOG_DIR'),
+    manifest: () => $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`),
+    read: path => $.fs.read(path),
+    write: (path, text) => $.fs.write(path, text),
+    toast: text => $.ui.toast(text),
+  }
+}
+
 async function logGuard($: $, text: string): Promise<void> {
   try {
     if ((await $.env.get('BASE_EVENT_LOG')) === '0') return
-    const atMs = await $.clock.now()
-    await update($, events, l => pushEvent(l, { atMs, kind: 'guard', text }))
+    const ev: BaseEvent = { atMs: await $.clock.now(), kind: 'guard', text }
+    await update($, events, l => pushEvent(l, ev))
+    await logLine(diskOf($), ev)
   } catch {}
 }
 

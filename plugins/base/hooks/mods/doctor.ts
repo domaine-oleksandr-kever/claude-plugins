@@ -1,15 +1,16 @@
-// /base-doctor and the base-tmp sweep (the sweep once per session id; a /clear starts a new one). The doctor runs
-// scripts/doctor.cjs for what a node process sees and adds what only a session answers: slim's view tool,
-// fnd loaded, each MCP server of base's manifest connected; then the tail of base.events.
+// /base-doctor and the sweeps of base-tmp and of old event-log directories (once per session id; a /clear starts
+// a new one). The doctor runs scripts/doctor.cjs for what a node process sees and adds what only a session answers:
+// slim's view tool, fnd loaded, each MCP server of base's manifest connected; then the tail of base.events.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent } from '../../types'
-import { pushEvent } from './events.ts'
+import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent } from './events.ts'
+import type { Disk } from './events.ts'
 import { SLIM_MISSING, SLIM_VIEW, WITH_FND } from './session.ts'
 
 export const COMMAND = {
   name: 'base-doctor',
-  description: 'Check the base install: node, manifest, slim, fnd, MCP servers, base-tmp',
+  description: 'Check the base install: node, manifest, slim, fnd, MCP servers, base-tmp, event log',
   immediate: true,
 } as const
 export const MCP_TIMEOUT_MS = 15_000
@@ -25,9 +26,50 @@ const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[
 
 type $ = EngineInterface
 
+/** events.ts's file writer reaches `$` through this: the validator follows `$` only within one file. */
+function diskOf($: $): Disk {
+  return {
+    session: () => $.session.id(),
+    home: () => $.env.get('HOME'),
+    override: () => $.env.get('DOMAINE_LOG_DIR'),
+    manifest: () => $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`),
+    read: path => $.fs.read(path),
+    write: (path, text) => $.fs.write(path, text),
+    toast: text => $.ui.toast(text),
+  }
+}
+
+/** Claude Code's session ids: the sweep touches nothing else, so no dotfile or other directory ever goes. */
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Removes the session directories under `$HOME/.claude/domaine/log` whose newest file is older than 7 days:
+ * never this session's, only a session-id name holding nothing but `*.jsonl` files, and never when the root
+ * or the directory resolves anywhere but its own spelling (a linked root could point at `~`). `$.fs` has no
+ * delete, hence `rm -rf`. A DOMAINE_LOG_DIR is the person's to clean.
+ */
+async function sweepLogs($: $, sid: string): Promise<void> {
+  const root = defaultLogRoot(await $.env.get('HOME'))
+  if (!root) return
+  if ((await $.fs.stat(root, { resolve: true })).realPath !== root) return
+  const now = await $.clock.now()
+  for (const d of await $.fs.list(root)) {
+    if (d.kind !== 'dir' || d.name === sid || !SESSION_ID.test(d.name)) continue
+    const dir = `${root}/${d.name}`
+    try {
+      const entries = await $.fs.list(dir)
+      if (entries.some(f => f.kind !== 'file' || !f.name.endsWith('.jsonl'))) continue
+      const newest = entries.length ? Math.max(...entries.map(f => f.mtimeMs)) : (await $.fs.stat(dir)).mtimeMs
+      if (now - newest <= LOG_TTL_MS) continue
+      if ((await $.fs.stat(dir, { resolve: true })).realPath === dir) await $.process.run(['rm', '-rf', dir], { timeoutMs: 10_000 })
+    } catch {}
+  }
+}
+
 /**
  * The command on every session start (a reload or a re-enable drops it) and at the first prompt of a new
- * session id; the sweep of `.claude/base-tmp` past BASE_TMP_TTL hours once per session id, unawaited.
+ * session id; the sweeps of `.claude/base-tmp` past BASE_TMP_TTL hours and of the old event-log session
+ * directories once per session id, unawaited.
  */
 async function arm($: $, start: boolean): Promise<void> {
   try {
@@ -40,6 +82,7 @@ async function arm($: $, start: boolean): Promise<void> {
     const ttl = await $.env.get('BASE_TMP_TTL')
     if (ttl) argv.push('--ttl-hours', ttl)
     void $.process.run(argv, { timeoutMs: 10_000 }).catch(() => undefined)
+    void sweepLogs($, sid).catch(() => undefined)
   } catch {}
 }
 
@@ -63,6 +106,8 @@ async function staticRows($: $): Promise<Row[]> {
   let r
   try {
     const argv = ['node', `${root}/scripts/doctor.cjs`, '--json', '--root', root, '--project', await $.session.root()]
+    const dir = logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), await $.session.id())
+    if (dir) argv.push('--log-dir', dir)
     r = await $.process.run(argv, { timeoutMs: 30_000 })
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err)
@@ -187,8 +232,9 @@ async function eventTail($: $): Promise<string[]> {
 async function logDoctor($: $, text: string): Promise<void> {
   try {
     if ((await $.env.get('BASE_EVENT_LOG')) === '0') return
-    const atMs = await $.clock.now()
-    await update($, events, l => pushEvent(l, { atMs, kind: 'doctor', text }))
+    const ev: BaseEvent = { atMs: await $.clock.now(), kind: 'doctor', text }
+    await update($, events, l => pushEvent(l, ev))
+    await logLine(diskOf($), ev)
   } catch {}
 }
 

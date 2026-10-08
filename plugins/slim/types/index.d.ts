@@ -48,7 +48,10 @@ export type SlimViewEvent = SlimEventBase & {
   bytesOut: number
 }
 
-export type SlimEvent = SlimCompressEvent | SlimLookupEvent | SlimViewEvent
+/** slim's first line in a session: text `slim <version>`. */
+export type SlimStartEvent = { v: 1; atMs: number; kind: 'start'; text: string; src: 'slim' }
+
+export type SlimEvent = SlimCompressEvent | SlimLookupEvent | SlimViewEvent | SlimStartEvent
 
 /** What the ToolResult and ToolGroup lines draw for one tool_use_id; bytesIn = bytes_seen ?? bytes_in. */
 export type SlimRow = { engine: SlimEngine; bytesIn: number; bytesOut: number }
@@ -67,6 +70,8 @@ declare module 'claude-code' {
       info: SlimInfo | null
       /** One member per @-mentioned file content slim compressed this session (keyed by its hash): the Log line is written once. */
       seen: StateFamily<true | null>
+      /** The session id whose start line slim wrote, so a repeated session.start writes none. */
+      started: string | null
     }
   }
 }

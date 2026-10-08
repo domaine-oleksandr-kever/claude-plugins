@@ -7,15 +7,18 @@
  * MCP server connected). It also runs standalone.
  *
  * Usage:
- *   node doctor.cjs [--project <dir>] [--root <plugin root>] [--home <dir>] [--json]
+ *   node doctor.cjs [--project <dir>] [--root <plugin root>] [--home <dir>] [--log-dir <dir>] [--json]
  *     --project  the project whose installs and `.claude/base-tmp` are checked (default: cwd)
  *     --root     the plugin root (default: this script's parent)
  *     --home     the home holding `.claude/` (tests; it also overrides CLAUDE_CONFIG_DIR)
+ *     --log-dir  the session's event-log directory (`/base-doctor` passes its own); default: the newest
+ *                session directory under DOMAINE_LOG_DIR, else under <home>/.claude/domaine/log
  *     --json     `{ root, rows: [{ status, name, detail }] }` instead of the table
  *
- * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, fnd, base-tmp. Every row is
- * one PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
- * BASE_TMP_TTL (the age the session sweep removes base-tmp files at). It only reports, never repairs.
+ * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, fnd, base-tmp, event-log. Every
+ * row is one PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
+ * BASE_TMP_TTL (the age the session sweep removes base-tmp files at) and DOMAINE_LOG_DIR. It only
+ * reports, never repairs.
  */
 'use strict';
 
@@ -44,7 +47,7 @@ function out(line) {
   } catch (_) {}
 }
 
-const USAGE = 'usage: doctor.cjs [--project <dir>] [--root <plugin root>] [--home <dir>] [--json]\n';
+const USAGE = 'usage: doctor.cjs [--project <dir>] [--root <plugin root>] [--home <dir>] [--log-dir <dir>] [--json]\n';
 
 function usage(msg) {
   if (!msg) {
@@ -56,12 +59,12 @@ function usage(msg) {
 }
 
 function parseArgs(argv) {
-  const opts = { root: null, home: null, project: null, json: false };
+  const opts = { root: null, home: null, project: null, 'log-dir': null, json: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') usage('');
     else if (a === '--json') opts.json = true;
-    else if (a === '--root' || a === '--home' || a === '--project') {
+    else if (a === '--root' || a === '--home' || a === '--project' || a === '--log-dir') {
       const v = argv[++i];
       if (!v || v.startsWith('--')) usage(a + ' needs a value');
       opts[a.slice(2)] = v;
@@ -236,6 +239,85 @@ function checkCoreTmp(projectDir) {
   pass('base-tmp', detail + (ci.status === 0 ? '; ignored by git' : ''));
 }
 
+/** The session directory under `root` whose newest file is the newest, or null; a link is never followed. */
+function newestSessionDir(root) {
+  let best = null;
+  let bestMs = -1;
+  let names;
+  try {
+    names = fs.readdirSync(root);
+  } catch (_) {
+    return null;
+  }
+  for (const n of names) {
+    const dir = path.join(root, n);
+    try {
+      const st = fs.lstatSync(dir);
+      if (!st.isDirectory()) continue;
+      let ms = st.mtimeMs;
+      for (const f of fs.readdirSync(dir)) ms = Math.max(ms, fs.lstatSync(path.join(dir, f)).mtimeMs);
+      if (ms > bestMs) {
+        best = dir;
+        bestMs = ms;
+      }
+    } catch (_) {}
+  }
+  return best;
+}
+
+/** `<name> <n> line(s), newest <ts>` for one `<plugin>.jsonl`: the last line is the newest. */
+function jsonlSummary(file) {
+  const lines = fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim());
+  let ts = 'none';
+  if (lines.length) {
+    try {
+      ts = String(JSON.parse(lines[lines.length - 1]).ts || '?');
+    } catch (_) {
+      ts = 'unreadable';
+    }
+  }
+  return path.basename(file) + ' ' + lines.length + ' line(s), newest ' + ts;
+}
+
+// Each plugin (base, band, slim) writes `<dir>/<plugin>.jsonl` for the session; base sweeps directories past 7 days.
+function checkEventLog(logDir, homeDir) {
+  let dir = logDir ? path.resolve(logDir) : null;
+  if (!dir) {
+    const override = (process.env.DOMAINE_LOG_DIR || '').trim();
+    const root = path.isAbsolute(override) ? override : path.join(homeDir, '.claude', 'domaine', 'log');
+    dir = newestSessionDir(root);
+    if (!dir) {
+      pass('event-log', root + ': no session directory yet');
+      return;
+    }
+  }
+  const off = process.env.BASE_EVENT_LOG === '0' ? "; base's is off (BASE_EVENT_LOG=0)" : '';
+  let names;
+  try {
+    names = fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')).sort();
+  } catch (e) {
+    // A /clear's new session has no directory until its first line: nothing failed yet.
+    if (e.code === 'ENOENT') {
+      pass('event-log', dir + ': no line yet this session' + off);
+      return;
+    }
+    names = [];
+  }
+  if (!names.length) {
+    (off ? pass : warn)('event-log', dir + ': no event log written' + (off || ' — every write failed (base toasts the reason)'));
+    return;
+  }
+  const parts = [];
+  for (const n of names) {
+    try {
+      parts.push(jsonlSummary(path.join(dir, n)));
+    } catch (e) {
+      parts.push(n + ' unreadable: ' + e.message);
+    }
+  }
+  pass('event-log', dir + ': ' + parts.join('; '));
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const pluginRoot = path.resolve(opts.root || path.join(__dirname, '..'));
@@ -252,6 +334,7 @@ function main() {
   checkSlim(claudeDir, projectDir, enabled);
   checkFnd(claudeDir, projectDir, enabled);
   checkCoreTmp(projectDir);
+  checkEventLog(opts['log-dir'], homeDir);
 
   const failed = rows.some((r) => r.status === 'FAIL');
   if (opts.json) {

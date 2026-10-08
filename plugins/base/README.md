@@ -190,7 +190,7 @@ change, a /clear, and every two minutes.
 | `base.events` | base's log lines for band's Log pane, oldest first, at most 200: `{ atMs, kind, text }` |
 | `base.started`, `base.checked`, `base.titled` | the session id whose start line, install checks and title are done (`<id>:user` when the person titled it) |
 | `base.guardRoot` | the project root the session launched in, which the scratch-path guard measures against |
-| `base.swept` | the session id whose base-tmp sweep ran |
+| `base.swept` | the session id whose base-tmp and event-log sweeps ran |
 
 `/base-progress <work-id>` pins the work id band's checklist shows, `/base-progress -` unpins, and
 `/base-progress` alone names the pin. The checklist itself is band's `/band-progress`.
@@ -199,7 +199,44 @@ change, a /clear, and every two minutes.
 present), `refuse` (a reader refused), `workspace` (the work id base now publishes, `none` when it
 leaves every workspace), `title` (the session title base set), `guard` (a guard's deny: the
 tool and the reason), `doctor` (a `/base-doctor` run's counts). band and slim write their own
-session, model, compaction, rate and compression lines.
+session, model, compaction, rate and compression lines. Each line also goes to base's file on disk
+(Event log on disk).
+
+## Event log on disk
+
+base, band and slim each write the lines they publish themselves to their own file, so the origin of
+a line is on the line, written by that plugin, not inferred from a pane:
+
+- **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
+  `slim.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
+  `<session-id>/` folder is still made under it. With neither (a cloud session) no file is written.
+  Never under the project.
+- **Line:** one JSON object per line, oldest first:
+  `{"ts":"2026-10-08T12:34:56.789Z","plugin":"base","version":"0.1.0","session":"<id>","kind":"guard","agent":"main","text":"Bash: a git hooks bypass"}`.
+  `ts` is the event's time in UTC, `plugin` and `version` the writer's own name and release, `agent`
+  the subagent type that caused the line or `main`, `kind` and `text` the line as `base.events` has it.
+- **Start line:** the first line a plugin writes for a session id is `start` / `<plugin> <version>`,
+  also under the new id a `/clear` opens, where no session start runs. A session whose lines already
+  hold a start line gets no second one: a module reload or a resume in a fresh process goes on from
+  the file.
+- **base's lines:** every `base.events` line, `agent` always `main`. The first line of a session's
+  file is `start` / `base <version>`; after a /clear (a new session id with no session start) base
+  writes that line before the new session's first event.
+- **Writing:** the whole file is rewritten after every line (the engine has no append), at most 2000
+  lines or 256 KB, oldest dropped first (the start line too, past the cap). A reload of the module
+  picks up the file of the same session and goes on. A write that fails never reaches the hook; the
+  first failure in a session toasts `base: event log not written: <reason>`.
+- **Off:** `BASE_EVENT_LOG=0` stops base's file and its `base.events` lines alike.
+- **Clean-up:** base sweeps session folders whose newest file is older than 7 days, and its
+  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. band and
+  slim never delete.
+
+The sweep runs once per session (and again after a /clear), in the background, over
+`$HOME/.claude/domaine/log` only — a `DOMAINE_LOG_DIR` is yours to clean — and not at all when that
+directory itself resolves anywhere but its own spelling (a symbolic link). It touches only folders
+named like a session id that hold nothing but `*.jsonl` files, skips the current session's folder and
+a folder that resolves anywhere but its own place under that directory; the rest goes with `rm -rf`,
+as the engine's file API cannot delete.
 
 ## Session start
 
@@ -220,6 +257,8 @@ session, model, compaction, rate and compression lines.
 - **base-tmp sweep**, once per session (and again after a /clear), in the background — the session
   start never waits for it: files in `.claude/base-tmp` older than `BASE_TMP_TTL` hours (24 by
   default) are deleted; directories and symlinks stay.
+- **Event-log sweep**, alongside it: session folders under `$HOME/.claude/domaine/log` whose newest
+  file is older than 7 days (Event log on disk).
 
 ## Doctor
 
@@ -233,12 +272,14 @@ and the last 10 `base.events` lines:
 | `slim` | slim installed (user scope or this project) and enabled — else `claude plugin install slim@domaine` |
 | `fnd` | fnd not installed; installed and enabled fails (`fnd and base must not run together`), installed and disabled warns |
 | `base-tmp` | `.claude/base-tmp`: files, size, how many the next sweep removes, whether git ignores it |
+| `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
 | `slim-live`, `fnd-live` | what this session loaded: slim's `mcp__slim__view` tool registered, no fnd command or enabled fnd |
 | `mcp:<server>` | each MCP server of base's manifest connects; sign-in needed fails with the `/mcp` pointer; `figma-dev-mode` (the Figma desktop app's local server) only warns |
 
-The first eight rows come from `scripts/doctor.cjs`, which also runs by hand:
-`node <base plugin root>/scripts/doctor.cjs [--project <dir>]`; it exits 1 when a row fails. The
-session rows need the command. One `doctor` line goes to `base.events` per run.
+The first nine rows come from `scripts/doctor.cjs`, which also runs by hand:
+`node <base plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`; it exits 1 when a
+row fails. By hand its `event-log` row reads the newest session folder unless `--log-dir` names one.
+The session rows need the command. One `doctor` line goes to `base.events` per run.
 
 ## Environment switches
 
@@ -246,7 +287,8 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 
 | Variable | Default | Effect |
 |---|---|---|
-| `BASE_EVENT_LOG` | on | `0` keeps `base.events` empty: band's Log pane shows no base line |
+| `BASE_EVENT_LOG` | on | `0` keeps `base.events` empty and writes no `base.jsonl`: band's Log pane shows no base line |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where base, band and slim write their event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
 | `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, and the scratch-path guard |
 | `BASE_LEAN` | on | `0` drops the lean-code convention from the system prompt and from code-writing subagents |
 | `BASE_SCRATCH_GUARD` | on | `0` turns the scratch-path guard off: the browser tools write wherever their path points |
@@ -276,7 +318,7 @@ scripts and texts have their own suites:
 | `tests/base-external-screenshots-sim.sh` | `scripts/external-screenshots.sh`: the allow-list, `og:image` resolution, cache, pacing, no resample |
 | `tests/base-figma-rest-sim.sh` | `scripts/figma-rest.sh`: the token, the modes, `--policy`, the cache, retries, the out-dir gate |
 | `tests/base-md-to-adf.mjs` | `scripts/md-to-adf.cjs`: the ADF it writes, the CLI contract, round trips through slim's adf engine |
-| `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes and projects: every row's verdicts, `--json`, Windows |
+| `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts, `--json`, `--log-dir`, Windows |
 | `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list) and the `scripts/scratch-hygiene.cjs` sweep |
 
 How the pieces fit — the mods, the atoms band reads, why some checks stay scripts:

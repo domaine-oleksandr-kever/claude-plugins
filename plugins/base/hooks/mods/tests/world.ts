@@ -39,6 +39,10 @@ export type World = {
   mcp: Record<string, McpConnectResult | 'hang'>
   /** a base-tmp sweep is answered once this settles */
   sweepGate: Promise<void>
+  /** every $.fs.write rejects with this message while set */
+  writeFails: string | null
+  /** `$.fs.stat(path, { resolve: true })` lands here instead of on the path itself: a symbolic link */
+  realPaths: Record<string, string>
 }
 
 export const progressMd = (id: string) => `${TASKS}/${id}/progress.md`
@@ -65,6 +69,8 @@ export function world(on: On, over: Partial<World> = {}) {
     manifest: '{ "name": "base", "version": "0.1.0" }',
     mcp: {},
     sweepGate: Promise.resolve(),
+    writeFails: null,
+    realPaths: {},
     ...over,
   }
   const calls = {
@@ -81,6 +87,10 @@ export function world(on: On, over: Partial<World> = {}) {
     commands: [] as string[],
     connects: [] as string[],
     below: [] as unknown[],
+    /** every $.fs.write, in order */
+    writes: [] as { path: string; text: string }[],
+    /** the directories an `rm -rf` removed */
+    removed: [] as string[],
   }
   const clock = mock.clock(on, { now: NOW })
   mock.store(on)
@@ -101,6 +111,12 @@ export function world(on: On, over: Partial<World> = {}) {
     value: w.commands.map(([name, plugin]) => ({ name, description: name, source: 'plugin', plugin }) as any),
   }))
   on('process.run', async (_$, e) => {
+    if (e.argv[0] === 'rm') {
+      const dir = e.argv[e.argv.length - 1] ?? ''
+      calls.removed.push(dir)
+      for (const p of Object.keys(w.files)) if (p.startsWith(`${dir}/`)) delete w.files[p]
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[1]?.endsWith('/scripts/scratch-hygiene.cjs')) {
       await w.sweepGate
       calls.sweeps.push(e.argv)
@@ -131,15 +147,30 @@ export function world(on: On, over: Partial<World> = {}) {
   on('fs.stat', async (_$, e) => {
     calls.fs.push(`stat ${e.path}`)
     const f = w.files[e.path]
-    if (!f && isDir(e.path)) return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false } }
+    const realPath = (e as { resolve?: boolean }).resolve ? (w.realPaths[e.path] ?? e.path) : undefined
+    if (!f && isDir(e.path)) return { value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath } }
     if (!f) throw enoent(e.path)
-    return { value: { kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false } }
+    return { value: { kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false, realPath } }
   })
   on('fs.list', async (_$, e) => {
     calls.fs.push(`list ${e.path}`)
     const names = new Set(Object.keys(w.files).filter(p => p.startsWith(`${e.path}/`)).map(p => p.slice(e.path.length + 1).split('/')[0] ?? ''))
     if (names.size === 0) throw enoent(e.path)
-    return { value: [...names].map(name => ({ name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false })) }
+    return {
+      value: [...names].map(name => {
+        const f = w.files[`${e.path}/${name}`]
+        return f
+          ? { name, kind: 'file' as const, size: f.text.length, mtimeMs: f.mtimeMs, isLink: false }
+          : { name, kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false }
+      }),
+    }
+  })
+  on('fs.write', async (_$, e) => {
+    calls.fs.push(`write ${e.path}`)
+    if (w.writeFails) throw new Error(w.writeFails)
+    calls.writes.push({ path: e.path, text: e.text })
+    w.files[e.path] = { text: e.text, mtimeMs: clock.now() }
+    return { value: undefined }
   })
   on('fs.read', async (_$, e) => {
     calls.fs.push(`read ${e.path}`)

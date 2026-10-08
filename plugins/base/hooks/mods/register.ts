@@ -1,5 +1,5 @@
 // base hooks module (Claude Code only): the workspace progress band draws, the install checks, the session
-// title, the guards, the conventions and the doctor. base writes only base.* atoms.
+// title, the guards, the conventions, the doctor and the event log on disk. base writes only base.* atoms.
 // Each feature file declares its own atoms and keeps its `$` code to itself: the validator follows `$` only within one file.
 import type { Register } from 'claude-code'
 import { registerConventions } from './conventions.ts'

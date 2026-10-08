@@ -3,7 +3,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent, BaseProgress } from '../../../types'
-import { pushEvent } from '../events.ts'
+import { logLine, pushEvent } from '../events.ts'
+import type { Disk } from '../events.ts'
 import { notesTail, parseProgress } from './progress-parse.ts'
 import { KEY, isWorkId, keyFromBranch, projectOf, slugFromBranch, ticketKeys } from './workid.ts'
 
@@ -29,16 +30,32 @@ const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[
 
 type $ = EngineInterface
 
+/** events.ts's file writer reaches `$` through this: the validator follows `$` only within one file. */
+function diskOf($: $): Disk {
+  return {
+    session: () => $.session.id(),
+    home: () => $.env.get('HOME'),
+    override: () => $.env.get('DOMAINE_LOG_DIR'),
+    manifest: () => $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`),
+    read: path => $.fs.read(path),
+    write: (path, text) => $.fs.write(path, text),
+    toast: text => $.ui.toast(text),
+  }
+}
+
 /** Compared with the last logged workspace, not the atom: /clear nulls the atom while the work stays. */
 async function logWorkspace($: $, text: string): Promise<void> {
   try {
     if ((await $.env.get('BASE_EVENT_LOG')) === '0') return
-    const atMs = await $.clock.now()
+    const ev: BaseEvent = { atMs: await $.clock.now(), kind: 'workspace', text }
+    let pushed = false
     await update($, events, l => {
       let last = 'none'
-      for (const ev of l) if (ev.kind === 'workspace') last = ev.text
-      return last === text ? l : pushEvent(l, { atMs, kind: 'workspace', text })
+      for (const e of l) if (e.kind === 'workspace') last = e.text
+      pushed = last !== text
+      return pushed ? pushEvent(l, ev) : l
     })
+    if (pushed) await logLine(diskOf($), ev)
   } catch {}
 }
 

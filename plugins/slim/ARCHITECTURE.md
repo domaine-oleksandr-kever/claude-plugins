@@ -27,7 +27,9 @@ the code on the date at the bottom; the code wins when they drift.
 │                ├── view.ts       mcp__slim__view: Read check | Bash → --view → compact text;  │
 │                │                 out through the Write tool; event + report line              │
 │                ├── describe.ts   one sentence on Bash/WebFetch descriptions pointing at lookup │
-│                ├── info.ts       slim.info snapshot at session.start (version, channels)       │
+│                ├── info.ts       slim.info snapshot at session.start (version, channels);      │
+│                │                 the start line `slim <version>` into slim.events             │
+│                ├── eventlog.ts   slim's own state.set hook on slim.events → slim.jsonl on disk │
 │                └── render.tsx    dim line under a compressed tool row; ToolGroup fold suffix   │
 │  channels.ts (pure: tool → channel, gate, pre-decisions)   node-hook.ts (pure: argv/parse)    │
 │  events.ts (pure: event texts, pct, sizes)                 types/index.d.ts ($.state contract)│
@@ -166,7 +168,8 @@ them equal, so the pure pre-decision in the module and the core never disagree.
                                  │   <<full=…/tool-results/bhnpr2bjz.txt original_result>>
                                  └──────────────────────────────────────────────┘
    decision ─────┬──────────────▶ 2 · $.state (session memory, any plugin reads)
-   from slim.cjs │                   slim.events  journal, cap 200, kinds slim | lookup
+   from slim.cjs │                   slim.events  journal, cap 200, kinds start | slim | lookup | view;
+                 │                                each line also to <log dir>/<session-id>/slim.jsonl
                  │                   slim.rows    one row per tool_use_id (engine, in, out)
                  │                   slim.info    { v, version, channels } at session.start
                  │                   slim.seen    one member per @-mentioned content compressed:
@@ -347,7 +350,7 @@ slim reads none of fnd's switches and loads no Domaine env file: its spill root,
 
 | layer | reads | switches |
 |---|---|---|
-| module | `$.env.get` with literal names | `SLIM_MCP` `SLIM_BASH` `SLIM_READ` `SLIM_WEB` `SLIM_GREP` `SLIM_AGENT` `SLIM_ATTACH` `SLIM_PROMPT` `SLIM_SPILL_GUARD` `SLIM_LOOKUP` `SLIM_LOOKUP_MODEL` `SLIM_TOAST` `SLIM_TOAST_MS` `SLIM_EVENT_LOG` `SLIM_CURL` `SLIM_PLAIN_BYTES` `SLIM_STUB_BYTES` (the size gates it applies before calling the core) `SLIM_DEBUG` (for its own stand-down and access lines) |
+| module | `$.env.get` with literal names | `SLIM_MCP` `SLIM_BASH` `SLIM_READ` `SLIM_WEB` `SLIM_GREP` `SLIM_AGENT` `SLIM_ATTACH` `SLIM_PROMPT` `SLIM_SPILL_GUARD` `SLIM_LOOKUP` `SLIM_LOOKUP_MODEL` `SLIM_TOAST` `SLIM_TOAST_MS` `SLIM_EVENT_LOG` (the list and `slim.jsonl`) `SLIM_CURL` `SLIM_PLAIN_BYTES` `SLIM_STUB_BYTES` (the size gates it applies before calling the core) `SLIM_DEBUG` (for its own stand-down and access lines); `HOME` `DOMAINE_LOG_DIR` (where `slim.jsonl` goes) |
 | delivery | `process.env` via `env.cjs` | `SLIM_DIR` `SLIM_TTL` `SLIM_DEBUG` `SLIM_STUB` `SLIM_STUB_BYTES` `SLIM_PLAIN_BYTES` `SLIM_BUDGET_MS` `SLIM_HINT` `SLIM_LOOKUP` (the hint line) |
 | engines | nothing | — (everything arrives as `options`) |
 

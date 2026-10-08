@@ -25,6 +25,11 @@ export type BandInfo = { v: 1; version: string; disabled: boolean }
 /** A line from another plugin's event log; band reads only these fields and drops an entry missing one. */
 export type ForeignEvent = { atMs: number; kind: string; text: string }
 
+/** The list a log line came from: the PLUGIN column of the Log pane and `/band-log`. */
+export type LogSource = 'band' | 'base' | 'fnd' | 'slim'
+/** One line of the merged log, tagged with its source list. */
+export type LogLine = ForeignEvent & { plugin: LogSource }
+
 export type ChecklistMark = 'done' | 'current' | 'waiting' | 'todo'
 export type ChecklistRow = { mark: ChecklistMark; text: string }
 /** The generic shape the Progress pane draws; band maps the published task snapshot into it. */

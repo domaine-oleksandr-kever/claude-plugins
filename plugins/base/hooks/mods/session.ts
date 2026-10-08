@@ -3,7 +3,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent, BaseEventKind } from '../../types'
-import { pushEvent } from './events.ts'
+import { logLine, pushEvent } from './events.ts'
+import type { Disk } from './events.ts'
 
 export const SLIM_VIEW = 'mcp__slim__view'
 const SLIM_INSTALL = 'claude plugin install slim@domaine'
@@ -18,11 +19,25 @@ const checked = atom({ plugin: 'base', key: 'checked' } as const, null)
 
 type $ = EngineInterface
 
+/** events.ts's file writer reaches `$` through this: the validator follows `$` only within one file. */
+function diskOf($: $): Disk {
+  return {
+    session: () => $.session.id(),
+    home: () => $.env.get('HOME'),
+    override: () => $.env.get('DOMAINE_LOG_DIR'),
+    manifest: () => $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`),
+    read: path => $.fs.read(path),
+    write: (path, text) => $.fs.write(path, text),
+    toast: text => $.ui.toast(text),
+  }
+}
+
 async function logEvent($: $, kind: BaseEventKind, text: string): Promise<void> {
   try {
     if ((await $.env.get('BASE_EVENT_LOG')) === '0') return
-    const atMs = await $.clock.now()
-    await update($, events, l => pushEvent(l, { atMs, kind, text }))
+    const ev: BaseEvent = { atMs: await $.clock.now(), kind, text }
+    await update($, events, l => pushEvent(l, ev))
+    await logLine(diskOf($), ev)
   } catch {}
 }
 
