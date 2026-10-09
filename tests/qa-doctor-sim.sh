@@ -29,7 +29,8 @@ printf '#!/bin/sh\necho "gh version 2.61.0 (2026-01-01)"\n' > "$GHBIN/gh"; chmod
 BADGH="$TMP/badgh"; mkdir -p "$BADGH"
 printf '#!/bin/sh\necho "gh: broken install" >&2\nexit 4\n' > "$BADGH/gh"; chmod 755 "$BADGH/gh"
 WITH_GH="$GHBIN:/usr/bin:/bin"
-NO_GH="/usr/bin:/bin"
+# An empty directory, not /usr/bin: a CI runner keeps gh there.
+NO_GH="$TMP/nogh"; mkdir -p "$NO_GH"
 
 rc=0
 # run [--path <PATH>] <doctor args...> — PATH defaults to the one with the stub.

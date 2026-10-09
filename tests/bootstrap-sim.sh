@@ -549,6 +549,10 @@ for name in "../x" "-y" "Base"; do
   if [ "$RC" -eq 2 ] && grep -qF "'$name' is not a plugin name" "$E"; then ok
   else bad "L7-claude-plugin-name($name)" "rc=$RC err=$(head -c 200 "$E")"; fi
 done
+# under a UTF-8 collating locale too: bash 3.2 matches [a-z] by collation order there
+LC_ALL=en_US.UTF-8 run "$TMP/h8d" "$FIXBOOT" --targets claude --plugins Base
+if [ "$RC" -eq 2 ] && grep -qF "'Base' is not a plugin name" "$E"; then ok
+else bad "L7-claude-plugin-name-utf8-locale" "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # --plugins without the claude target installs nothing differently and says it was ignored
 run "$TMP/h8e" "$FIXBOOT" --targets cursor --plugins fe

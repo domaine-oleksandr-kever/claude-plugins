@@ -14,6 +14,9 @@
 # Deliberately carries NO version stamp: it is always fetched from `main`, and the versions live
 # in the clone it produces.
 set -euo pipefail
+# The plugin-name check below is a glob range ([!a-z0-9-]); under a UTF-8 collating locale bash 3.2
+# matches it by collation order and lets `Base` through as a name.
+export LC_ALL=C
 
 # The one hardcoded fact a piped run cannot discover: where the plugin comes from. Kept as a
 # single unconditional assignment so tests can retarget it at a local bare origin.
