@@ -151,6 +151,8 @@ const check = async ($: $, tool: 'Read' | 'Write', file_path: string) => {
  * A one-line Read of `path` through the host, so the permission rules (and their dialog) and every
  * PreToolUse guard rule on it: the path the Read opened, or why it did not. A Read check that denies
  * is answered without the call. An image's Read comes back as an image, with no path: `path` stands.
+ * A first line over the Read's token or selected-bytes cap fails the call after every guard ruled: the
+ * file is there, too big for Read, and `path` stands (the core resolves it against the session cwd).
  */
 async function readProbe($: $, path: string): Promise<{ opened: string } | { denied: string }> {
   const c = await check($, 'Read', path)
@@ -158,7 +160,10 @@ async function readProbe($: $, path: string): Promise<{ opened: string } | { den
   try {
     const probe = await $.tool.call({ tool: 'Read', file_path: path, limit: 1 } as never)
     if (probe.deny !== undefined) return { denied: probe.deny }
-    if (probe.isError === true) return { denied: String(probe.text || `view: reading ${path} failed`) }
+    if (probe.isError === true) {
+      if (/exceeds maximum allowed tokens|more than a read can return/i.test(String(probe.text ?? ''))) return { opened: path }
+      return { denied: String(probe.text || `view: reading ${path} failed`) }
+    }
     const r = probe.result as { type?: unknown; file?: { filePath?: unknown } } | undefined
     if (typeof r?.file?.filePath === 'string' && r.file.filePath) return { opened: r.file.filePath }
     return r?.type === 'image' ? { opened: path } : { denied: `view: Read returned no file for ${path}` }

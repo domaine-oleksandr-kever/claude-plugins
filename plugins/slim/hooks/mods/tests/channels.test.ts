@@ -84,6 +84,17 @@ describe('K1 Bash JSON', () => {
       channel: 'bash', bytesIn: 100_000, bytesOut: 6_000, engine: 'json', ms: 9,
     }])
   })
+
+  test('the host\'s bashOutputMaxChars setting reaches the core; an unset or bad one does not', async ($, on) => {
+    let settings: Record<string, unknown> = { bashOutputMaxChars: 12_000 }
+    on('settings.read', async () => ({ value: settings }))
+    const w = world(on, bash(json(120_000)))
+    await $.tool.call({ tool: 'Bash', command: 'curl -s https://x.io/api' } as any)
+    expect(stdinOf(w.runs[0]).bash_output_max_chars).toBe(12_000)
+    settings = { bashOutputMaxChars: '12000' }
+    await $.tool.call({ tool: 'Bash', command: 'curl -s https://x.io/api' } as any)
+    expect('bash_output_max_chars' in stdinOf(w.runs[1])).toBe(false)
+  })
 })
 
 describe('K2–K4 Bash plain text and non-text', () => {

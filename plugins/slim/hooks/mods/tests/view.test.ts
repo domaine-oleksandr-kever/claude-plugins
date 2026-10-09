@@ -156,6 +156,23 @@ describe('V2 path', () => {
     expect(w.views).toEqual([])
   })
 
+  test('a one-line file over the Read token or bytes cap still reaches the core; another Read error does not', async ($, on) => {
+    const cap = 'File content (181010 tokens) exceeds maximum allowed tokens (25000). Use offset and limit parameters to read specific portions of the file, or use the GrepTool to search for specific content.'
+    let text = cap
+    const w = world(on, { below: () => ({ result: text, text, isError: true }) })
+    const host = '/Users/me/.claude/projects/-repo/S/tool-results/b8nxu0l2w.txt'
+    expect(await view($, { path: host, jq: '.[0]' })).toBe(`${REPLY.figure}\n--- head ---\n${REPLY.text}`)
+    expect(w.views[0].stdin).toMatchObject({ path: host, jq: '.[0]', cwd: '/repo' })
+    expect(await view($, { path: 'rel/whale.json' })).toBe(`${REPLY.figure}\n--- head ---\n${REPLY.text}`)
+    expect(w.views[1].stdin).toMatchObject({ path: 'rel/whale.json', cwd: '/repo' })
+    text = 'The requested line range contains over 3.1MB of text, more than a read can return. Use a smaller limit \u2014 or, if a single line is this large, no limit will fit it: search for specific content instead.'
+    expect(await view($, { path: host })).toBe(`${REPLY.figure}\n--- head ---\n${REPLY.text}`)
+    expect(w.views[2].stdin).toMatchObject({ path: host })
+    text = 'EISDIR: illegal operation on a directory, read'
+    expect(await view($, { path: '/repo/dir' })).toBe(text)
+    expect(w.views).toHaveLength(3)
+  })
+
   test('the Read check asks and the Read passes: the core runs', async ($, on) => {
     const w = world(on, { read: 'ask' })
     await view($, { path: '/outside/a.json' })

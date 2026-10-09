@@ -6,8 +6,10 @@
 //
 //   node slim.cjs                    one tool result; envelope on stdin:
 //       {v:1, channel, tool, tool_use_id, tool_input, tool_response, is_error, cwd, session_id,
-//        agentId?, pre?, bytes_in?, record?}  channel ∈ mcp|bash|read|webfetch|websearch|grep|glob|agent|attachment
-//     (attachment: tool_response {text} = an @-mentioned file as the host framed it)
+//        agentId?, pre?, bytes_in?, record?, bash_output_max_chars?}
+//       channel ∈ mcp|bash|read|webfetch|websearch|grep|glob|agent|attachment
+//     (attachment: tool_response {text} = an @-mentioned file as the host framed it;
+//      bash_output_max_chars: the host's bashOutputMaxChars setting, when set)
 //     `record: false`: the same content was answered and logged before (an attachment asked again), so no
 //     report line unless the run failed.
 //     stdout, exactly one JSON object:
@@ -439,11 +441,11 @@ function slimChannelText(channel, text, opts) {
   // A JSON view over the egress cap is stubbed, so the engine is asked to fit under it first.
   const run = (e) => compress({ data: text }, engineOptions(opts.deadline, {
     engine: e, budgetBytes: opts.window, plainBytes: ch.plainGate(channel, opts.plainBytes),
-    targetBytes: e === 'json' || e === 'jsonl' ? ch.EGRESS[channel] || null : null,
+    targetBytes: e === 'json' || e === 'jsonl' ? opts.egress || null : null,
   }));
   let r = run(engine);
   // A node tree over the cap would pass through raw; the JSON route can still fit it or stub it.
-  if (r.decision === 'compressed' && r.engine === 'figma-nodes' && utf8(r.text) > (ch.EGRESS[channel] || Infinity)) r = run('json');
+  if (r.decision === 'compressed' && r.engine === 'figma-nodes' && utf8(r.text) > (opts.egress || Infinity)) r = run('json');
   if (r.decision !== 'compressed') return { pass: r.reason || 'no-gain', format: r.format, engine };
   return { out: r.text, engine: r.engine, stages: r.stats.stages, parts: r.parts || [], window: r.window, json: r.engine === 'json' || r.engine === 'jsonl', ext: ['json', 'jsonl', 'figma-nodes'].includes(r.engine) ? '.json' : '.txt' };
 }
@@ -471,7 +473,8 @@ function runChannel(input, base) {
   // the same answer every time.
   const deadline = budget === 0 || channel === 'attachment' ? null : (budget < 0 ? Date.now() - 1 : Date.now() + budget);
   const window = channel === 'grep' || channel === 'glob' ? ch.WINDOW.grep : ch.WINDOW.other;
-  const opts = { command, plainBytes, deadline, window };
+  const inline = channel === 'bash' ? env.bashInline(input.bash_output_max_chars) : null;
+  const opts = { command, plainBytes, deadline, window, egress: inline === null ? ch.EGRESS[channel] : ch.bashEgress(inline) };
 
   if (ex.items) return runItems(input, base, ex, opts, spills, pass);
 
@@ -496,7 +499,7 @@ function runChannel(input, base) {
   const s = slimChannelText(channel, text, opts);
   if (s.pass) return pass(s.pass, bytesIn, { format: s.format });
 
-  const egress = ch.EGRESS[channel];
+  const egress = opts.egress;
   const hint = channel === 'bash' && s.engine === 'html' && env.hintOn() && ch.FETCH_CMD.test(command) ? emit.hintLine(command, cwdOf(input)) : null;
   const note = channel === 'read' ? emit.readNote(rec.file.filePath || ti.file_path)
     : channel === 'attachment' ? emit.readNote(typeof ti.path === 'string' ? ti.path : 'the attached file') : null;
@@ -506,17 +509,24 @@ function runChannel(input, base) {
   if (!hostFile) spills.push(original.path);
   const reason = hostFile ? 'mod-expand' : null;
 
-  if (utf8(s.out) > egress) {
+  // The host counts the characters (.length) of stdout and stderr together; past its limit it would
+  // save slim's own answer to a file and show only a preview of it.
+  const stderrChars = String(rec.stderr || '').length;
+  const persistedByHost = (value) => inline !== null && value.length + stderrChars >= inline;
+  const capped = () => {
     if (!s.json) return pass('egress-cap', bytesIn);
     const st = emit.stubFor(base.tool, text, 'json', original.path, 'egress-cap', false);
     const built = emit.withStats((stats) => st.render(stats), 'stub', bytesIn, utf8);
+    if (persistedByHost(built.value)) return pass('egress-cap', bytesIn);
     return {
       decision: 'stubbed', reason: 'egress-cap', result: ex.single.rebuild(built.value), figure: built.line,
       record: recordOf(base, 'stubbed', 'egress-cap', bytesIn, built.bytes, { spills, spill: original.path, engine: 'stub', stages: s.stages, bytesSeen }),
     };
-  }
+  };
+  if (utf8(s.out) > egress) return capped();
   const built = emit.withStats((stats) => `${s.out}${extras}${emit.tail(stats, original.path)}`, 'compressed', bytesIn, utf8);
   if (built.bytes >= bytesIn) return pass('marker-overhead', bytesIn);
+  if (persistedByHost(built.value)) return capped();
   if (!writeParts(s.parts, [built.value], spills)) return pass('spill-write-failure', bytesIn);
   return {
     decision: 'compressed', reason, result: ex.single.rebuild(built.value), figure: built.line,

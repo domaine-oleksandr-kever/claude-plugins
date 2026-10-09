@@ -25,8 +25,8 @@ const BOUND = 32768 + 1200;
 const FIX = path.join(ROOT, 'tests/fixtures');
 const LOG = 'fnd-mcp-slim-debug.log';
 
-// The envelope the hooks module sends, keys in its order (agentId, pre, bytes_in only when set).
-const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in'];
+// The envelope the hooks module sends, keys in its order (agentId, pre, bytes_in, bash_output_max_chars only when set).
+const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in', 'bash_output_max_chars'];
 const M1_KEYS = ENVELOPE_KEYS.slice(0, 9);
 const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment', 'prompt', 'lookup', 'view'];
 const ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'stub'];
@@ -680,8 +680,11 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cb9-host-read', call('Cb9h', T, chEnv(T, 'bash', 'Bash', { command: `head -c 99999 ${go}` }, BASH(GO_TEST))).reason, 'spill-read');
   eq('Cb10-own-cli', call('Cb10', T, chEnv(T, 'bash', 'Bash', { command: `node ${FROZEN_JSON} f.json --jq .a` }, BASH(F1))).reason, 'own-cli');
   eq('Cb11-source-json', call('Cb11', T, chEnv(T, 'bash', 'Bash', { command: 'cat templates/product.json' }, BASH(F1))).reason, 'read-guard');
-  const rn = call('Cb14', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST)));
+  // The fixture's node tree renders to ~30.5 KB: inline under a raised host limit, over the default one.
+  const rn = call('Cb14', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST), { bash_output_max_chars: 60000 }));
   check('Cb14-figma-nodes', rn.decision === 'compressed' && rn.record.engine === 'figma-nodes' && String((rn.result || {}).stdout).startsWith('# figma node 3326:39542'), `${rn.decision} ${rn.record.engine}`);
+  const rd = call('Cb14-default', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST)));
+  check('Cb14-default-json-route', ['compressed', 'stubbed'].includes(rd.decision) && rd.record.engine !== 'figma-nodes' && String((rd.result || {}).stdout).length < 30000, `${rd.decision} ${rd.record.engine}`);
   const rb = call('Cb15', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-1.nodes.json' }, BASH(REST_BIG)));
   check('Cb15-big-nodes', ['compressed', 'stubbed'].includes(rb.decision) && rb.record.engine !== 'figma-nodes' && bytes(String((rb.result || {}).stdout)) <= 32768 + 1024, `${rb.decision} ${rb.reason} ${rb.record.engine} ${rb.record.bytes_out}`);
 
@@ -701,6 +704,30 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const slimmed = (a.result || {}).stdout || '';
   const back = call('Cb13', T, chEnv(T, 'bash', 'Bash', { command: 'cat out.txt' }, BASH(`${slimmed}`)), { SLIM_STUB_BYTES: '1200' });
   eq('Cb13-already-slim', [back.decision, back.reason], ['passthrough', 'already-slim']);
+
+  // The host saves Bash output past its inline limit (characters of stdout + stderr) to a file and shows
+  // the model a 2 KB preview: slim's answer, figure and handle included, stays under that limit.
+  const rows3k = JSON.stringify(Array.from({ length: 3000 }, (_, i) => ({ id: i, name: `item ${i}`, email: `user${i}@example.com`, score: (i * 37) % 101, active: i % 2 === 0 })));
+  const gen = { command: 'node -e "console.log(JSON.stringify(rows))"' };
+  const shown = (x) => String((x.result || {}).stdout || '').length + String((x.result || {}).stderr || '').length;
+  const fits = (x, limit) => ['compressed', 'stubbed'].includes(x.decision) && shown(x) < limit;
+  const d30 = call('Cb16-default', T, chEnv(T, 'bash', 'Bash', gen, BASH(rows3k)));
+  check('Cb16-default-under-30000', fits(d30, 30000) && d30.record.bytes_in > 200000, `${d30.decision} ${shown(d30)}`);
+  const up = call('Cb16-env-raise', T, chEnv(T, 'bash', 'Bash', gen, BASH(rows3k)), { BASH_MAX_OUTPUT_LENGTH: '100000' });
+  check('Cb16-env-cannot-raise', fits(up, 30000), `${up.decision} ${shown(up)}`);
+  const low = call('Cb16-env-12000', T, chEnv(T, 'bash', 'Bash', gen, BASH(rows3k)), { BASH_MAX_OUTPUT_LENGTH: '12000' });
+  check('Cb16-env-12000', fits(low, 12000) && shown(d30) >= 12000, `${low.decision} ${shown(low)} (default ${shown(d30)})`);
+  const set = call('Cb16-setting-12000', T, chEnv(T, 'bash', 'Bash', gen, BASH(rows3k), { bash_output_max_chars: 12000 }));
+  check('Cb16-setting-12000', fits(set, 12000), `${set.decision} ${shown(set)}`);
+  // The last guard, whatever the engine fitted: stderr fills the rest of the limit.
+  const loud = call('Cb16-stderr', T, chEnv(T, 'bash', 'Bash', gen, BASH(rows3k, { stderr: 'w'.repeat(29000) })));
+  eq('Cb16-stderr-json-stub', [loud.decision, loud.reason, loud.record.engine], ['stubbed', 'egress-cap', 'stub']);
+  check('Cb16-stderr-stub-fits', shown(loud) < 30000, `${shown(loud)}`);
+  // Not even the stub fits beside this stderr: the raw stdout is the host's to save, not a stub of it.
+  const louder = call('Cb16-stderr-all', T, chEnv(T, 'bash', 'Bash', gen, BASH(rows3k, { stderr: 'w'.repeat(29900) })));
+  eq('Cb16-stderr-all-pass', [louder.decision, louder.reason], ['passthrough', 'egress-cap']);
+  const loudText = call('Cb16-stderr-text', T, chEnv(T, 'bash', 'Bash', { command: 'npx jest --ci' }, BASH(TESTOUT, { stderr: 'w'.repeat(29000) })), { SLIM_PLAIN_BYTES: '8192' });
+  eq('Cb16-stderr-text-pass', [loudText.decision, loudText.reason], ['passthrough', 'egress-cap']);
 }
 
 // C-read

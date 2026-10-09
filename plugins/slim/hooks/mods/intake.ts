@@ -75,6 +75,16 @@ async function reportError($: $, channel: string, tool: string, toolUseId: strin
   } catch {}
 }
 
+/** The host's bashOutputMaxChars setting, when it is a positive number: the core keeps Bash output under it. */
+async function bashOutputMaxChars($: $): Promise<number | undefined> {
+  try {
+    const v = (await $.settings.read()).bashOutputMaxChars
+    return typeof v === 'number' && v > 0 ? v : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** The subagent's type as $.agent.list() names it; undefined when unlisted or the list throws. */
 async function agentType($: $, agentId: string): Promise<string | undefined> {
   try {
@@ -123,6 +133,7 @@ export function registerIntake(on: On): void {
     }
     if (pre !== null && (await level($)) < (pre === 'error-shape' ? 1 : 2)) return r
 
+    const bashMax = ch === 'bash' && pre === null ? await bashOutputMaxChars($) : undefined
     const envelope = {
       v: 1,
       channel: ch,
@@ -135,6 +146,7 @@ export function registerIntake(on: On): void {
       session_id: await $.session.id(),
       ...(e.agentId !== undefined ? { agentId: e.agentId } : {}),
       ...(pre ? { pre, bytes_in: bytesIn } : {}),
+      ...(bashMax !== undefined ? { bash_output_max_chars: bashMax } : {}),
     }
     const { argv, init } = buildRun($.plugin.root, envelope)
     let run

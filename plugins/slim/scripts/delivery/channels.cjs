@@ -12,6 +12,9 @@ const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 
 const LOG_GATE = 16384;
 // A json/jsonl output still over this is stubbed; any other output over it passes through.
 const EGRESS = { bash: 32768, webfetch: 32768, websearch: 32768, agent: 32768, grep: 16384, glob: 16384, read: 65536, attachment: 65536 };
+// Room under the host's Bash inline limit for what follows the body: the figure, the handle, the hint.
+const BASH_TAIL = 2048;
+const bashEgress = (inline) => Math.max(1, Math.min(EGRESS.bash, inline - BASH_TAIL));
 const WINDOW = { bashPersisted: 4096, grep: 8192, glob: 8192, other: 12288 };
 const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment'];
 
@@ -174,6 +177,6 @@ function extract(channel, rec, input) {
 }
 
 module.exports = {
-  GATES, LOG_GATE, EGRESS, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, OWN_CLI, READ_LOG_EXT,
+  GATES, LOG_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, OWN_CLI, READ_LOG_EXT,
   isSourceJson, commandWords, admit, structuredGate, plainGate, bashSeen, extract, numberedBody, attachmentPath,
 };

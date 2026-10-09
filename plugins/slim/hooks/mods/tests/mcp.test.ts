@@ -10,8 +10,8 @@ const NOTICE =
   'Error: result (3,196,806 characters) exceeds maximum allowed tokens. Output has been saved to ' +
   '/Users/me/.claude/projects/-repo/S/tool-results/mcp-plugin_acme_atlassian-searchJiraIssuesUsingJql-1791010865179.txt.'
 const TEXT = 'searchJiraIssuesUsingJql: compressed 120 KB → 30 KB (−75%) · json'
-/** The core's stdin keys, in order; agentId, pre and bytes_in only when set. */
-const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in']
+/** The core's stdin keys, in order; agentId, pre, bytes_in and bash_output_max_chars only when set. */
+const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in', 'bash_output_max_chars']
 const AGENTS = [{ id: 'agent-7', description: 'read ELC-1', type: 'fnd:jira-reader', status: 'running' }]
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; env?: Record<string, string>; timeoutMs?: number } }
@@ -87,7 +87,7 @@ describe('M1 a big result goes through the core', () => {
     expect(run!.argv[1]).toEndWith('/scripts/slim.cjs')
     expect(run!.init?.timeoutMs).toBe(120_000)
     const stdin = stdinOf(run)
-    expect(Object.keys(stdin)).toEqual(ENVELOPE_KEYS.filter(k => !['agentId', 'pre', 'bytes_in'].includes(k)))
+    expect(Object.keys(stdin)).toEqual(ENVELOPE_KEYS.filter(k => !['agentId', 'pre', 'bytes_in', 'bash_output_max_chars'].includes(k)))
     expect(stdin).toEqual({
       v: 1, channel: 'mcp', tool: TOOL, tool_use_id: w.ids[0], tool_input: { jql: 'x' }, tool_response: BIG,
       is_error: false, cwd: '/repo', session_id: 'S',
@@ -193,7 +193,7 @@ describe('M4 debug levels spawn the core to log a pre-decided passthrough', () =
       expect(w.runs.length).toBe(pre ? 1 : 0)
       if (pre) {
         const stdin = stdinOf(w.runs[0])
-        expect(Object.keys(stdin)).toEqual(ENVELOPE_KEYS.filter(k => k !== 'agentId'))
+        expect(Object.keys(stdin)).toEqual(ENVELOPE_KEYS.filter(k => k !== 'agentId' && k !== 'bash_output_max_chars'))
         expect(stdin.pre).toBe(pre)
         expect(stdin.tool_response).toBeNull()
         expect(typeof stdin.bytes_in).toBe('number')
@@ -260,7 +260,7 @@ describe('M7 subagents', () => {
     expect(w.toasts).toEqual([])
     const stdin = stdinOf(w.runs[0])
     expect(stdin.agentId).toBe('agent-7')
-    expect(Object.keys(stdin)).toEqual(ENVELOPE_KEYS.filter(k => k !== 'pre' && k !== 'bytes_in'))
+    expect(Object.keys(stdin)).toEqual(ENVELOPE_KEYS.filter(k => k !== 'pre' && k !== 'bytes_in' && k !== 'bash_output_max_chars'))
     const [ev] = (await peek($)).events
     expect(ev.text).toBe(`jira-reader · ${TEXT}`)
     expect(ev.agentType).toBe('fnd:jira-reader')

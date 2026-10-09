@@ -129,7 +129,7 @@ non-zero exit, bad JSON) leaves the original result untouched and writes an erro
 | channel | gate | window if plain text | egress cap (json still over it → stub) |
 |---|---|---|---|
 | mcp | 4,096 | — | stub threshold 32,768 |
-| bash | 4,096 | 4,096 for a host-persisted output, else SLIM_PLAIN_BYTES | 32,768 |
+| bash | 4,096 | 4,096 for a host-persisted output, else SLIM_PLAIN_BYTES | host inline limit − 2,048, at most 32,768; an answer at or past the host limit (chars, stdout + stderr) → stub, or pass through |
 | read | 32,768 | — | 65,536 |
 | webfetch | 16,384 | 12,288 | 32,768 |
 | websearch | SLIM_PLAIN_BYTES | 12,288 | 32,768 |

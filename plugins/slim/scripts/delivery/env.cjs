@@ -1,5 +1,5 @@
 // slim's switches (SLIM_*), read straight from the process environment: the session env the host
-// hands the hook or the module's spawn. Nothing else is consulted.
+// hands the hook or the module's spawn. The one host switch read is the Bash tool's inline limit.
 'use strict';
 
 const os = require('os');
@@ -50,7 +50,18 @@ function plainBytes() {
 
 const hintOn = () => ENV.SLIM_HINT !== '0' && ENV.SLIM_LOOKUP !== '0';
 
+// The host's Bash tool shows this many characters of output inline and saves the rest to a file (its
+// bashOutputMaxChars / BASH_MAX_OUTPUT_LENGTH default).
+const BASH_INLINE_DEFAULT = 30000;
+// `setting` = the merged settings' bashOutputMaxChars, which the host obeys as given. Without it,
+// BASH_MAX_OUTPUT_LENGTH only lowers the default: newer hosts size just the read-back window with it.
+function bashInline(setting) {
+  if (Number.isInteger(setting) && setting > 0) return setting;
+  const n = Number(String(ENV.BASH_MAX_OUTPUT_LENGTH ?? '').trim());
+  return Number.isInteger(n) && n > 0 ? Math.min(n, BASH_INLINE_DEFAULT) : BASH_INLINE_DEFAULT;
+}
+
 module.exports = {
-  spillRoot, ttlRaw, debugLevel, budgetMs, stubEnabled, stubBytes, alreadySlimBound, plainBytes, hintOn,
+  spillRoot, ttlRaw, debugLevel, budgetMs, stubEnabled, stubBytes, alreadySlimBound, plainBytes, hintOn, bashInline,
   STUB_CAP, PLAIN_BYTES_DEFAULT,
 };

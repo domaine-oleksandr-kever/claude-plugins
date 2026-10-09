@@ -16,7 +16,7 @@ slim is a Claude Code hooks module (mods) and nothing else: other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads; the drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.6.0**.
+Current release: **slim v0.6.1**.
 
 ## Install
 
@@ -157,8 +157,11 @@ The handle names a spill copy of the original, not the file itself (see Spill fi
   compressor already gained nothing on one JSON document, the recipe is the jq narrowing alone,
   since a whole-file view would give the same bytes back. On the other
   channels a JSON or JSONL output still over the channel's egress cap (Read 65,536 B, Grep and Glob
-  16,384 B, the rest 32,768 B) is stubbed the same way (`egress-cap`); any other output over the cap
-  passes through.
+  16,384 B, Bash the host's inline limit less 2,048, at most 32,768 B, the rest 32,768 B) is stubbed
+  the same way (`egress-cap`); any other output over the cap passes through. On Bash the finished
+  answer is measured once more as the host measures it — characters of stdout plus stderr — and one
+  at or past the host's inline limit is stubbed (JSON) or passed through (`egress-cap`): past that
+  limit the host would save slim's own answer to a file and show the model a 2 KB preview of it.
 - **passthrough** — everything else, with a reason (`plain-gate`, `read-guard`, `no-gain`,
   `non-json`, `budget-exceeded`, …).
 
@@ -295,7 +298,10 @@ whose result the webfetch channel compresses, or `lookup({ url, question })`).
 
 - `path`: slim asks the Read permission check about the path (a deny is the answer), then makes a
   one-line Read of it through the host, so the permission rules and their dialog and every
-  PreToolUse guard rule on it exactly as on the model's own Read; a deny or an error is the answer.
+  PreToolUse guard rule on it exactly as on the model's own Read; a deny or an error is the answer,
+  except the Read's own over-limit errors ("exceeds maximum allowed tokens", "more than a read can
+  return": a first line over its token or byte cap, such as a host `tool-results/*.txt` holding one
+  JSON array): every guard has ruled by then, so view goes on.
   The core then reads the file the Read opened and picks the engine
   by content (`engine` overrides: `json`, `jsonl`, `log`, `html`, `figma`, `figma-nodes`, `adf`,
   `text`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
@@ -532,9 +538,11 @@ grammar is `plugins/slim/scripts/engines/CONTRACT.md` §8.
 
 ## Environment switches
 
-slim reads `SLIM_*` only, from the process environment: set them in `~/.claude/settings.json` →
-`env` or in the shell that starts Claude Code. The module reads them through `$.env` (session
-environment), and the core reads its own process environment, which the module's spawn passes on.
+slim reads `SLIM_*` and one host switch, from the process environment: set them in
+`~/.claude/settings.json` → `env` or in the shell that starts Claude Code. The module reads them
+through `$.env` (session environment), and the core reads its own process environment, which it
+inherits from the host through the module's spawn. The host's `bashOutputMaxChars` setting is read
+by the module (`$.settings.read`) and handed to the core in the envelope.
 `tests/readme-checks.sh` fails on a `SLIM_*` name under `plugins/slim/` without a row here.
 
 | Switch | Default | Effect |
@@ -562,6 +570,7 @@ environment), and the core reads its own process environment, which the module's
 | `SLIM_LOOKUP` | `1` | `0` removes the `mcp__slim__lookup` tool, the one-sentence pointer to it in the Bash and WebFetch tool descriptions and the lookup hint line together. The view tool stays. |
 | `SLIM_LOOKUP_MODEL` | `haiku` | Model the lookup tool asks its one question with — an alias or a model id. Every lookup writes its model and token usage to the report log at every debug level. |
 | `SLIM_HINT` | `1` | `0` drops the one line slim adds to an HTML page it compressed from a Bash fetch (`slim hint: for one fact about this page, call mcp__slim__lookup(…)`). |
+| `BASH_MAX_OUTPUT_LENGTH` | host: `30000` | The host's own switch, read, never set: older hosts show this many characters of Bash output inline before saving it to a file; newer hosts size only the read-back window with it and take the inline limit from the `bashOutputMaxChars` setting. slim keeps a Bash answer under that setting when set, else under 30,000, and this variable can only lower it. |
 | `SLIM_CURL` | unset | `deny` refuses a bare `curl <url>` in Bash with a pointer to the lookup tool and WebFetch; a curl with a pipe, an output file or headers is never refused. Any other value does nothing. |
 
 ## Not covered
