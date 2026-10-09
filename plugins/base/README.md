@@ -30,9 +30,9 @@ Current release: **base v0.2.0**.
 /reload-plugins
 ```
 
-`/base-doctor` then checks the install (§ Doctor). Then the team plugin, when one is published for
-your work. The same set as settings, in
-`~/.claude/settings.json`:
+`/base-doctor` then checks the install (§ Doctor). Then the team plugin for your work — the first is
+fe, the frontend one (`/plugin install fe@domaine`, then `/fe-doctor`; [plugins/fe/README.md](../fe/README.md)).
+The same set as settings, in `~/.claude/settings.json`:
 
 ```json
 {
@@ -106,6 +106,7 @@ resizes and compacts.
 | `scripts/worktree-setup.sh` | `/base:worktree` | creates or removes a sibling `git worktree` with its own branch and dev port, the `.claude/tasks` link back to the main checkout, and the `--copy` list |
 | `scripts/doctor.cjs` | `/base-doctor`, or by hand | the static install checks (below); `--json` for the command |
 | `scripts/scratch-hygiene.cjs` | base's hooks module, once per session | sweeps `.claude/base-tmp` of files older than `BASE_TMP_TTL` hours and keeps it in `.git/info/exclude` |
+| `scripts/qa-stores.cjs` | a QA engineer by hand; the qa plugin's preflight will read it | the QA store registry, one file per machine (`~/.config/domaine/qa-stores.json`, dir 0700, file 0600): `list`, `get <store>` (the only command that prints a password), `find`, `set`, `unset`, `path` |
 
 ## Skills
 
@@ -208,7 +209,7 @@ base, band and slim each write the lines they publish themselves to their own fi
 a line is on the line, written by that plugin, not inferred from a pane:
 
 - **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
-  `slim.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
+  `slim.jsonl`, and a team plugin's own, such as fe's `fe.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
   `<session-id>/` folder is still made under it. With neither (a cloud session) no file is written.
   Never under the project.
 - **Line:** one JSON object per line, oldest first:
@@ -320,6 +321,7 @@ scripts and texts have their own suites:
 | `tests/base-md-to-adf.mjs` | `scripts/md-to-adf.cjs`: the ADF it writes, the CLI contract, round trips through slim's adf engine |
 | `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts, `--json`, `--log-dir`, Windows |
 | `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list) and the `scripts/scratch-hygiene.cjs` sweep |
+| `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get`, `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
 
 How the pieces fit — the mods, the atoms band reads, why some checks stay scripts:
 [ARCHITECTURE.md](ARCHITECTURE.md).

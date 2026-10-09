@@ -43,9 +43,10 @@ usage: bootstrap.sh [--dir <path>] [--targets <csv>] [--plugins <csv>] [--yes] [
   --targets <csv>   cursor,codex,opencode,claude or all — hosts to install for, in that order;
                     --target is accepted as an alias. Without it, and with a terminal to ask
                     on, you get a picker
-  --plugins <csv>   claude only: the plugins to print instead of fnd, in install order
-                    (slim,band,base). An install that names fnd beside base is refused: the
-                    two never run together. With --uninstall, only the named plugins are listed
+  --plugins <csv>   claude only: the plugins to print, in install order (default
+                    slim,band,base,fe; fnd alone for the legacy plugin). An install that names
+                    fnd beside base or fe is refused: they never run together. With
+                    --uninstall, only the named plugins are listed
   --yes             accept the defaults and never prompt (the default destination, and every
                     host when --targets is absent)
   --copy            passed through to install.sh (copy instead of symlink)
@@ -214,8 +215,9 @@ fi
 [ -n "$TARGET_LIST" ] || { echo "error: no targets selected" >&2; usage >&2; exit 2; }
 
 # ------------------------------------------------------------------- the Claude Code set --
-# fnd until base and a team plugin are ready for team use; --plugins names the set instead. fnd ships
-# the same agents and MCP servers as base, so an install never names both.
+# The new set by default, each dependency before what requires it (base needs slim, fe needs base); fnd
+# only when --plugins names it. fnd ships the same agents, skills and MCP servers as base and fe, so an
+# install never names fnd beside either.
 CLAUDE_PLUGINS=""
 add_plugin() {
   case " $CLAUDE_PLUGINS " in
@@ -231,7 +233,7 @@ for p in $(printf '%s' "$PLUGINS" | tr ',' ' '); do
   add_plugin "$p"
 done
 set +f
-[ -n "$CLAUDE_PLUGINS" ] || CLAUDE_PLUGINS="fnd"
+[ -n "$CLAUDE_PLUGINS" ] || CLAUDE_PLUGINS="slim band base fe"
 case " $CLAUDE_PLUGINS " in
   *" fnd "*) CLAUDE_FND="yes" ;;
   *) CLAUDE_FND="no" ;;
@@ -240,8 +242,12 @@ case " $CLAUDE_PLUGINS " in
   *" base "*) CLAUDE_BASE="yes" ;;
   *) CLAUDE_BASE="no" ;;
 esac
-if [ "$ACTION" = "install" ] && [ "$CLAUDE_FND" = "yes" ] && [ "$CLAUDE_BASE" = "yes" ]; then
-  echo "error: fnd and base must not run together — name one of them in --plugins" >&2
+case " $CLAUDE_PLUGINS " in
+  *" fe "*) CLAUDE_FE="yes" ;;
+  *) CLAUDE_FE="no" ;;
+esac
+if [ "$ACTION" = "install" ] && [ "$CLAUDE_FND" = "yes" ] && { [ "$CLAUDE_BASE" = "yes" ] || [ "$CLAUDE_FE" = "yes" ]; }; then
+  echo "error: fnd must not run together with base or fe — name fnd alone, or the new set, in --plugins" >&2
   exit 2
 fi
 case " $TARGET_LIST " in
@@ -311,7 +317,7 @@ claude_block() {
   echo "claude: nothing to run from here — a Claude Code session cannot be driven from outside."
   local p reversed=""
   if [ "$ACTION" = "uninstall" ]; then
-    # dependents first: the install order puts a dependency (slim) before what requires it (base)
+    # dependents first: the install order puts a dependency (slim, base) before what requires it (base, fe)
     for p in $CLAUDE_PLUGINS; do reversed="$p $reversed"; done
     echo "        Remove from inside a session:"
     echo
@@ -328,8 +334,13 @@ claude_block() {
     fi
     if [ "$CLAUDE_BASE" = "yes" ]; then
       echo "        /base-doctor"
+    fi
+    if [ "$CLAUDE_FE" = "yes" ]; then
+      echo "        /fe-doctor"
+    fi
+    if [ "$CLAUDE_BASE" = "yes" ] || [ "$CLAUDE_FE" = "yes" ]; then
       echo
-      echo "        Moving from fnd: run /plugin uninstall fnd@domaine first — fnd and base never run together."
+      echo "        Moving from fnd: run /plugin uninstall fnd@domaine first — fnd never runs with base or fe."
     fi
   fi
   echo

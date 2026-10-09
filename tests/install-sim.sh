@@ -156,13 +156,13 @@ if [ "$RC" -eq 2 ] && grep -q "unknown plugin" "$E"; then ok
 else bad P3-path-name-refused "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # P4: a Claude-Code-only plugin (manifest, no host adapter) is refused per host with the
-# marketplace route — the shape plugins/slim, plugins/band and plugins/base ship in.
+# marketplace route — the shape plugins/slim, plugins/band, plugins/base and plugins/fe ship in.
 REPOP="$TMP/repo-plugins"; mkrepo "$REPOP"
-for p in slim band base; do
+for p in slim band base fe; do
   mkdir -p "$REPOP/plugins/$p/.claude-plugin"
   printf '{"name":"%s","version":"0.0.1"}\n' "$p" > "$REPOP/plugins/$p/.claude-plugin/plugin.json"
 done
-for p in slim band base; do
+for p in slim band base fe; do
   for host in cursor codex opencode; do
     run "$TMP/h-plugin-$p-$host" "$REPOP" --target "$host" --plugin "$p"
     if [ "$RC" -eq 2 ] && grep -q "plugin '$p' ships no $host adapter" "$E" \
@@ -173,7 +173,7 @@ for p in slim band base; do
 done
 
 run "$TMP/h-plugin-list" "$REPOP" --target cursor --plugin nope
-if [ "$RC" -eq 2 ] && grep -q "plugins/ holds: band base fnd slim" "$E"; then ok
+if [ "$RC" -eq 2 ] && grep -q "plugins/ holds: band base fe fnd slim" "$E"; then ok
 else bad P5-unknown-lists-all "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # --------------------------------------------------------------- cursor: fresh install ----

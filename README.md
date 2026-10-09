@@ -8,7 +8,7 @@ breaking-changes, preview themes, etc.) for Shopify theme work.
 CLI** and **OpenCode** through thin, committed adapters generated from it — one repo, no fork.
 See [Install — four hosts](#install--four-hosts).
 
-The repo is a marketplace (`domaine`, `.claude-plugin/marketplace.json`) that holds four plugins.
+The repo is a marketplace (`domaine`, `.claude-plugin/marketplace.json`) that holds five plugins.
 `plugins/fnd` is the Foundation plugin this README describes: skills, agents, scripts, classic
 hooks and the Claude Code hooks module. `plugins/slim` is the universal tool-result compression
 proxy: one Claude Code mod that compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and
@@ -19,10 +19,11 @@ fnd) and slim publish; while it is installed, fnd's own band stands down
 ([Which plugins to install](#which-plugins-to-install)). `plugins/base` is the shared plugin built
 beside fnd for Claude Code only: the readers, the Jira writer, the review agents, the task workspace,
 the guards, the conventions, a doctor and the shared MCP servers, reading large results through slim,
-which it requires ([plugins/base/README.md](plugins/base/README.md)). fnd is frozen; once a team
-plugin ships, new installs are slim + band + base + that team plugin, and fnd and base never run
-together.
-`tests/` covers all four, and `tests/mods-sim.sh` validates and tests
+which it requires ([plugins/base/README.md](plugins/base/README.md)). `plugins/fe` is the frontend
+team plugin on top of base: the Shopify theme skills, the theme-explorer agent, the project profile
+and store access ([plugins/fe/README.md](plugins/fe/README.md)). fnd is frozen; new installs are
+slim + band + base + fe, and fnd never runs together with base or fe.
+`tests/` covers all five, and `tests/mods-sim.sh` validates and tests
 every `plugins/*/hooks/hooks.json` module.
 
 ## What's inside
@@ -42,6 +43,10 @@ in its own subfolder under `plugins/`:
 │   │                             #   plugins/slim/README.md)
 │   ├── band/                     # the status band, Log and Progress panes (Claude Code only;
 │   │                             #   plugins/band/README.md)
+│   ├── base/                     # the shared plugin: readers, writer, reviewers, workspace, guards
+│   │                             #   (Claude Code only; plugins/base/README.md)
+│   ├── fe/                       # the frontend team plugin on top of base (Claude Code only;
+│   │                             #   plugins/fe/README.md)
 │   └── fnd/                      # the Foundation plugin (self-contained)
 │       ├── .claude-plugin/
 │       │   └── plugin.json       # plugin manifest (+ bundled mcpServers) — canonical
@@ -219,7 +224,7 @@ remain the full story — the fast path is those same steps with the typing remo
 
 | Host | Install | Verify | Details |
 |---|---|---|---|
-| Claude Code | `/plugin marketplace add …` + `/plugin install fnd@domaine` | `/fnd:smoke-test` | below |
+| Claude Code | `/plugin marketplace add …` + `/plugin install` slim, band, base and fe (legacy: `/plugin install fnd@domaine`) | `/base-doctor` + `/fe-doctor` (legacy: `/fnd:smoke-test`) | below |
 | Cursor | Customize → Plugins → **Add Marketplace** (dev channel: `./scripts/install.sh --target cursor`; a Cursor bug currently ignores subagent model pins on every route — see the doc) | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
 | Codex CLI | `codex plugin marketplace add …` **plus** `./scripts/install.sh --target codex` (subagents; Codex reads roles from `~/.codex/agents`, never from the plugin cache) | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
 | OpenCode | `./scripts/install.sh --target opencode` | `/smoke-test` (command shim) | [docs/README.opencode.md](docs/README.opencode.md) |
@@ -230,10 +235,10 @@ spawns one subagent, attempts a `--no-verify` commit in a scratch repo expecting
 block it, and reports a pass/fail matrix with remediation. `preflight-checks` keeps the
 recurring per-project role.
 
-`install.sh` takes `--plugin <name>` (default `fnd`). `slim`, `band` and `base` are Claude Code only —
-they ship no Cursor, Codex or OpenCode adapter, so `install.sh --plugin slim`, `install.sh --plugin band`
-and `install.sh --plugin base` exit 2 and point at `/plugin marketplace add …` +
-`/plugin install <name>@domaine`.
+`install.sh` takes `--plugin <name>` (default `fnd`). `slim`, `band`, `base` and `fe` are Claude Code
+only — they ship no Cursor, Codex or OpenCode adapter, so `install.sh --plugin slim`,
+`install.sh --plugin band`, `install.sh --plugin base` and `install.sh --plugin fe` exit 2 and point
+at `/plugin marketplace add …` + `/plugin install <name>@domaine`.
 
 ### Claude Code — from the published Git marketplace (team use)
 
@@ -241,15 +246,24 @@ and `install.sh --plugin base` exit 2 and point at `/plugin marketplace add …`
 # 1. Add the marketplace (you'll get a trust prompt — confirm it)
 /plugin marketplace add domaine-oleksandr-kever/claude-plugins
 
-# 2. Install the plugin from it
-/plugin install fnd@domaine
+# 2. Install the plugins from it, each dependency before what requires it
+/plugin install slim@domaine
+/plugin install band@domaine
+/plugin install base@domaine
+/plugin install fe@domaine
 
 # 3. Activate without restarting the session
 /reload-plugins
 
-# 4. Prove the install once, in a session
-/fnd:smoke-test
+# 4. Check the install, in a session
+/base-doctor
+/fe-doctor
 ```
+
+This is the set for new installs: slim + band + base + fe. fnd is legacy and never runs with base or
+fe; an existing fnd install keeps `/plugin install fnd@domaine` and `/fnd:smoke-test`
+([Which plugins to install](#which-plugins-to-install)). To move from fnd, run
+`/plugin uninstall fnd@domaine` first.
 
 `/plugin marketplace add` shows a **trust dialog** the first time, because a
 marketplace can ship hooks, commands, and MCP servers that run on your machine.
@@ -257,30 +271,35 @@ Review the source, then confirm to add it to your trusted marketplaces. To make
 it trusted for a whole team without each person confirming, an admin can
 predeclare it in managed settings under `extraKnownMarketplaces`.
 
-`/plugin install slim@domaine` installs the second plugin, which compresses large tool results —
+`/plugin install slim@domaine` installs slim, which compresses large tool results —
 MCP, Bash, Read, WebFetch, WebSearch, Grep, Glob and Agent — as well as data pasted into a prompt and
 @-mentioned data files, and adds a `lookup` and a `view` tool (Claude Code only; see
 [plugins/slim/README.md](plugins/slim/README.md), which also holds slim's complete switch table).
 
-`/plugin install band@domaine` installs the third, which draws the status band above the prompt, the
+`/plugin install band@domaine` installs band, which draws the status band above the prompt, the
 event log pane and the Progress pane (Claude Code only; see
 [plugins/band/README.md](plugins/band/README.md)). Update fnd first: an fnd release older than the one
 that yields to band (0.134.0 and earlier) still draws its own band, and only one plugin's band can show
 above the prompt, so load order decides which. fnd's `FND_BAND_COST` does not carry over: set
 `BAND_COST=1` in `~/.claude/settings.json` → `env` to keep the cost segment.
 
-`/plugin install base@domaine` installs the fourth, the shared plugin that replaces fnd together with
-a team plugin (Claude Code only; see [plugins/base/README.md](plugins/base/README.md)). It requires
-slim, and it never runs with fnd: uninstall fnd first (`/plugin uninstall fnd@domaine`). It is not
-ready for team use yet, so the team-use block above and `scripts/bootstrap.sh --targets claude` still
-install fnd; `--plugins slim,band,base` prints the new set instead, followed by `/base-doctor`,
-which checks the install from inside the session, and an install that names fnd beside base is refused.
+`/plugin install base@domaine` installs base, the shared plugin that replaces fnd together with a
+team plugin (Claude Code only; see [plugins/base/README.md](plugins/base/README.md)). It requires
+slim, and it never runs with fnd: uninstall fnd first (`/plugin uninstall fnd@domaine`).
+`/base-doctor` checks it from inside the session.
+
+`/plugin install fe@domaine` installs fe, the frontend team plugin: the Shopify theme skills, the
+`fe:theme-explorer` agent, the project profile and store access (Claude Code only; see
+[plugins/fe/README.md](plugins/fe/README.md)). It requires base, and slim through base, and never
+runs with fnd. `/fe-doctor` checks it from inside the session.
+
+`scripts/bootstrap.sh --targets claude` prints the block above; `--plugins fnd` prints the legacy fnd
+install instead, and an install that names fnd beside base or fe is refused.
 
 ### Which plugins to install
 
-fnd is frozen. Once a team plugin ships, new installs are slim + band + base + that team plugin;
-until then the team-use block installs fnd. fnd and base never run together: they ship the same
-agents and MCP servers. The table below is the fnd side.
+fnd is frozen. New installs are slim + band + base + fe. fnd never runs together with base or fe:
+they ship the same agents, skills and MCP servers. The table below is the fnd side.
 
 fnd works alone; slim and band add to it and also load without it. slim and band are Claude Code
 mods and nothing else, so on Cursor, Codex and OpenCode only fnd applies.
@@ -580,7 +599,7 @@ codex plugin marketplace upgrade         # Codex, then a new session
 at your clone, so re-running the installer *is* the update — it pulls and re-links in one pass:
 
 ```bash
-./scripts/install.sh --target <cursor|opencode|codex> [--plugin <name>]   # --plugin defaults to fnd; slim and band are Claude Code only
+./scripts/install.sh --target <cursor|opencode|codex> [--plugin <name>]   # --plugin defaults to fnd; slim, band, base and fe are Claude Code only
 ```
 
 - Skills, references, agents and scripts apply on the **next read**; manifest, hook-wiring, MCP

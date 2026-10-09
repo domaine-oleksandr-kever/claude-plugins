@@ -18,6 +18,8 @@ real_stamps() {
   cksum < "$ROOT/plugins/fnd/.claude-plugin/plugin.json"
   cksum < "$ROOT/plugins/base/.claude-plugin/plugin.json"
   cksum < "$ROOT/plugins/base/README.md"
+  cksum < "$ROOT/plugins/fe/.claude-plugin/plugin.json"
+  cksum < "$ROOT/plugins/fe/README.md"
   cksum < "$ROOT/README.md"
 }
 REAL_BEFORE="$(real_stamps)"
@@ -426,6 +428,30 @@ if [ "$rc" -eq 0 ] \
    && grep -q '^fnd v0.132.0$' "$C20B/README.md" \
    && [ "$(cksum < "$C20B/plugins/fnd/.claude-plugin/plugin.json")" = "$FND_BEFORE" ]; then ok
 else bad C20b-plugin-base "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E") readme=$(tr '\n' ';' < "$C20B/README.md")"; fi
+
+# C21 fe stamps its manifest and its README marker; a dry run names it and writes nothing
+C21="$TMP/c21"; plugin_sandbox "$C21" fe; BEFORE="$(snap "$C21")"
+rc=0; run patch --root "$C21" --plugin fe --dry-run || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(snap "$C21")" = "$BEFORE" ] \
+   && grep -q '^bump-version: 0.1.0 -> 0.1.1  (dry run — nothing written; plugin fe)$' "$O" \
+   && grep -q '^  stamped   plugins/fe/.claude-plugin/plugin.json  0.1.0 -> 0.1.1$' "$O" \
+   && grep -q '^  stamped   plugins/fe/README.md' "$O" \
+   && ! grep -q 'plugins/fnd/' "$O"; then ok
+else bad C21-plugin-fe-dry-run "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E")"; fi
+
+# C21b the marker is the whole word: "base v…" and "safe v…" beside it in fe's README stay as they are
+C21B="$TMP/c21b"; plugin_sandbox "$C21B" fe
+printf 'Requires base v0.2.0; safe v0.1.0 is not a marker.\n' >> "$C21B/plugins/fe/README.md"
+FND_BEFORE="$(cksum < "$C21B/plugins/fnd/.claude-plugin/plugin.json")"
+rc=0; run 0.2.0 --root "$C21B" --plugin fe || rc=$?
+if [ "$rc" -eq 0 ] \
+   && [ "$(ver "$C21B/plugins/fe/.claude-plugin/plugin.json")" = "0.2.0" ] \
+   && grep -q '^fe v0.2.0$' "$C21B/README.md" \
+   && grep -q 'Installed build: fe v0.2.0' "$C21B/plugins/fe/README.md" \
+   && grep -qF 'Requires base v0.2.0; safe v0.1.0 is not a marker.' "$C21B/plugins/fe/README.md" \
+   && grep -q '^fnd v0.132.0$' "$C21B/README.md" \
+   && [ "$(cksum < "$C21B/plugins/fnd/.claude-plugin/plugin.json")" = "$FND_BEFORE" ]; then ok
+else bad C21b-plugin-fe "rc=$rc out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E") readme=$(tr '\n' ';' < "$C21B/plugins/fe/README.md")"; fi
 
 # ---------------------------------------------- F fnd's frozen copy keeps its fnd default --
 # fnd's own README documents `node plugins/fnd/scripts/bump-version.cjs <v>` for its release, so the

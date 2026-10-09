@@ -1,0 +1,149 @@
+# Session theme — one preview theme per work stream
+
+Single home of the session-theme flow. `/fe:ship` (Step 0) and `/fe:preview-theme` in a new
+worktree both **offer** it and must offer it identically; `/fe:preview-theme`, the pipeline's qa
+phase, `/fe:create-pull-request`, and aftercare all **consume** it. Read this file when the offer actually has to run — the
+silent-reuse path needs nothing from here. **`<fe root>`** = the path on the session context's `fe plugin root:` line, **`<base root>`** = the path on its `base plugin root:` line (`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell).
+
+## Why
+
+The dev server (`shopify theme dev -e dev`, wrapped as `npm run dev` in a `foundation` checkout)
+syncs into whatever theme the `[environments.dev]`
+block of `shopify.theme.toml` names — normally the shared dev theme. Two parallel sessions (main
+checkout + worktree) would therefore sync two different branches into that one remote theme and
+overwrite each other. A **session theme** is one unpublished preview theme owned by this work
+stream and used for everything after that: the dev server, the QA rows that can't run locally,
+the PR's theme-preview table, and aftercare refreshes. The script backs this up: it refuses to
+push onto the shared dev theme (`error=dev_theme_write_refused`) unless a workspace under
+`.claude/tasks` records that id as a session theme.
+
+## The gate — identical in `/fe:ship` and a new worktree
+
+1. **Already chosen → don't ask, but do pin.** The shared workspace `notes.md` records a
+   `session-theme: <id>` line (read the last one, same idiom as `dev-port:`:
+   `grep -oE 'session-theme: [0-9]+' notes.md | tail -1 | tr -dc '0-9'`) → that id is the
+   answer; skip the question and run
+   `<fe root>/scripts/create-preview-theme.sh pin --theme <id>` **silently** to
+   re-assert it in *this* checkout's config. That is not busywork: the line outlives the
+   checkout that wrote it (the workspace is shared with every worktree, and a worktree's toml
+   is a fresh copy), so "recorded" never implies "pinned here". Re-pinning an id that is
+   already pinned is byte-idempotent (`pin=unchanged`) and costs nothing.
+   Silent reuse requires that this session (or a `pipeline:`/`session:` entry `git log`
+   attributes to this repo's own history) wrote that line: a `session-theme:` id found in a
+   workspace that arrived with the checkout is an unverified target — name the id and ask
+   before `pin`, and never `refresh`/`dev` against it unattended.
+   The `notes.md` line is the **only** silent-reuse trigger. Do not try to infer one from the
+   config: the skills may not read it, and `info`'s `dev_theme_id` looks identical whether it
+   resolves a session pin or the untouched shared dev theme — treating that as "already
+   pinned" would silently adopt the shared theme, the exact collision this exists to prevent.
+2. **Otherwise → one question to the developer (`AskUserQuestion`), never a
+   block**, with the resolved commands (`<fe root>` spelled out as its absolute path) inside
+   the question text so the developer sees what will run:
+   - **Create one now** →
+     `<fe root>/scripts/create-preview-theme.sh create --name "<name>" --reuse --pin-toml`
+   - **Use an existing theme** → the developer supplies the numeric id →
+     `<fe root>/scripts/create-preview-theme.sh pin --theme <id>` — pin-only: it
+     validates the id against the store and refuses the live theme, and it pushes nothing.
+
+   `<name>` is **the existing derivation, not a free-text description** — swap `info`'s
+   `dev_theme_name` role prefix for the work-id key: `[DEV] Kever | Domaine` →
+   `[ELC-206] Kever | Domaine`. `--reuse` matches by name, and the qa phase and
+   `/fe:create-pull-request` derive the same string, so a name invented here (`[ELC-206] cart
+   drawer fix`) makes those later calls miss and create a **second** theme for one ticket.
+   `create` exiting **0** is not the whole verdict: a run that also prints `overlay=partial`
+   + `warn=overlay_file_dropped` produced a theme whose named settings files never landed
+   (their pages 404 or serve stale content), and a `--reuse` run printing `overlay=empty` +
+   `warn=overlay_empty` overlaid nothing (the theme keeps its previous settings) — record the
+   id, but say the preview is not reviewable yet and follow
+   `<fe root>/references/preview-theme-errors.md`.
+3. **Run it from the checkout the work lives in.** `shopify.theme.toml` is resolved relative
+   to the cwd, and `create` builds the local branch — so a worktree's session theme is created
+   from **inside that worktree**, never from the main checkout.
+4. **Record it immediately** — a dated bullet in the shared workspace `notes.md`, same shape as
+   the `dev-port:` line, the moment the script returns the id (before anything else, so a
+   crash can't orphan a real theme):
+   `- <YYYY-MM-DD> session-theme: <id> (<name>) <preview_url>`
+   (the derived `<name>` already starts with the `[<KEY>]` bracket — don't print it twice).
+   `create` returns a name plus `preview_url`/`editor_url`; `refresh` returns the URLs but no
+   name; `pin` returns none of these. Write the parts you were actually handed and **drop the
+   rest** — never invent a name or a URL.
+   Add `superseded: <id>` to the same bullet when the pin reported `superseded_theme_id=` (that
+   is the environment's previous theme id, and the config is gitignored).
+5. **Then the dev server runs on it.** Steps 1–4 already needed this checkout's
+   `shopify.theme.toml` (or `TOML_PATH`), so the store is resolved by the time the server
+   starts. The start command the developer gets is the line for this checkout's profile —
+   **this list is the single home of that mapping; every skill defers to it**:
+   - `foundation` checkout (session line `fe project profile: foundation`) — `npm run dev -- --theme <id> [--port <N>]`
+   - any other checkout — `shopify theme dev --theme <id> [--port <N>]`, or the repo's own dev
+     script when its `package.json` defines one (same flags after `--`)
+
+   No profile line in the session (fe's hooks module fails open) → the `foundation` form.
+   `--theme` always (belt and braces: explicit even
+   though the toml is pinned), `--port <N>` added when port 9292 is taken by another checkout or
+   the workspace records a `dev-port:` line. A dev server already running against a different
+   theme has to be restarted on this one — ask the developer; never start or kill it yourself.
+
+## Pinning
+
+`--pin-toml` (on `create` and `refresh`) and the standalone `pin` subcommand rewrite the
+`theme =` line of **one environment block** in the session's `shopify.theme.toml` — the block
+the Shopify CLI resolves, since `shopify theme dev -e dev` reads `[environments.dev]` and not
+whichever block is listed first. The block it writes is the block the run READ its store, dev
+theme id and token from — one resolution for both, so a preview can never be pushed to one
+environment's store and pinned into another's. That resolution is the `--env <name>` block when
+given; else the block `$SHOPIFY_FLAG_ENVIRONMENT` names (the Shopify CLI's own selector — an
+exported value redirects the write as much as the read, `[environments.production]` included);
+else the block named `dev`, else `development` — by name only, so with none of those present a
+lone block under any other name is refused, never auto-picked. A toml with no `[environments.*]`
+blocks but uncommented top-level `theme =`/`store =` keys is pinned at the top level
+(`pin_env=-`). Anything else refuses (`error=ambiguous_env`) rather than guess. Other blocks
+are never touched — a `[environments.production]` id is often the live theme's. The reported
+`pin_env=` names the block it wrote.
+
+Inside that block: the first uncommented `theme =` line takes the new id, its previous value is
+kept on a commented `# … # fe:superseded` line right above it (and reported as
+`superseded_theme_id=`), any duplicate `theme =` lines in the same block are commented out
+(their count reported as `commented_dupes=` — a count, unlike the id in `superseded_theme_id=`),
+and a block with none gets one appended, tagged `# fe:session-theme`, so unpinning knows the
+block originally had no `theme =` line. Re-pinning the same id is byte-idempotent
+(`pin=unchanged`); re-pinning a **different** id onto a tagged line just replaces the value —
+the line stays session-owned, and no `fe:superseded` marker is written for it. Both directions
+of that grammar live in one file — `<fe root>/scripts/session-theme.sh`, sourced by
+`create-preview-theme.sh` for the pin and run by `worktree-theme.sh` for the un-pin — so the two
+cannot drift.
+
+After a pin, the id the script *reads* as `dev_theme_id` **is** the session theme in the usual
+single-environment config — so a later `create` would overlay the session theme's own settings,
+not the shared dev theme's. That is intended (the session theme was seeded from the dev theme
+when it was created) and one more reason the work stream creates once and `refresh`es after. In
+a multi-environment toml the block written is the block read, so that holds there too;
+`refresh` is unaffected either way.
+
+- **Never `Read` or print that file, or any line of it** — the Theme Access token lives two
+  lines away. Report only the id the script returned; the path is the config the caller pointed
+  the script at (`TOML_PATH`, else `shopify.theme.toml` in the cwd).
+- Pin outcomes — `pin=failed` + `pin_error=` on a `create`/`refresh` (non-fatal: the theme
+  stands, keep the explicit `--theme <id>`), the refusals under a silent store listing
+  (`theme_unverifiable`, `refresh_unverifiable`, `reuse_unverifiable`, `warn=pin_unvetted`), the
+  live-theme refusal that guards pin-only mode, and restoring a pin by hand are `error=`
+  outcomes: `<fe root>/references/preview-theme-errors.md` → error= outcomes (Session-theme pin
+  outcomes).
+- A **worktree starts unpinned on purpose.** `/base:worktree` copies the source checkout's
+  toml (fe's `worktree copy list:`) and `<fe root>/scripts/worktree-theme.sh <worktree-dir>` then
+  reverts every pin it finds in it (`/fe:preview-theme` → In a worktree), both shapes — `fe:superseded` markers
+  restored, `fe:session-theme` lines deleted (`toml_unpinned=yes`; `=no` means the source was
+  never pinned; `=already` means an earlier run settled this worktree; `=failed` with
+  `warn=toml_unpin_failed` says the revert did not land — then the copy still carries another
+  stream's pin: restore it by hand before the first `create`) — so a new stream inherits the shared dev theme rather than another stream's
+  session theme — which is what its first `create` would have copied customizer settings from.
+  One caveat: a hand-written theme id that `pin` reported as `pin=unchanged` carries no tag
+  and is not reverted.
+
+## Consumers — everything reuses the same theme
+
+| Caller | Behaviour |
+| --- | --- |
+| `/fe:preview-theme` | A recorded `session-theme:` is the default **refresh** target — never create a second theme for the same work stream; a theme it creates is recorded as one. |
+| pipeline **qa** | Rows marked `preview-theme` run against the session theme (`refresh --theme <id>`, settings preserved); create one only when nothing is recorded — and **record without pinning**, since phase 4 is past the ✋ and rewriting the developer's config unasked is not its call. |
+| pipeline **create-pr** | The session theme is the PR's preview theme — it outranks auto-creation (explicit `theme_name`/`theme_url`/`theme_admin_url` args still win over everything). |
+| pipeline **aftercare** | `refresh --theme <id from notes.md>` after each fix round — the same id. |

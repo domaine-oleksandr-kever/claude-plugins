@@ -30,6 +30,12 @@
       "source": "./plugins/base",
       "description": "Shared Domaine plugin for Claude Code: the Jira, Figma and doc readers, the Jira writer and the review agents, the task workspace and the progress it publishes for band, the commit and review guards, the working conventions, a doctor, and the shared MCP servers; requires slim, never runs with fnd.",
       "license": "MIT"
+    },
+    {
+      "name": "fe",
+      "source": "./plugins/fe",
+      "description": "Domaine frontend team plugin for Claude Code: the Shopify theme skills (ship, preview theme, steps to test, TA, breaking changes, translations, PR), the theme-explorer agent, project profile and store access; requires base (and slim through it)",
+      "license": "MIT"
     }
   ]
 }

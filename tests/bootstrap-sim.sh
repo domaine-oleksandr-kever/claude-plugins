@@ -226,7 +226,7 @@ else bad A10-dir-flag-as-value "rc=$RC err=$(head -c 160 "$E")"; fi
 : > "$STUB_LOG"; : > "$GIT_LOG"; RC=0
 ( cd "$TMP" && env -u HOME PATH="$SHIM:$PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
     "$BASH_BIN" "$BOOT" --targets claude ) >"$O" 2>"$E" || RC=$?
-if [ "$RC" -eq 0 ] && grep -qF '/plugin install fnd@domaine' "$O"; then ok
+if [ "$RC" -eq 0 ] && grep -qF '/plugin install fe@domaine' "$O"; then ok
 else bad H1-no-home-claude-only "rc=$RC err=$(head -c 200 "$E")"; fi
 
 # …while a target that needs the default destination has nowhere to put it: a named refusal,
@@ -277,7 +277,7 @@ else bad B2-piped-no-side-effects "the refused piped run cloned or wrote somethi
 # …and the same piped shape WITH targets does the install, so B1 is proving the picker gate and
 # not merely that a piped bootstrap always fails.
 runpiped "$TMP/h-piped2" "$BOOT" --targets claude
-if [ "$TIMED_OUT" = "no" ] && [ "$RC" -eq 0 ] && grep -q '/plugin install fnd@domaine' "$O"; then ok
+if [ "$TIMED_OUT" = "no" ] && [ "$RC" -eq 0 ] && grep -q '/plugin install fe@domaine' "$O"; then ok
 else bad B3-piped-with-targets "timed_out=$TIMED_OUT rc=$RC out=$(head -c 200 "$O")"; fi
 
 # …and it stayed a print: the claude target is a few lines of text, so a claude-only run has
@@ -312,7 +312,7 @@ run "$TMP/h3" "$FIXBOOT" --targets all
 if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 3 ] \
    && [ "$(argv_line 1)" = "--target cursor" ] && [ "$(argv_line 2)" = "--target codex" ] \
    && [ "$(argv_line 3)" = "--target opencode" ] \
-   && grep -q '/plugin install fnd@domaine' "$O"; then ok
+   && grep -q '/plugin install fe@domaine' "$O"; then ok
 else bad C4-all-expands "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG")"; fi
 
 # a repeated host is one install, not two
@@ -352,8 +352,8 @@ else bad C10-symlinked-scripts-dir "rc=$RC out=$(tr '\n' ';' < "$O") git=$(tr '\
 
 # ------------------------------------------------------------------------- the claude target --
 # Claude Code installs from inside a live session and cannot be driven from outside, so this
-# target prints and says so. Until base and a team plugin are ready for team use the default is fnd,
-# and the slash commands are the README's team-use block, line for line.
+# target prints and says so. The default is the new set (slim, band, base, fe — each dependency before
+# what requires it), and the slash commands are the README's team-use block, line for line.
 run "$TMP/h8" "$FIXBOOT" --targets claude
 if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 0 ]; then ok
 else bad L1-claude-no-installer "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG")"; fi
@@ -368,18 +368,31 @@ else bad L2-claude-block-is-readme "readme='$(printf '%s' "$README_CMDS" | tr '\
 if grep -q "cannot be driven from outside" "$O"; then ok
 else bad L3-claude-informational "the claude target does not say it is informational"; fi
 
-if ! grep -q "base" "$O"; then ok
-else bad L4-default-names-no-base "out=$(tr '\n' ';' < "$O")"; fi
+# the default set verifies with both doctors after the reload, carries the migration line and never
+# names fnd's install or its verify step
+INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$INSTALLS" = "slim@domaine band@domaine base@domaine fe@domaine " ] \
+   && [ "$(grep -A2 '/reload-plugins' "$O" | tail -2 | tr -d ' ' | tr '\n' ' ')" = "/base-doctor /fe-doctor " ] \
+   && grep -qF "Moving from fnd: run /plugin uninstall fnd@domaine first" "$O" \
+   && ! grep -qF "/plugin install fnd@domaine" "$O" && ! grep -qF "/fnd:smoke-test" "$O"; then ok
+else bad L4-default-is-the-new-set "installs='$INSTALLS' out=$(tr '\n' ';' < "$O")"; fi
 
-# --plugins names the set instead of fnd; base's set verifies with /base-doctor after the reload,
-# carries the migration line and no fnd verify step
+# --plugins names another set; base's alone verifies with /base-doctor only, and keeps the migration line
 run "$TMP/h8a" "$FIXBOOT" --targets claude --plugins slim,band,base
 INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
 if [ "$RC" -eq 0 ] && [ "$INSTALLS" = "slim@domaine band@domaine base@domaine " ] \
    && grep -qF "Moving from fnd: run /plugin uninstall fnd@domaine first" "$O" \
    && [ "$(grep -A1 '/reload-plugins' "$O" | tail -1 | tr -d ' ')" = "/base-doctor" ] \
-   && ! grep -qF "/fnd:smoke-test" "$O"; then ok
+   && ! grep -qF "/fe-doctor" "$O" && ! grep -qF "/fnd:smoke-test" "$O"; then ok
 else bad L4b-claude-base-set "rc=$RC installs='$INSTALLS' out=$(tr '\n' ';' < "$O")"; fi
+
+# fnd is reached only by naming it: its own install and smoke test, no doctor and no migration line
+run "$TMP/h8f" "$FIXBOOT" --targets claude --plugins fnd
+INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$RC" -eq 0 ] && [ "$INSTALLS" = "fnd@domaine " ] \
+   && [ "$(grep -A1 '/reload-plugins' "$O" | tail -1 | tr -d ' ')" = "/fnd:smoke-test" ] \
+   && ! grep -qF -- "-doctor" "$O" && ! grep -qF "Moving from fnd" "$O"; then ok
+else bad L4c-claude-fnd-only "rc=$RC installs='$INSTALLS' out=$(tr '\n' ';' < "$O")"; fi
 
 # a repeat is one line, and a team plugin keeps its place after the three
 run "$TMP/h8b" "$FIXBOOT" --targets claude --plugins slim,band,base,fe,base
@@ -387,11 +400,11 @@ INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3
 if [ "$RC" -eq 0 ] && [ "$INSTALLS" = "slim@domaine band@domaine base@domaine fe@domaine " ]; then ok
 else bad L5-claude-plugins-set "rc=$RC installs='$INSTALLS'"; fi
 
-# fnd beside base is refused with the reason, before anything is printed or installed
-for spelling in "--plugins fnd,base" "--plugins=base,fe,fnd"; do
+# fnd beside base or fe is refused with the reason, before anything is printed or installed
+for spelling in "--plugins fnd,base" "--plugins=base,fe,fnd" "--plugins fe,fnd"; do
   # shellcheck disable=SC2086
   run "$TMP/h8c" "$FIXBOOT" --targets claude,cursor $spelling
-  if [ "$RC" -eq 2 ] && grep -qF "fnd and base must not run together" "$E" \
+  if [ "$RC" -eq 2 ] && grep -qF "fnd must not run together with base or fe" "$E" \
      && ! grep -q '/plugin ' "$O" && [ "$(argv_count)" -eq 0 ]; then ok
   else bad "L6-claude-fnd-base-refused($spelling)" "rc=$RC out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E")"; fi
 done
@@ -447,7 +460,7 @@ else bad F3-missing-installer-per-target "rc=$RC out=$(tr '\n' ';' < "$O") err=$
 
 # …and the two things an early exit would have taken with it: the hosts after the failed one, and
 # the report itself — which is where a developer learns what to fix by hand
-if grep -qF "/plugin install fnd@domaine" "$O" && grep -q "^== summary ==$" "$O" \
+if grep -qF "/plugin install fe@domaine" "$O" && grep -q "^== summary ==$" "$O" \
    && grep -q "left to do by hand" "$O" && grep -q "MARKETPLACE-installed fnd copy first" "$O"; then ok
 else bad F4-missing-installer-report "out=$(tr '\n' ';' < "$O")"; fi
 
@@ -550,7 +563,7 @@ if [ -n "$REAL_GIT" ]; then
   if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 3 ] \
      && grep -q '^--target cursor$' "$STUB_LOG" && grep -q '^--target codex$' "$STUB_LOG" \
      && grep -q '^--target opencode$' "$STUB_LOG" \
-     && grep -qF '/plugin install fnd@domaine' "$O" \
+     && grep -qF '/plugin install fe@domaine' "$O" \
      && [ -f "$TMP/h15b/tools/claude-plugins/plugins/fnd/skills/alpha/SKILL.md" ]; then ok
   else bad G7-yes-defaults-to-all "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG") err=$(head -c 160 "$E")"; fi
 
@@ -679,11 +692,11 @@ run "$TMP/h18" "$BOOT" --targets cursor --uninstall
 if [ "$RC" -eq 2 ] && ! grep -q '^clone' "$GIT_LOG" && [ ! -e "$TMP/h18/tools" ]; then ok
 else bad U4-uninstall-default-dir "rc=$RC err=$(head -c 200 "$E")"; fi
 
-# the default uninstall removes what the default install installed: fnd, and nothing else
+# the default uninstall removes what the default install installed, dependents first
 run "$TMP/h19" "$FIXBOOT" --targets claude --uninstall
 REMOVES="$(grep -oE '/plugin uninstall [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
 if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 0 ] \
-   && [ "$REMOVES" = "fnd@domaine " ] \
+   && [ "$REMOVES" = "fe@domaine base@domaine band@domaine slim@domaine " ] \
    && grep -qF "/plugin marketplace remove domaine" "$O"; then ok
 else bad U5-uninstall-claude-block "rc=$RC removes='$REMOVES' out=$(tr '\n' ';' < "$O")"; fi
 

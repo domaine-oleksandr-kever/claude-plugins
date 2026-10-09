@@ -122,6 +122,12 @@ printf '\n\nSee [the contract](ARCHITECTURE-gone.md).\n' >> "$S/plugins/base/REA
 run --root "$S"
 expect G7c-base-readme 1 "FAIL  links:plugins/base/README.md" "ARCHITECTURE-gone.md"
 
+# G7d: and fe's, whose links reach into base's README by a relative path.
+S="$(sandbox fereadme)"
+printf '\n\nSee [the event log](../base/README-gone.md#event-log-on-disk).\n' >> "$S/plugins/fe/README.md"
+run --root "$S"
+expect G7d-fe-readme 1 "FAIL  links:plugins/fe/README.md" "README-gone.md"
+
 # --------------------------------------------------------------------- skill size watchlist --
 # G8: the Codex cap is unconfirmed (M1b), so an oversized skill WARNs and the run still exits 0 —
 # a size watchlist that blocked CI would be a guess enforced as a rule.

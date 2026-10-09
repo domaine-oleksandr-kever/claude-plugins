@@ -106,6 +106,20 @@ for f in "$CANON" \
          "$ROOT/plugins/base/skills/worktree/SKILL.md" \
          "$ROOT/tests/base-doctor-sim.sh" \
          "$ROOT/tests/base-scripts-sim.sh" \
+         "$ROOT/plugins/base/scripts/qa-stores.cjs" \
+         "$ROOT/tests/base-qa-stores-sim.sh" \
+         "$ROOT/plugins/fe/.claude-plugin/plugin.json" \
+         "$ROOT/plugins/fe/hooks/hooks.json" \
+         "$ROOT/plugins/fe/hooks/mods/register.ts" \
+         "$ROOT/plugins/fe/types/index.d.ts" \
+         "$ROOT/plugins/fe/README.md" \
+         "$ROOT/plugins/fe/ARCHITECTURE.md" \
+         "$ROOT/plugins/fe/scripts/doctor.cjs" \
+         "$ROOT/plugins/fe/hooks/mods/session.ts" \
+         "$ROOT/plugins/fe/hooks/mods/doctor.ts" \
+         "$ROOT/tests/fe-doctor-sim.sh" \
+         "$ROOT/plugins/fe/scripts/_shopify-common.sh" \
+         "$ROOT/tests/fe-scripts-sim.sh" \
          "$ROOT/scripts/bump-version.cjs"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done
@@ -122,6 +136,12 @@ for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" "$ROOT/scripts/
          "$ROOT/plugins/base/scripts/worktree-setup.sh" "$ROOT/plugins/base/scripts/jira-attachments.sh" \
          "$ROOT/plugins/base/scripts/external-screenshots.sh" "$ROOT/plugins/base/scripts/figma-rest.sh"; do
   if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
+done
+# fe's skills and its doctor run its scripts by path: every one named here keeps its bit.
+fe_executables="theme-json.sh create-preview-theme.sh session-theme.sh shopify-admin-gql.sh project-profile.sh worktree-theme.sh"
+for n in $fe_executables; do
+  f="$ROOT/plugins/fe/scripts/$n"
+  if [ -x "$f" ]; then ok; else bad "executable-plugins/fe/scripts/$n" "missing or not executable"; fi
 done
 
 CANON_VERSION="$(jval "$CANON" version)"
@@ -219,9 +239,9 @@ for mk in "$ROOT"/.*-plugin/marketplace.json; do
 $rows
 EOF
   if [ "$saw_fnd" = yes ]; then ok; else bad "marketplace-$label" "no 'fnd' plugin entry"; fi
-  # which plugins each host lists is a decision, not an accident: slim, band and base are Claude Code only
+  # which plugins each host lists is a decision, not an accident: slim, band, base and fe are Claude Code only
   case "$label" in
-    .claude-plugin) want_list=" fnd slim band base" ;;
+    .claude-plugin) want_list=" fnd slim band base fe" ;;
     .cursor-plugin) want_list=" fnd" ;;
     *) want_list="$listed" ;;
   esac
@@ -236,6 +256,8 @@ if grep -qE 'band v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/band/README.md" 2>/dev
 else bad band-readme-marker "plugins/band/README.md has no 'band v<semver>' release marker"; fi
 if grep -qE 'base v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/base/README.md" 2>/dev/null; then ok
 else bad base-readme-marker "plugins/base/README.md has no 'base v<semver>' release marker"; fi
+if grep -qE '(^|[^A-Za-z0-9_])fe v[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/plugins/fe/README.md" 2>/dev/null; then ok
+else bad fe-readme-marker "plugins/fe/README.md has no 'fe v<semver>' release marker"; fi
 
 # --------------------------------------------------------- Cursor manifest pointers --
 if [ -f "$CURSOR_MANIFEST" ]; then
@@ -776,11 +798,11 @@ base_manifest="$("$NODE_BIN" -e '
 ' "$BASE_CANON" "$CANON" 2>&1)"
 if [ -z "$base_manifest" ]; then ok; else bad base-manifest "plugins/base plugin.json: $base_manifest"; fi
 
-# The engine compiles base's modules itself: an npm specifier, a require/import() or a Node/DOM global
-# fails there, not here. base writes only base.* atoms: a write to fnd, slim or band fails at run time.
-BASE_MODS="$BASE_P/hooks/mods"
-if [ -d "$BASE_MODS" ]; then
-  base_check="$("$NODE_BIN" -e '
+# The engine compiles a plugin's modules itself: an npm specifier, a require/import() or a Node/DOM global
+# fails there, not here. A plugin writes only its own atoms: a write to another plugin's key fails at run
+# time. mods_boundary <mods dir> <foreign plugins as a regex alternation> prints one line per offence.
+mods_boundary() {
+  "$NODE_BIN" -e '
     const fs = require("fs"), path = require("path");
     const out = [];
     const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) {
@@ -800,16 +822,20 @@ if [ -d "$BASE_MODS" ]; then
       if (isTest) return;
       const glob = /(^|[^$.\x27"\w])process\.|\bBuffer\b|\bglobalThis\b|\bwindow\.|\bdocument\./m.exec(src);
       if (glob) out.push(rel + ": Node/DOM global near \x27" + glob[0].trim() + "\x27");
-      const names = [...src.matchAll(/const\s+(\w+)\s*=\s*atom\(\s*\{\s*plugin:\s*["\x27](?:fnd|slim|band)["\x27]/g)].map((m) => m[1]);
+      const names = [...src.matchAll(new RegExp("const\\s+(\\w+)\\s*=\\s*atom\\(\\s*\\{\\s*plugin:\\s*[\"\x27](?:" + process.argv[2] + ")[\"\x27]", "g"))].map((m) => m[1]);
       for (const n of names) {
         if (new RegExp("\\bupdate\\(\\s*\\$\\s*,\\s*" + n + "\\b").test(src)) out.push(rel + ": update($, " + n + ")");
         if (new RegExp("\\$\\.state\\.(set|update|delete)\\(\\s*" + n + "\\b").test(src)) out.push(rel + ": $.state write to " + n);
       }
-      if (/\$\.state\.(set|update|delete)\(\s*\{\s*plugin:\s*["\x27](fnd|slim|band)["\x27]/.test(src)) out.push(rel + ": $.state write to a literal fnd/slim/band ref");
+      if (new RegExp("\\$\\.state\\.(set|update|delete)\\(\\s*\\{\\s*plugin:\\s*[\"\x27](" + process.argv[2] + ")[\"\x27]").test(src)) out.push(rel + ": $.state write to a literal " + process.argv[2] + " ref");
     };
     walk(process.argv[1]);
     process.stdout.write(out.join("\n"));
-  ' "$BASE_MODS" 2>&1)"
+  ' "$1" "$2" 2>&1
+}
+BASE_MODS="$BASE_P/hooks/mods"
+if [ -d "$BASE_MODS" ]; then
+  base_check="$(mods_boundary "$BASE_MODS" 'fnd|slim|band')"
   if [ -z "$base_check" ]; then ok
   else bad base-mods-boundary "$(printf '%s' "$base_check" | head -5 | tr '\n' ';')"; fi
 else
@@ -819,6 +845,37 @@ fi
 # second declaration of a dependency's key is a type conflict.
 if grep -qE '^[[:space:]]+(slim|band|fnd):[[:space:]]*\{' "$BASE_P/types/index.d.ts"; then
   bad base-types-own-keys "plugins/base/types/index.d.ts declares another plugin's PluginState key"
+else ok; fi
+
+# ------------------------------------------------------------------ fe: packaging + mods boundary --
+# fe is Claude Code only and depends on base alone: the engine lays the contracts of base and, through it,
+# slim. base owns the MCP servers fe's skills call, and fe hooks through its module only.
+FE_P="$ROOT/plugins/fe"
+for d in .cursor-plugin .codex-plugin opencode agents-cursor agents-codex agents-opencode commands-opencode rules; do
+  if [ -e "$FE_P/$d" ]; then bad "fe-claude-only-$d" "plugins/fe/$d exists; fe ships for Claude Code only"; else ok; fi
+done
+fe_manifest="$("$NODE_BIN" -e '
+  const out = [];
+  let m;
+  try { m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); }
+  catch (e) { console.log("unparseable: " + e.message); process.exit(0); }
+  if (m.name !== "fe") out.push("name " + JSON.stringify(m.name) + " != \"fe\"");
+  if (JSON.stringify(m.dependencies) !== JSON.stringify(["base"])) out.push("dependencies " + JSON.stringify(m.dependencies) + " != [\"base\"]");
+  if ("hooks" in m) out.push("a classic hooks key: fe hooks through its module only");
+  if ("mcpServers" in m) out.push("an mcpServers key: the servers are base\x27s");
+  if (m.types !== "./types/index.d.ts") out.push("types " + JSON.stringify(m.types) + " != \"./types/index.d.ts\"");
+  process.stdout.write(out.join("; "));
+' "$FE_P/.claude-plugin/plugin.json" 2>&1)"
+if [ -z "$fe_manifest" ]; then ok; else bad fe-manifest "plugins/fe plugin.json: $fe_manifest"; fi
+if [ -d "$FE_P/hooks/mods" ]; then
+  fe_check="$(mods_boundary "$FE_P/hooks/mods" 'base|fnd|slim|band')"
+  if [ -z "$fe_check" ]; then ok
+  else bad fe-mods-boundary "$(printf '%s' "$fe_check" | head -5 | tr '\n' ';')"; fi
+else
+  bad fe-mods-boundary "plugins/fe/hooks/mods missing"
+fi
+if grep -qE '^[[:space:]]+(base|slim|band|fnd):[[:space:]]*\{' "$FE_P/types/index.d.ts"; then
+  bad fe-types-own-keys "plugins/fe/types/index.d.ts declares another plugin's PluginState key"
 else ok; fi
 
 # The engine refuses a plugin named after its own chain member: validate passes, the hooks module

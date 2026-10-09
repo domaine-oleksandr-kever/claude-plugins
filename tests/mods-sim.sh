@@ -57,6 +57,10 @@ case "$checked" in
   *" base "*) ok ;;
   *) bad discovery-base "plugins/base/hooks/hooks.json not found — no base module was validated (checked:$checked)" ;;
 esac
+case "$checked" in
+  *" fe "*) ok ;;
+  *) bad discovery-fe "plugins/fe/hooks/hooks.json not found — no fe module was validated (checked:$checked)" ;;
+esac
 
 echo "mods-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi
