@@ -7,9 +7,10 @@
 #           (flags: `| bash -s -- --targets cursor,opencode --yes`)
 #   direct  ./scripts/bootstrap.sh   — from inside a checkout; the clone step is skipped and
 #           this checkout is the one installed
-# It owns four things only — the clone, the host picker, the Claude Code instruction block and
-# the "what is left to do by hand" report; every real install is delegated to install.sh, which
-# already does the linking, the ff-only update and the doctor run.
+# It owns four things only — the clone, the host picker, the Claude Code target and the "what is
+# left to do by hand" report. The Claude Code target runs the `claude plugin` CLI when `claude` is
+# on PATH and prints the slash commands otherwise; every other host's install is delegated to
+# install.sh, which already does the linking, the ff-only update and the doctor run.
 # Deliberately carries NO version stamp: it is always fetched from `main`, and the versions live
 # in the clone it produces.
 set -euo pipefail
@@ -42,16 +43,24 @@ usage: bootstrap.sh [--dir <path>] [--targets <csv>] [--plugins <csv>] [--yes] [
                     script runs from inside a checkout
   --targets <csv>   cursor,codex,opencode,claude or all — hosts to install for, in that order;
                     --target is accepted as an alias. Without it, and with a terminal to ask
-                    on, you get a picker
-  --plugins <csv>   claude only: the plugins to print, in install order (default
-                    slim,band,base,fe; fnd alone for the legacy plugin). An install that names
-                    fnd beside base or fe is refused: they never run together. With
-                    --uninstall, only the named plugins are listed
+                    on, you get a picker. claude runs 'claude plugin marketplace add|update' and
+                    'claude plugin install' (update when already installed, and enable when
+                    disabled) when the claude CLI is on PATH, and prints the slash commands when
+                    it is not
+  --plugins <csv>   claude only: the plugins to install (default slim,band,base,fe; fnd alone
+                    for the legacy plugin), always in the order slim, band, base, fe, fnd
+                    whatever order the list gives, so a dependency comes first. An install
+                    that names fnd beside base or fe is refused: they never run together, and
+                    neither is installed next to an enabled copy of the other. With
+                    --uninstall, only the named plugins are removed, dependents first
   --yes             accept the defaults and never prompt (the default destination, and every
-                    host when --targets is absent)
+                    host when --targets is absent); passed to 'claude plugin install|update'
+                    as -y
   --copy            passed through to install.sh (copy instead of symlink)
   --uninstall       remove what install.sh created for the selected hosts; needs an existing
-                    checkout (--dir or a direct run) and never clones
+                    checkout (--dir or a direct run) and never clones. For claude it runs
+                    'claude plugin uninstall' (dependents first, the marketplace kept) and
+                    needs no checkout
 EOF
 }
 
@@ -176,7 +185,7 @@ Which hosts should the plugins be installed for?
   1) cursor     symlink this checkout into ~/.cursor/plugins/local
   2) codex      link the required subagents into ~/.codex/agents
   3) opencode   link skills, agents, commands and the plugin adapter into ~/.config/opencode
-  4) claude     print the slash commands to run inside a Claude Code session
+  4) claude     install with the claude CLI (prints the slash commands when it is absent)
   5) all        every host above
 
 EOF
@@ -234,6 +243,17 @@ for p in $(printf '%s' "$PLUGINS" | tr ',' ' '); do
 done
 set +f
 [ -n "$CLAUDE_PLUGINS" ] || CLAUDE_PLUGINS="slim band base fe"
+# The dependency order, whatever order --plugins gave: base requires slim and fe requires base, so
+# an install that reached fe first would fail, and the reversed uninstall would strand fe. A name
+# outside the known five keeps its given place after them.
+ORDERED_PLUGINS=""
+for p in slim band base fe fnd; do
+  case " $CLAUDE_PLUGINS " in *" $p "*) ORDERED_PLUGINS="${ORDERED_PLUGINS:+$ORDERED_PLUGINS }$p" ;; esac
+done
+for p in $CLAUDE_PLUGINS; do
+  case " slim band base fe fnd " in *" $p "*) ;; *) ORDERED_PLUGINS="${ORDERED_PLUGINS:+$ORDERED_PLUGINS }$p" ;; esac
+done
+CLAUDE_PLUGINS="$ORDERED_PLUGINS"
 case " $CLAUDE_PLUGINS " in
   *" fnd "*) CLAUDE_FND="yes" ;;
   *) CLAUDE_FND="no" ;;
@@ -309,22 +329,197 @@ ensure_clone
 
 INSTALLER="$DIR/scripts/install.sh"
 
-# ------------------------------------------------------------------- Claude Code, by words --
-# Claude Code installs from its own marketplace inside a live session, and no outside process can
-# drive one — so this target is informational by design and says so rather than pretending.
+# ------------------------------------------------------------------------------ Claude Code --
+MARKETPLACE="domaine"
+MARKETPLACE_SOURCE="domaine-oleksandr-kever/claude-plugins"
+
+# dependents first: CLAUDE_PLUGINS is in dependency order (slim, base before base, fe)
+CLAUDE_REVERSED=""
+for p in $CLAUDE_PLUGINS; do CLAUDE_REVERSED="$p${CLAUDE_REVERSED:+ $CLAUDE_REVERSED}"; done
+
+CLAUDE_NEXT="restart Claude Code, or run /reload-plugins in an open session"
+CLAUDE_VERIFY=""
+if [ "$CLAUDE_FND" = "yes" ]; then CLAUDE_VERIFY="/fnd:smoke-test"; fi
+if [ "$CLAUDE_BASE" = "yes" ]; then CLAUDE_VERIFY="${CLAUDE_VERIFY:+$CLAUDE_VERIFY and }/base-doctor"; fi
+if [ "$CLAUDE_FE" = "yes" ]; then CLAUDE_VERIFY="${CLAUDE_VERIFY:+$CLAUDE_VERIFY and }/fe-doctor"; fi
+if [ "$ACTION" = "install" ] && [ -n "$CLAUDE_VERIFY" ]; then CLAUDE_NEXT="$CLAUDE_NEXT, then $CLAUDE_VERIFY"; fi
+
+# How the claude target ended: "cli-ok", "cli-failed", "conflict" (fnd beside base or fe, nothing
+# run) or "printed" — the leftovers read it, and a conflict also reads the removal steps.
+CLAUDE_OUTCOME=""
+CLAUDE_CONFLICT_STEPS=""
+
+# A child that inherits stdin in a piped run reads the rest of this script as its input, and a
+# prompt with nobody at it is a hang. A terminal gets the CLI's own confirmations; anything else
+# gets end of input. In 2.1.293 only install and update confirm anything (a marketplace-declared
+# command, which -y accepts); `marketplace add` has no confirmation flag. Should the add refuse
+# without a terminal anyway, its exit code becomes this target's FAILED line.
+claude_cli() {
+  local stdin="/dev/null"
+  if tty_available; then stdin="/dev/tty"; fi
+  echo "+ claude $*"
+  claude "$@" < "$stdin"
+}
+
+# The installed plugins as "<id> <scope> <enabled>" lines, from `claude plugin list --json`. Split
+# on the "id" key instead of parsed: a fresh machine has no jq, and each entry carries one id, one
+# scope and one enabled flag before the next id. INSTALLED_KNOWN stays "no" when the list fails.
+INSTALLED=""
+INSTALLED_KNOWN="no"
+read_installed() {
+  local json
+  json="$(claude plugin list --json < /dev/null 2>/dev/null)" || return 0
+  INSTALLED_KNOWN="yes"
+  INSTALLED="$(printf '%s' "$json" | tr '\n' ' ' | awk '{
+    n = split($0, part, /"id"[ \t]*:[ \t]*/)
+    for (i = 2; i <= n; i++) {
+      s = part[i]; id = ""; sc = "-"; en = "-"
+      if (match(s, /^"[^"]*"/)) id = substr(s, 2, RLENGTH - 2)
+      if (match(s, /"scope"[ \t]*:[ \t]*"[^"]*"/)) { sc = substr(s, RSTART, RLENGTH); sub(/^.*:[ \t]*"/, "", sc); sub(/"$/, "", sc) }
+      if (match(s, /"enabled"[ \t]*:[ \t]*(true|false)/)) { en = substr(s, RSTART, RLENGTH); sub(/^.*:[ \t]*/, "", en) }
+      if (id != "") print id, sc, en
+    }
+  }')"
+}
+# user_install <id> — prints "true"/"false" (enabled) for a user-scope install, nothing otherwise.
+# bootstrap installs at user scope, so a project-scope copy elsewhere is not "already installed".
+user_install() { printf '%s\n' "$INSTALLED" | awk -v id="$1" '$1 == id && $2 == "user" { print $3; exit }'; }
+# removal_steps <id regex> — how to remove every enabled copy whose id matches, joined by ", then ".
+# The CLI uninstalls only from user, project and local scope, and the last two only from inside
+# that project; a synced copy belongs to the claude.ai account and a managed one to the admin.
+removal_steps() {
+  printf '%s\n' "$INSTALLED" | awk -v re="$1" '$1 ~ re && $3 == "true" {
+    if ($2 == "synced") s = "remove " $1 " from your claude.ai account (it is synced from there)"
+    else if ($2 == "user" || $2 == "-") s = "claude plugin uninstall " $1
+    else if ($2 == "managed") s = "ask your admin to drop " $1 " from the managed settings (a user cannot uninstall it)"
+    else if ($2 == "project" || $2 == "local") s = "claude plugin uninstall -s " $2 " " $1 " (run it in the project that installed it)"
+    else s = "remove " $1 " where it was added (" $2 " scope)"
+    out = out (out == "" ? "" : ", then ") s
+  } END { printf "%s", out }'
+}
+
+# A re-run is the update: an existing `domaine` marketplace is refreshed (a failure only leaves
+# the cached catalog, so it warns), an absent one is added. A list that fails says nothing either
+# way, so the add is tried, and its failure is this target's.
+MARKETPLACE_WARN=""
+CONFLICT_WARN=""
+claude_marketplace() {
+  local list rc=0
+  list="$(claude plugin marketplace list --json < /dev/null 2>/dev/null)" || rc=$?
+  if [ "$rc" -eq 0 ] && printf '%s' "$list" | grep -q "\"name\"[[:space:]]*:[[:space:]]*\"$MARKETPLACE\""; then
+    claude_cli plugin marketplace update "$MARKETPLACE" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "claude: WARN — 'claude plugin marketplace update $MARKETPLACE' exit $rc; installing from the catalog already on disk" >&2
+      MARKETPLACE_WARN=" (WARN: claude plugin marketplace update $MARKETPLACE exit $rc)"
+    fi
+    return 0
+  fi
+  if [ "$rc" -ne 0 ]; then echo "claude: could not list marketplaces (exit $rc) — adding $MARKETPLACE_SOURCE"; fi
+  rc=0
+  claude_cli plugin marketplace add "$MARKETPLACE_SOURCE" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    record claude "FAILED (claude plugin marketplace add $MARKETPLACE_SOURCE exit $rc)"
+    EXIT_RC="$rc"
+  fi
+  return "$rc"
+}
+
+# The first failed install stops the rest: the plugins after it depend on it (base on slim, fe on
+# base), so they would fail too, and a half-installed set reported as one failure is easier to
+# re-run than a list of knock-on errors.
+claude_cli_install() {
+  local p id verb state rc yes="" what="" steps=""
+  if [ "$ASSUME_YES" = "yes" ]; then yes="-y"; fi
+  read_installed
+  # Any enabled fnd counts, whatever its marketplace: a claude.ai-synced fnd is shadowed only while
+  # fnd@domaine is installed, and loads once that copy is gone.
+  # An unreadable list must not pass for an empty one: the install goes ahead (a refusal would
+  # leave no way past a CLI whose list is broken), but the summary says the check never ran.
+  if [ "$INSTALLED_KNOWN" = "no" ]; then
+    echo "claude: could not read 'claude plugin list --json' — installing every plugin"
+    if [ "$CLAUDE_BASE" = "yes" ] || [ "$CLAUDE_FE" = "yes" ]; then what="fnd"
+    elif [ "$CLAUDE_FND" = "yes" ]; then what="base or fe"; fi
+    if [ -n "$what" ]; then
+      echo "claude: WARN — an enabled $what was not checked for; run 'claude plugin list' and remove it if it shows (fnd never runs with base or fe)" >&2
+      CONFLICT_WARN=" (WARN: $what not checked)"
+    fi
+  elif [ "$CLAUDE_BASE" = "yes" ] || [ "$CLAUDE_FE" = "yes" ]; then
+    what="fnd"; steps="$(removal_steps '^fnd@')"
+  elif [ "$CLAUDE_FND" = "yes" ]; then
+    what="base or fe"
+    steps="$(removal_steps "^fe@$MARKETPLACE\$")"
+    p="$(removal_steps "^base@$MARKETPLACE\$")"
+    if [ -n "$p" ]; then steps="${steps:+$steps, then }$p"; fi
+  fi
+  if [ -n "$steps" ]; then
+    echo "error: $what is installed and enabled — fnd never runs with base or fe." >&2
+    echo "       Remove it first: $steps" >&2
+    record claude "FAILED ($what is installed and enabled — remove it first)"
+    CLAUDE_CONFLICT_STEPS="$steps"
+    EXIT_RC=2; CLAUDE_OUTCOME="conflict"; return 0
+  fi
+  claude_marketplace || { CLAUDE_OUTCOME="cli-failed"; return 0; }
+  for p in $CLAUDE_PLUGINS; do
+    id="$p@$MARKETPLACE"
+    state="$(user_install "$id")"
+    verb="install"
+    if [ -n "$state" ]; then verb="update"; fi
+    rc=0
+    claude_cli plugin "$verb" $yes "$id" || rc=$?
+    # an update keeps a disabled plugin disabled; asking for it here means wanting it loaded
+    if [ "$rc" -eq 0 ] && [ "$state" = "false" ]; then
+      verb="enable"
+      claude_cli plugin enable "$id" || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+      record claude "FAILED (claude plugin $verb $id exit $rc)"
+      EXIT_RC="$rc"; CLAUDE_OUTCOME="cli-failed"; return 0
+    fi
+  done
+  echo "claude: $CLAUDE_NEXT"
+  record claude "OK$MARKETPLACE_WARN$CONFLICT_WARN"
+  CLAUDE_OUTCOME="cli-ok"
+}
+
+# An uninstall keeps going past a failure — each removal stands alone — and skips what `claude
+# plugin list` shows is not installed at user scope, so only a real removal failure is reported.
+# The marketplace is never removed: other plugins may still come from it.
+claude_cli_uninstall() {
+  local p id rc failed=""
+  read_installed
+  for p in $CLAUDE_REVERSED; do
+    id="$p@$MARKETPLACE"
+    if [ "$INSTALLED_KNOWN" = "yes" ] && [ -z "$(user_install "$id")" ]; then
+      echo "claude: $id is not installed at user scope — skipped"
+      continue
+    fi
+    rc=0
+    claude_cli plugin uninstall "$id" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      failed="${failed:+$failed; }claude plugin uninstall $id exit $rc"
+      EXIT_RC="$rc"
+    fi
+  done
+  echo "claude: the $MARKETPLACE marketplace stays — 'claude plugin marketplace remove $MARKETPLACE' drops it too (optional)"
+  if [ -n "$failed" ]; then
+    record claude "FAILED ($failed)"
+    CLAUDE_OUTCOME="cli-failed"
+  else
+    record claude "OK"
+    CLAUDE_OUTCOME="cli-ok"
+  fi
+}
+
+# Without the CLI (CI, a Desktop-only machine) the same steps are printed as slash commands.
 claude_block() {
   echo
-  echo "claude: nothing to run from here — a Claude Code session cannot be driven from outside."
-  local p reversed=""
+  echo "claude: the \`claude\` CLI is not on PATH — run these in a session:"
+  local p
   if [ "$ACTION" = "uninstall" ]; then
-    # dependents first: the install order puts a dependency (slim, base) before what requires it (base, fe)
-    for p in $CLAUDE_PLUGINS; do reversed="$p $reversed"; done
-    echo "        Remove from inside a session:"
     echo
-    for p in $reversed; do echo "        /plugin uninstall $p@domaine"; done
+    for p in $CLAUDE_REVERSED; do echo "        /plugin uninstall $p@domaine"; done
     echo "        /plugin marketplace remove domaine     # optional — drops the marketplace too"
   else
-    echo "        Run these in a session:"
     echo
     echo "        /plugin marketplace add domaine-oleksandr-kever/claude-plugins"
     for p in $CLAUDE_PLUGINS; do echo "        /plugin install $p@domaine"; done
@@ -354,7 +549,7 @@ if [ "$ACTION" = "uninstall" ]; then INSTALL_FLAGS="$INSTALL_FLAGS --uninstall";
 
 RESULTS=""
 EXIT_RC=0
-SAW_CURSOR="no"; SAW_CODEX="no"; SAW_OPENCODE="no"; SAW_CLAUDE="no"
+SAW_CURSOR="no"; SAW_CODEX="no"; SAW_OPENCODE="no"
 
 record() { RESULTS="${RESULTS}$1 $2
 "; }
@@ -362,9 +557,15 @@ record() { RESULTS="${RESULTS}$1 $2
 for target in $TARGET_LIST; do
   case "$target" in
     claude)
-      SAW_CLAUDE="yes"
-      claude_block
-      record claude "PRINTED (run the slash commands in a session)"
+      if command -v claude >/dev/null 2>&1; then
+        echo
+        echo "== claude =="
+        if [ "$ACTION" = "uninstall" ]; then claude_cli_uninstall; else claude_cli_install; fi
+      else
+        claude_block
+        record claude "PRINTED (no claude on PATH)"
+        CLAUDE_OUTCOME="printed"
+      fi
       continue
       ;;
     cursor) SAW_CURSOR="yes" ;;
@@ -423,8 +624,13 @@ if [ "$ACTION" = "uninstall" ]; then
     echo "  - OpenCode: the config you pasted by hand stays yours — drop the fnd 'mcp' block, the"
     echo "    permission fragment and the statics from 'instructions' in your own opencode.json"
   fi
-  if [ "$SAW_CLAUDE" = "yes" ]; then
+  if [ "$CLAUDE_OUTCOME" = "printed" ]; then
     echo "  - Claude Code: run the removal slash commands printed above in a live session"
+  elif [ "$CLAUDE_OUTCOME" = "cli-ok" ]; then
+    echo "  - Claude Code: $CLAUDE_NEXT"
+  elif [ "$CLAUDE_OUTCOME" = "cli-failed" ]; then
+    echo "  - Claude Code: fix the failed 'claude plugin' call above, re-run with --targets claude"
+    echo "    --uninstall, then $CLAUDE_NEXT"
   fi
 else
   if [ "$SAW_CURSOR" = "yes" ]; then
@@ -449,8 +655,21 @@ else
     fi
     echo "    Steps 3-5 of docs/README.opencode.md ($DIR/docs/README.opencode.md)"
   fi
-  if [ "$SAW_CLAUDE" = "yes" ]; then
+  if [ "$CLAUDE_OUTCOME" = "printed" ]; then
     echo "  - Claude Code: run the slash commands printed above in a live session"
+  elif [ "$CLAUDE_OUTCOME" = "cli-ok" ]; then
+    if [ -n "$CONFLICT_WARN" ]; then
+      echo "  - Claude Code: 'claude plugin list' could not be read, so nothing checked that fnd is not"
+      echo "    enabled beside base or fe — run it, and remove whichever side this run did not install"
+    fi
+    echo "  - Claude Code: $CLAUDE_NEXT"
+  elif [ "$CLAUDE_OUTCOME" = "cli-failed" ]; then
+    echo "  - Claude Code: fix the failed 'claude plugin' call above and re-run with --targets claude"
+    echo "    (a re-run updates what is already installed), then $CLAUDE_NEXT"
+  elif [ "$CLAUDE_OUTCOME" = "conflict" ]; then
+    echo "  - Claude Code: fnd never runs with base or fe, so nothing was installed. First"
+    echo "    $CLAUDE_CONFLICT_STEPS;"
+    echo "    then re-run this command and $CLAUDE_NEXT"
   fi
   if [ "$CLAUDE_FND" = "yes" ]; then
     echo "  - every host: run /smoke-test once in a live session (/fnd:smoke-test on Claude Code,"

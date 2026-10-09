@@ -1,0 +1,21 @@
+{
+  "extraKnownMarketplaces": {
+    "domaine": {
+      "source": { "source": "github", "repo": "domaine-oleksandr-kever/claude-plugins" },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "slim@domaine": true,
+    "band@domaine": true,
+    "base@domaine": true,
+    "fe@domaine": true,
+    "fnd@domaine": false
+  },
+  "strictKnownMarketplaces": [
+    { "source": "github", "repo": "domaine-oleksandr-kever/*" },
+    { "source": "github", "repo": "anthropics/claude-plugins-official" },
+    { "source": "skills-dir" }
+  ],
+  "pluginTrustMessage": "Plugins from the Domaine marketplace (domaine-oleksandr-kever/claude-plugins) are reviewed and approved by Domaine."
+}

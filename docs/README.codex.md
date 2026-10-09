@@ -4,6 +4,13 @@ Quickstart, update path and the host-specific deltas. The plugin content is the 
 Claude Code uses — only the wiring differs. Start at the
 [README](../README.md#install--four-hosts) for the cross-host picture.
 
+> [!NOTE]
+> **fnd is frozen at 0.135.0 and supported on Codex CLI until 2027-06-30.** Until then only a
+> blocking bug gets a fix, on request (the `report-plugin-issue` skill files it); there are no new
+> features. After 2027-06-30 nothing is fixed. The Claude Code replacement (slim, band, base
+> and fe) does not run on this host, so fnd stays the plugin here. Details:
+> [README → fnd is frozen](../README.md#fnd-is-frozen).
+
 > [!IMPORTANT]
 > **Verification status: unverified, frozen 2026-09-07.** The Codex wiring ships as last
 > measured (the marketplace install route exercised live; hooks fire per the `FND_HOST_TRACE`

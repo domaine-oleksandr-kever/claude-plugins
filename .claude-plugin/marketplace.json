@@ -10,7 +10,7 @@
     {
       "name": "fnd",
       "source": "./plugins/fnd",
-      "description": "Domaine Foundation skills — Agentic Assisted Development workflow for Shopify theme work.",
+      "description": "Legacy, frozen at 0.135.0, supported until 2027-06-30 — Domaine Foundation skills, the Agentic Assisted Development workflow for Shopify theme work (new Claude Code installs: slim, band, base, fe).",
       "license": "MIT"
     },
     {

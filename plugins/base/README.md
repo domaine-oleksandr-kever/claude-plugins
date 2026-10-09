@@ -46,6 +46,8 @@ The same set as settings, in `~/.claude/settings.json`:
 ```
 
 To move from fnd, run `/plugin uninstall fnd@domaine` first, then install the set above.
+fnd is frozen and supported until 2027-06-30; the whole move is in the root README
+([fnd is frozen](../../README.md#fnd-is-frozen)).
 
 `base:jira-reader` hands every downloaded screenshot and screen recording to slim's `view`, which
 writes the resized copy (or the frames) beside it in `.claude/tasks/<work-id>/tmp/attachments/`.

@@ -21,10 +21,40 @@ beside fnd for Claude Code only: the readers, the Jira writer, the review agents
 the guards, the conventions, a doctor and the shared MCP servers, reading large results through slim,
 which it requires ([plugins/base/README.md](plugins/base/README.md)). `plugins/fe` is the frontend
 team plugin on top of base: the Shopify theme skills, the theme-explorer agent, the project profile
-and store access ([plugins/fe/README.md](plugins/fe/README.md)). fnd is frozen; new installs are
-slim + band + base + fe, and fnd never runs together with base or fe.
+and store access ([plugins/fe/README.md](plugins/fe/README.md)).
 `tests/` covers all five, and `tests/mods-sim.sh` validates and tests
 every `plugins/*/hooks/hooks.json` module.
+
+## fnd is frozen
+
+fnd is frozen at 0.135.0 since 2026-10-08. It is supported until 2027-06-30: a
+blocking bug gets a fix on request (file it with `/fnd:report-plugin-issue`); there are no new
+features and no rewrites. After 2027-06-30 nothing in fnd is fixed, and its marketplace entry may
+be removed.
+
+New installs on Claude Code are slim + band + base + fe
+([plugins/base/README.md](plugins/base/README.md), [plugins/fe/README.md](plugins/fe/README.md)).
+fnd never runs together with base or fe: they ship the same agents, skills and MCP servers. To move
+an fnd install to the new set:
+
+1. `/plugin uninstall fnd@domaine`. If `/plugin` or `claude plugin list` also shows an fnd synced
+   from claude.ai, remove it from your claude.ai account too: it loads as soon as fnd@domaine is
+   gone. In a repository whose `.claude/settings.json` enables fnd, also set
+   `"fnd@domaine": false` in its `.claude/settings.local.json` ([Team rollout](#team-rollout)).
+2. `/plugin install slim@domaine`, `/plugin install band@domaine`, `/plugin install base@domaine`,
+   `/plugin install fe@domaine`, in this order
+3. `/reload-plugins`, then `/base-doctor` and `/fe-doctor`
+4. Rename the `FND_*` keys you set: fe's become `FE_*` (the list is in
+   [plugins/fe/README.md → Install](plugins/fe/README.md#install)), base's become `BASE_*`
+   ([plugins/base/README.md → Environment switches](plugins/base/README.md#environment-switches)),
+   `FND_BAND_COST` becomes `BAND_COST`, and `FND_EVENT_LOG` becomes one `<PLUGIN>_EVENT_LOG` per
+   plugin (`SLIM_`, `BAND_`, `BASE_`, `FE_`). slim's and band's own switches are in
+   [plugins/slim/README.md](plugins/slim/README.md) and
+   [plugins/band/README.md](plugins/band/README.md); any other `FND_*` key has no successor and can
+   be removed.
+
+On Cursor, Codex CLI and OpenCode, keep fnd: slim, band, base and fe are Claude Code only, so
+nothing replaces fnd on those hosts.
 
 ## What's inside
 
@@ -194,7 +224,9 @@ from inside WSL and point the host there — `doctor.cjs` says so in one row on 
 run. The Node pieces (the ADF converters, `json-slim`) need nothing but Node and run anywhere.
 
 **Fast path — one command.** On a clean machine, `scripts/bootstrap.sh` does the clone, asks which
-hosts to install for, runs `install.sh` for each, and prints what is left to do by hand:
+hosts to install for, runs `install.sh` for each, and prints what is left to do by hand. On a
+machine with the `claude` CLI, the Claude Code target adds the marketplace and installs the plugins
+itself; without the CLI, it prints the slash commands to run in a session. Run it with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash
@@ -224,7 +256,7 @@ remain the full story — the fast path is those same steps with the typing remo
 
 | Host | Install | Verify | Details |
 |---|---|---|---|
-| Claude Code | `/plugin marketplace add …` + `/plugin install` slim, band, base and fe (legacy: `/plugin install fnd@domaine`) | `/base-doctor` + `/fe-doctor` (legacy: `/fnd:smoke-test`) | below |
+| Claude Code | `/plugin marketplace add …` + `/plugin install` slim, band, base and fe (legacy: `/plugin install fnd@domaine`), or `scripts/bootstrap.sh --targets claude` | `/base-doctor` + `/fe-doctor` (legacy: `/fnd:smoke-test`) | below |
 | Cursor | Customize → Plugins → **Add Marketplace** (dev channel: `./scripts/install.sh --target cursor`; a Cursor bug currently ignores subagent model pins on every route — see the doc) | `/smoke-test` | [docs/README.cursor.md](docs/README.cursor.md) |
 | Codex CLI | `codex plugin marketplace add …` **plus** `./scripts/install.sh --target codex` (subagents; Codex reads roles from `~/.codex/agents`, never from the plugin cache) | `$smoke-test` | [docs/README.codex.md](docs/README.codex.md) |
 | OpenCode | `./scripts/install.sh --target opencode` | `/smoke-test` (command shim) | [docs/README.opencode.md](docs/README.opencode.md) |
@@ -263,7 +295,7 @@ at `/plugin marketplace add …` + `/plugin install <name>@domaine`.
 This is the set for new installs: slim + band + base + fe. fnd is legacy and never runs with base or
 fe; an existing fnd install keeps `/plugin install fnd@domaine` and `/fnd:smoke-test`
 ([Which plugins to install](#which-plugins-to-install)). To move from fnd, run
-`/plugin uninstall fnd@domaine` first.
+`/plugin uninstall fnd@domaine` first; the whole recipe is in [fnd is frozen](#fnd-is-frozen).
 
 `/plugin marketplace add` shows a **trust dialog** the first time, because a
 marketplace can ship hooks, commands, and MCP servers that run on your machine.
@@ -293,13 +325,24 @@ slim, and it never runs with fnd: uninstall fnd first (`/plugin uninstall fnd@do
 [plugins/fe/README.md](plugins/fe/README.md)). It requires base, and slim through base, and never
 runs with fnd. `/fe-doctor` checks it from inside the session.
 
-`scripts/bootstrap.sh --targets claude` prints the block above; `--plugins fnd` prints the legacy fnd
-install instead, and an install that names fnd beside base or fe is refused.
+`scripts/bootstrap.sh --targets claude` does the same from a shell when the `claude` CLI is on PATH.
+It runs `claude plugin marketplace add domaine-oleksandr-kever/claude-plugins` (or `claude plugin
+marketplace update domaine` when the marketplace is already there). Then it runs `claude plugin
+install <name>@domaine` for each plugin in the order above, or `claude plugin update` for one already
+installed at user scope. The first failed install stops the rest, and the summary names it. A re-run
+is the update. Then restart Claude Code, or run `/reload-plugins` in an open session, and run the
+doctors. `--plugins fnd` installs the legacy fnd instead. An install that names fnd beside base or fe
+is refused, and so is the new set on a machine where fnd is installed and enabled, an fnd synced
+from claude.ai included (and the reverse). When `claude plugin list --json` cannot be read, that
+check is skipped with a WARN in the summary. `--uninstall` runs `claude plugin uninstall` for each
+plugin, dependents first, and keeps the marketplace. Without the CLI, bootstrap prints the block
+above instead.
 
 ### Which plugins to install
 
-fnd is frozen. New installs are slim + band + base + fe. fnd never runs together with base or fe:
-they ship the same agents, skills and MCP servers. The table below is the fnd side.
+fnd is frozen at 0.135.0 and supported until 2027-06-30, blocking bugs only
+([fnd is frozen](#fnd-is-frozen)). New installs are slim + band + base + fe. fnd never runs together
+with base or fe: they ship the same agents, skills and MCP servers. The table below is the fnd side.
 
 fnd works alone; slim and band add to it and also load without it. slim and band are Claude Code
 mods and nothing else, so on Cursor, Codex and OpenCode only fnd applies.
@@ -529,6 +572,16 @@ layers, so keep plugin rules generic-Foundation and let projects own their delta
 /plugin marketplace remove domaine    # remove the marketplace
 ```
 
+The same from a shell, outside a session (restart Claude Code, or run `/reload-plugins` in an open
+session, to apply):
+
+```bash
+claude plugin disable fnd@domaine
+claude plugin enable fnd@domaine
+claude plugin uninstall fnd@domaine
+claude plugin marketplace remove domaine
+```
+
 ### Recommended Claude Code settings (copy-paste)
 
 Two files, two scopes — both plain JSON, and every value inside `"env"` is a **string**:
@@ -570,6 +623,85 @@ Claude Code to add these keys to `~/.claude/settings.json`; it can edit its own 
 
 Every `FND_*` switch also works from the Domaine env files — see
 [Environment switches](#environment-switches), which is the single home for what each one means.
+
+### Team rollout
+
+Two routes install the new set for a whole team, with no `/plugin` typing. Both keep fnd off.
+
+**Settings route.** Merge these two keys into `~/.claude/settings.json`, or into a repository's
+`.claude/settings.json` so that everyone who opens that repository gets it:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "domaine": {
+      "source": { "source": "github", "repo": "domaine-oleksandr-kever/claude-plugins" },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "slim@domaine": true,
+    "band@domaine": true,
+    "base@domaine": true,
+    "fe@domaine": true,
+    "fnd@domaine": false
+  }
+}
+```
+
+- The key `domaine` is the marketplace's own `name` in `.claude-plugin/marketplace.json`.
+- In a repository's `.claude/settings.json`, Claude Code registers the marketplace only after the
+  workspace trust dialog for that folder. Never commit the file to a client theme repository
+  without the client's agreement.
+- Project settings outrank user settings: `"fnd@domaine": false` in `~/.claude/settings.json` does
+  not turn off an fnd that a repository's `.claude/settings.json` enables. Set it in that
+  repository's `.claude/settings.local.json` instead.
+- Auto-update is off by default for a third-party marketplace; `"autoUpdate": true` turns it on.
+  The update runs in the background up to ten minutes after the first message of a session and
+  applies on the next launch. `DISABLE_AUTOUPDATER=1` or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+  turns it off, unless `FORCE_AUTOUPDATE_PLUGINS=1` is also set. An update needs a new manifest
+  `version`; every release of this marketplace bumps it.
+
+**Corporate route.** An admin puts the same keys in managed settings. There `enabledPlugins` `true`
+force-enables a plugin at every scope (a user cannot turn it off), and `false` blocks the plugin at
+every scope and hides it. Claude Code registers the marketplace and installs the plugins at the
+start of each user's next session, with no trust prompt. `docs/managed-settings.example.json` is a
+ready policy: the two keys, a marketplace allowlist and a trust message. Three ways deliver it:
+
+- **Server-managed settings**: claude.ai → Organization settings → Claude Code → Managed settings,
+  on Claude for Teams or Enterprise, edited by an Owner or Primary Owner. Claude Code fetches it at
+  startup and every hour. It does not reach a user who runs through Bedrock, Vertex or Foundry, a
+  non-default `ANTHROPIC_BASE_URL` or `apiKeyHelper`, or a Cowork session.
+- **Endpoint file**: macOS `/Library/Application Support/ClaudeCode/managed-settings.json`, Linux
+  and WSL `/etc/claude-code/managed-settings.json`, Windows
+  `C:\Program Files\ClaudeCode\managed-settings.json`. Any plan. A file that is not valid JSON stops
+  Claude Code from starting, so parse it before you deploy it.
+- **MDM**: the macOS profile domain `com.anthropic.claudecode`, or the Windows `REG_SZ` value
+  `HKLM\SOFTWARE\Policies\ClaudeCode\Settings`. Templates:
+  [github.com/anthropics/claude-code/tree/main/examples/mdm](https://github.com/anthropics/claude-code/tree/main/examples/mdm).
+
+The first source that delivers a policy key wins, in the order server, MDM, file.
+`"managedSourcesBehavior": "merge"` (Claude Code 2.1.242 or later), set in the highest source,
+combines them. Three managed-only keys complete the policy:
+
+- `strictKnownMarketplaces`: the marketplaces a user may add. `{ "source": "github", "repo":
+  "domaine-oleksandr-kever/*" }` admits every repository of that owner (Claude Code 2.1.223 or
+  later). An allowlist blocks every marketplace it does not name, the official Anthropic one too,
+  so the example names that one as well. An allowlist without a `{ "source": "skills-dir" }`
+  entry also stops skills-directory plugins (a folder with a `.claude-plugin/plugin.json` under
+  `~/.claude/skills/` or a project's `.claude/skills/`), so the example keeps that entry.
+  An allowlist registers nothing: `extraKnownMarketplaces` does.
+- `blockedMarketplaces`: the marketplaces no user may add or install from.
+- `pluginTrustMessage`: your text, added to the trust warning before an install.
+
+Desktop local sessions read managed settings like the CLI. Cloud sessions read server-managed
+settings only. A Cowork session on the user's machine reads the device policy (MDM or file), never
+the admin console. A Cowork session in a full VM sandbox (`requireCoworkFullVmSandbox`) or a remote
+Cowork session reads neither, so this policy does not reach it.
+
+A team still on fnd sets `"fnd@domaine": true, "base@domaine": false, "fe@domaine": false`; a
+missing key turns nothing off, and in managed settings the two `false` keys also block and hide
+base and fe. Never enable fnd beside base or fe.
 
 ## Updating
 

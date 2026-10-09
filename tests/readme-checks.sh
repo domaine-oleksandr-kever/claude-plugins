@@ -304,7 +304,8 @@ elif [ "$INSTALL_V" = "$CANON_VERSION" ]; then ok
 else bad install-version-sync "install.sh says $INSTALL_V, manifest says $CANON_VERSION"; fi
 
 # docs/ is NOT a bump-version target, so a version literal there can only drift. Placeholders
-# (<version>) are how the per-host docs show doctor output without pinning a number.
+# (<version>) are how the per-host docs show doctor output without pinning a number. The one
+# literal docs/ carries, "fnd is frozen at 0.135.0", is the freeze point fnd-frozen-host-docs pins.
 while IFS= read -r d; do
   [ -n "$d" ] || continue
   hits="$(grep -oE '\bfnd v[0-9]+\.[0-9]+\.[0-9]+|FND_VERSION="[0-9]+\.[0-9]+\.[0-9]+"|version [0-9]+\.[0-9]+\.[0-9]+' "$d" | sort -u)"
@@ -619,6 +620,107 @@ else ok; fi
 if [ ! -f "$ROOT/plugins/band/hooks/mods/lib.ts" ]; then bad band-compact-no-show-threshold-band 'plugins/band/hooks/mods/lib.ts missing'
 elif grep -qF 'COMPACT_SHOW_PCT' "$ROOT/plugins/band/hooks/mods/lib.ts"; then bad band-compact-no-show-threshold-band 'plugins/band lib.ts gates the Compact button on COMPACT_SHOW_PCT'
 else ok; fi
+
+# ------------------------------------------- fnd frozen + the team rollout routes --
+# The support end is a promise to every fnd user, and each place a reader meets fnd (root README,
+# the marketplace picker, the three non-Claude host docs) must state the same version and date.
+# The version is the freeze point, not the manifest: a blocking-bug release in the support window
+# bumps the manifest, and "frozen at" keeps naming the release the freeze date belongs to.
+FROZEN_V="0.135.0"
+FROZEN_SECTION="$(awk '/^## fnd is frozen[[:space:]]*$/ { on = 1; next } on && /^## / { exit } on' "$README")"
+case "$FROZEN_SECTION" in
+  *"frozen at $FROZEN_V"*'supported until 2027-06-30'*) ok ;;
+  *) bad fnd-frozen-notice "README has no '## fnd is frozen' section saying 'frozen at $FROZEN_V' and 'supported until 2027-06-30'" ;;
+esac
+# An fnd synced from claude.ai loads once fnd@domaine is uninstalled, and a repository's settings
+# can enable fnd past a user-scope uninstall: the recipe that skips either leaves fnd beside base.
+case "$FROZEN_SECTION" in
+  *'synced'*'claude.ai account'*) ok ;;
+  *) bad fnd-frozen-notice-synced "the '## fnd is frozen' recipe does not say to remove an fnd synced from the claude.ai account" ;;
+esac
+case "$FROZEN_SECTION" in
+  *'"fnd@domaine": false'*'settings.local.json'*) ok ;;
+  *) bad fnd-frozen-notice-project "the '## fnd is frozen' recipe does not turn off an fnd a repository's settings enable" ;;
+esac
+# a second date or version inside the notice can only be a stale copy of one of the three facts
+for v in $(printf '%s\n' "$FROZEN_SECTION" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]+\.[0-9]+\.[0-9]+' | sort -u); do
+  case "$v" in
+    "$FROZEN_V"|2026-10-08|2027-06-30) ok ;;
+    *) bad fnd-frozen-notice-drift "the '## fnd is frozen' section names $v; its facts are $FROZEN_V, 2026-10-08 and 2027-06-30" ;;
+  esac
+done
+mkt_fnd_desc="$("$NODE_BIN" -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const p = (m.plugins || []).find((x) => x.name === "fnd");
+  process.stdout.write(p && typeof p.description === "string" ? p.description : "");
+' "$ROOT/.claude-plugin/marketplace.json" 2>/dev/null)"
+case "$mkt_fnd_desc" in
+  *"frozen at $FROZEN_V"*'supported until 2027-06-30'*) ok ;;
+  *) bad fnd-frozen-marketplace "marketplace.json's fnd description does not say 'frozen at $FROZEN_V' and 'supported until 2027-06-30'" ;;
+esac
+# Codex CLI reads the same catalog, and the four new plugins run on Claude Code only.
+case "$mkt_fnd_desc" in
+  *'new Claude Code installs'*) ok ;;
+  *) bad fnd-frozen-marketplace-host "marketplace.json's fnd description points at the new set without saying it is Claude Code only" ;;
+esac
+while IFS= read -r d; do
+  [ -n "$d" ] || continue
+  has "$d" "fnd is frozen at $FROZEN_V" "fnd-frozen-host-docs-${d##*/}"
+  has "$d" 'until 2027-06-30' "fnd-frozen-host-docs-${d##*/}"
+done <<EOF
+$DOCS
+EOF
+
+# The managed example is pasted into a policy as is, and a managed file that does not parse stops
+# Claude Code from starting; its marketplace must be this repo and its plugin set the new one.
+# An allowlist without the skills-dir entry stops every user's skills-directory plugins.
+MANAGED_EXAMPLE="$ROOT/docs/managed-settings.example.json"
+managed_problem="$("$NODE_BIN" -e '
+  const [file, slug] = process.argv.slice(1);
+  let j;
+  try { j = JSON.parse(require("fs").readFileSync(file, "utf8")); }
+  catch (e) { process.stdout.write("does not parse: " + e.message); process.exit(0); }
+  const src = (((j.extraKnownMarketplaces || {}).domaine || {}).source) || {};
+  const p = [];
+  if (src.source !== "github" || src.repo !== slug) p.push("extraKnownMarketplaces.domaine.source is not github " + slug);
+  const ep = j.enabledPlugins || {};
+  for (const n of ["slim", "band", "base", "fe"]) if (ep[n + "@domaine"] !== true) p.push(n + "@domaine is not true");
+  if (ep["fnd@domaine"] !== false) p.push("fnd@domaine is not false");
+  const allow = j.strictKnownMarketplaces;
+  if (Array.isArray(allow) && !allow.some((e) => e && e.source === "skills-dir")) p.push("strictKnownMarketplaces has no skills-dir entry");
+  process.stdout.write(p.join("; "));
+' "$MANAGED_EXAMPLE" "$SLUG" 2>&1)"
+if [ -z "$managed_problem" ]; then ok; else bad managed-example-json "docs/managed-settings.example.json: $managed_problem"; fi
+ROLLOUT_SECTION="$(awk '/^### Team rollout[[:space:]]*$/ { on = 1; next } on && /^##+ / { exit } on' "$README")"
+case "$ROLLOUT_SECTION" in
+  *'`docs/managed-settings.example.json`'*) ok ;;
+  *) bad team-rollout-section "README has no '### Team rollout' section naming docs/managed-settings.example.json" ;;
+esac
+# A missing key turns nothing off, so the legacy variant has to name base and fe as false.
+case "$ROLLOUT_SECTION" in
+  *'"fnd@domaine": true, "base@domaine": false, "fe@domaine": false'*) ok ;;
+  *) bad team-rollout-legacy "the Team rollout legacy variant does not set base and fe to false beside fnd true" ;;
+esac
+# fnd and base ship the same agents, skills and MCP servers, so a settings example that enables
+# base without turning fnd off can load both on a machine that still has fnd installed.
+has "$ROOT/plugins/base/README.md" '"fnd@domaine": false' base-readme-fnd-false
+fnd_beside_base="$("$NODE_BIN" -e '
+  const fs = require("fs");
+  const p = [];
+  const [root, ...files] = process.argv.slice(1);
+  for (const f of files) {
+    const blocks = (fs.readFileSync(f, "utf8").match(/```json\n[\s\S]*?\n```/g) || []);
+    for (const b of blocks) {
+      let j; try { j = JSON.parse(b.slice(8, -4)); } catch (_) { continue; }
+      const ep = j && j.enabledPlugins;
+      if (ep && (ep["base@domaine"] === true || ep["fe@domaine"] === true) && ep["fnd@domaine"] !== false)
+        p.push(require("path").relative(root, f));
+    }
+  }
+  process.stdout.write(p.join(", "));
+' "$ROOT" "$README" "$ROOT/plugins/base/README.md" "$ROOT/plugins/fe/README.md" 2>&1)"
+if [ -z "$fnd_beside_base" ]; then ok
+else bad enabled-plugins-fnd-false "an enabledPlugins example enables base or fe without \"fnd@domaine\": false in: $fnd_beside_base"; fi
 
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

@@ -38,6 +38,104 @@ exec "$REAL_GIT" "\$@"
 SHIMEOF
 chmod +x "$SHIM/git"
 
+# bootstrap drives the `claude` CLI when one is on PATH, and the developer's real one installs into
+# their real ~/.claude — so every case runs on a PATH with no `claude` at all. A directory that
+# holds one (Homebrew's bin also holds git and bash) is replaced by a farm of symlinks to
+# everything in it except `claude`. Only rows that ask for a CLI get the fake one below.
+NOCLAUDE_PATH=""
+farm=0
+set -f
+for d in $(printf '%s' "$PATH" | tr ':' ' '); do
+  case ":$NOCLAUDE_PATH:" in *":$d:"*) continue ;; esac
+  if [ -e "$d/claude" ]; then
+    farm=$((farm + 1))
+    mkdir -p "$TMP/pathfarm/$farm"
+    set +f
+    for e in "$d"/*; do
+      [ "${e##*/}" = claude ] || ln -s "$e" "$TMP/pathfarm/$farm/${e##*/}"
+    done
+    set -f
+    d="$TMP/pathfarm/$farm"
+  fi
+  NOCLAUDE_PATH="${NOCLAUDE_PATH:+$NOCLAUDE_PATH:}$d"
+done
+set +f
+if PATH="$NOCLAUDE_PATH" command -v claude >/dev/null 2>&1; then
+  echo "bootstrap-sim: refusing to run — a real claude is still reachable on the test PATH" >&2
+  exit 1
+fi
+
+# The fake `claude`: records argv, answers the two read-only lists from scripted files, and exits
+# with a scripted rc per subcommand and plugin (`.stub-rc-<sub>-<plugin>`, `.stub-rc-marketplace-
+# <sub>`). It refuses any option the real 2.1.293 `--help` does not list for that subcommand, so
+# bootstrap cannot pass a flag the real CLI would reject. Whatever reaches its stdin is kept: a
+# piped bootstrap that let a child read stdin would hand it the rest of its own source.
+SHIM_CLAUDE="$TMP/shim-claude"
+STUB_CLAUDE_LOG="$TMP/claude-argv"
+STUB_CLAUDE_STDIN="$TMP/claude-stdin"
+CSTATE="$TMP/claude-state"
+mkdir -p "$SHIM_CLAUDE" "$CSTATE"
+cat > "$SHIM_CLAUDE/claude" <<'SHIMEOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${STUB_CLAUDE_LOG:-/dev/null}"
+cat >> "${STUB_CLAUDE_STDIN:-/dev/null}"
+S="${STUB_CLAUDE_STATE:?}"
+[ "${1:-}" = plugin ] || { echo "fake claude: only 'plugin' is modelled" >&2; exit 64; }
+shift
+sub="${1:-}"; shift || true
+if [ "$sub" = marketplace ]; then sub="marketplace-${1:-}"; shift || true; fi
+case "$sub" in
+  install) allowed=" -y --yes --json -s --scope --config --accept-command --marketplace --registry " ;;
+  update) allowed=" -y --yes --json -s --scope --accept-command " ;;
+  uninstall) allowed=" -y --yes --json -s --scope --keep-data --prune " ;;
+  enable) allowed=" --json -s --scope " ;;
+  list) allowed=" --json --available --data-size " ;;
+  marketplace-add) allowed=" --json --scope --sparse --claudeai " ;;
+  marketplace-update|marketplace-list) allowed=" --json " ;;
+  marketplace-remove) allowed=" --json --scope " ;;
+  *) echo "error: unknown command '$sub'" >&2; exit 64 ;;
+esac
+target=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -s|--scope|--config|--accept-command|--marketplace|--registry|--sparse) opt="$1"; shift 2 ;;
+    -*) opt="$1"; shift ;;
+    *) target="$1"; shift; continue ;;
+  esac
+  case "$allowed" in *" $opt "*) ;; *) echo "error: unknown option '$opt'" >&2; exit 64 ;; esac
+done
+case "$sub" in
+  marketplace-list) [ -f "$S/mp.json" ] || { echo "error: failed to read marketplaces" >&2; exit 1; }; cat "$S/mp.json"; exit 0 ;;
+  list) [ -f "$S/installed.json" ] || { echo "error: failed to read installed plugins" >&2; exit 1; }; cat "$S/installed.json"; exit 0 ;;
+esac
+key="$sub"
+case "$sub" in marketplace-*) ;; *) key="$sub-${target%@*}" ;; esac
+rc=0
+[ -f "$S/.stub-rc-$key" ] && rc="$(cat "$S/.stub-rc-$key")"
+echo "fake claude: $sub $target -> $rc"
+exit "$rc"
+SHIMEOF
+chmod +x "$SHIM_CLAUDE/claude"
+
+# claude_state <mp: present|absent|broken> [installed json] — the machine the fake describes.
+# `broken` makes the marketplace list itself fail; an absent installed json makes `plugin list`
+# fail. Every rc file from the previous case is dropped.
+claude_state() {
+  rm -rf "$CSTATE"; mkdir -p "$CSTATE"
+  case "$1" in
+    present) printf '[\n  {\n    "name": "domaine",\n    "source": "github",\n    "repo": "domaine-oleksandr-kever/claude-plugins"\n  }\n]\n' > "$CSTATE/mp.json" ;;
+    absent) printf '[\n  {\n    "name": "claude-plugins-official",\n    "source": "github",\n    "repo": "anthropics/claude-plugins-official"\n  }\n]\n' > "$CSTATE/mp.json" ;;
+    broken) ;;
+  esac
+  printf '%s\n' "${2-[]}" > "$CSTATE/installed.json"
+}
+# installed_entry <id> <scope> <enabled> — one `claude plugin list --json` object, pretty-printed
+# the way 2.1.293 prints it
+installed_entry() {
+  printf '  {\n    "id": "%s",\n    "version": "0.1.0",\n    "scope": "%s",\n    "enabled": %s,\n    "projectEnabled": false\n  }' "$1" "$2" "$3"
+}
+claude_calls() { tr '\n' ';' < "$STUB_CLAUDE_LOG" 2>/dev/null; }
+
 gitq() {
   "$REAL_GIT" -c user.name=fnd -c user.email=fnd@example.com -c commit.gpgsign=false \
       -c init.defaultBranch=main -c advice.detachedHead=false "$@"
@@ -84,26 +182,38 @@ STUB
 
 # run <home> <script> [args...] — bootstrap under a throwaway HOME with both recorders armed,
 # from a scratch cwd so that anything written to a relative path lands where a case can see it
-# instead of in the suite's own directory
+# instead of in the suite's own directory. stdin is closed: bootstrap never reads it, and a
+# child that did would otherwise wait on the suite's own stdin
+# WITH_CLAUDE=yes before a runner puts the fake `claude` on PATH; without it the case exercises
+# the no-CLI fallback, which is what CI (no `claude` binary) always sees.
+run_path() {
+  if [ "${WITH_CLAUDE:-no}" = yes ]; then printf '%s' "$SHIM_CLAUDE:$SHIM:$NOCLAUDE_PATH"
+  else printf '%s' "$SHIM:$NOCLAUDE_PATH"; fi
+}
+
 run() {
-  local home="$1" script="$2"; shift 2
+  local home="$1" script="$2" path; shift 2
   mkdir -p "$home/cwd"
-  : > "$STUB_LOG"; : > "$GIT_LOG"
+  : > "$STUB_LOG"; : > "$GIT_LOG"; : > "$STUB_CLAUDE_LOG"; : > "$STUB_CLAUDE_STDIN"
+  path="$(run_path)"
   RC=0
-  ( cd "$home/cwd" && HOME="$home" PATH="$SHIM:$PATH" STUB_LOG="$STUB_LOG" \
-      STUB_GIT_LOG="$GIT_LOG" exec "$BASH_BIN" "$script" "$@" ) >"$O" 2>"$E" || RC=$?
+  ( cd "$home/cwd" && HOME="$home" PATH="$path" STUB_LOG="$STUB_LOG" \
+      STUB_GIT_LOG="$GIT_LOG" STUB_CLAUDE_LOG="$STUB_CLAUDE_LOG" STUB_CLAUDE_STDIN="$STUB_CLAUDE_STDIN" \
+      STUB_CLAUDE_STATE="$CSTATE" exec "$BASH_BIN" "$script" "$@" ) </dev/null >"$O" 2>"$E" || RC=$?
 }
 
 # runpiped <home> <script> [args...] — the curl|bash shape: the script arrives on stdin, so a
 # prompt could only come from /dev/tty. Killed after ~10s: a bootstrap that waits for input
 # here must fail the suite, not stall it.
 runpiped() {
-  local home="$1" script="$2"; shift 2
+  local home="$1" script="$2" path; shift 2
   mkdir -p "$home"
-  : > "$STUB_LOG"; : > "$GIT_LOG"
+  : > "$STUB_LOG"; : > "$GIT_LOG"; : > "$STUB_CLAUDE_LOG"; : > "$STUB_CLAUDE_STDIN"
+  path="$(run_path)"
   RC=0; TIMED_OUT=no
   local pid waited=0
-  HOME="$home" PATH="$SHIM:$PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
+  HOME="$home" PATH="$path" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
+    STUB_CLAUDE_LOG="$STUB_CLAUDE_LOG" STUB_CLAUDE_STDIN="$STUB_CLAUDE_STDIN" STUB_CLAUDE_STATE="$CSTATE" \
     "$BASH_BIN" -s -- "$@" <"$script" >"$O" 2>"$E" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null; do
@@ -143,7 +253,7 @@ runpty() {
   local inner pid waited=0
   inner="$(printf '%q ' "$BASH_BIN" "$script" "$@")"
   (
-    export HOME="$home" PATH="$SHIM:$PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG"
+    export HOME="$home" PATH="$SHIM:$NOCLAUDE_PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG"
     cd "$home/cwd" || exit 99
     if [ -n "$feed" ]; then
       ( printf '%s' "$feed"; sleep 2 ) | pty_exec "$inner"
@@ -202,6 +312,12 @@ run "$TMP/h-args" "$BOOT" --help
 if [ "$RC" -eq 0 ] && grep -q "usage: bootstrap.sh" "$O" && grep -q -- '--uninstall' "$O"; then ok
 else bad A1-help "rc=$RC out=$(head -c 160 "$O")"; fi
 
+# the help tells what the claude target runs on an uninstall and on a disabled install
+if tr '\n' ' ' < "$O" | tr -s ' ' | grep -qF "For claude it runs 'claude plugin uninstall' (dependents first, the marketplace kept) and needs no checkout" \
+   && tr '\n' ' ' < "$O" | tr -s ' ' | grep -qF "and enable when disabled" \
+   && tr '\n' ' ' < "$O" | tr -s ' ' | grep -qF "always in the order slim, band, base, fe, fnd"; then ok
+else bad A1b-help-claude-target "out=$(tr '\n' ';' < "$O")"; fi
+
 run "$TMP/h-args" "$BOOT" --wat
 if [ "$RC" -eq 2 ] && grep -q "unknown argument" "$E"; then ok
 else bad A2-unknown-flag "rc=$RC err=$(head -c 160 "$E")"; fi
@@ -224,7 +340,7 @@ else bad A10-dir-flag-as-value "rc=$RC err=$(head -c 160 "$E")"; fi
 # The HOME-free paths must stay HOME-free under `set -u`: a claude-only run touches no
 # filesystem, so an unset HOME (cron, containers) is no reason to die at line 1.
 : > "$STUB_LOG"; : > "$GIT_LOG"; RC=0
-( cd "$TMP" && env -u HOME PATH="$SHIM:$PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
+( cd "$TMP" && env -u HOME PATH="$SHIM:$NOCLAUDE_PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
     "$BASH_BIN" "$BOOT" --targets claude ) >"$O" 2>"$E" || RC=$?
 if [ "$RC" -eq 0 ] && grep -qF '/plugin install fe@domaine' "$O"; then ok
 else bad H1-no-home-claude-only "rc=$RC err=$(head -c 200 "$E")"; fi
@@ -232,7 +348,7 @@ else bad H1-no-home-claude-only "rc=$RC err=$(head -c 200 "$E")"; fi
 # …while a target that needs the default destination has nowhere to put it: a named refusal,
 # not bash's unbound-variable crash and not a clone into "/tools".
 : > "$STUB_LOG"; : > "$GIT_LOG"; RC=0
-( cd "$TMP" && env -u HOME PATH="$SHIM:$PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
+( cd "$TMP" && env -u HOME PATH="$SHIM:$NOCLAUDE_PATH" STUB_LOG="$STUB_LOG" STUB_GIT_LOG="$GIT_LOG" \
     "$BASH_BIN" "$BOOT" --targets cursor --yes ) >"$O" 2>"$E" || RC=$?
 if [ "$RC" -eq 2 ] && grep -q "HOME is unset" "$E" && ! grep -q '^clone' "$GIT_LOG"; then ok
 else bad H2-no-home-needs-dir "rc=$RC err=$(head -c 200 "$E")"; fi
@@ -351,9 +467,9 @@ if [ "$RC" -eq 0 ] && [ "$(argv_line 1)" = "--target cursor" ] && grep -q "from 
 else bad C10-symlinked-scripts-dir "rc=$RC out=$(tr '\n' ';' < "$O") git=$(tr '\n' ';' < "$GIT_LOG")"; fi
 
 # ------------------------------------------------------------------------- the claude target --
-# Claude Code installs from inside a live session and cannot be driven from outside, so this
-# target prints and says so. The default is the new set (slim, band, base, fe — each dependency before
-# what requires it), and the slash commands are the README's team-use block, line for line.
+# With no `claude` CLI on PATH (CI, a Desktop-only machine) this target prints and says why. The
+# default is the new set (slim, band, base, fe — each dependency before what requires it), and the
+# slash commands are the README's team-use block, line for line. The CLI-present half is section Q.
 run "$TMP/h8" "$FIXBOOT" --targets claude
 if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 0 ]; then ok
 else bad L1-claude-no-installer "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG")"; fi
@@ -365,8 +481,8 @@ BOOT_CMDS="$(sed -n 's/^ *\(\/[a-z][^ ].*\)$/\1/p' "$O" | sed 's/ *$//')"
 if [ -n "$README_CMDS" ] && [ "$README_CMDS" = "$BOOT_CMDS" ]; then ok
 else bad L2-claude-block-is-readme "readme='$(printf '%s' "$README_CMDS" | tr '\n' ';')' boot='$(printf '%s' "$BOOT_CMDS" | tr '\n' ';')'"; fi
 
-if grep -q "cannot be driven from outside" "$O"; then ok
-else bad L3-claude-informational "the claude target does not say it is informational"; fi
+if grep -qF 'claude: the `claude` CLI is not on PATH — run these in a session:' "$O"; then ok
+else bad L3-claude-informational "the claude target does not say why it only prints"; fi
 
 # the default set verifies with both doctors after the reload, carries the migration line and never
 # names fnd's install or its verify step
@@ -496,10 +612,10 @@ else bad P3-report-codex-channel "out=$(tr '\n' ';' < "$O")"; fi
 if grep -q "run /smoke-test once in a live session" "$O"; then ok
 else bad P4-report-smoke-test "out=$(tr '\n' ';' < "$O")"; fi
 
-# claude is the one selected host with no install to succeed or fail at, so both of its report
-# lines have to say so: an "OK" row would claim work that never happened, and a leftovers section
-# that skips it drops the only instruction that target ever produces.
-if grep -q "^claude PRINTED (run the slash commands in a session)$" "$O" \
+# without the CLI claude is the one selected host with no install to succeed or fail at, so both
+# of its report lines have to say so: an "OK" row would claim work that never happened, and a
+# leftovers section that skips it drops the only instruction that target then produces.
+if grep -q "^claude PRINTED (no claude on PATH)$" "$O" \
    && grep -q "Claude Code: run the slash commands printed above in a live session" "$O"; then ok
 else bad P5-report-claude-rows "out=$(tr '\n' ';' < "$O")"; fi
 
@@ -715,6 +831,12 @@ REMOVES="$(grep -oE '/plugin uninstall [a-z0-9-]+@domaine' "$O" | awk '{ print $
 if [ "$RC" -eq 0 ] && [ "$REMOVES" = "base@domaine band@domaine slim@domaine " ]; then ok
 else bad U5c-uninstall-named-reversed "rc=$RC removes='$REMOVES'"; fi
 
+# …whatever order --plugins names them in: fe,base, reversed literally, would remove base first
+run "$TMP/h19e" "$FIXBOOT" --targets claude --uninstall --plugins fe,base
+REMOVES="$(grep -oE '/plugin uninstall [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$RC" -eq 0 ] && [ "$REMOVES" = "fe@domaine base@domaine " ]; then ok
+else bad U5e-uninstall-dependency-order "rc=$RC removes='$REMOVES'"; fi
+
 # removing both is no co-install
 run "$TMP/h19d" "$FIXBOOT" --targets claude --uninstall --plugins fnd,base
 if [ "$RC" -eq 0 ] && ! grep -q "must not run together" "$E"; then ok
@@ -737,6 +859,266 @@ else bad U9-report-names-checkout "out=$(tr '\n' ';' < "$O")"; fi
 
 if grep -q "^cursor OK$" "$O" && ! grep -q "run /smoke-test once in a live session" "$O"; then ok
 else bad U10-uninstall-report-shape "out=$(tr '\n' ';' < "$O")"; fi
+
+# ------------------------------------------------------------ Q. the claude CLI is on PATH --
+# `claude plugin …` is an ordinary shell command, so with the CLI present the claude target
+# installs for real. Every row here runs the fake from $SHIM_CLAUDE; the rows above never see it.
+mp_calls() { grep -c '^plugin marketplace' "$STUB_CLAUDE_LOG"; }
+verbs() { sed -nE 's/^plugin (install|update|enable|uninstall) (-y )?([a-z0-9-]+)@domaine$/\1 \3/p' "$STUB_CLAUDE_LOG" | tr '\n' ';'; }
+
+# fresh machine: no domaine marketplace yet, so it is added, then the default set in install order
+claude_state absent
+WITH_CLAUDE=yes run "$TMP/hq1" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 0 ] && grep -qx 'plugin marketplace add domaine-oleksandr-kever/claude-plugins' "$STUB_CLAUDE_LOG" \
+   && ! grep -q '^plugin marketplace update' "$STUB_CLAUDE_LOG" && [ "$(argv_count)" -eq 0 ]; then ok
+else bad Q1-marketplace-added-when-absent "rc=$RC calls=$(claude_calls) err=$(head -c 200 "$E")"; fi
+
+if [ "$(verbs)" = "install slim;install band;install base;install fe;" ] \
+   && [ "$(grep -n '^plugin marketplace add' "$STUB_CLAUDE_LOG" | cut -d: -f1)" -lt "$(grep -n '^plugin install' "$STUB_CLAUDE_LOG" | head -1 | cut -d: -f1)" ]; then ok
+else bad Q2-install-order "calls=$(claude_calls)"; fi
+
+# the CLI did the work, so nothing is printed to paste and the report says OK with the one step left
+if grep -q '^claude OK$' "$O" && ! grep -q '/plugin install' "$O" \
+   && grep -qF -- '- Claude Code: restart Claude Code, or run /reload-plugins in an open session, then /base-doctor and /fe-doctor' "$O" \
+   && ! grep -q 'slash commands printed above' "$O"; then ok
+else bad Q3-cli-report "out=$(tr '\n' ';' < "$O")"; fi
+
+# a re-run is the update: the marketplace already there is refreshed, never added twice
+claude_state present
+WITH_CLAUDE=yes run "$TMP/hq2" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 0 ] && grep -qx 'plugin marketplace update domaine' "$STUB_CLAUDE_LOG" \
+   && ! grep -q '^plugin marketplace add' "$STUB_CLAUDE_LOG" \
+   && [ "$(verbs)" = "install slim;install band;install base;install fe;" ]; then ok
+else bad Q4-marketplace-updated-when-present "rc=$RC calls=$(claude_calls)"; fi
+
+# a marketplace list that fails says nothing about what is there, so the add is tried…
+claude_state broken
+WITH_CLAUDE=yes run "$TMP/hq3" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 0 ] && grep -qx 'plugin marketplace add domaine-oleksandr-kever/claude-plugins' "$STUB_CLAUDE_LOG" \
+   && grep -q 'could not list marketplaces' "$O" && [ "$(verbs)" = "install slim;install band;install base;install fe;" ]; then ok
+else bad Q5-add-when-list-fails "rc=$RC calls=$(claude_calls) out=$(head -c 200 "$O")"; fi
+
+# …and a failed add is this target's failure: no install runs against a marketplace that is not there
+claude_state broken; echo 4 > "$CSTATE/.stub-rc-marketplace-add"
+WITH_CLAUDE=yes run "$TMP/hq3b" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 4 ] && [ -z "$(verbs)" ] \
+   && grep -qx 'claude FAILED (claude plugin marketplace add domaine-oleksandr-kever/claude-plugins exit 4)' "$O" \
+   && grep -q '^== summary ==$' "$O"; then ok
+else bad Q5b-add-failure-stops "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# a failed refresh only leaves the cached catalog: a WARN, and the installs still run
+claude_state present; echo 1 > "$CSTATE/.stub-rc-marketplace-update"
+WITH_CLAUDE=yes run "$TMP/hq4" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 0 ] && grep -q 'WARN' "$E" && [ "$(verbs)" = "install slim;install band;install base;install fe;" ] \
+   && grep -qx 'claude OK (WARN: claude plugin marketplace update domaine exit 1)' "$O"; then ok
+else bad Q6-marketplace-update-warns "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# --plugins fnd installs fnd alone, verified by its smoke test
+claude_state present
+WITH_CLAUDE=yes run "$TMP/hq5" "$FIXBOOT" --targets claude --plugins fnd
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install fnd;" ] \
+   && grep -qF 'restart Claude Code, or run /reload-plugins in an open session, then /fnd:smoke-test' "$O" \
+   && ! grep -q -- '-doctor' "$O"; then ok
+else bad Q7-plugins-fnd-only "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# the first failed install stops the rest — what follows it in the order depends on it — and its
+# rc and name reach the report, which still prints
+claude_state present; echo 5 > "$CSTATE/.stub-rc-install-band"
+WITH_CLAUDE=yes run "$TMP/hq6" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 5 ] && [ "$(verbs)" = "install slim;install band;" ] \
+   && grep -qx 'claude FAILED (claude plugin install band@domaine exit 5)' "$O" \
+   && grep -q 'fix the failed .claude plugin. call above' "$O" && ! grep -q '^claude OK' "$O"; then ok
+else bad Q8-first-failure-stops "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# what is already installed at user scope is updated (and enabled again when it was disabled);
+# a copy at project scope elsewhere is not a user install, so that one is installed
+claude_state present "[
+$(installed_entry slim@domaine user true),
+$(installed_entry band@domaine user false),
+$(installed_entry base@domaine project true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq7" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "update slim;update band;enable band;install base;install fe;" ]; then ok
+else bad Q9-installed-is-updated "rc=$RC calls=$(claude_calls)"; fi
+
+# an update that fails is reported under its own verb
+echo 6 > "$CSTATE/.stub-rc-update-slim"
+WITH_CLAUDE=yes run "$TMP/hq7b" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 6 ] && [ "$(verbs)" = "update slim;" ] \
+   && grep -qx 'claude FAILED (claude plugin update slim@domaine exit 6)' "$O"; then ok
+else bad Q9b-update-failure "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# `plugin list` failing leaves nothing to compare against: every plugin is installed, and the
+# fnd check that could not run is a WARN in the summary and a step left by hand, never a silent OK
+claude_state present; rm -f "$CSTATE/installed.json"
+WITH_CLAUDE=yes run "$TMP/hq7c" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install slim;install band;install base;install fe;" ] \
+   && grep -q "could not read 'claude plugin list --json'" "$O" \
+   && grep -qF 'WARN — an enabled fnd was not checked for' "$E" \
+   && grep -qx 'claude OK (WARN: fnd not checked)' "$O" \
+   && grep -qF "'claude plugin list' could not be read, so nothing checked that fnd is not" "$O"; then ok
+else bad Q9c-list-fails-installs-all "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E")"; fi
+
+# …the legacy set warns about base and fe the same way, and a set with neither side warns nothing
+claude_state present; rm -f "$CSTATE/installed.json"
+WITH_CLAUDE=yes run "$TMP/hq7d" "$FIXBOOT" --targets claude --plugins fnd
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install fnd;" ] && grep -qx 'claude OK (WARN: base or fe not checked)' "$O"; then ok
+else bad Q9d-list-fails-warns-legacy "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+claude_state present; rm -f "$CSTATE/installed.json"
+WITH_CLAUDE=yes run "$TMP/hq7e" "$FIXBOOT" --targets claude --plugins slim,band
+if [ "$RC" -eq 0 ] && grep -qx 'claude OK' "$O" && ! grep -q 'not checked' "$O" "$E"; then ok
+else bad Q9e-list-fails-no-conflict-no-warn "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+# fnd never runs with base or fe: an enabled fnd stops the new set before anything changes…
+claude_state present "[
+$(installed_entry fnd@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && [ "$(mp_calls)" -eq 0 ] \
+   && grep -qF 'claude plugin uninstall fnd@domaine' "$E" \
+   && grep -qx 'claude FAILED (fnd is installed and enabled — remove it first)' "$O" \
+   && grep -qx '    claude plugin uninstall fnd@domaine;' "$O" \
+   && grep -qF 'then re-run this command and restart Claude Code' "$O" \
+   && ! grep -q 'fix the failed' "$O"; then ok
+else bad Q10-enabled-fnd-refused "rc=$RC calls=$(claude_calls) err=$(head -c 200 "$E") out=$(tr '\n' ';' < "$O")"; fi
+
+# …a disabled one does not load, so it is no conflict…
+claude_state present "[
+$(installed_entry fnd@domaine user false)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8b" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install slim;install band;install base;install fe;" ]; then ok
+else bad Q10b-disabled-fnd-allowed "rc=$RC calls=$(claude_calls)"; fi
+
+# …and the legacy set is refused beside an enabled base or fe the same way
+claude_state present "[
+$(installed_entry fe@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8c" "$FIXBOOT" --targets claude --plugins fnd
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && grep -qx 'claude FAILED (base or fe is installed and enabled — remove it first)' "$O" \
+   && grep -qx '    claude plugin uninstall fe@domaine;' "$O" && ! grep -q 'fix the failed' "$O"; then ok
+else bad Q10c-fnd-beside-enabled-fe-refused "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# …an fnd synced from the claude.ai account loads too once nothing shadows it, and only the
+# account can remove it…
+claude_state present "[
+$(installed_entry fnd@synced synced true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8d" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && [ "$(mp_calls)" -eq 0 ] \
+   && grep -qx '    remove fnd@synced from your claude.ai account (it is synced from there);' "$O" \
+   && ! grep -q 'claude plugin uninstall fnd@synced' "$O" "$E"; then ok
+else bad Q10d-synced-fnd-refused "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# …and every enabled copy is named, in the order the list gives them, with a non-user scope spelled out
+claude_state present "[
+$(installed_entry fnd@domaine project true),
+$(installed_entry fnd@synced synced true),
+$(installed_entry fe@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8e" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] \
+   && grep -qx '    claude plugin uninstall -s project fnd@domaine (run it in the project that installed it), then remove fnd@synced from your claude.ai account (it is synced from there);' "$O"; then ok
+else bad Q10e-every-fnd-named "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# `uninstall -s` takes user, project or local only: a managed copy is the admin's to drop, and a
+# local one uninstalls only from inside its project
+claude_state present "[
+$(installed_entry fnd@domaine managed true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8g" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] \
+   && grep -qx '    ask your admin to drop fnd@domaine from the managed settings (a user cannot uninstall it);' "$O" \
+   && ! grep -q 'uninstall -s managed' "$O" "$E"; then ok
+else bad Q10g-managed-fnd-admin "rc=$RC out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E")"; fi
+claude_state present "[
+$(installed_entry fnd@domaine local true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8h" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] \
+   && grep -qx '    claude plugin uninstall -s local fnd@domaine (run it in the project that installed it);' "$O"; then ok
+else bad Q10h-local-fnd-in-project "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+# the legacy set names base too when both are enabled, dependents first
+claude_state present "[
+$(installed_entry base@domaine user true),
+$(installed_entry fe@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8f" "$FIXBOOT" --targets claude --plugins fnd
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] \
+   && grep -qx '    claude plugin uninstall fe@domaine, then claude plugin uninstall base@domaine;' "$O"; then ok
+else bad Q10f-legacy-names-fe-then-base "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# a dependency is installed before what requires it, whatever order --plugins names them in
+claude_state present
+WITH_CLAUDE=yes run "$TMP/hq8i" "$FIXBOOT" --targets claude --plugins fe,slim,base
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install slim;install base;install fe;" ]; then ok
+else bad Q10i-install-dependency-order "rc=$RC calls=$(claude_calls)"; fi
+
+# --yes is "never prompt": the CLI gets its -y; without it, no -y is invented
+claude_state present
+WITH_CLAUDE=yes run "$TMP/hq9" "$FIXBOOT" --targets claude --yes
+if [ "$RC" -eq 0 ] && [ "$(grep -c '^plugin install -y [a-z]*@domaine$' "$STUB_CLAUDE_LOG")" -eq 4 ]; then ok
+else bad Q11-yes-passes-y "rc=$RC calls=$(claude_calls)"; fi
+
+# claude beside an install.sh host: both run, both reported
+claude_state present
+WITH_CLAUDE=yes run "$TMP/hq10" "$FIXBOOT" --targets claude,cursor
+if [ "$RC" -eq 0 ] && [ "$(argv_line 1)" = "--target cursor" ] \
+   && [ "$(verbs)" = "install slim;install band;install base;install fe;" ] \
+   && grep -q '^cursor OK$' "$O" && grep -q '^claude OK$' "$O"; then ok
+else bad Q12-claude-and-cursor "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG") calls=$(claude_calls)"; fi
+
+# The curl|bash shape with the CLI present: no prompt, no -y nobody asked for, and the CLI never
+# reads stdin — which in this shape is the rest of bootstrap's own source.
+claude_state present
+WITH_CLAUDE=yes runpiped "$TMP/hq11" "$FIXBOOT" --targets claude
+if [ "$TIMED_OUT" = "no" ] && [ "$RC" -eq 0 ] && [ ! -s "$STUB_CLAUDE_STDIN" ] \
+   && [ "$(verbs)" = "install slim;install band;install base;install fe;" ] \
+   && grep -q '^claude OK$' "$O"; then ok
+else bad Q13-piped-with-cli "timed_out=$TIMED_OUT rc=$RC stdin=$(head -c 80 "$STUB_CLAUDE_STDIN") calls=$(claude_calls)"; fi
+
+# uninstall: dependents first, past a failure, and the marketplace stays
+claude_state present "[
+$(installed_entry slim@domaine user true),
+$(installed_entry band@domaine user true),
+$(installed_entry base@domaine user true),
+$(installed_entry fe@domaine user true)
+]"
+echo 1 > "$CSTATE/.stub-rc-uninstall-base"
+WITH_CLAUDE=yes run "$TMP/hq12" "$FIXBOOT" --targets claude --uninstall
+if [ "$RC" -eq 1 ] && [ "$(verbs)" = "uninstall fe;uninstall base;uninstall band;uninstall slim;" ]; then ok
+else bad Q14-uninstall-reverse-continues "rc=$RC calls=$(claude_calls)"; fi
+
+if [ "$(mp_calls)" -eq 0 ] && grep -qF "'claude plugin marketplace remove domaine' drops it too (optional)" "$O" \
+   && grep -qx 'claude FAILED (claude plugin uninstall base@domaine exit 1)' "$O"; then ok
+else bad Q15-uninstall-keeps-marketplace "calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# what is not installed at user scope is skipped by name, not reported as a failed removal
+claude_state present "[
+$(installed_entry slim@domaine user true),
+$(installed_entry fe@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq13" "$FIXBOOT" --targets claude --uninstall
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "uninstall fe;uninstall slim;" ] \
+   && grep -q 'band@domaine is not installed at user scope — skipped' "$O" && grep -q '^claude OK$' "$O"; then ok
+else bad Q16-uninstall-skips-absent "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# a named uninstall in the wrong order still removes the dependent first
+claude_state present "[
+$(installed_entry base@domaine user true),
+$(installed_entry fe@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq13b" "$FIXBOOT" --targets claude --uninstall --plugins fe,base
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "uninstall fe;uninstall base;" ]; then ok
+else bad Q16b-uninstall-dependency-order "rc=$RC calls=$(claude_calls)"; fi
+
+# The fake is only as good as its argv check: an option the real CLI's --help does not list is
+# refused, so a bootstrap passing one would fail these rows instead of passing against a fiction.
+RC=0
+STUB_CLAUDE_STATE="$CSTATE" "$SHIM_CLAUDE/claude" plugin install --bogus slim@domaine </dev/null >/dev/null 2>"$E" || RC=$?
+if [ "$RC" -eq 64 ] && grep -q "unknown option '--bogus'" "$E"; then ok
+else bad Q17-fake-refuses-unknown-flags "rc=$RC err=$(head -c 120 "$E")"; fi
 
 if [ "$PTY_SKIPPED" = "yes" ]; then
   echo "bootstrap-sim: NOTE — no usable script(1), the 5 terminal-prompt cases (Y1-Y5) did not run" >&2
