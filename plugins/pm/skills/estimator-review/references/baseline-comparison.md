@@ -27,8 +27,8 @@ concrete change the author should make before submitting.
 For most projects, the general-purpose Online Store baseline is the right reference.
 
 - **Name:** `[Domaine NA _ Client Name] x Domaine - Project Estimator [Online Store Baseline]`
-- **File ID:** `1W2Wz2bTmIiepLAMmk2xmI9z0Trktj9OsuM5na9bqKEY`
-- **URL:** https://docs.google.com/spreadsheets/d/1W2Wz2bTmIiepLAMmk2xmI9z0Trktj9OsuM5na9bqKEY/edit
+- **Where:** the estimating lead's Drive folder; its file id is not in this plugin. Find it by the
+  name above (the Drive search below), or ask the user for the link.
 
 ## Project-type-specific baselines
 

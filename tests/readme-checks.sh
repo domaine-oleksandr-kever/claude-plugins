@@ -475,6 +475,15 @@ for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
   else bad "event-log-contract-$name" "plugins/$name/README.md → Event log on disk does not say 'same contract as every Domaine plugin'"; fi
 done
 
+# The marketplace repo is public: no plugin ships a link into Domaine's Drive (a file id names an
+# internal document). A skill says where to find a file by name, or asks the user for the link.
+for d in "$ROOT"/plugins/*/; do
+  name="$(basename "$d")"; [ "$name" = fnd ] && continue
+  if grep -rqE 'docs\.google\.com/|drive\.google\.com/' "$d" --include='*.md' 2>/dev/null; then
+    bad "no-drive-link-$name" "plugins/$name ships a Google Drive/Docs link: $(grep -rlE 'docs\.google\.com/|drive\.google\.com/' "$d" --include='*.md' | head -1)"
+  else ok; fi
+done
+
 # ------------------------------------- the copy-paste settings section + the title switch --
 # Host switches the plugin cannot set need the file to edit, the key to paste and what it buys —
 # a switch documented only as prose is a feature nobody turns on. The section is pinned by its

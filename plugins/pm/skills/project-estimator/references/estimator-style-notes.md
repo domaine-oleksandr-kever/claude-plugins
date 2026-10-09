@@ -18,7 +18,7 @@ reference estimators.
 
 ### Migration / Theme-Heavy Work
 
-Use this pattern when the work resembles Alexander Wang:
+Use this pattern when the work resembles a fashion-brand replatform (a migration-and-theme project):
 - package the estimate cleanly by `Discovery`, `Design`, `Build`, and `Testing & Release`
 - call out platform migration assumptions clearly
 - isolate backend consultation, migration, B2B, or post-launch services if they are separate scope
@@ -32,7 +32,7 @@ Typical cues:
 
 ### B2B Implementation / Migration
 
-Use this pattern when the work resembles La Colombe:
+Use this pattern when the work resembles a wholesale B2B rollout (a B2B implementation project):
 - emphasize business-process and operational assumptions
 - call out pricing, account structure, ordering model, and ERP/integration constraints
 - keep design scope minimal when the project is templated or Horizon-led
@@ -46,7 +46,7 @@ Typical cues:
 
 ### Custom App / Middleware / PCR
 
-Use this pattern when the work resembles Jordan's:
+Use this pattern when the work resembles a middleware-led integration (a custom app or PCR project):
 - write tighter scoped items with direct system language
 - break build work into concrete integration capabilities and lifecycle states
 - call out vendor/API dependencies and middleware ownership in assumptions
