@@ -8,7 +8,8 @@ Claude Code uses — only the wiring differs. Start at the
 > **fnd is frozen at 0.135.0 and supported on Codex CLI until 2027-06-30.** Until then only a
 > blocking bug gets a fix, on request (the `report-plugin-issue` skill files it); there are no new
 > features. After 2027-06-30 nothing is fixed. The Claude Code replacement (slim, band, base
-> and fe) does not run on this host, so fnd stays the plugin here. Details:
+> and the team plugins fe, qa, be, pm) does not run on this host, so fnd stays the plugin here.
+> Details:
 > [README → fnd is frozen](../README.md#fnd-is-frozen).
 
 > [!IMPORTANT]
@@ -58,8 +59,9 @@ Codex reads `.claude-plugin/marketplace.json` as a legacy-compatible marketplace
 this repo is already a Codex marketplace — nothing separate is published. Then run `/plugins`
 in Codex, find **fnd**, and install it.
 
-The same marketplace also lists **slim**, **band**, **base** and **fe**. All four are Claude Code only
-(Claude Code hooks modules, no Codex manifest), so do not install any of them from Codex `/plugins`.
+The same marketplace also lists **slim**, **band**, **base**, **fe**, **qa**, **be** and **pm**. All
+seven are Claude Code only (Claude Code hooks modules, no Codex manifest), so
+do not install any of them from Codex `/plugins`.
 
 To undo a registration: `codex plugin marketplace list` shows the configured name,
 `codex plugin marketplace remove <name>` drops it. A registration also pins the git ref it

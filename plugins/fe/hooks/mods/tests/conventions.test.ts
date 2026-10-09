@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import { FOUNDATION, PROGRESS_SERIES, STORE_ACCESS, WORKTREE } from '../conventions/text.ts'
 import { ROOT, compose, ours, put, ran, subagent, world } from './world.ts'
 
-// fe-refs-lint's banned names, spelled so that neither the lint nor the release grep flags this file: fe's text never points at the legacy plugin.
+// team-refs-lint's banned names, spelled so that neither the lint nor the release grep flags this file: fe's text never points at the legacy plugin.
 const OLD = 'f' + 'nd'
 const SLIMS = ['json', 'log'].map(k => `${k}-` + 'slim')
 const HOSTS = ['Cur' + 'sor', 'Co' + 'dex', 'Open' + 'Code']

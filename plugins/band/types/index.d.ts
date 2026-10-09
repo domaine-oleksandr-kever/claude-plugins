@@ -25,8 +25,10 @@ export type BandInfo = { v: 1; version: string; disabled: boolean }
 /** A line from another plugin's event log; band reads only these fields and drops an entry missing one. */
 export type ForeignEvent = { atMs: number; kind: string; text: string }
 
+/** A team plugin on base whose event list band reads. */
+export type TeamSource = 'fe' | 'qa' | 'be' | 'pm'
 /** The list a log line came from: the PLUGIN column of the Log pane and `/band-log`. */
-export type LogSource = 'band' | 'base' | 'fnd' | 'slim'
+export type LogSource = 'band' | 'base' | 'fnd' | 'slim' | TeamSource
 /** One line of the merged log, tagged with its source list. */
 export type LogLine = ForeignEvent & { plugin: LogSource }
 
@@ -71,6 +73,19 @@ declare module 'claude-code' {
     }
     /** Owned and written by the slim plugin; band only reads it. */
     slim: {
+      events: ForeignEvent[]
+    }
+    /** Owned and written by the team plugins (fe, qa, be, pm); band only reads their event lists ([] without the plugin). */
+    fe: {
+      events: ForeignEvent[]
+    }
+    qa: {
+      events: ForeignEvent[]
+    }
+    be: {
+      events: ForeignEvent[]
+    }
+    pm: {
       events: ForeignEvent[]
     }
   }

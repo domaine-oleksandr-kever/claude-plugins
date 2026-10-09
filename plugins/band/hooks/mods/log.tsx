@@ -1,5 +1,5 @@
-// Event log pane: /band-log and the band's Log button toggle it; it draws band's own lines merged with base's, fnd's
-// and slim's straight from their state (a plugin not loaded adds nothing), and never writes any of them.
+// Event log pane: /band-log and the band's Log button toggle it; it draws band's own lines merged with base's, fnd's,
+// slim's and the team plugins' straight from their state (a plugin not loaded adds nothing), and never writes any of them.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BandEvent, ForeignEvent, LogLine } from '../../types'
@@ -9,6 +9,10 @@ const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[
 const baseEvents = atom({ plugin: 'base', key: 'events' } as const, [] as ForeignEvent[])
 const fndEvents = atom({ plugin: 'fnd', key: 'events' } as const, [] as ForeignEvent[])
 const slimEvents = atom({ plugin: 'slim', key: 'events' } as const, [] as ForeignEvent[])
+const feEvents = atom({ plugin: 'fe', key: 'events' } as const, [] as ForeignEvent[])
+const qaEvents = atom({ plugin: 'qa', key: 'events' } as const, [] as ForeignEvent[])
+const beEvents = atom({ plugin: 'be', key: 'events' } as const, [] as ForeignEvent[])
+const pmEvents = atom({ plugin: 'pm', key: 'events' } as const, [] as ForeignEvent[])
 
 type $ = EngineInterface
 
@@ -18,7 +22,12 @@ async function drawsPanes($: $): Promise<boolean> {
 }
 
 async function allEvents($: $): Promise<LogLine[]> {
-  return merged(await read($, events), await read($, baseEvents), await read($, fndEvents), await read($, slimEvents))
+  return merged(await read($, events), await read($, baseEvents), await read($, fndEvents), await read($, slimEvents), {
+    fe: await read($, feEvents),
+    qa: await read($, qaEvents),
+    be: await read($, beEvents),
+    pm: await read($, pmEvents),
+  })
 }
 
 async function logText($: $): Promise<string> {

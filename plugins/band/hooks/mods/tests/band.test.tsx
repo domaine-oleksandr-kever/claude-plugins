@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { CRIT, cells, glyphText } from '../lib.ts'
-import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, modelSwitch, peek, peekCache, postCompact, sibFnd, sibSlim, start, test, world } from './world.tsx'
+import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, modelSwitch, peek, peekCache, postCompact, sibFnd, sibSlim, start, teamState, test, world } from './world.tsx'
 import type { Surface } from './world.tsx'
 
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { bodyRows: 10 }, view: {} }
@@ -944,6 +944,23 @@ describe('buttons from published state', () => {
       test(`${surface}: ${name} with BAND_EVENT_LOG=0 → Log ${shown ? 'drawn' : 'not drawn'}`, async ($, on) => {
         world(on, {}, { BAND_EVENT_LOG: '0' })
         baseState(on, { events })
+        await start($, surface)
+        await measure($, { window: 200_000, percent: 47 })
+        expect((await (await mount($, surface)).find({ key: 'log' })) !== undefined).toBe(shown)
+      })
+    }
+
+    for (const [team, events, shown] of [
+      ['fe', [{ atMs: T0, kind: 'profile', text: 'theme (project-profile.sh)' }], true],
+      ['qa', [{ atMs: T0, kind: 'start', text: 'qa 0.1.0' }], true],
+      ['be', [{ atMs: T0, kind: 'doctor', text: '6 PASS' }], true],
+      ['pm', [{ atMs: T0, kind: 'install', text: 'needs the base plugin' }], true],
+      ['pm', [], false],
+      ['fe', [{ atMs: 'x', kind: 'start', text: 'malformed' }], false],
+    ] as const) {
+      test(`${surface}: ${team}'s list ${shown ? 'with a line' : 'without a valid line'}, BAND_EVENT_LOG=0 → Log ${shown ? 'drawn' : 'not drawn'}`, async ($, on) => {
+        world(on, {}, { BAND_EVENT_LOG: '0' })
+        teamState(on, team, { events })
         await start($, surface)
         await measure($, { window: 200_000, percent: 47 })
         expect((await (await mount($, surface)).find({ key: 'log' })) !== undefined).toBe(shown)

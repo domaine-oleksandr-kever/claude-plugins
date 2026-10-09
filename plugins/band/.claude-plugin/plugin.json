@@ -3,7 +3,7 @@
   "name": "band",
   "displayName": "Band",
   "version": "0.3.0",
-  "description": "Status band, Log pane and Progress pane for Claude Code: draws the session's cache, context, rate and model figures above the prompt, and the event log and task checklist that base, fnd and slim publish.",
+  "description": "Status band, Log pane and Progress pane for Claude Code: draws the session's cache, context, rate and model figures above the prompt, and the event log and task checklist that base, fnd, slim and the team plugins publish; reads base, fnd, slim and the team plugins' state.",
   "author": {
     "name": "Oleksandr Kever",
     "email": "oleksandr.kever@meetdomaine.com"

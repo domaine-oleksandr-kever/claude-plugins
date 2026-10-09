@@ -36,9 +36,9 @@ its brief says otherwise.
    `notes.md` `ceiling:` entries) —
    live QA can't reproduce timing races on a slow local proxy; the static hunt covers
    them from the code. The qa agent's brief: **first extend `qa.md`** with break-it rows
-   derived from the *final diff* per `break-it-qa.md` → Deriving the rows (interactions
+   derived from the *final diff* per `<base root>/references/break-it-qa.md` → Deriving the rows (interactions
    added during implementation aren't in the gate-approved checklist — append them,
-   marked `post-plan`), then execute `qa.md` verbatim + `break-it-qa.md` → Executing the
+   marked `post-plan`), then execute `qa.md` verbatim + `<base root>/references/break-it-qa.md` → Executing the
    rows; **QA targets (products/entities) come from the `store-data:` map in
    `notes.md`** — never rediscover them by scanning the store; a data gap the audit
    missed → ESCALATE, don't improvise; state walks through
@@ -123,7 +123,7 @@ its brief says otherwise.
    theme id + preview/editor links, ≤10-line report. The conductor verifies the tick
    and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
-   `<fe root>/references/steps-to-test-format.md`: **one numbered list** in that file's
+   `<base root>/references/steps-to-test-format.md`: **one numbered list** in that file's
    General item order — theme · where + the click-level setup recipe · the walk-through, each
    step carrying its own expectation inline · edge cases · context / out of scope — and no
    per-AC scenarios and no regression sweep (QA already has the AC; what it lacks is how the

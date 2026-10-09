@@ -228,7 +228,7 @@ answer; the ticket's comments and media are ingested context too — an answer a
   gap from the audit**, one question each with your recommended answer — provision mock
   data (say on which product and with what values; the default when **write** access
   exists — on a read-only store recommend existing data or Mode 2 instead, and name the
-  break-it mutation rows that will report `not-executable: access` per `break-it-qa.md`
+  break-it mutation rows that will report `not-executable: access` per `<base root>/references/break-it-qa.md`
   so the ✋ checklist shows them upfront; provisioning per
   `metafield-metaobject-setup.md` → Planning & QA digest) vs the developer points at existing data
   (product/URL — e.g. "subscriptions live on /products/lip-pencil") vs **Mode 2**: you
@@ -253,7 +253,7 @@ answer; the ticket's comments and media are ingested context too — an answer a
   `gh api`) + timebox in minutes (a cap on active bot work — silent bots exit early,
   pipeline-phases §6); research pressure-test of the plan — an external
   cross-check subagent, token-heavy (default no; runs in Step 3).
-  QA depth is **not** a question (`break-it-qa.md` → No reduced mode — that rule's
+  QA depth is **not** a question (`<base root>/references/break-it-qa.md` → No reduced mode — that rule's
   single home).
 
 **Read `<fe root>/references/pipeline-mode.md` here, at the end of Step 2, and not before**
@@ -274,7 +274,7 @@ Draft **two artifacts** and present them together:
   metafield/metaobject when both exist); every data-driven row names its **QA target**
   (product/entity handle) from the store-data audit — rows resolved as static-only are
   marked so; break-it rows per
-  `<fe root>/references/break-it-qa.md` (its rules govern — No reduced
+  `<base root>/references/break-it-qa.md` (its rules govern — No reduced
   mode, `not-executable: access`); design
   conformance vs the Figma
   specs; accessibility; performance; viewport & cross-browser — the same dimensions

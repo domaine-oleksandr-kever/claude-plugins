@@ -113,6 +113,7 @@ describe('pure helpers', () => {
   })
 
   test('the list cap: 200, the oldest goes first', () => {
+    expect(EVENT_CAP).toBe(200)
     let list: any[] = []
     for (let i = 0; i < EVENT_CAP + 3; i++) list = pushEvent(list, { atMs: i, kind: 'doctor', text: `d${i}` })
     expect(list).toHaveLength(EVENT_CAP)

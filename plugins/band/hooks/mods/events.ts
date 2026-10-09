@@ -1,7 +1,7 @@
 // Pure event-log and pane helpers: band's own ring buffer, the merge of every publisher's list, the
 // pane's row model and the lines of band's file on disk. No `$` here: the writer keeps its own
 // `logEvent` wrapper, as the validator follows `$` only within one file.
-import type { BandEvent, ForeignEvent, LogLine, LogSource } from '../../types'
+import type { BandEvent, ForeignEvent, LogLine, LogSource, TeamSource } from '../../types'
 
 export const EVENT_CAP = 200
 export const LOG_PANE = 'band-log'
@@ -33,19 +33,23 @@ export function take(list: unknown): ForeignEvent[] {
 
 const tag = (plugin: LogSource) => (e: ForeignEvent): LogLine => ({ ...e, plugin })
 
+/** The team plugins on base, in the order their lines follow slim's on a tie. */
+export const TEAM_SOURCES: readonly TeamSource[] = ['fe', 'qa', 'be', 'pm']
+
 /**
- * band's, base's, fnd's and slim's lines in one list, oldest first, each tagged with the list it came from;
- * on equal times band → base → fnd → slim, each list in its own order. Beside slim's lines fnd's own
- * compression lines read `fnd-slim`.
+ * band's, base's, fnd's, slim's and the team plugins' lines in one list, oldest first, each tagged with the
+ * list it came from; on equal times band → base → fnd → slim → fe → qa → be → pm, each list in its own order.
+ * Beside slim's lines fnd's own compression lines read `fnd-slim`.
  */
-export function merged(own: unknown, base: unknown, fnd: unknown, slim: unknown): LogLine[] {
+export function merged(own: unknown, base: unknown, fnd: unknown, slim: unknown, teams: Partial<Record<TeamSource, unknown>> = {}): LogLine[] {
   const s = take(slim).map(tag('slim'))
   const c = take(base).filter(e => !OWN_KINDS.has(e.kind)).map(tag('base'))
   const f = take(fnd)
     .filter(e => !OWN_KINDS.has(e.kind))
     .map(e => (s.length && e.kind === 'slim' ? { ...e, kind: 'fnd-slim' } : e))
     .map(tag('fnd'))
-  return [...take(own).map(tag('band')), ...c, ...f, ...s].map((e, i) => ({ e, i })).sort((a, b) => a.e.atMs - b.e.atMs || a.i - b.i).map(x => x.e)
+  const t = TEAM_SOURCES.flatMap(p => take(teams[p]).map(tag(p)))
+  return [...take(own).map(tag('band')), ...c, ...f, ...s, ...t].map((e, i) => ({ e, i })).sort((a, b) => a.e.atMs - b.e.atMs || a.i - b.i).map(x => x.e)
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0')

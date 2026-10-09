@@ -49,6 +49,10 @@ const fndProgress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 const baseEvents = atom({ plugin: 'base', key: 'events' } as const, [] as ForeignEvent[])
 const fndEvents = atom({ plugin: 'fnd', key: 'events' } as const, [] as ForeignEvent[])
 const slimEvents = atom({ plugin: 'slim', key: 'events' } as const, [] as ForeignEvent[])
+const feEvents = atom({ plugin: 'fe', key: 'events' } as const, [] as ForeignEvent[])
+const qaEvents = atom({ plugin: 'qa', key: 'events' } as const, [] as ForeignEvent[])
+const beEvents = atom({ plugin: 'be', key: 'events' } as const, [] as ForeignEvent[])
+const pmEvents = atom({ plugin: 'pm', key: 'events' } as const, [] as ForeignEvent[])
 
 type $ = EngineInterface
 
@@ -162,7 +166,14 @@ export function registerBand(on: On, options: PluginOptions): void {
     const digest = !isPaneShown ? digestOf(snapshot) : null
     const hasChecklist = toChecklist(snapshot) !== null
     // Short-circuit: while band's own list holds a line the foreign lists are not read, so their writes do not redraw the band.
-    const hasEvents = take(await read($, events)).length > 0 || merged([], await read($, baseEvents), await read($, fndEvents), await read($, slimEvents)).length > 0
+    const hasEvents =
+      take(await read($, events)).length > 0 ||
+      merged([], await read($, baseEvents), await read($, fndEvents), await read($, slimEvents), {
+        fe: await read($, feEvents),
+        qa: await read($, qaEvents),
+        be: await read($, beEvents),
+        pm: await read($, pmEvents),
+      }).length > 0
     const isDesktop = e.surface === 'desktop'
     drawnOn = e.surface
     lastRender.surface = e.surface

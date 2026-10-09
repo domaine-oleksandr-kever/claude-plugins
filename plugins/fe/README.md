@@ -45,6 +45,8 @@ Current release: **fe v0.1.0**.
 }
 ```
 
+The team plugins fe, qa, be and pm co-install: each needs only base, and none needs another.
+
 To move from fnd, run `/plugin uninstall fnd@domaine`, install the set above, and rename every `FND_` key fe reads to its `FE_` name (`FND_PROFILE`, `FND_GQL_PROBE_CACHE`, `FND_CPT_THROTTLE_WAITS`, `FND_CPT_OVERLAY_VERIFY`, `FND_CPT_OVERLAY_VERIFY_WAIT`, `FND_THEME_JSON_VERIFY`, `FND_THEME_JSON_VERIFY_WAIT`) in `.claude/domaine.env`, `~/.config/domaine/env` and `~/.claude/settings.json` → `env`: fe does not read the old keys.
 
 ## Skills
@@ -79,7 +81,7 @@ the script answers `error=not_a_linked_worktree` and the skill goes on without i
 the same two steps before it starts.
 
 fnd's `smoke-test` skill has no fe copy: `/base-doctor` and `/fe-doctor` check an install. The
-`qa-preflight` skill moves to the qa plugin (`/qa:qa-preflight`).
+`qa-preflight` skill moves to the qa plugin (`/qa:preflight`).
 
 ## Agent
 
@@ -91,7 +93,7 @@ fnd's `smoke-test` skill has no fe copy: `/base-doctor` and `/fe-doctor` check a
 
 The skills and the agent cite fe's own files by their path under fe's root (`<fe root>/…`, the
 session's `fe plugin root:` line) and base's by their path under base's root (`<base root>/…`);
-`tests/fe-refs-lint.sh` checks that every cited path exists.
+`tests/team-refs-lint.sh` checks that every cited path exists.
 
 | Reference | Read by | Holds |
 |---|---|---|
@@ -104,8 +106,6 @@ session's `fe plugin root:` line) and base's by their path under base's root (`<
 | `references/theme-customizer-state.md` | `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:write-technical-approach` | reading and driving the theme editor's state through theme JSON |
 | `references/customizer-sandbox.md` | through `theme-customizer-state.md` | a disposable theme for a walk that would thrash the shared dev theme |
 | `references/preflight-checklist.md` | `/fe:preflight-checks`, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix` | the environment checklist |
-| `references/break-it-qa.md` | `/fe:qa-feature-or-fix`, `/fe:ship` | the break-it QA method |
-| `references/steps-to-test-format.md` | `/fe:write-steps-to-test`, `/fe:ship` | the Steps to Test format and the theme resolution |
 | `references/pipeline-mode.md`, `references/pipeline-phases.md` | `/fe:ship` | the run contract and the phase briefs |
 | `references/eslint-no-restricted-syntax.md` | `/fe:develop-feature-or-fix`, `/fe:fix-accessibility-issue`, `/fe:ship` | Foundation only: state through `data-*` attributes, not `classList` / `style.*` |
 | `references/section-css-variables-pattern.md` | `/fe:develop-feature-or-fix`, `/fe:ship` | Foundation only: a section that drives its blocks' sizes through CSS variables |
@@ -184,7 +184,7 @@ fails. By hand its `event-log` row reads the newest session folder unless `--log
 ## Event log on disk
 
 fe writes its lines to `$HOME/.claude/domaine/log/<session-id>/fe.jsonl` under the same contract as
-base, band and slim ([plugins/base/README.md](../base/README.md#event-log-on-disk)):
+every Domaine plugin ([plugins/base/README.md](../base/README.md#event-log-on-disk)):
 
 - **Line:** `{"ts":"…","plugin":"fe","version":"<fe's version>","session":"<id>","kind":"profile","agent":"main","text":"theme (project-profile.sh)"}`.
 - **fe's lines:** `start` (`fe <version>`, first in every session's file, once), `install` (base is not
@@ -197,7 +197,7 @@ base, band and slim ([plugins/base/README.md](../base/README.md#event-log-on-dis
 - **Off:** `FE_EVENT_LOG=0` stops the file and the `fe.events` lines alike.
 - **Clean-up:** fe never deletes; base sweeps old session folders.
 
-band's Log pane does not show fe's lines yet; the file and `/fe-doctor` do.
+band's Log pane (`/band-log`) shows fe's lines beside the other plugins', `fe` in its plugin column.
 
 ## Environment switches
 
@@ -211,7 +211,8 @@ the process environment wins.
 |---|---|---|
 | `FE_PROFILE` | detected | `foundation`, `theme` or `none` (spaces around it trimmed) forces the project profile instead of detecting it; any other value is ignored and the profile is detected |
 | `FE_EVENT_LOG` | on | `0` keeps `fe.events` empty and writes no `fe.jsonl` |
-| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where base, band, slim and fe write their event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` and `settings.json` the `base` row reads |
 | `FE_GQL_PROBE_CACHE` | `21600` | seconds `shopify-admin-gql.sh` reuses its `shopify version` probe and its "`store execute` is unavailable for this store" fact; `0` re-probes on every call (right after a `shopify store auth`) |
 | `FE_CPT_THROTTLE_WAITS` | `20 60` | pauses, in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled`; one retry per value, empty turns retrying off |
 | `FE_CPT_OVERLAY_VERIFY` | `1` | `0` skips `create-preview-theme.sh`'s overlay read-back (`overlay=skipped`); with it, each overlaid `*.json` the theme silently dropped prints `warn=overlay_file_dropped` |
@@ -234,7 +235,8 @@ the process environment wins.
 - `tests/fe-scripts-sim.sh` — the store scripts, `worktree-theme.sh` and `project-profile.sh` against
   stub CLIs and synthetic configs.
 - `tests/fe-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
-- `tests/fe-refs-lint.sh` — every qualified name and cited path resolves, no fnd name is left.
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no fnd name is left (the
+  same checker for every team plugin on base).
 - `tests/base-qa-stores-sim.sh` — base's QA store registry, `plugins/base/scripts/qa-stores.cjs`, which
   `/fe:write-steps-to-test` names.
 

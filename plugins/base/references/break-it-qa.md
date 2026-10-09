@@ -1,8 +1,8 @@
 # Break-it QA — think like a QA trying to break it
 
-The break-it method shared by `/fe:qa-feature-or-fix` and the pipeline QA phase
-(checklist generation and execution). TA/AC describe intended behaviour; real bugs live
-in the states nobody wrote down.
+The break-it method shared by a team plugin's QA (`/fe:qa-feature-or-fix` and `/fe:ship`'s QA
+phase: checklist generation and execution) and `/qa:preflight` (non-destructive rows only).
+TA/AC describe intended behaviour; real bugs live in the states nobody wrote down.
 
 ## Deriving the rows
 
@@ -27,14 +27,14 @@ fields) — the categories are lenses, not a fixed list. Two hard rules:
 - **Read-only store ≠ reduced mode.** A data-shaped row whose hostile value needs write
   access the run doesn't have is still derived and still reported — as
   `not-executable: access`, never silently dropped and never marked "pass". In a pipeline
-  run the access level is settled at the interview (ship Step 2), so these rows are known
+  run the access level is settled at the interview (`/fe:ship` Step 2), so these rows are known
   and marked before the ✋ gate, not discovered mid-run.
 
 ## Executing the rows
 
 Same mechanics as the AC state walks, hostile values. Data-shaped cases ride the two
-state patterns (`references/metafield-metaobject-setup.md`,
-`references/theme-customizer-state.md`): mutate the metafield / theme JSON to the hostile
+state patterns of the calling team plugin (fe's `<fe root>/references/metafield-metaobject-setup.md`
+and `<fe root>/references/theme-customizer-state.md`): mutate the metafield / theme JSON to the hostile
 value → reload → verify → **restore**. Timing cases: throttle the network via Chrome
 DevTools MCP (`emulate`), interact before scripts hydrate, fire rapid repeated
 interactions and watch the request log for aborted vs racing requests. A break-it row

@@ -1,0 +1,2 @@
+# the dependency contracts the engine lays on each load
+/.claude-plugin/types/

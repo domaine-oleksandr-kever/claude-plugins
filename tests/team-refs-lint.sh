@@ -1,35 +1,41 @@
 #!/usr/bin/env bash
-# Reference lint for plugins/fe: the checks the one-off fnd → fe rewrite ran, kept as a test.
+# Reference lint for the team plugins on base: every plugins/<p> whose manifest `dependencies` is
+# exactly ["base"] (fe, qa, be, pm). The checks the one-off fnd → fe rewrite ran, kept as a test.
 # Every name comes from the manifests (the plugin's own `name`, its first `dependencies` entry as
-# the base plugin), never a literal, so a rename that misses one place fails here:
+# the base plugin, the other team plugins' names), never a literal, so a rename that misses one
+# place fails here:
 #   a. no fnd / host / old-compressor name survives (exact-line allow-list below);
-#   b. fe calls no MCP server of its own: every mcp__plugin_<x>_ names the base plugin, and every
-#      mcp__plugin_<base>_<server> names a server in base's mcpServers;
-#   c. every ${CLAUDE_PLUGIN_ROOT}/…, <plugin root>/… and <fe root>/… path exists in plugins/fe,
+#   b. the plugin calls no MCP server of its own: every mcp__plugin_<x>_ names the base plugin, and
+#      every mcp__plugin_<base>_<server> names a server in base's mcpServers;
+#   c. every ${CLAUDE_PLUGIN_ROOT}/…, <plugin root>/… and <p root>/… path exists in plugins/<p>,
 #      every <base root>/… path in plugins/base;
-#   d. every fe:<x> in a markdown file, code fences included, names an fe agent or skill (or a toml
-#      marker tag), every base:<x> a base agent or skill; a gh `--search` query is skipped, since
-#      `base:<branch>` is GitHub's own qualifier there;
-#   e. every /fe:<x> names an fe skill, every /base:<x> a base skill, /qa:qa-preflight is the one
-#      foreign skill named before its plugin ships; /fe-doctor, /base-progress and /base-doctor
-#      are the only hyphen commands of the two;
+#   d. every <p>:<x> in a markdown file, code fences included, names an agent or skill of the
+#      plugin (or a toml marker tag), every base:<x> a base agent or skill; a gh `--search` query
+#      is skipped, since `base:<branch>` is GitHub's own qualifier there; <other>:<x> of another
+#      team plugin, in any file, is flagged outside the README, and in it unless it names one of
+#      that plugin's agents or skills;
+#   e. every /<p>:<x> names a skill of the plugin, every /base:<x> a base skill; /<other>:<x> of
+#      another team plugin names one of its skills and stands only in the README (a migration
+#      pointer), never in a skill, agent, reference or the module: team plugins never require each
+#      other; any other /<x>:<y> is flagged. /<p>-doctor, /base-progress and /base-doctor are the
+#      only hyphen commands of the two; /<other>-<x> stands only in the README, as /<other>-doctor;
 #   f. no bare /<skill> of either plugin, and no unqualified agent name in a markdown file (code
 #      fences included);
-#   g. every FE_* token is a row of plugins/fe/README.md → Environment switches, every BASE_*
+#   g. every <P>_* token is a row of plugins/<p>/README.md → Environment switches, every BASE_*
 #      token a row of plugins/base/README.md's;
-#   h. every relative markdown link under plugins/fe resolves;
+#   h. every relative markdown link under plugins/<p> resolves;
 #   i. every agents/<name>.md and skills/<name>/SKILL.md opens with frontmatter whose `name:` is
 #      <name> and carries a `description:`;
-#   j. every references/*.md is cited by a skill, the agent or another reference;
+#   j. every references/*.md is cited by a skill, an agent or another reference;
 #   k. every agent is a read-only scout: its `tools:` line lists no write tool.
-# The same checker runs against a planted fixture first (plugins named kit and hub), so a rule
-# that stopped firing — or one that only fires for the literal name fe — fails here.
+# The same checker runs against a planted fixture first (plugins named kit, hub and pal), so a rule
+# that stopped firing — or one that only fires for a literal team name — fails here.
 # Exit 0 = all green.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 NODE_BIN="$(command -v node || true)"
-[ -n "$NODE_BIN" ] || { echo "fe-refs-lint: node not found"; exit 1; }
+[ -n "$NODE_BIN" ] || { echo "team-refs-lint: node not found"; exit 1; }
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 pass=0; fail=0; failures=""
@@ -42,13 +48,12 @@ cat > "$LINT" <<'JS'
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const [dir, depDir, foreign, allowFile] = process.argv.slice(2);
+const [dir, depDir, siblingDirs, allowFile] = process.argv.slice(2);
 const out = [];
 const bad = (rule, where, what) => out.push(`${rule}\t${where}\t${what}`);
 
 const ALLOW = new Set(allowFile && fs.existsSync(allowFile)
   ? fs.readFileSync(allowFile, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean) : []);
-const FOREIGN = new Set((foreign || '').split(/\s+/).filter(Boolean));
 
 const walk = (d, acc = []) => {
   for (const n of fs.readdirSync(d).sort()) {
@@ -81,6 +86,9 @@ const agentsIn = (d) => new Set(listing(d, 'agents', (p, n) => n.endsWith('.md')
 const skillsIn = (d) => new Set(listing(d, 'skills', (p) => fs.statSync(p).isDirectory()));
 const ownAgents = agentsIn(dir); const ownSkills = skillsIn(dir);
 const depAgents = agentsIn(depDir); const depSkills = skillsIn(depDir);
+// the other team plugins on the same base: name → { skills, agents }
+const SIBLINGS = new Map((siblingDirs || '').split(/\s+/).filter(Boolean)
+  .map((d) => [manifestOf(d).name, { skills: skillsIn(d), agents: agentsIn(d) }]).filter(([n]) => okName(n) && n !== NAME));
 
 const envRowsOf = (d, prefix) => {
   const readme = text(path.join(d, 'README.md')) || '';
@@ -108,6 +116,9 @@ const SLASH_RE = /(^|[^A-Za-z0-9_.:\/-])\/([a-z][a-z0-9-]*):([a-z][a-z0-9-]*)/g;
 const CMD_LEAD = '(^|[^A-Za-z0-9_.:\\/<>}-])';
 const HYPHEN_RE = new RegExp(`${CMD_LEAD}\\/((?:${esc(NAME)}|${esc(DEP)})-[A-Za-z0-9_-]+)`, 'g');
 const COMMANDS = new Set([`${NAME}-doctor`, `${DEP}-progress`, `${DEP}-doctor`]);
+const SIB = [...SIBLINGS.keys()].map(esc).join('|');
+const SIB_REF_RE = SIB ? new RegExp(`(^|[^\\/A-Za-z0-9_-])(${SIB}):([a-z][a-z0-9-]*)`, 'g') : null;
+const SIB_HYPHEN_RE = SIB ? new RegExp(`${CMD_LEAD}\\/((${SIB})-[A-Za-z0-9_-]+)`, 'g') : null;
 const ALL_SKILLS = [...ownSkills, ...depSkills];
 const BARE_SKILL_RE = ALL_SKILLS.length
   ? new RegExp(`${CMD_LEAD}\\/(${ALL_SKILLS.map(esc).join('|')})(?![-A-Za-z0-9_:/])`, 'g') : null;
@@ -164,10 +175,22 @@ for (const f of files) {
       const ref = `/${m[2]}:${m[3]}`;
       if (m[2] === NAME) { if (!ownSkills.has(m[3])) bad('e', at, ref); }
       else if (m[2] === DEP) { if (!depSkills.has(m[3])) bad('e', at, ref); }
-      else if (!FOREIGN.has(ref)) bad('e', at, ref);
+      else if (!SIBLINGS.has(m[2]) || !SIBLINGS.get(m[2]).skills.has(m[3])) bad('e', at, ref);
+      else if (rel !== 'README.md') bad('e', at, `${ref} from another team plugin`);
     }
     for (const m of line.matchAll(HYPHEN_RE)) {
       if (!COMMANDS.has(m[2])) bad('e', at, `/${m[2]}`);
+    }
+    if (SIB_REF_RE) for (const m of line.matchAll(SIB_REF_RE)) {
+      if (isMd && searchSpans(line).some(([a, b]) => m.index >= a && m.index < b)) continue;
+      const ref = `${m[2]}:${m[3]}`;
+      const { agents, skills } = SIBLINGS.get(m[2]);
+      if (rel !== 'README.md') bad('d', at, `${ref} from another team plugin`);
+      else if (!agents.has(m[3]) && !skills.has(m[3])) bad('d', at, ref);
+    }
+    if (SIB_HYPHEN_RE) for (const m of line.matchAll(SIB_HYPHEN_RE)) {
+      if (rel !== 'README.md') bad('e', at, `/${m[2]} from another team plugin`);
+      else if (m[2] !== `${m[3]}-doctor`) bad('e', at, `/${m[2]}`);
     }
     if (BARE_SKILL_RE) for (const m of line.matchAll(BARE_SKILL_RE)) bad('f', at, `/${m[2]}`);
     if (isMd && BARE_AGENT_RE && !(fm && /^name:/.test(line))) {
@@ -217,16 +240,18 @@ for (const r of listing(dir, 'references', (p, n) => n.endsWith('.md'))) {
 process.stdout.write(out.join('\n') + (out.length ? '\n' : ''));
 JS
 
-FOREIGN_REFS="/qa:qa-preflight"
 ALLOW_FILE="$TMP/allow.txt"
-# The README's one migration line names fnd's uninstall command and its old profile key.
+# fe's README has the one migration line: it names fnd's uninstall command and its old profile key.
 cat > "$ALLOW_FILE" <<'TXT'
 To move from fnd, run `/plugin uninstall fnd@domaine`, install the set above, and rename every `FND_` key fe reads to its `FE_` name (`FND_PROFILE`, `FND_GQL_PROBE_CACHE`, `FND_CPT_THROTTLE_WAITS`, `FND_CPT_OVERLAY_VERIFY`, `FND_CPT_OVERLAY_VERIFY_WAIT`, `FND_THEME_JSON_VERIFY`, `FND_THEME_JSON_VERIFY_WAIT`) in `.claude/domaine.env`, `~/.config/domaine/env` and `~/.claude/settings.json` → `env`: fe does not read the old keys.
 TXT
-run_lint() { "$NODE_BIN" "$LINT" "$1" "$2" "$FOREIGN_REFS" "$ALLOW_FILE"; }
+# run_lint <plugin dir> <base dir> [<sibling team plugin dirs, space-separated>]
+run_lint() { "$NODE_BIN" "$LINT" "$1" "$2" "${3:-}" "$ALLOW_FILE"; }
 
 # ------------------------------------------------------- the checker fires on a planted fixture --
-HUB="$TMP/hub"; KIT="$TMP/kit"
+HUB="$TMP/hub"; KIT="$TMP/kit"; PAL="$TMP/pal"
+mkdir -p "$PAL/.claude-plugin" "$PAL/skills/check"
+printf '{ "name": "pal", "dependencies": ["hub"] }\n' > "$PAL/.claude-plugin/plugin.json"
 mkdir -p "$HUB/.claude-plugin" "$HUB/agents" "$HUB/skills/commit" "$HUB/skills/save-task-context" "$HUB/skills/worktree" "$HUB/skills/report" "$HUB/references" "$HUB/scripts"
 printf '{ "name": "hub", "mcpServers": { "atlassian": {} } }\n' > "$HUB/.claude-plugin/plugin.json"
 printf -- '---\nname: jira-reader\ndescription: x\n---\n' > "$HUB/agents/jira-reader.md"
@@ -247,7 +272,7 @@ name: ship
 description: a fixture skill
 ---
 Spawn kit:scout, kit:ghost, hub:jira-reader and hub:ghost; bare jira-reader and scout here.
-Run /kit:ship, /kit:nope, /hub:commit, /hub:nope, /qa:qa-preflight, /qa:other, /kit-doctor, /kit-bogus, /hub-progress.
+Run /kit:ship, /kit:nope, /hub:commit, /hub:nope, /pal:check, /qa:other, /kit-doctor, /kit-bogus, /hub-progress.
 Bare /commit and /ship. Paths ${CLAUDE_PLUGIN_ROOT}/scripts/present.sh <kit root>/references/absent.md
 <hub root>/references/task-workspace.md <hub root>/scripts/gone.sh <plugin root>/scripts/present.sh.
 Old names: plugin_fnd_x, FND_X, fnd:jira-reader, /fnd-progress, .claude/fnd-tmp, json-slim, Codex, host-model-map.
@@ -256,14 +281,16 @@ Switches: KIT_KNOWN, KIT_UNKNOWN, HUB_KNOWN, HUB_UNKNOWN. Markers: # kit:superse
 Links: [ok](../../README.md) [gone](missing.md) [web](https://x.test) `[code](span.md)`.
 .claude/hub-tmp/x is a path, agents/scout.md a file, http://localhost:9292 a URL.
 Then **/save-task-context** and →/worktree, */kit-stray* here; ${ROOT}/report here.
+Spawn pal:check to map it, then run /pal-doctor; plugins/pal-x/ and tests/pal-doctor-sim.sh are paths.
 ```bash
 gh pr list --search "merged:>2026-01-01 hub:main"
 Agent(subagent_type: "figma-reader", prompt: "then spawn kit:phantom")
 ```
 MD
 printf 'const HUB_MISSING = 1\n' > "$KIT/scripts/constants.ts"
+printf '%s\n' 'Hands-on QA moved to /pal:check (pal:check, checked by /pal-doctor); /pal:gone and pal:gone never shipped, nor /pal-bogus.' >> "$KIT/README.md"
 printf '%s\n' 'To move from fnd, run `/plugin uninstall fnd@domaine`, install the set above, and rename every `FND_` key fe reads to its `FE_` name (`FND_PROFILE`, `FND_GQL_PROBE_CACHE`, `FND_CPT_THROTTLE_WAITS`, `FND_CPT_OVERLAY_VERIFY`, `FND_CPT_OVERLAY_VERIFY_WAIT`, `FND_THEME_JSON_VERIFY`, `FND_THEME_JSON_VERIFY_WAIT`) in `.claude/domaine.env`, `~/.config/domaine/env` and `~/.claude/settings.json` → `env`: fe does not read the old keys.' >> "$KIT/README.md"
-run_lint "$KIT" "$HUB" > "$TMP/fx.out"
+run_lint "$KIT" "$HUB" "$PAL $KIT" > "$TMP/fx.out"
 OUTF="$TMP/fx.out"
 want() { # want <rule> <what>
   if awk -F'\t' -v r="$1" -v w="$2" '$1 == r && $3 == w { f = 1 } END { exit !f }' "$OUTF"; then ok
@@ -283,7 +310,16 @@ want d hub:ghost;                        dont d hub:jira-reader;  dont d hub:mai
 dont d kit:superseded;                   dont d kit:session-theme
 want e /kit:nope;                        dont e /kit:ship
 want e /hub:nope;                        dont e /hub:commit
-want e /qa:other;                        dont e /qa:qa-preflight
+want e /qa:other;                        want e /pal:gone
+want e "/pal:check from another team plugin"
+want d "pal:check from another team plugin"; want e "/pal-doctor from another team plugin"
+want d pal:gone;                         want e /pal-bogus
+dont e /pal-x;                           dont e /pal-doctor-sim.sh
+# a sibling's skill is allowed in the README only: the README line is never flagged for it
+if awk -F'\t' '$1 == "e" && $2 ~ /^README\.md:/ && $3 ~ /pal:check/ { f = 1 } END { exit f }' "$OUTF"; then ok
+else bad fixture-e-readme-sibling "rule e flagged /pal:check in the README"; fi
+if awk -F'\t' '$2 ~ /^README\.md:/ && ($3 == "pal:check" || $3 == "/pal-doctor") { f = 1 } END { exit f }' "$OUTF"; then ok
+else bad fixture-readme-sibling-agent "pal:check or /pal-doctor flagged in the README"; fi
 want e /kit-bogus;                       dont e /kit-doctor;      dont e /hub-progress
 dont e /hub-tmp;                         dont e /localhost
 want f /commit;                          want f /ship
@@ -312,24 +348,43 @@ printf '{ "name": "kit", "dependencies": ["base"] }\n' > "$KIT2/.claude-plugin/p
 run_lint "$KIT2" "$HUB" > "$TMP/fx2.out"; OUTF="$TMP/fx2.out"
 want b "dependencies hub"
 
-# ------------------------------------------------------------------------------- plugins/fe --
-FE="$ROOT/plugins/fe"; BASE="$ROOT/plugins/base"
-if [ -d "$FE" ] && [ -d "$BASE" ]; then
-  run_lint "$FE" "$BASE" > "$TMP/fe.out"
+# ------------------------------------------------------------------ the team plugins on base --
+# A team plugin is any plugins/<p> whose manifest `dependencies` is exactly ["base"].
+BASE="$ROOT/plugins/base"
+TEAMS="$(for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
+  "$NODE_BIN" -e '
+    try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      if (JSON.stringify(j.dependencies) === "[\"base\"]") console.log(j.name); } catch (e) {}
+  ' "$m"
+done | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+# discovery is by manifest, so a team plugin that lost its dependency would otherwise go unlinted
+if [ "$TEAMS" = "be fe pm qa" ]; then ok; else bad team-set "team plugins on base: '$TEAMS', want 'be fe pm qa'"; fi
+[ -d "$BASE" ] || bad base-present "plugins/base missing"
+TEAM_DIRS=""
+for p in $TEAMS; do TEAM_DIRS="$TEAM_DIRS $ROOT/plugins/$p"; done
+for p in $TEAMS; do
+  P="$ROOT/plugins/$p"
+  run_lint "$P" "$BASE" "$TEAM_DIRS" > "$TMP/$p.out"
   for r in a b c d e f g h i j k; do
-    hits="$(awk -F'\t' -v r="$r" '$1 == r { printf "%s %s; ", $2, $3 }' "$TMP/fe.out")"
-    if [ -z "$hits" ]; then ok; else bad "fe-$r" "$(printf '%s' "$hits" | head -c 800)"; fi
+    hits="$(awk -F'\t' -v r="$r" '$1 == r { printf "%s %s; ", $2, $3 }' "$TMP/$p.out")"
+    if [ -z "$hits" ]; then ok; else bad "$p-$r" "$(printf '%s' "$hits" | head -c 800)"; fi
   done
-  # the exact skill set fe ships, and the ones it must leave to base and the qa plugin
-  want_skills="create-pull-request develop-feature-or-fix fix-accessibility-issue fix-breaking-changes get-breaking-changes preflight-checks preview-theme qa-feature-or-fix ship update-translations write-steps-to-test write-technical-approach"
-  have_skills="$(cd "$FE/skills" 2>/dev/null && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | sort | tr '\n' ' ' | sed 's/ $//')"
-  if [ "$have_skills" = "$want_skills" ]; then ok; else bad fe-skill-set "skills: $have_skills"; fi
-  if [ "$(cd "$FE/agents" 2>/dev/null && ls)" = "theme-explorer.md" ]; then ok; else bad fe-agent-set "agents: $(ls "$FE/agents" 2>/dev/null | tr '\n' ' ')"; fi
-  if [ -f "$FE/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js" ]; then ok
-  else bad fe-fbc-template "skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js missing"; fi
-else
-  bad fe-present "plugins/fe or plugins/base missing"
-fi
+  # the exact skill and agent set each plugin ships, so a skill that strays into the wrong plugin shows
+  case "$p" in
+    fe) want_skills="create-pull-request develop-feature-or-fix fix-accessibility-issue fix-breaking-changes get-breaking-changes preflight-checks preview-theme qa-feature-or-fix ship update-translations write-steps-to-test write-technical-approach"
+        want_agents="theme-explorer.md" ;;
+    qa) want_skills="preflight"; want_agents="" ;;
+    be) want_skills="app-scope platform-limitations shopify-resources"; want_agents="" ;;
+    pm) want_skills="estimator-review merchant-brief project-estimator solutions-engineering vendor-evaluation"; want_agents="" ;;
+    *) want_skills="(not listed in team-refs-lint.sh)"; want_agents="" ;;
+  esac
+  have_skills="$(cd "$P/skills" 2>/dev/null && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+  if [ "$have_skills" = "$want_skills" ]; then ok; else bad "$p-skill-set" "skills: $have_skills"; fi
+  have_agents="$(cd "$P/agents" 2>/dev/null && ls | tr '\n' ' ' | sed 's/ $//')"
+  if [ "$have_agents" = "$want_agents" ]; then ok; else bad "$p-agent-set" "agents: '$have_agents', want '$want_agents'"; fi
+done
+if [ -f "$ROOT/plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js" ]; then ok
+else bad fe-fbc-template "plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js missing"; fi
 
-echo "fe-refs-lint: $pass passed, $fail failed"
+echo "team-refs-lint: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

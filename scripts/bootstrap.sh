@@ -47,10 +47,11 @@ usage: bootstrap.sh [--dir <path>] [--targets <csv>] [--plugins <csv>] [--yes] [
                     'claude plugin install' (update when already installed, and enable when
                     disabled) when the claude CLI is on PATH, and prints the slash commands when
                     it is not
-  --plugins <csv>   claude only: the plugins to install (default slim,band,base,fe; fnd alone
-                    for the legacy plugin), always in the order slim, band, base, fe, fnd
-                    whatever order the list gives, so a dependency comes first. An install
-                    that names fnd beside base or fe is refused: they never run together, and
+  --plugins <csv>   claude only: the plugins to install (default slim,band,base,fe; name the
+                    team plugins you need among fe, qa, be, pm; fnd alone for the legacy one),
+                    always in the order slim, band, base, fe, qa, be, pm, fnd whatever order
+                    the list gives, so a dependency comes first. An install that names fnd
+                    beside base or a team plugin is refused: they never run together, and
                     neither is installed next to an enabled copy of the other. With
                     --uninstall, only the named plugins are removed, dependents first
   --yes             accept the defaults and never prompt (the default destination, and every
@@ -224,9 +225,9 @@ fi
 [ -n "$TARGET_LIST" ] || { echo "error: no targets selected" >&2; usage >&2; exit 2; }
 
 # ------------------------------------------------------------------- the Claude Code set --
-# The new set by default, each dependency before what requires it (base needs slim, fe needs base); fnd
-# only when --plugins names it. fnd ships the same agents, skills and MCP servers as base and fe, so an
-# install never names fnd beside either.
+# The new set by default, each dependency before what requires it (base needs slim, every team plugin
+# needs base); fnd only when --plugins names it. fnd ships the same agents, skills and MCP servers as
+# base and the team plugins, so an install never names fnd beside any of them.
 CLAUDE_PLUGINS=""
 add_plugin() {
   case " $CLAUDE_PLUGINS " in
@@ -243,15 +244,16 @@ for p in $(printf '%s' "$PLUGINS" | tr ',' ' '); do
 done
 set +f
 [ -n "$CLAUDE_PLUGINS" ] || CLAUDE_PLUGINS="slim band base fe"
-# The dependency order, whatever order --plugins gave: base requires slim and fe requires base, so
-# an install that reached fe first would fail, and the reversed uninstall would strand fe. A name
-# outside the known five keeps its given place after them.
+# The dependency order, whatever order --plugins gave: base requires slim and every team plugin
+# requires base, so an install that reached a team plugin first would fail, and the reversed
+# uninstall would strand it. A name outside the known eight keeps its given place after them.
+TEAM_PLUGINS="fe qa be pm"
 ORDERED_PLUGINS=""
-for p in slim band base fe fnd; do
+for p in slim band base $TEAM_PLUGINS fnd; do
   case " $CLAUDE_PLUGINS " in *" $p "*) ORDERED_PLUGINS="${ORDERED_PLUGINS:+$ORDERED_PLUGINS }$p" ;; esac
 done
 for p in $CLAUDE_PLUGINS; do
-  case " slim band base fe fnd " in *" $p "*) ;; *) ORDERED_PLUGINS="${ORDERED_PLUGINS:+$ORDERED_PLUGINS }$p" ;; esac
+  case " slim band base $TEAM_PLUGINS fnd " in *" $p "*) ;; *) ORDERED_PLUGINS="${ORDERED_PLUGINS:+$ORDERED_PLUGINS }$p" ;; esac
 done
 CLAUDE_PLUGINS="$ORDERED_PLUGINS"
 case " $CLAUDE_PLUGINS " in
@@ -262,12 +264,16 @@ case " $CLAUDE_PLUGINS " in
   *" base "*) CLAUDE_BASE="yes" ;;
   *) CLAUDE_BASE="no" ;;
 esac
-case " $CLAUDE_PLUGINS " in
-  *" fe "*) CLAUDE_FE="yes" ;;
-  *) CLAUDE_FE="no" ;;
-esac
-if [ "$ACTION" = "install" ] && [ "$CLAUDE_FND" = "yes" ] && { [ "$CLAUDE_BASE" = "yes" ] || [ "$CLAUDE_FE" = "yes" ]; }; then
-  echo "error: fnd must not run together with base or fe — name fnd alone, or the new set, in --plugins" >&2
+CLAUDE_FE="no"; CLAUDE_QA="no"; CLAUDE_BE="no"; CLAUDE_PM="no"
+case " $CLAUDE_PLUGINS " in *" fe "*) CLAUDE_FE="yes" ;; esac
+case " $CLAUDE_PLUGINS " in *" qa "*) CLAUDE_QA="yes" ;; esac
+case " $CLAUDE_PLUGINS " in *" be "*) CLAUDE_BE="yes" ;; esac
+case " $CLAUDE_PLUGINS " in *" pm "*) CLAUDE_PM="yes" ;; esac
+# "yes" when the set names base or any team plugin: the side fnd never runs beside.
+CLAUDE_NEW="no"
+case "$CLAUDE_BASE$CLAUDE_FE$CLAUDE_QA$CLAUDE_BE$CLAUDE_PM" in *yes*) CLAUDE_NEW="yes" ;; esac
+if [ "$ACTION" = "install" ] && [ "$CLAUDE_FND" = "yes" ] && [ "$CLAUDE_NEW" = "yes" ]; then
+  echo "error: fnd must not run together with base or a team plugin (fe, qa, be, pm) — name fnd alone, or the new set, in --plugins" >&2
   exit 2
 fi
 case " $TARGET_LIST " in
@@ -333,19 +339,35 @@ INSTALLER="$DIR/scripts/install.sh"
 MARKETPLACE="domaine"
 MARKETPLACE_SOURCE="domaine-oleksandr-kever/claude-plugins"
 
-# dependents first: CLAUDE_PLUGINS is in dependency order (slim, base before base, fe)
+# dependents first: CLAUDE_PLUGINS is in dependency order (slim before base, base before the team plugins)
 CLAUDE_REVERSED=""
 for p in $CLAUDE_PLUGINS; do CLAUDE_REVERSED="$p${CLAUDE_REVERSED:+ $CLAUDE_REVERSED}"; done
 
-CLAUDE_NEXT="restart Claude Code, or run /reload-plugins in an open session"
+# The checks a session runs after the install, in install order: fnd's smoke test, base's doctor,
+# then one doctor per team plugin named.
+VERIFY_STEPS=""
+if [ "$CLAUDE_FND" = "yes" ]; then VERIFY_STEPS="/fnd:smoke-test"; fi
+if [ "$CLAUDE_BASE" = "yes" ]; then VERIFY_STEPS="${VERIFY_STEPS:+$VERIFY_STEPS }/base-doctor"; fi
+if [ "$CLAUDE_FE" = "yes" ]; then VERIFY_STEPS="${VERIFY_STEPS:+$VERIFY_STEPS }/fe-doctor"; fi
+if [ "$CLAUDE_QA" = "yes" ]; then VERIFY_STEPS="${VERIFY_STEPS:+$VERIFY_STEPS }/qa-doctor"; fi
+if [ "$CLAUDE_BE" = "yes" ]; then VERIFY_STEPS="${VERIFY_STEPS:+$VERIFY_STEPS }/be-doctor"; fi
+if [ "$CLAUDE_PM" = "yes" ]; then VERIFY_STEPS="${VERIFY_STEPS:+$VERIFY_STEPS }/pm-doctor"; fi
+# "a", "a and b", "a, b and c"
 CLAUDE_VERIFY=""
-if [ "$CLAUDE_FND" = "yes" ]; then CLAUDE_VERIFY="/fnd:smoke-test"; fi
-if [ "$CLAUDE_BASE" = "yes" ]; then CLAUDE_VERIFY="${CLAUDE_VERIFY:+$CLAUDE_VERIFY and }/base-doctor"; fi
-if [ "$CLAUDE_FE" = "yes" ]; then CLAUDE_VERIFY="${CLAUDE_VERIFY:+$CLAUDE_VERIFY and }/fe-doctor"; fi
+set -f
+set -- $VERIFY_STEPS
+set +f
+while [ $# -gt 0 ]; do
+  if [ -z "$CLAUDE_VERIFY" ]; then CLAUDE_VERIFY="$1"
+  elif [ $# -eq 1 ]; then CLAUDE_VERIFY="$CLAUDE_VERIFY and $1"
+  else CLAUDE_VERIFY="$CLAUDE_VERIFY, $1"; fi
+  shift
+done
+CLAUDE_NEXT="restart Claude Code, or run /reload-plugins in an open session"
 if [ "$ACTION" = "install" ] && [ -n "$CLAUDE_VERIFY" ]; then CLAUDE_NEXT="$CLAUDE_NEXT, then $CLAUDE_VERIFY"; fi
 
-# How the claude target ended: "cli-ok", "cli-failed", "conflict" (fnd beside base or fe, nothing
-# run) or "printed" — the leftovers read it, and a conflict also reads the removal steps.
+# How the claude target ended: "cli-ok", "cli-failed", "conflict" (fnd beside base or a team plugin,
+# nothing run) or "printed" — the leftovers read it, and a conflict also reads the removal steps.
 CLAUDE_OUTCOME=""
 CLAUDE_CONFLICT_STEPS=""
 
@@ -424,8 +446,8 @@ claude_marketplace() {
   return "$rc"
 }
 
-# The first failed install stops the rest: the plugins after it depend on it (base on slim, fe on
-# base), so they would fail too, and a half-installed set reported as one failure is easier to
+# The first failed install stops the rest: the plugins after it depend on it (base on slim, the team
+# plugins on base), so they would fail too, and a half-installed set reported as one failure is easier to
 # re-run than a list of knock-on errors.
 claude_cli_install() {
   local p id verb state rc yes="" what="" steps=""
@@ -437,22 +459,22 @@ claude_cli_install() {
   # leave no way past a CLI whose list is broken), but the summary says the check never ran.
   if [ "$INSTALLED_KNOWN" = "no" ]; then
     echo "claude: could not read 'claude plugin list --json' — installing every plugin"
-    if [ "$CLAUDE_BASE" = "yes" ] || [ "$CLAUDE_FE" = "yes" ]; then what="fnd"
-    elif [ "$CLAUDE_FND" = "yes" ]; then what="base or fe"; fi
+    if [ "$CLAUDE_NEW" = "yes" ]; then what="fnd"
+    elif [ "$CLAUDE_FND" = "yes" ]; then what="base or a team plugin"; fi
     if [ -n "$what" ]; then
-      echo "claude: WARN — an enabled $what was not checked for; run 'claude plugin list' and remove it if it shows (fnd never runs with base or fe)" >&2
+      echo "claude: WARN — an enabled $what was not checked for; run 'claude plugin list' and remove it if it shows (fnd never runs with base or a team plugin)" >&2
       CONFLICT_WARN=" (WARN: $what not checked)"
     fi
-  elif [ "$CLAUDE_BASE" = "yes" ] || [ "$CLAUDE_FE" = "yes" ]; then
+  elif [ "$CLAUDE_NEW" = "yes" ]; then
     what="fnd"; steps="$(removal_steps '^fnd@')"
   elif [ "$CLAUDE_FND" = "yes" ]; then
-    what="base or fe"
-    steps="$(removal_steps "^fe@$MARKETPLACE\$")"
+    what="base or a team plugin"
+    steps="$(removal_steps "^($(printf '%s' "$TEAM_PLUGINS" | tr ' ' '|'))@$MARKETPLACE\$")"
     p="$(removal_steps "^base@$MARKETPLACE\$")"
     if [ -n "$p" ]; then steps="${steps:+$steps, then }$p"; fi
   fi
   if [ -n "$steps" ]; then
-    echo "error: $what is installed and enabled — fnd never runs with base or fe." >&2
+    echo "error: $what is installed and enabled — fnd never runs with base or a team plugin." >&2
     echo "       Remove it first: $steps" >&2
     record claude "FAILED ($what is installed and enabled — remove it first)"
     CLAUDE_CONFLICT_STEPS="$steps"
@@ -524,18 +546,10 @@ claude_block() {
     echo "        /plugin marketplace add domaine-oleksandr-kever/claude-plugins"
     for p in $CLAUDE_PLUGINS; do echo "        /plugin install $p@domaine"; done
     echo "        /reload-plugins"
-    if [ "$CLAUDE_FND" = "yes" ]; then
-      echo "        /fnd:smoke-test"
-    fi
-    if [ "$CLAUDE_BASE" = "yes" ]; then
-      echo "        /base-doctor"
-    fi
-    if [ "$CLAUDE_FE" = "yes" ]; then
-      echo "        /fe-doctor"
-    fi
-    if [ "$CLAUDE_BASE" = "yes" ] || [ "$CLAUDE_FE" = "yes" ]; then
+    for p in $VERIFY_STEPS; do echo "        $p"; done
+    if [ "$CLAUDE_NEW" = "yes" ]; then
       echo
-      echo "        Moving from fnd: run /plugin uninstall fnd@domaine first — fnd never runs with base or fe."
+      echo "        Moving from fnd: run /plugin uninstall fnd@domaine first — fnd never runs with base or a team plugin."
     fi
   fi
   echo
@@ -660,14 +674,14 @@ else
   elif [ "$CLAUDE_OUTCOME" = "cli-ok" ]; then
     if [ -n "$CONFLICT_WARN" ]; then
       echo "  - Claude Code: 'claude plugin list' could not be read, so nothing checked that fnd is not"
-      echo "    enabled beside base or fe — run it, and remove whichever side this run did not install"
+      echo "    enabled beside base or a team plugin — run it, and remove whichever side this run did not install"
     fi
     echo "  - Claude Code: $CLAUDE_NEXT"
   elif [ "$CLAUDE_OUTCOME" = "cli-failed" ]; then
     echo "  - Claude Code: fix the failed 'claude plugin' call above and re-run with --targets claude"
     echo "    (a re-run updates what is already installed), then $CLAUDE_NEXT"
   elif [ "$CLAUDE_OUTCOME" = "conflict" ]; then
-    echo "  - Claude Code: fnd never runs with base or fe, so nothing was installed. First"
+    echo "  - Claude Code: fnd never runs with base or a team plugin, so nothing was installed. First"
     echo "    $CLAUDE_CONFLICT_STEPS;"
     echo "    then re-run this command and $CLAUDE_NEXT"
   fi

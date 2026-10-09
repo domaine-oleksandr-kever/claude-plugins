@@ -22,7 +22,7 @@
     {
       "name": "band",
       "source": "./plugins/band",
-      "description": "Status band, Log pane and Progress pane for Claude Code: draws the session's figures above the prompt and the event log and task checklist that base, fnd and slim publish; reads base, fnd and slim state.",
+      "description": "Status band, Log pane and Progress pane for Claude Code: draws the session's figures above the prompt and the event log and task checklist that base, fnd, slim and the team plugins publish; reads base, fnd, slim and the team plugins' state.",
       "license": "MIT"
     },
     {
@@ -35,6 +35,24 @@
       "name": "fe",
       "source": "./plugins/fe",
       "description": "Domaine frontend team plugin for Claude Code: the Shopify theme skills (ship, preview theme, steps to test, TA, breaking changes, translations, PR), the theme-explorer agent, project profile and store access; requires base (and slim through it)",
+      "license": "MIT"
+    },
+    {
+      "name": "qa",
+      "source": "./plugins/qa",
+      "description": "Domaine QA team plugin for Claude Code: the preflight skill (Jira ticket, PR and store facts, a storefront unlocked on the theme under test, Steps to Test pre-run at desktop and mobile, a brief in the house style) and the read-only store-access posture; requires base (and slim through it)",
+      "license": "MIT"
+    },
+    {
+      "name": "be",
+      "source": "./plugins/be",
+      "description": "Domaine backend team plugin for Claude Code: the Shopify app and extension skills (app scope with LOE, Shopify resources, platform limitations and workarounds); requires base (and slim through it)",
+      "license": "MIT"
+    },
+    {
+      "name": "pm",
+      "source": "./plugins/pm",
+      "description": "Domaine project-management plugin for Claude Code: the project estimator, the estimator pre-submission review, the merchant brief, solutions engineering (scoping, implementation plan, LOE, handoff) and vendor evaluation skills; requires base (and slim through it)",
       "license": "MIT"
     }
   ]

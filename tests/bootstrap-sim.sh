@@ -315,7 +315,7 @@ else bad A1-help "rc=$RC out=$(head -c 160 "$O")"; fi
 # the help tells what the claude target runs on an uninstall and on a disabled install
 if tr '\n' ' ' < "$O" | tr -s ' ' | grep -qF "For claude it runs 'claude plugin uninstall' (dependents first, the marketplace kept) and needs no checkout" \
    && tr '\n' ' ' < "$O" | tr -s ' ' | grep -qF "and enable when disabled" \
-   && tr '\n' ' ' < "$O" | tr -s ' ' | grep -qF "always in the order slim, band, base, fe, fnd"; then ok
+   && tr '\n' ' ' < "$O" | tr -s ' ' | grep -qF "always in the order slim, band, base, fe, qa, be, pm, fnd"; then ok
 else bad A1b-help-claude-target "out=$(tr '\n' ';' < "$O")"; fi
 
 run "$TMP/h-args" "$BOOT" --wat
@@ -468,18 +468,20 @@ else bad C10-symlinked-scripts-dir "rc=$RC out=$(tr '\n' ';' < "$O") git=$(tr '\
 
 # ------------------------------------------------------------------------- the claude target --
 # With no `claude` CLI on PATH (CI, a Desktop-only machine) this target prints and says why. The
-# default is the new set (slim, band, base, fe — each dependency before what requires it), and the
-# slash commands are the README's team-use block, line for line. The CLI-present half is section Q.
-run "$TMP/h8" "$FIXBOOT" --targets claude
-if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 0 ]; then ok
-else bad L1-claude-no-installer "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG")"; fi
-
+# default is the new set (slim, band, base, fe — each dependency before what requires it). The
+# README's team-use block names every team plugin, so the whole set's slash commands are that block,
+# line for line. The CLI-present half is section Q.
+run "$TMP/h8w" "$FIXBOOT" --targets claude --plugins slim,band,base,fe,qa,be,pm
 README_CMDS="$(awk '/^### Claude Code — from the published Git marketplace \(team use\)/ { s = 1; next }
   s && /^```/ { if (inb) exit; inb = 1; next }
   inb && /^\// { print }' "$ROOT/README.md")"
 BOOT_CMDS="$(sed -n 's/^ *\(\/[a-z][^ ].*\)$/\1/p' "$O" | sed 's/ *$//')"
 if [ -n "$README_CMDS" ] && [ "$README_CMDS" = "$BOOT_CMDS" ]; then ok
 else bad L2-claude-block-is-readme "readme='$(printf '%s' "$README_CMDS" | tr '\n' ';')' boot='$(printf '%s' "$BOOT_CMDS" | tr '\n' ';')'"; fi
+
+run "$TMP/h8" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 0 ] && [ "$(argv_count)" -eq 0 ]; then ok
+else bad L1-claude-no-installer "rc=$RC argv=$(tr '\n' ';' < "$STUB_LOG")"; fi
 
 if grep -qF 'claude: the `claude` CLI is not on PATH — run these in a session:' "$O"; then ok
 else bad L3-claude-informational "the claude target does not say why it only prints"; fi
@@ -516,11 +518,27 @@ INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3
 if [ "$RC" -eq 0 ] && [ "$INSTALLS" = "slim@domaine band@domaine base@domaine fe@domaine " ]; then ok
 else bad L5-claude-plugins-set "rc=$RC installs='$INSTALLS'"; fi
 
-# fnd beside base or fe is refused with the reason, before anything is printed or installed
-for spelling in "--plugins fnd,base" "--plugins=base,fe,fnd" "--plugins fe,fnd"; do
+# a team plugin alone is installed alone and verified by its own doctor; base's is not asked for
+run "$TMP/h8q" "$FIXBOOT" --targets claude --plugins qa
+INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$RC" -eq 0 ] && [ "$INSTALLS" = "qa@domaine " ] \
+   && [ "$(grep -A1 '/reload-plugins' "$O" | tail -1 | tr -d ' ')" = "/qa-doctor" ] \
+   && ! grep -qF "/base-doctor" "$O" && grep -qF "Moving from fnd: run /plugin uninstall fnd@domaine first" "$O"; then ok
+else bad L5b-claude-qa-alone "rc=$RC installs='$INSTALLS' out=$(tr '\n' ';' < "$O")"; fi
+
+# the team plugins follow base in the order fe, qa, be, pm whatever order --plugins gives, each
+# with its doctor after base's
+run "$TMP/h8r" "$FIXBOOT" --targets claude --plugins pm,qa,slim,band,base
+INSTALLS="$(grep -oE '/plugin install [a-z0-9-]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')"
+if [ "$RC" -eq 0 ] && [ "$INSTALLS" = "slim@domaine band@domaine base@domaine qa@domaine pm@domaine " ] \
+   && [ "$(grep -A3 '/reload-plugins' "$O" | tail -3 | tr -d ' ' | tr '\n' ' ')" = "/base-doctor /qa-doctor /pm-doctor " ]; then ok
+else bad L5c-claude-team-order "rc=$RC installs='$INSTALLS' out=$(tr '\n' ';' < "$O")"; fi
+
+# fnd beside base or a team plugin is refused with the reason, before anything is printed or installed
+for spelling in "--plugins fnd,base" "--plugins=base,fe,fnd" "--plugins fe,fnd" "--plugins qa,fnd" "--plugins be,fnd" "--plugins=fnd,pm"; do
   # shellcheck disable=SC2086
   run "$TMP/h8c" "$FIXBOOT" --targets claude,cursor $spelling
-  if [ "$RC" -eq 2 ] && grep -qF "fnd must not run together with base or fe" "$E" \
+  if [ "$RC" -eq 2 ] && grep -qF "fnd must not run together with base or a team plugin (fe, qa, be, pm)" "$E" \
      && ! grep -q '/plugin ' "$O" && [ "$(argv_count)" -eq 0 ]; then ok
   else bad "L6-claude-fnd-base-refused($spelling)" "rc=$RC out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E")"; fi
 done
@@ -959,17 +977,17 @@ if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install slim;install band;install base;ins
    && grep -qF "'claude plugin list' could not be read, so nothing checked that fnd is not" "$O"; then ok
 else bad Q9c-list-fails-installs-all "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O") err=$(head -c 200 "$E")"; fi
 
-# …the legacy set warns about base and fe the same way, and a set with neither side warns nothing
+# …the legacy set warns about base and the team plugins the same way, and a set with neither side warns nothing
 claude_state present; rm -f "$CSTATE/installed.json"
 WITH_CLAUDE=yes run "$TMP/hq7d" "$FIXBOOT" --targets claude --plugins fnd
-if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install fnd;" ] && grep -qx 'claude OK (WARN: base or fe not checked)' "$O"; then ok
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install fnd;" ] && grep -qx 'claude OK (WARN: base or a team plugin not checked)' "$O"; then ok
 else bad Q9d-list-fails-warns-legacy "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
 claude_state present; rm -f "$CSTATE/installed.json"
 WITH_CLAUDE=yes run "$TMP/hq7e" "$FIXBOOT" --targets claude --plugins slim,band
 if [ "$RC" -eq 0 ] && grep -qx 'claude OK' "$O" && ! grep -q 'not checked' "$O" "$E"; then ok
 else bad Q9e-list-fails-no-conflict-no-warn "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
 
-# fnd never runs with base or fe: an enabled fnd stops the new set before anything changes…
+# fnd never runs with base or a team plugin: an enabled fnd stops the new set before anything changes…
 claude_state present "[
 $(installed_entry fnd@domaine user true)
 ]"
@@ -990,14 +1008,31 @@ WITH_CLAUDE=yes run "$TMP/hq8b" "$FIXBOOT" --targets claude
 if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install slim;install band;install base;install fe;" ]; then ok
 else bad Q10b-disabled-fnd-allowed "rc=$RC calls=$(claude_calls)"; fi
 
-# …and the legacy set is refused beside an enabled base or fe the same way
+# …and the legacy set is refused beside an enabled base or team plugin the same way
 claude_state present "[
 $(installed_entry fe@domaine user true)
 ]"
 WITH_CLAUDE=yes run "$TMP/hq8c" "$FIXBOOT" --targets claude --plugins fnd
-if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && grep -qx 'claude FAILED (base or fe is installed and enabled — remove it first)' "$O" \
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && grep -qx 'claude FAILED (base or a team plugin is installed and enabled — remove it first)' "$O" \
    && grep -qx '    claude plugin uninstall fe@domaine;' "$O" && ! grep -q 'fix the failed' "$O"; then ok
 else bad Q10c-fnd-beside-enabled-fe-refused "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+for p in qa be pm; do
+  claude_state present "[
+$(installed_entry "$p@domaine" user true)
+]"
+  WITH_CLAUDE=yes run "$TMP/hq8c-$p" "$FIXBOOT" --targets claude --plugins fnd
+  if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && grep -qx "    claude plugin uninstall $p@domaine;" "$O"; then ok
+  else bad "Q10c-fnd-beside-enabled-$p-refused" "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+done
+# …and each team plugin alone is refused beside an enabled fnd
+claude_state present "[
+$(installed_entry fnd@domaine user true)
+]"
+for p in qa be pm; do
+  WITH_CLAUDE=yes run "$TMP/hq8q-$p" "$FIXBOOT" --targets claude --plugins "$p"
+  if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && grep -qx 'claude FAILED (fnd is installed and enabled — remove it first)' "$O"; then ok
+  else bad "Q10j-$p-beside-enabled-fnd-refused" "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+done
 
 # …an fnd synced from the claude.ai account loads too once nothing shadows it, and only the
 # account can remove it…
@@ -1048,12 +1083,28 @@ WITH_CLAUDE=yes run "$TMP/hq8f" "$FIXBOOT" --targets claude --plugins fnd
 if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] \
    && grep -qx '    claude plugin uninstall fe@domaine, then claude plugin uninstall base@domaine;' "$O"; then ok
 else bad Q10f-legacy-names-fe-then-base "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+# …every enabled team plugin before base, in the order the list gives them
+claude_state present "[
+$(installed_entry base@domaine user true),
+$(installed_entry pm@domaine user true),
+$(installed_entry qa@domaine user false),
+$(installed_entry be@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8f2" "$FIXBOOT" --targets claude --plugins fnd
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] \
+   && grep -qx '    claude plugin uninstall pm@domaine, then claude plugin uninstall be@domaine, then claude plugin uninstall base@domaine;' "$O"; then ok
+else bad Q10f2-legacy-names-team-then-base "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
 
 # a dependency is installed before what requires it, whatever order --plugins names them in
 claude_state present
 WITH_CLAUDE=yes run "$TMP/hq8i" "$FIXBOOT" --targets claude --plugins fe,slim,base
 if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install slim;install base;install fe;" ]; then ok
 else bad Q10i-install-dependency-order "rc=$RC calls=$(claude_calls)"; fi
+claude_state present
+WITH_CLAUDE=yes run "$TMP/hq8k" "$FIXBOOT" --targets claude --plugins pm,be,slim,qa,band,fe,base
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "install slim;install band;install base;install fe;install qa;install be;install pm;" ] \
+   && grep -qF -- '- Claude Code: restart Claude Code, or run /reload-plugins in an open session, then /base-doctor, /fe-doctor, /qa-doctor, /be-doctor and /pm-doctor' "$O"; then ok
+else bad Q10k-install-team-order "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
 
 # --yes is "never prompt": the CLI gets its -y; without it, no -y is invented
 claude_state present
@@ -1112,6 +1163,23 @@ $(installed_entry fe@domaine user true)
 WITH_CLAUDE=yes run "$TMP/hq13b" "$FIXBOOT" --targets claude --uninstall --plugins fe,base
 if [ "$RC" -eq 0 ] && [ "$(verbs)" = "uninstall fe;uninstall base;" ]; then ok
 else bad Q16b-uninstall-dependency-order "rc=$RC calls=$(claude_calls)"; fi
+# every team plugin goes before base, base before slim, in the reverse of the install order
+claude_state present "[
+$(installed_entry slim@domaine user true),
+$(installed_entry band@domaine user true),
+$(installed_entry base@domaine user true),
+$(installed_entry fe@domaine user true),
+$(installed_entry qa@domaine user true),
+$(installed_entry be@domaine user true),
+$(installed_entry pm@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq13c" "$FIXBOOT" --targets claude --uninstall --plugins slim,qa,base,pm,be,band,fe
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "uninstall pm;uninstall be;uninstall qa;uninstall fe;uninstall base;uninstall band;uninstall slim;" ]; then ok
+else bad Q16c-uninstall-team-order "rc=$RC calls=$(claude_calls)"; fi
+# without the CLI the printed uninstall block keeps that order
+run "$TMP/h13d" "$FIXBOOT" --targets claude --uninstall --plugins qa,base,pm
+if [ "$RC" -eq 0 ] && [ "$(grep -oE '/plugin uninstall [a-z]+@domaine' "$O" | awk '{ print $3 }' | tr '\n' ' ')" = "pm@domaine qa@domaine base@domaine " ]; then ok
+else bad Q16d-printed-uninstall-team-order "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
 
 # The fake is only as good as its argv check: an option the real CLI's --help does not list is
 # refused, so a bootstrap passing one would fail these rows instead of passing against a fiction.

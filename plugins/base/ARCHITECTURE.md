@@ -10,7 +10,7 @@ plugins/base/
 ├── .claude-plugin/plugin.json   dependencies: ["slim"], mcpServers, types; no classic `hooks` key
 ├── agents/*.md                  the readers, the writer, the review agents (spawned as base:<name>)
 ├── skills/*/SKILL.md            commit, pre-commit-review, save-task-context, report-plugin-issue, worktree
-├── references/*.md              what the agents and skills cite by ${CLAUDE_PLUGIN_ROOT}/references/…
+├── references/*.md              what the agents and skills cite by ${CLAUDE_PLUGIN_ROOT}/references/…, and the team plugins by <base root>/references/…
 ├── hooks/hooks.json             { "modules": ["./mods/register.ts"] } — the only hook wiring
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── hooks/no-verify-bypass.sh    the git-hooks guard's decision, run by guards/bash.ts
@@ -71,7 +71,7 @@ Engine rules this layout follows:
   `done|current|waiting|todo`; `total === 0` means no progress.md yet, `hasWorkspace === false` no
   workspace). `mtimeMs` is base's own tick compare; band ignores it.
 - **`base.events`** — `{ atMs, kind, text }`, oldest first, at most 200; band's Log pane merges it with
-  its own, fnd's and slim's lines. Kinds fit band's 9-cell kind column and never take the kinds band
+  its own, fnd's, slim's and the team plugins' lines. Kinds fit band's 9-cell kind column and never take the kinds band
   and slim own (`session`, `model`, `compact`, `rate`, `slim`, `lookup`). `BASE_EVENT_LOG=0` keeps it
   empty and writes no file.
 - **`base.jsonl`** — every line pushed to `base.events` is also handed to `events.ts`'s `logLine` with a
@@ -91,7 +91,7 @@ Engine rules this layout follows:
 
 band has no dependency on base: it declares the `base` keys it reads in its own types, as it does
 fnd's. It takes `base.progress` when it holds a value, else `fnd.progress`, and its checklist hints
-then name `/base:save-task-context`; its Log pane orders equal times band → base → fnd → slim.
+then name `/base:save-task-context`; its Log pane orders equal times band → base → fnd → slim → fe → qa → be → pm.
 
 ## 4. slim is required, fnd is excluded
 

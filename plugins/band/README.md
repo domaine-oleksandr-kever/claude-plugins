@@ -6,8 +6,9 @@ the task digest and the Compact / Clear / Progress / Log buttons), the **Progres
 task checklist and the **event log pane**. It draws and nothing else. The figures come from the
 session itself; the checklist and most log lines come from the other plugins in this marketplace,
 which publish them through `$.state`: base (or fnd, on an install that has not moved to base yet)
-publishes the resolved task and its own events, slim publishes its compression events. Band reads
-them; it never writes another plugin's state.
+publishes the resolved task and its own events, slim publishes its compression events, and the team
+plugins on base (fe, qa, be, pm) publish their own start, install and doctor lines. Band reads them;
+it never writes another plugin's state.
 
 Current release: **band v0.3.0**.
 
@@ -16,7 +17,8 @@ Current release: **band v0.3.0**.
 - Claude Code only: band is a hooks module (mods), which other hosts do not run. It ships no
   Cursor, Codex or OpenCode adapter, and `scripts/install.sh --plugin band` exits 2.
 - Works alone. With base or fnd it adds the task digest, the Progress pane and that plugin's log
-  lines; with slim it adds slim's log lines. None of them is a dependency.
+  lines; with slim it adds slim's log lines; with a team plugin (fe, qa, be, pm) that plugin's log
+  lines. None of them is a dependency.
 - The drawing shows in the terminal and in the desktop app's Code tab. Where nothing draws (a cloud
   session, the VS Code chat panel, `claude -p`) the hooks still run and `/band-log` and
   `/band-progress` answer as text.
@@ -73,7 +75,7 @@ The row's text truncates as a backstop, so the band never takes a second row.
 | Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable, so the other buttons never shift: before the first reading, while a turn runs and at any context. From 80 % between turns it switches to the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). Where the engine refuses compaction from a plugin (a headless / SDK session such as the desktop app), the press runs the `/compact` slash command as if typed instead and toasts its output. Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued. |
 | Clear | `[ Clear ]`, `x: Clear` | Runs `/clear` behind the engine's own Yes/No dialog (`Clear the conversation?`), always: the dialog takes the keyboard, so a stray click or hotkey never clears, and a dismissed dialog is a No. Toasts the command's output. Pressed while a turn runs it only toasts `turn is running — press Clear again when it ends`. Dim at rest, `x: Clear` while the band holds the keyboard. |
 | Progress | `[ Progress ]`, `p: Progress` | Drawn only while base or fnd resolves a task (its `base.progress` or `fnd.progress` carries a work id). Opens or closes the [Progress pane](#progress-pane); dim at rest, `p: Progress` while the band holds the keyboard |
-| Log | `[ Log ]`, `l: Log` | Drawn only while some event list (band's, base's, fnd's or slim's) holds a line. Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
+| Log | `[ Log ]`, `l: Log` | Drawn only while some event list (band's, base's, fnd's, slim's or a team plugin's: fe's, qa's, be's, pm's) holds a line. Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
 
 **Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the
 desktop frames its panel itself, so no rule is drawn there. The desktop draws the buttons on a second
@@ -180,8 +182,8 @@ the publisher's own skill: under fnd it reads `/fnd:save-task-context`.
 
 ## Event log pane
 
-Toasts flash and go. `l: Log`, or `/band-log`, opens a pane that keeps them: what band, base, fnd and
-slim did or noticed, one line each, oldest first and newest last. Esc, a second press or the engine's
+Toasts flash and go. `l: Log`, or `/band-log`, opens a pane that keeps them: what band, base, fnd,
+slim and the team plugins (fe, qa, be, pm) did or noticed, one line each, oldest first and newest last. Esc, a second press or the engine's
 close mark closes it. The Progress pane and the log pane can be open at once; the engine shows one and
 keeps the other as a tab. Pressing the button or running the command of the pane behind the tab
 brings that pane forward instead of closing it.
@@ -197,9 +199,9 @@ brings that pane forward instead of closing it.
 ```
 
 The lists are merged by time; lines written in the same millisecond keep the order band → base → fnd
-→ slim. The plugin column, between the time and the kind, names the list a line came from (`band`,
-`base`, `fnd`, `slim`, padded to 5), so a kind two plugins share (`guard`, `workspace`, `start`) still
-says whose it is. The time is local `HH:MM`; time, plugin and kind are dim. A line too long for the pane continues on the next row, under its own text column, on the
+→ slim → fe → qa → be → pm. The plugin column, between the time and the kind, names the list a line
+came from (`band`, `base`, `fnd`, `slim`, `fe`, `qa`, `be`, `pm`, padded to 5), so a kind several
+plugins share (`guard`, `workspace`, `start`, `install`, `doctor`) still says whose it is. The time is local `HH:MM`; time, plugin and kind are dim. A line too long for the pane continues on the next row, under its own text column, on the
 terminal and the desktop alike. When the pane is shorter than the log, its first line reads
 `… 12 earlier` and the newest lines fill the rest, wrapped rows counted. With no line anywhere the pane
 reads `no events yet`. A surface that cannot place the pane toasts `log pane not placed: <reason>`.
@@ -213,12 +215,13 @@ as text instead, one line per event, and the `Log` button is not there to press.
 | `model` | band | A `/model` switch to another model | The full model id, `claude-opus-5-5` |
 | `compact` | band | A compaction of the main thread | The trigger (`manual`, `auto`, `plugin` for the Compact button) and the tokens before → after when the engine reports them. One line per compaction, whichever of its two reports (the `session.compact` chain, the `PostCompact` event) arrives first |
 | `rate` | band | A rate window first reaches 90 % | The alarm toast's text, `5h window: 92% used, resets in 1h 05m` |
-| `start` | base, slim | The plugin's session start, once per session id | `base <version>`, `slim <version>` |
-| `install` | base | slim is missing, or fnd is loaded beside base | The install pointer, or the advice to uninstall fnd |
+| `start` | base, slim, fe, qa, be, pm | The plugin's session start, once per session id | `<plugin> <version>`: `base <version>`, `slim <version>`, `qa <version>` |
+| `install` | base, fe, qa, be, pm | base: slim is missing, or fnd is loaded beside base. A team plugin: base is not loaded | The install pointer, or the advice to uninstall fnd; a team plugin's reads `needs the base plugin — claude plugin install base@domaine` |
+| `profile` | fe | fe decides the project profile | The profile word and how it was decided, `theme (project-profile.sh)` |
 | `workspace` | base, fnd | The task the plugin resolved differs from the last one logged | The work id, or `none` |
 | `refuse` | base | base refuses a reader spawn because slim is missing | `<agent>: slim is not loaded` |
 | `title` | base | base titles the session after the ticket key | The title |
-| `doctor` | base | `/base-doctor` runs | The run's counts |
+| `doctor` | base, fe, qa, be, pm | The plugin's doctor runs (`/base-doctor`, `/fe-doctor`, `/qa-doctor`, `/be-doctor`, `/pm-doctor`) | The run's counts |
 | `fnd-slim` | fnd | fnd's own MCP slimming finds a savings figure | As fnd writes it; the kind reads `slim` while slim has written no line, `fnd-slim` once it has |
 | `prompt` | fnd | fnd rewrites a pasted JSON prompt | The toast's figure |
 | `guard` | base, fnd | A guard of the plugin refuses a tool call | The tool and the first line of the reason |
@@ -230,20 +233,21 @@ base or fnd lines of kind `session`, `model`, `compact` or `rate` are not shown:
 and an fnd that still writes them (a release that does not yield, or the moment before fnd sees band
 loaded) would show each one twice.
 
-Each publisher keeps its own list of at most 200 lines. Past 200, band and base drop their oldest line;
-fnd drops its oldest `slim` or `prompt` line first. The pane reads the session's state, so a new launch
+Each publisher keeps its own list of at most 200 lines. Past 200, band, base and the team plugins drop
+their oldest line; fnd drops its oldest `slim` or `prompt` line first. The pane reads the session's state, so a new launch
 starts it empty; the record that outlives the session is each plugin's own file, below. `/clear` keeps
 the lines and adds `session clear` where the conversation restarted. Each plugin gates its own lines,
 in the pane and in its file: `BAND_EVENT_LOG=0`, `BASE_EVENT_LOG=0`, `FND_EVENT_LOG=0`,
-`SLIM_EVENT_LOG=0`. Toasts are unchanged by any of them.
+`SLIM_EVENT_LOG=0`, and a team plugin's `FE_EVENT_LOG=0`, `QA_EVENT_LOG=0`, `BE_EVENT_LOG=0`,
+`PM_EVENT_LOG=0`. Toasts are unchanged by any of them.
 
 ### Event log on disk
 
-base, band and slim each write the lines they publish themselves to their own file, so the origin of
-a line is on the line, written by that plugin, not inferred from the pane:
+Every Domaine plugin (slim, band, base, fe, qa, be, pm) writes the lines it publishes itself to its
+own file, so the origin of a line is on the line, written by that plugin, not inferred from the pane:
 
 - **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
-  `slim.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
+  `slim.jsonl`, and a team plugin's own, such as `qa.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
   `<session-id>/` folder is still made under it. With neither (a cloud session) no file is written.
   Never under the project.
 - **Line:** one JSON object per line, oldest first:
@@ -265,8 +269,8 @@ a line is on the line, written by that plugin, not inferred from the pane:
   in a session toasts `band: event log not written: <reason>`.
 - **Off:** `BAND_EVENT_LOG=0` stops band's file and its pane lines alike.
 - **Clean-up:** base sweeps session folders whose newest file is older than 7 days, and its
-  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. band and
-  slim never delete.
+  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. The other
+  plugins never delete.
 
 ## Settings (userConfig)
 
@@ -324,8 +328,9 @@ finite `atMs` or a string `kind` or `text` is dropped):
 | `fnd.progress` | fnd | the digest, the Progress button, the Progress pane (when `base.progress` is null) |
 | `fnd.events` | fnd | the event log pane |
 | `slim.events` | slim | the event log pane |
+| `fe.events`, `qa.events`, `be.events`, `pm.events` | fe, qa, be, pm | the event log pane |
 
-`$.state` refs are literals, so band names each publisher in its code: a fourth publisher is a band
+`$.state` refs are literals, so band names each publisher in its code: a new publisher is a band
 release. The Progress pane draws a generic checklist shape,
 `{ v: 1, title, subtitle?, rows: { mark: 'done' | 'current' | 'waiting' | 'todo', text }[], footer? }`;
 band maps the publisher's snapshot into it (title = work id, subtitle = branch · done/total, footer =
@@ -377,8 +382,8 @@ fails on a `BAND_*` name under `plugins/band/` without a row here.
 | Switch | Default | Effect |
 |---|---|---|
 | `BAND_COST` | off | `1` (or `true`/`yes`/`on`) adds the session-cost segment to the status band (`cost $12.40`, `💰 $12.40` on the desktop): the `/cost` total at API prices, a measure of work on a subscription. Read at session start. |
-| `BAND_EVENT_LOG` | `1` | `0` stops band recording its own lines (`session`, `model`, `compact`, `rate`): none in the Log pane and no `band.jsonl`. base's, fnd's and slim's lines still show in `/band-log` unless their own switch is `0`. Toasts are untouched. |
-| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where base, band and slim write their event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
+| `BAND_EVENT_LOG` | `1` | `0` stops band recording its own lines (`session`, `model`, `compact`, `rate`): none in the Log pane and no `band.jsonl`. base's, fnd's, slim's and the team plugins' lines still show in `/band-log` unless their own switch is `0`. Toasts are untouched. |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
 
 ## Tests
 

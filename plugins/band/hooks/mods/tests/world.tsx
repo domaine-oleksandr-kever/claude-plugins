@@ -61,6 +61,13 @@ export function baseState(on: On, values: { progress?: unknown; events?: unknown
   return base
 }
 
+/** A team plugin's published state (fe, qa, be, pm), answered beneath band the way baseState answers base's. */
+export function teamState(on: On, plugin: 'fe' | 'qa' | 'be' | 'pm', values: { events?: unknown } = {}): Record<string, unknown> {
+  const team: Record<string, unknown> = { ...values }
+  on('state.get', { plugin } as any, async (_$: any, e: any) => ({ value: { value: team[e.key], version: team[e.key] === undefined ? 0 : 1 } }) as any)
+  return team
+}
+
 /** Reads band's own state from beside it: any plugin reads any value. */
 export const PEEK = {
   name: 'peek',

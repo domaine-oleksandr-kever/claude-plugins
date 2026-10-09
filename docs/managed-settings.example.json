@@ -10,6 +10,9 @@
     "band@domaine": true,
     "base@domaine": true,
     "fe@domaine": true,
+    "qa@domaine": true,
+    "be@domaine": true,
+    "pm@domaine": true,
     "fnd@domaine": false
   },
   "strictKnownMarketplaces": [

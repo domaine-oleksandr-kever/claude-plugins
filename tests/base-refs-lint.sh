@@ -15,7 +15,11 @@
 #      `description:` — the spawn name base:<name> is that field;
 #   k. the readers and the writer keep their write denylists: every Jira/Confluence/Notion write tool
 #      a role must not call is in its disallowedTools under the plugin's own prefix and as the
-#      user-scope twin (mcp__atlassian__…, mcp__notion__…), or its whole server is.
+#      user-scope twin (mcp__atlassian__…, mcp__notion__…), or its whole server is;
+#   t. the team plugins base's shared text names (every plugins/<p> whose manifest `dependencies` is
+#      exactly ["base"]): every <p root>/… path exists in plugins/<p>, every /<p>:<x> names a skill
+#      of p, every <p>:<x> in a markdown file an agent or skill of p; a /<x>:<y> or <x root>/… whose
+#      <x> is no team plugin (and no generic placeholder such as <project root>) is flagged.
 # The same checker runs against a planted fixture first, so a rule that stopped firing fails here.
 # Exit 0 = all green.
 set -u
@@ -39,7 +43,7 @@ cat > "$LINT" <<'JS'
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const [dir, skillSet] = process.argv.slice(2);
+const [dir, skillSet, teamDirs] = process.argv.slice(2);
 const out = [];
 const bad = (rule, where, what) => out.push(`${rule}\t${where}\t${what}`);
 
@@ -89,6 +93,24 @@ const BANNED = [
 ];
 const PATH_RE = /(?:\$\{CLAUDE_PLUGIN_ROOT\}|<plugin root>|<base root>)\/([A-Za-z0-9_.\/-]*)/g;
 
+const listing = (d, sub, pick) => (fs.existsSync(path.join(d, sub)) ? fs.readdirSync(path.join(d, sub)).filter((n) => pick(path.join(d, sub, n), n)) : []);
+const TEAMS = new Map();
+for (const d of (teamDirs || '').split(/\s+/).filter(Boolean)) {
+  let m = {};
+  try { m = JSON.parse(fs.readFileSync(path.join(d, '.claude-plugin', 'plugin.json'), 'utf8')); } catch {}
+  if (typeof m.name !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(m.name) || m.name === NAME) continue;
+  TEAMS.set(m.name, {
+    dir: d,
+    skills: new Set(listing(d, 'skills', (p) => fs.statSync(p).isDirectory())),
+    agents: new Set(listing(d, 'agents', (p, n) => n.endsWith('.md')).map((n) => n.slice(0, -3))),
+  });
+}
+const PLACEHOLDER_ROOTS = new Set(['plugin', 'project', 'repo', NAME]);
+const TEAM_PATH_RE = /<([a-z][a-z0-9-]*) root>\/([A-Za-z0-9_.\/-]*)/g;
+const TEAM_SLASH_RE = /(^|[^A-Za-z0-9_.:\/-])\/([a-z][a-z0-9-]*):([a-z][a-z0-9-]*)/g;
+const TEAM_NAMES = [...TEAMS.keys()].map(esc).join('|');
+const TEAM_REF_RE = TEAM_NAMES ? new RegExp(`(^|[^\\/A-Za-z0-9_-])(${TEAM_NAMES}):([a-z][a-z0-9-]*)`, 'g') : null;
+
 for (const f of files) {
   const rel = path.relative(dir, f);
   const t = text(f);
@@ -120,6 +142,24 @@ for (const f of files) {
     }
     for (const m of line.matchAll(HYPHEN_CMD_RE)) {
       if (!COMMANDS.has(m[2])) bad('e', at, `/${m[2]}`);
+    }
+    for (const m of line.matchAll(TEAM_PATH_RE)) {
+      if (PLACEHOLDER_ROOTS.has(m[1])) continue;
+      const team = TEAMS.get(m[1]);
+      const p = m[2].replace(/[.,:;]+$/, '');
+      if (!team) bad('t', at, `<${m[1]} root>`);
+      else if (p && !fs.existsSync(path.join(team.dir, p))) bad('t', at, `<${m[1]} root>/${p}`);
+    }
+    for (const m of line.matchAll(TEAM_SLASH_RE)) {
+      if (m[2] === NAME) continue;
+      const team = TEAMS.get(m[2]);
+      if (!team || !team.skills.has(m[3])) bad('t', at, `/${m[2]}:${m[3]}`);
+    }
+    if (isMd && TEAM_REF_RE) {
+      for (const m of line.matchAll(TEAM_REF_RE)) {
+        const { agents: a, skills: s } = TEAMS.get(m[2]);
+        if (!a.has(m[3]) && !s.has(m[3])) bad('t', at, `${m[2]}:${m[3]}`);
+      }
     }
     for (const m of line.matchAll(/(^|[\s`(\["'])\/(commit|save-task-context|report-plugin-issue|pre-commit-review|worktree)\b/g)) {
       bad('f', at, `/${m[2]}`);
@@ -192,7 +232,7 @@ for (const [a, rule] of Object.entries(DENY)) {
 process.stdout.write(out.join('\n') + (out.length ? '\n' : ''));
 JS
 
-run_lint() { "$NODE_BIN" "$LINT" "$1" "$BASE_SKILL_SET"; }
+run_lint() { "$NODE_BIN" "$LINT" "$1" "$BASE_SKILL_SET" "${2:-}"; }
 
 # ------------------------------------------------------- the checker fires on a planted fixture --
 FX="$TMP/fixture"; mkdir -p "$FX/.claude-plugin" "$FX/agents" "$FX/references" "$FX/scripts" "$FX/.claude-plugin/types/slim"
@@ -230,7 +270,15 @@ disallowedTools:
   - mcp__plugin_base_notion-mcp
 ---
 MD
-run_lint "$FX" > "$TMP/fx.out"
+# a team plugin the shared text names, and a line citing it right and wrong
+KIT="$TMP/teams/kit"; mkdir -p "$KIT/.claude-plugin" "$KIT/skills/ship" "$KIT/agents" "$KIT/references"
+printf '{ "name": "kit", "dependencies": ["base"] }\n' > "$KIT/.claude-plugin/plugin.json"
+: > "$KIT/agents/scout.md"; : > "$KIT/references/present.md"
+cat > "$FX/references/team.md" <<'MD'
+Team: /kit:ship /kit:no-such-skill kit:scout kit:no-agent kit:ship <kit root>/references/present.md
+<kit root>/references/no-such.md /zz:nothing <zz root>/x.md <project root>/.claude <base root>/scripts/present.sh
+MD
+run_lint "$FX" "$KIT" > "$TMP/fx.out"
 OUTF="$TMP/fx.out"
 want() { # want <rule> <what>
   if awk -F'\t' -v r="$1" -v w="$2" '$1 == r && $3 == w { f = 1 } END { exit !f }' "$OUTF"; then ok
@@ -258,6 +306,11 @@ dont k "jira-reader mcp__plugin_base_notion-mcp__notion-update-page"
 want k "figma-reader mcp__notion";       dont k "figma-reader mcp__plugin_base_notion-mcp"
 dont k "figma-reader mcp__atlassian";    want k "doc-reader missing"
 want k "jira-writer missing"
+want t /kit:no-such-skill;               dont t /kit:ship
+want t kit:no-agent;                     dont t kit:scout;        dont t kit:ship
+want t "<kit root>/references/no-such.md"; dont t "<kit root>/references/present.md"
+want t /zz:nothing;                      want t "<zz root>";      dont t "<project root>"
+dont t /base:commit
 
 # The prefix is the manifest's name, not a literal: under another name the old prefix is stale.
 FX2="$TMP/renamed"; mkdir -p "$FX2/.claude-plugin" "$FX2/references"
@@ -272,9 +325,15 @@ if ! grep -qF 'types/slim' "$TMP/fx.out"; then ok; else bad fixture-laid-types "
 
 # ------------------------------------------------------------------------------ plugins/base --
 BASE="$ROOT/plugins/base"
+# A team plugin is any plugins/<p> whose manifest `dependencies` is exactly ["base"].
+TEAM_DIRS="$(for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
+  "$NODE_BIN" -e 'try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    if (JSON.stringify(j.dependencies) === "[\"base\"]") console.log(require("path").dirname(require("path").dirname(process.argv[1]))); } catch (e) {}' "$m"
+done | tr '\n' ' ')"
+if [ -n "$TEAM_DIRS" ]; then ok; else bad team-set "no team plugin on base found under plugins/"; fi
 if [ -d "$BASE" ]; then
-  run_lint "$BASE" > "$TMP/base.out"
-  for r in a b c d e f g h i k; do
+  run_lint "$BASE" "$TEAM_DIRS" > "$TMP/base.out"
+  for r in a b c d e f g h i k t; do
     hits="$(awk -F'\t' -v r="$r" '$1 == r { printf "%s %s; ", $2, $3 }' "$TMP/base.out")"
     if [ -z "$hits" ]; then ok; else bad "base-$r" "$(printf '%s' "$hits" | head -c 600)"; fi
   done

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "be",
+  "displayName": "Backend",
+  "version": "0.1.0",
+  "description": "Domaine backend team plugin for Claude Code: the Shopify app and extension skills (app scope with LOE, Shopify resources, platform limitations and workarounds); requires base (and slim through it)",
+  "author": {
+    "name": "Oleksandr Kever",
+    "email": "oleksandr.kever@meetdomaine.com"
+  },
+  "license": "MIT",
+  "dependencies": ["base"],
+  "types": "./types/index.d.ts"
+}

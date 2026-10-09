@@ -2,7 +2,7 @@ import { describe, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { BandEvent } from '../../types'
 import { EVENT_CAP, PREFIX_COLS, fmtK, hhmm, kindCell, logRow, merged, newestFitting, pluginCell, pushEvent, take, textRows } from '../events.ts'
-import { SNAP, baseState, sibFnd, sibSlim, test } from './world.tsx'
+import { SNAP, baseState, sibFnd, sibSlim, teamState, test } from './world.tsx'
 
 const NOW = new Date(2027, 0, 15, 9, 5).getTime()
 const PANE = 'band-log'
@@ -150,6 +150,25 @@ describe('merged', () => {
       ['fnd', 'fnd-slim'],
       ['slim', 'start'],
     ])
+  })
+
+  test('the team plugins follow slim on a tie, fe → qa → be → pm, each tagged with its own name', () => {
+    const slim = [{ atMs: 10, kind: 'slim', text: 's' }]
+    const teams = {
+      pm: [{ atMs: 10, kind: 'start', text: 'pm 0.1.0' }],
+      qa: [{ atMs: 10, kind: 'start', text: 'qa 0.1.0' }, { atMs: 4, kind: 'install', text: 'needs the base plugin' }],
+      be: [{ atMs: 'x', kind: 'start', text: 'malformed' }],
+      fe: [{ atMs: 10, kind: 'doctor', text: '9 PASS' }],
+    }
+    expect(merged([], [], [], slim, teams).map(e => [e.plugin, e.text])).toEqual([
+      ['qa', 'needs the base plugin'],
+      ['slim', 's'],
+      ['fe', '9 PASS'],
+      ['qa', 'qa 0.1.0'],
+      ['pm', 'pm 0.1.0'],
+    ])
+    expect(merged([], [], [], [], { qa: null, be: { not: 'a list' } })).toEqual([])
+    expect(['fe', 'qa', 'be', 'pm'].map(pluginCell)).toEqual(['fe   ', 'qa   ', 'be   ', 'pm   '])
   })
 
   test("base's and fnd's session, model, compact and rate lines are dropped: band writes those itself", () => {
@@ -466,5 +485,53 @@ describe("base's lines in the log", () => {
         await ui.unmount()
       })
     }
+  }
+})
+
+/** qa's lines as qa writes them: its start line, a tie with band's start, and a doctor run a minute later. */
+const QA_EVENTS = [
+  { atMs: NOW, kind: 'start', text: 'qa 0.1.0' },
+  { atMs: NOW + 90_000, kind: 'doctor', text: '7 PASS · 1 SKIP' },
+]
+
+describe("a team plugin's lines in the log", () => {
+  test('where no surface draws panes the text answer names fe, qa and be in the plugin column, after base on a tie', async ($, on) => {
+    const w = world(on)
+    baseState(on, { events: BASE_EVENTS })
+    teamState(on, 'fe', { events: [{ atMs: NOW + 90_000, kind: 'profile', text: 'theme (project-profile.sh)' }] })
+    teamState(on, 'qa', { events: QA_EVENTS })
+    teamState(on, 'be', { events: [{ atMs: NOW, kind: 'start', text: 'be 0.1.0' }] })
+    w.surfaces = []
+    await interleave($, w)
+    expect((await run($, 'band-log')).text).toBe(
+      [
+        ['09:05', 'band', 'session', 'start · band 9.9.9'],
+        ['09:05', 'base', 'start', 'base 0.1.0'],
+        ['09:05', 'qa', 'start', 'qa 0.1.0'],
+        ['09:05', 'be', 'start', 'be 0.1.0'],
+        ['09:06', 'band', 'model', 'claude-opus-5-5'],
+        ['09:06', 'base', 'guard', 'Bash: --no-verify'],
+        ['09:06', 'fe', 'profile', 'theme (project-profile.sh)'],
+        ['09:06', 'qa', 'doctor', '7 PASS · 1 SKIP'],
+      ]
+        .map(textLine)
+        .join('\n'),
+    )
+  })
+
+  for (const surface of SURFACES) {
+    test(`${surface}: pm alone beside band fills the pane; an empty fe list adds nothing`, async ($, on) => {
+      const w = world(on)
+      teamState(on, 'pm', { events: [{ atMs: NOW + 90_000, kind: 'install', text: 'needs the base plugin — claude plugin install base@domaine' }] })
+      teamState(on, 'fe', { events: [] })
+      await interleave($, w)
+      const ui = await mountPane($, surface, { bodyColumns: 120 })
+      expect((await rows(ui)).map(x => [x.texts[1], x.texts[2], x.texts[3]])).toEqual([
+        ['band   ', 'session    ', 'start · band 9.9.9'],
+        ['band   ', 'model      ', 'claude-opus-5-5'],
+        ['pm     ', 'install    ', 'needs the base plugin — claude plugin install base@domaine'],
+      ])
+      await ui.unmount()
+    })
   }
 })

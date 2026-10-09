@@ -8,7 +8,8 @@ checkout Claude Code uses — only the wiring differs. Start at the
 > **fnd is frozen at 0.135.0 and supported on Cursor until 2027-06-30.** Until then only a
 > blocking bug gets a fix, on request (the `report-plugin-issue` skill files it); there are no new
 > features. After 2027-06-30 nothing is fixed. The Claude Code replacement (slim, band, base
-> and fe) does not run on this host, so fnd stays the plugin here. Details:
+> and the team plugins fe, qa, be, pm) does not run on this host, so fnd stays the plugin here.
+> Details:
 > [README → fnd is frozen](../README.md#fnd-is-frozen).
 
 > [!IMPORTANT]

@@ -20,7 +20,7 @@ plugins/fe/
 
 The skills hand off to base by qualified names only (`/base:commit`, `base:jira-reader`, …) and cite
 base's files as `<base root>/…`, the path on base's `base plugin root:` session line;
-`tests/fe-refs-lint.sh` resolves every such name and path against `plugins/base`.
+`tests/team-refs-lint.sh` resolves every such name and path against `plugins/base`.
 
 ## 2. How base is required
 
@@ -64,7 +64,7 @@ session, so the sections repeat byte for byte (the prompt cache). The probe stay
 
 - **`fe.events`** — `{ atMs, kind, text }`, oldest first, at most 200; kinds `start`, `install`,
   `profile`, `doctor` (9 cells at most, none of band's or slim's). `FE_EVENT_LOG=0` keeps it empty.
-  band does not read it yet.
+  band's Log pane merges it with the other publishers' lines, `fe` in its plugin column.
 - **`fe.profile`** — `{ session, word, via, why, store }`; `via` is `FE_PROFILE`, `project-profile.sh` or
   `fallback` (then `word` is `none` and `why` says what failed).
 - **`fe.started`**, **`fe.armed`** — the session id whose start line and base check ran, and whose

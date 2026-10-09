@@ -102,6 +102,20 @@ for d in "$ROOT/docs/README.cursor.md" "$ROOT/docs/README.codex.md" "$ROOT/docs/
   has "$d" 'bootstrap one-liner' "fast-path-${d##*/}"
 done
 
+# Each host doc's frozen banner names the whole Claude Code replacement: every marketplace plugin
+# but fnd, so a plugin added to the marketplace and missed in a banner fails here.
+for d in "$ROOT/docs/README.cursor.md" "$ROOT/docs/README.codex.md" "$ROOT/docs/README.opencode.md"; do
+  missing="$("$NODE_BIN" -e '
+    const fs = require("fs");
+    const names = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).plugins.map((p) => p.name).filter((n) => n !== "fnd");
+    const doc = fs.readFileSync(process.argv[2], "utf8").replace(/\n>\s*/g, " ");
+    const m = /The Claude Code replacement \(([^)]*)\)/.exec(doc);
+    if (!m) { console.log("(no banner)"); process.exit(0); }
+    console.log(names.filter((n) => !new RegExp(`\\b${n}\\b`).test(m[1])).join(" "));
+  ' "$ROOT/.claude-plugin/marketplace.json" "$d" 2>&1)"
+  if [ -z "$missing" ]; then ok; else bad "frozen-banner-plugins-${d##*/}" "the Claude Code replacement list lacks: $missing"; fi
+done
+
 # Per-host docs: the same command, plus the walkthrough steps that only exist there.
 has "$ROOT/docs/README.cursor.md" './scripts/install.sh --target cursor' cursor-doc-install
 has "$ROOT/docs/README.cursor.md" '/smoke-test' cursor-doc-verify
@@ -440,6 +454,26 @@ for d in "$ROOT"/plugins/*/; do
     esac
   done
 done
+# Claude Code's own CLAUDE_CONFIG_DIR, read by base's and each team plugin's doctor (the install
+# record and settings it reads), is a row of that plugin's table like any switch it reads.
+for d in "$ROOT"/plugins/*/; do
+  name="$(basename "$d")"
+  team="$("$NODE_BIN" -e 'try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    console.log(j.name === "base" || JSON.stringify(j.dependencies) === "[\"base\"]" ? "yes" : "no"); } catch (e) { console.log("no"); }' \
+    "$d/.claude-plugin/plugin.json")"
+  [ "$team" = yes ] || continue
+  grep -rqF 'process.env.CLAUDE_CONFIG_DIR' "$d/scripts" 2>/dev/null || continue
+  if awk '/^## Environment switches/ { on = 1; next } on && /^## / { exit } on' "$d/README.md" | grep -qF '| `CLAUDE_CONFIG_DIR` |'; then ok
+  else bad "env-config-dir-$name" "plugins/$name/scripts read CLAUDE_CONFIG_DIR but plugins/$name/README.md → Environment switches has no row"; fi
+done
+# Each team plugin's "Event log on disk" names the contract's writers as every Domaine plugin, as
+# base's own section does, rather than a list that goes stale with the next plugin.
+for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
+  d="$(dirname "$(dirname "$m")")"; name="$(basename "$d")"
+  "$NODE_BIN" -e 'process.exit(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).dependencies) === "[\"base\"]" ? 0 : 1)' "$m" 2>/dev/null || continue
+  if awk '/^## Event log on disk/ { on = 1; next } on && /^## / { exit } on' "$d/README.md" | tr '\n' ' ' | grep -qF 'same contract as every Domaine plugin'; then ok
+  else bad "event-log-contract-$name" "plugins/$name/README.md → Event log on disk does not say 'same contract as every Domaine plugin'"; fi
+done
 
 # ------------------------------------- the copy-paste settings section + the title switch --
 # Host switches the plugin cannot set need the file to edit, the key to paste and what it buys —
@@ -684,7 +718,7 @@ managed_problem="$("$NODE_BIN" -e '
   const p = [];
   if (src.source !== "github" || src.repo !== slug) p.push("extraKnownMarketplaces.domaine.source is not github " + slug);
   const ep = j.enabledPlugins || {};
-  for (const n of ["slim", "band", "base", "fe"]) if (ep[n + "@domaine"] !== true) p.push(n + "@domaine is not true");
+  for (const n of ["slim", "band", "base", "fe", "qa", "be", "pm"]) if (ep[n + "@domaine"] !== true) p.push(n + "@domaine is not true");
   if (ep["fnd@domaine"] !== false) p.push("fnd@domaine is not false");
   const allow = j.strictKnownMarketplaces;
   if (Array.isArray(allow) && !allow.some((e) => e && e.source === "skills-dir")) p.push("strictKnownMarketplaces has no skills-dir entry");
@@ -696,10 +730,20 @@ case "$ROLLOUT_SECTION" in
   *'`docs/managed-settings.example.json`'*) ok ;;
   *) bad team-rollout-section "README has no '### Team rollout' section naming docs/managed-settings.example.json" ;;
 esac
-# A missing key turns nothing off, so the legacy variant has to name base and fe as false.
+# A missing key turns nothing off, so the legacy variant has to name base and every team plugin as false.
+ROLLOUT_FLAT="$(printf '%s' "$ROLLOUT_SECTION" | tr '\n' ' ' | tr -s ' ')"
+case "$ROLLOUT_FLAT" in
+  *'"fnd@domaine": true, "base@domaine": false, "fe@domaine": false, "qa@domaine": false, "be@domaine": false, "pm@domaine": false'*) ok ;;
+  *) bad team-rollout-legacy "the Team rollout legacy variant does not set base and every team plugin (fe, qa, be, pm) to false beside fnd true" ;;
+esac
+# the whole-team settings example names every team plugin, and the per-team note names them all
 case "$ROLLOUT_SECTION" in
-  *'"fnd@domaine": true, "base@domaine": false, "fe@domaine": false'*) ok ;;
-  *) bad team-rollout-legacy "the Team rollout legacy variant does not set base and fe to false beside fnd true" ;;
+  *'"qa@domaine": true'*'"be@domaine": true'*'"pm@domaine": true'*) ok ;;
+  *) bad team-rollout-whole-team "the Team rollout settings example does not enable qa, be and pm" ;;
+esac
+case "$ROLLOUT_FLAT" in
+  *'enable only the team plugins it needs: fe, qa, be, pm'*) ok ;;
+  *) bad team-rollout-per-team "the Team rollout section does not say a team enables only the team plugins it needs: fe, qa, be, pm" ;;
 esac
 # fnd and base ship the same agents, skills and MCP servers, so a settings example that enables
 # base without turning fnd off can load both on a machine that still has fnd installed.
@@ -713,14 +757,47 @@ fnd_beside_base="$("$NODE_BIN" -e '
     for (const b of blocks) {
       let j; try { j = JSON.parse(b.slice(8, -4)); } catch (_) { continue; }
       const ep = j && j.enabledPlugins;
-      if (ep && (ep["base@domaine"] === true || ep["fe@domaine"] === true) && ep["fnd@domaine"] !== false)
+      if (ep && ["base", "fe", "qa", "be", "pm"].some((n) => ep[n + "@domaine"] === true) && ep["fnd@domaine"] !== false)
         p.push(require("path").relative(root, f));
     }
   }
   process.stdout.write(p.join(", "));
-' "$ROOT" "$README" "$ROOT/plugins/base/README.md" "$ROOT/plugins/fe/README.md" 2>&1)"
+' "$ROOT" "$README" "$ROOT/plugins/base/README.md" "$ROOT/plugins/fe/README.md" "$ROOT/plugins/qa/README.md" \
+  "$ROOT/plugins/be/README.md" "$ROOT/plugins/pm/README.md" 2>&1)"
 if [ -z "$fnd_beside_base" ]; then ok
-else bad enabled-plugins-fnd-false "an enabledPlugins example enables base or fe without \"fnd@domaine\": false in: $fnd_beside_base"; fi
+else bad enabled-plugins-fnd-false "an enabledPlugins example enables base or a team plugin without \"fnd@domaine\": false in: $fnd_beside_base"; fi
+
+# ------------------------------------------------------------- the team plugins' READMEs --
+# A team plugin is any plugins/<p> whose manifest `dependencies` is exactly ["base"]. Its README
+# carries the `<p> v<semver>` marker bump-version stamps, a Skills table row `/<p>:<name>` for every
+# skills/<name>/SKILL.md it ships, and, for a plugin whose skills were imported, the import line.
+TEAM_PLUGINS="$(for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
+  "$NODE_BIN" -e '
+    try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      if (JSON.stringify(j.dependencies) === "[\"base\"]") console.log(j.name); } catch (e) {}
+  ' "$m"
+done)"
+case " $(printf '%s' "$TEAM_PLUGINS" | tr '\n' ' ') " in
+  *" fe "*" qa "*|*" qa "*" fe "*) ok ;;
+  *) bad team-readme-discovery "no team plugin found by its dependencies (found: $(printf '%s' "$TEAM_PLUGINS" | tr '\n' ' '))" ;;
+esac
+IMPORT_LINE="The skills are imported from Domaine's \`domaine-skills-solutions\` repository (commit 3c96617, 2026-08-03) and adapted to Claude Code and base; update them here, not there."
+for p in $TEAM_PLUGINS; do
+  r="$ROOT/plugins/$p/README.md"
+  if grep -qE "(^|[^A-Za-z0-9_])$p v[0-9]+\.[0-9]+\.[0-9]+" "$r" 2>/dev/null; then ok
+  else bad "team-readme-marker-$p" "plugins/$p/README.md has no '$p v<semver>' release marker"; fi
+  SKILLS_SECTION="$(awk '/^## Skills[[:space:]]*$/ { on = 1; next } on && /^## / { exit } on' "$r" 2>/dev/null)"
+  for s in "$ROOT/plugins/$p"/skills/*/SKILL.md; do
+    [ -f "$s" ] || continue
+    n="$(basename "$(dirname "$s")")"
+    if printf '%s\n' "$SKILLS_SECTION" | grep -qE "^\| \`/$p:$n[\` ]"; then ok
+    else bad "team-readme-skill-row-$p-$n" "plugins/$p/README.md → Skills has no row for /$p:$n"; fi
+  done
+  case "$p" in
+    be|pm) if grep -qxF "$IMPORT_LINE" "$r"; then ok
+           else bad "team-readme-import-line-$p" "plugins/$p/README.md lacks the import line: $IMPORT_LINE"; fi ;;
+  esac
+done
 
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

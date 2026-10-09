@@ -30,8 +30,11 @@ Current release: **base v0.3.1**.
 /reload-plugins
 ```
 
-`/base-doctor` then checks the install (§ Doctor). Then the team plugin for your work — the first is
-fe, the frontend one (`/plugin install fe@domaine`, then `/fe-doctor`; [plugins/fe/README.md](../fe/README.md)).
+`/base-doctor` then checks the install (§ Doctor). Then the team plugins for your work, each with its
+own doctor: fe, the frontend one (`/plugin install fe@domaine`, then `/fe-doctor`;
+[plugins/fe/README.md](../fe/README.md)); qa (`/qa-doctor`; [plugins/qa/README.md](../qa/README.md));
+be (`/be-doctor`; [plugins/be/README.md](../be/README.md)); pm (`/pm-doctor`;
+[plugins/pm/README.md](../pm/README.md)).
 The same set as settings, in `~/.claude/settings.json`:
 
 ```json
@@ -96,6 +99,8 @@ every cited path exists.
 | `references/task-workspace.md`, `references/task-workspace-freshness.md` | the `.claude/tasks/<work-id>/` layout, its read and write rules, `progress.md`, the freshness probes |
 | `references/review-flow.md` | the branch review flow: the `.git/.base-review` marker, which agent runs which check |
 | `references/commit-message-format.md` | Conventional Commits with the house rules |
+| `references/steps-to-test-format.md` | the Steps to Test field's General and Bug templates and the theme resolution: what a team plugin's Steps to Test writer writes and `/qa:preflight` reads rows from |
+| `references/break-it-qa.md` | the break-it QA method: deriving and executing the hostile-value and timing rows of a team plugin's QA and of `/qa:preflight` |
 
 The fetchers (`scripts/jira-attachments.sh`, `scripts/external-screenshots.sh`,
 `scripts/figma-rest.sh`) share `scripts/_common.sh`: credentials ride a private `0600` curl config,
@@ -108,7 +113,7 @@ resizes and compacts.
 | `scripts/worktree-setup.sh` | `/base:worktree` | creates or removes a sibling `git worktree` with its own branch and dev port, the `.claude/tasks` link back to the main checkout, and the `--copy` list |
 | `scripts/doctor.cjs` | `/base-doctor`, or by hand | the static install checks (below); `--json` for the command |
 | `scripts/scratch-hygiene.cjs` | base's hooks module, once per session | sweeps `.claude/base-tmp` of files older than `BASE_TMP_TTL` hours and keeps it in `.git/info/exclude` |
-| `scripts/qa-stores.cjs` | a QA engineer by hand; the qa plugin's preflight will read it | the QA store registry, one file per machine (`~/.config/domaine/qa-stores.json`, dir 0700, file 0600): `list`, `get <store>` (the only command that prints a password), `find`, `set`, `unset`, `path` |
+| `scripts/qa-stores.cjs` | a QA engineer by hand; `/qa:preflight` reads it | the QA store registry, one file per machine (`~/.config/domaine/qa-stores.json`, dir 0700, file 0600): `list`, `get <store>` (the only command that prints a password), `find`, `set`, `unset`, `path` |
 
 ## Skills
 
@@ -207,8 +212,8 @@ session, model, compaction, rate and compression lines. Each line also goes to b
 
 ## Event log on disk
 
-base, band and slim each write the lines they publish themselves to their own file, so the origin of
-a line is on the line, written by that plugin, not inferred from a pane:
+Every Domaine plugin (slim, band, base, fe, qa, be, pm) writes the lines it publishes itself to its
+own file, so the origin of a line is on the line, written by that plugin, not inferred from a pane:
 
 - **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
   `slim.jsonl`, and a team plugin's own, such as fe's `fe.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
@@ -231,8 +236,8 @@ a line is on the line, written by that plugin, not inferred from a pane:
   first failure in a session toasts `base: event log not written: <reason>`.
 - **Off:** `BASE_EVENT_LOG=0` stops base's file and its `base.events` lines alike.
 - **Clean-up:** base sweeps session folders whose newest file is older than 7 days, and its
-  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. band and
-  slim never delete.
+  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. The other
+  plugins never delete.
 
 The sweep runs once per session (and again after a /clear), in the background, over
 `$HOME/.claude/domaine/log` only — a `DOMAINE_LOG_DIR` is yours to clean — and not at all when that
@@ -291,7 +296,8 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | Variable | Default | Effect |
 |---|---|---|
 | `BASE_EVENT_LOG` | on | `0` keeps `base.events` empty and writes no `base.jsonl`: band's Log pane shows no base line |
-| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where base, band and slim write their event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` and `settings.json` the `slim` and `fnd` rows read |
 | `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, and the scratch-path guard |
 | `BASE_LEAN` | on | `0` drops the lean-code convention from the system prompt and from code-writing subagents |
 | `BASE_SCRATCH_GUARD` | on | `0` turns the scratch-path guard off: the browser tools write wherever their path points |
@@ -316,7 +322,7 @@ scripts and texts have their own suites:
 |---|---|
 | `tests/base-guards-sim.sh` | `hooks/scratch-path-guard.cjs` as the mod runs it: the verdicts, the remediation paths, the launch root, worktrees, the exclude stamp of `scripts/scratch-hygiene.cjs` |
 | `tests/no-verify-bypass-matrix.sh` | `hooks/no-verify-bypass.sh`: every bypass row blocked, every legitimate command allowed (the same matrix as fnd's copy) |
-| `tests/base-refs-lint.sh` | no fnd, host or old-compressor name in plugins/base; every MCP server, cited path, agent, skill, command, `BASE_*` switch and markdown link resolves |
+| `tests/base-refs-lint.sh` | no fnd, host or old-compressor name in plugins/base; every MCP server, cited path, agent, skill, command, `BASE_*` switch and markdown link resolves, and so does every team plugin's path, skill or agent the shared text names (`<fe root>/…`, `/qa:preflight`) |
 | `tests/base-jira-attachments-sim.sh` | `scripts/jira-attachments.sh` against a fake curl: credentials, gates, caps, cache, videos kept whole |
 | `tests/base-external-screenshots-sim.sh` | `scripts/external-screenshots.sh`: the allow-list, `og:image` resolution, cache, pacing, no resample |
 | `tests/base-figma-rest-sim.sh` | `scripts/figma-rest.sh`: the token, the modes, `--policy`, the cache, retries, the out-dir gate |
