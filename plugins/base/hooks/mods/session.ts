@@ -9,7 +9,16 @@ import type { Disk } from './events.ts'
 export const SLIM_VIEW = 'mcp__slim__view'
 const SLIM_INSTALL = 'claude plugin install slim@domaine'
 export const SLIM_MISSING = `slim is not loaded — ${SLIM_INSTALL}`
-export const WITH_FND = 'fnd and base must not run together — uninstall fnd (claude plugin uninstall fnd@domaine)'
+/** fndFound's answer when no settings key enables fnd but its commands are loaded: a claude.ai-synced or --plugin-dir copy. */
+export const LOADED_ONLY = 'loaded-only'
+/** The remedy names the copy found: the enabled settings key, or the synced / plugin-dir copy no key governs. */
+export function withFnd(found: string): string {
+  const fix = found === LOADED_ONLY
+    ? 'an fnd copy is loaded without a settings key (synced from claude.ai or --plugin-dir) — remove it there'
+    : `uninstall fnd (claude plugin uninstall ${found})`
+  return `fnd and base must not run together — ${fix}`
+}
+export const WITH_FND = withFnd('fnd@domaine')
 /** The agents that read through slim's view tool; the writer and the reviewers do not need it. */
 const READER = /^base:(jira|figma|doc)-reader$/
 
@@ -55,16 +64,17 @@ async function slimLoaded($: $): Promise<boolean> {
   return (await $.tool.list()).some(t => t.name === SLIM_VIEW)
 }
 
-/** Enabled in the merged settings, or loaded now (a `--plugin-dir` load has no settings key). */
-async function fndLoaded($: $): Promise<boolean> {
+/** The enabled settings key, LOADED_ONLY when only its commands give it away, else null. */
+async function fndFound($: $): Promise<string | null> {
   try {
     const enabled = (await $.settings.read()).enabledPlugins
-    if (enabled && typeof enabled === 'object' && Object.entries(enabled).some(([k, v]) => k.startsWith('fnd@') && v === true)) return true
+    const key = enabled && typeof enabled === 'object' ? Object.entries(enabled).find(([k, v]) => k.startsWith('fnd@') && v === true)?.[0] : undefined
+    if (key) return key
   } catch {}
   try {
-    return (await $.command.list()).some(c => c.plugin === 'fnd')
+    return (await $.command.list()).some(c => c.plugin === 'fnd') ? LOADED_ONLY : null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -99,9 +109,10 @@ export function registerSession(on: On): void {
         await logEvent($, 'install', SLIM_MISSING)
         $.ui.toast(`base: ${SLIM_MISSING}`)
       }
-      if (await fndLoaded($)) {
-        await logEvent($, 'install', WITH_FND)
-        $.ui.toast(`base: ${WITH_FND}`)
+      const fnd = await fndFound($)
+      if (fnd) {
+        await logEvent($, 'install', withFnd(fnd))
+        $.ui.toast(`base: ${withFnd(fnd)}`)
       }
     } catch {}
     return r

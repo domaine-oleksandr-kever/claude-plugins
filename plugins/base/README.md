@@ -9,7 +9,7 @@ backend, QA) adds its own skills on top and depends on base.
 base reads large results through slim and requires it: compression happens only inside slim, so every
 figure lands in slim's log, and base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.3.2**.
+Current release: **base v0.3.3**.
 
 ## Status
 
@@ -251,7 +251,8 @@ as the engine's file API cannot delete.
 - **Install checks**, at the first prompt of each session (slim registers its tools at its own
   session start): without slim's `mcp__slim__view` tool, one line and one toast `slim is not loaded —
   claude plugin install slim@domaine`; with fnd enabled in the settings (`fnd@<marketplace>: true`) or
-  any fnd command loaded, `fnd and base must not run together — uninstall fnd`.
+  any fnd command loaded, `fnd and base must not run together — …`: the remedy names the enabled key
+  (`claude plugin uninstall fnd@<marketplace>`) or, with no key, the claude.ai-synced / `--plugin-dir` copy.
 - **Reader refusal**: while `mcp__slim__view` is missing, a spawn of `base:jira-reader`,
   `base:figma-reader` or `base:doc-reader` is denied with `base: <agent> needs the slim plugin —
   claude plugin install slim@domaine`, through the Agent tool and through any plugin's spawn. The

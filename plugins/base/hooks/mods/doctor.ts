@@ -6,7 +6,7 @@ import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent } from '../../types'
 import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
-import { SLIM_MISSING, SLIM_VIEW, WITH_FND } from './session.ts'
+import { LOADED_ONLY, SLIM_MISSING, SLIM_VIEW, withFnd } from './session.ts'
 
 export const COMMAND = {
   name: 'base-doctor',
@@ -120,15 +120,16 @@ async function staticRows($: $): Promise<Row[]> {
 }
 
 /** As the install checks at the first prompt see them (session.ts): the validator follows `$` within one file. */
-async function fndLoaded($: $): Promise<boolean> {
+async function fndFound($: $): Promise<string | null> {
   try {
     const enabled = (await $.settings.read()).enabledPlugins
-    if (enabled && typeof enabled === 'object' && Object.entries(enabled).some(([k, v]) => k.startsWith('fnd@') && v === true)) return true
+    const key = enabled && typeof enabled === 'object' ? Object.entries(enabled).find(([k, v]) => k.startsWith('fnd@') && v === true)?.[0] : undefined
+    if (key) return key
   } catch {}
   try {
-    return (await $.command.list()).some(c => c.plugin === 'fnd')
+    return (await $.command.list()).some(c => c.plugin === 'fnd') ? LOADED_ONLY : null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -141,8 +142,9 @@ async function liveRows($: $): Promise<Row[]> {
   } catch {
     rows.push({ status: 'SKIP', name: 'slim-live', detail: 'the tool list did not answer' })
   }
-  rows.push((await fndLoaded($))
-    ? { status: 'FAIL', name: 'fnd-live', detail: WITH_FND }
+  const fnd = await fndFound($)
+  rows.push(fnd
+    ? { status: 'FAIL', name: 'fnd-live', detail: withFnd(fnd) }
     : { status: 'PASS', name: 'fnd-live', detail: 'fnd not enabled and no fnd command loaded' })
   return rows
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { WITH_FND, SLIM_MISSING } from '../session.ts'
+import { LOADED_ONLY, WITH_FND, SLIM_MISSING, withFnd } from '../session.ts'
 import { NOW, PEEK, SLIM_VIEW, eventsOf, peek, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -81,11 +81,21 @@ describe('install checks at the first prompt', () => {
     expect(calls.toasts).toEqual([])
   })
 
-  t('fnd loaded without a settings key (a plugin-dir load) → its commands give it away', async ($, on) => {
-    const { calls } = world(on, { enabledPlugins: {}, commands: [['fnd-progress', 'fnd']] })
+  t('fnd loaded without a settings key (a synced or plugin-dir load) → its commands give it away, the line names that copy', async ($, on) => {
+    const { calls } = world(on, { enabledPlugins: { 'fnd@domaine': false }, commands: [['fnd-progress', 'fnd']] })
     await start($)
     await submit($, 'hello')
-    expect(calls.toasts).toEqual([`base: ${WITH_FND}`])
+    expect(calls.toasts).toEqual([`base: ${withFnd(LOADED_ONLY)}`])
+    expect(withFnd(LOADED_ONLY)).toContain('synced from claude.ai')
+    expect(withFnd(LOADED_ONLY)).not.toContain('fnd@domaine')
+  })
+
+  t('the enabled key names the marketplace in the uninstall line', async ($, on) => {
+    const { calls } = world(on, { enabledPlugins: { 'fnd@other': true } })
+    await start($)
+    await submit($, 'hello')
+    expect(calls.toasts).toEqual([`base: ${withFnd('fnd@other')}`])
+    expect(withFnd('fnd@other')).toContain('claude plugin uninstall fnd@other')
   })
 
   t('slim missing and fnd present → both lines', async ($, on) => {

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { MCP_TIMEOUT_MS, age, parseStatic, reconcile, render, summary } from '../doctor.ts'
 import type { Row } from '../doctor.ts'
-import { SLIM_MISSING, WITH_FND } from '../session.ts'
+import { LOADED_ONLY, SLIM_MISSING, WITH_FND, withFnd } from '../session.ts'
 import { NOW, PEEK, ROOT, eventsOf, peek, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -127,6 +127,18 @@ describe('/base-doctor', () => {
     expect(text).toContain(`FAIL  slim-live  ${SLIM_MISSING}; base refuses its readers until it is`)
     expect(text).toContain(`FAIL  fnd-live   ${WITH_FND}`)
     expect(calls.toasts).toEqual([])
+  })
+
+  t('fnd loaded by its commands alone (synced or plugin-dir) → the row names that copy', async ($, on) => {
+    world(on, {
+      enabledPlugins: { 'fnd@domaine': false },
+      commands: [['fnd-progress', 'fnd']],
+      manifest: manifest([]),
+      run: () => ran(0, staticOut(GREEN)),
+    })
+    await start($)
+    const { text } = await doctor($)
+    expect(text).toContain(`FAIL  fnd-live   ${withFnd(LOADED_ONLY)}`)
   })
 
   t('a slim the install record lacks but the session loaded → WARN, not FAIL', async ($, on) => {
