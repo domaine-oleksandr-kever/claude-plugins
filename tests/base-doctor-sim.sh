@@ -59,7 +59,10 @@ mkhome() {
   local d="$1"
   mkdir -p "$d/.claude/plugins"
   if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/.claude/plugins/installed_plugins.json"; fi
-  if [ -n "${3:-}" ]; then printf '%s\n' "$3" > "$d/.claude/settings.json"; fi
+  # No settings given → every plugin a fixture installs is enabled, as `claude plugin install` writes it.
+  local settings="${3:-}"
+  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fnd@domaine":true}}'
+  printf '%s\n' "$settings" > "$d/.claude/settings.json"
 }
 
 SLIM_USER='"slim@domaine":[{"scope":"user","version":"0.5.0"}]'
@@ -144,6 +147,9 @@ run --root "$P" --home "$H3" --project "$PRJ"; expect CD15b-no-install-record 1 
 H4="$TMP/h-slimoff"; mkhome "$H4" "$(installed "$SLIM_USER")" '{"enabledPlugins":{"slim@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect CD16-slim-disabled-user 1 "FAIL  slim       slim@domaine 0.5.0 is installed but disabled — enable it in /plugin"
+H4b="$TMP/h-slimnokey"; mkhome "$H4b" "$(installed "$SLIM_USER")" '{}'
+run --root "$P" --home "$H4b" --project "$PRJ"
+expect CD16b-slim-no-key 1 "FAIL  slim       slim@domaine 0.5.0 is installed but disabled — enable it in /plugin"
 PRJ2="$TMP/project2"; mkdir -p "$PRJ2/.claude"; printf '{"enabledPlugins":{"slim@domaine":false}}\n' > "$PRJ2/.claude/settings.local.json"
 run --root "$P" --home "$H" --project "$PRJ2"; expect CD17-slim-disabled-project-local 1 "is installed but disabled"
 printf '{"enabledPlugins":{"slim@domaine":true}}\n' > "$PRJ2/.claude/settings.json"
@@ -157,9 +163,12 @@ run --root "$P" --home "$H5" --project "$PRJ2"; expect CD19-slim-other-project 1
 H6="$TMP/h-fnd"; mkhome "$H6" "$(installed "$SLIM_USER,$FND_USER")"
 run --root "$P" --home "$H6" --project "$PRJ"
 expect CD20-fnd-enabled 1 "FAIL  fnd        fnd@domaine 0.135.0 is installed and enabled — fnd and base must not run together: claude plugin uninstall fnd@domaine"
-H7="$TMP/h-fndoff"; mkhome "$H7" "$(installed "$SLIM_USER,$FND_USER")" '{"enabledPlugins":{"fnd@domaine":false}}'
+H7="$TMP/h-fndoff"; mkhome "$H7" "$(installed "$SLIM_USER,$FND_USER")" '{"enabledPlugins":{"slim@domaine":true,"fnd@domaine":false}}'
 run --root "$P" --home "$H7" --project "$PRJ"
 expect CD21-fnd-disabled 0 "WARN  fnd        fnd@domaine 0.135.0 is installed but disabled" ", 1 warned"
+H7b="$TMP/h-fndnokey"; mkhome "$H7b" "$(installed "$SLIM_USER,$FND_USER")" '{"enabledPlugins":{"slim@domaine":true}}'
+run --root "$P" --home "$H7b" --project "$PRJ"
+expect CD21b-fnd-no-key 0 "WARN  fnd        fnd@domaine 0.135.0 is installed but disabled" ", 1 warned"
 
 # CLAUDE_CONFIG_DIR stands in for ~/.claude without --home, and --home overrides it.
 rc=0; CLAUDE_CONFIG_DIR="$H6/.claude" node "$DOCTOR" --root "$P" --project "$PRJ" >"$O" 2>"$E" || rc=$?

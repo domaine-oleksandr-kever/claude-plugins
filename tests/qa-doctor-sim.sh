@@ -86,7 +86,10 @@ mkhome() {
   local d="$1"
   mkdir -p "$d/.claude/plugins"
   if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/.claude/plugins/installed_plugins.json"; fi
-  if [ -n "${3:-}" ]; then printf '%s\n' "$3" > "$d/.claude/settings.json"; fi
+  # No settings given → every plugin a fixture installs is enabled, as `claude plugin install` writes it.
+  local settings="${3:-}"
+  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fnd@domaine":true}}'
+  printf '%s\n' "$settings" > "$d/.claude/settings.json"
 }
 
 base_user() { printf '"base@domaine":[{"scope":"user","version":"%s","installPath":"%s"}]' "${2:-0.3.1}" "$1"; }
@@ -175,6 +178,9 @@ run --root "$P" --home "$H3" --project "$PRJ"; expect FD18-no-install-record 1 "
 H4="$TMP/h-baseoff"; mkhome "$H4" "$(installed "$(base_user "$REAL_BASE")")" '{"enabledPlugins":{"base@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect FD19-base-disabled-user 1 "FAIL  base             base@domaine 0.3.1 is installed but disabled — enable it in /plugin" "SKIP  registry"
+H4b="$TMP/h-basenokey"; mkhome "$H4b" "$(installed "$(base_user "$REAL_BASE")")" '{}'
+run --root "$P" --home "$H4b" --project "$PRJ"
+expect FD19b-base-no-key 1 "FAIL  base             base@domaine 0.3.1 is installed but disabled — enable it in /plugin" "SKIP  registry"
 PRJ2="$TMP/project2"; mkdir -p "$PRJ2/.claude"; printf '{"enabledPlugins":{"base@domaine":false}}\n' > "$PRJ2/.claude/settings.local.json"
 run --root "$P" --home "$H" --project "$PRJ2"; expect FD20-base-disabled-project-local 1 "is installed but disabled"
 BASE_PROJ="\"base@domaine\":[{\"scope\":\"project\",\"projectPath\":\"$PRJ\",\"version\":\"0.3.2\",\"installPath\":\"$REAL_BASE\"}]"

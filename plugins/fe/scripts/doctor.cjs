@@ -175,7 +175,10 @@ function enabledPlugins(claudeDir, projectDir) {
   return merged;
 }
 
-/** The install of `<name>@<marketplace>` this project would load (user scope or this project), or null. */
+/**
+ * The install of `<name>@<marketplace>` this project would load (user scope or this project), or null.
+ * Enabled means its settings key is `true`: Claude Code never loads a plugin whose key is absent.
+ */
 function installedPlugin(name, claudeDir, projectDir, enabled) {
   const record = readJson(path.join(claudeDir, 'plugins', 'installed_plugins.json'));
   const plugins = record && record.plugins && typeof record.plugins === 'object' ? record.plugins : {};
@@ -185,7 +188,7 @@ function installedPlugin(name, claudeDir, projectDir, enabled) {
     const entry = entries.find((e) => e && (e.scope === 'user' || (e.projectPath && path.resolve(e.projectPath) === projectDir)));
     if (!entry) continue;
     const found = { key, version: String(entry.version || '?') };
-    if (enabled[key] === false) {
+    if (enabled[key] !== true) {
       disabled = found;
       continue;
     }

@@ -11,7 +11,7 @@ be builds on base and requires it: the Jira and doc readers, the Jira writer, th
 the shared MCP servers (Atlassian, Notion, the Shopify Dev MCP) are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so be runs with slim too.
 
-Current release: **be v0.1.0**.
+Current release: **be v0.1.1**.
 
 ## Status
 

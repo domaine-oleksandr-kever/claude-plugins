@@ -74,7 +74,10 @@ mkhome() {
   local d="$1"
   mkdir -p "$d/.claude/plugins"
   if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/.claude/plugins/installed_plugins.json"; fi
-  if [ -n "${3:-}" ]; then printf '%s\n' "$3" > "$d/.claude/settings.json"; fi
+  # No settings given → every plugin a fixture installs is enabled, as `claude plugin install` writes it.
+  local settings="${3:-}"
+  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fnd@domaine":true}}'
+  printf '%s\n' "$settings" > "$d/.claude/settings.json"
 }
 
 BASE_USER='"base@domaine":[{"scope":"user","version":"0.2.0"}]'
@@ -150,6 +153,9 @@ run --root "$P" --home "$H3" --project "$PRJ"; expect FD15b-no-install-record 1 
 H4="$TMP/h-baseoff"; mkhome "$H4" "$(installed "$BASE_USER")" '{"enabledPlugins":{"base@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect FD16-base-disabled-user 1 "FAIL  base          base@domaine 0.2.0 is installed but disabled — enable it in /plugin"
+H4b="$TMP/h-basenokey"; mkhome "$H4b" "$(installed "$BASE_USER")" '{}'
+run --root "$P" --home "$H4b" --project "$PRJ"
+expect FD16b-base-no-key 1 "FAIL  base          base@domaine 0.2.0 is installed but disabled — enable it in /plugin"
 PRJ2="$TMP/project2"; mkdir -p "$PRJ2/.claude"; printf '{"enabledPlugins":{"base@domaine":false}}\n' > "$PRJ2/.claude/settings.local.json"
 run --root "$P" --home "$H" --project "$PRJ2"; expect FD17-base-disabled-project-local 1 "is installed but disabled"
 BASE_PROJ="\"base@domaine\":[{\"scope\":\"project\",\"projectPath\":\"$PRJ\",\"version\":\"0.2.1\"}]"
