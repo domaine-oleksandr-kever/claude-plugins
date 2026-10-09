@@ -16,7 +16,7 @@ const mediaD = require('./media.cjs');
 const mediaE = require('../engines/media.cjs');
 const figmaNodes = require('../engines/figma-nodes.cjs');
 const jq = require('../engines/jq.cjs');
-const { compress, ENGINES: ENGINE_IDS } = require('../engines/index.cjs');
+const { compress, sniff, ENGINES: ENGINE_IDS } = require('../engines/index.cjs');
 
 const TOOL = 'mcp__slim__view';
 // The reply shows text up to this size whole; past it, the head and a file to Read windowed.
@@ -63,18 +63,20 @@ const inside = (root, p, minSegs) => {
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel) && rel.split(path.sep).length >= minSegs;
 };
 
+const tasksOf = (dir) => (typeof dir === 'string' && path.isAbsolute(dir) ? landing(path.join(dir, '.claude', 'tasks')) : null);
+
 /**
  * The `out` path a view may write → { path, exists } or { why }. Accepted only under
- * `<root>/.claude/tasks/<id>/` or slim's spill root, as a regular file that is not the input.
+ * `<root>/.claude/tasks/<id>/`, `<cwd>/.claude/tasks/<id>/` (a repo below the session root) or slim's
+ * spill root, as a regular file that is not the input.
  */
 function outTarget(out, root, cwd, input) {
   if (typeof out !== 'string' || !out.trim() || /[\\/]$/.test(out)) return { why: 'out-not-file' };
   const abs = path.resolve(cwd || process.cwd(), out);
   const at = landing(abs);
   if (!at) return { why: 'out-outside-roots' };
-  const tasks = typeof root === 'string' && path.isAbsolute(root) ? landing(path.join(root, '.claude', 'tasks')) : null;
   const spillRoot = landing(path.resolve(env.spillRoot()));
-  if (!inside(tasks, at, 2) && !inside(spillRoot, at, 1)) return { why: 'out-outside-roots' };
+  if (!inside(tasksOf(root), at, 2) && !inside(tasksOf(cwd), at, 2) && !inside(spillRoot, at, 1)) return { why: 'out-outside-roots' };
   const st = lstat(at);
   if (st && !st.isFile()) return { why: 'out-taken' };
   if (input && at === input) return { why: 'out-is-input' };
@@ -167,7 +169,7 @@ function view(input, opts) {
     target = outTarget(input.out, input.root, input.cwd, file);
     if (target.why) {
       const why = target.why === 'out-outside-roots'
-        ? `view: out must be under <project>/.claude/tasks/<id>/ or slim's spill root (${env.spillRoot()})`
+        ? `view: out must be under .claude/tasks/<id>/ of the session root or the working directory, or slim's spill root (${env.spillRoot()})`
         : target.why === 'out-taken' ? `view: out ${input.out} is a folder or a link, not a file`
           : target.why === 'out-is-input' ? 'view: out cannot be the input itself' : `view: out ${input.out} is not a file path`;
       return refuse(target.why, why);
@@ -196,7 +198,9 @@ function view(input, opts) {
   let r = null;
   if (!narrowed || utf8(body) > VIEW_INLINE) {
     // JSON is fitted to what the reader can take (dropped rows go to a part): the reply, or the out file.
-    r = compress({ data: body, hint }, { ...o.engineOptions, engine: narrowed ? (engine || 'json') : engine, targetBytes: target ? OUT_TARGET : VIEW_INLINE });
+    // A node tree is not: a long text is read windowed from a file, so no level of it is folded away.
+    const kind = engine || (narrowed ? 'json' : sniff({ data: body }).engine);
+    r = compress({ data: body, hint }, { ...o.engineOptions, engine: narrowed ? (engine || 'json') : engine, targetBytes: kind === 'figma-nodes' ? null : target ? OUT_TARGET : VIEW_INLINE });
     if (r.decision === 'refused') return refuse(r.reason || 'refused', `view: ${r.reason === 'binary' ? 'the source is binary (not text, an image or a video)' : `the engines refused the source (${r.reason})`}`);
   }
   const compressed = !!r && r.decision === 'compressed';

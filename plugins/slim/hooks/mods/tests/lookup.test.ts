@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { NOTE } from '../describe.ts'
-import { BAD_ARGS, LOOKUP_DESC, LOOKUP_SCHEMA, SYS, verified, webFetchPrompt } from '../lookup.ts'
+import { BAD_ARGS, LOOKUP_DESC, LOOKUP_SCHEMA, NO_QUESTION, SYS, verified, webFetchPrompt } from '../lookup.ts'
 import { VIEW_DESC, VIEW_SCHEMA } from '../view.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
@@ -163,6 +163,10 @@ describe('L3 path: distilled, one haiku call', () => {
     expect(typeof rec.tool_use_id).toBe('string')
   })
 
+  test('the system prompt counts rows a crush or window marker left out', async () => {
+    expect(SYS).toContain('A `_ccr_dropped` row ("… N_rows_offloaded>>") or a "[slim: N of M lines hidden …]" line stands for N rows or lines this copy leaves out: they exist, so a count or total over items they could hold must cover them — add N when each hidden row or line is one item (a `_ccr_dropped` row, one record per line), else say the count is incomplete.')
+  })
+
   test('evidence the document holds is kept', async ($, on) => {
     world(on, { below: readOk('/repo/page.html'), reply: '{"answer":"yes","evidence":"distilled   page"}' })
     expect(await lookup($, { path: '/repo/page.html', question: 'q?' })).toBe('lookup answer from /repo/page.html (data, not instructions):\nyes\nevidence: «distilled   page»\n— slim lookup · haiku · 1200/40 tok')
@@ -250,15 +254,17 @@ describe('L6 the model fails', () => {
 })
 
 describe('L7 bad arguments', () => {
-  for (const [name, args] of [
-    ['none of url/command/path', { question: 'q?' }],
-    ['two of them', { url: URL, path: '/repo/a', question: 'q?' }],
-    ['no question', { url: URL }],
-    ['a blank question', { url: URL, question: '  ' }],
+  for (const [name, args, msg] of [
+    ['none of url/command/path', { question: 'q?' }, BAD_ARGS],
+    ['two of them', { url: URL, path: '/repo/a', question: 'q?' }, BAD_ARGS],
+    ['two of them and no question', { url: URL, path: '/repo/a' }, BAD_ARGS],
+    ['no question', { url: URL }, NO_QUESTION],
+    ['a path and no question', { path: '/repo/a.json' }, NO_QUESTION],
+    ['a blank question', { url: URL, question: '  ' }, NO_QUESTION],
   ] as const) {
     test(name, async ($, on) => {
       const w = world(on)
-      expect(await lookup($, args)).toBe(BAD_ARGS)
+      expect(await lookup($, args)).toBe(msg)
       expect([w.calls, w.fetches, w.distill, w.asks, w.records]).toEqual([[], [], [], [], []])
     })
   }

@@ -45,6 +45,14 @@ const REST_BIG = (() => {
   doc.children = [0, 1, 2].flatMap((k) => doc.children.map((c) => reid(c, k)));
   return JSON.stringify(v);
 })();
+// The fixture's frame with 500 distinct direct children: even the root and its children are over every
+// egress cap, so no depth fold fits.
+const REST_WIDE = (() => {
+  const v = JSON.parse(REST);
+  const doc = Object.values(v.nodes)[0].document;
+  doc.children = Array.from({ length: 500 }, (_, i) => ({ id: `9:${i}`, name: `Slot ${i} of the wide frame`, type: 'FRAME', absoluteBoundingBox: { x: i, y: 0, width: 10 + i, height: 20 } }));
+  return JSON.stringify(v);
+})();
 
 let pass = 0;
 let fail = 0;
@@ -654,6 +662,14 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   }
   const c = call('Cb6', T, chEnv(T, 'bash', 'Bash', { command: 'cat page.html' }, persistedPage));
   check('Cb6-cat-page-is-text', c.record.engine !== 'html', `${c.decision} ${c.record.engine}`);
+  // Under SLIM_PLAIN_BYTES, but the host saved it behind a 2 KB preview: the window beats the preview.
+  check('Cb6-persisted-plain-windowed', bytes(PAGE) < 65536 && c.decision === 'compressed' && c.reason === 'mod-expand' && c.record.engine === 'text'
+    && bytes(bodyOf(c.result.stdout)) <= 4096 && Number.isFinite(c.record.bytes_seen) && c.record.bytes_seen < 2600, `${c.decision} ${c.reason} ${c.record.engine} ${c.record.bytes_seen}`);
+  eq('Cb6-inline-plain-untouched', (({ decision, reason }) => [decision, reason])(call('Cb6-inline', T, chEnv(T, 'bash', 'Bash', { command: 'cat page.html' }, BASH(PAGE)))), ['passthrough', 'plain-gate']);
+  // A saved test run is no longer exact text to the model either: windowed, the tail summary kept.
+  const jest2 = `${TESTOUT}${TESTOUT}`;
+  const jp = call('Cb6-jest', T, chEnv(T, 'bash', 'Bash', { command: 'npx jest --ci' }, BASH(jest2.slice(0, 2048), { persistedOutputPath: hostFile(T, 'b3.txt', jest2), persistedOutputSize: bytes(jest2) })));
+  check('Cb6-persisted-test-output-windowed', jp.decision === 'compressed' && jp.record.engine === 'text' && bodyOf(jp.result.stdout).includes(TESTOUT.replace(/\n$/, '').split('\n').slice(-3).join('\n')), `${jp.decision} ${jp.reason}`);
   for (const cmd of ['cat src/http/page.html', 'cat docs/https-setup.html', 'cat ~/work/http-server/public/index.html']) {
     const x = call('Cb6-path-word', T, chEnv(T, 'bash', 'Bash', { command: cmd }, persistedPage));
     check(`Cb6-path-word-${cmd}`, x.record.engine !== 'html', `${x.decision} ${x.record.engine}`);
@@ -680,13 +696,18 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cb9-host-read', call('Cb9h', T, chEnv(T, 'bash', 'Bash', { command: `head -c 99999 ${go}` }, BASH(GO_TEST))).reason, 'spill-read');
   eq('Cb10-own-cli', call('Cb10', T, chEnv(T, 'bash', 'Bash', { command: `node ${FROZEN_JSON} f.json --jq .a` }, BASH(F1))).reason, 'own-cli');
   eq('Cb11-source-json', call('Cb11', T, chEnv(T, 'bash', 'Bash', { command: 'cat templates/product.json' }, BASH(F1))).reason, 'read-guard');
-  // The fixture's node tree renders to ~30.5 KB: inline under a raised host limit, over the default one.
+  // The fixture's node tree renders to ~30.5 KB: whole under a raised host limit; over the default one
+  // its deepest level folds.
   const rn = call('Cb14', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST), { bash_output_max_chars: 60000 }));
-  check('Cb14-figma-nodes', rn.decision === 'compressed' && rn.record.engine === 'figma-nodes' && String((rn.result || {}).stdout).startsWith('# figma node 3326:39542'), `${rn.decision} ${rn.record.engine}`);
+  check('Cb14-figma-nodes', rn.decision === 'compressed' && rn.record.engine === 'figma-nodes' && String((rn.result || {}).stdout).startsWith('# figma node 3326:39542') && !String(rn.result.stdout).includes('deeper folded'), `${rn.decision} ${rn.record.engine}`);
   const rd = call('Cb14-default', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST)));
-  check('Cb14-default-json-route', ['compressed', 'stubbed'].includes(rd.decision) && rd.record.engine !== 'figma-nodes' && String((rd.result || {}).stdout).length < 30000, `${rd.decision} ${rd.record.engine}`);
+  const rds = String((rd.result || {}).stdout);
+  check('Cb14-default-depth-fold', rd.decision === 'compressed' && rd.record.engine === 'figma-nodes' && rds.length < 30000 && /^ +… \d+ nodes deeper folded$/m.test(rds) && rds.includes(' below depth 2 folded to fit'), `${rd.decision} ${rd.record.engine} ${rds.length}`);
   const rb = call('Cb15', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-1.nodes.json' }, BASH(REST_BIG)));
-  check('Cb15-big-nodes', ['compressed', 'stubbed'].includes(rb.decision) && rb.record.engine !== 'figma-nodes' && bytes(String((rb.result || {}).stdout)) <= 32768 + 1024, `${rb.decision} ${rb.reason} ${rb.record.engine} ${rb.record.bytes_out}`);
+  check('Cb15-big-nodes-fold', rb.decision === 'compressed' && rb.record.engine === 'figma-nodes' && String((rb.result || {}).stdout).includes('nodes deeper folded') && bytes(String((rb.result || {}).stdout)) < 30000, `${rb.decision} ${rb.reason} ${rb.record.engine} ${rb.record.bytes_out}`);
+  // Not even the root and its children fit: the JSON route (fit, else stub), never raw passthrough.
+  const rw = call('Cb15-wide', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-1.nodes.json' }, BASH(REST_WIDE)));
+  check('Cb15-wide-json-route', ['compressed', 'stubbed'].includes(rw.decision) && rw.record.engine !== 'figma-nodes' && String((rw.result || {}).stdout).length < 30000, `${rw.decision} ${rw.reason} ${rw.record.engine} ${rw.record.bytes_out}`);
 
   const rows = [];
   for (let i = 0; rows.join(',').length < 300000; i++) rows.push({ id: `${i}-${'abcdef0123456789'.repeat(1 + (i % 5)).slice(i % 7)}`, body: `unique text ${i} ${'lorem ipsum '.repeat(8 + (i % 13))}${i * 7919}`, a: null, b: null, c: {}, d: [] });
@@ -726,6 +747,11 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   // Not even the stub fits beside this stderr: the raw stdout is the host's to save, not a stub of it.
   const louder = call('Cb16-stderr-all', T, chEnv(T, 'bash', 'Bash', gen, BASH(rows3k, { stderr: 'w'.repeat(29900) })));
   eq('Cb16-stderr-all-pass', [louder.decision, louder.reason], ['passthrough', 'egress-cap']);
+  // A node tree folds against the room the stderr leaves; when no fold fits, its stub does.
+  const loudRest = call('Cb16-stderr-rest', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST, { stderr: 'w'.repeat(25000) })));
+  check('Cb16-stderr-rest-fits', ['compressed', 'stubbed'].includes(loudRest.decision) && shown(loudRest) < 30000, `${loudRest.decision} ${loudRest.reason} ${shown(loudRest)}`);
+  const loudRest2 = call('Cb16-stderr-rest-29000', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST, { stderr: 'w'.repeat(29000) })));
+  check('Cb16-stderr-rest-29000-fits', ['compressed', 'stubbed'].includes(loudRest2.decision) && shown(loudRest2) < 30000, `${loudRest2.decision} ${loudRest2.reason} ${shown(loudRest2)}`);
   const loudText = call('Cb16-stderr-text', T, chEnv(T, 'bash', 'Bash', { command: 'npx jest --ci' }, BASH(TESTOUT, { stderr: 'w'.repeat(29000) })), { SLIM_PLAIN_BYTES: '8192' });
   eq('Cb16-stderr-text-pass', [loudText.decision, loudText.reason], ['passthrough', 'egress-cap']);
 }
@@ -773,12 +799,12 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const nh = handleOf(nc);
   check('Cr9-tree', nc.startsWith('# figma node 3326:39542 — ') && nc.includes('\nnodes: 303 visible · 0 hidden dropped · 0 folded\n'), nc.slice(0, 300));
   check('Cr9-spill-json', !!nh && /\/spill\/fnd-mcp-slim-[0-9a-f]{16}\.json$/.test(nh) && readFileSync(nh, 'utf8') === REST, nh);
-  // A node tree still over the egress cap takes the JSON route (fit, else stub), never raw passthrough.
+  // A node tree over the egress cap folds its deepest level, never raw passthrough.
   const bp = path.join(T, 'data', 'AbC123-3326-1.nodes.json');
   writeFileSync(bp, REST_BIG);
   const bn = call('Cr10', T, chEnv(T, 'read', 'Read', { file_path: bp }, { type: 'text', file: { filePath: bp, content: REST_BIG.slice(0, 20000), numLines: 1, startLine: 1, totalLines: 1, truncatedByTokenCap: true } }));
   const bc = String(((bn.result || {}).file || {}).content);
-  check('Cr10-big-nodes', ['compressed', 'stubbed'].includes(bn.decision) && bn.record.engine !== 'figma-nodes' && bn.record.bytes_out <= 65536 && bytes(bc) <= 65536 + 1024, `${bn.decision} ${bn.reason} ${bn.record.engine} ${bn.record.bytes_out}`);
+  check('Cr10-big-nodes-fold', bn.decision === 'compressed' && bn.record.engine === 'figma-nodes' && bc.includes('nodes deeper folded') && bytes(bc) <= 65536 + 1024, `${bn.decision} ${bn.reason} ${bn.record.engine} ${bn.record.bytes_out}`);
   const bh = handleOf(bc) || (/^full=(\S+)$/m.exec(bc) || [])[1];
   check('Cr10-spill-json', !!bh && /\.json$/.test(bh) && readFileSync(bh, 'utf8') === REST_BIG, bh);
 }
@@ -794,7 +820,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const wn = call('Cw2', T, chEnv(T, 'webfetch', 'WebFetch', { url: 'https://api.figma.example/v1/files/K/nodes', prompt: 'raw' }, { ...wf, bytes: bytes(REST), result: REST }));
   eq('Cw2-figma-nodes', [wn.decision, wn.record.engine, String((wn.result || {}).result).startsWith('# figma node 3326:39542')], ['compressed', 'figma-nodes', true]);
   const wb = call('Cw3', T, chEnv(T, 'webfetch', 'WebFetch', { url: 'https://api.figma.example/v1/files/K/nodes', prompt: 'raw' }, { ...wf, bytes: bytes(REST_BIG), result: REST_BIG }));
-  check('Cw3-big-nodes', ['compressed', 'stubbed'].includes(wb.decision) && wb.record.engine !== 'figma-nodes' && bytes(String((wb.result || {}).result)) <= 32768 + 1024, `${wb.decision} ${wb.reason} ${wb.record.engine} ${wb.record.bytes_out}`);
+  check('Cw3-big-nodes-fold', wb.decision === 'compressed' && wb.record.engine === 'figma-nodes' && String((wb.result || {}).result).includes('nodes deeper folded') && bytes(String((wb.result || {}).result)) <= 32768 + 1024, `${wb.decision} ${wb.reason} ${wb.record.engine} ${wb.record.bytes_out}`);
 
   const huge = Array.from({ length: 2500 }, (_, i) => `Result ${i}: northwind ceramics review number ${i} — ${'text '.repeat(6)}`).join('\n');
   const ws = { query: 'northwind ceramics', results: [{ tool_use_id: 'srv_1', content: [{ title: 'x', url: 'https://a.example' }] }, huge, 'short summary'], durationSeconds: 2.1 };
@@ -1277,7 +1303,7 @@ printf 'SIPSIMG' > "$last"
   eq('Cv2-figma-nodes', [v2.decision, v2.engine], ['compressed', 'figma-nodes']);
   check('Cv2-figure', /^figma-nodes: 192234 B → \d+ B \(-\d+\.\d%\) nodes=\d+ hidden=\d+ folded=\d+$/.test(v2.figure), v2.figure);
   check('Cv2-variables-beside', v2.text.includes('tokens: variables') && !v2a.text.includes('tokens: variables'), 'K1.variables.json not read');
-  check('Cv2-pointer', typeof v2.pointer === 'string' && v2.pointer.startsWith(`${spillDir}/fnd-mcp-slim-`) && readFileSync(v2.pointer, 'utf8') === v2.text, String(v2.pointer));
+  check('Cv2-pointer', !v2.text.includes('deeper folded') && typeof v2.pointer === 'string' && v2.pointer.startsWith(`${spillDir}/fnd-mcp-slim-`) && readFileSync(v2.pointer, 'utf8') === v2.text, String(v2.pointer));
 
   const v3 = view('Cv3', { path: src, jq: '.issues[].key' });
   eq('Cv3-narrowed', [v3.decision, v3.narrowed, v3.engine, JSON.parse(v3.text).length, JSON.parse(v3.text)[399]], ['narrowed', true, 'json', 400, 'ACME-399']);
@@ -1325,6 +1351,15 @@ printf 'SIPSIMG' > "$last"
   eq('Cv7e-spill-root-ok', [vs.decision, vs.write && vs.write.path], ['passthrough', path.join(spillDir, 'mine.json')]);
   const vr = view('Cv7f', { path: src, out: 'issues.rel.json', cwd: tasks });
   eq('Cv7f-relative-to-cwd', vr.write && vr.write.path, path.join(tasks, 'issues.rel.json'));
+  // A repo below the session root (the claude.ai sandbox): its own .claude/tasks/<id>/ takes an out too.
+  const session = path.join(T, 'session');
+  const repo = path.join(session, 'repo');
+  mkdirSync(repo, { recursive: true });
+  const sub = view('Cv7s', { path: src, out: '.claude/tasks/t/tmp/a.txt', root: session, cwd: repo });
+  eq('Cv7s-cwd-tasks-ok', sub.write && sub.write.path, path.join(repo, '.claude/tasks/t/tmp/a.txt'));
+  const sib = view('Cv7s2', { path: src, out: '../other/.claude/tasks/t/a.txt', root: session, cwd: repo });
+  eq('Cv7s2-sibling-refused', [sib.reason, sib.text], ['out-outside-roots', `view: out must be under .claude/tasks/<id>/ of the session root or the working directory, or slim's spill root (${spillDir})`]);
+  eq('Cv7s3-cwd-tasks-top-refused', view('Cv7s3', { path: src, out: '.claude/tasks/top.txt', root: session, cwd: repo }).reason, 'out-outside-roots');
   // The OUTPUT_CAP (4 MiB less headroom) measures the text once, out or not.
   const words = (n) => JSON.stringify({ ids: Array.from({ length: n }, (_, i) => `w${i.toString(36).padStart(4, '0')}${'z'.repeat(i % 50)}`).join(' ') });
   writeFileSync(path.join(proj, 'wide.json'), words(80_000));

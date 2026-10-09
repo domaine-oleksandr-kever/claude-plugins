@@ -438,13 +438,13 @@ function slimChannelText(channel, text, opts) {
   const bytes = utf8(text);
   const gate = ch.structuredGate(channel, engine, opts.plainBytes);
   if (gate !== null && bytes <= gate) return { pass: 'size-gate' };
-  // A JSON view over the egress cap is stubbed, so the engine is asked to fit under it first.
+  // A JSON view or a node tree over the egress cap is stubbed, so the engine is asked to fit under it first.
   const run = (e) => compress({ data: text }, engineOptions(opts.deadline, {
     engine: e, budgetBytes: opts.window, plainBytes: ch.plainGate(channel, opts.plainBytes),
-    targetBytes: e === 'json' || e === 'jsonl' ? opts.egress || null : null,
+    targetBytes: ['json', 'jsonl', 'figma-nodes'].includes(e) ? opts.egress || null : null,
   }));
   let r = run(engine);
-  // A node tree over the cap would pass through raw; the JSON route can still fit it or stub it.
+  // A node tree its depth fold cannot fit would pass through raw; the JSON route can still fit it or stub it.
   if (r.decision === 'compressed' && r.engine === 'figma-nodes' && utf8(r.text) > (opts.egress || Infinity)) r = run('json');
   if (r.decision !== 'compressed') return { pass: r.reason || 'no-gain', format: r.format, engine };
   return { out: r.text, engine: r.engine, stages: r.stats.stages, parts: r.parts || [], window: r.window, json: r.engine === 'json' || r.engine === 'jsonl', ext: ['json', 'jsonl', 'figma-nodes'].includes(r.engine) ? '.json' : '.txt' };
@@ -474,7 +474,10 @@ function runChannel(input, base) {
   const deadline = budget === 0 || channel === 'attachment' ? null : (budget < 0 ? Date.now() - 1 : Date.now() + budget);
   const window = channel === 'grep' || channel === 'glob' ? ch.WINDOW.grep : ch.WINDOW.other;
   const inline = channel === 'bash' ? env.bashInline(input.bash_output_max_chars) : null;
-  const opts = { command, plainBytes, deadline, window, egress: inline === null ? ch.EGRESS[channel] : ch.bashEgress(inline) };
+  // The host counts the characters (.length) of stdout and stderr together; past its limit it would
+  // save slim's own answer to a file and show only a preview of it.
+  const stderrChars = String(rec.stderr || '').length;
+  const opts = { command, plainBytes, deadline, window, egress: inline === null ? ch.EGRESS[channel] : ch.bashEgress(inline - stderrChars) };
 
   if (ex.items) return runItems(input, base, ex, opts, spills, pass);
 
@@ -488,6 +491,8 @@ function runChannel(input, base) {
     text = host.text;
     bytesSeen = ch.bashSeen(ex.persisted, Number.isFinite(rec.persistedOutputSize) ? rec.persistedOutputSize : utf8(text));
     opts.window = ch.WINDOW.bashPersisted;
+    // The model saw only the host's 2 KB preview, so the window beats it whatever SLIM_PLAIN_BYTES says.
+    opts.plainBytes = ch.WINDOW.bashPersisted;
   } else if (channel === 'read' && rec.file.truncatedByTokenCap) {
     const whole = spill.readLocal(ti.file_path || rec.file.filePath);
     if (!whole.file) return pass(whole.why, visible);
@@ -509,12 +514,9 @@ function runChannel(input, base) {
   if (!hostFile) spills.push(original.path);
   const reason = hostFile ? 'mod-expand' : null;
 
-  // The host counts the characters (.length) of stdout and stderr together; past its limit it would
-  // save slim's own answer to a file and show only a preview of it.
-  const stderrChars = String(rec.stderr || '').length;
   const persistedByHost = (value) => inline !== null && value.length + stderrChars >= inline;
   const capped = () => {
-    if (!s.json) return pass('egress-cap', bytesIn);
+    if (!s.json && s.engine !== 'figma-nodes') return pass('egress-cap', bytesIn);
     const st = emit.stubFor(base.tool, text, 'json', original.path, 'egress-cap', false);
     const built = emit.withStats((stats) => st.render(stats), 'stub', bytesIn, utf8);
     if (persistedByHost(built.value)) return pass('egress-cap', bytesIn);

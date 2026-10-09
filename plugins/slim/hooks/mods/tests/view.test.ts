@@ -92,6 +92,10 @@ describe('V1 registration', () => {
     const d = await $.tool.describe({ tool: VIEW, description: VIEW_DESC, isDeferred: true, provider: PROVIDER } as any)
     expect(d.isDeferred).toBe(false)
   })
+
+  test('the description names both out roots: the session root and the working directory', () => {
+    expect(VIEW_DESC).toContain('out writes the compact text to a file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root)')
+  })
 })
 
 describe('V2 path', () => {
@@ -150,9 +154,10 @@ describe('V2 path', () => {
     expect(w.views[0].stdin.path).toBe('/repo/real/a.json')
   })
 
-  test('a Read error is the answer', async ($, on) => {
-    const w = world(on, { below: () => ({ result: 'File does not exist.', text: 'File does not exist.', isError: true }) })
-    expect(await view($, { path: '/repo/nope.json' })).toBe('File does not exist.')
+  test('a Read error is the answer, naming the path', async ($, on) => {
+    const host = 'File does not exist. Note: your current working directory is /home/claude.\nsecond line'
+    const w = world(on, { below: () => ({ result: host, text: host, isError: true }) })
+    expect(await view($, { path: '/repo/nope.json' })).toBe('view: /repo/nope.json: File does not exist. Note: your current working directory is /home/claude.')
     expect(w.views).toEqual([])
   })
 
@@ -169,7 +174,7 @@ describe('V2 path', () => {
     expect(await view($, { path: host })).toBe(`${REPLY.figure}\n--- head ---\n${REPLY.text}`)
     expect(w.views[2].stdin).toMatchObject({ path: host })
     text = 'EISDIR: illegal operation on a directory, read'
-    expect(await view($, { path: '/repo/dir' })).toBe(text)
+    expect(await view($, { path: '/repo/dir' })).toBe(`view: /repo/dir: ${text}`)
     expect(w.views).toHaveLength(3)
   })
 
@@ -248,7 +253,7 @@ describe('V4 out', () => {
   })
 
   test('an out outside the roots is the core\'s refusal: no Write', async ($, on) => {
-    const msg = 'view: out must be under <project>/.claude/tasks/<id>/ or slim\'s spill root (/tmp)'
+    const msg = 'view: out must be under .claude/tasks/<id>/ of the session root or the working directory, or slim\'s spill root (/tmp)'
     const w = world(on, { reply: { v: 1, decision: 'refused', reason: 'out-outside-roots', engine: null, figure: msg, text: msg, bytesIn: 0, bytesOut: 0, stages: [] } })
     expect(await view($, { path: '/repo/issues.json', out: '/etc/x.md' })).toBe(msg)
     expect(w.calls.map(c => c.tool)).toEqual(['Read'])

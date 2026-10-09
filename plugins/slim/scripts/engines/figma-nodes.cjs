@@ -5,7 +5,8 @@
  * One frame is 200–280 KB of JSON (a page is ~1 MB); the build tree is read in one or two calls and
  * is LOSSLESS FOR BUILD-RELEVANT DATA: every visible node keeps its measurements, layout, colours,
  * typography and effects, and every visible node id appears in the output either on its own line or
- * inside a fold's id list.
+ * inside a fold's id list — unless `targetBytes` is set and the tree is over it: then its deepest
+ * levels fold to `… N nodes deeper folded` lines (`compact`'s `depthCap`) until it fits.
  *
  * Dropped by design (a screenshot is the visual ground truth, and none of this is buildable data):
  * `fillGeometry` / `strokeGeometry` vector paths, `absoluteRenderBounds`, `exportSettings`,
@@ -470,6 +471,7 @@ function record(n, depth, parentLayout, ctx) {
     chars,
     fold: 0,
     foldRows: null,
+    deep: null,
   };
 }
 
@@ -561,7 +563,7 @@ function skelKey(recs) {
     // `r.fold` is part of the key: a record that already folded its own children stands for a
     // DIFFERENT number of nodes than one that did not, and merging the two would strand the inner
     // fold's id list (it lives on the exemplar that is about to be dropped).
-    recs._key = JSON.stringify(recs.map((r) => [r.depth, r.label, r.name, r.size, r.typeRef, r.attrs, r.tail, r.fold]));
+    recs._key = JSON.stringify(recs.map((r) => [r.depth, r.label, r.name, r.size, r.typeRef, r.attrs, r.tail, r.fold, r.deep]));
   }
   return recs._key;
 }
@@ -593,13 +595,49 @@ function countNodes(n) {
   return c;
 }
 
+// The visible nodes under a node whose children are not rendered; hidden ones still count as hidden.
+function countDeeper(kids, stats) {
+  let c = 0;
+  for (const k of kids) {
+    if (!k || typeof k !== 'object') continue;
+    if (k.visible === false) { stats.hidden += countNodes(k); continue; }
+    stats.visible++;
+    c += 1 + countDeeper(Array.isArray(k.children) ? k.children : [], stats);
+  }
+  return c;
+}
+
+// What a depth fold hides, minus ids and with positions relative to the folded node, so siblings that
+// differ only where a fold row would list them compare equal. `ctx.typeRef` must not grow the table.
+function deepSig(kids, parentLayout, ctx, origin) {
+  const out = [];
+  for (const k of kids) {
+    if (!k || typeof k !== 'object' || k.visible === false) continue;
+    const r = record(k, 0, parentLayout, ctx);
+    const b = k.absoluteBoundingBox;
+    const at = b && origin ? `${num((b.x || 0) - (origin.x || 0))},${num((b.y || 0) - (origin.y || 0))}` : r.pos;
+    out.push([r.label, r.name, r.size, at, r.typeRef, r.attrs, r.tail, r.imgs, r.chars,
+      deepSig(Array.isArray(k.children) ? k.children : [], k.layoutMode, ctx, origin)]);
+  }
+  return out;
+}
+
 function subtree(n, depth, parentLayout, ctx, stats) {
   if (!n || typeof n !== 'object') return null;
   if (n.visible === false) { stats.hidden += countNodes(n); return null; }
   stats.visible++;
+  if (depth > stats.depth) stats.depth = depth;
   const self = record(n, depth, parentLayout, ctx);
   const recs = [self];
   const kids = Array.isArray(n.children) ? n.children : [];
+  if (ctx.depthCap != null && depth >= ctx.depthCap && kids.length) {
+    const deeper = countDeeper(kids, stats);
+    if (deeper) { self.tail.push(`… ${deeper} node${deeper === 1 ? '' : 's'} deeper folded`); stats.deep += deeper; }
+    // The folded subtree joins the fold key: siblings whose hidden texts, fills or refs differ must
+    // not fold as identical, since no fold row can list what is no longer shown.
+    self.deep = JSON.stringify(deepSig(kids, n.layoutMode, { ...ctx, typeRef: (l) => l }, n.absoluteBoundingBox));
+    return recs;
+  }
   const subs = [];
   for (const k of kids) {
     const s = subtree(k, depth + 1, n.layoutMode, ctx, stats);
@@ -696,7 +734,8 @@ function compact(payload, opts) {
   const ids = Object.keys(nodes);
   if (!ids.length) throw new SlimError('no_nodes', 'the `nodes` object is empty');
 
-  const stats = { visible: 0, hidden: 0, folded: 0, foldGroups: 0 };
+  const stats = { visible: 0, hidden: 0, folded: 0, foldGroups: 0, depth: 0, deep: 0 };
+  const depthCap = Number.isInteger(o.depthCap) && o.depthCap >= 1 ? o.depthCap : null;
   const blocks = [];
   const headNodes = [];
   // One typography table for the whole document, in first-appearance order.
@@ -720,6 +759,7 @@ function compact(payload, opts) {
       vars,
       typeRef,
       maxText,
+      depthCap,
     };
     const recs = subtree(entry.document, 0, null, ctx, stats);
     headNodes.push({ id, name: entry.document.name || '' });
@@ -740,7 +780,8 @@ function compact(payload, opts) {
     out.push(`file: ${fileKey ? fileKey : '(key unknown)'}${payload.name ? ` · ${quote(payload.name)}` : ''}`);
     out.push(`lastModified: ${payload.lastModified || '(unknown)'}`);
     out.push(`nodes: ${stats.visible} visible · ${stats.hidden} hidden dropped · ${stats.folded} folded` +
-      `${stats.foldGroups ? ` into ${stats.foldGroups} exemplar${stats.foldGroups === 1 ? '' : 's'}` : ''}`);
+      `${stats.foldGroups ? ` into ${stats.foldGroups} exemplar${stats.foldGroups === 1 ? '' : 's'}` : ''}` +
+      `${stats.deep ? ` · ${stats.deep} below depth ${depthCap} folded to fit (the original has them)` : ''}`);
     out.push(hasVars ? 'tokens: variables' : 'tokens: raw values (Variables API unavailable on this plan)');
     out.push(`bytes: ${bytesIn} → ${bytesOut} (${pct >= 0 ? '-' : '+'}${Math.abs(Math.round(pct * 10) / 10).toFixed(1)}%)`);
     out.push('legend: `[TYPE] "name" #id WxH @x,y` then, when present, the TEXT content, its `T<n>` type');
@@ -805,19 +846,39 @@ function run(text, opts, ctx) {
   if (!isNodesResponse(v)) return pass('non-figma-nodes');
   const hint = isObj(ctx.hint) ? ctx.hint : {};
   const wrapBytes = fence ? [fence.preamble, fence.trailer].filter(Boolean).reduce((n, s) => n + utf8(s) + 2, 0) : 0;
+  const base = { variables: isObj(hint.variables) ? hint.variables : null, bytesIn: utf8(text), fileKey: keyFromName(hint.filename), maxText: Infinity, wrapBytes };
+  const wrap = (md) => (fence ? [fence.preamble, md, fence.trailer].filter(Boolean).join('\n\n') : md);
+  const late = () => ctx.deadline != null && Date.now() > ctx.deadline;
   let res;
   try {
-    res = compact(v, { variables: isObj(hint.variables) ? hint.variables : null, bytesIn: utf8(text), fileKey: keyFromName(hint.filename), maxText: Infinity, wrapBytes });
+    res = compact(v, base);
   } catch (e) {
     if (e instanceof SlimError) return pass('non-figma-nodes');
     throw e;
   }
   // One uninterruptible pass: a result that lands after the deadline is still discarded.
-  if (ctx.deadline != null && Date.now() > ctx.deadline) return pass('budget-exceeded');
-  const out = fence ? [fence.preamble, res.md, fence.trailer].filter(Boolean).join('\n\n') : res.md;
+  if (late()) return pass('budget-exceeded');
+  let out = wrap(res.md);
+  const stages = ['nodes'];
+  const warnings = [];
+  // cap 1 keeps the root's direct children: folding the root itself would leave nothing to build from.
+  const target = opts && opts.targetBytes;
+  if (target && utf8(out) > target) {
+    for (let cap = res.stats.depth - 1; cap >= 1 && !late(); cap--) {
+      const r = compact(v, { ...base, depthCap: cap });
+      const o = wrap(r.md);
+      if (utf8(o) > target) continue;
+      res = r;
+      out = o;
+      stages.push('depth');
+      warnings.push(`depth: ${r.stats.deep} nodes below depth ${cap} folded to meet targetBytes`);
+      break;
+    }
+    if (late()) return pass('budget-exceeded');
+  }
   if (utf8(out) >= utf8(text)) return pass('no-gain');
   const s = res.stats;
-  return { decision: 'compressed', text: out, stages: ['nodes'], meta: { nodes: s.visible, hidden: s.hidden, folded: s.folded } };
+  return { decision: 'compressed', text: out, stages, warnings, meta: { nodes: s.visible, hidden: s.hidden, folded: s.folded } };
 }
 
 module.exports = { id: 'figma-nodes', run, isNodesResponse, compact, keyFromName, figureLine };

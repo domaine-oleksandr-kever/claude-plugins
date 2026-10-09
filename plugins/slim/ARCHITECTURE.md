@@ -103,7 +103,7 @@ flowchart TD
   H -- refused --> Z2[passthrough expand-refused]
   H -- ok --> I[engines.sniff<br/>content, never the tool name]
   I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file}
-  J --> K[engines.compress<br/>maxMs 5000 · targetBytes for json]
+  J --> K[engines.compress<br/>maxMs 5000 · targetBytes for json and figma-nodes]
   K -- passthrough · refused --> L{stubbable?<br/>MCP json over 32 KB}
   L -- yes --> M[emit stub + spill original]
   L -- no --> Z3[passthrough with reason]
@@ -129,7 +129,7 @@ non-zero exit, bad JSON) leaves the original result untouched and writes an erro
 | channel | gate | window if plain text | egress cap (json still over it → stub) |
 |---|---|---|---|
 | mcp | 4,096 | — | stub threshold 32,768 |
-| bash | 4,096 | 4,096 for a host-persisted output, else SLIM_PLAIN_BYTES | host inline limit − 2,048, at most 32,768; an answer at or past the host limit (chars, stdout + stderr) → stub, or pass through |
+| bash | 4,096 | a host-persisted output always (4,096 budget), else over SLIM_PLAIN_BYTES | host inline limit − 2,048, at most 32,768; an answer at or past the host limit (chars, stdout + stderr) → stub, or pass through |
 | read | 32,768 | — | 65,536 |
 | webfetch | 16,384 | 12,288 | 32,768 |
 | websearch | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
@@ -271,9 +271,10 @@ line to a fetched page. `SLIM_LOOKUP=0` removes all three at once.
           slim.cjs --view   (delivery/view.cjs)
               media bytes ──▶ delivery/media.cjs normalize(path, allowed_out) → outputs beside the input
               (a media request — media / allowed_out — over non-media bytes is refused, never read as text)
-              text ─▶ out target (under <root>/.claude/tasks/<id>/ or the spill root) ─▶ cached?
+              text ─▶ out target (under <root|cwd>/.claude/tasks/<id>/ or the spill root) ─▶ cached?
                       (out newer than the input, line 1 = <<slim view k=<hash> engine=<e> v=<version>>>)
-                   ─▶ jq.narrow() ─▶ compress()  (JSON fitted to 16 KB, 64 KB with out; parts written)
+                   ─▶ jq.narrow() ─▶ compress()  (JSON fitted to 16 KB, 64 KB with out, a node tree never;
+                                                  parts written)
                       (cached also needs every <<full=…>> part it cites still on disk)
                    ─▶ { figure, text, write?: { path, marker }, pointer?, original? }
               │

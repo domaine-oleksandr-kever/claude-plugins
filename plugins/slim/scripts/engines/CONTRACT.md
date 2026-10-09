@@ -37,7 +37,7 @@ One call: `compress(input, options)`.
 | `spillDir` | `''` | prefix of the paths the text cites for parts (`<<full=<spillDir>/<name> …>>`). Empty → the bare name. |
 | `spillNames` | `{ original: 'slim-original-', rows: 'slim-rows-', ids: 'slim-ids-' }` | name prefix per spill kind. |
 | `trace` | `false` | fill `stats.stages` with the pipeline stages that changed bytes. |
-| `targetBytes` | `null` | json / jsonl only: the size the caller can show. A body still above it after the crush runs the `trim` and `fit` stages (see **json**). Other engines ignore it. |
+| `targetBytes` | `null` | json / jsonl and figma-nodes: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**). Other engines ignore it. |
 | `maxInputBytes` | `67108864` | larger input → `refused` / `too-large`. |
 | `marker` | `'handle'` | `'ccr'` reproduces Headroom's content-hash crush marker; parity tests only. |
 
@@ -129,12 +129,19 @@ Measurements round to 0.5 px. Dropped: vector geometry, `absoluteRenderBounds`, 
 thumbnails, the instance `overrides` array, and `visible:false` subtrees (counted). Adjacent siblings
 identical apart from id, position, image ref and text fold into one exemplar with a `×N` mark and a
 `folds ×N` block listing, per folded sibling, every id and what differed — so every visible node id and
-every text value stays in the output. With `hint.variables` a bound value reads `$Collection/Name
-(<node value>)` and the header says `tokens: variables`; without it bindings read `$var:<short id>`. A
-dominant markdown fence around the response is unwrapped, its preamble and trailer kept. The result
-carries `meta: { nodes, hidden, folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by
-`figma-nodes.cjs` prints `figma-nodes: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N`. The
-original's spill name ends `.json`.
+every text value stays in the output. With `targetBytes` set and the tree above it, the deepest level
+folds first, one level per pass, until the text fits: each node at the new last level keeps its line
+plus `… N nodes deeper folded` under it, the `nodes:` header adds `· N below depth D folded to fit`,
+the stage is `depth` and the warning `depth: N nodes below depth D folded to meet targetBytes`; the
+ids and texts below depth D are then only in the original, and two siblings at depth D fold into one
+exemplar only when what they folded is identical too, apart from ids and absolute position. It
+never folds past the root's direct children; a tree that does not fit even then comes back whole.
+With `hint.variables` a bound value reads `$Collection/Name (<node value>)` and the header says
+`tokens: variables`; without it bindings read `$var:<short id>`. A dominant markdown fence around the
+response is unwrapped, its preamble and trailer kept. The result carries `meta: { nodes, hidden,
+folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` prints
+`figma-nodes: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N`. The original's spill name ends
+`.json`.
 
 **adf** — a bare Atlassian document converted to markdown (media render as `_(media omitted)_`).
 

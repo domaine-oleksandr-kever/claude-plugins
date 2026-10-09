@@ -19,9 +19,9 @@ export const VIEW_DESC =
   '(JSON, JSON lines, logs, HTML, Figma REST nodes.json, Atlassian documents, plain-text windows) and returns a figure ' +
   'line and the compact text, whole up to 16 KB, else its head and a file to Read windowed. jq narrows JSON first ' +
   "(dot paths .a.b, .a[0], '[]' iteration, ',' multi-select, '| keys' / '| length'). out writes the compact text to a " +
-  'file under <project>/.claude/tasks/<id>/, reused while it is newer than the input. An image becomes a copy at most ' +
-  '1568 px on its long edge and a video a folder of frames, beside the input. Give exactly one of path or command; ' +
-  'for a URL use WebFetch or mcp__slim__lookup.'
+  'file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root), reused while ' +
+  'it is newer than the input. An image becomes a copy at most 1568 px on its long edge and a video a folder of ' +
+  'frames, beside the input. Give exactly one of path or command; for a URL use WebFetch or mcp__slim__lookup.'
 export const VIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -162,7 +162,8 @@ async function readProbe($: $, path: string): Promise<{ opened: string } | { den
     if (probe.deny !== undefined) return { denied: probe.deny }
     if (probe.isError === true) {
       if (/exceeds maximum allowed tokens|more than a read can return/i.test(String(probe.text ?? ''))) return { opened: path }
-      return { denied: String(probe.text || `view: reading ${path} failed`) }
+      const first = String(probe.text ?? '').split('\n')[0]!.trim()
+      return { denied: first ? `view: ${path}: ${first}` : `view: reading ${path} failed` }
     }
     const r = probe.result as { type?: unknown; file?: { filePath?: unknown } } | undefined
     if (typeof r?.file?.filePath === 'string' && r.file.filePath) return { opened: r.file.filePath }

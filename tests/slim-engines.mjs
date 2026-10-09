@@ -315,7 +315,7 @@ const EC = ecRows();
     eq(`ET-bad-option-${String(bad)}`, [b.decision, b.reason, b.warnings], ['refused', 'bad-option', ['invalid option: targetBytes']]);
   }
   const strip = (x) => ({ ...x, stats: { ...x.stats, ms: 0 } });
-  for (const [name, data, o] of [['html', PAGE], ['log', APPLOG], ['figma', fx('figma-design-context.jsx')], ['figma-nodes', REST], ['text', TESTOUT, { plainBytes: 8192, budgetBytes: 8192 }]]) {
+  for (const [name, data, o] of [['html', PAGE], ['log', APPLOG], ['figma', fx('figma-design-context.jsx')], ['text', TESTOUT, { plainBytes: 8192, budgetBytes: 8192 }]]) {
     eq(`ET-ignored-by-${name}`, strip(compress({ data }, { ...O, ...(o || {}), targetBytes: 1024 })), strip(compress({ data }, { ...O, ...(o || {}) })));
   }
 
@@ -382,6 +382,29 @@ const EC = ecRows();
   const rids = idsIn(r.text);
   check('EN-rest', r.engine === 'figma-nodes' && r.decision === 'compressed' && r.stats.pct > 75 && r.meta.nodes === visibleIds(rdoc).length, `${r.engine} ${r.decision} ${r.stats.pct} ${JSON.stringify(r.meta)}`);
   check('EN-rest-ids-lossless', visibleIds(rdoc).every((id) => rids.has(id)), 'an id is missing');
+
+  // targetBytes: the deepest level folds first, one level per pass, never past the root's children.
+  const strip = (x) => ({ ...x, stats: { ...x.stats, ms: 0 } });
+  const depthOf = (n, d = 0) => (n.visible === false ? [] : [[n.id, d], ...(n.children || []).flatMap((k) => depthOf(k, d + 1))]);
+  const t1 = compress({ data: REST }, { ...O, trace: true, targetBytes: 27952 });
+  const t1ids = idsIn(t1.text);
+  check('EN-target-one-fold', r.stats.bytesOut > 27952 && t1.decision === 'compressed' && t1.engine === 'figma-nodes' && t1.stats.bytesOut <= 27952
+    && t1.stats.stages.join(' ') === 'nodes depth' && t1.warnings.join() === 'depth: 240 nodes below depth 2 folded to meet targetBytes'
+    && /^ {6}… 4 nodes deeper folded$/m.test(t1.text) && t1.text.includes('\nnodes: 303 visible · 0 hidden dropped · 0 folded · 240 below depth 2 folded to fit (the original has them)\n')
+    && t1.meta.nodes === r.meta.nodes && t1.text.includes(`\nbytes: ${bytes(REST)} → ${bytes(t1.text)} (`), `${t1.stats.bytesOut} ${t1.stats.stages} ${JSON.stringify(t1.warnings)}`);
+  check('EN-target-fold-keeps-shallow-ids', depthOf(rdoc).filter(([, d]) => d <= 2).every(([id]) => t1ids.has(id)) && depthOf(rdoc).filter(([, d]) => d === 3).every(([id]) => !t1ids.has(id)), 'a shallow id is missing or a deep one stayed');
+  // The 60 cards differ below the cap (titles, prices, fills): each keeps its own line, none folds as identical.
+  check('EN-target-cap-no-false-fold', !/×\d+$/m.test(t1.text) && Array.from({ length: 60 }, (_, i) => `#100:${1000 + i} `).every((id) => t1.text.includes(id)), 'a card folded although its hidden subtree differs');
+  const same = JSON.parse(JSON.stringify(CARDS));
+  for (const k of same.nodes['20:1'].document.children) { k.children[0].fills[0].imageRef = 'ref-0'; k.children[1].characters = 'Bundle 0'; }
+  const capped = (p) => fn.compact(p, { depthCap: 1 }).md;
+  check('EN-target-cap-folds-identical', /"Product Card" #20:100 .* ×8$/m.test(capped(same)) && !/×\d+$/m.test(capped(CARDS)), capped(CARDS));
+  const t2 = compress({ data: REST }, { ...O, targetBytes: 2000 });
+  check('EN-target-two-folds', t2.decision === 'compressed' && t2.stats.bytesOut <= 2000 && t2.warnings.join() === 'depth: 300 nodes below depth 1 folded to meet targetBytes', `${t2.stats.bytesOut} ${JSON.stringify(t2.warnings)}`);
+  eq('EN-target-unreachable-whole', strip(compress({ data: REST }, { ...O, targetBytes: 1024 })), strip(r));
+  eq('EN-target-under-untouched', strip(compress({ data: REST }, { ...O, targetBytes: r.stats.bytesOut })), strip(r));
+  const ft = compress({ data: `Saved nodes:\n\`\`\`json\n${REST}\n\`\`\`\n` }, { ...O, targetBytes: 27952 });
+  check('EN-target-fence-counts', ft.decision === 'compressed' && ft.stats.bytesOut <= 27952 && ft.text.startsWith('Saved nodes:\n\n# figma node 3326:39542') && ft.text.includes('deeper folded'), `${ft.stats.bytesOut}`);
 
   const fenced = `Saved nodes:\n\`\`\`json\n${REST}\n\`\`\`\n`;
   const fr = compress({ data: fenced }, O);

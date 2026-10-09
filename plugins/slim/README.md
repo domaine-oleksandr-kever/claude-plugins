@@ -16,7 +16,7 @@ slim is a Claude Code hooks module (mods) and nothing else: other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads; the drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.6.1**.
+Current release: **slim v0.6.2**.
 
 ## Install
 
@@ -51,7 +51,7 @@ validates a hook's result against the built-in tool's output schema: Bash stays
 | Channel | Candidate when | What slim does |
 |---|---|---|
 | MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | JSON engines, else spill-and-stub (below) |
-| Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML; over 16,384 B from a log command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file | stdout only; stderr and the other fields are kept |
+| Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML; over 16,384 B from a log command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
 | Read | a whole-file read of a `.log`, `.jsonl` or `.ndjson` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
 | WebFetch | result over 16,384 B that is JSON or HTML, or over `SLIM_PLAIN_BYTES` | JSON, JSONL and HTML engines, else a window |
 | WebSearch | a result string over `SLIM_PLAIN_BYTES` | that string is windowed; the others are untouched |
@@ -68,8 +68,12 @@ shape, before the generic JSON engine) becomes a markdown build tree: one line p
 its measurements, layout, colours, typography and effects, and every TEXT value in full; hidden
 subtrees and vector geometry dropped and counted; identical sibling runs folded with every folded id
 and differing value listed. It is admitted wherever JSON is (Bash, Read, WebFetch); MCP results keep
-the JSON engine. A tree still over the channel's egress cap goes the JSON route instead (fit, else
-stub).
+the JSON engine. A tree over the channel's egress cap folds its deepest level first, one level at a
+time, until it fits: the nodes at the new last level keep their lines, each with `… N nodes deeper
+folded` under it (siblings there fold as `×N` only when what they folded is identical too), and the
+header counts what was folded. It never folds past the root's direct children; a tree that still
+does not fit goes the JSON route (fit, else stub). The view tool never folds a tree: a long one is
+read windowed from a file instead.
 
 **Engine admission on Bash.** JSON and JSONL output is compressed whatever the command. HTML is
 treated as a page only when the command fetches one: `curl`, `wget`, `http`, `https`, `xh` or `lynx`
@@ -83,7 +87,8 @@ is plain text, so test runners and git output are never deduplicated as a log.
 - code, diffs and test output — the detector checks for a diff, a test runner's summary (jest,
   mocha, go test, rspec, pytest, TAP), template markers (`{%`, `{{`, `<%`, `<?php`) and code lines
   BEFORE it looks for JSON lines, HTML or a log; such text is only ever windowed, and only above
-  `SLIM_PLAIN_BYTES` (`plain-gate` below it);
+  `SLIM_PLAIN_BYTES` (`plain-gate` below it) or when the host saved the Bash output to a file (the
+  model would see only a 2 KB preview of it, so the exact text is gone either way);
 - images, PDFs and other binary output (`not-text`, `binary`): detected by magic bytes;
 - a Bash command that runs a compressor CLI (`slim.cjs`, `json-slim.cjs`, `log-slim.cjs`, … — `own-cli`);
 - a Bash command or a Read that names a spill file or a host tool-results file (`spill-read`) —
@@ -94,9 +99,9 @@ is plain text, so test runners and git output are never deduplicated as a log.
   engines were ported from (`already-slim`).
 
 **Why `SLIM_PLAIN_BYTES` defaults to 65,536 B.** That is about twice Bash's inline cap of 30,000
-characters, so any output the host would show inline stays byte-identical. Only output the host has
-already moved behind a 2 KB preview gets windowed, and the window keeps the tail, where a test
-summary lives.
+characters, so any output the host would show inline stays byte-identical. A Bash output the host
+has already moved behind a 2 KB preview is windowed whatever its size — the window beats the
+preview — and the window keeps the tail, where a test summary lives.
 
 ### The window
 
@@ -130,6 +135,10 @@ slim: this view of <file> is compressed and its line numbers are not file lines 
 ```
 
 The handle names a spill copy of the original, not the file itself (see Spill files and handles).
+
+A file over the host's own Read size cap (256 KB: `File content (289.8KB) exceeds maximum allowed
+size (256KB)`) is refused by the host before any hook runs, so slim never sees that Read: use
+`mcp__slim__view({ path })`, or `mcp__slim__lookup({ path, question })` for one fact.
 
 ### Decisions
 
@@ -317,9 +326,10 @@ whose result the webfetch channel compresses, or `lookup({ url, question })`).
   up to 16 KB is shown as is; a bigger one goes through the engine. The figure then gives no saving,
   because jq changed what is measured:
   `slim view: narrowed by jq to 3,891 B of a 63,004 B source (no saving figure: jq changed the measured object)`.
-- `out`: a file under `<project>/.claude/tasks/<id>/` or slim's spill root, relative paths against
-  the session's directory; anything else, a folder or a link is refused before anything runs. The
-  module writes it through the host's Write tool (an existing file is Read first, as Write
+- `out`: a file under `.claude/tasks/<id>/` of the session root or of the working directory (a repo
+  checked out below the session root, as in a claude.ai chat sandbox), or slim's spill root, relative
+  paths against the working directory; anything else, a folder or a link is refused before anything
+  runs. The module writes it through the host's Write tool (an existing file is Read first, as Write
   requires), so permission rules and guards decide; a deny is the answer and nothing is written.
   Its first line is a marker, `<<slim view k=<request hash> engine=<engine> v=<slim version>>>`.
   For a `path`, a later call with the same `jq` and `engine` and the same `out` answers `cached`
@@ -556,7 +566,7 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
 | `SLIM_ATTACH` | `1` | `0` turns the @-mentioned file channel off: an @-mentioned data file reaches the model as the host rendered it. |
 | `SLIM_PROMPT` | `1` | `0` turns the prompt channel off: a typed or bridge prompt is never rewritten. |
 | `SLIM_SPILL_GUARD` | `1` | `0` turns the spill-read guard's deny off; access lines are still written at `SLIM_DEBUG` 1 or 2. |
-| `SLIM_PLAIN_BYTES` | `65536` | Size above which plain text (code, diffs, test output, prose) is windowed to head and tail; below it plain text passes byte-identical. A whole number, floored at 8,192; anything else → the default. |
+| `SLIM_PLAIN_BYTES` | `65536` | Size above which plain text (code, diffs, test output, prose) is windowed to head and tail; below it plain text passes byte-identical. A Bash output the host saved to a file is windowed whatever this says. A whole number, floored at 8,192; anything else → the default. |
 | `SLIM_DIR` | system temp dir | Spill root: originals, rows files, id maps and the report log `fnd-mcp-slim-debug.log`. A handle is trusted only there, in the prompt dir and in this session's host `tool-results/`. |
 | `SLIM_TTL` | `24` | Hours a spill file lives before the sweep removes it; `0` stops the sweep. Only slim's names in the spill root are pruned; the prompt dir is never swept by age. |
 | `SLIM_DEBUG` | off | `1` (or `true`/`yes`/`on`) writes one report line per call slim handles, on every channel, and the spill access lines; `2` adds the module's stand-downs (`size-gate`, `already-slim`, `plain-gate`, `read-guard`, …), prose-only prompts and the attachment probe. Error, lookup and view lines are written at every level. |
@@ -585,7 +595,8 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
 - **Raw HTML from WebFetch.** WebFetch hands back its own model's answer, not the page; slim only
   sees large answers.
 - **Source JSON and files you edit through Read** — see the Read rules.
-- **A Read over the host's size limit.** The host refuses it before slim sees a result.
+- **A Read over the host's 256 KB size cap.** The host refuses it before slim sees a result;
+  see the Read rules.
 - **Images, PDFs and binary output** pass through the hook channels untouched; images and video are
   resized only when asked through `view { path }` (see Media).
 - **A `.json` file the host showed whole.** A Read under the host's token cap is left as is. Ask a
