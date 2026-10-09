@@ -10,7 +10,7 @@ publishes the resolved task and its own events, slim publishes its compression e
 plugins on base (fe, qa, be, pm) publish their own start, install and doctor lines. Band reads them;
 it never writes another plugin's state.
 
-Current release: **band v0.3.0**.
+Current release: **band v0.4.0**.
 
 ## Status
 
