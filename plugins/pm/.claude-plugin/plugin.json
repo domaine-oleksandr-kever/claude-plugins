@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "pm",
   "displayName": "Project Management",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Domaine project-management plugin for Claude Code: the project estimator, the estimator pre-submission review, the merchant brief, solutions engineering (scoping, implementation plan, LOE, handoff) and vendor evaluation skills; requires base (and slim through it)",
   "author": {
     "name": "Oleksandr Kever",

@@ -11,7 +11,7 @@ pm builds on base and requires it: the Jira and doc readers, the Jira writer, th
 the shared MCP servers (Atlassian, Notion, Shopify Dev) are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so pm runs with slim too.
 
-Current release: **pm v0.1.0**.
+Current release: **pm v0.1.1**.
 
 ## Status
 
