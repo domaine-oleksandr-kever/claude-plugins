@@ -12,10 +12,10 @@
 # and a fetcher that followed arbitrary ones would be an SSRF / exfiltration surface driven by
 # ticket text. So: `https://` only; the page host must be one of PAGE_HOSTS / DIRECT_HOSTS below,
 # EXACTLY (no wildcards); the image URL a page resolves to must be `https://` on a host under one of
-# IMAGE_HOST_SUFFIXES; the answer must carry an `image/*` content type; the bytes are capped
-# (--max-mb, and the cap is re-checked on disk because curl's --max-filesize cannot stop a chunked
-# answer on every version). Anything else is a `skipped_host` row and NO request. No credential is
-# involved anywhere — these are public services.
+# IMAGE_HOST_SUFFIXES, and so must every redirect hop (curl never follows one on its own); the
+# bytes must be an image (FORMAT below) and are capped (--max-mb, and the cap is re-checked on disk
+# because curl's --max-filesize cannot stop a chunked answer on every version). Anything else is a
+# `skipped_host` row and NO request. No credential is involved anywhere — these are public services.
 #
 # USER-AGENT: prnt.sc answers curl's default agent with a bot-challenge page (HTTP 520, text/plain,
 # no og:image — measured 2026-09-25) and a browser one with the real page, so every request carries
@@ -26,6 +26,11 @@
 # the info/exclude line task-workspace.md prescribes is stamped. The file is
 # `<host>-<slug>.<ext>` — the slug is the URL's path with everything but [A-Za-z0-9._-] folded to
 # `_`, so a page URL can never name a path outside the out dir.
+#
+# FORMAT: the first bytes name it — PNG, JPEG, GIF and WebP by their magic numbers, whatever the
+# Content-Type says (`application/octet-stream` with PNG bytes is a PNG). A format with no magic
+# check here (SVG, AVIF …) takes an `image/*` Content-Type at its word; bytes that contradict the
+# PNG/JPEG/GIF/WebP type they were served as are `not_an_image`.
 #
 # CACHE: a URL whose `<host>-<slug>.*` file is already on disk is `cached` — no request; --force
 # re-downloads it. A run never leaves a `.part` behind: it is deleted on every failure.
@@ -120,12 +125,31 @@ SCRATCH="$(mktemp)"; ROWS_TSV="$(mktemp)"; ROWS_JSON="$(mktemp)"
 trap 'rm -f "$SCRATCH" "$ROWS_TSV" "$ROWS_JSON"' EXIT
 
 # --- requests ---------------------------------------------------------------------------------
-# `--proto =https --proto-redir =https` keep every hop on TLS; --max-filesize is the first cap, the
-# on-disk re-check below the one that always holds.
-CURL_OPTS=(-sS -L --connect-timeout 10 --max-time 60 --proto =https --proto-redir =https -A "$UA")
+# `--proto =https` keeps every request on TLS; --max-filesize is the first cap, the on-disk re-check
+# below the one that always holds. No `-L`: curl would follow a redirect to ANY host before the
+# script saw it, so fetch() takes each hop itself — at most 5, each to an https URL whose host
+# passes host_allowed_suffix.
+CURL_OPTS=(-sS --connect-timeout 10 --max-time 60 --proto =https --proto-redir =https -A "$UA")
+MAX_HOPS=5
 
-fetch() { # $1 = url, $2 = out file, $3 = byte cap → "<http code> <content type>" on stdout
-  curl "${CURL_OPTS[@]}" --max-filesize "$3" -o "$2" -w '%{http_code} %{content_type}' "$1"
+fetch() { # $1 = url, $2 = out file, $3 = byte cap → "<http code> <content type>" on stdout, or
+          # "redirect <host>" for a hop off the allow-list; the last 3xx when the hops run out
+  local u="$1" ans code loc h rc hops=0
+  while :; do
+    rc=0; ans="$(curl "${CURL_OPTS[@]}" --max-filesize "$3" -o "$2" \
+                   -w '%{http_code}\t%{content_type}\t%{redirect_url}' "$u")" || rc=$?
+    code="${ans%%$'\t'*}"; loc="${ans##*$'\t'}"
+    if [ "$rc" -ne 0 ] || [ "${code#3}" = "$code" ] || [ -z "$loc" ] || [ "$hops" -ge "$MAX_HOPS" ]; then
+      ans="${ans#*$'\t'}"; printf '%s %s' "$code" "${ans%%$'\t'*}"; return "$rc"
+    fi
+    h=""
+    if clean_url "$loc"; then h="$(url_host "$loc")"; fi
+    if [ -z "$h" ] || ! host_allowed_suffix "$h"; then
+      printf 'redirect %s' "${h:-$(printf '%s' "$loc" | tr -d '[:cntrl:]' | tr -s '[:space:]' '_' | cut -c1-120)}"
+      return 0
+    fi
+    u="$loc"; hops=$((hops + 1))
+  done
 }
 
 in_list() { # $1 = word, $2 = space-separated list
@@ -152,6 +176,15 @@ clean_url() { # $1 = raw url → 0 with CLEAN set, 1 when it carries what no URL
   CLEAN="$1"
   case "$CLEAN" in *[[:space:][:cntrl:]]*|*\"*|*\'*|*\\*) return 1 ;; esac
   return 0
+}
+
+sniff_type() { # $1 = file → the image type its first bytes name, "" for none of the four
+  case "$(head -c 12 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" in
+    89504e470d0a1a0a*) printf image/png ;;
+    ffd8ff*) printf image/jpeg ;;
+    474946383[79]61*) printf image/gif ;;
+    52494646????????57454250) printf image/webp ;;
+  esac
 }
 
 mime_ext() { # $1 = content type → extension, "" when it is not an image type this script names
@@ -219,6 +252,7 @@ for url in "${URLS[@]}"; do
         code="${ans%% *}"
         case "$code" in
           2*) ;;
+          redirect) status=failed; echo "note=image_host_not_allowed url=$url_shown host=${ans#* } via=redirect" >&2 ;;
           *) status=failed; echo "note=page_fetch_failed url=$url_shown http=${code:-000}" >&2 ;;
         esac
         if [ -z "$status" ]; then
@@ -252,12 +286,21 @@ for url in "${URLS[@]}"; do
         pace
         rc=0; ans="$(fetch "$image_url" "$part" "$MAX_BYTES")" || rc=$?
         code="${ans%% *}"; ctype="${ans#* }"; ctype="${ctype%%;*}"; ctype="$(printf '%s' "$ctype" | tr -d '[:space:][:cntrl:]' | tr 'A-Z' 'a-z')"
-        ext="$(mime_ext "$ctype")"
+        served="$ctype"
         case "$code" in
+          redirect) status=failed; rm -f "$part"
+             echo "note=image_host_not_allowed url=$url_shown host=${ans#* } via=redirect" >&2 ;;
           2*)
+            sniffed="$(sniff_type "$part")"
+            case "$sniffed:$ctype" in
+              :image/png|:image/jpeg|:image/jpg|:image/gif|:image/webp) ctype="" ;;
+              :*) ;;
+              *) ctype="$sniffed" ;;
+            esac
+            ext="$(mime_ext "$ctype")"
             if [ -z "$ext" ]; then
               status=failed; rm -f "$part"
-              echo "note=not_an_image url=$url_shown type=${ctype:-unknown}" >&2
+              echo "note=not_an_image url=$url_shown type=${served:-unknown}" >&2
             elif [ "$(file_size "$part")" -gt "$MAX_BYTES" ]; then
               status=failed; got="$(file_size "$part")"; rm -f "$part"
               echo "note=over_cap url=$url_shown size=$got max_mb=$MAX_MB" >&2

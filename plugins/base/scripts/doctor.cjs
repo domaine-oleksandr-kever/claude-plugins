@@ -15,10 +15,11 @@
  *                session directory under DOMAINE_LOG_DIR, else under <home>/.claude/domaine/log
  *     --json     `{ root, rows: [{ status, name, detail }] }` instead of the table
  *
- * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, fnd, base-tmp, event-log. Every
- * row is one PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
- * BASE_TMP_TTL (the age the session sweep removes base-tmp files at) and DOMAINE_LOG_DIR. It only
- * reports, never repairs.
+ * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, fnd, base-tmp, event-log,
+ * switches (only when a BASE_* switch holds a value outside its README domain: WARN). Every row is one
+ * PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
+ * BASE_TMP_TTL (the age the session sweep removes base-tmp files at), DOMAINE_LOG_DIR and every BASE_*
+ * switch. It only reports, never repairs.
  */
 'use strict';
 
@@ -26,7 +27,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
-const { baseTmpStats, parseTtl, SCRATCH_ROOT_REL } = require('./scratch-hygiene.cjs');
+const { baseTmpStats, parseTtl, SCRATCH_ROOT_REL, DEFAULT_TTL_HOURS } = require('./scratch-hygiene.cjs');
 
 const MIN_NODE_MAJOR = 18;
 // Plugin names the engine refuses to load a hooks module for (validate still passes).
@@ -321,6 +322,23 @@ function checkEventLog(logDir, homeDir) {
   pass('event-log', dir + ': ' + parts.join('; '));
 }
 
+// Read as `=== '0'`, untrimmed: any other value is on.
+const ON_OFF = ['BASE_EVENT_LOG', 'BASE_GUARD', 'BASE_LEAN', 'BASE_SCRATCH_GUARD', 'BASE_SESSION_TITLE', 'BASE_STE'];
+
+// Every reader degrades a value outside its domain to the default without a word; this row is the word.
+function checkSwitches(env) {
+  const shown = (k) => k + '=' + JSON.stringify(String(env[k]).slice(0, 40));
+  const bad = [];
+  for (const k of ON_OFF) {
+    if (env[k] !== undefined && !['', '0', '1'].includes(env[k])) bad.push(shown(k) + ' is read as on — only 0 turns it off');
+  }
+  const src = (env.BASE_FIGMA_SOURCE || '').trim();
+  if (!['', 'auto', 'mcp', 'rest'].includes(src)) bad.push(shown('BASE_FIGMA_SOURCE') + ' is read as auto — auto, mcp or rest');
+  const ttl = (env.BASE_TMP_TTL || '').trim();
+  if (ttl && parseTtl(ttl) !== Number(ttl)) bad.push(shown('BASE_TMP_TTL') + ' is read as ' + DEFAULT_TTL_HOURS + ' — hours, 0 or more');
+  if (bad.length) warn('switches', bad.join('; '));
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const pluginRoot = path.resolve(opts.root || path.join(__dirname, '..'));
@@ -338,6 +356,7 @@ function main() {
   checkFnd(claudeDir, projectDir, enabled);
   checkCoreTmp(projectDir);
   checkEventLog(opts['log-dir'], homeDir);
+  checkSwitches(process.env);
 
   const failed = rows.some((r) => r.status === 'FAIL');
   if (opts.json) {

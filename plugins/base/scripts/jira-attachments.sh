@@ -181,7 +181,8 @@ SITE="$(trim_ws "$SITE")"
 case "$SITE" in ''|*[!A-Za-z0-9.-]*) echo "error=invalid_site site=$SITE" >&2; exit 2 ;; esac
 
 CFG="$(mktemp)"; LISTF="$(mktemp)"; ROWS_TSV="$(mktemp)"; ROWS_JSON="$(mktemp)"; SCRATCH="$(mktemp)"
-trap 'rm -f "$CFG" "$LISTF" "$ROWS_TSV" "$ROWS_JSON" "$SCRATCH"' EXIT
+RETRY_SPENT="$CFG.retry-spent"
+trap 'rm -f "$CFG" "$LISTF" "$ROWS_TSV" "$ROWS_JSON" "$SCRATCH" "$RETRY_SPENT"' EXIT
 # the 0600 writer lives in _common.sh — figma-rest.sh holds a token the same way, and one
 # copy of "the credential rides a file, never the argv" is the only one that can be kept true
 curl_config_write "$CFG" "$(printf 'user = "%s:%s"' "$EMAIL" "$TOKEN")" \
@@ -192,18 +193,38 @@ curl_config_write "$CFG" "$(printf 'user = "%s:%s"' "$EMAIL" "$TOKEN")" \
 # on it. `--proto =https --proto-redir =https` keep the redirect chain to the media host on TLS.
 CURL_OPTS=(-sS -L --connect-timeout 10 --max-time 120 --proto =https --proto-redir =https)
 
+# ONE retry, 5 s apart, on a transport blip a second try can cure: DNS (6), connect (7),
+# timeout (28), TLS handshake (35), empty reply (52), connection reset (56), or no status at all.
+# An HTTP status — 4xx included — is an answer and is never retried. A retry that fails too means
+# the network is down rather than blipping, so the run spends no further retries: the worst case
+# stays one extra request per run.
+# The marker is a file because every caller runs this in a `$(…)` subshell.
+curl_code() { # curl args… → http code on stdout, curl's own exit status
+  local code rc=0
+  code="$(curl "$@")" || rc=$?
+  [ -e "$RETRY_SPENT" ] && { printf '%s' "$code"; return "$rc"; }
+  case "$rc:$code" in
+    6:*|7:*|28:*|35:*|52:*|56:*|0:000)
+      echo "note=transport_retry curl_exit=$rc after=5s" >&2
+      sleep 5
+      rc=0; code="$(curl "$@")" || rc=$?
+      { [ "$rc" -eq 0 ] && [ "$code" != 000 ]; } || : > "$RETRY_SPENT" ;;
+  esac
+  printf '%s' "$code"; return "$rc"
+}
+
 api_get() { # $1 = path under /rest/api/3, $2 = out file → http code on stdout
-  curl "${CURL_OPTS[@]}" -K "$CFG" -H 'Accept: application/json' \
+  curl_code "${CURL_OPTS[@]}" -K "$CFG" -H 'Accept: application/json' \
     -o "$2" -w '%{http_code}' "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/$1"
 }
 dl_get() { # $1 = path under /rest/api/3, $2 = out file → http code on stdout (bytes, no Accept)
-  curl "${CURL_OPTS[@]}" -K "$CFG" \
+  curl_code "${CURL_OPTS[@]}" -K "$CFG" \
     -o "$2" -w '%{http_code}' "https://api.atlassian.com/ex/jira/$CLOUD_ID/rest/api/3/$1"
 }
 
 if [ -z "$CLOUD_ID" ]; then
   # the ONE request that touches the site host, and the one that carries no credentials
-  code="$(curl "${CURL_OPTS[@]}" -o "$SCRATCH" -w '%{http_code}' "https://$SITE/_edge/tenant_info")" || code=000
+  code="$(curl_code "${CURL_OPTS[@]}" -o "$SCRATCH" -w '%{http_code}' "https://$SITE/_edge/tenant_info")" || code=000
   case "$code" in 2*) CLOUD_ID="$(jq -r '.cloudId // empty' "$SCRATCH" 2>/dev/null || true)" ;; esac
   if [ -z "$CLOUD_ID" ]; then
     echo "error=cloud_id_lookup_failed site=$SITE http=$code (pass --cloud-id <uuid>)" >&2

@@ -64,6 +64,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$cfg" ] && [ -n "${CURL_CFG_SAVE:-}" ] && cp "$cfg" "$CURL_CFG_SAVE"
+# FAKE_EXIT_SEQ: the curl exit status of each successive call whose URL holds FAKE_EXIT_MATCH
+# (counted in FAKE_EXIT_STATE; 0 or past the end = a normal answer). A transport failure prints
+# the `000` real curl prints and writes no body; an entry of `000` is that answer with exit 0.
+if [ -n "${FAKE_EXIT_SEQ:-}" ]; then
+  case "$url" in *"$FAKE_EXIT_MATCH"*)
+    n=$(( $(cat "$FAKE_EXIT_STATE" 2>/dev/null || echo 0) + 1 )); printf '%s' "$n" > "$FAKE_EXIT_STATE"
+    x="$(awk -v n="$n" -v s="$FAKE_EXIT_SEQ" 'BEGIN { split(s, a, ","); print (a[n] == "" ? 0 : a[n]) }')"
+    if [ "$x" != 0 ]; then printf '000'; exit "$x"; fi ;;
+  esac
+fi
 code=200
 case "$url" in
   */_edge/tenant_info)
@@ -93,7 +103,13 @@ FAKE
 for t in ffmpeg ffprobe sips; do
   printf '#!/usr/bin/env bash\n[ -n "${FFMPEG_LOG:-}" ] && printf "%%s %%s\\n" "$(basename "$0")" "$*" >> "$FFMPEG_LOG"\nexit 0\n' > "$SHIM/$t"
 done
-chmod +x "$SHIM/curl" "$SHIM/ffmpeg" "$SHIM/ffprobe" "$SHIM/sips"
+cat > "$SHIM/sleep" <<'FAKE'
+#!/usr/bin/env bash
+# a suite may not actually wait out a retry — the waits themselves are the assertion
+[ -n "${SLEEP_LOG:-}" ] && printf '%s\n' "$*" >> "$SLEEP_LOG"
+exit 0
+FAKE
+chmod +x "$SHIM/curl" "$SHIM/ffmpeg" "$SHIM/ffprobe" "$SHIM/sips" "$SHIM/sleep"
 
 # ------------------------------------------------------------------------ fixtures + runner --
 CLOUD="11111111-2222-3333-4444-555555555555"
@@ -149,7 +165,9 @@ ja() { # ja <cwd> <args…> — every knob below is a one-shot prefix on the cal
       FAKE_LIST="${FAKE_LIST:-$FIX/list.json}" FAKE_SIZES="${FAKE_SIZES:-$SIZES}" \
       FAKE_CLOUD_ID="${FAKE_CLOUD_ID:-$CLOUD}" FAKE_FAIL_IDS="${FAKE_FAIL_IDS:-}" \
       FAKE_HTTP_TENANT="${FAKE_HTTP_TENANT:-200}" FAKE_HTTP_ISSUE="${FAKE_HTTP_ISSUE:-200}" \
-      FAKE_HTTP_MYSELF="${FAKE_HTTP_MYSELF:-200}" \
+      FAKE_HTTP_MYSELF="${FAKE_HTTP_MYSELF:-200}" SLEEP_LOG="${SLEEP_LOG:-/dev/null}" \
+      FAKE_EXIT_SEQ="${FAKE_EXIT_SEQ:-}" FAKE_EXIT_MATCH="${FAKE_EXIT_MATCH:-}" \
+      FAKE_EXIT_STATE="${FAKE_EXIT_STATE:-/dev/null}" \
       JIRA_EMAIL="${JA_EMAIL-$EMAIL}" JIRA_API_TOKEN="${JA_TOKEN-$TOKEN}" JIRA_SITE="${JA_SITE-}" \
       TMPDIR="$TMP/jatmp" \
       "$BASH_BIN" "$JA" "$@" )
@@ -675,6 +693,66 @@ rc=0; NL="$(printf 'a\nerror=forged')"
 ja "$REPO" ABC-101 --out "$OUT" --cloud-id "$NL" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 2 ] && [ "$(grep -c '^error=' "$E")" -eq 1 ] && ! grep -q '^error=forged' "$E"; then ok
 else bad J15f-value-cannot-forge "rc=$rc err=$(head -c 200 "$E" | tr '\n' ';')"; fi
+
+# ----------------------------------------------------------------- 16. the transport retry --
+# ONE retry on a curl transport exit (6/7/28/35/52/56); an HTTP answer — 404 included — is final,
+# and a retry that fails too spends the run's retries so a dead network costs one extra request.
+D16="$(new_repo sixteen '.claude/')"; OUT16="$D16/.claude/tasks/ABC-101/tmp/attachments"
+xs() { rm -f "$TMP/xs"; printf '%s' "$TMP/xs"; }
+SLP="$TMP/sleep16"
+: > "$SLP"; ARGV="$TMP/argv16"; : > "$ARGV"
+rc=0; SLEEP_LOG="$SLP" CURL_ARGV="$ARGV" FAKE_EXIT_SEQ=7 FAKE_EXIT_MATCH=/issue/ FAKE_EXIT_STATE="$(xs)" \
+  ja "$D16" ABC-101 --out "$OUT16" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+assert J16a-list-retried 0 "$rc" "$E" "note=transport_retry curl_exit=7 after=5s"
+if [ "$(cat "$SLP")" = 5 ] && [ "$(grep -c '/issue/ABC-101' "$ARGV")" = 2 ] && grep -qF 'ok=1 saved=2' "$E"; then ok
+else bad J16a-one-wait "sleeps=$(tr '\n' ' ' < "$SLP") list-calls=$(grep -c '/issue/ABC-101' "$ARGV")"; fi
+
+: > "$SLP"; ARGV="$TMP/argv16b"; : > "$ARGV"
+rc=0; SLEEP_LOG="$SLP" CURL_ARGV="$ARGV" FAKE_EXIT_SEQ=7,7 FAKE_EXIT_MATCH=/issue/ FAKE_EXIT_STATE="$(xs)" \
+  ja "$D16" ABC-101 --out "$OUT16" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+assert J16b-list-fails-twice 5 "$rc" "$E" "error=curl_transport_failed"
+if [ "$(cat "$SLP")" = 5 ] && [ "$(grep -c '/issue/ABC-101' "$ARGV")" = 2 ]; then ok
+else bad J16b-one-retry-only "sleeps=$(tr '\n' ' ' < "$SLP") list-calls=$(grep -c '/issue/ABC-101' "$ARGV")"; fi
+
+D16c="$(new_repo sixteen-dl '.claude/')"; OUT16C="$D16c/.claude/tasks/ABC-101/tmp/attachments"
+: > "$SLP"; CONTENT="$TMP/content16c"; : > "$CONTENT"
+rc=0; SLEEP_LOG="$SLP" CONTENT_LOG="$CONTENT" FAKE_EXIT_SEQ=52 FAKE_EXIT_MATCH=/content/101 \
+  FAKE_EXIT_STATE="$(xs)" ja "$D16c" ABC-101 --out "$OUT16C" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(field 101 2 "$O")" = saved ] && [ "$(cat "$SLP")" = 5 ] \
+   && [ "$(wc -c < "$OUT16C/101-Screenshot_2026-09-10_at_3.26.09_PM.png" | tr -d ' ')" = 1234 ]; then ok
+else bad J16c-download-retried "rc=$rc row=$(grep '^101' "$O") sleeps=$(tr '\n' ' ' < "$SLP")"; fi
+
+# J16d: not a transport blip — curl's own HTTP-error exit (22) and a plain 404 are answers
+j16d() { # j16d <label> — the caller prefixes the failure knob
+  local d; d="$(new_repo "sixteen-$1" '.claude/')"
+  : > "$SLP"; ARGV="$TMP/argv16d"; : > "$ARGV"
+  rc=0; SLEEP_LOG="$SLP" CURL_ARGV="$ARGV" FAKE_EXIT_MATCH=/content/101 FAKE_EXIT_STATE="$(xs)" \
+    ja "$d" ABC-101 --out "$d/.claude/tasks/ABC-101/tmp/attachments" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 1 ] && [ "$(field 101 2 "$O")" = failed ] && [ ! -s "$SLP" ] \
+     && [ "$(grep -c '/content/101' "$ARGV")" = 1 ] && ! grep -qF 'note=transport_retry' "$E"; then ok
+  else bad "J16d-not-retried[$1]" "rc=$rc row=$(grep '^101' "$O") sleeps=$(tr '\n' ' ' < "$SLP") calls=$(grep -c '/content/101' "$ARGV")"; fi
+}
+FAKE_EXIT_SEQ=22 j16d exit22
+FAKE_FAIL_IDS=101 j16d http404
+
+# J16e: a dead network — the first download retries and fails again, the second is not retried
+D16e="$(new_repo sixteen-dead '.claude/')"; OUT16E="$D16e/.claude/tasks/ABC-101/tmp/attachments"
+: > "$SLP"; ARGV="$TMP/argv16e"; : > "$ARGV"
+rc=0; SLEEP_LOG="$SLP" CURL_ARGV="$ARGV" FAKE_EXIT_SEQ=28,28,28 FAKE_EXIT_MATCH=/attachment/content/ \
+  FAKE_EXIT_STATE="$(xs)" ja "$D16e" ABC-101 --out "$OUT16E" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+assert J16e-dead-network 1 "$rc" "$E" "ok=1 saved=0 cached=0 skipped=2 failed=2"
+if [ "$(cat "$SLP")" = 5 ] && [ "$(grep -c '/attachment/content/' "$ARGV")" = 3 ] \
+   && [ "$(grep -c 'note=transport_retry' "$E")" = 1 ] && grep -qF 'note=download_failed id=102 http=000' "$E"; then ok
+else bad J16e-retry-spent "sleeps=$(tr '\n' ' ' < "$SLP") calls=$(grep -c '/attachment/content/' "$ARGV") err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+
+# J16f: a status-less answer with exit 0 is a failed retry too, so it spends the run's retries
+D16f="$(new_repo sixteen-nostatus '.claude/')"; OUT16F="$D16f/.claude/tasks/ABC-101/tmp/attachments"
+: > "$SLP"; ARGV="$TMP/argv16f"; : > "$ARGV"
+rc=0; SLEEP_LOG="$SLP" CURL_ARGV="$ARGV" FAKE_EXIT_SEQ=000,000,000 FAKE_EXIT_MATCH=/attachment/content/ \
+  FAKE_EXIT_STATE="$(xs)" ja "$D16f" ABC-101 --out "$OUT16F" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+if [ "$(cat "$SLP")" = 5 ] && [ "$(grep -c '/attachment/content/' "$ARGV")" = 3 ] \
+   && [ "$(grep -c 'note=transport_retry' "$E")" = 1 ]; then ok
+else bad J16f-no-status-spends-retry "rc=$rc sleeps=$(tr '\n' ' ' < "$SLP") calls=$(grep -c '/attachment/content/' "$ARGV") err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
 
 echo "base-jira-attachments-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

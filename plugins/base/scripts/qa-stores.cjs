@@ -34,6 +34,11 @@
 // way. Flags may come in any order, and a value is taken VERBATIM from argv: storefront passwords
 // carry `$`, backticks, spaces and quotes.
 //
+// `notes` is one string per store, and each note says WHY — "checkout needs the B2B login; ask
+// #qa-acme", not a bare "B2B". `--note` replaces the whole text, so pass all of it, not the line
+// to add. `set` refuses a note over 4000 characters (exit 2); a longer one already in the file
+// still reads.
+//
 // Exit: 0 ok · 1 no such store (or an ambiguous alias) · 2 usage · 3 the registry is unreadable,
 // unparsable, unlockable or a version this script does not know (nothing is written).
 //
@@ -79,6 +84,7 @@ quietOnEpipe(process.stderr);
 const MASK = '***';
 const ORDER = ['alias', 'password', 'themes', 'defaultTheme', 'notes', 'updatedAt'];
 const VALUE_FLAGS = ['--alias', '--password', '--theme', '--default-theme', '--note'];
+const NOTE_MAX = 4000;
 const LOCK_WAIT_MS = 10000;
 const LOCK_STALE_MS = 30000;
 
@@ -332,7 +338,10 @@ function cmdSet(rest) {
       if (a === '--alias') patch.alias = v;
       // `--password ''` is the documented way to record an open storefront
       else if (a === '--password') { if (v === '') clearPassword = true; else patch.password = v; }
-      else if (a === '--note') patch.notes = v;
+      else if (a === '--note') {
+        if (v.length > NOTE_MAX) usage('--note is over ' + NOTE_MAX + ' characters — keep it to why');
+        patch.notes = v;
+      }
       else if (a === '--default-theme') patch.defaultTheme = v;
       else {
         const c = v.indexOf(':');

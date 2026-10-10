@@ -9,7 +9,7 @@ backend, QA) adds its own skills on top and depends on base.
 base reads large results through slim and requires it: compression happens only inside slim, so every
 figure lands in slim's log, and base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.4.0**.
+Current release: **base v0.5.0**.
 
 ## Status
 
@@ -282,10 +282,11 @@ and the last 10 `base.events` lines:
 | `fnd` | fnd not installed; installed and enabled fails (`fnd and base must not run together`), installed and disabled warns |
 | `base-tmp` | `.claude/base-tmp`: files, size, how many the next sweep removes, whether git ignores it |
 | `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
+| `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_TMP_TTL` that is not hours): warns with the value the reader falls back to |
 | `slim-live`, `fnd-live` | what this session loaded: slim's `mcp__slim__view` tool registered, no fnd command or enabled fnd |
 | `mcp:<server>` | each MCP server of base's manifest connects; sign-in needed fails with the `/mcp` pointer; `figma-dev-mode` (the Figma desktop app's local server) only warns |
 
-The first nine rows come from `scripts/doctor.cjs`, which also runs by hand:
+The rows up to `switches` come from `scripts/doctor.cjs`, which also runs by hand:
 `node <base plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`; it exits 1 when a
 row fails. By hand its `event-log` row reads the newest session folder unless `--log-dir` names one.
 The session rows need the command. One `doctor` line goes to `base.events` per run.
@@ -324,8 +325,8 @@ scripts and texts have their own suites:
 | `tests/base-guards-sim.sh` | `hooks/scratch-path-guard.cjs` as the mod runs it: the verdicts, the remediation paths, the launch root, worktrees, the exclude stamp of `scripts/scratch-hygiene.cjs` |
 | `tests/no-verify-bypass-matrix.sh` | `hooks/no-verify-bypass.sh`: every bypass row blocked, every legitimate command allowed (the same matrix as fnd's copy) |
 | `tests/base-refs-lint.sh` | no fnd, host or old-compressor name in plugins/base; every MCP server, cited path, agent, skill, command, `BASE_*` switch and markdown link resolves, and so does every team plugin's path, skill or agent the shared text names (`<fe root>/…`, `/qa:preflight`) |
-| `tests/base-jira-attachments-sim.sh` | `scripts/jira-attachments.sh` against a fake curl: credentials, gates, caps, cache, videos kept whole |
-| `tests/base-external-screenshots-sim.sh` | `scripts/external-screenshots.sh`: the allow-list, `og:image` resolution, cache, pacing, no resample |
+| `tests/base-jira-attachments-sim.sh` | `scripts/jira-attachments.sh` against a fake curl: credentials, gates, caps, cache, videos kept whole, the transport retry |
+| `tests/base-external-screenshots-sim.sh` | `scripts/external-screenshots.sh`: the allow-list, redirect hops, `og:image` resolution, the format from the bytes, cache, pacing, no resample |
 | `tests/base-figma-rest-sim.sh` | `scripts/figma-rest.sh`: the token, the modes, `--policy`, the cache, retries, the out-dir gate |
 | `tests/base-md-to-adf.mjs` | `scripts/md-to-adf.cjs`: the ADF it writes, the CLI contract, round trips through slim's adf engine |
 | `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts, `--json`, `--log-dir`, Windows |

@@ -396,6 +396,32 @@ if [ "$rc" -eq 0 ] && [ "$(jsonfield "$O" 'd.password')" = "<undef>" ]; then ok
 else bad C16c-password-cleared "rc=$rc got=$(jsonfield "$O" 'd.password')"; fi
 HOME="$TMP/home"
 
+# ------------------------------------------- C17 a note is capped on set, never on read --
+HOME="$TMP/home-notes"; NOTE_REG="$HOME/.config/domaine/qa-stores.json"
+LONG_NOTE="SECRETNOTE$(printf '%3990s' '' | tr ' ' 'n')"
+run set n.myshopify.com --alias 'NOTES' --note "${LONG_NOTE}x"
+if [ "$rc" -eq 2 ] && [ ! -f "$NOTE_REG" ] && [ ! -s "$O" ] && grep -q 'over 4000 characters' "$E" \
+   && ! grep -q 'SECRETNOTE' "$E"; then ok
+else bad C17-note-cap "rc=$rc reg=$([ -f "$NOTE_REG" ] && echo written || echo absent) err=$(head -c 160 "$E" | tr '\n' ';')"; fi
+
+# C17b: exactly 4000 characters is still a note
+run set n.myshopify.com --alias 'NOTES' --note "$LONG_NOTE"
+if [ "$rc" -eq 0 ] && [ "$(jsonfield "$NOTE_REG" 'd.stores["n.myshopify.com"].notes.length')" = 4000 ]; then ok
+else bad C17b-note-at-cap "rc=$rc len=$(jsonfield "$NOTE_REG" 'd.stores["n.myshopify.com"].notes.length')"; fi
+
+# C17c: a longer note already in the file (hand-edited, or written before the cap) reads through
+# every command, and a set that does not touch it still saves
+node -e 'const f=process.argv[1];const o=JSON.parse(require("fs").readFileSync(f,"utf8"));
+         o.stores["n.myshopify.com"].notes="legacy ".repeat(1000);require("fs").writeFileSync(f,JSON.stringify(o))' "$NOTE_REG"
+legacy_ok=1
+for c in "list" "get n.myshopify.com" "find legacy" "set n.myshopify.com --theme 7:dev"; do
+  run $c
+  [ "$rc" -eq 0 ] || { legacy_ok=0; bad "C17c-legacy-note[$c]" "rc=$rc err=$(head -c 160 "$E" | tr '\n' ';')"; }
+done
+if [ "$legacy_ok" = 1 ] && [ "$(jsonfield "$NOTE_REG" 'd.stores["n.myshopify.com"].notes.length')" = 7000 ]; then ok
+else bad C17c-legacy-kept "len=$(jsonfield "$NOTE_REG" 'd.stores["n.myshopify.com"].notes.length')"; fi
+HOME="$TMP/home"
+
 # ------------------------------------------------- C10 the developer's own registry is untouched --
 REAL_AFTER="$( [ -f "$REAL_REG" ] && cksum < "$REAL_REG" || echo absent )"
 if [ "$REAL_AFTER" = "$REAL_BEFORE" ]; then ok

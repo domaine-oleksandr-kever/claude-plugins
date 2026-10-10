@@ -30,7 +30,7 @@ assert() { # assert <label> <want-rc> <got-rc> <stderr-file> [required-stderr-su
 # --------------------------------------------------------------------------- the shims --
 BIN="$TMP/bin"; mkdir -p "$BIN"
 for b in bash sh jq git awk sed tr grep head tail wc sort cat cp mv rm mkdir rmdir touch chmod \
-         mktemp dirname basename ls env printf date cut; do
+         mktemp dirname basename ls env printf date cut od; do
   p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$BIN/$b"
 done
 
@@ -40,17 +40,29 @@ cat > "$SHIM/curl" <<'FAKE'
 #!/usr/bin/env bash
 # Answers by URL. A page URL (anything not under an image host) is served from
 # $FAKE_PAGES/<last path segment>.html when that file exists, else 404; FAKE_PAGE_HTTP overrides the
-# code for every page. An image URL gets FAKE_IMG_SIZE bytes with FAKE_IMG_TYPE and FAKE_IMG_HTTP.
-# `-w` is answered as the script formats it: "<code> <content type>". CURL_ARGV records the argv.
+# code for every page. An image URL gets FAKE_IMG_SIZE bytes with FAKE_IMG_TYPE and FAKE_IMG_HTTP;
+# the bytes open with the magic number of FAKE_IMG_MAGIC (default: the one FAKE_IMG_TYPE names,
+# none for a type without one). FAKE_REDIRECTS ("<from>|<to> …") answers <from> with a 302 to <to>.
+# `-w` is answered by filling in the script's own format. CURL_ARGV records the argv.
 [ -n "${CURL_ARGV:-}" ] && printf '%s\n' "$*" >> "$CURL_ARGV"
-out=""; url=""
+out=""; url=""; w=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) out="$2"; shift 2 ;;
-    -w|-A|--max-filesize|--connect-timeout|--max-time|--proto|--proto-redir) shift 2 ;;
+    -w) w="$2"; shift 2 ;;
+    -A|--max-filesize|--connect-timeout|--max-time|--proto|--proto-redir) shift 2 ;;
     -*) shift ;;
     *) url="$1"; shift ;;
   esac
+done
+answer() { # <code> <content type> [redirect url]
+  local o="$w"
+  o="${o//%\{http_code\}/$1}"; o="${o//%\{content_type\}/$2}"; o="${o//%\{redirect_url\}/${3-}}"
+  o="${o//\\t/$'\t'}"
+  printf '%s' "$o"; exit 0
+}
+for pair in ${FAKE_REDIRECTS:-}; do
+  [ "$url" = "${pair%%|*}" ] && { : > "${out:-/dev/null}"; answer 302 "text/html" "${pair#*|}"; }
 done
 host="${url#https://}"; host="${host%%/*}"
 case "$host" in
@@ -58,10 +70,17 @@ case "$host" in
     case "$url" in
       */page/*) ;;   # a page on an image host (imgur.com/<id>) falls through to the page branch
       *)
-        code="${FAKE_IMG_HTTP:-200}"
-        head -c "${FAKE_IMG_SIZE:-1000}" /dev/zero | tr '\0' 'x' > "${out:-/dev/null}"
-        printf '%s %s' "$code" "${FAKE_IMG_TYPE:-image/png}"
-        exit 0 ;;
+        ty="${FAKE_IMG_TYPE:-image/png}"
+        case "${FAKE_IMG_MAGIC:-${ty#image/}}" in
+          png)  magic='\x89PNG\r\n\x1a\n' ;;
+          jpeg) magic='\xff\xd8\xff\xe0' ;;
+          gif)  magic='GIF89a' ;;
+          webp) magic='RIFF\x10\x00\x00\x00WEBP' ;;
+          *)    magic='' ;;
+        esac
+        { printf "$magic"; head -c "${FAKE_IMG_SIZE:-1000}" /dev/zero | tr '\0' 'x'; } \
+          | head -c "${FAKE_IMG_SIZE:-1000}" > "${out:-/dev/null}"
+        answer "${FAKE_IMG_HTTP:-200}" "$ty" ;;
     esac ;;
 esac
 seg="${url##*/}"; seg="${seg%%\?*}"
@@ -74,7 +93,7 @@ elif [ -n "${FAKE_PAGE_ANY:-}" ]; then
 else
   : > "${out:-/dev/null}"; [ -n "$code" ] || code=404
 fi
-printf '%s %s' "$code" "text/html; charset=utf-8"
+answer "$code" "text/html; charset=utf-8"
 FAKE
 
 cat > "$SHIM/sleep" <<'FAKE'
@@ -120,7 +139,8 @@ es() { # es <cwd> <args…>
       MEDIA_LOG="${MEDIA_LOG:-/dev/null}" \
       FAKE_PAGES="${FAKE_PAGES:-$PAGES}" FAKE_PAGE_HTTP="${FAKE_PAGE_HTTP:-}" FAKE_PAGE_ANY="${FAKE_PAGE_ANY:-}" \
       FAKE_IMG_HTTP="${FAKE_IMG_HTTP:-200}" FAKE_IMG_TYPE="${FAKE_IMG_TYPE:-image/png}" \
-      FAKE_IMG_SIZE="${FAKE_IMG_SIZE:-1000}" TMPDIR="$TMP/estmp" \
+      FAKE_IMG_SIZE="${FAKE_IMG_SIZE:-1000}" FAKE_IMG_MAGIC="${FAKE_IMG_MAGIC:-}" \
+      FAKE_REDIRECTS="${FAKE_REDIRECTS:-}" TMPDIR="$TMP/estmp" \
       "$BASH_BIN" "$ES" "$@" )
 }
 mkdir -p "$TMP/estmp"
@@ -349,6 +369,65 @@ for u in "$P1" "https://evil.example/" "https://prnt.sc/challenge"; do
   done
 done
 if [ -z "$mismatch" ]; then ok; else bad S11b-json-matches-tsv "$mismatch"; fi
+
+# ------------------------------------------------- 12. the bytes name the format, not the header --
+IMG="https://img.lightshot.app/n43ljrh9QS6-FmUaf29l4w.png"
+rm -rf "$OUT"; rc=0
+FAKE_IMG_TYPE=application/octet-stream FAKE_IMG_MAGIC=png es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(field "$P1" 3 "$O")" = saved ] && [ "$(field "$P1" 5 "$O")" = image/png ] \
+   && [ -s "$OUT/prnt.sc-Qz7mTr4Kp2Xw.png" ]; then ok
+else bad S12-octet-stream-png "rc=$rc row=$(grep -F "$P1" "$O") err=$(tr '\n' ';' < "$E" | head -c 200)"; fi
+# a header that names a format the bytes contradict is a disguised page, not an image
+rm -rf "$OUT"; rc=0
+FAKE_IMG_TYPE=image/png FAKE_IMG_MAGIC=none es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?
+assert S12b-png-header-not-png-bytes 1 "$rc" "$E" "note=not_an_image url=$P1 type=image/png"
+if [ -z "$(ls "$OUT" 2>/dev/null)" ]; then ok; else bad S12b-no-file "left: $(ls "$OUT" | tr '\n' ' ')"; fi
+# JPEG bytes served as image/png are saved as what they are
+rm -rf "$OUT"; rc=0
+FAKE_IMG_TYPE=image/png FAKE_IMG_MAGIC=jpeg es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(field "$P1" 5 "$O")" = image/jpeg ] && [ -s "$OUT/prnt.sc-Qz7mTr4Kp2Xw.jpg" ]; then ok
+else bad S12c-bytes-win "rc=$rc row=$(grep -F "$P1" "$O")"; fi
+# SVG has no magic number: its Content-Type stands
+rm -rf "$OUT"; rc=0
+FAKE_IMG_TYPE=image/svg+xml es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(field "$P1" 5 "$O")" = image/svg+xml ] && [ -s "$OUT/prnt.sc-Qz7mTr4Kp2Xw.svg" ]; then ok
+else bad S12d-svg-by-type "rc=$rc row=$(grep -F "$P1" "$O") err=$(tr '\n' ';' < "$E" | head -c 200)"; fi
+# octet-stream with no image bytes is still not an image
+rm -rf "$OUT"; rc=0
+FAKE_IMG_TYPE=application/octet-stream es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?
+assert S12e-octet-stream-no-magic 1 "$rc" "$E" "note=not_an_image url=$P1 type=application/octet-stream"
+
+# ----------------------------------------------- 13. a redirect never leaves the allow-list --
+# curl follows nothing on its own: each hop is checked before it is requested
+rm -rf "$OUT"; rc=0; ARGV="$TMP/argv13"; : > "$ARGV"
+CURL_ARGV="$ARGV" FAKE_REDIRECTS="https://prnt.sc/hop|https://cdn.evil.example/x" \
+  es "$REPO" --out "$OUT" "https://prnt.sc/hop" >"$O" 2>"$E" || rc=$?
+assert S13-page-redirect-off-list 1 "$rc" "$E" "note=image_host_not_allowed url=https://prnt.sc/hop host=cdn.evil.example via=redirect"
+if [ "$(requests "$ARGV")" -eq 1 ] && ! grep -qF 'evil.example' "$ARGV" && ! grep -qE '(^| )-L( |$)' "$ARGV"; then ok
+else bad S13-no-foreign-request "argv=$(tr '\n' ';' < "$ARGV")"; fi
+rm -rf "$OUT"; rc=0; ARGV="$TMP/argv13b"; : > "$ARGV"
+CURL_ARGV="$ARGV" FAKE_REDIRECTS="$IMG|https://evil.example/steal.png" \
+  es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?
+assert S13b-image-redirect-off-list 1 "$rc" "$E" "note=image_host_not_allowed url=$P1 host=evil.example via=redirect"
+if [ "$(requests "$ARGV")" -eq 2 ] && ! grep -qF 'evil.example' "$ARGV" && [ -z "$(ls "$OUT" 2>/dev/null)" ]; then ok
+else bad S13b-no-foreign-request "requests=$(requests "$ARGV") left=$(ls "$OUT" 2>/dev/null | tr '\n' ' ')"; fi
+# a plain-http hop on an allowed host is off the list too
+rm -rf "$OUT"; rc=0
+FAKE_REDIRECTS="$IMG|http://img.lightshot.app/plain.png" es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?
+assert S13c-http-hop 1 "$rc" "$E" "host=http://img.lightshot.app/plain.png via=redirect"
+# hops within the allow-list — a page to a page, an image across CDNs — still land
+rm -rf "$OUT"; rc=0; ARGV="$TMP/argv13d"; : > "$ARGV"
+CURL_ARGV="$ARGV" FAKE_REDIRECTS="https://prnt.sc/hop|$P1 $IMG|https://i.imgur.com/final.png" \
+  es "$REPO" --out "$OUT" "https://prnt.sc/hop" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(field 'https://prnt.sc/hop' 3 "$O")" = saved ] && [ "$(requests "$ARGV")" -eq 4 ] \
+   && grep -qF 'https://i.imgur.com/final.png' "$ARGV" && [ -s "$OUT/prnt.sc-hop.png" ]; then ok
+else bad S13d-redirect-within-list "rc=$rc requests=$(requests "$ARGV") row=$(grep -F hop "$O") err=$(tr '\n' ';' < "$E" | head -c 200)"; fi
+# a redirect loop ends after the hop budget as the 3xx it is
+rm -rf "$OUT"; rc=0; ARGV="$TMP/argv13e"; : > "$ARGV"
+CURL_ARGV="$ARGV" FAKE_REDIRECTS="https://prnt.sc/loop|https://prnt.sc/loop" \
+  es "$REPO" --out "$OUT" "https://prnt.sc/loop" >"$O" 2>"$E" || rc=$?
+assert S13e-redirect-loop 1 "$rc" "$E" "note=page_fetch_failed url=https://prnt.sc/loop http=302"
+if [ "$(requests "$ARGV")" -eq 6 ]; then ok; else bad S13e-hop-budget "requests=$(requests "$ARGV")"; fi
 
 echo "base-external-screenshots-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

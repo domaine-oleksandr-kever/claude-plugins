@@ -4,7 +4,8 @@
 # network, nothing written outside $TMPDIR. The session rows (slim's view tool, fnd loaded, the MCP
 # servers) are the mod's and live in plugins/base/hooks/mods/tests/doctor.test.ts. Exit 0 = all green.
 set -u
-unset CLAUDE_CONFIG_DIR BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG
+unset CLAUDE_CONFIG_DIR BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG BASE_GUARD BASE_LEAN BASE_SCRATCH_GUARD \
+  BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCTOR="$ROOT/plugins/base/scripts/doctor.cjs"
@@ -229,6 +230,25 @@ expect CD35-event-log-override 0 "PASS  event-log  $LD: band.jsonl" "!$R"
 rc=0; DOMAINE_LOG_DIR=relative/logs node "$DOCTOR" --root "$P" --home "$HL" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect CD36-event-log-relative-override-ignored 0 "PASS  event-log  $R/new: slim.jsonl"
 run --root "$P" --home "$H" --project "$PRJ" --log-dir; if [ "$rc" -eq 2 ] && grep -q -- '--log-dir needs a value' "$E"; then ok; else bad CD37-log-dir-value "rc=$rc"; fi
+
+# -------------------------------------------------------------------------------- switches --
+# A value outside a switch's README domain is read as the default without a word: the doctor says it,
+# as a WARN — never a FAIL — and says nothing while every value is in its domain.
+rc=0; BASE_LEAN=0 BASE_EVENT_LOG=1 BASE_FIGMA_SOURCE=' rest ' BASE_TMP_TTL=48 \
+  node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD38-switches-valid 0 "!switches" "!warned"
+rc=0; BASE_LEAN=false BASE_GUARD=' 0' BASE_FIGMA_SOURCE=figma BASE_TMP_TTL=abc \
+  node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39-switches-invalid 0 'WARN  switches' 'BASE_GUARD=" 0" is read as on — only 0 turns it off' \
+  'BASE_LEAN="false" is read as on — only 0 turns it off' 'BASE_FIGMA_SOURCE="figma" is read as auto — auto, mcp or rest' \
+  'BASE_TMP_TTL="abc" is read as 24 — hours, 0 or more' "doctor: 8 passed, 0 failed, 0 skipped, 1 warned"
+rc=0; BASE_TMP_TTL=-1 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" --json >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && node -e '
+  const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const r = j.rows.filter((x) => x.name === "switches");
+  if (r.length !== 1 || r[0].status !== "WARN" || !r[0].detail.startsWith("BASE_TMP_TTL=\"-1\"")) process.exit(1);
+' "$O" 2>/dev/null; then ok
+else bad CD39b-switches-json "rc=$rc out=$(head -c 300 "$O")"; fi
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad CD-head "HEAD moved"; fi

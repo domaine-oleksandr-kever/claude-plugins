@@ -125,6 +125,7 @@ stderr carries notes, and always ends with the summary
 |---|---|
 | `note=download_failed id=… http=…` | that attachment's content request failed; the other rows are unaffected |
 | `note=invalid_attachment_id id=…` | an id that is not `[A-Za-z0-9_-]` is skipped: it would ride both a URL path and the filename |
+| `note=transport_retry curl_exit=… after=5s` | a request hit a transport blip (curl exit 6/7/28/35/52/56, or no HTTP status) and was sent once more; a retry that fails too ends retrying for the rest of the run |
 
 | exit | meaning | typical `error=` |
 |---|---|---|
@@ -232,8 +233,14 @@ ticket text. So a URL is fetched only when **all** of these hold, and anything e
   `prnt.sc`, `prntscr.com`, `imgur.com`, `gyazo.com`, `cleanshot.com`, `cleanshot.cloud` or
   `snipboard.io` — the service's own CDN, never an arbitrary host (`failed`,
   `note=image_host_not_allowed`);
-- the answer carries an `image/*` content type (`failed`, `note=not_an_image` otherwise — a
-  bot-challenge page served as 200 is refused here), and its bytes fit `--max-mb`.
+- every redirect hop, page or image, lands on that same list over `https://` — curl follows no
+  redirect on its own, so a hop elsewhere is refused before it is requested (`failed`,
+  `note=image_host_not_allowed … via=redirect`), and five hops are the most taken;
+- the bytes are an image: PNG, JPEG, GIF and WebP are told by their first bytes, whatever the
+  content type says (`application/octet-stream` with PNG bytes is saved as a PNG); a format with
+  no such check here (SVG …) needs an `image/*` content type. Anything else is `failed`,
+  `note=not_an_image` — a bot-challenge page served as 200 is refused here — and the bytes must
+  fit `--max-mb`.
 
 Every request carries a **browser User-Agent**: prnt.sc answers curl's default agent with a
 bot-challenge page (HTTP 520, `text/plain`, no `og:image` — measured 2026-09-25) and a browser
@@ -248,7 +255,7 @@ itself on a direct host), empty for a skipped row; `path` is the file on disk, e
 saved / cached; `size` is its bytes on disk. The image is kept as served; slim's `view` resizes it. The file is
 `<host>-<slug>.<ext>` — `prnt.sc-XlDYChfQ0Wyw.png` — the slug being the URL's path with everything
 but `[A-Za-z0-9._-]` folded to `_`, so a page URL can never name a path outside the out dir; the
-extension comes from the content type. A URL whose `<host>-<slug>.*` file is already on disk is
+extension comes from the format the bytes named, else the content type. A URL whose `<host>-<slug>.*` file is already on disk is
 `cached` — no request.
 
 stderr carries notes, then always the summary `ok=1 saved=N cached=N skipped=N failed=N out=<dir>`:
@@ -259,8 +266,9 @@ stderr carries notes, then always the summary `ok=1 saved=N cached=N skipped=N f
 | `note=no_og_image url=…` | the page carries no `og:image` tag — a bot-challenge page in most cases |
 | `note=image_url_not_https url=… image=…` | the `og:image` is not an `https://` URL — prnt.sc's "unknown id" placeholder |
 | `note=image_host_not_allowed url=… host=…` | the `og:image` points outside the service's CDNs; nothing was fetched from it |
+| `note=image_host_not_allowed url=… host=… via=redirect` | the page or the image redirected outside those CDNs (or off `https://` — `host=` is then the hop's URL); the hop was not requested |
 | `note=image_fetch_failed url=… http=…` | the image request did not come back 2xx |
-| `note=not_an_image url=… type=…` | a 2xx that is not `image/*`; the bytes were discarded |
+| `note=not_an_image url=… type=…` | a 2xx whose bytes are not an image, `type=` as served; the bytes were discarded |
 | `note=over_cap url=… size=… max_mb=…` | over `--max-mb` on disk; the bytes were discarded |
 
 | exit | meaning |
