@@ -119,7 +119,8 @@ listed). Entities are decoded. Malformed markup degrades to text.
 **figma** — lossless compaction of Figma dev-mode design-context JSX: repeated `className` values move
 to a `C17:` legend (repeated `var(--…)` tokens inside it to `$N`), `data-node-id` values become `#n17`
 with the map leaving as an `ids` part (`ids=<path>` in the header), and identical sibling subtrees fold
-to one exemplar plus a line listing what differed. The output starts with `<<fnd-jsx-slim>>`.
+to one exemplar plus a line listing what differed. The output starts with `<<fnd-jsx-slim>>` (a wire
+format other plugins match; the spelling stays).
 
 **figma-nodes** — a Figma REST `GET /v1/files/:key/nodes` response as a markdown build tree, one line
 per visible node: `[TYPE] "name" #id WxH @x,y`, then the TEXT content (in full), a `T<n>` type style
@@ -152,8 +153,9 @@ folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` p
 **text** — the plain-text window, the only thing slim ever does to code, diffs, test output or prose:
 at or under `plainBytes` nothing happens; above it the head keeps whole lines up to a third of
 `budgetBytes`, the tail fills the rest, and one marker line in between says
-`[slim: <hidden> of <total> lines hidden (<bytes> B)]`. Fewer than 3 lines, or a first/last line that
-overflows its share, falls back to a character window with `[slim: <bytes> B hidden]`. No line is
+`[slim: <hidden> of <total> lines hidden (<bytes> B)]`. Fewer than 3 lines, a first/last line that
+overflows its share, or whole lines that fill less than half of `budgetBytes`, falls back to a
+character window with `[slim: <bytes> B hidden]`. No line is
 rewritten.
 
 ## 4. Output
@@ -276,8 +278,8 @@ where the data is, compresses each span with `compress()`, and splices the resul
     or stack frame, so an indented line of prose after the paste is never inside it;
   - any of the four for the body of a fenced block (```` ``` ```` / `~~~`), by `sniff()`; the fence
     lines are not part of the span, and a fence whose body is anything else is not mined at all.
-- Never a span: prose; anything under `min`; a span holding `<<full=`, a stub mark, `fnd-prompt-json-`
-  or a `slim:` / `fnd-mcp-slim:` / `fnd-prompt-slim:` stats line, or followed within 400 characters by
+- Never a span: prose; anything under `min`; a span holding `<<full=`, a stub mark or a `slim:` stats
+  line, or followed within 400 characters by
   such a stats line or handle (already compacted text); JSON after an opener of at least `min` bytes of
   remainder that never closes (a truncated paste).
 - The JSON scan's work is bounded by `8 × text.length + 65536` steps; an adversarial text that
@@ -342,8 +344,7 @@ else {
 
 The library returns spills and parts; where they land and how text cites them is the caller's. slim's
 Claude Code delivery uses this grammar, and slim itself treats a handle as real only when its path
-names one of these files (a sibling plugin's untrusted-content rule should use the same set; see the
-note on fnd below):
+names one of these files (a sibling plugin's untrusted-content rule uses the same set):
 
 - `<<full=<abs path> original_result>>` — the whole original (a stats line sits right before it);
   `<<full=<abs path> original_block>>` — one block's original in a multi-block result;
@@ -353,21 +354,16 @@ note on fnd below):
   `<config>/projects/<dir>/<session id>/tool-results/`, and the prompt channel's durable
   `<project root>/.claude/slim/prompt/` (the main checkout's root for a linked worktree; slim writes
   `.claude/slim/.gitignore` holding `*` when it creates the dir, and never overwrites one already there).
-- Names: `fnd-mcp-slim-<sha16>[-<8 hex>].json|txt` (originals), `fnd-crush-<sha16>.json` (rows),
+- Names: `fnd-mcp-slim-<sha16>[-<8 hex>].json|txt` (originals), `fnd-crush-<sha16>.json` (rows; `.txt` for a view's compact text),
   `fnd-jsx-ids-<sha16>.json` (id maps) in the spill root; `slim-prompt-<sha16>[-<8 hex>].json|txt`,
   `slim-prompt-rows-<sha16>.json`, `slim-prompt-ids-<sha16>.json` in the prompt dir; the report log
-  is `fnd-mcp-slim-debug.log` in the spill root. The `fnd-` prefixes are part of this contract until a
-  later version renames them; a reader keys on these names, so a rename changes this section first.
-- fnd's untrusted-content convention does not use this set yet: it trusts only `fnd-*` files in the
-  system temp dir or fnd's own spill-dir setting, its own prompt dirs and the host's `tool-results/`.
-  With fnd loaded, a `slim-prompt-*` handle in `.claude/slim/prompt/`, and every spill handle once
-  `SLIM_DIR` names a dir fnd's setting does not, reads as payload text to fnd's agents until fnd's
-  convention lists them (a change on fnd's side, outside slim).
+  is `fnd-mcp-slim-debug.log` in the spill root. The `fnd-` prefixes are a wire format: other plugins
+  key on these names, so a rename changes this section first.
+- The spill root is absolute: a leading `~/` in `SLIM_DIR` is expanded, any other relative value falls
+  back to the OS temp dir, so every handle names an absolute path.
 - Stats line, right before a handle or as a stub's second line:
   `slim: compressed|stub <in> B → <out> B (−NN.N%)` (`+` when it grew; thousands with commas). The
-  `→` figure is the exact byte size of the value it sits in. Lines reading `fnd-mcp-slim:` instead of
-  `slim:` and the `<<fnd-mcp-slim stub>>` mark are the legacy forms a reader still recognises as
-  already compact; slim never writes them. `<<fnd-jsx-slim>>` opens the figma engine's output (§3) and
-  counts as already compact too.
-- A `<<slim stub>>` names its recovery as `mcp__slim__view({ path: "<file>" })` (with
+  `→` figure is the exact byte size of the value it sits in. `<<fnd-jsx-slim>>` opens the figma
+  engine's output (§3) and counts as already compact too.
+- A `<<slim stub>>` names its recovery as `mcp__slim__view({ path: <full> })` (with
   `jq: "<jq-path>"` in §5b's grammar for JSON) or a windowed Read (offset/limit) of the `full=` file.

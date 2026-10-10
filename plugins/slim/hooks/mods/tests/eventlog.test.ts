@@ -20,7 +20,7 @@ const PEEK = {
 }
 const events = async ($: any): Promise<any[]> => JSON.parse((await $.command.run({ command: 'peek-slim', args: '' })).text)
 
-type Opts = { env?: Record<string, string>; files?: Record<string, string>; writeFails?: string }
+type Opts = { env?: Record<string, string>; files?: Record<string, string>; writeFails?: string; writeMs?: number }
 /** The kit's `$` has no file system: files and writes live in the world. Each test names its own session, or a getter for one that changes. */
 function world(on: On, session: string | (() => string), o: Opts = {}) {
   mock.clock(on, { now: NOW })
@@ -37,6 +37,7 @@ function world(on: On, session: string | (() => string), o: Opts = {}) {
     return { deny: `ENOENT: ${e.path}` } as any
   })
   on('fs.write', async (_$, e) => {
+    if (o.writeMs) await new Promise(r => setTimeout(r, o.writeMs))
     w.writes.push(e.path)
     if (o.writeFails) return { deny: o.writeFails } as any
     w.files[e.path] = e.text
@@ -175,6 +176,12 @@ describe('L3 reload and failure', () => {
     await view($)
     expect(lines(w.files[fileOf('E13')]).map(l => [l.kind, l.text.slice(0, 14)])).toEqual([['start', 'slim 0.0.0-old'], ['view', 'view issues.js']])
     expect((await events($)).map(e => e.kind)).toEqual(['start', 'view'])
+  })
+
+  test('a start line while an earlier write is still queued: the reopened file keeps that write', { plugins: [PEEK] }, async ($, on) => {
+    const w = world(on, 'E14', { writeMs: 20 })
+    await Promise.all([view($), start($)])
+    expect(lines(w.files[fileOf('E14')]).map(l => l.kind).sort()).toEqual(['start', 'view'])
   })
 
   test('a failing write never fails the call and toasts once per session', { plugins: [PEEK] }, async ($, on) => {

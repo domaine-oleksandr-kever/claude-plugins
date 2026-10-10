@@ -12,7 +12,7 @@ const NOTICE =
 const TEXT = 'searchJiraIssuesUsingJql: compressed 120 KB → 30 KB (−75%) · json'
 /** The core's stdin keys, in order; agentId, pre, bytes_in and bash_output_max_chars only when set. */
 const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in', 'bash_output_max_chars']
-const AGENTS = [{ id: 'agent-7', description: 'read ELC-1', type: 'fnd:jira-reader', status: 'running' }]
+const AGENTS = [{ id: 'agent-7', description: 'read ELC-1', type: 'base:jira-reader', status: 'running' }]
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; env?: Record<string, string>; timeoutMs?: number } }
 
@@ -116,21 +116,19 @@ describe('M1 a big result goes through the core', () => {
 
 describe('M3 passthrough without a spawn', () => {
   const HANDLE = `<<full=${SPILL} original_result>>`
-  const fndSlim = `{"a":"${'1'.repeat(5000)}"}\n\nfnd-mcp-slim: compressed 110,794 B → 22,179 B (−80.0%)\n\n${HANDLE}`
   const ownSlim = `{"a":"${'1'.repeat(5000)}"}\n\nslim: compressed 110,794 B → 22,179 B (−80.0%)\n\n${HANDLE}`
-  const fndStub = `<<fnd-mcp-slim stub>> ${TOOL} returned 50,000 B (format=json) — ${'s'.repeat(6000)}`
-  // fnd's output with its stub off: bigger than any stub, its figure its own size.
+  const ownStub = `<<slim stub>> ${TOOL} returned 50,000 B (format=json) — ${'s'.repeat(6000)}`
+  // Output with the stub off: bigger than any stub, its figure its own size.
   let exact = ''
   for (let n = 0, i = 0; i < 10; i++) {
-    exact = `${'y'.repeat(50_000)}\n\nfnd-mcp-slim: compressed 200,000 B → ${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} B (−75.0%)\n\n${HANDLE}`
+    exact = `${'y'.repeat(50_000)}\n\nslim: compressed 200,000 B → ${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} B (−75.0%)\n\n${HANDLE}`
     n = new TextEncoder().encode(exact).length
   }
   const cases: [string, Record<string, unknown>, string, Record<string, string>?][] = [
     ['SLIM_MCP=0', { result: BIG, text: BIG }, TOOL, { SLIM_MCP: '0' }],
     ['SLIM_MCP=0 with a host notice', { result: NOTICE, text: NOTICE }, TOOL, { SLIM_MCP: '0' }],
     ['the error arm', { result: BIG, text: BIG, isError: true }, TOOL],
-    ['fnd stats + handle', { result: fndSlim, text: fndSlim }, TOOL],
-    ['the fnd stub mark', { result: fndStub, text: fndStub }, TOOL],
+    ['the stub mark', { result: ownStub, text: ownStub }, TOOL],
     ["slim's own stats + handle", { result: ownSlim, text: ownSlim }, TOOL],
     ['under the gate', { result: '{"issues":[]}', text: '{"issues":[]}' }, TOOL],
   ]
@@ -225,16 +223,14 @@ describe('M5 the host overflow notice', () => {
     expect(await peek($, w.ids[0])).toEqual({ events: [], row: null })
   })
 
-  for (const label of ['fnd-mcp-slim', 'slim']) {
-    test(`${label} output quoting the phrase above its host-file handle is no notice: no spawn`, async ($, on) => {
-      const host = '/Users/me/.claude/projects/-repo/S/tool-results/mcp-x-y-1791010865179.txt'
-      const quoted = `{"issues":[{"summary":"MCP result exceeds maximum allowed tokens"}]}\n\n${label}: compressed 110,794 B → 3,395 B (−96.9%)\n\n<<full=${host} original_result>>`
-      const w = world(on, { result: quoted, text: quoted })
-      const r = await $.tool.call({ tool: TOOL } as any)
-      expect(r.result).toBe(quoted)
-      expect(w.runs.length + w.errors.length).toBe(0)
-    })
-  }
+  test('slim output quoting the phrase above its host-file handle is no notice: no spawn', async ($, on) => {
+    const host = '/Users/me/.claude/projects/-repo/S/tool-results/mcp-x-y-1791010865179.txt'
+    const quoted = `{"issues":[{"summary":"MCP result exceeds maximum allowed tokens"}]}\n\nslim: compressed 110,794 B → 3,395 B (−96.9%)\n\n<<full=${host} original_result>>`
+    const w = world(on, { result: quoted, text: quoted })
+    const r = await $.tool.call({ tool: TOOL } as any)
+    expect(r.result).toBe(quoted)
+    expect(w.runs.length + w.errors.length).toBe(0)
+  })
 
   test('in a text block too', async ($, on) => {
     const w = world(on, { result: [{ type: 'text', text: NOTICE }] })
@@ -263,7 +259,7 @@ describe('M7 subagents', () => {
     expect(Object.keys(stdin)).toEqual(ENVELOPE_KEYS.filter(k => k !== 'pre' && k !== 'bytes_in' && k !== 'bash_output_max_chars'))
     const [ev] = (await peek($)).events
     expect(ev.text).toBe(`jira-reader · ${TEXT}`)
-    expect(ev.agentType).toBe('fnd:jira-reader')
+    expect(ev.agentType).toBe('base:jira-reader')
   })
 
   test('an unlisted agent → `agent · `, agentType agent', { plugins: [PEEK] }, async ($, on) => {

@@ -1,6 +1,6 @@
 // Files on disk: the spills slim writes (originals and the parts an engine's text cites), their TTL
 // sweep, and the rules for which existing files a handle or a host notice may name.
-// Spill names keep the `fnd-` prefixes for now; CONTRACT.md §7 holds the name set and the handle grammar.
+// CONTRACT.md §8 holds the name set and the handle grammar.
 'use strict';
 
 const fs = require('fs');
@@ -9,12 +9,13 @@ const path = require('path');
 const crypto = require('crypto');
 const env = require('./env.cjs');
 
+// The `fnd-` prefixes are a wire format other plugins match: renaming them breaks their handle checks.
 const NAMES = { original: 'fnd-mcp-slim-', rows: 'fnd-crush-', ids: 'fnd-jsx-ids-' };
 const SPILL_NAME = /^fnd-mcp-slim-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/;
 const HOST_NAME = /^[\w.-]+\.(?:txt|json)$/;
 const HOST_MAX = 33554432;
 // Only the names slim writes; any other file in the spill root is left alone.
-const SWEEP_PREFIXES = ['fnd-mcp-slim-', 'fnd-crush-', 'fnd-jsx-ids-'];
+const SWEEP_PREFIXES = Object.values(NAMES);
 const SWEEP_MARKER = '.slim-sweep';
 const SWEEP_KEEP = new Set(['fnd-mcp-slim-debug.log', 'fnd-mcp-slim-debug.log.1']);
 const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
@@ -178,12 +179,13 @@ const PROMPT_DIR_TAIL = path.join('.claude', 'slim', 'prompt');
 const PROMPT_SPILL_NAME = /^slim-prompt-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/;
 const isPromptSpill = (file, name) => name.test(path.basename(file)) && path.dirname(file).endsWith(path.sep + PROMPT_DIR_TAIL);
 
-// A path that is one of the plugins' own spills, or a host tool-results file of any session: reading
-// one is how the model follows a handle, so it always passes through.
+// A path that is one of slim's own files in a spill dir (the report log among them), a prompt spill, or a
+// host tool-results file of any session: reading one is how the model follows a handle, so it always passes.
 function isSpillOrHostFile(p) {
   const file = typeof p === 'string' ? real(p) : null;
   if (!file) return false;
-  if (/^fnd-[\w.-]+$/.test(path.basename(file)) && spillDirs().includes(path.dirname(file))) return true;
+  const name = path.basename(file);
+  if (SWEEP_PREFIXES.some((x) => name.startsWith(x)) && spillDirs().includes(path.dirname(file))) return true;
   if (isPromptSpill(file, /^slim-prompt-[\w.-]+$/)) return true;
   const segs = projectSegs(file);
   return !!segs && segs.length === 4 && segs[2] === 'tool-results';

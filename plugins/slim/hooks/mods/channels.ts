@@ -4,7 +4,7 @@ import type { SlimChannel } from '../../types'
 import { PLAIN_MIN, utf8Bytes } from './node-hook.ts'
 
 /** Bytes over which a channel's result is a candidate; 0 = SLIM_PLAIN_BYTES. scripts/delivery/channels.cjs holds the same table. */
-export const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, glob: 16384, agent: 0, attachment: 32768 } as const
+export const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, agent: 0, attachment: 32768 } as const
 /** A Bash command that reads a log is a candidate from here on, plain or not. */
 export const LOG_GATE = 16384
 /** A fetching command word at the start of a pipeline segment; `cat src/http/page.html` is not one. */
@@ -46,7 +46,6 @@ export function channelOf(tool: string): Intake | 'mcp' | 'lookup' | 'view' | nu
     case 'WebFetch': return 'webfetch'
     case 'WebSearch': return 'websearch'
     case 'Grep': return 'grep'
-    case 'Glob': return 'glob'
     case 'Agent':
     case 'Task': return 'agent'
     default: return null
@@ -128,12 +127,9 @@ export function viewOf(ch: Intake, r: { result?: unknown; text?: string; isError
       if (!Array.isArray(rec.results)) return null
       return viewOfTexts(rec.results.filter((x): x is string => typeof x === 'string'))
     }
-    case 'grep':
-    case 'glob': {
+    case 'grep': {
       const content = str(rec.content)
-      if (content !== undefined) return viewOfTexts([content])
-      if (!Array.isArray(rec.filenames)) return null
-      return viewOfTexts([rec.filenames.map(String).join('\n')])
+      return content === undefined ? null : viewOfTexts([content])
     }
     case 'agent': {
       if (rec.status !== 'completed') return { bytes: 0, texts: [], notText: true }
@@ -161,7 +157,7 @@ export function floor(ch: Intake, v: View): boolean {
 function readEligible(v: View): boolean {
   const path = v.path ?? ''
   const x = ext(path)
-  if (LOG_EXT.has(x)) return v.bytes > GATES.read
+  if (LOG_EXT.has(x)) return v.truncated === true || v.bytes > GATES.read
   return x === '.json' && v.truncated === true && !isSourceJson(path)
 }
 
@@ -172,7 +168,8 @@ export function guardOf(ch: Intake, v: View): Pre | null {
   if (ch !== 'read') return null
   if (v.windowed) return 'windowed-read'
   // How the model follows a handle: a Read of a spill always passes through.
-  if (/^fnd-/.test(baseName(v.path ?? '')) || PROMPT_SPILL.test(v.path ?? '')) return 'spill-read'
+  const kind = spillKind(v.path ?? '')
+  if (kind !== null && kind !== 'host') return 'spill-read'
   return readEligible(v) ? null : 'read-guard'
 }
 
@@ -188,8 +185,7 @@ function sizeOk(ch: Intake, v: View, plain: number): boolean {
     }
     case 'read': return true
     case 'webfetch': return (v.bytes > GATES.webfetch && structured(head)) || v.bytes > plain
-    case 'grep':
-    case 'glob': return v.bytes > GATES[ch]
+    case 'grep': return v.bytes > GATES.grep
     case 'websearch':
     case 'agent': return v.bytes > plain
   }
@@ -230,7 +226,7 @@ export function attachmentShape(text: string): 'numbered' | 'raw' {
   return 'raw'
 }
 
-/** A spill slim (or fnd) writes, by name: `fnd-*` in the spill root, `slim-prompt-*` in the prompt channel's dir. */
+/** A spill slim writes, by name: in the spill root (the `fnd-` prefixes are a wire format other plugins match), `slim-prompt-*` in the prompt channel's dir. */
 const SPILL_NAME = /^fnd-(mcp-slim|crush|jsx-ids)-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/
 const PROMPT_SPILL = /\/\.claude\/slim\/prompt\/slim-prompt-(?:(rows|ids)-)?[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/
 const HOST_FILE = /\/tool-results\/[^/]+$/

@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { DENY_TEXT } from '../intake.ts'
+import { denyText } from '../intake.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; env?: Record<string, string>; timeoutMs?: number } }
 type Below = Record<string, unknown>
@@ -147,10 +147,12 @@ describe('K5 Read', () => {
     ['.json truncated by the token cap', readRec(json(20_000), '/r/orders.json', { truncatedByTokenCap: true }), { file_path: '/r/orders.json' }, true],
     ['.json not truncated, 64 KB', readRec(json(64_000), '/r/orders.json'), { file_path: '/r/orders.json' }, false],
     ['with offset', readRec(json(64_000), '/r/orders.json', { truncatedByTokenCap: true }), { file_path: '/r/orders.json', offset: 100 }, false],
-    ['a spill file', readRec(json(64_000), '/tmp/fnd-mcp-slim-x.json', { truncatedByTokenCap: true }), { file_path: '/tmp/fnd-mcp-slim-x.json' }, false],
+    ['a spill file', readRec(json(64_000), '/tmp/fnd-mcp-slim-0123456789abcdef.json', { truncatedByTokenCap: true }), { file_path: '/tmp/fnd-mcp-slim-0123456789abcdef.json' }, false],
     ['templates/product.json truncated', readRec(json(64_000), '/r/templates/product.json', { truncatedByTokenCap: true }), { file_path: '/r/templates/product.json' }, false],
     ['a .ts file, 64 KB', readRec(plain(64_000), '/r/src/app.ts'), { file_path: '/r/src/app.ts' }, false],
     ['a .log file, 40 KB', readRec(plain(40_000), '/r/app.log'), { file_path: '/r/app.log' }, true],
+    ['a .log file cut at the token cap, 30 KB shown', readRec(plain(30_000), '/r/app.log', { truncatedByTokenCap: true }), { file_path: '/r/app.log' }, true],
+    ['a user file named fnd-*, 40 KB', readRec(plain(40_000), '/r/fnd-export.log'), { file_path: '/r/fnd-export.log' }, true],
   ]
   for (const [name, below, input, spawn] of rows) {
     test(`${name} → ${spawn ? 'spawn' : 'no spawn'}`, async ($, on) => {
@@ -185,14 +187,15 @@ describe('K6–K9 WebFetch, WebSearch, Grep/Glob, Agent', () => {
     expect(stdinOf(w.runs[0]).channel).toBe('websearch')
   })
 
-  test("K8 'Grep' content 30 KB and a 3000-file 'Glob' → spawn on their channels", async ($, on) => {
+  test("K8 'Grep' content 30 KB → spawn; a 3000-file listing from Grep or Glob → none", async ($, on) => {
     const files = Array.from({ length: 3000 }, (_, i) => `/r/src/file-${i}.ts`)
-    const w = world(on, e => (e.tool === 'Grep'
+    const w = world(on, e => (e.tool === 'Grep' && e.output_mode === 'content'
       ? { result: { mode: 'content', numFiles: 4, filenames: [], content: plain(30_000), numLines: 1500, numMatches: 1500 }, text: 'x' }
       : { result: { durationMs: 1, numFiles: 3000, filenames: files, truncated: false }, text: 'x' }), compressed('grep'))
+    await $.tool.call({ tool: 'Grep', pattern: 'x', output_mode: 'content' } as any)
     await $.tool.call({ tool: 'Grep', pattern: 'x' } as any)
     await $.tool.call({ tool: 'Glob', pattern: '**/*.ts' } as any)
-    expect(w.runs.map(r => stdinOf(r).channel)).toEqual(['grep', 'glob'])
+    expect(w.runs.map(r => stdinOf(r).channel)).toEqual(['grep'])
   })
 
   test('K9 Agent completed 100 KB → spawn; async_launched → none', async ($, on) => {
@@ -312,15 +315,13 @@ describe('K10 @-mentioned files', () => {
 })
 
 describe('K11 each switch stops its own channels only', () => {
-  const files = Array.from({ length: 3000 }, (_, i) => `/r/src/file-${i}.ts`)
   const below = (e: any): Below => {
     switch (e.tool) {
       case 'Bash': return bash(json(120_000))
       case 'Read': return readRec(json(20_000), '/r/orders.json', { truncatedByTokenCap: true })
       case 'WebFetch': return { result: { bytes: 1, code: 200, codeText: 'OK', result: page(40_000), durationMs: 1, url: 'u' }, text: 'x' }
       case 'WebSearch': return { result: { query: 'q', results: [plain(100_000)], durationSeconds: 1 }, text: 'x' }
-      case 'Grep': return { result: { numFiles: 3000, filenames: files }, text: 'x' }
-      case 'Glob': return { result: { durationMs: 1, numFiles: 3000, filenames: files, truncated: false }, text: 'x' }
+      case 'Grep': return { result: { mode: 'content', numFiles: 4, filenames: [], content: plain(30_000), numLines: 1500 }, text: 'x' }
       case 'Agent': return { result: { status: 'completed', content: [{ type: 'text', text: plain(100_000) }] }, text: 'x' }
       default: return { result: json(120_000), text: 'x' }
     }
@@ -328,12 +329,12 @@ describe('K11 each switch stops its own channels only', () => {
   const calls = [
     { tool: 'mcp__x__search' }, { tool: 'Bash', command: 'curl -s https://x.io/api' }, { tool: 'Read', file_path: '/r/orders.json' },
     { tool: 'WebFetch', url: 'https://x.io', prompt: 'p' }, { tool: 'WebSearch', query: 'q' }, { tool: 'Grep', pattern: 'x' },
-    { tool: 'Glob', pattern: '*' }, { tool: 'Agent', description: 'd', prompt: 'p' },
+    { tool: 'Agent', description: 'd', prompt: 'p' },
   ]
-  const ALL = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent']
+  const ALL = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'agent']
   const cases: [string, string[]][] = [
     ['SLIM_MCP', ['mcp']], ['SLIM_BASH', ['bash']], ['SLIM_READ', ['read']], ['SLIM_WEB', ['webfetch', 'websearch']],
-    ['SLIM_GREP', ['grep', 'glob']], ['SLIM_AGENT', ['agent']],
+    ['SLIM_GREP', ['grep']], ['SLIM_AGENT', ['agent']],
   ]
   test('all on: every channel reaches the core', async ($, on) => {
     const w = world(on, below)
@@ -353,8 +354,15 @@ describe('K12 SLIM_CURL=deny', () => {
   test('a bare curl of a page is denied and never reaches the tool', async ($, on) => {
     const w = world(on, bash('x'), compressed('bash'), { SLIM_CURL: 'deny' })
     const r = await $.tool.call({ tool: 'Bash', command: 'curl -s https://x.io/p' } as any)
-    expect(r.deny).toBe(DENY_TEXT)
+    expect(r.deny).toBe(denyText(true))
     expect(w.calls.length).toBe(0)
+  })
+
+  test('SLIM_LOOKUP=0: the refusal names WebFetch only', async ($, on) => {
+    world(on, bash('x'), compressed('bash'), { SLIM_CURL: 'deny', SLIM_LOOKUP: '0' })
+    const r = await $.tool.call({ tool: 'Bash', command: 'curl -s https://x.io/p' } as any)
+    expect(r.deny).toBe(denyText(false))
+    expect(r.deny).not.toContain('lookup')
   })
 
   for (const [name, command, env] of [

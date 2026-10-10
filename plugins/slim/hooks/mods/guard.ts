@@ -12,9 +12,10 @@ export const SPILL_INLINE = 32768
 
 type $ = EngineInterface
 
-export function denyText(path: string, size: number): string {
-  return `slim: ${path} is a ${size} B spill — Read it with offset/limit, or call mcp__slim__view({ path, jq }) to narrow it, ` +
-    'or mcp__slim__lookup({ path, question }) for one fact'
+/** `lookup` = the lookup tool is registered (SLIM_LOOKUP is not 0). */
+export function denyText(path: string, size: number, lookup: boolean): string {
+  return `slim: ${path} is a ${size} B spill — Read it with offset/limit, or call mcp__slim__view({ path, jq }) to narrow it` +
+    (lookup ? ', or mcp__slim__lookup({ path, question }) for one fact' : '')
 }
 
 async function record($: $, payload: Record<string, unknown>): Promise<void> {
@@ -46,7 +47,7 @@ export function registerGuard(on: On): void {
         const size = await oversize($, hit.paths[0]!)
         if (size !== null) {
           await record($, { tool: hit.tool, via: hit.via, spills: [hit.paths[0]!], denied: true })
-          return { deny: denyText(hit.paths[0]!, size) }
+          return { deny: denyText(hit.paths[0]!, size, (await $.env.get('SLIM_LOOKUP')) !== '0') }
         }
       }
     }

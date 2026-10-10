@@ -101,7 +101,8 @@ async function logLine($: $, ev: SlimEvent): Promise<void> {
     // A start line reopens the file: the version is new, and a /clear or resume may find lines there.
     if (!sink || sinkSession !== session || ev.kind === 'start') {
       sinkSession = session
-      sink = openSink($, session).catch(() => null)
+      // After the queued writes: one still pending would land after the file was read.
+      sink = writes.then(() => openSink($, session)).catch(() => null)
     }
     const s = await sink
     if (!s) return

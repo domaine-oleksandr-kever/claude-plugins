@@ -1,11 +1,12 @@
-// The one report log both plugins write (`fnd-mcp-slim-debug.log` in the spill root): one metadata
-// line per invocation, never payload, and the --report that reads it back by src and by channel.
+// The report log (`fnd-mcp-slim-debug.log` in the spill root): one metadata line per invocation, never
+// payload, and the --report that reads it back by src and by channel.
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const env = require('./env.cjs');
 
+// The `fnd-mcp-slim-` prefix is a wire format other plugins match (spill.cjs NAMES).
 const DEBUG_LOG = 'fnd-mcp-slim-debug.log';
 const DEBUG_LOG_MAX = 5 * 1024 * 1024;
 const SPILL_LOG_MAX = 8;
@@ -80,29 +81,6 @@ function fmtCounts(map) {
   return [...map.entries()].sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1)).map(([k, v]) => `${k} ${v}`).join(' · ');
 }
 
-// With fnd and slim both loaded, fnd's PreToolUse hook and slim's guard each log the same read: a slim
-// line with an fnd twin (same tool and spill, within this window) is not counted again.
-const ACCESS_TWIN_MS = 10000;
-function dropTwins(access) {
-  const others = new Map();
-  for (const e of access) {
-    if (e.src === 'slim') continue;
-    const k = `${e.tool}|${e.spill}`;
-    if (!others.has(k)) others.set(k, []);
-    others.get(k).push(Date.parse(e.ts) || 0);
-  }
-  if (!others.size) return access;
-  return access.filter((e) => {
-    const ats = e.src === 'slim' ? others.get(`${e.tool}|${e.spill}`) : null;
-    if (!ats) return true;
-    const at = Date.parse(e.ts) || 0;
-    const i = ats.findIndex((t) => Math.abs(t - at) <= ACCESS_TWIN_MS);
-    if (i < 0) return true;
-    ats.splice(i, 1);
-    return false;
-  });
-}
-
 function buildReport(lines, opts) {
   const o = opts || {};
   const since = o.since ? Date.parse(o.since) : null;
@@ -116,14 +94,13 @@ function buildReport(lines, opts) {
     if (since != null && !(Date.parse(r.ts) >= since)) continue;
     events.push(r);
   }
-  // An `entry:"access"` line (slim's spill-read guard, fnd's hooks/spill-access.sh) is not a compression event: it measures that a
+  // An `entry:"access"` line (slim's spill-read guard) is not a compression event: it measures that a
   // tool READ a spill. It carries no bytes, no decision and no stages, so every aggregate below runs
   // over `comp` and the access lines are only counted on their own line and paired as recoveries —
   // a log written before the hook existed therefore reports exactly the numbers it always did.
   const accessLines = events.filter((e) => e.entry === 'access');
   const denied = accessLines.filter((e) => e.denied === true);
-  const access = dropTwins(accessLines.filter((e) => e.denied !== true));
-  const twins = accessLines.length - denied.length - access.length;
+  const access = accessLines.filter((e) => e.denied !== true);
   const comp = events.filter((e) => e.entry !== 'access');
   const out = [`slim: debug-log report — ${o.file || '(stdin)'}`];
   const stamps = events.map((e) => e.ts).filter(Boolean).sort();
@@ -146,7 +123,6 @@ function buildReport(lines, opts) {
     const vias = new Map();
     for (const e of access) bump(vias, e.via || 'other');
     spillReads = `  spill reads (access hook): ${access.length}  (via: ${vias.size ? fmtCounts(vias) : 'none'})` +
-      `${twins ? ` [+${twins} logged by both fnd and slim]` : ''}` +
       `${denied.length ? ` · denied by the spill-read guard: ${denied.length}` : ''}`;
   }
   if (!comp.length) { out.push('  no compression events in range.', spillReads); return out.join('\n'); }
@@ -422,7 +398,7 @@ function report(text, { file, since } = {}) {
   }
   const kept = lines.filter((l) => { try { const r = JSON.parse(l); return !(r && r.channel === 'lookup'); } catch (_) { return true; } });
   const out = [buildReport(kept, { file, bytes: Buffer.byteLength(text, 'utf8'), since })];
-  out.push(`  by src: ${comp.length ? totalsBy(comp, (e) => String(e.src || 'fnd')) : '(no events)'}`);
+  out.push(`  by src: ${comp.length ? totalsBy(comp, (e) => String(e.src || 'other')) : '(no events)'}`);
   out.push(`  by channel: ${comp.length ? totalsBy(comp, (e) => String(e.channel || 'mcp')) : '(no events)'}`);
   if (lookups.length) {
     const answered = lookups.filter((e) => e.decision === 'answered').length;

@@ -244,7 +244,8 @@ function view(input, opts) {
   }
   if (bytesOut > VIEW_INLINE) {
     if (!compressed && !narrowed && file) return { ...reply, pointer: file };
-    const s = spill.writeOriginal(final, '.txt');
+    // A part name: the original's name promises an untouched source.
+    const s = spill.writeOriginal(final, '.txt', { prefix: spill.NAMES.rows });
     if (!s) return refuse('spill-write-failure', 'view: the compact text could not be kept for a windowed Read');
     if (s.created) created.push(s.path);
     return { ...reply, pointer: s.path };

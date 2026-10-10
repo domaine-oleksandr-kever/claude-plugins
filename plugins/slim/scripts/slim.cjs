@@ -7,7 +7,7 @@
 //   node slim.cjs                    one tool result; envelope on stdin:
 //       {v:1, channel, tool, tool_use_id, tool_input, tool_response, is_error, cwd, session_id,
 //        agentId?, pre?, bytes_in?, record?, bash_output_max_chars?}
-//       channel ∈ mcp|bash|read|webfetch|websearch|grep|glob|agent|attachment
+//       channel ∈ mcp|bash|read|webfetch|websearch|grep|agent|attachment
 //     (attachment: tool_response {text} = an @-mentioned file as the host framed it;
 //      bash_output_max_chars: the host's bashOutputMaxChars setting, when set)
 //     `record: false`: the same content was answered and logged before (an attachment asked again), so no
@@ -32,9 +32,8 @@
 //   node slim.cjs --error            the hooks module's own failure → one error line
 //   node slim.cjs --report [logfile] [--since ISO]
 //
-// Every record carries src:'slim' + its channel and goes to the report log fnd writes too, so one
-// --report shows both plugins side by side. Exit status goes through process.exitCode only, so a
-// large stdout is never cut short.
+// Every record carries src:'slim' + its channel and goes to the report log in the spill root. Exit
+// status goes through process.exitCode only, so a large stdout is never cut short.
 'use strict';
 
 const fs = require('fs');
@@ -53,7 +52,7 @@ const viewCore = () => require('./delivery/view.cjs');
 const promptCore = () => require('./delivery/prompt.cjs');
 
 const OUTPUT_CAP = 4_194_304 - 65_536; // the hooks module's stdout ceiling, less headroom
-const PRE_REASONS = new Set(['error-shape', 'already-slim', 'size-gate', 'plain-gate', 'spill-read', 'own-cli', 'windowed-read', 'read-guard', 'not-text']);
+const PRE_REASONS = new Set(['error-shape', 'already-slim', 'size-gate', 'spill-read', 'windowed-read', 'read-guard', 'not-text']);
 const STUB_REASONS = new Set(['non-json', 'no-gain', 'budget-exceeded', 'number-precision']);
 const OVERFLOW_PROBE_REASONS = new Set(['non-json', 'budget-exceeded']);
 const DISTILL_BUDGET = 49152;
@@ -175,11 +174,15 @@ function slimBlocks(blocks, deadline, parts, target) {
   let format;
   const engines = new Set();
   const stages = [];
-  // The stub limit applies to the blocks' joined text, so each block gets its share.
-  const share = target ? Math.floor(target / Math.max(1, blocks.filter((b) => b && typeof b === 'object' && typeof b.text === 'string').length)) : null;
+  // The stub limit applies to the blocks' joined text: a block may fill what the others leave, never
+  // less than an even share.
+  const sizes = blocks.map((b) => (b && typeof b === 'object' && typeof b.text === 'string' ? utf8(b.text) : -1));
+  const texts = sizes.filter((n) => n >= 0);
+  const total = texts.reduce((a, n) => a + n, 0);
+  const even = target ? Math.floor(target / Math.max(1, texts.length)) : 0;
   const out = blocks.map((b, i) => {
-    if (b && typeof b === 'object' && typeof b.text === 'string') {
-      const r = slimText(b.text, deadline, parts, share);
+    if (sizes[i] >= 0) {
+      const r = slimText(b.text, deadline, parts, target ? Math.max(even, target - (total - sizes[i])) : null);
       if (r.modified) {
         modified = true;
         markIndex = i;
@@ -288,12 +291,14 @@ function runMcp(input, base) {
   const tool = base.tool;
   let result = input.tool_response;
   let hostFile = null;
+  let noticeBytes;
   let stubSpills = false;
   const spills = [];
   const parts = [];
   const rec = (decision, reason, bytesIn, bytesOut, x) => recordOf(base, decision, reason, bytesIn, bytesOut, { spills, ...x });
   const pass = (reason, bytes, x) => ({ decision: 'passthrough', reason, record: rec('passthrough', reason, bytes, bytes, x) });
-  const replace = (decision, reason, built, bytesIn, x) => ({ decision, reason: reason || null, result: built.value, figure: built.line, record: rec(decision, reason, bytesIn, built.bytes, x) });
+  // An expanded host file is measured against the notice the model would have seen in its place.
+  const replace = (decision, reason, built, bytesIn, x) => ({ decision, reason: reason || null, result: built.value, figure: built.line, record: rec(decision, reason, bytesIn, built.bytes, { bytesSeen: noticeBytes, ...x }) });
 
   if (result === undefined || result === null) return pass('no-result', 0);
   if (typeof result === 'object' && result.isError === true) return pass('error-shape', bytesOf(result));
@@ -309,6 +314,7 @@ function runMcp(input, base) {
     const host = spill.readHost(notice, sessionId);
     if (!host.file) return pass(host.why, bytesIn);
     hostFile = host.file;
+    noticeBytes = bytesIn;
     const blocks = hostBlocks(host.text);
     result = expandedShape(result, host.text, blocks);
     // A stub's recipe over a block wrapper recovers nothing, so a multi-block payload spills its own copy.
@@ -472,7 +478,7 @@ function runChannel(input, base) {
   // The host caches an attachment's answer and asks again after a compaction: no deadline, so it is
   // the same answer every time.
   const deadline = budget === 0 || channel === 'attachment' ? null : (budget < 0 ? Date.now() - 1 : Date.now() + budget);
-  const window = channel === 'grep' || channel === 'glob' ? ch.WINDOW.grep : ch.WINDOW.other;
+  const window = channel === 'grep' ? ch.WINDOW.grep : ch.WINDOW.other;
   const inline = channel === 'bash' ? env.bashInline(input.bash_output_max_chars) : null;
   // The host counts the characters (.length) of stdout and stderr together; past its limit it would
   // save slim's own answer to a file and show only a preview of it.
@@ -497,6 +503,7 @@ function runChannel(input, base) {
     const whole = spill.readLocal(ti.file_path || rec.file.filePath);
     if (!whole.file) return pass(whole.why, visible);
     text = whole.text;
+    bytesSeen = visible;
   } else if (channel === 'attachment') {
     bytesSeen = visible;
   }
@@ -506,8 +513,7 @@ function runChannel(input, base) {
 
   const egress = opts.egress;
   const hint = channel === 'bash' && s.engine === 'html' && env.hintOn() && ch.FETCH_CMD.test(command) ? emit.hintLine(command, cwdOf(input)) : null;
-  const note = channel === 'read' ? emit.readNote(rec.file.filePath || ti.file_path)
-    : channel === 'attachment' ? emit.readNote(typeof ti.path === 'string' ? ti.path : 'the attached file') : null;
+  const note = channel === 'read' || channel === 'attachment' ? emit.readNote() : null;
   const extras = [note, hint].filter(Boolean).map((l) => `\n\n${l}`).join('');
   const original = hostFile ? { path: hostFile } : keep(spill.writeOriginal(text, s.ext));
   if (!original) return pass('spill-write-failure', bytesIn);

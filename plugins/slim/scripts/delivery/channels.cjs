@@ -8,15 +8,15 @@ const path = require('path');
 
 // Pre-filter sizes, held equal to the hooks module's GATES literal (tests/slim-fixtures.mjs S24).
 // 0 = the plain-text threshold (SLIM_PLAIN_BYTES).
-const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, glob: 16384, agent: 0, attachment: 32768 };
+const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, agent: 0, attachment: 32768 };
 const LOG_GATE = 16384;
 // A json/jsonl output still over this is stubbed; any other output over it passes through.
-const EGRESS = { bash: 32768, webfetch: 32768, websearch: 32768, agent: 32768, grep: 16384, glob: 16384, read: 65536, attachment: 65536 };
+const EGRESS = { bash: 32768, webfetch: 32768, websearch: 32768, agent: 32768, grep: 16384, read: 65536, attachment: 65536 };
 // Room under the host's Bash inline limit for what follows the body: the figure, the handle, the hint.
 const BASH_TAIL = 2048;
 const bashEgress = (inline) => Math.max(1, Math.min(EGRESS.bash, inline - BASH_TAIL));
-const WINDOW = { bashPersisted: 4096, grep: 8192, glob: 8192, other: 12288 };
-const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment'];
+const WINDOW = { bashPersisted: 4096, grep: 8192, other: 12288 };
+const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'agent', 'attachment'];
 
 // A fetching command word at the start of a pipeline segment; `cat src/http/page.html` is not one.
 const FETCH_CMD = /(?:^|[;&|(`]|\$\()\s*(?:curl|wget|https?|xh|lynx)(?=\s|$)/;
@@ -59,7 +59,7 @@ function structuredGate(channel, engine, plainBytes) {
   if (channel === 'bash' && engine === 'log') return LOG_GATE;
   return GATES[channel] || plainBytes;
 }
-const plainGate = (channel, plainBytes) => (channel === 'grep' || channel === 'glob' ? GATES[channel] : plainBytes);
+const plainGate = (channel, plainBytes) => (channel === 'grep' ? GATES.grep : plainBytes);
 
 // The Bash host's own stdout notice, as the model would have seen it (`bytes_seen`).
 function bashSeen(persistedPath, size) {
@@ -134,14 +134,9 @@ function extract(channel, rec, input) {
       if (typeof rec.result !== 'string') return { pass: 'unrecognized-shape' };
       return { texts: [rec.result], single: { text: rec.result, rebuild: (out) => ({ ...rec, result: out }) } };
     case 'grep':
-    case 'glob': {
-      if (channel === 'grep' && typeof rec.content === 'string') {
-        return { texts: [rec.content], single: { text: rec.content, rebuild: (out) => ({ ...rec, content: out }) } };
-      }
-      if (!Array.isArray(rec.filenames)) return { pass: 'unrecognized-shape' };
-      const text = rec.filenames.map(String).join('\n');
-      return { texts: [text], single: { text, rebuild: (out) => ({ ...rec, filenames: out.split('\n') }) } };
-    }
+      // A file listing has no text field to window: only the content mode is read.
+      if (typeof rec.content !== 'string') return { pass: 'unrecognized-shape' };
+      return { texts: [rec.content], single: { text: rec.content, rebuild: (out) => ({ ...rec, content: out }) } };
     case 'websearch': {
       if (!Array.isArray(rec.results)) return { pass: 'unrecognized-shape' };
       const at = [];

@@ -7,7 +7,7 @@ import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
 import { agentPrefix, pushEvent, viewText } from './events.ts'
-import { buildRecordRun, buildViewRun, parseView, utf8Bytes } from './node-hook.ts'
+import { buildRecordRun, buildViewRun, commandSource, parseView, utf8Bytes } from './node-hook.ts'
 import type { Viewed } from './node-hook.ts'
 
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
@@ -21,7 +21,7 @@ export const VIEW_DESC =
   "(dot paths .a.b, .a[0], '[]' iteration, ',' multi-select, '| keys' / '| length'). out writes the compact text to a " +
   'file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root), reused while ' +
   'it is newer than the input. An image becomes a copy at most 1568 px on its long edge and a video a folder of ' +
-  'frames, beside the input. Give exactly one of path or command; for a URL use WebFetch or mcp__slim__lookup.'
+  'frames, beside the input. Give exactly one of path or command; for a URL use WebFetch.'
 export const VIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -33,7 +33,10 @@ export const VIEW_SCHEMA = {
   },
 }
 export const BAD_ARGS = 'view: give exactly one of path or command'
-export const NO_URL = 'view: there is no url mode — for a page use WebFetch(url, prompt), or mcp__slim__lookup({ url, question }) for one fact'
+/** `lookup` = the lookup tool is registered (SLIM_LOOKUP is not 0). */
+export function noUrlText(lookup: boolean): string {
+  return `view: there is no url mode — for a page use WebFetch(url, prompt)${lookup ? ', or mcp__slim__lookup({ url, question }) for one fact' : ''}`
+}
 export const INLINE = 16384
 const HEAD_LINES = 40
 
@@ -226,13 +229,7 @@ async function viewCommand($: $, command: string, a: Record<string, string>): Pr
     return refused('command', 'bash-failed', `view: Bash failed (${errText(err)})`)
   }
   if (b.deny !== undefined) return refused('command', 'command-denied', b.deny)
-  const rec = (b.result ?? {}) as { stdout?: unknown; persistedOutputPath?: unknown }
-  const source = b.isError === true
-    ? { text: String(b.text ?? '') }
-    : typeof rec.persistedOutputPath === 'string'
-      ? { host_path: rec.persistedOutputPath }
-      : { text: typeof rec.stdout === 'string' ? rec.stdout : String(b.text ?? '') }
-  return core($, 'command', { ...source, command, ...a })
+  return core($, 'command', { ...commandSource(b), command, ...a })
 }
 
 /** Puts the core's `write` through the host's Write tool; an existing file is Read first, as Write requires. */
@@ -258,7 +255,7 @@ export function registerView(on: On): void {
   on('tool.call', { tool: VIEW_TOOL }, async ($, e) => {
     const args = e as unknown as Record<string, unknown>
     const str = (k: string) => (typeof args[k] === 'string' && (args[k] as string).trim() !== '' ? (args[k] as string).trim() : undefined)
-    if (args.url !== undefined) return { result: NO_URL }
+    if (args.url !== undefined) return { result: noUrlText((await $.env.get('SLIM_LOOKUP')) !== '0') }
     const path = str('path')
     const command = str('command')
     if ((path === undefined) === (command === undefined)) return { result: BAD_ARGS }

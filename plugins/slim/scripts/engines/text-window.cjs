@@ -5,8 +5,9 @@
  * hides the middle. The head takes whole lines up to a third of the budget, the tail fills the rest
  * (test summaries live at the end), and the marker in between counts what was hidden:
  *   [slim: <hidden> of <total> lines hidden (<hiddenBytes> B)]
- * Fewer than three lines, or a first/last line that alone overflows its share, falls back to a
- * character window with `[slim: <hiddenBytes> B hidden]`. Pure: no I/O.
+ * Fewer than three lines, a first/last line that alone overflows its share, or whole lines that fill
+ * less than half the budget fall back to a character window with `[slim: <hiddenBytes> B hidden]`.
+ * Pure: no I/O.
  */
 'use strict';
 
@@ -53,7 +54,7 @@ function windowText(text, budget = DEFAULT_BUDGET) {
   let tailBytes = 0;
   let t = lines.length;
   while (t - 1 > h && tailBytes + utf8(lines[t - 1]) + 1 <= tailBudget) tailBytes += utf8(lines[--t]) + 1;
-  if (h === 0 || t === lines.length) return charWindow(text, budget);
+  if (h === 0 || t === lines.length || headBytes + tailBytes < budget / 2) return charWindow(text, budget);
   const hidden = lines.slice(h, t);
   const hiddenBytes = utf8(hidden.join('\n')) + 1;
   const marker = `[slim: ${commas(hidden.length)} of ${commas(lines.length)} lines hidden (${commas(hiddenBytes)} B)]`;

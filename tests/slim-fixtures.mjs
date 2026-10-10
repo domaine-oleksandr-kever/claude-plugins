@@ -16,10 +16,6 @@ import path from 'node:path';
 const ROOT = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'));
 const SCRIPTS = path.join(ROOT, 'plugins/slim/scripts');
 const SLIM = path.join(SCRIPTS, 'slim.cjs');
-const FND_SCRIPTS = path.join(ROOT, 'plugins/fnd/scripts');
-// fnd's frozen json-slim: the compressor slim's json engine was ported from.
-const FROZEN_JSON = path.join(FND_SCRIPTS, 'json-slim.cjs');
-const FND_HOOK = path.join(ROOT, 'plugins/fnd/hooks/mcp-slim.cjs');
 const MODS = path.join(ROOT, 'plugins/slim/hooks/mods');
 const BOUND = 32768 + 1200;
 const FIX = path.join(ROOT, 'tests/fixtures');
@@ -28,7 +24,7 @@ const LOG = 'fnd-mcp-slim-debug.log';
 // The envelope the hooks module sends, keys in its order (agentId, pre, bytes_in, bash_output_max_chars only when set).
 const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in', 'bash_output_max_chars'];
 const M1_KEYS = ENVELOPE_KEYS.slice(0, 9);
-const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'glob', 'agent', 'attachment', 'prompt', 'lookup', 'view'];
+const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'agent', 'attachment', 'prompt', 'lookup', 'view'];
 const ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'stub'];
 
 const F1 = readFileSync(path.join(FIX, 'jql-search-ELC.json'), 'utf8');
@@ -106,16 +102,7 @@ function contractProblem(a) {
 function spawn(T, input, { extra = {}, args = [], script = SLIM, cwd = T } = {}) {
   const env = envFor(T, extra);
   if (env.SLIM_DIR) LOG_DIRS.push(env.SLIM_DIR);
-  if (env.FND_MCP_SLIM_DIR) LOG_DIRS.push(env.FND_MCP_SLIM_DIR);
   return spawnSync('node', [script, ...args], { cwd, env, input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-}
-
-// fnd's classic PostToolUse hook on one result → its updatedToolOutput, or null when it passed through.
-function fndSlim(T, response, extra = {}, args = []) {
-  const env = envFor(T, { SLIM_DIR: undefined, SLIM_DEBUG: undefined, FND_MCP_SLIM_DIR: `${T}/fspill`, ...extra });
-  const input = JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'mcp__x__y', tool_input: {}, tool_response: response, cwd: T, session_id: 's1' });
-  const r = spawnSync('node', [FND_HOOK, ...args], { cwd: T, env, input, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  try { return JSON.parse(r.stdout).hookSpecificOutput.updatedToolOutput; } catch (_) { return null; }
 }
 
 // One tool result through the core → its parsed answer (null when stdout is not JSON).
@@ -137,7 +124,7 @@ function logLines(dir) {
 const textOf = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
 const handleOf = (s) => { const m = /<<full=(\S+) original_result>>$/.exec(s); return m ? m[1] : null; };
 const mcpSpills = (dir) => (existsSync(dir) ? readdirSync(dir).filter((n) => /^fnd-mcp-slim-[0-9a-f]{16}(-[0-9a-f]+)?\.json$/.test(n)) : []);
-const FIGURE_OUT = /^(?:fnd-mcp-slim|slim): (?:compressed|stub) [\d,]+ B → ([\d,]+) B \(/m;
+const FIGURE_OUT = /^slim: (?:compressed|stub) [\d,]+ B → ([\d,]+) B \(/m;
 const figureOf = (t) => { const m = FIGURE_OUT.exec(t); return m ? Number(m[1].replace(/,/g, '')) : null; };
 const bytes = (s) => Buffer.byteLength(s, 'utf8');
 const old = (p) => { const t = new Date(Date.now() - 48 * 3600 * 1000); utimesSync(p, t, t); };
@@ -155,7 +142,6 @@ let F1_OUT = null;
   check('F1-figure-in-body', !!a.figure && res.includes(`\n\n${a.figure}\n\n`), 'figure not verbatim in the result');
   eq('F1-figure-is-size', figureOf(a.figure || ''), bytes(res));
   check('F1-under-30k', a.record.bytes_out < 30000 && a.record.bytes_out === bytes(res), `bytes_out ${a.record.bytes_out}`);
-  check('F1-no-fnd-label', !res.includes('fnd-mcp-slim:') && !JSON.stringify(a).includes('fnd mcp-slim'), 'fnd label leaked');
   F1_OUT = res;
 }
 {
@@ -178,7 +164,6 @@ let F1_OUT = null;
   check('F4-stub-header', res.startsWith('<<slim stub>> mcp__x__y returned '), res.slice(0, 80));
   check('F4-recipe-view', res.includes('mcp__slim__view({ path: ') && res.includes('windowed (offset/limit)') && !res.includes('json-slim'), 'recipe does not name the view tool and a windowed Read');
   check('F4-figure', (a.figure || '').startsWith('slim: stub ') && res.includes(a.figure), a.figure);
-  check('F4-no-fnd-marks', !res.includes('<<fnd-mcp-slim stub>>') && !/^fnd-mcp-slim:/m.test(res), 'fnd mark in a slim stub');
   const f = call('F4-fit', T, envelope(T, F4));
   eq('F4-fit-decision', [f.decision, f.reason, f.record.engine], ['compressed', null, 'json']);
   check('F4-fit-stages', ['trim', 'fit'].every((x) => (f.record.stages || []).includes(x)), JSON.stringify(f.record.stages));
@@ -187,7 +172,7 @@ let F1_OUT = null;
 {
   const T = newT();
   const JN = readFileSync(path.join(FIX, 'jql-nodes-ELC.json'), 'utf8');
-  const tool = 'mcp__plugin_fnd_atlassian__searchJiraIssuesUsingJql';
+  const tool = 'mcp__plugin_base_atlassian__searchJiraIssuesUsingJql';
   const a = call('JN', T, envelope(T, { content: [{ type: 'text', text: JN }] }, { tool }));
   eq('JN-decision', [a.decision, a.reason, a.record.engine], ['compressed', null, 'json']);
   const res = ((a.result || {}).content || [{}])[0].text || '';
@@ -260,11 +245,7 @@ let STUB0_OUT = null;
 {
   const rows = [];
   for (let i = 0; rows.join(',').length < 5000; i++) rows.push({ id: i, key: `ELC-${i}`, summary: 'a short summary line' });
-  const shapes = {
-    a: `${JSON.stringify({ rows })}\n\nfnd-mcp-slim: compressed 110,794 B → 22,179 B (−80.0%)\n\n<<full=/tmp/fnd-mcp-slim-0123456789abcdef.json original_result>>`,
-    b: F1_OUT,
-    c: `<<fnd-mcp-slim stub>> mcp__x__y returned 259620 B (format=json) — too large for context and not compressible here, so the FULL original was written to disk instead of being shown:\nfull=/tmp/fnd-mcp-slim-0123456789abcdef.json\n${'x'.repeat(5000)}`,
-  };
+  const shapes = { b: F1_OUT };
   const T = newT();
   const x = call('S6d-make', T, envelope(T, F4), { SLIM_STUB: '0' });
   STUB0_OUT = typeof x.result === 'string' ? x.result : null;
@@ -304,7 +285,7 @@ let STUB0_OUT = null;
   mkdirSync(`${T5}/spill`, { recursive: true });
   const link = path.join(T5, 'spill', 'fnd-mcp-slim-fedcba9876543210.json');
   symlinkSync(foreign, link);
-  const tail = (h) => fixed((n) => `${log.join('\n')}\n\nfnd-mcp-slim: compressed 999,999 B → ${n} B (−0.0%)\n\n<<full=${h} original_result>>`);
+  const tail = (h) => fixed((n) => `${log.join('\n')}\n\nslim: compressed 999,999 B → ${n} B (−0.0%)\n\n<<full=${h} original_result>>`);
   for (const [name, h] of [['missing', path.join(T5, 'spill', 'fnd-mcp-slim-0000000000000000.json')], ['foreign-dir', foreign], ['symlink', link]]) {
     const t = tail(h);
     check(`S7c-${name}-over-bound`, bytes(t) > BOUND, String(bytes(t)));
@@ -323,6 +304,7 @@ let STUB0_OUT = null;
   eq('S8-expand', [a.decision, a.reason, a.record.engine], ['compressed', 'mod-expand', 'json']);
   eq('S8-handle-is-host-file', handleOf(typeof a.result === 'string' ? a.result : ''), realpathSync(file));
   eq('S8-no-own-copy', mcpSpills(`${T}/spill`), []);
+  eq('S8-bytes-seen-is-the-notice', a.record.bytes_seen, bytes(notice(file)));
 
   const evil = path.join(T, 'evil/tool-results');
   mkdirSync(evil, { recursive: true });
@@ -358,42 +340,21 @@ let STUB0_OUT = null;
   const exact = call('S8f-own-exact', T, envelope(T, ownOut), { SLIM_STUB_BYTES: '1200' });
   check('S8f-exact-over-bound', bytes(ownOut) > 2400, String(bytes(ownOut)));
   eq('S8f-own-exact-already-slim', [exact.decision, exact.reason], ['passthrough', 'already-slim']);
-  const fnd = fndSlim(T, notice(quoting), {}, ['--from-mod', '--overflow=expand']);
-  check('S8f-fnd-made', typeof fnd === 'string' && /^fnd-mcp-slim: compressed /m.test(fnd) && fnd.includes('exceeds maximum allowed tokens'), String(fnd).slice(0, 120));
-  const fb = call('S8f-fnd', T, envelope(T, fnd));
-  eq('S8f-fnd-already-slim', [fb.decision, fb.reason], ['passthrough', 'already-slim']);
 }
 // The stub's recovery recipe: the view tool and a windowed Read, never a CLI; the cap holds with a long path.
 {
   const require = createRequire(import.meta.url);
   const emit = require(path.join(SCRIPTS, 'delivery/emit.cjs'));
-  const { GRAMMAR } = require(path.join(SCRIPTS, 'engines/jq.cjs'));
   const file = `/${'d'.repeat(180)}/fnd-mcp-slim-0123456789abcdef.json`;
   const stats = 'slim: stub 250,000 B → 1,100 B (−99.6%)';
   const noGain = emit.stubText('mcp__x__y', 250000, 'json', '{"a":1}', file, 'no-gain', false, stats);
-  check('Rs-no-gain-jq', noGain.includes(`mcp__slim__view({ path: ${JSON.stringify(file)}, jq: "<jq-path>" })`) && noGain.includes(GRAMMAR), noGain);
+  check('Rs-no-gain-jq', noGain.includes(`\nfull=${file}\n`) && noGain.includes('mcp__slim__view({ path: <full>, jq: "<jq-path>" })') && noGain.split(file).length === 2, noGain);
   check('Rs-no-gain-windowed', noGain.includes('Read it windowed (offset/limit)'), noGain);
   const general = emit.stubText('mcp__x__y', 250000, 'text', 'hello', file, 'weak-gain', false, stats);
-  check('Rs-general-view', general.includes(`mcp__slim__view({ path: ${JSON.stringify(file)} })`) && general.includes('Read it windowed (offset/limit)'), general);
+  check('Rs-general-view', general.includes('mcp__slim__view({ path: <full> })') && general.includes('Read it windowed (offset/limit)'), general);
   for (const [k, t] of [['no-gain', noGain], ['general', general]]) {
     check(`Rs-${k}-no-cli`, !/json-slim|\bnode /.test(t), t);
     check(`Rs-${k}-cap`, bytes(t) <= emit.STUB_CAP, String(bytes(t)));
-  }
-}
-// fnd's real hook beneath, spilling into slim's spill root: whatever it emits, at either stub setting,
-// slim must stand down on.
-{
-  const T = newT();
-  for (const stub of ['1', '0']) {
-    for (const [name, response] of [['F1', F1], ['F4', F4], ['F4-blocks', [{ type: 'text', text: F4 }]]]) {
-      const out = fndSlim(T, response, { FND_MCP_SLIM_STUB: stub });
-      const tag = `X-${name}-stub${stub}`;
-      check(`${tag}-fnd-emitted`, out !== null, 'fnd emitted nothing');
-      if (out === null) continue;
-      if (stub === '0' && name === 'F4') check(`${tag}-over-bound`, bytes(out) > BOUND, String(bytes(out)));
-      const a = call(tag, T, envelope(T, out), { SLIM_DIR: `${T}/fspill` });
-      eq(`${tag}-already-slim`, [a.decision, a.reason], ['passthrough', 'already-slim']);
-    }
   }
 }
 {
@@ -441,7 +402,7 @@ let STUB0_OUT = null;
   call('S14-f4', T, envelope(T, F4));
   const log = path.join(T, 'spill', LOG);
   writeFileSync(log, `${readFileSync(log, 'utf8')}${JSON.stringify({ ts: new Date().toISOString(), lvl: 2, entry: 'hook', tool: 't', decision: 'compressed', bytes_in: 1000, bytes_out: 400 })}\n`);
-  const BY_SRC = /^ {2}by src: fnd 1000 → 400 B \(60\.0% saved\) · slim \d+ → \d+ B \([\d.]+% saved\)$/m;
+  const BY_SRC = /^ {2}by src: other 1000 → 400 B \(60\.0% saved\) · slim \d+ → \d+ B \([\d.]+% saved\)$/m;
   const r = spawn(T, '', { args: ['--report', log] });
   check('S14-report', r.status === 0 && r.stdout.includes('  totals:') && BY_SRC.test(r.stdout), r.stdout + r.stderr);
   const d = spawn(T, '', { args: ['--report'] });
@@ -463,22 +424,20 @@ let STUB0_OUT = null;
 }
 {
   const T = newT();
-  // fnd's switches never reach slim: with SLIM_DIR unset the spill root is the system temp dir.
+  // With SLIM_DIR unset the spill root is the system temp dir.
   mkdirSync(`${T}/tmp`);
-  const a = call('S15a', T, envelope(T, F1), { SLIM_DIR: undefined, TMPDIR: `${T}/tmp`, FND_MCP_SLIM_DIR: `${T}/fdir` });
-  check('S15a-fnd-dir-ignored', (handleOf(a.result || '') || '').startsWith(`${T}/tmp/`) && logLines(`${T}/tmp`).length === 1 && !existsSync(`${T}/fdir`), handleOf(a.result || ''));
-  const T2 = newT();
-  const b = call('S15b', T2, envelope(T2, F1), { FND_MCP_SLIM_DIR: `${T2}/fdir` });
-  check('S15b-own-dir', (handleOf(b.result || '') || '').startsWith(`${T2}/spill/`) && logLines(`${T2}/spill`).length === 1 && !existsSync(`${T2}/fdir`), handleOf(b.result || ''));
-  const T3 = newT();
-  call('S15c', T3, envelope(T3, [{ type: 'text', text: F5 }]), { SLIM_DEBUG: undefined, FND_MCP_SLIM_DEBUG: '1' });
-  eq('S15c-fnd-debug-ignored', logLines(`${T3}/spill`), []);
+  const a = call('S15a', T, envelope(T, F1), { SLIM_DIR: undefined, TMPDIR: `${T}/tmp` });
+  check('S15a-tmpdir-default', (handleOf(a.result || '') || '').startsWith(`${T}/tmp/`) && logLines(`${T}/tmp`).length === 1, handleOf(a.result || ''));
   const T4 = newT();
-  call('S15d', T4, envelope(T4, F1), { SLIM_DEBUG: '0', FND_MCP_SLIM_DEBUG: '2' });
-  check('S15d-own-debug-only', !existsSync(path.join(T4, 'spill', LOG)), 'a log was written at SLIM_DEBUG=0');
-  const T5 = newT();
-  const e = call('S15e', T5, envelope(T5, F1), { FND_MCP_SLIM: '0' });
-  eq('S15e-fnd-switch-ignored', e.decision, 'compressed');
+  call('S15d', T4, envelope(T4, F1), { SLIM_DEBUG: '0' });
+  check('S15d-debug-off', !existsSync(path.join(T4, 'spill', LOG)), 'a log was written at SLIM_DEBUG=0');
+  const T6 = newT();
+  const f = call('S15f', T6, envelope(T6, F1), { SLIM_DIR: '~/spill' });
+  check('S15f-tilde-expanded', (handleOf(f.result || '') || '').startsWith(`${T6}/home/spill/`) && !existsSync(`${T6}/~`), handleOf(f.result || ''));
+  const T7 = newT();
+  mkdirSync(`${T7}/tmp`);
+  const g = call('S15g', T7, envelope(T7, F1), { SLIM_DIR: 'rel/spill', TMPDIR: `${T7}/tmp` });
+  check('S15g-relative-to-tmpdir', (handleOf(g.result || '') || '').startsWith(`${T7}/tmp/`) && !existsSync(`${T7}/rel`), handleOf(g.result || ''));
 }
 {
   const T = newT();
@@ -492,32 +451,19 @@ let STUB0_OUT = null;
     mkdirSync(`${T}/spill`, { recursive: true });
     writeFileSync(`${T}/spill/fnd-crush-dead.json`, '[]');
     old(`${T}/spill/fnd-crush-dead.json`);
-    writeFileSync(`${T}/spill/fnd-prompt-json-dead.json`, '[]');
-    old(`${T}/spill/fnd-prompt-json-dead.json`);
-    mkdirSync(`${T}/.claude/fnd-tmp/playwright`, { recursive: true });
-    writeFileSync(`${T}/.claude/fnd-tmp/playwright/old.png`, 'png');
-    old(`${T}/.claude/fnd-tmp/playwright/old.png`);
   };
   const T = newT();
   seed(T);
   call('S17', T, envelope(T, F1));
   check('S17-swept', !existsSync(`${T}/spill/fnd-crush-dead.json`) && existsSync(`${T}/spill/.slim-sweep`), 'stale spill kept or no marker');
-  check('S17-fnd-marker-untouched', !existsSync(`${T}/spill/.fnd-mcp-slim-sweep`), 'slim wrote fnd\'s throttle marker');
-  check('S17-fnd-only-kept', existsSync(`${T}/spill/fnd-prompt-json-dead.json`), 'slim swept a file only fnd writes');
-  check('S17-no-project-pass', existsSync(`${T}/.claude/fnd-tmp/playwright/old.png`), 'the playwright dir was pruned');
   const T2 = newT();
   seed(T2);
   call('S17-ttl0', T2, envelope(T2, F1), { SLIM_TTL: '0' });
   check('S17-ttl0-kept', existsSync(`${T2}/spill/fnd-crush-dead.json`), 'SLIM_TTL=0 still swept');
-  // fnd's TTL is not slim's: neither a longer one nor a 0 keeps a file past SLIM_TTL.
   const T3 = newT();
   seed(T3);
-  call('S17-ttl-own', T3, envelope(T3, F1), { SLIM_TTL: '1', FND_MCP_SLIM_TTL: '72' });
+  call('S17-ttl-own', T3, envelope(T3, F1), { SLIM_TTL: '1' });
   check('S17-ttl-own-swept', !existsSync(`${T3}/spill/fnd-crush-dead.json`), 'SLIM_TTL=1 kept a 48 h file');
-  const T4 = newT();
-  seed(T4);
-  call('S17-ttl-fnd0', T4, envelope(T4, F1), { FND_MCP_SLIM_TTL: '0' });
-  check('S17-ttl-fnd0-ignored', !existsSync(`${T4}/spill/fnd-crush-dead.json`), 'FND_MCP_SLIM_TTL=0 stopped slim\'s sweep');
 }
 {
   const T = newT();
@@ -568,29 +514,37 @@ let STUB0_OUT = null;
   eq('S24-gates', mod, require(path.join(SCRIPTS, 'delivery/channels.cjs')).GATES);
   const fetchLit = /export const FETCH_CMD = (\/.*\/)\n/.exec(readFileSync(path.join(MODS, 'channels.ts'), 'utf8'));
   eq('S24-fetch-cmd', fetchLit && fetchLit[1], String(require(path.join(SCRIPTS, 'delivery/channels.cjs')).FETCH_CMD));
-}
-
-// P: the engines produce exactly what the frozen compressor did on the real fixtures.
-{
-  const require = createRequire(import.meta.url);
-  const { compress } = require(path.join(SCRIPTS, 'engines/index.cjs'));
-  const frozen = require(FROZEN_JSON);
-  const T = newT();
-  const spillDir = path.join(T, 'p');
-  const names = { original: 'fnd-mcp-slim-', rows: 'fnd-crush-', ids: 'fnd-jsx-ids-' };
-  const inputs = { F1, F3, F4, F5, REST: readFileSync(path.join(FIX, 'figma-node-rest.json'), 'utf8') };
-  F2.forEach((b, i) => { if (b && typeof b.text === 'string') inputs[`F2-${i}`] = b.text; });
-  for (const [k, text] of Object.entries(inputs)) {
-    const old = frozen.slim(text, { spillDir });
-    const r = compress({ data: text }, { engine: 'json', spillDir, spillNames: names, maxMs: 0 });
-    const oldOut = old.wasModified && old.bytesOut < old.bytesIn ? old.output : null;
-    eq(`P-${k}`, r.decision === 'compressed' ? r.text : null, oldOut);
-    // The parts the text cites carry exactly the bytes the frozen compressor wrote under those names.
-    for (const p of r.parts || []) {
-      const file = path.join(spillDir, p.suggestedName);
-      check(`P-${k}-part-${p.kind}`, existsSync(file) && readFileSync(file, 'utf8') === p.payload, file);
-    }
+  // The module cannot require the core, so it keeps its own copies: each pinned to the core's literal.
+  const src = (f) => readFileSync(f, 'utf8');
+  const literal = (file, name) => ((new RegExp(`\\b${name} = (.+?);?(?: *\\/\\/.*)?$`, 'm').exec(src(file)) || [])[1] || null);
+  const M = (f) => path.join(MODS, f);
+  const C = (f) => path.join(SCRIPTS, f);
+  for (const [mf, mn, cf, cn] of [
+    ['channels.ts', 'LOG_CMD', 'delivery/channels.cjs', 'LOG_CMD'],
+    ['channels.ts', 'SOURCE_JSON', 'delivery/channels.cjs', 'SOURCE_JSON_DIR'],
+    ['channels.ts', 'SOURCE_JSON_NAME', 'delivery/channels.cjs', 'SOURCE_JSON_BASE'],
+    ['channels.ts', 'ACCESS_MAX', 'slim.cjs', 'ACCESS_MAX'],
+    ['node-hook.ts', 'OVERFLOW_MSG', 'slim.cjs', 'OVERFLOW_MSG'],
+    ['node-hook.ts', 'OVERFLOW_PATH', 'slim.cjs', 'OVERFLOW_PATH'],
+    ['node-hook.ts', 'OVERFLOW_WINDOW', 'slim.cjs', 'OVERFLOW_WINDOW'],
+    ['node-hook.ts', 'OVERFLOW_MAX_BYTES', 'slim.cjs', 'OVERFLOW_MAX_BYTES'],
+    ['node-hook.ts', 'STATS', 'delivery/emit.cjs', 'STATS'],
+    ['node-hook.ts', 'MARKS', 'delivery/emit.cjs', 'MARKS'],
+    ['node-hook.ts', 'STUB_BYTES_DEFAULT', 'delivery/env.cjs', 'STUB_BYTES_DEFAULT'],
+    ['node-hook.ts', 'STUB_CAP', 'delivery/env.cjs', 'STUB_CAP'],
+    ['node-hook.ts', 'PLAIN_MIN', 'delivery/env.cjs', 'PLAIN_BYTES_FLOOR'],
+    ['node-hook.ts', 'PLAIN_DEFAULT', 'delivery/env.cjs', 'PLAIN_BYTES_DEFAULT'],
+    ['lookup.ts', 'DISTILL_BUDGET', 'slim.cjs', 'DISTILL_BUDGET'],
+  ]) {
+    const m = literal(M(mf), mn);
+    const c = literal(C(cf), cn);
+    check(`S24-${mn}`, m !== null && m.replace(/\s+/g, ' ') === String(c).replace(/\s+/g, ' '), `${mf} ${m} vs ${cf} ${c}`);
   }
+  const ATTACH = /\/\^Called the Read tool with the following input: .*?\/m/;
+  eq('S24-attachment-path', (ATTACH.exec(src(M('channels.ts'))) || [])[0], (ATTACH.exec(src(C('delivery/channels.cjs'))) || [])[0]);
+  const spillName = new RegExp((/const SPILL_NAME = \/(.+)\/\n/.exec(src(M('channels.ts'))) || [])[1]);
+  const { NAMES } = require(C('delivery/spill.cjs'));
+  check('S24-spill-names', Object.values(NAMES).every((p) => spillName.test(`${p}0123456789abcdef.json`)), String(spillName));
 }
 
 const HOST = (T) => path.join(T, 'cfg/projects/p/s1/tool-results');
@@ -694,7 +648,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   writeFileSync(sp, F1);
   eq('Cb9-spill-read', call('Cb9', T, chEnv(T, 'bash', 'Bash', { command: `cat ${sp}` }, BASH(F1))).reason, 'spill-read');
   eq('Cb9-host-read', call('Cb9h', T, chEnv(T, 'bash', 'Bash', { command: `head -c 99999 ${go}` }, BASH(GO_TEST))).reason, 'spill-read');
-  eq('Cb10-own-cli', call('Cb10', T, chEnv(T, 'bash', 'Bash', { command: `node ${FROZEN_JSON} f.json --jq .a` }, BASH(F1))).reason, 'own-cli');
+  eq('Cb10-own-cli', call('Cb10', T, chEnv(T, 'bash', 'Bash', { command: `node ${SLIM} --report` }, BASH(F1))).reason, 'own-cli');
   eq('Cb11-source-json', call('Cb11', T, chEnv(T, 'bash', 'Bash', { command: 'cat templates/product.json' }, BASH(F1))).reason, 'read-guard');
   // The fixture's node tree renders to ~30.5 KB: whole under a raised host limit; over the default one
   // its deepest level folds.
@@ -768,9 +722,10 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const readRec = (filePath, content, x = {}) => ({ type: 'text', file: { filePath, content, numLines: content.split('\n').length, startLine: 1, totalLines: orders.split('\n').length, ...x } });
   const a = call('Cr1', T, chEnv(T, 'read', 'Read', { file_path: fp }, readRec(fp, page, { truncatedByTokenCap: true })));
   eq('Cr1-compressed', [a.decision, a.record.engine, a.record.channel, a.record.bytes_in], ['compressed', 'json', 'read', bytes(orders)]);
+  eq('Cr1-bytes-seen-is-the-cut', a.record.bytes_seen, bytes(page));
   const f = (a.result || {}).file || {};
   eq('Cr1-shape', [a.result && a.result.type, f.filePath, f.startLine, f.numLines === String(f.content).split('\n').length, 'truncatedByTokenCap' in f, f.totalLines], ['text', fp, 1, true, false, orders.split('\n').length]);
-  check('Cr1-note', String(f.content).includes(`\n\nslim: this view of ${fp} is compressed and its line numbers are not file lines — Read it with offset/limit for exact bytes before an Edit or Write\n\nslim: compressed `), String(f.content).slice(-400));
+  check('Cr1-note', String(f.content).includes('\n\nslim: compressed view — line numbers are not file lines; Read with offset/limit before an Edit\n\nslim: compressed '), String(f.content).slice(-400));
   const h = handleOf(String(f.content));
   check('Cr1-copy', !!h && /\/spill\/fnd-mcp-slim-[0-9a-f]{16}\.json$/.test(h) && readFileSync(h, 'utf8') === orders, h);
   check('Cr1-sentinel-dropped', !String(f.content).includes('SENTINEL-ORDER-0217'), 'sentinel kept');
@@ -788,6 +743,10 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   writeFileSync(logp, log60);
   const l = call('Cr6', T, chEnv(T, 'read', 'Read', { file_path: logp }, readRec(logp, log60)));
   eq('Cr6-log', [l.decision, l.record.engine], ['compressed', 'log']);
+  // Only slim's own names in the spill root are spill reads; a user's file there is a file.
+  const own = path.join(T, 'spill', 'fnd-export.log');
+  writeFileSync(own, log60);
+  eq('Cr6b-foreign-name-in-spill-root', call('Cr6b', T, chEnv(T, 'read', 'Read', { file_path: own }, readRec(own, log60))).decision, 'compressed');
   eq('Cr7-page', call('Cr7', T, chEnv(T, 'read', 'Read', { file_path: path.join(FIX, 'page.html') }, readRec(path.join(FIX, 'page.html'), PAGE))).reason, 'read-guard');
   eq('Cr8-image', call('Cr8', T, chEnv(T, 'read', 'Read', { file_path: '/x.png' }, { type: 'image', file: { base64: 'AAAA', type: 'image/png', originalSize: 4 } })).reason, 'not-text');
   // A Figma REST nodes response is JSON the read channel admits, compressed by its own engine.
@@ -809,7 +768,15 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   check('Cr10-spill-json', !!bh && /\.json$/.test(bh) && readFileSync(bh, 'utf8') === REST_BIG, bh);
 }
 
-// C-webfetch, C-websearch, C-grep, C-glob, C-agent
+// A block array's stub limit: a big block fills what a small note leaves, not half of it.
+{
+  const T = newT();
+  const a = call('Sb1', T, envelope(T, [{ type: 'text', text: 'note: here are the orders' }, { type: 'text', text: ORDERS(380) }]));
+  const big = Array.isArray(a.result) ? bytes(a.result[1].text) : 0;
+  check('Sb1-share-by-size', a.decision === 'compressed' && big > 24576 && big <= 32768, `${a.decision} ${big}`);
+}
+
+// C-webfetch, C-websearch, C-grep, C-agent
 {
   const T = newT();
   const wf = { bytes: bytes(PAGE), code: 200, codeText: 'OK', result: PAGE, durationMs: 120, url: 'https://shop.example/p' };
@@ -835,10 +802,9 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   check('Cg1-marker', /\[slim: [\d,]+ of 3,000 lines hidden/.test((g.result || {}).content) && bytes(bodyOf((g.result || {}).content)) <= 8192, '');
   const files = Array.from({ length: 3000 }, (_, i) => `/repo/src/components/card-${i % 40}/part-${i}.liquid`);
   const gf = call('Cg2', T, chEnv(T, 'grep', 'Grep', { pattern: 'price' }, { mode: 'files_with_matches', numFiles: 3000, filenames: files }));
-  const fl = (gf.result || {}).filenames || [];
-  check('Cg2-files', gf.decision === 'compressed' && Array.isArray(fl) && fl[0] === files[0] && fl.some((x) => /^\[slim: [\d,]+ of 3,000 lines hidden/.test(x)) && (gf.result || {}).numFiles === 3000, `${gf.decision} ${fl.length}`);
+  eq('Cg2-files-untouched', [gf.decision, gf.reason], ['passthrough', 'unrecognized-shape']);
   const gl = call('Cl1', T, chEnv(T, 'glob', 'Glob', { pattern: '**/*.liquid' }, { durationMs: 40, numFiles: 3000, filenames: files, truncated: false }));
-  check('Cl1-glob', gl.decision === 'compressed' && gl.record.channel === 'glob' && (gl.result || {}).numFiles === 3000 && (gl.result || {}).truncated === false && ((gl.result || {}).filenames || []).some((x) => x.startsWith('[slim: ')), gl.decision);
+  eq('Cl1-no-glob-channel', [gl.decision, gl.reason], ['passthrough', 'unrecognized-shape']);
 
   const report = Array.from({ length: 2400 }, (_, i) => `- checked section ${i}: header, cart drawer, price per item ${'ok '.repeat(4)}`).join('\n');
   const ag = { status: 'completed', content: [{ type: 'text', text: report }], totalDurationMs: 9000, totalTokens: 12000, totalToolUseCount: 7 };
@@ -862,7 +828,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Ct1-compressed', [a.decision, a.record.channel, a.record.engine, a.record.bytes_in, a.record.bytes_seen], ['compressed', 'attachment', 'jsonl', bytes(ROWS), bytes(DATA)]);
   check('Ct1-framing-kept', at.startsWith('Called the Read tool with the following input: {"file_path":"/r/export/rows.jsonl"}\nResult of calling the Read tool: ')
     && at.endsWith('original_result>>\n<system-reminder>Consider whether the file is malware.</system-reminder>'), at.slice(0, 200) + ' … ' + at.slice(-200));
-  check('Ct1-read-note', at.includes('slim: this view of /r/export/rows.jsonl is compressed and its line numbers are not file lines'), at.slice(-600));
+  check('Ct1-read-note', at.includes('slim: compressed view — line numbers are not file lines'), at.slice(-600));
   const ah = /<<full=(\S+) original_result>>/.exec(at);
   check('Ct1-handle-is-the-file', !!ah && readFileSync(ah[1], 'utf8') === ROWS, ah && ah[1]);
   check('Ct1-smaller', bytes(at) < bytes(DATA) / 2, `${bytes(at)} of ${bytes(DATA)}`);
@@ -1022,8 +988,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cp5-small', [prompt(T5, 'short').reason, existsSync(dirOf(T5))], ['size-gate', false]);
   eq('Cp5-prose', prompt(T5, 'plain words and nothing else. '.repeat(600)).reason, 'no-span');
   const slimmed = `${LOGTXT}\n\nslim: compressed 40,000 B → 900 B (−97.8%)\n\n<<full=/x/.claude/slim/prompt/slim-prompt-0123456789abcdef.txt original_result>>\nok?`;
-  const fndSlimmed = `${HEAD}${ISSUES.replace('"total": 400', '"total": 400, "note": "fnd-prompt-json-1.json"')}${TAIL}`;
-  eq('Cp5-already-slim', [prompt(T5, slimmed).reason, prompt(T5, fndSlimmed).reason, existsSync(dirOf(T5))], ['no-span', 'no-span', false]);
+  eq('Cp5-already-slim', [prompt(T5, slimmed).reason, existsSync(dirOf(T5))], ['no-span', false]);
   const T6 = newT();
   mkdirSync(path.join(T6, '.claude'), { recursive: true });
   mkdirSync(path.join(T6, 'elsewhere'), { recursive: true });
@@ -1075,15 +1040,6 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   check('Cx3-denied-not-a-recovery', /missed whales \(platform-overflow never read by any tool\): 1 of 1/.test(rd.stdout)
     && /spill reads \(access hook\): 0 {2}\(via: none\) · denied by the spill-read guard: 1/.test(rd.stdout), rd.stdout);
 
-  // fnd's PreToolUse hook and slim's guard both logged one read: counted once.
-  writeFileSync(rlog, [
-    { ts: ts(0), lvl: 1, src: 'slim', channel: 'mcp', entry: 'hook', tool: 'mcp__x__y', decision: 'passthrough', reason: 'platform-overflow', bytes_in: 300, bytes_out: 300, spill: sp },
-    { ts: ts(1), project: 'p', lvl: 1, entry: 'access', tool: 'Bash', via: 'jq', spill: sp },
-    { ts: ts(2), lvl: 1, src: 'slim', channel: 'bash', entry: 'access', tool: 'Bash', via: 'jq', spill: sp },
-    { ts: '2026-10-08T10:05:00.000Z', lvl: 1, src: 'slim', channel: 'bash', entry: 'access', tool: 'Bash', via: 'jq', spill: sp },
-  ].map((l) => JSON.stringify(l)).join('\n') + '\n');
-  const rt = spawn(T7, '', { args: ['--report', rlog] });
-  check('Cx4-twins-once', /spill reads \(access hook\): 2 {2}\(via: jq 2\) \[\+1 logged by both fnd and slim\]/.test(rt.stdout), rt.stdout);
 }
 
 // --report groups the channels written above.
@@ -1106,14 +1062,14 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
     line({ channel: 'bash', decision: 'compressed', bytes_in: 260779, bytes_seen: 2346, bytes_out: 7935 }),
     line({ channel: 'mcp', decision: 'compressed', bytes_in: 10000, bytes_out: 2500 }),
     line({ channel: 'read', decision: 'compressed', bytes_in: 90000, bytes_seen: 90000, bytes_out: 30000 }),
-    line({ src: 'fnd', channel: 'mcp', decision: 'passthrough', reason: 'size-gate', bytes_in: 800, bytes_out: 800 }),
+    line({ src: 'other', channel: 'mcp', decision: 'passthrough', reason: 'size-gate', bytes_in: 800, bytes_out: 800 }),
   ].join('\n')}\n`);
   const r = spawn(T, '', { args: ['--report', log] });
   const byChannel = (/^ {2}by channel: (.*)$/m.exec(r.stdout) || [])[1];
   eq('Rg-by-channel', byChannel, 'bash: 2 results, 560,779 B of output summarised into 14,935 B (host preview would have shown 4,646 B; the view grew ×3.2)'
     + ' · mcp 10800 → 3300 B (69.4% saved) · read 90000 → 30000 B (66.7% saved)');
   const bySrc = (/^ {2}by src: (.*)$/m.exec(r.stdout) || [])[1];
-  eq('Rg-by-src', bySrc, 'fnd 800 → 800 B (0.0% saved) · slim 104646 → 47435 B (54.7% saved)');
+  eq('Rg-by-src', bySrc, 'other 800 → 800 B (0.0% saved) · slim 104646 → 47435 B (54.7% saved)');
   check('Rg-no-negative', !/-\d[\d.]*% saved/.test(r.stdout), r.stdout);
   writeFileSync(log, `${line({ channel: 'bash', decision: 'compressed', bytes_in: 300000, bytes_seen: 2300, bytes_out: 7000 })}\n`);
   const one = spawn(T, '', { args: ['--report', log] });
@@ -1303,7 +1259,7 @@ printf 'SIPSIMG' > "$last"
   eq('Cv2-figma-nodes', [v2.decision, v2.engine], ['compressed', 'figma-nodes']);
   check('Cv2-figure', /^figma-nodes: 192234 B → \d+ B \(-\d+\.\d%\) nodes=\d+ hidden=\d+ folded=\d+$/.test(v2.figure), v2.figure);
   check('Cv2-variables-beside', v2.text.includes('tokens: variables') && !v2a.text.includes('tokens: variables'), 'K1.variables.json not read');
-  check('Cv2-pointer', !v2.text.includes('deeper folded') && typeof v2.pointer === 'string' && v2.pointer.startsWith(`${spillDir}/fnd-mcp-slim-`) && readFileSync(v2.pointer, 'utf8') === v2.text, String(v2.pointer));
+  check('Cv2-pointer', !v2.text.includes('deeper folded') && typeof v2.pointer === 'string' && v2.pointer.startsWith(`${spillDir}/fnd-crush-`) && readFileSync(v2.pointer, 'utf8') === v2.text, String(v2.pointer));
 
   const v3 = view('Cv3', { path: src, jq: '.issues[].key' });
   eq('Cv3-narrowed', [v3.decision, v3.narrowed, v3.engine, JSON.parse(v3.text).length, JSON.parse(v3.text)[399]], ['narrowed', true, 'json', 400, 'ACME-399']);
@@ -1316,7 +1272,7 @@ printf 'SIPSIMG' > "$last"
   // A big narrowed value the engine cannot shrink is kept in the spill root, never pointed at the source.
   writeFileSync(path.join(proj, 'blob.json'), JSON.stringify({ blob: 'word '.repeat(8000), n: 1 }));
   const v3g = view('Cv3g', { path: 'blob.json', jq: '.blob' });
-  check('Cv3g-relative-path-and-pointer', v3g.decision === 'narrowed' && typeof v3g.pointer === 'string' && v3g.pointer.startsWith(`${spillDir}/fnd-mcp-slim-`)
+  check('Cv3g-relative-path-and-pointer', v3g.decision === 'narrowed' && typeof v3g.pointer === 'string' && v3g.pointer.startsWith(`${spillDir}/fnd-crush-`)
     && readFileSync(v3g.pointer, 'utf8') === v3g.text && JSON.parse(v3g.text).length === 40000, JSON.stringify({ ...v3g, text: undefined }));
 
   const out = path.join(tasks, 'issues.view.json');
@@ -1474,7 +1430,7 @@ printf 'SIPSIMG' > "$last"
     if (seen.has(dir)) continue;
     seen.add(dir);
     for (const l of logLines(dir)) {
-      if (l.tool === 't') continue; // S14's synthetic fnd line
+      if (l.tool === 't' || l.tool === 'Glob') continue; // S14's line without src; Cl1's retired channel
       n++;
       const keys = Object.keys(l).filter((k) => !['ts', 'project', 'lvl'].includes(k));
       if (keys[0] !== 'src' || keys[1] !== 'channel' || l.src !== 'slim' || !CHANNELS.includes(l.channel)) bad.push(JSON.stringify(l).slice(0, 160));

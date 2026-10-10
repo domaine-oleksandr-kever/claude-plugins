@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BAD_ARGS, INLINE, NO_URL, VIEW_DESC, headOf, mediaName, mediaProbe, replyText } from '../view.ts'
+import { BAD_ARGS, INLINE, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText } from '../view.ts'
 import { viewText } from '../events.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
@@ -87,10 +87,10 @@ const view = async ($: any, args: Record<string, unknown>, extra: Record<string,
   String((await $.tool.call({ tool: VIEW, ...args, ...extra })).result)
 
 describe('V1 registration', () => {
-  test('pinned into the prompt\'s tool list, under SLIM_LOOKUP=0 too', async ($, on) => {
-    world(on, { env: { SLIM_LOOKUP: '0' } })
+  test('left deferred: slim does not pin it into the prompt\'s tool list', async ($, on) => {
+    world(on)
     const d = await $.tool.describe({ tool: VIEW, description: VIEW_DESC, isDeferred: true, provider: PROVIDER } as any)
-    expect(d.isDeferred).toBe(false)
+    expect(d.isDeferred).toBe(true)
   })
 
   test('the description names both out roots: the session root and the working directory', () => {
@@ -343,13 +343,19 @@ describe('V5 media', () => {
 describe('V6 arguments', () => {
   test('url is refused without a call; path and command together or neither: BAD_ARGS; an unknown engine', async ($, on) => {
     const w = world(on)
-    expect(await view($, { url: 'https://x.example' })).toBe(NO_URL)
-    expect(await view($, { url: 'https://x.example', path: '/repo/a.json' })).toBe(NO_URL)
+    expect(await view($, { url: 'https://x.example' })).toBe(noUrlText(true))
+    expect(await view($, { url: 'https://x.example', path: '/repo/a.json' })).toBe(noUrlText(true))
     expect(await view($, { path: '/repo/a.json', command: 'ls' })).toBe(BAD_ARGS)
     expect(await view($, {})).toBe(BAD_ARGS)
     expect(await view($, { path: '  ' })).toBe(BAD_ARGS)
     expect(await view($, { path: '/repo/a.json', engine: 'xml' })).toMatch(/^view: unknown engine 'xml' — one of json, /)
     expect([w.calls, w.checks, w.views, w.records]).toEqual([[], [], [], []])
+  })
+
+  test('SLIM_LOOKUP=0: the url answer names WebFetch only', async ($, on) => {
+    world(on, { env: { SLIM_LOOKUP: '0' } })
+    expect(await view($, { url: 'https://x.example' })).toBe(noUrlText(false))
+    expect(noUrlText(false)).not.toContain('lookup')
   })
 
   test('a broken core answer is a refusal, never a throw', async ($, on) => {

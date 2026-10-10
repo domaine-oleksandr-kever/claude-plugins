@@ -15,6 +15,7 @@
  */
 'use strict';
 
+// A wire format other plugins match (their figma readers name it): renaming it breaks them.
 const JSX_HEADER = '<<fnd-jsx-slim>>';
 const JSX_MIN_HITS = 3; // each signature must appear at least this often before the stage engages
 

@@ -1,6 +1,6 @@
 // The text slim puts in front of the model: the stats line and recovery handle, the stub that replaces
 // a payload too large to show, the Read note and the lookup hint — and the detector that recognises
-// any of these (slim's or fnd's) so a result is never compressed twice.
+// any of these so a result is never compressed twice.
 'use strict';
 
 const path = require('path');
@@ -41,7 +41,7 @@ function withStats(build, decision, bytesIn, measure = bytesOf) {
 
 const tail = (stats, file) => `${stats ? `\n\n${stats}` : ''}\n\n<<full=${file} original_result>>`;
 
-const readNote = (filePath) => `slim: this view of ${filePath} is compressed and its line numbers are not file lines — Read it with offset/limit for exact bytes before an Edit or Write`;
+const readNote = () => 'slim: compressed view — line numbers are not file lines; Read with offset/limit before an Edit';
 
 const URL_RE = /https?:\/\/[^\s'"<>|;]+/;
 const FILE_RE = /file:\/\/([^\s'"<>|;]+)/;
@@ -63,7 +63,7 @@ function hintLine(command, cwd) {
 
 // The stub's last line is the only part built from payload bytes: quoted, labelled and byte-counted
 // so a payload cannot speak in the plugin's voice.
-const SAMPLE_MAX = 200;
+const SAMPLE_MAX = 120;
 const LINE_BREAKS = /[\s\u0085\u001c-\u001f​-‏‪-‮⁦-⁩]+/g;
 // A lone surrogate would make the whole stdout invalid JSON for strict readers.
 const dropLoneSurrogate = (s) => s.replace(/[\ud800-\udbff][\udc00-\udfff]|[\ud800-\udfff]/g, (m) => (m.length === 2 ? m : ''));
@@ -78,20 +78,16 @@ function sampleLine(hint) {
 // back. The sample line is the one droppable part when the cap is reached.
 function stubText(tool, bytes, format, hint, file, reason, perBlock, stats) {
   const who = String(tool || 'MCP tool').replace(LINE_BREAKS, ' ').slice(0, STUB_TOOL_MAX);
-  const reRunRedumps = reason === 'no-gain' && format === 'json';
   const what = perBlock ? "this block's FULL text was written" : 'the FULL original was written';
-  const at = JSON.stringify(String(file));
-  const lines = reRunRedumps ? [
-    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context, and the compressor already ran on it and gained nothing, so ${what} to disk instead of being shown:`,
+  const lines = reason === 'no-gain' && format === 'json' ? [
+    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context and the compressor gained nothing, so ${what} to disk:`,
     `full=${file}`,
-    'Do NOT view the whole file again (it would give the same bytes back) and never raw-Read it. Narrow instead:',
-    `  mcp__slim__view({ path: ${at}, jq: "<jq-path>" })   — ${require('../engines/jq.cjs').GRAMMAR}`,
-    'or Read it windowed (offset/limit); grep it for anything a sub-path cannot answer.',
+    'Do NOT view or Read it whole (same bytes back). Narrow: mcp__slim__view({ path: <full>, jq: "<jq-path>" }), Read it windowed (offset/limit) or grep it.',
     sampleLine(hint),
   ] : [
-    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context and not compressible here, so ${what} to disk instead of being shown:`,
+    `${STUB_MARK} ${who} returned ${bytes} B (format=${format}) — too large for context and not compressible here, so ${what} to disk:`,
     `full=${file}`,
-    `Inspect it with mcp__slim__view({ path: ${at} }) — add jq: "<jq-path>" to narrow JSON first — or Read it windowed (offset/limit); never raw-Read a whale.`,
+    'Inspect: mcp__slim__view({ path: <full> }) (add jq: "<jq-path>" to narrow JSON), or Read it windowed (offset/limit); never Read it whole.',
     sampleLine(hint),
   ];
   if (stats) lines.splice(1, 0, stats);
@@ -106,16 +102,15 @@ function stubFor(tool, payload, format, file, reason, perBlock) {
   return { format: fmt, render: (stats) => stubText(tool, utf8(payload), fmt, h.hint, file, reason, perBlock, stats) };
 }
 
-// fnd's classic hook may already have slimmed a result beneath slim, or a result may come back from
-// slim itself. BOUNDED (fnd's rule): a stub mark, or a stats line beside a `<<full=` handle, in texts no
-// bigger than the largest stub either plugin emits. Over that bound only an emitted shape counts — a
+// A result may come back from slim itself (a re-read spill, a subagent's relayed answer). BOUNDED: a
+// stub mark, or a stats line beside a `<<full=` handle, in texts no bigger than the largest stub. Over that bound only an emitted shape counts — a
 // compressed tail or a stub head whose figure is the value's own size (withStats makes every genuine
 // emission say exactly that) and whose handle names a spill this user owns — so payload text cannot
 // opt a large result out of compression.
-const STATS = /^(?:slim|fnd-mcp-slim): (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m;
-const MARKS = ['<<slim stub>>', '<<fnd-mcp-slim stub>>', '<<fnd-jsx-slim>>'];
-const COMPRESSED_TAIL = /\n\n(?:fnd-mcp-slim|slim): compressed [\d,]+ B → ([\d,]+) B \([+−]\d+\.\d%\)\n\n<<full=([^\n]+) original_result>>$/;
-const STUB_HEAD = /^(?:<<fnd-mcp-slim stub>>|<<slim stub>>) [^\n]*\n(?:fnd-mcp-slim|slim): stub [\d,]+ B → ([\d,]+) B \([+−]\d+\.\d%\)\nfull=([^\n]+)(?:\n|$)/;
+const STATS = /^slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m;
+const MARKS = ['<<slim stub>>', '<<fnd-jsx-slim>>'];
+const COMPRESSED_TAIL = /\n\nslim: compressed [\d,]+ B → ([\d,]+) B \([+−]\d+\.\d%\)\n\n<<full=([^\n]+) original_result>>$/;
+const STUB_HEAD = /^<<slim stub>> [^\n]*\nslim: stub [\d,]+ B → ([\d,]+) B \([+−]\d+\.\d%\)\nfull=([^\n]+)(?:\n|$)/;
 const TAG_WINDOW = 4096;
 
 function emittedTag(t) {

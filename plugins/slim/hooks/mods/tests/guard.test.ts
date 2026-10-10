@@ -57,18 +57,25 @@ describe('G1 an unwindowed Read of a big spill', () => {
     test(`${name} over the inline budget: denied with the pointer, the tool never runs, one denied access line`, async ($, on) => {
       const w = world(on, { sizes: { [path]: 120_000 } })
       const r = await $.tool.call({ tool: 'Read', file_path: path } as any)
-      expect(r.deny).toBe(denyText(path, 120_000))
+      expect(r.deny).toBe(denyText(path, 120_000, true))
       expect(w.calls).toEqual([])
       expect(w.access).toEqual([{ v: 1, tool: 'Read', via: 'Read', spills: [path], denied: true, cwd: '/repo' }])
     })
   }
 
   test('the pointer names a windowed Read, view and lookup on one line', () => {
-    const t = denyText(ORIG, 120_000)
+    const t = denyText(ORIG, 120_000, true)
     expect(t.includes('\n')).toBe(false)
     expect(t).toContain('offset/limit')
     expect(t).toContain('mcp__slim__view({ path, jq })')
     expect(t).toContain('mcp__slim__lookup({ path, question })')
+  })
+
+  test('SLIM_LOOKUP=0: the pointer names no lookup tool', async ($, on) => {
+    world(on, { env: { SLIM_LOOKUP: '0' }, sizes: { [ORIG]: 120_000 } })
+    const r = await $.tool.call({ tool: 'Read', file_path: ORIG } as any)
+    expect(r.deny).toBe(denyText(ORIG, 120_000, false))
+    expect(r.deny).not.toContain('lookup')
   })
 })
 
@@ -124,7 +131,7 @@ describe('G2 what passes', () => {
 
   test('SLIM_DEBUG unset: the guard still denies, nothing is recorded', async ($, on) => {
     const w = world(on, { env: {}, sizes: { [ORIG]: 120_000 } })
-    expect((await $.tool.call({ tool: 'Read', file_path: ORIG } as any)).deny).toBe(denyText(ORIG, 120_000))
+    expect((await $.tool.call({ tool: 'Read', file_path: ORIG } as any)).deny).toBe(denyText(ORIG, 120_000, true))
     await $.tool.call({ tool: 'Read', file_path: ORIG, limit: 50 } as any)
     expect(w.access).toEqual([])
   })

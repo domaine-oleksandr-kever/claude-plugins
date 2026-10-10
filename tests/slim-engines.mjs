@@ -2,10 +2,10 @@
 // Suite for plugins/slim/scripts/engines/ — slim's compression library — exercised the way an embedder
 // would: compress() / sniff() / peek() as pure functions, no environment, no temp dirs (except the
 // CONTRACT.md server example), maxMs:0 for determinism. Rows: ES sniff, EC compress, EG guarantees
-// (never throws, deterministic, never writes), EP parity against Headroom's fixtures and the frozen
-// compressor copies, EF generators equal the committed fixtures, EX the contract's example runs, EL the
-// layer's purity, EN the figma-nodes engine on synthetic REST nodes responses, EM media planning, EQ the
-// jq narrowing the view tool runs before an engine.
+// (never throws, deterministic, never writes), EP parity against Headroom's fixtures, EF generators
+// equal the committed fixtures, EX the contract's example runs, EL the layer's purity, EN the
+// figma-nodes engine on synthetic REST nodes responses, EM media planning, EQ the jq narrowing the
+// view tool runs before an engine.
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -220,6 +220,10 @@ function ecRows() {
     const lines = TESTOUT.split('\n');
     check('EC-test-output-window', r.decision === 'compressed' && r.engine === 'text' && r.text.startsWith(lines.slice(0, 3).join('\n')) && r.text.endsWith(lines.slice(-4).join('\n')), r.text.slice(-200));
     check('EC-test-output-lines-verbatim', r.text.split('\n').filter((l) => !l.startsWith('[slim: ')).every((l) => lines.includes(l)), 'a line was rewritten');
+  }
+  {
+    const r = compress({ data: `header\n${'x'.repeat(50000)}\ntail` }, { ...O, engine: 'text', plainBytes: 8192, budgetBytes: 12288 });
+    check('EC-giant-middle-line', r.decision === 'compressed' && bytes(r.text) > 6144 && bytes(r.text) <= 12288 && / B hidden\]/.test(r.text), `${bytes(r.text)} ${r.text.slice(0, 80)}`);
   }
   {
     const r = compress({ data: DIFF }, { ...O, plainBytes: 8192, budgetBytes: 8192 });
@@ -656,7 +660,6 @@ const EC = ecRows();
   eq('EP-crush-constants', T0, { maxItems: 15, first: 0.3, last: 0.15, variance: 2 });
 
   const log = require(path.join(ENGINES, 'log.cjs'));
-  const frozen = require(path.join(ROOT, 'plugins/fnd/scripts/log-slim.cjs'));
   const MAP = {
     dedupe_warnings: 'dedupeWarnings', enable_ccr: 'enableCcr', error_context_lines: 'errorContextLines', keep_first_error: 'keepFirstError',
     keep_last_error: 'keepLastError', keep_summary_lines: 'keepSummaryLines', max_errors: 'maxErrors', max_stack_traces: 'maxStackTraces',
@@ -668,9 +671,7 @@ const EC = ecRows();
     const p = JSON.parse(readFileSync(path.join(ldir, f), 'utf8'));
     const cfg = { ccrStore: true };
     for (const [k, v] of Object.entries(p.config || {})) if (MAP[k]) cfg[MAP[k]] = v;
-    const got = log.compressLog(p.input, cfg);
-    eq(`EP-log:${f.slice(0, 8)}`, got, frozen.compressLog(p.input, cfg));
-    if (got.compressed === p.output.compressed) upstreamExact++;
+    if (log.compressLog(p.input, cfg).compressed === p.output.compressed) upstreamExact++;
   }
   eq('EP-log-upstream-byte-exact', upstreamExact, 19);
 }
@@ -696,7 +697,7 @@ const EC = ecRows();
   const code = `\`\`\`ts\n${Array.from({ length: 900 }, (_, i) => `const v${i} = ${i};`).join('\n')}\n\`\`\``;
   eq('ESP-fenced-code', spans(code), []);
   eq('ESP-already-slim-after', spans(`${ISSUES}\n\nslim: compressed 1 B → 1 B (−0.0%)\n\n<<full=/x original_result>>`), []);
-  eq('ESP-already-slim-inside', spans(`${ISSUES.replace('"ACME-0"', '"<<full=/x/fnd-prompt-json-1.json original_result>>"')}`), []);
+  eq('ESP-already-slim-inside', spans(`${ISSUES.replace('"ACME-0"', '"<<full=/x/slim-prompt-1.json original_result>>"')}`), []);
   const truncated = `{"issues": [${ISSUES}, ${'{"k": 1}, '.repeat(1200)}`;
   eq('ESP-truncated-paste-rail', spans(truncated).filter((x) => x.kind === 'json'), []);
   const adv = '{"a":'.repeat(200000);

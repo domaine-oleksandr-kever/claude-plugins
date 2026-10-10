@@ -220,6 +220,14 @@ export function textKey(s: string): string {
   return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0')
 }
 
+/** What a Bash call gives the core to read: an error's text, the host's saved-output file, else stdout. */
+export function commandSource(b: { result?: unknown; text?: string; isError?: true }): { text: string } | { host_path: string } {
+  const rec = (b.result ?? {}) as { stdout?: unknown; persistedOutputPath?: unknown }
+  if (b.isError === true) return { text: String(b.text ?? '') }
+  if (typeof rec.persistedOutputPath === 'string') return { host_path: rec.persistedOutputPath }
+  return { text: typeof rec.stdout === 'string' ? rec.stdout : String(b.text ?? '') }
+}
+
 /** A shallow copy of `obj` without `keys`: a tool.call input less the engine's own fields. */
 export function omit<T extends object>(obj: T, keys: readonly string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -259,25 +267,20 @@ export function bareCurl(command: string): boolean {
   return BARE_CURL.test(command)
 }
 
-/** The first http(s) URL a command names, or null. */
-export function curlUrl(command: string): string | null {
-  return /https?:\/\/[^\s'"<>|;]+/.exec(command)?.[0] ?? null
-}
-
 /** A raw SLIM_TOAST_MS: whole ms, floored at 1000; invalid → 5000. */
 export function toastMs(raw: string | null | undefined): number {
   const n = Number(String(raw ?? '').trim())
   return Number.isFinite(n) && n > 0 ? Math.max(Math.round(n), 1000) : 5000
 }
 
-// The same constants as scripts/slim.cjs: a real notice is small and names its file right after the phrase.
+// The same constants as scripts/slim.cjs and delivery/emit.cjs (tests/slim-fixtures.mjs S24): a real
+// notice is small and names its file right after the phrase.
 const OVERFLOW_MSG = 'exceeds maximum allowed tokens'
 const OVERFLOW_PATH = /(\/[^\s"'\\]*tool-results\/[^\s"'\\]+)/
 const OVERFLOW_WINDOW = 4096
 const OVERFLOW_MAX_BYTES = 8192
-const LEGACY_STATS = /^fnd-mcp-slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m
-const OWN_STATS = /^slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m
-const MARKS = ['<<fnd-mcp-slim stub>>', '<<slim stub>>', '<<fnd-jsx-slim>>']
+const STATS = /^slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m
+const MARKS = ['<<slim stub>>', '<<fnd-jsx-slim>>']
 
 export type HostStub = { text: string; path: string }
 
@@ -316,7 +319,7 @@ export function resultBytes(result: unknown): number {
 }
 
 /**
- * True when the result is already a slimmer's output by fnd's rule: no larger than a stub can be and
+ * True when the result is already slim's output: no larger than a stub can be and
  * carrying a stub or jsx mark, or a `<<full=` handle beside a stats line. A bigger one goes to the core,
  * which alone can check that its handle names a spill this user owns.
  */
@@ -332,8 +335,7 @@ export function alreadySlimTexts(ts: readonly string[], bound: number): boolean 
   let sum = 0
   for (const t of ts) sum += utf8Bytes(t)
   if (sum > bound) return false
-  const isStats = (t: string) => LEGACY_STATS.test(t) || OWN_STATS.test(t)
-  return ts.some(t => MARKS.some(m => t.startsWith(m)) || (t.includes('<<full=') && isStats(t)))
+  return ts.some(t => MARKS.some(m => t.startsWith(m)) || (t.includes('<<full=') && STATS.test(t)))
 }
 
 function firstText(result: unknown): string | null {

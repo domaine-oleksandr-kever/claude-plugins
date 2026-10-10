@@ -3,11 +3,16 @@
 'use strict';
 
 const os = require('os');
+const path = require('path');
 
 const ENV = process.env;
 
-// The spill root: SLIM_DIR when set, else the system temp dir.
-const spillRoot = () => ENV.SLIM_DIR || os.tmpdir();
+// The spill root: SLIM_DIR when absolute (a leading `~/` expands to the home dir), else the system temp dir.
+function spillRoot() {
+  const raw = ENV.SLIM_DIR || '';
+  const dir = raw.startsWith('~/') ? path.join(os.homedir(), raw.slice(2)) : raw;
+  return path.isAbsolute(dir) ? dir : os.tmpdir();
+}
 const ttlRaw = () => ENV.SLIM_TTL;
 
 // `1|true|yes|on` = key events, an integer ≥ 2 = everything, anything else = off.

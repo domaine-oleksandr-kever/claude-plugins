@@ -28,9 +28,11 @@ import {
 
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 
-export const DENY_TEXT =
-  'slim: a bare curl of a page is turned off here (SLIM_CURL=deny) — for one fact call mcp__slim__lookup({ url, question }); ' +
-  'for the page content use WebFetch(url, prompt).'
+/** `lookup` = the lookup tool is registered (SLIM_LOOKUP is not 0). */
+export function denyText(lookup: boolean): string {
+  return 'slim: a bare curl of a page is turned off here (SLIM_CURL=deny) — ' +
+    (lookup ? 'for one fact call mcp__slim__lookup({ url, question }); for the page content use WebFetch(url, prompt).' : 'use WebFetch(url, prompt).')
+}
 
 type $ = EngineInterface
 
@@ -42,8 +44,7 @@ async function switchOf($: $, ch: SlimChannel): Promise<string | undefined> {
     case 'read': return $.env.get('SLIM_READ')
     case 'webfetch':
     case 'websearch': return $.env.get('SLIM_WEB')
-    case 'grep':
-    case 'glob': return $.env.get('SLIM_GREP')
+    case 'grep': return $.env.get('SLIM_GREP')
     case 'agent': return $.env.get('SLIM_AGENT')
     case 'attachment': return $.env.get('SLIM_ATTACH')
     case 'prompt': return $.env.get('SLIM_PROMPT')
@@ -101,7 +102,7 @@ export function registerIntake(on: On): void {
     const args = e as unknown as Record<string, unknown>
     const tool = String(e.tool)
     if (tool === 'Bash' && /\bcurl\b/.test(String(args.command ?? ''))) {
-      if ((await $.env.get('SLIM_CURL')) === 'deny' && bareCurl(String(args.command))) return { deny: DENY_TEXT }
+      if ((await $.env.get('SLIM_CURL')) === 'deny' && bareCurl(String(args.command))) return { deny: denyText((await $.env.get('SLIM_LOOKUP')) !== '0') }
     }
 
     // Never race next: returning while it is pending aborts what runs beneath.

@@ -7,7 +7,7 @@
  * in a row), `html` (a `<!doctype html>` / `<html>` line through its `</html>` tag), `log` (a run of
  * timestamp- or level-led lines and their stack frames, confirmed by the log detector), and a fenced
  * block whose body sniffs as one of those (the span is the body; the fence lines stay). Prose is never
- * a span, and neither is a span that already carries a slim or fnd handle or stats line.
+ * a span, and neither is a span that already carries a slim handle or stats line.
  */
 'use strict';
 
@@ -25,8 +25,8 @@ const LOG_START = /^\s*(?:\[?\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}|\[?\d{4}\/\d{2}\/\
 const LOG_STACK = /^(?:\s+at\s+(?:async\s+|new\s+)?\S+(?:\s+\(.*\))?\s*$|\s+File "[^"]+", line \d+|\s*Caused by\b|\s*\.\.\. \d+ more)/;
 const LOG_MORE = /^(?:\t|\s+\.\.\.)/;
 // A handle, a stub mark or a stats line inside the span, or a stats line / handle right after it.
-const MARK_INSIDE = /<<full=|<<slim stub>>|<<fnd-mcp-slim stub>>|fnd-prompt-json-|^(?:slim|fnd-mcp-slim|fnd-prompt-slim): (?:compressed|stub) /m;
-const MARK_AFTER = /^\s*(?:(?:slim|fnd-mcp-slim|fnd-prompt-slim): (?:compressed|stub) |<<full=)/;
+const MARK_INSIDE = /<<full=|<<slim stub>>|^slim: (?:compressed|stub) /m;
+const MARK_AFTER = /^\s*(?:slim: (?:compressed|stub) |<<full=)/;
 
 /**
  * Every JSON object or array in `text` of at least `min` UTF-8 bytes that JSON.parse accepts, in order

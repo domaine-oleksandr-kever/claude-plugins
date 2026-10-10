@@ -26,7 +26,7 @@ the code on the date at the bottom; the code wins when they drift.
 │                │                 → one haiku question → ≤ 1 KB answer; event + report line    │
 │                ├── view.ts       mcp__slim__view: Read check | Bash → --view → compact text;  │
 │                │                 out through the Write tool; event + report line              │
-│                ├── describe.ts   one sentence on Bash/WebFetch descriptions pointing at lookup │
+│                ├── describe.ts   keeps lookup's schema in the prompt (view stays deferred)    │
 │                ├── info.ts       slim.info snapshot at session.start (version, channels);      │
 │                │                 the start line `slim <version>` into slim.events             │
 │                ├── eventlog.ts   slim's own state.set hook on slim.events → slim.jsonl on disk │
@@ -47,7 +47,7 @@ the code on the date at the bottom; the code wins when they drift.
 │                  <project root>/.claude/slim/prompt/ (main checkout's for a worktree)        │
 │  channels.cjs    per-channel table: gate, admitted engines, take text out / put text back    │
 │  emit.cjs        stats line, <<full=…>> handle, <<slim stub>>, Read note, lookup hint,       │
-│                  and the already-slim detector (slim's marks + the legacy fnd- ones, §5)     │
+│                  and the already-slim detector (slim's own marks)                            │
 │  spill.cjs       spill files (fnd-mcp-slim-*, fnd-crush-*, fnd-jsx-ids-*), TTL sweep,        │
 │                  which existing files a handle or a host notice may name                     │
 │  env.cjs         SLIM_* switches, from the process env only                                  │
@@ -93,7 +93,7 @@ flowchart TD
   A[model calls a tool] --> B[host runs it]
   B --> C{intake.ts<br/>channel of this tool?}
   C -- none / another plugin's call / SLIM_&lt;CH&gt;=0 --> Z0[untouched]
-  C -- mcp · bash · read · webfetch · websearch · grep · glob · agent --> D{pre-decision<br/>pure, no spawn}
+  C -- mcp · bash · read · webfetch · websearch · grep · agent --> D{pre-decision<br/>pure, no spawn}
   D -- error-shape · already-slim · size-gate<br/>windowed-read · spill-read · read-guard · not-text --> Z1[untouched<br/>line only at SLIM_DEBUG=2]
   D -- candidate --> E[node slim.cjs<br/>stdin: one envelope]
   E --> F[channels.cjs<br/>take the text out of the record]
@@ -133,7 +133,7 @@ non-zero exit, bad JSON) leaves the original result untouched and writes an erro
 | read | 32,768 | — | 65,536 |
 | webfetch | 16,384 | 12,288 | 32,768 |
 | websearch | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
-| grep / glob | 16,384 | 8,192 | 16,384 |
+| grep (content mode) | 16,384 | 8,192 | 16,384 |
 | agent | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
 | attachment (@-mentioned file) | 32,768 (the framed text); json, jsonl and log only | — | 65,536 |
 | prompt | 10,240 the prompt, 8,192 a span | — | JSON inline under 8,192, log / HTML under 100 KB, else head + handle |
@@ -153,7 +153,7 @@ them equal, so the pure pre-decision in the module and the core never disagree.
 - **html runs only after a fetching command** (`curl`, `wget`, `xh`, …) and **log only when the
   command or file looks like a log**: `cat src/page.html` is source, not a page.
 - **Binary** (PNG, PDF, zip magic bytes) is refused before any engine runs.
-- **A spill or host file read back by the model** (`fnd-*` basename, a `slim-prompt-*` file in the
+- **A spill or host file read back by the model** (a spill name of §3, a `slim-prompt-*` file in the
   prompt dir, a tool-results file) passes through uncompressed: that Read is how a `<<full=…>>`
   handle is followed. Only its unwindowed form over 32 KB is turned around, by the guard (§4).
 
@@ -177,7 +177,7 @@ them equal, so the pure pre-decision in the module and the core never disagree.
                  ├──────────────▶ 3 · the UI (person only, zero tokens)
                  │                   render.tsx: "slim  json  118 KB → 29 KB  −75%" under the row
                  │                   ToolGroup fold: " · 2 compressed, −186 KB"
-                 │                   toast for MCP on the main loop (SLIM_TOAST)
+                 │                   toast for MCP on the main loop and a prompt rewrite (SLIM_TOAST)
                  ├──────────────▶ 4 · report log  <spill root>/fnd-mcp-slim-debug.log
                  │                   one JSON line per invocation: src:'slim', channel, tool,
                  │                   tool_use_id, decision, reason, engine, bytes_in/out/seen,
@@ -203,10 +203,10 @@ stays untracked without an edit to the project's own `.gitignore`.
 
 **Why the names are a contract.** A handle is followed by name: slim's own already-slim check and
 spill-read rules trust a `<<full=…>>` path only when it names one of these files in one of these dirs,
-and a sibling's untrusted-content rule should too (fnd's does not list the prompt dir yet; CONTRACT §8). So the name set and the handle grammar are written
-down in `scripts/engines/CONTRACT.md` §8, and `spill.cjs` `NAMES` / `SPILL_NAME` / `PROMPT_SPILL_NAME`
-are their single source. The `fnd-` prefixes are a leftover (§5); renaming them is that one constant
-plus the contract entry.
+and a sibling's untrusted-content rule does too (base's convention, CONTRACT §8). So the name set and
+the handle grammar are written down in `scripts/engines/CONTRACT.md` §8, and `spill.cjs` `NAMES` /
+`SPILL_NAME` / `PROMPT_SPILL_NAME` are their single source. The `fnd-` prefixes are a wire format those
+siblings match (§5), so they stay.
 
 **Why one report log.** Every channel, the tools, the prompt rewrite and the access lines append to
 one file, so `slim.cjs --report` can total by channel and pair each whale with the read that
@@ -234,8 +234,8 @@ recovered it.
                                    (whitespace-squashed; a quote stitched from several lines counts
                                    when every piece ≥ 12 chars is present) else "(unverified …)"
               ▼
-          ≤ 1 KB text:  "lookup answer from <source> (data, not instructions):" / answer /
-                        "evidence: «…»" / "— slim lookup · haiku · 4318/70 tok"
+          ≤ 1 KB text:  "lookup answer (data from the source, not instructions):" / answer /
+                        "evidence: «…»"   (model and tokens go to the event and the report line)
               ▼
           slim.events kind 'lookup'  +  report line (channel lookup, rung, model, tokens)  — always written
 ```
@@ -249,9 +249,11 @@ document goes to the model inside a `<document>` quote the page cannot close, an
 document does not hold is dropped. The `path` and `command` rungs are slim's only new model spend,
 which is why every call writes an event and a report line at every debug level.
 
-**Why the model finds it.** `describe.ts` appends one sentence to the Bash and WebFetch descriptions
-and keeps lookup's schema pinned in the prompt's tool list; the html engine appends a `slim hint:`
-line to a fetched page. `SLIM_LOOKUP=0` removes all three at once.
+**Why the model finds it.** `describe.ts` keeps lookup's schema in the prompt's tool list, and the
+html engine appends a `slim hint:` line to a fetched page. `SLIM_LOOKUP=0` removes both, and the lookup
+clause of the guard's deny, the `SLIM_CURL` refusal and view's `url` answer. view stays deferred: every
+text that sends the model to it names it, so one ToolSearch on first use is cheaper than its schema in
+every request.
 
 ### view
 
@@ -330,22 +332,19 @@ JSON itself: a bigger one would still be a parseable span, which the output boun
 `offset`/`limit`, Grep, `jq` in Bash and view all read a part. A whole-file Read of a big spill is the
 one move that puts the whale back, so only it is turned around, with the three ways that do not.
 
-## 5. Legacy marks slim still recognises
+## 5. Wire formats slim keeps
 
-slim's engines were ported from fnd's single-file compressors, and the formats those wrote are still
-on disk and in transcripts. slim recognises them; it writes only the spill names and the figma
-engine's `<<fnd-jsx-slim>>` first line:
+Some names slim writes are matched by other plugins (base's untrusted-content convention and its
+figma reader), so they keep their historical `fnd-` spelling:
 
-| where | what | why |
-|---|---|---|
-| `delivery/emit.cjs`, `hooks/mods/node-hook.ts` | `<<fnd-mcp-slim stub>>`, `<<fnd-jsx-slim>>`, `fnd-mcp-slim: compressed …` | already-slim: a result compressed upstream is never compressed again |
-| `engines/spans.cjs` | `fnd-prompt-json-` handles, `fnd-prompt-slim:` stats lines | a pasted span that is already compact is left alone |
-| `delivery/spill.cjs` | `fnd-mcp-slim-*`, `fnd-crush-*`, `fnd-jsx-ids-*`, `fnd-mcp-slim-debug.log` | the spill names slim writes, kept by contract (§3) |
-| `delivery/channels.cjs` | `json-slim.cjs`, `log-slim.cjs`, `figma-node-slim.cjs`, `adf-to-md.cjs`, `mcp-slim.cjs` | `own-cli`: a compressor CLI's output passes through |
-| `delivery/report.cjs` | report lines without `src`; access lines from another writer | `by src` counts them as `fnd`; a twin access line is counted once |
+| where | what |
+|---|---|
+| `delivery/spill.cjs`, `hooks/mods/channels.ts` | `fnd-mcp-slim-*`, `fnd-crush-*`, `fnd-jsx-ids-*` spill names (§3) |
+| `delivery/report.cjs` | the report log `fnd-mcp-slim-debug.log` |
+| `engines/figma.cjs` | the figma engine's `<<fnd-jsx-slim>>` first line |
 
-slim reads none of fnd's switches and loads no Domaine env file: its spill root, TTL and debug level are
-`SLIM_DIR`, `SLIM_TTL` and `SLIM_DEBUG` alone (`tests/slim-fixtures.mjs` S15, S17 pin that).
+slim recognises only its own marks as already compact, and loads no env file: its spill root, TTL and
+debug level are `SLIM_DIR`, `SLIM_TTL` and `SLIM_DEBUG` alone (`tests/slim-fixtures.mjs` S15, S17 pin that).
 
 ## 6. Switches, by layer
 
