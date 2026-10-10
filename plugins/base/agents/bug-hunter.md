@@ -14,7 +14,8 @@ read deeply and **never edit**; return data, not chatter or preamble.
 
 - The **base** branch (diff scope = merge-base to the working tree:
   `git diff "$(git merge-base <base> HEAD)"` — staged/unstaged edits count; untracked files the
-  brief names are new in this change — `Read` them whole).
+  brief names are new in this change — `Read` them whole; build-dirtied paths it names are a
+  build's output, not the change — skip them).
 - Optionally a **file group** (you may be one of several hunters on a large diff).
 - Optionally **documented ceilings** — intentional simplifications the developer already
   accepted (`ceiling:` entries from the task workspace `notes.md`). Don't report those as

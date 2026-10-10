@@ -56,12 +56,31 @@ idx="$(git rev-parse --git-dir)/base-review-index"
 cp "$(git rev-parse --git-dir)/index" "$idx"
 GIT_INDEX_FILE="$idx" git add -N -- ':/' ':(top,exclude).claude/' ':(top,exclude)docs/technical-approaches/' \
   ':(top,exclude,glob)**/.env*' ':(top,exclude,glob)**/.env*/**' ':(top,exclude,glob)**/settings.local.json'
-diff_hash=$(GIT_INDEX_FILE="$idx" git diff "$mb" | git hash-object --stdin)
+# The caller sets ws=.claude/tasks/<work-id> when a task workspace exists (unset → no exclusion):
+# the last `build-dirtied:` line of its notes.md names tracked files a preview build rewrote, which
+# leave the scope. Only a token that is exactly a tracked file's path reaches git.
+ex=(); dirty=
+if [ -n "${ws:-}" ] && [ -f "$(git rev-parse --show-toplevel)/$ws/notes.md" ]; then
+  while read -r dash day kind rest || [ -n "$kind" ]; do
+    [ "$kind" = build-dirtied: ] && dirty=$rest
+  done < "$(git rev-parse --show-toplevel)/$ws/notes.md"
+fi
+while [ -n "$dirty" ]; do
+  read -r p dirty <<EOF
+$dirty
+EOF
+  [ "$(git -c core.quotePath=false ls-files --full-name -- ":(top,literal)$p" 2>/dev/null)" = "$p" ] \
+    && ex+=(":(top,literal,exclude)$p")
+done
+diff_hash=$(GIT_INDEX_FILE="$idx" git diff "$mb" -- ':/' ${ex[@]+"${ex[@]}"} | git hash-object --stdin)
 ```
 
-The **scope diff** is `GIT_INDEX_FILE="$idx" git diff "$mb"` (add `--name-only` for the
-reviewed-files list) — every step below that reads the diff uses it. `base-review-index` lives
-beside the marker and is rebuilt on every run, never committed.
+The **scope diff** is `GIT_INDEX_FILE="$idx" git diff "$mb" -- ':/' ${ex[@]+"${ex[@]}"}` (add
+`--name-only` for the reviewed-files list; the `${ex[@]+…}` form keeps an empty `ex` safe under
+`set -u` in bash 3.2) — every step below that reads the diff uses it. Files a preview build
+rewrote (the workspace's last `build-dirtied:` line) are a build artifact, not the developer's
+change: `ex` keeps them out of the scope, the hash and the agents' file groups.
+`base-review-index` lives beside the marker and is rebuilt on every run, never committed.
 
 Read it:
 
@@ -133,7 +152,7 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   (`(AC 1a)`, `(TA 1a)`, "Acceptance Criteria", "Technical Approach", "Steps to Test"):
 
   ```bash
-  GIT_INDEX_FILE="$idx" git diff "$mb" | grep -nE '^\+[^+]' \
+  GIT_INDEX_FILE="$idx" git diff "$mb" -- ':/' ${ex[@]+"${ex[@]}"} | grep -nE '^\+[^+]' \
     | grep -E '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates (the scope diff; ^\+[^+] skips +++ headers)
   git status --porcelain | grep '^??'                                          # D candidates
   ```
@@ -160,7 +179,8 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
 
   Spawn it **in parallel** with the `base:change-reviewer` agent(s) — same diff, different
   lens; on a large diff reuse the same file-groups. Pass it the `base`, its file group (on a
-  small diff, the scope diff's untracked new files), and the documented ceilings (`ceiling:` entries from the task workspace `notes.md`)
+  small diff, the scope diff's untracked new files), the build-dirtied paths `ex` excluded, and
+  the documented ceilings (`ceiling:` entries from the task workspace `notes.md`)
   when a workspace exists.
 
 - **Emphasis by caller** — assigned per skill in §3 → Per-skill entry behaviour.
@@ -205,7 +225,7 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
   staged, unstaged and untracked work in one go — which files, rough nature (comments/style vs. logic):
 
   ```bash
-  GIT_INDEX_FILE="$idx" git diff "$prev_head" --stat   # $idx per the §1 block
+  GIT_INDEX_FILE="$idx" git diff "$prev_head" --stat -- ':/' ${ex[@]+"${ex[@]}"}   # $idx, ex per the §1 block
   ```
 
 - Offer: **`[ full re-review ] / [ only the changed files ] / [ skip ]`**.

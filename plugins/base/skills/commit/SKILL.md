@@ -32,18 +32,20 @@ marker semantics are unclear):
   `/base:pre-commit-review` first; proceed if the developer declines.
 - **Marker exists** → continue; don't re-run a review unprompted.
 - **Re-stamp around the commit** — before step 6 compute the current `diff_hash` with review-flow.md
-  §1's scope + hash block (it covers untracked files; a bare `git diff | git hash-object` misses
-  them); if it equals the marker's, refresh the marker after the commit succeeds, per review-flow.md
-  §1 → *Re-stamp after a commit whose hooks rewrote the tree* (that block is the full rule). Why:
-  husky / lint-staged reformat files during `git commit`, drifting the hash so a PR skill's
-  correctness backstop re-runs `base:bug-hunter` over identical code. Hashes differ **before** the
-  commit → no re-stamp.
+  §1's scope + hash block, `ws=.claude/tasks/<work-id>` set when a task workspace exists (it covers
+  untracked files; a bare `git diff | git hash-object` misses them); if it equals the marker's,
+  refresh the marker after the commit succeeds, per review-flow.md §1 → *Re-stamp after a commit
+  whose hooks rewrote the tree* (that block is the full rule). Why: husky / lint-staged reformat
+  files during `git commit`, drifting the hash so a PR skill's correctness backstop re-runs
+  `base:bug-hunter` over identical code. Hashes differ **before** the commit → no re-stamp.
 
 (Your own untracked-file check in step 2 still runs regardless.)
 
 ## Workflow
 
 1. Run `git status` and `git diff --staged` (and `git diff` for unstaged) to see what's being committed.
+   Snapshot `git status --porcelain` and store the working-copy blob of each path whose second
+   column is `M`: one `git hash-object -w -- <path…>` call.
 2. **Check for untracked referenced files** — cross-check `git status --porcelain | grep '^??'` (or
    `git ls-files --error-unmatch <path>`) against references in the diff; a referenced file that
    exists on disk but is untracked → `git add` it so it ships with the commit.
@@ -68,12 +70,14 @@ marker semantics are unclear):
    )"
    ```
 7. **Files the hooks left modified.** After the commit, run `git status --porcelain` and compare it
-   with step 1's `git status`: a tracked path that was clean before the commit, or went into it, and
-   is modified now was rewritten by the repo's hooks (a pre-commit build, a formatter). List those
-   paths under the report, say the hooks changed them, and for a file the build owns (a build
+   with step 1's snapshot. A tracked path whose second column was blank in step 1 (clean, or fully
+   staged) and is modified now was rewritten by the repo's hooks (a pre-commit build, a formatter):
+   list it under the report, say the hooks changed it, and for a file the build owns (a build
    artifact) offer `git checkout -- <file>` — never restore it, and never stage it, without the
-   developer's yes. A path already modified before the commit was left out of it on purpose: never
-   offer to restore it.
+   developer's yes. A path whose second column was `M` in step 1 (` M`, `MM`, `AM`, `RM`) holds
+   unstaged work: list it only when `git hash-object` now differs from its step-1 blob, or it is
+   clean now — say the hooks rewrote it, show `git diff <file>` and the step-1 blob id
+   (`git cat-file -p <blob>` gets that version back), and never offer a restore.
 
 ## Next
 

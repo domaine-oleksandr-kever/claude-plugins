@@ -18,7 +18,8 @@ and the developer invokes it themselves.
 This skill is the primary home of base's review flow. Follow the shared contract in
 `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`:
 
-- Compute `branch` / `base` / `diff_hash` per §1 and read the marker at
+- Compute `branch` / `base` / `diff_hash` per §1 — with `ws=.claude/tasks/<work-id>` set in the
+  same shell when a task workspace exists — and read the marker at
   `"$(git rev-parse --git-dir)/.base-review"` (resolved, never the literal `.git/` path — a linked
   worktree's `.git` is a file); **first review on this branch** → run the full pass below; **already
   reviewed** → the §3 ask (`[ full re-review / only the changed files / skip ]`) — honour the choice.
@@ -51,11 +52,11 @@ rules. base detects none itself. With none → `profile: none` (the repo's own r
 - **F is delegated to `base:bug-hunter`, spawned in parallel with the change-reviewer(s)** when the
   review-flow correctness gate holds (the diff touches logic, control flow or request handling — pure
   copy/CSS/locale diffs skip it, say so in one line). Pass it the `base`, the untracked new files
-  from the step-1 list, the documented `ceiling:` entries from the workspace `notes.md` when a
-  workspace exists, and any domain hints the team plugin's section gives. Its findings join the
-  step-3 plan as check-F rows, failure scenario included — the agent reports findings, not fixes:
-  derive each row's **Proposed change** from the failure scenario yourself and carry the finding's
-  Severity/Verdict into the row.
+  from the step-1 list, the build-dirtied paths §1 excluded, the documented `ceiling:` entries from
+  the workspace `notes.md` when a workspace exists, and any domain hints the team plugin's section
+  gives. Its findings join the step-3 plan as check-F rows, failure scenario included — the agent
+  reports findings, not fixes: derive each row's **Proposed change** from the failure scenario
+  yourself and carry the finding's Severity/Verdict into the row.
 
 The five checks (A, C and F full definitions live in the agents — their single home):
 
@@ -110,9 +111,9 @@ message and reports the result). Never run `git commit` from this skill. If the 
 task workspace, tick `pre-commit-review` in its `progress.md` when the series has that row.
 
 **Write the marker** with review-flow's marker block, recomputing `diff_hash` from the post-edit tree
-(`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §1), so `/base:commit` and a team PR skill don't
-re-review redundantly. Append the `correctness_hash` line only when check F was handled this pass
-(`base:bug-hunter` ran, or the gate said not applicable).
+(`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §1, `ws` set as in step 0), so `/base:commit`
+and a team PR skill don't re-review redundantly. Append the `correctness_hash` line only when
+check F was handled this pass (`base:bug-hunter` ran, or the gate said not applicable).
 
 ## Guardrails
 

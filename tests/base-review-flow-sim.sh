@@ -42,13 +42,13 @@ new_repo() { # new_repo <name> — main with one commit, cwd untouched
 commit() { echo "$2" >> "$R/$1"; git -C "$R" add "$1"; git -C "$R" commit -qm "$2"; }
 sha() { git -C "$R" rev-parse "$1"; }
 
-# run_block [shell] [subdir] — prints base, mb, diff_hash, then the scope list; the scope diff -> $TMP/stream
+# run_block [shell] [subdir] — ws from the environment; prints base, mb, diff_hash, then the scope list; the scope diff -> $TMP/stream
 run_block() {
   local sh="${1:-$BASH_BIN}"
   (cd "$R/${2:-}" && "$sh" -c '. "$1"
     printf "%s\n%s\n%s\n" "$base" "$mb" "$diff_hash"
-    GIT_INDEX_FILE="$idx" git diff "$mb" > "$2"
-    GIT_INDEX_FILE="$idx" git diff --name-only "$mb"' _ "$BLOCK" "$TMP/stream")
+    GIT_INDEX_FILE="$idx" git diff "$mb" -- ":/" ${ex[@]+"${ex[@]}"} > "$2"
+    GIT_INDEX_FILE="$idx" git diff --name-only "$mb" -- ":/" ${ex[@]+"${ex[@]}"}' _ "$BLOCK" "$TMP/stream")
 }
 field() { run_block | sed -n "$1p"; }
 hash_now() { field 3; }
@@ -134,6 +134,58 @@ git -C "$R" reset -q
 
 if [ -n "$ZSH_BIN" ]; then
   if [ "$(run_block "$ZSH_BIN")" = "$(run_block)" ]; then ok; else bad k-zsh "zsh and bash disagree"; fi
+fi
+
+# (m)–(p) build-dirtied: the workspace's last notes.md line drops tracked files a build rewrote
+new_repo w
+mkdir -p "$R/dist" "$R/sub"; echo v1 > "$R/dist/app.js"; echo v1 > "$R/sub/a file.txt"
+git -C "$R" add dist "sub/a file.txt"; git -C "$R" commit -qm assets
+git -C "$R" checkout -qb feat; commit f.txt f1
+clean="$(hash_now)"
+echo rebuilt >> "$R/dist/app.js"; echo rebuilt >> "$R/sub/a file.txt"
+dirty="$(hash_now)"
+WS=.claude/tasks/T-1; mkdir -p "$R/$WS"
+printf -- '- 2026-10-09 build-dirtied: t.txt\n- 2026-10-10 build-dirtied: dist/app.js' > "$R/$WS/notes.md"
+git -C "$R" checkout -q -- "sub/a file.txt"; clean_sub="$(hash_now)"; echo rebuilt >> "$R/sub/a file.txt"
+git -C "$R" checkout -q -- dist/app.js; want="$(hash_now)"; echo rebuilt >> "$R/dist/app.js"
+[ "$want" != "$clean_sub" ] || bad m-fixture "restoring dist/app.js left the hash unchanged"
+out="$(ws=$WS run_block)"
+if [ "$(echo "$out" | sed -n 3p)" = "$want" ] && ! echo "$out" | grep -qx dist/app.js \
+   && ! grep -q "^diff --git a/dist/app.js" "$TMP/stream" && echo "$out" | grep -qx "sub/a file.txt"; then ok
+else bad m-excluded "the last build-dirtied line did not drop dist/app.js alone (unterminated last line)"; fi
+if [ "$(ws=$WS run_block "$BASH_BIN" sub | sed -n 3p)" = "$want" ]; then ok
+else bad m-subdir "run from a subdirectory: the exclusion is lost"; fi
+
+echo new > "$R/n.txt"; hn="$(ws=$WS hash_now)"
+git -C "$R" add n.txt
+if [ "$hn" != "$want" ] && [ "$(ws=$WS hash_now)" = "$hn" ]; then ok
+else bad n-staged-same "with an exclusion, staging an untracked file moved the hash (or it never counted)"; fi
+git -C "$R" reset -q; rm "$R/n.txt"
+
+echo "- 2026-10-11 build-dirtied: sub/a file.txt ../x /etc/hosts dist * :(glob)** f.txt/" >> "$R/$WS/notes.md"
+if [ "$(ws=$WS hash_now)" = "$dirty" ]; then ok
+else bad o-ignored "a spaced path, ../x, an absolute path, a directory or a glob reached the exclusion"; fi
+
+if [ "$(ws=.claude/tasks/NONE hash_now)" = "$dirty" ] && [ "$(ws= hash_now)" = "$dirty" ]; then ok
+else bad p-no-workspace "no workspace notes.md: the hash changed"; fi
+if [ -n "$ZSH_BIN" ]; then
+  git -C "$R" checkout -q -- "sub/a file.txt"
+  printf -- '- 2026-10-12 build-dirtied: dist/app.js\n' >> "$R/$WS/notes.md"
+  if [ "$(ws=$WS run_block "$ZSH_BIN")" = "$(ws=$WS run_block)" ] && [ "$(ws=$WS hash_now)" = "$clean" ]; then ok
+  else bad p-zsh "zsh and bash disagree on the exclusion"; fi
+fi
+
+# (q) a non-ASCII tracked path still matches its token (git would C-quote it)
+git -C "$R" checkout -q -- .; echo v1 > "$R/é.js"; git -C "$R" add é.js; git -C "$R" commit -qm accent
+printf -- '- 2026-10-13 build-dirtied: é.js\n' >> "$R/$WS/notes.md"
+before="$(ws=$WS hash_now)"; echo rebuilt >> "$R/é.js"
+if [ "$(ws=$WS hash_now)" = "$before" ]; then ok
+else bad q-non-ascii "a build-dirtied non-ASCII path was not excluded"; fi
+
+# (r) macOS bash 3.2 under set -u: an empty ex must not abort or blank the hash
+if [ -x /bin/bash ]; then
+  if [ "$(cd "$R" && /bin/bash -uc '. "$1"; echo "$diff_hash"' _ "$BLOCK" 2>&1)" = "$(hash_now)" ]; then ok
+  else bad r-set-u "/bin/bash -u with no workspace: the block failed or the hash changed"; fi
 fi
 
 echo "base-review-flow-sim: $pass passed, $fail failed"
