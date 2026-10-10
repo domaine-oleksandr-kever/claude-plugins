@@ -77,7 +77,7 @@ declare module 'claude-code' {
       checked: string | null
       /** System prompts the engine composed through base's `prompt.compose` hook this session; 0 = the conventions never reached the model. */
       composed: number
-      /** The session id whose classic SessionStart carried the conventions as context (no surface draws: cloud, `claude -p`). */
+      /** The session id whose first user message carries the conventions as a prompt.context block (no surface draws: cloud, `claude -p`). */
       injected: string | null
       /** The prompt events seen this session (the doctor's conventions row): which ones a host fires decides how the conventions travel. */
       delivery: BaseDelivery

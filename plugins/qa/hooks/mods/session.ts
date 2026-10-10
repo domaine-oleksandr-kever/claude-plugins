@@ -11,7 +11,7 @@ export const BASE_MISSING = 'needs the base plugin — claude plugin install bas
 
 const events = atom({ plugin: 'qa', key: 'events' } as const, [] as QaEvent[])
 const started = atom({ plugin: 'qa', key: 'started' } as const, null)
-/** The session id whose classic SessionStart carried the sections as context (no surface draws: cloud, `claude -p`): prompt.compose then adds nothing. */
+/** The session id whose first user message carries the sections as a prompt.context block (no surface draws: cloud, `claude -p`): prompt.compose then adds nothing. */
 const injected = atom({ plugin: 'qa', key: 'injected' } as const, null as string | null)
 
 type $ = EngineInterface
@@ -82,17 +82,17 @@ export function registerSession(on: On): void {
     return next(e)
   })
 
-  // A session no surface draws gets its prompt composed without the plugins: the sections ride SessionStart's context.
-  on('classic.SessionStart', async ($, e, next) => {
+  // A session no surface draws gets its prompt composed without the plugins: the sections go in as a block of the first user message.
+  on('prompt.context', async ($, e, next) => {
     const r = await next(e)
-    let ctx: string | null = null
+    let text: string | null = null
     try {
-      if ((await $.session.surfaces()).length === 0) ctx = (sections($.plugin.root)).map(s => s.text).join('\n\n')
+      if ((await $.session.surfaces()).length === 0) text = (sections($.plugin.root)).map(s => s.text).join('\n\n')
     } catch {}
-    if (ctx === null) return r
+    if (text === null) return r
     const sid = String(await $.session.id())
     await update($, injected, () => sid).catch(() => {})
-    return { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] }
+    return { ...r, blocks: [...r.blocks, { name: 'qaConventions', text }] }
   })
 
   on('prompt.compose', async ($, e, next) => {

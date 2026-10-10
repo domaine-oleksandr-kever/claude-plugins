@@ -11,7 +11,7 @@ pm builds on base and requires it: the Jira and doc readers, the Jira writer, th
 the shared MCP servers (Atlassian, Notion, Shopify Dev) are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so pm runs with slim too.
 
-Current release: **pm v0.2.2**.
+Current release: **pm v0.2.3**.
 
 ## Status
 
@@ -78,7 +78,7 @@ The skills cite pm's own files by their path under pm's root (`<pm root>/…`, t
 
 pm adds one section to the main session's system prompt after Claude Code's own and base's, named
 `root` (ids are `pm:<name>`): `pm plugin root: <path>`, the directory pm's references start from. It
-never changes within a session, so the prompt cache holds. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as session-start context instead, in the first user message.
+never changes within a session, so the prompt cache holds. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as a context block of the first user message instead (`prompt.context`, beside CLAUDE.md).
 
 **Subagents** get the same line as added context at their start (Claude Code's `SubagentStart`; the
 engine has no event for a subagent's system prompt), except base's readers and writer

@@ -70,7 +70,7 @@ export function world(on: On, over: Partial<World> = {}) {
   on('session.cwd', async () => ({ value: w.root }))
   on('session.id', async () => ({ value: w.sid }))
   on('session.surfaces', async () => ({ value: w.surfaces as never }))
-  on('classic.SessionStart', async () => ({}) as never)
+  on('prompt.context', async (_$, e) => ({ blocks: e.blocks }))
   on('tool.list', async () => {
     if (!w.tools) throw new Error('no tool list')
     return { value: w.tools.map(name => ({ name, description: name, mcp: name.startsWith('mcp__') })) }

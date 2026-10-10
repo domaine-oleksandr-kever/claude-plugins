@@ -23,7 +23,7 @@ export type Row = { status: Status; name: string; detail: string }
 
 const swept = atom({ plugin: 'base', key: 'swept' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
-// Written in conventions.ts (renders through prompt.compose; the session whose start carried the conventions) and
+// Written in conventions.ts (renders through prompt.compose; the session whose first message carries the conventions) and
 // session.ts (the first prompt's slim check).
 const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
 const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
@@ -151,9 +151,9 @@ async function liveRows($: $): Promise<Row[]> {
   try {
     const renders = await read($, composed)
     const prompted = (await read($, checked)) !== null
-    const atStart = (await read($, injected)) === String(await $.session.id())
-    rows.push(atStart
-      ? { status: 'PASS', name: 'conventions', detail: 'in the session-start context: no surface draws here, so the engine composes its prompt without the plugins' }
+    const inContext = (await read($, injected)) === String(await $.session.id())
+    rows.push(inContext
+      ? { status: 'PASS', name: 'conventions', detail: 'in the first user message as a prompt.context block: no surface draws here, so the engine composes its prompt without the plugins' }
       : renders > 0
         ? { status: 'PASS', name: 'conventions', detail: `in the system prompt: ${renders} render${renders === 1 ? '' : 's'} through prompt.compose` }
         : prompted

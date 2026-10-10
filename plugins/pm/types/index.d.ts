@@ -18,7 +18,7 @@ declare module 'claude-code' {
       events: PmEvent[]
       /** The session id whose start line was written and whose base check ran: a module reload does neither again. */
       started: string | null
-      /** The session id whose classic SessionStart carried the sections as context (no surface draws: cloud, `claude -p`). */
+      /** The session id whose first user message carries the sections as a prompt.context block (no surface draws: cloud, `claude -p`). */
       injected: string | null
       /** The session id whose /pm-doctor command is registered. */
       armed: string | null

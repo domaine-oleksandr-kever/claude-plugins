@@ -23,7 +23,7 @@ export const PROFILE_TIMEOUT_MS = 5_000
 
 const events = atom({ plugin: 'fe', key: 'events' } as const, [] as FeEvent[])
 const started = atom({ plugin: 'fe', key: 'started' } as const, null)
-/** The session id whose classic SessionStart carried the sections as context (no surface draws: cloud, `claude -p`): prompt.compose then adds nothing. */
+/** The session id whose first user message carries the sections as a prompt.context block (no surface draws: cloud, `claude -p`): prompt.compose then adds nothing. */
 const injected = atom({ plugin: 'fe', key: 'injected' } as const, null as string | null)
 const profile = atom({ plugin: 'fe', key: 'profile' } as const, null)
 
@@ -172,17 +172,17 @@ export function registerSession(on: On): void {
     return next(e)
   })
 
-  // A session no surface draws gets its prompt composed without the plugins: the sections ride SessionStart's context.
-  on('classic.SessionStart', async ($, e, next) => {
+  // A session no surface draws gets its prompt composed without the plugins: the sections go in as a block of the first user message.
+  on('prompt.context', async ($, e, next) => {
     const r = await next(e)
-    let ctx: string | null = null
+    let text: string | null = null
     try {
-      if ((await $.session.surfaces()).length === 0) ctx = (await sections($)).map(s => s.text).join('\n\n')
+      if ((await $.session.surfaces()).length === 0) text = (await sections($)).map(s => s.text).join('\n\n')
     } catch {}
-    if (ctx === null) return r
+    if (text === null) return r
     const sid = String(await $.session.id())
     await update($, injected, () => sid).catch(() => {})
-    return { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] }
+    return { ...r, blocks: [...r.blocks, { name: 'feConventions', text }] }
   })
 
   on('prompt.compose', async ($, e, next) => {

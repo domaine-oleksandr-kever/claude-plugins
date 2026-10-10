@@ -11,7 +11,7 @@ be builds on base and requires it: the Jira and doc readers, the Jira writer, th
 the shared MCP servers (Atlassian, Notion, the Shopify Dev MCP) are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so be runs with slim too.
 
-Current release: **be v0.3.2**.
+Current release: **be v0.3.3**.
 
 ## Status
 
@@ -82,7 +82,7 @@ The skills cite be's own files by their path under be's root (`<be root>/…`, t
 
 be adds one section to the main session's system prompt, after Claude Code's own and base's, with
 the id `be:<name>`: `root`, the line `be plugin root: <path>` the skills resolve `<be root>` from. It
-never changes within a session, so the prompt cache holds. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as session-start context instead, in the first user message.
+never changes within a session, so the prompt cache holds. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as a context block of the first user message instead (`prompt.context`, beside CLAUDE.md).
 
 **Subagents** get the same line as added context at their start (Claude Code's `SubagentStart`),
 except base's readers and writer (`base:jira-reader`, `base:jira-writer`, `base:figma-reader`,

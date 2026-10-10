@@ -149,12 +149,12 @@ describe('/base-doctor', () => {
     expect((await doctor($)).text).toContain('PASS  conventions  in the system prompt: 2 renders through prompt.compose')
   })
 
-  t('conventions: a surfaceless session whose start carried them passes without a render', async ($, on) => {
+  t('conventions: a surfaceless session whose first message carries them passes without a render', async ($, on) => {
     world(on, { surfaces: [], manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
     await start($)
-    await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
+    await $.prompt.context({ blocks: [] })
     await submit($, 'hello')
-    expect((await doctor($)).text).toContain('PASS  conventions  in the session-start context: no surface draws here, so the engine composes its prompt without the plugins')
+    expect((await doctor($)).text).toContain('PASS  conventions  in the first user message as a prompt.context block: no surface draws here, so the engine composes its prompt without the plugins')
   })
 
   t('a slim the install record lacks but the session loaded → WARN, not FAIL', async ($, on) => {
