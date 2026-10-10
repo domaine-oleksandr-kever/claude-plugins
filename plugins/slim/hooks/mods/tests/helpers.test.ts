@@ -60,7 +60,7 @@ describe('hostStub', () => {
 
 describe('alreadySlimIn', () => {
   const OWN = 'slim: compressed 110,794 B → 22,179 B (−80.0%)'
-  const HANDLE = '<<full=/tmp/fnd-mcp-slim-0123456789abcdef.json original_result>>'
+  const HANDLE = '<<full=/tmp/slim-mcp-0123456789abcdef.json original_result>>'
 
   test('bounded: a stub mark or a handle beside a stats line', () => {
     const body = `{"a":${'1'.repeat(5000)}}`
@@ -263,14 +263,14 @@ describe('channels', () => {
       [read(json(20_000), '/r/package.json', { truncatedByTokenCap: true }), false, 'read-guard'],
       [read(json(64_000), '/r/orders.json', { truncatedByTokenCap: true }, { offset: 10 }), false, 'windowed-read'],
       [read(json(64_000), '/r/orders.json', { truncatedByTokenCap: true }, { limit: 10 }), false, 'windowed-read'],
-      [read(json(64_000), '/tmp/fnd-mcp-slim-0123456789abcdef.json', { truncatedByTokenCap: true }), false, 'spill-read'],
+      [read(json(64_000), '/tmp/slim-mcp-0123456789abcdef.json', { truncatedByTokenCap: true }), false, 'spill-read'],
       [read(plain(64_000), '/r/src/app.ts'), false, 'read-guard'],
       [read(plain(40_000), '/r/app.log'), true, null],
       [read(plain(40_000), '/r/events.JSONL'), true, null],
       [read(plain(30_000), '/r/app.log'), false, 'read-guard'],
       [read(plain(30_000), '/r/app.log', { truncatedByTokenCap: true }), true, null],
-      [read(plain(40_000), '/r/fnd-export.log'), true, null],
-      [read(plain(40_000), '/tmp/fnd-mcp-slim-debug.log'), true, null],
+      [read(plain(40_000), '/r/slim-export.log'), true, null],
+      [read(plain(40_000), '/tmp/slim-debug.log'), true, null],
     ]
     for (const [v, want, guard] of cases) {
       expect(candidate('read', v, P)).toBe(want)
@@ -383,8 +383,8 @@ describe('lookup helpers', () => {
   })
 
   test('alreadySlimTexts knows the jsx mark and the slim tail on any channel text', () => {
-    expect(alreadySlimTexts(['<<fnd-jsx-slim>> ids=/tmp/fnd-jsx-ids-x.json\n<div/>'], BOUND)).toBe(true)
-    expect(alreadySlimTexts([`out\n\nslim: compressed 70,000 B → 4,000 B (−94.3%)\n\n<<full=/tmp/fnd-mcp-slim-0123456789abcdef.txt original_result>>`], BOUND)).toBe(true)
+    expect(alreadySlimTexts(['<<slim-jsx>> ids=/tmp/slim-jsx-ids-x.json\n<div/>'], BOUND)).toBe(true)
+    expect(alreadySlimTexts([`out\n\nslim: compressed 70,000 B → 4,000 B (−94.3%)\n\n<<full=/tmp/slim-mcp-0123456789abcdef.txt original_result>>`], BOUND)).toBe(true)
     expect(alreadySlimTexts(['plain output'], BOUND)).toBe(false)
     expect(alreadySlimTexts([], BOUND)).toBe(false)
   })

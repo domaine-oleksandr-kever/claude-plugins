@@ -3,9 +3,9 @@ import type { On } from 'claude-code'
 import { SPILL_INLINE, denyText } from '../guard.ts'
 import { attachmentEligible, attachmentPath, bashVia, guardOf, spillAccess, spillKind } from '../channels.ts'
 
-const ORIG = '/tmp/fnd-mcp-slim-0123456789abcdef.json'
-const ROWS = '/tmp/fnd-crush-0123456789abcdef.json'
-const IDS = '/tmp/fnd-jsx-ids-0123456789abcdef.json'
+const ORIG = '/tmp/slim-mcp-0123456789abcdef.json'
+const ROWS = '/tmp/slim-crush-0123456789abcdef.json'
+const IDS = '/tmp/slim-jsx-ids-0123456789abcdef.json'
 const PROMPT = '/repo/.claude/slim/prompt/slim-prompt-0123456789abcdef.json'
 const HOST = '/u/.claude/projects/p/S/tool-results/b1.txt'
 const ok = (stdout: string) => ({ exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
@@ -106,7 +106,7 @@ describe('G2 what passes', () => {
   test('a Read of any other file: no stat, no access spawn', async ($, on) => {
     const w = world(on, { sizes: { '/repo/a.json': 900_000 } })
     await $.tool.call({ tool: 'Read', file_path: '/repo/a.json' } as any)
-    await $.tool.call({ tool: 'Read', file_path: '/tmp/fnd-mcp-slim-notahash.json' } as any)
+    await $.tool.call({ tool: 'Read', file_path: '/tmp/slim-mcp-notahash.json' } as any)
     expect(w.stats).toEqual([])
     expect(w.access).toEqual([])
   })
@@ -163,7 +163,7 @@ describe('G2 what passes', () => {
 
 describe('G3 pure helpers', () => {
   test('spillKind', () => {
-    expect([ORIG, ROWS, IDS, PROMPT, HOST, '/repo/.claude/slim/prompt/slim-prompt-rows-0123456789abcdef.json', '/repo/a.json', '/tmp/fnd-mcp-slim-debug.log'].map(spillKind))
+    expect([ORIG, ROWS, IDS, PROMPT, HOST, '/repo/.claude/slim/prompt/slim-prompt-rows-0123456789abcdef.json', '/repo/a.json', '/tmp/slim-debug.log'].map(spillKind))
       .toEqual(['original', 'rows', 'ids', 'original', 'host', 'rows', null, null])
   })
 
@@ -175,8 +175,8 @@ describe('G3 pure helpers', () => {
   test('spillAccess: absolute spill paths only, deduplicated, at most 8', () => {
     expect(spillAccess('Read', { file_path: '/repo/a.json' })).toBeNull()
     expect(spillAccess('Edit', { file_path: ORIG })).toBeNull()
-    expect(spillAccess('Bash', { command: `cat fnd-mcp-slim-0123456789abcdef.json ${ORIG} ${ORIG}` })).toEqual({ tool: 'Bash', via: 'shell', paths: [ORIG] })
-    const many = Array.from({ length: 12 }, (_, i) => `/tmp/fnd-crush-${String(i).padStart(16, '0')}.json`).join(' ')
+    expect(spillAccess('Bash', { command: `cat slim-mcp-0123456789abcdef.json ${ORIG} ${ORIG}` })).toEqual({ tool: 'Bash', via: 'shell', paths: [ORIG] })
+    const many = Array.from({ length: 12 }, (_, i) => `/tmp/slim-crush-${String(i).padStart(16, '0')}.json`).join(' ')
     expect(spillAccess('Bash', { command: `wc -c ${many}` })!.paths).toHaveLength(8)
   })
 

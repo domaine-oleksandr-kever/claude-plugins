@@ -367,11 +367,11 @@ describe('V6 arguments', () => {
 describe('V7 the result is not slimmed again', () => {
   test('a 200 KB view answer passes the intake untouched: no core run but --view and --record', async ($, on) => {
     const big = `{"rows":[${'{"a":1},'.repeat(25_000)}{}]}`
-    const w = world(on, { reply: { ...REPLY, text: big, bytesOut: bytes(big), pointer: '/tmp/fnd-mcp-slim-0123456789abcdef.txt' } })
+    const w = world(on, { reply: { ...REPLY, text: big, bytesOut: bytes(big), pointer: '/tmp/slim-mcp-0123456789abcdef.txt' } })
     const text = await view($, { path: '/repo/a.json' })
     expect(w.other).toEqual([])
     expect(bytes(text)).toBeLessThanOrEqual(INLINE)
-    expect(text.endsWith('… 1 lines in all — read /tmp/fnd-mcp-slim-0123456789abcdef.txt windowed (offset/limit)')).toBe(true)
+    expect(text.endsWith('… 1 lines in all — read /tmp/slim-mcp-0123456789abcdef.txt windowed (offset/limit)')).toBe(true)
   })
 })
 

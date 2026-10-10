@@ -9,15 +9,15 @@ const path = require('path');
 const crypto = require('crypto');
 const env = require('./env.cjs');
 
-// The `fnd-` prefixes are a wire format other plugins match: renaming them breaks their handle checks.
-const NAMES = { original: 'fnd-mcp-slim-', rows: 'fnd-crush-', ids: 'fnd-jsx-ids-' };
-const SPILL_NAME = /^fnd-mcp-slim-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/;
+// These names are a wire format other plugins match (base's readers, CONTRACT §8): a rename lands there too.
+const NAMES = { original: 'slim-mcp-', rows: 'slim-crush-', ids: 'slim-jsx-ids-' };
+const SPILL_NAME = /^slim-mcp-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/;
 const HOST_NAME = /^[\w.-]+\.(?:txt|json)$/;
 const HOST_MAX = 33554432;
 // Only the names slim writes; any other file in the spill root is left alone.
 const SWEEP_PREFIXES = Object.values(NAMES);
 const SWEEP_MARKER = '.slim-sweep';
-const SWEEP_KEEP = new Set(['fnd-mcp-slim-debug.log', 'fnd-mcp-slim-debug.log.1']);
+const SWEEP_KEEP = new Set(['slim-debug.log', 'slim-debug.log.1']);
 const SWEEP_THROTTLE_MS = 10 * 60 * 1000;
 
 const sha = (s, n) => crypto.createHash('sha256').update(s, 'utf8').digest('hex').slice(0, n);

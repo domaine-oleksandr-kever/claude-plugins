@@ -48,10 +48,10 @@ the code on the date at the bottom; the code wins when they drift.
 │  channels.cjs    per-channel table: gate, admitted engines, take text out / put text back    │
 │  emit.cjs        stats line, <<full=…>> handle, <<slim stub>>, Read note, lookup hint,       │
 │                  and the already-slim detector (slim's own marks)                            │
-│  spill.cjs       spill files (fnd-mcp-slim-*, fnd-crush-*, fnd-jsx-ids-*), TTL sweep,        │
+│  spill.cjs       spill files (slim-mcp-*, slim-crush-*, slim-jsx-ids-*), TTL sweep,        │
 │                  which existing files a handle or a host notice may name                     │
 │  env.cjs         SLIM_* switches, from the process env only                                  │
-│  report.cjs      one metadata line per invocation → fnd-mcp-slim-debug.log; --report         │
+│  report.cjs      one metadata line per invocation → slim-debug.log; --report         │
 │  media.cjs       runs a media plan: ffprobe + ffmpeg on PATH, else sips (images); outputs    │
 │                  beside the input, only at the path the caller's Write check allowed         │
 └───────────────────────────────┬──────────────────────────────────────────────────────────────┘
@@ -115,7 +115,7 @@ flowchart TD
   P --> Q[intake.ts replaces the tool result]
   Q --> R1[model reads the compressed result]
   Q --> R2[$.state slim.events + slim.rows]
-  Q --> R3[report.cjs → fnd-mcp-slim-debug.log]
+  Q --> R3[report.cjs → slim-debug.log]
   Q --> R4[render.tsx: ToolResult line · ToolGroup suffix · toast]
 ```
 
@@ -178,14 +178,14 @@ them equal, so the pure pre-decision in the module and the core never disagree.
                  │                   render.tsx: "slim  json  118 KB → 29 KB  −75%" under the row
                  │                   ToolGroup fold: " · 2 compressed, −186 KB"
                  │                   toast for MCP on the main loop and a prompt rewrite (SLIM_TOAST)
-                 ├──────────────▶ 4 · report log  <spill root>/fnd-mcp-slim-debug.log
+                 ├──────────────▶ 4 · report log  <spill root>/slim-debug.log
                  │                   one JSON line per invocation: src:'slim', channel, tool,
                  │                   tool_use_id, decision, reason, engine, bytes_in/out/seen,
                  │                   pct, stages, spill, ms — NEVER payload   (SLIM_DEBUG 1 | 2)
                  └──────────────▶ 5 · spill files  <spill root> (SLIM_DIR, else os.tmpdir())
-                                     fnd-mcp-slim-<sha16>.json|txt   the untouched original
-                                     fnd-crush-<sha16>.json          rows the crusher dropped
-                                     fnd-jsx-ids-<sha16>.json        Figma id map
+                                     slim-mcp-<sha16>.json|txt   the untouched original
+                                     slim-crush-<sha16>.json          rows the crusher dropped
+                                     slim-jsx-ids-<sha16>.json        Figma id map
                                      swept after SLIM_TTL hours (24), marker .slim-sweep
 ```
 
@@ -205,8 +205,8 @@ stays untracked without an edit to the project's own `.gitignore`.
 spill-read rules trust a `<<full=…>>` path only when it names one of these files in one of these dirs,
 and a sibling's untrusted-content rule does too (base's convention, CONTRACT §8). So the name set and
 the handle grammar are written down in `scripts/engines/CONTRACT.md` §8, and `spill.cjs` `NAMES` /
-`SPILL_NAME` / `PROMPT_SPILL_NAME` are their single source. The `fnd-` prefixes are a wire format those
-siblings match (§5), so they stay.
+`SPILL_NAME` / `PROMPT_SPILL_NAME` are their single source. The prefixes are a wire format those
+siblings match (§5), so a rename lands in slim and in base's readers together.
 
 **Why one report log.** Every channel, the tools, the prompt rewrite and the access lines append to
 one file, so `slim.cjs --report` can total by channel and pair each whale with the read that
@@ -335,13 +335,13 @@ one move that puts the whale back, so only it is turned around, with the three w
 ## 5. Wire formats slim keeps
 
 Some names slim writes are matched by other plugins (base's untrusted-content convention and its
-figma reader), so they keep their historical `fnd-` spelling:
+figma reader), so they change only together with those readers:
 
 | where | what |
 |---|---|
-| `delivery/spill.cjs`, `hooks/mods/channels.ts` | `fnd-mcp-slim-*`, `fnd-crush-*`, `fnd-jsx-ids-*` spill names (§3) |
-| `delivery/report.cjs` | the report log `fnd-mcp-slim-debug.log` |
-| `engines/figma.cjs` | the figma engine's `<<fnd-jsx-slim>>` first line |
+| `delivery/spill.cjs`, `hooks/mods/channels.ts` | `slim-mcp-*`, `slim-crush-*`, `slim-jsx-ids-*` spill names (§3) |
+| `delivery/report.cjs` | the report log `slim-debug.log` |
+| `engines/figma.cjs` | the figma engine's `<<slim-jsx>>` first line |
 
 slim recognises only its own marks as already compact, and loads no env file: its spill root, TTL and
 debug level are `SLIM_DIR`, `SLIM_TTL` and `SLIM_DEBUG` alone (`tests/slim-fixtures.mjs` S15, S17 pin that).

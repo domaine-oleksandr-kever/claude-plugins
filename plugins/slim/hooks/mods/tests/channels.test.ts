@@ -147,12 +147,12 @@ describe('K5 Read', () => {
     ['.json truncated by the token cap', readRec(json(20_000), '/r/orders.json', { truncatedByTokenCap: true }), { file_path: '/r/orders.json' }, true],
     ['.json not truncated, 64 KB', readRec(json(64_000), '/r/orders.json'), { file_path: '/r/orders.json' }, false],
     ['with offset', readRec(json(64_000), '/r/orders.json', { truncatedByTokenCap: true }), { file_path: '/r/orders.json', offset: 100 }, false],
-    ['a spill file', readRec(json(64_000), '/tmp/fnd-mcp-slim-0123456789abcdef.json', { truncatedByTokenCap: true }), { file_path: '/tmp/fnd-mcp-slim-0123456789abcdef.json' }, false],
+    ['a spill file', readRec(json(64_000), '/tmp/slim-mcp-0123456789abcdef.json', { truncatedByTokenCap: true }), { file_path: '/tmp/slim-mcp-0123456789abcdef.json' }, false],
     ['templates/product.json truncated', readRec(json(64_000), '/r/templates/product.json', { truncatedByTokenCap: true }), { file_path: '/r/templates/product.json' }, false],
     ['a .ts file, 64 KB', readRec(plain(64_000), '/r/src/app.ts'), { file_path: '/r/src/app.ts' }, false],
     ['a .log file, 40 KB', readRec(plain(40_000), '/r/app.log'), { file_path: '/r/app.log' }, true],
     ['a .log file cut at the token cap, 30 KB shown', readRec(plain(30_000), '/r/app.log', { truncatedByTokenCap: true }), { file_path: '/r/app.log' }, true],
-    ['a user file named fnd-*, 40 KB', readRec(plain(40_000), '/r/fnd-export.log'), { file_path: '/r/fnd-export.log' }, true],
+    ['a user file named slim-*, 40 KB', readRec(plain(40_000), '/r/slim-export.log'), { file_path: '/r/slim-export.log' }, true],
   ]
   for (const [name, below, input, spawn] of rows) {
     test(`${name} → ${spawn ? 'spawn' : 'no spawn'}`, async ($, on) => {
@@ -164,9 +164,9 @@ describe('K5 Read', () => {
   }
 
   test('a Read of a spill at SLIM_DEBUG=2 is reported spill-read and passes through untouched', async ($, on) => {
-    const below = readRec(json(64_000), '/tmp/fnd-mcp-slim-0123456789abcdef.json', { truncatedByTokenCap: true })
+    const below = readRec(json(64_000), '/tmp/slim-mcp-0123456789abcdef.json', { truncatedByTokenCap: true })
     const w = world(on, below, compressed('read'), { SLIM_DEBUG: '2' })
-    const r = await $.tool.call({ tool: 'Read', file_path: '/tmp/fnd-mcp-slim-0123456789abcdef.json' } as any)
+    const r = await $.tool.call({ tool: 'Read', file_path: '/tmp/slim-mcp-0123456789abcdef.json' } as any)
     expect(r.result).toEqual(below.result)
     expect(stdinOf(w.runs[0]).pre).toBe('spill-read')
   })
@@ -430,7 +430,7 @@ describe('K13b another plugin\'s tool call', () => {
 })
 
 describe('K14 already slim on Bash', () => {
-  const slimmed = `{"a":1}\n\nslim: compressed 70,000 B → 9,000 B (−87.1%)\n\n<<full=/tmp/fnd-mcp-slim-0123456789abcdef.json original_result>>${' '.repeat(5000)}`
+  const slimmed = `{"a":1}\n\nslim: compressed 70,000 B → 9,000 B (−87.1%)\n\n<<full=/tmp/slim-mcp-0123456789abcdef.json original_result>>${' '.repeat(5000)}`
   test('bounded: no spawn by default', async ($, on) => {
     const w = world(on, bash(slimmed))
     expect((await $.tool.call({ tool: 'Bash', command: 'cat x' } as any)).result).toEqual(bash(slimmed).result)

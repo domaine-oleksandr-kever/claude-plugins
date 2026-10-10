@@ -16,7 +16,7 @@
 'use strict';
 
 // A wire format other plugins match (their figma readers name it): renaming it breaks them.
-const JSX_HEADER = '<<fnd-jsx-slim>>';
+const JSX_HEADER = '<<slim-jsx>>';
 const JSX_MIN_HITS = 3; // each signature must appear at least this often before the stage engages
 
 // Occurrence counter with an early exit at `cap`. indexOf, never a regex: a payload can be 200 KB on

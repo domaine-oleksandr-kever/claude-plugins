@@ -119,8 +119,8 @@ listed). Entities are decoded. Malformed markup degrades to text.
 **figma** — lossless compaction of Figma dev-mode design-context JSX: repeated `className` values move
 to a `C17:` legend (repeated `var(--…)` tokens inside it to `$N`), `data-node-id` values become `#n17`
 with the map leaving as an `ids` part (`ids=<path>` in the header), and identical sibling subtrees fold
-to one exemplar plus a line listing what differed. The output starts with `<<fnd-jsx-slim>>` (a wire
-format other plugins match; the spelling stays).
+to one exemplar plus a line listing what differed. The output starts with `<<slim-jsx>>` (a wire
+format other plugins match).
 
 **figma-nodes** — a Figma REST `GET /v1/files/:key/nodes` response as a markdown build tree, one line
 per visible node: `[TYPE] "name" #id WxH @x,y`, then the TEXT content (in full), a `T<n>` type style
@@ -331,7 +331,7 @@ const dir = os.tmpdir();          // the spill root the parts are written to
 const result = compress({ data: stdout }, {
   engine: 'html',                 // what the channel admits for this command
   budgetBytes: 12288, plainBytes: 65536, maxMs: 5000, spillDir: dir,
-  spillNames: { original: 'fnd-mcp-slim-', rows: 'fnd-crush-', ids: 'fnd-jsx-ids-' },
+  spillNames: { original: 'slim-mcp-', rows: 'slim-crush-', ids: 'slim-jsx-ids-' },
 });
 if (result.decision !== 'compressed') process.stdout.write(stdout);
 else {
@@ -354,16 +354,16 @@ names one of these files (a sibling plugin's untrusted-content rule uses the sam
   `<config>/projects/<dir>/<session id>/tool-results/`, and the prompt channel's durable
   `<project root>/.claude/slim/prompt/` (the main checkout's root for a linked worktree; slim writes
   `.claude/slim/.gitignore` holding `*` when it creates the dir, and never overwrites one already there).
-- Names: `fnd-mcp-slim-<sha16>[-<8 hex>].json|txt` (originals), `fnd-crush-<sha16>.json` (rows; `.txt` for a view's compact text),
-  `fnd-jsx-ids-<sha16>.json` (id maps) in the spill root; `slim-prompt-<sha16>[-<8 hex>].json|txt`,
+- Names: `slim-mcp-<sha16>[-<8 hex>].json|txt` (originals), `slim-crush-<sha16>.json` (rows; `.txt` for a view's compact text),
+  `slim-jsx-ids-<sha16>.json` (id maps) in the spill root; `slim-prompt-<sha16>[-<8 hex>].json|txt`,
   `slim-prompt-rows-<sha16>.json`, `slim-prompt-ids-<sha16>.json` in the prompt dir; the report log
-  is `fnd-mcp-slim-debug.log` in the spill root. The `fnd-` prefixes are a wire format: other plugins
+  is `slim-debug.log` in the spill root. These names are a wire format: other plugins
   key on these names, so a rename changes this section first.
 - The spill root is absolute: a leading `~/` in `SLIM_DIR` is expanded, any other relative value falls
   back to the OS temp dir, so every handle names an absolute path.
 - Stats line, right before a handle or as a stub's second line:
   `slim: compressed|stub <in> B → <out> B (−NN.N%)` (`+` when it grew; thousands with commas). The
-  `→` figure is the exact byte size of the value it sits in. `<<fnd-jsx-slim>>` opens the figma
+  `→` figure is the exact byte size of the value it sits in. `<<slim-jsx>>` opens the figma
   engine's output (§3) and counts as already compact too.
 - A `<<slim stub>>` names its recovery as `mcp__slim__view({ path: <full> })` (with
   `jq: "<jq-path>"` in §5b's grammar for JSON) or a windowed Read (offset/limit) of the `full=` file.

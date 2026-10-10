@@ -108,7 +108,7 @@ function stubFor(tool, payload, format, file, reason, perBlock) {
 // emission say exactly that) and whose handle names a spill this user owns — so payload text cannot
 // opt a large result out of compression.
 const STATS = /^slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m;
-const MARKS = ['<<slim stub>>', '<<fnd-jsx-slim>>'];
+const MARKS = ['<<slim stub>>', '<<slim-jsx>>'];
 const COMPRESSED_TAIL = /\n\nslim: compressed [\d,]+ B → ([\d,]+) B \([+−]\d+\.\d%\)\n\n<<full=([^\n]+) original_result>>$/;
 const STUB_HEAD = /^<<slim stub>> [^\n]*\nslim: stub [\d,]+ B → ([\d,]+) B \([+−]\d+\.\d%\)\nfull=([^\n]+)(?:\n|$)/;
 const TAG_WINDOW = 4096;

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "slim",
   "displayName": "Slim",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Universal result proxy for Claude Code — compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep and Agent results, pasted prompt data and @-mentioned files by content (JSON, logs, HTML, Figma REST node trees, plain-text windows), guards spill reads, and adds two tools: lookup answers one question about a page, command or file; view compacts a file or a command output (with jq narrowing, media resize and video frames) into a workspace file",
   "author": {
     "name": "Oleksandr Kever",

@@ -280,7 +280,7 @@ const OVERFLOW_PATH = /(\/[^\s"'\\]*tool-results\/[^\s"'\\]+)/
 const OVERFLOW_WINDOW = 4096
 const OVERFLOW_MAX_BYTES = 8192
 const STATS = /^slim: (?:compressed|stub) [\d,]+ B → [\d,]+ B \([+−]\d+\.\d%\)$/m
-const MARKS = ['<<slim stub>>', '<<fnd-jsx-slim>>']
+const MARKS = ['<<slim stub>>', '<<slim-jsx>>']
 
 export type HostStub = { text: string; path: string }
 

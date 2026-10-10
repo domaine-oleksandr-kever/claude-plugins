@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 const TOOL = 'mcp__plugin_acme_atlassian__searchJiraIssuesUsingJql'
 const BIG = `{"issues":[${'{"key":"ELC-1","fields":{"summary":"x"}},'.repeat(2900)}{}]}`
-const SPILL = '/tmp/fnd-mcp-slim-0123456789abcdef.json'
+const SPILL = '/tmp/slim-mcp-0123456789abcdef.json'
 const FIGURE = 'slim: compressed 120,030 B → 30,000 B (−75.0%)'
 const SLIMMED = `{"issues":[{"key":"ELC-1"}]}\n\n${FIGURE}\n\n<<full=${SPILL} original_result>>`
 const NOTICE =

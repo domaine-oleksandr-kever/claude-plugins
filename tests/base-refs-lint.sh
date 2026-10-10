@@ -248,7 +248,7 @@ for (const [a, rule] of Object.entries(DENY)) {
 for (const a of ['jira-reader', 'doc-reader', 'figma-reader']) {
   if (!agents.has(a)) continue;
   const body = text(path.join(dir, 'agents', `${a}.md`));
-  for (const n of ['fnd-mcp-slim-*', 'fnd-crush-*', 'fnd-jsx-ids-*', 'slim-prompt-*', 'SLIM_DIR', 'tool-results/']) {
+  for (const n of ['slim-mcp-*', 'slim-crush-*', 'slim-jsx-ids-*', 'slim-prompt-*', 'SLIM_DIR', 'tool-results/']) {
     if (!body.includes(n)) bad('j', `agents/${a}.md`, `${a} ${n}`);
   }
 }
@@ -342,7 +342,7 @@ dont k "doc-reader mcp__notion__notion-update-page"
 dont k "doc-reader no tools allowlist";  want k "jira-reader no tools allowlist"
 dont k "doc-reader Edit";                dont k "jira-reader Edit";  want k "jira-reader NotebookEdit"
 want k "jira-writer missing"
-want j "jira-reader fnd-mcp-slim-*";     dont j "jira-writer fnd-mcp-slim-*"
+want j "jira-reader slim-mcp-*";     dont j "jira-writer slim-mcp-*"
 want t /kit:no-such-skill;               dont t /kit:ship
 want t kit:no-agent;                     dont t kit:scout;        dont t kit:ship
 want t "<kit root>/references/no-such.md"; dont t "<kit root>/references/present.md"

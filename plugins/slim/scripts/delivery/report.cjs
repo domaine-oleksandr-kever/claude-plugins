@@ -1,4 +1,4 @@
-// The report log (`fnd-mcp-slim-debug.log` in the spill root): one metadata line per invocation, never
+// The report log (`slim-debug.log` in the spill root): one metadata line per invocation, never
 // payload, and the --report that reads it back by src and by channel.
 'use strict';
 
@@ -6,8 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const env = require('./env.cjs');
 
-// The `fnd-mcp-slim-` prefix is a wire format other plugins match (spill.cjs NAMES).
-const DEBUG_LOG = 'fnd-mcp-slim-debug.log';
+// The `slim-mcp-` prefix is a wire format other plugins match (spill.cjs NAMES).
+const DEBUG_LOG = 'slim-debug.log';
 const DEBUG_LOG_MAX = 5 * 1024 * 1024;
 const SPILL_LOG_MAX = 8;
 // Lines kept for level 2: the in==out ballast, and every passthrough the hooks module decided itself.

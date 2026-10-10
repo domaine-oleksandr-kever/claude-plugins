@@ -226,8 +226,8 @@ export function attachmentShape(text: string): 'numbered' | 'raw' {
   return 'raw'
 }
 
-/** A spill slim writes, by name: in the spill root (the `fnd-` prefixes are a wire format other plugins match), `slim-prompt-*` in the prompt channel's dir. */
-const SPILL_NAME = /^fnd-(mcp-slim|crush|jsx-ids)-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/
+/** A spill slim writes, by name: in the spill root (names other plugins match, CONTRACT §8), `slim-prompt-*` in the prompt channel's dir. */
+const SPILL_NAME = /^slim-(mcp|crush|jsx-ids)-[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/
 const PROMPT_SPILL = /\/\.claude\/slim\/prompt\/slim-prompt-(?:(rows|ids)-)?[0-9a-f]{16}(?:-[0-9a-f]{8})?\.(?:json|txt)$/
 const HOST_FILE = /\/tool-results\/[^/]+$/
 
@@ -236,7 +236,7 @@ export type SpillKind = 'original' | 'rows' | 'ids' | 'host'
 /** What a path is to slim: a whole original, a rows part, an id map, a host tool-results file, or null. */
 export function spillKind(path: string): SpillKind | null {
   const s = SPILL_NAME.exec(baseName(path))
-  if (s) return s[1] === 'mcp-slim' ? 'original' : s[1] === 'crush' ? 'rows' : 'ids'
+  if (s) return s[1] === 'mcp' ? 'original' : s[1] === 'crush' ? 'rows' : 'ids'
   const p = PROMPT_SPILL.exec(path)
   if (p) return p[1] === 'rows' ? 'rows' : p[1] === 'ids' ? 'ids' : 'original'
   return HOST_FILE.test(path) ? 'host' : null

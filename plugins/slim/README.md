@@ -16,7 +16,7 @@ slim is a Claude Code hooks module (mods) and nothing else: other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads; the drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.9.1**.
+Current release: **slim v0.10.0**.
 
 ## Install
 
@@ -149,7 +149,7 @@ size (256KB)`) is refused by the host before any hook runs, so slim never sees t
   ```
   slim: compressed 118,203 B → 29,412 B (−75.1%)
 
-  <<full=/tmp/fnd-mcp-slim-0123456789abcdef.json original_result>>
+  <<full=/tmp/slim-mcp-0123456789abcdef.json original_result>>
   ```
 
   The `→` figure is the exact byte size of what the model receives; the handle names the spilled
@@ -238,7 +238,7 @@ and the report line are written once per content. `SLIM_ATTACH=0` turns it off.
 ### The spill-read guard
 
 Reading a spill back whole puts the whale the compression kept out straight into the context. A
-model's Read with no `offset`/`limit` of an original or a rows file (`fnd-mcp-slim-*`, `fnd-crush-*`,
+model's Read with no `offset`/`limit` of an original or a rows file (`slim-mcp-*`, `slim-crush-*`,
 `slim-prompt-*`) over 32,768 B is therefore denied with one line:
 
 ```
@@ -247,7 +247,7 @@ slim: <file> is a 120000 B spill — Read it with offset/limit, or call mcp__sli
 
 (the lookup clause only while the lookup tool is registered).
 
-Windowed Reads, id maps (`fnd-jsx-ids-*`), host tool-results files, Grep, Bash and every plugin's
+Windowed Reads, id maps (`slim-jsx-ids-*`), host tool-results files, Grep, Bash and every plugin's
 own calls (view's and lookup's probes among them) pass. `SLIM_SPILL_GUARD=0` turns the deny off.
 Each Read, Bash or Grep that named a spill or a host tool-results file writes one `entry:"access"`
 line per file at `SLIM_DEBUG` 1 or 2 (`via`: `Read`, `Grep`, or the Bash reader — `jq`, `grep`,
@@ -478,7 +478,7 @@ a line is on the line, written by that plugin, not inferred from a pane:
 
 ## Report log
 
-slim writes one report log: `fnd-mcp-slim-debug.log` in the spill root. Each of its
+slim writes one report log: `slim-debug.log` in the spill root. Each of its
 lines carries `src: 'slim'` and its `channel`, plus `tool_use_id`, the decision, reason, engine,
 bytes in/out (and `bytes_seen` where the host showed less), % and ms — never any payload.
 
@@ -523,17 +523,17 @@ written atomically, content-addressed, never through a link):
 
 | Where | Name | Holds |
 |---|---|---|
-| spill root | `fnd-mcp-slim-<sha16>[-<8 hex>].json` or `.txt` | the untouched original of a result (`.json` for JSON) |
-| spill root | `fnd-crush-<sha16>.json` | the rows the JSON crush or fit dropped |
-| spill root | `fnd-jsx-ids-<sha16>.json` | a Figma id map |
-| spill root | `fnd-mcp-slim-debug.log` | the report log |
+| spill root | `slim-mcp-<sha16>[-<8 hex>].json` or `.txt` | the untouched original of a result (`.json` for JSON) |
+| spill root | `slim-crush-<sha16>.json` | the rows the JSON crush or fit dropped |
+| spill root | `slim-jsx-ids-<sha16>.json` | a Figma id map |
+| spill root | `slim-debug.log` | the report log |
 | prompt dir | `slim-prompt-<sha16>[-<8 hex>].json` or `.txt`, `slim-prompt-rows-*`, `slim-prompt-ids-*` | a pasted span and its parts |
 
 The spill root is `SLIM_DIR` (an absolute path; a leading `~/` is expanded), else the system temp dir; the sweep removes slim's own names there
 after `SLIM_TTL` hours (throttle marker `.slim-sweep`) and leaves every other file alone. The prompt
 dir is `<project root>/.claude/slim/prompt/` (the main checkout's, from a linked worktree) and is
-never swept by age. The `fnd-` name prefixes are a wire format other plugins match (base's
-untrusted-content convention, its figma reader), so they stay as they are.
+never swept by age. The name prefixes are a wire format other plugins match (base's
+untrusted-content convention, its figma reader), so they change only together with those readers.
 
 The model finds a file through one of these handles:
 
@@ -570,7 +570,7 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
 | `SLIM_PROMPT` | `1` | `0` turns the prompt channel off: a typed or bridge prompt is never rewritten. |
 | `SLIM_SPILL_GUARD` | `1` | `0` turns the spill-read guard's deny off; access lines are still written at `SLIM_DEBUG` 1 or 2. |
 | `SLIM_PLAIN_BYTES` | `65536` | Size above which plain text (code, diffs, test output, prose) is windowed to head and tail; below it plain text passes byte-identical. A Bash output the host saved to a file is windowed whatever this says. A whole number, floored at 8,192; anything else → the default. |
-| `SLIM_DIR` | system temp dir | Spill root, an absolute path (a leading `~/` is expanded to the home dir; any other relative value falls back to the system temp dir): originals, rows files, id maps and the report log `fnd-mcp-slim-debug.log`. A handle is trusted only there, in the prompt dir and in this session's host `tool-results/`. |
+| `SLIM_DIR` | system temp dir | Spill root, an absolute path (a leading `~/` is expanded to the home dir; any other relative value falls back to the system temp dir): originals, rows files, id maps and the report log `slim-debug.log`. A handle is trusted only there, in the prompt dir and in this session's host `tool-results/`. |
 | `SLIM_TTL` | `24` | Hours a spill file lives before the sweep removes it; `0` stops the sweep. Only slim's names in the spill root are pruned; the prompt dir is never swept by age. |
 | `SLIM_DEBUG` | off | `1` (or `true`/`yes`/`on`) writes one report line per call slim handles, on every channel, and the spill access lines; `2` adds the module's stand-downs (`size-gate`, `already-slim`, `plain-gate`, `read-guard`, …), prose-only prompts and the attachment probe. Error, lookup and view lines are written at every level. |
 | `SLIM_STUB` | `1` | `0` turns the spill-and-stub guard off for MCP results; a result the host cut at its token limit is still stubbed. |

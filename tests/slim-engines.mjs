@@ -190,7 +190,7 @@ function ecRows() {
     eq('EC-figma', [r.engine, r.decision], ['figma', 'compressed']);
     const ids = (r.parts || []).filter((p) => p.kind === 'ids');
     check('EC-figma-ids-part', ids.length === 1 && /^slim-ids-[0-9a-f]{16}\.json$/.test(ids[0].suggestedName) && r.text.includes(`ids=${spillDir}/${ids[0].suggestedName}`), JSON.stringify(r.parts));
-    check('EC-figma-header', r.text.startsWith('<<fnd-jsx-slim>> '), r.text.slice(0, 40));
+    check('EC-figma-header', r.text.startsWith('<<slim-jsx>> '), r.text.slice(0, 40));
   }
   {
     const r = compress({ data: PAGE }, O);

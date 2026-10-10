@@ -19,7 +19,7 @@ const SLIM = path.join(SCRIPTS, 'slim.cjs');
 const MODS = path.join(ROOT, 'plugins/slim/hooks/mods');
 const BOUND = 32768 + 1200;
 const FIX = path.join(ROOT, 'tests/fixtures');
-const LOG = 'fnd-mcp-slim-debug.log';
+const LOG = 'slim-debug.log';
 
 // The envelope the hooks module sends, keys in its order (agentId, pre, bytes_in, bash_output_max_chars only when set).
 const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in', 'bash_output_max_chars'];
@@ -123,7 +123,7 @@ function logLines(dir) {
 }
 const textOf = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
 const handleOf = (s) => { const m = /<<full=(\S+) original_result>>$/.exec(s); return m ? m[1] : null; };
-const mcpSpills = (dir) => (existsSync(dir) ? readdirSync(dir).filter((n) => /^fnd-mcp-slim-[0-9a-f]{16}(-[0-9a-f]+)?\.json$/.test(n)) : []);
+const mcpSpills = (dir) => (existsSync(dir) ? readdirSync(dir).filter((n) => /^slim-mcp-[0-9a-f]{16}(-[0-9a-f]+)?\.json$/.test(n)) : []);
 const FIGURE_OUT = /^slim: (?:compressed|stub) [\d,]+ B → ([\d,]+) B \(/m;
 const figureOf = (t) => { const m = FIGURE_OUT.exec(t); return m ? Number(m[1].replace(/,/g, '')) : null; };
 const bytes = (s) => Buffer.byteLength(s, 'utf8');
@@ -135,7 +135,7 @@ let F1_OUT = null;
   const a = call('F1', T, envelope(T, F1));
   eq('F1-decision', [a.decision, a.reason, a.record.engine], ['compressed', null, 'json']);
   const res = typeof a.result === 'string' ? a.result : '';
-  check('F1-handle', /\n\n<<full=.*\/spill\/fnd-mcp-slim-[0-9a-f]{16}(-[0-9a-f]+)?\.json original_result>>$/.test(res), res.slice(-200));
+  check('F1-handle', /\n\n<<full=.*\/spill\/slim-mcp-[0-9a-f]{16}(-[0-9a-f]+)?\.json original_result>>$/.test(res), res.slice(-200));
   const h = handleOf(res);
   check('F1-spill-is-original', !!h && existsSync(h) && readFileSync(h, 'utf8') === F1, `spill ${h}`);
   check('F1-figure-shape', /^slim: compressed 110,794 B → [\d,]+ B \(−\d+\.\d%\)$/.test(a.figure || ''), a.figure);
@@ -280,13 +280,13 @@ let STUB0_OUT = null;
   eq('S7b-leading-figure-ignored', [a.decision, a.record.engine], ['compressed', 'log']);
   const elsewhere = path.join(T5, 'elsewhere');
   mkdirSync(elsewhere, { recursive: true });
-  const foreign = path.join(elsewhere, 'fnd-mcp-slim-0123456789abcdef.json');
+  const foreign = path.join(elsewhere, 'slim-mcp-0123456789abcdef.json');
   writeFileSync(foreign, '{}');
   mkdirSync(`${T5}/spill`, { recursive: true });
-  const link = path.join(T5, 'spill', 'fnd-mcp-slim-fedcba9876543210.json');
+  const link = path.join(T5, 'spill', 'slim-mcp-fedcba9876543210.json');
   symlinkSync(foreign, link);
   const tail = (h) => fixed((n) => `${log.join('\n')}\n\nslim: compressed 999,999 B → ${n} B (−0.0%)\n\n<<full=${h} original_result>>`);
-  for (const [name, h] of [['missing', path.join(T5, 'spill', 'fnd-mcp-slim-0000000000000000.json')], ['foreign-dir', foreign], ['symlink', link]]) {
+  for (const [name, h] of [['missing', path.join(T5, 'spill', 'slim-mcp-0000000000000000.json')], ['foreign-dir', foreign], ['symlink', link]]) {
     const t = tail(h);
     check(`S7c-${name}-over-bound`, bytes(t) > BOUND, String(bytes(t)));
     const b = call(`S7c-${name}`, T5, envelope(T5, t));
@@ -345,7 +345,7 @@ let STUB0_OUT = null;
 {
   const require = createRequire(import.meta.url);
   const emit = require(path.join(SCRIPTS, 'delivery/emit.cjs'));
-  const file = `/${'d'.repeat(180)}/fnd-mcp-slim-0123456789abcdef.json`;
+  const file = `/${'d'.repeat(180)}/slim-mcp-0123456789abcdef.json`;
   const stats = 'slim: stub 250,000 B → 1,100 B (−99.6%)';
   const noGain = emit.stubText('mcp__x__y', 250000, 'json', '{"a":1}', file, 'no-gain', false, stats);
   check('Rs-no-gain-jq', noGain.includes(`\nfull=${file}\n`) && noGain.includes('mcp__slim__view({ path: <full>, jq: "<jq-path>" })') && noGain.split(file).length === 2, noGain);
@@ -449,21 +449,21 @@ let STUB0_OUT = null;
 {
   const seed = (T) => {
     mkdirSync(`${T}/spill`, { recursive: true });
-    writeFileSync(`${T}/spill/fnd-crush-dead.json`, '[]');
-    old(`${T}/spill/fnd-crush-dead.json`);
+    writeFileSync(`${T}/spill/slim-crush-dead.json`, '[]');
+    old(`${T}/spill/slim-crush-dead.json`);
   };
   const T = newT();
   seed(T);
   call('S17', T, envelope(T, F1));
-  check('S17-swept', !existsSync(`${T}/spill/fnd-crush-dead.json`) && existsSync(`${T}/spill/.slim-sweep`), 'stale spill kept or no marker');
+  check('S17-swept', !existsSync(`${T}/spill/slim-crush-dead.json`) && existsSync(`${T}/spill/.slim-sweep`), 'stale spill kept or no marker');
   const T2 = newT();
   seed(T2);
   call('S17-ttl0', T2, envelope(T2, F1), { SLIM_TTL: '0' });
-  check('S17-ttl0-kept', existsSync(`${T2}/spill/fnd-crush-dead.json`), 'SLIM_TTL=0 still swept');
+  check('S17-ttl0-kept', existsSync(`${T2}/spill/slim-crush-dead.json`), 'SLIM_TTL=0 still swept');
   const T3 = newT();
   seed(T3);
   call('S17-ttl-own', T3, envelope(T3, F1), { SLIM_TTL: '1' });
-  check('S17-ttl-own-swept', !existsSync(`${T3}/spill/fnd-crush-dead.json`), 'SLIM_TTL=1 kept a 48 h file');
+  check('S17-ttl-own-swept', !existsSync(`${T3}/spill/slim-crush-dead.json`), 'SLIM_TTL=1 kept a 48 h file');
 }
 {
   const T = newT();
@@ -644,7 +644,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cb8-image', call('Cb8-img', T, chEnv(T, 'bash', 'Bash', { command: 'cat a.png' }, BASH(F1, { isImage: true }))).reason, 'not-text');
 
   mkdirSync(path.join(T, 'spill'), { recursive: true });
-  const sp = path.join(T, 'spill', 'fnd-mcp-slim-0123456789abcdef.json');
+  const sp = path.join(T, 'spill', 'slim-mcp-0123456789abcdef.json');
   writeFileSync(sp, F1);
   eq('Cb9-spill-read', call('Cb9', T, chEnv(T, 'bash', 'Bash', { command: `cat ${sp}` }, BASH(F1))).reason, 'spill-read');
   eq('Cb9-host-read', call('Cb9h', T, chEnv(T, 'bash', 'Bash', { command: `head -c 99999 ${go}` }, BASH(GO_TEST))).reason, 'spill-read');
@@ -727,7 +727,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   eq('Cr1-shape', [a.result && a.result.type, f.filePath, f.startLine, f.numLines === String(f.content).split('\n').length, 'truncatedByTokenCap' in f, f.totalLines], ['text', fp, 1, true, false, orders.split('\n').length]);
   check('Cr1-note', String(f.content).includes('\n\nslim: compressed view — line numbers are not file lines; Read with offset/limit before an Edit\n\nslim: compressed '), String(f.content).slice(-400));
   const h = handleOf(String(f.content));
-  check('Cr1-copy', !!h && /\/spill\/fnd-mcp-slim-[0-9a-f]{16}\.json$/.test(h) && readFileSync(h, 'utf8') === orders, h);
+  check('Cr1-copy', !!h && /\/spill\/slim-mcp-[0-9a-f]{16}\.json$/.test(h) && readFileSync(h, 'utf8') === orders, h);
   check('Cr1-sentinel-dropped', !String(f.content).includes('SENTINEL-ORDER-0217'), 'sentinel kept');
   eq('Cr2-not-truncated', call('Cr2', T, chEnv(T, 'read', 'Read', { file_path: fp }, readRec(fp, orders))).reason, 'read-guard');
   const tpl = path.join(T, 'templates');
@@ -744,7 +744,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const l = call('Cr6', T, chEnv(T, 'read', 'Read', { file_path: logp }, readRec(logp, log60)));
   eq('Cr6-log', [l.decision, l.record.engine], ['compressed', 'log']);
   // Only slim's own names in the spill root are spill reads; a user's file there is a file.
-  const own = path.join(T, 'spill', 'fnd-export.log');
+  const own = path.join(T, 'spill', 'slim-export.log');
   writeFileSync(own, log60);
   eq('Cr6b-foreign-name-in-spill-root', call('Cr6b', T, chEnv(T, 'read', 'Read', { file_path: own }, readRec(own, log60))).decision, 'compressed');
   eq('Cr7-page', call('Cr7', T, chEnv(T, 'read', 'Read', { file_path: path.join(FIX, 'page.html') }, readRec(path.join(FIX, 'page.html'), PAGE))).reason, 'read-guard');
@@ -757,7 +757,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const nc = String(((n.result || {}).file || {}).content);
   const nh = handleOf(nc);
   check('Cr9-tree', nc.startsWith('# figma node 3326:39542 — ') && nc.includes('\nnodes: 303 visible · 0 hidden dropped · 0 folded\n'), nc.slice(0, 300));
-  check('Cr9-spill-json', !!nh && /\/spill\/fnd-mcp-slim-[0-9a-f]{16}\.json$/.test(nh) && readFileSync(nh, 'utf8') === REST, nh);
+  check('Cr9-spill-json', !!nh && /\/spill\/slim-mcp-[0-9a-f]{16}\.json$/.test(nh) && readFileSync(nh, 'utf8') === REST, nh);
   // A node tree over the egress cap folds its deepest level, never raw passthrough.
   const bp = path.join(T, 'data', 'AbC123-3326-1.nodes.json');
   writeFileSync(bp, REST_BIG);
@@ -1005,10 +1005,10 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const T7 = newT();
   const spillDir = path.join(T7, 'spill');
   mkdirSync(spillDir, { recursive: true });
-  const sp = path.join(spillDir, 'fnd-mcp-slim-0123456789abcdef.json');
+  const sp = path.join(spillDir, 'slim-mcp-0123456789abcdef.json');
   writeFileSync(sp, F1);
   const access = (payload, extra) => spawn(T7, JSON.stringify({ v: 1, cwd: T7, ...payload }), { args: ['--access'], extra });
-  const ax = access({ tool: 'Bash', via: 'jq', spills: [sp, sp, path.join(spillDir, 'fnd-mcp-slim-ffffffffffffffff.json')] });
+  const ax = access({ tool: 'Bash', via: 'jq', spills: [sp, sp, path.join(spillDir, 'slim-mcp-ffffffffffffffff.json')] });
   check('Cx1-exit', ax.status === 0 && ax.stdout === '', `exit ${ax.status}`);
   access({ tool: 'Read', via: 'Read', spills: [sp] }, { SLIM_DEBUG: '1' });
   access({ tool: 'Grep', via: 'Grep', spills: [sp] }, { SLIM_DEBUG: undefined });
@@ -1028,7 +1028,7 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const T8x = newT();
   const spill8 = path.join(T8x, 'spill');
   mkdirSync(spill8, { recursive: true });
-  const sp8 = path.join(spill8, 'fnd-mcp-slim-0123456789abcdef.json');
+  const sp8 = path.join(spill8, 'slim-mcp-0123456789abcdef.json');
   writeFileSync(sp8, F1);
   spawn(T8x, JSON.stringify({ v: 1, cwd: T8x, tool: 'Read', via: 'Read', spills: [sp8], denied: true }), { args: ['--access'] });
   eq('Cx3-denied-line', logLines(spill8).map((l) => [l.entry, l.tool, l.denied]), [['access', 'Read', true]]);
@@ -1249,7 +1249,7 @@ printf 'SIPSIMG' > "$last"
   eq('Cv1-json', [v1.v, v1.decision, v1.engine, v1.bytesIn, v1.pointer], [1, 'compressed', 'json', bytes(ISSUES), undefined]);
   check('Cv1-figure', /^slim: compressed 63,\d{3} B → [\d,]+ B \(−\d+\.\d%\)$/.test(v1.figure) && v1.bytesOut === bytes(v1.text) && v1.bytesOut <= 16384, v1.figure);
   const part = (/<<full=(\S+) \d+_rows_offloaded>>/.exec(v1.text) || [])[1];
-  check('Cv1-part-written', !!part && part.startsWith(`${spillDir}/fnd-crush-`) && existsSync(part), String(part));
+  check('Cv1-part-written', !!part && part.startsWith(`${spillDir}/slim-crush-`) && existsSync(part), String(part));
 
   const nodes = path.join(proj, 'K1-1-2.nodes.json');
   writeFileSync(nodes, REST);
@@ -1259,7 +1259,7 @@ printf 'SIPSIMG' > "$last"
   eq('Cv2-figma-nodes', [v2.decision, v2.engine], ['compressed', 'figma-nodes']);
   check('Cv2-figure', /^figma-nodes: 192234 B → \d+ B \(-\d+\.\d%\) nodes=\d+ hidden=\d+ folded=\d+$/.test(v2.figure), v2.figure);
   check('Cv2-variables-beside', v2.text.includes('tokens: variables') && !v2a.text.includes('tokens: variables'), 'K1.variables.json not read');
-  check('Cv2-pointer', !v2.text.includes('deeper folded') && typeof v2.pointer === 'string' && v2.pointer.startsWith(`${spillDir}/fnd-crush-`) && readFileSync(v2.pointer, 'utf8') === v2.text, String(v2.pointer));
+  check('Cv2-pointer', !v2.text.includes('deeper folded') && typeof v2.pointer === 'string' && v2.pointer.startsWith(`${spillDir}/slim-crush-`) && readFileSync(v2.pointer, 'utf8') === v2.text, String(v2.pointer));
 
   const v3 = view('Cv3', { path: src, jq: '.issues[].key' });
   eq('Cv3-narrowed', [v3.decision, v3.narrowed, v3.engine, JSON.parse(v3.text).length, JSON.parse(v3.text)[399]], ['narrowed', true, 'json', 400, 'ACME-399']);
@@ -1272,7 +1272,7 @@ printf 'SIPSIMG' > "$last"
   // A big narrowed value the engine cannot shrink is kept in the spill root, never pointed at the source.
   writeFileSync(path.join(proj, 'blob.json'), JSON.stringify({ blob: 'word '.repeat(8000), n: 1 }));
   const v3g = view('Cv3g', { path: 'blob.json', jq: '.blob' });
-  check('Cv3g-relative-path-and-pointer', v3g.decision === 'narrowed' && typeof v3g.pointer === 'string' && v3g.pointer.startsWith(`${spillDir}/fnd-crush-`)
+  check('Cv3g-relative-path-and-pointer', v3g.decision === 'narrowed' && typeof v3g.pointer === 'string' && v3g.pointer.startsWith(`${spillDir}/slim-crush-`)
     && readFileSync(v3g.pointer, 'utf8') === v3g.text && JSON.parse(v3g.text).length === 40000, JSON.stringify({ ...v3g, text: undefined }));
 
   const out = path.join(tasks, 'issues.view.json');
