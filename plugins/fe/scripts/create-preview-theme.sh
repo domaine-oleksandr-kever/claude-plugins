@@ -923,7 +923,7 @@ vet_build_script() {
 }
 BUILD_DIRTIED=""
 PUSHED_SHA=""
-tracked_changes() { git status --porcelain --untracked-files=no 2>/dev/null || true; }
+tracked_changes() { git -c core.quotePath=false status --porcelain --untracked-files=no 2>/dev/null || true; }
 run_build() {
   local log pre dirty; dirty="$(git status --porcelain -- "${THEME_DIRS[@]}" 2>/dev/null || true)"
   [ "$NO_BUILD" -eq 1 ] && BUILT="skipped"

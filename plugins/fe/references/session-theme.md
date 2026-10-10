@@ -55,7 +55,8 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    (their pages 404 or serve stale content), and a `--reuse` run printing `overlay=empty` +
    `warn=overlay_empty` overlaid nothing (the theme keeps its previous settings) — record the
    id, but say the preview is not reviewable yet and follow
-   `<fe root>/references/preview-theme-errors.md`.
+   `<fe root>/references/preview-theme-errors.md`. `warn=build_dirtied=` → name the files and
+   append the `build-dirtied:` line to `notes.md` per that reference.
 3. **Run it from the checkout the work lives in.** `shopify.theme.toml` is resolved relative
    to the cwd, and `create` builds the local branch — so a worktree's session theme is created
    from **inside that worktree**, never from the main checkout.

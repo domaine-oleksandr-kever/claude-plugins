@@ -109,9 +109,12 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    `built`, and — when it isn't `verified` — the `overlay=` verdict (`partial`, `unverified`,
    `skipped` or `empty`) with its warn lines. `warn=build_dirtied=<path,…>` → name the files
    the build rewrote and offer `git checkout -- <path>` for a build artifact (errors
-   reference). If a `preview_path` is known, also give the page-deep-linked preview and the
-   editor-on-template link (formulas: the errors reference's **Page deep-links**); path or
-   template unknown → **ask, never guess**.
+   reference); when a task workspace for this work-id exists, append
+   `- <YYYY-MM-DD> build-dirtied: <path> <path>` to its `notes.md` (the comma list
+   space-separated, a path with whitespace left out) so the review scope drops them — no
+   workspace, nothing is recorded. If a `preview_path` is known, also give the
+   page-deep-linked preview and the editor-on-template link (formulas: the errors reference's
+   **Page deep-links**); path or template unknown → **ask, never guess**.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id
    exists, append the id to its `notes.md` as a dated `session-theme: <id> (<name>)
    <preview_url>` bullet, plus a `session-theme-pushed: <sha> <id>` line when the run printed
@@ -143,7 +146,7 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    about the toml's settings SOURCE — no flag lifts that either, and every fix rewrites
    `shopify.theme.toml`, so ask which theme is the new source before running `pin --theme <ID>`.
 4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`, and
-   handle `warn=build_dirtied=` as create's step 5 does.
+   handle `warn=build_dirtied=` as create's step 5 does (the notes.md `build-dirtied:` line too).
    Remind the developer that customizer settings were intentionally left as-is.
 5. **Record it when the workspace hasn't.** When a task workspace for this work-id exists
    and its `notes.md` has no `session-theme:` line, append the refreshed id the same way as

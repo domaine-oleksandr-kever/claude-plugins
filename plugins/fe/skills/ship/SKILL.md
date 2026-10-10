@@ -156,7 +156,8 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    reviewable preview — the named settings files never landed and their pages 404 or go
    stale; nor is a `--reuse` run printing `overlay=empty` + `warn=overlay_empty` (nothing
    overlaid, the theme keeps its previous settings). Record the id, then follow `<fe root>/references/preview-theme-errors.md`
-   before anyone reads the preview or blames the branch for those 404s. Then hand
+   before anyone reads the preview or blames the branch for those 404s; `warn=build_dirtied=`
+   → name the files and append the `build-dirtied:` line to `notes.md` per that reference. Then hand
    over item 3's start command with `--theme <id>` filled in. Never read or echo
    `shopify.theme.toml`.
 

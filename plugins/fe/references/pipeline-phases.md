@@ -32,8 +32,8 @@ its brief says otherwise.
    via the runners, `git add` every new file, test
    paths / gids / `ceiling:` entries for intentional simplifications → `notes.md`.
 2. **qa** — a fresh agent that did NOT implement, **plus a parallel `base:bug-hunter` spawn**
-   over the diff as it stands at qa time (pre-finalize; pass the base branch and the
-   `notes.md` `ceiling:` entries) —
+   over the diff as it stands at qa time (pre-finalize; pass the base branch, the
+   `notes.md` `ceiling:` entries and the paths on its last `build-dirtied:` line) —
    live QA can't reproduce timing races on a slow local proxy; the static hunt covers
    them from the code. The qa agent's brief: **first extend `qa.md`** with break-it rows
    derived from the *final diff* per `<base root>/references/break-it-qa.md` → Deriving the rows (interactions
@@ -51,7 +51,10 @@ its brief says otherwise.
    preserved); no line recorded → build the `[ELC-…]` theme
    (`<fe root>/scripts/create-preview-theme.sh create --name "<name>" --reuse`)
    and record it as `session-theme: <id>` + links in `notes.md`, so create
-   happens at most once per work stream. A create/reuse that exits **0** but prints
+   happens at most once per work stream. `warn=build_dirtied=<path,…>` → append
+   `- <YYYY-MM-DD> build-dirtied: <path> <path>` to `notes.md`
+   (`<fe root>/references/preview-theme-errors.md`); never restore unasked. A create/reuse
+   that exits **0** but prints
    `overlay=partial` + `warn=overlay_file_dropped` is not a reviewable preview — the named
    settings files never landed, so their pages 404 or serve stale content — and neither is a
    `--reuse` run printing `overlay=empty` + `warn=overlay_empty` (nothing overlaid, the theme
@@ -79,9 +82,10 @@ its brief says otherwise.
 3. **finalize** — review + commit in one pass. Review per
    `<base root>/references/review-flow.md` with `hygiene` emphasis
    (`base:change-reviewer` subagent(s), each briefed with the run's
-   `profile:` per that file's §2) — §3's pre-existing-marker question is replaced by
-   the pipeline exception (current `diff_hash` → skip and say so; stale or absent →
-   full re-review; never ask); apply the objective classes (comment accuracy,
+   `profile:` per that file's §2; its §1 block — every `diff_hash` here and in phase 4 — runs
+   with `ws=.claude/tasks/<work-id>` set in the same shell) — §3's pre-existing-marker
+   question is replaced by the pipeline exception (current `diff_hash` → skip and say so;
+   stale or absent → full re-review; never ask); apply the objective classes (comment accuracy,
    ticket-ref stripping, untracked referenced files) — C-class refactor findings are NOT
    applied autonomously (the change already passed QA); log them to `notes.md` for the
    report and hand-off. **F-class (correctness) findings never land in that log-only

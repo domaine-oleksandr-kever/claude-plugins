@@ -35,7 +35,10 @@ skim past them. Flow context (decision flow, drift blockquote, push-root mechani
 - **`warn=build_dirtied=<path,…>`** (create & refresh, **exit 0**) → the theme was pushed, but the
   build rewrote those tracked files in the working tree. Name them and offer `git checkout -- <path>`
   for each one the build owns (a generated manifest, a compiled asset); never restore silently, and
-  keep them out of the review scope and any commit.
+  keep them out of the review scope and any commit. With a task workspace, append
+  `- <YYYY-MM-DD> build-dirtied: <path> <path>` to its `notes.md` (the comma list space-separated,
+  a path with whitespace left out): review-flow §1 drops the last such line's files from the
+  review scope; no workspace → nothing is recorded.
 - **`error=not_a_theme_checkout`** → the run started in the wrong directory: none of the theme
   directories (`assets`, `layout`, `sections`, …) is there, so the push root would have been
   empty — and a code push carries no `--nodelete`, so it would strip the theme it landed on.

@@ -3163,7 +3163,7 @@ else bad P61d-no-theme-line "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(
 # A git checkout of the fixture: the build may rewrite a tracked file, and HEAD is the pushed commit.
 CPTG="$TMP/cptgit"; cp -R "$CPTD/repo" "$CPTG"
 cat > "$CPTG/package.json" <<'EOF'
-{ "private": true, "scripts": { "build": "true", "dirty": "echo 'y{}' > assets/app.css" } }
+{ "private": true, "scripts": { "build": "true", "dirty": "echo 'y{}' > assets/app.css", "dirtyu": "echo y > assets/é.js" } }
 EOF
 cpt_git() { git -C "$CPTG" -c user.name=sim -c user.email=sim@example.com "$@"; }
 cpt_git init -q; cpt_git add -A; cpt_git commit -q -m init
@@ -3207,6 +3207,14 @@ rc=0; L="$TMP/cpt70e"; : > "$L"
 run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^built=yes$' "$O" && ! grep -q '^pushed=' "$O"; then ok
 else bad P70e-uncommitted-build-input-no-pushed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+cpt_git checkout -q -- .
+# P70f: a non-ASCII artifact is named verbatim, not C-quoted, so the notes.md line built from it
+# matches base's `git -c core.quotePath=false ls-files` path
+echo 'x' > "$CPTG/assets/é.js"; cpt_git add -A; cpt_git commit -q -m utf8
+rc=0; L="$TMP/cpt70f"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-UTF8" --build-script dirtyu || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^warn=build_dirtied=assets/é.js — ' "$O"; then ok
+else bad P70f-build-dirtied-non-ascii "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 cpt_git checkout -q -- .
 
 # ------------------------------ create-preview-theme.sh shared dev theme guard --
