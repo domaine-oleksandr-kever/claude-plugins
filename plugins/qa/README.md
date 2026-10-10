@@ -10,7 +10,7 @@ registry (`<base root>/scripts/qa-stores.cjs`), the shared references and the ch
 server are base's ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with
 slim too.
 
-Current release: **qa v0.1.1**.
+Current release: **qa v0.2.0**.
 
 ## Status
 

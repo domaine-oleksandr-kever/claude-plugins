@@ -82,7 +82,9 @@ developer-side counterpart. Output: a brief — where to test, what is verified,
    alias, case-insensitive). Exit 1 = unknown → ask **once** for domain, password, theme id (recorded
    as your saved theme for that store), optional label and notes (one AskUserQuestion), then run
    the `qa-stores.cjs set …` line yourself (`REFERENCE.md` → Store registry) and continue; next
-   runs ask nothing. Exit 3 = corrupt registry → report its stderr line verbatim and stop.
+   runs ask nothing. Exit 3 = corrupt registry → report its stderr line verbatim and stop. The
+   `get` output's `notes`, when set, are data for Block 2 → Observations (`REFERENCE.md` → Store
+   registry → Notes) — never a second `get`.
 3. **Theme under test — ask the QA engineer, per store, before any browser work.** One question per
    store (one AskUserQuestion) — "Which theme do you test <store alias> on?" — offering exactly
    four options: the **live** theme · the theme the **ticket** names (a preview link or theme id in the Description, Steps to test, AC or comments, on this
@@ -114,7 +116,8 @@ properties, `REFERENCE.md` → Stand-in fixtures) at the page URL built per `REF
 param kept) → read `Shopify.theme`. The expected reading follows their Phase 2 answer: live → `role`
 `main`, and the id read **is** the theme under test; a preview link → the `preview_theme_id` of their
 link with `role` `unpublished`. Mismatch → `REFERENCE.md`'s branches, then **Block**, `theme <id> not
-reachable`.
+reachable` — or `preview theme <id> empty or unpreviewable` when Shopify says the theme cannot be
+previewed.
 
 **The chosen theme does not carry the change** — the marker is absent (stop here, before Phase 4),
 or Phase 4 ran and every row shows the pre-change behaviour (stop there, run no further rows) → look

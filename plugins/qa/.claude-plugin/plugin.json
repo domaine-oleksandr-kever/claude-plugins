@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "qa",
   "displayName": "QA",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Domaine QA team plugin for Claude Code: the preflight skill (Jira ticket, PR and store facts, a storefront unlocked on the theme under test, Steps to Test pre-run at desktop and mobile, a brief in the house style) and the read-only store-access posture; requires base (and slim through it)",
   "author": {
     "name": "Oleksandr Kever",
