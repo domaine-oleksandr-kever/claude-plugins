@@ -37,9 +37,12 @@ export type ChecklistRow = { mark: ChecklistMark; text: string }
 /** The generic shape the Progress pane draws; band maps the published task snapshot into it. */
 export type Checklist = { v: 1; title: string; subtitle?: string; rows: ChecklistRow[]; footer?: string[] }
 
-/** A publisher's resolved task (base's BaseProgress, fnd's FndProgress) as band reads it; every field is checked before use. */
+/**
+ * A publisher's resolved task (base's BaseProgress, fnd's FndProgress) as band reads it; every field is checked before use.
+ * `stale` is base's alone: a workspace with savable work and no write for 20 min.
+ */
 export type ProgressSnapshot =
-  | { workId: string; branch: string | null; hasWorkspace: boolean; done: number; total: number; current: string | null; rows: ChecklistRow[]; notesTail: string[]; mtimeMs: number }
+  | { workId: string; branch: string | null; hasWorkspace: boolean; done: number; total: number; current: string | null; rows: ChecklistRow[]; notesTail: string[]; mtimeMs: number; stale?: boolean }
   | { workId: null; branch: string | null }
 
 declare module 'claude-code' {

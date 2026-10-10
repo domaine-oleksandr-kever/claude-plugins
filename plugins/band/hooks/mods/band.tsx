@@ -3,7 +3,8 @@
 // list can pop over the transcript. A desktop draws the buttons on a second row under the figures.
 // Render only reads: band's atoms (usage.ts and checklist.tsx write them), base's or fnd's task snapshot for the
 // digest and the Progress button, every publisher's event list for the Log button. The Progress and Log presses are
-// answered by the `ui.press` hooks on elements `progress` (checklist.tsx) and `log` (log.tsx).
+// answered by the `ui.press` hooks on elements `progress` (checklist.tsx) and `log` (log.tsx). While base reports
+// the task workspace stale, a Compact press or a typed /compact runs base's save-task-context first.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, RenderNode } from 'claude-code'
 import type { BandEvent, BandRate, ForeignEvent } from '../../types'
@@ -59,6 +60,15 @@ type $ = EngineInterface
 /** Main-loop turn in flight: turn events flip it, each band draw syncs it; usage.ts clears it, as the engine allows one unmatched turn.complete hook. */
 export const turn = { running: false }
 
+const SAVE = 'base:save-task-context'
+
+/** base's task workspace is stale and BASE_AUTOSAVE is not 0: a compaction now would drop the unsaved findings. */
+async function mustSave($: $): Promise<boolean> {
+  if ((await $.env.get('BASE_AUTOSAVE')) === '0') return false
+  const p = await read($, baseProgress)
+  return p !== null && p.workId !== null && p.stale === true
+}
+
 function pressCompact($: $): void {
   if (turn.running) {
     $.ui.toast('turn is running — press Compact again when it ends')
@@ -66,10 +76,18 @@ function pressCompact($: $): void {
   }
   const refused = (err: unknown) => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`)
   // A headless (SDK, desktop app) session refuses the op but still runs a typed /compact.
-  $.session.compact().then(
-    r => $.ui.toast(compactToast(r)),
-    () => $.command.run({ command: 'compact' }).then(r => $.ui.toast(r.text || 'compacted'), refused),
-  )
+  const compact = () =>
+    $.session.compact().then(
+      r => $.ui.toast(compactToast(r)),
+      () => $.command.run({ command: 'compact' }).then(r => $.ui.toast(r.text || 'compacted'), refused),
+    )
+  // After a save only the queued /compact is sure to run after the save's turn; the op could run before it starts.
+  const saveThenCompact = () =>
+    $.command.run({ command: SAVE }).then(
+      () => $.command.run({ command: 'compact' }).then(r => $.ui.toast(`saved, then ${r.text || 'compacted'}`), refused),
+      compact,
+    )
+  mustSave($).then(stale => (stale ? saveThenCompact() : compact()), compact)
 }
 
 const CLEAR_QUESTION = 'Clear the conversation?'
@@ -140,6 +158,18 @@ export function registerBand(on: On, options: PluginOptions): void {
     await setFocused($, false)
     await setPicker($, false)
     return next(e)
+  })
+  // A typed /compact would compact before a save it awaited could run, and the host refuses $.command.run from this
+  // hook: a stale workspace answers it, and a timer queues the save, then /compact again. band's own runs pass.
+  on('command.run', { command: 'compact' }, async ($, e, next) => {
+    if ((e.origin.kind === 'plugin' && e.origin.name === 'band') || !(await mustSave($).catch(() => false))) return next(e)
+    const again = () => $.command.run({ command: 'compact', args: e.args })
+    $.clock.after(1, () => {
+      $.command.run({ command: SAVE })
+        .then(again, again)
+        .catch(err => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`))
+    })
+    return { text: 'workspace stale: saving it first, then compacting' }
   })
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     turn.running = false

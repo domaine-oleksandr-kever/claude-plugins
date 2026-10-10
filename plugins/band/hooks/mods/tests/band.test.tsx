@@ -563,6 +563,74 @@ describe('band', () => {
       expect(w.toasts).toHaveLength(2)
     })
 
+    /** /compact as the person types it. */
+    const typed = ($: any, args: string) => $.command.run({ command: 'compact', args, origin: { kind: 'composer' } } as any)
+    /** base beneath band with ABC-7's workspace stale or not, and the runs of /base:save-task-context and /compact in order. */
+    const autosaveWorld = (on: any, stale: boolean, env: Record<string, string> = {}) => {
+      const { w, clock } = world(on, {}, env)
+      baseState(on, { progress: { ...SNAP, workId: 'ABC-7', stale } })
+      const runs: string[] = []
+      on('command.run', { command: 'base:save-task-context' }, async () => {
+        runs.push('save')
+        return { text: 'saved' }
+      })
+      on('command.run', { command: 'compact' }, async (_$: any, e: any) => {
+        runs.push(`/compact ${e.args}`.trim())
+        return { text: 'Compacted' }
+      })
+      w.compact = async () => {
+        runs.push('compact')
+        return { messages: KEPT, tokensBefore: 150_000, tokensAfter: 20_000 }
+      }
+      return { w, clock, runs }
+    }
+
+    test(`${surface}: Compact press with a stale base workspace saves first, then compacts`, async ($, on) => {
+      const { w, runs } = autosaveWorld(on, true)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await ui.press({ key: 'compact' })
+      expect(runs).toEqual(['save', '/compact'])
+      expect(w.toasts).toEqual(['saved, then Compacted'])
+    })
+
+    test(`${surface}: Compact press with a fresh workspace compacts only`, async ($, on) => {
+      const fresh = autosaveWorld(on, false)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await ui.press({ key: 'compact' })
+      expect(fresh.runs).toEqual(['compact'])
+      expect(fresh.w.toasts).toEqual(['compacted 150,000 → 20,000 tokens'])
+    })
+
+    test(`${surface}: BASE_AUTOSAVE=0 → a stale workspace is not saved, by press or typed /compact`, async ($, on) => {
+      const { w, runs } = autosaveWorld(on, true, { BASE_AUTOSAVE: '0' })
+      await start($, surface)
+      const ui = await mount($, surface)
+      await ui.press({ key: 'compact' })
+      expect((await typed($, '')).text).toBe('Compacted')
+      expect(runs).toEqual(['compact', '/compact'])
+      expect(w.toasts).toEqual(['compacted 150,000 → 20,000 tokens'])
+    })
+
+    test(`${surface}: typed /compact with a stale workspace queues the save, then /compact with its args`, async ($, on) => {
+      const { w, clock, runs } = autosaveWorld(on, true)
+      await start($, surface)
+      const r = await typed($, 'keep the plan')
+      expect(r.text).toBe('workspace stale: saving it first, then compacting')
+      // The save and the second /compact run from a timer; no refusal toasts.
+      await clock.advance(1)
+      expect(w.toasts).toEqual([])
+      expect(runs).toEqual(['save', '/compact keep the plan'])
+    })
+
+    test(`${surface}: typed /compact with a fresh workspace runs as typed, no save`, async ($, on) => {
+      const { runs } = autosaveWorld(on, false)
+      await start($, surface)
+      expect((await typed($, 'x')).text).toBe('Compacted')
+      expect(runs).toEqual(['/compact x'])
+    })
+
     test(`${surface}: Compact pressed during a main turn only toasts; a subagent turn's end keeps it; the main end re-arms it`, async ($, on) => {
       const { w } = world(on)
       let calls = 0
