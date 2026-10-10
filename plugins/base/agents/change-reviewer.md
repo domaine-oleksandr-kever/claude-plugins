@@ -24,7 +24,8 @@ chatter or preamble.
 - Optionally, **raw hits to confirm** (task-number grep hits, untracked-file candidates).
 
 Gather what you need with your own tools (`git diff "$(git merge-base <base> HEAD)" -- <file>`
-— merge-base to the working tree, so staged/unstaged edits count too — `Read`, `Grep`).
+— merge-base to the working tree, so staged/unstaged edits count too — `Read`, `Grep`). A file
+in your group with no diff is untracked: it is new in this change — `Read` it whole.
 
 ## What to check
 
@@ -68,7 +69,8 @@ A single findings table, grouped by file:
 |---|---|---|---|---|
 
 - `Check` ∈ {A, C, E, F} for findings you originate; use `B` (ticket reference) / `D` (untracked
-  referenced file) only to label passed-in hits you confirmed — you never originate those two.
+  referenced file) only to label passed-in hits you confirmed — you never originate those two. An
+  untracked file in your group is part of the change: A / C / E / F rows on it are yours.
   `Severity` ∈ {blocker, warning, nit}; `F` rows are never below `warning` and always
   carry a failure scenario in the Issue column.
 - A team rule the brief marks blocking is **always** `blocker`; no team rule applies off its

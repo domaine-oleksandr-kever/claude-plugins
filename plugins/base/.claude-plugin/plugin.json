@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "base",
   "displayName": "Base",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Shared Domaine plugin for Claude Code: the Jira, Figma and doc readers, the Jira writer and the review agents, the task workspace and the progress it publishes for band, the commit and review guards, the working conventions, a doctor, and the shared MCP servers; reads large results through slim, which it requires",
   "author": {
     "name": "Oleksandr Kever",

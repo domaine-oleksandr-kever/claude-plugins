@@ -27,15 +27,9 @@ After the pass is applied (step 4), **write/refresh the marker** (review-flow's 
 
 ## 1. Determine scope
 
-Scope = review-flow §1's diff — merge-base of the resolved `$base` to the **working tree**, so
-committed, staged and unstaged work all land in scope (this review runs *before* the commit):
-
-```bash
-git diff --name-only "$mb"   # $base / $mb per review-flow §1
-```
-
-Review **only these files** (untracked new files surface via check D) — produce the list only; the
-review agents read them (step 2).
+Scope = review-flow §1's **scope diff** — merge-base of the resolved `$base` to the **working
+tree**: committed, staged, unstaged and untracked work (this review runs *before* the commit).
+Review **only the files its `--name-only` lists** — produce the list; the agents read them (step 2).
 
 **Profile.** The `profile` word comes from whoever invoked this skill: the argument, a team plugin's
 brief, or the team plugin's own system-prompt section naming the checkout's profile and its team
@@ -56,11 +50,12 @@ rules. base detects none itself. With none → `profile: none` (the repo's own r
   like every other finding, with the severity the agent gave them.
 - **F is delegated to `base:bug-hunter`, spawned in parallel with the change-reviewer(s)** when the
   review-flow correctness gate holds (the diff touches logic, control flow or request handling — pure
-  copy/CSS/locale diffs skip it, say so in one line). Pass it the `base`, the documented `ceiling:`
-  entries from the workspace `notes.md` when a workspace exists, and any domain hints the team
-  plugin's section gives. Its findings join the step-3 plan as check-F rows, failure scenario
-  included — the agent reports findings, not fixes: derive each row's **Proposed change** from the
-  failure scenario yourself and carry the finding's Severity/Verdict into the row.
+  copy/CSS/locale diffs skip it, say so in one line). Pass it the `base`, the untracked new files
+  from the step-1 list, the documented `ceiling:` entries from the workspace `notes.md` when a
+  workspace exists, and any domain hints the team plugin's section gives. Its findings join the
+  step-3 plan as check-F rows, failure scenario included — the agent reports findings, not fixes:
+  derive each row's **Proposed change** from the failure scenario yourself and carry the finding's
+  Severity/Verdict into the row.
 
 The five checks (A, C and F full definitions live in the agents — their single home):
 
@@ -77,13 +72,9 @@ The five checks (A, C and F full definitions live in the agents — their single
   correctness/readability wins — **in the changed code only**, every change gets a pass.
 - **D — Untracked referenced files.** Verify every file the changed code references — included
   partials, imported modules, assets, config entries — exists on disk **and is tracked by git**.
-  First-pass signal:
-  ```bash
-  git status --porcelain | grep '^??'
-  ```
-  the candidates go to `base:change-reviewer` with the B hits — it confirms which untracked paths the
-  diff actually references. A referenced-but-untracked file breaks the build or the deploy — propose
-  `git add <path>` for each one found.
+  First-pass signal: review-flow's D-candidates line; the candidates go to `base:change-reviewer`
+  with the B hits — it confirms which untracked paths the diff actually references. A
+  referenced-but-untracked file breaks the build or the deploy — propose `git add <path>` for each.
 - **F — Correctness (bug hunt)** — run by `base:bug-hunter`: real bugs in how the diff interacts with
   unchanged code (races, invariant bypasses, state divergence between sibling paths, base-class
   traps), each verified with a concrete failure scenario.
@@ -126,5 +117,5 @@ re-review redundantly. Append the `correctness_hash` line only when check F was 
 ## Guardrails
 
 - Report → approve → apply. Never edit before approval; never expand past the approved list.
-- Only touch files in the branch diff (step 1). No drive-by changes elsewhere.
+- Only touch files in the step-1 list. No drive-by changes elsewhere.
 - Never commit, push, or stage-and-commit automatically.

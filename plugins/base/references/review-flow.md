@@ -21,7 +21,7 @@ Format (plain `key=value` lines, no `jq` needed):
 
 ```
 branch=<current branch>
-base=<develop|main>
+base=<develop|main|origin/develop|origin/main>
 diff_hash=<hash of the reviewed diff>
 reviewed_at_head=<commit sha at review time>
 correctness_hash=<diff hash when check F was last satisfied — line absent if never>
@@ -36,13 +36,32 @@ Compute scope + hash:
 
 ```bash
 branch=$(git rev-parse --abbrev-ref HEAD)
-base=$(git show-ref --verify --quiet refs/heads/develop && echo develop \
-  || { git show-ref --verify --quiet refs/remotes/origin/develop && echo origin/develop || echo main; })
-# ONE diff from the branch point to the WORKING TREE — covers committed, staged, and unstaged
-# changes alike (a { base...HEAD; git diff; } pair would miss staged-but-uncommitted edits):
+# develop, else main; origin/<b> when the local <b> is missing or only behind it (a stale local
+# branch gives an old merge-base and foreign files in scope); a local <b> with commits of its own wins.
+for b in develop main; do
+  base=$b
+  if git show-ref --verify --quiet "refs/remotes/origin/$b" \
+     && { ! git show-ref --verify --quiet "refs/heads/$b" || git merge-base --is-ancestor "$b" "origin/$b"; }; then
+    base="origin/$b"; break
+  fi
+  git show-ref --verify --quiet "refs/heads/$b" && break
+done
 mb=$(git merge-base "$base" HEAD)
-diff_hash=$(git diff "$mb" | git hash-object --stdin)
+# ONE diff from the branch point to the WORKING TREE — committed, staged, unstaged and untracked
+# work alike. A throwaway copy of the index marks untracked files intent-to-add, so each diffs as
+# the new file it becomes once staged (same hash before and after `git add`). Untracked files under
+# .claude/ or docs/technical-approaches/ and any .env* file or dir / settings.local.json stay out,
+# name and body.
+idx="$(git rev-parse --git-dir)/base-review-index"
+cp "$(git rev-parse --git-dir)/index" "$idx"
+GIT_INDEX_FILE="$idx" git add -N -- ':/' ':(top,exclude).claude/' ':(top,exclude)docs/technical-approaches/' \
+  ':(top,exclude,glob)**/.env*' ':(top,exclude,glob)**/.env*/**' ':(top,exclude,glob)**/settings.local.json'
+diff_hash=$(GIT_INDEX_FILE="$idx" git diff "$mb" | git hash-object --stdin)
 ```
+
+The **scope diff** is `GIT_INDEX_FILE="$idx" git diff "$mb"` (add `--name-only` for the
+reviewed-files list) — every step below that reads the diff uses it. `base-review-index` lives
+beside the marker and is rebuilt on every run, never committed.
 
 Read it:
 
@@ -81,8 +100,9 @@ legitimate.
 
 ```bash
 # BEFORE `git commit` — is the tree about to be committed the reviewed one?
+# (run the scope + hash block above first, in the same shell)
 marker="$(git rev-parse --git-dir)/.base-review"
-pre_hash=$(git diff "$(git merge-base "$base" HEAD)" | git hash-object --stdin)
+pre_hash=$diff_hash
 restamp=no; keep_correctness=no
 if [ -f "$marker" ] && grep -qx "branch=$branch" "$marker" && grep -qx "diff_hash=$pre_hash" "$marker"; then
   restamp=yes
@@ -90,8 +110,8 @@ if [ -f "$marker" ] && grep -qx "branch=$branch" "$marker" && grep -qx "diff_has
   if grep -qx "correctness_hash=$pre_hash" "$marker"; then keep_correctness=yes; fi
 fi
 
-# AFTER a successful `git commit` — did the hooks rewrite files?
-post_hash=$(git diff "$(git merge-base "$base" HEAD)" | git hash-object --stdin)
+# AFTER a successful `git commit` — did the hooks rewrite files? (re-run the scope + hash block)
+post_hash=$diff_hash
 if [ "$restamp" = yes ] && [ "$post_hash" != "$pre_hash" ]; then
   { echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$post_hash"; \
     echo "reviewed_at_head=$(git rev-parse HEAD)"; } > "$marker"
@@ -113,13 +133,14 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   (`(AC 1a)`, `(TA 1a)`, "Acceptance Criteria", "Technical Approach", "Steps to Test"):
 
   ```bash
-  git diff "$(git merge-base "$base" HEAD)" | grep -nE '^\+[^+]' \
-    | grep -E '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates (incl. staged + unstaged; ^\+[^+] skips +++ headers)
+  GIT_INDEX_FILE="$idx" git diff "$mb" | grep -nE '^\+[^+]' \
+    | grep -E '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates (the scope diff; ^\+[^+] skips +++ headers)
   git status --porcelain | grep '^??'                                          # D candidates
   ```
 
 - **A, C, and E are delegated to the `base:change-reviewer` agent** so the heavy reading stays
-  out of the main context (only the findings table comes back):
+  out of the main context (only the findings table comes back). The file list is the scope
+  diff's `--name-only`: an untracked new file in it is part of the change, reviewed like any other.
   - **Small diff** (≲ 15 changed files / ≲ 1500 diff lines) → **one** `base:change-reviewer`.
   - **Large diff** → **one `base:change-reviewer` per file-group, in parallel** — each file is
     read once; wall-clock drops. Split the file list into a few balanced groups.
@@ -138,8 +159,8 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   > and still record `correctness_hash` (the pass was handled: not applicable).
 
   Spawn it **in parallel** with the `base:change-reviewer` agent(s) — same diff, different
-  lens; on a large diff reuse the same file-groups. Pass it the `base`, its file group,
-  and the documented ceilings (`ceiling:` entries from the task workspace `notes.md`)
+  lens; on a large diff reuse the same file-groups. Pass it the `base`, its file group (on a
+  small diff, the scope diff's untracked new files), and the documented ceilings (`ceiling:` entries from the task workspace `notes.md`)
   when a workspace exists.
 
 - **Emphasis by caller** — assigned per skill in §3 → Per-skill entry behaviour.
@@ -180,16 +201,16 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
 
 - Compare `diff_hash` to `prev_hash`. If **unchanged**, say *"nothing changed since the
   last review"* and recommend **skip**. If **changed**, summarize what changed since the
-  last review — `git diff <prev_head>` covers commits since then plus staged and unstaged
-  work in one go — which files, rough nature (comments/style vs. logic):
+  last review — the scope diff's index against `<prev_head>` covers commits since then plus
+  staged, unstaged and untracked work in one go — which files, rough nature (comments/style vs. logic):
 
   ```bash
-  git diff "$prev_head" --stat
+  GIT_INDEX_FILE="$idx" git diff "$prev_head" --stat   # $idx per the §1 block
   ```
 
 - Offer: **`[ full re-review ] / [ only the changed files ] / [ skip ]`**.
   - *only the changed files* → run `base:change-reviewer` on just the delta vs. `prev_head`
-    (cheapest useful option).
+    (cheapest useful option) — the files of the same command's `--name-only`.
 - On any run that actually reviews, **refresh the marker** afterward.
 
 ### Per-skill entry behaviour

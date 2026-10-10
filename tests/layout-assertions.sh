@@ -106,6 +106,7 @@ for f in "$CANON" \
          "$ROOT/plugins/base/skills/worktree/SKILL.md" \
          "$ROOT/tests/base-doctor-sim.sh" \
          "$ROOT/tests/base-scripts-sim.sh" \
+         "$ROOT/tests/base-review-flow-sim.sh" \
          "$ROOT/plugins/base/scripts/qa-stores.cjs" \
          "$ROOT/tests/base-qa-stores-sim.sh" \
          "$ROOT/plugins/fe/.claude-plugin/plugin.json" \
