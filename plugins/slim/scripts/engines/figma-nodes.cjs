@@ -20,8 +20,9 @@
  *
  * Hint fields read by `run`: `hint.variables` — the `/v1/variables/local` payload (an object): it
  * NAMES the `boundVariables` ids, so a bound value reads `$Collection/Group/Name (<node value>)`, and
- * `; var default <v>` is appended only when the file resolves that variable to something else;
- * without it the header says the tokens are raw values and bindings read `$var:<short id>`.
+ * `; var default <v>` is appended only when the file resolves that variable to something else, and
+ * `; modes <name> <v> · …` only when its modes resolve to distinct values; without it the header
+ * says the tokens are raw values and bindings read `$var:<short id>`.
  * `hint.filename` — a `<key>-<node>.nodes.json` name gives the header its file key.
  * A dominant markdown fence around the response is unwrapped; its preamble and trailer stay. Pure.
  */
@@ -88,8 +89,11 @@ function quoteText(s, max) {
 
 // ---------------------------------------------------------------------------- variables --
 
-// `/v1/variables/local` → id ⇒ { name: 'Collection/Group/Name', value: '<default-mode value>' }.
-// An alias chain is followed to the value a build would actually ship, with a cycle guard.
+// `/v1/variables/local` → id ⇒ { name: 'Collection/Group/Name', value: '<default-mode value>',
+// modes: 'modes <name> <v> · …' or '' }. An alias chain is followed to the value a build would
+// actually ship, with a cycle guard; mode ids are per collection, so an alias into another collection
+// resolves in that collection's default mode. `modes` is set only when ≥ 2 modes differ.
+const MODES_SHOWN = 4;
 function buildVars(varsPayload) {
   const out = new Map();
   const meta = varsPayload && varsPayload.meta;
@@ -100,19 +104,23 @@ function buildVars(varsPayload) {
     const col = cols[v.variableCollectionId];
     return `${col && col.name ? `${col.name}/` : ''}${v.name || v.id}`;
   };
-  const valueOf = (v, seen) => {
+  const defaultMode = (v) => {
     const col = cols[v.variableCollectionId];
-    const modeId = (col && col.defaultModeId) || Object.keys(v.valuesByMode || {})[0];
-    let val = v.valuesByMode ? v.valuesByMode[modeId] : undefined;
+    return (col && col.defaultModeId) || Object.keys(v.valuesByMode || {})[0];
+  };
+  const valueIn = (v, modeId, seen) => {
+    let cur = v;
+    let mode = modeId;
+    let val = cur.valuesByMode ? cur.valuesByMode[mode] : undefined;
     let hops = 0;
     while (val && typeof val === 'object' && val.type === 'VARIABLE_ALIAS' && hops++ < 8) {
       if (seen.has(val.id)) return '(alias cycle)';
       seen.add(val.id);
       const next = vars[val.id];
       if (!next) return `(alias ${val.id})`;
-      const nCol = cols[next.variableCollectionId];
-      const nMode = (nCol && nCol.defaultModeId) || Object.keys(next.valuesByMode || {})[0];
-      val = next.valuesByMode ? next.valuesByMode[nMode] : undefined;
+      if (next.variableCollectionId !== cur.variableCollectionId) mode = defaultMode(next);
+      cur = next;
+      val = cur.valuesByMode ? cur.valuesByMode[mode] : undefined;
     }
     if (val === undefined || val === null) return '';
     if (typeof val === 'object') {
@@ -126,10 +134,21 @@ function buildVars(varsPayload) {
     if (typeof val === 'boolean') return String(val);
     return quote(val);
   };
+  const modesOf = (v, id) => {
+    const col = cols[v.variableCollectionId];
+    const list = col && Array.isArray(col.modes) && col.modes.length
+      ? col.modes : Object.keys(v.valuesByMode || {}).map((modeId) => ({ modeId }));
+    const got = list
+      .map((m) => ({ name: String((m && (m.name || m.modeId)) || '?').replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim(), value: valueIn(v, m && m.modeId, new Set([id])) }))
+      .filter((m) => m.value && !m.value.startsWith('(alias'));
+    if (new Set(got.map((m) => m.value)).size < 2) return '';
+    const more = got.length - MODES_SHOWN;
+    return `modes ${got.slice(0, MODES_SHOWN).map((m) => `${m.name} ${m.value}`).join(' · ')}${more > 0 ? ` · +${more} more` : ''}`;
+  };
   for (const id of Object.keys(vars)) {
     const v = vars[id];
     if (!v || typeof v !== 'object') continue;
-    out.set(id, { name: nameOf(v), value: valueOf(v, new Set([id])) });
+    out.set(id, { name: nameOf(v), value: valueIn(v, defaultMode(v), new Set([id])), modes: modesOf(v, id) });
   }
   return out;
 }
@@ -154,13 +173,16 @@ function shortVarId(id) {
 //     library variable pointing at another library — so there is nothing to compare. The raw
 //     `(alias VariableID:…)` is never printed: ~50 bytes of an id that leads nowhere.
 // A bound field with no raw counterpart on the node falls back to the variables file's value.
+// A variable whose modes differ adds `; modes <name> <v> · …` — never `/`, which `pad a/b/c/d` and
+// `[size]/lh` already use as their separator.
 function bindLabel(ctx, id, nodeValue) {
   const v = ctx.vars.get(id);
   const name = v && v.name ? v.name : `var:${shortVarId(id)}`;
   const fileValue = v && v.value && !v.value.startsWith('(alias') ? v.value : '';
   const own = nodeValue == null ? '' : String(nodeValue);
-  if (!own) return fileValue ? `$${name} (${fileValue})` : `$${name}`;
-  return `$${name} (${own}${fileValue && fileValue !== own ? `; var default ${fileValue}` : ''})`;
+  const inner = [own || fileValue, own && fileValue && fileValue !== own ? `var default ${fileValue}` : '', v && v.modes]
+    .filter(Boolean).join('; ');
+  return inner ? `$${name} (${inner})` : `$${name}`;
 }
 
 function aliasId(x) {
@@ -815,7 +837,8 @@ function compact(payload, opts) {
     out.push('  node folds N identical siblings and the `folds ×N` block below it lists every folded id');
     out.push('  with the values that differ, one cell per node, in the exemplar\'s order · `$Name (v)`');
     out.push('  = bound to variable `Name`, `v` = the NODE\'s own value (what a build ships), and a');
-    out.push('  trailing `; var default <d>` = the variables file resolves `Name` to `<d>` instead ·');
+    out.push('  trailing `; var default <d>` = the variables file resolves `Name` to `<d>` instead, and');
+    out.push('  `; modes Desktop 20 · Mobile 15` = its value per mode, only when the modes differ ·');
     out.push('  `gap auto (measured g)` = SPACE_BETWEEN, `g` = the median gap between the flow children');
     out.push('  (within a row under wrap); a gap variable bound on the node is listed as `ignored`.');
     if (typeTable.size) {

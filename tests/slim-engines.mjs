@@ -356,7 +356,7 @@ const EC = ecRows();
   check('EN-kitchen-ids-lossless', want.every((id) => kids.has(id)), want.filter((id) => !kids.has(id)).join(' '));
   check('EN-kitchen-hidden-dropped', !k.text.includes('SENTINEL-HIDDEN-COPY') && !kids.has('10:7') && !kids.has('10:6') && k.text.includes('3 hidden dropped'), k.text.slice(0, 400));
   check('EN-kitchen-texts', texts(KITCHEN.nodes['10:1'].document).every((t) => k.text.includes(JSON.stringify(t))), 'a TEXT value is missing');
-  check('EN-kitchen-variables', k.text.includes('tokens: variables') && k.text.includes('fill:$Core/Surface/Card (#FFFFFF)') && k.text.includes('gap $Core/Space/Gutter (12; var default 20)') && k.text.includes('[$Core/Type/Body Size (16)]/24'), k.text);
+  check('EN-kitchen-variables', k.text.includes('tokens: variables') && k.text.includes('fill:$Core/Surface/Card (#FFFFFF; modes Light #FFFFFF · Dark #111111)') && k.text.includes('gap $Core/Space/Gutter (12; var default 20)') && k.text.includes('[$Core/Type/Body Size (16)]/24'), k.text);
   check('EN-kitchen-geometry-dropped', !k.text.includes('NONZERO') && !k.text.includes('overriddenFields') && k.text.includes('props:{Label="Add to bundle"}'), 'geometry or overrides survived');
   check('EN-file-key', k.text.includes('\nfile: ABC123 · "Bundle System"\n'), k.text.slice(0, 200));
   check('EN-header-bytes', k.text.includes(`\nbytes: ${bytes(JSON.stringify(KITCHEN))} → ${bytes(k.text)} (`), /bytes: .*/.exec(k.text)[0]);
@@ -454,6 +454,43 @@ const EC = ecRows();
   eq('EN-between-bound-one-child', gapOf(between([kid(2, 0, 0, 100)], { boundVariables: { itemSpacing: alias('VariableID:2:12') } })), 'gap auto ($Core/Space/Gutter (86; var default 20) ignored)');
   check('EN-between-legend', between(three).includes('`gap auto (measured g)` = SPACE_BETWEEN'), 'legend line missing');
   check('EN-gap-plain-unchanged', /layout:row gap 86 /.test(between(three, { primaryAxisAlignItems: 'CENTER' })), 'non-SPACE_BETWEEN gap changed');
+
+  // Variable modes: one `; modes …` suffix per binding, only when ≥ 2 modes resolve to distinct values.
+  const col = (id, name, modes) => ({ id, name, defaultModeId: modes[0][0], modes: modes.map(([modeId, n]) => ({ modeId, name: n })) });
+  const mvar = (id, name, colId, valuesByMode) => ({ id, name, variableCollectionId: colId, valuesByMode });
+  const MV = { meta: {
+    variableCollections: {
+      L: col('L', 'Layout', [['d', 'Desktop'], ['m', 'Mobile']]), B: col('B', 'Base', [['b1', 'One'], ['b2', 'Two']]),
+      S: col('S', 'Solo', [['s', 'Only']]), C: col('C', 'Cyc', [['p', 'P'], ['q', 'Q'], ['r', 'R']]),
+      G: col('G', 'Big', ['A', 'B', 'C', 'D', 'E', 'F'].map((x) => [x, x])),
+    },
+    variables: {
+      gap: mvar('gap', 'Gap', 'L', { d: 20, m: 15 }), eq: mvar('eq', 'Equal', 'L', { d: 8, m: 8 }), one: mvar('one', 'Single', 'S', { s: 4 }),
+      ref: mvar('ref', 'Ref', 'L', { d: alias('bx'), m: alias('by') }), bx: mvar('bx', 'X', 'B', { b1: 10, b2: 99 }), by: mvar('by', 'Y', 'B', { b1: 4, b2: 77 }),
+      loop: mvar('loop', 'Loop', 'C', { p: 1, q: 2, r: alias('loop2') }), loop2: mvar('loop2', 'Loop2', 'C', { p: 1, q: 1, r: alias('loop') }),
+      big: mvar('big', 'Size', 'G', { A: 1, B: 2, C: 3, D: 4, E: 5, F: 6 }), body: mvar('body', 'Body', 'L', { d: 16, m: 14 }),
+      ink: mvar('ink', 'Ink', 'L', { d: { r: 1, g: 1, b: 1, a: 1 }, m: { r: 0, g: 0, b: 0, a: 0.5 } }),
+    },
+  } };
+  const modeRow = (extra) => fn.compact(nodesPayload({ id: '40:1', name: 'M', type: 'FRAME', absoluteBoundingBox: box(0, 0, 100, 100), constraints: TL,
+    layoutMode: 'HORIZONTAL', fills: [], strokes: [], effects: [], children: [], ...extra }), { variables: MV }).md;
+  const gapBy = (id) => (/#40:1 .*? (gap .*?) primary:/m.exec(modeRow({ itemSpacing: 7, primaryAxisAlignItems: 'CENTER', boundVariables: { itemSpacing: alias(id) } })) || [])[1];
+  eq('EN-modes-single', gapBy('one'), 'gap $Solo/Single (7; var default 4)');
+  eq('EN-modes-equal', gapBy('eq'), 'gap $Layout/Equal (7; var default 8)');
+  eq('EN-modes-distinct', gapBy('gap'), 'gap $Layout/Gap (7; var default 20; modes Desktop 20 · Mobile 15)');
+  eq('EN-modes-capped', gapBy('big'), 'gap $Big/Size (7; var default 1; modes A 1 · B 2 · C 3 · D 4 · +2 more)');
+  eq('EN-modes-cross-collection', gapBy('ref'), 'gap $Layout/Ref (7; var default 10; modes Desktop 10 · Mobile 4)');
+  eq('EN-modes-alias-cycle', gapBy('loop'), 'gap $Cyc/Loop (7; var default 1; modes P 1 · Q 2)');
+  check('EN-modes-pad', modeRow({ paddingTop: 20, paddingLeft: 2, boundVariables: { paddingTop: alias('gap') } })
+    .includes('pad $Layout/Gap (20; modes Desktop 20 · Mobile 15)/0/0/2'), 'pad lost its modes or separators');
+  check('EN-modes-fill', modeRow({ fills: [solid(1, 1, 1, 1, { boundVariables: { color: alias('ink') } })] })
+    .includes('fill:$Layout/Ink (#FFFFFF; modes Desktop #FFFFFF · Mobile #000000 50%)'), 'fill lost its modes');
+  const sized = fn.compact(nodesPayload({ id: '40:2', name: 'T', type: 'TEXT', characters: 'Hi', absoluteBoundingBox: box(0, 0, 10, 10), constraints: TL, fills: [], strokes: [], effects: [],
+    style: { fontFamily: 'Inter', fontPostScriptName: 'Inter-Regular', fontWeight: 400, fontSize: 16, lineHeightPx: 24, lineHeightUnit: 'PIXELS' }, boundVariables: { fontSize: alias('body') } }), { variables: MV }).md;
+  check('EN-modes-font-size', sized.includes('[$Layout/Body (16; modes Desktop 16 · Mobile 14)]/24'), sized);
+  check('EN-modes-between-ignored', modeRow({ itemSpacing: 7, primaryAxisAlignItems: 'SPACE_BETWEEN', boundVariables: { itemSpacing: alias('gap') } })
+    .includes('gap auto ($Layout/Gap (7; var default 20; modes Desktop 20 · Mobile 15) ignored)'), 'measured-gap ignored form lost its modes');
+  check('EN-modes-legend', modeRow({}).includes('`; modes Desktop 20 · Mobile 15` = its value per mode'), 'legend line missing');
 }
 
 // EM — media planning: kind from the leading bytes, outputs from probe facts, the figure line

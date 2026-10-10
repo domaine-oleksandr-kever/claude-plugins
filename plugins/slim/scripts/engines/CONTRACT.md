@@ -137,8 +137,12 @@ ids and texts below depth D are then only in the original, and two siblings at d
 exemplar only when what they folded is identical too, apart from ids and absolute position. It
 never folds past the root's direct children; a tree that does not fit even then comes back whole.
 With `hint.variables` a bound value reads `$Collection/Name (<node value>)` and the header says
-`tokens: variables`; without it bindings read `$var:<short id>`. A dominant markdown fence around the
-response is unwrapped, its preamble and trailer kept. The result carries `meta: { nodes, hidden,
+`tokens: variables`; without it bindings read `$var:<short id>`. A variable whose modes resolve to
+≥ 2 distinct values adds `; modes Desktop 20 · Mobile 15` inside the parentheses (first 4 modes, then
+`· +N more`; an alias into another collection resolves in that collection's default mode; an
+unresolvable or cyclic mode is left out) — never `/`, so `pad a/b/c/d` and `[size]/lh` keep their
+separators. A dominant markdown fence around the response is unwrapped, its preamble and trailer
+kept. The result carries `meta: { nodes, hidden,
 folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` prints
 `figma-nodes: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N`. The original's spill name ends
 `.json`.
@@ -284,8 +288,9 @@ where the data is, compresses each span with `compress()`, and splices the resul
 ## 6. Versioning
 
 `Result.v` is the contract version. A new engine, a new option or a new result field is a minor change
-and keeps `v: 1`; changing the meaning or shape of an existing field bumps `v`. Adding an engine is one
-file exporting `{ id, run(text, opts, ctx) }` (`ctx.deadline`, `ctx.part(kind, payload) → citePath`,
+and keeps `v: 1`; changing the meaning or shape of an existing field bumps `v`. A new suffix inside an
+engine's rendered text is minor too: figma-nodes' `; modes …` on a bound value (slim 0.8.0) kept
+`v: 1`. Adding an engine is one file exporting `{ id, run(text, opts, ctx) }` (`ctx.deadline`, `ctx.part(kind, payload) → citePath`,
 `ctx.hint` — the input's hint, `{}` when absent),
 one row in the `ENGINES` table of `index.cjs` and one rule in `sniff.cjs`.
 
