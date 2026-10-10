@@ -45,6 +45,8 @@ export type World = {
   readFails: string[]
   /** `$.fs.stat(path, { resolve: true })` lands here instead of on the path itself: a symbolic link */
   realPaths: Record<string, string>
+  /** what $.session.usage() reports as the context window's fill, in percent; null = no reading yet */
+  ctxPct: number | null
 }
 
 export const progressMd = (id: string) => `${TASKS}/${id}/progress.md`
@@ -74,6 +76,7 @@ export function world(on: On, over: Partial<World> = {}) {
     writeFails: null,
     readFails: [],
     realPaths: {},
+    ctxPct: null,
     ...over,
   }
   const calls = {
@@ -115,6 +118,7 @@ export function world(on: On, over: Partial<World> = {}) {
   on('session.root', async () => ({ value: w.root }))
   on('session.cwd', async () => ({ value: w.root }))
   on('session.id', async () => ({ value: w.sid }))
+  on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000, percent: w.ctxPct ?? undefined }, rateLimits: [] } as never }))
   on('settings.read', async () => ({ value: { env: w.settingsEnv, enabledPlugins: w.enabledPlugins } as any }))
   on('tool.list', async () => ({ value: w.tools.map(name => ({ name, description: name, mcp: name.startsWith('mcp__') })) }))
   on('command.list', async () => ({

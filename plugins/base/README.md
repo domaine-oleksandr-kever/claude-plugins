@@ -9,7 +9,7 @@ backend, QA) adds its own skills on top and depends on base.
 base reads large results through slim and requires it: compression happens only inside slim, so every
 figure lands in slim's log, and base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.7.0**.
+Current release: **base v0.7.1**.
 
 ## Status
 
@@ -208,7 +208,8 @@ The workspace is `stale` when progress.md and notes.md were last written over 20
 before the newest savable event. While it is stale, a prompt gets one context line asking to save to
 notes.md first; a turn that wrote nothing to the workspace, after savable work in it or 3 turns
 without a workspace write, is blocked at its stop once (never when the stop hook is already active, at most once per 3 turns); an auto-compact
-appends one `compact:` pointer line to notes.md. `BASE_AUTOSAVE=0` turns the three off.
+appends one `compact:` pointer line to notes.md. The three levers count a workspace stale after 5 minutes
+instead of 20 once the context window is 85 % full. `BASE_AUTOSAVE=0` turns the three off.
 
 `/base-progress <work-id>` pins the work id band's checklist shows, `/base-progress -` unpins, and
 `/base-progress` alone names the pin. The checklist itself is band's `/band-progress`.

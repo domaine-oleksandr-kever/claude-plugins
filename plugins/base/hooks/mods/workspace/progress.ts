@@ -20,6 +20,9 @@ const RESOLVE_EVERY = 4
 const FRESH_MS = 12 * 60 * 60_000
 const CHECKOUT = /\bgit\s+(checkout|switch|worktree)\b/
 export const STALE_MS = 20 * 60_000
+/** The levers' stale window once the context window is at or above TIGHT_CTX_PCT full: an auto-compact is near. */
+export const TIGHT_STALE_MS = 5 * 60_000
+const TIGHT_CTX_PCT = 85
 const SAVABLE_CAP = 200
 /** slim's MCP gate: a result past it is one slim compresses or stubs. */
 const MCP_GATE = 4096
@@ -35,9 +38,13 @@ const sessionId = atom({ plugin: 'base', key: 'sessionId' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
 const savable = atom({ plugin: 'base', key: 'savable' } as const, [] as BaseSavable[])
 
-/** Unsaved work: no workspace write for 20 min, and something worth saving happened after the last one. */
-export const isStale = (mtimeMs: number, lastSavableMs: number, now: number): boolean =>
-  now - mtimeMs > STALE_MS && lastSavableMs > mtimeMs
+/** Unsaved work: no workspace write for the stale window, and something worth saving happened after the last one. */
+export const isStale = (mtimeMs: number, lastSavableMs: number, now: number, staleMs = STALE_MS): boolean =>
+  now - mtimeMs > staleMs && lastSavableMs > mtimeMs
+
+/** The levers' window from `$.session.usage().context.percent`: 5 min at or above 85 % full, else 20. */
+export const staleWindowOf = (percent: number | null | undefined): number =>
+  (percent ?? 0) >= TIGHT_CTX_PCT ? TIGHT_STALE_MS : STALE_MS
 
 type Loaded = Extract<BaseProgress, { workId: string }>
 

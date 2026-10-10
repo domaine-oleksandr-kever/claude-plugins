@@ -52,6 +52,22 @@ describe('nudge', () => {
     await submit($, 'go on')
     expect(lastContext(calls)).toEqual([])
   })
+
+  t('a context window 85 % full shortens the stale window to 5 min', async ($, on) => {
+    const { w, calls, clock } = world(on, { ctxPct: 84 })
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await agent($)
+    await clock.advance(6 * MIN)
+    await submit($, 'go on')
+    expect(lastContext(calls)).toEqual([])
+    w.ctxPct = 85
+    await submit($, 'go on')
+    expect(lastContext(calls)).toEqual([NUDGE.replace('21 min', '7 min')])
+    w.ctxPct = null
+    await submit($, 'go on')
+    expect(lastContext(calls)).toEqual([])
+  })
 })
 
 describe('turn-end save', () => {
@@ -126,6 +142,16 @@ describe('turn-end save', () => {
     await agent($)
     w.files[NOTES_MD] = { text: NOTES, mtimeMs: clock.now() - 5 * MIN }
     expect(await stop($)).toEqual({})
+  })
+
+  t('a context window 85 % full blocks a stop after 5 min', async ($, on) => {
+    const { w, clock } = world(on, { ctxPct: 90 })
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await submit($, 'go on')
+    await agent($)
+    await clock.advance(6 * MIN)
+    expect((await stop($)).block).toBe(BLOCK)
   })
 
   t('no workspace: never blocked', async ($, on) => {
