@@ -30,7 +30,7 @@ describe('be.jsonl', () => {
     expect(lines.map(l => [l.kind, l.text])).toEqual([
       ['start', 'be 0.1.0'],
       ['install', 'needs the base plugin — claude plugin install base@domaine'],
-      ['doctor', '2 passed, 1 failed, 0 skipped'],
+      ['doctor', '3 passed, 1 failed, 0 skipped'],
     ])
     expect(lines.every(l => l.plugin === 'be' && l.session === 's1' && l.agent === 'main' && l.version === '0.1.0')).toBe(true)
     expect(calls.writes).toHaveLength(3)
@@ -56,7 +56,7 @@ describe('be.jsonl', () => {
     expect(parse(w.files[FILE]?.text).map(l => [l.session, l.kind, l.text])).toEqual([
       ['s1', 'start', 'be 0.1.0'],
       ['s1', 'install', 'x'],
-      ['s1', 'doctor', '3 passed, 0 failed, 0 skipped'],
+      ['s1', 'doctor', '4 passed, 0 failed, 0 skipped'],
     ])
   })
 

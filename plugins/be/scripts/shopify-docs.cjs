@@ -8,15 +8,17 @@
  * a sandbox that blocks shopify.dev.
  *
  * Usage:
- *   node shopify-docs.cjs [--api <name>] [--max <n>] [--timeout <s>] <query …>
+ *   node shopify-docs.cjs [--api <name>] [--max <n>] [--timeout <s>] [--] <query …>
  *     --api      narrow the search to one API (admin, storefront-graphql, functions, liquid, …)
  *     --max      results to ask for, 1-20 (default 5)
  *     --timeout  seconds before the request is abandoned, 1-600 (default 20)
+ *     --         every later word is query text, even one that starts with `-`
  *
  * stdout: one header line naming the source and that the answer is outside content, then one
  * `### <file>` block per result, at most 4000 characters in all (`note=truncated` on stderr when cut).
  * Exit 0 = answered (no result: `note=no_results`); 1 = the search failed (`error=timeout`,
- * `error=unreachable`, `error=http_status`, `error=bad_answer`); 2 = usage, or no global fetch (node < 18).
+ * `error=unreachable`, `error=http_status` — with `retry_after=<s>` on a 429 that sends Retry-After —,
+ * `error=bad_answer`); 2 = usage, or no global fetch (node < 18).
  * BE_SHOPIFY_DOCS_URL replaces the endpoint (tests).
  */
 'use strict';
@@ -24,7 +26,7 @@
 const DEFAULT_URL = 'https://shopify.dev/assistant/search';
 const MAX_CHARS = 4000;
 
-const USAGE = 'usage: shopify-docs.cjs [--api <name>] [--max <n>] [--timeout <s>] <query …>\n';
+const USAGE = 'usage: shopify-docs.cjs [--api <name>] [--max <n>] [--timeout <s>] [--] <query …>\n';
 
 function usage(code, line) {
   if (line) process.stderr.write(line + '\n');
@@ -41,6 +43,10 @@ function parseArgs(argv) {
   const opts = { api: undefined, max: 5, timeout: 20, words: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    if (a === '--') {
+      opts.words.push(...argv.slice(i + 1));
+      break;
+    }
     if (a === '--help' || a === '-h') usage(0);
     else if (a === '--api' || a === '--max' || a === '--timeout') {
       const v = argv[++i];
@@ -90,7 +96,10 @@ async function main() {
     const code = (e && e.cause && e.cause.code) || (e && e.message) || 'unknown';
     return fail('error=unreachable host=' + url.host + ' reason=' + code + ' (a sandbox needs ' + url.host + ' on its egress allowlist)');
   }
-  if (!res.ok) return fail('error=http_status http=' + res.status + ' host=' + url.host);
+  if (!res.ok) {
+    const wait = res.status === 429 ? (res.headers.get('retry-after') || '').trim() : '';
+    return fail('error=http_status http=' + res.status + ' host=' + url.host + (/^\d+$/.test(wait) ? ' retry_after=' + wait + 's' : ''));
+  }
 
   let docs;
   try {

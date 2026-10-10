@@ -1,5 +1,5 @@
 // /be-doctor: runs scripts/doctor.cjs for what a node process sees and adds what only a session answers —
-// base loaded, slim's view tool registered — then the tail of be.events.
+// base loaded, slim's view tool registered, the Shopify Dev MCP's tools present — then the tail of be.events.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BeEvent } from '../../types'
@@ -9,10 +9,11 @@ import { BASE_MISSING } from './session.ts'
 
 export const COMMAND = {
   name: 'be-doctor',
-  description: 'Check the be install: node, manifest, scripts, base, the Shopify Dev MCP server, slim, event log',
+  description: "Check the be install: node, manifest, scripts, base, the Shopify Dev MCP's declaration and tools, slim, event log",
   immediate: true,
 } as const
 export const SLIM_VIEW = 'mcp__slim__view'
+export const DEV_MCP_TOOL = 'mcp__plugin_base_shopify-dev-mcp__learn_shopify_api'
 const TAIL = 10
 
 type Status = 'PASS' | 'FAIL' | 'SKIP' | 'WARN'
@@ -90,11 +91,16 @@ async function liveRows($: $): Promise<Row[]> {
     rows.push({ status: 'SKIP', name: 'base-live', detail: 'the command list did not answer' })
   }
   try {
-    rows.push((await $.tool.list()).some(t => t.name === SLIM_VIEW)
+    const tools = await $.tool.list()
+    rows.push(tools.some(t => t.name === SLIM_VIEW)
       ? { status: 'PASS', name: 'slim-live', detail: `${SLIM_VIEW} registered` }
       : { status: 'FAIL', name: 'slim-live', detail: 'slim is not loaded — claude plugin install slim@domaine; base refuses its readers until it is' })
+    rows.push(tools.some(t => t.name === DEV_MCP_TOOL)
+      ? { status: 'PASS', name: 'dev-mcp-live', detail: `${DEV_MCP_TOOL} is in this session` }
+      : { status: 'WARN', name: 'dev-mcp-live', detail: "the Shopify Dev MCP's tools are not in this session (not connected? see /mcp) — the skills fall back to scripts/shopify-docs.cjs" })
   } catch {
     rows.push({ status: 'SKIP', name: 'slim-live', detail: 'the tool list did not answer' })
+    rows.push({ status: 'SKIP', name: 'dev-mcp-live', detail: 'the tool list did not answer' })
   }
   return rows
 }

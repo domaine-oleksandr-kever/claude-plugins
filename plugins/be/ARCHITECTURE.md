@@ -27,11 +27,12 @@ The three skills come from Domaine's `domaine-skills-solutions` repository at co
 (2026-08-03): `app-scope` from its `/domaine-app-scope` command, `shopify-resources` from its skill of
 that name, `platform-limitations` from the solutions-engineering skill's `limitation-workarounds.md`,
 which became a skill of its own with the tables as its reference. The domain judgment — the
-questions, the extension-type table, the LOE table and its buffer, the scope template, the resource
-hierarchy, every limitation and workaround row, the escalation steps — is kept as written. What
+questions, the extension-type table, the LOE table and its buffer, the scope template, the escalation
+steps — is kept as written. The limitation rows were re-checked against the Shopify docs on 2026-10-10
+and carry that stamp; shopify-resources kept only its question → source table. What
 changed is the plumbing: base's readers for a ticket, an epic or a page, base's Shopify Dev MCP
 server with `learn_shopify_api` first, Jira writes after approval only (a new ticket through base's
-Atlassian MCP, a field of an existing one through `base:jira-writer`),
+Atlassian MCP with a Markdown description, a field of an existing one through `base:jira-writer`),
 the task workspace when a ticket key is in play, the "connected tools" host list reduced to base's
 servers, and cross-references kept only to skills that landed in be. The skills now live here.
 
@@ -83,7 +84,7 @@ never sweeps: base owns the clean-up of old session folders.
 
 `scripts/doctor.cjs` answers what a node process can see (node, manifest, the scripts' exec bits and
 parse, base installed, base's installed manifest declaring `shopify-dev-mcp`, `be.jsonl`); `/be-doctor`
-adds `base-live` and `slim-live` and turns a static `base` FAIL into a WARN when the session loaded base
+adds `base-live`, `slim-live` and `dev-mcp-live` (the Dev MCP's tools in this session, a WARN without them) and turns a static `base` FAIL into a WARN when the session loaded base
 anyway (a `--plugin-dir` load has no install record). It only reports, never repairs.
 
 ## 8. The tests
@@ -94,5 +95,5 @@ anyway (a `--plugin-dir` load has no install record). It only reports, never rep
   `--help`, the exit codes, no secret in the output.
 - `tests/be-shopify-docs-sim.sh` — `shopify-docs.cjs` against a local http stub: an answer, the cap, a
   timeout, soft errors, a refused connection, usage.
-- `tests/team-refs-lint.sh` — every qualified name and cited path resolves against be and base, no fnd
-  name is left, and no skill names another team plugin's.
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves against be and base, no legacy
+  plugin name is left, and no skill names another team plugin's.

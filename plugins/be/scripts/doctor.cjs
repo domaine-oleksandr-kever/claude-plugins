@@ -3,8 +3,8 @@
  * doctor.cjs — be's static install checks: what a node process can see without a session.
  *
  * No model, no network: files, exec bits, JSON. `/be-doctor` (hooks/mods/doctor.ts) runs it with --json and
- * adds the rows only a session can answer (base's skills loaded, slim's view tool registered). It also runs
- * standalone.
+ * adds the rows only a session can answer (base's skills loaded, slim's view tool registered, the Dev MCP's
+ * tools present). It also runs standalone.
  *
  * Usage:
  *   node doctor.cjs [--project <dir>] [--root <be root>] [--home <dir>] [--log-dir <dir>] [--json]

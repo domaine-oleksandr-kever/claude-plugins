@@ -36,6 +36,8 @@ const server = http.createServer((req, res) => {
     else if (req.url === '/big') json(200, [doc(1, 3000), doc(2, 3000)]);
     else if (req.url === '/empty') json(200, []);
     else if (req.url === '/500') json(500, { error: 'boom' });
+    else if (req.url === '/429') { res.writeHead(429, { 'Retry-After': '7' }); res.end(); }
+    else if (req.url === '/429-bare') { res.writeHead(429); res.end(); }
     else if (req.url === '/garbage') json(200, '<html>not json</html>');
     else if (req.url === '/object') json(200, { results: [] });
     else if (req.url === '/redirect') { res.writeHead(302, { Location: 'http://127.0.0.1:' + process.env.REDIRECT_PORT + '/' }); res.end(); }
@@ -115,6 +117,12 @@ if [ $(( $(date +%s) - start )) -le 5 ]; then ok; else bad SD6b-timeout-fast "to
 # Soft errors: one line, exit 1, no stack, nothing on stdout.
 run /500 q
 expect SD7-http-5xx 1 stderr "error=http_status http=500" "!at "
+run /429 q
+expect SD7b-429-retry-after 1 stderr "error=http_status http=429" "retry_after=7s"
+run /429-bare q
+expect SD7c-429-no-header 1 stderr "error=http_status http=429" "!retry_after"
+run /500 q
+expect SD7d-5xx-no-retry-after 1 stderr "!retry_after"
 run /garbage q
 expect SD8-garbage 1 stderr "error=bad_answer" "!SyntaxError"
 run /object q
@@ -141,6 +149,12 @@ run /ok --api
 expect SD14-missing-value 2 stderr "error=missing_value flag=--api"
 run /ok --bogus q
 expect SD15-unknown-arg 2 stderr "error=unknown_arg arg=--bogus"
+run /ok --api admin -- -1 --max limit
+if [ "$rc" -eq 0 ] && "$NODE" -e 'const b = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  process.exit(b.query === "-1 --max limit" && b.api === "admin" && b.max_num_results === 5 ? 0 : 1)' "$TMP/body.json"
+then ok; else bad SD15b-double-dash "rc=$rc body was $(cat "$TMP/body.json")"; fi
+run /ok --
+expect SD15c-double-dash-empty 2 stderr "error=missing_query"
 for t in Infinity 1e10 0.0001; do
   run /ok --timeout "$t" q
   expect "SD17-invalid-timeout-$t" 2 stderr "error=invalid_timeout value=$t" "!RangeError"

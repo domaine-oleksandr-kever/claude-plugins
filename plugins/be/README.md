@@ -11,7 +11,7 @@ be builds on base and requires it: the Jira and doc readers, the Jira writer, th
 the shared MCP servers (Atlassian, Notion, the Shopify Dev MCP) are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so be runs with slim too.
 
-Current release: **be v0.2.0**.
+Current release: **be v0.3.0**.
 
 ## Status
 
@@ -20,7 +20,6 @@ Current release: **be v0.2.0**.
   `scripts/install.sh --plugin be` exits 2.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
   not install a dependency on its own: install all three.
-- Never runs together with fnd — install fnd OR base plus the team plugins.
 
 ## Install
 
@@ -42,8 +41,7 @@ Current release: **be v0.2.0**.
     "slim@domaine": true,
     "band@domaine": true,
     "base@domaine": true,
-    "be@domaine": true,
-    "fnd@domaine": false
+    "be@domaine": true
   }
 }
 ```
@@ -59,9 +57,9 @@ the user approved the text.
 
 | Skill | Does | Uses / hands off to |
 |---|---|---|
-| `/be:app-scope` | scopes a Shopify app or extension build: requirements, extension types, API scopes and webhooks, limitations, an LOE table by component, the scope document, next steps | `base:jira-reader` (a ticket or epic), `base:doc-reader` (a Confluence or Notion page, a web URL), base's Shopify Dev MCP server, `/be:platform-limitations`; after approval base's Atlassian MCP creates the drafted tickets, `base:jira-writer` fills a field of an existing one |
+| `/be:app-scope` | scopes a Shopify app or extension build: requirements, extension types, API scopes and webhooks, limitations, an LOE table by component, the scope document, next steps | `base:jira-reader` (a ticket or epic), `base:doc-reader` (a Confluence or Notion page, a web URL), base's Shopify Dev MCP server, `/be:platform-limitations`; after approval base's Atlassian MCP creates the drafted tickets (Markdown description), `base:jira-writer` fills a field of an existing one |
 | `/be:shopify-resources` | which Shopify source answers which question, in priority order: the Dev MCP, shopify.dev, the Help Center, the two communities | base's Shopify Dev MCP server, Atlassian and Notion servers through `base:jira-reader` / `base:doc-reader`; → `/be:app-scope`, `/be:platform-limitations` |
-| `/be:platform-limitations` | a limitation → workaround → what to tell the merchant answer for checkout, Functions, metafields, theme, API, integration and B2B limits, the limit checked against the current API version | its reference below, base's Shopify Dev MCP server |
+| `/be:platform-limitations` | a limitation → workaround → what to tell the merchant answer for checkout, Functions, metafields, theme, API, integration and B2B limits, the limit verified through the Dev MCP when available; it reads only the section the question names | its reference below, base's Shopify Dev MCP server |
 
 ## References
 
@@ -70,14 +68,15 @@ The skills cite be's own files by their path under be's root (`<be root>/…`, t
 
 | Reference | Read by | Holds |
 |---|---|---|
-| `skills/platform-limitations/references/limitation-workarounds.md` | `/be:platform-limitations` | the limitation and workaround tables by area, and the escalation steps when a limit has no workaround |
+| `skills/platform-limitations/references/limitation-workarounds.md` | `/be:platform-limitations` | the limitation and workaround tables by area, stamped with the Admin API version and date the rows were checked (a row the docs do not cover is marked *(unverified)*), and the escalation steps when a limit has no workaround |
 | `<base root>/references/task-workspace.md` (base's) | `/be:app-scope` | the task workspace a ticket's scope is saved to |
-| `<base root>/references/jira-adf-write.md` (base's) | `/be:app-scope` | how an approved ticket description is converted to ADF before it reaches Jira |
+
+### Scripts
 
 | Script | Run by | Does |
 |---|---|---|
 | `scripts/doctor.cjs` | `/be-doctor`, or by hand | the static install checks (§ Doctor) |
-| `scripts/shopify-docs.cjs` | `/be:shopify-resources`, `/be:platform-limitations` on a host with no Dev MCP wiring | one search of shopify.dev's documentation (`POST https://shopify.dev/assistant/search`, the endpoint the Dev MCP wraps): at most 4000 characters, 20 s, an `error=` line and exit 1 when it fails; it needs the same egress as the MCP server |
+| `scripts/shopify-docs.cjs` | `/be:shopify-resources`, `/be:platform-limitations` on a host with no Dev MCP wiring | one search of shopify.dev's documentation (`POST https://shopify.dev/assistant/search`, the endpoint the Dev MCP wraps): at most 4000 characters, 20 s, an `error=` line and exit 1 when it fails (`retry_after=<s>` on a 429 that names one); `--` ends the flags; it needs the same egress as the MCP server |
 
 ## Conventions
 
@@ -97,8 +96,7 @@ base@domaine`.
 ## Doctor
 
 `/be-doctor` checks be's side of the install and prints one PASS / FAIL / SKIP / WARN row per check,
-the counts, and the last 10 `be.events` lines. `/base-doctor` checks base's side (slim, fnd, the MCP
-servers).
+the counts, and the last 10 `be.events` lines. `/base-doctor` checks base's side (slim, the MCP servers).
 
 | Row | Checks |
 |---|---|
@@ -109,6 +107,7 @@ servers).
 | `shopify-dev-mcp` | base's installed manifest declares the `shopify-dev-mcp` server the skills check API facts and limits against; skipped when base is not installed and enabled |
 | `event-log` | this session's `be.jsonl`: its line count and newest `ts`; no file yet passes (a /clear's new session has none before its first line) |
 | `base-live`, `slim-live` | what this session loaded: base's skills, slim's `mcp__slim__view` tool |
+| `dev-mcp-live` | the Shopify Dev MCP's `learn_shopify_api` tool is in this session; WARN when it is not (the server declared but not connected): the skills then fall back to `scripts/shopify-docs.cjs` |
 
 The first six rows come from `scripts/doctor.cjs`, which also runs by hand:
 `node <be plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`; it exits 1 when a row
@@ -151,8 +150,8 @@ Every switch be reads has a row here; set it in `~/.claude/settings.json` → `e
 - `tests/be-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
 - `tests/be-shopify-docs-sim.sh` — `scripts/shopify-docs.cjs` against a local stub: an answer, the cap,
   a timeout, soft errors, a refused connection, usage.
-- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no fnd name is left (the
-  same checker for every team plugin on base).
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no legacy plugin name is left
+  (the same checker for every team plugin on base).
 
 How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md).
 

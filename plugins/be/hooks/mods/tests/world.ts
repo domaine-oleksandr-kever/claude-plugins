@@ -7,6 +7,7 @@ export const NOW = 1_800_000_000_000
 export const HOME = '/home/dev'
 export const LOG = `${HOME}/.claude/domaine/log`
 export const SLIM_VIEW = 'mcp__slim__view'
+export const DEV_MCP_TOOL = 'mcp__plugin_base_shopify-dev-mcp__learn_shopify_api'
 /** base as the command list shows it: its skills carry its name. */
 export const BASE_COMMANDS: [string, string][] = [['base:commit', 'base'], ['base-doctor', 'base']]
 
@@ -40,7 +41,7 @@ export function world(on: On, over: Partial<World> = {}) {
     sid: 's1',
     root: ROOT,
     files: {},
-    tools: ['Bash', 'Read', SLIM_VIEW],
+    tools: ['Bash', 'Read', SLIM_VIEW, DEV_MCP_TOOL],
     commands: BASE_COMMANDS,
     env: {},
     doctor: null,

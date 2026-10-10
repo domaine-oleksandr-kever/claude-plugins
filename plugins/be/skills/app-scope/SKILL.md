@@ -1,9 +1,9 @@
 ---
 name: app-scope
 description: >
-  Scope a Shopify app or extension build with APIs, extension points, limitations, and LOE estimate.
-  Use when the user asks to scope, size or estimate a Shopify app, extension or Function build, or
-  to turn an app requirement into a scope document.
+  Scope a Shopify app or extension build: APIs, extension points, limitations, LOE. Use when the
+  user asks to scope, size or estimate an app, extension or Function build, or turn an app
+  requirement into a scope document.
 argument-hint: "[app description or requirement]"
 ---
 
@@ -26,7 +26,7 @@ Ask the user to describe what the app needs to do. Clarify:
 - Does it need to read or write store data? Which resources? (products, orders, customers, inventory)
 - Does it integrate with any external systems? (ERPs, CRMs, shipping providers)
 - Is this a public app (App Store) or a custom app (single merchant)?
-- What Shopify plan is the merchant on? (Plus required for functions and checkout extensibility)
+- What Shopify plan is the merchant on? (a custom app with Functions and checkout UI extensions on the Information, Shipping and Payment steps need Plus)
 
 ### 2. Identify Extension Types
 
@@ -59,14 +59,11 @@ Query base's Shopify Dev MCP server for current API documentation on relevant en
 
 Document any Shopify platform limitations that affect the scope:
 
-- Features requiring Plus (functions, checkout extensibility, Launchpad)
-- API rate limits and their impact on the design
+- Features that need Plus for this build (custom-app Functions, checkout-step UI extensions)
 - Extension surface limitations (sandboxed checkout UI, no custom HTML)
-- Data size limits (metafield max 256KB, webhook payload limits)
-- One Cart Transform function per app
-- Maximum 25 automatic discounts per store
+- API rate limits, data size limits and per-app or per-store caps, and their impact on the design
 
-The workaround for each, and the current value of a limit, come from `/be:platform-limitations`, which checks the limit against base's Shopify Dev MCP server.
+Every value and workaround comes from `/be:platform-limitations`, which checks the limit against base's Shopify Dev MCP server; the scope never states a limit from memory.
 
 ### 5. Estimate Level of Effort
 
@@ -75,7 +72,7 @@ Break down LOE by component:
 ```markdown
 | Component | Description | LOE (hours) |
 |---|---|---|
-| App scaffolding | Remix app setup, auth, database | X |
+| App scaffolding | App template (React Router), auth, database | X |
 | Extension: [type] | [description] | X |
 | Admin UI | [pages/features] | X |
 | API integrations | [endpoints/webhooks] | X |
@@ -119,12 +116,12 @@ Present the complete scope:
 [Language, framework, hosting, database]
 ```
 
-When a ticket key is in play, save the approved scope to the task workspace as `app-scope.md` (`<base root>/references/task-workspace.md`).
+Ask the user to approve the scope or name what to change; revise until they approve. When a ticket key is in play, save the approved scope to the task workspace as `app-scope.md` (`<base root>/references/task-workspace.md`).
 
 ### 7. Offer Next Steps
 
 Ask if the user wants to:
-- Draft Jira tickets from this scope here (project, issue type, summary, description); after the user approves them, create each with base's Atlassian MCP (`createJiraIssue`), the description converted per `<base root>/references/jira-adf-write.md`. A rich-text field written to an existing ticket goes through `base:jira-writer`.
+- Draft Jira tickets from this scope here (project, issue type, summary, description). Show the drafts and ask "Create these tickets in Jira?"; after an explicit yes, create each with base's Atlassian MCP (`createJiraIssue` with `cloudId: "meetdomaine.atlassian.net"`, `contentFormat: "markdown"` and the Markdown description as drafted, every link as `[text](url)`). The MCP's Markdown conversion backslash-escapes `_` in a URL query string, so leave a URL with `_` in its query string (e.g. `?_ab=0&_fd=0`) out of the description. A rich-text field written to an existing ticket goes through `base:jira-writer`.
 - Deep-dive into any specific component
 - Start scaffolding the app
 
