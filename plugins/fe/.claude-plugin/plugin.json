@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "fe",
   "displayName": "Frontend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Domaine frontend team plugin for Claude Code: the Shopify theme skills (ship, preview theme, steps to test, TA, breaking changes, translations, PR), the theme-explorer agent, project profile and store access; requires base (and slim through it)",
   "author": {
     "name": "Oleksandr Kever",
