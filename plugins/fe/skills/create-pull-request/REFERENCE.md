@@ -38,6 +38,10 @@ content, not with a section count: **a section with nothing real to say is omitt
    `ceiling:` entry closes the Summary with one line — lean-code requires each ceiling named
    in the body, not in an inline comment, and one line is enough for reviewers and bots; two
    or more ceilings, and any merge/post-merge note, go to Conditional sections → Dependencies.
+   No browser QA ran on this change → the Summary carries one line: **Not verified in a
+   browser.** The per-AC record (`AC | Verified | Evidence observed`) goes in a PR comment or
+   the workspace `qa.md`, never the body — and no list of 404ing paths anywhere in the body
+   (a QA preflight reads storefront paths in it as pages to test).
 2. **Jira ticket** — key + URL (list every ticket when the PR closes more than one).
 3. **Theme preview** — the conditional table below, **directly under the Jira link, above
    Changes — never at the bottom**: a reviewer must hit the preview link without scrolling.

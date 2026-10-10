@@ -9,7 +9,7 @@ fe builds on base and requires it: the Jira, Figma and doc readers, the Jira wri
 the task workspace, the commit and review skills, the guards and the shared MCP servers are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.1.2**.
+Current release: **fe v0.2.0**.
 
 ## Status
 
@@ -98,7 +98,8 @@ session's `fe plugin root:` line) and base's by their path under base's root (`<
 | Reference | Read by | Holds |
 |---|---|---|
 | `references/session-theme.md` | `/fe:ship`, `/fe:preview-theme`, `/fe:create-pull-request` | one preview theme per work stream: the gate, the pin into `shopify.theme.toml`, the worktree un-pin |
-| `references/preview-theme-errors.md` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:ship` | `create-preview-theme.sh`'s `error=` outcomes and page deep-links |
+| `references/preview-theme-errors.md` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:ship` | `create-preview-theme.sh`'s `error=` outcomes, Shopify rejections and page deep-links |
+| `references/theme-gotchas.md` | `/fe:develop-feature-or-fix` | Shopify theme traps that fail silently: dropped settings, presets, Liquid limits, cascade layers, browser checks |
 | `references/technical-approach-format.md` | `/fe:write-technical-approach` | the short TA format |
 | `references/research-pressure-test.md` | `/fe:write-technical-approach`, `/fe:develop-feature-or-fix`, `/fe:ship` | cross-checking a draft plan against fresh external sources |
 | `references/metafield-metaobject-setup.md` | `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:write-technical-approach`, `/fe:ship` | inspecting, creating, mocking and binding store metafields and metaobjects |

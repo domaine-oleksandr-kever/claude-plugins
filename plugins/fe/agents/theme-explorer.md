@@ -21,7 +21,10 @@ The theme's coding rules are the **project's**, not yours to invent. Before mapp
 
 - Read the project's rule files — `.claude/rules/*.md` (e.g. `protected-core`,
   `css-conventions`, `liquid-conventions`, `schema-conventions`, `snippet-conventions`) and
-  `CLAUDE.md` if present. Glob `.claude/rules/` first.
+  `CLAUDE.md` if present. Glob `.claude/rules/` first. Then these named files when present:
+  `AGENTS.md` (often a symlink to `CLAUDE.md` — read it once), `.cursorrules`, `.cursor/rules/`,
+  `.github/copilot-instructions.md`, `CONTRIBUTING.md`; follow the pointers they make to other
+  files. Never a blanket read of `docs/`. Cite each rule by path — the caller re-reads it verbatim.
 - Surface, in your output, the constraints from those rules that the plan must respect. If no
   rule files exist, say so and fall back to general Shopify best practice (plus Foundation's
   on a `foundation` checkout — see below).
@@ -54,6 +57,10 @@ Using Grep/Glob/Bash to search and targeted Read to confirm, produce:
   affected.
 - **Rule constraints** — the specific conventions (from the project rules, plus the core rules
   when the profile is `foundation`) the plan must honour, and any core-extension points.
+- **Traps** — what would a competent engineer plausibly get WRONG about these files? A snippet
+  param the snippet never accepts, a value JS generates, a convention broken on purpose, a silent
+  default fallback, files that must change together. A trap without a `path:line` citation is a
+  guess — leave it out.
 - **Open questions** — ambiguities a developer should resolve before building.
 
 ## Output — structured, pointers not dumps
@@ -66,6 +73,7 @@ new_files_likely:            # list of `path — what it'd be (section/snippet/b
 schema_locale_settings:      # affected schemas / locales / settings / metafields
 rule_constraints:            # conventions + `foundation` core-extension points (cite the rule)
 patterns_to_follow:          # concrete existing patterns the build should match
+traps:                       # `path:line — what a competent engineer would get wrong`; [] if none
 open_questions:              # ambiguities for the developer
 needs_clarification:         # "" if none; else a one-line question
 ```

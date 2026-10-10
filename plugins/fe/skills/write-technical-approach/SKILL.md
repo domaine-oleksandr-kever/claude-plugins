@@ -30,6 +30,7 @@ Operating mode: **Phase 1 is analysis + outline only** — no repo or Jira write
 - Follow the repo's coding rules. In a `foundation` checkout (session line `fe project profile: foundation`) that includes the Foundation conventions — **extend — never directly modify** `src/entry/core/*`; in any other checkout, the project's own rules and the theme's existing patterns. No such line in the session (fe's hooks module fails open, so it can be absent) → run `<fe root>/scripts/project-profile.sh` from the checkout root and use its answer; if that is not possible either, assume `foundation`.
 - **Client-facing repo.** Never reference tickets, repos, or Figma files from other client accounts.
 - **No internal repo file links** in the TA — they render as plain text in Jira. Reference in-repo files/rules with **inline code** only (`` `sections/main-header.liquid` ``). External links (Jira, Figma, public Shopify/Domaine docs) are fine.
+- **Text written for an agent is never published to a person** — briefs, workspace notes and instructions to yourself stay out of the TA.
 
 ## Audience & voice
 
@@ -39,7 +40,7 @@ Senior-Shopify-developer audience, **~3-minute read** — full guidance: `<fe ro
 
 ## Phase 1 — Analysis & planning `[plan mode]`
 
-1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md` (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself). This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer. The reader also returns `comments` (one line each) and `attachments` (local paths) in full — read `comments.md` when the task depends on the discussion, `Read` only the screenshots/frames it points at, and hand a non-empty `attachments_note` to the developer once, verbatim, never as a blocker (`<base root>/references/task-workspace.md` → Read rule, comments & attachments).
+1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md` (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself). This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer. The reader also returns `comments` (one line each) and `attachments` (local paths) in full — read `comments.md` when the task depends on the discussion, `Read` only the screenshots/frames it points at, and hand a non-empty `attachments_note` to the developer once, verbatim, never as a blocker (`<base root>/references/task-workspace.md` → Read rule, comments & attachments). Two or more ticket screenshots are usually current vs intended — say which is which and cite them in the outline.
 2. **Validate readiness** — confirm Description and AC exist and are sufficient. If missing or ambiguous, **stop**, summarize gaps, ask how to proceed.
 3. **Read every linked doc** the `base:jira-reader` returned — one **`base:doc-reader`** subagent per link, in parallel, per `<base root>/references/reading-linked-docs.md` (pass the workspace path). **Notion is mandatory — a reader naming a missing Notion MCP → stop and ask the developer** rather than drafting around it; these docs often hold the real data model and final copy the TA must reflect.
 4. **Analyse the codebase** — inspect relevant areas for patterns, layout, dependencies, constraints. Apply the repo's coding rules (Liquid, blocks, Tailwind, a11y, etc.).
@@ -48,7 +49,7 @@ Senior-Shopify-developer audience, **~3-minute read** — full guidance: `<fe ro
 
 ### ✋ Checkpoint — Phase 1
 
-Present the **outline and open questions**. Wait for approval or edits before Phase 2.
+Present the **outline and open questions**. A state a `base:figma-reader` spec in context or the workspace lists under `states_missing` is a blocking open question, never an assumption. An absence claim ("X is not used anywhere") quotes the search that proved it here, in the outline — never in the TA body. Wait for approval or edits before Phase 2.
 
 ---
 

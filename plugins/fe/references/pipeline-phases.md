@@ -73,6 +73,9 @@ its brief says otherwise.
    **QA loop:** blocking findings (either source) → a fix agent scoped to them → a fresh
    qa agent re-runs the affected rows (a fixed base:bug-hunter finding is re-verified by code
    read when it can't be reproduced live); **cap 2 cycles**, then ESCALATE with the report.
+   Every fix-agent brief says `round N of 2`, and round 2 adds `this is your LAST`. A blocker an
+   earlier round already targeted is named in the brief as the SAME blocker: the last diagnosis
+   was wrong — re-diagnose before re-editing; its ESCALATE lists what was ruled out.
 3. **finalize** — review + commit in one pass. Review per
    `<base root>/references/review-flow.md` with `hygiene` emphasis
    (`base:change-reviewer` subagent(s), each briefed with the run's
@@ -84,6 +87,10 @@ its brief says otherwise.
    report and hand-off. **F-class (correctness) findings never land in that log-only
    bucket**: an F row from the reviewer → fix it when that fits the qa cap and is
    AC-compatible; justify → `ceiling:` entry + PR body; else ESCALATE.
+   **`foundation` profile only:** list the tracked content JSON the diff changes
+   (`templates/**/*.json`, `sections/*.json`, `config/settings_data.json`) that `plan.md` does
+   not name → ESCALATE with that list, never auto-revert; a template the TA names, or a
+   `/fe:fix-breaking-changes` edit, is exempt.
    Commit per `<base root>/references/commit-message-format.md` (scope per
    policy; body from plan + notes), **then** stamp the marker at
    `"$(git rev-parse --git-dir)/.base-review"` (resolved, never the literal `.git/` path —
@@ -158,7 +165,8 @@ its brief says otherwise.
    the PR table already published the old id, and swapping the link unasked is not this phase's
    call — every other outcome is in `<fe root>/references/preview-theme-errors.md`),
    re-verify the touched flow in the browser, commit + push (counts toward the
-   aftercare-rounds cap). A failing check is a deterministic signal from this repo's own CI and
+   aftercare-rounds cap; the fix brief carries the qa loop's `round N of 2` / LAST / SAME-blocker
+   wording). A failing check is a deterministic signal from this repo's own CI and
    is the ONLY thing this phase changes code for on its own. Then poll the policy bots'
    review threads via
    `gh api` (~90 s interval; the timebox is a **cap on active bot work, not a wait

@@ -24,6 +24,7 @@ Operating mode: **Phase 1 is ingest + analysis** (ticket + implementation contex
 
 - Read the ticket via the **`base:jira-reader` subagent** (Atlassian MCP) — AC, TA, issue type, links, comments, attachments; the optional write-back is **delegated to the `base:jira-writer` subagent** (the ✋ approval stays in the main loop).
 - **Never proceed past the ✋ checkpoint** without explicit developer confirmation.
+- **Text written for an agent is never published to a person** — briefs, workspace notes and instructions to yourself or the developer stay out of the field.
 
 ---
 

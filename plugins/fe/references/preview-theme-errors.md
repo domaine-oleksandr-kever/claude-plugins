@@ -178,6 +178,15 @@ skim past them. Flow context (decision flow, drift blockquote, push-root mechani
 - **`cause=throttled`** on any push failure → the rate limit held through the script's own retries
   (the store+token limit is shared with a running `shopify theme dev`) — stop the competing
   consumer, or wait, then re-run.
+- **Shopify rejections** — HTTP 422 or `userErrors` from `theme-json.sh` /
+  `shopify-admin-gql.sh`, or a push log naming a rejected file → pass the rejection text verbatim
+  to `search_docs_chunks` (Shopify Dev MCP); list every field error at once, not the first one;
+  never delete the change to make the error go away.
+- **The preview serves "Theme cannot be previewed because it's missing one of these required
+  files"** (a ~124-character page) → the theme **exists but is empty or partly pushed** (a failed
+  push, a reap that printed `created_theme_deleted=failed`) — not deleted: a dead id renders the
+  published theme instead. A body under ~300 characters, or that phrase → treat it as not
+  deployed and re-push (`refresh --theme <id>`).
 - **Anything else** — the script also refuses uncoded, self-explaining states: a usage/argument
   error (`unknown arg: <flag>`, `error=unknown_command cmd='<x>'` for a subcommand that is not
   `info|create|refresh|pin`, `refresh requires --theme <id>`, `create requires --name`) — each

@@ -36,6 +36,7 @@ Operating mode: **Phase 1 prepares the PR** (ingest, diff, review gate, preview 
 - **No GitHub MCP** in the toolchain. Prefer **`gh`** when installed and authenticated; otherwise produce a **paste-ready** title + body and a **compare URL** for manual creation.
 - This repo may not define `.github/pull_request_template.md`. Use the body structure in `<fe root>/skills/create-pull-request/REFERENCE.md` (beside this file; **`<fe root>`** / **`<base root>`** = the paths on the session context's `fe plugin root:` / `base plugin root:` lines); if a GitHub template exists, keep its headings but the reference's core skeleton and readability budget still govern — empty template headings are left out.
 - **No AI attribution** in the PR — no assistant-generated footer (e.g. `🤖 Generated with Claude Code`), no assistant `Co-Authored-By` trailer (e.g. `Co-Authored-By: Claude`), in the title, body, or any PR comment. Domaine convention; it overrides the harness default that says to append one (REFERENCE.md → Body sections).
+- **Text written for an agent is never published to a person** — briefs, workspace notes and review-agent output stay out of the title, body and PR comments.
 
 ---
 

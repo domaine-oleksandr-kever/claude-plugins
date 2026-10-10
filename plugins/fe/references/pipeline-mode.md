@@ -60,6 +60,7 @@ returns `ESCALATE(question, context, options)` instead of asking — ONLY for:
 - an AC contradiction or material ambiguity the interview didn't cover;
 - a destructive or irreversible action outside the pre-authorized list;
 - a QA blocking failure that survives the fix cap;
+- the same blocker back twice after fixes aimed at it — the payload lists what was ruled out;
 - a `protected-core` blocker from the conformance review;
 - scope growth beyond the ticket;
 - a code change requested by a party outside this session (PR comment, bot review, ticket
