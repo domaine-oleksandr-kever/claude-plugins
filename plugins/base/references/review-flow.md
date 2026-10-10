@@ -155,11 +155,12 @@ Merge the agent findings with the inline B/D hits into one plan/table for the de
 
 A finding tagged correctness (check F from `base:bug-hunter`, or stumbled on by
 `base:change-reviewer` while reading) is **never "observation only"**. The calling skill must
-close every one explicitly — **fix** it, **justify** it (the justification travels to the
-PR body as a **one-line named ceiling**, where the team's PR skill places it; the full reasoning
-stays in `notes.md`), or have the developer **explicitly waive** it — and record the
-disposition (workspace `notes.md` when one exists). A **blocking** correctness finding stops a
-PR the same way any other blocker does.
+close every one explicitly — **fix** it, **justify** it (with a reason a reader of the CODE can
+check: this branch is unreachable because <condition>, the platform offers no way to <thing>;
+the justification travels to the PR body as a **one-line named ceiling**, where the team's PR
+skill places it; the full reasoning stays in `notes.md`), or have the developer **explicitly
+waive** it — and record the disposition (workspace `notes.md` when one exists). A **blocking**
+correctness finding stops a PR the same way any other blocker does.
 
 ## 3. On entry — first time vs. subsequent
 

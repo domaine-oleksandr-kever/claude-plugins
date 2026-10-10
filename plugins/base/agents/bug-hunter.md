@@ -43,7 +43,9 @@ did NOT change. For every touched hunk, also read:
 ## Failure lenses
 
 Hypothesize concrete failures along these lenses, then verify each hypothesis against the
-code (not intuition) before reporting:
+code (not intuition) before reporting. An absence claim ("no other caller", "nothing reads
+Y") quotes the search that proved it inside the Failure scenario cell (`grep -rn 'Y' src/` →
+only the changed line):
 
 - **Timing & async** — debounces, races between a scheduled handler and an in-flight
   request, double-fire from re-emitted events, unawaited promises, stale reads after
@@ -75,8 +77,8 @@ A single findings table:
 - `Severity` ∈ {blocker, warning}. Blocker = corrupts data (a cart, an order, a record),
   breaks the main user path (a purchase, a sign-in), bypasses a configured control, or
   executes injected markup.
-- `Verdict` ∈ {CONFIRMED (traced end-to-end through the code), PLAUSIBLE (couldn't rule
-  out — say what would confirm it)}.
+- `Verdict` ∈ {CONFIRMED (traced end-to-end through the code; an absence, by the quoted
+  search), PLAUSIBLE (couldn't rule out — say what would confirm it)}.
 - Zero findings is a valid result: return `no findings in <N> files` plus one line on the
   riskiest interaction you checked and why it holds. Never pad with nits — hygiene is not
   your job.

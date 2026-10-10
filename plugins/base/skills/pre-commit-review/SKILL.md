@@ -73,7 +73,8 @@ The five checks (A, C and F full definitions live in the agents — their single
   which confirms each is inside a **comment** and applies the false-positive whitelist — its single
   home is the `base:change-reviewer` definition.
 - **C — Refactor / improvement (required)** — run by the agent: duplication, dead code, unclear
-  names, small correctness/readability wins — **in the changed code only**, every change gets a pass.
+  names, a file or edit the finished change no longer needs (fix = delete), small
+  correctness/readability wins — **in the changed code only**, every change gets a pass.
 - **D — Untracked referenced files.** Verify every file the changed code references — included
   partials, imported modules, assets, config entries — exists on disk **and is tracked by git**.
   First-pass signal:
@@ -104,9 +105,9 @@ by number:
 
 Then **ask the developer to review and correct** the plan ("remove any you disagree with, add anything
 I missed"). **Check-F rows are dispositioned, never dropped** (review-flow.md → Correctness findings):
-the developer picks fix / justify / waive per row; a justification becomes a named ceiling — record
-it as a `ceiling:` entry in the workspace `notes.md` (when one exists) so the team's PR skill carries
-it into the PR body. Do not edit yet.
+the developer picks fix / justify / waive per row; a justification (a reason a reader of the code
+can check, not intent) becomes a named ceiling — record it as a `ceiling:` entry in the workspace
+`notes.md` (when one exists) so the team's PR skill carries it into the PR body. Do not edit yet.
 
 ## 4. Apply
 

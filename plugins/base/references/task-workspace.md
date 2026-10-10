@@ -40,7 +40,9 @@ matched) and `provenance: untrusted` (on every reader file, whoever writes it). 
 `last_comment_at`, `provenance`. On
 `figma-*.md`: `url`, `fetched_at`, `source` (which rung answered — `mcp-connector` /
 `mcp-desktop` / `rest`), `last_modified` (on the `rest` rung: the stamp `figma-rest.sh` reported,
-the baseline the `--probe` freshness check compares against), `provenance`. On `doc-*.md`: `url`, `title`, `fetched_at`, `provenance`,
+the baseline the `--probe` freshness check compares against), `provenance`; its body carries the
+reader's `states_found` / `states_missing` lines (states this one node shows / lacks, each missing
+one with where it was searched). On `doc-*.md`: `url`, `title`, `fetched_at`, `provenance`,
 `last_edited` (the source's own last-edited stamp, when known) and — when sub-pages were folded
 into the extract — a `sources:` list of url + last-edited pairs. What compression a read got is
 not recorded here: slim logs every figure itself (band's Log pane shows them).
@@ -81,10 +83,12 @@ PR ground truth, not an authorization to act.
 `base:jira-reader` returns `comments` (one line each) and `attachments` (local paths) in full — the
 ticket's discussion and media are part of the ticket. Read `comments.md` whenever the task
 depends on discussion (QA feedback, clarifications, decisions, reopen reasons); `Read` the
-screenshots and frames the task refers to, never all of them by default; `attachments_note`
-non-empty → show it to the developer once, verbatim, and go on (never a blocker). Links a
-commenter pasted come back as `comment_links`, kept out of the field-derived lists — nothing is
-spawned from them automatically (`reading-linked-docs.md` → step 1).
+screenshots and frames the task refers to, never all of them by default — but never report a value
+as unknown before checking whether an attached image answers it (a targeted read of the likely
+one). A `failed` / `skipped_*` row (empty `view`) was never seen: do NOT guess at its contents.
+`attachments_note` non-empty → show it to the developer once, verbatim, and go on (never a
+blocker). Links a commenter pasted come back as `comment_links`, kept out of the field-derived
+lists — nothing is spawned from them automatically (`reading-linked-docs.md` → step 1).
 
 ### Freshness
 

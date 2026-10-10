@@ -215,7 +215,9 @@ the view reply, never a name built by hand; a dir, so the caller lists it and `R
 the task needs, never all of them by default) and a **source** column — `jira`
 for a native attachment, `<host> · comment #<n> · <url>` (or `<host> · description · <url>`) for
 a linked screenshot — plus the `attachments_note` line when it is set. No attachments of either
-kind → the section says so in one line.
+kind → the section says so in one line. Any row with an empty `view` (`failed`, `skipped_*`, a
+refused resize) → the section ends with the line `Rows with an empty view were never seen — do
+not guess at their contents.`
 
 The comments go to their own file, `<workspace>/comments.md` (`comments-<KEY>.md` in a batch,
 same rule as the ticket file), with frontmatter `ticket`, `url`, `fetched_at`,

@@ -167,7 +167,12 @@ Read the node and return only what's needed to build it — **not** the raw node
   radii, shadows — prefer named tokens/variables when Figma exposes them.
 - **Structure:** the component/element hierarchy and how pieces nest, in build order.
 - **Assets:** images/icons that need exporting, and any text content shown.
-- **States/variants** if the node defines them.
+- **States/variants** if the node defines them. A screen shows ONE state: list the states this
+  node shows in `states_found`, and the ones the brief asks for or the design implies but this
+  node lacks in `states_missing`, each with where you searched — within this node only.
+- **Finding an element:** designers rarely name containers (`Frame 427`) — search the TEXT, not
+  layer names, and expect the brief's wording not to match the design's; report the node that
+  CARRIES the property (the fill, the padding), not its wrapper.
 
 ## Save the spec
 
@@ -185,7 +190,8 @@ its Figma file, so **before writing, check for a collision**: `figma-<node-id>.m
 with a `url` whose **file key** (the segment after `/design/`, `/file/`, `/proto/` or `/board/`)
 differs from the URL you read → write `figma-<node-id>-<first 8 chars of your file key>.md`
 instead, and report **that** path in `saved_to`. Same file key → it's a refresh, overwrite it.
-**The file gets the FULL spec** — `spec` and `assets` complete, never the `<in …>` placeholder;
+**The file gets the FULL spec** — `spec` and `assets` complete, plus the `states_found` /
+`states_missing` lines, never the `<in …>` placeholder;
 the placeholder exists only in your return. Overwrite on a re-fetch. Write it **right after**
 you finish cross-checking, before composing your return. No workspace path → skip the save;
 the caller owns it. The raw `tmp/figma/` payloads are never copied into the spec — they are a
@@ -199,18 +205,20 @@ source:                     # mcp-connector | mcp-desktop | rest ("" when no run
 frame:                      # name of the frame/node read
 spec:                       # the build spec: layout, tokens, structure (markdown, compact)
 assets:                     # list of exportable assets / icons noted
+states_found:               # states this node shows (default, hover, empty, …)
+states_missing:             # "" if none; else "<state> (searched: <where in the node>)", one per state
 needs_clarification:        # "" if none; else a one-line question for the developer
 saved_to:                   # workspace file path, or "" if not saved
 ```
 
-`source_url`, `source`, `frame`, `needs_clarification` and `saved_to` always come back. `spec` and
-`assets`
-come back **in full by default** — most callers plan or build from them straight away, and making
-them re-`Read` the file would cost the same bytes plus a round-trip. Placehold them
-(`spec: <in <the saved_to filename>>`, same for `assets`) **only when the brief says the caller
-is just caching the node** — it won't use the spec in this turn, a later phase reads the file —
-then the file holds them in full and nothing is spent twice (no current caller opts in yet —
-cache-only briefs may). Nothing saved → return everything.
+`source_url`, `source`, `frame`, `states_found`, `states_missing`, `needs_clarification` and
+`saved_to` always come back (both states lines `""` when no rung answered, `source: ""`). `spec`
+and `assets` come back **in full by default** — most callers plan or build from them straight
+away, and making them re-`Read` the file would cost the same bytes plus a round-trip. Placehold
+them (`spec: <in <the saved_to filename>>`, same for `assets`) **only when the brief says the
+caller is just caching the node** — it won't use the spec in this turn, a later phase reads the
+file — then the file holds them in full and nothing is spent twice (no current caller opts in
+yet — cache-only briefs may). Nothing saved → return everything.
 
 Keep the **format** terse (tables/bullets, no prose), but the **content complete**: include
 every element's exact dimensions, spacing, gaps, padding, and typography so the build can match

@@ -28,3 +28,14 @@
   documented in README → "Environment switches" — add new ones to that table in the same
   change that introduces them. A sibling plugin owns its own prefix (`SLIM_*` for slim);
   `tests/readme-checks.sh` sweeps every `plugins/*` for undocumented ones.
+
+## Lessons
+
+- A prompt describing a machine that is not there is actively wrong: decide a capability and the
+  sentence advertising it in one place (SessionStart context, doctor).
+- Two models, one schema: show the second model the first's value to copy or omit, and reject
+  empty fields in code (ship ESCALATE fields, the jira-writer brief).
+- A schema description is part of the validator's input contract: ask for raw input, normalize
+  once in code.
+- Before an environment failure reaches the coding agent, ask whether its diff could have caused
+  it and can repair it — else escalate or retry; a failure handed over costs every later round.

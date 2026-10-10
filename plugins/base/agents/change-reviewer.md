@@ -38,6 +38,11 @@ Read each file in your group (the diff + enough surrounding code to judge), then
 - **C — refactor / improvement (changed code only).** Duplication, dead code, unclear
   names, copy-pasted blocks that could be shared, small correctness/readability wins.
   Keep proposals scoped to the diff; never propose rewrites of untouched code.
+  **Necessity sweep** before you finish, file by file: is this file, and every edit in it,
+  still needed by the finished change? A file nothing references, an edit a later edit
+  replaced, a setting or key nothing reads → a C row whose proposed change is **delete it**.
+  An absence claim ("X is not used anywhere") quotes the search that proved it inside the
+  Issue cell (`grep -rn 'X' src/` → only the definition).
 - **E — project-rules conformance.** Lean on the repo's `.claude/rules/*.md` when present, and
   on the team rules your brief carries for its `profile` (fe's, for instance, name a protected
   base that must be extended rather than edited). Severity is what the rule states — `blocker`
@@ -69,7 +74,13 @@ A single findings table, grouped by file:
 - A team rule the brief marks blocking is **always** `blocker`; no team rule applies off its
   profile.
 - Each row is one concrete proposed change with a one-line rationale.
-- If nothing is found, return an empty table plus a one-line `no findings in <N> files`.
+- Do not report: formatting, whitespace or quote style (linters own them); pre-existing
+  issues in code the change does not affect (a stale comment or a broken caller the change
+  caused is still A / F); whether the change meets the ticket or renders right (QA judges
+  that with evidence you lack); taste with no concrete defect behind it ("consider a helper"
+  where nothing is duplicated).
+- A clean diff is a normal outcome: if nothing is found, return an empty table plus a
+  one-line `no findings in <N> files` — never pad.
 
 Do not apply anything — the calling skill presents your findings to the developer for
 approval before any edit.

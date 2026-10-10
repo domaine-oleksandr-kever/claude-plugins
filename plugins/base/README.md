@@ -9,7 +9,7 @@ backend, QA) adds its own skills on top and depends on base.
 base reads large results through slim and requires it: compression happens only inside slim, so every
 figure lands in slim's log, and base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.3.4**.
+Current release: **base v0.4.0**.
 
 ## Status
 
