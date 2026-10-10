@@ -9,7 +9,7 @@ fe builds on base and requires it: the Jira, Figma and doc readers, the Jira wri
 the task workspace, the commit and review skills, the guards and the shared MCP servers are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.3.0**.
+Current release: **fe v0.3.1**.
 
 ## Status
 
