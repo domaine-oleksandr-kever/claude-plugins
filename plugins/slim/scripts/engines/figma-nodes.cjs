@@ -293,6 +293,27 @@ function propValue(v) {
 
 // ------------------------------------------------------------------------ node → record --
 
+// SPACE_BETWEEN makes Figma ignore `itemSpacing`, so the gap a build needs is the one the flow
+// children's boxes leave: the median, so one odd child does not set it. Under WRAP a child that
+// starts before its predecessor ends opens a new row and pairs with nothing.
+function measuredGap(n) {
+  const [start, len] = n.layoutMode === 'HORIZONTAL' ? ['x', 'width'] : ['y', 'height'];
+  const boxes = (Array.isArray(n.children) ? n.children : [])
+    .filter((k) => k && typeof k === 'object' && k.visible !== false && k.layoutPositioning !== 'ABSOLUTE')
+    .map((k) => { const b = k.absoluteBoundingBox; return b && typeof b[start] === 'number' && typeof b[len] === 'number' ? b : null; });
+  const gaps = [];
+  for (let i = 1; i < boxes.length; i++) {
+    const a = boxes[i - 1];
+    const b = boxes[i];
+    if (!a || !b || (n.layoutWrap === 'WRAP' && b[start] < a[start] + a[len])) continue;
+    gaps.push(b[start] - (a[start] + a[len]));
+  }
+  if (!gaps.length) return '';
+  gaps.sort((x, y) => x - y);
+  const mid = gaps.length >> 1;
+  return num(gaps.length % 2 ? gaps[mid] : (gaps[mid - 1] + gaps[mid]) / 2);
+}
+
 // Every node becomes ONE record. `label`/`name`/`size`/`attrs`/`tail` are the SKELETON (what folding
 // compares); `id`, `pos`, `imgs` and `chars` are the slots (what a fold lists per sibling).
 function record(n, depth, parentLayout, ctx) {
@@ -316,7 +337,11 @@ function record(n, depth, parentLayout, ctx) {
     const bits = [`layout:${n.layoutMode === 'HORIZONTAL' ? 'row' : 'col'}`];
     const gapVar = n.boundVariables && aliasId(n.boundVariables.itemSpacing);
     const gapVal = typeof n.itemSpacing === 'number' ? num(n.itemSpacing) : '';
-    if (gapVar) bits.push(`gap ${bindLabel(ctx, gapVar, gapVal)}`);
+    if (n.primaryAxisAlignItems === 'SPACE_BETWEEN') {
+      const m = measuredGap(n);
+      const why = [m && `measured ${m}`, gapVar && `${bindLabel(ctx, gapVar, gapVal)} ignored`].filter(Boolean).join('; ');
+      bits.push(`gap auto${why ? ` (${why})` : ''}`);
+    } else if (gapVar) bits.push(`gap ${bindLabel(ctx, gapVar, gapVal)}`);
     else if (gapVal && gapVal !== '0') bits.push(`gap ${gapVal}`);
     if (n.layoutWrap === 'WRAP') {
       bits.push('wrap');
@@ -790,7 +815,9 @@ function compact(payload, opts) {
     out.push('  node folds N identical siblings and the `folds ×N` block below it lists every folded id');
     out.push('  with the values that differ, one cell per node, in the exemplar\'s order · `$Name (v)`');
     out.push('  = bound to variable `Name`, `v` = the NODE\'s own value (what a build ships), and a');
-    out.push('  trailing `; var default <d>` = the variables file resolves `Name` to `<d>` instead.');
+    out.push('  trailing `; var default <d>` = the variables file resolves `Name` to `<d>` instead ·');
+    out.push('  `gap auto (measured g)` = SPACE_BETWEEN, `g` = the median gap between the flow children');
+    out.push('  (within a row under wrap); a gap variable bound on the node is listed as `ignored`.');
     if (typeTable.size) {
       out.push('');
       out.push('type styles:');

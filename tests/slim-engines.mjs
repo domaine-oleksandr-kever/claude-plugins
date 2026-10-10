@@ -435,6 +435,25 @@ const EC = ecRows();
   eq('EN-figure-grown', fn.figureLine(100, 150, { nodes: 1, hidden: 2, folded: 3 }), 'figma-nodes: 100 B → 150 B (+50.0%) nodes=1 hidden=2 folded=3');
   eq('EN-key-from-name', [fn.keyFromName('/a/b/AbC123-1-2.nodes.json'), fn.keyFromName('AbC123-1-2.nodes.json'), fn.keyFromName('nodes.json'), fn.keyFromName(undefined)], ['AbC123', 'AbC123', '', '']);
   eq('EN-is-nodes', [fn.isNodesResponse(KITCHEN), fn.isNodesResponse({ nodes: {} }), fn.isNodesResponse(null), fn.isNodesResponse([KITCHEN])], [true, false, false, false]);
+
+  // SPACE_BETWEEN: the gap is measured from the flow children's boxes, never read from itemSpacing.
+  const kid = (i, x, y, w, extra = {}) => ({ id: `30:${i}`, name: `K${i}`, type: 'RECTANGLE', absoluteBoundingBox: box(x, y, w, 40), constraints: TL, fills: [], strokes: [], effects: [], ...extra });
+  const between = (children, extra = {}) => fn.compact(nodesPayload({ id: '30:1', name: 'Row', type: 'FRAME', absoluteBoundingBox: box(0, 0, 1000, 200), constraints: TL,
+    layoutMode: 'HORIZONTAL', primaryAxisAlignItems: 'SPACE_BETWEEN', itemSpacing: 86, fills: [], strokes: [], effects: [], children, ...extra }), { variables: VARS }).md;
+  const gapOf = (md) => (/#30:1 .*?(gap auto[^·\n]*?)(?= primary:| wrap|$)/m.exec(md) || [])[1];
+  const three = [kid(2, 0, 0, 100), kid(3, 239, 0, 100), kid(4, 478, 0, 100)];
+  eq('EN-between-measured', gapOf(between(three)), 'gap auto (measured 139)');
+  eq('EN-between-absolute-skipped', gapOf(between([...three, kid(5, 10, 0, 20, { layoutPositioning: 'ABSOLUTE' })])), 'gap auto (measured 139)');
+  eq('EN-between-hidden-skipped', gapOf(between([kid(2, 0, 0, 100), kid(5, 120, 0, 20, { visible: false }), kid(3, 239, 0, 100), kid(4, 478, 0, 100)])), 'gap auto (measured 139)');
+  eq('EN-between-median', gapOf(between([kid(2, 0, 0, 100), kid(3, 110, 0, 100), kid(4, 230, 0, 100), kid(6, 800, 0, 100)])), 'gap auto (measured 20)');
+  eq('EN-between-one-flow-child', gapOf(between([kid(2, 0, 0, 100), kid(5, 300, 0, 20, { layoutPositioning: 'ABSOLUTE' })])), 'gap auto');
+  eq('EN-between-no-children', gapOf(between([])), 'gap auto');
+  eq('EN-between-wrap-row-only', gapOf(between([kid(2, 0, 0, 100), kid(3, 139, 0, 100), kid(4, 0, 60, 100), kid(6, 139, 60, 100)], { layoutWrap: 'WRAP', counterAxisSpacing: 20 })), 'gap auto (measured 39)');
+  eq('EN-between-wrap-one-per-row', gapOf(between([kid(2, 0, 0, 900), kid(3, 0, 60, 900)], { layoutWrap: 'WRAP' })), 'gap auto');
+  eq('EN-between-bound', gapOf(between(three, { boundVariables: { itemSpacing: alias('VariableID:2:12') } })), 'gap auto (measured 139; $Core/Space/Gutter (86; var default 20) ignored)');
+  eq('EN-between-bound-one-child', gapOf(between([kid(2, 0, 0, 100)], { boundVariables: { itemSpacing: alias('VariableID:2:12') } })), 'gap auto ($Core/Space/Gutter (86; var default 20) ignored)');
+  check('EN-between-legend', between(three).includes('`gap auto (measured g)` = SPACE_BETWEEN'), 'legend line missing');
+  check('EN-gap-plain-unchanged', /layout:row gap 86 /.test(between(three, { primaryAxisAlignItems: 'CENTER' })), 'non-SPACE_BETWEEN gap changed');
 }
 
 // EM — media planning: kind from the leading bytes, outputs from probe facts, the figure line
