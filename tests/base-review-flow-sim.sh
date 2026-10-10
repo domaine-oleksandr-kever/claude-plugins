@@ -168,6 +168,9 @@ else bad o-ignored "a spaced path, ../x, an absolute path, a directory or a glob
 
 if [ "$(ws=.claude/tasks/NONE hash_now)" = "$dirty" ] && [ "$(ws= hash_now)" = "$dirty" ]; then ok
 else bad p-no-workspace "no workspace notes.md: the hash changed"; fi
+printf -- '- 2026-10-11 build-dirtied: dist/app.js\n- 2026-10-12 build-dirtied:' >> "$R/$WS/notes.md"
+if [ "$(ws=$WS hash_now)" = "$dirty" ]; then ok
+else bad p-bare-line "a bare build-dirtied: line (no paths) did not end the exclusion"; fi
 if [ -n "$ZSH_BIN" ]; then
   git -C "$R" checkout -q -- "sub/a file.txt"
   printf -- '- 2026-10-12 build-dirtied: dist/app.js\n' >> "$R/$WS/notes.md"

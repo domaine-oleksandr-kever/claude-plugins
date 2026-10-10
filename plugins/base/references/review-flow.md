@@ -79,7 +79,8 @@ The **scope diff** is `GIT_INDEX_FILE="$idx" git diff "$mb" -- ':/' ${ex[@]+"${e
 `--name-only` for the reviewed-files list; the `${ex[@]+…}` form keeps an empty `ex` safe under
 `set -u` in bash 3.2) — every step below that reads the diff uses it. Files a preview build
 rewrote (the workspace's last `build-dirtied:` line) are a build artifact, not the developer's
-change: `ex` keeps them out of the scope, the hash and the agents' file groups.
+change: `ex` keeps them out of the scope, the hash and the agents' file groups. A bare line
+with no paths ends the exclusion.
 `base-review-index` lives beside the marker and is rebuilt on every run, never committed.
 
 Read it:
