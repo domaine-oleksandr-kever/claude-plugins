@@ -1,6 +1,9 @@
 ---
 name: vendor-evaluation
-description: Evaluate and compare vendors for a specific Shopify or ecommerce use case, with preference for Domaine-approved partners when they are a fit. Use when the user asks for help choosing between apps, platforms, agencies, or technology vendors for a merchant need, especially when the recommendation should consider Shopify compatibility, pricing, feature fit, Domaine experience, and market sentiment.
+description: >
+  Compare vendors (apps, platforms, agencies, technology) for a Shopify or ecommerce need,
+  preferring Domaine-approved partners that fit. Use when asked to help choose an app, platform,
+  agency or vendor for a merchant.
 ---
 
 # Vendor Evaluation

@@ -2,14 +2,15 @@
 
 The estimate is a `.xlsx` workbook (usually opened from Google Drive, sometimes native Google
 Sheets). Know the tab layout before reviewing — a contradiction or gap can live in any tab, and
-some tabs are deliberately off-limits (see the carve-out at the bottom).
+the Settings tab and every price, cost or margin column are off-limits (the skill's commercial
+restraint).
 
 ## Typical tabs
 
 - **External Summary** — phase-level estimates, kickoff and launch dates, key assumptions, project
   categorization. The client-facing framing lives here.
 - **Internal Summary** — per-phase hours and per-phase role breakdowns. **Read hours and roles
-  only** — skip price, cost, profit, GM columns.
+  only.**
 - **Monthly Revenue Breakdown** — phasing. Not used for review.
 - **Discovery** — workshop-level line items.
 - **Design** — design batch breakdowns.
@@ -22,14 +23,9 @@ some tabs are deliberately off-limits (see the carve-out at the bottom).
 
 ## Column conventions
 
-- Column A carries an **"In Scope?"** flag on the Build/discipline tabs. A discipline tab that
-  isn't part of the engagement should show a genuinely zeroed SUBTOTAL / EST. TOTAL for that tab —
-  check the aggregate row, driven by the In Scope? flag, not the individual line items above it.
-  Individual rows marked `In Scope? = False` are expected to retain their hours
-  (FED/BED/QA/BSA) even when the whole tab or an individual feature is out of scope — that's
-  intentional, so the row is ready to flip back into scope later without re-estimating. Do not flag
-  a False row for having populated hours; only flag if the tab's own SUBTOTAL/EST. TOTAL row fails
-  to net to zero when the whole tab is out of scope.
+- Column A carries an **"In Scope?"** flag on the Build/discipline tabs. A discipline tab outside
+  the engagement shows a zeroed SUBTOTAL / EST. TOTAL row; False rows keep their hours (the In Scope?
+  rule in `pre-submission-checklist.md`).
 - Role hour columns are typically **FED** (front-end dev), **BED** (back-end dev), **QA**, **BSA**
   (business/systems analyst). **TA** (technical architect) shows on complex programs, mostly in
   Discovery.
@@ -54,14 +50,3 @@ matter most:
 
 If no tag is visible, infer the variant from the assumptions/External Summary and state what you
 inferred.
-
-## Off-limits — do not read or comment on
-
-- Settings tab (rate card, multipliers).
-- Any price, cost, profit, gross margin, ABR, or blended-rate column on any tab.
-- Whether the deal should be approved, held, or escalated on commercial grounds.
-
-Read the Internal Summary for **hours and role allocations only**. If the user asks about margin or
-pricing, say it's outside this review and point them to their Delivery Director / estimating lead.
-The official Commercial Readiness checklist items (revenue viability, competitive positioning) are
-surfaced as **facts for SE judgment**, never as a pricing verdict — see `evaluation-guide.md`.

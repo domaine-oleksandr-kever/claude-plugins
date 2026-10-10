@@ -50,27 +50,7 @@ baseline and say in the output which baseline was used and that the match was un
 
 ## Access pattern
 
-### Option A — text representation (faster, lighter)
-
-`read_file_content` with the baseline's `fileId`. Returns a natural-language representation of the
-sheet. Good enough for cross-checking assumptions, line-item names, or section structure.
-
-If the response exceeds the inline token limit, the MCP saves full content to a temp file and
-returns the path. Read it in chunks.
-
-### Option B — full .xlsx parse (structured comparison)
-
-`download_file_content` with the baseline's `fileId` and
-`exportMimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'`.
-
-The bytes usually exceed the inline budget, so the response includes a temp path. From there:
-
-1. The temp file holds a JSON envelope with the binary content, typically base64.
-2. Decode and write the `.xlsx` to a working directory.
-3. Open with `openpyxl.load_workbook(path, data_only=True)` when a Python with `openpyxl` is present
-   in this session; otherwise fall back to Option A and say the structured parse was not available.
-
-Generate this inline as a short bash + Python sequence rather than relying on a bundled script.
-
-**Read the baseline for scope structure, line items, assumptions, and role mix only.** Ignore its
-rate card, price, cost, and margin columns — those are out of scope for this review.
+Read the baseline as the skill's Tool Usage reads the workbook: the text pass for assumptions,
+line-item names and structure, the `.xlsx` parse for a structured comparison. Read it for scope
+structure, line items, assumptions and role mix only — the commercial restraint covers a baseline
+too.

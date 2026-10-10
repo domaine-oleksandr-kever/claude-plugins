@@ -86,9 +86,19 @@ its skills of the same names, `vendor-evaluation` from `shopify-vendor-evaluatio
 from the `domaine-merchant-brief` command. `loe-worksheet.md` and `implementation-plan-template.md`
 moved from solutions-engineering's references to pm's shared `references/`, as two skills read them.
 
-Kept as they were: the hours and LOE baselines, the checklists, the templates, the output modes, the
-verdict rules, the question policies, the estimator review's read-only posture and commercial
-restraint.
+Kept as they were: the output modes, the verdict rule, the estimator review's read-only posture and
+commercial restraint.
+
+Changed in content (2026-10 review):
+
+- The checklist and its evaluation guide are one table (item, priority, how to check); its "Currency
+  and rate card" row is split into a currency check and an SE-confirmed rate card, since the rate
+  card sits on the Settings tab the review never reads; revenue viability reports hours and scope
+  size only.
+- `loe-worksheet.md` is the one LOE baseline (S / M / L columns, QA buffer only without a QA column);
+  solutions-engineering and merchant-brief cite it, and solutions-engineering points to the plan and
+  handoff templates and the Dev MCP instead of restating them.
+- project-estimator's rows carry `Complexity:` and a review-gates list pointing at the checklist.
 
 Changed, plumbing only:
 
@@ -112,5 +122,5 @@ Changed, plumbing only:
   check, the root section and the subagent share, `/pm-doctor`'s rows and tail, the `pm.jsonl` writer.
 - `tests/pm-doctor-sim.sh`: every `doctor.cjs` row on planted plugin roots, homes, install records and
   base manifests; `--help`, the exit codes, no planted secret in the output.
-- `tests/team-refs-lint.sh`: every qualified name and cited path resolves against pm and base, no fnd
+- `tests/team-refs-lint.sh`: every qualified name and cited path resolves against pm and base, no legacy
   name is left, and no skill names another team plugin's.

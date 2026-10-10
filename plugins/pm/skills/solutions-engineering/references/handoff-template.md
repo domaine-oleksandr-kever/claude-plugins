@@ -109,7 +109,7 @@ If the theme is updated (Foundation or custom), the following files should be re
 |---|---|---|
 | General questions | [Domaine contact] | [Email / Slack] |
 | Urgent production issues | [Domaine escalation] | [Phone / Slack] |
-| Shopify platform issues | Shopify Plus Support | [Merchant's Plus rep] |
+| Shopify platform issues | Shopify Support (Plus: the merchant's Plus rep) | [contact] |
 | App-specific issues | [App vendor] | [Support URL] |
 
 ## 7. Appendix

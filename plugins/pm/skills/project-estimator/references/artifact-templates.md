@@ -1,53 +1,7 @@
 # Artifact Templates
 
-Use these as compact output shapes. Adapt them to the user's requested scope and format.
-
-## Non-Spreadsheet Single Item
-
-```text
-Epic: [epic]
-Feature: [feature]
-Description: [short estimator-ready description]
-Engineering Hours - FED: [hours]
-Engineering Hours - BED: [hours]
-Engineering Hours - QA: [hours]
-Delivery Hours - BSA: [hours]
-Assumptions:
-- Assumes ...
-- Assumes ...
-```
-
-## Spreadsheet Row
-
-| Epic | Feature | Assumptions / Description | Engineering Hours - FED | Engineering Hours - BED | Engineering Hours - QA | Delivery Hours - BSA |
-| --- | --- | --- | --- | --- | --- | --- |
-| `[epic]` | `[feature]` | `[short description + assumptions]` | `[hours]` | `[hours]` | `[hours]` | `[hours]` |
-
-## Full Estimator Package
-
-Use this order when relevant:
-- `Discovery`
-- `Design`
-- `Build`
-- `Testing & Release`
-- `Key Assumptions`
-- `Out Of Scope`
-- `Front-Page Project Summary`
-
-## Phase Row Pattern
-
-```text
-Epic: [phase or epic]
-Feature: [feature]
-Description: [short estimator-ready description]
-Engineering Hours - FED: [hours]
-Engineering Hours - BED: [hours]
-Engineering Hours - QA: [hours]
-Delivery Hours - BSA: [hours]
-Assumptions:
-- Assumes ...
-- Assumes ...
-```
+Compact output shapes for the optional estimator artifacts; the row shapes are in the skill. Adapt
+them to the user's scope and format.
 
 ## Key Assumptions
 

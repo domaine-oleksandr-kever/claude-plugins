@@ -1,11 +1,9 @@
 ---
 name: project-estimator
 description: >
-  Create and refine Domaine-style Shopify project estimators, PCRs, LOE breakdowns, project fee
-  estimates, estimator line items, key assumptions, out-of-scope lists, and estimator header
-  content. Use when the user asks for an estimator, estimation, LOE, PCR, project fee estimate,
-  line items, assumptions, out of scope, key assumptions, discovery/design/build/testing estimate,
-  Shopify project estimate, payments app estimate, or integration estimate.
+  Create or refine Domaine Shopify estimators. Use when asked for an estimator, estimate, LOE, PCR,
+  project fee, line items, key assumptions, out of scope, or a discovery/design/build/testing, app
+  or integration estimate.
 ---
 
 # Project Estimator
@@ -42,6 +40,7 @@ Engineering Hours - FED: [hours]
 Engineering Hours - BED: [hours]
 Engineering Hours - QA: [hours]
 Delivery Hours - BSA: [hours]
+Complexity: [Low / Medium / High]
 Assumptions:
 - Assumes ...
 - Assumes ...
@@ -49,6 +48,7 @@ Assumptions:
 
 Rules:
 - Keep `Description:` to one short estimator-ready sentence or fragment.
+- `Complexity:` is risk and unknowns, never hours (review gates below).
 - Put business rules, dependencies, ownership, native-vs-custom boundaries, and open conditions in
   `Assumptions:`.
 - Prefer assumption bullets that begin with `Assumes`.
@@ -60,6 +60,7 @@ Use when the user asks for spreadsheet-ready output, sheet rows, CSV-style conte
 table format.
 
 Preserve these columns unless the user asks for a different structure:
+- `In Scope?`
 - `Epic`
 - `Feature`
 - `Assumptions / Description`
@@ -67,6 +68,7 @@ Preserve these columns unless the user asks for a different structure:
 - `Engineering Hours - BED`
 - `Engineering Hours - QA`
 - `Delivery Hours - BSA`
+- `Complexity`
 
 Rules:
 - Keep each cell concise and copy-pasteable.
@@ -149,6 +151,18 @@ concrete wording and archetype guidance for:
 - B2B implementation and migration work
 - custom app / middleware / PCR work
 
+## Review Gates
+
+A draft goes on to `/pm:estimator-review`; these rows of its checklist
+(`<pm root>/skills/estimator-review/references/pre-submission-checklist.md`) fail a draft most often:
+
+- Every significant row carries a Low / Medium / High complexity rated by
+  `<pm root>/skills/estimator-review/references/complexity-framework.md`'s three questions.
+- No row at ~40 h or more without a breakdown or a written reason it cannot be split.
+- The out-of-scope list names data migration, SEO/URL migration, backend/ERP integrations, content
+  entry and legacy customer accounts — each in scope or out, never silent.
+- Every Build component has its Design row, and every third-party row states its approach.
+
 ## Optional Estimator Artifacts
 
 Generate these when asked:
@@ -159,8 +173,8 @@ Generate these when asked:
 - high-level risks or dependencies
 - header-page blurbs
 
-Use `<pm root>/skills/project-estimator/references/artifact-templates.md` for reusable output
-shapes.
+Use `<pm root>/skills/project-estimator/references/artifact-templates.md` for the key assumptions,
+out-of-scope, front-page and section-blurb shapes.
 
 ## Question Policy
 
@@ -175,6 +189,7 @@ shapes.
   estimate is drafted so assumption gaps and complexity under-ratings get caught before submission.
 - Read `<pm root>/skills/project-estimator/references/estimator-style-notes.md` for current Domaine
   estimator syntax and archetype cues.
-- Read `<pm root>/references/loe-worksheet.md` when you need fallback LOE baselines.
+- Read `<pm root>/references/loe-worksheet.md` when you need fallback LOE baselines (its buffers
+  only for an estimate without a QA column).
 - Read `<pm root>/references/implementation-plan-template.md` when the estimator needs to align with
   broader project planning language.

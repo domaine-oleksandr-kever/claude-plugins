@@ -1,6 +1,6 @@
 # Implementation Plan Template
 
-Use this template for scoping Shopify Plus projects at Domaine. Copy and fill in each section.
+Use this template for scoping Shopify projects at Domaine. Copy and fill in each section.
 
 ---
 
@@ -9,7 +9,7 @@ Use this template for scoping Shopify Plus projects at Domaine. Copy and fill in
 > [2-3 sentences: what is being built, for whom, and why]
 
 **Client:** [Merchant name]
-**Shopify Plan:** [Plus / Enterprise]
+**Shopify Plan:** [...]
 **Store URL:** [myshopify.com domain]
 **Project Lead:** [Domaine team member]
 **Target Launch:** [Date]
@@ -69,7 +69,7 @@ See base's **Shopify Dev MCP** server (`learn_shopify_api` first) for data model
 
 ## 5. Dependencies
 
-- [ ] Shopify Plus plan confirmed
+- [ ] Shopify plan confirmed (Plus when a Plus-only surface is in scope)
 - [ ] Theme access (Collaborator account or theme files)
 - [ ] App installation permissions
 - [ ] Third-party API credentials / documentation
@@ -98,12 +98,12 @@ See base's **Shopify Dev MCP** server (`learn_shopify_api` first) for data model
 
 ## 8. LOE Estimate
 
-See the LOE guidelines in `/pm:solutions-engineering` for typical ranges per component type.
+Typical ranges per component type: `loe-worksheet.md` (beside this file).
 
 | Component | Estimate | Complexity |
 |---|---|---|
 | [Component 1] | X hrs | [Low/Med/High] |
 | [Component 2] | X hrs | [Low/Med/High] |
 | **Subtotal** | X hrs | |
-| QA buffer (25%) | X hrs | |
+| QA buffer (25%, only without QA hours above) | X hrs | |
 | **Total** | X hrs | |

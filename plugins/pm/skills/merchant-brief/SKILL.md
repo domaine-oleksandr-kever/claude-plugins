@@ -1,10 +1,9 @@
 ---
 name: merchant-brief
 description: >
-  Summarize merchant requirements into a structured solutions brief with recommendations. Use when
-  the user asks for a merchant brief or a solutions brief, or to turn a merchant's requirements (a
-  description, a Jira ticket or epic, a Confluence or Notion page, meeting notes) into recommended
-  approaches, complexity, effort and next steps.
+  Turn merchant requirements (description, Jira ticket or epic, Confluence/Notion page, meeting
+  notes) into a solutions brief: approaches, complexity, effort, next steps. Use when asked for a
+  merchant or solutions brief.
 argument-hint: "[merchant name or requirement description]"
 ---
 
@@ -12,7 +11,7 @@ argument-hint: "[merchant name or requirement description]"
 
 Summarize a merchant's requirements into a structured solutions brief that includes technical recommendations, implementation approach, and estimated effort.
 
-**`<base root>`** = the path on the session context's `base plugin root:` line.
+**`<pm root>`** / **`<base root>`** = the paths on the session context's `pm plugin root:` / `base plugin root:` lines.
 
 ## Instructions
 
@@ -46,9 +45,9 @@ For each requirement, determine:
 
 Check an API or platform fact against base's Shopify Dev MCP server (`learn_shopify_api` first) rather than from memory.
 
-### 3. Categorize by Complexity
+### 3. Categorize by Effort
 
-Group requirements into:
+Group requirements by effort size (risk is rated separately, below):
 
 - **Quick wins** -- native features or simple theme changes (hours)
 - **Moderate effort** -- app configuration, theme sections, simple extensions (days)
@@ -63,6 +62,7 @@ For each requirement, provide:
 - **Alternative options** -- if there are multiple valid approaches, compare them
 - **Dependencies** -- what needs to happen first
 - **Risks** -- what could go wrong or cause delays
+- **LOE** -- hours sized from `<pm root>/references/loe-worksheet.md`
 
 ### 5. Generate the Solutions Brief
 
@@ -85,7 +85,8 @@ Present the brief in this structure:
 #### 1. [Requirement Title]
 - **Description:** [what the merchant wants]
 - **Approach:** [how to implement]
-- **Complexity:** [quick win / moderate / complex]
+- **Effort:** [quick win / moderate / complex]
+- **Risk:** [Low / Medium / High — risk and unknowns, not hours]
 - **LOE:** [estimated hours]
 - **Dependencies:** [prerequisites]
 - **Notes:** [caveats, alternatives, risks]

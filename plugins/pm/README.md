@@ -11,7 +11,7 @@ pm builds on base and requires it: the Jira and doc readers, the Jira writer, th
 the shared MCP servers (Atlassian, Notion, Shopify Dev) are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so pm runs with slim too.
 
-Current release: **pm v0.1.2**.
+Current release: **pm v0.2.0**.
 
 ## Status
 
@@ -19,7 +19,6 @@ Current release: **pm v0.1.2**.
   adapter for another host.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
   not install a dependency on its own: install all three.
-- Never runs together with fnd — install fnd OR base plus the team plugins.
 
 ## Install
 
@@ -32,20 +31,7 @@ Current release: **pm v0.1.2**.
 /reload-plugins
 ```
 
-`/base-doctor` and `/pm-doctor` then check the install (§ Doctor). The same set as settings, in
-`~/.claude/settings.json`:
-
-```json
-{
-  "enabledPlugins": {
-    "slim@domaine": true,
-    "band@domaine": true,
-    "base@domaine": true,
-    "pm@domaine": true,
-    "fnd@domaine": false
-  }
-}
-```
+`/base-doctor` and `/pm-doctor` then check the install (§ Doctor).
 
 The team plugins fe, qa, be and pm co-install: each depends on base only, and none needs another.
 Install the ones your work needs beside base.
@@ -61,8 +47,8 @@ your approval of the exact text.
 |---|---|---|
 | `/pm:project-estimator` | Domaine-style estimators, PCRs, LOE breakdowns, line items, key assumptions, out-of-scope lists and header content, in single-item, spreadsheet or full-estimator mode | `base:jira-reader`, `base:doc-reader`; a Google Drive tool when the session has one → `/pm:estimator-review` |
 | `/pm:estimator-review` | read-only pre-submission review of an estimate against the SE checklist: findings per category, a prioritized fix list, the verdict; never a pricing verdict | the workbook from a Google Drive tool, a local `.xlsx` or a pasted export; Bluedot and Slack tools when present; base's notion MCP → `/pm:project-estimator` |
-| `/pm:merchant-brief` | a merchant's requirements as a solutions brief: approach, complexity, LOE, timeline, risks, next steps | `base:jira-reader`, `base:doc-reader`, base's Shopify Dev MCP; after approval base's Atlassian or notion MCP and `base:jira-writer` |
-| `/pm:solutions-engineering` | requirement scoping, implementation plans, LOE guidelines, common Shopify limitations, the merchant handoff and escalation paths | `base:jira-reader`, `base:doc-reader`, base's Shopify Dev MCP → `/pm:project-estimator`, `/pm:estimator-review`, `/pm:vendor-evaluation` |
+| `/pm:merchant-brief` | a merchant's requirements as a solutions brief: approach, effort, risk, LOE, timeline, risks, next steps | `base:jira-reader`, `base:doc-reader`, base's Shopify Dev MCP; after approval base's Atlassian or notion MCP and `base:jira-writer` |
+| `/pm:solutions-engineering` | requirement scoping and the approach table, the implementation plan and merchant handoff from their templates, LOE from the worksheet, escalation paths; limitations go to the Dev MCP | `base:jira-reader`, `base:doc-reader`, base's Shopify Dev MCP → `/pm:project-estimator`, `/pm:estimator-review`, `/pm:vendor-evaluation` |
 | `/pm:vendor-evaluation` | compares apps, platforms, agencies or vendors for a merchant use case, Domaine partners first when they fit | base's notion MCP (the Partnerships Database), WebSearch and WebFetch when present |
 
 A tool a skill names that this session may not have (Google Drive, Bluedot, Slack, a Python
@@ -76,14 +62,13 @@ The skills cite pm's own files by their path under pm's root (`<pm root>/…`, t
 
 | Reference | Read by | Holds |
 |---|---|---|
-| `references/loe-worksheet.md` | `/pm:project-estimator`, `/pm:solutions-engineering` | LOE baselines by component type, complexity factors, buffer guidelines, an example estimate |
-| `references/implementation-plan-template.md` | `/pm:project-estimator`, `/pm:solutions-engineering` | the implementation plan for a Shopify Plus engagement |
+| `references/loe-worksheet.md` | `/pm:project-estimator`, `/pm:solutions-engineering`, `/pm:merchant-brief`, `/pm:estimator-review` | pm's one set of LOE baselines (S / M / L by component type), sizing factors, buffers (QA only without a QA column), an example estimate |
+| `references/implementation-plan-template.md` | `/pm:project-estimator`, `/pm:solutions-engineering` | the implementation plan for a Shopify engagement |
 | `skills/project-estimator/references/estimator-style-notes.md` | `/pm:project-estimator` | estimator syntax and the archetype cues (migration, B2B, custom app / PCR) |
-| `skills/project-estimator/references/artifact-templates.md` | `/pm:project-estimator` | the output shapes: single item, spreadsheet row, full package, section blurbs |
-| `skills/estimator-review/references/pre-submission-checklist.md` | `/pm:estimator-review` | the five-category checklist, synced from Notion |
-| `skills/estimator-review/references/evaluation-guide.md` | `/pm:estimator-review` | how to check each checklist item against the workbook |
-| `skills/estimator-review/references/estimator-structure.md` | `/pm:estimator-review` | the workbook's tabs, columns, variant tags and off-limits tabs |
-| `skills/estimator-review/references/complexity-framework.md` | `/pm:estimator-review` | Low / Medium / High by risk, and the three-question screen |
+| `skills/project-estimator/references/artifact-templates.md` | `/pm:project-estimator` | the key assumptions, out-of-scope, front-page and section-blurb shapes |
+| `skills/estimator-review/references/pre-submission-checklist.md` | `/pm:estimator-review`, `/pm:project-estimator` | the five-category checklist synced from Notion, one row per item: priority and how to check it against the workbook |
+| `skills/estimator-review/references/estimator-structure.md` | `/pm:estimator-review` | the workbook's tabs, columns and variant tags |
+| `skills/estimator-review/references/complexity-framework.md` | `/pm:estimator-review`, `/pm:project-estimator` | Low / Medium / High by risk, and the three-question screen |
 | `skills/estimator-review/references/baseline-comparison.md` | `/pm:estimator-review` | when and how to compare against a Drive baseline estimator |
 | `skills/solutions-engineering/references/handoff-template.md` | `/pm:solutions-engineering` | the merchant handoff document |
 | `<base root>/references/task-workspace.md` (base's) | `/pm:project-estimator`, `/pm:merchant-brief`, `/pm:solutions-engineering` | the task workspace a ticket's work is saved to |
@@ -107,7 +92,7 @@ base@domaine`.
 ## Doctor
 
 `/pm-doctor` checks pm's side of the install and prints one PASS / FAIL / SKIP / WARN row per check,
-the counts, and the last 10 `pm.events` lines. `/base-doctor` checks base's side (slim, fnd, the MCP
+the counts, and the last 10 `pm.events` lines. `/base-doctor` checks base's side (slim, the MCP
 servers).
 
 | Row | Checks |
@@ -158,7 +143,7 @@ Every switch pm reads has a row here; set it in `~/.claude/settings.json` → `e
   `plugins/pm/hooks/mods/tests/`), both run by `tests/mods-sim.sh` with every other plugin (local
   only: CI has no `claude`).
 - `tests/pm-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
-- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no fnd name is left (the
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no legacy name is left (the
   same checker for every team plugin on base).
 
 How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md).
