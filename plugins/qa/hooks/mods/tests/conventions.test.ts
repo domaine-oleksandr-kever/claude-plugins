@@ -7,6 +7,25 @@ const OLD = 'f' + 'nd'
 const HOSTS = ['Cur' + 'sor', 'Co' + 'dex', 'Open' + 'Code']
 const BANNED = [`plugin_${OLD}_`, `${OLD.toUpperCase()}_`, `\\b${OLD}:`, `/${OLD}\\b`, `${OLD}-tmp`, '/f' + 'e:', '<f' + 'e root>', ...HOSTS.map(h => `\\b${h}\\b`)].map(p => new RegExp(p))
 
+const sessionStart = ($: any) => $.classic.SessionStart({ source: 'startup', session_id: 's1' })
+
+describe('a session no surface draws', () => {
+  test('SessionStart carries every section as one context block, and prompt.compose then adds none', async ($, on) => {
+    world(on, { surfaces: [] })
+    const r = await sessionStart($)
+    expect(r.additionalContext).toHaveLength(1)
+    expect(r.additionalContext[0]).toStartWith('qa plugin root: /')
+    expect(ours(await compose($))).toEqual([])
+  })
+
+  test('a terminal session: SessionStart adds no context, the system prompt carries the sections', async ($, on) => {
+    world(on)
+    const r = await sessionStart($)
+    expect(r.additionalContext ?? []).toEqual([])
+    expect(ours(await compose($)).map(s => s.id)).toEqual(['qa:root', 'qa:passwords'])
+  })
+})
+
 describe('prompt.compose', () => {
   test("the engine's sections first, then qa's two, every one session-scoped", async ($, on) => {
     world(on)

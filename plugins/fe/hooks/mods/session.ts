@@ -23,6 +23,8 @@ export const PROFILE_TIMEOUT_MS = 5_000
 
 const events = atom({ plugin: 'fe', key: 'events' } as const, [] as FeEvent[])
 const started = atom({ plugin: 'fe', key: 'started' } as const, null)
+/** The session id whose classic SessionStart carried the sections as context (no surface draws: cloud, `claude -p`): prompt.compose then adds nothing. */
+const injected = atom({ plugin: 'fe', key: 'injected' } as const, null as string | null)
 const profile = atom({ plugin: 'fe', key: 'profile' } as const, null)
 
 type $ = EngineInterface
@@ -170,9 +172,26 @@ export function registerSession(on: On): void {
     return next(e)
   })
 
+  // A session no surface draws gets its prompt composed without the plugins: the sections ride SessionStart's context.
+  on('classic.SessionStart', async ($, e, next) => {
+    const r = await next(e)
+    let ctx: string | null = null
+    try {
+      if ((await $.session.surfaces()).length === 0) ctx = (await sections($)).map(s => s.text).join('\n\n')
+    } catch {}
+    if (ctx === null) return r
+    const sid = String(await $.session.id())
+    await update($, injected, () => sid).catch(() => {})
+    return { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] }
+  })
+
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
-    const ours = await sections($).catch(() => [])
+    if ((await read($, injected).catch(() => null)) === String(await $.session.id())) return r
+    let ours: PromptComposeSection[] = []
+    try {
+      ours = await sections($)
+    } catch {}
     const taken = new Set(r.sections.map(s => s.id))
     return { sections: [...r.sections, ...ours.filter(s => !taken.has(s.id))] }
   })

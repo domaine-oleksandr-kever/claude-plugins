@@ -18,6 +18,8 @@ export type World = {
   root: string
   files: Record<string, File>
   tools: string[]
+  /** what $.session.surfaces() answers; empty = nothing draws (a cloud session, `claude -p`) */
+  surfaces: string[]
   /** `[name, plugin]` pairs $.command.list answers; null rejects the listing */
   commands: [string, string][] | null
   env: Record<string, string>
@@ -42,6 +44,7 @@ export function world(on: On, over: Partial<World> = {}) {
     root: ROOT,
     files: {},
     tools: ['Bash', 'Read', SLIM_VIEW, DEV_MCP_TOOL],
+    surfaces: ['terminal'],
     commands: BASE_COMMANDS,
     env: {},
     doctor: null,
@@ -66,6 +69,8 @@ export function world(on: On, over: Partial<World> = {}) {
   on('session.root', async () => ({ value: w.root }))
   on('session.cwd', async () => ({ value: w.root }))
   on('session.id', async () => ({ value: w.sid }))
+  on('session.surfaces', async () => ({ value: w.surfaces as never }))
+  on('classic.SessionStart', async () => ({}) as never)
   on('tool.list', async () => ({ value: w.tools.map(name => ({ name, description: name, mcp: name.startsWith('mcp__') })) }))
   on('command.list', async () => {
     if (!w.commands) throw new Error('no command list')

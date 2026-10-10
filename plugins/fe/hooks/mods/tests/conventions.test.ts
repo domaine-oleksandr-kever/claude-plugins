@@ -10,6 +10,25 @@ const BANNED = [`plugin_${OLD}_`, `${OLD.toUpperCase()}_`, `\\b${OLD}:`, `/${OLD
 const ids = async ($: any) => ours(await compose($)).map(s => s.id)
 const rootOf = (text: string) => text.replace(/^fe plugin root: (\S+) .*$/s, '$1')
 
+const sessionStart = ($: any) => $.classic.SessionStart({ source: 'startup', session_id: 's1' })
+
+describe('a session no surface draws', () => {
+  test('SessionStart carries every section as one context block, and prompt.compose then adds none', async ($, on) => {
+    world(on, { surfaces: [] })
+    const r = await sessionStart($)
+    expect(r.additionalContext).toHaveLength(1)
+    expect(r.additionalContext[0]).toStartWith('fe plugin root: /')
+    expect(ours(await compose($))).toEqual([])
+  })
+
+  test('a terminal session: SessionStart adds no context, the system prompt carries the sections', async ($, on) => {
+    world(on)
+    const r = await sessionStart($)
+    expect(r.additionalContext ?? []).toEqual([])
+    expect(ours(await compose($)).map(s => s.id)).toEqual(['fe:root', 'fe:profile', 'fe:progress-series'])
+  })
+})
+
 describe('prompt.compose', () => {
   test("the engine's sections first, then fe's, every one session-scoped", async ($, on) => {
     world(on)

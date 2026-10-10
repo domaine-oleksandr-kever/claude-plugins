@@ -1,6 +1,8 @@
 // base's conventions: system-prompt sections for the main session, added context for every subagent.
-// The engine has no event for a subagent's system prompt, so its share rides classic SubagentStart.
-import { atom, update } from 'claude-code'
+// The engine has no event for a subagent's system prompt, so its share rides classic SubagentStart. A session
+// no surface draws (a cloud session, `claude -p`) gets its prompt composed without the plugins: there the
+// sections ride classic SessionStart's context instead, and prompt.compose adds nothing.
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
 import {
   COMMENT_DISCIPLINE,
@@ -17,6 +19,8 @@ type $ = EngineInterface
 
 /** How many system prompts the engine composed through base's hook this session: 0 = the conventions never reached the model (doctor.ts reads it). */
 const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
+/** The session id whose start carried the conventions as context (doctor.ts reads it): prompt.compose then adds nothing. */
+const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
 
 /**
  * The sections in session order, each `base:<name>`: the switches are read on every render, and the
@@ -51,10 +55,27 @@ export async function subagentContext($: $, agentType: string): Promise<string> 
   return parts.join('\n\n')
 }
 
+/** The sections as one context block for a session no surface draws; null where one does (the system prompt carries them). */
+export async function startContext($: $): Promise<string | null> {
+  if ((await $.session.surfaces()).length > 0) return null
+  return (await sections($)).map(s => s.text).join('\n\n')
+}
+
 export function registerConventions(on: On): void {
+  // Matched apart from title.ts's hook: one unmatched hook per event per plugin.
+  on('classic.SessionStart', { source: /^/ }, async ($, e, next) => {
+    const r = await next(e)
+    const ctx = await startContext($).catch(() => null)
+    if (ctx === null) return r
+    const sid = String(await $.session.id())
+    await update($, injected, () => sid).catch(() => {})
+    return { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] }
+  })
+
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
     await update($, composed, n => n + 1).catch(() => {})
+    if ((await read($, injected).catch(() => null)) === String(await $.session.id())) return r
     const ours = await sections($).catch(() => [])
     const taken = new Set(r.sections.map(s => s.id))
     return { sections: [...r.sections, ...ours.filter(s => !taken.has(s.id))] }

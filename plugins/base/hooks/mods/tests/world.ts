@@ -24,6 +24,8 @@ export type World = {
   files: Record<string, File>
   /** the tool names $.tool.list answers */
   tools: string[]
+  /** what $.session.surfaces() answers; empty = nothing draws (a cloud session, `claude -p`) */
+  surfaces: string[]
   /** `[name, plugin]` pairs $.command.list answers */
   commands: [string, string][]
   /** the merged settings' enabledPlugins */
@@ -65,6 +67,7 @@ export function world(on: On, over: Partial<World> = {}) {
     root: ROOT,
     files: {},
     tools: ['Bash', 'Read', SLIM_VIEW],
+    surfaces: ['terminal'],
     commands: [],
     enabledPlugins: { 'slim@domaine': true, 'band@domaine': true, 'base@domaine': true },
     env: {},
@@ -118,6 +121,7 @@ export function world(on: On, over: Partial<World> = {}) {
   on('session.root', async () => ({ value: w.root }))
   on('session.cwd', async () => ({ value: w.root }))
   on('session.id', async () => ({ value: w.sid }))
+  on('session.surfaces', async () => ({ value: w.surfaces as never }))
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000, percent: w.ctxPct ?? undefined }, rateLimits: [] } as never }))
   on('settings.read', async () => ({ value: { env: w.settingsEnv, enabledPlugins: w.enabledPlugins } as any }))
   on('tool.list', async () => ({ value: w.tools.map(name => ({ name, description: name, mcp: name.startsWith('mcp__') })) }))

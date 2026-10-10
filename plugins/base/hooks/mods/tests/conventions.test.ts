@@ -11,8 +11,36 @@ const BANNED = [`plugin_${OLD}_`, `${OLD.toUpperCase()}_`, `\\b${OLD}:`, `/${OLD
 const INPUT = { model: 'claude-test', promptModel: 'claude-test', surfaces: ['terminal'], tools: ['Bash'], outputStyle: null, traits: [] }
 const compose = ($: any) => $.prompt.compose(INPUT)
 const ours = (r: { sections: readonly { id: string; text: string; scope: string }[] }) => r.sections.filter(s => s.id.startsWith('base:'))
+const sessionStart = ($: any) => $.classic.SessionStart({ source: 'startup', session_id: 's1' })
 const subagent = ($: any, agent_type: string) => $.classic.SubagentStart({ agent_id: 'a1', agent_type })
 const rootOf = (text: string) => text.replace(/^base plugin root: /, '')
+
+describe('a session no surface draws', () => {
+  test('SessionStart carries every section as one context block, and prompt.compose then adds none', async ($, on) => {
+    world(on, { surfaces: [] })
+    const r = await sessionStart($)
+    expect(r.additionalContext).toHaveLength(1)
+    const ctx = r.additionalContext[0] as string
+    expect(ctx).toStartWith('base plugin root: /')
+    for (const text of [COMMENT_DISCIPLINE, UNTRUSTED_CONTENT, LEAN_CODE, WRITING_STYLE]) expect(ctx).toContain(text)
+    expect(ours(await compose($))).toEqual([])
+  })
+
+  test('a terminal session: SessionStart adds no context, the system prompt carries the sections', async ($, on) => {
+    world(on)
+    const r = await sessionStart($)
+    expect(r.additionalContext ?? []).toEqual([])
+    expect(ours(await compose($)).map(s => s.id)).toEqual(IDS)
+  })
+
+  test('a new session id after a surfaceless start composes again', async ($, on) => {
+    const { w } = world(on, { surfaces: [] })
+    await sessionStart($)
+    w.sid = 's2'
+    w.surfaces = ['terminal']
+    expect(ours(await compose($)).map(s => s.id)).toEqual(IDS)
+  })
+})
 
 describe('prompt.compose', () => {
   test('the engine\'s sections first, then base\'s in order, every one session-scoped', async ($, on) => {

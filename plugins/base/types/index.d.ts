@@ -77,6 +77,8 @@ declare module 'claude-code' {
       checked: string | null
       /** System prompts the engine composed through base's `prompt.compose` hook this session; 0 = the conventions never reached the model. */
       composed: number
+      /** The session id whose classic SessionStart carried the conventions as context (no surface draws: cloud, `claude -p`). */
+      injected: string | null
       /** The session id whose title is settled: `<id>` titled by base, `<id>:user` set by the person. */
       titled: string | null
       /** The project root the session launched in, latched once: the scratch-path guard measures against it. */

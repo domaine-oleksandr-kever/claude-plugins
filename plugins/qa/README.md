@@ -10,7 +10,7 @@ registry (`<base root>/scripts/qa-stores.cjs`), the shared references and the ch
 server are base's ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with
 slim too.
 
-Current release: **qa v0.3.1**.
+Current release: **qa v0.3.2**.
 
 ## Status
 
@@ -64,7 +64,7 @@ qa ships no reference of its own. The skill cites base's by their path under bas
 ## Conventions
 
 qa adds its sections to the main session's system prompt after Claude Code's own and base's, in this
-order, each with the id `qa:<name>` and the session scope:
+order, each with the id `qa:<name>` and the session scope. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as session-start context instead, in the first user message.
 
 | Name | Holds |
 |---|---|

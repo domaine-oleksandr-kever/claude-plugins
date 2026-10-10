@@ -23,8 +23,10 @@ export type Row = { status: Status; name: string; detail: string }
 
 const swept = atom({ plugin: 'base', key: 'swept' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
-// Written in conventions.ts (renders through prompt.compose) and session.ts (the first prompt's slim check).
+// Written in conventions.ts (renders through prompt.compose; the session whose start carried the conventions) and
+// session.ts (the first prompt's slim check).
 const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
+const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
 const checked = atom({ plugin: 'base', key: 'checked' } as const, null)
 
 type $ = EngineInterface
@@ -134,11 +136,14 @@ async function liveRows($: $): Promise<Row[]> {
   try {
     const renders = await read($, composed)
     const prompted = (await read($, checked)) !== null
-    rows.push(renders > 0
-      ? { status: 'PASS', name: 'conventions', detail: `in the system prompt: ${renders} render${renders === 1 ? '' : 's'} through prompt.compose` }
-      : prompted
-        ? { status: 'FAIL', name: 'conventions', detail: 'prompt.compose never fired this session: this host composes its prompt without the plugins' }
-        : { status: 'SKIP', name: 'conventions', detail: 'no prompt sent yet: send one, then run the doctor again' })
+    const atStart = (await read($, injected)) === String(await $.session.id())
+    rows.push(atStart
+      ? { status: 'PASS', name: 'conventions', detail: 'in the session-start context: no surface draws here, so the engine composes its prompt without the plugins' }
+      : renders > 0
+        ? { status: 'PASS', name: 'conventions', detail: `in the system prompt: ${renders} render${renders === 1 ? '' : 's'} through prompt.compose` }
+        : prompted
+          ? { status: 'FAIL', name: 'conventions', detail: 'neither prompt.compose nor the session-start context carried them: a surface draws, yet prompt.compose never fired' }
+          : { status: 'SKIP', name: 'conventions', detail: 'no prompt sent yet: send one, then run the doctor again' })
   } catch {
     rows.push({ status: 'SKIP', name: 'conventions', detail: 'the state did not answer' })
   }

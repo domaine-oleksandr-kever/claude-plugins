@@ -9,7 +9,7 @@ fe builds on base and requires it: the Jira, Figma and doc readers, the Jira wri
 the task workspace, the commit and review skills, the guards and the shared MCP servers are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.5.1**.
+Current release: **fe v0.5.2**.
 
 ## Status
 
@@ -122,7 +122,7 @@ into the project and removes it after the run. `/fe:write-steps-to-test` names t
 ## Conventions
 
 fe adds its sections to the main session's system prompt after Claude Code's own and base's, in this
-order, each with the id `fe:<name>`:
+order, each with the id `fe:<name>`. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as session-start context instead, in the first user message.
 
 | Name | Holds | When |
 |---|---|---|
