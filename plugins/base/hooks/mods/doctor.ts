@@ -3,7 +3,7 @@
 // slim's view tool, each MCP server of base's manifest connected; then the tail of base.events.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { BaseEvent } from '../../types'
+import type { BaseDelivery, BaseEvent } from '../../types'
 import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 import { SLIM_MISSING, SLIM_VIEW } from './session.ts'
@@ -27,6 +27,7 @@ const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[
 // session.ts (the first prompt's slim check).
 const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
 const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
+const delivery = atom({ plugin: 'base', key: 'delivery' } as const, { sid: null, startSurfaces: null, prompts: 0, context: false } as BaseDelivery)
 const checked = atom({ plugin: 'base', key: 'checked' } as const, null)
 
 type $ = EngineInterface
@@ -124,6 +125,20 @@ async function staticRows($: $): Promise<Row[]> {
   return [{ status: 'FAIL', name: 'static', detail: `scripts/doctor.cjs exited ${r.exitCode}: ${why}` }]
 }
 
+/** What the prompt events did this session, one clause each: the host's transport the conventions can take. */
+async function deliverySeen($: $): Promise<string> {
+  const sid = String(await $.session.id())
+  const d = await read($, delivery)
+  const now = await $.session.surfaces().catch(() => null)
+  const same = d.sid === sid
+  return [
+    same && d.startSurfaces ? `SessionStart saw surfaces [${d.startSurfaces.join(', ')}]` : 'SessionStart never fired',
+    `UserPromptSubmit ×${same ? d.prompts : 0}`,
+    `prompt.context ${same && d.context ? 'fired' : 'never fired'}`,
+    `surfaces now [${now ? now.join(', ') : '?'}]`,
+  ].join('; ')
+}
+
 async function liveRows($: $): Promise<Row[]> {
   const rows: Row[] = []
   try {
@@ -142,7 +157,7 @@ async function liveRows($: $): Promise<Row[]> {
       : renders > 0
         ? { status: 'PASS', name: 'conventions', detail: `in the system prompt: ${renders} render${renders === 1 ? '' : 's'} through prompt.compose` }
         : prompted
-          ? { status: 'FAIL', name: 'conventions', detail: 'neither prompt.compose nor the session-start context carried them: a surface draws, yet prompt.compose never fired' }
+          ? { status: 'FAIL', name: 'conventions', detail: `not delivered: prompt.compose never fired; ${await deliverySeen($)}` }
           : { status: 'SKIP', name: 'conventions', detail: 'no prompt sent yet: send one, then run the doctor again' })
   } catch {
     rows.push({ status: 'SKIP', name: 'conventions', detail: 'the state did not answer' })

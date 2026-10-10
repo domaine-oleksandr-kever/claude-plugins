@@ -134,7 +134,16 @@ describe('/base-doctor', () => {
     await start($)
     expect((await doctor($)).text).toContain('SKIP  conventions  no prompt sent yet: send one, then run the doctor again')
     await submit($, 'hello')
-    expect((await doctor($)).text).toContain('FAIL  conventions  neither prompt.compose nor the session-start context carried them: a surface draws, yet prompt.compose never fired')
+    expect((await doctor($)).text).toContain(
+      'FAIL  conventions  not delivered: prompt.compose never fired; SessionStart never fired; UserPromptSubmit ×0; prompt.context never fired; surfaces now [terminal]',
+    )
+    await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
+    await $.classic.UserPromptSubmit({ prompt: 'hi', session_id: 's1' })
+    await $.classic.UserPromptSubmit({ prompt: 'again', session_id: 's1' })
+    await $.prompt.context({ blocks: [] })
+    expect((await doctor($)).text).toContain(
+      'FAIL  conventions  not delivered: prompt.compose never fired; SessionStart saw surfaces [terminal]; UserPromptSubmit ×2; prompt.context fired; surfaces now [terminal]',
+    )
     await compose($)
     await compose($)
     expect((await doctor($)).text).toContain('PASS  conventions  in the system prompt: 2 renders through prompt.compose')

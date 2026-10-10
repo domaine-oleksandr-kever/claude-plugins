@@ -79,6 +79,8 @@ declare module 'claude-code' {
       composed: number
       /** The session id whose classic SessionStart carried the conventions as context (no surface draws: cloud, `claude -p`). */
       injected: string | null
+      /** The prompt events seen this session (the doctor's conventions row): which ones a host fires decides how the conventions travel. */
+      delivery: BaseDelivery
       /** The session id whose title is settled: `<id>` titled by base, `<id>:user` set by the person. */
       titled: string | null
       /** The project root the session launched in, latched once: the scratch-path guard measures against it. */
@@ -92,3 +94,6 @@ declare module 'claude-code' {
     }
   }
 }
+
+/** Per session id: the surfaces classic SessionStart saw (null = it never fired), prompts classic UserPromptSubmit saw, whether prompt.context fired. */
+export type BaseDelivery = { sid: string | null; startSurfaces: string[] | null; prompts: number; context: boolean }

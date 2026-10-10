@@ -4,6 +4,7 @@
 // sections ride classic SessionStart's context instead, and prompt.compose adds nothing.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
+import type { BaseDelivery } from '../../types'
 import {
   COMMENT_DISCIPLINE,
   LEAN_CODE,
@@ -21,6 +22,8 @@ type $ = EngineInterface
 const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
 /** The session id whose start carried the conventions as context (doctor.ts reads it): prompt.compose then adds nothing. */
 const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
+/** What the prompt events did this session, for the doctor: which of them a host fires decides how the conventions travel. */
+const delivery = atom({ plugin: 'base', key: 'delivery' } as const, { sid: null, startSurfaces: null, prompts: 0, context: false } as BaseDelivery)
 
 /**
  * The sections in session order, each `base:<name>`: the switches are read on every render, and the
@@ -65,9 +68,11 @@ export function registerConventions(on: On): void {
   // Matched apart from title.ts's hook: one unmatched hook per event per plugin.
   on('classic.SessionStart', { source: /^/ }, async ($, e, next) => {
     const r = await next(e)
+    const sid = String(await $.session.id())
+    const seen = await $.session.surfaces().catch(() => null)
+    await update($, delivery, d => ({ ...(d.sid === sid ? d : { sid, prompts: 0, context: false }), sid, startSurfaces: seen ? [...seen] : null })).catch(() => {})
     const ctx = await startContext($).catch(() => null)
     if (ctx === null) return r
-    const sid = String(await $.session.id())
     await update($, injected, () => sid).catch(() => {})
     return { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] }
   })
@@ -79,6 +84,21 @@ export function registerConventions(on: On): void {
     const ours = await sections($).catch(() => [])
     const taken = new Set(r.sections.map(s => s.id))
     return { sections: [...r.sections, ...ours.filter(s => !taken.has(s.id))] }
+  })
+
+  // Matched apart from title.ts's hook. Counts the prompts a host hands the classic hook.
+  on('classic.UserPromptSubmit', { prompt: /^/ }, async ($, e, next) => {
+    const r = await next(e)
+    const sid = String(await $.session.id())
+    await update($, delivery, d => ({ ...(d.sid === sid ? d : { sid, startSurfaces: null, context: false }), sid, prompts: (d.sid === sid ? d.prompts : 0) + 1 })).catch(() => {})
+    return r
+  })
+
+  on('prompt.context', async ($, e, next) => {
+    const r = await next(e)
+    const sid = String(await $.session.id())
+    await update($, delivery, d => ({ ...(d.sid === sid ? d : { sid, startSurfaces: null, prompts: 0 }), sid, context: true })).catch(() => {})
+    return r
   })
 
   on('classic.SubagentStart', async ($, e, next) => {

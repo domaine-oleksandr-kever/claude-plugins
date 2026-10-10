@@ -116,6 +116,7 @@ export function world(on: On, over: Partial<World> = {}) {
   on('classic.CwdChanged', async () => ({}))
   on('classic.SessionStart', async () => ({}) as never)
   on('classic.UserPromptSubmit', async () => ({}) as never)
+  on('prompt.context', async (_$, e) => ({ blocks: e.blocks }))
   on('classic.Stop', async () => ({}))
   on('classic.PreCompact', async () => ({}))
   on('session.root', async () => ({ value: w.root }))
