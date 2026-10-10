@@ -178,7 +178,7 @@ function enabledPlugins(claudeDir, projectDir) {
 }
 
 /**
- * The install of `<name>@<marketplace>` this project would load (user scope or this project), or null.
+ * The install of `<name>@<marketplace>` this project would load (user scope or this project), else its synced copy, or null.
  * Enabled means its settings key is `true`: Claude Code never loads a plugin whose key is absent.
  */
 function installedPlugin(name, claudeDir, projectDir, enabled) {
@@ -196,7 +196,25 @@ function installedPlugin(name, claudeDir, projectDir, enabled) {
     }
     return { ...found, disabled: false };
   }
-  return disabled ? { ...disabled, disabled: true } : null;
+  return disabled ? { ...disabled, disabled: true } : syncedPlugin(name, claudeDir, enabled);
+}
+
+/**
+ * The claude.ai-account copy of `<name>` (`<name>@synced`): `plugins/synced/<account>/<name>/` beside this plugin
+ * in a cloud session or a synced terminal, with no install record; it loads unless its settings key is `false`.
+ */
+function syncedPlugin(name, claudeDir, enabled) {
+  const root = path.join(claudeDir, 'plugins', 'synced');
+  let accounts = [];
+  try { accounts = fs.readdirSync(root); } catch { return null; }
+  for (const account of accounts) {
+    const dir = path.resolve(root, account, name);
+    const manifest = readJson(path.join(dir, '.claude-plugin', 'plugin.json'));
+    if (!manifest) continue;
+    const key = name + '@synced';
+    return { key, version: String(manifest.version || '?'), installPath: dir, disabled: enabled[key] === false };
+  }
+  return null;
 }
 
 function checkBase(claudeDir, projectDir, enabled) {

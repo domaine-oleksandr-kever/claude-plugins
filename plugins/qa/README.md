@@ -10,7 +10,7 @@ registry (`<base root>/scripts/qa-stores.cjs`), the shared references and the ch
 server are base's ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with
 slim too.
 
-Current release: **qa v0.3.0**.
+Current release: **qa v0.3.1**.
 
 ## Status
 
@@ -127,7 +127,7 @@ Every switch qa reads has a row here; set it in `~/.claude/settings.json` → `e
 |---|---|---|
 | `QA_EVENT_LOG` | on | `0` keeps `qa.events` empty and writes no `qa.jsonl` |
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` and `settings.json` the `base`, `registry` and `chrome-devtools` rows read |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base`, `registry` and `chrome-devtools` rows read |
 
 ## Tests
 

@@ -11,7 +11,7 @@ pm builds on base and requires it: the Jira and doc readers, the Jira writer, th
 the shared MCP servers (Atlassian, Notion, Shopify Dev) are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so pm runs with slim too.
 
-Current release: **pm v0.2.0**.
+Current release: **pm v0.2.1**.
 
 ## Status
 
@@ -135,7 +135,7 @@ Every switch pm reads has a row here; set it in `~/.claude/settings.json` → `e
 |---|---|---|
 | `PM_EVENT_LOG` | on | `0` keeps `pm.events` empty and writes no `pm.jsonl` |
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` and `settings.json` the `base`, `atlassian` and `notion-mcp` rows read |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base`, `atlassian` and `notion-mcp` rows read |
 
 ## Tests
 

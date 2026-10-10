@@ -144,6 +144,12 @@ run --root "$P" --home "$H2" --project "$PRJ"
 expect CD15-slim-absent 1 "FAIL  slim       not installed" "claude plugin install slim@domaine"
 H3="$TMP/h-noinstalled"; mkhome "$H3"
 run --root "$P" --home "$H3" --project "$PRJ"; expect CD15b-no-install-record 1 "FAIL  slim       not installed"
+# The claude.ai-account copy (a cloud session, a synced terminal): no install record, enabled unless its key is false.
+HS="$TMP/h-synced"; mkhome "$HS"; SS="$HS/.claude/plugins/synced/acc_1/slim"; mkdir -p "$SS/.claude-plugin"
+printf '{"name":"slim","version":"0.9.0"}\n' > "$SS/.claude-plugin/plugin.json"
+run --root "$P" --home "$HS" --project "$PRJ"; expect CD15c-slim-synced 0 "PASS  slim       slim@synced 0.9.0 installed and enabled"
+printf '{"enabledPlugins":{"slim@synced":false}}\n' > "$HS/.claude/settings.json"
+run --root "$P" --home "$HS" --project "$PRJ"; expect CD15d-slim-synced-off 1 "FAIL  slim       slim@synced 0.9.0 is installed but disabled"
 H4="$TMP/h-slimoff"; mkhome "$H4" "$(installed "$SLIM_USER")" '{"enabledPlugins":{"slim@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect CD16-slim-disabled-user 1 "FAIL  slim       slim@domaine 0.5.0 is installed but disabled — enable it in /plugin"

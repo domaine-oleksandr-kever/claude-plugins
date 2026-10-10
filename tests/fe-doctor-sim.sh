@@ -150,6 +150,12 @@ run --root "$P" --home "$H2" --project "$PRJ"
 expect FD15-base-absent 1 "FAIL  base          not installed" "claude plugin install base@domaine"
 H3="$TMP/h-noinstalled"; mkhome "$H3"
 run --root "$P" --home "$H3" --project "$PRJ"; expect FD15b-no-install-record 1 "FAIL  base          not installed"
+# The claude.ai-account copy (a cloud session, a synced terminal): no install record, enabled unless its key is false.
+HS="$TMP/h-synced"; mkhome "$HS"; SB="$HS/.claude/plugins/synced/acc_1/base"; mkdir -p "$SB/.claude-plugin" "$SB/scripts"
+printf '{"name":"base","version":"0.8.0"}\n' > "$SB/.claude-plugin/plugin.json"; : > "$SB/scripts/review-scope.sh"
+run --root "$P" --home "$HS" --project "$PRJ"; expect FD15c-base-synced 0 "PASS  base          base@synced 0.8.0 installed and enabled"
+printf '{"enabledPlugins":{"base@synced":false}}\n' > "$HS/.claude/settings.json"
+run --root "$P" --home "$HS" --project "$PRJ"; expect FD15d-base-synced-off 1 "FAIL  base          base@synced 0.8.0 is installed but disabled"
 H4="$TMP/h-baseoff"; mkhome "$H4" "$(installed "$BASE_USER")" '{"enabledPlugins":{"base@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect FD16-base-disabled-user 1 "FAIL  base          base@domaine 0.2.0 is installed but disabled — enable it in /plugin"

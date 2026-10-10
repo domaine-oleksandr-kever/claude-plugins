@@ -150,6 +150,11 @@ expect PD16-base-absent 1 "FAIL  base        not installed" "claude plugin insta
   "SKIP  atlassian   no enabled base install to read — the base row says why" "SKIP  notion-mcp  no enabled base install to read — the base row says why"
 H3="$TMP/h-noinstalled"; mkhome "$H3"
 run --root "$P" --home "$H3" --project "$PRJ"; expect PD17-no-install-record 1 "FAIL  base        not installed"
+# The claude.ai-account copy (a cloud session, a synced terminal): no install record, enabled unless its key is false.
+HS="$TMP/h-synced"; mkhome "$HS"; mkbase "$HS/.claude/plugins/synced/acc_1/base" '{"atlassian":{"command":"npx"},"notion-mcp":{"type":"http"},"playwright":{}}'
+run --root "$P" --home "$HS" --project "$PRJ"; expect PD17b-base-synced 0 "PASS  base        base@synced 0.3.1 installed and enabled"
+printf '{"enabledPlugins":{"base@synced":false}}\n' > "$HS/.claude/settings.json"
+run --root "$P" --home "$HS" --project "$PRJ"; expect PD17c-base-synced-off 1 "FAIL  base        base@synced 0.3.1 is installed but disabled"
 H4="$TMP/h-baseoff"; mkhome "$H4" "$(installed "$(base_user "$BASEDIR")")" '{"enabledPlugins":{"base@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect PD18-base-disabled-user 1 "FAIL  base        base@domaine 0.3.1 is installed but disabled — enable it in /plugin" \
