@@ -151,7 +151,6 @@ H4="$TMP/h-baseoff"; mkhome "$H4" "$(installed "$(base_user "$B")")" '{"enabledP
 run --root "$P" --home "$H4" --project "$PRJ"
 expect BD16-base-disabled-user 1 "FAIL  base             base@domaine 0.3.0 is installed but disabled — enable it in /plugin" \
   "SKIP  shopify-dev-mcp  no enabled base install to read"
-PRJ2=  "SKIP  shopify-dev-mcp  no enabled base install to read"
 H4b="$TMP/h-basenokey"; mkhome "$H4b" "$(installed "$(base_user "$B")")" '{}'
 run --root "$P" --home "$H4b" --project "$PRJ"
 expect BD16b-base-no-key 1 "FAIL  base             base@domaine 0.3.0 is installed but disabled — enable it in /plugin" \
