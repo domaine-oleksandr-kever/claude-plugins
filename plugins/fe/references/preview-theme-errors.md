@@ -38,7 +38,8 @@ skim past them. Flow context (decision flow, drift blockquote, push-root mechani
   keep them out of the review scope and any commit. With a task workspace, append
   `- <YYYY-MM-DD> build-dirtied: <path> <path>` to its `notes.md` (the comma list space-separated,
   a path with whitespace left out): review-flow §1 drops the last such line's files from the
-  review scope; no workspace → nothing is recorded.
+  review scope; once the developer restores them, append a bare `- <YYYY-MM-DD> build-dirtied:`
+  line so a later edit to those files is reviewed again; no workspace → nothing is recorded.
 - **`error=not_a_theme_checkout`** → the run started in the wrong directory: none of the theme
   directories (`assets`, `layout`, `sections`, …) is there, so the push root would have been
   empty — and a code push carries no `--nodelete`, so it would strip the theme it landed on.
