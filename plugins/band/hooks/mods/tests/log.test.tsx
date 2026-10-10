@@ -1,8 +1,8 @@
 import { describe, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import type { BandEvent } from '../../types'
-import { EVENT_CAP, PREFIX_COLS, fmtK, hhmm, kindCell, logRow, merged, newestFitting, pluginCell, pushEvent, take, textRows } from '../events.ts'
-import { SNAP, baseState, sibFnd, sibSlim, teamState, test } from './world.tsx'
+import { EVENT_CAP, PREFIX_COLS, TEXT_LOG_ROWS, anyEvent, fmtK, hhmm, kindCell, logRow, merged, newestFitting, pluginCell, pushEvent, take, textRows } from '../events.ts'
+import { SNAP, baseState, sibBase, sibSlim, teamState, test } from './world.tsx'
 
 const NOW = new Date(2027, 0, 15, 9, 5).getTime()
 const PANE = 'band-log'
@@ -105,10 +105,10 @@ describe('event helpers', () => {
     expect(fmtK(950)).toBe('950')
     expect(kindCell('rate')).toBe('rate     ')
     expect(kindCell('workspace')).toBe('workspace')
-    expect(kindCell('fnd-slim')).toBe('fnd-slim ')
+    expect(kindCell('profile')).toBe('profile  ')
     expect(pluginCell('band')).toBe('band ')
     expect(pluginCell('slim')).toBe('slim ')
-    expect(pluginCell('fnd')).toBe('fnd  ')
+    expect(pluginCell('base')).toBe('base ')
     expect(logRow({ atMs: NOW, plugin: 'base', kind: 'guard', text: 'Bash: --no-verify' })).toBe('09:05  base   guard      Bash: --no-verify')
   })
 
@@ -130,24 +130,22 @@ describe('event helpers', () => {
 })
 
 describe('merged', () => {
-  test('oldest first; on a tie band → base → fnd → slim, each list in its own order', () => {
+  test('oldest first; on a tie band → base → slim, each list in its own order', () => {
     const own = [{ atMs: 10, kind: 'session', text: 'start' }, { atMs: 30, kind: 'model', text: 'm' }]
-    const base = [{ atMs: 30, kind: 'refuse', text: 'c1' }, { atMs: 2, kind: 'start', text: 'base 0.1.0' }]
-    const fnd = [{ atMs: 30, kind: 'guard', text: 'g1' }, { atMs: 30, kind: 'workspace', text: 'w' }, { atMs: 5, kind: 'prompt', text: 'p' }]
+    const base = [{ atMs: 30, kind: 'refuse', text: 'c1' }, { atMs: 2, kind: 'start', text: 'base 0.1.0' }, { atMs: 30, kind: 'guard', text: 'g1' }, { atMs: 5, kind: 'install', text: 'p' }]
     const slim = [{ atMs: 30, kind: 'lookup', text: 'tie' }, { atMs: 20, kind: 'lookup', text: 'mid' }]
-    expect(merged(own, base, fnd, slim).map(e => e.text)).toEqual(['base 0.1.0', 'p', 'start', 'mid', 'm', 'c1', 'g1', 'w', 'tie'])
-    expect(merged(own, [], fnd, slim).map(e => e.text)).toEqual(['p', 'start', 'mid', 'm', 'g1', 'w', 'tie'])
+    expect(merged(own, base, slim).map(e => e.text)).toEqual(['base 0.1.0', 'p', 'start', 'mid', 'm', 'c1', 'g1', 'tie'])
+    expect(merged(own, [], slim).map(e => e.text)).toEqual(['start', 'mid', 'm', 'tie'])
   })
 
-  test('each line is tagged with the list it came from, renamed fnd-slim lines included', () => {
+  test('each line is tagged with the list it came from and keeps its kind', () => {
     const own = [{ atMs: 1, kind: 'session', text: 'start · band 9.9.9' }]
-    const base = [{ atMs: 2, kind: 'start', text: 'base 0.1.0' }]
-    const fnd = [{ atMs: 3, kind: 'slim', text: 'fnd compressed' }]
+    const base = [{ atMs: 2, kind: 'start', text: 'base 0.1.0' }, { atMs: 3, kind: 'slim', text: 'not slim' }]
     const slim = [{ atMs: 4, kind: 'start', text: 'slim 0.5.1' }]
-    expect(merged(own, base, fnd, slim).map(e => [e.plugin, e.kind])).toEqual([
+    expect(merged(own, base, slim).map(e => [e.plugin, e.kind])).toEqual([
       ['band', 'session'],
       ['base', 'start'],
-      ['fnd', 'fnd-slim'],
+      ['base', 'slim'],
       ['slim', 'start'],
     ])
   })
@@ -160,33 +158,15 @@ describe('merged', () => {
       be: [{ atMs: 'x', kind: 'start', text: 'malformed' }],
       fe: [{ atMs: 10, kind: 'doctor', text: '9 PASS' }],
     }
-    expect(merged([], [], [], slim, teams).map(e => [e.plugin, e.text])).toEqual([
+    expect(merged([], [], slim, teams).map(e => [e.plugin, e.text])).toEqual([
       ['qa', 'needs the base plugin'],
       ['slim', 's'],
       ['fe', '9 PASS'],
       ['qa', 'qa 0.1.0'],
       ['pm', 'pm 0.1.0'],
     ])
-    expect(merged([], [], [], [], { qa: null, be: { not: 'a list' } })).toEqual([])
+    expect(merged([], [], [], { qa: null, be: { not: 'a list' } })).toEqual([])
     expect(['fe', 'qa', 'be', 'pm'].map(pluginCell)).toEqual(['fe   ', 'qa   ', 'be   ', 'pm   '])
-  })
-
-  test("base's and fnd's session, model, compact and rate lines are dropped: band writes those itself", () => {
-    const list = ['session', 'model', 'compact', 'rate', 'workspace'].map((kind, i) => ({ atMs: i, kind, text: kind }))
-    expect(merged([], [], list, []).map(e => e.kind)).toEqual(['workspace'])
-    expect(merged([], list, [], []).map(e => e.kind)).toEqual(['workspace'])
-  })
-
-  test("base's lines keep their kinds beside slim's: only fnd's own compression line is renamed", () => {
-    const base = [{ atMs: 10, kind: 'guard', text: 'g' }, { atMs: 11, kind: 'slim', text: 'not base' }]
-    expect(merged([], base, [], [{ atMs: 20, kind: 'slim', text: 'Bash: compressed' }]).map(e => e.kind)).toEqual(['guard', 'slim', 'slim'])
-  })
-
-  test("beside slim's lines fnd's own compression line reads fnd-slim; alone it stays slim", () => {
-    const fnd = [{ atMs: 10, kind: 'slim', text: 'getJiraIssue: compressed 9 B → 1 B' }]
-    expect(merged([], [], fnd, [{ atMs: 20, kind: 'slim', text: 'Bash: compressed' }]).map(e => e.kind)).toEqual(['fnd-slim', 'slim'])
-    expect(merged([], [], fnd, []).map(e => e.kind)).toEqual(['slim'])
-    expect(merged([], [], fnd, [{ atMs: 'x', kind: 'slim', text: 'malformed' }]).map(e => e.kind)).toEqual(['slim'])
   })
 
   test('malformed entries are dropped and extra fields stripped; absent, null or non-array lists add nothing', () => {
@@ -202,11 +182,20 @@ describe('merged', () => {
     ]
     expect(take(bad)).toEqual([{ atMs: 20, kind: 'lookup', text: 'mid' }])
     for (const absent of [undefined, null, {}, 'x', 3]) {
-      expect(merged(absent, absent, absent, absent)).toEqual([])
+      expect(merged(absent, absent, absent)).toEqual([])
       expect(take(absent)).toEqual([])
     }
-    expect(merged([{ atMs: 1, kind: 'session', text: 'start' }], null, null, undefined)).toEqual([{ atMs: 1, kind: 'session', text: 'start', plugin: 'band' }])
-    expect(merged([], bad, [], [])).toEqual([{ atMs: 20, kind: 'lookup', text: 'mid', plugin: 'base' }])
+    expect(merged([{ atMs: 1, kind: 'session', text: 'start' }], null, undefined)).toEqual([{ atMs: 1, kind: 'session', text: 'start', plugin: 'band' }])
+    expect(merged([], bad, [])).toEqual([{ atMs: 20, kind: 'lookup', text: 'mid', plugin: 'base' }])
+  })
+})
+
+describe('anyEvent', () => {
+  test('true at the first list with a valid line; absent, empty and malformed lists count as none', () => {
+    expect(anyEvent()).toBe(false)
+    expect(anyEvent([], null, undefined, { not: 'a list' }, [{ atMs: 'x', kind: 'slim', text: 'bad' }, { kind: 'slim' }])).toBe(false)
+    expect(anyEvent([], [{ atMs: 1, kind: 'session', text: 'start' }])).toBe(true)
+    expect(anyEvent([{ atMs: 1, kind: 'guard', text: 'g' }], 'x')).toBe(true)
   })
 })
 
@@ -240,6 +229,20 @@ describe('/band-log', () => {
     expect(w.opens).toEqual([])
   })
 
+  test(`the text answer holds the newest ${TEXT_LOG_ROWS} lines and counts the rest, pointing at the session's log folder`, async ($, on) => {
+    const lines = Array.from({ length: 45 }, (_, i) => ({ atMs: NOW + (i + 1) * 1000, kind: 'guard', text: `g${i + 1}` }))
+    const w = world(on, { SIB_BASE_EVENTS: JSON.stringify(lines), HOME: '/home/u' })
+    w.surfaces = []
+    await start($)
+    const text: string[] = (await run($, 'band-log')).text.split('\n')
+    expect(text).toHaveLength(TEXT_LOG_ROWS + 1)
+    expect(text[0]).toBe('… 6 earlier — full log: /home/u/.claude/domaine/log/s1/')
+    expect(text[1]).toContain('g6')
+    expect(text[TEXT_LOG_ROWS]).toContain('g45')
+    delete w.vars.HOME
+    expect((await run($, 'band-log')).text.split('\n')[0]).toBe('… 6 earlier')
+  })
+
   test('an unplaced open → one toast', async ($, on) => {
     const w = world(on)
     w.openResult = { isPlaced: false, reason: 'below 144 columns' }
@@ -249,7 +252,7 @@ describe('/band-log', () => {
   })
 
   test('both panes open at once: opening Log closes nothing', async ($, on) => {
-    const w = world(on, { SIB_FND_PROGRESS: JSON.stringify(SNAP) })
+    const w = world(on, { SIB_BASE_PROGRESS: JSON.stringify(SNAP) })
     await start($)
     await run($, 'band-progress')
     w.panes = [{ id: 'band-progress', title: 'Progress', isShown: true, isFocused: true, isPlaced: true }]
@@ -343,21 +346,18 @@ const SLIM_EVENTS = [
   { v: 1, atMs: NOW + 30_000, kind: 'slim', text: SLIM_LINE, src: 'slim', tool: 'mcp__x__getJiraIssue', ms: 40, channel: 'mcp', bytesIn: 90_000, bytesOut: 7000, engine: 'json' },
   { v: 1, atMs: NOW + 90_000, kind: 'lookup', text: LOOKUP_LINE, src: 'slim', tool: 'mcp__slim__lookup', ms: 900, model: 'haiku', tokens: null, answered: true },
 ]
-/** fnd's lines as fnd writes them: a workspace tie with band's start, its own compression tie with slim's, a guard tie with the lookup, and a session line band drops. */
-const FND_EVENTS = [
+/** base's lines as the base sibling writes them: a workspace tie with band's start, a guard tie with the lookup. */
+const SIB_BASE_LINES = [
   { atMs: NOW, kind: 'workspace', text: 'ELC-1591' },
-  { atMs: NOW, kind: 'session', text: 'start' },
-  { atMs: NOW + 30_000, kind: 'slim', text: 'getJiraIssue: compressed 9 B → 1 B' },
   { atMs: NOW + 90_000, kind: 'guard', text: 'outside the project: /etc/hosts' },
 ]
-const SIBLING_ENV = { SIB_FND_EVENTS: JSON.stringify(FND_EVENTS), SIB_SLIM_EVENTS: JSON.stringify(SLIM_EVENTS) }
+const SIBLING_ENV = { SIB_BASE_EVENTS: JSON.stringify(SIB_BASE_LINES), SIB_SLIM_EVENTS: JSON.stringify(SLIM_EVENTS) }
 const MERGED = [
   ['09:05', 'band', 'session', 'start · band 9.9.9'],
-  ['09:05', 'fnd', 'workspace', 'ELC-1591'],
-  ['09:05', 'fnd', 'fnd-slim', 'getJiraIssue: compressed 9 B → 1 B'],
+  ['09:05', 'base', 'workspace', 'ELC-1591'],
   ['09:05', 'slim', 'slim', SLIM_LINE],
   ['09:06', 'band', 'model', 'claude-opus-5-5'],
-  ['09:06', 'fnd', 'guard', 'outside the project: /etc/hosts'],
+  ['09:06', 'base', 'guard', 'outside the project: /etc/hosts'],
   ['09:06', 'slim', 'lookup', LOOKUP_LINE],
 ]
 const textLine = ([t, p, k, x]: string[]) => `${t}  ${pluginCell(p!)}  ${kindCell(k!)}  ${x}`
@@ -369,7 +369,7 @@ async function interleave($: any, w: ReturnType<typeof world>): Promise<void> {
   await switches($, w, 1)
 }
 
-describe("band's, fnd's and slim's lines in one log", () => {
+describe("band's, base's and slim's lines in one log", () => {
   test('where no surface draws panes the text answer interleaves all three', async ($, on) => {
     const w = world(on, SIBLING_ENV)
     w.surfaces = []
@@ -390,7 +390,7 @@ describe("band's, fnd's and slim's lines in one log", () => {
       const w = world(on, SIBLING_ENV)
       await interleave($, w)
       const ui = await mountPane($, surface, { bodyColumns: 120, scroll: { offset: 0, bodyRows: 3 } })
-      expect(await ui.find({ type: 'Text', text: '… 5 earlier' })).toBeTruthy()
+      expect(await ui.find({ type: 'Text', text: '… 4 earlier' })).toBeTruthy()
       expect((await rows(ui)).map(x => x.texts[3])).toEqual(['outside the project: /etc/hosts', LOOKUP_LINE])
       await ui.unmount()
     })
@@ -403,16 +403,16 @@ describe("band's, fnd's and slim's lines in one log", () => {
       w.vars.SIB_SLIM_EVENTS = JSON.stringify(SLIM_EVENTS)
       await sibSlim($)
       expect((await rows(ui)).map(x => x.texts[3])).toEqual(['start · band 9.9.9', SLIM_LINE, LOOKUP_LINE])
-      w.vars.SIB_FND_EVENTS = JSON.stringify([{ atMs: NOW + 60_000, kind: 'guard', text: 'g' }])
-      await sibFnd($)
+      w.vars.SIB_BASE_EVENTS = JSON.stringify([{ atMs: NOW + 60_000, kind: 'guard', text: 'g' }])
+      await sibBase($)
       expect((await rows(ui)).map(x => x.texts[3])).toEqual(['start · band 9.9.9', SLIM_LINE, 'g', LOOKUP_LINE])
       await ui.unmount()
     })
 
     for (const [name, env] of [
       ['no siblings', {}],
-      ['empty sibling lists', { SIB_FND_EVENTS: '[]', SIB_SLIM_EVENTS: '[]' }],
-      ['malformed sibling lists', { SIB_FND_EVENTS: JSON.stringify({ not: 'a list' }), SIB_SLIM_EVENTS: JSON.stringify([{ atMs: 'x', kind: 'slim', text: 'bad' }, { kind: 'slim' }]) }],
+      ['empty sibling lists', { SIB_BASE_EVENTS: '[]', SIB_SLIM_EVENTS: '[]' }],
+      ['malformed sibling lists', { SIB_BASE_EVENTS: JSON.stringify({ not: 'a list' }), SIB_SLIM_EVENTS: JSON.stringify([{ atMs: 'x', kind: 'slim', text: 'bad' }, { kind: 'slim' }]) }],
     ] as const) {
       test(`${surface}: ${name} → band's lines only`, async ($, on) => {
         const w = world(on, env)
@@ -433,32 +433,15 @@ describe("band's, fnd's and slim's lines in one log", () => {
   }
 })
 
-/** base's lines as base writes them: its start line, a guard tie with fnd's and a session line band drops. */
+/** base's lines as base writes them: its start line, a tie with band's start, and a guard a minute later. */
 const BASE_EVENTS = [
   { atMs: NOW, kind: 'start', text: 'base 0.1.0' },
-  { atMs: NOW, kind: 'session', text: 'start' },
   { atMs: NOW + 90_000, kind: 'guard', text: 'Bash: --no-verify' },
 ]
 
 describe("base's lines in the log", () => {
-  test('where no surface draws panes the text answer puts base between band and fnd on a tie', async ($, on) => {
-    const w = world(on, SIBLING_ENV)
-    baseState(on, { events: BASE_EVENTS })
-    w.surfaces = []
-    await interleave($, w)
-    const expected = [
-      ['09:05', 'band', 'session', 'start · band 9.9.9'],
-      ['09:05', 'base', 'start', 'base 0.1.0'],
-      ...MERGED.slice(1, 5),
-      ['09:06', 'base', 'guard', 'Bash: --no-verify'],
-      ...MERGED.slice(5),
-    ]
-    expect((await run($, 'band-log')).text).toBe(expected.map(textLine).join('\n'))
-    expect((await run($, 'band-log')).text).toContain('09:06  base   guard      Bash: --no-verify')
-  })
-
   for (const surface of SURFACES) {
-    test(`${surface}: base alone (no fnd, no slim) fills the pane beside band's lines`, async ($, on) => {
+    test(`${surface}: base alone (no slim) fills the pane beside band's lines`, async ($, on) => {
       const w = world(on)
       baseState(on, { events: BASE_EVENTS })
       await interleave($, w)
@@ -476,7 +459,7 @@ describe("base's lines in the log", () => {
       ['an empty base list', []],
       ['a malformed base list', { not: 'a list' }],
     ] as const) {
-      test(`${surface}: ${name} and no fnd → band's lines only`, async ($, on) => {
+      test(`${surface}: ${name} → band's lines only`, async ($, on) => {
         const w = world(on)
         baseState(on, { events })
         await interleave($, w)

@@ -1,5 +1,6 @@
-// band.info: the snapshot that tells another plugin (fnd, which then stops drawing) that band is loaded, which
-// version, and whether its `disabled` option is on. Also registers band's slash commands, again after a /clear.
+// band.info: the snapshot that tells any plugin that band is loaded, which version, and whether its `disabled`
+// option is on; band's own file lines and /band-debug read the version. Also registers band's slash commands,
+// again after a /clear.
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import { CHECKLIST_COMMAND, DEBUG_COMMAND, LOG_COMMAND } from './events.ts'
 

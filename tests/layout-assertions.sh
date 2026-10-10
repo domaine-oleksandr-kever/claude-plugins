@@ -98,6 +98,7 @@ for f in "$CANON" \
          "$ROOT/plugins/base/ARCHITECTURE.md" \
          "$ROOT/plugins/base/scripts/doctor.cjs" \
          "$ROOT/plugins/base/scripts/worktree-setup.sh" \
+         "$ROOT/plugins/base/scripts/review-scope.sh" \
          "$ROOT/plugins/base/hooks/mods/doctor.ts" \
          "$ROOT/plugins/base/skills/commit/SKILL.md" \
          "$ROOT/plugins/base/skills/pre-commit-review/SKILL.md" \
@@ -137,7 +138,8 @@ for f in "$ROOT/scripts/install.sh" "$ROOT/scripts/bootstrap.sh" "$ROOT/scripts/
          "$PLUGIN_DIR/scripts/project-profile.sh" "$PLUGIN_DIR/scripts/jira-attachments.sh" \
          "$PLUGIN_DIR/scripts/external-screenshots.sh" "$PLUGIN_DIR/scripts/figma-rest.sh" \
          "$ROOT/plugins/base/scripts/worktree-setup.sh" "$ROOT/plugins/base/scripts/jira-attachments.sh" \
-         "$ROOT/plugins/base/scripts/external-screenshots.sh" "$ROOT/plugins/base/scripts/figma-rest.sh"; do
+         "$ROOT/plugins/base/scripts/external-screenshots.sh" "$ROOT/plugins/base/scripts/figma-rest.sh" \
+         "$ROOT/plugins/base/scripts/review-scope.sh"; do
   if [ -x "$f" ]; then ok; else bad "executable-${f#$ROOT/}" "not executable — './${f#$ROOT/}' would fail"; fi
 done
 # A team plugin's skills and its doctor run its scripts by path: fe's named ones keep their bit, and
@@ -751,7 +753,7 @@ if [ -d "$BAND_MODS" ]; then
   if [ -z "$band_check" ]; then ok
   else bad band-mods-imports "$(printf '%s' "$band_check" | head -5 | tr '\n' ';')"; fi
 
-  # band only reads base.*, fnd.* and slim.*: a write to a foreign key fails at run time, never at validate
+  # band only reads base.*, slim.* and the team plugins' keys: a write to a foreign key fails at run time, never at validate
   band_writes="$("$NODE_BIN" -e '
     const fs = require("fs"), path = require("path");
     const out = [];
@@ -763,12 +765,12 @@ if [ -d "$BAND_MODS" ]; then
     const check = (p) => {
       const rel = path.relative(process.argv[1], p);
       const src = fs.readFileSync(p, "utf8");
-      const names = [...src.matchAll(/const\s+(\w+)\s*=\s*atom\(\s*\{\s*plugin:\s*["\x27](?:base|fnd|slim)["\x27]/g)].map((m) => m[1]);
+      const names = [...src.matchAll(/const\s+(\w+)\s*=\s*atom\(\s*\{\s*plugin:\s*["\x27](?:base|slim|fe|qa|be|pm)["\x27]/g)].map((m) => m[1]);
       for (const n of names) {
         if (new RegExp("\\bupdate\\(\\s*\\$\\s*,\\s*" + n + "\\b").test(src)) out.push(rel + ": update($, " + n + ")");
         if (new RegExp("\\$\\.state\\.(set|update|delete)\\(\\s*" + n + "\\b").test(src)) out.push(rel + ": $.state write to " + n);
       }
-      if (/\$\.state\.(set|update|delete)\(\s*\{\s*plugin:\s*["\x27](base|fnd|slim)["\x27]/.test(src)) out.push(rel + ": $.state write to a literal base/fnd/slim ref");
+      if (/\$\.state\.(set|update|delete)\(\s*\{\s*plugin:\s*["\x27](base|slim|fe|qa|be|pm)["\x27]/.test(src)) out.push(rel + ": $.state write to a literal foreign ref");
     };
     walk(process.argv[1]);
     process.stdout.write(out.join("\n"));
@@ -776,16 +778,16 @@ if [ -d "$BAND_MODS" ]; then
   if [ -z "$band_writes" ]; then ok
   else bad band-no-foreign-writes "$(printf '%s' "$band_writes" | head -5 | tr '\n' ';')"; fi
 
-  # the yield is fnd's half of the pairing; band never reads its own info to decide whether to draw
-  yield_code="$(grep -rnwE 'bandLive|MOVED' "$ROOT/plugins/band" 2>/dev/null)"
-  for f in band.tsx marker.ts; do
-    [ -f "$BAND_MODS/$f" ] || continue
-    hit="$(grep -nE "key:[[:space:]]*['\"]info['\"]" "$BAND_MODS/$f")"
-    [ -n "$hit" ] && yield_code="$yield_code
-$f: $hit"
-  done
-  if [ -z "$yield_code" ]; then ok
-  else bad band-no-yield-code "$(printf '%s' "$yield_code" | sed "s#$ROOT/##" | head -5 | tr '\n' ';')"; fi
+  # band never reads its own info to decide whether to draw
+  hit="$(grep -nE "key:[[:space:]]*['\"]info['\"]" "$BAND_MODS/band.tsx" 2>/dev/null)"
+  if [ -z "$hit" ]; then ok
+  else bad band-no-yield-code "band.tsx: $(printf '%s' "$hit" | head -5 | tr '\n' ';')"; fi
+
+  # band stands without fnd: no fnd atom, fallback, pointer or doc line anywhere in the plugin
+  fnd_hits="$(grep -rniE '\bfnd' "$ROOT/plugins/band" 2>/dev/null)"
+  if [ -z "$fnd_hits" ]; then ok
+  else bad band-no-fnd-refs "$(printf '%s' "$fnd_hits" | sed "s#$ROOT/##" | head -3 | tr '\n' ';')"; fi
+  if [ -e "$BAND_MODS/marker.ts" ]; then bad band-no-session-marker "plugins/band/hooks/mods/marker.ts is back"; else ok; fi
 else
   bad band-mods-imports "plugins/band/hooks/mods missing"
 fi
@@ -801,18 +803,16 @@ done
 base_manifest="$("$NODE_BIN" -e '
   const fs = require("fs");
   const out = [];
-  let base, fnd;
-  try { base = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); fnd = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); }
+  let base;
+  try { base = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); }
   catch (e) { console.log("unparseable: " + e.message); process.exit(0); }
   if (JSON.stringify(base.dependencies) !== JSON.stringify(["slim"])) out.push("dependencies " + JSON.stringify(base.dependencies) + " != [\"slim\"]");
   if ("hooks" in base) out.push("a classic hooks key: base hooks through its module only");
-  const want = JSON.parse(JSON.stringify(fnd.mcpServers || {}).split(".claude/fnd-tmp/").join(".claude/base-tmp/"));
-  if (JSON.stringify(base.mcpServers) !== JSON.stringify(want)) out.push("mcpServers differ from fnd\x27s definitions (fnd-tmp renamed base-tmp)");
   const pw = ((base.mcpServers || {}).playwright || {}).args || [];
   const i = pw.indexOf("--output-dir");
   if (i < 0 || pw[i + 1] !== ".claude/base-tmp/playwright") out.push("playwright --output-dir is not .claude/base-tmp/playwright");
   process.stdout.write(out.join("; "));
-' "$BASE_CANON" "$CANON" 2>&1)"
+' "$BASE_CANON" 2>&1)"
 if [ -z "$base_manifest" ]; then ok; else bad base-manifest "plugins/base plugin.json: $base_manifest"; fi
 
 # The engine compiles a plugin's modules itself: an npm specifier, a require/import() or a Node/DOM global
@@ -936,11 +936,11 @@ if command -v git >/dev/null 2>&1 && git -C "$ROOT" rev-parse --git-dir >/dev/nu
   done
 fi
 
-# The classic ctx monitor (a node process that cannot read $.state) finds the module's marker by this
-# file name, whichever plugin writes it. Matched in the write and the path build themselves, so a doc
+# The classic ctx monitor (a node process that cannot read $.state) finds fnd's module marker by this
+# file name. Matched in the write and the path build themselves, so a doc
 # comment naming the file cannot hold the row green.
 WRITE_RE='\$\.fs\.write\(.*fnd-mod-session-'
-for pair in "$ROOT/plugins/band/hooks/mods/marker.ts|$WRITE_RE" "$PLUGIN_DIR/hooks/mods/fnd/marker.ts|$WRITE_RE" \
+for pair in "$PLUGIN_DIR/hooks/mods/fnd/marker.ts|$WRITE_RE" \
             "$PLUGIN_DIR/hooks/mod-session.cjs|path\.join\(.*fnd-mod-session-"; do
   f="${pair%%|*}"
   if grep -qE -- "${pair#*|}" "$f" 2>/dev/null; then ok

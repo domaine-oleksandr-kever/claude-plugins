@@ -11,7 +11,7 @@ export type BandUsage = { ctxPct: number | null; ctxTokens: number | null; windo
 export type BandCache = {
   anchorMs: number | null
   ttlMs: number
-  ttlSource: 'option' | 'store' | 'model-switch' | 'agent' | 'subscription' | 'resume' | 'default'
+  ttlSource: 'option' | 'store' | 'model-switch' | 'agent' | 'subscription' | 'default'
   isCold: boolean
 }
 
@@ -28,7 +28,7 @@ export type ForeignEvent = { atMs: number; kind: string; text: string }
 /** A team plugin on base whose event list band reads. */
 export type TeamSource = 'fe' | 'qa' | 'be' | 'pm'
 /** The list a log line came from: the PLUGIN column of the Log pane and `/band-log`. */
-export type LogSource = 'band' | 'base' | 'fnd' | 'slim' | TeamSource
+export type LogSource = 'band' | 'base' | 'slim' | TeamSource
 /** One line of the merged log, tagged with its source list. */
 export type LogLine = ForeignEvent & { plugin: LogSource }
 
@@ -38,8 +38,8 @@ export type ChecklistRow = { mark: ChecklistMark; text: string }
 export type Checklist = { v: 1; title: string; subtitle?: string; rows: ChecklistRow[]; footer?: string[] }
 
 /**
- * A publisher's resolved task (base's BaseProgress, fnd's FndProgress) as band reads it; every field is checked before use.
- * `stale` is base's alone: a workspace with savable work and no write for 20 min.
+ * base's resolved task (its BaseProgress) as band reads it; every field is checked before use.
+ * `stale`: a workspace with savable work and no write within base's window.
  */
 export type ProgressSnapshot =
   | { workId: string; branch: string | null; hasWorkspace: boolean; done: number; total: number; current: string | null; rows: ChecklistRow[]; notesTail: string[]; mtimeMs: number; stale?: boolean }
@@ -66,11 +66,6 @@ declare module 'claude-code' {
     }
     /** Owned and written by the base plugin; band only reads it (null / [] without base). */
     base: {
-      events: ForeignEvent[]
-      progress: ProgressSnapshot | null
-    }
-    /** Owned and written by the fnd plugin; band only reads it (null / [] without fnd). */
-    fnd: {
       events: ForeignEvent[]
       progress: ProgressSnapshot | null
     }

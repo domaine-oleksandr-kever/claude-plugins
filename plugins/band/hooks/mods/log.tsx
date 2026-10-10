@@ -1,13 +1,12 @@
-// Event log pane: /band-log and the band's Log button toggle it; it draws band's own lines merged with base's, fnd's,
-// slim's and the team plugins' straight from their state (a plugin not loaded adds nothing), and never writes any of them.
+// Event log pane: /band-log and the band's Log button toggle it; it draws band's own lines merged with base's, slim's
+// and the team plugins' straight from their state (a plugin not loaded adds nothing), and never writes any of them.
 import { atom, read } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BandEvent, ForeignEvent, LogLine } from '../../types'
-import { LOG_COMMAND, LOG_PANE, PREFIX_COLS, hhmm, kindCell, logRow, merged, newestFitting, pluginCell } from './events.ts'
+import { LOG_COMMAND, LOG_PANE, PREFIX_COLS, TEXT_LOG_ROWS, hhmm, kindCell, logDir, logRow, merged, newestFitting, pluginCell } from './events.ts'
 
 const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[])
 const baseEvents = atom({ plugin: 'base', key: 'events' } as const, [] as ForeignEvent[])
-const fndEvents = atom({ plugin: 'fnd', key: 'events' } as const, [] as ForeignEvent[])
 const slimEvents = atom({ plugin: 'slim', key: 'events' } as const, [] as ForeignEvent[])
 const feEvents = atom({ plugin: 'fe', key: 'events' } as const, [] as ForeignEvent[])
 const qaEvents = atom({ plugin: 'qa', key: 'events' } as const, [] as ForeignEvent[])
@@ -22,7 +21,7 @@ async function drawsPanes($: $): Promise<boolean> {
 }
 
 async function allEvents($: $): Promise<LogLine[]> {
-  return merged(await read($, events), await read($, baseEvents), await read($, fndEvents), await read($, slimEvents), {
+  return merged(await read($, events), await read($, baseEvents), await read($, slimEvents), {
     fe: await read($, feEvents),
     qa: await read($, qaEvents),
     be: await read($, beEvents),
@@ -30,10 +29,18 @@ async function allEvents($: $): Promise<LogLine[]> {
   })
 }
 
+/** The newest lines as text; an older remainder is counted and pointed at the session's files on disk. */
 async function logText($: $): Promise<string> {
   const list = await allEvents($)
   if (list.length === 0) return 'no events yet'
-  return list.map(logRow).join('\n')
+  const shown = list.slice(-TEXT_LOG_ROWS)
+  if (shown.length === list.length) return shown.map(logRow).join('\n')
+  let dir: string | null = null
+  try {
+    dir = logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), String(await $.session.id()))
+  } catch {}
+  const cut = `… ${list.length - shown.length} earlier${dir === null ? '' : ` — full log: ${dir}/`}`
+  return [cut, ...shown.map(logRow)].join('\n')
 }
 
 async function togglePane($: $): Promise<string> {

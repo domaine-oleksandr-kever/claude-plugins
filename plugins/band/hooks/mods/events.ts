@@ -15,9 +15,6 @@ export function pushEvent(list: readonly BandEvent[], ev: BandEvent): BandEvent[
   return list.length < EVENT_CAP ? [...list, ev] : [...list.slice(1), ev]
 }
 
-/** The kinds band writes itself; an fnd that predates the yield writes them too, and they would show twice. Dropped from base's list as well. */
-const OWN_KINDS: ReadonlySet<string> = new Set(['session', 'model', 'compact', 'rate'])
-
 /** Another plugin writes the list: an entry without a finite `atMs` or a string `kind`/`text` is dropped, extra fields too. */
 export function take(list: unknown): ForeignEvent[] {
   if (!Array.isArray(list)) return []
@@ -37,19 +34,20 @@ const tag = (plugin: LogSource) => (e: ForeignEvent): LogLine => ({ ...e, plugin
 export const TEAM_SOURCES: readonly TeamSource[] = ['fe', 'qa', 'be', 'pm']
 
 /**
- * band's, base's, fnd's, slim's and the team plugins' lines in one list, oldest first, each tagged with the
- * list it came from; on equal times band → base → fnd → slim → fe → qa → be → pm, each list in its own order.
- * Beside slim's lines fnd's own compression lines read `fnd-slim`.
+ * band's, base's, slim's and the team plugins' lines in one list, oldest first, each tagged with the list it
+ * came from; on equal times band → base → slim → fe → qa → be → pm, each list in its own order.
  */
-export function merged(own: unknown, base: unknown, fnd: unknown, slim: unknown, teams: Partial<Record<TeamSource, unknown>> = {}): LogLine[] {
-  const s = take(slim).map(tag('slim'))
-  const c = take(base).filter(e => !OWN_KINDS.has(e.kind)).map(tag('base'))
-  const f = take(fnd)
-    .filter(e => !OWN_KINDS.has(e.kind))
-    .map(e => (s.length && e.kind === 'slim' ? { ...e, kind: 'fnd-slim' } : e))
-    .map(tag('fnd'))
+export function merged(own: unknown, base: unknown, slim: unknown, teams: Partial<Record<TeamSource, unknown>> = {}): LogLine[] {
   const t = TEAM_SOURCES.flatMap(p => take(teams[p]).map(tag(p)))
-  return [...take(own).map(tag('band')), ...c, ...f, ...s, ...t].map((e, i) => ({ e, i })).sort((a, b) => a.e.atMs - b.e.atMs || a.i - b.i).map(x => x.e)
+  return [...take(own).map(tag('band')), ...take(base).map(tag('base')), ...take(slim).map(tag('slim')), ...t]
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => a.e.atMs - b.e.atMs || a.i - b.i)
+    .map(x => x.e)
+}
+
+/** Whether any of the lists holds a valid line, without merging them. */
+export function anyEvent(...lists: unknown[]): boolean {
+  return lists.some(l => take(l).length > 0)
 }
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
@@ -74,6 +72,9 @@ export function pluginCell(plugin: string): string {
 export function kindCell(kind: string): string {
   return kind.padEnd(9)
 }
+
+/** The newest lines `/band-log` answers with as text, where no pane draws. */
+export const TEXT_LOG_ROWS = 40
 
 /** One line of `/band-log`'s text answer: `09:05  base   guard      Bash: --no-verify`. */
 export function logRow(ev: LogLine): string {

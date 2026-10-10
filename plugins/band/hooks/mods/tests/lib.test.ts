@@ -35,7 +35,6 @@ import {
   layout,
   modelOptions,
   pctLevel,
-  pickProgress,
   rateLabel,
   rowText,
   shortModel,
@@ -214,7 +213,7 @@ describe('layout', () => {
     expect(pinned[2]).toEqual({ value: 'claude-opus-5-5', label: 'opus-5-5' })
     expect(splitLabel('cache 42m')).toEqual(['cache', '42m'])
     expect(splitLabel('ELC-1591 3/5 ▶ Preview')).toEqual(['ELC-1591', '3/5 ▶ Preview'])
-    expect(splitLabel('fnd-mods')).toEqual(['fnd-mods', ''])
+    expect(splitLabel('slim-mods')).toEqual(['slim-mods', ''])
   })
 
   test('cache, ctx and Compact survive 30 columns', () => {
@@ -430,9 +429,9 @@ describe('toChecklist', () => {
 
   test('no workspace → the no-workspace hint leads the footer; total 0 → the no-progress.md hint', () => {
     expect(toChecklist({ workId: 'ELC-77', branch: 'main', hasWorkspace: false, done: 0, total: 0, current: null, rows: [], notesTail: [], mtimeMs: 0 })?.footer).toEqual([
-      'no task workspace — /fnd:save-task-context',
+      'no task workspace — /base:save-task-context',
     ])
-    expect(toChecklist({ ...SNAP, done: 0, total: 0, rows: [] })?.footer).toEqual(['no progress.md yet — /fnd:save-task-context', '- two', '- three'])
+    expect(toChecklist({ ...SNAP, done: 0, total: 0, rows: [] })?.footer).toEqual(['no progress.md yet — /base:save-task-context', '- two', '- three'])
     expect(toChecklist({ ...SNAP, notesTail: [] })).not.toHaveProperty('footer')
   })
 
@@ -449,37 +448,8 @@ describe('toChecklist', () => {
       { mark: 'todo', text: 'c' },
     ])
     expect(c?.subtitle).toBe('feature/ELC-1591-x')
-    expect(c?.footer).toEqual(['no progress.md yet — /fnd:save-task-context', '- ok'])
-    expect(toChecklist({ workId: 'ELC-1', rows: 'x', notesTail: 'y' })).toEqual({ v: 1, title: 'ELC-1', rows: [], footer: ['no progress.md yet — /fnd:save-task-context'] })
-  })
-
-  test("a base snapshot's hints name base's skill; the rows and figures read the same", () => {
-    const bare = { workId: 'ABC-7', branch: 'main', hasWorkspace: false, done: 0, total: 0, current: null, rows: [], notesTail: [], mtimeMs: 0 }
-    expect(toChecklist(bare, 'base')?.footer).toEqual(['no task workspace — /base:save-task-context'])
-    expect(toChecklist({ ...SNAP, done: 0, total: 0, rows: [] }, 'base')?.footer).toEqual(['no progress.md yet — /base:save-task-context', '- two', '- three'])
-    expect(toChecklist(bare, 'fnd')?.footer).toEqual(['no task workspace — /fnd:save-task-context'])
-    expect(toChecklist(SNAP, 'base')).toEqual(toChecklist(SNAP, 'fnd'))
-    expect(toChecklist({ workId: null, branch: 'main' }, 'base')).toBeNull()
-  })
-})
-
-describe('pickProgress', () => {
-  const BASE = { ...SNAP, workId: 'ABC-7' }
-
-  test('base.progress ?? fnd.progress: the first non-null snapshot, tagged with its publisher', () => {
-    expect(pickProgress(BASE, null)).toEqual({ snapshot: BASE, publisher: 'base' })
-    expect(pickProgress(null, SNAP)).toEqual({ snapshot: SNAP, publisher: 'fnd' })
-    expect(pickProgress(undefined, SNAP)).toEqual({ snapshot: SNAP, publisher: 'fnd' })
-    expect(pickProgress(BASE, SNAP)).toEqual({ snapshot: BASE, publisher: 'base' })
-  })
-
-  test("base resolving no task still wins over fnd's task: one publisher runs at a time", () => {
-    expect(pickProgress({ workId: null, branch: 'main' }, SNAP)).toEqual({ snapshot: { workId: null, branch: 'main' }, publisher: 'base' })
-  })
-
-  test('both empty → null', () => {
-    expect(pickProgress(null, null)).toBeNull()
-    expect(pickProgress(undefined, undefined)).toBeNull()
+    expect(c?.footer).toEqual(['no progress.md yet — /base:save-task-context', '- ok'])
+    expect(toChecklist({ workId: 'ELC-1', rows: 'x', notesTail: 'y' })).toEqual({ v: 1, title: 'ELC-1', rows: [], footer: ['no progress.md yet — /base:save-task-context'] })
   })
 })
 

@@ -1,8 +1,8 @@
 // Status band: the AbovePrompt row drawn from the atoms, the Compact and Clear presses and the terminal's model
 // picker, which unfolds into the row itself: the band region clips anything drawn outside its own rows, so no
 // list can pop over the transcript. A desktop draws the buttons on a second row under the figures.
-// Render only reads: band's atoms (usage.ts and checklist.tsx write them), base's or fnd's task snapshot for the
-// digest and the Progress button, every publisher's event list for the Log button. The Progress and Log presses are
+// Render only reads: band's atoms (usage.ts and checklist.tsx write them), base's task snapshot for the digest and
+// the Progress button, every publisher's event list for the Log button. The Progress and Log presses are
 // answered by the `ui.press` hooks on elements `progress` (checklist.tsx) and `log` (log.tsx). While base reports
 // the task workspace stale, a Compact press or a typed /compact runs base's save-task-context first.
 import { atom, read, update } from 'claude-code'
@@ -29,13 +29,12 @@ import {
   layout,
   modelOptions,
   pctLevel,
-  pickProgress,
   rateCard,
   rateText,
   splitLabel,
   toChecklist,
 } from './lib.ts'
-import { merged, take } from './events.ts'
+import { anyEvent, take } from './events.ts'
 
 const usage = atom({ plugin: 'band', key: 'usage' } as const, USAGE_INIT)
 const model = atom({ plugin: 'band', key: 'model' } as const, null)
@@ -46,9 +45,7 @@ const bandFocused = atom({ plugin: 'band', key: 'bandFocused' } as const, false)
 const modelPicker = atom({ plugin: 'band', key: 'modelPicker' } as const, false)
 const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[])
 const baseProgress = atom({ plugin: 'base', key: 'progress' } as const, null)
-const fndProgress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 const baseEvents = atom({ plugin: 'base', key: 'events' } as const, [] as ForeignEvent[])
-const fndEvents = atom({ plugin: 'fnd', key: 'events' } as const, [] as ForeignEvent[])
 const slimEvents = atom({ plugin: 'slim', key: 'events' } as const, [] as ForeignEvent[])
 const feEvents = atom({ plugin: 'fe', key: 'events' } as const, [] as ForeignEvent[])
 const qaEvents = atom({ plugin: 'qa', key: 'events' } as const, [] as ForeignEvent[])
@@ -69,11 +66,42 @@ async function mustSave($: $): Promise<boolean> {
   return p !== null && p.workId !== null && p.stale === true
 }
 
+const STILL_STALE = 'workspace still stale — save did not land; compaction cancelled'
+
+/** The /compact queued behind a save: `armed` while it runs, `vetoed` once its compaction met a still-stale workspace. */
+let afterSave: 'armed' | 'vetoed' | null = null
+/** A Compact press or a typed /compact is running its chain; a second one would queue a second save and compaction. */
+let compactInFlight = false
+
+/** Saves, then queues /compact behind the save's turn: only a queued command is sure to run after that turn. */
+function saveThenCompact($: $, args: string): Promise<{ text: string; vetoed: boolean }> {
+  const compact = () => {
+    afterSave = 'armed'
+    return $.command.run({ command: 'compact', args }).then(
+      r => {
+        const vetoed = afterSave === 'vetoed'
+        afterSave = null
+        return { text: r.text, vetoed }
+      },
+      err => {
+        afterSave = null
+        throw err
+      },
+    )
+  }
+  return $.command.run({ command: SAVE }).then(compact, compact)
+}
+
 function pressCompact($: $): void {
   if (turn.running) {
     $.ui.toast('turn is running — press Compact again when it ends')
     return
   }
+  if (compactInFlight) {
+    $.ui.toast('compact already queued')
+    return
+  }
+  compactInFlight = true
   const refused = (err: unknown) => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`)
   // A headless (SDK, desktop app) session refuses the op but still runs a typed /compact.
   const compact = () =>
@@ -81,13 +109,15 @@ function pressCompact($: $): void {
       r => $.ui.toast(compactToast(r)),
       () => $.command.run({ command: 'compact' }).then(r => $.ui.toast(r.text || 'compacted'), refused),
     )
-  // After a save only the queued /compact is sure to run after the save's turn; the op could run before it starts.
-  const saveThenCompact = () =>
-    $.command.run({ command: SAVE }).then(
-      () => $.command.run({ command: 'compact' }).then(r => $.ui.toast(`saved, then ${r.text || 'compacted'}`), refused),
-      compact,
-    )
-  mustSave($).then(stale => (stale ? saveThenCompact() : compact()), compact)
+  const saved = () =>
+    saveThenCompact($, '').then(r => {
+      if (!r.vetoed) $.ui.toast(`saved, then ${r.text || 'compacted'}`)
+    }, refused)
+  mustSave($)
+    .then(stale => (stale ? saved() : compact()), compact)
+    .finally(() => {
+      compactInFlight = false
+    })
 }
 
 const CLEAR_QUESTION = 'Clear the conversation?'
@@ -163,16 +193,30 @@ export function registerBand(on: On, options: PluginOptions): void {
   // hook: a stale workspace answers it, and a timer queues the save, then /compact again. band's own runs pass.
   on('command.run', { command: 'compact' }, async ($, e, next) => {
     if ((e.origin.kind === 'plugin' && e.origin.name === 'band') || !(await mustSave($).catch(() => false))) return next(e)
-    const again = () => $.command.run({ command: 'compact', args: e.args })
+    if (compactInFlight) return { text: 'compact already queued' }
+    compactInFlight = true
     $.clock.after(1, () => {
-      $.command.run({ command: SAVE })
-        .then(again, again)
+      saveThenCompact($, e.args)
         .catch(err => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`))
+        .finally(() => {
+          compactInFlight = false
+        })
     })
     return { text: 'workspace stale: saving it first, then compacting' }
   })
+  // The save's turn can end without a write (an error, an interrupt, a refused edit): its compaction is vetoed then.
+  // A /compact band queues reaches core as the person's own or as a plugin's: both meet the veto.
+  for (const trigger of ['manual', 'plugin'] as const) {
+    on('session.compact', { trigger }, async ($, e, next) => {
+      if (afterSave !== 'armed' || e.agentId !== undefined || !(await mustSave($).catch(() => false))) return next(e)
+      afterSave = 'vetoed'
+      $.ui.toast(STILL_STALE)
+      return { skip: STILL_STALE }
+    })
+  }
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     turn.running = false
+    compactInFlight = false
     await setFocused($, false)
     await setPicker($, false)
     return next(e)
@@ -192,18 +236,20 @@ export function registerBand(on: On, options: PluginOptions): void {
     if (u.ctxPct === null && u.rates.length === 0 && m === null && c.anchorMs === null) return next(e)
 
     const isWorking = e.props.isWorking
-    const snapshot = pickProgress(await read($, baseProgress), await read($, fndProgress))?.snapshot ?? null
+    const snapshot = await read($, baseProgress)
     const digest = !isPaneShown ? digestOf(snapshot) : null
     const hasChecklist = toChecklist(snapshot) !== null
     // Short-circuit: while band's own list holds a line the foreign lists are not read, so their writes do not redraw the band.
     const hasEvents =
       take(await read($, events)).length > 0 ||
-      merged([], await read($, baseEvents), await read($, fndEvents), await read($, slimEvents), {
-        fe: await read($, feEvents),
-        qa: await read($, qaEvents),
-        be: await read($, beEvents),
-        pm: await read($, pmEvents),
-      }).length > 0
+      anyEvent(
+        await read($, baseEvents),
+        await read($, slimEvents),
+        await read($, feEvents),
+        await read($, qaEvents),
+        await read($, beEvents),
+        await read($, pmEvents),
+      )
     const isDesktop = e.surface === 'desktop'
     drawnOn = e.surface
     lastRender.surface = e.surface
@@ -260,6 +306,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     // A desktop draws a hotkey as a badge on its native button, and its buttons are clicked: no hotkeys there.
     const letters = focused && !isDesktop ? { plain: true as const } : null
     const hot = (k: string) => (isDesktop ? {} : { hotkey: k })
+    const ruleCols = e.props.bodyColumns && e.props.bodyColumns > 0 ? Math.min(e.props.bodyColumns, 400) : 80
 
     // Unfolded, the row holds the models alone: four names plus letters outgrow a row that also holds the figures.
     // The current one is at full strength and only folds; no Esc, as the engine raises no focus-out.
@@ -279,7 +326,6 @@ export function registerBand(on: On, options: PluginOptions): void {
           />,
         )
       })
-      const ruleCols = e.props.bodyColumns && e.props.bodyColumns > 0 ? Math.min(e.props.bodyColumns, 400) : 80
       return (
         <Box flexDirection="column">
           <Text dimColor>{RULE.repeat(ruleCols)}</Text>
@@ -355,7 +401,6 @@ export function registerBand(on: On, options: PluginOptions): void {
         </Box>
       )
     }
-    const ruleCols = e.props.bodyColumns && e.props.bodyColumns > 0 ? Math.min(e.props.bodyColumns, 400) : 80
     return (
       <Box flexDirection="column">
         <Text dimColor>{RULE.repeat(ruleCols)}</Text>

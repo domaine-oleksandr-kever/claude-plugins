@@ -1,5 +1,6 @@
-// Shared test kit for band's suites: the engine beneath band, the fnd and slim plugins beside it (inline, fed
-// from env), base's published state, and a reader of band's own state. Not a test file itself: only *.test.ts(x) run.
+// Shared test kit for band's suites: the engine beneath band, the base and slim plugins beside it (inline, fed
+// from env), base's published state answered beneath band, and a reader of band's own state. Not a test file
+// itself: only *.test.ts(x) run.
 import { mock, test as kitTest } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -10,25 +11,26 @@ export const SURFACES = ['terminal', 'desktop'] as const
 export type Surface = (typeof SURFACES)[number]
 
 /**
- * fnd beside band: writes the fnd.events and fnd.progress it owns from SIB_FND_EVENTS / SIB_FND_PROGRESS
- * (JSON; unset → not written) at session start and on /sib-fnd. An inline plugin closes over nothing of
- * the test file and the validator follows `$` into no helper, so each hook spells its calls out.
+ * base beside band: writes the base.events and base.progress it owns from SIB_BASE_EVENTS / SIB_BASE_PROGRESS
+ * (JSON; unset → not written) at session start and on /sib-base, so its writes redraw the band. An inline
+ * plugin closes over nothing of the test file and the validator follows `$` into no helper, so each hook
+ * spells its calls out.
  */
-export const FND_SIBLING = {
-  name: 'fnd',
+export const BASE_SIBLING = {
+  name: 'base',
   register(on: On) {
     on('session.start', async ($: any, e: any, next: any) => {
-      const events = await $.env.get('SIB_FND_EVENTS')
-      if (events) await $.state.set({ plugin: 'fnd', key: 'events' }, JSON.parse(events))
-      const progress = await $.env.get('SIB_FND_PROGRESS')
-      if (progress) await $.state.set({ plugin: 'fnd', key: 'progress' }, JSON.parse(progress))
+      const events = await $.env.get('SIB_BASE_EVENTS')
+      if (events) await $.state.set({ plugin: 'base', key: 'events' }, JSON.parse(events))
+      const progress = await $.env.get('SIB_BASE_PROGRESS')
+      if (progress) await $.state.set({ plugin: 'base', key: 'progress' }, JSON.parse(progress))
       return next(e)
     })
-    on('command.run', { command: 'sib-fnd' } as any, async ($: any) => {
-      const events = await $.env.get('SIB_FND_EVENTS')
-      if (events) await $.state.set({ plugin: 'fnd', key: 'events' }, JSON.parse(events))
-      const progress = await $.env.get('SIB_FND_PROGRESS')
-      if (progress) await $.state.set({ plugin: 'fnd', key: 'progress' }, JSON.parse(progress))
+    on('command.run', { command: 'sib-base' } as any, async ($: any) => {
+      const events = await $.env.get('SIB_BASE_EVENTS')
+      if (events) await $.state.set({ plugin: 'base', key: 'events' }, JSON.parse(events))
+      const progress = await $.env.get('SIB_BASE_PROGRESS')
+      if (progress) await $.state.set({ plugin: 'base', key: 'progress' }, JSON.parse(progress))
       return { text: 'ok' }
     })
   },
@@ -87,9 +89,9 @@ export const PEEK = {
   },
 }
 
-export const SIBLINGS = [FND_SIBLING, SLIM_SIBLING, PEEK]
+export const SIBLINGS = [BASE_SIBLING, SLIM_SIBLING, PEEK]
 
-/** The kit's test with fnd, slim and the reader loaded beside band in every test, and a test's own plugins after them. */
+/** The kit's test with base, slim and the reader loaded beside band in every test, and a test's own plugins after them. */
 export const test = (name: string, ...rest: any[]): void => {
   const [options, body] = rest.length === 1 ? [{}, rest[0]] : [rest[0], rest[1]]
   kitTest(name, { ...options, plugins: [...SIBLINGS, ...(options.plugins ?? [])] }, body)
@@ -99,10 +101,10 @@ export const peek = async ($: any): Promise<any> => JSON.parse((await $.command.
 export const peekCache = async ($: any) => (await peek($)).cache
 export const peekEvents = async ($: any): Promise<{ atMs: number; kind: string; text: string }[]> => (await peek($)).events
 export const logged = async ($: any) => (await peekEvents($)).map(ev => `${ev.kind} ${ev.text}`)
-export const sibFnd = ($: any) => $.command.run({ command: 'sib-fnd', args: '' })
+export const sibBase = ($: any) => $.command.run({ command: 'sib-base', args: '' })
 export const sibSlim = ($: any) => $.command.run({ command: 'sib-slim', args: '' })
 
-/** fnd's resolved task as fnd 0.134.0 writes it: ELC-1591, three of five rows done. */
+/** base's resolved task: ELC-1591, three of five rows done. */
 export const SNAP = {
   workId: 'ELC-1591',
   branch: 'feature/ELC-1591-x',
@@ -120,7 +122,7 @@ export const SNAP = {
   notesTail: [],
   mtimeMs: T0,
 }
-export const TASK = { SIB_FND_PROGRESS: JSON.stringify(SNAP) }
+export const TASK = { SIB_BASE_PROGRESS: JSON.stringify(SNAP) }
 
 type Ctx = { window: number; percent?: number; tokens?: number }
 type Rate = { kind: string; percentUsed: number; resetsAt?: string }

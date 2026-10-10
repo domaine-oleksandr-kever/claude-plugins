@@ -5,12 +5,13 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 import type { BandEvent, BandEventKind, BandUsage } from '../../types'
 import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events.ts'
-import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, pickProgress, rateCard, seedsTtl, toUsage, ttlMsOf } from './lib.ts'
+import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, rateCard, seedsTtl, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 
 const TICK_MS = 30_000
 const ALARM_TOAST_MS = 8000
-const STORE_TTL = 'cacheTtlMs'
+/** A 1 h TTL learned in a billed session; a claude.ai account starts at 1 h anyway, so it stores none. */
+const STORE_TTL = 'billedCacheTtlMs'
 /** Below this much of session.end's shared bound, `session clear` stays off the disk rather than risk an abort. */
 const END_FILE_MIN_MS = 500
 
@@ -22,7 +23,6 @@ const rateAlarmed = atom({ plugin: 'band', key: 'rateAlarmed' } as const, false)
 const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[])
 const info = atom({ plugin: 'band', key: 'info' } as const, null)
 const baseProgress = atom({ plugin: 'base', key: 'progress' } as const, null)
-const fndProgress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 
 type $ = EngineInterface
 
@@ -92,6 +92,9 @@ async function logEvent($: $, kind: BandEventKind, text: string, onDisk?: { kind
 /** BAND_COST=1 (true/yes/on) shows the session's cost; off, the figure is dropped before it reaches the atom. */
 let costShown = false
 const ON = new Set(['1', 'true', 'yes', 'on'])
+const isOn = (v: string | undefined) => ON.has(v?.trim().toLowerCase() ?? '')
+/** The session bills an API key or a cloud provider; read at session start. */
+let billed = false
 
 function withCost(u: BandUsage): BandUsage {
   return costShown ? u : { ...u, costUsd: null }
@@ -133,17 +136,16 @@ async function refresh($: $): Promise<void> {
 }
 
 /**
- * An API key or a cloud provider bills per request and gets the 5 min cache; without them the session
- * runs on a claude.ai account, whose cache lives 1 h. Only the presence of the variables is read.
+ * A non-empty API key or a cloud provider switch that is on (1, true, yes, on) bills per request and gets the
+ * 5 min cache; without them the session runs on a claude.ai account, whose cache lives 1 h.
  */
-async function defaultTtl($: $): Promise<number> {
-  const billed = [
-    await $.env.get('ANTHROPIC_API_KEY'),
-    await $.env.get('CLAUDE_CODE_USE_BEDROCK'),
-    await $.env.get('CLAUDE_CODE_USE_VERTEX'),
-    await $.env.get('CLAUDE_CODE_USE_FOUNDRY'),
-  ].some(v => v !== undefined)
-  return billed ? CACHE_INIT.ttlMs : HOUR_MS
+async function isBilled($: $): Promise<boolean> {
+  return (
+    !!(await $.env.get('ANTHROPIC_API_KEY')) ||
+    isOn(await $.env.get('CLAUDE_CODE_USE_BEDROCK')) ||
+    isOn(await $.env.get('CLAUDE_CODE_USE_VERTEX')) ||
+    isOn(await $.env.get('CLAUDE_CODE_USE_FOUNDRY'))
+  )
 }
 
 /**
@@ -158,13 +160,13 @@ async function adoptSubscriptionTtl($: $, u: BandUsage): Promise<void> {
 }
 
 /**
- * Adopts a TTL the session reported. Only 1 h is remembered for the next sessions: a 5 min report is
- * the host's fallback when it has seen no 1 h cache write yet (every session start on 2.1.289), and
- * remembered it would outlive the session that made it.
+ * Adopts a TTL the session reported. Only a billed session's 1 h is remembered, for the next billed session:
+ * a 5 min report is the host's fallback when it has seen no 1 h cache write yet (every session start on
+ * 2.1.289), and remembered it would outlive the session that made it.
  */
 async function learnTtl($: $, ttlMs: number, ttlSource: 'model-switch' | 'agent'): Promise<void> {
   await update($, cache, c => ({ ...c, ttlMs, ttlSource }))
-  if (ttlMs === HOUR_MS) await $.store.set(STORE_TTL, ttlMs)
+  if (ttlMs === HOUR_MS && billed) await $.store.set(STORE_TTL, ttlMs)
 }
 
 /** Another plugin writes the snapshot: only a string or null id and branch are shown. */
@@ -186,25 +188,25 @@ export function registerUsage(on: On, options: PluginOptions): void {
     })
     // One throwing session.start hook skips every band session.start hook: each $ call fails alone.
     const reloaded = (await read($, tick).catch(() => 0)) > 0
+    billed = await isBilled($).catch(() => true)
     if (seedsTtl(reloaded, forcedTtl, (await read($, cache).catch(() => CACHE_INIT)).ttlSource)) {
       let learned: number | null = null
-      if (forcedTtl === null) {
+      if (forcedTtl === null && billed) {
         try {
           const stored = await $.store.get(STORE_TTL)
           learned = typeof stored === 'number' && stored > 0 ? stored : null
         } catch {}
       }
-      const ttlMs = forcedTtl ?? learned ?? (await defaultTtl($).catch(() => CACHE_INIT.ttlMs))
+      const ttlMs = forcedTtl ?? learned ?? (billed ? CACHE_INIT.ttlMs : HOUR_MS)
       const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
       await update($, cache, c => ({ ...c, ttlMs, ttlSource })).catch(() => undefined)
     }
-    costShown = ON.has((await $.env.get('BAND_COST').catch(() => undefined))?.trim().toLowerCase() ?? '')
+    costShown = isOn(await $.env.get('BAND_COST').catch(() => undefined))
     try {
       const m = await $.session.model()
       await update($, model, () => m)
     } catch {}
     await refresh($).catch(() => undefined)
-    // The start line names the drawer: fnd's own line reads `start`, so /band-log tells the two apart.
     if (!reloaded) {
       const v = (await read($, info).catch(() => null))?.version ?? '?'
       await logEvent($, 'session', `start · band ${v}`, { kind: 'start', text: `band ${v}` })
@@ -217,15 +219,13 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const root = await $.session.root().catch(err => `error: ${String(err)}`)
     const c = await read($, cache)
     const u = await read($, usage)
-    const picked = pickProgress(await read($, baseProgress), await read($, fndProgress))
     const lines = [
       'band debug',
       `info: ${JSON.stringify(await read($, info))}`,
       `usage(): ${JSON.stringify(raw)}`,
       `cache: ${JSON.stringify(c)}`,
       `usage atom: ${JSON.stringify(u)}`,
-      `progress: ${JSON.stringify(progressLine(picked?.snapshot ?? null))}`,
-      `publisher: ${picked?.publisher ?? 'none'}`,
+      `progress: ${JSON.stringify(progressLine(await read($, baseProgress)))}`,
       `root: ${root}`,
       `render: ${JSON.stringify(lastRender)}`,
       `tick: ${await read($, tick)}`,

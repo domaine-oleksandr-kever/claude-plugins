@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "band",
   "displayName": "Band",
-  "version": "0.5.0",
-  "description": "Status band, Log pane and Progress pane for Claude Code: draws the session's cache, context, rate and model figures above the prompt, and the event log and task checklist that base, fnd, slim and the team plugins publish; reads base, fnd, slim and the team plugins' state.",
+  "version": "0.6.0",
+  "description": "Status band, Log pane and Progress pane for Claude Code: draws the session's cache, context, rate and model figures above the prompt, and the event log and task checklist that base, slim and the team plugins publish; reads their state and never writes it.",
   "author": {
     "name": "Oleksandr Kever",
     "email": "oleksandr.kever@meetdomaine.com"
@@ -11,7 +11,7 @@
   "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
-    "disabled": { "type": "boolean", "title": "Hide the status band", "description": "true draws no band above the prompt and writes no session marker (fnd's classic context monitor speaks again); /band-log and /band-progress keep working", "default": false },
+    "disabled": { "type": "boolean", "title": "Hide the status band", "description": "true draws no band above the prompt; /band-log and /band-progress keep working", "default": false },
     "cacheTtl": { "type": "string", "title": "Prompt cache TTL", "description": "auto = learned from the session, else 5m; 5m or 1h forces it", "options": ["auto", "5m", "1h"], "default": "auto" }
   }
 }

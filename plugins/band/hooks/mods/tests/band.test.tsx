@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { CRIT, cells, glyphText } from '../lib.ts'
-import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, modelSwitch, peek, peekCache, postCompact, sibFnd, sibSlim, start, teamState, test, world } from './world.tsx'
+import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, modelSwitch, peek, peekCache, postCompact, sibBase, sibSlim, start, teamState, test, world } from './world.tsx'
 import type { Surface } from './world.tsx'
 
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { bodyRows: 10 }, view: {} }
@@ -565,37 +565,116 @@ describe('band', () => {
 
     /** /compact as the person types it. */
     const typed = ($: any, args: string) => $.command.run({ command: 'compact', args, origin: { kind: 'composer' } } as any)
-    /** base beneath band with ABC-7's workspace stale or not, and the runs of /base:save-task-context and /compact in order. */
-    const autosaveWorld = (on: any, stale: boolean, env: Record<string, string> = {}) => {
+    /**
+     * base beneath band with ABC-7's workspace stale or not, and the runs of /base:save-task-context, /compact and the
+     * compaction in order; /compact compacts as core does, through band's session.compact hooks. `save` is what the
+     * save's turn does: write the workspace (base then reports it fresh), write nothing, or fail.
+     */
+    const autosaveWorld = (
+      $: any,
+      on: any,
+      stale: boolean,
+      env: Record<string, string> = {},
+      save: 'lands' | 'writes nothing' | 'fails' = 'lands',
+      trigger: 'manual' | 'plugin' = 'manual',
+    ) => {
       const { w, clock } = world(on, {}, env)
-      baseState(on, { progress: { ...SNAP, workId: 'ABC-7', stale } })
+      const base = baseState(on, { progress: { ...SNAP, workId: 'ABC-7', stale } })
       const runs: string[] = []
       on('command.run', { command: 'base:save-task-context' }, async () => {
         runs.push('save')
+        if (save === 'fails') throw new Error('save failed')
+        if (save === 'lands') base.progress = { ...(base.progress as object), stale: false }
         return { text: 'saved' }
       })
       on('command.run', { command: 'compact' }, async (_$: any, e: any) => {
         runs.push(`/compact ${e.args}`.trim())
-        return { text: 'Compacted' }
+        const r = await $.session.compact({ trigger, messages: KEPT, ...(e.args ? { instructions: e.args } : {}) })
+        return { text: r.skip ?? 'Compacted' }
       })
       w.compact = async () => {
         runs.push('compact')
         return { messages: KEPT, tokensBefore: 150_000, tokensAfter: 20_000 }
       }
-      return { w, clock, runs }
+      return { w, clock, runs, base }
     }
 
     test(`${surface}: Compact press with a stale base workspace saves first, then compacts`, async ($, on) => {
-      const { w, runs } = autosaveWorld(on, true)
+      const { w, runs } = autosaveWorld($, on, true)
       await start($, surface)
       const ui = await mount($, surface)
       await ui.press({ key: 'compact' })
-      expect(runs).toEqual(['save', '/compact'])
+      expect(runs).toEqual(['save', '/compact', 'compact'])
       expect(w.toasts).toEqual(['saved, then Compacted'])
     })
 
+    for (const [save, trigger] of [['writes nothing', 'manual'], ['fails', 'manual'], ['writes nothing', 'plugin']] as const) {
+      test(`${surface}: a save that ${save} leaves the workspace stale → the queued ${trigger} compaction is vetoed, by press or typed`, async ($, on) => {
+        const { w, clock, runs } = autosaveWorld($, on, true, {}, save, trigger)
+        await start($, surface)
+        const ui = await mount($, surface)
+        await ui.press({ key: 'compact' })
+        const cancelled = 'workspace still stale — save did not land; compaction cancelled'
+        expect(runs).toEqual(['save', '/compact'])
+        expect(w.toasts).toEqual([cancelled])
+        expect((await typed($, 'x')).text).toBe('workspace stale: saving it first, then compacting')
+        await clock.advance(1)
+        expect(runs).toEqual(['save', '/compact', 'save', '/compact x'])
+        expect(w.toasts).toEqual([cancelled, cancelled])
+        // The veto covers only the run behind a save: a compaction after it goes through.
+        await $.session.compact({ trigger: 'manual', messages: KEPT })
+        expect(runs.at(-1)).toBe('compact')
+      })
+    }
+
+    test(`${surface}: a second Compact press while the first is in flight only toasts`, async ($, on) => {
+      // Registered first, so it runs above the save autosaveWorld answers and holds it until released.
+      let release = () => {}
+      on('command.run', { command: 'base:save-task-context' }, async (_$: any, e: any, next: any) => {
+        await new Promise<void>(r => (release = r))
+        return next(e)
+      })
+      const { w, clock, runs } = autosaveWorld($, on, true)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await ui.press({ key: 'compact' })
+      await ui.press({ key: 'compact' })
+      expect(w.toasts).toEqual(['compact already queued'])
+      release()
+      await clock.advance(1)
+      expect(runs).toEqual(['save', '/compact', 'compact'])
+      expect(w.toasts).toEqual(['compact already queued', 'saved, then Compacted'])
+      await ui.press({ key: 'compact' })
+      expect(runs).toEqual(['save', '/compact', 'compact', 'compact'])
+    })
+
+    test(`${surface}: a typed /compact during a Compact press chain answers, no second save; a press during a typed chain toasts`, async ($, on) => {
+      let release = () => {}
+      on('command.run', { command: 'base:save-task-context' }, async (_$: any, e: any, next: any) => {
+        await new Promise<void>(r => (release = r))
+        return next(e)
+      })
+      const { w, clock, runs, base } = autosaveWorld($, on, true)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await ui.press({ key: 'compact' })
+      expect((await typed($, 'x')).text).toBe('compact already queued')
+      release()
+      await clock.advance(1)
+      expect(runs).toEqual(['save', '/compact', 'compact'])
+      expect(w.toasts).toEqual(['saved, then Compacted'])
+      base.progress = { ...(base.progress as object), stale: true }
+      expect((await typed($, 'y')).text).toBe('workspace stale: saving it first, then compacting')
+      await clock.advance(1)
+      await ui.press({ key: 'compact' })
+      expect(w.toasts).toEqual(['saved, then Compacted', 'compact already queued'])
+      release()
+      await clock.advance(1)
+      expect(runs).toEqual(['save', '/compact', 'compact', 'save', '/compact y', 'compact'])
+    })
+
     test(`${surface}: Compact press with a fresh workspace compacts only`, async ($, on) => {
-      const fresh = autosaveWorld(on, false)
+      const fresh = autosaveWorld($, on, false)
       await start($, surface)
       const ui = await mount($, surface)
       await ui.press({ key: 'compact' })
@@ -604,31 +683,31 @@ describe('band', () => {
     })
 
     test(`${surface}: BASE_AUTOSAVE=0 → a stale workspace is not saved, by press or typed /compact`, async ($, on) => {
-      const { w, runs } = autosaveWorld(on, true, { BASE_AUTOSAVE: '0' })
+      const { w, runs } = autosaveWorld($, on, true, { BASE_AUTOSAVE: '0' })
       await start($, surface)
       const ui = await mount($, surface)
       await ui.press({ key: 'compact' })
       expect((await typed($, '')).text).toBe('Compacted')
-      expect(runs).toEqual(['compact', '/compact'])
+      expect(runs).toEqual(['compact', '/compact', 'compact'])
       expect(w.toasts).toEqual(['compacted 150,000 → 20,000 tokens'])
     })
 
     test(`${surface}: typed /compact with a stale workspace queues the save, then /compact with its args`, async ($, on) => {
-      const { w, clock, runs } = autosaveWorld(on, true)
+      const { w, clock, runs } = autosaveWorld($, on, true)
       await start($, surface)
       const r = await typed($, 'keep the plan')
       expect(r.text).toBe('workspace stale: saving it first, then compacting')
       // The save and the second /compact run from a timer; no refusal toasts.
       await clock.advance(1)
       expect(w.toasts).toEqual([])
-      expect(runs).toEqual(['save', '/compact keep the plan'])
+      expect(runs).toEqual(['save', '/compact keep the plan', 'compact'])
     })
 
     test(`${surface}: typed /compact with a fresh workspace runs as typed, no save`, async ($, on) => {
-      const { runs } = autosaveWorld(on, false)
+      const { runs } = autosaveWorld($, on, false)
       await start($, surface)
       expect((await typed($, 'x')).text).toBe('Compacted')
-      expect(runs).toEqual(['/compact x'])
+      expect(runs).toEqual(['/compact x', 'compact'])
     })
 
     test(`${surface}: Compact pressed during a main turn only toasts; a subagent turn's end keeps it; the main end re-arms it`, async ($, on) => {
@@ -935,47 +1014,44 @@ describe('buttons from published state', () => {
   const keys = async (ui: any) => nodes(await ui.drawn()).filter(n => n.type === 'Button' && n.props.key !== 'model').map(n => n.props.key)
 
   for (const surface of SURFACES) {
-    test(`${surface}: Progress only while fnd.progress names a task; it follows fnd's writes`, async ($, on) => {
-      const { w } = world(on, {}, { SIB_FND_PROGRESS: JSON.stringify({ workId: null, branch: 'main' }) })
+    test(`${surface}: Progress only while base.progress names a task; it follows base's writes`, async ($, on) => {
+      const { w } = world(on, {}, { SIB_BASE_PROGRESS: JSON.stringify({ workId: null, branch: 'main' }) })
       await start($, surface)
       await measure($, { window: 200_000, percent: 47 })
       const ui = await mount($, surface)
       expect(await keys(ui)).toEqual(['compact', 'clear', 'log'])
-      w.vars.SIB_FND_PROGRESS = JSON.stringify({ workId: 7, done: 1, total: 2 })
-      await sibFnd($)
+      w.vars.SIB_BASE_PROGRESS = JSON.stringify({ workId: 7, done: 1, total: 2 })
+      await sibBase($)
       expect(await ui.find({ key: 'progress' })).toBeUndefined()
-      w.vars.SIB_FND_PROGRESS = JSON.stringify(SNAP)
-      await sibFnd($)
+      w.vars.SIB_BASE_PROGRESS = JSON.stringify(SNAP)
+      await sibBase($)
       expect(await keys(ui)).toEqual(['compact', 'clear', 'progress', 'log'])
       expect(await textOf(ui, /ELC-1591/)).toBe(`${surface === 'desktop' ? '📋 ' : ''}ELC-1591 3/5 ▶ Preview themes`)
-      w.vars.SIB_FND_PROGRESS = 'null'
-      await sibFnd($)
+      w.vars.SIB_BASE_PROGRESS = 'null'
+      await sibBase($)
       expect(await keys(ui)).toEqual(['compact', 'clear', 'log'])
       expect(await textOf(ui, /ELC-1591/)).toBeUndefined()
     })
 
-    test(`${surface}: no fnd at all → no Progress button`, async ($, on) => {
+    test(`${surface}: no base at all → no Progress button`, async ($, on) => {
       world(on)
       await start($, surface)
       await measure($, { window: 200_000, percent: 47 })
       expect(await keys(await mount($, surface))).toEqual(['compact', 'clear', 'log'])
     })
 
-    test(`${surface}: Log only while some event list holds a line; fnd's band-kind lines do not count`, async ($, on) => {
+    test(`${surface}: Log only while some event list holds a line`, async ($, on) => {
       // band records nothing of its own here, so only the siblings' lists decide.
       const { w } = world(on, {}, { BAND_EVENT_LOG: '0' })
       await start($, surface)
       await measure($, { window: 200_000, percent: 47 })
       const ui = await mount($, surface)
       expect(await ui.find({ key: 'log' })).toBeUndefined()
-      w.vars.SIB_FND_EVENTS = JSON.stringify([{ atMs: T0, kind: 'session', text: 'start' }, { atMs: T0, kind: 'rate', text: 'x' }])
-      await sibFnd($)
-      expect(await ui.find({ key: 'log' })).toBeUndefined()
-      w.vars.SIB_FND_EVENTS = JSON.stringify([{ atMs: T0, kind: 'workspace', text: 'ELC-1591' }])
-      await sibFnd($)
+      w.vars.SIB_BASE_EVENTS = JSON.stringify([{ atMs: T0, kind: 'workspace', text: 'ELC-1591' }])
+      await sibBase($)
       expect(await ui.find({ key: 'log' })).toBeDefined()
-      w.vars.SIB_FND_EVENTS = '[]'
-      await sibFnd($)
+      w.vars.SIB_BASE_EVENTS = '[]'
+      await sibBase($)
       expect(await ui.find({ key: 'log' })).toBeUndefined()
       w.vars.SIB_SLIM_EVENTS = JSON.stringify([{ v: 1, atMs: T0, kind: 'lookup', text: 'q' }])
       await sibSlim($)
@@ -985,28 +1061,8 @@ describe('buttons from published state', () => {
       expect(await ui.find({ key: 'log' })).toBeUndefined()
     })
 
-    test(`${surface}: a base task draws Progress and the digest; base's task wins over fnd's`, async ($, on) => {
-      world(on, {}, TASK)
-      baseState(on, { progress: { ...SNAP, workId: 'ABC-7', done: 1, current: 'Plan' } })
-      await start($, surface)
-      await measure($, { window: 200_000, percent: 47 })
-      const ui = await mount($, surface)
-      expect(await keys(ui)).toEqual(['compact', 'clear', 'progress', 'log'])
-      expect(await textOf(ui, /ABC-7/)).toBe(`${surface === 'desktop' ? '📋 ' : ''}ABC-7 1/5 ▶ Plan`)
-      expect(await textOf(ui, /ELC-1591/)).toBeUndefined()
-    })
-
-    test(`${surface}: base resolving no task and no fnd → no Progress button, no digest`, async ($, on) => {
-      world(on)
-      baseState(on, { progress: { workId: null, branch: 'main' }, events: [] })
-      await start($, surface)
-      await measure($, { window: 200_000, percent: 47 })
-      expect(await keys(await mount($, surface))).toEqual(['compact', 'clear', 'log'])
-    })
-
     for (const [name, events, shown] of [
       ["a base line", [{ atMs: T0, kind: 'guard', text: 'Bash: --no-verify' }], true],
-      ["base's band-kind lines only", [{ atMs: T0, kind: 'session', text: 'start' }], false],
       ['an empty base list', [], false],
     ] as const) {
       test(`${surface}: ${name} with BAND_EVENT_LOG=0 → Log ${shown ? 'drawn' : 'not drawn'}`, async ($, on) => {

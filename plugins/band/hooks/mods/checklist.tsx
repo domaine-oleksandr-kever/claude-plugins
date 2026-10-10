@@ -1,26 +1,22 @@
-// Progress pane: /band-progress and the band's Progress button toggle it; it draws the task base or fnd resolved
-// as the generic checklist (title, subtitle, rows, footer) and never writes their state. Picking the task stays
-// the publisher's (`/base-progress <KEY>` or `/fnd-progress <KEY>` pins one); band redraws from the subscription.
+// Progress pane: /band-progress and the band's Progress button toggle it; it draws the task base resolved as the
+// generic checklist (title, subtitle, rows, footer) and never writes base's state. Picking the task stays base's
+// (`/base-progress <KEY>` pins one); band redraws from the subscription.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { Checklist, ChecklistMark } from '../../types'
 import { CHECKLIST_COMMAND, CHECKLIST_PANE } from './events.ts'
-import { pickProgress, toChecklist } from './lib.ts'
+import { toChecklist } from './lib.ts'
 
 const paneShown = atom({ plugin: 'band', key: 'paneShown' } as const, false)
 const baseProgress = atom({ plugin: 'base', key: 'progress' } as const, null)
-const fndProgress = atom({ plugin: 'fnd', key: 'progress' } as const, null)
 
 const GLYPH: Record<ChecklistMark, string> = { done: '✓', current: '▶', waiting: '◌', todo: '☐' }
-export const NO_CHECKLIST_TEXT =
-  'No task checklist: none of the loaded plugins publishes one (with base: /base-progress <KEY> pins one; with fnd: /fnd-progress <KEY>).'
+export const NO_CHECKLIST_TEXT = 'No task checklist: base resolves no task or is not loaded (/base-progress <KEY> pins one).'
 
 type $ = EngineInterface
 
-/** base.progress ?? fnd.progress as the checklist, its hints naming the publisher's skill. */
 async function checklist($: $): Promise<Checklist | null> {
-  const p = pickProgress(await read($, baseProgress), await read($, fndProgress))
-  return p === null ? null : toChecklist(p.snapshot, p.publisher)
+  return toChecklist(await read($, baseProgress))
 }
 
 /** The pane's lines as plain text, for the surfaces that draw no pane. */

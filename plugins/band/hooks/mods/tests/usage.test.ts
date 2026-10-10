@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { HOUR_MS, seedsTtl } from '../lib.ts'
-import { KEPT, MIN, SNAP, T0, baseState, logged, measure, modelSwitch, peekCache, peekEvents, sibFnd, start, test, world } from './world.tsx'
+import { KEPT, MIN, SNAP, T0, logged, measure, modelSwitch, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -76,7 +76,7 @@ describe('event log writers → band.events', () => {
   })
 })
 
-describe('TTL learning in band\'s store under cacheTtlMs', () => {
+describe('TTL learning in band\'s store under billedCacheTtlMs', () => {
   test('PostModelSwitch under auto learns 5m for the session and stores nothing', async ($, on) => {
     const { w } = world(on)
     on('classic.PostModelSwitch', async () => ({}) as never)
@@ -93,7 +93,7 @@ describe('TTL learning in band\'s store under cacheTtlMs', () => {
     expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'default' })
     await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '1h' }))
     expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'model-switch' })
-    expect(w.storeSets).toEqual([{ key: 'cacheTtlMs', value: 3_600_000 }])
+    expect(w.storeSets).toEqual([{ key: 'billedCacheTtlMs', value: 3_600_000 }])
   })
 
   test('on a subscription a reported 5m is ignored: the host reports it before any 1 h write', async ($, on) => {
@@ -124,21 +124,38 @@ describe('TTL learning in band\'s store under cacheTtlMs', () => {
     expect((await peekCache($)).anchorMs).toBeNull()
   })
 
-  test('an Agent result with 1 h cache writes learns 1 h', async ($, on) => {
-    const { w } = world(on)
-    on('tool.call', { tool: 'Agent' }, async () => ({
-      result: { usage: { cache_creation: { ephemeral_1h_input_tokens: 1200, ephemeral_5m_input_tokens: 0 } } },
-    }) as never)
+  for (const [name, env, stored] of [
+    ['billed', { ANTHROPIC_API_KEY: 'k' }, [{ key: 'billedCacheTtlMs', value: 3_600_000 }]],
+    ['on a claude.ai account', {}, []],
+  ] as const) {
+    test(`an Agent result with 1 h cache writes learns 1 h; ${name} it is ${stored.length ? 'stored' : 'not stored'}`, async ($, on) => {
+      const { w } = world(on, {}, env)
+      on('tool.call', { tool: 'Agent' }, async () => ({
+        result: { usage: { cache_creation: { ephemeral_1h_input_tokens: 1200, ephemeral_5m_input_tokens: 0 } } },
+      }) as never)
+      await start($)
+      await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'y' } as any)
+      expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'agent' })
+      expect(w.storeSets).toEqual(stored)
+    })
+  }
+
+  test('a fresh billed session.start reads the stored TTL', async ($, on) => {
+    world(on, { billedCacheTtlMs: 3_600_000 }, { ANTHROPIC_API_KEY: 'k' })
     await start($)
-    await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'y' } as any)
-    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'agent' })
-    expect(w.storeSets).toEqual([{ key: 'cacheTtlMs', value: 3_600_000 }])
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'store' })
   })
 
-  test('a fresh session.start reads the stored TTL', async ($, on) => {
-    world(on, { cacheTtlMs: 3_600_000 })
+  test('a billed session ignores a 1 h remembered from a claude.ai session under the old key', async ($, on) => {
+    world(on, { cacheTtlMs: 3_600_000 }, { ANTHROPIC_API_KEY: 'k' })
     await start($)
-    expect((await peekCache($)).ttlMs).toBe(3_600_000)
+    expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'default' })
+  })
+
+  test('a claude.ai session does not read the store: 1 h is its default', async ($, on) => {
+    world(on, { billedCacheTtlMs: 300_000 })
+    await start($)
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'default' })
   })
 
   test('without a stored TTL, auto starts at 1 h on a claude.ai account and 5 min under an API key', async ($, on) => {
@@ -154,6 +171,22 @@ describe('TTL learning in band\'s store under cacheTtlMs', () => {
       expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'default' })
     })
   }
+
+  for (const name of ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']) {
+    for (const value of ['0', '', 'false']) {
+      test(`${name}=${JSON.stringify(value)} is off → auto starts at 1 h`, async ($, on) => {
+        world(on, {}, { [name]: value })
+        await start($)
+        expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'default' })
+      })
+    }
+  }
+
+  test('an empty ANTHROPIC_API_KEY bills nothing → auto starts at 1 h', async ($, on) => {
+    world(on, {}, { ANTHROPIC_API_KEY: '' })
+    await start($)
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'default' })
+  })
 
   test('rate windows mean a subscription → 1 h, from the start reading or a measurement', async ($, on) => {
     const { w } = world(on)
@@ -173,7 +206,7 @@ describe('TTL learning in band\'s store under cacheTtlMs', () => {
   })
 
   test('a stored 5m TTL yields to the subscription rule; a reported or forced one does not', async ($, on) => {
-    world(on, { cacheTtlMs: 300_000 })
+    world(on, { billedCacheTtlMs: 300_000 }, { ANTHROPIC_API_KEY: 'k' })
     await start($)
     expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'store' })
     await measure($, { window: 200_000, percent: 10 }, [{ kind: 'five_hour', percentUsed: 2 }])
@@ -221,7 +254,7 @@ describe('a reload (a /config change runs session.start again)', () => {
     expect(seedsTtl(false, null, 'default')).toBe(true)
     expect(seedsTtl(true, HOUR_MS, 'subscription')).toBe(true)
     expect(seedsTtl(true, null, 'option')).toBe(true)
-    for (const source of ['store', 'model-switch', 'agent', 'subscription', 'resume', 'default'] as const) {
+    for (const source of ['store', 'model-switch', 'agent', 'subscription', 'default'] as const) {
       expect(seedsTtl(true, null, source)).toBe(false)
     }
   })
@@ -238,8 +271,8 @@ describe('a reload (a /config change runs session.start again)', () => {
 })
 
 describe('/band-debug', () => {
-  test("prints 'band debug', band.info, the usage figures and fnd's task as {workId, branch}", async ($, on) => {
-    world(on, {}, { SIB_FND_PROGRESS: JSON.stringify(SNAP) })
+  test("prints 'band debug', band.info, the usage figures and base's task as {workId, branch}", async ($, on) => {
+    world(on, {}, { SIB_BASE_PROGRESS: JSON.stringify(SNAP) })
     await start($)
     const text = await debug($)
     expect(text.split('\n')[0]).toBe('band debug')
@@ -247,27 +280,14 @@ describe('/band-debug', () => {
     expect(text).toMatch(/^cache: \{/m)
     expect(text).toMatch(/^usage atom: \{"ctxPct":null/m)
     expect(text).toContain('progress: {"workId":"ELC-1591","branch":"feature/ELC-1591-x"}')
-    expect(text).toMatch(/^publisher: fnd$/m)
   })
 
-  test("base's task beats fnd's and names base as the publisher", async ($, on) => {
-    world(on, {}, { SIB_FND_PROGRESS: JSON.stringify(SNAP) })
-    const base = baseState(on, { progress: { workId: 'ABC-7', branch: 'feature/ABC-7-x' } })
-    await start($)
-    const text = await debug($)
-    expect(text).toContain('progress: {"workId":"ABC-7","branch":"feature/ABC-7-x"}')
-    expect(text).toMatch(/^publisher: base$/m)
-    base.progress = null
-    expect(await debug($)).toMatch(/^publisher: fnd$/m)
-  })
-
-  test('without base and fnd the task line is null; a malformed snapshot shows nulls, never throws', async ($, on) => {
+  test('without base the task line is null; a malformed snapshot shows nulls, never throws', async ($, on) => {
     const { w } = world(on)
     await start($)
     expect(await debug($)).toContain('progress: null')
-    expect(await debug($)).toMatch(/^publisher: none$/m)
-    w.vars.SIB_FND_PROGRESS = JSON.stringify({ workId: 5, branch: ['x'] })
-    await sibFnd($)
+    w.vars.SIB_BASE_PROGRESS = JSON.stringify({ workId: 5, branch: ['x'] })
+    await sibBase($)
     expect(await debug($)).toContain('progress: {"workId":null,"branch":null}')
   })
 

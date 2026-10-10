@@ -1,5 +1,5 @@
 // Pure band helpers: the ctx/rate/cache colour ladders, rate labels, remaining-time text, the one-row
-// width model with its drop order, and fnd's task snapshot read as the generic checklist. No `$` here:
+// width model with its drop order, and base's task snapshot read as the generic checklist. No `$` here:
 // atoms and engine calls stay in the file that hooks the event.
 import type { BandCache, BandRate, BandUsage, Checklist, ChecklistMark, ChecklistRow } from '../../types'
 
@@ -101,7 +101,7 @@ export function rateText(r: BandRate): string {
   return `${r.label} ${fmtPct(r.pct)}`
 }
 
-export type BandButton = { key: string; label: string; hotkey: string; plain: boolean }
+type BandButton = { key: string; label: string; hotkey: string; plain: boolean }
 
 /** The band's segments in row order; null/empty = not drawn. */
 export type BandSegs = {
@@ -175,7 +175,7 @@ export function layout(segs: BandSegs, bodyColumns: number | undefined): BandSeg
 }
 
 const HOUR = 60 * MIN
-export const DEFAULT_TTL_MS = 5 * MIN
+const DEFAULT_TTL_MS = 5 * MIN
 
 export const USAGE_INIT: BandUsage = { ctxPct: null, ctxTokens: null, window: 0, rates: [], costUsd: null }
 export const CACHE_INIT: BandCache = { anchorMs: null, ttlMs: DEFAULT_TTL_MS, ttlSource: 'default', isCold: false }
@@ -248,7 +248,7 @@ export function rateCard(r: BandRate, nowMs: number): string {
   return `${r.label} window: ${fmtPct(r.pct)} used${reset ? `, resets ${reset}` : ''}`
 }
 
-export const RATE_ALARM_PCT = 90
+const RATE_ALARM_PCT = 90
 
 /** The first window whose shown percentage is at or past the alarm line, or null. */
 export function alarmRate(rates: readonly BandRate[]): BandRate | null {
@@ -299,7 +299,7 @@ export function glyphText(text: string): string {
     .replace(/^cost /, `${GLYPH.cost} `)
 }
 
-export const COMPACT_LOUD_PCT = 80
+const COMPACT_LOUD_PCT = 80
 
 /** Always drawn first and always pressable, so the buttons never shift; `plain` = the normal look (never dim), the primary button from 80 % between turns. */
 export function compactButton(ctxPct: number | null, isWorking: boolean): BandButton {
@@ -392,21 +392,8 @@ export function oneHourCacheTokens(result: unknown): number {
   return typeof n === 'number' ? n : 0
 }
 
-/** The two plugins that publish a task snapshot; fnd and base never run together. */
-export type Publisher = 'base' | 'fnd'
-
-/** The publisher's own skill in each hint: a base task is saved by base's, an fnd task by fnd's. */
-export const HINTS: Record<Publisher, { workspace: string; progress: string }> = {
-  base: { workspace: 'no task workspace — /base:save-task-context', progress: 'no progress.md yet — /base:save-task-context' },
-  fnd: { workspace: 'no task workspace — /fnd:save-task-context', progress: 'no progress.md yet — /fnd:save-task-context' },
-}
-
-/** base.progress ?? fnd.progress: the first non-null snapshot and who wrote it; null when neither publishes. */
-export function pickProgress(base: unknown, fnd: unknown): { snapshot: unknown; publisher: Publisher } | null {
-  if (base !== null && base !== undefined) return { snapshot: base, publisher: 'base' }
-  if (fnd !== null && fnd !== undefined) return { snapshot: fnd, publisher: 'fnd' }
-  return null
-}
+const NO_WORKSPACE_HINT = 'no task workspace — /base:save-task-context'
+const NO_PROGRESS_HINT = 'no progress.md yet — /base:save-task-context'
 
 const MARKS: ReadonlySet<string> = new Set<ChecklistMark>(['done', 'current', 'waiting', 'todo'])
 
@@ -421,8 +408,8 @@ function snapshotOf(p: unknown): Snapshot | null {
 
 const num = (x: unknown): number => (typeof x === 'number' && Number.isFinite(x) ? x : 0)
 
-/** The published task as the generic checklist the Progress pane draws, hints naming `publisher`'s skill; null while no task resolves. */
-export function toChecklist(p: unknown, publisher: Publisher = 'fnd'): Checklist | null {
+/** base's published task as the generic checklist the Progress pane draws; null while no task resolves. */
+export function toChecklist(p: unknown): Checklist | null {
   const s = snapshotOf(p)
   if (s === null) return null
   const done = num(s.done)
@@ -432,7 +419,7 @@ export function toChecklist(p: unknown, publisher: Publisher = 'fnd'): Checklist
   const rows: ChecklistRow[] = (Array.isArray(s.rows) ? s.rows : [])
     .filter((r): r is { mark?: unknown; text: string } => r !== null && typeof r === 'object' && typeof (r as { text?: unknown }).text === 'string')
     .map(r => ({ mark: typeof r.mark === 'string' && MARKS.has(r.mark) ? (r.mark as ChecklistMark) : 'todo', text: r.text }))
-  const hint = s.hasWorkspace === false ? HINTS[publisher].workspace : total === 0 ? HINTS[publisher].progress : null
+  const hint = s.hasWorkspace === false ? NO_WORKSPACE_HINT : total === 0 ? NO_PROGRESS_HINT : null
   const notes = Array.isArray(s.notesTail) ? s.notesTail.filter((l): l is string => typeof l === 'string') : []
   const footer = [...(hint === null ? [] : [hint]), ...notes]
   return { v: 1, title: s.workId, ...(subtitle ? { subtitle } : {}), rows, ...(footer.length ? { footer } : {}) }
