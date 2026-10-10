@@ -1,9 +1,8 @@
 ---
 name: fix-accessibility-issue
 description: >
-  Fix accessibility issues in theme components (ARIA, focus management, screen readers).
-  Use when the user asks to fix an accessibility / a11y / ARIA / keyboard / screen-reader /
-  focus issue, or references a GitHub accessibility issue.
+  Fix accessibility issues in theme components. Use when the user asks to fix an accessibility /
+  a11y / ARIA / keyboard / screen-reader / focus issue, or references a GitHub accessibility issue.
 argument-hint: "<component-name | GitHub issue #>"
 arguments:
   - name: target

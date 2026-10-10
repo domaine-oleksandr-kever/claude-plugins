@@ -65,7 +65,7 @@ describe('the project profile', () => {
     expect(calls.profiles).toHaveLength(1)
     expect(calls.profiles[0]!.argv.slice(2)).toEqual([ROOT])
     expect(calls.profiles[0]!.init?.timeoutMs).toBe(PROFILE_TIMEOUT_MS)
-    expect((await peek($)).profile).toEqual({ session: 's1', word: 'foundation', via: 'project-profile.sh', why: null, store: false })
+    expect((await peek($)).profile).toEqual({ session: 's1', word: 'foundation', via: 'project-profile.sh', why: null, toml: false, store: false })
     expect((await eventsOf($)).map(ev => [ev.kind, ev.text])).toEqual([
       ['start', 'fe 0.1.0'],
       ['profile', 'foundation (project-profile.sh)'],
@@ -108,7 +108,7 @@ describe('the project profile', () => {
     const { w } = world(on)
     put(w, 'shopify.theme.toml')
     await compose($)
-    expect((await peek($)).profile.store).toBe(true)
+    expect((await peek($)).profile).toMatchObject({ toml: true, store: true })
   })
 
   t('a /clear (a new session id, no session.start) decides again at its first render', async ($, on) => {
@@ -122,7 +122,7 @@ describe('the project profile', () => {
   })
 
   test('profileText', () => {
-    expect(profileText({ session: 's', word: 'theme', via: 'project-profile.sh', why: null, store: false })).toBe('theme (project-profile.sh)')
-    expect(profileText({ session: 's', word: 'none', via: 'fallback', why: 'x', store: false })).toBe('none (fallback: x)')
+    expect(profileText({ session: 's', word: 'theme', via: 'project-profile.sh', why: null, toml: false, store: false })).toBe('theme (project-profile.sh)')
+    expect(profileText({ session: 's', word: 'none', via: 'fallback', why: 'x', toml: false, store: false })).toBe('none (fallback: x)')
   })
 })

@@ -1,9 +1,8 @@
 ---
 name: get-breaking-changes
 description: >
-  Find confirmed breaking changes merged since the repo's last major version by scanning PRs
-  labeled "Breaking changes" and write a `breaking-changes.md` report with find/replace
-  patterns. Use when the user asks what breaking changes shipped or to audit breaking changes
+  Scan PRs labeled "Breaking changes" since the last major version and write breaking-changes.md
+  with find/replace patterns. Use when the user asks what breaking changes shipped or to audit them
   before an upgrade.
 argument-hint: "[repo owner/name] [since-version]"
 arguments:

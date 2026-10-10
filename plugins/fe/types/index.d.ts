@@ -17,13 +17,15 @@ export type FeProfile = 'foundation' | 'theme' | 'none'
 /**
  * The profile of one session's project. `via`: `FE_PROFILE` forced it, `project-profile.sh` answered it
  * (detection or a domaine env file), `fallback` the script failed and fe took `none` (`why` says how).
- * `store`: the project root holds `shopify.theme.toml` or `.env`, so the store-access section applies.
+ * `toml`: the project root holds `shopify.theme.toml`. `store`: the store-access section applies — a toml, or a
+ * root `.env` in a project whose profile is not `none`.
  */
 export type FeProfileInfo = {
   session: string
   word: FeProfile
   via: 'FE_PROFILE' | 'project-profile.sh' | 'fallback'
   why: string | null
+  toml: boolean
   store: boolean
 }
 

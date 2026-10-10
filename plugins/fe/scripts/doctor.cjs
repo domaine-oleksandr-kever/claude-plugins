@@ -29,6 +29,8 @@ const { spawnSync } = require('child_process');
 
 const MIN_NODE_MAJOR = 18;
 const BASE_INSTALL = 'claude plugin install base@domaine';
+// The newest base file fe's skills run; an older base install lacks it.
+const BASE_REVIEW_SCOPE = 'scripts/review-scope.sh';
 const PROFILES = ['foundation', 'theme', 'none'];
 const STORE_FILES = ['shopify.theme.toml', '.env'];
 // Its one argument is a directory, so `--help` is no probe for it: the profile row runs it instead.
@@ -187,7 +189,7 @@ function installedPlugin(name, claudeDir, projectDir, enabled) {
     if (key.split('@')[0] !== name || !Array.isArray(entries)) continue;
     const entry = entries.find((e) => e && (e.scope === 'user' || (e.projectPath && path.resolve(e.projectPath) === projectDir)));
     if (!entry) continue;
-    const found = { key, version: String(entry.version || '?') };
+    const found = { key, version: String(entry.version || '?'), installPath: entry.installPath };
     if (enabled[key] !== true) {
       disabled = found;
       continue;
@@ -201,6 +203,8 @@ function checkBase(claudeDir, projectDir, enabled) {
   const base = installedPlugin('base', claudeDir, projectDir, enabled);
   if (!base) fail('base', 'not installed — fe needs its readers, skills and MCP servers: ' + BASE_INSTALL);
   else if (base.disabled) fail('base', base.key + ' ' + base.version + ' is installed but disabled — enable it in /plugin');
+  else if (typeof base.installPath === 'string' && !fs.existsSync(path.join(base.installPath, BASE_REVIEW_SCOPE)))
+    fail('base', base.key + ' ' + base.version + ' has no ' + BASE_REVIEW_SCOPE + ' — the PR review gate runs it: claude plugin update ' + base.key);
   else pass('base', base.key + ' ' + base.version + ' installed and enabled');
 }
 

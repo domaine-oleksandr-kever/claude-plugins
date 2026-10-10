@@ -116,9 +116,6 @@ skips the MCP rungs) — a forced rung explains a row the machine could otherwis
 
 ## Plugin update check
 
-**`<fe root>`** / **`<base root>`** = the paths on the session context's `fe plugin root:` /
-`base plugin root:` lines (`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell).
-
 Two facts and one line of output per plugin (fe, and base under it): which version is installed,
 and whether a newer one is waiting. This row is **advisory — never a blocker**: it does not gate
 Workflows 2–6, and a check that could not run is 🟡 with the reason, never 🔴 and never a guess.

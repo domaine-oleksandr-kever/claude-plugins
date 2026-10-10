@@ -1,10 +1,9 @@
 ---
 name: ship
 description: >
-  Autonomous end-to-end delivery of a ready Jira ticket (the auto-mode alternative to
-  workflows 3–6): one upfront interview + one plan/QA-checklist approval, then the whole
-  series runs itself. Requires Description, AC, approved TA, Figma node. Use when the user
-  asks to ship a ticket end-to-end or run the pipeline / auto mode / autopilot on a ticket.
+  Autonomous end-to-end delivery of a ready Jira ticket (Description, AC, approved TA, Figma node)
+  after one interview and one approval. Use when asked to ship a ticket or run the pipeline / auto
+  mode / autopilot on one.
 argument-hint: "<jira-url-or-key> [figma-node-url]"
 arguments:
   - name: jira_ticket
@@ -19,9 +18,6 @@ From a ready ticket to an open PR + Steps to Test in one run. The run contract �
 decision-record format, autonomy rule, escalation contract with the pre-authorized list,
 judgment-call log, phase-start re-read — lives in
 `<fe root>/references/pipeline-mode.md` — read at the end of Step 2, not here.
-**`<fe root>`** = the path on the session context's `fe plugin root:` line, **`<base root>`** =
-the path on its `base plugin root:` line — write them into commands spelled out (no shell
-variable carries them).
 
 Relationship to the series: the autonomous alternative to workflows 3–6. It never invokes
 the solo skills — it reuses their shared references, agents, and scripts, writes the same
@@ -52,6 +48,9 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
 - **Crash-safe ordering:** record externally-visible results (PR URL, created theme id,
   Jira writes) to `progress.md` / `notes.md` **immediately** after the action succeeds,
   before doing anything else.
+- **The Technical Approach field is team-lead-only** — no phase writes it or offers to;
+  `/fe:write-technical-approach` owns it. A divergence from the TA is a dated
+  `ta-divergence: <what> — <why>` line in `notes.md`, carried into the PR body.
 
 ## Step 0 — Readiness (any failure → stop; nothing half-started)
 
@@ -80,20 +79,10 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    developer insists.
 3. **Environment** (the `/fe:preflight-checks` scope, inline and compact — classify here,
    not mid-run): Atlassian MCP up; Figma readable when designs are involved (an MCP, else the REST token); Chrome DevTools
-   MCP; the **local dev server** running (per-profile command:
-   `<fe root>/references/session-theme.md` step 5 — `foundation`: `npm run dev` — Turbo:
-   `shopify theme dev -e dev` + Vite — or `npm run theme:shopify`). Not running → ask the
-   developer to start it —
-   a long-lived interactive process the developer owns; never start or kill it yourself.
-   The start command is the one session-theme.md step 5 gives for this checkout's profile
-   (`foundation`: `npm run dev -- --theme <id> [--port <N>]`), with `<id>` =
-   the session theme (never the shared dev theme), and `--port <N>` added when port 9292
-   is taken by another checkout or the workspace's `notes.md` records a `dev-port:` line.
-   **A server that isn't running does not stop the run here** — it needs an id item 8 has
-   not settled yet, and item 7 can end the run before that. Note it as pending, finish
-   items 4–8, then hand the full command over once item 8 has the id (a server already
-   running on a different theme has to be restarted on this one — ask, never do it yourself).
-   Everything else in item 3 keeps its stop semantics.
+   MCP; the **local dev server** running on the session theme — a process the developer owns;
+   never start or kill it yourself. **Not running does not stop the run here**: its command
+   needs the id item 8 settles, and item 7 can end the run before that. Note it as pending and
+   hand the command over at item 8. Everything else in item 3 keeps its stop semantics.
    `gh auth status`; Shopify CLI present; **store access** — one cheap read through
    `<fe root>/scripts/shopify-admin-gql.sh` (probe `.graphql` → scratch),
    then classify: read failed → `none`; read ok → probe
@@ -112,7 +101,7 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    entries or `/fewer-permission-prompts` if not). A permission prompt mid-run kills autonomy — fix
    this before the interview, not after the ✋.
 5. **Workspace.** Ensure `.claude/tasks/<work-id>/` exists with `progress.md`
-   (`<base root>/references/task-workspace.md`, incl. the git-exclude line).
+   (`<base root>/references/task-workspace.md` → Location & layout, incl. the git-exclude line).
 6. **Branch.** Working tree clean (or only this ticket's work in it); note the current
    branch for the interview.
 7. **Isolation offer** — compare the two dirs in **absolute** form, or a subdirectory of a
@@ -132,40 +121,23 @@ pinned — rationale and assignments: `pipeline-mode.md` → Phase-agent models.
    session there, and re-invokes ship on the ticket (`claude` +
    `/fe:ship <ticket>`). An `error=` line from either script → report it and stop.
    **Continue here** → proceed, no further mention.
-8. **Session theme** — one preview theme per work stream, so the dev server, the QA rows
-   that can't run locally, and the PR all point at the same unpublished theme instead of
-   the shared dev theme two checkouts would fight over. The flow is
-   `<fe root>/references/session-theme.md` (read it whenever the gate runs).
-   Workspace `notes.md` already records a `session-theme: <id>` line → no question: run
-   `…/create-preview-theme.sh pin --theme <id>` silently to re-assert it in **this**
-   checkout (the workspace is shared across checkouts, so recorded ≠ pinned here;
-   re-pinning the same id is a no-op) and say so in one line. That line is the only
-   silent-reuse trigger — never infer one from the config, which you may not read and
-   whose `dev_theme_id` cannot tell a session pin from the shared dev theme.
-   Otherwise one question to the developer (AskUserQuestion), never a
-   block, both resolved commands in the question
-   text: **create one now** (`<fe root>/scripts/create-preview-theme.sh create
-   --name "<name>" --reuse --pin-toml`, `<name>` derived as the PR's is — `info`'s
-   `dev_theme_name` with the role prefix swapped for the key: `[ELC-206] Kever | Domaine`)
-   vs **use an existing theme id** the developer supplies (`…/create-preview-theme.sh pin
-   --theme <id>` — validates it against the store, refuses the live theme, pushes nothing).
-   Record the id as a dated `session-theme: <id>` bullet in `notes.md` the instant the
-   script returns it (crash-safe ordering), with the name/`preview_url` only if the script
-   returned them and `superseded: <id>` when it reported `superseded_theme_id=`. A create
-   that exits 0 while printing `overlay=partial` + `warn=overlay_file_dropped` is not a
-   reviewable preview — the named settings files never landed and their pages 404 or go
-   stale; nor is a `--reuse` run printing `overlay=empty` + `warn=overlay_empty` (nothing
-   overlaid, the theme keeps its previous settings). Record the id, then follow `<fe root>/references/preview-theme-errors.md`
-   before anyone reads the preview or blames the branch for those 404s; `warn=build_dirtied=`
-   → name the files and append the `build-dirtied:` line to `notes.md` per that reference. Then hand
-   over item 3's start command with `--theme <id>` filled in. Never read or echo
-   `shopify.theme.toml`.
+8. **Session theme** — one preview theme per work stream (the dev server, the QA rows that
+   can't run locally and the PR share it). A `session-theme: <id>` line this session or this
+   repo's own history wrote (`<fe root>/references/session-theme.md` step 1's provenance rule)
+   → no question and no read of that file: run `<fe root>/scripts/create-preview-theme.sh pin
+   --theme <id>` silently and say so in one line. Anything else → read session-theme.md now and
+   run its gate (steps 2–5). Either way, record a new id in `notes.md` the instant the script
+   returns it (crash-safe ordering), then hand over the dev-server command — `foundation` (or no
+   profile line): `npm run dev -- --theme <id> [--port <N>]`; otherwise
+   `shopify theme dev --theme <id> [--port <N>]` or the repo's own dev script with those flags;
+   `--port <N>` when 9292 is taken or `notes.md` has a `dev-port:` line — and append its
+   `session-theme-pushed: - <id>` line. A server already running on another theme → ask for a
+   restart. Never read or echo `shopify.theme.toml`.
 
 ## Step 1 — Ingest (parallel reads, workspace-first)
 
-As develop's Phase 1: context-first, then workspace, then fetch (layout + write rule:
-`<base root>/references/task-workspace.md`) — every reader gets the workspace path
-and writes its own file.
+Context-first, then workspace, then fetch (`<base root>/references/task-workspace.md` → Read
+rule) — every reader gets the workspace path and writes its own file.
 Spawn concurrently: **`base:jira-reader`** (Description, AC, TA, Steps to Test, links,
 `figma_urls`, plus `comments` and `attachments` in full), one **`base:figma-reader`** per
 Figma URL, **`fe:theme-explorer`** seeded with the
@@ -174,10 +146,8 @@ task intent and `profile: <foundation|theme|none>` (the session context's
 remaining doc link, in parallel, per
 `<base root>/references/reading-linked-docs.md` (reuse-before-fetch; pass the
 workspace path; Notion mandatory — a reader naming a missing MCP → stop and tell the
-developer). Read `comments.md` when the task depends on the discussion, `Read` only the
-screenshots/frames the ticket refers to, and hand a non-empty `attachments_note` to the
-developer once, verbatim, never as a blocker (`<base root>/references/task-workspace.md`
-→ Read rule, comments & attachments). Then
+developer). Comments, attachments and `attachments_note`:
+`<base root>/references/task-workspace.md` → Read rule. Then
 **validate readiness**: Description, AC,
 approved **Technical Approach**, Figma node — any missing → **stop** and point at the gap
 (`/fe:write-technical-approach` for a missing TA). If the ticket/docs define
@@ -269,7 +239,8 @@ Draft **two artifacts** and present them together:
 
 - **Implementation plan** — ordered, reviewable; heavy tickets split into milestones,
   each independently landable and ending in a working, clean state; metafield/metaobject
-  provisioning included; deviations from the TA called out.
+  provisioning included; deviations from the TA called out (each becomes a `ta-divergence:`
+  line in `notes.md` on approval).
 - **QA checklist** from the AC — the **state-variant matrix**: every AC-relevant config
   axis × each allowed value × each source that can drive it (customizer AND
   metafield/metaobject when both exist); every data-driven row names its **QA target**

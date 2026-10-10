@@ -68,7 +68,6 @@ sentences where they read cleaner (e.g. "PDP only — cart/checkout → ELC-303.
    the Shopify platform, CDN, theme editor, or already-installed apps (net-new prerequisites only).
 7. **Jira parity:** the markdown file is the review source of truth; converted to ADF with
    `<base root>/scripts/md-to-adf.cjs` it must paste in as the same seven H4 sections.
-   **`<fe root>`** = the path on the session context's `fe plugin root:` line, **`<base root>`** = the path on its `base plugin root:` line (`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell).
 8. **Client confidentiality:** this repo is client-facing — never reference tickets, projects, repos,
    or Figma files from other client accounts.
 

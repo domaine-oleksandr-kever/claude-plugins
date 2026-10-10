@@ -8,28 +8,29 @@ const SLIMS = ['json', 'log'].map(k => `${k}-` + 'slim')
 const HOSTS = ['Cur' + 'sor', 'Co' + 'dex', 'Open' + 'Code']
 const BANNED = [`plugin_${OLD}_`, `${OLD.toUpperCase()}_`, `\\b${OLD}:`, `/${OLD}\\b`, `${OLD}-tmp`, ...HOSTS.map(h => `\\b${h}\\b`), ...SLIMS].map(p => new RegExp(p))
 const ids = async ($: any) => ours(await compose($)).map(s => s.id)
-const rootOf = (text: string) => text.replace(/^fe plugin root: /, '')
+const rootOf = (text: string) => text.replace(/^fe plugin root: (\S+) .*$/s, '$1')
 
 describe('prompt.compose', () => {
   test("the engine's sections first, then fe's, every one session-scoped", async ($, on) => {
     world(on)
     const r = await compose($)
     expect(r.sections[0]).toEqual({ id: 'intro', text: 'You are Claude Code.', scope: 'shared' })
-    expect(r.sections.slice(1).map((s: any) => s.id)).toEqual(['fe:root', 'fe:profile', 'fe:worktree', 'fe:progress-series'])
+    expect(r.sections.slice(1).map((s: any) => s.id)).toEqual(['fe:root', 'fe:profile', 'fe:progress-series'])
     expect(ours(r).every(s => s.scope === 'session')).toBe(true)
   })
 
-  test('the root and profile lines, one line each', async ($, on) => {
+  test('the root line names both placeholders, the profile line its word, one line each', async ($, on) => {
     world(on)
     const [root, profile] = ours(await compose($))
-    expect(root!.text).toMatch(/^fe plugin root: \/\S*$/)
+    expect(root!.text).toMatch(/^fe plugin root: \/\S* — fe's files write it `<fe root>` and the `base plugin root:` path `<base root>`; /)
+    expect(root!.text.split('\n')).toHaveLength(1)
     expect(profile!.text).toBe('fe project profile: theme')
   })
 
   test('foundation → the LiquidDoc-and-core section right after the profile', async ($, on) => {
     world(on, { profile: () => ran(0, 'foundation\n') })
     const r = ours(await compose($))
-    expect(r.map(s => s.id)).toEqual(['fe:root', 'fe:profile', 'fe:comment-discipline-foundation', 'fe:worktree', 'fe:progress-series'])
+    expect(r.map(s => s.id)).toEqual(['fe:root', 'fe:profile', 'fe:comment-discipline-foundation', 'fe:progress-series'])
     expect(r[1]!.text).toBe('fe project profile: foundation')
     expect(r[2]!.text).toBe(FOUNDATION)
   })
@@ -55,8 +56,21 @@ describe('prompt.compose', () => {
     expect(await ids($)).not.toContain('fe:store-access')
   })
 
+  test('profile none: a bare .env says nothing beyond root and profile', async ($, on) => {
+    const { w } = world(on, { profile: () => ran(0, 'none\n') })
+    put(w, '.env')
+    expect(await ids($)).toEqual(['fe:root', 'fe:profile'])
+  })
+
+  test('profile none with a shopify.theme.toml: store access, worktree and the series', async ($, on) => {
+    const { w } = world(on, { profile: () => ran(0, 'none\n') })
+    put(w, 'shopify.theme.toml')
+    expect(await ids($)).toEqual(['fe:root', 'fe:profile', 'fe:store-access', 'fe:worktree', 'fe:progress-series'])
+  })
+
   test("the worktree section carries exactly one copy-list line base's /base:worktree parses", async ($, on) => {
-    world(on)
+    const { w } = world(on)
+    put(w, 'shopify.theme.toml')
     const text = ours(await compose($)).find(s => s.id === 'fe:worktree')!.text
     expect(text).toBe(WORKTREE)
     expect(text.split('\n').filter(l => l.startsWith('worktree copy list:'))).toEqual(['worktree copy list: shopify.theme.toml'])
@@ -74,8 +88,8 @@ describe('prompt.compose', () => {
       ['qa-feature-or-fix', '/fe:qa-feature-or-fix'],
       ['pre-commit-review', '/base:pre-commit-review'],
       ['commit', '/base:commit'],
-      ['write-steps-to-test', '/fe:write-steps-to-test'],
       ['create-pull-request', '/fe:create-pull-request'],
+      ['write-steps-to-test', '/fe:write-steps-to-test'],
     ])
   })
 
@@ -92,6 +106,7 @@ describe('prompt.compose', () => {
   test('no legacy, host or old-compressor name in any section', async ($, on) => {
     const { w } = world(on, { profile: () => ran(0, 'foundation\n') })
     put(w, '.env')
+    put(w, 'shopify.theme.toml')
     const r = ours(await compose($))
     expect(r).toHaveLength(6)
     for (const s of r) for (const re of BANNED) expect(re.test(s.text)).toBe(false)
@@ -126,7 +141,7 @@ describe('classic.SubagentStart', () => {
       expect(ctx[0]).toContain('fe project profile: foundation')
       expect(ctx[0]).toContain(FOUNDATION)
       expect(ctx[0]).toContain('## fe capability — live store access')
-      expect(ctx[0]).not.toContain('<fe root>')
+      expect(ctx[0]!.split('\n\n').slice(1).join('\n\n')).not.toContain('<fe root>')
       expect(ctx[0]).not.toContain(PROGRESS_SERIES)
     }
   })

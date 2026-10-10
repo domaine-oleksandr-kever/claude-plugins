@@ -241,12 +241,13 @@ process.stdout.write(out.join('\n') + (out.length ? '\n' : ''));
 JS
 
 ALLOW_FILE="$TMP/allow.txt"
-# fe's README has the one migration line: it names fnd's uninstall command and its old profile key.
+# Exact lines allowed to name the legacy plugin; the fixture below plants this one to prove the mechanism.
 cat > "$ALLOW_FILE" <<'TXT'
 To move from fnd, run `/plugin uninstall fnd@domaine`, install the set above, and rename every `FND_` key fe reads to its `FE_` name (`FND_PROFILE`, `FND_GQL_PROBE_CACHE`, `FND_CPT_THROTTLE_WAITS`, `FND_CPT_OVERLAY_VERIFY`, `FND_CPT_OVERLAY_VERIFY_WAIT`, `FND_THEME_JSON_VERIFY`, `FND_THEME_JSON_VERIFY_WAIT`) in `.claude/domaine.env`, `~/.config/domaine/env` and `~/.claude/settings.json` → `env`: fe does not read the old keys.
 TXT
-# run_lint <plugin dir> <base dir> [<sibling team plugin dirs, space-separated>]
-run_lint() { "$NODE_BIN" "$LINT" "$1" "$2" "${3:-}" "$ALLOW_FILE"; }
+# run_lint <plugin dir> <base dir> [<sibling team plugin dirs, space-separated>] [<allow file>]
+# Only the fixture passes the allow file: the real plugins get an empty allow-list.
+run_lint() { "$NODE_BIN" "$LINT" "$1" "$2" "${3:-}" "${4:-}"; }
 
 # ------------------------------------------------------- the checker fires on a planted fixture --
 HUB="$TMP/hub"; KIT="$TMP/kit"; PAL="$TMP/pal"
@@ -290,7 +291,7 @@ MD
 printf 'const HUB_MISSING = 1\n' > "$KIT/scripts/constants.ts"
 printf '%s\n' 'Hands-on QA moved to /pal:check (pal:check, checked by /pal-doctor); /pal:gone and pal:gone never shipped, nor /pal-bogus.' >> "$KIT/README.md"
 printf '%s\n' 'To move from fnd, run `/plugin uninstall fnd@domaine`, install the set above, and rename every `FND_` key fe reads to its `FE_` name (`FND_PROFILE`, `FND_GQL_PROBE_CACHE`, `FND_CPT_THROTTLE_WAITS`, `FND_CPT_OVERLAY_VERIFY`, `FND_CPT_OVERLAY_VERIFY_WAIT`, `FND_THEME_JSON_VERIFY`, `FND_THEME_JSON_VERIFY_WAIT`) in `.claude/domaine.env`, `~/.config/domaine/env` and `~/.claude/settings.json` → `env`: fe does not read the old keys.' >> "$KIT/README.md"
-run_lint "$KIT" "$HUB" "$PAL $KIT" > "$TMP/fx.out"
+run_lint "$KIT" "$HUB" "$PAL $KIT" "$ALLOW_FILE" > "$TMP/fx.out"
 OUTF="$TMP/fx.out"
 want() { # want <rule> <what>
   if awk -F'\t' -v r="$1" -v w="$2" '$1 == r && $3 == w { f = 1 } END { exit !f }' "$OUTF"; then ok
@@ -345,7 +346,7 @@ if ! grep -qF 'types/hub' "$TMP/fx.out"; then ok; else bad fixture-laid-types "t
 # still be judged by kit's rules, so a stray `fe` default shows up as a missed flag.
 KIT2="$TMP/kit2"; cp -R "$KIT" "$KIT2"
 printf '{ "name": "kit", "dependencies": ["base"] }\n' > "$KIT2/.claude-plugin/plugin.json"
-run_lint "$KIT2" "$HUB" > "$TMP/fx2.out"; OUTF="$TMP/fx2.out"
+run_lint "$KIT2" "$HUB" "" "$ALLOW_FILE" > "$TMP/fx2.out"; OUTF="$TMP/fx2.out"
 want b "dependencies hub"
 
 # ------------------------------------------------------------------ the team plugins on base --

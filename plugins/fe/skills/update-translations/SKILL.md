@@ -1,10 +1,9 @@
 ---
 name: update-translations
 description: >
-  Translate English strings into the theme's other languages — storefront copy
-  (`locales/*.json`) and/or schema locale files (`locales/*.schema.json`, admin/customizer
-  labels). Use when the user asks to translate / localize storefront (customer-facing)
-  copy, schema / settings / theme-editor labels, or add locale translations.
+  Translate English strings into the theme's other locales: storefront copy (locales/*.json) and
+  schema labels (locales/*.schema.json). Use when asked to translate / localize copy or theme-editor
+  labels, or add locales.
 argument-hint: "[storefront|schema|all] (describe the English keys/strings to translate)"
 arguments:
   - name: scope

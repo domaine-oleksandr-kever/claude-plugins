@@ -1,9 +1,9 @@
 ---
 name: write-technical-approach
 description: >
-  Draft a Domaine Technical Approach (TA) for a Jira ticket from its Description and
-  Acceptance Criteria, then (after approval) update the Jira TA field — Workflow 2. Use when
-  the user asks to write / draft / update a Technical Approach or TA for a Jira ticket.
+  Draft a Domaine Technical Approach (TA) from a Jira ticket's Description and AC, then update the
+  Jira TA field after approval. Use when the user asks to write / draft / update a Technical
+  Approach or TA.
 argument-hint: "<jira-ticket-url-or-key>"
 arguments:
   - name: jira_ticket
@@ -20,7 +20,7 @@ Operating mode: **Phase 1 is analysis + outline only** — read-only toward the 
 
 ## North star
 
-**The ticket's Description and AC govern the TA** — ungrounded decisions land in **Assumptions** (developer-confirmed), ambiguous or incomplete AC **stops** the draft. Full grounding rules: `<fe root>/references/technical-approach-format.md` (**`<fe root>`** / **`<base root>`** = the paths on the session context's `fe plugin root:` / `base plugin root:` lines — write them into commands spelled out, no shell variable carries them) §North star.
+**The ticket's Description and AC govern the TA** — ungrounded decisions land in **Assumptions** (developer-confirmed), ambiguous or incomplete AC **stops** the draft. Full grounding rules: `<fe root>/references/technical-approach-format.md` §North star.
 
 ## Global rules
 
@@ -40,7 +40,7 @@ Senior-Shopify-developer audience, **~3-minute read** — full guidance: `<fe ro
 
 ## Phase 1 — Analysis & planning
 
-1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md` (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself). This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer. The reader also returns `comments` (one line each) and `attachments` (local paths) in full — read `comments.md` when the task depends on the discussion, `Read` only the screenshots/frames it points at, and hand a non-empty `attachments_note` to the developer once, verbatim, never as a blocker (`<base root>/references/task-workspace.md` → Read rule, comments & attachments). Two or more ticket screenshots are usually current vs intended — say which is which and cite them in the outline.
+1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md` → Read rule (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself). This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer. Its `comments`, `attachments` and `attachments_note`: `<base root>/references/task-workspace.md` → Read rule. Two or more ticket screenshots are usually current vs intended — say which is which and cite them in the outline.
 2. **Validate readiness** — confirm Description and AC exist and are sufficient. If missing or ambiguous, **stop**, summarize gaps, ask how to proceed.
 3. **Read every linked doc** the `base:jira-reader` returned — one **`base:doc-reader`** subagent per link, in parallel, per `<base root>/references/reading-linked-docs.md` (pass the workspace path). **Notion is mandatory — a reader naming a missing Notion MCP → stop and ask the developer** rather than drafting around it; these docs often hold the real data model and final copy the TA must reflect.
 4. **Analyse the codebase** — inspect relevant areas for patterns, layout, dependencies, constraints. Apply the repo's coding rules (Liquid, blocks, Tailwind, a11y, etc.).

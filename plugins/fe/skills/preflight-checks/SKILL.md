@@ -1,10 +1,9 @@
 ---
 name: preflight-checks
 description: >
-  Validate the local environment — MCP servers, CLI tools, project context, skills & rules,
-  dev server — and produce a pass/fail report with blockers — Workflow 1; run at session
-  start or when switching projects. Use when the user asks to run preflight / environment
-  checks or validate tooling / MCP connectivity.
+  Validate the local environment (MCP servers, CLI tools, project context, dev server) into a
+  pass/fail report. Use at session start, on a project switch, or when asked to check environment,
+  tooling or MCP connectivity.
 argument-hint: "(no args — validates the current workspace)"
 arguments:
   - name: workspace
@@ -28,7 +27,7 @@ Operating mode: **validation** — Phase 1 is read-only toward the repo's tracke
 
 ## Phase 1 — Environment validation
 
-Run the full checklist in `<fe root>/references/preflight-checklist.md` (**`<fe root>`** / **`<base root>`** = the paths on the session context's `fe plugin root:` / `base plugin root:` lines) — read it now; it owns the per-check items, commands, and remediation: **CLI tools → MCP servers → project skills & rules → local dev server → Jira attachments → Figma access → plugin update**. Three skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; second, if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation; third, the plugin-update group is about the **plugins themselves** rather than the project — installed fe and base versions vs. what the marketplace checkout could install. It is advisory: it never gates the workflows, it reports 🟡 with the reason rather than guessing, and `/fe-doctor` + `/base-doctor` are the install checks to point at when something in the plugins looks broken.
+Run the full checklist in `<fe root>/references/preflight-checklist.md` — read it now; it owns the per-check items, commands, and remediation: **CLI tools → MCP servers → project skills & rules → local dev server → Jira attachments → Figma access → plugin update**. Three skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; second, if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation; third, the plugin-update group is about the **plugins themselves** rather than the project — installed fe and base versions vs. what the marketplace checkout could install. It is advisory: it never gates the workflows, it reports 🟡 with the reason rather than guessing, and `/fe-doctor` + `/base-doctor` are the install checks to point at when something in the plugins looks broken.
 
 ---
 

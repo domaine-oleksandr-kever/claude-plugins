@@ -51,8 +51,10 @@ Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `fe.jsonl` writ
 
 **The profile** lives in `session.ts` with both of its readers. It is decided once per session id —
 `FE_PROFILE` when it holds one of the three words, else `bash scripts/project-profile.sh <session root>`
-through `$.process.run` with a 5 s timeout — stored in `fe.profile` with how it was decided and whether
-the project root holds `shopify.theme.toml` or `.env` (the store-access gate), and logged once. A
+through `$.process.run` with a 5 s timeout — stored in `fe.profile` with how it was decided, whether
+the project root holds `shopify.theme.toml` (the worktree gate) and whether store access applies (the toml,
+or `.env` with a profile other than `none`), and logged once. The progress series needs a profile other
+than `none` or the toml. A
 module-local promise keyed by the session id keeps the start, a compose and a subagent from running the
 probe twice; a /clear's new id decides again at its first compose. The decision never changes within a
 session, so the sections repeat byte for byte (the prompt cache). The probe stays a script because
@@ -65,7 +67,7 @@ session, so the sections repeat byte for byte (the prompt cache). The probe stay
 - **`fe.events`** — `{ atMs, kind, text }`, oldest first, at most 200; kinds `start`, `install`,
   `profile`, `doctor` (9 cells at most, none of band's or slim's). `FE_EVENT_LOG=0` keeps it empty.
   band's Log pane merges it with the other publishers' lines, `fe` in its plugin column.
-- **`fe.profile`** — `{ session, word, via, why, store }`; `via` is `FE_PROFILE`, `project-profile.sh` or
+- **`fe.profile`** — `{ session, word, via, why, toml, store }`; `via` is `FE_PROFILE`, `project-profile.sh` or
   `fallback` (then `word` is `none` and `why` says what failed).
 - **`fe.started`**, **`fe.armed`** — the session id whose start line and base check ran, and whose
   `/fe-doctor` is registered: a module reload repeats neither the line nor the check.

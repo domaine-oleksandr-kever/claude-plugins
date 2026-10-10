@@ -1,10 +1,9 @@
 ---
 name: preview-theme
 description: >
-  Create or refresh an unpublished Shopify PREVIEW theme from the current branch. Use when
-  the user asks to create / make / spin up a preview theme, test the preview script, or
-  update / refresh / redeploy / rebuild a preview / push a fix to one. A bare theme id
-  means refresh that theme.
+  Create or refresh an unpublished Shopify preview theme from the current branch. Use when asked to
+  create / spin up / refresh / redeploy / rebuild a preview theme or push a fix to one; a bare theme
+  id means refresh.
 argument-hint: "[create|refresh] [theme-id|preview-url] [--name \"[TICKET] …\"] [--reuse] [--no-build] [--store <handle>]"
 arguments:
   - name: mode
@@ -19,24 +18,23 @@ arguments:
     description: Storefront path to deep-link the preview to (e.g. /products/group-lipglass). Optional.
   - name: build_overrides
     description: --no-build (developer already built) / --build-script <name> (a package.json script other than `build`). Optional.
-allowed-tools: Read, Glob, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/worktree-theme.sh*)
+allowed-tools: Read, Glob, Grep, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/create-preview-theme.sh*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/worktree-theme.sh*)
 ---
 
 # Preview theme (create / refresh)
 
-Both modes wrap `<fe root>/scripts/create-preview-theme.sh` — **`<fe root>`** = the path on the
-session context's `fe plugin root:` line; write it into commands spelled out (no shell variable
-carries it). It is the same script `/fe:create-pull-request` uses — running this skill is a good way to
+Both modes wrap `<fe root>/scripts/create-preview-theme.sh`. It is the same script `/fe:create-pull-request` uses — running this skill is a good way to
 test the mechanics in isolation. **create** builds a named, **unpublished** theme = your branch's code (built
 locally) + the dev theme's customizer settings. **refresh** redeploys the branch's code
 into an existing preview **without touching its customizer settings** — everything except
 `config/settings_data.json`, `templates/**/*.json`, and section groups `sections/*.json`
 is pushed, so the content a reviewer configured stays put. Full contract:
-`<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`. The
-**`error=` outcomes** + **page deep-link formulas** the steps below defer to live in the
-errors reference — `<fe root>/references/preview-theme-errors.md`: its `error= outcomes`
-section when a run fails, its `Page deep-links` section when a deep-link is needed (read the
-section, not the file).
+`<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`. Every run's output — the
+workspace lines, the `warn=`/`overlay=` verdicts, each `error=` and the page deep-link formulas —
+is read per the errors reference, `<fe root>/references/preview-theme-errors.md`: its **Reading a
+create/refresh result** section after every run, one key's entry when a run warns or fails (here:
+Grep the key in its `##` headings with line numbers, then Read from that line to the next heading),
+**Page deep-links** when a deep-link is needed — never the whole file.
 
 When this checkout is a `git worktree` — or anything else already holds port 9292 — its dev
 server has to start on the theme the workspace's `notes.md` records as `session-theme:` and
@@ -95,34 +93,23 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    neither flag — `--build-script` there is refused (`error=build_script_missing`) — the build
    is skipped (`built=skipped_no_package_json` + `warn=build_skipped_no_package_json`, exit 0)
    and the working tree is pushed as it stands. **Any `error=` line** → report it plainly,
-   then follow the errors reference's **`error=` outcomes** — it names, per code, whether
-   anything was pushed, whether retrying is right, and the recovery. Don't improvise one.
-   A run that exits 0 with `overlay=partial` + `warn=overlay_file_dropped` lines is NOT a
-   clean success: the named settings files never landed (their pages 404 or go stale) —
-   report the warn lines and follow the same reference's recovery before offering the URL.
-   With `--reuse`, `error=reuse_unverifiable` / `error=dev_theme_write_refused` follow the same
-   two consents as refresh step 3 (never add `--allow-unverified` / `--allow-dev-theme` on your own).
-   Same for `overlay=empty` + `warn=overlay_empty` on a `--reuse` run: nothing was overlaid,
-   the theme keeps its previous settings — not a reviewable preview until re-run against a dev
-   theme with settings.
+   then follow its entry in the errors reference — it names whether anything was pushed,
+   whether retrying is right, and the recovery. Don't improvise one. An exit-0 run is not
+   always reviewable (`overlay=partial` / `empty` / `unverified`): the reading section says
+   which. With `--reuse`, `error=reuse_unverifiable` / `error=dev_theme_write_refused` follow
+   the same two consents as refresh step 3 (never add `--allow-unverified` /
+   `--allow-dev-theme` on your own).
 5. **Report.** Print the resulting `theme_id`, `preview_url`, `editor_url`, `reused`,
-   `built`, and — when it isn't `verified` — the `overlay=` verdict (`partial`, `unverified`,
-   `skipped` or `empty`) with its warn lines. `warn=build_dirtied=<path,…>` → name the files
-   the build rewrote and offer `git checkout -- <path>` for a build artifact (errors
-   reference); when a task workspace for this work-id exists, append
-   `- <YYYY-MM-DD> build-dirtied: <path> <path>` to its `notes.md` (the comma list
-   space-separated, a path with whitespace left out) so the review scope drops them — no
-   workspace, nothing is recorded. If a `preview_path` is known, also give the
-   page-deep-linked preview and the editor-on-template link (formulas: the errors reference's
-   **Page deep-links**); path or template unknown → **ask, never guess**.
+   `built`, and — when it isn't `verified` — the `overlay=` verdict with its warn lines;
+   `warn=build_dirtied=` per the reading section (its `notes.md` line too). If a
+   `preview_path` is known, also give the page-deep-linked preview and the editor-on-template
+   link (**Page deep-links**); path or template unknown → **ask, never guess**.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id
-   exists, append the id to its `notes.md` as a dated `session-theme: <id> (<name>)
-   <preview_url>` bullet, plus a `session-theme-pushed: <sha> <id>` line when the run printed
-   `pushed=` (`<fe root>/references/session-theme.md` step 4) — otherwise the next `/fe:ship`
-   run, qa phase or PR run finds no line and creates a *second* theme for the same stream.
-   Do **not** pass `--pin-toml` here: the pin rewrites the developer's `shopify.theme.toml`
-   and is the session-theme offer's call (`<fe root>/references/session-theme.md`), not this
-   skill's.
+   exists, write the `session-theme:` and `session-theme-pushed:` lines per the reading
+   section — otherwise the next `/fe:ship` run, qa phase or PR run finds no line and creates a
+   *second* theme for the same stream. Do **not** pass `--pin-toml` here: the pin rewrites the
+   developer's `shopify.theme.toml` and is the session-theme offer's call
+   (`<fe root>/references/session-theme.md`), not this skill's.
 
 ## Steps — refresh
 
@@ -132,8 +119,8 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    (settings are preserved). Show the target id and `[ update / cancel ]`.
 3. **Refresh.** Run `create-preview-theme.sh refresh --theme <id>` (add `--no-build` /
    `--build-script <name>` as above; with no `package.json` the build is skipped the same
-   way). Any `error=` line → report it plainly and follow the
-   errors reference's **`error=` outcomes**; don't read the toml yourself. Two refusals need a
+   way). Any `error=` line → report it plainly and follow its entry in the errors reference;
+   don't read the toml yourself. Two refusals need a
    distinct developer consent each: `error=refresh_unverifiable` / `error=reuse_unverifiable`
    (the store listing was silent) → report; ask the developer before re-running with
    `--allow-unverified`. `error=dev_theme_write_refused` (the target is the shared dev theme) →
@@ -142,18 +129,14 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    theme" gets `--allow-dev-theme`. `error=theme_not_found` is neither of those: the listing
    answered and does not carry the id — deleted, or on another store: with a preview URL whose host
    differs, re-run with `--store <host>`; with a bare id, ask the developer whether it lives on
-   another store (which handle) and re-run with `--store <handle>` — only then offer a fresh `create`. `error=dev_theme_not_found` (on `create` too) says the same
-   about the toml's settings SOURCE — no flag lifts that either, and every fix rewrites
-   `shopify.theme.toml`, so ask which theme is the new source before running `pin --theme <ID>`.
+   another store (which handle) and re-run with `--store <handle>` — only then offer a fresh `create`.
 4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`, and
-   handle `warn=build_dirtied=` as create's step 5 does (the notes.md `build-dirtied:` line too).
-   Remind the developer that customizer settings were intentionally left as-is.
-5. **Record it when the workspace hasn't.** When a task workspace for this work-id exists
-   and its `notes.md` has no `session-theme:` line, append the refreshed id the same way as
-   create's step 6 (dated bullet, only the parts the script returned — refresh hands back no
-   name) — and, for the same reason as there, **without** `--pin-toml`. Whenever the refreshed id
-   is the recorded session theme and the run printed `pushed=`, append the
-   `session-theme-pushed: <sha> <id>` line.
+   handle `warn=build_dirtied=` as create's step 5 does. Remind the developer that customizer
+   settings were intentionally left as-is.
+5. **Record it.** With a task workspace for this work-id: no `session-theme:` line yet → append
+   the refreshed id as create's step 6 does (only the parts the script returned — refresh hands
+   back no name), **without** `--pin-toml`; the refreshed id is the recorded session theme →
+   the `session-theme-pushed:` line per the reading section, `pushed=` or not.
 
 ## In a worktree
 
@@ -175,7 +158,8 @@ Before the first create, refresh or dev-server start in a new worktree:
    `dev_port=unknown` (the line then reads `--port <dev-port>`) needs one from the developer. The
    worktree then gets its own session theme: the create flow above, or the session-theme offer
    (`<fe root>/references/session-theme.md`); fill that id into `<session-theme-id>` of the
-   printed line, as it is — never re-derive the line.
+   printed line, as it is — never re-derive the line — and append the
+   `session-theme-pushed: - <id>` line (a dev server on it changes the theme).
 3. `error=not_a_linked_worktree` → this is the main checkout, not a failure: its own session pin
    stays; skip this section and go on. Any other `error=<reason>` line on its stdout → report it
    plainly and stop; never edit the toml by hand to work around it, and never read it.

@@ -1,8 +1,7 @@
 # Theme gotchas — Shopify traps that fail silently
 
 Read by `/fe:develop-feature-or-fix` Phase 2 (implement + in-browser validation). Each entry is a
-trap that passes a build and a glance and still ships wrong. **`<fe root>`** = the path on the
-session context's `fe plugin root:` line.
+trap that passes a build and a glance and still ships wrong.
 
 ## Settings and templates
 

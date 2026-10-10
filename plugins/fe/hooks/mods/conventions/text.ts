@@ -2,7 +2,8 @@
 // `<fe root>` stands for the plugin root until `withRoot` fills it in.
 import type { FeProfile } from '../../../types'
 
-export const rootLine = (root: string) => `fe plugin root: ${root}`
+export const rootLine = (root: string) =>
+  `fe plugin root: ${root} — fe's files write it \`<fe root>\` and the \`base plugin root:\` path \`<base root>\`; spell both out in commands (\`\${CLAUDE_PLUGIN_ROOT}\` is empty in the Bash tool's shell)`
 
 export const profileLine = (word: FeProfile) => `fe project profile: ${word}`
 
@@ -50,11 +51,11 @@ step name; the skill after it ticks the row:
 3. \`qa-feature-or-fix\` — \`/fe:qa-feature-or-fix\`
 4. \`pre-commit-review\` — \`/base:pre-commit-review\` (pass it the profile word above)
 5. \`commit\` — \`/base:commit\`
-6. \`write-steps-to-test\` — \`/fe:write-steps-to-test\`
-7. \`create-pull-request\` — \`/fe:create-pull-request\`
+6. \`create-pull-request\` — \`/fe:create-pull-request\`
+7. \`write-steps-to-test\` — \`/fe:write-steps-to-test\`
 
 A batch (\`<work-id>\` = branch slug) lists one row per ticket, each ticked as its bug is fixed with
-its root cause, then the same tail from \`pre-commit-review\` to \`create-pull-request\`.
+its root cause, then the same tail from \`pre-commit-review\` to \`write-steps-to-test\`.
 \`/fe:ship\` runs the whole series and ticks the same rows.`
 
 /** base's readers and writer, and Claude Code's own helpers: no fe context at all. */

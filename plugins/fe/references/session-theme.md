@@ -3,7 +3,7 @@
 Single home of the session-theme flow. `/fe:ship` (Step 0) and `/fe:preview-theme` in a new
 worktree both **offer** it and must offer it identically; `/fe:preview-theme`, the pipeline's qa
 phase, `/fe:create-pull-request`, and aftercare all **consume** it. Read this file when the offer actually has to run — the
-silent-reuse path needs nothing from here. **`<fe root>`** = the path on the session context's `fe plugin root:` line, **`<base root>`** = the path on its `base plugin root:` line (`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell).
+silent-reuse path needs nothing from here.
 
 ## Why
 
@@ -50,13 +50,9 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    `[ELC-206] Kever | Domaine`. `--reuse` matches by name, and the qa phase and
    `/fe:create-pull-request` derive the same string, so a name invented here (`[ELC-206] cart
    drawer fix`) makes those later calls miss and create a **second** theme for one ticket.
-   `create` exiting **0** is not the whole verdict: a run that also prints `overlay=partial`
-   + `warn=overlay_file_dropped` produced a theme whose named settings files never landed
-   (their pages 404 or serve stale content), and a `--reuse` run printing `overlay=empty` +
-   `warn=overlay_empty` overlaid nothing (the theme keeps its previous settings) — record the
-   id, but say the preview is not reviewable yet and follow
-   `<fe root>/references/preview-theme-errors.md`. `warn=build_dirtied=` → name the files and
-   append the `build-dirtied:` line to `notes.md` per that reference.
+   Read the run's output per `<fe root>/references/preview-theme-errors.md` → Reading a
+   create/refresh result (an exit-0 run can still be unreviewable; `build_dirtied`; the
+   workspace lines).
 3. **Run it from the checkout the work lives in.** `shopify.theme.toml` is resolved relative
    to the cwd, and `create` builds the local branch — so a worktree's session theme is created
    from **inside that worktree**, never from the main checkout.
@@ -70,21 +66,25 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    rest** — never invent a name or a URL.
    Add `superseded: <id>` to the same bullet when the pin reported `superseded_theme_id=` (that
    is the environment's previous theme id, and the config is gitignored).
-   Every `create`/`refresh` onto the session theme that prints `pushed=<sha>` appends its own
-   line `- <YYYY-MM-DD> session-theme-pushed: <sha> <id>` — a separate line kind, so the
-   `session-theme:` grep above never matches it; the last one naming the session theme's id is
-   the commit that preview carries, and `/fe:create-pull-request` skips its refresh when no build
-   input changed since (`<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`).
-   No `pushed=` (uncommitted changes rode along) → no line.
+   Every `create`/`refresh` onto the session theme then appends
+   `- <YYYY-MM-DD> session-theme-pushed: <sha> <id>`, or `… session-theme-pushed: - <id>` when it
+   printed no `pushed=` — a separate line kind, so the `session-theme:` grep above never matches
+   it. `/fe:create-pull-request` skips its refresh only when every line naming the id carries a
+   sha and no build input changed since the last; one `-` line makes it refresh, since a dev
+   server handed over once may still be uploading
+   (`<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`).
 5. **Then the dev server runs on it.** Steps 1–4 already needed this checkout's
    `shopify.theme.toml` (or `TOML_PATH`), so the store is resolved by the time the server
    starts. The start command the developer gets is the line for this checkout's profile —
-   **this list is the single home of that mapping; every skill defers to it**:
+   **this list is the home of that mapping; every skill defers to it, and `/fe:ship` Step 0 item 8
+   carries a one-line copy for its silent path — change both together**:
    - `foundation` checkout (session line `fe project profile: foundation`) — `npm run dev -- --theme <id> [--port <N>]`
    - any other checkout — `shopify theme dev --theme <id> [--port <N>]`, or the repo's own dev
      script when its `package.json` defines one (same flags after `--`)
 
    No profile line in the session (fe's hooks module fails open) → the `foundation` form.
+   Handing over the command appends `- <YYYY-MM-DD> session-theme-pushed: - <id>` to `notes.md`:
+   the dev server uploads the working tree — uncommitted edits, a dev build — to that theme live.
    `--theme` always (belt and braces: explicit even
    though the toml is pinned), `--port <N>` added when port 9292 is taken by another checkout or
    the workspace records a `dev-port:` line. A dev server already running against a different
@@ -133,8 +133,7 @@ a multi-environment toml the block written is the block read, so that holds ther
   stands, keep the explicit `--theme <id>`), the refusals under a silent store listing
   (`theme_unverifiable`, `refresh_unverifiable`, `reuse_unverifiable`, `warn=pin_unvetted`), the
   live-theme refusal that guards pin-only mode, and restoring a pin by hand are `error=`
-  outcomes: `<fe root>/references/preview-theme-errors.md` → error= outcomes (Session-theme pin
-  outcomes).
+  outcomes: `<fe root>/references/preview-theme-errors.md`, the Session-theme pin outcomes entry.
 - A **worktree starts unpinned on purpose.** `/base:worktree` copies the source checkout's
   toml (fe's `worktree copy list:`) and `<fe root>/scripts/worktree-theme.sh <worktree-dir>` then
   reverts every pin it finds in it (`/fe:preview-theme` → In a worktree), both shapes — `fe:superseded` markers

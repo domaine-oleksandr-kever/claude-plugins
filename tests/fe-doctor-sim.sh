@@ -76,7 +76,7 @@ mkhome() {
   if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/.claude/plugins/installed_plugins.json"; fi
   # No settings given → every plugin a fixture installs is enabled, as `claude plugin install` writes it.
   local settings="${3:-}"
-  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fnd@domaine":true}}'
+  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true}}'
   printf '%s\n' "$settings" > "$d/.claude/settings.json"
 }
 
@@ -167,6 +167,14 @@ rc=0; CLAUDE_CONFIG_DIR="$H2/.claude" PATH="$WITH_SHOP" "$NODE" "$DOCTOR" --root
 expect FD20-claude-config-dir 1 "FAIL  base          not installed"
 rc=0; CLAUDE_CONFIG_DIR="$H2/.claude" PATH="$WITH_SHOP" "$NODE" "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect FD21-home-beats-config-dir 0 "PASS  base          base@domaine 0.2.0"
+# An install path without the review-scope script fe's PR gate runs is an outdated base.
+OLDBASE="$TMP/base-old"; mkdir -p "$OLDBASE/scripts"
+BASE_OLD="\"base@domaine\":[{\"scope\":\"user\",\"version\":\"0.7.3\",\"installPath\":\"$OLDBASE\"}]"
+H6="$TMP/h-baseold"; mkhome "$H6" "$(installed "$BASE_OLD")"
+run --root "$P" --home "$H6" --project "$PRJ"
+expect FD21b-base-outdated 1 "FAIL  base          base@domaine 0.7.3 has no scripts/review-scope.sh" "claude plugin update base@domaine"
+: > "$OLDBASE/scripts/review-scope.sh"
+run --root "$P" --home "$H6" --project "$PRJ"; expect FD21c-base-current 0 "PASS  base          base@domaine 0.7.3 installed and enabled"
 
 # ----------------------------------------------------------------------------- shopify-cli --
 run --path "$NO_SHOP" --root "$P" --home "$H" --project "$PRJ"

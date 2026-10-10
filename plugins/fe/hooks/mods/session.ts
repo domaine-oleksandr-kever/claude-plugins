@@ -20,8 +20,6 @@ import type { Disk } from './events.ts'
 
 export const BASE_MISSING = 'needs the base plugin — claude plugin install base@domaine'
 export const PROFILE_TIMEOUT_MS = 5_000
-/** The files the store runners read their store and credentials from, at the project root. */
-export const STORE_FILES = ['shopify.theme.toml', '.env'] as const
 
 const events = atom({ plugin: 'fe', key: 'events' } as const, [] as FeEvent[])
 const started = atom({ plugin: 'fe', key: 'started' } as const, null)
@@ -80,25 +78,29 @@ export function profileText(p: FeProfileInfo): string {
 
 async function decide($: $, session: string): Promise<FeProfileInfo> {
   let root = ''
-  let store = false
+  let toml = false
+  let env = false
   try {
     root = await $.session.root()
-    for (const f of STORE_FILES) if (await $.fs.exists(`${root}/${f}`)) store = true
+    toml = await $.fs.exists(`${root}/shopify.theme.toml`)
+    env = await $.fs.exists(`${root}/.env`)
   } catch {}
+  const info = (word: FeProfile, via: FeProfileInfo['via'], why: string | null): FeProfileInfo =>
+    ({ session, word, via, why, toml, store: toml || (env && word !== 'none') })
   const forced = (await $.env.get('FE_PROFILE').catch(() => undefined))?.trim()
-  if (isProfile(forced)) return { session, word: forced, via: 'FE_PROFILE', why: null, store }
+  if (isProfile(forced)) return info(forced, 'FE_PROFILE', null)
   let why: string
   try {
     const argv = ['bash', `${$.plugin.root}/scripts/project-profile.sh`]
     if (root) argv.push(root)
     const r = await $.process.run(argv, { timeoutMs: PROFILE_TIMEOUT_MS })
     const word = r.stdout.trim()
-    if (r.exitCode === 0 && isProfile(word)) return { session, word, via: 'project-profile.sh', why: null, store }
+    if (r.exitCode === 0 && isProfile(word)) return info(word, 'project-profile.sh', null)
     why = `project-profile.sh exited ${r.exitCode}: ${oneLine(r.stderr.split('\n')[0] || word) || 'no answer'}`
   } catch (err) {
     why = `project-profile.sh did not run: ${oneLine(err instanceof Error ? err.message : String(err))}`
   }
-  return { session, word: 'none', via: 'fallback', why, store }
+  return info('none', 'fallback', why)
 }
 
 // The decision in flight for one session id: compose, a subagent and the start never run the probe twice.
@@ -115,7 +117,7 @@ async function profileOf($: $): Promise<FeProfileInfo> {
       await logEvent($, 'profile', profileText(p))
       return p
     })
-    pending = { session, info: info.catch(() => ({ session, word: 'none', via: 'fallback', why: 'not stored', store: false }) as FeProfileInfo) }
+    pending = { session, info: info.catch(() => ({ session, word: 'none', via: 'fallback', why: 'not stored', toml: false, store: false }) as FeProfileInfo) }
   }
   return pending.info
 }
@@ -133,7 +135,8 @@ export async function sections($: $): Promise<PromptComposeSection[]> {
   ]
   if (p.word === 'foundation') parts.push(['comment-discipline-foundation', FOUNDATION])
   if (p.store) parts.push(['store-access', withRoot(STORE_ACCESS, root)])
-  parts.push(['worktree', WORKTREE], ['progress-series', PROGRESS_SERIES])
+  if (p.toml) parts.push(['worktree', WORKTREE])
+  if (p.toml || p.word !== 'none') parts.push(['progress-series', PROGRESS_SERIES])
   return parts.map(([name, text]) => ({ id: `fe:${name}`, text, scope: 'session' }))
 }
 

@@ -9,7 +9,7 @@ fe builds on base and requires it: the Jira, Figma and doc readers, the Jira wri
 the task workspace, the commit and review skills, the guards and the shared MCP servers are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.4.2**.
+Current release: **fe v0.5.0**.
 
 ## Status
 
@@ -17,7 +17,6 @@ Current release: **fe v0.4.2**.
   It ships no adapter for another host, and `scripts/install.sh --plugin fe` exits 2.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
   not install a dependency on its own: install all three.
-- Never runs together with fnd — install fnd OR base plus fe.
 
 ## Install
 
@@ -39,15 +38,12 @@ Current release: **fe v0.4.2**.
     "slim@domaine": true,
     "band@domaine": true,
     "base@domaine": true,
-    "fe@domaine": true,
-    "fnd@domaine": false
+    "fe@domaine": true
   }
 }
 ```
 
 The team plugins fe, qa, be and pm co-install: each needs only base, and none needs another.
-
-To move from fnd, run `/plugin uninstall fnd@domaine`, install the set above, and rename every `FND_` key fe reads to its `FE_` name (`FND_PROFILE`, `FND_GQL_PROBE_CACHE`, `FND_CPT_THROTTLE_WAITS`, `FND_CPT_OVERLAY_VERIFY`, `FND_CPT_OVERLAY_VERIFY_WAIT`, `FND_THEME_JSON_VERIFY`, `FND_THEME_JSON_VERIFY_WAIT`) in `.claude/domaine.env`, `~/.config/domaine/env` and `~/.claude/settings.json` → `env`: fe does not read the old keys.
 
 ## Skills
 
@@ -61,7 +57,7 @@ offer at the end of the run, never an automatic start; only `/fe:ship` runs the 
 | `/fe:write-technical-approach` | drafts a Technical Approach from the ticket's Description and Acceptance Criteria, then writes the field after approval | `base:jira-reader`, `base:doc-reader`, `base:jira-writer` → `/fe:develop-feature-or-fix` |
 | `/fe:develop-feature-or-fix` | implements an approved Technical Approach with in-browser validation | `base:jira-reader`, `base:figma-reader`, `base:doc-reader`, `fe:theme-explorer`, `base:bug-hunter` → `/fe:qa-feature-or-fix` |
 | `/fe:qa-feature-or-fix` | structured QA of a finished change against its ticket: checklist, browser checks, pass / fail report | `base:jira-reader`, `base:figma-reader`, `base:jira-writer` → `/base:pre-commit-review` (with the profile word) once every blocking check passes |
-| `/fe:write-steps-to-test` | Steps to Test in Domaine's format, written to the field after approval | `base:jira-reader`, `base:doc-reader`, `base:jira-writer` → `/fe:create-pull-request` when the branch has no PR |
+| `/fe:write-steps-to-test` | Steps to Test in Domaine's format, written to the field after approval; the series' last step | `base:jira-reader`, `base:doc-reader`, `base:jira-writer` → `/fe:create-pull-request` when the branch has no PR |
 | `/fe:create-pull-request` | a pull request with the Domaine description and the theme-preview table | `base:jira-reader`, `base:change-reviewer`, `base:bug-hunter`, `/fe:preview-theme`'s script → `/fe:write-steps-to-test` while the field is empty |
 | `/fe:preview-theme` | creates or refreshes an unpublished preview theme from the branch; in a new worktree, un-pins the copied store config first | `scripts/create-preview-theme.sh`, `scripts/worktree-theme.sh` |
 | `/fe:preflight-checks` | checks the project, the tools and the dev server before work starts | → `/fe:write-technical-approach` or `/fe:develop-feature-or-fix` |
@@ -80,9 +76,6 @@ main checkout's session theme) and prints the dev-server line with that port. On
 the script answers `error=not_a_linked_worktree` and the skill goes on without it. `/fe:ship` offers
 the same two steps before it starts.
 
-fnd's `smoke-test` skill has no fe copy: `/base-doctor` and `/fe-doctor` check an install. The
-`qa-preflight` skill moves to the qa plugin (`/qa:preflight`).
-
 ## Agent
 
 | Agent | Does |
@@ -98,7 +91,7 @@ session's `fe plugin root:` line) and base's by their path under base's root (`<
 | Reference | Read by | Holds |
 |---|---|---|
 | `references/session-theme.md` | `/fe:ship`, `/fe:preview-theme`, `/fe:create-pull-request` | one preview theme per work stream: the gate, the pin into `shopify.theme.toml`, the worktree un-pin |
-| `references/preview-theme-errors.md` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:ship` | `create-preview-theme.sh`'s `error=` outcomes, Shopify rejections and page deep-links |
+| `references/preview-theme-errors.md` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:ship` | how to read a `create-preview-theme.sh` run (its workspace lines and warnings), one entry per `error=` key, Shopify rejections and page deep-links |
 | `references/theme-gotchas.md` | `/fe:develop-feature-or-fix` | Shopify theme traps that fail silently: dropped settings, presets, Liquid limits, cascade layers, browser checks |
 | `references/technical-approach-format.md` | `/fe:write-technical-approach` | the short TA format |
 | `references/research-pressure-test.md` | `/fe:write-technical-approach`, `/fe:develop-feature-or-fix`, `/fe:ship` | cross-checking a draft plan against fresh external sources |
@@ -114,7 +107,7 @@ session's `fe plugin root:` line) and base's by their path under base's root (`<
 | Script | Run by | Does |
 |---|---|---|
 | `scripts/create-preview-theme.sh` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:ship` | builds and pushes an unpublished preview theme (`create`), re-pushes one (`refresh`), pins the session theme (`pin`) |
-| `scripts/session-theme.sh` | sourced by `create-preview-theme.sh`, run by `worktree-theme.sh` | the pin and un-pin grammar of `shopify.theme.toml` (`# fe:session-theme`, `# fe:superseded`; a pin fnd wrote is read too) |
+| `scripts/session-theme.sh` | sourced by `create-preview-theme.sh`, run by `worktree-theme.sh` | the pin and un-pin grammar of `shopify.theme.toml` (`# fe:session-theme`, `# fe:superseded`) |
 | `scripts/worktree-theme.sh` | `/fe:preview-theme` in a worktree, `/fe:ship` | the Shopify half of a new worktree: the one-time un-pin and the dev-server line |
 | `scripts/theme-json.sh` | the skills, through the `store-access` section | reads and writes a theme's JSON files (`templates/*.json`, `config/settings_data.json`) with a read-back check |
 | `scripts/shopify-admin-gql.sh` | the skills, through the `store-access` section | one Admin GraphQL call against the project's store |
@@ -133,12 +126,12 @@ order, each with the id `fe:<name>`:
 
 | Name | Holds | When |
 |---|---|---|
-| `root` | `fe plugin root: <path>`, the directory fe's scripts and references start from | always |
+| `root` | `fe plugin root: <path>`, the directory fe's scripts and references start from; the same line defines `<fe root>` and `<base root>` (the `base plugin root:` path) for every fe skill, agent and reference, and says to spell both out in commands since `${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell | always |
 | `profile` | `fe project profile: <foundation\|theme\|none>` | always |
 | `comment-discipline-foundation` | LiquidDoc on every snippet param; `src/entry/core/*` is protected; the Liquid core is hand-synced from the foundation repo, so prefer a copy | profile `foundation` |
-| `store-access` | the two store runners, `scripts/shopify-admin-gql.sh` and `scripts/theme-json.sh`, with their paths under fe's root; never `Read` `.env` or `shopify.theme.toml` | the project root holds `shopify.theme.toml` or `.env` |
-| `worktree` | `worktree copy list: shopify.theme.toml` (the line `/base:worktree` reads), then `/fe:preview-theme` in the new worktree | always |
-| `progress-series` | the rows of a ticket's `progress.md` in order — `write-technical-approach`, `develop-feature-or-fix`, `qa-feature-or-fix`, `pre-commit-review`, `commit`, `write-steps-to-test`, `create-pull-request` — and the skill that ticks each; a batch lists its tickets, then the same tail | always |
+| `store-access` | the two store runners, `scripts/shopify-admin-gql.sh` and `scripts/theme-json.sh`, with their paths under fe's root; never `Read` `.env` or `shopify.theme.toml` | the project root holds `shopify.theme.toml`, or `.env` with a profile other than `none` |
+| `worktree` | `worktree copy list: shopify.theme.toml` (the line `/base:worktree` reads), then `/fe:preview-theme` in the new worktree | the project root holds `shopify.theme.toml` |
+| `progress-series` | the rows of a ticket's `progress.md` in order — `write-technical-approach`, `develop-feature-or-fix`, `qa-feature-or-fix`, `pre-commit-review`, `commit`, `create-pull-request`, `write-steps-to-test` — and the skill that ticks each; a batch lists its tickets, then the same tail | a profile other than `none`, or `shopify.theme.toml` at the root |
 
 **The profile** is decided once per session id (a `/clear` decides again): `FE_PROFILE` when it holds
 one of the three words, else `scripts/project-profile.sh` on the project root, which also reads
@@ -162,7 +155,7 @@ base@domaine`.
 ## Doctor
 
 `/fe-doctor` checks fe's side of the install and prints one PASS / FAIL / SKIP / WARN row per check,
-the counts, and the last 10 `fe.events` lines. `/base-doctor` checks base's side (slim, fnd, the MCP
+the counts, and the last 10 `fe.events` lines. `/base-doctor` checks base's side (slim, the MCP
 servers).
 
 | Row | Checks |
@@ -170,7 +163,7 @@ servers).
 | `node` | Node 18 or newer |
 | `manifest` | the manifest's version, the name `fe`, `base` in its `dependencies` |
 | `scripts` | every `scripts/*.sh` but the sourced `_*.sh` keeps its exec bit and answers `--help` (`project-profile.sh` is probed by the `profile` row) |
-| `base` | base installed (user scope or this project) and enabled — else `claude plugin install base@domaine` |
+| `base` | base installed (user scope or this project) and enabled — else `claude plugin install base@domaine`; FAIL when that install lacks `<base root>/scripts/review-scope.sh` (the PR review gate runs it) — update base |
 | `shopify-cli` | `shopify version` answers; absent or failing only warns (the store scripts need it, the rest of fe does not) |
 | `profile` | the word and how it was decided: `FE_PROFILE`, `project-profile.sh`, or a fallback to `none` (warns); in a session, the session's own decision |
 | `store-config` | `shopify.theme.toml` and `.env` present at the project root — presence only, never a value; one missing warns; neither in a `none` project skips |
@@ -236,7 +229,9 @@ the process environment wins.
 - `tests/fe-scripts-sim.sh` — the store scripts, `worktree-theme.sh` and `project-profile.sh` against
   stub CLIs and synthetic configs.
 - `tests/fe-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
-- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no fnd name is left (the
+- `tests/helper-parity-sim.sh` — the helpers `scripts/doctor.cjs` and `scripts/_shopify-common.sh` share
+  with the other plugins' copies stay byte-identical.
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no legacy plugin name is left (the
   same checker for every team plugin on base).
 - `tests/base-qa-stores-sim.sh` — base's QA store registry, `plugins/base/scripts/qa-stores.cjs`, which
   `/fe:write-steps-to-test` names.

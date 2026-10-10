@@ -110,20 +110,27 @@ esac
 
 # Detection climbs like the env layer does, so a hook running in a subdirectory answers about the
 # checkout rather than about the folder it happens to stand in — and stops at the repo boundary,
-# because a marker outside this repo describes somebody else's project. Globs, not `find`: the
+# because a marker outside this repo describes somebody else's project. Then one level down from
+# the start, for a repo that keeps its theme in a subdirectory (`theme/`). Globs, not `find`: the
 # markers all sit at a fixed depth, and an unmatched pattern stays literal, which no `-f` accepts.
+_pp_detect() {
+  for _ppp in "$1"/snippets/@*.liquid "$1"/sections/core-*.liquid "$1"/blocks/core-*.liquid; do
+    if [ -f "$_ppp" ]; then printf 'foundation\n'; exit 0; fi
+  done
+  if [ -d "$1/src/entry/core" ]; then printf 'foundation\n'; exit 0; fi
+  if [ -f "$1/layout/theme.liquid" ]; then printf 'theme\n'; exit 0; fi
+}
 _ppd="$_ppdir"
 _ppi=0
 while [ "$_ppi" -lt 50 ]; do
-  for _ppp in "$_ppd"/snippets/@*.liquid "$_ppd"/sections/core-*.liquid "$_ppd"/blocks/core-*.liquid; do
-    if [ -f "$_ppp" ]; then printf 'foundation\n'; exit 0; fi
-  done
-  if [ -d "$_ppd/src/entry/core" ]; then printf 'foundation\n'; exit 0; fi
-  if [ -f "$_ppd/layout/theme.liquid" ]; then printf 'theme\n'; exit 0; fi
+  _pp_detect "$_ppd"
   [ -e "$_ppd/.git" ] && break
   [ "$_ppd" = / ] && break
   _ppd="${_ppd%/*}"; [ -n "$_ppd" ] || _ppd=/
   _ppi=$((_ppi + 1))
+done
+for _ppd in "$_ppdir"/*/; do
+  [ -d "$_ppd" ] && _pp_detect "${_ppd%/}"
 done
 printf 'none\n'
 exit 0

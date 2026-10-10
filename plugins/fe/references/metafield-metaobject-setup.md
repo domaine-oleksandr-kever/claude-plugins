@@ -2,7 +2,6 @@
 
 Shared reference for `/fe:develop-feature-or-fix` (and the Data / Config section of
 `/fe:write-technical-approach`).
-**`<fe root>`** = the path on the session context's `fe plugin root:` line, **`<base root>`** = the path on its `base plugin root:` line (`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell).
 
 **When the ticket — or a linked doc (e.g. a Notion data-mapping / schema page, see
 `<base root>/references/reading-linked-docs.md`) — describes a metafield or metaobject**, the
@@ -180,7 +179,7 @@ metafield → mock instances → product bind:
 Write it to the task workspace — `.claude/tasks/<work-id>/metaobject-setup.graphql` (and, if
 useful, a companion `tmp/inspection.graphql` for STEP 0) — not the repo's `docs/`, so
 ticket-scoped working files never ship with the branch
-(`<base root>/references/task-workspace.md`). Shape:
+(`<base root>/references/task-workspace.md` → Location & layout). Shape:
 
 - **Header comment block**: API version, the per-step **scopes** required
   (`read/write_metaobject_definitions`, `write_metaobjects`, `read/write_products`), a **diff vs

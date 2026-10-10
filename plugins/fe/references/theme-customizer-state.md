@@ -5,7 +5,7 @@ theme**: `templates/*.json` (which sections a page has, their order, blocks, per
 settings), `sections/*.json` (header/footer section groups) and `config/settings_data.json`
 (global theme settings). You have no customizer UI — but you don't need it: read and write those
 files directly with `<fe root>/scripts/theme-json.sh`, and any customizer-dependent
-AC, bug reproduction, or research question becomes scriptable. **`<fe root>`** = the path on the session context's `fe plugin root:` line, **`<base root>`** = the path on its `base plugin root:` line (`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell).
+AC, bug reproduction, or research question becomes scriptable.
 
 ## Always available — not only when finishing a plan
 

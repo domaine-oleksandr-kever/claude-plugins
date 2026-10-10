@@ -6,7 +6,6 @@ holds a stub and defers to here. Single home of the per-phase mission, brief con
 reference list; the standing rules every brief inherits, the tick/verify loop and the
 `ESCALATE` relay stay in `<fe root>/skills/ship/SKILL.md` → Step 4, and the model
 each phase is pinned to lives in `pipeline-mode.md` → Phase-agent models.
-**`<fe root>`** = the path on the session context's `fe plugin root:` line, **`<base root>`** = the path on its `base plugin root:` line (`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell).
 
 ## Orchestration — who spawns whom
 
@@ -30,10 +29,12 @@ its brief says otherwise.
    Foundation's Tailwind + `core-*` wiring; off `foundation` they do not apply).
    In-browser validation vs design + AC (Chrome DevTools MCP), data/customizer state walks
    via the runners, `git add` every new file, test
-   paths / gids / `ceiling:` entries for intentional simplifications → `notes.md`.
+   paths / gids / `ceiling:` entries for intentional simplifications → `notes.md`, and a
+   `ta-divergence: <what> — <why>` line for every departure from the TA (never a TA field write).
 2. **qa** — a fresh agent that did NOT implement, **plus a parallel `base:bug-hunter` spawn**
    over the diff as it stands at qa time (pre-finalize; pass the base branch, the
-   `notes.md` `ceiling:` entries and the paths on its last `build-dirtied:` line) —
+   `notes.md` `ceiling:` entries and the `excluded=` paths of
+   `<base root>/scripts/review-scope.sh --ws .claude/tasks/<work-id>`) —
    live QA can't reproduce timing races on a slow local proxy; the static hunt covers
    them from the code. The qa agent's brief: **first extend `qa.md`** with break-it rows
    derived from the *final diff* per `<base root>/references/break-it-qa.md` → Deriving the rows (interactions
@@ -51,19 +52,13 @@ its brief says otherwise.
    preserved); no line recorded → build the `[ELC-…]` theme
    (`<fe root>/scripts/create-preview-theme.sh create --name "<name>" --reuse`)
    and record it as `session-theme: <id>` + links in `notes.md`, so create
-   happens at most once per work stream. `warn=build_dirtied=<path,…>` → append
-   `- <YYYY-MM-DD> build-dirtied: <path> <path>` to `notes.md`
-   (`<fe root>/references/preview-theme-errors.md`); never restore unasked. A create/reuse
-   that exits **0** but prints
-   `overlay=partial` + `warn=overlay_file_dropped` is not a reviewable preview — the named
-   settings files never landed, so their pages 404 or serve stale content — and neither is a
-   `--reuse` run printing `overlay=empty` + `warn=overlay_empty` (nothing overlaid, the theme
-   keeps its previous settings); follow
-   `<fe root>/references/preview-theme-errors.md` and never book those 404s as branch
-   defects. `error=refresh_unverifiable`, `error=reuse_unverifiable`,
+   happens at most once per work stream. Every run's output — `build_dirtied` (never restore
+   unasked), an exit-0 run that is not reviewable (never book its 404s as branch defects), the
+   workspace lines — per `<fe root>/references/preview-theme-errors.md` → Reading a
+   create/refresh result. `error=refresh_unverifiable`, `error=reuse_unverifiable`,
    `error=dev_theme_write_refused`, `error=theme_not_found` (the recorded theme was deleted, or lives on another store — the
    `session-theme:` line's preview_url host names it),
-   `error=dev_theme_not_found` (the toml's settings source was deleted) →
+   `error=dev_theme_not_found` (on a create: the toml's settings source was deleted) →
    ESCALATE; the pipeline never passes `--allow-unverified` or `--allow-dev-theme`, and never
    creates a replacement theme on its own. **No `--pin-toml` here** — this phase is past the ✋
    and rewriting the developer's `shopify.theme.toml` unasked (possibly the choice they
@@ -82,8 +77,8 @@ its brief says otherwise.
 3. **finalize** — review + commit in one pass. Review per
    `<base root>/references/review-flow.md` with `hygiene` emphasis
    (`base:change-reviewer` subagent(s), each briefed with the run's
-   `profile:` per that file's §2; its §1 block — every `diff_hash` here and in phase 4 — runs
-   with `ws=.claude/tasks/<work-id>` set in the same shell) — §3's pre-existing-marker
+   `profile:` per that file's §2; every scope and `diff_hash` here and in phase 4 comes from
+   `<base root>/scripts/review-scope.sh --ws .claude/tasks/<work-id>`) — §3's pre-existing-marker
    question is replaced by the pipeline exception (current `diff_hash` → skip and say so;
    stale or absent → full re-review; never ask); apply the objective classes (comment accuracy,
    ticket-ref stripping, untracked referenced files) — C-class refactor findings are NOT
@@ -110,13 +105,13 @@ its brief says otherwise.
    backstop. Never recompute it blindly. Then push the working branch. Tick **both**
    `pre-commit-review` and `commit` rows.
 4. **create-pr** — agent. Brief: the policy answers (preview theme / target branch /
-   storefront path), the `notes.md` `ceiling:` entries **and its `session-theme: <id>`
+   storefront path), the `notes.md` `ceiling:` and `ta-divergence:` entries **and its `session-theme: <id>`
    line — that theme is the PR's preview theme, so the agent refreshes it instead of
    auto-creating another** (`<fe root>/skills/create-pull-request/SKILL.md` step 4 —
    precedence: explicit args → workspace session-theme → auto-create), and
    `<fe root>/skills/create-pull-request/REFERENCE.md` — it owns the title
    convention, the body structure (core skeleton Summary → Jira → theme-preview table →
-   Changes; conditional sections only with real content; ceilings one line each) and the
+   Changes; conditional sections only with real content; ceilings and TA divergences one line each) and the
    preview-theme decision flow (`[ELC-…]` naming, `--reuse`). Escalations, verbatim in
    the brief: `error=build_failed` → ESCALATE with
    the build output; `error=settings_drift` → the reference's manual recovery;
@@ -163,7 +158,7 @@ its brief says otherwise.
    the session theme's code (`<fe root>/scripts/create-preview-theme.sh refresh --theme
    <the session-theme id from notes.md — under session-theme.md's provenance gate>` — settings
    untouched, and it is the same theme the PR table links to; `error=refresh_unverifiable` /
-   `error=dev_theme_write_refused` / `error=theme_not_found` / `error=dev_theme_not_found` →
+   `error=dev_theme_write_refused` / `error=theme_not_found` →
    ESCALATE, never
    `--allow-unverified` / `--allow-dev-theme` from the pipeline, and never a replacement theme:
    the PR table already published the old id, and swapping the link unasked is not this phase's

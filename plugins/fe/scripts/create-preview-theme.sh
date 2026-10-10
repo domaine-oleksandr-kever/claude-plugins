@@ -76,8 +76,9 @@
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
 #       → theme_id=… store=… env=… preview_url=… editor_url=… [pushed=<HEAD sha>] built=… [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json]
-#       pushed= (create too) is printed only when the theme dirs — and, on a build, the tracked
-#       tree — had no uncommitted change before the build, so the push carried HEAD's code.
+#       pushed= (create too) is printed only when the theme dirs — and, on a build or under
+#       --no-build, the tracked tree — had no uncommitted change before the build, so the push
+#       carried HEAD's code.
 #       <ID> must clear the live-theme guard; when `theme list` never answered it must also be an id
 #       some workspace under ./.claude/tasks records as `session-theme:` (`error=refresh_unverifiable`
 #       otherwise), and it must not be the shared dev theme (`error=dev_theme_write_refused`).
@@ -158,7 +159,7 @@
 #         overlay — the dev theme (the settings source) lives on the toml's store, out of the
 #                   token's reach: `create` is refused before the build (`error=overlay_store_mismatch`
 #                   — a fresh theme without settings has no templates and 404s); `refresh` pushes
-#                   code only anyway and skips the dev_theme_not_found check; `info` adds
+#                   code only anyway; `info` adds
 #                   `note=dev_theme_other_store`.
 #         pin     — `pin` and `--pin-toml` are refused (`error=pin_store_mismatch`): the block names
 #                   another store, so `shopify theme dev` would look for the pinned id there.
@@ -174,9 +175,10 @@
 # A dev-theme pull that wrote no *.json at all is `error=overlay_pull_failed` on a fresh create
 # (the theme is deleted) and `overlay=empty` + `warn=overlay_empty` on --reuse (nothing overlaid,
 # the theme keeps its settings) — gated before the read-back, independent of the switch below.
-# The overlay SOURCE is vetted before either build: when the listing answered, names themes and
-# spells ids this script can match but does NOT carry the toml's `theme =` id, create and refresh
-# both refuse `error=dev_theme_not_found` — nothing built, nothing pushed. Same evidence bar and
+# The overlay SOURCE is vetted before create's build: when the listing answered, names themes and
+# spells ids this script can match but does NOT carry the toml's `theme =` id, create refuses
+# `error=dev_theme_not_found` — nothing built, nothing pushed. refresh reads no dev theme: it
+# neither needs a `theme =` line nor checks one. Same evidence bar and
 # same unliftability as refresh's `theme_not_found`; without it a deleted dev theme let the code
 # push land and only the settings pull fail, leaving the theme in that mixed state.
 # FE_CPT_OVERLAY_VERIFY=0 skips the read-back; FE_CPT_OVERLAY_VERIFY_WAIT sets its re-check pause.
@@ -310,14 +312,15 @@ TOKEN=""; TOKEN_SOURCE="env"
 if [ "$FOREIGN" -eq 0 ]; then TOKEN="$(theme_token_from_toml)"; TOKEN_SOURCE="toml"; fi
 [ -n "$TOKEN" ] || { TOKEN="${SHOPIFY_CLI_THEME_TOKEN:-}"; TOKEN_SOURCE="env"; }
 
-[ "$MODE" = pin ] || [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML (env=$TOML_ENV)"
+# Only create (the overlay source) and info read the dev theme; refresh pushes code only.
+case "$MODE" in pin|refresh) ;; *) [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML (env=$TOML_ENV)" ;; esac
 [ -n "${STORE:-}" ]        || fail "no uncommented \`store = \"...\"\` line in $TOML (env=$TOML_ENV)"
 
 # A value that cannot be what it claims to be is a typo or a mis-parse, and handing it to the CLI is
 # an opaque failure at best and the WRONG STORE at worst. A malformed dev theme id is the nastier
 # one: the code push does not use it, so a theme IS created, and only the settings pull fails —
 # which is how a run ends up reporting a pull error while an orphan theme burns a slot on the store.
-if [ "$MODE" != pin ]; then
+if [ "$MODE" = create ] || [ "$MODE" = info ]; then
   case "$DEV_THEME_ID" in *[!0-9]*)
     fail "invalid_dev_theme_id id='$DEV_THEME_ID' (expected digits — check the \`theme =\` line in $TOML)" ;;
   esac
@@ -426,7 +429,13 @@ theme_list_unreadable() { [ "$THEME_LIST_SILENT" -eq 0 ] && [ "$THEME_LIST_OK" -
 # the recorded session theme is the one write target a listing outage may not block (every routine
 # refresh is that id); an id lookup across every workspace under ./.claude/tasks, not the skills'
 # per-stream provenance gate. One grep, no pipe: pipefail could turn a recorded id into "unrecorded"
-session_theme_recorded() { grep -qsE "session-theme: $1([^0-9]|\$)" .claude/tasks/*/notes.md 2>/dev/null; }
+# the workspaces under the cwd and under the repo root: a theme kept in a subdirectory runs from there
+session_theme_recorded() {
+  local top notes=(.claude/tasks/*/notes.md)
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  [ -z "$top" ] || notes+=("$top"/.claude/tasks/*/notes.md)
+  grep -qsE "session-theme: $1([^0-9]|\$)" "${notes[@]}" 2>/dev/null
+}
 theme_name_by_id() { load_theme_list; theme_list_field "$THEME_LIST" "$1" name; }
 theme_role_by_id() { load_theme_list; theme_list_field "$THEME_LIST" "$1" role; }
 theme_found_by_id() { # 0 = the parsed listing contains an object with this id
@@ -511,8 +520,8 @@ assert_not_dev_theme() { # $1 = target id, $2 = context name for the message
 # as refresh's theme_not_found: only a listing that answered, parsed and spells ids this matcher
 # can read may claim absence, and no flag lifts it (absence is deletion, not an outage).
 assert_dev_theme_listed() {
-  # `pin` never gets here and every other mode has already refused an empty or non-numeric value —
-  # but a claim about an id has to be about an id. A foreign store's listing cannot carry it at all.
+  # only create gets here, and it has already refused an empty or non-numeric value — but a claim
+  # about an id has to be about an id. A foreign store's listing cannot carry it at all.
   [ "$FOREIGN" -eq 0 ] || return 0
   case "${DEV_THEME_ID:-}" in ''|*[!0-9]*) return 0 ;; esac
   load_theme_list
@@ -926,7 +935,8 @@ PUSHED_SHA=""
 tracked_changes() { git -c core.quotePath=false status --porcelain --untracked-files=no 2>/dev/null || true; }
 run_build() {
   local log pre dirty; dirty="$(git status --porcelain -- "${THEME_DIRS[@]}" 2>/dev/null || true)"
-  [ "$NO_BUILD" -eq 1 ] && BUILT="skipped"
+  # --no-build pushes whatever an earlier build left, built from any tracked file
+  [ "$NO_BUILD" -eq 1 ] && { BUILT="skipped"; dirty+="$(tracked_changes)"; }
   if [ "$BUILT" = "no" ]; then
     log="$(mk_tmpf)"; pre="$(tracked_changes)"; dirty+="$pre"
     if npm run "$BUILD_SCRIPT" >"$log" 2>&1; then
@@ -1162,7 +1172,6 @@ case "$MODE" in
        && theme_list_speaks_numeric_ids && ! theme_found_by_id "$TARGET"; then
       fail "theme_not_found theme=$TARGET store=$STORE$SRC_NOTE — no theme with that id is listed on the store (a deleted preview theme looks like this); nothing was built or pushed; check the id (a preview URL's \`?preview_theme_id=…\`) or make a fresh one with \`create --name \"<name>\" --reuse\` (add --pin-toml only if the id you lost was the one pinned in shopify.theme.toml) — or the id lives on another store: pass --store <handle> (a \`*.myshopify.com\` preview URL's host or the editor URL's \`/store/<handle>/\` names it)"
     fi
-    assert_dev_theme_listed
 
     run_build
     TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")

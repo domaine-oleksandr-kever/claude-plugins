@@ -1,11 +1,9 @@
 ---
 name: write-steps-to-test
 description: >
-  Write Steps to Test for a Jira ticket in Domaine's standard format — the theme to test in, where
-  the change lives plus the setup from scratch, a walk-through whose steps carry their own
-  expectations, edge cases, and the implementation context a QA engineer cannot get from the AC;
-  fewer test cases, more how it was built. Updates the Jira field after approval — Workflow 5.
-  Use when the user asks to write / draft Steps to Test or QA steps for a Jira ticket.
+  Write Steps to Test for a Jira ticket in Domaine's format (theme, setup, walk-through with
+  expectations, edge cases, build context), then update the Jira field. Use when asked to write /
+  draft Steps to Test or QA steps.
 argument-hint: "<jira-url-or-key> [feature|bug]"
 arguments:
   - name: jira_ticket
@@ -18,7 +16,8 @@ arguments:
 
 Produce **Steps to Test** in Domaine's standard format.
 
-Operating mode: **Phase 1 is ingest + analysis** (ticket + implementation context); Phase 2 drafts the steps and optionally updates Jira. Phase 1 is read-only toward the repo's tracked files; writes go to the task workspace only. **`<fe root>`** / **`<base root>`** = the paths on the session context's `fe plugin root:` / `base plugin root:` lines.
+Series position: Workflow 5 — the series' last step, after `/fe:create-pull-request`: the PR goes up first so its checks run while this is written, and the PR body and diff are its implementation context.
+Operating mode: **Phase 1 is ingest + analysis** (ticket + implementation context); Phase 2 drafts the steps and optionally updates Jira. Phase 1 is read-only toward the repo's tracked files; writes go to the task workspace only.
 
 ## Global rules
 
@@ -30,7 +29,7 @@ Operating mode: **Phase 1 is ingest + analysis** (ticket + implementation contex
 
 ## Phase 1 — Analysis
 
-1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md` (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself); the workspace `.claude/tasks/<TICKET>/` also holds QA repro values in `notes.md`. This skill needs: Description, AC, issue type, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy **via `base:doc-reader`**, per `<base root>/references/reading-linked-docs.md`; if the Notion MCP isn't connected, tell the developer rather than writing steps blind. The reader also returns `comments` (one line each) and `attachments` (local paths) in full — read `comments.md` when the task depends on the discussion, `Read` only the screenshots/frames it points at, and hand a non-empty `attachments_note` to the developer once, verbatim, never as a blocker (`<base root>/references/task-workspace.md` → Read rule, comments & attachments).
+1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md` → Read rule (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself); the workspace `.claude/tasks/<TICKET>/` also holds QA repro values in `notes.md`. This skill needs: Description, AC, issue type, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy **via `base:doc-reader`**, per `<base root>/references/reading-linked-docs.md`; if the Notion MCP isn't connected, tell the developer rather than writing steps blind. Its `comments`, `attachments` and `attachments_note`: `<base root>/references/task-workspace.md` → Read rule.
 2. **Resolve the theme** — the theme QA tests in, in the order `<base root>/references/steps-to-test-format.md` → Theme resolution sets: the ticket first, then an id this session confirmed on that store from the workspace `notes.md` (stated as unconfirmed, with its date), then **ask the developer once** — "which theme does the TL push to for QA?" (one AskUserQuestion) — then the unconfirmed `confirm with the TL` placeholder. Never read the QA store registry for this (`<base root>/scripts/qa-stores.cjs` `defaultTheme` is the QA engineer's own theme, not the TL's target), and never the session's own preview theme from `notes.md`: that is the PR's theme and may be gone by the time QA looks.
 3. **Gather the where + setup material** — the pages by path; the section / block names **as the admin sees them** (from the `{% schema %}`, `t:` keys resolved through `locales/en.default.schema.json`); the editor setup from scratch for everything the change adds or reconfigures (route, each non-default setting with its value by label, blocks, content, **Save**); and the data QA must create (metafield / metaobject definitions and values, fixtures with the properties a stand-in must share, store-wide vs per-theme). Sources: the diff, the TA, the theme repo, and the workspace `notes.md` repro values — or, with no diff available in this session, the developer's own summary of what they built, asked for once; never the QA theme's state, which you cannot see. A name you could not read from the schema or the admin is carried as **unverified** and raised at the ✋ checkpoint, never silently generalised. QA builds the section itself: what this material misses becomes a QA question.
 4. **Draft the walk-through and the implementation notes** — one pass through the feature **as built** (not one scenario per AC): imperative steps, location before action, each carrying its own expectation with exact values, every AC's functionality exercised by at least one step. Name fixtures by role plus an `e.g.` handle with its properties (from `notes.md` or the developer), never a bare handle or "any product that…". Alongside it collect the developer's **choices** for the context item — new settings with their defaults, where a value comes from, what was deliberately left unchanged, known limits, what is not in this ticket — from the diff, the TA, the PR body and `notes.md`; that is the "how the ACs were achieved" part QA cannot get from the AC. On a bug ticket collect instead the root cause and what was changed to fix it.

@@ -2610,6 +2610,15 @@ run_cpt "$L" FAKE_LIST='[]' -- refresh --theme 555 --no-build || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
 else bad P11f-empty-listing-session-theme-proceeds "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 rm -rf "$CPTD/repo/.claude"
+# P11g: a theme kept in a subdirectory runs from there, and the workspace sits at the repo root —
+# the recorded session theme is found there too
+CPTS="$TMP/cptsub"; mkdir -p "$CPTS/.claude/tasks/ABC-1"; cp -R "$CPTD/repo" "$CPTS/theme"
+git -C "$CPTS" init -q
+printf -- '- 2026-09-06 session-theme: 555 ([ABC-1] Kever)\n' > "$CPTS/.claude/tasks/ABC-1/notes.md"
+rc=0; L="$TMP/cpt11g"; : > "$L"
+run_cpt_at "$CPTS/theme" "$CPTD/shim:$PATH" "$L" FAKE_LIST_FAIL=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad P11g-session-theme-at-repo-root "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
 
 # P12 (pin): a CRLF toml — the quoted value stops at the closing quote and a bare one drops the CR,
 # so the digits assertion cannot turn a Windows-edited config into a hard failure
@@ -3120,7 +3129,7 @@ else bad P23k-pin-gid-listing "rc=$rc out=$(tr '\n' ';' < "$O") toml=$(grep -v p
 # branch's code over the settings it already had). Same evidence bar as theme_not_found, before
 # the build: nothing built, nothing pushed, nothing pulled.
 DEVLESS='[{"id":555,"name":"PREVIEW-X","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]'
-for cmd in "create --name PREVIEW-X --reuse" "create --name PREVIEW-FRESH" "refresh --theme 555"; do
+for cmd in "create --name PREVIEW-X --reuse" "create --name PREVIEW-FRESH"; do
   rc=0; L="$TMP/cpt61"; : > "$L"
   run_cpt "$L" FAKE_LIST="$DEVLESS" -- $cmd || rc=$?
   if [ "$rc" -eq 1 ] \
@@ -3149,15 +3158,23 @@ for lst in "FAIL" "<html>503 Service Unavailable</html>" "[]" '[{"id":null,"name
   if ! grep -q 'dev_theme_not_found' "$O" && [ "$(cpt_calls 'theme push' "$L")" -ge 1 ]; then ok
   else bad "P61c-fail-open[$i]" "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
 done
-# P61d: a toml with no `theme =` at all never reaches the check — that config is refused first,
-# and a refusal about the overlay source would name a value the file does not have
+# P61d: refresh pushes code only, so the overlay source is none of its business: a deleted dev theme,
+# a toml with no `theme =` line and a malformed one all let it push
 F61="$CPTD/toml/no-dev-theme.toml"
 printf '[environments.development]\nstore = "acme-dev"\npassword = "shptka_fixture1234"\n' > "$F61"
-rc=0; L="$TMP/cpt61d"; : > "$L"
-run_cpt "$L" TOML_PATH="$F61" FAKE_LIST="$DEVLESS" -- refresh --theme 555 --no-build || rc=$?
-if [ "$rc" -eq 1 ] && grep -q '^error=no uncommented ' "$O" && ! grep -q 'dev_theme_not_found' "$O" \
-   && [ ! -s "$L" ]; then ok
-else bad P61d-no-theme-line "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+i=0
+for t in "" "TOML_PATH=$F61" "TOML_PATH=$CPTD/toml/badid.toml"; do
+  i=$((i + 1)); rc=0; L="$TMP/cpt61d$i"; : > "$L"
+  run_cpt "$L" $t FAKE_LIST="$DEVLESS" -- refresh --theme 555 --no-build || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && ! grep -q '^error=' "$O" \
+     && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+  else bad "P61d-refresh-needs-no-dev-theme[$i]" "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+done
+# P61e: create still refuses a toml with no `theme =` line before any store call
+rc=0; L="$TMP/cpt61e"; : > "$L"
+run_cpt "$L" TOML_PATH="$F61" FAKE_LIST="$DEVLESS" -- create --name PREVIEW-X --no-build || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=no uncommented ' "$O" && [ ! -s "$L" ]; then ok
+else bad P61e-create-needs-dev-theme "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
 # ------------------------------ create-preview-theme.sh build_dirtied + pushed= --
 # A git checkout of the fixture: the build may rewrite a tracked file, and HEAD is the pushed commit.
@@ -3207,6 +3224,12 @@ rc=0; L="$TMP/cpt70e"; : > "$L"
 run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^built=yes$' "$O" && ! grep -q '^pushed=' "$O"; then ok
 else bad P70e-uncommitted-build-input-no-pushed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# P70g: --no-build pushes what an earlier build made, so a dirty tracked build input outside the theme
+# dirs withholds pushed= too
+rc=0; L="$TMP/cpt70g"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=skipped$' "$O" && ! grep -q '^pushed=' "$O"; then ok
+else bad P70g-no-build-dirty-input-no-pushed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 cpt_git checkout -q -- .
 # P70f: a non-ASCII artifact is named verbatim, not C-quoted, so the notes.md line built from it
 # matches base's `git -c core.quotePath=false ls-files` path
@@ -4655,12 +4678,6 @@ o4=""
 for k in $EVK; do o4="$o4$(cd "$EVR/repo/sub" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env "$k")"; done
 if [ "$o4" = "pppppp" ]; then ok; else bad EV4-project-ok-keys "got='$o4' want six p"; fi
 
-# EV5: the old FND_* spelling answers nothing — fe reads its own prefix only, in both layers
-printf 'FND_GQL_PROBE_CACHE=0\nFND_CPT_THROTTLE_WAITS=1 1\n' > "$EVR/repo/.claude/domaine.env"
-printf 'FND_GQL_PROBE_CACHE=0\n' > "$EVR/cfg/domaine/env"
-o5="$(cd "$EVR/repo" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FE_GQL_PROBE_CACHE)$(cd "$EVR/repo" && XDG_CONFIG_HOME="$EVR/cfg" domaine_env FE_CPT_THROTTLE_WAITS)"
-if [ -z "$o5" ]; then ok; else bad EV5-legacy-prefix-ignored "got='$o5'"; fi
-
 # EV6: the dialect — leading indent, spaces around '=', trailing spaces, a CRLF line, a duplicate
 # (first wins), a comment, and an EMPTY project value that shadows the global one (the first layer
 # that carries the key wins; callers read empty as "no value")
@@ -4854,6 +4871,13 @@ pp_eq PP12c-marker-above-the-boundary none "$PPR/outer/inner"
 mkdir -p "$PPR/outer/wt"; printf 'gitdir: /elsewhere\n' > "$PPR/outer/wt/.git"
 pp_eq PP12d-git-file-boundary none "$PPR/outer/wt"
 
+# PP12e: a repo that keeps its theme one level down (`theme/`) answers about that theme from its root;
+# two levels down is not probed
+mkdir -p "$PPR/mono/.git" "$PPR/mono/theme/snippets" "$PPR/deep/a/b/layout"
+: > "$PPR/mono/theme/snippets/@card.liquid"; : > "$PPR/deep/a/b/layout/theme.liquid"
+pp_eq PP12e-theme-one-level-down foundation "$PPR/mono"
+pp_eq PP12f-two-levels-down-is-not none "$PPR/deep"
+
 # PP13: an EMPTY first argument is a caller whose variable did not resolve, not "use the working
 # directory" — answering about wherever the hook happened to start is the silent wrong answer
 pp_run ""
@@ -4874,16 +4898,6 @@ pp_rc=0
 pp_out="$(FE_PROFILE= "$BASH_BIN" "$PPS" "$PPR/emptyenv" 2>"$E")" || pp_rc=$?
 if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = foundation ]; then ok
 else bad PP15-exported-empty-shadows-file "rc=$pp_rc profile='$pp_out' want='foundation'"; fi
-
-# PP16: the old FND_PROFILE key is not read — a project file that still carries it leaves the
-# answer to detection, in the process env and in both file layers
-mkdir -p "$PPR/legacy/.claude" "$PPR/legacy/snippets"; : > "$PPR/legacy/snippets/@card.liquid"
-printf 'FND_PROFILE=none\n' > "$PPR/legacy/.claude/domaine.env"
-PPG3="$PPR/xdg3"; mkdir -p "$PPG3/domaine"; printf 'FND_PROFILE=theme\n' > "$PPG3/domaine/env"
-pp_rc=0
-pp_out="$(FND_PROFILE=none XDG_CONFIG_HOME="$PPG3" "$BASH_BIN" "$PPS" "$PPR/legacy" 2>"$E")" || pp_rc=$?
-if [ "$pp_rc" -eq 0 ] && [ "$pp_out" = foundation ] && [ ! -s "$E" ]; then ok
-else bad PP16-legacy-key-ignored "rc=$pp_rc profile='$pp_out' err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
 
 # PP17: `--help` / `-h` print the header block and exit 0 (fe's doctor runs every script's --help)
 for ha in --help -h; do
@@ -5070,6 +5084,21 @@ rc=0; ( cd "$TMP" && HOME="$WTR/home" "$BASH_BIN" "$LONE_T/worktree-theme.sh" "$
 if [ "$rc" -eq 1 ] && grep -q "^error=session_lib_not_found path=$LONE_T/session-theme.sh$" "$O" \
    && [ "$(fhash "$WTR/f/wt/shopify.theme.toml")" = "$wt_before" ]; then ok
 else bad WT14-session-lib-missing "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# ER1: every error=/warn= key the preview runner prints names an entry heading, so the errors
+# reference's one-entry awk read finds its guidance
+ERR_REF="$ROOT/plugins/fe/references/preview-theme-errors.md"
+er_missing=""
+for k in $(grep -ohE '(error|warn)=[a-z_]+' "$CPT" "$ROOT/plugins/fe/scripts/_shopify-common.sh" "$ROOT/plugins/fe/scripts/session-theme.sh" | sort -u); do
+  [ -n "$(awk -v k="$k" '/^##/ { p = index($0, k) > 0 } p' "$ERR_REF")" ] || er_missing="$er_missing $k"
+done
+if [ -z "$er_missing" ]; then ok; else bad ER1-error-keys-have-entries "no heading names:$er_missing"; fi
+
+# ER2: ship's silent-path copy of the dev-server commands matches session-theme.md step 5
+for c in 'npm run dev -- --theme <id> [--port <N>]' 'shopify theme dev --theme <id> [--port <N>]'; do
+  if grep -qF -- "$c" "$ROOT/plugins/fe/references/session-theme.md" && grep -qF -- "$c" "$ROOT/plugins/fe/skills/ship/SKILL.md"; then ok
+  else bad ER2-dev-command-copy "'$c' is not in both session-theme.md and ship's SKILL.md"; fi
+done
 
 echo "fe-scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

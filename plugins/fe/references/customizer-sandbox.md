@@ -14,5 +14,3 @@ Don't count on GraphQL `themeCreate(source:)` — it refuses redirecting/chunked
 archive links fail with `Src is empty`). Mutate the copy freely, verify via its preview, then
 **delete it** (`shopify theme delete` / `themeDelete`) — stores cap out at 20 themes
 (100 on Plus), and stray sandboxes read as clutter to the client.
-
-**`<fe root>`** = the path on the session context's `fe plugin root:` line, **`<base root>`** = the path on its `base plugin root:` line (`${CLAUDE_PLUGIN_ROOT}` is empty in the Bash tool's shell).

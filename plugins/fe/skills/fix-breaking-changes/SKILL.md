@@ -1,9 +1,9 @@
 ---
 name: fix-breaking-changes
 description: >
-  Apply the fixes documented in `breaking-changes.md` to `templates/**/*.json` and
-  `config/settings_data.json` via a Node script, then verify with theme check. Use when the
-  user asks to fix / apply breaking changes or migrate templates after a major version bump.
+  Apply the fixes in breaking-changes.md to templates/**/*.json and config/settings_data.json, then
+  run theme check. Use when the user asks to fix / apply breaking changes or migrate templates after
+  a major bump.
 argument-hint: "(reads breaking-changes.md from the project root)"
 allowed-tools: Read, Edit, Grep, Glob, Bash(mkdir -p scripts), Bash(cp ${CLAUDE_PLUGIN_ROOT}/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js scripts/fix-breaking-changes.js), Bash(node scripts/fix-breaking-changes.js), Bash(shopify theme check*), Bash(rm scripts/fix-breaking-changes.js)
 ---
