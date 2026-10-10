@@ -145,6 +145,8 @@ describe('event helpers', () => {
     // A persisted Bash window measured against the host's 2 KB preview grew: said so, never `−0%`.
     expect(eventText('', 'Bash', 'compressed', 'text', 2_300, 4_096)).toBe('Bash: windowed 2 KB → 4 KB (+78% vs host preview) · text')
     expect(rowLine({ engine: 'text', bytesIn: 2_300, bytesOut: 4_096 })).toBe('slim  text  2 KB → 4 KB  +78%')
+    // A one-line JSON file Read showed almost whole: compressed against the raw bytes, a hair over the host's view.
+    expect(eventText('', 'Read', 'compressed', 'json', 45_500, 46_451)).toBe('Read: compressed 46 KB → 46 KB (+2% vs host preview) · json')
   })
 
   test('pushEvent keeps the newest 200, oldest first', () => {

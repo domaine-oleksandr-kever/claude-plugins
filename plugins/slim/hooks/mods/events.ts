@@ -50,8 +50,8 @@ export function agentPrefix(type: string | undefined, isSub: boolean): string {
   return type ? `${agentLabel(type)} · ` : 'agent · '
 }
 
-/** `jira-reader · getJiraIssue: compressed 118 KB → 29 KB (−75%) · json`; `windowed 2 KB → 4 KB (+74% vs host preview)`
- * when the view grew: the saving is counted from what the host itself would have shown, not from the raw bytes. */
+/** `jira-reader · getJiraIssue: compressed 118 KB → 29 KB (−75%) · json`; the text engine says `windowed`; a view that
+ * grew says `(+74% vs host preview)`: the saving is counted from what the host itself would have shown, not from the raw bytes. */
 export function eventText(
   prefix: string,
   tool: string,
@@ -62,7 +62,7 @@ export function eventText(
 ): string {
   const grew = bytesOut > bytesIn
   const pct = pctCell(bytesIn, bytesOut) + (grew ? ' vs host preview' : '')
-  return `${prefix}${toolName(tool)}: ${grew ? 'windowed' : decision} ${fmtSize(bytesIn)} → ${fmtSize(bytesOut)} (${pct}) · ${engine}`
+  return `${prefix}${toolName(tool)}: ${engine === 'text' ? 'windowed' : decision} ${fmtSize(bytesIn)} → ${fmtSize(bytesOut)} (${pct}) · ${engine}`
 }
 
 /** 812 → `812`, 1_240 → `1.2k`. */
