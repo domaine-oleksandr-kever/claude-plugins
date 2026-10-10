@@ -94,7 +94,7 @@ expect BD1-green 0 "be doctor — plugin root: $P" "PASS  node" "PASS  manifest 
 
 # The shipped plugin passes its own manifest and scripts rows.
 run --home "$H" --project "$PRJ"
-expect BD2-shipped-plugin 0 "plugin root: $ROOT/plugins/be" "PASS  manifest         be " "PASS  scripts          1 script(s)" "!FAIL"
+expect BD2-shipped-plugin 0 "plugin root: $ROOT/plugins/be" "PASS  manifest         be " "PASS  scripts          2 script(s)" "!FAIL"
 
 run --root "$P" --home "$H" --project "$PRJ" --json
 if "$NODE" -e '

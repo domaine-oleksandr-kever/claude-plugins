@@ -519,6 +519,7 @@ as a missing feature. Allow:
 | `api.atlassian.com` plus your `<site>.atlassian.net` | `jira-attachments.sh` — the gateway every authenticated call goes to, and the one unauthenticated `tenant_info` lookup on the site itself |
 | `prnt.sc`, `prntscr.com`, `img.lightshot.app`, `imgur.com`, `i.imgur.com`, `gyazo.com`, `i.gyazo.com`, `share.cleanshot.com`, `snipboard.io` | `external-screenshots.sh` — the screenshot pages a ticket links and the CDNs their `og:image` points at; the script never fetches any other host |
 | the store's `<store>.myshopify.com` | `shopify-admin-gql.sh`, `theme-json.sh` and the preview-theme scripts |
+| `shopify.dev` | be's `shopify-docs.cjs` — the docs search on a host with no Shopify Dev MCP wiring |
 
 **MCP traffic needs none of it** — a connector server is reached through Anthropic's
 infrastructure, not through the container's egress, so the Figma, Atlassian and Shopify MCPs keep

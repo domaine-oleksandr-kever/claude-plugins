@@ -120,6 +120,8 @@ for f in "$CANON" \
          "$ROOT/tests/fe-doctor-sim.sh" \
          "$ROOT/plugins/fe/scripts/_shopify-common.sh" \
          "$ROOT/tests/fe-scripts-sim.sh" \
+         "$ROOT/plugins/be/scripts/shopify-docs.cjs" \
+         "$ROOT/tests/be-shopify-docs-sim.sh" \
          "$ROOT/scripts/bump-version.cjs"; do
   if [ -f "$f" ]; then ok; else bad "exists-${f#$ROOT/}" "missing"; fi
 done

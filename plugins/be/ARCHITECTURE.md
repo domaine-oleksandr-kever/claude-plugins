@@ -13,7 +13,8 @@ plugins/be/
 ├── types/index.d.ts             be's $.state contract: the `be` key only
 ├── skills/<name>/SKILL.md       the 3 skills (`/be:<name>`); platform-limitations carries its tables
 │                                in references/limitation-workarounds.md
-└── scripts/doctor.cjs           the static install checks
+├── scripts/doctor.cjs           the static install checks
+└── scripts/shopify-docs.cjs     one shopify.dev docs search for a host with no Dev MCP wiring
 ```
 
 The skills hand off to base by qualified names only (`base:jira-reader`, `base:doc-reader`,
@@ -91,5 +92,7 @@ anyway (a `--plugin-dir` load has no install record). It only reports, never rep
   base check, the section and the subagent context, the doctor command, `be.jsonl`.
 - `tests/be-doctor-sim.sh` — every `doctor.cjs` row PASS / FAIL / SKIP / WARN on sandbox installs,
   `--help`, the exit codes, no secret in the output.
+- `tests/be-shopify-docs-sim.sh` — `shopify-docs.cjs` against a local http stub: an answer, the cap, a
+  timeout, soft errors, a refused connection, usage.
 - `tests/team-refs-lint.sh` — every qualified name and cited path resolves against be and base, no fnd
   name is left, and no skill names another team plugin's.

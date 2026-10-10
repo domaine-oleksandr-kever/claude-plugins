@@ -11,12 +11,13 @@ be builds on base and requires it: the Jira and doc readers, the Jira writer, th
 the shared MCP servers (Atlassian, Notion, the Shopify Dev MCP) are base's
 ([plugins/base/README.md](../base/README.md)). base requires slim, so be runs with slim too.
 
-Current release: **be v0.1.1**.
+Current release: **be v0.2.0**.
 
 ## Status
 
-- Claude Code only: be is a plugin of skills, one skill reference, a doctor script and a hooks module
-  (mods). It ships no adapter for another host, and `scripts/install.sh --plugin be` exits 2.
+- Claude Code only: be is a plugin of skills, one skill reference, a doctor script, a docs-search
+  script and a hooks module (mods). It ships no adapter for another host, and
+  `scripts/install.sh --plugin be` exits 2.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
   not install a dependency on its own: install all three.
 - Never runs together with fnd — install fnd OR base plus the team plugins.
@@ -72,6 +73,11 @@ The skills cite be's own files by their path under be's root (`<be root>/…`, t
 | `skills/platform-limitations/references/limitation-workarounds.md` | `/be:platform-limitations` | the limitation and workaround tables by area, and the escalation steps when a limit has no workaround |
 | `<base root>/references/task-workspace.md` (base's) | `/be:app-scope` | the task workspace a ticket's scope is saved to |
 | `<base root>/references/jira-adf-write.md` (base's) | `/be:app-scope` | how an approved ticket description is converted to ADF before it reaches Jira |
+
+| Script | Run by | Does |
+|---|---|---|
+| `scripts/doctor.cjs` | `/be-doctor`, or by hand | the static install checks (§ Doctor) |
+| `scripts/shopify-docs.cjs` | `/be:shopify-resources`, `/be:platform-limitations` on a host with no Dev MCP wiring | one search of shopify.dev's documentation (`POST https://shopify.dev/assistant/search`, the endpoint the Dev MCP wraps): at most 4000 characters, 20 s, an `error=` line and exit 1 when it fails; it needs the same egress as the MCP server |
 
 ## Conventions
 
@@ -134,6 +140,7 @@ Every switch be reads has a row here; set it in `~/.claude/settings.json` → `e
 |---|---|---|
 | `BE_EVENT_LOG` | on | `0` keeps `be.events` empty and writes no `be.jsonl` |
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
+| `BE_SHOPIFY_DOCS_URL` | `https://shopify.dev/assistant/search` | the endpoint `scripts/shopify-docs.cjs` posts to (tests point it at a local stub) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` and `settings.json` the `base` and `shopify-dev-mcp` rows read |
 
 ## Tests
@@ -142,6 +149,8 @@ Every switch be reads has a row here; set it in `~/.claude/settings.json` → `e
   `plugins/be/hooks/mods/tests/`), both run by `tests/mods-sim.sh` with every other plugin (local
   only: CI has no `claude`).
 - `tests/be-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
+- `tests/be-shopify-docs-sim.sh` — `scripts/shopify-docs.cjs` against a local stub: an answer, the cap,
+  a timeout, soft errors, a refused connection, usage.
 - `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no fnd name is left (the
   same checker for every team plugin on base).
 
