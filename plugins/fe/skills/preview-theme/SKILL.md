@@ -107,15 +107,19 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    theme with settings.
 5. **Report.** Print the resulting `theme_id`, `preview_url`, `editor_url`, `reused`,
    `built`, and — when it isn't `verified` — the `overlay=` verdict (`partial`, `unverified`,
-   `skipped` or `empty`) with its warn lines. If a `preview_path` is known, also give the
-   page-deep-linked preview and the editor-on-template link (formulas: the errors reference's
-   **Page deep-links**); path or template unknown → **ask, never guess**.
+   `skipped` or `empty`) with its warn lines. `warn=build_dirtied=<path,…>` → name the files
+   the build rewrote and offer `git checkout -- <path>` for a build artifact (errors
+   reference). If a `preview_path` is known, also give the page-deep-linked preview and the
+   editor-on-template link (formulas: the errors reference's **Page deep-links**); path or
+   template unknown → **ask, never guess**.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id
    exists, append the id to its `notes.md` as a dated `session-theme: <id> (<name>)
-   <preview_url>` bullet — otherwise the next `/fe:ship` run, qa phase or PR run finds
-   no line and creates a *second* theme for the same stream. Do **not** pass `--pin-toml`
-   here: the pin rewrites the developer's `shopify.theme.toml` and is the session-theme
-   offer's call (`<fe root>/references/session-theme.md`), not this skill's.
+   <preview_url>` bullet, plus a `session-theme-pushed: <sha> <id>` line when the run printed
+   `pushed=` (`<fe root>/references/session-theme.md` step 4) — otherwise the next `/fe:ship`
+   run, qa phase or PR run finds no line and creates a *second* theme for the same stream.
+   Do **not** pass `--pin-toml` here: the pin rewrites the developer's `shopify.theme.toml`
+   and is the session-theme offer's call (`<fe root>/references/session-theme.md`), not this
+   skill's.
 
 ## Steps — refresh
 
@@ -138,12 +142,15 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    another store (which handle) and re-run with `--store <handle>` — only then offer a fresh `create`. `error=dev_theme_not_found` (on `create` too) says the same
    about the toml's settings SOURCE — no flag lifts that either, and every fix rewrites
    `shopify.theme.toml`, so ask which theme is the new source before running `pin --theme <ID>`.
-4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`.
+4. **Report.** Print the returned `theme_id`, `preview_url`, `editor_url`, and `built`, and
+   handle `warn=build_dirtied=` as create's step 5 does.
    Remind the developer that customizer settings were intentionally left as-is.
 5. **Record it when the workspace hasn't.** When a task workspace for this work-id exists
    and its `notes.md` has no `session-theme:` line, append the refreshed id the same way as
    create's step 6 (dated bullet, only the parts the script returned — refresh hands back no
-   name) — and, for the same reason as there, **without** `--pin-toml`.
+   name) — and, for the same reason as there, **without** `--pin-toml`. Whenever the refreshed id
+   is the recorded session theme and the run printed `pushed=`, append the
+   `session-theme-pushed: <sha> <id>` line.
 
 ## In a worktree
 

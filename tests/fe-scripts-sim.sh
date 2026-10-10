@@ -3159,6 +3159,56 @@ if [ "$rc" -eq 1 ] && grep -q '^error=no uncommented ' "$O" && ! grep -q 'dev_th
    && [ ! -s "$L" ]; then ok
 else bad P61d-no-theme-line "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
 
+# ------------------------------ create-preview-theme.sh build_dirtied + pushed= --
+# A git checkout of the fixture: the build may rewrite a tracked file, and HEAD is the pushed commit.
+CPTG="$TMP/cptgit"; cp -R "$CPTD/repo" "$CPTG"
+cat > "$CPTG/package.json" <<'EOF'
+{ "private": true, "scripts": { "build": "true", "dirty": "echo 'y{}' > assets/app.css" } }
+EOF
+cpt_git() { git -C "$CPTG" -c user.name=sim -c user.email=sim@example.com "$@"; }
+cpt_git init -q; cpt_git add -A; cpt_git commit -q -m init
+CPTG_SHA="$(cpt_git rev-parse HEAD)"
+
+# P70: a build that rewrites a tracked file is named in one warn line on an exit-0 run (the theme is
+# still pushed); a file the developer had already modified before the build is not the build's doing,
+# but it rode along in the push, so no pushed= claims the theme carries HEAD
+echo '<!-- wip -->' >> "$CPTG/sections/main-product.liquid"
+rc=0; L="$TMP/cpt70"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-DIRTY" --build-script dirty || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=222$' "$O" && grep -q '^warn=build_dirtied=assets/app.css — ' "$O" \
+   && ! grep -q '^pushed=' "$O" && [ "$(cpt_calls 'theme push' "$L")" -ge 1 ]; then ok
+else bad P70-build-dirtied-warn "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+cpt_git checkout -q -- .
+
+# P70b: a clean build prints no build_dirtied line; refresh reports pushed= too
+rc=0; L="$TMP/cpt70b"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=yes$' "$O" && ! grep -q 'build_dirtied' "$O" \
+   && grep -q "^pushed=$CPTG_SHA$" "$O"; then ok
+else bad P70b-clean-build-refresh-pushed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P70c: --no-build runs no build, so nothing can be dirtied by one; a clean create reports pushed=
+rc=0; L="$TMP/cpt70c"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-NB" --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=skipped$' "$O" && ! grep -q 'build_dirtied' "$O" \
+   && grep -q "^pushed=$CPTG_SHA$" "$O"; then ok
+else bad P70c-no-build-no-dirtied "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# P70d: an untracked theme file (pushed as it stands) or a tracked build input edited but not
+# committed both withhold pushed=
+echo '<p>wip</p>' > "$CPTG/sections/wip.liquid"
+rc=0; L="$TMP/cpt70d"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q '^pushed=' "$O"; then ok
+else bad P70d-untracked-theme-file-no-pushed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rm -f "$CPTG/sections/wip.liquid"
+printf '\n' >> "$CPTG/package.json"
+rc=0; L="$TMP/cpt70e"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=yes$' "$O" && ! grep -q '^pushed=' "$O"; then ok
+else bad P70e-uncommitted-build-input-no-pushed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+cpt_git checkout -q -- .
+
 # ------------------------------ create-preview-theme.sh shared dev theme guard --
 # P54 (bug): `refresh --theme <the toml's theme id>` overwrote the SHARED dev theme's code — the id
 # the toml names as the settings source is never a push target unless a workspace records it as

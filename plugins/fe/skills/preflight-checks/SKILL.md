@@ -16,7 +16,7 @@ allowed-tools: Read, Glob, Bash(shopify version), Bash(node -v), Bash(npm -v), B
 
 Confirm required tooling is installed, configured, and authenticated so you don't hit failures mid-workflow. After this passes, the environment is cleared for Workflows 2–6.
 
-Operating mode: **read-only validation** — the checks below inspect, they never write. Run Phase 1 in plan mode — that is what the `[plan mode]` marker below means.
+Operating mode: **validation** — Phase 1 is read-only toward the repo's tracked files; writes go to the task workspace only.
 
 ## Global rules
 
@@ -26,7 +26,7 @@ Operating mode: **read-only validation** — the checks below inspect, they neve
 
 ---
 
-## Phase 1 — Environment validation `[plan mode]`
+## Phase 1 — Environment validation
 
 Run the full checklist in `<fe root>/references/preflight-checklist.md` (**`<fe root>`** / **`<base root>`** = the paths on the session context's `fe plugin root:` / `base plugin root:` lines) — read it now; it owns the per-check items, commands, and remediation: **CLI tools → MCP servers → project skills & rules → local dev server → Jira attachments → Figma access → plugin update**. Three skill-side specifics: first confirm the active **workspace/IDE** matches the target project and remind the developer to verify IDE/MCP security settings against team policy; second, if the dev server isn't running, note that the develop/QA workflows need it for in-browser validation; third, the plugin-update group is about the **plugins themselves** rather than the project — installed fe and base versions vs. what the marketplace checkout could install. It is advisory: it never gates the workflows, it reports 🟡 with the reason rather than guessing, and `/fe-doctor` + `/base-doctor` are the install checks to point at when something in the plugins looks broken.
 

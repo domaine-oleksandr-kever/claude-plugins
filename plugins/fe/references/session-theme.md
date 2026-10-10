@@ -69,6 +69,12 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    rest** — never invent a name or a URL.
    Add `superseded: <id>` to the same bullet when the pin reported `superseded_theme_id=` (that
    is the environment's previous theme id, and the config is gitignored).
+   Every `create`/`refresh` onto the session theme that prints `pushed=<sha>` appends its own
+   line `- <YYYY-MM-DD> session-theme-pushed: <sha> <id>` — a separate line kind, so the
+   `session-theme:` grep above never matches it; the last one naming the session theme's id is
+   the commit that preview carries, and `/fe:create-pull-request` skips its refresh when no build
+   input changed since (`<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`).
+   No `pushed=` (uncommitted changes rode along) → no line.
 5. **Then the dev server runs on it.** Steps 1–4 already needed this checkout's
    `shopify.theme.toml` (or `TOML_PATH`), so the store is resolved by the time the server
    starts. The start command the developer gets is the line for this checkout's profile —

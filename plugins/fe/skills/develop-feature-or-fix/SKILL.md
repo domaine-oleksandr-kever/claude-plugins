@@ -19,7 +19,7 @@ Implement a feature or fix with an approved Technical Approach, validated ticket
 
 Series position: Workflow 3 — after `/fe:write-technical-approach`, before `/fe:qa-feature-or-fix`.
 Inputs (ask if missing): **Jira ticket URL or key** (`jira_ticket`); confirmation that **Description, AC, Technical Approach, and a Figma URL with a node** are on the ticket.
-Operating mode: **Phase 1 produces the plan** (ingest ticket + designs, align with the TA; its only writes are workspace artifacts) — no production code until the developer approves it. Run Phase 1 in plan mode and leave plan mode after the developer approves the plan.
+Operating mode: **Phase 1 produces the plan** (ingest ticket + designs, align with the TA) — no production code until the developer approves it. Phase 1 is read-only toward the repo's tracked files; writes go to the task workspace only.
 
 ## Global rules
 
@@ -30,7 +30,7 @@ Operating mode: **Phase 1 produces the plan** (ingest ticket + designs, align wi
 
 ---
 
-## Phase 1 — Analysis & planning `[plan mode]`
+## Phase 1 — Analysis & planning
 
 **Kick off the reads in parallel.** When the task scope is already clear (the ticket is in
 context or the request is explicit), spawn `base:jira-reader`, the `base:figma-reader`(s), and

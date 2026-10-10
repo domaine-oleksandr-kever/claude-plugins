@@ -18,7 +18,7 @@ Structured QA for a completed change.
 
 Series position: Workflow 4 — after `/fe:develop-feature-or-fix`.
 Inputs (ask if missing): **Jira ticket URL or key** (`jira_ticket`); **how to view the change** (`how_to_view` — preview URL, theme name, template/page path, flags/settings).
-Operating mode: **Phase 1 is ingest + analysis** (review diff vs TA/AC, build the checklist; its only writes are workspace artifacts); Phase 2 runs the checks and produces the report. Run Phase 1 in plan mode — that is what the `[plan mode]` marker below means.
+Operating mode: **Phase 1 is ingest + analysis** (review diff vs TA/AC, build the checklist); Phase 2 runs the checks and produces the report. Phase 1 is read-only toward the repo's tracked files; writes go to the task workspace only.
 
 ## Global rules
 
@@ -28,7 +28,7 @@ Operating mode: **Phase 1 is ingest + analysis** (review diff vs TA/AC, build th
 
 ---
 
-## Phase 1 — QA preparation `[plan mode]`
+## Phase 1 — QA preparation
 
 1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md`; the workspace also holds dev's test breadcrumbs in `notes.md` (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself). This skill needs: Description, AC, Technical Approach, Steps to Test, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy **via `base:doc-reader`**, per `<base root>/references/reading-linked-docs.md`; Notion MCP missing → tell the developer rather than QA'ing blind. The reader also returns `comments` (one line each) and `attachments` (local paths) in full — read `comments.md` when the task depends on the discussion, `Read` only the screenshots/frames it points at, and hand a non-empty `attachments_note` to the developer once, verbatim, never as a blocker (`<base root>/references/task-workspace.md` → Read rule, comments & attachments). A re-QA after a feedback round is driven by those comments: their findings and the screenshots/frames they attach are input for the checklist — read them before building it.
 2. **Analyse the implementation** — review the diff (branch/PR or local — ask which source); cross-check changes against the TA and each AC.

@@ -67,7 +67,7 @@
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
 #         → read the overlay back (see verify_overlay)
 #       → theme_id=… name=… store=… env=… preview_url=… editor_url=… reused=…
-#         built=… [warn=build_skipped_no_package_json] overlay=…
+#         [pushed=<HEAD sha>] built=… [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json] overlay=…
 #         [warn=overlay_file_dropped file=… [unknown_types=…]] [hint=…] | [warn=overlay_unverified …] | [warn=overlay_empty …]
 #       `--reuse` resolves the name through `theme list`: a listing that never answered is refused
 #       (`error=reuse_unverifiable`), and a name that resolves to the shared dev theme is refused
@@ -75,7 +75,9 @@
 #   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
-#       → theme_id=… store=… env=… preview_url=… editor_url=… built=… [warn=build_skipped_no_package_json]
+#       → theme_id=… store=… env=… preview_url=… editor_url=… [pushed=<HEAD sha>] built=… [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json]
+#       pushed= (create too) is printed only when the theme dirs — and, on a build, the tracked
+#       tree — had no uncommitted change before the build, so the push carried HEAD's code.
 #       <ID> must clear the live-theme guard; when `theme list` never answered it must also be an id
 #       some workspace under ./.claude/tasks records as `session-theme:` (`error=refresh_unverifiable`
 #       otherwise), and it must not be the shared dev theme (`error=dev_theme_write_refused`).
@@ -919,18 +921,27 @@ vet_build_script() {
     package.json "$BUILD_SCRIPT" 2>/dev/null \
     || fail "build_script_missing ($BUILD_SCRIPT) — no such script under \`scripts\` in ./package.json (run from the project root); pick one it defines or pass --no-build; nothing was built or pushed"
 }
+BUILD_DIRTIED=""
+PUSHED_SHA=""
+tracked_changes() { git status --porcelain --untracked-files=no 2>/dev/null || true; }
 run_build() {
-  [ "$NO_BUILD" -eq 1 ] && { BUILT="skipped"; return 0; }
-  [ "$BUILT" = "skipped_no_package_json" ] && return 0
-  local log; log="$(mk_tmpf)"
-  if npm run "$BUILD_SCRIPT" >"$log" 2>&1; then
-    BUILT="yes"; rm -f "$log"
-  else
-    printf 'error=build_failed (npm run %s):\n' "$BUILD_SCRIPT"; tail -n 5 "$log"; rm -f "$log"; exit 1
+  local log pre dirty; dirty="$(git status --porcelain -- "${THEME_DIRS[@]}" 2>/dev/null || true)"
+  [ "$NO_BUILD" -eq 1 ] && BUILT="skipped"
+  if [ "$BUILT" = "no" ]; then
+    log="$(mk_tmpf)"; pre="$(tracked_changes)"; dirty+="$pre"
+    if npm run "$BUILD_SCRIPT" >"$log" 2>&1; then
+      BUILT="yes"; rm -f "$log"
+      BUILD_DIRTIED="$(tracked_changes | grep -vxF -f <(printf '%s\n' "$pre") | cut -c4- | paste -sd, - || true)"
+    else
+      printf 'error=build_failed (npm run %s):\n' "$BUILD_SCRIPT"; tail -n 5 "$log"; rm -f "$log"; exit 1
+    fi
   fi
+  [ -n "$dirty" ] || PUSHED_SHA="$(git rev-parse --verify -q HEAD 2>/dev/null || true)"
 }
 print_build_keys() {
+  [ -z "$PUSHED_SHA" ] || printf 'pushed=%s\n' "$PUSHED_SHA"
   printf 'built=%s\n' "$BUILT"
+  [ -z "$BUILD_DIRTIED" ] || printf 'warn=build_dirtied=%s — the build rewrote these tracked files in the working tree and the theme was pushed with them; restore a build artifact with `git checkout -- <path>` rather than committing it\n' "$BUILD_DIRTIED"
   [ "$BUILT" = "skipped_no_package_json" ] || return 0
   printf 'warn=build_skipped_no_package_json — no ./package.json in this checkout, so nothing was built and the working tree was pushed as it stands; pass --build-script <name> if this repo does need a build\n'
 }

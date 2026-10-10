@@ -18,7 +18,7 @@ arguments:
 
 Produce **Steps to Test** in Domaine's standard format.
 
-Operating mode: **Phase 1 is ingest + analysis** (ticket + implementation context; its only writes are workspace artifacts); Phase 2 drafts the steps and optionally updates Jira. Run Phase 1 in plan mode — that is what the `[plan mode]` marker below means. **`<fe root>`** / **`<base root>`** = the paths on the session context's `fe plugin root:` / `base plugin root:` lines.
+Operating mode: **Phase 1 is ingest + analysis** (ticket + implementation context); Phase 2 drafts the steps and optionally updates Jira. Phase 1 is read-only toward the repo's tracked files; writes go to the task workspace only. **`<fe root>`** / **`<base root>`** = the paths on the session context's `fe plugin root:` / `base plugin root:` lines.
 
 ## Global rules
 
@@ -28,7 +28,7 @@ Operating mode: **Phase 1 is ingest + analysis** (ticket + implementation contex
 
 ---
 
-## Phase 1 — Analysis `[plan mode]`
+## Phase 1 — Analysis
 
 1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md` (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself); the workspace `.claude/tasks/<TICKET>/` also holds QA repro values in `notes.md`. This skill needs: Description, AC, issue type, Technical Approach, Steps to Test, Figma links, environment notes (plus `figma_urls` / `notion_urls` / `other_links`). `needs_clarification` → ask. **Read the linked docs** that define expected behaviour/data/copy **via `base:doc-reader`**, per `<base root>/references/reading-linked-docs.md`; if the Notion MCP isn't connected, tell the developer rather than writing steps blind. The reader also returns `comments` (one line each) and `attachments` (local paths) in full — read `comments.md` when the task depends on the discussion, `Read` only the screenshots/frames it points at, and hand a non-empty `attachments_note` to the developer once, verbatim, never as a blocker (`<base root>/references/task-workspace.md` → Read rule, comments & attachments).
 2. **Resolve the theme** — the theme QA tests in, in the order `<base root>/references/steps-to-test-format.md` → Theme resolution sets: the ticket first, then an id this session confirmed on that store from the workspace `notes.md` (stated as unconfirmed, with its date), then **ask the developer once** — "which theme does the TL push to for QA?" (one AskUserQuestion) — then the unconfirmed `confirm with the TL` placeholder. Never read the QA store registry for this (`<base root>/scripts/qa-stores.cjs` `defaultTheme` is the QA engineer's own theme, not the TL's target), and never the session's own preview theme from `notes.md`: that is the PR's theme and may be gone by the time QA looks.

@@ -32,6 +32,10 @@ skim past them. Flow context (decision flow, drift blockquote, push-root mechani
   repo root, so there was nothing to build and the working tree was pushed as it stands (a plain
   theme repo). Report `built=` as it is; only if the repo really does need a build is the fix
   `--build-script <name>` from a directory whose `package.json` defines it.
+- **`warn=build_dirtied=<path,…>`** (create & refresh, **exit 0**) → the theme was pushed, but the
+  build rewrote those tracked files in the working tree. Name them and offer `git checkout -- <path>`
+  for each one the build owns (a generated manifest, a compiled asset); never restore silently, and
+  keep them out of the review scope and any commit.
 - **`error=not_a_theme_checkout`** → the run started in the wrong directory: none of the theme
   directories (`assets`, `layout`, `sections`, …) is there, so the push root would have been
   empty — and a code push carries no `--nodelete`, so it would strip the theme it landed on.

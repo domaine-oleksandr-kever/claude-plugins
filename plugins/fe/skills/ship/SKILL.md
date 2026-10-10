@@ -33,7 +33,7 @@ live only in `pipeline.md`.
 
 Inputs (ask if missing): **Jira ticket** (`jira_ticket`); designs from the ticket's Figma
 link or `figma_url`.
-Operating mode: Steps 0–3 interactive (plan-mode discipline — read, align, ask; the only
+Operating mode: Steps 0–3 interactive (read-only discipline — read, align, ask; the only
 writes are the workspace cache and `pipeline.md`); Step 4 autonomous.
 Session model: strongest available as the conductor, **Fable recommended**, Opus acceptable.
 The conductor stays on the session model while every phase agent is

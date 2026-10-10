@@ -16,7 +16,7 @@ Draft a Technical Approach (TA) for a Jira ticket. Follow the phases in order.
 
 Series position: Workflow 2 — after ticket validation, before `/fe:develop-feature-or-fix`.
 Input (ask if missing): **Jira ticket URL or key** (`jira_ticket`) — its **Description** and **Acceptance Criteria** are the governing source of truth.
-Operating mode: **Phase 1 is analysis + outline only** — no repo or Jira writes until the developer approves the outline (run Phase 1 in plan mode and leave plan mode on approval — that is what the `[plan mode]` marker below means); Jira updates only after approval.
+Operating mode: **Phase 1 is analysis + outline only** — read-only toward the repo's tracked files, writes go to the task workspace only, until the developer approves the outline; Jira updates only after approval.
 
 ## North star
 
@@ -38,7 +38,7 @@ Senior-Shopify-developer audience, **~3-minute read** — full guidance: `<fe ro
 
 ---
 
-## Phase 1 — Analysis & planning `[plan mode]`
+## Phase 1 — Analysis & planning
 
 1. **Ingest the ticket** — context-first per `<base root>/references/task-workspace.md` (pass the workspace path to the **`base:jira-reader`** subagent — it writes `ticket.md` itself). This skill needs: Description, AC, **Assumptions**, Technical Approach, Documentation Links, Steps to Test, `figma_urls`. `needs_clarification` → ask the developer. The reader also returns `comments` (one line each) and `attachments` (local paths) in full — read `comments.md` when the task depends on the discussion, `Read` only the screenshots/frames it points at, and hand a non-empty `attachments_note` to the developer once, verbatim, never as a blocker (`<base root>/references/task-workspace.md` → Read rule, comments & attachments). Two or more ticket screenshots are usually current vs intended — say which is which and cite them in the outline.
 2. **Validate readiness** — confirm Description and AC exist and are sufficient. If missing or ambiguous, **stop**, summarize gaps, ask how to proceed.
