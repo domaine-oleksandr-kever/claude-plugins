@@ -145,6 +145,9 @@ clean="$(hash_now)"
 echo rebuilt >> "$R/dist/app.js"; echo rebuilt >> "$R/sub/a file.txt"
 dirty="$(hash_now)"
 WS=.claude/tasks/T-1; mkdir -p "$R/$WS"
+# note <text> — appends one line; the earlier fixture may end without a newline (that path is under test
+# too), and without zsh the (p) branch that used to terminate it never runs.
+note() { [ -z "$(tail -c1 "$R/$WS/notes.md")" ] || echo >> "$R/$WS/notes.md"; printf -- "%s\n" "$1" >> "$R/$WS/notes.md"; }
 printf -- '- 2026-10-09 build-dirtied: t.txt\n- 2026-10-10 build-dirtied: dist/app.js' > "$R/$WS/notes.md"
 git -C "$R" checkout -q -- "sub/a file.txt"; clean_sub="$(hash_now)"; echo rebuilt >> "$R/sub/a file.txt"
 git -C "$R" checkout -q -- dist/app.js; want="$(hash_now)"; echo rebuilt >> "$R/dist/app.js"
@@ -162,25 +165,25 @@ if [ "$hn" != "$want" ] && [ "$(ws=$WS hash_now)" = "$hn" ]; then ok
 else bad n-staged-same "with an exclusion, staging an untracked file moved the hash (or it never counted)"; fi
 git -C "$R" reset -q; rm "$R/n.txt"
 
-echo "- 2026-10-11 build-dirtied: sub/a file.txt ../x /etc/hosts dist * :(glob)** f.txt/" >> "$R/$WS/notes.md"
+note "- 2026-10-11 build-dirtied: sub/a file.txt ../x /etc/hosts dist * :(glob)** f.txt/"
 if [ "$(ws=$WS hash_now)" = "$dirty" ]; then ok
 else bad o-ignored "a spaced path, ../x, an absolute path, a directory or a glob reached the exclusion"; fi
 
 if [ "$(ws=.claude/tasks/NONE hash_now)" = "$dirty" ] && [ "$(ws= hash_now)" = "$dirty" ]; then ok
 else bad p-no-workspace "no workspace notes.md: the hash changed"; fi
-printf -- '- 2026-10-11 build-dirtied: dist/app.js\n- 2026-10-12 build-dirtied:' >> "$R/$WS/notes.md"
+note "- 2026-10-11 build-dirtied: dist/app.js"; printf -- "- 2026-10-12 build-dirtied:" >> "$R/$WS/notes.md"
 if [ "$(ws=$WS hash_now)" = "$dirty" ]; then ok
 else bad p-bare-line "a bare build-dirtied: line (no paths) did not end the exclusion"; fi
 if [ -n "$ZSH_BIN" ]; then
   git -C "$R" checkout -q -- "sub/a file.txt"
-  printf -- '- 2026-10-12 build-dirtied: dist/app.js\n' >> "$R/$WS/notes.md"
+  note "- 2026-10-12 build-dirtied: dist/app.js"
   if [ "$(ws=$WS run_block "$ZSH_BIN")" = "$(ws=$WS run_block)" ] && [ "$(ws=$WS hash_now)" = "$clean" ]; then ok
   else bad p-zsh "zsh and bash disagree on the exclusion"; fi
 fi
 
 # (q) a non-ASCII tracked path still matches its token (git would C-quote it)
 git -C "$R" checkout -q -- .; echo v1 > "$R/é.js"; git -C "$R" add é.js; git -C "$R" commit -qm accent
-printf -- '- 2026-10-13 build-dirtied: é.js\n' >> "$R/$WS/notes.md"
+note "- 2026-10-13 build-dirtied: é.js"
 before="$(ws=$WS hash_now)"; echo rebuilt >> "$R/é.js"
 if [ "$(ws=$WS hash_now)" = "$before" ]; then ok
 else bad q-non-ascii "a build-dirtied non-ASCII path was not excluded"; fi
