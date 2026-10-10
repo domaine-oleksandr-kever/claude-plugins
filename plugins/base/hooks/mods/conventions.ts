@@ -1,5 +1,6 @@
 // base's conventions: system-prompt sections for the main session, added context for every subagent.
 // The engine has no event for a subagent's system prompt, so its share rides classic SubagentStart.
+import { atom, update } from 'claude-code'
 import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
 import {
   COMMENT_DISCIPLINE,
@@ -13,6 +14,9 @@ import {
 } from './conventions/text.ts'
 
 type $ = EngineInterface
+
+/** How many system prompts the engine composed through base's hook this session: 0 = the conventions never reached the model (doctor.ts reads it). */
+const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
 
 /**
  * The sections in session order, each `base:<name>`: the switches are read on every render, and the
@@ -50,6 +54,7 @@ export async function subagentContext($: $, agentType: string): Promise<string> 
 export function registerConventions(on: On): void {
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
+    await update($, composed, n => n + 1).catch(() => {})
     const ours = await sections($).catch(() => [])
     const taken = new Set(r.sections.map(s => s.id))
     return { sections: [...r.sections, ...ours.filter(s => !taken.has(s.id))] }

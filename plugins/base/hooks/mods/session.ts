@@ -14,6 +14,7 @@ const READER = /^base:(jira|figma|doc)-reader$/
 
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
 const started = atom({ plugin: 'base', key: 'started' } as const, null)
+/** The session id whose first prompt ran the slim check: a prompt has been sent once it is set (doctor.ts reads it). */
 const checked = atom({ plugin: 'base', key: 'checked' } as const, null)
 
 type $ = EngineInterface

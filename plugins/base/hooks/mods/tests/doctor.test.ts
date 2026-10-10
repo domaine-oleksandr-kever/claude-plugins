@@ -8,6 +8,9 @@ import { NOW, PEEK, ROOT, eventsOf, peek, ran, run, start, submit, world } from 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
 const doctor = ($: any) => run($, '', 'base-doctor')
 const NO_SLIM = ['Bash', 'Read']
+const PROMPT = { model: 'claude-test', promptModel: 'claude-test', surfaces: ['terminal'], tools: ['Bash'], outputStyle: null, traits: [] }
+/** One system prompt rendered: the engine's compose call runs base's hook. */
+const compose = ($: any) => $.prompt.compose(PROMPT)
 
 const row = (status: Row['status'], name: string, detail = 'x'): Row => ({ status, name, detail })
 const staticOut = (rows: Row[]) => JSON.stringify({ root: '/plugin', rows })
@@ -72,6 +75,7 @@ describe('/base-doctor', () => {
       run: () => ran(0, staticOut(GREEN)),
     })
     await start($)
+    await compose($)
     const { text } = await doctor($)
     expect(calls.runs).toHaveLength(1)
     const argv = calls.runs[0]?.argv ?? []
@@ -82,15 +86,16 @@ describe('/base-doctor', () => {
     expect(calls.connects.sort()).toEqual(['atlassian', 'playwright'])
     const out = lines(text)
     expect(out[0]).toMatch(/^base doctor — plugin root: /)
-    expect(out.slice(1, 7)).toEqual([
+    expect(out.slice(1, 8)).toEqual([
       'PASS  node            node 22.0.0 (>= 18 required)',
       'PASS  manifest        base 0.1.0, depends on slim',
       'PASS  slim            slim@domaine 0.5.0 installed and enabled',
       'PASS  slim-live       mcp__slim__view registered',
+      'PASS  conventions     in the system prompt: 1 render through prompt.compose',
       'PASS  mcp:atlassian   connected as plugin:base:atlassian',
       'PASS  mcp:playwright  connected as plugin:base:playwright',
     ])
-    expect(out[7]).toBe('doctor: 6 passed, 0 failed, 0 skipped')
+    expect(out[8]).toBe('doctor: 7 passed, 0 failed, 0 skipped')
   })
 
   t('one doctor line in base.events, and the events tail in the answer', async ($, on) => {
@@ -101,7 +106,7 @@ describe('/base-doctor', () => {
     expect(text).toContain('base events (last 1 of 1, newest last):')
     expect(text).toContain('    2m  start      base 0.1.0')
     expect(text).toContain('SKIP  mcp')
-    expect(await eventsOf($, 'doctor')).toEqual([{ atMs: NOW + 125_000, kind: 'doctor', text: '4 passed, 0 failed, 1 skipped' }])
+    expect(await eventsOf($, 'doctor')).toEqual([{ atMs: NOW + 125_000, kind: 'doctor', text: '4 passed, 0 failed, 2 skipped' }])
   })
 
   t('BASE_EVENT_LOG=0 → the tail says so and no line is written', async ($, on) => {
@@ -120,8 +125,19 @@ describe('/base-doctor', () => {
     })
     await start($)
     const { text } = await doctor($)
-    expect(text).toContain(`FAIL  slim-live  ${SLIM_MISSING}; base refuses its readers until it is`)
+    expect(text).toContain(`FAIL  slim-live    ${SLIM_MISSING}; base refuses its readers until it is`)
     expect(calls.toasts).toEqual([])
+  })
+
+  t('conventions: SKIP before any prompt, FAIL once a prompt went out with no compose, PASS counts the renders', async ($, on) => {
+    world(on, { manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
+    await start($)
+    expect((await doctor($)).text).toContain('SKIP  conventions  no prompt sent yet: send one, then run the doctor again')
+    await submit($, 'hello')
+    expect((await doctor($)).text).toContain('FAIL  conventions  prompt.compose never fired this session: this host composes its prompt without the plugins')
+    await compose($)
+    await compose($)
+    expect((await doctor($)).text).toContain('PASS  conventions  in the system prompt: 2 renders through prompt.compose')
   })
 
   t('a slim the install record lacks but the session loaded → WARN, not FAIL', async ($, on) => {
@@ -131,7 +147,7 @@ describe('/base-doctor', () => {
     })
     await start($)
     const { text } = await doctor($)
-    expect(text).toContain('WARN  slim       not in installed_plugins.json, yet loaded this session (a --plugin-dir load?)')
+    expect(text).toContain('WARN  slim         not in installed_plugins.json, yet loaded this session (a --plugin-dir load?)')
     expect(text).not.toContain('FAIL  slim ')
   })
 
@@ -147,7 +163,7 @@ describe('/base-doctor', () => {
     world(on, { manifest: manifest([]), run: () => ran(2, 'not json', 'doctor: unknown argument --json\nusage') })
     await start($)
     const { text } = await doctor($)
-    expect(text).toContain('FAIL  static     scripts/doctor.cjs exited 2: doctor: unknown argument --json')
+    expect(text).toContain('FAIL  static       scripts/doctor.cjs exited 2: doctor: unknown argument --json')
   })
 
   t('the MCP verdicts: connected, sign-in, the local Figma server, turned off, failed, a rejecting connect', async ($, on) => {
@@ -170,7 +186,7 @@ describe('/base-doctor', () => {
     expect(text).toMatch(/WARN {2}mcp:shopify-dev-mcp +turned off: disabled in \/mcp/)
     expect(text).toMatch(/FAIL {2}mcp:playwright +failed: exited 1/)
     expect(text).toMatch(/FAIL {2}mcp:chrome-devtools-mcp +\S/)
-    expect(text).toContain('doctor: 5 passed, 3 failed, 0 skipped, 2 warned')
+    expect(text).toContain('doctor: 5 passed, 3 failed, 1 skipped, 2 warned')
   })
 
   t(`a server that never answers fails after ${MCP_TIMEOUT_MS / 1000} s`, async ($, on) => {
@@ -186,7 +202,7 @@ describe('/base-doctor', () => {
     world(on, { manifest: 'not json', run: () => ran(0, staticOut(GREEN)) })
     await start($)
     const { text } = await doctor($)
-    expect(text).toContain("FAIL  mcp        base's manifest is unreadable: no server to check")
+    expect(text).toContain("FAIL  mcp          base's manifest is unreadable: no server to check")
   })
 })
 

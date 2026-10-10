@@ -9,7 +9,7 @@ backend, QA) adds its own skills on top and depends on base.
 base reads large results through slim and requires it: compression happens only inside slim, so every
 figure lands in slim's log, and base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.8.2**.
+Current release: **base v0.8.3**.
 
 ## Status
 
@@ -294,6 +294,7 @@ and the last 10 `base.events` lines:
 | `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
 | `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_TMP_TTL` that is not hours): warns with the value the reader falls back to |
 | `slim-live` | what this session loaded: slim's `mcp__slim__view` tool registered |
+| `conventions` | base's `prompt.compose` hook rendered the conventions into the system prompt at least once; FAIL after a prompt was sent = this host composes its prompt without the plugins, so the conventions never reach the model |
 | `mcp:<server>` | each MCP server of base's manifest connects; sign-in needed fails with the `/mcp` pointer; `figma-dev-mode` (the Figma desktop app's local server) only warns |
 
 The rows up to `switches` come from `scripts/doctor.cjs`, which also runs by hand:

@@ -107,7 +107,7 @@ draws `base.progress` and its hints name `/base:save-task-context`; its Log pane
   and through `agent.spawn` (another plugin's `$.agent.spawn`, or a bare name the engine resolved).
   The writer and the reviewers do not need slim and run.
 - **Doctor**: `doctor.cjs` reads `installed_plugins.json` and the user, project and local settings for
-  slim; `/base-doctor` adds what the session loaded (`slim-live`) and each MCP
+  slim; `/base-doctor` adds what the session loaded (`slim-live`, `conventions`) and each MCP
   server's `$.mcp.connect` answer. A slim the install record lacks but the session loaded is a WARN.
 
 ## 5. What stays a script, and why
