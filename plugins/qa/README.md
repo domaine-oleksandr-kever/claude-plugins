@@ -10,7 +10,7 @@ registry (`<base root>/scripts/qa-stores.cjs`), the shared references and the ch
 server are base's ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with
 slim too.
 
-Current release: **qa v0.2.0**.
+Current release: **qa v0.3.0**.
 
 ## Status
 
@@ -18,40 +18,21 @@ Current release: **qa v0.2.0**.
   another host.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
   not install a dependency on its own: install all three.
-- Never runs together with fnd — install fnd OR base plus the team plugins.
 
 ## Install
 
 ```text
 /plugin marketplace add domaine-oleksandr-kever/claude-plugins
 /plugin install slim@domaine
-/plugin install band@domaine
 /plugin install base@domaine
 /plugin install qa@domaine
 /reload-plugins
 ```
 
-`/base-doctor` and `/qa-doctor` then check the install (§ Doctor). The same set as settings, in
-`~/.claude/settings.json`:
-
-```json
-{
-  "enabledPlugins": {
-    "slim@domaine": true,
-    "band@domaine": true,
-    "base@domaine": true,
-    "qa@domaine": true,
-    "fnd@domaine": false
-  }
-}
-```
+`/base-doctor` and `/qa-doctor` then check the install (§ Doctor).
 
 The team plugins — fe, qa, be and pm — co-install: each needs only base, none needs another, so a
 person who tests and builds installs both qa and fe beside the same base.
-
-To move from fnd, run `/plugin uninstall fnd@domaine` and install the set above. The QA store
-registry stays where it was (`~/.config/domaine/qa-stores.json`):
-`<base root>/scripts/qa-stores.cjs` reads the same file.
 
 ## Skills
 
@@ -62,9 +43,11 @@ Invoked by its qualified name. It hands off to base by base's qualified names (`
 |---|---|---|
 | `/qa:preflight <KEY> [<KEY> ...]` | preflights tickets for hands-on QA: ticket, PR and store facts, the theme under test asked for and proved on the storefront, Steps to Test and the AC pre-run at desktop and mobile with screenshots, a two-block brief (house style for Jira, preflight notes for the engineer); posts Block 1 as a Jira comment only on a yes per key | `base:jira-reader`, base's chrome-devtools MCP, local `gh` / `git`, `<base root>/scripts/qa-stores.cjs`; `base:jira-writer` after approval → the engineer's hands-on pass, or back to the developer |
 
-The skill carries its own `skills/preflight/REFERENCE.md`: the registry commands, PR discovery, the
-theme question and page URLs, the unlock and the deployed gate, the rows from Steps to Test, stand-in
-fixtures, the evidence rules, the brief template and the Jira comment rules.
+The skill's detail sits beside its `SKILL.md`, one file per stage, each read when its phase starts:
+`gate.md` (PR discovery, what the run can test, the store registry, the theme question, page URLs,
+the unlock and the theme gate), `rows.md` (rows from Steps to Test, the two viewport passes,
+evidence, stand-in fixtures) and `brief.md` (a filled brief, the Block 1 and Block 2 rules, the chat
+output, the Jira comment).
 
 ## References
 
@@ -74,9 +57,9 @@ qa ships no reference of its own. The skill cites base's by their path under bas
 | Reference (base's) | Read for |
 |---|---|
 | `references/task-workspace.md` | the `.claude/tasks/<KEY>/` workspace read first, and the progress close-out |
-| `references/steps-to-test-format.md` | the numbered Steps to Test shape the rows are read from, and its fixtures rule |
+| `references/steps-to-test-format.md` | cited, not read: `rows.md` maps its numbered shape to rows |
 | `references/break-it-qa.md` | the break-it rows, non-destructive only; `not-executable: access` for the rest |
-| `references/jira-adf-write.md` | the opt-in Jira comment through `base:jira-writer` |
+| `references/jira-adf-write.md` | cited, not read: `base:jira-writer` reads it for the opt-in Jira comment |
 
 ## Conventions
 
@@ -86,15 +69,11 @@ order, each with the id `qa:<name>` and the session scope:
 | Name | Holds |
 |---|---|
 | `root` | `qa plugin root: <path>`, the directory qa's skill and doctor start from |
-| `store-access` | the QA posture while `/qa:preflight` runs or the person says the session is hands-on QA (a team plugin's own QA flow follows its own store-access section): the storefront only — no Admin API write, no theme or theme-settings write, no publish, duplicate or preview-theme creation; storefront-session actions (cart, quantity, a named discount code, checkout to the payment step) in scope. Whatever the scope, a storefront password comes only from `<base root>/scripts/qa-stores.cjs get` and is used only as the browser fill value — never in a file, a workspace note, a Jira comment, a screenshot or another Bash line than the registering `set`, never restated |
+| `passwords` | one paragraph: a storefront password comes only from `<base root>/scripts/qa-stores.cjs get` and is used only as the browser fill value — never in a file, a workspace note, a Jira comment, a screenshot or chat, never on a Bash line other than a `qa-stores.cjs set` that registers or updates a store; the registry file is never read directly |
 
-The text never changes within a session, so the prompt cache holds.
-
-**Subagents** get qa's share as added context at their start (Claude Code's `SubagentStart`): base's
-readers and writer (`base:jira-reader`, `base:jira-writer`, `base:figma-reader`, `base:doc-reader`)
-and Claude Code's `claude-code-guide` and `statusline-setup` get nothing from qa; base's reviewers
-(`base:change-reviewer`, `base:bug-hunter`) get the root line; every other agent gets the root line
-and the store-access posture.
+The store-access posture (storefront only, no Admin or theme write) lives in `/qa:preflight` itself.
+The text never changes within a session, so the prompt cache holds. **Subagents** get nothing from
+qa.
 
 **base required:** at a session start qa looks for base's skills in the command list. Without them it
 shows one toast and writes one `install` line: `qa: needs the base plugin — claude plugin install
@@ -103,7 +82,7 @@ base@domaine`.
 ## Doctor
 
 `/qa-doctor` checks qa's side of the install and prints one PASS / FAIL / SKIP / WARN row per check,
-the counts, and the last 10 `qa.events` lines. `/base-doctor` checks base's side (slim, fnd, the MCP
+the counts, and the last 10 `qa.events` lines. `/base-doctor` checks base's side (slim, the MCP
 servers).
 
 | Row | Checks |
@@ -157,7 +136,7 @@ Every switch qa reads has a row here; set it in `~/.claude/settings.json` → `e
   only: CI has no `claude`).
 - `tests/qa-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs, base's real registry
   script against a sandbox home.
-- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no fnd name is left (the
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no legacy name is left (the
   same checker for every team plugin on base).
 - `tests/base-qa-stores-sim.sh` — base's QA store registry, `plugins/base/scripts/qa-stores.cjs`, which
   `/qa:preflight` reads.

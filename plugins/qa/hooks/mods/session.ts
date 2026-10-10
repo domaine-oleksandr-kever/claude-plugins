@@ -1,9 +1,9 @@
 // qa's session: the start line, the base check and the conventions — system-prompt sections for the main
-// session, added context for subagents.
+// session; subagents get nothing from qa.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
 import type { QaEvent, QaEventKind } from '../../types'
-import { BASE_AGENT, NO_QA_AGENT, STORE_ACCESS, rootLine } from './conventions/text.ts'
+import { PASSWORDS, rootLine } from './conventions/text.ts'
 import { logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 
@@ -58,15 +58,9 @@ async function baseLoaded($: $): Promise<boolean> {
 export function sections(root: string): PromptComposeSection[] {
   const parts: [string, string][] = [
     ['root', rootLine(root)],
-    ['store-access', STORE_ACCESS],
+    ['passwords', PASSWORDS],
   ]
   return parts.map(([name, text]) => ({ id: `qa:${name}`, text, scope: 'session' }))
-}
-
-/** null for base's readers and writer and Claude Code's helpers; the root for base's reviewers; root and store access for the rest. */
-export function subagentContext(root: string, agentType: string): string | null {
-  if (NO_QA_AGENT.test(agentType)) return null
-  return BASE_AGENT.test(agentType) ? rootLine(root) : `${rootLine(root)}\n\n${STORE_ACCESS}`
 }
 
 export function registerSession(on: On): void {
@@ -90,11 +84,5 @@ export function registerSession(on: On): void {
     const r = await next(e)
     const taken = new Set(r.sections.map(s => s.id))
     return { sections: [...r.sections, ...sections($.plugin.root).filter(s => !taken.has(s.id))] }
-  })
-
-  on('classic.SubagentStart', async ($, e, next) => {
-    const r = await next(e)
-    const ctx = subagentContext($.plugin.root, e.agent_type ?? '')
-    return ctx ? { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] } : r
   })
 }

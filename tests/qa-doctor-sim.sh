@@ -88,7 +88,7 @@ mkhome() {
   if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/.claude/plugins/installed_plugins.json"; fi
   # No settings given → every plugin a fixture installs is enabled, as `claude plugin install` writes it.
   local settings="${3:-}"
-  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fnd@domaine":true}}'
+  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true}}'
   printf '%s\n' "$settings" > "$d/.claude/settings.json"
 }
 

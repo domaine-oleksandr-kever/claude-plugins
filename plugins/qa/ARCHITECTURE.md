@@ -11,7 +11,7 @@ plugins/qa/
 ├── hooks/hooks.json             { "modules": ["./mods/register.ts"] } — the only hook wiring
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── types/index.d.ts             qa's $.state contract: the `qa` key only
-├── skills/preflight/            SKILL.md (`/qa:preflight`) and its REFERENCE.md
+├── skills/preflight/            SKILL.md (`/qa:preflight`), gate.md, rows.md, brief.md
 └── scripts/doctor.cjs           the static install checks
 ```
 
@@ -21,25 +21,19 @@ registry (`scripts/qa-stores.cjs`), the task workspace, the Steps to Test format
 and the ADF write rules all live in base, so a second team plugin reads the same copy. qa names no
 other team plugin's skill or path: the team plugins co-install and never require one another.
 
-## 2. What came from fnd, and what changed
+## 2. The skill's files
 
-The skill is fnd's `qa-preflight`, renamed `preflight`. The phases, the read-only posture, the
-password rules, the theme question and gate, the evidence rules, the brief template and the Jira
-comment rules are fnd's text. What changed is plumbing:
+`SKILL.md` is the phase skeleton: the global rules (store access, passwords, one theme per store) and
+one pointer per phase. The detail is split by when it is needed, so a run loads each file once, at its
+phase, and a run that stops at Phase 1 never loads the last two: `gate.md` (Phases 1–3), `rows.md`
+(Phase 4), `brief.md` (Phases 5–6). Each rule is stated in one file only; another file points at it.
+base's `steps-to-test-format.md` and `jira-adf-write.md` are cited but not read by the skill —
+`rows.md` carries the item → row mapping, and `base:jira-writer` reads the ADF rules itself.
 
-- the readers and the writer are base's (`base:jira-reader`, `base:jira-writer`); the registry is
-  `<base root>/scripts/qa-stores.cjs` and the references are base's, cited by base's root;
-- the host branches went (Claude Code only): one AskUserQuestion, `SendUserFile` in the desktop app
-  else absolute paths, subagents on `model: opus`;
-- the rename to `QA preflight <KEY>` stays, as a fallback: base's title hook names the session only
-  after a ticket it can corroborate, once, so the skill renames when the tool exists and the title
-  does not already name every key of the run;
-- the developer-side QA skill is "the developer's own QA pass", and the Admin GraphQL reads of the
-  stand-in search name no script, as qa ships none;
-- the examples use a placeholder store (`acme-us-uat.myshopify.com`) and placeholder theme ids.
-
-`steps-to-test-format.md` and `break-it-qa.md` moved from fe to base in the same step, as both the
-frontend skills and this one read them.
+The rename to `QA preflight <KEY>` is a fallback: base's title hook names the session only after a
+ticket it can corroborate, once, so the skill renames when the tool exists and the title does not
+already name every key of the run. The examples use a placeholder store
+(`acme-us-uat.myshopify.com`) and placeholder theme ids.
 
 ## 3. How base is required
 
@@ -60,16 +54,17 @@ across an import, so `doctor.ts` repeats `diskOf` and the base lookup rather tha
 
 | File | Hooks | Writes |
 |---|---|---|
-| `session.ts` | `session.start {cwd:/^/}` start line and base check · `prompt.compose`: the `root` and `store-access` sections (ids `qa:<name>`) · `classic.SubagentStart`: the subagents' share as `additionalContext` | `qa.started`, `qa.events` |
+| `session.ts` | `session.start {cwd:/^/}` start line and base check · `prompt.compose`: the `root` and `passwords` sections (ids `qa:<name>`) | `qa.started`, `qa.events` |
 | `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit`: register `/qa-doctor` (every start, and a new session id) · `command.run qa-doctor` (passes `--log-dir` to `doctor.cjs`) | `qa.armed`, `qa.events` |
 
 Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `qa.jsonl` writer), `conventions/text.ts`
-(the section texts and the agent patterns). `<base root>` stays literal in the store-access text: qa
+(the section texts). `<base root>` stays literal in the passwords text: qa
 cannot see base's directory, and base's own session line names it.
 
 The sections are fixed text, so every render repeats the last one byte for byte (the prompt cache).
-Subagents: base's readers and writer and Claude Code's helpers get nothing; base's reviewers the root
-line; every other agent the root line and the store-access posture.
+The main session gets the root line and the password paragraph only; the store-access posture lives in
+the skill, which is where it applies. Subagents get nothing from qa: the preflight's own subagents
+are base's reader and writer, which never touch a password.
 
 ## 5. The atoms
 
@@ -103,8 +98,8 @@ error text is not relayed, as a parse message can quote the file. `/qa-doctor` a
 ## 8. The tests
 
 - `hooks/mods/tests/*.test.ts` through `claude plugin test plugins/qa` (`tests/mods-sim.sh`): the start
-  line and base check, the two sections and the subagent shares, the doctor command, `qa.jsonl`.
+  line and base check, the two sections and the empty subagent share, the doctor command, `qa.jsonl`.
 - `tests/qa-doctor-sim.sh`: every `doctor.cjs` row's PASS / FAIL / SKIP / WARN on a sandbox plugin
   root, home and project, base's real `qa-stores.cjs` as the registry, no secret in the output.
-- `tests/team-refs-lint.sh`: every qualified name and cited path resolves against qa and base, no fnd
+- `tests/team-refs-lint.sh`: every qualified name and cited path resolves against qa and base, no legacy
   name is left, and no skill names another team plugin's.
