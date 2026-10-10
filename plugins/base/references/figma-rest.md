@@ -259,11 +259,15 @@ The tree is a markdown **build tree** — one line per node, hierarchy by indent
   binding, the variables file supplies only the NAME, and the value in the parentheses is the
   **node's own** — what a build ships. When that file also resolves a default-mode value and it
   **differs**, the line carries the discrepancy as `$Name (<node value>; var default <v>)` instead of
-  silently picking a side; when the alias chain leaves the file — the norm when every variable is a
-  library variable — the name alone stands, and with no name at all the label is `$var:<short id>`
-  (the id's tail, never the 40-character library hash). A bound field with no raw counterpart on the
-  node falls back to the variables file's value. With no variables file the header says
-  `tokens: raw values (Variables API unavailable on this plan)` and bindings still show, as
+  silently picking a side. When the variable's modes resolve to two or more **distinct** values, the
+  parentheses also list them — `$Name (<node value>; modes Desktop 20 · Mobile 15)`, the first four
+  modes then `· +N more`, never `/` (so `pad a/b/c/d` and `[size]/lh` keep their separators); an
+  alias into another collection resolves in that collection's default mode, and a mode whose alias
+  chain cycles or leaves the file is left out. When the alias chain leaves the file — the norm when
+  every variable is a library variable — the name alone stands, and with no name at all the label is
+  `$var:<short id>` (the id's tail, never the 40-character library hash). A bound field with no raw
+  counterpart on the node falls back to the variables file's value. With no variables file the header
+  says `tokens: raw values (Variables API unavailable on this plan)` and bindings still show, as
   `$var:<short id> (<node value>)`.
 - `[INSTANCE of "<component>"]` names the main component from the response's `components` map and
   carries its `componentProperties` as `props:{…}` — a SLOT property's value being the id of the node
