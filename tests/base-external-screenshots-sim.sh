@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Simulation harness for plugins/base/scripts/external-screenshots.sh (external-screenshots-sim.sh
-# covers fnd's copy). No network: `curl` and `sleep` are PATH shims, `ffmpeg` and `sips` tripwires
-# that log any call (base's script keeps the image as served; slim's `view` resizes it), and the
-# PATH itself is a dir of symlinks to exactly the tools the script uses. Exit 0 = all green.
+# Simulation harness for plugins/base/scripts/external-screenshots.sh. No network: `curl` and
+# `sleep` are PATH shims, `ffmpeg` and `sips` tripwires that log any call (base's script keeps the
+# image as served; slim's `view` resizes it), and the PATH itself is a dir of symlinks to exactly
+# the tools the script uses. Exit 0 = all green.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -330,7 +330,7 @@ if [ ! -s "$SL" ]; then ok; else bad S8f-delay-zero "sleeps=$(tr '\n' ',' < "$SL
 
 # --------------------------------------------------------------- 9. no resample, ever --
 # the resize is slim's (`view`): no image type, no flag and no tool on PATH makes this script touch
-# the bytes, and fnd's --max-width is an unknown argument here
+# the bytes, and --max-width is an unknown argument here
 for ty in image/png image/jpeg image/gif image/webp; do
   rm -rf "$OUT"; FFL="$TMP/media9"; : > "$FFL"
   rc=0; MEDIA_LOG="$FFL" FAKE_IMG_TYPE="$ty" es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?

@@ -1,4 +1,4 @@
-// base's install state: the start line, the slim and fnd checks at a session's first prompt, and the refusal
+// base's install state: the start line, the slim check at a session's first prompt, and the refusal
 // of the readers while slim's view tool is missing.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
@@ -9,16 +9,6 @@ import type { Disk } from './events.ts'
 export const SLIM_VIEW = 'mcp__slim__view'
 const SLIM_INSTALL = 'claude plugin install slim@domaine'
 export const SLIM_MISSING = `slim is not loaded — ${SLIM_INSTALL}`
-/** fndFound's answer when no settings key enables fnd but its commands are loaded: a claude.ai-synced or --plugin-dir copy. */
-export const LOADED_ONLY = 'loaded-only'
-/** The remedy names the copy found: the enabled settings key, or the synced / plugin-dir copy no key governs. */
-export function withFnd(found: string): string {
-  const fix = found === LOADED_ONLY
-    ? 'an fnd copy is loaded without a settings key (synced from claude.ai or --plugin-dir) — remove it there'
-    : `uninstall fnd (claude plugin uninstall ${found})`
-  return `fnd and base must not run together — ${fix}`
-}
-export const WITH_FND = withFnd('fnd@domaine')
 /** The agents that read through slim's view tool; the writer and the reviewers do not need it. */
 const READER = /^base:(jira|figma|doc)-reader$/
 
@@ -64,20 +54,6 @@ async function slimLoaded($: $): Promise<boolean> {
   return (await $.tool.list()).some(t => t.name === SLIM_VIEW)
 }
 
-/** The enabled settings key, LOADED_ONLY when only its commands give it away, else null. */
-async function fndFound($: $): Promise<string | null> {
-  try {
-    const enabled = (await $.settings.read()).enabledPlugins
-    const key = enabled && typeof enabled === 'object' ? Object.entries(enabled).find(([k, v]) => k.startsWith('fnd@') && v === true)?.[0] : undefined
-    if (key) return key
-  } catch {}
-  try {
-    return (await $.command.list()).some(c => c.plugin === 'fnd') ? LOADED_ONLY : null
-  } catch {
-    return null
-  }
-}
-
 /** The deny reason for a reader spawned while slim is missing, else null; a failed tool listing lets it run. */
 async function refusal($: $, type: string): Promise<string | null> {
   if (!READER.test(type) || (await slimLoaded($).catch(() => true))) return null
@@ -108,11 +84,6 @@ export function registerSession(on: On): void {
       if (!(await slimLoaded($))) {
         await logEvent($, 'install', SLIM_MISSING)
         $.ui.toast(`base: ${SLIM_MISSING}`)
-      }
-      const fnd = await fndFound($)
-      if (fnd) {
-        await logEvent($, 'install', withFnd(fnd))
-        $.ui.toast(`base: ${withFnd(fnd)}`)
       }
     } catch {}
     return r

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { LOADED_ONLY, WITH_FND, SLIM_MISSING, withFnd } from '../session.ts'
+import { SLIM_MISSING } from '../session.ts'
 import { NOW, PEEK, SLIM_VIEW, eventsOf, peek, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -26,17 +26,17 @@ describe('start line', () => {
   })
 
   t('BASE_EVENT_LOG=0 keeps the list empty', async ($, on) => {
-    const { calls } = world(on, { env: { BASE_EVENT_LOG: '0' }, tools: NO_SLIM, enabledPlugins: { 'fnd@domaine': true } })
+    const { calls } = world(on, { env: { BASE_EVENT_LOG: '0' }, tools: NO_SLIM })
     await start($)
     await submit($, 'hello')
     await $.tool.call(spawnArgs('base:jira-reader'))
     expect((await peek($)).events).toEqual([])
-    expect(calls.toasts).toEqual([`base: ${SLIM_MISSING}`, `base: ${WITH_FND}`])
+    expect(calls.toasts).toEqual([`base: ${SLIM_MISSING}`])
   })
 })
 
 describe('install checks at the first prompt', () => {
-  t('slim and no fnd → nothing said', async ($, on) => {
+  t('slim loaded → nothing said', async ($, on) => {
     const { calls } = world(on)
     await start($)
     await submit($, 'hello')
@@ -63,46 +63,6 @@ describe('install checks at the first prompt', () => {
     w.tools = [...NO_SLIM, SLIM_VIEW]
     await submit($, 'hello')
     expect(calls.toasts).toEqual([])
-  })
-
-  t('fnd enabled in settings → the uninstall line', async ($, on) => {
-    const { calls } = world(on, { enabledPlugins: { 'base@domaine': true, 'fnd@domaine': true } })
-    await start($)
-    await submit($, 'hello')
-    expect(calls.toasts).toEqual([`base: ${WITH_FND}`])
-    expect((await eventsOf($, 'install')).map(ev => ev.text)).toEqual([WITH_FND])
-    expect(WITH_FND).toContain('fnd and base must not run together — uninstall fnd')
-  })
-
-  t('fnd disabled in settings and no fnd command → nothing', async ($, on) => {
-    const { calls } = world(on, { enabledPlugins: { 'fnd@domaine': false }, commands: [['band-log', 'band']] })
-    await start($)
-    await submit($, 'hello')
-    expect(calls.toasts).toEqual([])
-  })
-
-  t('fnd loaded without a settings key (a synced or plugin-dir load) → its commands give it away, the line names that copy', async ($, on) => {
-    const { calls } = world(on, { enabledPlugins: { 'fnd@domaine': false }, commands: [['fnd-progress', 'fnd']] })
-    await start($)
-    await submit($, 'hello')
-    expect(calls.toasts).toEqual([`base: ${withFnd(LOADED_ONLY)}`])
-    expect(withFnd(LOADED_ONLY)).toContain('synced from claude.ai')
-    expect(withFnd(LOADED_ONLY)).not.toContain('fnd@domaine')
-  })
-
-  t('the enabled key names the marketplace in the uninstall line', async ($, on) => {
-    const { calls } = world(on, { enabledPlugins: { 'fnd@other': true } })
-    await start($)
-    await submit($, 'hello')
-    expect(calls.toasts).toEqual([`base: ${withFnd('fnd@other')}`])
-    expect(withFnd('fnd@other')).toContain('claude plugin uninstall fnd@other')
-  })
-
-  t('slim missing and fnd present → both lines', async ($, on) => {
-    const { calls } = world(on, { tools: NO_SLIM, enabledPlugins: { 'fnd@domaine': true } })
-    await start($)
-    await submit($, 'hello')
-    expect(calls.toasts).toEqual([`base: ${SLIM_MISSING}`, `base: ${WITH_FND}`])
   })
 })
 

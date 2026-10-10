@@ -1,9 +1,8 @@
-// Autosave: the levers on a stale task workspace (base.progress `stale`) — one context line on a prompt,
-// one blocked stop at turn end, a notes.md marker before an auto-compact. The levers' stale window drops from
-// 20 to 5 min once the context window is 85 % full. BASE_AUTOSAVE=0 turns all three off.
+// Autosave: the levers on a stale task workspace (base.progress `stale`) — one context line on a person's prompt,
+// one blocked stop at turn end, a notes.md marker before an auto-compact. BASE_AUTOSAVE=0 turns all three off.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On } from 'claude-code'
-import { isStale, staleWindowOf } from './progress.ts'
+import type { EngineInterface, FsEntry, On } from 'claude-code'
+import { PERSON, newestWrite } from './progress.ts'
 
 const BLOCK_EVERY = 3
 /** Turns without a workspace write after which earlier savable work counts at a stop too. */
@@ -11,38 +10,33 @@ const QUIET_TURNS = 3
 
 const progress = atom({ plugin: 'base', key: 'progress' } as const, null)
 const autosave = atom({ plugin: 'base', key: 'autosave' } as const, null)
+const marker = atom({ plugin: 'base', key: 'compactMarker' } as const, null)
 
 type $ = EngineInterface
-type Workspace = { id: string; notes: string; mtimeMs: number; staleMs: number; lastSavableMs: number; agentsSince: number; editsSince: number }
+type Workspace = { id: string; notes: string; mtimeMs: number; stale: boolean; lastSavableMs: number; agentsSince: number; editsSince: number }
 
-async function mtimeOf($: $, path: string): Promise<number> {
-  try {
-    return (await $.fs.stat(path)).mtimeMs
-  } catch {
-    return 0
-  }
-}
-
-/** The current work id's workspace with its newest write stat'ed now: a Bash append lands between ticks. */
+/** The published workspace with its newest write listed now: a Bash append lands between ticks and un-stales it. */
 async function workspace($: $): Promise<Workspace | null> {
   if ((await $.env.get('BASE_AUTOSAVE')) === '0') return null
   const p = await read($, progress)
   if (!p || p.workId === null || !p.hasWorkspace) return null
   const dir = `${await $.session.root()}/.claude/tasks/${p.workId}`
-  const notes = `${dir}/notes.md`
-  const mtimeMs = Math.max(await mtimeOf($, `${dir}/progress.md`), await mtimeOf($, notes))
-  const usage = await $.session.usage().catch(() => null)
-  const staleMs = staleWindowOf(usage?.context.percent)
-  return { id: p.workId, notes, mtimeMs, staleMs, lastSavableMs: p.lastSavableMs ?? 0, agentsSince: p.agentsSince ?? 0, editsSince: p.editsSince ?? 0 }
+  let entries: FsEntry[] = []
+  try {
+    entries = await $.fs.list(dir)
+  } catch {}
+  const mtimeMs = Math.max(p.mtimeMs, newestWrite(entries, p.workId, await read($, marker)))
+  return { id: p.workId, notes: `${dir}/notes.md`, mtimeMs, stale: p.stale && mtimeMs <= p.mtimeMs, lastSavableMs: p.lastSavableMs, agentsSince: p.agentsSince, editsSince: p.editsSince }
 }
 
 const minutes = (ws: Workspace, now: number) => Math.floor((now - ws.mtimeMs) / 60_000)
 
+/** Once per stale period: the period ends with the next workspace write (a new `mtimeMs`). */
 async function nudge($: $, ws: Workspace | null): Promise<string | null> {
-  const now = await $.clock.now()
-  if (!ws || !isStale(ws.mtimeMs, ws.lastSavableMs, now, ws.staleMs)) return null
-  const last = ws.mtimeMs ? `last write ${minutes(ws, now)} min ago` : 'nothing saved yet'
-  return `workspace stale: ${last} — save decisions and interim findings to .claude/tasks/${ws.id}/notes.md before you answer`
+  if (!ws?.stale || (await read($, autosave))?.nudgedMs === ws.mtimeMs) return null
+  await update($, autosave, t => (t ? { ...t, nudgedMs: ws.mtimeMs } : t))
+  const age = ws.mtimeMs ? `${minutes(ws, await $.clock.now())} min` : 'unsaved'
+  return `workspace stale ${age}: save findings to .claude/tasks/${ws.id}/notes.md before answering`
 }
 
 /**
@@ -53,8 +47,7 @@ async function stopReason($: $): Promise<string | null> {
   const turn = await read($, autosave)
   const ws = await workspace($)
   if (!turn || !ws) return null
-  const now = await $.clock.now()
-  if (ws.mtimeMs >= turn.startMs || !isStale(ws.mtimeMs, ws.lastSavableMs, now, ws.staleMs)) return null
+  if (ws.mtimeMs >= turn.startMs || !ws.stale) return null
   if (ws.lastSavableMs < turn.startMs && turn.turn - turn.writeTurn < QUIET_TURNS) return null
   if (turn.blockedTurn && turn.turn - turn.blockedTurn < BLOCK_EVERY) return null
   await update($, autosave, t => (t ? { ...t, blockedTurn: t.turn } : t))
@@ -64,17 +57,21 @@ async function stopReason($: $): Promise<string | null> {
 /** An auto-compact gives the model no pass to save in: leave a pointer for the next context instead. */
 async function compactMarker($: $): Promise<void> {
   const ws = await workspace($)
+  if (!ws?.stale) return
   const now = await $.clock.now()
-  if (!ws || !isStale(ws.mtimeMs, ws.lastSavableMs, now, ws.staleMs)) return
   const age = ws.mtimeMs ? ` ${minutes(ws, now)} min` : ', nothing saved yet'
   const line = `- ${new Date(now).toISOString().slice(0, 10)} compact: workspace stale${age}; since then ${ws.agentsSince} reader agents, ${ws.editsSince} edits\n`
   let text = ''
   try {
     text = await $.fs.read(ws.notes)
   } catch {
-    if ((await mtimeOf($, ws.notes)) > 0) return
+    if (await $.fs.stat(ws.notes).then(() => true, () => false)) return
   }
   await $.fs.write(ws.notes, text && !text.endsWith('\n') ? `${text}\n${line}` : `${text}${line}`)
+  const notesMs = (await $.fs.stat(ws.notes)).mtimeMs
+  await update($, marker, () => ({ workId: ws.id, notesMs, priorMs: ws.mtimeMs }))
+  // the compacted context lost the earlier line: the next prompt gets it again
+  await update($, autosave, t => (t ? { ...t, nudgedMs: -1 } : t))
 }
 
 export function registerAutosave(on: On): void {
@@ -89,10 +86,10 @@ export function registerAutosave(on: On): void {
         await update($, autosave, t => {
           const turn = (t?.turn ?? 0) + 1
           const writeTurn = t && t.writeMs === writeMs ? t.writeTurn : turn - 1
-          return { turn, startMs, blockedTurn: t?.blockedTurn ?? 0, writeMs, writeTurn }
+          return { turn, startMs, blockedTurn: t?.blockedTurn ?? 0, writeMs, writeTurn, nudgedMs: t?.nudgedMs ?? -1 }
         })
       }
-      line = await nudge($, ws)
+      if (PERSON.has(e.origin.kind)) line = await nudge($, ws)
     } catch {}
     return next(line ? { ...e, context: [...(e.context ?? []), line] } : e)
   })

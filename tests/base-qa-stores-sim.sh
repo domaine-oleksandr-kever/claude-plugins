@@ -285,6 +285,34 @@ if [ "$rc" -eq 2 ] && ! grep -qF "$PW" "$O" "$E" && grep -q '^Usage:' "$E" \
    && [ "$(snap)" = "$BEFORE" ]; then ok
 else bad C9e-usage-echoes-secret "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
+# C9f: `--flag=value` is the two-token form, a mistyped `--flag=<secret>` is named only up to
+# its `=`, and a `-`-leading secret with no flag before it is not named at all
+HOME="$TMP/home-eq"; EQ_REG="$HOME/.config/domaine/qa-stores.json"
+run set eq.myshopify.com --password="$PW" --alias=EQ
+if [ "$rc" -eq 0 ] && ! grep -qF "$PW" "$O" "$E"; then
+  run get EQ
+  if [ "$rc" -eq 0 ] && [ "$(jsonfield "$O" 'd.password')" = "$PW" ]; then ok
+  else bad C9f-eq-form "rc=$rc got=$(jsonfield "$O" 'd.alias')"; fi
+else bad C9f-eq-form "set rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+BEFORE="$(snap)"
+for bogus in "--pasword=$PW" "-p=$PW" "-Hunter2Secret" "-$PW"; do
+  run set eq.myshopify.com "$bogus"
+  if [ "$rc" -eq 2 ] && ! grep -qF "$PW" "$O" "$E" && grep -q 'unknown option' "$E" \
+     && [ "$(snap)" = "$BEFORE" ]; then ok
+  else bad "C9f-unknown-eq-echo[${bogus%%=*}]" "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+done
+
+# C9g: a forgotten `--password` before a host-shaped secret never keys a store by it
+for sec in 'Hunter2.Secret' 'p@ss.w0rd!'; do
+  run set "$sec"
+  if [ "$rc" -eq 2 ] && ! grep -qiF "$sec" "$O" "$E" && [ "$(snap)" = "$BEFORE" ]; then ok
+  else bad "C9g-secret-as-domain[$sec]" "rc=$rc out=$(head -c 120 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+done
+run set --alias EQ2 'p@ss.w0rd!'
+if [ "$rc" -eq 2 ] && ! grep -qF 'p@ss' "$O" "$E" && [ "$(snap)" = "$BEFORE" ]; then ok
+else bad C9g-secret-as-domain-with-flag "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+HOME="$TMP/home"
+
 # ------------------------------------------- C11 an alias never becomes a second registry key --
 # `<store>` is accepted by alias everywhere else, so `set <alias>` looks right; keyed by the alias
 # text it would shadow the real store and win alias resolution with no password.

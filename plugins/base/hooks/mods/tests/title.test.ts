@@ -91,8 +91,18 @@ describe('session title', () => {
     expect((await promptSubmit($, 'ABC-77 please', { source: undefined })).sessionTitle).toBe('ABC-77')
   })
 
+  t('a branch key titles only when its workspace or its project is known here', async ($, on) => {
+    const { w } = world(on, { branch: 'fix/UTF-8-encoding' })
+    addWorkspace(w, 'ABC-77', MD)
+    expect((await sessionStart($)).sessionTitle).toBeUndefined()
+    expect((await peek($)).titled).toBeNull()
+    w.branch = 'feature/ABC-1591-x'
+    expect((await sessionStart($, { source: 'clear', session_id: 's2' })).sessionTitle).toBe('ABC-1591')
+  })
+
   t('a new session id gets its own shot', async ($, on) => {
-    world(on)
+    const { w } = world(on)
+    addWorkspace(w, 'ABC-1591', MD)
     expect((await sessionStart($)).sessionTitle).toBe('ABC-1591')
     expect((await sessionStart($, { source: 'compact' })).sessionTitle).toBeUndefined()
     expect((await sessionStart($, { source: 'clear', session_id: 's2' })).sessionTitle).toBe('ABC-1591')

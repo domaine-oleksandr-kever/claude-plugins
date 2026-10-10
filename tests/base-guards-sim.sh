@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Simulation harness for base's scratch-path guard script (plugins/base/hooks/scratch-path-guard.cjs)
-# and the exclude stamp it buys its allow with (plugins/base/scripts/scratch-hygiene.cjs). fnd's copy
-# keeps its D rows in hooks-sim.sh. The script runs as the mod runs it: the event on stdin, the
-# launch root in CLAUDE_PROJECT_DIR (or none, for the cwd fallback). The mod side (when it spawns,
-# what it denies with) is plugins/base/hooks/mods/tests/guards.test.ts; base's no-verify-bypass.sh
+# and the exclude stamp it buys its allow with (plugins/base/scripts/scratch-hygiene.cjs). The script
+# runs as the mod runs it: the event on stdin, the launch root in CLAUDE_PROJECT_DIR (or none, for
+# the cwd fallback). The mod side (when it spawns, what it denies with) is plugins/base/hooks/mods/tests/guards.test.ts; base's no-verify-bypass.sh
 # rides tests/no-verify-bypass-matrix.sh. Exit 0 = all green.
 set -u
 
@@ -59,7 +58,6 @@ assert_contains G1-prefix   "$out" 'base scratch-path guard:'
 assert_contains G1-where    "$out" "$DPROJ/.claude/tasks/<work-id>/tmp/abc-123-cart.jpeg"
 assert_contains G1-noticket "$out" "$DPROJ/.claude/tmp/abc-123-cart.jpeg"
 assert_contains G1-switch   "$out" 'BASE_SCRATCH_GUARD=0'
-assert_absent   G1-no-fnd   "$out" 'fnd'
 assert_empty G1b-remediation-allowed "$(run_spg "$(ev "$PWU" filename "$DPROJ/.claude/tmp/abc-123-cart.jpeg")")"
 
 # G2: base's own playwright resolves a bare filename into its pinned output dir — allowed; escaping
@@ -67,9 +65,9 @@ assert_empty G1b-remediation-allowed "$(run_spg "$(ev "$PWU" filename "$DPROJ/.c
 assert_empty G2-bundled-allowed "$(run_spg "$(ev "$PW" filename abc-123-cart.jpeg)")"
 out="$(run_spg "$(ev "$PW" filename ../../../x.png)")"
 assert_contains G2b-bundled-escape "$out" "$DPROJ/x.png"
-# fnd's playwright name is no longer the bundled one here: judged as a default-configured server
-out="$(run_spg "$(ev mcp__plugin_fnd_playwright__browser_take_screenshot filename shot.png)")"
-assert_contains G2c-fnd-name-not-bundled "$out" '.playwright-mcp'
+# another plugin's playwright is not the bundled one: judged as a default-configured server
+out="$(run_spg "$(ev mcp__plugin_other_playwright__browser_take_screenshot filename shot.png)")"
+assert_contains G2c-foreign-name-not-bundled "$out" '.playwright-mcp'
 
 # G3: in-tree litter, root or subdir, and the project's own tmp/ → deny; `.claude/` paths → allow.
 assert_contains G3-root-deny   "$(run_spg "$(ev "$CDT" filePath "$DPROJ/abc-99.png")")" '"permissionDecision":"deny"'

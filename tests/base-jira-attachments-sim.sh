@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Simulation harness for plugins/base/scripts/jira-attachments.sh (jira-attachments-sim.sh covers
-# fnd's copy). No network and no Jira: `curl` is a PATH shim, and the PATH itself is a dir of
-# symlinks to exactly the tools the script uses. `ffmpeg`, `ffprobe` and `sips` are tripwires that
-# log any call: base's script only downloads — slim's `view` resizes and cuts frames.
-# Exit 0 = all green.
+# Simulation harness for plugins/base/scripts/jira-attachments.sh. No network and no Jira: `curl`
+# is a PATH shim, and the PATH itself is a dir of symlinks to exactly the tools the script uses.
+# `ffmpeg`, `ffprobe` and `sips` are tripwires that log any call: base's script only downloads —
+# slim's `view` resizes and cuts frames. Exit 0 = all green.
 set -u
 
 # Hermetic env: a developer with a real scoped token exported would otherwise have their own
@@ -615,7 +614,7 @@ else bad J14-no-frames "frames=$(find "$OUT14" -name '*.frames' | tr '\n' ' ') m
 assert J14-summary 0 "$rc" "$E" "ok=1 saved=1 cached=0 skipped=0 failed=0 out=$OUT14"
 if ! grep -qE 'frames=|ffmpeg' "$E"; then ok
 else bad J14-no-frame-notes "$(tr '\n' ';' < "$E")"; fi
-# fnd's frame flags are not flags here: each is an unknown argument, refused before any request
+# frame flags are not flags here: each is an unknown argument, refused before any request
 for fl in --no-frames --keep-video "--frames 8"; do
   rc=0; ARGV="$TMP/argv14f"; : > "$ARGV"
   CURL_ARGV="$ARGV" ja "$D14" ABC-101 --out "$OUT14" --cloud-id "$CLOUD" $fl >"$O" 2>"$E" || rc=$?

@@ -1,6 +1,9 @@
 ---
 name: pre-commit-review
-description: Review the branch's changed files before committing — hygiene plus a bug-hunter correctness pass. Use when the user is about to commit, says "before commit", asks to tidy / clean a branch, check for stale comments or leftover ticket numbers, or review the changes for bugs.
+description: >
+  Pre-commit hygiene plus a bug-hunter pass over the branch's changes. Use when the user is about to
+  commit, says "before commit", asks to tidy a branch, find stale comments or ticket numbers, or
+  check changes for bugs.
 argument-hint: "[profile: <word>]"
 arguments:
   - name: profile
@@ -18,8 +21,8 @@ and the developer invokes it themselves.
 This skill is the primary home of base's review flow. Follow the shared contract in
 `${CLAUDE_PLUGIN_ROOT}/references/review-flow.md`:
 
-- Compute `branch` / `base` / `diff_hash` per §1 — with `ws=.claude/tasks/<work-id>` set in the
-  same shell when a task workspace exists — and read the marker at
+- Run `${CLAUDE_PLUGIN_ROOT}/scripts/review-scope.sh` (§1; add `--ws .claude/tasks/<work-id>` when
+  a task workspace exists) for `branch` / `base` / `diff_hash` and the file list, and read the marker at
   `"$(git rev-parse --git-dir)/.base-review"` (resolved, never the literal `.git/` path — a linked
   worktree's `.git` is a file); **first review on this branch** → run the full pass below; **already
   reviewed** → the §3 ask (`[ full re-review / only the changed files / skip ]`) — honour the choice.
@@ -28,9 +31,9 @@ After the pass is applied (step 4), **write/refresh the marker** (review-flow's 
 
 ## 1. Determine scope
 
-Scope = review-flow §1's **scope diff** — merge-base of the resolved `$base` to the **working
-tree**: committed, staged, unstaged and untracked work (this review runs *before* the commit).
-Review **only the files its `--name-only` lists** — produce the list; the agents read them (step 2).
+Scope = review-flow §1's **scope** — merge-base of the resolved `base` to the **working tree**:
+committed, staged, unstaged and untracked work (this review runs *before* the commit). Review
+**only the files review-scope.sh lists** — the agents read them (step 2).
 
 **Profile.** The `profile` word comes from whoever invoked this skill: the argument, a team plugin's
 brief, or the team plugin's own system-prompt section naming the checkout's profile and its team
@@ -52,7 +55,7 @@ rules. base detects none itself. With none → `profile: none` (the repo's own r
 - **F is delegated to `base:bug-hunter`, spawned in parallel with the change-reviewer(s)** when the
   review-flow correctness gate holds (the diff touches logic, control flow or request handling — pure
   copy/CSS/locale diffs skip it, say so in one line). Pass it the `base`, the untracked new files
-  from the step-1 list, the build-dirtied paths §1 excluded, the documented `ceiling:` entries from
+  from the step-1 list, the build-dirtied paths in `excluded=`, the documented `ceiling:` entries from
   the workspace `notes.md` when a workspace exists, and any domain hints the team plugin's section
   gives. Its findings join the step-3 plan as check-F rows, failure scenario included — the agent
   reports findings, not fixes: derive each row's **Proposed change** from the failure scenario
@@ -111,7 +114,7 @@ message and reports the result). Never run `git commit` from this skill. If the 
 task workspace, tick `pre-commit-review` in its `progress.md` when the series has that row.
 
 **Write the marker** with review-flow's marker block, recomputing `diff_hash` from the post-edit tree
-(`${CLAUDE_PLUGIN_ROOT}/references/review-flow.md` §1, `ws` set as in step 0), so `/base:commit`
+(review-scope.sh again, `--ws` as in step 0), so `/base:commit`
 and a team PR skill don't re-review redundantly. Append the `correctness_hash` line only when
 check F was handled this pass (`base:bug-hunter` ran, or the gate said not applicable).
 

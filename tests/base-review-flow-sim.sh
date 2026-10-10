@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Simulation harness for the scope + hash block of plugins/base/references/review-flow.md §1 (base
-# resolution, merge-base, diff_hash over tracked + untracked work). The block lives in markdown, so it
-# is extracted from the first ```bash fence after the line starting "Compute scope + hash" and run in
-# scratch git repos — remote refs are written with update-ref, nothing touches the network or the
-# real checkout. Runs the block under bash and, when present, zsh. Exit 0 = all green.
+# Simulation harness for plugins/base/scripts/review-scope.sh, the scope + hash of the review flow
+# (references/review-flow.md §1): base resolution, merge-base, diff_hash over tracked + untracked work,
+# the build-dirtied exclusion. Runs in scratch git repos — remote refs are written with update-ref,
+# nothing touches the network or the real checkout. Exit 0 = all green.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FLOW="$ROOT/plugins/base/references/review-flow.md"
+SCOPE="$ROOT/plugins/base/scripts/review-scope.sh"
 BASH_BIN="$(command -v bash)"
-ZSH_BIN="$(command -v zsh || true)"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -19,16 +18,12 @@ ok() { pass=$((pass + 1)); }
 bad() { fail=$((fail + 1)); failures="${failures}  [$1] $2
 "; }
 
-BLOCK="$TMP/block.sh"
-awk '/^Compute scope \+ hash/ { armed = 1; next }
-     armed && /^```bash/ { inside = 1; next }
-     inside && /^```/ { exit }
-     inside { print }' "$FLOW" > "$BLOCK"
-if grep -q 'diff_hash=' "$BLOCK" && grep -q 'merge-base' "$BLOCK"; then ok
-else bad extract "no scope + hash block after 'Compute scope + hash' in review-flow.md"; fi
+# The reference runs the script and keeps no copy of its logic.
+if grep -q 'scripts/review-scope.sh' "$FLOW" && ! grep -q 'git hash-object' "$FLOW"; then ok
+else bad flow-calls-script "review-flow.md does not call review-scope.sh, or still carries the hash block"; fi
 
 # Hermetic git: HOME pinned inside $TMP and an identity in the environment, so the developer's
-# ~/.gitconfig never reaches the fixtures and the extracted block inherits the same setup.
+# ~/.gitconfig never reaches the fixtures and the script inherits the same setup.
 export HOME="$TMP/home" GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=base GIT_AUTHOR_EMAIL=base@example.com \
   GIT_COMMITTER_NAME=base GIT_COMMITTER_EMAIL=base@example.com
 mkdir -p "$HOME"
@@ -42,13 +37,16 @@ new_repo() { # new_repo <name> — main with one commit, cwd untouched
 commit() { echo "$2" >> "$R/$1"; git -C "$R" add "$1"; git -C "$R" commit -qm "$2"; }
 sha() { git -C "$R" rev-parse "$1"; }
 
-# run_block [shell] [subdir] — ws from the environment; prints base, mb, diff_hash, then the scope list; the scope diff -> $TMP/stream
+# run_block [bash] [subdir] — ws from the environment; prints base, merge_base, diff_hash, then the
+# scope list; the scope diff -> $TMP/stream, the excluded= value -> $TMP/excluded
 run_block() {
-  local sh="${1:-$BASH_BIN}"
-  (cd "$R/${2:-}" && "$sh" -c '. "$1"
-    printf "%s\n%s\n%s\n" "$base" "$mb" "$diff_hash"
-    GIT_INDEX_FILE="$idx" git diff "$mb" -- ":/" ${ex[@]+"${ex[@]}"} > "$2"
-    GIT_INDEX_FILE="$idx" git diff --name-only "$mb" -- ":/" ${ex[@]+"${ex[@]}"}' _ "$BLOCK" "$TMP/stream")
+  local sh="${1:-$BASH_BIN}" w="${ws:-}"
+  (cd "$R/${2:-}" && "$sh" "$SCOPE" ${w:+--ws "$w"} --diff > "$TMP/stream" \
+    && "$sh" "$SCOPE" ${w:+--ws "$w"} | awk -v x="$TMP/excluded" '
+      !body && /^$/ { body = 1; next }
+      body { print; next }
+      /^(base|merge_base|diff_hash)=/ { print substr($0, index($0, "=") + 1) }
+      /^excluded=/ { print substr($0, 10) > x }')
 }
 field() { run_block | sed -n "$1p"; }
 hash_now() { field 3; }
@@ -132,11 +130,7 @@ git -C "$R" add n.txt "sub/a file.txt"
 if [ "$(hash_now)" = "$h4" ]; then ok; else bad h-staged-same "staging the untracked files moved the hash"; fi
 git -C "$R" reset -q
 
-if [ -n "$ZSH_BIN" ]; then
-  if [ "$(run_block "$ZSH_BIN")" = "$(run_block)" ]; then ok; else bad k-zsh "zsh and bash disagree"; fi
-fi
-
-# (m)–(p) build-dirtied: the workspace's last notes.md line drops tracked files a build rewrote
+# (m)–(p) build-dirtied: the workspace's notes.md lines drop tracked files a build rewrote
 new_repo w
 mkdir -p "$R/dist" "$R/sub"; echo v1 > "$R/dist/app.js"; echo v1 > "$R/sub/a file.txt"
 git -C "$R" add dist "sub/a file.txt"; git -C "$R" commit -qm assets
@@ -155,7 +149,9 @@ git -C "$R" checkout -q -- dist/app.js; want="$(hash_now)"; echo rebuilt >> "$R/
 out="$(ws=$WS run_block)"
 if [ "$(echo "$out" | sed -n 3p)" = "$want" ] && ! echo "$out" | grep -qx dist/app.js \
    && ! grep -q "^diff --git a/dist/app.js" "$TMP/stream" && echo "$out" | grep -qx "sub/a file.txt"; then ok
-else bad m-excluded "the last build-dirtied line did not drop dist/app.js alone (unterminated last line)"; fi
+else bad m-excluded "the build-dirtied lines did not drop dist/app.js alone (unterminated last line)"; fi
+if [ "$(cat "$TMP/excluded")" = "t.txt dist/app.js" ]; then ok
+else bad m-excluded-line "excluded= should name both build-dirtied paths, got: $(cat "$TMP/excluded")"; fi
 if [ "$(ws=$WS run_block "$BASH_BIN" sub | sed -n 3p)" = "$want" ]; then ok
 else bad m-subdir "run from a subdirectory: the exclusion is lost"; fi
 
@@ -165,6 +161,7 @@ if [ "$hn" != "$want" ] && [ "$(ws=$WS hash_now)" = "$hn" ]; then ok
 else bad n-staged-same "with an exclusion, staging an untracked file moved the hash (or it never counted)"; fi
 git -C "$R" reset -q; rm "$R/n.txt"
 
+note "- 2026-10-11 build-dirtied:"
 note "- 2026-10-11 build-dirtied: sub/a file.txt ../x /etc/hosts dist * :(glob)** f.txt/"
 if [ "$(ws=$WS hash_now)" = "$dirty" ]; then ok
 else bad o-ignored "a spaced path, ../x, an absolute path, a directory or a glob reached the exclusion"; fi
@@ -174,12 +171,10 @@ else bad p-no-workspace "no workspace notes.md: the hash changed"; fi
 note "- 2026-10-11 build-dirtied: dist/app.js"; printf -- "- 2026-10-12 build-dirtied:" >> "$R/$WS/notes.md"
 if [ "$(ws=$WS hash_now)" = "$dirty" ]; then ok
 else bad p-bare-line "a bare build-dirtied: line (no paths) did not end the exclusion"; fi
-if [ -n "$ZSH_BIN" ]; then
-  git -C "$R" checkout -q -- "sub/a file.txt"
-  note "- 2026-10-12 build-dirtied: dist/app.js"
-  if [ "$(ws=$WS run_block "$ZSH_BIN")" = "$(ws=$WS run_block)" ] && [ "$(ws=$WS hash_now)" = "$clean" ]; then ok
-  else bad p-zsh "zsh and bash disagree on the exclusion"; fi
-fi
+git -C "$R" checkout -q -- "sub/a file.txt"
+note "- 2026-10-12 build-dirtied: dist/app.js"
+if [ "$(ws=$WS hash_now)" = "$clean" ]; then ok
+else bad p-after-bare "a build-dirtied line after a bare one did not exclude its path"; fi
 
 # (q) a non-ASCII tracked path still matches its token (git would C-quote it)
 git -C "$R" checkout -q -- .; echo v1 > "$R/é.js"; git -C "$R" add é.js; git -C "$R" commit -qm accent
@@ -188,11 +183,65 @@ before="$(ws=$WS hash_now)"; echo rebuilt >> "$R/é.js"
 if [ "$(ws=$WS hash_now)" = "$before" ]; then ok
 else bad q-non-ascii "a build-dirtied non-ASCII path was not excluded"; fi
 
-# (r) macOS bash 3.2 under set -u: an empty ex must not abort or blank the hash
+# (r) macOS bash 3.2 under set -u: an empty ex must not abort or blank the hash, a full one neither
 if [ -x /bin/bash ]; then
-  if [ "$(cd "$R" && /bin/bash -uc '. "$1"; echo "$diff_hash"' _ "$BLOCK" 2>&1)" = "$(hash_now)" ]; then ok
-  else bad r-set-u "/bin/bash -u with no workspace: the block failed or the hash changed"; fi
+  if [ "$(run_block /bin/bash | sed -n 3p)" = "$(hash_now)" ] \
+     && [ "$(ws=$WS run_block /bin/bash | sed -n 3p)" = "$(ws=$WS hash_now)" ]; then ok
+  else bad r-bash32 "/bin/bash: the script failed or the hash changed"; fi
 fi
+
+# (s) a build-dirtied file's committed or staged change is the developer's: it stays in scope up to
+# the index, and only the working-tree rewrite leaves
+new_repo s
+mkdir -p "$R/dist"; echo v1 > "$R/dist/app.js"; echo v1 > "$R/dist/b.js"; echo v1 > "$R/dist/c.js"
+git -C "$R" add dist; git -C "$R" commit -qm assets
+git -C "$R" checkout -qb feat; commit f.txt f1
+mkdir -p "$R/$WS"; printf -- '- 2026-10-14 build-dirtied: dist/app.js dist/b.js\n' > "$R/$WS/notes.md"
+echo rebuilt >> "$R/dist/b.js"
+commit dist/app.js committed
+out="$(ws=$WS run_block)"
+if echo "$out" | grep -qx dist/app.js && ! echo "$out" | grep -qx dist/b.js \
+   && [ "$(cat "$TMP/excluded")" = dist/b.js ]; then ok
+else bad s-committed-kept "a committed build-dirtied path left the scope, or the working-tree one stayed: $(echo "$out" | tail -n +4 | tr '\n' ' ')"; fi
+hc="$(ws=$WS hash_now)"; echo rebuilt-again >> "$R/dist/app.js"
+if [ "$(ws=$WS hash_now)" = "$hc" ] && grep -q '^+committed' "$TMP/stream" && ! grep -q 'rebuilt-again' "$TMP/stream"; then ok
+else bad s-worktree-rewrite "a committed build-dirtied file: its working-tree rewrite moved the hash, or its commit left the diff"; fi
+git -C "$R" checkout -q -- dist/app.js
+git -C "$R" add dist/b.js
+if ws=$WS run_block | grep -qx dist/b.js && [ -z "$(cat "$TMP/excluded")" ]; then ok
+else bad s-staged-kept "a staged build-dirtied path left the scope"; fi
+git -C "$R" reset -q
+
+# (t) every build-dirtied line since the last bare one counts: a second build that reports only
+# its new files keeps the first build's unrestored ones out
+echo rebuilt >> "$R/dist/c.js"
+printf -- '- 2026-10-14 build-dirtied: dist/b.js\n- 2026-10-15 decision: x\n- 2026-10-15 build-dirtied: dist/c.js\n' > "$R/$WS/notes.md"
+out="$(ws=$WS run_block)"
+if ! echo "$out" | grep -qx -e dist/b.js -e dist/c.js && [ "$(cat "$TMP/excluded")" = "dist/b.js dist/c.js" ]; then ok
+else bad t-union "the union of build-dirtied lines did not exclude both files: $(cat "$TMP/excluded")"; fi
+printf -- '- 2026-10-16 build-dirtied:\n- 2026-10-16 build-dirtied: dist/c.js\n' >> "$R/$WS/notes.md"
+if ws=$WS run_block | grep -qx dist/b.js && [ "$(cat "$TMP/excluded")" = dist/c.js ]; then ok
+else bad t-bare-resets "a bare line did not drop the earlier lines from the union"; fi
+
+# (u) --since <rev>: the stat and the files changed since that commit, exclusion applied
+out="$(cd "$R" && "$SCOPE" --ws "$WS" --since "$(sha HEAD~1)")"
+files="$(echo "$out" | sed '1,/^$/d' | tr '\n' ' ')"
+if echo "$out" | sed '/^$/q' | grep -q 'dist/b.js' && [ "$files" = "dist/app.js dist/b.js " ]; then ok
+else bad u-since "--since: stat or file list wrong: $(echo "$out" | tr '\n' ' ')"; fi
+
+# (v) usage and refusals
+rc=0; (cd "$R" && "$SCOPE" --help) > "$TMP/o" 2>&1 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^usage: review-scope.sh' "$TMP/o"; then ok; else bad v-help "rc=$rc $(head -c 120 "$TMP/o")"; fi
+for args in "--bogus" "--ws" "--since" "--since nope"; do
+  rc=0; (cd "$R" && "$SCOPE" $args) > "$TMP/o" 2>&1 || rc=$?
+  if [ "$rc" -eq 2 ]; then ok; else bad "v-usage[$args]" "rc=$rc $(head -c 120 "$TMP/o")"; fi
+done
+rc=0; (cd "$TMP/home" && "$SCOPE") > "$TMP/o" 2>&1 || rc=$?
+if [ "$rc" -eq 3 ] && grep -q 'not inside a git checkout' "$TMP/o"; then ok; else bad v-no-git "rc=$rc $(head -c 120 "$TMP/o")"; fi
+mkdir -p "$TMP/nobase"; git -C "$TMP/nobase" init -q -b trunk; echo x > "$TMP/nobase/x"
+git -C "$TMP/nobase" add x; git -C "$TMP/nobase" -c commit.gpgsign=false commit -qm x
+rc=0; (cd "$TMP/nobase" && "$SCOPE") > "$TMP/o" 2>&1 || rc=$?
+if [ "$rc" -eq 3 ] && grep -q 'no develop or main' "$TMP/o"; then ok; else bad v-no-base "rc=$rc $(head -c 120 "$TMP/o")"; fi
 
 echo "base-review-flow-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

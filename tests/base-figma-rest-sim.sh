@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Simulation harness for plugins/base/scripts/figma-rest.sh (figma-rest-sim.sh covers fnd's copy).
+# Simulation harness for plugins/base/scripts/figma-rest.sh.
 # No network and no Figma: `curl` and `sleep` are PATH shims, and the PATH itself is a dir of
 # symlinks to exactly the tools the script uses.
 # The curl shim answers by URL, logs the argv as it was handed over (the transport flags and the

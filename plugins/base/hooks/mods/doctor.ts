@@ -1,16 +1,16 @@
 // /base-doctor and the sweeps of base-tmp and of old event-log directories (once per session id; a /clear starts
 // a new one). The doctor runs scripts/doctor.cjs for what a node process sees and adds what only a session answers:
-// slim's view tool, fnd loaded, each MCP server of base's manifest connected; then the tail of base.events.
+// slim's view tool, each MCP server of base's manifest connected; then the tail of base.events.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent } from '../../types'
 import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
-import { LOADED_ONLY, SLIM_MISSING, SLIM_VIEW, withFnd } from './session.ts'
+import { SLIM_MISSING, SLIM_VIEW } from './session.ts'
 
 export const COMMAND = {
   name: 'base-doctor',
-  description: 'Check the base install: node, manifest, slim, fnd, MCP servers, base-tmp, event log',
+  description: 'Check the base install: node, manifest, slim, MCP servers, base-tmp, event log',
   immediate: true,
 } as const
 export const MCP_TIMEOUT_MS = 15_000
@@ -119,20 +119,6 @@ async function staticRows($: $): Promise<Row[]> {
   return [{ status: 'FAIL', name: 'static', detail: `scripts/doctor.cjs exited ${r.exitCode}: ${why}` }]
 }
 
-/** As the install checks at the first prompt see them (session.ts): the validator follows `$` within one file. */
-async function fndFound($: $): Promise<string | null> {
-  try {
-    const enabled = (await $.settings.read()).enabledPlugins
-    const key = enabled && typeof enabled === 'object' ? Object.entries(enabled).find(([k, v]) => k.startsWith('fnd@') && v === true)?.[0] : undefined
-    if (key) return key
-  } catch {}
-  try {
-    return (await $.command.list()).some(c => c.plugin === 'fnd') ? LOADED_ONLY : null
-  } catch {
-    return null
-  }
-}
-
 async function liveRows($: $): Promise<Row[]> {
   const rows: Row[] = []
   try {
@@ -142,10 +128,6 @@ async function liveRows($: $): Promise<Row[]> {
   } catch {
     rows.push({ status: 'SKIP', name: 'slim-live', detail: 'the tool list did not answer' })
   }
-  const fnd = await fndFound($)
-  rows.push(fnd
-    ? { status: 'FAIL', name: 'fnd-live', detail: withFnd(fnd) }
-    : { status: 'PASS', name: 'fnd-live', detail: 'fnd not enabled and no fnd command loaded' })
   return rows
 }
 

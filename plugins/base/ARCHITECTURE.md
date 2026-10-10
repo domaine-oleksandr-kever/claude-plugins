@@ -27,14 +27,14 @@ mod cannot do the job (§5).
 
 `register.ts` calls one register function per file. Each file declares its own atoms and spells its
 own env names: the engine's validator follows `$` only into functions declared in the same file, never
-across an import, so a `$` helper is never shared between files (`doctor.ts` repeats the fnd check of
-`session.ts` for that reason).
+across an import, so a `$` helper is never shared between files (`title.ts` repeats `branchOf` and
+the `.claude/tasks` listing of `workspace/progress.ts` for that reason).
 
 | File | Hooks | Writes |
 |---|---|---|
-| `session.ts` | `session.start {cwd:/^/}` start line · `prompt.submit {text:/^/}` slim and fnd checks at a session's first prompt · `tool.call {tool:'Agent'}` + `agent.spawn {subagentType}` reader refusal | `base.started`, `base.checked`, `base.events` |
+| `session.ts` | `session.start {cwd:/^/}` start line · `prompt.submit {text:/^/}` the slim check at a session's first prompt · `tool.call {tool:'Agent'}` + `agent.spawn {subagentType}` reader refusal | `base.started`, `base.checked`, `base.events` |
 | `workspace/progress.ts` | `session.start`, `prompt.submit` (both unmatched) · `session.end {reason:'clear'}` · `tool.call` Write/Edit and `{tool:'Bash'}` (a checkout) · `classic.CwdChanged` · `tool.call {tool:/^(Agent|Task)$/}` and `{tool:/^mcp__/}` (savable events) · `command.run base-progress` | `base.progress`, `base.pin`, `base.lastKey`, `base.sessionId`, `base.savable`, `base.events` |
-| `workspace/autosave.ts` | `prompt.submit {text:/(?:)/}` (the stale-workspace context line) · `classic.Stop` (the one-time block) · `classic.PreCompact` (the `compact:` marker on an auto-compact) | `base.autosave` |
+| `workspace/autosave.ts` | `prompt.submit {text:/(?:)/}` (the stale-workspace context line) · `classic.Stop` (the turn-end block, at most once per 3 turns) · `classic.PreCompact` (the `compact:` marker on an auto-compact) | `base.autosave`, `base.compactMarker` |
 | `title.ts` | `classic.SessionStart`, `classic.UserPromptSubmit`: their `sessionTitle` result field | `base.titled`, `base.events` |
 | `guards/bash.ts` | `tool.call {tool:/^Bash$/}`: the attribution rule (pure, `guards/attribution.ts`), then `hooks/no-verify-bypass.sh` for a command naming a git verb | `base.events` |
 | `guards/scratch.ts` | `session.start {cwd:/./}` latches the launch root · `tool.describe` + `tool.call` on the browser tools that take a path → `hooks/scratch-path-guard.cjs` | `base.guardRoot`, `base.events` |
@@ -73,7 +73,7 @@ Engine rules this layout follows:
   workspace). `mtimeMs` is base's own tick compare. `stale` (with `lastSavableMs`, `agentsSince`,
   `editsSince`) is what `workspace/autosave.ts` and band's compact act on.
 - **`base.events`** — `{ atMs, kind, text }`, oldest first, at most 200; band's Log pane merges it with
-  its own, fnd's, slim's and the team plugins' lines. Kinds fit band's 9-cell kind column and never take the kinds band
+  its own, slim's and the team plugins' lines. Kinds fit band's 9-cell kind column and never take the kinds band
   and slim own (`session`, `model`, `compact`, `rate`, `slim`, `lookup`). `BASE_EVENT_LOG=0` keeps it
   empty and writes no file.
 - **`base.jsonl`** — every line pushed to `base.events` is also handed to `events.ts`'s `logLine` with a
@@ -91,11 +91,10 @@ Engine rules this layout follows:
   directories were fixed there, so the scratch guard measures against it even after `/cd` or a
   worktree move changes `$.session.root()`.
 
-band has no dependency on base: it declares the `base` keys it reads in its own types, as it does
-fnd's. It takes `base.progress` when it holds a value, else `fnd.progress`, and its checklist hints
-then name `/base:save-task-context`; its Log pane orders equal times band → base → fnd → slim → fe → qa → be → pm.
+band has no dependency on base: it declares the `base` keys it reads in its own types. Its checklist
+draws `base.progress` and its hints name `/base:save-task-context`; its Log pane merges `base.events`.
 
-## 4. slim is required, fnd is excluded
+## 4. slim is required
 
 - **Declared**: `"dependencies": ["slim"]` in the manifest. The engine lays slim's contract into
   `.claude-plugin/types/` (gitignored) on each load, so `slim.*` typechecks without a redeclaration.
@@ -107,18 +106,15 @@ then name `/base:save-task-context`; its Log pane orders equal times band → ba
   `base:doc-reader` is denied while the view tool is missing — through the Agent tool's `tool.call`
   and through `agent.spawn` (another plugin's `$.agent.spawn`, or a bare name the engine resolved).
   The writer and the reviewers do not need slim and run.
-- **fnd**: enabled in the merged settings (`fnd@<marketplace>: true`) or any fnd command in
-  `$.command.list()` (a `--plugin-dir` load has no settings key) → one install line and one toast.
-  fnd ships the same agents and MCP servers; the two must not run together.
 - **Doctor**: `doctor.cjs` reads `installed_plugins.json` and the user, project and local settings for
-  slim and fnd; `/base-doctor` adds what the session loaded (`slim-live`, `fnd-live`) and each MCP
+  slim; `/base-doctor` adds what the session loaded (`slim-live`) and each MCP
   server's `$.mcp.connect` answer. A slim the install record lacks but the session loaded is a WARN.
 
 ## 5. What stays a script, and why
 
 | Script | Why not a mod |
 |---|---|
-| `hooks/no-verify-bypass.sh` | a shell-grammar heuristic pinned row by row by `tests/no-verify-bypass-matrix.sh`, shared with fnd's copy; `guards/bash.ts` spawns it only for a command naming a git verb |
+| `hooks/no-verify-bypass.sh` | a shell-grammar heuristic pinned row by row by `tests/no-verify-bypass-matrix.sh`; `guards/bash.ts` spawns it only for a command naming a git verb |
 | `hooks/scratch-path-guard.cjs` | needs `os.tmpdir()` (chrome-devtools writes to its temp dir) and `realpath` across symlinks, which `$` does not offer; it also creates the remediation directory and stamps the exclude |
 | `scripts/doctor.cjs` | static checks a node process answers without a session, also run by hand; the mod adds the session rows |
 | `scripts/scratch-hygiene.cjs` | deletes files: `$.fs` has no unlink |

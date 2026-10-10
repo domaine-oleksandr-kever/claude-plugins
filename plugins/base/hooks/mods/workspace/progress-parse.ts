@@ -34,11 +34,14 @@ export function parseProgress(md: string): ParsedProgress {
   }
 }
 
-/** The last three `- ` bullet lines of notes.md. */
+/** The machine lines task-workspace.md defines for notes.md: pointers, never findings. */
+const MACHINE = /^- \S+ (compact|build-dirtied):/
+
+/** The last three `- ` bullet lines of notes.md, machine lines left out. */
 export function notesTail(md: string): string[] {
   return md
     .split(/\r?\n/)
-    .filter(l => l.startsWith('- '))
+    .filter(l => l.startsWith('- ') && !MACHINE.test(l))
     .slice(-NOTES_TAIL)
     .map(l => l.trimEnd())
 }

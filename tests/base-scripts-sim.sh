@@ -129,7 +129,7 @@ else bad W1-fresh-create "rc=$rc out=$(show) err=$(head -c 200 "$E" | tr '\n' ' 
 W1PORT="$(wt_key dev_port)"; W1DIRP="$(cd "$W1DIR" && pwd -P)"
 if grep -qF "cd '$W1DIRP' && claude" "$O" && grep -qF 'the task workspace .claude/tasks/ABC-123 is shared' "$O" \
    && grep -qF "# dev server: start it on port $W1PORT" "$O" \
-   && ! grep -qE '/fnd|/fe:|shopify|--theme' "$O" && printf '%s' "$W1PORT" | grep -qE '^9[0-9]+$'; then ok
+   && ! grep -qE '/fe:|shopify|--theme' "$O" && printf '%s' "$W1PORT" | grep -qE '^9[0-9]+$'; then ok
 else bad W2-handoff-block "port=$W1PORT out=$(show)"; fi
 
 # W3: `.claude/tasks` is a symlink INTO the main checkout; settings.local.json is a real copy
@@ -540,8 +540,8 @@ if [ "$rc" -eq 0 ] && printf '%s' "$cp8_out" | grep -q 'kept=src;' && [ "$rc2" -
 else bad C8-kept-dir-stays-dirty "rc=$rc/$rc2 dirty='$cp_dirty' out=$cp8_out"; fi
 
 # C6: the generic script carries no team step: no store-theme pinning, no profile probe, no fixed copies
-if ! grep -qE 'session-theme|project-profile|create-preview-theme|toml_unpinned|ENV_STATE|/fnd' "$WTS"; then ok
-else bad C6-no-team-steps "$(grep -nE 'session-theme|project-profile|create-preview-theme|toml_unpinned|ENV_STATE|/fnd' "$WTS" | head -3)"; fi
+if ! grep -qE 'session-theme|project-profile|create-preview-theme|toml_unpinned|ENV_STATE' "$WTS"; then ok
+else bad C6-no-team-steps "$(grep -nE 'session-theme|project-profile|create-preview-theme|toml_unpinned|ENV_STATE' "$WTS" | head -3)"; fi
 
 # ------------------------------------------------------------- scratch-hygiene.cjs CLI --
 HR="$TMP/hyg"

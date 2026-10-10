@@ -42,9 +42,11 @@
  * colour — a palette name from adf-colors.cjs or a `#rrggbb` hex — as an ADF textColor mark; an
  * unknown name or a missing `{color}` closer stays literal), nested inline marks (**bold `code`**, **[link](u)**),
  * hard line breaks (two trailing spaces or a trailing backslash), bullet/ordered lists,
- * ``` fenced code blocks ```, --- horizontal rules, > blockquotes (which hold BLOCKS — a quoted
- * fence, list or second paragraph survives; a construct ADF forbids inside a quote degrades to
- * paragraph text), and GFM pipe tables.
+ * `- [ ]` / `- [x]` task lists (an ADF taskList; a checkbox line inside a plain list item or a
+ * quote, where ADF has no slot for one, stays a bullet with its literal box), ``` fenced code
+ * blocks ```, --- horizontal rules, > blockquotes (which hold BLOCKS — a quoted fence, list or
+ * second paragraph survives; a construct ADF forbids inside a quote degrades to paragraph text),
+ * and GFM pipe tables (`<br>` in a cell is a hard break). A heading's closing `#` run is dropped.
  * Underscore emphasis (_x_/__x__) is intentionally NOT treated as italics/bold so
  * snake_case identifiers survive; use * / ** for emphasis.
  *
@@ -451,6 +453,22 @@ function heading(level, nodes) {
   if (nodes.length) n.content = nodes;
   return n;
 }
+// A table cell is one line; `<br>` is how GFM writes a line break inside one — but not inside a
+// code span, which keeps it as text.
+function cellNodes(text) {
+  return inlineNodes(trimAscii(text)).flatMap((n) => {
+    if (n.type !== 'text' || (n.marks || []).some((m) => m.type === 'code')) return [n];
+    const parts = n.text.split(/<br\s*\/?>/i);
+    return parts.flatMap((part, k) => {
+      if (k) part = part.replace(/^[ \t]+/, '');
+      if (k < parts.length - 1) part = part.replace(/[ \t]+$/, '');
+      const piece = part ? [{ ...n, text: part }] : [];
+      return k ? [{ type: 'hardBreak' }, ...piece] : piece;
+    });
+  });
+}
+let localIds = 0;
+const localId = () => `md-${++localIds}`;
 // An info string can't contain backticks, so ```x``` is a code SPAN, not a fence. A fence may be
 // INDENTED (inside a list, under a bullet in a reference doc) — unrecognized, its body would be
 // read as prose, and the inline layer would then rewrite the code (eat a `\+`, turn a trailing
@@ -545,7 +563,12 @@ function toADF(md, quoted) {
 
     // heading — a bare `#` is an EMPTY heading, not prose
     const h = quoted ? null : /^(#{1,6})(?:\s+(.*))?$/.exec(line);
-    if (h) { content.push(heading(h[1].length, inlineNodes(trimAscii(h[2] || '')))); i++; continue; }
+    if (h) {
+      const text = trimAscii(h[2] || '').replace(/(^|[ \t]+)#+$/, '');
+      content.push(heading(h[1].length, inlineNodes(text)));
+      i++;
+      continue;
+    }
 
     // horizontal rule
     if (!quoted && /^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { content.push({ type: 'rule' }); i++; continue; }
@@ -576,7 +599,7 @@ function toADF(md, quoted) {
               return key ? `${key}: ${c}` : c;
             })
             .filter((s) => s !== '');
-          return { type: 'listItem', content: [para(inlineNodes(parts.join(' · ')))] };
+          return { type: 'listItem', content: [para(cellNodes(parts.join(' · ')))] };
         }).filter((it) => it.content[0].content && it.content[0].content.length);
         if (items.length) {
           content.push({ type: 'bulletList', content: items });
@@ -589,12 +612,12 @@ function toADF(md, quoted) {
       } else {
         const rows = [{
           type: 'tableRow',
-          content: header.map((c) => ({ type: 'tableHeader', content: [para(inlineNodes(c))] })),
+          content: header.map((c) => ({ type: 'tableHeader', content: [para(cellNodes(c))] })),
         }];
         for (const cells of dataRows) {
           rows.push({
             type: 'tableRow',
-            content: cells.map((c) => ({ type: 'tableCell', content: [para(inlineNodes(c))] })),
+            content: cells.map((c) => ({ type: 'tableCell', content: [para(cellNodes(c))] })),
           });
         }
         content.push({ type: 'table', content: rows });
@@ -618,34 +641,52 @@ function toADF(md, quoted) {
     // literal `-`/`1.` prose arrives escaped, so this can't swallow a paragraph
     const LIST_RE = /^(\s*)([-*+]|\d+\.)(?:\s+(.*))?$/;
     if (LIST_RE.test(line)) {
-      const stack = []; // { indent, list, lastItem, ordered }
+      const stack = []; // { indent, list, lastItem, kind: 'bullet' | 'ordered' | 'task' }
       while (i < lines.length) {
         const m = LIST_RE.exec(lines[i]);
         if (!m) break;
         const indent = m[1].replace(/\t/g, '  ').length;
-        const ordered = /^\d/.test(m[2]);
-        const item = { type: 'listItem', content: [para(inlineNodes(trimAscii(m[3] || '')))] };
+        let kind = /^\d/.test(m[2]) ? 'ordered' : 'bullet';
+        let text = trimAscii(m[3] || '');
         while (stack.length && indent < stack[stack.length - 1].indent) stack.pop();
-        let top = stack[stack.length - 1];
-        if (top && ordered === top.ordered && indent < top.indent + 2) {
+        const top = stack[stack.length - 1];
+        const nests = !!top && indent >= top.indent + 2;
+        const parent = nests ? top : stack[stack.length - 2];
+        const box = kind === 'bullet' && !quoted && !(parent && parent.kind !== 'task')
+          ? /^\[([ xX])\](?:[ \t]+(.*))?$/.exec(text) : null;
+        let item;
+        if (box) {
+          kind = 'task';
+          item = { type: 'taskItem', attrs: { localId: localId(), state: box[1] === ' ' ? 'TODO' : 'DONE' } };
+          const nodes = inlineNodes(trimAscii(box[2] || ''));
+          if (nodes.length) item.content = nodes;
+        } else {
+          item = { type: 'listItem', content: [para(inlineNodes(text))] };
+        }
+        if (top && !nests && kind === top.kind) {
           top.list.content.push(item); // sibling item
           top.lastItem = item;
-        } else {
-          const list = { type: ordered ? 'orderedList' : 'bulletList', content: [item] };
-          if (ordered) {
-            const start = parseInt(m[2], 10);
-            if (start !== 1) list.attrs = { order: start }; // preserve lists starting at e.g. "3."
-          }
-          if (top && indent >= top.indent + 2) {
-            top.lastItem.content.push(list); // nested under the previous item
-          } else {
-            // same level but the marker type changed → sibling list of the other type
-            if (top) { stack.pop(); top = stack[stack.length - 1]; }
-            if (top) top.lastItem.content.push(list);
-            else content.push(list);
-          }
-          stack.push({ indent, list, lastItem: item, ordered });
+          i++;
+          continue;
         }
+        // same level but the marker type changed → sibling list of the other type
+        if (top && !nests) stack.pop();
+        let list;
+        if (kind === 'task') list = { type: 'taskList', attrs: { localId: localId() }, content: [item] };
+        else {
+          list = { type: kind === 'ordered' ? 'orderedList' : 'bulletList', content: [item] };
+          const start = parseInt(m[2], 10);
+          if (kind === 'ordered' && start !== 1) list.attrs = { order: start }; // preserve lists starting at e.g. "3."
+        }
+        // the deepest open level that can hold it: a list item holds any list but a task list (its
+        // items hold inline content only), a task list holds only a task list, as a sibling of its items
+        let k = stack.length - 1;
+        while (k >= 0 && (stack[k].kind === 'task') !== (kind === 'task')) k--;
+        stack.length = k + 1;
+        if (k < 0) content.push(list);
+        else if (kind === 'task') stack[k].list.content.push(list);
+        else stack[k].lastItem.content.push(list);
+        stack.push({ indent, list, lastItem: item, kind });
         i++;
       }
       continue;

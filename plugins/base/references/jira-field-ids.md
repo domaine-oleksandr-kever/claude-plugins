@@ -38,7 +38,7 @@ filename, measured 2026-09-10), but slim's adf engine renders every media node a
 `_(media omitted)_` once the response is over 4 KB, so the join is lost either way.
 `base:jira-reader` therefore reads the markdown bodies and lists the attachment rows on their own,
 with their `author` and `created` — no comment-to-attachment join (its prompt → Fetch the
-attachments, step 6).
+attachments, step 4).
 
 The site host works as `cloudId` directly; only if it is rejected call
 `getAccessibleAtlassianResources` (no params) for the site's UUID and use that instead.

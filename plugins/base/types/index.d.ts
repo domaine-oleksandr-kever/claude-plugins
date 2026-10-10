@@ -8,10 +8,12 @@ export type BaseRow = { mark: BaseMark; text: string }
 
 /**
  * The task workspace of the pinned or detected work id; `{ workId: null, branch }` when none applies.
- * band draws it: `current` is the step in progress, `notesTail` the last notes.md bullets.
- * `mtimeMs` is the newest write of progress.md / notes.md (0 = neither exists); `lastSavableMs` the newest
- * savable event this session (0 = none); `agentsSince` / `editsSince` count the agent / edit ones after `mtimeMs`;
- * `stale` = a workspace, `mtimeMs` over 20 min old and older than `lastSavableMs`.
+ * band draws it: `current` is the step in progress, `notesTail` the last notes.md bullets but `compact:` and
+ * `build-dirtied:` ones.
+ * `mtimeMs` is the newest write of a file in the workspace root (0 = none; a compact marker is no write);
+ * `lastSavableMs` the newest savable event of this work id this session (0 = none); `agentsSince` / `editsSince`
+ * count the agent / edit ones after `mtimeMs`; `stale` = a workspace, `mtimeMs` older than the stale window
+ * (20 min, 5 at 85 % context) and than `lastSavableMs`.
  */
 export type BaseProgress =
   | {
@@ -33,20 +35,27 @@ export type BaseProgress =
 
 /**
  * At most 9 characters each (band's kind cell); band and slim own session, model, compact, rate, slim and lookup.
- * `start` base's version at session start, `install` slim missing or fnd present, `refuse` a reader refused,
+ * `start` base's version at session start, `install` slim missing, `refuse` a reader refused,
  * `workspace` the work id base publishes, `title` the session title base set, `guard` a guard's deny,
  * `doctor` the counts of a /base-doctor run.
  */
 export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'title' | 'guard' | 'doctor'
 
-/** Worth saving to the workspace: an Agent / Task call returned, a Write / Edit outside `.claude/`, an MCP result over slim's 4 KB gate. */
-export type BaseSavable = { atMs: number; kind: 'agent' | 'edit' | 'mcp' }
+/**
+ * Worth saving to the workspace, in the main loop: an Agent / Task call returned, a Write / Edit outside `.claude/`,
+ * an MCP result over slim's 4 KB gate. `workId` = the work id published when it happened (null = none).
+ */
+export type BaseSavable = { atMs: number; kind: 'agent' | 'edit' | 'mcp'; workId: string | null }
+
+/** The last `compact:` line autosave appended: notes.md's mtime after it and the workspace mtime before it. */
+export type BaseCompactMarker = { workId: string; notesMs: number; priorMs: number }
 
 /**
  * The autosave turn: a counter bumped per prompt that starts a turn, when it began, the turn the stop was last
- * blocked in (0 = never), the workspace mtime seen at its start and the last turn that ended with a new one.
+ * blocked in (0 = never), the workspace mtime seen at its start, the last turn that ended with a new one, and
+ * the workspace mtime the prompt line last fired for (-1 = none).
  */
-export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number; writeMs: number; writeTurn: number }
+export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number; writeMs: number; writeTurn: number; nudgedMs: number }
 
 /** atMs = $.clock.now() when written; text is one line. */
 export type BaseEvent = { atMs: number; kind: BaseEventKind; text: string }
@@ -64,7 +73,7 @@ declare module 'claude-code' {
       events: BaseEvent[]
       /** The session id whose start line was written: a module reload writes none. */
       started: string | null
-      /** The session id whose slim and fnd checks ran (at its first prompt). */
+      /** The session id whose slim check ran (at its first prompt). */
       checked: string | null
       /** The session id whose title is settled: `<id>` titled by base, `<id>:user` set by the person. */
       titled: string | null
@@ -75,6 +84,7 @@ declare module 'claude-code' {
       /** This session's savable events, oldest first, at most 200. */
       savable: BaseSavable[]
       autosave: BaseAutosave | null
+      compactMarker: BaseCompactMarker | null
     }
   }
 }

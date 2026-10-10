@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NOTES, NOW, PEEK, TASKS, addWorkspace, start, submit, world } from './world.ts'
+import { NOTES, NOW, PEEK, TASKS, addWorkspace, peek, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
 const agent = ($: any) => $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose' })
 const stop = ($: any, stop_hook_active = false) => $.classic.Stop({ stop_hook_active } as any)
 const NOTES_MD = `${TASKS}/ABC-1591/notes.md`
 const MIN = 60_000
-const NUDGE = 'workspace stale: last write 21 min ago — save decisions and interim findings to .claude/tasks/ABC-1591/notes.md before you answer'
+const NUDGE = 'workspace stale 21 min: save findings to .claude/tasks/ABC-1591/notes.md before answering'
 const BLOCK = 'save interim findings to the workspace (.claude/tasks/ABC-1591/notes.md), then stop'
 
 /** A workspace written a minute before the start, an agent returned, then 20 min without a write. */
@@ -23,8 +23,26 @@ async function staleWorld($: any, on: On, env: Record<string, string> = {}) {
 const lastContext = (calls: any) => calls.prompts[calls.prompts.length - 1]?.context ?? []
 
 describe('nudge', () => {
-  t('a stale workspace adds one context line to the prompt', async ($, on) => {
+  t('a stale workspace adds one context line to the prompt, once per stale period', async ($, on) => {
+    const { w, calls, clock } = await staleWorld($, on)
+    await submit($, 'go on')
+    expect(lastContext(calls)).toEqual([NUDGE])
+    await submit($, 'go on')
+    expect(lastContext(calls)).toEqual([])
+    w.files[NOTES_MD] = { text: NOTES, mtimeMs: clock.now() }
+    await clock.advance(30_000)
+    await agent($)
+    await clock.advance(21 * MIN)
+    await submit($, 'go on')
+    expect(lastContext(calls)).toEqual([NUDGE])
+  })
+
+  t('a notification or a peer message gets no line; the person\'s next prompt does', async ($, on) => {
     const { calls } = await staleWorld($, on)
+    for (const kind of ['task-notification', 'peer', 'scheduled-trigger']) {
+      await submit($, 'done', kind)
+      expect(lastContext(calls)).toEqual([])
+    }
     await submit($, 'go on')
     expect(lastContext(calls)).toEqual([NUDGE])
   })
@@ -62,11 +80,9 @@ describe('nudge', () => {
     await submit($, 'go on')
     expect(lastContext(calls)).toEqual([])
     w.ctxPct = 85
+    await clock.advance(30_000)
     await submit($, 'go on')
     expect(lastContext(calls)).toEqual([NUDGE.replace('21 min', '7 min')])
-    w.ctxPct = null
-    await submit($, 'go on')
-    expect(lastContext(calls)).toEqual([])
   })
 })
 
@@ -186,6 +202,25 @@ describe('auto-compact marker', () => {
     expect(ctx.w.files[NOTES_MD]?.text).toBe(
       `## log\n- one\n- ${day(NOW)} compact: workspace stale 21 min; since then 1 reader agents, 1 edits\n`,
     )
+  })
+
+  t('the marker is no save: the workspace stays stale and the next prompt gets the line again', async ($, on) => {
+    const ctx = world(on)
+    addWorkspace(ctx.w, 'ABC-1591')
+    await start($)
+    await agent($)
+    await ctx.clock.advance(20 * MIN)
+    await submit($, 'go on')
+    expect(lastContext(ctx.calls)).toEqual([NUDGE])
+    await $.classic.PreCompact({ trigger: 'auto', custom_instructions: null } as any)
+    expect(ctx.calls.writes.map(x => x.path)).toEqual([NOTES_MD])
+    await ctx.clock.advance(30_000)
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW - MIN, stale: true })
+    await submit($, 'go on')
+    expect(lastContext(ctx.calls)).toEqual([NUDGE])
+    await submit($, 'go on')
+    await agent($)
+    expect((await stop($)).block).toBe(BLOCK)
   })
 
   t('a notes.md that exists but cannot be read is left alone', async ($, on) => {

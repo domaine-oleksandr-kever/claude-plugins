@@ -3,8 +3,8 @@
  * doctor.cjs — base's static install checks: what a node process can see without a session.
  *
  * No model, no network: files, exec bits, JSON. `/base-doctor` (hooks/mods/doctor.ts) runs it with
- * --json and adds the rows only a session can answer (slim's view tool registered, fnd loaded, each
- * MCP server connected). It also runs standalone.
+ * --json and adds the rows only a session can answer (slim's view tool registered, each MCP server
+ * connected). It also runs standalone.
  *
  * Usage:
  *   node doctor.cjs [--project <dir>] [--root <plugin root>] [--home <dir>] [--log-dir <dir>] [--json]
@@ -15,7 +15,7 @@
  *                session directory under DOMAINE_LOG_DIR, else under <home>/.claude/domaine/log
  *     --json     `{ root, rows: [{ status, name, detail }] }` instead of the table
  *
- * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, fnd, base-tmp, event-log,
+ * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, base-tmp, event-log,
  * switches (only when a BASE_* switch holds a value outside its README domain: WARN). Every row is one
  * PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
  * BASE_TMP_TTL (the age the session sweep removes base-tmp files at), DOMAINE_LOG_DIR and every BASE_*
@@ -33,7 +33,6 @@ const MIN_NODE_MAJOR = 18;
 // Plugin names the engine refuses to load a hooks module for (validate still passes).
 const ENGINE_RESERVED = ['core', 'engine'];
 const SLIM_INSTALL = 'claude plugin install slim@domaine';
-const UNINSTALL_FND = 'claude plugin uninstall fnd@domaine';
 
 const rows = [];
 const report = (status, name, detail) => rows.push({ status, name, detail });
@@ -214,13 +213,6 @@ function checkSlim(claudeDir, projectDir, enabled) {
   else pass('slim', slim.key + ' ' + slim.version + ' installed and enabled');
 }
 
-function checkFnd(claudeDir, projectDir, enabled) {
-  const fnd = installedPlugin('fnd', claudeDir, projectDir, enabled);
-  if (!fnd) pass('fnd', 'not installed');
-  else if (fnd.disabled) warn('fnd', fnd.key + ' ' + fnd.version + ' is installed but disabled — uninstall it once the move to base is done: ' + UNINSTALL_FND);
-  else fail('fnd', fnd.key + ' ' + fnd.version + ' is installed and enabled — fnd and base must not run together: ' + UNINSTALL_FND);
-}
-
 function kb(bytes) {
   return bytes < 1024 ? bytes + ' B' : bytes < 1048576 ? (bytes / 1024).toFixed(1) + ' KB' : (bytes / 1048576).toFixed(1) + ' MB';
 }
@@ -353,7 +345,6 @@ function main() {
   checkHooks(pluginRoot);
   checkScripts(pluginRoot);
   checkSlim(claudeDir, projectDir, enabled);
-  checkFnd(claudeDir, projectDir, enabled);
   checkCoreTmp(projectDir);
   checkEventLog(opts['log-dir'], homeDir);
   checkSwitches(process.env);

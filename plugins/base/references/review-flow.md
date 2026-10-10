@@ -32,58 +32,29 @@ exact diff — either `base:bug-hunter` ran, or the correctness gate legitimatel
 applicable". Absent or ≠ the current `diff_hash` → the branch's correctness pass is
 missing or stale.
 
-Compute scope + hash:
+Compute scope + hash with base's script (`<base root>` = `${CLAUDE_PLUGIN_ROOT}` in base's own
+skills, the `base plugin root:` path elsewhere); pass `--ws .claude/tasks/<work-id>` when a task
+workspace exists:
 
 ```bash
-branch=$(git rev-parse --abbrev-ref HEAD)
-# develop, else main; origin/<b> when the local <b> is missing or only behind it (a stale local
-# branch gives an old merge-base and foreign files in scope); a local <b> with commits of its own wins.
-for b in develop main; do
-  base=$b
-  if git show-ref --verify --quiet "refs/remotes/origin/$b" \
-     && { ! git show-ref --verify --quiet "refs/heads/$b" || git merge-base --is-ancestor "$b" "origin/$b"; }; then
-    base="origin/$b"; break
-  fi
-  git show-ref --verify --quiet "refs/heads/$b" && break
-done
-mb=$(git merge-base "$base" HEAD)
-# ONE diff from the branch point to the WORKING TREE — committed, staged, unstaged and untracked
-# work alike. A throwaway copy of the index marks untracked files intent-to-add, so each diffs as
-# the new file it becomes once staged (same hash before and after `git add`). Untracked files under
-# .claude/ or docs/technical-approaches/ and any .env* file or dir / settings.local.json stay out,
-# name and body.
-idx="$(git rev-parse --git-dir)/base-review-index"
-cp "$(git rev-parse --git-dir)/index" "$idx"
-GIT_INDEX_FILE="$idx" git add -N -- ':/' ':(top,exclude).claude/' ':(top,exclude)docs/technical-approaches/' \
-  ':(top,exclude,glob)**/.env*' ':(top,exclude,glob)**/.env*/**' ':(top,exclude,glob)**/settings.local.json'
-# The caller sets ws=.claude/tasks/<work-id> when a task workspace exists (unset → no exclusion):
-# the last `build-dirtied:` line of its notes.md names tracked files a preview build rewrote, which
-# leave the scope. Only a token that is exactly a tracked file's path reaches git.
-ex=(); dirty=
-if [ -n "${ws:-}" ] && [ -f "$(git rev-parse --show-toplevel)/$ws/notes.md" ]; then
-  while read -r dash day kind rest || [ -n "$kind" ]; do
-    [ "$kind" = build-dirtied: ] && dirty=$rest
-  done < "$(git rev-parse --show-toplevel)/$ws/notes.md"
-fi
-while [ -n "$dirty" ]; do
-  read -r p dirty <<EOF
-$dirty
-EOF
-  [ "$(git -c core.quotePath=false ls-files --full-name -- ":(top,literal)$p" 2>/dev/null)" = "$p" ] \
-    && ex+=(":(top,literal,exclude)$p")
-done
-diff_hash=$(GIT_INDEX_FILE="$idx" git diff "$mb" -- ':/' ${ex[@]+"${ex[@]}"} | git hash-object --stdin)
+<base root>/scripts/review-scope.sh --ws .claude/tasks/<work-id>
+# branch=…  base=…  merge_base=…  diff_hash=…  excluded=…   then a blank line and the scope's files
 ```
 
-The **scope diff** is `GIT_INDEX_FILE="$idx" git diff "$mb" -- ':/' ${ex[@]+"${ex[@]}"}` (add
-`--name-only` for the reviewed-files list; the `${ex[@]+…}` form keeps an empty `ex` safe under
-`set -u` in bash 3.2) — every step below that reads the diff uses it. Files a preview build
-rewrote (the workspace's last `build-dirtied:` line) are a build artifact, not the developer's
-change: `ex` keeps them out of the scope, the hash and the agents' file groups. A bare line
-with no paths ends the exclusion.
-`base-review-index` lives beside the marker and is rebuilt on every run, never committed.
+The **scope** is one diff from the merge-base with `base` (develop, else main; `origin/<b>` when the
+local branch is missing or only behind it) to the **working tree**: committed, staged, unstaged and
+untracked work, so the hash is the same before and after `git add`. Untracked files under
+`.claude/`, `docs/technical-approaches/`, any `.env*` and `settings.local.json` stay out. The files
+listed after the blank line are the reviewed-files list; `--diff` prints the scope diff itself,
+`--since <rev>` its `--stat` and files against `<rev>`. The script's header is the full contract.
 
-Read it:
+Files a preview build rewrote (the workspace's `build-dirtied:` lines since the last bare one) are
+a build artifact, not the developer's change: their working-tree rewrite leaves the scope, the hash
+and the agents' file groups. A file with no committed or staged change of its own leaves whole and
+is named in `excluded=`; one the branch committed or staged stays in, diffed up to the index. A bare
+line with no paths ends the exclusion.
+
+Read it (`branch` and `diff_hash` are the script's values):
 
 ```bash
 marker="$(git rev-parse --git-dir)/.base-review"
@@ -120,7 +91,7 @@ legitimate.
 
 ```bash
 # BEFORE `git commit` — is the tree about to be committed the reviewed one?
-# (run the scope + hash block above first, in the same shell)
+# (diff_hash, branch, base: review-scope.sh's output just before)
 marker="$(git rev-parse --git-dir)/.base-review"
 pre_hash=$diff_hash
 restamp=no; keep_correctness=no
@@ -130,7 +101,7 @@ if [ -f "$marker" ] && grep -qx "branch=$branch" "$marker" && grep -qx "diff_has
   if grep -qx "correctness_hash=$pre_hash" "$marker"; then keep_correctness=yes; fi
 fi
 
-# AFTER a successful `git commit` — did the hooks rewrite files? (re-run the scope + hash block)
+# AFTER a successful `git commit` — did the hooks rewrite files? (re-run review-scope.sh)
 post_hash=$diff_hash
 if [ "$restamp" = yes ] && [ "$post_hash" != "$pre_hash" ]; then
   { echo "branch=$branch"; echo "base=$base"; echo "diff_hash=$post_hash"; \
@@ -139,8 +110,8 @@ if [ "$restamp" = yes ] && [ "$post_hash" != "$pre_hash" ]; then
 fi
 ```
 
-A caller whose `allowed-tools` bars shell redirection may instead rewrite those lines in
-place with `Edit` — on this path the marker exists by construction.
+A caller whose `allowed-tools` bars shell redirection may instead compare with `grep` or `Read` and
+rewrite those lines in place with `Edit` — on this path the marker exists by construction.
 
 ## 2. How the checks run
 
@@ -153,14 +124,14 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
   (`(AC 1a)`, `(TA 1a)`, "Acceptance Criteria", "Technical Approach", "Steps to Test"):
 
   ```bash
-  GIT_INDEX_FILE="$idx" git diff "$mb" -- ':/' ${ex[@]+"${ex[@]}"} | grep -nE '^\+[^+]' \
+  <base root>/scripts/review-scope.sh --ws <ws> --diff | grep -nE '^\+[^+]' \
     | grep -E '\b[A-Z]{2,}-[0-9]+\b|\((AC|TA)[^)]*\)|\b(AC|TA) [0-9]+[a-z]?\b|Acceptance Criteria|Technical Approach|Steps to Test'   # B candidates (the scope diff; ^\+[^+] skips +++ headers)
   git status --porcelain | grep '^??'                                          # D candidates
   ```
 
 - **A, C, and E are delegated to the `base:change-reviewer` agent** so the heavy reading stays
-  out of the main context (only the findings table comes back). The file list is the scope
-  diff's `--name-only`: an untracked new file in it is part of the change, reviewed like any other.
+  out of the main context (only the findings table comes back). The file list is
+  review-scope.sh's: an untracked new file in it is part of the change, reviewed like any other.
   - **Small diff** (≲ 15 changed files / ≲ 1500 diff lines) → **one** `base:change-reviewer`.
   - **Large diff** → **one `base:change-reviewer` per file-group, in parallel** — each file is
     read once; wall-clock drops. Split the file list into a few balanced groups.
@@ -180,7 +151,7 @@ The cost is **reading the changed files**, which checks A and C (and E) share. S
 
   Spawn it **in parallel** with the `base:change-reviewer` agent(s) — same diff, different
   lens; on a large diff reuse the same file-groups. Pass it the `base`, its file group (on a
-  small diff, the scope diff's untracked new files), the build-dirtied paths `ex` excluded, and
+  small diff, the scope diff's untracked new files), the build-dirtied paths in `excluded=`, and
   the documented ceilings (`ceiling:` entries from the task workspace `notes.md`)
   when a workspace exists.
 
@@ -222,16 +193,16 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
 
 - Compare `diff_hash` to `prev_hash`. If **unchanged**, say *"nothing changed since the
   last review"* and recommend **skip**. If **changed**, summarize what changed since the
-  last review — the scope diff's index against `<prev_head>` covers commits since then plus
+  last review — the scope against `<prev_head>` covers commits since then plus
   staged, unstaged and untracked work in one go — which files, rough nature (comments/style vs. logic):
 
   ```bash
-  GIT_INDEX_FILE="$idx" git diff "$prev_head" --stat -- ':/' ${ex[@]+"${ex[@]}"}   # $idx, ex per the §1 block
+  <base root>/scripts/review-scope.sh --ws <ws> --since "$prev_head"
   ```
 
 - Offer: **`[ full re-review ] / [ only the changed files ] / [ skip ]`**.
   - *only the changed files* → run `base:change-reviewer` on just the delta vs. `prev_head`
-    (cheapest useful option) — the files of the same command's `--name-only`.
+    (cheapest useful option) — the files that command lists after its blank line.
 - On any run that actually reviews, **refresh the marker** afterward.
 
 ### Per-skill entry behaviour

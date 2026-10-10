@@ -1,12 +1,12 @@
 // Progress: the work-id resolver, the digest refresh and /base-progress (the pin). Writes the base.progress
 // atom band draws its checklist from, with the staleness autosave.ts acts on; base draws nothing itself.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On } from 'claude-code'
-import type { BaseEvent, BaseProgress, BaseSavable } from '../../../types'
+import type { EngineInterface, FsEntry, On } from 'claude-code'
+import type { BaseCompactMarker, BaseEvent, BaseProgress, BaseSavable } from '../../../types'
 import { logLine, pushEvent } from '../events.ts'
 import type { Disk } from '../events.ts'
 import { notesTail, parseProgress } from './progress-parse.ts'
-import { KEY, isWorkId, keyFromBranch, projectOf, slugFromBranch, ticketKeys } from './workid.ts'
+import { KEY, isWorkId, keyFromBranch, projectsOf, slugFromBranch, ticketKeys } from './workid.ts'
 
 export const COMMAND = {
   name: 'base-progress',
@@ -29,7 +29,7 @@ const MCP_GATE = 4096
 /** slim's handle or stub: the original was over the gate even when the result now is not. */
 const SLIMMED = /<<full=|<<slim stub>>/
 /** Prompt origins a person wrote; notifications, peers and schedules never set the conversation key. */
-const PERSON = new Set(['composer', 'bridge', 'sdk'])
+export const PERSON = new Set(['composer', 'bridge', 'sdk'])
 
 const progress = atom({ plugin: 'base', key: 'progress' } as const, null)
 const pin = atom({ plugin: 'base', key: 'pin' } as const, null)
@@ -37,6 +37,7 @@ const lastKey = atom({ plugin: 'base', key: 'lastKey' } as const, null)
 const sessionId = atom({ plugin: 'base', key: 'sessionId' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
 const savable = atom({ plugin: 'base', key: 'savable' } as const, [] as BaseSavable[])
+const marker = atom({ plugin: 'base', key: 'compactMarker' } as const, null)
 
 /** Unsaved work: no workspace write for the stale window, and something worth saving happened after the last one. */
 export const isStale = (mtimeMs: number, lastSavableMs: number, now: number, staleMs = STALE_MS): boolean =>
@@ -46,23 +47,37 @@ export const isStale = (mtimeMs: number, lastSavableMs: number, now: number, sta
 export const staleWindowOf = (percent: number | null | undefined): number =>
   (percent ?? 0) >= TIGHT_CTX_PCT ? TIGHT_STALE_MS : STALE_MS
 
+/** The newest write among a workspace root's files; notes.md still at the compact marker's write keeps the time before it. */
+export function newestWrite(entries: readonly FsEntry[], id: string, m: BaseCompactMarker | null): number {
+  let ms = 0
+  for (const f of entries) {
+    if (f.kind !== 'file') continue
+    ms = Math.max(ms, f.name === 'notes.md' && m?.workId === id && f.mtimeMs === m.notesMs ? m.priorMs : f.mtimeMs)
+  }
+  return ms
+}
+
 type Loaded = Extract<BaseProgress, { workId: string }>
 
-function withStaleness(p: Loaded, list: readonly BaseSavable[], now: number): Loaded {
+/** Events stamped with another work id belong to that task; unstamped ones count for any. */
+function withStaleness(p: Loaded, list: readonly BaseSavable[], now: number, staleMs: number): Loaded {
   let lastSavableMs = 0
   let agentsSince = 0
   let editsSince = 0
   for (const s of list) {
+    if (s.workId != null && s.workId !== p.workId) continue
     lastSavableMs = Math.max(lastSavableMs, s.atMs)
     if (s.atMs <= p.mtimeMs) continue
     if (s.kind === 'agent') agentsSince++
     else if (s.kind === 'edit') editsSince++
   }
-  const stale = p.hasWorkspace && isStale(p.mtimeMs, lastSavableMs, now)
+  const stale = p.hasWorkspace && isStale(p.mtimeMs, lastSavableMs, now, staleMs)
   return { ...p, lastSavableMs, agentsSince, editsSince, stale }
 }
 
 type $ = EngineInterface
+
+const windowOf = async ($: $): Promise<number> => staleWindowOf((await $.session.usage().catch(() => null))?.context.percent)
 
 /** events.ts's file writer reaches `$` through this: the validator follows `$` only within one file. */
 function diskOf($: $): Disk {
@@ -141,16 +156,13 @@ type Inputs = { pin: string | null; lastKey: string | null }
 
 const readInputs = async ($: $): Promise<Inputs> => ({ pin: await read($, pin), lastKey: await read($, lastKey) })
 
-/** The projects of the `.claude/tasks/<KEY>` dirs: what corroborates a bare key in a prompt. */
-async function knownProjects($: $, root: string): Promise<Set<string>> {
-  const out = new Set<string>()
+/** The names of the `.claude/tasks` dirs. */
+async function taskDirs($: $, root: string): Promise<Set<string>> {
   try {
-    for (const d of await $.fs.list(tasksDir(root))) {
-      const project = d.kind === 'dir' ? projectOf(d.name) : null
-      if (project) out.add(project)
-    }
-  } catch {}
-  return out
+    return new Set((await $.fs.list(tasksDir(root))).filter(d => d.kind === 'dir').map(d => d.name))
+  } catch {
+    return new Set()
+  }
 }
 
 /**
@@ -167,8 +179,7 @@ async function resolveWorkId($: $, root: string, branch: string | null, inputs: 
 /** The most recent ticket the prompt names (`ticketKeys`), else null: the held key stays. */
 async function conversationKey($: $, text: string): Promise<string | null> {
   if (!KEY.test(text)) return null
-  const keys = ticketKeys(text, await knownProjects($, await $.session.root()))
-  return keys[0] ?? null
+  return ticketKeys(text, projectsOf(await taskDirs($, await $.session.root())))[0] ?? null
 }
 
 async function readText($: $, path: string): Promise<string> {
@@ -179,18 +190,13 @@ async function readText($: $, path: string): Promise<string> {
   }
 }
 
-async function mtimeOf($: $, path: string): Promise<number> {
-  try {
-    return (await $.fs.stat(path)).mtimeMs
-  } catch {
-    return 0
-  }
-}
-
-/** Newest mtime of the workspace's progress.md and notes.md: what the tick compares. */
+/** The workspace's newest write (`newestWrite`): what the tick compares. */
 async function workspaceMtime($: $, root: string, id: string): Promise<number> {
-  const dir = workDir(root, id)
-  return Math.max(await mtimeOf($, `${dir}/progress.md`), await mtimeOf($, `${dir}/notes.md`))
+  let entries: FsEntry[] = []
+  try {
+    entries = await $.fs.list(workDir(root, id))
+  } catch {}
+  return newestWrite(entries, id, await read($, marker))
 }
 
 async function load($: $, root: string, workId: string, branch: string | null): Promise<BaseProgress> {
@@ -200,14 +206,16 @@ async function load($: $, root: string, workId: string, branch: string | null): 
   const parsed = parseProgress(await readText($, `${dir}/progress.md`))
   const notes = notesTail(await readText($, `${dir}/notes.md`))
   const p = { workId, branch, hasWorkspace: workspace, ...parsed, notesTail: notes, mtimeMs, lastSavableMs: 0, agentsSince: 0, editsSince: 0, stale: false }
-  return withStaleness(p, await read($, savable), await $.clock.now())
+  return withStaleness(p, await read($, savable), await $.clock.now(), await windowOf($))
 }
 
 /** A savable event re-derives the staleness fields without re-reading the workspace. */
 async function noteSavable($: $, kind: BaseSavable['kind']): Promise<void> {
   const now = await $.clock.now()
-  const list = await update($, savable, l => [...l, { atMs: now, kind }].slice(-SAVABLE_CAP))
-  await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now) : p))
+  const workId = (await read($, progress))?.workId ?? null
+  const list = await update($, savable, l => [...l, { atMs: now, kind, workId }].slice(-SAVABLE_CAP))
+  const staleMs = await windowOf($)
+  await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now, staleMs) : p))
 }
 
 /** `resolve` re-runs git and the resolver; otherwise only the current workspace is re-read while it exists. */
@@ -237,11 +245,12 @@ async function tick($: $, resolve: boolean): Promise<void> {
   if (cur.workId === null) return
   const mtimeMs = await workspaceMtime($, await $.session.root(), cur.workId)
   if (mtimeMs !== cur.mtimeMs) return refresh($, false)
-  // Time alone turns a workspace stale: write only when the flag flips.
+  // Time or the context window alone turns a workspace stale: write only when the flag flips.
   const now = await $.clock.now()
   const list = await read($, savable)
-  if (withStaleness(cur, list, now).stale !== cur.stale)
-    await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now) : p))
+  const staleMs = await windowOf($)
+  if (withStaleness(cur, list, now, staleMs).stale !== cur.stale)
+    await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now, staleMs) : p))
 }
 
 export function registerProgress(on: On): void {
@@ -291,7 +300,7 @@ export function registerProgress(on: On): void {
     const r = await next(e)
     if (e.tool !== 'Write' && e.tool !== 'Edit') return r
     if (!e.file_path.includes('/.claude/')) {
-      if (r.deny === undefined && !r.isError) await noteSavable($, 'edit')
+      if (r.deny === undefined && !r.isError && e.agentId === undefined) await noteSavable($, 'edit')
       return r
     }
     const root = await $.session.root()
@@ -304,13 +313,13 @@ export function registerProgress(on: On): void {
 
   on('tool.call', { tool: /^(Agent|Task)$/ }, async ($, e, next) => {
     const r = await next(e)
-    if (r.deny === undefined && !r.isError) await noteSavable($, 'agent')
+    if (r.deny === undefined && !r.isError && e.agentId === undefined) await noteSavable($, 'agent')
     return r
   })
 
   on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {
     const r = await next(e)
-    if (r.deny !== undefined || r.isError) return r
+    if (r.deny !== undefined || r.isError || e.agentId !== undefined) return r
     const text = typeof r.result === 'string' ? r.result : (JSON.stringify(r.result) ?? '')
     if (text.length > MCP_GATE || SLIMMED.test(text)) await noteSavable($, 'mcp')
     return r

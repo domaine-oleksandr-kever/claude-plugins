@@ -42,6 +42,16 @@ export function projectOf(id: string): string | null {
   return KEY_WHOLE.test(id) ? id.slice(0, id.indexOf('-')) : null
 }
 
+/** The projects of a checkout's `.claude/tasks/<KEY>` dir names: what corroborates a bare key. */
+export function projectsOf(dirs: Iterable<string>): Set<string> {
+  const out = new Set<string>()
+  for (const d of dirs) {
+    const project = projectOf(d)
+    if (project) out.add(project)
+  }
+  return out
+}
+
 /** A ticket key or a kebab slug: the only names the resolver turns into a workspace path. */
 export function isWorkId(id: string): boolean {
   return KEY_WHOLE.test(id) || SLUG.test(id)

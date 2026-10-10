@@ -1,11 +1,11 @@
-// Session title `<KEY> — <summary>`: from the branch key at session start, else from the first person prompt
+// Session title `<KEY> — <summary>`: from a corroborated branch key at session start, else from the first person prompt
 // that names a corroborated ticket. One shot per session; a title the person set (at start or by /rename) is kept.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent } from '../../types'
 import { logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
-import { KEY, keyFromBranch, projectOf, ticketKeys } from './workspace/workid.ts'
+import { KEY, keyFromBranch, projectOf, projectsOf, ticketKeys } from './workspace/workid.ts'
 
 /** Bytes, not characters: a Cyrillic summary costs two per character in the hook envelope. */
 const TITLE_MAX_BYTES = 100
@@ -72,15 +72,12 @@ async function branchOf($: $, root: string): Promise<string | null> {
   }
 }
 
-async function knownProjects($: $, root: string): Promise<Set<string>> {
-  const out = new Set<string>()
+async function taskDirs($: $, root: string): Promise<Set<string>> {
   try {
-    for (const d of await $.fs.list(`${root}/.claude/tasks`)) {
-      const project = d.kind === 'dir' ? projectOf(d.name) : null
-      if (project) out.add(project)
-    }
-  } catch {}
-  return out
+    return new Set((await $.fs.list(`${root}/.claude/tasks`)).filter(d => d.kind === 'dir').map(d => d.name))
+  } catch {
+    return new Set()
+  }
 }
 
 /** Off by the switch, or this session's one shot already spent (`<id>` titled by base, `<id>:user` by the person). */
@@ -109,7 +106,10 @@ async function startTitle($: $, sid: string, sessionTitle: string | undefined): 
   }
   const root = await $.session.root()
   const key = keyFromBranch(await branchOf($, root))
-  return key ? settle($, sid, root, key) : null
+  if (!key) return null
+  // key shape alone is no evidence: `fix/UTF-8-encoding` names no ticket
+  const dirs = await taskDirs($, root)
+  return dirs.has(key) || projectsOf(dirs).has(projectOf(key) ?? '') ? settle($, sid, root, key) : null
 }
 
 /**
@@ -124,7 +124,7 @@ async function promptTitle($: $, sid: string, prompt: string, source: string | u
   }
   if ((source !== undefined && !PERSON.has(source)) || !KEY.test(prompt)) return null
   const root = await $.session.root()
-  const key = ticketKeys(prompt, await knownProjects($, root))[0]
+  const key = ticketKeys(prompt, projectsOf(await taskDirs($, root)))[0]
   return key ? settle($, sid, root, key) : null
 }
 

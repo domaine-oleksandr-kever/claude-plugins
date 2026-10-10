@@ -1,10 +1,9 @@
 ---
 name: worktree
 description: >
-  Set up — or tear down — an isolated `git worktree` so a run gets its own checkout, branch and dev
-  port instead of occupying the main repo, sharing the task workspace with it. Use when the user
-  asks to create / set up a worktree (for a ticket key or a slug), to work on something in parallel
-  without tying up the main checkout, or to remove / clean up a worktree.
+  Set up or tear down an isolated git worktree with its own checkout, branch and dev port. Use when
+  the user asks to create or remove a worktree, or to work in parallel without tying up the main
+  checkout.
 argument-hint: "<WORK-ID> [base-branch] | --remove <WORK-ID> [--force]"
 arguments:
   - name: work_id

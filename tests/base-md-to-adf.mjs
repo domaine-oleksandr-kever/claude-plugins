@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Fixture suite for plugins/base/scripts/md-to-adf.cjs (base:jira-writer's converter). The read side
 // is slim's adf engine (plugins/slim/scripts/engines/adf.cjs), so the round trips here run
-// markdown → base's writer → slim's reader → base's writer. adf-md-fixtures.mjs keeps covering
-// fnd's pair. Exit 0 = all green.
+// markdown → base's writer → slim's reader → base's writer. Exit 0 = all green.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -63,6 +62,27 @@ check('m2a-color-hex', m2a('{color:#ABCDEF}ok{color}'), doc([p([t('ok', [{ type:
 check('m2a-color-unknown-literal', m2a('{color:mauve}x{color}'), doc([p([t('{color:mauve}x{color}')])]));
 check('m2a-table', m2a('| A | B |\n| --- | --- |\n| 1 | 2 |').content[0].type, 'table');
 check('m2a-no-tables', m2a('| A | B |\n| --- | --- |\n| 1 | 2 |', ['--no-tables']).content[0].type, 'bulletList');
+const hb = { type: 'hardBreak' };
+check('m2a-cell-br', m2a('| A |\n| --- |\n| one<br>two<BR/>three |').content[0].content[1].content[0],
+  { type: 'tableCell', content: [p([t('one'), hb, t('two'), hb, t('three')])] });
+check('m2a-cell-br-no-tables', m2a('| A |\n| --- |\n| one<br>two |', ['--no-tables']),
+  doc([ul([li([p([t('A: one'), hb, t('two')])])])]));
+check('m2a-cell-br-in-code', m2a('| Tag | Use |\n| --- | --- |\n| `<br>` | **a<br>b** |').content[0].content[1].content,
+  [{ type: 'tableCell', content: [p([t('<br>', [code])])] }, { type: 'tableCell', content: [p([t('a', [strong]), hb, t('b', [strong])])] }]);
+check('m2a-cell-br-in-code-no-tables', m2a('| Tag |\n| --- |\n| `<br>` |', ['--no-tables']),
+  doc([ul([li([p([t('Tag: '), t('<br>', [code])])])])]));
+check('m2a-heading-closing-hashes', m2a('## Title ##\n\n# #\n\n# C#'),
+  doc([h(2, [t('Title')]), { type: 'heading', attrs: { level: 1 } }, h(1, [t('C#')])]));
+const ti = (id, state, content) => (content ? { type: 'taskItem', attrs: { localId: id, state }, content } : { type: 'taskItem', attrs: { localId: id, state } });
+const tl = (id, content) => ({ type: 'taskList', attrs: { localId: id }, content });
+check('m2a-task-list', m2a('- [ ] a\n- [x] **b**\n  - [X] c\n- [ ]\n- d'),
+  doc([tl('md-2', [ti('md-1', 'TODO', [t('a')]), ti('md-3', 'DONE', [t('b', [strong])]),
+    tl('md-5', [ti('md-4', 'DONE', [t('c')])]), ti('md-6', 'TODO')]), ul([li([p([t('d')])])])]));
+// ADF has no slot for a task list inside a list item or a quote: the box stays literal text there,
+// and a plain list under a task item leaves the task list instead of nesting in an item that holds inline only
+check('m2a-task-in-bullet-literal', m2a('- x\n  - [ ] y'), doc([ul([li([p([t('x')]), ul([li([p([t('[ ] y')])])])])])]));
+check('m2a-task-in-quote-literal', m2a('> - [x] q'), doc([{ type: 'blockquote', content: [ul([li([p([t('[x] q')])])])] }]));
+check('m2a-bullet-under-task', m2a('- [ ] a\n  - b'), doc([tl('md-2', [ti('md-1', 'TODO', [t('a')])]), ul([li([p([t('b')])])])]));
 
 // ---------------------------------------------------------------------- the CLI contract --
 {
@@ -133,6 +153,7 @@ const CORPUS = [
   'Fields:\nName | Type\n--- | ---\nsku | text',
   '### Setup\n\n1. Open the page\n2. Click **Add**\n\n### Expected\n\nThe drawer opens.',
   'Unicode — “quotes”, non breaking, emoji 🙂',
+  '- [ ] todo with [a link](https://x.test)\n- [x] done\n  - [ ] nested',
 ];
 for (const [i, md] of CORPUS.entries()) {
   for (const args of [[], ['--no-tables']]) {

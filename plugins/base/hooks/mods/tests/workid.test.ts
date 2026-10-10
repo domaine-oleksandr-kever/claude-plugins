@@ -109,6 +109,7 @@ describe('progress parse', () => {
     const notes = ['## 1', '- one', '  - nested', '- two', 'prose', '- three', '- four  '].join('\n')
     expect(notesTail(notes)).toEqual(['- two', '- three', '- four'])
     expect(notesTail('')).toEqual([])
+    expect(notesTail(`${notes}\n- 2026-10-10 compact: workspace stale 21 min\n- 2026-10-10 build-dirtied: a.js\n- 2026-10-10 build-dirtied:`)).toEqual(['- two', '- three', '- four'])
   })
 })
 

@@ -25,7 +25,8 @@
 # command carrying the flag as an option token before a `--` (`git grep -n
 # --no-verify -- src/`), which reads as an alias invocation; bare prose
 # containing `git commit -n` outside quotes (echo args, heredoc bodies);
-# `HUSKY=0` in front of a NON-git command in the same line as a commit; and a
+# a hook manager's kill switch (`HUSKY=0`, `LEFTHOOK=0`, `SKIP=<id>`) in front of a
+# NON-git command in the same line as a commit; and a
 # `-F -` heredoc body that names a hook file (`-m "<msg>"` is the safe
 # spelling — the message span is stripped, the stdin body cannot be). On a host
 # with no working `sed` the raw command stands in for the normalized scan, so a
@@ -200,10 +201,15 @@ esac
 # An alias definition joins the gate on its own: it carries no commit segment for the first half
 # to match, and it is exactly where the coarse rail's flag test earns its keep.
 nogrep_seg="$git_seg_re(commit|push|merge|am|pull)|$alias_head|$alias_invoke_re"
+# The pre-commit framework reads SKIP from the environment only, so it counts as an assignment
+# at a word start and in caps — never `--skip=e2e` or a `Skip=` trailer.
+skip_env='(^|[[:space:];&|(])SKIP=[^[:space:]|&;]'
 if [ -z "$segs$psegs$msegs" ] && [[ $scan =~ $nogrep_seg ]] && ! printf 'g\n' | grep -q g 2>/dev/null; then
+  skipped=""
+  [[ $scan =~ $skip_env ]] && skipped=1
   shopt -s nocasematch 2>/dev/null || true
   nogrep_bundle='(^|[[:space:]])-[[:alpha:]]*n[[:alpha:]]*([^[:alnum:]-]|$)'
-  nogrep_disable='(core\.hookspath|\.husky|\.git/hooks|husky=0)'
+  nogrep_disable='(core\.hookspath|\.husky|\.git/hooks|husky=0|lefthook=(0|false))'
   # `-n` is --no-verify on a commit and something else everywhere else, so the bundle test walks
   # the commit spans the way git_segments would: read against the whole scan it takes a
   # neighbouring `git log -n 5`, `git push -n` or `find -name` for a bypass. Parameter expansion,
@@ -215,8 +221,8 @@ if [ -z "$segs$psegs$msegs" ] && [[ $scan =~ $nogrep_seg ]] && ! printf 'g\n' | 
     span="${rest%%[\|\&\;]*}"
     [[ $span =~ $nogrep_bundle ]] && { bundled=1; break; }
   done
-  if [[ $scan =~ $no_verify_re ]] || [[ $scan =~ $nogrep_disable ]] || [ -n "$bundled" ]; then
-    echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never commit, push, merge or am with --no-verify (-n on a commit), and never disable them (core.hooksPath, .husky / .git/hooks, HUSKY=0). This host has no working \`grep\`, so the guard is running a reduced text scan that cannot tell a commit message apart from the command: if those words only appear inside your -m message, rephrase it — otherwise re-run the plain git command and let the hooks run." >&2
+  if [[ $scan =~ $no_verify_re ]] || [[ $scan =~ $nogrep_disable ]] || [ -n "$bundled$skipped" ]; then
+    echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never commit, push, merge or am with --no-verify (-n on a commit), and never disable them (core.hooksPath, .husky / .git/hooks, HUSKY=0, LEFTHOOK=0, SKIP=). This host has no working \`grep\`, so the guard is running a reduced text scan that cannot tell a commit message apart from the command: if those words only appear inside your -m message, rephrase it — otherwise re-run the plain git command and let the hooks run." >&2
     exit 2
   fi
   shopt -u nocasematch 2>/dev/null || true
@@ -288,15 +294,15 @@ if [ -z "$flat" ]; then
   [ -n "$flat" ] || flat="$cmd"
 fi
 
-# Every disable form below names a hook path or husky itself, so a command mentioning neither
-# substring is done here — that keeps the grep below off the ordinary `git commit -m …` path.
+# Every disable form below names a hook path or a hook manager's switch, so a command mentioning
+# none of those substrings is done here — that keeps the grep below off the ordinary `git commit -m …` path.
 # Read on the DEQUOTED text, the same text those matchers read: a quote split inside the word
 # (`core.ho"oks"Path`, `.hus"ky"`) leaves the raw command naming neither substring, and the
 # early exit would hand back the bypass the matchers were about to catch. The normalize pass
 # it now sits behind is one fork, paid only by commands that reached this far — a command with
 # no git commit/push/merge/am/pull segment left above.
 shopt -s nocasematch 2>/dev/null || true
-case "$flat" in *hooks*|*husky*) ;; *) exit 0 ;; esac
+case "$flat" in *hooks*|*husky*|*lefthook*|*skip=*) ;; *) exit 0 ;; esac
 
 # Forms of the same move, one pass (the clean path pays one grep):
 # 1. redirecting hooks away — core.hooksPath via -c / git config / GIT_CONFIG_* env;
@@ -318,9 +324,11 @@ case "$flat" in *hooks*|*husky*) ;; *) exit 0 ;; esac
 #    pre-commit` all empty the file without naming a verb at all. Its target must be a BARE
 #    name, the only kind that resolves inside the directory cd landed in: `ls > /tmp/out` after
 #    a cd writes somewhere else entirely, and blocking that would be a pure FP;
-# 4. HUSKY=0, husky's own kill switch.
-# Case-insensitive throughout: config keys are (BASE.HOOKSPATH), and matching a lowercase
-# `husky=0` — which would not actually disable anything — is a cheaper price than a second pass.
+# 4. the hook managers' own kill switches: husky's HUSKY=0, lefthook's LEFTHOOK=0 / =false, and
+#    the pre-commit framework's SKIP=<hook ids> (an empty SKIP= skips nothing).
+# Case-insensitive except SKIP ($skip_env above): config keys are (BASE.HOOKSPATH), and matching
+# a lowercase `husky=0` — which would not actually disable anything — is a cheaper price than a
+# second pass.
 hook_file='(\.husky|\.git/hooks)([^[:alnum:]_.-]|$)'
 verbs='rm|mv|truncate|unlink|shred|ln|tee|install'
 chmod_off='[^[:space:]+]*-[^[:space:]+]*x|[ugoa]*=[^x[:space:]]*|[0-7]?[0246][0246][0246]'
@@ -346,8 +354,10 @@ if printf '%s' "$flat" | grep -qiE \
 |(^|[^[:alnum:]_.-])find[[:space:]][^|&;]*$hook_file[^|&;]*(-delete|-exec)\
 |(^|[^[:alnum:]_.-])(cd|pushd)[[:space:]]+[^|&;]*$hook_file[^|&;]*[|&;]*[[:space:]]*(($verbs|chmod)[[:space:]]|sed[^|&;]*[[:space:]]$sed_i|$copy_bare|$redir_bare)\
 |>[[:space:]]*[^[:space:]|&;]*$hook_file\
-|(^|[^[:alnum:]_])HUSKY=0([^[:alnum:]_.-]|$)"; then
-  echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never disable them to get a commit or push through: no core.hooksPath / GIT_CONFIG_* redirect, no removing / chmod-ing / truncating / overwriting .husky or .git/hooks files, no HUSKY=0. Restore the hooks and re-run the plain git command. If a hook fails on a pre-existing repo defect your change didn't touch, report it to the developer (in auto flows: ESCALATE) — only the developer may bypass, by hand." >&2
+|(^|[^[:alnum:]_])HUSKY=0([^[:alnum:]_.-]|$)\
+|(^|[^[:alnum:]_])LEFTHOOK=(0|false)([^[:alnum:]_.-]|$)" \
+  || { shopt -u nocasematch 2>/dev/null; [[ $flat =~ $skip_env ]]; }; then
+  echo "Domaine convention (references/commit-message-format.md): git hooks are quality gates — never disable them to get a commit or push through: no core.hooksPath / GIT_CONFIG_* redirect, no removing / chmod-ing / truncating / overwriting .husky or .git/hooks files, no HUSKY=0, LEFTHOOK=0 or SKIP=. Restore the hooks and re-run the plain git command. If a hook fails on a pre-existing repo defect your change didn't touch, report it to the developer (in auto flows: ESCALATE) — only the developer may bypass, by hand." >&2
   exit 2
 fi
 exit 0

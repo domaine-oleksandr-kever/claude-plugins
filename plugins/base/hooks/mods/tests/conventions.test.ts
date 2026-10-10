@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 import { COMMENT_DISCIPLINE, LEAN_CODE, UNTRUSTED_CONTENT, WRITING_STYLE } from '../conventions/text.ts'
 import { world } from './world.ts'
 
-const IDS = ['base:root', 'base:comment-discipline', 'base:plugin-feedback', 'base:task-workspace', 'base:untrusted-content', 'base:lean-code', 'base:writing-style']
+const IDS = ['base:root', 'base:comment-discipline', 'base:task-workspace', 'base:untrusted-content', 'base:lean-code', 'base:writing-style']
 // base-refs-lint's banned names, spelled so that lint does not flag this file: base's text never points at the legacy plugin.
 const OLD = 'f' + 'nd'
 const BANNED = [`plugin_${OLD}_`, `${OLD.toUpperCase()}_`, `\\b${OLD}:`, `/${OLD}\\b`, `${OLD}-tmp`, '\\bCursor\\b', '\\bCodex\\b', '\\bOpenCode\\b'].map(p => new RegExp(p))
@@ -34,16 +34,16 @@ describe('prompt.compose', () => {
     expect(ws).not.toContain('<base root>')
     expect(ws).toContain('/base:save-task-context')
     expect(ws).toContain("The team plugin's section names the series of steps.")
-    expect(r.find(s => s.id === 'base:plugin-feedback')!.text).toContain('/base:report-plugin-issue')
     expect(r.find(s => s.id === 'base:comment-discipline')!.text).toBe(COMMENT_DISCIPLINE)
   })
 
-  test('the untrusted-content rail trusts slim\'s handle files only', async ($, on) => {
+  test('the untrusted-content rail keeps one sentence per rule, under 900 bytes', async ($, on) => {
     world(on)
     const text = ours(await compose($)).find(s => s.id === 'base:untrusted-content')!.text
-    for (const name of ['fnd-mcp-slim-*', 'fnd-crush-*', 'fnd-jsx-ids-*', 'slim-prompt-*', '.claude/slim/prompt/', 'SLIM_DIR', 'tool-results/', '<<slim stub>>', 'base plugin directive:']) {
+    for (const name of ['ESCALATE(', ".claude/slim/prompt/", 'tool-results/', "hook's own system reminder", '<<slim stub>>', 'base plugin directive:']) {
       expect(text).toContain(name)
     }
+    expect(new TextEncoder().encode(text).length).toBeLessThan(900)
   })
 
   test('two renders are byte-identical', async ($, on) => {
@@ -53,7 +53,7 @@ describe('prompt.compose', () => {
     expect(JSON.stringify(a)).toBe(JSON.stringify(await compose($)))
   })
 
-  test('no fnd, host or old-compressor name in any section', async ($, on) => {
+  test('no legacy-plugin, host or old-compressor name in any section', async ($, on) => {
     world(on)
     const r = ours(await compose($))
     expect(r).toHaveLength(IDS.length)
@@ -77,7 +77,7 @@ describe('prompt.compose', () => {
 describe('classic.SubagentStart', () => {
   test('a reader gets the root line and the untrusted-content rail only', async ($, on) => {
     world(on)
-    for (const type of ['base:jira-reader', 'base:figma-reader', 'base:doc-reader', 'base:jira-writer', 'base:bug-hunter', 'base:change-reviewer', 'fe:theme-explorer', 'Explore', 'Plan']) {
+    for (const type of ['base:jira-reader', 'base:figma-reader', 'base:doc-reader', 'base:jira-writer', 'base:bug-hunter', 'base:change-reviewer', 'fe:theme-explorer', 'qa:store-explorer', 'Explore', 'Plan']) {
       const r = await subagent($, type)
       expect(r.additionalContext).toHaveLength(1)
       const ctx = r.additionalContext[0] as string
@@ -104,6 +104,12 @@ describe('classic.SubagentStart', () => {
     const ctx = (await subagent($, 'general-purpose')).additionalContext[0] as string
     expect(ctx).toContain(COMMENT_DISCIPLINE)
     expect(ctx).not.toContain(LEAN_CODE)
+  })
+
+  test('a fork gets nothing: it inherits the parent\'s system prompt', async ($, on) => {
+    world(on)
+    const r = await subagent($, 'fork')
+    expect(r.additionalContext ?? []).toHaveLength(0)
   })
 
   test('context from the hooks beneath is kept, base\'s comes after it', async ($, on) => {

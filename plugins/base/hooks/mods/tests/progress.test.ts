@@ -441,6 +441,54 @@ describe('staleness', () => {
     expect((await peek($)).progress).toMatchObject({ lastSavableMs: NOW, agentsSince: 0, editsSince: 0 })
   })
 
+  t('a context window 85 % full turns the published flag stale after 5 min', async ($, on) => {
+    const { w, clock } = world(on, { ctxPct: 90 })
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await agent($)
+    await clock.advance(5 * 60_000)
+    expect((await peek($)).progress).toMatchObject({ stale: true })
+    w.ctxPct = 40
+    await clock.advance(30_000)
+    expect((await peek($)).progress).toMatchObject({ stale: false })
+  })
+
+  t('a reader\'s own file in the workspace root is a write; tmp/ is not', async ($, on) => {
+    const { w, clock } = world(on)
+    w.files[`${TASKS}/ABC-1591/tmp/x.json`] = { text: '{}', mtimeMs: NOW + 5 }
+    await start($)
+    expect((await peek($)).progress).toMatchObject({ workId: 'ABC-1591', mtimeMs: 0 })
+    await $.tool.call({ tool: 'Write', file_path: `${TASKS}/ABC-1591/ticket.md`, content: '# ABC-1591', agentId: 'a1' })
+    await agent($)
+    await clock.advance(25 * 60_000)
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW + 1, lastSavableMs: NOW, stale: false })
+  })
+
+  t('a subagent\'s own edits and MCP reads are not savable', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await $.tool.call({ tool: 'Edit', file_path: `${ROOT}/sections/header.liquid`, old_string: 'a', new_string: 'b', agentId: 'a1' })
+    await $.tool.call({ tool: 'mcp__atlassian__getJiraIssue', reply: 'x'.repeat(5000), agentId: 'a1' })
+    await $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose', agentId: 'a1' })
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: 0, agentsSince: 0, editsSince: 0 })
+  })
+
+  t('savable work stays with its work id: a switch to an older workspace is not stale', async ($, on) => {
+    const { w, clock } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    addWorkspace(w, 'ABC-77', MD, NOW - HOUR)
+    await start($)
+    await agent($)
+    await edit($, `${ROOT}/sections/header.liquid`)
+    await clock.advance(60_000)
+    await submit($, 'see ABC-77')
+    await clock.advance(25 * 60_000)
+    expect((await peek($)).progress).toMatchObject({ workId: 'ABC-77', lastSavableMs: 0, agentsSince: 0, editsSince: 0, stale: false })
+    await submit($, 'back to ABC-1591')
+    expect((await peek($)).progress).toMatchObject({ workId: 'ABC-1591', lastSavableMs: NOW, agentsSince: 1, editsSince: 1, stale: true })
+  })
+
   t('no workspace is never stale', async ($, on) => {
     const { w, clock } = world(on)
     addWorkspace(w, 'ABC-1591')

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { MCP_TIMEOUT_MS, age, parseStatic, reconcile, render, summary } from '../doctor.ts'
 import type { Row } from '../doctor.ts'
-import { LOADED_ONLY, SLIM_MISSING, WITH_FND, withFnd } from '../session.ts'
+import { SLIM_MISSING } from '../session.ts'
 import { NOW, PEEK, ROOT, eventsOf, peek, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -15,7 +15,6 @@ const GREEN = [
   row('PASS', 'node', 'node 22.0.0 (>= 18 required)'),
   row('PASS', 'manifest', 'base 0.1.0, depends on slim'),
   row('PASS', 'slim', 'slim@domaine 0.5.0 installed and enabled'),
-  row('PASS', 'fnd', 'not installed'),
 ]
 const manifest = (servers: string[]) =>
   JSON.stringify({ name: 'base', version: '0.1.0', mcpServers: Object.fromEntries(servers.map(s => [s, {}])) })
@@ -83,17 +82,15 @@ describe('/base-doctor', () => {
     expect(calls.connects.sort()).toEqual(['atlassian', 'playwright'])
     const out = lines(text)
     expect(out[0]).toMatch(/^base doctor — plugin root: /)
-    expect(out.slice(1, 9)).toEqual([
+    expect(out.slice(1, 7)).toEqual([
       'PASS  node            node 22.0.0 (>= 18 required)',
       'PASS  manifest        base 0.1.0, depends on slim',
       'PASS  slim            slim@domaine 0.5.0 installed and enabled',
-      'PASS  fnd             not installed',
       'PASS  slim-live       mcp__slim__view registered',
-      'PASS  fnd-live        fnd not enabled and no fnd command loaded',
       'PASS  mcp:atlassian   connected as plugin:base:atlassian',
       'PASS  mcp:playwright  connected as plugin:base:playwright',
     ])
-    expect(out[9]).toBe('doctor: 8 passed, 0 failed, 0 skipped')
+    expect(out[7]).toBe('doctor: 6 passed, 0 failed, 0 skipped')
   })
 
   t('one doctor line in base.events, and the events tail in the answer', async ($, on) => {
@@ -104,7 +101,7 @@ describe('/base-doctor', () => {
     expect(text).toContain('base events (last 1 of 1, newest last):')
     expect(text).toContain('    2m  start      base 0.1.0')
     expect(text).toContain('SKIP  mcp')
-    expect(await eventsOf($, 'doctor')).toEqual([{ atMs: NOW + 125_000, kind: 'doctor', text: '6 passed, 0 failed, 1 skipped' }])
+    expect(await eventsOf($, 'doctor')).toEqual([{ atMs: NOW + 125_000, kind: 'doctor', text: '4 passed, 0 failed, 1 skipped' }])
   })
 
   t('BASE_EVENT_LOG=0 → the tail says so and no line is written', async ($, on) => {
@@ -115,30 +112,16 @@ describe('/base-doctor', () => {
     expect((await peek($)).events).toEqual([])
   })
 
-  t('slim missing and fnd loaded → both live rows fail', async ($, on) => {
+  t('slim missing → the live row fails', async ($, on) => {
     const { calls } = world(on, {
       tools: NO_SLIM,
-      enabledPlugins: { 'fnd@domaine': true },
       manifest: manifest([]),
       run: () => ran(0, staticOut(GREEN)),
     })
     await start($)
     const { text } = await doctor($)
     expect(text).toContain(`FAIL  slim-live  ${SLIM_MISSING}; base refuses its readers until it is`)
-    expect(text).toContain(`FAIL  fnd-live   ${WITH_FND}`)
     expect(calls.toasts).toEqual([])
-  })
-
-  t('fnd loaded by its commands alone (synced or plugin-dir) → the row names that copy', async ($, on) => {
-    world(on, {
-      enabledPlugins: { 'fnd@domaine': false },
-      commands: [['fnd-progress', 'fnd']],
-      manifest: manifest([]),
-      run: () => ran(0, staticOut(GREEN)),
-    })
-    await start($)
-    const { text } = await doctor($)
-    expect(text).toContain(`FAIL  fnd-live   ${withFnd(LOADED_ONLY)}`)
   })
 
   t('a slim the install record lacks but the session loaded → WARN, not FAIL', async ($, on) => {
@@ -187,7 +170,7 @@ describe('/base-doctor', () => {
     expect(text).toMatch(/WARN {2}mcp:shopify-dev-mcp +turned off: disabled in \/mcp/)
     expect(text).toMatch(/FAIL {2}mcp:playwright +failed: exited 1/)
     expect(text).toMatch(/FAIL {2}mcp:chrome-devtools-mcp +\S/)
-    expect(text).toContain('doctor: 7 passed, 3 failed, 0 skipped, 2 warned')
+    expect(text).toContain('doctor: 5 passed, 3 failed, 0 skipped, 2 warned')
   })
 
   t(`a server that never answers fails after ${MCP_TIMEOUT_MS / 1000} s`, async ($, on) => {
@@ -215,7 +198,7 @@ describe('doctor helpers', () => {
   })
 
   test('reconcile touches only a not-installed slim FAIL beside a live slim', () => {
-    const rows = [row('FAIL', 'slim', 'not installed — x'), row('FAIL', 'fnd', 'y')]
+    const rows = [row('FAIL', 'slim', 'not installed — x'), row('FAIL', 'node', 'y')]
     expect(reconcile(rows)).toEqual(rows)
     expect(reconcile([...rows, row('PASS', 'slim-live')])[0]?.status).toBe('WARN')
     expect(reconcile([row('FAIL', 'slim', 'slim@d 0.5.0 is installed but disabled'), row('PASS', 'slim-live')])[0]?.status).toBe('FAIL')

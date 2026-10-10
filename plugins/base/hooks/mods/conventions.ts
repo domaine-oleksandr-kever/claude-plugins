@@ -5,7 +5,6 @@ import {
   COMMENT_DISCIPLINE,
   LEAN_CODE,
   NO_CODE_AGENT,
-  PLUGIN_FEEDBACK,
   TASK_WORKSPACE,
   UNTRUSTED_CONTENT,
   WRITING_STYLE,
@@ -26,7 +25,6 @@ export async function sections($: $): Promise<PromptComposeSection[]> {
   const parts: [string, string][] = [
     ['root', rootLine(root)],
     ['comment-discipline', COMMENT_DISCIPLINE],
-    ['plugin-feedback', PLUGIN_FEEDBACK],
     ['task-workspace', withRoot(TASK_WORKSPACE, root)],
     ['untrusted-content', UNTRUSTED_CONTENT],
   ]
@@ -35,8 +33,12 @@ export async function sections($: $): Promise<PromptComposeSection[]> {
   return parts.map(([name, text]) => ({ id: `base:${name}`, text, scope: 'session' }))
 }
 
-/** The root line and the untrusted-content rail for every agent; the code conventions for one that writes code. */
+/**
+ * The root line and the untrusted-content rail for every agent; the code conventions for one that writes code.
+ * Empty for a fork: it inherits the parent's system prompt, which already carries base's sections.
+ */
 export async function subagentContext($: $, agentType: string): Promise<string> {
+  if (agentType === 'fork') return ''
   const parts = [rootLine($.plugin.root), UNTRUSTED_CONTENT]
   if (!NO_CODE_AGENT.test(agentType)) {
     parts.push(COMMENT_DISCIPLINE)

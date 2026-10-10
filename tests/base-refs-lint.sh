@@ -13,9 +13,12 @@
 #   h. every relative markdown link under plugins/base resolves;
 #   i. every agents/<name>.md opens with frontmatter whose `name:` is <name> and carries a
 #      `description:` — the spawn name base:<name> is that field;
-#   k. the readers and the writer keep their write denylists: every Jira/Confluence/Notion write tool
-#      a role must not call is in its disallowedTools under the plugin's own prefix and as the
-#      user-scope twin (mcp__atlassian__…, mcp__notion__…), or its whole server is;
+#   k. no Jira/Confluence/Notion write tool a reader or the writer must not call is reachable under
+#      the plugin's own prefix or the user-scope twin (mcp__atlassian__…, mcp__notion__…), resolved as
+#      the engine does (disallowedTools first, then the tools allowlist); every role but figma-reader
+#      carries a tools allowlist, so a write tool under any other server name stays out;
+#   j. each reader (jira-, doc-, figma-reader) names the files a real slim handle points at, the
+#      list base's shared untrusted-content section leaves out;
 #   t. the team plugins base's shared text names (every plugins/<p> whose manifest `dependencies` is
 #      exactly ["base"]): every <p root>/… path exists in plugins/<p>, every /<p>:<x> names a skill
 #      of p, every <p>:<x> in a markdown file an agent or skill of p; a /<x>:<y> or <x root>/… whose
@@ -218,15 +221,35 @@ const listOf = (fm, key) => {
   }
   return items.map((x) => x.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
 };
+// The engine's resolution: drop what disallowedTools names (a tool or its whole server), then keep
+// what tools names (a tool or its whole server); no tools line keeps everything left.
+const names = (list, t) => {
+  if (list.includes(t)) return true;
+  const [pre, server] = t.split('__');
+  return pre === 'mcp' && [`mcp__${server}`, `mcp__${server}__*`, 'mcp__*'].some((x) => list.includes(x));
+};
+const reachable = (fm, t) => {
+  if (names(listOf(fm, 'disallowedTools'), t)) return false;
+  const allow = listOf(fm, 'tools');
+  return !allow.length || allow.includes('*') || names(allow, t);
+};
 for (const [a, rule] of Object.entries(DENY)) {
   if (!agents.has(a)) { bad('k', `agents/${a}.md`, `${a} missing`); continue; }
-  const denied = new Set(listOf(frontmatter(a), 'disallowedTools'));
+  const fm = frontmatter(a);
   for (const [server, tools] of Object.entries(rule)) {
     for (const base of [`${PFX}${server}`, TWIN[server]]) {
-      if (denied.has(base)) continue;
-      if (tools === WHOLE) { bad('k', `agents/${a}.md`, `${a} ${base}`); continue; }
-      for (const t of tools) if (!denied.has(`${base}__${t}`)) bad('k', `agents/${a}.md`, `${a} ${base}__${t}`);
+      if (tools === WHOLE) { if (reachable(fm, `${base}__any`)) bad('k', `agents/${a}.md`, `${a} ${base}`); continue; }
+      for (const t of tools) if (reachable(fm, `${base}__${t}`)) bad('k', `agents/${a}.md`, `${a} ${base}__${t}`);
     }
+  }
+  if (a !== 'figma-reader' && !listOf(fm, 'tools').length) bad('k', `agents/${a}.md`, `${a} no tools allowlist`);
+  for (const t of ['Edit', 'NotebookEdit', 'Agent', 'Task']) if (reachable(fm, t)) bad('k', `agents/${a}.md`, `${a} ${t}`);
+}
+for (const a of ['jira-reader', 'doc-reader', 'figma-reader']) {
+  if (!agents.has(a)) continue;
+  const body = text(path.join(dir, 'agents', `${a}.md`));
+  for (const n of ['fnd-mcp-slim-*', 'fnd-crush-*', 'fnd-jsx-ids-*', 'slim-prompt-*', 'SLIM_DIR', 'tool-results/']) {
+    if (!body.includes(n)) bad('j', `agents/${a}.md`, `${a} ${n}`);
   }
 }
 process.stdout.write(out.join('\n') + (out.length ? '\n' : ''));
@@ -270,6 +293,14 @@ disallowedTools:
   - mcp__plugin_base_notion-mcp
 ---
 MD
+cat > "$FX/agents/doc-reader.md" <<'MD'
+---
+name: doc-reader
+description: a fixture reader on an allowlist, one write tool of an allowed server left open
+tools: Read, Write, mcp__plugin_base_atlassian, mcp__slim
+disallowedTools: mcp__plugin_base_atlassian__editJiraIssue, mcp__plugin_base_atlassian__addCommentToJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment
+---
+MD
 # a team plugin the shared text names, and a line citing it right and wrong
 KIT="$TMP/teams/kit"; mkdir -p "$KIT/.claude-plugin" "$KIT/skills/ship" "$KIT/agents" "$KIT/references"
 printf '{ "name": "kit", "dependencies": ["base"] }\n' > "$KIT/.claude-plugin/plugin.json"
@@ -304,8 +335,14 @@ want k "jira-reader mcp__atlassian__transitionJiraIssue"
 dont k "jira-reader mcp__plugin_base_atlassian__createJiraIssue"
 dont k "jira-reader mcp__plugin_base_notion-mcp__notion-update-page"
 want k "figma-reader mcp__notion";       dont k "figma-reader mcp__plugin_base_notion-mcp"
-dont k "figma-reader mcp__atlassian";    want k "doc-reader missing"
+dont k "figma-reader mcp__atlassian";    dont k "figma-reader no tools allowlist"
+want k "doc-reader mcp__plugin_base_atlassian__createIssueLink"
+dont k "doc-reader mcp__atlassian__editJiraIssue"
+dont k "doc-reader mcp__notion__notion-update-page"
+dont k "doc-reader no tools allowlist";  want k "jira-reader no tools allowlist"
+dont k "doc-reader Edit";                dont k "jira-reader Edit";  want k "jira-reader NotebookEdit"
 want k "jira-writer missing"
+want j "jira-reader fnd-mcp-slim-*";     dont j "jira-writer fnd-mcp-slim-*"
 want t /kit:no-such-skill;               dont t /kit:ship
 want t kit:no-agent;                     dont t kit:scout;        dont t kit:ship
 want t "<kit root>/references/no-such.md"; dont t "<kit root>/references/present.md"

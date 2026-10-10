@@ -760,6 +760,29 @@ NV_BASE_NOPRE="$TMPD/base-no-verify-bypass-noprefilter.sh"
 CUR_HOOK="$HOOK_BASE"; LBL="base-"; no_verify_cases
 strip_prefilter "$HOOK_BASE" "$NV_BASE_NOPRE" 2
 CUR_HOOK="$NV_BASE_NOPRE"; LBL="base-nopre-"; no_verify_cases
+# base's guard also closes the other hook managers' kill switches
+base_kill_switch_cases() {
+  check block B90-lefthook-env        'LEFTHOOK=0 git commit -m x'
+  check block B91-lefthook-false      'LEFTHOOK=false git push origin main'
+  check block B92-lefthook-export     'export LEFTHOOK=0; git commit -m x'
+  check block B93-skip-env            'SKIP=lint git commit -m x'
+  check block B94-skip-quoted-list    'SKIP="eslint,prettier" git commit -m x'
+  check block B95-skip-export         'export SKIP=lint; git commit -m x'
+  check allow A90-lefthook-one        'LEFTHOOK=1 git commit -m ok'
+  check allow A91-skip-empty          'SKIP= git commit -m ok'
+  check allow A92-skip-suffix-var     'MY_SKIP=1 git commit -m ok'
+  check allow A93-kill-switch-in-msg  'git commit -m "docs: why LEFTHOOK=0 and SKIP=lint are banned"'
+  check allow A94-skip-flag-before    'npm test -- --skip=e2e && git commit -m x'
+  check allow A95-skip-flag-after     'git commit -m x && git log --skip=1 -1'
+  check allow A96-skip-trailer        'git commit -m x --trailer "Skip=no"'
+  check block B96-skip-env-prefix     'env SKIP=lint git commit -m x'
+  [ -n "${nogrep:-}" ] || return 0
+  raw block "D90-nogrep-lefthook" "$(str_ev 'LEFTHOOK=0 git commit -m wip')" "$nogrep"
+  raw block "D91-nogrep-skip"     "$(str_ev 'SKIP=lint git commit -m wip')" "$nogrep"
+  raw allow "E91-nogrep-skip-flag" "$(str_ev 'npm test -- --skip=e2e && git commit -m wip')" "$nogrep"
+}
+CUR_HOOK="$HOOK_BASE"; LBL="base-"; base_kill_switch_cases
+CUR_HOOK="$NV_BASE_NOPRE"; LBL="base-nopre-"; base_kill_switch_cases
 LBL="base-"
 for xp in 'git com"mit" -n -m x' "git com\$'mit' -n -m x" 'git pu"sh" --no-verify' 'HUSKY=0 git com"mit" -m x'; do
   CUR_HOOK="$HOOK_BASE";     check block "XP-split-kw-prefiltered" "$xp"

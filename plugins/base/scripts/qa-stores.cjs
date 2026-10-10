@@ -31,8 +31,11 @@
 // it already has), every other flag overwrites, and an omitted flag leaves its field alone — so
 // `set <domain> --theme <id>` never drops the stored password. `--password ''` is how a store with
 // an open storefront is recorded: the field is dropped, so every reader sees "no password" the same
-// way. Flags may come in any order, and a value is taken VERBATIM from argv: storefront passwords
-// carry `$`, backticks, spaces and quotes.
+// way. Flags may come in any order, as `--flag <v>` or `--flag=<v>`, and a value is taken VERBATIM
+// from argv: storefront passwords carry `$`, backticks, spaces and quotes. No refusal quotes a value
+// back: an unknown option is named only up to its `=` and only when it looks like a flag name, and a
+// new store needs at least one flag, so a forgotten `--password` never registers the secret as a
+// domain.
 //
 // `notes` is one string per store, and each note says WHY — "checkout needs the B2B login; ask
 // #qa-acme", not a bare "B2B". `--note` replaces the whole text, so pass all of it, not the line
@@ -269,11 +272,16 @@ function print(obj) {
   process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
 }
 
+function unknownOption(a, cmd) {
+  const name = a.split('=')[0];
+  return 'unknown option ' + (/^--?[a-z][a-z-]*$/.test(name) ? name : '(value not shown)') + ' for ' + cmd;
+}
+
 function cmdList(rest) {
   let json = false;
   for (const a of rest) {
     if (a === '--json') json = true;
-    else if (a.startsWith('-')) usage('unknown option ' + a + ' for list');
+    else if (a.startsWith('-')) usage(unknownOption(a, 'list'));
     else usage('list takes no argument');
   }
   const reg = loadRegistry();
@@ -330,11 +338,16 @@ function cmdSet(rest) {
   const themes = [];
   const patch = {};
   for (let i = 0; i < rest.length; i++) {
-    const a = rest[i];
+    let a = rest[i];
+    let v;
+    const eq = a.startsWith('--') ? a.indexOf('=') : -1;
+    if (eq > 0) { v = a.slice(eq + 1); a = a.slice(0, eq); }
     if (VALUE_FLAGS.includes(a)) {
-      const v = rest[i + 1];
-      if (v === undefined) usage(a + ' needs a value');
-      i++;
+      if (v === undefined) {
+        v = rest[i + 1];
+        if (v === undefined) usage(a + ' needs a value');
+        i++;
+      }
       if (a === '--alias') patch.alias = v;
       // `--password ''` is the documented way to record an open storefront
       else if (a === '--password') { if (v === '') clearPassword = true; else patch.password = v; }
@@ -349,7 +362,7 @@ function cmdSet(rest) {
         if (!id) usage('--theme needs <id>[:<label>]');
         themes.push([id, c < 0 ? undefined : v.slice(c + 1)]);
       }
-    } else if (a.startsWith('-')) usage('unknown option ' + a + ' for set');
+    } else if (a.startsWith('-')) usage(unknownOption(a, 'set'));
     else if (domain === null) domain = normalizeDomain(a, 'the <domain> argument');
     // the offending value is NOT quoted back: a forgotten `--password` puts the secret here
     else usage('set takes one <domain> (got a second argument)');
@@ -357,12 +370,16 @@ function cmdSet(rest) {
   if (domain === null) usage('set expects <domain>');
   // the key space is hosts only, so `set <alias>` cannot fork a second, password-less entry that
   // then wins alias resolution
-  if (/\s/.test(domain) || !domain.includes('.')) {
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain)) {
     usage('the <domain> argument must be a store host (acme-us-uat.myshopify.com), not an alias');
   }
   withLock(() => {
     const reg = loadRegistry();
     const known = Object.prototype.hasOwnProperty.call(reg.stores, domain);
+    // a flagless `set <value>` for an unknown host is a forgotten `--password`, not a registration
+    if (!known && !clearPassword && !themes.length && !Object.keys(patch).length) {
+      usage('set <domain> for a new store needs at least one flag');
+    }
     for (const [key, store] of Object.entries(reg.stores)) {
       if (!known && aliasKey(store.alias) === domain) {
         usage('"' + domain + '" is the alias of ' + key + ' — pass that domain as <domain>');

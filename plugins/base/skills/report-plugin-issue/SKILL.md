@@ -1,10 +1,9 @@
 ---
 name: report-plugin-issue
 description: >
-  File a GitHub issue on the plugin repo when a base component misbehaves — a bundled script,
-  converter, guard, skill, reference, agent, or the doctor fails or contradicts actual behavior.
-  Use when a base script / skill / agent / guard fails or behaves incorrectly, or the user reports
-  a plugin bug.
+  File a GitHub issue on the plugin repo when a base script, converter, guard, skill, reference,
+  agent or the doctor fails or contradicts its docs. Use when a base component misbehaves or the
+  user reports a plugin bug.
 argument-hint: "[one-line summary of the defect — inferred from the conversation if omitted]"
 arguments:
   - name: problem
@@ -48,7 +47,7 @@ Gather what applies (skip the rest):
 - **Component + mode** — e.g. `md-to-adf.cjs --no-tables`, `worktree-setup.sh --remove`,
   `guard:no-verify-bypass`, `skill:commit step 6`, `agent:jira-reader`.
 - **Install state** — ask the developer to run `/base-doctor` and keep its output: the static rows,
-  slim and fnd as the session sees them, each MCP server's connection, and the tail of `base.events`
+  slim as the session sees it, each MCP server's connection, and the tail of `base.events`
   (the guards' denies, the reader refusals, the install lines). Without it, run
   `node ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.cjs` for the static rows.
 - **Plugin version** — from the doctor's `manifest` row, or `Read`

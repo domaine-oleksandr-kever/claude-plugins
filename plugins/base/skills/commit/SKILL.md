@@ -1,7 +1,7 @@
 ---
 name: commit
 description: Create git commits per the Conventional Commits spec. Use when the user asks to commit changes, write a commit message, or run git commit.
-allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(git log*), Bash(git ls-files*), Bash(git rev-parse*), Bash(git merge-base*), Bash(git show-ref*), Bash(git hash-object*), Bash(cp*), Bash(grep*), Read, Glob, Grep, Edit
+allowed-tools: Bash(git status*), Bash(git diff*), Bash(git add*), Bash(git commit*), Bash(git log*), Bash(git ls-files*), Bash(git rev-parse*), Bash(git hash-object*), Bash(${CLAUDE_PLUGIN_ROOT}/scripts/review-scope.sh*), Bash(grep*), Read, Glob, Grep, Edit
 ---
 
 # Commit
@@ -31,9 +31,10 @@ marker semantics are unclear):
   path — a linked worktree's `.git` is a file). **No marker for this branch** → offer to run
   `/base:pre-commit-review` first; proceed if the developer declines.
 - **Marker exists** → continue; don't re-run a review unprompted.
-- **Re-stamp around the commit** — before step 6 compute the current `diff_hash` with review-flow.md
-  §1's scope + hash block, `ws=.claude/tasks/<work-id>` set when a task workspace exists (it covers
-  untracked files; a bare `git diff | git hash-object` misses them); if it equals the marker's,
+- **Re-stamp around the commit** — before step 6 run
+  `${CLAUDE_PLUGIN_ROOT}/scripts/review-scope.sh` (add `--ws .claude/tasks/<work-id>` when a task
+  workspace exists) for the current `diff_hash` (it covers untracked files; a bare
+  `git diff | git hash-object` misses them); if it equals the marker's,
   refresh the marker after the commit succeeds, per review-flow.md §1 → *Re-stamp after a commit
   whose hooks rewrote the tree* (that block is the full rule). Why: husky / lint-staged reformat
   files during `git commit`, drifting the hash so a PR skill's correctness backstop re-runs

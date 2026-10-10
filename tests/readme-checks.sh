@@ -754,9 +754,8 @@ case "$ROLLOUT_FLAT" in
   *'enable only the team plugins it needs: fe, qa, be, pm'*) ok ;;
   *) bad team-rollout-per-team "the Team rollout section does not say a team enables only the team plugins it needs: fe, qa, be, pm" ;;
 esac
-# fnd and base ship the same agents, skills and MCP servers, so a settings example that enables
-# base without turning fnd off can load both on a machine that still has fnd installed.
-has "$ROOT/plugins/base/README.md" '"fnd@domaine": false' base-readme-fnd-false
+# fnd and base ship the same agents, skills and MCP servers, so a root README settings example that
+# enables base without turning fnd off can load both on a machine that still has fnd installed.
 fnd_beside_base="$("$NODE_BIN" -e '
   const fs = require("fs");
   const p = [];
@@ -771,8 +770,7 @@ fnd_beside_base="$("$NODE_BIN" -e '
     }
   }
   process.stdout.write(p.join(", "));
-' "$ROOT" "$README" "$ROOT/plugins/base/README.md" "$ROOT/plugins/fe/README.md" "$ROOT/plugins/qa/README.md" \
-  "$ROOT/plugins/be/README.md" "$ROOT/plugins/pm/README.md" 2>&1)"
+' "$ROOT" "$README" 2>&1)"
 if [ -z "$fnd_beside_base" ]; then ok
 else bad enabled-plugins-fnd-false "an enabledPlugins example enables base or a team plugin without \"fnd@domaine\": false in: $fnd_beside_base"; fi
 

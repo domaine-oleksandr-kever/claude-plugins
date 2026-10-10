@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Simulation harness for plugins/base/scripts/doctor.cjs: every case runs the doctor against a sandbox
 # plugin root (--root), a sandbox home (--home) and a sandbox project (--project). No host, no
-# network, nothing written outside $TMPDIR. The session rows (slim's view tool, fnd loaded, the MCP
+# network, nothing written outside $TMPDIR. The session rows (slim's view tool, the MCP
 # servers) are the mod's and live in plugins/base/hooks/mods/tests/doctor.test.ts. Exit 0 = all green.
 set -u
 unset CLAUDE_CONFIG_DIR BASE_AUTOSAVE BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG BASE_GUARD BASE_LEAN BASE_SCRATCH_GUARD \
@@ -62,12 +62,11 @@ mkhome() {
   if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/.claude/plugins/installed_plugins.json"; fi
   # No settings given → every plugin a fixture installs is enabled, as `claude plugin install` writes it.
   local settings="${3:-}"
-  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fnd@domaine":true}}'
+  [ -n "$settings" ] || settings='{"enabledPlugins":{"slim@domaine":true,"base@domaine":true}}'
   printf '%s\n' "$settings" > "$d/.claude/settings.json"
 }
 
 SLIM_USER='"slim@domaine":[{"scope":"user","version":"0.5.0"}]'
-FND_USER='"fnd@domaine":[{"scope":"user","version":"0.135.0"}]'
 installed() { printf '{"version":2,"plugins":{%s}}' "$1"; }
 
 P="$TMP/plugin"; mkplugin "$P"
@@ -80,9 +79,9 @@ PRJ_REAL="$(cd "$PRJ" && pwd -P)"
 run --root "$P" --home "$H" --project "$PRJ"
 expect CD1-green 0 "base doctor — plugin root: $P" "PASS  node" "PASS  manifest   kit 0.9.1, depends on slim" \
   "PASS  hooks      1 module(s): ./mods/register.ts" "PASS  scripts    1 shell script(s) executable" \
-  "PASS  slim       slim@domaine 0.5.0 installed and enabled" "PASS  fnd        not installed" \
+  "PASS  slim       slim@domaine 0.5.0 installed and enabled" \
   "PASS  base-tmp   .claude/base-tmp absent — nothing written there yet" \
-  "PASS  event-log  $H/.claude/domaine/log: no session directory yet" "doctor: 8 passed, 0 failed, 0 skipped" "!platform"
+  "PASS  event-log  $H/.claude/domaine/log: no session directory yet" "doctor: 7 passed, 0 failed, 0 skipped" "!platform"
 
 # The shipped plugin passes its own static rows.
 run --home "$H" --project "$PRJ"
@@ -93,7 +92,7 @@ run --root "$P" --home "$H" --project "$PRJ" --json
 if node -e '
   const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
   const names = j.rows.map((r) => r.name).join(",");
-  if (j.root !== process.argv[2] || names !== "node,manifest,hooks,scripts,slim,fnd,base-tmp,event-log") process.exit(1);
+  if (j.root !== process.argv[2] || names !== "node,manifest,hooks,scripts,slim,base-tmp,event-log") process.exit(1);
   if (!j.rows.every((r) => ["PASS","FAIL","SKIP","WARN"].includes(r.status) && typeof r.detail === "string")) process.exit(1);
 ' "$O" "$P" 2>/dev/null && [ "$rc" -eq 0 ] && [ "$(wc -l < "$O" | tr -d ' ')" = "1" ]; then ok
 else bad CD3-json "rc=$rc out=$(head -c 300 "$O")"; fi
@@ -160,22 +159,12 @@ H5="$TMP/h-slimproj"; mkhome "$H5" "$(installed "$SLIM_PROJ")"
 run --root "$P" --home "$H5" --project "$PRJ"; expect CD18-slim-this-project 0 "PASS  slim       slim@domaine 0.5.1 installed and enabled"
 run --root "$P" --home "$H5" --project "$PRJ2"; expect CD19-slim-other-project 1 "FAIL  slim       not installed"
 
-# ------------------------------------------------------------------------------------- fnd --
-H6="$TMP/h-fnd"; mkhome "$H6" "$(installed "$SLIM_USER,$FND_USER")"
-run --root "$P" --home "$H6" --project "$PRJ"
-expect CD20-fnd-enabled 1 "FAIL  fnd        fnd@domaine 0.135.0 is installed and enabled — fnd and base must not run together: claude plugin uninstall fnd@domaine"
-H7="$TMP/h-fndoff"; mkhome "$H7" "$(installed "$SLIM_USER,$FND_USER")" '{"enabledPlugins":{"slim@domaine":true,"fnd@domaine":false}}'
-run --root "$P" --home "$H7" --project "$PRJ"
-expect CD21-fnd-disabled 0 "WARN  fnd        fnd@domaine 0.135.0 is installed but disabled" ", 1 warned"
-H7b="$TMP/h-fndnokey"; mkhome "$H7b" "$(installed "$SLIM_USER,$FND_USER")" '{"enabledPlugins":{"slim@domaine":true}}'
-run --root "$P" --home "$H7b" --project "$PRJ"
-expect CD21b-fnd-no-key 0 "WARN  fnd        fnd@domaine 0.135.0 is installed but disabled" ", 1 warned"
-
 # CLAUDE_CONFIG_DIR stands in for ~/.claude without --home, and --home overrides it.
+H6="$TMP/h-config-dir"; mkhome "$H6" "$(installed '"slim@domaine":[{"scope":"user","version":"0.5.9"}]')"
 rc=0; CLAUDE_CONFIG_DIR="$H6/.claude" node "$DOCTOR" --root "$P" --project "$PRJ" >"$O" 2>"$E" || rc=$?
-expect CD22-claude-config-dir 1 "FAIL  fnd        fnd@domaine 0.135.0"
+expect CD22-claude-config-dir 0 "PASS  slim       slim@domaine 0.5.9 installed and enabled"
 rc=0; CLAUDE_CONFIG_DIR="$H6/.claude" node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
-expect CD23-home-beats-config-dir 0 "PASS  fnd        not installed"
+expect CD23-home-beats-config-dir 0 "PASS  slim       slim@domaine 0.5.0 installed and enabled"
 
 # -------------------------------------------------------------------------------- base-tmp --
 CT="$PRJ/.claude/base-tmp/playwright"; mkdir -p "$CT"
@@ -241,7 +230,7 @@ rc=0; BASE_LEAN=false BASE_GUARD=' 0' BASE_FIGMA_SOURCE=figma BASE_TMP_TTL=abc \
   node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect CD39-switches-invalid 0 'WARN  switches' 'BASE_GUARD=" 0" is read as on — only 0 turns it off' \
   'BASE_LEAN="false" is read as on — only 0 turns it off' 'BASE_FIGMA_SOURCE="figma" is read as auto — auto, mcp or rest' \
-  'BASE_TMP_TTL="abc" is read as 24 — hours, 0 or more' "doctor: 8 passed, 0 failed, 0 skipped, 1 warned"
+  'BASE_TMP_TTL="abc" is read as 24 — hours, 0 or more' "doctor: 7 passed, 0 failed, 0 skipped, 1 warned"
 rc=0; BASE_TMP_TTL=-1 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" --json >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && node -e '
   const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));

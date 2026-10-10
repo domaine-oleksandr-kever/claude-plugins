@@ -1,10 +1,8 @@
 ---
 name: save-task-context
 description: >
-  Create or update the task workspace (`.claude/tasks/<work-id>/`) from what is already in the
-  conversation — ticket fields, decisions, root causes, progress — so the next skill or a
-  fresh session resumes without re-running readers. Use when the user asks to save / remember
-  the task context or progress (сохранить контекст) or set up a task workspace.
+  Create or update the task workspace (.claude/tasks/<work-id>/) from the conversation for resuming
+  later. Use when asked to save task context or progress (сохранить контекст) or set up a workspace.
 argument-hint: "[ticket-key(s) or branch]"
 arguments:
   - name: work_id
