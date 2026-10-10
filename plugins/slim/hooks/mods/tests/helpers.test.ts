@@ -143,7 +143,7 @@ describe('event helpers', () => {
     )
     expect(rowLine({ engine: 'log', bytesIn: 118_400, bytesOut: 29_000 })).toBe('slim  log  118 KB → 29 KB  −76%')
     // A persisted Bash window measured against the host's 2 KB preview grew: said so, never `−0%`.
-    expect(eventText('', 'Bash', 'compressed', 'text', 2_300, 4_096)).toBe('Bash: windowed 2 KB → 4 KB (+78%) · text')
+    expect(eventText('', 'Bash', 'compressed', 'text', 2_300, 4_096)).toBe('Bash: windowed 2 KB → 4 KB (+78% vs host preview) · text')
     expect(rowLine({ engine: 'text', bytesIn: 2_300, bytesOut: 4_096 })).toBe('slim  text  2 KB → 4 KB  +78%')
   })
 

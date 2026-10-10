@@ -239,7 +239,7 @@ export function registerLookup(on: On): void {
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
     try {
       if ((await $.env.get('SLIM_LOOKUP')) !== '0') {
-        await $.tool.register({ name: 'lookup', description: LOOKUP_DESC, inputSchema: LOOKUP_SCHEMA })
+        await $.tool.register({ name: 'lookup', description: LOOKUP_DESC, inputSchema: LOOKUP_SCHEMA, isDeferred: false })
       }
     } catch {}
     try {

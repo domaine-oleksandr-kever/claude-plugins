@@ -1,5 +1,5 @@
-// Keeps lookup's schema in the prompt's tool list, so it is called without a ToolSearch first. view stays
-// deferred: every pointer to it (a stub, the guard's deny, view's own out line) names it.
+// Keeps lookup's schema in the prompt's tool list (registration also passes isDeferred: false; engines before 2.1.293 ignore
+// that field, so this hook is the one that holds everywhere). view stays deferred: every pointer to it names it.
 import type { On } from 'claude-code'
 
 export function registerDescribe(on: On): void {

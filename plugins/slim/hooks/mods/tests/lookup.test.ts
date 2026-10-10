@@ -94,7 +94,7 @@ describe('L1 registration', () => {
     const w = world(on)
     await start($)
     expect(w.regs).toEqual([
-      { name: 'lookup', description: LOOKUP_DESC, inputSchema: LOOKUP_SCHEMA },
+      { name: 'lookup', description: LOOKUP_DESC, inputSchema: LOOKUP_SCHEMA, isDeferred: false },
       { name: 'view', description: VIEW_DESC, inputSchema: VIEW_SCHEMA },
     ])
   })
