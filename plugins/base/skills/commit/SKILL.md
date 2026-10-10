@@ -67,6 +67,13 @@ marker semantics are unclear):
    EOF
    )"
    ```
+7. **Files the hooks left modified.** After the commit, run `git status --porcelain` and compare it
+   with step 1's `git status`: a tracked path that was clean before the commit, or went into it, and
+   is modified now was rewritten by the repo's hooks (a pre-commit build, a formatter). List those
+   paths under the report, say the hooks changed them, and for a file the build owns (a build
+   artifact) offer `git checkout -- <file>` — never restore it, and never stage it, without the
+   developer's yes. A path already modified before the commit was left out of it on purpose: never
+   offer to restore it.
 
 ## Next
 

@@ -4,7 +4,7 @@
 # network, nothing written outside $TMPDIR. The session rows (slim's view tool, fnd loaded, the MCP
 # servers) are the mod's and live in plugins/base/hooks/mods/tests/doctor.test.ts. Exit 0 = all green.
 set -u
-unset CLAUDE_CONFIG_DIR BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG BASE_GUARD BASE_LEAN BASE_SCRATCH_GUARD \
+unset CLAUDE_CONFIG_DIR BASE_AUTOSAVE BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG BASE_GUARD BASE_LEAN BASE_SCRATCH_GUARD \
   BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -249,6 +249,10 @@ if [ "$rc" -eq 0 ] && node -e '
   if (r.length !== 1 || r[0].status !== "WARN" || !r[0].detail.startsWith("BASE_TMP_TTL=\"-1\"")) process.exit(1);
 ' "$O" 2>/dev/null; then ok
 else bad CD39b-switches-json "rc=$rc out=$(head -c 300 "$O")"; fi
+rc=0; BASE_AUTOSAVE=off node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39c-switches-autosave 0 'WARN  switches' 'BASE_AUTOSAVE="off" is read as on — only 0 turns it off'
+rc=0; BASE_AUTOSAVE=0 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39d-switches-autosave-off 0 "!switches"
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad CD-head "HEAD moved"; fi

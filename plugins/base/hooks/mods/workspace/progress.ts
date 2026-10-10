@@ -1,8 +1,8 @@
 // Progress: the work-id resolver, the digest refresh and /base-progress (the pin). Writes the base.progress
-// atom band draws its checklist from; base draws nothing itself.
+// atom band draws its checklist from, with the staleness autosave.ts acts on; base draws nothing itself.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { BaseEvent, BaseProgress } from '../../../types'
+import type { BaseEvent, BaseProgress, BaseSavable } from '../../../types'
 import { logLine, pushEvent } from '../events.ts'
 import type { Disk } from '../events.ts'
 import { notesTail, parseProgress } from './progress-parse.ts'
@@ -19,6 +19,12 @@ const TICK_MS = 30_000
 const RESOLVE_EVERY = 4
 const FRESH_MS = 12 * 60 * 60_000
 const CHECKOUT = /\bgit\s+(checkout|switch|worktree)\b/
+export const STALE_MS = 20 * 60_000
+const SAVABLE_CAP = 200
+/** slim's MCP gate: a result past it is one slim compresses or stubs. */
+const MCP_GATE = 4096
+/** slim's handle or stub: the original was over the gate even when the result now is not. */
+const SLIMMED = /<<full=|<<slim stub>>/
 /** Prompt origins a person wrote; notifications, peers and schedules never set the conversation key. */
 const PERSON = new Set(['composer', 'bridge', 'sdk'])
 
@@ -27,6 +33,27 @@ const pin = atom({ plugin: 'base', key: 'pin' } as const, null)
 const lastKey = atom({ plugin: 'base', key: 'lastKey' } as const, null)
 const sessionId = atom({ plugin: 'base', key: 'sessionId' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
+const savable = atom({ plugin: 'base', key: 'savable' } as const, [] as BaseSavable[])
+
+/** Unsaved work: no workspace write for 20 min, and something worth saving happened after the last one. */
+export const isStale = (mtimeMs: number, lastSavableMs: number, now: number): boolean =>
+  now - mtimeMs > STALE_MS && lastSavableMs > mtimeMs
+
+type Loaded = Extract<BaseProgress, { workId: string }>
+
+function withStaleness(p: Loaded, list: readonly BaseSavable[], now: number): Loaded {
+  let lastSavableMs = 0
+  let agentsSince = 0
+  let editsSince = 0
+  for (const s of list) {
+    lastSavableMs = Math.max(lastSavableMs, s.atMs)
+    if (s.atMs <= p.mtimeMs) continue
+    if (s.kind === 'agent') agentsSince++
+    else if (s.kind === 'edit') editsSince++
+  }
+  const stale = p.hasWorkspace && isStale(p.mtimeMs, lastSavableMs, now)
+  return { ...p, lastSavableMs, agentsSince, editsSince, stale }
+}
 
 type $ = EngineInterface
 
@@ -165,7 +192,15 @@ async function load($: $, root: string, workId: string, branch: string | null): 
   const mtimeMs = await workspaceMtime($, root, workId)
   const parsed = parseProgress(await readText($, `${dir}/progress.md`))
   const notes = notesTail(await readText($, `${dir}/notes.md`))
-  return { workId, branch, hasWorkspace: workspace, ...parsed, notesTail: notes, mtimeMs }
+  const p = { workId, branch, hasWorkspace: workspace, ...parsed, notesTail: notes, mtimeMs, lastSavableMs: 0, agentsSince: 0, editsSince: 0, stale: false }
+  return withStaleness(p, await read($, savable), await $.clock.now())
+}
+
+/** A savable event re-derives the staleness fields without re-reading the workspace. */
+async function noteSavable($: $, kind: BaseSavable['kind']): Promise<void> {
+  const now = await $.clock.now()
+  const list = await update($, savable, l => [...l, { atMs: now, kind }].slice(-SAVABLE_CAP))
+  await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now) : p))
 }
 
 /** `resolve` re-runs git and the resolver; otherwise only the current workspace is re-read while it exists. */
@@ -194,7 +229,12 @@ async function tick($: $, resolve: boolean): Promise<void> {
   if (resolve || cur === null) return refresh($, true)
   if (cur.workId === null) return
   const mtimeMs = await workspaceMtime($, await $.session.root(), cur.workId)
-  if (mtimeMs !== cur.mtimeMs) await refresh($, false)
+  if (mtimeMs !== cur.mtimeMs) return refresh($, false)
+  // Time alone turns a workspace stale: write only when the flag flips.
+  const now = await $.clock.now()
+  const list = await read($, savable)
+  if (withStaleness(cur, list, now).stale !== cur.stale)
+    await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now) : p))
 }
 
 export function registerProgress(on: On): void {
@@ -236,17 +276,36 @@ export function registerProgress(on: On): void {
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     await update($, progress, () => null)
     await update($, lastKey, () => null)
+    await update($, savable, () => [])
     return next(e)
   })
 
   on('tool.call', { tool: /^(Write|Edit)$/ }, async ($, e, next) => {
     const r = await next(e)
     if (e.tool !== 'Write' && e.tool !== 'Edit') return r
+    if (!e.file_path.includes('/.claude/')) {
+      if (r.deny === undefined && !r.isError) await noteSavable($, 'edit')
+      return r
+    }
     const root = await $.session.root()
     if (!e.file_path.startsWith(`${tasksDir(root)}/`)) return r
     const cur = await read($, progress)
     const inCurrent = !!cur?.workId && e.file_path.startsWith(`${workDir(root, cur.workId)}/`)
     await refresh($, !inCurrent)
+    return r
+  })
+
+  on('tool.call', { tool: /^(Agent|Task)$/ }, async ($, e, next) => {
+    const r = await next(e)
+    if (r.deny === undefined && !r.isError) await noteSavable($, 'agent')
+    return r
+  })
+
+  on('tool.call', { tool: /^mcp__/ }, async ($, e, next) => {
+    const r = await next(e)
+    if (r.deny !== undefined || r.isError) return r
+    const text = typeof r.result === 'string' ? r.result : (JSON.stringify(r.result) ?? '')
+    if (text.length > MCP_GATE || SLIMMED.test(text)) await noteSavable($, 'mcp')
     return r
   })
 

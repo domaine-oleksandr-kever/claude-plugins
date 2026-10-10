@@ -9,7 +9,7 @@ backend, QA) adds its own skills on top and depends on base.
 base reads large results through slim and requires it: compression happens only inside slim, so every
 figure lands in slim's log, and base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.6.1**.
+Current release: **base v0.7.0**.
 
 ## Status
 
@@ -191,7 +191,9 @@ change, a /clear, and every two minutes.
 
 | Atom | Value |
 |---|---|
-| `base.progress` | the parsed progress.md of the work id (`{ workId, branch, hasWorkspace, done, total, current, rows, notesTail, mtimeMs }`), or `{ workId: null, branch }` |
+| `base.progress` | the parsed progress.md of the work id (`{ workId, branch, hasWorkspace, done, total, current, rows, notesTail, mtimeMs, lastSavableMs, agentsSince, editsSince, stale }`), or `{ workId: null, branch }` |
+| `base.savable` | this session's savable events, `{ atMs, kind: 'agent' \| 'edit' \| 'mcp' }`, at most 200 |
+| `base.autosave` | the turn counter, its start, the turn whose stop was last blocked, and the last turn that wrote the workspace |
 | `base.pin` | the work id `/base-progress` pinned, or null |
 | `base.lastKey` | the last ticket a person's prompt named this session |
 | `base.sessionId` | the session the atoms describe |
@@ -199,6 +201,14 @@ change, a /clear, and every two minutes.
 | `base.started`, `base.checked`, `base.titled` | the session id whose start line, install checks and title are done (`<id>:user` when the person titled it) |
 | `base.guardRoot` | the project root the session launched in, which the scratch-path guard measures against |
 | `base.swept` | the session id whose base-tmp and event-log sweeps ran |
+
+**Autosave.** A savable event is an Agent call that returned, a Write / Edit outside `.claude/`, or an
+MCP result over slim's 4 KB gate.
+The workspace is `stale` when progress.md and notes.md were last written over 20 minutes ago and
+before the newest savable event. While it is stale, a prompt gets one context line asking to save to
+notes.md first; a turn that wrote nothing to the workspace, after savable work in it or 3 turns
+without a workspace write, is blocked at its stop once (never when the stop hook is already active, at most once per 3 turns); an auto-compact
+appends one `compact:` pointer line to notes.md. `BASE_AUTOSAVE=0` turns the three off.
 
 `/base-progress <work-id>` pins the work id band's checklist shows, `/base-progress -` unpins, and
 `/base-progress` alone names the pin. The checklist itself is band's `/band-progress`.
@@ -307,6 +317,7 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_FIGMA_SOURCE` | `auto` | `base:figma-reader`'s source ladder: `auto` tries the Figma MCPs, then the REST API; `mcp` never uses the token; `rest` skips the MCPs. Process environment only |
 | `BASE_SESSION_TITLE` | on | `0` leaves the session title to Claude Code |
 | `BASE_TMP_TTL` | `24` | hours a file in `.claude/base-tmp` lives before the session sweep deletes it; `0` turns the sweep off |
+| `BASE_AUTOSAVE` | on | `0` turns the workspace autosave levers off: the stale-workspace line on a prompt, the one-time block at turn end, the `compact:` marker before an auto-compact. `base.progress` still carries `stale` |
 
 The fetchers read their credentials from the process environment first, else from the project's
 gitignored `./.env` (`--env <file>` names another): `JIRA_EMAIL` + `JIRA_API_TOKEN` (a read-only

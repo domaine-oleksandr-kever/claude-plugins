@@ -96,8 +96,9 @@ signature). `--location-trusted`, which would not drop them, is never passed.
 |---|---|---|
 | `--out <dir>` | `.claude/tasks/<KEY>/tmp/attachments` | download dir; must be a path git ignores (below) |
 | `--ids <id,id>` | all | only these attachment ids |
-| `--all` | off | lift the `image/*` + `video/*` filter (PDFs, zips, …) |
+| `--all` | off | lift the image / video / text filter (PDFs, zips, …) and the text cap |
 | `--max-mb <N>` | `25` | per-file size cap for images (and whatever `--all` lets through); over it the row is `skipped_size` |
+| — | 256 KB | the cap for **text** (`text/*`, `application/json`, `application/javascript`, a `.liquid` name under `application/octet-stream` or no mime); over it the row is `skipped_size` |
 | `--max-video-mb <N>` | `200` | the same cap for **videos**, whose recordings run to tens of MB |
 | `--force` | off | re-download even when the file is already there at the metadata size |
 | `--env <dotenv>` | `./.env` | where `JIRA_EMAIL` / `JIRA_API_TOKEN` / `JIRA_SITE` are read from |
@@ -108,15 +109,19 @@ signature). `--location-trusted`, which would not drop them, is never passed.
 
 stdout is one row per attachment, header first:
 `id  status  kind  mime  size  created  author  path  filename` — `status` is
-`saved` / `cached` / `skipped_type` / `skipped_size` / `failed`, `kind` is
-`image` / `video` / `other`, `path` is empty unless the file is on disk.
+`saved` / `cached` / `skipped_type` (kind `other` without `--all`) / `skipped_size` (over the
+kind's cap) / `failed`, `kind` is `image` / `video` / `text` / `other`, `path` is empty unless the
+file is on disk. A `text` file keeps its name only when it ends in a text extension (`.json`,
+`.js`, `.csv`, `.liquid`, `.md`, …); any other gains `.txt` (`405-run.sh.txt`) — it is read as
+data, never run.
 `--check` prints `ok=1 jira_user=<name> cloud_id=<uuid>` instead.
 
 **`--json`** emits those same rows as a JSON array — one object per attachment, the same nine field
 names.
 
 A video is a file like an image: downloaded whole and kept, so slim's `view` tool can cut it into
-frames (→ Frames and resizing).
+frames (→ Frames and resizing). A text file needs no resize: the reader quotes it into `ticket.md`
+as outside content (`base:jira-reader` → Fetch the attachments).
 
 stderr carries notes, and always ends with the summary
 `ok=1 saved=N cached=N skipped=N failed=N out=<dir>`:

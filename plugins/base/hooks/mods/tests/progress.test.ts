@@ -26,6 +26,10 @@ describe('resolver', () => {
       ],
       notesTail: ['- two', '- three', '- four'],
       mtimeMs: NOW - 60_000,
+      lastSavableMs: 0,
+      agentsSince: 0,
+      editsSince: 0,
+      stale: false,
     })
   })
 
@@ -395,6 +399,56 @@ describe('workspace event', () => {
     const s = await peek($)
     expect(s.events).toEqual([])
     expect(s.progress.workId).toBe('ABC-1591')
+  })
+})
+
+describe('staleness', () => {
+  const agent = ($: any) => $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose' })
+  const edit = ($: any, file_path: string) => $.tool.call({ tool: 'Edit', file_path, old_string: 'a', new_string: 'b' })
+
+  t('an agent return and an edit outside .claude/ count; 20 min without a write turns the workspace stale', async ($, on) => {
+    const { w, clock } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await agent($)
+    await edit($, `${ROOT}/sections/header.liquid`)
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: NOW, agentsSince: 1, editsSince: 1, stale: false })
+    await clock.advance(20 * 60_000)
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW - 60_000, stale: true })
+    await $.tool.call({ tool: 'Write', file_path: `${TASKS}/ABC-1591/notes.md`, content: NOTES })
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW + 1, lastSavableMs: NOW, agentsSince: 0, editsSince: 0, stale: false })
+  })
+
+  t('an edit under .claude/ and a denied agent are not savable; time alone is not stale', async ($, on) => {
+    const { w, clock } = world(on, { tools: ['Bash', 'Read'] })
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await edit($, `${ROOT}/.claude/settings.json`)
+    await $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'base:jira-reader' })
+    await clock.advance(25 * 60_000)
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: 0, agentsSince: 0, editsSince: 0, stale: false })
+  })
+
+  t('an MCP result over slim\'s gate, or carrying its handle, counts; a small one does not', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    const mcp = (reply: string) => $.tool.call({ tool: 'mcp__atlassian__getJiraIssue', reply })
+    await mcp('x'.repeat(4096))
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: 0 })
+    await mcp('x'.repeat(4097))
+    await mcp('<<slim stub>> getJiraIssue returned 90000 B')
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: NOW, agentsSince: 0, editsSince: 0 })
+  })
+
+  t('no workspace is never stale', async ($, on) => {
+    const { w, clock } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await submit($, 'see ABC-77')
+    await agent($)
+    await clock.advance(25 * 60_000)
+    expect((await peek($)).progress).toMatchObject({ workId: 'ABC-77', hasWorkspace: false, agentsSince: 1, stale: false })
   })
 })
 

@@ -33,7 +33,8 @@ across an import, so a `$` helper is never shared between files (`doctor.ts` rep
 | File | Hooks | Writes |
 |---|---|---|
 | `session.ts` | `session.start {cwd:/^/}` start line · `prompt.submit {text:/^/}` slim and fnd checks at a session's first prompt · `tool.call {tool:'Agent'}` + `agent.spawn {subagentType}` reader refusal | `base.started`, `base.checked`, `base.events` |
-| `workspace/progress.ts` | `session.start`, `prompt.submit` (both unmatched) · `session.end {reason:'clear'}` · `tool.call` Write/Edit and `{tool:'Bash'}` (a checkout) · `classic.CwdChanged` · `command.run base-progress` | `base.progress`, `base.pin`, `base.lastKey`, `base.sessionId`, `base.events` |
+| `workspace/progress.ts` | `session.start`, `prompt.submit` (both unmatched) · `session.end {reason:'clear'}` · `tool.call` Write/Edit and `{tool:'Bash'}` (a checkout) · `classic.CwdChanged` · `tool.call {tool:/^(Agent|Task)$/}` and `{tool:/^mcp__/}` (savable events) · `command.run base-progress` | `base.progress`, `base.pin`, `base.lastKey`, `base.sessionId`, `base.savable`, `base.events` |
+| `workspace/autosave.ts` | `prompt.submit {text:/(?:)/}` (the stale-workspace context line) · `classic.Stop` (the one-time block) · `classic.PreCompact` (the `compact:` marker on an auto-compact) | `base.autosave` |
 | `title.ts` | `classic.SessionStart`, `classic.UserPromptSubmit`: their `sessionTitle` result field | `base.titled`, `base.events` |
 | `guards/bash.ts` | `tool.call {tool:/^Bash$/}`: the attribution rule (pure, `guards/attribution.ts`), then `hooks/no-verify-bypass.sh` for a command naming a git verb | `base.events` |
 | `guards/scratch.ts` | `session.start {cwd:/./}` latches the launch root · `tool.describe` + `tool.call` on the browser tools that take a path → `hooks/scratch-path-guard.cjs` | `base.guardRoot`, `base.events` |
@@ -66,10 +67,11 @@ Engine rules this layout follows:
 `types/index.d.ts` declares `base: { … }` only. Any plugin reads a base atom; base alone writes it.
 
 - **`base.progress`** — `{ workId, branch, hasWorkspace, done, total, current, rows, notesTail,
-  mtimeMs }` for the resolved work id, or `{ workId: null, branch }`. band's checklist and digest
+  mtimeMs, lastSavableMs, agentsSince, editsSince, stale }` for the resolved work id, or `{ workId: null, branch }`. band's checklist and digest
   read it (`snapshotOf` wants a non-empty string `workId`; `rows[]` of `{ mark, text }` with `mark` in
   `done|current|waiting|todo`; `total === 0` means no progress.md yet, `hasWorkspace === false` no
-  workspace). `mtimeMs` is base's own tick compare; band ignores it.
+  workspace). `mtimeMs` is base's own tick compare. `stale` (with `lastSavableMs`, `agentsSince`,
+  `editsSince`) is what `workspace/autosave.ts` and band's compact act on.
 - **`base.events`** — `{ atMs, kind, text }`, oldest first, at most 200; band's Log pane merges it with
   its own, fnd's, slim's and the team plugins' lines. Kinds fit band's 9-cell kind column and never take the kinds band
   and slim own (`session`, `model`, `compact`, `rate`, `slim`, `lookup`). `BASE_EVENT_LOG=0` keeps it

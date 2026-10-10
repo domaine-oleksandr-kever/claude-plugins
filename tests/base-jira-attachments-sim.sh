@@ -344,6 +344,41 @@ if [ "$rc" -eq 0 ] && [ "$(awk 'NR > 1 { printf "%s ", $1 }' "$O")" = "101 " ] \
    && [ "$(cat "$CONTENT")" = 101 ]; then ok
 else bad J6-ids "rc=$rc rows=$(awk 'NR>1{printf "%s ", $1}' "$O") content=$(tr '\n' ' ' < "$CONTENT")"; fi
 
+# J6t: text is in the default filter under its own 256 KB cap; generic binary stays out, a .liquid
+# under a generic mime is text, and a text file never keeps a name that claims to be something else
+cat > "$FIX/text.json" <<'JSON'
+{"key":"ABC-101","fields":{"attachment":[
+ {"id":"401","filename":"spec.json","mimeType":"application/json","size":500,"created":"c","author":{"displayName":"A"}},
+ {"id":"402","filename":"big.csv","mimeType":"text/csv","size":300000,"created":"c","author":{"displayName":"A"}},
+ {"id":"403","filename":"blob.bin","mimeType":"application/octet-stream","size":100,"created":"c","author":{"displayName":"A"}},
+ {"id":"404","filename":"main-product.liquid","mimeType":"application/octet-stream","size":200,"created":"c","author":{"displayName":"A"}},
+ {"id":"405","filename":"run.sh","mimeType":"text/x-shellscript","size":50,"created":"c","author":{"displayName":"A"}},
+ {"id":"406","filename":"Theme.LIQUID","mimeType":"application/octet-stream","size":60,"created":"c","author":{"displayName":"A"}},
+ {"id":"407","filename":"data.JSON","mimeType":"application/json","size":70,"created":"c","author":{"displayName":"A"}}
+]}}
+JSON
+TXT_SIZES="401:500,402:300000,403:100,404:200,405:50,406:60,407:70"
+D6t="$(new_repo six-text '.claude/')"; OUT6T="$D6t/.claude/tasks/ABC-101/tmp/attachments"
+rc=0; FAKE_LIST="$FIX/text.json" FAKE_SIZES="$TXT_SIZES" ja "$D6t" ABC-101 --out "$OUT6T" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+assert J6t-text-run 0 "$rc" "$E" "ok=1 saved=5 cached=0 skipped=2 failed=0"
+if [ "$(field 401 2 "$O")" = saved ] && [ "$(field 401 3 "$O")" = text ] \
+   && [ "$(field 401 8 "$O")" = "$OUT6T/401-spec.json" ] && [ -s "$OUT6T/401-spec.json" ]; then ok
+else bad J6t-text-saved "$(grep '^401' "$O")"; fi
+if [ "$(field 402 2 "$O")" = skipped_size ] && [ "$(field 402 3 "$O")" = text ] && [ ! -e "$OUT6T/402-big.csv" ]; then ok
+else bad J6t-text-over-cap "$(grep '^402' "$O")"; fi
+if [ "$(field 403 2 "$O")" = skipped_type ] && [ "$(field 403 3 "$O")" = other ]; then ok
+else bad J6t-octet-stream-skipped "$(grep '^403' "$O")"; fi
+if [ "$(field 404 2 "$O")" = saved ] && [ "$(field 404 3 "$O")" = text ] && [ -s "$OUT6T/404-main-product.liquid" ]; then ok
+else bad J6t-liquid-generic-mime "$(grep '^404' "$O")"; fi
+if [ "$(field 405 9 "$O")" = run.sh.txt ] && [ -s "$OUT6T/405-run.sh.txt" ] && [ ! -e "$OUT6T/405-run.sh" ]; then ok
+else bad J6t-safe-extension "$(grep '^405' "$O")"; fi
+if [ "$(field 406 2 "$O")" = saved ] && [ "$(field 406 3 "$O")" = text ] && [ -s "$OUT6T/406-Theme.LIQUID" ] \
+   && [ -s "$OUT6T/407-data.JSON" ] && [ ! -e "$OUT6T/407-data.JSON.txt" ]; then ok
+else bad J6t-uppercase-extension "$(grep -E '^40[67]' "$O" | tr '\n' ' ')"; fi
+D6u="$(new_repo six-text-all '.claude/')"; OUT6U="$D6u/.claude/tasks/ABC-101/tmp/attachments"
+rc=0; FAKE_LIST="$FIX/text.json" FAKE_SIZES="$TXT_SIZES" ja "$D6u" ABC-101 --out "$OUT6U" --cloud-id "$CLOUD" --all >"$O" 2>"$E" || rc=$?
+assert J6t-all-lifts-text-cap 0 "$rc" "$E" "ok=1 saved=7 cached=0 skipped=0 failed=0"
+
 # ------------------------------------------------------------ 7. idempotence, truncation, --force --
 CONTENT="$TMP/content7"; FFLOG="$TMP/ff7"; : > "$CONTENT"; : > "$FFLOG"
 rc=0; CONTENT_LOG="$CONTENT" FFMPEG_LOG="$FFLOG" \

@@ -323,7 +323,7 @@ function checkEventLog(logDir, homeDir) {
 }
 
 // Read as `=== '0'`, untrimmed: any other value is on.
-const ON_OFF = ['BASE_EVENT_LOG', 'BASE_GUARD', 'BASE_LEAN', 'BASE_SCRATCH_GUARD', 'BASE_SESSION_TITLE', 'BASE_STE'];
+const ON_OFF = ['BASE_AUTOSAVE', 'BASE_EVENT_LOG', 'BASE_GUARD', 'BASE_LEAN', 'BASE_SCRATCH_GUARD', 'BASE_SESSION_TITLE', 'BASE_STE'];
 
 // Every reader degrades a value outside its domain to the default without a word; this row is the word.
 function checkSwitches(env) {

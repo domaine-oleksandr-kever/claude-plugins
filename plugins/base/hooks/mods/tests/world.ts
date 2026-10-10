@@ -41,6 +41,8 @@ export type World = {
   sweepGate: Promise<void>
   /** every $.fs.write rejects with this message while set */
   writeFails: string | null
+  /** paths whose $.fs.read rejects while $.fs.stat still answers: a file over the engine's 4 MiB read cap */
+  readFails: string[]
   /** `$.fs.stat(path, { resolve: true })` lands here instead of on the path itself: a symbolic link */
   realPaths: Record<string, string>
 }
@@ -70,6 +72,7 @@ export function world(on: On, over: Partial<World> = {}) {
     mcp: {},
     sweepGate: Promise.resolve(),
     writeFails: null,
+    readFails: [],
     realPaths: {},
     ...over,
   }
@@ -91,6 +94,8 @@ export function world(on: On, over: Partial<World> = {}) {
     writes: [] as { path: string; text: string }[],
     /** the directories an `rm -rf` removed */
     removed: [] as string[],
+    /** every prompt that reached the bottom, as it arrived */
+    prompts: [] as { text: string; context?: readonly string[] }[],
   }
   const clock = mock.clock(on, { now: NOW })
   mock.store(on)
@@ -98,10 +103,15 @@ export function world(on: On, over: Partial<World> = {}) {
   const enoent = (path: string) => new Error(`ENOENT: ${path}`)
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
-  on('prompt.submit', async (_$, e) => ({ text: e.text }))
+  on('prompt.submit', async (_$, e) => {
+    calls.prompts.push(e)
+    return { text: e.text }
+  })
   on('classic.CwdChanged', async () => ({}))
   on('classic.SessionStart', async () => ({}) as never)
   on('classic.UserPromptSubmit', async () => ({}) as never)
+  on('classic.Stop', async () => ({}))
+  on('classic.PreCompact', async () => ({}))
   on('session.root', async () => ({ value: w.root }))
   on('session.cwd', async () => ({ value: w.root }))
   on('session.id', async () => ({ value: w.sid }))
@@ -178,6 +188,7 @@ export function world(on: On, over: Partial<World> = {}) {
     if (e.path.endsWith('/.claude-plugin/plugin.json')) return { value: w.manifest }
     const f = w.files[e.path]
     if (!f) throw enoent(e.path)
+    if (w.readFails.includes(e.path)) throw new Error(`file too large: ${e.path}`)
     return { value: f.text }
   })
   on('command.register', async (_$, e) => {
@@ -211,7 +222,7 @@ export function world(on: On, over: Partial<World> = {}) {
       const m = /git (?:checkout|switch) (\S+)/.exec(a.command)
       if (m) w.branch = m[1] ?? null
     }
-    return { result: 'ok' }
+    return { result: a.tool.startsWith('mcp__') && typeof a.reply === 'string' ? a.reply : 'ok' }
   })
   return { w, calls, clock }
 }

@@ -9,6 +9,9 @@ export type BaseRow = { mark: BaseMark; text: string }
 /**
  * The task workspace of the pinned or detected work id; `{ workId: null, branch }` when none applies.
  * band draws it: `current` is the step in progress, `notesTail` the last notes.md bullets.
+ * `mtimeMs` is the newest write of progress.md / notes.md (0 = neither exists); `lastSavableMs` the newest
+ * savable event this session (0 = none); `agentsSince` / `editsSince` count the agent / edit ones after `mtimeMs`;
+ * `stale` = a workspace, `mtimeMs` over 20 min old and older than `lastSavableMs`.
  */
 export type BaseProgress =
   | {
@@ -21,6 +24,10 @@ export type BaseProgress =
       rows: BaseRow[]
       notesTail: string[]
       mtimeMs: number
+      lastSavableMs: number
+      agentsSince: number
+      editsSince: number
+      stale: boolean
     }
   | { workId: null; branch: string | null }
 
@@ -31,6 +38,15 @@ export type BaseProgress =
  * `doctor` the counts of a /base-doctor run.
  */
 export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'title' | 'guard' | 'doctor'
+
+/** Worth saving to the workspace: an Agent / Task call returned, a Write / Edit outside `.claude/`, an MCP result over slim's 4 KB gate. */
+export type BaseSavable = { atMs: number; kind: 'agent' | 'edit' | 'mcp' }
+
+/**
+ * The autosave turn: a counter bumped per prompt that starts a turn, when it began, the turn the stop was last
+ * blocked in (0 = never), the workspace mtime seen at its start and the last turn that ended with a new one.
+ */
+export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number; writeMs: number; writeTurn: number }
 
 /** atMs = $.clock.now() when written; text is one line. */
 export type BaseEvent = { atMs: number; kind: BaseEventKind; text: string }
@@ -56,6 +72,9 @@ declare module 'claude-code' {
       guardRoot: string | null
       /** The session id whose base-tmp sweep ran and whose /base-doctor command is registered. */
       swept: string | null
+      /** This session's savable events, oldest first, at most 200. */
+      savable: BaseSavable[]
+      autosave: BaseAutosave | null
     }
   }
 }

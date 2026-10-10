@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# jira-attachments.sh — download a Jira issue's image/video attachments into the task workspace.
+# jira-attachments.sh — download a Jira issue's image/video/text attachments into the task workspace.
 #
 # WHY A SCRIPT AT ALL: the Atlassian MCP server returns attachment METADATA (id, filename,
 # mimeType, size) and no tool that returns the BYTES, so a screenshot on a ticket is invisible to
@@ -45,8 +45,8 @@
 #
 #   --out           download dir (default .claude/tasks/<KEY>/tmp/attachments)
 #   --ids           only these attachment ids (comma-separated)
-#   --all           lift the image/* + video/* type filter
-#   --max-mb        per-file size cap for everything but videos (default 25)
+#   --all           lift the image/video/text type filter and the text cap
+#   --max-mb        per-file size cap for everything but videos and text (default 25)
 #   --max-video-mb  per-video size cap (default 200)
 #   --force         re-download even when the file is already on disk at the metadata size
 #   --env           dotenv holding JIRA_EMAIL / JIRA_API_TOKEN (default ./.env)
@@ -63,8 +63,13 @@
 # stdout — one row per attachment, header first:
 #   id  status  kind  mime  size  created  author  path  filename
 #   status = saved | cached | skipped_type | skipped_size | failed;
-#   kind = image | video | other; path = the file on disk, EMPTY for every row that is not
+#   kind = image | video | text | other; path = the file on disk, EMPTY for every row that is not
 #   saved/cached.
+#
+# TEXT: a spec attached as .js / .json / .csv / .liquid is ticket content, so text/*,
+# application/json, application/javascript, and a .liquid name under a generic mime are fetched by
+# default under their own small cap (256 KB). The saved name ends in a text extension (else gains
+# `.txt`): the file is read as data, never opened or run as what its name claims.
 # stderr — notes, then always a last summary line:
 #   ok=1 saved=N cached=N skipped=N failed=N out=<dir>
 #
@@ -98,6 +103,7 @@ REFERENCE="$(dirname "$SCRIPT_DIR")/references/jira-attachments.md"
 
 KEY=""; OUT_DIR=""; IDS=""; ALL=0; MAX_MB=25; MAX_VIDEO_MB=200; FORCE=0
 ENV_FILE=".env"; SITE=""; CLOUD_ID=""; CHECK=0; JSON=0
+TEXT_MAX_BYTES=262144
 US="$(printf '\037')"   # the row separator between the metadata fields (see the jq call below)
 
 # a value flag must not be the last arg — a bare `shift 2` would exit silently under set -e
@@ -298,6 +304,10 @@ mime_ext() { # $1 = mime → the extension a name without one gets
     video/quicktime) printf mov ;;
     video/webm) printf webm ;;
     application/pdf) printf pdf ;;
+    application/json*) printf json ;;
+    application/javascript*|text/javascript*) printf js ;;
+    text/csv*) printf csv ;;
+    text/*) printf txt ;;
   esac
 }
 
@@ -335,14 +345,26 @@ while IFS="$US" read -r id name mime size created author; do
   if [ -n "$IDS" ]; then
     case ",$IDS," in *",$id,"*) ;; *) continue ;; esac
   fi
-  kind=other
-  case "$mime" in image/*) kind=image ;; video/*) kind=video ;; esac
+  kind=other; lname="$(printf '%s' "$name" | tr 'A-Z' 'a-z')"
+  case "$mime" in
+    image/*) kind=image ;;
+    video/*) kind=video ;;
+    text/*|application/json*|application/javascript*) kind=text ;;
+    ''|application/octet-stream|binary/octet-stream) case "$lname" in *.liquid) kind=text ;; esac ;;
+  esac
   case "$size" in ''|*[!0-9]*) size=0 ;; esac
   fname="$(sanitize_name "$name" "$mime")"
+  if [ "$kind" = text ]; then
+    case "$(printf '%s' "$fname" | tr 'A-Z' 'a-z')" in
+      *.txt|*.md|*.csv|*.tsv|*.json|*.js|*.mjs|*.cjs|*.ts|*.liquid|*.css|*.scss|*.html|*.xml|*.yml|*.yaml|*.log) ;;
+      *) fname="$(sanitize_name "$fname.txt" "$mime")" ;;
+    esac
+  fi
   target="$OUT_ABS/$id-$fname"
   status=""; path=""
 
   cap="$MAX_BYTES"; [ "$kind" = video ] && cap="$MAX_VIDEO_BYTES"
+  if [ "$kind" = text ] && [ "$ALL" -eq 0 ]; then cap="$TEXT_MAX_BYTES"; fi
   if [ "$ALL" -eq 0 ] && [ "$kind" = other ]; then status=skipped_type
   elif [ "$size" -gt "$cap" ]; then status=skipped_size
   elif [ "$FORCE" -eq 0 ] && file_cached "$target" "$size"; then
