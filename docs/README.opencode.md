@@ -1,71 +1,77 @@
 # fnd on OpenCode
 
-Quickstart, update path and the host-specific deltas. The plugin content is the same checkout
-Claude Code uses — only the wiring differs. Start at the
-[README](../README.md#install--four-hosts) for the cross-host picture.
+This page gives the quickstart, the update path and the differences that apply only to OpenCode.
+Claude Code uses the same plugin content from the same checkout; only the wiring is different.
+For the picture across all hosts, start at the [README](../README.md#install--four-hosts).
 
 > [!NOTE]
-> **fnd is frozen at 0.135.0 and supported on OpenCode until 2027-06-30.** Until then only a
-> blocking bug gets a fix, on request (the `report-plugin-issue` skill files it); there are no new
-> features. After 2027-06-30 nothing is fixed. The Claude Code replacement (slim, band, base
+> **fnd is frozen at 0.135.0 and supported on OpenCode until 2027-06-30.** Until that date, we fix
+> only a blocking bug, and only on request (the `report-plugin-issue` skill files it). There are
+> no new features. After 2027-06-30, we fix nothing. The Claude Code replacement (slim, band, base
 > and the team plugins fe, qa, be, pm) does not run on this host, so fnd stays the plugin here.
-> Details:
-> [README → fnd is frozen](../README.md#fnd-is-frozen).
+> Details: [README → fnd is frozen](../README.md#fnd-is-frozen).
 
 > [!IMPORTANT]
-> **Verification status: unverified, frozen 2026-09-07.** The OpenCode wiring ships as last
-> measured (installer route and hooks firing per the `FND_HOST_TRACE` matrix), but no release
-> since has been smoke-tested here in an interactive session, and no full `smoke-test` run was
-> ever recorded on this host. Known gaps: no MCP-level guard and no verified MCP payload shape,
-> so screenshots are unguarded. Details and what "best-effort" means: [README → Host verification
+> **Verification status: unverified, frozen 2026-09-07.** The OpenCode wiring ships as it was last
+> measured: the installer route and the hooks fired as the `FND_HOST_TRACE` matrix recorded them.
+> Since then, nobody has smoke-tested a release here in an interactive session, and nobody ever
+> recorded a full `smoke-test` run on this host. Known gaps: there is no guard at the MCP level,
+> and the MCP payload shape is not verified. Thus screenshots have no guard. For details and the
+> meaning of "best-effort", see [README → Host verification
 > status](../README.md#host-verification-status--cursor-codex-cli-and-opencode-are-unverified).
 
-OpenCode has no plugin marketplace primitive, so the installer is the whole distribution
-channel, and three pieces of configuration stay yours to paste: the MCP block, the commit-guard
-backstop and the static conventions.
+OpenCode has no plugin marketplace, so the installer is the only distribution channel. You paste
+three pieces of configuration yourself: the MCP block, the commit-guard backstop and the static
+conventions.
 
 ## Install
 
-Seven steps take a machine that has never seen OpenCode to a proven install: 0 installs the host
-itself, 1 installs the plugin in one command (2 is the manual equivalent, and what got linked),
-3–5 are three pastes into a config file you own, 6 is optional, 7 proves the whole thing in a
-live session.
+Seven steps take a machine without OpenCode to a proven install:
+
+0. Install the host.
+1. Install the plugin with one command.
+2. Do step 1 by hand, if you prefer; this step also lists what the installer links.
+3. Paste the MCP block into a config file that you own.
+4. Paste the commit-guard backstop into the same file.
+5. Paste the static conventions into the same file.
+6. Optional: set up model tiering.
+7. Prove the full install in a live session.
 
 ### 0. Prerequisites — the host and the runtime
 
-Skip anything you already have:
+Skip each item that you already have:
 
-- **OpenCode itself.** The official installer:
+- **OpenCode itself.** Use the official installer:
 
   ```bash
   curl -fsSL https://opencode.ai/install | bash
   ```
 
-  (`npm i -g opencode-ai` and `brew install sst/tap/opencode` are the upstream alternatives —
-  see [opencode.ai/docs](https://opencode.ai/docs/) for the current list.) Then connect a model
-  provider: run `opencode auth login` and follow the prompts, or wire a local provider in your
-  config. `opencode` must start and answer a prompt before the plugin is worth installing.
-- **Node.js** (any current LTS) and **git** on the PATH OpenCode inherits — every fnd script and
-  hook runs on bare `node`, no npm installs.
+  The upstream alternatives are `npm i -g opencode-ai` and `brew install sst/tap/opencode`;
+  [opencode.ai/docs](https://opencode.ai/docs/) has the current list. Then connect a model
+  provider: run `opencode auth login` and follow the prompts, or set up a local provider in your
+  config. Make sure that `opencode` starts and answers a prompt before you install the plugin.
+- **Node.js** (any current LTS) and **git** on the PATH that OpenCode inherits. Every fnd script
+  and hook runs on bare `node`, without npm installs.
 
 ### 1. Install — one command
 
-The bootstrap one-liner clones this repo to a permanent location (default
-`~/tools/claude-plugins`; `--dir <path>` to change) and runs the OpenCode installer inside it:
+The bootstrap one-liner clones this repo to a permanent location and runs the OpenCode installer
+in it. The default location is `~/tools/claude-plugins`; use `--dir <path>` to change it.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets opencode --yes
 ```
 
-`--yes` is what makes it one command: it accepts the default destination instead of prompting
-for one when a terminal is attached (piped runs never prompt). The clone is not a temporary
-download — the symlinks point into it, so this folder **is** the
-installed plugin and deleting it uninstalls everything; leave it where the bootstrap put it.
-The three config pastes (steps 3–5) are still yours — no script edits your `opencode.json`.
+`--yes` makes it one command: it accepts the default location and does not ask for one when a
+terminal is attached. Piped runs never ask. The clone is not a temporary download. The symlinks
+point into it, so this folder **is** the installed plugin, and if you delete it, you uninstall
+everything. Keep it where the bootstrap put it. You still do the three config pastes (steps 3–5)
+yourself, because no script edits your `opencode.json`.
 
 ### 2. The installer — manual equivalent, and what it links
 
-Already have a clone, or prefer the steps by hand?
+If you already have a clone, or prefer to do the steps by hand, run this:
 
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git ~/tools/claude-plugins
@@ -73,9 +79,9 @@ cd ~/tools/claude-plugins
 ./scripts/install.sh --target opencode
 ```
 
-The clone **is** the install: per-entry symlinks under `~/.config/opencode/`
-(`$XDG_CONFIG_HOME` is honored) point back into this checkout, so `git pull` updates the host
-live. The installer links, never replaces a directory of yours:
+The clone **is** the install. Symlinks, one per entry, under `~/.config/opencode/` point back into
+this checkout (the installer honors `$XDG_CONFIG_HOME`). Thus `git pull` updates the host live.
+The installer only adds links; it never replaces a directory of yours:
 
 | Linked into | From |
 |---|---|
@@ -84,23 +90,23 @@ live. The installer links, never replaces a directory of yours:
 | `~/.config/opencode/commands/<name>.md` | `plugins/fnd/commands-opencode/` (18 `/name` shims, generated) |
 | `~/.config/opencode/plugins/fnd-plugin.js` | `plugins/fnd/opencode/fnd-plugin.js` |
 
-> The install lever is **provisional**, pending a decision between these symlinks,
-> `OPENCODE_CONFIG_DIR` and a global `opencode.json` fragment. Exactly one route
-> will remain — mixing two would duplicate the content.
+> This install method is **provisional**. A decision between these symlinks,
+> `OPENCODE_CONFIG_DIR` and a global `opencode.json` fragment is still open. Only one route will remain,
+> because two routes together would duplicate the content.
 
-The installer finishes by running `doctor.cjs --target opencode` for you — read those rows
-before moving on:
+At the end, the installer runs `doctor.cjs --target opencode` for you. Read those rows before you
+continue:
 
 ```text
 PASS  generator-sync         generated dirs match scripts/gen-host-adapters.cjs
 PASS  install:opencode       symlink install, 44 entry(ies) live (root: ~/.config/opencode)
 ```
 
-Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target opencode`.
+To run the doctor again at any time, use `node plugins/fnd/scripts/doctor.cjs --target opencode`.
 
-The next three steps are pastes into **your own** `opencode.json` — the installer never links or
-edits that file, because it is yours. The global one lives at
-`~/.config/opencode/opencode.json`; if it does not exist yet, create it as:
+The next three steps are pastes into **your own** `opencode.json`. The installer never links or
+edits that file, because it is yours. The global file is at `~/.config/opencode/opencode.json`.
+If it does not exist yet, create it with this content:
 
 ```json
 {
@@ -108,26 +114,27 @@ edits that file, because it is yours. The global one lives at
 }
 ```
 
-You do not have to assemble those three blocks by hand. From the checkout:
+You do not have to write those three blocks by hand. From the checkout, run:
 
 ```bash
 node plugins/fnd/scripts/opencode-config.cjs
 ```
 
-It prints all three — steps 3, 4 and 5 below — as labeled JSON blocks with this clone's absolute
-paths already filled in, so the paste is copy-from-terminal. `--json` prints the same three
-merged into one object, for a `jq` merge. It reads; it never writes your `opencode.json`. Steps
-3–5 then describe what each block is and why, and stay the reference when you merge by hand.
+It prints all three blocks (steps 3, 4 and 5 below) as labeled JSON blocks. The absolute paths of
+this clone are already in them, so you can copy them from the terminal. `--json` prints the same
+three blocks merged into one object, for a merge with `jq`. The command only reads; it never
+writes your `opencode.json`. Steps 3–5 tell what each block is and why. Use them as the
+reference when you merge by hand.
 
 ### 3. Paste the MCP servers into your `opencode.json`
 
-Open `plugins/fnd/opencode/mcp-fragment.json` (generated from the canonical server list) and
-copy its `mcp` object — the whole `"mcp": { … }` block, six servers — into the top level of your
-`opencode.json`, next to `$schema`. Do not copy the `_comment` key. If your config already has
-an `mcp` block, add the six fnd entries inside it rather than replacing yours.
+Open `plugins/fnd/opencode/mcp-fragment.json`, which is generated from the canonical server list.
+Copy its `mcp` object, the full `"mcp": { … }` block with six servers. Paste it at the top level of
+your `opencode.json`, next to `$schema`. Do not copy the `_comment` key. If your config already
+has an `mcp` block, add the six fnd entries into it; do not replace your entries.
 
-The end state, in full (this is the fragment's `mcp` block as generated today — if it differs
-from your copy of `plugins/fnd/opencode/mcp-fragment.json`, the file wins):
+This is the full end state. It shows the `mcp` block of the fragment as it is generated today. If
+it is different from your copy of `plugins/fnd/opencode/mcp-fragment.json`, use the file.
 
 ```json
 {
@@ -164,33 +171,34 @@ from your copy of `plugins/fnd/opencode/mcp-fragment.json`, the file wins):
 
 ### 4. Paste the commit-guard backstop
 
-Same file, second block: merge the `permission.bash` object from
-`plugins/fnd/opencode/permission-fragment.example.json` into your `opencode.json` (top-level
-`permission` key, next to `mcp`). The JS adapter is the precise layer; these globs are the blunt
-one that still holds in `--auto` runs and when the adapter never loaded.
+This is the second block in the same file. Merge the `permission.bash` object from
+`plugins/fnd/opencode/permission-fragment.example.json` into your `opencode.json`, as the
+top-level `permission` key next to `mcp`. The JS adapter is the precise guard layer. These globs
+are the coarse layer. They still work in `--auto` runs and when the adapter did not load.
 
-Because they are blunt, the fragment re-allows a few documented false positives — read-only
-`git config --get core.hooksPath`, `chmod +x` on a hook file,
-`git push --no-verify-signatures`. Those re-allows are **exact** command strings, never
-`prefix*` patterns: a trailing `*` swallows the rest of the line, and under last-match-wins an
-allow like `chmod +x*` would re-permit `chmod +x .husky/pre-commit && git commit --no-verify`
-that the deny rules above it had just blocked. The cost of exactness is that a variant
-spelling (another hook name, extra `git push` arguments) stays denied — run those yourself
-rather than widening the pattern.
+Because the globs are coarse, the fragment allows again a few known false positives: the
+read-only `git config --get core.hooksPath`, `chmod +x` on a hook file, and
+`git push --no-verify-signatures`. These allow rules are **exact** command strings, never
+`prefix*` patterns. A trailing `*` matches the rest of the line, and the last matching rule wins.
+Thus an allow rule like `chmod +x*` would allow
+`chmod +x .husky/pre-commit && git commit --no-verify` again, after the deny rules above it
+blocked it. Because the strings are exact, a different spelling (another hook name, more
+`git push` arguments) stays denied. Run those commands yourself; do not widen the pattern.
 
 ### 5. Paste the static conventions
 
-The session conventions that other hosts inject for you — comment discipline, lean code, how to
-explain, whale routing, plugin feedback, task workspace, untrusted content — are wired by you on OpenCode: the plugin adapter
-injects only what a static file cannot answer (where the bundle is, the project profile) plus
-the two detection-gated blocks (live-store access, the Foundation LiquidDoc-and-core addendum).
-Without this paste **no fnd convention reaches your sessions** (the smoke test's
-context-injection row goes red on exactly this).
+On other hosts, the plugin injects the session conventions for you: comment discipline, lean
+code, how to explain, whale routing, plugin feedback, task workspace and untrusted content. On
+OpenCode, you wire them yourself. The plugin adapter injects only what a static file cannot
+answer: the location of the bundle and the project profile. It also injects the two blocks that
+depend on detection: live-store access and the Foundation LiquidDoc-and-core addendum. Without
+this paste, **no fnd convention reaches your sessions**. The context-injection row of the smoke
+test goes red for exactly this reason.
 
-Same file, third block: an `instructions` array at the top level, next to `mcp` and
-`permission`, naming the static convention files with the absolute path of your clone.
-`node plugins/fnd/scripts/opencode-config.cjs` prints this array with the paths already
-substituted; the files it names are:
+This is the third block in the same file: an `instructions` array at the top level, next to `mcp`
+and `permission`. It names the static convention files with the absolute path of your clone.
+`node plugins/fnd/scripts/opencode-config.cjs` prints this array with the paths already filled
+in. It names these files:
 
 ```json
 "instructions": [
@@ -204,41 +212,41 @@ substituted; the files it names are:
 ]
 ```
 
-If your config already has `instructions`, append these entries to it. List the files
-explicitly — a `hooks/*.md` glob would also pull in `store-access.md` and
-`comment-discipline-foundation.md`, which the adapter injects itself where the workspace says
-so — store credentials for the first, Foundation markers for the second — so a static copy would
-double them; it would also pull in `mcp-whale-claude.md`, the Claude Code variant of
-`mcp-whale.md`. (That
-exclusion is exactly what the renderer applies, which is why its output is the safe list to
-paste. An `AGENTS.md` referencing the same files works too, if that is how you organize global
-instructions.) Because the paths point into the clone, `git pull` updates the content with no
-further pasting — only a renamed or added convention file comes back to this step, and re-running
-the renderer is how you see it.
+If your config already has `instructions`, add these entries to it. Name each file explicitly; do
+not use a `hooks/*.md` glob. A glob would also add `store-access.md` and
+`comment-discipline-foundation.md`. The adapter injects these two itself when the workspace calls
+for them: the first when there are store credentials, the second when there are Foundation
+markers. A static copy would thus duplicate them. A glob would also add `mcp-whale-claude.md`,
+which is the Claude Code variant of `mcp-whale.md`. The renderer excludes exactly these files, so
+its output is the safe list to paste. An `AGENTS.md` that names the same files also works, if you
+organize your global instructions that way. Because the paths point into the clone, `git pull`
+updates the content, and you do not paste again. Come back to this step only when a convention
+file is renamed or added. To see such a change, run the renderer again.
 
 ### 6. Optional: model tiering
 
-Generated agents carry no `model:` pin (see below); to opt in, copy
-the `agent` block from `plugins/fnd/opencode/model-profile.cloud.example.json` or
-`model-profile.local.example.json` into your `opencode.json` and replace the ids with ones your
-provider config actually exposes.
+The generated agents have no `model:` pin (see below). To opt in, copy the `agent` block from
+`plugins/fnd/opencode/model-profile.cloud.example.json` or `model-profile.local.example.json` into
+your `opencode.json`. Then replace the ids with ids that your provider config really offers.
 
 ### 7. Run the smoke test once
 
-Start a **new OpenCode session** (config edits load at startup) and run: `/smoke-test` (the command
-shim; OpenCode itself invokes skills by model choice only). It proves MCP connectivity, subagent
-delegation, the commit guards firing and the session context arriving. Run it after installing
-or updating, not every session — `/preflight-checks` owns the recurring per-project role.
+Start a **new OpenCode session**, because OpenCode loads config changes at startup. Then run
+`/smoke-test`. This is the command shim; OpenCode itself starts skills only when the model chooses
+them. The smoke test proves MCP connectivity, subagent delegation, that the commit guards fire, and the
+arrival of the session context. Run it after an install or an update, not in each session.
+`/preflight-checks` does the recurring check per project.
 
 **Proving the hooks fired.** Arm `FND_HOST_TRACE` globally
-(`node plugins/fnd/scripts/domaine-env.cjs set FND_HOST_TRACE=1`), start a session, use it, then
-run `node plugins/fnd/scripts/doctor.cjs --trace --since 2h`. Under host `opencode` a healthy run
-shows `UserPromptSubmit/fnd-plugin` from the adapter and `SessionStart/fnd-plugin` (once per
-session, in every checkout — the bundle location and the project profile always ride; only the
-store-access and Foundation blocks inside that injection are detection-gated), plus
-`user-prompt`, the two shell commit guards, `spill-access` and `mcp-slim`. There is no
-`SubagentStart` row — OpenCode exposes no subagent-start event — and that absence is expected, not
-a gap. Full recipe: [Verifying any install](../README.md#verifying-any-install).
+(`node plugins/fnd/scripts/domaine-env.cjs set FND_HOST_TRACE=1`). Start a session and use it.
+Then run `node plugins/fnd/scripts/doctor.cjs --trace --since 2h`. Under host `opencode`, a
+healthy run shows `UserPromptSubmit/fnd-plugin` from the adapter and `SessionStart/fnd-plugin`.
+`SessionStart/fnd-plugin` appears once per session, in every checkout, because the bundle location
+and the project profile are always injected. Only the store-access and Foundation blocks in that
+injection depend on detection. The run also shows `user-prompt`, the two shell commit guards,
+`spill-access` and `mcp-slim`. There is no `SubagentStart` row, because OpenCode has no
+subagent-start event. This absence is expected and is not a gap. Full recipe:
+[Verifying any install](../README.md#verifying-any-install).
 
 ## Update
 
@@ -247,69 +255,70 @@ cd /path/to/claude-plugins
 ./scripts/install.sh --target opencode      # = git pull --ff-only + re-link + doctor
 ```
 
-The installer is the updater — there is no "reinstall" on this host. Skills, references and
-agent bodies apply on the next read; the plugin adapter, the command shims and anything in your
-own `opencode.json` need a **new session**. A skill removed or renamed upstream is pruned by the
-same run that pulled it.
+The installer is also the updater; this host has no "reinstall". Skills, references and agent
+bodies apply at the next read. The plugin adapter, the command shims and all changes in your own
+`opencode.json` need a **new session**. When upstream removes or renames a skill, the same run
+that pulled the change also removes the old link.
 
-Two config-shaped changes never reach you automatically, because they live in a file you own:
-re-check `mcp-fragment.json` and `permission-fragment.example.json` against your `opencode.json`
-after an update that touched them.
+Two config changes never reach you automatically, because they are in a file that you own. After
+an update that changed `mcp-fragment.json` or `permission-fragment.example.json`, compare them
+with your `opencode.json` again.
 
-`--copy` installs a real copy instead of symlinks; such an install does **not** follow
-`git pull` — re-run `./scripts/install.sh --target opencode --copy` to refresh it.
-`--uninstall` removes only the entries the installer created.
+`--copy` installs a real copy instead of symlinks. Such an install does **not** follow
+`git pull`. To refresh it, run `./scripts/install.sh --target opencode --copy` again.
+`--uninstall` removes only the entries that the installer created.
 
 ## What's different on OpenCode
 
-- **Bun in-process runtime, real `node` children.** OpenCode loads plugins as JS/TS modules
-  under Bun. `opencode/fnd-plugin.js` is wiring only — it spawns the canonical `hooks/*.cjs|sh`
-  as real `node` processes rather than importing them, so nothing depends on Bun's CJS interop
-  and the guards run byte-identically to Claude Code. `node` must be on the PATH OpenCode
-  inherits.
-- **No model pins, by design.** Generated `agents-opencode/*.md` carry no `model:` field, so
-  every agent inherits the session model and local providers (`ollama/*`, `lmstudio/*`, custom
-  OpenAI-compatible endpoints) work. A pin your provider config lacks would break the agent
-  outright. Tiering is opt-in through the model-profile fragments above; the honest caveat is
-  that the fnd review bar (`bug-hunter`, `pre-commit-review`) was calibrated on frontier models —
-  a small local model will run, but finding quality is the model choice's responsibility.
-- **Static conventions are yours to wire.** The adapter injects only what a static file cannot
-  answer — where the bundle is, the project profile — plus the two detection-gated blocks
-  (live-store access, the Foundation LiquidDoc-and-core addendum), once per session. The static
-  conventions (comment discipline, lean code, how to explain, task workspace, whale routing,
-  plugin feedback, the untrusted-content rail) arrive through your `instructions` config — install step 5 is that
-  paste — which costs nothing per message and survives compaction. Consequence: `FND_LEAN=0`
-  and `FND_STE=0` cannot reach them here; remove the lean-code or writing-style file from
-  `instructions` instead. The other way
-  round for the injected pair: riding `chat.message` means they do NOT survive compaction and a
-  task subagent never sees them, so on this host the Foundation addendum is a first-message
-  reminder rather than a standing rule.
-- **MCP output is rewritten in place.** `tool.execute.after` exposes a mutable `output.output`,
-  so `mcp-slim` both compresses and spills-and-stubs, as on Claude Code (Cursor is the
+- **A Bun runtime in the process, real `node` child processes.** OpenCode loads plugins as JS/TS
+  modules under Bun. `opencode/fnd-plugin.js` contains only wiring. It starts the canonical
+  `hooks/*.cjs|sh` as real `node` processes and does not import them. Thus nothing depends on the
+  CJS interop of Bun, and the guards run byte-identically to Claude Code. `node` must be on the
+  PATH that OpenCode inherits.
+- **No model pins, by design.** The generated `agents-opencode/*.md` have no `model:` field. So
+  every agent uses the session model, and local providers work (`ollama/*`, `lmstudio/*`, custom
+  OpenAI-compatible endpoints). A pin that your provider config does not have would break the agent
+  completely. Tiering is opt-in, through the model-profile fragments above. One honest warning: we
+  calibrated the fnd review bar (`bug-hunter`, `pre-commit-review`) on frontier models. A small
+  local model runs, but the quality of its findings depends on your model choice.
+- **You wire the static conventions yourself.** Once per session, the adapter injects only what a
+  static file cannot answer: the location of the bundle and the project profile. It also injects
+  the two blocks that depend on detection: live-store access and the Foundation LiquidDoc-and-core
+  addendum. The static conventions (comment discipline, lean code, how to explain, task workspace,
+  whale routing, plugin feedback, the untrusted-content rail) arrive through your `instructions`
+  config. Install step 5 is that paste. It costs nothing per message and stays after compaction.
+  As a result, `FND_LEAN=0` and `FND_STE=0` cannot reach these conventions here. Remove the
+  lean-code or writing-style file from `instructions` instead. The two injected blocks behave the
+  other way. They use `chat.message`, so they do NOT stay after compaction, and a task subagent
+  never sees them. On this host, the Foundation addendum is thus a reminder in the first message,
+  not a permanent rule.
+- **MCP output is rewritten in place.** `tool.execute.after` gives a changeable `output.output`.
+  Thus `mcp-slim` both compresses and does spill-and-stub, as on Claude Code (Cursor is the
   observe-only host — nothing is compressed, stubbed or spilled there).
-- **A blocked prompt is rewritten, not erased.** Nothing can erase a message on this host, so
-  when the prompt-JSON guard fires, each blob it spilled is replaced in place by its `full=`
-  handle — the paste is offloaded exactly as on Claude Code instead of riding along every turn.
-  The context-usage monitor is inert (`chat.message` hands a hook no transcript path).
-- **No subagent-start hook.** The conventions that hook injects elsewhere are written into the
-  generated agent bodies instead.
-- **No screenshot scratch-path guard.** `tool.execute.before` reaches only the bash tool in this
-  adapter, and the MCP tool-name/argument shapes OpenCode hands it are unverified — so the deny
-  that keeps QA screenshots out of the checkout on the other three hosts is absent here, and the
-  task workspace `tmp/` convention is the only rail
+- **A blocked prompt is rewritten, not erased.** This host cannot erase a message. So when the
+  prompt-JSON guard fires, it replaces each blob that it spilled with its `full=` handle, in place.
+  As on Claude Code, the paste moves out of the context and does not repeat in every turn. The
+  context-usage monitor does not work, because `chat.message` gives a hook no transcript path.
+- **No subagent-start hook.** On other hosts, that hook injects conventions. Here, the generated
+  agent bodies contain those conventions instead.
+- **No screenshot scratch-path guard.** In this adapter, `tool.execute.before` reaches only the
+  bash tool. Also, the shapes of the MCP tool names and arguments that OpenCode gives it are not
+  verified. On the other three hosts, a deny keeps QA screenshots out of the checkout. That deny
+  is absent here, so the `tmp/` convention of the task workspace is the only rail
   (`plugins/fnd/references/task-workspace.md`).
-- **`/name` comes from shims.** OpenCode invokes skills by model choice only; the 18 generated
-  `commands-opencode/*.md` shims give slash parity by loading the skill by name (with an
-  anchored path fallback if the lookup misses).
-- **Ship orchestration runs hoisted** unless you raised `subagent_depth`: the conductor is the
-  only spawner and every nested helper is hoisted to it, possibly serialized — that costs
-  wall-clock, not coverage (`plugins/fnd/references/host-orchestration.md`).
-- **Windows:** OpenCode recommends WSL; fnd is macOS-first and does not engineer around it.
+- **`/name` comes from shims.** OpenCode starts skills only when the model chooses them. The 18
+  generated `commands-opencode/*.md` shims give the same slash commands as other hosts: each shim
+  loads its skill by name. If the lookup fails, it uses an anchored path.
+- **Ship orchestration runs hoisted**, unless you increased `subagent_depth`. The conductor is the
+  only agent that starts other agents, and it starts every nested helper itself, possibly one after
+  another. This costs time, not coverage (`plugins/fnd/references/host-orchestration.md`).
+- **Windows:** OpenCode recommends WSL. fnd is made for macOS first and has no special support for
+  Windows.
 
 ## Project layer
 
-The plugin is a user-space install and stays additive: a project's `.opencode/*`, `AGENTS.md`
-and project `opencode.json` all keep working, and OpenCode merges configs across layers with
-your own file winning. Do not reuse fnd skill, agent or command names project-side, and never
-declare a second copy of the fnd plugin adapter — both would load, which means double injection
-and a second compression pass.
+The plugin is a user-space install and only adds to a project. A project's `.opencode/*`,
+`AGENTS.md` and project `opencode.json` all keep working. OpenCode merges the configs of all
+layers, and your own file wins. Do not use fnd skill, agent or command names in a project. Never
+declare a second copy of the fnd plugin adapter. Both copies would load, which causes double
+injection and a second compression pass.

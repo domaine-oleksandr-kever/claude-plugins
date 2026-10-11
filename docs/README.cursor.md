@@ -1,116 +1,117 @@
 # fnd on Cursor
 
-Quickstart, update path and the host-specific deltas. The plugin content is the same
-checkout Claude Code uses — only the wiring differs. Start at the
-[README](../README.md#install--four-hosts) for the cross-host picture.
+This page gives the quickstart, the update path and the differences that apply only to Cursor.
+Claude Code uses the same plugin content from the same checkout; only the wiring is different.
+For the picture across all hosts, start at the [README](../README.md#install--four-hosts).
 
 > [!NOTE]
-> **fnd is frozen at 0.135.0 and supported on Cursor until 2027-06-30.** Until then only a
-> blocking bug gets a fix, on request (the `report-plugin-issue` skill files it); there are no new
-> features. After 2027-06-30 nothing is fixed. The Claude Code replacement (slim, band, base
+> **fnd is frozen at 0.135.0 and supported on Cursor until 2027-06-30.** Until that date, we fix
+> only a blocking bug, and only on request (the `report-plugin-issue` skill files it). There are
+> no new features. After 2027-06-30, we fix nothing. The Claude Code replacement (slim, band, base
 > and the team plugins fe, qa, be, pm) does not run on this host, so fnd stays the plugin here.
-> Details:
-> [README → fnd is frozen](../README.md#fnd-is-frozen).
+> Details: [README → fnd is frozen](../README.md#fnd-is-frozen).
 
 > [!IMPORTANT]
-> **Verification status: unverified, frozen 2026-09-07.** The Cursor wiring ships as last
-> measured (hooks fire per the `FND_HOST_TRACE` matrix; the deny path was accepted by a headless
-> `cursor-agent` run), but no release since has been smoke-tested here in an interactive session,
-> and three gaps stay open by decision: `afterMCPExecution` is observe-only (no compression, stub
-> or spill on Cursor), `subagentStart` conventions injection is unconfirmed, and the model-pin bug
-> below. Details and what "best-effort" means: [README → Host verification
+> **Verification status: unverified, frozen 2026-09-07.** The Cursor wiring ships as it was last
+> measured. The hooks fire as the `FND_HOST_TRACE` matrix shows, and a headless `cursor-agent` run
+> accepted the deny path. Since then, nobody has smoke-tested a release here in an interactive
+> session. Three gaps stay open by decision. First, `afterMCPExecution` is observe-only, so Cursor
+> gets no compression, stub or spill. Second, nobody has confirmed the `subagentStart` injection of
+> the conventions. Third, the model-pin bug below. For details and the meaning of "best-effort",
+> see [README → Host verification
 > status](../README.md#host-verification-status--cursor-codex-cli-and-opencode-are-unverified).
 
 ## Install
 
 > [!WARNING]
-> **Cursor currently ignores subagent model pins — on every install route.** A
-> staff-acknowledged Cursor bug (open since April 2026, **no fix date**) makes plugin agents
-> drop their `model:` frontmatter. First observed on marketplace installs, live-verified
-> 2026-08-24 on the local-symlink install too: on both routes every fnd subagent
-> (`jira-reader`, `figma-reader`, `bug-hunter`, …) silently inherits the session model instead
-> of the tier map in `plugins/fnd/references/host-model-map.md`. Skills, hooks, MCP and the
-> agents themselves still work; only the model routing is lost. The pins stay in the generated
-> agents so they bind the moment Cursor ships the fix — until then **pick the session model
-> with subagents in mind** (e.g. run the review gates from a `claude-sonnet-5` session).
+> **Cursor currently ignores subagent model pins — on every install route.** Because of a Cursor
+> bug, plugin agents drop their `model:` frontmatter. Cursor staff acknowledged the bug; it is open
+> since April 2026, with **no fix date**. We first saw it on marketplace installs. On 2026-08-24 we
+> verified it live on the local-symlink install too. On both routes, every fnd subagent
+> (`jira-reader`, `figma-reader`, `bug-hunter`, …) silently uses the session model. It does not
+> use the tier map in `plugins/fnd/references/host-model-map.md`. Skills, hooks, MCP and the
+> agents still work; only the model routing is lost. The pins stay in the generated agents, so they
+> apply as soon as Cursor ships the fix. Until then, **choose the session model with the
+> subagents in mind**. For example, run the review gates from a `claude-sonnet-5` session.
 
-The route is the **marketplace**: no clone, no shell — Cursor installs the plugin into its own
-cache and follows GitHub for updates. A local-checkout route (a symlink install via
-`./scripts/install.sh`) also exists — it is documented at the end of this section as the
-alternative, for working on the plugin itself or running unpushed commits.
+Use the **marketplace** route. It needs no clone and no shell: Cursor installs the plugin into its
+own cache and gets updates from GitHub. A local-checkout route also exists: a symlink install
+through `./scripts/install.sh`. The end of this section describes it as the alternative. Use it
+to work on the plugin itself or to run unpushed commits.
 
 ### 0. Prerequisites
 
-- **Cursor itself** — the desktop app from [cursor.com](https://cursor.com), on a current
-  version (the plugin layer — `plugin.json`, hooks, `mcp.json` — is a recent addition; update
-  the app before blaming the install). Sign in so chat works. No Cursor CLI is needed.
-- **Node.js** (any current LTS) and **git** on your PATH — every fnd script and hook runs on
-  bare `node`, no npm installs.
+- **Cursor itself**: the desktop app from [cursor.com](https://cursor.com), in a current version.
+  The plugin layer (`plugin.json`, hooks, `mcp.json`) is a recent addition, so update the app
+  before you suspect the install. Sign in, so that chat works. You do not need the Cursor CLI.
+- **Node.js** (any current LTS) and **git** on your PATH. Every fnd script and hook runs on bare
+  `node`, without npm installs.
 
 ### 1. Install from the marketplace
 
-No clone, no shell (live-verified 2026-08-22). In Cursor: **Customize → Plugins →
-Add Marketplace** (or `/add-plugin` in chat), paste
+This step needs no clone and no shell (verified live on 2026-08-22). In Cursor, open
+**Customize → Plugins → Add Marketplace** (or type `/add-plugin` in chat). Paste this URL:
 
 ```text
 https://github.com/domaine-oleksandr-kever/claude-plugins
 ```
 
-then press **Add** on the **fnd** card that appears under the marketplace's name. Cursor clones
-the plugin into its own cache and keeps it updated by re-indexing the marketplace from GitHub —
-which also means **unpushed commits are invisible** on this route, exactly as on Codex.
-`node plugins/fnd/scripts/doctor.cjs --target cursor` recognizes the result as
+Then press **Add** on the **fnd** card under the name of the marketplace. Cursor clones the plugin
+into its own cache. It keeps the plugin updated when it indexes the marketplace again from
+GitHub. Thus, as on Codex, **unpushed commits are invisible** on this route.
+`node plugins/fnd/scripts/doctor.cjs --target cursor` shows the result as
 `marketplace cache install`.
 
-**Uninstalling** happens on the same screen: the fnd card's `…` menu → Uninstall in
-Customize → Plugins; a stale or duplicate marketplace entry is removed there too. Registering
-a marketplace does NOT install its plugins, and removing a marketplace does not uninstall an
-already-installed plugin.
+To **uninstall**, use the same screen: in Customize → Plugins, open the `…` menu of the fnd card
+and select Uninstall. You also remove an old or duplicate marketplace entry there. When you add a
+marketplace, Cursor does NOT install its plugins. When you remove a marketplace, an installed
+plugin stays installed.
 
-This route is editor-UI only, on purpose: the Cursor CLI has no plugin install/uninstall
-commands (staff-confirmed), so anything scripted ends in workarounds — stay in the editor.
+This route uses only the editor UI, on purpose. The Cursor CLI has no commands to install or
+uninstall a plugin (Cursor staff confirmed this). Any script would need workarounds, so stay in
+the editor.
 
 ### 2. Reload the Cursor window
 
-Command Palette (`Cmd+Shift+P`) → *Developer: Reload Window*. The manifest, the hooks wiring
-and `mcp.json` are read at startup, so a fresh install is not live until you do. First load
-also brings MCP auth prompts for the remote servers (Atlassian, Notion) — approve the ones you
-use.
+Open the Command Palette (`Cmd+Shift+P`) and run *Developer: Reload Window*. Cursor reads the
+manifest, the hooks wiring and `mcp.json` at startup. Thus a new install is not live until you
+reload. On the first load, the remote servers (Atlassian, Notion) also ask for MCP auth. Approve
+the servers that you use.
 
 ### 3. Run the smoke test once
 
-`/smoke-test` in a Cursor chat. It proves the layers a script cannot reach — MCP connectivity,
-subagent spawning, the commit guards firing, the session conventions arriving. Run it after
-installing or updating, not every session (`/preflight-checks` owns the recurring per-project
-role).
+Run `/smoke-test` in a Cursor chat. It proves the layers that a script cannot reach: MCP
+connectivity, subagent spawning, that the commit guards fire, and the arrival of the session conventions.
+Run it after an install or an update, not in each session. `/preflight-checks` does the recurring
+check per project.
 
-**Proving the hooks fired.** The smoke test's last row reads a log instead of trusting the model:
-arm `FND_HOST_TRACE` globally (`node plugins/fnd/scripts/domaine-env.cjs set FND_HOST_TRACE=1`),
-reload the window, use the session normally, then run
-`node plugins/fnd/scripts/doctor.cjs --trace --since 2h`. Under host `cursor` a healthy run shows
-`SessionStart/cursor-shim`, `UserPromptSubmit/cursor-shim` and `SubagentStart/cursor-shim` — this
-host composes those contexts in the adapter — next to the rows the spawned scripts log for
-themselves (`user-prompt`, `subagent-conventions`, `no-verify-bypass`, `no-ai-attribution`,
-`spill-access`, `mcp-slim`). Full recipe:
+**Proving the hooks fired.** The last row of the smoke test reads a log; it does not trust the
+model. Arm `FND_HOST_TRACE` globally
+(`node plugins/fnd/scripts/domaine-env.cjs set FND_HOST_TRACE=1`). Reload the window and use the
+session normally. Then run `node plugins/fnd/scripts/doctor.cjs --trace --since 2h`. Under host
+`cursor`, a healthy run shows `SessionStart/cursor-shim`, `UserPromptSubmit/cursor-shim` and
+`SubagentStart/cursor-shim`, because on this host the adapter builds those contexts. Next to them
+are the rows that the started scripts log for themselves (`user-prompt`, `subagent-conventions`,
+`no-verify-bypass`, `no-ai-attribution`, `spill-access`, `mcp-slim`). Full recipe:
 [Verifying any install](../README.md#verifying-any-install).
 
 ### Alternative: local checkout — script install
 
-Here the clone **is** the install: Cursor reads a symlink into `~/.cursor/plugins/local/fnd`,
-so the files it loads are the ones in the checkout and a `git pull` updates the host live —
-take this route to work on the plugin itself or to run unpushed commits. The bootstrap one-liner
-clones this repo to a permanent location (default `~/tools/claude-plugins`; `--dir <path>` to
-change) and runs the Cursor installer inside it:
+On this route, the clone **is** the install. Cursor reads a symlink into
+`~/.cursor/plugins/local/fnd`, so it loads the files in the checkout, and a `git pull` updates
+the host live. Use this route to work on the plugin itself or to run unpushed commits. The
+bootstrap one-liner clones this repo to a permanent location and runs the Cursor installer in it.
+The default location is `~/tools/claude-plugins`; use `--dir <path>` to change it.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets cursor --yes
 ```
 
-`--yes` is what makes it one command: it accepts the default destination instead of prompting
-for one when a terminal is attached (piped runs never prompt). The clone is not a temporary
-download — the symlink points into it, so this folder **is** the installed plugin and deleting
-it uninstalls everything; leave it where the bootstrap put it.
-Already have a clone, or prefer the steps by hand? The equivalent is:
+`--yes` makes it one command: it accepts the default location and does not ask for one when a
+terminal is attached. Piped runs never ask. The clone is not a temporary download. The symlink
+points into it, so this folder **is** the installed plugin, and if you delete it, you uninstall
+everything. Keep it where the bootstrap put it. If you already have a clone, or prefer to do the
+steps by hand, run this equivalent:
 
 ```bash
 git clone https://github.com/domaine-oleksandr-kever/claude-plugins.git ~/tools/claude-plugins
@@ -118,9 +119,9 @@ cd ~/tools/claude-plugins
 ./scripts/install.sh --target cursor
 ```
 
-Either way the installer pulls (`git pull --ff-only`, skipped on a dirty tree), creates the
-symlink, refuses to clobber anything it did not create, and finishes by running `doctor.cjs
---target cursor` for you — read those rows before doing anything else:
+On both paths, the installer does a pull (`git pull --ff-only`, skipped on a dirty tree) and
+creates the symlink. It refuses to overwrite anything that it did not create. At the end, it runs
+`doctor.cjs --target cursor` for you. Read those rows before you do anything else:
 
 ```text
 PASS  manifest:cursor        .cursor-plugin/plugin.json version <version>
@@ -129,24 +130,26 @@ PASS  generator-sync         generated dirs match scripts/gen-host-adapters.cjs
 PASS  install:cursor         symlink install, 1 entry(ies) live (root: ~/.cursor/plugins/local)
 ```
 
-Re-run it any time: `node plugins/fnd/scripts/doctor.cjs --target cursor`. On a marketplace-only
-machine the same command run from an unlinked checkout reports `install:cursor` as **not
-installed** — that is the checkout, not the host — and names the cached bundle to re-run it from.
+To run the doctor again at any time, use `node plugins/fnd/scripts/doctor.cjs --target cursor`.
+On a machine with only the marketplace install, the same command from an unlinked checkout shows
+`install:cursor` as **not installed**. This result is about the checkout, not the host, and the
+row names the cached bundle to run the doctor from.
 
-`--copy` installs a real copy instead of the symlink (no-symlink environments); such an install
-does **not** follow `git pull` — re-run `./scripts/install.sh --target cursor --copy` to refresh
-it. `./scripts/install.sh --target cursor --uninstall` removes only the entries the installer
+`--copy` installs a real copy instead of the symlink, for environments without symlinks. Such an
+install does **not** follow `git pull`. To refresh it, run
+`./scripts/install.sh --target cursor --copy` again.
+`./scripts/install.sh --target cursor --uninstall` removes only the entries that the installer
 created. Then do step 2 (reload) and step 3 (smoke test).
 
-**Pick one route per machine.** A marketplace install and a local-checkout install are two
-independent plugin copies — with both present, both load: duplicate skills and agents reach the
-model, and every hook fires twice. `./scripts/install.sh --target cursor --uninstall` removes
-the local one; the marketplace one is removed from Customize → Plugins.
+**Use one route per machine.** A marketplace install and a local-checkout install are two
+separate copies of the plugin. If both are present, both load: the model gets duplicate skills
+and agents, and every hook fires twice. `./scripts/install.sh --target cursor --uninstall` removes
+the local copy. You remove the marketplace copy in Customize → Plugins.
 
 ## Update
 
-On the **marketplace route** there is nothing to run: Cursor re-indexes the marketplace from
-GitHub on its own (batching pushes, roughly every 10 minutes), or press **Refresh** on the
+On the **marketplace route**, you run nothing. Cursor indexes the marketplace again from GitHub
+by itself, about every 10 minutes, with pushes in batches. You can also press **Refresh** on the
 marketplace in Customize → Plugins. Only pushed commits arrive.
 
 On the **local-checkout route**:
@@ -156,88 +159,92 @@ cd /path/to/claude-plugins
 ./scripts/install.sh --target cursor        # = git pull --ff-only + re-link + doctor
 ```
 
-The installer is the updater — there is no "reinstall" on this host. What lands when:
+The installer is also the updater; this host has no "reinstall". This table shows when each
+change becomes live:
 
 | Changed | Live after |
 |---|---|
 | Skills, references, agents, scripts | the next read (no reload needed) |
 | `.cursor-plugin/plugin.json`, `hooks/hooks-cursor.json`, `mcp.json`, `rules/` | a window reload |
 
-A `--copy` install refreshes only when you re-run the installer, so prefer the symlink route
-unless your filesystem forbids it.
+A `--copy` install refreshes only when you run the installer again. Thus use the symlink route,
+unless your filesystem does not allow symlinks.
 
 ## What's different on Cursor
 
-- **Statics arrive as rules, not as a session hook.** The Foundation session conventions
-  (comment discipline, lean code, how to explain, task workspace, whale routing, plugin feedback,
-  outside content as data) ship as always-applied `rules/fnd-*.mdc`, generated from `plugins/fnd/hooks/*.md` by
-  `gen-host-adapters.cjs` — never hand-edit one; change the hook and re-run the generator. They
-  sit alongside the vendored `meetdomaine/foundation` theme rules (13 `.mdc`, provenance in
-  `plugins/fnd/rules/SOURCE.md`). The `sessionStart` hook keeps only the dynamic part — what a
-  rule file cannot answer (the plugin-root and project-profile lines) plus the detection-gated
-  blocks (live-store access and, in a `foundation` checkout, the LiquidDoc-and-core addendum
-  `hooks/comment-discipline-foundation.md`), because a rule cannot look at the workspace. Consequence: `FND_LEAN=0` and `FND_STE=0` do not reach the session copy here — turn
-  `rules/fnd-lean-code.mdc` or `rules/fnd-writing-style.mdc` off instead.
-- **MCP output is NOT compressed here.** Cursor's `afterMCPExecution` has no response schema
-  (the docs list none; measured 2026.09.02: `updated_mcp_tool_output` and every other key are
-  ignored), so a tool result cannot be rewritten or stubbed — the model reads it raw, and
-  `mcp-slim` is never spawned on this host. The shim only logs that the event fired
-  (`PostToolUse/cursor-shim skip` in `doctor --trace`). The `json-slim` CLI recipe still applies
-  to any large file on disk.
-- **The ~40-tool cap.** Cursor is community-reported to stop exposing tools past ~40 across all
-  servers; the six bundled servers are roughly three times that. `mcp.json` still ships all six —
-  see [Bundled MCP servers](../README.md#the-same-list-on-the-other-hosts) for the pruned
-  priority profile (`mcp.pruned.json`) and how to apply it from Cursor Settings → MCP.
-- **One level of subagents.** `ship` and the review flow run the *hoisted* orchestration shape:
-  the conductor is the only spawner, and every nested helper a phase brief names
-  (`bug-hunter`, `change-reviewer`, the PR conformance pass) is hoisted to the conductor and its
-  findings handed into the phase. Same phases, same gates, same artifacts; what is lost is the
-  adversarial verify fan-out and the per-phase telemetry —
-  `plugins/fnd/references/host-orchestration.md` states it in full
+- **The static conventions arrive as rules, not through a session hook.** The Foundation session
+  conventions are comment discipline, lean code, how to explain, task workspace, whale routing,
+  plugin feedback and outside content as data. They ship as always-applied `rules/fnd-*.mdc`.
+  `gen-host-adapters.cjs` generates these files from `plugins/fnd/hooks/*.md`. Never edit one by
+  hand: change the hook and run the generator again. They are next to the vendored
+  `meetdomaine/foundation` theme rules (13 `.mdc`; `plugins/fnd/rules/SOURCE.md` records their
+  source). The `sessionStart` hook keeps only the dynamic part. This part is what a rule file
+  cannot answer (the plugin-root and project-profile lines) and the blocks that depend on
+  detection: live-store access and, in a `foundation` checkout, the LiquidDoc-and-core addendum
+  `hooks/comment-discipline-foundation.md`. A rule cannot look at the workspace. As a result,
+  `FND_LEAN=0` and `FND_STE=0` do not reach the session copy here. Turn off
+  `rules/fnd-lean-code.mdc` or `rules/fnd-writing-style.mdc` instead.
+- **MCP output is NOT compressed here.** The `afterMCPExecution` hook of Cursor has no response
+  schema. The docs list none, and on 2026.09.02 we measured that Cursor ignores
+  `updated_mcp_tool_output` and every other key. Thus a hook cannot rewrite or stub a tool result:
+  the model reads it raw, and this host never starts `mcp-slim`. The shim only logs that the event
+  fired (`PostToolUse/cursor-shim skip` in `doctor --trace`). The `json-slim` CLI recipe still
+  applies to any large file on disk.
+- **The cap of about 40 tools.** Community reports say that Cursor stops showing tools after about
+  40 across all servers. The six bundled servers have about three times that number. `mcp.json`
+  still ships all six. See [Bundled MCP servers](../README.md#the-same-list-on-the-other-hosts) for
+  the reduced priority profile (`mcp.pruned.json`) and for how to apply it in Cursor Settings → MCP.
+- **Only one level of subagents.** `ship` and the review flow run the *hoisted* orchestration
+  shape. The conductor is the only agent that starts other agents. A phase brief names nested
+  helpers (`bug-hunter`, `change-reviewer`, the PR conformance pass). The conductor starts each of
+  them itself and gives their findings to the phase. The phases, gates and artifacts are the same.
+  The losses are the adversarial verify fan-out and the telemetry per phase.
+  `plugins/fnd/references/host-orchestration.md` gives the full description
   (`plugins/fnd/references/pipeline-phases.md` → Orchestration is the branch point).
-- **Every subagent is pinned — but the pins are currently inert (the warning at the top of
-  Install).** Cursor frontmatter takes only `inherit` or an exact versioned id (no family
-  aliases, verified 2026-08-23). Per the Domaine model-selection guidelines: the reader-type
-  agents and `theme-explorer` pin Cursor's cheapest model (`composer-2.5[fast=false]` — the
-  standard variant; Fast is the pricier default), and the review gates (`bug-hunter`,
-  `change-reviewer`) pin `claude-sonnet-5`, where the guidelines start deep PR review — Opus is
-  barred from standard reviews there, so going past a pin is a deliberate manual act, not a
-  session default. The whole map is in `plugins/fnd/references/host-model-map.md`; the
-  session-level ladder + Plan-Mode triggers ride in `rules/fnd-model-policy.mdc`. Never
-  hand-edit a generated agent: change the tier table in
-  `plugins/fnd/scripts/gen-host-adapters.cjs` and re-run the generator. Until Cursor fixes the
-  frontmatter bug every subagent runs on the session model, so the session picker is the only
-  model dial that actually works. `claude-sonnet-5` may be absent from a fresh model picker —
-  if a spawn rejects it, enable it once via the picker's **Add Models**, then re-check with the
-  `/preflight-checks` model-pin row.
-- **The context-usage monitor is inert.** It reads the session transcript, which
-  `beforeSubmitPrompt` does not hand a hook; the prompt-JSON guard half of the same hook works
-  normally.
-- **The screenshot scratch-path guard rides `beforeMCPExecution`.** Same deny as on Claude Code
-  and Codex, translated into this host's `permission: "deny"` response with its `user_message` /
-  `agent_message` pair. Two payload divergences the shim absorbs: Cursor hands the hook
-  `tool_input` as a JSON *string*, and the tool name arrives without a server prefix
-  (`mcp_server_name` is its own field). `FND_SCRATCH_GUARD=0` disables it here too.
-- **Cloud Agents run without your plugins.** A Cursor Cloud/background agent executes on a
-  remote VM whose plugin cache is empty (live-verified 2026-08-22: `.cloud-plugin-manifest.json`
-  carries `plugins: []`) — no fnd skills, hooks, MCP or subagents ride along, and in particular
-  the `--no-verify` commit guard is **absent** there. Everything in this document describes local
-  desktop sessions; run `/smoke-test` in a regular local chat, not a Cloud Agent, or it reports
-  on an empty host.
-- **Hook path resolution.** Cursor sets both `CURSOR_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` and
-  has a staff-acknowledged leak between concurrent plugins' hooks, so the wiring probes a chain
-  (`CURSOR_PLUGIN_ROOT` → `CLAUDE_PLUGIN_ROOT` → `~/.cursor/plugins/local/fnd`) and the guard
-  scripts resolve their own paths from `__dirname`. If no shim is found, a git command that
-  looks like a commit/push/merge/pull is **denied** rather than run unchecked.
-- **Headless `cursor-agent -p`** loads none of the installed plugins (measured on
-  2026.09.02: no fnd hook fires, no trace line), so a scripted run has to name the plugin
-  itself — `cursor-agent -p --plugin-dir ~/.cursor/plugins/local/fnd …`. The IDE needs no such
-  flag.
+- **Every subagent has a model pin, but the pins currently do nothing (see the warning at the top
+  of Install).** Cursor frontmatter accepts only `inherit` or an exact versioned id, without family
+  aliases (verified 2026-08-23). The pins follow the Domaine model-selection guidelines. The
+  reader-type agents and `theme-explorer` pin the cheapest model of Cursor,
+  `composer-2.5[fast=false]`. This is the standard variant; the default Fast variant costs more.
+  The review gates (`bug-hunter`, `change-reviewer`) pin `claude-sonnet-5`, the model at which the
+  guidelines start deep PR review. The guidelines do not allow Opus for standard reviews. Thus a
+  model above a pin must be a deliberate manual choice, not a session default. The full map is in
+  `plugins/fnd/references/host-model-map.md`. The model ladder for the session and the Plan-Mode
+  triggers are in `rules/fnd-model-policy.mdc`. Never edit a generated agent by hand: change the
+  tier table in `plugins/fnd/scripts/gen-host-adapters.cjs` and run the generator again. Until
+  Cursor fixes the frontmatter bug, every subagent runs on the session model. So the session model
+  picker is the only model control that works. The model picker of a fresh install can lack `claude-sonnet-5`. If
+  a spawn rejects it, enable it once through **Add Models** in the picker. Then check again with
+  the model-pin row of `/preflight-checks`.
+- **The context-usage monitor does not work.** It reads the session transcript, and
+  `beforeSubmitPrompt` does not give a hook the transcript. The prompt-JSON guard, the other half
+  of the same hook, works normally.
+- **The screenshot scratch-path guard uses `beforeMCPExecution`.** It gives the same deny as on
+  Claude Code and Codex, in the form of this host: a `permission: "deny"` response with a
+  `user_message` / `agent_message` pair. The shim handles two payload differences. Cursor gives
+  the hook `tool_input` as a JSON *string*. Also, the tool name has no server prefix
+  (`mcp_server_name` is a separate field). `FND_SCRATCH_GUARD=0` turns the guard off here too.
+- **Cloud Agents run without your plugins.** A Cursor Cloud/background agent runs on a remote VM
+  with an empty plugin cache. We verified this live on 2026-08-22: `.cloud-plugin-manifest.json`
+  carries `plugins: []`. No fnd skills, hooks, MCP or subagents go with the agent. In particular,
+  the `--no-verify` commit guard is **absent** there. This document describes only local desktop
+  sessions. Run `/smoke-test` in a normal local chat, not in a Cloud Agent, or it reports on an
+  empty host.
+- **Hook path resolution.** Cursor sets both `CURSOR_PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT`. Cursor
+  staff also acknowledged a leak between the hooks of plugins that run at the same time. Thus the
+  wiring tries a chain (`CURSOR_PLUGIN_ROOT` → `CLAUDE_PLUGIN_ROOT` →
+  `~/.cursor/plugins/local/fnd`), and the guard scripts find their own paths from `__dirname`. If
+  the wiring finds no shim, it **denies** a git command that looks like a commit, push, merge or
+  pull. It does not run that command unchecked.
+- **Headless `cursor-agent -p` loads none of the installed plugins.** We measured this on
+  2026.09.02: no fnd hook fires and no trace line appears. Thus a scripted run must name the
+  plugin itself: `cursor-agent -p --plugin-dir ~/.cursor/plugins/local/fnd …`. The IDE does not
+  need this flag.
 
 ## Project layer
 
-The plugin is a user-space install and stays additive: a project's own `.cursor/rules`,
-`.cursor/skills`, `.cursor/hooks.json` and `mcp.json` all keep working. Two rules keep the two
-layers from fighting — do not reuse fnd skill or agent names project-side (both copies reach the
-model), and never re-declare the fnd hooks in a project `hooks.json` (all layers fire, so a
-duplicate means double-run, not override).
+The plugin is a user-space install and only adds to a project. A project's own `.cursor/rules`,
+`.cursor/skills`, `.cursor/hooks.json` and `mcp.json` all keep working. Two rules prevent
+conflicts between the two layers. Do not use fnd skill or agent names in a project, because the
+model gets both copies. Never declare the fnd hooks again in a project `hooks.json`. All layers
+fire, so a duplicate hook runs twice; it does not override.

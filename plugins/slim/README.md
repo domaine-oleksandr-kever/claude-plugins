@@ -1,22 +1,39 @@
 # slim
 
+slim is a Claude Code plugin that compresses large tool results, pasted data and @-mentioned data
+files before they reach the model's context. It keeps every original on disk, so nothing is lost.
+To install it, add the marketplace and install `slim@domaine`: see the root README section
+[Quick install (Claude Code)](../../README.md#quick-install-claude-code).
+
 ## What it is
 
-slim is a compression proxy for Claude Code. One `tool.call` handler sees every tool result — MCP,
-Bash, Read, WebFetch, WebSearch, Grep and Agent — and shrinks the large ones before they reach
-the context; a pasted prompt's data and an @-mentioned data file get the same treatment. It decides
-by content, never by tool name: JSON goes to the JSON compressor, a log to the log engine, an HTML
-page to the HTML engine, an XML document or SVG to the element-tree engine, Figma design-context JSX
-to the JSX compactor, a Figma REST nodes response to the node-tree engine, a browser MCP's
-accessibility snapshot to the snapshot folder, linter output to the lint engine, a path listing from
-`find`, `ls -R` or `tree` to the listing outline, a CSV or TSV table to the table profiler, and plain
-text (code, diffs, test output) is at most windowed. Two tools
-come with it: `lookup` answers one question about a page, a command's output or a file without
-loading it whole, and `view` shows a big file or a command's output compactly (and resizes images
-and video). Every original stays on disk behind a recovery handle, so nothing is lost.
+slim is a compression proxy for Claude Code. One `tool.call` handler sees every tool result: MCP,
+Bash, Read, WebFetch, WebSearch, Grep and Agent. The handler shrinks the large results before they
+reach the context. slim treats a pasted prompt's data and an @-mentioned data file in the same way.
 
-slim is a Claude Code hooks module (mods) and nothing else: other hosts do not run it, and it never
-runs as a classic hook. The hooks run wherever the plugin loads; the drawing (the ToolResult line,
+slim picks an engine by content, never by tool name. An engine is the compressor for one data
+format:
+
+- JSON goes to the JSON compressor.
+- A log goes to the log engine.
+- An HTML page goes to the HTML engine.
+- An XML document or SVG goes to the element-tree engine.
+- Figma design-context JSX goes to the JSX compactor.
+- A Figma REST nodes response goes to the node-tree engine.
+- A browser MCP's accessibility snapshot goes to the snapshot folder.
+- Linter output goes to the lint engine.
+- A path listing from `find`, `ls -R` or `tree` goes to the listing outline.
+- A CSV or TSV table goes to the table profiler.
+- Plain text (code, diffs, test output) is at most windowed: slim keeps its head and tail (see
+  The window).
+
+Two tools come with slim. `lookup` answers one question about a page, a command's output or a file,
+and does not load the source whole. `view` shows a big file or a command's output in a compact form,
+and resizes images and video. slim keeps every original on disk behind a recovery handle (a path the
+model can read back), so nothing is lost.
+
+slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not run it, and it never
+runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
 Current release: **slim v0.11.0**.
@@ -29,25 +46,33 @@ Current release: **slim v0.11.0**.
 /reload-plugins
 ```
 
-The prompt channel keeps pasted data in each project's `.claude/slim/` (see Pasted prompts); slim
-writes a `.gitignore` holding `*` inside that folder, so git never stages it, and leaves the project's
-own `.gitignore` alone.
+The prompt channel keeps pasted data in each project's `.claude/slim/` folder (see Pasted prompts).
+slim writes a `.gitignore` that holds `*` inside that folder, so git never stages it. slim leaves the
+project's own `.gitignore` alone.
 
 ## Channels
 
-The module's intake (`plugins/slim/hooks/mods/intake.ts`) lets the tool run first. It then measures the
-result with a pure byte check — no environment read, no spawn — and stops there for anything under
-its channel's gate. A candidate goes to the core, `plugins/slim/scripts/slim.cjs`, as one JSON
-envelope on stdin (channel, tool, tool_use_id, tool input, raw result, cwd, session id). The core
-answers with one JSON object — the decision, the restored result, the stats figure and the report
-record — and the module hands the model a fresh result object. Anything the module cannot read (a
-failed spawn, a non-zero exit, bad output) leaves the original result untouched. Only the model's own
-tool calls are compressed: a call another plugin makes through `$.tool.call` (lookup's own among
-them) gets back the record it asked for.
+A channel is the path that one kind of input takes into slim: the results of one tool, a typed
+prompt, or an @-mentioned file. A tool channel works in these steps (the prompt channel has no tool;
+its path is described under "Pasted prompts" below):
 
-The core puts the compressed text back into the tool's own result shape, because the engine
-validates a hook's result against the built-in tool's output schema: Bash stays
-`{stdout, stderr, …}`, Read keeps its file record, Grep keeps its counts.
+1. The module's intake (`plugins/slim/hooks/mods/intake.ts`) lets the tool run first.
+2. The intake measures the result with a pure byte check: it reads no environment and spawns
+   nothing. A result under its channel's gate (the size threshold) stops here.
+3. The intake sends a candidate to the core, `plugins/slim/scripts/slim.cjs`, as one JSON envelope
+   on stdin. The envelope holds the channel, tool, tool_use_id, tool input, raw result, cwd and
+   session id.
+4. The core answers with one JSON object: the decision, the restored result, the stats figure and
+   the report record.
+5. The module gives the model a fresh result object.
+
+If the module cannot read the core's answer (a failed spawn, a non-zero exit, bad output), the
+original result stays untouched. slim compresses only the model's own tool calls. A call that another
+plugin makes through `$.tool.call` (lookup's own calls too) gets back the record it asked for.
+
+The core puts the compressed text back into the tool's own result shape. It must do this because the
+host's hook engine validates a hook's result against the built-in tool's output schema. Bash stays
+`{stdout, stderr, …}`, Read keeps its file record, and Grep keeps its counts.
 
 ### Gates and engines
 
@@ -64,159 +89,209 @@ validates a hook's result against the built-in tool's output schema: Bash stays
 | Prompt (typed or bridge) | a prompt of 10,240 B or more holding a data span of 8,192 B or more | each span replaced in place; see below |
 | View (`mcp__slim__view`) | every call | the tool's own answer is already compact; slim never compresses it again (see View) |
 
-Calls a subagent makes go through the same handler; their events carry the agent type.
+A subagent's calls go through the same handler. Their events carry the agent type.
 
-**Figma REST node trees.** A `GET /v1/files/:key/nodes` response (detected by its `nodes.<id>.document`
-shape, before the generic JSON engine) becomes a markdown build tree: one line per visible node with
-its measurements, layout, colours, typography and effects, and every TEXT value in full; hidden
-subtrees and vector geometry dropped and counted; identical sibling runs folded with every folded id
-and differing value listed. It is admitted wherever JSON is (Bash, Read, WebFetch); MCP results keep
-the JSON engine. A tree over the channel's egress cap folds its deepest level first, one level at a
-time, until it fits: the nodes at the new last level keep their lines, each with `… N nodes deeper
-folded` under it (siblings there fold as `×N` only when what they folded is identical too), and the
-header counts what was folded. It never folds past the root's direct children; a tree that still
-does not fit goes the JSON route (fit, else stub). The view tool never folds a tree: a long one is
-read windowed from a file instead.
+**Figma REST node trees.** slim detects a `GET /v1/files/:key/nodes` response by its
+`nodes.<id>.document` shape, before the generic JSON engine. The response becomes a markdown build
+tree. Each visible node gets one line with its measurements, layout, colours, typography and
+effects, and every TEXT value in full. slim drops hidden subtrees and vector geometry and counts
+them. It folds runs of identical siblings and lists every folded id and differing value.
 
-**Browser accessibility snapshots.** A Playwright MCP snapshot (`- role "name" [ref=eN]` lines) or a
-Chrome DevTools MCP one (`uid=… role "name"` lines) — from `browser_snapshot` / `take_snapshot` and
-from every action tool that returns one — keeps its own grammar, with repeated siblings folded: a run
-of product cards keeps the first two and becomes one line, `- … 46 more like the 2 above [refs
-e40–e361]: names "Cleanser No. 3", … +34; prices $22.00–$112.00`. Nameless wrappers are flattened
-and nameless leaf images dropped; headings, landmarks, alerts, dialogs, form state (`[checked]`,
-`[disabled]`, `[expanded]`, `[level=N]`) and prose are never folded, and no ref is renumbered or lost:
-each is on a kept line, in a fold's ranges or on the dropped-images line, and every one stays
-clickable. The last line names the narrowing call (`browser_find`, `take_snapshot({ verbose: true })`
-or `lookup` on the spill). Over the stub limit it first folds harder (one exemplar, 6 names), then
-drops `/url` lines and non-state attributes, then collapses the deepest levels; a prose page that
-saves under 10 % passes through. MCP only, from the 4,096 B gate; `SLIM_A11Y=0` turns it off.
+slim admits this engine wherever it admits JSON (Bash, Read, WebFetch); MCP results keep the JSON
+engine. A tree over the channel's egress cap (the largest output the channel lets through) folds its
+deepest level first, one level at a time, until it fits. The nodes at the new last level keep their
+lines, each with `… N nodes deeper folded` under it. Siblings there fold as `×N` only when what they
+folded is identical too. The header counts what slim folded.
 
-**Linter output.** ESLint (stylish and unix), stylelint, theme-check text, tsc (plain and `--pretty`)
-and `prettier --check` lists — 30 or more lines, at least 70 % of them in one of those grammars — are
-grouped by rule and message template (quoted names and numbers slotted), errors first, then warnings,
-then notes, larger groups first. Each group keeps its count and its first 5 locations verbatim
-(`file:line:col`, or tsc's `file(line,col)`, with the message when it differs from the template),
-then `… +N in M files (file ×n, …)` naming every file; tsc's indented elaboration lines stay under
-their error. The tool's own summary lines close it, verbatim. Over the channel's size cap each fold
-names its first 8 files, then it keeps 3, then 1 location per group, then counts only, else it is
-stubbed.
-The output starts with `<<slim-lint>>`. Admitted on Bash for a linter command (below), on MCP by
-content, and on a Read of a `.log`, `.jsonl` or `.ndjson` report over 32,768 B (the Read rules);
-any other file stays as the host shows it. Theme-check output that quotes Liquid source
-lines stays template text (Guard rails).
+Folding never goes past the root's direct children. A tree that still does not fit goes the JSON
+route (fit, else stub). The view tool never folds a tree: it reads a long tree windowed from a file
+instead.
 
-**Delimited tables.** A CSV, TSV or `;`-separated table — 20 or more records, one delimiter splitting
-≥ 95 % of them into the header's width (3 columns or more), a header with no number in it, not
-opening like a log line (a date, time or level) and no cell typed like its column's values — becomes a profile: a `<<slim-csv>>` line with rows × cols, the delimiter and the size; one line
-per column with its type (number, integer, date, bool, category, string), min and max as written,
-nulls, distinct count, and either the values of a category or bool with their counts or three
-samples (an identifier-like value without whitespace whole up to 400 chars, prose clipped past 160);
-then a markdown table of the header, rows 1–3 and three sampled rows with their data-row
-numbers, cells as written (a cell over 160 chars is clipped with its length). Samples and sampled
-rows are picked by a generator seeded with the content hash, so a rerun shows the same ones. A
-`;` file reads `1.299,00` as a number. Over the channel's egress cap the table rows go first (3,
-then none), then the samples (one per column); still over → stub. It runs on Bash whatever the
-command, on WebFetch, on a Read of a `.csv` / `.tsv` file and an @-mentioned one, and on MCP text.
-For a row, a column or a filter the footer names `lookup({ path, question })` on the original.
+**Browser accessibility snapshots.** This engine reads a Playwright MCP snapshot
+(`- role "name" [ref=eN]` lines) or a Chrome DevTools MCP one (`uid=… role "name"` lines). The
+snapshot comes from `browser_snapshot` / `take_snapshot` or from any action tool that returns one.
+The output keeps the snapshot's own grammar and folds repeated siblings. For example, a run of
+product cards keeps the first two and becomes one line,
+`- … 46 more like the 2 above [refs e40–e361]: names "Cleanser No. 3", … +34; prices $22.00–$112.00`.
+slim flattens nameless wrappers and drops nameless leaf images.
 
-**XML and SVG.** A text opening with `<?xml` or with an element that is not HTML (sitemaps, product
-and Google Merchant feeds, RSS, Figma `get_metadata`, any XML) becomes an element tree, one line per
-element with its attributes and text: five or more same-name siblings fold into one
-`url ×50,000 {loc, lastmod, changefreq, priority}` line followed by three records verbatim (first,
-middle, last; `#N` is the record's position), several shapes each with its count and samples
-(past 12 shapes a `fields:` line counts every field). Folded siblings with an `id` list every id
-(`ids: P0…P1999`); an id-bearing node that is a bare attribute line or nests further ids never folds,
-so a Figma node tree keeps every node. A text or attribute value over 200 chars is cut to a head and
-its length, except a multi-line text body; an element mixing text with inline elements (a Notion
-page) reads as written, every inline reference in place. An SVG keeps its markup, ids, groups,
-`<use>` refs, fills, styles and `<text>`; `d` and `points` read `d="(1,204 chars)"`, and comments, `<metadata>`
-and editor namespaces (Inkscape, Sodipodi, Sketch, Serif) are dropped. The first line is
-`<<slim-xml>>` with the element and byte counts; the last names `lookup({ path, question })` for one
-record. Over the channel's cap it drops samples (3 → 1 → 0), then folds its deepest level, then is
-stubbed. Admitted on Bash only after a fetch command (`cat assets/icon.svg` stays text), on WebFetch
-by content, on Read for an `.xml` file over 32,768 B (never `.svg`), and on MCP. Liquid with markup
-stays `template`; an HTML fragment (a leading `<div>`, `<section>`, …) stays text; an HTML or XHTML
-page (`<html>`, `<head>` or `<body>` first, prolog or not) goes to the HTML engine.
+slim never folds headings, landmarks, alerts, dialogs, form state (`[checked]`, `[disabled]`,
+`[expanded]`, `[level=N]`) or prose. It never renumbers or loses a ref. Each ref is on a kept line,
+in a fold's ranges or on the dropped-images line, and every ref stays clickable. The last line names
+the narrowing call (`browser_find`, `take_snapshot({ verbose: true })` or `lookup` on the spill).
 
-**Engine admission on Bash.** JSON, JSONL and delimited-table output is compressed whatever the command. HTML is
-treated as a page only when the command fetches one: `curl`, `wget`, `http`, `https`, `xh` or `lynx`
-as the command word of a pipeline segment (`cat src/http/page.html` is not a fetch). Otherwise it is
-plain text, so theme source is never stripped. The log engine runs only
-for a log source (a command naming a `.log` or `.jsonl` file, `journalctl`, `logs`); any other text
-is plain text, so test runners and git output are never deduplicated as a log. The lint engine runs
-for `eslint`, `stylelint`, `theme-check`, `shopify theme check`, `tsc`, `prettier` (directly, through
-`npx`/`pnpm exec`/`yarn`/`bunx`, or by bin path) and a package's `lint` script (`npm run lint`,
-`pnpm lint`, `yarn lint`, `bun run lint`); any other command's output is not lint (a `grep -rn
-error: logs/` hit list keeps every line). The listing engine
-runs only when a listing command (`find`, `fd`, `ls`, `tree`, `git ls-files`, `rg --files`) writes
-the output: it is the last command, followed in its pipeline by nothing but `sort`, `uniq`, `head`,
-`tail` or `grep`, without `-exec`. `cat paths.txt`, `ls data && cat data/prices.csv` and
-`find … | xargs grep -c` stay plain text.
+Over the stub limit, slim first folds harder (one exemplar, 6 names). Then it drops `/url` lines and
+non-state attributes, then it collapses the deepest levels. A prose page that saves under 10 % passes
+through. The engine runs on MCP only, from the 4,096 B gate. `SLIM_A11Y=0` turns it off.
 
-**Path listings.** A Bash listing over 8,192 B — one path per line (`find`, `fd`, `git ls-files`,
-`rg --files`), `ls -R` blocks or `tree` box drawing — becomes a directory outline: one line per
-directory holding files, `./sections/ (12 files, 1 dir)`, in the order the command printed them
-(an `ls -t` keeps its newest first, an order across directories holds within each), with its files by bare name under it while
-it holds at most 8, else on that line an extension histogram and three example names
-(`./assets/ (1,350 files): .js 610, .css 380, .svg 240 · e.g. …`). Depth is never cut. Over the
-egress cap the threshold falls to 4, then to histograms only, then the output is stubbed. Lines that
-are not paths (`find: …: Permission denied`, tree's summary) stay verbatim under the header; a name
-is printed as it came or counted, never rewritten. A listing with nothing to fold stays as it came
-(`no-gain`) unless it is over the egress cap. The footer names the next call: a narrower `find <dir> -name '<pattern>'` or
-`ls <dir>`, or a windowed Read of the original.
+**Linter output.** The lint engine reads ESLint (stylish and unix), stylelint, theme-check text, tsc
+(plain and `--pretty`) and `prettier --check` lists. The output must have 30 or more lines, and at
+least 70 % of them must be in one of those grammars. The engine groups the lines by rule and message
+template, with quoted names and numbers slotted. Errors come first, then warnings, then notes, and
+larger groups come first. Each group keeps its count and its first 5 locations verbatim
+(`file:line:col`, or tsc's `file(line,col)`, with the message when it differs from the template).
+Then a line `… +N in M files (file ×n, …)` names every file.
 
-**Guard rails.** These pass through untouched, with their reason on the report line:
+tsc's indented elaboration lines stay under their error. The tool's own summary lines close the
+output, verbatim. Over the channel's size cap, each fold names its first 8 files. Then each group
+keeps 3 locations, then 1, then counts only; else slim stubs the output. The output starts with
+`<<slim-lint>>`.
 
-- code, diffs and test output — the detector checks for a diff, a test runner's summary (jest,
-  mocha, go test, rspec, pytest, TAP), template markers (`{%`, `{{`, `<%`, `<?php`) and code lines
-  BEFORE it looks for JSON lines, HTML or a log; such text is only ever windowed, and only above
-  `SLIM_PLAIN_BYTES` (`plain-gate` below it) or when the host saved the Bash output to a file (the
-  model would see only a 2 KB preview of it, so the exact text is gone either way). An MCP text
-  block runs through the same checks and is never windowed: it passes through with the guard's name
-  (`diff`, `test-output`, `template`) or `non-json`, and over 32,768 B it is stubbed — so theme-check
-  output quoting Liquid stays as it came, from any MCP tool;
-- images, PDFs and other binary output (`not-text`, `binary`): detected by magic bytes;
-- a Bash command that runs a compressor CLI (`slim.cjs`, `json-slim.cjs`, `log-slim.cjs`, … — `own-cli`);
-- a Bash command or a Read that names a spill file or a host tool-results file (`spill-read`) —
-  this is how the model follows a `<<full=` handle, so it must see the bytes as they are;
-- a Read with `offset`, `limit` or `pages` (`windowed-read`), and every Read the rules below do
-  not admit (`read-guard`);
-- a result that already carries a slim mark (`already-slim`).
+slim admits the lint engine on Bash for a linter command (below) and on MCP by content. It also
+admits it on a Read of a `.log`, `.jsonl` or `.ndjson` report over 32,768 B (see the Read rules).
+Any other file stays as the host shows it. Theme-check output that quotes Liquid source lines stays
+template text (see Guard rails).
 
-**Why `SLIM_PLAIN_BYTES` defaults to 65,536 B.** That is about twice Bash's inline cap of 30,000
-characters, so any output the host would show inline stays byte-identical. A Bash output the host
-has already moved behind a 2 KB preview is windowed whatever its size — the window beats the
-preview — and the window keeps the tail, where a test summary lives.
+**Delimited tables.** A CSV, TSV or `;`-separated table becomes a profile when all of these are true:
+
+- It has 20 or more records.
+- One delimiter splits ≥ 95 % of them into the header's width (3 columns or more).
+- The header holds no number.
+- It does not open like a log line (a date, time or level).
+- No header cell is typed like its column's values (a header that looks like a data row is not a header).
+
+The profile has three parts:
+
+- A `<<slim-csv>>` line with rows × cols, the delimiter and the size.
+- One line per column with its type (number, integer, date, bool, category, string), min and max as
+  written, nulls and distinct count. The line also holds either the values of a category or bool with
+  their counts, or three samples. An identifier-like sample without whitespace stays whole up to 400
+  chars; slim clips prose past 160.
+- A markdown table of the header, rows 1–3 and three sampled rows with their data-row numbers. Cells
+  stay as written; slim clips a cell over 160 chars and gives its length.
+
+A generator seeded with the content hash picks the samples and sampled rows, so a rerun shows the
+same ones. In a `;` file, slim reads `1.299,00` as a number. Over the channel's egress cap, the table
+rows go first (3, then none), then the samples (one per column). If the profile is still over the
+cap, slim stubs it.
+
+The table engine runs on Bash whatever the command, on WebFetch, on a Read of a `.csv` / `.tsv` file,
+on an @-mentioned one, and on MCP text. For a row, a column or a filter, the footer names
+`lookup({ path, question })` on the original.
+
+**XML and SVG.** The element-tree engine reads a text that opens with `<?xml` or with an element that
+is not HTML. Examples are sitemaps, product and Google Merchant feeds, RSS, Figma `get_metadata` and
+any XML. The output has one line per element with its attributes and text. Five or more same-name
+siblings fold into one `url ×50,000 {loc, lastmod, changefreq, priority}` line. Three records follow
+it verbatim (first, middle, last; `#N` is the record's position). Siblings of several shapes give
+each shape with its count and samples; past 12 shapes, a `fields:` line counts every field.
+
+Folded siblings with an `id` list every id (`ids: P0…P1999`). An id-bearing node never folds when it
+is a bare attribute line or nests further ids, so a Figma node tree keeps every node. slim cuts a
+text or attribute value over 200 chars to a head and its length, except a multi-line text body. An
+element that mixes text with inline elements (a Notion page) reads as written, with every inline
+reference in place.
+
+An SVG keeps its markup, ids, groups, `<use>` refs, fills, styles and `<text>`. `d` and `points` read
+`d="(1,204 chars)"`. slim drops comments, `<metadata>` and editor namespaces (Inkscape, Sodipodi,
+Sketch, Serif). The first line is `<<slim-xml>>` with the element and byte counts. The last line
+names `lookup({ path, question })` for one record. Over the channel's cap, slim drops samples
+(3 → 1 → 0), then folds the deepest level, then stubs the output.
+
+slim admits the element-tree engine on Bash only after a fetch command (`cat assets/icon.svg` stays
+text). It also admits it on WebFetch by content, on Read for an `.xml` file over 32,768 B (never
+`.svg`), and on MCP. Liquid with markup stays `template`. An HTML fragment (a leading `<div>`,
+`<section>`, …) stays text. An HTML or XHTML page (`<html>`, `<head>` or `<body>` first, with or
+without a prolog) goes to the HTML engine.
+
+**Engine admission on Bash.** slim compresses JSON, JSONL and delimited-table output whatever the
+command. It treats HTML as a page only when the command fetches one. A fetch is `curl`, `wget`,
+`http`, `https`, `xh` or `lynx` as the command word of a pipeline segment
+(`cat src/http/page.html` is not a fetch). Other HTML is plain text, so slim never strips theme
+source.
+
+The log engine runs only for a log source: a command that names a `.log` or `.jsonl` file,
+`journalctl`, or `logs`. Any other text is plain text, so slim never deduplicates test runners and
+git output as a log.
+
+The lint engine runs for `eslint`, `stylelint`, `theme-check`, `shopify theme check`, `tsc` and
+`prettier`. Each one counts when it runs directly, through `npx`/`pnpm exec`/`yarn`/`bunx`, or by
+bin path. A package's `lint` script counts too (`npm run lint`, `pnpm lint`, `yarn lint`,
+`bun run lint`). Any other command's output is not lint: a `grep -rn error: logs/` hit list keeps
+every line.
+
+The listing engine runs only when a listing command (`find`, `fd`, `ls`, `tree`, `git ls-files`,
+`rg --files`) writes the output. The listing command must be the last command. Only `sort`, `uniq`,
+`head`, `tail` or `grep` may follow it in its pipeline, and it has no `-exec`. `cat paths.txt`,
+`ls data && cat data/prices.csv` and `find … | xargs grep -c` stay plain text.
+
+**Path listings.** A Bash listing over 8,192 B becomes a directory outline. The listing can be one
+path per line (`find`, `fd`, `git ls-files`, `rg --files`), `ls -R` blocks or `tree` box drawing.
+The outline has one line per directory that holds files, such as `./sections/ (12 files, 1 dir)`.
+Directories keep the order that the command printed them in: an `ls -t` keeps its newest first, and
+an order across directories holds within each. A directory with at most 8 files lists them by bare
+name under its line. A larger directory gets an extension histogram and three example names on its
+line (`./assets/ (1,350 files): .js 610, .css 380, .svg 240 · e.g. …`).
+
+slim never cuts depth. Over the egress cap, the threshold falls to 4, then to histograms only, then
+slim stubs the output. Lines that are not paths (`find: …: Permission denied`, tree's summary) stay
+verbatim under the header. slim prints a name as it came or counts it, and never rewrites it. A
+listing with nothing to fold stays as it came (`no-gain`), unless it is over the egress cap. The
+footer names the next call: a narrower `find <dir> -name '<pattern>'` or `ls <dir>`, or a windowed
+Read of the original.
+
+**Guard rails.** These results pass through untouched, with their reason on the report line:
+
+- Code, diffs and test output. The detector checks for a diff, a test runner's summary (jest, mocha,
+  go test, rspec, pytest, TAP), template markers (`{%`, `{{`, `<%`, `<?php`) and code lines. It does
+  this BEFORE it looks for JSON lines, HTML or a log. slim only ever windows such text, and only
+  above `SLIM_PLAIN_BYTES` (`plain-gate` below it) or when the host saved the Bash output to a file.
+  In that case the model would see only a 2 KB preview of it, so the exact text is gone either way.
+  An MCP text block runs through the same checks but is never windowed. It passes through with the
+  guard's name (`diff`, `test-output`, `template`) or `non-json`, and over 32,768 B slim stubs it.
+  So theme-check output that quotes Liquid stays as it came, from any MCP tool.
+- Images, PDFs and other binary output (`not-text`, `binary`), detected by magic bytes.
+- A Bash command that runs a compressor CLI (`slim.cjs`, `json-slim.cjs`, `log-slim.cjs`, … —
+  `own-cli`).
+- A Bash command or a Read that names a spill file or a host tool-results file (`spill-read`). This
+  is how the model follows a `<<full=` handle, so it must see the bytes as they are.
+- A Read with `offset`, `limit` or `pages` (`windowed-read`), and every Read that the rules below do
+  not admit (`read-guard`).
+- A result that already carries a slim mark (`already-slim`).
+
+**Why `SLIM_PLAIN_BYTES` defaults to 65,536 B.** That value is about twice Bash's inline cap of
+30,000 characters, so any output that the host would show inline stays byte-identical. The host
+moves a large Bash output behind a 2 KB preview. slim windows such an output whatever its size,
+because the window beats the preview. The window keeps the tail, where a test summary lives.
 
 ### The window
 
-Plain text over its threshold keeps whole lines from the head (about a third of the budget) and
-from the tail (the rest), with one marker line between them:
+Plain text over its threshold keeps whole lines from the head (about a third of the budget) and from
+the tail (the rest). One marker line sits between them:
 
 ```
 [slim: 2,871 of 3,000 lines hidden (241,388 B)]
 ```
 
-A text of fewer than three lines, one long line, or whole lines that fill less than half the budget
-(a huge line between short ones) gets a character window (`[slim: <N> B hidden]`). Budgets: 4,096 B
-for a Bash output the host saved to a file, 8,192 B for Grep, 12,288 B otherwise. MCP results are never windowed.
+slim uses a character window (`[slim: <N> B hidden]`) for a text of fewer than three lines, for one
+long line, or for whole lines that fill less than half the budget (a huge line between short ones).
+The budgets are 4,096 B for a Bash output the host saved to a file, 8,192 B for Grep, and 12,288 B
+otherwise. slim never windows MCP results.
 
-For a Bash output the host saved to a file, the model would otherwise have seen only the host's
-2 KB preview; for an MCP result over the host's limit, its short overflow notice; for a Read the host
-cut at its token cap, the cut text. The report line records that view as `bytes_seen`, and the row, the
-ToolGroup suffix and `--report` count savings against it, so they are not overstated: a view bigger
-than that is shown as `+N%`. The Log event counts from the raw bytes and names that view beside the saving:
+Without slim, the model would see a smaller view in three cases:
+
+- the host's 2 KB preview, for a Bash output the host saved to a file;
+- the host's short overflow notice, for an MCP result over the host's limit;
+- the cut text, for a Read that the host cut at its token cap.
+
+The report line records that view as `bytes_seen`. The row, the ToolGroup suffix and `--report`
+count savings against it, so they do not overstate the savings. A result bigger than that view shows
+as `+N%`. The Log event counts from the raw bytes and names that view beside the saving:
 `windowed 48 KB → 4 KB (−91%; host preview 2 KB)`.
 
 ### Read rules
 
-A compressed view of an editable file would break the next Edit (its `old_string` would span lines
-the view dropped) and invite a lossy Write. So Read compresses only data files the host would not
-have shown whole: a whole-file read of a `.log`, `.jsonl`, `.ndjson`, `.csv`, `.tsv` or `.xml` file over
-32 KB, or of a `.json` file the host cut at its token cap. Source JSON never qualifies: files under `config/`,
-`templates/`, `locales/`, `sections/`, `blocks/`, `snippets/` or `layout/`, `package.json`,
-`package-lock.json`, `tsconfig*.json`, `composer.json`, `jsconfig.json`, `*rc.json` and
-`*.schema.json`. A compressed Read starts at line 1 and carries this note before the stats line:
+A compressed view of an editable file would break the next Edit, because its `old_string` would span
+lines that the view dropped. It would also invite a lossy Write. So Read compresses only data files
+that the host would not have shown whole:
+
+- a whole-file read of a `.log`, `.jsonl`, `.ndjson`, `.csv`, `.tsv` or `.xml` file over 32 KB;
+- a whole-file read of a `.json` file that the host cut at its token cap.
+
+Source JSON never qualifies: files under `config/`, `templates/`, `locales/`, `sections/`, `blocks/`,
+`snippets/` or `layout/`, `package.json`, `package-lock.json`, `tsconfig*.json`, `composer.json`,
+`jsconfig.json`, `*rc.json` and `*.schema.json`. A compressed Read starts at line 1 and carries this
+note before the stats line:
 
 ```
 slim: compressed view — line numbers are not file lines; Read with offset/limit before an Edit
@@ -224,14 +299,15 @@ slim: compressed view — line numbers are not file lines; Read with offset/limi
 
 The handle names a spill copy of the original, not the file itself (see Spill files and handles).
 
-A file over the host's own Read size cap (256 KB: `File content (289.8KB) exceeds maximum allowed
-size (256KB)`) is refused by the host before any hook runs, so slim never sees that Read: use
-`mcp__slim__view({ path })`, or `mcp__slim__lookup({ path, question })` for one fact.
+The host refuses a file over its own Read size cap (256 KB:
+`File content (289.8KB) exceeds maximum allowed size (256KB)`) before any hook runs. So slim never
+sees that Read. Use `mcp__slim__view({ path })` instead, or `mcp__slim__lookup({ path, question })`
+for one fact.
 
 ### Decisions
 
-- **compressed** — the result is replaced by its compressed body, then a stats line and a recovery
-  handle:
+- **compressed** — slim replaces the result with its compressed body, then a stats line and a
+  recovery handle:
 
   ```
   slim: compressed 118,203 B → 29,412 B (−75.1%)
@@ -239,53 +315,66 @@ size (256KB)`) is refused by the host before any hook runs, so slim never sees t
   <<full=/tmp/slim-mcp-0123456789abcdef.json original_result>>
   ```
 
-  The `→` figure is the exact byte size of what the model receives; the handle names the spilled
+  The `→` figure is the exact byte size of what the model receives. The handle names the spilled
   original (`.json` for JSON, `.txt` for text).
-- **stubbed** — before stubbing, a JSON result still over the threshold gets two more passes on its
-  arrays of rows (a JQL search's 50 issues, say): long prose in those rows (descriptions, comment
-  bodies) is cut to its first 300 characters plus `… [+N chars]`, longest first, and if that is not
-  enough an evenly spaced subset of the largest array's rows stays (first and last included) while the rest
-  leave to a rows file cited by a `{"_ccr_dropped":"<<full=… N_rows_offloaded>>"}` row. Ids, keys,
-  numbers and short strings are never cut, and the handle still names the untouched original. An MCP
-  result the compressor still cannot bring under the stub threshold (32,768 B) is
-  spilled and replaced by a ~1 KB stub that opens `<<slim stub>> <tool> returned <N> B (format=…)`,
-  names the spill (`full=<file>`) and gives the recovery recipe: `mcp__slim__view({ path: <full> })`
-  (with `jq: "<jq-path>"` to narrow JSON first) or a windowed Read (offset/limit). When the
-  compressor already gained nothing on one JSON document, the recipe is the jq narrowing alone,
-  since a whole-file view would give the same bytes back. On the other
-  channels a compressed output still over the channel's egress cap (Read 65,536 B, Grep
-  16,384 B, Bash the host's inline limit less 2,048, at most 32,768 B, the rest 32,768 B) is stubbed
-  the same way (`egress-cap`), whichever engine produced it (JSON, a node tree, a log, a page, a
-  window); JSON and node trees are first fitted under the cap. On Bash the finished
-  answer is measured once more as the host measures it — characters of stdout plus stderr — and one
-  at or past the host's inline limit is stubbed, or passed through (`egress-cap`) when not even the
-  stub fits beside stderr: past that limit the host would save slim's own answer to a file and show
-  the model a 2 KB preview of it.
+- **stubbed** — a stub is a short text that replaces a result and points to the original on disk (~1 KB for a
+  tool result; the prompt channel keeps the span's first ~2 KB).
+  Before stubbing, a JSON result that is still over the threshold gets two more passes on its arrays
+  of rows (a JQL search's 50 issues, for example):
+
+  1. slim cuts long prose in those rows (descriptions, comment bodies) to its first 300 characters
+     plus `… [+N chars]`, longest first.
+  2. If that is not enough, an evenly spaced subset of the largest array's rows stays (first and
+     last included). The other rows go to a rows file, cited by a
+     `{"_ccr_dropped":"<<full=… N_rows_offloaded>>"}` row.
+
+  slim never cuts ids, keys, numbers and short strings, and the handle still names the untouched
+  original. If the compressor still cannot bring an MCP result under the stub threshold (32,768 B),
+  slim spills the result and replaces it with a ~1 KB stub. The stub opens
+  `<<slim stub>> <tool> returned <N> B (format=…)` and names the spill (`full=<file>`). It gives the
+  recovery recipe: `mcp__slim__view({ path: <full> })` (with `jq: "<jq-path>"` to narrow JSON first)
+  or a windowed Read (offset/limit). When the compressor already gained nothing on one JSON document,
+  the recipe is the jq narrowing alone, because a whole-file view would give the same bytes back.
+
+  On the other channels, slim stubs a compressed output in the same way (`egress-cap`) when it is
+  still over the channel's egress cap. The caps are Read 65,536 B, Grep 16,384 B, Bash the host's
+  inline limit less 2,048 (at most 32,768 B), and the rest 32,768 B. This applies whichever engine
+  produced the output (JSON, a node tree, a log, a page, a window). slim first fits JSON and node
+  trees under the cap.
+
+  On Bash, slim measures the finished answer once more as the host measures it: characters of stdout
+  plus stderr. slim stubs an answer at or past the host's inline limit. When not even the stub fits
+  beside stderr, slim passes the answer through (`egress-cap`). Past that limit, the host would save
+  slim's own answer to a file and show the model a 2 KB preview of it.
 - **passthrough** — everything else, with a reason (`plain-gate`, `read-guard`, `no-gain`,
   `non-json`, `budget-exceeded`, …).
 
-A result over the platform limit arrives as the host's own "exceeds maximum allowed tokens … saved
-to `<file>`" notice (MCP) or with a `persistedOutputPath` (Bash). slim reads the named file and
-compresses the real payload, but only after resolving the path to
+A result over the platform limit arrives in one of two forms: the host's own "exceeds maximum
+allowed tokens … saved to `<file>`" notice (MCP), or a `persistedOutputPath` (Bash). slim reads the
+named file and compresses the real payload. It does this only after it resolves the path to
 `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<dir>/<session id>/tool-results/<name>` for the current
-session, as a regular file this user owns of at most 32 MiB — any other path is payload text and is
-refused (`expand-refused`).
+session. The file must be a regular file that this user owns, of at most 32 MiB. slim refuses any
+other path as payload text (`expand-refused`).
 
-Limits: one compression gets 5,000 ms of wall clock (`SLIM_BUDGET_MS`; every engine checks it, and
-the HTML tokenizer stays linear on malformed markup), and an answer over
-4,128,768 B (4 MiB − 64 KiB) is dropped in favour of the original (`output-cap`), with its spills
-removed.
+Limits: one compression gets 5,000 ms of wall clock (`SLIM_BUDGET_MS`). Every engine checks this
+budget, and the HTML tokenizer stays linear on malformed markup. slim drops an answer over
+4,128,768 B (4 MiB − 64 KiB) in favour of the original (`output-cap`) and removes its spills.
 
 ### Pasted prompts
 
-A prompt you type (or send through the Remote Control bridge) of 10,240 B or more is searched for
-data-shaped spans of 8,192 B or more: a JSON object or array that parses, two or more JSON lines in
-a row, a run of timestamp- or level-led log lines (with their stack frames) the log detector
-confirms, an HTML page (`<!doctype html>` / `<html>` through the `</html>` tag), and a fenced block
-whose body is one of those. A log span ends at its last log line or stack frame, so a question typed
-on the next line, indented or not, stays prose.
-Each span is replaced **in place**; the prose around it and your question stay byte for byte, and
-the prompt is never blocked:
+slim searches a prompt of 10,240 B or more that you type (or send through the Remote Control bridge)
+for data-shaped spans of 8,192 B or more. A span is one of these:
+
+- a JSON object or array that parses;
+- two or more JSON lines in a row;
+- a run of timestamp- or level-led log lines (with their stack frames) that the log detector
+  confirms;
+- an HTML page (`<!doctype html>` / `<html>` through the `</html>` tag);
+- a fenced block whose body is one of those.
+
+A log span ends at its last log line or stack frame, so a question typed on the next line, indented
+or not, stays prose. slim replaces each span **in place**. The prose around it and your question
+stay byte for byte, and slim never blocks the prompt:
 
 ```
 <the compact text>
@@ -295,217 +384,261 @@ slim: compressed 117,700 B → 5,144 B (−95.6%)
 <<full=<project root>/.claude/slim/prompt/slim-prompt-0eb3a1494d5b0e1d.json original_result>>
 ```
 
-JSON is inlined only while its compact text is under 8,192 B (rows the fit drops go to a
-`slim-prompt-rows-*` file beside it); otherwise, and for a log or a page whose compact text is still
-over 100 KB, the span becomes its first ~2 KB, a line saying where the rest is, a `slim: stub …`
-figure and the handle. The rewritten prompt never carries a parseable JSON span of 8,192 B or more;
-if it would, the prompt goes in as typed. A span that already carries a slim handle or stats line is left alone, and so are slash commands, `!` lines and prompts from any other origin (the
-SDK, a notification, a schedule, another session or plugin). A rewrite shows a toast and a Log line
+slim inlines JSON only while its compact text is under 8,192 B; rows that the fit drops go to a
+`slim-prompt-rows-*` file beside it. In other cases, and for a log or a page whose compact text is
+still over 100 KB, the span becomes its first ~2 KB, a line that says where the rest is, a
+`slim: stub …` figure and the handle. The rewritten prompt never carries a parseable JSON span of
+8,192 B or more; if it would, the prompt goes in as typed.
+
+slim leaves a span alone when it already carries a slim handle or stats line. It also leaves alone
+slash commands, `!` lines and prompts from any other origin (the SDK, a notification, a schedule,
+another session or plugin). A rewrite shows a toast and a Log line
 (`prompt: compressed 152 KB → 5 KB (−96%) · json · 2 spans`). `SLIM_PROMPT=0` turns it off.
 
-The spans are kept in `<project root>/.claude/slim/prompt/` (the main checkout's when the session runs
-in a linked worktree, since a worktree's ignored files go with it), 0600, content-addressed. The
-rewrite consumed the paste, so that copy is the only one left: nothing sweeps the folder by age, and
-a link anywhere on its path makes slim leave the prompt alone. A rewrite the session never took is
-removed: the prompt was interrupted or a hook beneath dropped it (`slim.cjs --prompt-drop`), or the
-run was killed at its 20 s timeout (the next prompt run removes what its `.pending-*` journal lists
-once it is ten minutes old). When it creates the folder, slim writes `.claude/slim/.gitignore` holding
-`*`, so `git add -A` never stages a paste; an existing file there is never overwritten, and the
-project's own `.gitignore` is left alone.
+slim keeps the spans in `<project root>/.claude/slim/prompt/`, 0600, content-addressed. When the
+session runs in a linked worktree, this is the main checkout's folder, because a worktree's ignored
+files go with the worktree. The rewrite consumed the paste, so that copy is the only one left. For
+this reason nothing sweeps the folder by age, and slim leaves the prompt alone when a link is
+anywhere on the folder's path.
+
+slim removes a rewrite that the session never took. This happens when the prompt was interrupted,
+when a hook beneath dropped it (`slim.cjs --prompt-drop`), or when the run was killed at its 20 s
+timeout. In the last case, the next prompt run removes what its `.pending-*` journal lists once it is
+ten minutes old. When slim creates the folder, it writes `.claude/slim/.gitignore` holding `*`, so
+`git add -A` never stages a paste. slim never overwrites an existing file there and leaves the
+project's own `.gitignore` alone.
 
 ### @-mentioned files
 
-An @-mentioned file reaches the model as the host frames a Read of it: `Called the Read tool with
-the following input: {"file_path": …}`, then the file as numbered lines. Over 32,768 B, a data file —
-the framing names a `.json`, `.jsonl`, `.ndjson`, `.log`, `.txt`, `.csv` or `.tsv` file that is not source
-JSON, or names none and the content sniffs as JSON, JSON lines, a log or a table — has its numbered lines replaced by
-the compressed content, the Read note and a handle, inside the same framing; source, prose and code
-pass through. The same text is always compressed the same way (the host keeps the answer and asks
-again after a compaction), and the Log line (`@rows.jsonl: compressed 61 KB → 2 KB (−97%) · jsonl`)
-and the report line are written once per content. `SLIM_ATTACH=0` turns it off.
+The host gives an @-mentioned file to the model in the frame of a Read of it:
+`Called the Read tool with the following input: {"file_path": …}`, then the file as numbered lines.
+slim compresses a data file over 32,768 B. A data file is a file that the framing names as a `.json`,
+`.jsonl`, `.ndjson`, `.log`, `.txt`, `.csv` or `.tsv` file and that is not source JSON. It is also a
+file that the framing does not name, whose content sniffs as JSON, JSON lines, a log or a table.
+slim replaces its numbered lines with the compressed content, the Read note and a handle, inside the
+same framing. Source, prose and code pass through.
+
+slim always compresses the same text in the same way, because the host keeps the answer and asks
+again after a compaction. slim writes the Log line
+(`@rows.jsonl: compressed 61 KB → 2 KB (−97%) · jsonl`) and the report line once per content.
+`SLIM_ATTACH=0` turns it off.
 
 ### The spill-read guard
 
-Reading a spill back whole puts the whale the compression kept out straight into the context. A
-model's Read with no `offset`/`limit` of an original or a rows file (`slim-mcp-*`, `slim-crush-*`,
-`slim-prompt-*`) over 32,768 B is therefore denied with one line:
+A spill is the copy of an original that slim writes to disk. When the model reads a spill back
+whole, the whale (the large payload) that compression kept out goes straight into the context. So
+slim denies a model's Read with no `offset`/`limit` of an original or a rows file (`slim-mcp-*`,
+`slim-crush-*`, `slim-prompt-*`) over 32,768 B. The deny is one line:
 
 ```
 slim: <file> is a 120000 B spill — Read it with offset/limit, or call mcp__slim__view({ path, jq }) to narrow it, or mcp__slim__lookup({ path, question }) for one fact
 ```
 
-(the lookup clause only while the lookup tool is registered).
+The lookup clause appears only while the lookup tool is registered.
 
 Windowed Reads, id maps (`slim-jsx-ids-*`), host tool-results files, Grep, Bash and every plugin's
-own calls (view's and lookup's probes among them) pass. `SLIM_SPILL_GUARD=0` turns the deny off.
-Each Read, Bash or Grep that named a spill or a host tool-results file writes one `entry:"access"`
-line per file at `SLIM_DEBUG` 1 or 2 (`via`: `Read`, `Grep`, or the Bash reader — `jq`, `grep`,
-`shell`, `node`, `named` for `rm`/`ls`/`echo`…, `other`), which `--report` pairs with the whale it
-recovered. A denied Read is marked `denied: true`; `--report` counts it apart and never pairs it.
+own calls (view's and lookup's probes too) pass. `SLIM_SPILL_GUARD=0` turns the deny off. At
+`SLIM_DEBUG` 1 or 2, each Read, Bash or Grep that named a spill or a host tool-results file writes one
+`entry:"access"` line per file. Its `via` is `Read`, `Grep`, or the Bash reader: `jq`, `grep`,
+`shell`, `node`, `named` for `rm`/`ls`/`echo`…, or `other`. `--report` pairs the line with the whale
+it recovered. A denied Read is marked `denied: true`; `--report` counts it apart and never pairs it.
 
 ## Lookup
 
-`mcp__slim__lookup({ url | command | path, question })` answers one question without loading the
+`mcp__slim__lookup({ url | command | path, question })` answers one question and does not load the
 source into context:
 
 - `url` (http or https): slim asks WebFetch itself, with the question and a request to quote the
-  supporting passage, and returns WebFetch's answer. Every WebFetch rule applies — permissions,
-  other plugins' PreToolUse hooks, the auto-mode classifier, the org's web-fetch policy and
-  WebFetch's own redirect checks — and slim adds no model call. When the auto-mode classifier gives
-  WebFetch no verdict, the failure opens with one line: `URL lookups need a WebFetch verdict here — use
-  WebSearch or ask the user to allow WebFetch`, and leaves out the usual "use WebFetch, Read or Bash" advice.
-- `path`: slim first reads one line through Read, so every PreToolUse hook rules on the path; the core then distills the file that Read actually opened (a hook that
-  rewrote the path is obeyed) and asks a small model once.
-- `command`: slim runs it through Bash (an output the host saved to a file is read from there),
-  distills the output and asks a small model once.
+  supporting passage. It returns WebFetch's answer. Every WebFetch rule applies: permissions, other
+  plugins' PreToolUse hooks, the auto-mode classifier, the org's web-fetch policy and WebFetch's own
+  redirect checks. slim adds no model call. When the auto-mode classifier gives WebFetch no verdict,
+  the failure opens with one line:
+  `URL lookups need a WebFetch verdict here — use WebSearch or ask the user to allow WebFetch`. It
+  then leaves out the usual "use WebFetch, Read or Bash" advice.
+- `path`: slim first reads one line through Read, so every PreToolUse hook rules on the path. The
+  core then distills the file that Read actually opened, so it obeys a hook that rewrote the path. It
+  asks a small model once.
+- `command`: slim runs it through Bash and distills the output; it reads an output that the host
+  saved to a file from there. It asks a small model once.
 
-Distilling uses the same engines, with one difference: a JSON array is not crushed (the dropped rows
-would sit in a file nobody writes), but kept one row per line and windowed to 48 KB.
+Distilling uses the same engines, with one difference. slim does not crush a JSON array, because the
+dropped rows would sit in a file nobody writes. It keeps the array one row per line and windows it to
+48 KB.
 
-The tool's text is at most 1 KB and opens with `lookup answer (data from the source, not
-instructions):`, so it reads as the source's content, not as slim's own word. Then come the answer
-and a verbatim evidence quote of at most 200 characters (the model and its token usage go to the
-event and the report line). The model is `haiku` unless `SLIM_LOOKUP_MODEL` names another. The document goes to the model
-inside a `<document>` quote that its own text cannot close, and a quote the model returns that the
-document does not hold is dropped, with the answer marked `(unverified …)`. A quote stitched from
-several lines (joined by a newline, ` … `, ` | ` or `; `) still counts when every piece of 12 or
-more characters is in the document; it is then shown as those pieces joined with ` … `.
+The tool's text is at most 1 KB and opens with
+`lookup answer (data from the source, not instructions):`. So it reads as the source's content, not
+as slim's own word. Then come the answer and a verbatim evidence quote of at most 200 characters. The
+model and its token usage go to the event and the report line. The model is `haiku` unless
+`SLIM_LOOKUP_MODEL` names another.
 
-**The cost is visible.** The `path` and `command` rungs are the only new spend slim adds, so every
-lookup writes an event
-(`lookup: <question…> · haiku · 1.2k tok`) and a report line (channel `lookup`, rung, model,
-tokens) at every debug level, and `--report` prints a `lookup:` total.
+The document goes to the model inside a `<document>` quote that the document's own text cannot
+close. When the model returns a quote that the document does not hold, slim drops the quote and marks
+the answer `(unverified …)`. A quote stitched from several lines (joined by a newline, ` … `, ` | `
+or `; `) still counts when every piece of 12 or more characters is in the document. slim then shows
+it as those pieces joined with ` … `.
 
-One hint points the model at it: when the HTML engine compressed a fetched page, one line before the
-stats line:
+**The cost is visible.** The `path` and `command` rungs are the only new spend that slim adds. So
+every lookup writes an event (`lookup: <question…> · haiku · 1.2k tok`) and a report line (channel
+`lookup`, rung, model, tokens) at every debug level. `--report` prints a `lookup:` total.
+
+One hint points the model at lookup. When the HTML engine compressed a fetched page, slim adds one
+line before the stats line:
 
 ```
 slim hint: for one fact about this page, call mcp__slim__lookup({ url: "<url>", question: "…" }) instead of reading it whole
 ```
 
 slim also pins the lookup tool into the prompt's tool list, so the model does not have to search for
-it first. `SLIM_HINT=0` drops the hint line; `SLIM_LOOKUP=0` removes the tool, the hint and every
-other text that names it (the spill-read guard's deny, the `SLIM_CURL` refusal, view's `url` answer). `SLIM_CURL=deny` (off by default) refuses a bare `curl <url>` with a
-pointer to lookup and WebFetch; a curl with a pipe, an output file or headers is never refused, and
-nothing is ever redirected silently.
+it first. `SLIM_HINT=0` drops the hint line. `SLIM_LOOKUP=0` removes the tool, the hint and every
+other text that names it (the spill-read guard's deny, the `SLIM_CURL` refusal, view's `url`
+answer). `SLIM_CURL=deny` (off by default) refuses a bare `curl <url>` with a pointer to lookup and
+WebFetch. slim never refuses a curl with a pipe, an output file or headers, and never redirects
+anything silently.
 
 ## View
 
 `mcp__slim__view({ path | command, jq?, out?, engine? })` shows a big local file or a command's
-output compactly, through the same engines the channels use, and puts nothing whole into the
-context. Exactly one of `path` and `command`; there is no `url` (a page goes through WebFetch,
-whose result the webfetch channel compresses, or `lookup({ url, question })`).
+output in a compact form. It uses the same engines as the channels and puts nothing whole into the
+context. Give exactly one of `path` and `command`. There is no `url`: a page goes through WebFetch,
+whose result the webfetch channel compresses, or through `lookup({ url, question })`.
 
-- `path`: slim asks the Read permission check about the path (a deny is the answer), then makes a
-  one-line Read of it through the host, so the permission rules and their dialog and every
-  PreToolUse guard rule on it exactly as on the model's own Read; a deny or an error is the answer,
-  except the Read's own over-limit errors ("exceeds maximum allowed tokens", "more than a read can
-  return": a first line over its token or byte cap, such as a host `tool-results/*.txt` holding one
-  JSON array): every guard has ruled by then, so view goes on.
-  The core then reads the file the Read opened and picks the engine
-  by content (`engine` overrides: `json`, `jsonl`, `log`, `html`, `figma`, `figma-nodes`, `adf`,
-  `text`, `a11y`, `lint`, `listing`, `csv`, `xml`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
-  is one, so bound variables read by name. An image or a video goes to the media backend (see Media).
-- `command`: slim runs it through Bash (permission rules and hooks rule on it); an output the host
-  saved to a file is read from there. A compressed output keeps its original in the spill root, and
-  the reply names it (`original: <path>`).
-- `jq`: narrows a JSON (or JSON lines, or one dominant fenced JSON block) before the engine, in the
-  subset `.a.b`, `.a[0]`, `[]` iteration, `,` multi-select, `| keys`, `| length`, and `.a | .b`.
-  Anything else is refused by name (`jq: unsupported syntax near 'select(' — supported: …`), a path
-  that resolves nothing says what was there (`jq: 'issuez' not found at top level; keys: …`), and a
-  source holding integers JavaScript would round is refused (`number-precision`). A narrowed result
-  up to 16 KB is shown as is; a bigger one goes through the engine. The figure then gives no saving,
-  because jq changed what is measured:
+- `path`: slim asks the Read permission check about the path; a deny is the answer. Then slim makes
+  a one-line Read of the path through the host. So the permission rules, their dialog and every
+  PreToolUse guard rule on it exactly as on the model's own Read. A deny or an error is the answer,
+  with one exception: the Read's own over-limit errors ("exceeds maximum allowed tokens", "more than
+  a read can return"). These come from a first line over the Read's token or byte cap, such as a
+  host `tool-results/*.txt` that holds one JSON array. Every guard has ruled by then, so view goes
+  on.
+
+  The core then reads the file that the Read opened and picks the engine by content. `engine`
+  overrides the choice: `json`, `jsonl`, `log`, `html`, `figma`, `figma-nodes`, `adf`, `text`,
+  `a11y`, `lint`, `listing`, `csv`, `xml`, `media`. A `<key>-<node>.nodes.json` gets the
+  `<key>.variables.json` beside it, when there is one, so bound variables read by name. An image or a
+  video goes to the media backend (see Media).
+- `command`: slim runs it through Bash, so permission rules and hooks rule on it. slim reads an
+  output that the host saved to a file from there. A compressed output keeps its original in the
+  spill root, and the reply names it (`original: <path>`).
+- `jq`: narrows a JSON (or JSON lines, or one dominant fenced JSON block) before the engine. The
+  supported subset is `.a.b`, `.a[0]`, `[]` iteration, `,` multi-select, `| keys`, `| length`, and
+  `.a | .b`. view refuses anything else by name
+  (`jq: unsupported syntax near 'select(' — supported: …`). A path that resolves nothing says what
+  was there (`jq: 'issuez' not found at top level; keys: …`). view refuses a source that holds
+  integers JavaScript would round (`number-precision`). A narrowed result up to 16 KB shows as is; a
+  bigger one goes through the engine. The figure then gives no saving, because jq changed what is
+  measured:
   `slim view: narrowed by jq to 3,891 B of a 63,004 B source (no saving figure: jq changed the measured object)`.
-- `out`: a file under `.claude/tasks/<id>/` of the session root or of the working directory (a repo
-  checked out below the session root, as in a claude.ai chat sandbox), or slim's spill root, relative
-  paths against the working directory; anything else, a folder or a link is refused before anything
-  runs. The module writes it through the host's Write tool (an existing file is Read first, as Write
-  requires), so permission rules and guards decide; a deny is the answer and nothing is written.
-  Its first line is a marker, `<<slim view k=<request hash> engine=<engine> v=<slim version>>>`.
-  For a `path`, a later call with the same `jq` and `engine` and the same `out` answers `cached`
-  without recomputing while that file is newer than the input and carries the marker of this slim
-  version. A `command` always recomputes. `jq` and `out` do not apply to an image or a video.
-  Rows the json engine offloads still go to part files in the spill root, which the sweep empties
-  after `SLIM_TTL`; a `cached` answer needs every part its file cites, so a call after the sweep
+- `out`: the file to write. It must be under `.claude/tasks/<id>/` of the session root or of the
+  working directory, or in slim's spill root. The working directory counts for a repo checked out
+  below the session root, as in a claude.ai chat sandbox. Relative paths resolve against the working
+  directory. view refuses anything else, a folder or a link, before anything runs.
+
+  The module writes the file through the host's Write tool, and it Reads an existing file first, as
+  Write requires. So permission rules and guards decide; a deny is the answer and nothing is written.
+  The file's first line is a marker, `<<slim view k=<request hash> engine=<engine> v=<slim version>>>`.
+
+  For a `path`, a later call with the same `jq`, `engine` and `out` answers `cached` without
+  recomputing. This holds while that file is newer than the input and carries the marker of this slim
+  version. A `command` always recomputes. `jq` and `out` do not apply to an image or a video. Rows
+  that the json engine offloads still go to part files in the spill root, and the sweep empties them
+  after `SLIM_TTL`. A `cached` answer needs every part its file cites, so a call after the sweep
   recomputes and writes them again.
 
-The reply is one figure line (`slim: compressed …`, the `figma-nodes:` line with its node counts,
-the narrowing figure above, `cached`, or `slim view: <n> B, not compressed (<reason>)`), then
-`out: <path> (<n> lines)` when a file was written, then `--- head ---` and the compact text — whole
-up to 16 KB, else its first 40 lines and `read <file> windowed (offset/limit)`. Without `out`, JSON
-is fitted to those 16 KB (the rows that did not fit go to a part file the text cites), and a longer
-text is kept in the spill root for that windowed Read. With `out` JSON is fitted to 64 KB instead
-(the read channel's budget), so the file holds a compact view, never the source copied whole. A
-compact text over 4 MiB is refused, with or without `out`; narrow it with `jq`. A refusal is one line naming why.
+The reply has these parts, in this order:
+
+1. One figure line: `slim: compressed …`, the `figma-nodes:` line with its node counts, the
+   narrowing figure above, `cached`, or `slim view: <n> B, not compressed (<reason>)`.
+2. `out: <path> (<n> lines)`, when view wrote a file.
+3. `--- head ---` and the compact text. The text is whole up to 16 KB. A longer text gives its first
+   40 lines and `read <file> windowed (offset/limit)`.
+
+Without `out`, view fits JSON to those 16 KB; the rows that did not fit go to a part file that the
+text cites. view keeps a longer text in the spill root for that windowed Read. With `out`, view fits
+JSON to 64 KB instead (the read channel's budget), so the file holds a compact view, never the whole
+source. view refuses a compact text over 4 MiB, with or without `out`; narrow it with `jq`. A refusal
+is one line that names the reason.
 
 Every call writes a `slim.events` entry
 (`jira-reader · view issues.json: 118 KB → 29 KB (−75%) · json`, or `narrowed by jq`, `cached`,
-`refused (<reason>)`) and a report line (channel `view`) at every debug level. A view of a spill
-file or a host tool-results file also writes an `entry: "access"` line (`via: "view"`), so
-`--report` counts it as a recovery. Unlike lookup, view stays a deferred tool: every text that sends
-the model to it (a stub, the spill-read guard's deny, a reply's out line) names it, so one ToolSearch
-on first use costs less than its schema in every request. `SLIM_LOOKUP=0` does not remove it, and
-view's result is never compressed again by slim.
+`refused (<reason>)`). It also writes a report line (channel `view`) at every debug level. A view of
+a spill file or a host tool-results file also writes an `entry: "access"` line (`via: "view"`), so
+`--report` counts it as a recovery.
+
+Unlike lookup, view stays a deferred tool. Every text that sends the model to view names it (a stub,
+the spill-read guard's deny, a reply's out line). So one ToolSearch on first use costs less than the
+tool's schema in every request. `SLIM_LOOKUP=0` does not remove view, and slim never compresses
+view's result again.
 
 ## Media
 
-Images and video reach the model through a resize, never raw: an image becomes `<name>.1568.<ext>`
-(long edge at most 1568 px, aspect kept, never upscaled, metadata stripped; `<ext>` is the file's own
-`png`, `jpg`, `jpeg` or `gif`, and PNG for anything else, WebP included), and a video becomes
-`<name>.frames/001.jpg …`, one frame every 2 seconds from the start, at most 24 (a longer clip
-spreads the 24 over its whole length), each resized the same way. A portrait phone clip or a JPEG
-with an EXIF orientation comes out upright, at its displayed size. The outputs land beside the
-input, and the reply lists their paths (frames with their timestamps) after one figure line:
+Images and video reach the model only through a resize, never raw:
+
+- An image becomes `<name>.1568.<ext>`: long edge at most 1568 px, aspect kept, never upscaled,
+  metadata stripped. `<ext>` is the file's own `png`, `jpg`, `jpeg` or `gif`, and PNG for anything
+  else, WebP included.
+- A video becomes `<name>.frames/001.jpg …`: one frame every 2 seconds from the start, at most 24,
+  each resized in the same way. A longer clip spreads the 24 frames over its whole length.
+
+A portrait phone clip or a JPEG with an EXIF orientation comes out upright, at its displayed size.
+The outputs land beside the input. The reply lists their paths (frames with their timestamps) after
+one figure line:
 
 ```
 media: 2481920 B → 412300 B (-83%) frames=12
 ```
 
-written as `media: <in> B → <out> B (-NN%) frames=N` (`frames=1` for an image, `+` when the outputs
-are larger). The `view` tool (`view { path }` on an image or a video) is the way in.
+The figure line format is `media: <in> B → <out> B (-NN%) frames=N` (`frames=1` for an image, `+`
+when the outputs are larger). The way in is the `view` tool (`view { path }` on an image or a video).
 
-slim adds no dependency for this. It uses what the machine already has: `ffprobe` + `ffmpeg` on
-PATH for images and video, else macOS `sips` for images only (sips cannot strip metadata, and the
-reply says so). With neither, or a video with only sips, the answer is the refusal
-`media: no backend (install ffmpeg)`. The Read and Write permission checks rule on the input and on
-the exact output path (the image, or the first frame); a deny from either is the answer, and an
-`ask` from either becomes one Yes/No question naming both (a no, or a dismissed question, writes
-nothing). An image also takes the one-line Read, so PreToolUse guards rule on it; the Read tool
-cannot open a video, and the backend writes outside the Write tool, so for a video's input and for
-every output only the permission rules and the person decide. A file the name or `engine: "media"`
-sends this way whose bytes are not an image or a video (a text file named `*.mp4`, or a link to one)
-is refused (`not-media`), never shown as text. slim marks a
-frames folder it creates; a re-run replaces only its own frames there, and a `<name>.frames` that is
-a link, or a folder slim did not make that already holds files, is refused, never cleared. Claude already downsizes every image it is shown to
-about 1568 px, so the resize saves bytes and upload time rather than tokens; slim never crops. The
-planning is the pure `plugins/slim/scripts/engines/media.cjs` (CONTRACT.md §5a); the backend is
+slim adds no dependency for this and uses what the machine already has. It uses `ffprobe` + `ffmpeg`
+on PATH for images and video, else macOS `sips` for images only. sips cannot strip metadata, and the
+reply says so. With neither backend, or for a video with only sips, the answer is the refusal
+`media: no backend (install ffmpeg)`.
+
+The Read and Write permission checks rule on the input and on the exact output path (the image, or
+the first frame). A deny from either is the answer. An `ask` from either becomes one Yes/No question
+that names both; a no, or a dismissed question, writes nothing. An image also takes the one-line
+Read, so PreToolUse guards rule on it. The Read tool cannot open a video, and the backend writes
+outside the Write tool. So for a video's input and for every output, only the permission rules and
+the person decide.
+
+A file can go this way by its name or by `engine: "media"`. When its bytes are not an image or a
+video (a text file named `*.mp4`, or a link to one), view refuses it (`not-media`) and never shows
+it as text. slim marks a frames folder that it creates, and a re-run replaces only its own frames
+there. slim refuses, and never clears, a `<name>.frames` that is a link, or a folder that slim did
+not make and that already holds files.
+
+Claude already downsizes every image it is shown to about 1568 px. So the resize saves bytes and
+upload time rather than tokens; slim never crops. The planning is the pure
+`plugins/slim/scripts/engines/media.cjs` (CONTRACT.md §5a). The backend is
 `plugins/slim/scripts/delivery/media.cjs`.
 
 ## What you see
 
-- **The ToolResult line.** Under a tool row slim compressed or stubbed, one dim line:
+- **The ToolResult line.** Under a tool row that slim compressed or stubbed, slim draws one dim
+  line:
 
   ```
   slim  json  118 KB → 29 KB  −75%
   ```
 
-  It is drawn in the success colour when slim saved 50 % or more. A Bash window over an output the
-  host saved to a file can be larger than the host's 2 KB preview it replaces; its line then reads
-  `slim  text  2 KB → 4 KB  +78%`, while its event says `windowed 48 KB → 4 KB (−91%; host preview 2 KB)`: the
-  figure under the result and the event count from the raw bytes, the row from the host's own preview.
-- **The ToolGroup suffix.** Read, Grep and Bash runs fold into one group row; when slim compressed
+  The line uses the success colour when slim saved 50 % or more. A Bash window over an output the
+  host saved to a file can be larger than the host's 2 KB preview that it replaces. Its line then
+  reads `slim  text  2 KB → 4 KB  +78%`, while its event says
+  `windowed 48 KB → 4 KB (−91%; host preview 2 KB)`. The figure under the result and the event count
+  from the raw bytes; the row counts from the host's own preview.
+- **The ToolGroup suffix.** Read, Grep and Bash runs fold into one group row. When slim compressed
   any call in the group, the fold line ends with ` · 2 compressed, −186 KB`. Only calls whose view
   shrank count. An expanded group shows the per-row lines instead.
-- **The toast.** For MCP results on the main conversation only (never for a subagent's calls, never
-  for the other tool channels), e.g. `searchJiraIssuesUsingJql: compressed 118 KB → 29 KB (−75%) · json`,
-  and for a rewritten prompt (`prompt: compressed 152 KB → 5 KB (−96%) · json`).
-  `SLIM_TOAST=0` silences it; `SLIM_TOAST_MS` sets how long it stays.
+- **The toast.** slim shows a toast for MCP results on the main conversation only. It never shows
+  one for a subagent's calls or for the other tool channels. An example is
+  `searchJiraIssuesUsingJql: compressed 118 KB → 29 KB (−75%) · json`. slim also shows a toast for a
+  rewritten prompt (`prompt: compressed 152 KB → 5 KB (−96%) · json`). `SLIM_TOAST=0` silences it;
+  `SLIM_TOAST_MS` sets how long it stays.
 
 ## State other plugins read
 
-slim owns four `$.state` keys under `plugin: 'slim'`. Any plugin reads them; only slim writes them.
-The contract is `plugins/slim/types/index.d.ts`:
+slim owns four `$.state` keys under `plugin: 'slim'`. Any plugin can read them; only slim writes
+them. The contract is `plugins/slim/types/index.d.ts`:
 
 ```ts
 export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'lint' | 'listing' | 'csv' | 'xml' | 'stub'
@@ -519,72 +652,75 @@ export type SlimEvent = SlimCompressEvent | SlimLookupEvent | SlimViewEvent | Sl
 export type SlimInfo = { v: 1; version: string; channels: SlimChannel[] }
 ```
 
-- **`slim.info`** — a snapshot written at session start: slim's version (read from its manifest)
-  and the channels whose switch is on. A plugin that finds it non-null knows slim is loaded and
-  which channels it compresses.
-- **`slim.events`** — the start line `slim <version>` (kind `start`, once per session), then one event
-  per compressed or stubbed result and per lookup or view call, oldest first, at most 200. `text` is one line, e.g. `<agent type> · Bash: compressed 120 KB → 11 KB (−91%) · json`
+- **`slim.info`** — a snapshot that slim writes at session start: slim's version (read from its
+  manifest) and the channels whose switch is on. A plugin that finds it non-null knows that slim is
+  loaded and which channels it compresses.
+- **`slim.events`** — first the start line `slim <version>` (kind `start`, once per session). Then
+  one event per compressed or stubbed result and per lookup or view call, oldest first, at most 200.
+  `text` is one line, for example `<agent type> · Bash: compressed 120 KB → 11 KB (−91%) · json`
   (the agent prefix only for a subagent's call) or `lookup: <question…> · haiku · 1.2k tok`.
-  `agentType` is absent on the main conversation, the subagent's type (`core:jira-reader`) when it is
-  listed, and `agent` when it is not. `SLIM_EVENT_LOG=0` stops the writes, and the list stays `[]`.
-  A Log pane (band's) merges these events with its own; each one also goes to `slim.jsonl` (see
-  Event log on disk).
-- **`slim.rows`** — one member per compressed tool_use_id; internal to the ToolResult line and the
-  ToolGroup suffix.
-- **`slim.seen`** — one member per @-mentioned file content slim compressed this session; internal
-  to the once-per-content Log line.
+  `agentType` is absent on the main conversation. It is the subagent's type (`core:jira-reader`) when
+  that type is listed, and `agent` when it is not. `SLIM_EVENT_LOG=0` stops the writes, and the list
+  stays `[]`. A Log pane (band's) merges these events with its own. Each event also goes to
+  `slim.jsonl` (see Event log on disk).
+- **`slim.rows`** — one member per compressed tool_use_id. The ToolResult line and the ToolGroup
+  suffix use it internally.
+- **`slim.seen`** — one member per @-mentioned file content that slim compressed this session. The
+  once-per-content Log line uses it internally.
 
 ## Event log on disk
 
-base, band and slim each write the lines they publish themselves to their own file, so the origin of
-a line is on the line, written by that plugin, not inferred from a pane:
+base, band and slim each write the lines they publish to their own file. So the origin of a line is
+on the line, written by that plugin, not inferred from a pane:
 
 - **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
   `slim.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
-  `<session-id>/` folder is still made under it. With neither (a cloud session) no file is written.
-  Never under the project.
+  plugin still makes the `<session-id>/` folder under it. With neither (a cloud session), no file is
+  written. The log is never under the project.
 - **Line:** one JSON object per line, oldest first:
   `{"ts":"2026-10-08T12:34:56.789Z","plugin":"slim","version":"0.5.0","session":"<id>","kind":"slim","agent":"jira-reader","text":"jira-reader · getJiraIssue: compressed 118 KB → 29 KB (−75%) · json"}`.
-  `ts` is the event's time in UTC, `plugin` and `version` the writer's own name and release, `agent`
-  the subagent type that caused the line or `main`, `kind` and `text` the line as `slim.events` has it.
-- **Start line:** the first line a plugin writes for a session id is `start` / `<plugin> <version>`,
-  also under the new id a `/clear` opens, where no session start runs. A session whose lines already
-  hold a start line gets no second one: a module reload or a resume in a fresh process goes on from
-  the file.
-- **slim's lines:** every `slim.events` entry — kind `slim` (a compressed or stubbed result, file or
-  prompt), `lookup` or `view`; `agent` is the type the text is prefixed with (`jira-reader`, plugin
-  prefix dropped; `agent` for an unlisted subagent). The first line of a session is `start` /
+  `ts` is the event's time in UTC. `plugin` and `version` are the writer's own name and release.
+  `agent` is the subagent type that caused the line, or `main`. `kind` and `text` are the line as
+  `slim.events` has it.
+- **Start line:** the first line a plugin writes for a session id is `start` / `<plugin> <version>`.
+  This also applies under the new id that a `/clear` opens, where no session start runs. A session
+  whose lines already hold a start line gets no second one: a module reload or a resume in a fresh
+  process continues from the file.
+- **slim's lines:** every `slim.events` entry, of kind `slim` (a compressed or stubbed result, file
+  or prompt), `lookup` or `view`. `agent` is the type that prefixes the text (`jira-reader`, without
+  the plugin prefix; `agent` for an unlisted subagent). The first line of a session is `start` /
   `slim <version>`, also in `slim.events`.
-- **Writing:** the whole file is rewritten after every line (the engine has no append), at most 2000
-  lines or 256 KB, oldest dropped first. A reload of the module picks up the file of the same session
-  and goes on. A write that fails never reaches the hook; the first failure in a session toasts
-  `slim: event log not written: <reason>`.
+- **Writing:** the plugin rewrites the whole file after every line, because the engine has no append.
+  The file holds at most 2000 lines or 256 KB, and the oldest lines go first. A reload of the module
+  picks up the file of the same session and continues. A write that fails never reaches the hook.
+  The first failure in a session toasts `slim: event log not written: <reason>`.
 - **Off:** `SLIM_EVENT_LOG=0` stops slim's file and its `slim.events` lines alike. The report log
   below is separate and keeps its own switch, `SLIM_DEBUG`.
-- **Clean-up:** base sweeps session folders whose newest file is older than 7 days, and its
-  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. band and
-  slim never delete.
+- **Clean-up:** base sweeps session folders whose newest file is older than 7 days. Its
+  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. band
+  and slim never delete.
 
 ## Report log
 
-slim writes one report log: `slim-debug.log` in the spill root. Each of its
-lines carries `src: 'slim'` and its `channel`, plus `tool_use_id`, the decision, reason, engine,
-bytes in/out (and `bytes_seen` where the host showed less), % and ms — never any payload.
+slim writes one report log: `slim-debug.log` in the spill root. Each line carries `src: 'slim'` and
+its `channel`, plus `tool_use_id`, the decision, reason, engine, bytes in/out (and `bytes_seen` where
+the host showed less), % and ms. A line never holds any payload.
 
-- `SLIM_DEBUG=1` writes one line per call slim handles; `2` adds the `size-gate`, `already-slim`,
-  `plain-gate`, `read-guard` and other stand-downs the module sends. A Bash or Read call under its
-  channel's gate is not a slim invocation and writes nothing at any level.
-- Error lines (`decision: 'error'`, `entry: 'hook'` from the core, `entry: 'mod'` when the module's
-  spawn failed), lookup lines and view lines are written at every level, including off. A view
+- `SLIM_DEBUG=1` writes one line per call that slim handles. `2` adds the `size-gate`,
+  `already-slim`, `plain-gate`, `read-guard` and other stand-downs that the module sends. A Bash or
+  Read call under its channel's gate is not a slim invocation and writes nothing at any level.
+- slim writes error lines (`decision: 'error'`, `entry: 'hook'` from the core, `entry: 'mod'` when
+  the module's spawn failed), lookup lines and view lines at every level, including off. A view
   line's reason is `jq-narrowed` for a narrowed result and `cached` for a cached one. A media view's
-  line keeps the image or video sizes in `media_in` / `media_out` and logs `bytes_in` /
-  `bytes_out` as 0: those bytes never headed for the context, so the savings totals leave them out.
-- The module's own stand-downs are logged only when the level is set in the session's environment
+  line keeps the image or video sizes in `media_in` / `media_out` and logs `bytes_in` / `bytes_out`
+  as 0. Those bytes never headed for the context, so the savings totals leave them out.
+- slim logs the module's own stand-downs only when the level is set in the session's environment
   (shell, `~/.claude/settings.json` → `env`).
-- A prompt line (`channel: 'prompt'`, `entry: 'mod'`, `spans`, every span's spill in `spills`) is
-  written at level 1 like the tool channels; a prose-only prompt (`no-span`) at level 2.
-- An access line (`entry: 'access'`, `tool`, `via`, `spill`, `denied` when the guard refused it) per
-  spill file a model's Read, Bash or Grep named, at level 1 or 2 (see the spill-read guard).
+- slim writes a prompt line (`channel: 'prompt'`, `entry: 'mod'`, `spans`, every span's spill in
+  `spills`) at level 1, like the tool channels. It writes a prose-only prompt (`no-span`) at level 2.
+- slim writes an access line (`entry: 'access'`, `tool`, `via`, `spill`, `denied` when the guard
+  refused it) per spill file that a model's Read, Bash or Grep named, at level 1 or 2 (see the
+  spill-read guard).
 
 Read the totals with:
 
@@ -592,22 +728,23 @@ Read the totals with:
 node plugins/slim/scripts/slim.cjs --report [logfile] [--since <ISO>] [--by-tool]
 ```
 
-It prints the totals plus a `by src:` line (one total per writer; a line without `src` counts as
-`other`), a `by channel:` line and, when
-lookup ran, a `lookup:` line (calls, answered, tokens in and out, models). A group whose summaries are
-bigger than what the model would have seen — Bash outputs the host saved to a file, where the
-baseline is its 2 KB preview — reads as a grown view rather than a negative saving:
+The report prints the totals, a `by src:` line and a `by channel:` line. The `by src:` line gives one
+total per writer; a line without `src` counts as `other`. When lookup ran, the report adds a
+`lookup:` line (calls, answered, tokens in and out, models). For some groups the summaries are bigger
+than what the model would have seen: Bash outputs that the host saved to a file, where the baseline
+is its 2 KB preview. Such a group reads as a grown view, not as a negative saving:
 
 ```
 bash: 2 results, 560,779 B of output summarised into 14,935 B (host preview would have shown 4,646 B; the view grew ×3.2)
 ```
 
-Below ×1.1 the growth is given in bytes, and results that passed through untouched are counted apart
-(`+ 1 passed through (500 B)`).
+Below ×1.1, the report gives the growth in bytes. It counts results that passed through untouched
+apart (`+ 1 passed through (500 B)`).
 
-`--by-tool` adds one block per tool and channel, biggest first: the bytes slim let through by reason
-(with the format: `non-json/text`), the bytes it stubbed by reason, and what it compressed. It is
-the readout for deciding which engine to build next — what is large and still passes through:
+`--by-tool` adds one block per tool and channel, biggest first. The block holds the bytes that slim
+let through, by reason (with the format: `non-json/text`). It also holds the bytes that slim
+stubbed, by reason, and what it compressed. Use this readout to decide which engine to build next:
+it shows what is large and still passes through:
 
 ```
   by tool (passthrough and stubbed bytes by reason):
@@ -616,13 +753,13 @@ the readout for deciding which engine to build next — what is large and still 
       stubbed 40,000 B → 1,100 B: non-json 1 × 40,000 B
 ```
 
-Sub-gate results (`size-gate`) appear only in a log written at `SLIM_DEBUG=2`, so a week at that level
-on a QA machine gives the full picture.
+Sub-gate results (`size-gate`) appear only in a log written at `SLIM_DEBUG=2`. So a week at that
+level on a QA machine gives the full picture.
 
 ## Spill files and handles
 
-Every original slim replaces, and every part a compact text cites, is a file this user owns (0600,
-written atomically, content-addressed, never through a link):
+Every original that slim replaces, and every part that a compact text cites, is a file this user
+owns. slim writes it 0600, atomically, content-addressed and never through a link:
 
 | Where | Name | Holds |
 |---|---|---|
@@ -632,11 +769,13 @@ written atomically, content-addressed, never through a link):
 | spill root | `slim-debug.log` | the report log |
 | prompt dir | `slim-prompt-<sha16>[-<8 hex>].json` or `.txt`, `slim-prompt-rows-*`, `slim-prompt-ids-*` | a pasted span and its parts |
 
-The spill root is `SLIM_DIR` (an absolute path; a leading `~/` is expanded), else the system temp dir; the sweep removes slim's own names there
-after `SLIM_TTL` hours (throttle marker `.slim-sweep`) and leaves every other file alone. The prompt
-dir is `<project root>/.claude/slim/prompt/` (the main checkout's, from a linked worktree) and is
-never swept by age. The name prefixes are a wire format other plugins match (base's
-untrusted-content convention, its figma reader), so they change only together with those readers.
+The spill root is `SLIM_DIR` (an absolute path; slim expands a leading `~/`), else the system temp
+dir. The sweep removes slim's own names there after `SLIM_TTL` hours (throttle marker
+`.slim-sweep`) and leaves every other file alone. The prompt dir is
+`<project root>/.claude/slim/prompt/` (the main checkout's, from a linked worktree). The sweep never
+removes files there by age. Other plugins match the name prefixes as a wire format (base's
+untrusted-content convention, its figma reader). So the prefixes change only together with those
+readers.
 
 The model finds a file through one of these handles:
 
@@ -647,19 +786,19 @@ The model finds a file through one of these handles:
 - `full=<abs path>` — a line of a `<<slim stub>>`, after its stats line.
 
 A handle is real only when its path names one of the files above in the spill root or the prompt
-dir, or this session's host `tool-results/` file; slim's own already-slim check trusts nothing else,
-and any other path in a result is payload text. A Read, Grep or Bash that names one passes through
-uncompressed (that is how a handle is followed), within the spill-read guard's one rule. The full
-grammar is `plugins/slim/scripts/engines/CONTRACT.md` §8.
+dir, or this session's host `tool-results/` file. slim's own already-slim check trusts nothing else,
+and any other path in a result is payload text. A Read, Grep or Bash that names a real handle passes
+through uncompressed, because that is how the model follows a handle. The spill-read guard's one
+rule still applies. The full grammar is `plugins/slim/scripts/engines/CONTRACT.md` §8.
 
 ## Environment switches
 
-slim reads `SLIM_*` and one host switch, from the process environment: set them in
+slim reads the `SLIM_*` switches and one host switch from the process environment. Set them in
 `~/.claude/settings.json` → `env` or in the shell that starts Claude Code. The module reads them
-through `$.env` (session environment), and the core reads its own process environment, which it
-inherits from the host through the module's spawn. The host's `bashOutputMaxChars` setting is read
-by the module (`$.settings.read`) and handed to the core in the envelope.
-`tests/readme-checks.sh` fails on a `SLIM_*` name under `plugins/slim/` without a row here.
+through `$.env` (session environment). The core reads its own process environment, which it inherits
+from the host through the module's spawn. The module reads the host's `bashOutputMaxChars` setting
+(`$.settings.read`) and gives it to the core in the envelope. `tests/readme-checks.sh` fails on a
+`SLIM_*` name under `plugins/slim/` without a row here.
 
 | Switch | Default | Effect |
 |---|---|---|
@@ -693,76 +832,90 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
 ## Not covered
 
 - **Glob, and Grep's file listings.** The host already caps them (Glob at 100 files, Grep at 250
-  entries) and a listing has no text field a window could go back into, so slim leaves them alone.
+  entries). A listing has no text field that a window could go back into, so slim leaves them alone.
   The native 2.1.289 build does not register Grep as a tool; slim matches it by name where it exists.
-- **Listings outside a Bash listing command.** A path list read with Read, returned by an MCP tool
-  or printed by another Bash command is plain text (`view { path }` on such a file does fold it, by
-  content); `ls -l` (sizes, permissions) is not a listing at all.
+- **Listings outside a Bash listing command.** A path list that Read reads, that an MCP tool returns
+  or that another Bash command prints is plain text. `view { path }` on such a file does fold it, by
+  content. `ls -l` (sizes, permissions) is not a listing at all.
 - **Images pasted or @-mentioned in a prompt.** `prompt.submit` tells a hook only that an image is
-  there, never its bytes, so slim cannot resize it; ask for `view { path }` on the file instead.
-- **@-mentioned source files and prose.** Only data files are compressed (see @-mentioned files);
-  a large source file reaches the model as the host rendered it.
-- **Raw HTML from WebFetch.** WebFetch hands back its own model's answer, not the page; slim only
+  there, never its bytes, so slim cannot resize it. Ask for `view { path }` on the file instead.
+- **@-mentioned source files and prose.** slim compresses only data files (see @-mentioned files). A
+  large source file reaches the model as the host rendered it.
+- **Raw HTML from WebFetch.** WebFetch gives back its own model's answer, not the page. slim only
   sees large answers.
 - **Source JSON and files you edit through Read** — see the Read rules.
-- **A Read over the host's 256 KB size cap.** The host refuses it before slim sees a result;
-  see the Read rules.
-- **Images, PDFs and binary output** pass through the hook channels untouched; images and video are
-  resized only when asked through `view { path }` (see Media).
+- **A Read over the host's 256 KB size cap.** The host refuses it before slim sees a result; see the
+  Read rules.
+- **Images, PDFs and binary output** pass through the hook channels untouched. slim resizes images
+  and video only when you ask through `view { path }` (see Media).
 - **A lint report in any other file.** Read groups a report only in a `.log`, `.jsonl` or `.ndjson`
-  file over 32 KB (see the Read rules); a saved `report.txt` is shown as the host renders it. Run the
-  linter through Bash, or ask `view({ path })`, to get it grouped.
-- **Headerless or short tables, and tables pasted in a prompt.** A table whose first row holds a
-  number, opens with a date, time or log level, or has a cell typed like its column, or one of fewer
-  than 20 records, is plain text; the prompt channel's spans
-  are JSON, JSONL, HTML and logs. A `.csv` under 32 KB is shown as the host read it.
-- **An `.svg` you Read or `cat`.** An asset you may edit stays byte-identical; only a fetched or MCP
-  SVG is reduced.
-- **A `.json` file the host showed whole.** A Read under the host's token cap is left as is. Ask a
-  question about it with `lookup({ path, question })`, or narrow it with `view({ path, jq })`.
-- **Browser snapshots outside MCP.** A snapshot printed by a Bash command, read from a file or shown
-  by `view` is plain text there (windowed above `SLIM_PLAIN_BYTES`); only an MCP result is folded, and
-  `view` folds one only when asked with `engine: 'a11y'`. Refs are per snapshot, so nothing is cached
-  across results.
+  file over 32 KB (see the Read rules). The host shows a saved `report.txt` as it renders it. To get
+  the report grouped, run the linter through Bash, or ask `view({ path })`.
+- **Headerless or short tables, and tables pasted in a prompt.** slim treats these tables as plain
+  text: a table whose first row holds a number, opens with a date, time or log level, or has a cell
+  typed like its column; and a table of fewer than 20 records. The prompt channel's spans are JSON,
+  JSONL, HTML and logs. The host shows a `.csv` under 32 KB as it read it.
+- **An `.svg` you Read or `cat`.** An asset that you may edit stays byte-identical. slim reduces only
+  a fetched or MCP SVG.
+- **A `.json` file the host showed whole.** slim leaves a Read under the host's token cap as is. Ask
+  a question about the file with `lookup({ path, question })`, or narrow it with
+  `view({ path, jq })`.
+- **Browser snapshots outside MCP.** A snapshot that a Bash command prints, that comes from a file
+  or that `view` shows is plain text there (windowed above `SLIM_PLAIN_BYTES`). slim folds only an
+  MCP result, and `view` folds one only when asked with `engine: 'a11y'`. Refs are per snapshot, so
+  slim caches nothing across results.
 
 ## Layout
 
 slim has three layers with a hard boundary between each, plus its evals.
 
-- **Engines** — `plugins/slim/scripts/engines/`: a host-independent compression library. Pure Node
-  modules (no environment, no filesystem, no process, no timers): text or an object in, a result
-  object out. An engine returns what should be spilled; it never writes it. Any Node program can
-  embed it — a microservice, a CLI, a hook on another harness. `plugins/slim/scripts/engines/registry.cjs`
-  is the one table of engines (id, module, spill suffix, fit, stub and mcp flags). The versioned contract — input,
-  detection rules, each engine's algorithm, output, guarantees and runnable examples — is
-  `plugins/slim/scripts/engines/CONTRACT.md`. Beside `compress()`, `plugins/slim/scripts/engines/jq.cjs`
-  narrows JSON for the view tool, `plugins/slim/scripts/engines/media.cjs` plans a resize and
+- **Engines** — `plugins/slim/scripts/engines/`: a host-independent compression library. The engines
+  are pure Node modules (no environment, no filesystem, no process, no timers): text or an object
+  goes in, and a result object comes out. An engine returns what slim should spill; it never writes
+  it. Any Node program can embed the library: a microservice, a CLI, a hook on another harness.
+  `plugins/slim/scripts/engines/registry.cjs` is the one table of engines (id, module, spill suffix,
+  fit, stub and mcp flags). `plugins/slim/scripts/engines/CONTRACT.md` is the versioned contract:
+  input, detection rules, each engine's algorithm, output, guarantees and runnable examples.
+
+  Beside `compress()`, `plugins/slim/scripts/engines/jq.cjs` narrows JSON for the view tool,
+  `plugins/slim/scripts/engines/media.cjs` plans a resize and
   `plugins/slim/scripts/engines/spans.cjs` finds the data spans in a pasted prompt.
-  How the layers fit together, with diagrams of one tool result's path, the five destinations and the
-  lookup and view rungs: `plugins/slim/ARCHITECTURE.md`.
+  `plugins/slim/ARCHITECTURE.md` shows how the layers fit together. It has diagrams of one tool
+  result's path, the five destinations and the lookup and view rungs.
 - **Delivery** — `plugins/slim/scripts/slim.cjs` and `plugins/slim/scripts/delivery/`: the only
-  Claude Code-specific code. It knows the channel envelopes (`plugins/slim/scripts/delivery/channels.cjs`),
-  host overflow files, the `SLIM_*` switches, spill files and their sweep, the report log and
-  the stats and stub text. Besides the hook mode, `slim.cjs` has `--distill` (the lookup tool's
-  fetch-and-distill step), `--view` (the view tool's core, `plugins/slim/scripts/delivery/view.cjs`),
-  `--prompt` (the prompt channel, `plugins/slim/scripts/delivery/prompt.cjs`), `--prompt-drop` (the
-  spills of a rewrite the session never took), `--access` (a spill
-  access line), `--record` (a lookup or view report line), `--error`, `--report` and `--help`.
+  Claude Code-specific code. It knows the channel envelopes
+  (`plugins/slim/scripts/delivery/channels.cjs`), host overflow files, the `SLIM_*` switches, spill
+  files and their sweep, the report log, and the stats and stub text. Besides the hook mode,
+  `slim.cjs` has these modes:
+  - `--distill`: the lookup tool's fetch-and-distill step;
+  - `--view`: the view tool's core, `plugins/slim/scripts/delivery/view.cjs`;
+  - `--prompt`: the prompt channel, `plugins/slim/scripts/delivery/prompt.cjs`;
+  - `--prompt-drop`: the spills of a rewrite that the session never took;
+  - `--access`: a spill access line;
+  - `--record`: a lookup or view report line;
+  - `--error`, `--report` and `--help`.
 - **Module** — `plugins/slim/hooks/mods/`: the intake (tool results and @-mentioned files), the
   prompt channel (`prompt.ts`), the spill-read guard (`guard.ts`), the lookup and view tools, the
   lookup pin (`describe.ts`), the `slim.info` snapshot and the drawing.
-- **Evals** — `plugins/slim/evals/`: the eval suite below; `plugins/slim/evals/_shared/` holds the
+- **Evals** — `plugins/slim/evals/`: the eval suite below. `plugins/slim/evals/_shared/` holds the
   deterministic generators that write its inputs (and the committed `tests/fixtures/page.html` and
   `tests/fixtures/app.log`).
 
 ## Evals
 
-`plugins/slim/evals/` is a `claude plugin eval` suite with six cases, each run with and without
-the plugin (the default with-without ablation): a Read of a big JSON export, a curl of an HTML page,
-a cat of a log, a mocked Jira MCP search (`plugins/slim/evals/mocks/atlassian/`), a one-fact
-lookup and a mocked Playwright snapshot the model must still click a live ref in
-(`plugins/slim/evals/mocks/playwright/`, the body is `tests/fixtures/a11y-plp.txt`). Each case has free graders (tool used, regex on the trace) and one LLM grader (haiku judge).
-Every run is a full `claude` child on your own credential, so run it by hand:
+`plugins/slim/evals/` is a `claude plugin eval` suite with six cases. Each case runs with and without
+the plugin (the default with-without ablation). The cases are:
+
+- a Read of a big JSON export;
+- a curl of an HTML page;
+- a cat of a log;
+- a mocked Jira MCP search (`plugins/slim/evals/mocks/atlassian/`);
+- a one-fact lookup;
+- a mocked Playwright snapshot in which the model must still click a live ref
+  (`plugins/slim/evals/mocks/playwright/`; the body is `tests/fixtures/a11y-plp.txt`).
+
+Each case has free graders (tool used, regex on the trace) and one LLM grader (haiku judge). Every
+run is a full `claude` child on your own credential, so run the suite by hand:
 
 ```
 claude plugin eval plugins/slim --runs 1 --max-cost-usd 2 --model sonnet --scaffold --allow-tools Bash WebFetch ToolSearch mcp__slim__lookup mcp__atlassian__searchJiraIssuesUsingJql mcp__playwright__browser_snapshot mcp__playwright__browser_click

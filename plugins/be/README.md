@@ -1,25 +1,30 @@
 # be
 
-be is the Domaine backend team plugin for Claude Code. It holds the Shopify app and extension work:
-scoping an app, extension or Function build with its APIs, limitations and level of effort, finding
-the right Shopify source for a question, and answering "can Shopify do X?" with the limitation, the
-workaround and what to tell the merchant.
+be is the Domaine backend team plugin for Claude Code. It holds the Shopify app and extension work.
+To install it, see [Quick install (Claude Code)](../../README.md#quick-install-claude-code) or
+§ Install below.
+
+be covers these tasks:
+
+- scoping an app, extension or Function build, with its APIs, limitations and level of effort (LOE);
+- finding the right Shopify source for a question;
+- answering "can Shopify do X?" with the limitation, the workaround and what to tell the merchant.
 
 The skills are imported from Domaine's `domaine-skills-solutions` repository (commit 3c96617, 2026-08-03) and adapted to Claude Code and base; update them here, not there.
 
-be builds on base and requires it: the Jira and doc readers, the Jira writer, the task workspace and
-the shared MCP servers (Atlassian, Notion, the Shopify Dev MCP) are base's
+be builds on base and requires it. base supplies the Jira and doc readers, the Jira writer, the task
+workspace and the shared MCP servers: Atlassian, Notion, the Shopify Dev MCP
 ([plugins/base/README.md](../base/README.md)). base requires slim, so be runs with slim too.
 
 Current release: **be v0.3.3**.
 
 ## Status
 
-- Claude Code only: be is a plugin of skills, one skill reference, a doctor script, a docs-search
+- Claude Code only. be is a plugin of skills, one skill reference, a doctor script, a docs-search
   script and a hooks module (mods). It ships no adapter for another host, and
   `scripts/install.sh --plugin be` exits 2.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
-  not install a dependency on its own: install all three.
+  not install a dependency by itself, so install all three.
 
 ## Install
 
@@ -32,8 +37,8 @@ Current release: **be v0.3.3**.
 /reload-plugins
 ```
 
-`/base-doctor` and `/be-doctor` then check the install (§ Doctor). The same set as settings, in
-`~/.claude/settings.json`:
+Then run `/base-doctor` and `/be-doctor` to check the install (§ Doctor). To enable the same set
+through settings, add this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -46,14 +51,14 @@ Current release: **be v0.3.3**.
 }
 ```
 
-The team plugins fe, qa, be and pm co-install beside base: add the ones your work needs, none of them
+The team plugins fe, qa, be and pm co-install beside base. Add the ones your work needs; none of them
 requires another.
 
 ## Skills
 
-Invoked by their qualified names (`/be:<skill>`). They hand off to base's agents by base's qualified
-names (`base:jira-reader`, `base:doc-reader`, `base:jira-writer`). A write to Jira happens only after
-the user approved the text.
+Call the skills by their qualified names (`/be:<skill>`). They hand off to base's agents by base's
+qualified names (`base:jira-reader`, `base:doc-reader`, `base:jira-writer`). A write to Jira happens
+only after the user approves the text.
 
 | Skill | Does | Uses / hands off to |
 |---|---|---|
@@ -63,8 +68,8 @@ the user approved the text.
 
 ## References
 
-The skills cite be's own files by their path under be's root (`<be root>/…`, the session's
-`be plugin root:` line) and base's by their path under base's root (`<base root>/…`).
+The skills cite be's own files by their path under be's root (`<be root>/…`, from the session's
+`be plugin root:` line). They cite base's files by their path under base's root (`<base root>/…`).
 
 | Reference | Read by | Holds |
 |---|---|---|
@@ -80,22 +85,25 @@ The skills cite be's own files by their path under be's root (`<be root>/…`, t
 
 ## Conventions
 
-be adds one section to the main session's system prompt, after Claude Code's own and base's, with
-the id `be:<name>`: `root`, the line `be plugin root: <path>` the skills resolve `<be root>` from. It
-never changes within a session, so the prompt cache holds. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as a context block of the first user message instead (`prompt.context`, beside CLAUDE.md).
+be adds one section to the main session's system prompt, after Claude Code's own and base's. The
+section has the id `be:<name>`: `root`, the line `be plugin root: <path>`. The skills resolve
+`<be root>` from this line. It never changes within a session, so the prompt cache holds.
 
-**Subagents** get the same line as added context at their start (Claude Code's `SubagentStart`),
-except base's readers and writer (`base:jira-reader`, `base:jira-writer`, `base:figma-reader`,
-`base:doc-reader`) and Claude Code's `claude-code-guide` and `statusline-setup`, which get nothing
-from be.
+Some sessions draw no surface, for example a claude.ai cloud session or `claude -p`. There the engine
+composes its prompt without the plugins. The same sections then arrive once as a context block of the
+first user message instead (`prompt.context`, beside CLAUDE.md).
 
-**base required:** at a session start be looks for base's skills in the command list. Without them it
-shows one toast and writes one `install` line: `be: needs the base plugin — claude plugin install
-base@domaine`.
+**Subagents** get the same line as added context at their start (Claude Code's `SubagentStart`). Some
+agents get nothing from be: base's readers and writer (`base:jira-reader`, `base:jira-writer`,
+`base:figma-reader`, `base:doc-reader`) and Claude Code's `claude-code-guide` and `statusline-setup`.
+
+**base required:** at a session start be looks for base's skills in the command list. If they are
+missing, be shows one toast and writes one `install` line:
+`be: needs the base plugin — claude plugin install base@domaine`.
 
 ## Doctor
 
-`/be-doctor` checks be's side of the install and prints one PASS / FAIL / SKIP / WARN row per check,
+`/be-doctor` checks be's side of the install. It prints one PASS / FAIL / SKIP / WARN row per check,
 the counts, and the last 10 `be.events` lines. `/base-doctor` checks base's side (slim, the MCP servers).
 
 | Row | Checks |
@@ -109,31 +117,31 @@ the counts, and the last 10 `be.events` lines. `/base-doctor` checks base's side
 | `base-live`, `slim-live` | what this session loaded: base's skills, slim's `mcp__slim__view` tool |
 | `dev-mcp-live` | the Shopify Dev MCP's `learn_shopify_api` tool is in this session; WARN when it is not (the server declared but not connected): the skills then fall back to `scripts/shopify-docs.cjs` |
 
-The first six rows come from `scripts/doctor.cjs`, which also runs by hand:
-`node <be plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`; it exits 1 when a row
-fails. By hand its `event-log` row reads the newest session folder unless `--log-dir` names one. A
-static `base` FAIL for a base the session loaded anyway (a `--plugin-dir` load) reads as a WARN in
-`/be-doctor`. One `doctor` line goes to `be.events` per run.
+The first six rows come from `scripts/doctor.cjs`. You can also run it by hand:
+`node <be plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`. It exits 1 when a row
+fails. By hand, its `event-log` row reads the newest session folder unless `--log-dir` names one. A
+static `base` FAIL for a base that the session loaded anyway (a `--plugin-dir` load) reads as a WARN
+in `/be-doctor`. Each run writes one `doctor` line to `be.events`.
 
 ## Event log on disk
 
-be writes its lines to `$HOME/.claude/domaine/log/<session-id>/be.jsonl` under the same contract as
-every Domaine plugin ([plugins/base/README.md](../base/README.md#event-log-on-disk)):
+be writes its lines to `$HOME/.claude/domaine/log/<session-id>/be.jsonl`. The file follows the
+same contract as every Domaine plugin ([plugins/base/README.md](../base/README.md#event-log-on-disk)):
 
 - **Line:** `{"ts":"…","plugin":"be","version":"<be's version>","session":"<id>","kind":"doctor","agent":"main","text":"6 passed, 0 failed, 0 skipped"}`.
 - **be's lines:** `start` (`be <version>`, first in every session's file, once), `install` (base is not
   loaded), `doctor` (a `/be-doctor` run's counts). The same lines fill `be.events` (oldest first, at
   most 200).
-- **Writing:** the whole file is rewritten after every line, at most 2000 lines or 256 KB, oldest
-  dropped first; a reload of the module goes on from the file of the same session. A write that
-  fails never reaches the hook; the first failure in a session toasts `be: event log not written:
-  <reason>`.
+- **Writing:** be rewrites the whole file after every line. The file keeps at most 2000 lines or
+  256 KB and drops the oldest lines first. After a reload, the module continues from the file of the
+  same session. A failed write never reaches the hook. The first failure in a session toasts
+  `be: event log not written: <reason>`.
 - **Off:** `BE_EVENT_LOG=0` stops the file and the `be.events` lines alike.
 - **Clean-up:** be never deletes; base sweeps old session folders.
 
 ## Environment switches
 
-Every switch be reads has a row here; set it in `~/.claude/settings.json` → `env`.
+Every switch be reads has a row here. Set it in `~/.claude/settings.json` → `env`.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -150,8 +158,8 @@ Every switch be reads has a row here; set it in `~/.claude/settings.json` → `e
 - `tests/be-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
 - `tests/be-shopify-docs-sim.sh` — `scripts/shopify-docs.cjs` against a local stub: an answer, the cap,
   a timeout, soft errors, a refused connection, usage.
-- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no legacy plugin name is left
-  (the same checker for every team plugin on base).
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, and no legacy plugin name
+  is left. The same checker runs for every team plugin on base.
 
 How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md).
 

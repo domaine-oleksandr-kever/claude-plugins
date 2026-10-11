@@ -1,7 +1,8 @@
 # json-slim fixtures
 
-Inputs for the `reduction:*` cases in `../json-slim-fixtures.mjs` and the M1 byte-reduction
-measurements in `MCP-COMPRESSION-PLAN.md`. Secrets scrubbed (emails redacted; no tokens).
+These files are the inputs for the `reduction:*` cases in `../json-slim-fixtures.mjs`. They are
+also the inputs for the M1 byte-reduction measurements in `MCP-COMPRESSION-PLAN.md`. Secrets are
+scrubbed: emails are redacted, and the files contain no tokens.
 
 | File | Source | Shape | Notes |
 |---|---|---|---|
@@ -14,26 +15,29 @@ measurements in `MCP-COMPRESSION-PLAN.md`. Secrets scrubbed (emails redacted; no
 | `figma-node-rest.json` | **synthetic** — Figma REST `/v1/files/:key/nodes` shape | PLP frame w/ 60 repeated product-card instances | grounded in the real node's repetition; 76.8% reduction. The dev-mode MCP does not emit large JSON node trees; the REST API does (Phase 2). |
 | `figma-variables-local.json` | **synthetic** — Figma REST `/v1/variables/local` shape | 2 collections (`Core` w/ Light+Dark modes, `Primitives` w/ one), 7 variables: colours, floats, and a `VARIABLE_ALIAS` chain | the `--variables` input of `figma-node-slim.cjs` (`tests/figma-node-slim-fixtures.mjs`): it NAMES the `boundVariables` ids, so a binding reads `$Collection/Group/Name (<node value>)`, and the alias rows pin the follow-the-chain rule. Its `Core/Space/Gutter` is deliberately 20 against the fixture node's own gap of 12 — that is the `; var default <v>` discrepancy row. No client tokens — names and values are invented. |
 
-`figma-node-rest.json` is also the size gate of `tests/figma-node-slim-fixtures.mjs`, the REST-path
-compactor: **84.2%** (192,234 B → 30,464 B of markdown build tree). Nothing folds there — the 60 cards
-drift one colour step per card, so they are 60 genuinely different styles and the sibling fold rail
-(never merge siblings whose structure, size, layout or style differs) correctly refuses them. The fold
-itself is covered by the suite's synthetic `fold:*` rows.
+`figma-node-rest.json` is also the size gate of `tests/figma-node-slim-fixtures.mjs`, the suite of
+the REST-path compactor. The reduction is **84.2%** (192,234 B → 30,464 B of markdown build tree).
+Nothing folds in this file. Each of the 60 cards changes the colour by one step, so the cards have
+60 really different styles. The sibling fold rail never merges siblings with a different structure,
+size, layout or style, so it correctly refuses these cards. The synthetic `fold:*` rows of the suite
+test the fold itself.
 
-`figma-design-context.jsx` is 28 KB rather than a couple of KB because the jsx stage's win is
-cross-sibling: two adjacent Comparison Column subtrees are the smallest real excerpt that still
-carries a repeated className dictionary worth a legend, the `$N` var-token pass and a ×N fold.
-Anything smaller drops the excerpt's ratio to ~0.3 and the assertions with it. The whole capture —
-211 KB of JSX inside a 219 KB MCP envelope — stays out of the repo at
-`.claude/tasks/mcp-compression/figma-captures/` (git-excluded).
+`figma-design-context.jsx` is 28 KB, not a few KB, because the jsx stage saves bytes across
+siblings. Two adjacent Comparison Column subtrees are the smallest real excerpt that still has
+these three parts: a repeated className dictionary that is worth a legend, the `$N` var-token pass
+and a ×N fold. A smaller excerpt drops the ratio to ~0.3, and the assertions fail. The full capture
+is 211 KB of JSX inside a 219 KB MCP envelope. It stays out of the repo, at
+`.claude/tasks/mcp-compression/figma-captures/` (excluded from git).
 
-`../parity/fixtures/smart_crusher/` holds Headroom's 17 SmartCrusher parity fixtures (vendored
-verbatim, Apache-2.0 — see `../parity/NOTICE`); they are the array-crush porting contract.
+`../parity/fixtures/smart_crusher/` holds the 17 SmartCrusher parity fixtures of Headroom. We
+copied them without changes (Apache-2.0; see `../parity/NOTICE`). They define the contract for the
+port of the array crush.
 
 ## slim channel fixtures
 
-Inputs for `../slim-engines.mjs`, the engine suites (`../html-`, `../a11y-`, `../lint-`, `../listing-`,
-`../csv-slim-fixtures.mjs`) and the per-channel rows of `../slim-fixtures.mjs`. All synthetic; none is derived from third-party content.
+These files are the inputs for `../slim-engines.mjs`, for the engine suites (`../html-`, `../a11y-`,
+`../lint-`, `../listing-`, `../csv-slim-fixtures.mjs`) and for the per-channel rows of
+`../slim-fixtures.mjs`. All of them are synthetic, and none comes from third-party content.
 
 | File | Source | Shape | Notes |
 |---|---|---|---|
@@ -61,12 +65,13 @@ Inputs for `../slim-engines.mjs`, the engine suites (`../html-`, `../a11y-`, `..
 | `small.csv` | **synthetic** — script-built once | 15 lines, 4 columns | under the 20-record detection floor (sniffs as prose); forced through the csv engine it is `no-gain` |
 | `sync-commas.log` | **synthetic** — script-built once | ~39 KB, 400 log lines with a millisecond comma and two commas per message, so every line has the same comma count | must stay `log`: the csv header rule refuses a first row that starts with a date |
 
-The 12,480-row product export (~2.3 MB, 14 columns, quoted `Body (HTML)`) comes from
-`plugins/slim/evals/_shared/make-products-csv.cjs` at run time, like `orders.json` below.
+`plugins/slim/evals/_shared/make-products-csv.cjs` makes the product export at run time, as with
+`orders.json` below. The export has 12,480 rows (~2.3 MB, 14 columns, quoted `Body (HTML)`).
 
 ## xml engine fixtures
 
-Inputs for `../xml-slim-fixtures.mjs`. Synthetic, script-built once; invented store, products and hosts.
+These files are the inputs for `../xml-slim-fixtures.mjs`. A script built them once. They are
+synthetic, and the store, products and hosts are invented.
 
 | File | Shape | Notes |
 |---|---|---|
@@ -74,10 +79,11 @@ Inputs for `../xml-slim-fixtures.mjs`. Synthetic, script-built once; invented st
 | `rss-feed.xml` | ~52 KB RSS 2.0 blog feed: 40 items, `guid isPermaLink`, an `atom:link`, CDATA HTML bodies | one uniform record list; CDATA bodies elided to a length |
 | `icon-snippet.liquid` | a theme snippet: an inline `<svg>` with `{% if %}` branches and a `{{ … \| t }}` title | must sniff as `template` and stay untouched |
 
-The 50,000-URL sitemap (~8.9 MB) and the ~430 KB Inkscape SVG are generated by the suite at run time.
-`figma-metadata-3326-39542.xml` (above) is the Figma `get_metadata` row: every node id kept.
+The suite generates the sitemap with 50,000 URLs (~8.9 MB) and the Inkscape SVG (~430 KB) at run
+time. `figma-metadata-3326-39542.xml` (above) is the Figma `get_metadata` row; the engine keeps
+every node id.
 
-The 300 KB Read row and the eval's `orders.json` come from `plugins/slim/evals/_shared/make-orders.cjs`
-at run time; `jql-nodes-ELC.json` is the one fixture of that size committed, because the delivery
-suite reads it as a file.
+`plugins/slim/evals/_shared/make-orders.cjs` makes the 300 KB Read row and the `orders.json` of
+the eval at run time. `jql-nodes-ELC.json` is the only committed fixture of that size, because the
+delivery suite reads it as a file.
 
