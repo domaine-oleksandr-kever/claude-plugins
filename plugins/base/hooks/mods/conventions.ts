@@ -44,10 +44,17 @@ async function pluginVersions($: $): Promise<string> {
   return versionsLine(versionsOf(installed, $.plugin.root, own, slim, enabled))
 }
 
+/** The dogfood section under BASE_DOGFOOD=1, worded for a session no surface draws where none does; else null. */
+async function dogfood($: $): Promise<string | null> {
+  if ((await $.env.get('BASE_DOGFOOD')) !== '1') return null
+  const surfaceless = (await $.session.surfaces().catch(() => null))?.length === 0
+  return dogfoodSection(await pluginVersions($), surfaceless)
+}
+
 /**
  * The sections in session order, each `base:<name>`: the switches are read on every render, and the
- * text depends on nothing else but the plugin versions in the dogfood section, so a render repeats the
- * last one byte for byte (the prompt cache).
+ * text depends on nothing else but the plugin versions and the surfaces in the dogfood section, so a render
+ * repeats the last one byte for byte (the prompt cache).
  */
 export async function sections($: $): Promise<PromptComposeSection[]> {
   const root = $.plugin.root
@@ -61,13 +68,14 @@ export async function sections($: $): Promise<PromptComposeSection[]> {
   ]
   if (lean) parts.push(['lean-code', LEAN_CODE])
   if (ste) parts.push(['writing-style', WRITING_STYLE])
-  if ((await $.env.get('BASE_DOGFOOD')) === '1') parts.push(['dogfood', dogfoodSection(await pluginVersions($))])
+  const df = await dogfood($)
+  if (df) parts.push(['dogfood', df])
   return parts.map(([name, text]) => ({ id: `base:${name}`, text, scope: 'session' }))
 }
 
 /**
- * The root line and the untrusted-content rail for every agent; the code conventions for one that writes code.
- * Empty for a fork: it inherits the parent's system prompt, which already carries base's sections.
+ * The root line and the untrusted-content rail for every agent; the code conventions for one that writes code;
+ * the dogfood section under BASE_DOGFOOD=1, since any agent may run a plugin script. Empty for a fork: it inherits the parent's system prompt, which already carries base's sections.
  */
 export async function subagentContext($: $, agentType: string): Promise<string> {
   if (agentType === 'fork') return ''
@@ -76,6 +84,8 @@ export async function subagentContext($: $, agentType: string): Promise<string> 
     parts.push(COMMENT_DISCIPLINE)
     if ((await $.env.get('BASE_LEAN')) !== '0') parts.push(LEAN_CODE)
   }
+  const df = await dogfood($)
+  if (df) parts.push(df)
   return parts.join('\n\n')
 }
 

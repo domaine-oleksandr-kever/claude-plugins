@@ -13,6 +13,7 @@ import {
   bashFailed,
   defectBody,
   enabledNames,
+  fenced,
   fileName,
   indexLine,
   isRepo,
@@ -146,7 +147,10 @@ const serial = <T>(job: () => Promise<T>): Promise<T> => {
   return next
 }
 
-/** Writes the report and its index line; the result names the path (and the issue). */
+/**
+ * Writes the report and its index line; the result names the path (and the issue). Where no surface draws the
+ * file and `~` die with the session, so the result carries the whole report and the issue is filed by default.
+ */
 async function report($: $, d: Defect): Promise<string> {
   const root = await $.session.root()
   const now = await $.clock.now()
@@ -170,7 +174,8 @@ async function report($: $, d: Defect): Promise<string> {
     git($, root, ['rev-parse', '--abbrev-ref', 'HEAD']),
     git($, root, ['rev-parse', '--short', 'HEAD']),
   ])
-  const surfaces = await $.session.surfaces().catch(() => [] as readonly string[])
+  const surfaces = await $.session.surfaces().catch(() => null)
+  const surfaceless = surfaces?.length === 0
   const claudeCode = (await $.session.version().catch(() => null))?.version ?? null
   const body = defectBody(d, { version: v.get(d.plugin) ?? 'unknown', date, session: sid, workId }, {
     root,
@@ -178,7 +183,7 @@ async function report($: $, d: Defect): Promise<string> {
     branch,
     commit,
     versions: versionsLine(v),
-    surfaces: surfaces.length ? surfaces.join(', ') : 'none (nothing draws)',
+    surfaces: surfaces === null ? 'unknown' : surfaces.length ? surfaces.join(', ') : 'none (nothing draws)',
     claudeCode,
     session: sid,
     workId,
@@ -193,14 +198,20 @@ async function report($: $, d: Defect): Promise<string> {
   const lines = [`Plugin defect: ${d.title} → ${path}`]
   const home = await homeDir($)
   if (home) {
+    const index = `${home}/index.md`
     try {
-      const index = `${home}/index.md`
-      const prior = (await $.fs.read(index).catch(() => '')) as string
-      await $.fs.write(index, `${prior}${prior && !prior.endsWith('\n') ? '\n' : ''}${indexLine(date, d, path)}\n`)
-      lines.push(`Index: ${index}`)
-    } catch {}
+      // An index that exists but will not read is skipped, never rewritten from '' over its lines.
+      const prior = (await $.fs.exists(index)) ? await $.fs.read(index) : ''
+      try {
+        await $.fs.write(index, `${prior}${prior && !prior.endsWith('\n') ? '\n' : ''}${indexLine(date, d, path)}\n`)
+        lines.push(`Index: ${index}`)
+      } catch {}
+    } catch (err) {
+      lines.push(`Index not updated: ${index} did not read (${String((err as Error)?.message ?? err).slice(0, 160)})`)
+    }
   }
-  if (d.github) lines.push(await fileIssue($, d, path, installed, config))
+  if (d.github ?? surfaceless) lines.push(await fileIssue($, d, path, installed, config))
+  if (surfaceless) lines.push('', 'No surface draws here: this file and ~ end with the session. Paste the whole report below into your reply, in this fenced block, under the Plugin defect: line.', '', fenced(body, 'markdown'))
   return lines.join('\n')
 }
 

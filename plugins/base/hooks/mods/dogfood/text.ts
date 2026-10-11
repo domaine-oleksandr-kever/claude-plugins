@@ -15,7 +15,7 @@ export const SLUG_CHARS = 40
 export const WINDOW_DAYS = 7
 export const NUDGE = 'base dogfood: a plugin script failed — report it with plugin_defect before working around it'
 
-export const TOOL_DESC = `Report a defect in a Domaine plugin (${PLUGINS.join(', ')}) you hit while working: a script that failed or returned odd output, a hook or mod that threw, a skill that contradicts the code, a doctor FAIL, wrong slim output, a convention wrong for this host. Writes a report under the project's .claude/plugin-defects/ and returns its path; github: true also files a GitHub issue (only when the person asked). Never put secrets, tokens or passwords in any field.`
+export const TOOL_DESC = `Report a defect in a Domaine plugin (${PLUGINS.join(', ')}) you hit while working: a script that failed or returned odd output, a hook or mod that threw, a skill that contradicts the code, a doctor FAIL, wrong slim output, a convention wrong for this host. Writes a report under the project's .claude/plugin-defects/ and returns its path; github: true also files a GitHub issue (only when the person asked). Where no surface draws (a cloud session, claude -p) it returns the whole report and files the issue unless github: false. Never put secrets, tokens or passwords in any field.`
 
 export const TOOL_SCHEMA = {
   type: 'object',
@@ -29,7 +29,7 @@ export const TOOL_SCHEMA = {
     reproduce: { type: 'string', description: 'The commands or the tool call that show it.' },
     evidence: { type: 'string', description: `The raw output, error or stub; cut at ${EVIDENCE_BYTES} bytes.` },
     suspect: { type: 'string', enum: [...SUSPECTS], description: 'Whose fault it looks like.' },
-    github: { type: 'boolean', description: 'Also file a GitHub issue; only when the person asked. Default false.' },
+    github: { type: 'boolean', description: 'Also file a GitHub issue; true only when the person asked. Default false; where no surface draws, default true.' },
   },
   required: ['plugin', 'kind', 'title', 'observed', 'expected'],
 } as const
@@ -45,10 +45,13 @@ export type Defect = {
   reproduce: string
   evidence: string
   suspect: (typeof SUSPECTS)[number]
-  github: boolean
+  /** null = not given: the session decides (no surface draws → file). */
+  github: boolean | null
 }
 
-const str = (v: unknown) => (typeof v === 'string' ? v : '')
+// C0 but tab and newline, DEL, C1: an ESC or NUL must not reach a file name, a heading, the index or gh's argv.
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
+const str = (v: unknown) => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n').replace(CONTROL, '') : '')
 const oneOf = <T extends string>(list: readonly T[], v: unknown): T | null => (list as readonly unknown[]).includes(v) ? (v as T) : null
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)} [cut at ${n} characters]` : s)
 
@@ -70,7 +73,7 @@ export function parseDefect(a: Record<string, unknown>): Defect | string {
     reproduce: cut(str(a.reproduce).trim(), FIELD_CHARS),
     evidence: capEvidence(str(a.evidence)),
     suspect: oneOf(SUSPECTS, a.suspect) ?? 'unsure',
-    github: a.github === true,
+    github: typeof a.github === 'boolean' ? a.github : null,
   }
 }
 
@@ -99,11 +102,11 @@ export function fileName(date: string, plugin: Plugin, slug: string, n: number):
   return `${date}-${plugin}-${slug}${n > 1 ? `-${n}` : ''}.md`
 }
 
-/** A fence longer than any backtick run in `text`. */
-function fenced(text: string): string {
+/** A fence longer than any backtick run in `text`: the text cannot close it and forge a section after it. */
+export function fenced(text: string, lang = 'text'): string {
   const longest = Math.max(2, ...[...text.matchAll(/`+/g)].map(m => m[0].length))
   const f = '`'.repeat(longest + 1)
-  return `${f}text\n${text}\n${f}`
+  return `${f}${lang}\n${text}\n${f}`
 }
 
 export type Environment = {
@@ -139,11 +142,11 @@ export function defectBody(d: Defect, m: Meta, env: Environment): string {
     '',
     '## Observed',
     '',
-    or(d.observed),
+    d.observed ? fenced(d.observed) : '(none given)',
     '',
     '## Expected',
     '',
-    or(d.expected),
+    d.expected ? fenced(d.expected) : '(none given)',
     '',
     '## Reproduce',
     '',
@@ -282,7 +285,13 @@ export function recent(list: readonly Seen[], nowMs: number): Seen[] {
 
 export const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
-export const dogfoodSection = (versions: string) => `## base convention — dogfood mode
+const RULE_DRAWN = `Offer a GitHub issue (\`github: true\`); never create one unasked.`
+const RULE_SURFACELESS = `No surface draws in this session (a cloud session, \`claude -p\`): the report file
+and \`~\` do not outlive it. \`plugin_defect\` returns the whole report and files the GitHub issue
+itself unless you pass \`github: false\`. Paste the whole report into your reply, in a fenced block
+under the \`Plugin defect:\` line, so the owner can copy it into a session in the plugin repo.`
+
+export const dogfoodSection = (versions: string, surfaceless = false) => `## base convention — dogfood mode
 
 The Domaine plugins in this session are unstable development builds: ${versions}. You are
 dogfooding them: a plugin defect is a finding to report, not noise to route around.
@@ -294,5 +303,5 @@ needed); a convention sentence is wrong for this host.
 
 **Rule:** ALWAYS report a defect with the \`plugin_defect\` tool before or while you work
 around it — never silently. Your reply then carries one line \`Plugin defect: <title> → <path>\`.
-Offer a GitHub issue (\`github: true\`); never create one unasked. Never put secrets, tokens or
-storefront passwords in a report.`
+${surfaceless ? RULE_SURFACELESS : RULE_DRAWN} Never put secrets, tokens or storefront passwords in a
+report.`

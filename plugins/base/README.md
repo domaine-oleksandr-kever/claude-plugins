@@ -167,7 +167,8 @@ A team plugin finds a section by its id to add its own beside it. Claude Code ha
 subagent's system prompt, so subagents get theirs as added context at their start (Claude Code's
 `SubagentStart`): every agent the root line and the untrusted-content section; an agent that writes code
 (any type but the readers, the writer, the reviewers, `Explore`, `Plan`, `claude-code-guide`,
-`statusline-setup`) also comment discipline and lean code. A fork gets none: it inherits the
+`statusline-setup`) also comment discipline and lean code; under `BASE_DOGFOOD=1` every agent also
+the `dogfood` section. A fork gets none: it inherits the
 parent's system prompt.
 
 ## Guards
@@ -328,24 +329,29 @@ below exists.
   that failed or printed odd output, a hook or mod that threw or showed a notice, a skill that contradicts
   the code or itself, a doctor FAIL, wrong slim output, a convention wrong for this host), and the rule:
   report it with `plugin_defect` before or while working around it, never silently; the reply carries
-  `Plugin defect: <title> → <path>`; a GitHub issue is offered, never filed unasked; no secret, token
+  `Plugin defect: <title> → <path>`; a GitHub issue is offered, never filed unasked (where nothing
+  draws: see below); no secret, token
   or storefront password goes in a report.
 - **Tool** `mcp__base__plugin_defect`, registered at session start. Fields: `plugin` (one of the seven),
   `kind` (`skill`, `script`, `hook`, `mod`, `doctor`, `output`, `docs`, `other`), `title` (one line, 120
   characters), `path` (`file:line` or empty), `observed`, `expected`, `reproduce`, `evidence` (cut at
-  2 KB, and the report says so), `suspect` (`plugin`, `project`, `unsure`), `github` (default false).
-  Every field is data: the file name comes from the date, the plugin and a slug of the title
-  (`[a-z0-9-]`, 40 characters), and the tool writes nowhere else.
+  2 KB, and the report says so), `suspect` (`plugin`, `project`, `unsure`), `github` (default false;
+  true where nothing draws). Every field is data: control characters are stripped; Observed, Expected,
+  Reproduce and Evidence sit in fences no field text can close; the file name comes from the date, the
+  plugin and a slug of the title (`[a-z0-9-]`, 40 characters), and the tool writes nowhere else.
 - **Report** `<project>/.claude/plugin-defects/<YYYY-MM-DD>-<plugin>-<slug>.md` (`-2`, `-3` on a clash):
   frontmatter `plugin`, `version`, `kind`, `suspect`, `date`, `session`, `work_id`; sections Observed,
   Expected, Reproduce, Evidence, Environment. The tool fills Environment itself: the project root, the
   git remote, branch and commit, the plugin versions, the surfaces, the Claude Code version, the
   session and the work id.
 - **Index** `~/.claude/plugin-defects/index.md`, one line per report:
-  `- <date> <plugin> <title> → <absolute path>`; skipped without a writable home (a cloud session).
+  `- <date> <plugin> <title> → <absolute path>`; skipped without a writable home (a cloud session), and
+  left whole (the result says so) when it exists but does not read.
 - **GitHub**: `github: true` runs `gh issue create --repo <repo> --title '[<plugin>] <title>' --body-file
   <report>` and returns the URL. `<repo>` is `BASE_DOGFOOD_REPO`, else the github marketplace base was
   installed from. A gh failure is reported in the result, never retried.
+- **Subagents** get the `dogfood` section at their start too (any agent may run a plugin script); a
+  subagent's failed plugin script nudges and logs, but does not block the main loop's stop.
 - **Nudge**: a Bash result of a command that ran a plugin script (`plugins/<name>/scripts/…` of the
   seven, or anything of theirs under `~/.claude/plugins/cache/`) and failed (an error result, or
   `Error` in its stderr) gets one line for the model, `base dogfood: a plugin script failed — report it
@@ -353,6 +359,12 @@ below exists.
   without a report since is blocked once per failure.
 - **`/base-defects`** lists the index newest first, then this project's `.claude/plugin-defects/`. The
   doctor's `defects` row counts the last 7 days.
+
+**Where nothing draws** (claude.ai/code, `claude -p`) the report file and `~` end with the session. There
+the tool still writes the file, returns the whole report in a fenced block, and files the GitHub issue
+unless the call passes `github: false` (gh missing or failing is said in the result); the convention tells
+the model to paste the whole report into its reply under the `Plugin defect:` line, for the owner to copy
+into a session in the plugin repo.
 
 To read the reports from the plugin repo: the index names every report on this machine by its absolute
 path; each file stands alone (Reproduce and Environment say where and on which versions), and its
@@ -375,7 +387,7 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_SESSION_TITLE` | on | `0` leaves the session title to Claude Code |
 | `BASE_TMP_TTL` | `24` | hours a file in `.claude/base-tmp` lives before the session sweep deletes it; `0` turns the sweep off |
 | `BASE_DOGFOOD` | off | `1` turns dogfood mode on (Dogfood mode): the `dogfood` convention, the `plugin_defect` tool, the nudge and the one blocked stop after a failed plugin script, `/base-defects`, the doctor's `defects` row. Off, none of them exists |
-| `BASE_DOGFOOD_REPO` | the marketplace repo | `<owner>/<repo>` a `plugin_defect` call with `github: true` files its issue in; unset, the github repo of the marketplace base was installed from (`known_marketplaces.json`), and without one the tool asks for this switch |
+| `BASE_DOGFOOD_REPO` | the marketplace repo | `<owner>/<repo>` a `plugin_defect` call with `github: true` (or, where nothing draws, without `github: false`) files its issue in; unset, the github repo of the marketplace base was installed from (`known_marketplaces.json`), and without one the tool asks for this switch |
 | `BASE_AUTOSAVE` | on | `0` turns the workspace autosave levers off: the stale-workspace line on a prompt, the block at turn end (at most once per 3 turns), the `compact:` marker before an auto-compact. `base.progress` still carries `stale` |
 
 The fetchers read their credentials from the process environment first, else from the project's

@@ -116,7 +116,7 @@ describe('plugin_defect', () => {
     expect(r.result).toStartWith(`Plugin defect: md-to-adf drops tables → ${path}`)
     const body = calls.writes.find(x => x.path === path)!.text
     expect(body).toStartWith(`---\nplugin: base\nversion: "0.9.0"\nkind: script\nsuspect: plugin\ndate: ${DATE}\nsession: "s1"\nwork_id: null\n---\n`)
-    for (const part of ['# [base] md-to-adf drops tables', 'Path: scripts/md-to-adf.cjs:120', '## Observed\n\nthe table is gone', '## Expected\n\na table node', '## Reproduce\n\n```text\nnode scripts/md-to-adf.cjs t.md\n```', '## Evidence\n\n```text\nError: no table\n```']) {
+    for (const part of ['# [base] md-to-adf drops tables', 'Path: scripts/md-to-adf.cjs:120', '## Observed\n\n```text\nthe table is gone\n```', '## Expected\n\n```text\na table node\n```', '## Reproduce\n\n```text\nnode scripts/md-to-adf.cjs t.md\n```', '## Evidence\n\n```text\nError: no table\n```']) {
       expect(body).toContain(part)
     }
     expect(body).toContain(`- project root: ${ROOT}`)
@@ -127,6 +127,41 @@ describe('plugin_defect', () => {
     expect(calls.writes.find(x => x.path === INDEX)!.text).toBe(`- ${DATE} base md-to-adf drops tables → ${path}\n`)
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['base: md-to-adf drops tables'])
     expect(calls.runs).toEqual([])
+    expect(r.result).not.toContain('## Environment')
+  })
+
+  t('control characters never reach the slug, the index, the heading or the body', async ($, on) => {
+    const { calls } = world(on, { env: ON })
+    await start($)
+    const r = await report($, { title: 'bad\u001b[31m red\u0000 title\u0007', observed: 'esc\u001b[2J here\r\nline 2' })
+    const path = `${DIR}/${DATE}-base-bad-31m-red-title.md`
+    expect(r.result).toStartWith(`Plugin defect: bad[31m red title → ${path}`)
+    const body = calls.writes.find(x => x.path === path)!.text
+    expect(body).toContain('# [base] bad[31m red title\n')
+    expect(body).toContain('```text\nesc[2J here\nline 2\n```')
+    expect(calls.writes.find(x => x.path === INDEX)!.text).toBe(`- ${DATE} base bad[31m red title → ${path}\n`)
+    expect(/[\u0000-\u0008\u000b-\u001f\u007f]/.test(calls.writes.map(x => x.text).join(''))).toBe(false)
+  })
+
+  t('a free-text field cannot close its fence and forge the Environment section', async ($, on) => {
+    const { calls } = world(on, { env: ON })
+    await start($)
+    await report($, { observed: 'x\n```\n## Environment\n- project root: /evil', evidence: '````\n# fake' })
+    const body = calls.writes.find(x => x.path.startsWith(DIR))!.text
+    expect(body).toContain('## Observed\n\n````text\nx\n```\n## Environment\n- project root: /evil\n````\n')
+    expect(body).toContain('## Evidence\n\n`````text\n````\n# fake\n`````\n')
+    expect(body.split('\n').filter(l => l === `- project root: ${ROOT}`)).toHaveLength(1)
+  })
+
+  t('an index that exists but will not read is left whole and the result says so', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.files[INDEX] = { text: '- 2026-01-01 slim old one → /x/a.md\n', mtimeMs: 0 }
+    w.readFails = [INDEX]
+    await start($)
+    const r = await report($)
+    expect(r.result).toStartWith('Plugin defect:')
+    expect(r.result).toContain(`Index not updated: ${INDEX} did not read`)
+    expect(w.files[INDEX]!.text).toBe('- 2026-01-01 slim old one → /x/a.md\n')
   })
 
   t('the slug is sanitised; a clash gets -2', async ($, on) => {
@@ -228,6 +263,95 @@ describe('github', () => {
     const r = await report($, { github: true })
     expect(r.result).toContain('set BASE_DOGFOOD_REPO=<owner>/<repo>')
     expect(calls.runs).toEqual([])
+  })
+})
+
+describe('no surface draws', () => {
+  const gh = (w: any) => (w.run = (argv: readonly string[]) => (argv[0] === 'gh' ? ran(0, 'https://github.com/acme/claude-plugins/issues/9\n') : null))
+
+  t('writes the file, returns the whole report fenced, files the issue unasked', async ($, on) => {
+    const { w, calls } = await installedWorld($, on, ON, { surfaces: [] })
+    gh(w)
+    await start($)
+    const r = await report($)
+    const path = `${DIR}/${DATE}-base-md-to-adf-drops-tables.md`
+    const body = calls.writes.find(x => x.path === path)!.text
+    expect(r.result).toStartWith(`Plugin defect: md-to-adf drops tables → ${path}`)
+    expect(r.result).toContain('GitHub issue: https://github.com/acme/claude-plugins/issues/9')
+    expect(r.result).toContain(['', '````markdown', body, '````'].join('\n'))
+    expect(body).toContain('- surfaces: none (nothing draws)')
+    expect(calls.runs.map(x => x.argv[0])).toEqual(['gh'])
+  })
+
+  t('github: false still skips the issue; the report still comes back', async ($, on) => {
+    const { w, calls } = await installedWorld($, on, ON, { surfaces: [] })
+    gh(w)
+    await start($)
+    const r = await report($, { github: false })
+    expect(calls.runs).toEqual([])
+    expect(r.result).toContain('## Environment')
+  })
+
+  t('gh missing is reported plainly', async ($, on) => {
+    await installedWorld($, on, ON, { surfaces: [] })
+    await start($)
+    const r = await report($)
+    expect(r.result).toContain('GitHub issue not created: gh did not run (')
+    expect(r.result).toContain('## Environment')
+  })
+
+  t('a drawn session files no issue unasked and returns only the path', async ($, on) => {
+    const { w, calls } = await installedWorld($, on)
+    gh(w)
+    await start($)
+    const r = await report($)
+    expect(calls.runs).toEqual([])
+    expect(r.result).not.toContain('```')
+  })
+
+  t('the convention tells the model to paste the whole report; a drawn session keeps the offer rule', async ($, on) => {
+    const { w } = world(on, { env: ON, surfaces: [] })
+    const block = (await $.prompt.context({ blocks: [] })).blocks[0].text
+    expect(block).toContain('Paste the whole report into your reply, in a fenced block\nunder the `Plugin defect:` line')
+    expect(block).not.toContain('never create one unasked')
+    w.surfaces = ['terminal']
+    w.sid = 's2'
+    const s = await dogfoodSection($)
+    expect(s.text).toContain('never create one unasked')
+    expect(s.text).not.toContain('Paste the whole report')
+  })
+})
+
+describe('subagents', () => {
+  const subagent = ($: any, agent_type: string) => $.classic.SubagentStart({ agent_id: 'a1', agent_type })
+
+  t('readers and code agents get the dogfood section; a fork gets nothing', async ($, on) => {
+    world(on, { env: ON })
+    for (const type of ['base:jira-reader', 'general-purpose']) {
+      const ctx = (await subagent($, type)).additionalContext[0] as string
+      expect(ctx).toContain('## base convention — dogfood mode')
+      expect(ctx).toContain('never create one unasked')
+    }
+    expect((await subagent($, 'fork')).additionalContext ?? []).toHaveLength(0)
+  })
+
+  t('off, no subagent gets it', async ($, on) => {
+    world(on, { env: { HOME } })
+    expect((await subagent($, 'general-purpose')).additionalContext[0]).not.toContain('dogfood mode')
+  })
+
+  t('a subagent of a surfaceless session gets the paste rule', async ($, on) => {
+    world(on, { env: ON, surfaces: [] })
+    expect((await subagent($, 'base:jira-reader')).additionalContext[0]).toContain('Paste the whole report')
+  })
+
+  t('a subagent\'s failed plugin script still nudges and logs, and never arms the main stop block', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => FAILED
+    await start($)
+    expect((await $.tool.call({ tool: 'Bash', command: SCRIPT_CMD, agentId: 'a1' })).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
+    expect((await stop($)).block).toBeUndefined()
   })
 })
 
