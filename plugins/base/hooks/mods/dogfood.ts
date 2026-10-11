@@ -138,6 +138,14 @@ async function fileIssue($: $, d: Defect, path: string, installed: string | null
   return url ? `GitHub issue: ${url}` : `GitHub issue created in ${repo}; gh printed no URL`
 }
 
+// Reports run one at a time: the free-name probe and the index read-modify-write would race in parallel calls.
+let queue: Promise<unknown> = Promise.resolve()
+const serial = <T>(job: () => Promise<T>): Promise<T> => {
+  const next = queue.then(job, job)
+  queue = next.catch(() => undefined)
+  return next
+}
+
 /** Writes the report and its index line; the result names the path (and the issue). */
 async function report($: $, d: Defect): Promise<string> {
   const root = await $.session.root()
@@ -231,7 +239,7 @@ export function registerDogfood(on: On): void {
     if (!(await isOn($))) return { result: 'plugin_defect: dogfood mode is off (BASE_DOGFOOD=1 turns it on)' }
     const d = parseDefect(e as unknown as Record<string, unknown>)
     if (typeof d === 'string') return { result: d }
-    return { result: await report($, d).catch(err => `plugin_defect failed: ${String((err as Error)?.message ?? err).slice(0, 160)}`) }
+    return { result: await serial(() => report($, d)).catch(err => `plugin_defect failed: ${String((err as Error)?.message ?? err).slice(0, 160)}`) }
   })
 
   on('tool.call', { tool: 'Bash', command: /plugins\// }, async ($, e, next) => {

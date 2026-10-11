@@ -150,6 +150,24 @@ describe('plugin_defect', () => {
     expect(capEvidence('a'.repeat(2048))).toBe('a'.repeat(2048))
   })
 
+  t('a token in the git remote never reaches the report', async ($, on) => {
+    const { calls } = world(on, { env: ON, remote: 'https://x-access-token:ghs_SECRET@github.com/acme/shop.git' })
+    await start($)
+    await report($)
+    const body = calls.writes.find(x => x.path.startsWith(DIR))!.text
+    expect(body).not.toContain('ghs_SECRET')
+    expect(body).toContain('- git: https://github.com/acme/shop.git · ')
+  })
+
+  t('parallel reports with one slug get two files and two index lines', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    await start($)
+    const [a, b] = await Promise.all([report($, { title: 'x broke' }), report($, { title: 'X broke!' })])
+    expect(a.result).toContain(`→ ${DIR}/${DATE}-base-x-broke.md`)
+    expect(b.result).toContain(`→ ${DIR}/${DATE}-base-x-broke-2.md`)
+    expect(w.files[INDEX]!.text.trim().split('\n')).toHaveLength(2)
+  })
+
   t('a bad plugin or kind is refused, nothing written', async ($, on) => {
     const { calls } = world(on, { env: ON })
     await start($)
@@ -245,6 +263,16 @@ describe('nudge and stop', () => {
     expect((await stop($)).block).toBeUndefined()
   })
 
+  t('a failing grep or cat over a plugin script path gets no nudge and never blocks', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => FAILED
+    await start($)
+    expect((await bash($, 'grep -n nothing plugins/base/scripts/doctor.cjs')).context ?? []).toEqual([])
+    expect((await bash($, 'cat plugins/slim/scripts/nope.cjs')).context ?? []).toEqual([])
+    expect(await eventsOf($, 'defect')).toEqual([])
+    expect((await stop($)).block).toBeUndefined()
+  })
+
   t('a session without a failure is never blocked; a new session id forgets the old failure', async ($, on) => {
     const { w } = world(on, { env: ON })
     expect((await stop($)).block).toBeUndefined()
@@ -299,6 +327,22 @@ describe('pure parts', () => {
     expect(pluginScript('node plugins/acme/scripts/x.cjs')).toBeNull()
     expect(pluginScript('node plugins/base/hooks/x.cjs')).toBeNull()
     expect(pluginScript('node ~/.claude/plugins/cache/other/tool/1.0/x.cjs')).toBeNull()
+    expect(pluginScript('cd /r && FOO=1 node --no-warnings plugins/fe/scripts/a.cjs')).toBe('a.cjs')
+    expect(pluginScript('ls | env python3 plugins/pm/scripts/b.py')).toBe('b.py')
+    expect(pluginScript('x=$(plugins/be/scripts/c.sh)')).toBe('c.sh')
+  })
+
+  test('pluginScript: a path merely named is not a run', () => {
+    for (const cmd of [
+      'grep -n nothing plugins/base/scripts/doctor.cjs',
+      'cat plugins/slim/scripts/nope.cjs',
+      'ls plugins/fe/scripts/',
+      'test -f plugins/fe/scripts/none.sh',
+      'sed -n 1,5p plugins/base/scripts/doctor.cjs && git diff plugins/base/scripts/x.cjs',
+      'grep -n node plugins/base/scripts/doctor.cjs',
+      'rg foo ~/.claude/plugins/cache/domaine/slim/0.10.0/README.md',
+      'node ~/.claude/plugins/cache/domaine/fe/0.5.3/skills/ship/SKILL.md',
+    ]) expect(pluginScript(cmd)).toBeNull()
   })
 
   test('seen: a path once, the index title first, newest first', () => {

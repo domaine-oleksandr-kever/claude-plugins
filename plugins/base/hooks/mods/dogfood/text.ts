@@ -156,7 +156,7 @@ export function defectBody(d: Defect, m: Meta, env: Environment): string {
     '## Environment',
     '',
     `- project root: ${env.root}`,
-    `- git: ${env.remote ?? '(no remote)'} · ${env.branch ?? '(no branch)'} · ${env.commit ?? '(no commit)'}`,
+    `- git: ${env.remote?.replace(/^([a-z][\w+.-]*:\/\/)[^@/]*@/i, '$1') ?? '(no remote)'} · ${env.branch ?? '(no branch)'} · ${env.commit ?? '(no commit)'}`,
     `- plugins: ${env.versions}`,
     `- surfaces: ${env.surfaces}`,
     `- Claude Code: ${env.claudeCode ?? 'unknown'}`,
@@ -232,10 +232,12 @@ export function repoOf(known: string | null, marketplace: string | null): string
 export const isRepo = (s: string) => REPO.test(s)
 
 const NAMES = PLUGINS.join('|')
-const IN_REPO = new RegExp(`(?:^|[\\s"'=/])plugins/(?:${NAMES})/scripts/[^\\s"';|&)]+`)
-const IN_CACHE = new RegExp(`/\\.claude/plugins/cache/[^/\\s"']+/(?:${NAMES})/[^\\s"';|&)]+`)
+// A path runs only in command position: a command's first word, or the script argument of an interpreter that is one.
+const RUN = `(?:^|[;&|(\`])\\s*(?:(?:\\w+=\\S*|env|exec|time)\\s+)*(?:[^\\s;&|()]*/)?(?:(?:node|bash|sh|zsh|python3?)(?:\\s+-\\S+)*\\s+)?["']?`
+const IN_REPO = new RegExp(`${RUN}(?:[^\\s"';|&()]*/)?plugins/(?:${NAMES})/scripts/[^\\s"';|&)]+`)
+const IN_CACHE = new RegExp(`${RUN}[^\\s"';|&()]*/\\.claude/plugins/cache/[^/\\s"']+/(?:${NAMES})/[^/\\s"']+/scripts/[^\\s"';|&)]+`)
 
-/** The basename of the Domaine plugin script a command runs (repo `plugins/<name>/scripts/` or the plugin cache), else null. */
+/** The basename of the Domaine plugin script a command runs (repo `plugins/<name>/scripts/` or the plugin cache), else null; a path merely named (grep, cat, ls) is not a run. */
 export function pluginScript(command: string): string | null {
   const p = (IN_CACHE.exec(command) ?? IN_REPO.exec(command))?.[0]
   return p ? p.slice(p.lastIndexOf('/') + 1) : null
