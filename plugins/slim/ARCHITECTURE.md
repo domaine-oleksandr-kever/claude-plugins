@@ -72,7 +72,8 @@ the code on the date at the bottom; the code wins when they drift.
 │                         ├─ lint.cjs   (linter output grouped by rule · first locations kept) │
 │                         ├─ listing.cjs (find / ls -R / tree → directory outline, histograms) │
 │                         ├─ csv.cjs    (table → column profile · seeded samples · rows as md) │
-│                         └─ text-window.cjs (head + tail window, hidden-lines count)          │
+│                         ├─ text-window.cjs (head + tail window, hidden-lines count)          │
+│                         └─ xml.cjs    (element tree, record lists ×N + samples · SVG elided) │
 │  media.cjs  (beside compress(): kindOf · plan resize / frames from probe facts · figure)     │
 │  jq.cjs     (beside compress(): narrow a JSON document by a small jq subset, or refuse)      │
 │  spans.cjs  (beside compress(): the JSON / JSONL / log / HTML spans inside a mixed text)    │
@@ -107,7 +108,7 @@ flowchart TD
   G -- no --> I
   H -- refused --> Z2[passthrough expand-refused]
   H -- ok --> I[engines.sniff<br/>content, never the tool name<br/>every channel, MCP per text block]
-  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter cmd,<br/>listing only after a listing cmd on Bash,<br/>MCP: plain, guarded and HTML text not compressed,<br/>a11y snapshots MCP only,<br/>csv on Bash · Read .csv/.tsv · WebFetch · @-file · MCP}
+  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter cmd,<br/>listing only after a listing cmd on Bash,<br/>MCP: plain, guarded and HTML text not compressed,<br/>a11y snapshots MCP only,<br/>csv on Bash · Read .csv/.tsv · WebFetch · @-file · MCP,<br/>xml after a fetch cmd · Read .xml · WebFetch · MCP}
   J --> K[engines.compress<br/>maxMs 5000 · targetBytes for engines flagged fit]
   K -- passthrough · refused --> L{stubbable?<br/>MCP over 32 KB}
   L -- yes --> M[emit stub + spill original]
@@ -136,6 +137,7 @@ non-zero exit, bad JSON) leaves the original result untouched and writes an erro
 | mcp | 4,096 | — | stub threshold 32,768 |
 | bash | 4,096; 8,192 linter output from a linter command, a listing from a listing command; 16,384 a log from a log command | a host-persisted output always (4,096 budget), else over SLIM_PLAIN_BYTES | host inline limit − 2,048, at most 32,768; an answer at or past the host limit (chars, stdout + stderr) → stub, or pass through |
 | read | 32,768 | — | 65,536 |
+| read / bash / webfetch / mcp, xml engine | as the channel; Bash only after a fetch cmd, Read only `.xml` (never `.svg`) | — | as the channel |
 | webfetch | 16,384 | 12,288 | 32,768 |
 | websearch | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
 | grep (content mode) | 16,384 | 8,192 | 16,384 |
@@ -360,6 +362,7 @@ figma reader), so they change only together with those readers:
 | `delivery/spill.cjs`, `hooks/mods/channels.ts` | `slim-mcp-*`, `slim-crush-*`, `slim-jsx-ids-*` spill names (§3) |
 | `delivery/report.cjs` | the report log `slim-debug.log` |
 | `engines/figma.cjs` | the figma engine's `<<slim-jsx>>` first line |
+| `engines/xml.cjs` | the xml engine's `<<slim-xml>>` first line (an already-slim mark) |
 
 slim recognises only its own marks as already compact, and loads no env file: its spill root, TTL and
 debug level are `SLIM_DIR`, `SLIM_TTL` and `SLIM_DEBUG` alone (`tests/slim-fixtures.mjs` S15, S17 pin that).
@@ -385,6 +388,7 @@ All rows live in `README.md` → Environment switches; `tests/readme-checks.sh` 
 | engines (lint) | `tests/lint-slim-fixtures.mjs` | the lint engine on the ESLint / theme-check / tsc fixtures: sniff per grammar, exact bytes, every kept location in the input, counts equal the tool's summary, fit stages, Bash / MCP / Read delivery |
 | engines (listing) | `tests/listing-slim-fixtures.mjs` | the listing engine on the find / ls -R / tree fixtures: sniff, exact bytes, fit stages, every printed path and directory count against the input, Bash admission |
 | engines (csv) | `tests/csv-slim-fixtures.mjs` | the csv engine: detection, counts, types, samples and rows checked against the input, fit stages, determinism |
+| engines (xml) | `tests/xml-slim-fixtures.mjs` | the xml engine: sniff, folds and verbatim samples, SVG reduction, fit stages, and its admission per channel through `slim.cjs` |
 | delivery | `tests/slim-fixtures.mjs` | one envelope per channel through `slim.cjs`: decisions, restored shapes, records, gates equal to the module's, `--report`; `--view` (jq, out roots, cache marker, host files, media); the media backend against fake `ffprobe` / `ffmpeg` / `sips` on a one-dir PATH; @-mentioned files; `--prompt` (in place, durable dir, worktree, output bound, link rail); `--access` and its `--report` pairing |
 | module | `plugins/slim/hooks/mods/tests/*.test.ts(x)` via `claude plugin test` | every channel's hook, pre-decisions, lookup rungs with mocked `$.tool.call` / `$.model.complete`, view's checks, Write path and reply text, the prompt rewrite and its origins, the attachment hook, the spill-read guard, describe, render, info |
 | all | `tests/layout-assertions.sh`, `tests/readme-checks.sh`, `claude plugin validate --strict` | layer purity, env rows, state contract |

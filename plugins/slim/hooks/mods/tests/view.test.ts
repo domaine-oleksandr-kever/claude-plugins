@@ -348,7 +348,7 @@ describe('V6 arguments', () => {
     expect(await view($, { path: '/repo/a.json', command: 'ls' })).toBe(BAD_ARGS)
     expect(await view($, {})).toBe(BAD_ARGS)
     expect(await view($, { path: '  ' })).toBe(BAD_ARGS)
-    expect(await view($, { path: '/repo/a.json', engine: 'xml' })).toMatch(/^view: unknown engine 'xml' — one of json, /)
+    expect(await view($, { path: '/repo/a.json', engine: 'yaml' })).toMatch(/^view: unknown engine 'yaml' — one of json, /)
     expect([w.calls, w.checks, w.views, w.records]).toEqual([[], [], [], []])
   })
 

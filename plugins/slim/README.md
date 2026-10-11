@@ -6,8 +6,11 @@ slim is a compression proxy for Claude Code. One `tool.call` handler sees every 
 Bash, Read, WebFetch, WebSearch, Grep and Agent — and shrinks the large ones before they reach
 the context; a pasted prompt's data and an @-mentioned data file get the same treatment. It decides
 by content, never by tool name: JSON goes to the JSON compressor, a log to the log engine, an HTML
-page to the HTML engine, Figma design-context JSX to the JSX compactor, a Figma REST nodes response
-to the node-tree engine, a browser MCP's accessibility snapshot to the snapshot folder, linter output to the lint engine, a path listing from `find`, `ls -R` or `tree` to the listing outline, a CSV or TSV table to the table profiler, and plain text (code, diffs, test output) is at most windowed. Two tools
+page to the HTML engine, an XML document or SVG to the element-tree engine, Figma design-context JSX
+to the JSX compactor, a Figma REST nodes response to the node-tree engine, a browser MCP's
+accessibility snapshot to the snapshot folder, linter output to the lint engine, a path listing from
+`find`, `ls -R` or `tree` to the listing outline, a CSV or TSV table to the table profiler, and plain
+text (code, diffs, test output) is at most windowed. Two tools
 come with it: `lookup` answers one question about a page, a command's output or a file without
 loading it whole, and `view` shows a big file or a command's output compactly (and resizes images
 and video). Every original stays on disk behind a recovery handle, so nothing is lost.
@@ -50,10 +53,10 @@ validates a hook's result against the built-in tool's output schema: Bash stays
 
 | Channel | Candidate when | What slim does |
 |---|---|---|
-| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX, linter output, delimited tables and logs compressed, browser accessibility snapshots folded; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
-| Bash | stdout over 4,096 B that is JSON, JSONL, a delimited table or (for a fetch command) HTML; over 16,384 B from a log command; over 8,192 B from a linter or a listing command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
-| Read | a whole-file read of a `.log`, `.jsonl`, `.ndjson`, `.csv` or `.tsv` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
-| WebFetch | result over 16,384 B that is JSON, HTML or a delimited table, or over `SLIM_PLAIN_BYTES` | JSON, JSONL, HTML and csv engines, else a window |
+| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX, XML, SVG, linter output, delimited tables and logs compressed, browser accessibility snapshots folded; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
+| Bash | stdout over 4,096 B that is JSON, JSONL, a delimited table or (for a fetch command) HTML or XML; over 16,384 B from a log command; over 8,192 B from a linter or a listing command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
+| Read | a whole-file read of a `.log`, `.jsonl`, `.ndjson`, `.csv`, `.tsv` or `.xml` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
+| WebFetch | result over 16,384 B that is JSON, HTML, XML or a delimited table, or over `SLIM_PLAIN_BYTES` | JSON, JSONL, HTML, XML and csv engines, else a window |
 | WebSearch | a result string over `SLIM_PLAIN_BYTES` | that string is windowed; the others are untouched |
 | Grep | `content` output over 16,384 B (a file listing is never touched) | window with an 8,192 B budget; `numFiles`, `numLines` and `numMatches` never change |
 | Agent | a completed subagent's text block over `SLIM_PLAIN_BYTES` | that block is windowed |
@@ -113,6 +116,25 @@ rows are picked by a generator seeded with the content hash, so a rerun shows th
 then none), then the samples (one per column); still over → stub. It runs on Bash whatever the
 command, on WebFetch, on a Read of a `.csv` / `.tsv` file and an @-mentioned one, and on MCP text.
 For a row, a column or a filter the footer names `lookup({ path, question })` on the original.
+
+**XML and SVG.** A text opening with `<?xml` or with an element that is not HTML (sitemaps, product
+and Google Merchant feeds, RSS, Figma `get_metadata`, any XML) becomes an element tree, one line per
+element with its attributes and text: five or more same-name siblings fold into one
+`url ×50,000 {loc, lastmod, changefreq, priority}` line followed by three records verbatim (first,
+middle, last; `#N` is the record's position), several shapes each with its count and samples
+(past 12 shapes a `fields:` line counts every field). Folded siblings with an `id` list every id
+(`ids: P0…P1999`); an id-bearing node that is a bare attribute line or nests further ids never folds,
+so a Figma node tree keeps every node. A text or attribute value over 200 chars is cut to a head and
+its length, except a multi-line text body; an element mixing text with inline elements (a Notion
+page) reads as written, every inline reference in place. An SVG keeps its markup, ids, groups,
+`<use>` refs, fills, styles and `<text>`; `d` and `points` read `d="(1,204 chars)"`, and comments, `<metadata>`
+and editor namespaces (Inkscape, Sodipodi, Sketch, Serif) are dropped. The first line is
+`<<slim-xml>>` with the element and byte counts; the last names `lookup({ path, question })` for one
+record. Over the channel's cap it drops samples (3 → 1 → 0), then folds its deepest level, then is
+stubbed. Admitted on Bash only after a fetch command (`cat assets/icon.svg` stays text), on WebFetch
+by content, on Read for an `.xml` file over 32,768 B (never `.svg`), and on MCP. Liquid with markup
+stays `template`; an HTML fragment (a leading `<div>`, `<section>`, …) stays text; an HTML or XHTML
+page (`<html>`, `<head>` or `<body>` first, prolog or not) goes to the HTML engine.
 
 **Engine admission on Bash.** JSON, JSONL and delimited-table output is compressed whatever the command. HTML is
 treated as a page only when the command fetches one: `curl`, `wget`, `http`, `https`, `xh` or `lynx`
@@ -188,8 +210,8 @@ than that is shown as `+N%`. The Log event counts from the raw bytes and names t
 
 A compressed view of an editable file would break the next Edit (its `old_string` would span lines
 the view dropped) and invite a lossy Write. So Read compresses only data files the host would not
-have shown whole: a whole-file read of a `.log`, `.jsonl`, `.ndjson`, `.csv` or `.tsv` file over 32 KB,
-or of a `.json` file the host cut at its token cap. Source JSON never qualifies: files under `config/`,
+have shown whole: a whole-file read of a `.log`, `.jsonl`, `.ndjson`, `.csv`, `.tsv` or `.xml` file over
+32 KB, or of a `.json` file the host cut at its token cap. Source JSON never qualifies: files under `config/`,
 `templates/`, `locales/`, `sections/`, `blocks/`, `snippets/` or `layout/`, `package.json`,
 `package-lock.json`, `tsconfig*.json`, `composer.json`, `jsconfig.json`, `*rc.json` and
 `*.schema.json`. A compressed Read starts at line 1 and carries this note before the stats line:
@@ -380,7 +402,7 @@ whose result the webfetch channel compresses, or `lookup({ url, question })`).
   JSON array): every guard has ruled by then, so view goes on.
   The core then reads the file the Read opened and picks the engine
   by content (`engine` overrides: `json`, `jsonl`, `log`, `html`, `figma`, `figma-nodes`, `adf`,
-  `text`, `a11y`, `lint`, `listing`, `csv`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
+  `text`, `a11y`, `lint`, `listing`, `csv`, `xml`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
   is one, so bound variables read by name. An image or a video goes to the media backend (see Media).
 - `command`: slim runs it through Bash (permission rules and hooks rule on it); an output the host
   saved to a file is read from there. A compressed output keeps its original in the spill root, and
@@ -484,7 +506,7 @@ slim owns four `$.state` keys under `plugin: 'slim'`. Any plugin reads them; onl
 The contract is `plugins/slim/types/index.d.ts`:
 
 ```ts
-export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'lint' | 'listing' | 'csv' | 'stub'
+export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'lint' | 'listing' | 'csv' | 'xml' | 'stub'
 export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'agent' | 'attachment' | 'prompt'
 type SlimEventBase = { v: 1; atMs: number; text: string; src: 'slim'; tool: string; agentType?: string; ms: number }
 export type SlimCompressEvent = SlimEventBase & { kind: 'slim'; channel: SlimChannel; bytesIn: number; bytesOut: number; engine: SlimEngine }
@@ -641,7 +663,7 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
 |---|---|---|
 | `SLIM_MCP` | `1` | `0` turns the MCP channel off: every MCP result passes through untouched, nothing is spawned and no report line is written. |
 | `SLIM_BASH` | `1` | `0` turns the Bash channel off (stdout of large JSON, HTML-fetch, log and plain-text outputs, and outputs the host saved to a file). |
-| `SLIM_READ` | `1` | `0` turns the Read channel off (whole-file reads of big `.log`/`.jsonl`/`.ndjson`/`.csv`/`.tsv` files and of `.json` data files the host cut at its token cap). |
+| `SLIM_READ` | `1` | `0` turns the Read channel off (whole-file reads of big `.log`/`.jsonl`/`.ndjson`/`.csv`/`.tsv`/`.xml` files and of `.json` data files the host cut at its token cap). |
 | `SLIM_WEB` | `1` | `0` turns the WebFetch and WebSearch channels off. |
 | `SLIM_GREP` | `1` | `0` turns the Grep channel off (the `content` window; the counts never change either way). |
 | `SLIM_AGENT` | `1` | `0` turns the Agent channel off (the window over a completed subagent's long report). |
@@ -692,6 +714,8 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
   number, opens with a date, time or log level, or has a cell typed like its column, or one of fewer
   than 20 records, is plain text; the prompt channel's spans
   are JSON, JSONL, HTML and logs. A `.csv` under 32 KB is shown as the host read it.
+- **An `.svg` you Read or `cat`.** An asset you may edit stays byte-identical; only a fetched or MCP
+  SVG is reduced.
 - **A `.json` file the host showed whole.** A Read under the host's token cap is left as is. Ask a
   question about it with `lookup({ path, question })`, or narrow it with `view({ path, jq })`.
 - **Browser snapshots outside MCP.** A snapshot printed by a Bash command, read from a file or shown
@@ -753,6 +777,7 @@ node tests/html-slim-fixtures.mjs  # the HTML engine
 node tests/a11y-slim-fixtures.mjs  # the browser-snapshot engine
 node tests/listing-slim-fixtures.mjs  # the listing engine
 node tests/csv-slim-fixtures.mjs   # the csv engine
+node tests/xml-slim-fixtures.mjs   # the XML engine
 node tests/slim-fixtures.mjs       # delivery end to end: every channel, --view, --prompt, --access, --report
 claude plugin test plugins/slim    # the module's kit tests
 bash tests/mods-sim.sh             # validate --strict + the kit tests per plugin (local only; needs claude)

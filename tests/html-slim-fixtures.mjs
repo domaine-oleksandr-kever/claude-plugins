@@ -132,7 +132,7 @@ scripts (2):
   const tiny = html.run('<b>x</b>', {});
   eq('H4-no-gain', [tiny.decision, tiny.reason], ['passthrough', 'no-gain']);
   const xml = '<?xml version="1.0"?>\n<feed><entry><title>x</title></entry></feed>';
-  eq('H5-xml-not-html', [sniff({ data: xml }).engine, sniff({ data: xml }).reason], ['text', 'xml']);
+  eq('H5-xml-not-html', [sniff({ data: xml }).engine, sniff({ data: xml }).reason], ['xml', 'xml']);
   const frag = '<frame id="1" name="Card"><frame id="2" name="Title"/></frame>';
   eq('H5-fragment-not-html', sniff({ data: frag }).reason, 'xml');
   const page = readFileSync(path.join(ROOT, 'tests/fixtures/page.html'), 'utf8');

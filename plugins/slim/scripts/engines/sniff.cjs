@@ -7,6 +7,10 @@
  * browser accessibility snapshot (`a11y`, reason `playwright` / `devtools`) → a dominant markdown
  * fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → lint (linter output)
  * → log (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
+ * the guards that keep text untouched (diff, test output, template, shebang, an HTML fragment →
+ * `text`) → XML (`<?xml` or a leading non-HTML element; `svg` too) → a dominant markdown fence (the
+ * body's engine) → JSONL → code by line openings (`text`) → HTML → log (detector confidence ≥ 0.5)
+ * → `text`. The guards run before HTML and log on purpose: a test run
  * must not be deduped as a log, a theme template must not be stripped as a page. Pure.
  */
 'use strict';
@@ -60,6 +64,13 @@ const TEMPLATE = /\{%|\{\{|<%|<\?php/;
 const CODE_LINE = /^\s*(?:import|export|from|const|let|var|function|class|def|return|if|for|while|public|private|package|#include|use |fn |[{}]|\/\/|\/\*|\*)/;
 const HTML_START = /^\s*(?:<!doctype html|<html[\s>])/i;
 const HTML_HEAD = /<head[\s>]|<body[\s>]/i;
+// Also the hooks module's Bash/WebFetch pre-filter (tests/slim-fixtures.mjs S24).
+const XML_START = /^\s*<(?:\?xml|[a-z][\w:.-]*[\s>/])/i;
+const HTML_TAGS = new Set(['html', 'head', 'body', 'div', 'span', 'p', 'a', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
+  'section', 'article', 'main', 'header', 'footer', 'nav', 'aside', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'form', 'input', 'button', 'label',
+  'select', 'option', 'textarea', 'img', 'picture', 'source', 'video', 'audio', 'iframe', 'script', 'style', 'link', 'meta', 'br', 'hr', 'pre',
+  'code', 'blockquote', 'em', 'strong', 'b', 'i', 'u', 'small', 'figure', 'figcaption', 'details', 'summary', 'dl', 'dt', 'dd', 'template',
+  'slot', 'noscript', 'canvas']);
 
 const isHtml = (s) => HTML_START.test(s) || HTML_HEAD.test(s.slice(0, 2048));
 const count = (re, s) => { re.lastIndex = 0; let n = 0; while (re.exec(s)) n++; return n; };
@@ -72,8 +83,21 @@ function guard(text) {
   if (TEMPLATE.test(head)) return 'template';
   const t = head.trimStart();
   if (t.startsWith('#!')) return 'code';
-  if (t.startsWith('<?xml') || (/^<[a-z][\w:.-]*[\s>/]/i.test(t) && !isHtml(head))) return 'xml';
+  if (!t.startsWith('<?xml') && XML_START.test(t) && !isHtml(head) && HTML_TAGS.has(/^<([\w:.-]+)/.exec(t)[1].toLowerCase())) return 'markup';
   return null;
+}
+
+const ROOT_EL = /^(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*<([a-z_][\w:.-]*)/i;
+
+// An XML document or an SVG, after the guards: the prolog, or a leading element that opens no HTML
+// page. An XHTML page (root `<html>`, prolog or not) is the html engine's.
+function xmlOf(text) {
+  const head = text.slice(0, SCAN);
+  if (!XML_START.test(head)) return null;
+  const t = head.trimStart();
+  const root = (ROOT_EL.exec(t) || [])[1];
+  if ((root && root.toLowerCase() === 'html') || (!t.startsWith('<?xml') && isHtml(head))) return null;
+  return { engine: 'xml', confidence: 0.9, reason: root && root.toLowerCase() === 'svg' ? 'svg' : 'xml' };
 }
 
 // Source code by its line openings. Checked after the fence and JSONL rules: a JSON line opens with a
@@ -91,6 +115,8 @@ function sniffText(text, fenced) {
   if (detectJsx(text)) return { engine: 'figma', confidence: 0.95, reason: 'figma-jsx' };
   const g = guard(text);
   if (g) return { engine: 'text', confidence: 0.9, reason: g };
+  const xml = xmlOf(text);
+  if (xml) return xml;
   // Ahead of the fence rule: an action result carries its snapshot beside a code fence, so no fence dominates.
   const snap = detectSnapshot(text);
   if (snap) return { engine: 'a11y', confidence: 0.9, reason: snap };

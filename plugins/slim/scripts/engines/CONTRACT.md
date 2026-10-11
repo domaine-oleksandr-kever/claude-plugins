@@ -37,7 +37,7 @@ One call: `compress(input, options)`.
 | `spillDir` | `''` | prefix of the paths the text cites for parts (`<<full=<spillDir>/<name> …>>`). Empty → the bare name. |
 | `spillNames` | `{ original: 'slim-original-', rows: 'slim-rows-', ids: 'slim-ids-' }` | name prefix per spill kind. |
 | `trace` | `false` | fill `stats.stages` with the pipeline stages that changed bytes. |
-| `targetBytes` | `null` | json / jsonl, figma-nodes, a11y, lint, listing and csv: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**); a snapshot folds harder (see **a11y**); lint output keeps fewer locations per group (see **lint**); a listing lowers its fold threshold (see **listing**); a table profile drops its rows, then samples (see **csv**). Other engines ignore it. |
+| `targetBytes` | `null` | json / jsonl, figma-nodes, a11y, lint, listing, csv and xml: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**); a snapshot folds harder (see **a11y**); lint output keeps fewer locations per group (see **lint**); a listing lowers its fold threshold (see **listing**); a table profile drops its rows, then samples (see **csv**); an element tree drops samples, then folds its deepest level (see **xml**). Other engines ignore it. |
 | `maxInputBytes` | `67108864` | larger input → `refused` / `too-large`. |
 | `marker` | `'handle'` | `'ccr'` reproduces Headroom's content-hash crush marker; parity tests only. |
 
@@ -46,7 +46,7 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
 ## 2. Detection
 
 `sniff(input)` → `{ engine, confidence, reason }`, where `engine` is one of `json | jsonl | log | html
-| figma | figma-nodes | adf | text | a11y | lint | listing | csv | binary | none` and `confidence` is 0..1. Content only; first match wins:
+| figma | figma-nodes | adf | text | a11y | lint | listing | csv | xml | binary | none` and `confidence` is 0..1. Content only; first match wins:
 
 1. **binary** — a Buffer starting with PNG, JPEG, GIF8, `%PDF-`, zip (`PK\x03\x04`), gzip (`1F 8B`),
    `RIFF…WEBP`, wasm (`\0asm`), ELF or Mach-O magic, or holding a NUL byte in its first 8192 bytes; a
@@ -62,9 +62,12 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
    `diff` (two or more `diff --git` / `--- a/` / `+++ b/` / `@@ -n,n +n,n @@` lines), `test-output`
    (jest `PASS`/`FAIL` heads and `Tests:` totals, TAP `ok n`, `N passing/passed/failed`, pytest `===
    … passed … ===`, go `--- PASS`/`ok  pkg 0.4s`, rspec `N examples, N failures`, three or more ✓/✗
-   lines), `template` (`{%`, `{{`, `<%`, `<?php`), `code` (a `#!` shebang), `xml` (`<?xml`, or a
-   leading tag that is not an HTML document).
-5a. **a11y** — a browser accessibility snapshot, checked in the first 64 KB: at least 20 tree lines and
+   lines), `template` (`{%`, `{{`, `<%`, `<?php`), `code` (a `#!` shebang), `markup` (an HTML
+   fragment: a leading HTML element such as `<div>` or `<section>`, no `<?xml` prolog, no HTML page).
+5a. **xml** — `<?xml`, or a leading element that is neither HTML nor an HTML page (`<head`/`<body`
+   in the first 2048 chars); never a root `<html>` (XHTML, prolog or not, is html); reason `svg` when
+   the root element is `<svg`, else `xml`.
+5b. **a11y** — a browser accessibility snapshot, checked in the first 64 KB: at least 20 tree lines and
    80 % of the lines that are not blank, a fence or a `#` heading; reason `playwright` (`- role "name"
    [attr] [ref=eN]` lines, refs on 30 % of them) or `devtools` (`uid=… role` lines). Ahead of the fence
    rule, because an action result carries its snapshot beside a code fence.
@@ -215,6 +218,32 @@ not paths, verbatim; the last line names the next call (a narrower `find`/`ls`, 
 the original). Names are printed as they came or counted, never rewritten. Nothing folded and no
 `targetBytes` the input exceeds → `no-gain`; text that is not a listing → `non-listing`.
 
+**xml** — an XML document as an element tree, one line per element (`name attr="v"…: text`, nesting
+by indent; a wrapper with one child element chains on with ` › `). Five or more same-name siblings
+fold into `name ×N {fields}` — `@attr`, child names in first-seen order, `+` for a child repeated
+inside a record, `#text` — followed by three records as compact markup in document order (first,
+middle, last; `#N` = the record's 1-based position among those siblings; CDATA keeps its wrapper);
+a shape is the set of attribute and child names, order aside; siblings of several shapes list each
+shape `{fields} ×n`, most frequent first (at most 12, then `… N more shapes` and one `fields:` line
+with every field and its record count), with its own samples. Folded siblings carrying an
+`id`/`xml:id` list every id in input order on an `ids:` line (a run of consecutive numbered ids as
+`P0…P1999`); a sibling with an id that has no child element or nests further ids (a Figma node)
+never folds. A text value and an attribute value over 200 chars become their first 60 chars and
+`… (N chars)` (an `http(s)` URL under 2,048 chars is kept), except a multi-line text body of an
+element outside a fold; an element with text beside child elements is written inline in document
+order, whole, its children never folded; a sample stops at 1,500 chars. An SVG (root `<svg`) keeps
+its markup one element per line — attributes, ids, `<use>` refs, `<text>`, `style`/`fill`/`stroke`/
+`class` and `<style>` whole — with `d`/`points` over 40 chars as `d="(N chars)"`, drops comments,
+`<metadata>` and the `inkscape:`/`sodipodi:`/`sketch:`/`serif:` elements and attributes, and folds
+five or more adjacent leaves without an id whose attributes are equal but for elided geometry into
+one line with `×N`. The first
+line is `<<slim-xml>> xml <root> · N elements · B B · …` (or `svg · …` with the viewBox and what was
+elided), the last names `lookup({ path, question })`. With `targetBytes`: samples 3 → 1 → 0 (stage
+`samples`), then the deepest level folds into its parent's line (`… N elements deeper folded`, stage
+`depth`), down to the root's children; a text that still misses says `targetBytes T not met: B B`.
+A dominant markdown fence is unwrapped (the header leads, the prose follows). Passthroughs carry
+`format: 'xml' | 'svg'`. The original's spill name ends `.txt`.
+
 **text** — the plain-text window, the only thing slim ever does to code, diffs, test output or prose:
 at or under `plainBytes` nothing happens; above it the head keeps whole lines up to a third of
 `budgetBytes`, the tail fills the rest, and one marker line in between says
@@ -246,10 +275,10 @@ children become one `- … N nodes below [refs …]: names …` line listing the
 ```ts
 {
   v: 1,
-  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'a11y'|'lint'|'listing'|'csv'|'binary'|'none',  // the engine that produced the text
+  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'a11y'|'lint'|'listing'|'csv'|'xml'|'binary'|'none',  // the engine that produced the text
   decision: 'compressed' | 'passthrough' | 'refused',
   reason?: string,      // why not compressed
-  format?: string,      // diagnostic tag of a non-JSON passthrough (html | xml | broken-json | text)
+  format?: string,      // diagnostic tag of a non-JSON passthrough (html | xml | svg | broken-json | text)
   text: string,         // the compressed text; on passthrough the input as a string; '' when refused
   stats: { bytesIn, bytesOut, pct, ms, stages: string[] },   // pct = saved %, one decimal, may be negative
   spill?: { kind: 'original', payload, suggestedName },      // compressed only: the input, to keep
