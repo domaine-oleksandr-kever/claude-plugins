@@ -50,19 +50,13 @@ export function fmtRemaining(ms: number | null): string {
   return `${Math.floor(ms / MIN)}m`
 }
 
-export const COMPACT_WARN_MS = 5 * MIN
 export const COMPACT_OPTIONS = ['Compact', 'Clear', 'Cancel'] as const
+export const COMPACT_COLD = 'Prompt cache is cold: compacting re-reads the whole conversation at full price. If this session is done, Clear is cheaper. Compact anyway?'
 
-/**
- * What a Compact press asks first when the cache is cold (the compaction re-reads the whole conversation at
- * full price) or ends within 5 min; null while it is warm or unmeasured, when the press compacts at once.
- */
+/** What a Compact press asks first on a cold cache; null while it is warm or unmeasured, when the press compacts at once. */
 export function compactQuestion(cache: BandCache, nowMs: number): string | null {
   const left = cacheRemaining(cache, nowMs)
-  if (left === null) return null
-  if (cache.isCold || left <= 0) return 'Prompt cache is cold: compacting re-reads the whole conversation at full price. If this session is done, Clear is cheaper. Compact anyway?'
-  if (left < COMPACT_WARN_MS) return `Prompt cache ends in ${fmtRemaining(left)}: compact now while it is warm, or Clear if this session is done.`
-  return null
+  return left !== null && (cache.isCold || left <= 0) ? COMPACT_COLD : null
 }
 
 export type CacheView = { text: string; level: Level }

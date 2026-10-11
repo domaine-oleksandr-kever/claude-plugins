@@ -1,5 +1,5 @@
-// Status band: the AbovePrompt row drawn from the atoms, the Compact and Clear presses (a cold or ending cache asks
-// Compact / Clear / Cancel first) and the terminal's model
+// Status band: the AbovePrompt row drawn from the atoms, the Compact and Clear presses (a cold cache asks Compact / Clear /
+// Cancel first) and the terminal's model
 // picker, which unfolds into the row itself: the band region clips anything drawn outside its own rows, so no
 // list can pop over the transcript. A desktop draws the buttons on a second row under the figures.
 // Render only reads: band's atoms (usage.ts and checklist.tsx write them), base's task snapshot for the digest and
