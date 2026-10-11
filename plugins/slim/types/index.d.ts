@@ -1,6 +1,6 @@
 // slim's $.state contract. Values are JSON, so an absent value is null, never undefined.
 
-export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'stub'
+export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'stub'
 
 /** What slim reads: MCP calls, the built-in tools it has an intake for, @-mentioned files and pasted prompts. */
 export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'agent' | 'attachment' | 'prompt'

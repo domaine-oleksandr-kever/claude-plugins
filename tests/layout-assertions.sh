@@ -981,7 +981,7 @@ else bad slim-engines-requires "engines/ requires beyond crypto + siblings: $(pr
 # case.yaml names itself, and a scaffold it names must exist, be runnable and reach a generator
 # that exists. The mocked Jira server answers with the committed fixture, byte for byte.
 EVALS="$SLIM_DIR_P/evals"
-for c in read-big-json bash-curl-html bash-log mcp-jql lookup-one-fact; do
+for c in read-big-json bash-curl-html bash-log mcp-jql lookup-one-fact mcp-a11y-snapshot; do
   y="$EVALS/$c/case.yaml"
   [ -f "$y" ] || { bad "eval-$c" "plugins/slim/evals/$c/case.yaml missing"; continue; }
   if grep -qE '^schema_version: "1\.[0-9]+"$' "$y" && grep -qxF "name: $c" "$y"; then ok

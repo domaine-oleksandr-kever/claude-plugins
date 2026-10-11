@@ -161,7 +161,8 @@ function mcpTexts(result) {
 // (`non-json`, or the guard's name). `target` is the size above which the caller would stub the text.
 function slimText(text, deadline, parts, target) {
   const sniffed = sniff({ data: text });
-  const engine = ch.admit('mcp', sniffed.engine);
+  // SLIM_A11Y=0: a snapshot goes the json route, as before the a11y engine (non-json, stub when large).
+  const engine = sniffed.engine === 'a11y' && !env.a11yOn() ? 'json' : ch.admit('mcp', sniffed.engine);
   if (engine === null) {
     const guarded = GUARD_REASONS.has(sniffed.reason);
     return { text, modified: false, reason: guarded ? sniffed.reason : 'non-json', stages: [], format: guarded ? 'text' : engines().peek(text).format };

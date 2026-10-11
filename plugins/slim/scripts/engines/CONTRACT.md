@@ -46,7 +46,7 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
 ## 2. Detection
 
 `sniff(input)` → `{ engine, confidence, reason }`, where `engine` is one of `json | jsonl | log | html
-| figma | figma-nodes | adf | text | binary | none` and `confidence` is 0..1. Content only; first match wins:
+| figma | figma-nodes | adf | text | a11y | binary | none` and `confidence` is 0..1. Content only; first match wins:
 
 1. **binary** — a Buffer starting with PNG, JPEG, GIF8, `%PDF-`, zip (`PK\x03\x04`), gzip (`1F 8B`),
    `RIFF…WEBP`, wasm (`\0asm`), ELF or Mach-O magic, or holding a NUL byte in its first 8192 bytes; a
@@ -64,6 +64,10 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
    … passed … ===`, go `--- PASS`/`ok  pkg 0.4s`, rspec `N examples, N failures`, three or more ✓/✗
    lines), `template` (`{%`, `{{`, `<%`, `<?php`), `code` (a `#!` shebang), `xml` (`<?xml`, or a
    leading tag that is not an HTML document).
+5a. **a11y** — a browser accessibility snapshot, checked in the first 64 KB: at least 20 tree lines and
+   80 % of the lines that are not blank, a fence or a `#` heading; reason `playwright` (`- role "name"
+   [attr] [ref=eN]` lines, refs on 30 % of them) or `devtools` (`uid=… role` lines). Ahead of the fence
+   rule, because an action result carries its snapshot beside a code fence.
 6. **fence** — one dominant markdown fence (≥ 80 % of the bytes, ≤ 3 preamble and trailer lines): the
    body's engine, reason `fence`.
 7. **jsonl** — two or more lines, every non-blank line a JSON object or array.
@@ -158,12 +162,27 @@ overflows its share, or whole lines that fill less than half of `budgetBytes`, f
 character window with `[slim: <bytes> B hidden]`. No line is
 rewritten.
 
+**a11y** — a Playwright or Chrome DevTools MCP accessibility snapshot in its own grammar, the lines
+around the tree kept verbatim. A nameless, ref-less `generic`/`none` wrapper is flattened into its
+parent; a nameless leaf `img` is dropped. A run of more than k adjacent siblings with the same
+skeleton (the subtree with names, refs, inline texts and urls as slots) keeps the first k and becomes
+one line: `- … 46 more like the 2 above [refs e40–e361]: names "A", "B", … +34; prices $22.00–$112.00`.
+Only items holding a control or a link fold — never prose, items over 200 chars of text, landmarks,
+alerts, status, dialogs or a level-1/2 heading. Refs are never renumbered: every input ref is on a kept
+line, in a fold or cut range, or on the closing `unnamed imgs dropped: refs …` line. With
+`targetBytes` the stages run until the text fits: `fold` (k=2, 12 names) → `fold1` (k=1, 6 names) →
+`prune` (no `/url` lines, state attrs only) → `depth` (from the deepest level up, a node's children
+become one `- … N nodes below [refs …]` line); still over → the last stage's text. Output starts with
+`<<slim-a11y>> <format> · N nodes → N lines · N folds (N nodes)`; the last line names the next call
+(`browser_find` / `take_snapshot({ verbose: true })`, or `mcp__slim__lookup` on the spill). Under
+10 % saved → `no-gain`. `meta: { format, nodes, folds, folded, imgs, cut }`.
+
 ## 4. Output
 
 ```ts
 {
   v: 1,
-  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'binary'|'none',  // the engine that produced the text
+  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'a11y'|'binary'|'none',  // the engine that produced the text
   decision: 'compressed' | 'passthrough' | 'refused',
   reason?: string,      // why not compressed
   format?: string,      // diagnostic tag of a non-JSON passthrough (html | xml | broken-json | text)
@@ -172,7 +191,8 @@ rewritten.
   spill?: { kind: 'original', payload, suggestedName },      // compressed only: the input, to keep
   parts?: [{ kind: 'rows' | 'ids', payload, suggestedName }],// payloads the text cites by path
   window?: { lines_total, lines_hidden, bytes_hidden },      // text engine only
-  meta?: { nodes, hidden, folded },                         // figma-nodes only: visible, hidden-dropped, folded node counts
+  meta?: { nodes, hidden, folded },                         // figma-nodes: visible, hidden-dropped, folded node counts
+                                                            // a11y: { format, nodes, folds, folded, imgs, cut }
   warnings: string[],
 }
 ```
@@ -186,7 +206,7 @@ reply — is the caller's decision.
 
 Passthrough reasons: `empty`, `engine-not-allowed`, `plain-gate`, `no-gain`, `non-json`, `error-shape`,
 `number-precision`, `budget-exceeded`, `transform-error`, and per engine `non-log`, `non-figma`,
-`non-figma-nodes`, `non-adf`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
+`non-figma-nodes`, `non-adf`, `non-a11y`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
 
 ## 5. Guarantees
 

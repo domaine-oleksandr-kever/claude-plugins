@@ -1,0 +1,129 @@
+### Page
+- Page URL: https://shop.example.invalid/collections/skincare
+- Page Title: Skincare – Example Store
+### Snapshot
+```yaml
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - link "Skip to content" [ref=e3] [cursor=pointer]:
+      - /url: "#MainContent"
+    - navigation "Main" [ref=e4]:
+      - list [ref=e5]:
+        - listitem [ref=e6]:
+          - link "Shop" [ref=e7] [cursor=pointer]:
+            - /url: /collections/shop
+        - listitem [ref=e8]:
+          - link "Skincare" [ref=e9] [cursor=pointer]:
+            - /url: /collections/skincare
+        - listitem [ref=e10]:
+          - link "Makeup" [ref=e11] [cursor=pointer]:
+            - /url: /collections/makeup
+        - listitem [ref=e12]:
+          - link "Hair" [ref=e13] [cursor=pointer]:
+            - /url: /collections/hair
+        - listitem [ref=e14]:
+          - link "Body" [ref=e15] [cursor=pointer]:
+            - /url: /collections/body
+        - listitem [ref=e16]:
+          - link "Gifts" [ref=e17] [cursor=pointer]:
+            - /url: /collections/gifts
+        - listitem [ref=e18]:
+          - link "Journal" [ref=e19] [cursor=pointer]:
+            - /url: /collections/journal
+        - listitem [ref=e20]:
+          - link "About" [ref=e21] [cursor=pointer]:
+            - /url: /collections/about
+    - button "Search" [ref=e22] [cursor=pointer]
+    - link "Cart (2 items)" [ref=e23] [cursor=pointer]:
+      - /url: /cart
+  - main [ref=e24]:
+    - heading "Skincare" [level=1] [ref=e25]
+  - dialog "Your cart" [active] [ref=e26]:
+    - heading "Your cart (8)" [level=2] [ref=e27]
+    - button "Close cart" [ref=e28] [cursor=pointer]
+    - list [ref=e29]:
+      - listitem [ref=e30]:
+        - link "Serum No. 1" [ref=e31] [cursor=pointer]:
+          - /url: /products/serum-no-1?variant=41000
+          - img "Serum No. 1" [ref=e32]
+        - generic [ref=e33]: Size: 15 ml
+        - generic [ref=e34]: $18.00
+        - spinbutton "Quantity for Serum No. 1" [ref=e35]: "1"
+        - button "Decrease quantity for Serum No. 1" [ref=e36] [cursor=pointer]
+        - button "Increase quantity for Serum No. 1" [ref=e37] [cursor=pointer]
+        - button "Remove Serum No. 1" [ref=e38] [cursor=pointer]
+      - listitem [ref=e39]:
+        - link "Cream No. 2" [ref=e40] [cursor=pointer]:
+          - /url: /products/cream-no-2?variant=41037
+          - img "Cream No. 2" [ref=e41]
+        - generic [ref=e42]: Size: 30 ml
+        - generic [ref=e43]: $25.00
+        - spinbutton "Quantity for Cream No. 2" [ref=e44]: "2"
+        - button "Decrease quantity for Cream No. 2" [ref=e45] [cursor=pointer]
+        - button "Increase quantity for Cream No. 2" [ref=e46] [cursor=pointer]
+        - button "Remove Cream No. 2" [ref=e47] [cursor=pointer]
+      - listitem [ref=e48]:
+        - link "Cleanser No. 3" [ref=e49] [cursor=pointer]:
+          - /url: /products/cleanser-no-3?variant=41074
+          - img "Cleanser No. 3" [ref=e50]
+        - generic [ref=e51]: Size: 50 ml
+        - generic [ref=e52]: $32.00
+        - spinbutton "Quantity for Cleanser No. 3" [ref=e53]: "1"
+        - button "Decrease quantity for Cleanser No. 3" [ref=e54] [cursor=pointer]
+        - button "Increase quantity for Cleanser No. 3" [ref=e55] [cursor=pointer]
+        - button "Remove Cleanser No. 3" [ref=e56] [cursor=pointer]
+      - listitem [ref=e57]:
+        - link "Toner No. 4" [ref=e58] [cursor=pointer]:
+          - /url: /products/toner-no-4?variant=41111
+          - img "Toner No. 4" [ref=e59]
+        - generic [ref=e60]: Size: 15 ml
+        - generic [ref=e61]: $39.00
+        - spinbutton "Quantity for Toner No. 4" [ref=e62]: "2"
+        - button "Decrease quantity for Toner No. 4" [ref=e63] [cursor=pointer]
+        - button "Increase quantity for Toner No. 4" [ref=e64] [cursor=pointer]
+        - button "Remove Toner No. 4" [ref=e65] [cursor=pointer]
+      - listitem [ref=e66]:
+        - link "Mask No. 5" [ref=e67] [cursor=pointer]:
+          - /url: /products/mask-no-5?variant=41148
+          - img "Mask No. 5" [ref=e68]
+        - generic [ref=e69]: Size: 30 ml
+        - generic [ref=e70]: $46.00
+        - spinbutton "Quantity for Mask No. 5" [ref=e71]: "1"
+        - button "Decrease quantity for Mask No. 5" [ref=e72] [cursor=pointer]
+        - button "Increase quantity for Mask No. 5" [ref=e73] [cursor=pointer]
+        - button "Remove Mask No. 5" [ref=e74] [cursor=pointer]
+      - listitem [ref=e75]:
+        - link "Balm No. 6" [ref=e76] [cursor=pointer]:
+          - /url: /products/balm-no-6?variant=41185
+          - img "Balm No. 6" [ref=e77]
+        - generic [ref=e78]: Size: 50 ml
+        - generic [ref=e79]: $53.00
+        - spinbutton "Quantity for Balm No. 6" [ref=e80]: "2"
+        - button "Decrease quantity for Balm No. 6" [ref=e81] [cursor=pointer]
+        - button "Increase quantity for Balm No. 6" [ref=e82] [cursor=pointer]
+        - button "Remove Balm No. 6" [ref=e83] [cursor=pointer]
+      - listitem [ref=e84]:
+        - link "Oil No. 7" [ref=e85] [cursor=pointer]:
+          - /url: /products/oil-no-7?variant=41222
+          - img "Oil No. 7" [ref=e86]
+        - generic [ref=e87]: Size: 15 ml
+        - generic [ref=e88]: $60.00
+        - spinbutton "Quantity for Oil No. 7" [ref=e89]: "1"
+        - button "Decrease quantity for Oil No. 7" [ref=e90] [cursor=pointer]
+        - button "Increase quantity for Oil No. 7" [ref=e91] [cursor=pointer]
+        - button "Remove Oil No. 7" [ref=e92] [cursor=pointer]
+      - listitem [ref=e93]:
+        - link "Mist No. 8" [ref=e94] [cursor=pointer]:
+          - /url: /products/mist-no-8?variant=41259
+          - img "Mist No. 8" [ref=e95]
+        - generic [ref=e96]: Size: 30 ml
+        - generic [ref=e97]: $67.00
+        - spinbutton "Quantity for Mist No. 8" [ref=e98]: "2"
+        - button "Decrease quantity for Mist No. 8" [ref=e99] [cursor=pointer]
+        - button "Increase quantity for Mist No. 8" [ref=e100] [cursor=pointer]
+        - button "Remove Mist No. 8" [ref=e101] [cursor=pointer]
+    - status [ref=e102]: Subtotal $214.00
+    - textbox "Order note" [ref=e103]
+    - checkbox "I agree with the terms and conditions" [ref=e104] [cursor=pointer]
+    - button "Check out" [disabled] [ref=e105] [cursor=pointer]
+```

@@ -1,0 +1,509 @@
+---
+type: fixed
+---
+### Page
+- Page URL: https://shop.example.invalid/collections/all
+- Page Title: All products – Example Store
+### Snapshot
+```yaml
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - link "Skip to content" [ref=e3] [cursor=pointer]:
+      - /url: "#MainContent"
+    - navigation "Main" [ref=e4]:
+      - list [ref=e5]:
+        - listitem [ref=e6]:
+          - link "Shop" [ref=e7] [cursor=pointer]:
+            - /url: /collections/shop
+        - listitem [ref=e8]:
+          - link "Skincare" [ref=e9] [cursor=pointer]:
+            - /url: /collections/skincare
+        - listitem [ref=e10]:
+          - link "Makeup" [ref=e11] [cursor=pointer]:
+            - /url: /collections/makeup
+        - listitem [ref=e12]:
+          - link "Hair" [ref=e13] [cursor=pointer]:
+            - /url: /collections/hair
+        - listitem [ref=e14]:
+          - link "Body" [ref=e15] [cursor=pointer]:
+            - /url: /collections/body
+        - listitem [ref=e16]:
+          - link "Gifts" [ref=e17] [cursor=pointer]:
+            - /url: /collections/gifts
+        - listitem [ref=e18]:
+          - link "Journal" [ref=e19] [cursor=pointer]:
+            - /url: /collections/journal
+        - listitem [ref=e20]:
+          - link "About" [ref=e21] [cursor=pointer]:
+            - /url: /collections/about
+    - button "Search" [ref=e22] [cursor=pointer]
+    - link "Cart (2 items)" [ref=e23] [cursor=pointer]:
+      - /url: /cart
+  - main [ref=e24]:
+    - heading "All products" [level=1] [ref=e25]
+    - group "Filters" [ref=e26]:
+      - checkbox "In stock" [checked] [ref=e27] [cursor=pointer]
+      - checkbox "Vegan" [ref=e28] [cursor=pointer]
+      - checkbox "Fragrance free" [ref=e29] [cursor=pointer]
+      - checkbox "Refillable" [checked] [ref=e30] [cursor=pointer]
+      - combobox "Sort by" [ref=e31]:
+        - option "Featured" [selected]
+        - option "Best selling"
+        - option "Price, low to high"
+        - option "Price, high to low"
+    - generic [ref=e32]:
+      - heading "Best sellers" [level=2] [ref=e33]
+      - list [ref=e34]:
+        - listitem [ref=e35]:
+          - generic:
+            - link "Serum No. 1" [ref=e36] [cursor=pointer]:
+              - /url: /products/serum-no-1
+              - img "Serum No. 1" [ref=e37]
+            - img [ref=e38]
+            - heading "Serum No. 1" [level=3] [ref=e39]
+            - generic [ref=e40]: Regular price $18.00
+            - button "Add to cart — Serum No. 1" [ref=e41] [cursor=pointer]
+        - listitem [ref=e42]:
+          - generic:
+            - link "Cream No. 2" [ref=e43] [cursor=pointer]:
+              - /url: /products/cream-no-2
+              - img "Cream No. 2" [ref=e44]
+            - img [ref=e45]
+            - heading "Cream No. 2" [level=3] [ref=e46]
+            - generic [ref=e47]: Regular price $25.00
+            - button "Add to cart — Cream No. 2" [ref=e48] [cursor=pointer]
+        - listitem [ref=e49]:
+          - generic:
+            - link "Cleanser No. 3" [ref=e50] [cursor=pointer]:
+              - /url: /products/cleanser-no-3
+              - img "Cleanser No. 3" [ref=e51]
+            - img [ref=e52]
+            - heading "Cleanser No. 3" [level=3] [ref=e53]
+            - generic [ref=e54]: Regular price $32.00
+            - button "Add to cart — Cleanser No. 3" [ref=e55] [cursor=pointer]
+        - listitem [ref=e56]:
+          - generic:
+            - link "Toner No. 4" [ref=e57] [cursor=pointer]:
+              - /url: /products/toner-no-4
+              - img "Toner No. 4" [ref=e58]
+            - img [ref=e59]
+            - heading "Toner No. 4" [level=3] [ref=e60]
+            - generic [ref=e61]: Regular price $39.00
+            - button "Add to cart — Toner No. 4" [ref=e62] [cursor=pointer]
+        - listitem [ref=e63]:
+          - generic:
+            - link "Mask No. 5" [ref=e64] [cursor=pointer]:
+              - /url: /products/mask-no-5
+              - img "Mask No. 5" [ref=e65]
+            - img [ref=e66]
+            - heading "Mask No. 5" [level=3] [ref=e67]
+            - generic [ref=e68]: Regular price $46.00
+            - button "Add to cart — Mask No. 5" [ref=e69] [cursor=pointer]
+        - listitem [ref=e70]:
+          - generic:
+            - link "Balm No. 6" [ref=e71] [cursor=pointer]:
+              - /url: /products/balm-no-6
+              - img "Balm No. 6" [ref=e72]
+            - img [ref=e73]
+            - heading "Balm No. 6" [level=3] [ref=e74]
+            - generic [ref=e75]: Regular price $53.00
+            - button "Add to cart — Balm No. 6" [ref=e76] [cursor=pointer]
+        - listitem [ref=e77]:
+          - generic:
+            - link "Oil No. 7" [ref=e78] [cursor=pointer]:
+              - /url: /products/oil-no-7
+              - img "Oil No. 7" [ref=e79]
+            - img [ref=e80]
+            - heading "Oil No. 7" [level=3] [ref=e81]
+            - generic [ref=e82]: Regular price $60.00
+            - button "Add to cart — Oil No. 7" [ref=e83] [cursor=pointer]
+        - listitem [ref=e84]:
+          - generic:
+            - link "Mist No. 8" [ref=e85] [cursor=pointer]:
+              - /url: /products/mist-no-8
+              - img "Mist No. 8" [ref=e86]
+            - img [ref=e87]
+            - heading "Mist No. 8" [level=3] [ref=e88]
+            - generic [ref=e89]: Regular price $67.00
+            - button "Add to cart — Mist No. 8" [ref=e90] [cursor=pointer]
+        - listitem [ref=e91]:
+          - generic:
+            - link "Serum No. 9" [ref=e92] [cursor=pointer]:
+              - /url: /products/serum-no-9
+              - img "Serum No. 9" [ref=e93]
+            - img [ref=e94]
+            - heading "Serum No. 9" [level=3] [ref=e95]
+            - generic [ref=e96]: Regular price $74.00
+            - button "Add to cart — Serum No. 9" [ref=e97] [cursor=pointer]
+        - listitem [ref=e98]:
+          - generic:
+            - link "Cream No. 10" [ref=e99] [cursor=pointer]:
+              - /url: /products/cream-no-10
+              - img "Cream No. 10" [ref=e100]
+            - img [ref=e101]
+            - heading "Cream No. 10" [level=3] [ref=e102]
+            - generic [ref=e103]: Regular price $81.00
+            - generic [ref=e104]: Sold out
+            - button "Add to cart — Cream No. 10" [ref=e105] [cursor=pointer] [disabled]
+        - listitem [ref=e106]:
+          - generic:
+            - link "Cleanser No. 11" [ref=e107] [cursor=pointer]:
+              - /url: /products/cleanser-no-11
+              - img "Cleanser No. 11" [ref=e108]
+            - img [ref=e109]
+            - heading "Cleanser No. 11" [level=3] [ref=e110]
+            - generic [ref=e111]: Regular price $88.00
+            - button "Add to cart — Cleanser No. 11" [ref=e112] [cursor=pointer]
+        - listitem [ref=e113]:
+          - generic:
+            - link "Toner No. 12" [ref=e114] [cursor=pointer]:
+              - /url: /products/toner-no-12
+              - img "Toner No. 12" [ref=e115]
+            - img [ref=e116]
+            - heading "Toner No. 12" [level=3] [ref=e117]
+            - generic [ref=e118]: Regular price $95.00
+            - button "Add to cart — Toner No. 12" [ref=e119] [cursor=pointer]
+        - listitem [ref=e120]:
+          - generic:
+            - link "Mask No. 13" [ref=e121] [cursor=pointer]:
+              - /url: /products/mask-no-13
+              - img "Mask No. 13" [ref=e122]
+            - img [ref=e123]
+            - heading "Mask No. 13" [level=3] [ref=e124]
+            - generic [ref=e125]: Regular price $102.00
+            - button "Add to cart — Mask No. 13" [ref=e126] [cursor=pointer]
+        - listitem [ref=e127]:
+          - generic:
+            - link "Balm No. 14" [ref=e128] [cursor=pointer]:
+              - /url: /products/balm-no-14
+              - img "Balm No. 14" [ref=e129]
+            - img [ref=e130]
+            - heading "Balm No. 14" [level=3] [ref=e131]
+            - generic [ref=e132]: Regular price $19.00
+            - button "Add to cart — Balm No. 14" [ref=e133] [cursor=pointer]
+        - listitem [ref=e134]:
+          - generic:
+            - link "Oil No. 15" [ref=e135] [cursor=pointer]:
+              - /url: /products/oil-no-15
+              - img "Oil No. 15" [ref=e136]
+            - img [ref=e137]
+            - heading "Oil No. 15" [level=3] [ref=e138]
+            - generic [ref=e139]: Regular price $26.00
+            - button "Add to cart — Oil No. 15" [ref=e140] [cursor=pointer]
+        - listitem [ref=e141]:
+          - generic:
+            - link "Mist No. 16" [ref=e142] [cursor=pointer]:
+              - /url: /products/mist-no-16
+              - img "Mist No. 16" [ref=e143]
+            - img [ref=e144]
+            - heading "Mist No. 16" [level=3] [ref=e145]
+            - generic [ref=e146]: Regular price $33.00
+            - button "Add to cart — Mist No. 16" [ref=e147] [cursor=pointer]
+    - generic [ref=e148]:
+      - heading "New in" [level=2] [ref=e149]
+      - list [ref=e150]:
+        - listitem [ref=e151]:
+          - generic:
+            - link "Toner No. 17" [ref=e152] [cursor=pointer]:
+              - /url: /products/toner-no-17
+              - img "Toner No. 17" [ref=e153]
+            - img [ref=e154]
+            - heading "Toner No. 17" [level=3] [ref=e155]
+            - generic [ref=e156]: Regular price $40.00
+            - button "Add to cart — Toner No. 17" [ref=e157] [cursor=pointer]
+        - listitem [ref=e158]:
+          - generic:
+            - link "Mask No. 18" [ref=e159] [cursor=pointer]:
+              - /url: /products/mask-no-18
+              - img "Mask No. 18" [ref=e160]
+            - img [ref=e161]
+            - heading "Mask No. 18" [level=3] [ref=e162]
+            - generic [ref=e163]: Regular price $47.00
+            - button "Add to cart — Mask No. 18" [ref=e164] [cursor=pointer]
+        - listitem [ref=e165]:
+          - generic:
+            - link "Balm No. 19" [ref=e166] [cursor=pointer]:
+              - /url: /products/balm-no-19
+              - img "Balm No. 19" [ref=e167]
+            - img [ref=e168]
+            - heading "Balm No. 19" [level=3] [ref=e169]
+            - generic [ref=e170]: Regular price $54.00
+            - button "Add to cart — Balm No. 19" [ref=e171] [cursor=pointer]
+        - listitem [ref=e172]:
+          - generic:
+            - link "Oil No. 20" [ref=e173] [cursor=pointer]:
+              - /url: /products/oil-no-20
+              - img "Oil No. 20" [ref=e174]
+            - img [ref=e175]
+            - heading "Oil No. 20" [level=3] [ref=e176]
+            - generic [ref=e177]: Regular price $61.00
+            - button "Add to cart — Oil No. 20" [ref=e178] [cursor=pointer]
+        - listitem [ref=e179]:
+          - generic:
+            - link "Mist No. 21" [ref=e180] [cursor=pointer]:
+              - /url: /products/mist-no-21
+              - img "Mist No. 21" [ref=e181]
+            - img [ref=e182]
+            - heading "Mist No. 21" [level=3] [ref=e183]
+            - generic [ref=e184]: Regular price $68.00
+            - button "Add to cart — Mist No. 21" [ref=e185] [cursor=pointer]
+        - listitem [ref=e186]:
+          - generic:
+            - link "Serum No. 22" [ref=e187] [cursor=pointer]:
+              - /url: /products/serum-no-22
+              - img "Serum No. 22" [ref=e188]
+            - img [ref=e189]
+            - heading "Serum No. 22" [level=3] [ref=e190]
+            - generic [ref=e191]: Regular price $75.00
+            - button "Add to cart — Serum No. 22" [ref=e192] [cursor=pointer]
+        - listitem [ref=e193]:
+          - generic:
+            - link "Cream No. 23" [ref=e194] [cursor=pointer]:
+              - /url: /products/cream-no-23
+              - img "Cream No. 23" [ref=e195]
+            - img [ref=e196]
+            - heading "Cream No. 23" [level=3] [ref=e197]
+            - generic [ref=e198]: Regular price $82.00
+            - button "Add to cart — Cream No. 23" [ref=e199] [cursor=pointer]
+        - listitem [ref=e200]:
+          - generic:
+            - link "Cleanser No. 24" [ref=e201] [cursor=pointer]:
+              - /url: /products/cleanser-no-24
+              - img "Cleanser No. 24" [ref=e202]
+            - img [ref=e203]
+            - heading "Cleanser No. 24" [level=3] [ref=e204]
+            - generic [ref=e205]: Regular price $89.00
+            - button "Add to cart — Cleanser No. 24" [ref=e206] [cursor=pointer]
+        - listitem [ref=e207]:
+          - generic:
+            - link "Toner No. 25" [ref=e208] [cursor=pointer]:
+              - /url: /products/toner-no-25
+              - img "Toner No. 25" [ref=e209]
+            - img [ref=e210]
+            - heading "Toner No. 25" [level=3] [ref=e211]
+            - generic [ref=e212]: Regular price $96.00
+            - button "Add to cart — Toner No. 25" [ref=e213] [cursor=pointer]
+        - listitem [ref=e214]:
+          - generic:
+            - link "Mask No. 26" [ref=e215] [cursor=pointer]:
+              - /url: /products/mask-no-26
+              - img "Mask No. 26" [ref=e216]
+            - img [ref=e217]
+            - heading "Mask No. 26" [level=3] [ref=e218]
+            - generic [ref=e219]: Regular price $103.00
+            - generic [ref=e220]: Sold out
+            - button "Add to cart — Mask No. 26" [ref=e221] [cursor=pointer] [disabled]
+        - listitem [ref=e222]:
+          - generic:
+            - link "Balm No. 27" [ref=e223] [cursor=pointer]:
+              - /url: /products/balm-no-27
+              - img "Balm No. 27" [ref=e224]
+            - img [ref=e225]
+            - heading "Balm No. 27" [level=3] [ref=e226]
+            - generic [ref=e227]: Regular price $20.00
+            - button "Add to cart — Balm No. 27" [ref=e228] [cursor=pointer]
+        - listitem [ref=e229]:
+          - generic:
+            - link "Oil No. 28" [ref=e230] [cursor=pointer]:
+              - /url: /products/oil-no-28
+              - img "Oil No. 28" [ref=e231]
+            - img [ref=e232]
+            - heading "Oil No. 28" [level=3] [ref=e233]
+            - generic [ref=e234]: Regular price $27.00
+            - button "Add to cart — Oil No. 28" [ref=e235] [cursor=pointer]
+        - listitem [ref=e236]:
+          - generic:
+            - link "Mist No. 29" [ref=e237] [cursor=pointer]:
+              - /url: /products/mist-no-29
+              - img "Mist No. 29" [ref=e238]
+            - img [ref=e239]
+            - heading "Mist No. 29" [level=3] [ref=e240]
+            - generic [ref=e241]: Regular price $34.00
+            - button "Add to cart — Mist No. 29" [ref=e242] [cursor=pointer]
+        - listitem [ref=e243]:
+          - generic:
+            - link "Serum No. 30" [ref=e244] [cursor=pointer]:
+              - /url: /products/serum-no-30
+              - img "Serum No. 30" [ref=e245]
+            - img [ref=e246]
+            - heading "Serum No. 30" [level=3] [ref=e247]
+            - generic [ref=e248]: Regular price $41.00
+            - button "Add to cart — Serum No. 30" [ref=e249] [cursor=pointer]
+        - listitem [ref=e250]:
+          - generic:
+            - link "Cream No. 31" [ref=e251] [cursor=pointer]:
+              - /url: /products/cream-no-31
+              - img "Cream No. 31" [ref=e252]
+            - img [ref=e253]
+            - heading "Cream No. 31" [level=3] [ref=e254]
+            - generic [ref=e255]: Regular price $48.00
+            - button "Add to cart — Cream No. 31" [ref=e256] [cursor=pointer]
+        - listitem [ref=e257]:
+          - generic:
+            - link "Cleanser No. 32" [ref=e258] [cursor=pointer]:
+              - /url: /products/cleanser-no-32
+              - img "Cleanser No. 32" [ref=e259]
+            - img [ref=e260]
+            - heading "Cleanser No. 32" [level=3] [ref=e261]
+            - generic [ref=e262]: Regular price $55.00
+            - button "Add to cart — Cleanser No. 32" [ref=e263] [cursor=pointer]
+    - generic [ref=e264]:
+      - heading "Sale" [level=2] [ref=e265]
+      - list [ref=e266]:
+        - listitem [ref=e267]:
+          - generic:
+            - link "Oil No. 33" [ref=e268] [cursor=pointer]:
+              - /url: /products/oil-no-33
+              - img "Oil No. 33" [ref=e269]
+            - img [ref=e270]
+            - heading "Oil No. 33" [level=3] [ref=e271]
+            - generic [ref=e272]: Regular price $62.00
+            - button "Add to cart — Oil No. 33" [ref=e273] [cursor=pointer]
+        - listitem [ref=e274]:
+          - generic:
+            - link "Mist No. 34" [ref=e275] [cursor=pointer]:
+              - /url: /products/mist-no-34
+              - img "Mist No. 34" [ref=e276]
+            - img [ref=e277]
+            - heading "Mist No. 34" [level=3] [ref=e278]
+            - generic [ref=e279]: Regular price $69.00
+            - button "Add to cart — Mist No. 34" [ref=e280] [cursor=pointer]
+        - listitem [ref=e281]:
+          - generic:
+            - link "Serum No. 35" [ref=e282] [cursor=pointer]:
+              - /url: /products/serum-no-35
+              - img "Serum No. 35" [ref=e283]
+            - img [ref=e284]
+            - heading "Serum No. 35" [level=3] [ref=e285]
+            - generic [ref=e286]: Regular price $76.00
+            - button "Add to cart — Serum No. 35" [ref=e287] [cursor=pointer]
+        - listitem [ref=e288]:
+          - generic:
+            - link "Cream No. 36" [ref=e289] [cursor=pointer]:
+              - /url: /products/cream-no-36
+              - img "Cream No. 36" [ref=e290]
+            - img [ref=e291]
+            - heading "Cream No. 36" [level=3] [ref=e292]
+            - generic [ref=e293]: Regular price $83.00
+            - button "Add to cart — Cream No. 36" [ref=e294] [cursor=pointer]
+        - listitem [ref=e295]:
+          - generic:
+            - link "Cleanser No. 37" [ref=e296] [cursor=pointer]:
+              - /url: /products/cleanser-no-37
+              - img "Cleanser No. 37" [ref=e297]
+            - img [ref=e298]
+            - heading "Cleanser No. 37" [level=3] [ref=e299]
+            - generic [ref=e300]: Regular price $90.00
+            - button "Add to cart — Cleanser No. 37" [ref=e301] [cursor=pointer]
+        - listitem [ref=e302]:
+          - generic:
+            - link "Toner No. 38" [ref=e303] [cursor=pointer]:
+              - /url: /products/toner-no-38
+              - img "Toner No. 38" [ref=e304]
+            - img [ref=e305]
+            - heading "Toner No. 38" [level=3] [ref=e306]
+            - generic [ref=e307]: Regular price $97.00
+            - button "Add to cart — Toner No. 38" [ref=e308] [cursor=pointer]
+        - listitem [ref=e309]:
+          - generic:
+            - link "Mask No. 39" [ref=e310] [cursor=pointer]:
+              - /url: /products/mask-no-39
+              - img "Mask No. 39" [ref=e311]
+            - img [ref=e312]
+            - heading "Mask No. 39" [level=3] [ref=e313]
+            - generic [ref=e314]: Regular price $104.00
+            - button "Add to cart — Mask No. 39" [ref=e315] [cursor=pointer]
+        - listitem [ref=e316]:
+          - generic:
+            - link "Balm No. 40" [ref=e317] [cursor=pointer]:
+              - /url: /products/balm-no-40
+              - img "Balm No. 40" [ref=e318]
+            - img [ref=e319]
+            - heading "Balm No. 40" [level=3] [ref=e320]
+            - generic [ref=e321]: Regular price $21.00
+            - button "Add to cart — Balm No. 40" [ref=e322] [cursor=pointer]
+        - listitem [ref=e323]:
+          - generic:
+            - link "Oil No. 41" [ref=e324] [cursor=pointer]:
+              - /url: /products/oil-no-41
+              - img "Oil No. 41" [ref=e325]
+            - img [ref=e326]
+            - heading "Oil No. 41" [level=3] [ref=e327]
+            - generic [ref=e328]: Regular price $28.00
+            - button "Add to cart — Oil No. 41" [ref=e329] [cursor=pointer]
+        - listitem [ref=e330]:
+          - generic:
+            - link "Mist No. 42" [ref=e331] [cursor=pointer]:
+              - /url: /products/mist-no-42
+              - img "Mist No. 42" [ref=e332]
+            - img [ref=e333]
+            - heading "Mist No. 42" [level=3] [ref=e334]
+            - generic [ref=e335]: Regular price $35.00
+            - generic [ref=e336]: Sold out
+            - button "Add to cart — Mist No. 42" [ref=e337] [cursor=pointer] [disabled]
+        - listitem [ref=e338]:
+          - generic:
+            - link "Serum No. 43" [ref=e339] [cursor=pointer]:
+              - /url: /products/serum-no-43
+              - img "Serum No. 43" [ref=e340]
+            - img [ref=e341]
+            - heading "Serum No. 43" [level=3] [ref=e342]
+            - generic [ref=e343]: Regular price $42.00
+            - button "Add to cart — Serum No. 43" [ref=e344] [cursor=pointer]
+        - listitem [ref=e345]:
+          - generic:
+            - link "Cream No. 44" [ref=e346] [cursor=pointer]:
+              - /url: /products/cream-no-44
+              - img "Cream No. 44" [ref=e347]
+            - img [ref=e348]
+            - heading "Cream No. 44" [level=3] [ref=e349]
+            - generic [ref=e350]: Regular price $49.00
+            - button "Add to cart — Cream No. 44" [ref=e351] [cursor=pointer]
+        - listitem [ref=e352]:
+          - generic:
+            - link "Cleanser No. 45" [ref=e353] [cursor=pointer]:
+              - /url: /products/cleanser-no-45
+              - img "Cleanser No. 45" [ref=e354]
+            - img [ref=e355]
+            - heading "Cleanser No. 45" [level=3] [ref=e356]
+            - generic [ref=e357]: Regular price $56.00
+            - button "Add to cart — Cleanser No. 45" [ref=e358] [cursor=pointer]
+        - listitem [ref=e359]:
+          - generic:
+            - link "Toner No. 46" [ref=e360] [cursor=pointer]:
+              - /url: /products/toner-no-46
+              - img "Toner No. 46" [ref=e361]
+            - img [ref=e362]
+            - heading "Toner No. 46" [level=3] [ref=e363]
+            - generic [ref=e364]: Regular price $63.00
+            - button "Add to cart — Toner No. 46" [ref=e365] [cursor=pointer]
+        - listitem [ref=e366]:
+          - generic:
+            - link "Mask No. 47" [ref=e367] [cursor=pointer]:
+              - /url: /products/mask-no-47
+              - img "Mask No. 47" [ref=e368]
+            - img [ref=e369]
+            - heading "Mask No. 47" [level=3] [ref=e370]
+            - generic [ref=e371]: Regular price $70.00
+            - button "Add to cart — Mask No. 47" [ref=e372] [cursor=pointer]
+        - listitem [ref=e373]:
+          - generic:
+            - link "Balm No. 48" [ref=e374] [cursor=pointer]:
+              - /url: /products/balm-no-48
+              - img "Balm No. 48" [ref=e375]
+            - img [ref=e376]
+            - heading "Balm No. 48" [level=3] [ref=e377]
+            - generic [ref=e378]: Regular price $77.00
+            - button "Add to cart — Balm No. 48" [ref=e379] [cursor=pointer]
+    - navigation "Pagination" [ref=e380]:
+      - link "Page 1" [ref=e381] [cursor=pointer]:
+        - /url: /collections/all?page=1
+      - link "Page 2" [ref=e382] [cursor=pointer]:
+        - /url: /collections/all?page=2
+      - link "Page 3" [ref=e383] [cursor=pointer]:
+        - /url: /collections/all?page=3
+      - link "Page 4" [ref=e384] [cursor=pointer]:
+        - /url: /collections/all?page=4
+  - contentinfo [ref=e385]:
+    - paragraph [ref=e386]: © 2026 Example Store
+```

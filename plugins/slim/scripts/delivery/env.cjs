@@ -54,6 +54,7 @@ function plainBytes() {
 }
 
 const hintOn = () => ENV.SLIM_HINT !== '0' && ENV.SLIM_LOOKUP !== '0';
+const a11yOn = () => ENV.SLIM_A11Y !== '0';
 
 // The host's Bash tool shows this many characters of output inline and saves the rest to a file (its
 // bashOutputMaxChars / BASH_MAX_OUTPUT_LENGTH default).
@@ -67,6 +68,6 @@ function bashInline(setting) {
 }
 
 module.exports = {
-  spillRoot, ttlRaw, debugLevel, budgetMs, stubEnabled, stubBytes, alreadySlimBound, plainBytes, hintOn, bashInline,
+  spillRoot, ttlRaw, debugLevel, budgetMs, stubEnabled, stubBytes, alreadySlimBound, plainBytes, hintOn, a11yOn, bashInline,
   STUB_CAP, PLAIN_BYTES_DEFAULT,
 };
