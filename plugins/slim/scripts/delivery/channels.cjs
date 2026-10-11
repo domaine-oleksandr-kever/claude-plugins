@@ -11,6 +11,7 @@ const path = require('path');
 const GATES = { mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, agent: 0, attachment: 32768 };
 const LOG_GATE = 16384;
 const LINT_GATE = 8192;
+const LIST_GATE = 8192;
 // A json/jsonl output still over this is stubbed; any other output over it passes through.
 const EGRESS = { bash: 32768, webfetch: 32768, websearch: 32768, agent: 32768, grep: 16384, read: 65536, attachment: 65536 };
 // Room under the host's Bash inline limit for what follows the body: the figure, the handle, the hint.
@@ -24,6 +25,9 @@ const FETCH_CMD = /(?:^|[;&|(`]|\$\()\s*(?:curl|wget|https?|xh|lynx)(?=\s|$)/;
 const LOG_CMD = /\.log\b|\.jsonl\b|\b(?:journalctl|logs?)\b/;
 // A linter, maybe through a package runner or its bin path, or a package's lint script, at the start of a pipeline segment.
 const LINT_CMD = /(?:^|[;&|(`]|\$\()\s*(?:(?:npx|pnpx|bunx|yarn|pnpm(?:\s+exec)?|npm\s+exec)\s+)?(?:[\w.-]*\/)*(?:eslint|stylelint|theme-check|tsc|prettier|shopify\s+theme\s+check|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?lint(?::[\w-]+)?)(?=\s|$)/;
+// The last command lists paths and writes the output: only sort/uniq/head/tail/grep may follow it
+// in the pipeline, never `-exec`, `xargs` or a later `&& cat`.
+const LIST_CMD = /(?:^|&&|\|\||[;\n(`]|\$\()\s*(?:find|fd|fdfind|ls|tree|git(?:\s+-C\s+\S+)?\s+ls-files|rg\s(?:[^;&|\n]*\s)?--files)(?=\s|$)(?![^;&|\n]*\s-(?:exec|execdir|ok|okdir)\s)(?:[^;&|\n]|>&)*(?:\|\s*(?:sort|uniq|head|tail|grep)(?=\s|$)(?:[^;&|\n]|>&)*)*[)`]?\s*$/;
 const OWN_CLI = /\b(?:json-slim|log-slim|slim|figma-node-slim|adf-to-md|mcp-slim)\.cjs\b/;
 const SOURCE_JSON_DIR = /(?:^|\/)(?:config|templates|locales|sections|blocks|snippets|layout)\/[^/]+\.json$/i;
 const SOURCE_JSON_BASE = /^(?:package(?:-lock)?|tsconfig[\w.-]*|composer|jsconfig|\.?[\w-]*rc)\.json$|\.schema\.json$/i;
@@ -37,9 +41,9 @@ const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const commandWords = (cmd) => String(cmd || '').split(/[\s'"|;&<>()=]+/).filter(Boolean);
 
 // The engine a channel lets run on a sniffed payload: html and log need a command that fetches or
-// reads a log, lint a linter, a browser snapshot is MCP's only, everything a channel does not admit
-// is treated as plain text. A Figma REST nodes response goes wherever JSON goes. MCP: null = not
-// compressed (plain text, guarded text, HTML).
+// reads a log, lint a linter, listing a command that lists paths; a browser snapshot is MCP's only;
+// everything a channel does not admit is treated as plain text. A Figma REST nodes response goes
+// wherever JSON goes. MCP: null = not compressed (plain text, guarded text, HTML).
 function admit(channel, engine, command) {
   switch (channel) {
     case 'mcp':
@@ -51,6 +55,7 @@ function admit(channel, engine, command) {
       if (engine === 'log') return LOG_CMD.test(command) ? 'log' : 'text';
       if (engine === 'a11y') return 'text';
       if (engine === 'lint') return LINT_CMD.test(command) ? 'lint' : 'text';
+      if (engine === 'listing') return LIST_CMD.test(command) ? 'listing' : 'text';
       return engine;
     case 'read':
       return ['json', 'jsonl', 'figma-nodes', 'log'].includes(engine) ? engine : null;
@@ -68,6 +73,7 @@ function structuredGate(channel, engine, plainBytes) {
   if (engine === 'text') return null;
   if (channel === 'bash' && engine === 'log') return LOG_GATE;
   if (channel === 'bash' && engine === 'lint') return LINT_GATE;
+  if (channel === 'bash' && engine === 'listing') return LIST_GATE;
   return GATES[channel] || plainBytes;
 }
 const plainGate = (channel, plainBytes) => (channel === 'grep' ? GATES.grep : plainBytes);
@@ -183,6 +189,7 @@ function extract(channel, rec, input) {
 }
 
 module.exports = {
-  GATES, LOG_GATE, LINT_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, LINT_CMD, OWN_CLI, READ_LOG_EXT,
+  GATES, LOG_GATE, LINT_GATE, LIST_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, LINT_CMD, LIST_CMD, OWN_CLI,
+  READ_LOG_EXT,
   isSourceJson, commandWords, admit, structuredGate, plainGate, bashSeen, extract, numberedBody, attachmentPath,
 };

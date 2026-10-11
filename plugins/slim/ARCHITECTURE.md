@@ -70,6 +70,7 @@ the code on the date at the bottom; the code wins when they drift.
 │                         ├─ adf.cjs    (Atlassian document → markdown)                        │
 │                         ├─ a11y.cjs   (browser snapshot · wrappers flat · sibling runs fold) │
 │                         ├─ lint.cjs   (linter output grouped by rule · first locations kept) │
+│                         ├─ listing.cjs (find / ls -R / tree → directory outline, histograms) │
 │                         └─ text-window.cjs (head + tail window, hidden-lines count)          │
 │  media.cjs  (beside compress(): kindOf · plan resize / frames from probe facts · figure)     │
 │  jq.cjs     (beside compress(): narrow a JSON document by a small jq subset, or refuse)      │
@@ -105,7 +106,7 @@ flowchart TD
   G -- no --> I
   H -- refused --> Z2[passthrough expand-refused]
   H -- ok --> I[engines.sniff<br/>content, never the tool name<br/>every channel, MCP per text block]
-  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter cmd,<br/>MCP: plain, guarded and HTML text not compressed,<br/>a11y snapshots MCP only}
+  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter cmd,<br/>listing only after a listing cmd on Bash,<br/>MCP: plain, guarded and HTML text not compressed,<br/>a11y snapshots MCP only}
   J --> K[engines.compress<br/>maxMs 5000 · targetBytes for engines flagged fit]
   K -- passthrough · refused --> L{stubbable?<br/>MCP over 32 KB}
   L -- yes --> M[emit stub + spill original]
@@ -132,7 +133,7 @@ non-zero exit, bad JSON) leaves the original result untouched and writes an erro
 | channel | gate | window if plain text | egress cap (output still over it → stub) |
 |---|---|---|---|
 | mcp | 4,096 | — | stub threshold 32,768 |
-| bash | 4,096; 8,192 linter output from a linter command; 16,384 a log from a log command | a host-persisted output always (4,096 budget), else over SLIM_PLAIN_BYTES | host inline limit − 2,048, at most 32,768; an answer at or past the host limit (chars, stdout + stderr) → stub, or pass through |
+| bash | 4,096; 8,192 linter output from a linter command, a listing from a listing command; 16,384 a log from a log command | a host-persisted output always (4,096 budget), else over SLIM_PLAIN_BYTES | host inline limit − 2,048, at most 32,768; an answer at or past the host limit (chars, stdout + stderr) → stub, or pass through |
 | read | 32,768 | — | 65,536 |
 | webfetch | 16,384 | 12,288 | 32,768 |
 | websearch | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
@@ -159,7 +160,10 @@ them equal, so the pure pre-decision in the module and the core never disagree.
 - **html runs only after a fetching command** (`curl`, `wget`, `xh`, …) and **log only when the
   command or file looks like a log**: `cat src/page.html` is source, not a page. **lint** runs on
   Bash only for a linter command (`eslint`, `tsc`, `shopify theme check`, `npm run lint`, …), on
-  MCP by content, never on Read: a `grep -rn error: logs/` hit list stays plain text.
+  MCP by content, never on Read: a `grep -rn error: logs/` hit list stays plain text. **listing runs only
+  after a listing command on Bash** (`find`, `fd`, `ls`, `tree`, `git ls-files`, `rg --files`) that
+  writes the output, never on Read or MCP: `cat paths.txt` and `ls data && cat data/prices.csv` stay
+  plain text.
 - **MCP text is sniffed too, guards included**: a text block that sniffs as plain text, a diff, test
   output, a template or HTML passes through (stubbed when too large); every other shape goes the json
   route, which unwraps fences, JSONL, block envelopes, Figma JSX and logs. So theme-check output that
@@ -378,6 +382,7 @@ All rows live in `README.md` → Environment switches; `tests/readme-checks.sh` 
 | engines (html) | `tests/html-slim-fixtures.mjs` | the html engine on `tests/fixtures/page.html` and malformed markup |
 | engines (a11y) | `tests/a11y-slim-fixtures.mjs` | the a11y engine on `tests/fixtures/a11y-*.txt`: sniff, exact bytes, every ref kept or in a range, fit stages, the generator |
 | engines (lint) | `tests/lint-slim-fixtures.mjs` | the lint engine on the ESLint / theme-check / tsc fixtures: sniff per grammar, exact bytes, every kept location in the input, counts equal the tool's summary, fit stages, Bash / MCP / Read delivery |
+| engines (listing) | `tests/listing-slim-fixtures.mjs` | the listing engine on the find / ls -R / tree fixtures: sniff, exact bytes, fit stages, every printed path and directory count against the input, Bash admission |
 | delivery | `tests/slim-fixtures.mjs` | one envelope per channel through `slim.cjs`: decisions, restored shapes, records, gates equal to the module's, `--report`; `--view` (jq, out roots, cache marker, host files, media); the media backend against fake `ffprobe` / `ffmpeg` / `sips` on a one-dir PATH; @-mentioned files; `--prompt` (in place, durable dir, worktree, output bound, link rail); `--access` and its `--report` pairing |
 | module | `plugins/slim/hooks/mods/tests/*.test.ts(x)` via `claude plugin test` | every channel's hook, pre-decisions, lookup rungs with mocked `$.tool.call` / `$.model.complete`, view's checks, Write path and reply text, the prompt rewrite and its origins, the attachment hook, the spill-read guard, describe, render, info |
 | all | `tests/layout-assertions.sh`, `tests/readme-checks.sh`, `claude plugin validate --strict` | layer purity, env rows, state contract |

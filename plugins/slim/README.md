@@ -7,7 +7,7 @@ Bash, Read, WebFetch, WebSearch, Grep and Agent — and shrinks the large ones b
 the context; a pasted prompt's data and an @-mentioned data file get the same treatment. It decides
 by content, never by tool name: JSON goes to the JSON compressor, a log to the log engine, an HTML
 page to the HTML engine, Figma design-context JSX to the JSX compactor, a Figma REST nodes response
-to the node-tree engine, a browser MCP's accessibility snapshot to the snapshot folder, linter output to the lint engine, and plain text (code, diffs, test output) is at most windowed. Two tools
+to the node-tree engine, a browser MCP's accessibility snapshot to the snapshot folder, linter output to the lint engine, a path listing from `find`, `ls -R` or `tree` to the listing outline, and plain text (code, diffs, test output) is at most windowed. Two tools
 come with it: `lookup` answers one question about a page, a command's output or a file without
 loading it whole, and `view` shows a big file or a command's output compactly (and resizes images
 and video). Every original stays on disk behind a recovery handle, so nothing is lost.
@@ -51,7 +51,7 @@ validates a hook's result against the built-in tool's output schema: Bash stays
 | Channel | Candidate when | What slim does |
 |---|---|---|
 | MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX, linter output and logs compressed, browser accessibility snapshots folded; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
-| Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML; over 16,384 B from a log command; over 8,192 B from a linter command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
+| Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML; over 16,384 B from a log command; over 8,192 B from a linter or a listing command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
 | Read | a whole-file read of a `.log`, `.jsonl` or `.ndjson` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
 | WebFetch | result over 16,384 B that is JSON or HTML, or over `SLIM_PLAIN_BYTES` | JSON, JSONL and HTML engines, else a window |
 | WebSearch | a result string over `SLIM_PLAIN_BYTES` | that string is windowed; the others are untouched |
@@ -109,7 +109,23 @@ is plain text, so test runners and git output are never deduplicated as a log. T
 for `eslint`, `stylelint`, `theme-check`, `shopify theme check`, `tsc`, `prettier` (directly, through
 `npx`/`pnpm exec`/`yarn`/`bunx`, or by bin path) and a package's `lint` script (`npm run lint`,
 `pnpm lint`, `yarn lint`, `bun run lint`); any other command's output is not lint (a `grep -rn
-error: logs/` hit list keeps every line).
+error: logs/` hit list keeps every line). The listing engine
+runs only when a listing command (`find`, `fd`, `ls`, `tree`, `git ls-files`, `rg --files`) writes
+the output: it is the last command, followed in its pipeline by nothing but `sort`, `uniq`, `head`,
+`tail` or `grep`, without `-exec`. `cat paths.txt`, `ls data && cat data/prices.csv` and
+`find … | xargs grep -c` stay plain text.
+
+**Path listings.** A Bash listing over 8,192 B — one path per line (`find`, `fd`, `git ls-files`,
+`rg --files`), `ls -R` blocks or `tree` box drawing — becomes a directory outline: one line per
+directory holding files, `./sections/ (12 files, 1 dir)`, in the order the command printed them
+(an `ls -t` keeps its newest first, an order across directories holds within each), with its files by bare name under it while
+it holds at most 8, else on that line an extension histogram and three example names
+(`./assets/ (1,350 files): .js 610, .css 380, .svg 240 · e.g. …`). Depth is never cut. Over the
+egress cap the threshold falls to 4, then to histograms only, then the output is stubbed. Lines that
+are not paths (`find: …: Permission denied`, tree's summary) stay verbatim under the header; a name
+is printed as it came or counted, never rewritten. A listing with nothing to fold stays as it came
+(`no-gain`) unless it is over the egress cap. The footer names the next call: a narrower `find <dir> -name '<pattern>'` or
+`ls <dir>`, or a windowed Read of the original.
 
 **Guard rails.** These pass through untouched, with their reason on the report line:
 
@@ -350,7 +366,7 @@ whose result the webfetch channel compresses, or `lookup({ url, question })`).
   JSON array): every guard has ruled by then, so view goes on.
   The core then reads the file the Read opened and picks the engine
   by content (`engine` overrides: `json`, `jsonl`, `log`, `html`, `figma`, `figma-nodes`, `adf`,
-  `text`, `a11y`, `lint`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
+  `text`, `a11y`, `lint`, `listing`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
   is one, so bound variables read by name. An image or a video goes to the media backend (see Media).
 - `command`: slim runs it through Bash (permission rules and hooks rule on it); an output the host
   saved to a file is read from there. A compressed output keeps its original in the spill root, and
@@ -454,7 +470,7 @@ slim owns four `$.state` keys under `plugin: 'slim'`. Any plugin reads them; onl
 The contract is `plugins/slim/types/index.d.ts`:
 
 ```ts
-export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'lint' | 'stub'
+export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'lint' | 'listing' | 'stub'
 export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'agent' | 'attachment' | 'prompt'
 type SlimEventBase = { v: 1; atMs: number; text: string; src: 'slim'; tool: string; agentType?: string; ms: number }
 export type SlimCompressEvent = SlimEventBase & { kind: 'slim'; channel: SlimChannel; bytesIn: number; bytesOut: number; engine: SlimEngine }
@@ -641,6 +657,9 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
 - **Glob, and Grep's file listings.** The host already caps them (Glob at 100 files, Grep at 250
   entries) and a listing has no text field a window could go back into, so slim leaves them alone.
   The native 2.1.289 build does not register Grep as a tool; slim matches it by name where it exists.
+- **Listings outside a Bash listing command.** A path list read with Read, returned by an MCP tool
+  or printed by another Bash command is plain text (`view { path }` on such a file does fold it, by
+  content); `ls -l` (sizes, permissions) is not a listing at all.
 - **Images pasted or @-mentioned in a prompt.** `prompt.submit` tells a hook only that an image is
   there, never its bytes, so slim cannot resize it; ask for `view { path }` on the file instead.
 - **@-mentioned source files and prose.** Only data files are compressed (see @-mentioned files);
@@ -714,6 +733,7 @@ directory. Results land in the suite's `results/` directory (git-ignored).
 node tests/slim-engines.mjs        # the engines as pure functions on the real fixtures, and the library contract
 node tests/html-slim-fixtures.mjs  # the HTML engine
 node tests/a11y-slim-fixtures.mjs  # the browser-snapshot engine
+node tests/listing-slim-fixtures.mjs  # the listing engine
 node tests/slim-fixtures.mjs       # delivery end to end: every channel, --view, --prompt, --access, --report
 claude plugin test plugins/slim    # the module's kit tests
 bash tests/mods-sim.sh             # validate --strict + the kit tests per plugin (local only; needs claude)

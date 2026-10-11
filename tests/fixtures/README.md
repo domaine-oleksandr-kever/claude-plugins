@@ -32,7 +32,7 @@ verbatim, Apache-2.0 — see `../parity/NOTICE`); they are the array-crush porti
 
 ## slim channel fixtures
 
-Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs`, `../lint-slim-fixtures.mjs` and the per-channel rows of
+Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs`, `../lint-slim-fixtures.mjs`, `../listing-slim-fixtures.mjs` and the per-channel rows of
 `../slim-fixtures.mjs`. All synthetic; none is derived from third-party content.
 
 | File | Source | Shape | Notes |
@@ -53,6 +53,10 @@ Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs`, `../lint-slim-fix
 | `eslint-stylish.txt` | **synthetic** — script-built once | ~36 KB ESLint stylish report: 400 problems (228 errors, 172 warnings) over 30 files under `/home/dev/shop-theme/src/`, 9 rules, one rule-less parsing error, the `✖ 400 problems` and `--fix` summary lines | the lint engine (`../lint-slim-fixtures.mjs`): sniffed `lint`, ~75% saved, every kept `file:line:col` in the input, header counts equal the summary; Bash `npx eslint` and MCP rows |
 | `lint-theme-check.txt` | **synthetic** — script-built once | ~14 KB theme-check text report without quoted source lines: 120 offences (`[level] file:line:col Check: message`) over 20 Liquid files, 7 checks, the `files inspected, … offenses detected` summary | the lint engine on theme-check; the Bash `shopify theme check` and MCP rows. `theme-check.txt` (above) quotes Liquid and stays `template` |
 | `tsc.txt` | **synthetic** — script-built once | ~5.5 KB `tsc --noEmit` output: 60 errors (`file(line,col): error TSnnnn: message`) over 14 files, 5 codes, `Found 60 errors in 14 files.` | the lint engine on tsc: locations kept as `file(line,col)`, quoted names shown per location; under the Bash 8,192 B lint gate |
+| `listing-theme-find.txt` | **synthetic** — script-built once (seeded) | ~66 KB `find . -type f` of a Shopify theme repo: 2,300 paths in filesystem order, 1,350 assets, 410 snippets, 260 sections, small `config/`, `layout/`, `templates/customers/` | the listing engine (`listing-slim-fixtures.mjs`, `slim-fixtures.mjs` Cb17): 67,371 B → 1,703 B, big directories folded to histograms, small ones listed whole |
+| `listing-node-modules-ls-R.txt` | **synthetic** — script-built once (seeded) | ~55 KB GNU `ls -R node_modules`: 60 packages × `lib/`, `lib/internal/`, `dist/`, `dist/esm/`, 301 directories | the deep case: 32,317 B at the first stage, 19,506 B after `fold4` → `fold0` under a 30,000 B target |
+| `listing-tree.txt` | **synthetic** — script-built once (seeded) | ~16 KB `tree` output with the non-breaking spaces of a UTF-8 locale: 7 theme directories, one nested, and tree's `8 directories, 464 files` summary | box-drawing parse; the summary stays verbatim under the header |
+| `listing-small.txt` | **synthetic** — hand-shaped | a 50-line `git ls-files`, every directory at most 6 files | nothing to fold → `no-gain` |
 
 The 300 KB Read row and the eval's `orders.json` come from `plugins/slim/evals/_shared/make-orders.cjs`
 at run time; `jql-nodes-ELC.json` is the one fixture of that size committed, because the delivery

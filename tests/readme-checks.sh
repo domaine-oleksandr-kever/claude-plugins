@@ -806,5 +806,12 @@ for p in $TEAM_PLUGINS; do
   esac
 done
 
+# slim's README copies its state contract: every exported Slim type line matches types/index.d.ts.
+while IFS= read -r line; do
+  has "$ROOT/plugins/slim/README.md" "$line" slim-state-contract-types
+done <<EOF_TYPES
+$(grep -E '^export type Slim(Engine|Channel) ' "$ROOT/plugins/slim/types/index.d.ts")
+EOF_TYPES
+
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

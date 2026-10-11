@@ -14,6 +14,9 @@ export const LOG_CMD = /\.log\b|\.jsonl\b|\b(?:journalctl|logs?)\b/
 export const LINT_GATE = 8192
 /** A linter, maybe through a package runner or its bin path, or a package's lint script, at the start of a pipeline segment. */
 export const LINT_CMD = /(?:^|[;&|(`]|\$\()\s*(?:(?:npx|pnpx|bunx|yarn|pnpm(?:\s+exec)?|npm\s+exec)\s+)?(?:[\w.-]*\/)*(?:eslint|stylelint|theme-check|tsc|prettier|shopify\s+theme\s+check|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?lint(?::[\w-]+)?)(?=\s|$)/
+/** A Bash command whose last command lists paths (only sort/uniq/head/tail/grep after it) is a candidate from here on: the core folds the listing. */
+export const LIST_GATE = 8192
+export const LIST_CMD = /(?:^|&&|\|\||[;\n(`]|\$\()\s*(?:find|fd|fdfind|ls|tree|git(?:\s+-C\s+\S+)?\s+ls-files|rg\s(?:[^;&|\n]*\s)?--files)(?=\s|$)(?![^;&|\n]*\s-(?:exec|execdir|ok|okdir)\s)(?:[^;&|\n]|>&)*(?:\|\s*(?:sort|uniq|head|tail|grep)(?=\s|$)(?:[^;&|\n]|>&)*)*[)`]?\s*$/
 /** Theme and package JSON a person edits: never compressed, whatever its size. */
 export const SOURCE_JSON = /(?:^|\/)(?:config|templates|locales|sections|blocks|snippets|layout)\/[^/]+\.json$/i
 const SOURCE_JSON_NAME = /^(?:package(?:-lock)?|tsconfig[\w.-]*|composer|jsconfig|\.?[\w-]*rc)\.json$|\.schema\.json$/i
@@ -186,6 +189,7 @@ function sizeOk(ch: Intake, v: View, plain: number): boolean {
       if (v.bytes > GATES.bash && structured(head) && (!markup(head) || FETCH_CMD.test(cmd))) return true
       if (v.bytes > LOG_GATE && LOG_CMD.test(cmd)) return true
       if (v.bytes > LINT_GATE && LINT_CMD.test(cmd)) return true
+      if (v.bytes > LIST_GATE && LIST_CMD.test(cmd)) return true
       return v.bytes > plain
     }
     case 'read': return true

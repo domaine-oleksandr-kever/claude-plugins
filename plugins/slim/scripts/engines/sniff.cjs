@@ -18,6 +18,7 @@ const { detectJsx } = require('./figma.cjs');
 const { isNodesResponse } = require('./figma-nodes.cjs');
 const { parseJsonl, unwrapFence } = require('./json.cjs');
 const { detectSnapshot } = require('./a11y.cjs');
+const { detect: detectListing } = require('./listing.cjs');
 
 const SCAN = 65536;
 
@@ -100,6 +101,9 @@ function sniffText(text, fenced) {
     }
   }
   if (parseJsonl(text)) return { engine: 'jsonl', confidence: 0.9, reason: 'jsonl' };
+  // Ahead of the code rule: a path such as `export/feed.csv` opens like code.
+  const listing = detectListing(text);
+  if (listing) return { engine: 'listing', confidence: 0.9, reason: `listing-${listing}` };
   if (looksLikeCode(text)) return { engine: 'text', confidence: 0.9, reason: 'code' };
   if (isHtml(text)) return { engine: 'html', confidence: 0.9, reason: 'html' };
   const lint = detectLint(text);

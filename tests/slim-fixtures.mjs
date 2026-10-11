@@ -571,6 +571,8 @@ let STUB0_OUT = null;
     ['lookup.ts', 'DISTILL_BUDGET', 'slim.cjs', 'DISTILL_BUDGET'],
     ['channels.ts', 'LINT_CMD', 'delivery/channels.cjs', 'LINT_CMD'],
     ['channels.ts', 'LINT_GATE', 'delivery/channels.cjs', 'LINT_GATE'],
+    ['channels.ts', 'LIST_CMD', 'delivery/channels.cjs', 'LIST_CMD'],
+    ['channels.ts', 'LIST_GATE', 'delivery/channels.cjs', 'LIST_GATE'],
   ]) {
     const m = literal(M(mf), mn);
     const c = literal(C(cf), cn);
@@ -756,6 +758,18 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const snapBash = readFileSync(path.join(FIX, 'a11y-plp.txt'), 'utf8').repeat(3);
   const sb = call('Cb17-a11y-is-text', T, chEnv(T, 'bash', 'Bash', { command: 'cat snapshot.txt' }, BASH(snapBash)));
   eq('Cb17-a11y-is-text', [sb.decision, sb.record.engine], ['compressed', 'text']);
+  // A path listing: folded only under a listing command, from 8 KB; the spill is the listing as printed.
+  const FIND = readFileSync(path.join(FIX, 'listing-theme-find.txt'), 'utf8');
+  const fl = call('Cb17-listing', T, chEnv(T, 'bash', 'Bash', { command: 'find . -type f' }, BASH(FIND)));
+  eq('Cb17-listing', [fl.decision, fl.record.engine, fl.record.stages], ['compressed', 'listing', ['listing']]);
+  const flOut = String((fl.result || {}).stdout || '');
+  check('Cb17-listing-body', flOut.startsWith('<<slim-listing>> flat · 2,300 paths') && !!handleOf(flOut) && /\.txt$/.test(handleOf(flOut)) && readFileSync(handleOf(flOut), 'utf8') === FIND, flOut.slice(0, 120));
+  eq('Cb17-listing-cat-is-text', call('Cb17-cat', T, chEnv(T, 'bash', 'Bash', { command: 'cat paths.txt' }, BASH(FIND))).record.engine, 'text');
+  eq('Cb17-listing-under-gate', call('Cb17-small', T, chEnv(T, 'bash', 'Bash', { command: 'find .' }, BASH(FIND.slice(0, 8000)))).reason, 'size-gate');
+  const lsr = readFileSync(path.join(FIX, 'listing-node-modules-ls-R.txt'), 'utf8');
+  const lsFit = call('Cb17-listing-fit', T, chEnv(T, 'bash', 'Bash', { command: 'ls -R node_modules' }, BASH(lsr), { bash_output_max_chars: 30000 }));
+  eq('Cb17-listing-fit', [lsFit.decision, lsFit.record.engine, lsFit.record.stages], ['compressed', 'listing', ['listing', 'fold4', 'fold0']]);
+  eq('Cb17-listing-mcp-as-text', (({ decision, reason }) => [decision, reason])(call('Cb17-mcp', T, envelope(T, [{ type: 'text', text: FIND }], { tool: 'mcp__x__files' }))), ['stubbed', 'non-json']);
 }
 
 // C-read
