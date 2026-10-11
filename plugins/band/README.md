@@ -18,7 +18,7 @@ and its own events. slim publishes its compression events. The team plugins on b
 publish their own start, install and doctor lines. Band reads these lines; it never writes another
 plugin's state.
 
-Current release: **band v0.9.0**.
+Current release: **band v0.9.1**.
 
 ## Status
 
@@ -57,6 +57,13 @@ Clear, then the digest:
 ```text
 cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ [ Compact ]  [ Progress ]
 ```
+
+**When the band appears.** Band draws the row as soon as it holds one figure. At launch it reads the
+model, the cache TTL and the first usage figures in its session start hook, so the row shows within a
+second. A `/clear` opens a new session id. The host keeps plugin state per session id, so every band
+figure starts empty again, and no session start hook runs. Band reads the same three things again in
+the SessionStart hook that a `/clear` fires, so the row returns at once. Without that seed, the row
+stayed hidden until the 30 s refresh or the first turn filled the figures (band 0.9.0 and earlier).
 
 At 60 columns, band also drops the rate windows (the least full one first) and then the model:
 
@@ -253,9 +260,10 @@ below): `… 12 earlier — full log: <log dir>/<session-id>/`. Where no folder 
 | `view` | slim | slim's `view` tool returns a file, URL or command output | `view <source>: <size> → <size> (<saving>) · <engine>`, or `cached`, `narrowed by jq`, `refused (<reason>)`; a subagent's call prefixed with its agent type |
 
 Each publisher keeps its own list of at most 200 lines. Past 200 lines, band, base and the team
-plugins drop their oldest line. The pane reads the session's state, so the pane starts empty on each
-new launch. The record that outlives the session is each plugin's own file (see below). `/clear`
-keeps the lines and adds `session clear` where the conversation restarted. Each plugin has its own
+plugins drop their oldest line. The pane reads the session's state, and the host keeps that state per session id. So the pane
+starts empty on each new launch and after a `/clear`. The record that outlives the session is each
+plugin's own file (see below). `session clear` is the last line of the session that a `/clear` ends;
+it goes to that session's list and file, not to the new one. Each plugin has its own
 switch for its lines, in the pane and in its file: `BAND_EVENT_LOG=0`, `BASE_EVENT_LOG=0`,
 `SLIM_EVENT_LOG=0`, and a team plugin's `FE_EVENT_LOG=0`, `QA_EVENT_LOG=0`, `BE_EVENT_LOG=0`,
 `PM_EVENT_LOG=0`. None of these switches changes the toasts.
