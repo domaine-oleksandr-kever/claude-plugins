@@ -177,6 +177,30 @@ function progressLine(p: unknown): { workId: string | null; branch: string | nul
   return { workId: str(s.workId), branch: str(s.branch) }
 }
 
+/**
+ * Fills the atoms a fresh session starts without: the TTL (`seedsTtl` decides), the model and the first usage
+ * reading. One throwing session.start hook skips every band session.start hook: each $ call fails alone.
+ */
+async function seed($: $, reloaded: boolean, forcedTtl: number | null): Promise<void> {
+  if (seedsTtl(reloaded, forcedTtl, (await read($, cache).catch(() => CACHE_INIT)).ttlSource)) {
+    let learned: number | null = null
+    if (forcedTtl === null && billed) {
+      try {
+        const stored = await $.store.get(STORE_TTL)
+        learned = typeof stored === 'number' && stored > 0 ? stored : null
+      } catch {}
+    }
+    const ttlMs = forcedTtl ?? learned ?? (billed ? CACHE_INIT.ttlMs : HOUR_MS)
+    const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
+    await update($, cache, c => ({ ...c, ttlMs, ttlSource })).catch(() => undefined)
+  }
+  try {
+    const m = await $.session.model()
+    await update($, model, () => m)
+  } catch {}
+  await refresh($).catch(() => undefined)
+}
+
 export function registerUsage(on: On, options: PluginOptions): void {
   const forcedTtl = ttlMsOf(options.cacheTtl)
 
@@ -186,27 +210,10 @@ export function registerUsage(on: On, options: PluginOptions): void {
     $.clock.every(TICK_MS, () => {
       void refresh($).catch(() => undefined)
     })
-    // One throwing session.start hook skips every band session.start hook: each $ call fails alone.
     const reloaded = (await read($, tick).catch(() => 0)) > 0
     billed = await isBilled($).catch(() => true)
-    if (seedsTtl(reloaded, forcedTtl, (await read($, cache).catch(() => CACHE_INIT)).ttlSource)) {
-      let learned: number | null = null
-      if (forcedTtl === null && billed) {
-        try {
-          const stored = await $.store.get(STORE_TTL)
-          learned = typeof stored === 'number' && stored > 0 ? stored : null
-        } catch {}
-      }
-      const ttlMs = forcedTtl ?? learned ?? (billed ? CACHE_INIT.ttlMs : HOUR_MS)
-      const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
-      await update($, cache, c => ({ ...c, ttlMs, ttlSource })).catch(() => undefined)
-    }
     costShown = isOn(await $.env.get('BAND_COST').catch(() => undefined))
-    try {
-      const m = await $.session.model()
-      await update($, model, () => m)
-    } catch {}
-    await refresh($).catch(() => undefined)
+    await seed($, reloaded, forcedTtl)
     if (!reloaded) {
       const v = (await read($, info).catch(() => null))?.version ?? '?'
       await logEvent($, 'session', `start · band ${v}`, { kind: 'start', text: `band ${v}` })
@@ -321,6 +328,13 @@ export function registerUsage(on: On, options: PluginOptions): void {
     if (e.source !== 'resume' && (e.from_model !== e.to_model || !e.prompt_cache_warm)) {
       await update($, cache, c => ({ ...c, isCold: true }))
     }
+    return next(e)
+  })
+
+  // /clear goes on under a new session id, whose state starts empty, and no session.start follows: unseeded,
+  // the band stays hidden until the tick or the first turn fills the atoms.
+  on('classic.SessionStart', { source: 'clear' }, async ($, e, next) => {
+    await seed($, false, forcedTtl)
     return next(e)
   })
 

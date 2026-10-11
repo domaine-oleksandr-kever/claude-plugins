@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { HOUR_MS, seedsTtl } from '../lib.ts'
-import { KEPT, MIN, SNAP, T0, logged, measure, modelSwitch, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
+import { KEPT, MIN, SNAP, T0, logged, measure, modelSwitch, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -28,6 +28,33 @@ describe('event log writers → band.events', () => {
     await start($)
     await $.session.end({ reason: 'resume', sessionId: 's1', resume: {} } as any)
     await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'session clear'])
+  })
+
+  test('classic.SessionStart clear re-seeds the model, TTL and usage the new session id starts without; no new lines', async ($, on) => {
+    const { w } = world(on)
+    on('classic.SessionStart', async () => ({}) as never)
+    // band's state, held here in the host's place: it keeps state per session id, so a /clear empties it.
+    const mem = new Map<string, { value: unknown; version: number }>()
+    on('state.get', { plugin: 'band' } as any, async (_$: any, e: any) => ({ value: mem.get(e.key) ?? { value: undefined, version: 0 } }) as any)
+    on('state.set', { plugin: 'band' } as any, async (_$: any, e: any) => {
+      const version = (mem.get(e.key)?.version ?? 0) + 1
+      mem.set(e.key, { value: e.value, version })
+      return { value: { isSet: true, version } } as any
+    })
+    await start($)
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
+    const lines = mem.get('events')
+    mem.clear()
+    expect((await peek($)).model).toBeNull()
+    if (lines) mem.set('events', lines)
+    w.rateLimits = [{ kind: 'five_hour', percentUsed: 12 }]
+    await $.classic.SessionStart({ source: 'clear' } as any)
+    const p = await peek($)
+    expect(p.model).toBe('claude-fable-5-1')
+    expect(p.usage.rates.map((r: any) => r.pct)).toEqual([12])
+    expect(p.cache.ttlMs).toBe(HOUR_MS)
+    expect(p.tick).toBe(T0)
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'session clear'])
   })
 
