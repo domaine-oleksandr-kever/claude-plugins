@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { SlimEvent } from '../../../types'
 import type { View } from '../channels.ts'
-import { GATES, LOG_GATE, attachmentShape, candidate, channelOf, floor, guardOf, isSourceJson, structured, viewOf } from '../channels.ts'
+import { GATES, LIST_GATE, LOG_GATE, attachmentShape, candidate, channelOf, floor, guardOf, isSourceJson, structured, viewOf } from '../channels.ts'
 import { EVENT_CAP, agentPrefix, eventText, fmtSize, fmtTokens, groupSuffix, lookupText, pctSaved, pushEvent, rowLine, toolName } from '../events.ts'
 import { HEADER, cutBytes, parseReply, quoted, resultText, verified } from '../lookup.ts'
 import {
@@ -253,6 +253,14 @@ describe('channels', () => {
     expect(candidate('bash', bash(plain(70_000), 'npm test'), 100_000)).toBe(false)
     expect(candidate('bash', bash('preview', 'x', { persistedOutputPath: '/p/tool-results/b.txt' }), P)).toBe(true)
     expect(candidate('bash', bash(`{% render 'x' %}${'y'.repeat(6000)}`), P)).toBe(false)
+  })
+
+  test('Bash: a listing command over 8 KB goes to the core below SLIM_PLAIN_BYTES', () => {
+    const paths = Array.from({ length: 400 }, (_, i) => `./snippets/card-${i}.liquid`).join('\n')
+    expect(LIST_GATE).toBe(8192)
+    for (const cmd of ['find . -type f', 'cd t && ls -R', 'tree -L 2', 'git ls-files', 'rg --files', 'fd -e liquid']) expect(candidate('bash', bash(paths, cmd), P)).toBe(true)
+    expect(candidate('bash', bash(paths, 'cat paths.txt'), P)).toBe(false)
+    expect(candidate('bash', bash(paths.slice(0, 8000), 'find .'), P)).toBe(false)
   })
 
   test('Bash: images, structured content and background tasks are not text', () => {

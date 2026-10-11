@@ -37,7 +37,7 @@ One call: `compress(input, options)`.
 | `spillDir` | `''` | prefix of the paths the text cites for parts (`<<full=<spillDir>/<name> …>>`). Empty → the bare name. |
 | `spillNames` | `{ original: 'slim-original-', rows: 'slim-rows-', ids: 'slim-ids-' }` | name prefix per spill kind. |
 | `trace` | `false` | fill `stats.stages` with the pipeline stages that changed bytes. |
-| `targetBytes` | `null` | json / jsonl and figma-nodes: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**). Other engines ignore it. |
+| `targetBytes` | `null` | json / jsonl, figma-nodes and listing: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**); a listing lowers its fold threshold (see **listing**). Other engines ignore it. |
 | `maxInputBytes` | `67108864` | larger input → `refused` / `too-large`. |
 | `marker` | `'handle'` | `'ccr'` reproduces Headroom's content-hash crush marker; parity tests only. |
 
@@ -46,7 +46,7 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
 ## 2. Detection
 
 `sniff(input)` → `{ engine, confidence, reason }`, where `engine` is one of `json | jsonl | log | html
-| figma | figma-nodes | adf | text | binary | none` and `confidence` is 0..1. Content only; first match wins:
+| figma | figma-nodes | adf | listing | text | binary | none` and `confidence` is 0..1. Content only; first match wins:
 
 1. **binary** — a Buffer starting with PNG, JPEG, GIF8, `%PDF-`, zip (`PK\x03\x04`), gzip (`1F 8B`),
    `RIFF…WEBP`, wasm (`\0asm`), ELF or Mach-O magic, or holding a NUL byte in its first 8192 bytes; a
@@ -67,6 +67,11 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
 6. **fence** — one dominant markdown fence (≥ 80 % of the bytes, ≤ 3 preamble and trailer lines): the
    body's engine, reason `fence`.
 7. **jsonl** — two or more lines, every non-blank line a JSON object or array.
+7a. **listing** — 50 or more non-blank lines that are a path list (reason `listing-flat`: 90 % or more
+   bare paths without whitespace, URLs and `-` lines excluded, half of them holding a `/` or an
+   extension), `ls -R` blocks (`listing-ls-R`: a `dir:` header, entries without a `/`) or `tree` box
+   drawing (`listing-tree`: 90 % of the lines after the root under `├──`/`└──`/`|--`). Ahead of the
+   code rule, because a path such as `export/feed.csv` opens like code.
 8. **code → text** — non-markup text where 30 % of the first 200 non-empty lines open like code
    (`import`, `const`, `function`, `def`, `return`, `{`, `}`, `//`, …). After the fence and JSONL rules,
    because a JSON line opens with a brace too.
@@ -150,6 +155,20 @@ folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` p
 
 **adf** — a bare Atlassian document converted to markdown (media render as `_(media omitted)_`).
 
+**listing** — a path list as a directory outline. The paths (one per line, `ls -R` blocks joined to
+their header, `tree` lines joined to their parents) build a trie printed top-down in name order: one
+line per directory holding files, or empty, `<dir>/ (N files, M dirs)`, then its files by bare name,
+two spaces in, while it holds at most 8; a bigger one carries on its own line an extension histogram
+(top 8, then `other N`) and up to 3 example names, one per top extension first
+(`./assets/ (1,350 files): .js 610, .css 380 · e.g. a.js, b.css, c.svg`). Bare relative paths at the
+top print under `(top level)`. Depth is never cut. With `targetBytes` the threshold falls 8 → 4 → 0,
+stages `listing`, `fold4`, `fold0`; at 0 every directory folds without example names; a text still
+over it comes back for the caller to stub. The header `<<slim-listing>> <flat|ls-R|tree> · N paths · N
+files in N dirs · N files folded in N dirs · shown N lines` is followed by the input lines that are
+not paths, verbatim; the last line names the next call (a narrower `find`/`ls`, or a windowed Read of
+the original). Names are printed as they came or counted, never rewritten. Nothing folded and no
+`targetBytes` the input exceeds → `no-gain`; text that is not a listing → `non-listing`.
+
 **text** — the plain-text window, the only thing slim ever does to code, diffs, test output or prose:
 at or under `plainBytes` nothing happens; above it the head keeps whole lines up to a third of
 `budgetBytes`, the tail fills the rest, and one marker line in between says
@@ -163,7 +182,7 @@ rewritten.
 ```ts
 {
   v: 1,
-  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'binary'|'none',  // the engine that produced the text
+  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'listing'|'text'|'binary'|'none',  // the engine that produced the text
   decision: 'compressed' | 'passthrough' | 'refused',
   reason?: string,      // why not compressed
   format?: string,      // diagnostic tag of a non-JSON passthrough (html | xml | broken-json | text)
@@ -186,7 +205,7 @@ reply — is the caller's decision.
 
 Passthrough reasons: `empty`, `engine-not-allowed`, `plain-gate`, `no-gain`, `non-json`, `error-shape`,
 `number-precision`, `budget-exceeded`, `transform-error`, and per engine `non-log`, `non-figma`,
-`non-figma-nodes`, `non-adf`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
+`non-figma-nodes`, `non-adf`, `non-listing`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
 
 ## 5. Guarantees
 

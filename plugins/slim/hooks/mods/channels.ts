@@ -10,6 +10,9 @@ export const LOG_GATE = 16384
 /** A fetching command word at the start of a pipeline segment; `cat src/http/page.html` is not one. */
 export const FETCH_CMD = /(?:^|[;&|(`]|\$\()\s*(?:curl|wget|https?|xh|lynx)(?=\s|$)/
 export const LOG_CMD = /\.log\b|\.jsonl\b|\b(?:journalctl|logs?)\b/
+/** A Bash command that lists paths is a candidate from here on: the core folds the listing. */
+export const LIST_GATE = 8192
+export const LIST_CMD = /(?:^|[;&|(`]|\$\()\s*(?:find|fd|fdfind|ls|tree|git(?:\s+-C\s+\S+)?\s+ls-files|rg\s(?:[^;&|]*\s)?--files)(?=\s|$)/
 /** Theme and package JSON a person edits: never compressed, whatever its size. */
 export const SOURCE_JSON = /(?:^|\/)(?:config|templates|locales|sections|blocks|snippets|layout)\/[^/]+\.json$/i
 const SOURCE_JSON_NAME = /^(?:package(?:-lock)?|tsconfig[\w.-]*|composer|jsconfig|\.?[\w-]*rc)\.json$|\.schema\.json$/i
@@ -181,6 +184,7 @@ function sizeOk(ch: Intake, v: View, plain: number): boolean {
       if (v.persisted) return true
       if (v.bytes > GATES.bash && structured(head) && (!markup(head) || FETCH_CMD.test(cmd))) return true
       if (v.bytes > LOG_GATE && LOG_CMD.test(cmd)) return true
+      if (v.bytes > LIST_GATE && LIST_CMD.test(cmd)) return true
       return v.bytes > plain
     }
     case 'read': return true

@@ -34,7 +34,7 @@ const { spans, jsonBlobs } = require('./spans.cjs');
  * @property {{original?: string, rows?: string, ids?: string}} [spillNames]  name prefixes per kind
  * @property {boolean} [trace=false]           fill stats.stages with the stages that changed bytes
  * @property {number|null} [targetBytes=null]  json/jsonl: a crushed body still above it is trimmed, then row-fitted;
- *   figma-nodes: a tree above it folds its deepest levels
+ *   figma-nodes: a tree above it folds its deepest levels; listing: lowers its fold threshold
  * @property {number} [maxInputBytes=67108864] larger input → refused 'too-large'
  * @property {'handle'|'ccr'} [marker='handle'] 'ccr' reproduces Headroom's crush hash (parity tests only)
  *

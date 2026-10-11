@@ -32,7 +32,7 @@ verbatim, Apache-2.0 — see `../parity/NOTICE`); they are the array-crush porti
 
 ## slim channel fixtures
 
-Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs` and the per-channel rows of
+Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs`, `../listing-slim-fixtures.mjs` and the per-channel rows of
 `../slim-fixtures.mjs`. All synthetic; none is derived from third-party content.
 
 | File | Source | Shape | Notes |
@@ -44,6 +44,10 @@ Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs` and the per-channe
 | `theme-check.txt` | **synthetic** — script-built once | ~21 KB theme-check text report: 120 offences over 20 Liquid files, each with the quoted source line (`{% render … %}`, `{{ … }}`) and a severity summary | the MCP route must sniff it as `template` text and pass it through (stub over the limit), never log-compress it (`slim-fixtures.mjs` MS1) |
 | `playwright-snapshot.txt` | **synthetic** — script-built once | ~20 KB Playwright MCP `browser_snapshot` text: page header lines, then a fenced YAML accessibility tree of a 48-card product grid with `[ref=eN]` refs | no engine claims it yet: passthrough `non-json` on MCP (`slim-fixtures.mjs` MS2) |
 | `jql-nodes-ELC.json` | **synthetic** — `plugins/slim/evals/_shared/make-jql-nodes.cjs` | ~297 KB Atlassian MCP JQL search in the `{issues:{nodes:[50]},context}` shape: ELC-1401…ELC-1450, each with a 1.5–4.2 KB lorem markdown `description`, invented people and hosts | no crush signal (unique rows), so only the `targetBytes` trim and fit stages bring it under the 32,768 B stub limit; EF holds it equal to the generator's output |
+| `listing-theme-find.txt` | **synthetic** — script-built once (seeded) | ~66 KB `find . -type f` of a Shopify theme repo: 2,300 paths in filesystem order, 1,350 assets, 410 snippets, 260 sections, small `config/`, `layout/`, `templates/customers/` | the listing engine (`listing-slim-fixtures.mjs`, `slim-fixtures.mjs` Cb17): 67,371 B → 1,703 B, big directories folded to histograms, small ones listed whole |
+| `listing-node-modules-ls-R.txt` | **synthetic** — script-built once (seeded) | ~55 KB GNU `ls -R node_modules`: 60 packages × `lib/`, `lib/internal/`, `dist/`, `dist/esm/`, 301 directories | the deep case: 32,317 B at the first stage, 19,506 B after `fold4` → `fold0` under a 30,000 B target |
+| `listing-tree.txt` | **synthetic** — script-built once (seeded) | ~16 KB `tree` output with the non-breaking spaces of a UTF-8 locale: 7 theme directories, one nested, and tree's `8 directories, 464 files` summary | box-drawing parse; the summary stays verbatim under the header |
+| `listing-small.txt` | **synthetic** — hand-shaped | a 50-line `git ls-files`, every directory at most 6 files | nothing to fold → `no-gain` |
 
 The 300 KB Read row and the eval's `orders.json` come from `plugins/slim/evals/_shared/make-orders.cjs`
 at run time; `jql-nodes-ELC.json` is the one fixture of that size committed, because the delivery
