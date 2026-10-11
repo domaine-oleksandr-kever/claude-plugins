@@ -167,12 +167,15 @@ around the tree kept verbatim. A nameless, ref-less `generic`/`none` wrapper is 
 parent; a nameless leaf `img` is dropped. A run of more than k adjacent siblings with the same
 skeleton (the subtree with names, refs, inline texts and urls as slots) keeps the first k and becomes
 one line: `- … 46 more like the 2 above [refs e40–e361]: names "A", "B", … +34; prices $22.00–$112.00`.
-Only items holding a control or a link fold — never prose, items over 200 chars of text, landmarks,
-alerts, status, dialogs or a level-1/2 heading. Refs are never renumbered: every input ref is on a kept
-line, in a fold or cut range, or on the closing `unnamed imgs dropped: refs …` line. With
-`targetBytes` the stages run until the text fits: `fold` (k=2, 12 names) → `fold1` (k=1, 6 names) →
-`prune` (no `/url` lines, state attrs only) → `depth` (from the deepest level up, a node's children
-become one `- … N nodes below [refs …]` line); still over → the last stage's text. Output starts with
+Only items holding a control or a link, list items, rows and articles fold, and a run ends at the
+first sibling that does not — never prose, items over 200 chars of text, landmarks, alerts, status,
+dialogs or a level-1/2 heading. Names are cut at 60 chars. A YAML-quoted Playwright key
+(`- 'link "Size: 5" [ref=e14]':`) is read unquoted and kept quoted. Refs are never renumbered: every
+input ref is on a kept line, in a fold or cut range, or on the closing `unnamed imgs dropped: refs …`
+line. With `targetBytes` the stages run until the text fits: `fold` (k=2, 12 names) → `fold1` (k=1, 6
+names) → `prune` (no `/url` lines, state attrs only) → `depth` (from the deepest level up, a node's
+children become one `- … N nodes below [refs …]: names …` line listing the names inside); still over
+→ the last stage's text. A tree nested deeper than 512 levels is `non-a11y`. Output starts with
 `<<slim-a11y>> <format> · N nodes → N lines · N folds (N nodes)`; the last line names the next call
 (`browser_find` / `take_snapshot({ verbose: true })`, or `mcp__slim__lookup` on the spill). Under
 10 % saved → `no-gain`. `meta: { format, nodes, folds, folded, imgs, cut }`.

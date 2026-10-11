@@ -11,10 +11,12 @@
  *   2. a run of more than k adjacent siblings with the same skeleton (the subtree with names, refs,
  *      inline texts and urls as slots) keeps the first k verbatim and becomes one fold line naming
  *      every folded ref as ranges, the folded names (capped) and their price range. Only items that
- *      hold a control or link fold, never prose, landmarks, alerts, dialogs or a level-1/2 heading.
+ *      hold a control or link, and list items, rows and articles fold, each with at most 200 chars of
+ *      text; never prose, landmarks, alerts, dialogs or a level-1/2 heading.
  * Refs are never renumbered or dropped: every input ref is on a kept line, in a fold's ranges or on
- * the dropped-img line. Fit stages under targetBytes: fold (k=2) → fold1 (k=1, 6 names) → prune
- * (no `/url` lines, state attrs only) → depth (deepest level first, children become one line).
+ * the dropped-img line. A Playwright key YAML-quoted for its `: ` is read unquoted. Fit stages under
+ * targetBytes: fold (k=2) → fold1 (k=1, 6 names) → prune (no `/url` lines, state attrs only) → depth
+ * (deepest level first, children become one line).
  * Pure: no I/O.
  */
 'use strict';
@@ -27,23 +29,30 @@ const SCAN = 65536;
 const MIN_LINES = 20;
 const MIN_GAIN = 0.1;
 const ITEM_TEXT_MAX = 200;
+const NAME_MAX = 60;
+// Deeper than any page's accessibility tree; keeps the recursive passes inside the stack.
+const MAX_NEST = 512;
 
-const PW_NODE = /^- ([a-z][\w-]*)(?: ("(?:[^"\\]|\\.)*"))?((?: \[[^\]\n]*\])*)(?:(:)(?: (.*))?)?$/;
+const PW_NODE = /^- ([a-z][\w-]*)(?: ("[^"\\]*(?:\\.[^"\\]*)*"))?((?: \[[^\]\n]*\])*)(?:(:)(?: (.*))?)?$/;
 const PW_PROP = /^- (\/[\w-]+):(?: (.*))?$/;
+const PW_QUOTED = /^- '([^']*(?:''[^']*)*)'(:.*)?$/;
 const PW_ATTR = / \[([^\]\n]*)\]/g;
-const DT_NODE = /^uid=(\S+) (\S+)(?: ("(?:[^"\\]|\\.)*"))?(.*)$/;
-const DT_ATTR = /\s+([\w-]+)(?:=("(?:[^"\\]|\\.)*"|\S+))?/g;
+const DT_NODE = /^uid=(\S+) (\S+)(?: ("[^"\\]*(?:\\.[^"\\]*)*"))?(.*)$/;
+const DT_ATTR = /\s+([\w-]+)(?:=("[^"\\]*(?:\\.[^"\\]*)*"|\S+))?/g;
 const DT_SLOT = new Set(['url', 'value', 'description', 'valuetext']);
 const STATE = new Set(['active', 'checked', 'disabled', 'expanded', 'level', 'selected', 'pressed', 'required', 'invalid']);
 const FLATTEN = new Set(['generic', 'none']);
 const IMG = new Set(['img', 'image']);
 const PIN = new Set(['banner', 'navigation', 'main', 'contentinfo', 'alert', 'status', 'dialog', 'alertdialog']);
+const ITEM = new Set(['listitem', 'row', 'article']);
 const ACT = new Set(['link', 'button', 'checkbox', 'radio', 'option', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab',
   'textbox', 'searchbox', 'combobox', 'switch', 'slider', 'spinbutton', 'treeitem', 'listbox']);
 const PRICE = /[$£€]\s?\d[\d,]*(?:\.\d+)?/g;
 
 const expired = (ctx) => ctx && ctx.deadline != null && Date.now() > ctx.deadline;
 const indentOf = (l) => l.length - l.trimStart().length;
+// `- 'link "Size: 5" [ref=e14]':` → `- link "Size: 5" [ref=e14]:`; any other line as is.
+const unquote = (l) => { const q = PW_QUOTED.exec(l); return q ? `- ${q[1].replace(/''/g, "'")}${q[2] || ''}` : l; };
 
 // 'playwright' | 'devtools' | null: at least MIN_LINES tree lines, 80 % of the lines that are not blank,
 // a fence or a markdown heading; a Playwright tree also carries refs on 30 % of its nodes.
@@ -57,7 +66,7 @@ function detectSnapshot(text) {
     total++;
     if (DT_NODE.test(l)) dt++;
     else if (PW_PROP.test(l)) pw++;
-    else if (PW_NODE.test(l)) { pw++; if (l.includes('[ref=')) refs++; }
+    else if (PW_NODE.test(unquote(l))) { pw++; if (l.includes('[ref=')) refs++; }
   }
   if (pw >= MIN_LINES && pw >= 0.8 * total && refs >= 0.3 * pw) return 'playwright';
   if (dt >= MIN_LINES && dt >= 0.8 * total) return 'devtools';
@@ -78,7 +87,8 @@ function parseLine(content, format) {
   }
   const p = PW_PROP.exec(content);
   if (p) return { kind: 'prop', key: p[1], text: content, skel: `${p[1]}:${p[2] ? ' ·' : ''}` };
-  const m = PW_NODE.exec(content);
+  const key = unquote(content);
+  const m = PW_NODE.exec(key);
   if (!m) return null;
   const attrs = [];
   let ref = null;
@@ -88,7 +98,7 @@ function parseLine(content, format) {
     else attrs.push(a[1]);
   }
   const inline = m[5] !== undefined ? m[5] : null;
-  return { kind: 'el', role: m[1], name: m[2] || null, ref, inline, attrs, colon: !!m[4], text: content,
+  return { kind: 'el', role: m[1], name: m[2] || null, ref, inline, attrs, colon: !!m[4], quoted: key !== content, text: content,
     skel: `${m[1]}${m[2] ? ' "·"' : ''}${attrs.map((a) => ` [${a}]`).join('')}${m[4] ? ':' : ''}${inline !== null ? ' ·' : ''}` };
 }
 
@@ -107,7 +117,9 @@ function segments(text, format) {
 }
 
 // Nest a region's nodes by indent, then flatten wrappers, drop nameless imgs and compute per subtree:
-// skeleton id, refs in document order, first name, the texts a fold summarises and its byte size.
+// skeleton id, refs in document order, first name, the texts a fold summarises, its byte size and the
+// indent it renders at (a root keeps its own, a child sits one unit under its parent). false when the
+// nesting passes MAX_NEST.
 function buildRegion(region, intern, st) {
   const root = { children: [], pad: -1 };
   const stack = [root];
@@ -119,17 +131,20 @@ function buildRegion(region, intern, st) {
     if (parent !== root && (!unit || n.pad - parent.pad < unit)) unit = n.pad - parent.pad;
     parent.children.push(n);
     stack.push(n);
+    if (stack.length > MAX_NEST) return false;
     if (n.kind === 'el') st.nodes++;
   }
-  const finish = (list) => {
+  unit = unit || 2;
+  const finish = (list, at) => {
     const kept = [];
     for (const n of list) {
       if (n.kind === 'el' && FLATTEN.has(n.role) && !n.name && !n.ref && n.inline === null) {
         st.flattened++;
-        kept.push(...finish(n.children));
+        for (const c of finish(n.children, at === null ? n.pad : at)) kept.push(c);
         continue;
       }
-      n.children = finish(n.children);
+      n.out = at === null ? n.pad : at;
+      n.children = finish(n.children, n.out + unit);
       n.hidden = n.kind === 'el' && IMG.has(n.role) && !n.name && n.inline === null && !n.children.length;
       kept.push(n);
     }
@@ -166,10 +181,10 @@ function buildRegion(region, intern, st) {
     }
     return kept;
   };
-  region.roots = finish(root.children);
-  region.base = region.lines.reduce((m, n) => Math.min(m, n.pad), Infinity);
-  region.unit = unit || 2;
+  region.roots = finish(root.children, null);
+  region.unit = unit;
   region.depth = region.roots.reduce((m, n) => Math.max(m, n.depth), 0);
+  return true;
 }
 
 // `e71–e184, e190`: consecutive ids (same prefix, number + 1) as one range, in document order.
@@ -199,25 +214,33 @@ function priceSpan(texts) {
   return found.length === 1 || found[0] === found[found.length - 1] ? `; price ${found[0]}` : `; prices ${found[0]}–${found[found.length - 1]}`;
 }
 
-// One summary line for nodes leaving the output: refs as ranges, first names up to `cap`, prices.
-function summary(nodes, lead, format, cap) {
+// `"…"` cut to NAME_MAX chars, still quoted.
+function clip(name) {
+  const cs = Array.from(name);
+  return cs.length <= NAME_MAX ? name : `${cs.slice(0, NAME_MAX - 2).join('').replace(/\\+$/, '')}…"`;
+}
+
+// One summary line for nodes leaving the output: refs as ranges, names up to `cap` (each node's first
+// one, or with `deep` every name in the subtrees), prices.
+function summary(nodes, lead, format, cap, deep) {
   const refs = [];
   const names = [];
   const texts = [];
   for (const n of nodes) {
     for (const r of n.refs) refs.push(r);
-    if (n.first) names.push(n.first);
+    if (deep) for (const t of n.texts) names.push(t);
+    else if (n.first) names.push(n.first);
     for (const t of n.texts) texts.push(t);
   }
   const bullet = format === 'devtools' ? '' : '- ';
   const label = format === 'devtools' ? 'uids' : 'refs';
-  const shown = names.slice(0, cap);
+  const shown = names.slice(0, cap).map(clip);
   const more = names.length - shown.length;
   return `${bullet}… ${lead}${refs.length ? ` [${label} ${ranges(refs)}]` : ''}` +
     `${shown.length ? `: names ${shown.join(', ')}${more ? ` … +${more}` : ''}` : ''}${priceSpan(texts)}`;
 }
 
-const foldable = (n) => n.kind === 'el' && n.act && !n.pin && n.textLen <= ITEM_TEXT_MAX;
+const foldable = (n) => n.kind === 'el' && (n.act || ITEM.has(n.role)) && !n.pin && n.textLen <= ITEM_TEXT_MAX;
 
 function lineOf(n, format, prune, leaf) {
   if (n.kind !== 'el') return n.text;
@@ -227,19 +250,20 @@ function lineOf(n, format, prune, leaf) {
     return `uid=${n.ref} ${n.role}${n.name ? ` ${n.name}` : ''}${kept}`;
   }
   const kept = n.attrs.filter((a) => STATE.has(a.split('=')[0])).map((a) => ` [${a}]`).join('');
-  return `- ${n.role}${n.name ? ` ${n.name}` : ''}${kept}${n.ref ? ` [ref=${n.ref}]` : ''}${n.colon && (!leaf || n.inline !== null) ? ':' : ''}${n.inline !== null ? ` ${n.inline}` : ''}`;
+  const key = `${n.role}${n.name ? ` ${n.name}` : ''}${kept}${n.ref ? ` [ref=${n.ref}]` : ''}`;
+  return `- ${n.quoted ? `'${key.replace(/'/g, "''")}'` : key}${n.colon && (!leaf || n.inline !== null) ? ':' : ''}${n.inline !== null ? ` ${n.inline}` : ''}`;
 }
 
 // Render one region under options { k, cap, prune, maxDepth } into `out`; counts folds into `st`.
 function renderRegion(region, o, format, out, st) {
-  const pad = (d) => ' '.repeat(region.base + d * region.unit);
+  const pad = (n) => ' '.repeat(n);
   const emit = (nodes, d) => {
     for (let i = 0; i < nodes.length;) {
       let j = i + 1;
-      while (j < nodes.length && nodes[j].sk === nodes[i].sk) j++;
-      if (j - i >= o.k + 2 && foldable(nodes[i])) {
+      if (foldable(nodes[i])) while (j < nodes.length && nodes[j].sk === nodes[i].sk && foldable(nodes[j])) j++;
+      if (j - i > o.k) {
         const rest = nodes.slice(i + o.k, j);
-        const line = pad(d) + summary(rest, `${rest.length} more like the ${o.k === 1 ? 'one' : o.k} above`, format, o.cap);
+        const line = pad(nodes[i].out) + summary(rest, `${rest.length} more like the ${o.k === 1 ? 'one' : o.k} above`, format, o.cap);
         if (utf8(line) < rest.reduce((s, n) => s + n.size, 0)) {
           for (let x = i; x < i + o.k; x++) node(nodes[x], d);
           out.push(line);
@@ -257,11 +281,11 @@ function renderRegion(region, o, format, out, st) {
     if (n.hidden) { if (n.ref) st.imgRefs.push(n.ref); return; }
     if (o.prune && n.kind === 'prop' && n.key === '/url') return;
     const kids = n.children.filter((c) => !(o.prune && c.kind === 'prop' && c.key === '/url'));
-    out.push(pad(d) + lineOf(n, format, o.prune, !kids.some((c) => !c.hidden)));
+    out.push(pad(n.out) + lineOf(n, format, o.prune, !kids.some((c) => !c.hidden)));
     if (!kids.length) return;
     if (d >= o.maxDepth) {
       const els = kids.reduce((s, c) => s + c.els, 0);
-      out.push(pad(d + 1) + summary(kids, `${els} node${els === 1 ? '' : 's'} below`, format, o.cap));
+      out.push(pad(n.out + region.unit) + summary(kids, `${els} node${els === 1 ? '' : 's'} below`, format, o.cap, true));
       st.cut++;
       st.folded += els;
       return;
@@ -311,7 +335,11 @@ function run(text, opts, ctx) {
   const intern = new Map();
   const st0 = { nodes: 0, flattened: 0, imgs: 0 };
   let depth = 0;
-  for (const s of segs) if (typeof s !== 'string') { buildRegion(s, intern, st0); depth = Math.max(depth, s.depth); }
+  for (const s of segs) {
+    if (typeof s === 'string') continue;
+    if (!buildRegion(s, intern, st0)) return { decision: 'passthrough', reason: 'non-a11y', text };
+    depth = Math.max(depth, s.depth);
+  }
   const target = opts && opts.targetBytes;
   const stages = [];
   let r;

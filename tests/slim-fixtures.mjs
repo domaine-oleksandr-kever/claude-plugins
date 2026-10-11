@@ -1316,6 +1316,13 @@ printf 'SIPSIMG' > "$last"
   check('Cv1-figure', /^slim: compressed 63,\d{3} B → [\d,]+ B \(−\d+\.\d%\)$/.test(v1.figure) && v1.bytesOut === bytes(v1.text) && v1.bytesOut <= 16384, v1.figure);
   const part = (/<<full=(\S+) \d+_rows_offloaded>>/.exec(v1.text) || [])[1];
   check('Cv1-part-written', !!part && part.startsWith(`${spillDir}/slim-crush-`) && existsSync(part), String(part));
+  // A saved browser snapshot is plain text to view (its refs are dead); engine 'a11y' folds it on request.
+  const snap = path.join(proj, 'snapshot.txt');
+  copyFileSync(path.join(FIX, 'a11y-plp.txt'), snap);
+  const vsnap = view('Cv1b', { path: snap });
+  check('Cv1b-snapshot-is-text', vsnap.engine === 'text' && !vsnap.text.startsWith('<<slim-a11y>>'), JSON.stringify({ ...vsnap, text: vsnap.text.slice(0, 80) }));
+  const va = view('Cv1c', { path: snap, engine: 'a11y' });
+  eq('Cv1c-snapshot-asked', [va.decision, va.engine, va.text.startsWith('<<slim-a11y>> playwright')], ['compressed', 'a11y', true]);
 
   const nodes = path.join(proj, 'K1-1-2.nodes.json');
   writeFileSync(nodes, REST);

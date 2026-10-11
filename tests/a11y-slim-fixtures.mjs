@@ -96,7 +96,7 @@ for (const [k, t] of Object.entries(FIXTURES)) eq(`AS-${k}`, [sniff({ data: t })
 
 // AC — compress: decision, exact bytes, header, footer
 const TABLE = {
-  plp: [23230, 9081], 'plp-devtools': [24308, 9633], pdp: [13048, 9447], cart: [6215, 2801], grid: [20722, 2857],
+  plp: [23230, 9081], 'plp-devtools': [24308, 9633], pdp: [13048, 9423], cart: [6215, 2801], grid: [20722, 2857],
 };
 const OUT = {};
 for (const [k, [inB, outB]] of Object.entries(TABLE)) {
@@ -133,6 +133,22 @@ for (const [k, [inB, outB]] of Object.entries(TABLE)) {
   alerts.push('```');
   const al = compress({ data: alerts.join('\n') }, O);
   eq('AC-alerts-not-folded', [al.engine, al.decision, al.reason], ['a11y', 'passthrough', 'no-gain']);
+  // A table's rows fold though no row holds a control; names are cut at 60 chars.
+  const table = ['- table [ref=e1]:', '  - rowgroup [ref=e2]:'];
+  for (let i = 0, n = 3; i < 100; i++) {
+    table.push(`    - row "Order #${1000 + i} Paid $${i}.00${i === 5 ? ` ${'note '.repeat(20)}` : ''}" [ref=e${n++}]:`);
+    for (const c of [`Order #${1000 + i}`, 'Paid', `$${i}.00`]) table.push(`      - cell "${c}" [ref=e${n++}]`);
+  }
+  const tb = a11y.run(table.join('\n'), {}, {});
+  check('AC-table-rows-fold', tb.decision === 'compressed' && tb.meta.folds === 1 && tb.text.includes('- … 98 more like the 2 above [refs e11–e402]: names "Order #1002 Paid $2.00"') &&
+    tb.text.includes(`"Order #1005 Paid $5.00 ${'note '.repeat(6)}note…"`) && tb.text.includes('… +86; prices $2.00–$99.00'), tb.text.slice(0, 1200));
+  // A run ends at the first sibling over the text cap: a short first review never folds the long ones.
+  const reviews = ['- list [ref=e1]:'];
+  for (let i = 0; i < 30; i++) reviews.push(`  - listitem [ref=e${2 + i * 3}]:`, `    - paragraph [ref=e${3 + i * 3}]: ${i ? `Review ${i} ${'long text '.repeat(40)}` : 'Great.'}`, `    - button "Helpful" [ref=e${4 + i * 3}]`);
+  const rv = a11y.run(reviews.join('\n'), {}, {});
+  eq('AC-short-first-review-no-fold', [rv.decision, rv.reason], ['passthrough', 'no-gain']);
+  // A run of three with k=2 folds its third when the fold line is the smaller (the PDP's related products).
+  check('AC-three-fold-one', OUT.pdp.text.includes('- … 1 more like the 2 above [refs e28]: names "Serum No. 1"'), OUT.pdp.text);
 }
 
 // AI — identifier preservation
@@ -153,6 +169,40 @@ for (const [k, r] of Object.entries(OUT)) {
   }
 }
 
+// AI — a tree the parser cannot read whole keeps every node under its own parent
+{
+  // DevTools: a StaticText name with a raw newline splits the tree; `list` stays a child of `main`.
+  const dt = ['uid=1_0 RootWebArea "Shop"', '  uid=1_1 main', '    uid=1_2 code', '      uid=1_3 StaticText "line one', 'line two"', '    uid=1_4 list'];
+  for (let i = 0; i < 20; i++) dt.push(`      uid=1_${5 + i * 2} listitem`, `        uid=1_${6 + i * 2} link "Product ${i}"`);
+  dt.push('  uid=1_65 contentinfo');
+  const d = a11y.run(dt.join('\n'), {}, {});
+  check('AI-split-devtools-nesting', d.decision === 'compressed' && d.text.includes('line two"\n    uid=1_4 list\n      uid=1_5 listitem\n') && d.text.includes('\n  uid=1_65 contentinfo\n'), d.text);
+  // Playwright: a stray line inside a list keeps the listitems under the list, beside nothing else.
+  const pw = ['- main [ref=e1]:', '  - list [ref=e2]:'];
+  for (let i = 0; i < 20; i++) { pw.push(`    - listitem [ref=e${10 + i * 2}]:`, `      - link "Product ${i}" [ref=e${11 + i * 2}]`); if (i === 9) pw.push('stray note'); }
+  pw.push('  - button "Load more" [ref=e99]');
+  const p = a11y.run(pw.join('\n'), {}, {});
+  check('AI-split-playwright-nesting', p.decision === 'compressed' && p.text.includes('stray note\n    - listitem [ref=e30]:\n      - link "Product 10" [ref=e31]\n') &&
+    p.text.includes('\n  - button "Load more" [ref=e99]\n'), p.text);
+  // A key Playwright YAML-quotes for its `: `: parsed, kept quoted with its colon, its child under it, the run unbroken.
+  const q = ['- main [ref=e1]:', '  - list [ref=e2]:'];
+  for (let i = 0; i < 20; i++) {
+    const link = i === 0 ? `'link "Size: ${i}" [ref=e${11 + i * 3}]'` : i === 5 ? `'link "It''s: ${i}" [ref=e${11 + i * 3}]'` : `link "Size ${i}" [ref=e${11 + i * 3}]`;
+    q.push(`    - listitem [ref=e${10 + i * 3}]:`, `      - ${link}:`, `        - /url: /p/${i}`);
+  }
+  const qt = q.join('\n');
+  eq('AI-quoted-sniff', a11y.detectSnapshot(qt), 'playwright');
+  const qr = a11y.run(qt, {}, {});
+  check('AI-quoted-kept', qr.decision === 'compressed' && qr.meta.folds === 1 && qr.text.includes(`    - listitem [ref=e10]:\n      - 'link "Size: 0" [ref=e11]':\n        - /url: /p/0\n`) &&
+    qr.text.includes('"It\'s: 5"'), qr.text);
+  const { kept, folded } = outputRefs(qr.text, 'playwright');
+  eq('AI-quoted-every-ref-once', [...kept, ...folded], inputRefs(qt, 'playwright'));
+  const fold1 = a11y.run(qt, { targetBytes: bytes(qr.text) - 1 }, {});
+  const qp = a11y.run(qt, { targetBytes: bytes(fold1.text) - 1 }, {});
+  eq('AI-quoted-prune-stage', qp.stages, ['fold', 'fold1', 'prune']);
+  check('AI-quoted-prune-requoted', qp.text.includes(`      - 'link "Size: 0" [ref=e11]'\n`), qp.text);
+}
+
 // AT — fit: the named stages reach a 4 KB target, refs still all there
 for (const [k, stages] of [['plp', ['fold', 'fold1', 'prune', 'depth']], ['plp-devtools', ['fold', 'fold1', 'prune', 'depth']], ['pdp', ['fold', 'fold1', 'prune', 'depth']], ['cart', ['fold']]]) {
   const r = compress({ data: FIXTURES[k] }, { ...O, targetBytes: 4096 });
@@ -170,6 +220,9 @@ for (const [k, stages] of [['plp', ['fold', 'fold1', 'prune', 'depth']], ['plp-d
   check('AT-prune-state-only', !pr.text.includes('[cursor=pointer]') && !pr.text.includes('/url:') && pr.text.includes('checkbox "In stock" [checked] [ref=e27]'), pr.text.slice(0, 1500));
   // A target nothing reaches: the last depth stage is returned for the caller to stub.
   const tiny = compress({ data: FIXTURES.plp }, { ...O, targetBytes: 200 });
+  // A cut lists the names inside the subtree, not only each child's first.
+  const cart = compress({ data: FIXTURES.cart }, { ...O, targetBytes: 1500 }).text;
+  check('AT-cut-names-deep', /navigation "Main".*\n\s+- … \d+ nodes below \[refs [^\]]+\]: names "Shop", "Skincare", /.test(cart), cart.slice(0, 1500));
   check('AT-unreachable', tiny.decision === 'compressed' && tiny.stats.stages.includes('depth') && tiny.stats.bytesOut > 200 && tiny.stats.bytesOut < 4096, `${tiny.decision} ${tiny.stats.bytesOut}`);
 }
 
@@ -191,6 +244,14 @@ for (const [k, t] of Object.entries(FIXTURES)) {
     Array.from({ length: 60 }, (_, i) => `uid=${i} ${'StaticText'} "${'"'.repeat(i % 3)}`).join('\n'),
     `- button "${'a'.repeat(200000)}" [ref=e1]\n`.repeat(25),
   ];
+  // Shapes past the stack: a 130k-child wrapper, 3,000 levels, a 10 MB name. None ends in transform-error.
+  const wide = ['- main [ref=e1]:', '  - generic:', ...Array.from({ length: 130000 }, (_, i) => `    - button "B" [ref=e${i + 2}]`)].join('\n');
+  const deep = Array.from({ length: 3000 }, (_, i) => `${'  '.repeat(i)}- group [ref=e${i}]:`).join('\n');
+  const huge = `- button "${'a'.repeat(10 * 1024 * 1024)}" [ref=e1]\n${Array.from({ length: 30 }, (_, i) => `- link "l${i}" [ref=e${i + 2}]`).join('\n')}`;
+  const big = (t) => compress({ data: t }, { ...O, maxInputBytes: 64 * 1024 * 1024 });
+  eq('AG-wide-wrapper', [big(wide).decision, big(wide).reason], ['compressed', undefined]);
+  eq('AG-too-deep', [big(deep).decision, big(deep).reason], ['passthrough', 'non-a11y']);
+  check('AG-huge-name', big(huge).reason !== 'transform-error', big(huge).reason);
   for (const [i, g] of garbage.entries()) {
     let ok = true;
     try { const r = a11y.run(g, { targetBytes: 1000 }, { deadline: null }); ok = typeof r.decision === 'string'; } catch (_) { ok = false; }

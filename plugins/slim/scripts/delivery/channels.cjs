@@ -35,7 +35,8 @@ const commandWords = (cmd) => String(cmd || '').split(/[\s'"|;&<>()=]+/).filter(
 
 // The engine a channel lets run on a sniffed payload: html and log need a command that fetches or
 // reads a log, a browser snapshot is MCP's only, everything a channel does not admit is treated as
-// plain text. A Figma REST nodes response goes wherever JSON goes. MCP: null = not compressed (plain text, guarded text, HTML).
+// plain text. A Figma REST nodes response goes wherever JSON goes. MCP: null = not compressed
+// (plain text, guarded text, HTML).
 function admit(channel, engine, command) {
   switch (channel) {
     case 'mcp':

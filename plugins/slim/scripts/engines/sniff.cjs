@@ -4,8 +4,9 @@
  * Order (first match wins): binary (magic bytes / NUL) → none (empty) → JSON (`adf` for a bare ADF
  * doc, `figma-nodes` for a Figma REST nodes response) → figma (Figma design-context JSX markers) →
  * the guards that keep text untouched (diff, test output, template, shebang, XML → `text`) → a
- * browser accessibility snapshot (`a11y`, reason `playwright` / `devtools`) → a dominant markdown fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → log
- * (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
+ * browser accessibility snapshot (`a11y`, reason `playwright` / `devtools`) → a dominant markdown
+ * fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → log (detector
+ * confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
  * must not be deduped as a log, a theme template must not be stripped as a page. Pure.
  */
 'use strict';

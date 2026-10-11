@@ -638,9 +638,10 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
   resized only when asked through `view { path }` (see Media).
 - **A `.json` file the host showed whole.** A Read under the host's token cap is left as is. Ask a
   question about it with `lookup({ path, question })`, or narrow it with `view({ path, jq })`.
-- **Browser snapshots outside MCP.** A snapshot printed by a Bash command or read from a file is plain
-  text there (windowed above `SLIM_PLAIN_BYTES`); only an MCP result is folded. Refs are per snapshot,
-  so nothing is cached across results.
+- **Browser snapshots outside MCP.** A snapshot printed by a Bash command, read from a file or shown
+  by `view` is plain text there (windowed above `SLIM_PLAIN_BYTES`); only an MCP result is folded, and
+  `view` folds one only when asked with `engine: 'a11y'`. Refs are per snapshot, so nothing is cached
+  across results.
 
 ## Layout
 
