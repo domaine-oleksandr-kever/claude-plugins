@@ -180,6 +180,23 @@ for (const [name, text, d, rowsN, colsN, size] of [['products', PRODUCTS, ',', 1
   const eg = field(sections(compress({ data: text }, O).text).cols[1], 'e\\.g\\.').split(' · ');
   check('CC-long-samples-verbatim', eg.length === 3 && eg.every((v) => /^https:\/\/\S+\?v=17\d+$/.test(v) && text.includes(`,${v},`)), eg.join(' | '));
 }
+{
+  // An identifier-like value (no whitespace) is never clipped in the column block up to 400 chars, then cut with '…';
+  // a prose value keeps the 160 → 120 clip. Table cells keep the clip either way.
+  const id = (i) => `gid://shopify/ProductVariant/${'v'.repeat(260)}-${i}`;
+  const huge = (i) => `${'h'.repeat(450)}${i}`;
+  const prose = (i) => `${'word '.repeat(50)}${i}`;
+  const text = ['n,gid,blob,note', ...Array.from({ length: 30 }, (_, i) => `${i},${id(i)},${huge(i)},${prose(i)}`)].join('\n');
+  const s = sections(compress({ data: text }, O).text);
+  const egOf = (k) => field(s.cols[k], 'e\\.g\\.').split(' · ');
+  check('CC-id-sample-whole', egOf(1).length === 3 && egOf(1).every((v) => v.length > 160 && text.includes(`,${v},`)), egOf(1).join(' | ').slice(0, 200));
+  check('CC-id-sample-cap', egOf(2).every((v) => v === `${'h'.repeat(400)}…`), egOf(2)[0].slice(-20));
+  check('CC-prose-sample-clipped', egOf(3).every((v) => v.startsWith(`${'word '.repeat(24)}…`) && v.endsWith(' chars]')), egOf(3)[0].slice(-40));
+  check('CC-id-cell-clipped', s.rows.every((l) => l.includes('… [+')), s.rows[0].slice(0, 200));
+  const mm = ['k,code,tag', ...Array.from({ length: 30 }, (_, i) => `${i},${i + 10}${'0'.repeat(200)},t${i}`)].join('\n');
+  const line = sections(compress({ data: mm }, O).text).cols[1];
+  check('CC-id-minmax-whole', line.includes(`min 10${'0'.repeat(200)} max 39${'0'.repeat(200)}`), line.slice(0, 120));
+}
 
 // CT — fit: rows 3+3 → 3 → 0, then samples 3 → 1; a target nothing meets says so
 {

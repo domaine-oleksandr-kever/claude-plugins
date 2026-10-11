@@ -108,7 +108,7 @@ flowchart TD
   G -- no --> I
   H -- refused --> Z2[passthrough expand-refused]
   H -- ok --> I[engines.sniff<br/>content, never the tool name<br/>every channel, MCP per text block]
-  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter cmd,<br/>listing only after a listing cmd on Bash,<br/>MCP: plain, guarded and HTML text not compressed,<br/>a11y snapshots MCP only,<br/>csv on Bash · Read .csv/.tsv · WebFetch · @-file · MCP,<br/>xml after a fetch cmd · Read .xml · WebFetch · MCP}
+  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint for a linter cmd or a Read .log,<br/>listing only after a listing cmd on Bash,<br/>MCP: plain, guarded and HTML text not compressed,<br/>a11y snapshots MCP only,<br/>csv on Bash · Read .csv/.tsv · WebFetch · @-file · MCP,<br/>xml after a fetch cmd · Read .xml · WebFetch · MCP}
   J --> K[engines.compress<br/>maxMs 5000 · targetBytes for engines flagged fit]
   K -- passthrough · refused --> L{stubbable?<br/>MCP over 32 KB}
   L -- yes --> M[emit stub + spill original]
@@ -163,7 +163,8 @@ them equal, so the pure pre-decision in the module and the core never disagree.
 - **html runs only after a fetching command** (`curl`, `wget`, `xh`, …) and **log only when the
   command or file looks like a log**: `cat src/page.html` is source, not a page. **lint** runs on
   Bash only for a linter command (`eslint`, `tsc`, `shopify theme check`, `npm run lint`, …), on
-  MCP by content, never on Read: a `grep -rn error: logs/` hit list stays plain text. **listing runs only
+  MCP by content, and on Read only for a `.log/.jsonl/.ndjson` file (where the log engine would
+  otherwise have run): a `grep -rn error: logs/` hit list stays plain text. **listing runs only
   after a listing command on Bash** (`find`, `fd`, `ls`, `tree`, `git ls-files`, `rg --files`) that
   writes the output, never on Read or MCP: `cat paths.txt` and `ls data && cat data/prices.csv` stay
   plain text.

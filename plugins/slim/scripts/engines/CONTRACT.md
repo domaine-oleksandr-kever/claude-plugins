@@ -178,7 +178,9 @@ folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` p
 one line per column: name, type (`number`, `integer`, `date` for ISO dates, `bool`, `category` when
 distinct/non-null < 0.5 and ≤ 50 distinct, `string`, `empty`), `min`/`max` as written (number, integer,
 date), `nulls` (empty, `null`, `n/a`, `nan`), `distinct`, then a bool's or category's values with
-` ×count` (most frequent first) or `e.g.` three distinct samples (clipped like a table cell). A
+` ×count` (most frequent first) or `e.g.` three distinct samples. In this column block a value without
+whitespace (a handle, SKU, URL, id) is never clipped up to 400 chars, then cut to 400 plus `…`; any other
+value is clipped like a table cell. A
 number column reads `1,299.00` or, in a `;` file first, `1.299,00`. Then a markdown table: a `#`
 column with the data-row number, the header, rows 1–3 and three sampled rows in file order, cells
 as written with `|` → `\|`, line breaks → `<br>`, a cell over 160 chars cut to 120 plus `… [+N chars]`.

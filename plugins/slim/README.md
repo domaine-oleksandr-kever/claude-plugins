@@ -100,8 +100,9 @@ then `… +N in M files (file ×n, …)` naming every file; tsc's indented elabo
 their error. The tool's own summary lines close it, verbatim. Over the channel's size cap each fold
 names its first 8 files, then it keeps 3, then 1 location per group, then counts only, else it is
 stubbed.
-The output starts with `<<slim-lint>>`. Admitted on Bash for a linter command (below) and on MCP by
-content; a Read of a lint report is not compressed. Theme-check output that quotes Liquid source
+The output starts with `<<slim-lint>>`. Admitted on Bash for a linter command (below), on MCP by
+content, and on a Read of a `.log`, `.jsonl` or `.ndjson` report over 32,768 B (the Read rules);
+any other file stays as the host shows it. Theme-check output that quotes Liquid source
 lines stays template text (Guard rails).
 
 **Delimited tables.** A CSV, TSV or `;`-separated table — 20 or more records, one delimiter splitting
@@ -109,7 +110,8 @@ lines stays template text (Guard rails).
 opening like a log line (a date, time or level) and no cell typed like its column's values — becomes a profile: a `<<slim-csv>>` line with rows × cols, the delimiter and the size; one line
 per column with its type (number, integer, date, bool, category, string), min and max as written,
 nulls, distinct count, and either the values of a category or bool with their counts or three
-samples (whole up to 160 chars); then a markdown table of the header, rows 1–3 and three sampled rows with their data-row
+samples (an identifier-like value without whitespace whole up to 400 chars, prose clipped past 160);
+then a markdown table of the header, rows 1–3 and three sampled rows with their data-row
 numbers, cells as written (a cell over 160 chars is clipped with its length). Samples and sampled
 rows are picked by a generator seeded with the content hash, so a rerun shows the same ones. A
 `;` file reads `1.299,00` as a number. Over the channel's egress cap the table rows go first (3,
@@ -707,9 +709,9 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
   see the Read rules.
 - **Images, PDFs and binary output** pass through the hook channels untouched; images and video are
   resized only when asked through `view { path }` (see Media).
-- **A lint report read from a file.** Read admits only data files (see the Read rules), so a saved
-  ESLint or tsc report is shown as the host renders it; run the linter through Bash, or ask
-  `view({ path })`, to get it grouped.
+- **A lint report in any other file.** Read groups a report only in a `.log`, `.jsonl` or `.ndjson`
+  file over 32 KB (see the Read rules); a saved `report.txt` is shown as the host renders it. Run the
+  linter through Bash, or ask `view({ path })`, to get it grouped.
 - **Headerless or short tables, and tables pasted in a prompt.** A table whose first row holds a
   number, opens with a date, time or log level, or has a cell typed like its column, or one of fewer
   than 20 records, is plain text; the prompt channel's spans

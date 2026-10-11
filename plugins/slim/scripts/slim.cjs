@@ -483,7 +483,7 @@ function runChannel(input, base) {
   if (channel === 'read' && !readAdmits(input, rec)) return pass('read-guard', visible);
 
   const ti = input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
-  const command = typeof ti.command === 'string' ? ti.command : '';
+  const command = channel === 'read' ? String(ti.file_path || rec.file.filePath || '') : typeof ti.command === 'string' ? ti.command : '';
   const plainBytes = env.plainBytes();
   const budget = env.budgetMs();
   // The host caches an attachment's answer and asks again after a compaction: no deadline, so it is

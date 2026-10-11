@@ -46,6 +46,7 @@ const commandWords = (cmd) => String(cmd || '').split(/[\s'"|;&<>()=]+/).filter(
 // one that reads a log, lint a linter, listing a command that lists paths; a browser snapshot is
 // MCP's only; everything a channel does not admit is treated as plain text. A Figma REST nodes
 // response goes wherever JSON goes. MCP: null = not compressed (plain text, guarded text, HTML).
+// `command` is the Bash command, or the file path on Read (lint only in a .log/.jsonl/.ndjson file).
 function admit(channel, engine, command) {
   switch (channel) {
     case 'mcp':
@@ -60,6 +61,7 @@ function admit(channel, engine, command) {
       if (engine === 'listing') return LIST_CMD.test(command) ? 'listing' : 'text';
       return engine;
     case 'read':
+      if (engine === 'lint') return READ_LOG_EXT.has(path.extname(String(command || '')).toLowerCase()) ? 'lint' : null;
       return ['json', 'jsonl', 'figma-nodes', 'log', 'csv', 'xml'].includes(engine) ? engine : null;
     case 'attachment':
       return ['json', 'jsonl', 'log', 'csv'].includes(engine) ? engine : null;

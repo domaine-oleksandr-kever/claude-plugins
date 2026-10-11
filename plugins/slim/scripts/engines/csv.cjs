@@ -19,6 +19,8 @@ const SCAN = 65536;
 const MIN_RECORDS = 20;
 const CELL_MAX = 160;
 const CELL_KEEP = 120;
+// A whitespace-free value (a handle, SKU, URL, id) in the column block is cut only past this.
+const ID_MAX = 400;
 const CATEGORY_MAX = 50;
 // [rows shown, samples per column], tried in order until the text fits targetBytes.
 const PLANS = [[6, 3], [3, 3], [0, 3], [0, 1]];
@@ -136,7 +138,8 @@ function draw(rand, k, from, to) {
 }
 
 const clip = (v) => (v.length > CELL_MAX ? `${v.slice(0, CELL_KEEP)}… [+${commas(v.length - CELL_KEEP)} chars]` : v);
-const sample = (v) => clip(v).replace(/\r?\n/g, '\\n').replace(/\t/g, '\\t');
+const idValue = (v) => (v.length > ID_MAX ? `${v.slice(0, ID_MAX)}…` : v);
+const sample = (v) => (/^\S+$/.test(v) ? idValue(v) : clip(v).replace(/\r?\n/g, '\\n').replace(/\t/g, '\\t'));
 const cell = (v) => clip(v).replace(/\r?\n/g, '<br>').replace(/\|/g, '\\|');
 const sizeOf = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`);
 

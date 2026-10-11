@@ -256,11 +256,13 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
   for (const c of no) check(`LA-not-cmd-${c}`, !ch.LINT_CMD.test(c), c);
   eq('LA-admit', [ch.admit('bash', 'lint', 'npx eslint .'), ch.admit('bash', 'lint', 'cat lint.log'), ch.admit('bash', 'lint', 'grep -rn "error:" logs/'), ch.admit('bash', 'lint', 'cat out.txt'),
     ch.admit('mcp', 'lint'), ch.admit('read', 'lint'), ch.admit('attachment', 'lint'), ch.admit('webfetch', 'lint')], ['lint', 'text', 'text', 'text', 'lint', null, null, 'text']);
+  eq('LA-admit-read', [ch.admit('read', 'lint', '/w/out/lint.log'), ch.admit('read', 'lint', '/w/out/LINT.NDJSON'), ch.admit('read', 'lint', '/w/x.jsonl'),
+    ch.admit('read', 'lint', '/w/report.csv'), ch.admit('read', 'lint', '/w/feed.xml'), ch.admit('read', 'lint', '/w/a.json')], ['lint', 'lint', 'lint', null, null, null]);
   eq('LA-gate', [ch.structuredGate('bash', 'lint', 65536), ch.LINT_GATE], [8192, 8192]);
   eq('LA-registry', REGISTRY.lint, { ext: '.txt', fit: true, stub: true, mcp: true });
 }
 
-// LD — delivery through scripts/slim.cjs: Bash by command word, MCP by content, not Read
+// LD — delivery through scripts/slim.cjs: Bash by command word, MCP by content, Read of a .log/.jsonl/.ndjson file
 {
   const T = realpathSync(mkdtempSync(path.join(tmpdir(), 'slimlint-')));
   const env = { PATH: process.env.PATH, HOME: `${T}/home`, XDG_CONFIG_HOME: `${T}/xdg`, CLAUDE_CONFIG_DIR: `${T}/cfg`, SLIM_DIR: `${T}/spill`, SLIM_DEBUG: '1' };
@@ -298,8 +300,17 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
   mkdirSync(path.join(T, 'out'), { recursive: true });
   const fp = path.join(T, 'out', 'lint.log');
   writeFileSync(fp, ESLINT);
-  const rd = call('read', 'Read', { file_path: fp }, { type: 'text', file: { filePath: fp, content: ESLINT, numLines: 463, startLine: 1, totalLines: 463 } });
-  eq('LD-read-not-admitted', rd.reason, 'read-guard');
+  const readRec = (p, content) => ({ type: 'text', file: { filePath: p, content, numLines: content.split('\n').length, startLine: 1, totalLines: content.split('\n').length } });
+  const rd = call('read', 'Read', { file_path: fp }, readRec(fp, ESLINT));
+  eq('LD-read-log', [rd.decision, rd.record.engine, rd.record.channel], ['compressed', 'lint', 'read']);
+  const rdOut = String(((rd.result || {}).file || {}).content || '');
+  check('LD-read-marker', rdOut.startsWith('<<slim-lint>> stylish · 400 problems'), rdOut.slice(0, 120));
+  const rh = /<<full=(\S+) original_result>>/.exec(rdOut);
+  check('LD-read-original', !!rh && readFileSync(rh[1], 'utf8') === ESLINT, rh ? rh[1] : 'no handle');
+  eq('LD-read-under-gate', call('read', 'Read', { file_path: fp }, readRec(fp, TSC)).reason, 'read-guard');
+  const txt = path.join(T, 'out', 'lint.txt');
+  writeFileSync(txt, ESLINT);
+  eq('LD-read-txt-not-admitted', call('read', 'Read', { file_path: txt }, readRec(txt, ESLINT)).reason, 'read-guard');
   rmSync(T, { recursive: true, force: true });
 }
 
