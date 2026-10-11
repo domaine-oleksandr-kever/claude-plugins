@@ -763,6 +763,55 @@ describe('band', () => {
       expect(w.toasts).toEqual(['turn is running — press Compact again when it ends'])
     })
 
+    test(`${surface}: Compact press on a cold or ending cache asks Compact / Clear / Cancel; warm compacts at once`, async ($, on) => {
+      const { w, clock } = world(on)
+      const asked: { question: string; options: string[] }[] = []
+      let answer: string | null = 'Cancel'
+      on('tool.call', { tool: 'AskUserQuestion' }, async (_$, e: any) => {
+        const q = e.questions[0]
+        asked.push({ question: q.question, options: q.options.map((o: any) => o.label) })
+        if (answer === null) throw new Error('dismissed')
+        return { result: { questions: e.questions, answers: { [q.question]: answer } } } as any
+      })
+      const runs: string[] = []
+      on('command.run', { command: 'clear' }, async () => {
+        runs.push('clear')
+        return { text: 'cleared' }
+      })
+      let compacts = 0
+      w.compact = async () => {
+        compacts++
+        return { messages: KEPT, tokensBefore: 150_000, tokensAfter: 20_000 }
+      }
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 60 })
+      await mainTurn($)
+      const ui = await mount($, surface)
+      await clock.advance(18 * MIN)
+      await ui.press({ key: 'compact' })
+      expect(asked).toEqual([])
+      expect(compacts).toBe(1)
+      await clock.advance(38 * MIN)
+      await ui.press({ key: 'compact' })
+      expect(asked).toEqual([{ question: 'Prompt cache ends in 4m: compact now while it is warm, or Clear if this session is done.', options: ['Compact', 'Clear', 'Cancel'] }])
+      expect(compacts).toBe(1)
+      await clock.advance(5 * MIN)
+      answer = null
+      await ui.press({ key: 'compact' })
+      expect(asked[1]!.question).toMatch(/^Prompt cache is cold: /)
+      expect(compacts).toBe(1)
+      answer = 'Compact'
+      await ui.press({ key: 'compact' })
+      expect(compacts).toBe(2)
+      expect(runs).toEqual([])
+      answer = 'Clear'
+      await ui.press({ key: 'compact' })
+      expect(asked).toHaveLength(4)
+      expect(compacts).toBe(2)
+      expect(runs).toEqual(['clear'])
+      expect(w.toasts.at(-1)).toBe('cleared')
+    })
+
     test(`${surface}: Clear press asks Yes/No first; only Yes runs /clear`, async ($, on) => {
       const { w } = world(on)
       const asked: { question: string; options: string[] }[] = []

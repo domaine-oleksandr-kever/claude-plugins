@@ -9,6 +9,7 @@ import {
   bandSegs,
   buttonText,
   cacheCard,
+  compactQuestion,
   compactButton,
   compactToast,
   costCard,
@@ -114,6 +115,20 @@ describe('remaining time', () => {
   test('ctx text', () => {
     expect(ctxText(null)).toBe('ctx —')
     expect(ctxText(47)).toBe('ctx 47%')
+  })
+})
+
+describe('compact question', () => {
+  const cache = { anchorMs: 1_000_000, ttlMs: HOUR, ttlSource: 'option' as const, isCold: false }
+
+  test('warm or unmeasured → none; under 5 min → the ending text; cold or run out → the full-price text', () => {
+    expect(compactQuestion({ ...cache, anchorMs: null }, 0)).toBeNull()
+    expect(compactQuestion(cache, cache.anchorMs + 18 * MIN)).toBeNull()
+    expect(compactQuestion(cache, cache.anchorMs + 55 * MIN)).toBeNull()
+    expect(compactQuestion(cache, cache.anchorMs + 56 * MIN)).toBe('Prompt cache ends in 4m: compact now while it is warm, or Clear if this session is done.')
+    expect(compactQuestion(cache, cache.anchorMs + 59.5 * MIN)).toContain('ends in <1m')
+    expect(compactQuestion(cache, cache.anchorMs + 61 * MIN)).toMatch(/^Prompt cache is cold: .*full price.*Compact anyway\?$/)
+    expect(compactQuestion({ ...cache, isCold: true }, cache.anchorMs)).toContain('is cold')
   })
 })
 

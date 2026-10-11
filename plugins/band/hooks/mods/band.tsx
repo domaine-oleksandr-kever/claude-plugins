@@ -1,4 +1,5 @@
-// Status band: the AbovePrompt row drawn from the atoms, the Compact and Clear presses and the terminal's model
+// Status band: the AbovePrompt row drawn from the atoms, the Compact and Clear presses (a cold or ending cache asks
+// Compact / Clear / Cancel first) and the terminal's model
 // picker, which unfolds into the row itself: the band region clips anything drawn outside its own rows, so no
 // list can pop over the transcript. A desktop draws the buttons on a second row under the figures.
 // Render only reads: band's atoms (usage.ts and checklist.tsx write them), base's task snapshot for the digest and
@@ -18,9 +19,11 @@ import {
   SEP,
   USAGE_INIT,
   bandSegs,
+  COMPACT_OPTIONS,
   cacheCard,
   cells,
   cacheView,
+  compactQuestion,
   compactToast,
   costCard,
   ctxCard,
@@ -114,8 +117,15 @@ function pressCompact($: $): void {
     saveThenCompact($, '').then(r => {
       if (!r.vetoed) $.ui.toast(`saved, then ${r.text || 'compacted'}`)
     }, refused)
-  mustSave($)
-    .then(stale => (stale ? saved() : compact()), compact)
+  const go = () => mustSave($).then(stale => (stale ? saved() : compact()), compact)
+  const clear = () => $.command.run({ command: 'clear' }).then(r => $.ui.toast(r.text || 'cleared'), err => $.ui.toast(`clear refused: ${err instanceof Error ? err.message : String(err)}`))
+  // A dismissed dialog rejects: that is a Cancel.
+  const ask = (q: string) => $.ui.ask(q, [...COMPACT_OPTIONS]).then(a => (a === 'Compact' ? go() : a === 'Clear' ? clear() : undefined), () => undefined)
+  Promise.all([read($, cache), $.clock.now()])
+    .then(([c, now]) => {
+      const q = compactQuestion(c, now)
+      return q ? ask(q) : go()
+    }, go)
     .finally(() => {
       compactInFlight = false
     })
