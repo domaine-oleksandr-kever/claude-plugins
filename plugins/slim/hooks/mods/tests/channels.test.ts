@@ -66,7 +66,7 @@ function world(on: On, below: Below | ((e: any) => Below), core: () => ReturnTyp
 const stdinOf = (run: Run | undefined) => JSON.parse(run?.init?.stdin ?? 'null')
 
 describe('K1 Bash JSON', () => {
-  test('120 KB → one core run on channel bash, restored result, row and event by bytes_seen, no toast', { plugins: [PEEK] }, async ($, on) => {
+  test('120 KB → one core run on channel bash, restored result, row by bytes_seen, the event from the raw bytes naming it, no toast', { plugins: [PEEK] }, async ($, on) => {
     const big = json(120_000)
     const w = world(on, bash(big), compressed('bash', { bytes_seen: 100_000 }))
     const r = await $.tool.call({ tool: 'Bash', command: 'curl -s https://x.io/api' } as any)
@@ -80,7 +80,7 @@ describe('K1 Bash JSON', () => {
     const seen = await peek($, w.calls[0].tool_use_id)
     expect(seen.row).toEqual({ engine: 'json', bytesIn: 100_000, bytesOut: 6_000 })
     expect(seen.events).toEqual([{
-      v: 1, atMs: 5_000, kind: 'slim', text: 'Bash: compressed 100 KB → 6 KB (−94%) · json', src: 'slim', tool: 'Bash',
+      v: 1, atMs: 5_000, kind: 'slim', text: 'Bash: compressed 120 KB → 6 KB (−95%; host preview 100 KB) · json', src: 'slim', tool: 'Bash',
       channel: 'bash', bytesIn: 100_000, bytesOut: 6_000, engine: 'json', ms: 9,
     }])
   })

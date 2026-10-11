@@ -176,7 +176,7 @@ export function registerIntake(on: On): void {
     const listed = isSub ? await agentType($, e.agentId!) : undefined
     const type = isSub ? (listed ?? 'agent') : undefined
     const decision = out.decision as 'compressed' | 'stubbed'
-    const text = eventText(agentPrefix(listed, isSub), tool, decision, engine, seen, rec.bytes_out)
+    const text = eventText(agentPrefix(listed, isSub), tool, decision, engine, rec.bytes_in, rec.bytes_out, rec.bytes_seen)
     // A toast per Bash or Read would be noise: the other channels show the row and the group line.
     if (ch === 'mcp' && !isSub && (await $.env.get('SLIM_TOAST')) !== '0') {
       $.ui.toast(text, { timeoutMs: toastMs(await $.env.get('SLIM_TOAST_MS')) })
@@ -242,7 +242,7 @@ export function registerIntake(on: On): void {
           const name = path !== null ? `@${path.slice(path.lastIndexOf('/') + 1)}` : '@file'
           const ev: SlimEvent = {
             v: 1, atMs: await $.clock.now(), kind: 'slim', src: 'slim', tool: 'Attachment', channel: 'attachment',
-            text: eventText(agentPrefix(listed, isSub), name, out.decision as 'compressed' | 'stubbed', rec.engine!, bytesSeen(rec), rec.bytes_out),
+            text: eventText(agentPrefix(listed, isSub), name, out.decision as 'compressed' | 'stubbed', rec.engine!, rec.bytes_in, rec.bytes_out, rec.bytes_seen),
             ...(isSub ? { agentType: listed ?? 'agent' } : {}),
             bytesIn: bytesSeen(rec), bytesOut: rec.bytes_out, engine: rec.engine!, ms: rec.ms,
           }

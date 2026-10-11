@@ -142,11 +142,15 @@ describe('event helpers', () => {
       'jira-reader · getJiraIssue: compressed 118 KB → 29 KB (−76%) · json',
     )
     expect(rowLine({ engine: 'log', bytesIn: 118_400, bytesOut: 29_000 })).toBe('slim  log  118 KB → 29 KB  −76%')
-    // A persisted Bash window measured against the host's 2 KB preview grew: said so, never `−0%`.
-    expect(eventText('', 'Bash', 'compressed', 'text', 2_300, 4_096)).toBe('Bash: windowed 2 KB → 4 KB (+78% vs host preview) · text')
+    // A persisted Bash output: the saving counts from the raw bytes, the host's 2 KB preview is named beside it.
+    expect(eventText('', 'Bash', 'compressed', 'text', 48_000, 4_096, 2_300)).toBe('Bash: windowed 48 KB → 4 KB (−91%; host preview 2 KB) · text')
+    // The row under the result still measures against that preview: it grew, said so, never `−0%`.
     expect(rowLine({ engine: 'text', bytesIn: 2_300, bytesOut: 4_096 })).toBe('slim  text  2 KB → 4 KB  +78%')
-    // A one-line JSON file Read showed almost whole: compressed against the raw bytes, a hair over the host's view.
-    expect(eventText('', 'Read', 'compressed', 'json', 45_500, 46_451)).toBe('Read: compressed 46 KB → 46 KB (+2% vs host preview) · json')
+    // A one-line JSON file Read the host cut at its token cap: raw bytes, then the cut the model would have seen.
+    expect(eventText('', 'Read', 'compressed', 'json', 60_000, 46_451, 40_000)).toBe('Read: compressed 60 KB → 46 KB (−23%; host preview 40 KB) · json')
+    // bytes_seen equal to the raw bytes (or absent) adds nothing; bigger (an @-mentioned file's line numbers) it is the base.
+    expect(eventText('', 'Read', 'compressed', 'json', 60_000, 46_451, 60_000)).toBe('Read: compressed 60 KB → 46 KB (−23%) · json')
+    expect(eventText('', '@issues.jsonl', 'compressed', 'jsonl', 55_000, 900, 61_000)).toBe('@issues.jsonl: compressed 61 KB → 900 B (−99%) · jsonl')
   })
 
   test('pushEvent keeps the newest 200, oldest first', () => {

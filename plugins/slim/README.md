@@ -16,7 +16,7 @@ slim is a Claude Code hooks module (mods) and nothing else: other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads; the drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.10.1**.
+Current release: **slim v0.10.2**.
 
 ## Install
 
@@ -117,9 +117,10 @@ for a Bash output the host saved to a file, 8,192 B for Grep, 12,288 B otherwise
 
 For a Bash output the host saved to a file, the model would otherwise have seen only the host's
 2 KB preview; for an MCP result over the host's limit, its short overflow notice; for a Read the host
-cut at its token cap, the cut text. The report line records that view as `bytes_seen`, and the row, the event, the
+cut at its token cap, the cut text. The report line records that view as `bytes_seen`, and the row, the
 ToolGroup suffix and `--report` count savings against it, so they are not overstated: a view bigger
-than that is shown as `windowed … (+N%)`.
+than that is shown as `+N%`. The Log event counts from the raw bytes and names that view beside the saving:
+`windowed 48 KB → 4 KB (−91%; host preview 2 KB)`.
 
 ### Read rules
 
@@ -403,8 +404,8 @@ planning is the pure `plugins/slim/scripts/engines/media.cjs` (CONTRACT.md §5a)
 
   It is drawn in the success colour when slim saved 50 % or more. A Bash window over an output the
   host saved to a file can be larger than the host's 2 KB preview it replaces; its line then reads
-  `slim  text  2 KB → 4 KB  +78%` and its event says `windowed 2 KB → 4 KB (+78% vs host preview)`: the
-  figure under the result counts from the raw bytes, the row and the event from the host's own preview.
+  `slim  text  2 KB → 4 KB  +78%`, while its event says `windowed 48 KB → 4 KB (−91%; host preview 2 KB)`: the
+  figure under the result and the event count from the raw bytes, the row from the host's own preview.
 - **The ToolGroup suffix.** Read, Grep and Bash runs fold into one group row; when slim compressed
   any call in the group, the fold line ends with ` · 2 compressed, −186 KB`. Only calls whose view
   shrank count. An expanded group shows the per-row lines instead.

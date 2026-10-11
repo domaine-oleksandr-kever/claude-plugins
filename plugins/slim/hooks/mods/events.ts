@@ -50,8 +50,12 @@ export function agentPrefix(type: string | undefined, isSub: boolean): string {
   return type ? `${agentLabel(type)} · ` : 'agent · '
 }
 
-/** `jira-reader · getJiraIssue: compressed 118 KB → 29 KB (−75%) · json`; the text engine says `windowed`; a view that
- * grew says `(+74% vs host preview)`: the saving is counted from what the host itself would have shown, not from the raw bytes. */
+/**
+ * `jira-reader · getJiraIssue: compressed 118 KB → 29 KB (−75%) · json`, counted from the raw bytes; the text engine
+ * says `windowed`. `seen` is what the host itself would have shown instead: smaller than the raw bytes (a persisted
+ * Bash output's 2 KB preview, a Read cut at its token cap) it is named beside the saving, `(−92%; host preview 2 KB)`;
+ * bigger (an @-mentioned file with the host's line numbers) it is the base.
+ */
 export function eventText(
   prefix: string,
   tool: string,
@@ -59,10 +63,11 @@ export function eventText(
   engine: SlimEngine,
   bytesIn: number,
   bytesOut: number,
+  seen?: number,
 ): string {
-  const grew = bytesOut > bytesIn
-  const pct = pctCell(bytesIn, bytesOut) + (grew ? ' vs host preview' : '')
-  return `${prefix}${toolName(tool)}: ${engine === 'text' ? 'windowed' : decision} ${fmtSize(bytesIn)} → ${fmtSize(bytesOut)} (${pct}) · ${engine}`
+  const base = seen !== undefined && seen > bytesIn ? seen : bytesIn
+  const preview = seen !== undefined && seen < bytesIn ? `; host preview ${fmtSize(seen)}` : ''
+  return `${prefix}${toolName(tool)}: ${engine === 'text' ? 'windowed' : decision} ${fmtSize(base)} → ${fmtSize(bytesOut)} (${pctCell(base, bytesOut)}${preview}) · ${engine}`
 }
 
 /** 812 → `812`, 1_240 → `1.2k`. */
