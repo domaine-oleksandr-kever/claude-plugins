@@ -19,6 +19,7 @@ const { isNodesResponse } = require('./figma-nodes.cjs');
 const { parseJsonl, unwrapFence } = require('./json.cjs');
 const { detectSnapshot } = require('./a11y.cjs');
 const { detect: detectListing } = require('./listing.cjs');
+const { detect: detectCsv } = require('./csv.cjs');
 
 const SCAN = 65536;
 
@@ -101,6 +102,7 @@ function sniffText(text, fenced) {
     }
   }
   if (parseJsonl(text)) return { engine: 'jsonl', confidence: 0.9, reason: 'jsonl' };
+  if (detectCsv(text)) return { engine: 'csv', confidence: 0.9, reason: 'csv' };
   // Ahead of the code rule: a path such as `export/feed.csv` opens like code.
   const listing = detectListing(text);
   if (listing) return { engine: 'listing', confidence: 0.9, reason: `listing-${listing}` };

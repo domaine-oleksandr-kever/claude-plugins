@@ -441,7 +441,7 @@ function readAdmits(input, rec) {
   const fp = String((input.tool_input && input.tool_input.file_path) || (rec.file && rec.file.filePath) || '');
   const ext = path.extname(fp).toLowerCase();
   const truncated = !!(rec.file && rec.file.truncatedByTokenCap);
-  if (ch.READ_LOG_EXT.has(ext)) return truncated || utf8(rec.file.content) > ch.GATES.read;
+  if (ch.READ_LOG_EXT.has(ext) || ch.READ_DATA_EXT.has(ext)) return truncated || utf8(rec.file.content) > ch.GATES.read;
   return ext === '.json' && truncated && !ch.isSourceJson(fp);
 }
 

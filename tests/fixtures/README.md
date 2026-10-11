@@ -32,8 +32,8 @@ verbatim, Apache-2.0 — see `../parity/NOTICE`); they are the array-crush porti
 
 ## slim channel fixtures
 
-Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs`, `../lint-slim-fixtures.mjs`, `../listing-slim-fixtures.mjs` and the per-channel rows of
-`../slim-fixtures.mjs`. All synthetic; none is derived from third-party content.
+Inputs for `../slim-engines.mjs`, the engine suites (`../html-`, `../a11y-`, `../lint-`, `../listing-`,
+`../csv-slim-fixtures.mjs`) and the per-channel rows of `../slim-fixtures.mjs`. All synthetic; none is derived from third-party content.
 
 | File | Source | Shape | Notes |
 |---|---|---|---|
@@ -49,7 +49,6 @@ Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs`, `../lint-slim-fix
 | `a11y-pdp.txt` | **synthetic** — `make-a11y.cjs pdp` | ~13 KB product page: gallery of nameless thumbnails, size / shade radios with `[checked]` / `[disabled]`, quantity, an `[expanded]` accordion, 8 recommendations, 10 long reviews | 13,048 B → 9,447 B; the reviews (prose) never fold |
 | `a11y-cart.txt` | **synthetic** — `make-a11y.cjs cart` | ~6 KB page header behind an open cart drawer `dialog` with 8 line items | 6,215 B → 2,801 B |
 | `a11y-docs.txt` | **synthetic** — `make-a11y.cjs docs` | ~10 KB documentation article: headings, long paragraphs, code lines, a 6-link nav | must come back `no-gain` (prose saves under 10 %) |
-
 | `eslint-stylish.txt` | **synthetic** — script-built once | ~36 KB ESLint stylish report: 400 problems (228 errors, 172 warnings) over 30 files under `/home/dev/shop-theme/src/`, 9 rules, one rule-less parsing error, the `✖ 400 problems` and `--fix` summary lines | the lint engine (`../lint-slim-fixtures.mjs`): sniffed `lint`, ~75% saved, every kept `file:line:col` in the input, header counts equal the summary; Bash `npx eslint` and MCP rows |
 | `lint-theme-check.txt` | **synthetic** — script-built once | ~14 KB theme-check text report without quoted source lines: 120 offences (`[level] file:line:col Check: message`) over 20 Liquid files, 7 checks, the `files inspected, … offenses detected` summary | the lint engine on theme-check; the Bash `shopify theme check` and MCP rows. `theme-check.txt` (above) quotes Liquid and stays `template` |
 | `tsc.txt` | **synthetic** — script-built once | ~5.5 KB `tsc --noEmit` output: 60 errors (`file(line,col): error TSnnnn: message`) over 14 files, 5 codes, `Found 60 errors in 14 files.` | the lint engine on tsc: locations kept as `file(line,col)`, quoted names shown per location; under the Bash 8,192 B lint gate |
@@ -57,6 +56,13 @@ Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs`, `../lint-slim-fix
 | `listing-node-modules-ls-R.txt` | **synthetic** — script-built once (seeded) | ~55 KB GNU `ls -R node_modules`: 60 packages × `lib/`, `lib/internal/`, `dist/`, `dist/esm/`, 301 directories | the deep case: 32,317 B at the first stage, 19,506 B after `fold4` → `fold0` under a 30,000 B target |
 | `listing-tree.txt` | **synthetic** — script-built once (seeded) | ~16 KB `tree` output with the non-breaking spaces of a UTF-8 locale: 7 theme directories, one nested, and tree's `8 directories, 464 files` summary | box-drawing parse; the summary stays verbatim under the header |
 | `listing-small.txt` | **synthetic** — hand-shaped | a 50-line `git ls-files`, every directory at most 6 files | nothing to fold → `no-gain` |
+| `inventory.tsv` | **synthetic** — script-built once | ~38 KB TSV, 640 warehouse rows × 8 columns: quoted `"Austin, TX"` locations, ISO dates, a `note` column mostly empty, one quoted note holding a line break | the csv engine's TSV and quoted-comma case (`csv-slim-fixtures.mjs`), and the csv Read / MCP / WebFetch / @-file rows of `slim-fixtures.mjs` (C-csv) |
+| `prices-eu.csv` | **synthetic** — script-built once | ~16 KB `;`-separated price list, 320 rows × 7 columns, European decimals (`1.299,00`, `0,342`) and `ja`/`nein` | the csv engine's delimiter-first rule: `;` wins over the decimal commas, and the number columns read as numbers |
+| `small.csv` | **synthetic** — script-built once | 15 lines, 4 columns | under the 20-record detection floor (sniffs as prose); forced through the csv engine it is `no-gain` |
+| `sync-commas.log` | **synthetic** — script-built once | ~39 KB, 400 log lines with a millisecond comma and two commas per message, so every line has the same comma count | must stay `log`: the csv header rule refuses a first row that starts with a date |
+
+The 12,480-row product export (~2.3 MB, 14 columns, quoted `Body (HTML)`) comes from
+`plugins/slim/evals/_shared/make-products-csv.cjs` at run time, like `orders.json` below.
 
 The 300 KB Read row and the eval's `orders.json` come from `plugins/slim/evals/_shared/make-orders.cjs`
 at run time; `jql-nodes-ELC.json` is the one fixture of that size committed, because the delivery

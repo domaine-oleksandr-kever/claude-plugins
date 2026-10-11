@@ -16,6 +16,7 @@ const text = require('./text-window.cjs');
 const a11y = require('./a11y.cjs');
 const lint = require('./lint.cjs');
 const listing = require('./listing.cjs');
+const csv = require('./csv.cjs');
 
 /**
  * @typedef {object} EngineRow
@@ -42,6 +43,7 @@ const ROWS = [
   { id: 'a11y', module: a11y, ext: '.txt', fit: true, stub: true, mcp: true },
   { id: 'lint', module: lint, ext: '.txt', fit: true, stub: true, mcp: true },
   { id: 'listing', module: listing, ext: '.txt', fit: true, stub: true, mcp: false },
+  { id: 'csv', module: csv, ext: '.txt', fit: true, stub: true, mcp: true },
 ];
 
 module.exports = { ROWS };

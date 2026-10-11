@@ -573,6 +573,8 @@ let STUB0_OUT = null;
     ['channels.ts', 'LINT_GATE', 'delivery/channels.cjs', 'LINT_GATE'],
     ['channels.ts', 'LIST_CMD', 'delivery/channels.cjs', 'LIST_CMD'],
     ['channels.ts', 'LIST_GATE', 'delivery/channels.cjs', 'LIST_GATE'],
+    ['channels.ts', 'READ_DATA_EXT', 'delivery/channels.cjs', 'READ_DATA_EXT'],
+    ['channels.ts', 'DELIMS', 'engines/csv.cjs', 'DELIMS'],
   ]) {
     const m = literal(M(mf), mn);
     const c = literal(C(cf), cn);
@@ -1508,6 +1510,42 @@ printf 'SIPSIMG' > "$last"
   ];
   eq('Cv15-text-as-media-refused', textAsMedia.map((r) => [r.decision, r.reason, String(r.text).includes('SECRET')]),
     [['refused', 'not-media', false], ['refused', 'not-media', false], ['refused', 'not-media', false]]);
+}
+
+// C-csv — a delimited table on every channel the csv engine serves; its re-run is already slim.
+{
+  const T = newT();
+  const csv = spawnSync('node', [path.join(ROOT, 'plugins/slim/evals/_shared/make-products-csv.cjs')], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).stdout;
+  const tsv = readFileSync(path.join(FIX, 'inventory.tsv'), 'utf8');
+  const b = call('Ccsv1', T, chEnv(T, 'bash', 'Bash', { command: 'cat exports/products.csv' }, BASH(csv)));
+  const out = String((b.result || {}).stdout);
+  eq('Ccsv1-bash', [b.decision, b.record.engine, out.startsWith('<<slim-csv>> 12,480 rows × 14 cols · delimiter , ·')], ['compressed', 'csv', true]);
+  check('Ccsv1-spill', !!handleOf(out) && handleOf(out).endsWith('.txt') && readFileSync(handleOf(out), 'utf8') === csv, handleOf(out));
+  eq('Ccsv1-figure', figureOf(out), bytes(out));
+  eq('Ccsv2-rerun', call('Ccsv2', T, chEnv(T, 'bash', 'Bash', { command: 'cat exports/products.csv' }, BASH(out))).reason, 'already-slim');
+  const fp = path.join(T, 'stock.tsv');
+  writeFileSync(fp, tsv);
+  const readRec = (content) => ({ type: 'text', file: { filePath: fp, content, numLines: content.split('\n').length, startLine: 1, totalLines: content.split('\n').length } });
+  const r = call('Ccsv3', T, chEnv(T, 'read', 'Read', { file_path: fp }, readRec(tsv)));
+  eq('Ccsv3-read', [r.decision, r.record.engine, String(((r.result || {}).file || {}).content).startsWith('<<slim-csv>> 640 rows × 8 cols · delimiter tab')], ['compressed', 'csv', true]);
+  eq('Ccsv4-read-prose-csv', call('Ccsv4', T, chEnv(T, 'read', 'Read', { file_path: fp }, readRec('a line of prose\n'.repeat(3000)))).reason, 'read-guard');
+  const m = call('Ccsv5', T, envelope(T, [{ type: 'text', text: tsv }]));
+  eq('Ccsv5-mcp', [m.decision, m.record.engine, String(((m.result || [])[0] || {}).text).startsWith('<<slim-csv>> 640 rows')], ['compressed', 'csv', true]);
+  const wf = { bytes: bytes(tsv), code: 200, codeText: 'OK', result: tsv, durationMs: 9, url: 'https://shop.example/stock.tsv' };
+  const w = call('Ccsv6', T, chEnv(T, 'webfetch', 'WebFetch', { url: wf.url, prompt: 'raw' }, wf));
+  eq('Ccsv6-webfetch', [w.decision, w.record.engine], ['compressed', 'csv']);
+  const framed = `Called the Read tool with the following input: ${JSON.stringify({ file_path: fp })}\nResult of calling the Read tool: ` +
+    tsv.split('\n').map((l, i) => `${String(i + 1).padStart(6)}→${l}`).join('\n');
+  const a = call('Ccsv7', T, chEnv(T, 'attachment', 'Attachment', { type: 'file', origin: 'engine', shape: 'numbered', path: fp }, { text: framed }));
+  eq('Ccsv7-attachment', [a.decision, a.record.engine], ['compressed', 'csv']);
+  // The view reply has no full= handle: the footer names the file the model viewed or the original: line.
+  old(fp);
+  const view = (req) => JSON.parse(spawn(T, JSON.stringify({ v: 1, root: T, cwd: T, session_id: 's1', ...req }), { args: ['--view'] }).stdout);
+  const footer = 'lookup({ path: <the original: its full= or original: path, or the file you viewed>, question })';
+  const vp = view({ path: fp });
+  eq('Ccsv8-view-path', [vp.decision, vp.engine, vp.text.includes('<<full='), vp.text.trimEnd().endsWith(footer)], ['compressed', 'csv', false, true]);
+  const vc = view({ text: tsv, command: 'cat stock.tsv' });
+  check('Ccsv9-view-command-original', vc.engine === 'csv' && vc.text.trimEnd().endsWith(footer) && !!vc.original && readFileSync(vc.original, 'utf8') === tsv, String(vc.original));
 }
 
 // S13 last: every line any row above wrote.

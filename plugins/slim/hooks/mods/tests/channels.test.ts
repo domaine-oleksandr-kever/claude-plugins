@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { denyText } from '../intake.ts'
+import { attachmentEligible, tabular } from '../channels.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; env?: Record<string, string>; timeoutMs?: number } }
 type Below = Record<string, unknown>
@@ -450,5 +451,39 @@ describe('K15 cost below the floor', () => {
     await $.tool.call({ tool: 'Edit', file_path: '/r/a', old_string: 'a', new_string: 'b' } as any)
     expect(w.envReads).toEqual([])
     expect(w.runs.length + w.other.length).toBe(0)
+  })
+})
+
+describe('K16 delimited tables', () => {
+  const table = (n: number, d = ',') => {
+    const lines = [['sku', 'title', 'price', 'qty'].join(d)]
+    for (let i = 0; lines.join('\n').length < n; i++) lines.push([`NW-${i}`, `Mug ${i}`, `${9 + (i % 90)}.50`, String(i % 40)].join(d))
+    return lines.join('\n')
+  }
+  test('tabular: comma, tab and semicolon tables pass; prose, one-comma lines and a short head do not', () => {
+    for (const d of [',', '\t', ';']) expect(tabular(table(2_000, d))).toBe(true)
+    expect(tabular('a line, of prose\n'.repeat(40))).toBe(false)
+    expect(tabular('a,b,c\n1,2,3\n')).toBe(false)
+  })
+  test('Bash 20 KB CSV → spawn; 20 KB plain → none', async ($, on) => {
+    const w = world(on, e => bash(e.command === 'cat p.csv' ? table(20_000) : plain(20_000)))
+    await $.tool.call({ tool: 'Bash', command: 'cat p.csv' } as any)
+    await $.tool.call({ tool: 'Bash', command: 'cat notes.txt' } as any)
+    expect(w.runs.length).toBe(1)
+  })
+  test('Read .csv / .tsv over 32 KB → spawn; a 20 KB .csv → none', async ($, on) => {
+    const w = world(on, e => readRec(e.file_path.endsWith('small.csv') ? table(20_000) : table(40_000, e.file_path.endsWith('.tsv') ? '\t' : ','), e.file_path), compressed('read'))
+    for (const f of ['/r/export.csv', '/r/stock.tsv', '/r/small.csv']) await $.tool.call({ tool: 'Read', file_path: f } as any)
+    expect(w.runs.map(r => stdinOf(r).tool_input.file_path)).toEqual(['/r/export.csv', '/r/stock.tsv'])
+  })
+  test('WebFetch 20 KB TSV → spawn', async ($, on) => {
+    const w = world(on, { result: { bytes: 1, code: 200, codeText: 'OK', result: table(20_000, '\t'), durationMs: 3, url: 'https://x.io/t.tsv' }, text: 'x' }, compressed('webfetch'))
+    await $.tool.call({ tool: 'WebFetch', url: 'https://x.io/t.tsv', prompt: 'p' } as any)
+    expect(w.runs.length).toBe(1)
+  })
+  test('an @-mentioned .csv / .tsv is a data file', () => {
+    const framed = 'Called the Read tool with the following input: {"file_path":"/r/a.csv"}\nResult of calling the Read tool:      1→a,b\n     2→1,2\n     3→3,4\n     4→5,6'
+    expect(attachmentEligible(framed, '/r/a.csv')).toBe(true)
+    expect(attachmentEligible(framed, '/r/a.tsv')).toBe(true)
   })
 })

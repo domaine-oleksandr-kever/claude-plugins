@@ -71,6 +71,7 @@ the code on the date at the bottom; the code wins when they drift.
 │                         ├─ a11y.cjs   (browser snapshot · wrappers flat · sibling runs fold) │
 │                         ├─ lint.cjs   (linter output grouped by rule · first locations kept) │
 │                         ├─ listing.cjs (find / ls -R / tree → directory outline, histograms) │
+│                         ├─ csv.cjs    (table → column profile · seeded samples · rows as md) │
 │                         └─ text-window.cjs (head + tail window, hidden-lines count)          │
 │  media.cjs  (beside compress(): kindOf · plan resize / frames from probe facts · figure)     │
 │  jq.cjs     (beside compress(): narrow a JSON document by a small jq subset, or refuse)      │
@@ -106,7 +107,7 @@ flowchart TD
   G -- no --> I
   H -- refused --> Z2[passthrough expand-refused]
   H -- ok --> I[engines.sniff<br/>content, never the tool name<br/>every channel, MCP per text block]
-  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter cmd,<br/>listing only after a listing cmd on Bash,<br/>MCP: plain, guarded and HTML text not compressed,<br/>a11y snapshots MCP only}
+  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter cmd,<br/>listing only after a listing cmd on Bash,<br/>MCP: plain, guarded and HTML text not compressed,<br/>a11y snapshots MCP only,<br/>csv on Bash · Read .csv/.tsv · WebFetch · @-file · MCP}
   J --> K[engines.compress<br/>maxMs 5000 · targetBytes for engines flagged fit]
   K -- passthrough · refused --> L{stubbable?<br/>MCP over 32 KB}
   L -- yes --> M[emit stub + spill original]
@@ -139,7 +140,7 @@ non-zero exit, bad JSON) leaves the original result untouched and writes an erro
 | websearch | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
 | grep (content mode) | 16,384 | 8,192 | 16,384 |
 | agent | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
-| attachment (@-mentioned file) | 32,768 (the framed text); json, jsonl and log only | — | 65,536 |
+| attachment (@-mentioned file) | 32,768 (the framed text); json, jsonl, log and csv only | — | 65,536 |
 | prompt | 10,240 the prompt, 8,192 a span | — | JSON inline under 8,192, log / HTML under 100 KB, else head + handle |
 
 A browser snapshot (a11y) is compressed on MCP only, from the same 4,096 gate, fitted to the stub
@@ -150,7 +151,7 @@ them equal, so the pure pre-decision in the module and the core never disagree.
 
 ### Why the guard rails
 
-- **Read is narrowed** to whole-file reads of `.log/.jsonl/.ndjson` over 32 KB and of `.json` the
+- **Read is narrowed** to whole-file reads of `.log/.jsonl/.ndjson/.csv/.tsv` over 32 KB and of `.json` the
   host itself truncated by its token cap, and never to source JSON (`config/`, `templates/`,
   `locales/`, `package.json`, …). After a Read the model often Edits; Edit matches an exact
   `old_string`, and a Write would store the compressed view. A compressed Read also carries a note
@@ -383,6 +384,7 @@ All rows live in `README.md` → Environment switches; `tests/readme-checks.sh` 
 | engines (a11y) | `tests/a11y-slim-fixtures.mjs` | the a11y engine on `tests/fixtures/a11y-*.txt`: sniff, exact bytes, every ref kept or in a range, fit stages, the generator |
 | engines (lint) | `tests/lint-slim-fixtures.mjs` | the lint engine on the ESLint / theme-check / tsc fixtures: sniff per grammar, exact bytes, every kept location in the input, counts equal the tool's summary, fit stages, Bash / MCP / Read delivery |
 | engines (listing) | `tests/listing-slim-fixtures.mjs` | the listing engine on the find / ls -R / tree fixtures: sniff, exact bytes, fit stages, every printed path and directory count against the input, Bash admission |
+| engines (csv) | `tests/csv-slim-fixtures.mjs` | the csv engine: detection, counts, types, samples and rows checked against the input, fit stages, determinism |
 | delivery | `tests/slim-fixtures.mjs` | one envelope per channel through `slim.cjs`: decisions, restored shapes, records, gates equal to the module's, `--report`; `--view` (jq, out roots, cache marker, host files, media); the media backend against fake `ffprobe` / `ffmpeg` / `sips` on a one-dir PATH; @-mentioned files; `--prompt` (in place, durable dir, worktree, output bound, link rail); `--access` and its `--report` pairing |
 | module | `plugins/slim/hooks/mods/tests/*.test.ts(x)` via `claude plugin test` | every channel's hook, pre-decisions, lookup rungs with mocked `$.tool.call` / `$.model.complete`, view's checks, Write path and reply text, the prompt rewrite and its origins, the attachment hook, the spill-read guard, describe, render, info |
 | all | `tests/layout-assertions.sh`, `tests/readme-checks.sh`, `claude plugin validate --strict` | layer purity, env rows, state contract |

@@ -23,6 +23,9 @@ const SOURCE_JSON_NAME = /^(?:package(?:-lock)?|tsconfig[\w.-]*|composer|jsconfi
 const STRUCTURED = /^﻿?\s*(?:\{\s*["}[]|\[|<(?:!doctype|html|head|body)\b)/i
 const MARKUP = /^﻿?\s*<(?:!doctype|html|head|body)\b/i
 const LOG_EXT = new Set(['.log', '.jsonl', '.ndjson'])
+const READ_DATA_EXT = new Set(['.csv', '.tsv'])
+/** The delimiters of a table; engines/csv.cjs holds the same list. */
+const DELIMS = [',', '\t', ';']
 
 /** The tool-result channels but MCP, which keeps its own pre-spawn rules. */
 export type Intake = Exclude<SlimChannel, 'mcp' | 'attachment' | 'prompt'>
@@ -66,6 +69,21 @@ export function isSourceJson(path: string): boolean {
 /** JSON or a page at the start of the text: worth the core below the plain-text threshold. */
 export function structured(t: string): boolean {
   return STRUCTURED.test(t.slice(0, 4096))
+}
+
+/**
+ * A delimited table at the start of the text: a header with two or more of one delimiter and at least
+ * half the next lines as wide. Worth the core below the plain-text threshold; the core's sniff decides.
+ */
+export function tabular(t: string): boolean {
+  const lines = t.slice(0, 8192).split('\n').slice(0, 21)
+  if (lines.length < 6) return false
+  const count = (s: string, d: string) => s.split(d).length - 1
+  const body = lines.slice(1, -1)
+  return DELIMS.some(d => {
+    const k = count(lines[0] ?? '', d)
+    return k >= 2 && body.filter(l => count(l, d) >= k).length * 2 >= body.length
+  })
 }
 
 function markup(t: string): boolean {
@@ -164,7 +182,7 @@ export function floor(ch: Intake, v: View): boolean {
 function readEligible(v: View): boolean {
   const path = v.path ?? ''
   const x = ext(path)
-  if (LOG_EXT.has(x)) return v.truncated === true || v.bytes > GATES.read
+  if (LOG_EXT.has(x) || READ_DATA_EXT.has(x)) return v.truncated === true || v.bytes > GATES.read
   return x === '.json' && v.truncated === true && !isSourceJson(path)
 }
 
@@ -190,10 +208,11 @@ function sizeOk(ch: Intake, v: View, plain: number): boolean {
       if (v.bytes > LOG_GATE && LOG_CMD.test(cmd)) return true
       if (v.bytes > LINT_GATE && LINT_CMD.test(cmd)) return true
       if (v.bytes > LIST_GATE && LIST_CMD.test(cmd)) return true
+      if (v.bytes > GATES.bash && tabular(head)) return true
       return v.bytes > plain
     }
     case 'read': return true
-    case 'webfetch': return (v.bytes > GATES.webfetch && structured(head)) || v.bytes > plain
+    case 'webfetch': return (v.bytes > GATES.webfetch && (structured(head) || tabular(head))) || v.bytes > plain
     case 'grep': return v.bytes > GATES.grep
     case 'websearch':
     case 'agent': return v.bytes > plain
@@ -205,7 +224,7 @@ export function candidate(ch: Intake, v: View, plain: number): boolean {
   return floor(ch, v) && guardOf(ch, v) === null && sizeOk(ch, v, plain)
 }
 
-const DATA_EXT = new Set(['.json', '.jsonl', '.ndjson', '.log', '.txt'])
+const DATA_EXT = new Set(['.json', '.jsonl', '.ndjson', '.log', '.txt', '.csv', '.tsv'])
 
 /** The file the host's framing of an @-mentioned file names (`Called the Read tool with the following input: {…}`), or null. */
 export function attachmentPath(text: string): string | null {

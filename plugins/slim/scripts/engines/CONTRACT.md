@@ -37,7 +37,7 @@ One call: `compress(input, options)`.
 | `spillDir` | `''` | prefix of the paths the text cites for parts (`<<full=<spillDir>/<name> …>>`). Empty → the bare name. |
 | `spillNames` | `{ original: 'slim-original-', rows: 'slim-rows-', ids: 'slim-ids-' }` | name prefix per spill kind. |
 | `trace` | `false` | fill `stats.stages` with the pipeline stages that changed bytes. |
-| `targetBytes` | `null` | json / jsonl, figma-nodes, a11y, lint and listing: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**); a snapshot folds harder (see **a11y**); lint output keeps fewer locations per group (see **lint**); a listing lowers its fold threshold (see **listing**). Other engines ignore it. |
+| `targetBytes` | `null` | json / jsonl, figma-nodes, a11y, lint, listing and csv: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**); a snapshot folds harder (see **a11y**); lint output keeps fewer locations per group (see **lint**); a listing lowers its fold threshold (see **listing**); a table profile drops its rows, then samples (see **csv**). Other engines ignore it. |
 | `maxInputBytes` | `67108864` | larger input → `refused` / `too-large`. |
 | `marker` | `'handle'` | `'ccr'` reproduces Headroom's content-hash crush marker; parity tests only. |
 
@@ -46,7 +46,7 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
 ## 2. Detection
 
 `sniff(input)` → `{ engine, confidence, reason }`, where `engine` is one of `json | jsonl | log | html
-| figma | figma-nodes | adf | text | a11y | lint | listing | binary | none` and `confidence` is 0..1. Content only; first match wins:
+| figma | figma-nodes | adf | text | a11y | lint | listing | csv | binary | none` and `confidence` is 0..1. Content only; first match wins:
 
 1. **binary** — a Buffer starting with PNG, JPEG, GIF8, `%PDF-`, zip (`PK\x03\x04`), gzip (`1F 8B`),
    `RIFF…WEBP`, wasm (`\0asm`), ELF or Mach-O magic, or holding a NUL byte in its first 8192 bytes; a
@@ -78,6 +78,11 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
    decimals, versions, base64 and `grep -c` counts are not paths), `ls -R` blocks (`listing-ls-R`: a `dir:` header, entries without a `/`) or `tree` box
    drawing (`listing-tree`: 90 % of the lines after the root under `├──`/`└──`/`|--`). Ahead of the
    code rule, because a path such as `export/feed.csv` opens like code.
+   Then **csv** — a delimited table in the first 64 KB: for `,`, tab or `;`, at least 20 records (quoted
+   fields may hold the delimiter, `""` and line breaks; text after a closing quote rules the delimiter
+   out) of which ≥ 95 % have the header's width, that width ≥ 3; the header has no number cell, does not
+   open with a date (`T` form too), time or level (so a comma-shaped log stays a log), and no cell parses
+   as the type its column's values share. The widest such delimiter wins; reason `csv`.
 8. **code → text** — non-markup text where 30 % of the first 200 non-empty lines open like code
    (`import`, `const`, `function`, `def`, `return`, `{`, `}`, `//`, …). After the fence and JSONL rules,
    because a JSON line opens with a brace too.
@@ -164,6 +169,22 @@ folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` p
 `figma-nodes: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N`. The original's spill name ends
 `.json`.
 
+**csv** — a delimited table as a profile. Header `<<slim-csv>> <rows> rows × <cols> cols · delimiter
+<, | tab | ;> · <size> · <n> rows shown` (plus `· N rows of another width` when ragged). `columns:`,
+one line per column: name, type (`number`, `integer`, `date` for ISO dates, `bool`, `category` when
+distinct/non-null < 0.5 and ≤ 50 distinct, `string`, `empty`), `min`/`max` as written (number, integer,
+date), `nulls` (empty, `null`, `n/a`, `nan`), `distinct`, then a bool's or category's values with
+` ×count` (most frequent first) or `e.g.` three distinct samples (clipped like a table cell). A
+number column reads `1,299.00` or, in a `;` file first, `1.299,00`. Then a markdown table: a `#`
+column with the data-row number, the header, rows 1–3 and three sampled rows in file order, cells
+as written with `|` → `\|`, line breaks → `<br>`, a cell over 160 chars cut to 120 plus `… [+N chars]`.
+Samples and sampled rows come from a PRNG seeded with the content hash. A footer names the next call:
+`lookup({ path, question })` on the original (the `full=` handle, the view's `original:` line or the
+viewed file). With `targetBytes`, stages `rows`
+(6 → 3 → 0 table rows) then `samples` (3 → 1), each with a warning; a profile that still misses says
+`targetBytes T not met: B B`. A dominant markdown fence is unwrapped, its preamble and trailer
+kept. Forced on text that is no table: `passthrough` / `non-csv`.
+
 **adf** — a bare Atlassian document converted to markdown (media render as `_(media omitted)_`).
 
 **lint** — linter output parsed to `{ file, line, col, level, rule, message }` and grouped by level,
@@ -225,7 +246,7 @@ children become one `- … N nodes below [refs …]: names …` line listing the
 ```ts
 {
   v: 1,
-  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'a11y'|'lint'|'listing'|'binary'|'none',  // the engine that produced the text
+  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'a11y'|'lint'|'listing'|'csv'|'binary'|'none',  // the engine that produced the text
   decision: 'compressed' | 'passthrough' | 'refused',
   reason?: string,      // why not compressed
   format?: string,      // diagnostic tag of a non-JSON passthrough (html | xml | broken-json | text)
@@ -249,7 +270,7 @@ reply — is the caller's decision.
 
 Passthrough reasons: `empty`, `engine-not-allowed`, `plain-gate`, `no-gain`, `non-json`, `error-shape`,
 `number-precision`, `budget-exceeded`, `transform-error`, and per engine `non-log`, `non-figma`,
-`non-figma-nodes`, `non-adf`, `non-a11y`, `non-lint`, `non-listing`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
+`non-figma-nodes`, `non-adf`, `non-a11y`, `non-lint`, `non-listing`, `non-csv`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
 
 ## 5. Guarantees
 
