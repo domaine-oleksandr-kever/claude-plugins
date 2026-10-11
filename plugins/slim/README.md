@@ -6,8 +6,8 @@ slim is a compression proxy for Claude Code. One `tool.call` handler sees every 
 Bash, Read, WebFetch, WebSearch, Grep and Agent — and shrinks the large ones before they reach
 the context; a pasted prompt's data and an @-mentioned data file get the same treatment. It decides
 by content, never by tool name: JSON goes to the JSON compressor, a log to the log engine, an HTML
-page to the HTML engine, Figma design-context JSX to the JSX compactor, a Figma REST nodes response
-to the node-tree engine, and plain text (code, diffs, test output) is at most windowed. Two tools
+page to the HTML engine, an XML document or SVG to the element-tree engine, Figma design-context JSX
+to the JSX compactor, a Figma REST nodes response to the node-tree engine, and plain text (code, diffs, test output) is at most windowed. Two tools
 come with it: `lookup` answers one question about a page, a command's output or a file without
 loading it whole, and `view` shows a big file or a command's output compactly (and resizes images
 and video). Every original stays on disk behind a recovery handle, so nothing is lost.
@@ -50,7 +50,7 @@ validates a hook's result against the built-in tool's output schema: Bash stays
 
 | Channel | Candidate when | What slim does |
 |---|---|---|
-| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX and logs compressed; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
+| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX, XML, SVG and logs compressed; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
 | Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML or XML; over 16,384 B from a log command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
 | Read | a whole-file read of a `.log`, `.jsonl`, `.ndjson` or `.xml` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
 | WebFetch | result over 16,384 B that is JSON, HTML or XML, or over `SLIM_PLAIN_BYTES` | JSON, JSONL, HTML and XML engines, else a window |
@@ -79,16 +79,20 @@ read windowed from a file instead.
 and Google Merchant feeds, RSS, Figma `get_metadata`, any XML) becomes an element tree, one line per
 element with its attributes and text: five or more same-name siblings fold into one
 `url ×50,000 {loc, lastmod, changefreq, priority}` line followed by three records verbatim (first,
-middle, last; `#N` is the record's position), several shapes each with its count and samples.
-Siblings with an `id` never fold, so a Figma node tree keeps every node id. A sample's text and any
-attribute value over 200 chars is cut to a head and its length. An SVG keeps its markup, ids, groups,
-`<use>` refs, fills and `<text>`; `d` and `points` read `d="(1,204 chars)"`, and comments, `<metadata>`
+middle, last; `#N` is the record's position), several shapes each with its count and samples
+(past 12 shapes a `fields:` line counts every field). Folded siblings with an `id` list every id
+(`ids: P0…P1999`); an id-bearing node that is a bare attribute line or nests further ids never folds,
+so a Figma node tree keeps every node. A text or attribute value over 200 chars is cut to a head and
+its length, except a multi-line text body; an element mixing text with inline elements (a Notion
+page) reads as written, every inline reference in place. An SVG keeps its markup, ids, groups,
+`<use>` refs, fills, styles and `<text>`; `d` and `points` read `d="(1,204 chars)"`, and comments, `<metadata>`
 and editor namespaces (Inkscape, Sodipodi, Sketch, Serif) are dropped. The first line is
 `<<slim-xml>>` with the element and byte counts; the last names `lookup({ path, question })` for one
 record. Over the channel's cap it drops samples (3 → 1 → 0), then folds its deepest level, then is
 stubbed. Admitted on Bash only after a fetch command (`cat assets/icon.svg` stays text), on WebFetch
 by content, on Read for an `.xml` file over 32,768 B (never `.svg`), and on MCP. Liquid with markup
-stays `template`; an HTML fragment (a leading `<div>`, `<section>`, …) stays text.
+stays `template`; an HTML fragment (a leading `<div>`, `<section>`, …) stays text; an HTML or XHTML
+page (`<html>`, `<head>` or `<body>` first, prolog or not) goes to the HTML engine.
 
 **Engine admission on Bash.** JSON and JSONL output is compressed whatever the command. HTML is
 treated as a page only when the command fetches one: `curl`, `wget`, `http`, `https`, `xh` or `lynx`

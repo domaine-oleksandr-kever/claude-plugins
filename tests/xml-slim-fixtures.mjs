@@ -95,7 +95,11 @@ const recordsOf = (src, name) => [...src.matchAll(new RegExp(`<${name}>[\\s\\S]*
     ['icon-snippet.liquid', SNIPPET, 'text', 'template'],
     ['html-fragment', '<div class="card">\n  <p>Hello</p>\n</div>\n', 'text', 'markup'],
     ['html-page', '<!doctype html><html><head><title>x</title></head><body><p>x</p></body></html>', 'html', 'html'],
-    ['xhtml-prolog', '<?xml version="1.0"?>\n<html xmlns="http://www.w3.org/1999/xhtml"><head><title>x</title></head><body/></html>', 'xml', 'xml'],
+    ['xhtml-prolog', '<?xml version="1.0"?>\n<html xmlns="http://www.w3.org/1999/xhtml"><head><title>x</title></head><body/></html>', 'html', 'html'],
+    ['xhtml-doctype', '<?xml version="1.0"?>\n<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">\n<html xmlns="http://www.w3.org/1999/xhtml"><head><title>x</title></head><body><div><p>Paragraph 40</p></div></body></html>', 'html', 'html'],
+    ['html-no-doctype', '<html lang="en"><head><title>x</title></head><body><p>x</p></body></html>', 'html', 'html'],
+    ['head-opener', '<head><title>x</title></head><body><p>x</p></body>', 'html', 'html'],
+    ['body-opener', '<body class="page"><main><p>x</p></main></body>', 'html', 'html'],
     ['fenced', `Feed fetched:\n\`\`\`xml\n${RSS}\`\`\`\n`, 'xml', 'fence'],
     ['own-output', xml(RSS).text, 'text', 'prose'],
   ];
@@ -134,7 +138,7 @@ const recordsOf = (src, name) => [...src.matchAll(new RegExp(`<${name}>[\\s\\S]*
 {
   const r = xml(RSS);
   check('XC-rss-fold', r.text.includes('  item ×40 {title, link, guid, pubDate, author, category, description}'), r.text.slice(0, 600));
-  check('XC-rss-cdata-elided', samplesOf(r.text).every(([, rec]) => /<description><p>Paragraph 1 .*… \(\d{3} chars\)<\/description>/.test(rec)), r.text);
+  check('XC-rss-cdata-elided', samplesOf(r.text).every(([, rec]) => /<description><!\[CDATA\[<p>Paragraph 1 .*… \(\d{3} chars\)<\/description>/.test(rec)), r.text);
   check('XC-rss-attrs-kept', r.text.includes('atom:link href="https://northwind.example/blogs/journal.atom" rel="self" type="application/rss+xml"') && r.text.includes('<guid isPermaLink="false">northwind-journal-9000</guid>'), r.text);
 }
 {
@@ -159,14 +163,65 @@ const recordsOf = (src, name) => [...src.matchAll(new RegExp(`<${name}>[\\s\\S]*
   check('XC-figma-no-fold', !/ ×\d/.test(r.text), r.text.slice(0, 300));
 }
 {
-  // An element outside a fold keeps its text whole: a prose answer in a tag gains nothing.
-  const prose = `<answer>\n${'The order ships in two parcels; the second leaves the warehouse on Friday. '.repeat(60)}\n</answer>\n`;
+  const items = Array.from({ length: 6 }, (_, i) => `<item><title>Post ${i}</title><description><![CDATA[<p>Hello & <b>bye</b> ${i}</p>]]></description></item>`);
+  const r = xml(`<?xml version="1.0"?>\n<rss><channel><title>t</title>\n${items.join('\n')}\n</channel></rss>\n`);
+  const s = samplesOf(r.text);
+  check('XC-cdata-samples-verbatim', s.length === 3 && s.every(([k, rec]) => rec === items[k - 1]), JSON.stringify(s));
+}
+{
+  const ps = Array.from({ length: 6 }, (_, i) => `<p>Paragraph ${i} says <strong>important ${i}</strong> and then continues.</p>`);
+  const s = samplesOf(xml(`<?xml version="1.0"?>\n<doc>\n${ps.join('\n')}\n</doc>\n`).text);
+  check('XC-mixed-samples-in-order', s.length === 3 && s.every(([k, rec]) => rec === ps[k - 1]), JSON.stringify(s));
+}
+{
+  // A Notion-style page: prose with inline references is written as it reads; no reference is cut out.
+  const tasks = Array.from({ length: 30 }, (_, i) => `- Task ${i} owner <mention-user url="user://u${i}"/> spec <mention-page url="https://www.notion.so/page-${i}"/>`);
+  const page = `<page url="https://www.notion.so/tasks">\n<properties>{"title":"Tasks"}</properties>\n<content>\n# Tasks\n${tasks.join('\n')}\n</content>\n</page>\n`;
+  const r = xml(page);
+  check('XC-mixed-inline-refs', tasks.every((t) => r.text.includes(t)), r.text.slice(0, 600));
+}
+{
+  const blob = `<?xml version="1.0"?><doc><title>t</title><blob>${'QUJDRA'.repeat(14000)}</blob><a>x</a></doc>`;
+  const r = xml(blob);
+  check('XC-long-text-elided', r.decision === 'compressed' && r.text.includes('blob: QUJDRA') && r.text.includes('… (84,000 chars)') && bytes(r.text) < 1024, `${r.decision} ${bytes(r.text)}`);
+  const desc = 'A long channel description that goes on about the studio, its makers and its materials. '.repeat(55);
+  const rss = xml(`<?xml version="1.0"?><rss><channel><title>t</title><description>${desc}</description>${'<item><title>x</title></item>'.repeat(3)}</channel></rss>`);
+  check('XC-channel-description-elided', rss.decision === 'compressed' && rss.text.includes(`description: ${desc.slice(0, 60)}… (`), rss.text.slice(0, 400));
+  // A multi-line text body (prose, markdown) is content the model reads: kept whole, so it gains nothing.
+  const prose = `<answer>\n${'The order ships in two parcels; the second leaves the warehouse on Friday.\n'.repeat(60)}</answer>\n`;
   eq('XC-prose-kept', [xml(prose).decision, xml(prose).reason, xml(prose).format], ['passthrough', 'no-gain', 'xml']);
   eq('XC-tiny', [xml('<a>x</a>', { engine: 'xml' }).decision, xml('<a>x</a>', { engine: 'xml' }).reason], ['passthrough', 'no-gain']);
   eq('XC-no-element', xml('just text', { engine: 'xml' }).reason, 'no-gain');
   const fenced = xml(`Feed fetched:\n\`\`\`xml\n${RSS}\`\`\`\nDone.`);
   check('XC-fence', fenced.decision === 'compressed' && fenced.text.startsWith('<<slim-xml>> ') && fenced.text.includes('\n\nFeed fetched:\n\n') && fenced.text.endsWith('\n\nDone.'), fenced.text.slice(0, 200));
   check('XC-already-slim', emit.alreadySlim([xml(RSS).text], bytes(xml(RSS).text), 33968, 's'), 'the xml mark');
+}
+
+{
+  const products = Array.from({ length: 2000 }, (_, i) => `  <product id="P${i}"><name>Linen shirt ${i}</name><price>${(20 + i % 50).toFixed(2)}</price><url>https://northwind.example/products/p-${i}</url></product>`);
+  const cat = `<?xml version="1.0"?>\n<catalog>\n${products.join('\n')}\n</catalog>\n`;
+  const r = xml(cat);
+  check('XC-id-feed-folds', r.text.includes('  product ×2,000 {@id, name, price, url}\n    ids: P0…P1999\n') && bytes(r.text) < 2048, r.text.slice(0, 500));
+  const fit = xml(cat, { targetBytes: 4000 });
+  eq('XC-id-feed-fits', [fit.decision, bytes(fit.text) <= 4000, fit.text.includes('ids: P0…P1999')], ['compressed', true, true]);
+  eq('XC-id-list-runs', xml(`<l>${['a1', 'a2', 'a3', 'b', 'a5', 'a7', 'a8', 'a9', 'a10'].map((id) => `<e id="${id}"><v>${'a value long enough that a fold of the list pays for its own lines. '.repeat(2)}</v></e>`).join('')}</l>`, { engine: 'xml' }).text.split('\n')[3], '    ids: a1…a3, b, a5, a7…a10');
+}
+{
+  const OPT = ['g:sale_price', 'g:color', 'g:size', 'g:gtin', 'g:mpn', 'g:brand', 'g:material', 'g:gender'];
+  const items = Array.from({ length: 1000 }, (_, i) => `<item><g:id>${i}</g:id><title>Item ${i}</title>${OPT.filter((_, b) => (i >> b) & 1).map((f) => `<${f}>v</${f}>`).join('')}${i === 999 ? '<g:rare_field>r</g:rare_field>' : ''}</item>`);
+  const r = xml(`<?xml version="1.0"?>\n<rss><channel>\n${items.join('\n')}\n</channel></rss>\n`);
+  const fields = /^\s+fields: (.*)$/m.exec(r.text);
+  check('XC-shapes-union', r.text.includes('item ×1,000 in 257 shapes') && !!fields && fields[1].startsWith('g:id ×1,000, title ×1,000, ') && OPT.every((f) => new RegExp(`${f} ×\\d{3}`).test(fields[1])) && fields[1].includes('g:rare_field ×1'), (fields || [r.text.slice(0, 300)])[0]);
+  const recs = Array.from({ length: 40 }, (_, i) => (i % 2 ? `<rec x="${i}" y="2"><a>${i}</a><b>2</b></rec>` : `<rec y="2" x="${i}"><b>2</b><a>${i}</a></rec>`));
+  const o = xml(`<?xml version="1.0"?><l>${recs.join('')}</l>`).text;
+  check('XC-shape-order-insensitive', o.includes('rec ×40 {@y, @x, b, a}'), o);
+}
+{
+  const fills = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#00ffff', '#ff00ff'];
+  const style = (f) => `font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;stroke:none;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1;fill:${f}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><style>.a{fill:#111111}${'.b{stroke:#222222;stroke-width:2px}'.repeat(8)}.brand{fill:#C8102E}</style>${fills.map((f) => `<path style="${style(f)}" d="M0 0 ${'L1 1 '.repeat(300)}"/>`).join('')}</svg>`;
+  const r = xml(svg);
+  check('XC-svg-fills-kept', r.decision === 'compressed' && fills.every((f) => r.text.includes(`fill:${f}`)) && r.text.includes('.brand{fill:#C8102E}') && !/identical leaves folded/.test(r.text), r.text.slice(0, 600));
 }
 
 // XT — targetBytes: samples 3 → 1 → 0, then depth
@@ -227,6 +282,9 @@ const readRec = (filePath, content) => ({ type: 'text', file: { filePath, conten
   const a = core(BASH(SMALL_MAP), { channel: 'bash', tool: 'Bash', tool_input: { command: 'curl -s https://northwind.example/sitemap.xml' } });
   eq('XD-bash-fetch', [a.decision, a.record.engine], ['compressed', 'xml']);
   check('XD-bash-fetch-shape', String((a.result || {}).stdout).startsWith('<<slim-xml>> xml <urlset> · 25,001 elements') && /<<full=\S+\.txt original_result>>$/.test(a.result.stdout), String((a.result || {}).stdout).slice(0, 120));
+  const page = `<html lang="en"><head><title>Shop</title></head><body>${Array.from({ length: 120 }, (_, i) => `<div class="card"><a href="/products/p-${i}">Product ${i}</a><p>A short line of copy about product ${i}.</p></div>`).join('\n')}</body></html>`;
+  const h = core(BASH(page), { channel: 'bash', tool: 'Bash', tool_input: { command: 'curl -s https://shop.example/' } });
+  eq('XD-bash-fetch-html-no-doctype', [h.decision, h.record.engine], ['compressed', 'html']);
   const c = core(BASH(SVG), { channel: 'bash', tool: 'Bash', tool_input: { command: 'cat assets/hero.svg' } });
   eq('XD-bash-cat-svg-text', [c.decision, c.record.engine], ['compressed', 'text']);
 }

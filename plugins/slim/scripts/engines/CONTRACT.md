@@ -63,9 +63,10 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
    (jest `PASS`/`FAIL` heads and `Tests:` totals, TAP `ok n`, `N passing/passed/failed`, pytest `===
    … passed … ===`, go `--- PASS`/`ok  pkg 0.4s`, rspec `N examples, N failures`, three or more ✓/✗
    lines), `template` (`{%`, `{{`, `<%`, `<?php`), `code` (a `#!` shebang), `markup` (an HTML
-   fragment: a leading HTML element such as `<div>` or `<section>`, no `<?xml` prolog).
+   fragment: a leading HTML element such as `<div>` or `<section>`, no `<?xml` prolog, no HTML page).
 5a. **xml** — `<?xml`, or a leading element that is neither HTML nor an HTML page (`<head`/`<body`
-   in the first 2048 chars); reason `svg` when the root element is `<svg`, else `xml`.
+   in the first 2048 chars); never a root `<html>` (XHTML, prolog or not, is html); reason `svg` when
+   the root element is `<svg`, else `xml`.
 6. **fence** — one dominant markdown fence (≥ 80 % of the bytes, ≤ 3 preamble and trailer lines): the
    body's engine, reason `fence`.
 7. **jsonl** — two or more lines, every non-blank line a JSON object or array.
@@ -154,16 +155,23 @@ folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` p
 
 **xml** — an XML document as an element tree, one line per element (`name attr="v"…: text`, nesting
 by indent; a wrapper with one child element chains on with ` › `). Five or more same-name siblings
-without an `id`/`xml:id` fold into `name ×N {fields}` — `@attr`, child names in first-seen order, `+`
-for a child repeated inside a record, `#text` — followed by three records as compact markup (first,
-middle, last; `#N` = the record's 1-based position among those siblings); siblings of several shapes
-list each shape `{fields} ×n`, most frequent first (at most 12, then `… N more shapes`), with its own
-samples. An element outside a fold keeps its text whole; a sample's text and any attribute value
-over 200 chars become their first 60 chars and `… (N chars)` (an `http(s)` URL under 2,048 chars is
-kept); a sample stops at 1,500 chars. An SVG (root `<svg`) keeps its markup one element per line —
-attributes, ids, `<use>` refs, `<text>` — with `d`/`points` over 40 chars as `d="(N chars)"`, drops
-comments, `<metadata>` and the `inkscape:`/`sodipodi:`/`sketch:`/`serif:` elements and attributes,
-and folds five or more adjacent identical leaves without an id into one line with `×N`. The first
+fold into `name ×N {fields}` — `@attr`, child names in first-seen order, `+` for a child repeated
+inside a record, `#text` — followed by three records as compact markup in document order (first,
+middle, last; `#N` = the record's 1-based position among those siblings; CDATA keeps its wrapper);
+a shape is the set of attribute and child names, order aside; siblings of several shapes list each
+shape `{fields} ×n`, most frequent first (at most 12, then `… N more shapes` and one `fields:` line
+with every field and its record count), with its own samples. Folded siblings carrying an
+`id`/`xml:id` list every id in input order on an `ids:` line (a run of consecutive numbered ids as
+`P0…P1999`); a sibling with an id that has no child element or nests further ids (a Figma node)
+never folds. A text value and an attribute value over 200 chars become their first 60 chars and
+`… (N chars)` (an `http(s)` URL under 2,048 chars is kept), except a multi-line text body of an
+element outside a fold; an element with text beside child elements is written inline in document
+order, whole, its children never folded; a sample stops at 1,500 chars. An SVG (root `<svg`) keeps
+its markup one element per line — attributes, ids, `<use>` refs, `<text>`, `style`/`fill`/`stroke`/
+`class` and `<style>` whole — with `d`/`points` over 40 chars as `d="(N chars)"`, drops comments,
+`<metadata>` and the `inkscape:`/`sodipodi:`/`sketch:`/`serif:` elements and attributes, and folds
+five or more adjacent leaves without an id whose attributes are equal but for elided geometry into
+one line with `×N`. The first
 line is `<<slim-xml>> xml <root> · N elements · B B · …` (or `svg · …` with the viewBox and what was
 elided), the last names `lookup({ path, question })`. With `targetBytes`: samples 3 → 1 → 0 (stage
 `samples`), then the deepest level folds into its parent's line (`… N elements deeper folded`, stage

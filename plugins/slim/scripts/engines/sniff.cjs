@@ -75,17 +75,21 @@ function guard(text) {
   if (TEMPLATE.test(head)) return 'template';
   const t = head.trimStart();
   if (t.startsWith('#!')) return 'code';
-  if (!t.startsWith('<?xml') && XML_START.test(t) && HTML_TAGS.has(/^<([\w:.-]+)/.exec(t)[1].toLowerCase())) return 'markup';
+  if (!t.startsWith('<?xml') && XML_START.test(t) && !isHtml(head) && HTML_TAGS.has(/^<([\w:.-]+)/.exec(t)[1].toLowerCase())) return 'markup';
   return null;
 }
 
-// An XML document or an SVG, after the guards: the prolog, or a leading element that opens no HTML page.
+const ROOT_EL = /^(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*<([a-z_][\w:.-]*)/i;
+
+// An XML document or an SVG, after the guards: the prolog, or a leading element that opens no HTML
+// page. An XHTML page (root `<html>`, prolog or not) is the html engine's.
 function xmlOf(text) {
   const head = text.slice(0, SCAN);
   if (!XML_START.test(head)) return null;
   const t = head.trimStart();
-  if (!t.startsWith('<?xml') && isHtml(head)) return null;
-  return { engine: 'xml', confidence: 0.9, reason: /^(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*|<!DOCTYPE[^>]*>\s*)*<svg[\s>]/i.test(t) ? 'svg' : 'xml' };
+  const root = (ROOT_EL.exec(t) || [])[1];
+  if ((root && root.toLowerCase() === 'html') || (!t.startsWith('<?xml') && isHtml(head))) return null;
+  return { engine: 'xml', confidence: 0.9, reason: root && root.toLowerCase() === 'svg' ? 'svg' : 'xml' };
 }
 
 // Source code by its line openings. Checked after the fence and JSONL rules: a JSON line opens with a

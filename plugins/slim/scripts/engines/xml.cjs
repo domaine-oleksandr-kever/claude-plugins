@@ -9,14 +9,18 @@
  *   → one record: lookup({ path: <the full= file below>, question: "…" })
  * Five or more same-name siblings fold into one `name ×N {fields}` line (`@attr`, child names, `+` for a
  * child repeated inside a record, `#text`); siblings of several shapes list each shape with its count
- * and its own samples. Siblings carrying an `id` / `xml:id` are addressable and never fold (a Figma
- * node tree keeps every node). An element outside a fold keeps its text whole; a sample's text and
- * any attribute value over 200 chars are elided to a head and a length (a URL under 2,048 chars is kept).
+ * and its own samples, and past 12 shapes a `fields:` line counts every field. Folded siblings with an
+ * `id` / `xml:id` list every id on an `ids:` line; an id-bearing element that is a bare attribute line
+ * or nests further ids is a node the model addresses and never folds (a Figma node tree keeps every
+ * node). A text value or attribute value over 200 chars is elided to a head and a length (a URL under
+ * 2,048 chars is kept), except a multi-line text body in the tree; an element mixing text with inline
+ * elements is written as it reads, in document order, its children never folded.
  *
  * SVG (root `<svg`): the markup one element per line, nesting by indent: viewBox, ids, groups,
- * `<use>` refs, fills, `<text>` kept; `d` / `points` over 40 chars → `d="(1,204 chars)"`; comments,
- * `<metadata>` and editor namespaces (inkscape, sodipodi, sketch, serif) dropped; five or more adjacent
- * identical leaves without an id fold to one line with `×N`.
+ * `<use>` refs, fills, styles, `<text>` kept; `d` / `points` over 40 chars → `d="(1,204 chars)"`;
+ * comments, `<metadata>` and editor namespaces (inkscape, sodipodi, sketch, serif) dropped; five or
+ * more adjacent leaves without an id whose attributes are equal but for elided geometry fold to one
+ * line with `×N`.
  *
  * Fit (targetBytes): samples 3 → 1 → 0, then the deepest level folds into its parent's line
  * (`… N elements deeper folded`), one level per pass down to the root's children. Pure.
@@ -37,6 +41,7 @@ const DEADLINE_EVERY = 512;
 const EDITOR = /^(?:inkscape|sodipodi|sketch|serif):|^xmlns:(?:inkscape|sodipodi|sketch|serif)$/;
 const GEOMETRY = new Set(['d', 'points']);
 const ID_ATTRS = ['id', 'xml:id'];
+const PAINT = new Set(['style', 'fill', 'stroke', 'class']);
 
 // XML forbids a raw `<` inside an attribute value, so a quoted value stops at the next `<`: an unclosed
 // quote costs a scan to the next tag, never to the end of the text.
@@ -52,10 +57,19 @@ function attrsOf(raw) {
   return out;
 }
 
+function addText(el, t) {
+  el.text += t;
+  el.nodes.push(t);
+  if (!t.trim()) return;
+  el.worded = true;
+  if (el.kids.length) el.mixed = true;
+}
+
 // → { top: [elements], count, comments } or null once the deadline passed. Values stay raw (entities
-// as written), so a sample is the input's own text.
+// as written, CDATA with its wrapper), so a sample is the input's own text. `nodes` holds text and
+// child elements in document order; `mixed` marks non-blank text beside a child element.
 function parse(src, deadline) {
-  const root = { name: '', attrs: [], kids: [], text: '', depth: -1 };
+  const root = { name: '', attrs: [], kids: [], nodes: [], text: '', depth: -1 };
   const stack = [root];
   let count = 0;
   let comments = 0;
@@ -65,7 +79,7 @@ function parse(src, deadline) {
     if (deadline != null && ++n % DEADLINE_EVERY === 0 && Date.now() > deadline) return null;
     const tok = m[0];
     const top = stack[stack.length - 1];
-    if (m[1] !== undefined) { top.text += m[1]; continue; }
+    if (m[1] !== undefined) { if (stack.length > 1) addText(top, tok); continue; }
     if (m[3]) {
       const name = m[3];
       if (m[2] === '/') {
@@ -74,15 +88,17 @@ function parse(src, deadline) {
         if (at > 0) stack.length = at;
         continue;
       }
-      const el = { name, attrs: attrsOf(m[4]), kids: [], text: '', depth: stack.length - 1 };
+      const el = { name, attrs: attrsOf(m[4]), kids: [], nodes: [], text: '', depth: stack.length - 1 };
+      if (top.worded) top.mixed = true;
       top.kids.push(el);
+      top.nodes.push(el);
       count++;
       if (!/\/\s*$/.test(m[4])) stack.push(el);
       continue;
     }
     if (tok.startsWith('<!--')) { comments++; continue; }
     if (tok.length > 1 && tok[0] === '<' && (tok[1] === '!' || tok[1] === '?')) continue;
-    if (stack.length > 1) top.text += tok;
+    if (stack.length > 1) addText(top, tok);
   }
   return { top: root.kids, count, comments };
 }
@@ -93,34 +109,46 @@ function clip(v) {
   if (v.length <= TEXT_MAX || (v.length < URL_MAX && URL.test(v))) return v;
   return `${v.slice(0, 60)}… (${commas(v.length)} chars)`;
 }
-// A record's or an SVG element's text; the tree itself keeps an element's text whole.
 const textOf = (el) => clip(flat(el.text));
 const attrText = (attrs) => attrs.map(([k, v]) => ` ${k}="${clip(v)}"`).join('');
 const idOf = (el) => { for (const [k, v] of el.attrs) if (ID_ATTRS.includes(k)) return v; return null; };
+const idBelow = (el) => el.kids.some((k) => idOf(k) !== null || idBelow(k));
+// A node the model addresses by id: a bare attribute line, or a node that nests further nodes.
+const addressable = (el) => idOf(el) !== null && (!el.kids.length || idBelow(el));
 const descendants = (el) => { let n = 0; for (const k of el.kids) n += 1 + descendants(k); return n; };
 const deepest = (el) => { let d = el.depth; for (const k of el.kids) d = Math.max(d, deepest(k)); return d; };
 
-// A record as one line of compact markup, cut at SAMPLE_MAX chars.
-function serialize(el) {
+// An element as one line of markup in document order, whitespace runs collapsed, cut at SAMPLE_MAX
+// chars; `whole` (an inline-mixed element in the tree) keeps its own text runs as written and no cap.
+function serialize(el, whole) {
   let out = '';
-  const walk = (e) => {
-    if (out.length > SAMPLE_MAX) return;
-    const t = textOf(e);
+  const walk = (e, raw) => {
+    if (!whole && out.length > SAMPLE_MAX) return;
     out += `<${e.name}${attrText(e.attrs)}`;
-    if (!t && !e.kids.length) { out += '/>'; return; }
-    out += `>${t}`;
-    for (const k of e.kids) walk(k);
+    if (!e.nodes.some((n) => typeof n !== 'string' || n.trim())) { out += '/>'; return; }
+    out += '>';
+    e.nodes.forEach((n, i) => {
+      if (typeof n !== 'string') { walk(n, false); return; }
+      if (raw) { out += n; return; }
+      if (!n.trim()) return;
+      let t = n.replace(/\s+/g, ' ');
+      if (i === 0) t = t.trimStart();
+      if (i === e.nodes.length - 1) t = t.trimEnd();
+      out += clip(t);
+    });
     out += `</${e.name}>`;
   };
-  walk(el);
-  return out.length > SAMPLE_MAX ? `${out.slice(0, SAMPLE_MAX)}… (+${commas(out.length - SAMPLE_MAX)} chars)` : out;
+  walk(el, whole);
+  return !whole && out.length > SAMPLE_MAX ? `${out.slice(0, SAMPLE_MAX)}… (+${commas(out.length - SAMPLE_MAX)} chars)` : out;
 }
 
+// A record's shape: its attribute and child names as a set (order-insensitive key) and in first-seen
+// order (what the fold line shows).
 function shapeOf(el) {
   const seen = new Map();
   for (const k of el.kids) seen.set(k.name, (seen.get(k.name) || 0) + 1);
-  const key = [...el.attrs.map(([k]) => `@${k}`), ...seen.keys(), ...(flat(el.text) ? ['#text'] : [])].join('\u0000');
-  return { key, repeated: [...seen].filter(([, c]) => c > 1).map(([k]) => k) };
+  const fields = [...el.attrs.map(([k]) => `@${k}`), ...seen.keys(), ...(flat(el.text) ? ['#text'] : [])];
+  return { key: [...fields].sort().join('\u0000'), fields, repeated: [...seen].filter(([, c]) => c > 1).map(([k]) => k) };
 }
 
 // Same-name siblings grouped once per parent: { name → members } in first-occurrence order.
@@ -140,7 +168,7 @@ function shapesOf(members) {
   const by = new Map();
   for (const m of members) {
     const s = shapeOf(m);
-    if (!by.has(s.key)) by.set(s.key, { key: s.key, members: [], repeated: new Set() });
+    if (!by.has(s.key)) by.set(s.key, { fields: s.fields, members: [], repeated: new Set() });
     const g = by.get(s.key);
     g.members.push(m);
     for (const r of s.repeated) g.repeated.add(r);
@@ -148,7 +176,27 @@ function shapesOf(members) {
   return [...by.values()].sort((a, b) => b.members.length - a.members.length);
 }
 
-const fieldsOf = (shape) => `{${shape.key.split('\u0000').filter(Boolean).map((f) => (shape.repeated.has(f) ? `${f}+` : f)).join(', ')}}`;
+const fieldsOf = (shape) => `{${shape.fields.map((f) => (shape.repeated.has(f) ? `${f}+` : f)).join(', ')}}`;
+
+// Every field of a record list with the number of records carrying it, most common first.
+function unionOf(members) {
+  const n = new Map();
+  for (const m of members) for (const f of new Set(shapeOf(m).fields)) n.set(f, (n.get(f) || 0) + 1);
+  return [...n].sort((a, b) => b[1] - a[1]).map(([f, c]) => `${f} ×${commas(c)}`).join(', ');
+}
+
+// Ids in input order, a run of consecutive numbered ids (`p7, p8, p9`) written `p7…p9`.
+function idList(ids) {
+  const out = [];
+  for (let i = 0; i < ids.length;) {
+    const m = /^(.*?)(\d{1,15})$/.exec(ids[i]);
+    let j = i + 1;
+    if (m) while (j < ids.length && ids[j] === `${m[1]}${Number(m[2]) + (j - i)}`) j++;
+    out.push(j - i >= 3 ? `${ids[i]}…${ids[j - 1]}` : ids.slice(i, j).join(', '));
+    i = j;
+  }
+  return out.join(', ');
+}
 function pick(n, k) {
   if (k <= 0 || n === 0) return [];
   if (k === 1) return [0];
@@ -165,6 +213,9 @@ function renderXml(top, o, stats) {
     const listed = shapes.slice(0, SHAPES_MAX);
     const one = shapes.length === 1;
     lines.push(one ? `${pad}${name} ×${commas(members.length)} ${fieldsOf(shapes[0])}` : `${pad}${name} ×${commas(members.length)} in ${shapes.length} shapes`);
+    const ids = members.map(idOf).filter((v) => v !== null);
+    if (ids.length) lines.push(`${pad}  ids: ${idList(ids)}`);
+    if (shapes.length > SHAPES_MAX) lines.push(`${pad}  fields: ${unionOf(members)}`);
     for (const s of listed) {
       const p = one ? `${pad}  ` : `${pad}    `;
       if (!one) lines.push(`${pad}  ${fieldsOf(s)} ×${commas(s.members.length)}`);
@@ -178,7 +229,7 @@ function renderXml(top, o, stats) {
   const children = (el, pad) => {
     const groups = groupsOf(el);
     const folds = new Map();
-    for (const [name, members] of groups) folds.set(name, members.length >= FOLD_MIN && members.every((m) => idOf(m) === null));
+    for (const [name, members] of groups) folds.set(name, members.length >= FOLD_MIN && !members.some(addressable));
     for (const k of el.kids) {
       if (!folds.get(k.name)) { render(k, pad); continue; }
       if (folds.get(k.name) === 'done') continue;
@@ -194,7 +245,13 @@ function renderXml(top, o, stats) {
       at = at.kids[0];
       head += ` › ${at.name}${attrText(at.attrs)}`;
     }
-    const t = at.text.trim().replace(/\n/g, `\n${pad}  `);
+    if (at.mixed) {
+      const inner = serialize(at, true).replace(/^<[^>]*>|<\/[^>]*>$/g, '').trim();
+      lines.push(`${pad}${head}: ${inner.replace(/\n/g, `\n${pad}  `)}`);
+      return;
+    }
+    const body = at.text.trim();
+    const t = body.includes('\n') ? body.replace(/\n/g, `\n${pad}  `) : clip(body);
     lines.push(`${pad}${head}${t ? `: ${t}` : ''}`);
     if (!at.kids.length) return;
     if (at.depth < o.depthCap) { children(at, `${pad}  `); return; }
@@ -211,18 +268,20 @@ function renderSvg(top, o, stats) {
   const lines = [];
   const geometry = (k, v) => GEOMETRY.has(k) && v.length > GEOMETRY_MAX;
   const keep = (el) => el.name !== 'metadata' && !EDITOR.test(el.name);
-  const attrs = (el) => el.attrs.filter(([k]) => !EDITOR.test(k)).map(([k, v]) => ` ${k}="${geometry(k, v) ? `(${commas(v.length)} chars)` : clip(v)}"`).join('');
+  const own = (el) => el.attrs.filter(([k]) => !EDITOR.test(k));
+  const attrs = (el) => own(el).map(([k, v]) => ` ${k}="${geometry(k, v) ? `(${commas(v.length)} chars)` : PAINT.has(k) ? v : clip(v)}"`).join('');
   const count = (el) => {
     for (const [k, v] of el.attrs) if (geometry(k, v)) { stats.geometry++; stats.geometryChars += v.length; }
     for (const k of el.kids) if (keep(k)) count(k); else stats.dropped++;
   };
   const line = (el) => {
-    const t = textOf(el);
+    const t = el.name === 'style' ? flat(el.text) : textOf(el);
     const open = `<${el.name}${attrs(el)}`;
     if (el.kids.some(keep)) return `${open}>${t}`;
     return t ? `${open}>${t}</${el.name}>` : `${open}/>`;
   };
   const LEN = /\((?:[\d,]+) chars\)/g;
+  const same = (el) => JSON.stringify([el.name, own(el).map(([k, v]) => [k, geometry(k, v) ? '' : v]), el.text]);
   const render = (el, pad) => {
     lines.push(`${pad}${line(el)}`);
     const kids = el.kids.filter(keep);
@@ -236,10 +295,10 @@ function renderSvg(top, o, stats) {
     for (let i = 0; i < kids.length;) {
       const k = kids[i];
       if (idOf(k) !== null || k.kids.some(keep)) { render(k, `${pad}  `); i++; continue; }
-      const l = line(k);
-      const norm = l.replace(LEN, '(… chars)');
+      const norm = line(k).replace(LEN, '(… chars)');
+      const key = same(k);
       let j = i + 1;
-      while (j < kids.length && idOf(kids[j]) === null && !kids[j].kids.some(keep) && line(kids[j]).replace(LEN, '(… chars)') === norm) j++;
+      while (j < kids.length && idOf(kids[j]) === null && !kids[j].kids.some(keep) && same(kids[j]) === key) j++;
       if (j - i >= FOLD_MIN) { lines.push(`${pad}  ${norm} ×${j - i}`); stats.folded += j - i; }
       else for (let x = i; x < j; x++) lines.push(`${pad}  ${line(kids[x])}`);
       i = j;
