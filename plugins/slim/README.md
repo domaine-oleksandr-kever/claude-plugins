@@ -76,17 +76,17 @@ does not fit goes the JSON route (fit, else stub). The view tool never folds a t
 read windowed from a file instead.
 
 **Delimited tables.** A CSV, TSV or `;`-separated table — 20 or more records, one delimiter splitting
-≥ 95 % of them into the header's width (3 columns or more), a header with no number, date or time in
-it — becomes a profile: a `<<slim-csv>>` line with rows × cols, the delimiter and the size; one line
+≥ 95 % of them into the header's width (3 columns or more), a header with no number in it, not
+opening like a log line (a date, time or level) and no cell typed like its column's values — becomes a profile: a `<<slim-csv>>` line with rows × cols, the delimiter and the size; one line
 per column with its type (number, integer, date, bool, category, string), min and max as written,
 nulls, distinct count, and either the values of a category or bool with their counts or three
-samples; then a markdown table of the header, rows 1–3 and three sampled rows with their data-row
+samples (whole up to 160 chars); then a markdown table of the header, rows 1–3 and three sampled rows with their data-row
 numbers, cells as written (a cell over 160 chars is clipped with its length). Samples and sampled
 rows are picked by a generator seeded with the content hash, so a rerun shows the same ones. A
 `;` file reads `1.299,00` as a number. Over the channel's egress cap the table rows go first (3,
 then none), then the samples (one per column); still over → stub. It runs on Bash whatever the
 command, on WebFetch, on a Read of a `.csv` / `.tsv` file and an @-mentioned one, and on MCP text.
-For one row or a filter the footer names `lookup({ path, question })` on the spill.
+For a row, a column or a filter the footer names `lookup({ path, question })` on the original.
 
 **Engine admission on Bash.** JSON, JSONL and delimited-table output is compressed whatever the command. HTML is
 treated as a page only when the command fetches one: `curl`, `wget`, `http`, `https`, `xh` or `lynx`
@@ -636,7 +636,8 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
 - **Images, PDFs and binary output** pass through the hook channels untouched; images and video are
   resized only when asked through `view { path }` (see Media).
 - **Headerless or short tables, and tables pasted in a prompt.** A table whose first row holds a
-  number, date or time, or one of fewer than 20 records, is plain text; the prompt channel's spans
+  number, opens with a date, time or log level, or has a cell typed like its column, or one of fewer
+  than 20 records, is plain text; the prompt channel's spans
   are JSON, JSONL, HTML and logs. A `.csv` under 32 KB is shown as the host read it.
 - **A `.json` file the host showed whole.** A Read under the host's token cap is left as is. Ask a
   question about it with `lookup({ path, question })`, or narrow it with `view({ path, jq })`.

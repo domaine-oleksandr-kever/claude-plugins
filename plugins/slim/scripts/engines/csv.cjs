@@ -19,8 +19,6 @@ const SCAN = 65536;
 const MIN_RECORDS = 20;
 const CELL_MAX = 160;
 const CELL_KEEP = 120;
-const SAMPLE_MAX = 48;
-const SAMPLE_KEEP = 40;
 const CATEGORY_MAX = 50;
 // [rows shown, samples per column], tried in order until the text fits targetBytes.
 const PLANS = [[6, 3], [3, 3], [0, 3], [0, 1]];
@@ -32,13 +30,15 @@ const LEAD0 = /^[+-]?0\d/;
 const DOT = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$|^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/;
 const COMMA = /^[+-]?\d+,\d+$|^[+-]?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/;
 const DATE = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
-// A cell no header holds: a number, or a leading date or time (a log line's timestamp).
-const HEADER_DATA = /^\s*(?:[+-]?[\d.,]+\s*$|\[?\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b|\[?\d{1,2}:\d{2}\b)/;
+const NUMBER_CELL = /^\s*[+-]?[\d.,]+\s*$/;
+// How a log line opens: a date (ISO, compact or with a `T`), a time, or a level.
+const LOG_START = /^\s*\[?(?:\d{4}(?:[-/.]\d{1,2}[-/.]\d{1,2}|\d{4})(?:[T ]|\b)|\d{1,2}:\d{2}\b|(?:TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL)\b)/;
 const fromDot = (v) => Number(v.replace(/,/g, ''));
 const fromComma = (v) => Number(v.replace(/\./g, '').replace(',', '.'));
 
-// RFC 4180 records: a field opening with `"` may hold the delimiter, `""` and line breaks.
-function parse(text, d) {
+// RFC 4180 records: a field opening with `"` may hold the delimiter, `""` and line breaks. Text after a
+// closing quote is kept in the field; `strict` returns null instead (a sign of the wrong delimiter).
+function parse(text, d, strict) {
   const rows = [];
   let row = [];
   const n = text.length;
@@ -58,6 +58,7 @@ function parse(text, d) {
         break;
       }
       const e = end(j);
+      if (strict && e > j) return null;
       v += text.slice(j, e);
       i = e;
     } else {
@@ -80,27 +81,36 @@ function parse(text, d) {
   return rows.filter((r) => r.length > 1 || r[0].trim() !== '');
 }
 
-const firstLine = (s) => { const k = s.indexOf('\n'); return k === -1 ? s : s.slice(0, k); };
-const countOf = (s, ch) => { let c = 0; for (let i = s.indexOf(ch); i !== -1; i = s.indexOf(ch, i + 1)) c++; return c; };
+// A header names its columns: no cell is a number, the row does not open like a log line, and no cell
+// has the type its column's values share (the csv.Sniffer has-header test).
+function isHeader(recs, d) {
+  const head = recs[0];
+  if (LOG_START.test(head[0]) || head.some((c) => NUMBER_CELL.test(c))) return false;
+  return head.every((h, i) => {
+    const vals = [...new Set(recs.slice(1).map((r) => (i < r.length ? r[i] : '')).filter((v) => !NULLISH.test(v.trim())))];
+    const t = vals.length && typeOf(vals, d);
+    const own = t && typeOf([h], d);
+    return !own || own.type !== t.type;
+  });
+}
 
 /**
- * The table shape of `text`, or null: `{ delim, width }` for the delimiter (`,`, tab, `;`) that splits
- * at least `min` records of the first 64 KB into the header's width (≥ 3) on ≥ 95 % of them, the header
- * holding no number and no leading date or time. The widest such delimiter wins.
+ * The table shape of `text`, or null: `{ delim, width }` for the delimiter (`,`, tab, `;`) that parses
+ * at least `min` records of the first 64 KB with no text after a closing quote and splits ≥ 95 % of them
+ * into the width (≥ 3) of a row that `isHeader`. The widest such delimiter wins.
  */
 function detect(text, min = MIN_RECORDS) {
   const cut = text.length > SCAN;
   const head = cut ? text.slice(0, SCAN) : text;
-  const line = firstLine(head);
   let best = null;
   for (const d of DELIMS) {
-    if (countOf(line, d) < 2) continue;
-    let recs = parse(head, d);
+    let recs = parse(head, d, true);
+    if (!recs) continue;
     if (cut) recs = recs.slice(0, -1);
     if (recs.length < min) continue;
     const width = recs[0].length;
-    if (width < 3 || recs[0].some((c) => HEADER_DATA.test(c))) continue;
-    if (recs.filter((r) => r.length === width).length < recs.length * 0.95) continue;
+    if (width < 3 || recs.filter((r) => r.length === width).length < recs.length * 0.95) continue;
+    if (!isHeader(recs, d)) continue;
     if (!best || width > best.width) best = { delim: d, width };
   }
   return best;
@@ -125,12 +135,9 @@ function draw(rand, k, from, to) {
   return [...got];
 }
 
-const escapeCtl = (v) => v.replace(/\r?\n/g, '\\n').replace(/\t/g, '\\t');
-const clipSample = (v) => { const s = escapeCtl(v); return s.length > SAMPLE_MAX ? `${s.slice(0, SAMPLE_KEEP)}…` : s; };
-const cell = (v) => {
-  const s = v.length > CELL_MAX ? `${v.slice(0, CELL_KEEP)}… [+${commas(v.length - CELL_KEEP)} chars]` : v;
-  return s.replace(/\r?\n/g, '<br>').replace(/\|/g, '\\|');
-};
+const clip = (v) => (v.length > CELL_MAX ? `${v.slice(0, CELL_KEEP)}… [+${commas(v.length - CELL_KEEP)} chars]` : v);
+const sample = (v) => clip(v).replace(/\r?\n/g, '\\n').replace(/\t/g, '\\t');
+const cell = (v) => clip(v).replace(/\r?\n/g, '<br>').replace(/\|/g, '\\|');
 const sizeOf = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`);
 
 // The type of a column from its distinct non-null values: bool, integer, number, date, or null (text).
@@ -176,12 +183,12 @@ function profileColumn(name, rows, idx, delim, rand) {
 }
 
 function columnLine(c, pad, samples) {
-  const bits = [c.name.padEnd(pad), c.type];
-  if (c.min !== undefined) bits.push(`min ${clipSample(c.min.trim())} max ${clipSample(c.max.trim())}`);
+  const bits = [sample(c.name).padEnd(pad), c.type];
+  if (c.min !== undefined) bits.push(`min ${sample(c.min.trim())} max ${sample(c.max.trim())}`);
   bits.push(`nulls ${commas(c.nulls)}`);
   if (c.type !== 'empty') bits.push(`distinct ${commas(c.distinct)}`);
-  if (c.listed) bits.push(c.listed.map(([v, n]) => `${clipSample(v)} ×${commas(n)}`).join(' · '));
-  if (c.samples) bits.push(`e.g. ${c.samples.slice(0, samples).map(clipSample).join(' · ')}`);
+  if (c.listed) bits.push(c.listed.map(([v, n]) => `${sample(v)} ×${commas(n)}`).join(' · '));
+  if (c.samples) bits.push(`e.g. ${c.samples.slice(0, samples).map(sample).join(' · ')}`);
   return bits.join('  ');
 }
 
@@ -198,7 +205,7 @@ function tableLines(header, rows, picks) {
 }
 
 function render(t, shown, samples) {
-  const names = t.cols.map((c) => c.name);
+  const names = t.cols.map((c) => sample(c.name));
   const pad = Math.min(24, Math.max(...names.map((n) => n.length)));
   const n = t.rows.length;
   const picks = shown >= 6 ? t.picks : t.picks.slice(0, Math.min(shown, 3));
@@ -212,7 +219,7 @@ function render(t, shown, samples) {
     const label = picks.length > 3 ? 'rows 1–3 and 3 sampled' : `rows 1–${picks.length}`;
     out.push('', `${label} (# = data row):`, ...tableLines(t.header, t.rows, picks));
   }
-  out.push('', 'next: a row or a filter → lookup({ path: <the full= file below>, question }) · a column or a row range → Read that file windowed (offset, limit)');
+  out.push('', 'next: a row, a column or a filter → lookup({ path: <the original: its full= or original: path, or the file you viewed>, question })');
   return out.join('\n');
 }
 

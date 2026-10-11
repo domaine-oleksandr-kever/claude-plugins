@@ -1496,6 +1496,14 @@ printf 'SIPSIMG' > "$last"
     tsv.split('\n').map((l, i) => `${String(i + 1).padStart(6)}→${l}`).join('\n');
   const a = call('Ccsv7', T, chEnv(T, 'attachment', 'Attachment', { type: 'file', origin: 'engine', shape: 'numbered', path: fp }, { text: framed }));
   eq('Ccsv7-attachment', [a.decision, a.record.engine], ['compressed', 'csv']);
+  // The view reply has no full= handle: the footer names the file the model viewed or the original: line.
+  old(fp);
+  const view = (req) => JSON.parse(spawn(T, JSON.stringify({ v: 1, root: T, cwd: T, session_id: 's1', ...req }), { args: ['--view'] }).stdout);
+  const footer = 'lookup({ path: <the original: its full= or original: path, or the file you viewed>, question })';
+  const vp = view({ path: fp });
+  eq('Ccsv8-view-path', [vp.decision, vp.engine, vp.text.includes('<<full='), vp.text.trimEnd().endsWith(footer)], ['compressed', 'csv', false, true]);
+  const vc = view({ text: tsv, command: 'cat stock.tsv' });
+  check('Ccsv9-view-command-original', vc.engine === 'csv' && vc.text.trimEnd().endsWith(footer) && !!vc.original && readFileSync(vc.original, 'utf8') === tsv, String(vc.original));
 }
 
 // S13 last: every line any row above wrote.

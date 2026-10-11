@@ -68,9 +68,10 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
    body's engine, reason `fence`.
 7. **jsonl** — two or more lines, every non-blank line a JSON object or array.
    Then **csv** — a delimited table in the first 64 KB: for `,`, tab or `;`, at least 20 records (quoted
-   fields may hold the delimiter, `""` and line breaks) of which ≥ 95 % have the header's width, that
-   width ≥ 3, and no header cell a number or starting with a date or time (so a log line with a
-   millisecond comma is not a header). The widest such delimiter wins; reason `csv`.
+   fields may hold the delimiter, `""` and line breaks; text after a closing quote rules the delimiter
+   out) of which ≥ 95 % have the header's width, that width ≥ 3; the header has no number cell, does not
+   open with a date (`T` form too), time or level (so a comma-shaped log stays a log), and no cell parses
+   as the type its column's values share. The widest such delimiter wins; reason `csv`.
 8. **code → text** — non-markup text where 30 % of the first 200 non-empty lines open like code
    (`import`, `const`, `function`, `def`, `return`, `{`, `}`, `//`, …). After the fence and JSONL rules,
    because a JSON line opens with a brace too.
@@ -157,12 +158,13 @@ folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` p
 one line per column: name, type (`number`, `integer`, `date` for ISO dates, `bool`, `category` when
 distinct/non-null < 0.5 and ≤ 50 distinct, `string`, `empty`), `min`/`max` as written (number, integer,
 date), `nulls` (empty, `null`, `n/a`, `nan`), `distinct`, then a bool's or category's values with
-` ×count` (most frequent first) or `e.g.` three distinct samples (over 48 chars clipped with `…`). A
+` ×count` (most frequent first) or `e.g.` three distinct samples (clipped like a table cell). A
 number column reads `1,299.00` or, in a `;` file first, `1.299,00`. Then a markdown table: a `#`
 column with the data-row number, the header, rows 1–3 and three sampled rows in file order, cells
 as written with `|` → `\|`, line breaks → `<br>`, a cell over 160 chars cut to 120 plus `… [+N chars]`.
-Samples and sampled rows come from a PRNG seeded with the content hash. A footer names the next call
-(`lookup({ path, question })` on the original, or a windowed Read). With `targetBytes`, stages `rows`
+Samples and sampled rows come from a PRNG seeded with the content hash. A footer names the next call:
+`lookup({ path, question })` on the original (the `full=` handle, the view's `original:` line or the
+viewed file). With `targetBytes`, stages `rows`
 (6 → 3 → 0 table rows) then `samples` (3 → 1), each with a warning; a profile that still misses says
 `targetBytes T not met: B B`. A dominant markdown fence is unwrapped, its preamble and trailer
 kept. Forced on text that is no table: `passthrough` / `non-csv`.

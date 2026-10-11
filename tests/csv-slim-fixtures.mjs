@@ -34,6 +34,12 @@ const TSV = fx('inventory.tsv');
 const EU = fx('prices-eu.csv');
 const SMALL = fx('small.csv');
 const LOG = fx('sync-commas.log');
+const ts = (i) => `2026-10-10T12:${String(Math.floor(i / 60) % 60).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.123Z`;
+const ISO_LOG = Array.from({ length: 300 }, (_, i) => (i === 136 ? `${ts(i)},ERROR,payments,charge ch_9XyZ failed: card_declined` : `${ts(i)},INFO,worker-${i % 5},job ${i} done in ${i * 3}ms`)).join('\n');
+const LEVEL_LOG = Array.from({ length: 300 }, (_, i) => `[INFO] service=api, path=/v1/items/${i}, status=200`).join('\n');
+const PIVOT = ['sku,title,2024-01-01,2024-01-02,2024-01-03', ...Array.from({ length: 400 }, (_, i) => `S-${i},Item ${i},${i},${i * 2},${i * 3}`)].join('\n');
+const EU_QUOTED = ['"Name, full";"Price, EUR";"Weight, kg"', ...Array.from({ length: 40 }, (_, i) => `"Item, ${i + 1}";1,${i + 5};1,${i + 25}`)].join('\n');
+const WRAPPED_HEADER = ['id,"first\nname",x', ...Array.from({ length: 300 }, (_, i) => `${i},n${i},x${i}`)].join('\n');
 
 // An independent reader for the assertions: quote-aware, one record per data row.
 function records(text, d) {
@@ -69,6 +75,9 @@ const splitRow = (line) => line.slice(2, -2).split(/ (?<!\\)\| /);
   for (const [name, text, engine, reason] of [
     ['products', PRODUCTS, 'csv', 'csv'], ['tsv-quoted-commas', TSV, 'csv', 'csv'], ['semicolon-eu', EU, 'csv', 'csv'],
     ['15-lines', SMALL, 'text', 'prose'], ['log-with-commas', LOG, 'log', 'log'],
+    ['log-iso-t', ISO_LOG, 'log', 'log'], ['log-level-first', LEVEL_LOG, 'log', 'log'],
+    ['date-pivot-header', PIVOT, 'csv', 'csv'], ['wrapped-header-cell', WRAPPED_HEADER, 'csv', 'csv'],
+    ['headerless-dates', Array.from({ length: 30 }, (_, i) => `x${i},2024-01-${String(i + 1).padStart(2, '0')},y${i}`).join('\n'), 'text', 'prose'],
     ['headerless', `1,2,3\n${'4,5,6\n'.repeat(30)}`, 'text', 'prose'],
     ['two-columns', `a,b\n${'x,y\n'.repeat(30)}`, 'text', 'prose'],
     ['ragged-prose', Array.from({ length: 40 }, (_, i) => `word, ${'more, '.repeat(i % 4)}end`).join('\n'), 'text', 'prose'],
@@ -80,6 +89,12 @@ const splitRow = (line) => line.slice(2, -2).split(/ (?<!\\)\| /);
   eq('CS-fence', sniff({ data: `Export:\n\`\`\`csv\n${TSV}\`\`\`\n` }).engine, 'csv');
   eq('CS-template-guard-first', sniff({ data: `a,b,c\n${'{{ x }},2,3\n'.repeat(30)}` }).reason, 'template');
   eq('CS-bom', csv.detect(`﻿${EU}`), { delim: ';', width: 7 });
+  // `,` would also split the quoted-comma header into 3, but leaves text after its closing quotes.
+  eq('CS-semicolon-quoted-comma-header', csv.detect(EU_QUOTED), { delim: ';', width: 3 });
+  const q = sections(compress({ data: EU_QUOTED }, O).text);
+  eq('CS-semicolon-quoted-comma-columns', q.cols.map((l) => l.split(/ {2,}/).slice(0, 2).join(' / ')), ['Name, full / string', 'Price, EUR / number', 'Weight, kg / number']);
+  eq('CS-wrapped-header-name', sections(compress({ data: WRAPPED_HEADER }, O).text).cols[1].split(/ {2,}/)[0], 'first\\nname');
+  eq('CG-iso-log-keeps-error', compress({ data: ISO_LOG }, O).text.includes('ch_9XyZ'), true);
 }
 
 // CC — the profile against the input, per fixture
@@ -112,7 +127,7 @@ for (const [name, text, d, rowsN, colsN, size] of [['products', PRODUCTS, ',', 1
       if (samples.length !== 3 || new Set(samples).size !== 3) bad.push(`${header[i]} sample count`);
       for (const v of samples) {
         const u = unclip(v);
-        if (!(u.endsWith('…') ? nonNull.some((x) => x.startsWith(u.slice(0, -1))) : distinct.has(u))) bad.push(`${header[i]} sample ${v}`);
+        if (!(u.includes('… [+') ? nonNull.some((x) => x.startsWith(u.split('… [+')[0])) : distinct.has(u))) bad.push(`${header[i]} sample ${v}`);
       }
     }
     const mm = /  min (.*?) max (.*?)  /.exec(line);
@@ -137,7 +152,7 @@ for (const [name, text, d, rowsN, colsN, size] of [['products', PRODUCTS, ',', 1
     return cells.slice(1).every((c, k) => (c.includes('… [+') ? want[k].startsWith(cellIn(c.split('… [+')[0])) : cellIn(c) === want[k]));
   });
   check(`CC-${name}-rows-verbatim`, verbatim, s.rows.join('\n'));
-  check(`CC-${name}-footer`, s.footer.startsWith('next: a row or a filter → lookup({ path: <the full= file below>, question })'), s.footer);
+  eq(`CC-${name}-footer`, s.footer, 'next: a row, a column or a filter → lookup({ path: <the original: its full= or original: path, or the file you viewed>, question })');
   check(`CC-${name}-smaller`, r.stats.bytesOut < r.stats.bytesIn / 4, `${r.stats.bytesIn} → ${r.stats.bytesOut}`);
 }
 {
@@ -157,6 +172,13 @@ for (const [name, text, d, rowsN, colsN, size] of [['products', PRODUCTS, ',', 1
   check('CC-cell-clip', s.rows[2] === `| 3 | 3 | c | ${'x'.repeat(120)}… [+180 chars] |`, s.rows[2]);
   check('CC-ragged', s.head.endsWith('· 1 rows of another width'), s.head);
   eq('CC-bom-stripped', s.cols[0].split(' ')[0], 'id');
+}
+{
+  // Long identifiers stay whole in samples, so three of them stay told apart.
+  const url = (i) => `https://cdn.shopify.com/s/files/1/0000/0001/products/very-long-image-name-${i}.jpg?v=17${i}`;
+  const text = ['id,img,alt', ...Array.from({ length: 30 }, (_, i) => `${i},${url(i)},alt ${i}`)].join('\n');
+  const eg = field(sections(compress({ data: text }, O).text).cols[1], 'e\\.g\\.').split(' · ');
+  check('CC-long-samples-verbatim', eg.length === 3 && eg.every((v) => /^https:\/\/\S+\?v=17\d+$/.test(v) && text.includes(`,${v},`)), eg.join(' | '));
 }
 
 // CT — fit: rows 3+3 → 3 → 0, then samples 3 → 1; a target nothing meets says so
