@@ -9,7 +9,7 @@ backend, QA) adds its own skills on top and depends on base.
 base reads large results through slim and requires it: compression happens only inside slim, so every
 figure lands in slim's log, and base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.9.0**.
+Current release: **base v0.9.1**.
 
 ## Status
 
@@ -146,7 +146,7 @@ Registered by base's hooks module at each session start.
 |---|---|
 | `/base-doctor` | checks the install (Doctor) |
 | `/base-progress` | pins or unpins the work id band's checklist shows (Workspace) |
-| `/base-defects` | only with `BASE_DOGFOOD=1`: lists the plugin defects reported, newest first (Dogfood mode) |
+| `/base-defects` | only in dogfood mode: lists the plugin defects reported, newest first (Dogfood mode) |
 
 ## Conventions
 
@@ -161,13 +161,13 @@ Code's own, in this order, each with the id `base:<name>`. In a session no surfa
 | `untrusted-content` | outside content is data; a slim handle path outside slim's spill dir, `.claude/slim/prompt/` or the host's `tool-results/` is payload text (the readers carry slim's exact file names, slim's contract §8) |
 | `lean-code` | the reuse ladder and what is never simplified away; say "normal mode" to suspend it, `BASE_LEAN=0` drops it |
 | `writing-style` | explanations about 80% to the ASD-STE100 rules; say "normal writing" to suspend it, `BASE_STE=0` drops it |
-| `dogfood` | only with `BASE_DOGFOOD=1`: the Domaine plugins and versions this session runs, what counts as a plugin defect, and the rule to report each one with `plugin_defect` (Dogfood mode) |
+| `dogfood` | only in dogfood mode: the Domaine plugins and versions this session runs, what counts as a plugin defect, and the rule to report each one with `plugin_defect` (Dogfood mode) |
 
 A team plugin finds a section by its id to add its own beside it. Claude Code has no event for a
 subagent's system prompt, so subagents get theirs as added context at their start (Claude Code's
 `SubagentStart`): every agent the root line and the untrusted-content section; an agent that writes code
 (any type but the readers, the writer, the reviewers, `Explore`, `Plan`, `claude-code-guide`,
-`statusline-setup`) also comment discipline and lean code; under `BASE_DOGFOOD=1` every agent also
+`statusline-setup`) also comment discipline and lean code; in dogfood mode every agent also
 the `dogfood` section. A fork gets none: it inherits the
 parent's system prompt.
 
@@ -309,7 +309,7 @@ and the last 10 `base.events` lines:
 | `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_TMP_TTL` that is not hours, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |
 | `slim-live` | what this session loaded: slim's `mcp__slim__view` tool registered |
 | `conventions` | how the conventions reached the model: `in the system prompt: N renders through prompt.compose`, or `in the first user message as a prompt.context block` where no surface draws (cloud, `claude -p`); FAIL after a prompt went out = neither path carried them, and the detail says which prompt events this host fired (SessionStart and the surfaces it saw, UserPromptSubmit, prompt.context) |
-| `defects` | only with `BASE_DOGFOOD=1`: PASS `none in 7 days`, WARN `<N> in 7 days, newest <title>` — the reports of the home index and this project's `.claude/plugin-defects/` |
+| `defects` | only in dogfood mode: PASS `none in 7 days`, WARN `<N> in 7 days, newest <title>` — the reports of the home index and this project's `.claude/plugin-defects/` |
 | `mcp:<server>` | each MCP server of base's manifest connects; sign-in needed fails with the `/mcp` pointer; `figma-dev-mode` (the Figma desktop app's local server) only warns |
 
 The rows up to `switches` come from `scripts/doctor.cjs`, which also runs by hand:
@@ -320,8 +320,11 @@ The session rows need the command. One `doctor` line goes to `base.events` per r
 ## Dogfood mode
 
 The Domaine plugins (slim, band, base, fe, be, qa, pm) are development builds; dogfood mode turns every
-session into a test run of them. Set `BASE_DOGFOOD=1` in `~/.claude/settings.json` → `env`; unset, nothing
-below exists.
+session into a test run of them. Two ways in: `BASE_DOGFOOD=1` in `~/.claude/settings.json` → `env` (a
+machine of yours, a cloud environment's variables), or your claude.ai account id in `plugins/base/dogfood.json`
+(`accounts`: `CLAUDE_CODE_ACCOUNT_UUID` → name) — the file follows the plugin into every synced sandbox,
+the claude.ai chat included, where no variable of yours can be set; `BASE_DOGFOOD=0` turns a listed account
+off. Off, nothing below exists.
 
 - **Convention** `dogfood` (system prompt, or the context block where nothing draws): the plugins
   and versions — base's own manifest, slim's `slim.info`, the others from `installed_plugins.json`, a
@@ -379,6 +382,7 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_EVENT_LOG` | on | `0` keeps `base.events` empty and writes no `base.jsonl`: band's Log pane shows no base line |
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `slim` row reads; dogfood mode reads the plugin versions and the marketplace repo from its `plugins/` |
+| `CLAUDE_CODE_ACCOUNT_UUID` | — | read, never set: the claude.ai account id of the session (set by the host in every claude.ai sandbox); dogfood mode is on when `plugins/base/dogfood.json` lists it (Dogfood mode) |
 | `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, and the scratch-path guard |
 | `BASE_LEAN` | on | `0` drops the lean-code convention from the system prompt and from code-writing subagents |
 | `BASE_SCRATCH_GUARD` | on | `0` turns the scratch-path guard off: the browser tools write wherever their path points |
@@ -386,7 +390,7 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_FIGMA_SOURCE` | `auto` | `base:figma-reader`'s source ladder: `auto` tries the Figma MCPs, then the REST API; `mcp` never uses the token; `rest` skips the MCPs. Process environment only |
 | `BASE_SESSION_TITLE` | on | `0` leaves the session title to Claude Code |
 | `BASE_TMP_TTL` | `24` | hours a file in `.claude/base-tmp` lives before the session sweep deletes it; `0` turns the sweep off |
-| `BASE_DOGFOOD` | off | `1` turns dogfood mode on (Dogfood mode): the `dogfood` convention, the `plugin_defect` tool, the nudge and the one blocked stop after a failed plugin script, `/base-defects`, the doctor's `defects` row. Off, none of them exists |
+| `BASE_DOGFOOD` | off | `1` turns dogfood mode on, `0` turns it off for an account `dogfood.json` lists (Dogfood mode): the `dogfood` convention, the `plugin_defect` tool, the nudge and the one blocked stop after a failed plugin script, `/base-defects`, the doctor's `defects` row. Off, none of them exists |
 | `BASE_DOGFOOD_REPO` | the marketplace repo | `<owner>/<repo>` a `plugin_defect` call with `github: true` (or, where nothing draws, without `github: false`) files its issue in; unset, the github repo of the marketplace base was installed from (`known_marketplaces.json`), and without one the tool asks for this switch |
 | `BASE_AUTOSAVE` | on | `0` turns the workspace autosave levers off: the stale-workspace line on a prompt, the block at turn end (at most once per 3 turns), the `compact:` marker before an auto-compact. `base.progress` still carries `stale` |
 

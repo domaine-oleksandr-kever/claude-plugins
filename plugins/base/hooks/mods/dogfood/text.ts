@@ -285,6 +285,27 @@ export function recent(list: readonly Seen[], nowMs: number): Seen[] {
 
 export const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10)
 
+/**
+ * Dogfood mode: on under BASE_DOGFOOD=1; else, unless BASE_DOGFOOD=0, for a claude.ai account dogfood.json lists —
+ * the file follows the plugin into every synced sandbox, where no environment variable of the person's can be set.
+ */
+export function dogfoodMode(sw: string, account: string, json: string | null): boolean {
+  if (sw === '1') return true
+  if (sw === '0') return false
+  const id = account.trim()
+  return id !== '' && dogfoodAccounts(json).includes(id)
+}
+
+/** The claude.ai account ids dogfood.json lists (`accounts`: id → name); [] for a missing or malformed file. */
+export function dogfoodAccounts(json: string | null): string[] {
+  try {
+    const a = (JSON.parse(json ?? '') as { accounts?: unknown }).accounts
+    return a && typeof a === 'object' && !Array.isArray(a) ? Object.keys(a) : []
+  } catch {
+    return []
+  }
+}
+
 const RULE_DRAWN = `Offer a GitHub issue (\`github: true\`); never create one unasked.`
 const RULE_SURFACELESS = `No surface draws in this session (a cloud session, \`claude -p\`): the report file
 and \`~\` do not outlive it. \`plugin_defect\` returns the whole report and files the GitHub issue

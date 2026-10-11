@@ -16,7 +16,7 @@ import {
   rootLine,
   withRoot,
 } from './conventions/text.ts'
-import { dogfoodSection, enabledNames, versionsLine, versionsOf } from './dogfood/text.ts'
+import { dogfoodMode, dogfoodSection, enabledNames, versionsLine, versionsOf } from './dogfood/text.ts'
 
 type $ = EngineInterface
 
@@ -44,9 +44,12 @@ async function pluginVersions($: $): Promise<string> {
   return versionsLine(versionsOf(installed, $.plugin.root, own, slim, enabled))
 }
 
-/** The dogfood section under BASE_DOGFOOD=1, worded for a session no surface draws where none does; else null. */
+const dogfoodOn = async ($: $) =>
+  dogfoodMode((await $.env.get('BASE_DOGFOOD')) ?? '', (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID')) ?? '', await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
+
+/** The dogfood section when dogfood mode is on, worded for a session no surface draws where none does; else null. */
 async function dogfood($: $): Promise<string | null> {
-  if ((await $.env.get('BASE_DOGFOOD')) !== '1') return null
+  if (!(await dogfoodOn($))) return null
   const surfaceless = (await $.session.surfaces().catch(() => null))?.length === 0
   return dogfoodSection(await pluginVersions($), surfaceless)
 }
@@ -75,7 +78,7 @@ export async function sections($: $): Promise<PromptComposeSection[]> {
 
 /**
  * The root line and the untrusted-content rail for every agent; the code conventions for one that writes code;
- * the dogfood section under BASE_DOGFOOD=1, since any agent may run a plugin script. Empty for a fork: it inherits the parent's system prompt, which already carries base's sections.
+ * the dogfood section in dogfood mode, since any agent may run a plugin script. Empty for a fork: it inherits the parent's system prompt, which already carries base's sections.
  */
 export async function subagentContext($: $, agentType: string): Promise<string> {
   if (agentType === 'fork') return ''

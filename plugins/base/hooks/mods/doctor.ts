@@ -7,7 +7,7 @@ import type { BaseDelivery, BaseEvent } from '../../types'
 import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 import { SLIM_MISSING, SLIM_VIEW } from './session.ts'
-import { WINDOW_DAYS, recent, seen } from './dogfood/text.ts'
+import { WINDOW_DAYS, dogfoodMode, recent, seen } from './dogfood/text.ts'
 
 export const COMMAND = {
   name: 'base-doctor',
@@ -166,9 +166,12 @@ async function liveRows($: $): Promise<Row[]> {
   return rows
 }
 
+const dogfoodOn = async ($: $) =>
+  dogfoodMode((await $.env.get('BASE_DOGFOOD')) ?? '', (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID')) ?? '', await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
+
 /** Dogfood mode's reports of the last 7 days, the home index and this project's folder together; no row when it is off. */
 async function defectRows($: $): Promise<Row[]> {
-  if ((await $.env.get('BASE_DOGFOOD')) !== '1') return []
+  if (!(await dogfoodOn($))) return []
   try {
     const home = (await $.env.get('HOME'))?.trim() ?? ''
     const index = home.startsWith('/') ? await $.fs.read(`${home.replace(/\/+$/, '')}/.claude/plugin-defects/index.md`).catch(() => '') : ''

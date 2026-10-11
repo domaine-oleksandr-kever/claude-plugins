@@ -1,4 +1,4 @@
-// Dogfood mode (BASE_DOGFOOD=1): the plugin_defect tool and its report files, the nudge on a failed plugin
+// Dogfood mode (BASE_DOGFOOD=1, or an account of dogfood.json): the plugin_defect tool and its report files, the nudge on a failed plugin
 // script, the one blocked stop while that failure is unreported, and /base-defects. Off, every hook passes.
 // The convention section is conventions.ts's; the doctor's `defects` row is doctor.ts's.
 import { atom, read, update } from 'claude-code'
@@ -12,6 +12,7 @@ import {
   TOOL_SCHEMA,
   bashFailed,
   defectBody,
+  dogfoodMode,
   enabledNames,
   fenced,
   fileName,
@@ -67,7 +68,8 @@ async function logDefect($: $, text: string): Promise<void> {
   } catch {}
 }
 
-const isOn = async ($: $) => (await $.env.get('BASE_DOGFOOD')) === '1'
+const dogfoodOn = async ($: $) =>
+  dogfoodMode((await $.env.get('BASE_DOGFOOD')) ?? '', (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID')) ?? '', await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
 
 /** `$HOME/.claude/plugin-defects`, or null without an absolute HOME (a cloud session). */
 async function homeDir($: $): Promise<string | null> {
@@ -108,7 +110,7 @@ async function git($: $, root: string, args: string[]): Promise<string | null> {
 /** Registers the command on every session start and at the first prompt of a new session id; a new id starts clean. */
 async function arm($: $, start: boolean): Promise<void> {
   try {
-    if (!(await isOn($))) return
+    if (!(await dogfoodOn($))) return
     const sid = String(await $.session.id())
     const fresh = (await read($, dogfood))?.sid !== sid
     if (start || fresh) await $.command.register(COMMAND).catch(() => undefined)
@@ -234,7 +236,7 @@ export function registerDogfood(on: On): void {
   // Matchers apart from base's other start and prompt hooks: one unmatched hook per event per plugin.
   on('session.start', { cwd: /(?:)/ }, async ($, e, next) => {
     try {
-      if (await isOn($)) await $.tool.register({ name: TOOL_NAME, description: TOOL_DESC, inputSchema: TOOL_SCHEMA, isDeferred: false })
+      if (await dogfoodOn($)) await $.tool.register({ name: TOOL_NAME, description: TOOL_DESC, inputSchema: TOOL_SCHEMA, isDeferred: false })
     } catch {}
     await arm($, true)
     return next(e)
@@ -247,7 +249,7 @@ export function registerDogfood(on: On): void {
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    if (!(await isOn($))) return { result: 'plugin_defect: dogfood mode is off (BASE_DOGFOOD=1 turns it on)' }
+    if (!(await dogfoodOn($))) return { result: 'plugin_defect: dogfood mode is off (BASE_DOGFOOD=1 turns it on)' }
     const d = parseDefect(e as unknown as Record<string, unknown>)
     if (typeof d === 'string') return { result: d }
     return { result: await serial(() => report($, d)).catch(err => `plugin_defect failed: ${String((err as Error)?.message ?? err).slice(0, 160)}`) }
@@ -257,7 +259,7 @@ export function registerDogfood(on: On): void {
     const r = await next(e)
     if (e.tool !== 'Bash' || r.deny !== undefined || !bashFailed(r)) return r
     const script = pluginScript(e.command)
-    if (!script || !(await isOn($).catch(() => false))) return r
+    if (!script || !(await dogfoodOn($).catch(() => false))) return r
     try {
       await logDefect($, `script failed: ${script}`)
       if (e.agentId === undefined) {
@@ -272,7 +274,7 @@ export function registerDogfood(on: On): void {
     const r = await next(e)
     if (r.block) return r
     try {
-      if (!(await isOn($))) return r
+      if (!(await dogfoodOn($))) return r
       const s = await read($, dogfood)
       if (!s || s.sid !== String(await $.session.id()) || !s.failMs || s.reportMs >= s.failMs || s.blockedMs === s.failMs) return r
       await update($, dogfood, t => (t ? { ...t, blockedMs: s.failMs } : t))

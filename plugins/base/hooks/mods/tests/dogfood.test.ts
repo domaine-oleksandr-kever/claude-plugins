@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NUDGE, TOOL, capEvidence, pluginScript, seen, slugOf } from '../dogfood/text.ts'
+import { NUDGE, TOOL, capEvidence, dogfoodAccounts, pluginScript, seen, slugOf } from '../dogfood/text.ts'
 import { NOW, PEEK, ROOT, eventsOf, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -75,6 +75,49 @@ describe('dogfood off', () => {
     const r = await report($)
     expect(r.result).toContain('dogfood mode is off')
     expect(calls.writes.filter(x => x.path.includes('plugin-defects'))).toEqual([])
+  })
+})
+
+describe('dogfood by account', () => {
+  const ACCOUNT = '7111e876-2a12-474b-87aa-fb87ec35aa2c'
+  /** A world whose dogfood.json lists ACCOUNT. */
+  async function accountWorld($: any, on: On, env: Record<string, string>) {
+    const ctx = world(on, { env })
+    const root = (await compose($)).sections.find((s: any) => s.id === 'base:root').text.replace(/^base plugin root: /, '')
+    ctx.w.files[`${root}/dogfood.json`] = { text: JSON.stringify({ accounts: { [ACCOUNT]: 'Owner' } }), mtimeMs: 0 }
+    return ctx
+  }
+
+  t('a listed account turns the mode on without BASE_DOGFOOD: tool, section, command, doctor row', async ($, on) => {
+    const { calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT })
+    await start($)
+    await submit($, 'go')
+    expect(calls.tools.map(x => x.name)).toEqual(['plugin_defect'])
+    expect(calls.commands).toContain('base-defects')
+    expect((await dogfoodSection($))?.text).toContain('dogfood mode')
+    expect((await run($, '', 'base-doctor')).text).toContain('PASS  defects')
+  })
+
+  t('BASE_DOGFOOD=0 keeps a listed account off', async ($, on) => {
+    const { calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT, BASE_DOGFOOD: '0' })
+    await start($)
+    expect(calls.tools).toEqual([])
+    expect(await dogfoodSection($)).toBeUndefined()
+    expect((await report($)).result).toContain('dogfood mode is off')
+  })
+
+  t('an unlisted account stays off; a listed one without the file stays off', async ($, on) => {
+    const { calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: 'ffffffff-0000-0000-0000-000000000000' })
+    await start($)
+    expect(calls.tools).toEqual([])
+    expect(await dogfoodSection($)).toBeUndefined()
+  })
+
+  t('no file: a listed-looking account stays off', async ($, on) => {
+    const { calls } = world(on, { env: { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT } })
+    await start($)
+    expect(calls.tools).toEqual([])
+    expect(await dogfoodSection($)).toBeUndefined()
   })
 })
 
@@ -467,6 +510,14 @@ describe('pure parts', () => {
       'rg foo ~/.claude/plugins/cache/domaine/slim/0.10.0/README.md',
       'node ~/.claude/plugins/cache/domaine/fe/0.5.3/skills/ship/SKILL.md',
     ]) expect(pluginScript(cmd)).toBeNull()
+  })
+
+  test('dogfoodAccounts: the keys of accounts; [] for null, bad JSON, an array or a missing key', () => {
+    expect(dogfoodAccounts('{"accounts":{"a":"A","b":"B"}}')).toEqual(['a', 'b'])
+    expect(dogfoodAccounts(null)).toEqual([])
+    expect(dogfoodAccounts('{')).toEqual([])
+    expect(dogfoodAccounts('{"accounts":["a"]}')).toEqual([])
+    expect(dogfoodAccounts('{}')).toEqual([])
   })
 
   test('seen: a path once, the index title first, newest first', () => {
