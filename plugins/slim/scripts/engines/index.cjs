@@ -4,23 +4,18 @@
  * Embeddable anywhere Node runs (a microservice, a CLI, a hook on another harness): no plugin
  * context, no environment, no filesystem, no network, no timers. The contract is CONTRACT.md beside
  * this file; the typedefs below mirror it. A new engine is one file exporting { id, run(text, opts,
- * ctx) } plus one ENGINES row here and one sniff rule in sniff.cjs.
+ * ctx) } plus one row in registry.cjs and one sniff rule in sniff.cjs.
  */
 'use strict';
 
 const { sha16, utf8, pct } = require('./util.cjs');
 const { sniff } = require('./sniff.cjs');
 const json = require('./json.cjs');
-const log = require('./log.cjs');
-const html = require('./html.cjs');
-const figma = require('./figma.cjs');
-const figmaNodes = require('./figma-nodes.cjs');
-const adf = require('./adf.cjs');
-const text = require('./text-window.cjs');
+const { ROWS } = require('./registry.cjs');
 const { spans, jsonBlobs } = require('./spans.cjs');
 
 /**
- * @typedef {'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'} EngineId
+ * @typedef {string} EngineId                 an id of registry.cjs
  * @typedef {EngineId|'binary'|'none'} SniffEngine
  *
  * @typedef {object} Input
@@ -46,7 +41,7 @@ const { spans, jsonBlobs } = require('./spans.cjs');
  * @typedef {object} Spill
  * @property {'original'|'rows'|'ids'} kind
  * @property {string} payload
- * @property {string} suggestedName            prefix + sha256(payload)[0,16] + '.json'|'.txt'
+ * @property {string} suggestedName            prefix + sha256(payload)[0,16] + '.json' (a part) or the engine's registry ext (the original)
  *
  * @typedef {object} Result
  * @property {1} v
@@ -64,17 +59,10 @@ const { spans, jsonBlobs } = require('./spans.cjs');
  */
 
 const VERSION = 1;
-const ENGINES = {
-  json,
-  jsonl: json,
-  log,
-  html,
-  figma,
-  'figma-nodes': figmaNodes,
-  adf,
-  text,
-};
+const ENGINES = Object.fromEntries(ROWS.map((r) => [r.id, r.module]));
 const IDS = Object.keys(ENGINES);
+// Per id, what a caller needs to know: spill suffix, fits targetBytes, stubs over a cap, runs on MCP as sniffed.
+const REGISTRY = Object.fromEntries(ROWS.map(({ id, ext, fit, stub, mcp }) => [id, { ext, fit, stub, mcp }]));
 const NAMES = { original: 'slim-original-', rows: 'slim-rows-', ids: 'slim-ids-' };
 const DEFAULTS = {
   budgetBytes: null,
@@ -130,8 +118,7 @@ function textOf(input) {
   return { reason: 'bad-input' };
 }
 
-// The extension of the original's spill name: figma-nodes prints markdown but its input is JSON.
-const extOf = (engine) => (['json', 'jsonl', 'adf', 'figma-nodes'].includes(engine) ? '.json' : '.txt');
+const extOf = (engine) => (REGISTRY[engine] ? REGISTRY[engine].ext : '.txt');
 
 /**
  * Compress one payload. Never throws; never writes anything.
@@ -204,4 +191,4 @@ function peek(t) {
   return json.shapeHint(typeof t === 'string' ? t : '');
 }
 
-module.exports = { compress, sniff, peek, spans, jsonBlobs, VERSION, ENGINES: IDS };
+module.exports = { compress, sniff, peek, spans, jsonBlobs, VERSION, ENGINES: IDS, REGISTRY };

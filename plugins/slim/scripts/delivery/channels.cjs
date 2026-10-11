@@ -35,9 +35,13 @@ const commandWords = (cmd) => String(cmd || '').split(/[\s'"|;&<>()=]+/).filter(
 
 // The engine a channel lets run on a sniffed payload: html and log need a command that fetches or
 // reads a log, everything a channel does not admit is treated as plain text. A Figma REST nodes
-// response goes wherever JSON goes.
+// response goes wherever JSON goes. MCP: null = not compressed (plain text, guarded text, HTML).
 function admit(channel, engine, command) {
   switch (channel) {
+    case 'mcp':
+      if (engine === 'text' || engine === 'html') return null;
+      // A registry row with mcp:true runs as sniffed; any other shape goes the json route.
+      return (require('../engines/index.cjs').REGISTRY[engine] || {}).mcp ? engine : 'json';
     case 'bash':
       if (engine === 'html') return FETCH_CMD.test(command) ? 'html' : 'text';
       if (engine === 'log') return LOG_CMD.test(command) ? 'log' : 'text';

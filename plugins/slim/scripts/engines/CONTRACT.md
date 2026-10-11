@@ -177,7 +177,9 @@ rewritten.
 }
 ```
 
-`suggestedName` = `spillNames[kind] + sha256(payload)[0..16] + ('.json' | '.txt')`. The text cites a part
+`suggestedName` = `spillNames[kind] + sha256(payload)[0..16]` + a suffix: always `.json` for a part; for
+the original, the engine's `ext` in `registry.cjs` — `.json` when the input is JSON (json, jsonl,
+figma-nodes, adf), else `.txt`. The text cites a part
 as `<spillDir>/<suggestedName>`, so a caller that stores parts under `spillDir` by those names makes
 every handle resolve. What happens to `text`, `spill` and `parts` — a file, a database row, an HTTP
 reply — is the caller's decision.
@@ -294,7 +296,12 @@ and keeps `v: 1`; changing the meaning or shape of an existing field bumps `v`. 
 engine's rendered text is minor too: figma-nodes' `; modes …` on a bound value (slim 0.8.0) kept
 `v: 1`. Adding an engine is one file exporting `{ id, run(text, opts, ctx) }` (`ctx.deadline`, `ctx.part(kind, payload) → citePath`,
 `ctx.hint` — the input's hint, `{}` when absent),
-one row in the `ENGINES` table of `index.cjs` and one rule in `sniff.cjs`.
+one row in `registry.cjs` and one rule in `sniff.cjs`. The row is the only place the id is listed:
+`index.cjs` builds its dispatch and spill suffixes from it and exports the caller flags as `REGISTRY`
+(`{ [id]: { ext, fit, stub, mcp } }` — `fit`: the engine honours `targetBytes`; `stub`: a caller with a
+size cap stubs a compressed text still over it instead of passing the original through; `mcp`: slim's
+MCP channel runs the engine on a text sniffed as its id, else sends that text the json route), and
+`tests/slim-engines.mjs` pins the id lists of slim's hooks module and types to it.
 
 ## 7. Examples
 

@@ -25,7 +25,7 @@ const LOG = 'slim-debug.log';
 const ENVELOPE_KEYS = ['v', 'channel', 'tool', 'tool_use_id', 'tool_input', 'tool_response', 'is_error', 'cwd', 'session_id', 'agentId', 'pre', 'bytes_in', 'bash_output_max_chars'];
 const M1_KEYS = ENVELOPE_KEYS.slice(0, 9);
 const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'agent', 'attachment', 'prompt', 'lookup', 'view'];
-const ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'stub'];
+const ENGINES = [...createRequire(import.meta.url)(path.join(SCRIPTS, 'engines/index.cjs')).ENGINES, 'stub'];
 
 const F1 = readFileSync(path.join(FIX, 'jql-search-ELC.json'), 'utf8');
 const F2 = JSON.parse(readFileSync(path.join(FIX, 'mcp-envelope-jira.json'), 'utf8'));
@@ -206,6 +206,25 @@ let F1_OUT = null;
   const T = newT();
   const a = call('F6', T, envelope(T, F1, { tool: 'mcp__plugin_figma_figma__get_metadata' }));
   eq('F6-tool-name-ignored', [a.decision, a.record.engine], ['compressed', 'json']);
+}
+// MCP text is sniffed with the guards: theme-check output quoting Liquid is template text, never a log.
+{
+  const T = newT();
+  const TC = readFileSync(path.join(FIX, 'theme-check.txt'), 'utf8');
+  const tool = 'mcp__plugin_base_shopify-dev-mcp__validate_theme';
+  const a = call('MS1', T, envelope(T, [{ type: 'text', text: TC }], { tool }));
+  eq('MS1-template-pass', [a.decision, a.reason, a.record.format], ['passthrough', 'template', 'text']);
+  const big = call('MS1-stub', T, envelope(T, [{ type: 'text', text: TC }], { tool }), { SLIM_STUB_BYTES: '4096' });
+  eq('MS1-template-stub', [big.decision, big.reason, big.record.engine], ['stubbed', 'template', 'stub']);
+  const fenced = call('MS1-fence', T, envelope(T, [{ type: 'text', text: `Theme check found offenses:\n\`\`\`\n${TC}\`\`\`\n` }], { tool }));
+  eq('MS1-fence-pass', [fenced.decision, fenced.reason], ['passthrough', 'template']);
+  // A browser snapshot has no engine yet: passthrough under the stub limit.
+  const SNAP = readFileSync(path.join(FIX, 'playwright-snapshot.txt'), 'utf8');
+  const s = call('MS2', T, envelope(T, { content: [{ type: 'text', text: SNAP }] }, { tool: 'mcp__plugin_base_playwright__browser_snapshot' }));
+  eq('MS2-snapshot', [s.decision, s.reason, s.record.format, s.record.engine], ['passthrough', 'non-json', 'text', null]);
+  // A log on MCP still reaches the log stage through the json route.
+  const lg = call('MS3', T, envelope(T, [{ type: 'text', text: readFileSync(path.join(FIX, 'app.log'), 'utf8') }], { tool: 'mcp__x__logs' }));
+  eq('MS3-log', [lg.decision, lg.record.engine], ['compressed', 'log']);
 }
 
 {
@@ -521,6 +540,7 @@ let STUB0_OUT = null;
   const C = (f) => path.join(SCRIPTS, f);
   for (const [mf, mn, cf, cn] of [
     ['channels.ts', 'LOG_CMD', 'delivery/channels.cjs', 'LOG_CMD'],
+    ['channels.ts', 'LOG_EXT', 'delivery/channels.cjs', 'READ_LOG_EXT'],
     ['channels.ts', 'SOURCE_JSON', 'delivery/channels.cjs', 'SOURCE_JSON_DIR'],
     ['channels.ts', 'SOURCE_JSON_NAME', 'delivery/channels.cjs', 'SOURCE_JSON_BASE'],
     ['channels.ts', 'ACCESS_MAX', 'slim.cjs', 'ACCESS_MAX'],
@@ -707,7 +727,14 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const loudRest2 = call('Cb16-stderr-rest-29000', T, chEnv(T, 'bash', 'Bash', { command: 'cat AbC123-3326-39542.nodes.json' }, BASH(REST, { stderr: 'w'.repeat(29000) })));
   check('Cb16-stderr-rest-29000-fits', ['compressed', 'stubbed'].includes(loudRest2.decision) && shown(loudRest2) < 30000, `${loudRest2.decision} ${loudRest2.reason} ${shown(loudRest2)}`);
   const loudText = call('Cb16-stderr-text', T, chEnv(T, 'bash', 'Bash', { command: 'npx jest --ci' }, BASH(TESTOUT, { stderr: 'w'.repeat(29000) })), { SLIM_PLAIN_BYTES: '8192' });
-  eq('Cb16-stderr-text-pass', [loudText.decision, loudText.reason], ['passthrough', 'egress-cap']);
+  eq('Cb16-stderr-text-stub', [loudText.decision, loudText.reason, loudText.record.engine], ['stubbed', 'egress-cap', 'stub']);
+  check('Cb16-stderr-text-fits', shown(loudText) < 30000, `${shown(loudText)}`);
+  // Any engine's output over the egress cap is stubbed, never passed through raw: here a log.
+  const capLog = call('Cb16-log-cap', T, chEnv(T, 'bash', 'Bash', { command: 'cat app.log' }, BASH(APPLOG), { bash_output_max_chars: 4000 }));
+  eq('Cb16-log-cap-stub', [capLog.decision, capLog.reason, capLog.record.engine], ['stubbed', 'egress-cap', 'stub']);
+  const capFull = /^full=(\S+)$/m.exec(String((capLog.result || {}).stdout || ''));
+  check('Cb16-log-cap-spill', !!capFull && /\.txt$/.test(capFull[1]) && readFileSync(capFull[1], 'utf8') === APPLOG, capFull && capFull[1]);
+  check('Cb16-log-cap-fits', shown(capLog) < 4000 && String(capLog.result.stdout).includes('(format=text)'), `${shown(capLog)}`);
 }
 
 // C-read
@@ -1082,6 +1109,26 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const small = spawn(T, '', { args: ['--report', log] });
   eq('Rg-small-growth', (/^ {2}by channel: (.*)$/m.exec(small.stdout) || [])[1],
     'bash: 1 result, 300,000 B of output summarised into 2,100 B (host preview would have shown 2,048 B; the view grew by 52 B) + 1 passed through (500 B)');
+  // --by-tool: per tool, passthrough and stubbed bytes by reason (with the format), the biggest first.
+  writeFileSync(log, `${[
+    line({ channel: 'mcp', tool: 'mcp__p__browser_snapshot', decision: 'passthrough', reason: 'non-json', format: 'text', bytes_in: 20000, bytes_out: 20000 }),
+    line({ channel: 'mcp', tool: 'mcp__p__browser_snapshot', decision: 'stubbed', reason: 'non-json', bytes_in: 40000, bytes_out: 1100 }),
+    line({ channel: 'mcp', tool: 'mcp__p__browser_snapshot', decision: 'passthrough', reason: 'size-gate', bytes_in: 3000, bytes_out: 3000 }),
+    line({ channel: 'bash', tool: 'Bash', decision: 'compressed', bytes_in: 50000, bytes_out: 9000 }),
+    line({ channel: 'bash', tool: 'Bash', decision: 'stubbed', reason: 'egress-cap', bytes_in: 70000, bytes_seen: 2300, bytes_out: 1000 }),
+  ].join('\n')}\n`);
+  const plain = spawn(T, '', { args: ['--report', log] });
+  check('Rg-by-tool-off', !plain.stdout.includes('by tool'), plain.stdout);
+  const bt = spawn(T, '', { args: ['--report', log, '--by-tool'] });
+  eq('Rg-by-tool', bt.stdout.slice(bt.stdout.indexOf('  by tool')).trimEnd().split('\n'), [
+    '  by tool (passthrough and stubbed bytes by reason):',
+    '    mcp__p__browser_snapshot [mcp] — 3 calls',
+    '      passthrough 23,000 B: non-json/text 1 × 20,000 B · size-gate 1 × 3,000 B',
+    '      stubbed 40,000 B → 1,100 B: non-json 1 × 40,000 B',
+    '    Bash [bash] — 2 calls',
+    '      stubbed 2,300 B → 1,000 B: egress-cap 1 × 2,300 B',
+    '      compressed 50,000 B → 9,000 B',
+  ]);
 }
 
 // Cm — the media backend (delivery/media.cjs) with fake ffprobe / ffmpeg / sips: each row's PATH is

@@ -50,7 +50,7 @@ validates a hook's result against the built-in tool's output schema: Bash stays
 
 | Channel | Candidate when | What slim does |
 |---|---|---|
-| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | JSON engines, else spill-and-stub (below) |
+| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX and logs compressed; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
 | Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML; over 16,384 B from a log command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
 | Read | a whole-file read of a `.log`, `.jsonl` or `.ndjson` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
 | WebFetch | result over 16,384 B that is JSON or HTML, or over `SLIM_PLAIN_BYTES` | JSON, JSONL and HTML engines, else a window |
@@ -88,7 +88,10 @@ is plain text, so test runners and git output are never deduplicated as a log.
   mocha, go test, rspec, pytest, TAP), template markers (`{%`, `{{`, `<%`, `<?php`) and code lines
   BEFORE it looks for JSON lines, HTML or a log; such text is only ever windowed, and only above
   `SLIM_PLAIN_BYTES` (`plain-gate` below it) or when the host saved the Bash output to a file (the
-  model would see only a 2 KB preview of it, so the exact text is gone either way);
+  model would see only a 2 KB preview of it, so the exact text is gone either way). An MCP text
+  block runs through the same checks and is never windowed: it passes through with the guard's name
+  (`diff`, `test-output`, `template`) or `non-json`, and over 32,768 B it is stubbed — so theme-check
+  output quoting Liquid stays as it came, from any MCP tool;
 - images, PDFs and other binary output (`not-text`, `binary`): detected by magic bytes;
 - a Bash command that runs a compressor CLI (`slim.cjs`, `json-slim.cjs`, `log-slim.cjs`, … — `own-cli`);
 - a Bash command or a Read that names a spill file or a host tool-results file (`spill-read`) —
@@ -167,12 +170,14 @@ size (256KB)`) is refused by the host before any hook runs, so slim never sees t
   (with `jq: "<jq-path>"` to narrow JSON first) or a windowed Read (offset/limit). When the
   compressor already gained nothing on one JSON document, the recipe is the jq narrowing alone,
   since a whole-file view would give the same bytes back. On the other
-  channels a JSON or JSONL output still over the channel's egress cap (Read 65,536 B, Grep
+  channels a compressed output still over the channel's egress cap (Read 65,536 B, Grep
   16,384 B, Bash the host's inline limit less 2,048, at most 32,768 B, the rest 32,768 B) is stubbed
-  the same way (`egress-cap`); any other output over the cap passes through. On Bash the finished
+  the same way (`egress-cap`), whichever engine produced it (JSON, a node tree, a log, a page, a
+  window); JSON and node trees are first fitted under the cap. On Bash the finished
   answer is measured once more as the host measures it — characters of stdout plus stderr — and one
-  at or past the host's inline limit is stubbed (JSON) or passed through (`egress-cap`): past that
-  limit the host would save slim's own answer to a file and show the model a 2 KB preview of it.
+  at or past the host's inline limit is stubbed, or passed through (`egress-cap`) when not even the
+  stub fits beside stderr: past that limit the host would save slim's own answer to a file and show
+  the model a 2 KB preview of it.
 - **passthrough** — everything else, with a reason (`plain-gate`, `read-guard`, `no-gain`,
   `non-json`, `budget-exceeded`, …).
 
@@ -501,7 +506,7 @@ bytes in/out (and `bytes_seen` where the host showed less), % and ms — never a
 Read the totals with:
 
 ```
-node plugins/slim/scripts/slim.cjs --report [logfile] [--since <ISO>]
+node plugins/slim/scripts/slim.cjs --report [logfile] [--since <ISO>] [--by-tool]
 ```
 
 It prints the totals plus a `by src:` line (one total per writer; a line without `src` counts as
@@ -516,6 +521,20 @@ bash: 2 results, 560,779 B of output summarised into 14,935 B (host preview woul
 
 Below ×1.1 the growth is given in bytes, and results that passed through untouched are counted apart
 (`+ 1 passed through (500 B)`).
+
+`--by-tool` adds one block per tool and channel, biggest first: the bytes slim let through by reason
+(with the format: `non-json/text`), the bytes it stubbed by reason, and what it compressed. It is
+the readout for deciding which engine to build next — what is large and still passes through:
+
+```
+  by tool (passthrough and stubbed bytes by reason):
+    mcp__plugin_base_playwright__browser_snapshot [mcp] — 3 calls
+      passthrough 23,000 B: non-json/text 1 × 20,000 B · size-gate 1 × 3,000 B
+      stubbed 40,000 B → 1,100 B: non-json 1 × 40,000 B
+```
+
+Sub-gate results (`size-gate`) appear only in a log written at `SLIM_DEBUG=2`, so a week at that level
+on a QA machine gives the full picture.
 
 ## Spill files and handles
 
@@ -613,7 +632,8 @@ slim has three layers with a hard boundary between each, plus its evals.
 - **Engines** — `plugins/slim/scripts/engines/`: a host-independent compression library. Pure Node
   modules (no environment, no filesystem, no process, no timers): text or an object in, a result
   object out. An engine returns what should be spilled; it never writes it. Any Node program can
-  embed it — a microservice, a CLI, a hook on another harness. The versioned contract — input,
+  embed it — a microservice, a CLI, a hook on another harness. `plugins/slim/scripts/engines/registry.cjs`
+  is the one table of engines (id, module, spill suffix, fit, stub and mcp flags). The versioned contract — input,
   detection rules, each engine's algorithm, output, guarantees and runnable examples — is
   `plugins/slim/scripts/engines/CONTRACT.md`. Beside `compress()`, `plugins/slim/scripts/engines/jq.cjs`
   narrows JSON for the view tool, `plugins/slim/scripts/engines/media.cjs` plans a resize and

@@ -30,7 +30,7 @@
 //                                    at debug level 1 or 2
 //   node slim.cjs --record           one lookup or view record on stdin → one report line, at every debug level
 //   node slim.cjs --error            the hooks module's own failure → one error line
-//   node slim.cjs --report [logfile] [--since ISO]
+//   node slim.cjs --report [logfile] [--since ISO] [--by-tool]
 //
 // Every record carries src:'slim' + its channel and goes to the report log in the spill root. Exit
 // status goes through process.exitCode only, so a large stdout is never cut short.
@@ -48,12 +48,15 @@ let enginesMod = null;
 const engines = () => enginesMod || (enginesMod = require('./engines/index.cjs'));
 const compress = (input, options) => engines().compress(input, options);
 const sniff = (input) => engines().sniff(input);
+const flags = (engine) => engines().REGISTRY[engine] || { ext: '.txt', fit: false, stub: false };
 const viewCore = () => require('./delivery/view.cjs');
 const promptCore = () => require('./delivery/prompt.cjs');
 
 const OUTPUT_CAP = 4_194_304 - 65_536; // the hooks module's stdout ceiling, less headroom
 const PRE_REASONS = new Set(['error-shape', 'already-slim', 'size-gate', 'spill-read', 'windowed-read', 'read-guard', 'not-text']);
-const STUB_REASONS = new Set(['non-json', 'no-gain', 'budget-exceeded', 'number-precision']);
+// The sniff guards an MCP text passes through under; like non-json, stubbed when too large.
+const GUARD_REASONS = new Set(['diff', 'test-output', 'template']);
+const STUB_REASONS = new Set(['non-json', 'no-gain', 'budget-exceeded', 'number-precision', ...GUARD_REASONS]);
 const OVERFLOW_PROBE_REASONS = new Set(['non-json', 'budget-exceeded']);
 const DISTILL_BUDGET = 49152;
 
@@ -109,7 +112,7 @@ function recordOf(base, decision, reason, bytesIn, bytesOut, x = {}) {
   };
 }
 
-// MCP: the json pipeline over every text block.
+// MCP: every text block sniffed, then the engine channels.cjs admits for it.
 
 // A result over MAX_MCP_OUTPUT_TOKENS reaches the hook as the host's short notice naming a
 // tool-results file. Both the phrase and a path are required, and only in a small text.
@@ -154,10 +157,16 @@ function mcpTexts(result) {
   return list.filter((t) => typeof t === 'string');
 }
 
-// One text through the json pipeline (the engine that handles every MCP shape: JSON, JSONL, fences,
-// envelopes, Figma JSX, logs). `target` is the size above which the caller would stub the text.
+// One text through the engine its sniff admits. Plain, guarded and HTML text is not compressed
+// (`non-json`, or the guard's name). `target` is the size above which the caller would stub the text.
 function slimText(text, deadline, parts, target) {
-  const r = compress({ data: text }, engineOptions(deadline, { engine: 'json', targetBytes: target || null }));
+  const sniffed = sniff({ data: text });
+  const engine = ch.admit('mcp', sniffed.engine);
+  if (engine === null) {
+    const guarded = GUARD_REASONS.has(sniffed.reason);
+    return { text, modified: false, reason: guarded ? sniffed.reason : 'non-json', stages: [], format: guarded ? 'text' : engines().peek(text).format };
+  }
+  const r = compress({ data: text }, engineOptions(deadline, { engine, targetBytes: (flags(engine).fit && target) || null }));
   if (r.decision !== 'compressed') return { text, modified: false, reason: r.reason || 'no-gain', stages: r.stats.stages, format: r.format };
   for (const p of r.parts || []) parts.push(p);
   return { text: r.text, modified: true, reason: null, stages: r.stats.stages, engine: r.engine };
@@ -210,7 +219,8 @@ function slimResult(result, deadline, parts, target) {
   return { value: result, modified: false, kind: 'none', reason: 'unrecognized-shape', anyError: false, stages: [], engines: new Set() };
 }
 
-const engineOf = (s) => (s.engines.has('log') ? 'log' : s.engines.has('figma') ? 'figma' : s.engines.has('jsonl') ? 'jsonl' : 'json');
+// The most specific engine of the blocks: any but the JSON pair, then jsonl, then json.
+const engineOf = (s) => [...s.engines].find((e) => e !== 'json' && e !== 'jsonl') || (s.engines.has('jsonl') ? 'jsonl' : 'json');
 
 function attachMarker(res, suffix) {
   const v = res.value;
@@ -444,16 +454,16 @@ function slimChannelText(channel, text, opts) {
   const bytes = utf8(text);
   const gate = ch.structuredGate(channel, engine, opts.plainBytes);
   if (gate !== null && bytes <= gate) return { pass: 'size-gate' };
-  // A JSON view or a node tree over the egress cap is stubbed, so the engine is asked to fit under it first.
+  // Output over the egress cap is stubbed, so an engine that can fit is asked to fit under it first.
   const run = (e) => compress({ data: text }, engineOptions(opts.deadline, {
     engine: e, budgetBytes: opts.window, plainBytes: ch.plainGate(channel, opts.plainBytes),
-    targetBytes: ['json', 'jsonl', 'figma-nodes'].includes(e) ? opts.egress || null : null,
+    targetBytes: flags(e).fit ? opts.egress || null : null,
   }));
   let r = run(engine);
   // A node tree its depth fold cannot fit would pass through raw; the JSON route can still fit it or stub it.
   if (r.decision === 'compressed' && r.engine === 'figma-nodes' && utf8(r.text) > (opts.egress || Infinity)) r = run('json');
   if (r.decision !== 'compressed') return { pass: r.reason || 'no-gain', format: r.format, engine };
-  return { out: r.text, engine: r.engine, stages: r.stats.stages, parts: r.parts || [], window: r.window, json: r.engine === 'json' || r.engine === 'jsonl', ext: ['json', 'jsonl', 'figma-nodes'].includes(r.engine) ? '.json' : '.txt' };
+  return { out: r.text, engine: r.engine, stages: r.stats.stages, parts: r.parts || [], window: r.window, ext: flags(r.engine).ext };
 }
 
 function runChannel(input, base) {
@@ -522,8 +532,8 @@ function runChannel(input, base) {
 
   const persistedByHost = (value) => inline !== null && value.length + stderrChars >= inline;
   const capped = () => {
-    if (!s.json && s.engine !== 'figma-nodes') return pass('egress-cap', bytesIn);
-    const st = emit.stubFor(base.tool, text, 'json', original.path, 'egress-cap', false);
+    if (!flags(s.engine).stub) return pass('egress-cap', bytesIn);
+    const st = emit.stubFor(base.tool, text, s.ext === '.json' ? 'json' : null, original.path, 'egress-cap', false);
     const built = emit.withStats((stats) => st.render(stats), 'stub', bytesIn, utf8);
     if (persistedByHost(built.value)) return pass('egress-cap', bytesIn);
     return {
@@ -846,9 +856,11 @@ function handleAccess(raw) {
 function handleReport(args) {
   let file = null;
   let since = null;
+  let byTool = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === '--since' && i + 1 < args.length) since = args[++i];
+    if (a === '--by-tool') byTool = true;
+    else if (a === '--since' && i + 1 < args.length) since = args[++i];
     else if (a.startsWith('--since=')) since = a.slice('--since='.length);
     else if (a.startsWith('-') || file !== null) { usage(process.stderr); process.exitCode = 2; return; }
     else file = a;
@@ -865,7 +877,7 @@ function handleReport(args) {
     process.exitCode = 1;
     return;
   }
-  process.stdout.write(`${rep.report(text, { file, since })}\n`);
+  process.stdout.write(`${rep.report(text, { file, since, byTool })}\n`);
   process.exitCode = 0;
 }
 
@@ -879,7 +891,7 @@ function usage(stream) {
     '       node slim.cjs --access < access.json            log a model\'s read of slim\'s spill files',
     '       node slim.cjs --record < record.json            log one lookup or view',
     '       node slim.cjs --error < error.json              log the hooks module\'s own failure',
-    '       node slim.cjs --report [logfile] [--since ISO]  report by src and by channel',
+    '       node slim.cjs --report [logfile] [--since ISO] [--by-tool]  report by src and by channel (--by-tool: passthrough and stub bytes per tool and reason)',
   ].join('\n') + '\n');
 }
 

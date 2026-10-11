@@ -16,7 +16,7 @@ const mediaD = require('./media.cjs');
 const mediaE = require('../engines/media.cjs');
 const figmaNodes = require('../engines/figma-nodes.cjs');
 const jq = require('../engines/jq.cjs');
-const { compress, sniff, ENGINES: ENGINE_IDS } = require('../engines/index.cjs');
+const { compress, sniff, ENGINES: ENGINE_IDS, REGISTRY } = require('../engines/index.cjs');
 
 const TOOL = 'mcp__slim__view';
 // The reply shows text up to this size whole; past it, the head and a file to Read windowed.
@@ -231,7 +231,7 @@ function view(input, opts) {
   // A command's output is gone once the call returns: a compressed view keeps the original on disk.
   if (compressed && !file) {
     if (!original) {
-      const s = spill.writeOriginal(text, ['json', 'jsonl', 'figma-nodes', 'adf'].includes(usedEngine) ? '.json' : '.txt');
+      const s = spill.writeOriginal(text, REGISTRY[usedEngine] ? REGISTRY[usedEngine].ext : '.txt');
       if (!s) return refuse('spill-write-failure', 'view: the original output could not be kept');
       if (s.created) created.push(s.path);
       original = s.path;

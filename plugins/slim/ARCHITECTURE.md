@@ -61,6 +61,7 @@ the code on the date at the bottom; the code wins when they drift.
 │  LAYER 1 · ENGINES   plugins/slim/scripts/engines/*.cjs   — pure library, CONTRACT.md v1     │
 │  no env, no fs, no stdin, no child_process, no os, no timers; only 'crypto' + siblings       │
 │                                                                                              │
+│  registry.cjs (the one engine table: id · module · spill ext · fit · stub · mcp)             │
 │  index.cjs → sniff.cjs ─┬─ json.cjs   (envelope unwrap · noise · ADF→md · smart crush · trim)│
 │                         ├─ log.cjs    (dedupe · levels · stack traces kept · ×N survivors)   │
 │                         ├─ html.cjs   (title/meta · visible text as md · links · script src) │
@@ -101,10 +102,10 @@ flowchart TD
   G -- yes --> H[spill.cjs<br/>resolve to this session's tool-results file<br/>realpath · owner · ≤ 32 MiB]
   G -- no --> I
   H -- refused --> Z2[passthrough expand-refused]
-  H -- ok --> I[engines.sniff<br/>content, never the tool name]
-  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file}
-  J --> K[engines.compress<br/>maxMs 5000 · targetBytes for json and figma-nodes]
-  K -- passthrough · refused --> L{stubbable?<br/>MCP json over 32 KB}
+  H -- ok --> I[engines.sniff<br/>content, never the tool name<br/>every channel, MCP per text block]
+  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>MCP: plain, guarded and HTML text not compressed}
+  J --> K[engines.compress<br/>maxMs 5000 · targetBytes for engines flagged fit]
+  K -- passthrough · refused --> L{stubbable?<br/>MCP over 32 KB}
   L -- yes --> M[emit stub + spill original]
   L -- no --> Z3[passthrough with reason]
   K -- compressed --> N[spill.cjs writes original + parts<br/>emit.cjs appends stats line + handle<br/>channels.cjs puts text back in the record]
@@ -126,7 +127,7 @@ non-zero exit, bad JSON) leaves the original result untouched and writes an erro
 
 ### Gates (bytes of the text slim would read)
 
-| channel | gate | window if plain text | egress cap (json still over it → stub) |
+| channel | gate | window if plain text | egress cap (output still over it → stub) |
 |---|---|---|---|
 | mcp | 4,096 | — | stub threshold 32,768 |
 | bash | 4,096 | a host-persisted output always (4,096 budget), else over SLIM_PLAIN_BYTES | host inline limit − 2,048, at most 32,768; an answer at or past the host limit (chars, stdout + stderr) → stub, or pass through |
@@ -152,6 +153,10 @@ them equal, so the pure pre-decision in the module and the core never disagree.
   diffs and code reach the model intact or as head + tail with a hidden-lines count.
 - **html runs only after a fetching command** (`curl`, `wget`, `xh`, …) and **log only when the
   command or file looks like a log**: `cat src/page.html` is source, not a page.
+- **MCP text is sniffed too, guards included**: a text block that sniffs as plain text, a diff, test
+  output, a template or HTML passes through (stubbed when too large); every other shape goes the json
+  route, which unwraps fences, JSONL, block envelopes, Figma JSX and logs. So theme-check output that
+  quotes Liquid is never log-compressed, whichever tool returned it.
 - **Binary** (PNG, PDF, zip magic bytes) is refused before any engine runs.
 - **A spill or host file read back by the model** (a spill name of §3, a `slim-prompt-*` file in the
   prompt dir, a tool-results file) passes through uncompressed: that Read is how a `<<full=…>>`
@@ -361,7 +366,7 @@ All rows live in `README.md` → Environment switches; `tests/readme-checks.sh` 
 
 | layer | suite | what it pins |
 |---|---|---|
-| engines | `tests/slim-engines.mjs` | contract shape, refusals, determinism, no fs writes, smart-crusher and log-compressor parity, purity grep, media planning, jq narrowing, prompt spans |
+| engines | `tests/slim-engines.mjs` | contract shape, the engine registry and the id lists pinned to it, refusals, determinism, no fs writes, smart-crusher and log-compressor parity, purity grep, media planning, jq narrowing, prompt spans |
 | engines (html) | `tests/html-slim-fixtures.mjs` | the html engine on `tests/fixtures/page.html` and malformed markup |
 | delivery | `tests/slim-fixtures.mjs` | one envelope per channel through `slim.cjs`: decisions, restored shapes, records, gates equal to the module's, `--report`; `--view` (jq, out roots, cache marker, host files, media); the media backend against fake `ffprobe` / `ffmpeg` / `sips` on a one-dir PATH; @-mentioned files; `--prompt` (in place, durable dir, worktree, output bound, link rail); `--access` and its `--report` pairing |
 | module | `plugins/slim/hooks/mods/tests/*.test.ts(x)` via `claude plugin test` | every channel's hook, pre-decisions, lookup rungs with mocked `$.tool.call` / `$.model.complete`, view's checks, Write path and reply text, the prompt rewrite and its origins, the attachment hook, the spill-read guard, describe, render, info |
@@ -371,8 +376,11 @@ All rows live in `README.md` → Environment switches; `tests/readme-checks.sh` 
 ## 8. Adding things
 
 - **A new engine**: one file under `engines/` exporting `{ id, run(text, opts, ctx) }`, one row in
-  `engines/index.cjs`, one rule in `engines/sniff.cjs`, its section in `CONTRACT.md`, its fixture
-  tests. Then decide per channel in `delivery/channels.cjs` whether the channel admits it.
+  `engines/registry.cjs` (spill ext, `fit`, `stub`, `mcp`), one rule in `engines/sniff.cjs`, its id added to
+  the literal lists `tests/slim-engines.mjs` ER pins to the registry (`ENGINES` in
+  `hooks/mods/node-hook.ts`, `SlimEngine` in `types/index.d.ts`, `VIEW_ENGINES` in
+  `hooks/mods/view.ts`), its section in `CONTRACT.md`, its fixture tests. Then decide per channel in
+  `delivery/channels.cjs` `admit()` whether the channel admits it (MCP: the row's `mcp` flag).
 - **A new channel**: a row in the module's `GATES` and `channels.ts` (tool → channel, what to read),
   the same row in `delivery/channels.cjs` (take out / put back the record shape — read the tool's
   output type in the engine's `claude-code.d.ts`), a `SLIM_<CH>` switch with its README row, a kit

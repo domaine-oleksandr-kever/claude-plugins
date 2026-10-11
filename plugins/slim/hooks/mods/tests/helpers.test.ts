@@ -215,7 +215,9 @@ describe('channels', () => {
   test('GATES, LOG_GATE and ENGINES are the contract', () => {
     expect(GATES).toEqual({ mcp: 4096, bash: 4096, read: 32768, webfetch: 16384, websearch: 0, grep: 16384, agent: 0, attachment: 32768 })
     expect(LOG_GATE).toBe(16384)
-    expect(ENGINES).toEqual(['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'stub'])
+    // The ids themselves are pinned to engines/registry.cjs by tests/slim-engines.mjs (ER-node-hook).
+    expect(ENGINES).toContain('stub')
+    expect(new Set(ENGINES).size).toBe(ENGINES.length)
   })
 
   test('structured: JSON or a page at the start; a template or prose is not', () => {

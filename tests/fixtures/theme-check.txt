@@ -1,0 +1,242 @@
+[error] sections/main-product-0.liquid:10:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    10 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] sections/main-product-0.liquid:23:4 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    23 | {% render 'card-badge', product: card_product %}
+[warning] sections/main-product-0.liquid:36:5 UndefinedObject: Unknown object 'section_settings' used.
+    36 | {{ section_settings.heading | escape }}
+[warning] sections/main-product-0.liquid:49:6 ImgWidthAndHeight: Missing width and height attributes on img
+    49 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] sections/main-product-0.liquid:62:7 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    62 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] sections/main-product-0.liquid:75:3 UnusedAssign: The variable 'card_index' is assigned but not used
+    75 | {%- assign card_index = forloop.index | plus: 5 -%}
+[error] snippets/card-product-1.liquid:17:3 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    17 | {% render 'card-badge', product: card_product %}
+[warning] snippets/card-product-1.liquid:30:4 UndefinedObject: Unknown object 'section_settings' used.
+    30 | {{ section_settings.heading | escape }}
+[warning] snippets/card-product-1.liquid:43:5 ImgWidthAndHeight: Missing width and height attributes on img
+    43 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] snippets/card-product-1.liquid:56:6 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    56 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] snippets/card-product-1.liquid:69:7 UnusedAssign: The variable 'card_index' is assigned but not used
+    69 | {%- assign card_index = forloop.index | plus: 10 -%}
+[error] snippets/card-product-1.liquid:82:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    82 | {%- render 'price', product: product, show_badges: true -%}</div>
+[warning] blocks/collection-grid-2.liquid:24:3 UndefinedObject: Unknown object 'section_settings' used.
+    24 | {{ section_settings.heading | escape }}
+[warning] blocks/collection-grid-2.liquid:37:4 ImgWidthAndHeight: Missing width and height attributes on img
+    37 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] blocks/collection-grid-2.liquid:50:5 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    50 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] blocks/collection-grid-2.liquid:63:6 UnusedAssign: The variable 'card_index' is assigned but not used
+    63 | {%- assign card_index = forloop.index | plus: 15 -%}
+[error] blocks/collection-grid-2.liquid:76:7 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    76 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] blocks/collection-grid-2.liquid:89:3 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    89 | {% render 'card-badge', product: card_product %}
+[warning] sections/header-3.liquid:31:3 ImgWidthAndHeight: Missing width and height attributes on img
+    31 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] sections/header-3.liquid:44:4 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    44 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] sections/header-3.liquid:57:5 UnusedAssign: The variable 'card_index' is assigned but not used
+    57 | {%- assign card_index = forloop.index | plus: 20 -%}
+[error] sections/header-3.liquid:70:6 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    70 | {%- render 'price', product: product, show_badges: true -%}</div>
+[error] sections/header-3.liquid:83:7 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    83 | {% render 'card-badge', product: card_product %}
+[warning] sections/header-3.liquid:96:3 UndefinedObject: Unknown object 'section_settings' used.
+    96 | {{ section_settings.heading | escape }}
+[suggestion] snippets/footer-4.liquid:38:3 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    38 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] snippets/footer-4.liquid:51:4 UnusedAssign: The variable 'card_index' is assigned but not used
+    51 | {%- assign card_index = forloop.index | plus: 25 -%}
+[error] snippets/footer-4.liquid:64:5 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    64 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] snippets/footer-4.liquid:77:6 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    77 | {% render 'card-badge', product: card_product %}
+[warning] snippets/footer-4.liquid:90:7 UndefinedObject: Unknown object 'section_settings' used.
+    90 | {{ section_settings.heading | escape }}
+[warning] snippets/footer-4.liquid:103:3 ImgWidthAndHeight: Missing width and height attributes on img
+    103 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[warning] blocks/main-product-5.liquid:45:3 UnusedAssign: The variable 'card_index' is assigned but not used
+    45 | {%- assign card_index = forloop.index | plus: 30 -%}
+[error] blocks/main-product-5.liquid:58:4 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    58 | {%- render 'price', product: product, show_badges: true -%}</div>
+[error] blocks/main-product-5.liquid:71:5 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    71 | {% render 'card-badge', product: card_product %}
+[warning] blocks/main-product-5.liquid:84:6 UndefinedObject: Unknown object 'section_settings' used.
+    84 | {{ section_settings.heading | escape }}
+[warning] blocks/main-product-5.liquid:97:7 ImgWidthAndHeight: Missing width and height attributes on img
+    97 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] blocks/main-product-5.liquid:110:3 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    110 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[error] sections/card-product-6.liquid:52:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    52 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] sections/card-product-6.liquid:65:4 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    65 | {% render 'card-badge', product: card_product %}
+[warning] sections/card-product-6.liquid:78:5 UndefinedObject: Unknown object 'section_settings' used.
+    78 | {{ section_settings.heading | escape }}
+[warning] sections/card-product-6.liquid:91:6 ImgWidthAndHeight: Missing width and height attributes on img
+    91 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] sections/card-product-6.liquid:104:7 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    104 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] sections/card-product-6.liquid:117:3 UnusedAssign: The variable 'card_index' is assigned but not used
+    117 | {%- assign card_index = forloop.index | plus: 41 -%}
+[error] snippets/collection-grid-7.liquid:59:3 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    59 | {% render 'card-badge', product: card_product %}
+[warning] snippets/collection-grid-7.liquid:72:4 UndefinedObject: Unknown object 'section_settings' used.
+    72 | {{ section_settings.heading | escape }}
+[warning] snippets/collection-grid-7.liquid:85:5 ImgWidthAndHeight: Missing width and height attributes on img
+    85 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] snippets/collection-grid-7.liquid:98:6 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    98 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] snippets/collection-grid-7.liquid:111:7 UnusedAssign: The variable 'card_index' is assigned but not used
+    111 | {%- assign card_index = forloop.index | plus: 46 -%}
+[error] snippets/collection-grid-7.liquid:124:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    124 | {%- render 'price', product: product, show_badges: true -%}</div>
+[warning] blocks/header-8.liquid:66:3 UndefinedObject: Unknown object 'section_settings' used.
+    66 | {{ section_settings.heading | escape }}
+[warning] blocks/header-8.liquid:79:4 ImgWidthAndHeight: Missing width and height attributes on img
+    79 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] blocks/header-8.liquid:92:5 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    92 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] blocks/header-8.liquid:105:6 UnusedAssign: The variable 'card_index' is assigned but not used
+    105 | {%- assign card_index = forloop.index | plus: 51 -%}
+[error] blocks/header-8.liquid:118:7 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    118 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] blocks/header-8.liquid:131:3 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    131 | {% render 'card-badge', product: card_product %}
+[warning] sections/footer-9.liquid:73:3 ImgWidthAndHeight: Missing width and height attributes on img
+    73 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] sections/footer-9.liquid:86:4 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    86 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] sections/footer-9.liquid:99:5 UnusedAssign: The variable 'card_index' is assigned but not used
+    99 | {%- assign card_index = forloop.index | plus: 56 -%}
+[error] sections/footer-9.liquid:112:6 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    112 | {%- render 'price', product: product, show_badges: true -%}</div>
+[error] sections/footer-9.liquid:125:7 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    125 | {% render 'card-badge', product: card_product %}
+[warning] sections/footer-9.liquid:138:3 UndefinedObject: Unknown object 'section_settings' used.
+    138 | {{ section_settings.heading | escape }}
+[suggestion] snippets/main-product-10.liquid:80:3 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    80 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] snippets/main-product-10.liquid:93:4 UnusedAssign: The variable 'card_index' is assigned but not used
+    93 | {%- assign card_index = forloop.index | plus: 61 -%}
+[error] snippets/main-product-10.liquid:106:5 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    106 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] snippets/main-product-10.liquid:119:6 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    119 | {% render 'card-badge', product: card_product %}
+[warning] snippets/main-product-10.liquid:132:7 UndefinedObject: Unknown object 'section_settings' used.
+    132 | {{ section_settings.heading | escape }}
+[warning] snippets/main-product-10.liquid:145:3 ImgWidthAndHeight: Missing width and height attributes on img
+    145 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[warning] blocks/card-product-11.liquid:87:3 UnusedAssign: The variable 'card_index' is assigned but not used
+    87 | {%- assign card_index = forloop.index | plus: 66 -%}
+[error] blocks/card-product-11.liquid:100:4 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    100 | {%- render 'price', product: product, show_badges: true -%}</div>
+[error] blocks/card-product-11.liquid:113:5 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    113 | {% render 'card-badge', product: card_product %}
+[warning] blocks/card-product-11.liquid:126:6 UndefinedObject: Unknown object 'section_settings' used.
+    126 | {{ section_settings.heading | escape }}
+[warning] blocks/card-product-11.liquid:139:7 ImgWidthAndHeight: Missing width and height attributes on img
+    139 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] blocks/card-product-11.liquid:152:3 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    152 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[error] sections/collection-grid-12.liquid:94:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    94 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] sections/collection-grid-12.liquid:107:4 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    107 | {% render 'card-badge', product: card_product %}
+[warning] sections/collection-grid-12.liquid:120:5 UndefinedObject: Unknown object 'section_settings' used.
+    120 | {{ section_settings.heading | escape }}
+[warning] sections/collection-grid-12.liquid:133:6 ImgWidthAndHeight: Missing width and height attributes on img
+    133 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] sections/collection-grid-12.liquid:146:7 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    146 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] sections/collection-grid-12.liquid:159:3 UnusedAssign: The variable 'card_index' is assigned but not used
+    159 | {%- assign card_index = forloop.index | plus: 77 -%}
+[error] snippets/header-13.liquid:101:3 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    101 | {% render 'card-badge', product: card_product %}
+[warning] snippets/header-13.liquid:114:4 UndefinedObject: Unknown object 'section_settings' used.
+    114 | {{ section_settings.heading | escape }}
+[warning] snippets/header-13.liquid:127:5 ImgWidthAndHeight: Missing width and height attributes on img
+    127 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] snippets/header-13.liquid:140:6 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    140 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] snippets/header-13.liquid:153:7 UnusedAssign: The variable 'card_index' is assigned but not used
+    153 | {%- assign card_index = forloop.index | plus: 82 -%}
+[error] snippets/header-13.liquid:166:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    166 | {%- render 'price', product: product, show_badges: true -%}</div>
+[warning] blocks/footer-14.liquid:108:3 UndefinedObject: Unknown object 'section_settings' used.
+    108 | {{ section_settings.heading | escape }}
+[warning] blocks/footer-14.liquid:121:4 ImgWidthAndHeight: Missing width and height attributes on img
+    121 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] blocks/footer-14.liquid:134:5 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    134 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] blocks/footer-14.liquid:147:6 UnusedAssign: The variable 'card_index' is assigned but not used
+    147 | {%- assign card_index = forloop.index | plus: 87 -%}
+[error] blocks/footer-14.liquid:160:7 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    160 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] blocks/footer-14.liquid:173:3 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    173 | {% render 'card-badge', product: card_product %}
+[warning] sections/main-product-15.liquid:115:3 ImgWidthAndHeight: Missing width and height attributes on img
+    115 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] sections/main-product-15.liquid:128:4 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    128 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] sections/main-product-15.liquid:141:5 UnusedAssign: The variable 'card_index' is assigned but not used
+    141 | {%- assign card_index = forloop.index | plus: 92 -%}
+[error] sections/main-product-15.liquid:154:6 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    154 | {%- render 'price', product: product, show_badges: true -%}</div>
+[error] sections/main-product-15.liquid:167:7 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    167 | {% render 'card-badge', product: card_product %}
+[warning] sections/main-product-15.liquid:180:3 UndefinedObject: Unknown object 'section_settings' used.
+    180 | {{ section_settings.heading | escape }}
+[suggestion] snippets/card-product-16.liquid:122:3 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    122 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] snippets/card-product-16.liquid:135:4 UnusedAssign: The variable 'card_index' is assigned but not used
+    135 | {%- assign card_index = forloop.index | plus: 97 -%}
+[error] snippets/card-product-16.liquid:148:5 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    148 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] snippets/card-product-16.liquid:161:6 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    161 | {% render 'card-badge', product: card_product %}
+[warning] snippets/card-product-16.liquid:174:7 UndefinedObject: Unknown object 'section_settings' used.
+    174 | {{ section_settings.heading | escape }}
+[warning] snippets/card-product-16.liquid:187:3 ImgWidthAndHeight: Missing width and height attributes on img
+    187 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[warning] blocks/collection-grid-17.liquid:129:3 UnusedAssign: The variable 'card_index' is assigned but not used
+    129 | {%- assign card_index = forloop.index | plus: 102 -%}
+[error] blocks/collection-grid-17.liquid:142:4 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    142 | {%- render 'price', product: product, show_badges: true -%}</div>
+[error] blocks/collection-grid-17.liquid:155:5 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    155 | {% render 'card-badge', product: card_product %}
+[warning] blocks/collection-grid-17.liquid:168:6 UndefinedObject: Unknown object 'section_settings' used.
+    168 | {{ section_settings.heading | escape }}
+[warning] blocks/collection-grid-17.liquid:181:7 ImgWidthAndHeight: Missing width and height attributes on img
+    181 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] blocks/collection-grid-17.liquid:14:3 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    14 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[error] sections/header-18.liquid:136:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    136 | {%- render 'price', product: product, show_badges: false -%}</div>
+[error] sections/header-18.liquid:149:4 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    149 | {% render 'card-badge', product: card_product %}
+[warning] sections/header-18.liquid:162:5 UndefinedObject: Unknown object 'section_settings' used.
+    162 | {{ section_settings.heading | escape }}
+[warning] sections/header-18.liquid:175:6 ImgWidthAndHeight: Missing width and height attributes on img
+    175 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] sections/header-18.liquid:188:7 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    188 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] sections/header-18.liquid:21:3 UnusedAssign: The variable 'card_index' is assigned but not used
+    21 | {%- assign card_index = forloop.index | plus: 113 -%}
+[error] snippets/footer-19.liquid:143:3 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+    143 | {% render 'card-badge', product: card_product %}
+[warning] snippets/footer-19.liquid:156:4 UndefinedObject: Unknown object 'section_settings' used.
+    156 | {{ section_settings.heading | escape }}
+[warning] snippets/footer-19.liquid:169:5 ImgWidthAndHeight: Missing width and height attributes on img
+    169 | <img src="{{ block.settings.image | image_url: width: 800 }}" alt="">
+[suggestion] snippets/footer-19.liquid:182:6 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+    182 | <script src="https://cdn.example.invalid/slider.js" defer></script>
+[warning] snippets/footer-19.liquid:15:7 UnusedAssign: The variable 'card_index' is assigned but not used
+    15 | {%- assign card_index = forloop.index | plus: 118 -%}
+[error] snippets/footer-19.liquid:28:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+    28 | {%- render 'price', product: product, show_badges: true -%}</div>
+
+120 files inspected with 120 offenses found, 0 corrected (40 errors, 60 warnings, 20 suggestions).

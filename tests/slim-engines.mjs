@@ -3,7 +3,8 @@
 // would: compress() / sniff() / peek() as pure functions, no environment, no temp dirs (except the
 // CONTRACT.md server example), maxMs:0 for determinism. Rows: ES sniff, EC compress, EG guarantees
 // (never throws, deterministic, never writes), EP parity against Headroom's fixtures, EF generators
-// equal the committed fixtures, EX the contract's example runs, EL the layer's purity, EN the
+// equal the committed fixtures, EX the contract's example runs, EL the layer's purity, ER the engine
+// registry and the id lists outside the layer pinned to it, EN the
 // figma-nodes engine on synthetic REST nodes responses, EM media planning, EQ the jq narrowing the
 // view tool runs before an engine.
 import { spawn, spawnSync } from 'node:child_process';
@@ -728,7 +729,7 @@ check('EF-orders-size', bytes(ORDERS) < 256 * 1024 && bytes(ORDERS) > 150 * 1024
 {
   const banned = /\bprocess\.|require\(['"](node:)?(fs|fs\/promises|os|child_process|net|http|https|worker_threads|readline)['"]\)|\bset(Timeout|Interval|Immediate)\b|\bglobalThis\b/;
   const files = readdirSync(ENGINES).filter((f) => f.endsWith('.cjs'));
-  check('EL-files', ['index.cjs', 'sniff.cjs', 'json.cjs', 'log.cjs', 'html.cjs', 'figma.cjs', 'figma-nodes.cjs', 'adf.cjs', 'media.cjs', 'jq.cjs', 'spans.cjs', 'text-window.cjs', 'util.cjs'].every((f) => files.includes(f)), files.join(' '));
+  check('EL-files', ['index.cjs', 'registry.cjs', 'sniff.cjs', 'json.cjs', 'log.cjs', 'html.cjs', 'figma.cjs', 'figma-nodes.cjs', 'adf.cjs', 'media.cjs', 'jq.cjs', 'spans.cjs', 'text-window.cjs', 'util.cjs'].every((f) => files.includes(f)), files.join(' '));
   for (const f of files) {
     const src = readFileSync(path.join(ENGINES, f), 'utf8');
     check(`EL-pure-${f}`, !banned.test(src), (banned.exec(src) || [])[0]);
@@ -736,6 +737,31 @@ check('EF-orders-size', bytes(ORDERS) < 256 * 1024 && bytes(ORDERS) > 150 * 1024
     check(`EL-requires-${f}`, reqs.every((r) => r === 'crypto' || /^\.\/[\w-]+\.cjs$/.test(r)), reqs.join(' '));
   }
   check('EL-contract-doc', readFileSync(path.join(ENGINES, 'CONTRACT.md'), 'utf8').includes('compress(input, options)'), 'CONTRACT.md');
+}
+
+// ER — registry.cjs is the one engine table; the hooks module and the types cannot require it, so
+// their literal id lists are pinned to it here (order-free: parallel additions merge in any order).
+{
+  const { ROWS } = require(path.join(ENGINES, 'registry.cjs'));
+  const ids = ROWS.map((r) => r.id);
+  eq('ER-ids', lib.ENGINES, ids);
+  eq('ER-unique', new Set(ids).size, ids.length);
+  for (const r of ROWS) {
+    check(`ER-row-${r.id}`, typeof r.module.run === 'function' && ['.json', '.txt'].includes(r.ext) && typeof r.fit === 'boolean' && typeof r.stub === 'boolean' && typeof r.mcp === 'boolean', JSON.stringify({ ...r, module: typeof r.module }));
+    eq(`ER-flags-${r.id}`, lib.REGISTRY[r.id], { ext: r.ext, fit: r.fit, stub: r.stub, mcp: r.mcp });
+  }
+  const SLIM = path.join(ROOT, 'plugins/slim');
+  const src = (f) => readFileSync(path.join(SLIM, f), 'utf8');
+  const quoted = (s) => [...String(s || '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
+  const want = (...extra) => [...ids, ...extra].sort();
+  eq('ER-node-hook', quoted((/export const ENGINES: readonly SlimEngine\[\] = \[([^\]]*)\]/.exec(src('hooks/mods/node-hook.ts')) || [])[1]), want('stub'));
+  eq('ER-types', quoted((/export type SlimEngine = ([^\n]*)/.exec(src('types/index.d.ts')) || [])[1]), want('stub'));
+  eq('ER-view', quoted((/export const VIEW_ENGINES = \[([^\]]*)\] as const/.exec(src('hooks/mods/view.ts')) || [])[1]), want('media'));
+  // Every compressed result is spilled under its engine's suffix.
+  for (const [data, engine] of [[JQL, 'json'], [APPLOG, 'log'], [ADF, 'adf']]) {
+    const r = compress({ data }, { ...O, engine });
+    check(`ER-ext-${engine}`, r.decision === 'compressed' && r.spill.suggestedName.endsWith(lib.REGISTRY[engine].ext), r.decision);
+  }
 }
 
 // EX — the CONTRACT.md microservice example, run as written (its import pointed at this checkout, port 0)

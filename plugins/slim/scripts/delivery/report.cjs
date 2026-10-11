@@ -382,8 +382,36 @@ function totalsBy(events, keyOf) {
   return [...m.keys()].sort().map((k) => saving(k, m.get(k))).join(' · ');
 }
 
-// The --report text for the log's raw lines.
-function report(text, { file, since } = {}) {
+// Per tool, the bytes slim let through and the bytes it stubbed, by reason (a passthrough reason
+// carries its format: `non-json/xml`), largest first: where an engine would earn the most.
+function byTool(events) {
+  const m = new Map();
+  for (const e of events) {
+    const k = `${e.tool || '(unknown)'} [${e.channel || 'mcp'}]`;
+    const t = m.get(k) || { n: 0, pass: new Map(), passB: 0, stub: new Map(), stubIn: 0, stubOut: 0, compIn: 0, compOut: 0 };
+    const bi = seenBytes(e);
+    t.n++;
+    const add = (map, reason) => { const r = map.get(reason) || { n: 0, b: 0 }; r.n++; r.b += bi; map.set(reason, r); };
+    if (e.decision === 'stubbed') { add(t.stub, String(e.reason || 'unknown')); t.stubIn += bi; t.stubOut += Number(e.bytes_out) || 0; }
+    else if (e.decision === 'compressed') { t.compIn += bi; t.compOut += Number(e.bytes_out) || 0; }
+    else if (e.decision === 'passthrough') { add(t.pass, `${e.reason || 'unknown'}${e.format ? `/${e.format}` : ''}`); t.passB += bi; }
+    m.set(k, t);
+  }
+  const reasons = (map) => [...map.entries()].sort((a, b) => (b[1].b - a[1].b) || (a[0] < b[0] ? -1 : 1)).map(([r, x]) => `${r} ${x.n} × ${commas(x.b)} B`).join(' · ');
+  const out = ['  by tool (passthrough and stubbed bytes by reason):'];
+  const rows = [...m.entries()].sort((a, b) => ((b[1].passB + b[1].stubIn) - (a[1].passB + a[1].stubIn)) || (a[0] < b[0] ? -1 : 1));
+  if (!rows.length) out.push('    (no events)');
+  for (const [k, t] of rows) {
+    out.push(`    ${k} — ${t.n} call${t.n === 1 ? '' : 's'}`);
+    if (t.pass.size) out.push(`      passthrough ${commas(t.passB)} B: ${reasons(t.pass)}`);
+    if (t.stub.size) out.push(`      stubbed ${commas(t.stubIn)} B → ${commas(t.stubOut)} B: ${reasons(t.stub)}`);
+    if (t.compIn) out.push(`      compressed ${commas(t.compIn)} B → ${commas(t.compOut)} B`);
+  }
+  return out;
+}
+
+// The --report text for the log's raw lines; `byTool` adds the per-tool passthrough / stub breakdown.
+function report(text, { file, since, byTool: perTool } = {}) {
   const lines = text.split('\n');
   const events = [];
   const comp = [];
@@ -412,6 +440,7 @@ function report(text, { file, since } = {}) {
     }
     out.push(`  lookup: ${lookups.length} calls (${answered} answered) · ${tin} in / ${tout} out tokens · ${[...models.entries()].map(([m, n]) => `${m}×${n}`).join(' ')}`);
   }
+  if (perTool) out.push(...byTool(comp));
   return out.join('\n');
 }
 
