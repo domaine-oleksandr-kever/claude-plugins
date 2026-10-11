@@ -19,7 +19,7 @@ slim is a Claude Code hooks module (mods) and nothing else: other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads; the drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.10.2**.
+Current release: **slim v0.11.0**.
 
 ## Install
 
