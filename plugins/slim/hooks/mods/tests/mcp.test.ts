@@ -307,7 +307,7 @@ describe('M9 a failed core run → r unchanged and one --error spawn', () => {
     ['truncated stdout', () => out('{"decision":"compressed"', 0, true), 'stdout-truncated'],
     ['garbage', () => out('{bad'), 'bad-output'],
     ['empty stdout', () => out(''), 'bad-output'],
-    ['an unknown engine', answer({}, { engine: 'xml' }), 'bad-output'],
+    ['an unknown engine', answer({}, { engine: 'yaml' }), 'bad-output'],
   ]
   for (const [name, core, reason] of cases) {
     test(name, { plugins: [PEEK] }, async ($, on) => {

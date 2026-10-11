@@ -26,6 +26,7 @@ const SOURCE_JSON_DIR = /(?:^|\/)(?:config|templates|locales|sections|blocks|sni
 const SOURCE_JSON_BASE = /^(?:package(?:-lock)?|tsconfig[\w.-]*|composer|jsconfig|\.?[\w-]*rc)\.json$|\.schema\.json$/i;
 const isSourceJson = (p) => SOURCE_JSON_DIR.test(p) || SOURCE_JSON_BASE.test(path.basename(p));
 const READ_LOG_EXT = new Set(['.log', '.jsonl', '.ndjson']);
+const READ_XML_EXT = new Set(['.xml']);
 
 const utf8 = (s) => Buffer.byteLength(s, 'utf8');
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -33,8 +34,8 @@ const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 // The words of a shell command that look like paths.
 const commandWords = (cmd) => String(cmd || '').split(/[\s'"|;&<>()=]+/).filter(Boolean);
 
-// The engine a channel lets run on a sniffed payload: html and log need a command that fetches or
-// reads a log, everything a channel does not admit is treated as plain text. A Figma REST nodes
+// The engine a channel lets run on a sniffed payload: html and xml need a command that fetches, log
+// one that reads a log, everything a channel does not admit is treated as plain text. A Figma REST nodes
 // response goes wherever JSON goes. MCP: null = not compressed (plain text, guarded text, HTML).
 function admit(channel, engine, command) {
   switch (channel) {
@@ -43,15 +44,15 @@ function admit(channel, engine, command) {
       // A registry row with mcp:true runs as sniffed; any other shape goes the json route.
       return (require('../engines/index.cjs').REGISTRY[engine] || {}).mcp ? engine : 'json';
     case 'bash':
-      if (engine === 'html') return FETCH_CMD.test(command) ? 'html' : 'text';
+      if (engine === 'html' || engine === 'xml') return FETCH_CMD.test(command) ? engine : 'text';
       if (engine === 'log') return LOG_CMD.test(command) ? 'log' : 'text';
       return engine;
     case 'read':
-      return ['json', 'jsonl', 'figma-nodes', 'log'].includes(engine) ? engine : null;
+      return ['json', 'jsonl', 'figma-nodes', 'log', 'xml'].includes(engine) ? engine : null;
     case 'attachment':
       return ['json', 'jsonl', 'log'].includes(engine) ? engine : null;
     case 'webfetch':
-      return ['json', 'jsonl', 'figma-nodes', 'html'].includes(engine) ? engine : 'text';
+      return ['json', 'jsonl', 'figma-nodes', 'html', 'xml'].includes(engine) ? engine : 'text';
     default:
       return 'text';
   }
@@ -176,6 +177,6 @@ function extract(channel, rec, input) {
 }
 
 module.exports = {
-  GATES, LOG_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, OWN_CLI, READ_LOG_EXT,
+  GATES, LOG_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, OWN_CLI, READ_LOG_EXT, READ_XML_EXT,
   isSourceJson, commandWords, admit, structuredGate, plainGate, bashSeen, extract, numberedBody, attachmentPath,
 };

@@ -13,7 +13,7 @@ import type { Viewed } from './node-hook.ts'
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 
 export const VIEW_TOOL = 'mcp__slim__view'
-export const VIEW_ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'media'] as const
+export const VIEW_ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'xml', 'media'] as const
 export const VIEW_DESC =
   'Show a big local file (path) or a shell command\'s output (command) compactly: slim picks the engine by content ' +
   '(JSON, JSON lines, logs, HTML, Figma REST nodes.json, Atlassian documents, plain-text windows) and returns a figure ' +

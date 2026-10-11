@@ -134,7 +134,7 @@ const texts = (doc, out = []) => { if (doc.visible === false) return out; if (ty
     ['mcp-envelope-jira.json', fx('mcp-envelope-jira.json'), 'json', 'json'],
     ['jira-issue-ELC-104.json', fx('jira-issue-ELC-104.json'), 'json', 'json'],
     ['figma-design-context.jsx', fx('figma-design-context.jsx'), 'figma', 'figma-jsx'],
-    ['figma-metadata-3326-39542.xml', fx('figma-metadata-3326-39542.xml'), 'text', 'xml'],
+    ['figma-metadata-3326-39542.xml', fx('figma-metadata-3326-39542.xml'), 'xml', 'xml'],
     ['jsonl', JSONL, 'jsonl', 'jsonl'],
     ['grep-listing', GREP, 'text', 'prose'],
     ['png', PNG, 'binary', 'magic-bytes'],

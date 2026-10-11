@@ -16,6 +16,9 @@ const SOURCE_JSON_NAME = /^(?:package(?:-lock)?|tsconfig[\w.-]*|composer|jsconfi
 const STRUCTURED = /^﻿?\s*(?:\{\s*["}[]|\[|<(?:!doctype|html|head|body)\b)/i
 const MARKUP = /^﻿?\s*<(?:!doctype|html|head|body)\b/i
 const LOG_EXT = new Set(['.log', '.jsonl', '.ndjson'])
+const XML_EXT = new Set(['.xml'])
+/** An XML prolog or a leading element: the xml engine's head, as engines/sniff.cjs reads it. */
+const XML_START = /^\s*<(?:\?xml|[a-z][\w:.-]*[\s>/])/i
 
 /** The tool-result channels but MCP, which keeps its own pre-spawn rules. */
 export type Intake = Exclude<SlimChannel, 'mcp' | 'attachment' | 'prompt'>
@@ -59,6 +62,10 @@ export function isSourceJson(path: string): boolean {
 /** JSON or a page at the start of the text: worth the core below the plain-text threshold. */
 export function structured(t: string): boolean {
   return STRUCTURED.test(t.slice(0, 4096))
+}
+
+function xmlHead(t: string): boolean {
+  return XML_START.test(t.slice(0, 4096))
 }
 
 function markup(t: string): boolean {
@@ -157,7 +164,7 @@ export function floor(ch: Intake, v: View): boolean {
 function readEligible(v: View): boolean {
   const path = v.path ?? ''
   const x = ext(path)
-  if (LOG_EXT.has(x)) return v.truncated === true || v.bytes > GATES.read
+  if (LOG_EXT.has(x) || XML_EXT.has(x)) return v.truncated === true || v.bytes > GATES.read
   return x === '.json' && v.truncated === true && !isSourceJson(path)
 }
 
@@ -180,11 +187,12 @@ function sizeOk(ch: Intake, v: View, plain: number): boolean {
       const cmd = v.command ?? ''
       if (v.persisted) return true
       if (v.bytes > GATES.bash && structured(head) && (!markup(head) || FETCH_CMD.test(cmd))) return true
+      if (v.bytes > GATES.bash && xmlHead(head) && FETCH_CMD.test(cmd)) return true
       if (v.bytes > LOG_GATE && LOG_CMD.test(cmd)) return true
       return v.bytes > plain
     }
     case 'read': return true
-    case 'webfetch': return (v.bytes > GATES.webfetch && structured(head)) || v.bytes > plain
+    case 'webfetch': return (v.bytes > GATES.webfetch && (structured(head) || xmlHead(head))) || v.bytes > plain
     case 'grep': return v.bytes > GATES.grep
     case 'websearch':
     case 'agent': return v.bytes > plain

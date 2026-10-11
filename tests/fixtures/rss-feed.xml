@@ -1,0 +1,370 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Northwind Journal</title>
+    <link>https://northwind.example/blogs/journal</link>
+    <description>Notes from the Northwind studio</description>
+    <language>en-us</language>
+    <atom:link href="https://northwind.example/blogs/journal.atom" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>Studio notes #40</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-40</link>
+      <guid isPermaLink="false">northwind-journal-9000</guid>
+      <pubDate>Mon, 01 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 1: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 1: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 1: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 1: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 1: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 1: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #39</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-39</link>
+      <guid isPermaLink="false">northwind-journal-9001</guid>
+      <pubDate>Tue, 02 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 2: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 2: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 2: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 2: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 2: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 2: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #38</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-38</link>
+      <guid isPermaLink="false">northwind-journal-9002</guid>
+      <pubDate>Wed, 03 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 3: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 3: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 3: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 3: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 3: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 3: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #37</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-37</link>
+      <guid isPermaLink="false">northwind-journal-9003</guid>
+      <pubDate>Thu, 04 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 4: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 4: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 4: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 4: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 4: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 4: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #36</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-36</link>
+      <guid isPermaLink="false">northwind-journal-9004</guid>
+      <pubDate>Fri, 05 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 5: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 5: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 5: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 5: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 5: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 5: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #35</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-35</link>
+      <guid isPermaLink="false">northwind-journal-9005</guid>
+      <pubDate>Sat, 06 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 6: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 6: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 6: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 6: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 6: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 6: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #34</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-34</link>
+      <guid isPermaLink="false">northwind-journal-9006</guid>
+      <pubDate>Sun, 07 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 7: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 7: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 7: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 7: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 7: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 7: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #33</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-33</link>
+      <guid isPermaLink="false">northwind-journal-9007</guid>
+      <pubDate>Mon, 08 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 8: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 8: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 8: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 8: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 8: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 8: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #32</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-32</link>
+      <guid isPermaLink="false">northwind-journal-9008</guid>
+      <pubDate>Tue, 09 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 9: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 9: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 9: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 9: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 9: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 9: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #31</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-31</link>
+      <guid isPermaLink="false">northwind-journal-9009</guid>
+      <pubDate>Wed, 10 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 10: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 10: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 10: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 10: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 10: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 10: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #30</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-30</link>
+      <guid isPermaLink="false">northwind-journal-9010</guid>
+      <pubDate>Thu, 11 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 11: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 11: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 11: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 11: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 11: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 11: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #29</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-29</link>
+      <guid isPermaLink="false">northwind-journal-9011</guid>
+      <pubDate>Fri, 12 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 12: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 12: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 12: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 12: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 12: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 12: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #28</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-28</link>
+      <guid isPermaLink="false">northwind-journal-9012</guid>
+      <pubDate>Sat, 13 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 13: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 13: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 13: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 13: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 13: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 13: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #27</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-27</link>
+      <guid isPermaLink="false">northwind-journal-9013</guid>
+      <pubDate>Sun, 14 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 14: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 14: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 14: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 14: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 14: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 14: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #26</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-26</link>
+      <guid isPermaLink="false">northwind-journal-9014</guid>
+      <pubDate>Mon, 15 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 15: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 15: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 15: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 15: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 15: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 15: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #25</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-25</link>
+      <guid isPermaLink="false">northwind-journal-9015</guid>
+      <pubDate>Tue, 16 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 16: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 16: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 16: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 16: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 16: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 16: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #24</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-24</link>
+      <guid isPermaLink="false">northwind-journal-9016</guid>
+      <pubDate>Wed, 17 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 17: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 17: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 17: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 17: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 17: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 17: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #23</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-23</link>
+      <guid isPermaLink="false">northwind-journal-9017</guid>
+      <pubDate>Thu, 18 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 18: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 18: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 18: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 18: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 18: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 18: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #22</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-22</link>
+      <guid isPermaLink="false">northwind-journal-9018</guid>
+      <pubDate>Fri, 19 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 19: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 19: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 19: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 19: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 19: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 19: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #21</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-21</link>
+      <guid isPermaLink="false">northwind-journal-9019</guid>
+      <pubDate>Sat, 20 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 20: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 20: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 20: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 20: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 20: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 20: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #20</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-20</link>
+      <guid isPermaLink="false">northwind-journal-9020</guid>
+      <pubDate>Sun, 21 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 21: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 21: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 21: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 21: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 21: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 21: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #19</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-19</link>
+      <guid isPermaLink="false">northwind-journal-9021</guid>
+      <pubDate>Mon, 22 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 22: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 22: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 22: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 22: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 22: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 22: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #18</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-18</link>
+      <guid isPermaLink="false">northwind-journal-9022</guid>
+      <pubDate>Tue, 23 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 23: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 23: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 23: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 23: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 23: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 23: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #17</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-17</link>
+      <guid isPermaLink="false">northwind-journal-9023</guid>
+      <pubDate>Wed, 24 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 24: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 24: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 24: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 24: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 24: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 24: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #16</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-16</link>
+      <guid isPermaLink="false">northwind-journal-9024</guid>
+      <pubDate>Thu, 25 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 25: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 25: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 25: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 25: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 25: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 25: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #15</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-15</link>
+      <guid isPermaLink="false">northwind-journal-9025</guid>
+      <pubDate>Fri, 26 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 26: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 26: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 26: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 26: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 26: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 26: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #14</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-14</link>
+      <guid isPermaLink="false">northwind-journal-9026</guid>
+      <pubDate>Sat, 27 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 27: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 27: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 27: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 27: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 27: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 27: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #13</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-13</link>
+      <guid isPermaLink="false">northwind-journal-9027</guid>
+      <pubDate>Sun, 28 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 28: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 28: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 28: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 28: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 28: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 28: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #12</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-12</link>
+      <guid isPermaLink="false">northwind-journal-9028</guid>
+      <pubDate>Mon, 01 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 29: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 29: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 29: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 29: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 29: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 29: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #11</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-11</link>
+      <guid isPermaLink="false">northwind-journal-9029</guid>
+      <pubDate>Tue, 02 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 30: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 30: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 30: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 30: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 30: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 30: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #10</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-10</link>
+      <guid isPermaLink="false">northwind-journal-9030</guid>
+      <pubDate>Wed, 03 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 31: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 31: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 31: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 31: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 31: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 31: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #9</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-9</link>
+      <guid isPermaLink="false">northwind-journal-9031</guid>
+      <pubDate>Thu, 04 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 32: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 32: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 32: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 32: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 32: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 32: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #8</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-8</link>
+      <guid isPermaLink="false">northwind-journal-9032</guid>
+      <pubDate>Fri, 05 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 33: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 33: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 33: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 33: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 33: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 33: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #7</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-7</link>
+      <guid isPermaLink="false">northwind-journal-9033</guid>
+      <pubDate>Sat, 06 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 34: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 34: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 34: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 34: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 34: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 34: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #6</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-6</link>
+      <guid isPermaLink="false">northwind-journal-9034</guid>
+      <pubDate>Sun, 07 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 35: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 35: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 35: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 35: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 35: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 35: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #5</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-5</link>
+      <guid isPermaLink="false">northwind-journal-9035</guid>
+      <pubDate>Mon, 08 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 36: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 36: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 36: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 36: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 36: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 36: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #4</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-4</link>
+      <guid isPermaLink="false">northwind-journal-9036</guid>
+      <pubDate>Tue, 09 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 37: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 37: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 37: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 37: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 37: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 37: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #3</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-3</link>
+      <guid isPermaLink="false">northwind-journal-9037</guid>
+      <pubDate>Wed, 10 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 38: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 38: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 38: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 38: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 38: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 38: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #2</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-2</link>
+      <guid isPermaLink="false">northwind-journal-9038</guid>
+      <pubDate>Thu, 11 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 39: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 39: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 39: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 39: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 39: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 39: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+    <item>
+      <title>Studio notes #1</title>
+      <link>https://northwind.example/blogs/journal/studio-notes-1</link>
+      <guid isPermaLink="false">northwind-journal-9039</guid>
+      <pubDate>Fri, 12 Sep 2026 09:00:00 +0000</pubDate>
+      <author>journal@northwind.example (Northwind Studio)</author>
+      <category>Journal</category>
+      <description><![CDATA[<p>Paragraph 1 of post 40: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 2 recipes this week.</p><p>Paragraph 2 of post 40: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 3 recipes this week.</p><p>Paragraph 3 of post 40: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 4 recipes this week.</p><p>Paragraph 4 of post 40: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 5 recipes this week.</p><p>Paragraph 5 of post 40: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 6 recipes this week.</p><p>Paragraph 6 of post 40: notes from the studio on dyeing, weaving and the slow work of making cloth that lasts. We tried 7 recipes this week.</p>]]></description>
+    </item>
+  </channel>
+</rss>

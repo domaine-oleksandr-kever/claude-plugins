@@ -1,0 +1,2492 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+  <channel>
+    <title>Northwind Goods — Google Shopping feed</title>
+    <link>https://northwind.example</link>
+    <description>Product feed for Merchant Center</description>
+    <item>
+      <g:id>NW-10000</g:id>
+      <g:item_group_id>NW-G0</g:item_group_id>
+      <title>Linen Shirt — Black</title>
+      <description>The linen shirt in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 1 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-black?variant=4100000</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10000-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10000-2.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>19.00 USD</g:price>
+      <g:sale_price>15.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10007</g:id>
+      <g:item_group_id>NW-G0</g:item_group_id>
+      <title>Wool Throw — Ivory</title>
+      <description>The wool throw in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 2 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-ivory?variant=4100001</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10007-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10007-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10007-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>20.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10014</g:id>
+      <g:item_group_id>NW-G0</g:item_group_id>
+      <title>Ceramic Mug — Sage</title>
+      <description>The ceramic mug in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 3 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-sage?variant=4100002</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10014-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10014-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10014-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10014-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>22.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10021</g:id>
+      <g:item_group_id>NW-G0</g:item_group_id>
+      <title>Canvas Tote — Navy</title>
+      <description>The canvas tote in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 4 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-navy?variant=4100003</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10021-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10021-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10021-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10021-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10021-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>23.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10028</g:id>
+      <g:item_group_id>NW-G0</g:item_group_id>
+      <title>Oak Tray — Terracotta</title>
+      <description>The oak tray in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 5 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-terracotta?variant=4100004</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10028-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10028-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>25.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10035</g:id>
+      <g:item_group_id>NW-G0</g:item_group_id>
+      <title>Cotton Robe — Oat</title>
+      <description>The cotton robe in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 6 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-oat?variant=4100005</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10035-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10035-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10035-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>26.50 USD</g:price>
+      <g:sale_price>22.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10042</g:id>
+      <g:item_group_id>NW-G1</g:item_group_id>
+      <title>Glass Carafe — Black</title>
+      <description>The glass carafe in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 7 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-black?variant=4100006</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10042-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10042-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10042-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10042-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>28.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10049</g:id>
+      <g:item_group_id>NW-G1</g:item_group_id>
+      <title>Linen Shirt — Ivory</title>
+      <description>The linen shirt in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 8 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-ivory?variant=4100007</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10049-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10049-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10049-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10049-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10049-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>29.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10056</g:id>
+      <g:item_group_id>NW-G1</g:item_group_id>
+      <title>Wool Throw — Sage</title>
+      <description>The wool throw in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 9 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-sage?variant=4100008</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10056-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10056-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>31.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10063</g:id>
+      <g:item_group_id>NW-G1</g:item_group_id>
+      <title>Ceramic Mug — Navy</title>
+      <description>The ceramic mug in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 10 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-navy?variant=4100009</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10063-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10063-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10063-3.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>32.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10070</g:id>
+      <g:item_group_id>NW-G1</g:item_group_id>
+      <title>Canvas Tote — Terracotta</title>
+      <description>The canvas tote in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 11 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-terracotta?variant=4100010</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10070-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10070-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10070-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10070-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>34.00 USD</g:price>
+      <g:sale_price>30.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10077</g:id>
+      <g:item_group_id>NW-G1</g:item_group_id>
+      <title>Oak Tray — Oat</title>
+      <description>The oak tray in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 12 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-oat?variant=4100011</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10077-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10077-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10077-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10077-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10077-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>35.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10084</g:id>
+      <g:item_group_id>NW-G2</g:item_group_id>
+      <title>Cotton Robe — Black</title>
+      <description>The cotton robe in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 13 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-black?variant=4100012</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10084-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10084-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>37.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10091</g:id>
+      <g:item_group_id>NW-G2</g:item_group_id>
+      <title>Glass Carafe — Ivory</title>
+      <description>The glass carafe in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 14 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-ivory?variant=4100013</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10091-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10091-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10091-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>38.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10098</g:id>
+      <g:item_group_id>NW-G2</g:item_group_id>
+      <title>Linen Shirt — Sage</title>
+      <description>The linen shirt in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 15 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-sage?variant=4100014</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10098-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10098-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10098-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10098-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>40.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10105</g:id>
+      <g:item_group_id>NW-G2</g:item_group_id>
+      <title>Wool Throw — Navy</title>
+      <description>The wool throw in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 16 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-navy?variant=4100015</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10105-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10105-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10105-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10105-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10105-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>41.50 USD</g:price>
+      <g:sale_price>37.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10112</g:id>
+      <g:item_group_id>NW-G2</g:item_group_id>
+      <title>Ceramic Mug — Terracotta</title>
+      <description>The ceramic mug in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 17 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-terracotta?variant=4100016</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10112-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10112-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>43.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10119</g:id>
+      <g:item_group_id>NW-G2</g:item_group_id>
+      <title>Canvas Tote — Oat</title>
+      <description>The canvas tote in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 18 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-oat?variant=4100017</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10119-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10119-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10119-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>44.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10126</g:id>
+      <g:item_group_id>NW-G3</g:item_group_id>
+      <title>Oak Tray — Black</title>
+      <description>The oak tray in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 19 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-black?variant=4100018</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10126-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10126-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10126-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10126-4.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>46.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10133</g:id>
+      <g:item_group_id>NW-G3</g:item_group_id>
+      <title>Cotton Robe — Ivory</title>
+      <description>The cotton robe in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 20 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-ivory?variant=4100019</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10133-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10133-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10133-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10133-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10133-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>47.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10140</g:id>
+      <g:item_group_id>NW-G3</g:item_group_id>
+      <title>Glass Carafe — Sage</title>
+      <description>The glass carafe in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 21 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-sage?variant=4100020</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10140-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10140-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>49.00 USD</g:price>
+      <g:sale_price>45.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10147</g:id>
+      <g:item_group_id>NW-G3</g:item_group_id>
+      <title>Linen Shirt — Navy</title>
+      <description>The linen shirt in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 22 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-navy?variant=4100021</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10147-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10147-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10147-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>50.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10154</g:id>
+      <g:item_group_id>NW-G3</g:item_group_id>
+      <title>Wool Throw — Terracotta</title>
+      <description>The wool throw in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 23 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-terracotta?variant=4100022</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10154-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10154-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10154-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10154-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>52.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10161</g:id>
+      <g:item_group_id>NW-G3</g:item_group_id>
+      <title>Ceramic Mug — Oat</title>
+      <description>The ceramic mug in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 24 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-oat?variant=4100023</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10161-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10161-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10161-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10161-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10161-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>53.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10168</g:id>
+      <g:item_group_id>NW-G4</g:item_group_id>
+      <title>Canvas Tote — Black</title>
+      <description>The canvas tote in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 25 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-black?variant=4100024</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10168-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10168-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>55.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10175</g:id>
+      <g:item_group_id>NW-G4</g:item_group_id>
+      <title>Oak Tray — Ivory</title>
+      <description>The oak tray in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 26 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-ivory?variant=4100025</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10175-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10175-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10175-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>56.50 USD</g:price>
+      <g:sale_price>52.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10182</g:id>
+      <g:item_group_id>NW-G4</g:item_group_id>
+      <title>Cotton Robe — Sage</title>
+      <description>The cotton robe in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 27 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-sage?variant=4100026</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10182-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10182-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10182-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10182-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>58.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10189</g:id>
+      <g:item_group_id>NW-G4</g:item_group_id>
+      <title>Glass Carafe — Navy</title>
+      <description>The glass carafe in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 28 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-navy?variant=4100027</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10189-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10189-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10189-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10189-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10189-5.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>59.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10196</g:id>
+      <g:item_group_id>NW-G4</g:item_group_id>
+      <title>Linen Shirt — Terracotta</title>
+      <description>The linen shirt in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 29 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-terracotta?variant=4100028</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10196-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10196-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>61.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10203</g:id>
+      <g:item_group_id>NW-G4</g:item_group_id>
+      <title>Wool Throw — Oat</title>
+      <description>The wool throw in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 30 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-oat?variant=4100029</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10203-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10203-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10203-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>62.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10210</g:id>
+      <g:item_group_id>NW-G5</g:item_group_id>
+      <title>Ceramic Mug — Black</title>
+      <description>The ceramic mug in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 31 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-black?variant=4100030</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10210-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10210-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10210-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10210-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>64.00 USD</g:price>
+      <g:sale_price>60.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10217</g:id>
+      <g:item_group_id>NW-G5</g:item_group_id>
+      <title>Canvas Tote — Ivory</title>
+      <description>The canvas tote in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 32 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-ivory?variant=4100031</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10217-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10217-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10217-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10217-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10217-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>65.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10224</g:id>
+      <g:item_group_id>NW-G5</g:item_group_id>
+      <title>Oak Tray — Sage</title>
+      <description>The oak tray in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 33 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-sage?variant=4100032</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10224-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10224-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>67.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10231</g:id>
+      <g:item_group_id>NW-G5</g:item_group_id>
+      <title>Cotton Robe — Navy</title>
+      <description>The cotton robe in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 34 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-navy?variant=4100033</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10231-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10231-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10231-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>68.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10238</g:id>
+      <g:item_group_id>NW-G5</g:item_group_id>
+      <title>Glass Carafe — Terracotta</title>
+      <description>The glass carafe in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 35 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-terracotta?variant=4100034</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10238-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10238-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10238-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10238-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>70.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10245</g:id>
+      <g:item_group_id>NW-G5</g:item_group_id>
+      <title>Linen Shirt — Oat</title>
+      <description>The linen shirt in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 36 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-oat?variant=4100035</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10245-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10245-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10245-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10245-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10245-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>71.50 USD</g:price>
+      <g:sale_price>67.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10252</g:id>
+      <g:item_group_id>NW-G6</g:item_group_id>
+      <title>Wool Throw — Black</title>
+      <description>The wool throw in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 37 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-black?variant=4100036</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10252-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10252-2.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>73.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10259</g:id>
+      <g:item_group_id>NW-G6</g:item_group_id>
+      <title>Ceramic Mug — Ivory</title>
+      <description>The ceramic mug in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 38 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-ivory?variant=4100037</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10259-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10259-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10259-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>74.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10266</g:id>
+      <g:item_group_id>NW-G6</g:item_group_id>
+      <title>Canvas Tote — Sage</title>
+      <description>The canvas tote in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 39 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-sage?variant=4100038</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10266-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10266-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10266-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10266-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>76.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10273</g:id>
+      <g:item_group_id>NW-G6</g:item_group_id>
+      <title>Oak Tray — Navy</title>
+      <description>The oak tray in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 40 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-navy?variant=4100039</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10273-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10273-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10273-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10273-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10273-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>77.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10280</g:id>
+      <g:item_group_id>NW-G6</g:item_group_id>
+      <title>Cotton Robe — Terracotta</title>
+      <description>The cotton robe in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 41 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-terracotta?variant=4100040</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10280-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10280-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>79.00 USD</g:price>
+      <g:sale_price>75.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10287</g:id>
+      <g:item_group_id>NW-G6</g:item_group_id>
+      <title>Glass Carafe — Oat</title>
+      <description>The glass carafe in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 42 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-oat?variant=4100041</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10287-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10287-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10287-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>80.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10294</g:id>
+      <g:item_group_id>NW-G7</g:item_group_id>
+      <title>Linen Shirt — Black</title>
+      <description>The linen shirt in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 43 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-black?variant=4100042</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10294-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10294-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10294-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10294-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>82.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10301</g:id>
+      <g:item_group_id>NW-G7</g:item_group_id>
+      <title>Wool Throw — Ivory</title>
+      <description>The wool throw in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 44 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-ivory?variant=4100043</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10301-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10301-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10301-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10301-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10301-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>83.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10308</g:id>
+      <g:item_group_id>NW-G7</g:item_group_id>
+      <title>Ceramic Mug — Sage</title>
+      <description>The ceramic mug in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 45 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-sage?variant=4100044</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10308-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10308-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>85.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10315</g:id>
+      <g:item_group_id>NW-G7</g:item_group_id>
+      <title>Canvas Tote — Navy</title>
+      <description>The canvas tote in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 46 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-navy?variant=4100045</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10315-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10315-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10315-3.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>86.50 USD</g:price>
+      <g:sale_price>82.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10322</g:id>
+      <g:item_group_id>NW-G7</g:item_group_id>
+      <title>Oak Tray — Terracotta</title>
+      <description>The oak tray in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 47 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-terracotta?variant=4100046</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10322-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10322-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10322-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10322-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>88.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10329</g:id>
+      <g:item_group_id>NW-G7</g:item_group_id>
+      <title>Cotton Robe — Oat</title>
+      <description>The cotton robe in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 48 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-oat?variant=4100047</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10329-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10329-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10329-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10329-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10329-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>89.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10336</g:id>
+      <g:item_group_id>NW-G8</g:item_group_id>
+      <title>Glass Carafe — Black</title>
+      <description>The glass carafe in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 49 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-black?variant=4100048</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10336-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10336-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>91.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10343</g:id>
+      <g:item_group_id>NW-G8</g:item_group_id>
+      <title>Linen Shirt — Ivory</title>
+      <description>The linen shirt in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 50 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-ivory?variant=4100049</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10343-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10343-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10343-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>92.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10350</g:id>
+      <g:item_group_id>NW-G8</g:item_group_id>
+      <title>Wool Throw — Sage</title>
+      <description>The wool throw in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 51 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-sage?variant=4100050</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10350-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10350-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10350-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10350-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>94.00 USD</g:price>
+      <g:sale_price>90.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10357</g:id>
+      <g:item_group_id>NW-G8</g:item_group_id>
+      <title>Ceramic Mug — Navy</title>
+      <description>The ceramic mug in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 52 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-navy?variant=4100051</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10357-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10357-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10357-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10357-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10357-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>95.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10364</g:id>
+      <g:item_group_id>NW-G8</g:item_group_id>
+      <title>Canvas Tote — Terracotta</title>
+      <description>The canvas tote in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 53 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-terracotta?variant=4100052</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10364-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10364-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>97.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10371</g:id>
+      <g:item_group_id>NW-G8</g:item_group_id>
+      <title>Oak Tray — Oat</title>
+      <description>The oak tray in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 54 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-oat?variant=4100053</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10371-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10371-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10371-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>98.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10378</g:id>
+      <g:item_group_id>NW-G9</g:item_group_id>
+      <title>Cotton Robe — Black</title>
+      <description>The cotton robe in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 55 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-black?variant=4100054</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10378-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10378-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10378-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10378-4.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>100.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10385</g:id>
+      <g:item_group_id>NW-G9</g:item_group_id>
+      <title>Glass Carafe — Ivory</title>
+      <description>The glass carafe in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 56 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-ivory?variant=4100055</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10385-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10385-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10385-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10385-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10385-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>101.50 USD</g:price>
+      <g:sale_price>97.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10392</g:id>
+      <g:item_group_id>NW-G9</g:item_group_id>
+      <title>Linen Shirt — Sage</title>
+      <description>The linen shirt in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 57 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-sage?variant=4100056</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10392-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10392-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>103.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10399</g:id>
+      <g:item_group_id>NW-G9</g:item_group_id>
+      <title>Wool Throw — Navy</title>
+      <description>The wool throw in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 58 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-navy?variant=4100057</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10399-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10399-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10399-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>104.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10406</g:id>
+      <g:item_group_id>NW-G9</g:item_group_id>
+      <title>Ceramic Mug — Terracotta</title>
+      <description>The ceramic mug in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 59 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-terracotta?variant=4100058</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10406-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10406-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10406-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10406-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>106.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10413</g:id>
+      <g:item_group_id>NW-G9</g:item_group_id>
+      <title>Canvas Tote — Oat</title>
+      <description>The canvas tote in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 60 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-oat?variant=4100059</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10413-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10413-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10413-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10413-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10413-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>107.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10420</g:id>
+      <g:item_group_id>NW-G10</g:item_group_id>
+      <title>Oak Tray — Black</title>
+      <description>The oak tray in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 61 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-black?variant=4100060</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10420-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10420-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>19.00 USD</g:price>
+      <g:sale_price>15.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10427</g:id>
+      <g:item_group_id>NW-G10</g:item_group_id>
+      <title>Cotton Robe — Ivory</title>
+      <description>The cotton robe in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 62 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-ivory?variant=4100061</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10427-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10427-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10427-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>20.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10434</g:id>
+      <g:item_group_id>NW-G10</g:item_group_id>
+      <title>Glass Carafe — Sage</title>
+      <description>The glass carafe in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 63 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-sage?variant=4100062</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10434-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10434-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10434-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10434-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>22.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10441</g:id>
+      <g:item_group_id>NW-G10</g:item_group_id>
+      <title>Linen Shirt — Navy</title>
+      <description>The linen shirt in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 64 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-navy?variant=4100063</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10441-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10441-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10441-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10441-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10441-5.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>23.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10448</g:id>
+      <g:item_group_id>NW-G10</g:item_group_id>
+      <title>Wool Throw — Terracotta</title>
+      <description>The wool throw in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 65 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-terracotta?variant=4100064</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10448-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10448-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>25.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10455</g:id>
+      <g:item_group_id>NW-G10</g:item_group_id>
+      <title>Ceramic Mug — Oat</title>
+      <description>The ceramic mug in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 66 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-oat?variant=4100065</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10455-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10455-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10455-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>26.50 USD</g:price>
+      <g:sale_price>22.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10462</g:id>
+      <g:item_group_id>NW-G11</g:item_group_id>
+      <title>Canvas Tote — Black</title>
+      <description>The canvas tote in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 67 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-black?variant=4100066</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10462-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10462-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10462-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10462-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>28.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10469</g:id>
+      <g:item_group_id>NW-G11</g:item_group_id>
+      <title>Oak Tray — Ivory</title>
+      <description>The oak tray in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 68 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-ivory?variant=4100067</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10469-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10469-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10469-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10469-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10469-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>29.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10476</g:id>
+      <g:item_group_id>NW-G11</g:item_group_id>
+      <title>Cotton Robe — Sage</title>
+      <description>The cotton robe in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 69 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-sage?variant=4100068</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10476-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10476-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>31.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10483</g:id>
+      <g:item_group_id>NW-G11</g:item_group_id>
+      <title>Glass Carafe — Navy</title>
+      <description>The glass carafe in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 70 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-navy?variant=4100069</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10483-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10483-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10483-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>32.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10490</g:id>
+      <g:item_group_id>NW-G11</g:item_group_id>
+      <title>Linen Shirt — Terracotta</title>
+      <description>The linen shirt in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 71 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-terracotta?variant=4100070</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10490-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10490-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10490-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10490-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>34.00 USD</g:price>
+      <g:sale_price>30.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10497</g:id>
+      <g:item_group_id>NW-G11</g:item_group_id>
+      <title>Wool Throw — Oat</title>
+      <description>The wool throw in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 72 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-oat?variant=4100071</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10497-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10497-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10497-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10497-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10497-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>35.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10504</g:id>
+      <g:item_group_id>NW-G12</g:item_group_id>
+      <title>Ceramic Mug — Black</title>
+      <description>The ceramic mug in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 73 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-black?variant=4100072</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10504-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10504-2.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>37.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10511</g:id>
+      <g:item_group_id>NW-G12</g:item_group_id>
+      <title>Canvas Tote — Ivory</title>
+      <description>The canvas tote in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 74 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-ivory?variant=4100073</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10511-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10511-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10511-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>38.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10518</g:id>
+      <g:item_group_id>NW-G12</g:item_group_id>
+      <title>Oak Tray — Sage</title>
+      <description>The oak tray in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 75 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-sage?variant=4100074</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10518-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10518-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10518-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10518-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>40.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10525</g:id>
+      <g:item_group_id>NW-G12</g:item_group_id>
+      <title>Cotton Robe — Navy</title>
+      <description>The cotton robe in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 76 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-navy?variant=4100075</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10525-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10525-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10525-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10525-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10525-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>41.50 USD</g:price>
+      <g:sale_price>37.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10532</g:id>
+      <g:item_group_id>NW-G12</g:item_group_id>
+      <title>Glass Carafe — Terracotta</title>
+      <description>The glass carafe in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 77 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-terracotta?variant=4100076</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10532-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10532-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>43.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10539</g:id>
+      <g:item_group_id>NW-G12</g:item_group_id>
+      <title>Linen Shirt — Oat</title>
+      <description>The linen shirt in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 78 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-oat?variant=4100077</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10539-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10539-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10539-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>44.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10546</g:id>
+      <g:item_group_id>NW-G13</g:item_group_id>
+      <title>Wool Throw — Black</title>
+      <description>The wool throw in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 79 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-black?variant=4100078</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10546-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10546-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10546-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10546-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>46.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10553</g:id>
+      <g:item_group_id>NW-G13</g:item_group_id>
+      <title>Ceramic Mug — Ivory</title>
+      <description>The ceramic mug in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 80 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-ivory?variant=4100079</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10553-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10553-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10553-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10553-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10553-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>47.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10560</g:id>
+      <g:item_group_id>NW-G13</g:item_group_id>
+      <title>Canvas Tote — Sage</title>
+      <description>The canvas tote in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 81 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-sage?variant=4100080</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10560-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10560-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>49.00 USD</g:price>
+      <g:sale_price>45.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10567</g:id>
+      <g:item_group_id>NW-G13</g:item_group_id>
+      <title>Oak Tray — Navy</title>
+      <description>The oak tray in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 82 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-navy?variant=4100081</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10567-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10567-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10567-3.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>50.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10574</g:id>
+      <g:item_group_id>NW-G13</g:item_group_id>
+      <title>Cotton Robe — Terracotta</title>
+      <description>The cotton robe in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 83 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-terracotta?variant=4100082</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10574-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10574-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10574-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10574-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>52.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10581</g:id>
+      <g:item_group_id>NW-G13</g:item_group_id>
+      <title>Glass Carafe — Oat</title>
+      <description>The glass carafe in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 84 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-oat?variant=4100083</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10581-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10581-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10581-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10581-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10581-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>53.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10588</g:id>
+      <g:item_group_id>NW-G14</g:item_group_id>
+      <title>Linen Shirt — Black</title>
+      <description>The linen shirt in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 85 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-black?variant=4100084</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10588-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10588-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>55.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10595</g:id>
+      <g:item_group_id>NW-G14</g:item_group_id>
+      <title>Wool Throw — Ivory</title>
+      <description>The wool throw in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 86 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-ivory?variant=4100085</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10595-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10595-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10595-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>56.50 USD</g:price>
+      <g:sale_price>52.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10602</g:id>
+      <g:item_group_id>NW-G14</g:item_group_id>
+      <title>Ceramic Mug — Sage</title>
+      <description>The ceramic mug in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 87 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-sage?variant=4100086</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10602-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10602-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10602-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10602-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>58.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10609</g:id>
+      <g:item_group_id>NW-G14</g:item_group_id>
+      <title>Canvas Tote — Navy</title>
+      <description>The canvas tote in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 88 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-navy?variant=4100087</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10609-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10609-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10609-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10609-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10609-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>59.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10616</g:id>
+      <g:item_group_id>NW-G14</g:item_group_id>
+      <title>Oak Tray — Terracotta</title>
+      <description>The oak tray in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 89 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-terracotta?variant=4100088</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10616-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10616-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>61.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10623</g:id>
+      <g:item_group_id>NW-G14</g:item_group_id>
+      <title>Cotton Robe — Oat</title>
+      <description>The cotton robe in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 90 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-oat?variant=4100089</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10623-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10623-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10623-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>62.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10630</g:id>
+      <g:item_group_id>NW-G15</g:item_group_id>
+      <title>Glass Carafe — Black</title>
+      <description>The glass carafe in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 91 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-black?variant=4100090</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10630-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10630-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10630-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10630-4.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>64.00 USD</g:price>
+      <g:sale_price>60.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10637</g:id>
+      <g:item_group_id>NW-G15</g:item_group_id>
+      <title>Linen Shirt — Ivory</title>
+      <description>The linen shirt in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 92 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-ivory?variant=4100091</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10637-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10637-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10637-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10637-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10637-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>65.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10644</g:id>
+      <g:item_group_id>NW-G15</g:item_group_id>
+      <title>Wool Throw — Sage</title>
+      <description>The wool throw in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 93 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-sage?variant=4100092</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10644-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10644-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>67.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10651</g:id>
+      <g:item_group_id>NW-G15</g:item_group_id>
+      <title>Ceramic Mug — Navy</title>
+      <description>The ceramic mug in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 94 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-navy?variant=4100093</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10651-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10651-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10651-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>68.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10658</g:id>
+      <g:item_group_id>NW-G15</g:item_group_id>
+      <title>Canvas Tote — Terracotta</title>
+      <description>The canvas tote in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 95 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-terracotta?variant=4100094</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10658-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10658-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10658-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10658-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>70.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10665</g:id>
+      <g:item_group_id>NW-G15</g:item_group_id>
+      <title>Oak Tray — Oat</title>
+      <description>The oak tray in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 96 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-oat?variant=4100095</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10665-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10665-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10665-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10665-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10665-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>71.50 USD</g:price>
+      <g:sale_price>67.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10672</g:id>
+      <g:item_group_id>NW-G16</g:item_group_id>
+      <title>Cotton Robe — Black</title>
+      <description>The cotton robe in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 97 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-black?variant=4100096</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10672-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10672-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>73.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10679</g:id>
+      <g:item_group_id>NW-G16</g:item_group_id>
+      <title>Glass Carafe — Ivory</title>
+      <description>The glass carafe in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 98 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-ivory?variant=4100097</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10679-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10679-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10679-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>74.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10686</g:id>
+      <g:item_group_id>NW-G16</g:item_group_id>
+      <title>Linen Shirt — Sage</title>
+      <description>The linen shirt in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 99 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-sage?variant=4100098</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10686-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10686-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10686-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10686-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>76.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10693</g:id>
+      <g:item_group_id>NW-G16</g:item_group_id>
+      <title>Wool Throw — Navy</title>
+      <description>The wool throw in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 100 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-navy?variant=4100099</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10693-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10693-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10693-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10693-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10693-5.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>77.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10700</g:id>
+      <g:item_group_id>NW-G16</g:item_group_id>
+      <title>Ceramic Mug — Terracotta</title>
+      <description>The ceramic mug in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 101 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-terracotta?variant=4100100</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10700-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10700-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>79.00 USD</g:price>
+      <g:sale_price>75.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10707</g:id>
+      <g:item_group_id>NW-G16</g:item_group_id>
+      <title>Canvas Tote — Oat</title>
+      <description>The canvas tote in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 102 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-oat?variant=4100101</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10707-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10707-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10707-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>80.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10714</g:id>
+      <g:item_group_id>NW-G17</g:item_group_id>
+      <title>Oak Tray — Black</title>
+      <description>The oak tray in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 103 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-black?variant=4100102</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10714-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10714-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10714-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10714-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>82.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10721</g:id>
+      <g:item_group_id>NW-G17</g:item_group_id>
+      <title>Cotton Robe — Ivory</title>
+      <description>The cotton robe in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 104 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-ivory?variant=4100103</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10721-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10721-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10721-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10721-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10721-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>83.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10728</g:id>
+      <g:item_group_id>NW-G17</g:item_group_id>
+      <title>Glass Carafe — Sage</title>
+      <description>The glass carafe in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 105 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-sage?variant=4100104</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10728-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10728-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>85.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10735</g:id>
+      <g:item_group_id>NW-G17</g:item_group_id>
+      <title>Linen Shirt — Navy</title>
+      <description>The linen shirt in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 106 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-navy?variant=4100105</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10735-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10735-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10735-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>86.50 USD</g:price>
+      <g:sale_price>82.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10742</g:id>
+      <g:item_group_id>NW-G17</g:item_group_id>
+      <title>Wool Throw — Terracotta</title>
+      <description>The wool throw in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 107 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-terracotta?variant=4100106</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10742-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10742-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10742-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10742-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>88.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10749</g:id>
+      <g:item_group_id>NW-G17</g:item_group_id>
+      <title>Ceramic Mug — Oat</title>
+      <description>The ceramic mug in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 108 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-oat?variant=4100107</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10749-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10749-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10749-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10749-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10749-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>89.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10756</g:id>
+      <g:item_group_id>NW-G18</g:item_group_id>
+      <title>Canvas Tote — Black</title>
+      <description>The canvas tote in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 109 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-black?variant=4100108</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10756-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10756-2.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>91.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10763</g:id>
+      <g:item_group_id>NW-G18</g:item_group_id>
+      <title>Oak Tray — Ivory</title>
+      <description>The oak tray in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 110 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-ivory?variant=4100109</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10763-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10763-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10763-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>92.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10770</g:id>
+      <g:item_group_id>NW-G18</g:item_group_id>
+      <title>Cotton Robe — Sage</title>
+      <description>The cotton robe in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 111 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-sage?variant=4100110</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10770-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10770-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10770-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10770-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>94.00 USD</g:price>
+      <g:sale_price>90.00 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10777</g:id>
+      <g:item_group_id>NW-G18</g:item_group_id>
+      <title>Glass Carafe — Navy</title>
+      <description>The glass carafe in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 112 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-navy?variant=4100111</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10777-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10777-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10777-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10777-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10777-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>95.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10784</g:id>
+      <g:item_group_id>NW-G18</g:item_group_id>
+      <title>Linen Shirt — Terracotta</title>
+      <description>The linen shirt in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 113 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-terracotta?variant=4100112</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10784-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10784-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>97.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10791</g:id>
+      <g:item_group_id>NW-G18</g:item_group_id>
+      <title>Wool Throw — Oat</title>
+      <description>The wool throw in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 114 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/wool-throw-oat?variant=4100113</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10791-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10791-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10791-3.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>98.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10798</g:id>
+      <g:item_group_id>NW-G19</g:item_group_id>
+      <title>Ceramic Mug — Black</title>
+      <description>The ceramic mug in black, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 115 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/ceramic-mug-black?variant=4100114</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10798-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10798-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10798-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10798-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>100.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Black</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10805</g:id>
+      <g:item_group_id>NW-G19</g:item_group_id>
+      <title>Canvas Tote — Ivory</title>
+      <description>The canvas tote in ivory, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 116 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/canvas-tote-ivory?variant=4100115</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10805-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10805-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10805-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10805-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10805-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>101.50 USD</g:price>
+      <g:sale_price>97.50 USD</g:sale_price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Ivory</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10812</g:id>
+      <g:item_group_id>NW-G19</g:item_group_id>
+      <title>Oak Tray — Sage</title>
+      <description>The oak tray in sage, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 117 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/oak-tray-sage?variant=4100116</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10812-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10812-2.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>103.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Sage</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10819</g:id>
+      <g:item_group_id>NW-G19</g:item_group_id>
+      <title>Cotton Robe — Navy</title>
+      <description>The cotton robe in navy, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 118 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/cotton-robe-navy?variant=4100117</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10819-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10819-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10819-3.jpg</g:additional_image_link>
+      <g:availability>out_of_stock</g:availability>
+      <g:price>104.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Navy</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>6.95 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10826</g:id>
+      <g:item_group_id>NW-G19</g:item_group_id>
+      <title>Glass Carafe — Terracotta</title>
+      <description>The glass carafe in terracotta, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 119 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/glass-carafe-terracotta?variant=4100118</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10826-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10826-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10826-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10826-4.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>106.00 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Terracotta</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+    <item>
+      <g:id>NW-10833</g:id>
+      <g:item_group_id>NW-G19</g:item_group_id>
+      <title>Linen Shirt — Oat</title>
+      <description>The linen shirt in oat, made in small batches from responsibly sourced materials. Pre-washed for a soft hand and a relaxed fit; every piece is inspected before it ships. Care: cold wash, line dry. Item 120 of the Northwind autumn range.</description>
+      <link>https://northwind.example/products/linen-shirt-oat?variant=4100119</link>
+      <g:image_link>https://cdn.northwind.example/files/nw-10833-1.jpg</g:image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10833-2.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10833-3.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10833-4.jpg</g:additional_image_link>
+      <g:additional_image_link>https://cdn.northwind.example/files/nw-10833-5.jpg</g:additional_image_link>
+      <g:availability>in_stock</g:availability>
+      <g:price>107.50 USD</g:price>
+      <g:brand>Northwind</g:brand>
+      <g:condition>new</g:condition>
+      <g:color>Oat</g:color>
+      <g:shipping>
+        <g:country>US</g:country>
+        <g:service>Standard</g:service>
+        <g:price>0.00 USD</g:price>
+      </g:shipping>
+    </item>
+  </channel>
+</rss>

@@ -187,7 +187,7 @@ describe('the core run', () => {
     ['no decision', ok('{"decision":1}'), 'bad-output'],
     ['no result', ok(JSON.stringify({ decision: 'compressed', record: rec })), 'bad-output'],
     ['no figures', ok(JSON.stringify({ decision: 'compressed', result: 'r', record: { engine: 'json' } })), 'bad-output'],
-    ['unknown engine', ok(JSON.stringify({ decision: 'compressed', result: 'r', record: { ...rec, engine: 'xml' } })), 'bad-output'],
+    ['unknown engine', ok(JSON.stringify({ decision: 'compressed', result: 'r', record: { ...rec, engine: 'yaml' } })), 'bad-output'],
   ]
   for (const [name, run, reason] of rows) {
     test(`parseOut: ${name}`, () => {
@@ -315,6 +315,18 @@ describe('channels', () => {
     expect(attachmentShape('     1\tconst a = 1\n     2\tconst b = 2\n     3\texport {}\n')).toBe('numbered')
     expect(attachmentShape('1→a\n2→b\n3→c')).toBe('numbered')
     expect(attachmentShape('{"a":1}\n{"b":2}\n{"c":3}')).toBe('raw')
+  })
+
+  test('xml: a fetched document over 4 KB, a WebFetch over 16 KB, a Read of .xml over 32 KB, never .svg; the xml mark', () => {
+    const feed = `<?xml version="1.0"?>\n<urlset>${'<url><loc>https://x.io/p</loc></url>'.repeat(200)}</urlset>`
+    expect(candidate('bash', bash(feed, 'curl -s https://x.io/sitemap.xml'), P)).toBe(true)
+    expect(candidate('bash', bash(feed, 'cat sitemap.xml'), P)).toBe(false)
+    expect(candidate('webfetch', viewOf('webfetch', { result: { result: `<rss>${'<item/>'.repeat(3000)}</rss>` } }, {})!, P)).toBe(true)
+    const svg = `<svg viewBox="0 0 1 1">${'<path d="M0 0"/>'.repeat(3000)}</svg>`
+    expect(candidate('read', read(svg, '/r/feed.xml'), P)).toBe(true)
+    expect(candidate('read', read(svg, '/r/assets/icon.svg'), P)).toBe(false)
+    expect(candidate('read', read(svg.slice(0, 20_000), '/r/feed.xml'), P)).toBe(false)
+    expect(alreadySlimTexts(['<<slim-xml>> xml <urlset> · 3 elements · 90 B\nurlset'], BOUND)).toBe(true)
   })
 })
 

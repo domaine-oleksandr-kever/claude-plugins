@@ -198,9 +198,12 @@ let F1_OUT = null;
 }
 {
   const T = newT();
+  // Figma get_metadata is XML: the xml engine drops the closing tags, every node id stays.
   const a = call('F5', T, envelope(T, [{ type: 'text', text: F5 }]));
-  eq('F5-decision', [a.decision, a.reason, a.record.format], ['passthrough', 'non-json', 'xml']);
-  check('F5-no-result', !('result' in a), 'a passthrough carries no result');
+  eq('F5-decision', [a.decision, a.record.engine], ['compressed', 'xml']);
+  const ids = [...F5.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+  const out = ((a.result || [])[0] || {}).text || '';
+  check('F5-every-id', ids.length > 40 && ids.every((id) => out.includes(`id="${id}"`)), `${ids.length} ids`);
 }
 {
   const T = newT();
@@ -555,6 +558,8 @@ let STUB0_OUT = null;
     ['node-hook.ts', 'PLAIN_MIN', 'delivery/env.cjs', 'PLAIN_BYTES_FLOOR'],
     ['node-hook.ts', 'PLAIN_DEFAULT', 'delivery/env.cjs', 'PLAIN_BYTES_DEFAULT'],
     ['lookup.ts', 'DISTILL_BUDGET', 'slim.cjs', 'DISTILL_BUDGET'],
+    ['channels.ts', 'XML_EXT', 'delivery/channels.cjs', 'READ_XML_EXT'],
+    ['channels.ts', 'XML_START', 'engines/sniff.cjs', 'XML_START'],
   ]) {
     const m = literal(M(mf), mn);
     const c = literal(C(cf), cn);
