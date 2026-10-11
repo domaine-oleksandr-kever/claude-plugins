@@ -16,9 +16,49 @@ name is `domaine`. It holds these plugins:
 
 ## Quick install (Claude Code)
 
-Run these commands in a Claude Code session:
+Pick one of the three ways. Each one installs slim, band and base, then the team plugins you name.
+
+### A. One command in a terminal
+
+This needs the `claude` CLI on PATH (`claude --version` answers). Copy the line of your team, paste
+it into Terminal, press Enter:
+
+```bash
+# Frontend team: slim, band, base, fe
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,fe --yes
+
+# QA team: slim, band, base, qa
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,qa --yes
+
+# Backend team: slim, band, base, be
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,be --yes
+
+# PM team: slim, band, base, pm
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,pm --yes
+
+# Everything
+curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,fe,qa,be,pm --yes
+```
+
+The command adds the `domaine` marketplace, installs the plugins in dependency order and prints a
+summary. Run the same line again later to update. Then restart Claude Code, or run `/reload-plugins`
+in an open session, and run `/base-doctor` plus your team's doctor (`/fe-doctor`, `/qa-doctor`,
+`/be-doctor`, `/pm-doctor`).
+
+If the legacy fnd plugin is installed and enabled, the command warns and removes it first (`--yes`
+agrees to that; without `--yes` it asks `[y/N]`). One case it cannot remove: an fnd synced from your
+claude.ai account. Then the summary stops and tells you to remove it in claude.ai first, or to ask
+the account owner. See [fnd is frozen](#fnd-is-frozen).
+
+### B. No terminal: paste into a Claude Code session
+
+This works in the desktop app's Code tab and in the CLI alike. Paste these lines into the prompt,
+one at a time, and skip the team plugins you do not need:
 
 ```text
+# Moving from fnd? Remove it first; it never runs with base or a team plugin.
+/plugin uninstall fnd@domaine
+
 # 1. Add the marketplace (confirm the trust prompt)
 /plugin marketplace add domaine-oleksandr-kever/claude-plugins
 
@@ -44,9 +84,17 @@ Run these commands in a Claude Code session:
 /pm-doctor
 ```
 
+### C. Desktop app and claude.ai
+
+- **Desktop app.** It reads the same `~/.claude` as the CLI. So way A in Terminal installs the
+  plugins for the desktop app too; restart the app afterwards. Way B works inside its Code tab.
+- **claude.ai (web and cloud sessions).** You install nothing. The account owner enables the
+  plugins in claude.ai, and they arrive in every session as synced plugins. Ask the owner.
+
 Notes:
 
-1. Install slim, band and base before the team plugins. base requires slim.
+1. Install slim, band and base before the team plugins. base requires slim. Way A keeps this order
+   whatever order you name the plugins in.
 2. The team plugins do not require each other. Install only the ones you need.
 3. Do not install fnd with base or a team plugin. They ship the same agents, skills and MCP
    servers. To move from fnd, follow [fnd is frozen](#fnd-is-frozen).
@@ -406,10 +454,13 @@ The default set is slim, band, base and fe. `--plugins` names a different set, s
 `--plugins slim,band,base,qa,pm`. The install order stays as above, whatever order the list gives.
 To update, run the script again. `--plugins fnd` installs the legacy fnd instead.
 
-bootstrap refuses an install that names fnd together with base or a team plugin. It also refuses
-the new set on a machine where fnd is installed and enabled, an fnd synced from claude.ai
-included, and the reverse. When bootstrap cannot read `claude plugin list --json`, it skips that
-check and writes a WARN in the summary. `--uninstall` runs `claude plugin uninstall` for each
+bootstrap refuses an install that names fnd together with base or a team plugin. On a machine where
+fnd is installed and enabled at user scope, it warns and removes fnd first: `--yes` agrees to that,
+a terminal is asked `[y/N]`, and a run with neither refuses and names the steps. An fnd synced from
+claude.ai, a managed one, or a project or local copy is never removed by bootstrap: the install
+stops and the summary names the steps. The reverse (fnd beside an enabled base or team plugin) is
+refused the same way. When bootstrap cannot read `claude plugin list --json`, it skips that check
+and writes a WARN in the summary. `--uninstall` runs `claude plugin uninstall` for each
 plugin, dependents first, and keeps the marketplace. Without the CLI, bootstrap prints the block
 above instead.
 

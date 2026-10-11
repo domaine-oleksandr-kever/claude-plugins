@@ -55,8 +55,12 @@ usage: bootstrap.sh [--dir <path>] [--targets <csv>] [--plugins <csv>] [--yes] [
                     always in the order slim, band, base, fe, qa, be, pm, fnd whatever order
                     the list gives, so a dependency comes first. An install that names fnd
                     beside base or a team plugin is refused: they never run together, and
-                    neither is installed next to an enabled copy of the other. With
-                    --uninstall, only the named plugins are removed, dependents first
+                    neither is installed next to an enabled copy of the other. An enabled
+                    fnd at user scope is the one case bootstrap removes itself, after a
+                    WARN: --yes removes it without asking, a terminal asks [y/N], anything
+                    else refuses and names the steps. A synced, managed, project or local
+                    copy is never removed here. With --uninstall, only the named plugins
+                    are removed, dependents first
   --yes             accept the defaults and never prompt (the default destination, and every
                     host when --targets is absent); passed to 'claude plugin install|update'
                     as -y
@@ -373,6 +377,7 @@ if [ "$ACTION" = "install" ] && [ -n "$CLAUDE_VERIFY" ]; then CLAUDE_NEXT="$CLAU
 # nothing run) or "printed" — the leftovers read it, and a conflict also reads the removal steps.
 CLAUDE_OUTCOME=""
 CLAUDE_CONFLICT_STEPS=""
+CLAUDE_CONFLICT_HINT=""
 
 # A child that inherits stdin in a piped run reads the rest of this script as its input, and a
 # prompt with nobody at it is a hang. A terminal gets the CLI's own confirmations; anything else
@@ -409,11 +414,12 @@ read_installed() {
 # user_install <id> — prints "true"/"false" (enabled) for a user-scope install, nothing otherwise.
 # bootstrap installs at user scope, so a project-scope copy elsewhere is not "already installed".
 user_install() { printf '%s\n' "$INSTALLED" | awk -v id="$1" '$1 == id && $2 == "user" { print $3; exit }'; }
-# removal_steps <id regex> — how to remove every enabled copy whose id matches, joined by ", then ".
+# removal_steps <id regex> [others] — how to remove every enabled copy whose id matches, joined by
+# ", then "; `others` leaves out the user-scope copies, the ones this run can remove itself.
 # The CLI uninstalls only from user, project and local scope, and the last two only from inside
 # that project; a synced copy belongs to the claude.ai account and a managed one to the admin.
 removal_steps() {
-  printf '%s\n' "$INSTALLED" | awk -v re="$1" '$1 ~ re && $3 == "true" {
+  printf '%s\n' "$INSTALLED" | awk -v re="$1" -v others="${2:-}" '$1 ~ re && $3 == "true" && !(others != "" && ($2 == "user" || $2 == "-")) {
     if ($2 == "synced") s = "remove " $1 " from your claude.ai account (it is synced from there)"
     else if ($2 == "user" || $2 == "-") s = "claude plugin uninstall " $1
     else if ($2 == "managed") s = "ask your admin to drop " $1 " from the managed settings (a user cannot uninstall it)"
@@ -421,6 +427,24 @@ removal_steps() {
     else s = "remove " $1 " where it was added (" $2 " scope)"
     out = out (out == "" ? "" : ", then ") s
   } END { printf "%s", out }'
+}
+
+# user_fnd_ids — the enabled fnd copies at user scope, one id per line: what `claude plugin uninstall`
+# removes from here.
+user_fnd_ids() { printf '%s\n' "$INSTALLED" | awk '$1 ~ /^fnd@/ && $3 == "true" && ($2 == "user" || $2 == "-") { print $1 }'; }
+
+# Whether this run may remove the enabled fnd: --yes says so, a terminal is asked (default No), and a
+# run with neither refuses, since removing a plugin is nothing to do behind someone's back.
+FND_REMOVED=""
+remove_fnd_agreed() {
+  if [ "$ASSUME_YES" = "yes" ]; then
+    echo "claude: --yes — removing fnd, then installing"
+    return 0
+  fi
+  tty_available || return 1
+  ask "claude: remove fnd now (claude plugin uninstall) and continue? [y/N] " "N"
+  case "$ANSWER" in y|Y|yes|YES|Yes) return 0 ;; esac
+  return 1
 }
 
 # A re-run is the update: an existing `domaine` marketplace is refreshed (a failure only leaves
@@ -470,6 +494,24 @@ claude_cli_install() {
     fi
   elif [ "$CLAUDE_NEW" = "yes" ]; then
     what="fnd"; steps="$(removal_steps '^fnd@')"
+    # Only a user-scope fnd, and nothing beside it, is removed here: with a synced or managed copy
+    # too, removing the user one alone would only unshadow the other.
+    if [ -n "$(user_fnd_ids)" ] && [ -z "$(removal_steps '^fnd@' others)" ]; then
+      echo "claude: WARN — fnd is installed and enabled; fnd never runs with base or a team plugin" >&2
+      if remove_fnd_agreed; then
+        for id in $(user_fnd_ids); do
+          rc=0
+          claude_cli plugin uninstall "$id" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            record claude "FAILED (claude plugin uninstall $id exit $rc)"
+            EXIT_RC="$rc"; CLAUDE_OUTCOME="cli-failed"; return 0
+          fi
+        done
+        FND_REMOVED=" (fnd removed)"; steps=""
+      else
+        CLAUDE_CONFLICT_HINT="or re-run with --yes, and bootstrap removes it for you"
+      fi
+    fi
   elif [ "$CLAUDE_FND" = "yes" ]; then
     what="base or a team plugin"
     steps="$(removal_steps "^($(printf '%s' "$TEAM_PLUGINS" | tr ' ' '|'))@$MARKETPLACE\$")"
@@ -479,6 +521,7 @@ claude_cli_install() {
   if [ -n "$steps" ]; then
     echo "error: $what is installed and enabled — fnd never runs with base or a team plugin." >&2
     echo "       Remove it first: $steps" >&2
+    if [ -n "$CLAUDE_CONFLICT_HINT" ]; then echo "       ($CLAUDE_CONFLICT_HINT)" >&2; fi
     record claude "FAILED ($what is installed and enabled — remove it first)"
     CLAUDE_CONFLICT_STEPS="$steps"
     EXIT_RC=2; CLAUDE_OUTCOME="conflict"; return 0
@@ -502,7 +545,7 @@ claude_cli_install() {
     fi
   done
   echo "claude: $CLAUDE_NEXT"
-  record claude "OK$MARKETPLACE_WARN$CONFLICT_WARN"
+  record claude "OK$MARKETPLACE_WARN$CONFLICT_WARN$FND_REMOVED"
   CLAUDE_OUTCOME="cli-ok"
 }
 
@@ -686,6 +729,7 @@ else
   elif [ "$CLAUDE_OUTCOME" = "conflict" ]; then
     echo "  - Claude Code: fnd never runs with base or a team plugin, so nothing was installed. First"
     echo "    $CLAUDE_CONFLICT_STEPS;"
+    if [ -n "$CLAUDE_CONFLICT_HINT" ]; then echo "    ($CLAUDE_CONFLICT_HINT)"; fi
     echo "    then re-run this command and $CLAUDE_NEXT"
   fi
   if [ "$CLAUDE_FND" = "yes" ]; then

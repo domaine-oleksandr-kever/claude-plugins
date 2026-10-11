@@ -1038,6 +1038,54 @@ for p in qa be pm; do
   else bad "Q10j-$p-beside-enabled-fnd-refused" "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
 done
 
+# …without a terminal and without --yes the refusal also names the --yes way out…
+claude_state present "[
+$(installed_entry fnd@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8y0" "$FIXBOOT" --targets claude
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && grep -qF 're-run with --yes, and bootstrap removes it for you' "$E" \
+   && grep -qF '(or re-run with --yes, and bootstrap removes it for you)' "$O"; then ok
+else bad Q10y0-refusal-names-yes "rc=$RC err=$(head -c 300 "$E") out=$(tr '\n' ';' < "$O")"; fi
+
+# …--yes removes an enabled user-scope fnd first, after a WARN, then installs the set, and the summary says so…
+claude_state present "[
+$(installed_entry fnd@domaine user true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8y" "$FIXBOOT" --targets claude --yes
+if [ "$RC" -eq 0 ] && [ "$(verbs)" = "uninstall fnd;install slim;install band;install base;install fe;" ] \
+   && grep -qF 'WARN — fnd is installed and enabled' "$E" \
+   && grep -qF 'removing fnd, then installing' "$O" \
+   && grep -qx 'claude OK (fnd removed)' "$O" && ! grep -q 'remove it first' "$O"; then ok
+else bad Q10y-yes-removes-user-fnd "rc=$RC calls=$(claude_calls) err=$(head -c 200 "$E") out=$(tr '\n' ';' < "$O")"; fi
+
+# …a failed removal is this target's failure, and nothing is installed on top of a live fnd…
+claude_state present "[
+$(installed_entry fnd@domaine user true)
+]"
+echo 7 > "$CSTATE/.stub-rc-uninstall-fnd"
+WITH_CLAUDE=yes run "$TMP/hq8y2" "$FIXBOOT" --targets claude --yes
+rm -f "$CSTATE/.stub-rc-uninstall-fnd"
+if [ "$RC" -eq 7 ] && [ "$(verbs)" = "uninstall fnd;" ] && [ "$(mp_calls)" -eq 0 ] \
+   && grep -qx 'claude FAILED (claude plugin uninstall fnd@domaine exit 7)' "$O"; then ok
+else bad Q10y2-removal-failure "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
+# …--yes never removes a synced copy, nor a user copy that a synced one hides behind: both still refuse…
+claude_state present "[
+$(installed_entry fnd@synced synced true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8y3" "$FIXBOOT" --targets claude --yes
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] && ! grep -q 're-run with --yes' "$O" "$E" \
+   && grep -qx '    remove fnd@synced from your claude.ai account (it is synced from there);' "$O"; then ok
+else bad Q10y3-yes-keeps-synced "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+claude_state present "[
+$(installed_entry fnd@domaine user true),
+$(installed_entry fnd@synced synced true)
+]"
+WITH_CLAUDE=yes run "$TMP/hq8y4" "$FIXBOOT" --targets claude --yes
+if [ "$RC" -eq 2 ] && [ -z "$(verbs)" ] \
+   && grep -qx '    claude plugin uninstall fnd@domaine, then remove fnd@synced from your claude.ai account (it is synced from there);' "$O"; then ok
+else bad Q10y4-yes-keeps-user-beside-synced "rc=$RC calls=$(claude_calls) out=$(tr '\n' ';' < "$O")"; fi
+
 # …an fnd synced from the claude.ai account loads too once nothing shadows it, and only the
 # account can remove it…
 claude_state present "[
