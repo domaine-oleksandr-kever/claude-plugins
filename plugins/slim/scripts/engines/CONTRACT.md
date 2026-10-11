@@ -64,39 +64,40 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
    … passed … ===`, go `--- PASS`/`ok  pkg 0.4s`, rspec `N examples, N failures`, three or more ✓/✗
    lines), `template` (`{%`, `{{`, `<%`, `<?php`), `code` (a `#!` shebang), `markup` (an HTML
    fragment: a leading HTML element such as `<div>` or `<section>`, no `<?xml` prolog, no HTML page).
-5a. **xml** — `<?xml`, or a leading element that is neither HTML nor an HTML page (`<head`/`<body`
+6. **xml** — `<?xml`, or a leading element that is neither HTML nor an HTML page (`<head`/`<body`
    in the first 2048 chars); never a root `<html>` (XHTML, prolog or not, is html); reason `svg` when
    the root element is `<svg`, else `xml`.
-5b. **a11y** — a browser accessibility snapshot, checked in the first 64 KB: at least 20 tree lines and
+7. **a11y** — a browser accessibility snapshot, checked in the first 64 KB: at least 20 tree lines and
    80 % of the lines that are not blank, a fence or a `#` heading; reason `playwright` (`- role "name"
    [attr] [ref=eN]` lines, refs on 30 % of them) or `devtools` (`uid=… role` lines). Ahead of the fence
    rule, because an action result carries its snapshot beside a code fence.
-6. **fence** — one dominant markdown fence (≥ 80 % of the bytes, ≤ 3 preamble and trailer lines): the
+8. **fence** — one dominant markdown fence (≥ 80 % of the bytes, ≤ 3 preamble and trailer lines): the
    body's engine, reason `fence`.
-7. **jsonl** — two or more lines, every non-blank line a JSON object or array.
-7a. **listing** — 50 or more non-blank lines that are a path list (reason `listing-flat`: 90 % or more
-   bare paths without whitespace, URLs and `-` lines excluded, half of them holding a `/` or an
-   extension that starts with a letter, half of those with a `/` sharing their top directory with
-   another line, and fewer than half holding `,` `;` `=` or ending in `:<digits>`, so CSV rows,
-   decimals, versions, base64 and `grep -c` counts are not paths), `ls -R` blocks (`listing-ls-R`: a `dir:` header, entries without a `/`) or `tree` box
-   drawing (`listing-tree`: 90 % of the lines after the root under `├──`/`└──`/`|--`). Ahead of the
-   code rule, because a path such as `export/feed.csv` opens like code.
-   Then **csv** — a delimited table in the first 64 KB: for `,`, tab or `;`, at least 20 records (quoted
-   fields may hold the delimiter, `""` and line breaks; text after a closing quote rules the delimiter
-   out) of which ≥ 95 % have the header's width, that width ≥ 3; the header has no number cell, does not
-   open with a date (`T` form too), time or level (so a comma-shaped log stays a log), and no cell parses
-   as the type its column's values share. The widest such delimiter wins; reason `csv`.
-8. **code → text** — non-markup text where 30 % of the first 200 non-empty lines open like code
-   (`import`, `const`, `function`, `def`, `return`, `{`, `}`, `//`, …). After the fence and JSONL rules,
-   because a JSON line opens with a brace too.
-9. **html** — opens with `<!doctype html` or `<html`, or has `<head`/`<body` in the first 2048 chars.
-10. **lint** — linter output: 30 or more non-blank lines, ≥ 70 % of them in a linter grammar (ESLint
+9. **jsonl** — two or more lines, every non-blank line a JSON object or array.
+10. **csv** — a delimited table in the first 64 KB: for `,`, tab or `;`, at least 20 records (quoted
+    fields may hold the delimiter, `""` and line breaks; text after a closing quote rules the delimiter
+    out) of which ≥ 95 % have the header's width, that width ≥ 3; the header has no number cell, does not
+    open with a date (`T` form too), time or level (so a comma-shaped log stays a log), and no cell parses
+    as the type its column's values share. The widest such delimiter wins; reason `csv`.
+11. **listing** — 50 or more non-blank lines that are a path list (reason `listing-flat`: 90 % or more
+    bare paths without whitespace, URLs and `-` lines excluded, half of them holding a `/` or an
+    extension that starts with a letter, half of those with a `/` sharing their top directory with
+    another line, and fewer than half holding `,` `;` `=` or ending in `:<digits>`, so CSV rows,
+    decimals, versions, base64 and `grep -c` counts are not paths), `ls -R` blocks (`listing-ls-R`: a
+    `dir:` header, entries without a `/`) or `tree` box drawing (`listing-tree`: 90 % of the lines
+    after the root under `├──`/`└──`/`|--`). After csv, so a table is never read as paths; ahead of the
+    code rule, because a path such as `export/feed.csv` opens like code.
+12. **code → text** — non-markup text where 30 % of the first 200 non-empty lines open like code
+    (`import`, `const`, `function`, `def`, `return`, `{`, `}`, `//`, …). After the fence, JSONL, csv
+    and listing rules, because a JSON line opens with a brace too and a path may open like code.
+13. **html** — opens with `<!doctype html` or `<html`, or has `<head`/`<body` in the first 2048 chars.
+14. **lint** — linter output: 30 or more non-blank lines, ≥ 70 % of them in a linter grammar (ESLint
     stylish / unix, stylelint, theme-check `[level] file:line`, tsc `file(l,c): error TSn:` or
     `file:l:c - error TSn:`, `prettier --check` `[warn] file`, their summary lines and quoted source
     excerpts), ≥ 25 % of them problems; confidence 0.9 with a summary line, else 0.8. A
     `file:line: text` line counts only when it names a level, so grep hits are not lint.
-11. **log** — the log detector's confidence ≥ 0.5 (level fields such as `ERROR`/`[warn]`/`error:`).
-12. **text** — reason `prose`.
+15. **log** — the log detector's confidence ≥ 0.5 (level fields such as `ERROR`/`[warn]`/`error:`).
+16. **text** — reason `prose`.
 
 `peek(text)` → `{ format, hint }`: a one-line shape hint (`array of N`, the top-level keys, or a
 whitespace-collapsed head preview) for a caller that shows a stub instead of a payload.

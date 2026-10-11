@@ -146,6 +146,22 @@ const texts = (doc, out = []) => { if (doc.visible === false) return out; if (ty
     ['nodes-no-document', JSON.stringify({ nodes: { '1:1': { components: {} } } }), 'json', 'json'],
     ['nodes-null-entry', JSON.stringify({ nodes: { '1:1': { document: { id: '1:1', type: 'FRAME', children: [] } }, '1:2': null } }), 'json', 'json'],
     ['nodes-untyped-document', JSON.stringify({ nodes: { '1:1': { document: { id: '1:1', absoluteBoundingBox: box(0, 0, 1, 1) } } } }), 'json', 'json'],
+    // One fixture per engine sniff rule, all in one table so the order across engines stays pinned.
+    ['a11y-plp.txt', fx('a11y-plp.txt'), 'a11y', 'playwright'],
+    ['a11y-plp-devtools.txt', fx('a11y-plp-devtools.txt'), 'a11y', 'devtools'],
+    ['eslint-stylish.txt', fx('eslint-stylish.txt'), 'lint', 'lint'],
+    ['tsc.txt', fx('tsc.txt'), 'lint', 'lint'],
+    ['lint-theme-check.txt', fx('lint-theme-check.txt'), 'lint', 'lint'],
+    ['theme-check.txt', fx('theme-check.txt'), 'text', 'template'],
+    ['listing-theme-find.txt', fx('listing-theme-find.txt'), 'listing', 'listing-flat'],
+    ['listing-tree.txt', fx('listing-tree.txt'), 'listing', 'listing-tree'],
+    ['listing-node-modules-ls-R.txt', fx('listing-node-modules-ls-R.txt'), 'listing', 'listing-ls-R'],
+    ['inventory.tsv', fx('inventory.tsv'), 'csv', 'csv'],
+    ['prices-eu.csv', fx('prices-eu.csv'), 'csv', 'csv'],
+    ['sync-commas.log', fx('sync-commas.log'), 'log', 'log'],
+    ['merchant-feed.xml', fx('merchant-feed.xml'), 'xml', 'xml'],
+    ['rss-feed.xml', fx('rss-feed.xml'), 'xml', 'xml'],
+    ['icon-snippet.liquid', fx('icon-snippet.liquid'), 'text', 'template'],
   ];
   for (const [name, data, engine, reason] of rows) {
     const s = sniff({ data });

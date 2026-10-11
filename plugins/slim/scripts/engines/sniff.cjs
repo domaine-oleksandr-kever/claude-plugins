@@ -1,17 +1,14 @@
 /*
  * engines/sniff.cjs — content-based detection: which engine a payload belongs to, and why.
  *
- * Order (first match wins): binary (magic bytes / NUL) → none (empty) → JSON (`adf` for a bare ADF
- * doc, `figma-nodes` for a Figma REST nodes response) → figma (Figma design-context JSX markers) →
- * the guards that keep text untouched (diff, test output, template, shebang, XML → `text`) → a
- * browser accessibility snapshot (`a11y`, reason `playwright` / `devtools`) → a dominant markdown
- * fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → lint (linter output)
- * → log (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
- * the guards that keep text untouched (diff, test output, template, shebang, an HTML fragment →
- * `text`) → XML (`<?xml` or a leading non-HTML element; `svg` too) → a dominant markdown fence (the
- * body's engine) → JSONL → code by line openings (`text`) → HTML → log (detector confidence ≥ 0.5)
- * → `text`. The guards run before HTML and log on purpose: a test run
- * must not be deduped as a log, a theme template must not be stripped as a page. Pure.
+ * Order (first match wins):
+ *   binary (magic bytes / NUL) → none (empty) → JSON (`adf`, `figma-nodes`) → figma (design-context JSX)
+ *   → guards → `text` (diff, test output, template, shebang, an HTML fragment `markup`)
+ *   → xml (`<?xml` or a leading non-HTML element; reason `svg` for an SVG) → a11y (browser snapshot)
+ *   → a dominant markdown fence (the body's engine) → JSONL → csv (delimited table) → listing (paths)
+ *   → code by line openings (`text`) → HTML → lint (linter output) → log (confidence ≥ 0.5) → `text`.
+ * The guards run before every transforming engine on purpose: a test run must not be deduped as a log
+ * or grouped as lint, a theme template must not be stripped as a page or folded as XML. Pure.
  */
 'use strict';
 
