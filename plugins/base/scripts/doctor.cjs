@@ -346,6 +346,9 @@ function checkSwitches(env) {
   if (!['', 'auto', 'mcp', 'rest'].includes(src)) bad.push(shown('BASE_FIGMA_SOURCE') + ' is read as auto — auto, mcp or rest');
   const ttl = (env.BASE_TMP_TTL || '').trim();
   if (ttl && parseTtl(ttl) !== Number(ttl)) bad.push(shown('BASE_TMP_TTL') + ' is read as ' + DEFAULT_TTL_HOURS + ' — hours, 0 or more');
+  if (env.BASE_DOGFOOD !== undefined && !['', '0', '1'].includes(env.BASE_DOGFOOD)) bad.push(shown('BASE_DOGFOOD') + ' is read as off — only 1 turns it on');
+  const repo = (env.BASE_DOGFOOD_REPO || '').trim();
+  if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) bad.push(shown('BASE_DOGFOOD_REPO') + ' is not <owner>/<repo> — plugin_defect files no GitHub issue');
   if (bad.length) warn('switches', bad.join('; '));
 }
 

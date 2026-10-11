@@ -1,9 +1,10 @@
 // base hooks module (Claude Code only): the workspace progress band draws and its autosave, the install checks, the session
-// title, the guards, the conventions, the doctor and the event log on disk. base writes only base.* atoms.
+// title, the guards, the conventions, the doctor, the event log on disk and dogfood mode. base writes only base.* atoms.
 // Each feature file declares its own atoms and keeps its `$` code to itself: the validator follows `$` only within one file.
 import type { Register } from 'claude-code'
 import { registerConventions } from './conventions.ts'
 import { registerDoctor } from './doctor.ts'
+import { registerDogfood } from './dogfood.ts'
 import { registerBashGuards } from './guards/bash.ts'
 import { registerScratchGuard } from './guards/scratch.ts'
 import { registerSession } from './session.ts'
@@ -20,4 +21,5 @@ export const register: Register = (on) => {
   registerScratchGuard(on)
   registerConventions(on)
   registerDoctor(on)
+  registerDogfood(on)
 }

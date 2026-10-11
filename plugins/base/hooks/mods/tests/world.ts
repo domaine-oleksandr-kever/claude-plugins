@@ -43,12 +43,20 @@ export type World = {
   sweepGate: Promise<void>
   /** every $.fs.write rejects with this message while set */
   writeFails: string | null
+  /** a $.fs.write under one of these prefixes rejects: a directory the session cannot write */
+  writeDenied: string[]
   /** paths whose $.fs.read rejects while $.fs.stat still answers: a file over the engine's 4 MiB read cap */
   readFails: string[]
   /** `$.fs.stat(path, { resolve: true })` lands here instead of on the path itself: a symbolic link */
   realPaths: Record<string, string>
   /** what $.session.usage() reports as the context window's fill, in percent; null = no reading yet */
   ctxPct: number | null
+  /** what `git remote get-url origin` answers; null = no remote */
+  remote: string | null
+  /** what `git rev-parse --short HEAD` answers */
+  commit: string
+  /** what a Bash call answers at the bottom; null = `{ result: 'ok' }` */
+  bash: ((command: string) => Record<string, unknown>) | null
 }
 
 export const progressMd = (id: string) => `${TASKS}/${id}/progress.md`
@@ -77,9 +85,13 @@ export function world(on: On, over: Partial<World> = {}) {
     mcp: {},
     sweepGate: Promise.resolve(),
     writeFails: null,
+    writeDenied: [],
     readFails: [],
     realPaths: {},
     ctxPct: null,
+    remote: 'git@github.com:acme/shop.git',
+    commit: 'abc1234',
+    bash: null,
     ...over,
   }
   const calls = {
@@ -100,6 +112,8 @@ export function world(on: On, over: Partial<World> = {}) {
     writes: [] as { path: string; text: string }[],
     /** the directories an `rm -rf` removed */
     removed: [] as string[],
+    /** every tool registered: its name and spec */
+    tools: [] as { name: string; inputSchema?: unknown; isDeferred?: unknown }[],
     /** every prompt that reached the bottom, as it arrived */
     prompts: [] as { text: string; context?: readonly string[] }[],
   }
@@ -123,6 +137,11 @@ export function world(on: On, over: Partial<World> = {}) {
   on('session.cwd', async () => ({ value: w.root }))
   on('session.id', async () => ({ value: w.sid }))
   on('session.surfaces', async () => ({ value: w.surfaces as never }))
+  on('session.version', async () => ({ value: { version: '2.1.293', base: '2.1.293' } as never }))
+  on('tool.register', async (_$, e) => {
+    calls.tools.push(e as any)
+    return { value: { tool: `mcp__base__${e.name}` } as never }
+  })
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000, percent: w.ctxPct ?? undefined }, rateLimits: [] } as never }))
   on('settings.read', async () => ({ value: { env: w.settingsEnv, enabledPlugins: w.enabledPlugins } as any }))
   on('tool.list', async () => ({ value: w.tools.map(name => ({ name, description: name, mcp: name.startsWith('mcp__') })) }))
@@ -154,6 +173,8 @@ export function world(on: On, over: Partial<World> = {}) {
       await clock.sleep(ms)
     }
     if (w.gitRejects) throw new Error('spawn git ENOENT')
+    if (e.argv.includes('get-url')) return { value: w.remote ? ran(0, `${w.remote}\n`) : ran(2, '', 'error: No such remote') }
+    if (e.argv.includes('--short')) return { value: ran(0, `${w.commit}\n`) }
     const ok = w.branch !== null
     return { value: { exitCode: ok ? 0 : 128, stdout: ok ? `${w.branch}\n` : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -187,6 +208,7 @@ export function world(on: On, over: Partial<World> = {}) {
   on('fs.write', async (_$, e) => {
     calls.fs.push(`write ${e.path}`)
     if (w.writeFails) throw new Error(w.writeFails)
+    if (w.writeDenied.some(p => e.path.startsWith(p))) throw new Error(`EACCES: ${e.path}`)
     calls.writes.push({ path: e.path, text: e.text })
     w.files[e.path] = { text: e.text, mtimeMs: clock.now() }
     return { value: undefined }
@@ -227,6 +249,7 @@ export function world(on: On, over: Partial<World> = {}) {
     const a = e as any
     calls.below.push(a)
     if (a.tool === 'Write') w.files[a.file_path] = { text: a.content, mtimeMs: NOW + 1 }
+    if (a.tool === 'Bash' && w.bash) return w.bash(a.command) as never
     if (a.tool === 'Bash') {
       const m = /git (?:checkout|switch) (\S+)/.exec(a.command)
       if (m) w.branch = m[1] ?? null
