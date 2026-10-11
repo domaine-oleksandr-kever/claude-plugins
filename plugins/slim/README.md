@@ -7,7 +7,7 @@ Bash, Read, WebFetch, WebSearch, Grep and Agent — and shrinks the large ones b
 the context; a pasted prompt's data and an @-mentioned data file get the same treatment. It decides
 by content, never by tool name: JSON goes to the JSON compressor, a log to the log engine, an HTML
 page to the HTML engine, Figma design-context JSX to the JSX compactor, a Figma REST nodes response
-to the node-tree engine, and plain text (code, diffs, test output) is at most windowed. Two tools
+to the node-tree engine, a CSV or TSV table to the table profiler, and plain text (code, diffs, test output) is at most windowed. Two tools
 come with it: `lookup` answers one question about a page, a command's output or a file without
 loading it whole, and `view` shows a big file or a command's output compactly (and resizes images
 and video). Every original stays on disk behind a recovery handle, so nothing is lost.
@@ -50,14 +50,14 @@ validates a hook's result against the built-in tool's output schema: Bash stays
 
 | Channel | Candidate when | What slim does |
 |---|---|---|
-| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX and logs compressed; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
-| Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML; over 16,384 B from a log command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
-| Read | a whole-file read of a `.log`, `.jsonl` or `.ndjson` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
-| WebFetch | result over 16,384 B that is JSON or HTML, or over `SLIM_PLAIN_BYTES` | JSON, JSONL and HTML engines, else a window |
+| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX, logs and delimited tables compressed; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
+| Bash | stdout over 4,096 B that is JSON, JSONL, a delimited table or (for a fetch command) HTML; over 16,384 B from a log command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
+| Read | a whole-file read of a `.log`, `.jsonl`, `.ndjson`, `.csv` or `.tsv` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
+| WebFetch | result over 16,384 B that is JSON, HTML or a delimited table, or over `SLIM_PLAIN_BYTES` | JSON, JSONL, HTML and csv engines, else a window |
 | WebSearch | a result string over `SLIM_PLAIN_BYTES` | that string is windowed; the others are untouched |
 | Grep | `content` output over 16,384 B (a file listing is never touched) | window with an 8,192 B budget; `numFiles`, `numLines` and `numMatches` never change |
 | Agent | a completed subagent's text block over `SLIM_PLAIN_BYTES` | that block is windowed |
-| @-mentioned file | over 32,768 B, the host's numbered lines of a data file | JSON, JSONL and log engines, as a Read; see below |
+| @-mentioned file | over 32,768 B, the host's numbered lines of a data file | JSON, JSONL, log and csv engines, as a Read; see below |
 | Prompt (typed or bridge) | a prompt of 10,240 B or more holding a data span of 8,192 B or more | each span replaced in place; see below |
 | View (`mcp__slim__view`) | every call | the tool's own answer is already compact; slim never compresses it again (see View) |
 
@@ -75,7 +75,20 @@ header counts what was folded. It never folds past the root's direct children; a
 does not fit goes the JSON route (fit, else stub). The view tool never folds a tree: a long one is
 read windowed from a file instead.
 
-**Engine admission on Bash.** JSON and JSONL output is compressed whatever the command. HTML is
+**Delimited tables.** A CSV, TSV or `;`-separated table — 20 or more records, one delimiter splitting
+≥ 95 % of them into the header's width (3 columns or more), a header with no number, date or time in
+it — becomes a profile: a `<<slim-csv>>` line with rows × cols, the delimiter and the size; one line
+per column with its type (number, integer, date, bool, category, string), min and max as written,
+nulls, distinct count, and either the values of a category or bool with their counts or three
+samples; then a markdown table of the header, rows 1–3 and three sampled rows with their data-row
+numbers, cells as written (a cell over 160 chars is clipped with its length). Samples and sampled
+rows are picked by a generator seeded with the content hash, so a rerun shows the same ones. A
+`;` file reads `1.299,00` as a number. Over the channel's egress cap the table rows go first (3,
+then none), then the samples (one per column); still over → stub. It runs on Bash whatever the
+command, on WebFetch, on a Read of a `.csv` / `.tsv` file and an @-mentioned one, and on MCP text.
+For one row or a filter the footer names `lookup({ path, question })` on the spill.
+
+**Engine admission on Bash.** JSON, JSONL and delimited-table output is compressed whatever the command. HTML is
 treated as a page only when the command fetches one: `curl`, `wget`, `http`, `https`, `xh` or `lynx`
 as the command word of a pipeline segment (`cat src/http/page.html` is not a fetch). Otherwise it is
 plain text, so theme source is never stripped. The log engine runs only
@@ -129,8 +142,8 @@ than that is shown as `+N%`. The Log event counts from the raw bytes and names t
 
 A compressed view of an editable file would break the next Edit (its `old_string` would span lines
 the view dropped) and invite a lossy Write. So Read compresses only data files the host would not
-have shown whole: a whole-file read of a `.log`, `.jsonl` or `.ndjson` file over 32 KB, or of a
-`.json` file the host cut at its token cap. Source JSON never qualifies: files under `config/`,
+have shown whole: a whole-file read of a `.log`, `.jsonl`, `.ndjson`, `.csv` or `.tsv` file over 32 KB,
+or of a `.json` file the host cut at its token cap. Source JSON never qualifies: files under `config/`,
 `templates/`, `locales/`, `sections/`, `blocks/`, `snippets/` or `layout/`, `package.json`,
 `package-lock.json`, `tsconfig*.json`, `composer.json`, `jsconfig.json`, `*rc.json` and
 `*.schema.json`. A compressed Read starts at line 1 and carries this note before the stats line:
@@ -234,8 +247,8 @@ project's own `.gitignore` is left alone.
 
 An @-mentioned file reaches the model as the host frames a Read of it: `Called the Read tool with
 the following input: {"file_path": …}`, then the file as numbered lines. Over 32,768 B, a data file —
-the framing names a `.json`, `.jsonl`, `.ndjson`, `.log` or `.txt` file that is not source JSON, or
-names none and the content sniffs as JSON, JSON lines or a log — has its numbered lines replaced by
+the framing names a `.json`, `.jsonl`, `.ndjson`, `.log`, `.txt`, `.csv` or `.tsv` file that is not source
+JSON, or names none and the content sniffs as JSON, JSON lines, a log or a table — has its numbered lines replaced by
 the compressed content, the Read note and a handle, inside the same framing; source, prose and code
 pass through. The same text is always compressed the same way (the host keeps the answer and asks
 again after a compaction), and the Log line (`@rows.jsonl: compressed 61 KB → 2 KB (−97%) · jsonl`)
@@ -321,7 +334,7 @@ whose result the webfetch channel compresses, or `lookup({ url, question })`).
   JSON array): every guard has ruled by then, so view goes on.
   The core then reads the file the Read opened and picks the engine
   by content (`engine` overrides: `json`, `jsonl`, `log`, `html`, `figma`, `figma-nodes`, `adf`,
-  `text`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
+  `text`, `csv`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
   is one, so bound variables read by name. An image or a video goes to the media backend (see Media).
 - `command`: slim runs it through Bash (permission rules and hooks rule on it); an output the host
   saved to a file is read from there. A compressed output keeps its original in the spill root, and
@@ -425,7 +438,7 @@ slim owns four `$.state` keys under `plugin: 'slim'`. Any plugin reads them; onl
 The contract is `plugins/slim/types/index.d.ts`:
 
 ```ts
-export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'stub'
+export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'csv' | 'stub'
 export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'agent' | 'attachment' | 'prompt'
 type SlimEventBase = { v: 1; atMs: number; text: string; src: 'slim'; tool: string; agentType?: string; ms: number }
 export type SlimCompressEvent = SlimEventBase & { kind: 'slim'; channel: SlimChannel; bytesIn: number; bytesOut: number; engine: SlimEngine }
@@ -582,7 +595,7 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
 |---|---|---|
 | `SLIM_MCP` | `1` | `0` turns the MCP channel off: every MCP result passes through untouched, nothing is spawned and no report line is written. |
 | `SLIM_BASH` | `1` | `0` turns the Bash channel off (stdout of large JSON, HTML-fetch, log and plain-text outputs, and outputs the host saved to a file). |
-| `SLIM_READ` | `1` | `0` turns the Read channel off (whole-file reads of big `.log`/`.jsonl`/`.ndjson` files and of `.json` data files the host cut at its token cap). |
+| `SLIM_READ` | `1` | `0` turns the Read channel off (whole-file reads of big `.log`/`.jsonl`/`.ndjson`/`.csv`/`.tsv` files and of `.json` data files the host cut at its token cap). |
 | `SLIM_WEB` | `1` | `0` turns the WebFetch and WebSearch channels off. |
 | `SLIM_GREP` | `1` | `0` turns the Grep channel off (the `content` window; the counts never change either way). |
 | `SLIM_AGENT` | `1` | `0` turns the Agent channel off (the window over a completed subagent's long report). |
@@ -622,6 +635,9 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
   see the Read rules.
 - **Images, PDFs and binary output** pass through the hook channels untouched; images and video are
   resized only when asked through `view { path }` (see Media).
+- **Headerless or short tables, and tables pasted in a prompt.** A table whose first row holds a
+  number, date or time, or one of fewer than 20 records, is plain text; the prompt channel's spans
+  are JSON, JSONL, HTML and logs. A `.csv` under 32 KB is shown as the host read it.
 - **A `.json` file the host showed whole.** A Read under the host's token cap is left as is. Ask a
   question about it with `lookup({ path, question })`, or narrow it with `view({ path, jq })`.
 
@@ -675,6 +691,7 @@ directory. Results land in the suite's `results/` directory (git-ignored).
 ```
 node tests/slim-engines.mjs        # the engines as pure functions on the real fixtures, and the library contract
 node tests/html-slim-fixtures.mjs  # the HTML engine
+node tests/csv-slim-fixtures.mjs   # the csv engine
 node tests/slim-fixtures.mjs       # delivery end to end: every channel, --view, --prompt, --access, --report
 claude plugin test plugins/slim    # the module's kit tests
 bash tests/mods-sim.sh             # validate --strict + the kit tests per plugin (local only; needs claude)

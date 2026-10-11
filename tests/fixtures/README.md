@@ -44,6 +44,13 @@ Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs` and the per-channe
 | `theme-check.txt` | **synthetic** — script-built once | ~21 KB theme-check text report: 120 offences over 20 Liquid files, each with the quoted source line (`{% render … %}`, `{{ … }}`) and a severity summary | the MCP route must sniff it as `template` text and pass it through (stub over the limit), never log-compress it (`slim-fixtures.mjs` MS1) |
 | `playwright-snapshot.txt` | **synthetic** — script-built once | ~20 KB Playwright MCP `browser_snapshot` text: page header lines, then a fenced YAML accessibility tree of a 48-card product grid with `[ref=eN]` refs | no engine claims it yet: passthrough `non-json` on MCP (`slim-fixtures.mjs` MS2) |
 | `jql-nodes-ELC.json` | **synthetic** — `plugins/slim/evals/_shared/make-jql-nodes.cjs` | ~297 KB Atlassian MCP JQL search in the `{issues:{nodes:[50]},context}` shape: ELC-1401…ELC-1450, each with a 1.5–4.2 KB lorem markdown `description`, invented people and hosts | no crush signal (unique rows), so only the `targetBytes` trim and fit stages bring it under the 32,768 B stub limit; EF holds it equal to the generator's output |
+| `inventory.tsv` | **synthetic** — script-built once | ~38 KB TSV, 640 warehouse rows × 8 columns: quoted `"Austin, TX"` locations, ISO dates, a `note` column mostly empty, one quoted note holding a line break | the csv engine's TSV and quoted-comma case (`csv-slim-fixtures.mjs`), and the csv Read / MCP / WebFetch / @-file rows of `slim-fixtures.mjs` (C-csv) |
+| `prices-eu.csv` | **synthetic** — script-built once | ~16 KB `;`-separated price list, 320 rows × 7 columns, European decimals (`1.299,00`, `0,342`) and `ja`/`nein` | the csv engine's delimiter-first rule: `;` wins over the decimal commas, and the number columns read as numbers |
+| `small.csv` | **synthetic** — script-built once | 15 lines, 4 columns | under the 20-record detection floor (sniffs as prose); forced through the csv engine it is `no-gain` |
+| `sync-commas.log` | **synthetic** — script-built once | ~39 KB, 400 log lines with a millisecond comma and two commas per message, so every line has the same comma count | must stay `log`: the csv header rule refuses a first row that starts with a date |
+
+The 12,480-row product export (~2.3 MB, 14 columns, quoted `Body (HTML)`) comes from
+`plugins/slim/evals/_shared/make-products-csv.cjs` at run time, like `orders.json` below.
 
 The 300 KB Read row and the eval's `orders.json` come from `plugins/slim/evals/_shared/make-orders.cjs`
 at run time; `jql-nodes-ELC.json` is the one fixture of that size committed, because the delivery

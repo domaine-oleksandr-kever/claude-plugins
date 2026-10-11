@@ -4,8 +4,8 @@
  * Order (first match wins): binary (magic bytes / NUL) → none (empty) → JSON (`adf` for a bare ADF
  * doc, `figma-nodes` for a Figma REST nodes response) → figma (Figma design-context JSX markers) →
  * the guards that keep text untouched (diff, test output, template, shebang, XML → `text`) → a
- * dominant markdown fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → log
- * (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
+ * dominant markdown fence (the body's engine) → JSONL → a delimited table (`csv`) → code by line
+ * openings (`text`) → HTML → log (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
  * must not be deduped as a log, a theme template must not be stripped as a page. Pure.
  */
 'use strict';
@@ -15,6 +15,7 @@ const { detectLog } = require('./log.cjs');
 const { detectJsx } = require('./figma.cjs');
 const { isNodesResponse } = require('./figma-nodes.cjs');
 const { parseJsonl, unwrapFence } = require('./json.cjs');
+const { detect: detectCsv } = require('./csv.cjs');
 
 const SCAN = 65536;
 
@@ -94,6 +95,7 @@ function sniffText(text, fenced) {
     }
   }
   if (parseJsonl(text)) return { engine: 'jsonl', confidence: 0.9, reason: 'jsonl' };
+  if (detectCsv(text)) return { engine: 'csv', confidence: 0.9, reason: 'csv' };
   if (looksLikeCode(text)) return { engine: 'text', confidence: 0.9, reason: 'code' };
   if (isHtml(text)) return { engine: 'html', confidence: 0.9, reason: 'html' };
   const log = detectLog(text);

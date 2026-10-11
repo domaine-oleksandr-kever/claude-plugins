@@ -26,6 +26,7 @@ const SOURCE_JSON_DIR = /(?:^|\/)(?:config|templates|locales|sections|blocks|sni
 const SOURCE_JSON_BASE = /^(?:package(?:-lock)?|tsconfig[\w.-]*|composer|jsconfig|\.?[\w-]*rc)\.json$|\.schema\.json$/i;
 const isSourceJson = (p) => SOURCE_JSON_DIR.test(p) || SOURCE_JSON_BASE.test(path.basename(p));
 const READ_LOG_EXT = new Set(['.log', '.jsonl', '.ndjson']);
+const READ_DATA_EXT = new Set(['.csv', '.tsv']);
 
 const utf8 = (s) => Buffer.byteLength(s, 'utf8');
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -47,11 +48,11 @@ function admit(channel, engine, command) {
       if (engine === 'log') return LOG_CMD.test(command) ? 'log' : 'text';
       return engine;
     case 'read':
-      return ['json', 'jsonl', 'figma-nodes', 'log'].includes(engine) ? engine : null;
+      return ['json', 'jsonl', 'figma-nodes', 'log', 'csv'].includes(engine) ? engine : null;
     case 'attachment':
-      return ['json', 'jsonl', 'log'].includes(engine) ? engine : null;
+      return ['json', 'jsonl', 'log', 'csv'].includes(engine) ? engine : null;
     case 'webfetch':
-      return ['json', 'jsonl', 'figma-nodes', 'html'].includes(engine) ? engine : 'text';
+      return ['json', 'jsonl', 'figma-nodes', 'html', 'csv'].includes(engine) ? engine : 'text';
     default:
       return 'text';
   }
@@ -176,6 +177,6 @@ function extract(channel, rec, input) {
 }
 
 module.exports = {
-  GATES, LOG_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, OWN_CLI, READ_LOG_EXT,
+  GATES, LOG_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, OWN_CLI, READ_LOG_EXT, READ_DATA_EXT,
   isSourceJson, commandWords, admit, structuredGate, plainGate, bashSeen, extract, numberedBody, attachmentPath,
 };
