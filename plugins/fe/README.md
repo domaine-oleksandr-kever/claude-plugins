@@ -1,22 +1,29 @@
 # fe
 
-fe is the Domaine frontend team plugin for Claude Code. It holds the Shopify theme work: the skills that
-take a ticket from a Technical Approach to a pull request and a preview theme, the steps to test, the
-breaking-changes and translation tools, the `fe:theme-explorer` agent, the project profile (Foundation,
-another theme, or none) and the store-access rules.
+fe is the Domaine frontend team plugin for Claude Code. It holds the Shopify theme work. Its skills
+take a ticket from a Technical Approach (TA) to a pull request and a preview theme. To install it, see
+[Quick install (Claude Code)](../../README.md#quick-install-claude-code) or § Install below.
 
-fe builds on base and requires it: the Jira, Figma and doc readers, the Jira writer, the review agents,
-the task workspace, the commit and review skills, the guards and the shared MCP servers are base's
+fe also holds these parts:
+
+- the Steps to Test skill;
+- the breaking-changes and translation tools;
+- the `fe:theme-explorer` agent;
+- the project profile: Foundation, another theme, or none;
+- the store-access rules.
+
+fe builds on base and requires it. base supplies the Jira, Figma and doc readers, the Jira writer, the
+review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
 Current release: **fe v0.5.3**.
 
 ## Status
 
-- Claude Code only: fe is a plugin of skills, an agent, references, scripts and a hooks module (mods).
+- Claude Code only. fe is a plugin of skills, an agent, references, scripts and a hooks module (mods).
   It ships no adapter for another host, and `scripts/install.sh --plugin fe` exits 2.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
-  not install a dependency on its own: install all three.
+  not install a dependency by itself, so install all three.
 
 ## Install
 
@@ -29,8 +36,8 @@ Current release: **fe v0.5.3**.
 /reload-plugins
 ```
 
-`/base-doctor` and `/fe-doctor` then check the install (§ Doctor). The same set as settings, in
-`~/.claude/settings.json`:
+Then run `/base-doctor` and `/fe-doctor` to check the install (§ Doctor). To enable the same set
+through settings, add this to `~/.claude/settings.json`:
 
 ```json
 {
@@ -43,13 +50,13 @@ Current release: **fe v0.5.3**.
 }
 ```
 
-The team plugins fe, qa, be and pm co-install: each needs only base, and none needs another.
+The team plugins fe, qa, be and pm co-install. Each needs only base, and none needs another.
 
 ## Skills
 
-Invoked by their qualified names (`/fe:<skill>`). They hand off to base's skills and agents by base's
-qualified names (`/base:commit`, `/base:pre-commit-review`, `base:jira-reader`, …). A hand-off is an
-offer at the end of the run, never an automatic start; only `/fe:ship` runs the series by itself.
+Call the skills by their qualified names (`/fe:<skill>`). They hand off to base's skills and agents by
+base's qualified names (`/base:commit`, `/base:pre-commit-review`, `base:jira-reader`, …). A hand-off
+is an offer at the end of the run, never an automatic start. Only `/fe:ship` runs the series by itself.
 
 | Skill | Does | Uses / hands off to |
 |---|---|---|
@@ -66,15 +73,20 @@ offer at the end of the run, never an automatic start; only `/fe:ship` runs the 
 | `/fe:fix-breaking-changes` | applies the documented breaking changes to templates and settings data | its bundled script template; reads `/fe:get-breaking-changes`'s report |
 | `/fe:update-translations` | translates storefront and schema strings into the theme's other languages | the project's own update-translations.js (fe ships none) |
 
-The progress rows these skills tick in a ticket's `progress.md` are fe's `progress-series` section
-(§ Conventions).
+fe's `progress-series` section (§ Conventions) lists the progress rows that these skills tick in a
+ticket's `progress.md`.
 
-**A worktree:** `/base:worktree` makes the checkout, copies `.env` and `shopify.theme.toml` (fe's
-`worktree copy list:` line) and records a dev port; then `/fe:preview-theme` in the worktree runs
-`scripts/worktree-theme.sh`, which un-pins the copied config once (a worktree never inherits the
-main checkout's session theme) and prints the dev-server line with that port. On the main checkout
-the script answers `error=not_a_linked_worktree` and the skill goes on without it. `/fe:ship` offers
-the same two steps before it starts.
+**A worktree:** fe sets up a worktree in two steps. `/fe:ship` offers the same two steps before it
+starts.
+
+1. `/base:worktree` makes the checkout, copies `.env` and `shopify.theme.toml` (fe's
+   `worktree copy list:` line) and records a dev port.
+2. `/fe:preview-theme` in the worktree runs `scripts/worktree-theme.sh`. The script un-pins the copied
+   config once, because a worktree never inherits the main checkout's session theme. Then it prints
+   the dev-server line with that port.
+
+On the main checkout the script answers `error=not_a_linked_worktree`, and the skill continues
+without it.
 
 ## Agent
 
@@ -84,9 +96,9 @@ the same two steps before it starts.
 
 ## References and scripts
 
-The skills and the agent cite fe's own files by their path under fe's root (`<fe root>/…`, the
-session's `fe plugin root:` line) and base's by their path under base's root (`<base root>/…`);
-`tests/team-refs-lint.sh` checks that every cited path exists.
+The skills and the agent cite fe's own files by their path under fe's root (`<fe root>/…`, from the
+session's `fe plugin root:` line). They cite base's files by their path under base's root
+(`<base root>/…`). `tests/team-refs-lint.sh` checks that every cited path exists.
 
 | Reference | Read by | Holds |
 |---|---|---|
@@ -116,13 +128,16 @@ session's `fe plugin root:` line) and base's by their path under base's root (`<
 | `scripts/_shopify-common.sh` | sourced by the store scripts | the shared Shopify CLI and config helpers |
 
 `/fe:fix-breaking-changes` copies its own `skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js`
-into the project and removes it after the run. `/fe:write-steps-to-test` names the QA store registry,
+into the project and removes the copy after the run. `/fe:write-steps-to-test` names the QA store registry,
 `<base root>/scripts/qa-stores.cjs`, only to say why it does not read it.
 
 ## Conventions
 
-fe adds its sections to the main session's system prompt after Claude Code's own and base's, in this
-order, each with the id `fe:<name>`. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as a context block of the first user message instead (`prompt.context`, beside CLAUDE.md).
+fe adds its sections to the main session's system prompt, after Claude Code's own and base's. They
+come in the order below, and each has the id `fe:<name>`. Some sessions draw no surface, for example
+a claude.ai cloud session or `claude -p`. There the engine composes its prompt without the plugins.
+The same sections then arrive once as a context block of the first user message instead
+(`prompt.context`, beside CLAUDE.md).
 
 | Name | Holds | When |
 |---|---|---|
@@ -133,28 +148,35 @@ order, each with the id `fe:<name>`. In a session no surface draws (a claude.ai 
 | `worktree` | `worktree copy list: shopify.theme.toml` (the line `/base:worktree` reads), then `/fe:preview-theme` in the new worktree | the project root holds `shopify.theme.toml` |
 | `progress-series` | the rows of a ticket's `progress.md` in order — `write-technical-approach`, `develop-feature-or-fix`, `qa-feature-or-fix`, `pre-commit-review`, `commit`, `create-pull-request`, `write-steps-to-test` — and the skill that ticks each; a batch lists its tickets, then the same tail | a profile other than `none`, or `shopify.theme.toml` at the root |
 
-**The profile** is decided once per session id (a `/clear` decides again): `FE_PROFILE` when it holds
-one of the three words, else `scripts/project-profile.sh` on the project root, which also reads
-`FE_PROFILE` from `.claude/domaine.env` or `~/.config/domaine/env` and otherwise detects
-(`snippets/@*.liquid`, `sections/core-*.liquid`, `blocks/core-*.liquid` or `src/entry/core/` ⇒
-`foundation`; `layout/theme.liquid` ⇒ `theme`; else `none`). A probe that fails or times out (5 s)
-gives `none` and one `profile` line saying why. The sections never change within a session, so the
-prompt cache holds.
+**The profile** is decided once per session id; a `/clear` decides again. fe takes the first answer
+in this order:
 
-**Subagents** get fe's share as added context at their start (Claude Code's `SubagentStart`; the
-engine has no event for a subagent's system prompt): base's readers and writer (`base:jira-reader`,
-`base:jira-writer`, `base:figma-reader`, `base:doc-reader`) and Claude Code's `claude-code-guide` and
-`statusline-setup` get nothing from fe; the read-only agents
-(`fe:theme-explorer`, `base:change-reviewer`, `base:bug-hunter`, `Explore`, `Plan`) get the root, the
-profile and the Foundation section; every other agent also gets store access when it applies.
+1. `FE_PROFILE`, when it holds one of the three words.
+2. `scripts/project-profile.sh` on the project root. The script also reads `FE_PROFILE` from
+   `.claude/domaine.env` or `~/.config/domaine/env`.
+3. Detection by the same script: `snippets/@*.liquid`, `sections/core-*.liquid`,
+   `blocks/core-*.liquid` or `src/entry/core/` ⇒ `foundation`; `layout/theme.liquid` ⇒ `theme`;
+   else `none`.
 
-**base required:** at a session start fe looks for base's skills in the command list. Without them it
-shows one toast and writes one `install` line: `fe: needs the base plugin — claude plugin install
-base@domaine`.
+A probe that fails or times out (5 s) gives `none` and one `profile` line that says why. The sections
+never change within a session, so the prompt cache holds.
+
+**Subagents** get fe's share as added context at their start, through Claude Code's `SubagentStart`.
+The engine has no event for a subagent's system prompt. The share depends on the agent:
+
+- base's readers and writer (`base:jira-reader`, `base:jira-writer`, `base:figma-reader`,
+  `base:doc-reader`) and Claude Code's `claude-code-guide` and `statusline-setup` get nothing from fe.
+- The read-only agents (`fe:theme-explorer`, `base:change-reviewer`, `base:bug-hunter`, `Explore`,
+  `Plan`) get the root, the profile and the Foundation section.
+- Every other agent also gets store access when it applies.
+
+**base required:** at a session start fe looks for base's skills in the command list. If they are
+missing, fe shows one toast and writes one `install` line:
+`fe: needs the base plugin — claude plugin install base@domaine`.
 
 ## Doctor
 
-`/fe-doctor` checks fe's side of the install and prints one PASS / FAIL / SKIP / WARN row per check,
+`/fe-doctor` checks fe's side of the install. It prints one PASS / FAIL / SKIP / WARN row per check,
 the counts, and the last 10 `fe.events` lines. `/base-doctor` checks base's side (slim, the MCP
 servers).
 
@@ -170,36 +192,37 @@ servers).
 | `event-log` | this session's `fe.jsonl`: its line count and newest `ts`; no file yet passes (a /clear's new session has none before its first line) |
 | `base-live`, `slim-live` | what this session loaded: base's skills, slim's `mcp__slim__view` tool |
 
-The first eight rows come from `scripts/doctor.cjs`, which also runs by hand:
-`node <fe plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`; it exits 1 when a row
-fails. By hand its `event-log` row reads the newest session folder unless `--log-dir` names one. One
-`doctor` line goes to `fe.events` per run.
+The first eight rows come from `scripts/doctor.cjs`. You can also run it by hand:
+`node <fe plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`. It exits 1 when a row
+fails. By hand, its `event-log` row reads the newest session folder unless `--log-dir` names one.
+Each run writes one `doctor` line to `fe.events`.
 
 ## Event log on disk
 
-fe writes its lines to `$HOME/.claude/domaine/log/<session-id>/fe.jsonl` under the same contract as
-every Domaine plugin ([plugins/base/README.md](../base/README.md#event-log-on-disk)):
+fe writes its lines to `$HOME/.claude/domaine/log/<session-id>/fe.jsonl`. The file follows the
+same contract as every Domaine plugin ([plugins/base/README.md](../base/README.md#event-log-on-disk)):
 
 - **Line:** `{"ts":"…","plugin":"fe","version":"<fe's version>","session":"<id>","kind":"profile","agent":"main","text":"theme (project-profile.sh)"}`.
 - **fe's lines:** `start` (`fe <version>`, first in every session's file, once), `install` (base is not
   loaded), `profile` (the word and how it was decided), `doctor` (a `/fe-doctor` run's counts). The
   same lines fill `fe.events` (oldest first, at most 200).
-- **Writing:** the whole file is rewritten after every line, at most 2000 lines or 256 KB, oldest
-  dropped first; a reload of the module goes on from the file of the same session. A write that
-  fails never reaches the hook; the first failure in a session toasts `fe: event log not written:
-  <reason>`.
+- **Writing:** fe rewrites the whole file after every line. The file keeps at most 2000 lines or
+  256 KB and drops the oldest lines first. After a reload, the module continues from the file of the
+  same session. A failed write never reaches the hook. The first failure in a session toasts
+  `fe: event log not written: <reason>`.
 - **Off:** `FE_EVENT_LOG=0` stops the file and the `fe.events` lines alike.
 - **Clean-up:** fe never deletes; base sweeps old session folders.
 
-band's Log pane (`/band-log`) shows fe's lines beside the other plugins', `fe` in its plugin column.
+band's Log pane (`/band-log`) shows fe's lines beside the lines of the other plugins, with `fe` in
+its plugin column.
 
 ## Environment switches
 
-Every switch fe reads has a row here; set it in `~/.claude/settings.json` → `env`. The store scripts
-also read their switches from `~/.config/domaine/env`, and the tuning ones (`FE_PROFILE`,
+Every switch fe reads has a row here. Set it in `~/.claude/settings.json` → `env`. The store scripts
+also read their switches from `~/.config/domaine/env`. They read the tuning switches (`FE_PROFILE`,
 `FE_GQL_PROBE_CACHE`, `FE_CPT_THROTTLE_WAITS`, `FE_CPT_OVERLAY_VERIFY_WAIT`,
-`FE_THEME_JSON_VERIFY_WAIT`, `SHOPIFY_ADMIN_GQL_QUIET`) from the nearest `.claude/domaine.env` too;
-the process environment wins.
+`FE_THEME_JSON_VERIFY_WAIT`, `SHOPIFY_ADMIN_GQL_QUIET`) from the nearest `.claude/domaine.env` too.
+The process environment wins.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -229,10 +252,10 @@ the process environment wins.
 - `tests/fe-scripts-sim.sh` — the store scripts, `worktree-theme.sh` and `project-profile.sh` against
   stub CLIs and synthetic configs.
 - `tests/fe-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
-- `tests/helper-parity-sim.sh` — the helpers `scripts/doctor.cjs` and `scripts/_shopify-common.sh` share
-  with the other plugins' copies stay byte-identical.
-- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no legacy plugin name is left (the
-  same checker for every team plugin on base).
+- `tests/helper-parity-sim.sh` — the helpers in `scripts/doctor.cjs` and `scripts/_shopify-common.sh`
+  stay byte-identical to the other plugins' copies.
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, and no legacy plugin name
+  is left. The same checker runs for every team plugin on base.
 - `tests/base-qa-stores-sim.sh` — base's QA store registry, `plugins/base/scripts/qa-stores.cjs`, which
   `/fe:write-steps-to-test` names.
 

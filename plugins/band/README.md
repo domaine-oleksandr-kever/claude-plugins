@@ -1,26 +1,36 @@
 # band
 
-Band draws what a Claude Code session shows around the prompt: the **status band** above the
-prompt (prompt-cache countdown, model, context use, every rate-limit window, the session's cost,
-the task digest and the Compact / Clear / Progress / Log buttons), the **Progress pane** with the
-task checklist and the **event log pane**. It draws and nothing else. The figures come from the
-session itself; the checklist and most log lines come from the other plugins in this marketplace,
-which publish them through `$.state`: base publishes the resolved task and its own events, slim publishes its compression events, and the team
-plugins on base (fe, qa, be, pm) publish their own start, install and doctor lines. Band reads them;
-it never writes another plugin's state.
+Band is a Claude Code plugin that draws a status row, a task checklist and an event log around the
+prompt. It only draws; it has no other job. To install it, see
+[Quick install (Claude Code)](../../README.md#quick-install-claude-code) in the root README.
+
+Band draws three things:
+
+- The **status band** above the prompt. It shows the prompt-cache countdown, the model, the context
+  use, every rate-limit window, the session's cost and the task digest. It also holds the Compact,
+  Clear, Progress and Log buttons.
+- The **Progress pane**, which shows the task checklist.
+- The **event log pane**, which lists what the plugins did.
+
+The figures come from the session itself. The checklist and most log lines come from the other
+plugins in this marketplace, which publish them through `$.state`. base publishes the resolved task
+and its own events. slim publishes its compression events. The team plugins on base (fe, qa, be, pm)
+publish their own start, install and doctor lines. Band reads these lines; it never writes another
+plugin's state.
 
 Current release: **band v0.9.0**.
 
 ## Status
 
-- Claude Code only: band is a hooks module (mods), which other hosts do not run. It ships no
-  Cursor, Codex or OpenCode adapter, and `scripts/install.sh --plugin band` exits 2.
-- Works alone. With base it adds the task digest, the Progress pane and that plugin's log
-  lines; with slim it adds slim's log lines; with a team plugin (fe, qa, be, pm) that plugin's log
-  lines. None of them is a dependency.
-- The drawing shows in the terminal and in the desktop app's Code tab. Where nothing draws (a cloud
-  session, the VS Code chat panel, `claude -p`) the hooks still run and `/band-log` and
-  `/band-progress` answer as text.
+- Band runs on Claude Code only. It is a hooks module (mods), and other hosts do not run hooks
+  modules. Band ships no Cursor, Codex or OpenCode adapter, and `scripts/install.sh --plugin band`
+  exits 2.
+- Band works alone. With base, it adds the task digest, the Progress pane and base's log lines. With
+  slim, it adds slim's log lines. With a team plugin (fe, qa, be, pm), it adds that plugin's log
+  lines. None of these plugins is a dependency.
+- The drawing shows in the terminal and in the desktop app's Code tab. Some surfaces draw nothing: a
+  cloud session, the VS Code chat panel and `claude -p`. There the hooks still run, and `/band-log`
+  and `/band-progress` answer as text.
 
 ## Install
 
@@ -28,35 +38,45 @@ Current release: **band v0.9.0**.
 /plugin install band@domaine
 ```
 
-Which plugins to install for what is the matrix in
+To choose which plugins to install for which work, use the matrix in
 [the root README](../../README.md#which-plugins-to-install).
 
 ## Status band
 
-One row, most important first. 170 columns, context at 47 %, an account reporting three
-windows, base resolving a task:
+The band is one row, with the most important segment first. This example has 170 columns, context
+at 47 %, an account that reports three windows, and base resolving a task:
 
 ```text
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Clear ]  [ Progress ]  [ Log ]
 ```
 
-120 columns, same session. The row is 172 cells, so the Log button goes first, then Clear, then the digest:
+The same session at 120 columns: the row needs 172 cells, so band drops the Log button first, then
+Clear, then the digest:
 
 ```text
 cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ [ Compact ]  [ Progress ]
 ```
 
-60 columns. The rate windows go next, the least full one first, then the model:
+At 60 columns, band also drops the rate windows (the least full one first) and then the model:
 
 ```text
 cache 42m │ ctx 47% │ [ Compact ]  [ Progress ]
 ```
 
-The full drop order is: the Log button (`/band-log` still opens the pane), the Clear button (`/clear`
-still works), the digest, the cost, then the rate windows beyond the fullest (least full first), then
-the last window, then the model, then the Progress button. Cache, ctx and Compact are never dropped.
-The row's text truncates as a backstop, so the band never takes a second row.
+Band drops segments in this order:
+
+1. The Log button (`/band-log` still opens the pane).
+2. The Clear button (`/clear` still works).
+3. The digest.
+4. The cost.
+5. The rate windows other than the fullest one, the least full first.
+6. The last rate window.
+7. The model.
+8. The Progress button.
+
+Band never drops cache, ctx or Compact. As a backstop, the row's text truncates, so the band never
+takes a second row.
 
 | Segment | Shows | Rule |
 |---|---|---|
@@ -71,65 +91,71 @@ The row's text truncates as a backstop, so the band never takes a second row.
 | Progress | `[ Progress ]`, `p: Progress` | Drawn only while base resolves a task (its `base.progress` carries a work id). Opens or closes the [Progress pane](#progress-pane); dim at rest, `p: Progress` while the band holds the keyboard |
 | Log | `[ Log ]`, `l: Log` | Drawn only while some event list (band's, base's, slim's or a team plugin's: fe's, qa's, be's, pm's) holds a line. Opens or closes the [event log pane](#event-log-pane); dim at rest, `l: Log` while the band holds the keyboard |
 
-**Look.** On a terminal a dim rule (`────`) separates the band from the transcript above it; the
-desktop frames its panel itself, so no rule is drawn there. The desktop draws the buttons on a second
-row under the figures, left-aligned, with a row of air between the two and padding around the panel:
-its native buttons are tall, and in the figures' row they squashed it and sat far right. The terminal
-keeps one row, as its height is the scarce side there. Each figure is a dim label and a bold value
-(`cache` dim, `42m` bold; the same for `ctx` and each rate window), the model id is plain (on the
-terminal with the picker's `▾` mark), the digest's work id is bold and the separators are dim.
+**Look.** On a terminal, a dim rule (`────`) separates the band from the transcript above it. The
+desktop frames its panel itself, so band draws no rule there. On the desktop, the buttons sit on a
+second row under the figures, left-aligned, with an empty row between the two rows and padding
+around the panel. The reason: the desktop's native buttons are tall, and in the figures' row they
+squashed the row and sat far right. The terminal keeps one row, because height is the scarce space
+there. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and
+each rate window). The model id is plain; on the terminal it carries the picker's `▾` mark. The
+digest's work id is bold, and the separators are dim.
 
-**Colors.** ctx is green (the theme's `success`) up to 30 %; the rate windows are plain there. Both
-use the theme's `warning` color above 30 % and the alarm look from 80 %. The cache is plain at
-10 min or more, `warning` below 10 min and the alarm below 2 min (a 5 min TTL scales both: warning
-below 2 min, the alarm below 24 s). Only theme keys are used, so the band follows light, dark and
-high-contrast themes. The alarm look is `warning` + bold + inverse until a dedicated error key is
-proven to draw on every theme.
+**Colors.** Up to 30 %, ctx is green (the theme's `success`) and the rate windows are plain. Above
+30 %, both use the theme's `warning` color, and from 80 % they use the alarm look. The cache is plain
+at 10 min or more, `warning` below 10 min, and the alarm below 2 min. A 5 min TTL scales both
+limits: `warning` below 2 min and the alarm below 24 s. Band uses only theme keys, so the band
+follows light, dark and high-contrast themes. The alarm look is `warning` + bold + inverse until a
+dedicated error key is proven to draw on every theme.
 
-**Desktop and hover.** In the desktop app's Code tab every segment carries a glyph instead of a word
-(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`), and
-Compact / Clear / Progress / Log are native buttons. The desktop draws proportional text, so the
-width model above does not apply there: nothing is dropped, the row clips at the panel's edge. When
-the pointer rests on the cache, ctx, a rate window or the cost, a one-line card appears. This is
-meant for desktop and for terminals that pass the pointer through (kitty, Ghostty, iTerm2, WezTerm;
-tmux passes none). The cards read:
+**Desktop and hover.** In the desktop app's Code tab, every segment carries a glyph instead of a word
+(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`).
+Compact, Clear, Progress and Log are native buttons there. The desktop draws proportional text, so
+the width rules above do not apply: band drops nothing, and the row clips at the panel's edge. When
+the pointer rests on the cache, ctx, a rate window or the cost, a one-line card appears. Cards work
+on the desktop and on terminals that pass the pointer through (kitty, Ghostty, iTerm2, WezTerm; tmux
+passes none). The cards read:
 `prompt cache: ~42 min left (estimate: last response + 1 h TTL)`,
 `context: 47% of 200,000 tokens, 94,000 used`, `5h window: 61% used, resets in 2h 05m`,
 `session cost: $12.40 at API prices, as /cost counts it (a subscription is not billed per request)`.
-The glyph labels, the native buttons and hover are still a live check (desktop and terminal paint).
+The glyph labels, the native buttons and hover still need a live check (desktop and terminal paint).
 
 **Toasts.** When a rate window first reaches 90 %, one toast shows that window's card for 8 s
-(`5h window: 91% used, resets in 1h 05m`). It re-arms once every window is back under the line, and
-after `/clear`. The savings toasts are slim's, not band's (`SLIM_TOAST`).
-Toasts sit at the transcript's top-right in fullscreen, or on the notification line under the prompt
-otherwise. Several toasts stack; a click takes one off and the pointer over it holds it (there is no
-close button). They never touch the transcript or what the model reads. They keep showing while a
-pane is open (a pane is not a dialog and does not hold toasts).
+(`5h window: 91% used, resets in 1h 05m`). The toast re-arms once every window is back under 90 %,
+and after `/clear`. The savings toasts come from slim, not from band (`SLIM_TOAST`). In fullscreen,
+toasts sit at the transcript's top-right; otherwise they sit on the notification line under the
+prompt. Several toasts stack. A click removes a toast, and the pointer over a toast holds it (there
+is no close button). Toasts never touch the transcript or what the model reads. They keep showing
+while a pane is open, because a pane is not a dialog and does not hold toasts.
 
 **Hotkeys.** `c`, `x`, `p`, `l` and `m` work only while the band holds the keyboard: after
-**ctrl+x tab** or a click on the band. They never fire from the composer, so typing a `c` is just a
-`c`. The letters are drawn only then too (`c: Compact  x: Clear  p: Progress  l: Log`): at rest the
-buttons read `[ Compact ]  [ Clear ]  [ Progress ]  [ Log ]`, so the band never suggests a key the
-composer would swallow. The letters go away again on a press, when a turn starts and on `/clear`
-(there is no focus-out event, so Esc alone leaves them until the next of those). On a terminal the
-buttons are mainly clicked (pointer-capable terminals) or reached as ctrl+x tab then the letter, and
-Esc gives the keyboard back to the prompt. To focus the band with a single chord, rebind
-`abovePrompt:focus` (default ctrl+x tab) in `~/.claude/keybindings.json`, then press the letter. On
-desktop they are ordinary buttons with no hotkey at all (a desktop draws a hotkey as a badge on its
-native button, and a click is the way there). ctrl+x ctrl+a collapses the band; while it is collapsed
-the engine shows one dim line above the prompt, `plugin panel hidden · ctrl+x ctrl+a or click to show`,
-and that chord or a click on the line brings it back. The collapsed state is the engine's and persists
-across reloads; the plugin cannot and does not reopen the band by itself.
+**ctrl+x tab** or a click on the band. They never fire from the composer, so a typed `c` stays a `c`.
+Band draws the letters only at that time too (`c: Compact  x: Clear  p: Progress  l: Log`). At rest
+the buttons read `[ Compact ]  [ Clear ]  [ Progress ]  [ Log ]`, so the band never suggests a key
+that the composer would swallow. The letters go away again on a press, when a turn starts and on
+`/clear`. There is no focus-out event, so Esc alone leaves the letters until the next of those
+events.
+
+On a terminal, you mainly click the buttons (on pointer-capable terminals) or press ctrl+x tab and
+then the letter. Esc gives the keyboard back to the prompt. To focus the band with a single chord,
+rebind `abovePrompt:focus` (default ctrl+x tab) in `~/.claude/keybindings.json`, then press the
+letter. On the desktop, the buttons are ordinary buttons with no hotkey at all: a desktop draws a
+hotkey as a badge on its native button, and a click is the way to press it there.
+
+ctrl+x ctrl+a collapses the band. While the band is collapsed, the engine shows one dim line above
+the prompt: `plugin panel hidden · ctrl+x ctrl+a or click to show`. That chord or a click on the
+line brings the band back. The collapsed state belongs to the engine and persists across reloads.
+The plugin cannot reopen the band by itself, and it does not try.
 
 **Debug.** `/band-debug` prints the raw figures behind the band: `band.info`, the session's `usage()`
-answer, the cache state, the usage atom, the task base resolved (work id and branch, or `null`), the
-session root and the last render's surface and measured columns. Paste its output when a segment looks wrong on some surface.
+answer, the cache state, the usage atom, the task that base resolved (work id and branch, or
+`null`), the session root, and the last render's surface and measured columns. When a segment looks
+wrong on some surface, paste this output.
 
 ## Progress pane
 
-`p: Progress`, or `/band-progress`, opens a pane with the task base resolved: docked beside the
-transcript in a wide fullscreen terminal, inline otherwise (the surface decides). Esc or a second
-press closes it.
+`p: Progress` or `/band-progress` opens a pane with the task that base resolved. The surface decides
+where the pane goes: beside the transcript in a wide fullscreen terminal, inline otherwise. Esc or a
+second press closes it.
 
 ```text
 ELC-1591 · feature/ELC-1591-preview-themes · 3/5
@@ -143,37 +169,43 @@ ELC-1591 · feature/ELC-1591-preview-themes · 3/5
 - open: confirm the empty-state copy with design
 ```
 
-The header is the work id · branch · checked/total, in bold. Below it come every `progress.md` row
-(✓ done dimmed, ▶ the digest's current row in bold, ◌ unchecked rows above ▶ dimmed — they wait on
-someone, not the queue — ☐ the rest) and the last three `- ` lines of `notes.md`, dimmed. A workspace
-without `progress.md` shows its id, the branch, one dim line
+The header shows the work id, the branch and checked/total, in bold. Below it come all rows of
+`progress.md` and then the last three `- ` lines of `notes.md`, dimmed. The row marks are:
+
+- `✓`: a done row, dimmed.
+- `▶`: the digest's current row, in bold.
+- `◌`: an unchecked row above `▶`, dimmed. Such a row waits on someone, not on the queue.
+- `☐`: any other row.
+
+A workspace without `progress.md` shows its id, the branch, one dim line
 `no progress.md yet — /base:save-task-context` and the notes tail. A ticket you named that has no
 workspace shows its id, the branch and `no task workspace — /base:save-task-context`.
 
-- **Which task** is base's decision, not band's: its resolver (pin, the ticket you named, the branch,
-  the newest `progress.md`) publishes the result and band draws it. The order is in
+- **Which task.** base decides the task, not band. base's resolver (pin, the ticket you named, the
+  branch, the newest `progress.md`) publishes the result, and band draws it. The order is in
   [base's README](../base/README.md#workspace).
-- **Pinning** stays base's command: `/base-progress <KEY>` pins a task, `/base-progress -` clears the
-  pin. `/band-progress` takes no argument.
-- **No task.** The Progress button is not drawn while base resolves nothing (or is not installed), and
-  `/band-progress` then answers
+- **Pinning** stays base's command. `/base-progress <KEY>` pins a task, and `/base-progress -`
+  clears the pin. `/band-progress` takes no argument.
+- **No task.** Band does not draw the Progress button while base resolves nothing or is not
+  installed. `/band-progress` then answers
   `No task checklist: base resolves no task or is not loaded (/base-progress <KEY> pins one).`
   and opens nothing. If the task goes away while the pane is open, the pane reads `no task checklist`.
-- **Redraw.** The pane and the digest redraw whenever base writes a new snapshot (a Write or
-  Edit under `.claude/tasks/`, its 30 s tick, a branch or directory change, a pin).
-- Where the surface cannot place the pane, the command toasts `progress pane not placed: <reason>` and
-  answers with the same reason.
-- Where nothing draws a pane (a cloud session, the VS Code chat panel, `claude -p`), `/band-progress`
-  answers with the checklist as text: the header, one `✓` / `▶` / `◌` / `☐` line per row, then the
-  footer lines.
+- **Redraw.** The pane and the digest redraw each time base writes a new snapshot: after a Write or
+  Edit under `.claude/tasks/`, on its 30 s tick, on a branch or directory change, and on a pin.
+- When the surface cannot place the pane, the command toasts `progress pane not placed: <reason>`
+  and answers with the same reason.
+- Some surfaces draw no pane: a cloud session, the VS Code chat panel and `claude -p`. There
+  `/band-progress` answers with the checklist as text: the header, one `✓` / `▶` / `◌` / `☐` line per
+  row, and then the footer lines.
 
 ## Event log pane
 
-Toasts flash and go. `l: Log`, or `/band-log`, opens a pane that keeps them: what band, base, slim and
-the team plugins (fe, qa, be, pm) did or noticed, one line each, oldest first and newest last. Esc, a second press or the engine's
-close mark closes it. The Progress pane and the log pane can be open at once; the engine shows one and
-keeps the other as a tab. Pressing the button or running the command of the pane behind the tab
-brings that pane forward instead of closing it.
+Toasts show for a short time and then go. The event log pane keeps them. `l: Log` or `/band-log`
+opens it. The pane shows what band, base, slim and the team plugins (fe, qa, be, pm) did or noticed,
+one line per event, oldest first and newest last. Esc, a second press or the engine's close mark
+closes it. The Progress pane and the log pane can be open at the same time: the engine shows one
+and keeps the other as a tab. The button or the command of the pane behind the tab brings that pane
+forward instead of closing it.
 
 ```text
 14:02  band   session    start · band 0.2.0
@@ -184,19 +216,23 @@ brings that pane forward instead of closing it.
 14:40  band   compact    manual 412k → 38k
 ```
 
-The lists are merged by time; lines written in the same millisecond keep the order band → base → slim
-→ fe → qa → be → pm. The plugin column, between the time and the kind, names the list a line came from
-(`band`, `base`, `slim`, `fe`, `qa`, `be`, `pm`, padded to 5), so a kind several
-plugins share (`guard`, `workspace`, `start`, `install`, `doctor`) still says whose it is. The time is local `HH:MM`; time, plugin and kind are dim. A line too long for the pane continues on the next row, under its own text column, on the
-terminal and the desktop alike. When the pane is shorter than the log, its first line reads
-`… 12 earlier` and the newest lines fill the rest, wrapped rows counted. With no line anywhere the pane
-reads `no events yet`. A surface that cannot place the pane toasts `log pane not placed: <reason>`.
-Where nothing draws a pane — a cloud session (the browser at claude.ai/code, the
-Desktop app's cloud sessions), the VS Code chat panel, `claude -p` — `/band-log` answers with the log
-as text instead, one line per event, and the `Log` button is not there to press. The text holds the
-newest 40 lines; with more, a first line counts the rest and points at the session's log folder,
-`… 12 earlier — full log: <log dir>/<session-id>/` (the folder below; just `… 12 earlier` where no
-folder is written).
+The pane merges the lists by time. Lines written in the same millisecond keep the order band → base
+→ slim → fe → qa → be → pm. The plugin column, between the time and the kind, names the list that a
+line came from (`band`, `base`, `slim`, `fe`, `qa`, `be`, `pm`, padded to 5). So a kind that several
+plugins share (`guard`, `workspace`, `start`, `install`, `doctor`) still says whose line it is. The
+time is local `HH:MM`. The time, plugin and kind are dim.
+
+A line too long for the pane continues on the next row, under its own text column, on the terminal
+and the desktop alike. When the pane is shorter than the log, its first line reads `… 12 earlier`
+and the newest lines fill the rest, with wrapped rows counted. With no line anywhere, the pane reads
+`no events yet`. A surface that cannot place the pane toasts `log pane not placed: <reason>`.
+
+Some surfaces draw no pane: a cloud session (the browser at claude.ai/code, the Desktop app's cloud
+sessions), the VS Code chat panel and `claude -p`. There `/band-log` answers with the log as text,
+one line per event, and there is no `Log` button to press. The text holds the newest 40 lines. When
+there are more, the first line counts the rest and points at the session's log folder (described
+below): `… 12 earlier — full log: <log dir>/<session-id>/`. Where no folder is written, it reads just
+`… 12 earlier`.
 
 | Kind | Writer | Written when | Text |
 |---|---|---|---|
@@ -216,52 +252,54 @@ folder is written).
 | `lookup` | slim | slim's `lookup` tool answers a question | `lookup: <question…> · <model> · <tokens>` |
 | `view` | slim | slim's `view` tool returns a file, URL or command output | `view <source>: <size> → <size> (<saving>) · <engine>`, or `cached`, `narrowed by jq`, `refused (<reason>)`; a subagent's call prefixed with its agent type |
 
-Each publisher keeps its own list of at most 200 lines. Past 200, band, base and the team plugins drop
-their oldest line. The pane reads the session's state, so a new launch
-starts it empty; the record that outlives the session is each plugin's own file, below. `/clear` keeps
-the lines and adds `session clear` where the conversation restarted. Each plugin gates its own lines,
-in the pane and in its file: `BAND_EVENT_LOG=0`, `BASE_EVENT_LOG=0`,
+Each publisher keeps its own list of at most 200 lines. Past 200 lines, band, base and the team
+plugins drop their oldest line. The pane reads the session's state, so the pane starts empty on each
+new launch. The record that outlives the session is each plugin's own file (see below). `/clear`
+keeps the lines and adds `session clear` where the conversation restarted. Each plugin has its own
+switch for its lines, in the pane and in its file: `BAND_EVENT_LOG=0`, `BASE_EVENT_LOG=0`,
 `SLIM_EVENT_LOG=0`, and a team plugin's `FE_EVENT_LOG=0`, `QA_EVENT_LOG=0`, `BE_EVENT_LOG=0`,
-`PM_EVENT_LOG=0`. Toasts are unchanged by any of them.
+`PM_EVENT_LOG=0`. None of these switches changes the toasts.
 
 ### Event log on disk
 
-Every Domaine plugin (slim, band, base, fe, qa, be, pm) writes the lines it publishes itself to its
-own file, so the origin of a line is on the line, written by that plugin, not inferred from the pane:
+Every Domaine plugin (slim, band, base, fe, qa, be, pm) writes the lines it publishes to its own
+file. So each line carries its origin, written by that plugin, and nobody infers it from the pane.
 
 - **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
-  `slim.jsonl`, and a team plugin's own, such as `qa.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
-  `<session-id>/` folder is still made under it. With neither (a cloud session) no file is written.
-  Never under the project.
+  `slim.jsonl`, and a team plugin's own file, such as `qa.jsonl`). `DOMAINE_LOG_DIR` (an absolute
+  directory) replaces `$HOME/.claude/domaine/log`; the plugin still makes the `<session-id>/` folder
+  under it. With neither (a cloud session), no file is written. The file is never under the project.
 - **Line:** one JSON object per line, oldest first:
   `{"ts":"2026-10-08T12:34:56.789Z","plugin":"band","version":"0.2.0","session":"<id>","kind":"model","agent":"main","text":"claude-opus-5-5"}`.
-  `ts` is the event's time in UTC, `plugin` and `version` the writer's own name and release, `agent`
-  the subagent type that caused the line or `main`, `kind` and `text` the line as the pane shows it.
-- **Start line:** the first line a plugin writes for a session id is `start` / `<plugin> <version>`,
-  also under the new id a `/clear` opens, where no session start runs. A session whose lines already
-  hold a start line gets no second one: a module reload or a resume in a fresh process goes on from
-  the file.
-- **band's lines:** `session`, `model`, `compact` and `rate`, `agent` always `main`. The first line
-  of a session is `start` / `band <version>` (the pane's `session` / `start · band <version>`), also
-  in the file a `/clear` or a resume opens under the new session id, where no session start runs.
-  `session clear` closes the old session's file; it is written only while the exit's short bound has
-  time left, and a failure there never toasts mid-`/clear`.
-- **Writing:** the whole file is rewritten after every line (the engine has no append), at most 2000
-  lines or 256 KB, oldest dropped first. A reload of the module (a `/config` change) picks up the
-  file of the same session and goes on. A write that fails never reaches the hook; the first failure
-  in a session toasts `band: event log not written: <reason>`.
-- **Off:** `BAND_EVENT_LOG=0` stops band's file and its pane lines alike.
-- **Clean-up:** base sweeps session folders whose newest file is older than 7 days, and its
-  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. The other
-  plugins never delete.
+  `ts` is the event's time in UTC. `plugin` and `version` are the writer's own name and release.
+  `agent` is the subagent type that caused the line, or `main`. `kind` and `text` are the line as the
+  pane shows it.
+- **Start line:** the first line that a plugin writes for a session id is `start` /
+  `<plugin> <version>`. This is also true under the new id that a `/clear` opens, where no session
+  start runs. A session whose lines already hold a start line gets no second one: a module reload or
+  a resume in a fresh process continues from the file.
+- **band's lines:** `session`, `model`, `compact` and `rate`, with `agent` always `main`. The first
+  line of a session is `start` / `band <version>` (the pane's `session` / `start · band <version>`).
+  This is also true in the file that a `/clear` or a resume opens under the new session id, where no
+  session start runs. `session clear` closes the old session's file. Band writes it only while the
+  exit's short time limit has time left, and a failure there never toasts during `/clear`.
+- **Writing:** band rewrites the whole file after every line, because the engine has no append. The
+  file holds at most 2000 lines or 256 KB, and the oldest lines go first. A reload of the module (a
+  `/config` change) picks up the file of the same session and continues. A failed write never
+  reaches the hook. The first failure in a session toasts `band: event log not written: <reason>`.
+- **Off:** `BAND_EVENT_LOG=0` stops both band's file and its pane lines.
+- **Clean-up:** base sweeps session folders whose newest file is older than 7 days. Its
+  `/base-doctor` row `event-log` names the folder and, for each file, the line count and newest
+  time. The other plugins never delete.
 
 ## Settings (userConfig)
 
-Two fields in `plugins/band/.claude-plugin/plugin.json` → `userConfig`. The engine documents them as
-rows in `/config`; where they appear is still a live check. They are stored in `~/.claude/settings.json`
-→ `pluginConfigs` under the plugin's id, `band@domaine` for a marketplace install (the bare `band` key
-is read only for a `--plugin-dir` load). A change (in `/config` or in the file) reloads the module: the
-band appears or goes at once, and the reload writes no second `session start` line.
+Band has two fields in `plugins/band/.claude-plugin/plugin.json` → `userConfig`. The engine
+documents them as rows in `/config`; where they appear still needs a live check. The values are
+stored in `~/.claude/settings.json` → `pluginConfigs` under the plugin's id. For a marketplace
+install the id is `band@domaine`; band reads the bare `band` key only for a `--plugin-dir` load. A
+change (in `/config` or in the file) reloads the module. The band then appears or goes at once, and
+the reload writes no second `session start` line.
 
 | Field | Default | Effect |
 |---|---|---|
@@ -274,25 +312,25 @@ To hide the band for yourself, add this to `~/.claude/settings.json`:
 "pluginConfigs": { "band@domaine": { "options": { "disabled": true } } }
 ```
 
-`/plugin disable band@domaine` turns the whole plugin off instead, panes and commands included.
+To turn off the whole plugin instead, panes and commands included, use `/plugin disable band@domaine`.
 
 ## State contract
 
-The contract is `plugins/band/types/index.d.ts`. Any plugin can read band's keys; only band writes them.
-Band reads the other plugins' keys through shapes it types itself, with no `dependencies` key in either
-direction.
+The contract is `plugins/band/types/index.d.ts`. Any plugin can read band's keys; only band writes
+them. Band reads the other plugins' keys through shapes that it types itself. Neither direction has a
+`dependencies` key.
 
 **band publishes** under `plugin: 'band'`:
 
-- **`band.info`** — `{ v: 1, version, disabled }`, written at every session start of band (version from
-  band's manifest). Non-null means band is loaded.
-- **`band.events`** — band's own log lines, `{ atMs, kind, text }` with kind `session`, `model`,
-  `compact` or `rate`, oldest first, at most 200.
-- **`band.usage`, `band.model`, `band.cache`, `band.tick`, `band.rateAlarmed`** — the figures the band
-  draws; `band.paneShown`, `band.bandFocused`, `band.modelPicker` — drawing state.
+- **`band.info`** — `{ v: 1, version, disabled }`. Band writes it at each of its session starts, with
+  the version from band's manifest. A non-null value means that band is loaded.
+- **`band.events`** — band's own log lines, `{ atMs, kind, text }`, with kind `session`, `model`,
+  `compact` or `rate`. Oldest first, at most 200.
+- **`band.usage`, `band.model`, `band.cache`, `band.tick`, `band.rateAlarmed`** — the figures that
+  the band draws. **`band.paneShown`, `band.bandFocused`, `band.modelPicker`** — the drawing state.
 
-**band reads** (each read is tolerant: an absent key reads as `null` or `[]`, and an entry missing a
-finite `atMs` or a string `kind` or `text` is dropped):
+**band reads** these keys. Each read is tolerant: an absent key reads as `null` or `[]`. Band drops
+an entry that has no finite `atMs`, or no string `kind` or `text`.
 
 | Key | Publisher | Used for |
 |---|---|---|
@@ -301,26 +339,26 @@ finite `atMs` or a string `kind` or `text` is dropped):
 | `slim.events` | slim | the event log pane |
 | `fe.events`, `qa.events`, `be.events`, `pm.events` | fe, qa, be, pm | the event log pane |
 
-`$.state` refs are literals, so band names each publisher in its code: a new publisher is a band
-release. The Progress pane draws a generic checklist shape,
-`{ v: 1, title, subtitle?, rows: { mark: 'done' | 'current' | 'waiting' | 'todo', text }[], footer? }`;
-band maps base's snapshot into it (title = work id, subtitle = branch · done/total, footer = the hint
-naming base's save skill and the notes tail).
+`$.state` refs are literals, so band names each publisher in its code. A new publisher therefore
+needs a new band release. The Progress pane draws a generic checklist shape:
+`{ v: 1, title, subtitle?, rows: { mark: 'done' | 'current' | 'waiting' | 'todo', text }[], footer? }`.
+Band maps base's snapshot into this shape: title = work id, subtitle = branch · done/total, footer =
+the hint that names base's save skill, plus the notes tail.
 
 ## Known limits
 
-- **`/plugin disable band` or `/plugin uninstall band` mid-session** leaves `band.info` set for the rest
-  of the process. Re-enabling band writes it again.
+- **`/plugin disable band` or `/plugin uninstall band` mid-session** leaves `band.info` set for the
+  rest of the process. When you enable band again, it writes the key again.
 - **Pane docking.** The panes are `band-log` and `band-progress`. The engine docks a pane beside the
-  transcript from 144 columns, or from 110 once that id has been asked for, so open each once on a wide
-  terminal.
-- **No argument to `/band-progress`.** Pinning a task is `/base-progress <KEY>`.
+  transcript from 144 columns, or from 110 columns once that pane id has been requested. So open each
+  pane once on a wide terminal.
+- **No argument to `/band-progress`.** To pin a task, use `/base-progress <KEY>`.
 
 ## Environment switches
 
-band reads these through the module's `$.env`, so only the session environment reaches them (the
-shell, or `~/.claude/settings.json` → `env`); the Domaine env files do not. `tests/readme-checks.sh`
-fails on a `BAND_*` name under `plugins/band/` without a row here.
+band reads these switches through the module's `$.env`, so only the session environment reaches
+them: the shell, or `~/.claude/settings.json` → `env`. The Domaine env files do not reach them.
+`tests/readme-checks.sh` fails when a `BAND_*` name under `plugins/band/` has no row here.
 
 | Switch | Default | Effect |
 |---|---|---|

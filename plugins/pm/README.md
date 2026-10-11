@@ -1,24 +1,31 @@
 # pm
 
 pm is the Domaine project-management plugin for Claude Code. It holds the work of the solutions
-engineers and project managers before and around a build: project estimators and PCRs, the
-pre-submission review of an estimate, the merchant solutions brief, scoping and implementation
-planning with LOE baselines and the merchant handoff, and vendor evaluation.
+engineers and project managers before and around a build. To install it, see
+[Quick install (Claude Code)](../../README.md#quick-install-claude-code) or § Install below.
+
+pm covers these tasks:
+
+- project estimators and PCRs;
+- the pre-submission review of an estimate;
+- the merchant solutions brief;
+- scoping and implementation planning, with LOE baselines and the merchant handoff;
+- vendor evaluation.
 
 The skills are imported from Domaine's `domaine-skills-solutions` repository (commit 3c96617, 2026-08-03) and adapted to Claude Code and base; update them here, not there.
 
-pm builds on base and requires it: the Jira and doc readers, the Jira writer, the task workspace and
-the shared MCP servers (Atlassian, Notion, Shopify Dev) are base's
+pm builds on base and requires it. base supplies the Jira and doc readers, the Jira writer, the task
+workspace and the shared MCP servers: Atlassian, Notion, Shopify Dev
 ([plugins/base/README.md](../base/README.md)). base requires slim, so pm runs with slim too.
 
 Current release: **pm v0.2.3**.
 
 ## Status
 
-- Claude Code only: pm is a plugin of skills, references and a hooks module (mods). It ships no
+- Claude Code only. pm is a plugin of skills, references and a hooks module (mods). It ships no
   adapter for another host.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
-  not install a dependency on its own: install all three.
+  not install a dependency by itself, so install all three.
 
 ## Install
 
@@ -31,16 +38,16 @@ Current release: **pm v0.2.3**.
 /reload-plugins
 ```
 
-`/base-doctor` and `/pm-doctor` then check the install (§ Doctor).
+Then run `/base-doctor` and `/pm-doctor` to check the install (§ Doctor).
 
-The team plugins fe, qa, be and pm co-install: each depends on base only, and none needs another.
+The team plugins fe, qa, be and pm co-install. Each depends on base only, and none needs another.
 Install the ones your work needs beside base.
 
 ## Skills
 
-Invoked by their qualified names (`/pm:<skill>`). They hand off to base's agents by base's qualified
-names (`base:jira-reader`, `base:doc-reader`, `base:jira-writer`). A hand-off is an offer at the end
-of the run, never an automatic start, and nothing is written to Jira, Confluence or Notion without
+Call the skills by their qualified names (`/pm:<skill>`). They hand off to base's agents by base's
+qualified names (`base:jira-reader`, `base:doc-reader`, `base:jira-writer`). A hand-off is an offer at
+the end of the run, never an automatic start. Nothing is written to Jira, Confluence or Notion without
 your approval of the exact text.
 
 | Skill | Does | Uses / hands off to |
@@ -51,14 +58,14 @@ your approval of the exact text.
 | `/pm:solutions-engineering` | requirement scoping and the approach table, the implementation plan and merchant handoff from their templates, LOE from the worksheet, escalation paths; limitations go to the Dev MCP | `base:jira-reader`, `base:doc-reader`, base's Shopify Dev MCP → `/pm:project-estimator`, `/pm:estimator-review`, `/pm:vendor-evaluation` |
 | `/pm:vendor-evaluation` | compares apps, platforms, agencies or vendors for a merchant use case, Domaine partners first when they fit | base's notion MCP (the Partnerships Database), WebSearch and WebFetch when present |
 
-A tool a skill names that this session may not have (Google Drive, Bluedot, Slack, a Python
-`openpyxl`, web search) is never a hard dependency: the skill asks for a pasted export or skips the
-source and says so.
+A skill can name a tool that this session may not have: Google Drive, Bluedot, Slack, a Python
+`openpyxl`, web search. Such a tool is never a hard dependency. The skill then asks for a pasted
+export, or it skips the source and says so.
 
 ## References
 
-The skills cite pm's own files by their path under pm's root (`<pm root>/…`, the session's
-`pm plugin root:` line) and base's by their path under base's root (`<base root>/…`).
+The skills cite pm's own files by their path under pm's root (`<pm root>/…`, from the session's
+`pm plugin root:` line). They cite base's files by their path under base's root (`<base root>/…`).
 
 | Reference | Read by | Holds |
 |---|---|---|
@@ -76,22 +83,26 @@ The skills cite pm's own files by their path under pm's root (`<pm root>/…`, t
 
 ## Conventions
 
-pm adds one section to the main session's system prompt after Claude Code's own and base's, named
-`root` (ids are `pm:<name>`): `pm plugin root: <path>`, the directory pm's references start from. It
-never changes within a session, so the prompt cache holds. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as a context block of the first user message instead (`prompt.context`, beside CLAUDE.md).
+pm adds one section to the main session's system prompt, after Claude Code's own and base's. The
+section is named `root`, and ids are `pm:<name>`. It holds `pm plugin root: <path>`, the directory
+pm's references start from. It never changes within a session, so the prompt cache holds.
 
-**Subagents** get the same line as added context at their start (Claude Code's `SubagentStart`; the
-engine has no event for a subagent's system prompt), except base's readers and writer
-(`base:jira-reader`, `base:jira-writer`, `base:figma-reader`, `base:doc-reader`) and Claude Code's
-`claude-code-guide` and `statusline-setup`, which get nothing from pm.
+Some sessions draw no surface, for example a claude.ai cloud session or `claude -p`. There the engine
+composes its prompt without the plugins. The same sections then arrive once as a context block of the
+first user message instead (`prompt.context`, beside CLAUDE.md).
 
-**base required:** at a session start pm looks for base's skills in the command list. Without them it
-shows one toast and writes one `install` line: `pm: needs the base plugin — claude plugin install
-base@domaine`.
+**Subagents** get the same line as added context at their start, through Claude Code's
+`SubagentStart`. The engine has no event for a subagent's system prompt. Some agents get nothing from
+pm: base's readers and writer (`base:jira-reader`, `base:jira-writer`, `base:figma-reader`,
+`base:doc-reader`) and Claude Code's `claude-code-guide` and `statusline-setup`.
+
+**base required:** at a session start pm looks for base's skills in the command list. If they are
+missing, pm shows one toast and writes one `install` line:
+`pm: needs the base plugin — claude plugin install base@domaine`.
 
 ## Doctor
 
-`/pm-doctor` checks pm's side of the install and prints one PASS / FAIL / SKIP / WARN row per check,
+`/pm-doctor` checks pm's side of the install. It prints one PASS / FAIL / SKIP / WARN row per check,
 the counts, and the last 10 `pm.events` lines. `/base-doctor` checks base's side (slim, the MCP
 servers).
 
@@ -105,31 +116,31 @@ servers).
 | `event-log` | this session's `pm.jsonl`: its line count and newest `ts`; no file yet passes (a /clear's new session has none before its first line) |
 | `base-live`, `slim-live` | what this session loaded: base's skills, slim's `mcp__slim__view` tool |
 
-The first seven rows come from `scripts/doctor.cjs`, which also runs by hand:
-`node <pm plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`; it exits 1 when a row
-fails. By hand its `event-log` row reads the newest session folder unless `--log-dir` names one. A
-static `base` FAIL for a base the session loaded anyway (a `--plugin-dir` load) reads as a WARN in
-`/pm-doctor`. One `doctor` line goes to `pm.events` per run.
+The first seven rows come from `scripts/doctor.cjs`. You can also run it by hand:
+`node <pm plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`. It exits 1 when a row
+fails. By hand, its `event-log` row reads the newest session folder unless `--log-dir` names one. A
+static `base` FAIL for a base that the session loaded anyway (a `--plugin-dir` load) reads as a WARN
+in `/pm-doctor`. Each run writes one `doctor` line to `pm.events`.
 
 ## Event log on disk
 
-pm writes its lines to `$HOME/.claude/domaine/log/<session-id>/pm.jsonl` under the same contract as
-every Domaine plugin ([plugins/base/README.md](../base/README.md#event-log-on-disk)):
+pm writes its lines to `$HOME/.claude/domaine/log/<session-id>/pm.jsonl`. The file follows the
+same contract as every Domaine plugin ([plugins/base/README.md](../base/README.md#event-log-on-disk)):
 
 - **Line:** `{"ts":"…","plugin":"pm","version":"<pm's version>","session":"<id>","kind":"doctor","agent":"main","text":"9 passed, 0 failed, 0 skipped"}`.
 - **pm's lines:** `start` (`pm <version>`, first in every session's file, once), `install` (base is not
   loaded), `doctor` (a `/pm-doctor` run's counts). The same lines fill `pm.events` (oldest first, at
   most 200).
-- **Writing:** the whole file is rewritten after every line, at most 2000 lines or 256 KB, oldest
-  dropped first; a reload of the module goes on from the file of the same session. A write that
-  fails never reaches the hook; the first failure in a session toasts `pm: event log not written:
-  <reason>`.
+- **Writing:** pm rewrites the whole file after every line. The file keeps at most 2000 lines or
+  256 KB and drops the oldest lines first. After a reload, the module continues from the file of the
+  same session. A failed write never reaches the hook. The first failure in a session toasts
+  `pm: event log not written: <reason>`.
 - **Off:** `PM_EVENT_LOG=0` stops the file and the `pm.events` lines alike.
 - **Clean-up:** pm never deletes; base sweeps old session folders.
 
 ## Environment switches
 
-Every switch pm reads has a row here; set it in `~/.claude/settings.json` → `env`.
+Every switch pm reads has a row here. Set it in `~/.claude/settings.json` → `env`.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -143,8 +154,8 @@ Every switch pm reads has a row here; set it in `~/.claude/settings.json` → `e
   `plugins/pm/hooks/mods/tests/`), both run by `tests/mods-sim.sh` with every other plugin (local
   only: CI has no `claude`).
 - `tests/pm-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
-- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, no legacy name is left (the
-  same checker for every team plugin on base).
+- `tests/team-refs-lint.sh` — every qualified name and cited path resolves, and no legacy name is
+  left. The same checker runs for every team plugin on base.
 
 How the pieces fit: [ARCHITECTURE.md](ARCHITECTURE.md).
 

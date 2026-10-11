@@ -1,22 +1,28 @@
 # base
 
-base is the shared Domaine plugin for Claude Code. It holds what every team uses: the readers that
-turn a Jira ticket, a Figma frame or a linked doc into workspace files, the Jira writer, the review
-agents, the task workspace and the progress it publishes for band, the commit and review guards, the
-working conventions, a doctor, and the MCP servers those agents call. A team plugin (frontend,
-backend, QA) adds its own skills on top and depends on base.
+base is the shared Domaine plugin for Claude Code. It holds the tools that every team uses. A team
+plugin (frontend, backend, QA) depends on base and adds its own skills on top. To install it, see
+[Quick install (Claude Code)](../../README.md#quick-install-claude-code) in the root README.
 
-base reads large results through slim and requires it: compression happens only inside slim, so every
-figure lands in slim's log, and base's readers call slim's `view` tool for a file or a command output.
+base contains these parts:
+
+- the readers, which turn a Jira ticket, a Figma frame or a linked doc into workspace files;
+- the Jira writer and the review agents;
+- the task workspace and the progress that base publishes for band;
+- the commit and review guards;
+- the working conventions, a doctor, and the MCP servers that the agents call.
+
+base requires slim and reads large results through it. Only slim compresses, so every figure goes
+to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
 Current release: **base v0.9.1**.
 
 ## Status
 
-- Claude Code only: base is a plugin of skills, agents, MCP servers and a hooks module (mods). It
-  ships no adapter for another host, and `scripts/install.sh --plugin base` exits 2.
-- Requires slim (`"dependencies": ["slim"]` in its manifest). The engine does not install a
-  dependency on its own: install both.
+- base runs in Claude Code only. It is a plugin of skills, agents, MCP servers and a hooks module
+  (mods). It ships no adapter for another host, and `scripts/install.sh --plugin base` exits 2.
+- base requires slim (`"dependencies": ["slim"]` in its manifest). The engine does not install a
+  dependency on its own, so install both.
 
 ## Install
 
@@ -28,12 +34,16 @@ Current release: **base v0.9.1**.
 /reload-plugins
 ```
 
-`/base-doctor` then checks the install (§ Doctor). Then the team plugins for your work, each with its
-own doctor: fe, the frontend one (`/plugin install fe@domaine`, then `/fe-doctor`;
-[plugins/fe/README.md](../fe/README.md)); qa (`/qa-doctor`; [plugins/qa/README.md](../qa/README.md));
-be (`/be-doctor`; [plugins/be/README.md](../be/README.md)); pm (`/pm-doctor`;
-[plugins/pm/README.md](../pm/README.md)).
-The same set as settings, in `~/.claude/settings.json`:
+Then run `/base-doctor` to check the install (§ Doctor). Next, install the team plugins for your
+work. Each team plugin has its own doctor:
+
+- fe, the frontend plugin: `/plugin install fe@domaine`, then `/fe-doctor`
+  ([plugins/fe/README.md](../fe/README.md)).
+- qa: `/qa-doctor` ([plugins/qa/README.md](../qa/README.md)).
+- be: `/be-doctor` ([plugins/be/README.md](../be/README.md)).
+- pm: `/pm-doctor` ([plugins/pm/README.md](../pm/README.md)).
+
+To enable the same set through settings, put this in `~/.claude/settings.json`:
 
 ```json
 {
@@ -45,22 +55,22 @@ The same set as settings, in `~/.claude/settings.json`:
 }
 ```
 
-`base:jira-reader` hands every downloaded screenshot and screen recording to slim's `view`, which
-writes the resized copy (or the frames) beside it in `.claude/tasks/<work-id>/tmp/attachments/`.
-When the permission check would ask about that write, slim asks you once per file (Yes/No). An
-allow rule in the project's `.claude/settings.json` skips the question:
+`base:jira-reader` gives every downloaded screenshot and screen recording to slim's `view`. `view`
+writes the resized copy (or the frames) beside the file in `.claude/tasks/<work-id>/tmp/attachments/`.
+If the permission check would ask about that write, slim asks you once per file (Yes/No). To skip
+the question, add an allow rule to the project's `.claude/settings.json`:
 
 ```json
 { "permissions": { "allow": ["Write(.claude/tasks/**)"] } }
 ```
 
-Resizing and frame cutting need `ffmpeg` + `ffprobe` on PATH (macOS `sips` covers images only);
-without them the files stay downloaded and the reader says so in its `attachments_note`.
+Resizing and frame cutting need `ffmpeg` + `ffprobe` on PATH. macOS `sips` covers images only.
+Without these tools, the files stay downloaded and the reader says so in its `attachments_note`.
 
 ## Agents
 
-Spawned by their qualified names (`base:<agent>`); a bare name does not resolve once two plugins
-ship agents.
+Spawn each agent by its qualified name (`base:<agent>`). When two plugins ship agents, a bare name
+does not resolve.
 
 | Agent | Does | Model |
 |---|---|---|
@@ -71,17 +81,18 @@ ship agents.
 | `base:bug-hunter` | adversarial correctness review of the branch's diff | opus |
 | `base:change-reviewer` | comment accuracy, refactors and rule conformance on the changed files; the `profile` and its team rules come in the brief | opus |
 
-The three readers need slim: they read big MCP results compacted by slim's mcp channel and call
-`mcp__slim__view` for files on disk. Without slim loaded, base refuses to spawn them. The
-Jira and doc readers and the writer run on a `tools:` allowlist (the built-ins they use, slim, and
-the Atlassian and Notion servers under both `mcp__plugin_base_…` and the user-scope name); their
-`disallowedTools:` removes every write tool of those servers they do not need. figma-reader denies
-the Atlassian and Notion servers whole.
+The three readers need slim. They read big MCP results that slim's mcp channel compacts, and they
+call `mcp__slim__view` for files on disk. If slim is not loaded, base refuses to spawn them.
+
+The Jira reader, the doc reader and the writer run on a `tools:` allowlist. The allowlist holds the
+built-ins they use, slim, and the Atlassian and Notion servers. Each server appears under both
+`mcp__plugin_base_…` and the user-scope name. Their `disallowedTools:` removes every write tool of
+those servers that they do not need. figma-reader denies the Atlassian and Notion servers whole.
 
 ## References and scripts
 
-The agents cite these by their path under the plugin root; `tests/base-refs-lint.sh` checks that
-every cited path exists.
+The agents cite these files by their path under the plugin root. `tests/base-refs-lint.sh` checks
+that every cited path exists.
 
 | File | Holds |
 |---|---|
@@ -100,9 +111,9 @@ every cited path exists.
 | `references/break-it-qa.md` | the break-it QA method: deriving and executing the hostile-value and timing rows of a team plugin's QA and of `/qa:preflight` |
 
 The fetchers (`scripts/jira-attachments.sh`, `scripts/external-screenshots.sh`,
-`scripts/figma-rest.sh`) share `scripts/_common.sh`: credentials ride a private `0600` curl config,
-never the argv, and every download lands in a directory git ignores. They download only; slim
-resizes and compacts.
+`scripts/figma-rest.sh`) share `scripts/_common.sh`. Credentials go in a private `0600` curl config,
+never in the argv. Every download goes to a directory that git ignores. The fetchers only download;
+slim resizes and compacts.
 
 | Script | Run by | Does |
 |---|---|---|
@@ -115,8 +126,8 @@ resizes and compacts.
 
 ## Skills
 
-Invoked by their qualified names (`/base:<skill>`). A team plugin's skills call them by the same
-names.
+Invoke each skill by its qualified name (`/base:<skill>`). A team plugin's skills call them by the
+same names.
 
 | Skill | Does |
 |---|---|
@@ -126,21 +137,21 @@ names.
 | `/base:report-plugin-issue` | drafts a sanitized GitHub issue for a base defect, with the `/base-doctor` output and the `base.events` tail, and posts it after your approval |
 | `/base:worktree` | a sibling `git worktree` on `feat/<work-id>` with its own dev port, sharing the task workspace; `--remove` tears it down |
 
-`/base:worktree` copies `.env` into a new worktree (base's fetchers read their credentials from it)
-and every path a team plugin names in its system-prompt section with one line:
+`/base:worktree` copies `.env` into a new worktree, because base's fetchers read their credentials
+from it. It also copies every path that a team plugin names in its system-prompt section, on one line:
 
 ```text
 worktree copy list: <path>[, <path>…]
 ```
 
-The paths are repo-relative files or directories, separated by `, `; the skill passes each to
-`scripts/worktree-setup.sh` as `--copy <path>` (`.git`, `.claude`, `.claude/tasks` and
-`.claude/settings.local.json` are refused). A team step that must follow (a per-worktree config to
-adjust) runs from the team plugin's own skill.
+The paths are repo-relative files or directories, separated by `, `. The skill passes each path to
+`scripts/worktree-setup.sh` as `--copy <path>`. The script refuses `.git`, `.claude`, `.claude/tasks`
+and `.claude/settings.local.json`. A team step that must follow, such as a per-worktree config to
+adjust, runs from the team plugin's own skill.
 
 ## Commands
 
-Registered by base's hooks module at each session start.
+base's hooks module registers these commands at each session start.
 
 | Command | Does |
 |---|---|
@@ -150,8 +161,12 @@ Registered by base's hooks module at each session start.
 
 ## Conventions
 
-The working conventions reach the main session as system-prompt sections, appended after Claude
-Code's own, in this order, each with the id `base:<name>`. In a session no surface draws (a claude.ai cloud session, `claude -p`) the engine composes its prompt without the plugins, so the same sections arrive once as a context block of the first user message instead (`prompt.context`, beside CLAUDE.md). `/base-doctor`'s `conventions` row names the path taken.
+The working conventions reach the main session as system-prompt sections. base appends them after
+Claude Code's own sections, in the order below, each with the id `base:<name>`. Some sessions have no
+surface that draws, for example a claude.ai cloud session or `claude -p`. There the engine composes
+its prompt without the plugins. So the same sections arrive once as a context block of the first
+user message instead (`prompt.context`, beside CLAUDE.md). `/base-doctor`'s `conventions` row names
+the path taken.
 
 | Name | Holds |
 |---|---|
@@ -163,19 +178,22 @@ Code's own, in this order, each with the id `base:<name>`. In a session no surfa
 | `writing-style` | explanations about 80% to the ASD-STE100 rules; say "normal writing" to suspend it, `BASE_STE=0` drops it |
 | `dogfood` | only in dogfood mode: the Domaine plugins and versions this session runs, what counts as a plugin defect, and the rule to report each one with `plugin_defect` (Dogfood mode) |
 
-A team plugin finds a section by its id to add its own beside it. Claude Code has no event for a
-subagent's system prompt, so subagents get theirs as added context at their start (Claude Code's
-`SubagentStart`): every agent the root line and the untrusted-content section; an agent that writes code
-(any type but the readers, the writer, the reviewers, `Explore`, `Plan`, `claude-code-guide`,
-`statusline-setup`) also comment discipline and lean code; in dogfood mode every agent also
-the `dogfood` section. A fork gets none: it inherits the
-parent's system prompt.
+A team plugin finds a section by its id and adds its own section beside it.
+
+Claude Code has no event for a subagent's system prompt. So subagents get their sections as added
+context at their start (Claude Code's `SubagentStart`):
+
+- Every agent gets the root line and the untrusted-content section.
+- An agent that writes code also gets comment discipline and lean code. This is any type except the
+  readers, the writer, the reviewers, `Explore`, `Plan`, `claude-code-guide` and `statusline-setup`.
+- In dogfood mode, every agent also gets the `dogfood` section.
+- A fork gets no section, because it inherits the parent's system prompt.
 
 ## Guards
 
-Tool-call guards deny a command or a path before it runs; the reason reaches the model, and each deny
-writes one `guard` line to `base.events`. They guard subagents' calls as well. `BASE_GUARD=0` turns
-all of them off.
+A tool-call guard denies a command or a path before it runs. The reason reaches the model, and each
+deny writes one `guard` line to `base.events`. The guards also check subagents' calls.
+`BASE_GUARD=0` turns all of them off.
 
 | Guard | Tools | Denies |
 |---|---|---|
@@ -183,21 +201,26 @@ all of them off.
 | no git-hooks bypass | `Bash` | `--no-verify` (`-n` on a commit) on commit, push, merge, pull, am and rebase in any spelling, a `core.hooksPath` or `HUSKY=0` override, an alias that carries the flag, and a command that removes, empties or rewrites a hook file before a commit; `hooks/no-verify-bypass.sh` decides, run only for a command naming a git verb |
 | scratch path | the browser tools that take a file path (`take_screenshot`, `browser_take_screenshot`, `take_snapshot`, `get_network_request`, `browser_run_code_unsafe`) of any MCP server | a path outside the project (chrome-devtools also accepts its OS temp dir), or inside it outside `.claude/` (the task workspace's `tmp/`, `.claude/tmp/`, `.claude/base-tmp/`); in a git worktree, a path into the shared task workspace. `hooks/scratch-path-guard.cjs` decides against the project root the session launched in (`base.guardRoot`), names an absolute path to use instead and creates its directory. The tools' descriptions carry the rule too. `BASE_SCRATCH_GUARD=0` turns this one off |
 
-base's playwright server writes its own files under `.claude/base-tmp/playwright`, and the guard
-adds `/.claude/base-tmp/` to `.git/info/exclude` when it allows a write there. A guard that cannot
-run (its script fails or times out) lets the call through.
+base's playwright server writes its own files under `.claude/base-tmp/playwright`. When the guard
+allows a write there, it adds `/.claude/base-tmp/` to `.git/info/exclude`. If a guard cannot run
+(its script fails or times out), it lets the call through.
 
 ## Workspace
 
-base publishes the task workspace of the work id it resolves as `$.state` atoms; band draws them
-(its checklist and Log panes). Any plugin reads them, base alone writes them. The work id is, in
-order: the pinned id when its `.claude/tasks/<id>/` exists; the last ticket a person's prompt named
-(a Jira `/browse/` URL, or a project that already has a `.claude/tasks/<KEY>` dir, corroborates a
-key: `UTF-8` or `SHA-256` alone does not); the branch's ticket key, then its kebab slug, when that
-workspace exists; the newest `progress.md` written within 12 hours. base re-reads the workspace
-when a file in its root changes (checked every 30 s, at once after a Write or Edit under
-`.claude/tasks/`), and resolves again after a `git checkout`/`switch`/`worktree`, a directory
-change, a /clear, and every two minutes.
+base resolves a work id and publishes its task workspace as `$.state` atoms (shared state values).
+band draws them in its checklist and Log panes. Any plugin reads the atoms; only base writes them.
+
+base picks the work id in this order:
+
+1. The pinned id, when its `.claude/tasks/<id>/` exists.
+2. The last ticket that a person's prompt named. A Jira `/browse/` URL corroborates a key, and so
+   does a project that already has a `.claude/tasks/<KEY>` dir. `UTF-8` or `SHA-256` alone does not.
+3. The branch's ticket key, then its kebab slug, when that workspace exists.
+4. The newest `progress.md` written within 12 hours.
+
+base re-reads the workspace when a file in its root changes. It checks every 30 s, and at once after
+a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
+`git checkout`/`switch`/`worktree`, a directory change, a /clear, and every two minutes.
 
 | Atom | Value |
 |---|---|
@@ -214,90 +237,112 @@ change, a /clear, and every two minutes.
 | `base.swept` | the session id whose base-tmp and event-log sweeps ran |
 | `base.dogfood` | dogfood mode's session: `{ sid, failMs, script, blockedMs, reportMs }` — the last plugin-script failure, the failure whose stop was blocked, the last `plugin_defect` report |
 
-**Autosave.** A savable event is, in the main loop, an Agent call that returned, a Write / Edit outside
-`.claude/`, or an MCP result over slim's 4 KB gate; it belongs to the work id published when it happened.
-The workspace is `stale` when no file in its root (a reader's `ticket.md` counts, `tmp/` does not) was
-written for 20 minutes — 5 once the context window is 85 % full — and the newest savable event of its
-work id came after that write. band's Compact reads the same flag. While it is stale, a person's
-prompt gets one context line asking to save to notes.md, once until the next workspace write; a turn
-that wrote nothing to the workspace, after savable work in it or 3 turns without a workspace write, is
-blocked at its stop (never when the stop hook is already active, at most once per 3 turns); an
-auto-compact appends one `compact:` pointer line to notes.md, which is no save: the workspace stays
-stale and the next prompt gets the line again. `BASE_AUTOSAVE=0` turns the three off.
+**Autosave.** A savable event is one of these, in the main loop: an Agent call that returned, a
+Write / Edit outside `.claude/`, or an MCP result over slim's 4 KB gate. The event belongs to the
+work id that base published when it happened.
 
-`/base-progress <work-id>` pins the work id band's checklist shows, `/base-progress -` unpins, and
-`/base-progress` alone names the pin. The checklist itself is band's `/band-progress`.
+The workspace is `stale` when two things are true. First, no file in its root was written for 20
+minutes, or for 5 minutes once the context window is 85 % full. A reader's `ticket.md` counts;
+`tmp/` does not. Second, the newest savable event of its work id came after that write. band's
+Compact reads the same flag.
 
-`base.events` kinds: `start` (base's version, once per session), `install` (slim missing),
-`refuse` (a reader refused), `workspace` (the work id base now publishes, `none` when it
-leaves every workspace), `title` (the session title base set), `guard` (a guard's deny: the
-tool and the reason), `doctor` (a `/base-doctor` run's counts), `defect` (dogfood mode: a
-`plugin_defect` report, `<plugin>: <title>`, or a failed plugin script, `script failed: <basename>`). band and slim write their own
-session, model, compaction, rate and compression lines. Each line also goes to base's file on disk
-(Event log on disk).
+While the workspace is stale, autosave does three things:
+
+- A person's prompt gets one context line that asks to save to notes.md. The line comes once until
+  the next workspace write.
+- A turn that wrote nothing to the workspace is blocked at its stop. This happens after savable work
+  in the workspace, or after 3 turns without a workspace write. It never happens when the stop hook
+  is already active, and at most once per 3 turns.
+- An auto-compact appends one `compact:` pointer line to notes.md. This line is not a save: the
+  workspace stays stale, and the next prompt gets the line again.
+
+`BASE_AUTOSAVE=0` turns the three off.
+
+`/base-progress <work-id>` pins the work id that band's checklist shows. `/base-progress -` unpins,
+and `/base-progress` alone names the pin. The checklist itself is band's `/band-progress`.
+
+`base.events` has these kinds:
+
+- `start`: base's version, once per session.
+- `install`: slim is missing.
+- `refuse`: a reader refused.
+- `workspace`: the work id base now publishes, or `none` when base leaves every workspace.
+- `title`: the session title base set.
+- `guard`: a guard's deny, with the tool and the reason.
+- `doctor`: the counts of a `/base-doctor` run.
+- `defect`: in dogfood mode, a `plugin_defect` report (`<plugin>: <title>`) or a failed plugin
+  script (`script failed: <basename>`).
+
+band and slim write their own session, model, compaction, rate and compression lines. Each line
+also goes to base's file on disk (Event log on disk).
 
 ## Event log on disk
 
-Every Domaine plugin (slim, band, base, fe, qa, be, pm) writes the lines it publishes itself to its
-own file, so the origin of a line is on the line, written by that plugin, not inferred from a pane:
+Every Domaine plugin (slim, band, base, fe, qa, be, pm) writes the lines that it publishes to its own
+file. So the origin of a line is on the line, written by that plugin, and nobody infers it from a
+pane.
 
-- **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl` (`base.jsonl`, `band.jsonl`,
-  `slim.jsonl`, and a team plugin's own, such as fe's `fe.jsonl`). `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`; the
-  `<session-id>/` folder is still made under it. With neither (a cloud session) no file is written.
-  Never under the project.
+- **Where:** `$HOME/.claude/domaine/log/<session-id>/<plugin>.jsonl`. Examples are `base.jsonl`,
+  `band.jsonl`, `slim.jsonl`, and a team plugin's own file, such as fe's `fe.jsonl`.
+  `DOMAINE_LOG_DIR` (an absolute directory) replaces `$HOME/.claude/domaine/log`. The
+  `<session-id>/` folder is still made under it. With neither (a cloud session), no file is written.
+  The log is never under the project.
 - **Line:** one JSON object per line, oldest first:
   `{"ts":"2026-10-08T12:34:56.789Z","plugin":"base","version":"0.1.0","session":"<id>","kind":"guard","agent":"main","text":"Bash: a git hooks bypass"}`.
-  `ts` is the event's time in UTC, `plugin` and `version` the writer's own name and release, `agent`
-  the subagent type that caused the line or `main`, `kind` and `text` the line as `base.events` has it.
-- **Start line:** the first line a plugin writes for a session id is `start` / `<plugin> <version>`,
-  also under the new id a `/clear` opens, where no session start runs. A session whose lines already
-  hold a start line gets no second one: a module reload or a resume in a fresh process goes on from
-  the file.
-- **base's lines:** every `base.events` line, `agent` always `main`. The first line of a session's
-  file is `start` / `base <version>`; after a /clear (a new session id with no session start) base
-  writes that line before the new session's first event.
-- **Writing:** the whole file is rewritten after every line (the engine has no append), at most 2000
-  lines or 256 KB, oldest dropped first (the start line too, past the cap). A reload of the module
-  picks up the file of the same session and goes on. A write that fails never reaches the hook; the
-  first failure in a session toasts `base: event log not written: <reason>`.
+  `ts` is the event's time in UTC. `plugin` and `version` are the writer's own name and release.
+  `agent` is the subagent type that caused the line, or `main`. `kind` and `text` are the line as
+  `base.events` has it.
+- **Start line:** the first line that a plugin writes for a session id is `start` /
+  `<plugin> <version>`. This is also true under the new id that a `/clear` opens, where no session
+  start runs. A session whose lines already hold a start line gets no second one. A module reload or
+  a resume in a fresh process goes on from the file.
+- **base's lines:** every `base.events` line, with `agent` always `main`. The first line of a
+  session's file is `start` / `base <version>`. After a /clear (a new session id with no session
+  start), base writes that line before the new session's first event.
+- **Writing:** the engine has no append, so the whole file is rewritten after every line. The file
+  holds at most 2000 lines or 256 KB, and the oldest lines drop first (past the cap, the start line
+  too). A reload of the module picks up the file of the same session and goes on. A write that fails
+  never reaches the hook. The first failure in a session toasts
+  `base: event log not written: <reason>`.
 - **Off:** `BASE_EVENT_LOG=0` stops base's file and its `base.events` lines alike.
-- **Clean-up:** base sweeps session folders whose newest file is older than 7 days, and its
-  `/base-doctor` row `event-log` names the folder and each file's line count and newest time. The other
-  plugins never delete.
+- **Clean-up:** base sweeps session folders whose newest file is older than 7 days. Its
+  `/base-doctor` row `event-log` names the folder, and each file's line count and newest time. The
+  other plugins never delete.
 
-The sweep runs once per session (and again after a /clear), in the background, over
-`$HOME/.claude/domaine/log` only — a `DOMAINE_LOG_DIR` is yours to clean — and not at all when that
-directory itself resolves anywhere but its own spelling (a symbolic link). It touches only folders
-named like a session id that hold nothing but `*.jsonl` files, skips the current session's folder and
-a folder that resolves anywhere but its own place under that directory; the rest goes with `rm -rf`,
-as the engine's file API cannot delete.
+The sweep runs once per session, and again after a /clear, in the background. It sweeps
+`$HOME/.claude/domaine/log` only; you clean a `DOMAINE_LOG_DIR` yourself. The sweep does not run when
+that directory resolves anywhere but its own spelling (a symbolic link). It touches only folders that
+are named like a session id and hold nothing but `*.jsonl` files. It skips the current session's
+folder, and a folder that resolves anywhere but its own place under that directory. It deletes the
+rest with `rm -rf`, because the engine's file API cannot delete.
 
 ## Session start
 
-- **Install checks**, at the first prompt of each session (slim registers its tools at its own
-  session start): without slim's `mcp__slim__view` tool, one line and one toast `slim is not loaded —
-  claude plugin install slim@domaine`.
-- **Reader refusal**: while `mcp__slim__view` is missing, a spawn of `base:jira-reader`,
-  `base:figma-reader` or `base:doc-reader` is denied with `base: <agent> needs the slim plugin —
-  claude plugin install slim@domaine`, through the Agent tool and through any plugin's spawn. The
-  writer and the reviewers run without slim.
-- **Session title** `<KEY> — <summary>`, the summary from the `# <KEY> — …` heading of
-  `.claude/tasks/<KEY>/ticket.md` (the key alone without one), cut at 100 bytes: from the branch's
-  ticket key when the session starts and `.claude/tasks/` holds that key or another of its project,
-  else from the first prompt you write that names a corroborated
-  ticket (the most recent one it names, as the workspace resolver picks). Once per session; a title
-  you gave the session (`--name` at start, `/rename` later) is kept.
+- **Install checks** run at the first prompt of each session. (slim registers its tools at its own
+  session start.) Without slim's `mcp__slim__view` tool, base shows one line and one toast:
+  `slim is not loaded — claude plugin install slim@domaine`.
+- **Reader refusal**: while `mcp__slim__view` is missing, base denies a spawn of `base:jira-reader`,
+  `base:figma-reader` or `base:doc-reader`. The deny reads `base: <agent> needs the slim plugin —
+  claude plugin install slim@domaine`. It applies through the Agent tool and through any plugin's
+  spawn. The writer and the reviewers run without slim.
+- **Session title** is `<KEY> — <summary>`, cut at 100 bytes. The summary comes from the
+  `# <KEY> — …` heading of `.claude/tasks/<KEY>/ticket.md`; without that heading, the title is the
+  key alone. base takes the key from the branch's ticket key when the session starts and
+  `.claude/tasks/` holds that key or another key of its project. Else base takes it from the first
+  prompt you write that names a corroborated ticket. That is the most recent ticket the prompt names,
+  as the workspace resolver picks. base sets the title once per session. It keeps a title that you
+  gave the session (`--name` at start, `/rename` later).
 
-- **base-tmp sweep**, once per session (and again after a /clear), in the background — the session
-  start never waits for it: files in `.claude/base-tmp` older than `BASE_TMP_TTL` hours (24 by
-  default) are deleted; directories and symlinks stay.
-- **Event-log sweep**, alongside it: session folders under `$HOME/.claude/domaine/log` whose newest
-  file is older than 7 days (Event log on disk).
+- **base-tmp sweep** runs once per session, and again after a /clear, in the background. The session
+  start never waits for it. It deletes files in `.claude/base-tmp` older than `BASE_TMP_TTL` hours
+  (24 by default). Directories and symlinks stay.
+- **Event-log sweep** runs alongside it. It deletes session folders under `$HOME/.claude/domaine/log`
+  whose newest file is older than 7 days (Event log on disk).
 
 ## Doctor
 
-`/base-doctor` checks the install and prints one PASS / FAIL / SKIP / WARN row per check, the counts,
-and the last 10 `base.events` lines:
+`/base-doctor` checks the install. It prints one PASS / FAIL / SKIP / WARN row per check, the
+counts, and the last 10 `base.events` lines:
 
 | Row | Checks |
 |---|---|
@@ -312,66 +357,81 @@ and the last 10 `base.events` lines:
 | `defects` | only in dogfood mode: PASS `none in 7 days`, WARN `<N> in 7 days, newest <title>` — the reports of the home index and this project's `.claude/plugin-defects/` |
 | `mcp:<server>` | each MCP server of base's manifest connects; sign-in needed fails with the `/mcp` pointer; `figma-dev-mode` (the Figma desktop app's local server) only warns |
 
-The rows up to `switches` come from `scripts/doctor.cjs`, which also runs by hand:
-`node <base plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`; it exits 1 when a
-row fails. By hand its `event-log` row reads the newest session folder unless `--log-dir` names one.
-The session rows need the command. One `doctor` line goes to `base.events` per run.
+The rows up to `switches` come from `scripts/doctor.cjs`. You can also run it by hand:
+`node <base plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`. It exits 1 when a
+row fails. By hand, its `event-log` row reads the newest session folder, unless `--log-dir` names
+one. The session rows need the command. Each run writes one `doctor` line to `base.events`.
 
 ## Dogfood mode
 
-The Domaine plugins (slim, band, base, fe, be, qa, pm) are development builds; dogfood mode turns every
-session into a test run of them. Two ways in: `BASE_DOGFOOD=1` in `~/.claude/settings.json` → `env` (a
-machine of yours, a cloud environment's variables), or your claude.ai account id in `plugins/base/dogfood.json`
-(`accounts`: `CLAUDE_CODE_ACCOUNT_UUID` → name) — the file follows the plugin into every synced sandbox,
-the claude.ai chat included, where no variable of yours can be set; `BASE_DOGFOOD=0` turns a listed account
-off. Off, nothing below exists.
+Dogfood mode turns every session into a test run of the Domaine plugins (slim, band, base, fe, be,
+qa, pm), which are development builds. When dogfood mode is off, nothing in this section exists.
 
-- **Convention** `dogfood` (system prompt, or the context block where nothing draws): the plugins
-  and versions — base's own manifest, slim's `slim.info`, the others from `installed_plugins.json`, a
-  plugin enabled in settings without a record named without one — what counts as a defect (a script
-  that failed or printed odd output, a hook or mod that threw or showed a notice, a skill that contradicts
-  the code or itself, a doctor FAIL, wrong slim output, a convention wrong for this host), and the rule:
-  report it with `plugin_defect` before or while working around it, never silently; the reply carries
-  `Plugin defect: <title> → <path>`; a GitHub issue is offered, never filed unasked (where nothing
-  draws: see below); no secret, token
-  or storefront password goes in a report.
-- **Tool** `mcp__base__plugin_defect`, registered at session start. Fields: `plugin` (one of the seven),
-  `kind` (`skill`, `script`, `hook`, `mod`, `doctor`, `output`, `docs`, `other`), `title` (one line, 120
-  characters), `path` (`file:line` or empty), `observed`, `expected`, `reproduce`, `evidence` (cut at
-  2 KB, and the report says so), `suspect` (`plugin`, `project`, `unsure`), `github` (default false;
-  true where nothing draws). Every field is data: control characters are stripped; Observed, Expected,
-  Reproduce and Evidence sit in fences no field text can close; the file name comes from the date, the
-  plugin and a slug of the title (`[a-z0-9-]`, 40 characters), and the tool writes nowhere else.
-- **Report** `<project>/.claude/plugin-defects/<YYYY-MM-DD>-<plugin>-<slug>.md` (`-2`, `-3` on a clash):
-  frontmatter `plugin`, `version`, `kind`, `suspect`, `date`, `session`, `work_id`; sections Observed,
-  Expected, Reproduce, Evidence, Environment. The tool fills Environment itself: the project root, the
-  git remote, branch and commit, the plugin versions, the surfaces, the Claude Code version, the
-  session and the work id.
-- **Index** `~/.claude/plugin-defects/index.md`, one line per report:
-  `- <date> <plugin> <title> → <absolute path>`; skipped without a writable home (a cloud session), and
-  left whole (the result says so) when it exists but does not read.
+There are two ways to turn it on:
+
+1. Set `BASE_DOGFOOD=1` in `~/.claude/settings.json` → `env`. Use this on a machine of yours, or in
+   a cloud environment's variables.
+2. Add your claude.ai account id to `plugins/base/dogfood.json` (`accounts`:
+   `CLAUDE_CODE_ACCOUNT_UUID` → name). The file follows the plugin into every synced sandbox. This
+   includes the claude.ai chat, where you cannot set a variable. `BASE_DOGFOOD=0` turns a listed
+   account off.
+
+- **Convention** `dogfood` goes in the system prompt, or in the context block where nothing draws.
+  It holds three things:
+  - The plugins and versions. base reads its own manifest, slim's `slim.info`, and the others from
+    `installed_plugins.json`. A plugin that settings enable without a record is named without a
+    version.
+  - What counts as a defect: a script that failed or printed odd output, a hook or mod that threw or
+    showed a notice, a skill that contradicts the code or itself, a doctor FAIL, wrong slim output,
+    or a convention that is wrong for this host.
+  - The rule. Report each defect with `plugin_defect` before or while you work around it, never
+    silently. The reply carries `Plugin defect: <title> → <path>`. Offer a GitHub issue, but never
+    file one unasked (for where nothing draws, see below). Never put a secret, token or storefront
+    password in a report.
+- **Tool** `mcp__base__plugin_defect` is registered at session start. Its fields:
+  - `plugin`: one of the seven.
+  - `kind`: `skill`, `script`, `hook`, `mod`, `doctor`, `output`, `docs` or `other`.
+  - `title`: one line, 120 characters.
+  - `path`: `file:line`, or empty.
+  - `observed`, `expected`, `reproduce`.
+  - `evidence`: cut at 2 KB, and the report says so.
+  - `suspect`: `plugin`, `project` or `unsure`.
+  - `github`: default false; true where nothing draws.
+
+  The tool treats every field as data. It strips control characters. Observed, Expected, Reproduce
+  and Evidence sit in fences that no field text can close. The file name comes from the date, the
+  plugin and a slug of the title (`[a-z0-9-]`, 40 characters). The tool writes nowhere else.
+- **Report** goes to `<project>/.claude/plugin-defects/<YYYY-MM-DD>-<plugin>-<slug>.md`, with `-2`,
+  `-3` on a clash. Its frontmatter is `plugin`, `version`, `kind`, `suspect`, `date`, `session`,
+  `work_id`. Its sections are Observed, Expected, Reproduce, Evidence and Environment. The tool fills
+  Environment itself: the project root, the git remote, branch and commit, the plugin versions, the
+  surfaces, the Claude Code version, the session and the work id.
+- **Index** `~/.claude/plugin-defects/index.md` has one line per report:
+  `- <date> <plugin> <title> → <absolute path>`. The tool skips it without a writable home (a cloud
+  session). When the index exists but does not read, the tool leaves it whole and the result says so.
 - **GitHub**: `github: true` runs `gh issue create --repo <repo> --title '[<plugin>] <title>' --body-file
-  <report>` and returns the URL. `<repo>` is `BASE_DOGFOOD_REPO`, else the github marketplace base was
-  installed from. A gh failure is reported in the result, never retried.
-- **Subagents** get the `dogfood` section at their start too (any agent may run a plugin script); a
-  subagent's failed plugin script nudges and logs, but does not block the main loop's stop.
-- **Nudge**: a Bash result of a command that ran a plugin script (`plugins/<name>/scripts/…` of the
-  seven, or anything of theirs under `~/.claude/plugins/cache/`) and failed (an error result, or
-  `Error` in its stderr) gets one line for the model, `base dogfood: a plugin script failed — report it
-  with plugin_defect before working around it`, and a `defect` event. In the main loop, the next stop
-  without a report since is blocked once per failure.
-- **`/base-defects`** lists the index newest first, then this project's `.claude/plugin-defects/`. The
-  doctor's `defects` row counts the last 7 days.
+  <report>` and returns the URL. `<repo>` is `BASE_DOGFOOD_REPO`, else the github marketplace that
+  base was installed from. The tool reports a gh failure in the result and never retries it.
+- **Subagents** also get the `dogfood` section at their start, because any agent may run a plugin
+  script. A subagent's failed plugin script nudges and logs, but does not block the main loop's stop.
+- **Nudge**: a Bash command can run a plugin script and fail. A plugin script is
+  `plugins/<name>/scripts/…` of the seven, or anything of theirs under `~/.claude/plugins/cache/`.
+  A failure is an error result, or `Error` in the stderr. The result then gets one line for the model,
+  `base dogfood: a plugin script failed — report it with plugin_defect before working around it`,
+  and a `defect` event. In the main loop, the next stop without a report since then is blocked once
+  per failure.
+- **`/base-defects`** lists the index newest first, then this project's `.claude/plugin-defects/`.
+  The doctor's `defects` row counts the last 7 days.
 
-**Where nothing draws** (claude.ai/code, `claude -p`) the report file and `~` end with the session. There
-the tool still writes the file, returns the whole report in a fenced block, and files the GitHub issue
-unless the call passes `github: false` (gh missing or failing is said in the result); the convention tells
-the model to paste the whole report into its reply under the `Plugin defect:` line, for the owner to copy
-into a session in the plugin repo.
+**Where nothing draws** (claude.ai/code, `claude -p`), the report file and `~` end with the session.
+There the tool still writes the file and returns the whole report in a fenced block. It also files
+the GitHub issue, unless the call passes `github: false`. The result says when gh is missing or
+fails. The convention tells the model to paste the whole report into its reply under the
+`Plugin defect:` line. The owner then copies it into a session in the plugin repo.
 
-To read the reports from the plugin repo: the index names every report on this machine by its absolute
-path; each file stands alone (Reproduce and Environment say where and on which versions), and its
-frontmatter sorts them by plugin, kind and suspect.
+To read the reports from the plugin repo, start at the index. It names every report on this machine
+by its absolute path. Each file stands alone: Reproduce and Environment say where and on which
+versions. The frontmatter sorts the reports by plugin, kind and suspect.
 
 ## Environment switches
 
@@ -394,17 +454,20 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_DOGFOOD_REPO` | the marketplace repo | `<owner>/<repo>` a `plugin_defect` call with `github: true` (or, where nothing draws, without `github: false`) files its issue in; unset, the github repo of the marketplace base was installed from (`known_marketplaces.json`), and without one the tool asks for this switch |
 | `BASE_AUTOSAVE` | on | `0` turns the workspace autosave levers off: the stale-workspace line on a prompt, the block at turn end (at most once per 3 turns), the `compact:` marker before an auto-compact. `base.progress` still carries `stale` |
 
-The fetchers read their credentials from the process environment first, else from the project's
-gitignored `./.env` (`--env <file>` names another): `JIRA_EMAIL` + `JIRA_API_TOKEN` (a read-only
-scoped Atlassian token, `references/jira-attachments.md`), `JIRA_SITE` (default
-`meetdomaine.atlassian.net`), `FIGMA_TOKEN` (a read-only Figma token, `references/figma-rest.md`).
+The fetchers read their credentials from the process environment first. Else they read the
+project's gitignored `./.env`; `--env <file>` names another file. The credentials are:
+
+- `JIRA_EMAIL` + `JIRA_API_TOKEN`: a read-only scoped Atlassian token (`references/jira-attachments.md`).
+- `JIRA_SITE`: default `meetdomaine.atlassian.net`.
+- `FIGMA_TOKEN`: a read-only Figma token (`references/figma-rest.md`).
+
 Agents never read `.env` themselves.
 
 ## Tests
 
-`claude plugin validate --strict plugins/base` and `claude plugin test plugins/base` (the kit tests in
-`plugins/base/hooks/mods/tests/`), both run by `tests/mods-sim.sh` with every other plugin. The
-scripts and texts have their own suites:
+`tests/mods-sim.sh` runs `claude plugin validate --strict plugins/base` and
+`claude plugin test plugins/base` with every other plugin. The second command runs the kit tests in
+`plugins/base/hooks/mods/tests/`. The scripts and texts have their own suites:
 
 | Suite | Covers |
 |---|---|
@@ -420,8 +483,8 @@ scripts and texts have their own suites:
 | `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, bash 3.2 |
 | `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get`, `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
 
-How the pieces fit — the mods, the atoms band reads, why some checks stay scripts:
-[ARCHITECTURE.md](ARCHITECTURE.md).
+[ARCHITECTURE.md](ARCHITECTURE.md) tells how the pieces fit: the mods, the atoms that band reads,
+and why some checks stay scripts.
 
 ## Licence
 
