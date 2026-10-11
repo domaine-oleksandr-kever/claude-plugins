@@ -423,6 +423,28 @@ describe('band', () => {
       expect(await modelButtons(ui)).toHaveLength(0)
     })
 
+    test(`${surface}: the picker's close button folds it without a /model run`, async ($, on) => {
+      const { w } = world(on)
+      const runs: string[] = []
+      on('command.run', { command: 'model' }, async (_$, e) => {
+        runs.push(e.args)
+        return { text: 'ok' }
+      })
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      if (isDesktop) return
+      await ui.press({ key: 'model' })
+      expect(await modelButtons(ui)).toHaveLength(4)
+      expect((await ui.find({ key: 'model-close' }))?.props).toMatchObject({ label: '×', dimColor: true })
+      await ui.press({ key: 'model-close' })
+      expect(await modelButtons(ui)).toHaveLength(0)
+      expect(await ui.find({ key: 'model-close' })).toBeUndefined()
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
+      expect(runs).toEqual([])
+      expect(w.toasts).toHaveLength(0)
+    })
+
     test(`${surface}: a subagent compaction leaves the main figures`, async ($, on) => {
       world(on)
       await start($, surface)

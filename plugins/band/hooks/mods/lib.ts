@@ -358,6 +358,9 @@ export function modelFamily(id: string): string {
 /** The mark after the model id on the terminal: the segment is the picker's button. */
 export const MODEL_MARK = ' ▾'
 
+/** The unfolded picker's close button: folds the row without a pick. */
+export const MODEL_CLOSE = '×'
+
 /** `value` is what `/model` runs; `current` marks the session's own model, which only folds the picker. */
 export type ModelOption = { value: string; label: string; current: boolean; hotkey?: string }
 

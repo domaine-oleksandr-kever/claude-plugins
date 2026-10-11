@@ -14,6 +14,7 @@ import {
   CTX_PROPS,
   GLYPH,
   LEVEL_PROPS,
+  MODEL_CLOSE,
   MODEL_MARK,
   RULE,
   SEP,
@@ -320,7 +321,8 @@ export function registerBand(on: On, options: PluginOptions): void {
     const ruleCols = e.props.bodyColumns && e.props.bodyColumns > 0 ? Math.min(e.props.bodyColumns, 400) : 80
 
     // Unfolded, the row holds the models alone: four names plus letters outgrow a row that also holds the figures.
-    // The current one is at full strength and only folds; no Esc, as the engine raises no focus-out.
+    // The current one is at full strength and only folds. Esc reaches no hook (the engine raises no focus-out),
+    // so a close button ends the row; `x` is free here, as Clear is not drawn.
     if (unfolded && !isDesktop && m !== null) {
       const options = modelOptions(m)
       const row: RenderNode[] = [<Text dimColor>model </Text>]
@@ -337,6 +339,8 @@ export function registerBand(on: On, options: PluginOptions): void {
           />,
         )
       })
+      row.push(<Text>{'  '}</Text>)
+      row.push(<Button key="model-close" label={MODEL_CLOSE} plain {...(letters ? { hotkey: 'x' } : {})} dimColor onPress={() => setPicker($, false)} />)
       return (
         <Box flexDirection="column">
           <Text dimColor>{RULE.repeat(ruleCols)}</Text>
