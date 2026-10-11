@@ -16,6 +16,7 @@ import {
   rootLine,
   withRoot,
 } from './conventions/text.ts'
+import { dogfoodSection, enabledNames, versionsLine, versionsOf } from './dogfood/text.ts'
 
 type $ = EngineInterface
 
@@ -25,10 +26,28 @@ const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
 const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
 /** What the prompt events did this session, for the doctor: which of them a host fires decides how the conventions travel. */
 const delivery = atom({ plugin: 'base', key: 'delivery' } as const, { sid: null, startSurfaces: null, prompts: 0, context: false } as BaseDelivery)
+const slimInfo = atom({ plugin: 'slim', key: 'info' } as const, null)
+
+/** The Domaine plugins and versions dogfood mode names; dogfood.ts reads the same sources for a report's Environment. */
+async function pluginVersions($: $): Promise<string> {
+  const home = (await $.env.get('HOME'))?.trim() ?? ''
+  const cfgEnv = (await $.env.get('CLAUDE_CONFIG_DIR'))?.trim() ?? ''
+  const config = cfgEnv.startsWith('/') ? cfgEnv.replace(/\/+$/, '') : home.startsWith('/') ? `${home.replace(/\/+$/, '')}/.claude` : null
+  const installed = config ? await $.fs.read(`${config}/plugins/installed_plugins.json`).catch(() => null) : null
+  let own = 'unknown'
+  try {
+    const v = (JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { version?: unknown }).version
+    if (typeof v === 'string' && v) own = v
+  } catch {}
+  const slim = (await read($, slimInfo).catch(() => null))?.version ?? null
+  const enabled = enabledNames(await $.settings.read().catch(() => null))
+  return versionsLine(versionsOf(installed, $.plugin.root, own, slim, enabled))
+}
 
 /**
  * The sections in session order, each `base:<name>`: the switches are read on every render, and the
- * text depends on nothing else, so a render repeats the last one byte for byte (the prompt cache).
+ * text depends on nothing else but the plugin versions in the dogfood section, so a render repeats the
+ * last one byte for byte (the prompt cache).
  */
 export async function sections($: $): Promise<PromptComposeSection[]> {
   const root = $.plugin.root
@@ -42,6 +61,7 @@ export async function sections($: $): Promise<PromptComposeSection[]> {
   ]
   if (lean) parts.push(['lean-code', LEAN_CODE])
   if (ste) parts.push(['writing-style', WRITING_STYLE])
+  if ((await $.env.get('BASE_DOGFOOD')) === '1') parts.push(['dogfood', dogfoodSection(await pluginVersions($))])
   return parts.map(([name, text]) => ({ id: `base:${name}`, text, scope: 'session' }))
 }
 

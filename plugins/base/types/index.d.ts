@@ -37,9 +37,9 @@ export type BaseProgress =
  * At most 9 characters each (band's kind cell); band and slim own session, model, compact, rate, slim and lookup.
  * `start` base's version at session start, `install` slim missing, `refuse` a reader refused,
  * `workspace` the work id base publishes, `title` the session title base set, `guard` a guard's deny,
- * `doctor` the counts of a /base-doctor run.
+ * `doctor` the counts of a /base-doctor run, `defect` a plugin defect reported or a plugin script failed (dogfood mode).
  */
-export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'title' | 'guard' | 'doctor'
+export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'title' | 'guard' | 'doctor' | 'defect'
 
 /**
  * Worth saving to the workspace, in the main loop: an Agent / Task call returned, a Write / Edit outside `.claude/`,
@@ -56,6 +56,12 @@ export type BaseCompactMarker = { workId: string; notesMs: number; priorMs: numb
  * the workspace mtime the prompt line last fired for (-1 = none).
  */
 export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number; writeMs: number; writeTurn: number; nudgedMs: number }
+
+/**
+ * Dogfood mode, per session id: the last plugin-script failure in the main loop (`failMs` 0 = none) and its
+ * basename, the failure whose stop was blocked, and the last plugin_defect report this session (0 = none).
+ */
+export type BaseDogfood = { sid: string; failMs: number; script: string; blockedMs: number; reportMs: number }
 
 /** atMs = $.clock.now() when written; text is one line. */
 export type BaseEvent = { atMs: number; kind: BaseEventKind; text: string }
@@ -91,6 +97,8 @@ declare module 'claude-code' {
       savable: BaseSavable[]
       autosave: BaseAutosave | null
       compactMarker: BaseCompactMarker | null
+      /** Dogfood mode's session (BASE_DOGFOOD=1): whose /base-defects is registered, its script failure and its last report. */
+      dogfood: BaseDogfood | null
     }
   }
 }

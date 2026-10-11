@@ -5,7 +5,7 @@
 # servers) are the mod's and live in plugins/base/hooks/mods/tests/doctor.test.ts. Exit 0 = all green.
 set -u
 unset CLAUDE_CONFIG_DIR BASE_AUTOSAVE BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG BASE_GUARD BASE_LEAN BASE_SCRATCH_GUARD \
-  BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE
+  BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE BASE_DOGFOOD BASE_DOGFOOD_REPO
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCTOR="$ROOT/plugins/base/scripts/doctor.cjs"
@@ -248,6 +248,11 @@ rc=0; BASE_AUTOSAVE=off node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" 
 expect CD39c-switches-autosave 0 'WARN  switches' 'BASE_AUTOSAVE="off" is read as on — only 0 turns it off'
 rc=0; BASE_AUTOSAVE=0 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect CD39d-switches-autosave-off 0 "!switches"
+rc=0; BASE_DOGFOOD=1 BASE_DOGFOOD_REPO=acme/claude-plugins node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39e-switches-dogfood-valid 0 "!switches"
+rc=0; BASE_DOGFOOD=yes BASE_DOGFOOD_REPO='https://github.com/acme/x' node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39f-switches-dogfood-invalid 0 'WARN  switches' 'BASE_DOGFOOD="yes" is read as off — only 1 turns it on' \
+  'BASE_DOGFOOD_REPO="https://github.com/acme/x" is not <owner>/<repo> — plugin_defect files no GitHub issue'
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad CD-head "HEAD moved"; fi

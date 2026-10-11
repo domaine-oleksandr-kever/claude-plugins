@@ -7,6 +7,7 @@ import type { BaseDelivery, BaseEvent } from '../../types'
 import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 import { SLIM_MISSING, SLIM_VIEW } from './session.ts'
+import { WINDOW_DAYS, recent, seen } from './dogfood/text.ts'
 
 export const COMMAND = {
   name: 'base-doctor',
@@ -165,6 +166,23 @@ async function liveRows($: $): Promise<Row[]> {
   return rows
 }
 
+/** Dogfood mode's reports of the last 7 days, the home index and this project's folder together; no row when it is off. */
+async function defectRows($: $): Promise<Row[]> {
+  if ((await $.env.get('BASE_DOGFOOD')) !== '1') return []
+  try {
+    const home = (await $.env.get('HOME'))?.trim() ?? ''
+    const index = home.startsWith('/') ? await $.fs.read(`${home.replace(/\/+$/, '')}/.claude/plugin-defects/index.md`).catch(() => '') : ''
+    const dir = `${await $.session.root()}/.claude/plugin-defects`
+    const names = (await $.fs.list(dir).catch(() => [])).filter(f => f.kind === 'file').map(f => f.name)
+    const week = recent(seen(index as string, dir, names), await $.clock.now())
+    return [week.length
+      ? { status: 'WARN', name: 'defects', detail: `${week.length} in ${WINDOW_DAYS} days, newest ${week[0]!.title} (/base-defects lists them)` }
+      : { status: 'PASS', name: 'defects', detail: `none in ${WINDOW_DAYS} days` }]
+  } catch {
+    return [{ status: 'SKIP', name: 'defects', detail: 'the reports did not answer' }]
+  }
+}
+
 async function connect($: $, server: string): Promise<Row> {
   const name = `mcp:${server}`
   const timeout = $.clock.sleep(MCP_TIMEOUT_MS).then(() => null)
@@ -271,8 +289,8 @@ export function registerDoctor(on: On): void {
   })
 
   on('command.run', { command: COMMAND.name }, async $ => {
-    const [fixed, live, mcp] = await Promise.all([staticRows($), liveRows($), mcpRows($)])
-    const rows = reconcile([...fixed, ...live, ...mcp])
+    const [fixed, live, defects, mcp] = await Promise.all([staticRows($), liveRows($), defectRows($), mcpRows($)])
+    const rows = reconcile([...fixed, ...live, ...defects, ...mcp])
     const tail = await eventTail($)
     await logDoctor($, summary(rows))
     return { text: render($.plugin.root, rows, tail) }
