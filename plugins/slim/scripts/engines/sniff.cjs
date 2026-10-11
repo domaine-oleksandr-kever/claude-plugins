@@ -4,8 +4,9 @@
  * Order (first match wins): binary (magic bytes / NUL) → none (empty) → JSON (`adf` for a bare ADF
  * doc, `figma-nodes` for a Figma REST nodes response) → figma (Figma design-context JSX markers) →
  * the guards that keep text untouched (diff, test output, template, shebang, XML → `text`) → a
- * dominant markdown fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → log
- * (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
+ * browser accessibility snapshot (`a11y`, reason `playwright` / `devtools`) → a dominant markdown
+ * fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → log (detector
+ * confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
  * must not be deduped as a log, a theme template must not be stripped as a page. Pure.
  */
 'use strict';
@@ -15,6 +16,7 @@ const { detectLog } = require('./log.cjs');
 const { detectJsx } = require('./figma.cjs');
 const { isNodesResponse } = require('./figma-nodes.cjs');
 const { parseJsonl, unwrapFence } = require('./json.cjs');
+const { detectSnapshot } = require('./a11y.cjs');
 
 const SCAN = 65536;
 
@@ -86,6 +88,9 @@ function sniffText(text, fenced) {
   if (detectJsx(text)) return { engine: 'figma', confidence: 0.95, reason: 'figma-jsx' };
   const g = guard(text);
   if (g) return { engine: 'text', confidence: 0.9, reason: g };
+  // Ahead of the fence rule: an action result carries its snapshot beside a code fence, so no fence dominates.
+  const snap = detectSnapshot(text);
+  if (snap) return { engine: 'a11y', confidence: 0.9, reason: snap };
   if (!fenced) {
     const f = unwrapFence(text);
     if (f) {

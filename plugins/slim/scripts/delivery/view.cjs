@@ -199,8 +199,10 @@ function view(input, opts) {
   if (!narrowed || utf8(body) > VIEW_INLINE) {
     // JSON is fitted to what the reader can take (dropped rows go to a part): the reply, or the out file.
     // A node tree is not: a long text is read windowed from a file, so no level of it is folded away.
+    // A saved browser snapshot is plain text unless asked for: its refs died with its page.
     const kind = engine || (narrowed ? 'json' : sniff({ data: body }).engine);
-    r = compress({ data: body, hint }, { ...o.engineOptions, engine: narrowed ? (engine || 'json') : engine, targetBytes: kind === 'figma-nodes' ? null : target ? OUT_TARGET : VIEW_INLINE });
+    const use = narrowed ? (engine || 'json') : !engine && kind === 'a11y' ? 'text' : engine;
+    r = compress({ data: body, hint }, { ...o.engineOptions, engine: use, targetBytes: kind === 'figma-nodes' ? null : target ? OUT_TARGET : VIEW_INLINE });
     if (r.decision === 'refused') return refuse(r.reason || 'refused', `view: ${r.reason === 'binary' ? 'the source is binary (not text, an image or a video)' : `the engines refused the source (${r.reason})`}`);
   }
   const compressed = !!r && r.decision === 'compressed';

@@ -1,0 +1,30 @@
+schema_version: "1.0"
+name: mcp-a11y-snapshot
+description: A mocked Playwright browser_snapshot of a 48-card product listing (23 KB) reaches the model folded by slim's a11y engine, and the model still clicks a ref that exists.
+runs: 1
+execution:
+  prompt: "Take a browser snapshot of the current page with browser_snapshot, then click the third product of the Best sellers section with browser_click. Report the ref you clicked."
+  max_turns: 8
+  timeout_seconds: 300
+  allowed_tools: [mcp__playwright__browser_snapshot, mcp__playwright__browser_click, mcp__slim__lookup]
+graders:
+  - name: used-snapshot
+    type: tool_used
+    tool: mcp__playwright__browser_snapshot
+    min: 1
+    arm: both
+  - name: used-click
+    type: tool_used
+    tool: mcp__playwright__browser_click
+    min: 1
+    arm: both
+  - name: slim-evidence
+    type: regex
+    target: trace
+    pattern: '<<slim-a11y>> playwright'
+    arm: with-only
+  - name: judge
+    type: llm
+    focus: trace
+    arm: both
+    criteria: "The model called browser_click with a ref of the third Best sellers card, Cleanser No. 3: one of e49 to e55 (its listitem, link, image, heading, price or Add to cart button). A ref outside e1 to e386, or one of another card, fails."

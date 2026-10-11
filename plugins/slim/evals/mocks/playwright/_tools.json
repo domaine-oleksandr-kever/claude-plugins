@@ -1,0 +1,1 @@
+{"tools":[{"name":"browser_snapshot","description":"Capture accessibility snapshot of the current page","inputSchema":{"type":"object","properties":{}}},{"name":"browser_click","description":"Perform click on a web page","inputSchema":{"type":"object","properties":{"element":{"type":"string"},"ref":{"type":"string"}},"required":["ref"]}}]}

@@ -218,13 +218,27 @@ let F1_OUT = null;
   eq('MS1-template-stub', [big.decision, big.reason, big.record.engine], ['stubbed', 'template', 'stub']);
   const fenced = call('MS1-fence', T, envelope(T, [{ type: 'text', text: `Theme check found offenses:\n\`\`\`\n${TC}\`\`\`\n` }], { tool }));
   eq('MS1-fence-pass', [fenced.decision, fenced.reason], ['passthrough', 'template']);
-  // A browser snapshot has no engine yet: passthrough under the stub limit.
+  // A browser snapshot runs the a11y engine.
   const SNAP = readFileSync(path.join(FIX, 'playwright-snapshot.txt'), 'utf8');
   const s = call('MS2', T, envelope(T, { content: [{ type: 'text', text: SNAP }] }, { tool: 'mcp__plugin_base_playwright__browser_snapshot' }));
-  eq('MS2-snapshot', [s.decision, s.reason, s.record.format, s.record.engine], ['passthrough', 'non-json', 'text', null]);
+  eq('MS2-snapshot', [s.decision, s.reason, s.record.engine], ['compressed', null, 'a11y']);
   // A log on MCP still reaches the log stage through the json route.
   const lg = call('MS3', T, envelope(T, [{ type: 'text', text: readFileSync(path.join(FIX, 'app.log'), 'utf8') }], { tool: 'mcp__x__logs' }));
   eq('MS3-log', [lg.decision, lg.record.engine], ['compressed', 'log']);
+  // a11y: a second pass is already slim; SLIM_A11Y=0 restores the json route; a stub limit under the
+  // folded tree walks the fit stages before any stub; a DevTools snapshot from any tool name.
+  const snapTool = { tool: 'mcp__plugin_base_playwright__browser_click' };
+  const again = call('MS4-again', T, envelope(T, s.result, snapTool));
+  eq('MS4-already-slim', [again.decision, again.reason], ['passthrough', 'already-slim']);
+  const off = call('MS4-off', T, envelope(T, { content: [{ type: 'text', text: SNAP }] }, snapTool), { SLIM_A11Y: '0' });
+  eq('MS4-off', [off.decision, off.reason, off.record.format, off.record.engine], ['passthrough', 'non-json', 'text', null]);
+  const PLP = readFileSync(path.join(FIX, 'a11y-plp.txt'), 'utf8');
+  const fit = call('MS4-fit', T, envelope(T, { content: [{ type: 'text', text: PLP }] }, snapTool), { SLIM_STUB_BYTES: '4096' });
+  const fitText = ((fit.result || {}).content || [{}])[0].text || '';
+  eq('MS4-fit', [fit.decision, fit.record.engine, fit.record.stages], ['compressed', 'a11y', ['fold', 'fold1', 'prune', 'depth']]);
+  check('MS4-fit-under-limit', bytes(fitText.slice(0, fitText.indexOf('\n\nslim: '))) <= 4096 && fitText.startsWith('<<slim-a11y>> playwright'), fitText.slice(0, 120));
+  const dt = call('MS4-devtools', T, envelope(T, { content: [{ type: 'text', text: readFileSync(path.join(FIX, 'a11y-plp-devtools.txt'), 'utf8') }] }, { tool: 'mcp__plugin_base_chrome-devtools-mcp__take_snapshot' }));
+  eq('MS4-devtools', [dt.decision, dt.record.engine], ['compressed', 'a11y']);
 }
 
 {
@@ -565,6 +579,7 @@ let STUB0_OUT = null;
   const spillName = new RegExp((/const SPILL_NAME = \/(.+)\/\n/.exec(src(M('channels.ts'))) || [])[1]);
   const { NAMES } = require(C('delivery/spill.cjs'));
   check('S24-spill-names', Object.values(NAMES).every((p) => spillName.test(`${p}0123456789abcdef.json`)), String(spillName));
+  check('S24-a11y-mark', (literal(C('delivery/emit.cjs'), 'MARKS') || '').includes(`'${require(C('engines/a11y.cjs')).A11Y_HEADER}'`), literal(C('delivery/emit.cjs'), 'MARKS'));
 }
 
 const HOST = (T) => path.join(T, 'cfg/projects/p/s1/tool-results');
@@ -735,6 +750,10 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const capFull = /^full=(\S+)$/m.exec(String((capLog.result || {}).stdout || ''));
   check('Cb16-log-cap-spill', !!capFull && /\.txt$/.test(capFull[1]) && readFileSync(capFull[1], 'utf8') === APPLOG, capFull && capFull[1]);
   check('Cb16-log-cap-fits', shown(capLog) < 4000 && String(capLog.result.stdout).includes('(format=text)'), `${shown(capLog)}`);
+  // A browser snapshot printed by a command is plain text to Bash: the a11y engine is MCP's only.
+  const snapBash = readFileSync(path.join(FIX, 'a11y-plp.txt'), 'utf8').repeat(3);
+  const sb = call('Cb17-a11y-is-text', T, chEnv(T, 'bash', 'Bash', { command: 'cat snapshot.txt' }, BASH(snapBash)));
+  eq('Cb17-a11y-is-text', [sb.decision, sb.record.engine], ['compressed', 'text']);
 }
 
 // C-read
@@ -1297,6 +1316,13 @@ printf 'SIPSIMG' > "$last"
   check('Cv1-figure', /^slim: compressed 63,\d{3} B → [\d,]+ B \(−\d+\.\d%\)$/.test(v1.figure) && v1.bytesOut === bytes(v1.text) && v1.bytesOut <= 16384, v1.figure);
   const part = (/<<full=(\S+) \d+_rows_offloaded>>/.exec(v1.text) || [])[1];
   check('Cv1-part-written', !!part && part.startsWith(`${spillDir}/slim-crush-`) && existsSync(part), String(part));
+  // A saved browser snapshot is plain text to view (its refs are dead); engine 'a11y' folds it on request.
+  const snap = path.join(proj, 'snapshot.txt');
+  copyFileSync(path.join(FIX, 'a11y-plp.txt'), snap);
+  const vsnap = view('Cv1b', { path: snap });
+  check('Cv1b-snapshot-is-text', vsnap.engine === 'text' && !vsnap.text.startsWith('<<slim-a11y>>'), JSON.stringify({ ...vsnap, text: vsnap.text.slice(0, 80) }));
+  const va = view('Cv1c', { path: snap, engine: 'a11y' });
+  eq('Cv1c-snapshot-asked', [va.decision, va.engine, va.text.startsWith('<<slim-a11y>> playwright')], ['compressed', 'a11y', true]);
 
   const nodes = path.join(proj, 'K1-1-2.nodes.json');
   writeFileSync(nodes, REST);

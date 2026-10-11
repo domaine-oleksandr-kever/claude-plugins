@@ -34,8 +34,9 @@ const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const commandWords = (cmd) => String(cmd || '').split(/[\s'"|;&<>()=]+/).filter(Boolean);
 
 // The engine a channel lets run on a sniffed payload: html and log need a command that fetches or
-// reads a log, everything a channel does not admit is treated as plain text. A Figma REST nodes
-// response goes wherever JSON goes. MCP: null = not compressed (plain text, guarded text, HTML).
+// reads a log, a browser snapshot is MCP's only, everything a channel does not admit is treated as
+// plain text. A Figma REST nodes response goes wherever JSON goes. MCP: null = not compressed
+// (plain text, guarded text, HTML).
 function admit(channel, engine, command) {
   switch (channel) {
     case 'mcp':
@@ -45,6 +46,7 @@ function admit(channel, engine, command) {
     case 'bash':
       if (engine === 'html') return FETCH_CMD.test(command) ? 'html' : 'text';
       if (engine === 'log') return LOG_CMD.test(command) ? 'log' : 'text';
+      if (engine === 'a11y') return 'text';
       return engine;
     case 'read':
       return ['json', 'jsonl', 'figma-nodes', 'log'].includes(engine) ? engine : null;

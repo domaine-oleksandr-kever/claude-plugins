@@ -1,0 +1,58 @@
+### Page
+- Page URL: https://docs.example.invalid/apps/theme-extensions
+- Page Title: Theme app extensions – Docs
+### Snapshot
+```yaml
+- generic [ref=e1]:
+  - navigation "Docs" [ref=e2]:
+    - link "Overview" [ref=e3] [cursor=pointer]:
+      - /url: /apps/theme-extensions/overview
+    - link "Getting started" [ref=e4] [cursor=pointer]:
+      - /url: /apps/theme-extensions/getting-started
+    - link "App blocks" [ref=e5] [cursor=pointer]:
+      - /url: /apps/theme-extensions/app-blocks
+    - link "App embeds" [ref=e6] [cursor=pointer]:
+      - /url: /apps/theme-extensions/app-embeds
+    - link "Settings" [ref=e7] [cursor=pointer]:
+      - /url: /apps/theme-extensions/settings
+    - link "Assets" [ref=e8] [cursor=pointer]:
+      - /url: /apps/theme-extensions/assets
+  - main [ref=e9]:
+    - heading "Theme app extensions" [level=1] [ref=e10]
+    - heading "Part 1" [level=2] [ref=e11]
+    - paragraph [ref=e12]: Section 1, paragraph 1: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e13]: Section 1, paragraph 2: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e14]: Section 1, paragraph 3: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e15]: Section 1, paragraph 4: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - code [ref=e16]: "shopify app generate extension --template theme_app_extension --name block-1"
+    - heading "Part 2" [level=2] [ref=e17]
+    - paragraph [ref=e18]: Section 2, paragraph 1: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e19]: Section 2, paragraph 2: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e20]: Section 2, paragraph 3: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e21]: Section 2, paragraph 4: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - code [ref=e22]: "shopify app generate extension --template theme_app_extension --name block-2"
+    - heading "Part 3" [level=2] [ref=e23]
+    - paragraph [ref=e24]: Section 3, paragraph 1: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e25]: Section 3, paragraph 2: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e26]: Section 3, paragraph 3: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e27]: Section 3, paragraph 4: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - code [ref=e28]: "shopify app generate extension --template theme_app_extension --name block-3"
+    - heading "Part 4" [level=2] [ref=e29]
+    - paragraph [ref=e30]: Section 4, paragraph 1: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e31]: Section 4, paragraph 2: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e32]: Section 4, paragraph 3: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e33]: Section 4, paragraph 4: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - code [ref=e34]: "shopify app generate extension --template theme_app_extension --name block-4"
+    - heading "Part 5" [level=2] [ref=e35]
+    - paragraph [ref=e36]: Section 5, paragraph 1: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e37]: Section 5, paragraph 2: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e38]: Section 5, paragraph 3: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e39]: Section 5, paragraph 4: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - code [ref=e40]: "shopify app generate extension --template theme_app_extension --name block-5"
+    - heading "Part 6" [level=2] [ref=e41]
+    - paragraph [ref=e42]: Section 6, paragraph 1: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e43]: Section 6, paragraph 2: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e44]: Section 6, paragraph 3: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - paragraph [ref=e45]: Section 6, paragraph 4: a theme app extension renders inside the merchant's theme through app blocks and app embed blocks. Each block declares its settings in a schema, which the theme editor turns into controls; the values reach the block's Liquid as block.settings. Keep assets small, because the storefront loads them on every page.
+    - code [ref=e46]: "shopify app generate extension --template theme_app_extension --name block-6"
+```

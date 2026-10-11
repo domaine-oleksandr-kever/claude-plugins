@@ -1,0 +1,440 @@
+# take_snapshot response
+## Latest page snapshot
+uid=1_0 RootWebArea "All products – Example Store" url="https://shop.example.invalid/collections/all"
+  uid=1_1 banner
+    uid=1_2 link "Skip to content" url="https://shop.example.invalid/collections/all#MainContent"
+    uid=1_3 navigation "Main"
+      uid=1_4 list
+        uid=1_5 listitem
+          uid=1_6 link "Shop" url="https://shop.example.invalid/collections/shop"
+            uid=1_7 StaticText "Shop"
+        uid=1_8 listitem
+          uid=1_9 link "Skincare" url="https://shop.example.invalid/collections/skincare"
+            uid=1_10 StaticText "Skincare"
+        uid=1_11 listitem
+          uid=1_12 link "Makeup" url="https://shop.example.invalid/collections/makeup"
+            uid=1_13 StaticText "Makeup"
+        uid=1_14 listitem
+          uid=1_15 link "Hair" url="https://shop.example.invalid/collections/hair"
+            uid=1_16 StaticText "Hair"
+        uid=1_17 listitem
+          uid=1_18 link "Body" url="https://shop.example.invalid/collections/body"
+            uid=1_19 StaticText "Body"
+        uid=1_20 listitem
+          uid=1_21 link "Gifts" url="https://shop.example.invalid/collections/gifts"
+            uid=1_22 StaticText "Gifts"
+        uid=1_23 listitem
+          uid=1_24 link "Journal" url="https://shop.example.invalid/collections/journal"
+            uid=1_25 StaticText "Journal"
+        uid=1_26 listitem
+          uid=1_27 link "About" url="https://shop.example.invalid/collections/about"
+            uid=1_28 StaticText "About"
+    uid=1_29 button "Search"
+  uid=1_30 main
+    uid=1_31 heading "All products" level="1"
+    uid=1_32 group "Filters"
+      uid=1_33 checkbox "In stock" checked
+      uid=1_34 checkbox "Vegan"
+      uid=1_35 checkbox "Fragrance free"
+      uid=1_36 checkbox "Refillable" checked
+      uid=1_37 combobox "Sort by" haspopup="listbox" value="Featured"
+    uid=1_38 heading "Best sellers" level="2"
+    uid=1_39 list
+      uid=1_40 listitem
+        uid=1_41 link "Serum No. 1" url="https://shop.example.invalid/products/serum-no-1"
+          uid=1_42 image "Serum No. 1" url="https://shop.example.invalid/cdn/shop/files/serum-no-1.jpg"
+        uid=1_43 image
+        uid=1_44 heading "Serum No. 1" level="3"
+          uid=1_45 StaticText "Serum No. 1"
+        uid=1_46 StaticText "Regular price $18.00"
+        uid=1_47 button "Add to cart — Serum No. 1"
+      uid=1_48 listitem
+        uid=1_49 link "Cream No. 2" url="https://shop.example.invalid/products/cream-no-2"
+          uid=1_50 image "Cream No. 2" url="https://shop.example.invalid/cdn/shop/files/cream-no-2.jpg"
+        uid=1_51 image
+        uid=1_52 heading "Cream No. 2" level="3"
+          uid=1_53 StaticText "Cream No. 2"
+        uid=1_54 StaticText "Regular price $25.00"
+        uid=1_55 button "Add to cart — Cream No. 2"
+      uid=1_56 listitem
+        uid=1_57 link "Cleanser No. 3" url="https://shop.example.invalid/products/cleanser-no-3"
+          uid=1_58 image "Cleanser No. 3" url="https://shop.example.invalid/cdn/shop/files/cleanser-no-3.jpg"
+        uid=1_59 image
+        uid=1_60 heading "Cleanser No. 3" level="3"
+          uid=1_61 StaticText "Cleanser No. 3"
+        uid=1_62 StaticText "Regular price $32.00"
+        uid=1_63 button "Add to cart — Cleanser No. 3"
+      uid=1_64 listitem
+        uid=1_65 link "Toner No. 4" url="https://shop.example.invalid/products/toner-no-4"
+          uid=1_66 image "Toner No. 4" url="https://shop.example.invalid/cdn/shop/files/toner-no-4.jpg"
+        uid=1_67 image
+        uid=1_68 heading "Toner No. 4" level="3"
+          uid=1_69 StaticText "Toner No. 4"
+        uid=1_70 StaticText "Regular price $39.00"
+        uid=1_71 button "Add to cart — Toner No. 4"
+      uid=1_72 listitem
+        uid=1_73 link "Mask No. 5" url="https://shop.example.invalid/products/mask-no-5"
+          uid=1_74 image "Mask No. 5" url="https://shop.example.invalid/cdn/shop/files/mask-no-5.jpg"
+        uid=1_75 image
+        uid=1_76 heading "Mask No. 5" level="3"
+          uid=1_77 StaticText "Mask No. 5"
+        uid=1_78 StaticText "Regular price $46.00"
+        uid=1_79 button "Add to cart — Mask No. 5"
+      uid=1_80 listitem
+        uid=1_81 link "Balm No. 6" url="https://shop.example.invalid/products/balm-no-6"
+          uid=1_82 image "Balm No. 6" url="https://shop.example.invalid/cdn/shop/files/balm-no-6.jpg"
+        uid=1_83 image
+        uid=1_84 heading "Balm No. 6" level="3"
+          uid=1_85 StaticText "Balm No. 6"
+        uid=1_86 StaticText "Regular price $53.00"
+        uid=1_87 button "Add to cart — Balm No. 6"
+      uid=1_88 listitem
+        uid=1_89 link "Oil No. 7" url="https://shop.example.invalid/products/oil-no-7"
+          uid=1_90 image "Oil No. 7" url="https://shop.example.invalid/cdn/shop/files/oil-no-7.jpg"
+        uid=1_91 image
+        uid=1_92 heading "Oil No. 7" level="3"
+          uid=1_93 StaticText "Oil No. 7"
+        uid=1_94 StaticText "Regular price $60.00"
+        uid=1_95 button "Add to cart — Oil No. 7"
+      uid=1_96 listitem
+        uid=1_97 link "Mist No. 8" url="https://shop.example.invalid/products/mist-no-8"
+          uid=1_98 image "Mist No. 8" url="https://shop.example.invalid/cdn/shop/files/mist-no-8.jpg"
+        uid=1_99 image
+        uid=1_100 heading "Mist No. 8" level="3"
+          uid=1_101 StaticText "Mist No. 8"
+        uid=1_102 StaticText "Regular price $67.00"
+        uid=1_103 button "Add to cart — Mist No. 8"
+      uid=1_104 listitem
+        uid=1_105 link "Serum No. 9" url="https://shop.example.invalid/products/serum-no-9"
+          uid=1_106 image "Serum No. 9" url="https://shop.example.invalid/cdn/shop/files/serum-no-9.jpg"
+        uid=1_107 image
+        uid=1_108 heading "Serum No. 9" level="3"
+          uid=1_109 StaticText "Serum No. 9"
+        uid=1_110 StaticText "Regular price $74.00"
+        uid=1_111 button "Add to cart — Serum No. 9"
+      uid=1_112 listitem
+        uid=1_113 link "Cream No. 10" url="https://shop.example.invalid/products/cream-no-10"
+          uid=1_114 image "Cream No. 10" url="https://shop.example.invalid/cdn/shop/files/cream-no-10.jpg"
+        uid=1_115 image
+        uid=1_116 heading "Cream No. 10" level="3"
+          uid=1_117 StaticText "Cream No. 10"
+        uid=1_118 StaticText "Regular price $81.00"
+        uid=1_119 StaticText "Sold out"
+        uid=1_120 button "Add to cart — Cream No. 10" disabled
+      uid=1_121 listitem
+        uid=1_122 link "Cleanser No. 11" url="https://shop.example.invalid/products/cleanser-no-11"
+          uid=1_123 image "Cleanser No. 11" url="https://shop.example.invalid/cdn/shop/files/cleanser-no-11.jpg"
+        uid=1_124 image
+        uid=1_125 heading "Cleanser No. 11" level="3"
+          uid=1_126 StaticText "Cleanser No. 11"
+        uid=1_127 StaticText "Regular price $88.00"
+        uid=1_128 button "Add to cart — Cleanser No. 11"
+      uid=1_129 listitem
+        uid=1_130 link "Toner No. 12" url="https://shop.example.invalid/products/toner-no-12"
+          uid=1_131 image "Toner No. 12" url="https://shop.example.invalid/cdn/shop/files/toner-no-12.jpg"
+        uid=1_132 image
+        uid=1_133 heading "Toner No. 12" level="3"
+          uid=1_134 StaticText "Toner No. 12"
+        uid=1_135 StaticText "Regular price $95.00"
+        uid=1_136 button "Add to cart — Toner No. 12"
+      uid=1_137 listitem
+        uid=1_138 link "Mask No. 13" url="https://shop.example.invalid/products/mask-no-13"
+          uid=1_139 image "Mask No. 13" url="https://shop.example.invalid/cdn/shop/files/mask-no-13.jpg"
+        uid=1_140 image
+        uid=1_141 heading "Mask No. 13" level="3"
+          uid=1_142 StaticText "Mask No. 13"
+        uid=1_143 StaticText "Regular price $102.00"
+        uid=1_144 button "Add to cart — Mask No. 13"
+      uid=1_145 listitem
+        uid=1_146 link "Balm No. 14" url="https://shop.example.invalid/products/balm-no-14"
+          uid=1_147 image "Balm No. 14" url="https://shop.example.invalid/cdn/shop/files/balm-no-14.jpg"
+        uid=1_148 image
+        uid=1_149 heading "Balm No. 14" level="3"
+          uid=1_150 StaticText "Balm No. 14"
+        uid=1_151 StaticText "Regular price $19.00"
+        uid=1_152 button "Add to cart — Balm No. 14"
+      uid=1_153 listitem
+        uid=1_154 link "Oil No. 15" url="https://shop.example.invalid/products/oil-no-15"
+          uid=1_155 image "Oil No. 15" url="https://shop.example.invalid/cdn/shop/files/oil-no-15.jpg"
+        uid=1_156 image
+        uid=1_157 heading "Oil No. 15" level="3"
+          uid=1_158 StaticText "Oil No. 15"
+        uid=1_159 StaticText "Regular price $26.00"
+        uid=1_160 button "Add to cart — Oil No. 15"
+      uid=1_161 listitem
+        uid=1_162 link "Mist No. 16" url="https://shop.example.invalid/products/mist-no-16"
+          uid=1_163 image "Mist No. 16" url="https://shop.example.invalid/cdn/shop/files/mist-no-16.jpg"
+        uid=1_164 image
+        uid=1_165 heading "Mist No. 16" level="3"
+          uid=1_166 StaticText "Mist No. 16"
+        uid=1_167 StaticText "Regular price $33.00"
+        uid=1_168 button "Add to cart — Mist No. 16"
+    uid=1_169 heading "New in" level="2"
+    uid=1_170 list
+      uid=1_171 listitem
+        uid=1_172 link "Toner No. 17" url="https://shop.example.invalid/products/toner-no-17"
+          uid=1_173 image "Toner No. 17" url="https://shop.example.invalid/cdn/shop/files/toner-no-17.jpg"
+        uid=1_174 image
+        uid=1_175 heading "Toner No. 17" level="3"
+          uid=1_176 StaticText "Toner No. 17"
+        uid=1_177 StaticText "Regular price $40.00"
+        uid=1_178 button "Add to cart — Toner No. 17"
+      uid=1_179 listitem
+        uid=1_180 link "Mask No. 18" url="https://shop.example.invalid/products/mask-no-18"
+          uid=1_181 image "Mask No. 18" url="https://shop.example.invalid/cdn/shop/files/mask-no-18.jpg"
+        uid=1_182 image
+        uid=1_183 heading "Mask No. 18" level="3"
+          uid=1_184 StaticText "Mask No. 18"
+        uid=1_185 StaticText "Regular price $47.00"
+        uid=1_186 button "Add to cart — Mask No. 18"
+      uid=1_187 listitem
+        uid=1_188 link "Balm No. 19" url="https://shop.example.invalid/products/balm-no-19"
+          uid=1_189 image "Balm No. 19" url="https://shop.example.invalid/cdn/shop/files/balm-no-19.jpg"
+        uid=1_190 image
+        uid=1_191 heading "Balm No. 19" level="3"
+          uid=1_192 StaticText "Balm No. 19"
+        uid=1_193 StaticText "Regular price $54.00"
+        uid=1_194 button "Add to cart — Balm No. 19"
+      uid=1_195 listitem
+        uid=1_196 link "Oil No. 20" url="https://shop.example.invalid/products/oil-no-20"
+          uid=1_197 image "Oil No. 20" url="https://shop.example.invalid/cdn/shop/files/oil-no-20.jpg"
+        uid=1_198 image
+        uid=1_199 heading "Oil No. 20" level="3"
+          uid=1_200 StaticText "Oil No. 20"
+        uid=1_201 StaticText "Regular price $61.00"
+        uid=1_202 button "Add to cart — Oil No. 20"
+      uid=1_203 listitem
+        uid=1_204 link "Mist No. 21" url="https://shop.example.invalid/products/mist-no-21"
+          uid=1_205 image "Mist No. 21" url="https://shop.example.invalid/cdn/shop/files/mist-no-21.jpg"
+        uid=1_206 image
+        uid=1_207 heading "Mist No. 21" level="3"
+          uid=1_208 StaticText "Mist No. 21"
+        uid=1_209 StaticText "Regular price $68.00"
+        uid=1_210 button "Add to cart — Mist No. 21"
+      uid=1_211 listitem
+        uid=1_212 link "Serum No. 22" url="https://shop.example.invalid/products/serum-no-22"
+          uid=1_213 image "Serum No. 22" url="https://shop.example.invalid/cdn/shop/files/serum-no-22.jpg"
+        uid=1_214 image
+        uid=1_215 heading "Serum No. 22" level="3"
+          uid=1_216 StaticText "Serum No. 22"
+        uid=1_217 StaticText "Regular price $75.00"
+        uid=1_218 button "Add to cart — Serum No. 22"
+      uid=1_219 listitem
+        uid=1_220 link "Cream No. 23" url="https://shop.example.invalid/products/cream-no-23"
+          uid=1_221 image "Cream No. 23" url="https://shop.example.invalid/cdn/shop/files/cream-no-23.jpg"
+        uid=1_222 image
+        uid=1_223 heading "Cream No. 23" level="3"
+          uid=1_224 StaticText "Cream No. 23"
+        uid=1_225 StaticText "Regular price $82.00"
+        uid=1_226 button "Add to cart — Cream No. 23"
+      uid=1_227 listitem
+        uid=1_228 link "Cleanser No. 24" url="https://shop.example.invalid/products/cleanser-no-24"
+          uid=1_229 image "Cleanser No. 24" url="https://shop.example.invalid/cdn/shop/files/cleanser-no-24.jpg"
+        uid=1_230 image
+        uid=1_231 heading "Cleanser No. 24" level="3"
+          uid=1_232 StaticText "Cleanser No. 24"
+        uid=1_233 StaticText "Regular price $89.00"
+        uid=1_234 button "Add to cart — Cleanser No. 24"
+      uid=1_235 listitem
+        uid=1_236 link "Toner No. 25" url="https://shop.example.invalid/products/toner-no-25"
+          uid=1_237 image "Toner No. 25" url="https://shop.example.invalid/cdn/shop/files/toner-no-25.jpg"
+        uid=1_238 image
+        uid=1_239 heading "Toner No. 25" level="3"
+          uid=1_240 StaticText "Toner No. 25"
+        uid=1_241 StaticText "Regular price $96.00"
+        uid=1_242 button "Add to cart — Toner No. 25"
+      uid=1_243 listitem
+        uid=1_244 link "Mask No. 26" url="https://shop.example.invalid/products/mask-no-26"
+          uid=1_245 image "Mask No. 26" url="https://shop.example.invalid/cdn/shop/files/mask-no-26.jpg"
+        uid=1_246 image
+        uid=1_247 heading "Mask No. 26" level="3"
+          uid=1_248 StaticText "Mask No. 26"
+        uid=1_249 StaticText "Regular price $103.00"
+        uid=1_250 StaticText "Sold out"
+        uid=1_251 button "Add to cart — Mask No. 26" disabled
+      uid=1_252 listitem
+        uid=1_253 link "Balm No. 27" url="https://shop.example.invalid/products/balm-no-27"
+          uid=1_254 image "Balm No. 27" url="https://shop.example.invalid/cdn/shop/files/balm-no-27.jpg"
+        uid=1_255 image
+        uid=1_256 heading "Balm No. 27" level="3"
+          uid=1_257 StaticText "Balm No. 27"
+        uid=1_258 StaticText "Regular price $20.00"
+        uid=1_259 button "Add to cart — Balm No. 27"
+      uid=1_260 listitem
+        uid=1_261 link "Oil No. 28" url="https://shop.example.invalid/products/oil-no-28"
+          uid=1_262 image "Oil No. 28" url="https://shop.example.invalid/cdn/shop/files/oil-no-28.jpg"
+        uid=1_263 image
+        uid=1_264 heading "Oil No. 28" level="3"
+          uid=1_265 StaticText "Oil No. 28"
+        uid=1_266 StaticText "Regular price $27.00"
+        uid=1_267 button "Add to cart — Oil No. 28"
+      uid=1_268 listitem
+        uid=1_269 link "Mist No. 29" url="https://shop.example.invalid/products/mist-no-29"
+          uid=1_270 image "Mist No. 29" url="https://shop.example.invalid/cdn/shop/files/mist-no-29.jpg"
+        uid=1_271 image
+        uid=1_272 heading "Mist No. 29" level="3"
+          uid=1_273 StaticText "Mist No. 29"
+        uid=1_274 StaticText "Regular price $34.00"
+        uid=1_275 button "Add to cart — Mist No. 29"
+      uid=1_276 listitem
+        uid=1_277 link "Serum No. 30" url="https://shop.example.invalid/products/serum-no-30"
+          uid=1_278 image "Serum No. 30" url="https://shop.example.invalid/cdn/shop/files/serum-no-30.jpg"
+        uid=1_279 image
+        uid=1_280 heading "Serum No. 30" level="3"
+          uid=1_281 StaticText "Serum No. 30"
+        uid=1_282 StaticText "Regular price $41.00"
+        uid=1_283 button "Add to cart — Serum No. 30"
+      uid=1_284 listitem
+        uid=1_285 link "Cream No. 31" url="https://shop.example.invalid/products/cream-no-31"
+          uid=1_286 image "Cream No. 31" url="https://shop.example.invalid/cdn/shop/files/cream-no-31.jpg"
+        uid=1_287 image
+        uid=1_288 heading "Cream No. 31" level="3"
+          uid=1_289 StaticText "Cream No. 31"
+        uid=1_290 StaticText "Regular price $48.00"
+        uid=1_291 button "Add to cart — Cream No. 31"
+      uid=1_292 listitem
+        uid=1_293 link "Cleanser No. 32" url="https://shop.example.invalid/products/cleanser-no-32"
+          uid=1_294 image "Cleanser No. 32" url="https://shop.example.invalid/cdn/shop/files/cleanser-no-32.jpg"
+        uid=1_295 image
+        uid=1_296 heading "Cleanser No. 32" level="3"
+          uid=1_297 StaticText "Cleanser No. 32"
+        uid=1_298 StaticText "Regular price $55.00"
+        uid=1_299 button "Add to cart — Cleanser No. 32"
+    uid=1_300 heading "Sale" level="2"
+    uid=1_301 list
+      uid=1_302 listitem
+        uid=1_303 link "Oil No. 33" url="https://shop.example.invalid/products/oil-no-33"
+          uid=1_304 image "Oil No. 33" url="https://shop.example.invalid/cdn/shop/files/oil-no-33.jpg"
+        uid=1_305 image
+        uid=1_306 heading "Oil No. 33" level="3"
+          uid=1_307 StaticText "Oil No. 33"
+        uid=1_308 StaticText "Regular price $62.00"
+        uid=1_309 button "Add to cart — Oil No. 33"
+      uid=1_310 listitem
+        uid=1_311 link "Mist No. 34" url="https://shop.example.invalid/products/mist-no-34"
+          uid=1_312 image "Mist No. 34" url="https://shop.example.invalid/cdn/shop/files/mist-no-34.jpg"
+        uid=1_313 image
+        uid=1_314 heading "Mist No. 34" level="3"
+          uid=1_315 StaticText "Mist No. 34"
+        uid=1_316 StaticText "Regular price $69.00"
+        uid=1_317 button "Add to cart — Mist No. 34"
+      uid=1_318 listitem
+        uid=1_319 link "Serum No. 35" url="https://shop.example.invalid/products/serum-no-35"
+          uid=1_320 image "Serum No. 35" url="https://shop.example.invalid/cdn/shop/files/serum-no-35.jpg"
+        uid=1_321 image
+        uid=1_322 heading "Serum No. 35" level="3"
+          uid=1_323 StaticText "Serum No. 35"
+        uid=1_324 StaticText "Regular price $76.00"
+        uid=1_325 button "Add to cart — Serum No. 35"
+      uid=1_326 listitem
+        uid=1_327 link "Cream No. 36" url="https://shop.example.invalid/products/cream-no-36"
+          uid=1_328 image "Cream No. 36" url="https://shop.example.invalid/cdn/shop/files/cream-no-36.jpg"
+        uid=1_329 image
+        uid=1_330 heading "Cream No. 36" level="3"
+          uid=1_331 StaticText "Cream No. 36"
+        uid=1_332 StaticText "Regular price $83.00"
+        uid=1_333 button "Add to cart — Cream No. 36"
+      uid=1_334 listitem
+        uid=1_335 link "Cleanser No. 37" url="https://shop.example.invalid/products/cleanser-no-37"
+          uid=1_336 image "Cleanser No. 37" url="https://shop.example.invalid/cdn/shop/files/cleanser-no-37.jpg"
+        uid=1_337 image
+        uid=1_338 heading "Cleanser No. 37" level="3"
+          uid=1_339 StaticText "Cleanser No. 37"
+        uid=1_340 StaticText "Regular price $90.00"
+        uid=1_341 button "Add to cart — Cleanser No. 37"
+      uid=1_342 listitem
+        uid=1_343 link "Toner No. 38" url="https://shop.example.invalid/products/toner-no-38"
+          uid=1_344 image "Toner No. 38" url="https://shop.example.invalid/cdn/shop/files/toner-no-38.jpg"
+        uid=1_345 image
+        uid=1_346 heading "Toner No. 38" level="3"
+          uid=1_347 StaticText "Toner No. 38"
+        uid=1_348 StaticText "Regular price $97.00"
+        uid=1_349 button "Add to cart — Toner No. 38"
+      uid=1_350 listitem
+        uid=1_351 link "Mask No. 39" url="https://shop.example.invalid/products/mask-no-39"
+          uid=1_352 image "Mask No. 39" url="https://shop.example.invalid/cdn/shop/files/mask-no-39.jpg"
+        uid=1_353 image
+        uid=1_354 heading "Mask No. 39" level="3"
+          uid=1_355 StaticText "Mask No. 39"
+        uid=1_356 StaticText "Regular price $104.00"
+        uid=1_357 button "Add to cart — Mask No. 39"
+      uid=1_358 listitem
+        uid=1_359 link "Balm No. 40" url="https://shop.example.invalid/products/balm-no-40"
+          uid=1_360 image "Balm No. 40" url="https://shop.example.invalid/cdn/shop/files/balm-no-40.jpg"
+        uid=1_361 image
+        uid=1_362 heading "Balm No. 40" level="3"
+          uid=1_363 StaticText "Balm No. 40"
+        uid=1_364 StaticText "Regular price $21.00"
+        uid=1_365 button "Add to cart — Balm No. 40"
+      uid=1_366 listitem
+        uid=1_367 link "Oil No. 41" url="https://shop.example.invalid/products/oil-no-41"
+          uid=1_368 image "Oil No. 41" url="https://shop.example.invalid/cdn/shop/files/oil-no-41.jpg"
+        uid=1_369 image
+        uid=1_370 heading "Oil No. 41" level="3"
+          uid=1_371 StaticText "Oil No. 41"
+        uid=1_372 StaticText "Regular price $28.00"
+        uid=1_373 button "Add to cart — Oil No. 41"
+      uid=1_374 listitem
+        uid=1_375 link "Mist No. 42" url="https://shop.example.invalid/products/mist-no-42"
+          uid=1_376 image "Mist No. 42" url="https://shop.example.invalid/cdn/shop/files/mist-no-42.jpg"
+        uid=1_377 image
+        uid=1_378 heading "Mist No. 42" level="3"
+          uid=1_379 StaticText "Mist No. 42"
+        uid=1_380 StaticText "Regular price $35.00"
+        uid=1_381 StaticText "Sold out"
+        uid=1_382 button "Add to cart — Mist No. 42" disabled
+      uid=1_383 listitem
+        uid=1_384 link "Serum No. 43" url="https://shop.example.invalid/products/serum-no-43"
+          uid=1_385 image "Serum No. 43" url="https://shop.example.invalid/cdn/shop/files/serum-no-43.jpg"
+        uid=1_386 image
+        uid=1_387 heading "Serum No. 43" level="3"
+          uid=1_388 StaticText "Serum No. 43"
+        uid=1_389 StaticText "Regular price $42.00"
+        uid=1_390 button "Add to cart — Serum No. 43"
+      uid=1_391 listitem
+        uid=1_392 link "Cream No. 44" url="https://shop.example.invalid/products/cream-no-44"
+          uid=1_393 image "Cream No. 44" url="https://shop.example.invalid/cdn/shop/files/cream-no-44.jpg"
+        uid=1_394 image
+        uid=1_395 heading "Cream No. 44" level="3"
+          uid=1_396 StaticText "Cream No. 44"
+        uid=1_397 StaticText "Regular price $49.00"
+        uid=1_398 button "Add to cart — Cream No. 44"
+      uid=1_399 listitem
+        uid=1_400 link "Cleanser No. 45" url="https://shop.example.invalid/products/cleanser-no-45"
+          uid=1_401 image "Cleanser No. 45" url="https://shop.example.invalid/cdn/shop/files/cleanser-no-45.jpg"
+        uid=1_402 image
+        uid=1_403 heading "Cleanser No. 45" level="3"
+          uid=1_404 StaticText "Cleanser No. 45"
+        uid=1_405 StaticText "Regular price $56.00"
+        uid=1_406 button "Add to cart — Cleanser No. 45"
+      uid=1_407 listitem
+        uid=1_408 link "Toner No. 46" url="https://shop.example.invalid/products/toner-no-46"
+          uid=1_409 image "Toner No. 46" url="https://shop.example.invalid/cdn/shop/files/toner-no-46.jpg"
+        uid=1_410 image
+        uid=1_411 heading "Toner No. 46" level="3"
+          uid=1_412 StaticText "Toner No. 46"
+        uid=1_413 StaticText "Regular price $63.00"
+        uid=1_414 button "Add to cart — Toner No. 46"
+      uid=1_415 listitem
+        uid=1_416 link "Mask No. 47" url="https://shop.example.invalid/products/mask-no-47"
+          uid=1_417 image "Mask No. 47" url="https://shop.example.invalid/cdn/shop/files/mask-no-47.jpg"
+        uid=1_418 image
+        uid=1_419 heading "Mask No. 47" level="3"
+          uid=1_420 StaticText "Mask No. 47"
+        uid=1_421 StaticText "Regular price $70.00"
+        uid=1_422 button "Add to cart — Mask No. 47"
+      uid=1_423 listitem
+        uid=1_424 link "Balm No. 48" url="https://shop.example.invalid/products/balm-no-48"
+          uid=1_425 image "Balm No. 48" url="https://shop.example.invalid/cdn/shop/files/balm-no-48.jpg"
+        uid=1_426 image
+        uid=1_427 heading "Balm No. 48" level="3"
+          uid=1_428 StaticText "Balm No. 48"
+        uid=1_429 StaticText "Regular price $77.00"
+        uid=1_430 button "Add to cart — Balm No. 48"
+    uid=1_431 navigation "Pagination"
+      uid=1_432 link "Page 1" url="https://shop.example.invalid/collections/all?page=1"
+      uid=1_433 link "Page 2" url="https://shop.example.invalid/collections/all?page=2"
+      uid=1_434 link "Page 3" url="https://shop.example.invalid/collections/all?page=3"
+      uid=1_435 link "Page 4" url="https://shop.example.invalid/collections/all?page=4"
+  uid=1_436 contentinfo
+    uid=1_437 StaticText "© 2026 Example Store"
