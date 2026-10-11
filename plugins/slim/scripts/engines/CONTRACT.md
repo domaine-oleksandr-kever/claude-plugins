@@ -161,10 +161,12 @@ warnings, then notes (info, suggestion, style), larger groups first. Output: a h
 `<<slim-lint>> <grammars> · N problems: E errors, W warnings, N notes · F files · R rules · K
 locations shown, first k per group`; per group `rule (E 12) — <message or template>`, its first 5
 locations verbatim (`file:line:col`, tsc `file(line,col)`, the message beside each when the group's
-messages differ), then `… +N in M files (file ×n, …, +N more)`; up to 10 other lines verbatim; the
-tool's own summary lines verbatim, `rules: R · files: F` and the next call. With `targetBytes` set
-and the text above it, the locations per group drop to 3 (stage `locs-3`), then 1 (`locs-1`), then
-none (`counts`); a text still above it comes back for the caller to stub. Not lint →
+messages differ, a tsc record's indented elaboration lines under it), then `… +N in M files (file
+×n, …)` naming every file; up to 10 other lines verbatim; the tool's own summary lines verbatim,
+`rules: R · files: F` and the next call. Records are matched before summary lines, and ties order
+by code unit, never by locale. With `targetBytes` set and the text above it, each fold names its
+first 8 files then `+N more` (stage `files-8`), then the locations per group drop to 3 (`locs-3`),
+then 1 (`locs-1`), then none (`counts`); a text still above it comes back for the caller to stub. Not lint →
 `passthrough` / `non-lint`; not smaller → `no-gain`. The original's spill name ends `.txt`.
 
 **text** — the plain-text window, the only thing slim ever does to code, diffs, test output or prose:

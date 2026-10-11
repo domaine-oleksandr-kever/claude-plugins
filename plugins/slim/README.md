@@ -80,8 +80,10 @@ and `prettier --check` lists — 30 or more lines, at least 70 % of them in one 
 grouped by rule and message template (quoted names and numbers slotted), errors first, then warnings,
 then notes, larger groups first. Each group keeps its count and its first 5 locations verbatim
 (`file:line:col`, or tsc's `file(line,col)`, with the message when it differs from the template),
-then `… +N in M files (file ×n, …)`; the tool's own summary lines close it, verbatim. Over the
-channel's size cap it keeps 3, then 1 location per group, then counts only, else it is stubbed.
+then `… +N in M files (file ×n, …)` naming every file; tsc's indented elaboration lines stay under
+their error. The tool's own summary lines close it, verbatim. Over the channel's size cap each fold
+names its first 8 files, then it keeps 3, then 1 location per group, then counts only, else it is
+stubbed.
 The output starts with `<<slim-lint>>`. Admitted on Bash for a linter command (below) and on MCP by
 content; a Read of a lint report is not compressed. Theme-check output that quotes Liquid source
 lines stays template text (Guard rails).
@@ -94,7 +96,8 @@ for a log source (a command naming a `.log` or `.jsonl` file, `journalctl`, `log
 is plain text, so test runners and git output are never deduplicated as a log. The lint engine runs
 for `eslint`, `stylelint`, `theme-check`, `shopify theme check`, `tsc`, `prettier` (directly, through
 `npx`/`pnpm exec`/`yarn`/`bunx`, or by bin path) and a package's `lint` script (`npm run lint`,
-`pnpm lint`, `yarn lint`, `bun run lint`), and for a log command whose output is linter output.
+`pnpm lint`, `yarn lint`, `bun run lint`); any other command's output is not lint (a `grep -rn
+error: logs/` hit list keeps every line).
 
 **Guard rails.** These pass through untouched, with their reason on the report line:
 
@@ -439,7 +442,7 @@ slim owns four `$.state` keys under `plugin: 'slim'`. Any plugin reads them; onl
 The contract is `plugins/slim/types/index.d.ts`:
 
 ```ts
-export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'stub'
+export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'lint' | 'stub'
 export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'agent' | 'attachment' | 'prompt'
 type SlimEventBase = { v: 1; atMs: number; text: string; src: 'slim'; tool: string; agentType?: string; ms: number }
 export type SlimCompressEvent = SlimEventBase & { kind: 'slim'; channel: SlimChannel; bytesIn: number; bytesOut: number; engine: SlimEngine }

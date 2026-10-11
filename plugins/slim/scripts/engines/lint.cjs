@@ -14,13 +14,13 @@ const { utf8, commas } = require('./util.cjs');
 const MARK = '<<slim-lint>>';
 const SCAN = 65536;
 const MIN_LINES = 30;
-// Locations kept per group, one fit stage each; 0 = counts only.
-const STAGES = [[5, 'lint'], [3, 'locs-3'], [1, 'locs-1'], [0, 'counts']];
+// [locations kept per group (0 = counts only), files named per fold, stage]; one fit stage each.
+const FILES_MAX = 8;
+const STAGES = [[5, Infinity, 'lint'], [5, FILES_MAX, 'files-8'], [3, FILES_MAX, 'locs-3'], [1, FILES_MAX, 'locs-1'], [0, FILES_MAX, 'counts']];
 const NOTES_MAX = 10;
 const NOTE_CHARS = 300;
 // Longer lines are never parsed: no linter writes one, and the regexes stay linear.
 const LINE_MAX = 2000;
-const FILES_MAX = 8;
 
 const LEVEL = {
   error: 'E', fatal: 'E', '✖': 'E', '×': 'E',
@@ -72,7 +72,8 @@ function unixRecord(m) {
 
 /**
  * Lines → { records, kinds, summary, formats }. kinds[i] is one of record | header | summary |
- * excerpt | blank | other; a stylish or nested record takes its file from the header line above it.
+ * excerpt | continuation | blank | other; a stylish or nested record takes its file from the header
+ * line above it; indented lines right under a tsc record are its elaboration (record.detail).
  */
 function parse(lines) {
   const records = [];
@@ -82,6 +83,7 @@ function parse(lines) {
   let header = -1;
   let file = null;
   let prev = 'blank';
+  let last = null;
   for (let i = 0; i < lines.length; i++) {
     const s = lines[i].replace(/\r$/, '');
     let kind = 'other';
@@ -96,8 +98,7 @@ function parse(lines) {
       r = { file: m[2], line: m[3], col: m[4] || null, loc: `${m[2]}:${m[3]}${m[4] ? `:${m[4]}` : ''}`, level: levelOf(m[1]), rule, message, fmt: 'theme-check' };
     } else if ((m = PRETTIER.exec(s))) {
       r = { file: m[1], line: null, col: null, loc: m[1], level: 'W', rule: 'prettier', message: 'not formatted', fmt: 'prettier' };
-    } else if (SUMMARY.test(s)) kind = 'summary';
-    else if (file !== null && (m = STYLISH.exec(s))) {
+    } else if (file !== null && (m = STYLISH.exec(s))) {
       const parts = m[4].trimEnd().split(/\s{2,}/);
       const rule = parts.length > 1 && RULE_WORD.test(parts[parts.length - 1]) ? parts.pop() : null;
       r = { file, line: m[1], col: m[2], loc: `${file}:${m[1]}:${m[2]}`, level: levelOf(m[3]), rule, message: parts.join('  ').trim(), fmt: 'stylish' };
@@ -107,9 +108,16 @@ function parse(lines) {
       const { rule, message } = ruleLead(at ? body.slice(0, at.index) : body);
       r = { file, line: at ? at[1] : null, col: null, loc: at ? `${file}:${at[1]}` : file, level: levelOf(m[1]), rule, message, fmt: 'theme-check' };
     } else if ((m = UNIX.exec(s))) r = unixRecord(m);
+    // Records first: a record's own message may read like a summary ("Expected 3 warnings, found 4").
+    if (!r && kind === 'other' && SUMMARY.test(s)) kind = 'summary';
+    if (!r && kind === 'other' && /^\s/.test(s) && last && last.fmt === 'tsc' && (kinds[i - 1] === 'record' || kinds[i - 1] === 'continuation') && !EXCERPT.test(s)) {
+      kind = 'continuation';
+      (last.detail || (last.detail = [])).push(s.trimEnd());
+    }
     if (!r && kind === 'other' && (EXCERPT.test(s) || ((prev === 'record' || prev === 'excerpt') && PRETTY_CODE.test(s)))) kind = 'excerpt';
     if (r) {
       kind = 'record';
+      last = r;
       records.push(r);
       formats.add(r.fmt);
       if (header >= 0 && (r.fmt === 'stylish' || r.fmt === 'theme-check') && r.file === file) { kinds[header] = 'header'; header = -1; }
@@ -141,6 +149,8 @@ function detectLint(text) {
 }
 
 // A message with what varies between its instances slotted, so one rule's messages share a line.
+const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
 const template = (m) => m
   .replace(/'[^']*'/g, "'…'").replace(/"[^"]*"/g, '"…"').replace(/`[^`]*`/g, '`…`').replace(/‘[^’]*’/g, '‘…’')
   .replace(/\d+/g, 'N').replace(/\/[\w/]+\//g, '/PATH/');
@@ -156,20 +166,20 @@ function groupsOf(records) {
     g.messages.add(r.message);
   }
   return [...by.values()].sort((a, b) => RANK[a.level] - RANK[b.level] || b.items.length - a.items.length
-    || String(a.rule || '').localeCompare(String(b.rule || '')) || a.template.localeCompare(b.template));
+    || cmp(a.rule || '', b.rule || '') || cmp(a.template, b.template));
 }
 
-// `file ×n` for the given records, most first, at most FILES_MAX then `+N more`.
-function fileCounts(items) {
+// `file ×n` for the given records, most first, at most `max` then `+N more`.
+function fileCounts(items, max) {
   const n = new Map();
   for (const r of items) n.set(r.file, (n.get(r.file) || 0) + 1);
-  const list = [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const shown = list.slice(0, FILES_MAX).map(([f, c]) => `${f} ×${c}`);
-  if (list.length > FILES_MAX) shown.push(`+${list.length - FILES_MAX} more`);
+  const list = [...n.entries()].sort((a, b) => b[1] - a[1] || cmp(a[0], b[0]));
+  const shown = list.slice(0, max).map(([f, c]) => `${f} ×${c}`);
+  if (list.length > max) shown.push(`+${list.length - max} more`);
   return { files: list.length, text: shown.join(', ') };
 }
 
-function render(p, groups, notes, k) {
+function render(p, groups, notes, k, filesMax) {
   const n = { E: 0, W: 0, N: 0 };
   for (const r of p.records) n[r.level]++;
   const files = new Set(p.records.map((r) => r.file)).size;
@@ -179,10 +189,10 @@ function render(p, groups, notes, k) {
   for (const g of groups) {
     const one = g.messages.size === 1;
     out.push('', `${g.rule || '(no rule)'} (${g.level} ${commas(g.items.length)}) — ${one ? g.items[0].message : g.template}`);
-    for (const r of g.items.slice(0, k)) out.push(`  ${r.loc}${one ? '' : `  ${r.message}`}`);
+    for (const r of g.items.slice(0, k)) out.push(`  ${r.loc}${one ? '' : `  ${r.message}`}`, ...(r.detail || []).map((d) => `  ${d}`));
     const rest = g.items.slice(k);
     if (rest.length) {
-      const fc = fileCounts(rest);
+      const fc = fileCounts(rest, filesMax);
       out.push(`  … ${k ? '+' : ''}${commas(rest.length)} in ${commas(fc.files)} file${fc.files === 1 ? '' : 's'} (${fc.text})`);
     }
   }
@@ -211,8 +221,8 @@ function run(text, opts, ctx) {
   const target = opts && opts.targetBytes;
   const stages = [];
   let out = null;
-  for (const [k, stage] of STAGES) {
-    out = render(p, groups, notes, k);
+  for (const [k, filesMax, stage] of STAGES) {
+    out = render(p, groups, notes, k, filesMax);
     stages.push(stage);
     if (!target || utf8(out) <= target) break;
   }

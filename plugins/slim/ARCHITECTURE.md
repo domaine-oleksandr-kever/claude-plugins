@@ -104,7 +104,7 @@ flowchart TD
   G -- no --> I
   H -- refused --> Z2[passthrough expand-refused]
   H -- ok --> I[engines.sniff<br/>content, never the tool name<br/>every channel, MCP per text block]
-  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter or log cmd,<br/>MCP: plain, guarded and HTML text not compressed}
+  I --> J{channels.cjs admit<br/>html only after a fetch cmd,<br/>log only for log-looking cmd/file,<br/>lint only for a linter cmd,<br/>MCP: plain, guarded and HTML text not compressed}
   J --> K[engines.compress<br/>maxMs 5000 · targetBytes for engines flagged fit]
   K -- passthrough · refused --> L{stubbable?<br/>MCP over 32 KB}
   L -- yes --> M[emit stub + spill original]
@@ -154,8 +154,8 @@ them equal, so the pure pre-decision in the module and the core never disagree.
   diffs and code reach the model intact or as head + tail with a hidden-lines count.
 - **html runs only after a fetching command** (`curl`, `wget`, `xh`, …) and **log only when the
   command or file looks like a log**: `cat src/page.html` is source, not a page. **lint** runs on
-  Bash only for a linter command (`eslint`, `tsc`, `shopify theme check`, `npm run lint`, …) or a
-  log command, on MCP by content, never on Read.
+  Bash only for a linter command (`eslint`, `tsc`, `shopify theme check`, `npm run lint`, …), on
+  MCP by content, never on Read: a `grep -rn error: logs/` hit list stays plain text.
 - **MCP text is sniffed too, guards included**: a text block that sniffs as plain text, a diff, test
   output, a template or HTML passes through (stubbed when too large); every other shape goes the json
   route, which unwraps fences, JSONL, block envelopes, Figma JSX and logs. So theme-check output that

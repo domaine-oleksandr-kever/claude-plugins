@@ -63,6 +63,15 @@ const NESTED = THEME.split('\n').filter((l) => l.startsWith('[')).map((l) => {
 }).join('\n');
 const GREP = Array.from({ length: 60 }, (_, i) => `src/sections/main-${i % 9}.js:${10 + i}:5: const price = format(${i});`).join('\n');
 const MIXED = `${ESLINT}\nPASS src/cart.test.js\nTests:       12 passed, 12 total\n`;
+// tsc with its indented elaboration lines under every `every`-th error.
+const tscElab = (every) => TSC.split('\n').map((l, i) => (/\(\d+,\d+\): error /.test(l) && i % every === 0
+  ? `${l}\n  Type 'Item${i}' is not assignable to type 'Line'.\n    Property 'qty${i}' is missing in type 'Item${i}'.` : l)).join('\n');
+// grep hits whose text starts with a level word: grammar-shaped, but not a linter's output.
+const GREP_LOGS = Array.from({ length: 200 }, (_, i) => `logs/app-${i % 5}.log:${1000 + i}:error: connection refused to db host 10.0.0.${i % 9} user=u${i}`).join('\n');
+// A stylish record whose message reads like a summary line must stay a record of its file.
+const SUMMARYISH = `/p/a.js\n${Array.from({ length: 30 }, (_, i) => `  ${i + 1}:1  error  'v${i}' is not defined  no-undef`).join('\n')}\n\n/p/b.js\n${Array.from({ length: 6 }, (_, i) => `  ${i + 1}:3  warning  Expected 3 warnings at most, found 4  custom/max-warn`).join('\n')}\n  9:1  error  Expected at most 2 errors found per handler  custom/max-errors\n\n✖ 37 problems (31 errors, 6 warnings)\n`;
+// Ties in group size and file count: the order is by code unit whatever the locale (Danish sorts 'aa' after 'z').
+const TIES = `x.js\n${Array.from({ length: 5 }, (_, i) => `  ${i + 1}:1  error  bad  rule-aa`).join('\n')}\n${['aa.js', 'zz.js', 'äb.js'].map((f) => `\n${f}\n${Array.from({ length: 10 }, (_, i) => `  ${i + 1}:1  error  bad  rule-aa\n  ${i + 1}:2  error  bad  rule-zz`).join('\n')}`).join('\n')}\n\n✖ 65 problems (65 errors, 0 warnings)\n`;
 
 // ES — sniff: each grammar is lint; the guards and the other detectors stay ahead or apart
 {
@@ -79,6 +88,8 @@ const MIXED = `${ESLINT}\nPASS src/cart.test.js\nTests:       12 passed, 12 tota
     ['jest-failure', TESTOUT, 'text', 'test-output'],
     ['lint-plus-test-summary', MIXED, 'text', 'test-output'],
     ['grep-hits', GREP, 'text', 'prose'],
+    ['tsc-elaborated-all', tscElab(1), 'lint', 'lint'],
+    ['tsc-elaborated-every-4th', tscElab(4), 'lint', 'lint'],
     ['app-log', APPLOG, 'log', 'log'],
     ['short-lint', ESLINT.split('\n').slice(0, 25).join('\n'), 'text', 'prose'],
   ]) {
@@ -94,15 +105,15 @@ const MIXED = `${ESLINT}\nPASS src/cart.test.js\nTests:       12 passed, 12 tota
 const GROUP = /^\S.* \((E|W|N) [\d,]+\) — /;
 const groupLines = (out) => out.split('\n').filter((l) => GROUP.test(l));
 const locLines = (out) => out.split('\n\n').filter((b) => GROUP.test(b)).flatMap((b) => b.split('\n').slice(1))
-  .filter((l) => !l.startsWith('  … ')).map((l) => l.slice(2).split('  ')[0]);
+  .filter((l) => !l.startsWith('  … ') && !l.startsWith('    ')).map((l) => l.slice(2).split('  ')[0]);
 const header = (out) => out.split('\n')[0];
 const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header(out)) || [])[1]?.replace(/,/g, ''));
 
 // LC — compress: decision, exact bytes, marker, spill suffix, counts against the tool's own summary
 {
   const rows = [
-    ['eslint', ESLINT, 8886, /\((\d+) errors, (\d+) warnings\)/, ['stylish']],
-    ['theme-check', THEME, 5779, /\((\d+) errors, (\d+) warnings, (\d+) suggestions\)/, ['theme-check']],
+    ['eslint', ESLINT, 13374, /\((\d+) errors, (\d+) warnings\)/, ['stylish']],
+    ['theme-check', THEME, 5946, /\((\d+) errors, (\d+) warnings, (\d+) suggestions\)/, ['theme-check']],
     ['tsc', TSC, 2793, /Found (\d+) errors/, ['tsc']],
   ];
   for (const [name, data, outBytes, summary, fmt] of rows) {
@@ -125,11 +136,14 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
   eq('LC-eslint-problems', count(compress({ data: ESLINT }, O).text, 'problems'), 400);
   eq('LC-theme-check-problems', count(compress({ data: THEME }, O).text, 'problems'), 120);
   eq('LC-tsc-problems', count(compress({ data: TSC }, O).text, 'problems'), 60);
-  for (const [name, data] of [['unix', UNIX], ['stylelint', STYLELINT_UNIX], ['prettier', PRETTIER], ['tsc-pretty', TSC_PRETTY], ['nested', NESTED]]) {
+  for (const [name, data] of [['unix', UNIX], ['stylelint', STYLELINT_UNIX], ['tsc-pretty', TSC_PRETTY], ['nested', NESTED]]) {
     const r = compress({ data }, O);
     eq(`LC-${name}`, [r.engine, r.decision], ['lint', 'compressed']);
   }
-  const p = compress({ data: PRETTIER }, O);
+  // A prettier list is all file names: every fold names every file, so only a size target folds it.
+  eq('LC-prettier-no-target', compress({ data: PRETTIER }, O).reason, 'no-gain');
+  const p = compress({ data: PRETTIER }, { ...O, trace: true, targetBytes: 1000 });
+  eq('LC-prettier-fit', [p.decision, p.stats.stages], ['compressed', ['lint', 'files-8']]);
   eq('LC-prettier-group', [groupLines(p.text)[0], count(p.text, 'problems')], ['prettier (W 40) — not formatted', 40]);
   check('LC-prettier-other-line', p.text.includes('other output (1 line):\nChecking formatting...'), p.text.slice(-400));
   // The unix rows are the stylish fixture's first 120 problems: the same rules, the same counts per level.
@@ -137,8 +151,18 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
   eq('LC-nested-counts', [count(nested, 'problems'), count(nested, 'errors'), count(nested, 'notes')], [120, 34, 29]);
   check('LC-nested-loc', /^ {2}sections\/main-product-0\.liquid:\d+$/m.test(nested), nested.slice(0, 600));
   const longNote = compress({ data: `${'Oops! '.repeat(2000)}\n${ESLINT}` }, O).text;
-  check('LC-note-clipped', /^(Oops! )+…?.* … \[\+[\d,]+ chars\]$/m.test(longNote) && bytes(longNote) < 10000, longNote.slice(-700));
+  check('LC-note-clipped', /^(Oops! )+…?.* … \[\+[\d,]+ chars\]$/m.test(longNote) && bytes(longNote) < bytes(compress({ data: ESLINT }, O).text) + 400, longNote.slice(-700));
   const u = compress({ data: UNIX }, O);
+  // tsc elaborations stay under their error, never in 'other output'.
+  const el = compress({ data: tscElab(1) }, O).text;
+  eq('LC-tsc-elab-counts', [count(el, 'problems'), count(el, 'errors')], [60, 60]);
+  check('LC-tsc-elab-attached', !el.includes('other output') && /^ {2}src\/\S+\(\d+,\d+\).*\n {4}Type 'Item\d+' is not assignable to type 'Line'\.\n {6}Property 'qty\d+' is missing/m.test(el), el.slice(0, 900));
+  const e6 = compress({ data: tscElab(6) }, O).text;
+  check('LC-tsc-elab-sparse', !e6.includes('other output'), e6.slice(-600));
+  // Records whose message reads like a summary are counted under their file and rule.
+  const si = compress({ data: SUMMARYISH }, O).text;
+  eq('LC-summaryish-counts', [count(si, 'problems'), count(si, 'errors'), count(si, 'warnings'), count(si, 'files'), count(si, 'rules')], [37, 31, 6, 2, 3]);
+  check('LC-summaryish-located', si.includes('  /p/b.js:9:1') && si.includes('  /p/b.js:1:3') && !si.includes('other output'), si);
   eq('LC-unix-errors', count(u.text, 'errors'), stylishRows.slice(0, 120).filter((r) => r.level === 'error').length);
 }
 
@@ -158,6 +182,13 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
     eq(`LI-${name}-locations-in-input`, missing, []);
     const folded = out.split('\n').filter((l) => l.startsWith('  … ')).flatMap((l) => [...l.matchAll(/(?:\(|, )([^ ,()]+) ×\d+/g)].map((m) => m[1]));
     check(`LI-${name}-fold-files`, folded.length > 0 && folded.every((f) => data.includes(f)), folded.filter((f) => !data.includes(f)).join(' '));
+    // Each fold names every file it counts: `… +N in M files (…)` lists M names summing to N.
+    const folds = out.split('\n').filter((l) => l.startsWith('  … '));
+    check(`LI-${name}-fold-every-file`, folds.every((l) => {
+      const m = /^ {2}… \+?([\d,]+) in ([\d,]+) files? \((.*)\)$/.exec(l);
+      const parts = [...m[3].matchAll(/ ×(\d+)/g)].map((x) => Number(x[1]));
+      return !m[3].includes(' more') && parts.length === Number(m[2]) && parts.reduce((a, b) => a + b, 0) === Number(m[1].replace(/,/g, ''));
+    }), folds.join('\n'));
   }
   // Messages that differ only in a quoted name share one group, and each kept location shows its own name.
   const out = compress({ data: TSC }, O).text;
@@ -172,10 +203,12 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
   const full = compress({ data: ESLINT }, O).text;
   const at = (t) => compress({ data: ESLINT }, { ...O, trace: true, targetBytes: t });
   const r3 = at(bytes(full) - 1);
-  eq('LT-locs-3', [r3.stats.stages, r3.text.includes('first 3 per group')], [['lint', 'locs-3'], true]);
-  check('LT-locs-3-fits', r3.stats.bytesOut <= bytes(full) - 1, String(r3.stats.bytesOut));
+  eq('LT-files-8', [r3.stats.stages, r3.text.includes('first 5 per group'), /, \+\d+ more\)$/m.test(r3.text)], [['lint', 'files-8'], true, true]);
+  check('LT-files-8-fits', r3.stats.bytesOut <= bytes(full) - 1, String(r3.stats.bytesOut));
+  const f8 = compress({ data: ESLINT }, { ...O, targetBytes: bytes(r3.text) - 1 });
+  check('LT-locs-3', f8.text.includes('first 3 per group'), header(f8.text));
   const r1 = at(7000);
-  eq('LT-locs-1', r1.stats.stages, ['lint', 'locs-3', 'locs-1']);
+  eq('LT-locs-1', r1.stats.stages, ['lint', 'files-8', 'locs-3', 'locs-1']);
   check('LT-locs-1-fits', r1.stats.bytesOut <= 7000 && groupLines(r1.text).length === groupLines(full).length, String(r1.stats.bytesOut));
   const r0 = at(1024);
   eq('LT-counts', [r0.stats.stages.at(-1), locLines(r0.text).length, r0.text.includes('counts only')], ['counts', 0, true]);
@@ -203,6 +236,14 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
     try { compress({ data }, { ...O, engine: 'lint' }); } catch (e) { threw = e; }
     check(`LG-no-throw-${name}`, threw === null, String(threw));
   }
+  // Same bytes under any locale: group and file ties order by code unit.
+  const ties = compress({ data: TIES }, O).text;
+  check('LG-ties-order', /^rule-aa \(E 35\)[^]*^rule-zz \(E 30\)/m.test(ties) && ties.includes('(aa.js ×10, zz.js ×10, äb.js ×10)'), ties);
+  const script = `const { compress } = require(${JSON.stringify(path.join(SCRIPTS, 'engines/index.cjs'))}); process.stdout.write(compress({ data: require('fs').readFileSync(0, 'utf8') }, { maxMs: 0 }).text);`;
+  for (const loc of ['da_DK.UTF-8', 'sv_SE.UTF-8']) {
+    const r = spawnSync('node', ['-e', script], { input: TIES, encoding: 'utf8', env: { PATH: process.env.PATH, LC_ALL: loc, LANG: loc } });
+    eq(`LG-ties-locale-${loc}`, r.stdout, ties);
+  }
   eq('LG-crlf', compress({ data: ESLINT.replace(/\n/g, '\r\n') }, O).engine, 'lint');
 }
 
@@ -213,8 +254,8 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
   const no = ['cat eslint-report.txt', 'git log --grep eslint', 'grep -rn tsc src', 'npm test', 'echo prettier', 'npm run build'];
   for (const c of yes) check(`LA-cmd-${c}`, ch.LINT_CMD.test(c), c);
   for (const c of no) check(`LA-not-cmd-${c}`, !ch.LINT_CMD.test(c), c);
-  eq('LA-admit', [ch.admit('bash', 'lint', 'npx eslint .'), ch.admit('bash', 'lint', 'cat lint.log'), ch.admit('bash', 'lint', 'cat out.txt'),
-    ch.admit('mcp', 'lint'), ch.admit('read', 'lint'), ch.admit('attachment', 'lint'), ch.admit('webfetch', 'lint')], ['lint', 'lint', 'text', 'lint', null, null, 'text']);
+  eq('LA-admit', [ch.admit('bash', 'lint', 'npx eslint .'), ch.admit('bash', 'lint', 'cat lint.log'), ch.admit('bash', 'lint', 'grep -rn "error:" logs/'), ch.admit('bash', 'lint', 'cat out.txt'),
+    ch.admit('mcp', 'lint'), ch.admit('read', 'lint'), ch.admit('attachment', 'lint'), ch.admit('webfetch', 'lint')], ['lint', 'text', 'text', 'text', 'lint', null, null, 'text']);
   eq('LA-gate', [ch.structuredGate('bash', 'lint', 65536), ch.LINT_GATE], [8192, 8192]);
   eq('LA-registry', REGISTRY.lint, { ext: '.txt', fit: true, stub: true, mcp: true });
 }
@@ -240,6 +281,8 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
   eq('LD-bash-rerun-already-slim', call('bash', 'Bash', { command: 'npx eslint src' }, BASH(out)).reason, 'already-slim');
   eq('LD-bash-theme-check', [call('bash', 'Bash', { command: 'shopify theme check --path theme' }, BASH(THEME)).record.engine], ['lint']);
   eq('LD-bash-not-a-linter', call('bash', 'Bash', { command: 'cat report.txt' }, BASH(ESLINT)).reason, 'plain-gate');
+  const g = call('bash', 'Bash', { command: 'grep -rn "error:" logs/' }, BASH(GREP_LOGS));
+  check('LD-bash-grep-logs-kept', g.decision !== 'compressed' && g.record.engine !== 'lint', JSON.stringify([g.decision, g.reason, g.record.engine]));
   eq('LD-bash-under-gate', call('bash', 'Bash', { command: 'npx tsc --noEmit' }, BASH(TSC)).reason, 'size-gate');
 
   const tool = 'mcp__plugin_base_shopify-dev-mcp__validate_theme';
@@ -247,7 +290,7 @@ const count = (out, word) => Number((new RegExp(`([\\d,]+) ${word}`).exec(header
   eq('LD-mcp-lint', [m.decision, m.record.engine], ['compressed', 'lint']);
   check('LD-mcp-marker', Array.isArray(m.result) && m.result[0].text.startsWith('<<slim-lint>> theme-check · 120 problems'), JSON.stringify(m.result).slice(0, 200));
   const fit = call('mcp', tool, {}, [{ type: 'text', text: ESLINT }], { SLIM_STUB_BYTES: '7000' });
-  eq('LD-mcp-fit', [fit.decision, fit.record.engine, fit.record.stages], ['compressed', 'lint', ['lint', 'locs-3', 'locs-1']]);
+  eq('LD-mcp-fit', [fit.decision, fit.record.engine, fit.record.stages], ['compressed', 'lint', ['lint', 'files-8', 'locs-3', 'locs-1']]);
   const stub = call('mcp', tool, {}, [{ type: 'text', text: ESLINT }], { SLIM_STUB_BYTES: '4096' });
   eq('LD-mcp-stub', [stub.decision, stub.record.engine], ['stubbed', 'stub']);
   eq('LD-mcp-liquid-stays-template', call('mcp', tool, {}, [{ type: 'text', text: THEME_LIQUID }]).reason, 'template');

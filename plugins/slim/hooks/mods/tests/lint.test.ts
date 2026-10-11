@@ -13,6 +13,7 @@ describe('lint admission', () => {
     expect(candidate('bash', bash(plain(10_000), 'shopify theme check'), P)).toBe(true)
     expect(candidate('bash', bash(plain(7_000), 'npx eslint src'), P)).toBe(false)
     expect(candidate('bash', bash(plain(10_000), 'cat report.txt'), P)).toBe(false)
+    expect(candidate('bash', bash(plain(10_000), 'cat build.log'), P)).toBe(false)
   })
 
   test('LINT_CMD: the command word of a pipeline segment', () => {
