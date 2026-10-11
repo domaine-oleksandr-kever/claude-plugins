@@ -2,7 +2,8 @@
  * engines/listing.cjs — path lists (find, fd, git ls-files, rg --files, ls -R, tree) as a directory
  * outline.
  *
- * Input is parsed into one path set, a trie is built from it and printed top-down: one line per
+ * Input is parsed into one path set, a trie is built from it and printed top-down in input order
+ * (an `ls -t` keeps its newest first): one line per
  * directory holding files (`<dir>/ (N files, M dirs)`), its files by bare name under it while the
  * directory has at most `threshold` files, else an extension histogram on that line
  * (`./assets/ (142 files): .liquid 61, .json 40 · e.g. a.liquid, b.json`). Depth is never cut; the
@@ -27,7 +28,10 @@ const TREE_BRANCH = /^((?:[│|]\s{3}|\s{4})*)(?:[├└]──|[|`]--)\s(.*)$/;
 const LS_HEADER = /^(\S.*):$/;
 
 const isPath = (l) => PATH.test(l) && !l.includes('://') && !l.startsWith('-') && !l.startsWith('```');
-const hasShape = (l) => l.includes('/') || /[^./]\.[\w-]{1,10}$/.test(l);
+// An extension starts with a letter: `0.00`, `pkg==1.2.0` are values, not file names.
+const hasShape = (l) => l.includes('/') || /[^./]\.[A-Za-z][\w-]{0,9}$/.test(l);
+// CSV rows, key=value pairs and `grep -c` / `-printf '%p:%s'` counts carry values a fold would hide.
+const DATA = /[,;=]|:\d+$/;
 
 // The listing format of `lines` (non-blank, trimmed of \r), or null.
 function formatOf(lines) {
@@ -41,7 +45,13 @@ function formatOf(lines) {
   const headers = scan.filter((l) => LS_HEADER.test(l)).length;
   const nested = scan.filter((l) => !LS_HEADER.test(l) && l.slice(0, -1).includes('/')).length;
   if (headers && nested < scan.length * 0.1) return 'ls-R';
-  return paths.filter(hasShape).length / paths.length >= 0.5 ? 'flat' : null;
+  if (paths.filter((l) => DATA.test(l)).length * 2 >= paths.length) return null;
+  if (paths.filter(hasShape).length / paths.length < 0.5) return null;
+  // Paths share their top directory; random text that happens to hold a `/` (base64) does not.
+  const tops = new Map();
+  const slashed = paths.filter((l) => l.slice(0, -1).includes('/')).map((l) => l.slice(0, l.indexOf('/')));
+  for (const t of slashed) tops.set(t, (tops.get(t) || 0) + 1);
+  return slashed.filter((t) => tops.get(t) > 1).length * 2 >= slashed.length ? 'flat' : null;
 }
 
 // → { format, entries: [{ segs, dir }], other: string[] } or null when the text is not a listing.
@@ -59,21 +69,27 @@ function parse(text) {
     return { segs, dir };
   };
   if (format === 'tree') {
+    // stack[d] = the segments of the open directory at depth d; stack[0] is the root.
     const stack = [];
-    for (const l of lines) {
+    lines.forEach((l, i) => {
       const m = TREE_BRANCH.exec(l);
       if (!m) {
-        // A path-shaped line outside the glyphs opens a tree (`tree a b` prints one per root).
-        if (isPath(l)) { stack.length = 0; stack.push(l.replace(/\/$/, '')); entries.push({ segs: split(l).segs, dir: true }); } else other.push(l);
-        continue;
+        // Any other line closes the tree; it opens the next one (`tree a "My Dir"`) when a depth-1 branch follows.
+        stack.length = 0;
+        const next = TREE_BRANCH.exec(lines[i + 1] || '');
+        if (isPath(l) || (next && !next[1])) { stack.push(split(l).segs); entries.push({ segs: stack[0], dir: true }); } else other.push(l);
+        return;
       }
       const depth = m[1].length / 4 + 1;
-      if (stack.length < depth) { other.push(l); continue; }
+      if (stack.length < depth) { other.push(l); return; }
       stack.length = depth;
       const name = m[2];
-      stack[depth] = name.replace(/\/$/, '');
-      entries.push({ segs: [...split(stack[0]).segs, ...stack.slice(1, depth + 1)], dir: name.endsWith('/') });
-    }
+      const parent = stack[depth - 1];
+      // `tree -f` prints every name as a full path under its parent's.
+      const segs = name.startsWith(`${parent.join('/')}/`) ? split(name).segs : [...parent, name.replace(/\/$/, '')];
+      stack.push(segs);
+      entries.push({ segs, dir: name.endsWith('/') });
+    });
   } else if (format === 'ls-R') {
     // BSD `ls -R` prints the first directory's entries without a header: they belong to the parent of the first header.
     const first = raw.find((l, i) => (i === 0 || !raw[i - 1].trim()) && LS_HEADER.test(l));
@@ -85,6 +101,7 @@ function parse(text) {
       const h = atStart ? LS_HEADER.exec(l) : null;
       atStart = false;
       if (h) { prefix = h[1].replace(/\/$/, ''); entries.push({ segs: split(prefix).segs, dir: true }); continue; }
+      if (!isPath(l) && l.includes(': ')) { other.push(l); continue; }
       const name = l.length > 1 ? l.replace(/\/$/, '') : l;
       entries.push({ segs: prefix === null ? [name] : [...split(prefix).segs, name], dir: name !== l });
     }
@@ -119,7 +136,6 @@ function trieOf(entries) {
     for (const [name, k] of [...n.kids]) {
       if (k.kids.size || k.explicitDir) { dirs++; walk(k); } else { n.files.push(name); n.kids.delete(name); files++; }
     }
-    n.files.sort();
   };
   walk(root);
   return { root, dirs, files };
@@ -129,7 +145,7 @@ const label = (segs) => (segs.length === 1 && segs[0] === '' ? '/' : `${segs.joi
 const extOf = (name) => { const i = name.lastIndexOf('.'); return i > 0 ? name.slice(i) : '(none)'; };
 const plural = (n, word) => `${commas(n)} ${word}${n === 1 ? '' : 's'}`;
 
-// A folded directory's file summary: extension histogram, then up to `examples` names, one per top extension first.
+// A folded directory's file summary: extension histogram, then up to `examples` names (input order), one per top extension first.
 function histogram(files, examples) {
   const by = new Map();
   for (const f of files) { const e = extOf(f); if (!by.has(e)) by.set(e, []); by.get(e).push(f); }
@@ -153,7 +169,7 @@ function render(trie, threshold, deadline) {
   let n = 0;
   const visit = (d) => {
     if (deadline != null && ++n % 512 === 0 && Date.now() > deadline) return false;
-    const kids = [...d.kids.keys()].sort();
+    const kids = [...d.kids.keys()];
     if (d.files.length || (d.segs.length && !kids.length)) {
       const counts = d.files.length || kids.length ? `${plural(d.files.length, 'file')}${kids.length ? `, ${plural(kids.length, 'dir')}` : ''}` : 'empty';
       const head = `${d.segs.length ? label(d.segs) : '(top level)'} (${counts})`;
@@ -171,7 +187,7 @@ function compose(p, trie, r) {
   const paths = new Set(p.entries.map((e) => e.segs.join('/'))).size;
   const header = `${MARK} ${p.format} · ${plural(paths, 'path')} · ${plural(trie.files, 'file')} in ${plural(trie.dirs, 'dir')}` +
     ` · ${commas(r.folded)} files folded in ${plural(r.foldedDirs, 'dir')} · shown ${plural(r.body.length, 'line')}`;
-  const footer = 'a folded name → rerun narrower (`find <dir> -name \'<pattern>\'`, `ls <dir>`) or Read the <<full=…>> spill below with offset/limit';
+  const footer = 'a folded name → rerun narrower (`find <dir> -name \'<pattern>\'`, `ls <dir>`) or Read the original with offset/limit';
   return [header, ...p.other, ...r.body, footer].join('\n');
 }
 

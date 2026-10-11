@@ -154,8 +154,9 @@ them equal, so the pure pre-decision in the module and the core never disagree.
   diffs and code reach the model intact or as head + tail with a hidden-lines count.
 - **html runs only after a fetching command** (`curl`, `wget`, `xh`, …) and **log only when the
   command or file looks like a log**: `cat src/page.html` is source, not a page. **listing runs only
-  after a listing command on Bash** (`find`, `fd`, `ls`, `tree`, `git ls-files`, `rg --files`), never
-  on Read or MCP: `cat paths.txt` stays plain text.
+  after a listing command on Bash** (`find`, `fd`, `ls`, `tree`, `git ls-files`, `rg --files`) that
+  writes the output, never on Read or MCP: `cat paths.txt` and `ls data && cat data/prices.csv` stay
+  plain text.
 - **MCP text is sniffed too, guards included**: a text block that sniffs as plain text, a diff, test
   output, a template or HTML passes through (stubbed when too large); every other shape goes the json
   route, which unwraps fences, JSONL, block envelopes, Figma JSX and logs. So theme-check output that

@@ -69,7 +69,9 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
 7. **jsonl** — two or more lines, every non-blank line a JSON object or array.
 7a. **listing** — 50 or more non-blank lines that are a path list (reason `listing-flat`: 90 % or more
    bare paths without whitespace, URLs and `-` lines excluded, half of them holding a `/` or an
-   extension), `ls -R` blocks (`listing-ls-R`: a `dir:` header, entries without a `/`) or `tree` box
+   extension that starts with a letter, half of those with a `/` sharing their top directory with
+   another line, and fewer than half holding `,` `;` `=` or ending in `:<digits>`, so CSV rows,
+   decimals, versions, base64 and `grep -c` counts are not paths), `ls -R` blocks (`listing-ls-R`: a `dir:` header, entries without a `/`) or `tree` box
    drawing (`listing-tree`: 90 % of the lines after the root under `├──`/`└──`/`|--`). Ahead of the
    code rule, because a path such as `export/feed.csv` opens like code.
 8. **code → text** — non-markup text where 30 % of the first 200 non-empty lines open like code
@@ -156,12 +158,12 @@ folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` p
 **adf** — a bare Atlassian document converted to markdown (media render as `_(media omitted)_`).
 
 **listing** — a path list as a directory outline. The paths (one per line, `ls -R` blocks joined to
-their header, `tree` lines joined to their parents) build a trie printed top-down in name order: one
+their header, `tree` lines joined to their parents, a `tree -f` full path taken as it is) build a trie printed top-down in input order (an `ls -t` keeps its newest first): one
 line per directory holding files, or empty, `<dir>/ (N files, M dirs)`, then its files by bare name,
 two spaces in, while it holds at most 8; a bigger one carries on its own line an extension histogram
-(top 8, then `other N`) and up to 3 example names, one per top extension first
+(top 8, then `other N`) and up to 3 example names, the first ones of the input, one per top extension first
 (`./assets/ (1,350 files): .js 610, .css 380 · e.g. a.js, b.css, c.svg`). Bare relative paths at the
-top print under `(top level)`. Depth is never cut. With `targetBytes` the threshold falls 8 → 4 → 0,
+top print under `(top level)`. An order across directories is kept within each directory only. Depth is never cut. With `targetBytes` the threshold falls 8 → 4 → 0,
 stages `listing`, `fold4`, `fold0`; at 0 every directory folds without example names; a text still
 over it comes back for the caller to stub. The header `<<slim-listing>> <flat|ls-R|tree> · N paths · N
 files in N dirs · N files folded in N dirs · shown N lines` is followed by the input lines that are

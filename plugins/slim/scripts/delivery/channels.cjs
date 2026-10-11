@@ -22,8 +22,9 @@ const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'agent
 // A fetching command word at the start of a pipeline segment; `cat src/http/page.html` is not one.
 const FETCH_CMD = /(?:^|[;&|(`]|\$\()\s*(?:curl|wget|https?|xh|lynx)(?=\s|$)/;
 const LOG_CMD = /\.log\b|\.jsonl\b|\b(?:journalctl|logs?)\b/;
-// A path-listing command word at the start of a pipeline segment.
-const LIST_CMD = /(?:^|[;&|(`]|\$\()\s*(?:find|fd|fdfind|ls|tree|git(?:\s+-C\s+\S+)?\s+ls-files|rg\s(?:[^;&|]*\s)?--files)(?=\s|$)/;
+// The last command lists paths and writes the output: only sort/uniq/head/tail/grep may follow it
+// in the pipeline, never `-exec`, `xargs` or a later `&& cat`.
+const LIST_CMD = /(?:^|&&|\|\||[;\n(`]|\$\()\s*(?:find|fd|fdfind|ls|tree|git(?:\s+-C\s+\S+)?\s+ls-files|rg\s(?:[^;&|\n]*\s)?--files)(?=\s|$)(?![^;&|\n]*\s-(?:exec|execdir|ok|okdir)\s)(?:[^;&|\n]|>&)*(?:\|\s*(?:sort|uniq|head|tail|grep)(?=\s|$)(?:[^;&|\n]|>&)*)*[)`]?\s*$/;
 const OWN_CLI = /\b(?:json-slim|log-slim|slim|figma-node-slim|adf-to-md|mcp-slim)\.cjs\b/;
 const SOURCE_JSON_DIR = /(?:^|\/)(?:config|templates|locales|sections|blocks|snippets|layout)\/[^/]+\.json$/i;
 const SOURCE_JSON_BASE = /^(?:package(?:-lock)?|tsconfig[\w.-]*|composer|jsconfig|\.?[\w-]*rc)\.json$|\.schema\.json$/i;
