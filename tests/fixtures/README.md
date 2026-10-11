@@ -32,7 +32,7 @@ verbatim, Apache-2.0 — see `../parity/NOTICE`); they are the array-crush porti
 
 ## slim channel fixtures
 
-Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs` and the per-channel rows of
+Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs`, `../lint-slim-fixtures.mjs` and the per-channel rows of
 `../slim-fixtures.mjs`. All synthetic; none is derived from third-party content.
 
 | File | Source | Shape | Notes |
@@ -49,6 +49,10 @@ Inputs for `../slim-engines.mjs`, `../html-slim-fixtures.mjs` and the per-channe
 | `a11y-pdp.txt` | **synthetic** — `make-a11y.cjs pdp` | ~13 KB product page: gallery of nameless thumbnails, size / shade radios with `[checked]` / `[disabled]`, quantity, an `[expanded]` accordion, 8 recommendations, 10 long reviews | 13,048 B → 9,447 B; the reviews (prose) never fold |
 | `a11y-cart.txt` | **synthetic** — `make-a11y.cjs cart` | ~6 KB page header behind an open cart drawer `dialog` with 8 line items | 6,215 B → 2,801 B |
 | `a11y-docs.txt` | **synthetic** — `make-a11y.cjs docs` | ~10 KB documentation article: headings, long paragraphs, code lines, a 6-link nav | must come back `no-gain` (prose saves under 10 %) |
+
+| `eslint-stylish.txt` | **synthetic** — script-built once | ~36 KB ESLint stylish report: 400 problems (228 errors, 172 warnings) over 30 files under `/home/dev/shop-theme/src/`, 9 rules, one rule-less parsing error, the `✖ 400 problems` and `--fix` summary lines | the lint engine (`../lint-slim-fixtures.mjs`): sniffed `lint`, ~75% saved, every kept `file:line:col` in the input, header counts equal the summary; Bash `npx eslint` and MCP rows |
+| `lint-theme-check.txt` | **synthetic** — script-built once | ~14 KB theme-check text report without quoted source lines: 120 offences (`[level] file:line:col Check: message`) over 20 Liquid files, 7 checks, the `files inspected, … offenses detected` summary | the lint engine on theme-check; the Bash `shopify theme check` and MCP rows. `theme-check.txt` (above) quotes Liquid and stays `template` |
+| `tsc.txt` | **synthetic** — script-built once | ~5.5 KB `tsc --noEmit` output: 60 errors (`file(line,col): error TSnnnn: message`) over 14 files, 5 codes, `Found 60 errors in 14 files.` | the lint engine on tsc: locations kept as `file(line,col)`, quoted names shown per location; under the Bash 8,192 B lint gate |
 
 The 300 KB Read row and the eval's `orders.json` come from `plugins/slim/evals/_shared/make-orders.cjs`
 at run time; `jql-nodes-ELC.json` is the one fixture of that size committed, because the delivery

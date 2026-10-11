@@ -13,10 +13,10 @@ import type { Viewed } from './node-hook.ts'
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 
 export const VIEW_TOOL = 'mcp__slim__view'
-export const VIEW_ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'a11y', 'media'] as const
+export const VIEW_ENGINES = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'a11y', 'lint', 'media'] as const
 export const VIEW_DESC =
   'Show a big local file (path) or a shell command\'s output (command) compactly: slim picks the engine by content ' +
-  '(JSON, JSON lines, logs, HTML, Figma REST nodes.json, Atlassian documents, plain-text windows) and returns a figure ' +
+  '(JSON, JSON lines, logs, HTML, Figma REST nodes.json, Atlassian documents, linter output, plain-text windows) and returns a figure ' +
   'line and the compact text, whole up to 16 KB, else its head and a file to Read windowed. jq narrows JSON first ' +
   "(dot paths .a.b, .a[0], '[]' iteration, ',' multi-select, '| keys' / '| length'). out writes the compact text to a " +
   'file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root), reused while ' +

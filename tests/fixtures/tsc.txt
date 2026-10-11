@@ -1,0 +1,62 @@
+src/cart/store-0.ts(59,22): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/cart/store-0.ts(97,7): error TS2532: Object is possibly 'undefined'.
+src/cart/store-0.ts(107,16): error TS7006: Parameter 'event' implicitly has an 'any' type.
+src/cart/store-0.ts(130,24): error TS2304: Cannot find name 'swatchMap'.
+src/cart/store-0.ts(187,12): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/cart/store-0.ts(252,23): error TS2304: Cannot find name 'priceFormat'.
+src/product/api-1.ts(52,16): error TS7006: Parameter 'event' implicitly has an 'any' type.
+src/product/api-1.ts(149,23): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/product/api-1.ts(160,2): error TS7006: Parameter 'el' implicitly has an 'any' type.
+src/product/api-1.ts(191,1): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/product/api-1.ts(261,19): error TS2532: Object is possibly 'undefined'.
+src/product/api-1.ts(283,23): error TS7006: Parameter 'el' implicitly has an 'any' type.
+src/product/api-1.ts(290,25): error TS2339: Property 'blockIndex' does not exist on type 'Variant'.
+src/search/render-2.ts(45,12): error TS2304: Cannot find name 'cartTotal'.
+src/search/render-2.ts(112,7): error TS7006: Parameter 'event' implicitly has an 'any' type.
+src/search/render-2.ts(130,3): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/search/render-2.ts(154,37): error TS2532: Object is possibly 'undefined'.
+src/search/render-2.ts(223,39): error TS2532: Object is possibly 'undefined'.
+src/search/render-2.ts(285,19): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/utils/format-3.ts(210,19): error TS2304: Cannot find name 'productHandle'.
+src/utils/format-3.ts(248,6): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/utils/format-3.ts(267,23): error TS2532: Object is possibly 'undefined'.
+src/cart/store-4.ts(44,15): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/cart/store-4.ts(178,6): error TS2339: Property 'variantId' does not exist on type 'CartItem'.
+src/cart/store-4.ts(246,17): error TS2339: Property 'sectionId' does not exist on type 'Section'.
+src/product/api-5.ts(15,33): error TS2532: Object is possibly 'undefined'.
+src/product/api-5.ts(70,4): error TS2304: Cannot find name 'drawerEl'.
+src/product/api-5.ts(82,9): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/product/api-5.ts(164,18): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/product/api-5.ts(165,30): error TS7006: Parameter 'event' implicitly has an 'any' type.
+src/product/api-5.ts(248,31): error TS2532: Object is possibly 'undefined'.
+src/search/render-6.ts(97,30): error TS2532: Object is possibly 'undefined'.
+src/search/render-6.ts(273,18): error TS2304: Cannot find name 'imgSrc'.
+src/utils/format-7.ts(65,39): error TS7006: Parameter 'event' implicitly has an 'any' type.
+src/utils/format-7.ts(81,38): error TS2304: Cannot find name 'locale'.
+src/utils/format-7.ts(182,33): error TS2304: Cannot find name 'variantId'.
+src/cart/store-8.ts(34,27): error TS2304: Cannot find name 'sectionId'.
+src/cart/store-8.ts(69,30): error TS2339: Property 'qtyInput' does not exist on type 'CartItem'.
+src/cart/store-8.ts(161,10): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/cart/store-8.ts(204,13): error TS2304: Cannot find name 'qtyInput'.
+src/cart/store-8.ts(205,37): error TS2339: Property 'productHandle' does not exist on type 'Variant'.
+src/cart/store-8.ts(221,13): error TS2339: Property 'drawerEl' does not exist on type 'Section'.
+src/cart/store-8.ts(281,28): error TS2304: Cannot find name 'drawerEl'.
+src/product/api-9.ts(54,32): error TS7006: Parameter 'event' implicitly has an 'any' type.
+src/product/api-9.ts(294,11): error TS2532: Object is possibly 'undefined'.
+src/search/render-10.ts(163,38): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/search/render-10.ts(217,36): error TS2339: Property 'qtyInput' does not exist on type 'Section'.
+src/search/render-10.ts(268,9): error TS2532: Object is possibly 'undefined'.
+src/utils/format-11.ts(39,29): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/utils/format-11.ts(266,5): error TS2339: Property 'drawerEl' does not exist on type 'CartItem'.
+src/cart/store-12.ts(165,19): error TS2304: Cannot find name 'imgSrc'.
+src/cart/store-12.ts(198,36): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/cart/store-12.ts(268,40): error TS2304: Cannot find name 'locale'.
+src/product/api-13.ts(7,27): error TS2304: Cannot find name 'swatchMap'.
+src/product/api-13.ts(81,39): error TS2339: Property 'qtyInput' does not exist on type 'CartItem'.
+src/product/api-13.ts(84,8): error TS2339: Property 'sectionId' does not exist on type 'CartItem'.
+src/product/api-13.ts(182,9): error TS7006: Parameter 'event' implicitly has an 'any' type.
+src/product/api-13.ts(209,17): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.
+src/product/api-13.ts(278,28): error TS2339: Property 'locale' does not exist on type 'CartItem'.
+src/product/api-13.ts(283,31): error TS2304: Cannot find name 'qtyInput'.
+
+Found 60 errors in 14 files.

@@ -7,7 +7,7 @@ Bash, Read, WebFetch, WebSearch, Grep and Agent — and shrinks the large ones b
 the context; a pasted prompt's data and an @-mentioned data file get the same treatment. It decides
 by content, never by tool name: JSON goes to the JSON compressor, a log to the log engine, an HTML
 page to the HTML engine, Figma design-context JSX to the JSX compactor, a Figma REST nodes response
-to the node-tree engine, a browser MCP's accessibility snapshot to the snapshot folder, and plain text (code, diffs, test output) is at most windowed. Two tools
+to the node-tree engine, a browser MCP's accessibility snapshot to the snapshot folder, linter output to the lint engine, and plain text (code, diffs, test output) is at most windowed. Two tools
 come with it: `lookup` answers one question about a page, a command's output or a file without
 loading it whole, and `view` shows a big file or a command's output compactly (and resizes images
 and video). Every original stays on disk behind a recovery handle, so nothing is lost.
@@ -50,8 +50,8 @@ validates a hook's result against the built-in tool's output schema: Bash stays
 
 | Channel | Candidate when | What slim does |
 |---|---|---|
-| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX and logs compressed, browser accessibility snapshots folded; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
-| Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML; over 16,384 B from a log command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
+| MCP (`mcp__*`) | result over 4,096 B, or the host's overflow notice | each text block sniffed like any other channel's text: JSON, JSONL, fenced JSON, Figma JSX, linter output and logs compressed, browser accessibility snapshots folded; plain, guarded and HTML text untouched; spill-and-stub when still too large (below) |
+| Bash | stdout over 4,096 B that is JSON, JSONL or (for a fetch command) HTML; over 16,384 B from a log command; over 8,192 B from a linter command; over `SLIM_PLAIN_BYTES`; or any output the host saved to a file (plain text included, whatever its size) | stdout only; stderr and the other fields are kept |
 | Read | a whole-file read of a `.log`, `.jsonl` or `.ndjson` file over 32,768 B, or of a `.json` data file the host cut at its token cap | the file view is compressed; see the Read rules below |
 | WebFetch | result over 16,384 B that is JSON or HTML, or over `SLIM_PLAIN_BYTES` | JSON, JSONL and HTML engines, else a window |
 | WebSearch | a result string over `SLIM_PLAIN_BYTES` | that string is windowed; the others are untouched |
@@ -87,13 +87,29 @@ clickable. The last line names the narrowing call (`browser_find`, `take_snapsho
 or `lookup` on the spill). Over the stub limit it first folds harder (one exemplar, 6 names), then
 drops `/url` lines and non-state attributes, then collapses the deepest levels; a prose page that
 saves under 10 % passes through. MCP only, from the 4,096 B gate; `SLIM_A11Y=0` turns it off.
+**Linter output.** ESLint (stylish and unix), stylelint, theme-check text, tsc (plain and `--pretty`)
+and `prettier --check` lists — 30 or more lines, at least 70 % of them in one of those grammars — are
+grouped by rule and message template (quoted names and numbers slotted), errors first, then warnings,
+then notes, larger groups first. Each group keeps its count and its first 5 locations verbatim
+(`file:line:col`, or tsc's `file(line,col)`, with the message when it differs from the template),
+then `… +N in M files (file ×n, …)` naming every file; tsc's indented elaboration lines stay under
+their error. The tool's own summary lines close it, verbatim. Over the channel's size cap each fold
+names its first 8 files, then it keeps 3, then 1 location per group, then counts only, else it is
+stubbed.
+The output starts with `<<slim-lint>>`. Admitted on Bash for a linter command (below) and on MCP by
+content; a Read of a lint report is not compressed. Theme-check output that quotes Liquid source
+lines stays template text (Guard rails).
 
 **Engine admission on Bash.** JSON and JSONL output is compressed whatever the command. HTML is
 treated as a page only when the command fetches one: `curl`, `wget`, `http`, `https`, `xh` or `lynx`
 as the command word of a pipeline segment (`cat src/http/page.html` is not a fetch). Otherwise it is
 plain text, so theme source is never stripped. The log engine runs only
 for a log source (a command naming a `.log` or `.jsonl` file, `journalctl`, `logs`); any other text
-is plain text, so test runners and git output are never deduplicated as a log.
+is plain text, so test runners and git output are never deduplicated as a log. The lint engine runs
+for `eslint`, `stylelint`, `theme-check`, `shopify theme check`, `tsc`, `prettier` (directly, through
+`npx`/`pnpm exec`/`yarn`/`bunx`, or by bin path) and a package's `lint` script (`npm run lint`,
+`pnpm lint`, `yarn lint`, `bun run lint`); any other command's output is not lint (a `grep -rn
+error: logs/` hit list keeps every line).
 
 **Guard rails.** These pass through untouched, with their reason on the report line:
 
@@ -334,7 +350,7 @@ whose result the webfetch channel compresses, or `lookup({ url, question })`).
   JSON array): every guard has ruled by then, so view goes on.
   The core then reads the file the Read opened and picks the engine
   by content (`engine` overrides: `json`, `jsonl`, `log`, `html`, `figma`, `figma-nodes`, `adf`,
-  `text`, `a11y`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
+  `text`, `a11y`, `lint`, `media`). A `<key>-<node>.nodes.json` gets the `<key>.variables.json` beside it, when there
   is one, so bound variables read by name. An image or a video goes to the media backend (see Media).
 - `command`: slim runs it through Bash (permission rules and hooks rule on it); an output the host
   saved to a file is read from there. A compressed output keeps its original in the spill root, and
@@ -438,7 +454,7 @@ slim owns four `$.state` keys under `plugin: 'slim'`. Any plugin reads them; onl
 The contract is `plugins/slim/types/index.d.ts`:
 
 ```ts
-export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'stub'
+export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'lint' | 'stub'
 export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'agent' | 'attachment' | 'prompt'
 type SlimEventBase = { v: 1; atMs: number; text: string; src: 'slim'; tool: string; agentType?: string; ms: number }
 export type SlimCompressEvent = SlimEventBase & { kind: 'slim'; channel: SlimChannel; bytesIn: number; bytesOut: number; engine: SlimEngine }
@@ -636,6 +652,9 @@ by the module (`$.settings.read`) and handed to the core in the envelope.
   see the Read rules.
 - **Images, PDFs and binary output** pass through the hook channels untouched; images and video are
   resized only when asked through `view { path }` (see Media).
+- **A lint report read from a file.** Read admits only data files (see the Read rules), so a saved
+  ESLint or tsc report is shown as the host renders it; run the linter through Bash, or ask
+  `view({ path })`, to get it grouped.
 - **A `.json` file the host showed whole.** A Read under the host's token cap is left as is. Ask a
   question about it with `lookup({ path, question })`, or narrow it with `view({ path, jq })`.
 - **Browser snapshots outside MCP.** A snapshot printed by a Bash command, read from a file or shown

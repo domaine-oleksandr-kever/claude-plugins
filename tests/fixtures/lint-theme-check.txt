@@ -1,0 +1,122 @@
+[warning] sections/main-product-0.liquid:22:8 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] sections/main-product-0.liquid:106:3 UndefinedObject: Unknown object 'section_settings' used.
+[warning] sections/main-product-0.liquid:111:6 UndefinedObject: Unknown object 'section_settings' used.
+[error] sections/main-product-0.liquid:146:12 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'span' before it was opened
+[error] sections/main-product-0.liquid:155:8 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'li' before it was opened
+[error] sections/main-product-0.liquid:183:12 MissingTemplate: 'snippets/price-sale.liquid' does not exist
+[error] sections/main-product-0.liquid:198:8 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+[warning] sections/main-product-0.liquid:200:9 ImgWidthAndHeight: Missing width and height attributes on img
+[error] sections/main-product-0.liquid:215:4 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'span' before it was opened
+[suggestion] sections/main-product-0.liquid:240:12 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (47 KB).
+[warning] snippets/card-product-1.liquid:38:12 ImgWidthAndHeight: Missing width and height attributes on img
+[suggestion] snippets/card-product-1.liquid:47:1 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (23 KB).
+[warning] snippets/card-product-1.liquid:134:8 ImgWidthAndHeight: Missing width and height attributes on img
+[suggestion] snippets/card-product-1.liquid:138:2 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (21 KB).
+[warning] snippets/card-product-1.liquid:231:9 ImgWidthAndHeight: Missing width and height attributes on img
+[suggestion] blocks/collection-grid-2.liquid:25:5 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (39 KB).
+[warning] blocks/collection-grid-2.liquid:37:6 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] blocks/collection-grid-2.liquid:74:6 ImgWidthAndHeight: Missing width and height attributes on img
+[error] blocks/collection-grid-2.liquid:80:12 MissingTemplate: 'snippets/price-sale.liquid' does not exist
+[warning] blocks/collection-grid-2.liquid:85:11 UndefinedObject: Unknown object 'card_product' used.
+[error] blocks/collection-grid-2.liquid:156:3 MissingTemplate: 'snippets/swatch.liquid' does not exist
+[suggestion] templates/customers/account-3.liquid:28:8 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[warning] templates/customers/account-3.liquid:42:10 UndefinedObject: Unknown object 'swatch_map' used.
+[warning] templates/customers/account-3.liquid:75:3 UnusedAssign: The variable 'img_ratio' is assigned but not used
+[warning] templates/customers/account-3.liquid:95:12 UndefinedObject: Unknown object 'section_settings' used.
+[suggestion] templates/customers/account-3.liquid:122:7 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (45 KB).
+[error] sections/main-product-4.liquid:9:11 MissingTemplate: 'snippets/swatch.liquid' does not exist
+[suggestion] sections/main-product-4.liquid:132:5 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (11 KB).
+[warning] sections/main-product-4.liquid:177:10 UnusedAssign: The variable 'qty_max' is assigned but not used
+[warning] snippets/card-product-5.liquid:18:8 UndefinedObject: Unknown object 'section_settings' used.
+[error] snippets/card-product-5.liquid:38:12 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'li' before it was opened
+[error] snippets/card-product-5.liquid:57:9 MissingTemplate: 'snippets/price-sale.liquid' does not exist
+[suggestion] snippets/card-product-5.liquid:73:5 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[warning] snippets/card-product-5.liquid:131:1 UnusedAssign: The variable 'img_ratio' is assigned but not used
+[warning] snippets/card-product-5.liquid:170:3 UnusedAssign: The variable 'card_index' is assigned but not used
+[warning] snippets/card-product-5.liquid:181:3 UndefinedObject: Unknown object 'swatch_map' used.
+[warning] snippets/card-product-5.liquid:202:3 UnusedAssign: The variable 'img_ratio' is assigned but not used
+[warning] snippets/card-product-5.liquid:231:2 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] snippets/card-product-5.liquid:234:1 ImgWidthAndHeight: Missing width and height attributes on img
+[suggestion] blocks/collection-grid-6.liquid:51:1 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[warning] blocks/collection-grid-6.liquid:137:12 ImgWidthAndHeight: Missing width and height attributes on img
+[suggestion] blocks/collection-grid-6.liquid:173:9 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (23 KB).
+[suggestion] blocks/collection-grid-6.liquid:198:8 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (30 KB).
+[error] blocks/collection-grid-6.liquid:218:7 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+[error] blocks/collection-grid-6.liquid:224:5 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+[warning] templates/customers/account-7.liquid:7:10 UndefinedObject: Unknown object 'section_settings' used.
+[warning] templates/customers/account-7.liquid:10:7 UndefinedObject: Unknown object 'swatch_map' used.
+[error] templates/customers/account-7.liquid:51:12 MissingTemplate: 'snippets/icon-cart.liquid' does not exist
+[suggestion] templates/customers/account-7.liquid:167:8 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (26 KB).
+[suggestion] templates/customers/account-7.liquid:214:2 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[error] templates/customers/account-7.liquid:217:4 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+[suggestion] sections/main-product-8.liquid:37:4 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (35 KB).
+[suggestion] sections/main-product-8.liquid:105:12 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (31 KB).
+[suggestion] sections/main-product-8.liquid:160:9 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[suggestion] sections/main-product-8.liquid:228:4 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[suggestion] snippets/card-product-9.liquid:77:5 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (17 KB).
+[warning] snippets/card-product-9.liquid:231:3 ImgWidthAndHeight: Missing width and height attributes on img
+[error] blocks/collection-grid-10.liquid:13:6 MissingTemplate: 'snippets/icon-cart.liquid' does not exist
+[warning] blocks/collection-grid-10.liquid:35:10 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] blocks/collection-grid-10.liquid:67:11 UnusedAssign: The variable 'card_index' is assigned but not used
+[error] blocks/collection-grid-10.liquid:87:5 MissingTemplate: 'snippets/icon-cart.liquid' does not exist
+[warning] blocks/collection-grid-10.liquid:193:12 UnusedAssign: The variable 'card_index' is assigned but not used
+[warning] blocks/collection-grid-10.liquid:200:6 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] blocks/collection-grid-10.liquid:200:12 UndefinedObject: Unknown object 'card_product' used.
+[warning] blocks/collection-grid-10.liquid:208:4 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] blocks/collection-grid-10.liquid:220:7 UnusedAssign: The variable 'img_ratio' is assigned but not used
+[suggestion] templates/customers/account-11.liquid:70:4 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[warning] templates/customers/account-11.liquid:71:11 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] templates/customers/account-11.liquid:72:8 UndefinedObject: Unknown object 'section_settings' used.
+[warning] templates/customers/account-11.liquid:75:10 ImgWidthAndHeight: Missing width and height attributes on img
+[error] templates/customers/account-11.liquid:123:10 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+[error] templates/customers/account-11.liquid:156:3 MissingTemplate: 'snippets/icon-cart.liquid' does not exist
+[suggestion] templates/customers/account-11.liquid:221:9 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (24 KB).
+[error] sections/main-product-12.liquid:9:3 MissingTemplate: 'snippets/card-badge.liquid' does not exist
+[suggestion] sections/main-product-12.liquid:32:1 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (17 KB).
+[warning] sections/main-product-12.liquid:54:3 UndefinedObject: Unknown object 'swatch_map' used.
+[error] sections/main-product-12.liquid:79:3 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'span' before it was opened
+[warning] sections/main-product-12.liquid:105:1 UndefinedObject: Unknown object 'section_settings' used.
+[error] sections/main-product-12.liquid:111:1 MissingTemplate: 'snippets/price-sale.liquid' does not exist
+[warning] sections/main-product-12.liquid:116:4 UnusedAssign: The variable 'qty_max' is assigned but not used
+[warning] sections/main-product-12.liquid:130:12 UndefinedObject: Unknown object 'card_product' used.
+[warning] sections/main-product-12.liquid:173:6 UnusedAssign: The variable 'qty_max' is assigned but not used
+[suggestion] sections/main-product-12.liquid:174:2 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[suggestion] sections/main-product-12.liquid:181:5 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (36 KB).
+[error] sections/main-product-12.liquid:184:4 MissingTemplate: 'snippets/icon-cart.liquid' does not exist
+[warning] sections/main-product-12.liquid:205:6 UnusedAssign: The variable 'card_index' is assigned but not used
+[warning] snippets/card-product-13.liquid:14:6 UnusedAssign: The variable 'img_ratio' is assigned but not used
+[warning] snippets/card-product-13.liquid:95:4 ImgWidthAndHeight: Missing width and height attributes on img
+[suggestion] snippets/card-product-13.liquid:129:8 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (49 KB).
+[error] snippets/card-product-13.liquid:149:2 MissingTemplate: 'snippets/icon-cart.liquid' does not exist
+[warning] snippets/card-product-13.liquid:175:1 UndefinedObject: Unknown object 'swatch_map' used.
+[suggestion] snippets/card-product-13.liquid:188:7 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[warning] blocks/collection-grid-14.liquid:52:11 ImgWidthAndHeight: Missing width and height attributes on img
+[error] blocks/collection-grid-14.liquid:152:1 MissingTemplate: 'snippets/price-sale.liquid' does not exist
+[error] blocks/collection-grid-14.liquid:156:8 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'span' before it was opened
+[suggestion] templates/customers/account-15.liquid:33:8 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[warning] templates/customers/account-15.liquid:210:9 ImgWidthAndHeight: Missing width and height attributes on img
+[error] templates/customers/account-15.liquid:232:12 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'span' before it was opened
+[warning] templates/customers/account-15.liquid:242:1 ImgWidthAndHeight: Missing width and height attributes on img
+[error] sections/main-product-16.liquid:19:11 MissingTemplate: 'snippets/price-sale.liquid' does not exist
+[suggestion] sections/main-product-16.liquid:79:2 AssetSizeJavaScript: JavaScript on every page load exceeds compressed size threshold (32 KB).
+[warning] sections/main-product-16.liquid:100:8 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] sections/main-product-16.liquid:183:5 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] snippets/card-product-17.liquid:65:1 UndefinedObject: Unknown object 'card_product' used.
+[error] snippets/card-product-17.liquid:140:12 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+[warning] snippets/card-product-17.liquid:168:3 UndefinedObject: Unknown object 'swatch_map' used.
+[error] snippets/card-product-17.liquid:182:12 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'li' before it was opened
+[warning] snippets/card-product-17.liquid:217:9 UnusedAssign: The variable 'img_ratio' is assigned but not used
+[warning] snippets/card-product-17.liquid:233:4 UndefinedObject: Unknown object 'card_product' used.
+[warning] blocks/collection-grid-18.liquid:41:1 UndefinedObject: Unknown object 'card_product' used.
+[suggestion] blocks/collection-grid-18.liquid:123:10 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[warning] blocks/collection-grid-18.liquid:180:6 ImgWidthAndHeight: Missing width and height attributes on img
+[warning] blocks/collection-grid-18.liquid:188:11 UnusedAssign: The variable 'card_index' is assigned but not used
+[error] blocks/collection-grid-18.liquid:195:6 MissingTemplate: 'snippets/swatch.liquid' does not exist
+[error] templates/customers/account-19.liquid:28:6 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+[error] templates/customers/account-19.liquid:63:10 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+[suggestion] templates/customers/account-19.liquid:65:10 RemoteAsset: Asset should be served by the Shopify CDN for better performance.
+[warning] templates/customers/account-19.liquid:94:10 UnusedAssign: The variable 'qty_max' is assigned but not used
+[error] templates/customers/account-19.liquid:102:1 LiquidHTMLSyntaxError: Attempting to close HtmlElement 'div' before it was opened
+[error] templates/customers/account-19.liquid:241:6 MissingTemplate: 'snippets/icon-cart.liquid' does not exist
+
+20 files inspected, 120 offenses detected (34 errors, 57 warnings, 29 suggestions)

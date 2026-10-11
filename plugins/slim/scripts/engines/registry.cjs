@@ -14,6 +14,7 @@ const figmaNodes = require('./figma-nodes.cjs');
 const adf = require('./adf.cjs');
 const text = require('./text-window.cjs');
 const a11y = require('./a11y.cjs');
+const lint = require('./lint.cjs');
 
 /**
  * @typedef {object} EngineRow
@@ -38,6 +39,7 @@ const ROWS = [
   { id: 'adf', module: adf, ext: '.json', fit: false, stub: true, mcp: false },
   { id: 'text', module: text, ext: '.txt', fit: false, stub: true, mcp: false },
   { id: 'a11y', module: a11y, ext: '.txt', fit: true, stub: true, mcp: true },
+  { id: 'lint', module: lint, ext: '.txt', fit: true, stub: true, mcp: true },
 ];
 
 module.exports = { ROWS };
