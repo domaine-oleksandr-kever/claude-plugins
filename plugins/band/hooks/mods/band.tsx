@@ -34,6 +34,7 @@ import {
   splitLabel,
   toChecklist,
 } from './lib.ts'
+import type { ModelOption } from './lib.ts'
 import { anyEvent, take } from './events.ts'
 
 const usage = atom({ plugin: 'band', key: 'usage' } as const, USAGE_INIT)
@@ -140,12 +141,12 @@ function pressClear($: $): void {
   )
 }
 
-/** A pick folds the picker and runs `/model <id>` as typed; the switch event then moves the segment. The current id only folds. */
-function pickModel($: $, id: string, current: string): void {
+/** A pick folds the picker and runs `/model <alias>` as typed; the switch event then moves the segment. The current one only folds. */
+function pickModel($: $, o: ModelOption): void {
   void setPicker($, false)
-  if (id === current) return
-  $.command.run({ command: 'model', args: id }).then(
-    r => $.ui.toast(r.text || `model ${id}`),
+  if (o.current) return
+  $.command.run({ command: 'model', args: o.value }).then(
+    r => $.ui.toast(r.text || `model ${o.value}`),
     err => $.ui.toast(`model refused: ${err instanceof Error ? err.message : String(err)}`),
   )
 }
@@ -321,8 +322,8 @@ export function registerBand(on: On, options: PluginOptions): void {
             label={o.label}
             plain
             {...(letters && o.hotkey ? { hotkey: o.hotkey } : {})}
-            {...(o.value === m ? {} : { dimColor: true })}
-            onPress={() => pickModel($, o.value, m)}
+            {...(o.current ? {} : { dimColor: true })}
+            onPress={() => pickModel($, o)}
           />,
         )
       })

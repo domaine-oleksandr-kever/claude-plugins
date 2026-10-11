@@ -337,27 +337,34 @@ export function shortModel(m: string | null): string | null {
   return m === null ? null : m.replace(/^claude-/, '')
 }
 
-/** The ids the terminal's model picker offers, as `/model <id>` takes them; the engine lists no models itself. */
-export const MODEL_IDS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001'] as const
+/** The families the terminal's model picker offers: `/model <alias>` resolves to the family's newest model, so the list never dates. */
+export const MODEL_ALIASES = ['fable', 'opus', 'sonnet', 'haiku'] as const
+
+/** `claude-haiku-5-5` → `haiku`, `claude-opus-5-5[1m]` → `opus`: the family of a model id. */
+export function modelFamily(id: string): string {
+  return (shortModel(id) as string).split('-')[0]
+}
 
 /** The mark after the model id on the terminal: the segment is the picker's button. */
 export const MODEL_MARK = ' ▾'
 
-export type ModelOption = { value: string; label: string; hotkey?: string }
+/** `value` is what `/model` runs; `current` marks the session's own model, which only folds the picker. */
+export type ModelOption = { value: string; label: string; current: boolean; hotkey?: string }
 
 /**
- * The picker's options: the known ids plus the session's own when it is none of them (a pinned or dated id).
- * Each takes its label's first letter as hotkey when it is one and still free (`f`, `o`, `s`, `h`).
+ * The picker's options: the aliases, the one of the session's family marked current; the session's own id leads
+ * them when no alias stands for it (a pinned `[1m]` id, a family outside the list). Each takes its label's first
+ * letter as hotkey when it is one and still free (`f`, `o`, `s`, `h`).
  */
 export function modelOptions(current: string | null): ModelOption[] {
-  const ids: string[] = current !== null && !MODEL_IDS.includes(current as (typeof MODEL_IDS)[number]) ? [current, ...MODEL_IDS] : [...MODEL_IDS]
+  const aliased = current !== null && !/\[/.test(current) && MODEL_ALIASES.includes(modelFamily(current) as (typeof MODEL_ALIASES)[number])
+  const own: ModelOption[] = current !== null && !aliased ? [{ value: current, label: shortModel(current) as string, current: true }] : []
   const taken = new Set<string>()
-  return ids.map(value => {
-    const label = shortModel(value) as string
-    const letter = label[0]
-    if (!/^[a-z]$/.test(letter) || taken.has(letter)) return { value, label }
+  return [...own, ...MODEL_ALIASES.map(a => ({ value: a, label: a, current: aliased && modelFamily(current as string) === a }))].map(o => {
+    const letter = o.label[0]
+    if (!/^[a-z]$/.test(letter) || taken.has(letter)) return o
     taken.add(letter)
-    return { value, label, hotkey: letter }
+    return { ...o, hotkey: letter }
   })
 }
 

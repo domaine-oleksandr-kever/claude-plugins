@@ -33,6 +33,7 @@ import {
   fmtPct,
   fmtRemaining,
   layout,
+  modelFamily,
   modelOptions,
   pctLevel,
   rateLabel,
@@ -204,13 +205,21 @@ describe('layout', () => {
     expect(shortModel('claude-fable-5-1')).toBe('fable-5-1')
     expect(shortModel('claude-opus-5-5')).toBe('opus-5-5')
     expect(shortModel(null)).toBeNull()
-    expect(modelOptions('claude-opus-5-5').map(o => o.label)).toEqual(['fable-5-1', 'opus-5-5', 'sonnet-5-5', 'haiku-4-5-20251001'])
+    // The picker offers families, not dated ids: /model <alias> is the family's newest model.
+    expect(modelFamily('claude-haiku-5-5')).toBe('haiku')
+    expect(modelFamily('claude-opus-5-5[1m]')).toBe('opus')
+    expect(modelOptions('claude-opus-5-5').map(o => o.label)).toEqual(['fable', 'opus', 'sonnet', 'haiku'])
     expect(modelOptions('claude-opus-5-5').map(o => o.hotkey)).toEqual(['f', 'o', 's', 'h'])
+    expect(modelOptions('claude-opus-5-5').map(o => o.current)).toEqual([false, true, false, false])
+    expect(modelOptions('claude-haiku-5-5').map(o => o.current)).toEqual([false, false, false, true])
     expect(modelOptions(null)).toHaveLength(4)
-    // A pinned id leads and takes its letter; the listed id it shadows goes without one.
+    expect(modelOptions(null).some(o => o.current)).toBe(false)
+    // A pinned id leads as the current one and takes its letter; the alias it shadows goes without one.
     const pinned = modelOptions('claude-opus-5-5[1m]')
-    expect(pinned[0]).toEqual({ value: 'claude-opus-5-5[1m]', label: 'opus-5-5[1m]', hotkey: 'o' })
-    expect(pinned[2]).toEqual({ value: 'claude-opus-5-5', label: 'opus-5-5' })
+    expect(pinned[0]).toEqual({ value: 'claude-opus-5-5[1m]', label: 'opus-5-5[1m]', current: true, hotkey: 'o' })
+    expect(pinned[2]).toEqual({ value: 'opus', label: 'opus', current: false })
+    // A family outside the list leads the same way.
+    expect(modelOptions('claude-zephyr-1-0')[0]).toEqual({ value: 'claude-zephyr-1-0', label: 'zephyr-1-0', current: true, hotkey: 'z' })
     expect(splitLabel('cache 42m')).toEqual(['cache', '42m'])
     expect(splitLabel('ELC-1591 3/5 ▶ Preview')).toEqual(['ELC-1591', '3/5 ▶ Preview'])
     expect(splitLabel('slim-mods')).toEqual(['slim-mods', ''])

@@ -126,11 +126,11 @@ describe('band.jsonl', () => {
   test("a fresh module seeds from the file: this session's lines stay, another session's and junk go", async ($, on) => {
     const w = world(on)
     const path = pathOf(w)
-    const mine = fileLine(T0 - 1000, '9.9.8', w.sid, 'model', 'claude-haiku-4-5-20251001')
+    const mine = fileLine(T0 - 1000, '9.9.8', w.sid, 'model', 'claude-haiku-5-5')
     w.files[path] = [mine, 'not json', fileLine(T0 - 500, '9.9.8', 'other', 'model', 'x'), ''].join('\n')
     await start($)
     expect(linesOf(w.files[path]).map(l => `${l.session === w.sid} ${l.kind} ${l.text}`)).toEqual([
-      'true model claude-haiku-4-5-20251001',
+      'true model claude-haiku-5-5',
       'true start band 9.9.9',
     ])
   })
