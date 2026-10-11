@@ -20,23 +20,36 @@ Pick one of the three ways. Each one installs slim, band and base, then the team
 
 ### A. One command in a terminal
 
-This needs the `claude` CLI on PATH (`claude --version` answers). Copy the line of your team, paste
-it into Terminal, press Enter:
+This needs the `claude` CLI on PATH (`claude --version` answers). Each block below is one line.
+Press its copy button, paste it into Terminal, press Enter.
+
+Frontend team (slim, band, base, fe):
 
 ```bash
-# Frontend team: slim, band, base, fe
 curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,fe --yes
+```
 
-# QA team: slim, band, base, qa
+QA team (slim, band, base, qa):
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,qa --yes
+```
 
-# Backend team: slim, band, base, be
+Backend team (slim, band, base, be):
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,be --yes
+```
 
-# PM team: slim, band, base, pm
+PM team (slim, band, base, pm):
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,pm --yes
+```
 
-# Everything
+Everything:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/domaine-oleksandr-kever/claude-plugins/main/scripts/bootstrap.sh | bash -s -- --targets claude --plugins slim,band,base,fe,qa,be,pm --yes
 ```
 
