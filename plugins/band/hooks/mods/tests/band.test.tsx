@@ -763,7 +763,7 @@ describe('band', () => {
       expect(w.toasts).toEqual(['turn is running — press Compact again when it ends'])
     })
 
-    test(`${surface}: Compact press on a cold cache asks Compact / Clear / Cancel; warm compacts at once`, async ($, on) => {
+    test(`${surface}: Compact press on a cold or ending cache asks Compact / Clear / Cancel; warm compacts at once`, async ($, on) => {
       const { w, clock } = world(on)
       const asked: { question: string; options: string[] }[] = []
       let answer: string | null = 'Cancel'
@@ -791,14 +791,19 @@ describe('band', () => {
       await ui.press({ key: 'compact' })
       expect(asked).toEqual([])
       expect(compacts).toBe(1)
-      await clock.advance(41 * MIN)
+      await clock.advance(36 * MIN)
       await ui.press({ key: 'compact' })
       expect(asked).toEqual([])
       expect(compacts).toBe(2)
-      await clock.advance(2 * MIN)
+      await clock.advance(MIN)
       answer = null
       await ui.press({ key: 'compact' })
-      expect(asked).toEqual([{ question: expect.stringMatching(/^Prompt cache is cold: /), options: ['Compact', 'Clear', 'Cancel'] }])
+      expect(asked).toEqual([{ question: expect.stringMatching(/^Prompt cache is cold or ends within 5 min: /), options: ['Compact', 'Clear', 'Cancel'] }])
+      expect(compacts).toBe(2)
+      await clock.advance(6 * MIN)
+      await ui.press({ key: 'compact' })
+      expect(asked).toHaveLength(2)
+      expect(asked[1]).toEqual(asked[0])
       expect(compacts).toBe(2)
       answer = 'Compact'
       await ui.press({ key: 'compact' })
@@ -806,7 +811,7 @@ describe('band', () => {
       expect(runs).toEqual([])
       answer = 'Clear'
       await ui.press({ key: 'compact' })
-      expect(asked).toHaveLength(3)
+      expect(asked).toHaveLength(4)
       expect(compacts).toBe(3)
       expect(runs).toEqual(['clear'])
       expect(w.toasts.at(-1)).toBe('cleared')

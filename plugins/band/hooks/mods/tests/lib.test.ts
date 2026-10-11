@@ -121,12 +121,13 @@ describe('remaining time', () => {
 describe('compact question', () => {
   const cache = { anchorMs: 1_000_000, ttlMs: HOUR, ttlSource: 'option' as const, isCold: false }
 
-  test('warm or unmeasured → none, down to the last minute; cold or run out → the full-price text', () => {
+  test('warm or unmeasured → none; 5 min left, run out or cold → the one full-price text', () => {
     expect(compactQuestion({ ...cache, anchorMs: null }, 0)).toBeNull()
     expect(compactQuestion(cache, cache.anchorMs + 18 * MIN)).toBeNull()
-    expect(compactQuestion(cache, cache.anchorMs + 59.5 * MIN)).toBeNull()
-    expect(compactQuestion(cache, cache.anchorMs + 61 * MIN)).toMatch(/^Prompt cache is cold: .*full price.*Compact anyway\?$/)
-    expect(compactQuestion({ ...cache, isCold: true }, cache.anchorMs)).toContain('is cold')
+    expect(compactQuestion(cache, cache.anchorMs + 54 * MIN)).toBeNull()
+    expect(compactQuestion(cache, cache.anchorMs + 55 * MIN)).toMatch(/^Prompt cache is cold or ends within 5 min: .*full price.*Compact anyway\?$/)
+    expect(compactQuestion(cache, cache.anchorMs + 61 * MIN)).toBe(compactQuestion(cache, cache.anchorMs + 55 * MIN))
+    expect(compactQuestion({ ...cache, isCold: true }, cache.anchorMs)).toBe(compactQuestion(cache, cache.anchorMs + 61 * MIN))
   })
 })
 
