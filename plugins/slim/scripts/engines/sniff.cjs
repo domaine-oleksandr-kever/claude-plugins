@@ -4,14 +4,15 @@
  * Order (first match wins): binary (magic bytes / NUL) → none (empty) → JSON (`adf` for a bare ADF
  * doc, `figma-nodes` for a Figma REST nodes response) → figma (Figma design-context JSX markers) →
  * the guards that keep text untouched (diff, test output, template, shebang, XML → `text`) → a
- * dominant markdown fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → log
- * (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
+ * dominant markdown fence (the body's engine) → JSONL → code by line openings (`text`) → HTML → lint
+ * (linter output) → log (detector confidence ≥ 0.5) → `text`. The guards run before HTML and log on purpose: a test run
  * must not be deduped as a log, a theme template must not be stripped as a page. Pure.
  */
 'use strict';
 
 const { stripBom } = require('./util.cjs');
 const { detectLog } = require('./log.cjs');
+const { detectLint } = require('./lint.cjs');
 const { detectJsx } = require('./figma.cjs');
 const { isNodesResponse } = require('./figma-nodes.cjs');
 const { parseJsonl, unwrapFence } = require('./json.cjs');
@@ -96,6 +97,8 @@ function sniffText(text, fenced) {
   if (parseJsonl(text)) return { engine: 'jsonl', confidence: 0.9, reason: 'jsonl' };
   if (looksLikeCode(text)) return { engine: 'text', confidence: 0.9, reason: 'code' };
   if (isHtml(text)) return { engine: 'html', confidence: 0.9, reason: 'html' };
+  const lint = detectLint(text);
+  if (lint.isLint) return { engine: 'lint', confidence: lint.confidence, reason: 'lint' };
   const log = detectLog(text);
   if (log.confidence >= 0.5) return { engine: 'log', confidence: Math.round(log.confidence * 100) / 100, reason: 'log' };
   return { engine: 'text', confidence: 0.5, reason: 'prose' };

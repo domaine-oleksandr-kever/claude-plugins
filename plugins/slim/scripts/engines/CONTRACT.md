@@ -37,7 +37,7 @@ One call: `compress(input, options)`.
 | `spillDir` | `''` | prefix of the paths the text cites for parts (`<<full=<spillDir>/<name> …>>`). Empty → the bare name. |
 | `spillNames` | `{ original: 'slim-original-', rows: 'slim-rows-', ids: 'slim-ids-' }` | name prefix per spill kind. |
 | `trace` | `false` | fill `stats.stages` with the pipeline stages that changed bytes. |
-| `targetBytes` | `null` | json / jsonl and figma-nodes: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**). Other engines ignore it. |
+| `targetBytes` | `null` | json / jsonl, figma-nodes and lint: the size the caller can show. A JSON body still above it after the crush runs the `trim` and `fit` stages (see **json**); a node tree above it folds its deepest levels (see **figma-nodes**); lint output keeps fewer locations per group (see **lint**). Other engines ignore it. |
 | `maxInputBytes` | `67108864` | larger input → `refused` / `too-large`. |
 | `marker` | `'handle'` | `'ccr'` reproduces Headroom's content-hash crush marker; parity tests only. |
 
@@ -46,7 +46,7 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
 ## 2. Detection
 
 `sniff(input)` → `{ engine, confidence, reason }`, where `engine` is one of `json | jsonl | log | html
-| figma | figma-nodes | adf | text | binary | none` and `confidence` is 0..1. Content only; first match wins:
+| figma | figma-nodes | adf | lint | text | binary | none` and `confidence` is 0..1. Content only; first match wins:
 
 1. **binary** — a Buffer starting with PNG, JPEG, GIF8, `%PDF-`, zip (`PK\x03\x04`), gzip (`1F 8B`),
    `RIFF…WEBP`, wasm (`\0asm`), ELF or Mach-O magic, or holding a NUL byte in its first 8192 bytes; a
@@ -71,8 +71,13 @@ An option of the wrong type is `refused` / `bad-option`, with the field named in
    (`import`, `const`, `function`, `def`, `return`, `{`, `}`, `//`, …). After the fence and JSONL rules,
    because a JSON line opens with a brace too.
 9. **html** — opens with `<!doctype html` or `<html`, or has `<head`/`<body` in the first 2048 chars.
-10. **log** — the log detector's confidence ≥ 0.5 (level fields such as `ERROR`/`[warn]`/`error:`).
-11. **text** — reason `prose`.
+10. **lint** — linter output: 30 or more non-blank lines, ≥ 70 % of them in a linter grammar (ESLint
+    stylish / unix, stylelint, theme-check `[level] file:line`, tsc `file(l,c): error TSn:` or
+    `file:l:c - error TSn:`, `prettier --check` `[warn] file`, their summary lines and quoted source
+    excerpts), ≥ 25 % of them problems; confidence 0.9 with a summary line, else 0.8. A
+    `file:line: text` line counts only when it names a level, so grep hits are not lint.
+11. **log** — the log detector's confidence ≥ 0.5 (level fields such as `ERROR`/`[warn]`/`error:`).
+12. **text** — reason `prose`.
 
 `peek(text)` → `{ format, hint }`: a one-line shape hint (`array of N`, the top-level keys, or a
 whitespace-collapsed head preview) for a caller that shows a stub instead of a payload.
@@ -150,6 +155,18 @@ folded }`; `figureLine(bytesIn, bytesOut, meta)` exported by `figma-nodes.cjs` p
 
 **adf** — a bare Atlassian document converted to markdown (media render as `_(media omitted)_`).
 
+**lint** — linter output parsed to `{ file, line, col, level, rule, message }` and grouped by level,
+rule and message template (quoted strings → `'…'`, digits → `N`, `/a/b/` → `/PATH/`): errors, then
+warnings, then notes (info, suggestion, style), larger groups first. Output: a header
+`<<slim-lint>> <grammars> · N problems: E errors, W warnings, N notes · F files · R rules · K
+locations shown, first k per group`; per group `rule (E 12) — <message or template>`, its first 5
+locations verbatim (`file:line:col`, tsc `file(line,col)`, the message beside each when the group's
+messages differ), then `… +N in M files (file ×n, …, +N more)`; up to 10 other lines verbatim; the
+tool's own summary lines verbatim, `rules: R · files: F` and the next call. With `targetBytes` set
+and the text above it, the locations per group drop to 3 (stage `locs-3`), then 1 (`locs-1`), then
+none (`counts`); a text still above it comes back for the caller to stub. Not lint →
+`passthrough` / `non-lint`; not smaller → `no-gain`. The original's spill name ends `.txt`.
+
 **text** — the plain-text window, the only thing slim ever does to code, diffs, test output or prose:
 at or under `plainBytes` nothing happens; above it the head keeps whole lines up to a third of
 `budgetBytes`, the tail fills the rest, and one marker line in between says
@@ -163,7 +180,7 @@ rewritten.
 ```ts
 {
   v: 1,
-  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'text'|'binary'|'none',  // the engine that produced the text
+  engine: 'json'|'jsonl'|'log'|'html'|'figma'|'figma-nodes'|'adf'|'lint'|'text'|'binary'|'none',  // the engine that produced the text
   decision: 'compressed' | 'passthrough' | 'refused',
   reason?: string,      // why not compressed
   format?: string,      // diagnostic tag of a non-JSON passthrough (html | xml | broken-json | text)
@@ -186,7 +203,7 @@ reply — is the caller's decision.
 
 Passthrough reasons: `empty`, `engine-not-allowed`, `plain-gate`, `no-gain`, `non-json`, `error-shape`,
 `number-precision`, `budget-exceeded`, `transform-error`, and per engine `non-log`, `non-figma`,
-`non-figma-nodes`, `non-adf`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
+`non-figma-nodes`, `non-adf`, `non-lint`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
 
 ## 5. Guarantees
 

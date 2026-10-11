@@ -555,6 +555,8 @@ let STUB0_OUT = null;
     ['node-hook.ts', 'PLAIN_MIN', 'delivery/env.cjs', 'PLAIN_BYTES_FLOOR'],
     ['node-hook.ts', 'PLAIN_DEFAULT', 'delivery/env.cjs', 'PLAIN_BYTES_DEFAULT'],
     ['lookup.ts', 'DISTILL_BUDGET', 'slim.cjs', 'DISTILL_BUDGET'],
+    ['channels.ts', 'LINT_CMD', 'delivery/channels.cjs', 'LINT_CMD'],
+    ['channels.ts', 'LINT_GATE', 'delivery/channels.cjs', 'LINT_GATE'],
   ]) {
     const m = literal(M(mf), mn);
     const c = literal(C(cf), cn);

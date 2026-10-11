@@ -1,0 +1,463 @@
+
+/home/dev/shop-theme/src/components/drawer-0.ts
+  29:42   warning  'sectionId' is defined but never used          no-unused-vars
+  76:1    warning  'drawerEl' is defined but never used           no-unused-vars
+  124:20  error    Expected '===' and instead saw '=='            eqeqeq
+  163:25  warning  'drawerEl' is assigned a value but never used  no-unused-vars
+  257:19  error    'qtyInput' is not defined                      no-undef
+  278:15  warning  Unexpected console statement                   no-console
+  281:24  error    'sectionId' is not defined                     no-undef
+  282:43  warning  'sectionId' is defined but never used          no-unused-vars
+  308:12  warning  'priceFormat' is defined but never used        no-unused-vars
+  311:58  warning  'blockIndex' is defined but never used         no-unused-vars
+  327:59  warning  Unexpected console statement                   no-console
+  335:28  error    'imgSrc' is not defined                        no-undef
+  355:4   error    'imgSrc' is not defined                        no-undef
+
+/home/dev/shop-theme/src/sections/gallery-1.js
+  49:39   warning  Strings must use singlequote                       quotes
+  73:19   warning  'blockIndex' is defined but never used             no-unused-vars
+  80:3    warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+  88:13   error    'swatchMap' is not defined                         no-undef
+  143:44  error    Expected '===' and instead saw '=='                eqeqeq
+  171:41  error    'cartTotal' is not defined                         no-undef
+  190:37  error    'cartTotal' is not defined                         no-undef
+  259:38  error    'locale' is never reassigned. Use 'const' instead  prefer-const
+  266:38  error    Expected '===' and instead saw '=='                eqeqeq
+  316:9   error    'sectionId' is not defined                         no-undef
+  378:13  warning  'priceFormat' is assigned a value but never used   no-unused-vars
+
+/home/dev/shop-theme/src/utils/variant-picker-2.js
+  25:34   error    'qtyInput' is never reassigned. Use 'const' instead                                                           prefer-const
+  48:14   error    Expected '===' and instead saw '=='                                                                           eqeqeq
+  60:56   warning  Strings must use singlequote                                                                                  quotes
+  74:2    warning  Strings must use singlequote                                                                                  quotes
+  77:14   error    'locale' is not defined                                                                                       no-undef
+  110:46  warning  React Hook useEffect has a missing dependency: 'swatchMap'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  173:2   warning  React Hook useEffect has a missing dependency: 'imgSrc'. Either include it or remove the dependency array     react-hooks/exhaustive-deps
+  194:32  warning  Strings must use singlequote                                                                                  quotes
+  205:30  warning  Strings must use singlequote                                                                                  quotes
+  238:18  warning  Strings must use singlequote                                                                                  quotes
+  258:25  error    'blockIndex' is not defined                                                                                   no-undef
+  296:30  error    'drawerEl' is not defined                                                                                     no-undef
+  313:10  warning  Unexpected console statement                                                                                  no-console
+  342:39  error    Missing semicolon                                                                                             semi
+  349:15  error    'drawerEl' is not defined                                                                                     no-undef
+  352:31  error    'locale' is not defined                                                                                       no-undef
+  352:34  error    'sectionId' is not defined                                                                                    no-undef
+  355:47  warning  Unexpected console statement                                                                                  no-console
+
+/home/dev/shop-theme/src/cart/price-3.ts
+  17:11   warning  'cartTotal' is assigned a value but never used       no-unused-vars
+  86:58   error    Missing semicolon                                    semi
+  102:27  error    Missing semicolon                                    semi
+  111:31  warning  Strings must use singlequote                         quotes
+  160:37  error    'debounceMs' is not defined                          no-undef
+  170:16  warning  'variantId' is assigned a value but never used       no-unused-vars
+  205:60  warning  Strings must use singlequote                         quotes
+  221:49  error    'priceFormat' is not defined                         no-undef
+  268:15  error    'swatchMap' is not defined                           no-undef
+  274:47  warning  Strings must use singlequote                         quotes
+  286:30  error    'qtyInput' is never reassigned. Use 'const' instead  prefer-const
+  296:17  warning  'swatchMap' is defined but never used                no-unused-vars
+  314:22  error    'cartTotal' is not defined                           no-undef
+  358:1   error    'blockIndex' is not defined                          no-undef
+  373:50  warning  Strings must use singlequote                         quotes
+
+/home/dev/shop-theme/src/product/quantity-4.js
+  62:15   warning  Unexpected console statement                                                                                      no-console
+  69:31   warning  'variantId' is assigned a value but never used                                                                    no-unused-vars
+  125:50  warning  Unexpected console statement                                                                                      no-console
+  142:4   warning  React Hook useEffect has a missing dependency: 'productHandle'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  155:32  error    'drawerEl' is never reassigned. Use 'const' instead                                                               prefer-const
+  192:11  warning  Unexpected any. Specify a different type                                                                          @typescript-eslint/no-explicit-any
+  243:9   error    'locale' is not defined                                                                                           no-undef
+  274:2   error    'swatchMap' is not defined                                                                                        no-undef
+  304:20  warning  'swatchMap' is defined but never used                                                                             no-unused-vars
+  311:4   error    Missing semicolon                                                                                                 semi
+  332:16  error    Missing semicolon                                                                                                 semi
+  355:20  warning  Strings must use singlequote                                                                                      quotes
+  380:47  warning  'drawerEl' is assigned a value but never used                                                                     no-unused-vars
+
+/home/dev/shop-theme/src/components/swatches-5.js
+  5:5     error    Missing semicolon                          semi
+  35:60   warning  'swatchMap' is defined but never used      no-unused-vars
+  37:35   error    'cartTotal' is not defined                 no-undef
+  57:20   warning  'blockIndex' is defined but never used     no-unused-vars
+  73:8    warning  Strings must use singlequote               quotes
+  107:2   error    Expected '===' and instead saw '=='        eqeqeq
+  119:4   error    Missing semicolon                          semi
+  132:48  warning  'productHandle' is defined but never used  no-unused-vars
+  136:7   error    'sectionId' is not defined                 no-undef
+  141:27  error    Missing semicolon                          semi
+  169:51  error    'cartTotal' is not defined                 no-undef
+  174:27  error    'drawerEl' is not defined                  no-undef
+  212:18  warning  'cartTotal' is defined but never used      no-unused-vars
+  335:52  error    Expected '===' and instead saw '=='        eqeqeq
+  347:52  error    Missing semicolon                          semi
+  357:60  warning  Strings must use singlequote               quotes
+
+/home/dev/shop-theme/src/sections/drawer-6.ts
+  10:3    error    'debounceMs' is not defined                     no-undef
+  12:36   error    'imgSrc' is not defined                         no-undef
+  27:7    warning  'sectionId' is defined but never used           no-unused-vars
+  35:11   error    Missing semicolon                               semi
+  53:24   error    Missing semicolon                               semi
+  75:25   warning  'locale' is assigned a value but never used     no-unused-vars
+  84:30   error    Missing semicolon                               semi
+  115:11  warning  Strings must use singlequote                    quotes
+  197:36  warning  'debounceMs' is defined but never used          no-unused-vars
+  209:28  warning  'variantId' is assigned a value but never used  no-unused-vars
+  221:9   warning  Unexpected console statement                    no-console
+  235:8   error    'locale' is not defined                         no-undef
+  254:32  warning  Unexpected console statement                    no-console
+  302:9   error    'locale' is not defined                         no-undef
+  339:39  error    Expected '===' and instead saw '=='             eqeqeq
+  351:57  warning  'blockIndex' is defined but never used          no-unused-vars
+
+/home/dev/shop-theme/src/utils/gallery-7.js
+  46:12   warning  'productHandle' is assigned a value but never used      no-unused-vars
+  93:40   error    Missing semicolon                                       semi
+  139:3   error    'cartTotal' is not defined                              no-undef
+  173:30  error    'priceFormat' is never reassigned. Use 'const' instead  prefer-const
+  181:19  error    'cartTotal' is not defined                              no-undef
+  197:54  warning  'qtyInput' is defined but never used                    no-unused-vars
+  214:18  error    Parsing error: Unexpected token )
+  234:24  error    'cartTotal' is not defined                              no-undef
+  246:41  warning  'imgSrc' is assigned a value but never used             no-unused-vars
+  278:29  error    'locale' is not defined                                 no-undef
+  283:58  warning  'locale' is defined but never used                      no-unused-vars
+  322:23  warning  Unexpected console statement                            no-console
+  328:35  error    'priceFormat' is not defined                            no-undef
+
+/home/dev/shop-theme/src/cart/variant-picker-8.js
+  40:59   error    'blockIndex' is not defined                     no-undef
+  70:58   warning  Strings must use singlequote                    quotes
+  108:20  error    'swatchMap' is not defined                      no-undef
+  139:59  error    'drawerEl' is not defined                       no-undef
+  160:38  error    'imgSrc' is not defined                         no-undef
+  203:35  error    Missing semicolon                               semi
+  212:14  error    Missing semicolon                               semi
+  217:16  warning  'variantId' is assigned a value but never used  no-unused-vars
+  264:20  error    'locale' is not defined                         no-undef
+  292:33  error    'drawerEl' is not defined                       no-undef
+  314:20  error    'variantId' is not defined                      no-undef
+  318:37  warning  Strings must use singlequote                    quotes
+  332:21  warning  'imgSrc' is assigned a value but never used     no-unused-vars
+  351:4   error    Missing semicolon                               semi
+
+/home/dev/shop-theme/src/product/price-9.ts
+  5:7     error    'debounceMs' is not defined                         no-undef
+  28:26   error    'cartTotal' is not defined                          no-undef
+  29:4    error    'blockIndex' is not defined                         no-undef
+  36:16   warning  Strings must use singlequote                        quotes
+  106:26  error    'imgSrc' is not defined                             no-undef
+  206:38  error    'swatchMap' is not defined                          no-undef
+  290:47  warning  Strings must use singlequote                        quotes
+  294:59  error    'blockIndex' is not defined                         no-undef
+  299:3   error    Missing semicolon                                   semi
+  318:36  warning  'productHandle' is assigned a value but never used  no-unused-vars
+  360:59  warning  'sectionId' is defined but never used               no-unused-vars
+
+/home/dev/shop-theme/src/components/quantity-10.js
+  31:34   warning  'debounceMs' is defined but never used                no-unused-vars
+  35:48   warning  'productHandle' is defined but never used             no-unused-vars
+  109:44  error    Missing semicolon                                     semi
+  156:60  warning  Unexpected console statement                          no-console
+  162:11  warning  'productHandle' is defined but never used             no-unused-vars
+  201:8   error    Missing semicolon                                     semi
+  244:57  error    Missing semicolon                                     semi
+  251:27  error    Expected '===' and instead saw '=='                   eqeqeq
+  256:34  error    'cartTotal' is not defined                            no-undef
+  314:59  warning  'imgSrc' is assigned a value but never used           no-unused-vars
+  328:14  warning  'swatchMap' is assigned a value but never used        no-unused-vars
+  344:59  warning  Unexpected console statement                          no-console
+  354:39  error    Missing semicolon                                     semi
+  361:38  warning  Unexpected console statement                          no-console
+  375:39  error    'sectionId' is never reassigned. Use 'const' instead  prefer-const
+
+/home/dev/shop-theme/src/sections/swatches-11.js
+  28:3    warning  'swatchMap' is defined but never used          no-unused-vars
+  47:58   warning  'drawerEl' is defined but never used           no-unused-vars
+  82:28   warning  Strings must use singlequote                   quotes
+  88:7    error    'priceFormat' is not defined                   no-undef
+  120:12  warning  'imgSrc' is defined but never used             no-unused-vars
+  181:13  error    Missing semicolon                              semi
+  184:58  warning  Strings must use singlequote                   quotes
+  244:57  warning  'qtyInput' is assigned a value but never used  no-unused-vars
+  292:26  error    'priceFormat' is not defined                   no-undef
+  352:19  error    'debounceMs' is not defined                    no-undef
+  378:23  error    Missing semicolon                              semi
+
+/home/dev/shop-theme/src/utils/drawer-12.ts
+  27:11   warning  'productHandle' is assigned a value but never used    no-unused-vars
+  69:6    error    'variantId' is not defined                            no-undef
+  70:56   error    'drawerEl' is never reassigned. Use 'const' instead   prefer-const
+  93:48   error    'variantId' is never reassigned. Use 'const' instead  prefer-const
+  134:60  warning  'swatchMap' is defined but never used                 no-unused-vars
+  147:36  warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  216:3   error    'cartTotal' is not defined                            no-undef
+  235:27  error    'debounceMs' is not defined                           no-undef
+
+/home/dev/shop-theme/src/cart/gallery-13.js
+  35:22   error    Missing semicolon                                    semi
+  39:39   error    Missing semicolon                                    semi
+  72:48   warning  Unexpected console statement                         no-console
+  75:39   warning  'drawerEl' is assigned a value but never used        no-unused-vars
+  82:55   error    'imgSrc' is not defined                              no-undef
+  91:30   error    Missing semicolon                                    semi
+  91:54   error    'sectionId' is not defined                           no-undef
+  116:5   warning  'priceFormat' is assigned a value but never used     no-unused-vars
+  129:44  error    Missing semicolon                                    semi
+  170:8   error    'swatchMap' is not defined                           no-undef
+  202:12  error    'qtyInput' is never reassigned. Use 'const' instead  prefer-const
+  238:54  error    'variantId' is not defined                           no-undef
+  261:18  error    Expected '===' and instead saw '=='                  eqeqeq
+  267:5   warning  Unexpected any. Specify a different type             @typescript-eslint/no-explicit-any
+
+/home/dev/shop-theme/src/product/variant-picker-14.js
+  22:10   error    Expected '===' and instead saw '=='                                                                           eqeqeq
+  36:49   warning  Strings must use singlequote                                                                                  quotes
+  53:26   warning  Strings must use singlequote                                                                                  quotes
+  63:57   error    Missing semicolon                                                                                             semi
+  89:18   warning  'variantId' is assigned a value but never used                                                                no-unused-vars
+  90:4    error    Missing semicolon                                                                                             semi
+  150:13  error    Missing semicolon                                                                                             semi
+  159:58  warning  React Hook useEffect has a missing dependency: 'variantId'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  172:4   warning  'productHandle' is assigned a value but never used                                                            no-unused-vars
+  200:6   error    Missing semicolon                                                                                             semi
+  226:17  warning  'variantId' is assigned a value but never used                                                                no-unused-vars
+
+/home/dev/shop-theme/src/components/price-15.ts
+  57:54   error    Missing semicolon                                semi
+  71:8    error    Missing semicolon                                semi
+  122:3   warning  Strings must use singlequote                     quotes
+  140:42  error    Expected '===' and instead saw '=='              eqeqeq
+  156:20  error    'imgSrc' is not defined                          no-undef
+  157:3   error    'drawerEl' is not defined                        no-undef
+  171:8   warning  'qtyInput' is defined but never used             no-unused-vars
+  177:48  warning  'locale' is assigned a value but never used      no-unused-vars
+  282:48  warning  Strings must use singlequote                     quotes
+  314:52  error    'priceFormat' is not defined                     no-undef
+  324:30  warning  'debounceMs' is assigned a value but never used  no-unused-vars
+  325:33  error    Missing semicolon                                semi
+  349:49  warning  'sectionId' is assigned a value but never used   no-unused-vars
+
+/home/dev/shop-theme/src/sections/quantity-16.js
+  2:47    error    'qtyInput' is not defined                              no-undef
+  29:32   error    'priceFormat' is not defined                           no-undef
+  58:23   error    'priceFormat' is not defined                           no-undef
+  65:34   error    Missing semicolon                                      semi
+  95:55   warning  Unexpected console statement                           no-console
+  97:43   error    Missing semicolon                                      semi
+  99:39   error    'blockIndex' is not defined                            no-undef
+  106:55  error    'blockIndex' is not defined                            no-undef
+  113:2   error    'blockIndex' is not defined                            no-undef
+  171:5   warning  'swatchMap' is assigned a value but never used         no-unused-vars
+  250:22  error    'qtyInput' is not defined                              no-undef
+  289:60  error    'variantId' is not defined                             no-undef
+  300:17  warning  'qtyInput' is defined but never used                   no-unused-vars
+  303:57  error    Missing semicolon                                      semi
+  359:18  error    'blockIndex' is never reassigned. Use 'const' instead  prefer-const
+  380:47  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+
+/home/dev/shop-theme/src/utils/swatches-17.js
+  4:10    error    Missing semicolon                                 semi
+  13:5    error    'locale' is not defined                           no-undef
+  23:7    warning  Strings must use singlequote                      quotes
+  60:6    error    Expected '===' and instead saw '=='               eqeqeq
+  80:56   error    'priceFormat' is not defined                      no-undef
+  97:49   warning  Unexpected any. Specify a different type          @typescript-eslint/no-explicit-any
+  121:52  error    'variantId' is not defined                        no-undef
+  178:36  warning  'locale' is assigned a value but never used       no-unused-vars
+  184:2   error    Missing semicolon                                 semi
+  225:41  error    Missing semicolon                                 semi
+  228:57  warning  'qtyInput' is defined but never used              no-unused-vars
+  246:46  warning  'priceFormat' is assigned a value but never used  no-unused-vars
+  262:36  warning  Unexpected console statement                      no-console
+  286:28  error    'blockIndex' is not defined                       no-undef
+  294:27  warning  'qtyInput' is defined but never used              no-unused-vars
+  316:44  error    'priceFormat' is not defined                      no-undef
+  320:23  error    'drawerEl' is not defined                         no-undef
+  346:1   error    Expected '===' and instead saw '=='               eqeqeq
+  368:23  warning  'blockIndex' is defined but never used            no-unused-vars
+
+/home/dev/shop-theme/src/cart/drawer-18.ts
+  59:15   error    'drawerEl' is not defined                        no-undef
+  64:19   error    Missing semicolon                                semi
+  67:40   warning  Unexpected console statement                     no-console
+  137:3   error    'blockIndex' is not defined                      no-undef
+  152:52  warning  'blockIndex' is defined but never used           no-unused-vars
+  200:36  error    'qtyInput' is not defined                        no-undef
+  230:27  error    Missing semicolon                                semi
+  274:16  warning  'debounceMs' is assigned a value but never used  no-unused-vars
+  307:19  error    Expected '===' and instead saw '=='              eqeqeq
+  325:35  error    Missing semicolon                                semi
+  330:9   warning  'sectionId' is defined but never used            no-unused-vars
+  347:58  warning  Strings must use singlequote                     quotes
+
+/home/dev/shop-theme/src/product/gallery-19.js
+  55:43   error    'qtyInput' is not defined                              no-undef
+  82:4    error    'locale' is never reassigned. Use 'const' instead      prefer-const
+  126:12  error    Missing semicolon                                      semi
+  168:42  warning  'productHandle' is defined but never used              no-unused-vars
+  169:35  error    'variantId' is not defined                             no-undef
+  174:38  error    'blockIndex' is never reassigned. Use 'const' instead  prefer-const
+  268:11  error    Missing semicolon                                      semi
+  276:7   warning  'debounceMs' is defined but never used                 no-unused-vars
+  302:32  warning  'variantId' is defined but never used                  no-unused-vars
+  335:15  error    Missing semicolon                                      semi
+  361:59  error    'variantId' is not defined                             no-undef
+
+/home/dev/shop-theme/src/components/variant-picker-20.js
+  4:45    error    Expected '===' and instead saw '=='             eqeqeq
+  13:23   error    Expected '===' and instead saw '=='             eqeqeq
+  98:10   error    'variantId' is not defined                      no-undef
+  102:58  error    Expected '===' and instead saw '=='             eqeqeq
+  106:12  warning  Strings must use singlequote                    quotes
+  124:57  warning  'productHandle' is defined but never used       no-unused-vars
+  156:13  error    'blockIndex' is not defined                     no-undef
+  190:18  warning  'variantId' is assigned a value but never used  no-unused-vars
+  266:39  error    'debounceMs' is not defined                     no-undef
+  318:9   error    Missing semicolon                               semi
+  320:53  error    'variantId' is not defined                      no-undef
+  349:8   error    Missing semicolon                               semi
+
+/home/dev/shop-theme/src/sections/price-21.ts
+  28:46   error    'sectionId' is not defined                       no-undef
+  62:22   warning  Strings must use singlequote                     quotes
+  68:3    warning  Strings must use singlequote                     quotes
+  89:49   error    Missing semicolon                                semi
+  118:33  warning  'debounceMs' is assigned a value but never used  no-unused-vars
+  122:58  error    'sectionId' is not defined                       no-undef
+  216:50  warning  'variantId' is defined but never used            no-unused-vars
+  243:12  warning  'drawerEl' is defined but never used             no-unused-vars
+  304:36  error    'priceFormat' is not defined                     no-undef
+  323:2   warning  Strings must use singlequote                     quotes
+  353:22  warning  'sectionId' is assigned a value but never used   no-unused-vars
+  354:38  warning  Strings must use singlequote                     quotes
+  379:25  error    Expected '===' and instead saw '=='              eqeqeq
+
+/home/dev/shop-theme/src/utils/quantity-22.js
+  2:16    warning  Strings must use singlequote                          quotes
+  10:23   error    'productHandle' is not defined                        no-undef
+  33:60   error    Missing semicolon                                     semi
+  76:2    warning  Strings must use singlequote                          quotes
+  103:40  error    'variantId' is not defined                            no-undef
+  107:59  warning  Strings must use singlequote                          quotes
+  219:2   error    'swatchMap' is not defined                            no-undef
+  236:58  error    Missing semicolon                                     semi
+  241:2   error    'qtyInput' is not defined                             no-undef
+  242:47  warning  Unexpected console statement                          no-console
+  259:60  warning  Unexpected console statement                          no-console
+  282:43  error    'swatchMap' is never reassigned. Use 'const' instead  prefer-const
+  322:14  error    'variantId' is not defined                            no-undef
+  345:39  warning  'swatchMap' is assigned a value but never used        no-unused-vars
+
+/home/dev/shop-theme/src/cart/swatches-23.js
+  11:34   warning  'swatchMap' is defined but never used           no-unused-vars
+  68:8    error    Expected '===' and instead saw '=='             eqeqeq
+  76:38   error    Missing semicolon                               semi
+  87:20   warning  Strings must use singlequote                    quotes
+  90:5    warning  'cartTotal' is defined but never used           no-unused-vars
+  134:45  error    Missing semicolon                               semi
+  139:31  error    Expected '===' and instead saw '=='             eqeqeq
+  172:19  error    'cartTotal' is not defined                      no-undef
+  173:40  warning  Unexpected console statement                    no-console
+  207:14  error    Expected '===' and instead saw '=='             eqeqeq
+  216:10  warning  'sectionId' is assigned a value but never used  no-unused-vars
+  222:6   error    'sectionId' is not defined                      no-undef
+  232:59  warning  Unexpected console statement                    no-console
+  234:1   warning  'locale' is defined but never used              no-unused-vars
+  242:1   warning  'swatchMap' is defined but never used           no-unused-vars
+  247:44  error    Missing semicolon                               semi
+  257:34  warning  'drawerEl' is defined but never used            no-unused-vars
+  281:4   error    Missing semicolon                               semi
+  285:21  warning  Unexpected console statement                    no-console
+  298:29  error    Missing semicolon                               semi
+  330:59  error    Missing semicolon                               semi
+
+/home/dev/shop-theme/src/product/drawer-24.ts
+  26:22   error    'productHandle' is not defined  no-undef
+  89:54   error    'qtyInput' is not defined       no-undef
+  170:52  error    'qtyInput' is not defined       no-undef
+  241:42  warning  Unexpected console statement    no-console
+  284:39  warning  Unexpected console statement    no-console
+  286:59  error    Missing semicolon               semi
+  321:55  error    'qtyInput' is not defined       no-undef
+  339:31  warning  Strings must use singlequote    quotes
+
+/home/dev/shop-theme/src/components/gallery-25.js
+  8:31    error    'cartTotal' is not defined                             no-undef
+  9:54    error    Missing semicolon                                      semi
+  31:50   warning  'locale' is assigned a value but never used            no-unused-vars
+  91:13   error    'debounceMs' is never reassigned. Use 'const' instead  prefer-const
+  103:25  warning  Unexpected console statement                           no-console
+  124:51  error    'productHandle' is not defined                         no-undef
+  249:53  warning  Strings must use singlequote                           quotes
+  253:36  warning  Strings must use singlequote                           quotes
+  339:22  error    'productHandle' is not defined                         no-undef
+  358:14  warning  'qtyInput' is defined but never used                   no-unused-vars
+
+/home/dev/shop-theme/src/sections/variant-picker-26.js
+  6:58    error    'sectionId' is never reassigned. Use 'const' instead      prefer-const
+  24:45   warning  'drawerEl' is defined but never used                      no-unused-vars
+  34:39   warning  'blockIndex' is defined but never used                    no-unused-vars
+  47:30   error    'locale' is not defined                                   no-undef
+  79:36   error    'drawerEl' is never reassigned. Use 'const' instead       prefer-const
+  88:46   error    Expected '===' and instead saw '=='                       eqeqeq
+  103:29  error    'variantId' is not defined                                no-undef
+  117:5   warning  'qtyInput' is defined but never used                      no-unused-vars
+  181:49  warning  'imgSrc' is defined but never used                        no-unused-vars
+  246:53  warning  'drawerEl' is assigned a value but never used             no-unused-vars
+  258:43  warning  'priceFormat' is assigned a value but never used          no-unused-vars
+  266:43  error    Expected '===' and instead saw '=='                       eqeqeq
+  281:27  error    'productHandle' is never reassigned. Use 'const' instead  prefer-const
+  291:33  error    Expected '===' and instead saw '=='                       eqeqeq
+  358:46  error    Missing semicolon                                         semi
+  359:44  error    'priceFormat' is not defined                              no-undef
+  375:37  error    'drawerEl' is not defined                                 no-undef
+
+/home/dev/shop-theme/src/utils/price-27.ts
+  1:59    warning  Strings must use singlequote                     quotes
+  36:1    error    'locale' is not defined                          no-undef
+  127:22  warning  'variantId' is defined but never used            no-unused-vars
+  179:45  warning  'blockIndex' is assigned a value but never used  no-unused-vars
+  181:9   error    Missing semicolon                                semi
+  192:58  error    'sectionId' is not defined                       no-undef
+  254:46  warning  'qtyInput' is defined but never used             no-unused-vars
+  277:41  warning  'locale' is assigned a value but never used      no-unused-vars
+  294:14  warning  'swatchMap' is defined but never used            no-unused-vars
+  298:39  warning  Unexpected console statement                     no-console
+  301:36  error    'debounceMs' is not defined                      no-undef
+  343:34  warning  'imgSrc' is assigned a value but never used      no-unused-vars
+  354:54  warning  Unexpected console statement                     no-console
+  355:38  error    Missing semicolon                                semi
+  358:28  warning  'swatchMap' is defined but never used            no-unused-vars
+
+/home/dev/shop-theme/src/cart/quantity-28.js
+  7:17    error    'drawerEl' is never reassigned. Use 'const' instead  prefer-const
+  132:16  error    Missing semicolon                                    semi
+  137:30  error    Missing semicolon                                    semi
+  152:9   warning  Unexpected any. Specify a different type             @typescript-eslint/no-explicit-any
+  181:31  error    'imgSrc' is not defined                              no-undef
+  189:2   warning  Unexpected any. Specify a different type             @typescript-eslint/no-explicit-any
+  240:41  warning  'productHandle' is defined but never used            no-unused-vars
+  312:51  error    'cartTotal' is not defined                           no-undef
+  339:15  error    'imgSrc' is not defined                              no-undef
+
+/home/dev/shop-theme/src/product/swatches-29.js
+  20:27   error    Expected '===' and instead saw '=='                eqeqeq
+  87:17   error    'blockIndex' is not defined                        no-undef
+  116:41  error    'sectionId' is not defined                         no-undef
+  125:55  error    Missing semicolon                                  semi
+  142:22  error    'variantId' is not defined                         no-undef
+  173:44  error    Missing semicolon                                  semi
+  196:57  error    'drawerEl' is not defined                          no-undef
+  252:38  warning  'productHandle' is defined but never used          no-unused-vars
+  293:53  warning  'productHandle' is defined but never used          no-unused-vars
+  310:50  error    'locale' is never reassigned. Use 'const' instead  prefer-const
+  339:21  error    'imgSrc' is not defined                            no-undef
+
+✖ 400 problems (228 errors, 172 warnings)
+  110 errors and 0 warnings potentially fixable with the `--fix` option.
