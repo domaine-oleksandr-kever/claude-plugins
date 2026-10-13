@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.9.1**.
+Current release: **base v0.9.2**.
 
 ## Status
 
@@ -216,7 +216,8 @@ base picks the work id in this order:
 2. The last ticket that a person's prompt named. A Jira `/browse/` URL corroborates a key, and so
    does a project that already has a `.claude/tasks/<KEY>` dir. `UTF-8` or `SHA-256` alone does not.
 3. The branch's ticket key, then its kebab slug, when that workspace exists.
-4. The newest `progress.md` written within 12 hours.
+4. The newest `progress.md` written within 12 hours. This id is only guessed (`guessed: true`): the
+   autosave levers wait until the session writes into that workspace.
 
 base re-reads the workspace when a file in its root changes. It checks every 30 s, and at once after
 a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
@@ -224,7 +225,7 @@ a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
 
 | Atom | Value |
 |---|---|
-| `base.progress` | the parsed progress.md of the work id (`{ workId, branch, hasWorkspace, done, total, current, rows, notesTail, mtimeMs, lastSavableMs, agentsSince, editsSince, stale }`), or `{ workId: null, branch }` |
+| `base.progress` | the parsed progress.md of the work id (`{ workId, branch, hasWorkspace, done, total, current, rows, notesTail, mtimeMs, lastSavableMs, agentsSince, editsSince, stale, guessed }`), or `{ workId: null, branch }` |
 | `base.savable` | this session's savable events, `{ atMs, kind: 'agent' \| 'edit' \| 'mcp', workId }`, at most 200 |
 | `base.autosave` | the turn counter, its start, the turn whose stop was last blocked, the last turn that wrote the workspace, and the write the prompt line last fired for |
 | `base.compactMarker` | the last `compact:` line autosave wrote: `{ workId, notesMs, priorMs }`, so it never counts as a save |
@@ -255,6 +256,9 @@ While the workspace is stale, autosave does three things:
   is already active, and at most once per 3 turns.
 - An auto-compact appends one `compact:` pointer line to notes.md. This line is not a save: the
   workspace stays stale, and the next prompt gets the line again.
+
+A workspace found only as the newest `progress.md` is guessed, and autosave leaves it alone. The
+first write into it during the session adopts it, and the three levers apply from then on.
 
 `BASE_AUTOSAVE=0` turns the three off.
 
@@ -419,7 +423,11 @@ There are two ways to turn it on:
   A failure is an error result, or `Error` in the stderr. The result then gets one line for the model,
   `base dogfood: a plugin script failed — report it with plugin_defect before working around it`,
   and a `defect` event. In the main loop, the next stop without a report since then is blocked once
-  per failure.
+  per failure. A designed refusal is not a failure: a `<script stem>: …` line (a base script's die) or
+  an `error=…` line (an fe script's), with no `Error` in the output. When the script is not the
+  line's last command (`script; echo done`, `script | head`), the exit code is not its own: only
+  `Error` in the output nudges and logs, and the stop is never blocked. A trailing `2>&1` still
+  counts as last.
 - **`/base-defects`** lists the index newest first, then this project's `.claude/plugin-defects/`.
   The doctor's `defects` row counts the last 7 days.
 

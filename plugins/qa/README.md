@@ -19,7 +19,7 @@ store registry (`<base root>/scripts/qa-stores.cjs`), the shared references and 
 MCP server ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with slim
 too.
 
-Current release: **qa v0.3.3**.
+Current release: **qa v0.3.4**.
 
 ## Status
 

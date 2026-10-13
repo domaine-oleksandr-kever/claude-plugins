@@ -8,7 +8,7 @@ import type { EngineInterface, ModelUsage, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
 import { agentPrefix, lookupText, pushEvent } from './events.ts'
 import { buildDistillRun, buildRecordRun, commandSource, parseDistill, utf8Bytes } from './node-hook.ts'
-import { VIEW_DESC, VIEW_SCHEMA } from './view.ts'
+import { VIEW_DESC, VIEW_SCHEMA, mediaName } from './view.ts'
 
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 
@@ -214,7 +214,7 @@ async function answerPath($: $, path: string, question: string, model: string): 
   if (probe.isError === true) return { ...fail('read errored'), text: String(probe.text ?? failureText('read errored')) }
   // The file the Read actually opened: a guard may have rewritten the path, and that ruling holds here too.
   const opened = (probe.result as { file?: { filePath?: unknown } } | undefined)?.file?.filePath
-  if (typeof opened !== 'string' || !opened) return fail('read returned no text file')
+  if (typeof opened !== 'string' || !opened) return fail(mediaName(path) ? 'an image or a video is not text — mcp__slim__view reads it' : 'read returned no text file')
   const doc = await distill($, { path: opened })
   return typeof doc === 'string' ? fail(doc) : ask($, model, path, doc, question, 'path')
 }

@@ -63,7 +63,7 @@ if [ "$(echo "$out" | sed -n 1p)" = origin/develop ] && [ "$(echo "$out" | sed -
 else bad a-stale-develop "want origin/develop @ $point, got: $(echo "$out" | head -2 | tr '\n' ' ')"; fi
 
 # (b) local develop with a commit of its own (not an ancestor of origin/develop) keeps winning
-git -C "$R" checkout -q develop; commit own.txt d1; own="$(sha HEAD)"
+git -C "$R" checkout -q develop; git -C "$R" merge -q --ff-only origin/develop; commit own.txt d1; own="$(sha HEAD)"
 git -C "$R" checkout -q feat; git -C "$R" merge -q --no-edit develop
 out="$(run_block)"
 if [ "$(echo "$out" | sed -n 1p)" = develop ] && [ "$(echo "$out" | sed -n 2p)" = "$own" ]; then ok
@@ -229,10 +229,48 @@ files="$(echo "$out" | sed '1,/^$/d' | tr '\n' ' ')"
 if echo "$out" | sed '/^$/q' | grep -q 'dist/b.js' && [ "$files" = "dist/app.js dist/b.js " ]; then ok
 else bad u-since "--since: stat or file list wrong: $(echo "$out" | tr '\n' ' ')"; fi
 
+# (w) gitignored .claude/ and odd untracked names: no git advice on stderr, names taken literally
+new_repo ig
+printf '.claude\ndocs/technical-approaches/\n' > "$R/.gitignore"; git -C "$R" add .gitignore; git -C "$R" commit -qm ignore
+git -C "$R" checkout -qb feat; commit f.txt f1
+rc=0; (cd "$R" && "$SCOPE") > "$TMP/o" 2> "$TMP/e" || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -s "$TMP/e" ]; then ok; else bad w-no-untracked "rc=$rc stderr: $(head -c 160 "$TMP/e")"; fi
+mkdir -p "$R/.claude/tmp"; echo x > "$R/.claude/tmp/shot.png"; echo junk > "$R/junk.txt"
+echo c > "$R/:colon.txt"; echo s > "$R/with space.txt"; echo g > "$R/*glob.txt"
+rc=0; (cd "$R" && "$SCOPE") > "$TMP/o" 2> "$TMP/e" || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -s "$TMP/e" ] && grep -qx junk.txt "$TMP/o" && ! grep -q '^\.claude/' "$TMP/o"; then ok
+else bad w-ignored-claude "rc=$rc stderr: $(head -c 160 "$TMP/e") list: $(sed '1,/^$/d' "$TMP/o" | tr '\n' ' ')"; fi
+if grep -qx ':colon.txt' "$TMP/o" && grep -qx 'with space.txt' "$TMP/o" && grep -qx '\*glob.txt' "$TMP/o"; then ok
+else bad w-literal-names "a ':', spaced or glob-like untracked name was not listed: $(sed '1,/^$/d' "$TMP/o" | tr '\n' ' ')"; fi
+
+# (x) release branches: a branch cut from origin/release/* diffs against it, not develop; --base forces
+new_repo rl
+git -C "$R" update-ref refs/remotes/origin/develop HEAD; git -C "$R" branch -q develop
+git -C "$R" checkout -qb release/2.3.0; commit r1.txt r1; commit r2.txt r2
+git -C "$R" update-ref refs/remotes/origin/release/2.3.0 HEAD
+git -C "$R" checkout -q develop; git -C "$R" branch -qD release/2.3.0
+commit d.txt d1; git -C "$R" update-ref refs/remotes/origin/develop HEAD
+git -C "$R" checkout -qb feat origin/release/2.3.0; commit f.txt f1
+out="$(cd "$R" && "$SCOPE")"
+if echo "$out" | grep -qx base=origin/release/2.3.0 && [ "$(echo "$out" | sed '1,/^$/d')" = f.txt ]; then ok
+else bad x-release-base "want origin/release/2.3.0 and f.txt alone, got: $(echo "$out" | grep -e '^base=' -e '^[^=]*$' | tr '\n' ' ')"; fi
+git -C "$R" checkout -q develop; git -C "$R" merge -q --no-edit origin/release/2.3.0
+git -C "$R" update-ref refs/remotes/origin/develop HEAD
+git -C "$R" checkout -qb feat2; commit g.txt g1
+out="$(cd "$R" && "$SCOPE")"
+if echo "$out" | grep -qx base=origin/develop && [ "$(echo "$out" | sed '1,/^$/d')" = g.txt ]; then ok
+else bad x-merged-release "want origin/develop after the release merged into develop, got: $(echo "$out" | tr '\n' ' ')"; fi
+out="$(cd "$R" && "$SCOPE" --base origin/release/2.3.0)"
+if echo "$out" | grep -qx base=origin/release/2.3.0 \
+   && echo "$out" | grep -qx "merge_base=$(sha origin/release/2.3.0)"; then ok
+else bad x-base-flag "--base origin/release/2.3.0 not honoured: $(echo "$out" | head -3 | tr '\n' ' ')"; fi
+rc=0; (cd "$R" && "$SCOPE" --base nope) > "$TMP/o" 2>&1 || rc=$?
+if [ "$rc" -eq 2 ] && grep -q 'not a ref: nope' "$TMP/o"; then ok; else bad x-bad-base "rc=$rc $(head -c 120 "$TMP/o")"; fi
+
 # (v) usage and refusals
 rc=0; (cd "$R" && "$SCOPE" --help) > "$TMP/o" 2>&1 || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^usage: review-scope.sh' "$TMP/o"; then ok; else bad v-help "rc=$rc $(head -c 120 "$TMP/o")"; fi
-for args in "--bogus" "--ws" "--since" "--since nope"; do
+for args in "--bogus" "--ws" "--since" "--since nope" "--base"; do
   rc=0; (cd "$R" && "$SCOPE" $args) > "$TMP/o" 2>&1 || rc=$?
   if [ "$rc" -eq 2 ]; then ok; else bad "v-usage[$args]" "rc=$rc $(head -c 120 "$TMP/o")"; fi
 done

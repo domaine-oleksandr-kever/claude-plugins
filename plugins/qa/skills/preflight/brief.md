@@ -14,8 +14,8 @@ wording as it stands — it is what QA readers expect to see:
 
 ## Block 1 — for Jira (house style)
 
-_Preflight — automated pre-run via `/qa:preflight`, not the QA sign-off; rows below were checked
-by the agent at the viewports named._
+*Preflight — automated pre-run via `/qa:preflight`, not the QA sign-off; rows below were checked
+by the agent at the viewports named.*
 
 **Testing Status: Partially pass**
 * Tested in Desktop on Chrome
@@ -52,7 +52,7 @@ by the agent at the viewports named._
 
 ## Block 1
 
-- **The label line** (`_Preflight — automated pre-run …_`) always stays, in every form: a `Testing
+- **The label line** (`*Preflight — automated pre-run …*`) always stays, in every form: a `Testing
   Status` without it reads as the QA engineer's own verdict and invites a transition on agent
   evidence.
 - **Verdict**, exactly one of four, chosen from the rows: **Pass** (every reachable row verified),

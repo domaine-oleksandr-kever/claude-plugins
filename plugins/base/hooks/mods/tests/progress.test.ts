@@ -14,6 +14,7 @@ describe('resolver', () => {
       workId: 'ABC-1591',
       branch: 'feature/ABC-1591-x',
       hasWorkspace: true,
+      guessed: false,
       done: 3,
       total: 5,
       current: 'Preview themes',

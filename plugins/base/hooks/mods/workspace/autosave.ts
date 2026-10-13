@@ -19,7 +19,7 @@ type Workspace = { id: string; notes: string; mtimeMs: number; stale: boolean; l
 async function workspace($: $): Promise<Workspace | null> {
   if ((await $.env.get('BASE_AUTOSAVE')) === '0') return null
   const p = await read($, progress)
-  if (!p || p.workId === null || !p.hasWorkspace) return null
+  if (!p || p.workId === null || !p.hasWorkspace || p.guessed) return null
   const dir = `${await $.session.root()}/.claude/tasks/${p.workId}`
   let entries: FsEntry[] = []
   try {

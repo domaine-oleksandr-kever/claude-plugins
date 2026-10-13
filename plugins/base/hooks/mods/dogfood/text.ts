@@ -246,12 +246,43 @@ export function pluginScript(command: string): string | null {
   return p ? p.slice(p.lastIndexOf('/') + 1) : null
 }
 
+/**
+ * True when the plugin script's command is the line's last: the exit code is then the script's own. After
+ * `script; echo done` or `script | head` it belongs to another command (`2>&1` redirects are not a `&`).
+ */
+export function scriptLast(command: string): boolean {
+  const m = IN_CACHE.exec(command) ?? IN_REPO.exec(command)
+  if (!m) return false
+  const tail = command.slice(m.index + m[0].length).replace(/\d*>&\d+/g, '')
+  return !/[;&|\n]/.test(tail)
+}
+
+/** The stdout and stderr of a Bash result as one text. */
+export function bashText(r: { result?: unknown; text?: unknown }): string {
+  if (typeof r.result === 'string') return r.result
+  const o = (r.result ?? {}) as { stdout?: unknown; stderr?: unknown }
+  const parts = [o.stdout, o.stderr].filter((s): s is string => typeof s === 'string')
+  return parts.length ? parts.join('\n') : typeof r.text === 'string' ? r.text : ''
+}
+
 /** A Bash result that failed: an error result, or `Error` in its stderr. */
 export function bashFailed(r: { isError?: true; result?: unknown }): boolean {
   if (r.isError) return true
   const stderr = (r.result as { stderr?: unknown } | null)?.stderr
   return typeof stderr === 'string' && /\bError\b/.test(stderr)
 }
+
+/**
+ * A refusal the script printed on purpose — `<stem>: <why>` (a base script's die) or an `error=<reason>` line
+ * (an fe script's fail) — with no crash signature after it: the script did its job, nothing to report.
+ */
+export function designedRefusal(text: string, script: string): boolean {
+  const stem = script.replace(/\.[a-z]+$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`^(?:${stem}: |error=)`, 'm').test(text) && !/\bError\b/.test(text)
+}
+
+/** A crash signature in the output: `Error` (an exception, a node stack) — what a compound line's exit code cannot tell. */
+export const crashed = (text: string): boolean => /\bError\b/.test(text)
 
 export type Seen = { date: string; plugin: string; title: string; path: string }
 

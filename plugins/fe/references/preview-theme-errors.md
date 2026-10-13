@@ -159,7 +159,7 @@ ask the developer whether it lives on another store (which handle) before offeri
 A `store=` followed by `($SHOPIFY_STORE …)` came from an export, not the toml — ask whether it
 was meant for this project.
 
-### Another store — `error=overlay_store_mismatch` · `error=pin_store_mismatch` · `error=no access token` · `hint=a Theme Access token is minted PER STORE`
+### Another store — `error=overlay_store_mismatch` · `error=pin_store_mismatch` · `auth=cli-session` · `hint=a Theme Access token is minted PER STORE` · `hint=no Theme Access token`
 
 `--store` / `$SHOPIFY_STORE` naming a store other than the toml's — the toml's token, dev theme and
 pin target all belong to the toml's store:
@@ -170,8 +170,16 @@ pin target all belong to the toml's store:
   (`SHOPIFY_FLAG_ENVIRONMENT=<name>`).
 - **`error=pin_store_mismatch`** (`pin`, `refresh --pin-toml`) → nothing was written; drop the
   pin (record the id in `notes.md` only) or `--env` the block that names that store.
-- **`error=no access token for store=…`** → that store's own Theme Access password has to be
-  exported as `SHOPIFY_CLI_THEME_TOKEN` — the developer does it; never read or paste a token.
+- **`auth=cli-session`** (after `store=`, any subcommand) → no Theme Access token resolved for
+  that store (none exported as `SHOPIFY_CLI_THEME_TOKEN`; for the toml's own store, no
+  `password =` either), so the run went out on the Shopify CLI's logged-in session. Not an
+  error: a developer who logged in with `shopify auth login` pushes this way.
+- **`hint=no Theme Access token for <store> and the Shopify CLI session cannot reach it …`**
+  (with any `error=`) → the session is not logged in (the CLI cannot prompt without a terminal)
+  or its account has no access to that store. The developer runs `shopify auth login` with an
+  account that has access to that store (`shopify auth logout` first if the wrong account is
+  logged in), or exports that store's own Theme Access password as `SHOPIFY_CLI_THEME_TOKEN`;
+  then re-run. Never read or paste a token.
 - **`hint=a Theme Access token is minted PER STORE …`** (with any `error=` — a push failure or a
   listing refusal) → the CLI rejected the token: it belongs to another store. The line names
   where the token came from and the fix — a developer action, like the one above.
@@ -304,7 +312,7 @@ error (`unknown arg: <flag>`, `error=unknown_command cmd='<x>'` for a subcommand
 `info|create|refresh|pin`, `refresh requires --theme <id>`, `create requires --name`) — each
 names `--help`, which prints the call shape from the script itself, as does
 `shopify-admin-gql.sh`'s `error=unknown_arg` — `error=invalid_theme_id`
-(`--theme` takes a numeric id), `no access token`,
+(`--theme` takes a numeric id),
 `code push succeeded but could not parse theme id from --json`. Nothing was pushed except in that
 last one (the code IS on the theme — find its id in the admin and continue with `refresh`). Report
 the line verbatim with the fix it names, fix the invocation, re-run. Never read the toml to "check".

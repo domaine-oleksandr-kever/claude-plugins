@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NUDGE, TOOL, capEvidence, dogfoodAccounts, pluginScript, seen, slugOf } from '../dogfood/text.ts'
+import { NUDGE, TOOL, bashText, capEvidence, designedRefusal, dogfoodAccounts, pluginScript, scriptLast, seen, slugOf } from '../dogfood/text.ts'
 import { NOW, PEEK, ROOT, eventsOf, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -450,6 +450,55 @@ describe('nudge and stop', () => {
     await submit($, 'next')
     expect((await stop($)).block).toBeUndefined()
   })
+  t('a compound line the script does not end: an exit code without Error is not the script\'s', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    const doc = Array.from({ length: 10 }, (_, i) => `doc line ${i + 1}`).join('\n')
+    w.bash = () => ({ isError: true, result: `Exit code 1\n${doc}\n(eval):1: ==== not found` })
+    await start($)
+    const cmd = 'cat /x/review-flow.md; echo =====; /home/dev/.claude/plugins/cache/domaine/base/0.9.1/scripts/review-scope.sh --ws .claude/tasks/ELC-584; echo =====; cat marker'
+    expect((await bash($, cmd)).context ?? []).toEqual([])
+    expect(await eventsOf($, 'defect')).toEqual([])
+    expect((await stop($)).block).toBeUndefined()
+  })
+
+  t('a compound line the script does not end, with Error in the output: nudge and event, never a blocked stop', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'Exit code 1\nError: boom' })
+    await start($)
+    expect((await bash($, 'bash plugins/base/scripts/review-scope.sh --ws x; echo done')).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: review-scope.sh'])
+    expect((await stop($)).block).toBeUndefined()
+  })
+
+  t('the script last after cd, with a trailing 2>&1: nudge, event, the stop blocked once', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => FAILED
+    await start($)
+    expect((await bash($, 'cd /repo && node plugins/base/scripts/md-to-adf.cjs in.md 2>&1')).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
+    expect((await stop($)).block).toContain('a plugin script failed (md-to-adf.cjs)')
+    expect((await stop($)).block).toBeUndefined()
+  })
+
+  t('a designed refusal (base die, fe error= line) gets no nudge, no event, no block', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = cmd => cmd.includes('qa-stores')
+      ? { isError: true, result: { stdout: '', stderr: 'qa-stores: no store matches that selector (qa-stores.cjs list)' } }
+      : { isError: true, result: 'Exit code 1\nnote=engine=token\nerror=no_admin_token\nhint=Set SHOPIFY_ADMIN_TOKEN …' }
+    await start($)
+    expect((await bash($, 'node /home/dev/.claude/plugins/cache/domaine/base/0.9.1/scripts/qa-stores.cjs get elc-us-mc-dev')).context ?? []).toEqual([])
+    expect((await bash($, 'bash plugins/fe/scripts/shopify-admin-gql.sh --query q.graphql')).context ?? []).toEqual([])
+    expect(await eventsOf($, 'defect')).toEqual([])
+    expect((await stop($)).block).toBeUndefined()
+  })
+
+  t('a refusal line followed by Error still nudges', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'Exit code 1\nerror=push_failed\nError: ECONNRESET' })
+    await start($)
+    expect((await bash($, 'bash plugins/fe/scripts/push-theme.sh')).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: push-theme.sh'])
+  })
 })
 
 describe('/base-defects and the doctor row', () => {
@@ -523,5 +572,40 @@ describe('pure parts', () => {
   test('seen: a path once, the index title first, newest first', () => {
     const list = seen('- 2026-10-01 base A → /p/2026-10-01-base-a.md\n', '/p', ['2026-10-01-base-a.md', '2026-10-05-fe-b.md', 'notes.txt'])
     expect(list.map(s => s.title)).toEqual(['b', 'A'])
+  })
+
+  test('scriptLast: the script ends the line, redirects allowed', () => {
+    expect(scriptLast('node plugins/base/scripts/x.cjs')).toBe(true)
+    expect(scriptLast('node plugins/base/scripts/x.cjs 2>&1')).toBe(true)
+    expect(scriptLast('cd /repo && bash plugins/base/scripts/review-scope.sh --ws a 2>&1')).toBe(true)
+    expect(scriptLast('VAR=1 node plugins/base/scripts/x.cjs')).toBe(true)
+    expect(scriptLast(SCRIPT_CMD)).toBe(true)
+    expect(scriptLast('node plugins/base/scripts/x.cjs | head')).toBe(false)
+    expect(scriptLast('node plugins/base/scripts/x.cjs; echo done')).toBe(false)
+    expect(scriptLast('cat a; node plugins/base/scripts/x.cjs; cat b')).toBe(false)
+    expect(scriptLast('node plugins/base/scripts/x.cjs && echo ok')).toBe(false)
+    expect(scriptLast('node plugins/base/scripts/x.cjs\necho next')).toBe(false)
+    expect(scriptLast('echo hi')).toBe(false)
+  })
+
+  test('designedRefusal: a stem line or an error= line, never with Error', () => {
+    expect(designedRefusal('md-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
+    expect(designedRefusal('Exit code 1\nmd-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
+    expect(designedRefusal('note=x\nerror=no_admin_token', 'shopify-admin-gql.sh')).toBe(true)
+    expect(designedRefusal('error=push_failed\nError: ECONNRESET', 'push-theme.sh')).toBe(false)
+    expect(designedRefusal('md-to-adf: Error: boom', 'md-to-adf.cjs')).toBe(false)
+    expect(designedRefusal('other-script: nope', 'md-to-adf.cjs')).toBe(false)
+    expect(designedRefusal('see md-to-adf: nope', 'md-to-adf.cjs')).toBe(false)
+    expect(designedRefusal('aXb: nope', 'a.b.cjs')).toBe(false)
+    expect(designedRefusal('a.b: nope', 'a.b.cjs')).toBe(true)
+  })
+
+  test('bashText: a string result, stdout + stderr, the text fallback', () => {
+    expect(bashText({ result: 'Exit code 1\nboom' })).toBe('Exit code 1\nboom')
+    expect(bashText({ result: { stdout: 'out', stderr: 'err' } })).toBe('out\nerr')
+    expect(bashText({ result: { stdout: '', stderr: 'err' } })).toBe('\nerr')
+    expect(bashText({ result: { stderr: 'err' } })).toBe('err')
+    expect(bashText({ text: 'fallback' })).toBe('fallback')
+    expect(bashText({})).toBe('')
   })
 })

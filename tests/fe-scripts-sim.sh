@@ -2168,13 +2168,15 @@ cat > "$CPTD/shim/shopify" <<'FAKE'
 #!/usr/bin/env bash
 if [ -n "${CPT_LOG:-}" ]; then
   printf 'argv=%s\n' "$*" >> "$CPT_LOG"
-  printf 'token=%s\n' "${SHOPIFY_CLI_THEME_TOKEN:-}" >> "$CPT_LOG"
+  # `<unset>` tells an unexported token (the CLI-session run) apart from an exported empty one
+  printf 'token=%s\n' "${SHOPIFY_CLI_THEME_TOKEN-<unset>}" >> "$CPT_LOG"
 fi
-# FAKE_REJECT_STORE: every call at that store is the CLI's auth rejection — a token minted for another store
+# FAKE_REJECT_STORE: every call at that store is the CLI's auth rejection — a token minted for another
+# store; FAKE_REJECT_MSG replaces the rejection text (a CLI session that is not logged in, say)
 if [ -n "${FAKE_REJECT_STORE:-}" ]; then
   prev=""; for a in "$@"; do
     [ "$prev" = "--store" ] && [ "$a" = "$FAKE_REJECT_STORE" ] \
-      && { printf '│  Invalid API key or access token (unrecognized login or wrong password)  │\n' >&2; exit 1; }
+      && { printf '%s\n' "${FAKE_REJECT_MSG:-│  Invalid API key or access token (unrecognized login or wrong password)  │}" >&2; exit 1; }
     prev="$a"
   done
 fi
@@ -3005,12 +3007,19 @@ run_cpt "$L" TOML_PATH="$CPTD/toml/notoken.toml" SHOPIFY_CLI_THEME_TOKEN=shptka_
 if [ "$rc" -eq 0 ] && grep -q '^token=shptka_from_env$' "$L"; then ok
 else bad P20b-env-token-fallback "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
 
-# P20c: no token anywhere — the file scan matches nothing, and that no-match must surface as the
-# script's own "no access token" line, never as a silent set -e abort inside the shared helper
+# P20c: no token anywhere — the file scan matches nothing, which is neither a silent set -e abort
+# inside the shared helper nor a refusal: the CLI's logged-in session authenticates, the token var
+# is not exported at all, and the output says so right after the store line
 rc=0; L="$TMP/cpt20c"; : > "$L"
 run_cpt "$L" TOML_PATH="$CPTD/toml/notoken.toml" -- info || rc=$?
-if [ "$rc" -eq 1 ] && grep -q '^error=no access token' "$O" && [ ! -s "$L" ]; then ok
-else bad P20c-no-token "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+if [ "$rc" -eq 0 ] && grep -A1 '^store=acme-dev$' "$O" | grep -q '^auth=cli-session$' \
+   && [ "$(cpt_calls 'theme list' "$L")" -eq 1 ] && ! grep '^token=' "$L" | grep -qv '^token=<unset>$'; then ok
+else bad P20c-no-token-cli-session "rc=$rc out=$(tr '\n' ';' < "$O") log=$(tr '\n' ';' < "$L")"; fi
+# P20d: a token run says nothing about auth — auth= is the session's line only
+rc=0; L="$TMP/cpt20d"; : > "$L"
+run_cpt "$L" NO=1 -- info || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q '^auth=' "$O"; then ok
+else bad P20d-token-run-no-auth-line "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # P21 (bug): `shopify --store` documents the https:// URL form as valid and real tomls carry it —
 # it is normalized, not refused
@@ -4290,7 +4299,7 @@ else bad P59i-toplevel-wins "rc=$rc out=$(tr '\n' ';' < "$O") log=$(grep -v toke
 
 # P59j (blocker): a block that carries no password of its own must not borrow another STORE's
 # token — a Theme Access token is minted per store, so the borrowed one authenticates nothing here.
-# Refused with the config error, before the CLI.
+# No token reaches the CLI: the run goes out on the CLI's logged-in session.
 F59J="$(env_toml env-notoken '[environments.production]
 store = "store-a"
 password = "shptka_prodAAA"
@@ -4302,7 +4311,8 @@ theme = "444"
 ')"
 rc=0; L="$TMP/cpt59j"; : > "$L"
 run_cpt "$L" TOML_PATH="$F59J" FAKE_LIST="$ENV_LIST" -- info || rc=$?
-if [ "$rc" -ne 0 ] && grep -q '^error=no access token' "$O" && [ ! -s "$L" ]; then ok
+if [ "$rc" -eq 0 ] && grep -q '^store=store-b$' "$O" && grep -q '^auth=cli-session$' "$O" \
+   && ! grep -q 'shptka_prodAAA' "$L" && ! grep '^token=' "$L" | grep -qv '^token=<unset>$'; then ok
 else bad P59j-no-cross-store-token "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(tr '\n' ';' < "$L")"; fi
 
 # P59k (blocker): the same for the TOP-LEVEL keys — a block that omits `password` must not borrow
@@ -4318,7 +4328,8 @@ theme = "444"
 ')"
 rc=0; L="$TMP/cpt59k"; : > "$L"
 run_cpt "$L" TOML_PATH="$F59K" FAKE_LIST="$ENV_LIST" -- create --name "PREVIEW-TOPMIX" --no-build || rc=$?
-if [ "$rc" -ne 0 ] && grep -q '^error=no access token' "$O" && [ ! -s "$L" ]; then ok
+if [ "$rc" -eq 0 ] && grep -q '^store=store-b$' "$O" && grep -q '^auth=cli-session$' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -ge 1 ] && ! grep '^token=' "$L" | grep -qv '^token=<unset>$'; then ok
 else bad P59k-no-toplevel-cross-store-token "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ') calls=$(grep -v token "$L" | tr '\n' ';') borrowed=$(grep -c 'shptka_topAAA' "$L" 2>/dev/null || true)"; fi
 
 # P59m: $SHOPIFY_FLAG_ENVIRONMENT selects the block the pin WRITES, not only the one it reads —
@@ -4433,13 +4444,35 @@ rc=0; L="$TMP/cpt63c2"; : > "$L"
 run_cpt "$L" SHOPIFY_STORE=acme-other SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- info --store acme-uk || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^store=acme-uk$' "$O"; then ok
 else bad P63c2-flag-beats-env "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ')"; fi
-# P63d: no env token for a foreign store is refused before any CLI call — the toml's password would
-# only reach the CLI as an opaque 401
+# P63d: no env token for a foreign store — the toml's password never goes along (it would only reach
+# the CLI as an opaque 401); the refresh runs on the CLI's logged-in session instead
 rc=0; L="$TMP/cpt63d"; : > "$L"
-run_cpt "$L" NO=1 -- refresh --store acme-uk --theme 777 --no-build || rc=$?
-if [ "$rc" -eq 1 ] && grep -q '^error=no access token for store=acme-uk (--store) — a Theme Access token is minted PER STORE' "$O" \
-   && grep -q 'export SHOPIFY_CLI_THEME_TOKEN with acme-uk' "$O" && [ ! -s "$L" ]; then ok
-else bad P63d-foreign-store-needs-env-token "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+run_cpt "$L" FAKE_LIST="$UK_LIST" -- refresh --store acme-uk --theme 777 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -A1 '^store=acme-uk$' "$O" | grep -q '^auth=cli-session$' \
+   && grep -q 'argv=theme push --store acme-uk --theme 777' "$L" \
+   && ! grep -q 'shptka_fixture1234' "$L" && ! grep '^token=' "$L" | grep -qv '^token=<unset>$'; then ok
+else bad P63d-foreign-store-cli-session "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# P63d2: an env token still wins over the session on a foreign store
+rc=0; L="$TMP/cpt63d2"; : > "$L"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_LIST="$UK_LIST" -- refresh --store acme-uk --theme 777 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q '^auth=' "$O" && ! grep '^token=' "$L" | grep -qv '^token=shptka_uk$'; then ok
+else bad P63d2-foreign-env-token-wins "rc=$rc out=$(head -c 240 "$O" | tr '\n' ' ') log=$(tr '\n' ';' < "$L")"; fi
+# P63d3: a session the store refuses — not logged in (the CLI cannot prompt without a TTY), or an
+# account without access to it — names the session and both ways out; the token hint stays silent
+H63D3='^hint=no Theme Access token for acme-uk.myshopify.com and the Shopify CLI session cannot reach it — run `shopify auth login` with an account that has access to acme-uk.myshopify.com (or `shopify auth logout` first if the wrong account is logged in), or export SHOPIFY_CLI_THEME_TOKEN with acme-uk.myshopify.com'"'"'s own Theme Access password$'
+for msg in '' 'Failed to prompt: To run this command, log in to Shopify.' 'You are not authorized to use the CLI to develop in the provided store.'; do
+  rc=0; L="$TMP/cpt63d3"; : > "$L"
+  run_cpt "$L" FAKE_REJECT_STORE=acme-uk FAKE_REJECT_MSG="$msg" -- refresh --store acme-uk --theme 777 --no-build || rc=$?
+  if [ "$rc" -eq 1 ] && grep -q '^error=refresh_unverifiable theme=777 store=acme-uk' "$O" && grep -q "$H63D3" "$O" \
+     && ! grep -q 'minted PER STORE' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+  else bad "P63d3-session-auth-hint[${msg:-default}]" "rc=$rc out=$(head -c 400 "$O" | tr '\n' ' ')"; fi
+done
+# P63d4: session wording on a TOKEN run is not an auth rejection of that token — no hint
+rc=0; L="$TMP/cpt63d4"; : > "$L"
+run_cpt "$L" SHOPIFY_CLI_THEME_TOKEN=shptka_uk FAKE_REJECT_STORE=acme-uk FAKE_REJECT_MSG='Failed to prompt: To run this command, log in to Shopify.' \
+  -- refresh --store acme-uk --theme 777 --no-build || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=refresh_unverifiable' "$O" && ! grep -q '^hint=no Theme Access\|^hint=a Theme Access' "$O"; then ok
+else bad P63d4-session-wording-token-run "rc=$rc out=$(head -c 400 "$O" | tr '\n' ' ')"; fi
 # P63e: a token the store rejects says it is minted PER STORE and where it came from — on the
 # listing refusal and on the push failure alike; a toml token is told to fix the toml
 H63E='^hint=a Theme Access token is minted PER STORE — this one came from \$SHOPIFY_CLI_THEME_TOKEN and the request went to acme-uk.myshopify.com, .*export SHOPIFY_CLI_THEME_TOKEN with acme-uk.myshopify.com'"'"'s own'

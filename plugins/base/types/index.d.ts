@@ -30,6 +30,8 @@ export type BaseProgress =
       agentsSince: number
       editsSince: number
       stale: boolean
+      /** Resolved from the newest progress.md alone (no pin, key or branch): autosave waits for a write of this session. */
+      guessed: boolean
     }
   | { workId: null; branch: string | null }
 

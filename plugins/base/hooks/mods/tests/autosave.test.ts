@@ -65,6 +65,25 @@ describe('nudge', () => {
     expect(lastContext(calls)).toEqual([])
   })
 
+  t('a workspace guessed from the newest progress.md gets no line and no block until this session writes into it', async ($, on) => {
+    const { w, calls, clock } = world(on, { branch: 'main' })
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    expect((await peek($)).progress).toMatchObject({ workId: 'ABC-1591', guessed: true })
+    await agent($)
+    await clock.advance(25 * MIN)
+    await submit($, 'go on')
+    expect(lastContext(calls)).toEqual([])
+    expect((await stop($)).block).toBeUndefined()
+    await $.tool.call({ tool: 'Write', file_path: NOTES_MD, content: NOTES })
+    expect((await peek($)).progress).toMatchObject({ guessed: false })
+    await agent($)
+    await clock.advance(25 * MIN)
+    await submit($, 'go on')
+    // the stub stamps a Write at NOW + 1, 50 min before this prompt
+    expect(lastContext(calls)).toEqual([NUDGE.replace('21 min', '49 min')])
+  })
+
   t('BASE_AUTOSAVE=0 adds none', async ($, on) => {
     const { calls } = await staleWorld($, on, { BASE_AUTOSAVE: '0' })
     await submit($, 'go on')

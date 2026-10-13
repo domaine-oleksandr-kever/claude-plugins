@@ -18,14 +18,16 @@ protected: extend or compose it, never edit it in place. The Liquid core — \`s
 \`sections/core-*\`, \`blocks/core-*\` — may be edited, but every edit has to be hand-synced from the
 foundation repo, so prefer a copy under a new name.`
 
-export const STORE_ACCESS = `## fe capability — live store access, any time
+export const STORE_ACCESS = `## fe capability — live store access
 
 Two runners under \`<fe root>/scripts/\` — use them whenever real store state would answer a
-question; don't guess store state.
+question; don't guess store state. The Admin runner needs \`SHOPIFY_ADMIN_TOKEN\` in \`.env\` or a
+\`shopify store auth\` login (Shopify CLI 4+); without either it prints \`error=no_admin_token\` and
+the setup to relay — that is the answer then, not a defect.
 
 - \`<fe root>/scripts/shopify-admin-gql.sh --query <file.graphql> [--operation <Name>] [--variables <json>
   | --variables-file <file>] [--store <domain>] [--out <file>]\` (\`--help\` prints the full call
-  shape) — Admin GraphQL. Read-only queries are always fair game (big reads: \`--out\` + \`jq\`);
+  shape) — Admin GraphQL. Read-only queries need no approval (big reads: \`--out\` + \`jq\`);
   mutations follow \`<fe root>/references/metafield-metaobject-setup.md\`. Both paths: every query or
   mutation you wrote clears a \`validate_graphql_codeblocks\` pass first (base's Shopify Dev MCP
   server; needs a \`learn_shopify_api\` conversationId).

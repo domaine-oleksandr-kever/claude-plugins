@@ -165,15 +165,18 @@ async function taskDirs($: $, root: string): Promise<Set<string>> {
   }
 }
 
+type Resolved = { id: string; guessed: boolean } | null
+
 /**
  * pin (an existing dir) → conversation key, workspace or not: the ticket the developer named is the task →
- * branch key → branch slug (existing dirs) → newest progress.md within 12 h → null.
+ * branch key → branch slug (existing dirs) → newest progress.md within 12 h (`guessed`) → null.
  */
-async function resolveWorkId($: $, root: string, branch: string | null, inputs: Inputs): Promise<string | null> {
-  if (await hasWorkspace($, root, inputs.pin)) return inputs.pin
-  if (inputs.lastKey) return inputs.lastKey
-  for (const id of [keyFromBranch(branch), slugFromBranch(branch)]) if (await hasWorkspace($, root, id)) return id
-  return newestWorkspace($, root)
+async function resolveWorkId($: $, root: string, branch: string | null, inputs: Inputs): Promise<Resolved> {
+  if (await hasWorkspace($, root, inputs.pin)) return { id: inputs.pin as string, guessed: false }
+  if (inputs.lastKey) return { id: inputs.lastKey, guessed: false }
+  for (const id of [keyFromBranch(branch), slugFromBranch(branch)]) if (await hasWorkspace($, root, id)) return { id: id as string, guessed: false }
+  const id = await newestWorkspace($, root)
+  return id ? { id, guessed: true } : null
 }
 
 /** The most recent ticket the prompt names (`ticketKeys`), else null: the held key stays. */
@@ -199,13 +202,13 @@ async function workspaceMtime($: $, root: string, id: string): Promise<number> {
   return newestWrite(entries, id, await read($, marker))
 }
 
-async function load($: $, root: string, workId: string, branch: string | null): Promise<BaseProgress> {
+async function load($: $, root: string, workId: string, branch: string | null, guessed: boolean): Promise<BaseProgress> {
   const dir = workDir(root, workId)
   const workspace = await hasWorkspace($, root, workId)
   const mtimeMs = await workspaceMtime($, root, workId)
   const parsed = parseProgress(await readText($, `${dir}/progress.md`))
   const notes = notesTail(await readText($, `${dir}/notes.md`))
-  const p = { workId, branch, hasWorkspace: workspace, ...parsed, notesTail: notes, mtimeMs, lastSavableMs: 0, agentsSince: 0, editsSince: 0, stale: false }
+  const p = { workId, branch, hasWorkspace: workspace, ...parsed, notesTail: notes, mtimeMs, lastSavableMs: 0, agentsSince: 0, editsSince: 0, stale: false, guessed }
   return withStaleness(p, await read($, savable), await $.clock.now(), await windowOf($))
 }
 
@@ -226,11 +229,15 @@ async function refresh($: $, resolve: boolean): Promise<void> {
   const reload = !resolve && !!cur?.workId && (await hasWorkspace($, root, cur.workId))
   let next: BaseProgress
   if (reload && cur?.workId) {
-    next = await load($, root, cur.workId, cur.branch)
+    next = await load($, root, cur.workId, cur.branch, cur.guessed)
+    // a write since the last read adopts a guessed workspace: it is this session's work now
+    if (next.workId !== null && next.guessed && next.mtimeMs > cur.mtimeMs) next = { ...next, guessed: false }
   } else {
     const branch = await branchOf($, root)
-    const id = await resolveWorkId($, root, branch, inputs)
-    next = id ? await load($, root, id, branch) : { workId: null, branch }
+    const r = await resolveWorkId($, root, branch, inputs)
+    // a re-resolve keeps an adopted workspace adopted
+    const guessed = !!r?.guessed && !(cur !== null && cur.workId === r.id && !cur.guessed)
+    next = r ? await load($, root, r.id, branch, guessed) : { workId: null, branch }
   }
   // A pin or key change (or /clear) during the awaits started its own, newer resolve.
   const now = await readInputs($)

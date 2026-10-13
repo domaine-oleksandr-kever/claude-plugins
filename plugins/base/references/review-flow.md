@@ -21,7 +21,7 @@ Format (plain `key=value` lines, no `jq` needed):
 
 ```
 branch=<current branch>
-base=<develop|main|origin/develop|origin/main>
+base=<develop|main|release/*, local or origin/…, or the --base ref>
 diff_hash=<hash of the reviewed diff>
 reviewed_at_head=<commit sha at review time>
 correctness_hash=<diff hash when check F was last satisfied — line absent if never>
@@ -41,8 +41,9 @@ workspace exists:
 # branch=…  base=…  merge_base=…  diff_hash=…  excluded=…   then a blank line and the scope's files
 ```
 
-The **scope** is one diff from the merge-base with `base` (develop, else main; `origin/<b>` when the
-local branch is missing or only behind it) to the **working tree**: committed, staged, unstaged and
+The **scope** is one diff from the merge-base with `base` (`--base <ref>` when given, else
+the nearest to HEAD of develop, main and every `release/*`; `origin/<b>` when the local branch is
+missing or only behind it) to the **working tree**: committed, staged, unstaged and
 untracked work, so the hash is the same before and after `git add`. Untracked files under
 `.claude/`, `docs/technical-approaches/`, any `.env*` and `settings.local.json` stay out. The files
 listed after the blank line are the reviewed-files list; `--diff` prints the scope diff itself,

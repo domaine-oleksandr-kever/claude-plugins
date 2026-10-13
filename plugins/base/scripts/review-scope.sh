@@ -4,12 +4,14 @@
 # (references/review-flow.md §1): the `.git/.base-review` marker compares `diff_hash`, the review
 # agents read the file list.
 #
-# Base: develop, else main; origin/<b> when the local <b> is missing or only behind it (a stale local
-# branch gives an old merge-base and foreign files in scope); a local <b> with commits of its own wins.
+# Base: --base <ref> when given; else the candidate nearest HEAD (fewest commits from its merge-base
+# to HEAD; a tie keeps the earlier) of develop, main and every release/* branch, by name. Each name
+# resolves to origin/<b> when the local <b> is missing or only behind it (a stale local branch gives an
+# old merge-base and foreign files in scope); a local <b> with commits of its own wins.
 #
 # Scope: ONE diff from the merge-base to the WORKING TREE — committed, staged, unstaged and untracked
 # work alike. A throwaway copy of the index (`<git-dir>/base-review-index`, rebuilt every run) marks
-# untracked files intent-to-add, so each diffs as the new file it becomes once staged (same hash
+# untracked, not-ignored files (listed in `<git-dir>/base-review-untracked`) intent-to-add, so each diffs as the new file it becomes once staged (same hash
 # before and after `git add`); the real index is never touched. Untracked files under .claude/ or
 # docs/technical-approaches/ and any .env* file or dir / settings.local.json stay out, name and body.
 #
@@ -21,27 +23,30 @@
 # a tracked file's path counts.
 #
 # Usage:
-#   review-scope.sh [--ws <dir>]                 → branch= base= merge_base= diff_hash= excluded=
+#   review-scope.sh [--base <ref>] [--ws <dir>]  → branch= base= merge_base= diff_hash= excluded=
 #                                                   then a blank line and the scope's files, one a line
 #   review-scope.sh [--ws <dir>] --diff          → the scope diff itself
 #   review-scope.sh [--ws <dir>] --since <rev>   → the scope's --stat against <rev>, a blank line,
 #                                                   and the files changed since <rev>
 #
-# `excluded=` lists the build-dirtied paths out of the scope whole, space-separated. Runs from any
+# Every form takes --base <ref> (any ref `git rev-parse` resolves to a commit). `excluded=` lists the build-dirtied paths out of the scope whole, space-separated. Runs from any
 # directory of the checkout, linked worktrees included.
 #
-# Exit: 0 ok · 2 usage · 3 not a git checkout, or no develop / main to diff against.
+# Exit: 0 ok · 2 usage or a bad --base · 3 not a git checkout, or no develop / main / release/* to
+# diff against.
 set -u
 
-USAGE='usage: review-scope.sh [--ws <dir>] [--diff | --since <rev>]'
+USAGE='usage: review-scope.sh [--base <ref>] [--ws <dir>] [--diff | --since <rev>]'
 die() { printf 'review-scope: %s\n' "$1" >&2; exit "$2"; }
 
-ws=; mode=list; since=
+ws=; mode=list; since=; base=
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) printf '%s\n' "$USAGE"; exit 0 ;;
     --ws) [ $# -ge 2 ] || die "--ws needs a value" 2; ws=$2; shift 2 ;;
     --ws=*) ws=${1#--ws=}; shift ;;
+    --base) [ $# -ge 2 ] && [ -n "$2" ] || die "--base needs a ref" 2; base=$2; shift 2 ;;
+    --base=*) base=${1#--base=}; [ -n "$base" ] || die "--base needs a ref" 2; shift ;;
     --diff) mode=diff; shift ;;
     --since) [ $# -ge 2 ] && [ -n "$2" ] || die "--since needs a rev" 2; mode=since; since=$2; shift 2 ;;
     --since=*) mode=since; since=${1#--since=}; [ -n "$since" ] || die "--since needs a rev" 2; shift ;;
@@ -55,21 +60,37 @@ gitdir=$(git rev-parse --absolute-git-dir) || die "not inside a git checkout" 3
 cd "$top" || die "cannot enter $top" 3
 
 branch=$(git rev-parse --abbrev-ref HEAD)
-base=
-for b in develop main; do
-  if git show-ref --verify --quiet "refs/remotes/origin/$b" \
-     && { ! git show-ref --verify --quiet "refs/heads/$b" || git merge-base --is-ancestor "$b" "origin/$b"; }; then
-    base="origin/$b"; break
-  fi
-  if git show-ref --verify --quiet "refs/heads/$b"; then base=$b; break; fi
-done
-[ -n "$base" ] || die "no develop or main branch (local or origin) to diff against" 3
+if [ -n "$base" ]; then
+  git rev-parse --verify --quiet "$base^{commit}" >/dev/null || die "not a ref: $base" 2
+else
+  best=
+  while read -r b; do
+    [ -n "$b" ] || continue
+    if git show-ref --verify --quiet "refs/remotes/origin/$b" \
+       && { ! git show-ref --verify --quiet "refs/heads/$b" || git merge-base --is-ancestor "$b" "origin/$b"; }; then
+      c="origin/$b"
+    elif git show-ref --verify --quiet "refs/heads/$b"; then c=$b
+    else continue; fi
+    m=$(git merge-base "$c" HEAD) || continue
+    n=$(git rev-list --count "$m..HEAD")
+    if [ -z "$best" ] || [ "$n" -lt "$best" ]; then base=$c; best=$n; fi
+  done <<EOF
+develop
+main
+$(git for-each-ref --format='%(refname)' refs/remotes/origin/release/ refs/heads/release/ \
+  | sed -e 's#^refs/remotes/origin/##' -e 's#^refs/heads/##' | sort -u)
+EOF
+  [ -n "$base" ] || die "no develop or main branch, nor release/* (local or origin), to diff against" 3
+fi
 mb=$(git merge-base "$base" HEAD) || die "no merge-base between $base and HEAD" 3
 
 idx="$gitdir/base-review-index"
 if [ -f "$gitdir/index" ]; then cp "$gitdir/index" "$idx"; else rm -f "$idx"; fi
-GIT_INDEX_FILE="$idx" git add -N -- ':/' ':(top,exclude).claude/' ':(top,exclude)docs/technical-approaches/' \
-  ':(top,exclude,glob)**/.env*' ':(top,exclude,glob)**/.env*/**' ':(top,exclude,glob)**/settings.local.json'
+keep=(':/' ':(top,exclude).claude/' ':(top,exclude)docs/technical-approaches/' \
+  ':(top,exclude,glob)**/.env*' ':(top,exclude,glob)**/.env*/**' ':(top,exclude,glob)**/settings.local.json')
+new="$gitdir/base-review-untracked"
+GIT_INDEX_FILE="$idx" git ls-files -z --others --exclude-standard -- "${keep[@]}" > "$new"
+[ ! -s "$new" ] || GIT_INDEX_FILE="$idx" git --literal-pathspecs add -N --pathspec-from-file="$new" --pathspec-file-nul
 
 ex=(); staged=(); excluded=; dirty=
 notes="${ws%/}/notes.md"

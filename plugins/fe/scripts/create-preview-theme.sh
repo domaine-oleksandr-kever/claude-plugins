@@ -25,7 +25,9 @@
 #                    (`--store` / $SHOPIFY_STORE override it — see --store below)
 #   - token        : `password = "..."`, else first shp*_… in the file, else $SHOPIFY_CLI_THEME_TOKEN
 #                    (the repo's own credential wins — an env token exported for another project
-#                    would authenticate this repo's pushes against that store)
+#                    would authenticate this repo's pushes against that store), else none: the
+#                    `shopify` CLI's own logged-in session (`shopify auth login`) authenticates,
+#                    reported as `auth=cli-session` after the `store=` line
 #   Values may be double-quoted, single-quoted or bare; a malformed store/theme id is a hard stop
 #   (it would otherwise reach the CLI and target the wrong store, or orphan a created theme).
 #   All three come out of ONE `[environments.*]` block (`--env`, else $SHOPIFY_FLAG_ENVIRONMENT,
@@ -154,8 +156,9 @@
 #       names is still `error=ambiguous_env` there). A store other than
 #       the resolved block's is a FOREIGN store, and the toml's other values do not reach it:
 #         token   — a Theme Access token is minted PER STORE, so only $SHOPIFY_CLI_THEME_TOKEN is
-#                   used (`no access token for store=…` when it is unset); a CLI auth rejection
-#                   adds a `hint=` naming where the token came from and which store refused it.
+#                   used, else the CLI's logged-in session (`auth=cli-session`); a CLI auth rejection
+#                   adds a `hint=` naming where the token came from (or the session) and which
+#                   store refused it.
 #         overlay — the dev theme (the settings source) lives on the toml's store, out of the
 #                   token's reach: `create` is refused before the build (`error=overlay_store_mismatch`
 #                   — a fresh theme without settings has no templates and 404s); `refresh` pushes
@@ -307,10 +310,12 @@ fi
 # The project's own credential wins: a $SHOPIFY_CLI_THEME_TOKEN exported for ANOTHER project (a common
 # `theme dev` habit) would otherwise authenticate this repo's pushes against that store and die as an
 # opaque CLI 401 naming neither source. The env var is the last resort — which is also the escape
-# hatch for a token this file cannot supply, and the only token a foreign store can take.
+# hatch for a token this file cannot supply, and the only token a foreign store can take. With no
+# token at all the CLI's logged-in session authenticates (TOKEN_SOURCE=session).
 TOKEN=""; TOKEN_SOURCE="env"
 if [ "$FOREIGN" -eq 0 ]; then TOKEN="$(theme_token_from_toml)"; TOKEN_SOURCE="toml"; fi
 [ -n "$TOKEN" ] || { TOKEN="${SHOPIFY_CLI_THEME_TOKEN:-}"; TOKEN_SOURCE="env"; }
+[ -n "$TOKEN" ] || TOKEN_SOURCE="session"
 
 # Only create (the overlay source) and info read the dev theme; refresh pushes code only.
 case "$MODE" in pin|refresh) ;; *) [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML (env=$TOML_ENV)" ;; esac
@@ -329,18 +334,15 @@ fi
 STORE="$(store_handle "$STORE")" \
   || fail "invalid_store store='$STORE' (expected a myshopify handle, <handle>.myshopify.com or its https:// URL — check $STORE_FROM)"
 
-# Refused before the token check: no token makes either of these runnable.
+# Refused before any CLI call: no credential makes either of these runnable.
 if [ "$FOREIGN" -eq 1 ]; then
   [ "$MODE" != create ] || fail "overlay_store_mismatch store=$STORE$SRC_NOTE toml_store=$TOML_STORE dev_theme=$DEV_THEME_ID — create copies the customizer settings from the dev theme in $TOML, which lives on $TOML_STORE, and a fresh theme without them has no templates; nothing was built or pushed; refresh an existing preview theme on $STORE instead (\`refresh --store $STORE --theme <id>\`), or select the toml block whose store is $STORE: $CPT_ENV_FIX"
   [ "$MODE" != pin ] && { [ "$MODE" != refresh ] || [ "$CPT_PIN_ARG" -eq 0 ]; } \
     || fail "pin_store_mismatch store=$STORE$SRC_NOTE toml_store=$TOML_STORE — a pin writes the id into $TOML (env=$TOML_ENV), whose store is $TOML_STORE, so \`shopify theme dev\` would look for it on the wrong store; nothing was built, pushed or written; pass --env <the block whose store is $STORE>, or drop the pin"
 fi
-[ -n "${TOKEN:-}" ] || {
-  [ "$FOREIGN" -eq 0 ] || fail "no access token for store=$STORE ($STORE_FROM) — a Theme Access token is minted PER STORE and the one in $TOML belongs to $TOML_STORE; export SHOPIFY_CLI_THEME_TOKEN with $STORE's own Theme Access password (Shopify admin → Apps → Theme Access)"
-  fail "no access token (password / shp*_… in $TOML env=$TOML_ENV, or \$SHOPIFY_CLI_THEME_TOKEN)"
-}
-
-export SHOPIFY_CLI_THEME_TOKEN="$TOKEN"   # consumed by `shopify`; never echoed
+# consumed by `shopify`, never echoed; unset (not empty) without a token, so the CLI uses its login
+if [ -n "$TOKEN" ]; then export SHOPIFY_CLI_THEME_TOKEN="$TOKEN"; else unset SHOPIFY_CLI_THEME_TOKEN; fi
+print_auth() { [ "$TOKEN_SOURCE" != session ] || printf 'auth=cli-session\n'; }
 
 # --- helpers ------------------------------------------------------------------
 # Build flag arrays portably (bash 3.2 on macOS has no mapfile).
@@ -459,9 +461,19 @@ theme_ids_by_name() {
 
 # A Theme Access token is minted PER STORE, so the CLI's auth rejection almost always means the token
 # belongs to another store — the one thing its raw output never says (theme-json.sh's wording).
+# Without a token it is the CLI session that failed: no login (the CLI cannot prompt without a TTY),
+# or a login whose account has no access to this store.
 auth_hint() { # $1 = file holding the CLI's stderr — one hint line, only when it IS an auth rejection
-  grep -qiE '(^|[[:space:]])401([[:space:]]|$)|unauthorized|invalid api key or access token' "$1" 2>/dev/null || return 0
+  if ! grep -qiE '(^|[[:space:]])401([[:space:]]|$)|unauthorized|invalid api key or access token' "$1" 2>/dev/null; then
+    [ "$TOKEN_SOURCE" = session ] \
+      && grep -qiE 'not logged in|log in to shopify|auth login|credentials are invalid|(failed|unable) to prompt|not authorized|(^|[[:space:]])403([[:space:]]|$)' "$1" 2>/dev/null \
+      || return 0
+  fi
   local domain src fix; domain="$(store_domain "$STORE")"
+  if [ "$TOKEN_SOURCE" = session ]; then
+    printf 'hint=no Theme Access token for %s and the Shopify CLI session cannot reach it — run `shopify auth login` with an account that has access to %s (or `shopify auth logout` first if the wrong account is logged in), or export SHOPIFY_CLI_THEME_TOKEN with %s'"'"'s own Theme Access password\n' "$domain" "$domain" "$domain"
+    return 0
+  fi
   if [ "$TOKEN_SOURCE" = toml ]; then
     src="$TOML"; fix="the password= in $TOML is not $domain's — mint $domain's own Theme Access password (Shopify admin → Apps → Theme Access) and put it there"
   else
@@ -960,6 +972,7 @@ case "$MODE" in
   info)
     load_theme_list
     printf 'store=%s\n' "$STORE"
+    print_auth
     printf 'env=%s\n' "$TOML_ENV"
     printf 'dev_theme_id=%s\n' "$DEV_THEME_ID"
     printf 'dev_theme_name=%s\n' "$(theme_name_by_id "$DEV_THEME_ID")"
@@ -1002,6 +1015,7 @@ case "$MODE" in
     pin_toml "$TARGET" || fail "$PIN_ERR_KEY $PIN_ERR_MSG; nothing was changed"
     printf 'theme_id=%s\n' "$TARGET"
     printf 'store=%s\n' "$STORE"
+    print_auth
     printf 'env=%s\n' "$TOML_ENV"
     print_pin_keys
     ;;
@@ -1110,6 +1124,7 @@ case "$MODE" in
     printf 'theme_id=%s\n' "$THEME_ID"
     printf 'name=%s\n' "$NAME"
     printf 'store=%s\n' "$STORE"
+    print_auth
     printf 'env=%s\n' "$TOML_ENV"
     printf 'preview_url=%s\n' "$PREVIEW"
     printf 'editor_url=%s\n' "$EDITOR"
@@ -1191,6 +1206,7 @@ case "$MODE" in
 
     printf 'theme_id=%s\n' "$(json_field "$OUT" id)"
     printf 'store=%s\n' "$STORE"
+    print_auth
     printf 'env=%s\n' "$TOML_ENV"
     printf 'preview_url=%s\n' "$(json_field "$OUT" preview_url)"
     printf 'editor_url=%s\n' "$(json_field "$OUT" editor_url)"
