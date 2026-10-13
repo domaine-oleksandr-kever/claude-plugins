@@ -100,6 +100,22 @@ function withCost(u: BandUsage): BandUsage {
   return costShown ? u : { ...u, costUsd: null }
 }
 
+/** The model a switch moved away from: $.session.model() still answers it for a while after the event. */
+let leftModel: string | null = null
+
+/** The $.session.model() answer, or null when it is the model a switch just left: that is the lagging answer. */
+async function sessionModel($: $): Promise<string | null> {
+  let m: string | null = null
+  try {
+    m = await $.session.model()
+  } catch {
+    return null
+  }
+  if (!m || m === leftModel) return null
+  leftModel = null
+  return m
+}
+
 /** Writes the model atom and logs the change once; the same id again is a no-op. */
 async function adoptModel($: $, m: string): Promise<void> {
   if ((await read($, model)) === m) return
@@ -194,10 +210,8 @@ async function seed($: $, reloaded: boolean, forcedTtl: number | null): Promise<
     const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
     await update($, cache, c => ({ ...c, ttlMs, ttlSource })).catch(() => undefined)
   }
-  try {
-    const m = await $.session.model()
-    await update($, model, () => m)
-  } catch {}
+  const m = await sessionModel($)
+  if (m !== null) await update($, model, () => m).catch(() => undefined)
   await refresh($).catch(() => undefined)
 }
 
@@ -248,10 +262,8 @@ export function registerUsage(on: On, options: PluginOptions): void {
     await adoptSubscriptionTtl($, u)
     // No session.start follows a /clear and the seed may read null: the first measure fills the gap. A
     // switch whose PostModelSwitch never reached the mod is caught here too.
-    try {
-      const m = await $.session.model()
-      if (m) await adoptModel($, m)
-    } catch {}
+    const m = await sessionModel($)
+    if (m !== null) await adoptModel($, m)
     const hot = alarmRate(u.rates)
     const isAlarmed = await read($, rateAlarmed)
     if (hot && !isAlarmed) {
@@ -317,7 +329,9 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   on('classic.PostModelSwitch', async ($, e, next) => {
-    // The event's own field: $.session.model() may still answer the model before the switch here.
+    // The event's own field: $.session.model() may still answer the model before the switch here, and
+    // the measure the host sends right after the switch would write that stale answer over this one.
+    if (e.from_model !== e.to_model) leftModel = e.from_model
     await adoptModel($, e.to_model)
     // On a subscription (rate windows seen) the cache lives 1 h; a 5 min report there is the host's
     // fallback, not a measurement. Overage does drop it to 5 min, and the band hides the segment then.

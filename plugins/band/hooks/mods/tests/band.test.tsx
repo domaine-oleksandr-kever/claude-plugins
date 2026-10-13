@@ -493,6 +493,24 @@ describe('band', () => {
       expect(await shownModel(ui, surface)).toBe('opus-5-5')
     })
 
+    test(`${surface}: the measure after a switch keeps the event's model while session.model() still answers the old one`, async ($, on) => {
+      const { w } = world(on)
+      on('classic.PostModelSwitch', async () => ({}) as never)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      await $.classic.PostModelSwitch(modelSwitch({}))
+      await measure($, { window: 200_000, percent: 12 })
+      expect(await shownModel(ui, surface)).toBe('opus-5-5')
+      w.model = 'claude-opus-5-5'
+      await measure($, { window: 200_000, percent: 13 })
+      expect(await shownModel(ui, surface)).toBe('opus-5-5')
+      // Caught up: a later change without an event is adopted again, even back to the model the switch left.
+      w.model = 'claude-fable-5-1'
+      await measure($, { window: 200_000, percent: 14 })
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
+    })
+
     test(`${surface}: a measure adopts a model the session changed without a PostModelSwitch`, async ($, on) => {
       const { w } = world(on)
       await start($, surface)
