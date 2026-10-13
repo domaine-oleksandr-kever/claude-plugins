@@ -42,12 +42,17 @@
 // to add. `set` refuses a note over 4000 characters (exit 2); a longer one already in the file
 // still reads.
 //
+// `get` prints the store as JSON; `get <store> --field <name>` prints that one value raw plus a newline,
+// so `$(… --field password)` is the password itself, never a JSON document typed into a password box.
+// A store without the field (an open storefront has no password) prints nothing and exits 0; a name
+// outside the list is a usage error.
+//
 // Exit: 0 ok · 1 no such store (or an ambiguous alias) · 2 usage · 3 the registry is unreadable,
 // unparsable, unlockable or a version this script does not know (nothing is written).
 //
 // Usage:
 //   qa-stores.cjs list [--json]
-//   qa-stores.cjs get <store>
+//   qa-stores.cjs get <store> [--field password|alias|defaultTheme|domain|notes]
 //   qa-stores.cjs find <text>
 //   qa-stores.cjs set <domain> [--alias <a>] [--password <p>] [--theme <id>[:<label>]]…
 //                              [--default-theme <id>] [--note <text>]
@@ -65,7 +70,7 @@ const path = require('path');
 // what `--help` prints; tests/base-qa-stores-sim.sh pins the two together.
 const USAGE = `Usage:
   qa-stores.cjs list [--json]
-  qa-stores.cjs get <store>
+  qa-stores.cjs get <store> [--field password|alias|defaultTheme|domain|notes]
   qa-stores.cjs find <text>
   qa-stores.cjs set <domain> [--alias <a>] [--password <p>] [--theme <id>[:<label>]]…
                              [--default-theme <id>] [--note <text>]
@@ -87,6 +92,7 @@ quietOnEpipe(process.stderr);
 const MASK = '***';
 const ORDER = ['alias', 'password', 'themes', 'defaultTheme', 'notes', 'updatedAt'];
 const VALUE_FLAGS = ['--alias', '--password', '--theme', '--default-theme', '--note'];
+const GET_FIELDS = ['password', 'alias', 'defaultTheme', 'domain', 'notes'];
 const NOTE_MAX = 4000;
 const LOCK_WAIT_MS = 10000;
 const LOCK_STALE_MS = 30000;
@@ -313,11 +319,25 @@ function cmdList(rest) {
 }
 
 function cmdGet(rest) {
-  if (rest.length !== 1) usage('get expects one <store>');
+  let selector = null;
+  let field = null;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    if (a === '--field' || a.startsWith('--field=')) {
+      field = a === '--field' ? rest[++i] : a.slice('--field='.length);
+      // the value is not quoted back: a mistyped call can carry the password in this position
+      if (!GET_FIELDS.includes(field)) usage('--field takes one of ' + GET_FIELDS.join(', '));
+    } else if (a.startsWith('-')) usage(unknownOption(a, 'get'));
+    else if (selector === null) selector = a;
+    else usage('get expects one <store>');
+  }
+  if (selector === null) usage('get expects one <store>');
   const reg = loadRegistry();
-  const domain = resolve(reg, rest[0]);
+  const domain = resolve(reg, selector);
   if (!domain) die('no store matches that selector (qa-stores.cjs list)', 1);
-  print(withDomain(domain, reg.stores[domain]));
+  if (!field) return print(withDomain(domain, reg.stores[domain]));
+  const value = field === 'domain' ? domain : reg.stores[domain][field];
+  if (value !== undefined && value !== null && value !== '') process.stdout.write(String(value) + '\n');
 }
 
 function cmdFind(rest) {

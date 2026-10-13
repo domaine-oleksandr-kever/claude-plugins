@@ -1,6 +1,6 @@
 ---
 name: jira-reader
-description: Reads ONE Jira ticket via the Atlassian MCP — fields, comments and attachments (images and screen recordings downloaded into the task workspace and resized there by slim's `view`, linked prnt.sc / imgur screenshots fetched alongside) — and returns them compactly, keeping the raw ADF and the bytes out of the main context. Use PROACTIVELY whenever a whole ticket needs reading — e.g. when a Jira URL or key (ABC-123) is pasted. One per ticket, in parallel; skip tickets already in context. Writes `ticket.md` and `comments.md` itself when given the workspace path. NOT for single-field lookups or JQL searches — use the MCP directly. Read-only toward Jira. Needs the slim plugin.
+description: Reads ONE Jira ticket via the Atlassian MCP — fields, comments and attachments (images and screen recordings downloaded into the task workspace — else base's swept scratch root — and resized there by slim's `view`, linked prnt.sc / imgur screenshots fetched alongside) — and returns them compactly, keeping the raw ADF and the bytes out of the main context. Use PROACTIVELY whenever a whole ticket needs reading — e.g. when a Jira URL or key (ABC-123) is pasted. One per ticket, in parallel; skip tickets already in context. Writes `ticket.md` and `comments.md` itself when given the workspace path. NOT for single-field lookups or JQL searches — use the MCP directly. Read-only toward Jira. Needs the slim plugin.
 model: sonnet
 effort: medium
 tools: Read, Write, Bash, Glob, Grep, ToolSearch, mcp__plugin_base_atlassian, mcp__atlassian, mcp__slim
@@ -124,9 +124,13 @@ a linked screenshot is a URL in the requested fields or the comments whose host 
 `prnt.sc`, `prntscr.com`, `imgur.com`, `i.imgur.com`, `img.lightshot.app`, `gyazo.com`,
 `i.gyazo.com`, `share.cleanshot.com`, `snipboard.io`.
 
-1. **No workspace path** → nothing is downloaded: metadata rows only, `path` and `view` empty, a
-   linked screenshot as an entry carrying its URL, `attachments_note: "pass a workspace path to
-   download"`.
+1. **The download dir** is `<workspace>/tmp/attachments`. **No workspace path** → base's swept
+   scratch root, `.claude/base-tmp/<KEY>` (repo-relative; files older than `BASE_TMP_TTL` hours
+   go at the next session start): the same scripts, the same resize, rows with `path` and `view`
+   exactly as with a workspace; once anything was fetched, `attachments_note` names the dir —
+   `"no workspace: attachments in .claude/base-tmp/<KEY>/ (swept after BASE_TMP_TTL hours)"`, plus
+   any failure line after `; `. Without a workspace there is no `ticket.md`, so the rows reach the
+   caller only through your return.
 2. **No attachment of a wanted kind** (`image/*`, `video/*`, text — `text/*`, `application/json`,
    `application/javascript`, a `.liquid` name) **and no linked screenshot** → nothing to run, no
    network, `attachments_note: ""`. A screenshot that lives only in Slack ("see the thread")
@@ -165,7 +169,8 @@ lines too, under the same rule as a full read: the first 160 characters of each 
 `ticket.md` ends with a `## Attachments` section: the attachment rows as a table — id,
 filename, kind, mime, size, created, author, **repo-relative** path of the download
 (`.claude/tasks/ABC-123/tmp/attachments/248440-Screenshot_….png`), **repo-relative** `view`
-(the resized copy `…/248440-Screenshot_….1568.png`, or the frames dir of a video
+(the path on the view reply's `Read` line — the resized copy `…/248440-Screenshot_….1568.png`, or
+the download itself when it already fits within 1568 px — or the frames dir of a video
 `…/248443-Screen_Recording_….frames/` with its frame count — the directory of the frame paths in
 the view reply, never a name built by hand; a dir, so the caller lists it and `Read`s the frames
 the task needs, never all of them by default) and a **source** column — `jira`
@@ -216,7 +221,7 @@ other_links:                # list — other external URLs worth reading (Conflu
 comments:                   # list — one line each, oldest first: "#<n> <author> <YYYY-MM-DD HH:MM> — <first 160 chars>"; [] when none; full text in comments.md
 comment_links:              # list — every URL found in the comments (never merged into the three lists above; minus the screenshot links, which are `attachments` rows now)
 attachments:                # list — id · filename · kind · mime · size · created · author · path ("" if not on disk) · view ("" or the resized copy's path, "<frames dir>:<n>" for a video, the path itself for text); a linked screenshot's id is `ext` and its line ends with `source: <host> · comment #<n> | description · <url>`
-attachments_note:           # "" when every wanted file is on disk and resized; else one line for the developer (the token hint / a view refusal / a linked screenshot's note= line / a Slack-only screenshot)
+attachments_note:           # "" when every wanted file is in the workspace and resized; else one line for the developer (the no-workspace dir / the token hint / a view refusal / a linked screenshot's note= line / a Slack-only screenshot)
 field_id_mismatch:          # "" normally; "customfield_10040 → customfield_10041" when Step B resolved a different ID
 needs_clarification:        # "" if none; else a one-line question for the developer
 saved_to:                   # workspace file path, or "" if not saved

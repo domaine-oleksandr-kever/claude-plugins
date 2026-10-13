@@ -12,8 +12,8 @@ export type BaseRow = { mark: BaseMark; text: string }
  * `build-dirtied:` ones.
  * `mtimeMs` is the newest write of a file in the workspace root (0 = none; a compact marker is no write);
  * `lastSavableMs` the newest savable event of this work id this session (0 = none); `agentsSince` / `editsSince`
- * count the agent / edit ones after `mtimeMs`; `stale` = a workspace, `mtimeMs` older than the stale window
- * (20 min, 5 at 85 % context) and than `lastSavableMs`.
+ * count the agent / edit ones after `mtimeMs`; `stale` = a workspace not `guessed`, `mtimeMs` older than the stale
+ * window (20 min, 5 at 85 % context) and than `lastSavableMs`.
  */
 export type BaseProgress =
   | {
@@ -30,7 +30,10 @@ export type BaseProgress =
       agentsSince: number
       editsSince: number
       stale: boolean
-      /** Resolved from the newest progress.md alone (no pin, key or branch): autosave waits for a write of this session. */
+      /**
+       * Resolved from the branch or the newest progress.md, not from a pin or a named key, and not yet touched by this
+       * session (a Read, Write or Edit under it, a Bash command naming its dir, a write into it): never `stale`.
+       */
       guessed: boolean
     }
   | { workId: null; branch: string | null }
@@ -44,8 +47,9 @@ export type BaseProgress =
 export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'title' | 'guard' | 'doctor' | 'defect'
 
 /**
- * Worth saving to the workspace, in the main loop: an Agent / Task call returned, a Write / Edit outside `.claude/`,
- * an MCP result over slim's 4 KB gate. `workId` = the work id published when it happened (null = none).
+ * Worth saving to the workspace, in the main loop: an Agent / Task call returned its result, a background agent it
+ * launched stopped, a Write / Edit outside `.claude/`, an MCP result over slim's 4 KB gate. `workId` = the work id
+ * published when it happened (null = none).
  */
 export type BaseSavable = { atMs: number; kind: 'agent' | 'edit' | 'mcp'; workId: string | null }
 
@@ -54,10 +58,9 @@ export type BaseCompactMarker = { workId: string; notesMs: number; priorMs: numb
 
 /**
  * The autosave turn: a counter bumped per prompt that starts a turn, when it began, the turn the stop was last
- * blocked in (0 = never), the workspace mtime seen at its start, the last turn that ended with a new one, and
- * the workspace mtime the prompt line last fired for (-1 = none).
+ * blocked in (0 = never), and the workspace mtime the prompt line last fired for (-1 = none).
  */
-export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number; writeMs: number; writeTurn: number; nudgedMs: number }
+export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number; nudgedMs: number }
 
 /**
  * Dogfood mode, per session id: the last plugin-script failure in the main loop (`failMs` 0 = none) and its
@@ -97,6 +100,8 @@ declare module 'claude-code' {
       swept: string | null
       /** This session's savable events, oldest first, at most 200. */
       savable: BaseSavable[]
+      /** The ids of background agents the main loop launched that have not stopped yet, oldest first, at most 200. */
+      background: string[]
       autosave: BaseAutosave | null
       compactMarker: BaseCompactMarker | null
       /** Dogfood mode's session (BASE_DOGFOOD=1): whose /base-defects is registered, its script failure and its last report. */

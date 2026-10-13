@@ -494,6 +494,17 @@ else bad J10c-exclude-line "exclude = $(tr '\n' '|' < "$D10c/.git/info/exclude")
 if [ -s "$D10c/.claude/tasks/ABC-101/tmp/attachments/101-Screenshot_2026-09-10_at_3.26.09_PM.png" ]; then ok
 else bad J10c-default-out "the default out dir did not receive the files: $(ls "$D10c/.claude/tasks/ABC-101/tmp/attachments" 2>&1 | tr '\n' ' ')"; fi
 
+# the reader's no-workspace fallback, base's swept scratch root: stamped with its own line, once
+D10s="$(new_repo ten-scratch)"
+for _ in 1 2; do
+  rc=0; ja "$D10s" ABC-101 --out .claude/base-tmp/ABC-101 --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+done
+assert J10s-scratch-stamped 0 "$rc" "$E" "ok=1"
+if [ "$(grep -cxF '.claude/base-tmp/' "$D10s/.git/info/exclude")" = 1 ] \
+   && ! grep -qxF '.claude/tasks/' "$D10s/.git/info/exclude" \
+   && [ -s "$D10s/.claude/base-tmp/ABC-101/101-Screenshot_2026-09-10_at_3.26.09_PM.png" ]; then ok
+else bad J10s-scratch "exclude=$(tr '\n' '|' < "$D10s/.git/info/exclude" 2>&1) files=$(ls "$D10s/.claude/base-tmp/ABC-101" 2>&1 | tr '\n' ' ')"; fi
+
 # a glob character in --out (or in $PWD) is a path segment, not a pattern: the download must land
 # in the directory the caller named, not in whatever the cwd happens to match
 D10e="$(new_repo ten-glob '.claude/')"

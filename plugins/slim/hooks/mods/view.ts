@@ -21,8 +21,9 @@ export const VIEW_DESC =
   'line and the compact text, whole up to 16 KB, else its head and a file to Read windowed. jq narrows JSON first ' +
   "(dot paths .a.b, .a[0], '[]' iteration, ',' multi-select, '| keys' / '| length'). out writes the compact text to a " +
   'file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root), reused while ' +
-  'it is newer than the input. An image becomes a copy at most 1568 px on its long edge and a video a folder of ' +
-  'frames, beside the input. Give exactly one of path or command; for a URL use WebFetch.'
+  'it is newer than the input. An image becomes a copy at most 1568 px on its long edge (one already within that ' +
+  'stays as it is) and a video a folder of frames, beside the input; the reply\'s last line names the one image to Read. ' +
+  'Give exactly one of path or command; for a URL use WebFetch.'
 export const VIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -65,12 +66,14 @@ export function mediaName(path: string): boolean {
 /**
  * The first file the media backend would write for `path`, from the name alone (the core refuses
  * when its byte sniff disagrees): `<dir>/<stem>.1568.<ext>` for an image (png, jpg, jpeg, gif kept,
- * anything else png), `<dir>/<stem>.frames/001.jpg` for a video. `path` is absolute.
+ * anything else png), `<dir>/<stem>.frames/001.jpg` for a video. An image already named so is its
+ * own probe: `path` itself, nothing to write. `path` is absolute.
  */
 export function mediaProbe(path: string): string {
   const { dir, stem, ext } = nameParts(path)
   const at = dir === '/' ? '' : dir
   if (VIDEO_EXT.has(ext)) return `${at}/${stem}.frames/001.jpg`
+  if (stem.endsWith('.1568') && OUT_EXT.has(ext)) return path
   return `${at}/${stem}.1568.${OUT_EXT.has(ext) ? ext : 'png'}`
 }
 
@@ -204,9 +207,14 @@ async function viewMedia($: $, path: string, a: Record<string, string>): Promise
     askRead = r.decision === 'ask'
   }
   const probe = mediaProbe(abs)
-  const w = await check($, 'Write', probe)
-  if (w.decision === 'deny') return refused('path', 'write-denied', `view: writing ${probe} is denied${w.reason ? ` (${w.reason})` : ''}`)
-  if (askRead || w.decision === 'ask') {
+  let askWrite = false
+  // A copy is its own probe: the backend writes nothing, so there is no Write to rule on.
+  if (probe !== abs) {
+    const w = await check($, 'Write', probe)
+    if (w.decision === 'deny') return refused('path', 'write-denied', `view: writing ${probe} is denied${w.reason ? ` (${w.reason})` : ''}`)
+    askWrite = w.decision === 'ask'
+  }
+  if (askRead || askWrite) {
     const what = VIDEO_EXT.has(ext) ? `frames into ${probe.slice(0, probe.lastIndexOf('/'))}/` : `a resized copy ${probe}`
     if (!(await confirmed($, `Let slim read ${abs} and write ${what}?`))) {
       return refused('path', 'not-confirmed', `view: not confirmed — reading ${abs} and writing ${what} needs a yes`)

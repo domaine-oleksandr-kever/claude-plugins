@@ -23,7 +23,7 @@
 #
 # WHERE THE BYTES LAND: --out is gated exactly like jira-attachments.sh's (out_dir_gate in
 # _common.sh): a path git ignores, judged at its physical location; under `.claude/tasks/`
-# the info/exclude line task-workspace.md prescribes is stamped. The file is
+# (or `.claude/base-tmp/`) the info/exclude line for it is stamped. The file is
 # `<host>-<slug>.<ext>` — the slug is the URL's path with everything but [A-Za-z0-9._-] folded to
 # `_`, so a page URL can never name a path outside the out dir.
 #

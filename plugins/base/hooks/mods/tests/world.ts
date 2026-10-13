@@ -240,6 +240,7 @@ export function world(on: On, over: Partial<World> = {}) {
   })
   on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'You are Claude Code.', scope: 'shared' as const }] }))
   on('classic.SubagentStart', async () => ({}) as never)
+  on('classic.SubagentStop', async () => ({}))
   on('tool.describe', async (_$, e) => ({ description: e.description }))
   on('agent.spawn', async (_$, e) => {
     calls.spawned.push(e.subagentType)
@@ -254,7 +255,8 @@ export function world(on: On, over: Partial<World> = {}) {
       const m = /git (?:checkout|switch) (\S+)/.exec(a.command)
       if (m) w.branch = m[1] ?? null
     }
-    return { result: a.tool.startsWith('mcp__') && typeof a.reply === 'string' ? a.reply : 'ok' }
+    // an MCP call's or an Agent call's `reply` is what it answers
+    return { result: (a.tool.startsWith('mcp__') || a.tool === 'Agent') && a.reply !== undefined ? a.reply : 'ok' }
   })
   return { w, calls, clock }
 }

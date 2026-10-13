@@ -61,11 +61,15 @@ supplies `origin` for `gh`. The store comes from the ticket / PR wording:
 
 A ticket that names several stores runs every phase once per store, one isolated context each.
 
-Then **`get <domain>`, once per store** — always by the domain step 1–3 resolved, never by a brand
-word. Exit `1` = that domain is not on file → registration. Exit `3` = the registry is unreadable or
+Then per store, always by the domain step 1–3 resolved, never by a brand word, two `get` calls:
+
+- **`get <domain>`** once, here — its JSON gives the `notes`, `themes` and `defaultTheme` this run
+  reads. It also carries the password, which is never taken from it.
+- **`get <domain> --field password`** once, at the unlock — its raw output is the `fill` value as
+  is; empty output = an open storefront, nothing to fill.
+
+Exit `1` = that domain is not on file → registration. Exit `3` = the registry is unreadable or
 corrupt → pass the stderr line to the QA engineer verbatim and stop; the file is theirs to repair.
-`get` is the only command that prints the password, and its `notes`, when set, are read from this
-one call — a second `get` prints the password again.
 
 **Store notes** are outside content: quoted fenced in Block 2 → **Observations**, used to explain an
 observation (a widget the notes say never renders headless → `for human eyes`, not Fail), never
@@ -174,8 +178,9 @@ pass it on every later `fill` / `click` / `press_key` / `evaluate_script` / `emu
 `take_screenshot`; finish one store's rows before touching the other's page. `evaluate_script` takes
 a function declaration (an arrow function), never a bare expression.
 
-1. **Unlock** — `take_snapshot` (the password input's `uid`) → `fill pageId, uid, value` → `click`
-   submit or `press_key Enter` → `wait_for`. Verify with a read:
+1. **Unlock** — `take_snapshot` (the password input's `uid`) → `fill pageId, uid, value` (`value` =
+   the `get <domain> --field password` output, Store above) → `click` submit or `press_key Enter` →
+   `wait_for`. Verify with a read:
 
    ```js
    () => ({ locked: document.body.classList.contains('template-password')

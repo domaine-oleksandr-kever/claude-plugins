@@ -1193,6 +1193,8 @@ case "$f" in
   *turned*.mp4) printf '{"streams":[{"width":1920,"height":1080,"side_data_list":[{"rotation":90}]}],"format":{"duration":"7.000000"}}\\n' ;;
   *.mp4) printf '{"streams":[{"width":1920,"height":1080,"duration":"7.0"}],"format":{"duration":"7.000000"}}\\n' ;;
   *portrait*) printf '{"frames":[{"side_data_list":[{"rotation":-90}]}],"streams":[{"width":4000,"height":3000}],"format":{}}\\n' ;;
+  *tilt*) printf '{"frames":[{"side_data_list":[{"rotation":180}]}],"streams":[{"width":1000,"height":800}],"format":{}}\\n' ;;
+  *small*) printf '{"streams":[{"width":1000,"height":800}],"format":{}}\\n' ;;
   *) printf '{"streams":[{"width":4000,"height":3000}],"format":{}}\\n' ;;
 esac
 `;
@@ -1301,6 +1303,21 @@ printf 'SIPSIMG' > "$last"
   eq('Cm-name-no-ext', [r7c.decision, r7c.outputs.map((o) => path.basename(o.path))], ['compressed', ['screenshot.1568.png']]);
   const r7d = run(media('clip.png', MP4_IN), FF, 'clip.1568.png');
   eq('Cm-name-kind-mismatch', [r7d.kind, r7d.reason, existsSync(at('clip.1568.png')), argv()], ['video', 'write-denied', false, '']);
+  const r8 = run(media('small.png', PNG_IN), FF, 'small.1568.png');
+  eq('Cm-image-fits-is-itself', [r8.decision, r8.figure, r8.text, r8.outputs, r8.bytesOut, existsSync(at('small.1568.png')), argv()],
+    ['passthrough', 'media: 5000 B, already ≤1568 px — no copy', `image png 1000×800, not re-encoded (ffmpeg)\nRead ${at('small.png')}`, [{ path: at('small.png'), bytes: 5000 }], 5000, false, '']);
+  const r8c = run(media('small.1568.png', PNG_IN), FF, 'small.1568.png');
+  eq('Cm-image-copy-is-itself', [r8c.decision, r8c.text.split('\n').pop(), r8c.outputs.map((o) => o.path), existsSync(at('small.1568.1568.png')), argv()],
+    ['passthrough', `Read ${at('small.1568.png')}`, [at('small.1568.png')], false, '']);
+  const r8u = run(media('big.1568.png', PNG_IN), FF, 'big.1568.png');
+  eq('Cm-image-copy-unfit', [r8u.decision, r8u.reason, r8u.figure, readFileSync(at('big.1568.png')).equals(PNG_IN), argv()],
+    ['refused', 'copy-unfit', "media: big.1568.png is named like slim's copy but needs one — rename it; not overwritten", true, '']);
+  const r8w = run(media('smallweb.jpg', WEBP_IN), FF, 'smallweb.1568.jpg');
+  eq('Cm-image-fits-wrong-ext', [r8w.decision, r8w.text, readFileSync(at('smallweb.1568.jpg'), 'utf8')],
+    ['compressed', `image webp 1000×800 → 1000×800 (no resize), metadata stripped (ffmpeg)\nRead ${at('smallweb.1568.jpg')} once to see it`, 'IMG']);
+  const r8t = run(media('tilt.jpg', JPG_IN), FF, 'tilt.1568.jpg');
+  eq('Cm-image-fits-turned', [r8t.decision, r8t.outputs.map((o) => path.basename(o.path))], ['compressed', ['tilt.1568.jpg']]);
+  check('Cm-image-read-once-line', r1.text.endsWith(`\nRead ${at('photo.1568.png')} once to see it`) && r1.text.split('\n').length === 2, r1.text);
   rmSync(at('photo.1568.png'));
   const r7e = run(png, FF, 'photo.1568.png', { opts: { longEdge: 800 } });
   eq('Cm-long-edge-mismatch', [r7e.reason, existsSync(at('photo.800.png')), existsSync(at('photo.1568.png'))], ['write-denied', false, false]);
@@ -1496,7 +1513,17 @@ printf 'SIPSIMG' > "$last"
   const viaLink = path.join(T, 'linked', 'shot.png');
   const m1 = viewMedia({ path: viaLink, allowed_out: path.join(T, 'linked', 'shot.1568.png') }, fake);
   eq('Cv14-image', [m1.decision, m1.engine, m1.figure, m1.frames, readFileSync(path.join(media, 'shot.1568.png'), 'utf8')], ['compressed', 'media', 'media: 1000 B → 3 B (-100%) frames=1', 1, 'IMG']);
-  check('Cv14-text-lists-output', m1.text.endsWith(`\n${path.join(media, 'shot.1568.png')}`), m1.text);
+  check('Cv14-text-lists-output', m1.text.endsWith(`\nRead ${path.join(media, 'shot.1568.png')} once to see it`), m1.text);
+  writeFileSync(path.join(media, 'big.1568.png'), Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(992, 1)]));
+  const m2 = viewMedia({ path: path.join(media, 'big.1568.png'), allowed_out: path.join(media, 'big.1568.png') }, fake);
+  const fits = path.join(T, 'fitsbin');
+  mkdirSync(fits);
+  writeFileSync(path.join(fits, 'ffprobe'), '#!/bin/sh\nprintf \'{"streams":[{"width":1000,"height":800}],"format":{}}\\n\'\n', { mode: 0o755 });
+  writeFileSync(path.join(fits, 'ffmpeg'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const m3 = viewMedia({ path: path.join(media, 'big.1568.png'), allowed_out: path.join(media, 'big.1568.png') }, fits);
+  eq('Cv14-copy-passthrough', [m3.decision, m3.engine, m3.figure, m3.text.split('\n').pop(), (m3.outputs || []).map((o) => o.path)],
+    ['passthrough', 'media', 'media: 1000 B, already ≤1568 px — no copy', `Read ${path.join(media, 'big.1568.png')}`, [path.join(media, 'big.1568.png')]]);
+  eq('Cv14-copy-unfit-not-overwritten', [m2.decision, m2.reason, m2.engine, readFileSync(path.join(media, 'big.1568.png')).length], ['refused', 'copy-unfit', 'media', 1000]);
   eq('Cv14-refusals', [
     viewMedia({ path: viaLink }, fake).reason,
     viewMedia({ path: viaLink, allowed_out: path.join(media, 'other.png') }, fake).reason,

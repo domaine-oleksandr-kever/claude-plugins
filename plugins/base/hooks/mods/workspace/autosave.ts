@@ -1,12 +1,11 @@
-// Autosave: the levers on a stale task workspace (base.progress `stale`) — one context line on a person's prompt,
-// one blocked stop at turn end, a notes.md marker before an auto-compact. BASE_AUTOSAVE=0 turns all three off.
+// Autosave: the levers on a stale task workspace (base.progress `stale`, never a `guessed` one) — one context line
+// on a person's prompt, one blocked stop at the end of a turn that did savable work, a notes.md marker before an
+// auto-compact. BASE_AUTOSAVE=0 turns all three off.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, FsEntry, On } from 'claude-code'
 import { PERSON, newestWrite } from './progress.ts'
 
 const BLOCK_EVERY = 3
-/** Turns without a workspace write after which earlier savable work counts at a stop too. */
-const QUIET_TURNS = 3
 
 const progress = atom({ plugin: 'base', key: 'progress' } as const, null)
 const autosave = atom({ plugin: 'base', key: 'autosave' } as const, null)
@@ -19,7 +18,7 @@ type Workspace = { id: string; notes: string; mtimeMs: number; stale: boolean; l
 async function workspace($: $): Promise<Workspace | null> {
   if ((await $.env.get('BASE_AUTOSAVE')) === '0') return null
   const p = await read($, progress)
-  if (!p || p.workId === null || !p.hasWorkspace || p.guessed) return null
+  if (!p || p.workId === null || !p.hasWorkspace) return null
   const dir = `${await $.session.root()}/.claude/tasks/${p.workId}`
   let entries: FsEntry[] = []
   try {
@@ -39,16 +38,12 @@ async function nudge($: $, ws: Workspace | null): Promise<string | null> {
   return `workspace stale ${age}: save findings to .claude/tasks/${ws.id}/notes.md before answering`
 }
 
-/**
- * Blocks a stop whose turn wrote nothing to the workspace and left it stale, after savable work in this turn
- * or 3 turns without a write; once per 3 turns.
- */
+/** Blocks a stop whose turn did savable work, wrote nothing to the workspace and left it stale; once per 3 turns. */
 async function stopReason($: $): Promise<string | null> {
   const turn = await read($, autosave)
   const ws = await workspace($)
   if (!turn || !ws) return null
-  if (ws.mtimeMs >= turn.startMs || !ws.stale) return null
-  if (ws.lastSavableMs < turn.startMs && turn.turn - turn.writeTurn < QUIET_TURNS) return null
+  if (ws.mtimeMs >= turn.startMs || !ws.stale || ws.lastSavableMs < turn.startMs) return null
   if (turn.blockedTurn && turn.turn - turn.blockedTurn < BLOCK_EVERY) return null
   await update($, autosave, t => (t ? { ...t, blockedTurn: t.turn } : t))
   return `save interim findings to the workspace (.claude/tasks/${ws.id}/notes.md), then stop`
@@ -82,12 +77,7 @@ export function registerAutosave(on: On): void {
       // A prompt typed over a running turn, or delivered into it, starts no turn of its own.
       if (e.turnId === undefined) {
         const startMs = await $.clock.now()
-        const writeMs = ws?.mtimeMs ?? 0
-        await update($, autosave, t => {
-          const turn = (t?.turn ?? 0) + 1
-          const writeTurn = t && t.writeMs === writeMs ? t.writeTurn : turn - 1
-          return { turn, startMs, blockedTurn: t?.blockedTurn ?? 0, writeMs, writeTurn, nudgedMs: t?.nudgedMs ?? -1 }
-        })
+        await update($, autosave, t => ({ turn: (t?.turn ?? 0) + 1, startMs, blockedTurn: t?.blockedTurn ?? 0, nudgedMs: t?.nudgedMs ?? -1 }))
       }
       if (PERSON.has(e.origin.kind)) line = await nudge($, ws)
     } catch {}

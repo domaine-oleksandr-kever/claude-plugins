@@ -28,6 +28,11 @@
 #   review-scope.sh [--ws <dir>] --diff          → the scope diff itself
 #   review-scope.sh [--ws <dir>] --since <rev>   → the scope's --stat against <rev>, a blank line,
 #                                                   and the files changed since <rev>
+#   review-scope.sh [--ws <dir>] --check         → one line: marker=<verdict> branch= marker_branch=
+#                                                   diff_hash= marker_hash= — the `.base-review` marker
+#                                                   against this branch and scope: fresh (same branch,
+#                                                   same hash) · stale (same branch, other hash) ·
+#                                                   other-branch · none (no marker file)
 #
 # Every form takes --base <ref> (any ref `git rev-parse` resolves to a commit). `excluded=` lists the build-dirtied paths out of the scope whole, space-separated. Runs from any
 # directory of the checkout, linked worktrees included.
@@ -36,7 +41,7 @@
 # diff against.
 set -u
 
-USAGE='usage: review-scope.sh [--base <ref>] [--ws <dir>] [--diff | --since <rev>]'
+USAGE='usage: review-scope.sh [--base <ref>] [--ws <dir>] [--diff | --since <rev> | --check]'
 die() { printf 'review-scope: %s\n' "$1" >&2; exit "$2"; }
 
 ws=; mode=list; since=; base=
@@ -48,6 +53,7 @@ while [ $# -gt 0 ]; do
     --base) [ $# -ge 2 ] && [ -n "$2" ] || die "--base needs a ref" 2; base=$2; shift 2 ;;
     --base=*) base=${1#--base=}; [ -n "$base" ] || die "--base needs a ref" 2; shift ;;
     --diff) mode=diff; shift ;;
+    --check) mode=check; shift ;;
     --since) [ $# -ge 2 ] && [ -n "$2" ] || die "--since needs a rev" 2; mode=since; since=$2; shift 2 ;;
     --since=*) mode=since; since=${1#--since=}; [ -n "$since" ] || die "--since needs a rev" 2; shift ;;
     *) die "unknown argument: $1
@@ -129,6 +135,17 @@ case "$mode" in
     git rev-parse --verify --quiet "$since^{commit}" >/dev/null || die "not a commit: $since" 2
     qp='-c core.quotePath=false'
     scope "$since" --stat; echo; scope "$since" --name-only | sort -u ;;
+  check)
+    hash=$(scope "$mb" | git hash-object --stdin)
+    marker="$gitdir/.base-review"; mbranch=; mhash=
+    if [ -f "$marker" ]; then
+      mbranch=$(sed -n 's/^branch=//p' "$marker" | head -n 1); mhash=$(sed -n 's/^diff_hash=//p' "$marker" | head -n 1)
+      if [ "$mbranch" != "$branch" ]; then verdict=other-branch
+      elif [ "$mhash" = "$hash" ]; then verdict=fresh
+      else verdict=stale; fi
+    else verdict=none; fi
+    printf 'marker=%s branch=%s marker_branch=%s diff_hash=%s marker_hash=%s\n' \
+      "$verdict" "$branch" "$mbranch" "$hash" "$mhash" ;;
   *)
     hash=$(scope "$mb" | git hash-object --stdin)
     qp='-c core.quotePath=false'

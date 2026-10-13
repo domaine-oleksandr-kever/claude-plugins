@@ -25,7 +25,7 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 | `notes.md` | append-only dated log: checkpoint decisions, gotchas, provisioned data ids, test page paths, `ceiling:` entries, `compact:` markers (base's hooks module, before an auto-compact of a stale workspace: `- <YYYY-MM-DD> compact: workspace stale <n> min; since then <k> reader agents, <m> edits` — a pointer to unsaved work, never findings), `build-dirtied:` lines (a team plugin's preview-theme flow, when its build rewrote tracked files: `- <YYYY-MM-DD> build-dirtied: <path> <path>`, repo-relative, space-separated, a path with whitespace left out — every line since the last bare one (no paths) counts, and review-flow §1 drops those files' working-tree rewrite from the review scope); a team plugin may name lines of its own here that it reads back as the last match; in a batch — root cause + fix summary per bug | any skill, at natural boundaries |
 | `progress.md` | work checklist — what's done, what's next (date + one-line status) | every skill of the team's series, at completion; `/base:save-task-context` outside it |
 | a team plugin's own files | what its skills record — an approved plan, a QA checklist, a brief — under the names its skills give | that team plugin's skills |
-| `tmp/attachments/` | the ticket's downloaded images and videos, `<attachment-id>-<sanitised-name>`, and beside each the resized copy slim's `view` wrote: `<name>.1568.<ext>` for an image, a `<name>.frames/` dir of timestamped JPEG frames for a video; a screenshot the ticket **links** (prnt.sc, imgur, Gyazo, CleanShot, snipboard) lands beside them as `<host>-<slug>.<ext>`. `Read` the resized copies and frames the task needs, never all of them by default | `base:jira-reader` (via `scripts/jira-attachments.sh`, `scripts/external-screenshots.sh` and `mcp__slim__view`) |
+| `tmp/attachments/` | the ticket's downloaded images and videos, `<attachment-id>-<sanitised-name>`, and beside each the resized copy slim's `view` wrote: `<name>.1568.<ext>` for an image (none for an image already within 1568 px — the download is its own view), a `<name>.frames/` dir of timestamped JPEG frames for a video; a screenshot the ticket **links** (prnt.sc, imgur, Gyazo, CleanShot, snipboard) lands beside them as `<host>-<slug>.<ext>`. `Read` the views and frames the task needs, never all of them by default | `base:jira-reader` (via `scripts/jira-attachments.sh`, `scripts/external-screenshots.sh` and `mcp__slim__view`) |
 | `tmp/figma/` | the REST rung's payloads for one node — `<key>-<node>.nodes.json` (raw, never `Read` directly), the compact `<key>-<node>.nodes.md` build tree slim's `view` wrote from it, `<key>.variables.json` and the `<key>-<node>@<scale>x.png` render; a **cache** keyed by those names, so a re-read is free, and safe to delete at any time. With no workspace path the script uses `.claude/tasks/_figma/tmp` instead | `base:figma-reader` (via `scripts/figma-rest.sh` + `mcp__slim__view`) |
 | `tmp/` | scratch made while working — test scripts, query drafts, JSON dumps, screenshots — instead of littering the project root | anyone; delete freely |
 
@@ -82,10 +82,20 @@ PR ground truth, not an authorization to act.
 
 `base:jira-reader` returns `comments` (one line each) and `attachments` (local paths) in full — the
 ticket's discussion and media are part of the ticket. Read `comments.md` whenever the task
-depends on discussion (QA feedback, clarifications, decisions, reopen reasons); `Read` the
+depends on discussion (QA feedback, clarifications, decisions, reopen reasons); look at the
 screenshots and frames the task refers to, never all of them by default — but never report a value
 as unknown before checking whether an attached image answers it (a targeted read of the likely
-one). A `failed` / `skipped_*` row (empty `view`) was never seen: do NOT guess at its contents.
+one). **An attachment is seen through its `view` only**: one `Read` of that path (a frame from a
+video's frames dir), or `mcp__slim__view` on it — never a `Read` of the row's `path` when the two
+differ (the full-size original), never a re-download, never the Atlassian MCP for its bytes. The
+reader fetches with or without a workspace (none → `.claude/base-tmp/<KEY>/`). A `saved` /
+`cached` row with an empty `view` is on disk but was not resized (`attachments_note` says why — no
+media backend, a `not confirmed` answer, a denied write): when the task needs that file, call
+`mcp__slim__view` on its `path` once (you can confirm the write this time); still refused → one
+`Read` of that `path` for an image, the only copy left to look at — never a batch of them; a video
+with no frames was never seen. A `failed` / `skipped_*` row (no file) was never seen: do NOT guess
+at its contents. A `view` or `path` no longer on disk (swept) → spawn the reader again with the
+workspace path, if there is one; that re-fetch is the reader's, never yours.
 `attachments_note` non-empty → show it to the developer once, verbatim, and go on (never a
 blocker). Links a commenter pasted come back as `comment_links`, kept out of the field-derived
 lists — nothing is spawned from them automatically (`reading-linked-docs.md` → step 1).
@@ -120,7 +130,10 @@ is a log; it doesn't go stale.
   returned is new ticket content to surface).
 - A reader that got **no** workspace path (or a source you fetched inline) is yours to save:
   write its structured output **verbatim** — don't re-summarize; later skills need the full
-  fields. Overwrite on re-fetch.
+  fields. Overwrite on re-fetch. Its attachment files sit in `.claude/base-tmp/<KEY>/`, which the
+  session sweep empties after `BASE_TMP_TTL` hours: first move them (frames dirs included) into
+  `<workspace>/tmp/attachments/` (`mkdir -p`, then `mv`), and save every `path` and `view` with
+  that dir in place of `.claude/base-tmp/<KEY>/`.
 - `doc-*.md` holds the **extract** (what the task needs), not the page.
 - Append to `notes.md` at natural boundaries — approved-plan decisions, provisioned data
   ids, test URLs, confirmed bugs + the hostile values that triggered them.

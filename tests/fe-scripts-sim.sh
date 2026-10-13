@@ -218,7 +218,9 @@ fi
 # TJ_LIST_FAIL / TJ_PULL_FAIL / TJ_PUSH_FAIL make that call fail: `401` reproduces the CLI's
 # box-drawing auth rejection (a Theme Access token minted for a DIFFERENT store); for list, `reqid`
 # and `ts` are plain failures whose text merely contains the digits 401; anything else is a plain
-# failure (a pull's is the 503 shape).
+# failure (a pull's is the 503 shape). `json401` (list, push) is CLI 4.x under --json: the same
+# rejection as an {"error":{"message":…}} envelope on STDOUT with stderr empty; `json0` (list) is
+# that envelope with exit 0; `session` (list) is a CLI with no usable login.
 path=""; only=""; prev=""
 for a in "$@"; do
   case "$prev" in --path) path="$a" ;; --only) only="$a" ;; esac
@@ -235,12 +237,16 @@ case "$*" in
                           '╰───────────────────────────────────────╯' >&2; exit 1 ;;
       reqid) echo 'Error: network unreachable (request_id: 7d401ef2-aaaa)' >&2; exit 1 ;;
       ts)  echo 'Error: push failed at 12:34:56.401 (id ab-401-cd)' >&2; exit 1 ;;
+      json401) printf '%s\n' '{"error":{"type":"abort","message":"Error connecting to your store x.myshopify.com: GraphQL Error (Code: 401): [API] Invalid API key or access token 401 undefined"}}'; exit 1 ;;
+      json0) printf '%s\n' '{"error":{"type":"abort","message":"Error: something odd"}}'; exit 0 ;;
+      session) echo 'To run this command, log in to Shopify. Run `shopify auth login`.' >&2; exit 1 ;;
       *)   echo 'Error: getaddrinfo ENOTFOUND (network unreachable)' >&2; exit 1 ;;
     esac
     if [ -n "${TJ_LIST_JSON:-}" ]; then printf '%s\n' "$TJ_LIST_JSON"
     else printf '[{"id":2,"name":"Dev","role":"development"}]\n'; fi ;;
   *"theme push"*)
     [ "${TJ_PUSH_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
+    [ "${TJ_PUSH_FAIL:-}" = json401 ] && { printf '%s\n' '{"error":{"type":"abort","message":"GraphQL Error (Code: 401): Invalid API key or access token 401 undefined"}}'; exit 1; }
     if [ -n "${TJ_PUSH_SAVE:-}" ] && [ -n "$path" ] && [ -n "$only" ]; then cp "$path/$only" "$TJ_PUSH_SAVE"; fi
     pj="${TJ_PUSH_JSON:-}"; [ -n "$pj" ] || pj='{}'
     printf '%s\n' "$pj" ;;
@@ -1002,7 +1008,7 @@ if grep -q '^hint=.*PER STORE' "$E" && grep -q "$TT/single.toml" "$E" \
    && grep -q 'acme-dev.myshopify.com' "$E" && grep -q '401 undefined' "$E"; then ok
 else bad T53b-list-401-hint "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
 # T53d: store and token both out of the toml — the remedy is that toml's password=, not TOML_PATH
-if grep -q 'password= in .*single.toml is not acme-dev.myshopify.com' "$E" && ! grep -q 'TOML_PATH' "$E"; then ok
+if grep -qF "password= in $TT/single.toml [environments.development] is not acme-dev.myshopify.com" "$E" && ! grep -q 'TOML_PATH' "$E"; then ok
 else bad T53d-list-401-toml-remedy "err=$(grep '^hint=' "$E" | head -c 400)"; fi
 # T53c: verdict → fix → the CLI's own words; the raw tail is noise until the first two have run
 if [ "$(grep -n 'error=cli_list_failed' "$E" | head -1 | cut -d: -f1)" -lt "$(grep -n '^hint=' "$E" | head -1 | cut -d: -f1)" ] \
@@ -1040,6 +1046,92 @@ else bad T55b-list-401-env-hint "err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
 # T55c: with --store overriding the toml the remedy is a token for THAT store, TOML_PATH included
 if grep -q 'TOML_PATH pointing at a toml whose store= is test.myshopify.com' "$E"; then ok
 else bad T55c-list-401-override-remedy "err=$(grep '^hint=' "$E" | head -c 400)"; fi
+
+# T56: CLI 4.x under --json reports the rejection on STDOUT and leaves stderr empty — the hint and
+# the tail must still see it, or the failure line stands alone with a blank tail
+rc=0; TOML_PATH="$TT/single.toml" TJ_LIST_FAIL=json401 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+assert T56-list-json401-error-line 5 "$rc" "$E" "error=cli_list_failed store=acme-dev.myshopify.com token_source=toml"
+if grep -q '^hint=.*PER STORE' "$E" && grep -q '^Error connecting to your store .*401 undefined' "$E" \
+   && grep -qF "came from $TT/single.toml [environments.development] and the request went to acme-dev.myshopify.com" "$E" \
+   && [ "$(grep -n '^hint=' "$E" | head -1 | cut -d: -f1)" -lt "$(grep -n '^Error connecting' "$E" | head -1 | cut -d: -f1)" ]; then ok
+else bad T56b-list-json401-hint-and-tail "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
+# T56c: the same envelope through set's push
+rc=0; TOML_PATH="$TT/single.toml" TJ_PUSH_FAIL=json401 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --theme 2 --file templates/product.json \
+  --from "$TMP/snap.json" >"$O" 2>"$E" || rc=$?
+assert T56c-push-json401-error-line 5 "$rc" "$E" "error=cli_push_failed theme=2 store=acme-dev.myshopify.com token_source=toml"
+if grep -q '^hint=.*PER STORE' "$E" && grep -q 'Invalid API key or access token' "$E"; then ok
+else bad T56d-push-json401-hint "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
+# T56e: an error envelope is never a listing, whatever the exit code says
+rc=0; TOML_PATH="$TT/single.toml" TJ_LIST_FAIL=json0 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+assert T56e-list-json-envelope-rc0 5 "$rc" "$E" "error=cli_list_failed"
+if [ ! -s "$O" ] && grep -q 'something odd' "$E" && ! grep -q '^hint=' "$E"; then ok
+else bad T56f-list-json-envelope-no-themes "out=$(head -c 160 "$O") err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
+
+# T57: a --store the toml block does not name never gets that block's token (minted for the
+# block's store, it can only 401) — with no env token the CLI's own login authenticates instead
+rc=0; L="$TMP/tjl57"; : > "$L"
+TOML_PATH="$TT/single.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store acme-uk >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"name":"Dev"' "$O" && grep -q 'argv=theme list --store acme-uk\.myshopify\.com ' "$L" \
+   && grep -qx 'token=' "$L" && ! grep -q 'shptka_fixture1234' "$L" \
+   && grep -q '^auth=cli-session store=acme-uk.myshopify.com toml_store=acme-dev ' "$E"; then ok
+else bad T57-foreign-store-session "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T57b: the same store spelled as a domain is NOT foreign — the toml token still goes
+rc=0; L="$TMP/tjl57b"; : > "$L"
+TOML_PATH="$TT/single.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store acme-dev.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^token=shptka_fixture1234$' "$L" && ! grep -q 'auth=cli-session' "$E"; then ok
+else bad T57b-same-store-keeps-toml-token "rc=$rc err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T57c: on the auto engine the probe answers yes for the session, so a missing admin credential
+# still falls back — and the note names the session, not a Theme Access token
+rc=0; L="$TMP/tjl57c"; : > "$L"
+TOML_PATH="$TT/single.toml" FAKE_RUNNER_MODE=nocreds TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --store acme-uk >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'using the theme-CLI engine (Shopify CLI session)' "$E" && grep -qx 'token=' "$L"; then ok
+else bad T57c-auto-foreign-store-session "rc=$rc err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T57d: a session that cannot reach the store says so — token_source=session, the login remedy and
+# whose token the toml holds; never the per-store Theme Access hint (no token was sent)
+rc=0; TOML_PATH="$TT/single.toml" TJ_LIST_FAIL=session PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store acme-uk >"$O" 2>"$E" || rc=$?
+assert T57d-session-fail-error-line 5 "$rc" "$E" "error=cli_list_failed store=acme-uk.myshopify.com token_source=session"
+if grep -qF "hint=no Theme Access token for acme-uk.myshopify.com (the password= in $TT/single.toml [environments.development] is acme-dev's" "$E" \
+   && grep -q 'shopify auth login' "$E" && ! grep -q 'PER STORE' "$E"; then ok
+else bad T57e-session-fail-hint "err=$(tr '\n' ';' < "$E" | head -c 400)"; fi
+
+# T58e (bug): a resolved block naming ANOTHER store is not the end of the search — a sibling block
+# naming the --store holds that store's own token, and the default `dev` block existing must not
+# decide whether it is used (without `dev` the ambiguous-file pick already reached it)
+printf '[environments.dev]\nstore = "acme-dev"\npassword = "shptka_devAAA"\n\n[environments.uat]\nstore = "acme-uat"\npassword = "shptka_uatBBB"\n' > "$TT/multi.toml"
+rc=0; L="$TMP/tjl58e"; : > "$L"
+TOML_PATH="$TT/multi.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store acme-uat >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=theme list --store acme-uat\.myshopify\.com ' "$L" \
+   && grep -q '^token=shptka_uatBBB$' "$L" && ! grep -q 'shptka_devAAA' "$L" && ! grep -q 'auth=cli-session' "$E"; then ok
+else bad T58e-sibling-block-token "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T58f: a --store no block names still falls to the session, and the auth line names the block
+# whose token was held back (the resolution put back after the failed search, not the last one tried)
+rc=0; L="$TMP/tjl58f"; : > "$L"
+TOML_PATH="$TT/multi.toml" TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store acme-uk >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'token=' "$L" \
+   && grep -q '^auth=cli-session store=acme-uk.myshopify.com toml_store=acme-dev toml_env=dev ' "$E"; then ok
+else bad T58f-no-sibling-session "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T58g: that sibling token rejected — the hint names the store and the block the token came from,
+# and the remedy is that block's password=, not a different toml
+rc=0; TOML_PATH="$TT/multi.toml" TJ_LIST_FAIL=json401 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli --store acme-uat >"$O" 2>"$E" || rc=$?
+assert T58g-sibling-401-error-line 5 "$rc" "$E" "error=cli_list_failed store=acme-uat.myshopify.com token_source=toml"
+if grep -qF "came from $TT/multi.toml [environments.uat] and the request went to acme-uat.myshopify.com" "$E" \
+   && grep -qF "the password= in $TT/multi.toml [environments.uat] is not acme-uat.myshopify.com's" "$E"; then ok
+else bad T58h-sibling-401-hint-names-block "err=$(grep '^hint=' "$E" | head -c 400)"; fi
+# T58i: SHOPIFY_FLAG_ENVIRONMENT picking the block — the hint names THAT block, not just the path
+rc=0; TOML_PATH="$TT/multi.toml" SHOPIFY_FLAG_ENVIRONMENT=uat TJ_LIST_FAIL=json401 PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --engine themecli >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -qF "came from $TT/multi.toml [environments.uat] and the request went to acme-uat.myshopify.com" "$E"; then ok
+else bad T58i-flag-env-401-hint-names-block "rc=$rc err=$(grep '^hint=' "$E" | head -c 400)"; fi
 
 # T59: the same rejection through get's pull and set's push carries the same two facts and the
 # same hint, in the same order, and still exits 5 — the hint helper must never eat the exit

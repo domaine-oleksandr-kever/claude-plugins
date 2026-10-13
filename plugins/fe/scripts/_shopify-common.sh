@@ -177,11 +177,13 @@ toml_env_ready() { # [$1 = explicit block name] → 0, or 1 with TOML_ENV_ERR se
 # advertises actually works instead of refusing a run whose store is no longer in doubt. Several
 # blocks naming it are still one store, so the first is as good as any — their tokens all
 # authenticate it. No match leaves the refusal exactly as it stood.
+# Also callable after a clean resolution whose block names another store: that block's token can
+# only 401 on the fixed store, so a sibling block naming it wins; no match restores the resolution.
 # A name the file does not carry stays an error: that is a typo, not an open question a store can
 # settle.
 toml_env_pick_by_store() { # $1 = store handle or domain → 0 with TOML_ENV* set to that block
   local want n v hit="" names prev="$TOML_ENV_WANT"
-  [ "$TOML_ENV_ERR" = "ambiguous_env" ] || return 1
+  case "$TOML_ENV_ERR" in ''|ambiguous_env) ;; *) return 1 ;; esac
   [ -n "${1:-}" ] || return 1
   names="$TOML_ENVS"
   [ -n "$names" ] || return 1
@@ -197,7 +199,7 @@ toml_env_pick_by_store() { # $1 = store handle or domain → 0 with TOML_ENV* se
     toml_resolve_env "$hit"
     return 0
   fi
-  toml_resolve_env "$prev" || true   # the refusal the caller was about to print, put back
+  toml_resolve_env "$prev" || true   # the resolution (or refusal) the caller held, put back
   return 1
 }
 # One spelling for "the same store": handle, domain and https:// URL all collapse to it.

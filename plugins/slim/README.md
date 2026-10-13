@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.11.1**.
+Current release: **slim v0.11.2**.
 
 ## Install
 
@@ -570,17 +570,22 @@ view's result again.
 
 ## Media
 
-Images and video reach the model only through a resize, never raw:
+Images and video reach the model through a resize, unless an image already fits:
 
-- An image becomes `<name>.1568.<ext>`: long edge at most 1568 px, aspect kept, never upscaled,
-  metadata stripped. `<ext>` is the file's own `png`, `jpg`, `jpeg` or `gif`, and PNG for anything
-  else, WebP included.
+- An image over 1568 px on its long edge becomes `<name>.1568.<ext>`: long edge at most 1568 px,
+  aspect kept, metadata stripped. `<ext>` is the file's own `png`, `jpg`, `jpeg` or `gif`, and PNG
+  for anything else, WebP included. An image already within 1568 px, upright, with an extension
+  that names its format (`png`, `jpg`/`jpeg`, `gif`, `webp`) is passed as itself, with nothing
+  written: figure `media: <in> B, already ≤1568 px — no copy`. A file already named
+  `<stem>.1568.<ext>` is never copied again; if it does not fit, view refuses it (`copy-unfit`)
+  rather than overwrite it.
 - A video becomes `<name>.frames/001.jpg …`: one frame every 2 seconds from the start, at most 24,
   each resized in the same way. A longer clip spreads the 24 frames over its whole length.
 
 A portrait phone clip or a JPEG with an EXIF orientation comes out upright, at its displayed size.
-The outputs land beside the input. The reply lists their paths (frames with their timestamps) after
-one figure line:
+The outputs land beside the input. After one figure line, an image's reply ends with one line naming
+the file to read: `Read <copy> once to see it`, or `Read <input>` when the image is passed as itself.
+A video's reply lists its frames with their timestamps:
 
 ```
 media: 2481920 B → 412300 B (-83%) frames=12
@@ -595,7 +600,7 @@ reply says so. With neither backend, or for a video with only sips, the answer i
 `media: no backend (install ffmpeg)`.
 
 The Read and Write permission checks rule on the input and on the exact output path (the image, or
-the first frame). A deny from either is the answer. An `ask` from either becomes one Yes/No question
+the first frame). An image already named as a copy has no Write check, since nothing is written. A deny from either is the answer. An `ask` from either becomes one Yes/No question
 that names both; a no, or a dismissed question, writes nothing. An image also takes the one-line
 Read, so PreToolUse guards rule on it. The Read tool cannot open a video, and the backend writes
 outside the Write tool. So for a video's input and for every output, only the permission rules and

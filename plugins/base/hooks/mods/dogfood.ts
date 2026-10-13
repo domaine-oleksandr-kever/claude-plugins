@@ -1,5 +1,6 @@
 // Dogfood mode (BASE_DOGFOOD=1, or an account of dogfood.json): the plugin_defect tool and its report files, the nudge on a failed plugin
-// script, the one blocked stop while that failure is unreported, and /base-defects. Off, every hook passes.
+// script (a designed refusal stays silent: text.ts's designedRefusal), the one blocked stop while a failure of a script that ended its
+// line is unreported, and /base-defects. Off, every hook passes.
 // The convention section is conventions.ts's; the doctor's `defects` row is doctor.ts's.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
@@ -17,6 +18,7 @@ import {
   designedRefusal,
   dogfoodMode,
   enabledNames,
+  failureLine,
   fenced,
   fileName,
   indexLine,
@@ -261,14 +263,14 @@ export function registerDogfood(on: On): void {
 
   on('tool.call', { tool: 'Bash', command: /plugins\// }, async ($, e, next) => {
     const r = await next(e)
-    if (e.tool !== 'Bash' || r.deny !== undefined || !bashFailed(r)) return r
+    if (e.tool !== 'Bash' || r.deny !== undefined) return r
     const script = pluginScript(e.command)
-    if (!script || !(await dogfoodOn($).catch(() => false))) return r
+    if (!script) return r
     const text = bashText(r)
-    if (designedRefusal(text, script)) return r
-    // A line the script does not end owns no exit code: only a crash signature in the output speaks for the script.
+    // A line the script does not end owns no exit code (`| head` hides it): only the output speaks for the script.
     const own = scriptLast(e.command)
-    if (!own && !crashed(text)) return r
+    const failed = own ? bashFailed(r) && !designedRefusal(text, script) : (bashFailed(r) && crashed(text)) || failureLine(text)
+    if (!failed || !(await dogfoodOn($).catch(() => false))) return r
     try {
       await logDefect($, `script failed: ${script}`)
       if (own && e.agentId === undefined) {

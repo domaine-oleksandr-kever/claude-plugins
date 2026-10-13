@@ -122,21 +122,22 @@ git_common_dir() { # $1 = a dir → its repo's physical common dir on stdout, no
 # the one-liner task-workspace.md prescribes, with the newline care worktree-setup.sh pays: an
 # exclude file whose last byte is not a newline is legal, and appending blind would glue the
 # pattern onto the developer's last rule — breaking theirs and never adding ours.
-stamp_exclude() { # $1 = the repo's physical common dir
-  local cdir="$1" exclude
+stamp_exclude() { # $1 = the repo's physical common dir, $2 = the pattern (`.claude/tasks/`, `.claude/base-tmp/`)
+  local cdir="$1" line="$2" exclude
   mkdir -p "$cdir/info" 2>/dev/null || return 0
   exclude="$cdir/info/exclude"
-  # the pattern is root-anchored: a deeper `.claude/tasks/` stays unignored and re-enters here on
+  # the pattern is root-anchored: a deeper dir of that name stays unignored and re-enters here on
   # every retry, so a blind append would grow the developer's file one duplicate line per run
-  grep -qxF '.claude/tasks/' "$exclude" 2>/dev/null && return 0
+  grep -qxF "$line" "$exclude" 2>/dev/null && return 0
   if [ -s "$exclude" ] && [ -n "$(tail -c 1 "$exclude" 2>/dev/null)" ]; then printf '\n' >> "$exclude"; fi
-  printf '.claude/tasks/\n' >> "$exclude"
+  printf '%s\n' "$line" >> "$exclude"
 }
 
 # THE GATE ITSELF. --out must be a path git ignores, judged at its PHYSICAL location, because
 # "never reaches a commit" is a requirement and because it is what keeps a ticket that says "save
 # to ~/…" inside a repo's scratch: a physical location in no repository at all is refused. Under
-# `.claude/tasks/` the stamp task-workspace.md prescribes is written — only when that physical repo
+# `.claude/tasks/` the stamp task-workspace.md prescribes is written (under `.claude/base-tmp/`,
+# the scratch root a reader with no workspace downloads into, its own line) — only when that physical repo
 # is the cwd's own (a worktree and its main checkout share one common dir, so the symlink case
 # still stamps) — and the run proceeds; any other unignored dir is refused. On success the caller
 # reads OUT_DIR_ABS: every later path is the PHYSICAL one, which is what was cleared here and what
@@ -157,11 +158,15 @@ out_dir_gate() { # $1 = the requested dir → 0 with OUT_DIR_ABS set, else 1 wit
     # the stamp is this repo's to write, so it is offered only when the bytes land in the SAME
     # repository the caller is standing in — a worktree and its main checkout share one common dir,
     # a different checkout's `.claude/tasks` gets no line from us and is refused by the re-check
+    local line=""
     case "$OUT_DIR_ABS/" in
-      */.claude/tasks/*)
-        cwd_common="$(git_common_dir "$PWD" || true)"
-        if [ -n "$cwd_common" ] && [ "$cwd_common" = "$common" ]; then stamp_exclude "$common"; fi ;;
+      */.claude/tasks/*) line='.claude/tasks/' ;;
+      */.claude/base-tmp/*) line='.claude/base-tmp/' ;;
     esac
+    if [ -n "$line" ]; then
+      cwd_common="$(git_common_dir "$PWD" || true)"
+      if [ -n "$cwd_common" ] && [ "$cwd_common" = "$common" ]; then stamp_exclude "$common" "$line"; fi
+    fi
     git -C "$PHYS_BASE" check-ignore -q "$OUT_DIR_ABS" 2>/dev/null || {
       echo "error=out_dir_not_ignored out=$OUT_DIR_ABS (git would track it — use a path under .claude/tasks/, or ignore it first)" >&2
       return 1

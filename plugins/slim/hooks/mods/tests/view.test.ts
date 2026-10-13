@@ -94,6 +94,7 @@ describe('V1 registration', () => {
   })
 
   test('the description names both out roots: the session root and the working directory', () => {
+    expect(VIEW_DESC).toContain('(one already within that stays as it is)')
     expect(VIEW_DESC).toContain('out writes the compact text to a file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root)')
   })
 })
@@ -270,14 +271,25 @@ describe('V4 out', () => {
 describe('V5 media', () => {
   test('an image: a one-line Read, the Write check on the first output, then the core gets it as allowed_out', async ($, on) => {
     const figure = 'media: 5000 B → 900 B (-82%) frames=1'
-    const w = world(on, { reply: { v: 1, decision: 'compressed', engine: 'media', figure, text: 'image png 4000×3000 → 1568×1176, metadata stripped (ffmpeg)\n/repo/a/shot.1568.png', bytesIn: 5000, bytesOut: 900, stages: [], frames: 1 } })
+    const w = world(on, { reply: { v: 1, decision: 'compressed', engine: 'media', figure, text: 'image png 4000×3000 → 1568×1176, metadata stripped (ffmpeg)\nRead /repo/a/shot.1568.png once to see it', bytesIn: 5000, bytesOut: 900, stages: [], frames: 1 } })
     const text = await view($, { path: '/repo/a/shot.webp' })
     expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: '/repo/a/shot.webp' } }, { tool: 'Write', input: { file_path: '/repo/a/shot.1568.png' } }])
     expect(w.calls.map(c => [c.tool, c.file_path, c.limit])).toEqual([['Read', '/repo/a/shot.webp', 1]])
     expect(w.asked).toEqual([])
     expect(w.views[0].stdin).toMatchObject({ path: '/repo/a/shot.webp', media: true, allowed_out: '/repo/a/shot.1568.png' })
-    expect(text).toBe(`${figure}\nimage png 4000×3000 → 1568×1176, metadata stripped (ffmpeg)\n/repo/a/shot.1568.png`)
+    expect(text).toBe(`${figure}\nimage png 4000×3000 → 1568×1176, metadata stripped (ffmpeg)\nRead /repo/a/shot.1568.png once to see it`)
     expect(w.records[0]).toMatchObject({ engine: 'media', frames: 1 })
+  })
+
+  test('an image that is already a copy: no Write check and no question, the input is its own allowed_out', async ($, on) => {
+    const figure = 'media: 900 B, already ≤1568 px — no copy'
+    const w = world(on, { write: 'ask', reply: { v: 1, decision: 'passthrough', engine: 'media', figure, text: 'image png 1568×1176, not re-encoded (ffmpeg)\nRead /repo/a/shot.1568.png', bytesIn: 900, bytesOut: 900, stages: [], frames: 1 } })
+    const text = await view($, { path: 'a/shot.1568.png' })
+    expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: 'a/shot.1568.png' } }])
+    expect(w.asked).toEqual([])
+    expect(w.views[0].stdin).toMatchObject({ path: 'a/shot.1568.png', media: true, allowed_out: '/repo/a/shot.1568.png' })
+    expect(text).toBe(`${figure}\nimage png 1568×1176, not re-encoded (ffmpeg)\nRead /repo/a/shot.1568.png`)
+    expect(w.records[0]).toMatchObject({ decision: 'passthrough', engine: 'media' })
   })
 
   test('a video: no Read (the Read tool cannot open one); its probe is its first frame; a relative path is made absolute', async ($, on) => {
@@ -383,6 +395,8 @@ describe('V8 pure helpers', () => {
     expect(mediaProbe('/a/x.y.gif')).toBe('/a/x.y.1568.gif')
     expect(mediaProbe('/a/clip.webm')).toBe('/a/clip.frames/001.jpg')
     expect(mediaProbe('/shot.png')).toBe('/shot.1568.png')
+    for (const p of ['/a/b.JPG', '/a/b.webp', '/a/x.y.gif', '/shot.png', '/a/b']) expect(mediaProbe(mediaProbe(p))).toBe(mediaProbe(p))
+    expect([mediaProbe('/a/b.1568.JPG'), mediaProbe('/a/b.1568.webp'), mediaProbe('/a/b.800.png')]).toEqual(['/a/b.1568.JPG', '/a/b.1568.1568.png', '/a/b.800.1568.png'])
   })
 
   test('headOf: at most N lines and B bytes, a long line cut with …', () => {

@@ -37,6 +37,7 @@ const lastKey = atom({ plugin: 'base', key: 'lastKey' } as const, null)
 const sessionId = atom({ plugin: 'base', key: 'sessionId' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
 const savable = atom({ plugin: 'base', key: 'savable' } as const, [] as BaseSavable[])
+const background = atom({ plugin: 'base', key: 'background' } as const, [] as string[])
 const marker = atom({ plugin: 'base', key: 'compactMarker' } as const, null)
 
 /** Unsaved work: no workspace write for the stale window, and something worth saving happened after the last one. */
@@ -71,7 +72,7 @@ function withStaleness(p: Loaded, list: readonly BaseSavable[], now: number, sta
     if (s.kind === 'agent') agentsSince++
     else if (s.kind === 'edit') editsSince++
   }
-  const stale = p.hasWorkspace && isStale(p.mtimeMs, lastSavableMs, now, staleMs)
+  const stale = p.hasWorkspace && !p.guessed && isStale(p.mtimeMs, lastSavableMs, now, staleMs)
   return { ...p, lastSavableMs, agentsSince, editsSince, stale }
 }
 
@@ -169,12 +170,12 @@ type Resolved = { id: string; guessed: boolean } | null
 
 /**
  * pin (an existing dir) → conversation key, workspace or not: the ticket the developer named is the task →
- * branch key → branch slug (existing dirs) → newest progress.md within 12 h (`guessed`) → null.
+ * branch key → branch slug (existing dirs) → newest progress.md within 12 h → null. The last three are `guessed`.
  */
 async function resolveWorkId($: $, root: string, branch: string | null, inputs: Inputs): Promise<Resolved> {
   if (await hasWorkspace($, root, inputs.pin)) return { id: inputs.pin as string, guessed: false }
   if (inputs.lastKey) return { id: inputs.lastKey, guessed: false }
-  for (const id of [keyFromBranch(branch), slugFromBranch(branch)]) if (await hasWorkspace($, root, id)) return { id: id as string, guessed: false }
+  for (const id of [keyFromBranch(branch), slugFromBranch(branch)]) if (await hasWorkspace($, root, id)) return { id: id as string, guessed: true }
   const id = await newestWorkspace($, root)
   return id ? { id, guessed: true } : null
 }
@@ -219,6 +220,17 @@ async function noteSavable($: $, kind: BaseSavable['kind']): Promise<void> {
   const list = await update($, savable, l => [...l, { atMs: now, kind, workId }].slice(-SAVABLE_CAP))
   const staleMs = await windowOf($)
   await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now, staleMs) : p))
+}
+
+/** A tool call that reaches into the guessed workspace (`touches` its dir or id) makes it this session's work. */
+async function adopt($: $, touches: (dir: string, id: string) => boolean): Promise<void> {
+  const cur = await read($, progress)
+  if (!cur || cur.workId === null || !cur.guessed) return
+  const root = await $.session.root()
+  const list = await read($, savable)
+  const now = await $.clock.now()
+  const staleMs = await windowOf($)
+  await update($, progress, p => (p && p.workId !== null && p.guessed && touches(workDir(root, p.workId), p.workId) ? withStaleness({ ...p, guessed: false }, list, now, staleMs) : p))
 }
 
 /** `resolve` re-runs git and the resolver; otherwise only the current workspace is re-read while it exists. */
@@ -315,12 +327,42 @@ export function registerProgress(on: On): void {
     const cur = await read($, progress)
     const inCurrent = !!cur?.workId && e.file_path.startsWith(`${workDir(root, cur.workId)}/`)
     await refresh($, !inCurrent)
+    const path = e.file_path
+    if (r.deny === undefined && !r.isError) await adopt($, dir => path.startsWith(`${dir}/`))
     return r
   })
 
+  on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+    const r = await next(e)
+    if (e.tool === 'Read' && e.file_path.includes('/.claude/tasks/') && r.deny === undefined && !r.isError) {
+      const path = e.file_path
+      await adopt($, dir => path.startsWith(`${dir}/`))
+    }
+    return r
+  })
+
+  // A background launch is no result yet: the agent's stop is the savable event.
   on('tool.call', { tool: /^(Agent|Task)$/ }, async ($, e, next) => {
     const r = await next(e)
-    if (r.deny === undefined && !r.isError && e.agentId === undefined) await noteSavable($, 'agent')
+    if (r.deny !== undefined || r.isError || e.agentId !== undefined) return r
+    const rec = r.result as { status?: unknown; agentId?: unknown } | null | undefined
+    const status = typeof rec === 'object' ? rec?.status : undefined
+    if (status === 'async_launched' && typeof rec?.agentId === 'string') {
+      const id = rec.agentId
+      await update($, background, l => [...l, id].slice(-SAVABLE_CAP))
+    } else if (status === undefined || status === 'completed') await noteSavable($, 'agent')
+    return r
+  })
+
+  on('classic.SubagentStop', async ($, e, next) => {
+    const r = await next(e)
+    if (r.block) return r
+    let mine = false
+    await update($, background, l => {
+      mine = l.includes(e.agent_id)
+      return mine ? l.filter(id => id !== e.agent_id) : l
+    })
+    if (mine) await noteSavable($, 'agent')
     return r
   })
 
@@ -334,7 +376,10 @@ export function registerProgress(on: On): void {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const r = await next(e)
-    if (e.tool === 'Bash' && CHECKOUT.test(e.command)) await refresh($, true)
+    if (e.tool !== 'Bash') return r
+    if (CHECKOUT.test(e.command)) await refresh($, true)
+    const command = e.command
+    if (command.includes('.claude/tasks/')) await adopt($, (_, id) => command.includes(`.claude/tasks/${id}/`))
     return r
   })
 

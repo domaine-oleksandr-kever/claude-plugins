@@ -148,8 +148,8 @@ function view(input, opts) {
       const allowedOut = typeof input.allowed_out === 'string' ? landing(path.resolve(input.cwd || process.cwd(), input.allowed_out)) : undefined;
       const m = mediaD.normalize(file, { allowedOut, env: process.env });
       const x = { engine: 'media', bytesIn: m.bytesIn, bytesOut: m.bytesOut, frames: m.frames, outputs: m.outputs };
-      if (m.decision !== 'compressed') return refuse(m.reason, m.figure, x);
-      return { v: 1, decision: 'compressed', ...x, figure: m.figure, text: m.text, stages: [] };
+      if (m.decision === 'refused') return refuse(m.reason, m.figure, x);
+      return { v: 1, decision: m.decision, ...x, figure: m.figure, text: m.text, stages: [] };
     }
     const f = spill.readLocal(file);
     if (!f.file) return refuse(f.why, `view: cannot read ${input.path} (${f.why})`);

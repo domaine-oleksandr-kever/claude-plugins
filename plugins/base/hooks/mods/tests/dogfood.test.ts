@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NUDGE, TOOL, bashText, capEvidence, designedRefusal, dogfoodAccounts, pluginScript, scriptLast, seen, slugOf } from '../dogfood/text.ts'
+import { NUDGE, TOOL, bashText, capEvidence, designedRefusal, dogfoodAccounts, failureLine, pluginScript, scriptLast, seen, slugOf } from '../dogfood/text.ts'
 import { NOW, PEEK, ROOT, eventsOf, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -13,6 +13,28 @@ const INSTALLED = `${HOME}/.claude/plugins/installed_plugins.json`
 const KNOWN = `${HOME}/.claude/plugins/known_marketplaces.json`
 const SCRIPT_CMD = 'node /home/dev/.claude/plugins/cache/domaine/base/0.9.0/scripts/md-to-adf.cjs in.md'
 const FAILED = { isError: true, result: 'Exit code 1\nError: bad input', text: 'Exit code 1\nError: bad input' }
+/** `error=` reasons the fe, base and be scripts print for a caller's mistake, a guard or a designed degrade: silent. */
+const REFUSALS = [
+  'usage (get needs --theme and --file)', 'usage: session-theme.sh unpin <toml> (--help prints usage)', 'unknown_arg arg=--x (--help prints usage)',
+  'unknown_command cmd=x', 'unknown arg: --x (--help prints usage)', 'missing_value flag=--theme', 'missing value for --name', 'create requires --name "<new theme name>"',
+  'no_store (pass --store)', "invalid_store store='x'", 'ambiguous_env envs=a,b toml=t', 'env_not_found env=x toml=t', "bad_theme_id value='x'",
+  'bad_file path=../x', 'file_not_writable path=x', 'theme_not_found theme=1', 'dev_theme_not_found dev_theme=1', 'file_not_found_or_not_text file=x theme=1',
+  'not_applied engine=gql theme=1 file=x', 'dev_theme_write_refused theme=1', 'live_theme_write_refused theme=1', 'from_file_refused file=.env',
+  'invalid_variables_json (--variables must be valid JSON)', 'variables_file_not_found file=v.json', 'no_such_dir dir=x', 'invalid_engine engine=x',
+  'invalid_cloud_id value=x', 'settings_drift', 'overlay_store_mismatch store=x', 'theme_limit — store is at its theme cap', 'worktree_dirty path=x',
+  'branch_checked_out_elsewhere branch=b', 'not_a_git_repo — run this from the project repo', 'no_jira_credentials (JIRA_EMAIL + JIRA_API_TOKEN)',
+  '--env requires --pin-toml', '--copy needs a path (usage: worktree-setup.sh <KEY> [--copy <path>])', '--port needs a value', 'from_file_invalid_json file=x',
+]
+/** `error=` reasons that are a failure: a tool, the plugin's own file, a credential, a remote call or the script's machinery broke. */
+const FAILURES = [
+  'cli_list_failed store=x token_source=env', 'cli_list_unreadable theme=1', 'no_admin_token', 'invalid_admin_token source=env', 'no_theme_token (themecli)',
+  'store_execute_failed (no app)', 'store_execute_failed_mutation (x)', 'http_401 url=x', 'http_status http=503 host=x', 'gql_errors log=x',
+  'non_json_response log=x', 'cli_push_reported_errors file=x', 'upsert_user_errors x', 'build_failed (npm run build):', 'shopify_cli_not_found',
+  'jq_not_found', 'curl_not_found', 'runner_not_found path=x', 'common_lib_not_found path=x', 'session_lib_not_found path=x', 'jq not found on PATH',
+  'shopify CLI not found on PATH', 'strip_needs_perl', 'refresh_unverifiable theme=1', 'reuse_unverifiable name=x', 'theme_unverifiable theme=1',
+  'verify_read_failed engine=gql theme=1 file=x', 'out_write_failed out=x', 'refresh_push_failed', 'overlay_pull_failed',
+  'code push succeeded but could not parse theme id from --json', 'invalid_figma_token source=env', 'token_rejected http=403', 'rate_limited http=429',
+]
 
 const DEFECT = {
   plugin: 'base',
@@ -484,12 +506,57 @@ describe('nudge and stop', () => {
     const { w } = world(on, { env: ON })
     w.bash = cmd => cmd.includes('qa-stores')
       ? { isError: true, result: { stdout: '', stderr: 'qa-stores: no store matches that selector (qa-stores.cjs list)' } }
-      : { isError: true, result: 'Exit code 1\nnote=engine=token\nerror=no_admin_token\nhint=Set SHOPIFY_ADMIN_TOKEN …' }
+      : { isError: true, result: 'Exit code 2\nnote=engine=token\nerror=no_store (pass --store)\nhint=…' }
     await start($)
     expect((await bash($, 'node /home/dev/.claude/plugins/cache/domaine/base/0.9.1/scripts/qa-stores.cjs get elc-us-mc-dev')).context ?? []).toEqual([])
     expect((await bash($, 'bash plugins/fe/scripts/shopify-admin-gql.sh --query q.graphql')).context ?? []).toEqual([])
     expect(await eventsOf($, 'defect')).toEqual([])
     expect((await stop($)).block).toBeUndefined()
+  })
+
+  for (const reason of REFUSALS)
+    t(`error=${reason.split(' ')[0]}: a refusal — no nudge, no event, no block`, async ($, on) => {
+      const { w } = world(on, { env: ON })
+      w.bash = () => ({ isError: true, result: `Exit code 2\nerror=${reason}` })
+      await start($)
+      expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x')).context ?? []).toEqual([])
+      expect(await eventsOf($, 'defect')).toEqual([])
+      expect((await stop($)).block).toBeUndefined()
+    })
+
+  for (const reason of FAILURES)
+    t(`error=${reason.split(' ')[0]}: a failure — nudge, event, the stop blocked`, async ($, on) => {
+      const { w } = world(on, { env: ON })
+      w.bash = () => ({ isError: true, result: `Exit code 5\nnote=x\nerror=${reason}` })
+      await start($)
+      expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x')).context).toEqual([NUDGE])
+      expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: theme-json.sh'])
+      expect((await stop($)).block).toContain('a plugin script failed (theme-json.sh)')
+    })
+
+  t('a failure line among refusal lines is a failure', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'Exit code 5\nerror=theme_not_found theme=1\nerror=gql_errors log=x' })
+    await start($)
+    expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x')).context).toEqual([NUDGE])
+  })
+
+  t('a compound line the script does not end: a failure line nudges even at exit 0, never blocks; a refusal line stays silent', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = cmd => ({ result: { stdout: cmd.includes('gql') ? 'error=gql_errors log=x' : 'error=theme_not_found theme=1', stderr: '' } })
+    await start($)
+    expect((await bash($, 'bash plugins/fe/scripts/shopify-admin-gql.sh --query q.graphql 2>&1 | head -20')).context).toEqual([NUDGE])
+    expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x 2>&1 | tail -5')).context ?? []).toEqual([])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: shopify-admin-gql.sh'])
+    expect((await stop($)).block).toBeUndefined()
+  })
+
+  t('a compound line the script does not end, failing with a refusal line and no Error: silent', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'Exit code 2\nerror=usage (get needs --theme and --file)' })
+    await start($)
+    expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get; echo done')).context ?? []).toEqual([])
+    expect(await eventsOf($, 'defect')).toEqual([])
   })
 
   t('a refusal line followed by Error still nudges', async ($, on) => {
@@ -588,16 +655,31 @@ describe('pure parts', () => {
     expect(scriptLast('echo hi')).toBe(false)
   })
 
-  test('designedRefusal: a stem line or an error= line, never with Error', () => {
+  test('designedRefusal: refusal error= lines, or a stem line without any, never with Error', () => {
     expect(designedRefusal('md-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
     expect(designedRefusal('Exit code 1\nmd-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
-    expect(designedRefusal('note=x\nerror=no_admin_token', 'shopify-admin-gql.sh')).toBe(true)
+    expect(designedRefusal('note=x\nerror=no_store', 'shopify-admin-gql.sh')).toBe(true)
+    expect(designedRefusal('note=x\nerror=no_admin_token', 'shopify-admin-gql.sh')).toBe(false)
+    expect(designedRefusal('x: half\nerror=gql_errors', 'x.sh')).toBe(false)
+    expect(designedRefusal('pin_error=refresh_unverifiable', 'create-preview-theme.sh')).toBe(false)
     expect(designedRefusal('error=push_failed\nError: ECONNRESET', 'push-theme.sh')).toBe(false)
+    expect(designedRefusal('error=usage\nError: ECONNRESET', 'theme-json.sh')).toBe(false)
     expect(designedRefusal('md-to-adf: Error: boom', 'md-to-adf.cjs')).toBe(false)
     expect(designedRefusal('other-script: nope', 'md-to-adf.cjs')).toBe(false)
     expect(designedRefusal('see md-to-adf: nope', 'md-to-adf.cjs')).toBe(false)
     expect(designedRefusal('aXb: nope', 'a.b.cjs')).toBe(false)
     expect(designedRefusal('a.b: nope', 'a.b.cjs')).toBe(true)
+  })
+
+  test('the two classes: every refusal reason is silent, every failure reason is a failure line', () => {
+    for (const r of REFUSALS) {
+      expect([r, designedRefusal(`Exit code 2\nerror=${r}`, 'theme-json.sh'), failureLine(`error=${r}`)]).toEqual([r, true, false])
+    }
+    for (const r of FAILURES) {
+      expect([r, designedRefusal(`Exit code 5\nerror=${r}`, 'theme-json.sh'), failureLine(`error=${r}`)]).toEqual([r, false, true])
+    }
+    expect(failureLine('no error line here')).toBe(false)
+    expect(failureLine('  "error=gql_errors"')).toBe(false)
   })
 
   test('bashText: a string result, stdout + stderr, the text fallback', () => {

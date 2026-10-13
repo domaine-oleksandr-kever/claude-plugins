@@ -530,12 +530,31 @@ const EC = ecRows();
   ]);
 
   const img = (w, h, extra) => media.plan({ kind: 'image', format: 'png', name: 'shot', ext: 'png', width: w, height: h, ...extra });
-  eq('EM-plan-landscape', img(4000, 3000), { kind: 'image', outputs: [{ rel: 'shot.1568.png' }], source: { w: 4000, h: 3000 }, scale: { w: 1568, h: 1176 }, resized: true });
+  eq('EM-plan-landscape', img(4000, 3000), { kind: 'image', outputs: [{ rel: 'shot.1568.png' }], source: { w: 4000, h: 3000 }, scale: { w: 1568, h: 1176 }, resized: true, same: false });
   eq('EM-plan-portrait', media.plan({ kind: 'image', format: 'jpeg', name: 'p', ext: 'JPG', width: 1000, height: 3000 }).scale, { w: 523, h: 1568 });
   eq('EM-plan-portrait-name', media.plan({ kind: 'image', format: 'jpeg', name: 'p', ext: 'JPG', width: 1000, height: 3000 }).outputs, [{ rel: 'p.1568.jpg' }]);
-  eq('EM-plan-small', img(800, 600), { kind: 'image', outputs: [{ rel: 'shot.1568.png' }], source: { w: 800, h: 600 }, scale: { w: 800, h: 600 }, resized: false });
+  eq('EM-plan-small', img(800, 600), { kind: 'image', outputs: [{ rel: 'shot.png' }], source: { w: 800, h: 600 }, scale: { w: 800, h: 600 }, resized: false, same: true });
+  const copy = (name, ext, w, h, extra) => media.plan({ kind: 'image', format: 'png', name, ext, width: w, height: h, ...extra });
+  eq('EM-plan-same', [
+    copy('shot.1568', 'png', 1568, 1000).outputs, copy('shot.1568', 'png', 1568, 1000).same, copy('shot', 'png', 800, 600, { rotation: 180 }).outputs,
+    copy('shot', 'PNG', 800, 600).outputs, media.plan({ kind: 'image', format: 'webp', name: 'w', ext: 'webp', width: 10, height: 10 }).outputs,
+    media.plan({ kind: 'image', format: 'jpeg', name: 'w', ext: 'png', width: 10, height: 10 }).same, copy('s.800', 'png', 800, 10, {}).outputs,
+  ], [[{ rel: 'shot.1568.png' }], true, [{ rel: 'shot.1568.png' }], [{ rel: 'shot.PNG' }], [{ rel: 'w.webp' }], false, [{ rel: 's.800.png' }]]);
+  eq('EM-plan-copy-unfit', [copy('shot.1568', 'png', 3000, 2000), copy('shot.1568', 'jpg', 800, 600), copy('shot.1568', 'png', 800, 600, { rotation: 90 }), media.plan({ kind: 'image', format: 'png', name: 's.800', ext: 'png', width: 900, height: 10 }, { longEdge: 800 })],
+    [{ refused: 'copy-unfit' }, { refused: 'copy-unfit' }, { refused: 'copy-unfit' }, { refused: 'copy-unfit' }]);
+  eq('EM-target-copy-is-itself', [
+    media.target({ kind: 'image', name: 'shot.1568', ext: 'png' }), media.target({ kind: 'image', name: 'shot.1568', ext: 'JPG' }),
+    media.target({ kind: 'image', name: 'shot.1568', ext: 'webp' }), media.target({ kind: 'image', name: 's.800', ext: 'gif' }, { longEdge: 800 }),
+    media.target({ kind: 'image', name: 's.800', ext: 'gif' }), media.target({ kind: 'video', name: 'clip.1568', ext: 'mp4' }),
+  ], ['shot.1568.png', 'shot.1568.JPG', 'shot.1568.1568.png', 's.800.gif', 's.800.1568.gif', 'clip.1568.frames/001.jpg']);
+  eq('EM-target-idempotent', ['shot.JPG', 'a.webp', 'screenshot', 'x.y.gif'].map((b) => {
+    const dot = b.lastIndexOf('.');
+    const once = media.target({ kind: 'image', name: dot > 0 ? b.slice(0, dot) : b, ext: dot > 0 ? b.slice(dot + 1) : '' });
+    const d2 = once.lastIndexOf('.');
+    return media.target({ kind: 'image', name: once.slice(0, d2), ext: once.slice(d2 + 1) }) === once;
+  }), [true, true, true, true]);
   eq('EM-plan-edge', img(1568, 10).resized, false);
-  eq('EM-plan-webp-as-png', media.plan({ kind: 'image', format: 'webp', name: 'w', ext: 'webp', width: 10, height: 10 }).outputs, [{ rel: 'w.1568.png' }]);
+  eq('EM-plan-webp-as-png', media.plan({ kind: 'image', format: 'webp', name: 'w', ext: 'webp', width: 2000, height: 10 }).outputs, [{ rel: 'w.1568.png' }]);
   eq('EM-plan-long-edge-opt', media.plan({ kind: 'image', format: 'png', name: 's', ext: 'png', width: 4000, height: 2000 }, { longEdge: 800 }).outputs[0].rel, 's.800.png');
   eq('EM-target', [
     media.target({ kind: 'image', name: 'shot', ext: 'jpg' }), media.target({ kind: 'image', name: 'screenshot', ext: '' }),
@@ -572,6 +591,7 @@ const EC = ecRows();
 
   eq('EM-figure', [media.figureLine(5000, 1250, 1), media.figureLine(100, 173, 4), media.figureLine(3, 3, 1)],
     ['media: 5000 B → 1250 B (-75%) frames=1', 'media: 100 B → 173 B (+73%) frames=4', 'media: 3 B → 3 B (-0%) frames=1']);
+  eq('EM-same-line', [media.sameLine(900), media.sameLine(900, 800)], ['media: 900 B, already ≤1568 px — no copy', 'media: 900 B, already ≤800 px — no copy']);
 }
 
 // EQ — jq narrowing: the grammar, the evaluator, and what narrow() refuses

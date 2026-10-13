@@ -110,7 +110,8 @@ After the developer approves (with their corrections), make exactly the agreed e
 For approved check-D rows, run the agreed `git add <path>` so the referenced files are tracked. Then
 **stop**: report what changed and hand the commit back to the developer — stage the files and suggest
 `/base:commit` (invoking it authorizes the commit — it commits directly with a Conventional-Commits
-message and reports the result). Never run `git commit` from this skill. If the branch's ticket has a
+message and reports the result); when `/base:commit`'s review gate ran this review, that skill
+resumes its commit itself. Never run `git commit` from this skill. If the branch's ticket has a
 task workspace, tick `pre-commit-review` in its `progress.md` when the series has that row.
 
 **Write the marker** with review-flow's marker block, recomputing `diff_hash` from the post-edit tree

@@ -267,7 +267,7 @@ fi
 [ -n "$OUT_DIR" ] || OUT_DIR=".claude/tasks/$KEY/tmp/attachments"
 
 # The whole gate — lexical normalisation, the physical resolution symlinked worktrees need, the
-# `.claude/tasks/` stamp and the three refusals — lives in _common.sh, because
+# `.claude/tasks/` / `.claude/base-tmp/` stamp and the three refusals — lives in _common.sh, because
 # figma-rest.sh writes into the same workspace under the same rule and a second copy would be a
 # second rule. Every later path is the PHYSICAL one the gate cleared.
 out_dir_gate "$OUT_DIR" || exit 2

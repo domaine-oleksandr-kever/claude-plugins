@@ -133,6 +133,53 @@ run get ACME-US-UAT.myshopify.com
 if [ "$rc" -eq 0 ] && [ "$(jsonfield "$O" 'd.password')" = "$PW" ]; then ok
 else bad C4c-domain-lookup "rc=$rc err=$(head -c 160 "$E")"; fi
 
+# ------------------------------------------- C18 get --field prints one raw value, not JSON --
+# `PW=$(qa-stores.cjs get <store>)` fills a password box with a JSON document; `--field password`
+# is the value itself, byte for byte, so a shell variable or a browser fill gets the password.
+run get acme-us-uat.myshopify.com --field password
+if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && printf '%s\n' "$PW" | cmp -s - "$O"; then ok
+else bad C18-field-password "rc=$rc out-bytes=$(wc -c < "$O" | tr -d ' ') want=$(( ${#PW} + 1 )) err=$(head -c 160 "$E")"; fi
+
+# C18b: `--field=<name>` and the flag before the store are the same call; by alias too
+run get --field=password 'acme us uat'
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = "$PW" ]; then ok
+else bad C18b-field-eq-form "rc=$rc err=$(head -c 160 "$E")"; fi
+
+# C18c: alias and domain read back raw — domain is the resolved key, not the selector as typed
+run get 'https://ACME-US-UAT.myshopify.com/' --field alias
+A_OUT="$(cat "$O")"; A_RC=$rc
+run get 'acme us uat' --field domain
+if [ "$A_RC" -eq 0 ] && [ "$A_OUT" = "ACME US UAT" ] \
+   && [ "$rc" -eq 0 ] && [ "$(cat "$O")" = "acme-us-uat.myshopify.com" ]; then ok
+else bad C18c-field-alias-domain "alias-rc=$A_RC alias=[$A_OUT] domain-rc=$rc domain=[$(cat "$O")]"; fi
+
+# C18d: a field the store does not carry prints nothing and is not an error — an open storefront has
+# no password, and that is an answer, not a failure
+HOME="$TMP/home-field"
+run set open.myshopify.com --alias OPEN
+run get open.myshopify.com --field password
+if [ "$rc" -eq 0 ] && [ ! -s "$O" ] && [ ! -s "$E" ]; then ok
+else bad C18d-field-missing "rc=$rc out=$(head -c 80 "$O") err=$(head -c 160 "$E")"; fi
+
+# C18e: a name outside the list is a usage error that never quotes the name back (a mistyped call
+# can put the password there) and reads no store; `--field` with no name is the same refusal
+for fa in field-arg field-eq field-bare; do
+  case "$fa" in
+    field-arg) run get open.myshopify.com --field "$PW" ;;
+    field-eq)  run get open.myshopify.com "--field=$PW" ;;
+    *)         run get open.myshopify.com --field ;;
+  esac
+  if [ "$rc" -eq 2 ] && [ ! -s "$O" ] && grep -q '^Usage:' "$E" && ! grep -qF "$PW" "$E" \
+     && grep -q 'password, alias, defaultTheme, domain, notes' "$E"; then ok
+  else bad "C18e-field-unknown[$fa]" "rc=$rc out=$(head -c 80 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+done
+
+# C18f: an unknown store is still exit 1 with a field asked for
+run get nope.myshopify.com --field password
+if [ "$rc" -eq 1 ] && [ ! -s "$O" ] && grep -q 'no store matches' "$E"; then ok
+else bad C18f-field-unknown-store "rc=$rc err=$(head -c 160 "$E")"; fi
+HOME="$TMP/home"
+
 # ------------------------------------------------------------------ C5 list and find mask it --
 run list
 if [ "$rc" -eq 0 ] && ! grep -qF "$PW" "$O" "$E" && grep -q '\*\*\*' "$O" \

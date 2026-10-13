@@ -16,6 +16,9 @@
 #   themecli — `shopify theme pull/push --only <file> --nodelete` from a private temp dir,
 #              authenticated by the Theme Access token (SHOPIFY_CLI_THEME_TOKEN env, else
 #              password= / first shp*_… in shopify.theme.toml — read internally, NEVER printed).
+#              A --store/$SHOPIFY_STORE the toml block does not name never gets that block's
+#              token: without the env var the CLI's logged-in session authenticates
+#              (`auth=cli-session` on stderr, token_source=session).
 #              This is the token every Foundation project already has for `theme dev`, so the
 #              flow works even with no Admin API access at all.
 #   auto (default) — gql first; if its credentials are missing (runner exit 3) or lack the
@@ -32,7 +35,9 @@
 # file whose blocks name different stores: a Theme Access token is minted PER STORE, so one lifted
 # out of another block cannot authenticate this run — it can only authenticate the wrong store.
 # Such a file is `error=ambiguous_env` (exit 2) before any request, unless --store/$SHOPIFY_STORE
-# already names a store one block carries, which settles the question and picks that block.
+# already names a store one block carries, which settles the question and picks that block. The
+# same holds when the resolved block names ANOTHER store: a block naming the fixed store supplies
+# the token, and only with none does the CLI's logged-in session authenticate (auth=cli-session).
 #
 # SAFETY: `set` hard-refuses the live theme (role MAIN / live) on every engine — that is
 # merchant-owned content; a human changes it in the customizer. The role check runs
@@ -122,9 +127,10 @@
 # `cli_list_failed` — the listing failed, was empty or was unparseable — and `live_role_unreadable`
 # — the theme is listed but carries no role, so the live guard cannot clear it; every themecli
 # failure line — `cli_list_failed`, `cli_pull_failed`, `cli_push_failed` — carries
-# `store=<domain> token_source=<env|toml>`, and one whose stderr reads as an auth rejection adds
-# one `hint=` line naming the per-store nature of the Theme Access token, ahead of the CLI's own
-# stderr tail) · 3 no engine credentials at
+# `store=<domain> token_source=<env|toml|session>`, and one whose CLI output (stderr, or the 4.x
+# `--json` error envelope on stdout) reads as an auth rejection adds one `hint=` line naming the
+# per-store nature of the Theme Access token — or, on the session, `shopify auth login` — ahead of
+# the CLI's own tail) · 3 no engine credentials at
 # all (hints name every remedy) · 6 the write reported success but the theme does not serve the
 # payload (read-back mismatch, or the read-back itself failed — state unconfirmed).
 set -euo pipefail
@@ -630,13 +636,13 @@ gql_set() {
 }
 
 # ----------------------------------------------------------- themecli engine --
-DOMAIN=""; DOMAIN_SOURCE=""
+DOMAIN=""
 resolve_domain() {
-  local s="$STORE_ARG"; DOMAIN_SOURCE="arg"
-  if [ -z "$s" ]; then s="${SHOPIFY_STORE:-}"; DOMAIN_SOURCE="env"; fi
+  local s="$STORE_ARG"
+  [ -n "$s" ] || s="${SHOPIFY_STORE:-}"
   if [ -z "$s" ]; then
     toml_env_ready || { echo "error=$(toml_env_error "$TJ_ENV_FIX")" >&2; exit 2; }
-    s="$(toml_value store)" || true; DOMAIN_SOURCE="toml"
+    s="$(toml_value store)" || true
   fi
   [ -n "$s" ] || { echo "error=no_store (pass --store or set store= in $TOML, env=$TOML_ENV; looked for $(toml_abs) — run from the project root or set TOML_PATH)" >&2; exit 2; }
   s="$(store_handle "$s")" \
@@ -647,7 +653,10 @@ resolve_domain() {
 # Theme Access token: env wins, else the resolved block of shopify.theme.toml (password=, else —
 # single-store files only — the first shp*_… in it). A store already fixed by --store/$SHOPIFY_STORE
 # settles an ambiguous file by itself (toml_env_pick_by_store), which is what makes the `pass
-# --store` half of TJ_ENV_FIX a real escape hatch.
+# --store` half of TJ_ENV_FIX a real escape hatch. A fixed store the resolved block does NOT name
+# never gets that block's token (it is minted for the block's store and can only 401): a sibling
+# block naming the fixed store supplies it instead, and with none (and no env token) the CLI's own
+# logged-in session authenticates (CLI_TOKEN_SOURCE=session).
 # Read internally and exported ONLY for the `shopify` subprocess — never printed. WHERE it came
 # from is (see cli_auth_hint) the whole diagnosis of a 401, and it is recorded ONCE: the toml
 # branch EXPORTS the token, so a later call would otherwise re-report it as env.
@@ -655,14 +664,21 @@ resolve_domain() {
 # token to fall back on?" — and an abort here would replace the gql engine's own diagnosis (the
 # credential lacking read_themes) with a config line about a block that run never needed.
 # prep_cli is where a decline becomes an error.
-CLI_TOKEN_SOURCE=""
+CLI_TOKEN_SOURCE=""; TOML_STORE_FOREIGN=""
 cli_token_ready() {
   if [ -n "${SHOPIFY_CLI_THEME_TOKEN:-}" ]; then
     [ -n "$CLI_TOKEN_SOURCE" ] || CLI_TOKEN_SOURCE="env"
     return 0
   fi
-  local t
-  toml_env_ready || toml_env_pick_by_store "${STORE_ARG:-${SHOPIFY_STORE:-}}" || return 1
+  local t want ts
+  want="${STORE_ARG:-${SHOPIFY_STORE:-}}"
+  toml_env_ready || toml_env_pick_by_store "$want" || return 1
+  ts="$(toml_value store || true)"
+  if [ -n "$want" ] && [ -n "$ts" ] && [ "$(toml_store_key "$want")" != "$(toml_store_key "$ts")" ] \
+     && ! toml_env_pick_by_store "$want"; then
+    TOML_STORE_FOREIGN="$(store_handle "$ts" || true)"; CLI_TOKEN_SOURCE="session"
+    return 0
+  fi
   t="$(theme_token_from_toml)"
   [ -n "$t" ] || return 1
   CLI_TOKEN_SOURCE="toml"
@@ -677,16 +693,37 @@ cli_token_ready() {
 cli_auth_rejected() { # $1 = file holding the CLI's stderr
   grep -qiE '(^|[[:space:]])401([[:space:]]|$)|unauthorized|invalid api key or access token' "$1"
 }
-# The remedy follows where the two halves came from: store and token both out of the toml means
-# that toml's password= is simply not this store's; a --store/SHOPIFY_STORE override means the toml
-# (or the env token) was minted for a different store than the one asked for.
+# The CLI under --json (4.x) reports a failure as {"error":{"message":…}} on STDOUT and leaves stderr
+# empty, so neither the hint nor the tail would see why it failed.
+cli_json_error() { # $1 = the command's stdout, $2 = its stderr file — appends the envelope's message
+  local m
+  m="$(printf '%s\n' "$1" | theme_list_trim | jq -r 'if type == "object" and has("error") then ((.error.message? // .error) | tostring) else empty end' 2>/dev/null)" || m=""
+  [ -z "$m" ] || printf '%s\n' "$m" >> "$2"
+  return 0
+}
+# Where in the toml a value came from: the path plus the block, since in a multi-block file the
+# path alone does not say which password= is the wrong one.
+toml_src() {
+  case "$TOML_ENV" in ''|-|'*') printf '%s' "$TOML" ;; *) printf '%s [environments.%s]' "$TOML" "$TOML_ENV" ;; esac
+}
+# The remedy follows where the token came from: a toml token only ever goes to a store its block
+# names (cli_token_ready), so that block's password= is simply not this store's; an env token was
+# minted for a different store than the one asked for.
 cli_auth_hint() { # $1 = file holding the CLI's stderr — one hint line, only when it IS an auth 401
+  if [ "$CLI_TOKEN_SOURCE" = "session" ]; then
+    cli_auth_rejected "$1" \
+      || grep -qiE 'not logged in|log in to shopify|auth login|credentials are invalid|(failed|unable) to prompt|not authorized|(^|[[:space:]])403([[:space:]]|$)' "$1" \
+      || return 0
+    echo "hint=no Theme Access token for $DOMAIN (the password= in $(toml_src) is $TOML_STORE_FOREIGN's, so it was not sent) and the Shopify CLI session cannot reach $DOMAIN — run \`shopify auth login\` with an account that has access to it (\`shopify auth logout\` first if another account is logged in), or export SHOPIFY_CLI_THEME_TOKEN with $DOMAIN's own Theme Access password" >&2
+    return 0
+  fi
   cli_auth_rejected "$1" || return 0
   local src fix
-  if [ "$CLI_TOKEN_SOURCE" = "toml" ]; then src="$TOML"; else src="\$SHOPIFY_CLI_THEME_TOKEN"; fi
-  if [ "$CLI_TOKEN_SOURCE" = "toml" ] && [ "$DOMAIN_SOURCE" = "toml" ]; then
-    fix="the password= in $TOML is not $DOMAIN's — mint $DOMAIN's own Theme Access password (Shopify admin → Apps → Theme Access) and put it there, or export it as SHOPIFY_CLI_THEME_TOKEN"
+  if [ "$CLI_TOKEN_SOURCE" = "toml" ]; then
+    src="$(toml_src)"
+    fix="the password= in $(toml_src) is not $DOMAIN's — mint $DOMAIN's own Theme Access password (Shopify admin → Apps → Theme Access) and put it there, or export it as SHOPIFY_CLI_THEME_TOKEN"
   else
+    src="\$SHOPIFY_CLI_THEME_TOKEN"
     fix="export SHOPIFY_CLI_THEME_TOKEN with $DOMAIN's own Theme Access password, or run with TOML_PATH pointing at a toml whose store= is $DOMAIN and whose password= belongs to it"
   fi
   echo "hint=a Theme Access token is minted PER STORE — this one came from $src and the request went to $DOMAIN, so a token belonging to any other store cannot authenticate it: $fix" >&2
@@ -702,18 +739,25 @@ prep_cli() {
     [ -z "$TOML_ENV_ERR" ] || { echo "error=$(toml_env_error "$TJ_ENV_FIX")" >&2; exit 2; }
     echo "error=no_theme_token (themecli engine needs SHOPIFY_CLI_THEME_TOKEN or a password=/shp*_ token in $TOML, env=$TOML_ENV)" >&2
     exit 3; }
+  local how="Theme Access token"
+  if [ "$CLI_TOKEN_SOURCE" = "session" ]; then
+    how="Shopify CLI session"
+    echo "auth=cli-session store=$DOMAIN toml_store=$TOML_STORE_FOREIGN toml_env=$TOML_ENV (the toml's Theme Access token belongs to toml_store, so it is not sent)" >&2
+  fi
   if [ -n "$GQL_NOTE" ]; then
-    echo "note=gql engine unavailable ($GQL_NOTE) — using the theme-CLI engine (Theme Access token)" >&2
+    echo "note=gql engine unavailable ($GQL_NOTE) — using the theme-CLI engine ($how)" >&2
   fi
 }
 
 CLI_LIST=""
 # A banner before the JSON is trimmed, not fatal (pipefail keeps the CLI's own rc); an EMPTY listing
-# is fatal — `jq empty` accepts no input, and a silent CLI would otherwise read as "no such theme".
+# is fatal (a silent CLI would otherwise read as "no such theme"), and so is a 4.x {"error":…} envelope.
 cli_list() {
   local err rc=0; err="$(mktemp)"; CLEAN+=("$err")
   CLI_LIST="$(shopify theme list --store "$DOMAIN" --json --no-color 2>"$err" | theme_list_trim)" || rc=$?
-  if [ "$rc" -ne 0 ] || [ -z "$CLI_LIST" ] || ! printf '%s' "$CLI_LIST" | jq empty >/dev/null 2>&1; then
+  if [ "$rc" -ne 0 ] || [ -z "$CLI_LIST" ] \
+     || ! printf '%s' "$CLI_LIST" | jq -e '(type == "object" and has("error")) | not' >/dev/null 2>&1; then
+    cli_json_error "$CLI_LIST" "$err"
     # verdict, then the fix, then the CLI's own words — the raw box-drawing tail reads as noise
     # until the two lines above have said which store and which credential produced it
     echo "error=cli_list_failed store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2
@@ -787,7 +831,7 @@ cli_set() {
   cp "$FROM" "$tmp/$FILE"
   out="$(shopify theme push --store "$DOMAIN" --theme "$nid" --path "$tmp" \
       --only "$FILE" --nodelete --json --no-color 2>"$err")" \
-    || { echo "error=cli_push_failed theme=$nid store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2; cli_auth_hint "$err"; tail -8 "$err" >&2; exit 5; }
+    || { cli_json_error "$out" "$err"; echo "error=cli_push_failed theme=$nid store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2; cli_auth_hint "$err"; tail -8 "$err" >&2; exit 5; }
   cli_push_report "$out" "$nid"
   # rc 0 is the transport's opinion, not the server's — read it back (exits 6 when it did not land)
   if [ "$VERIFY" -eq 1 ]; then

@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.5.4**.
+Current release: **fe v0.5.5**.
 
 ## Status
 
@@ -238,8 +238,8 @@ The process environment wins.
 | `FE_THEME_JSON_VERIFY_WAIT` | `2` | seconds `theme-json.sh set` waits before its one read-back retry |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | a non-`0` value shortens `shopify-admin-gql.sh`'s engine-fallback note to `note=engine=token` |
 | `TOML_PATH` | `shopify.theme.toml` | the config `create-preview-theme.sh`, `theme-json.sh` and `shopify-admin-gql.sh` read (`store =`, the dev theme's `theme =`, the Theme Access token), and the file `create-preview-theme.sh`'s pin rewrites — point it at a copy when the real config must not change. In a toml with `[environments.*]` blocks every value comes from one block: `--env <name>` (`create-preview-theme.sh` only), else `SHOPIFY_FLAG_ENVIRONMENT`, else `dev`, else `development`, else the top-level keys |
-| `SHOPIFY_CLI_THEME_TOKEN` | unset | Theme Access token for the `shopify` CLI: `create-preview-theme.sh`'s last resort after the toml's `password =` (and its only token for a store other than the toml's) — with none, the CLI's logged-in session authenticates (`auth=cli-session`); `theme-json.sh --engine themecli` prefers it over the toml. Never printed |
-| `SHOPIFY_STORE` | unset | the store `theme-json.sh`, `shopify-admin-gql.sh` and `create-preview-theme.sh` use when `--store` is not passed, ahead of the toml's `store =`. A store other than the toml's refuses `create-preview-theme.sh create` and the pin; `refresh` then pushes with `SHOPIFY_CLI_THEME_TOKEN`, else the CLI's logged-in session |
+| `SHOPIFY_CLI_THEME_TOKEN` | unset | Theme Access token for the `shopify` CLI: `create-preview-theme.sh`'s last resort after the toml's `password =` (and its only token for a store other than the toml's) — with none, the CLI's logged-in session authenticates (`auth=cli-session`); `theme-json.sh` (themecli engine) prefers it over the toml. It never sends a toml block's token to a `--store` that block does not name: another `[environments.*]` block naming that store supplies the token, and with none the CLI's logged-in session authenticates (`auth=cli-session … toml_env=<block>` on stderr, `token_source=session`). Never printed |
+| `SHOPIFY_STORE` | unset | the store `theme-json.sh`, `shopify-admin-gql.sh` and `create-preview-theme.sh` use when `--store` is not passed, ahead of the toml's `store =`. A store other than the toml's refuses `create-preview-theme.sh create` and the pin; `refresh` then pushes with `SHOPIFY_CLI_THEME_TOKEN`, else the CLI's logged-in session. For `theme-json.sh` it counts like `--store`: a store the resolved toml block does not name never gets that block's token — `SHOPIFY_CLI_THEME_TOKEN`, else a sibling block naming the store, else the CLI's logged-in session |
 | `SHOPIFY_FLAG_ENVIRONMENT` | unset | read, never set, by fe: the Shopify CLI's own environment selector, taken by the three store scripts as the default `[environments.<name>]` block of `shopify.theme.toml`; a name no block carries is `error=env_not_found` |
 | `SHOPIFY_ADMIN_TOKEN` | unset | Admin API access token for `shopify-admin-gql.sh`'s token engine, ahead of the `--env` dotenv file |
 | `SHOPIFY_ADMIN_API_VERSION` | `2026-04` | the Admin API version `shopify-admin-gql.sh` requests when `--api-version` is not passed |

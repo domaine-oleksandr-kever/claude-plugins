@@ -14,7 +14,7 @@ describe('resolver', () => {
       workId: 'ABC-1591',
       branch: 'feature/ABC-1591-x',
       hasWorkspace: true,
-      guessed: false,
+      guessed: true,
       done: 3,
       total: 5,
       current: 'Preview themes',
@@ -166,6 +166,30 @@ describe('resolver', () => {
     w.files[progressMd('ABC-1588')] = { text: MD, mtimeMs: NOW + 1 }
     await $.tool.call({ tool: 'Write', file_path: progressMd('ABC-1588'), content: MD })
     expect((await peek($)).progress).toMatchObject({ workId: 'ABC-1588', done: 3, total: 5, current: 'Preview themes' })
+  })
+
+  t('a branch-matched workspace is guessed until the session reads, writes, names or pins it; a re-resolve keeps it adopted', async ($, on) => {
+    const { w, clock } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    const guessed = async () => (await peek($)).progress.guessed
+    for (const adopt of [
+      () => $.tool.call({ tool: 'Read', file_path: progressMd('ABC-1591') }),
+      () => $.tool.call({ tool: 'Write', file_path: `${TASKS}/ABC-1591/tmp/x.json`, content: '{}' }),
+      () => submit($, 'back to ABC-1591'),
+      () => run($, 'ABC-1591'),
+    ]) {
+      await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+      await run($, '-')
+      await clock.advance(30_000)
+      expect(await guessed()).toBe(true)
+      await $.tool.call({ tool: 'Read', file_path: `${ROOT}/sections/header.liquid` })
+      expect(await guessed()).toBe(true)
+      await adopt()
+      expect(await guessed()).toBe(false)
+      await clock.advance(4 * 30_000)
+      expect(await guessed()).toBe(false)
+    }
   })
 
   t('a stray file named like a key is not a workspace', async ($, on) => {
@@ -407,7 +431,7 @@ describe('staleness', () => {
   const agent = ($: any) => $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose' })
   const edit = ($: any, file_path: string) => $.tool.call({ tool: 'Edit', file_path, old_string: 'a', new_string: 'b' })
 
-  t('an agent return and an edit outside .claude/ count; 20 min without a write turns the workspace stale', async ($, on) => {
+  t('an agent return and an edit outside .claude/ count; 20 min without a write turns an adopted workspace stale', async ($, on) => {
     const { w, clock } = world(on)
     addWorkspace(w, 'ABC-1591')
     await start($)
@@ -415,7 +439,9 @@ describe('staleness', () => {
     await edit($, `${ROOT}/sections/header.liquid`)
     expect((await peek($)).progress).toMatchObject({ lastSavableMs: NOW, agentsSince: 1, editsSince: 1, stale: false })
     await clock.advance(20 * 60_000)
-    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW - 60_000, stale: true })
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW - 60_000, guessed: true, stale: false })
+    await $.tool.call({ tool: 'Read', file_path: progressMd('ABC-1591') })
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW - 60_000, guessed: false, stale: true })
     await $.tool.call({ tool: 'Write', file_path: `${TASKS}/ABC-1591/notes.md`, content: NOTES })
     expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW + 1, lastSavableMs: NOW, agentsSince: 0, editsSince: 0, stale: false })
   })
@@ -446,6 +472,7 @@ describe('staleness', () => {
     const { w, clock } = world(on, { ctxPct: 90 })
     addWorkspace(w, 'ABC-1591')
     await start($)
+    await $.tool.call({ tool: 'Read', file_path: progressMd('ABC-1591') })
     await agent($)
     await clock.advance(5 * 60_000)
     expect((await peek($)).progress).toMatchObject({ stale: true })
@@ -463,6 +490,24 @@ describe('staleness', () => {
     await agent($)
     await clock.advance(25 * 60_000)
     expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW + 1, lastSavableMs: NOW, stale: false })
+  })
+
+  t('a background agent is savable when it stops, not when it launches; a remote or teammate launch never', async ($, on) => {
+    const { w, clock } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    const launch = (reply: Record<string, unknown>) => $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose', reply })
+    const subagentStop = (agent_id: string) => $.classic.SubagentStop({ agent_id, stop_hook_active: false, agent_transcript_path: '', agent_type: 'general-purpose' })
+    await launch({ status: 'async_launched', agentId: 'bg1', description: 'd', prompt: 'p', outputFile: '/tmp/o' })
+    await launch({ status: 'remote_launched', taskId: 't1', sessionUrl: 'https://x', description: 'd', prompt: 'p', outputFile: '/tmp/o' })
+    await launch({ status: 'teammate_spawned', agent_id: 'tm1', teammate_id: 'tm@team', name: 'tm' })
+    await subagentStop('fg1')
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: 0, agentsSince: 0 })
+    await clock.advance(60_000)
+    await subagentStop('bg1')
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: NOW + 60_000, agentsSince: 1 })
+    await subagentStop('bg1')
+    expect((await peek($)).progress).toMatchObject({ agentsSince: 1 })
   })
 
   t('a subagent\'s own edits and MCP reads are not savable', async ($, on) => {

@@ -1,20 +1,26 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NOTES, NOW, PEEK, TASKS, addWorkspace, peek, start, submit, world } from './world.ts'
+import { NOTES, NOW, PEEK, TASKS, addWorkspace, peek, progressMd, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
 const agent = ($: any) => $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose' })
 const stop = ($: any, stop_hook_active = false) => $.classic.Stop({ stop_hook_active } as any)
+/** A Read under the branch's workspace: the session's own from then on. */
+const touch = ($: any) => $.tool.call({ tool: 'Read', file_path: progressMd('ABC-1591') })
+const background = ($: any, agentId: string) =>
+  $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose', reply: { status: 'async_launched', agentId, description: 'd', prompt: 'p', outputFile: '/tmp/o' } })
+const subagentStop = ($: any, agent_id: string) => $.classic.SubagentStop({ agent_id, stop_hook_active: false, agent_transcript_path: '', agent_type: 'general-purpose' } as any)
 const NOTES_MD = `${TASKS}/ABC-1591/notes.md`
 const MIN = 60_000
 const NUDGE = 'workspace stale 21 min: save findings to .claude/tasks/ABC-1591/notes.md before answering'
 const BLOCK = 'save interim findings to the workspace (.claude/tasks/ABC-1591/notes.md), then stop'
 
-/** A workspace written a minute before the start, an agent returned, then 20 min without a write. */
+/** A workspace written a minute before the start and read, an agent returned, then 20 min without a write. */
 async function staleWorld($: any, on: On, env: Record<string, string> = {}) {
   const ctx = world(on, { env })
   addWorkspace(ctx.w, 'ABC-1591')
   await start($)
+  await touch($)
   await agent($)
   await ctx.clock.advance(20 * MIN)
   return ctx
@@ -84,6 +90,37 @@ describe('nudge', () => {
     expect(lastContext(calls)).toEqual([NUDGE.replace('21 min', '49 min')])
   })
 
+  t('a workspace matched by the branch gets no line and no block until this session reads under it', async ($, on) => {
+    const { w, calls, clock } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    expect((await peek($)).progress).toMatchObject({ workId: 'ABC-1591', guessed: true })
+    await agent($)
+    await clock.advance(25 * MIN)
+    await submit($, 'run /base-doctor, change nothing')
+    expect(lastContext(calls)).toEqual([])
+    await agent($)
+    expect((await stop($)).block).toBeUndefined()
+    await $.tool.call({ tool: 'Read', file_path: `${TASKS}/ABC-1592/progress.md` })
+    expect((await peek($)).progress).toMatchObject({ guessed: true })
+    await touch($)
+    expect((await peek($)).progress).toMatchObject({ guessed: false })
+    await submit($, 'go on')
+    expect(lastContext(calls)).toEqual([NUDGE.replace('21 min', '26 min')])
+    await agent($)
+    expect((await stop($)).block).toBe(BLOCK)
+  })
+
+  t('a Bash command naming the workspace dir adopts it; one naming the tasks dir alone does not', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await $.tool.call({ tool: 'Bash', command: 'ls .claude/tasks/' })
+    expect((await peek($)).progress).toMatchObject({ guessed: true })
+    await $.tool.call({ tool: 'Bash', command: 'cat .claude/tasks/ABC-1591/notes.md' })
+    expect((await peek($)).progress).toMatchObject({ guessed: false })
+  })
+
   t('BASE_AUTOSAVE=0 adds none', async ($, on) => {
     const { calls } = await staleWorld($, on, { BASE_AUTOSAVE: '0' })
     await submit($, 'go on')
@@ -94,6 +131,7 @@ describe('nudge', () => {
     const { w, calls, clock } = world(on, { ctxPct: 84 })
     addWorkspace(w, 'ABC-1591')
     await start($)
+    await touch($)
     await agent($)
     await clock.advance(6 * MIN)
     await submit($, 'go on')
@@ -124,26 +162,31 @@ describe('turn-end save', () => {
     expect(await stop($)).toEqual({ block: BLOCK })
   })
 
-  t('3 turns without a workspace write count savable work from an earlier turn', async ($, on) => {
-    const ctx = world(on)
-    addWorkspace(ctx.w, 'ABC-1591')
-    await start($)
-    await agent($)
-    const turn = async () => {
-      await submit($, 'just a question')
-      const r = (await stop($)).block ?? null
-      await ctx.clock.advance(15 * MIN)
-      return r
+  t('a turn with no savable work of its own is never blocked, however long the workspace stayed stale', async ($, on) => {
+    const { clock } = await staleWorld($, on)
+    for (let i = 0; i < 6; i++) {
+      await submit($, 'run /base-doctor, change nothing')
+      expect(await stop($)).toEqual({})
+      await clock.advance(15 * MIN)
     }
-    expect(await turn()).toBeNull()
-    expect(await turn()).toBeNull()
-    expect(await turn()).toBe(BLOCK)
+  })
+
+  t('a turn that only launched background agents is not blocked; their stop is savable work of the turn it lands in', async ($, on) => {
+    const { clock } = await staleWorld($, on)
+    await submit($, 'go on')
+    await background($, 'bg1')
+    expect(await stop($)).toEqual({})
+    await clock.advance(MIN)
+    await submit($, 'go on')
+    await subagentStop($, 'bg1')
+    expect(await stop($)).toEqual({ block: BLOCK })
   })
 
   t('chat turns with no savable work never block', async ($, on) => {
     const ctx = world(on)
     addWorkspace(ctx.w, 'ABC-1591')
     await start($)
+    await touch($)
     for (let i = 0; i < 8; i++) {
       await ctx.clock.advance(15 * MIN)
       await submit($, 'just a question')
@@ -183,6 +226,7 @@ describe('turn-end save', () => {
     const { w, clock } = world(on, { ctxPct: 90 })
     addWorkspace(w, 'ABC-1591')
     await start($)
+    await touch($)
     await submit($, 'go on')
     await agent($)
     await clock.advance(6 * MIN)
@@ -214,6 +258,7 @@ describe('auto-compact marker', () => {
     addWorkspace(ctx.w, 'ABC-1591')
     ctx.w.files[NOTES_MD] = { text: '## log\n- one', mtimeMs: NOW - 2 * MIN }
     await start($)
+    await touch($)
     await agent($)
     await $.tool.call({ tool: 'Edit', file_path: '/repo/sections/header.liquid', old_string: 'a', new_string: 'b' })
     await ctx.clock.advance(20 * MIN)
@@ -227,6 +272,7 @@ describe('auto-compact marker', () => {
     const ctx = world(on)
     addWorkspace(ctx.w, 'ABC-1591')
     await start($)
+    await touch($)
     await agent($)
     await ctx.clock.advance(20 * MIN)
     await submit($, 'go on')
@@ -248,6 +294,7 @@ describe('auto-compact marker', () => {
     ctx.w.files[NOTES_MD] = { text: 'x'.repeat(100), mtimeMs: NOW - 2 * MIN }
     ctx.w.readFails = [NOTES_MD]
     await start($)
+    await touch($)
     await agent($)
     await ctx.clock.advance(20 * MIN)
     await $.classic.PreCompact({ trigger: 'auto', custom_instructions: null } as any)

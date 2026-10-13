@@ -150,7 +150,8 @@ request — and size equality also catches a run truncated halfway. A cache hit 
 The script refuses an `--out` that git would track (`git check-ignore`): downloads must never
 reach a commit, and the same gate is what keeps a ticket that says *"save it to ~/…"* inside a
 repo's scratch. Under `.claude/tasks/` it stamps the `info/exclude` line
-`<plugin root>/references/task-workspace.md` prescribes and proceeds; any other unignored
+`<plugin root>/references/task-workspace.md` prescribes and proceeds — under `.claude/base-tmp/`
+(the reader's dir when it has no workspace) the line `.claude/base-tmp/`; any other unignored
 directory is `error=out_dir_not_ignored`, exit 2, nothing created and no issue or attachment
 request made — with no `--cloud-id` the unauthenticated `_edge/tenant_info` lookup has already
 run, since the gate sits after it.
@@ -187,10 +188,13 @@ mcp__slim__view({ path: "<workspace>/tmp/attachments/<file>" })
 
 slim's media engine resizes an image to `<name>.1568.<ext>` (long edge at most 1568 px, metadata
 stripped) and cuts a video into `<name>.frames/001.jpg …` (one frame every 2 seconds, at most 24,
-each resized the same way), beside the input. The reply is one figure line,
-`media: <in> B → <out> B (-NN%) frames=N`, then the output paths (frames with their timestamps).
-Those output paths are what `ticket.md` and `comments.md` cite; the caller `Read`s the ones the task
-needs, never all of them by default. The original stays on disk beside them.
+each resized the same way), beside the input. An image already within 1568 px is passed as itself,
+with nothing written. The reply is one figure line — `media: <in> B → <out> B (-NN%) frames=N`, or
+`media: <in> B, already ≤1568 px — no copy` for a passed image — then, for an image, the one line
+`Read <copy> once to see it` (or `Read <input>` for a passed image), and for a video the frame paths
+with their timestamps. The path on that `Read` line, or the frame paths, are what `ticket.md` and
+`comments.md` cite; the caller `Read`s the ones the task needs, never all of them by default. The
+original stays on disk beside them.
 
 slim uses `ffprobe` + `ffmpeg` when they are on PATH, else macOS `sips` for images only. With
 neither (or a video with only `sips`) the answer is the one-line refusal

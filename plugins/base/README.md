@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.9.2**.
+Current release: **base v0.9.3**.
 
 ## Status
 
@@ -56,16 +56,20 @@ To enable the same set through settings, put this in `~/.claude/settings.json`:
 ```
 
 `base:jira-reader` gives every downloaded screenshot and screen recording to slim's `view`. `view`
-writes the resized copy (or the frames) beside the file in `.claude/tasks/<work-id>/tmp/attachments/`.
-If the permission check would ask about that write, slim asks you once per file (Yes/No). To skip
-the question, add an allow rule to the project's `.claude/settings.json`:
+writes the resized copy (or the frames) beside the file in `.claude/tasks/<work-id>/tmp/attachments/`,
+or in `.claude/base-tmp/<KEY>/` when the reader was given no workspace path; that dir is swept after
+`BASE_TMP_TTL` hours. If the permission check would ask about that write, slim asks you once per file
+(Yes/No). To skip the question, add allow rules for both dirs to the project's
+`.claude/settings.json`:
 
 ```json
-{ "permissions": { "allow": ["Write(.claude/tasks/**)"] } }
+{ "permissions": { "allow": ["Write(.claude/tasks/**)", "Write(.claude/base-tmp/**)"] } }
 ```
 
 Resizing and frame cutting need `ffmpeg` + `ffprobe` on PATH. macOS `sips` covers images only.
-Without these tools, the files stay downloaded and the reader says so in its `attachments_note`.
+Without these tools, the files stay downloaded but are not resized, and the reader says so in its
+`attachments_note`. Claude then looks at an image the task needs through one read of the original,
+never a batch of them; a recording without frames cannot be looked at.
 
 ## Agents
 
@@ -74,7 +78,7 @@ does not resolve.
 
 | Agent | Does | Model |
 |---|---|---|
-| `base:jira-reader` | reads one ticket — fields, comments, attachments — writes `ticket.md` and `comments.md` to the workspace; downloads images and recordings, resizes them through slim's `view` | sonnet |
+| `base:jira-reader` | reads one ticket — fields, comments, attachments — writes `ticket.md` and `comments.md` to the workspace; downloads images and recordings (into the workspace, else `.claude/base-tmp/<KEY>/`), resizes them through slim's `view` | sonnet |
 | `base:figma-reader` | reads one Figma node through a Figma MCP or the REST API, writes `figma-<node-id>.md`; the REST tree is compacted by slim's `view` | sonnet |
 | `base:doc-reader` | reads one linked doc (Notion, Confluence, web) and writes a task-focused extract | sonnet |
 | `base:jira-writer` | writes one approved value to one Jira field or comment, converted to ADF, and reads it back | sonnet |
@@ -118,11 +122,11 @@ slim resizes and compacts.
 | Script | Run by | Does |
 |---|---|---|
 | `scripts/md-to-adf.cjs` | `base:jira-writer` | Markdown → ADF for a Jira field or comment |
-| `scripts/review-scope.sh` | `/base:pre-commit-review`, `/base:commit`, a team plugin's PR gate | the review scope and its `diff_hash` for the `.git/.base-review` marker: merge-base to working tree, untracked files included, build-dirtied rewrites kept out |
+| `scripts/review-scope.sh` | `/base:pre-commit-review`, `/base:commit`, a team plugin's PR gate | the review scope and its `diff_hash` for the `.git/.base-review` marker: merge-base to working tree, untracked files included, build-dirtied rewrites kept out; `--check` prints one line `marker=fresh\|stale\|other-branch\|none` (the marker against this branch and scope) for `/base:commit`'s gate |
 | `scripts/worktree-setup.sh` | `/base:worktree` | creates or removes a sibling `git worktree` with its own branch and dev port, the `.claude/tasks` link back to the main checkout, and the `--copy` list |
 | `scripts/doctor.cjs` | `/base-doctor`, or by hand | the static install checks (below); `--json` for the command |
 | `scripts/scratch-hygiene.cjs` | base's hooks module, once per session | sweeps `.claude/base-tmp` of files older than `BASE_TMP_TTL` hours and keeps it in `.git/info/exclude` |
-| `scripts/qa-stores.cjs` | a QA engineer by hand; `/qa:preflight` reads it | the QA store registry, one file per machine (`~/.config/domaine/qa-stores.json`, dir 0700, file 0600): `list`, `get <store>` (the only command that prints a password), `find`, `set`, `unset`, `path` |
+| `scripts/qa-stores.cjs` | a QA engineer by hand; `/qa:preflight` reads it | the QA store registry, one file per machine (`~/.config/domaine/qa-stores.json`, dir 0700, file 0600): `list`, `get <store>` (the only command that prints a password; `--field password\|alias\|defaultTheme\|domain\|notes` prints that one value raw, nothing for a field the store lacks), `find`, `set`, `unset`, `path` |
 
 ## Skills
 
@@ -131,7 +135,7 @@ same names.
 
 | Skill | Does |
 |---|---|
-| `/base:commit` | a Conventional Commits commit, directly, after checking the branch was reviewed (`.git/.base-review`); offers a ticket scope |
+| `/base:commit` | a Conventional Commits commit, directly — only on a reviewed tree: no fresh `.git/.base-review` marker for this branch and diff (`review-scope.sh --check`) → runs `/base:pre-commit-review` first; the developer's own "commit without review" request in the same turn (not negated) is the only bypass; offers a ticket scope |
 | `/base:pre-commit-review` | the branch review before a commit: ticket references and untracked files inline, `base:change-reviewer` for comments, refactors and rules, `base:bug-hunter` for correctness; a plan to approve, then the agreed edits and the marker. The caller passes the `profile` word its team plugin names (`none` without one) |
 | `/base:save-task-context` | writes what the conversation holds into `.claude/tasks/<work-id>/` — ticket fields, comments, decisions, `progress.md` in the team's series order — without spawning a reader |
 | `/base:report-plugin-issue` | drafts a sanitized GitHub issue for a base defect, with the `/base-doctor` output and the `base.events` tail, and posts it after your approval |
@@ -216,8 +220,10 @@ base picks the work id in this order:
 2. The last ticket that a person's prompt named. A Jira `/browse/` URL corroborates a key, and so
    does a project that already has a `.claude/tasks/<KEY>` dir. `UTF-8` or `SHA-256` alone does not.
 3. The branch's ticket key, then its kebab slug, when that workspace exists.
-4. The newest `progress.md` written within 12 hours. This id is only guessed (`guessed: true`): the
-   autosave levers wait until the session writes into that workspace.
+4. The newest `progress.md` written within 12 hours.
+
+The ids from rungs 3 and 4 are only guessed (`guessed: true`): the autosave levers wait until the
+session touches that workspace.
 
 base re-reads the workspace when a file in its root changes. It checks every 30 s, and at once after
 a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
@@ -227,7 +233,8 @@ a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
 |---|---|
 | `base.progress` | the parsed progress.md of the work id (`{ workId, branch, hasWorkspace, done, total, current, rows, notesTail, mtimeMs, lastSavableMs, agentsSince, editsSince, stale, guessed }`), or `{ workId: null, branch }` |
 | `base.savable` | this session's savable events, `{ atMs, kind: 'agent' \| 'edit' \| 'mcp', workId }`, at most 200 |
-| `base.autosave` | the turn counter, its start, the turn whose stop was last blocked, the last turn that wrote the workspace, and the write the prompt line last fired for |
+| `base.background` | the ids of background agents the main loop launched that have not stopped yet, at most 200 |
+| `base.autosave` | the turn counter, its start, the turn whose stop was last blocked, and the write the prompt line last fired for |
 | `base.compactMarker` | the last `compact:` line autosave wrote: `{ workId, notesMs, priorMs }`, so it never counts as a save |
 | `base.pin` | the work id `/base-progress` pinned, or null |
 | `base.lastKey` | the last ticket a person's prompt named this session |
@@ -238,27 +245,30 @@ a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
 | `base.swept` | the session id whose base-tmp and event-log sweeps ran |
 | `base.dogfood` | dogfood mode's session: `{ sid, failMs, script, blockedMs, reportMs }` — the last plugin-script failure, the failure whose stop was blocked, the last `plugin_defect` report |
 
-**Autosave.** A savable event is one of these, in the main loop: an Agent call that returned, a
-Write / Edit outside `.claude/`, or an MCP result over slim's 4 KB gate. The event belongs to the
+**Autosave.** A savable event is one of these, in the main loop: an Agent call that returned its
+result, the stop of a background agent it launched, a Write / Edit outside `.claude/`, or an MCP
+result over slim's 4 KB gate. The event belongs to the
 work id that base published when it happened.
 
 The workspace is `stale` when two things are true. First, no file in its root was written for 20
 minutes, or for 5 minutes once the context window is 85 % full. A reader's `ticket.md` counts;
-`tmp/` does not. Second, the newest savable event of its work id came after that write. band's
-Compact reads the same flag.
+`tmp/` does not. Second, the newest savable event of its work id came after that write. A guessed workspace is
+never stale. band's Compact reads the same flag, so it never saves into a guessed workspace either.
 
 While the workspace is stale, autosave does three things:
 
 - A person's prompt gets one context line that asks to save to notes.md. The line comes once until
   the next workspace write.
-- A turn that wrote nothing to the workspace is blocked at its stop. This happens after savable work
-  in the workspace, or after 3 turns without a workspace write. It never happens when the stop hook
-  is already active, and at most once per 3 turns.
+- A turn that did savable work and wrote nothing to the workspace is blocked at its stop. A turn
+  without savable work of its own is never blocked, and launching a background agent is not savable
+  work. It never happens when the stop hook is already active, and at most once per 3 turns.
 - An auto-compact appends one `compact:` pointer line to notes.md. This line is not a save: the
   workspace stays stale, and the next prompt gets the line again.
 
-A workspace found only as the newest `progress.md` is guessed, and autosave leaves it alone. The
-first write into it during the session adopts it, and the three levers apply from then on.
+A workspace found from the branch or as the newest `progress.md` is guessed, and autosave leaves it
+alone. The session adopts it with the first Read, Write or Edit under it, a Bash command naming
+`.claude/tasks/<id>/`, a write into it, a prompt that names its key, or a pin. The three levers
+apply from then on, and a /clear makes it guessed again.
 
 `BASE_AUTOSAVE=0` turns the three off.
 
@@ -339,7 +349,9 @@ rest with `rm -rf`, because the engine's file API cannot delete.
 
 - **base-tmp sweep** runs once per session, and again after a /clear, in the background. The session
   start never waits for it. It deletes files in `.claude/base-tmp` older than `BASE_TMP_TTL` hours
-  (24 by default). Directories and symlinks stay.
+  (24 by default). Directories and symlinks stay. It also holds `base:jira-reader`'s downloads for a
+  ticket read with no task workspace (`.claude/base-tmp/<KEY>/`); the download scripts add
+  `.claude/base-tmp/` to `.git/info/exclude` the first time they write there.
 - **Event-log sweep** runs alongside it. It deletes session folders under `$HOME/.claude/domaine/log`
   whose newest file is older than 7 days (Event log on disk).
 
@@ -423,10 +435,19 @@ There are two ways to turn it on:
   A failure is an error result, or `Error` in the stderr. The result then gets one line for the model,
   `base dogfood: a plugin script failed — report it with plugin_defect before working around it`,
   and a `defect` event. In the main loop, the next stop without a report since then is blocked once
-  per failure. A designed refusal is not a failure: a `<script stem>: …` line (a base script's die) or
-  an `error=…` line (an fe script's), with no `Error` in the output. When the script is not the
-  line's last command (`script; echo done`, `script | head`), the exit code is not its own: only
-  `Error` in the output nudges and logs, and the stop is never blocked. A trailing `2>&1` still
+  per failure. A designed refusal is not a failure, so it gets no nudge. A refusal is output whose
+  `error=` lines all name a refusal, or, with no `error=` line, a `<script stem>: …` line (a base
+  script's die). A refusal is the caller's input or usage (`usage`, `unknown_arg`, `missing_value`,
+  `--env requires …`, `invalid_store`, `from_file_invalid_json`, …), a guard (`*_refused`,
+  `*_mismatch`, `settings_drift`, `ambiguous_env`, `not_applied`, …), something named that is not
+  there (`theme_not_found`, `variables_file_not_found`, …) or a designed degradation
+  (`no_jira_credentials`, `no_figma_token`). Every other `error=` reason is a failure: a missing tool
+  or plugin file (`jq_not_found`, `shopify_cli_not_found`, `common_lib_not_found`), a credential that
+  is absent or broken (`no_admin_token`, `invalid_admin_token`), a remote call (`http_*`,
+  `gql_errors`), or the script's own work (`*_failed`, `*_unverifiable`). `Error` in the output
+  always makes it a failure. When the script is not the line's last command (`script; echo done`,
+  `script | head`), the exit code is not its own: `Error` in a failed result, or a failure `error=`
+  line even at exit 0, nudges and logs, and the stop is never blocked. A trailing `2>&1` still
   counts as last.
 - **`/base-defects`** lists the index newest first, then this project's `.claude/plugin-defects/`.
   The doctor's `defects` row counts the last 7 days.
@@ -482,14 +503,14 @@ Agents never read `.env` themselves.
 | `tests/base-guards-sim.sh` | `hooks/scratch-path-guard.cjs` as the mod runs it: the verdicts, the remediation paths, the launch root, worktrees, the exclude stamp of `scripts/scratch-hygiene.cjs` |
 | `tests/no-verify-bypass-matrix.sh` | `hooks/no-verify-bypass.sh`: every bypass row blocked, every legitimate command allowed |
 | `tests/base-refs-lint.sh` | no legacy-plugin, host or old-compressor name in plugins/base; every MCP server, cited path, agent, skill, command, `BASE_*` switch and markdown link resolves, and so does every team plugin's path, skill or agent the shared text names (`<fe root>/…`, `/qa:preflight`) |
-| `tests/base-jira-attachments-sim.sh` | `scripts/jira-attachments.sh` against a fake curl: credentials, gates, caps, cache, videos kept whole, the transport retry |
+| `tests/base-jira-attachments-sim.sh` | `scripts/jira-attachments.sh` against a fake curl: credentials, gates (the `.claude/base-tmp/` no-workspace dir stamped once), caps, cache, videos kept whole, the transport retry |
 | `tests/base-external-screenshots-sim.sh` | `scripts/external-screenshots.sh`: the allow-list, redirect hops, `og:image` resolution, the format from the bytes, cache, pacing, no resample |
 | `tests/base-figma-rest-sim.sh` | `scripts/figma-rest.sh`: the token, the modes, `--policy`, the cache, retries, the out-dir gate |
 | `tests/base-md-to-adf.mjs` | `scripts/md-to-adf.cjs`: the ADF it writes, the CLI contract, round trips through slim's adf engine |
 | `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts, `--json`, `--log-dir`, Windows |
 | `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list) and the `scripts/scratch-hygiene.cjs` sweep |
-| `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, bash 3.2 |
-| `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get`, `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
+| `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, the `--check` marker verdicts (fresh / stale / other-branch / none, read-only, per worktree), bash 3.2 |
+| `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get` (JSON and `--field` raw values, a missing field prints nothing, an unknown field is a usage error), `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
 
 [ARCHITECTURE.md](ARCHITECTURE.md) tells how the pieces fit: the mods, the atoms that band reads,
 and why some checks stay scripts.

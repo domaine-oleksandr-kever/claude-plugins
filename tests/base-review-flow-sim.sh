@@ -267,6 +267,31 @@ else bad x-base-flag "--base origin/release/2.3.0 not honoured: $(echo "$out" | 
 rc=0; (cd "$R" && "$SCOPE" --base nope) > "$TMP/o" 2>&1 || rc=$?
 if [ "$rc" -eq 2 ] && grep -q 'not a ref: nope' "$TMP/o"; then ok; else bad x-bad-base "rc=$rc $(head -c 120 "$TMP/o")"; fi
 
+# (y) --check: the marker against this branch and scope — the one line /base:commit's gate reads
+new_repo ck
+git -C "$R" checkout -qb feat; commit f.txt f1
+check() { (cd "$R" && "$SCOPE" --check); }
+hk="$(cd "$R" && "$SCOPE" | sed -n 's/^diff_hash=//p')"
+if [ "$(check)" = "marker=none branch=feat marker_branch= diff_hash=$hk marker_hash=" ]; then ok
+else bad y-none "no marker: $(check)"; fi
+stamp() { printf 'branch=%s\nbase=main\ndiff_hash=%s\nreviewed_at_head=x\n' "$1" "$2" > "$(git -C "$R" rev-parse --absolute-git-dir)/.base-review"; }
+stamp feat "$hk"
+if [ "$(check)" = "marker=fresh branch=feat marker_branch=feat diff_hash=$hk marker_hash=$hk" ]; then ok
+else bad y-fresh "same branch, same hash: $(check)"; fi
+echo more >> "$R/f.txt"
+out="$(check)"
+if echo "$out" | grep -q '^marker=stale branch=feat marker_branch=feat ' && echo "$out" | grep -q " marker_hash=$hk\$"; then ok
+else bad y-stale "same branch, edited tree: $out"; fi
+git -C "$R" checkout -q -- f.txt
+stamp bugfix/OTHER-1 "$hk"
+if [ "$(check)" = "marker=other-branch branch=feat marker_branch=bugfix/OTHER-1 diff_hash=$hk marker_hash=$hk" ]; then ok
+else bad y-other-branch "another branch's marker with the same hash: $(check)"; fi
+if grep -qx 'branch=bugfix/OTHER-1' "$(git -C "$R" rev-parse --absolute-git-dir)/.base-review"; then ok
+else bad y-read-only "--check rewrote the marker"; fi
+git -C "$R" worktree add -q -b wt "$TMP/ck-wt" feat 2>/dev/null
+if [ "$(cd "$TMP/ck-wt" && "$SCOPE" --check | cut -d' ' -f1-3)" = "marker=none branch=wt marker_branch=" ]; then ok
+else bad y-worktree "a linked worktree read the main checkout's marker: $(cd "$TMP/ck-wt" && "$SCOPE" --check)"; fi
+
 # (v) usage and refusals
 rc=0; (cd "$R" && "$SCOPE" --help) > "$TMP/o" 2>&1 || rc=$?
 if [ "$rc" -eq 0 ] && grep -q '^usage: review-scope.sh' "$TMP/o"; then ok; else bad v-help "rc=$rc $(head -c 120 "$TMP/o")"; fi

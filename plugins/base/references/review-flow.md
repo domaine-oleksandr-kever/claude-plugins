@@ -69,6 +69,19 @@ else
 fi
 ```
 
+**Valid for a commit** means `fresh`: the marker's `branch` is the current branch **and** its
+`diff_hash` is the current one. `--check` prints that verdict in one line, read-only:
+
+```bash
+<base root>/scripts/review-scope.sh --ws .claude/tasks/<work-id> --check
+# marker=fresh|stale|other-branch|none branch=… marker_branch=… diff_hash=… marker_hash=…
+```
+
+`stale` = this branch, another hash (edited since the review); `other-branch` = a marker another
+branch wrote, treated exactly as `none` and never rewritten by `/base:commit`. Anything but `fresh`
+means `/base:commit` runs `/base:pre-commit-review` before committing; its Review gate is the
+rule's home, bypass phrase included.
+
 Write it (only after a review actually ran — for `/base:pre-commit-review`, **after** its edits
 are applied, so it records the final reviewed state; add the `correctness_hash` line only
 when check F was handled this pass):
@@ -212,9 +225,11 @@ When asking (subsequent runs), enrich the prompt so the decision is easy:
   review, **including check F** (`base:bug-hunter` in parallel with the
   `base:change-reviewer`(s) when the correctness gate holds). Applies edits after developer
   approval, then writes/refreshes the marker (incl. `correctness_hash`).
-- **`/base:commit`** — does **not** itself run the hygiene review. On entry: if
-  `reviewed_before == no`, offer to run `/base:pre-commit-review` first (proceed if the dev
-  declines); if `yes`, continue to the commit. (Its own untracked-file check still runs.)
+- **`/base:commit`** — does **not** itself run the hygiene review, and commits only on a §1
+  `--check` verdict of `fresh`: any other verdict → it runs `/base:pre-commit-review` first and
+  commits once `--check` prints `fresh` (the only bypass: the developer's own request in the same
+  turn to skip the review with "commit without review" — not negated, not quoted; its SKILL.md
+  Review gate). (Its own untracked-file check still runs.)
   Around the commit itself it applies §1's **re-stamp** rule.
 - **A team plugin's PR skill** (`/fe:create-pull-request`) — final gate; emphasis
   **`conformance`** (lead E, with the team rules its profile names): first time on branch →

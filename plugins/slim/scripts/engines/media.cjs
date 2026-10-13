@@ -42,14 +42,20 @@ const OUT_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif']);
 const outExt = (ext) => (OUT_EXTS.has(String(ext || '').toLowerCase()) ? String(ext).toLowerCase() : 'png');
 const longEdgeOf = (o) => (posInt(o.longEdge) ? o.longEdge : LONG_EDGE);
 const frameRel = (dir, i) => `${dir}/${String(i + 1).padStart(3, '0')}.jpg`;
+// A name target() gives: the copy is its own output, never `<stem>.1568.1568.<ext>`.
+const isCopy = (f, longEdge) => f.name.endsWith(`.${longEdge}`) && OUT_EXTS.has(String(f.ext || '').toLowerCase());
+const selfRel = (f) => (f.ext ? `${f.name}.${f.ext}` : f.name);
+// The formats a reader opens by extension; a mismatched or missing one would be sent as the wrong type.
+const EXT_FORMAT = { png: 'png', jpg: 'jpeg', jpeg: 'jpeg', gif: 'gif', webp: 'webp' };
 
 // target(facts, opts) → the first output's path relative to the input's directory, from `kind`,
-// `name` and `ext` only (no probe needed): the path a caller's Write check must rule on. null when
-// kind or name is missing.
+// `name` and `ext` only (no probe needed): the path a caller's Write check must rule on; an image
+// already named `<stem>.<longEdge>.<png|jpg|jpeg|gif>` is its own target. null when kind or name is missing.
 function target(facts, opts) {
   const f = facts || {};
   if (typeof f.name !== 'string' || !f.name) return null;
-  if (f.kind === 'image') return `${f.name}.${longEdgeOf(opts || {})}.${outExt(f.ext)}`;
+  const longEdge = longEdgeOf(opts || {});
+  if (f.kind === 'image') return isCopy(f, longEdge) ? selfRel(f) : `${f.name}.${longEdge}.${outExt(f.ext)}`;
   return f.kind === 'video' ? frameRel(`${f.name}.frames`, 0) : null;
 }
 
@@ -68,8 +74,10 @@ function fit(width, height, longEdge) {
  *   `rotation` (degrees, from the display matrix or EXIF) swaps them to the displayed ones; outputs
  *   are paths relative to the input's directory.
  * opts: { longEdge = 1568, everyS = 2, maxFrames = 24, scene = false }.
- * image → { kind, outputs: [{ rel: target(facts, opts) }], source: { w, h }, scale: { w, h }, resized }
- *   — `source` is the displayed size, `scale` the output size.
+ * image → { kind, outputs: [{ rel }], source: { w, h }, scale: { w, h }, resized, same } — `source`
+ *   is the displayed size, `scale` the output size. `same`: the input is its own output (rel is its
+ *   basename, nothing to write) when it fits the cap, is upright and its extension names its format;
+ *   else rel is target(facts, opts). A name target() gives that is not such an input → { refused: 'copy-unfit' }.
  * video → { kind, dir: '<name>.frames', outputs: [{ rel, t }], source, scale, resized, interval,
  *   scene } — interval frames at t = 0, interval, …; when ceil(duration / everyS) exceeds
  *   maxFrames the interval widens to duration / maxFrames so the frames still span the whole clip.
@@ -87,7 +95,11 @@ function plan(facts, opts) {
   const turned = Math.abs(Math.round(Number(f.rotation) || 0)) % 180 === 90;
   const source = turned ? { w: f.height, h: f.width } : { w: f.width, h: f.height };
   const { w, h, resized } = fit(source.w, source.h, longEdge);
-  if (f.kind === 'image') return { kind: 'image', outputs: [{ rel: target(f, o) }], source, scale: { w, h }, resized };
+  if (f.kind === 'image') {
+    const same = !resized && !Number(f.rotation) && EXT_FORMAT[String(f.ext || '').toLowerCase()] === f.format;
+    if (!same && isCopy(f, longEdge)) return { refused: 'copy-unfit' };
+    return { kind: 'image', outputs: [{ rel: same ? selfRel(f) : target(f, o) }], source, scale: { w, h }, resized, same };
+  }
   if (!posNum(f.durationS)) return { refused: 'no-probe' };
   const dir = `${f.name}.frames`;
   if (o.scene) {
@@ -107,4 +119,7 @@ function figureLine(bytesIn, bytesOut, frames) {
   return `media: ${bytesIn} B → ${bytesOut} B (${p < 0 ? '+' : '-'}${Math.abs(p)}%) frames=${frames}`;
 }
 
-module.exports = { kindOf, plan, target, figureLine, LONG_EDGE, EVERY_S, MAX_FRAMES };
+// `media: <in> B, already ≤<longEdge> px — no copy`: the figure of an image that is its own output.
+const sameLine = (bytesIn, longEdge) => `media: ${bytesIn} B, already ≤${posInt(longEdge) ? longEdge : LONG_EDGE} px — no copy`;
+
+module.exports = { kindOf, plan, target, figureLine, sameLine, LONG_EDGE, EVERY_S, MAX_FRAMES };

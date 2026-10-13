@@ -62,7 +62,10 @@ lack the theme scopes, the script **falls back to the theme-CLI engine automatic
 `shopify theme pull/push --only --nodelete` from a private temp dir, authenticated by the
 **Theme Access token** every Foundation project already has for `theme dev`
 (`SHOPIFY_CLI_THEME_TOKEN`, else `password=` in `shopify.theme.toml` — read internally, never
-printed). So theme JSON works even with **no Admin API access at all**; both engines return
+printed). A `--store` the toml block does not name never gets that block's token (it belongs to
+another store): without `SHOPIFY_CLI_THEME_TOKEN` the CLI's logged-in session (`shopify auth
+login`) authenticates instead, flagged `auth=cli-session` on stderr. So theme JSON works even with
+**no Admin API access at all**; both engines return
 identical bytes and enforce the same live-theme refusal. Exit 6 is the one code that needs
 judgement — the write protocol below.
 

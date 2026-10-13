@@ -273,15 +273,38 @@ export function bashFailed(r: { isError?: true; result?: unknown }): boolean {
 }
 
 /**
- * A refusal the script printed on purpose — `<stem>: <why>` (a base script's die) or an `error=<reason>` line
- * (an fe script's fail) — with no crash signature after it: the script did its job, nothing to report.
+ * The `error=` reasons that are refusals: the caller's input or usage, the checkout or toml, a store state a guard
+ * stops at, a named thing that is not there, a designed degrade rung. Every other reason — a tool or the
+ * plugin's own file missing, a credential absent or broken, a remote call, the script's own machinery — is a
+ * failure. Matched against the text after `error=`; a free-text reason (`unknown arg: x`) counts too.
+ */
+const REFUSAL = new RegExp(`^(?:${[
+  'usage', 'unknown[_ ]', 'unexpected_', 'missing[_ ]', 'too many ', '(?:--)?[a-z][a-z-]* (?:requires|needs) ', 'conflicting_', 'ambiguous_',
+  'not_a_', 'not_applied', 'unusable_', 'unsupported_', 'no uncommented ', 'config not found',
+  'no_(?:store|such_dir|origin|free_port|jira_credentials|figma_token)\\b', 'bad_(?:theme_id|file|build_script)\\b',
+  'file_not_writable\\b', '(?:\\w+_)?invalid_(?!\\w*(?:token|credentials)\\b)',
+  '\\w+_(?:refused|mismatch|drift|limit|missing|dirty|detached|taken|elsewhere|not_a_symlink|not_in_repo|not_ignored)\\b',
+  '(?!\\w*(?:cli|jq|curl|runner|lib)_not)\\w+_not_found',
+].join('|')})`)
+
+const errorReasons = (text: string) => [...text.matchAll(/^error=(.*)$/gm)].map(m => m[1]!)
+
+/** An `error=` line that is a failure, not a refusal: worth a report even when the line's exit code is another command's. */
+export const failureLine = (text: string): boolean => errorReasons(text).some(r => !REFUSAL.test(r))
+
+/**
+ * A refusal the script printed on purpose, with no crash signature: its `error=` lines all refusals, or, with
+ * none, a `<stem>: <why>` line (a base script's die). The script did its job, nothing to report.
  */
 export function designedRefusal(text: string, script: string): boolean {
+  if (crashed(text)) return false
+  const reasons = errorReasons(text)
+  if (reasons.length) return reasons.every(r => REFUSAL.test(r))
   const stem = script.replace(/\.[a-z]+$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`^(?:${stem}: |error=)`, 'm').test(text) && !/\bError\b/.test(text)
+  return new RegExp(`^${stem}: `, 'm').test(text)
 }
 
-/** A crash signature in the output: `Error` (an exception, a node stack) — what a compound line's exit code cannot tell. */
+/** A crash signature in the output: `Error` (an exception, a node stack); never a refusal. */
 export const crashed = (text: string): boolean => /\bError\b/.test(text)
 
 export type Seen = { date: string; plugin: string; title: string; path: string }

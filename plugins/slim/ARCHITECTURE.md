@@ -287,6 +287,7 @@ every request.
               │              image / video name: image → the Read above, video → the Read check only;
               │                $.tool.check('Write', <stem>.1568.<ext> | <stem>.frames/001.jpg)
               │                deny → refused; an ask from either → one $.ui.ask Yes/No; yes → allowed_out
+              │                (an image already named <stem>.1568.<ext> is its own output: no Write check)
               │
               └─ command ─▶ $.tool.call('Bash', { command })     (a host-persisted output → host_path)
               │

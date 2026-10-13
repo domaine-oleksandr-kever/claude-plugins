@@ -19,7 +19,7 @@ store registry (`<base root>/scripts/qa-stores.cjs`), the shared references and 
 MCP server ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with slim
 too.
 
-Current release: **qa v0.3.4**.
+Current release: **qa v0.3.5**.
 
 ## Status
 
@@ -84,7 +84,7 @@ instead (`prompt.context`, beside CLAUDE.md).
 | Name | Holds |
 |---|---|
 | `root` | `qa plugin root: <path>`, the directory qa's skill and doctor start from |
-| `passwords` | one paragraph: a storefront password comes only from `<base root>/scripts/qa-stores.cjs get` and is used only as the browser fill value — never in a file, a workspace note, a Jira comment, a screenshot or chat, never on a Bash line other than a `qa-stores.cjs set` that registers or updates a store; the registry file is never read directly |
+| `passwords` | one paragraph: a storefront password comes only from `<base root>/scripts/qa-stores.cjs get <store> --field password` (a bare `get` prints JSON, never a fill value) and that raw output is used only as the browser fill value — never in a file, a workspace note, a Jira comment, a screenshot or chat, never on a Bash line other than a `qa-stores.cjs set` that registers or updates a store; the registry file is never read directly |
 
 `/qa:preflight` itself holds the store-access posture: storefront only, no Admin or theme write. The
 text never changes within a session, so the prompt cache holds. **Subagents** get nothing from qa.

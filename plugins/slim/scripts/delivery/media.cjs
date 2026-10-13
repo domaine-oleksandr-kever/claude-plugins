@@ -128,6 +128,7 @@ function describe(kind, facts, p, be) {
   const dims = `${p.source.w}×${p.source.h}`;
   const to = `${p.scale.w}×${p.scale.h}`;
   const meta = be.name === 'sips' ? 'metadata kept (sips cannot strip it)' : 'metadata stripped';
+  if (kind === 'image' && p.same) return `image ${facts.format} ${dims}, not re-encoded (${be.name})`;
   if (kind === 'image') return `image ${facts.format} ${dims} → ${p.resized ? to : `${dims} (no resize)`}, ${meta} (${be.name})`;
   const how = p.scene ? 'at scene changes' : `every ${secs(p.interval)}`;
   return `video ${facts.format} ${secs(facts.durationS)} ${dims} → frames ${how} at ${to} (${be.name})`;
@@ -135,13 +136,14 @@ function describe(kind, facts, p, be) {
 
 /**
  * normalize(file, { allowedOut, env, longEdge, everyS, maxFrames, scene, timeoutMs }) →
- *   { decision: 'compressed'|'refused', reason?, figure, text, kind?, format?, backend?, bytesIn,
+ *   { decision: 'compressed'|'passthrough'|'refused', reason?, figure, text, kind?, format?, backend?, bytesIn,
  *     bytesOut, frames, outputs: [{ path, bytes, t? }] }
  * `allowedOut` is the path the caller's Write check allowed; it must equal the first output
  * (engines/media.cjs target(): `<dir>/<name>.<longEdge>.<ext>` or `<dir>/<name>.frames/001.jpg`),
- * else nothing is spawned or written. `timeoutMs` bounds probe and run together (default 30 s for
- * an image, 100 s for a video). `figure` is the media figure line, or the refusal in one line.
- * Never throws.
+ * else nothing is spawned or written. An image the plan passes as itself (`same`) is its own output,
+ * nothing written. `timeoutMs` bounds probe and run together (default 30 s for an image, 100 s for a
+ * video). `figure` is the media figure line, or the refusal in one line. `text` ends with the line
+ * `Read <path>` naming the one image to read. Never throws.
  */
 function normalize(file, opts) {
   const o = opts || {};
@@ -169,10 +171,12 @@ function normalize(file, opts) {
     const pr = probe(be, file, env, Math.min(PROBE_TIMEOUT_MS, left()));
     const facts = { kind: k.kind, format: k.format, name, ext, ...pr };
     const p = pr ? media.plan(facts, { longEdge: o.longEdge, everyS: o.everyS, maxFrames: o.maxFrames, scene: o.scene }) : { refused: 'no-probe' };
+    if (p.refused === 'copy-unfit') return refuse(p.refused, `media: ${path.basename(file)} is named like slim's copy but needs one — rename it; not overwritten`, withBe);
     if (p.refused) return refuse(p.refused, `media: ${be.name} could not measure ${path.basename(file)}`, withBe);
     let outputs;
     let err = null;
-    if (k.kind === 'image') {
+    if (p.same) outputs = [{ path: file, bytes: bytesIn }];
+    else if (k.kind === 'image') {
       const out = path.join(base, p.outputs[0].rel);
       const st = lstatOf(out);
       if (st && !st.isFile()) return refuse('out-taken', `media: ${out} is a link or a folder, not written`, withBe);
@@ -195,9 +199,11 @@ function normalize(file, opts) {
     }
     if (err) return refuse('backend-failed', `media: ${be.name} failed on ${path.basename(file)}: ${err}`, withBe);
     const bytesOut = outputs.reduce((s, x) => s + x.bytes, 0);
-    const lines = outputs.map((x) => (x.t === undefined ? x.path : `${x.path}  t=${secs(x.t)}`));
+    const lines = k.kind === 'image' ? [`Read ${outputs[0].path}${p.same ? '' : ' once to see it'}`]
+      : outputs.map((x) => (x.t === undefined ? x.path : `${x.path}  t=${secs(x.t)}`));
     return {
-      decision: 'compressed', figure: media.figureLine(bytesIn, bytesOut, outputs.length),
+      decision: p.same ? 'passthrough' : 'compressed',
+      figure: p.same ? media.sameLine(bytesIn, o.longEdge) : media.figureLine(bytesIn, bytesOut, outputs.length),
       text: [describe(k.kind, facts, p, be), ...lines].join('\n'),
       kind: k.kind, format: k.format, backend: be.name, bytesIn, bytesOut, frames: outputs.length, outputs,
     };

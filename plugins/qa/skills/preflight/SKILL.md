@@ -35,7 +35,8 @@ Not for this skill to read: `<base root>/references/steps-to-test-format.md` (ro
   actions — add to cart, change a quantity, apply a discount code the ticket names, advance checkout to
   the payment step — are in scope; any other write is reported, not performed. The same holds when the
   person says the session is hands-on QA.
-- **Passwords** come only from `qa-stores.cjs get` and are used only as the browser fill value — never
+- **Passwords** come only from `qa-stores.cjs get <store> --field password`, whose raw output is the browser
+  fill value as is (a bare `get` prints JSON, never a fill value), and are used only as that value — never
   in a workspace file, a Jira comment, a screenshot frame, chat, or a Bash line other than a
   `qa-stores.cjs set` that registers or updates a store; the registry file is never read directly. The
   registration answer, the `get` output and the `fill` argument land in this session's transcript: say
@@ -55,9 +56,11 @@ Read `gate.md` first.
 
 1. **Workspace first**, per `<base root>/references/task-workspace.md`: read `.claude/tasks/<KEY>/`
    before fetching; every reader gets that path and writes its file there.
-2. **One `base:jira-reader` per ticket, in parallel** — Steps to test (`customfield_10040`), AC (when
-   empty, look in the Description), Description, comments, links (Development panel / PR);
-   `needs_clarification` is a Developer-gaps line, not a stop.
+2. **One `base:jira-reader` per ticket, in parallel**, each passed `.claude/tasks/<KEY>` — Steps to
+   test (`customfield_10040`), AC (when empty, look in the Description), Description, comments,
+   links (Development panel / PR); `needs_clarification` is a Developer-gaps line, not a stop. Its
+   `comments`, `attachments` and `attachments_note`: `<base root>/references/task-workspace.md` →
+   Read rule.
 3. **PR facts** — the `gh` call and the diff: gate.md → PR discovery. A non-zero exit is not "no PR".
 4. **Decide what the run can test** — gate.md → Classify and decide. A non-theme change, nothing to
    test, or no Steps to test and no AC stops the ticket here — before the registry and the browser —
@@ -72,8 +75,9 @@ Read `gate.md` first.
 ## Phase 2 — Store + theme under test
 
 1. **Store** — gate.md → Store: a domain as given, a brand word through `find`, else ask with `list`;
-   then `get <domain>` once. Not on file → one registration question, the `set` line, the `notes.md`
-   line (gate.md → Registering or updating a store).
+   then `get <domain>` once for the notes and themes (`--field password` waits for the unlock). Not
+   on file → one registration question, the `set` line, the `notes.md` line (gate.md → Registering or
+   updating a store).
 2. **Theme under test** — per store, before any browser work, one AskUserQuestion with up to four
    two to four options: live · the ticket's theme (when offered) · your saved theme (when set) · paste
    the preview link you test on (gate.md → Theme question).
