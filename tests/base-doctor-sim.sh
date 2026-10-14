@@ -253,6 +253,11 @@ expect CD39e-switches-dogfood-valid 0 "!switches"
 rc=0; BASE_DOGFOOD=yes BASE_DOGFOOD_REPO='https://github.com/acme/x' node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect CD39f-switches-dogfood-invalid 0 'WARN  switches' 'BASE_DOGFOOD="yes" is read as off — only 1 turns it on' \
   'BASE_DOGFOOD_REPO="https://github.com/acme/x" is not <owner>/<repo> — plugin_defect files no GitHub issue'
+rc=0; BASE_SHOPIFY_VALIDATE=0 BASE_SHOPIFY_VALIDATE_TIMEOUT=120 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39g-switches-shopify-validate-valid 0 "!switches"
+rc=0; BASE_SHOPIFY_VALIDATE=no BASE_SHOPIFY_VALIDATE_TIMEOUT=900 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD39h-switches-shopify-validate-invalid 0 'WARN  switches' 'BASE_SHOPIFY_VALIDATE="no" is read as on — only 0 turns it off' \
+  'BASE_SHOPIFY_VALIDATE_TIMEOUT="900" is read as 90 — seconds, 1-600'
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad CD-head "HEAD moved"; fi

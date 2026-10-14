@@ -110,6 +110,8 @@ for f in "$CANON" \
          "$ROOT/tests/base-review-flow-sim.sh" \
          "$ROOT/plugins/base/scripts/qa-stores.cjs" \
          "$ROOT/tests/base-qa-stores-sim.sh" \
+         "$ROOT/plugins/base/scripts/shopify-validate.cjs" \
+         "$ROOT/tests/base-shopify-validate-sim.sh" \
          "$ROOT/plugins/fe/.claude-plugin/plugin.json" \
          "$ROOT/plugins/fe/hooks/hooks.json" \
          "$ROOT/plugins/fe/hooks/mods/register.ts" \

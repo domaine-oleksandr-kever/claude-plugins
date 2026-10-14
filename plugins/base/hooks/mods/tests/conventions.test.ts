@@ -1,9 +1,9 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { COMMENT_DISCIPLINE, LEAN_CODE, UNTRUSTED_CONTENT, WRITING_STYLE } from '../conventions/text.ts'
+import { COMMENT_DISCIPLINE, LEAN_CODE, SHOPIFY_POINTER, UNTRUSTED_CONTENT, WRITING_STYLE } from '../conventions/text.ts'
 import { world } from './world.ts'
 
-const IDS = ['base:root', 'base:comment-discipline', 'base:task-workspace', 'base:untrusted-content', 'base:lean-code', 'base:writing-style']
+const IDS = ['base:root', 'base:comment-discipline', 'base:task-workspace', 'base:untrusted-content', 'base:shopify', 'base:lean-code', 'base:writing-style']
 // base-refs-lint's banned names, spelled so that lint does not flag this file: base's text never points at the legacy plugin.
 const OLD = 'f' + 'nd'
 const BANNED = [`plugin_${OLD}_`, `${OLD.toUpperCase()}_`, `\\b${OLD}:`, `/${OLD}\\b`, `${OLD}-tmp`, '\\bCursor\\b', '\\bCodex\\b', '\\bOpenCode\\b'].map(p => new RegExp(p))
@@ -72,6 +72,15 @@ describe('prompt.compose', () => {
       expect(text).toContain(name)
     }
     expect(new TextEncoder().encode(text).length).toBeLessThan(900)
+  })
+
+  test('the Shopify pointer names the skill on one line and no store channel', async ($, on) => {
+    world(on)
+    const text = ours(await compose($)).find(s => s.id === 'base:shopify')!.text
+    expect(text).toBe(SHOPIFY_POINTER)
+    expect(text).toContain('/base:shopify')
+    expect(text.split('\n').filter(l => l && !l.startsWith('## '))).toHaveLength(1)
+    expect(/gateway|gadget|shopify-gw/i.test(text)).toBe(false)
   })
 
   test('two renders are byte-identical', async ($, on) => {

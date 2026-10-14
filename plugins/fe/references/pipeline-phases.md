@@ -23,7 +23,9 @@ its brief says otherwise.
    products and values), and `profile: <foundation|theme|none>` — the session context's
    `fe project profile:` word, which a subagent never sees on its own; references:
    `metafield-metaobject-setup.md` (provision first when planned; every query/mutation
-   you wrote passes `validate_graphql_codeblocks` before it runs),
+   you wrote passes the Shopify Dev MCP `validate` tool before it runs — no dev-mcp server
+   in the session → `node <base root>/scripts/shopify-validate.cjs --file <f>`;
+   `result=unavailable` → send anyway; validation never blocks — `/base:shopify`),
    `theme-customizer-state.md`, and — **on a `foundation` profile only** —
    `section-css-variables-pattern.md`, `eslint-no-restricted-syntax.md` (both describe
    Foundation's Tailwind + `core-*` wiring; off `foundation` they do not apply).

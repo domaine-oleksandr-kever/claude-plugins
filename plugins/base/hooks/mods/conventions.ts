@@ -10,6 +10,7 @@ import {
   COMMENT_DISCIPLINE,
   LEAN_CODE,
   NO_CODE_AGENT,
+  SHOPIFY_POINTER,
   TASK_WORKSPACE,
   UNTRUSTED_CONTENT,
   WRITING_STYLE,
@@ -68,6 +69,7 @@ export async function sections($: $): Promise<PromptComposeSection[]> {
     ['comment-discipline', COMMENT_DISCIPLINE],
     ['task-workspace', withRoot(TASK_WORKSPACE, root)],
     ['untrusted-content', UNTRUSTED_CONTENT],
+    ['shopify', SHOPIFY_POINTER],
   ]
   if (lean) parts.push(['lean-code', LEAN_CODE])
   if (ste) parts.push(['writing-style', WRITING_STYLE])

@@ -28,6 +28,7 @@ const path = require('path');
 const os = require('os');
 const { spawnSync } = require('child_process');
 const { baseTmpStats, parseTtl, SCRATCH_ROOT_REL, DEFAULT_TTL_HOURS } = require('./scratch-hygiene.cjs');
+const { parseTimeout, DEFAULT_TIMEOUT_S } = require('./shopify-validate.cjs');
 
 const MIN_NODE_MAJOR = 18;
 // Plugin names the engine refuses to load a hooks module for (validate still passes).
@@ -333,7 +334,7 @@ function checkEventLog(logDir, homeDir) {
 }
 
 // Read as `=== '0'`, untrimmed: any other value is on.
-const ON_OFF = ['BASE_AUTOSAVE', 'BASE_EVENT_LOG', 'BASE_GUARD', 'BASE_LEAN', 'BASE_SCRATCH_GUARD', 'BASE_SESSION_TITLE', 'BASE_STE'];
+const ON_OFF = ['BASE_AUTOSAVE', 'BASE_EVENT_LOG', 'BASE_GUARD', 'BASE_LEAN', 'BASE_SCRATCH_GUARD', 'BASE_SESSION_TITLE', 'BASE_SHOPIFY_VALIDATE', 'BASE_STE'];
 
 // Every reader degrades a value outside its domain to the default without a word; this row is the word.
 function checkSwitches(env) {
@@ -346,6 +347,8 @@ function checkSwitches(env) {
   if (!['', 'auto', 'mcp', 'rest'].includes(src)) bad.push(shown('BASE_FIGMA_SOURCE') + ' is read as auto — auto, mcp or rest');
   const ttl = (env.BASE_TMP_TTL || '').trim();
   if (ttl && parseTtl(ttl) !== Number(ttl)) bad.push(shown('BASE_TMP_TTL') + ' is read as ' + DEFAULT_TTL_HOURS + ' — hours, 0 or more');
+  const svt = env.BASE_SHOPIFY_VALIDATE_TIMEOUT;
+  if (svt && parseTimeout(svt) === null) bad.push(shown('BASE_SHOPIFY_VALIDATE_TIMEOUT') + ' is read as ' + DEFAULT_TIMEOUT_S + ' — seconds, 1-600');
   if (env.BASE_DOGFOOD !== undefined && !['', '0', '1'].includes(env.BASE_DOGFOOD)) bad.push(shown('BASE_DOGFOOD') + ' is read as off — only 1 turns it on');
   const repo = (env.BASE_DOGFOOD_REPO || '').trim();
   if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) bad.push(shown('BASE_DOGFOOD_REPO') + ' is not <owner>/<repo> — plugin_defect files no GitHub issue');

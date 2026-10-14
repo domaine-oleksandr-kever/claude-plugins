@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.5.5**.
+Current release: **fe v0.6.0**.
 
 ## Status
 
@@ -185,7 +185,7 @@ servers).
 | `node` | Node 18 or newer |
 | `manifest` | the manifest's version, the name `fe`, `base` in its `dependencies` |
 | `scripts` | every `scripts/*.sh` but the sourced `_*.sh` keeps its exec bit and answers `--help` (`project-profile.sh` is probed by the `profile` row) |
-| `base` | base installed (user scope or this project) and enabled — else `claude plugin install base@domaine`; FAIL when that install lacks `<base root>/scripts/review-scope.sh` (the PR review gate runs it) — update base |
+| `base` | base installed (user scope or this project) and enabled — else `claude plugin install base@domaine`; FAIL when that install lacks `<base root>/scripts/review-scope.sh` (the PR review gate runs it), `skills/shopify/SKILL.md` or `references/shopify-recipes.md` (fe store work points at them) — update base |
 | `shopify-cli` | `shopify version` answers; absent or failing only warns (the store scripts need it, the rest of fe does not) |
 | `profile` | the word and how it was decided: `FE_PROFILE`, `project-profile.sh`, or a fallback to `none` (warns); in a session, the session's own decision |
 | `store-config` | `shopify.theme.toml` and `.env` present at the project root — presence only, never a value; one missing warns; neither in a `none` project skips |
@@ -242,7 +242,7 @@ The process environment wins.
 | `SHOPIFY_STORE` | unset | the store `theme-json.sh`, `shopify-admin-gql.sh` and `create-preview-theme.sh` use when `--store` is not passed, ahead of the toml's `store =`. A store other than the toml's refuses `create-preview-theme.sh create` and the pin; `refresh` then pushes with `SHOPIFY_CLI_THEME_TOKEN`, else the CLI's logged-in session. For `theme-json.sh` it counts like `--store`: a store the resolved toml block does not name never gets that block's token — `SHOPIFY_CLI_THEME_TOKEN`, else a sibling block naming the store, else the CLI's logged-in session |
 | `SHOPIFY_FLAG_ENVIRONMENT` | unset | read, never set, by fe: the Shopify CLI's own environment selector, taken by the three store scripts as the default `[environments.<name>]` block of `shopify.theme.toml`; a name no block carries is `error=env_not_found` |
 | `SHOPIFY_ADMIN_TOKEN` | unset | Admin API access token for `shopify-admin-gql.sh`'s token engine, ahead of the `--env` dotenv file |
-| `SHOPIFY_ADMIN_API_VERSION` | `2026-04` | the Admin API version `shopify-admin-gql.sh` requests when `--api-version` is not passed |
+| `SHOPIFY_ADMIN_API_VERSION` | `2026-10` | the Admin API version `shopify-admin-gql.sh` requests when `--api-version` is not passed |
 
 ## Tests
 

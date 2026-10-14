@@ -151,8 +151,10 @@ expect FD15-base-absent 1 "FAIL  base          not installed" "claude plugin ins
 H3="$TMP/h-noinstalled"; mkhome "$H3"
 run --root "$P" --home "$H3" --project "$PRJ"; expect FD15b-no-install-record 1 "FAIL  base          not installed"
 # The claude.ai-account copy (a cloud session, a synced terminal): no install record, enabled unless its key is false.
-HS="$TMP/h-synced"; mkhome "$HS"; SB="$HS/.claude/plugins/synced/acc_1/base"; mkdir -p "$SB/.claude-plugin" "$SB/scripts"
-printf '{"name":"base","version":"0.8.0"}\n' > "$SB/.claude-plugin/plugin.json"; : > "$SB/scripts/review-scope.sh"
+# basefiles <dir> — the base files fe's doctor requires, empty
+basefiles() { mkdir -p "$1/scripts" "$1/skills/shopify" "$1/references"; : > "$1/scripts/review-scope.sh"; : > "$1/skills/shopify/SKILL.md"; : > "$1/references/shopify-recipes.md"; }
+HS="$TMP/h-synced"; mkhome "$HS"; SB="$HS/.claude/plugins/synced/acc_1/base"; mkdir -p "$SB/.claude-plugin"
+printf '{"name":"base","version":"0.8.0"}\n' > "$SB/.claude-plugin/plugin.json"; basefiles "$SB"
 run --root "$P" --home "$HS" --project "$PRJ"; expect FD15c-base-synced 0 "PASS  base          base@synced 0.8.0 installed and enabled"
 printf '{"enabledPlugins":{"base@synced":false}}\n' > "$HS/.claude/settings.json"
 run --root "$P" --home "$HS" --project "$PRJ"; expect FD15d-base-synced-off 1 "FAIL  base          base@synced 0.8.0 is installed but disabled"
@@ -180,6 +182,12 @@ H6="$TMP/h-baseold"; mkhome "$H6" "$(installed "$BASE_OLD")"
 run --root "$P" --home "$H6" --project "$PRJ"
 expect FD21b-base-outdated 1 "FAIL  base          base@domaine 0.7.3 has no scripts/review-scope.sh" "claude plugin update base@domaine"
 : > "$OLDBASE/scripts/review-scope.sh"
+run --root "$P" --home "$H6" --project "$PRJ"
+expect FD21d-base-no-shopify 1 "FAIL  base          base@domaine 0.7.3 has no skills/shopify/SKILL.md — fe store work points at /base:shopify" "claude plugin update base@domaine"
+mkdir -p "$OLDBASE/skills/shopify"; : > "$OLDBASE/skills/shopify/SKILL.md"
+run --root "$P" --home "$H6" --project "$PRJ"
+expect FD21e-base-no-recipes 1 "FAIL  base          base@domaine 0.7.3 has no references/shopify-recipes.md — fe store work reads its recipes"
+basefiles "$OLDBASE"
 run --root "$P" --home "$H6" --project "$PRJ"; expect FD21c-base-current 0 "PASS  base          base@domaine 0.7.3 installed and enabled"
 
 # ----------------------------------------------------------------------------- shopify-cli --

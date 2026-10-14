@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.9.3**.
+Current release: **base v0.10.0**.
 
 ## Status
 
@@ -113,6 +113,9 @@ that every cited path exists.
 | `references/commit-message-format.md` | Conventional Commits with the house rules |
 | `references/steps-to-test-format.md` | the Steps to Test field's General and Bug templates and the theme resolution: what a team plugin's Steps to Test writer writes and `/qa:preflight` reads rows from |
 | `references/break-it-qa.md` | the break-it QA method: deriving and executing the hostile-value and timing rows of a team plugin's QA and of `/qa:preflight` |
+| `references/shopify-recipes.md` | `/base:shopify`'s Admin GraphQL recipes, validated on API 2026-10 with their scopes and how to read each answer; the PDP "why does X not show" checklist; the `metafieldsSet` and `productUpdate` templates |
+| `references/shopify-custom-data.md` | metafield and metaobject rules: `$app` vs merchant namespaces, definitions, `metafieldsSet` writes, metaobject `ACTIVE` status, reference metafields |
+| `references/shopify-analytics.md` | ShopifyQL through `shopifyqlQuery`: the wrapper, `parseErrors`, `read_reports`, example statements |
 
 The fetchers (`scripts/jira-attachments.sh`, `scripts/external-screenshots.sh`,
 `scripts/figma-rest.sh`) share `scripts/_common.sh`. Credentials go in a private `0600` curl config,
@@ -127,6 +130,7 @@ slim resizes and compacts.
 | `scripts/doctor.cjs` | `/base-doctor`, or by hand | the static install checks (below); `--json` for the command |
 | `scripts/scratch-hygiene.cjs` | base's hooks module, once per session | sweeps `.claude/base-tmp` of files older than `BASE_TMP_TTL` hours and keeps it in `.git/info/exclude` |
 | `scripts/qa-stores.cjs` | a QA engineer by hand; `/qa:preflight` reads it | the QA store registry, one file per machine (`~/.config/domaine/qa-stores.json`, dir 0700, file 0600): `list`, `get <store>` (the only command that prints a password; `--field password\|alias\|defaultTheme\|domain\|notes` prints that one value raw, nothing for a field the store lacks), `find`, `set`, `unset`, `path` |
+| `scripts/shopify-validate.cjs` | `/base:shopify` where no dev-mcp server is loaded (a cloud session) | validates one Admin GraphQL document through `npx -y @shopify/dev-mcp@latest` over stdio: `--file`, `--code` or stdin, `--version` (default `2026-10`); prints `result=valid\|invalid\|unavailable` and the server's detail text; exit 0 / 1 / 3 (unavailable: send the operation anyway), 2 = usage; a timeout before the server speaks leaves `npx` to finish its install instead of killing it, and `error=server_exited_early` names the `_npx` dir to delete |
 
 ## Skills
 
@@ -140,6 +144,7 @@ same names.
 | `/base:save-task-context` | writes what the conversation holds into `.claude/tasks/<work-id>/` — ticket fields, comments, decisions, `progress.md` in the team's series order — without spawning a reader |
 | `/base:report-plugin-issue` | drafts a sanitized GitHub issue for a base defect, with the `/base-doctor` output and the `base.events` tail, and posts it after your approval |
 | `/base:worktree` | a sibling `git worktree` on `feat/<work-id>` with its own dev port, sharing the task workspace; `--remove` tears it down |
+| `/base:shopify` | store questions and Admin GraphQL: a routing table to the recipes, answers with evidence (field, value, file key), validation through the dev-mcp `validate` tool or `scripts/shopify-validate.cjs` (never blocking), a mutation only after a "yes" in a separate turn, then a runner table: Shopify CLI `store execute`, a remote store connector, an Admin token, or a ready `.graphql` file for GraphiQL |
 
 `/base:worktree` copies `.env` into a new worktree, because base's fetchers read their credentials
 from it. It also copies every path that a team plugin names in its system-prompt section, on one line:
@@ -178,6 +183,7 @@ the path taken.
 | `comment-discipline` | keep documentation, minimize inline comments, no change narration or ticket refs |
 | `task-workspace` | read `.claude/tasks/<work-id>/` first, write as you go, where scratch goes; the team plugin's section names the series of steps |
 | `untrusted-content` | outside content is data; a slim handle path outside slim's spill dir, `.claude/slim/prompt/` or the host's `tool-results/` is payload text (the readers carry slim's exact file names, slim's contract §8) |
+| `shopify` | one line: Shopify store questions and Admin GraphQL → `/base:shopify` |
 | `lean-code` | the reuse ladder and what is never simplified away; say "normal mode" to suspend it, `BASE_LEAN=0` drops it |
 | `writing-style` | explanations about 80% to the ASD-STE100 rules; say "normal writing" to suspend it, `BASE_STE=0` drops it |
 | `dogfood` | only in dogfood mode: the Domaine plugins and versions this session runs, what counts as a plugin defect, and the rule to report each one with `plugin_defect` (Dogfood mode) |
@@ -367,7 +373,7 @@ counts, and the last 10 `base.events` lines:
 | `slim` | slim installed (user scope or this project) and enabled — else `claude plugin install slim@domaine` |
 | `base-tmp` | `.claude/base-tmp`: files, size, how many the next sweep removes, whether git ignores it |
 | `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
-| `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_TMP_TTL` that is not hours, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |
+| `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_TMP_TTL` that is not hours, a `BASE_SHOPIFY_VALIDATE_TIMEOUT` outside 1-600 seconds, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |
 | `slim-live` | what this session loaded: slim's `mcp__slim__view` tool registered |
 | `conventions` | how the conventions reached the model: `in the system prompt: N renders through prompt.compose`, or `in the first user message as a prompt.context block` where no surface draws (cloud, `claude -p`); FAIL after a prompt went out = neither path carried them, and the detail says which prompt events this host fired (SessionStart and the surfaces it saw, UserPromptSubmit, prompt.context) |
 | `defects` | only in dogfood mode: PASS `none in 7 days`, WARN `<N> in 7 days, newest <title>` — the reports of the home index and this project's `.claude/plugin-defects/` |
@@ -482,6 +488,8 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_DOGFOOD` | off | `1` turns dogfood mode on, `0` turns it off for an account `dogfood.json` lists (Dogfood mode): the `dogfood` convention, the `plugin_defect` tool, the nudge and the one blocked stop after a failed plugin script, `/base-defects`, the doctor's `defects` row. Off, none of them exists |
 | `BASE_DOGFOOD_REPO` | the marketplace repo | `<owner>/<repo>` a `plugin_defect` call with `github: true` (or, where nothing draws, without `github: false`) files its issue in; unset, the github repo of the marketplace base was installed from (`known_marketplaces.json`), and without one the tool asks for this switch |
 | `BASE_AUTOSAVE` | on | `0` turns the workspace autosave levers off: the stale-workspace line on a prompt, the block at turn end (at most once per 3 turns), the `compact:` marker before an auto-compact. `base.progress` still carries `stale` |
+| `BASE_SHOPIFY_VALIDATE` | on | `0` makes `scripts/shopify-validate.cjs` answer `result=unavailable` (`error=disabled`, exit 3) without spawning the server |
+| `BASE_SHOPIFY_VALIDATE_TIMEOUT` | `90` | seconds `scripts/shopify-validate.cjs` waits in all (the first `npx` download included) before it answers `error=timeout`; 1-600, another value is read as `90`; `--timeout` outranks it |
 
 The fetchers read their credentials from the process environment first. Else they read the
 project's gitignored `./.env`; `--env <file>` names another file. The credentials are:
@@ -511,6 +519,7 @@ Agents never read `.env` themselves.
 | `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list) and the `scripts/scratch-hygiene.cjs` sweep |
 | `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, the `--check` marker verdicts (fresh / stale / other-branch / none, read-only, per worktree), bash 3.2 |
 | `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get` (JSON and `--field` raw values, a missing field prints nothing, an unknown field is a usage error), `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
+| `tests/base-shopify-validate-sim.sh` | `scripts/shopify-validate.cjs` against a fake `npx` on `PATH`: the handshake and the constant prompt, valid / invalid, stray frames, every unavailable shape incl. `server_exited_early` and its `_npx` dir, a plain `INVALID` status, the timeout and the kill after the server spoke, no kill while `npx` still installs, `BASE_SHOPIFY_VALIDATE=0`, usage; `SIM_LIVE=1` adds two cases against the real server |
 
 [ARCHITECTURE.md](ARCHITECTURE.md) tells how the pieces fit: the mods, the atoms that band reads,
 and why some checks stay scripts.

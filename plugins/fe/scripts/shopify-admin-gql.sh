@@ -76,7 +76,7 @@
 #                    script's stdout and must keep receiving the full envelope.
 #   --env            path to the dotenv file holding the token (default: ./.env; token engine only)
 #   --store          store subdomain or full *.myshopify.com (default: from $TOML_PATH / shopify.theme.toml)
-#   --api-version    Admin API version (default: 2026-04, or $SHOPIFY_ADMIN_API_VERSION)
+#   --api-version    Admin API version (default: 2026-10, or $SHOPIFY_ADMIN_API_VERSION)
 #   --engine         auto (default) | store | token
 #
 # `--help` / `-h` — bare or anywhere in the args — prints the Usage block above to stdout and exits
@@ -127,7 +127,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 QUERY_FILE=""; OPERATION=""; VARIABLES=""; VARIABLES_FILE=""; ENV_FILE=".env"; STORE=""; ENGINE="auto"
 OUT_FILE=""
-API_VERSION="${SHOPIFY_ADMIN_API_VERSION:-2026-04}"
+API_VERSION="${SHOPIFY_ADMIN_API_VERSION:-2026-10}"
 
 # a value flag must not be the last arg — a bare `shift 2` would exit silently under set -e
 need_val() { [ "$1" -ge 2 ] || { echo "error=missing_value flag=$2" >&2; exit 2; }; }

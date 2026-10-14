@@ -29,8 +29,11 @@ the setup to relay — that is the answer then, not a defect.
   | --variables-file <file>] [--store <domain>] [--out <file>]\` (\`--help\` prints the full call
   shape) — Admin GraphQL. Read-only queries need no approval (big reads: \`--out\` + \`jq\`);
   mutations follow \`<fe root>/references/metafield-metaobject-setup.md\`. Both paths: every query or
-  mutation you wrote clears a \`validate_graphql_codeblocks\` pass first (base's Shopify Dev MCP
-  server; needs a \`learn_shopify_api\` conversationId).
+  mutation you wrote clears a Shopify Dev MCP \`validate\` pass first (api \`admin\`; needs a
+  \`learn_shopify_api\` conversationId); no dev-mcp server in the session →
+  \`node <base root>/scripts/shopify-validate.cjs --file <f>\`; \`result=unavailable\` → send anyway,
+  validation never blocks. A remote store connector in the session that lists the
+  store is a valid runner for the same documents; recipes and rules: \`/base:shopify\`.
 - \`<fe root>/scripts/theme-json.sh themes|get|set\` — customizer state. \`themes\`/\`get\` freely, any
   theme incl. live; \`set\` only per the snapshot → mutate → verify → restore protocol in
   \`<fe root>/references/theme-customizer-state.md\` (live theme refused). Works without Admin

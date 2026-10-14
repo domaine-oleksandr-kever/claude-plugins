@@ -9,8 +9,10 @@ theme code has nothing to render until the store's data model exists. This is ho
 place: inspect what's already there, create what's missing in dependency order, mock content, and
 bind it to a test product so the feature can be built and QA'd.
 
-Admin GraphQL API (pin the version the repo targets, e.g. `2026-04`). Every mutation must select
-`userErrors { field message code }` and the created `id`.
+Admin GraphQL API (pin the version the repo targets, e.g. `2026-10`). Every mutation must select
+`userErrors { field message code }` and the created `id`. General Admin recipes (operation,
+variables, scopes) live in `<base root>/references/shopify-recipes.md` — validated on `2026-10`,
+the runner's default; this file keeps only the theme-feature flow.
 
 ## Planning & QA digest
 
@@ -73,9 +75,14 @@ shopify store auth --store <store>.myshopify.com \
 
 That list is the **full example** (metafields/metaobjects + products + files + themes — the
 `read_themes`/`write_themes` pair powers `theme-json.sh`, the customizer-state flow in
-`<fe root>/references/theme-customizer-state.md`). **Don't hardcode it — agree the
-scope list with the developer first**: propose what the task actually needs and ask which level
-this store allows. On some stores (client/production especially) only the `read_*` scopes are
+`<fe root>/references/theme-customizer-state.md`). **Don't hardcode it — `--scopes` is the
+union of the `Required scopes` the validator reports for the operations at hand, plus what it
+does not report: the owner type's write scope for `metafieldsSet` / `metafieldDefinitionCreate`
+(`write_products` for a PRODUCT owner; the scope comment on each recipe in
+`<base root>/references/shopify-recipes.md`), and `read_themes`/`write_themes` when `theme-json.sh`
+is in the plan. Never more** (only `read_*` when only reads are planned); agree that list with the
+developer first and ask
+which level this store allows. On some stores (client/production especially) only the `read_*` scopes are
 appropriate — inspection still works fully; you just hand mutations to the developer (Mode 2)
 instead of running them. Prefer one auth that covers the whole task over asking twice, but never
 request `write_*` the developer didn't sign off on.
@@ -84,7 +91,11 @@ The stored token **expires** — it's an online token: max **24 h**, sooner if t
 admin session ends — so when the runner falls back reporting `no stored store auth`, ask the
 developer to re-run that same command (fast: the app is already installed). **Never run `store auth` from a script or skill** — it
 is interactive and hangs a non-TTY run. Mutations are auto-opted-in by the runner
-(`--allow-mutations`); the CLI blocks them otherwise.
+(`--allow-mutations`); the CLI blocks them otherwise. **Before any mutation, show the full
+document + variables and get the developer's "yes" in a separate turn** — never run it in the
+turn that proposes it. Outside a `/fe:ship` run only: there the ✋ record pre-authorizes
+test-state mutations (`<fe root>/references/pipeline-mode.md`). After the write, re-read the value
+to confirm it landed.
 
 **Auth fails, expires, or the browser step misbehaves** → read
 `<fe root>/references/store-auth-troubleshooting.md` — the fix per symptom and the
@@ -124,15 +135,19 @@ hint says before any re-run). Put each query/mutation in a `.graphql` file **ins
 `--operation` when the file holds several named operations — for the store engine the runner
 extracts the named operation itself). If it exits with `error=no_admin_token`, **neither** engine
 is set up — relay the two fixes its hint names to the developer, or fall back to **Mode 2**.
+When a remote store connector that lists this store is in the session, its GraphQL tool is a
+valid runner for the same documents (same validation and mutation rules).
 
-**Validate before you run.** Every query or mutation you wrote goes through
-`validate_graphql_codeblocks` (Shopify Dev MCP, `api: "admin"`, `version` = the version the
-runner requests — `SHOPIFY_ADMIN_API_VERSION`, default `2026-04`; omit it and the MCP
-validates against the latest stable instead) first: pass the raw GraphQL text (not a fenced
-block) plus the `conversationId` from `learn_shopify_api` — it checks fields, arguments, and
-input shapes against that Admin schema. Fix and re-validate (same `artifactId`, `revision` +
-1) until it passes. The schema server is already loaded, so this is one cheap call; a
-hallucinated field costs a round-trip, and a bad **mutation** may not be undoable.
+**Validate before you run.** Every query or mutation you wrote goes through the Shopify Dev
+MCP `validate` tool (`api: "admin"`, `version` = the version the runner requests —
+`SHOPIFY_ADMIN_API_VERSION`, default `2026-10`; omit it and the MCP validates against the
+latest stable instead) first: pass the raw GraphQL text (not a fenced block) plus the
+`conversationId` from `learn_shopify_api` — it checks fields, arguments, and input shapes
+against that Admin schema and reports the `Required scopes`. Fix and re-validate (same
+`artifactId`, `revision` + 1) until it passes. A hallucinated field costs a round-trip, and a
+bad **mutation** may not be undoable. No dev-mcp server in the session →
+`node <base root>/scripts/shopify-validate.cjs --file <f>`; `result=unavailable` → send anyway;
+validation never blocks (`/base:shopify`).
 
 ## Step skeleton (dependency order)
 
@@ -199,7 +214,7 @@ Never paste a GraphQL operation into the chat for the developer to copy — term
 mangles it and copying from chat is awkward. Write the current step as a **standalone
 ready-to-run file** in `.claude/tasks/<work-id>/tmp/step-<n>-<short-name>.graphql`: exactly one
 operation, every `REPLACE_WITH_*` placeholder already filled from prior results, runnable as-is —
-and **`validate_graphql_codeblocks`-clean before you hand it over** (a hand-off you can't run
+and **`validate`-clean before you hand it over** (a hand-off you can't run
 yourself is exactly where a hallucinated field wastes the developer's round-trip).
 In chat give only the **file path**, one line on what the step does, and the scope it needs; the
 developer copies it from the file (or the IDE), runs it in GraphiQL, and pastes the JSON result

@@ -9,13 +9,13 @@ person using it; this file is for whoever changes it. The code wins when the two
 plugins/base/
 ├── .claude-plugin/plugin.json   dependencies: ["slim"], mcpServers, types; no classic `hooks` key
 ├── agents/*.md                  the readers, the writer, the review agents (spawned as base:<name>)
-├── skills/*/SKILL.md            commit, pre-commit-review, save-task-context, report-plugin-issue, worktree
+├── skills/*/SKILL.md            commit, pre-commit-review, save-task-context, report-plugin-issue, worktree, shopify
 ├── references/*.md              what the agents and skills cite by ${CLAUDE_PLUGIN_ROOT}/references/…, and the team plugins by <base root>/references/…
 ├── hooks/hooks.json             { "modules": ["./mods/register.ts"] } — the only hook wiring
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── hooks/no-verify-bypass.sh    the git-hooks guard's decision, run by guards/bash.ts
 ├── hooks/scratch-path-guard.cjs the scratch-path guard's decision, run by guards/scratch.ts
-├── scripts/*                    the fetchers, md-to-adf, worktree-setup, doctor, scratch-hygiene
+├── scripts/*                    the fetchers, md-to-adf, worktree-setup, doctor, scratch-hygiene, shopify-validate
 └── types/index.d.ts             base's $.state contract: the `base` key only
 ```
 
@@ -121,6 +121,7 @@ draws `base.progress` and its hints name `/base:save-task-context`; its Log pane
 | `scripts/doctor.cjs` | static checks a node process answers without a session, also run by hand; the mod adds the session rows |
 | `scripts/scratch-hygiene.cjs` | deletes files: `$.fs` has no unlink |
 | `scripts/worktree-setup.sh` | git plumbing, port probes and `npm ci` the skill runs as one command |
+| `scripts/shopify-validate.cjs` | a CLI `/base:shopify` runs where the session loads no manifest MCP server: it spawns the dev-mcp server through `npx` and speaks stdio JSON-RPC to it |
 | `scripts/figma-rest.sh`, `jira-attachments.sh`, `external-screenshots.sh`, `md-to-adf.cjs` | the agents run a CLI on a file; credentials ride a private curl config, never the argv |
 
 A delegated script answers like a classic PreToolUse hook (JSON `permissionDecision` on stdout, or
