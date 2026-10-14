@@ -13,8 +13,9 @@ import {
   TOOL_SCHEMA,
   bashFailed,
   bashText,
-  crashed,
+  crashedIn,
   defectBody,
+  deniedNotRun,
   designedRefusal,
   dogfoodMode,
   enabledNames,
@@ -27,6 +28,7 @@ import {
   marketplaceOf,
   parseDefect,
   pluginScript,
+  pluginScripts,
   repoOf,
   scriptLast,
   seen,
@@ -267,9 +269,10 @@ export function registerDogfood(on: On): void {
     const script = pluginScript(e.command)
     if (!script) return r
     const text = bashText(r)
-    // A line the script does not end owns no exit code (`| head` hides it): only the output speaks for the script.
+    if (r.isError && deniedNotRun(text)) return r
+    // A line the script does not end owns no exit code (`| head` hides it): only the script's own trace or `error=` line speaks for it.
     const own = scriptLast(e.command)
-    const failed = own ? bashFailed(r) && !designedRefusal(text, script) : (bashFailed(r) && crashed(text)) || failureLine(text)
+    const failed = own ? bashFailed(r) && !designedRefusal(text, script) : (bashFailed(r) && pluginScripts(e.command).some(s => crashedIn(text, s))) || failureLine(text)
     if (!failed || !(await dogfoodOn($).catch(() => false))) return r
     try {
       await logDefect($, `script failed: ${script}`)

@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.10.1**.
+Current release: **base v0.10.2**.
 
 ## Status
 
@@ -452,9 +452,11 @@ There are two ways to turn it on:
   is absent or broken (`no_admin_token`, `invalid_admin_token`), a remote call (`http_*`,
   `gql_errors`), or the script's own work (`*_failed`, `*_unverifiable`). `Error` in the output
   always makes it a failure. When the script is not the line's last command (`script; echo done`,
-  `script | head`), the exit code is not its own: `Error` in a failed result, or a failure `error=`
-  line even at exit 0, nudges and logs, and the stop is never blocked. A trailing `2>&1` still
-  counts as last.
+  `script | head`), the exit code is not its own: a failed result with a crash the script's own
+  trace names (`Error` with a stack frame `<script>:12`, or a shell's `<script>: line 12:`), or a
+  failure `error=` line even at exit 0, nudges and logs, and the stop is never blocked; another
+  command's `Error` (tsc, a husky hook) does not. A trailing `2>&1` still counts as last. A call the
+  permission layer denied (the auto mode classifier, a rule, the user) never ran: no nudge.
 - **`/base-defects`** lists the index newest first, then this project's `.claude/plugin-defects/`.
   The doctor's `defects` row counts the last 7 days.
 

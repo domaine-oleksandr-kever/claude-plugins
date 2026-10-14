@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NUDGE, TOOL, bashText, capEvidence, designedRefusal, dogfoodAccounts, failureLine, pluginScript, scriptLast, seen, slugOf } from '../dogfood/text.ts'
+import { NUDGE, TOOL, bashText, capEvidence, crashedIn, deniedNotRun, designedRefusal, dogfoodAccounts, failureLine, pluginScript, pluginScripts, scriptLast, seen, slugOf } from '../dogfood/text.ts'
 import { NOW, PEEK, ROOT, eventsOf, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -495,14 +495,68 @@ describe('nudge and stop', () => {
     expect((await stop($)).block).toBeUndefined()
   })
 
-  t('a compound line the script does not end, with Error in the output: nudge and event, never a blocked stop', async ($, on) => {
+  t('a compound line the script does not end, with a stack naming the script: nudge and event, never a blocked stop', async ($, on) => {
     const { w } = world(on, { env: ON })
-    w.bash = () => ({ isError: true, result: 'Exit code 1\nError: boom' })
+    w.bash = () => ({ isError: true, result: 'Exit code 1\nError: boom\n    at Object.<anonymous> (/x/plugins/base/scripts/x.cjs:12:3)' })
     await start($)
-    expect((await bash($, 'bash plugins/base/scripts/review-scope.sh --ws x; echo done')).context).toEqual([NUDGE])
-    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: review-scope.sh'])
+    expect((await bash($, 'node plugins/base/scripts/x.cjs --ws x; echo done')).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: x.cjs'])
     expect((await stop($)).block).toBeUndefined()
   })
+
+  t('a compound line the script does not end, with a shell trace naming the script: nudge', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'Exit code 127\n/x/plugins/base/scripts/review-scope.sh: line 12: foo: command not found' })
+    await start($)
+    expect((await bash($, 'bash plugins/base/scripts/review-scope.sh --check && git status')).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: review-scope.sh'])
+  })
+
+  t('a compound line the script does not end, another command\'s Error (a husky tsc hook): no nudge, no event, no block', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    const out = [
+      'Exit code 1',
+      'marker=fresh branch=fix/x marker_hash=b6b6d398',
+      "src/x.test.ts(3,20): error TS7016: Could not find a declaration file for module 'y'.",
+      'Error: Command failed with exit code 2: tsc --noEmit',
+      'husky - pre-commit script failed (code 2)',
+    ].join('\n')
+    w.bash = () => ({ isError: true, result: out })
+    await start($)
+    const cmd = 'bash /home/dev/.claude/plugins/cache/domaine/base/0.9.3/scripts/review-scope.sh --check && git add -A && git commit -m x'
+    expect((await bash($, cmd)).context ?? []).toEqual([])
+    expect(await eventsOf($, 'defect')).toEqual([])
+    expect((await stop($)).block).toBeUndefined()
+  })
+
+  t('a crash in the second plugin script of a compound line: nudge, event', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'TypeError: boom\n    at Object.<anonymous> (/r/plugins/base/scripts/md-to-adf.cjs:40:3)' })
+    await start($)
+    const cmd = 'bash plugins/base/scripts/review-scope.sh --check && node plugins/base/scripts/md-to-adf.cjs < x.md; echo done'
+    expect((await bash($, cmd)).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).length).toBe(1)
+  })
+
+  t('a failing script whose output quotes a denial phrase mid-text: still a nudge', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'comment: denied by the Claude Code auto mode classifier\nPermission to x denied\nexit 1' })
+    await start($)
+    expect((await bash($, 'node plugins/base/scripts/md-to-adf.cjs < comment.md')).context).toEqual([NUDGE])
+  })
+
+  for (const denial of [
+    'Permission for this action was denied by the Claude Code auto mode classifier. Reason: x',
+    "The user doesn't want to proceed with this tool use. The tool use was rejected.",
+  ])
+    t(`a denied call that never ran (${denial.slice(0, 24)}…): no nudge, no event, no block`, async ($, on) => {
+      const { w } = world(on, { env: ON })
+      w.bash = () => ({ isError: true, result: denial })
+      await start($)
+      expect((await bash($, 'bash plugins/base/scripts/review-scope.sh --check')).context ?? []).toEqual([])
+      expect(await eventsOf($, 'defect')).toEqual([])
+      expect((await stop($)).block).toBeUndefined()
+    })
 
   t('the script last after cd, with a trailing 2>&1: nudge, event, the stop blocked once', async ($, on) => {
     const { w } = world(on, { env: ON })
@@ -625,6 +679,9 @@ describe('pure parts', () => {
     expect(pluginScript('cd /r && FOO=1 node --no-warnings plugins/fe/scripts/a.cjs')).toBe('a.cjs')
     expect(pluginScript('ls | env python3 plugins/pm/scripts/b.py')).toBe('b.py')
     expect(pluginScript('x=$(plugins/be/scripts/c.sh)')).toBe('c.sh')
+    expect(pluginScript('node plugins/qa/scripts/qa-stores.cjs>/tmp/s.txt; cat /tmp/s.txt')).toBe('qa-stores.cjs')
+    expect(pluginScript('x=`plugins/be/scripts/c.sh`')).toBe('c.sh')
+    expect(pluginScripts('bash plugins/base/scripts/a.sh && node ~/.claude/plugins/cache/domaine/fe/0.6.1/scripts/b.cjs | head').sort()).toEqual(['a.sh', 'b.cjs'])
   })
 
   test('pluginScript: a path merely named is not a run', () => {
@@ -638,6 +695,30 @@ describe('pure parts', () => {
       'rg foo ~/.claude/plugins/cache/domaine/slim/0.10.0/README.md',
       'node ~/.claude/plugins/cache/domaine/fe/0.5.3/skills/ship/SKILL.md',
     ]) expect(pluginScript(cmd)).toBeNull()
+  })
+
+  test('crashedIn: Error with a stack frame naming the script, or a shell trace naming it', () => {
+    expect(crashedIn('Error: boom\n    at Object.<anonymous> (/x/plugins/base/scripts/x.cjs:12:3)', 'x.cjs')).toBe(true)
+    expect(crashedIn('/x/plugins/base/scripts/x.cjs:12\n  throw new Error("boom")', 'x.cjs')).toBe(true)
+    expect(crashedIn('review-scope.sh: line 12: foo: command not found', 'review-scope.sh')).toBe(true)
+    expect(crashedIn('/x/scripts/review-scope.sh: line 3: jq: command not found', 'review-scope.sh')).toBe(true)
+    expect(crashedIn('TypeError: x\n    at f (/x/plugins/base/scripts/x.cjs:3:1)', 'x.cjs')).toBe(true)
+    expect(crashedIn('SyntaxError: Unexpected end of JSON input\n    at JSON.parse (<anonymous>)\n    at Object.<anonymous> (/x/plugins/base/scripts/x.cjs:1:6)', 'x.cjs')).toBe(true)
+    expect(crashedIn('Error: boom', 'x.cjs')).toBe(false)
+    expect(crashedIn('Error: tsc failed\n    at run (/r/node_modules/tsc/lib/tsc.js:4:1)', 'x.cjs')).toBe(false)
+    expect(crashedIn('see x.cjs:12 for the flag', 'x.cjs')).toBe(false)
+    expect(crashedIn('Error in xxcjs:1', 'x.cjs')).toBe(false)
+  })
+
+  test('deniedNotRun: the permission layer\'s denials, never a script\'s output', () => {
+    for (const t of [
+      'Permission for this action was denied by the Claude Code auto mode classifier. Reason: x',
+      'Permission for this tool use was denied. The tool use was rejected.',
+      'Permission to use Bash with command rm -rf x has been denied.',
+      "The user doesn't want to proceed with this tool use. The tool use was rejected.",
+    ]) expect(deniedNotRun(t)).toBe(true)
+    for (const t of ['bash: ./x.sh: Permission denied', 'out\ndenied by the Claude Code auto mode classifier', 'remote:\nPermission to o/r.git denied to u.', 'Error: EACCES: permission denied', 'marker=fresh', ''])
+      expect(deniedNotRun(t)).toBe(false)
   })
 
   test('dogfoodAccounts: the keys of accounts; [] for null, bad JSON, an array or a missing key', () => {

@@ -237,14 +237,19 @@ export const isRepo = (s: string) => REPO.test(s)
 const NAMES = PLUGINS.join('|')
 // A path runs only in command position: a command's first word, or the script argument of an interpreter that is one.
 const RUN = `(?:^|[;&|(\`])\\s*(?:(?:\\w+=\\S*|env|exec|time)\\s+)*(?:[^\\s;&|()]*/)?(?:(?:node|bash|sh|zsh|python3?)(?:\\s+-\\S+)*\\s+)?["']?`
-const IN_REPO = new RegExp(`${RUN}(?:[^\\s"';|&()]*/)?plugins/(?:${NAMES})/scripts/[^\\s"';|&)]+`)
-const IN_CACHE = new RegExp(`${RUN}[^\\s"';|&()]*/\\.claude/plugins/cache/[^/\\s"']+/(?:${NAMES})/[^/\\s"']+/scripts/[^\\s"';|&)]+`)
+const IN_REPO = new RegExp(`${RUN}(?:[^\\s"';|&()]*/)?plugins/(?:${NAMES})/scripts/[^\\s"';|&)<>\`]+`)
+const IN_CACHE = new RegExp(`${RUN}[^\\s"';|&()]*/\\.claude/plugins/cache/[^/\\s"']+/(?:${NAMES})/[^/\\s"']+/scripts/[^\\s"';|&)<>\`]+`)
+const base = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 
 /** The basename of the Domaine plugin script a command runs (repo `plugins/<name>/scripts/` or the plugin cache), else null; a path merely named (grep, cat, ls) is not a run. */
 export function pluginScript(command: string): string | null {
   const p = (IN_CACHE.exec(command) ?? IN_REPO.exec(command))?.[0]
-  return p ? p.slice(p.lastIndexOf('/') + 1) : null
+  return p ? base(p) : null
 }
+
+/** The basenames of every Domaine plugin script a command runs, in no particular order. */
+export const pluginScripts = (command: string): string[] =>
+  [IN_CACHE, IN_REPO].flatMap(re => [...command.matchAll(new RegExp(re.source, 'g'))].map(m => base(m[0])))
 
 /**
  * True when the plugin script's command is the line's last: the exit code is then the script's own. After
@@ -300,12 +305,25 @@ export function designedRefusal(text: string, script: string): boolean {
   if (crashed(text)) return false
   const reasons = errorReasons(text)
   if (reasons.length) return reasons.every(r => REFUSAL.test(r))
-  const stem = script.replace(/\.[a-z]+$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return new RegExp(`^${stem}: `, 'm').test(text)
+  return new RegExp(`^${esc(script.replace(/\.[a-z]+$/, ''))}: `, 'm').test(text)
 }
+
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** A crash signature in the output: `Error` (an exception, a node stack); never a refusal. */
 export const crashed = (text: string): boolean => /\bError\b/.test(text)
+
+/**
+ * A crash the script's own trace names: `Error` (`TypeError`, …) with a stack frame `<script>:12`, or a shell's `<script>: line 12:`.
+ * In a compound line another command's `Error` (tsc, git, a husky hook) is in the same output and is not the script's.
+ */
+export function crashedIn(text: string, script: string): boolean {
+  const s = esc(script)
+  return (/Error\b/.test(text) && new RegExp(`(?:^|[/\\s(])${s}:\\d+`, 'm').test(text)) || new RegExp(`(?:^|/)${s}: line \\d+: `, 'm').test(text)
+}
+
+/** A result the permission layer wrote in place of the command's (its text opens with the denial): nothing ran, so no script failed. */
+export const deniedNotRun = (text: string): boolean => /^\s*(?:Permission (?:for|to) .* denied|The user doesn't want to proceed with this tool use)/.test(text)
 
 export type Seen = { date: string; plugin: string; title: string; path: string }
 
