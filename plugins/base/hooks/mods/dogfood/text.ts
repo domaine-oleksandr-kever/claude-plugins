@@ -13,7 +13,7 @@ export const FIELD_CHARS = 4000
 export const TITLE_CHARS = 120
 export const SLUG_CHARS = 40
 export const WINDOW_DAYS = 7
-export const NUDGE = 'base dogfood: a plugin script failed — report it with plugin_defect before working around it'
+export const NUDGE = 'base dogfood: a plugin script failed — report it with plugin_defect (not among your tools: in your reply) before working around it'
 
 export const TOOL_DESC = `Report a defect in a Domaine plugin (${PLUGINS.join(', ')}) you hit while working: a script that failed or returned odd output, a hook or mod that threw, a skill that contradicts the code, a doctor FAIL, wrong slim output, a convention wrong for this host. Writes a report under the project's .claude/plugin-defects/ and returns its path; github: true also files a GitHub issue (only when the person asked). Where no surface draws (a cloud session, claude -p) it returns the whole report and files the issue unless github: false. Never put secrets, tokens or passwords in any field.`
 
@@ -362,9 +362,13 @@ export function dogfoodAccounts(json: string | null): string[] {
 
 const RULE_DRAWN = `Offer a GitHub issue (\`github: true\`); never create one unasked.`
 const RULE_SURFACELESS = `No surface draws in this session (a cloud session, \`claude -p\`): the report file
-and \`~\` do not outlive it. \`plugin_defect\` returns the whole report and files the GitHub issue
-itself unless you pass \`github: false\`. Paste the whole report into your reply, in a fenced block
-under the \`Plugin defect:\` line, so the owner can copy it into a session in the plugin repo.`
+and \`~\` do not outlive it. Paste the whole report into your reply, in a fenced block
+under the \`Plugin defect:\` line, so the owner can copy it into a session in the plugin repo.
+\`plugin_defect\` returns that report and files the GitHub issue itself unless you pass
+\`github: false\`. No \`plugin_defect\` among your tools (base's tool server is absent in some cloud
+sessions): write the report in that block yourself — title, plugin and version, kind, observed,
+expected, reproduce, evidence, environment (the versions above) — and end the \`Plugin defect:\`
+line with \`→ in this reply\` instead of a path, since no file was written.`
 
 export const dogfoodSection = (versions: string, surfaceless = false) => `## base convention — dogfood mode
 
@@ -376,7 +380,8 @@ notice; a skill contradicts the code or itself; a \`/<plugin>-doctor\` row FAILs
 wrong (a stub where data was expected, \`lookup\` with no answer, a window missing the part
 needed); a convention sentence is wrong for this host.
 
-**Rule:** ALWAYS report a defect with the \`plugin_defect\` tool before or while you work
-around it — never silently. Your reply then carries one line \`Plugin defect: <title> → <path>\`.
+**Rule:** ALWAYS report a defect — with the \`plugin_defect\` tool where it is listed — before
+or while you work around it, never silently. Your reply then carries one line \`Plugin defect: <title> → <path>\`,
+the path the tool returned.
 ${surfaceless ? RULE_SURFACELESS : RULE_DRAWN} Never put secrets, tokens or storefront passwords in a
 report.`

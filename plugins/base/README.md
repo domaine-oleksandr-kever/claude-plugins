@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.10.0**.
+Current release: **base v0.10.1**.
 
 ## Status
 
@@ -144,7 +144,7 @@ same names.
 | `/base:save-task-context` | writes what the conversation holds into `.claude/tasks/<work-id>/` — ticket fields, comments, decisions, `progress.md` in the team's series order — without spawning a reader |
 | `/base:report-plugin-issue` | drafts a sanitized GitHub issue for a base defect, with the `/base-doctor` output and the `base.events` tail, and posts it after your approval |
 | `/base:worktree` | a sibling `git worktree` on `feat/<work-id>` with its own dev port, sharing the task workspace; `--remove` tears it down |
-| `/base:shopify` | store questions and Admin GraphQL: a routing table to the recipes, answers with evidence (field, value, file key), validation through the dev-mcp `validate` tool or `scripts/shopify-validate.cjs` (never blocking), a mutation only after a "yes" in a separate turn, then a runner table: Shopify CLI `store execute`, a remote store connector, an Admin token, or a ready `.graphql` file for GraphiQL |
+| `/base:shopify` | store questions and Admin GraphQL: a routing table to the recipes, answers with evidence (field, value, file key), validation through a remote store connector's own validate tool, the dev-mcp `validate` tool or `scripts/shopify-validate.cjs` (never blocking), a mutation only after a "yes" in a separate turn, then a runner table: Shopify CLI `store execute`, a remote store connector, an Admin token, or a ready `.graphql` file for GraphiQL |
 
 `/base:worktree` copies `.env` into a new worktree, because base's fetchers read their credentials
 from it. It also copies every path that a team plugin names in its system-prompt section, on one line:
@@ -406,7 +406,7 @@ There are two ways to turn it on:
   - What counts as a defect: a script that failed or printed odd output, a hook or mod that threw or
     showed a notice, a skill that contradicts the code or itself, a doctor FAIL, wrong slim output,
     or a convention that is wrong for this host.
-  - The rule. Report each defect with `plugin_defect` before or while you work around it, never
+  - The rule. Report each defect (with `plugin_defect` where it is listed) before or while you work around it, never
     silently. The reply carries `Plugin defect: <title> → <path>`. Offer a GitHub issue, but never
     file one unasked (for where nothing draws, see below). Never put a secret, token or storefront
     password in a report.
@@ -439,7 +439,7 @@ There are two ways to turn it on:
 - **Nudge**: a Bash command can run a plugin script and fail. A plugin script is
   `plugins/<name>/scripts/…` of the seven, or anything of theirs under `~/.claude/plugins/cache/`.
   A failure is an error result, or `Error` in the stderr. The result then gets one line for the model,
-  `base dogfood: a plugin script failed — report it with plugin_defect before working around it`,
+  `base dogfood: a plugin script failed — report it with plugin_defect (not among your tools: in your reply) before working around it`,
   and a `defect` event. In the main loop, the next stop without a report since then is blocked once
   per failure. A designed refusal is not a failure, so it gets no nudge. A refusal is output whose
   `error=` lines all name a refusal, or, with no `error=` line, a `<script stem>: …` line (a base
@@ -462,7 +462,9 @@ There are two ways to turn it on:
 There the tool still writes the file and returns the whole report in a fenced block. It also files
 the GitHub issue, unless the call passes `github: false`. The result says when gh is missing or
 fails. The convention tells the model to paste the whole report into its reply under the
-`Plugin defect:` line. The owner then copies it into a session in the plugin repo.
+`Plugin defect:` line, and to write that report itself when no `plugin_defect` tool is listed (some
+cloud sessions lack base's tool server). That line then ends `→ in this reply`, since no file was
+written. The owner then copies it into a session in the plugin repo.
 
 To read the reports from the plugin repo, start at the index. It names every report on this machine
 by its absolute path. Each file stands alone: Reproduce and Environment say where and on which

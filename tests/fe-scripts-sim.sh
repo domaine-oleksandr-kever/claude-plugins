@@ -734,7 +734,7 @@ printf '{"sections":{"main":{"settings":{%s}}}}' \
 printf '%s' '{"sections":{"main":{"type":"main"}}}' > "$TV/few.json"
 rc=0; TJ_PULL_BODY="$TV/few.json" tj_set_cli "$TV/many.json" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 6 ] \
-   && grep -qx 'note=verify_diff only_in_payload=sections.main.settings.k00,sections.main.settings.k01,sections.main.settings.k02,sections.main.settings.k03,sections.main.settings.k04,sections.main.settings.k05,sections.main.settings.k06,sections.main.settings.k07,+4_more only_in_theme=sections.main.type changed=- diff_lines=[0-9]*' "$E"; then ok
+   && grep -qx 'note=verify_diff only_in_payload=sections.main.settings.k00,sections.main.settings.k01,sections.main.settings.k02,sections.main.settings.k03,sections.main.settings.k04,sections.main.settings.k05,sections.main.settings.k06,sections.main.settings.k07,+4_more only_in_theme=sections.main.settings,sections.main.type changed=- diff_lines=[0-9]*' "$E"; then ok
 else bad T35f-verify-diff-capped "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 # T35g: the payload's extra keys are the ONLY difference (a setting the section schema dropped) —
 # the rest landed, so the hint names the dropped keys instead of claiming nothing is served; still
@@ -777,6 +777,48 @@ rc=0; TJ_PULL_BODY="$TV/reserialized.json" tj_set_cli "$TV/payload.json" >"$O" 2
 if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" \
    && ! cmp -s "$TV/payload.json" "$TV/reserialized.json"; then ok
 else bad T37-banner-keyorder-normalized "rc=$rc out=$(head -c 160 "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# T37b (bug): Shopify stores a block written without `settings` as `"settings": {}` — the write
+# landed, and a not_applied here tells the caller to restore the snapshot over a good write
+printf '%s' '{"sections":{"main":{"type":"main","settings":{"a":"1"},"blocks":{"eng":{"type":"engraving"}}}}}' > "$TV/blk.json"
+printf '%s' '{"sections":{"main":{"type":"main","settings":{"a":"1"},"blocks":{"eng":{"type":"engraving","settings":{}}}}}}' > "$TV/blk-served.json"
+rc=0; TJ_PULL_BODY="$TV/blk-served.json" tj_set_cli "$TV/blk.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O"; then ok
+else bad T37b-block-default-settings "rc=$rc out=$(head -c 160 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T37c: the same default on a section
+printf '%s' '{"sections":{"main":{"type":"main"}},"order":["main"]}' > "$TV/sec.json"
+printf '%s' '{"sections":{"main":{"type":"main","settings":{}}},"order":["main"]}' > "$TV/sec-served.json"
+rc=0; TJ_PULL_BODY="$TV/sec-served.json" tj_set_cli "$TV/sec.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O"; then ok
+else bad T37c-section-default-settings "rc=$rc out=$(head -c 160 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T37d: settings_data.json carries its sections under `.current`
+printf '%s' '{"current":{"colors":"x","sections":{"hdr":{"type":"header","blocks":{"b1":{"type":"link"}}}}},"presets":{}}' > "$TV/sd.json"
+printf '%s' '{"current":{"colors":"x","sections":{"hdr":{"type":"header","settings":{},"blocks":{"b1":{"type":"link","settings":{}}}}}},"presets":{}}' > "$TV/sd-served.json"
+rc=0; TJ_PULL_BODY="$TV/sd-served.json" SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file config/settings_data.json --from "$TV/sd.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O"; then ok
+else bad T37d-settings-data-default-settings "rc=$rc out=$(head -c 160 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T37f: theme blocks nest — the default reaches a block inside a block, and a settings_data preset
+printf '%s' '{"sections":{"main":{"type":"main","settings":{},"blocks":{"g":{"type":"group","settings":{},"blocks":{"t":{"type":"text","blocks":{"u":{"type":"icon"}}}}}}}}}' > "$TV/nest.json"
+printf '%s' '{"sections":{"main":{"type":"main","settings":{},"blocks":{"g":{"type":"group","settings":{},"blocks":{"t":{"type":"text","settings":{},"blocks":{"u":{"type":"icon","settings":{}}}}}}}}}}' > "$TV/nest-served.json"
+rc=0; TJ_PULL_BODY="$TV/nest-served.json" tj_set_cli "$TV/nest.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O"; then ok
+else bad T37f-nested-block-default-settings "rc=$rc out=$(head -c 160 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+printf '%s' '{"current":"Default","presets":{"Default":{"sections":{"hdr":{"type":"header","blocks":{"b1":{"type":"link"}}}}}}}' > "$TV/sdp.json"
+printf '%s' '{"current":"Default","presets":{"Default":{"sections":{"hdr":{"type":"header","settings":{},"blocks":{"b1":{"type":"link","settings":{}}}}}}}}' > "$TV/sdp-served.json"
+rc=0; TJ_PULL_BODY="$TV/sdp-served.json" SHOPIFY_CLI_THEME_TOKEN=fake PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file config/settings_data.json --from "$TV/sdp.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O"; then ok
+else bad T37f-presets-default-settings "rc=$rc out=$(head -c 160 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T37e (regression guard): only an absent `settings` is defaulted — a read-back missing a key the
+# payload carries is still not_applied
+printf '%s' '{"sections":{"main":{"type":"main","settings":{"a":"1"},"blocks":{"eng":{"type":"engraving","settings":{"label":"x"}}}}}}' > "$TV/blk-real.json"
+rc=0; TJ_PULL_BODY="$TV/blk-served.json" tj_set_cli "$TV/blk-real.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied engine=themecli theme=2 file=templates/product.json' "$O" \
+   && grep -q '^note=verify_diff only_in_payload=sections.main.blocks.eng.settings.label ' "$E"; then ok
+else bad T37e-missing-key-still-not-applied "rc=$rc out=$(head -c 160 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 
 # T38 (escape hatch): FE_THEME_JSON_VERIFY=0 does no read-back at all — the pull-back fixture is
 # the stale content, which would otherwise fail the case, and no pull is recorded

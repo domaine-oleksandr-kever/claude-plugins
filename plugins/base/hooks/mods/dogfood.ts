@@ -289,7 +289,7 @@ export function registerDogfood(on: On): void {
       const s = await read($, dogfood)
       if (!s || s.sid !== String(await $.session.id()) || !s.failMs || s.reportMs >= s.failMs || s.blockedMs === s.failMs) return r
       await update($, dogfood, t => (t ? { ...t, blockedMs: s.failMs } : t))
-      return { ...r, block: `base dogfood: a plugin script failed (${s.script}) and no plugin_defect report followed — report it with plugin_defect, then stop` }
+      return { ...r, block: `base dogfood: a plugin script failed (${s.script}) and no plugin_defect report followed — report it with plugin_defect (not among your tools: in your reply), then stop` }
     } catch {
       return r
     }

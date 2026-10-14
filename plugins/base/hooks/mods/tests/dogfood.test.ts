@@ -374,16 +374,23 @@ describe('no surface draws', () => {
     expect(r.result).not.toContain('```')
   })
 
-  t('the convention tells the model to paste the whole report; a drawn session keeps the offer rule', async ($, on) => {
+  t('the convention tells the model to paste the whole report, or write it without the tool; a drawn session keeps the offer rule', async ($, on) => {
     const { w } = world(on, { env: ON, surfaces: [] })
     const block = (await $.prompt.context({ blocks: [] })).blocks[0].text
     expect(block).toContain('Paste the whole report into your reply, in a fenced block\nunder the `Plugin defect:` line')
+    expect(block).toContain('No `plugin_defect` among your tools (base\'s tool server is absent in some cloud\nsessions): write the report in that block yourself')
+    expect(block).toContain('ALWAYS report a defect — with the `plugin_defect` tool where it is listed — before\nor while you work around it, never silently.')
+    expect(block).toContain('end the `Plugin defect:`\nline with `→ in this reply` instead of a path, since no file was written.')
+    expect(block).toContain('`Plugin defect: <title> → <path>`,\nthe path the tool returned.')
     expect(block).not.toContain('never create one unasked')
     w.surfaces = ['terminal']
     w.sid = 's2'
     const s = await dogfoodSection($)
     expect(s.text).toContain('never create one unasked')
+    expect(s.text).toContain('ALWAYS report a defect — with the `plugin_defect` tool where it is listed')
     expect(s.text).not.toContain('Paste the whole report')
+    expect(s.text).not.toContain('among your tools')
+    expect(s.text).not.toContain('→ in this reply')
   })
 })
 
@@ -407,7 +414,9 @@ describe('subagents', () => {
 
   t('a subagent of a surfaceless session gets the paste rule', async ($, on) => {
     world(on, { env: ON, surfaces: [] })
-    expect((await subagent($, 'base:jira-reader')).additionalContext[0]).toContain('Paste the whole report')
+    const ctx = (await subagent($, 'base:jira-reader')).additionalContext[0]
+    expect(ctx).toContain('Paste the whole report')
+    expect(ctx).toContain('write the report in that block yourself')
   })
 
   t('a subagent\'s failed plugin script still nudges and logs, and never arms the main stop block', async ($, on) => {
@@ -427,8 +436,11 @@ describe('nudge and stop', () => {
     await start($)
     const r = await bash($, SCRIPT_CMD)
     expect(r.context).toEqual([NUDGE])
+    expect(NUDGE).toContain('(not among your tools: in your reply)')
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
-    expect((await stop($)).block).toContain('a plugin script failed (md-to-adf.cjs)')
+    const block = (await stop($)).block
+    expect(block).toContain('a plugin script failed (md-to-adf.cjs)')
+    expect(block).toContain('report it with plugin_defect (not among your tools: in your reply), then stop')
     expect((await stop($)).block).toBeUndefined()
     await clock.advance(1000)
     await bash($, 'bash plugins/base/scripts/review-scope.sh')

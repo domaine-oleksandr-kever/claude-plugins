@@ -22,10 +22,15 @@
 //
 // `<store>` resolves against the exact domain OR the exact alias (case-insensitive); a domain is
 // normalized first (scheme, userinfo, port, path and trailing dots dropped, lowercased), so
-// `https://acme-us-uat.myshopify.com/` and `acme-us-uat.myshopify.com` are one entry. `set`
-// takes a host only: an alias in the `<domain>` position is refused (exit 2) instead of creating a
-// second entry keyed by the alias text, and an `--alias` another domain already carries is refused
-// too — a reused alias would hand out the wrong store's password.
+// `https://acme-us-uat.myshopify.com/` and `acme-us-uat.myshopify.com` are one entry, and a dotless
+// shop handle is a myshopify host — `acme-us-uat` is `acme-us-uat.myshopify.com` in `get`, `set`
+// and `unset` alike (a host with a dot is never suffixed). `set` takes a host only: an alias in the
+// `<domain>` position is refused (exit 2) instead of creating a second entry keyed by the alias
+// text, and an `--alias` another domain already carries is refused too — a reused alias would hand
+// out the wrong store's password. A domain outranks an alias, so `set` also refuses an `--alias`
+// that is another registered store's handle or host, and a new host whose handle is already
+// another store's alias; a registry that carries such a pair anyway (hand-edited, or written
+// before handles resolved) makes `get`/`unset` by that handle refuse (exit 1) instead of picking one.
 //
 // `set` merges: `themes` accumulate (a repeated `--theme <id>` without `:<label>` keeps the label
 // it already has), every other flag overwrites, and an omitted flag leaves its field alone — so
@@ -58,7 +63,7 @@
 //                              [--default-theme <id>] [--note <text>]
 //   qa-stores.cjs unset <store>
 //   qa-stores.cjs path
-// <store> = exact domain or exact alias (case-insensitive). Only `get` prints the password.
+// <store> = domain, shop handle or exact alias (case-insensitive). Only `get` prints the password.
 // `--help` / `-h` (outside a flag value) prints this block and exits 0, before any file access.
 'use strict';
 
@@ -76,7 +81,7 @@ const USAGE = `Usage:
                              [--default-theme <id>] [--note <text>]
   qa-stores.cjs unset <store>
   qa-stores.cjs path
-<store> = exact domain or exact alias (case-insensitive). Only \`get\` prints the password.
+<store> = domain, shop handle or exact alias (case-insensitive). Only \`get\` prints the password.
 \`--help\` / \`-h\` (outside a flag value) prints this block and exits 0, before any file access.`;
 
 // A reader that goes away mid-write (`list | head -1`) is success, not failure: the EPIPE
@@ -126,13 +131,20 @@ function corrupt(msg) {
 }
 
 // scheme, userinfo, port, path, query and fragment are call decoration, not identity: the registry
-// key is the host, so one store pasted in any shape stays one entry
-function normalizeDomain(input, what) {
+// key is the host, so one store pasted in any shape stays one entry; a bare shop handle (what fe's
+// preview script prints as `store=`) is canonicalized here so lookup and registration agree
+function hostOf(input) {
   let d = String(input == null ? '' : input).trim();
   d = d.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
   d = d.replace(/[/?#].*$/, '');
   d = d.replace(/^[^@]*@/, '').replace(/:\d+$/, '');
   d = d.replace(/\.+$/, '').toLowerCase();
+  if (/^[a-z0-9][a-z0-9-]*$/.test(d)) d += '.myshopify.com';
+  return d;
+}
+
+function normalizeDomain(input, what) {
+  const d = hostOf(input);
   if (!d) usage(what + ' does not name a store domain');
   return d;
 }
@@ -258,16 +270,22 @@ function masked(domain, store) {
 
 const aliasKey = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : null);
 
-// exact domain first, then exact alias — a selector that matches both is the same store anyway.
-// A hand-edited registry can carry the same alias twice; picking the first would hand out one
-// store's password under the other's name, so it is an error instead.
+// domain first (a shop handle already canonicalized to its myshopify host), then exact alias.
+// A selector that is one store's handle and another's alias, or an alias two stores carry, would
+// hand out one store's password under the other's name, so it is an error instead.
 function resolve(reg, selector) {
   const domain = normalizeDomain(selector, 'the store selector');
-  if (Object.prototype.hasOwnProperty.call(reg.stores, domain)) return domain;
   const wanted = aliasKey(selector);
   const hits = Object.entries(reg.stores)
     .filter(([, store]) => aliasKey(store.alias) !== null && aliasKey(store.alias) === wanted)
     .map(([key]) => key);
+  if (Object.prototype.hasOwnProperty.call(reg.stores, domain)) {
+    const others = hits.filter((key) => key !== domain);
+    if (wanted !== domain && others.length) {
+      die('the store selector is the handle of ' + domain + ' and the alias of ' + others.join(', ') + ' — name the domain', 1);
+    }
+    return domain;
+  }
   if (hits.length > 1) {
     die('alias matches ' + hits.length + ' stores (' + hits.join(', ') + ') — name the domain', 1);
   }
@@ -400,9 +418,14 @@ function cmdSet(rest) {
     if (!known && !clearPassword && !themes.length && !Object.keys(patch).length) {
       usage('set <domain> for a new store needs at least one flag');
     }
+    const aliasHost = aliasKey(patch.alias) ? hostOf(patch.alias) : '';
+    if (aliasHost && aliasHost !== domain && Object.prototype.hasOwnProperty.call(reg.stores, aliasHost)) {
+      usage('--alias names ' + aliasHost + ' as a domain — that store would win every lookup by it');
+    }
     for (const [key, store] of Object.entries(reg.stores)) {
-      if (!known && aliasKey(store.alias) === domain) {
-        usage('"' + domain + '" is the alias of ' + key + ' — pass that domain as <domain>');
+      // compared as hosts: an alias spelled like a handle is what this host's handle resolves to
+      if (!known && aliasKey(store.alias) && hostOf(store.alias) === domain) {
+        usage('the <domain> argument or its handle is the alias of ' + key + ' — pass that domain as <domain>, or give it another --alias first');
       }
       if (patch.alias !== undefined && key !== domain && aliasKey(store.alias) === aliasKey(patch.alias)) {
         usage('--alias is already on ' + key + ' — an alias names one store');

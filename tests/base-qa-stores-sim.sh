@@ -497,6 +497,82 @@ if [ "$legacy_ok" = 1 ] && [ "$(jsonfield "$NOTE_REG" 'd.stores["n.myshopify.com
 else bad C17c-legacy-kept "len=$(jsonfield "$NOTE_REG" 'd.stores["n.myshopify.com"].notes.length')"; fi
 HOME="$TMP/home"
 
+# ------------------------------------------- C19 a bare shop handle is its myshopify host --
+# `store=elc-us-mc-dev` is how the preview script and developers name a store; the registry key is
+# the full host, so a handle must reach it — and register under it — instead of "no store matches".
+HOME="$TMP/home-handle"; H_REG="$HOME/.config/domaine/qa-stores.json"
+run set shop-a.myshopify.com --alias 'SHOP A' --password 'pa'
+run get shop-a --field password
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = "pa" ]; then ok
+else bad C19-get-by-handle "rc=$rc out=$(cat "$O") err=$(head -c 160 "$E")"; fi
+
+# C19b: set by handle writes the canonical key — the full-host spelling is the same entry
+run set shop-b --alias 'SHOP B' --password 'pb'
+run set shop-b.myshopify.com --theme 9:dev
+run list
+if [ "$rc" -eq 0 ] && grep -q '^shop-b\.myshopify\.com ' "$O" \
+   && [ "$(jsonfield "$H_REG" 'Object.keys(d.stores).sort().join(",")')" = "shop-a.myshopify.com,shop-b.myshopify.com" ] \
+   && [ "$(jsonfield "$H_REG" 'd.stores["shop-b.myshopify.com"].password')" = "pb" ]; then ok
+else bad C19b-set-by-handle "rc=$rc keys=$(jsonfield "$H_REG" 'Object.keys(d.stores).join(",")') out=$(head -c 200 "$O" | tr '\n' ';')"; fi
+
+# C19c: a host with a dot is never suffixed
+run set shop.example.com --password 'pc'
+run get shop.example.com --field domain
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = "shop.example.com" ] \
+   && [ "$(jsonfield "$H_REG" 'd.stores["shop.example.com.myshopify.com"]')" = "<undef>" ]; then ok
+else bad C19c-dotted-host-unsuffixed "rc=$rc out=$(cat "$O") keys=$(jsonfield "$H_REG" 'Object.keys(d.stores).join(",")')"; fi
+
+# C19d: a domain outranks an alias, so an --alias that is another store's handle or host would
+# never be reached — set refuses it; a handle-shaped alias no host matches still resolves
+H_SNAP() { cksum < "$H_REG"; }
+BEFORE="$(H_SNAP)"
+run set shop-c.myshopify.com --alias 'shop-a' --password 'pcc'
+D_RC=$rc; D_ERR="$(head -c 200 "$E" | tr '\n' ' ')"
+run set shop-c.myshopify.com --alias 'SHOP-A.myshopify.com' --password 'pcc'
+if [ "$D_RC" -eq 2 ] && printf '%s' "$D_ERR" | grep -q 'names shop-a.myshopify.com as a domain' \
+   && [ "$rc" -eq 2 ] && grep -q 'names shop-a.myshopify.com as a domain' "$E" && [ "$(H_SNAP)" = "$BEFORE" ]; then ok
+else bad C19d-alias-is-other-handle "rc=$D_RC/$rc err=$D_ERR / $(head -c 160 "$E" | tr '\n' ' ')"; fi
+run set shop-d.myshopify.com --alias 'nohost' --password 'pd'
+run get nohost --field domain
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = "shop-d.myshopify.com" ]; then ok
+else bad C19d-handle-shaped-alias "rc=$rc out=$(cat "$O") err=$(head -c 160 "$E")"; fi
+
+# C19e: `set <alias>` where the alias is handle-shaped is still refused, not a new suffixed store —
+# and so is the full host that handle names, which would silently take over `get nohost`
+BEFORE="$(H_SNAP)"
+run set nohost --theme 1
+E_RC=$rc; E_ERR="$(head -c 200 "$E" | tr '\n' ' ')"
+run set nohost.myshopify.com --password 'px'
+if [ "$E_RC" -eq 2 ] && printf '%s' "$E_ERR" | grep -q 'is the alias of shop-d.myshopify.com' \
+   && [ "$rc" -eq 2 ] && grep -q 'is the alias of shop-d.myshopify.com' "$E" && [ "$(H_SNAP)" = "$BEFORE" ]; then ok
+else bad C19e-host-of-handle-shaped-alias "rc=$E_RC/$rc err=$E_ERR / $(head -c 200 "$E" | tr '\n' ' ')"; fi
+
+# C19g: a registry that already pairs one store's handle with another's alias (hand-edited, or
+# written before handles resolved) refuses that selector in get and unset; the full host still works
+G_HOME="$TMP/home-handle-legacy"; G_REG="$G_HOME/.config/domaine/qa-stores.json"
+mkdir -p "$G_HOME/.config/domaine"
+printf '%s' '{"version":1,"stores":{"shop-b.myshopify.com":{"password":"BPASS"},
+  "shop-a.myshopify.com":{"alias":"shop-b","password":"APASS"}}}' > "$G_REG"
+HOME="$G_HOME"
+run get shop-b --field password
+G_RC=$rc; G_OUT="$(cat "$O")"; G_ERR="$(head -c 200 "$E" | tr '\n' ' ')"
+run unset shop-b
+U_RC=$rc
+run get shop-b.myshopify.com --field password
+if [ "$G_RC" -eq 1 ] && [ -z "$G_OUT" ] \
+   && printf '%s' "$G_ERR" | grep -q 'handle of shop-b.myshopify.com and the alias of shop-a.myshopify.com' \
+   && [ "$U_RC" -eq 1 ] && [ "$(jsonfield "$G_REG" 'Object.keys(d.stores).length')" = "2" ] \
+   && [ "$rc" -eq 0 ] && [ "$(cat "$O")" = "BPASS" ]; then ok
+else bad C19g-legacy-handle-alias-pair "get=$G_RC out=[$G_OUT] err=$G_ERR unset=$U_RC full=$rc/$(cat "$O")"; fi
+HOME="$TMP/home-handle"
+
+# C19f: unset by handle removes the canonical entry
+run unset shop-b
+if [ "$rc" -eq 0 ] && grep -q '^removed shop-b\.myshopify\.com$' "$O" \
+   && [ "$(jsonfield "$H_REG" 'd.stores["shop-b.myshopify.com"]')" = "<undef>" ]; then ok
+else bad C19f-unset-by-handle "rc=$rc out=$(cat "$O") err=$(head -c 160 "$E")"; fi
+HOME="$TMP/home"
+
 # ------------------------------------------------- C10 the developer's own registry is untouched --
 REAL_AFTER="$( [ -f "$REAL_REG" ] && cksum < "$REAL_REG" || echo absent )"
 if [ "$REAL_AFTER" = "$REAL_BEFORE" ]; then ok

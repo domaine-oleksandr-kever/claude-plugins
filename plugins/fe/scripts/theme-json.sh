@@ -55,7 +55,10 @@
 # exits 0, `themeFilesUpsert` returns no userErrors, and the theme still serves the old file.
 # Every `set` therefore pulls the file back and compares it against the payload: for *.json
 # normalized (banner comments stripped, `jq -S` key order) so Shopify's re-stamped /*…*/ header
-# is not a diff, raw bytes (modulo trailing newlines) for anything else. A mismatch is retried
+# is not a diff, raw bytes (modulo trailing newlines) for anything else. The normalized form also
+# gives every section and block, nested blocks included, without `settings` (templates/*.json,
+# sections/*.json, and settings_data.json `.current.sections` and `.presets.*.sections`) the
+# `"settings": {}` Shopify stores for it. A mismatch is retried
 # ONCE after FE_THEME_JSON_VERIFY_WAIT seconds, default 2 (a read straight after a write can
 # still serve the old copy). Landed →
 # `verified=true` on the result line; the read-back does NOT carry the payload →
@@ -308,7 +311,8 @@ case "$VERIFY_WAIT" in ''|.|*.*.*|*[!0-9.]*) VERIFY_WAIT=2 ;; esac
 
 # normalize_body <file> → stdout: the comparable form of a theme file body. *.json rides
 # strip_json_comments (Shopify re-stamps its /*…*/ banner on every write, so the banner is not
-# a difference) and then `jq -S .` (neither is key order or whitespace). Anything else — a
+# a difference) and then `jq -S` through canon_filter (neither is key order, whitespace or a
+# defaulted empty `settings`). Anything else — a
 # non-.json file — compares as RAW bytes minus trailing newlines: the CLI's pull can hand back a
 # body with a newline the payload did not have, and that is not a dropped write.
 # TWO different failures hide behind "we could not normalize", and they point opposite ways:
@@ -344,6 +348,27 @@ verify_body_note() { # $1 = why
 raw_body() { # trailing newlines are not content for this comparison; $() eats them on both sides
   printf '%s' "$(cat "$1")"
 }
+# canon_filter → stdout: the jq filter normalize_body sorts through. Shopify stores a section or
+# block (nested theme blocks included) written without `settings` as `"settings": {}`, so both
+# sides get that one default.
+# Only that key: treating any key the theme adds as "applied" would pass a refused write that
+# only deleted a key.
+canon_filter() {
+  local def='def canon: if type == "object" and (has("settings") | not) then .settings = {} else . end;
+    def canon_node: canon | if type == "object" and (.blocks | type) == "object"
+      then .blocks |= map_values(canon_node) else . end;
+    def canon_sections: if type == "object" and (.sections | type) == "object"
+      then .sections |= map_values(canon_node) else . end;'
+  case "$FILE" in
+    templates/*.json|sections/*.json) printf '%s canon_sections' "$def" ;;
+    config/settings_data.json)
+      printf '%s if type == "object" then
+        (if (.current | type) == "object" then .current |= canon_sections else . end)
+        | (if (.presets | type) == "object" then .presets |= map_values(canon_sections) else . end)
+        else . end' "$def" ;;
+    *) printf '.' ;;
+  esac
+}
 normalize_body() {
   local s t
   case "$FILE" in *.json) ;; *) raw_body "$1"; return 0 ;; esac
@@ -358,7 +383,7 @@ normalize_body() {
     verify_raw_note "perl is present but could not strip /*…*/ comments"
     raw_body "$1"; return 0
   fi
-  if jq -S . < "$s" > "$t" 2>/dev/null; then cat "$t"; return 0; fi
+  if jq -S "$(canon_filter)" < "$s" > "$t" 2>/dev/null; then cat "$t"; return 0; fi
   verify_body_note "the body did not parse as JSON after stripping /*…*/ comments"
   raw_body "$1"
 }

@@ -66,6 +66,11 @@ A schema question the recipes do not cover → the dev-mcp docs search (`search_
 Validate every document you wrote or changed before it runs, on API version `2026-10` (the version
 the recipes target):
 
+- **The runner is a remote store connector** (Runners row 2) **and it lists a validate tool**: validate
+  with it first. It checks the document against the live schema of the API version its description
+  names and against that store's policy (read-only env, mutation allow-list), and never sends. Its
+  result replaces the two checks below for that document: validate once, never twice. A connector
+  without such a tool → the next bullets.
 - **The dev-mcp server is in the session** (its tools are listed): call `learn_shopify_api` with
   `api: "admin"`, `model: "none"`, `user_prompt: "base shopify validate"` (always this constant,
   never the developer's words), `version: "2026-10"`; then `validate` with that `conversationId`,
