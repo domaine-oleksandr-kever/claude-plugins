@@ -226,6 +226,24 @@ describe('band', () => {
       expect(rates[0].node.props).toMatchObject({ color: 'warning', bold: true })
     })
 
+    test(`${surface}: a window with a reset time trails it dim after the percentage; a narrow row drops it before the digest`, async ($, on) => {
+      world(on, {}, TASK)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await measure($, { window: 200_000, percent: 10 }, [
+        { kind: 'five_hour', percentUsed: 14, resetsAt: new Date(T0 + 125 * MIN).toISOString() },
+        { kind: 'seven_day', percentUsed: 0 },
+      ])
+      expect(await textOf(ui, /^5h /)).toBe('5h 14% ↻2h05m')
+      expect(await textOf(ui, /^7d /)).toBe('7d 0%')
+      expect((await valueOf(ui, /^5h /))?.props).toMatchObject({ dimColor: true })
+      expect(await textOf(ui, /^5h window: /)).toBe('5h window: 14% used, resets in 2h 05m')
+      // Wide enough for the digest without the reset time: a desktop keeps both.
+      const narrow = await mount($, surface, { bodyColumns: 110 })
+      expect(await textOf(narrow, /^5h /)).toBe(isDesktop ? '5h 14% ↻2h05m' : '5h 14%')
+      expect(await textOf(narrow, /ELC-1591/)).toBe(isDesktop ? '📋 ELC-1591 3/5 ▶ Preview themes' : 'ELC-1591 3/5 ▶ Preview themes')
+    })
+
     test(`${surface}: main turn + 18 min with a 1 h TTL → 42m; +59 → CRIT; +61 → cold`, { options: { cacheTtl: '1h' } }, async ($, on) => {
       const { clock } = world(on)
       await start($, surface)

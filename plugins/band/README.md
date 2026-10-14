@@ -18,7 +18,7 @@ and its own events. slim publishes its compression events. The team plugins on b
 publish their own start, install and doctor lines. Band reads these lines; it never writes another
 plugin's state.
 
-Current release: **band v0.9.2**.
+Current release: **band v0.10.0**.
 
 ## Status
 
@@ -43,16 +43,16 @@ To choose which plugins to install for which work, use the matrix in
 
 ## Status band
 
-The band is one row, with the most important segment first. This example has 170 columns, context
-at 47 %, an account that reports three windows, and base resolving a task:
+The band is one row, with the most important segment first. This example has 190 columns, context
+at 47 %, an account that reports three windows (two with a reset time), and base resolving a task:
 
 ```text
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Clear ]  [ Progress ]  [ Log ]
+cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% ↻2h05m · 7d 34% ↻3d4h · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Clear ]  [ Progress ]  [ Log ]
 ```
 
-The same session at 120 columns: the row needs 172 cells, so band drops the Log button first, then
-Clear, then the digest:
+The same session at 120 columns: the row needs 185 cells, so band drops the Log button first, then
+Clear, then the reset times, then the digest:
 
 ```text
 cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ [ Compact ]  [ Progress ]
@@ -75,12 +75,13 @@ Band drops segments in this order:
 
 1. The Log button (`/band-log` still opens the pane).
 2. The Clear button (`/clear` still works).
-3. The digest.
-4. The cost.
-5. The rate windows other than the fullest one, the least full first.
-6. The last rate window.
-7. The model.
-8. The Progress button.
+3. The rate windows' reset times (the hover card still names them).
+4. The digest.
+5. The cost.
+6. The rate windows other than the fullest one, the least full first.
+7. The last rate window.
+8. The model.
+9. The Progress button.
 
 Band never drops cache, ctx or Compact. As a backstop, the row's text truncates, so the band never
 takes a second row.
@@ -90,7 +91,7 @@ takes a second row.
 | cache | `cache 42m`, `<1m`, `cache cold`, `cache —`, `cache ●` | Minutes left of the prompt cache: the last main-thread response plus the TTL. `●` while a turn runs; `—` before the first response and after `/clear` or resume; `cold` once the TTL has passed, after a compaction, or after a `/model` switch that forfeits the cache (another model, or the host reports it cold). A resumed session takes its state from the time since the last response. Hidden while any rate window is at or past 100 %: in overage the TTL is unknown. **It is an estimate.** The host reports no cache state, only the events it is derived from. |
 | model | `fable-5-1` | The model id as the session reports it, without the `claude-` prefix every id carries. A `/model` switch updates it from the switch event itself; every measurement re-reads it, so a switch the event missed shows by the next response. The session still answers the old id for a moment after a switch, and the measurement right after it ignores that answer: it keeps the event's model until the session answers something else. **On the terminal it is a picker:** the segment reads `fable-5-1 ▾` and is a button (hotkey `m` while the band holds the keyboard: ctrl+x tab, or a click). Pressed, the row folds its figures away and holds the models alone, in place: `model fable  opus  sonnet  haiku`: the families, not dated ids, since `/model <alias>` resolves to the family's newest model and the list never dates (plus the session's own id first when no alias stands for it, say a pinned `[1m]` id), the current one bright and the rest dim, each with its first letter as hotkey (`f`, `o`, `s`, `h`). Tab or a letter picks one; the pick runs `/model <alias>` as typed, toasts its output and folds the row back, which then follows the switch event. The current model only folds the row; so does the `×` button at its end (hotkey `x`: Clear is not drawn while the row is unfolded, so the letter is free), and a turn or `/clear` folds it too. The band never grows: its region clips anything drawn outside its own two rows, so no list can pop over the transcript. The desktop app has its own model menu, so there the segment stays text. |
 | ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`), or `—` when the engine reported no count; that count holds until a response reports a measured fill, as a reading with no fill (only the window) keeps the last one. A compaction reaches the band two ways, the `session.compact` chain and the engine's own `PostCompact` report (the settings-hook event, which arrives even when the chain skips the mod, as it did for a Compact press on Claude Code 2.1.289); reports within 30 s of each other are one compaction. Mid-turn it refreshes on a 30 s tick. |
-| rates | `5h 61% · 7d 34% · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. Empty off a subscription and before the first reading. |
+| rates | `5h 61% ↻2h05m · 7d 34% ↻3d4h · 7d·fable 12%` | **Every** window the API reports, in its order, separated by a dim `·`: `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. A window the API gives a reset time trails it dim after the percentage: `↻42m`, `↻2h05m`, `↻3d4h`. The reset times are the first figures to go on a narrow row (after the Log and Clear buttons). Empty off a subscription and before the first reading. |
 | cost | `cost $12.40` | Opt-in: drawn only with `BAND_COST=1` in the session's environment. What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
 | digest | `ELC-1591 3/5 ▶ Preview themes` | The task base resolved, same on the terminal and the desktop: work id · checked/total rows of the workspace's `progress.md` · the current row as base writes it (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet, or while the ticket you named has no workspace at all. Hidden while the Progress pane is open, when base resolves nothing, and without base. |
 | Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable, so the other buttons never shift: before the first reading, while a turn runs and at any context. From 80 % between turns it switches to the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). When the prompt cache is cold or ends within 5 min, the press first asks `Compact` / `Clear` / `Cancel` through the engine's own dialog (`Prompt cache is cold or ends within 5 min: compacting re-reads the whole conversation at full price. If this session is done, Clear is cheaper. Compact anyway?`); `Clear` runs `/clear` without the second Yes/No, a dismissed dialog is a Cancel. A typed `/compact` never asks. Where the engine refuses compaction from a plugin (a headless / SDK session such as the desktop app), the press runs the `/compact` slash command as if typed instead and toasts its output. Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued. While base reports the task workspace stale (unless `BASE_AUTOSAVE=0`), a press or a typed `/compact` runs `/base:save-task-context` first, then the `/compact` slash command, so the compaction waits for the save's turn; a press toasts `saved, then ` and the command's output. When that turn wrote nothing (an API error, an interrupt, a refused edit) and base still reports the workspace stale, the compaction behind it is vetoed: the conversation stays as it is and a toast reads `workspace still stale — save did not land; compaction cancelled`. One save-then-compact chain runs at a time: a second press while one is still running only toasts `compact already queued`, and a typed `/compact` then answers the same. |
@@ -115,7 +116,7 @@ follows light, dark and high-contrast themes. The alarm look is `warning` + bold
 dedicated error key is proven to draw on every theme.
 
 **Desktop and hover.** In the desktop app's Code tab, every segment carries a glyph instead of a word
-(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% · 7d 34% │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`).
+(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% ↻2h05m · 7d 34% ↻3d4h │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`).
 Compact, Clear, Progress and Log are native buttons there. The desktop draws proportional text, so
 the width rules above do not apply: band drops nothing, and the row clips at the panel's edge. When
 the pointer rests on the cache, ctx, a rate window or the cost, a one-line card appears. Cards work

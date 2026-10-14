@@ -29,12 +29,14 @@ import {
   costCard,
   ctxCard,
   digestOf,
+  fmtResetShort,
   glyphText,
   layout,
   modelOptions,
   pctLevel,
   rateCard,
   rateText,
+  resetMark,
   splitLabel,
   toChecklist,
 } from './lib.ts'
@@ -310,10 +312,22 @@ export function registerBand(on: On, options: PluginOptions): void {
         </Box>
       </Box>
     )
-    const rate = (r: BandRate, i: number): RenderNode[] => [
-      ...(i > 0 ? [<Text dimColor> · </Text>] : []),
-      hoverable(`seg-rate-${r.kind}`, labeled(rateText(r), dimLabel, { bold: true, ...LEVEL_PROPS[pctLevel(r.pct)] }), rateCard(r, now)),
-    ]
+    // The reset time trails the bold value, dim: rowText measures the same ` ↻2h05m`.
+    const rate = (r: BandRate, i: number): RenderNode[] => {
+      const reset = resetMark(segs.resetsNowMs === null ? null : fmtResetShort(r.resetsAt, segs.resetsNowMs))
+      const pct = labeled(rateText(r), dimLabel, { bold: true, ...LEVEL_PROPS[pctLevel(r.pct)] })
+      const body = reset ? (
+        <Box flexDirection="row">
+          {pct}
+          <Text dimColor wrap="truncate-end">
+            {reset}
+          </Text>
+        </Box>
+      ) : (
+        pct
+      )
+      return [...(i > 0 ? [<Text dimColor> · </Text>] : []), hoverable(`seg-rate-${r.kind}`, body, rateCard(r, now))]
+    }
 
     // A desktop draws a hotkey as a badge on its native button, and its buttons are clicked: no hotkeys there.
     const letters = focused && !isDesktop ? { plain: true as const } : null

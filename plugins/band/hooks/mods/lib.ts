@@ -107,8 +107,14 @@ export function toRates(list: readonly RawRate[] | undefined): BandRate[] {
   }))
 }
 
-export function rateText(r: BandRate): string {
-  return `${r.label} ${fmtPct(r.pct)}`
+/** ` ↻2h05m` after a rate's percentage; empty without a reset time. */
+export function resetMark(short: string | null): string {
+  return short ? ` ${GLYPH.reset}${short}` : ''
+}
+
+/** `5h 61%`, `5h 61% ↻2h05m` with the window's compact reset time. */
+export function rateText(r: BandRate, resetShort: string | null = null): string {
+  return `${r.label} ${fmtPct(r.pct)}${resetMark(resetShort)}`
 }
 
 type BandButton = { key: string; label: string; hotkey: string; plain: boolean }
@@ -120,6 +126,8 @@ export type BandSegs = {
   model: string | null
   ctx: string
   rates: BandRate[]
+  /** The clock (ms) each rate's reset countdown reads against; null = no reset times drawn. */
+  resetsNowMs: number | null
   /** `cost $1.23`; null without a ledger or at zero. */
   cost: string | null
   digest: string | null
@@ -145,7 +153,10 @@ export function rowText(s: BandSegs): string {
   const groups: string[] = s.cache === null ? [] : [s.cache]
   if (s.model !== null) groups.push(`${s.model}${MODEL_MARK}`)
   groups.push(s.ctx)
-  if (s.rates.length) groups.push(s.rates.map(rateText).join(RATE_GAP))
+  if (s.rates.length) {
+    const now = s.resetsNowMs
+    groups.push(s.rates.map(r => rateText(r, now === null ? null : fmtResetShort(r.resetsAt, now))).join(RATE_GAP))
+  }
   if (s.cost !== null) groups.push(s.cost)
   if (s.digest !== null) groups.push(s.digest)
   const buttons = [s.compact, s.clear, s.progress, s.log].filter((b): b is BandButton => b !== null)
@@ -160,8 +171,8 @@ export function cells(text: string): number {
 
 /**
  * Drops segments until the row fits `bodyColumns`: the Log button (/band-log stays), the Clear button (/clear
- * stays), the digest, the cost, then rate windows beyond the fullest (least full first), then the last rate,
- * the model, the Progress button.
+ * stays), the rates' reset times, the digest, the cost, then rate windows beyond the fullest (least full first),
+ * then the last rate, the model, the Progress button.
  * Cache, ctx and Compact are never dropped. 0 or absent columns = a surface that did not measure: kept whole.
  */
 export function layout(segs: BandSegs, bodyColumns: number | undefined): BandSegs {
@@ -171,6 +182,7 @@ export function layout(segs: BandSegs, bodyColumns: number | undefined): BandSeg
   if (fits()) return s
   if (s.log !== null) s = { ...s, log: null }
   if (!fits() && s.clear !== null) s = { ...s, clear: null }
+  if (!fits() && s.resetsNowMs !== null) s = { ...s, resetsNowMs: null }
   if (!fits() && s.digest !== null) s = { ...s, digest: null }
   if (!fits() && s.cost !== null) s = { ...s, cost: null }
   while (!fits() && s.rates.length > 1) {
@@ -240,16 +252,27 @@ export function fmtInt(n: number): string {
   return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
-/** `in 42m`, `in 2h 05m`, `in 3d 4h`; null when absent or unparsable. */
-export function fmtResetIn(resetsAt: string | null, nowMs: number): string | null {
+/** Time left until `resetsAt` as its two largest units (`['42m']`, `['2h', '05m']`, `['3d', '4h']`); null when absent or unparsable. */
+function resetParts(resetsAt: string | null, nowMs: number): string[] | null {
   if (!resetsAt) return null
   const at = Date.parse(resetsAt)
   if (Number.isNaN(at)) return null
   const mins = Math.max(0, Math.round((at - nowMs) / MIN))
-  if (mins < 60) return `in ${mins}m`
+  if (mins < 60) return [`${mins}m`]
   const h = Math.floor(mins / 60)
-  if (h < 24) return `in ${h}h ${String(mins % 60).padStart(2, '0')}m`
-  return `in ${Math.floor(h / 24)}d ${h % 24}h`
+  if (h < 24) return [`${h}h`, `${String(mins % 60).padStart(2, '0')}m`]
+  return [`${Math.floor(h / 24)}d`, `${h % 24}h`]
+}
+
+/** `in 42m`, `in 2h 05m`, `in 3d 4h`; null when absent or unparsable. */
+export function fmtResetIn(resetsAt: string | null, nowMs: number): string | null {
+  const parts = resetParts(resetsAt, nowMs)
+  return parts && `in ${parts.join(' ')}`
+}
+
+/** `42m`, `2h05m`, `3d4h`: the band row's form; null when absent or unparsable. */
+export function fmtResetShort(resetsAt: string | null, nowMs: number): string | null {
+  return resetParts(resetsAt, nowMs)?.join('') ?? null
 }
 
 /** `5h window: 61% used, resets in 2h 05m`: the rate hover card and the ≥ 90 % toast. */
@@ -299,7 +322,7 @@ export function ctxCard(u: BandUsage): string {
 }
 
 /** Single code points only: a VS16/ZWJ sequence has no settled cell width. */
-export const GLYPH = { cache: '⏱', ctx: '\u{1F9E0}', rates: '⏳', model: '\u{1F916}', digest: '\u{1F4CB}', cost: '\u{1F4B0}' } as const
+export const GLYPH = { cache: '⏱', ctx: '\u{1F9E0}', rates: '⏳', model: '\u{1F916}', digest: '\u{1F4CB}', cost: '\u{1F4B0}', reset: '↻' } as const
 
 /** The desktop label: the leading word of `cache 42m` / `ctx 47%` / `cost $1.23` becomes its glyph. */
 export function glyphText(text: string): string {
@@ -394,6 +417,7 @@ export function bandSegs(i: BandInput): BandSegs {
     model: shortModel(i.model),
     ctx: ctxText(i.usage.ctxPct),
     rates: i.usage.rates,
+    resetsNowMs: i.nowMs,
     cost: costText(i.usage.costUsd),
     digest: i.digest,
     compact: compactButton(i.usage.ctxPct, i.isWorking),

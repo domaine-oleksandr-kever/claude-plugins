@@ -19,6 +19,7 @@ import {
   fmtInt,
   fmtUsd,
   fmtResetIn,
+  fmtResetShort,
   glyphText,
   keepCtx,
   oneHourCacheTokens,
@@ -38,6 +39,7 @@ import {
   modelOptions,
   pctLevel,
   rateLabel,
+  rateText,
   rowText,
   shortModel,
   splitLabel,
@@ -174,6 +176,7 @@ describe('layout', () => {
       { kind: 'seven_day', percentUsed: 34 },
       { kind: 'seven_day_fable', percentUsed: 12 },
     ]),
+    resetsNowMs: null,
     cost: 'cost $139.14',
     digest: 'ELC-1591 3/5 ▶ Preview themes',
     compact: { key: 'compact', label: 'Compact', hotkey: 'c', plain: true },
@@ -204,6 +207,29 @@ describe('layout', () => {
     expect(at(60)).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ c: Compact  p: Progress')
     expect(at(50)).toBe('cache 42m │ ctx 47% │ c: Compact  p: Progress')
     expect(at(40)).toBe('cache 42m │ ctx 47% │ c: Compact')
+  })
+
+  test('reset times: shown on a wide row, dropped right after Clear and before the digest', () => {
+    const now = Date.parse('2026-10-03T12:00:00Z')
+    const s: BandSegs = {
+      ...full,
+      resetsNowMs: now,
+      rates: toRates([
+        { kind: 'five_hour', percentUsed: 61, resetsAt: '2026-10-03T14:05:00Z' },
+        { kind: 'seven_day', percentUsed: 34, resetsAt: '2026-10-06T16:00:00Z' },
+        { kind: 'seven_day_fable', percentUsed: 12 },
+      ]),
+    }
+    const wide = 'cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% ↻2h05m · 7d 34% ↻3d4h · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log'
+    expect(rowText(s)).toBe(wide)
+    expect(cells(wide)).toBe(170)
+    expect(rowText(layout(s, 170))).toBe(wide)
+    expect(rowText(layout(s, 152))).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% ↻2h05m · 7d 34% ↻3d4h · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress')
+    expect(rowText(layout(s, 151))).toBe('cache 42m │ Fable 5.1 ▾ │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $139.14 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  p: Progress')
+    expect(layout(s, 151).resetsNowMs).toBeNull()
+    expect(layout(s, 138).digest).toBeNull()
+    expect(layout(s, undefined)).toBe(s)
+    expect(layout(s, 0)).toBe(s)
   })
 
   test('the fullest window outlives the others wherever it sits', () => {
@@ -246,6 +272,7 @@ describe('layout', () => {
     expect(narrow.rates).toEqual([])
     expect(narrow.cost).toBeNull()
     expect(narrow.digest).toBeNull()
+    expect(narrow.resetsNowMs).toBeNull()
     expect(narrow.clear).toBeNull()
     expect(narrow.progress).toBeNull()
     expect(narrow.log).toBeNull()
@@ -323,6 +350,27 @@ describe('cards and toasts', () => {
     expect(fmtResetIn('2026-10-03T11:00:00Z', NOW)).toBe('in 0m')
   })
 
+  test('fmtResetShort: the band row form', () => {
+    expect(fmtResetShort(null, NOW)).toBeNull()
+    expect(fmtResetShort('', NOW)).toBeNull()
+    expect(fmtResetShort('not a date', NOW)).toBeNull()
+    expect(fmtResetShort('2026-10-03T12:00:00Z', NOW)).toBe('0m')
+    expect(fmtResetShort('2026-10-03T11:00:00Z', NOW)).toBe('0m')
+    expect(fmtResetShort('2026-10-03T12:42:00Z', NOW)).toBe('42m')
+    expect(fmtResetShort('2026-10-03T13:00:00Z', NOW)).toBe('1h00m')
+    expect(fmtResetShort('2026-10-03T14:05:00Z', NOW)).toBe('2h05m')
+    expect(fmtResetShort('2026-10-04T11:59:00Z', NOW)).toBe('23h59m')
+    expect(fmtResetShort('2026-10-04T12:00:00Z', NOW)).toBe('1d0h')
+    expect(fmtResetShort('2026-10-06T16:00:00Z', NOW)).toBe('3d4h')
+  })
+
+  test('rateText appends the reset time only when known', () => {
+    const [r] = toRates([{ kind: 'five_hour', percentUsed: 14, resetsAt: '2026-10-03T14:05:00Z' }])
+    expect(rateText(r!)).toBe('5h 14%')
+    expect(rateText(r!, null)).toBe('5h 14%')
+    expect(rateText(r!, fmtResetShort(r!.resetsAt, NOW))).toBe('5h 14% ↻2h05m')
+  })
+
   test('rate card and the alarm line', () => {
     const [r] = toRates([{ kind: 'five_hour', percentUsed: 91, resetsAt: '2026-10-03T14:05:00Z' }])
     expect(rateCard(r!, NOW)).toBe('5h window: 91% used, resets in 2h 05m')
@@ -357,7 +405,7 @@ describe('cards and toasts', () => {
     expect(glyphText('cache 42m')).toBe('⏱ 42m')
     expect(glyphText('ctx 47%')).toBe('\u{1F9E0} 47%')
     expect(glyphText('Fable 5.1')).toBe('Fable 5.1')
-    for (const g of ['⏱', '\u{1F9E0}', '⏳']) expect([...g]).toHaveLength(1)
+    for (const g of ['⏱', '\u{1F9E0}', '⏳', '↻']) expect([...g]).toHaveLength(1)
   })
 })
 
@@ -374,7 +422,7 @@ describe('segments', () => {
 
   test('bandSegs from the atoms', () => {
     const s = bandSegs({
-      usage: { ...USAGE_INIT, ctxPct: 47, rates: toRates([{ kind: 'five_hour', percentUsed: 61 }]), costUsd: 0.4920822 },
+      usage: { ...USAGE_INIT, ctxPct: 47, rates: toRates([{ kind: 'five_hour', percentUsed: 61, resetsAt: new Date(18 * MIN + 125 * MIN).toISOString() }]), costUsd: 0.4920822 },
       model: 'claude-fable-5-1',
       cache: { ...CACHE_INIT, anchorMs: 0, ttlMs: HOUR },
       nowMs: 18 * MIN,
@@ -384,7 +432,7 @@ describe('segments', () => {
       hasEvents: true,
     })
     expect(rowText(s)).toBe(
-      'cache 42m │ fable-5-1 ▾ │ ctx 47% │ 5h 61% │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log',
+      'cache 42m │ fable-5-1 ▾ │ ctx 47% │ 5h 61% ↻2h05m │ cost $0.49 │ ELC-1591 3/5 ▶ Preview themes │ c: Compact  x: Clear  p: Progress  l: Log',
     )
   })
 
