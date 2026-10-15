@@ -1194,6 +1194,7 @@ case "$f" in
   *.mp4) printf '{"streams":[{"width":1920,"height":1080,"duration":"7.0"}],"format":{"duration":"7.000000"}}\\n' ;;
   *portrait*) printf '{"frames":[{"side_data_list":[{"rotation":-90}]}],"streams":[{"width":4000,"height":3000}],"format":{}}\\n' ;;
   *tilt*) printf '{"frames":[{"side_data_list":[{"rotation":180}]}],"streams":[{"width":1000,"height":800}],"format":{}}\\n' ;;
+  *reuse*.1568.*) printf '{"streams":[{"width":1568,"height":1176}],"format":{}}\\n' ;;
   *small*) printf '{"streams":[{"width":1000,"height":800}],"format":{}}\\n' ;;
   *) printf '{"streams":[{"width":4000,"height":3000}],"format":{}}\\n' ;;
 esac
@@ -1326,6 +1327,52 @@ printf 'SIPSIMG' > "$last"
   writeFileSync(at('dir.png'), PNG_IN);
   mkdirSync(at('dir.1568.png'));
   eq('Cm-image-out-taken', [r7f.reason, readFileSync(at('elsewhere/001.jpg'), 'utf8'), run(at('dir.png'), FF, 'dir.1568.png').reason, argv()], ['out-taken', 'MINE', 'out-taken', '']);
+
+  // reuse: an earlier run's outputs come back `cached` while newer than the input; nothing is ever written.
+  const PNG_OUT = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(92, 5)]);
+  const JPG_OUT = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(6, 6)]);
+  const aged = (rel, from, secs) => { const t = statSync(from).mtimeMs / 1000 + secs; utimesSync(at(rel), t, t); };
+  const reuse = (file, out, extra = {}) => run(file, FF, out, { ...extra, opts: { reuse: true, ...extra.opts } });
+  const rin = media('reuse.png', PNG_IN);
+  writeFileSync(at('reuse.1568.png'), PNG_OUT);
+  aged('reuse.1568.png', rin, 60);
+  const ru1 = reuse(rin, 'reuse.1568.png');
+  eq('Cm-reuse-image', [ru1.decision, ru1.figure, ru1.text, ru1.outputs, readFileSync(at('reuse.1568.png')).equals(PNG_OUT), argv()],
+    ['cached', 'media: 5000 B → 100 B (-98%) frames=1',
+      `image png 4000×3000 → the copy an earlier view made, newer than the input\nRead ${at('reuse.1568.png')} once to see it`, [{ path: at('reuse.1568.png'), bytes: 100 }], true, '']);
+  aged('reuse.1568.png', rin, -60);
+  const ru2 = reuse(rin, 'reuse.1568.png');
+  eq('Cm-reuse-stale', [ru2.decision, ru2.reason, ru2.figure, readFileSync(at('reuse.1568.png')).equals(PNG_OUT), argv()],
+    ['refused', 'not-reused', `media: no output of an earlier view newer than reuse.png at ${at('reuse.1568.png')}`, true, '']);
+  const rwide = media('wide.png', PNG_IN);
+  writeFileSync(at('wide.1568.png'), PNG_OUT);
+  aged('wide.1568.png', rwide, 60);
+  const rtext = media('reusetext.png', PNG_IN);
+  writeFileSync(at('reusetext.1568.png'), 'IMG');
+  aged('reusetext.1568.png', rtext, 60);
+  const rgone = media('reusegone.png', PNG_IN);
+  eq('Cm-reuse-unfit', [reuse(rwide, 'wide.1568.png').reason, reuse(rtext, 'reusetext.1568.png').reason, reuse(rgone, 'reusegone.1568.png').reason,
+    readFileSync(at('wide.1568.png')).equals(PNG_OUT), readFileSync(at('reusetext.1568.png'), 'utf8'), existsSync(at('reusegone.1568.png')), argv()],
+    ['not-reused', 'not-reused', 'not-reused', true, 'IMG', false, '']);
+  const ru3 = reuse(media('small-reuse.png', PNG_IN), 'small-reuse.1568.png');
+  eq('Cm-reuse-same', [ru3.decision, ru3.outputs.map((o) => o.path), existsSync(at('small-reuse.1568.png')), argv()], ['passthrough', [at('small-reuse.png')], false, '']);
+  const rclip = media('rclip.mp4', MP4_IN);
+  mkdirSync(at('rclip.frames'));
+  writeFileSync(at('rclip.frames/.slim-frames'), '');
+  for (const n of ['001', '002', '003', '004']) { writeFileSync(at(`rclip.frames/${n}.jpg`), JPG_OUT); aged(`rclip.frames/${n}.jpg`, rclip, 60); }
+  const ru4 = reuse(rclip, 'rclip.frames/001.jpg');
+  eq('Cm-reuse-frames', [ru4.decision, ru4.frames, ru4.outputs.map((o) => [path.basename(o.path), o.bytes, o.t]), ru4.text.split('\n')[0], ls('rclip.frames'), argv()],
+    ['cached', 4, [['001.jpg', 10, 0], ['002.jpg', 10, 2], ['003.jpg', 10, 4], ['004.jpg', 10, 6]],
+      'video mp4 7s 1920×1080 → the frames an earlier view made, newer than the input', ['.slim-frames', '001.jpg', '002.jpg', '003.jpg', '004.jpg'], '']);
+  aged('rclip.frames/003.jpg', rclip, -60);
+  const ru5 = reuse(rclip, 'rclip.frames/001.jpg');
+  const uclip = media('uclip.mp4', MP4_IN);
+  mkdirSync(at('uclip.frames'));
+  writeFileSync(at('uclip.frames/001.jpg'), JPG_OUT);
+  aged('uclip.frames/001.jpg', uclip, 60);
+  eq('Cm-reuse-frames-refused', [ru5.reason, reuse(uclip, 'uclip.frames/001.jpg').reason, ls('rclip.frames').length, ls('uclip.frames'), argv()],
+    ['not-reused', 'not-reused', 5, ['001.jpg'], '']);
+  eq('Cm-reuse-still-checks-path', [reuse(rin, 'other.1568.png').reason, argv()], ['write-denied', '']);
 
   const r6 = dm.normalize(png, { env: { PATH: FF, FAKE_LOG: LOGF } });
   eq('Cm-write-not-ok', [r6.decision, r6.reason, existsSync(at('photo.1568.png')), r6.outputs], ['refused', 'write-denied', false, []]);
@@ -1542,6 +1589,65 @@ printf 'SIPSIMG' > "$last"
   ];
   eq('Cv15-text-as-media-refused', textAsMedia.map((r) => [r.decision, r.reason, String(r.text).includes('SECRET')]),
     [['refused', 'not-media', false], ['refused', 'not-media', false], ['refused', 'not-media', false]]);
+
+  // The hooks module's host Write leaves the placeholder at allowed_out; whatever the reply, it never survives
+  // and is never an output. The folder that Write made for a video's first frame goes with it.
+  const PH = createRequire(import.meta.url)(path.join(SCRIPTS, 'delivery/media.cjs')).PLACEHOLDER;
+  eq('Cv16-placeholder-same-text', (/export const PLACEHOLDER = '([^']*)'/.exec(readFileSync(path.join(MODS, 'view.ts'), 'utf8')) || [])[1], PH);
+  const phBin = path.join(T, 'phbin');
+  const phFail = path.join(T, 'phfail');
+  for (const d of [phBin, phFail]) mkdirSync(d);
+  const PROBE = 'for a; do f=$a; done\ncase "$f" in\n  *.mp4) printf \'{"streams":[{"width":1920,"height":1080,"duration":"4.0"}],"format":{"duration":"4.0"}}\\n\' ;;\n  *small*) printf \'{"streams":[{"width":1000,"height":800}],"format":{}}\\n\' ;;\n  *) printf \'{"streams":[{"width":4000,"height":3000}],"format":{}}\\n\' ;;\nesac\n';
+  writeFileSync(path.join(phBin, 'ffprobe'), `#!/bin/sh\n${PROBE}`, { mode: 0o755 });
+  writeFileSync(path.join(phFail, 'ffprobe'), `#!/bin/sh\n${PROBE}`, { mode: 0o755 });
+  writeFileSync(path.join(phBin, 'ffmpeg'), '#!/bin/sh\nn=1; prev=; for a; do [ "$prev" = "-frames:v" ] && n=$a; prev=$a; out=$a; done\ncase "$out" in\n  *%03d*) i=1; while [ $i -le $n ]; do printf FRAME > "$(printf "$out" $i)"; i=$((i+1)); done ;;\n  *) printf IMG > "$out" ;;\nesac\n', { mode: 0o755 });
+  writeFileSync(path.join(phFail, 'ffmpeg'), '#!/bin/sh\nprintf \'fake failure\\n\' >&2; exit 1\n', { mode: 0o755 });
+  const ph = path.join(T, 'ph');
+  mkdirSync(ph);
+  const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(992, 1)]);
+  const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from('ftypisom', 'latin1'), Buffer.alloc(988, 2)]);
+  const at = (rel) => path.join(ph, rel);
+  const input = (rel, bytes) => { writeFileSync(at(rel), bytes); return at(rel); };
+  const placed = (rel, body = PH) => { mkdirSync(path.dirname(at(rel)), { recursive: true }); writeFileSync(at(rel), body); return at(rel); };
+  const phView = (file, out, PATH, extra = {}) => viewMedia({ path: file, allowed_out: placed(out, extra.body), ...extra.req }, PATH);
+
+  const p1 = phView(input('shot.png', PNG), 'shot.1568.png', phBin);
+  eq('Cv16-placeholder-replaced', [p1.decision, readFileSync(at('shot.1568.png'), 'utf8')], ['compressed', 'IMG']);
+  const p2 = phView(input('small.png', PNG), 'small.1568.png', phBin, { body: `${PH}\r\n` });
+  eq('Cv16-placeholder-same', [p2.decision, (p2.outputs || []).map((o) => o.path), existsSync(at('small.1568.png'))], ['passthrough', [at('small.png')], false]);
+  const p3 = phView(input('fail.png', PNG), 'fail.1568.png', phFail);
+  eq('Cv16-placeholder-failed', [p3.reason, existsSync(at('fail.1568.png'))], ['backend-failed', false]);
+  eq('Cv16-placeholder-refused', [
+    [phView(input('nob.png', PNG), 'nob.1568.png', path.join(T, 'nobin')).reason, existsSync(at('nob.1568.png'))],
+    [phView(input('args.png', PNG), 'args.1568.png', phBin, { req: { jq: '.a' } }).reason, existsSync(at('args.1568.png'))],
+    [phView(input('kind.png', MP4), 'kind.1568.png', phBin).reason, existsSync(at('kind.1568.png'))],
+    [phView(at('gone.mp4'), 'gone.frames/001.jpg', phBin).reason, existsSync(at('gone.frames'))],
+  ], [['no-backend', false], ['media-args', false], ['write-denied', false], ['expand-missing', false]]);
+  const p4 = phView(input('clip.mp4', MP4), 'clip.frames/001.jpg', phBin);
+  eq('Cv16-placeholder-frames', [p4.decision, p4.frames > 0, readFileSync(at('clip.frames/001.jpg'), 'utf8'), readdirSync(at('clip.frames')).includes('.slim-frames')], ['compressed', true, 'FRAME', true]);
+  const p5 = phView(input('fclip.mp4', MP4), 'fclip.frames/001.jpg', phFail);
+  eq('Cv16-placeholder-frames-failed', [p5.reason, existsSync(at('fclip.frames'))], ['backend-failed', false]);
+  const p6 = phView(input('user.mp4', MP4), 'user.frames/001.jpg', phBin, { body: 'MINE' });
+  eq('Cv16-not-a-placeholder-kept', [p6.reason, readFileSync(at('user.frames/001.jpg'), 'utf8')], ['out-taken', 'MINE']);
+
+  // reuse: the request reaches the backend, which writes nothing; a fresh copy is `cached`, anything else `not-reused`.
+  const ruBin = path.join(T, 'rubin');
+  mkdirSync(ruBin);
+  writeFileSync(path.join(ruBin, 'ffprobe'), '#!/bin/sh\nfor a; do f=$a; done\ncase "$f" in\n  *.1568.*) printf \'{"streams":[{"width":1568,"height":1176}],"format":{}}\\n\' ;;\n  *) printf \'{"streams":[{"width":4000,"height":3000}],"format":{}}\\n\' ;;\nesac\n', { mode: 0o755 });
+  writeFileSync(path.join(ruBin, 'ffmpeg'), '#!/bin/sh\nfor a; do out=$a; done\nprintf IMG > "$out"\n', { mode: 0o755 });
+  const COPY = Buffer.concat([PNG.subarray(0, 8), Buffer.alloc(40, 7)]);
+  const again = input('again.png', PNG);
+  const age = (rel, secs) => { const t = statSync(again).mtimeMs / 1000 + secs; utimesSync(at(rel), t, t); };
+  writeFileSync(at('again.1568.png'), COPY);
+  age('again.1568.png', 60);
+  const u1 = viewMedia({ path: again, allowed_out: at('again.1568.png'), reuse: true }, ruBin);
+  eq('Cv17-reuse-cached', [u1.decision, u1.engine, u1.text.split('\n').pop(), readFileSync(at('again.1568.png')).equals(COPY)],
+    ['cached', 'media', `Read ${at('again.1568.png')} once to see it`, true]);
+  age('again.1568.png', -60);
+  const u2 = viewMedia({ path: again, allowed_out: at('again.1568.png'), reuse: true }, ruBin);
+  eq('Cv17-reuse-stale', [u2.decision, u2.reason, readFileSync(at('again.1568.png')).equals(COPY)], ['refused', 'not-reused', true]);
+  const u3 = viewMedia({ path: input('fresh.png', PNG), allowed_out: placed('fresh.1568.png'), reuse: true }, ruBin);
+  eq('Cv17-reuse-placeholder-cleared', [u3.reason, existsSync(at('fresh.1568.png'))], ['not-reused', false]);
 }
 
 // C-csv — a delimited table on every channel the csv engine serves; its re-run is already slim.

@@ -1,7 +1,8 @@
 // The media backend: runs the plan engines/media.cjs makes, with whatever the machine already has —
 // ffprobe + ffmpeg on PATH (images and video), else `sips` (images only; macOS). No backend → an
 // honest refusal, never a new dependency. Outputs land beside the input, and only at the path the
-// caller's Write permission check ruled on (`allowedOut`).
+// caller's Write permission check ruled on (`allowedOut`). The view tool's hooks module may first leave
+// PLACEHOLDER there through the host's Write tool; clearPlaceholder() removes it before the backend runs.
 'use strict';
 
 const fs = require('fs');
@@ -18,6 +19,8 @@ const FRAME_NAME = /^\d{3}\.jpg$/;
 // Marks a frames folder slim made, so a re-run clears only its own frames, never a user's folder.
 const FRAMES_MARK = '.slim-frames';
 const SIPS_FORMAT = { png: 'png', jpg: 'jpeg', jpeg: 'jpeg', gif: 'gif' };
+// The whole body the hooks module's host Write puts at the first output (hooks/mods/view.ts keeps the same text).
+const PLACEHOLDER = 'slim media placeholder';
 
 function which(name, env) {
   for (const dir of String((env && env.PATH) || '').split(path.delimiter)) {
@@ -101,6 +104,15 @@ const sizeOf = (p) => { try { const st = fs.statSync(p); return st.isFile() ? st
 const lstatOf = (p) => { try { return fs.lstatSync(p); } catch (_) { return null; } };
 const frameFiles = (dir) => { try { return fs.readdirSync(dir).filter((n) => FRAME_NAME.test(n)).sort(); } catch (_) { return []; } };
 const rmQuiet = (p) => { try { fs.unlinkSync(p); } catch (_) {} };
+const mtimeOf = (p) => { try { return fs.statSync(p).mtimeMs; } catch (_) { return -1; } };
+// A regular file (not a link) newer than `since` whose bytes are an image.
+const freshImage = (p, since) => {
+  const st = lstatOf(p);
+  if (!st || !st.isFile() || !(st.mtimeMs > since)) return false;
+  const h = headOf(p);
+  const k = h && media.kindOf(h);
+  return !!k && k.kind === 'image';
+};
 
 // Takes `dir` for this run's frames → { made, marked }, or null when it is a link, a file, or a
 // folder holding files slim did not write. Only a folder slim marked has its old NNN.jpg cleared.
@@ -123,9 +135,44 @@ function claimFrames(dir) {
   return { made: false, marked: false };
 }
 
+/**
+ * Removes the file at `out` when it holds PLACEHOLDER alone (surrounding whitespace ignored), then its
+ * folder when that is left empty (a video's `<name>.frames/` the host's Write made). Any other file, a
+ * link or a folder at `out` stays. Never throws.
+ */
+function clearPlaceholder(out) {
+  if (typeof out !== 'string') return;
+  const st = lstatOf(out);
+  if (!st || !st.isFile() || st.size > 64) return;
+  try { if (fs.readFileSync(out, 'utf8').trim() !== PLACEHOLDER) return; } catch (_) { return; }
+  rmQuiet(out);
+  try { fs.rmdirSync(path.dirname(out)); } catch (_) {}
+}
+
+/**
+ * The outputs an earlier run left where plan `p` puts them, or null: an image copy newer than `file`
+ * whose long edge fits `cap`, or the frames in a folder slim marked, each newer than `file`.
+ */
+function reusable(be, p, file, base, env, timeout, cap) {
+  const since = mtimeOf(file);
+  if (p.kind === 'image') {
+    const out = path.join(base, p.outputs[0].rel);
+    if (!freshImage(out, since)) return null;
+    const d = probe(be, out, env, timeout);
+    return d && Math.max(d.width, d.height) <= cap ? [{ path: out, bytes: sizeOf(out) }] : null;
+  }
+  const dir = path.join(base, p.dir);
+  const st = lstatOf(dir);
+  if (!st || !st.isDirectory() || !lstatOf(path.join(dir, FRAMES_MARK))) return null;
+  const names = frameFiles(dir).slice(0, p.outputs.length);
+  if (!names.length || !names.every((n) => freshImage(path.join(dir, n), since))) return null;
+  return names.map((n, i) => ({ path: path.join(dir, n), bytes: sizeOf(path.join(dir, n)), ...(p.scene ? {} : { t: p.outputs[i].t }) }));
+}
+
 const secs = (t) => `${Math.round(t * 10) / 10}s`;
-function describe(kind, facts, p, be) {
+function describe(kind, facts, p, be, reused) {
   const dims = `${p.source.w}×${p.source.h}`;
+  if (reused) return `${kind} ${facts.format} ${kind === 'video' ? `${secs(facts.durationS)} ` : ''}${dims} → the ${kind === 'image' ? 'copy' : 'frames'} an earlier view made, newer than the input`;
   const to = `${p.scale.w}×${p.scale.h}`;
   const meta = be.name === 'sips' ? 'metadata kept (sips cannot strip it)' : 'metadata stripped';
   if (kind === 'image' && p.same) return `image ${facts.format} ${dims}, not re-encoded (${be.name})`;
@@ -135,15 +182,17 @@ function describe(kind, facts, p, be) {
 }
 
 /**
- * normalize(file, { allowedOut, env, longEdge, everyS, maxFrames, scene, timeoutMs }) →
- *   { decision: 'compressed'|'passthrough'|'refused', reason?, figure, text, kind?, format?, backend?, bytesIn,
+ * normalize(file, { allowedOut, env, longEdge, everyS, maxFrames, scene, timeoutMs, reuse }) →
+ *   { decision: 'compressed'|'passthrough'|'cached'|'refused', reason?, figure, text, kind?, format?, backend?, bytesIn,
  *     bytesOut, frames, outputs: [{ path, bytes, t? }] }
  * `allowedOut` is the path the caller's Write check allowed; it must equal the first output
  * (engines/media.cjs target(): `<dir>/<name>.<longEdge>.<ext>` or `<dir>/<name>.frames/001.jpg`),
  * else nothing is spawned or written. An image the plan passes as itself (`same`) is its own output,
- * nothing written. `timeoutMs` bounds probe and run together (default 30 s for an image, 100 s for a
- * video). `figure` is the media figure line, or the refusal in one line. `text` ends with the line
- * `Read <path>` naming the one image to read. Never throws.
+ * nothing written. `reuse` writes nothing: the outputs an earlier run left (reusable()) come back as
+ * `cached`, else the refusal `not-reused`; an image that is its own output is still `passthrough`.
+ * `timeoutMs` bounds probe and run together (default 30 s for an image, 100 s for a video). `figure`
+ * is the media figure line, or the refusal in one line. `text` ends with the line `Read <path>`
+ * naming the one image to read. Never throws.
  */
 function normalize(file, opts) {
   const o = opts || {};
@@ -175,7 +224,11 @@ function normalize(file, opts) {
     if (p.refused) return refuse(p.refused, `media: ${be.name} could not measure ${path.basename(file)}`, withBe);
     let outputs;
     let err = null;
-    if (p.same) outputs = [{ path: file, bytes: bytesIn }];
+    const reused = o.reuse === true && !p.same;
+    if (reused) {
+      outputs = reusable(be, p, file, base, env, Math.min(PROBE_TIMEOUT_MS, left()), Number.isInteger(o.longEdge) && o.longEdge > 0 ? o.longEdge : media.LONG_EDGE);
+      if (!outputs) return refuse('not-reused', `media: no output of an earlier view newer than ${path.basename(file)} at ${first}`, withBe);
+    } else if (p.same) outputs = [{ path: file, bytes: bytesIn }];
     else if (k.kind === 'image') {
       const out = path.join(base, p.outputs[0].rel);
       const st = lstatOf(out);
@@ -202,9 +255,9 @@ function normalize(file, opts) {
     const lines = k.kind === 'image' ? [`Read ${outputs[0].path}${p.same ? '' : ' once to see it'}`]
       : outputs.map((x) => (x.t === undefined ? x.path : `${x.path}  t=${secs(x.t)}`));
     return {
-      decision: p.same ? 'passthrough' : 'compressed',
+      decision: p.same ? 'passthrough' : reused ? 'cached' : 'compressed',
       figure: p.same ? media.sameLine(bytesIn, o.longEdge) : media.figureLine(bytesIn, bytesOut, outputs.length),
-      text: [describe(k.kind, facts, p, be), ...lines].join('\n'),
+      text: [describe(k.kind, facts, p, be, reused), ...lines].join('\n'),
       kind: k.kind, format: k.format, backend: be.name, bytesIn, bytesOut, frames: outputs.length, outputs,
     };
   } catch (e) {
@@ -212,4 +265,4 @@ function normalize(file, opts) {
   }
 }
 
-module.exports = { normalize, backend, probe, headOf, NO_BACKEND };
+module.exports = { normalize, clearPlaceholder, backend, probe, headOf, NO_BACKEND, PLACEHOLDER };

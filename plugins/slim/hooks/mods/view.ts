@@ -2,7 +2,7 @@
 // channels use, without the whole source entering the context. A path is ruled on by a one-line Read
 // through the host, a command runs through Bash, and `out` is written through the host's Write tool,
 // so permission rules and every guard decide on each. An image or a video is resized by the core's
-// media backend beside the input, where the Read and Write checks allow or the person says yes.
+// media backend beside the input, once the host's Read and Write rules, or the mode's decider, allow it.
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
@@ -48,6 +48,8 @@ type Outcome = Viewed & { rung: 'path' | 'command' }
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
 const VIDEO_EXT = new Set(['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi'])
 const OUT_EXT = new Set(['png', 'jpg', 'jpeg', 'gif'])
+/** The body of the host Write that puts a media output to the mode's decider; scripts/delivery/media.cjs removes it by this text. */
+export const PLACEHOLDER = 'slim media placeholder'
 
 function nameParts(path: string): { dir: string; stem: string; ext: string } {
   const slash = path.lastIndexOf('/')
@@ -189,10 +191,58 @@ async function confirmed($: $, question: string): Promise<boolean> {
   }
 }
 
+/** The Write tool's input-validation refusals of a file already at the path, raised before the permission decider. */
+const UNREAD = /has not been read yet|since (read|it was last read|this session read)/i
+/** The Write tool's refusals of a binary file, raised after the decider allowed the Write. */
+const BINARY = /is not valid UTF-8|has NUL bytes|UTF-16 big-endian/i
+/** The marker of a frames folder slim made (scripts/delivery/media.cjs keeps the same name). */
+const FRAMES_MARK = '.slim-frames'
+
 /**
- * An image or a video: the Read tool cannot open a video, and the backend writes beside the input
- * outside the Write tool, so the permission checks rule on both and an `ask` from either becomes one
- * Yes/No question; an image still takes the one-line Read, so its guards rule too.
+ * The host's Write of PLACEHOLDER on `probe`, so a Write check's `ask` reaches the mode's decider (its
+ * dialog, classifier or rule); the backend then overwrites or removes the placeholder. null once the
+ * decider allowed (written, or a binary file there, which the backend overwrites); 'unread' when a
+ * file is there that this session has not read (UNREAD); else the refusal.
+ */
+async function writeProbe($: $, probe: string): Promise<Outcome | 'unread' | null> {
+  try {
+    const res = await $.tool.call({ tool: 'Write', file_path: probe, content: PLACEHOLDER } as never)
+    if (res.deny !== undefined) return refused('path', 'write-denied', res.deny)
+    if (res.isError !== true) return null
+    const text = String(res.text ?? '')
+    if (BINARY.test(text)) return null
+    return UNREAD.test(text) ? 'unread' : refused('path', 'write-failed', text || `view: writing ${probe} failed`)
+  } catch (err) {
+    return refused('path', 'write-failed', `view: Write failed (${errText(err)})`)
+  }
+}
+
+/**
+ * Reads the file at `probe` through the host, as the Write tool requires before it overwrites one; a
+ * video's first frame only inside a folder slim marked (FRAMES_MARK). null once read, else the refusal.
+ */
+async function readTaken($: $, probe: string, video: boolean): Promise<Outcome | null> {
+  const dir = probe.slice(0, probe.lastIndexOf('/'))
+  try {
+    if (video) {
+      const m = await $.tool.call({ tool: 'Read', file_path: `${dir}/${FRAMES_MARK}`, limit: 1 } as never)
+      if (m.deny !== undefined) return refused('path', 'read-denied', m.deny)
+      if (m.isError === true) return refused('path', 'out-taken', `view: ${dir} holds files slim did not write — not overwritten`)
+    }
+    const r = await $.tool.call({ tool: 'Read', file_path: probe, limit: 1 } as never)
+    return r.deny !== undefined ? refused('path', 'read-denied', r.deny) : null
+  } catch (err) {
+    return refused('path', 'read-denied', `view: Read failed (${errText(err)})`)
+  }
+}
+
+/**
+ * An image or a video: the backend writes beside the input outside the Write tool. A Write check's
+ * `ask` goes to the mode's decider through writeProbe(); an output already there that this session has
+ * not read is served as is while the core finds it newer than the input (no Write to decide), else it
+ * is Read through the host and the Write tried once more. An image takes the one-line Read, so its
+ * guards rule too. The one Yes/No question left is a Read check's `ask` on a non-image, which the Read
+ * tool cannot open; it covers the write too.
  */
 async function viewMedia($: $, path: string, a: Record<string, string>): Promise<Outcome> {
   const abs = path.startsWith('/') ? path : `${(await $.session.cwd()).replace(/\/+$/, '')}/${path}`
@@ -214,11 +264,20 @@ async function viewMedia($: $, path: string, a: Record<string, string>): Promise
     if (w.decision === 'deny') return refused('path', 'write-denied', `view: writing ${probe} is denied${w.reason ? ` (${w.reason})` : ''}`)
     askWrite = w.decision === 'ask'
   }
-  if (askRead || askWrite) {
+  if (askRead) {
     const what = VIDEO_EXT.has(ext) ? `frames into ${probe.slice(0, probe.lastIndexOf('/'))}/` : `a resized copy ${probe}`
     if (!(await confirmed($, `Let slim read ${abs} and write ${what}?`))) {
       return refused('path', 'not-confirmed', `view: not confirmed — reading ${abs} and writing ${what} needs a yes`)
     }
+  } else if (askWrite) {
+    let no = await writeProbe($, probe)
+    if (no === 'unread') {
+      const reused = await core($, 'path', { path, ...a, media: true, allowed_out: probe, reuse: true })
+      if (reused.reason !== 'not-reused') return reused
+      no = (await readTaken($, probe, VIDEO_EXT.has(ext))) ?? (await writeProbe($, probe))
+      if (no === 'unread') return refused('path', 'write-failed', `view: the Write tool still refuses ${probe} after reading it`)
+    }
+    if (no) return no
   }
   return core($, 'path', { path, ...a, media: true, allowed_out: probe })
 }

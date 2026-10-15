@@ -114,8 +114,10 @@ const isSpillOrHost = (p) => { try { return spill.isSpillOrHostFile(p); } catch 
 
 /**
  * One view request → the reply the hooks module turns into the tool's text.
- * request: { v:1, path? | text? | host_path?, command?, jq?, engine?, out?, media?, allowed_out?, root, cwd, session_id }
- * (`media` or `allowed_out` makes it media-only: a path whose bytes are not an image or a video is refused)
+ * request: { v:1, path? | text? | host_path?, command?, jq?, engine?, out?, media?, allowed_out?, reuse?, root, cwd, session_id }
+ * (`media` or `allowed_out` makes it media-only: a path whose bytes are not an image or a video is refused;
+ * a media placeholder at `allowed_out` is removed first, whatever the reply; `reuse` writes no media
+ * output: an earlier run's fresh one is `cached`, else the refusal `not-reused`)
  * reply:   { v:1, decision: 'compressed'|'narrowed'|'passthrough'|'cached'|'refused', reason?, engine,
  *            figure, text, bytesIn, bytesOut, stages, narrowed?, out?, lines?, write?: { path, marker, exists },
  *            pointer?, original?, outputs?, frames? }
@@ -126,6 +128,8 @@ function view(input, opts) {
   const o = opts || {};
   const created = o.created || [];
   const refuse = (reason, message, x) => ({ v: 1, decision: 'refused', reason, engine: null, figure: message.split('\n')[0], text: message, bytesIn: 0, bytesOut: 0, stages: [], ...x });
+  // Cleared before any refusal, so the hooks module's placeholder never outlives the request nor passes as an output.
+  if (typeof input.allowed_out === 'string') mediaD.clearPlaceholder(path.resolve(input.cwd || process.cwd(), input.allowed_out));
   const engine = typeof input.engine === 'string' && input.engine ? input.engine : null;
   if (engine && engine !== 'media' && !ENGINE_IDS.includes(engine)) return refuse('bad-engine', `view: unknown engine '${String(engine).slice(0, 32)}' — one of ${[...ENGINE_IDS, 'media'].join(', ')}`);
   const jqSrc = typeof input.jq === 'string' && input.jq.trim() ? input.jq : null;
@@ -146,7 +150,7 @@ function view(input, opts) {
       if (jqSrc || hasOut) return refuse('media-args', 'view: jq and out do not apply to an image or a video — its outputs land beside the input');
       // The check ruled on the path as given; a linked folder on the way (macOS /tmp) lands in the same place.
       const allowedOut = typeof input.allowed_out === 'string' ? landing(path.resolve(input.cwd || process.cwd(), input.allowed_out)) : undefined;
-      const m = mediaD.normalize(file, { allowedOut, env: process.env });
+      const m = mediaD.normalize(file, { allowedOut, env: process.env, reuse: input.reuse === true });
       const x = { engine: 'media', bytesIn: m.bytesIn, bytesOut: m.bytesOut, frames: m.frames, outputs: m.outputs };
       if (m.decision === 'refused') return refuse(m.reason, m.figure, x);
       return { v: 1, decision: m.decision, ...x, figure: m.figure, text: m.text, stages: [] };

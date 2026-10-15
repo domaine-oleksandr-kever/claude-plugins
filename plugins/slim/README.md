@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.11.2**.
+Current release: **slim v0.11.3**.
 
 ## Install
 
@@ -600,11 +600,32 @@ reply says so. With neither backend, or for a video with only sips, the answer i
 `media: no backend (install ffmpeg)`.
 
 The Read and Write permission checks rule on the input and on the exact output path (the image, or
-the first frame). An image already named as a copy has no Write check, since nothing is written. A deny from either is the answer. An `ask` from either becomes one Yes/No question
-that names both; a no, or a dismissed question, writes nothing. An image also takes the one-line
-Read, so PreToolUse guards rule on it. The Read tool cannot open a video, and the backend writes
-outside the Write tool. So for a video's input and for every output, only the permission rules and
-the person decide.
+the first frame). An image already named as a copy has no Write check, since nothing is written. A
+deny from either check is the answer. An image also takes the one-line Read, so PreToolUse guards
+rule on it.
+
+When the Write check answers `ask`, slim calls the host's Write tool on the output path with a
+placeholder text. Thus the current mode decides: the standard dialog in default mode, the
+classifier in auto mode, an allow in acceptEdits, a deny in dontAsk. A deny writes nothing. When the
+Write is allowed, the backend replaces the placeholder with the real output. The core removes the
+placeholder whenever it runs for that output path, before it decides. When the core never starts
+after the Write (`spawn-failed`), the placeholder stays until the next view of that file.
+
+An output from an earlier view can already be at that path. The Write tool then refuses before it
+asks the mode, because this session has not read that file (or it changed since the read). slim
+first tries to use the earlier output again, and writes nothing: the answer is `cached`. For an
+image, the copy must be newer than the input and fit 1568 px. For a video, the frames must be in a
+folder that slim marked, and each frame must be newer than the input. When slim cannot use the
+output again (for example, it is older than the input), slim reads it through the host and calls
+the Write tool once more, so the mode decides as above. The Write tool does not overwrite a binary
+file, but it refuses one only after the mode allowed the Write, so the backend then writes the
+output. For a video, slim reads the first frame only in a `<name>.frames` folder that slim marked.
+In any other folder, slim refuses (`out-taken`), asks nothing, and does not overwrite a frame.
+
+slim asks one Yes/No question of its own in one case only: a Read check that answers `ask` on a
+file that is not an image (a video, or a file given with `engine: "media"`), because the Read tool
+cannot open it. The question names the read and the write. A no, or a dismissed question, writes
+nothing.
 
 A file can go this way by its name or by `engine: "media"`. When its bytes are not an image or a
 video (a text file named `*.mp4`, or a link to one), view refuses it (`not-media`) and never shows

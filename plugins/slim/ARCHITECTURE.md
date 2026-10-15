@@ -286,13 +286,20 @@ every request.
               │                                                     the core gets the path it opened
               │              image / video name: image → the Read above, video → the Read check only;
               │                $.tool.check('Write', <stem>.1568.<ext> | <stem>.frames/001.jpg)
-              │                deny → refused; an ask from either → one $.ui.ask Yes/No; yes → allowed_out
+              │                deny → refused; Write ask → $.tool.call('Write', placeholder) on that path
+              │                (the mode's decider: dialog / classifier / acceptEdits / dontAsk) → allowed_out;
+              │                a file already there, unread or changed since its read → the core with
+              │                reuse: true (writes nothing; cached or not-reused); not-reused → Read it
+              │                (a video's 001.jpg only beside a .slim-frames marker, else out-taken) and
+              │                the Write once more; a binary refusal comes after the decider allowed → the
+              │                core; one $.ui.ask Yes/No only for a Read ask on a non-image
               │                (an image already named <stem>.1568.<ext> is its own output: no Write check)
               │
               └─ command ─▶ $.tool.call('Bash', { command })     (a host-persisted output → host_path)
               │
               ▼
           slim.cjs --view   (delivery/view.cjs)
+              allowed_out ─▶ clearPlaceholder()   (removes the module's placeholder before anything else)
               media bytes ──▶ delivery/media.cjs normalize(path, allowed_out) → outputs beside the input
               (a media request — media / allowed_out — over non-media bytes is refused, never read as text)
               text ─▶ out target (under <root|cwd>/.claude/tasks/<id>/ or the spill root) ─▶ cached?
@@ -323,7 +330,15 @@ image or a video (a text file named `*.mp4`, a link to one) is refused, never re
 hooks and guards that decide on the model's own writes decide on it. The compact text crosses the
 core's stdout once (`write` carries only the marker line), so the 4 MiB output cap measures the text,
 not two copies of it. Media outputs cannot be written that way (binary), so the module checks the
-exact first output path, asks the person when the check asks, and the core refuses any other path.
+exact first output path. On an `ask`, it writes a placeholder there through the Write tool, so the
+mode's own decider rules: a `$.ui.ask` of its own would ask even where auto mode allows silently. The
+core removes the placeholder before it decides, and refuses any other path; a core that never starts
+leaves it for the next view of that file. An output from an earlier view makes the Write tool refuse
+in its input validation (not read in this session), before the decider. The core then runs
+reuse-only: `cached` with the earlier outputs while they are newer than the input, nothing written.
+Else the module Reads the output through the host and writes once more; the Write tool's binary
+refusal comes after the decider allowed, so the core overwrites. The only `$.ui.ask` left is a Read
+`ask` on a non-image, which the Read tool cannot open.
 
 **Why view's result is not compressed again.** `channelOf` maps `mcp__slim__view` to `view`,
 which the intake skips like `lookup`: the answer is already compact and states its own figure.

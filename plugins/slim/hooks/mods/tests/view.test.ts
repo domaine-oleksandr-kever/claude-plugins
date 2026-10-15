@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BAD_ARGS, INLINE, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText } from '../view.ts'
+import { BAD_ARGS, INLINE, PLACEHOLDER, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText } from '../view.ts'
 import { viewText } from '../events.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
@@ -27,7 +27,7 @@ const REPLY = {
 
 type Check = 'allow' | 'ask' | 'deny'
 type Opts = {
-  reply?: Record<string, unknown>
+  reply?: Record<string, unknown> | ((stdin: any) => Record<string, unknown>)
   env?: Record<string, string>
   read?: Check
   write?: Check
@@ -57,7 +57,7 @@ function world(on: On, o: Opts = {}) {
     const stdin = JSON.parse(e.init?.stdin ?? 'null')
     if (e.argv[2] === '--view') {
       w.views.push({ stdin, timeoutMs: e.init?.timeoutMs })
-      return { value: ok(JSON.stringify(o.reply ?? REPLY)) }
+      return { value: ok(JSON.stringify((typeof o.reply === 'function' ? o.reply(stdin) : o.reply) ?? REPLY)) }
     }
     if (e.argv[2] === '--record') {
       w.records.push(stdin)
@@ -301,33 +301,199 @@ describe('V5 media', () => {
     expect(w.views[0].stdin.media).toBe(true)
   })
 
-  test('a Write check that asks: one Yes/No; yes runs the core', async ($, on) => {
-    const w = world(on, { write: 'ask', answer: 'Yes' })
+  const readOk = (e: any) => ({ result: { type: 'text', file: { filePath: e.file_path, content: '', numLines: 0, startLine: 1, totalLines: 0 } }, text: '' })
+  const imageRead = { result: { type: 'image', file: { base64: '', type: 'image/png', originalSize: 4096 } }, text: '' }
+  const refusal = (msg: string) => ({ isError: true, result: msg, text: `<tool_use_error>${msg}</tool_use_error>` })
+  /** The Write tool's input-validation refusals of a file this session has not read: before the decider. */
+  const UNREAD = [
+    'File has not been read yet. Read it first before writing to it.',
+    'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+    'File content has changed since it was last read. This commonly happens when a linter or formatter run via Bash rewrites the file. Call Read on this file to refresh, then retry the edit.',
+  ]
+  /** The Write tool's refusals of a binary file: after the decider allowed. */
+  const BINARY = [
+    'File is not valid UTF-8: it uses a legacy encoding such as Windows-1252, Shift-JIS or GBK, or it is binary. These tools write UTF-8 (or UTF-16LE behind its byte-order mark) and never convert a file\'s encoding on their own, so nothing was written.',
+    'File has NUL bytes in its first 8 KB: binary data, UTF-16/UTF-32 without a byte-order mark, or text with embedded NULs. These tools write UTF-8 (or UTF-16LE behind its byte-order mark) and never convert a file\'s encoding on their own, so nothing was written.',
+    'File is UTF-16 big-endian, which these tools do not write, so nothing was written.',
+  ]
+  /**
+   * A host with a file at the probe: the n-th Write answers `writes[n]` (a refusal text, `{ deny }`, or
+   * undefined = written); a Read of a frames marker succeeds when `marker`, any other Read answers an image.
+   */
+  const taken = (writes: (string | { deny: string } | undefined)[], marker = true) => {
+    let n = 0
+    return (e: any) => {
+      if (e.tool === 'Write') {
+        const r = writes[n++]
+        return r === undefined ? { result: { type: 'update', filePath: e.file_path }, text: 'ok' } : typeof r === 'string' ? refusal(r) : r
+      }
+      if (String(e.file_path).endsWith('/.slim-frames')) return marker ? readOk(e) : refusal('File does not exist.')
+      return imageRead
+    }
+  }
+  const trail = (w: any) => w.calls.map((c: any) => [c.tool, c.file_path, c.limit ?? c.content])
+
+  test('a Write check that asks: no question; the host Write puts the placeholder on the probe, then the core', async ($, on) => {
+    const w = world(on, { write: 'ask' })
     await view($, { path: '/repo/shot.png' })
-    expect(w.asked).toEqual(['Let slim read /repo/shot.png and write a resized copy /repo/shot.1568.png?'])
-    expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', allowed_out: '/repo/shot.1568.png' })
+    expect(w.asked).toEqual([])
+    expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER]])
+    expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.png' })
   })
 
-  const NOT_CONFIRMED = 'view: not confirmed — reading /repo/shot.png and writing a resized copy /repo/shot.1568.png needs a yes'
-  test('a Write check that asks and a no: refused before any spawn', async ($, on) => {
-    const w = world(on, { write: 'ask', answer: 'No' })
-    expect(await view($, { path: '/repo/shot.png' })).toBe(NOT_CONFIRMED)
+  test('the host denies the placeholder Write: its reason, no spawn', async ($, on) => {
+    const w = world(on, { write: 'ask', below: e => (e.tool === 'Write' ? { deny: 'Permission to write /repo/shot.1568.png was denied' } : readOk(e)) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('Permission to write /repo/shot.1568.png was denied')
+    expect(w.asked).toEqual([])
     expect(w.views).toEqual([])
-    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'not-confirmed' })
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
   })
 
-  test('a Write check that asks and a dismissed question: refused before any spawn', async ($, on) => {
-    const w = world(on, { write: 'ask', answer: null })
-    expect(await view($, { path: '/repo/shot.png' })).toBe(NOT_CONFIRMED)
+  test('the placeholder Write fails: refused write-failed, no spawn', async ($, on) => {
+    const w = world(on, { write: 'ask', below: e => (e.tool === 'Write' ? { isError: true, result: 'EACCES: permission denied', text: 'EACCES: permission denied' } : readOk(e)) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('EACCES: permission denied')
+    expect(w.asked).toEqual([])
     expect(w.views).toEqual([])
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-failed' })
   })
 
-  test('a video whose Read and Write checks both ask: one question for both', async ($, on) => {
+  const CACHED = { v: 1, decision: 'cached', engine: 'media', figure: 'media: 5000 B → 900 B (-82%) frames=1', text: 'image png 4000×3000 → the copy an earlier view made, newer than the input\nRead /repo/shot.1568.png once to see it', bytesIn: 5000, bytesOut: 900, stages: [], frames: 1 }
+  const NOT_REUSED = { v: 1, decision: 'refused', reason: 'not-reused', engine: 'media', figure: 'media: no output', text: 'media: no output', bytesIn: 0, bytesOut: 0, stages: [] }
+  /** The core's reply: `first` for the reuse-only request, REPLY for a writing one. */
+  const reuseThen = (first: Record<string, unknown>) => (stdin: any) => (stdin.reuse === true ? first : REPLY)
+
+  for (const msg of UNREAD) {
+    test(`a fresh copy at the probe the session has not read (${msg.slice(0, 32)}…): reused, no question, no second Write`, async ($, on) => {
+      const w = world(on, { write: 'ask', below: taken([msg]), reply: reuseThen(CACHED) })
+      const text = await view($, { path: '/repo/shot.png' })
+      expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER]])
+      expect(w.asked).toEqual([])
+      expect(w.views).toHaveLength(1)
+      expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.png', reuse: true })
+      expect(text).toBe(`${CACHED.figure}\n${CACHED.text}`)
+      expect(w.records[0]).toMatchObject({ decision: 'cached', engine: 'media' })
+    })
+  }
+
+  for (const msg of BINARY) {
+    test(`a binary file at the probe after the decider allowed (${msg.slice(0, 32)}…): the writing core, no reuse, no question`, async ($, on) => {
+      const w = world(on, { write: 'ask', below: taken([msg]) })
+      await view($, { path: '/repo/shot.png' })
+      expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER]])
+      expect(w.asked).toEqual([])
+      expect(w.views.map(v => v.stdin.reuse)).toEqual([undefined])
+      expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.png' })
+    })
+  }
+
+  const STALE = [['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER], ['Read', '/repo/shot.1568.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER]]
+
+  test('a stale copy the session has not read: Read through the host, the Write again, then the writing core; no question', async ($, on) => {
+    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[1]!, undefined]), reply: reuseThen(NOT_REUSED) })
+    await view($, { path: '/repo/shot.png' })
+    expect(trail(w)).toEqual(STALE)
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => v.stdin.reuse)).toEqual([true, undefined])
+    expect(w.views[1].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.png' })
+  })
+
+  test('a stale binary copy: Read, the Write again refused as binary after the decider allowed, then the writing core', async ($, on) => {
+    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, BINARY[1]!]), reply: reuseThen(NOT_REUSED) })
+    await view($, { path: '/repo/shot.png' })
+    expect(trail(w)).toEqual(STALE)
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => v.stdin.reuse)).toEqual([true, undefined])
+  })
+
+  test('the Write still unread after the Read: refused write-failed, no writing spawn, no question', async ($, on) => {
+    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, UNREAD[1]!]), reply: reuseThen(NOT_REUSED) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('view: the Write tool still refuses /repo/shot.1568.png after reading it')
+    expect(trail(w)).toEqual(STALE)
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => v.stdin.reuse)).toEqual([true])
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-failed' })
+  })
+
+  test('the host denies the second Write: refused write-denied, no writing spawn, no question', async ($, on) => {
+    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, { deny: 'Permission to write /repo/shot.1568.png was denied' }]), reply: reuseThen(NOT_REUSED) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('Permission to write /repo/shot.1568.png was denied')
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => v.stdin.reuse)).toEqual([true])
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
+  })
+
+  test('the Read of the copy is denied: refused read-denied, no second Write', async ($, on) => {
+    const w = world(on, { write: 'ask', answer: 'Yes', below: e => (e.tool === 'Write' ? refusal(UNREAD[0]!) : e.file_path === '/repo/shot.1568.png' ? { deny: 'guard: not that file' } : imageRead), reply: reuseThen(NOT_REUSED) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('guard: not that file')
+    expect(trail(w)).toEqual(STALE.slice(0, 3))
+    expect(w.asked).toEqual([])
+    expect(w.views).toHaveLength(1)
+  })
+
+  test('the reuse-only core refuses for another reason: that is the answer, no question', async ($, on) => {
+    const noBackend = { ...NOT_REUSED, reason: 'no-backend', figure: 'media: no backend (install ffmpeg)', text: 'media: no backend (install ffmpeg)' }
+    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!]), reply: reuseThen(noBackend) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('media: no backend (install ffmpeg)')
+    expect(w.asked).toEqual([])
+    expect(w.views).toHaveLength(1)
+  })
+
+  test('a video\'s fresh frames the session has not read: reused, no question', async ($, on) => {
+    const w = world(on, { write: 'ask', below: taken([UNREAD[0]!]), reply: reuseThen({ ...CACHED, frames: 4 }) })
+    await view($, { path: '/repo/rec.mov' })
+    expect(trail(w)).toEqual([['Write', '/repo/rec.frames/001.jpg', PLACEHOLDER]])
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => [v.stdin.allowed_out, v.stdin.reuse])).toEqual([['/repo/rec.frames/001.jpg', true]])
+  })
+
+  test('a video\'s stale frames in a folder slim marked: the marker and 001.jpg Read, the Write again, the writing core; no question', async ($, on) => {
+    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, undefined]), reply: reuseThen(NOT_REUSED) })
+    await view($, { path: '/repo/rec.mov' })
+    expect(trail(w)).toEqual([
+      ['Write', '/repo/rec.frames/001.jpg', PLACEHOLDER], ['Read', '/repo/rec.frames/.slim-frames', 1],
+      ['Read', '/repo/rec.frames/001.jpg', 1], ['Write', '/repo/rec.frames/001.jpg', PLACEHOLDER],
+    ])
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => v.stdin.reuse)).toEqual([true, undefined])
+  })
+
+  test('a video\'s frames folder slim did not mark: refused out-taken, no Read of 001.jpg, no second Write, no question', async ($, on) => {
+    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, undefined], false), reply: reuseThen(NOT_REUSED) })
+    expect(await view($, { path: '/repo/rec.mov' })).toBe('view: /repo/rec.frames holds files slim did not write — not overwritten')
+    expect(trail(w)).toEqual([['Write', '/repo/rec.frames/001.jpg', PLACEHOLDER], ['Read', '/repo/rec.frames/.slim-frames', 1]])
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => v.stdin.reuse)).toEqual([true])
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'out-taken' })
+  })
+
+  test('a video whose Read and Write checks both ask: one question for both, no placeholder Write', async ($, on) => {
     const w = world(on, { read: 'ask', write: 'ask', answer: 'Yes' })
     await view($, { path: '/repo/rec.mov' })
     expect(w.asked).toEqual(['Let slim read /repo/rec.mov and write frames into /repo/rec.frames/?'])
     expect(w.calls).toEqual([])
     expect(w.views).toHaveLength(1)
+  })
+
+  test('a video whose Read check asks and the Write check allows: the same one question', async ($, on) => {
+    const w = world(on, { read: 'ask', answer: 'Yes' })
+    await view($, { path: '/repo/rec.mov' })
+    expect(w.asked).toEqual(['Let slim read /repo/rec.mov and write frames into /repo/rec.frames/?'])
+    expect(w.calls).toEqual([])
+    expect(w.views).toHaveLength(1)
+  })
+
+  const NOT_CONFIRMED = 'view: not confirmed — reading /repo/rec.mov and writing frames into /repo/rec.frames/ needs a yes'
+  test('a video\'s question answered no: refused before any spawn', async ($, on) => {
+    const w = world(on, { read: 'ask', write: 'ask', answer: 'No' })
+    expect(await view($, { path: '/repo/rec.mov' })).toBe(NOT_CONFIRMED)
+    expect(w.views).toEqual([])
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'not-confirmed' })
+  })
+
+  test('a video\'s question dismissed: refused before any spawn', async ($, on) => {
+    const w = world(on, { read: 'ask', answer: null })
+    expect(await view($, { path: '/repo/rec.mov' })).toBe(NOT_CONFIRMED)
+    expect(w.views).toEqual([])
   })
 
   test('a guard that denies an image\'s Read: refused, no Write check, no spawn', async ($, on) => {
