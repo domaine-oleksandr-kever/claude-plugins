@@ -22,7 +22,7 @@
 # Usage:
 #   worktree-setup.sh <WORK-ID> [<base-branch>] [--copy <path>]…      (default base: develop)
 #       → worktree=… branch=… base=… branch_source=… reused=… npm=… copied=… kept=… missing=…
-#         settings=… workspace=… dev_port=…   followed by the hand-off block
+#         settings=… tasks_dir_allowed=… workspace=… dev_port=…   followed by the hand-off block
 #   worktree-setup.sh --remove <WORK-ID> [--force]
 #       → removed=… branch=… branch_kept=… workspace_kept=…
 #
@@ -35,6 +35,17 @@
 # the worktree's own git dir, so --remove does not count them as uncommitted work while they still
 # match the main checkout's. `.git`, `.claude`, `.claude/tasks` and `.claude/settings.local.json`
 # are refused.
+#
+# `.claude/settings.local.json` is the worktree's own: kept when it has one (`settings=kept`), else
+# copied from the main checkout (`settings=copied`), else created (`settings=created`; `absent` when
+# nothing could be written). The main checkout's physical `.claude/tasks` is merged into its
+# `permissions.additionalDirectories` once, every other key kept (`tasks_dir_allowed=added|present`),
+# so a write through the symlink no longer resolves outside the session's working directories; `.claude`
+# stays a protected path, prompted outside auto mode as in the main checkout. Stamped into
+# `info/exclude` like the link. The rewrite is atomic (temp file + rename). A file that is not a JSON object, or
+# whose `permissions` / `additionalDirectories` has another type, is never rewritten:
+# `warn=settings_local_invalid_json` (or `…_unexpected_shape`) and `tasks_dir_allowed=skipped`; no
+# `node` on PATH → `warn=settings_local_not_updated reason=no_node`.
 #
 # Remove mode refuses a dirty worktree — or one on a detached HEAD, whose commits nothing else
 # points at — unless --force, never deletes the branch and never deletes
@@ -175,8 +186,9 @@ MAIN="$(cd "$CDIR/.." 2>/dev/null && pwd -P || true)"
 # a symlink is not one. Unstamped, a bulk `git add` stages a link holding an absolute path from one
 # machine. No trailing slash here, so one line covers both the link and the main checkout's real
 # directory; `info/exclude` lives in the COMMON git dir, so one stamp serves every worktree.
-ensure_tasks_excluded() { # $1 = a checkout to ask check-ignore in
-  if git -C "$1" check-ignore -q .claude/tasks 2>/dev/null; then return 0; fi
+# `.claude/settings.local.json` holds an absolute path from one machine too.
+ensure_excluded() { # $1 = a checkout to ask check-ignore in, $2 = the repo-relative path to stamp
+  if git -C "$1" check-ignore -q "$2" 2>/dev/null; then return 0; fi
   mkdir -p "$CDIR/info"
   local exclude="$CDIR/info/exclude"
   # An exclude file whose last byte is not a newline is legal, and appending blind would glue
@@ -185,7 +197,7 @@ ensure_tasks_excluded() { # $1 = a checkout to ask check-ignore in
   if [ -s "$exclude" ] && [ -n "$(tail -c 1 "$exclude" 2>/dev/null)" ]; then
     printf '\n' >> "$exclude"
   fi
-  printf '.claude/tasks\n' >> "$exclude"
+  printf '%s\n' "$2" >> "$exclude"
 }
 
 REPO="$(basename "$MAIN")"
@@ -536,15 +548,59 @@ fi
 ln -s "$MAIN/.claude/tasks" "$LINK"
 # Asked in the WORKTREE: check-ignore answers per checkout, and this is the one a bulk `git add`
 # will run in.
-ensure_tasks_excluded "$WT"
+ensure_excluded "$WT" .claude/tasks
 
 SETTINGS=absent
-if [ -f "$WT/.claude/settings.local.json" ]; then SETTINGS=kept
+SETTINGS_FILE="$WT/.claude/settings.local.json"
+if [ -f "$SETTINGS_FILE" ]; then SETTINGS=kept
 elif [ -f "$MAIN/.claude/settings.local.json" ]; then
   # Copied, not shared: two sessions approving permissions would write the same file
   # concurrently and lose each other's approvals.
-  cp "$MAIN/.claude/settings.local.json" "$WT/.claude/settings.local.json"; SETTINGS=copied
+  cp "$MAIN/.claude/settings.local.json" "$SETTINGS_FILE"; SETTINGS=copied
 fi
+
+# The host resolves a write through the link to the main checkout, outside the worktree session's
+# working directories; registered as an additional one, that write gets no extra prompt for it.
+TASKS_DIR=skipped
+if command -v node >/dev/null 2>&1; then
+  TASKS_DIR="$(node -e '
+    const fs = require("fs");
+    const [file, dir] = process.argv.slice(1);
+    const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+    let cfg = {};
+    if (fs.existsSync(file)) {
+      try { cfg = JSON.parse(fs.readFileSync(file, "utf8")); } catch { process.stdout.write("invalid_json"); process.exit(0); }
+    }
+    if (!isObj(cfg)) { process.stdout.write("invalid_json"); process.exit(0); }
+    const perms = cfg.permissions === undefined ? (cfg.permissions = {}) : cfg.permissions;
+    if (!isObj(perms)) { process.stdout.write("unexpected_shape"); process.exit(0); }
+    const dirs = perms.additionalDirectories === undefined ? (perms.additionalDirectories = []) : perms.additionalDirectories;
+    if (!Array.isArray(dirs)) { process.stdout.write("unexpected_shape"); process.exit(0); }
+    if (dirs.includes(dir)) { process.stdout.write("present"); process.exit(0); }
+    dirs.push(dir);
+    // Written beside and renamed over: a short write must never truncate the approvals already in the file.
+    const tmp = file + ".tmp-" + process.pid;
+    const mode = fs.existsSync(file) ? fs.statSync(file).mode & 0o777 : 0o644;
+    try { fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode }); fs.renameSync(tmp, file); }
+    catch { try { fs.unlinkSync(tmp); } catch {} process.exit(0); }
+    process.stdout.write("added");
+  ' "$SETTINGS_FILE" "$MAIN/.claude/tasks" 2>/dev/null || true)"
+  # A node killed by a signal (SIGXFSZ) leaves its temp file behind.
+  rm -f "$SETTINGS_FILE".tmp-*
+  case "$TASKS_DIR" in
+    added) [ "$SETTINGS" != absent ] || SETTINGS=created ;;
+    present) ;;
+    invalid_json|unexpected_shape)
+      warn "settings_local_$TASKS_DIR path=$SETTINGS_FILE (left as it is; add $MAIN/.claude/tasks to its permissions.additionalDirectories by hand, or the host asks on every write to the shared task workspace)"
+      TASKS_DIR=skipped ;;
+    *)
+      warn "settings_local_not_updated path=$SETTINGS_FILE reason=write_failed"
+      TASKS_DIR=skipped ;;
+  esac
+else
+  warn "settings_local_not_updated path=$SETTINGS_FILE reason=no_node (add $MAIN/.claude/tasks to its permissions.additionalDirectories by hand, or the host asks on every write to the shared task workspace)"
+fi
+[ ! -f "$SETTINGS_FILE" ] || ensure_excluded "$WT" .claude/settings.local.json
 
 printf 'worktree=%s\n' "$WT"
 printf 'branch=%s\n' "$BRANCH_REPORT"
@@ -556,6 +612,7 @@ printf 'copied=%s\n' "${COPIED:-none}"
 printf 'kept=%s\n' "${KEPT:-none}"
 printf 'missing=%s\n' "${MISSING:-none}"
 printf 'settings=%s\n' "$SETTINGS"
+printf 'tasks_dir_allowed=%s\n' "$TASKS_DIR"
 printf 'workspace=%s\n' "$WORKSPACE"
 printf 'dev_port=%s\n' "$PORT"
 

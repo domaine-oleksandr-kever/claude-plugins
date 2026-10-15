@@ -72,6 +72,12 @@ Each path becomes one `--copy <path>` argument. The script refuses a path that l
 
 - `.claude/tasks` is a link to the main checkout's: both sessions read and write one workspace, and
   band's checklist follows it. Write through the link; never replace it with a directory.
+- The worktree's `.claude/settings.local.json` lists the main checkout's `.claude/tasks` in
+  `permissions.additionalDirectories` (`tasks_dir_allowed=added|present`), so a write through the link
+  no longer counts as outside the working directories: in auto mode it goes to the classifier like any
+  `.claude/` write, and Manual or accept-edits mode still asks, as in the main checkout. A
+  `warn=settings_local_…` line means the entry is missing: relay it, and the developer adds the path
+  to `additionalDirectories` by hand (an allow rule does not help: `.claude` is a protected path).
 - Screenshots and other scratch from the browser tools go under `.claude/tmp/<WORK-ID>/` of the
   worktree, not into the shared workspace's `tmp/` — base's scratch-path guard names the path when it
   refuses one.

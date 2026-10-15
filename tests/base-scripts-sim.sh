@@ -35,6 +35,11 @@ wt_run() { # wt_run <args…>   ; stdout -> $O, stderr -> $E
 }
 wt_branch() { wt_git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null || true; }
 wt_key() { grep "^$1=" "$O" | head -1 | cut -d= -f2- ; }
+wt_perm() { # wt_perm <settings.json> <key> — permissions.<key> as compact JSON (null when unset)
+  node -e 'const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const v = (c.permissions || {})[process.argv[2]]; process.stdout.write(JSON.stringify(v === undefined ? null : v));' \
+    "$1" "$2" 2>/dev/null
+}
 show() { tr '\n' ';' < "$O" | head -c 400; }
 
 wt_wait_port() { # blocks until 127.0.0.1:$1 accepts (5 s cap)
@@ -139,6 +144,17 @@ if [ -L "$W1DIR/.claude/tasks" ] \
    && grep -q '^settings=copied$' "$O"; then ok
 else bad W3-claude-wiring "link=$(ls -l "$W1DIR/.claude" 2>&1 | tr '\n' ';')"; fi
 
+# W3d: the copy registers the main checkout's physical `.claude/tasks` as an additional directory
+# and keeps the approvals it carried; the main checkout's own file is untouched
+W1SET="$W1DIR/.claude/settings.local.json"
+if grep -q '^tasks_dir_allowed=added$' "$O" \
+   && [ "$(wt_perm "$W1SET" additionalDirectories)" = "[\"$WTMAIN/.claude/tasks\"]" ] \
+   && [ "$(wt_perm "$W1SET" allow)" = '["Bash(ls:*)"]' ] \
+   && [ "$(cat "$WTR/theme/.claude/settings.local.json")" = '{"permissions":{"allow":["Bash(ls:*)"]}}' ] \
+   && wt_git -C "$W1DIR" check-ignore -q .claude/settings.local.json \
+   && ! wt_git -C "$W1DIR" status --porcelain -uall | grep -q 'settings\.local'; then ok
+else bad W3d-tasks-dir-registered "out=$(show) settings=$(tr '\n' ' ' < "$W1SET" 2>&1)"; fi
+
 # W3c: the symlink is stamped into the shared `.git/info/exclude`, so git never sees it
 if ! wt_git -C "$W1DIR" status --porcelain -uall | grep -q '\.claude/tasks' \
    && grep -qx '\.claude/tasks' "$WTR/theme/.git/info/exclude"; then ok
@@ -159,6 +175,12 @@ if [ "$rc" -eq 0 ] && grep -q '^reused=true$' "$O" && [ "$(wt_key dev_port)" = "
    && grep -q '^settings=kept$' "$O" \
    && [ "$(grep -c 'dev-port:' "$WTR/theme/.claude/tasks/ABC-123/notes.md")" -eq 1 ]; then ok
 else bad W6-idempotent-rerun "rc=$rc out=$(show)"; fi
+
+# W6b: the re-entry finds the directory registered and does not add it twice
+if grep -q '^tasks_dir_allowed=present$' "$O" \
+   && [ "$(wt_perm "$W1SET" additionalDirectories)" = "[\"$WTMAIN/.claude/tasks\"]" ] \
+   && [ "$(wt_perm "$W1SET" allow)" = '["Bash(ls:*)"]' ]; then ok
+else bad W6b-tasks-dir-once "out=$(show) settings=$(tr '\n' ' ' < "$W1SET" 2>&1)"; fi
 
 # W7: a kebab-case slug is a valid work-id too
 rc=0; wt_run header-refactor || rc=$?
@@ -400,6 +422,64 @@ rc=0; (cd "$WTR/sep/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/
 if [ "$rc" -eq 1 ] && grep -q '^error=unsupported_layout' "$O" \
    && [ ! -e "$WTR/sep-SEP-1" ] && [ ! -e "$WTR/sep/realgit/.claude" ]; then ok
 else bad W27-separate-git-dir "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' ')"; fi
+
+# W28: no settings in the main checkout → the worktree's file is created holding only the registration
+mk_repo "$WTR/st"
+WT_ST_MAIN="$(cd "$WTR/st/theme" && pwd -P)"
+WT_ST_SET="$WTR/st/theme-ST-1/.claude/settings.local.json"
+rc=0; repo_run "$WTR/st" ST-1 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^settings=created$' "$O" && grep -q '^tasks_dir_allowed=added$' "$O" \
+   && [ "$(node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))))' "$WT_ST_SET" 2>/dev/null)" \
+        = "{\"permissions\":{\"additionalDirectories\":[\"$WT_ST_MAIN/.claude/tasks\"]}}" ] \
+   && [ ! -e "$WTR/st/theme/.claude/settings.local.json" ] \
+   && wt_git -C "$WTR/st/theme-ST-1" check-ignore -q .claude/settings.local.json \
+   && [ -z "$(wt_git -C "$WTR/st/theme-ST-1" status --porcelain -uall)" ]; then ok
+else bad W28-settings-created "rc=$rc out=$(show) settings=$(tr '\n' ' ' < "$WT_ST_SET" 2>&1)"; fi
+
+# W28b: a settings.local.json that is not JSON is left byte for byte, named in a warning, and the run goes on
+printf '{"permissions": {"allow": [' > "$WT_ST_SET"
+cp "$WT_ST_SET" "$WTR/st/settings.before"
+rc=0; repo_run "$WTR/st" ST-1 || rc=$?
+if [ "$rc" -eq 0 ] && cmp -s "$WT_ST_SET" "$WTR/st/settings.before" \
+   && grep -qF "warn=settings_local_invalid_json path=$WT_ST_MAIN-ST-1/.claude/settings.local.json" "$O" \
+   && grep -q '^settings=kept$' "$O" && grep -q '^tasks_dir_allowed=skipped$' "$O" \
+   && grep -q '^dev_port=' "$O"; then ok
+else bad W28b-settings-invalid-json "rc=$rc out=$(show)"; fi
+
+# W28d: `additionalDirectories` of another type is the developer's value: never replaced, only named
+printf '{"permissions":{"additionalDirectories":"x"}}' > "$WT_ST_SET"
+cp "$WT_ST_SET" "$WTR/st/settings.before"
+rc=0; repo_run "$WTR/st" ST-1 || rc=$?
+if [ "$rc" -eq 0 ] && cmp -s "$WT_ST_SET" "$WTR/st/settings.before" \
+   && grep -qF "warn=settings_local_unexpected_shape path=$WT_ST_MAIN-ST-1/.claude/settings.local.json" "$O" \
+   && grep -q '^tasks_dir_allowed=skipped$' "$O"; then ok
+else bad W28d-settings-unexpected-shape "rc=$rc out=$(show)"; fi
+
+# W28e: a rewrite cut short (a 512-byte file-size limit) leaves the file byte for byte and no temp file.
+# The report goes through a pipe: the limit would cut a redirect to a file too.
+node -e 'const allow = Array.from({ length: 40 }, (_, i) => "Bash(cmd-" + i + ":*)");
+  process.stdout.write(JSON.stringify({ permissions: { allow } }, null, 2));' > "$WT_ST_SET"
+cp "$WT_ST_SET" "$WTR/st/settings.before"
+( ulimit -f 1; cd "$WTR/st/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+    "$BASH_BIN" "$WTS" ST-1 ) 2>"$E" | cat > "$O"
+rc="${PIPESTATUS[0]}"
+if [ "$rc" -eq 0 ] && [ "$(wc -c < "$WTR/st/settings.before")" -gt 512 ] \
+   && cmp -s "$WT_ST_SET" "$WTR/st/settings.before" \
+   && grep -q '^warn=settings_local_not_updated .*reason=write_failed' "$O" \
+   && grep -q '^tasks_dir_allowed=skipped$' "$O" \
+   && [ -z "$(find "$(dirname "$WT_ST_SET")" -name 'settings.local.json.tmp-*')" ]; then ok
+else bad W28e-settings-short-write "rc=$rc out=$(show) dir=$(ls -a "$(dirname "$WT_ST_SET")" | tr '\n' ' ')"; fi
+
+# W28c: no node → nothing is written, the run says so and goes on
+WTS_NN="$WTR/worktree-setup-nonode.sh"
+sed 's#command -v node #command -v base-sim-no-node #' "$WTS" > "$WTS_NN"
+rc=0; (cd "$WTR/st/theme" && HOME="$WTR/home" GIT_CONFIG_NOSYSTEM=1 PATH="$WTR/shim:$PATH" \
+  "$BASH_BIN" "$WTS_NN" ST-2) >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'base-sim-no-node' "$WTS_NN" \
+   && grep -q '^warn=settings_local_not_updated .*reason=no_node' "$O" \
+   && grep -q '^settings=absent$' "$O" && grep -q '^tasks_dir_allowed=skipped$' "$O" \
+   && [ ! -e "$WTR/st/theme-ST-2/.claude/settings.local.json" ] && [ -d "$WTR/st/theme-ST-2" ]; then ok
+else bad W28c-settings-no-node "rc=$rc out=$(show)"; fi
 
 # W31: two setups at once never share a port: RACE-1 is frozen inside `npm ci` while RACE-2 runs
 mk_repo "$WTR/race"

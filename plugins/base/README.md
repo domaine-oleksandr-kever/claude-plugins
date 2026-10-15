@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.10.2**.
+Current release: **base v0.10.3**.
 
 ## Status
 
@@ -157,6 +157,15 @@ The paths are repo-relative files or directories, separated by `, `. The skill p
 `scripts/worktree-setup.sh` as `--copy <path>`. The script refuses `.git`, `.claude`, `.claude/tasks`
 and `.claude/settings.local.json`. A team step that must follow, such as a per-worktree config to
 adjust, runs from the team plugin's own skill.
+
+The worktree's `.claude/settings.local.json` (its own, else copied from the main checkout, else created) lists the
+main checkout's `.claude/tasks` under `permissions.additionalDirectories`. A write through the
+`.claude/tasks` link resolves outside the worktree, and without that entry Claude Code asks for
+permission on every one. With it, a write there is treated like any other `.claude/` write: auto mode
+hands it to the classifier, and Manual and accept-edits modes still ask, because `.claude` is a
+protected path. The script merges the entry into the other keys, writes it atomically, stamps the file
+into `info/exclude`, and never rewrites a file that is not valid JSON
+(`warn=settings_local_invalid_json`).
 
 ## Commands
 
@@ -520,7 +529,7 @@ Agents never read `.env` themselves.
 | `tests/base-figma-rest-sim.sh` | `scripts/figma-rest.sh`: the token, the modes, `--policy`, the cache, retries, the out-dir gate |
 | `tests/base-md-to-adf.mjs` | `scripts/md-to-adf.cjs`: the ADF it writes, the CLI contract, round trips through slim's adf engine |
 | `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts, `--json`, `--log-dir`, Windows |
-| `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list) and the `scripts/scratch-hygiene.cjs` sweep |
+| `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list, the `settings.local.json` registration) and the `scripts/scratch-hygiene.cjs` sweep |
 | `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, the `--check` marker verdicts (fresh / stale / other-branch / none, read-only, per worktree), bash 3.2 |
 | `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get` (JSON and `--field` raw values, a missing field prints nothing, an unknown field is a usage error), `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
 | `tests/base-shopify-validate-sim.sh` | `scripts/shopify-validate.cjs` against a fake `npx` on `PATH`: the handshake and the constant prompt, valid / invalid, stray frames, every unavailable shape incl. `server_exited_early` and its `_npx` dir, a plain `INVALID` status, the timeout and the kill after the server spoke, no kill while `npx` still installs, `BASE_SHOPIFY_VALIDATE=0`, usage; `SIM_LIVE=1` adds two cases against the real server |
