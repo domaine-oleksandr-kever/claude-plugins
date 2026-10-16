@@ -94,7 +94,7 @@ describe('V1 registration', () => {
   })
 
   test('the description names both out roots: the session root and the working directory', () => {
-    expect(VIEW_DESC).toContain('(one already within that stays as it is)')
+    expect(VIEW_DESC).toContain('a JPEG copy at most 1568 px on its long edge and about 150 KB (one already within both stays as it is)')
     expect(VIEW_DESC).toContain('out writes the compact text to a file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root)')
   })
 })
@@ -270,25 +270,34 @@ describe('V4 out', () => {
 
 describe('V5 media', () => {
   test('an image: a one-line Read, the Write check on the first output, then the core gets it as allowed_out', async ($, on) => {
-    const figure = 'media: 5000 B → 900 B (-82%) frames=1'
-    const w = world(on, { reply: { v: 1, decision: 'compressed', engine: 'media', figure, text: 'image png 4000×3000 → 1568×1176, metadata stripped (ffmpeg)\nRead /repo/a/shot.1568.png once to see it', bytesIn: 5000, bytesOut: 900, stages: [], frames: 1 } })
+    const figure = 'view shot.webp: 5 KB → 900 B (-82%) · 1568 px · jpeg'
+    const w = world(on, { reply: { v: 1, decision: 'compressed', engine: 'media', figure, text: 'image webp 4000×3000 → 1568×1176 jpeg q60, metadata stripped (ffmpeg)\nRead /repo/a/shot.1568.jpg once to see it', bytesIn: 5000, bytesOut: 900, stages: [], frames: 1 } })
     const text = await view($, { path: '/repo/a/shot.webp' })
-    expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: '/repo/a/shot.webp' } }, { tool: 'Write', input: { file_path: '/repo/a/shot.1568.png' } }])
+    expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: '/repo/a/shot.webp' } }, { tool: 'Write', input: { file_path: '/repo/a/shot.1568.jpg' } }])
     expect(w.calls.map(c => [c.tool, c.file_path, c.limit])).toEqual([['Read', '/repo/a/shot.webp', 1]])
     expect(w.asked).toEqual([])
-    expect(w.views[0].stdin).toMatchObject({ path: '/repo/a/shot.webp', media: true, allowed_out: '/repo/a/shot.1568.png' })
-    expect(text).toBe(`${figure}\nimage png 4000×3000 → 1568×1176, metadata stripped (ffmpeg)\nRead /repo/a/shot.1568.png once to see it`)
+    expect(w.views[0].stdin).toMatchObject({ path: '/repo/a/shot.webp', media: true, allowed_out: '/repo/a/shot.1568.jpg' })
+    expect(text).toBe(`${figure}\nimage webp 4000×3000 → 1568×1176 jpeg q60, metadata stripped (ffmpeg)\nRead /repo/a/shot.1568.jpg once to see it`)
     expect(w.records[0]).toMatchObject({ engine: 'media', frames: 1 })
   })
 
+  test('a small png under the byte cap: the Write check names the .1568.jpg copy, the core passes the input as itself', async ($, on) => {
+    const figure = 'view small.png: 90 KB · 1000 px — fits, no copy'
+    const w = world(on, { reply: { v: 1, decision: 'passthrough', engine: 'media', figure, text: 'image png 1000×800, not re-encoded (ffmpeg)\nRead /repo/a/small.png', bytesIn: 92160, bytesOut: 92160, stages: [], frames: 1 } })
+    const text = await view($, { path: '/repo/a/small.png' })
+    expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: '/repo/a/small.png' } }, { tool: 'Write', input: { file_path: '/repo/a/small.1568.jpg' } }])
+    expect(w.views[0].stdin).toMatchObject({ path: '/repo/a/small.png', media: true, allowed_out: '/repo/a/small.1568.jpg' })
+    expect(text).toBe(`${figure}\nimage png 1000×800, not re-encoded (ffmpeg)\nRead /repo/a/small.png`)
+  })
+
   test('an image that is already a copy: no Write check and no question, the input is its own allowed_out', async ($, on) => {
-    const figure = 'media: 900 B, already ≤1568 px — no copy'
-    const w = world(on, { write: 'ask', reply: { v: 1, decision: 'passthrough', engine: 'media', figure, text: 'image png 1568×1176, not re-encoded (ffmpeg)\nRead /repo/a/shot.1568.png', bytesIn: 900, bytesOut: 900, stages: [], frames: 1 } })
-    const text = await view($, { path: 'a/shot.1568.png' })
-    expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: 'a/shot.1568.png' } }])
+    const figure = 'view shot.1568.jpg: 900 B · 1568 px — fits, no copy'
+    const w = world(on, { write: 'ask', reply: { v: 1, decision: 'passthrough', engine: 'media', figure, text: 'image jpeg 1568×1176, not re-encoded (ffmpeg)\nRead /repo/a/shot.1568.jpg', bytesIn: 900, bytesOut: 900, stages: [], frames: 1 } })
+    const text = await view($, { path: 'a/shot.1568.jpg' })
+    expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: 'a/shot.1568.jpg' } }])
     expect(w.asked).toEqual([])
-    expect(w.views[0].stdin).toMatchObject({ path: 'a/shot.1568.png', media: true, allowed_out: '/repo/a/shot.1568.png' })
-    expect(text).toBe(`${figure}\nimage png 1568×1176, not re-encoded (ffmpeg)\nRead /repo/a/shot.1568.png`)
+    expect(w.views[0].stdin).toMatchObject({ path: 'a/shot.1568.jpg', media: true, allowed_out: '/repo/a/shot.1568.jpg' })
+    expect(text).toBe(`${figure}\nimage jpeg 1568×1176, not re-encoded (ffmpeg)\nRead /repo/a/shot.1568.jpg`)
     expect(w.records[0]).toMatchObject({ decision: 'passthrough', engine: 'media' })
   })
 
@@ -337,13 +346,13 @@ describe('V5 media', () => {
     const w = world(on, { write: 'ask' })
     await view($, { path: '/repo/shot.png' })
     expect(w.asked).toEqual([])
-    expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER]])
-    expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.png' })
+    expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.jpg', PLACEHOLDER]])
+    expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.jpg' })
   })
 
   test('the host denies the placeholder Write: its reason, no spawn', async ($, on) => {
-    const w = world(on, { write: 'ask', below: e => (e.tool === 'Write' ? { deny: 'Permission to write /repo/shot.1568.png was denied' } : readOk(e)) })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('Permission to write /repo/shot.1568.png was denied')
+    const w = world(on, { write: 'ask', below: e => (e.tool === 'Write' ? { deny: 'Permission to write /repo/shot.1568.jpg was denied' } : readOk(e)) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('Permission to write /repo/shot.1568.jpg was denied')
     expect(w.asked).toEqual([])
     expect(w.views).toEqual([])
     expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
@@ -357,7 +366,7 @@ describe('V5 media', () => {
     expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-failed' })
   })
 
-  const CACHED = { v: 1, decision: 'cached', engine: 'media', figure: 'media: 5000 B → 900 B (-82%) frames=1', text: 'image png 4000×3000 → the copy an earlier view made, newer than the input\nRead /repo/shot.1568.png once to see it', bytesIn: 5000, bytesOut: 900, stages: [], frames: 1 }
+  const CACHED = { v: 1, decision: 'cached', engine: 'media', figure: 'view shot.png: 5 KB → 900 B (-82%) · 1568 px · jpeg', text: 'image png 4000×3000 → the copy an earlier view made, newer than the input\nRead /repo/shot.1568.jpg once to see it', bytesIn: 5000, bytesOut: 900, stages: [], frames: 1 }
   const NOT_REUSED = { v: 1, decision: 'refused', reason: 'not-reused', engine: 'media', figure: 'media: no output', text: 'media: no output', bytesIn: 0, bytesOut: 0, stages: [] }
   /** The core's reply: `first` for the reuse-only request, REPLY for a writing one. */
   const reuseThen = (first: Record<string, unknown>) => (stdin: any) => (stdin.reuse === true ? first : REPLY)
@@ -366,10 +375,10 @@ describe('V5 media', () => {
     test(`a fresh copy at the probe the session has not read (${msg.slice(0, 32)}…): reused, no question, no second Write`, async ($, on) => {
       const w = world(on, { write: 'ask', below: taken([msg]), reply: reuseThen(CACHED) })
       const text = await view($, { path: '/repo/shot.png' })
-      expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER]])
+      expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.jpg', PLACEHOLDER]])
       expect(w.asked).toEqual([])
       expect(w.views).toHaveLength(1)
-      expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.png', reuse: true })
+      expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.jpg', reuse: true })
       expect(text).toBe(`${CACHED.figure}\n${CACHED.text}`)
       expect(w.records[0]).toMatchObject({ decision: 'cached', engine: 'media' })
     })
@@ -379,14 +388,14 @@ describe('V5 media', () => {
     test(`a binary file at the probe after the decider allowed (${msg.slice(0, 32)}…): the writing core, no reuse, no question`, async ($, on) => {
       const w = world(on, { write: 'ask', below: taken([msg]) })
       await view($, { path: '/repo/shot.png' })
-      expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER]])
+      expect(trail(w)).toEqual([['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.jpg', PLACEHOLDER]])
       expect(w.asked).toEqual([])
       expect(w.views.map(v => v.stdin.reuse)).toEqual([undefined])
-      expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.png' })
+      expect(w.views[0].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.jpg' })
     })
   }
 
-  const STALE = [['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER], ['Read', '/repo/shot.1568.png', 1], ['Write', '/repo/shot.1568.png', PLACEHOLDER]]
+  const STALE = [['Read', '/repo/shot.png', 1], ['Write', '/repo/shot.1568.jpg', PLACEHOLDER], ['Read', '/repo/shot.1568.jpg', 1], ['Write', '/repo/shot.1568.jpg', PLACEHOLDER]]
 
   test('a stale copy the session has not read: Read through the host, the Write again, then the writing core; no question', async ($, on) => {
     const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[1]!, undefined]), reply: reuseThen(NOT_REUSED) })
@@ -394,7 +403,7 @@ describe('V5 media', () => {
     expect(trail(w)).toEqual(STALE)
     expect(w.asked).toEqual([])
     expect(w.views.map(v => v.stdin.reuse)).toEqual([true, undefined])
-    expect(w.views[1].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.png' })
+    expect(w.views[1].stdin).toMatchObject({ path: '/repo/shot.png', media: true, allowed_out: '/repo/shot.1568.jpg' })
   })
 
   test('a stale binary copy: Read, the Write again refused as binary after the decider allowed, then the writing core', async ($, on) => {
@@ -407,7 +416,7 @@ describe('V5 media', () => {
 
   test('the Write still unread after the Read: refused write-failed, no writing spawn, no question', async ($, on) => {
     const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, UNREAD[1]!]), reply: reuseThen(NOT_REUSED) })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('view: the Write tool still refuses /repo/shot.1568.png after reading it')
+    expect(await view($, { path: '/repo/shot.png' })).toBe('view: the Write tool still refuses /repo/shot.1568.jpg after reading it')
     expect(trail(w)).toEqual(STALE)
     expect(w.asked).toEqual([])
     expect(w.views.map(v => v.stdin.reuse)).toEqual([true])
@@ -415,15 +424,15 @@ describe('V5 media', () => {
   })
 
   test('the host denies the second Write: refused write-denied, no writing spawn, no question', async ($, on) => {
-    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, { deny: 'Permission to write /repo/shot.1568.png was denied' }]), reply: reuseThen(NOT_REUSED) })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('Permission to write /repo/shot.1568.png was denied')
+    const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, { deny: 'Permission to write /repo/shot.1568.jpg was denied' }]), reply: reuseThen(NOT_REUSED) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('Permission to write /repo/shot.1568.jpg was denied')
     expect(w.asked).toEqual([])
     expect(w.views.map(v => v.stdin.reuse)).toEqual([true])
     expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
   })
 
   test('the Read of the copy is denied: refused read-denied, no second Write', async ($, on) => {
-    const w = world(on, { write: 'ask', answer: 'Yes', below: e => (e.tool === 'Write' ? refusal(UNREAD[0]!) : e.file_path === '/repo/shot.1568.png' ? { deny: 'guard: not that file' } : imageRead), reply: reuseThen(NOT_REUSED) })
+    const w = world(on, { write: 'ask', answer: 'Yes', below: e => (e.tool === 'Write' ? refusal(UNREAD[0]!) : e.file_path === '/repo/shot.1568.jpg' ? { deny: 'guard: not that file' } : imageRead), reply: reuseThen(NOT_REUSED) })
     expect(await view($, { path: '/repo/shot.png' })).toBe('guard: not that file')
     expect(trail(w)).toEqual(STALE.slice(0, 3))
     expect(w.asked).toEqual([])
@@ -505,7 +514,7 @@ describe('V5 media', () => {
 
   test('a Write check that denies: its reason, no spawn', async ($, on) => {
     const w = world(on, { write: 'deny' })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('view: writing /repo/shot.1568.png is denied (Write denied by rule)')
+    expect(await view($, { path: '/repo/shot.png' })).toBe('view: writing /repo/shot.1568.jpg is denied (Write denied by rule)')
     expect(w.views).toEqual([])
   })
 
@@ -557,12 +566,13 @@ describe('V8 pure helpers', () => {
   test('mediaName and mediaProbe from the name alone', () => {
     expect([mediaName('/a/b.PNG'), mediaName('/a/b.mp4'), mediaName('/a/b.json'), mediaName('/a/.png')]).toEqual([true, true, false, false])
     expect(mediaProbe('/a/b.JPG')).toBe('/a/b.1568.jpg')
-    expect(mediaProbe('/a/b.webp')).toBe('/a/b.1568.png')
-    expect(mediaProbe('/a/x.y.gif')).toBe('/a/x.y.1568.gif')
+    expect(mediaProbe('/a/b.webp')).toBe('/a/b.1568.jpg')
+    expect(mediaProbe('/a/x.y.gif')).toBe('/a/x.y.1568.jpg')
     expect(mediaProbe('/a/clip.webm')).toBe('/a/clip.frames/001.jpg')
-    expect(mediaProbe('/shot.png')).toBe('/shot.1568.png')
+    expect(mediaProbe('/shot.png')).toBe('/shot.1568.jpg')
     for (const p of ['/a/b.JPG', '/a/b.webp', '/a/x.y.gif', '/shot.png', '/a/b']) expect(mediaProbe(mediaProbe(p))).toBe(mediaProbe(p))
-    expect([mediaProbe('/a/b.1568.JPG'), mediaProbe('/a/b.1568.webp'), mediaProbe('/a/b.800.png')]).toEqual(['/a/b.1568.JPG', '/a/b.1568.1568.png', '/a/b.800.1568.png'])
+    expect([mediaProbe('/a/b.1568.JPG'), mediaProbe('/a/b.1568.jpeg'), mediaProbe('/a/b.1568.png'), mediaProbe('/a/b.1568.webp'), mediaProbe('/a/b.800.png')])
+      .toEqual(['/a/b.1568.JPG', '/a/b.1568.jpeg', '/a/b.1568.1568.jpg', '/a/b.1568.1568.jpg', '/a/b.800.1568.jpg'])
   })
 
   test('headOf: at most N lines and B bytes, a long line cut with …', () => {

@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.11.3**.
+Current release: **slim v0.12.0**.
 
 ## Install
 
@@ -572,13 +572,17 @@ view's result again.
 
 Images and video reach the model through a resize, unless an image already fits:
 
-- An image over 1568 px on its long edge becomes `<name>.1568.<ext>`: long edge at most 1568 px,
-  aspect kept, metadata stripped. `<ext>` is the file's own `png`, `jpg`, `jpeg` or `gif`, and PNG
-  for anything else, WebP included. An image already within 1568 px, upright, with an extension
-  that names its format (`png`, `jpg`/`jpeg`, `gif`, `webp`) is passed as itself, with nothing
-  written: figure `media: <in> B, already ≤1568 px — no copy`. A file already named
-  `<stem>.1568.<ext>` is never copied again; if it does not fit, view refuses it (`copy-unfit`)
-  rather than overwrite it.
+- An image becomes `<name>.1568.jpg`, a JPEG at quality 60 whatever its format: long edge at most
+  1568 px, aspect kept, metadata stripped with ffmpeg (sips keeps it), transparent pixels
+  become white. When that copy is still over
+  150 KB, slim encodes it again at a long edge of 1280, 1024, 800 and then 640 px, and keeps the
+  first one within 150 KB, or the 640 px one. A GIF keeps its first frame. Figure:
+  `view shot.png: 2.3 MB → 96 KB (-96%) · 1280 px · jpeg`.
+- An image already within 1568 px and 150 KB, upright, with an extension that names its format
+  (`png`, `jpg`/`jpeg`, `gif`, `webp`) is passed as itself, with nothing written: figure
+  `view shot.png: 90 KB · 1000 px — fits, no copy`. A file already named `<stem>.1568.jpg` (or
+  `.jpeg`) is never copied again, whatever its bytes; if it does not fit 1568 px, view refuses it
+  (`copy-unfit`) rather than overwrite it.
 - A video becomes `<name>.frames/001.jpg …`: one frame every 2 seconds from the start, at most 24,
   each resized in the same way. A longer clip spreads the 24 frames over its whole length.
 
@@ -591,8 +595,19 @@ A video's reply lists its frames with their timestamps:
 media: 2481920 B → 412300 B (-83%) frames=12
 ```
 
-The figure line format is `media: <in> B → <out> B (-NN%) frames=N` (`frames=1` for an image, `+`
-when the outputs are larger). The way in is the `view` tool (`view { path }` on an image or a video).
+A video's figure line format is `media: <in> B → <out> B (-NN%) frames=N` (`+` when the outputs are
+larger); an image's is `view <name>: <in> → <out> (-NN%) · <long edge> px · jpeg`. Frames are JPEGs
+at the same quality as an image copy. The way in is the `view` tool (`view { path }` on an image or a video).
+
+An image an MCP tool returns (a browser screenshot from chrome-devtools or Playwright) goes the same
+way without a call: an image block over 150 KB of base64 is saved to slim's spill dir as
+`slim-mcp-<hash>.<ext>`, and its JPEG copy (long edge at most 1568 px, base64 within 150 KB) takes
+its place. One text line follows the block:
+`slim: image 1005 KB → 120 KB (-88%) · 1568 px · jpeg — shown at 1568×1091; ×1.53 maps a coordinate to the 2400×1670 image the tool returned, saved at <path>`.
+Read that path to see the image whole. A text block over the stub limit beside the image is
+stubbed as usual; the image block stays. With no backend, or when the copy is not smaller, the
+result passes as it came (`image-no-backend`, `image-no-gain` in the report log). `SLIM_MCP=0` turns
+it off with the rest of the MCP channel.
 
 slim adds no dependency for this and uses what the machine already has. It uses `ffprobe` + `ffmpeg`
 on PATH for images and video, else macOS `sips` for images only. sips cannot strip metadata, and the
@@ -614,7 +629,7 @@ after the Write (`spawn-failed`), the placeholder stays until the next view of t
 An output from an earlier view can already be at that path. The Write tool then refuses before it
 asks the mode, because this session has not read that file (or it changed since the read). slim
 first tries to use the earlier output again, and writes nothing: the answer is `cached`. For an
-image, the copy must be newer than the input and fit 1568 px. For a video, the frames must be in a
+image, the copy must be newer than the input and fit 1568 px (its bytes are not checked again). For a video, the frames must be in a
 folder that slim marked, and each frame must be newer than the input. When slim cannot use the
 output again (for example, it is older than the input), slim reads it through the host and calls
 the Write tool once more, so the mode decides as above. The Write tool does not overwrite a binary
@@ -633,8 +648,8 @@ it as text. slim marks a frames folder that it creates, and a re-run replaces on
 there. slim refuses, and never clears, a `<name>.frames` that is a link, or a folder that slim did
 not make and that already holds files.
 
-Claude already downsizes every image it is shown to about 1568 px. So the resize saves bytes and
-upload time rather than tokens; slim never crops. The planning is the pure
+Claude already downsizes every image it is shown to about 1568 px. So the resize and the JPEG
+re-encode save bytes and upload time more than tokens; slim never crops. The planning is the pure
 `plugins/slim/scripts/engines/media.cjs` (CONTRACT.md §5a). The backend is
 `plugins/slim/scripts/delivery/media.cjs`.
 
@@ -667,7 +682,7 @@ slim owns four `$.state` keys under `plugin: 'slim'`. Any plugin can read them; 
 them. The contract is `plugins/slim/types/index.d.ts`:
 
 ```ts
-export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'lint' | 'listing' | 'csv' | 'xml' | 'stub'
+export type SlimEngine = 'json' | 'jsonl' | 'log' | 'html' | 'figma' | 'figma-nodes' | 'adf' | 'text' | 'a11y' | 'lint' | 'listing' | 'csv' | 'xml' | 'media' | 'stub'
 export type SlimChannel = 'mcp' | 'bash' | 'read' | 'webfetch' | 'websearch' | 'grep' | 'agent' | 'attachment' | 'prompt'
 type SlimEventBase = { v: 1; atMs: number; text: string; src: 'slim'; tool: string; agentType?: string; ms: number }
 export type SlimCompressEvent = SlimEventBase & { kind: 'slim'; channel: SlimChannel; bytesIn: number; bytesOut: number; engine: SlimEngine }

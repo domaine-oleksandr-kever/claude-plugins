@@ -174,6 +174,13 @@ them equal, so the pure pre-decision in the module and the core never disagree.
   quotes Liquid is never log-compressed, whichever tool returned it. A browser accessibility snapshot
   runs the a11y engine (registry `mcp: true`; `SLIM_A11Y=0` sends it the json route).
 - **Binary** (PNG, PDF, zip magic bytes) is refused before any engine runs.
+- **An MCP image block over 150 KB of base64** (a browser screenshot) is the one binary slim rewrites:
+  the core decodes it, saves it to the spill root as `slim-mcp-<sha16>.<png|jpg|gif|webp>`, runs the
+  view tool's media backend (`delivery/media.cjs`, plan capped at 112.5 KB so the base64 fits 150 KB)
+  and puts the JPEG back in the block's own shape (`source.data` / `data`), followed by one text block:
+  the figure, the size shown, the factor back to the size the tool returned, and the saved file.
+  Engine `media`; no backend or no gain → passthrough `image-<reason>`. A whale text block beside
+  it still goes to the per-block stub first; binary blocks stay whole there.
 - **A spill or host file read back by the model** (a spill name of §3, a `slim-prompt-*` file in the
   prompt dir, a tool-results file) passes through uncompressed: that Read is how a `<<full=…>>`
   handle is followed. Only its unwindowed form over 32 KB is turned around, by the guard (§4).
@@ -285,7 +292,7 @@ every request.
               │              $.tool.call('Read', limit 1)         ← rules + dialog + PreToolUse guards;
               │                                                     the core gets the path it opened
               │              image / video name: image → the Read above, video → the Read check only;
-              │                $.tool.check('Write', <stem>.1568.<ext> | <stem>.frames/001.jpg)
+              │                $.tool.check('Write', <stem>.1568.jpg | <stem>.frames/001.jpg)
               │                deny → refused; Write ask → $.tool.call('Write', placeholder) on that path
               │                (the mode's decider: dialog / classifier / acceptEdits / dontAsk) → allowed_out;
               │                a file already there, unread or changed since its read → the core with
@@ -293,7 +300,7 @@ every request.
               │                (a video's 001.jpg only beside a .slim-frames marker, else out-taken) and
               │                the Write once more; a binary refusal comes after the decider allowed → the
               │                core; one $.ui.ask Yes/No only for a Read ask on a non-image
-              │                (an image already named <stem>.1568.<ext> is its own output: no Write check)
+              │                (an image already named <stem>.1568.jpg is its own output: no Write check)
               │
               └─ command ─▶ $.tool.call('Bash', { command })     (a host-persisted output → host_path)
               │

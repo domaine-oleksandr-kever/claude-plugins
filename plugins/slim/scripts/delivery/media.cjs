@@ -18,7 +18,8 @@ const VIDEO_TIMEOUT_MS = 100000;
 const FRAME_NAME = /^\d{3}\.jpg$/;
 // Marks a frames folder slim made, so a re-run clears only its own frames, never a user's folder.
 const FRAMES_MARK = '.slim-frames';
-const SIPS_FORMAT = { png: 'png', jpg: 'jpeg', jpeg: 'jpeg', gif: 'gif' };
+// ffmpeg's JPEG scale (2 best … 31 worst) that matched sips quality 60 in bytes on a screenshot.
+const FF_QSCALE = '4';
 // The whole body the hooks module's host Write puts at the first output (hooks/mods/view.ts keeps the same text).
 const PLACEHOLDER = 'slim media placeholder';
 
@@ -81,23 +82,25 @@ function probe(be, file, env, timeoutMs) {
   return r.ok && w && h ? { width: Number(w[1]), height: Number(h[1]) } : null;
 }
 
-const longEdge = (p) => Math.max(p.scale.w, p.scale.h);
 // A box fit, not explicit W:H: the frame is already turned upright when the filter sees it.
-const fitBox = (p) => `scale=${longEdge(p)}:${longEdge(p)}:force_original_aspect_ratio=decrease`;
+const fitBox = (edge) => `scale=${edge}:${edge}:force_original_aspect_ratio=decrease`;
 
-function imageArgs(be, p, file, out, ext) {
+// Lays the frame over white, as sips does: ffmpeg alone turns a transparent pixel black in a JPEG.
+const ON_WHITE = 'split[a][b];[a]drawbox=c=white@1:t=fill[w];[w][b]overlay';
+
+// One JPEG encode of plan `p` at `step` (one of p.steps); a transparent pixel becomes white.
+function imageArgs(be, p, step, file, out) {
   if (be.name === 'sips') {
-    return [...['-s', 'format', SIPS_FORMAT[ext] || 'png'], ...(p.resized ? ['-Z', String(longEdge(p))] : []), file, '--out', out];
+    return ['-s', 'format', 'jpeg', '-s', 'formatOptions', String(p.quality), ...(step.resized ? ['-Z', String(step.longEdge)] : []), file, '--out', out];
   }
   return ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-map_metadata', '-1',
-    ...(p.resized ? ['-vf', fitBox(p)] : []),
-    ...(ext === 'gif' ? [] : ['-frames:v', '1']), ...(ext === 'jpg' || ext === 'jpeg' ? ['-q:v', '3'] : []), out];
+    '-vf', [ON_WHITE, ...(step.resized ? [fitBox(step.longEdge)] : [])].join(','), '-frames:v', '1', '-q:v', FF_QSCALE, out];
 }
 
 function videoArgs(be, p, file, dir) {
-  const vf = [p.scene ? "select='eq(n,0)+gt(scene,0.3)'" : `fps=1/${p.interval}`, ...(p.resized ? [fitBox(p)] : [])].join(',');
+  const vf = [p.scene ? "select='eq(n,0)+gt(scene,0.3)'" : `fps=1/${p.interval}`, ...(p.resized ? [fitBox(Math.max(p.scale.w, p.scale.h))] : [])].join(',');
   return ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-map_metadata', '-1',
-    '-vf', vf, ...(p.scene ? ['-fps_mode', 'vfr'] : []), '-frames:v', String(p.outputs.length), '-q:v', '4', path.join(dir, '%03d.jpg')];
+    '-vf', vf, ...(p.scene ? ['-fps_mode', 'vfr'] : []), '-frames:v', String(p.outputs.length), '-q:v', FF_QSCALE, path.join(dir, '%03d.jpg')];
 }
 
 const sizeOf = (p) => { try { const st = fs.statSync(p); return st.isFile() ? st.size : -1; } catch (_) { return -1; } };
@@ -151,7 +154,8 @@ function clearPlaceholder(out) {
 
 /**
  * The outputs an earlier run left where plan `p` puts them, or null: an image copy newer than `file`
- * whose long edge fits `cap`, or the frames in a folder slim marked, each newer than `file`.
+ * whose long edge fits `cap` and whose bytes fit p.maxBytes (over it only at the plan's last step), or
+ * the frames in a folder slim marked, each newer than `file`.
  */
 function reusable(be, p, file, base, env, timeout, cap) {
   const since = mtimeOf(file);
@@ -159,7 +163,10 @@ function reusable(be, p, file, base, env, timeout, cap) {
     const out = path.join(base, p.outputs[0].rel);
     if (!freshImage(out, since)) return null;
     const d = probe(be, out, env, timeout);
-    return d && Math.max(d.width, d.height) <= cap ? [{ path: out, bytes: sizeOf(out) }] : null;
+    const edge = d && Math.max(d.width, d.height);
+    const bytes = sizeOf(out);
+    const fits = bytes <= p.maxBytes || edge <= p.steps[p.steps.length - 1].longEdge;
+    return d && edge <= cap && fits ? [{ path: out, bytes, longEdge: edge }] : null;
   }
   const dir = path.join(base, p.dir);
   const st = lstatOf(dir);
@@ -170,26 +177,27 @@ function reusable(be, p, file, base, env, timeout, cap) {
 }
 
 const secs = (t) => `${Math.round(t * 10) / 10}s`;
-function describe(kind, facts, p, be, reused) {
+function describe(kind, facts, p, be, reused, step) {
   const dims = `${p.source.w}×${p.source.h}`;
   if (reused) return `${kind} ${facts.format} ${kind === 'video' ? `${secs(facts.durationS)} ` : ''}${dims} → the ${kind === 'image' ? 'copy' : 'frames'} an earlier view made, newer than the input`;
   const to = `${p.scale.w}×${p.scale.h}`;
   const meta = be.name === 'sips' ? 'metadata kept (sips cannot strip it)' : 'metadata stripped';
   if (kind === 'image' && p.same) return `image ${facts.format} ${dims}, not re-encoded (${be.name})`;
-  if (kind === 'image') return `image ${facts.format} ${dims} → ${p.resized ? to : `${dims} (no resize)`}, ${meta} (${be.name})`;
+  if (kind === 'image') return `image ${facts.format} ${dims} → ${step.resized ? `${step.w}×${step.h}` : `${dims} (no resize)`} jpeg q${p.quality}, ${meta} (${be.name})`;
   const how = p.scene ? 'at scene changes' : `every ${secs(p.interval)}`;
   return `video ${facts.format} ${secs(facts.durationS)} ${dims} → frames ${how} at ${to} (${be.name})`;
 }
 
 /**
- * normalize(file, { allowedOut, env, longEdge, everyS, maxFrames, scene, timeoutMs, reuse }) →
+ * normalize(file, { allowedOut, env, longEdge, everyS, maxFrames, scene, timeoutMs, reuse, maxBytes }) →
  *   { decision: 'compressed'|'passthrough'|'cached'|'refused', reason?, figure, text, kind?, format?, backend?, bytesIn,
- *     bytesOut, frames, outputs: [{ path, bytes, t? }] }
+ *     bytesOut, frames, outputs: [{ path, bytes, t? }], source?, scale? }
+ * An image written or passed as itself also answers `source` (the displayed size) and `scale` (the output's), { w, h }.
  * `allowedOut` is the path the caller's Write check allowed; it must equal the first output
- * (engines/media.cjs target(): `<dir>/<name>.<longEdge>.<ext>` or `<dir>/<name>.frames/001.jpg`),
+ * (engines/media.cjs target(): `<dir>/<name>.<longEdge>.jpg` or `<dir>/<name>.frames/001.jpg`),
  * else nothing is spawned or written. An image the plan passes as itself (`same`) is its own output,
- * nothing written. `reuse` writes nothing: the outputs an earlier run left (reusable()) come back as
- * `cached`, else the refusal `not-reused`; an image that is its own output is still `passthrough`.
+ * nothing written; an image copy is encoded at each of the plan's steps until one fits its maxBytes.
+ * `reuse` writes nothing: the outputs an earlier run left (reusable()) come back as `cached`, else the refusal `not-reused`; an image that is its own output is still `passthrough`.
  * `timeoutMs` bounds probe and run together (default 30 s for an image, 100 s for a video). `figure`
  * is the media figure line, or the refusal in one line. `text` ends with the line `Read <path>`
  * naming the one image to read. Never throws.
@@ -218,23 +226,30 @@ function normalize(file, opts) {
     const left = () => Math.max(1, deadline - Date.now());
     const withBe = { ...known, backend: be.name };
     const pr = probe(be, file, env, Math.min(PROBE_TIMEOUT_MS, left()));
-    const facts = { kind: k.kind, format: k.format, name, ext, ...pr };
-    const p = pr ? media.plan(facts, { longEdge: o.longEdge, everyS: o.everyS, maxFrames: o.maxFrames, scene: o.scene }) : { refused: 'no-probe' };
+    const facts = { kind: k.kind, format: k.format, name, ext, bytes: bytesIn, ...pr };
+    const p = pr ? media.plan(facts, { longEdge: o.longEdge, everyS: o.everyS, maxFrames: o.maxFrames, scene: o.scene, maxBytes: o.maxBytes }) : { refused: 'no-probe' };
     if (p.refused === 'copy-unfit') return refuse(p.refused, `media: ${path.basename(file)} is named like slim's copy but needs one — rename it; not overwritten`, withBe);
     if (p.refused) return refuse(p.refused, `media: ${be.name} could not measure ${path.basename(file)}`, withBe);
     let outputs;
     let err = null;
+    let step = p.steps && p.steps[0];
     const reused = o.reuse === true && !p.same;
     if (reused) {
       outputs = reusable(be, p, file, base, env, Math.min(PROBE_TIMEOUT_MS, left()), Number.isInteger(o.longEdge) && o.longEdge > 0 ? o.longEdge : media.LONG_EDGE);
       if (!outputs) return refuse('not-reused', `media: no output of an earlier view newer than ${path.basename(file)} at ${first}`, withBe);
+      if (k.kind === 'image') { step = { longEdge: outputs[0].longEdge }; outputs = [{ path: outputs[0].path, bytes: outputs[0].bytes }]; }
     } else if (p.same) outputs = [{ path: file, bytes: bytesIn }];
     else if (k.kind === 'image') {
       const out = path.join(base, p.outputs[0].rel);
       const st = lstatOf(out);
       if (st && !st.isFile()) return refuse('out-taken', `media: ${out} is a link or a folder, not written`, withBe);
-      const r = exec(be.name === 'sips' ? be.sips : be.ffmpeg, imageArgs(be, p, file, out, path.extname(out).slice(1)), env, left());
-      const bytes = sizeOf(out);
+      let r;
+      let bytes;
+      for (step of p.steps) {
+        r = exec(be.name === 'sips' ? be.sips : be.ffmpeg, imageArgs(be, p, step, file, out), env, left());
+        bytes = sizeOf(out);
+        if (!r.ok || bytes <= 0 || bytes <= p.maxBytes) break;
+      }
       if (!r.ok || bytes <= 0) { err = r.err || 'no output'; rmQuiet(out); } else outputs = [{ path: out, bytes }];
     } else {
       const dir = path.join(base, p.dir);
@@ -256,9 +271,12 @@ function normalize(file, opts) {
       : outputs.map((x) => (x.t === undefined ? x.path : `${x.path}  t=${secs(x.t)}`));
     return {
       decision: p.same ? 'passthrough' : reused ? 'cached' : 'compressed',
-      figure: p.same ? media.sameLine(bytesIn, o.longEdge) : media.figureLine(bytesIn, bytesOut, outputs.length),
-      text: [describe(k.kind, facts, p, be, reused), ...lines].join('\n'),
+      figure: k.kind === 'video' ? media.figureLine(bytesIn, bytesOut, outputs.length)
+        : p.same ? media.sameLine(path.basename(file), bytesIn, Math.max(p.source.w, p.source.h))
+          : media.imageLine(path.basename(file), bytesIn, bytesOut, step.longEdge),
+      text: [describe(k.kind, facts, p, be, reused, step), ...lines].join('\n'),
       kind: k.kind, format: k.format, backend: be.name, bytesIn, bytesOut, frames: outputs.length, outputs,
+      ...(k.kind === 'image' && step && step.w ? { source: p.source, scale: { w: step.w, h: step.h } } : {}),
     };
   } catch (e) {
     return refuse('error', `media: ${(e && e.code) || (e && e.message) || 'failed'}`);

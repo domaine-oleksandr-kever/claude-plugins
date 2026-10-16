@@ -530,23 +530,30 @@ const EC = ecRows();
   ]);
 
   const img = (w, h, extra) => media.plan({ kind: 'image', format: 'png', name: 'shot', ext: 'png', width: w, height: h, ...extra });
-  eq('EM-plan-landscape', img(4000, 3000), { kind: 'image', outputs: [{ rel: 'shot.1568.png' }], source: { w: 4000, h: 3000 }, scale: { w: 1568, h: 1176 }, resized: true, same: false });
+  const STEPS = [[1568, 1568, 1176], [1280, 1280, 960], [1024, 1024, 768], [800, 800, 600], [640, 640, 480]].map(([longEdge, w, h]) => ({ longEdge, w, h, resized: true }));
+  eq('EM-plan-landscape', img(4000, 3000), { kind: 'image', outputs: [{ rel: 'shot.1568.jpg' }], source: { w: 4000, h: 3000 }, scale: { w: 1568, h: 1176 }, resized: true, same: false, steps: STEPS, quality: 60, maxBytes: 153600 });
+  eq('EM-plan-over-cap', [img(1200, 900, { bytes: 600000 }).same, img(1200, 900, { bytes: 600000 }).outputs, img(1200, 900, { bytes: 600000 }).steps.map((x) => [x.longEdge, x.w, x.resized]),
+    img(1200, 900, { bytes: 153600 }).same, media.plan({ kind: 'image', format: 'png', name: 'shot', ext: 'png', width: 1200, height: 900, bytes: 20 }, { maxBytes: 10 }).same],
+    [false, [{ rel: 'shot.1568.jpg' }], [[1200, 1200, false], [1024, 1024, true], [800, 800, true], [640, 640, true]], true, false]);
+  eq('EM-plan-gif-over-cap', media.plan({ kind: 'image', format: 'gif', name: 'anim', ext: 'gif', width: 400, height: 300, bytes: 900000 }).outputs, [{ rel: 'anim.1568.jpg' }]);
   eq('EM-plan-portrait', media.plan({ kind: 'image', format: 'jpeg', name: 'p', ext: 'JPG', width: 1000, height: 3000 }).scale, { w: 523, h: 1568 });
   eq('EM-plan-portrait-name', media.plan({ kind: 'image', format: 'jpeg', name: 'p', ext: 'JPG', width: 1000, height: 3000 }).outputs, [{ rel: 'p.1568.jpg' }]);
-  eq('EM-plan-small', img(800, 600), { kind: 'image', outputs: [{ rel: 'shot.png' }], source: { w: 800, h: 600 }, scale: { w: 800, h: 600 }, resized: false, same: true });
+  eq('EM-plan-small', [img(800, 600).outputs, img(800, 600).same, img(800, 600, { bytes: 90000 }).same], [[{ rel: 'shot.png' }], true, true]);
   const copy = (name, ext, w, h, extra) => media.plan({ kind: 'image', format: 'png', name, ext, width: w, height: h, ...extra });
+  const jcopy = (name, ext, w, h, extra) => media.plan({ kind: 'image', format: 'jpeg', name, ext, width: w, height: h, ...extra });
   eq('EM-plan-same', [
-    copy('shot.1568', 'png', 1568, 1000).outputs, copy('shot.1568', 'png', 1568, 1000).same, copy('shot', 'png', 800, 600, { rotation: 180 }).outputs,
+    jcopy('shot.1568', 'jpg', 1568, 1000).outputs, jcopy('shot.1568', 'jpg', 1568, 1000, { bytes: 900000 }).same, copy('shot', 'png', 800, 600, { rotation: 180 }).outputs,
     copy('shot', 'PNG', 800, 600).outputs, media.plan({ kind: 'image', format: 'webp', name: 'w', ext: 'webp', width: 10, height: 10 }).outputs,
     media.plan({ kind: 'image', format: 'jpeg', name: 'w', ext: 'png', width: 10, height: 10 }).same, copy('s.800', 'png', 800, 10, {}).outputs,
-  ], [[{ rel: 'shot.1568.png' }], true, [{ rel: 'shot.1568.png' }], [{ rel: 'shot.PNG' }], [{ rel: 'w.webp' }], false, [{ rel: 's.800.png' }]]);
-  eq('EM-plan-copy-unfit', [copy('shot.1568', 'png', 3000, 2000), copy('shot.1568', 'jpg', 800, 600), copy('shot.1568', 'png', 800, 600, { rotation: 90 }), media.plan({ kind: 'image', format: 'png', name: 's.800', ext: 'png', width: 900, height: 10 }, { longEdge: 800 })],
+    copy('old.1568', 'png', 1000, 800).same, copy('old.1568', 'png', 1000, 800, { bytes: 900000 }).outputs,
+  ], [[{ rel: 'shot.1568.jpg' }], true, [{ rel: 'shot.1568.jpg' }], [{ rel: 'shot.PNG' }], [{ rel: 'w.webp' }], false, [{ rel: 's.800.png' }], true, [{ rel: 'old.1568.1568.jpg' }]]);
+  eq('EM-plan-copy-unfit', [jcopy('shot.1568', 'jpg', 3000, 2000), copy('shot.1568', 'jpg', 800, 600), jcopy('shot.1568', 'jpg', 800, 600, { rotation: 90 }), media.plan({ kind: 'image', format: 'jpeg', name: 's.800', ext: 'jpg', width: 900, height: 10 }, { longEdge: 800 })],
     [{ refused: 'copy-unfit' }, { refused: 'copy-unfit' }, { refused: 'copy-unfit' }, { refused: 'copy-unfit' }]);
   eq('EM-target-copy-is-itself', [
     media.target({ kind: 'image', name: 'shot.1568', ext: 'png' }), media.target({ kind: 'image', name: 'shot.1568', ext: 'JPG' }),
     media.target({ kind: 'image', name: 'shot.1568', ext: 'webp' }), media.target({ kind: 'image', name: 's.800', ext: 'gif' }, { longEdge: 800 }),
     media.target({ kind: 'image', name: 's.800', ext: 'gif' }), media.target({ kind: 'video', name: 'clip.1568', ext: 'mp4' }),
-  ], ['shot.1568.png', 'shot.1568.JPG', 'shot.1568.1568.png', 's.800.gif', 's.800.1568.gif', 'clip.1568.frames/001.jpg']);
+  ], ['shot.1568.1568.jpg', 'shot.1568.JPG', 'shot.1568.1568.jpg', 's.800.800.jpg', 's.800.1568.jpg', 'clip.1568.frames/001.jpg']);
   eq('EM-target-idempotent', ['shot.JPG', 'a.webp', 'screenshot', 'x.y.gif'].map((b) => {
     const dot = b.lastIndexOf('.');
     const once = media.target({ kind: 'image', name: dot > 0 ? b.slice(0, dot) : b, ext: dot > 0 ? b.slice(dot + 1) : '' });
@@ -554,18 +561,19 @@ const EC = ecRows();
     return media.target({ kind: 'image', name: once.slice(0, d2), ext: once.slice(d2 + 1) }) === once;
   }), [true, true, true, true]);
   eq('EM-plan-edge', img(1568, 10).resized, false);
-  eq('EM-plan-webp-as-png', media.plan({ kind: 'image', format: 'webp', name: 'w', ext: 'webp', width: 2000, height: 10 }).outputs, [{ rel: 'w.1568.png' }]);
-  eq('EM-plan-long-edge-opt', media.plan({ kind: 'image', format: 'png', name: 's', ext: 'png', width: 4000, height: 2000 }, { longEdge: 800 }).outputs[0].rel, 's.800.png');
+  eq('EM-plan-webp-as-jpg', media.plan({ kind: 'image', format: 'webp', name: 'w', ext: 'webp', width: 2000, height: 10 }).outputs, [{ rel: 'w.1568.jpg' }]);
+  const p800 = media.plan({ kind: 'image', format: 'png', name: 's', ext: 'png', width: 4000, height: 2000 }, { longEdge: 800 });
+  eq('EM-plan-long-edge-opt', [p800.outputs[0].rel, p800.steps.map((x) => x.longEdge)], ['s.800.jpg', [800, 640]]);
   eq('EM-target', [
     media.target({ kind: 'image', name: 'shot', ext: 'jpg' }), media.target({ kind: 'image', name: 'screenshot', ext: '' }),
     media.target({ kind: 'image', name: 'a', ext: 'WEBP' }), media.target({ kind: 'image', name: 'a', ext: 'dat' }), media.target({ kind: 'image', name: 'a', ext: 'JPG' }),
     media.target({ kind: 'image', name: 's', ext: 'png' }, { longEdge: 800 }), media.target({ kind: 'video', name: 'clip', ext: 'mov' }),
     media.target({ kind: 'image', ext: 'png' }), media.target({ kind: 'audio', name: 'x' }), media.target(null),
-  ], ['shot.1568.jpg', 'screenshot.1568.png', 'a.1568.png', 'a.1568.png', 'a.1568.jpg', 's.800.png', 'clip.frames/001.jpg', null, null, null]);
+  ], ['shot.1568.jpg', 'screenshot.1568.jpg', 'a.1568.jpg', 'a.1568.jpg', 'a.1568.jpg', 's.800.jpg', 'clip.frames/001.jpg', null, null, null]);
   eq('EM-plan-name-from-ext-not-content', [
     media.plan({ kind: 'image', format: 'webp', name: 'shot', ext: 'jpg', width: 10, height: 10 }).outputs[0].rel,
     media.plan({ kind: 'image', format: 'png', name: 'screenshot', ext: '', width: 10, height: 10 }).outputs[0].rel,
-  ], ['shot.1568.jpg', 'screenshot.1568.png']);
+  ], ['shot.1568.jpg', 'screenshot.1568.jpg']);
   const turned = (rotation, kind = 'video') => media.plan({ kind, format: 'mp4', name: 'phone', ext: 'mp4', width: 1920, height: 1080, durationS: 4, rotation });
   eq('EM-plan-rotated', [turned(-90), turned(90), turned(270), turned(180), turned(0), turned(-90, 'image')].map((p) => [p.source, p.scale]), [
     [{ w: 1080, h: 1920 }, { w: 882, h: 1568 }], [{ w: 1080, h: 1920 }, { w: 882, h: 1568 }], [{ w: 1080, h: 1920 }, { w: 882, h: 1568 }],
@@ -591,7 +599,10 @@ const EC = ecRows();
 
   eq('EM-figure', [media.figureLine(5000, 1250, 1), media.figureLine(100, 173, 4), media.figureLine(3, 3, 1)],
     ['media: 5000 B → 1250 B (-75%) frames=1', 'media: 100 B → 173 B (+73%) frames=4', 'media: 3 B → 3 B (-0%) frames=1']);
-  eq('EM-same-line', [media.sameLine(900), media.sameLine(900, 800)], ['media: 900 B, already ≤1568 px — no copy', 'media: 900 B, already ≤800 px — no copy']);
+  eq('EM-image-line', [media.imageLine('shot.png', 2411724, 98304, 1280), media.imageLine('a.png', 100000, 120000, 640), media.imageLine('b.gif', 900, 900, 10)],
+    ['view shot.png: 2.3 MB → 96 KB (-96%) · 1280 px · jpeg', 'view a.png: 98 KB → 117 KB (+20%) · 640 px · jpeg', 'view b.gif: 900 B → 900 B (-0%) · 10 px · jpeg']);
+  eq('EM-shrink-figure', media.shrinkFigure(2411724, 98304, 1280), '2.3 MB → 96 KB (-96%) · 1280 px · jpeg');
+  eq('EM-same-line', media.sameLine('small.png', 92160, 1000), 'view small.png: 90 KB · 1000 px — fits, no copy');
 }
 
 // EQ — jq narrowing: the grammar, the evaluator, and what narrow() refuses
@@ -790,8 +801,8 @@ check('EF-orders-size', bytes(ORDERS) < 256 * 1024 && bytes(ORDERS) > 150 * 1024
   const src = (f) => readFileSync(path.join(SLIM, f), 'utf8');
   const quoted = (s) => [...String(s || '').matchAll(/'([^']+)'/g)].map((m) => m[1]).sort();
   const want = (...extra) => [...ids, ...extra].sort();
-  eq('ER-node-hook', quoted((/export const ENGINES: readonly SlimEngine\[\] = \[([^\]]*)\]/.exec(src('hooks/mods/node-hook.ts')) || [])[1]), want('stub'));
-  eq('ER-types', quoted((/export type SlimEngine = ([^\n]*)/.exec(src('types/index.d.ts')) || [])[1]), want('stub'));
+  eq('ER-node-hook', quoted((/export const ENGINES: readonly SlimEngine\[\] = \[([^\]]*)\]/.exec(src('hooks/mods/node-hook.ts')) || [])[1]), want('media', 'stub'));
+  eq('ER-types', quoted((/export type SlimEngine = ([^\n]*)/.exec(src('types/index.d.ts')) || [])[1]), want('media', 'stub'));
   eq('ER-view', quoted((/export const VIEW_ENGINES = \[([^\]]*)\] as const/.exec(src('hooks/mods/view.ts')) || [])[1]), want('media'));
   // Every compressed result is spilled under its engine's suffix.
   for (const [data, engine] of [[JQL, 'json'], [APPLOG, 'log'], [ADF, 'adf']]) {

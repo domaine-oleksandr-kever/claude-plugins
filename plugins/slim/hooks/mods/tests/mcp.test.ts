@@ -341,3 +341,30 @@ describe('M9 a failed core run → r unchanged and one --error spawn', () => {
     expect(w.errors.length).toBe(1)
   })
 })
+
+describe('M13 a screenshot: the image block goes to the core, the media answer replaces the result', () => {
+  const SHOT = 'mcp__plugin_base_chrome-devtools-mcp__take_screenshot'
+  const image = (data: string) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } })
+  const BLOCKS = [{ type: 'text', text: 'Took a screenshot.' }, image('A'.repeat(194_000))]
+  const SMALL = [BLOCKS[0], image('B'.repeat(98_000)), { type: 'text', text: 'slim: image 189 KB → 96 KB (-49%) · 1568 px · jpeg — saved at /s/slim-mcp-0123456789abcdef.jpg' }]
+
+  test('compressed · media: fresh {result} with the core blocks, toast, event, row', { plugins: [PEEK] }, async ($, on) => {
+    const core = answer({ result: SMALL }, { tool: SHOT, engine: 'media', bytes_in: 194_100, bytes_out: 98_200 })
+    const w = world(on, { result: BLOCKS, text: 'Took a screenshot.' }, core)
+    const r = await $.tool.call({ tool: SHOT } as any)
+    expect(r).toEqual({ result: SMALL })
+    const stdin = stdinOf(w.runs[0])
+    expect(stdin.tool_response).toEqual(BLOCKS)
+    expect('pre' in stdin).toBe(false)
+    expect(w.toasts.map(t => t.text)).toEqual(['take_screenshot: compressed 194 KB → 98 KB (−49%) · media'])
+    expect((await peek($, w.ids[0])).row).toEqual({ engine: 'media', bytesIn: 194_100, bytesOut: 98_200 })
+  })
+
+  test('the core passing it through (image-no-backend) → r unchanged, no toast', async ($, on) => {
+    const core = () => out(JSON.stringify({ decision: 'passthrough', reason: 'image-no-backend', record: record({ decision: 'passthrough', reason: 'image-no-backend', engine: null }) }))
+    const w = world(on, { result: BLOCKS, text: 'Took a screenshot.' }, core)
+    expect((await $.tool.call({ tool: SHOT } as any)).result).toEqual(BLOCKS)
+    expect(w.runs.length).toBe(1)
+    expect(w.toasts).toEqual([])
+  })
+})

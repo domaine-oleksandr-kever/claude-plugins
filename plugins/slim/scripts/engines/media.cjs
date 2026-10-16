@@ -11,6 +11,10 @@
 const LONG_EDGE = 1568;
 const EVERY_S = 2;
 const MAX_FRAMES = 24;
+const MAX_BYTES = 150 * 1024;
+const QUALITY = 60;
+// The long edges an image copy over MAX_BYTES steps down through, below the first fit.
+const STEP_EDGES = [1280, 1024, 800, 640];
 
 const at = (b, off, sig) => sig.every((v, i) => b[off + i] === v);
 const ascii = (b, from, to) => (b.length >= to ? b.toString('latin1', from, to) : '');
@@ -36,13 +40,11 @@ function kindOf(head) {
 
 const posInt = (v) => Number.isFinite(v) && v > 0 && Math.floor(v) === v;
 const posNum = (v) => Number.isFinite(v) && v > 0;
-// From the name alone, so a caller that cannot read the bytes can predict the output path. Neither
-// backend encodes WebP everywhere, so it (and any other extension) comes out as PNG.
-const OUT_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif']);
-const outExt = (ext) => (OUT_EXTS.has(String(ext || '').toLowerCase()) ? String(ext).toLowerCase() : 'png');
+// Every image copy is a JPEG, whatever the input format: the name alone predicts the output path.
+const OUT_EXTS = new Set(['jpg', 'jpeg']);
 const longEdgeOf = (o) => (posInt(o.longEdge) ? o.longEdge : LONG_EDGE);
 const frameRel = (dir, i) => `${dir}/${String(i + 1).padStart(3, '0')}.jpg`;
-// A name target() gives: the copy is its own output, never `<stem>.1568.1568.<ext>`.
+// A name target() gives: the copy is its own output, never `<stem>.1568.1568.jpg`.
 const isCopy = (f, longEdge) => f.name.endsWith(`.${longEdge}`) && OUT_EXTS.has(String(f.ext || '').toLowerCase());
 const selfRel = (f) => (f.ext ? `${f.name}.${f.ext}` : f.name);
 // The formats a reader opens by extension; a mismatched or missing one would be sent as the wrong type.
@@ -50,12 +52,12 @@ const EXT_FORMAT = { png: 'png', jpg: 'jpeg', jpeg: 'jpeg', gif: 'gif', webp: 'w
 
 // target(facts, opts) → the first output's path relative to the input's directory, from `kind`,
 // `name` and `ext` only (no probe needed): the path a caller's Write check must rule on; an image
-// already named `<stem>.<longEdge>.<png|jpg|jpeg|gif>` is its own target. null when kind or name is missing.
+// already named `<stem>.<longEdge>.<jpg|jpeg>` is its own target. null when kind or name is missing.
 function target(facts, opts) {
   const f = facts || {};
   if (typeof f.name !== 'string' || !f.name) return null;
   const longEdge = longEdgeOf(opts || {});
-  if (f.kind === 'image') return isCopy(f, longEdge) ? selfRel(f) : `${f.name}.${longEdge}.${outExt(f.ext)}`;
+  if (f.kind === 'image') return isCopy(f, longEdge) ? selfRel(f) : `${f.name}.${longEdge}.jpg`;
   return f.kind === 'video' ? frameRel(`${f.name}.frames`, 0) : null;
 }
 
@@ -69,15 +71,19 @@ function fit(width, height, longEdge) {
 
 /**
  * plan(facts, opts) → the outputs to produce, or { refused }.
- * facts: { kind, format, name, ext, width, height, durationS, rotation } — `name` is the input's
+ * facts: { kind, format, name, ext, width, height, durationS, rotation, bytes } — `name` is the input's
  *   basename without its extension; width × height are the stored dimensions, and a quarter-turn
  *   `rotation` (degrees, from the display matrix or EXIF) swaps them to the displayed ones; outputs
- *   are paths relative to the input's directory.
- * opts: { longEdge = 1568, everyS = 2, maxFrames = 24, scene = false }.
- * image → { kind, outputs: [{ rel }], source: { w, h }, scale: { w, h }, resized, same } — `source`
- *   is the displayed size, `scale` the output size. `same`: the input is its own output (rel is its
- *   basename, nothing to write) when it fits the cap, is upright and its extension names its format;
- *   else rel is target(facts, opts). A name target() gives that is not such an input → { refused: 'copy-unfit' }.
+ *   are paths relative to the input's directory; `bytes` is the input's size (absent: under the cap).
+ * opts: { longEdge = 1568, everyS = 2, maxFrames = 24, scene = false, maxBytes = 150 KB }.
+ * image → { kind, outputs: [{ rel }], source: { w, h }, scale: { w, h }, resized, same, steps,
+ *   quality, maxBytes } — `source` is the displayed size, `scale` the first step's size. `same`: the
+ *   input is its own output (rel is its basename, nothing to write) when it fits the long edge, is
+ *   upright, its extension names its format and it is within maxBytes (a copy target() named needs
+ *   no byte check: it is final); else rel is target(facts, opts), a JPEG at `quality`. `steps`
+ *   [{ longEdge, w, h, resized }]: the first fits the long edge, the rest step down while the
+ *   encoded copy stays over maxBytes; the last is kept even over it. An animated GIF keeps its first
+ *   frame. A name target() gives that is not `same` → { refused: 'copy-unfit' }.
  * video → { kind, dir: '<name>.frames', outputs: [{ rel, t }], source, scale, resized, interval,
  *   scene } — interval frames at t = 0, interval, …; when ceil(duration / everyS) exceeds
  *   maxFrames the interval widens to duration / maxFrames so the frames still span the whole clip.
@@ -96,9 +102,13 @@ function plan(facts, opts) {
   const source = turned ? { w: f.height, h: f.width } : { w: f.width, h: f.height };
   const { w, h, resized } = fit(source.w, source.h, longEdge);
   if (f.kind === 'image') {
-    const same = !resized && !Number(f.rotation) && EXT_FORMAT[String(f.ext || '').toLowerCase()] === f.format;
-    if (!same && isCopy(f, longEdge)) return { refused: 'copy-unfit' };
-    return { kind: 'image', outputs: [{ rel: same ? selfRel(f) : target(f, o) }], source, scale: { w, h }, resized, same };
+    const maxBytes = posInt(o.maxBytes) ? o.maxBytes : MAX_BYTES;
+    const copy = isCopy(f, longEdge);
+    const same = !resized && !Number(f.rotation) && EXT_FORMAT[String(f.ext || '').toLowerCase()] === f.format && (copy || !(f.bytes > maxBytes));
+    if (!same && copy) return { refused: 'copy-unfit' };
+    const first = Math.max(w, h);
+    const steps = [first, ...STEP_EDGES.filter((e) => e < first)].map((e) => ({ longEdge: e, ...fit(source.w, source.h, e) }));
+    return { kind: 'image', outputs: [{ rel: same ? selfRel(f) : target(f, o) }], source, scale: { w, h }, resized, same, steps, quality: QUALITY, maxBytes };
   }
   if (!posNum(f.durationS)) return { refused: 'no-probe' };
   const dir = `${f.name}.frames`;
@@ -119,7 +129,19 @@ function figureLine(bytesIn, bytesOut, frames) {
   return `media: ${bytesIn} B → ${bytesOut} B (${p < 0 ? '+' : '-'}${Math.abs(p)}%) frames=${frames}`;
 }
 
-// `media: <in> B, already ≤<longEdge> px — no copy`: the figure of an image that is its own output.
-const sameLine = (bytesIn, longEdge) => `media: ${bytesIn} B, already ≤${posInt(longEdge) ? longEdge : LONG_EDGE} px — no copy`;
+// 900 B, 96 KB, 2.3 MB (1 KB = 1024 B).
+const size = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-module.exports = { kindOf, plan, target, figureLine, sameLine, LONG_EDGE, EVERY_S, MAX_FRAMES };
+// `<in> → <out> (-NN%) · <long edge> px · jpeg`: what an image copy saved.
+function shrinkFigure(bytesIn, bytesOut, longEdge) {
+  const p = bytesIn > 0 ? Math.round((1 - bytesOut / bytesIn) * 100) : 0;
+  return `${size(bytesIn)} → ${size(bytesOut)} (${p < 0 ? '+' : '-'}${Math.abs(p)}%) · ${longEdge} px · jpeg`;
+}
+
+// `view <name>: <shrinkFigure>`: the figure of an image copy.
+const imageLine = (name, bytesIn, bytesOut, longEdge) => `view ${name}: ${shrinkFigure(bytesIn, bytesOut, longEdge)}`;
+
+// `view <name>: <in> · <long edge> px — fits, no copy`: the figure of an image that is its own output.
+const sameLine = (name, bytesIn, longEdge) => `view ${name}: ${size(bytesIn)} · ${longEdge} px — fits, no copy`;
+
+module.exports = { kindOf, plan, target, figureLine, shrinkFigure, imageLine, sameLine, LONG_EDGE, EVERY_S, MAX_FRAMES, MAX_BYTES, QUALITY };

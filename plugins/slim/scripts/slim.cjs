@@ -51,6 +51,8 @@ const sniff = (input) => engines().sniff(input);
 const flags = (engine) => engines().REGISTRY[engine] || { ext: '.txt', fit: false, stub: false };
 const viewCore = () => require('./delivery/view.cjs');
 const promptCore = () => require('./delivery/prompt.cjs');
+const mediaCore = () => require('./delivery/media.cjs');
+const mediaEngine = () => require('./engines/media.cjs');
 
 const OUTPUT_CAP = 4_194_304 - 65_536; // the hooks module's stdout ceiling, less headroom
 const PRE_REASONS = new Set(['error-shape', 'already-slim', 'size-gate', 'spill-read', 'windowed-read', 'read-guard', 'not-text']);
@@ -265,10 +267,10 @@ function payloadOf(result) {
 const blocksOf = (x) => (Array.isArray(x) ? x : (x && Array.isArray(x.content) ? x.content : null));
 
 // A block array that cannot collapse into one stub gets one stub per over-limit block; each names the
-// spill of THAT block's original text, and a lossy block kept in place gets its own handle.
+// spill of THAT block's original text, and a lossy block kept in place gets its own handle. A binary
+// block (an image) stays whole: a text spill cannot hold its bytes.
 function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, spills) {
-  if (blocks.some(isBinaryBlock)) return null;
-  const isText = (b) => !!b && typeof b === 'object' && typeof b.text === 'string';
+  const isText = (b) => !!b && typeof b === 'object' && typeof b.text === 'string' && !isBinaryBlock(b);
   const sourceText = (b, i) => (originalBlocks[i] && typeof originalBlocks[i].text === 'string' ? originalBlocks[i].text : b.text);
   let main = null;
   let mainBytes = 0;
@@ -296,6 +298,62 @@ function blockStubs(originalBlocks, blocks, tool, format, stubLimit, reason, spi
     out[i] = { ...out[i], text: `${out[i].text}\n\n<<full=${s.path} original_block>>` };
   }
   return { blocks: out, spill: main, format: mainFormat, firstStub };
+}
+
+// An image block of an MCP result, in the host's shape ({ source: { type: 'base64', media_type, data } })
+// or the server's ({ data, mimeType }): its base64, or null.
+function imageData(b) {
+  if (!b || typeof b !== 'object' || b.type !== 'image') return null;
+  const src = b.source;
+  if (src && typeof src === 'object') return src.type === 'base64' && typeof src.data === 'string' ? src.data : null;
+  return typeof b.data === 'string' ? b.data : null;
+}
+const IMAGE_EXT = { png: '.png', jpeg: '.jpg', gif: '.gif', webp: '.webp' };
+const ratio = (a, b) => Math.round((a / b) * 100) / 100;
+
+// One image block over the cap: its bytes saved to the spill root, the media backend's JPEG copy in its
+// place (base64 within the cap), and a text line naming the saved file → { blocks, saved } or { reason }.
+function shrinkImage(b, data, cap) {
+  const mediaE = mediaEngine();
+  const buf = Buffer.from(data, 'base64');
+  const k = mediaE.kindOf(buf.subarray(0, 64));
+  if (!k || k.kind !== 'image') return { reason: 'not-media' };
+  const saved = keep(spill.writeOriginal(buf, IMAGE_EXT[k.format]));
+  if (!saved) return { reason: 'spill-write-failure' };
+  const ext = path.extname(saved.path);
+  const name = path.basename(saved.path, ext);
+  const allowedOut = path.join(path.dirname(saved.path), mediaE.target({ kind: 'image', name, ext: ext.slice(1) }));
+  const n = mediaCore().normalize(saved.path, { allowedOut, env: process.env, maxBytes: Math.floor((cap * 3) / 4) });
+  if (n.decision !== 'compressed') return { reason: n.reason || 'no-gain', saved: saved.path };
+  let out;
+  try { out = fs.readFileSync(n.outputs[0].path).toString('base64'); } catch (_) { return { reason: 'backend-failed', saved: saved.path }; }
+  if (out.length >= data.length) return { reason: 'no-gain', saved: saved.path };
+  const block = b.source ? { ...b, source: { ...b.source, media_type: 'image/jpeg', data: out } } : { ...b, data: out, mimeType: 'image/jpeg' };
+  const longEdge = Math.max(n.scale.w, n.scale.h);
+  const line = `slim: image ${mediaE.shrinkFigure(data.length, out.length, longEdge)} — shown at ${n.scale.w}×${n.scale.h}; ` +
+    `×${ratio(n.source.w, n.scale.w)} maps a coordinate to the ${n.source.w}×${n.source.h} image the tool returned, saved at ${saved.path}`;
+  return { blocks: [block, { type: 'text', text: line }], saved: saved.path };
+}
+
+// Every image block over the cap in a block array (or an envelope's content) shrunk → { value, shrunk, reason }:
+// `value` is `result` itself when none was, `reason` the first refusal.
+function shrinkImages(result) {
+  const blocks = blocksOf(result);
+  const none = { value: result, shrunk: [], reason: null };
+  if (!blocks) return none;
+  const cap = mediaEngine().MAX_BYTES;
+  const shrunk = [];
+  let reason = null;
+  const out = blocks.flatMap((b) => {
+    const data = imageData(b);
+    if (data === null || data.length <= cap) return [b];
+    const r = shrinkImage(b, data, cap);
+    if (!r.blocks) { reason = reason || r.reason; return [b]; }
+    shrunk.push(r);
+    return r.blocks;
+  });
+  if (!shrunk.length) return { ...none, reason };
+  return { value: Array.isArray(result) ? out : { ...result, content: out }, shrunk, reason };
 }
 
 function runMcp(input, base) {
@@ -335,6 +393,12 @@ function runMcp(input, base) {
   }
   if (input.is_error === true) return pass('error-shape', bytesIn);
   if (isSlim(result, bytesIn)) return pass('already-slim', bytesIn);
+  const images = shrinkImages(result);
+  if (images.shrunk.length) {
+    result = images.value;
+    serialized = JSON.stringify(result);
+    for (const r of images.shrunk) spills.push(r.saved);
+  }
   if (bytesIn <= ch.GATES.mcp) {
     const overflow = hostFile ? null : overflowSpill(serialized);
     return pass(overflow ? 'platform-overflow' : 'size-gate', bytesIn, { spill: overflow });
@@ -386,7 +450,12 @@ function runMcp(input, base) {
       const stubbed = tryStub(slimmed.reason, []) || tryBlockStubs(slimmed.reason, [], slimmed.value);
       if (stubbed) return stubbed;
     }
-    return pass(overflow ? 'platform-overflow' : (slimmed.reason || 'no-gain'), bytesIn, { spill: overflow, format: slimmed.format });
+    if (images.shrunk.length) {
+      return replace('compressed', null, { value: result, bytes: utf8(serialized), line: images.shrunk[0].blocks[1].text }, bytesIn,
+        x({ engine: 'media', spill: images.shrunk[0].saved }));
+    }
+    const reason = overflow ? 'platform-overflow' : images.reason ? `image-${images.reason}` : (slimmed.reason || 'no-gain');
+    return pass(reason, bytesIn, { spill: overflow, format: slimmed.format });
   }
 
   // Compressed and still over the threshold: stub it. Measured on the text payload, not the envelope.

@@ -327,22 +327,25 @@ sips) runs the plan. It reads no file and runs nothing.
 - `target(facts, opts) → rel | null`: the first output's path relative to the input's directory,
   from `kind`, `name` and `ext` alone (no probe, no bytes beyond the kind), so a caller can run its
   Write permission check on exactly the path the backend will write: an image is
-  `<name>.<longEdge>.<ext>` where `<ext>` is the input's own extension lowercased when it is `png`,
-  `jpg`, `jpeg` or `gif`, and `png` otherwise (WebP, no extension, anything else); a video is
-  `<name>.frames/001.jpg`. An image whose name is already such a target (`<stem>.<longEdge>.<png|jpg|jpeg|gif>`)
-  is its own target, so `target` of a target is itself. `null` without a name or a media kind.
-- `plan(facts, opts)` with `facts = { kind, format, name, ext, width, height, durationS, rotation }`
+  `<name>.<longEdge>.jpg` whatever its format; a video is `<name>.frames/001.jpg`. An image whose
+  name is already such a target (`<stem>.<longEdge>.<jpg|jpeg>`, any case) is its own target, so
+  `target` of a target is itself. `null` without a name or a media kind.
+- `plan(facts, opts)` with `facts = { kind, format, name, ext, width, height, durationS, rotation, bytes }`
   (what a probe measured; `name` is the basename without its extension; `width × height` are the
   stored dimensions and a quarter-turn `rotation` in degrees, from a display matrix or EXIF
-  orientation, swaps them to the displayed ones) and
-  `opts = { longEdge = 1568, everyS = 2, maxFrames = 24, scene = false }`:
-  - image → `{ kind, outputs: [{ rel }], source: { w, h }, scale: { w, h }, resized, same }`
-    (`source` is the displayed size, `scale` the output size): long edge capped, aspect kept, never
-    upscaled. `same: true` when the image is within the cap, has no rotation and its extension names
-    its format (`png`, `jpg`/`jpeg`, `gif`, `webp`): `rel` is the input's own basename and nothing is
-    written. Otherwise `rel` is `target(facts, opts)` and the image is re-encoded there. An input
-    named as a target that is not `same` → `{ refused: 'copy-unfit' }` (re-encoding it would
-    overwrite the input).
+  orientation, swaps them to the displayed ones; `bytes` is the input's size, absent = under the
+  byte cap) and `opts = { longEdge = 1568, everyS = 2, maxFrames = 24, scene = false, maxBytes = 153600 }`:
+  - image → `{ kind, outputs: [{ rel }], source: { w, h }, scale: { w, h }, resized, same, steps,
+    quality, maxBytes }` (`source` is the displayed size, `scale` the first step's size): long edge
+    capped, aspect kept, never upscaled. `same: true` when the image is within the long edge, has no
+    rotation, its extension names its format (`png`, `jpg`/`jpeg`, `gif`, `webp`) and `bytes` is
+    within `maxBytes` (an input named as a target skips the byte check: a copy is final): `rel` is
+    the input's own basename and nothing is written. Otherwise `rel` is `target(facts, opts)` and the
+    image is re-encoded there as a JPEG at `quality` (60); an animated GIF keeps its first frame and
+    transparent pixels become white. `steps: [{ longEdge, w, h, resized }]` is the first fit, then each of
+    1280, 1024, 800, 640 px below it: the backend encodes them in order and stops at the first copy
+    within `maxBytes`, keeping the last one even over it. An input named as a target that is not
+    `same` → `{ refused: 'copy-unfit' }` (re-encoding it would overwrite the input).
   - video → `{ kind, dir: '<name>.frames', outputs: [{ rel: '<name>.frames/NNN.jpg', t }], source,
     scale, resized, interval, scene }`: one frame every `everyS` seconds from t = 0, at most
     `maxFrames`; a clip longer than `everyS × maxFrames` widens the interval to
@@ -351,8 +354,12 @@ sips) runs the plan. It reads no file and runs nothing.
   - missing or non-positive dimensions, or a video without a duration → `{ refused: 'no-probe' }`;
     a kind other than image / video → `{ refused: 'not-media' }`.
 - `figureLine(bytesIn, bytesOut, frames)` → `media: <in> B → <out> B (-NN%) frames=N` (whole percent,
-  `+` when the outputs outweigh the input; an image is `frames=1`).
-- `sameLine(bytesIn, longEdge = 1568)` → `media: <in> B, already ≤<longEdge> px — no copy`: the figure
+  `+` when the outputs outweigh the input): the figure of a video's frames.
+- `imageLine(name, bytesIn, bytesOut, longEdge)` → `view <name>: <in> → <out> (-NN%) · <longEdge> px · jpeg`
+  (sizes as `900 B`, `96 KB`, `2.3 MB`, 1 KB = 1024 B): the figure of an image copy.
+- `shrinkFigure(bytesIn, bytesOut, longEdge)` → `<in> → <out> (-NN%) · <longEdge> px · jpeg`: `imageLine`'s
+  figure without the name (the MCP image-block line uses it).
+- `sameLine(name, bytesIn, longEdge)` → `view <name>: <in> · <longEdge> px — fits, no copy`: the figure
   of a `same` image.
 
 ## 5b. JSON narrowing (`jq.cjs`, beside compress())

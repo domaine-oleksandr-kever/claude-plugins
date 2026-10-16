@@ -4,7 +4,7 @@
 import type { ProcessRunInit, ProcessRunResult } from 'claude-code'
 import type { SlimEngine } from '../../types'
 
-export const ENGINES: readonly SlimEngine[] = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'a11y', 'lint', 'listing', 'csv', 'xml', 'stub']
+export const ENGINES: readonly SlimEngine[] = ['json', 'jsonl', 'log', 'html', 'figma', 'figma-nodes', 'adf', 'text', 'a11y', 'lint', 'listing', 'csv', 'xml', 'media', 'stub']
 
 export type Run = { argv: string[]; init: ProcessRunInit }
 
