@@ -112,8 +112,9 @@ its brief says otherwise.
    auto-creating another** (`<fe root>/skills/create-pull-request/SKILL.md` step 4 —
    precedence: explicit args → workspace session-theme → auto-create), and
    `<fe root>/skills/create-pull-request/REFERENCE.md` — it owns the title
-   convention, the body structure (core skeleton Summary → Jira → theme-preview table →
-   Changes; conditional sections only with real content; ceilings and TA divergences one line each) and the
+   convention, the body structure (core skeleton Summary → Jira → theme-preview table → To check →
+   Screenshots → Changes; conditional sections only with real content; ceilings and TA divergences
+   in Dependencies) and the
    preview-theme decision flow (`[ELC-…]` naming, `--reuse`). Escalations, verbatim in
    the brief: `error=build_failed` → ESCALATE with
    the build output; `error=settings_drift` → the reference's manual recovery;
@@ -128,7 +129,7 @@ its brief says otherwise.
    `--draft`** (the end state is aftercare's to apply). **Crash-safe, verbatim in the
    brief: the moment the PR exists, record its URL to `progress.md` + `notes.md` and
    tick the `create-pull-request` row — before any remaining work.** Return: PR URL,
-   theme id + preview/editor links, ≤10-line report. The conductor verifies the tick
+   theme id + preview/editor links, the screenshot files the body's placeholder names, ≤10-line report. The conductor verifies the tick
    and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
    `<base root>/references/steps-to-test-format.md`: **one numbered list** in that file's

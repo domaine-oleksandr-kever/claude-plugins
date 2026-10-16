@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.7.1**.
+Current release: **fe v0.8.0**.
 
 ## Status
 
@@ -65,7 +65,7 @@ is an offer at the end of the run, never an automatic start. Only `/fe:ship` run
 | `/fe:develop-feature-or-fix` | implements an approved Technical Approach with in-browser validation | `base:jira-reader`, `base:figma-reader`, `base:doc-reader`, `fe:theme-explorer`, `base:bug-hunter` → `/fe:qa-feature-or-fix` |
 | `/fe:qa-feature-or-fix` | structured QA of a finished change against its ticket: checklist, browser checks, pass / fail report | `base:jira-reader`, `base:figma-reader`, `base:jira-writer` → `/base:pre-commit-review` (with the profile word) once every blocking check passes |
 | `/fe:write-steps-to-test` | Steps to Test in Domaine's format, written to the field after approval; the series' last step | `base:jira-reader`, `base:doc-reader`, `base:jira-writer` → `/fe:create-pull-request` when the branch has no PR |
-| `/fe:create-pull-request` | a pull request with the Domaine description and the theme-preview table | `base:jira-reader`, `base:change-reviewer`, `base:bug-hunter`, `/fe:preview-theme`'s script → `/fe:write-steps-to-test` while the field is empty |
+| `/fe:create-pull-request` | a pull request with the Domaine description: a plain-English Summary, the theme-preview table, To check steps and screenshot placeholders | `base:jira-reader`, `base:change-reviewer`, `base:bug-hunter`, `/fe:preview-theme`'s script → `/fe:write-steps-to-test` while the field is empty |
 | `/fe:preview-theme` | creates or refreshes an unpublished preview theme from the branch; in a new worktree, un-pins the copied store config first | `scripts/create-preview-theme.sh`, `scripts/worktree-theme.sh` |
 | `/fe:preflight-checks` | checks the project, the tools and the dev server before work starts | → `/fe:write-technical-approach` or `/fe:develop-feature-or-fix` |
 | `/fe:fix-accessibility-issue` | fixes an accessibility issue in theme components | → `/base:commit` |

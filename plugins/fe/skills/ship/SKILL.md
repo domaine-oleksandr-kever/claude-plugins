@@ -296,7 +296,8 @@ there inherits the protocol above.
 ## Final report
 
 PR URL · checks/threads state · QA pass/fail table · Jira writes made · preview-theme
-links · judgment-call digest · anything pending (bots) · any screenshot or short video the
+links · the PR's screenshot files as `file://` links to drag into its Screenshots section ·
+judgment-call digest · anything pending (bots) · any screenshot or short video the
 steps-to-test phase asked for by name, verbatim from its report — the plugin uploads nothing,
 so an ask that does not reach the developer here is lost. Set `pipeline.md` →
 `status: done`; every `progress.md` row **this run owns** ticked with dates (rows ship
