@@ -59,7 +59,8 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
   (`error=overlay_store_mismatch`) — refresh an existing theme. Never fall back to a raw
   `shopify theme push`.
 - A copy of another store's theme: `create --name "<name>" --duplicate-of <theme> --store <store>
-  [--brand <b>]`; never run duplicate / build / push / poll by hand, the script owns that.
+  [--brand <b>]` (brand = a directory name under multi-brand/brands/, e.g. jo-malone, never a
+  ticket's short code); never run duplicate / build / push / poll by hand, the script owns that.
 - Neither: a preview-theme id for this ticket is already known (the workspace `notes.md`
   `session-theme: <id>` line **wins** — that is this work stream's theme, refresh it rather
   than creating a second one; then the conversation, the PR preview table, a preview URL's

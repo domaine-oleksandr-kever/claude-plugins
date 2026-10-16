@@ -528,7 +528,8 @@ gql() {
     cat "$rerr" >&2
     if [ "$rc" -eq 3 ]; then
       if [ -n "$CLI_UNAVAILABLE" ]; then
-        command -v shopify >/dev/null 2>&1 || echo "error=shopify_cli_not_found" >&2
+        command -v shopify >/dev/null 2>&1 || grep -qx 'error=shopify_cli_not_found' "$rerr" \
+          || echo "error=shopify_cli_not_found" >&2
         echo "hint=themecli_unavailable ($CLI_UNAVAILABLE) — the theme-CLI engine is the other option: fix that and re-run" >&2
       else
         echo "hint=the theme-CLI engine is another option — --engine themecli runs on SHOPIFY_CLI_THEME_TOKEN, the toml's password=, or the Shopify CLI session for --store" >&2

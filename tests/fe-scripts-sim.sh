@@ -84,7 +84,8 @@ set -u
 if [ -n "${TJ_GQL_LOG:-}" ]; then printf '%s\n' "$*" >> "$TJ_GQL_LOG"; fi
 case "${FAKE_RUNNER_MODE:-ok}" in
   mutfail) echo "error=store_execute_failed_mutation (stub)" >&2; exit 3 ;;
-  nocreds) echo "error=no_admin_token" >&2; exit 3 ;;
+  nocreds) echo "error=no_admin_token" >&2
+           command -v shopify >/dev/null 2>&1 || echo "error=shopify_cli_not_found" >&2; exit 3 ;;
   # an Admin token minted for another store: the Admin API answers 401
   http401) echo "error=http_401 url=https://x/admin/api/graphql.json" >&2; exit 5 ;;
   # the runner's OTHER exit-3 credential refusal: a token that cannot be an admin token at all
@@ -1284,7 +1285,8 @@ path_without "$NOSHOP" shopify \
 rc=0; TOML_PATH="$TN" FAKE_RUNNER_MODE=nocreds PATH="$NOSHOP" \
   "$BASH_BIN" "$TJDIR/theme-json.sh" get --store acme-uk --theme 2 --file templates/product.json >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 3 ] && grep -q 'error=no_admin_token' "$E" \
-   && grep -qF 'hint=themecli_unavailable (no shopify CLI on PATH)' "$E" && grep -qx 'error=shopify_cli_not_found' "$E"; then ok
+   && grep -qF 'hint=themecli_unavailable (no shopify CLI on PATH)' "$E" \
+   && [ "$(grep -cx 'error=shopify_cli_not_found' "$E")" -eq 1 ]; then ok
 else bad T62e-no-cli-names-both "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 
 # T64: `locate <id>` — which store holds a theme: `themes` once per candidate store (base's QA
@@ -1834,6 +1836,23 @@ rc=0; GQL_TMPDIR="$QT7" GQL_LOG="$L4" run_gql --engine store --query query.graph
 if [ "$rc" -eq 3 ] && grep -q 'error=store_execute_failed ' "$E" \
    && [ "$(grep -c 'store execute' "$L4")" -eq 1 ] && [ "$(grep -c '^version' "$L4")" -eq 0 ]; then ok
 else bad G22-engine-store-ignores-skip "rc=$rc err=$(head -c 120 "$E" | tr '\n' ' ') calls=[$(tr '\n' ';' < "$L4")]"; fi
+
+# G22b: no `shopify` on PATH names the condition the way theme-json does — store engine: the key
+# alone; auto with no token: the token engine's verdict AND the key; auto with a token: no CLI error
+GNOSHOP="$TMP/gql-noshop"
+path_without "$GNOSHOP" shopify \
+  jq perl mktemp cmp cat sed tr wc grep awk dirname basename mkdir head tail cut id date stat chmod rm touch bash ls sort od
+ln -sf "$SHIM/curl" "$GNOSHOP/curl"
+gql_noshop() { (cd "$GQLDIR" && PATH="$GNOSHOP" TMPDIR="$(mktemp -d "$TMP/gqlns.XXXX")" "$BASH_BIN" "$GQL" --store test-store "$@"); }
+rc=0; SHOPIFY_ADMIN_TOKEN=test-token gql_noshop --engine store --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && grep -qx 'error=shopify_cli_not_found' "$E" && ! grep -q 'store_execute_failed' "$E"; then ok
+else bad G22b-store-no-cli-key "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+rc=0; SHOPIFY_ADMIN_TOKEN="" gql_noshop --env "$GQLDIR/none.env" --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && grep -qx 'error=no_admin_token' "$E" && grep -qx 'error=shopify_cli_not_found' "$E"; then ok
+else bad G22c-auto-no-cli-no-token-both "rc=$rc err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+rc=0; M="$TMP/m22d"; CURL_MARKER="$M" SHOPIFY_ADMIN_TOKEN=test-token gql_noshop --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ -f "$M" ] && grep -q '"ok":true' "$O" && ! grep -q 'error=' "$E"; then ok
+else bad G22d-auto-no-cli-token-runs "rc=$rc curl=$([ -f "$M" ] && echo yes || echo no) err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
 # G23: a CLI upgraded in place (binary newer than the cache) re-probes the version
 QT8="$TMP/probe-stale"; mkdir -p "$QT8"
@@ -5463,7 +5482,7 @@ dup_run() { # dup_run <label-dir> <env=val…> -- <extra create args…>; log in
 # authenticates through the CLI session
 dup_run dup1 FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of 777 --brand CL --build-script brandbuild
 if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O" && grep -q '^duplicate_of=777$' "$O" && grep -q '^brand=CL$' "$O" \
-   && grep -q '^auth=cli-session$' "$O" && grep -q '^reused=false$' "$O" && ! grep -q '^overlay=' "$O" \
+   && grep -qx 'note=brand_unchecked (no multi-brand/brands/ dir)' "$O" && grep -q '^auth=cli-session$' "$O" && grep -q '^reused=false$' "$O" && ! grep -q '^overlay=' "$O" \
    && [ "$(cat "$DB")" = CL ] && [ "$(cpt_calls 'theme list' "$L")" -eq 3 ] \
    && [ "$(cpt_calls 'theme duplicate --store elc-us-cl-uat --theme 777' "$L")" -eq 1 ] \
    && [ "$(cpt_calls 'theme push --store elc-us-cl-uat --theme 333 .*--ignore config/settings_data.json' "$L")" -eq 1 ] \
@@ -5514,6 +5533,17 @@ else bad D7-duplicate-reuse-refused "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 dup_run dup7b -- --duplicate-of 777 --brand 'CL;x' --no-build
 if [ "$rc" -eq 1 ] && grep -q '^error=bad_brand' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
 else bad D7b-bad-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# D7c: with multi-brand/brands/ in the project --brand must name one of its directories — an unknown
+# code is refused with the list before the store, a known one goes through unremarked
+BRANDS="$CPTD/repo/multi-brand/brands"; mkdir -p "$BRANDS/clinique" "$BRANDS/jo-malone" "$BRANDS/mac"
+dup_run dup7c -- --duplicate-of 777 --brand jm --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=unknown_brand brand=jm known=clinique,jo-malone,mac ' "$O" \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad D7c-unknown-brand "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+dup_run dup7d FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of 777 --brand jo-malone --build-script brandbuild
+if [ "$rc" -eq 0 ] && grep -q '^brand=jo-malone$' "$O" && [ "$(cat "$DB")" = jo-malone ] && ! grep -q '^note=brand_unchecked' "$O"; then ok
+else bad D7d-known-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rm -rf "$CPTD/repo/multi-brand"
 
 # D8: without --duplicate-of a foreign-store create is still overlay_store_mismatch, now naming the copy route
 rc=0; L="$TMP/dup8"; : > "$L"; run_cpt "$L" NO=1 -- create --name X --store elc-us-cl-uat --no-build || rc=$?

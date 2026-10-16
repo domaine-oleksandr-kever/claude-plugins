@@ -90,6 +90,8 @@
 #         [pushed=…] built=… [brand=…] — no overlay= key
 #   --brand <b>  (create & refresh) — exported as BRAND=<b> to the build (`npm run <build-script>`)
 #       and printed as brand=; nothing else reads it. `[A-Za-z0-9_-]+`, else `error=bad_brand`.
+#       With ./multi-brand/brands/ present it must name one of its directories, else
+#       `error=unknown_brand brand=<b> known=<dir,…>` before the store; without it `note=brand_unchecked`.
 #   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
@@ -943,6 +945,11 @@ vet_build_script() {
     case "$BRAND_ARG" in *[!A-Za-z0-9_-]*)
       fail "bad_brand ($BRAND_ARG) — --brand takes a brand code ([A-Za-z0-9_-]), passed to the build as BRAND; nothing was built or pushed" ;;
     esac
+    if [ -d multi-brand/brands ]; then
+      [ -d "multi-brand/brands/$BRAND_ARG" ] || fail "unknown_brand brand=$BRAND_ARG known=$(cd multi-brand/brands && ls -d -- */ 2>/dev/null | tr -d / | paste -sd, -) — --brand takes a directory name under multi-brand/brands/; nothing was built or pushed"
+    else
+      printf 'note=brand_unchecked (no multi-brand/brands/ dir)\n'
+    fi
     export BRAND="$BRAND_ARG"
   fi
   case "$BUILD_SCRIPT" in

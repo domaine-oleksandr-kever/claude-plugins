@@ -38,6 +38,8 @@
 # attempted execute, queries still fall back — MUTATIONS never do: the mutation may have
 # been applied server-side before the CLI failed, and re-sending it through the token
 # engine would execute it twice. `--engine store` / `--engine token` forces one.
+# No `shopify` on PATH: `--engine store` exits 3 `error=shopify_cli_not_found`; under auto that
+# line follows `error=no_admin_token` only when the token engine has no token either.
 # A store whose `store execute` has already failed on this machine is remembered, so later calls
 # jump straight to the token engine instead of re-paying `shopify version` + a doomed execute; a
 # SKIPPED execute leaves mutations safe to hand on, since nothing was sent. Only a MACHINE-level
@@ -213,6 +215,7 @@ fi
 
 # --- engine 1: shopify store execute (CLI ≥ 4.x + stored store auth) --------------------------
 SKIP_REASON=""
+CLI_MISSING=0
 
 # Two facts about this machine are sticky and expensive to rediscover per call: the CLI version
 # (`shopify version` measures ~1.5 s, and theme-json.sh `set` runs this script twice per write) and
@@ -479,7 +482,7 @@ count_ops() { # $1 = gql_defs output, $2 = wanted name ("" = any) → OPS_TOTAL 
 
 try_store_execute() {
   local bin; bin="$(command -v shopify 2>/dev/null || true)"
-  [ -n "$bin" ] || { SKIP_REASON="shopify CLI not found"; return 1; }
+  [ -n "$bin" ] || { SKIP_REASON="shopify CLI not found"; CLI_MISSING=1; return 1; }
   # skip the whole doomed probe when this store is already known-unavailable. NEVER under
   # --engine store, which must attempt and report. Nothing is sent here, so a MUTATION is safe to
   # hand to the token engine — unlike a failure AFTER an execute actually ran (bottom of this
@@ -613,7 +616,8 @@ try_store_execute() {
 if [ "$ENGINE" != "token" ]; then
   if try_store_execute; then exit 0; fi
   if [ "$ENGINE" = "store" ]; then
-    echo "error=store_execute_failed ($SKIP_REASON)" >&2
+    if [ "$CLI_MISSING" -eq 1 ]; then echo "error=shopify_cli_not_found" >&2
+    else echo "error=store_execute_failed ($SKIP_REASON)" >&2; fi
     exit 3
   fi
   # the full note is a one-time pointer to the preferred engine — after the first run per
@@ -660,6 +664,7 @@ TOKEN="$(trim_ws "$TOKEN")"
 # themecli fallback, so the wording is load-bearing)
 if [ -z "$TOKEN" ]; then
   echo "error=no_admin_token" >&2
+  [ "$CLI_MISSING" -eq 1 ] && echo "error=shopify_cli_not_found" >&2
   echo "hint=Set SHOPIFY_ADMIN_TOKEN in $ENV_FILE (Admin API access token, shpat_…) — see metafield-metaobject-setup.md — OR use the store engine: Shopify CLI >= 4.x + one-time \`shopify store auth --store $DOMAIN --scopes <scopes>\`" >&2
   exit 3
 fi
