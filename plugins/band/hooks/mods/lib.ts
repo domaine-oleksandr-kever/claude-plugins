@@ -107,6 +107,41 @@ export function toRates(list: readonly RawRate[] | undefined): BandRate[] {
   }))
 }
 
+const isRecord = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === 'object' && !Array.isArray(x)
+
+const ENDPOINT_WINDOWS = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'] as const
+
+/**
+ * The windows of the claude.ai usage endpoint's body (`/api/oauth/usage`): the top-level windows, then each
+ * per-model weekly row of `limits` as `seven_day_<model slug>` (`Fable` → `seven_day_fable`). The body is
+ * untrusted: a window without a finite percentage is skipped, and a kind seen twice keeps the first.
+ */
+export function endpointRates(json: unknown): RawRate[] {
+  if (!isRecord(json)) return []
+  const out: RawRate[] = []
+  const add = (kind: string, pct: unknown, resetsAt: unknown) => {
+    if (typeof pct !== 'number' || !Number.isFinite(pct) || out.some(r => r.kind === kind)) return
+    out.push({ kind, percentUsed: pct, ...(typeof resetsAt === 'string' ? { resetsAt } : {}) })
+  }
+  for (const kind of ENDPOINT_WINDOWS) {
+    const w = json[kind]
+    if (isRecord(w)) add(kind, w.utilization, w.resets_at)
+  }
+  for (const row of Array.isArray(json.limits) ? json.limits : []) {
+    if (!isRecord(row) || row.kind !== 'weekly_scoped' || !isRecord(row.scope) || !isRecord(row.scope.model)) continue
+    const name = row.scope.model.display_name
+    const slug = typeof name === 'string' ? name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : ''
+    if (slug) add(`seven_day_${slug}`, row.percent, row.resets_at)
+  }
+  return out
+}
+
+/** The host's measured windows in their order (its live reading wins a kind), then the endpoint's other windows. */
+export function mergeRates(measured: readonly BandRate[], endpoint: readonly BandRate[]): BandRate[] {
+  const kinds = new Set(measured.map(r => r.kind))
+  return [...measured, ...endpoint.filter(r => !kinds.has(r.kind))]
+}
+
 /** ` ↻2h05m` after a rate's percentage; empty without a reset time. */
 export function resetMark(short: string | null): string {
   return short ? ` ${GLYPH.reset}${short}` : ''

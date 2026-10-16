@@ -1,11 +1,11 @@
-// Status band writers: usage, model, cache and tick atoms plus the tick timer, band's own event lines
-// (session, model, compact, rate) with their file on disk, and /band-debug. Nothing here draws; the band
-// reads these atoms.
+// Status band writers: usage, model, cache and tick atoms plus the tick timer, the claude.ai usage endpoint
+// poll, band's own event lines (session, model, compact, rate) with their file on disk, and /band-debug.
+// Nothing here draws; the band reads these atoms.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PluginOptions } from 'claude-code'
-import type { BandEvent, BandEventKind, BandUsage } from '../../types'
+import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
+import type { BandEvent, BandEventKind, BandRate, BandUsage } from '../../types'
 import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events.ts'
-import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, keepCtx, oneHourCacheTokens, rateCard, seedsTtl, toUsage, ttlMsOf } from './lib.ts'
+import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, keepCtx, mergeRates, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 
 const TICK_MS = 30_000
@@ -143,12 +143,106 @@ async function applyCompaction($: $, trigger: string, tokensAfter?: number, toke
   await logEvent($, 'compact', `${trigger}${sizes}`)
 }
 
+/** The host's last measured windows and the endpoint's last good ones: the usage atom's `rates` is their merge. */
+let measured: BandRate[] = []
+let endpoint: BandRate[] = []
+
+/**
+ * Writes the usage atom: `next` is a new measured reading, whose rates become the measured windows; absent,
+ * only the endpoint's windows changed. An endpoint window past its `resetsAt` is dropped. Every write of the
+ * atom's rates goes through here.
+ */
+async function writeUsage($: $, next?: BandUsage): Promise<void> {
+  if (next) measured = next.rates
+  const now = await $.clock.now()
+  endpoint = endpoint.filter(r => r.resetsAt === null || !(Date.parse(r.resetsAt) <= now))
+  const rates = mergeRates(measured, endpoint)
+  await update($, usage, prev => (next ? keepCtx(prev, { ...next, rates }) : { ...prev, rates }))
+  await adoptSubscriptionTtl($, rates)
+}
+
+const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
+/** The host's /usage caches its answer this long; band asks no more often, after a failure too. */
+const ENDPOINT_MIN_MS = 5 * 60_000
+/** A request unanswered this long fails as `timeout`, so a stalled one never blocks the next poll. */
+const ENDPOINT_TIMEOUT_MS = 10_000
+/** BAND_USAGE_ENDPOINT=0 turns the poll off; read at session start. */
+let endpointOn = true
+/** The last endpoint attempt, for /band-debug: `at` in clock ms, `error` one line; the body is never kept. */
+let attempt: { at: number; ok: boolean; status?: number; error?: string } | null = null
+let inFlight: Promise<void> | null = null
+
+/**
+ * Polls the usage endpoint at most once per ENDPOINT_MIN_MS, one request at a time; never throws. Callers do
+ * not await it: the poll writes the atom itself.
+ */
+function maybeFetchLimits($: $): Promise<void> {
+  if (!endpointOn) return Promise.resolve()
+  inFlight ??= fetchLimits($).finally(() => {
+    inFlight = null
+  })
+  return inFlight
+}
+
+async function fetchLimits($: $): Promise<void> {
+  let at: number
+  try {
+    at = await $.clock.now()
+  } catch {
+    return
+  }
+  if (attempt !== null && at - attempt.at < ENDPOINT_MIN_MS) return
+  try {
+    attempt = { at, ok: false }
+    const auth = await $.session.authorize()
+    // The endpoint takes the claude.ai login's token only; a session may log in later, so it asks again.
+    // No such login means no subscription, not a failed request: the windows it gave go.
+    if (auth?.kind !== 'bearer') {
+      attempt = { at, ok: false, error: auth ? 'api-key session' : 'no claude.ai login' }
+      if (!endpoint.length) return
+      endpoint = []
+      await writeUsage($).catch(() => undefined)
+      return
+    }
+    let timer: Timer | undefined
+    const res = await Promise.race([
+      $.http.fetch(USAGE_URL, {
+        headers: { 'anthropic-beta': 'oauth-2025-04-20', 'Content-Type': 'application/json' },
+        auth: auth.handle,
+      }),
+      new Promise<never>((_, reject) => {
+        timer = $.clock.after(ENDPOINT_TIMEOUT_MS, () => reject(new Error('timeout')))
+      }),
+    ]).finally(() => timer?.cancel())
+    if (!res.ok) {
+      attempt = { at, ok: false, status: res.status }
+      return
+    }
+    const body: unknown = JSON.parse(res.text)
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new Error('body is not a JSON object')
+    endpoint = toRates(endpointRates(body))
+    attempt = { at, ok: true, status: res.status }
+  } catch (err) {
+    attempt = { at, ok: false, error: (err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200) }
+    return
+  }
+  await writeUsage($).catch(() => undefined)
+}
+
+/** The /band-debug endpoint line's value: the last attempt and the windows it holds. */
+function endpointDebug() {
+  return {
+    ...(attempt ?? { at: null, ok: false }),
+    ...(endpointOn ? {} : { error: 'BAND_USAGE_ENDPOINT=0' }),
+    windows: endpoint.map(r => ({ kind: r.kind, pct: r.pct })),
+  }
+}
+
 async function refresh($: $): Promise<void> {
   const now = await $.clock.now()
   await update($, tick, () => now)
-  const u = withCost(toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const))))
-  await update($, usage, prev => keepCtx(prev, u))
-  await adoptSubscriptionTtl($, u)
+  await writeUsage($, withCost(toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const)))))
+  void maybeFetchLimits($)
 }
 
 /**
@@ -168,8 +262,8 @@ async function isBilled($: $): Promise<boolean> {
  * Rate-limit windows arrive only on a claude.ai subscription, whose prompt cache lives 1 h (5 min
  * under an API key or in overage). Live evidence beats the default and a remembered value alike.
  */
-async function adoptSubscriptionTtl($: $, u: BandUsage): Promise<void> {
-  if (u.rates.length === 0) return
+async function adoptSubscriptionTtl($: $, rates: readonly BandRate[]): Promise<void> {
+  if (rates.length === 0) return
   await update($, cache, c =>
     c.ttlSource === 'default' || c.ttlSource === 'store' ? { ...c, ttlMs: HOUR_MS, ttlSource: 'subscription' } : c,
   )
@@ -227,6 +321,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
     const reloaded = (await read($, tick).catch(() => 0)) > 0
     billed = await isBilled($).catch(() => true)
     costShown = isOn(await $.env.get('BAND_COST').catch(() => undefined))
+    endpointOn = (await $.env.get('BAND_USAGE_ENDPOINT').catch(() => undefined)) !== '0'
     await seed($, reloaded, forcedTtl)
     if (!reloaded) {
       const v = (await read($, info).catch(() => null))?.version ?? '?'
@@ -246,6 +341,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
       `usage(): ${JSON.stringify(raw)}`,
       `cache: ${JSON.stringify(c)}`,
       `usage atom: ${JSON.stringify(u)}`,
+      `endpoint: ${JSON.stringify(endpointDebug())}`,
       `progress: ${JSON.stringify(progressLine(await read($, baseProgress)))}`,
       `root: ${root}`,
       `render: ${JSON.stringify(lastRender)}`,
@@ -257,14 +353,13 @@ export function registerUsage(on: On, options: PluginOptions): void {
 
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
-    const u = withCost(toUsage(e.context, e.rateLimits, e.cost))
-    await update($, usage, prev => keepCtx(prev, u))
-    await adoptSubscriptionTtl($, u)
+    await writeUsage($, withCost(toUsage(e.context, e.rateLimits, e.cost)))
     // No session.start follows a /clear and the seed may read null: the first measure fills the gap. A
     // switch whose PostModelSwitch never reached the mod is caught here too.
     const m = await sessionModel($)
     if (m !== null) await adoptModel($, m)
-    const hot = alarmRate(u.rates)
+    void maybeFetchLimits($)
+    const hot = alarmRate((await read($, usage)).rates)
     const isAlarmed = await read($, rateAlarmed)
     if (hot && !isAlarmed) {
       await update($, rateAlarmed, () => true)

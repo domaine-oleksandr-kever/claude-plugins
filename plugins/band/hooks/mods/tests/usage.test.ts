@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { HOUR_MS, seedsTtl } from '../lib.ts'
-import { KEPT, MIN, SNAP, T0, logged, measure, modelSwitch, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
+import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, measure, modelSwitch, ok, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -322,5 +322,186 @@ describe('/band-debug', () => {
     world(on)
     await start($)
     expect(await debug($)).toMatch(/^info: \{"v":1,"version":"[^"]+","disabled":true\}$/m)
+  })
+})
+
+describe('the claude.ai usage endpoint', () => {
+  const BEARER = { handle: 'h1', kind: 'bearer' as const }
+  const CTX = { window: 200_000, percent: 10 }
+  const rates = async ($: any) => (await peek($)).usage.rates.map((r: any) => `${r.label} ${r.pct}`)
+
+  test('a measurement keeps its windows and values; the endpoint adds the ones it lacks, 7d·fable among them', async ($, on) => {
+    const { w } = world(on)
+    w.auth = BEARER
+    await start($)
+    await measure($, CTX, [{ kind: 'five_hour', percentUsed: 70 }, { kind: 'seven_day', percentUsed: 30 }])
+    expect(await rates($)).toEqual(['5h 70', '7d 30', '7d·sonnet 5', '7d·fable 12'])
+    expect(w.fetches).toEqual([
+      { url: 'https://api.anthropic.com/api/oauth/usage', init: { headers: { 'anthropic-beta': 'oauth-2025-04-20', 'Content-Type': 'application/json' }, auth: 'h1' } },
+    ])
+  })
+
+  test('the desktop measures no window: the endpoint supplies every one, and they mean a subscription', async ($, on) => {
+    const { w } = world(on, {}, { ANTHROPIC_API_KEY: '' })
+    w.auth = BEARER
+    w.surfaces = ['desktop']
+    await start($, 'desktop')
+    await measure($, CTX, [])
+    expect(await rates($)).toEqual(['5h 61', '7d 34', '7d·sonnet 5', '7d·fable 12'])
+    expect((await peek($)).usage.rates[0].resetsAt).toBe('2026-10-16T14:05:00Z')
+    expect(await peekCache($)).toMatchObject({ ttlMs: HOUR_MS })
+  })
+
+  test('no claude.ai login: no request, the measured windows alone, no toast', async ($, on) => {
+    const { w } = world(on)
+    await start($)
+    await measure($, CTX, [{ kind: 'five_hour', percentUsed: 70 }])
+    expect(w.fetches).toEqual([])
+    expect(await rates($)).toEqual(['5h 70'])
+    expect(w.toasts).toEqual([])
+    expect(await debug($)).toContain(`endpoint: {"at":${T0},"ok":false,"error":"no claude.ai login","windows":[]}`)
+  })
+
+  test('an API-key credential is not sent to the endpoint', async ($, on) => {
+    const { w } = world(on)
+    w.auth = { handle: 'h2', kind: 'api-key' }
+    await start($)
+    await measure($, CTX, [])
+    expect(w.fetches).toEqual([])
+  })
+
+  for (const [name, answer, line] of [
+    ['a rejected request', async () => ({ deny: 'refused: nonessential traffic is off\nmore' }), 'refused: nonessential traffic is off'],
+    ['a 500', async () => ({ status: 500, ok: false, headers: {}, text: 'oops' }), '"status":500'],
+    ['a body that is not JSON', async () => ({ status: 200, ok: true, headers: {}, text: '<html>' }), '"error":"'],
+    ['a JSON body that is not an object', async () => ok([1]), '"error":"body is not a JSON object"'],
+  ] as const) {
+    test(`${name} keeps the last good windows, toasts nothing and shows in /band-debug`, async ($, on) => {
+      const { w, clock } = world(on)
+      w.auth = BEARER
+      await start($)
+      w.http = answer as any
+      await clock.advance(5 * MIN)
+      expect(w.fetches).toHaveLength(2)
+      await measure($, CTX, [])
+      expect(await rates($)).toEqual(['5h 61', '7d 34', '7d·sonnet 5', '7d·fable 12'])
+      expect(w.toasts).toEqual([])
+      const text = await debug($)
+      expect(text).toMatch(/^endpoint: \{"at":\d+,"ok":false,/m)
+      expect(text).toContain(line)
+    })
+  }
+
+  test('asked at most once per 5 min, success or not; again once 5 min have passed', async ($, on) => {
+    const { w, clock } = world(on)
+    w.auth = BEARER
+    await start($)
+    await measure($, CTX, [])
+    await measure($, CTX, [])
+    expect(w.fetches).toHaveLength(1)
+    await clock.advance(4 * MIN)
+    await measure($, CTX, [])
+    expect(w.fetches).toHaveLength(1)
+    w.http = async () => ok({ ...ENDPOINT_BODY, five_hour: { utilization: 64, resets_at: null } })
+    await clock.advance(MIN)
+    expect(w.fetches).toHaveLength(2)
+    expect(await rates($)).toEqual(['5h 64', '7d 34', '7d·sonnet 5', '7d·fable 12'])
+  })
+
+  test('without a login at first, it asks again after 5 min and fills in then', async ($, on) => {
+    const { w, clock } = world(on)
+    await start($)
+    w.auth = BEARER
+    await measure($, CTX, [])
+    expect(w.fetches).toHaveLength(0)
+    await clock.advance(5 * MIN)
+    expect(w.fetches).toHaveLength(1)
+    expect(await rates($)).toEqual(['5h 61', '7d 34', '7d·sonnet 5', '7d·fable 12'])
+  })
+
+  test('BAND_USAGE_ENDPOINT=0 → no request, and /band-debug says so', async ($, on) => {
+    const { w, clock } = world(on, {}, { BAND_USAGE_ENDPOINT: '0' })
+    w.auth = BEARER
+    await start($)
+    await measure($, CTX, [])
+    await clock.advance(6 * MIN)
+    expect(w.fetches).toEqual([])
+    expect(await rates($)).toEqual([])
+    expect(await debug($)).toContain('endpoint: {"at":null,"ok":false,"error":"BAND_USAGE_ENDPOINT=0","windows":[]}')
+  })
+
+  test('a request that never answers delays no measure and the alarm, and times out so the next poll runs', async ($, on) => {
+    const { w, clock } = world(on)
+    w.auth = BEARER
+    w.http = () => new Promise(() => {})
+    await start($)
+    await measure($, CTX, [{ kind: 'five_hour', percentUsed: 50 }])
+    w.rateLimits = [{ kind: 'five_hour', percentUsed: 95 }]
+    await measure($, CTX, w.rateLimits)
+    expect(await rates($)).toEqual(['5h 95'])
+    expect(w.toasts).toHaveLength(1)
+    await clock.advance(10_000)
+    expect(await debug($)).toContain('"error":"timeout"')
+    w.http = async () => ok()
+    await clock.advance(5 * MIN)
+    expect(w.fetches).toHaveLength(2)
+    expect(await rates($)).toEqual(['5h 95', '7d 34', '7d·sonnet 5', '7d·fable 12'])
+  })
+
+  test('an endpoint window past its reset time goes while the requests fail', async ($, on) => {
+    const { w, clock } = world(on)
+    w.auth = BEARER
+    w.http = async () => ok({ ...ENDPOINT_BODY, five_hour: { utilization: 95, resets_at: new Date(T0 + 7 * MIN).toISOString() } })
+    await start($)
+    await measure($, CTX, [])
+    expect(await rates($)).toEqual(['5h 95', '7d 34', '7d·sonnet 5', '7d·fable 12'])
+    w.http = async () => ({ deny: 'refused' })
+    await clock.advance(10 * MIN)
+    await measure($, CTX, [])
+    expect(await rates($)).toEqual(['7d 34', '7d·sonnet 5', '7d·fable 12'])
+  })
+
+  test('a claude.ai login that goes away takes its endpoint windows with it', async ($, on) => {
+    const { w, clock } = world(on)
+    w.auth = BEARER
+    await start($)
+    await measure($, CTX, [])
+    expect(await rates($)).toHaveLength(4)
+    w.auth = null
+    await clock.advance(5 * MIN)
+    expect(await rates($)).toEqual([])
+    expect(await debug($)).toMatch(/"error":"no claude\.ai login","windows":\[\]/)
+  })
+
+  test('after a /clear the seed brings the cached endpoint windows into the new session without a request', async ($, on) => {
+    const { w } = world(on)
+    w.auth = BEARER
+    on('classic.SessionStart', async () => ({}) as never)
+    const mem = new Map<string, { value: unknown; version: number }>()
+    on('state.get', { plugin: 'band' } as any, async (_$: any, e: any) => ({ value: mem.get(e.key) ?? { value: undefined, version: 0 } }) as any)
+    on('state.set', { plugin: 'band' } as any, async (_$: any, e: any) => {
+      const version = (mem.get(e.key)?.version ?? 0) + 1
+      mem.set(e.key, { value: e.value, version })
+      return { value: { isSet: true, version } } as any
+    })
+    await start($)
+    await measure($, CTX, [])
+    expect(await rates($)).toEqual(['5h 61', '7d 34', '7d·sonnet 5', '7d·fable 12'])
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
+    mem.clear()
+    await $.classic.SessionStart({ source: 'clear' } as any)
+    expect(await rates($)).toEqual(['5h 61', '7d 34', '7d·sonnet 5', '7d·fable 12'])
+    expect(w.fetches).toHaveLength(1)
+  })
+
+  test('/band-debug shows the last answer as its windows, never the body', async ($, on) => {
+    const { w } = world(on)
+    w.auth = BEARER
+    await start($)
+    const text = await debug($)
+    expect(text).toContain(
+      `endpoint: {"at":${T0},"ok":true,"status":200,"windows":[{"kind":"five_hour","pct":61},{"kind":"seven_day","pct":34},{"kind":"seven_day_sonnet","pct":5},{"kind":"seven_day_fable","pct":12}]}`,
+    )
+    expect(text).not.toContain('extra_usage')
   })
 })

@@ -130,8 +130,32 @@ type Cost = { usd: number }
 type PaneRow = { id: string; isShown: boolean; isPlaced: boolean }
 
 /**
+ * The claude.ai usage endpoint's answer: 5h 61 %, 7d 34 %, no opus window, sonnet 5 %, and in `limits` one
+ * per-model weekly row (Fable 12 %) beside the rows that repeat the top-level windows.
+ */
+export const ENDPOINT_BODY = {
+  five_hour: { utilization: 61, resets_at: '2026-10-16T14:05:00Z' },
+  seven_day: { utilization: 34, resets_at: '2026-10-20T00:00:00Z' },
+  seven_day_opus: null,
+  seven_day_sonnet: { utilization: 5, resets_at: null },
+  seven_day_oauth_apps: { utilization: 1, resets_at: null },
+  limits: [
+    { kind: 'weekly_scoped', group: 'g', percent: 12, resets_at: '2026-10-20T00:00:00Z', scope: { model: { display_name: 'Fable' }, surface: null }, severity: 'ok', is_active: true },
+    { kind: 'weekly_all', group: 'g', percent: 34, resets_at: null, scope: null, severity: 'ok', is_active: true },
+    { kind: 'session', group: 'g', percent: 61, resets_at: null, scope: null, severity: 'ok', is_active: true },
+  ],
+  extra_usage: { is_enabled: false, monthly_limit: null, used_credits: 0, utilization: null, currency: 'USD' },
+}
+
+type HttpAnswer = { status: number; ok: boolean; headers: Record<string, string>; text: string }
+
+/** A 200 answer carrying `body` as JSON. */
+export const ok = (body: unknown = ENDPOINT_BODY): HttpAnswer => ({ status: 200, ok: true, headers: {}, text: JSON.stringify(body) })
+
+/**
  * The engine beneath band: clock, a recording store, a mutable env (`vars`), the session ops usage.ts
- * calls, a pane host and a toast recorder.
+ * calls, a pane host and a toast recorder. `auth` is what session.authorize answers (null by default, so
+ * no suite meets the usage endpoint unless it opts in); `http` answers each fetch (`{ deny }` rejects it), which `fetches` records.
  */
 export function world(on: On, store: Record<string, unknown> = {}, env: Record<string, string> = {}) {
   const w = {
@@ -145,6 +169,9 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
     panes: [] as PaneRow[],
     vars: { ...env } as Record<string, string>,
     surfaces: ['terminal'] as string[],
+    auth: null as { handle: string; kind: 'bearer' | 'api-key' } | null,
+    http: (async () => ok()) as () => Promise<HttpAnswer | { deny: string }>,
+    fetches: [] as { url: string; init?: any }[],
   }
   const clock = mock.clock(on, { now: T0 })
   // A recording store: mock.store and a second store.set hook cannot both be registered.
@@ -164,6 +191,12 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
   on('session.surfaces', async () => ({ value: w.surfaces }) as never)
   on('session.usage', async () => ({ value: { startedAt: T0, context: w.context, rateLimits: w.rateLimits, cost: w.cost } }))
   on('session.model', async () => ({ value: w.model }))
+  on('session.authorize', async () => ({ value: w.auth }))
+  on('http.fetch', async (_$, e) => {
+    w.fetches.push({ url: e.url, init: e.init })
+    const a = await w.http()
+    return ('deny' in a ? a : { value: a }) as never
+  })
   on('session.measure', async (_$, e) => ({ changed: e.changed }))
   on('session.compact', async () => (await w.compact()) as never)
   on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))

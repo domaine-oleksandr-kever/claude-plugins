@@ -32,6 +32,8 @@ import {
   cells,
   ctxText,
   digestOf,
+  endpointRates,
+  mergeRates,
   fmtPct,
   fmtRemaining,
   layout,
@@ -163,6 +165,54 @@ describe('rate labels', () => {
     expect(rates[1]?.resetsAt).toBeNull()
     expect(toRates([])).toEqual([])
     expect(toRates(undefined)).toEqual([])
+  })
+})
+
+describe('usage endpoint windows', () => {
+  const win = (utilization: unknown, resets_at: unknown = null) => ({ utilization, resets_at })
+  const scoped = (name: unknown, percent: unknown, kind = 'weekly_scoped') => ({ kind, group: 'g', percent, resets_at: null, scope: { model: { display_name: name } }, severity: 'ok', is_active: true })
+
+  test('top-level windows in order, then per-model weekly rows; null and non-number windows skipped', () => {
+    const body = {
+      seven_day_sonnet: win(5),
+      seven_day: win(34, '2026-10-20T00:00:00Z'),
+      five_hour: win(61.5),
+      seven_day_opus: null,
+      seven_day_oauth_apps: win(3),
+      limits: [scoped('Fable', 12), scoped('Fable 5.1', 7), scoped('Opus', 2, 'weekly_all'), { kind: 'session', percent: 61, scope: null }],
+    }
+    expect(endpointRates(body)).toEqual([
+      { kind: 'five_hour', percentUsed: 61.5 },
+      { kind: 'seven_day', percentUsed: 34, resetsAt: '2026-10-20T00:00:00Z' },
+      { kind: 'seven_day_sonnet', percentUsed: 5 },
+      { kind: 'seven_day_fable', percentUsed: 12 },
+      { kind: 'seven_day_fable_5_1', percentUsed: 7 },
+    ])
+    expect(endpointRates({ five_hour: win(null), seven_day: win('34'), seven_day_sonnet: win(Number.NaN), limits: [scoped('Fable', '12'), scoped(5, 1), scoped('  ', 1)] })).toEqual([])
+  })
+
+  test('a malformed body reads no window; a model named like a top-level window keeps the first', () => {
+    for (const body of [null, 'x', 5, [], {}, { limits: 'x' }, { limits: [null, 'row', { kind: 'weekly_scoped', scope: null, percent: 1 }] }]) {
+      expect(endpointRates(body)).toEqual([])
+    }
+    expect(endpointRates({ seven_day_opus: win(9), limits: [scoped('Opus', 2)] })).toEqual([{ kind: 'seven_day_opus', percentUsed: 9 }])
+  })
+
+  test('labels: opus, sonnet and a model id read as the band shows them', () => {
+    expect(toRates(endpointRates({ seven_day_opus: win(1), seven_day_sonnet: win(1), limits: [scoped('Fable', 1), scoped('Fable 5.1', 1)] })).map(r => r.label)).toEqual([
+      '7d·opus',
+      '7d·sonnet',
+      '7d·fable',
+      '7d·fable·5',
+    ])
+  })
+
+  test('mergeRates: the measured windows lead and win their kind; the endpoint adds the rest in its order', () => {
+    const measured = toRates([{ kind: 'seven_day', percentUsed: 30 }, { kind: 'five_hour', percentUsed: 70 }])
+    const endpoint = toRates([{ kind: 'five_hour', percentUsed: 61 }, { kind: 'seven_day_fable', percentUsed: 12 }, { kind: 'seven_day', percentUsed: 34 }])
+    expect(mergeRates(measured, endpoint).map(r => `${r.kind} ${r.pct}`)).toEqual(['seven_day 30', 'five_hour 70', 'seven_day_fable 12'])
+    expect(mergeRates([], endpoint)).toEqual(endpoint)
+    expect(mergeRates(measured, [])).toEqual(measured)
   })
 })
 
