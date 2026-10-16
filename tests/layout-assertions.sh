@@ -973,11 +973,11 @@ else bad slim-no-fnd-refs "plugins/slim names an fnd switch or tool: $(printf '%
 impure="$(grep -rnE --include='*.cjs' "\bprocess\.|require\(['\"](node:)?(fs|fs/promises|os|child_process|net|http|https|worker_threads|readline)['\"]\)|\bset(Timeout|Interval|Immediate)\b|\bglobalThis\b" "$ENGINES" 2>/dev/null)"
 if [ -z "$impure" ]; then ok
 else bad slim-engines-purity "engines/ reaches the host: $(printf '%s' "$impure" | head -3 | sed "s#$ROOT/##" | tr '\n' ' ')"; fi
-# the only modules an engine may load are crypto and its siblings
+# the only modules an engine may load are crypto, zlib and its siblings
 foreign="$(grep -rnoE --include='*.cjs' "require\(['\"][^'\"]*['\"]\)" "$ENGINES" 2>/dev/null |
-           grep -vE "require\(['\"](node:)?crypto['\"]\)$|require\(['\"]\./[A-Za-z0-9_-]+(\.cjs)?['\"]\)$")"
+           grep -vE "require\(['\"](node:)?(crypto|zlib)['\"]\)$|require\(['\"]\./([A-Za-z0-9_-]+/)?[A-Za-z0-9_-]+(\.cjs)?['\"]\)$")"
 if [ -z "$foreign" ]; then ok
-else bad slim-engines-requires "engines/ requires beyond crypto + siblings: $(printf '%s' "$foreign" | head -3 | sed "s#$ROOT/##" | tr '\n' ' ')"; fi
+else bad slim-engines-requires "engines/ requires beyond crypto/zlib + siblings: $(printf '%s' "$foreign" | head -3 | sed "s#$ROOT/##" | tr '\n' ' ')"; fi
 
 # Every eval case is a directory the owner's `claude plugin eval plugins/slim` run picks up: its
 # case.yaml names itself, and a scaffold it names must exist, be runnable and reach a generator

@@ -10,8 +10,8 @@ kept — the original, the rows a crush dropped — comes back in the result for
 import { compress, sniff, peek } from './engines/index.cjs';   // or: const { compress } = require(…)
 ```
 
-Dependency-free: Node built-ins only, and of those only `crypto` (content hashes). Every engine file
-requires nothing but `crypto` and its siblings.
+Dependency-free: Node built-ins only, and of those only `crypto` (content hashes) and `zlib` (the
+PNG codec). Every engine file requires nothing but `crypto`, `zlib` and its siblings.
 
 ## 1. Input
 

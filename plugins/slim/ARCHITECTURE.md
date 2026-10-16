@@ -60,7 +60,7 @@ the code on the date at the bottom; the code wins when they drift.
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
 │  LAYER 1 · ENGINES   plugins/slim/scripts/engines/*.cjs   — pure library, CONTRACT.md v1     │
-│  no env, no fs, no stdin, no child_process, no os, no timers; only 'crypto' + siblings       │
+│  no env, no fs, no stdin, no child_process, no os, no timers; only crypto, zlib + siblings   │
 │                                                                                              │
 │  registry.cjs (the one engine table: id · module · spill ext · fit · stub · mcp)             │
 │  index.cjs → sniff.cjs ─┬─ json.cjs   (envelope unwrap · noise · ADF→md · smart crush · trim)│
