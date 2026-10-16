@@ -218,7 +218,9 @@ proceeds; any other unignored directory is `error=out_dir_not_ignored`, exit 2, 
 created and no request made; a dir that resolves outside every git repository is
 `error=out_dir_not_in_repo`. A `git worktree` checkout whose `.claude/tasks` is a symlink into the
 main checkout resolves to that main checkout and is asked there — `git check-ignore` cannot look
-past a symbolic link at all. The reason is the same as for attachments: fetched payloads must never
+past a symbolic link at all. The bytes land at that physical path; the rows' `path=` and the
+summary's `out=` name the dir as given, and one `note=out_symlink out=<given> physical=<resolved>`
+line says they are the same dir — not a fault. The reason is the same as for attachments: fetched payloads must never
 reach a commit.
 
 Filenames are `<key>-<node>.nodes.json`, `<key>.variables.json` and `<key>-<node>@<scale>x.png`

@@ -13,7 +13,7 @@ const INSTALLED = `${HOME}/.claude/plugins/installed_plugins.json`
 const KNOWN = `${HOME}/.claude/plugins/known_marketplaces.json`
 const SCRIPT_CMD = 'node /home/dev/.claude/plugins/cache/domaine/base/0.9.0/scripts/md-to-adf.cjs in.md'
 const FAILED = { isError: true, result: 'Exit code 1\nError: bad input', text: 'Exit code 1\nError: bad input' }
-/** `error=` reasons the fe, base and be scripts print for a caller's mistake, a guard or a designed degrade: silent. */
+/** `error=` reasons the fe, base and be scripts print for a caller's mistake, a guard, a designed degrade or a credential not set up: silent. */
 const REFUSALS = [
   'usage (get needs --theme and --file)', 'usage: session-theme.sh unpin <toml> (--help prints usage)', 'unknown_arg arg=--x (--help prints usage)',
   'unknown_command cmd=x', 'unknown arg: --x (--help prints usage)', 'missing_value flag=--theme', 'missing value for --name', 'create requires --name "<new theme name>"',
@@ -23,11 +23,13 @@ const REFUSALS = [
   'invalid_variables_json (--variables must be valid JSON)', 'variables_file_not_found file=v.json', 'no_such_dir dir=x', 'invalid_engine engine=x',
   'invalid_cloud_id value=x', 'settings_drift', 'overlay_store_mismatch store=x', 'theme_limit — store is at its theme cap', 'worktree_dirty path=x',
   'branch_checked_out_elsewhere branch=b', 'not_a_git_repo — run this from the project repo', 'no_jira_credentials (JIRA_EMAIL + JIRA_API_TOKEN)',
+  'no_admin_token', 'no_theme_token (themecli)', 'no_figma_token (FIGMA_TOKEN, from the environment or .env)',
   '--env requires --pin-toml', '--copy needs a path (usage: worktree-setup.sh <KEY> [--copy <path>])', '--port needs a value', 'from_file_invalid_json file=x',
 ]
-/** `error=` reasons that are a failure: a tool, the plugin's own file, a credential, a remote call or the script's machinery broke. */
+/** `error=` reasons that are a failure: a tool, the plugin's own file, a credential set but rejected, a remote call or the script's machinery broke. */
 const FAILURES = [
-  'cli_list_failed store=x token_source=env', 'cli_list_unreadable theme=1', 'no_admin_token', 'invalid_admin_token source=env', 'no_theme_token (themecli)',
+  'cli_list_failed store=x token_source=env', 'cli_list_unreadable theme=1', 'invalid_admin_token source=env', 'cli_pull_failed theme=1 store=x token_source=toml',
+  'cli_push_failed theme=1 store=x token_source=env',
   'store_execute_failed (no app)', 'store_execute_failed_mutation (x)', 'http_401 url=x', 'http_status http=503 host=x', 'gql_errors log=x',
   'non_json_response log=x', 'cli_push_reported_errors file=x', 'upsert_user_errors x', 'build_failed (npm run build):', 'shopify_cli_not_found',
   'jq_not_found', 'curl_not_found', 'runner_not_found path=x', 'common_lib_not_found path=x', 'session_lib_not_found path=x', 'jq not found on PATH',
@@ -752,7 +754,10 @@ describe('pure parts', () => {
     expect(designedRefusal('md-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
     expect(designedRefusal('Exit code 1\nmd-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
     expect(designedRefusal('note=x\nerror=no_store', 'shopify-admin-gql.sh')).toBe(true)
-    expect(designedRefusal('note=x\nerror=no_admin_token', 'shopify-admin-gql.sh')).toBe(false)
+    expect(designedRefusal('Exit code 3\nnote=engine=token\nerror=no_admin_token\nhint=Set SHOPIFY_ADMIN_TOKEN or run shopify app dev', 'shopify-admin-gql.sh')).toBe(true)
+    expect(designedRefusal('note=engine=token\nerror=invalid_admin_token source=env', 'shopify-admin-gql.sh')).toBe(false)
+    expect(designedRefusal('error=no_admin_token\nError: ECONNRESET', 'shopify-admin-gql.sh')).toBe(false)
+    expect(designedRefusal('Exit code 3\nerror=no_admin_token\nerror=shopify_cli_not_found\nhint=themecli_unavailable (no shopify CLI on PATH)', 'theme-json.sh')).toBe(false)
     expect(designedRefusal('x: half\nerror=gql_errors', 'x.sh')).toBe(false)
     expect(designedRefusal('pin_error=refresh_unverifiable', 'create-preview-theme.sh')).toBe(false)
     expect(designedRefusal('error=push_failed\nError: ECONNRESET', 'push-theme.sh')).toBe(false)

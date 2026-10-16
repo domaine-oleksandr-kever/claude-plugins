@@ -130,7 +130,9 @@ a linked screenshot is a URL in the requested fields or the comments whose host 
    exactly as with a workspace; once anything was fetched, `attachments_note` names the dir —
    `"no workspace: attachments in .claude/base-tmp/<KEY>/ (swept after BASE_TMP_TTL hours)"`, plus
    any failure line after `; `. Without a workspace there is no `ticket.md`, so the rows reach the
-   caller only through your return.
+   caller only through your return. A `note=out_symlink out=… physical=…` line (either script) means the
+   workspace dir is a symlink (a worktree's `.claude/tasks` points into the main checkout): the
+   files ARE in the workspace you gave, under the path the rows print — not a defect, never report it.
 2. **No attachment of a wanted kind** (`image/*`, `video/*`, text — `text/*`, `application/json`,
    `application/javascript`, a `.liquid` name) **and no linked screenshot** → nothing to run, no
    network, `attachments_note: ""`. A screenshot that lives only in Slack ("see the thread")
@@ -169,8 +171,8 @@ lines too, under the same rule as a full read: the first 160 characters of each 
 `ticket.md` ends with a `## Attachments` section: the attachment rows as a table — id,
 filename, kind, mime, size, created, author, **repo-relative** path of the download
 (`.claude/tasks/ABC-123/tmp/attachments/248440-Screenshot_….png`), **repo-relative** `view`
-(the path on the view reply's `Read` line — the resized copy `…/248440-Screenshot_….1568.png`, or
-the download itself when it already fits within 1568 px — or the frames dir of a video
+(the path on the view reply's `Read` line — the JPEG copy `…/248440-Screenshot_….1568.jpg`, or
+the download itself when it already fits within 1568 px and 150 KB — or the frames dir of a video
 `…/248443-Screen_Recording_….frames/` with its frame count — the directory of the frame paths in
 the view reply, never a name built by hand; a dir, so the caller lists it and `Read`s the frames
 the task needs, never all of them by default) and a **source** column — `jira`
@@ -192,7 +194,7 @@ else the download), so the file and the link stay joined — the link sits in th
 so this join is a fact:
 
 ```markdown
-→ https://prnt.sc/abc123 → .claude/tasks/ABC-123/tmp/attachments/prnt.sc-abc123.1568.png
+→ https://prnt.sc/abc123 → .claude/tasks/ABC-123/tmp/attachments/prnt.sc-abc123.1568.jpg
 ```
 
 No comments → no file. Both files are written right after reading, before you compose your

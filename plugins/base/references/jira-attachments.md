@@ -130,6 +130,7 @@ stderr carries notes, and always ends with the summary
 |---|---|
 | `note=download_failed id=… http=…` | that attachment's content request failed; the other rows are unaffected |
 | `note=invalid_attachment_id id=…` | an id that is not `[A-Za-z0-9_-]` is skipped: it would ride both a URL path and the filename |
+| `note=out_symlink out=… physical=…` | `--out` runs through a symlink (a worktree's `.claude/tasks`): the files are in the given dir, which is the physical one; printed once, not a fault |
 | `note=transport_retry curl_exit=… after=5s` | a request hit a transport blip (curl exit 6/7/28/35/52/56, or no HTTP status) and was sent once more; a retry that fails too ends retrying for the rest of the run |
 
 | exit | meaning | typical `error=` |
@@ -162,9 +163,10 @@ workspace serves every worktree), and `git check-ignore` cannot look past a symb
 all — asked about a path under one it dies `fatal: pathspec '…' is beyond a symbolic link`. So the
 script resolves the out dir (nearest existing ancestor through the symlinks, plus the segments
 that do not exist yet) and asks the repository that **physically holds the bytes**: in a worktree
-that is the main checkout, whose `.gitignore`/`info/exclude` already covers `.claude`. The rows,
-the `path` column and the summary's `out=` all name that physical path — which is also what says
-out loud which checkout a worktree actually wrote to.
+that is the main checkout, whose `.gitignore`/`info/exclude` already covers `.claude`. The bytes
+are written to that physical path, but the `path` column and the summary's `out=` name the dir
+**as given** (absolute, unresolved), and one `note=out_symlink out=<given> physical=<resolved>`
+line says the two are the same dir — the files are in the worktree's workspace, not misplaced.
 
 The `info/exclude` stamp is only ever written when that physical repo is **the same repository**
 as the cwd's (same `--git-common-dir` — a worktree and its main checkout share one, so the
@@ -186,11 +188,13 @@ each image and each video to slim, one call per file:
 mcp__slim__view({ path: "<workspace>/tmp/attachments/<file>" })
 ```
 
-slim's media engine resizes an image to `<name>.1568.<ext>` (long edge at most 1568 px, metadata
-stripped) and cuts a video into `<name>.frames/001.jpg …` (one frame every 2 seconds, at most 24,
-each resized the same way), beside the input. An image already within 1568 px is passed as itself,
-with nothing written. The reply is one figure line — `media: <in> B → <out> B (-NN%) frames=N`, or
-`media: <in> B, already ≤1568 px — no copy` for a passed image — then, for an image, the one line
+slim's media engine re-encodes an image to the JPEG `<name>.1568.jpg` (long edge at most 1568 px,
+stepped down until it is within about 150 KB, metadata stripped) and cuts a video into
+`<name>.frames/001.jpg …` (one frame every 2 seconds, at most 24, each resized the same way), beside
+the input. An image already within 1568 px and 150 KB is passed as itself, with nothing written. The
+reply is one figure line — `view <name>: <in> → <out> (-NN%) · <long edge> px · jpeg` for an image
+copy, `view <name>: <in> · <long edge> px — fits, no copy` for a passed image,
+`media: <in> B → <out> B (-NN%) frames=N` for a video — then, for an image, the one line
 `Read <copy> once to see it` (or `Read <input>` for a passed image), and for a video the frame paths
 with their timestamps. The path on that `Read` line, or the frame paths, are what `ticket.md` and
 `comments.md` cite; the caller `Read`s the ones the task needs, never all of them by default. The
@@ -220,7 +224,7 @@ involved, these are public pages:
 
 | flag | default | what it does |
 |---|---|---|
-| `--out <dir>` | — (required) | download dir; the same git-ignore gate as above |
+| `--out <dir>` | — (required) | download dir; the same git-ignore gate as above, and the same `path`/`out=` as given with `note=out_symlink` |
 | `--max-mb <N>` | `25` | per-image size cap, re-checked on disk after the download |
 | `--delay <s>` | `1` | whole seconds between two requests — never before the first, none for a cached or skipped row |
 | `--force` | off | re-download an image already on disk |

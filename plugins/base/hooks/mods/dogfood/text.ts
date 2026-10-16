@@ -279,14 +279,14 @@ export function bashFailed(r: { isError?: true; result?: unknown }): boolean {
 
 /**
  * The `error=` reasons that are refusals: the caller's input or usage, the checkout or toml, a store state a guard
- * stops at, a named thing that is not there, a designed degrade rung. Every other reason — a tool or the
- * plugin's own file missing, a credential absent or broken, a remote call, the script's own machinery — is a
- * failure. Matched against the text after `error=`; a free-text reason (`unknown arg: x`) counts too.
+ * stops at, a named thing that is not there, a designed degrade rung, a credential not set up. Every other
+ * reason — a tool or the plugin's own file missing, a credential set but rejected, a remote call, the script's own
+ * machinery — is a failure. Matched against the text after `error=`; a free-text reason (`unknown arg: x`) counts too.
  */
 const REFUSAL = new RegExp(`^(?:${[
   'usage', 'unknown[_ ]', 'unexpected_', 'missing[_ ]', 'too many ', '(?:--)?[a-z][a-z-]* (?:requires|needs) ', 'conflicting_', 'ambiguous_',
   'not_a_', 'not_applied', 'unusable_', 'unsupported_', 'no uncommented ', 'config not found',
-  'no_(?:store|such_dir|origin|free_port|jira_credentials|figma_token)\\b', 'bad_(?:theme_id|file|build_script)\\b',
+  'no_(?:store|such_dir|origin|free_port|jira_credentials|(?:admin|theme|figma)_token)\\b', 'bad_(?:theme_id|file|build_script)\\b',
   'file_not_writable\\b', '(?:\\w+_)?invalid_(?!\\w*(?:token|credentials)\\b)',
   '\\w+_(?:refused|mismatch|drift|limit|missing|dirty|detached|taken|elsewhere|not_a_symlink|not_in_repo|not_ignored)\\b',
   '(?!\\w*(?:cli|jq|curl|runner|lib)_not)\\w+_not_found',

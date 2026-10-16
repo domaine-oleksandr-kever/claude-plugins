@@ -530,9 +530,23 @@ git -C "$D10f" worktree add -q "$WT10f" -b wt-f >/dev/null 2>&1
 mkdir -p "$WT10f/.claude"; ln -s "$D10f/.claude/tasks" "$WT10f/.claude/tasks"
 rc=0; ja "$WT10f" ABC-101 --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
 assert J10f-worktree-symlink 0 "$rc" "$E" "ok=1 saved=2"
+# the bytes land physically in the main checkout, but every path is reported as the worktree named
+# it, plus one note that the two are the same dir — else a reader reports "--out was ignored"
 if [ -s "$D10f/.claude/tasks/ABC-101/tmp/attachments/101-Screenshot_2026-09-10_at_3.26.09_PM.png" ] \
-   && grep -qF "out=$D10f/.claude/tasks/ABC-101/tmp/attachments" "$E"; then ok
-else bad J10f-physical-out "the bytes did not land in the main checkout: $(tail -1 "$E")"; fi
+   && tail -1 "$E" | grep -qF "out=$WT10f/.claude/tasks/ABC-101/tmp/attachments" \
+   && [ "$(field 101 8 "$O")" = "$WT10f/.claude/tasks/ABC-101/tmp/attachments/101-Screenshot_2026-09-10_at_3.26.09_PM.png" ]; then ok
+else bad J10f-given-out "row=$(grep '^101' "$O") last=$(tail -1 "$E")"; fi
+if [ "$(grep -c '^note=out_symlink' "$E")" = 1 ] \
+   && grep -qF "note=out_symlink out=$WT10f/.claude/tasks/ABC-101/tmp/attachments physical=$D10f/.claude/tasks/ABC-101/tmp/attachments" "$E"; then ok
+else bad J10f-symlink-note "$(grep note= "$E" | tr '\n' ';')"; fi
+# an explicit --out through the symlink: same contract
+OUT10i="$WT10f/.claude/tasks/ABC-102/tmp/attachments"
+rc=0; ja "$WT10f" ABC-101 --out "$OUT10i" --ids 101 --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+assert J10i-out-symlink 0 "$rc" "$E" "note=out_symlink out=$OUT10i physical=$D10f/.claude/tasks/ABC-102/tmp/attachments"
+if [ "$(field 101 8 "$O")" = "$OUT10i/101-Screenshot_2026-09-10_at_3.26.09_PM.png" ] \
+   && tail -1 "$E" | grep -qF "out=$OUT10i" \
+   && [ -s "$D10f/.claude/tasks/ABC-102/tmp/attachments/101-Screenshot_2026-09-10_at_3.26.09_PM.png" ]; then ok
+else bad J10i-given-path "row=$(grep '^101' "$O") last=$(tail -1 "$E")"; fi
 if [ "$(grep -cxF '.claude/tasks/' "$D10f/.git/info/exclude")" = 1 ]; then ok
 else bad J10f-exclude-dupes "lines=$(grep -cxF '.claude/tasks/' "$D10f/.git/info/exclude")"; fi
 
@@ -623,7 +637,7 @@ else bad J14-video-whole "rc=$rc row=$(grep '^102' "$O") files=$(ls "$OUT14" 2>&
 if [ -z "$(find "$OUT14" -name '*.frames' 2>/dev/null)" ] && [ ! -s "$FFLOG" ]; then ok
 else bad J14-no-frames "frames=$(find "$OUT14" -name '*.frames' | tr '\n' ' ') media-tool calls=$(tr '\n' ';' < "$FFLOG")"; fi
 assert J14-summary 0 "$rc" "$E" "ok=1 saved=1 cached=0 skipped=0 failed=0 out=$OUT14"
-if ! grep -qE 'frames=|ffmpeg' "$E"; then ok
+if ! grep -qE 'frames=|ffmpeg|out_symlink' "$E"; then ok
 else bad J14-no-frame-notes "$(tr '\n' ';' < "$E")"; fi
 # frame flags are not flags here: each is an unknown argument, refused before any request
 for fl in --no-frames --keep-video "--frames 8"; do

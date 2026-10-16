@@ -140,12 +140,14 @@ stamp_exclude() { # $1 = the repo's physical common dir, $2 = the pattern (`.cla
 # the scratch root a reader with no workspace downloads into, its own line) — only when that physical repo
 # is the cwd's own (a worktree and its main checkout share one common dir, so the symlink case
 # still stamps) — and the run proceeds; any other unignored dir is refused. On success the caller
-# reads OUT_DIR_ABS: every later path is the PHYSICAL one, which is what was cleared here and what
-# says out loud which checkout a worktree's symlinked .claude/tasks really wrote to.
-OUT_DIR_ABS=""
-out_dir_gate() { # $1 = the requested dir → 0 with OUT_DIR_ABS set, else 1 with the refusal on stderr
+# reads OUT_DIR_ABS, the PHYSICAL dir that was cleared here (write there), and OUT_DIR_GIVEN, the
+# same dir as the caller named it, absolute but unresolved (report that). When the two differ the
+# gate prints one stderr line `note=out_symlink out=<given> physical=<resolved> (…)`.
+OUT_DIR_ABS=""; OUT_DIR_GIVEN=""
+out_dir_gate() { # $1 = the requested dir → 0 with OUT_DIR_ABS + OUT_DIR_GIVEN set, else 1 with the refusal on stderr
   local abs common cwd_common
   abs="$(abs_dir "$1")"
+  OUT_DIR_GIVEN="$abs"
   PHYS_BASE=""; PHYS_OUT=""
   resolve_phys "$abs" || { echo "error=out_dir_not_writable out=$abs" >&2; return 1; }
   OUT_DIR_ABS="$PHYS_OUT"
@@ -173,5 +175,7 @@ out_dir_gate() { # $1 = the requested dir → 0 with OUT_DIR_ABS set, else 1 wit
     }
   fi
   mkdir -p "$OUT_DIR_ABS" 2>/dev/null || { echo "error=out_dir_not_writable out=$OUT_DIR_ABS" >&2; return 1; }
+  [ "$OUT_DIR_GIVEN" = "$OUT_DIR_ABS" ] \
+    || echo "note=out_symlink out=$OUT_DIR_GIVEN physical=$OUT_DIR_ABS (same dir through a symlink, e.g. a worktree's .claude/tasks)" >&2
   return 0
 }

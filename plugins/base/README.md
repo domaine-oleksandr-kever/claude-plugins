@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.10.3**.
+Current release: **base v0.10.4**.
 
 ## Status
 
@@ -455,10 +455,10 @@ There are two ways to turn it on:
   script's die). A refusal is the caller's input or usage (`usage`, `unknown_arg`, `missing_value`,
   `--env requires …`, `invalid_store`, `from_file_invalid_json`, …), a guard (`*_refused`,
   `*_mismatch`, `settings_drift`, `ambiguous_env`, `not_applied`, …), something named that is not
-  there (`theme_not_found`, `variables_file_not_found`, …) or a designed degradation
-  (`no_jira_credentials`, `no_figma_token`). Every other `error=` reason is a failure: a missing tool
-  or plugin file (`jq_not_found`, `shopify_cli_not_found`, `common_lib_not_found`), a credential that
-  is absent or broken (`no_admin_token`, `invalid_admin_token`), a remote call (`http_*`,
+  there (`theme_not_found`, `variables_file_not_found`, …) or a credential not set up
+  (`no_admin_token`, `no_theme_token`, `no_jira_credentials`, `no_figma_token`). Every other `error=`
+  reason is a failure: a missing tool or plugin file (`jq_not_found`, `shopify_cli_not_found`,
+  `common_lib_not_found`), a credential set but rejected (`invalid_admin_token`), a remote call (`http_*`,
   `gql_errors`), or the script's own work (`*_failed`, `*_unverifiable`). `Error` in the output
   always makes it a failure. When the script is not the line's last command (`script; echo done`,
   `script | head`), the exit code is not its own: a failed result with a crash the script's own

@@ -429,5 +429,20 @@ CURL_ARGV="$ARGV" FAKE_REDIRECTS="https://prnt.sc/loop|https://prnt.sc/loop" \
 assert S13e-redirect-loop 1 "$rc" "$E" "note=page_fetch_failed url=https://prnt.sc/loop http=302"
 if [ "$(requests "$ARGV")" -eq 6 ]; then ok; else bad S13e-hop-budget "requests=$(requests "$ARGV")"; fi
 
+# ------------------------------- 14. an out dir through a symlink (a worktree's .claude/tasks) --
+# bytes land in the physical dir; rows and the summary name the dir as given, one note says so
+mkdir -p "$REPO/.claude/real"; ln -s "$REPO/.claude/real" "$REPO/.claude/linked"
+LOUT="$REPO/.claude/linked/ABC-9/tmp/attachments"; POUT="$REPO/.claude/real/ABC-9/tmp/attachments"
+rc=0; es "$REPO" --out "$LOUT" "$P1" >"$O" 2>"$E" || rc=$?
+assert S14-symlink-out 0 "$rc" "$E" "ok=1 saved=1 cached=0 skipped=0 failed=0 out=$LOUT"
+if [ -s "$POUT/prnt.sc-Qz7mTr4Kp2Xw.png" ] && [ "$(field "$P1" 7 "$O")" = "$LOUT/prnt.sc-Qz7mTr4Kp2Xw.png" ] \
+   && [ "$(grep -c '^note=out_symlink ' "$E")" = 1 ] && grep -qF "note=out_symlink out=$LOUT physical=$POUT " "$E"; then ok
+else bad S14-given-path "row=$(grep -F "$P1" "$O") err=$(tr '\n' ';' < "$E")"; fi
+rc=0; es "$REPO" --out "$LOUT" "$P1" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(field "$P1" 3 "$O")" = cached ] && [ "$(field "$P1" 7 "$O")" = "$LOUT/prnt.sc-Qz7mTr4Kp2Xw.png" ]; then ok
+else bad S14-cached-given-path "row=$(grep -F "$P1" "$O")"; fi
+rc=0; es "$REPO" --out "$OUT" "$P1" >"$O" 2>"$E" || rc=$?
+if ! grep -qF 'note=out_symlink' "$E"; then ok; else bad S14-no-note-without-symlink "$(tr '\n' ';' < "$E")"; fi
+
 echo "base-external-screenshots-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

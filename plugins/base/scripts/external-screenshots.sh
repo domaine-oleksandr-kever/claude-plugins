@@ -23,7 +23,8 @@
 #
 # WHERE THE BYTES LAND: --out is gated exactly like jira-attachments.sh's (out_dir_gate in
 # _common.sh): a path git ignores, judged at its physical location; under `.claude/tasks/`
-# (or `.claude/base-tmp/`) the info/exclude line for it is stamped. The file is
+# (or `.claude/base-tmp/`) the info/exclude line for it is stamped. Bytes go to the physical dir;
+# `path` and `out=` name it as given (a worktree's path), with `note=out_symlink` when they differ. The file is
 # `<host>-<slug>.<ext>` — the slug is the URL's path with everything but [A-Za-z0-9._-] folded to
 # `_`, so a page URL can never name a path outside the out dir.
 #
@@ -119,7 +120,7 @@ command -v curl >/dev/null 2>&1 || { echo "error=curl_not_found" >&2; exit 2; }
 command -v jq   >/dev/null 2>&1 || { echo "error=jq_not_found" >&2; exit 2; }
 
 out_dir_gate "$OUT_DIR" || exit 2
-OUT_ABS="$OUT_DIR_ABS"
+OUT_ABS="$OUT_DIR_ABS"; OUT_SHOWN="$OUT_DIR_GIVEN"
 
 SCRATCH="$(mktemp)"; ROWS_TSV="$(mktemp)"; ROWS_JSON="$(mktemp)"
 trap 'rm -f "$SCRATCH" "$ROWS_TSV" "$ROWS_JSON"' EXIT
@@ -238,7 +239,7 @@ for url in "${URLS[@]}"; do
     stem="$host-$slug"
     have="$(cached_file "$OUT_ABS" "$stem")"
     if [ "$FORCE" -eq 0 ] && [ -n "$have" ]; then
-      status=cached; path="$have"; fname="${have##*/}"; size="$(file_size "$have")"
+      status=cached; fname="${have##*/}"; path="$OUT_SHOWN/$fname"; size="$(file_size "$have")"
       ext="${fname##*.}"
       case "$ext" in png) mime=image/png ;; jpg) mime=image/jpeg ;; gif) mime=image/gif ;; webp) mime=image/webp ;; svg) mime=image/svg+xml ;; esac
     else
@@ -307,7 +308,7 @@ for url in "${URLS[@]}"; do
             else
               target="$OUT_ABS/$stem.$ext"
               mv -f "$part" "$target"
-              status=saved; path="$target"; fname="$stem.$ext"; mime="$ctype"; size="$(file_size "$target")"
+              status=saved; path="$OUT_SHOWN/$stem.$ext"; fname="$stem.$ext"; mime="$ctype"; size="$(file_size "$target")"
             fi ;;
           *) status=failed; rm -f "$part"
              echo "note=image_fetch_failed url=$url_shown http=${code:-000}" >&2 ;;
@@ -340,5 +341,5 @@ else
   cat "$ROWS_TSV"
 fi
 
-echo "ok=1 saved=$saved cached=$cached skipped=$skipped failed=$failed out=$OUT_ABS" >&2
+echo "ok=1 saved=$saved cached=$cached skipped=$skipped failed=$failed out=$OUT_SHOWN" >&2
 [ "$failed" -eq 0 ] || exit 1

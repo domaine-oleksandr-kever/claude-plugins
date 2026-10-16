@@ -27,9 +27,10 @@ no-workspace dir is named in `attachments_note` (`agents/jira-reader.md` → Fet
 2. **Resize through slim.** For every row with a `path` (kind `image` or `video`), call
    `mcp__slim__view({ path: "<that path>" })` — one call per file. The reply opens with one figure
    line. An image's reply ends with the one line naming the file to look at:
-   `Read <name>.1568.<ext> once to see it` for a resized copy (figure
-   `media: <in> B → <out> B (-NN%) frames=1`), or `Read <that path>` for an image already within
-   1568 px, passed as itself with nothing written (figure `media: <in> B, already ≤1568 px — no copy`).
+   `Read <name>.1568.jpg once to see it` for a JPEG copy (figure
+   `view <name>: <in> → <out> (-NN%) · <long edge> px · jpeg`), or `Read <that path>` for an image
+   already within 1568 px and 150 KB, passed as itself with nothing written (figure
+   `view <name>: <in> · <long edge> px — fits, no copy`).
    A video's reply lists `<name>.frames/001.jpg …` with their timestamps. That row's `view` is the
    path on the image's `Read` line, or `"<frames dir>:<n>"` for a video (the dir of the frame
    paths, and their count). A one-line refusal instead — `media: no backend (install ffmpeg)`,

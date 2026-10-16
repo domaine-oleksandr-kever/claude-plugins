@@ -74,7 +74,9 @@ line saying the policy forbids the token path and naming `BASE_FIGMA_SOURCE` as 
 would open it — `source:` empty, nothing fetched. Exit **1** is **not** this rung — it means an
 optional artifact failed while the node tree landed; carry on with the tree, `source: rest`, and
 note the gap (there is no `error=` line to quote, only a `note=`). On `error=node_not_found` do
-not retry with other flags or neighbouring ids — the same link gets the same answer.
+not retry with other flags or neighbouring ids — the same link gets the same answer. A
+`note=out_symlink out=… physical=…` line means the workspace dir is a symlink (a worktree's
+`.claude/tasks`): the files are where the rows' `path=` says — not a defect, never report it.
 
 Never `Read` the repo's `.env`, and never put a token on a command line — the script reads the
 credential itself and never prints it. Walk-through, flags and exit table:

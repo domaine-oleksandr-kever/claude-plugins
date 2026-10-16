@@ -27,7 +27,8 @@
 # WHERE THE BYTES LAND: --out must be a path git ignores, judged at its PHYSICAL location, by the
 # gate jira-attachments.sh uses (out_dir_gate in _common.sh) — a worktree's `.claude/tasks`
 # is a symlink into the main checkout, and "never reaches a commit" is a requirement, not a
-# preference. Default `.claude/tasks/_figma/tmp`; the reader passes `<workspace>/tmp/figma`.
+# preference. Default `.claude/tasks/_figma/tmp`; the reader passes `<workspace>/tmp/figma`. Bytes
+# go to the physical dir; the `path`s and `out=` name it as given, with `note=out_symlink` when they differ.
 #
 # CACHE: a `.nodes.json` already on disk that is non-empty, valid JSON and actually carries the
 # node is `cached` — no request. Same for the variables file (non-empty JSON) and the PNG at THAT
@@ -446,7 +447,7 @@ fi
 # --- the payload dir must be a path git ignores --------------------------------------------------
 [ -n "$OUT_DIR" ] || OUT_DIR=".claude/tasks/_figma/tmp"
 out_dir_gate "$OUT_DIR" || exit 2
-OUT_ABS="$OUT_DIR_ABS"
+OUT_ABS="$OUT_DIR_ABS"; OUT_SHOWN="$OUT_DIR_GIVEN"
 
 # `:` is legal in a filename on every platform this runs on and illegal on one it may be copied to,
 # and `;` is a shell metacharacter in every path a developer pastes: the node id is flattened for
@@ -594,25 +595,27 @@ fi
 nb="$(file_size "$NODES_FILE")"; [ -n "$nb" ] || nb=0
 vb=0; [ -z "$VARS_PATH" ] || { vb="$(file_size "$VARS_PATH")"; [ -n "$vb" ] || vb=0; }
 ib=0; [ -z "$IMG_PATH" ] || { ib="$(file_size "$IMG_PATH")"; [ -n "$ib" ] || ib=0; }
+shown() { [ -z "$1" ] || printf '%s' "$OUT_SHOWN/${1##*/}"; }
+NODES_SHOWN="$(shown "$NODES_FILE")"; VARS_SHOWN="$(shown "$VARS_PATH")"; IMG_SHOWN="$(shown "$IMG_PATH")"
 
 if [ "$JSON" -eq 1 ]; then
   jq -nc --arg fk "$FILE_KEY" --arg nid "$NODE_ID" --arg nm "$NODE_NAME" --arg lm "$LAST_MOD" \
-    --arg ns "$NODES_STATUS" --arg np "$NODES_FILE" --argjson nb "$nb" \
-    --arg vs "$VARS_STATUS" --arg vp "$VARS_PATH" --argjson vb "$vb" \
-    --arg is "$IMG_STATUS" --arg ip "$IMG_PATH" --argjson ib "$ib" \
+    --arg ns "$NODES_STATUS" --arg np "$NODES_SHOWN" --argjson nb "$nb" \
+    --arg vs "$VARS_STATUS" --arg vp "$VARS_SHOWN" --argjson vb "$vb" \
+    --arg is "$IMG_STATUS" --arg ip "$IMG_SHOWN" --argjson ib "$ib" \
     '{file_key: $fk, node_id: $nid, name: $nm, last_modified: $lm,
       nodes: {status: $ns, path: $np, bytes: $nb},
       variables: {status: $vs, path: $vp, bytes: $vb},
       image: {status: $is, path: $ip, bytes: $ib}}'
 else
-  printf 'kind=nodes status=%s path=%s bytes=%s\n' "$NODES_STATUS" "$NODES_FILE" "$nb"
-  printf 'kind=variables status=%s path=%s bytes=%s\n' "$VARS_STATUS" "$VARS_PATH" "$vb"
-  printf 'kind=image status=%s path=%s bytes=%s\n' "$IMG_STATUS" "$IMG_PATH" "$ib"
+  printf 'kind=nodes status=%s path=%s bytes=%s\n' "$NODES_STATUS" "$NODES_SHOWN" "$nb"
+  printf 'kind=variables status=%s path=%s bytes=%s\n' "$VARS_STATUS" "$VARS_SHOWN" "$vb"
+  printf 'kind=image status=%s path=%s bytes=%s\n' "$IMG_STATUS" "$IMG_SHOWN" "$ib"
   # `name=` LAST: it is the one field a Figma layer can put spaces (and a `last_modified=` of its
   # own) into, so it goes where nothing follows it to shadow.
   printf 'kind=meta file_key=%s node_id=%s last_modified=%s name=%s\n' \
     "$FILE_KEY" "$NODE_ID" "$LAST_MOD" "$NODE_NAME"
 fi
 
-echo "ok=1 saved=$saved cached=$cached unavailable=$unavailable failed=$failed out=$OUT_ABS" >&2
+echo "ok=1 saved=$saved cached=$cached unavailable=$unavailable failed=$failed out=$OUT_SHOWN" >&2
 [ "$failed" -eq 0 ] || exit 1

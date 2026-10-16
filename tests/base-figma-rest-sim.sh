@@ -768,9 +768,15 @@ mkdir -p "$WT9/.claude"; ln -s "$D9c/.claude/tasks" "$WT9/.claude/tasks"
 rc=0; fr "$WT9" "$URL_D" >"$O" 2>"$E" || rc=$?
 assert F9-worktree-symlink 0 "$rc" "$E" "ok=1 saved=3"
 if [ -s "$D9c/.claude/tasks/_figma/tmp/$KEY-1-2.nodes.json" ] \
-   && grep -qF "out=$D9c/.claude/tasks/_figma/tmp" "$E" \
    && [ "$(grep -cxF '.claude/tasks/' "$D9c/.git/info/exclude")" = 1 ]; then ok
 else bad F9-worktree-physical "the bytes did not land in the main checkout: $(tail -1 "$E")"; fi
+# the rows and the summary name the worktree's path; one note says it is the main checkout's dir
+if grep -qF "out=$WT9/.claude/tasks/_figma/tmp" "$E" \
+   && grep -qxF "kind=nodes status=saved path=$WT9/.claude/tasks/_figma/tmp/$KEY-1-2.nodes.json bytes=$(wc -c < "$D9c/.claude/tasks/_figma/tmp/$KEY-1-2.nodes.json" | tr -d ' ')" "$O" \
+   && ! grep -qF "path=$D9c" "$O" \
+   && [ "$(grep -c '^note=out_symlink ' "$E")" = 1 ] \
+   && grep -qF "note=out_symlink out=$WT9/.claude/tasks/_figma/tmp physical=$D9c/.claude/tasks/_figma/tmp " "$E"; then ok
+else bad F9-worktree-given-path "rows/summary should name the worktree path: $(cat "$O" "$E")"; fi
 
 # a glob character in --out is a path segment, not a pattern
 D9d="$(new_repo gate-glob '.claude/')"

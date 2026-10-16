@@ -24,7 +24,9 @@
 # WHERE THE BYTES LAND: --out must be a path git ignores, judged at its PHYSICAL location — the
 # dir is resolved through symlinks and the question is put to the repository that actually holds
 # the bytes, because a git worktree's `.claude/tasks` is a SYMLINK into the main checkout and git
-# refuses to answer about anything beyond a symlink at all. "Never reaches a commit" is a
+# refuses to answer about anything beyond a symlink at all. Paths are REPORTED as given (absolute,
+# unresolved), so a worktree run names the worktree; `note=out_symlink` says once that it is the
+# same dir as the physical one. "Never reaches a commit" is a
 # requirement, and the same gate is what keeps a ticket that says "save to ~/…" inside a repo's
 # scratch: a physical location in no repository at all is refused (out_dir_not_in_repo). Under
 # `.claude/tasks/` the script stamps the info/exclude line task-workspace.md prescribes — only
@@ -63,14 +65,15 @@
 # stdout — one row per attachment, header first:
 #   id  status  kind  mime  size  created  author  path  filename
 #   status = saved | cached | skipped_type | skipped_size | failed;
-#   kind = image | video | text | other; path = the file on disk, EMPTY for every row that is not
-#   saved/cached.
+#   kind = image | video | text | other; path = the file on disk under --out as given, EMPTY for
+#   every row that is not saved/cached.
 #
 # TEXT: a spec attached as .js / .json / .csv / .liquid is ticket content, so text/*,
 # application/json, application/javascript, and a .liquid name under a generic mime are fetched by
 # default under their own small cap (256 KB). The saved name ends in a text extension (else gains
 # `.txt`): the file is read as data, never opened or run as what its name claims.
-# stderr — notes, then always a last summary line:
+# stderr — notes (`note=out_symlink out=<given> physical=<resolved>` when --out runs through a
+# symlink), then always a last summary line:
 #   ok=1 saved=N cached=N skipped=N failed=N out=<dir>
 #
 # Exit: 0 ok · 1 at least one attachment failed to download (the rows name them) ·
@@ -269,9 +272,9 @@ fi
 # The whole gate — lexical normalisation, the physical resolution symlinked worktrees need, the
 # `.claude/tasks/` / `.claude/base-tmp/` stamp and the three refusals — lives in _common.sh, because
 # figma-rest.sh writes into the same workspace under the same rule and a second copy would be a
-# second rule. Every later path is the PHYSICAL one the gate cleared.
+# second rule. Bytes go to the PHYSICAL dir the gate cleared; rows and the summary name the given one.
 out_dir_gate "$OUT_DIR" || exit 2
-OUT_ABS="$OUT_DIR_ABS"
+OUT_ABS="$OUT_DIR_ABS"; OUT_SHOWN="$OUT_DIR_GIVEN"
 
 # --- the attachment table ----------------------------------------------------------------------
 code="$(api_get "issue/$KEY?fields=attachment" "$LISTF")" || { echo "error=curl_transport_failed" >&2; exit 5; }
@@ -368,13 +371,13 @@ while IFS="$US" read -r id name mime size created author; do
   if [ "$ALL" -eq 0 ] && [ "$kind" = other ]; then status=skipped_type
   elif [ "$size" -gt "$cap" ]; then status=skipped_size
   elif [ "$FORCE" -eq 0 ] && file_cached "$target" "$size"; then
-    status=cached; path="$target"
+    status=cached; path="$OUT_SHOWN/$id-$fname"
     # the `.part` of an interrupted run is reaped here or never: every later run takes this branch
     rm -f "$target.part"
   else
     code="$(dl_get "attachment/content/$id" "$target.part")" || code=000
     case "$code" in
-      2*) mv -f "$target.part" "$target"; status=saved; path="$target" ;;
+      2*) mv -f "$target.part" "$target"; status=saved; path="$OUT_SHOWN/$id-$fname" ;;
       # one failed download is reported and never fatal to the others; the stub goes so a later
       # run cannot read it back as a cached file
       *) rm -f "$target.part"; status=failed
@@ -407,5 +410,5 @@ else
   cat "$ROWS_TSV"
 fi
 
-echo "ok=1 saved=$saved cached=$cached skipped=$skipped failed=$failed out=$OUT_ABS" >&2
+echo "ok=1 saved=$saved cached=$cached skipped=$skipped failed=$failed out=$OUT_SHOWN" >&2
 [ "$failed" -eq 0 ] || exit 1
