@@ -66,7 +66,8 @@ Then per store, always by the domain step 1–3 resolved, never by a brand word,
 - **`get <domain>`** once, here — its JSON gives the `notes`, `themes` and `defaultTheme` this run
   reads. It also carries the password, which is never taken from it.
 - **`get <domain> --field password`** once, at the unlock — its raw output is the `fill` value as
-  is; empty output = an open storefront, nothing to fill.
+  is; empty output = an open storefront, nothing to fill. Not on file, a password the person gave
+  in chat or a memory or workspace note holds answers the registration's password question.
 
 Exit `1` = that domain is not on file → registration. Exit `3` = the registry is unreadable or
 corrupt → pass the stderr line to the QA engineer verbatim and stop; the file is theirs to repair.
@@ -90,10 +91,9 @@ node <base root>/scripts/qa-stores.cjs set <domain> --alias '<label>' --theme '<
 Every value goes in single quotes, a `'` inside one written as `'\''` (`it's` → `'it'\''s'`): a
 value is taken verbatim and passwords carry `$`, backticks, spaces and quotes. `--default-theme`
 makes the id their saved theme, offered on this and every later run. `--password ''` records an open
-storefront: the unlock is skipped. A `set` that registers or updates a store is the only Bash line a
-password may appear on. Right after it, append to `.claude/tasks/<KEY>/notes.md`:
+storefront: the unlock is skipped. Right after it, append to `.claude/tasks/<KEY>/notes.md`:
 `- <YYYY-MM-DD> store <alias> registered, password in registry` (an update: `store <alias> password
-updated, password in registry`) — the note says where the password is, never what it is.
+updated, password in registry`).
 
 `set` merges: themes accumulate, other flags overwrite. Exit `2` = usage error (an alias in the
 `<domain>` position, an `--alias` another domain carries) — fix the line, never a second entry.

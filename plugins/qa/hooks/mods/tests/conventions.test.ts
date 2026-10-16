@@ -41,19 +41,21 @@ describe('prompt.compose', () => {
     expect(root!.text).toMatch(/^qa plugin root: \/\S*$/)
   })
 
-  test("passwords: base's registry get --field password, the browser fill alone, one paragraph", async ($, on) => {
+  test('passwords: registry preferred, low-sensitivity, client-facing places only, one paragraph', async ($, on) => {
     world(on)
     const text = ours(await compose($)).find(s => s.id === 'qa:passwords')!.text
     expect(text).toBe(PASSWORDS)
-    expect(text).toMatch(/^## qa convention — storefront passwords\n\nA storefront password comes only from/)
+    expect(text).toMatch(/^## qa convention — storefront passwords\n\nA dev or UAT storefront password is low-sensitivity/)
     expect(text).toContain('`node <base root>/scripts/qa-stores.cjs get <store> --field password`')
     expect(text).toContain('a bare `get` prints JSON, never a fill value')
     expect(text).toContain("base's `base plugin root:` line")
-    expect(text).toContain('raw output is used only as the browser fill value')
-    expect(text).toContain('a `qa-stores.cjs set` that registers or updates a store')
-    expect(text).toContain('the registry file is never read directly')
+    expect(text).toContain('preferred source when it knows the store')
+    expect(text).toContain('in chat, notes, browser fill code and on a Bash line')
+    expect(text).toContain('never in a Jira comment, Steps to Test, a PR\nbody')
+    expect(text).toContain('a screenshot attached to a ticket')
+    expect(text).toContain('The registry file is never read directly')
     expect(text.split('\n\n')).toHaveLength(2)
-    expect(text.length).toBeLessThanOrEqual(540)
+    expect(text.length).toBeLessThanOrEqual(760)
   })
 
   test('the store-access posture lives in the skill, not the prompt', async ($, on) => {
