@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.6.1**.
+Current release: **fe v0.7.0**.
 
 ## Status
 
@@ -118,10 +118,10 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 
 | Script | Run by | Does |
 |---|---|---|
-| `scripts/create-preview-theme.sh` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:ship` | builds and pushes an unpublished preview theme (`create`), re-pushes one (`refresh`), pins the session theme (`pin`) |
+| `scripts/create-preview-theme.sh` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:ship` | builds and pushes an unpublished preview theme (`create`), re-pushes one (`refresh`), pins the session theme (`pin`). `create --duplicate-of <theme-id\|name> --store <store>` copies a theme on that store server-side, waits until `theme list` shows the copy ready, then pushes the branch code into it; `--brand <b>` (create, refresh) exports `BRAND=<b>` to the build and does nothing else |
 | `scripts/session-theme.sh` | sourced by `create-preview-theme.sh`, run by `worktree-theme.sh` | the pin and un-pin grammar of `shopify.theme.toml` (`# fe:session-theme`, `# fe:superseded`) |
 | `scripts/worktree-theme.sh` | `/fe:preview-theme` in a worktree, `/fe:ship` | the Shopify half of a new worktree: the one-time un-pin and the dev-server line |
-| `scripts/theme-json.sh` | the skills, through the `store-access` section | reads and writes a theme's JSON files (`templates/*.json`, `config/settings_data.json`) with a read-back check |
+| `scripts/theme-json.sh` | the skills, through the `store-access` section | reads and writes a theme's JSON files (`templates/*.json`, `config/settings_data.json`) with a read-back check; `locate <id>` finds which store holds a theme (the stores in `<base root>/scripts/qa-stores.cjs` plus the toml's, or `--stores a,b`) |
 | `scripts/shopify-admin-gql.sh` | the skills, through the `store-access` section | one Admin GraphQL call against the project's store |
 | `scripts/project-profile.sh` | fe's hooks module, `worktree-theme.sh`, the doctor, the skills' fallback | prints `foundation`, `theme` or `none` |
 | `scripts/doctor.cjs` | `/fe-doctor`, or by hand | the static install checks (§ Doctor) |
@@ -129,7 +129,8 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 
 `/fe:fix-breaking-changes` copies its own `skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js`
 into the project and removes the copy after the run. `/fe:write-steps-to-test` names the QA store registry,
-`<base root>/scripts/qa-stores.cjs`, only to say why it does not read it.
+`<base root>/scripts/qa-stores.cjs`, only to say why it does not read it; `theme-json.sh locate` reads its
+store list (`list --json`, never a password) from base's install beside fe.
 
 ## Conventions
 
@@ -233,13 +234,15 @@ The process environment wins.
 | `FE_GQL_PROBE_CACHE` | `21600` | seconds `shopify-admin-gql.sh` reuses its `shopify version` probe and its "`store execute` is unavailable for this store" fact; `0` re-probes on every call (right after a `shopify store auth`) |
 | `FE_CPT_THROTTLE_WAITS` | `20 60` | pauses, in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled`; one retry per value, empty turns retrying off |
 | `FE_CPT_OVERLAY_VERIFY` | `1` | `0` skips `create-preview-theme.sh`'s overlay read-back (`overlay=skipped`); with it, each overlaid `*.json` the theme silently dropped prints `warn=overlay_file_dropped` |
+| `FE_CPT_DUPLICATE_TIMEOUT` | `300` | seconds `create-preview-theme.sh create --duplicate-of` waits for the copy to be listed ready before `error=duplicate_timeout` |
+| `FE_CPT_DUPLICATE_POLL` | `5` | seconds between those `theme list` polls |
 | `FE_CPT_OVERLAY_VERIFY_WAIT` | `2` | seconds before the overlay read-back's one re-pull when a file comes back missing |
 | `FE_THEME_JSON_VERIFY` | `1` | `0` skips `theme-json.sh set`'s read-back verify (`verified=skipped`); with it, a write the theme does not serve exits 6 with `error=not_applied` |
-| `FE_THEME_JSON_VERIFY_WAIT` | `2` | seconds `theme-json.sh set` waits before its one read-back retry |
+| `FE_THEME_JSON_VERIFY_WAIT` | `2` | seconds `theme-json.sh set` waits before its first read-back retry; the second waits 2.5× that |
 | `SHOPIFY_ADMIN_GQL_QUIET` | off | a non-`0` value shortens `shopify-admin-gql.sh`'s engine-fallback note to `note=engine=token` |
 | `TOML_PATH` | `shopify.theme.toml` | the config `create-preview-theme.sh`, `theme-json.sh` and `shopify-admin-gql.sh` read (`store =`, the dev theme's `theme =`, the Theme Access token), and the file `create-preview-theme.sh`'s pin rewrites — point it at a copy when the real config must not change. In a toml with `[environments.*]` blocks every value comes from one block: `--env <name>` (`create-preview-theme.sh` only), else `SHOPIFY_FLAG_ENVIRONMENT`, else `dev`, else `development`, else the top-level keys |
-| `SHOPIFY_CLI_THEME_TOKEN` | unset | Theme Access token for the `shopify` CLI: `create-preview-theme.sh`'s last resort after the toml's `password =` (and its only token for a store other than the toml's) — with none, the CLI's logged-in session authenticates (`auth=cli-session`); `theme-json.sh` (themecli engine) prefers it over the toml. It never sends a toml block's token to a `--store` that block does not name: another `[environments.*]` block naming that store supplies the token, and with none the CLI's logged-in session authenticates (`auth=cli-session … toml_env=<block>` on stderr, `token_source=session`). Never printed |
-| `SHOPIFY_STORE` | unset | the store `theme-json.sh`, `shopify-admin-gql.sh` and `create-preview-theme.sh` use when `--store` is not passed, ahead of the toml's `store =`. A store other than the toml's refuses `create-preview-theme.sh create` and the pin; `refresh` then pushes with `SHOPIFY_CLI_THEME_TOKEN`, else the CLI's logged-in session. For `theme-json.sh` it counts like `--store`: a store the resolved toml block does not name never gets that block's token — `SHOPIFY_CLI_THEME_TOKEN`, else a sibling block naming the store, else the CLI's logged-in session |
+| `SHOPIFY_CLI_THEME_TOKEN` | unset | Theme Access token for the `shopify` CLI: `create-preview-theme.sh`'s last resort after the toml's `password =` (and its only token for a store other than the toml's) — with none, the CLI's logged-in session authenticates (`auth=cli-session`); `theme-json.sh` (themecli engine) prefers it over the toml. It never sends a toml block's token to a `--store` that block does not name: another `[environments.*]` block naming that store supplies the token, and with none the CLI's logged-in session authenticates (`auth=cli-session … toml_env=<block>` on stderr, `token_source=session`) — as it does for any store with no token at all (no toml found, or a block without `password =`: `toml_store=-`). Never printed |
+| `SHOPIFY_STORE` | unset | the store `theme-json.sh`, `shopify-admin-gql.sh` and `create-preview-theme.sh` use when `--store` is not passed, ahead of the toml's `store =`. A store other than the toml's refuses a plain `create-preview-theme.sh create` (`create --duplicate-of` is allowed) and the pin; `refresh` then pushes with `SHOPIFY_CLI_THEME_TOKEN`, else the CLI's logged-in session. For `theme-json.sh` it counts like `--store`: a store the resolved toml block does not name never gets that block's token — `SHOPIFY_CLI_THEME_TOKEN`, else a sibling block naming the store, else the CLI's logged-in session |
 | `SHOPIFY_FLAG_ENVIRONMENT` | unset | read, never set, by fe: the Shopify CLI's own environment selector, taken by the three store scripts as the default `[environments.<name>]` block of `shopify.theme.toml`; a name no block carries is `error=env_not_found` |
 | `SHOPIFY_ADMIN_TOKEN` | unset | Admin API access token for `shopify-admin-gql.sh`'s token engine, ahead of the `--env` dotenv file |
 | `SHOPIFY_ADMIN_API_VERSION` | `2026-10` | the Admin API version `shopify-admin-gql.sh` requests when `--api-version` is not passed |

@@ -78,11 +78,15 @@ cat > "$TJDIR/shopify-admin-gql.sh" <<'STUB'
 # FAKE_RUNNER_MODE simulates the runner's exit-3 stderr contracts. TJ_GQL_LOG records one argv line
 # per call — the --file vetting cases assert the OPPOSITE (nothing was read or written), and "no
 # output" alone would also be what a broken stub looks like; T52 reads the line itself.
+# FAKE_THEMES_DIR (locate cases): the themes listing is $FAKE_THEMES_DIR/<--store>, and a store
+# with no file there fails the way an unreachable store does.
 set -u
 if [ -n "${TJ_GQL_LOG:-}" ]; then printf '%s\n' "$*" >> "$TJ_GQL_LOG"; fi
 case "${FAKE_RUNNER_MODE:-ok}" in
   mutfail) echo "error=store_execute_failed_mutation (stub)" >&2; exit 3 ;;
   nocreds) echo "error=no_admin_token" >&2; exit 3 ;;
+  # an Admin token minted for another store: the Admin API answers 401
+  http401) echo "error=http_401 url=https://x/admin/api/graphql.json" >&2; exit 5 ;;
   # the runner's OTHER exit-3 credential refusal: a token that cannot be an admin token at all
   badtoken) echo "error=invalid_admin_token source=.env (not an Admin API access token)" >&2; exit 3 ;;
   # two concatenated envelopes: valid JSON documents, but not ONE envelope
@@ -99,10 +103,13 @@ case "${FAKE_RUNNER_MODE:-ok}" in
   # exit 0 with NO output — parses fine, yields no value
   empty)   exit 0 ;;
 esac
-Q=""
-while [ $# -gt 0 ]; do case "$1" in --query) Q="$2"; shift 2 ;; *) shift ;; esac; done
+Q=""; ST=""
+while [ $# -gt 0 ]; do case "$1" in --query) Q="$2"; shift 2 ;; --store) ST="$2"; shift 2 ;; *) shift ;; esac; done
 role="${FAKE_ROLE:-DEVELOPMENT}"
-if grep -q FeThemesList "$Q"; then
+if grep -q FeThemesList "$Q" && [ -n "${FAKE_THEMES_DIR:-}" ]; then
+  [ -f "$FAKE_THEMES_DIR/$ST" ] || { echo "error=stub_store_unreachable store=$ST" >&2; exit 5; }
+  cat "$FAKE_THEMES_DIR/$ST"
+elif grep -q FeThemesList "$Q"; then
   printf '{"data":{"themes":{"nodes":[{"id":"gid://shopify/OnlineStoreTheme/1","name":"Live","role":"MAIN"},{"id":"gid://shopify/OnlineStoreTheme/2","name":"Dev","role":"DEVELOPMENT"}]}}}\n'
 elif grep -q FeThemeFileGet "$Q"; then
   case "${FAKE_GET_MODE:-}" in
@@ -715,18 +722,23 @@ else bad T35b-hint-names-triggers "err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
 if grep -q 'get --theme 2 --file templates/product.json' "$E" \
    && ! grep -qi 'old content is still in place' "$E"; then ok
 else bad T35d-hint-no-preimage-claim "err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
-if [ "$(cat "$C35")" = 2 ]; then ok; else bad T35c-retried-once "pulls=$(cat "$C35") want 2"; fi
+if [ "$(cat "$C35")" = 3 ]; then ok; else bad T35c-retried-twice "pulls=$(cat "$C35") want 3"; fi
 # T35e: the verdict says WHAT differs — leaf key paths of the normalized pair on stderr, ahead of
 # the hint, never a value and never the token
 rc=0; SHOPIFY_CLI_THEME_TOKEN=shptka_verifydiff9876 TJ_PULL_BODY="$TV/old.json" PATH="$TJSHIM:$PATH" \
   "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
   --theme 2 --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 6 ] && [ "$(wc -l < "$O" | tr -d ' ')" -eq 1 ] \
+if [ "$rc" -eq 6 ] && [ "$(wc -l < "$O" | tr -d ' ')" -eq 2 ] \
    && grep -qx 'note=verify_diff only_in_payload=- only_in_theme=- changed=sections.main.settings.test_parent diff_lines=[0-9]*' "$E" \
    && [ "$(grep -n '^note=verify_diff' "$E" | cut -d: -f1)" -lt "$(grep -n '^hint=' "$E" | cut -d: -f1)" ] \
    && ! grep -q 'shptka_verifydiff9876' "$E" \
    && ! grep '^note=verify_diff' "$E" | grep -qe 'old' -e 'metafields'; then ok
 else bad T35e-verify-diff-keys "rc=$rc out=$(head -c 160 "$O") err=$(grep -v shptka "$E" | head -c 300 | tr '\n' ' ')"; fi
+# T35j: an agent reading only `| tail -1` of stdout still gets what differed, and that a later
+# `get` showing the payload means propagation lag — stderr is lost on that path
+if [ "$(head -1 "$O")" = 'error=not_applied engine=themecli theme=2 file=templates/product.json' ] \
+   && tail -1 "$O" | grep -q '^note=verify_diff only_in_payload=- only_in_theme=- changed=sections.main.settings.test_parent diff_lines=[0-9]* (after 3 reads; a later `get` that shows the payload means propagation lag, not a dropped write)$'; then ok
+else bad T35j-verify-diff-on-stdout "out=$(tr '\n' ';' < "$O" | head -c 400)"; fi
 # T35f: each key list caps at 8 plus a `+N_more` count — a whole settings_data.json that did not
 # land must not flood the caller's context
 printf '{"sections":{"main":{"settings":{%s}}}}' \
@@ -755,6 +767,31 @@ else bad T35h-dropped-keys-count "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')";
 rc=0; TJ_PULL_BODY="$TV/few.json" tj_set_cli "$TV/many.json" >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 6 ] && grep -q 'does NOT serve the payload' "$E" && ! grep -q 'applied except' "$E"; then ok
 else bad T35i-mixed-diff-general-hint "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+
+# T36b (race guard): the CDN can serve the old copy for longer than one pause — the first TWO
+# pull-backs are stale, the third sees the payload, and the set succeeds
+rc=0; C36b="$TMP/tj36b-pulls"; : > "$C36b"; S36b="$TMP/tj36b-stale"; mkdir -p "$S36b"
+cat > "$S36b/shopify" <<'W'
+#!/usr/bin/env bash
+# the TJSHIM CLI, except that pulls 1 and 2 serve TJ_STALE_BODY
+case "$*" in *"theme pull"*)
+  n=$(( $(cat "$TJ_PULL_COUNT" 2>/dev/null || echo 0) + 1 ))
+  if [ "$n" -le 2 ]; then
+    printf '%s' "$n" > "$TJ_PULL_COUNT"
+    path=""; only=""; prev=""
+    for a in "$@"; do case "$prev" in --path) path="$a" ;; --only) only="$a" ;; esac; prev="$a"; done
+    mkdir -p "$path/$(dirname "$only")"; cp "$TJ_STALE_BODY" "$path/$only"; exit 0
+  fi ;;
+esac
+exec "$TJSHIM_REAL" "$@"
+W
+chmod +x "$S36b/shopify"
+TJ_STALE_BODY="$TV/old.json" TJ_PULL_BODY="$TV/new.json" TJ_PULL_COUNT="$C36b" TJSHIM_REAL="$TJSHIM/shopify" \
+  SHOPIFY_CLI_THEME_TOKEN=fake PATH="$S36b:$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" set --engine themecli --store test.myshopify.com \
+  --theme 2 --file templates/product.json --from "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" && [ "$(cat "$C36b")" = 3 ]; then ok
+else bad T36b-two-stale-reads-then-success "rc=$rc pulls=$(cat "$C36b") out=$(head -c 160 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
 # T36 (race guard): a read issued right after a write can still be served the old copy — the
 # FIRST pull-back is stale, the retry sees the payload, and the set succeeds
@@ -956,17 +993,23 @@ TJ_PUSH_SAVE="$TV/pushed47.json" TJ_PULL_BODY_1="$TV/garbled.json" TJ_PULL_BODY=
 if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" && [ "$(cat "$C47")" = 2 ]; then ok
 else bad T47b-garbled-then-clean "rc=$rc pulls=$(cat "$C47") out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 # T47c: an unusable FE_THEME_JSON_VERIFY_WAIT falls back to the default instead of handing
-# `sleep` an argument it refuses — under `set -e` that would abort the verify mid-run. This is
-# the one row in the section that pays the pause.
-rc=0; FE_THEME_JSON_VERIFY_WAIT=soon TJ_PULL_BODY="$TV/old.json" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E"; then ok
-else bad T47c-invalid-wait "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# `sleep` an argument it refuses — under `set -e` that would abort the verify mid-run. A `sleep`
+# shim records the pauses (the default pair, 2 then 5) instead of paying them.
+TJS="$TMP/tj47-sleep"; mkdir -p "$TJS"
+printf '#!/bin/sh\necho "$1" >> "%s"\n' "$TJS/sleeps" > "$TJS/sleep"; chmod +x "$TJS/sleep"
+rc=0; : > "$TJS/sleeps"
+FE_THEME_JSON_VERIFY_WAIT=soon TJ_PULL_BODY="$TV/old.json" PATH="$TJS:$PATH" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E" \
+   && [ "$(tr '\n' ' ' < "$TJS/sleeps")" = "2 5 " ]; then ok
+else bad T47c-invalid-wait "rc=$rc sleeps=$(tr '\n' ';' < "$TJS/sleeps") out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 # T47d: `1.2.3` is the shape a bytes-only filter lets through — `sleep` still refuses it, and under
 # `set -e` that aborted the verify AFTER the mutation had committed, stranding the caller with no
 # verdict at all. It must fall back like any other unusable value.
-rc=0; FE_THEME_JSON_VERIFY_WAIT=1.2.3 TJ_PULL_BODY="$TV/old.json" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E"; then ok
-else bad T47d-multidot-wait "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+rc=0; : > "$TJS/sleeps"
+FE_THEME_JSON_VERIFY_WAIT=1.2.3 TJ_PULL_BODY="$TV/old.json" PATH="$TJS:$PATH" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && ! grep -qi 'sleep' "$E" \
+   && [ "$(tr '\n' ' ' < "$TJS/sleeps")" = "2 5 " ]; then ok
+else bad T47d-multidot-wait "rc=$rc sleeps=$(tr '\n' ';' < "$TJS/sleeps") out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 # T47e: theme-json.sh itself fills its switches from the domaine env files, not just the reader
 # (EV4 proves the reader). A `sleep` shim records the pause the retry asks for: the project
 # layer's FE_THEME_JSON_VERIFY_WAIT reaches it, and a project-layer FE_THEME_JSON_VERIFY=0 does
@@ -978,8 +1021,8 @@ rc=0; : > "$TJE/sleeps"; C47e="$TMP/tj47e-pulls"; : > "$C47e"
 ( unset FE_THEME_JSON_VERIFY_WAIT FE_THEME_JSON_VERIFY; cd "$TJE/proj/sub" \
   && PATH="$TJE/shim:$PATH" TJ_PULL_BODY="$TV/old.json" TJ_PULL_COUNT="$C47e" \
      tj_set_cli "$TV/new.json" ) >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && [ "$(cat "$TJE/sleeps")" = "0.5" ] \
-   && [ "$(cat "$C47e")" = 2 ]; then ok
+if [ "$rc" -eq 6 ] && grep -q 'error=not_applied' "$O" && [ "$(tr '\n' ' ' < "$TJE/sleeps")" = "0.5 1.25 " ] \
+   && [ "$(cat "$C47e")" = 3 ]; then ok
 else bad T47e-project-env-wait "rc=$rc sleeps=$(tr '\n' ';' < "$TJE/sleeps") pulls=$(cat "$C47e") out=$(head -c 200 "$O")"; fi
 printf 'FE_THEME_JSON_VERIFY=0\n' > "$TJE/xdg/domaine/env"
 rc=0; : > "$C47e"
@@ -1195,6 +1238,139 @@ rc=0; TOML_PATH="$TT/single.toml" TJ_PULL_FAIL=1 PATH="$TJSHIM:$PATH" \
 assert T59e-pull-503-error-line 5 "$rc" "$E" "error=cli_pull_failed theme=2 store=acme-dev.myshopify.com token_source=toml"
 if ! grep -q '^hint=' "$E"; then ok; else bad T59f-pull-503-no-hint "err=$(tr '\n' ';' < "$E" | head -c 300)"; fi
 
+# T62 (bug): `get --store <other store>` with NO toml reachable (a cwd outside the checkout, or a
+# worktree's shared .claude/tasks) printed only gql's no_admin_token hints: the theme-CLI probe
+# needed a toml token, though a fixed store runs on the CLI's logged-in session without one
+TN="$TMP/tj62-none/shopify.theme.toml"
+rc=0; L="$TMP/tjl62"; : > "$L"
+TOML_PATH="$TN" FAKE_RUNNER_MODE=nocreds TJ_CLI_LOG="$L" TJ_PULL_BODY="$TV/new.json" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" get --store acme-uk.myshopify.com --theme 2 --file templates/product.json \
+  --out "$TMP/tj62.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && cmp -s "$TMP/tj62.json" "$TV/new.json" \
+   && grep -q 'argv=theme pull --store acme-uk\.myshopify\.com ' "$L" && grep -qx 'token=' "$L" \
+   && grep -q '^auth=cli-session store=acme-uk.myshopify.com toml_store=- ' "$E" \
+   && grep -q 'using the theme-CLI engine (Shopify CLI session)' "$E"; then ok
+else bad T62-no-toml-get-session "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T62b: `themes` and `set` take the same decision from the same probe — no command falls back alone
+rc=0; L="$TMP/tjl62b"; : > "$L"
+TOML_PATH="$TN" FAKE_RUNNER_MODE=nocreds TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes --store acme-uk >"$O" 2>"$E" || rc=$?
+rc2=0; TOML_PATH="$TN" FAKE_RUNNER_MODE=nocreds TJ_CLI_LOG="$L" TJ_PUSH_SAVE="$TMP/tj62b.json" TJ_PULL_BODY="$TMP/tj62b.json" \
+  PATH="$TJSHIM:$PATH" "$BASH_BIN" "$TJDIR/theme-json.sh" set --store acme-uk --theme 2 \
+  --file templates/product.json --from "$TV/new.json" >"$TMP/tj62b.out" 2>"$E" || rc2=$?
+if [ "$rc" -eq 0 ] && grep -q '"name":"Dev"' "$O" && [ "$rc2" -eq 0 ] && grep -q '"engine":"themecli"' "$TMP/tj62b.out" \
+   && grep -q 'argv=theme push --store acme-uk\.myshopify\.com ' "$L" && ! grep -q '^token=.' "$L"; then ok
+else bad T62b-themes-set-same-fallback "rc=$rc rc2=$rc2 out=$(head -c 160 "$TMP/tj62b.out") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T62c: a toml naming the store with no password= is the same case — the session on the toml's store
+printf '[environments.dev]\nstore = "acme-nopw"\n' > "$TT/nopw.toml"
+rc=0; L="$TMP/tjl62c"; : > "$L"
+TOML_PATH="$TT/nopw.toml" FAKE_RUNNER_MODE=nocreds TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" themes >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q 'argv=theme list --store acme-nopw\.myshopify\.com ' "$L" && grep -qx 'token=' "$L" \
+   && grep -q '^auth=cli-session store=acme-nopw.myshopify.com toml_store=- toml_env=dev ' "$E"; then ok
+else bad T62c-toml-without-password-session "rc=$rc log=$(grep -v token "$L" | tr '\n' ';') err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T62d: truly no engine — no store anywhere: gql's reason AND the theme-CLI's, nothing invoked
+rc=0; L="$TMP/tjl62d"; : > "$L"
+TOML_PATH="$TN" FAKE_RUNNER_MODE=nocreds TJ_CLI_LOG="$L" PATH="$TJSHIM:$PATH" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" get --theme 2 --file templates/product.json >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && grep -q 'error=no_admin_token' "$E" && [ ! -s "$L" ] \
+   && grep -qF "hint=themecli_unavailable (no store to run on: no --store/\$SHOPIFY_STORE and no store= in $TN)" "$E" \
+   && ! grep -q 'error=shopify_cli_not_found' "$E"; then ok
+else bad T62d-no-engine-names-both "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+# T62e: …and with a store but no `shopify` CLI on PATH, that is the theme-CLI's reason
+NOSHOP="$TMP/noshop-bin"
+path_without "$NOSHOP" shopify \
+  jq perl mktemp cmp cat sed tr wc grep awk dirname mkdir head tail cp sleep rm touch bash ls sort
+rc=0; TOML_PATH="$TN" FAKE_RUNNER_MODE=nocreds PATH="$NOSHOP" \
+  "$BASH_BIN" "$TJDIR/theme-json.sh" get --store acme-uk --theme 2 --file templates/product.json >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && grep -q 'error=no_admin_token' "$E" \
+   && grep -qF 'hint=themecli_unavailable (no shopify CLI on PATH)' "$E" && grep -qx 'error=shopify_cli_not_found' "$E"; then ok
+else bad T62e-no-cli-names-both "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+
+# T64: `locate <id>` — which store holds a theme: `themes` once per candidate store (base's QA
+# registry beside fe, plus the toml's store), the first listing carrying the id wins
+LOC="$TMP/tjloc"; mkdir -p "$LOC/repo/fe/scripts" "$LOC/repo/base/scripts" "$LOC/themes"
+cp "$TJDIR/theme-json.sh" "$TJDIR/_shopify-common.sh" "$TJDIR/shopify-admin-gql.sh" "$LOC/repo/fe/scripts/"
+cat > "$LOC/repo/base/scripts/qa-stores.cjs" <<'J'
+// registry stub: `list --json` in base's qa-stores.cjs shape (password masked)
+if (process.argv[2] === 'list' && process.argv[3] === '--json') {
+  process.stdout.write(JSON.stringify([{ domain: 'store-a.myshopify.com', alias: 'A', password: '***' },
+    { domain: 'store-b.myshopify.com', alias: 'B' }]) + '\n');
+} else process.exit(2);
+J
+printf '{"data":{"themes":{"nodes":[{"id":"gid://shopify/OnlineStoreTheme/11","name":"A Live","role":"MAIN"}]}}}\n' > "$LOC/themes/store-a.myshopify.com"
+printf '{"data":{"themes":{"nodes":[{"id":"gid://shopify/OnlineStoreTheme/22","name":"B Dev","role":"DEVELOPMENT"}]}}}\n' > "$LOC/themes/store-b.myshopify.com"
+printf '{"data":{"themes":{"nodes":[{"id":"gid://shopify/OnlineStoreTheme/33","name":"C Preview","role":"UNPUBLISHED"}]}}}\n' > "$LOC/themes/store-c.myshopify.com"
+tj_locate() { # tj_locate <script> <args…> — the stub runner answers per --store from $LOC/themes
+  local sc="$1"; shift
+  FAKE_THEMES_DIR="$LOC/themes" TOML_PATH="${LOC_TOML:-$TN}" "$BASH_BIN" "$sc" locate "$@"
+}
+rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 22 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'store=store-b.myshopify.com theme=22 name=B Dev role=DEVELOPMENT' ]; then ok
+else bad T64-locate-registry-store "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T64b: a gid names the same theme
+rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" gid://shopify/OnlineStoreTheme/11 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'store=store-a.myshopify.com theme=11 name=A Live role=MAIN' ]; then ok
+else bad T64b-locate-gid "rc=$rc out=$(head -c 200 "$O")"; fi
+# T64c: --stores replaces the registry; a miss is one stdout line with the count, exit 5
+rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 22 --stores store-a,store-a.myshopify.com >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=1' ]; then ok
+else bad T64c-locate-not-found "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# T64d: a store whose listing fails is skipped with a note (never the end of the search), and a
+# URL / upper-case spelling reaches the same store
+rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 22 --stores 'store-x, https://STORE-B.myshopify.com/' >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'store=store-b.myshopify.com theme=22 name=B Dev role=DEVELOPMENT' ] \
+   && grep -q '^note=locate_skipped store=store-x.myshopify.com rc=5 (.*stub_store_unreachable' "$E"; then ok
+else bad T64d-locate-skips-unreachable "rc=$rc out=$(head -c 200 "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 99 --stores store-x,store-a >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=2 unreachable=1' ]; then ok
+else bad T64e-locate-not-found-unreachable "rc=$rc out=$(head -c 200 "$O")"; fi
+# T64f: the toml's store is a candidate too
+LOC_TOML="$TT/nopw.toml"; printf '[environments.dev]\nstore = "store-c"\n' > "$LOC_TOML"
+rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 33 >"$O" 2>"$E" || rc=$?
+unset LOC_TOML
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'store=store-c.myshopify.com theme=33 name=C Preview role=UNPUBLISHED' ]; then ok
+else bad T64f-locate-toml-store "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T64g: the plugin-cache layout (<cache>/fe/<ver>, <cache>/base/<ver>) takes base's HIGHEST version,
+# compared as numbers — 0.10.1 beats 0.9.0, whose registry knows only store-a
+mkdir -p "$LOC/cache/fe/0.6.1/scripts" "$LOC/cache/base/0.9.0/scripts" "$LOC/cache/base/0.10.1/scripts"
+cp "$LOC/repo/fe/scripts/"* "$LOC/cache/fe/0.6.1/scripts/"
+cp "$LOC/repo/base/scripts/qa-stores.cjs" "$LOC/cache/base/0.10.1/scripts/"
+printf "process.stdout.write(JSON.stringify([{ domain: 'store-a.myshopify.com' }]) + '\\\\n');\n" > "$LOC/cache/base/0.9.0/scripts/qa-stores.cjs"
+rc=0; tj_locate "$LOC/cache/fe/0.6.1/scripts/theme-json.sh" 22 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=store-b.myshopify.com theme=22 ' "$O"; then ok
+else bad T64g-locate-cache-layout "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T64h: no registry beside fe and no toml store — nothing to search, said on both channels
+rc=0; tj_locate "$TJDIR/theme-json.sh" 22 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=0' ] \
+   && grep -q '^note=locate_no_registry' "$E" && grep -q '^hint=no store to search' "$E"; then ok
+else bad T64h-locate-no-candidates "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T64k: an Admin token another store rejects (401) re-runs that store once on the theme CLI
+rc=0; L="$TMP/tjl64k"; : > "$L"
+FAKE_RUNNER_MODE=http401 TJ_CLI_LOG="$L" TJ_LIST_JSON='[{"id":22,"name":"B Dev","role":"development"}]' PATH="$TJSHIM:$PATH" \
+  tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 22 --stores store-b >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'store=store-b.myshopify.com theme=22 name=B Dev role=DEVELOPMENT' ] \
+   && grep -q '^argv=theme list --store store-b\.myshopify\.com ' "$L"; then ok
+else bad T64k-locate-401-falls-back-to-cli "rc=$rc out=$(head -c 200 "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# …and an explicit --engine token keeps the 401 as that store's failure
+rc=0; FAKE_RUNNER_MODE=http401 PATH="$TJSHIM:$PATH" \
+  tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 22 --stores store-b --engine token >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -q '^note=locate_skipped store=store-b.myshopify.com rc=5 (error=http_401' "$E"; then ok
+else bad T64k2-locate-gql-401-skipped "rc=$rc out=$(head -c 200 "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T64l: the claude.ai-synced layout after a resync — fe~g2 beside base~g1 and base~g3: the highest wins
+mkdir -p "$LOC/synced/fe~g2/scripts" "$LOC/synced/base~g1/scripts" "$LOC/synced/base~g3/scripts"
+cp "$LOC/repo/fe/scripts/"* "$LOC/synced/fe~g2/scripts/"
+cp "$LOC/repo/base/scripts/qa-stores.cjs" "$LOC/synced/base~g3/scripts/"
+printf "process.stdout.write(JSON.stringify([{ domain: 'store-a.myshopify.com' }]) + '\\\\n');\n" > "$LOC/synced/base~g1/scripts/qa-stores.cjs"
+rc=0; tj_locate "$LOC/synced/fe~g2/scripts/theme-json.sh" 22 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^store=store-b.myshopify.com theme=22 ' "$O"; then ok
+else bad T64l-locate-synced-generation "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T64i: the id is required, and validated
+rc=0; tj_locate "$TJDIR/theme-json.sh" >"$O" 2>"$E" || rc=$?
+assert T64i-locate-needs-id 2 "$rc" "$E" "error=usage (locate needs a theme id"
+rc=0; tj_locate "$TJDIR/theme-json.sh" abc >"$O" 2>"$E" || rc=$?
+assert T64j-locate-bad-id 2 "$rc" "$E" "error=bad_theme_id"
+
 unset FE_THEME_JSON_VERIFY_WAIT
 
 # T49: themecli `get` — a pull of exactly the named file into a private dir, whose body reaches
@@ -1355,15 +1531,15 @@ TJH="$TMP/tj-usage-header"
 awk '/^# Usage:/ { f = 1 } f { if ($0 == "#" || $0 !~ /^#( |$)/) exit; sub(/^# ?/, ""); print }' \
   "$TJ" > "$TJH"
 rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" --help >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 0 ] && [ "$(wc -l < "$TJH" | tr -d ' ')" -eq 6 ] && sed '$d' "$O" | diff -q - "$TJH" >/dev/null; then ok
+if [ "$rc" -eq 0 ] && [ "$(wc -l < "$TJH" | tr -d ' ')" -eq 7 ] && sed '$d' "$O" | diff -q - "$TJH" >/dev/null; then ok
 else bad T57-help-matches-header "rc=$rc diff=$(sed '$d' "$O" | diff - "$TJH" | head -c 300 | tr '\n' ';')"; fi
 # T57b: the pointer line that follows it names where the full contract lives
 if [ "$(tail -1 "$O")" = "Full contract: the header of $TJDIR/theme-json.sh" ]; then ok
 else bad T57b-help-pointer "tail=$(tail -1 "$O")"; fi
 # T57c: the reference's copy of the three command lines is the same text (the third copy)
 TJR="$ROOT/plugins/fe/references/theme-customizer-state.md"
-if [ "$(grep -c '^theme-json.sh \(themes\|get\|set\) ' "$TJR")" -eq 3 ] \
-   && grep '^theme-json.sh \(themes\|get\|set\) ' "$TJR" | diff -q - <(grep '^  theme-json.sh ' "$TJH" | sed 's/^  //') >/dev/null; then ok
+if [ "$(grep -c '^theme-json.sh \(themes\|get\|set\|locate\) ' "$TJR")" -eq 4 ] \
+   && grep '^theme-json.sh \(themes\|get\|set\|locate\) ' "$TJR" | diff -q - <(grep '^  theme-json.sh ' "$TJH" | sed 's/^  //') >/dev/null; then ok
 else bad T57c-reference-matches-usage "diff=$(grep '^theme-json.sh ' "$TJR" | diff - <(sed 's/^  //' "$TJH" | grep '^theme-json.sh ') | head -c 300 | tr '\n' ';')"; fi
 # T57d: the unknown_arg trailer lists every flag the parser accepts — a `--foo)` arm added above
 # without a trailer update would leave the refusal lying about the accepted set
@@ -1375,7 +1551,7 @@ if [ "$n" -ge 10 ] && [ -z "$missing" ]; then ok; else bad T57d-trailer-lists-fl
 
 # T58: the refusals name the way out — a guessed flag has to self-correct in one step
 rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" bogus >"$O" 2>"$E" || rc=$?
-assert T58-unknown-command-trailer 2 "$rc" "$E" "error=unknown_command cmd='bogus' (use themes|get|set; --help prints usage)"
+assert T58-unknown-command-trailer 2 "$rc" "$E" "error=unknown_command cmd='bogus' (use themes|get|set|locate; --help prints usage)"
 rc=0; "$BASH_BIN" "$TJDIR/theme-json.sh" get --key sections >"$O" 2>"$E" || rc=$?
 assert T58b-unknown-arg-trailer 2 "$rc" "$E" "error=unknown_arg arg=--key (flags: --theme --file"
 if grep -q -- '--file' "$E" && grep -q -- '--help prints usage' "$E"; then ok
@@ -2305,6 +2481,8 @@ if [ -n "${CPT_LOG:-}" ]; then
   # `<unset>` tells an unexported token (the CLI-session run) apart from an exported empty one
   printf 'token=%s\n' "${SHOPIFY_CLI_THEME_TOKEN-<unset>}" >> "$CPT_LOG"
 fi
+# CPT_ARGV_LINES: every call's argv one <arg> per element, so a value that word-split shows up
+[ -n "${CPT_ARGV_LINES:-}" ] && { printf '<%s>' "$@"; echo; } >> "$CPT_ARGV_LINES"
 # FAKE_REJECT_STORE: every call at that store is the CLI's auth rejection — a token minted for another
 # store; FAKE_REJECT_MSG replaces the rejection text (a CLI session that is not logged in, say)
 if [ -n "${FAKE_REJECT_STORE:-}" ]; then
@@ -2324,6 +2502,11 @@ done
 case "$1 ${2:-}" in
   "theme list")
     [ -n "${FAKE_LIST_FAIL:-}" ] && { echo "Error: could not reach the Admin API" >&2; exit 1; }
+    # FAKE_LIST_COUNT (a counter file) + FAKE_LIST_AT_<n>: the n-th list call answers that value
+    if [ -n "${FAKE_LIST_COUNT:-}" ]; then
+      n=0; [ -f "$FAKE_LIST_COUNT" ] && n="$(cat "$FAKE_LIST_COUNT")"; n=$((n + 1)); echo "$n" > "$FAKE_LIST_COUNT"
+      v="FAKE_LIST_AT_$n"; [ -n "${!v:-}" ] && { printf '%s\n' "${!v}"; exit 0; }
+    fi
     # FAKE_LIST2 + FAKE_LIST_MARK: a list answers FAKE_LIST while the mark file is absent and
     # FAKE_LIST2 once it exists — how a test shows a theme "appearing" mid-run. The CODE push drops
     # the mark (`--unpublished` creates the theme server-side before uploading, so even a failed
@@ -2392,6 +2575,10 @@ J
     # express (a gid-shaped theme id above all). Same gotcha: the value is never a ${…:-default}.
     [ "$is_only" -eq 0 ] && [ -n "${FAKE_PUSH_JSON:-}" ] && { printf '%s\n' "$FAKE_PUSH_JSON"; exit 0; }
     printf '{"theme":{"id":%s,"preview_url":"https://acme-dev.myshopify.com/?preview_theme_id=%s","editor_url":"https://admin.shopify.com/store/acme-dev/themes/%s/editor"}}\n' "$nid" "$nid" "$nid" ;;
+  "theme duplicate")
+    [ -n "${FAKE_DUP_FAIL:-}" ] && { printf '%s\n' "$FAKE_DUP_FAIL" >&2; exit 1; }
+    [ -n "${FAKE_DUP_JSON:-}" ] && { printf '%s\n' "$FAKE_DUP_JSON"; exit 0; }
+    printf '{"theme":{"id":%s,"name":"copy","role":"unpublished"}}\n' "${FAKE_DUP_ID:-333}" ;;
   "theme delete") [ -n "${FAKE_DELETE_FAIL:-}" ] && exit 1; exit 0 ;;
   "version") echo "4.5.2" ;;
   *) echo "shim: unhandled: $*" >&2; exit 1 ;;
@@ -2428,6 +2615,12 @@ cat > "$CPTD/dropmark.sh" <<'W'
 : > "${FAKE_LIST_MARK:?}"
 exit 0
 W
+# records the BRAND the build saw
+cat > "$CPTD/brand.sh" <<'W'
+#!/usr/bin/env bash
+printf '%s' "${BRAND-<unset>}" > "${CPT_BRAND_OUT:-/dev/null}"
+exit 0
+W
 # records that it ran, so a case can assert a refusal landed BEFORE the build
 cat > "$CPTD/markbuild.sh" <<'W'
 #!/usr/bin/env bash
@@ -2454,6 +2647,7 @@ cat > "$CPTD/repo/package.json" <<EOF
   "scripts": {
     "build": "$CPTD/markbuild.sh",
     "markbuild": "$CPTD/markbuild.sh",
+    "brandbuild": "$CPTD/brand.sh",
     "dropmark": "$CPTD/dropmark.sh",
     "waitpull": "$CPTD/waitpull.sh",
     "overlap": "$CPTD/overlap.sh",
@@ -2461,7 +2655,7 @@ cat > "$CPTD/repo/package.json" <<EOF
   }
 }
 EOF
-chmod +x "$CPTD/shim/shopify" "$CPTD/shim/npm" "$CPTD/waitpull.sh" "$CPTD/overlap.sh" "$CPTD/markbuild.sh" "$CPTD/dropmark.sh"
+chmod +x "$CPTD/brand.sh" "$CPTD/shim/shopify" "$CPTD/shim/npm" "$CPTD/waitpull.sh" "$CPTD/overlap.sh" "$CPTD/markbuild.sh" "$CPTD/dropmark.sh"
 
 run_cpt_at() { # run_cpt_at <cwd> <path-prefix> <log-file> <env=val…> -- <args…>
   local dir="$1" pfx="$2" log="$3"; shift 3
@@ -4493,7 +4687,7 @@ for ha in --help -h; do
   rc=0; L="$TMP/cpt60$ha"; : > "$L"
   run_cpt_at "$CPTH" "$CPTD/shim:$PATH" "$L" NO=1 -- "$ha" || rc=$?
   if [ "$rc" -eq 0 ] && [ ! -s "$E" ] && [ ! -s "$L" ] \
-     && [ "$(wc -l < "$CPTHH" | tr -d ' ')" -eq 10 ] && sed '$d' "$O" | diff -q - "$CPTHH" >/dev/null; then ok
+     && [ "$(wc -l < "$CPTHH" | tr -d ' ')" -eq 13 ] && sed '$d' "$O" | diff -q - "$CPTHH" >/dev/null; then ok
   else bad "P60-help[$ha]" "rc=$rc diff=$(sed '$d' "$O" | diff - "$CPTHH" | head -c 300 | tr '\n' ';') err=$(head -c 120 "$E" | tr '\n' ' ')"; fi
 done
 # P60b: the pointer line that follows it names where the full contract lives
@@ -5251,6 +5445,80 @@ rc=0; ( cd "$TMP" && HOME="$WTR/home" "$BASH_BIN" "$LONE_T/worktree-theme.sh" "$
 if [ "$rc" -eq 1 ] && grep -q "^error=session_lib_not_found path=$LONE_T/session-theme.sh$" "$O" \
    && [ "$(fhash "$WTR/f/wt/shopify.theme.toml")" = "$wt_before" ]; then ok
 else bad WT14-session-lib-missing "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# --- create --duplicate-of: a copy of a theme on another store, pushed once the copy is ready ---
+DUPL='[{"id":111,"name":"[DEV] Kever","role":"development"},{"id":777,"name":"Develop CL","role":"unpublished"},{"id":999,"name":"Live Theme","role":"live"}]'
+DUPL_PROC='[{"id":777,"name":"Develop CL","role":"unpublished"},{"id":333,"name":"[ELC-1] CL | Kever","role":"unpublished","processing":true},{"id":999,"name":"Live Theme","role":"live"}]'
+DUPL_READY='[{"id":777,"name":"Develop CL","role":"unpublished"},{"id":333,"name":"[ELC-1] CL | Kever","role":"unpublished","processing":false},{"id":999,"name":"Live Theme","role":"live"}]'
+dup_run() { # dup_run <label-dir> <env=val…> -- <extra create args…>; log in $L, BRAND seen in $DB
+  local d="$TMP/$1"; shift; rm -rf "$d"; mkdir -p "$d"; L="$d/log"; : > "$L"; DB="$d/brand"
+  local envs=(); while [ "$1" != "--" ]; do envs+=("$1"); shift; done; shift
+  rc=0; run_cpt "$L" FAKE_LIST="$DUPL" FAKE_LIST_COUNT="$d/count" FE_CPT_DUPLICATE_POLL=0 FE_CPT_DUPLICATE_TIMEOUT=30 \
+    CPT_BRAND_OUT="$DB" CPT_ARGV_LINES="$d/argv" CPT_BUILD_MARK="$d/built" ${envs[@]+"${envs[@]}"} \
+    -- create --name "[ELC-1] CL | Kever" --store elc-us-cl-uat "$@" || rc=$?
+}
+
+# D1: the copy is absent on the first poll and listed ready on the second → one duplicate, one code
+# push into it with the settings ignored, no overlay; BRAND reaches the build; a foreign store
+# authenticates through the CLI session
+dup_run dup1 FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of 777 --brand CL --build-script brandbuild
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O" && grep -q '^duplicate_of=777$' "$O" && grep -q '^brand=CL$' "$O" \
+   && grep -q '^auth=cli-session$' "$O" && grep -q '^reused=false$' "$O" && ! grep -q '^overlay=' "$O" \
+   && [ "$(cat "$DB")" = CL ] && [ "$(cpt_calls 'theme list' "$L")" -eq 3 ] \
+   && [ "$(cpt_calls 'theme duplicate --store elc-us-cl-uat --theme 777' "$L")" -eq 1 ] \
+   && [ "$(cpt_calls 'theme push --store elc-us-cl-uat --theme 333 .*--ignore config/settings_data.json' "$L")" -eq 1 ] \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ] && [ "$(cpt_calls 'theme pull' "$L")" -eq 0 ]; then ok
+else bad D1-duplicate-happy "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+
+# D2: a copy listed but still processing is not ready — the push waits for processing:false
+dup_run dup2 FAKE_LIST_AT_2="$DUPL_PROC" FAKE_LIST_AT_3="$DUPL_PROC" FAKE_LIST_AT_4="$DUPL_READY" -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O" && [ "$(cpt_calls 'theme list' "$L")" -eq 4 ] \
+   && [ "$(grep -n 'argv=theme push' "$L" | cut -d: -f1)" -gt "$(grep -n 'argv=theme list' "$L" | tail -1 | cut -d: -f1)" ]; then ok
+else bad D2-duplicate-waits-processing "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+
+# D3: never listed ready within the timeout → duplicate_timeout naming the kept copy, nothing pushed or deleted
+dup_run dup3 FE_CPT_DUPLICATE_TIMEOUT=0 -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_timeout theme=333 source=777 store=elc-us-cl-uat' "$O" \
+   && grep -q '^created_theme=333$' "$O" && grep -q 'refresh --theme 333 --store elc-us-cl-uat' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ] && [ "$(cpt_calls 'theme delete' "$L")" -eq 0 ]; then ok
+else bad D3-duplicate-timeout "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+
+# D4: a source the store does not list → refused before the build and the duplicate
+dup_run dup4 -- --duplicate-of "Develop JM"
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_source_not_found source="Develop JM"' "$O" && [ ! -e "$TMP/dup4/built" ] \
+   && [ "$(cpt_calls 'theme duplicate' "$L")" -eq 0 ] && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D4-duplicate-source-not-found "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+
+# D4b: a listing that never answered cannot resolve the source either
+dup_run dup4b FAKE_LIST_FAIL=1 -- --duplicate-of 777
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_source_not_found source="777"' "$O" \
+   && [ "$(cpt_calls 'theme duplicate' "$L")" -eq 0 ]; then ok
+else bad D4b-duplicate-source-unlisted "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# D5: flags are argv arrays — a source NAME and a theme name with spaces reach the CLI as one argument each
+dup_run dup5 FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of "Develop CL" --no-build
+if [ "$rc" -eq 0 ] && grep -q '^duplicate_of=777$' "$O" \
+   && grep -qF '<theme><duplicate><--store><elc-us-cl-uat><--theme><777><--name><[ELC-1] CL | Kever><--force><--json>' "$TMP/dup5/argv"; then ok
+else bad D5-duplicate-flags-as-array "rc=$rc out=$(tr '\n' ';' < "$O") argv=$(tr '\n' ';' < "$TMP/dup5/argv")"; fi
+
+# D6: the duplicate itself failing → duplicate_failed, nothing pushed
+dup_run dup6 FAKE_DUP_FAIL='Error: Theme could not be duplicated' -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=duplicate_failed source=777' "$O" && grep -q 'could not be duplicated' "$O" \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D6-duplicate-failed "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# D7: --reuse with --duplicate-of is refused; a malformed --brand is refused before the store
+dup_run dup7 -- --duplicate-of 777 --reuse --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=--duplicate-of always makes a new theme' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad D7-duplicate-reuse-refused "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+dup_run dup7b -- --duplicate-of 777 --brand 'CL;x' --no-build
+if [ "$rc" -eq 1 ] && grep -q '^error=bad_brand' "$O" && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad D7b-bad-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+
+# D8: without --duplicate-of a foreign-store create is still overlay_store_mismatch, now naming the copy route
+rc=0; L="$TMP/dup8"; : > "$L"; run_cpt "$L" NO=1 -- create --name X --store elc-us-cl-uat --no-build || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=overlay_store_mismatch' "$O" && grep -q -- '--duplicate-of <theme> --store elc-us-cl-uat' "$O"; then ok
+else bad D8-foreign-create-still-refused "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 
 # ER1: every error=/warn= key the preview runner prints names an entry heading, so the errors
 # reference's one-entry awk read finds its guidance

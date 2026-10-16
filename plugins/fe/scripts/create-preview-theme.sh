@@ -49,9 +49,12 @@
 # Usage:
 #   create-preview-theme.sh info
 #   create-preview-theme.sh create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>]
-#                                  [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+#                                  [--brand <b>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #                                  [--allow-unverified] [--allow-dev-theme]
-#   create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>]
+#   create-preview-theme.sh create --name "<NAME>" --duplicate-of <theme-id|name> [--brand <b>]
+#                                  [--no-build] [--build-script <name>] [--ignore-extra "<glob>"]
+#                                  [--pin-toml [--env <name>]]
+#   create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>] [--brand <b>]
 #                                   [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
 #                                   [--allow-unverified] [--allow-dev-theme]
 #   create-preview-theme.sh pin --theme <ID> [--env <name>]
@@ -74,6 +77,19 @@
 #       `--reuse` resolves the name through `theme list`: a listing that never answered is refused
 #       (`error=reuse_unverifiable`), and a name that resolves to the shared dev theme is refused
 #       (`error=dev_theme_write_refused`) — see the two flags below.
+#   create --name "<NAME>" --duplicate-of <theme-id|name> [--brand <b>] …
+#       → a copy of a theme on the store (`--store` names a store other than the toml's, too): resolve
+#         the source through `theme list` (`error=duplicate_source_not_found`, `ambiguous_name`) →
+#         build repo → `shopify theme duplicate` → poll `theme list` every $FE_CPT_DUPLICATE_POLL s
+#         (default 5) until the copy is listed and not `processing` (a push during processing is
+#         overwritten when the copy finishes), at most $FE_CPT_DUPLICATE_TIMEOUT s (default 300,
+#         `error=duplicate_timeout`, the copy is kept) → push CODE ONLY, as refresh does. The model
+#         stays branch code + customizer settings, here the source theme's, copied server-side
+#         (images and settings no overlay carries). No dev theme is read; `--reuse` is refused.
+#       → theme_id=… name=… store=… env=… preview_url=… editor_url=… reused=false duplicate_of=<id>
+#         [pushed=…] built=… [brand=…] — no overlay= key
+#   --brand <b>  (create & refresh) — exported as BRAND=<b> to the build (`npm run <build-script>`)
+#       and printed as brand=; nothing else reads it. `[A-Za-z0-9_-]+`, else `error=bad_brand`.
 #   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
@@ -161,7 +177,8 @@
 #                   store refused it.
 #         overlay — the dev theme (the settings source) lives on the toml's store, out of the
 #                   token's reach: `create` is refused before the build (`error=overlay_store_mismatch`
-#                   — a fresh theme without settings has no templates and 404s); `refresh` pushes
+#                   — a fresh theme without settings has no templates and 404s; `--duplicate-of`
+#                   copies a theme ON that store and is allowed); `refresh` pushes
 #                   code only anyway; `info` adds
 #                   `note=dev_theme_other_store`.
 #         pin     — `pin` and `--pin-toml` are refused (`error=pin_store_mismatch`): the block names
@@ -197,9 +214,12 @@ set -euo pipefail
 USAGE='Usage:
   create-preview-theme.sh info
   create-preview-theme.sh create --name "<NAME>" [--reuse] [--no-build] [--build-script <name>]
-                                 [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
+                                 [--brand <b>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
                                  [--allow-unverified] [--allow-dev-theme]
-  create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>]
+  create-preview-theme.sh create --name "<NAME>" --duplicate-of <theme-id|name> [--brand <b>]
+                                 [--no-build] [--build-script <name>] [--ignore-extra "<glob>"]
+                                 [--pin-toml [--env <name>]]
+  create-preview-theme.sh refresh --theme <ID> [--no-build] [--build-script <name>] [--brand <b>]
                                   [--ignore-extra "<glob>"] [--pin-toml [--env <name>]]
                                   [--allow-unverified] [--allow-dev-theme]
   create-preview-theme.sh pin --theme <ID> [--env <name>]
@@ -258,14 +278,15 @@ MODE="${1:-}"; shift || true
 # token — a preview theme pushed to the production store. The scan mirrors the per-mode grammars
 # (a value-taking flag's value is skipped, so `--name --env` is a name), and the assert after each
 # of those loops is what keeps the two readings from drifting apart.
-CPT_ENV_ARG=""; CPT_PIN_ARG=0; CPT_STORE_ARG=""
+CPT_ENV_ARG=""; CPT_PIN_ARG=0; CPT_STORE_ARG=""; CPT_DUP_ARG=""
 scan_env_arg() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --env) [ $# -ge 2 ] || return 0; CPT_ENV_ARG="$2"; shift 2 ;;
       --store) [ $# -ge 2 ] || return 0; CPT_STORE_ARG="$2"; shift 2 ;;
+      --duplicate-of) [ $# -ge 2 ] || return 0; CPT_DUP_ARG="$2"; shift 2 ;;
       --pin-toml) CPT_PIN_ARG=1; shift ;;
-      --theme|--name|--build-script|--ignore-extra) [ $# -ge 2 ] || return 0; shift 2 ;;
+      --theme|--name|--build-script|--ignore-extra|--brand) [ $# -ge 2 ] || return 0; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -317,15 +338,17 @@ if [ "$FOREIGN" -eq 0 ]; then TOKEN="$(theme_token_from_toml)"; TOKEN_SOURCE="to
 [ -n "$TOKEN" ] || { TOKEN="${SHOPIFY_CLI_THEME_TOKEN:-}"; TOKEN_SOURCE="env"; }
 [ -n "$TOKEN" ] || TOKEN_SOURCE="session"
 
-# Only create (the overlay source) and info read the dev theme; refresh pushes code only.
-case "$MODE" in pin|refresh) ;; *) [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML (env=$TOML_ENV)" ;; esac
+# Only create (the overlay source) and info read the dev theme; refresh and a duplicate push code only.
+DEV_READ=1
+case "$MODE" in pin|refresh) DEV_READ=0 ;; create) [ -z "$CPT_DUP_ARG" ] || DEV_READ=0 ;; esac
+[ "$DEV_READ" -eq 0 ] || [ -n "${DEV_THEME_ID:-}" ] || fail "no uncommented \`theme = \"...\"\` line in $TOML (env=$TOML_ENV)"
 [ -n "${STORE:-}" ]        || fail "no uncommented \`store = \"...\"\` line in $TOML (env=$TOML_ENV)"
 
 # A value that cannot be what it claims to be is a typo or a mis-parse, and handing it to the CLI is
 # an opaque failure at best and the WRONG STORE at worst. A malformed dev theme id is the nastier
 # one: the code push does not use it, so a theme IS created, and only the settings pull fails —
 # which is how a run ends up reporting a pull error while an orphan theme burns a slot on the store.
-if [ "$MODE" = create ] || [ "$MODE" = info ]; then
+if { [ "$MODE" = create ] || [ "$MODE" = info ]; } && [ "$DEV_READ" -eq 1 ]; then
   case "$DEV_THEME_ID" in *[!0-9]*)
     fail "invalid_dev_theme_id id='$DEV_THEME_ID' (expected digits — check the \`theme =\` line in $TOML)" ;;
   esac
@@ -336,8 +359,8 @@ STORE="$(store_handle "$STORE")" \
 
 # Refused before any CLI call: no credential makes either of these runnable.
 if [ "$FOREIGN" -eq 1 ]; then
-  [ "$MODE" != create ] || fail "overlay_store_mismatch store=$STORE$SRC_NOTE toml_store=$TOML_STORE dev_theme=$DEV_THEME_ID — create copies the customizer settings from the dev theme in $TOML, which lives on $TOML_STORE, and a fresh theme without them has no templates; nothing was built or pushed; refresh an existing preview theme on $STORE instead (\`refresh --store $STORE --theme <id>\`), or select the toml block whose store is $STORE: $CPT_ENV_FIX"
-  [ "$MODE" != pin ] && { [ "$MODE" != refresh ] || [ "$CPT_PIN_ARG" -eq 0 ]; } \
+  [ "$MODE" != create ] || [ -n "$CPT_DUP_ARG" ] || fail "overlay_store_mismatch store=$STORE$SRC_NOTE toml_store=$TOML_STORE dev_theme=$DEV_THEME_ID — create copies the customizer settings from the dev theme in $TOML, which lives on $TOML_STORE, and a fresh theme without them has no templates; nothing was built or pushed; refresh an existing preview theme on $STORE instead (\`refresh --store $STORE --theme <id>\`), copy a theme that lives there (\`create --name \"<name>\" --duplicate-of <theme> --store $STORE\`), or select the toml block whose store is $STORE: $CPT_ENV_FIX"
+  [ "$MODE" != pin ] && { [ "$MODE" = info ] || [ "$CPT_PIN_ARG" -eq 0 ]; } \
     || fail "pin_store_mismatch store=$STORE$SRC_NOTE toml_store=$TOML_STORE — a pin writes the id into $TOML (env=$TOML_ENV), whose store is $TOML_STORE, so \`shopify theme dev\` would look for it on the wrong store; nothing was built, pushed or written; pass --env <the block whose store is $STORE>, or drop the pin"
 fi
 # consumed by `shopify`, never echoed; unset (not empty) without a token, so the CLI uses its login
@@ -554,7 +577,7 @@ json_field() { printf '%s' "$1" | jq -r --arg f "$2" '.. | objects | .[$f]? // e
 # stderr log (in $ERR) and points to it, plus shows the last 25 lines inline. Shopify
 # crashes ("undefined method 'dig' for nil") when an invalid asset is rejected — the
 # offending file is named a few lines above the ruby trace, so show enough context.
-push_fail() { # $1 = error code; $2 (create only) = theme name to scan for a this-run-created orphan
+push_fail() { # $1 = error code; $2 (create only) = theme name to scan for a this-run-created orphan; $3 = a kept duplicate's id
   printf 'error=%s\n' "$1"
   auth_hint "$ERR"
   # A throttle that held through the retries is an actionable state of its own: the fix is outside
@@ -563,6 +586,7 @@ push_fail() { # $1 = error code; $2 (create only) = theme name to scan for a thi
     printf 'cause=throttled — the store+token rate limit held through the retries; a `shopify theme dev` running against this store draws on the same budget — stop it (or wait a minute) and re-run\n'
   fi
   [ -z "${2:-}" ] || reap_created_orphan "$2"
+  [ -z "${3:-}" ] || printf 'theme=%s — the duplicate is kept and still carries the source theme code; re-push with `refresh --theme %s --store %s`\n' "$3" "$3" "$STORE"
   printf 'log=%s\n' "$ERR"
   printf -- '--- last 25 lines of shopify stderr ---\n'
   tail -n 25 "$ERR"
@@ -908,12 +932,19 @@ package_json_ancestor() {
 }
 
 NO_BUILD=0
+BRAND_ARG=""
 BUILD_SCRIPT="build"
 BUILD_SCRIPT_SET=0
 BUILT="no"
 # Name-only, run as argv — the callers pre-approve this script's whole argv, so a value that
 # reached a shell would run with no permission prompt (rationale: header). Refuse before the store.
 vet_build_script() {
+  if [ -n "$BRAND_ARG" ]; then
+    case "$BRAND_ARG" in *[!A-Za-z0-9_-]*)
+      fail "bad_brand ($BRAND_ARG) — --brand takes a brand code ([A-Za-z0-9_-]), passed to the build as BRAND; nothing was built or pushed" ;;
+    esac
+    export BRAND="$BRAND_ARG"
+  fi
   case "$BUILD_SCRIPT" in
     ''|-*|*[!A-Za-z0-9_.:-]*)
       fail "bad_build_script ($BUILD_SCRIPT) — --build-script takes the NAME of a script in ./package.json ([A-Za-z0-9_.:-], no leading dash), not a command; nothing was built or pushed" ;;
@@ -963,9 +994,90 @@ run_build() {
 print_build_keys() {
   [ -z "$PUSHED_SHA" ] || printf 'pushed=%s\n' "$PUSHED_SHA"
   printf 'built=%s\n' "$BUILT"
+  [ -z "$BRAND_ARG" ] || printf 'brand=%s\n' "$BRAND_ARG"
   [ -z "$BUILD_DIRTIED" ] || printf 'warn=build_dirtied=%s — the build rewrote these tracked files in the working tree and the theme was pushed with them; restore a build artifact with `git checkout -- <path>` rather than committing it\n' "$BUILD_DIRTIED"
   [ "$BUILT" = "skipped_no_package_json" ] || return 0
   printf 'warn=build_skipped_no_package_json — no ./package.json in this checkout, so nothing was built and the working tree was pushed as it stands; pass --build-script <name> if this repo does need a build\n'
+}
+
+reload_theme_list() { THEME_LIST_LOADED=0; THEME_LIST_OK=0; THEME_LIST_SILENT=1; THEME_LIST=""; load_theme_list; }
+# 0 = the listing carries $1 and does not mark it `processing` (`theme info` has no such field)
+dup_ready() {
+  printf '%s' "$THEME_LIST" | jq -e --arg id "$1" \
+    'any(.. | objects | select((.id|tostring|sub(".*/";""))==$id); .processing != true)' >/dev/null 2>&1
+}
+num_or_empty() { case "$1" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$1" ;; esac; }
+DUP_TIMEOUT="$(num_or_empty "${FE_CPT_DUPLICATE_TIMEOUT:-}")"; DUP_TIMEOUT="${DUP_TIMEOUT:-300}"
+DUP_POLL="$(num_or_empty "${FE_CPT_DUPLICATE_POLL:-}")"; DUP_POLL="${DUP_POLL:-5}"
+
+# create --duplicate-of: copy $DUP_SRC on $STORE server-side, wait until the copy is ready, push the
+# branch's code into it with the settings patterns ignored (refresh's push). Prints create's keys.
+create_duplicate() {
+  local src_id="" ids n out start
+  load_theme_list
+  { [ "$THEME_LIST_SILENT" -eq 0 ] && [ "$THEME_LIST_OK" -eq 1 ]; } \
+    || fail_listing "duplicate_source_not_found source=\"$DUP_SRC\" store=$STORE — \`shopify theme list --json\` gave no readable answer, so the source theme cannot be resolved; nothing was built or duplicated; re-run when the store answers"
+  case "$DUP_SRC" in *[!0-9]*) ;; *) theme_found_by_id "$DUP_SRC" && src_id="$DUP_SRC" ;; esac
+  if [ -z "$src_id" ]; then
+    ids="$(theme_ids_by_name "$DUP_SRC" | grep '^[0-9][0-9]*$' || true)"
+    n="$(printf '%s' "$ids" | grep -c '.' || true)"
+    [ "$n" -le 1 ] || fail "ambiguous_name — $n themes on $STORE are named \"$DUP_SRC\" (ids: $(printf '%s' "$ids" | tr '\n' ' ')); pass --duplicate-of <id>"
+    src_id="$ids"
+  fi
+  [ -n "$src_id" ] || fail "duplicate_source_not_found source=\"$DUP_SRC\" store=$STORE$SRC_NOTE — no theme with that id or name is listed on the store; nothing was built or duplicated; check \`shopify theme list --store $STORE\`"
+
+  run_build
+  TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
+
+  ERR="$(mk_tmpf)"
+  local dup_args; dup_args=(theme duplicate --store "$STORE" --theme "$src_id" --name "$NAME" --force --json)
+  if ! push_retry "$ERR" shopify "${dup_args[@]}" </dev/null; then
+    printf 'error=duplicate_failed source=%s store=%s — `shopify theme duplicate` failed; nothing was pushed\n' "$src_id" "$STORE"
+    auth_hint "$ERR"
+    printf 'log=%s\n' "$ERR"
+    printf -- '--- last 25 lines of shopify stderr ---\n'
+    tail -n 25 "$ERR"
+    exit 1
+  fi
+  THEME_ID="$(json_field "$PUSH_OUT" id | sed 's|.*/||')"
+  case "$THEME_ID" in ''|*[!0-9]*)
+    fail "duplicate_failed source=$src_id store=$STORE — \`shopify theme duplicate --json\` answered without a numeric theme id, so the copy cannot be followed; a theme named \"$NAME\" may exist now — check \`shopify theme list --store $STORE\`; nothing was pushed" ;;
+  esac
+  rm -f "$ERR"
+
+  start=$SECONDS
+  while :; do
+    reload_theme_list
+    dup_ready "$THEME_ID" && break
+    if [ $((SECONDS - start)) -ge "$DUP_TIMEOUT" ]; then
+      printf 'error=duplicate_timeout theme=%s source=%s store=%s — the copy was not listed as ready (present, not processing) within %ss; nothing was pushed, the copy was kept\n' "$THEME_ID" "$src_id" "$STORE" "$DUP_TIMEOUT"
+      printf 'created_theme=%s\n' "$THEME_ID"
+      printf 'hint=once `shopify theme list --store %s` shows it ready, push the branch with `refresh --theme %s --store %s%s`\n' "$STORE" "$THEME_ID" "$STORE" "${BRAND_ARG:+ --brand $BRAND_ARG}"
+      exit 1
+    fi
+    sleep "$DUP_POLL"
+  done
+
+  ERR="$(mk_tmpf)"
+  push_retry "$ERR" shopify theme push --store "$STORE" --theme "$THEME_ID" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json \
+    || push_fail push_code_failed "" "$THEME_ID"
+  out="$PUSH_OUT"
+  rm -f "$ERR"
+
+  if [ "$PIN" -eq 1 ]; then
+    pin_toml "$THEME_ID" || PIN_FAIL="$PIN_ERR_KEY $PIN_ERR_MSG; the theme was created, the config was NOT changed"
+  fi
+  printf 'theme_id=%s\n' "$THEME_ID"
+  printf 'name=%s\n' "$NAME"
+  printf 'store=%s\n' "$STORE"
+  print_auth
+  printf 'env=%s\n' "$TOML_ENV"
+  printf 'preview_url=%s\n' "$(json_field "$out" preview_url)"
+  printf 'editor_url=%s\n' "$(json_field "$out" editor_url)"
+  printf 'reused=false\n'
+  printf 'duplicate_of=%s\n' "$src_id"
+  print_build_keys
+  [ "$PIN" -eq 0 ] || print_pin_keys
 }
 
 case "$MODE" in
@@ -1021,10 +1133,12 @@ case "$MODE" in
     ;;
 
   create)
-    NAME=""; REUSE=0
+    NAME=""; REUSE=0; DUP_SRC=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --name) need_val $# "$1"; NAME="$2"; shift 2 ;;
+        --duplicate-of) need_val $# "$1"; [ -n "$2" ] || fail "missing value for --duplicate-of"; DUP_SRC="$2"; shift 2 ;;
+        --brand) need_val $# "$1"; BRAND_ARG="$2"; shift 2 ;;
         --reuse) REUSE=1; shift ;;
         --no-build) NO_BUILD=1; shift ;;
         --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; BUILD_SCRIPT_SET=1; shift 2 ;;
@@ -1042,8 +1156,14 @@ case "$MODE" in
     # the caller reads as "the block I named was pinned"
     [ "$PIN" -eq 1 ] || [ -z "$PIN_ENV" ] || fail "--env requires --pin-toml"
     sync_pin_env
+    [ "$DUP_SRC" = "$CPT_DUP_ARG" ] || fail "arg_scan_mismatch — the pre-scan and the create argument loop disagree about --duplicate-of; nothing was changed"
     require_theme_checkout
     vet_build_script
+    if [ -n "$DUP_SRC" ]; then
+      [ "$REUSE" -eq 0 ] || fail "--duplicate-of always makes a new theme — drop --reuse (refresh --theme <id> re-pushes an existing copy)"
+      create_duplicate
+      exit 0
+    fi
 
     # Resolve (and vet) the --reuse target BEFORE the build: a refusal after a several-minute npm
     # build is a refusal the developer waited for, and the live-theme guard must land before the push.
@@ -1139,6 +1259,7 @@ case "$MODE" in
     while [ $# -gt 0 ]; do
       case "$1" in
         --theme) need_val $# "$1"; TARGET="$2"; shift 2 ;;
+        --brand) need_val $# "$1"; BRAND_ARG="$2"; shift 2 ;;
         --no-build) NO_BUILD=1; shift ;;
         --build-script) need_val $# "$1"; BUILD_SCRIPT="$2"; BUILD_SCRIPT_SET=1; shift 2 ;;
         --ignore-extra) need_val $# "$1"; EXTRA_IGN+=(--ignore "$2"); shift 2 ;;

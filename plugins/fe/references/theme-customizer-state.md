@@ -16,6 +16,7 @@ including the live one (reading live is safe). Don't guess what's configured on 
 
 ```bash
 <fe root>/scripts/theme-json.sh themes                       # id / name / role
+<fe root>/scripts/theme-json.sh locate <id>                  # which store holds theme <id>
 <fe root>/scripts/theme-json.sh get --theme <id> --file templates/product.json \
   --strip-comments --out .claude/tasks/<work-id>/tmp/product.json          # then pull values with jq
 ```
@@ -43,6 +44,7 @@ The whole JSON content layer is in `.shopifyignore` deliberately. Two consequenc
 theme-json.sh themes [--role main|development|unpublished|live|demo]
 theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>] [--strip-comments]
 theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
+theme-json.sh locate <id|gid> [--stores <a,b,c>]
 theme-json.sh --help   # the same block, from the script itself
 # common: --store <domain> · --engine auto|store|token|themecli · --env <path> · --api-version <v>
 ```
@@ -104,13 +106,15 @@ against, or a preview/sandbox theme. Then:
 
 3. **Write**: `set --theme <id> --file templates/product.json --from "$TMP/product.working.json"`.
    The write is **verified mechanically**: on both engines `set` pulls the file back and compares
-   it against the payload (semantically for `*.json`, retrying once); landed ⇒ `verified=true`.
+   it against the payload (semantically for `*.json`, retrying twice — after 2 s, then 5 s, since
+   the CDN can serve the old copy for seconds after a write); landed ⇒ `verified=true`.
    Shopify validates theme JSON server-side and, for a payload it rejects, **keeps the previous
    content while the write reports success** — `error=not_applied` + **exit 6**, its hint naming
    the two known triggers (a schema-unsupported attribute; a dynamic source without `.value` after
    every reference hop — write `{{ ….value }}` from the start); a `note=verify_diff` line ahead of
    it names the differing leaf keys (`only_in_payload=` / `only_in_theme=` / `changed=`) — start
-   there. When `only_in_payload=` is the only difference, the hint says `applied except <n> key(s)
+   there; the same line is the last line on stdout. A `get` straight after that shows the payload
+   means the write landed late (propagation lag), not that it was dropped. When `only_in_payload=` is the only difference, the hint says `applied except <n> key(s)
    Shopify dropped` instead: the rest is live, and dropping those keys (typically a setting the
    section schema no longer has) makes the write clean — unless those keys ARE your change: then
    the whole write was refused, so check the two triggers above. Treat exit 6 as *the theme

@@ -34,10 +34,11 @@ the setup to relay — that is the answer then, not a defect.
   \`node <base root>/scripts/shopify-validate.cjs --file <f>\`; \`result=unavailable\` → send anyway,
   validation never blocks. A remote store connector in the session that lists the
   store is a valid runner for the same documents; recipes and rules: \`/base:shopify\`.
-- \`<fe root>/scripts/theme-json.sh themes|get|set\` — customizer state. \`themes\`/\`get\` freely, any
+- \`<fe root>/scripts/theme-json.sh themes|get|set|locate\` — customizer state. \`themes\`/\`get\` freely, any
   theme incl. live; \`set\` only per the snapshot → mutate → verify → restore protocol in
-  \`<fe root>/references/theme-customizer-state.md\` (live theme refused). Works without Admin
-  credentials via the Theme Access token.
+  \`<fe root>/references/theme-customizer-state.md\` (live theme refused); \`locate <id>\` answers
+  which store holds a theme. Works without Admin credentials via the Theme Access token or the
+  Shopify CLI login.
 
 Auth is handled inside; on failure they print the setup fix to relay. Never \`Read\` \`.env\` or
 \`shopify.theme.toml\` — the runners consume secrets without exposing them.`

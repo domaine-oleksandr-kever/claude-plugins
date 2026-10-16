@@ -166,9 +166,10 @@ pin target all belong to the toml's store:
 
 - **`error=overlay_store_mismatch`** (`create`, `--reuse` too) → nothing was built or pushed: the
   settings source is out of reach and a theme without settings has no templates. Refresh an
-  existing preview theme on that store instead, or select the toml block that names it
-  (`SHOPIFY_FLAG_ENVIRONMENT=<name>`).
-- **`error=pin_store_mismatch`** (`pin`, `refresh --pin-toml`) → nothing was written; drop the
+  existing preview theme on that store instead, copy a theme that lives there
+  (`create --name <NAME> --duplicate-of <theme> --store <store>`, see **A copy of another
+  theme**), or select the toml block that names it (`SHOPIFY_FLAG_ENVIRONMENT=<name>`).
+- **`error=pin_store_mismatch`** (`pin`, `refresh --pin-toml`, `create --duplicate-of --pin-toml`) → nothing was written; drop the
   pin (record the id in `notes.md` only) or `--env` the block that names that store.
 - **`auth=cli-session`** (after `store=`, any subcommand) → no Theme Access token resolved for
   that store (none exported as `SHOPIFY_CLI_THEME_TOKEN`; for the toml's own store, no
@@ -229,7 +230,32 @@ unreadable fresh listing, or a concurrent run made the name ambiguous) — check
 `refresh` the target **pre-existed and may now carry partial
 code** — say so, and tell the reviewer the preview is mid-update until a push succeeds. Fix the
 named cause, then re-run the same command (a re-push is idempotent — it overwrites, it never
-stacks).
+stacks). On `create --duplicate-of` the copy is kept and named (`theme=<id> — the duplicate is
+kept…`): it still carries the source theme's code — re-push with `refresh --theme <id> --store
+<store>` (same `--brand`) once the cause is fixed, never a second `--duplicate-of`.
+
+### A copy of another theme — `error=duplicate_source_not_found` · `error=duplicate_failed` · `error=duplicate_timeout` · `error=bad_brand`
+
+`create --name <NAME> --duplicate-of <theme-id|name> [--brand <b>] --store <store>` — never run
+`shopify theme duplicate`, the build, the push or a poll by hand; the script owns all four.
+
+- **`error=duplicate_source_not_found`** → nothing was built or duplicated: the store's
+  `theme list` does not carry that id or name (check the store — a brand has a store per region),
+  or the listing gave no readable answer (the line says so; an auth `hint=` may follow) → re-run
+  when the store answers. A name two themes share is `error=ambiguous_name` → pass the id.
+- **`error=duplicate_failed`** → the build ran, `shopify theme duplicate` failed (`log=` + its last
+  25 lines; auth `hint=` lines as for a push) or answered without a theme id — then a theme of that
+  name may exist: check `shopify theme list --store <store>` before re-running. Nothing was pushed.
+- **`error=duplicate_timeout theme=<id>`** + `created_theme=<id>` → the copy exists but was not
+  listed ready (present and not `processing`) within `FE_CPT_DUPLICATE_TIMEOUT` (300 s); a large
+  theme can take longer. Nothing was pushed — a push while it processes is overwritten when the
+  copy finishes. Wait, then run the `hint=` line (`refresh --theme <id> --store <store>`); never
+  re-run `--duplicate-of` (a second copy).
+- **`error=bad_brand`** → `--brand` takes a bare brand code (`[A-Za-z0-9_-]`); it is passed to the
+  build as `BRAND` and nothing else. Nothing ran.
+
+A successful run prints `duplicate_of=<source id>` (and `brand=` with `--brand`) and no `overlay=`
+key: the settings came with the server-side copy.
 
 ### `error=ambiguous_env` / `error=env_not_found`
 

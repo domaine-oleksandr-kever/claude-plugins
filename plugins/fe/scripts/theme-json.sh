@@ -18,12 +18,16 @@
 #              password= / first shp*_… in shopify.theme.toml — read internally, NEVER printed).
 #              A --store/$SHOPIFY_STORE the toml block does not name never gets that block's
 #              token: without the env var the CLI's logged-in session authenticates
-#              (`auth=cli-session` on stderr, token_source=session).
+#              (`auth=cli-session` on stderr, token_source=session) — as it does for any store
+#              with no token at all (no toml found, or a block without password=).
 #              This is the token every Foundation project already has for `theme dev`, so the
 #              flow works even with no Admin API access at all.
 #   auto (default) — gql first; if its credentials are missing (runner exit 3) or lack the
-#              theme scopes (ACCESS_DENIED), falls back to themecli when a Theme Access token
-#              is available, with a note on stderr.
+#              theme scopes (ACCESS_DENIED), falls back to themecli whenever that engine can run
+#              (a `shopify` CLI, a store, and a Theme Access token or the CLI session), with a
+#              note on stderr. When it cannot, gql's refusal is followed by
+#              `hint=themecli_unavailable (<why>)`, so both engines' reasons are on stderr
+#              (plus `error=shopify_cli_not_found` when the why is a missing CLI).
 #
 # WHICH TOML FILE: $TOML_PATH, else shopify.theme.toml in the cwd or in the nearest ancestor up to
 # the checkout root (_shopify-common.sh default_toml_path).
@@ -58,9 +62,9 @@
 # is not a diff, raw bytes (modulo trailing newlines) for anything else. The normalized form also
 # gives every section and block, nested blocks included, without `settings` (templates/*.json,
 # sections/*.json, and settings_data.json `.current.sections` and `.presets.*.sections`) the
-# `"settings": {}` Shopify stores for it. A mismatch is retried
-# ONCE after FE_THEME_JSON_VERIFY_WAIT seconds, default 2 (a read straight after a write can
-# still serve the old copy). Landed →
+# `"settings": {}` Shopify stores for it. A mismatch is retried TWICE: after
+# FE_THEME_JSON_VERIFY_WAIT seconds (default 2), then after 2.5× that (5) — the CDN behind a read
+# straight after a write can serve the old copy for several seconds. Landed →
 # `verified=true` on the result line; the read-back does NOT carry the payload →
 # `error=not_applied` + hint + exit 6; the read-back itself unable to produce the file (including
 # a throttled/5xx/garbled gql read — the mutation already ran, so it is never retried on the
@@ -78,7 +82,9 @@
 # a non-empty `.errors` is `error=cli_push_reported_errors` + exit 5 before any read-back, while
 # `.warnings` only print `note=cli_push_warnings` and let the read-back decide.
 # A not_applied verdict also prints `note=verify_diff only_in_payload=… only_in_theme=… changed=…
-# diff_lines=N` on stderr — leaf key paths of the normalized pair (8 per list), never a value
+# diff_lines=N` on stderr and, with a propagation-lag reminder appended, as the last stdout line (a
+# caller reading only `| tail -1` still sees what differed) — leaf key paths of the normalized pair
+# (8 per list), never a value
 # (the count alone when the read-back is not JSON). When the payload's own extra keys are the only
 # difference, the hint names them as dropped and the rest as live — unless they ARE the intended
 # change, which reads identically on a fully refused write; still not_applied, exit 6.
@@ -93,6 +99,7 @@
 #   theme-json.sh themes [--role main|development|unpublished|live|demo]
 #   theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>] [--strip-comments]
 #   theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
+#   theme-json.sh locate <id|gid> [--stores <a,b,c>]
 # Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
 #          [--api-version <v>]   (store domain defaults from shopify.theme.toml)
 #
@@ -112,6 +119,15 @@
 # banner) so the result is plain JSON a jq edit can consume; a `/*` inside a value (custom_css) is
 # content and survives. Lossless — Shopify re-stamps the banner on every write. Snapshot WITHOUT it
 # (raw bytes restore byte-exact); strip only the working base you'll edit.
+#
+# `locate` answers "which store holds theme X": it runs `themes` once per candidate store — --stores
+# (comma-separated handles or domains), else every store base's QA registry knows (`qa-stores.cjs
+# list --json`, found beside fe's install) plus the toml's store — and prints
+# `store=<domain> theme=<id> name=<name> role=<ROLE>` for the first store listing it (exit 0), or
+# `error=theme_not_found stores=<n>` (exit 5). Under auto, a store whose Admin API answers 401/403
+# (an Admin token belongs to one store) is listed once more on the theme CLI. A store whose listing fails is skipped with
+# `note=locate_skipped store=<domain>` and the failure's last line on stderr, counted in
+# `unreachable=<k>` on the not-found line.
 #
 # Output: `themes` prints one {"id","name","role"} JSON per line (gid + UPPERCASE role on every
 # engine); `get` prints the raw file body (--out preserves exact bytes) — an inline body over
@@ -145,6 +161,7 @@ USAGE='Usage:
   theme-json.sh themes [--role main|development|unpublished|live|demo]
   theme-json.sh get  --theme <id|gid> --file <path/in/theme.json> [--out <file>] [--strip-comments]
   theme-json.sh set  --theme <id|gid> --file <path/in/theme.json> --from <file>
+  theme-json.sh locate <id|gid> [--stores <a,b,c>]
 Common: [--store <name|domain>] [--engine auto|store|token|themecli] [--env <path>]
          [--api-version <v>]   (store domain defaults from shopify.theme.toml)'
 
@@ -165,9 +182,10 @@ RUNNER="$SCRIPT_DIR/shopify-admin-gql.sh"
 command -v jq >/dev/null 2>&1 || { echo "error=jq_not_found" >&2; exit 2; }
 
 CMD="${1:-}"; [ $# -gt 0 ] && shift
-case "$CMD" in themes|get|set) ;; *) echo "error=unknown_command cmd='$CMD' (use themes|get|set; --help prints usage)" >&2; exit 2 ;; esac
+case "$CMD" in themes|get|set|locate) ;; *) echo "error=unknown_command cmd='$CMD' (use themes|get|set|locate; --help prints usage)" >&2; exit 2 ;; esac
 
-THEME=""; FILE=""; OUT=""; FROM=""; ROLE_FILTER=""; STRIP=0
+THEME=""; FILE=""; OUT=""; FROM=""; ROLE_FILTER=""; STRIP=0; STORES=""
+if [ "$CMD" = locate ] && [ $# -gt 0 ]; then case "$1" in -*) ;; *) THEME="$1"; shift ;; esac; fi
 ENGINE="auto"; STORE_ARG=""; ENV_ARG=""; APIV_ARG=""
 TOML="${TOML_PATH:-$(default_toml_path)}"
 export TOML_PATH="$TOML"   # the gql runner reads this same file, and walks (and notes) nothing twice
@@ -189,9 +207,10 @@ while [ $# -gt 0 ]; do
     --store)  need_val $# "$1"; STORE_ARG="$2"; shift 2 ;;
     --env)    need_val $# "$1"; ENV_ARG="$2"; shift 2 ;;
     --api-version) need_val $# "$1"; APIV_ARG="$2"; shift 2 ;;
+    --stores) need_val $# "$1"; STORES="$2"; shift 2 ;;
     # no positional is accepted either — naming the real flags is what turns a guessed `--key`
     # (or a bare path where --file belongs) into a one-step correction
-    *) echo "error=unknown_arg arg=$1 (flags: --theme --file --out --from --role --strip-comments --store --engine --env --api-version; --help prints usage)" >&2; exit 2 ;;
+    *) echo "error=unknown_arg arg=$1 (flags: --theme --file --out --from --role --strip-comments --store --engine --env --api-version --stores; --help prints usage)" >&2; exit 2 ;;
   esac
 done
 case "$ENGINE" in auto|store|token|themecli) ;; *) echo "error=invalid_engine engine=$ENGINE (use auto|store|token|themecli)" >&2; exit 2 ;; esac
@@ -301,13 +320,14 @@ if [ -z "${FE_THEME_JSON_VERIFY_WAIT+x}" ]; then
 fi
 VERIFY=1
 [ "${FE_THEME_JSON_VERIFY:-1}" = "0" ] && VERIFY=0
-# Pause before the ONE read-back retry: a read issued straight after a write can still be served
-# the old copy, so the default buys the write a moment to land. The suites pass 0 — every
+# Pauses before the two read-back retries: a read issued straight after a write can still be served
+# the old copy for several seconds, so each retry waits longer (VERIFY_WAIT, then 2.5× it). The suites pass 0 — every
 # not_applied case would otherwise pay it. A non-numeric value falls back to the default rather
 # than handing `sleep` an argument it refuses under `set -e` — including `1.2.3`, which a
 # bytes-only filter would let through.
 VERIFY_WAIT="${FE_THEME_JSON_VERIFY_WAIT:-2}"
 case "$VERIFY_WAIT" in ''|.|*.*.*|*[!0-9.]*) VERIFY_WAIT=2 ;; esac
+VERIFY_WAITS="$VERIFY_WAIT $(awk -v w="$VERIFY_WAIT" 'BEGIN { print w * 2.5 }')"
 
 # normalize_body <file> → stdout: the comparable form of a theme file body. *.json rides
 # strip_json_comments (Shopify re-stamps its /*…*/ banner on every write, so the banner is not
@@ -407,7 +427,7 @@ bodies_match() {
 # line count alone. Sets DROPPED_KEYS / DROPPED_COUNT when the payload's extra leaves are the ONLY
 # difference.
 verify_diff_note() {
-  local n keys more=0
+  local n keys more=0 line
   n="$({ diff "$VERIFY_NORM_A" "$VERIFY_NORM_B" 2>/dev/null || true; } | wc -l | tr -d ' ')"
   keys="$(jq -n -r --slurpfile a "$VERIFY_NORM_A" --slurpfile b "$VERIFY_NORM_B" '
     def leafy: if type == "object" or type == "array" then length == 0 else true end;
@@ -421,7 +441,9 @@ verify_diff_note() {
       + " only_in_theme=\([$y | keys[] | select(. as $k | $x | has($k) | not)] | fmt)"
       + " changed=\([$x | keys[] | select(. as $k | ($y | has($k)) and $x[$k] != $y[$k])] | fmt)"
   ' 2>/dev/null)" || keys=""
-  echo "note=verify_diff ${keys:+$keys }diff_lines=${n:-0}" >&2
+  line="note=verify_diff ${keys:+$keys }diff_lines=${n:-0}"
+  echo "$line" >&2
+  echo "$line (after 3 reads; a later \`get\` that shows the payload means propagation lag, not a dropped write)"
   case "$keys" in
     "only_in_payload=- "*) ;;
     *" only_in_theme=- changed=-")
@@ -433,22 +455,22 @@ verify_diff_note() {
 
 # verify_applied <engine> <theme-id> <reader-fn>: reader-fn <dest> writes the theme's current
 # copy of $FILE to <dest> (non-zero = could not read it). Compares against $FROM and, on a
-# mismatch, retries ONCE after a short sleep — a read issued right after a write can still be
+# mismatch, retries after each of VERIFY_WAITS — a read issued right after a write can still be
 # served the old copy, and a false `not_applied` would send the caller chasing a phantom.
 # Returns 0 = the payload is on the theme; 2 = compared raw and it differed, which on this host
 # is not evidence either way (VERIFY_HOST_DEGRADED); both real failure modes exit 6 and never
 # return.
 verify_applied() {
-  local engine="$1" theme="$2" reader="$3" back rc=0 attempt=1
-  while : ; do
+  local engine="$1" theme="$2" reader="$3" back rc=0 w
+  for w in $VERIFY_WAITS -; do
     VERIFY_BODY_UNPARSED=0   # a per-attempt fact; the last attempt's read-back is the one judged
     back="$(mktemp)"; CLEAN+=("$back")
     rc=0; "$reader" "$back" || rc=$?
     if [ "$rc" -eq 0 ] && bodies_match "$FROM" "$back"; then return 0; fi
-    [ "$attempt" -eq 1 ] || break
+    [ "$w" != - ] || break
     # non-fatal: the mutation already committed, so dying on sleep's complaint instead of
     # printing the verdict (or the exit-6 hint) would strand the caller with no read-back at all
-    attempt=2; sleep "$VERIFY_WAIT" || true
+    sleep "$w" || true
   done
   if [ "$rc" -ne 0 ]; then
     echo "error=verify_read_failed engine=$engine theme=$theme file=$FILE"
@@ -477,7 +499,7 @@ verify_applied() {
 
 # ---------------------------------------------------------------- gql engine --
 # gql <query> <variables>: fills RESP. Returns 0 = ok; 1 = fall back to themecli (auto mode,
-# credentials missing/insufficient AND a Theme Access token exists); exits on hard failures —
+# credentials missing/insufficient AND cli_token_ready: a token or the CLI session); exits on hard failures —
 # EXCEPT while GQL_SOFT=1 (the post-mutation read-back), where every hard failure returns 2
 # instead. Exiting from inside the read-back would print the pre-existing `error=gql_errors`
 # exit 5 — byte-identical to "the upsert itself failed" — for a write that already committed,
@@ -504,7 +526,14 @@ gql() {
     fi
     if [ "$GQL_SOFT" -eq 1 ]; then tail -3 "$rerr" >&2; return 2; fi
     cat "$rerr" >&2
-    [ "$rc" -eq 3 ] && echo "hint=the theme-CLI engine is a third option — put the Theme Access password in $TOML or export SHOPIFY_CLI_THEME_TOKEN" >&2
+    if [ "$rc" -eq 3 ]; then
+      if [ -n "$CLI_UNAVAILABLE" ]; then
+        command -v shopify >/dev/null 2>&1 || echo "error=shopify_cli_not_found" >&2
+        echo "hint=themecli_unavailable ($CLI_UNAVAILABLE) — the theme-CLI engine is the other option: fix that and re-run" >&2
+      else
+        echo "hint=the theme-CLI engine is another option — --engine themecli runs on SHOPIFY_CLI_THEME_TOKEN, the toml's password=, or the Shopify CLI session for --store" >&2
+      fi
+    fi
     exit "$rc"
   fi
   # ONE pass over the envelope answers both "is it JSON" (jq's exit status) and "is it an error
@@ -689,25 +718,39 @@ resolve_domain() {
 # token to fall back on?" — and an abort here would replace the gql engine's own diagnosis (the
 # credential lacking read_themes) with a config line about a block that run never needed.
 # prep_cli is where a decline becomes an error.
-CLI_TOKEN_SOURCE=""; TOML_STORE_FOREIGN=""
+# With no token anywhere, a known store (fixed, or the toml block's) runs on the session too.
+# A decline leaves its reason in CLI_UNAVAILABLE for the auto engine's refusal.
+CLI_TOKEN_SOURCE=""; TOML_STORE_FOREIGN=""; CLI_SESSION_WHY=""; CLI_UNAVAILABLE=""
 cli_token_ready() {
+  command -v shopify >/dev/null 2>&1 || { CLI_UNAVAILABLE="no shopify CLI on PATH"; return 1; }
   if [ -n "${SHOPIFY_CLI_THEME_TOKEN:-}" ]; then
     [ -n "$CLI_TOKEN_SOURCE" ] || CLI_TOKEN_SOURCE="env"
     return 0
   fi
   local t want ts
   want="${STORE_ARG:-${SHOPIFY_STORE:-}}"
-  toml_env_ready || toml_env_pick_by_store "$want" || return 1
+  toml_env_ready || toml_env_pick_by_store "$want" \
+    || { CLI_UNAVAILABLE="$(toml_env_error "$TJ_ENV_FIX")"; return 1; }
   ts="$(toml_value store || true)"
   if [ -n "$want" ] && [ -n "$ts" ] && [ "$(toml_store_key "$want")" != "$(toml_store_key "$ts")" ] \
      && ! toml_env_pick_by_store "$want"; then
     TOML_STORE_FOREIGN="$(store_handle "$ts" || true)"; CLI_TOKEN_SOURCE="session"
+    CLI_SESSION_WHY="the toml's Theme Access token belongs to toml_store, so it is not sent"
     return 0
   fi
   t="$(theme_token_from_toml)"
-  [ -n "$t" ] || return 1
-  CLI_TOKEN_SOURCE="toml"
-  export SHOPIFY_CLI_THEME_TOKEN="$t"
+  if [ -n "$t" ]; then
+    CLI_TOKEN_SOURCE="toml"
+    export SHOPIFY_CLI_THEME_TOKEN="$t"
+    return 0
+  fi
+  if [ -n "${want:-$ts}" ]; then
+    CLI_TOKEN_SOURCE="session"
+    CLI_SESSION_WHY="no Theme Access token for it: none in SHOPIFY_CLI_THEME_TOKEN or $(toml_abs)"
+    return 0
+  fi
+  CLI_UNAVAILABLE="no store to run on: no --store/\$SHOPIFY_STORE and no store= in $(toml_abs)"
+  return 1
 }
 
 # A Theme Access token is minted PER STORE, so the CLI's auth rejection (a box-drawing frame around
@@ -739,7 +782,9 @@ cli_auth_hint() { # $1 = file holding the CLI's stderr — one hint line, only w
     cli_auth_rejected "$1" \
       || grep -qiE 'not logged in|log in to shopify|auth login|credentials are invalid|(failed|unable) to prompt|not authorized|(^|[[:space:]])403([[:space:]]|$)' "$1" \
       || return 0
-    echo "hint=no Theme Access token for $DOMAIN (the password= in $(toml_src) is $TOML_STORE_FOREIGN's, so it was not sent) and the Shopify CLI session cannot reach $DOMAIN — run \`shopify auth login\` with an account that has access to it (\`shopify auth logout\` first if another account is logged in), or export SHOPIFY_CLI_THEME_TOKEN with $DOMAIN's own Theme Access password" >&2
+    local why="none in SHOPIFY_CLI_THEME_TOKEN or $(toml_abs)"
+    [ -z "$TOML_STORE_FOREIGN" ] || why="the password= in $(toml_src) is $TOML_STORE_FOREIGN's, so it was not sent"
+    echo "hint=no Theme Access token for $DOMAIN ($why) and the Shopify CLI session cannot reach $DOMAIN — run \`shopify auth login\` with an account that has access to it (\`shopify auth logout\` first if another account is logged in), or export SHOPIFY_CLI_THEME_TOKEN with $DOMAIN's own Theme Access password" >&2
     return 0
   fi
   cli_auth_rejected "$1" || return 0
@@ -762,12 +807,12 @@ prep_cli() {
     # which of the two it is decides the fix: an unresolved block is a config question, a resolved
     # one that simply holds no token is a credential question
     [ -z "$TOML_ENV_ERR" ] || { echo "error=$(toml_env_error "$TJ_ENV_FIX")" >&2; exit 2; }
-    echo "error=no_theme_token (themecli engine needs SHOPIFY_CLI_THEME_TOKEN or a password=/shp*_ token in $TOML, env=$TOML_ENV)" >&2
+    echo "error=no_theme_token ($CLI_UNAVAILABLE)" >&2
     exit 3; }
   local how="Theme Access token"
   if [ "$CLI_TOKEN_SOURCE" = "session" ]; then
     how="Shopify CLI session"
-    echo "auth=cli-session store=$DOMAIN toml_store=$TOML_STORE_FOREIGN toml_env=$TOML_ENV (the toml's Theme Access token belongs to toml_store, so it is not sent)" >&2
+    echo "auth=cli-session store=$DOMAIN toml_store=${TOML_STORE_FOREIGN:--} toml_env=$TOML_ENV ($CLI_SESSION_WHY)" >&2
   fi
   if [ -n "$GQL_NOTE" ]; then
     echo "note=gql engine unavailable ($GQL_NOTE) — using the theme-CLI engine ($how)" >&2
@@ -932,6 +977,72 @@ vet_from() {
   done
 }
 
+# ------------------------------------------------------------------- locate --
+# base's QA store registry, one domain per line: base sits beside fe in the repo and in the
+# claude.ai-synced layout (`base`, or `base~g<N>` after a resync: the highest N wins), and one
+# version dir over in the plugin cache (the highest wins).
+qa_registry_stores() {
+  local root reg="" v
+  root="$(cd "$SCRIPT_DIR/.." && pwd)"
+  if [ -f "$root/../base/scripts/qa-stores.cjs" ]; then
+    reg="$root/../base/scripts/qa-stores.cjs"
+  elif v="$(ls "$root/.." 2>/dev/null | grep -E '^base~g[0-9]+$' | sort -t g -k2,2n | tail -1)" && [ -n "$v" ]; then
+    reg="$root/../$v/scripts/qa-stores.cjs"
+  else
+    v="$(ls "$root/../../base" 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1 || true)"
+    [ -z "$v" ] || reg="$root/../../base/$v/scripts/qa-stores.cjs"
+  fi
+  if [ -z "$reg" ] || [ ! -f "$reg" ] || ! command -v node >/dev/null 2>&1; then
+    echo "note=locate_no_registry (base's qa-stores.cjs not found beside fe, or no node) — pass --stores to name more stores" >&2
+    return 0
+  fi
+  node "$reg" list --json 2>/dev/null | jq -r '.[]?.domain // empty' 2>/dev/null \
+    || echo "note=locate_registry_unreadable registry=$reg — pass --stores to name more stores" >&2
+}
+
+# `themes` once per candidate store, each in its own run of this script (its own engine choice and
+# auth), first listing that carries the id wins. Under auto, an Admin API auth rejection (an Admin
+# token is minted for one store) re-runs that store once on the theme CLI.
+locate_theme() {
+  local gid nid list out err cand s key seen=" " n=0 skipped=0 rc hit
+  gid="$(gid_of "$THEME")"; nid="$(num_of "$THEME")"
+  list="$(mktemp)"; out="$(mktemp)"; err="$(mktemp)"; CLEAN+=("$list" "$out" "$err")
+  local args=(--engine "$ENGINE")
+  [ -n "$ENV_ARG" ]  && args+=(--env "$ENV_ARG")
+  [ -n "$APIV_ARG" ] && args+=(--api-version "$APIV_ARG")
+  if [ -n "$STORES" ]; then
+    printf '%s\n' "$STORES" | tr ',' '\n' > "$list"
+  else
+    qa_registry_stores > "$list"
+    printf '%s\n' "${STORE_ARG:-${SHOPIFY_STORE:-}}" >> "$list"
+    printf '%s\n' "$({ toml_env_ready && toml_value store; } 2>/dev/null || true)" >> "$list"
+  fi
+  while IFS= read -r cand; do
+    cand="$(trim_ws "$cand")"
+    [ -n "$cand" ] || continue
+    s="$(store_handle "$cand")" \
+      || { echo "note=locate_skipped store='$cand' (not a myshopify handle, domain or URL)" >&2; continue; }
+    s="$(store_domain "$s" | tr 'A-Z' 'a-z')"
+    case "$seen" in *" $s "*) continue ;; esac
+    seen="$seen$s "; n=$((n + 1))
+    rc=0
+    "$BASH" "$SCRIPT_DIR/theme-json.sh" themes --store "$s" "${args[@]}" >"$out" 2>"$err" </dev/null || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$ENGINE" = auto ] && grep -qE '^error=http_40[13]( |$)' "$err"; then
+      rc=0; "$BASH" "$SCRIPT_DIR/theme-json.sh" themes --store "$s" --engine themecli "${args[@]:2}" >"$out" 2>"$err" </dev/null || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+      skipped=$((skipped + 1))
+      echo "note=locate_skipped store=$s rc=$rc ($(grep -v '^[[:space:]]*$' "$err" | tail -1))" >&2
+      continue
+    fi
+    hit="$(jq -r --arg g "$gid" 'select(.id == $g) | "name=\(.name) role=\(.role)"' "$out" 2>/dev/null | head -1)" || hit=""
+    if [ -n "$hit" ]; then echo "store=$s theme=$nid $hit"; return 0; fi
+  done < "$list"
+  echo "error=theme_not_found stores=$n$([ "$skipped" -eq 0 ] || printf ' unreachable=%s' "$skipped")"
+  [ "$n" -gt 0 ] || echo "hint=no store to search — pass --stores <a,b>, or register stores with base's qa-stores.cjs set" >&2
+  exit 5
+}
+
 # ------------------------------------------------------------------ dispatch --
 # run_op <gql_fn> <cli_fn>: engine dispatch with auto-fallback (gql fn returns 1 = fall back).
 run_op() {
@@ -972,5 +1083,10 @@ case "$CMD" in
         fi ;;
     esac
     run_op gql_set cli_set
+    ;;
+  locate)
+    [ -n "$THEME" ] || { echo "error=usage (locate needs a theme id: theme-json.sh locate <id> [--stores a,b,c])" >&2; exit 2; }
+    gid_of "$THEME" >/dev/null
+    locate_theme
     ;;
 esac
