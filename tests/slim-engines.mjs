@@ -5,8 +5,8 @@
 // (never throws, deterministic, never writes), EP parity against Headroom's fixtures, EF generators
 // equal the committed fixtures, EX the contract's example runs, EL the layer's purity, ER the engine
 // registry and the id lists outside the layer pinned to it, EN the
-// figma-nodes engine on synthetic REST nodes responses, EM media planning, EQ the jq narrowing the
-// view tool runs before an engine.
+// figma-nodes engine on synthetic REST nodes responses, EM media planning, EI the JS PNG decoder, resize and JPEG encoder, EQ the jq narrowing the
+// view tool runs before an engine, ED the vendored JPEG decoder.
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -602,7 +602,99 @@ const EC = ecRows();
   eq('EM-image-line', [media.imageLine('shot.png', 2411724, 98304, 1280), media.imageLine('a.png', 100000, 120000, 640), media.imageLine('b.gif', 900, 900, 10)],
     ['view shot.png: 2.3 MB → 96 KB (-96%) · 1280 px · jpeg', 'view a.png: 98 KB → 117 KB (+20%) · 640 px · jpeg', 'view b.gif: 900 B → 900 B (-0%) · 10 px · jpeg']);
   eq('EM-shrink-figure', media.shrinkFigure(2411724, 98304, 1280), '2.3 MB → 96 KB (-96%) · 1280 px · jpeg');
+  eq('EM-figure-backend', [media.imageLine('a.png', 2048, 1024, 640, 'js'), media.imageLine('a.png', 2048, 1024, 640, 'sips'), media.shrinkFigure(2048, 1024, 640, 'magick')],
+    ['view a.png: 2 KB → 1 KB (-50%) · 640 px · jpeg · js', 'view a.png: 2 KB → 1 KB (-50%) · 640 px · jpeg', '2 KB → 1 KB (-50%) · 640 px · jpeg · magick']);
   eq('EM-same-line', media.sameLine('small.png', 92160, 1000), 'view small.png: 90 KB · 1000 px — fits, no copy');
+}
+
+// EI — the JS image codecs: the PNG decoder on hand-built PNGs, the box resize, the vendored JPEG encoder
+{
+  const zlib = require('node:zlib');
+  const png = require(path.join(ENGINES, 'codec/png.cjs'));
+  const { resize } = require(path.join(ENGINES, 'codec/resize.cjs'));
+  const { encode } = require(path.join(ENGINES, 'codec/jpeg-encode.cjs'));
+  const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc32 = (b) => { let c = 0xffffffff; for (const x of b) c = CRC[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const td = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  // A PNG of `rows` (unfiltered sample bytes per row), each row sent with filters[y % filters.length].
+  const build = ({ w, h, depth = 8, type, rows, filters = [0], plte, trns, interlace = 0 }) => {
+    const ih = Buffer.alloc(13);
+    ih.writeUInt32BE(w, 0); ih.writeUInt32BE(h, 4); ih[8] = depth; ih[9] = type; ih[12] = interlace;
+    const bpp = Math.max(1, ({ 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[type] * depth) >> 3);
+    const raw = rows.map((row, y) => {
+      const f = filters[y % filters.length];
+      const prev = y ? rows[y - 1] : Buffer.alloc(row.length);
+      const out = Buffer.alloc(row.length + 1);
+      out[0] = f;
+      for (let x = 0; x < row.length; x++) {
+        const a = x >= bpp ? row[x - bpp] : 0;
+        const b = prev[x];
+        const c = x >= bpp ? prev[x - bpp] : 0;
+        const p = a + b - c;
+        const pred = [0, a, b, (a + b) >> 1, Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - c) ? a : Math.abs(p - b) <= Math.abs(p - c) ? b : c][f];
+        out[x + 1] = (row[x] - pred) & 0xff;
+      }
+      return out;
+    });
+    return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ih), ...(plte ? [chunk('PLTE', Buffer.from(plte))] : []),
+      ...(trns ? [chunk('tRNS', Buffer.from(trns))] : []), chunk('IDAT', zlib.deflateSync(Buffer.concat(raw))), chunk('IEND', Buffer.alloc(0))]);
+  };
+  const px = (r) => (r.rgb ? [r.w, r.h, [...r.rgb]] : r);
+  const B = (...a) => Buffer.from(a);
+
+  eq('EI-png-rgb', px(png.decode(build({ w: 2, h: 2, type: 2, rows: [B(255, 0, 0, 0, 255, 0), B(0, 0, 255, 10, 20, 30)] }))),
+    [2, 2, [255, 0, 0, 0, 255, 0, 0, 0, 255, 10, 20, 30]]);
+  eq('EI-png-rgba-on-white', px(png.decode(build({ w: 3, h: 1, type: 6, rows: [B(0, 0, 0, 0, 255, 0, 0, 128, 9, 9, 9, 255)] }))),
+    [3, 1, [255, 255, 255, 255, 127, 127, 9, 9, 9]]);
+  eq('EI-png-palette', px(png.decode(build({ w: 3, h: 1, type: 3, rows: [B(0, 1, 2)], plte: [10, 20, 30, 40, 50, 60, 0, 0, 0], trns: [255, 255, 0] }))),
+    [3, 1, [10, 20, 30, 40, 50, 60, 255, 255, 255]]);
+  eq('EI-png-palette-2bit', px(png.decode(build({ w: 3, h: 1, depth: 2, type: 3, rows: [B(0b00011000)], plte: [1, 1, 1, 2, 2, 2, 3, 3, 3] }))),
+    [3, 1, [1, 1, 1, 2, 2, 2, 3, 3, 3]]);
+  eq('EI-png-grey', [px(png.decode(build({ w: 2, h: 1, type: 0, rows: [B(0, 200)] }))), px(png.decode(build({ w: 3, h: 1, depth: 1, type: 0, rows: [B(0b10100000)] }))),
+    px(png.decode(build({ w: 2, h: 1, type: 4, rows: [B(100, 255, 0, 0)] }))), px(png.decode(build({ w: 2, h: 1, type: 0, rows: [B(7, 8)], trns: [0, 7] })))],
+  [[2, 1, [0, 0, 0, 200, 200, 200]], [3, 1, [255, 255, 255, 0, 0, 0, 255, 255, 255]], [2, 1, [100, 100, 100, 255, 255, 255]], [2, 1, [255, 255, 255, 8, 8, 8]]]);
+  eq('EI-png-16bit', px(png.decode(build({ w: 1, h: 1, depth: 16, type: 2, rows: [B(0x12, 0x34, 0xab, 0xcd, 0xff, 0x00)] }))), [1, 1, [0x12, 0xab, 0xff]]);
+  const rows = Array.from({ length: 5 }, (_, y) => Buffer.from(Array.from({ length: 9 }, (_, i) => (y * 53 + i * 31 + ((i * y) % 7) * 17) & 0xff)));
+  eq('EI-png-filters', [0, 1, 2, 3, 4].map((f) => px(png.decode(build({ w: 3, h: 5, type: 2, rows, filters: [f, (f + 1) % 5, (f + 2) % 5, (f + 3) % 5, (f + 4) % 5] }))))
+    .every((r) => JSON.stringify(r) === JSON.stringify([3, 5, rows.flatMap((r) => [...r])])), true);
+  // Filters 1–4 against filter 0 where a pixel is not 3 bytes: 16-bit RGB (6 B), RGBA16 (8 B), 2-bit grey (under a byte).
+  const bytes = (n, k) => Array.from({ length: 5 }, (_, y) => Buffer.from(Array.from({ length: n }, (_, i) => (y * 71 + i * 29 + k + ((i * y) % 5) * 13) & 0xff)));
+  eq('EI-png-filters-bpp', [[16, 2, 3, 18], [16, 6, 3, 24], [2, 0, 7, 2]].map(([depth, type, w, n]) => {
+    const rs = bytes(n, depth + type);
+    const want = JSON.stringify(px(png.decode(build({ w, h: 5, depth, type, rows: rs }))));
+    return [1, 2, 3, 4].every((f) => JSON.stringify(px(png.decode(build({ w, h: 5, depth, type, rows: rs, filters: [f] })))) === want);
+  }), [true, true, true]);
+  eq('EI-png-refused', [png.decode(build({ w: 1, h: 1, type: 2, rows: [B(1, 2, 3)], interlace: 1 })), png.decode(Buffer.from('not a png')),
+    png.decode(build({ w: 1, h: 1, type: 5, rows: [B(1)] })), png.decode(build({ w: 9000, h: 9000, type: 0, rows: [B(0)] })), png.decode(build({ w: 4, h: 4, type: 0, rows: [B(0)] }))],
+  [{ refused: 'png-interlaced' }, { refused: 'png-invalid' }, { refused: 'png-invalid' }, { refused: 'png-too-large' }, { refused: 'png-invalid' }]);
+  const bomb = build({ w: 1, h: 1, type: 0, rows: [B(0)] });
+  const at = bomb.indexOf(Buffer.from('IDAT', 'latin1')) - 4;
+  const bombed = Buffer.concat([bomb.subarray(0, at), chunk('IDAT', zlib.deflateSync(Buffer.alloc(64 * 1024 * 1024))), bomb.subarray(bomb.indexOf(Buffer.from('IEND', 'latin1')) - 4)]);
+  eq('EI-png-inflate-capped', png.decode(bombed), { refused: 'png-invalid' });
+  eq('EI-png-header', png.header(build({ w: 7, h: 3, type: 2, rows: [B(0)] })), { w: 7, h: 3, depth: 8, type: 2, interlace: 0 });
+
+  const grey = (w, h, vals) => ({ w, h, rgb: Buffer.from(vals.flatMap((v) => [v, v, v])) });
+  const r22 = resize(grey(4, 4, [0, 10, 100, 100, 20, 31, 100, 101, 0, 0, 255, 255, 0, 0, 255, 254]), 2);
+  eq('EI-resize-box', [r22.w, r22.h, [...r22.rgb].filter((_, i) => i % 3 === 0)], [2, 2, [15, 100, 0, 255]]);
+  const r21 = resize(grey(4, 2, [10, 20, 30, 40, 50, 60, 70, 80]), 2);
+  const same = grey(3, 2, [1, 2, 3, 4, 5, 6]);
+  eq('EI-resize-aspect', [r21.w, r21.h, [...r21.rgb].filter((_, i) => i % 3 === 0), resize(same, 3) === same], [2, 1, [35, 55], true]);
+
+  let seed = 7;
+  const rnd = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return seed >>> 24; };
+  const noisy = { w: 64, h: 48, rgb: Buffer.from(Array.from({ length: 64 * 48 * 3 }, rnd)) };
+  const q60 = encode(noisy, 60);
+  const q90 = encode(noisy, 90);
+  eq('EI-jpeg-markers', [q60.subarray(0, 2).toString('hex'), q60.subarray(-2).toString('hex'), q60.indexOf(B(0xff, 0xc0)) > 0], ['ffd8', 'ffd9', true]);
+  const sof = q60.indexOf(B(0xff, 0xc0));
+  eq('EI-jpeg-sof', [q60.readUInt16BE(sof + 5), q60.readUInt16BE(sof + 7), q60[sof + 9]], [48, 64, 3]);
+  check('EI-jpeg-quality-order', q60.length < q90.length, `${q60.length} vs ${q90.length}`);
+  check('EI-jpeg-odd-size', encode({ w: 13, h: 5, rgb: Buffer.alloc(13 * 5 * 3, 200) }, 60).subarray(-2).toString('hex') === 'ffd9', 'odd size');
 }
 
 // EQ — jq narrowing: the grammar, the evaluator, and what narrow() refuses
@@ -867,6 +959,55 @@ await serverExample();
       [0, true, true]);
     rmSync(T, { recursive: true, force: true });
   }
+}
+
+// ED — the vendored JPEG decoder on a 16×8 sips baseline JPEG (left half #c82828, right half #2828c8):
+// colours, EXIF orientation via an injected APP1, refusals
+{
+  const { decode } = require(path.join(ENGINES, 'codec/jpeg-decode.cjs'));
+  const JPG = Buffer.from('/9j/4AAQSkZJRgABAQAASABIAAD/wAARCAAIABADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9sAQwABAQEBAQECAQECAwICAgMEAwMDAwQFBAQEBAQFBgUFBQUFBQYGBgYGBgYGBwcHBwcHCAgICAgJCQkJCQkJCQkJ/9sAQwEBAQECAgIEAgIECQYFBgkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJ/90ABAAB/9oADAMBAAIRAxEAPwD8v6+D6+8K+D6/tT9j3/zUX/cr/wC7J/oZ+1R/5kP/AHM/+4D/2Q==', 'base64');
+  const exif = (o, jpg = JPG) => {
+    const tiff = Buffer.from([0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const body = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff]);
+    const seg = Buffer.from([0xff, 0xe1, 0, 0]);
+    seg.writeUInt16BE(body.length + 2, 2);
+    return Buffer.concat([jpg.subarray(0, 2), seg, body, jpg.subarray(2)]);
+  };
+  const mean = (r, x0, y0, x1, y1) => {
+    const s = [0, 0, 0];
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) for (let k = 0; k < 3; k++) s[k] += r.rgb[(y * r.w + x) * 3 + k];
+    const n = (x1 - x0) * (y1 - y0);
+    return s.map((v) => v / n);
+  };
+  const near = (a, b) => a.every((v, i) => Math.abs(v - b[i]) <= 3);
+  const RED = [200, 40, 40], BLUE = [40, 40, 200];
+  const r = decode(JPG);
+  eq('ED-dims', [r.w, r.h, r.rgb && r.rgb.length], [16, 8, 16 * 8 * 3]);
+  check('ED-colour', near(mean(r, 0, 0, 8, 8), RED) && near(mean(r, 8, 0, 16, 8), BLUE), JSON.stringify([mean(r, 0, 0, 8, 8), mean(r, 8, 0, 16, 8)]));
+  // A 32×16 JPEG of four 16×8 quadrants A B / C D; each orientation's upright quadrants, read clockwise from the top left.
+  const Q = { A: [200, 40, 40], B: [40, 40, 200], C: [40, 200, 40], D: [220, 220, 40] };
+  const quad = Buffer.alloc(32 * 16 * 3);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) Q[y < 8 ? (x < 16 ? 'A' : 'B') : x < 16 ? 'C' : 'D'].forEach((v, k) => { quad[(y * 32 + x) * 3 + k] = v; });
+  const QJ = require(path.join(ENGINES, 'codec/jpeg-encode.cjs')).encode({ w: 32, h: 16, rgb: quad }, 90);
+  const UPRIGHT = { 1: 'ABCD', 2: 'BADC', 3: 'DCBA', 4: 'CDAB', 5: 'ACBD', 6: 'CADB', 7: 'DBCA', 8: 'BDAC' };
+  const quadrants = (o) => {
+    const q = decode(exif(o, QJ));
+    const hw = q.w / 2, hh = q.h / 2;
+    const names = [[0, 0], [hw, 0], [0, hh], [hw, hh]].map(([x, y]) => Object.keys(Q).find((n) => near(mean(q, x + 2, y + 2, x + hw - 2, y + hh - 2), Q[n])) || '?');
+    return `${q.w}x${q.h} ${names.join('')}`;
+  };
+  eq('ED-orient-all', [1, 2, 3, 4, 5, 6, 7, 8].map(quadrants), [1, 2, 3, 4, 5, 6, 7, 8].map((o) => `${o >= 5 ? '16x32' : '32x16'} ${UPRIGHT[o]}`));
+  const big = Buffer.from(JPG);
+  const sof = big.indexOf(Buffer.from([0xff, 0xc0]));
+  big.writeUInt16BE(8000, sof + 5); big.writeUInt16BE(8000, sof + 7);
+  // The 512 MB budget: a 4:4:4 JPEG decodes at 24 MP and is refused at 27 MP.
+  const J27 = require(path.join(ENGINES, 'codec/jpeg-encode.cjs')).encode({ w: 6000, h: 4500, rgb: Buffer.alloc(6000 * 4500 * 3, 90) }, 60);
+  const J24 = Buffer.from(J27);
+  J24.writeUInt16BE(4000, J24.indexOf(Buffer.from([0xff, 0xc0])) + 5);
+  const d24 = decode(J24);
+  eq('ED-budget-444', [d24.refused || `${d24.w}x${d24.h}`, decode(J27)], ['6000x4000', { refused: 'jpeg-too-large' }]);
+  eq('ED-refuse', [decode(big), decode(Buffer.from('not a jpeg')), decode(JPG.subarray(0, 300))],
+    [{ refused: 'jpeg-too-large' }, { refused: 'jpeg-decode-failed' }, { refused: 'jpeg-decode-failed' }]);
 }
 
 console.log(`slim engines: ${pass} passed, ${fail} failed`);

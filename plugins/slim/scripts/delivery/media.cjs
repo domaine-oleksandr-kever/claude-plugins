@@ -1,6 +1,7 @@
 // The media backend: runs the plan engines/media.cjs makes, with whatever the machine already has —
-// ffprobe + ffmpeg on PATH (images and video), else `sips` (images only; macOS). No backend → an
-// honest refusal, never a new dependency. Outputs land beside the input, and only at the path the
+// ffprobe + ffmpeg on PATH (images and video), else `sips` (images only; macOS), else ImageMagick
+// (`magick`, else `convert`; images only), else slim's own JS codecs (PNG and JPEG images only).
+// SLIM_MEDIA_BACKEND in `env` forces one. No backend → an honest refusal, never a new dependency. Outputs land beside the input, and only at the path the
 // caller's Write permission check ruled on (`allowedOut`). The view tool's hooks module may first leave
 // PLACEHOLDER there through the host's Write tool; clearPlaceholder() removes it before the backend runs.
 'use strict';
@@ -9,6 +10,10 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const media = require('../engines/media.cjs');
+const png = require('../engines/codec/png.cjs');
+const { resize } = require('../engines/codec/resize.cjs');
+const { encode } = require('../engines/codec/jpeg-encode.cjs');
+const jpeg = require('../engines/codec/jpeg-decode.cjs');
 
 const NO_BACKEND = 'media: no backend (install ffmpeg)';
 const HEAD_BYTES = 64;
@@ -32,14 +37,79 @@ function which(name, env) {
   return null;
 }
 
-// { name: 'ffmpeg', ffmpeg, ffprobe } | { name: 'sips', sips } | null, from `env.PATH` only.
-function backend(env) {
-  const ffmpeg = which('ffmpeg', env);
-  const ffprobe = which('ffprobe', env);
-  if (ffmpeg && ffprobe) return { name: 'ffmpeg', ffmpeg, ffprobe };
-  const sips = which('sips', env);
-  return sips ? { name: 'sips', sips } : null;
+const BACKENDS = ['ffmpeg', 'sips', 'magick', 'js'];
+// The image formats the JS backend decodes.
+const JS_FORMATS = new Set(['png', 'jpeg']);
+
+function found(name, env) {
+  if (name === 'js') return { name };
+  if (name === 'ffmpeg') {
+    const ffmpeg = which('ffmpeg', env);
+    const ffprobe = which('ffprobe', env);
+    return ffmpeg && ffprobe ? { name, ffmpeg, ffprobe } : null;
+  }
+  if (name === 'sips') { const sips = which('sips', env); return sips ? { name, sips } : null; }
+  const magick = which('magick', env) || which('convert', env);
+  return magick ? { name, magick } : null;
 }
+
+/**
+ * The first backend of ffmpeg → sips → magick → js found on `env.PATH`, or the one
+ * `env.SLIM_MEDIA_BACKEND` names (null when that one is missing; any other value → the chain):
+ * { name: 'ffmpeg', ffmpeg, ffprobe } | { name: 'sips', sips } | { name: 'magick', magick } | { name: 'js' }.
+ */
+function backend(env) {
+  const forced = String((env && env.SLIM_MEDIA_BACKEND) || '').trim();
+  if (BACKENDS.includes(forced)) return found(forced, env);
+  for (const name of BACKENDS) { const be = found(name, env); if (be) return be; }
+  return null;
+}
+
+// EXIF orientation → the degrees the plan reads; a mirrored one counts as turned.
+const EXIF_ROTATION = { 2: 180, 3: 180, 4: 180, 5: 90, 6: 90, 7: 270, 8: 270 };
+
+// { width, height, rotation } of a baseline or progressive JPEG from its SOF segment and EXIF, or null.
+function jpegDims(b) {
+  let rotation = 0;
+  for (let off = 2; off + 9 <= b.length;) {
+    if (b[off] !== 0xff) return null;
+    const m = b[off + 1];
+    if (m === 0xff) { off++; continue; }
+    if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { off += 2; continue; }
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+      const height = b.readUInt16BE(off + 5);
+      const width = b.readUInt16BE(off + 7);
+      return width && height ? { width, height, rotation } : null;
+    }
+    const len = b.readUInt16BE(off + 2);
+    if (m === 0xe1 && b.toString('latin1', off + 4, off + 10) === 'Exif\0\0') {
+      rotation = EXIF_ROTATION[jpeg.orientationOf(b.subarray(off + 9, off + 2 + len))] || 0;
+    }
+    off += 2 + len;
+  }
+  return null;
+}
+
+function jsProbe(file) {
+  const b = fs.readFileSync(file);
+  const k = media.kindOf(b.subarray(0, HEAD_BYTES));
+  if (k && k.format === 'png') { const h = png.header(b); return h ? { width: h.w, height: h.h } : null; }
+  return k && k.format === 'jpeg' ? jpegDims(b) : null;
+}
+
+// The JS backend for one input → (step, out) => { ok, err } writing a JPEG at the step's long edge, or { refused }.
+function jsEncoder(file, format, quality) {
+  const b = fs.readFileSync(file);
+  const img = format === 'png' ? png.decode(b) : jpeg.decode(b);
+  if (img.refused) return img;
+  return (step, out) => {
+    fs.writeFileSync(out, encode(resize(img, step.longEdge), quality));
+    return { ok: true, err: null };
+  };
+}
+
+// ImageMagick's orientation names → the degrees the plan reads; a mirrored one counts as turned.
+const IM_ROTATION = { TopRight: 180, BottomRight: 180, BottomLeft: 180, LeftTop: 90, RightTop: 90, RightBottom: 90, LeftBottom: 270 };
 
 function headOf(file) {
   let fd;
@@ -64,6 +134,12 @@ function exec(bin, args, env, timeout) {
 // matrix or EXIF orientation before any filter; the first decoded frame's side data reveals it.
 function probe(be, file, env, timeoutMs) {
   const timeout = timeoutMs || PROBE_TIMEOUT_MS;
+  if (be.name === 'js') { try { return jsProbe(file); } catch (_) { return null; } }
+  if (be.name === 'magick') {
+    const r = exec(be.magick, [`${file}[0]`, '-format', '%w %h %[orientation]', 'info:'], env, timeout);
+    const m = /^(\d+) (\d+) ?(\w*)/.exec(r.out.trim());
+    return r.ok && m ? { width: Number(m[1]), height: Number(m[2]), rotation: IM_ROTATION[m[3]] || 0 } : null;
+  }
   if (be.name === 'ffmpeg') {
     const r = exec(be.ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-read_intervals', '%+#1', '-show_entries',
       'stream=width,height,duration:stream_side_data=rotation:frame_side_data=rotation:format=duration', '-of', 'json', file], env, timeout);
@@ -92,6 +168,12 @@ const ON_WHITE = 'split[a][b];[a]drawbox=c=white@1:t=fill[w];[w][b]overlay';
 function imageArgs(be, p, step, file, out) {
   if (be.name === 'sips') {
     return ['-s', 'format', 'jpeg', '-s', 'formatOptions', String(p.quality), ...(step.resized ? ['-Z', String(step.longEdge)] : []), file, '--out', out];
+  }
+  if (be.name === 'magick') {
+    // `[0]`: an animated GIF's first frame only, not one file per frame.
+    return [`${file}[0]`, '-background', 'white', '-alpha', 'remove', '-alpha', 'off', '-auto-orient',
+      // `%%`: ImageMagick reads `%d` in an output name as a frame-number template.
+      '-resize', `${step.longEdge}x${step.longEdge}>`, '-strip', '-quality', String(p.quality), out.replace(/%/g, '%%')];
   }
   return ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-map_metadata', '-1',
     '-vf', [ON_WHITE, ...(step.resized ? [fitBox(step.longEdge)] : [])].join(','), '-frames:v', '1', '-q:v', FF_QSCALE, out];
@@ -214,7 +296,7 @@ function normalize(file, opts) {
     if (!k) return refuse('not-media', 'media: not an image or video slim can read (png, jpeg, gif, webp, mp4, mov, webm, mkv, avi)');
     const known = { kind: k.kind, format: k.format, bytesIn };
     const be = backend(env);
-    if (!be || (k.kind === 'video' && be.name !== 'ffmpeg')) return refuse('no-backend', NO_BACKEND, known);
+    if (!be || (k.kind === 'video' && be.name !== 'ffmpeg') || (be.name === 'js' && !JS_FORMATS.has(k.format))) return refuse('no-backend', NO_BACKEND, known);
     const base = path.dirname(file);
     const ext = path.extname(file).slice(1);
     const name = path.basename(file, path.extname(file));
@@ -243,12 +325,14 @@ function normalize(file, opts) {
       const out = path.join(base, p.outputs[0].rel);
       const st = lstatOf(out);
       if (st && !st.isFile()) return refuse('out-taken', `media: ${out} is a link or a folder, not written`, withBe);
+      const js = be.name === 'js' ? jsEncoder(file, k.format, p.quality) : null;
+      if (js && js.refused) return refuse(js.refused, `media: js cannot decode ${path.basename(file)} (${js.refused})`, withBe);
       let r;
       let bytes;
       for (step of p.steps) {
-        r = exec(be.name === 'sips' ? be.sips : be.ffmpeg, imageArgs(be, p, step, file, out), env, left());
+        r = js ? js(step, out) : exec(be[be.name], imageArgs(be, p, step, file, out), env, left());
         bytes = sizeOf(out);
-        if (!r.ok || bytes <= 0 || bytes <= p.maxBytes) break;
+        if (!r.ok || bytes <= 0 || bytes <= p.maxBytes || (js && Date.now() >= deadline)) break;
       }
       if (!r.ok || bytes <= 0) { err = r.err || 'no output'; rmQuiet(out); } else outputs = [{ path: out, bytes }];
     } else {
@@ -273,7 +357,7 @@ function normalize(file, opts) {
       decision: p.same ? 'passthrough' : reused ? 'cached' : 'compressed',
       figure: k.kind === 'video' ? media.figureLine(bytesIn, bytesOut, outputs.length)
         : p.same ? media.sameLine(path.basename(file), bytesIn, Math.max(p.source.w, p.source.h))
-          : media.imageLine(path.basename(file), bytesIn, bytesOut, step.longEdge),
+          : media.imageLine(path.basename(file), bytesIn, bytesOut, step.longEdge, reused ? null : be.name),
       text: [describe(k.kind, facts, p, be, reused, step), ...lines].join('\n'),
       kind: k.kind, format: k.format, backend: be.name, bytesIn, bytesOut, frames: outputs.length, outputs,
       ...(k.kind === 'image' && step && step.w ? { source: p.source, scale: { w: step.w, h: step.h } } : {}),

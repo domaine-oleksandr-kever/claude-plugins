@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.12.0**.
+Current release: **slim v0.13.0**.
 
 ## Install
 
@@ -573,11 +573,12 @@ view's result again.
 Images and video reach the model through a resize, unless an image already fits:
 
 - An image becomes `<name>.1568.jpg`, a JPEG at quality 60 whatever its format: long edge at most
-  1568 px, aspect kept, metadata stripped with ffmpeg (sips keeps it), transparent pixels
+  1568 px, aspect kept, metadata stripped (sips keeps it), transparent pixels
   become white. When that copy is still over
   150 KB, slim encodes it again at a long edge of 1280, 1024, 800 and then 640 px, and keeps the
   first one within 150 KB, or the 640 px one. A GIF keeps its first frame. Figure:
-  `view shot.png: 2.3 MB → 96 KB (-96%) · 1280 px · jpeg`.
+  `view shot.png: 2.3 MB → 96 KB (-96%) · 1280 px · jpeg`, with the backend that wrote the copy
+  after it unless that is sips (`· jpeg · ffmpeg`, `· jpeg · magick`, `· jpeg · js`).
 - An image already within 1568 px and 150 KB, upright, with an extension that names its format
   (`png`, `jpg`/`jpeg`, `gif`, `webp`) is passed as itself, with nothing written: figure
   `view shot.png: 90 KB · 1000 px — fits, no copy`. A file already named `<stem>.1568.jpg` (or
@@ -589,6 +590,8 @@ Images and video reach the model through a resize, unless an image already fits:
 A portrait phone clip or a JPEG with an EXIF orientation comes out upright, at its displayed size.
 The outputs land beside the input. After one figure line, an image's reply ends with one line naming
 the file to read: `Read <copy> once to see it`, or `Read <input>` when the image is passed as itself.
+Every path names the input's folder as given: when that folder runs through a symlink (a worktree's
+`.claude/tasks`), one line `note=out_symlink out=<given> physical=<resolved>` follows the figure.
 A video's reply lists its frames with their timestamps:
 
 ```
@@ -609,9 +612,20 @@ stubbed as usual; the image block stays. With no backend, or when the copy is no
 result passes as it came (`image-no-backend`, `image-no-gain` in the report log). `SLIM_MCP=0` turns
 it off with the rest of the MCP channel.
 
-slim adds no dependency for this and uses what the machine already has. It uses `ffprobe` + `ffmpeg`
-on PATH for images and video, else macOS `sips` for images only. sips cannot strip metadata, and the
-reply says so. With neither backend, or for a video with only sips, the answer is the refusal
+slim adds no dependency for this and uses what the machine already has, in this order:
+
+1. `ffprobe` + `ffmpeg` on PATH: images and video.
+2. macOS `sips`: images only. sips cannot strip metadata, and the reply says so.
+3. ImageMagick, `magick` or else `convert` on PATH: images only (the first frame of a GIF).
+4. slim's own JavaScript codecs, always there: PNG and JPEG images only. The copy is a baseline
+   JPEG (4:4:4, so it runs a little larger than sips' at the same quality); transparent pixels
+   become white; a JPEG's EXIF orientation is applied. An Adam7-interlaced PNG is refused
+   (`png-interlaced`), and so is a PNG or JPEG over 40 megapixels (`png-too-large`,
+   `jpeg-too-large`; a 4:4:4 JPEG already over about 25 megapixels, the decoder's 512 MB budget), a JPEG in a colour mode the decoder lacks (`jpeg-color-unsupported`) and a
+   broken one (`jpeg-decode-failed`).
+
+`SLIM_MEDIA_BACKEND` forces one of `ffmpeg`, `sips`, `magick`, `js`. A video with no ffmpeg, or a GIF
+or WebP that only the JavaScript codecs could take, gets the refusal
 `media: no backend (install ffmpeg)`.
 
 The Read and Write permission checks rule on the input and on the exact output path (the image, or
@@ -868,6 +882,7 @@ from the host through the module's spawn. The module reads the host's `bashOutpu
 | `SLIM_HINT` | `1` | `0` drops the one line slim adds to an HTML page it compressed from a Bash fetch (`slim hint: for one fact about this page, call mcp__slim__lookup(…)`). |
 | `BASH_MAX_OUTPUT_LENGTH` | host: `30000` | The host's own switch, read, never set: older hosts show this many characters of Bash output inline before saving it to a file; newer hosts size only the read-back window with it and take the inline limit from the `bashOutputMaxChars` setting. slim keeps a Bash answer under that setting when set, else under 30,000, and this variable can only lower it. |
 | `SLIM_CURL` | unset | `deny` refuses a bare `curl <url>` in Bash with a pointer to WebFetch (and the lookup tool, while it is registered); a curl with a pipe, an output file or headers is never refused. Any other value does nothing. |
+| `SLIM_MEDIA_BACKEND` | unset | `ffmpeg`, `sips`, `magick` or `js` makes the media backend that one alone (`media: no backend` when it is missing); unset or any other value takes the first found of ffmpeg → sips → magick → js. |
 | `SLIM_A11Y` | `1` | `0` turns the browser-snapshot engine off: a Playwright or DevTools MCP snapshot goes the JSON route again (`non-json`, passed through, or stubbed over `SLIM_STUB_BYTES`). |
 
 ## Not covered

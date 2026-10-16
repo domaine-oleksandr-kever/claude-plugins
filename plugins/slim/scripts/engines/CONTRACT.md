@@ -319,7 +319,7 @@ Passthrough reasons: `empty`, `engine-not-allowed`, `plain-gate`, `no-gain`, `no
 
 Images and video are binary, so `compress()` refuses them (`binary`). `media.cjs` is a separate pure
 module that only **plans** what a media file becomes for a model; a caller with a backend (ffmpeg,
-sips) runs the plan. It reads no file and runs nothing.
+sips, ImageMagick, or the JS codecs below) runs the plan. It reads no file and runs nothing.
 
 - `kindOf(head: Buffer) → { kind: 'image'|'video', format } | null` from the first bytes (64 are
   enough): images `png`, `jpeg`, `gif`, `webp`; video `mp4`, `mov` (ISO-BMFF `ftyp`, still-image
@@ -355,12 +355,30 @@ sips) runs the plan. It reads no file and runs nothing.
     a kind other than image / video → `{ refused: 'not-media' }`.
 - `figureLine(bytesIn, bytesOut, frames)` → `media: <in> B → <out> B (-NN%) frames=N` (whole percent,
   `+` when the outputs outweigh the input): the figure of a video's frames.
-- `imageLine(name, bytesIn, bytesOut, longEdge)` → `view <name>: <in> → <out> (-NN%) · <longEdge> px · jpeg`
-  (sizes as `900 B`, `96 KB`, `2.3 MB`, 1 KB = 1024 B): the figure of an image copy.
-- `shrinkFigure(bytesIn, bytesOut, longEdge)` → `<in> → <out> (-NN%) · <longEdge> px · jpeg`: `imageLine`'s
-  figure without the name (the MCP image-block line uses it).
+- `imageLine(name, bytesIn, bytesOut, longEdge, backend?)` → `view <name>: <in> → <out> (-NN%) · <longEdge> px · jpeg[ · <backend>]`
+  (sizes as `900 B`, `96 KB`, `2.3 MB`, 1 KB = 1024 B): the figure of an image copy. `backend` is the
+  name the caller's backend answers (`ffmpeg`, `magick`, `js`); `sips` or none leaves the figure bare.
+- `shrinkFigure(bytesIn, bytesOut, longEdge, backend?)` → `<in> → <out> (-NN%) · <longEdge> px · jpeg[ · <backend>]`:
+  `imageLine`'s figure without the name (the MCP image-block line uses it).
 - `sameLine(name, bytesIn, longEdge)` → `view <name>: <in> · <longEdge> px — fits, no copy`: the figure
   of a `same` image.
+
+The caller's `normalize()` (delivery/media.cjs) answers `backend: 'ffmpeg'|'sips'|'magick'|'js'`, the
+backend that measured and wrote the outputs. The JS backend runs pure codecs under `engines/codec/`
+(Buffer in, Buffer out, Node built-ins only):
+
+- `png.cjs`: `decode(buf) → { w, h, rgb } | { refused: 'png-invalid'|'png-interlaced'|'png-too-large' }`
+  (8-bit RGB, w·h·3 bytes; colour types 0/2/3/4/6 at any legal depth, 16-bit → high byte; alpha
+  flattened on white; Adam7 refused; over 40 MP refused) and `header(buf) → { w, h, depth, type, interlace } | null`.
+- `resize.cjs`: `resize({ w, h, rgb }, longEdge) → { w, h, rgb }`, an area-average downscale to the long
+  edge (sizes rounded as `plan` rounds them), never an upscale.
+- `jpeg-encode.cjs`: `encode({ w, h, rgb }, quality) → Buffer`, a baseline 4:4:4 JFIF JPEG (vendored
+  jpeg-js encoder; licence in the file header).
+- `jpeg-decode.cjs`: `decode(buf) → { w, h, rgb } | { refused: 'jpeg-too-large'|'jpeg-color-unsupported'|'jpeg-decode-failed' }`
+  (baseline and progressive; EXIF orientation applied, so 5–8 swap w and h; over 40 MP refused, and over the 512 MB decode
+  budget, which a 4:4:4 JPEG reaches at about 25 MP;
+  vendored jpeg-js decoder, pdf.js lineage; licences in the file header) and
+  `orientationOf(exifPayload) → 1..8`.
 
 ## 5b. JSON narrowing (`jq.cjs`, beside compress())
 

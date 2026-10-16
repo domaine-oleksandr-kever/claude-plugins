@@ -52,7 +52,8 @@ the code on the date at the bottom; the code wins when they drift.
 │                  which existing files a handle or a host notice may name                     │
 │  env.cjs         SLIM_* switches, from the process env only                                  │
 │  report.cjs      one metadata line per invocation → slim-debug.log; --report         │
-│  media.cjs       runs a media plan: ffprobe + ffmpeg on PATH, else sips (images); outputs    │
+│  media.cjs       runs a media plan: ffprobe + ffmpeg, else sips, else ImageMagick, else the  │
+│                  JS codecs in engines/codec/ (PNG/JPEG images); outputs                      │
 │                  beside the input, only at the path the caller's Write check allowed         │
 └───────────────────────────────┬──────────────────────────────────────────────────────────────┘
                                 │ compress({ data, hint }, options) / sniff(input)   (plain require)
@@ -413,7 +414,7 @@ All rows live in `README.md` → Environment switches; `tests/readme-checks.sh` 
 | engines (listing) | `tests/listing-slim-fixtures.mjs` | the listing engine on the find / ls -R / tree fixtures: sniff, exact bytes, fit stages, every printed path and directory count against the input, Bash admission |
 | engines (csv) | `tests/csv-slim-fixtures.mjs` | the csv engine: detection, counts, types, samples and rows checked against the input, fit stages, determinism |
 | engines (xml) | `tests/xml-slim-fixtures.mjs` | the xml engine: sniff, folds and verbatim samples, SVG reduction, fit stages, and its admission per channel through `slim.cjs` |
-| delivery | `tests/slim-fixtures.mjs` | one envelope per channel through `slim.cjs`: decisions, restored shapes, records, gates equal to the module's, `--report`; `--view` (jq, out roots, cache marker, host files, media); the media backend against fake `ffprobe` / `ffmpeg` / `sips` on a one-dir PATH; @-mentioned files; `--prompt` (in place, durable dir, worktree, output bound, link rail); `--access` and its `--report` pairing |
+| delivery | `tests/slim-fixtures.mjs` | one envelope per channel through `slim.cjs`: decisions, restored shapes, records, gates equal to the module's, `--report`; `--view` (jq, out roots, cache marker, host files, media); the media backend against fake `ffprobe` / `ffmpeg` / `sips` / `magick` on a one-dir PATH and the JS backend on PNGs built in the test; @-mentioned files; `--prompt` (in place, durable dir, worktree, output bound, link rail); `--access` and its `--report` pairing |
 | module | `plugins/slim/hooks/mods/tests/*.test.ts(x)` via `claude plugin test` | every channel's hook, pre-decisions, lookup rungs with mocked `$.tool.call` / `$.model.complete`, view's checks, Write path and reply text, the prompt rewrite and its origins, the attachment hook, the spill-read guard, describe, render, info |
 | all | `tests/layout-assertions.sh`, `tests/readme-checks.sh`, `claude plugin validate --strict` | layer purity, env rows, state contract |
 | end to end | `plugins/slim/evals/` (`claude plugin eval`, owner-run, paid) | the model actually benefits: Read big JSON, curl HTML, cat log, mocked JQL, lookup |

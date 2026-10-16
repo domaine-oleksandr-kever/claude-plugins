@@ -132,14 +132,15 @@ function figureLine(bytesIn, bytesOut, frames) {
 // 900 B, 96 KB, 2.3 MB (1 KB = 1024 B).
 const size = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 
-// `<in> → <out> (-NN%) · <long edge> px · jpeg`: what an image copy saved.
-function shrinkFigure(bytesIn, bytesOut, longEdge) {
+// `<in> → <out> (-NN%) · <long edge> px · jpeg[ · <backend>]`: what an image copy saved; the backend
+// that wrote it is named unless it is sips or not given.
+function shrinkFigure(bytesIn, bytesOut, longEdge, backend) {
   const p = bytesIn > 0 ? Math.round((1 - bytesOut / bytesIn) * 100) : 0;
-  return `${size(bytesIn)} → ${size(bytesOut)} (${p < 0 ? '+' : '-'}${Math.abs(p)}%) · ${longEdge} px · jpeg`;
+  return `${size(bytesIn)} → ${size(bytesOut)} (${p < 0 ? '+' : '-'}${Math.abs(p)}%) · ${longEdge} px · jpeg${backend && backend !== 'sips' ? ` · ${backend}` : ''}`;
 }
 
 // `view <name>: <shrinkFigure>`: the figure of an image copy.
-const imageLine = (name, bytesIn, bytesOut, longEdge) => `view ${name}: ${shrinkFigure(bytesIn, bytesOut, longEdge)}`;
+const imageLine = (name, bytesIn, bytesOut, longEdge, backend) => `view ${name}: ${shrinkFigure(bytesIn, bytesOut, longEdge, backend)}`;
 
 // `view <name>: <in> · <long edge> px — fits, no copy`: the figure of an image that is its own output.
 const sameLine = (name, bytesIn, longEdge) => `view ${name}: ${size(bytesIn)} · ${longEdge} px — fits, no copy`;

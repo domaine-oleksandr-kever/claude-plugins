@@ -1231,7 +1231,7 @@ printf 'SIPSIMG' > "$last"
   const png = media('photo.png', PNG_IN);
   const r1 = run(png, FF, 'photo.1568.jpg');
   eq('Cm-image-ffmpeg', [r1.decision, r1.figure, r1.frames, r1.backend, r1.outputs.map((o) => path.basename(o.path)), readFileSync(at('photo.1568.jpg'), 'utf8')],
-    ['compressed', 'view photo.png: 5 KB → 3 B (-100%) · 1568 px · jpeg', 1, 'ffmpeg', ['photo.1568.jpg'], 'IMG']);
+    ['compressed', 'view photo.png: 5 KB → 3 B (-100%) · 1568 px · jpeg · ffmpeg', 1, 'ffmpeg', ['photo.1568.jpg'], 'IMG']);
   check('Cm-image-ffmpeg-argv', /-map_metadata -1 -vf split\[a\]\[b\];\[a\]drawbox=c=white@1:t=fill\[w\];\[w\]\[b\]overlay,scale=1568:1568:force_original_aspect_ratio=decrease -frames:v 1 -q:v 4 .*photo\.1568\.jpg$/m.test(argv()) && argv().split('\n').length === 2 && r1.text.startsWith('image png 4000×3000 → 1568×1176 jpeg q60, metadata stripped (ffmpeg)\n'), argv() + r1.text);
   check('Cm-probe-argv', readFileSync(`${LOGF}.probe`, 'utf8').startsWith('-v error -select_streams v:0 -read_intervals %+#1 -show_entries stream=width,height,duration:stream_side_data=rotation:frame_side_data=rotation:format=duration -of json '),
     readFileSync(`${LOGF}.probe`, 'utf8'));
@@ -1292,8 +1292,10 @@ printf 'SIPSIMG' > "$last"
   check('Cm-sips-metadata-honest', r4.text.includes('metadata kept (sips cannot strip it) (sips)'), r4.text);
   const r5 = run(media('sipsclip.mp4', MP4_IN), SB, 'sipsclip.frames/001.jpg');
   eq('Cm-sips-video', [r5.decision, r5.reason, r5.figure, existsSync(at('sipsclip.frames'))], ['refused', 'no-backend', 'media: no backend (install ffmpeg)', false]);
-  eq('Cm-no-backend', [run(png, '', 'photo.1568.jpg').figure, run(png, at('nowhere'), 'photo.1568.jpg').reason, run(png, `${at('ff')}/ffmpeg`, 'photo.1568.jpg').reason],
-    ['media: no backend (install ffmpeg)', 'no-backend', 'no-backend']);
+  const webp = media('anim.webp', WEBP_IN);
+  eq('Cm-no-backend', [run(webp, '', 'anim.1568.jpg').figure, run(webp, at('nowhere'), 'anim.1568.jpg').reason, run(media('anim.gif', Buffer.concat([Buffer.from('GIF89a', 'latin1'), Buffer.alloc(200, 1)])), '', 'anim.1568.jpg').reason,
+    run(png, FF, 'photo.1568.jpg', { env: { SLIM_MEDIA_BACKEND: 'magick' } }).reason, run(media('jsclip.mp4', MP4_IN), '', 'jsclip.frames/001.jpg').reason],
+  ['media: no backend (install ffmpeg)', 'no-backend', 'no-backend', 'no-backend', 'no-backend']);
 
   const r7 = run(media('web.jpg', WEBP_IN), FF, 'web.1568.jpg');
   eq('Cm-name-from-ext-webp-as-jpg', [r7.decision, r7.format, r7.outputs.map((o) => path.basename(o.path)), existsSync(at('web.1568.png'))], ['compressed', 'webp', ['web.1568.jpg'], false]);
@@ -1321,13 +1323,13 @@ printf 'SIPSIMG' > "$last"
   const big = { env: { FAKE_BIG: '200000', FAKE_FIT: 'scale=1024:' } };
   const r9 = run(media('steps.png', PNG_IN), FF, 'steps.1568.jpg', big);
   eq('Cm-image-step-down', [r9.decision, r9.figure, r9.outputs.map((o) => [path.basename(o.path), o.bytes]), argv().trim().split('\n').map((l) => /scale=(\d+):/.exec(l)[1]), r9.text.split('\n')[0]],
-    ['compressed', 'view steps.png: 5 KB → 3 B (-100%) · 1024 px · jpeg', [['steps.1568.jpg', 3]], ['1568', '1280', '1024'], 'image png 4000×3000 → 1024×768 jpeg q60, metadata stripped (ffmpeg)']);
+    ['compressed', 'view steps.png: 5 KB → 3 B (-100%) · 1024 px · jpeg · ffmpeg', [['steps.1568.jpg', 3]], ['1568', '1280', '1024'], 'image png 4000×3000 → 1024×768 jpeg q60, metadata stripped (ffmpeg)']);
   const r9k = run(media('stuck.png', PNG_IN), FF, 'stuck.1568.jpg', { env: { FAKE_BIG: '200000', FAKE_FIT: 'never' } });
   eq('Cm-image-step-down-kept-over-cap', [r9k.decision, r9k.figure, r9k.outputs.map((o) => [path.basename(o.path), o.bytes]), argv().trim().split('\n').length],
-    ['compressed', 'view stuck.png: 5 KB → 195 KB (+3900%) · 640 px · jpeg', [['stuck.1568.jpg', 200000]], 5]);
+    ['compressed', 'view stuck.png: 5 KB → 195 KB (+3900%) · 640 px · jpeg · ffmpeg', [['stuck.1568.jpg', 200000]], 5]);
   const r9f = run(media('smallfat.png', Buffer.concat([PNG_IN, Buffer.alloc(200000, 7)])), FF, 'smallfat.1568.jpg');
   eq('Cm-image-fits-over-cap-copied', [r9f.decision, r9f.figure, r9f.outputs.map((o) => path.basename(o.path)), argv().includes('scale='), argv().includes('-q:v 4')],
-    ['compressed', 'view smallfat.png: 200 KB → 3 B (-100%) · 1000 px · jpeg', ['smallfat.1568.jpg'], false, true]);
+    ['compressed', 'view smallfat.png: 200 KB → 3 B (-100%) · 1000 px · jpeg · ffmpeg', ['smallfat.1568.jpg'], false, true]);
   check('Cm-image-on-white', / -vf split\[a\]\[b\];\[a\]drawbox=c=white@1:t=fill\[w\];\[w\]\[b\]overlay -frames:v 1 /.test(argv()), argv());
   check('Cm-image-read-once-line', r1.text.endsWith(`\nRead ${at('photo.1568.jpg')} once to see it`) && r1.text.split('\n').length === 2, r1.text);
   rmSync(at('photo.1568.jpg'));
@@ -1394,6 +1396,72 @@ printf 'SIPSIMG' > "$last"
   eq('Cm-not-media', [run(media('notes.txt', 'plain text'), FF, 'x').reason, run(media('pic.heic', Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic', 'latin1'), Buffer.alloc(64)])), FF, 'x').reason,
     run(media('empty.png', ''), FF, 'x').reason, run(at('missing.png'), FF, 'x').reason], ['not-media', 'not-media', 'unreadable', 'unreadable']);
 
+  // The JS backend (no sips, ffmpeg, magick or convert on PATH) on real PNGs built here; ImageMagick through a fake `magick`.
+  const zlib = require('node:zlib');
+  const CRC = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc32 = (b) => { let c = 0xffffffff; for (const x of b) c = CRC[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const td = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const n = Buffer.alloc(4); n.writeUInt32BE(data.length);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc32(td));
+    return Buffer.concat([n, td, c]);
+  };
+  // An 8-bit RGB PNG, filter 0, pixel (x, y) = rgbAt(x, y).
+  const makePng = (w, h, rgbAt, interlace = 0) => {
+    const ih = Buffer.alloc(13);
+    ih.writeUInt32BE(w, 0); ih.writeUInt32BE(h, 4); ih[8] = 8; ih[9] = 2; ih[12] = interlace;
+    const raw = Buffer.alloc(h * (w * 3 + 1));
+    for (let y = 0, o = 0; y < h; y++) { raw[o++] = 0; for (let x = 0; x < w; x++) { const [r, g, b] = rgbAt(x, y); raw[o++] = r; raw[o++] = g; raw[o++] = b; } }
+    return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ih), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+  };
+  let seed = 11;
+  const rnd = () => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return seed >>> 24; };
+  const NOISE = makePng(1000, 625, () => [rnd(), rnd(), rnd()]);
+  const sofOf = (file) => { const b = readFileSync(file); const i = b.indexOf(Buffer.from([0xff, 0xc0])); return [b.subarray(0, 2).toString('hex'), b.readUInt16BE(i + 7), b.readUInt16BE(i + 5)]; };
+  const rj = run(media('grad.png', makePng(2400, 1600, (x, y) => [(x * 255 / 2400) | 0, (y * 255 / 1600) | 0, 128])), '', 'grad.1568.jpg');
+  eq('Cm-js-image', [rj.decision, rj.backend, rj.outputs.map((o) => path.basename(o.path)), rj.bytesOut <= 150 * 1024, sofOf(at('grad.1568.jpg')), rj.scale, / · 1568 px · jpeg · js$/.test(rj.figure),
+    rj.text.split('\n')[0]], ['compressed', 'js', ['grad.1568.jpg'], true, ['ffd8', 1568, 1045], { w: 1568, h: 1045 }, true, 'image png 2400×1600 → 1568×1045 jpeg q60, metadata stripped (js)']);
+  const rjn = run(media('noise.png', NOISE), at('nowhere'), 'noise.1568.jpg', { opts: { maxBytes: 30000 } });
+  eq('Cm-js-step-down-kept-over-cap', [rjn.decision, rjn.backend, / · 640 px · jpeg · js$/.test(rjn.figure), rjn.bytesOut > 30000, sofOf(at('noise.1568.jpg')), rjn.scale], ['compressed', 'js', true, true, ['ffd8', 640, 400], { w: 640, h: 400 }]);
+  const rjd = run(media('late.png', NOISE), '', 'late.1568.jpg', { opts: { maxBytes: 1000, timeoutMs: 1 } });
+  eq('Cm-js-deadline-step-named', [rjd.decision, rjd.figure.split(' · ')[1], sofOf(at(path.basename(rjd.outputs[0].path)))[1], rjd.scale.w], ['compressed', '1000 px', 1000, 1000]);
+  const rjf = run(media('forced.png', makePng(1700, 10, (x) => [x & 255, 0, 0])), FF, 'forced.1568.jpg', { env: { SLIM_MEDIA_BACKEND: 'js' } });
+  eq('Cm-js-forced', [rjf.decision, rjf.backend, argv()], ['compressed', 'js', '']);
+  const lace = Buffer.from(makePng(2000, 2, () => [0, 0, 0], 1));
+  const tiny = run(media('tiny.png', makePng(20, 10, () => [9, 9, 9])), '', 'tiny.1568.jpg');
+  eq('Cm-js-limits', [run(media('lace.png', lace), '', 'lace.1568.jpg').reason, existsSync(at('lace.1568.jpg')), [tiny.decision, tiny.backend]],
+    ['png-interlaced', false, ['passthrough', 'js']]);
+  const JW = require(path.join(SCRIPTS, 'engines/codec/jpeg-encode.cjs')).encode({ w: 2000, h: 8, rgb: Buffer.alloc(2000 * 8 * 3, 90) }, 60);
+  const jpg = run(media('jwide.jpeg', JW), '', 'jwide.1568.jpg');
+  eq('Cm-js-jpeg', [jpg.decision, jpg.backend, sofOf(at('jwide.1568.jpg')), jpg.scale, / · 1568 px · jpeg · js$/.test(jpg.figure)], ['compressed', 'js', ['ffd8', 1568, 6], { w: 1568, h: 6 }, true]);
+  const exif6 = Buffer.from('ffe10022457869660000' + '4d4d002a00000008' + '0001' + '011200030000000100060000' + '00000000', 'hex');
+  const jt = run(media('jturn.jpeg', Buffer.concat([JW.subarray(0, 2), exif6, JW.subarray(2)])), '', 'jturn.1568.jpg');
+  eq('Cm-js-jpeg-exif-turned', [jt.decision, sofOf(at('jturn.1568.jpg')), jt.scale, jt.source], ['compressed', ['ffd8', 6, 1568], { w: 6, h: 1568 }, { w: 8, h: 2000 }]);
+  const jhuge = Buffer.from(JW);
+  const sof = jhuge.indexOf(Buffer.from([0xff, 0xc0]));
+  jhuge.writeUInt16BE(8000, sof + 5); jhuge.writeUInt16BE(8000, sof + 7);
+  const jb = run(media('jbig.jpeg', jhuge), '', 'jbig.1568.jpg');
+  eq('Cm-js-jpeg-refused', [jb.reason, jb.figure, existsSync(at('jbig.1568.jpg'))], ['jpeg-too-large', 'media: js cannot decode jbig.jpeg (jpeg-too-large)', false]);
+
+  const MAGICK = `printf '%s\\n' "$*" >> "$FAKE_LOG"
+for a; do last=$a; done
+[ "$last" = info: ] && { case "$1" in *turn*) printf '4000 3000 RightTop' ;; *) printf '4000 3000 TopLeft' ;; esac; exit 0; }
+o=; r=$last; while :; do case $r in *%%*) o="$o\${r%%\\%\\%*}%"; r=\${r#*\\%\\%} ;; *) break ;; esac; done
+printf 'MAGICKIMG' > "$o$r"
+`;
+  const MG = bin(path.join(T, 'mg'), { magick: MAGICK });
+  const CV = bin(path.join(T, 'cv'), { convert: MAGICK });
+  const rm1 = run(media('mshot.png', PNG_IN), MG, 'mshot.1568.jpg');
+  eq('Cm-magick-image', [rm1.decision, rm1.backend, rm1.figure, readFileSync(at('mshot.1568.jpg'), 'utf8'), argv().trim().split('\n'), rm1.text.split('\n')[0]],
+    ['compressed', 'magick', 'view mshot.png: 5 KB → 9 B (-100%) · 1568 px · jpeg · magick', 'MAGICKIMG',
+      [`${at('mshot.png')}[0] -format %w %h %[orientation] info:`, `${at('mshot.png')}[0] -background white -alpha remove -alpha off -auto-orient -resize 1568x1568> -strip -quality 60 ${at('mshot.1568.jpg')}`],
+      'image png 4000×3000 → 1568×1176 jpeg q60, metadata stripped (magick)']);
+  const rmp = run(media('report%d.png', PNG_IN), MG, 'report%d.1568.jpg');
+  eq('Cm-magick-percent-name', [rmp.decision, argv().trim().split('\n')[1].split(' ').pop(), existsSync(at('report%d.1568.jpg')), existsSync(at('report0.1568.jpg'))],
+    ['compressed', at('report%%d.1568.jpg'), true, false]);
+  const rm2 = run(media('cturn.png', PNG_IN), CV, 'cturn.1568.jpg');
+  eq('Cm-magick-convert-turned', [rm2.decision, rm2.backend, rm2.text.split('\n')[0]], ['compressed', 'magick', 'image png 3000×4000 → 1176×1568 jpeg q60, metadata stripped (magick)']);
+
   // Ci — an MCP image block over the cap through the core: saved, the backend's JPEG in its place, a line naming the file.
   const NODE = bin(path.join(T, 'node-only'), {});
   symlinkSync(process.execPath, path.join(NODE, 'node'));
@@ -1405,13 +1473,18 @@ printf 'SIPSIMG' > "$last"
   const ciSaved = /saved at (\S+)$/.exec(ciLine || '');
   eq('Ci-image-shrunk', [ci.decision, ci.record.engine, ci.result && ci.result.length, ci.result && ci.result[0], ci.result && ci.result[1]],
     ['compressed', 'media', 3, shot[0], { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: Buffer.from('IMG').toString('base64') } }]);
-  check('Ci-image-line', /^slim: image 267 KB → 4 B \(-100%\) · 1568 px · jpeg — shown at 1568×1176; ×2\.55 maps a coordinate to the 4000×3000 image the tool returned, saved at \S+\/slim-mcp-[0-9a-f]{16}\.png$/.test(ciLine || ''), ciLine);
+  check('Ci-image-line', /^slim: image 267 KB → 4 B \(-100%\) · 1568 px · jpeg · ffmpeg — shown at 1568×1176; ×2\.55 maps a coordinate to the 4000×3000 image the tool returned, saved at \S+\/slim-mcp-[0-9a-f]{16}\.png$/.test(ciLine || ''), ciLine);
   check('Ci-image-saved', !!ciSaved && readFileSync(ciSaved[1]).equals(BIG_PNG) && ci.record.spill === ciSaved[1] && ci.record.bytes_in > 266000 && ci.record.bytes_out < 1000, JSON.stringify(ci.record));
   const mcpShape = { content: [{ type: 'image', data: BIG_PNG.toString('base64'), mimeType: 'image/png' }], isError: false };
   const cs = call('Ci-mcp-shape', TI, envelope(TI, mcpShape), { PATH: `${FF}:${NODE}`, FAKE_LOG: LOGF });
   eq('Ci-mcp-shape', [cs.decision, cs.result && cs.result.content[0].mimeType, cs.result && cs.result.content[0].data, cs.result && cs.result.isError], ['compressed', 'image/jpeg', 'SU1H', false]);
-  const cn = call('Ci-no-backend', TI, envelope(TI, shot), { PATH: NODE });
+  const cn = call('Ci-no-backend', TI, envelope(TI, shot), { PATH: NODE, SLIM_MEDIA_BACKEND: 'magick' });
   eq('Ci-no-backend', [cn.decision, cn.reason, cn.record.bytes_in, 'result' in cn], ['passthrough', 'image-no-backend', bytes(JSON.stringify(shot)), false]);
+  const JS_PNG = makePng(300, 200, () => [rnd(), rnd(), rnd()]);
+  const cj = call('Ci-js', TI, envelope(TI, [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: JS_PNG.toString('base64') } }]), { PATH: NODE });
+  const cjLine = cj.result && cj.result[1] && cj.result[1].text;
+  eq('Ci-js', [cj.decision, cj.result && cj.result[0].source.media_type, Buffer.from((cj.result && cj.result[0].source.data) || '', 'base64').subarray(0, 2).toString('hex'),
+    / · 300 px · jpeg · js — shown at 300×200; ×1 maps a coordinate to the 300×200 image/.test(cjLine || '')], ['compressed', 'image/jpeg', 'ffd8', true]);
   const under = [shot[0], { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG_IN.toString('base64') } }, { type: 'text', text: 'x'.repeat(5000) }];
   const cu = call('Ci-under-cap', TI, envelope(TI, under), { PATH: `${FF}:${NODE}`, FAKE_LOG: LOGF });
   eq('Ci-under-cap', [cu.decision, cu.reason], ['passthrough', 'non-json']);
@@ -1601,8 +1674,11 @@ printf 'SIPSIMG' > "$last"
   };
   const viaLink = path.join(T, 'linked', 'shot.png');
   const m1 = viewMedia({ path: viaLink, allowed_out: path.join(T, 'linked', 'shot.1568.jpg') }, fake);
-  eq('Cv14-image', [m1.decision, m1.engine, m1.figure, m1.frames, readFileSync(path.join(media, 'shot.1568.jpg'), 'utf8')], ['compressed', 'media', 'view shot.png: 1000 B → 3 B (-100%) · 1568 px · jpeg', 1, 'IMG']);
-  check('Cv14-text-lists-output', m1.text.endsWith(`\nRead ${path.join(media, 'shot.1568.jpg')} once to see it`), m1.text);
+  eq('Cv14-image', [m1.decision, m1.engine, m1.figure, m1.frames, readFileSync(path.join(media, 'shot.1568.jpg'), 'utf8')], ['compressed', 'media', 'view shot.png: 1000 B → 3 B (-100%) · 1568 px · jpeg · ffmpeg', 1, 'IMG']);
+  check('Cv14-text-lists-output', m1.text.endsWith(`\nRead ${path.join(T, 'linked', 'shot.1568.jpg')} once to see it`), m1.text);
+  // A linked folder on the way: every path as given, the physical folder once in a note.
+  eq('Cv14-symlink-note', [m1.text.split('\n')[0], m1.text.includes(`${media}/`), m1.outputs.map((o) => o.path)],
+    [`note=out_symlink out=${path.join(T, 'linked')} physical=${media}`, false, [path.join(T, 'linked', 'shot.1568.jpg')]]);
   writeFileSync(path.join(media, 'big.1568.jpg'), Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(996, 1)]));
   const m2 = viewMedia({ path: path.join(media, 'big.1568.jpg'), allowed_out: path.join(media, 'big.1568.jpg') }, fake);
   const fits = path.join(T, 'fitsbin');
@@ -1612,6 +1688,7 @@ printf 'SIPSIMG' > "$last"
   const m3 = viewMedia({ path: path.join(media, 'big.1568.jpg'), allowed_out: path.join(media, 'big.1568.jpg') }, fits);
   eq('Cv14-copy-passthrough', [m3.decision, m3.engine, m3.figure, m3.text.split('\n').pop(), (m3.outputs || []).map((o) => o.path)],
     ['passthrough', 'media', 'view big.1568.jpg: 1000 B · 1000 px — fits, no copy', `Read ${path.join(media, 'big.1568.jpg')}`, [path.join(media, 'big.1568.jpg')]]);
+  check('Cv14-no-symlink-no-note', !m3.text.includes('note=out_symlink'), m3.text);
   eq('Cv14-copy-unfit-not-overwritten', [m2.decision, m2.reason, m2.engine, readFileSync(path.join(media, 'big.1568.jpg')).length], ['refused', 'copy-unfit', 'media', 1000]);
   eq('Cv14-refusals', [
     viewMedia({ path: viaLink }, fake).reason,
@@ -1619,7 +1696,7 @@ printf 'SIPSIMG' > "$last"
     viewMedia({ path: viaLink, allowed_out: path.join(media, 'shot.1568.jpg') }, path.join(T, 'nobin')).figure,
     viewMedia({ path: viaLink, jq: '.a' }, fake).reason,
     viewMedia({ path: viaLink, out: path.join(tasks, 'x.md') }, fake).reason,
-  ], ['write-denied', 'write-denied', 'media: no backend (install ffmpeg)', 'media-args', 'media-args']);
+  ], ['write-denied', 'write-denied', 'media: js could not measure shot.png', 'media-args', 'media-args']);
   // A media request whose bytes are text is refused, never read as text: no Read probe ruled on it.
   writeFileSync(path.join(T, 'creds'), 'SECRET=synthetic-value\n');
   writeFileSync(path.join(proj, 'notes.mp4'), 'SECRET=synthetic-value\n');
@@ -1664,7 +1741,7 @@ printf 'SIPSIMG' > "$last"
     [phView(input('args.png', PNG), 'args.1568.jpg', phBin, { req: { jq: '.a' } }).reason, existsSync(at('args.1568.jpg'))],
     [phView(input('kind.png', MP4), 'kind.1568.jpg', phBin).reason, existsSync(at('kind.1568.jpg'))],
     [phView(at('gone.mp4'), 'gone.frames/001.jpg', phBin).reason, existsSync(at('gone.frames'))],
-  ], [['no-backend', false], ['media-args', false], ['write-denied', false], ['expand-missing', false]]);
+  ], [['no-probe', false], ['media-args', false], ['write-denied', false], ['expand-missing', false]]);
   const p4 = phView(input('clip.mp4', MP4), 'clip.frames/001.jpg', phBin);
   eq('Cv16-placeholder-frames', [p4.decision, p4.frames > 0, readFileSync(at('clip.frames/001.jpg'), 'utf8'), readdirSync(at('clip.frames')).includes('.slim-frames')], ['compressed', true, 'FRAME', true]);
   const p5 = phView(input('fclip.mp4', MP4), 'fclip.frames/001.jpg', phFail);

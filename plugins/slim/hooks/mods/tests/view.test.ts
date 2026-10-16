@@ -290,6 +290,15 @@ describe('V5 media', () => {
     expect(text).toBe(`${figure}\nimage png 1000×800, not re-encoded (ffmpeg)\nRead /repo/a/small.png`)
   })
 
+  test('a linked folder: the core gets the path as given though the host Read resolves it, and its note follows the figure', async ($, on) => {
+    const figure = 'view big.png: 570 KB → 128 KB (-77%) · 1200 px · jpeg'
+    const body = 'note=out_symlink out=/wt/.claude/tasks/t physical=/main/.claude/tasks/t\nimage png 1200×834 → 1200×834 (no resize) jpeg q60, metadata stripped (ffmpeg)\nRead /wt/.claude/tasks/t/big.1568.jpg once to see it'
+    const w = world(on, { below: e => (e.tool === 'Read' ? { result: { type: 'text', file: { filePath: '/main/.claude/tasks/t/big.png' } }, text: 'x' } : undefined), reply: { v: 1, decision: 'compressed', engine: 'media', figure, text: body, bytesIn: 583680, bytesOut: 131072, stages: [], frames: 1 } })
+    const text = await view($, { path: '/wt/.claude/tasks/t/big.png' })
+    expect(w.views[0].stdin).toMatchObject({ path: '/wt/.claude/tasks/t/big.png', allowed_out: '/wt/.claude/tasks/t/big.1568.jpg' })
+    expect(text).toBe(`${figure}\n${body}`)
+  })
+
   test('an image that is already a copy: no Write check and no question, the input is its own allowed_out', async ($, on) => {
     const figure = 'view shot.1568.jpg: 900 B · 1568 px — fits, no copy'
     const w = world(on, { write: 'ask', reply: { v: 1, decision: 'passthrough', engine: 'media', figure, text: 'image jpeg 1568×1176, not re-encoded (ffmpeg)\nRead /repo/a/shot.1568.jpg', bytesIn: 900, bytesOut: 900, stages: [], frames: 1 } })

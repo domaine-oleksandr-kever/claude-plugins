@@ -330,7 +330,7 @@ function shrinkImage(b, data, cap) {
   if (out.length >= data.length) return { reason: 'no-gain', saved: saved.path };
   const block = b.source ? { ...b, source: { ...b.source, media_type: 'image/jpeg', data: out } } : { ...b, data: out, mimeType: 'image/jpeg' };
   const longEdge = Math.max(n.scale.w, n.scale.h);
-  const line = `slim: image ${mediaE.shrinkFigure(data.length, out.length, longEdge)} — shown at ${n.scale.w}×${n.scale.h}; ` +
+  const line = `slim: image ${mediaE.shrinkFigure(data.length, out.length, longEdge, n.backend)} — shown at ${n.scale.w}×${n.scale.h}; ` +
     `×${ratio(n.source.w, n.scale.w)} maps a coordinate to the ${n.source.w}×${n.source.h} image the tool returned, saved at ${saved.path}`;
   return { blocks: [block, { type: 'text', text: line }], saved: saved.path };
 }

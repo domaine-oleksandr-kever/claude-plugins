@@ -151,9 +151,15 @@ function view(input, opts) {
       // The check ruled on the path as given; a linked folder on the way (macOS /tmp) lands in the same place.
       const allowedOut = typeof input.allowed_out === 'string' ? landing(path.resolve(input.cwd || process.cwd(), input.allowed_out)) : undefined;
       const m = mediaD.normalize(file, { allowedOut, env: process.env, reuse: input.reuse === true });
-      const x = { engine: 'media', bytesIn: m.bytesIn, bytesOut: m.bytesOut, frames: m.frames, outputs: m.outputs };
-      if (m.decision === 'refused') return refuse(m.reason, m.figure, x);
-      return { v: 1, decision: m.decision, ...x, figure: m.figure, text: m.text, stages: [] };
+      // Paths go back under the folder as given (a worktree's linked .claude/tasks), the physical one in a note.
+      const given = path.dirname(path.resolve(input.cwd || process.cwd(), input.path));
+      const physical = path.dirname(file);
+      const alias = given !== physical && real(given) === physical;
+      const shown = (s) => (alias ? s.split(`${physical}/`).join(`${given}/`) : s);
+      const x = { engine: 'media', bytesIn: m.bytesIn, bytesOut: m.bytesOut, frames: m.frames, outputs: m.outputs.map((q) => ({ ...q, path: shown(q.path) })) };
+      if (m.decision === 'refused') return refuse(m.reason, shown(m.figure), x);
+      const note = alias ? `note=out_symlink out=${given} physical=${physical}\n` : '';
+      return { v: 1, decision: m.decision, ...x, figure: m.figure, text: note + shown(m.text), stages: [] };
     }
     const f = spill.readLocal(file);
     if (!f.file) return refuse(f.why, `view: cannot read ${input.path} (${f.why})`);
