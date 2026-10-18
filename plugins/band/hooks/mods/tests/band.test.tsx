@@ -488,6 +488,43 @@ describe('band', () => {
       expect(await modelButtons(ui)).toHaveLength(0)
     })
 
+    test(`${surface}: the picker leaves out a family the login cannot use, unless it is the current one`, async ($, on) => {
+      const HOME = '/Users/dev'
+      const { w } = world(on, {}, { HOME, BAND_EVENT_LOG: '0' })
+      w.auth = { handle: 'h1', kind: 'bearer' }
+      w.model = 'claude-opus-5-5'
+      const team = { oauthAccount: { organizationType: 'claude_team', hasExtraUsageEnabled: true }, modelAccessCache: [] }
+      const gated = { ...team, additionalModelOptionsCache: [{ value: 'claude-fable-5-1[1m]', label: 'Fable' }], cachedExtraUsageDisabledReason: 'out_of_credits' }
+      w.files[`${HOME}/.claude.json`] = JSON.stringify(gated)
+      await start($, surface)
+      const ui = await mount($, surface)
+      await mainTurn($)
+      if (isDesktop) return
+      await $.ui.focus({ component: 'AbovePrompt', requestId: 'band', origin: { kind: 'person' }, element: 'model' } as never)
+      await ui.press({ key: 'model' })
+      expect((await modelButtons(ui)).map(b => [b.props.label, b.props.hotkey])).toEqual([
+        ['opus', 'o'],
+        ['sonnet', 's'],
+        ['haiku', 'h'],
+      ])
+      await ui.press({ key: 'model-close' })
+      // On Fable itself the row keeps it, marked current.
+      w.model = 'claude-fable-5-1'
+      await measure($, { window: 200_000, percent: 11 })
+      await ui.press({ key: 'model' })
+      const onFable = await modelButtons(ui)
+      expect(onFable.map(b => b.props.label)).toEqual(['fable', 'opus', 'sonnet', 'haiku'])
+      expect(onFable[0].props.dimColor).toBeUndefined()
+      await ui.press({ key: 'model-close' })
+      // The personal record carries no gating keys: every family is listed.
+      w.files[`${HOME}/.claude.json`] = JSON.stringify({ oauthAccount: { organizationType: 'claude_max' } })
+      w.model = 'claude-opus-5-5'
+      await start($, surface)
+      await measure($, { window: 200_000, percent: 11 })
+      await ui.press({ key: 'model' })
+      expect((await modelButtons(ui)).map(b => b.props.label)).toEqual(['fable', 'opus', 'sonnet', 'haiku'])
+    })
+
     test(`${surface}: the picker's close button folds it without a /model run`, async ($, on) => {
       const { w } = world(on)
       const runs: string[] = []

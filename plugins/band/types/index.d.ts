@@ -18,7 +18,9 @@ export type BandCache = {
 /**
  * The claude.ai login the session runs on. `label`: `work` for a Team or Enterprise organization, `personal` for any
  * other plan, null when the plan is unknown (no segment). `plan` is the raw organization type (`claude_team`);
- * `configDir` the config directory as shown (`~/.claude`); `source` where the label came from.
+ * `configDir` the config directory as shown (`~/.claude`); `source` where the label came from. `hiddenModels`: the
+ * model-picker families the login cannot use (credit-gated while extra usage is unusable), [] when none or unknown;
+ * `hiddenReason`: why, one word (`out_of_credits`, `extra_usage_off`), null when nothing is hidden.
  */
 export type BandAccount = {
   label: 'work' | 'personal' | null
@@ -28,6 +30,8 @@ export type BandAccount = {
   role: string | null
   configDir: string | null
   source: 'login record' | 'profile endpoint' | 'BAND_ACCOUNT' | null
+  hiddenModels: string[]
+  hiddenReason: string | null
 }
 
 export type BandEventKind = 'session' | 'model' | 'compact' | 'rate'

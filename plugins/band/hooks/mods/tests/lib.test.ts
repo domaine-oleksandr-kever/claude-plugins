@@ -5,6 +5,7 @@ import {
   accountCard,
   accountLabel,
   accountMode,
+  creditGate,
   groupResets,
   loginAccount,
   loginPaths,
@@ -361,6 +362,27 @@ describe('layout', () => {
     expect(pinned[2]).toEqual({ value: 'opus', label: 'opus', current: false })
     // A family outside the list leads the same way.
     expect(modelOptions('claude-zephyr-1-0')[0]).toEqual({ value: 'claude-zephyr-1-0', label: 'zephyr-1-0', current: true, hotkey: 'z' })
+    // A hidden family is left out; letters are dealt after the filter, so each keeps its own.
+    expect(modelOptions('claude-opus-5-5', ['fable']).map(o => [o.label, o.hotkey, o.current])).toEqual([
+      ['opus', 'o', true],
+      ['sonnet', 's', false],
+      ['haiku', 'h', false],
+    ])
+    // The session's own family stays listed, marked current, even when hidden.
+    expect(modelOptions('claude-fable-5-1', ['fable']).map(o => [o.label, o.current])).toEqual([
+      ['fable', true],
+      ['opus', false],
+      ['sonnet', false],
+      ['haiku', false],
+    ])
+    // A pinned id of a hidden family leads; the alias goes, so the id keeps `f` and nothing shadows it.
+    expect(modelOptions('claude-fable-5-1[1m]', ['fable']).map(o => [o.label, o.hotkey])).toEqual([
+      ['fable-5-1[1m]', 'f'],
+      ['opus', 'o'],
+      ['sonnet', 's'],
+      ['haiku', 'h'],
+    ])
+    expect(modelOptions(null, ['fable', 'opus']).map(o => o.label)).toEqual(['sonnet', 'haiku'])
     expect(splitLabel('cache 42m')).toEqual(['cache', '42m'])
     expect(splitLabel('ELC-1591 3/5 ▶ Preview')).toEqual(['ELC-1591', '3/5 ▶ Preview'])
     expect(splitLabel('slim-mods')).toEqual(['slim-mods', ''])
@@ -640,6 +662,30 @@ describe('account', () => {
     expect([...(long?.org ?? '')]).toHaveLength(120)
   })
 
+  test('creditGate: the families of additionalModelOptionsCache, hidden while extra usage is unusable; anything unknown hides nothing', () => {
+    const GATED = [{ value: 'claude-fable-5-1[1m]', label: 'Fable', description: 'x' }]
+    const team = { additionalModelOptionsCache: GATED, cachedExtraUsageDisabledReason: 'out_of_credits', oauthAccount: { organizationType: 'claude_team', hasExtraUsageEnabled: true }, modelAccessCache: [] }
+    expect(creditGate(team)).toEqual({ hiddenModels: ['fable'], hiddenReason: 'out_of_credits' })
+    expect(creditGate({ additionalModelOptionsCache: GATED, oauthAccount: { hasExtraUsageEnabled: false } })).toEqual({ hiddenModels: ['fable'], hiddenReason: 'extra_usage_off' })
+    // Ids without a [1m], aliases, several families: MODEL_ALIASES order, once each.
+    expect(
+      creditGate({ additionalModelOptionsCache: [{ value: 'opus' }, { value: 'claude-fable-5-1' }, { value: 'claude-fable-5-1[1m]' }], cachedExtraUsageDisabledReason: 'out_of_credits' }),
+    ).toEqual({ hiddenModels: ['fable', 'opus'], hiddenReason: 'out_of_credits' })
+    const none = { hiddenModels: [], hiddenReason: null }
+    // Extra usage usable or unknown: nothing hidden.
+    expect(creditGate({ ...team, cachedExtraUsageDisabledReason: null })).toEqual(none)
+    expect(creditGate({ ...team, cachedExtraUsageDisabledReason: '' })).toEqual(none)
+    expect(creditGate({ additionalModelOptionsCache: GATED })).toEqual(none)
+    expect(creditGate({ additionalModelOptionsCache: GATED, cachedExtraUsageDisabledReason: 7, oauthAccount: { hasExtraUsageEnabled: 'false' } })).toEqual(none)
+    // No gated model, a family outside the aliases, non-string values, a cache that is not a list.
+    expect(creditGate({ ...team, additionalModelOptionsCache: [] })).toEqual(none)
+    expect(creditGate({ ...team, additionalModelOptionsCache: [{ value: 'claude-zephyr-1-0' }] })).toEqual(none)
+    expect(creditGate({ ...team, additionalModelOptionsCache: [{ value: 5 }, { label: 'Fable' }, null, 'claude-fable-5-1'] })).toEqual(none)
+    expect(creditGate({ ...team, additionalModelOptionsCache: { value: 'claude-fable-5-1' } })).toEqual(none)
+    // The personal record carries none of these keys.
+    for (const bad of [undefined, null, 'x', [], {}, RECORD({ organizationType: 'claude_max' })]) expect(creditGate(bad)).toEqual(none)
+  })
+
   test('profileAccount: account.email and organization.organization_type / name; neither plan nor email → null', () => {
     expect(profileAccount({ account: { email: 'a@b.co', uuid: 'u' }, organization: { organization_type: 'claude_enterprise', name: 'Acme' } })).toEqual({ plan: 'claude_enterprise', email: 'a@b.co', org: 'Acme', role: null })
     expect(profileAccount({ account: { email: 'a@b.co' } })).toEqual({ plan: null, email: 'a@b.co', org: null, role: null })
@@ -672,17 +718,23 @@ describe('account', () => {
     expect(planName('claude_team')).toBe('Claude Team')
     expect(planName('free')).toBe('Free')
     expect(
-      accountCard({ label: 'work', plan: 'claude_team', email: 'a@b.co', org: 'Domaine Worldwide (2)', role: 'user', configDir: '~/.claude-cloudcon', source: 'login record' }),
+      accountCard({ label: 'work', plan: 'claude_team', email: 'a@b.co', org: 'Domaine Worldwide (2)', role: 'user', configDir: '~/.claude-cloudcon', source: 'login record', hiddenModels: [], hiddenReason: null }),
     ).toBe('account: work (Claude Team) · email: a@b.co · org: Domaine Worldwide (2) · role: user · config: ~/.claude-cloudcon · source: login record')
-    expect(accountCard({ label: 'personal', plan: 'claude_max', email: null, org: null, role: null, configDir: '~/.claude', source: 'profile endpoint' })).toBe(
+    expect(accountCard({ label: 'personal', plan: 'claude_max', email: null, org: null, role: null, configDir: '~/.claude', source: 'profile endpoint', hiddenModels: [], hiddenReason: null })).toBe(
       'account: personal (Claude Max) · config: ~/.claude · source: profile endpoint',
     )
-    expect(accountCard({ label: 'work', plan: null, email: null, org: null, role: null, configDir: null, source: 'BAND_ACCOUNT' })).toBe('account: work (forced by BAND_ACCOUNT) · source: BAND_ACCOUNT')
+    expect(accountCard({ label: 'work', plan: null, email: null, org: null, role: null, configDir: null, source: 'BAND_ACCOUNT', hiddenModels: [], hiddenReason: null })).toBe(
+      'account: work (forced by BAND_ACCOUNT) · source: BAND_ACCOUNT',
+    )
+    // A hidden family adds one models part.
+    const gated = { label: 'work' as const, plan: 'claude_team', email: null, org: null, role: null, configDir: null, source: 'login record' as const, hiddenModels: ['fable'], hiddenReason: 'out_of_credits' }
+    expect(accountCard(gated)).toBe('account: work (Claude Team) · models: opus, sonnet, haiku (fable needs credits) · source: login record')
+    expect(accountCard({ ...gated, hiddenModels: ['fable', 'opus'] })).toBe('account: work (Claude Team) · models: sonnet, haiku (fable, opus need credits) · source: login record')
   })
 
   test('bandSegs takes the atom\'s label; absent or null → no segment', () => {
     const base = { usage: USAGE_INIT, model: null, cache: CACHE_INIT, nowMs: 0, isWorking: false, digest: null, hasChecklist: false, hasEvents: false }
-    const work = { label: 'work' as const, plan: 'claude_team', email: null, org: null, role: null, configDir: null, source: 'login record' as const }
+    const work = { label: 'work' as const, plan: 'claude_team', email: null, org: null, role: null, configDir: null, source: 'login record' as const, hiddenModels: [], hiddenReason: null }
     expect(rowText(bandSegs({ ...base, account: work }))).toStartWith('work │ cache — │ ctx — │')
     expect(rowText(bandSegs({ ...base, account: { ...work, label: null } }))).toStartWith('cache — │')
     expect(rowText(bandSegs({ ...base, account: null }))).toStartWith('cache — │')

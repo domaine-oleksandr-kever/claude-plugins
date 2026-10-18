@@ -459,14 +459,16 @@ export type ModelOption = { value: string; label: string; current: boolean; hotk
 
 /**
  * The picker's options: the aliases, the one of the session's family marked current; the session's own id leads
- * them when no alias stands for it (a pinned `[1m]` id, a family outside the list). Each takes its label's first
- * letter as hotkey when it is one and still free (`f`, `o`, `s`, `h`).
+ * them when no alias stands for it (a pinned `[1m]` id, a family outside the list). A `hidden` family is left out
+ * unless it is the current one. Each takes its label's first letter as hotkey when it is one and still free
+ * (`f`, `o`, `s`, `h`).
  */
-export function modelOptions(current: string | null): ModelOption[] {
+export function modelOptions(current: string | null, hidden: readonly string[] = []): ModelOption[] {
   const aliased = current !== null && !/\[/.test(current) && MODEL_ALIASES.includes(modelFamily(current) as (typeof MODEL_ALIASES)[number])
   const own: ModelOption[] = current !== null && !aliased ? [{ value: current, label: shortModel(current) as string, current: true }] : []
+  const aliases = MODEL_ALIASES.map(a => ({ value: a, label: a, current: aliased && modelFamily(current as string) === a })).filter(o => o.current || !hidden.includes(o.value))
   const taken = new Set<string>()
-  return [...own, ...MODEL_ALIASES.map(a => ({ value: a, label: a, current: aliased && modelFamily(current as string) === a }))].map(o => {
+  return [...own, ...aliases].map(o => {
     const letter = o.label[0]
     if (!/^[a-z]$/.test(letter) || taken.has(letter)) return o
     taken.add(letter)
@@ -571,6 +573,26 @@ export function loginAccount(json: unknown): AccountFacts | null {
   return { plan: fact(a.organizationType), email: fact(a.emailAddress), org: fact(a.organizationName), role: fact(a.organizationRole) }
 }
 
+/** The picker families a login cannot use: `hiddenModels` in MODEL_ALIASES order, `hiddenReason` why (null when none is hidden). */
+export type CreditGate = Pick<BandAccount, 'hiddenModels' | 'hiddenReason'>
+
+/**
+ * The login record's credit-gated families: those of `additionalModelOptionsCache[].value` (a trailing `[1m]` dropped),
+ * hidden while extra usage is unusable: `cachedExtraUsageDisabledReason` is a non-empty string (it is the reason), or
+ * `oauthAccount.hasExtraUsageEnabled` is false (`extra_usage_off`). Missing or malformed keys hide nothing.
+ */
+export function creditGate(json: unknown): CreditGate {
+  const none: CreditGate = { hiddenModels: [], hiddenReason: null }
+  if (!isRecord(json)) return none
+  const reason = fact(json.cachedExtraUsageDisabledReason) ?? (isRecord(json.oauthAccount) && json.oauthAccount.hasExtraUsageEnabled === false ? 'extra_usage_off' : null)
+  if (reason === null || !Array.isArray(json.additionalModelOptionsCache)) return none
+  const gated = new Set(
+    json.additionalModelOptionsCache.flatMap(o => (isRecord(o) && typeof o.value === 'string' ? [modelFamily(o.value.replace(/\[1m\]$/, ''))] : [])),
+  )
+  const hiddenModels = MODEL_ALIASES.filter(a => gated.has(a))
+  return hiddenModels.length ? { hiddenModels, hiddenReason: reason } : none
+}
+
 /** The OAuth profile endpoint's body (`account.email`, `organization.organization_type` / `name`); null when it names neither plan nor email. */
 export function profileAccount(json: unknown): AccountFacts | null {
   if (!isRecord(json)) return null
@@ -623,14 +645,22 @@ export function planName(plan: string): string {
     .join(' ')
 }
 
-/** `account: work (Claude Team) · email: … · org: … · role: … · config: ~/.claude-x · source: login record`. */
+/**
+ * `account: work (Claude Team) · email: … · org: … · role: … · models: opus, sonnet, haiku (fable needs credits) ·
+ * config: ~/.claude-x · source: login record`; `models` only while a family is hidden.
+ */
 export function accountCard(a: BandAccount): string {
   const why = a.source === 'BAND_ACCOUNT' ? 'forced by BAND_ACCOUNT' : a.plan !== null ? planName(a.plan) : null
+  const hidden = a.hiddenModels
+  const models = hidden.length
+    ? `models: ${MODEL_ALIASES.filter(m => !hidden.includes(m)).join(', ')} (${hidden.join(', ')} ${hidden.length > 1 ? 'need' : 'needs'} credits)`
+    : null
   return [
     `account: ${a.label ?? 'none'}${why ? ` (${why})` : ''}`,
     ...(a.email !== null ? [`email: ${a.email}`] : []),
     ...(a.org !== null ? [`org: ${a.org}`] : []),
     ...(a.role !== null ? [`role: ${a.role}`] : []),
+    ...(models !== null ? [models] : []),
     ...(a.configDir !== null ? [`config: ${a.configDir}`] : []),
     ...(a.source !== null ? [`source: ${a.source}`] : []),
   ].join(' · ')

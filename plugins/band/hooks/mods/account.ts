@@ -1,10 +1,11 @@
 // band.account writer: which claude.ai login the session runs on, read from the login record the host writes
-// (`.claude.json` under CLAUDE_CONFIG_DIR, else HOME), else once per process from the OAuth profile endpoint.
-// BAND_ACCOUNT=0 reads nothing; `work` / `personal` forces the label. Nothing here draws; the band reads the atom.
+// (`.claude.json` under CLAUDE_CONFIG_DIR, else HOME), else once per process from the OAuth profile endpoint, and
+// the model families that record says the login cannot use. BAND_ACCOUNT=0 reads nothing; `work` / `personal`
+// forces the label and still reads the record for those families. Nothing here draws; the band reads the atom.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Timer } from 'claude-code'
 import type { BandAccount } from '../../types'
-import { accountLabel, accountMode, loginAccount, loginPaths, profileAccount } from './lib.ts'
+import { accountLabel, accountMode, creditGate, loginAccount, loginPaths, profileAccount } from './lib.ts'
 import type { AccountFacts, AccountMode } from './lib.ts'
 
 const account = atom({ plugin: 'band', key: 'account' } as const, null)
@@ -61,15 +62,31 @@ async function askProfile($: $, handle: string): Promise<void> {
   if (profile !== null) await maybeRead($)
 }
 
+/** The login record, `none` (the atom without a login) carrying its credit gate, and why it names no login. */
+async function readRecord($: $) {
+  const where = loginPaths(await $.env.get('HOME'), await $.env.get('CLAUDE_CONFIG_DIR'))
+  let record: unknown
+  let why = 'no login record path'
+  if (where.file !== null) {
+    try {
+      record = JSON.parse(await $.fs.read(where.file))
+      why = 'no oauthAccount'
+    } catch (err) {
+      why = oneLine(err)
+    }
+  }
+  const none = { plan: null, email: null, org: null, role: null, configDir: where.configDir, ...creditGate(record) }
+  return { record, none, why }
+}
+
 /** The login as the record (else the profile endpoint) reports it; sets `attempt`. */
 async function resolve($: $, at: number): Promise<BandAccount | null> {
   if (mode === 'off') {
     attempt = { at, source: 'none', error: 'BAND_ACCOUNT=0' }
     return null
   }
-  const where = loginPaths(await $.env.get('HOME'), await $.env.get('CLAUDE_CONFIG_DIR'))
-  const none = { plan: null, email: null, org: null, role: null, configDir: where.configDir }
   if (mode !== 'on') {
+    const { none } = await readRecord($)
     attempt = { at, source: 'BAND_ACCOUNT' }
     return { ...none, label: mode, source: 'BAND_ACCOUNT' }
   }
@@ -78,27 +95,19 @@ async function resolve($: $, at: number): Promise<BandAccount | null> {
     attempt = { at, source: 'none', error: auth ? 'api-key session' : 'no claude.ai login' }
     return null
   }
-  let facts: AccountFacts | null = null
-  let why = 'no login record path'
-  if (where.file !== null) {
-    try {
-      facts = loginAccount(JSON.parse(await $.fs.read(where.file)))
-      why = 'no oauthAccount'
-    } catch (err) {
-      why = oneLine(err)
-    }
-  }
+  const { record, none, why } = await readRecord($)
+  let facts: AccountFacts | null = loginAccount(record)
   let source: BandAccount['source'] = 'login record'
   if (facts === null) {
     if (profile === undefined) void askProfile($, auth.handle)
     facts = profile ?? null
     source = 'profile endpoint'
-    why = `${why}; profile: ${profileNote}`
   }
   const label = facts === null ? null : accountLabel(facts.plan)
   if (facts === null || label === null) {
-    attempt = { at, source: 'none', error: facts === null ? why : 'no plan' }
-    return null
+    attempt = { at, source: 'none', error: facts === null ? `${why}; profile: ${profileNote}` : 'no plan' }
+    // No segment, but the record's gate still holds for the picker.
+    return none.hiddenModels.length ? { ...none, label: null, source: null } : null
   }
   attempt = { at, source }
   return { ...none, ...facts, label, source }

@@ -32,6 +32,8 @@ describe('band.account from the login record', () => {
         role: 'user',
         configDir: '~/.claude',
         source: 'login record',
+        hiddenModels: [],
+        hiddenReason: null,
       })
       expect(w.profileFetches).toEqual([])
     })
@@ -60,15 +62,89 @@ describe('band.account from the login record', () => {
     ['no claude.ai login', null],
     ['an API-key session', { handle: 'h2', kind: 'api-key' as const }],
   ] as const) {
-    test(`${name} → no segment even with a login record, and no request`, async ($, on) => {
-      const { w } = world(on, {}, ENV)
+    test(`${name} → no segment, the login record never read, and no request`, async ($, on) => {
+      const { w, clock } = world(on, {}, ENV)
       w.auth = auth
-      w.files[`${HOME}/.claude.json`] = record(TEAM)
+      let reads = 0
+      Object.defineProperty(w.files, `${HOME}/.claude.json`, { enumerable: true, get: () => (reads++, record(TEAM)) })
       await start($)
+      await clock.advance(6 * MIN)
       expect(await account($)).toBeNull()
+      expect(reads).toBe(0)
       expect(w.profileFetches).toEqual([])
     })
   }
+})
+
+describe('band.account hiddenModels from the login record', () => {
+  /** The Team login's record as the host writes it while the org has no credits for the credit-gated Fable. */
+  const gated = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      oauthAccount: { ...TEAM, hasExtraUsageEnabled: true },
+      additionalModelOptionsCache: [{ value: 'claude-fable-5-1[1m]', label: 'Fable', description: 'Credit-gated' }],
+      cachedExtraUsageDisabledReason: 'out_of_credits',
+      modelAccessCache: [],
+      ...extra,
+    })
+
+  test('a Team record out of credits → fable hidden, out_of_credits, in the atom and /band-debug', async ($, on) => {
+    const { w } = world(on, {}, { ...ENV, CLAUDE_CONFIG_DIR: `${HOME}/.claude-cloudcon` })
+    w.auth = BEARER
+    w.files[`${HOME}/.claude-cloudcon/.claude.json`] = gated()
+    await start($)
+    expect(await account($)).toMatchObject({ label: 'work', hiddenModels: ['fable'], hiddenReason: 'out_of_credits' })
+    expect(await debug($)).toContain('"hiddenModels":["fable"],"hiddenReason":"out_of_credits"')
+  })
+
+  test('extra usage usable → nothing hidden', async ($, on) => {
+    const { w } = world(on, {}, ENV)
+    w.auth = BEARER
+    w.files[`${HOME}/.claude.json`] = gated({ cachedExtraUsageDisabledReason: null })
+    await start($)
+    expect(await account($)).toMatchObject({ label: 'work', hiddenModels: [], hiddenReason: null })
+  })
+
+  test('the personal record (no oauthAccount, no gating keys) → the profile endpoint names it, nothing hidden', async ($, on) => {
+    const { w } = world(on, {}, ENV)
+    w.auth = BEARER
+    w.files[`${HOME}/.claude.json`] = JSON.stringify({ numStartups: 9 })
+    w.profile = async () => ok({ account: { email: 'me@home.co' }, organization: { organization_type: 'claude_max' } })
+    await start($)
+    await peek($)
+    expect(await account($)).toMatchObject({ label: 'personal', source: 'profile endpoint', hiddenModels: [], hiddenReason: null })
+  })
+
+  test('a gated record that names no plan → no label (no segment), and fable still hidden', async ($, on) => {
+    const { w } = world(on, {}, ENV)
+    w.auth = BEARER
+    w.files[`${HOME}/.claude.json`] = gated({ oauthAccount: { emailAddress: 'dev@corp.co', hasExtraUsageEnabled: true } })
+    await start($)
+    expect(await account($)).toMatchObject({ label: null, source: null, email: null, hiddenModels: ['fable'], hiddenReason: 'out_of_credits' })
+    expect(await debug($)).toContain('"error":"no plan"')
+  })
+
+  test('a gated record without oauthAccount and a failed profile request → no label, fable still hidden', async ($, on) => {
+    const { w, clock } = world(on, {}, ENV)
+    w.auth = BEARER
+    w.files[`${HOME}/.claude.json`] = gated({ oauthAccount: undefined })
+    w.profile = async () => ({ status: 500, ok: false, headers: {}, text: 'oops' })
+    await start($)
+    await peek($)
+    expect(await account($)).toMatchObject({ label: null, source: null, hiddenModels: ['fable'], hiddenReason: 'out_of_credits' })
+    await clock.advance(6 * MIN)
+    expect(await account($)).toMatchObject({ label: null, hiddenModels: ['fable'] })
+    expect(w.profileFetches).toHaveLength(1)
+  })
+
+  test('BAND_ACCOUNT=work still reads the record for the hidden families; BAND_ACCOUNT=0 reads nothing, so none', async ($, on) => {
+    const { w } = world(on, {}, { ...ENV, BAND_ACCOUNT: 'work' })
+    w.files[`${HOME}/.claude.json`] = gated()
+    await start($)
+    expect(await account($)).toMatchObject({ label: 'work', source: 'BAND_ACCOUNT', hiddenModels: ['fable'], hiddenReason: 'out_of_credits' })
+    w.vars.BAND_ACCOUNT = '0'
+    await start($)
+    expect(await account($)).toBeNull()
+  })
 })
 
 describe('band.account from the profile endpoint', () => {
@@ -80,7 +156,7 @@ describe('band.account from the profile endpoint', () => {
     w.profile = async () => ok(PROFILE)
     await start($)
     await peek($)
-    expect(await account($)).toEqual({ label: 'personal', plan: 'claude_max', email: 'me@home.co', org: "me's Organization", role: null, configDir: '~/.claude', source: 'profile endpoint' })
+    expect(await account($)).toEqual({ label: 'personal', plan: 'claude_max', email: 'me@home.co', org: "me's Organization", role: null, configDir: '~/.claude', source: 'profile endpoint', hiddenModels: [], hiddenReason: null })
     expect(w.profileFetches).toEqual([
       { url: 'https://api.anthropic.com/api/oauth/profile', init: { headers: { 'anthropic-beta': 'oauth-2025-04-20', 'Content-Type': 'application/json' }, auth: 'h1' } },
     ])
@@ -156,7 +232,7 @@ describe('BAND_ACCOUNT', () => {
       const { w } = world(on, {}, { ...ENV, BAND_ACCOUNT: label })
       w.files[`${HOME}/.claude.json`] = record({ organizationType: label === 'work' ? 'claude_max' : 'claude_team' })
       await start($)
-      expect(await account($)).toEqual({ label, plan: null, email: null, org: null, role: null, configDir: '~/.claude', source: 'BAND_ACCOUNT' })
+      expect(await account($)).toEqual({ label, plan: null, email: null, org: null, role: null, configDir: '~/.claude', source: 'BAND_ACCOUNT', hiddenModels: [], hiddenReason: null })
       expect(w.profileFetches).toEqual([])
     })
   }
@@ -263,7 +339,7 @@ describe('refresh', () => {
     w.files[`${HOME}/.claude.json`] = record(TEAM)
     await start($)
     expect(await debug($)).toContain(
-      `account: {"atom":{"plan":"claude_team","email":"dev@corp.co","org":"Domaine Worldwide (2)","role":"user","configDir":"~/.claude","label":"work","source":"login record"},"last":{"mode":"on","at":${T0},"source":"login record"}}`,
+      `account: {"atom":{"plan":"claude_team","email":"dev@corp.co","org":"Domaine Worldwide (2)","role":"user","configDir":"~/.claude","hiddenModels":[],"hiddenReason":null,"label":"work","source":"login record"},"last":{"mode":"on","at":${T0},"source":"login record"}}`,
     )
   })
 })

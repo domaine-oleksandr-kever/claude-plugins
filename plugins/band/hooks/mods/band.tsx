@@ -342,7 +342,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     // The current one is at full strength and only folds. Esc reaches no hook (the engine raises no focus-out),
     // so a close button ends the row; `x` is free here, as Clear is not drawn.
     if (unfolded && !isDesktop && m !== null) {
-      const options = modelOptions(m)
+      const options = modelOptions(m, acct?.hiddenModels ?? [])
       const row: RenderNode[] = [<Text dimColor>model </Text>]
       options.forEach((o, i) => {
         if (i > 0) row.push(<Text>{'  '}</Text>)
