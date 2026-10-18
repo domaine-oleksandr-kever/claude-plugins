@@ -18,7 +18,7 @@ and its own events. slim publishes its compression events. The team plugins on b
 publish their own start, install and doctor lines. Band reads these lines; it never writes another
 plugin's state.
 
-Current release: **band v0.13.0**.
+Current release: **band v0.13.1**.
 
 ## Status
 

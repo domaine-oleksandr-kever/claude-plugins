@@ -380,7 +380,10 @@ export function registerBand(on: On, options: PluginOptions): void {
     if (segs.model !== null && m !== null) {
       groups.push([
         isDesktop ? (
-          <Text wrap="truncate-end">{`${GLYPH.model} ${segs.model}`}</Text>
+          // A bare truncating Text shrinks to nothing on the desktop when the row overflows.
+          <Box key="seg-model" flexDirection="row" flexShrink={0}>
+            <Text>{`${GLYPH.model} ${segs.model}`}</Text>
+          </Box>
         ) : (
           <Button key="model" label={`${segs.model}${MODEL_MARK}`} plain {...(letters ? { hotkey: 'm' } : {})} onPress={() => setPicker($, true)} />
         ),
