@@ -6,9 +6,9 @@ prompt. It only draws; it has no other job. To install it, see
 
 Band draws three things:
 
-- The **status band** above the prompt. It shows the prompt-cache countdown, the model, the context
-  use, every rate-limit window, the session's cost and the task digest. It also holds the Compact,
-  Clear, Progress and Log buttons.
+- The **status band** above the prompt. It shows the account the session runs on (work or personal),
+  the prompt-cache countdown, the model, the context use, every rate-limit window, the session's cost
+  and the task digest. It also holds the Compact, Clear, Progress and Log buttons.
 - The **Progress pane**, which shows the task checklist.
 - The **event log pane**, which lists what the plugins did.
 
@@ -18,7 +18,7 @@ and its own events. slim publishes its compression events. The team plugins on b
 publish their own start, install and doctor lines. Band reads these lines; it never writes another
 plugin's state.
 
-Current release: **band v0.11.0**.
+Current release: **band v0.12.0**.
 
 ## Status
 
@@ -43,19 +43,20 @@ To choose which plugins to install for which work, use the matrix in
 
 ## Status band
 
-The band is one row, with the most important segment first. This example has 190 columns, context
-at 47 %, an account that reports three windows (two with a reset time), and base resolving a task:
+The band is one row, with the most important segment first. This example has 200 columns, a work
+login (Claude Team), context at 47 %, three rate windows (the two weekly ones share one reset time),
+and base resolving a task:
 
 ```text
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% ↻2h05m · 7d 34% ↻3d4h · 7d·fable 12% │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Clear ]  [ Progress ]  [ Log ]
+work │ cache 42m │ fable-5-1 ▾ │ ctx 47% │ 5h 61% ↻2h05m · 7d 34% · 7d·fable 12% ↻3d4h │ cost $12.40 │ ELC-1591 3/5 ▶ Preview themes for QA review │ [ Compact ]  [ Clear ]  [ Progress ]  [ Log ]
 ```
 
-The same session at 120 columns: the row needs 185 cells, so band drops the Log button first, then
-Clear, then the reset times, then the digest:
+The same session at 120 columns: the row needs 194 cells, so band drops the Log button first, then
+Clear, then the reset times, then the account, then the digest:
 
 ```text
-cache 42m │ fable-5-1 │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ [ Compact ]  [ Progress ]
+cache 42m │ fable-5-1 ▾ │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% │ cost $12.40 │ [ Compact ]  [ Progress ]
 ```
 
 **When the band appears.** Band draws the row as soon as it holds one figure. At launch it reads the
@@ -76,22 +77,24 @@ Band drops segments in this order:
 1. The Log button (`/band-log` still opens the pane).
 2. The Clear button (`/clear` still works).
 3. The rate windows' reset times (the hover card still names them).
-4. The digest.
-5. The cost.
-6. The rate windows other than the fullest one, the least full first.
-7. The last rate window.
-8. The model.
-9. The Progress button.
+4. The account.
+5. The digest.
+6. The cost.
+7. The rate windows other than the fullest one, the least full first.
+8. The last rate window.
+9. The model.
+10. The Progress button.
 
 Band never drops cache, ctx or Compact. As a backstop, the row's text truncates, so the band never
 takes a second row.
 
 | Segment | Shows | Rule |
 |---|---|---|
+| account | `work`, `personal` | Which claude.ai login the session runs on, for a Mac with two (a personal plan in `~/.claude`, a company Team in another `CLAUDE_CONFIG_DIR`). `work` is a Claude Team or Enterprise organization; `personal` is any other plan (Max, Pro, free). It comes from the login record the host writes: `oauthAccount.organizationType` in `<CLAUDE_CONFIG_DIR>/.claude.json`, or `~/.claude.json` when `CLAUDE_CONFIG_DIR` is unset. A record without `oauthAccount` falls back to the claude.ai profile endpoint (`/api/oauth/profile`), asked once per session and never awaited by the band. No claude.ai login (an API key, Bedrock, Vertex, a gateway), a login with no plan, or a failed read: no segment, silently. Read at session start and again every 5 min, so a later `/login`, or one that switches the account mid-session, shows up; a `/clear` reads it anew. A `~/` in `CLAUDE_CONFIG_DIR` stands for HOME; any other relative value is never taken for HOME's record, so only the profile endpoint can name the account. A dim word on the terminal, a glyph on the desktop (`🏢` work, `🏠` personal). The hover card reads `account: work (Claude Team) · email: … · org: … · role: … · config: ~/.claude-cloudcon · source: login record`. `BAND_ACCOUNT` hides it (`0`) or forces the word (`work`, `personal`; the card then says `forced by BAND_ACCOUNT`). |
 | cache | `cache 42m`, `<1m`, `cache cold`, `cache —`, `cache ●` | Minutes left of the prompt cache: the last main-thread response plus the TTL. `●` while a turn runs; `—` before the first response and after `/clear` or resume; `cold` once the TTL has passed, after a compaction, or after a `/model` switch that forfeits the cache (another model, or the host reports it cold). A resumed session takes its state from the time since the last response. Hidden while any rate window is at or past 100 %: in overage the TTL is unknown. **It is an estimate.** The host reports no cache state, only the events it is derived from. |
 | model | `fable-5-1` | The model id as the session reports it, without the `claude-` prefix every id carries. A `/model` switch updates it from the switch event itself; every measurement re-reads it, so a switch the event missed shows by the next response. The session still answers the old id for a moment after a switch, and the measurement right after it ignores that answer: it keeps the event's model until the session answers something else. **On the terminal it is a picker:** the segment reads `fable-5-1 ▾` and is a button (hotkey `m` while the band holds the keyboard: ctrl+x tab, or a click). Pressed, the row folds its figures away and holds the models alone, in place: `model fable  opus  sonnet  haiku`: the families, not dated ids, since `/model <alias>` resolves to the family's newest model and the list never dates (plus the session's own id first when no alias stands for it, say a pinned `[1m]` id), the current one bright and the rest dim, each with its first letter as hotkey (`f`, `o`, `s`, `h`). Tab or a letter picks one; the pick runs `/model <alias>` as typed, toasts its output and folds the row back, which then follows the switch event. The current model only folds the row; so does the `×` button at its end (hotkey `x`: Clear is not drawn while the row is unfolded, so the letter is free), and a turn or `/clear` folds it too. The band never grows: its region clips anything drawn outside its own two rows, so no list can pop over the transcript. The desktop app has its own model menu, so there the segment stays text. |
 | ctx | `ctx 47%`, `ctx —` | Context-window use. It is `—` on a fresh session until the first response. Right after a compaction it shows the engine's own count of what was kept over the window (`ctx 3%`), or `—` when the engine reported no count; that count holds until a response reports a measured fill, as a reading with no fill (only the window) keeps the last one. A compaction reaches the band two ways, the `session.compact` chain and the engine's own `PostCompact` report (the settings-hook event, which arrives even when the chain skips the mod, as it did for a Compact press on Claude Code 2.1.289); reports within 30 s of each other are one compaction. Mid-turn it refreshes on a 30 s tick. |
-| rates | `5h 61% ↻2h05m · 7d 34% ↻3d4h · 7d·fable 12%` | **Every** window the host measures, in its order, then each window the claude.ai usage endpoint (`/api/oauth/usage`, the one `/usage` reads) adds, separated by a dim `·`. The host's measurement wins a window both report; the endpoint adds the per-model weekly windows the measurement never carries (`7d·sonnet`, `7d·fable`). On the desktop app the measurement reports no window at all, so there the endpoint supplies every one. band asks the endpoint at most once per 5 min (after a failure too), on a claude.ai login only: an API key, Bedrock, Vertex or a gateway gets none, and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks the request. A failed request (or one unanswered after 10 s) keeps the last good windows, silently, until a window passes its reset time; logging out of claude.ai drops them. `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. A window the API gives a reset time trails it dim after the percentage: `↻42m`, `↻2h05m`, `↻3d4h`. The reset times are the first figures to go on a narrow row (after the Log and Clear buttons). Empty off a subscription and before the first reading. |
+| rates | `5h 61% ↻2h05m · 7d 34% · 7d·fable 12% ↻3d4h` | **Every** window the host measures, in its order, then each window the claude.ai usage endpoint (`/api/oauth/usage`, the one `/usage` reads) adds, separated by a dim `·`. The host's measurement wins a window both report; the endpoint adds the per-model weekly windows the measurement never carries (`7d·sonnet`, `7d·fable`). On the desktop app the measurement reports no window at all, so there the endpoint supplies every one. band asks the endpoint at most once per 5 min (after a failure too), on a claude.ai login only: an API key, Bedrock, Vertex or a gateway gets none, and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` blocks the request. A failed request (or one unanswered after 10 s) keeps the last good windows, silently, until a window passes its reset time; logging out of claude.ai drops them. `five_hour` → `5h`, `seven_day` → `7d`, `spend_limit` → `$`; an unknown kind keeps a shortened raw name (`7d·fable`); past 100 % reads `>100%`. A window the API gives a reset time trails it dim after the percentage: `↻42m`, `↻2h05m`, `↻3d4h`. Adjacent windows whose resets lie within 60 s of each other (the weekly `7d` and the per-model `7d·…` windows reset together) show it once, after the last of them: `7d 34% · 7d·fable 12% ↻3d4h`; each window's hover card still names its own. The labels keep their prefix, so `7d·fable` always reads as a weekly window. The reset times are the first figures to go on a narrow row (after the Log and Clear buttons). Empty off a subscription and before the first reading. |
 | cost | `cost $12.40` | Opt-in: drawn only with `BAND_COST=1` in the session's environment. What the session has cost at API prices, as `/cost` totals it (`usage().cost.usd`). A subscription is not billed per request, so there it is a measure of work, not a bill. Hidden while it is zero and where the host keeps no ledger. |
 | digest | `ELC-1591 3/5 ▶ Preview themes` | The task base resolved, same on the terminal and the desktop: work id · checked/total rows of the workspace's `progress.md` · the current row as base writes it (cut to 28 characters); `ELC-1591 ✓ 5/5` when all are done; the bare id (`ELC-1588`) while the workspace has no `progress.md` yet, or while the ticket you named has no workspace at all. Hidden while the Progress pane is open, when base resolves nothing, and without base. |
 | Compact | `[ Compact ]`, `c: Compact` | Always drawn first and always pressable, so the other buttons never shift: before the first reading, while a turn runs and at any context. From 80 % between turns it switches to the accent color. While the band holds the keyboard it reads `c: Compact`. A press runs `/compact` and toasts the result (`compacted 412,000 → 38,000 tokens`, or why it was skipped or refused). When the prompt cache is cold or ends within 5 min, the press first asks `Compact` / `Clear` / `Cancel` through the engine's own dialog (`Prompt cache is cold or ends within 5 min: compacting re-reads the whole conversation at full price. If this session is done, Clear is cheaper. Compact anyway?`); `Clear` runs `/clear` without the second Yes/No, a dismissed dialog is a Cancel. A typed `/compact` never asks. Where the engine refuses compaction from a plugin (a headless / SDK session such as the desktop app), the press runs the `/compact` slash command as if typed instead and toasts its output. Pressed while a turn runs it only toasts `turn is running — press Compact again when it ends`; nothing is queued. While base reports the task workspace stale (unless `BASE_AUTOSAVE=0`), a press or a typed `/compact` runs `/base:save-task-context` first, then the `/compact` slash command, so the compaction waits for the save's turn; a press toasts `saved, then ` and the command's output. When that turn wrote nothing (an API error, an interrupt, a refused edit) and base still reports the workspace stale, the compaction behind it is vetoed: the conversation stays as it is and a toast reads `workspace still stale — save did not land; compaction cancelled`. One save-then-compact chain runs at a time: a second press while one is still running only toasts `compact already queued`, and a typed `/compact` then answers the same. |
@@ -105,7 +108,7 @@ second row under the figures, left-aligned, with an empty row between the two ro
 around the panel. The reason: the desktop's native buttons are tall, and in the figures' row they
 squashed the row and sat far right. The terminal keeps one row, because height is the scarce space
 there. Each figure is a dim label and a bold value (`cache` dim, `42m` bold; the same for `ctx` and
-each rate window). The model id is plain; on the terminal it carries the picker's `▾` mark. The
+each rate window). The account word is dim, with no value. The model id is plain; on the terminal it carries the picker's `▾` mark. The
 digest's work id is bold, and the separators are dim.
 
 **Colors.** Up to 30 %, ctx is green (the theme's `success`) and the rate windows are plain. Above
@@ -116,12 +119,13 @@ follows light, dark and high-contrast themes. The alarm look is `warning` + bold
 dedicated error key is proven to draw on every theme.
 
 **Desktop and hover.** In the desktop app's Code tab, every segment carries a glyph instead of a word
-(`⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% ↻2h05m · 7d 34% ↻3d4h │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`).
+(`🏢 │ ⏱ 42m │ 🤖 fable-5-1 │ 🧠 47% │ ⏳ 5h 61% ↻2h05m · 7d 34% · 7d·fable 12% ↻3d4h │ 💰 $12.40 │ 📋 ELC-1591 3/5 ▶ …`).
 Compact, Clear, Progress and Log are native buttons there. The desktop draws proportional text, so
 the width rules above do not apply: band drops nothing, and the row clips at the panel's edge. When
-the pointer rests on the cache, ctx, a rate window or the cost, a one-line card appears. Cards work
+the pointer rests on the account, the cache, ctx, a rate window or the cost, a one-line card appears. Cards work
 on the desktop and on terminals that pass the pointer through (kitty, Ghostty, iTerm2, WezTerm; tmux
 passes none). The cards read:
+`account: personal (Claude Max) · email: me@example.com · config: ~/.claude · source: login record`,
 `prompt cache: ~42 min left (estimate: last response + 1 h TTL)`,
 `context: 47% of 200,000 tokens, 94,000 used`, `5h window: 61% used, resets in 2h 05m`,
 `session cost: $12.40 at API prices, as /cost counts it (a subscription is not billed per request)`.
@@ -156,7 +160,9 @@ The plugin cannot reopen the band by itself, and it does not try.
 
 **Debug.** `/band-debug` prints the raw figures behind the band: `band.info`, the session's `usage()`
 answer, the cache state, the usage atom, the usage endpoint's last attempt (`endpoint: {"at":…,"ok":true,"status":200,"windows":[{"kind":"seven_day_fable","pct":12}, …]}`,
-or its status or one-line error; never the body), the task that base resolved (work id and branch, or
+or its status or one-line error; never the body), the account atom and its last read
+(`account: {"atom":{…,"label":"work","source":"login record"},"last":{"mode":"on","at":…,"source":"login record"}}`,
+or the last read's one-line error), the task that base resolved (work id and branch, or
 `null`), the session root, and the last render's surface and measured columns. When a segment looks
 wrong on some surface, paste this output.
 
@@ -336,6 +342,9 @@ them. Band reads the other plugins' keys through shapes that it types itself. Ne
   the version from band's manifest. A non-null value means that band is loaded.
 - **`band.events`** — band's own log lines, `{ atMs, kind, text }`, with kind `session`, `model`,
   `compact` or `rate`. Oldest first, at most 200.
+- **`band.account`** — `{ label, plan, email, org, role, configDir, source }`: the login the session
+  runs on (`label` `work` / `personal`); `null` without a claude.ai login, under `BAND_ACCOUNT=0`, or
+  before the first read.
 - **`band.usage`, `band.model`, `band.cache`, `band.tick`, `band.rateAlarmed`** — the figures that
   the band draws. **`band.paneShown`, `band.bandFocused`, `band.modelPicker`** — the drawing state.
 
@@ -372,6 +381,7 @@ them: the shell, or `~/.claude/settings.json` → `env`. The Domaine env files d
 
 | Switch | Default | Effect |
 |---|---|---|
+| `BAND_ACCOUNT` | on | The account segment (`work` / `personal`). Unset or any other value reads the login; `0` hides the segment and reads nothing; `work` or `personal` forces that word whatever the login (its card says `forced by BAND_ACCOUNT`). Read at session start. |
 | `BAND_COST` | off | `1` (or `true`/`yes`/`on`) adds the session-cost segment to the status band (`cost $12.40`, `💰 $12.40` on the desktop): the `/cost` total at API prices, a measure of work on a subscription. Read at session start. |
 | `BAND_USAGE_ENDPOINT` | `1` | `0` stops band asking the claude.ai usage endpoint: the rate windows are then the host's measurement alone (none on the desktop app, no per-model weekly window anywhere). Read at session start. |
 | `BAND_EVENT_LOG` | `1` | `0` stops band recording its own lines (`session`, `model`, `compact`, `rate`): none in the Log pane and no `band.jsonl`. base's, slim's and the team plugins' lines still show in `/band-log` unless their own switch is `0`. Toasts are untouched. |

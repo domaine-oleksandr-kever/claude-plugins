@@ -2,6 +2,7 @@
 // and writes only its own atoms; it reads base.*, slim.* and the team plugins' events and never writes them.
 // Each feature file declares its own atoms and keeps its `$` code to itself: the validator follows `$` only within one file.
 import type { Register } from 'claude-code'
+import { registerAccount } from './account.ts'
 import { registerBand } from './band.tsx'
 import { registerChecklist } from './checklist.tsx'
 import { registerInfo } from './info.ts'
@@ -11,6 +12,7 @@ import { registerUsage } from './usage.ts'
 export const register: Register = (on, options) => {
   registerInfo(on, options)
   registerUsage(on, options)
+  registerAccount(on)
   registerBand(on, options)
   registerChecklist(on)
   registerLog(on)

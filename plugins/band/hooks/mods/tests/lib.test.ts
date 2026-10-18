@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 import {
   CACHE_INIT,
+  GLYPH,
+  accountCard,
+  accountLabel,
+  accountMode,
+  groupResets,
+  loginAccount,
+  loginPaths,
+  planName,
+  profileAccount,
   CRIT,
   CTX_PROPS,
   LEVEL_PROPS,
@@ -218,6 +227,7 @@ describe('usage endpoint windows', () => {
 
 describe('layout', () => {
   const full: BandSegs = {
+    account: null,
     cache: 'cache 42m',
     model: 'Fable 5.1',
     ctx: 'ctx 47%',
@@ -282,6 +292,47 @@ describe('layout', () => {
     expect(layout(s, 0)).toBe(s)
   })
 
+  test('weekly windows sharing a reset show it once; a narrow row still drops it first', () => {
+    const now = Date.parse('2026-10-03T12:00:00Z')
+    const s: BandSegs = {
+      ...full,
+      resetsNowMs: now,
+      rates: toRates([
+        { kind: 'five_hour', percentUsed: 61, resetsAt: '2026-10-03T14:05:00Z' },
+        { kind: 'seven_day', percentUsed: 34, resetsAt: '2026-10-06T16:00:00Z' },
+        { kind: 'seven_day_fable', percentUsed: 12, resetsAt: '2026-10-06T16:00:20Z' },
+      ]),
+    }
+    expect(rowText(s)).toContain('│ 5h 61% ↻2h05m · 7d 34% · 7d·fable 12% ↻3d4h │')
+    const narrow = layout(s, cells(rowText(s)) - 1 - 'x: Clear  l: Log  '.length)
+    expect(narrow.resetsNowMs).toBeNull()
+    expect(rowText(narrow)).toContain('│ 5h 61% · 7d 34% · 7d·fable 12% │')
+  })
+
+  test('the account leads the row and goes right after the reset times, before the digest', () => {
+    const now = Date.parse('2026-10-03T12:00:00Z')
+    const s: BandSegs = {
+      ...full,
+      account: 'work',
+      resetsNowMs: now,
+      rates: toRates([{ kind: 'five_hour', percentUsed: 61, resetsAt: '2026-10-03T14:05:00Z' }]),
+    }
+    const wide = rowText(s)
+    expect(wide).toStartWith('work │ cache 42m │ Fable 5.1 ▾ │')
+    expect(rowText({ ...s, account: 'personal' })).toStartWith('personal │ cache 42m │')
+    expect(rowText({ ...s, account: 'work', cache: null })).toStartWith('work │ Fable 5.1 ▾ │')
+    const noButtons = cells(wide) - cells('  x: Clear  l: Log')
+    expect(layout(s, noButtons).account).toBe('work')
+    expect(layout(s, noButtons).resetsNowMs).toBe(now)
+    const noResets = layout(s, noButtons - 1)
+    expect(noResets.resetsNowMs).toBeNull()
+    expect(noResets.account).toBe('work')
+    const noAccount = layout(s, cells(rowText(noResets)) - 1)
+    expect(noAccount.account).toBeNull()
+    expect(noAccount.digest).toBe(full.digest)
+    expect(layout(s, cells(rowText(noAccount)) - 1).digest).toBeNull()
+  })
+
   test('the fullest window outlives the others wherever it sits', () => {
     const s = { ...full, log: null, clear: null, digest: null, cost: null, rates: toRates([
       { kind: 'five_hour', percentUsed: 10 },
@@ -316,8 +367,9 @@ describe('layout', () => {
   })
 
   test('cache, ctx and Compact survive 30 columns', () => {
-    const narrow = layout({ ...full, compact: { ...full.compact, plain: false } }, 30)
+    const narrow = layout({ ...full, account: 'personal', compact: { ...full.compact, plain: false } }, 30)
     expect(rowText(narrow)).toBe('cache 42m │ ctx 47% │ [ Compact ]')
+    expect(narrow.account).toBeNull()
     expect(narrow.model).toBeNull()
     expect(narrow.rates).toEqual([])
     expect(narrow.cost).toBeNull()
@@ -421,6 +473,39 @@ describe('cards and toasts', () => {
     expect(rateText(r!, fmtResetShort(r!.resetsAt, NOW))).toBe('5h 14% ↻2h05m')
   })
 
+  test('groupResets: adjacent windows within 60 s of each other show one reset, after the last of them', () => {
+    const W = '2026-10-06T16:00:00Z'
+    const plus = (s: number) => new Date(Date.parse(W) + s * 1000).toISOString()
+    const shorts = (list: { kind: string; percentUsed: number; resetsAt?: string }[]) => groupResets(toRates(list), NOW)
+    // two equal resets, after a window with its own
+    expect(shorts([
+      { kind: 'five_hour', percentUsed: 61, resetsAt: '2026-10-03T14:05:00Z' },
+      { kind: 'seven_day', percentUsed: 34, resetsAt: W },
+      { kind: 'seven_day_fable', percentUsed: 12, resetsAt: W },
+    ])).toEqual(['2h05m', null, '3d4h'])
+    // three equal resets
+    expect(shorts([
+      { kind: 'seven_day', percentUsed: 34, resetsAt: W },
+      { kind: 'seven_day_sonnet', percentUsed: 5, resetsAt: plus(30) },
+      { kind: 'seven_day_fable', percentUsed: 12, resetsAt: W },
+    ])).toEqual([null, null, '3d4h'])
+    // the 60 s boundary: 59 s apart is one instant, 61 s apart is two
+    expect(shorts([{ kind: 'seven_day', percentUsed: 1, resetsAt: W }, { kind: 'seven_day_fable', percentUsed: 2, resetsAt: plus(59) }])).toEqual([null, '3d4h'])
+    expect(shorts([{ kind: 'seven_day', percentUsed: 1, resetsAt: W }, { kind: 'seven_day_fable', percentUsed: 2, resetsAt: plus(61) }])).toEqual(['3d4h', '3d4h'])
+    // mixed order: equal resets that are not adjacent keep one each
+    expect(shorts([
+      { kind: 'seven_day', percentUsed: 34, resetsAt: W },
+      { kind: 'five_hour', percentUsed: 61, resetsAt: '2026-10-03T14:05:00Z' },
+      { kind: 'seven_day_fable', percentUsed: 12, resetsAt: W },
+    ])).toEqual(['3d4h', '2h05m', '3d4h'])
+    // no resets, a window without one beside one with one, no clock
+    expect(shorts([{ kind: 'five_hour', percentUsed: 1 }, { kind: 'seven_day', percentUsed: 2 }])).toEqual([null, null])
+    expect(shorts([{ kind: 'seven_day', percentUsed: 1, resetsAt: W }, { kind: 'seven_day_fable', percentUsed: 2 }])).toEqual(['3d4h', null])
+    expect(shorts([{ kind: 'seven_day', percentUsed: 1, resetsAt: 'x' }, { kind: 'seven_day_fable', percentUsed: 2, resetsAt: 'x' }])).toEqual([null, null])
+    expect(groupResets(toRates([{ kind: 'seven_day', percentUsed: 1, resetsAt: W }]), null)).toEqual([null])
+    expect(groupResets([], NOW)).toEqual([])
+  })
+
   test('rate card and the alarm line', () => {
     const [r] = toRates([{ kind: 'five_hour', percentUsed: 91, resetsAt: '2026-10-03T14:05:00Z' }])
     expect(rateCard(r!, NOW)).toBe('5h window: 91% used, resets in 2h 05m')
@@ -455,7 +540,9 @@ describe('cards and toasts', () => {
     expect(glyphText('cache 42m')).toBe('⏱ 42m')
     expect(glyphText('ctx 47%')).toBe('\u{1F9E0} 47%')
     expect(glyphText('Fable 5.1')).toBe('Fable 5.1')
-    for (const g of ['⏱', '\u{1F9E0}', '⏳', '↻']) expect([...g]).toHaveLength(1)
+    for (const g of Object.values(GLYPH)) expect([...g]).toHaveLength(1)
+    expect(GLYPH.work).toBe('🏢')
+    expect(GLYPH.personal).toBe('🏠')
   })
 })
 
@@ -519,6 +606,89 @@ const SNAP = {
   notesTail: ['- two', '- three'],
   mtimeMs: 1,
 }
+
+describe('account', () => {
+  const RECORD = (oauthAccount: unknown) => ({ numStartups: 3, oauthAccount })
+
+  test('classification: Team and Enterprise are work; Max, Pro, free and any other plan personal; no plan none', () => {
+    for (const [plan, label] of [
+      ['claude_team', 'work'],
+      ['claude_enterprise', 'work'],
+      ['claude_max', 'personal'],
+      ['claude_pro', 'personal'],
+      ['free', 'personal'],
+      ['claude_something_new', 'personal'],
+      [null, null],
+    ] as const) {
+      expect(accountLabel(plan)).toBe(label)
+    }
+  })
+
+  test('loginAccount reads oauthAccount; its absence, a non-object, malformed fields → null or the field null', () => {
+    expect(loginAccount(RECORD({ organizationType: 'claude_team', emailAddress: 'a@b.co', organizationName: 'Domaine Worldwide (2)', organizationRole: 'user', seatTier: 'x', displayName: 'A' }))).toEqual({
+      plan: 'claude_team',
+      email: 'a@b.co',
+      org: 'Domaine Worldwide (2)',
+      role: 'user',
+    })
+    expect(loginAccount(RECORD({ organizationType: 'claude_max', emailAddress: 7, organizationName: '', organizationRole: null }))).toEqual({ plan: 'claude_max', email: null, org: null, role: null })
+    expect(loginAccount(RECORD({}))).toEqual({ plan: null, email: null, org: null, role: null })
+    for (const bad of [null, 'x', [], {}, { oauthAccount: null }, { oauthAccount: 'claude_team' }, { oauthAccount: [] }]) expect(loginAccount(bad)).toBeNull()
+    // one line, capped
+    const long = loginAccount(RECORD({ organizationType: 'claude_team', organizationName: `Line\nbreak\t${'x'.repeat(300)}` }))
+    expect(long?.org).toStartWith('Line break x')
+    expect([...(long?.org ?? '')]).toHaveLength(120)
+  })
+
+  test('profileAccount: account.email and organization.organization_type / name; neither plan nor email → null', () => {
+    expect(profileAccount({ account: { email: 'a@b.co', uuid: 'u' }, organization: { organization_type: 'claude_enterprise', name: 'Acme' } })).toEqual({ plan: 'claude_enterprise', email: 'a@b.co', org: 'Acme', role: null })
+    expect(profileAccount({ account: { email: 'a@b.co' } })).toEqual({ plan: null, email: 'a@b.co', org: null, role: null })
+    for (const bad of [null, [], 'x', {}, { account: 'a', organization: 5 }, { organization: { name: 'Acme' } }]) expect(profileAccount(bad)).toBeNull()
+  })
+
+  test('accountMode: 0 off; work and personal force; unset or anything else on', () => {
+    expect(accountMode('0')).toBe('off')
+    expect(accountMode('work')).toBe('work')
+    expect(accountMode(' Personal ')).toBe('personal')
+    for (const v of [undefined, '', '1', 'yes', 'off', 'team']) expect(accountMode(v)).toBe('on')
+  })
+
+  test('loginPaths: CLAUDE_CONFIG_DIR wins, else HOME; ~ for HOME; empty counts as unset; other relative values never fall back to HOME', () => {
+    expect(loginPaths('/Users/me', undefined)).toEqual({ file: '/Users/me/.claude.json', configDir: '~/.claude' })
+    expect(loginPaths('/Users/me', '/Users/me/.claude-cloudcon/')).toEqual({ file: '/Users/me/.claude-cloudcon/.claude.json', configDir: '~/.claude-cloudcon' })
+    expect(loginPaths('/Users/me', '/opt/claude')).toEqual({ file: '/opt/claude/.claude.json', configDir: '/opt/claude' })
+    expect(loginPaths('/Users/me', '')).toEqual({ file: '/Users/me/.claude.json', configDir: '~/.claude' })
+    expect(loginPaths('/Users/me', '~/.claude-x')).toEqual({ file: '/Users/me/.claude-x/.claude.json', configDir: '~/.claude-x' })
+    expect(loginPaths('/Users/me', '~')).toEqual({ file: '/Users/me/.claude.json', configDir: '~' })
+    expect(loginPaths(undefined, '~/.claude-x')).toEqual({ file: null, configDir: '~/.claude-x' })
+    expect(loginPaths('/Users/me', '.claude-x')).toEqual({ file: null, configDir: '.claude-x' })
+    expect(loginPaths('/Users/me', '~other/.claude')).toEqual({ file: null, configDir: '~other/.claude' })
+    expect(loginPaths(undefined, undefined)).toEqual({ file: null, configDir: null })
+    expect(loginPaths('relative', undefined)).toEqual({ file: null, configDir: null })
+    expect(loginPaths(undefined, '/c')).toEqual({ file: '/c/.claude.json', configDir: '/c' })
+  })
+
+  test('the card: label with the plan, the facts present, config and source; a forced label says so', () => {
+    expect(planName('claude_team')).toBe('Claude Team')
+    expect(planName('free')).toBe('Free')
+    expect(
+      accountCard({ label: 'work', plan: 'claude_team', email: 'a@b.co', org: 'Domaine Worldwide (2)', role: 'user', configDir: '~/.claude-cloudcon', source: 'login record' }),
+    ).toBe('account: work (Claude Team) · email: a@b.co · org: Domaine Worldwide (2) · role: user · config: ~/.claude-cloudcon · source: login record')
+    expect(accountCard({ label: 'personal', plan: 'claude_max', email: null, org: null, role: null, configDir: '~/.claude', source: 'profile endpoint' })).toBe(
+      'account: personal (Claude Max) · config: ~/.claude · source: profile endpoint',
+    )
+    expect(accountCard({ label: 'work', plan: null, email: null, org: null, role: null, configDir: null, source: 'BAND_ACCOUNT' })).toBe('account: work (forced by BAND_ACCOUNT) · source: BAND_ACCOUNT')
+  })
+
+  test('bandSegs takes the atom\'s label; absent or null → no segment', () => {
+    const base = { usage: USAGE_INIT, model: null, cache: CACHE_INIT, nowMs: 0, isWorking: false, digest: null, hasChecklist: false, hasEvents: false }
+    const work = { label: 'work' as const, plan: 'claude_team', email: null, org: null, role: null, configDir: null, source: 'login record' as const }
+    expect(rowText(bandSegs({ ...base, account: work }))).toStartWith('work │ cache — │ ctx — │')
+    expect(rowText(bandSegs({ ...base, account: { ...work, label: null } }))).toStartWith('cache — │')
+    expect(rowText(bandSegs({ ...base, account: null }))).toStartWith('cache — │')
+    expect(rowText(bandSegs(base))).toStartWith('cache — │')
+  })
+})
 
 describe('toChecklist', () => {
   test('no task → null: null, a non-object, workId null or empty', () => {

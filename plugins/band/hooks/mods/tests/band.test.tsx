@@ -244,6 +244,53 @@ describe('band', () => {
       expect(await textOf(narrow, /ELC-1591/)).toBe(isDesktop ? '📋 ELC-1591 3/5 ▶ Preview themes' : 'ELC-1591 3/5 ▶ Preview themes')
     })
 
+    test(`${surface}: weekly windows sharing a reset show it once, after the last; each card keeps its own`, async ($, on) => {
+      world(on)
+      await start($, surface)
+      const ui = await mount($, surface)
+      const weekly = new Date(T0 + (3 * 24 + 4) * 60 * MIN).toISOString()
+      await measure($, { window: 200_000, percent: 10 }, [
+        { kind: 'five_hour', percentUsed: 61, resetsAt: new Date(T0 + 125 * MIN).toISOString() },
+        { kind: 'seven_day', percentUsed: 34, resetsAt: weekly },
+        { kind: 'seven_day_fable', percentUsed: 12, resetsAt: weekly },
+      ])
+      const rates = (await unitsOf(ui)).filter(u => /^(5h|7d|7d·fable) \d+%/.test(u.text))
+      expect(rates.map(u => u.text)).toEqual(['5h 61% ↻2h05m', '7d 34%', '7d·fable 12% ↻3d4h'])
+      expect(await textOf(ui, /^7d window: /)).toBe('7d window: 34% used, resets in 3d 4h')
+      expect(await textOf(ui, /^7d·fable window: /)).toBe('7d·fable window: 12% used, resets in 3d 4h')
+    })
+
+    test(`${surface}: the account leads the row (${isDesktop ? 'a glyph' : 'the dim word'}) with its card`, async ($, on) => {
+      const { w } = world(on, {}, { HOME: '/Users/dev', BAND_EVENT_LOG: '0' })
+      w.auth = { handle: 'h1', kind: 'bearer' }
+      w.files['/Users/dev/.claude.json'] = JSON.stringify({ oauthAccount: { organizationType: 'claude_team', emailAddress: 'dev@corp.co', organizationName: 'Domaine Worldwide (2)', organizationRole: 'user' } })
+      await start($, surface)
+      const ui = await mount($, surface)
+      await measure($, { window: 200_000, percent: 47 })
+      const all = (await unitsOf(ui)).map(u => u.text)
+      expect(all[isDesktop ? 0 : 1]).toBe(isDesktop ? '🏢' : 'work')
+      expect(all.indexOf(isDesktop ? '🏢' : 'work')).toBeLessThan(all.findIndex(t => cacheRe.test(t)))
+      const word = await valueOf(ui, isDesktop ? /^🏢$/ : /^work$/)
+      expect(word?.props?.dimColor).toBe(isDesktop ? undefined : true)
+      expect(await textOf(ui, /^account: /)).toBe('account: work (Claude Team) · email: dev@corp.co · org: Domaine Worldwide (2) · role: user · config: ~/.claude · source: login record')
+      expect(await ui.find({ key: 'seg-account' })).toBeDefined()
+    })
+
+    test(`${surface}: BAND_ACCOUNT=personal draws ${isDesktop ? '🏠' : 'personal'}; no login and BAND_ACCOUNT=0 draw none`, async ($, on) => {
+      const { w } = world(on, {}, { BAND_ACCOUNT: 'personal' })
+      await start($, surface)
+      const ui = await mount($, surface)
+      await measure($, { window: 200_000, percent: 47 })
+      expect(await textOf(ui, isDesktop ? /^🏠$/ : /^personal$/)).toBe(isDesktop ? '🏠' : 'personal')
+      expect(await textOf(ui, /^account: /)).toBe('account: personal (forced by BAND_ACCOUNT) · source: BAND_ACCOUNT')
+      w.vars.BAND_ACCOUNT = '0'
+      await start($, surface)
+      expect(await ui.find({ key: 'seg-account' })).toBeUndefined()
+      delete w.vars.BAND_ACCOUNT
+      await start($, surface)
+      expect(await ui.find({ key: 'seg-account' })).toBeUndefined()
+    })
+
     test(`${surface}: main turn + 18 min with a 1 h TTL → 42m; +59 → CRIT; +61 → cold`, { options: { cacheTtl: '1h' } }, async ($, on) => {
       const { clock } = world(on)
       await start($, surface)

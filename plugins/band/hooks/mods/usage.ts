@@ -1,5 +1,6 @@
 // Status band writers: usage, model, cache and tick atoms plus the tick timer, the claude.ai usage endpoint
-// poll, band's own event lines (session, model, compact, rate) with their file on disk, and /band-debug.
+// poll, band's own event lines (session, model, compact, rate) with their file on disk, and /band-debug
+// (account.ts writes the account atom).
 // Nothing here draws; the band reads these atoms.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
@@ -7,6 +8,7 @@ import type { BandEvent, BandEventKind, BandRate, BandUsage } from '../../types'
 import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events.ts'
 import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, keepCtx, mergeRates, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
+import { accountDebug } from './account.ts'
 
 const TICK_MS = 30_000
 const ALARM_TOAST_MS = 8000
@@ -22,6 +24,7 @@ const tick = atom({ plugin: 'band', key: 'tick' } as const, 0)
 const rateAlarmed = atom({ plugin: 'band', key: 'rateAlarmed' } as const, false)
 const events = atom({ plugin: 'band', key: 'events' } as const, [] as BandEvent[])
 const info = atom({ plugin: 'band', key: 'info' } as const, null)
+const account = atom({ plugin: 'band', key: 'account' } as const, null)
 const baseProgress = atom({ plugin: 'base', key: 'progress' } as const, null)
 
 type $ = EngineInterface
@@ -342,6 +345,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
       `cache: ${JSON.stringify(c)}`,
       `usage atom: ${JSON.stringify(u)}`,
       `endpoint: ${JSON.stringify(endpointDebug())}`,
+      `account: ${JSON.stringify({ atom: await read($, account), last: accountDebug() })}`,
       `progress: ${JSON.stringify(progressLine(await read($, baseProgress)))}`,
       `root: ${root}`,
       `render: ${JSON.stringify(lastRender)}`,

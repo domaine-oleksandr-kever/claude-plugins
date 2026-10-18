@@ -1,7 +1,7 @@
 // Pure band helpers: the ctx/rate/cache colour ladders, rate labels, remaining-time text, the one-row
 // width model with its drop order, and base's task snapshot read as the generic checklist. No `$` here:
 // atoms and engine calls stay in the file that hooks the event.
-import type { BandCache, BandRate, BandUsage, Checklist, ChecklistMark, ChecklistRow } from '../../types'
+import type { BandAccount, BandCache, BandRate, BandUsage, Checklist, ChecklistMark, ChecklistRow } from '../../types'
 
 export type Level = 'plain' | 'warning' | 'crit'
 
@@ -152,10 +152,31 @@ export function rateText(r: BandRate, resetShort: string | null = null): string 
   return `${r.label} ${fmtPct(r.pct)}${resetMark(resetShort)}`
 }
 
+/** Resets closer than this are one instant: the weekly windows share theirs. */
+const SAME_RESET_MS = 60_000
+
+const resetMs = (r: BandRate): number => (r.resetsAt ? Date.parse(r.resetsAt) : NaN)
+
+/**
+ * The compact reset time drawn after each window, by index: adjacent windows whose resets lie within 60 s of each
+ * other form a group that shows it once, after its last window (`7d 34% · 7d·fable 12% ↻3d4h`); null = none drawn.
+ * `nowMs` null draws none.
+ */
+export function groupResets(rates: readonly BandRate[], nowMs: number | null): (string | null)[] {
+  if (nowMs === null) return rates.map(() => null)
+  return rates.map((r, i) => {
+    const next = rates[i + 1]
+    const shared = next !== undefined && Math.abs(resetMs(next) - resetMs(r)) < SAME_RESET_MS
+    return shared ? null : fmtResetShort(r.resetsAt, nowMs)
+  })
+}
+
 type BandButton = { key: string; label: string; hotkey: string; plain: boolean }
 
 /** The band's segments in row order; null/empty = not drawn. */
 export type BandSegs = {
+  /** `work` / `personal`: the login the session runs on; null = no segment. */
+  account: 'work' | 'personal' | null
   /** null while a rate window is at or past 100 %: in overage the TTL is unknown, so nothing is shown. */
   cache: string | null
   model: string | null
@@ -185,12 +206,13 @@ export function buttonText(b: BandButton): string {
 
 /** The row as the terminal draws it: groups joined by ` │ `. */
 export function rowText(s: BandSegs): string {
-  const groups: string[] = s.cache === null ? [] : [s.cache]
+  const groups: string[] = s.account === null ? [] : [s.account]
+  if (s.cache !== null) groups.push(s.cache)
   if (s.model !== null) groups.push(`${s.model}${MODEL_MARK}`)
   groups.push(s.ctx)
   if (s.rates.length) {
-    const now = s.resetsNowMs
-    groups.push(s.rates.map(r => rateText(r, now === null ? null : fmtResetShort(r.resetsAt, now))).join(RATE_GAP))
+    const resets = groupResets(s.rates, s.resetsNowMs)
+    groups.push(s.rates.map((r, i) => rateText(r, resets[i])).join(RATE_GAP))
   }
   if (s.cost !== null) groups.push(s.cost)
   if (s.digest !== null) groups.push(s.digest)
@@ -206,8 +228,8 @@ export function cells(text: string): number {
 
 /**
  * Drops segments until the row fits `bodyColumns`: the Log button (/band-log stays), the Clear button (/clear
- * stays), the rates' reset times, the digest, the cost, then rate windows beyond the fullest (least full first),
- * then the last rate, the model, the Progress button.
+ * stays), the rates' reset times, the account, the digest, the cost, then rate windows beyond the fullest (least
+ * full first), then the last rate, the model, the Progress button.
  * Cache, ctx and Compact are never dropped. 0 or absent columns = a surface that did not measure: kept whole.
  */
 export function layout(segs: BandSegs, bodyColumns: number | undefined): BandSegs {
@@ -218,6 +240,7 @@ export function layout(segs: BandSegs, bodyColumns: number | undefined): BandSeg
   if (s.log !== null) s = { ...s, log: null }
   if (!fits() && s.clear !== null) s = { ...s, clear: null }
   if (!fits() && s.resetsNowMs !== null) s = { ...s, resetsNowMs: null }
+  if (!fits() && s.account !== null) s = { ...s, account: null }
   if (!fits() && s.digest !== null) s = { ...s, digest: null }
   if (!fits() && s.cost !== null) s = { ...s, cost: null }
   while (!fits() && s.rates.length > 1) {
@@ -357,7 +380,17 @@ export function ctxCard(u: BandUsage): string {
 }
 
 /** Single code points only: a VS16/ZWJ sequence has no settled cell width. */
-export const GLYPH = { cache: '⏱', ctx: '\u{1F9E0}', rates: '⏳', model: '\u{1F916}', digest: '\u{1F4CB}', cost: '\u{1F4B0}', reset: '↻' } as const
+export const GLYPH = {
+  cache: '⏱',
+  ctx: '\u{1F9E0}',
+  rates: '⏳',
+  model: '\u{1F916}',
+  digest: '\u{1F4CB}',
+  cost: '\u{1F4B0}',
+  reset: '↻',
+  work: '\u{1F3E2}',
+  personal: '\u{1F3E0}',
+} as const
 
 /** The desktop label: the leading word of `cache 42m` / `ctx 47%` / `cost $1.23` becomes its glyph. */
 export function glyphText(text: string): string {
@@ -398,6 +431,8 @@ export type BandInput = {
   hasChecklist: boolean
   /** some event list is non-empty: the Log button is drawn only then */
   hasEvents: boolean
+  /** the band.account atom; absent or null = no account segment */
+  account?: BandAccount | null
 }
 
 /** `claude-fable-5-1` → `fable-5-1`: every model id carries the prefix, so it says nothing. */
@@ -448,6 +483,7 @@ export function splitLabel(text: string): [string, string] {
 /** Every segment before the width drop. */
 export function bandSegs(i: BandInput): BandSegs {
   return {
+    account: i.account?.label ?? null,
     cache: i.usage.rates.some(r => r.pct >= 100) ? null : cacheView(i.cache, i.nowMs, i.isWorking).text,
     model: shortModel(i.model),
     ctx: ctxText(i.usage.ctxPct),
@@ -514,4 +550,88 @@ export function digestOf(p: unknown): string | null {
   if (total === 0) return s.workId
   if (current === null) return `${s.workId} ✓ ${done}/${total}`
   return `${s.workId} ${done}/${total} ▶ ${current}`
+}
+
+/** The plan and the person behind a login, as a login record or the profile endpoint reports them. */
+export type AccountFacts = Pick<BandAccount, 'plan' | 'email' | 'org' | 'role'>
+
+const FACT_MAX = 120
+
+/** A non-empty string field of an untrusted record, on one line and capped; anything else → null. */
+function fact(x: unknown): string | null {
+  if (typeof x !== 'string') return null
+  const v = x.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()
+  return v ? [...v].slice(0, FACT_MAX).join('') : null
+}
+
+/** `oauthAccount` of the host's login record (`.claude.json`); null without that object. */
+export function loginAccount(json: unknown): AccountFacts | null {
+  if (!isRecord(json) || !isRecord(json.oauthAccount)) return null
+  const a = json.oauthAccount
+  return { plan: fact(a.organizationType), email: fact(a.emailAddress), org: fact(a.organizationName), role: fact(a.organizationRole) }
+}
+
+/** The OAuth profile endpoint's body (`account.email`, `organization.organization_type` / `name`); null when it names neither plan nor email. */
+export function profileAccount(json: unknown): AccountFacts | null {
+  if (!isRecord(json)) return null
+  const account = isRecord(json.account) ? json.account : {}
+  const org = isRecord(json.organization) ? json.organization : {}
+  const facts = { plan: fact(org.organization_type), email: fact(account.email), org: fact(org.name), role: null }
+  return facts.plan === null && facts.email === null ? null : facts
+}
+
+/** `claude_team` / `claude_enterprise` → work; any other plan → personal; no plan → null. */
+export function accountLabel(plan: string | null): BandAccount['label'] {
+  if (plan === null) return null
+  return plan === 'claude_team' || plan === 'claude_enterprise' ? 'work' : 'personal'
+}
+
+export type AccountMode = 'on' | 'off' | 'work' | 'personal'
+
+/** BAND_ACCOUNT: `0` hides the segment, `work` / `personal` forces it; anything else (unset included) reads the login. */
+export function accountMode(v: string | undefined): AccountMode {
+  const t = v?.trim().toLowerCase()
+  return t === '0' ? 'off' : t === 'work' || t === 'personal' ? t : 'on'
+}
+
+const isAbsolute = (p: string): boolean => /^(\/|[A-Za-z]:[\\/])/.test(p)
+
+/**
+ * Where the host keeps the login: `<CLAUDE_CONFIG_DIR>/.claude.json` when that is set, else `<HOME>/.claude.json`;
+ * `configDir` is the config directory as the card shows it (`~` for HOME). An empty CLAUDE_CONFIG_DIR counts as unset; a
+ * leading `~/` stands for HOME; any other relative value gives `file` null (the host reads it under its cwd), never HOME's.
+ */
+export function loginPaths(home: string | undefined, configDir: string | undefined): { file: string | null; configDir: string | null } {
+  const h = home && isAbsolute(home) ? home.replace(/\/+$/, '') : null
+  const tilde = (p: string) => (h !== null && (p === h || p.startsWith(`${h}/`)) ? `~${p.slice(h.length)}` : p)
+  if (configDir) {
+    const raw = configDir === '~' || configDir.startsWith('~/') ? (h === null ? null : h + configDir.slice(1)) : configDir
+    if (raw === null || !isAbsolute(raw)) return { file: null, configDir }
+    const dir = raw.replace(/\/+$/, '')
+    return { file: `${dir}/.claude.json`, configDir: tilde(dir) }
+  }
+  if (h !== null) return { file: `${h}/.claude.json`, configDir: '~/.claude' }
+  return { file: null, configDir: null }
+}
+
+/** `claude_max` → `Claude Max`. */
+export function planName(plan: string): string {
+  return plan
+    .split('_')
+    .filter(Boolean)
+    .map(w => w[0].toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+/** `account: work (Claude Team) · email: … · org: … · role: … · config: ~/.claude-x · source: login record`. */
+export function accountCard(a: BandAccount): string {
+  const why = a.source === 'BAND_ACCOUNT' ? 'forced by BAND_ACCOUNT' : a.plan !== null ? planName(a.plan) : null
+  return [
+    `account: ${a.label ?? 'none'}${why ? ` (${why})` : ''}`,
+    ...(a.email !== null ? [`email: ${a.email}`] : []),
+    ...(a.org !== null ? [`org: ${a.org}`] : []),
+    ...(a.role !== null ? [`role: ${a.role}`] : []),
+    ...(a.configDir !== null ? [`config: ${a.configDir}`] : []),
+    ...(a.source !== null ? [`source: ${a.source}`] : []),
+  ].join(' · ')
 }

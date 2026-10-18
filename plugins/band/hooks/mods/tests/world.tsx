@@ -84,6 +84,7 @@ export const PEEK = {
         paneShown: (await $.state.get({ plugin: 'band', key: 'paneShown' })).value ?? null,
         bandFocused: (await $.state.get({ plugin: 'band', key: 'bandFocused' })).value ?? null,
         events: (await $.state.get({ plugin: 'band', key: 'events' })).value ?? [],
+        account: (await $.state.get({ plugin: 'band', key: 'account' })).value ?? null,
       }),
     }))
   },
@@ -155,7 +156,9 @@ export const ok = (body: unknown = ENDPOINT_BODY): HttpAnswer => ({ status: 200,
 /**
  * The engine beneath band: clock, a recording store, a mutable env (`vars`), the session ops usage.ts
  * calls, a pane host and a toast recorder. `auth` is what session.authorize answers (null by default, so
- * no suite meets the usage endpoint unless it opts in); `http` answers each fetch (`{ deny }` rejects it), which `fetches` records.
+ * no suite meets the usage endpoint unless it opts in); `http` answers each usage-endpoint fetch (`{ deny }`
+ * rejects it), which `fetches` records; `profile` answers each OAuth profile fetch (404 by default), which
+ * `profileFetches` records. `files` holds what fs.read answers besides band's manifest; any other path is missing.
  */
 export function world(on: On, store: Record<string, unknown> = {}, env: Record<string, string> = {}) {
   const w = {
@@ -172,6 +175,9 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
     auth: null as { handle: string; kind: 'bearer' | 'api-key' } | null,
     http: (async () => ok()) as () => Promise<HttpAnswer | { deny: string }>,
     fetches: [] as { url: string; init?: any }[],
+    profile: (async () => ({ status: 404, ok: false, headers: {}, text: '' })) as () => Promise<HttpAnswer | { deny: string }>,
+    profileFetches: [] as { url: string; init?: any }[],
+    files: {} as Record<string, string>,
   }
   const clock = mock.clock(on, { now: T0 })
   // A recording store: mock.store and a second store.set hook cannot both be registered.
@@ -185,7 +191,11 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
   on('env.get', async (_$, e) => ({ value: w.vars[e.name] }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   // band's own manifest, as info.ts reads it for band.info and the start line.
-  on('fs.read', async () => ({ value: JSON.stringify({ name: 'band', version: '9.9.9' }) }))
+  on('fs.read', async (_$, e) => {
+    if (e.path.endsWith('/.claude-plugin/plugin.json')) return { value: JSON.stringify({ name: 'band', version: '9.9.9' }) }
+    if (e.path in w.files) return { value: w.files[e.path]! }
+    throw new Error(`ENOENT: ${e.path}`)
+  })
   on('session.id', async () => ({ value: 's1' }))
   on('session.root', async () => ({ value: '/repo' }))
   on('session.surfaces', async () => ({ value: w.surfaces }) as never)
@@ -193,8 +203,9 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
   on('session.model', async () => ({ value: w.model }))
   on('session.authorize', async () => ({ value: w.auth }))
   on('http.fetch', async (_$, e) => {
-    w.fetches.push({ url: e.url, init: e.init })
-    const a = await w.http()
+    const isProfile = e.url.endsWith('/api/oauth/profile')
+    ;(isProfile ? w.profileFetches : w.fetches).push({ url: e.url, init: e.init })
+    const a = await (isProfile ? w.profile() : w.http())
     return ('deny' in a ? a : { value: a }) as never
   })
   on('session.measure', async (_$, e) => ({ changed: e.changed }))

@@ -15,6 +15,21 @@ export type BandCache = {
   isCold: boolean
 }
 
+/**
+ * The claude.ai login the session runs on. `label`: `work` for a Team or Enterprise organization, `personal` for any
+ * other plan, null when the plan is unknown (no segment). `plan` is the raw organization type (`claude_team`);
+ * `configDir` the config directory as shown (`~/.claude`); `source` where the label came from.
+ */
+export type BandAccount = {
+  label: 'work' | 'personal' | null
+  plan: string | null
+  email: string | null
+  org: string | null
+  role: string | null
+  configDir: string | null
+  source: 'login record' | 'profile endpoint' | 'BAND_ACCOUNT' | null
+}
+
 export type BandEventKind = 'session' | 'model' | 'compact' | 'rate'
 /** One of band's own event-log lines; `atMs` = `$.clock.now()` when written, `text` is one line. */
 export type BandEvent = { atMs: number; kind: BandEventKind; text: string }
@@ -55,6 +70,8 @@ declare module 'claude-code' {
       /** clock time of the last refresh; 0 until the first session.start of this process */
       tick: number
       rateAlarmed: boolean
+      /** the login the session runs on; null without a claude.ai login, under BAND_ACCOUNT=0, or before the first read */
+      account: BandAccount | null
       /** the band-progress pane is placed and not closed; the band hides its digest then */
       paneShown: boolean
       /** the band holds the keyboard; hotkey letters are drawn only then */

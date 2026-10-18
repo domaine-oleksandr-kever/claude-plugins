@@ -2,7 +2,7 @@
 // Clear / Cancel first) and the terminal's model
 // picker, which unfolds into the row itself: the band region clips anything drawn outside its own rows, so no
 // list can pop over the transcript. A desktop draws the buttons on a second row under the figures.
-// Render only reads: band's atoms (usage.ts and checklist.tsx write them), base's task snapshot for the digest and
+// Render only reads: band's atoms (usage.ts, account.ts and checklist.tsx write them), base's task snapshot for the digest and
 // the Progress button, every publisher's event list for the Log button. The Progress and Log presses are
 // answered by the `ui.press` hooks on elements `progress` (checklist.tsx) and `log` (log.tsx). While base reports
 // the task workspace stale, a Compact press or a typed /compact runs base's save-task-context first.
@@ -28,9 +28,10 @@ import {
   compactToast,
   costCard,
   ctxCard,
+  accountCard,
   digestOf,
-  fmtResetShort,
   glyphText,
+  groupResets,
   layout,
   modelOptions,
   pctLevel,
@@ -46,6 +47,7 @@ import { anyEvent, take } from './events.ts'
 const usage = atom({ plugin: 'band', key: 'usage' } as const, USAGE_INIT)
 const model = atom({ plugin: 'band', key: 'model' } as const, null)
 const cache = atom({ plugin: 'band', key: 'cache' } as const, CACHE_INIT)
+const account = atom({ plugin: 'band', key: 'account' } as const, null)
 const tick = atom({ plugin: 'band', key: 'tick' } as const, 0)
 const paneShown = atom({ plugin: 'band', key: 'paneShown' } as const, false)
 const bandFocused = atom({ plugin: 'band', key: 'bandFocused' } as const, false)
@@ -247,6 +249,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     const isPaneShown = await read($, paneShown)
     const focused = await read($, bandFocused)
     const unfolded = await read($, modelPicker)
+    const acct = await read($, account)
     if (u.ctxPct === null && u.rates.length === 0 && m === null && c.anchorMs === null) return next(e)
 
     const isWorking = e.props.isWorking
@@ -270,7 +273,7 @@ export function registerBand(on: On, options: PluginOptions): void {
     lastRender.bodyColumns = e.props.bodyColumns
     lastRender.maxRows = e.props.maxRows
     // A desktop draws proportional text: its bodyColumns do not measure the row, so nothing is dropped there.
-    const segs = layout(bandSegs({ usage: u, model: m, cache: c, nowMs: now, isWorking, digest, hasChecklist, hasEvents }), isDesktop ? undefined : e.props.bodyColumns)
+    const segs = layout(bandSegs({ usage: u, model: m, cache: c, nowMs: now, isWorking, digest, hasChecklist, hasEvents, account: acct }), isDesktop ? undefined : e.props.bodyColumns)
     const { Box, Text, Button } = $.ui.resolve(e)
 
     const label = (text: string) => (isDesktop ? glyphText(text) : text)
@@ -312,9 +315,10 @@ export function registerBand(on: On, options: PluginOptions): void {
         </Box>
       </Box>
     )
-    // The reset time trails the bold value, dim: rowText measures the same ` ↻2h05m`.
+    // The reset time trails the bold value, dim, once per group of windows sharing it: rowText measures the same ` ↻2h05m`.
+    const resets = groupResets(segs.rates, segs.resetsNowMs)
     const rate = (r: BandRate, i: number): RenderNode[] => {
-      const reset = resetMark(segs.resetsNowMs === null ? null : fmtResetShort(r.resetsAt, segs.resetsNowMs))
+      const reset = resetMark(resets[i])
       const pct = labeled(rateText(r), dimLabel, { bold: true, ...LEVEL_PROPS[pctLevel(r.pct)] })
       const body = reset ? (
         <Box flexDirection="row">
@@ -364,6 +368,10 @@ export function registerBand(on: On, options: PluginOptions): void {
     }
 
     const groups: RenderNode[][] = []
+    if (segs.account !== null && acct !== null) {
+      const word = isDesktop ? <Text>{GLYPH[segs.account]}</Text> : <Text dimColor>{segs.account}</Text>
+      groups.push([hoverable('seg-account', word, accountCard(acct))])
+    }
     if (segs.cache !== null) {
       const level = LEVEL_PROPS[cacheView(c, now, isWorking).level]
       groups.push([hoverable('seg-cache', labeled(label(segs.cache), dimLabel, { bold: true, ...level }), cacheCard(c, now))])
