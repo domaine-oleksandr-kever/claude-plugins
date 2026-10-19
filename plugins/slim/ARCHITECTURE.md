@@ -167,8 +167,9 @@ them equal, so the pure pre-decision in the module and the core never disagree.
   MCP by content, and on Read only for a `.log/.jsonl/.ndjson` file (where the log engine would
   otherwise have run): a `grep -rn error: logs/` hit list stays plain text. **listing runs only
   after a listing command on Bash** (`find`, `fd`, `ls`, `tree`, `git ls-files`, `rg --files`) that
-  writes the output, never on Read or MCP: `cat paths.txt` and `ls data && cat data/prices.csv` stay
-  plain text.
+  writes the output, never on Read or MCP, and not after an earlier command that starts with `echo`,
+  `printf`, `cat`, `grep`, `wc`, `head` or `tail` outside a `$(…)` capture: `cat paths.txt`,
+  `ls data && cat data/prices.csv` and `echo x; find .` stay plain text.
 - **MCP text is sniffed too, guards included**: a text block that sniffs as plain text, a diff, test
   output, a template or HTML passes through (stubbed when too large); every other shape goes the json
   route, which unwraps fences, JSONL, block envelopes, Figma JSX and logs. So theme-check output that

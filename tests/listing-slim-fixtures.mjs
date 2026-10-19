@@ -167,19 +167,40 @@ for (const [name, text, opts] of [['find', FIND, {}], ['ls-R', LSR, {}], ['tree'
     const f = compress({ data: fullPaths(root) }, O);
     check(`LP-tree-f-${root}`, f.decision === 'compressed' && f.text.includes(`\n${root}/d0/ (30 files, 1 dir): .js 30 · e.g. f0.js, f1.js, f2.js\n`) && f.text.includes(`\n${root}/d1/sub/ (1 file)\n  deep.js\n`) && !f.text.includes(`${root}/${root}/`), f.text);
   }
+  const prefix = ['dir=/Users/dev/.claude/domaine/log', 'file=/Users/dev/.claude/domaine/log/67fc90c0/base.jsonl', '2', '--- guard lines:', 'none', '--- workspace:'];
+  const ws = Array.from({ length: 100 }, (_, i) => `/Users/dev/ws/.claude/tasks/t${i % 4}/${i % 3 ? 'notes' : 'shots'}-${i}.${i % 2 ? 'md' : 'png'}`).join('\n');
+  const mixed = `${prefix.join('\n')}\n${ws}\n`;
+  eq('LP-mixed-sniff', sniff({ data: mixed }).reason, 'listing-flat');
+  const alone = compress({ data: ws }, O).text.split('\n');
+  const m = compress({ data: mixed }, O);
+  eq('LP-mixed-other-verbatim-in-order', m.text, [alone[0], ...prefix, ...alone.slice(1)].join('\n'));
+  for (const [name, top, sub] of [['find-root', ['src'], 'src/d0/f'], ['ls-files-bare', ['gradlew', 'mvnw', '_redirects', 'configure', 'Makefile'], 'src/f'], ['fd-dirs', ['assets', 'config', 'layout', 'sections'], 'sections/s']]) {
+    const p = listing.parse([...top, ...Array.from({ length: 60 }, (_, i) => `${sub}${i}.js`)].join('\n'));
+    check(`LP-bare-name-${name}`, p.entries.length === top.length + 60 && p.other.length === 0, JSON.stringify(p.other));
+  }
+  check('LP-mixed-no-other-node', outlineOf(m.text).every((d) => !/^(?:dir|file)=/.test(d.dir) && !d.names.some((n) => n === '2' || n === 'none')), m.text.slice(0, 600));
   const fdDirs = `${Array.from({ length: 60 }, (_, i) => `blocks/b-${i}.liquid`).join('\n')}\nempty-dir/\n`;
   check('LP-fd-trailing-slash-dir', compress({ data: fdDirs }, O).text.includes('\nempty-dir/ (empty)\n'), compress({ data: fdDirs }, O).text);
 }
 
 // LA — admission: Bash by command word only, gate 8,192; never Read, attachment or WebFetch; MCP takes the json route
 {
-  for (const cmd of ['find . -type f', 'cd theme && find . -name "*.liquid"', 'fd -e liquid', 'ls -R node_modules', 'tree -L 3', 'git ls-files', 'git -C ../shop ls-files', 'rg --files', 'rg -g "*.json" --files', 'find . | sort', 'find . -type f 2>&1 | head -500', '(cd x && find .)']) {
+  for (const cmd of ['find . -type f', 'cd theme && find . -name "*.liquid"', 'fd -e liquid', 'ls -R node_modules', 'tree -L 3', 'git ls-files', 'git -C ../shop ls-files', 'rg --files', 'rg -g "*.json" --files', 'find . | sort', 'find . -type f 2>&1 | head -500', '(cd x && find .)', 'f=$(find . -name a | head -1); find "$f" -type f',
+    'f=$(cat list.txt); find "$f" -type f', 'd=$(grep -l x a | head -1) && find "$d"', 'n=$(wc -l < a); find src', '`cat x`; find .']) {
     eq(`LA-bash-${cmd}`, admit('bash', 'listing', cmd), 'listing');
   }
   for (const cmd of ['cat files.txt', 'grep -r foo .', 'echo find', 'node scripts/lsfiles.cjs', 'rg foo', 'git log --stat',
     'ls data && cat data/prices.csv', "find data -name '*.csv' -exec cat {} +", "find data -name '*.csv' -exec cut -d, -f3 {} +",
-    'ls && cat requirements.txt', "find src -name '*.js' | xargs grep -c TODO", 'find . -type f; echo done']) {
+    'ls && cat requirements.txt', "find src -name '*.js' | xargs grep -c TODO", 'find . -type f; echo done',
+    'echo x; find .', 'printf a && ls -R', 'cat a | sort; find .', 'grep -q x f || find .', '(echo hi; find .)',
+    'D=log; echo "dir=$D"; f=$(find "$D" -name base.jsonl | head -1); echo "file=$f"; wc -l < "$f"; grep guard "$f" || echo none; find ws -type f | sort']) {
     eq(`LA-bash-not-${cmd}`, admit('bash', 'listing', cmd), 'text');
+  }
+  for (const unit of ['(echo ', '(echo a|', '(cat $( ']) {
+    const cmd = `${unit.repeat(Math.ceil(131072 / unit.length))} find .`;
+    const t0 = performance.now();
+    LIST_CMD.test(cmd);
+    check(`LA-cmd-linear-${unit}`, performance.now() - t0 < 1000, `${(performance.now() - t0).toFixed(0)} ms`);
   }
   eq('LA-other-channels', ['read', 'attachment', 'webfetch', 'mcp'].map((c) => admit(c, 'listing', 'find .')), [null, null, 'text', 'json']);
   eq('LA-gate', [structuredGate('bash', 'listing', 65536), LIST_GATE], [8192, 8192]);

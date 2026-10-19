@@ -259,7 +259,7 @@ describe('channels', () => {
     const paths = Array.from({ length: 400 }, (_, i) => `./snippets/card-${i}.liquid`).join('\n')
     expect(LIST_GATE).toBe(8192)
     for (const cmd of ['find . -type f', 'cd t && ls -R', 'tree -L 2', 'git ls-files', 'rg --files', 'fd -e liquid']) expect(candidate('bash', bash(paths, cmd), P)).toBe(true)
-    for (const cmd of ['cat paths.txt', 'ls data && cat data/prices.csv', "find . -name '*.csv' -exec cat {} +", 'find . | xargs grep -c TODO']) expect(candidate('bash', bash(paths, cmd), P)).toBe(false)
+    for (const cmd of ['cat paths.txt', 'ls data && cat data/prices.csv', "find . -name '*.csv' -exec cat {} +", 'find . | xargs grep -c TODO', 'echo x; find .', 'D=log; echo "dir=$D"; f=$(find "$D" -name base.jsonl | head -1); echo "file=$f"; wc -l < "$f"; grep guard "$f" || echo none; find ws -type f | sort']) expect(candidate('bash', bash(paths, cmd), P)).toBe(false)
     expect(candidate('bash', bash(paths.slice(0, 8000), 'find .'), P)).toBe(false)
   })
 

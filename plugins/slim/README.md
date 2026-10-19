@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.14.0**.
+Current release: **slim v0.14.1**.
 
 ## Install
 
@@ -216,8 +216,10 @@ every line.
 
 The listing engine runs only when a listing command (`find`, `fd`, `ls`, `tree`, `git ls-files`,
 `rg --files`) writes the output. The listing command must be the last command. Only `sort`, `uniq`,
-`head`, `tail` or `grep` may follow it in its pipeline, and it has no `-exec`. `cat paths.txt`,
-`ls data && cat data/prices.csv` and `find … | xargs grep -c` stay plain text.
+`head`, `tail` or `grep` may follow it in its pipeline, and it has no `-exec`. No earlier command
+starts with `echo`, `printf`, `cat`, `grep`, `wc`, `head` or `tail`, except inside a `$(…)` capture,
+which prints nothing. `cat paths.txt`, `ls data && cat data/prices.csv`, `echo files: ; find .` and
+`find … | xargs grep -c` stay plain text.
 
 **Path listings.** A Bash listing over 8,192 B becomes a directory outline. The listing can be one
 path per line (`find`, `fd`, `git ls-files`, `rg --files`), `ls -R` blocks or `tree` box drawing.
@@ -229,7 +231,8 @@ line (`./assets/ (1,350 files): .js 610, .css 380, .svg 240 · e.g. …`).
 
 slim never cuts depth. Over the egress cap, the threshold falls to 4, then to histograms only, then
 slim stubs the output. Lines that are not paths (`find: …: Permission denied`, tree's summary) stay
-verbatim under the header. slim prints a name as it came or counts it, and never rewrites it. A
+verbatim under the header. So does what an earlier command printed: a `key=value` line or a bare
+word such as `2` or `none`. slim prints a name as it came or counts it, and never rewrites it. A
 listing with nothing to fold stays as it came (`no-gain`), unless it is over the egress cap. The
 footer names the next call: a narrower `find <dir> -name '<pattern>'` or `ls <dir>`, or a windowed
 Read of the original.

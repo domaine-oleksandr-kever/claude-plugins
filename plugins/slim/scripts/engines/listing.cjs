@@ -9,8 +9,9 @@
  * (`./assets/ (142 files): .liquid 61, .json 40 · e.g. a.liquid, b.json`). Depth is never cut; the
  * threshold falls instead (stages `listing` 8 → `fold4` 4 → `fold0` 0) until `targetBytes` holds. A
  * name is printed verbatim or counted, never rewritten; lines that are not paths (errors, tree's
- * summary) stay verbatim under the header. Nothing folded and the input within `targetBytes` →
- * `no-gain`: a re-layout alone is the input again. Pure: no I/O.
+ * summary, another command's `key=value` lines) stay verbatim under the header, and so does a bare
+ * word without `/` or an extension (`2`, `none`) once the output holds such a line. Nothing folded
+ * and the input within `targetBytes` → `no-gain`: a re-layout alone is the input again. Pure: no I/O.
  */
 'use strict';
 
@@ -32,6 +33,8 @@ const isPath = (l) => PATH.test(l) && !l.includes('://') && !l.startsWith('-') &
 const hasShape = (l) => l.includes('/') || /[^./]\.[A-Za-z][\w-]{0,9}$/.test(l);
 // CSV rows, key=value pairs and `grep -c` / `-printf '%p:%s'` counts carry values a fold would hide.
 const DATA = /[,;=]|:\d+$/;
+// A `key=value` line (`dir=/a/b`) is another command's output, never a path.
+const KV = /^[\w-]+=/;
 
 // The listing format of `lines` (non-blank, trimmed of \r), or null.
 function formatOf(lines) {
@@ -106,8 +109,11 @@ function parse(text) {
       entries.push({ segs: prefix === null ? [name] : [...split(prefix).segs, name], dir: name !== l });
     }
   } else {
+    const named = (l) => !KV.test(l) && (isPath(l) || (l.includes('/') && !l.includes(': ')));
+    // A shapeless bare word (`gradlew`, a `find src` root) is a name unless another command's output sits beside it (`2`, `none`).
+    const mixed = lines.some((l) => !named(l));
     for (const l of lines) {
-      if (isPath(l) || (l.includes('/') && !l.includes(': '))) entries.push(split(l));
+      if (named(l) && (!mixed || !isPath(l) || hasShape(l))) entries.push(split(l));
       else other.push(l);
     }
   }
