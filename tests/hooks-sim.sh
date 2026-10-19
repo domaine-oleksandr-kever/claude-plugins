@@ -6213,6 +6213,25 @@ assert_absent DH10-no-ste "$(dh_ctx)" "how to explain"
 assert_absent DH10-no-workspace "$(dh_ctx)" "## base convention — task workspace"
 assert_absent DH10-no-shopify "$(dh_ctx)" "Shopify store work"
 
+# DH10b: the subagent record base's MCP guard reads — agents/<agent_id>.json holds the agent_type, one file per
+# agent; no id, a bad id or no type records nothing; a fork is recorded too.
+dh_home agents; AG="$(BLOG s-ag)/agents"
+ag() { DH_IN="{\"session_id\":\"s-ag\",\"agent_type\":\"$1\",\"agent_id\":\"$2\"}" dh base SubagentStart; }
+ag base:jira-reader a1
+assert_eq DH10b-record "$(cat "$AG/a1.json")" '"base:jira-reader"'
+ag general-purpose a2
+assert_eq DH10b-second "$(cat "$AG/a1.json") $(cat "$AG/a2.json")" '"base:jira-reader" "general-purpose"'
+ag fork a3
+assert_eq DH10b-fork "$(cat "$AG/a3.json")" '"fork"'
+ag base:jira-writer ..; ag base:jira-writer 'x/y'
+DH_IN='{"session_id":"s-ag","agent_type":"x"}' dh base SubagentStart
+DH_IN='{"session_id":"s-ag","agent_id":"a5"}' dh base SubagentStart
+assert_eq DH10b-no-id-or-type "$(ls "$AG" | tr '\n' ' ')" 'a1.json a2.json a3.json '
+assert_eq DH10b-exit "$dh_rc" 0
+rm -rf "$DH/tmp/domaine-log/s-ag2"
+for i in 1 2; do DH_IN="{\"session_id\":\"s-ag2\",\"agent_type\":\"t$i\",\"agent_id\":\"b$i\"}" DH_ENV="DOMAINE_LOG_DIR=/dev/null/log" dh base SubagentStart; done
+assert_eq DH10b-spare "$(cat "$DH/tmp/domaine-log/s-ag2/agents/b1.json") $(cat "$DH/tmp/domaine-log/s-ag2/agents/b2.json")" '"t1" "t2"'
+
 # DH11: the dogfood Stop — blocks once per mirrored, unreported failure of this session; the reason pinned.
 dh_home stop; SD="$(BLOG s-stop)"; mkdir -p "$SD"
 REASON='base dogfood: a plugin script failed (md-to-adf.cjs) and no plugin_defect report followed — report it with plugin_defect (not among your tools: in your reply), then stop'

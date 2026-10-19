@@ -14,9 +14,11 @@
 #   i. every agents/<name>.md opens with frontmatter whose `name:` is <name> and carries a
 #      `description:` — the spawn name base:<name> is that field;
 #   k. no Jira/Confluence/Notion write tool a reader or the writer must not call is reachable under
-#      the plugin's own prefix or the user-scope twin (mcp__atlassian__…, mcp__notion__…), resolved as
-#      the engine does (disallowedTools first, then the tools allowlist); every role but figma-reader
-#      carries a tools allowlist, so a write tool under any other server name stays out;
+#      the plugin's own prefix, resolved as the engine does (disallowedTools first, then the tools
+#      allowlist), nor a server of base's it does not use, nor Edit, NotebookEdit, Agent, Task or a
+#      built-in its role leaves out; under any other server name the MCP guard
+#      (hooks/mods/guards/mcp.ts) refuses the writes and the servers out of the agent's scope;
+#  k2. that guard holds both write lists (JIRA_WRITES, NOTION_WRITES), which rule k reads from it;
 #   j. each reader (jira-, doc-, figma-reader) names the files a real slim handle points at, the
 #      list base's shared untrusted-content section leaves out;
 #   t. the team plugins base's shared text names (every plugins/<p> whose manifest `dependencies` is
@@ -189,24 +191,36 @@ for (const a of agents) {
   if (name !== a) bad('i', `agents/${a}.md`, `name: ${name || '(none)'}`);
   if (!/^description:\s*\S/m.test(fm)) bad('i', `agents/${a}.md`, 'description');
 }
-const JIRA_WRITES = ['editJiraIssue', 'addCommentToJiraIssue', 'transitionJiraIssue', 'createJiraIssue',
-  'createIssueLink', 'addWorklogToJiraIssue', 'createConfluencePage', 'updateConfluencePage',
-  'createConfluenceFooterComment', 'createConfluenceInlineComment'];
-const NOTION_WRITES = ['notion-create-pages', 'notion-update-page', 'notion-create-comment', 'notion-move-pages',
-  'notion-duplicate-page', 'notion-create-database', 'notion-update-data-source', 'notion-create-view',
-  'notion-update-view', 'notion-create-folder', 'notion-update-folder', 'notion-create-file-upload',
-  'notion-create-attachment', 'notion-spawn-session', 'notion-send-message-to-session', 'notion-stop-session'];
+const GUARD = path.join('hooks', 'mods', 'guards', 'mcp.ts');
+const guardText = text(path.join(dir, GUARD)) || '';
+const writesOf = (name) => {
+  const m = new RegExp(`export const ${name} = \\[([^\\]]*)\\]`).exec(guardText);
+  const list = m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : [];
+  if (!list.length) bad('k2', GUARD, name);
+  return list;
+};
+const JIRA_WRITES = writesOf('JIRA_WRITES');
+const NOTION_WRITES = writesOf('NOTION_WRITES');
 const WHOLE = '*';
+const OFF = { playwright: WHOLE, 'chrome-devtools-mcp': WHOLE, 'shopify-dev-mcp': WHOLE };
 const DENY = {
-  'jira-reader': { atlassian: JIRA_WRITES, 'notion-mcp': NOTION_WRITES },
-  'doc-reader': { atlassian: JIRA_WRITES, 'notion-mcp': NOTION_WRITES },
+  'jira-reader': { ...OFF, 'figma-dev-mode': WHOLE, atlassian: JIRA_WRITES, 'notion-mcp': NOTION_WRITES },
+  'doc-reader': { ...OFF, 'figma-dev-mode': WHOLE, atlassian: JIRA_WRITES, 'notion-mcp': NOTION_WRITES },
   'jira-writer': {
+    ...OFF,
+    'figma-dev-mode': WHOLE,
     atlassian: JIRA_WRITES.filter((t) => t !== 'editJiraIssue' && t !== 'addCommentToJiraIssue'),
     'notion-mcp': NOTION_WRITES,
   },
-  'figma-reader': { atlassian: WHOLE, 'notion-mcp': WHOLE },
+  'figma-reader': { ...OFF, atlassian: WHOLE, 'notion-mcp': WHOLE },
 };
-const TWIN = { atlassian: 'mcp__atlassian', 'notion-mcp': 'mcp__notion' };
+const STD = ['Edit', 'NotebookEdit', 'Agent', 'Task'];
+const BUILTIN = {
+  'jira-reader': [...STD, 'Skill', 'WebFetch', 'WebSearch'],
+  'doc-reader': [...STD, 'Skill'],
+  'jira-writer': [...STD, 'Skill', 'Write', 'Glob', 'Grep', 'WebFetch', 'WebSearch'],
+  'figma-reader': [...STD, 'WebFetch', 'WebSearch'],
+};
 const listOf = (fm, key) => {
   const m = new RegExp(`^${key}:[ \\t]*(.*)$`, 'm').exec(fm);
   if (!m) return [];
@@ -237,13 +251,11 @@ for (const [a, rule] of Object.entries(DENY)) {
   if (!agents.has(a)) { bad('k', `agents/${a}.md`, `${a} missing`); continue; }
   const fm = frontmatter(a);
   for (const [server, tools] of Object.entries(rule)) {
-    for (const base of [`${PFX}${server}`, TWIN[server]]) {
-      if (tools === WHOLE) { if (reachable(fm, `${base}__any`)) bad('k', `agents/${a}.md`, `${a} ${base}`); continue; }
-      for (const t of tools) if (reachable(fm, `${base}__${t}`)) bad('k', `agents/${a}.md`, `${a} ${base}__${t}`);
-    }
+    const base = `${PFX}${server}`;
+    if (tools === WHOLE) { if (reachable(fm, `${base}__any`)) bad('k', `agents/${a}.md`, `${a} ${base}`); continue; }
+    for (const t of tools) if (reachable(fm, `${base}__${t}`)) bad('k', `agents/${a}.md`, `${a} ${base}__${t}`);
   }
-  if (a !== 'figma-reader' && !listOf(fm, 'tools').length) bad('k', `agents/${a}.md`, `${a} no tools allowlist`);
-  for (const t of ['Edit', 'NotebookEdit', 'Agent', 'Task']) if (reachable(fm, t)) bad('k', `agents/${a}.md`, `${a} ${t}`);
+  for (const t of BUILTIN[a]) if (reachable(fm, t)) bad('k', `agents/${a}.md`, `${a} ${t}`);
 }
 for (const a of ['jira-reader', 'doc-reader', 'figma-reader']) {
   if (!agents.has(a)) continue;
@@ -280,17 +292,22 @@ cat > "$FX/agents/jira-reader.md" <<'MD'
 ---
 name: jira-reader
 description: a fixture reader with a gap in its denylist
-disallowedTools: Edit, mcp__plugin_kore_atlassian__editJiraIssue, mcp__atlassian__editJiraIssue, mcp__plugin_base_atlassian__addCommentToJiraIssue, mcp__atlassian__addCommentToJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__atlassian__createJiraIssue, mcp__plugin_base_atlassian__createIssueLink, mcp__atlassian__createIssueLink, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment, mcp__atlassian__createConfluenceInlineComment, mcp__plugin_base_notion-mcp, mcp__notion
+disallowedTools: Edit, mcp__plugin_kore_atlassian__editJiraIssue, mcp__plugin_base_atlassian__addCommentToJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__plugin_base_atlassian__createIssueLink, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment, mcp__plugin_base_notion-mcp
 ---
 MD
 cat > "$FX/agents/figma-reader.md" <<'MD'
 ---
 name: figma-reader
-description: a fixture reader denying whole servers, one twin short
+description: a fixture reader denying whole servers, one short
 disallowedTools:
+  - Edit
+  - NotebookEdit
+  - Agent
+  - Task
+  - WebFetch
+  - WebSearch
   - mcp__plugin_base_atlassian
-  - mcp__atlassian
-  - mcp__plugin_base_notion-mcp
+  - mcp__plugin_base_playwright
 ---
 MD
 cat > "$FX/agents/doc-reader.md" <<'MD'
@@ -301,6 +318,8 @@ tools: Read, Write, mcp__plugin_base_atlassian, mcp__slim
 disallowedTools: mcp__plugin_base_atlassian__editJiraIssue, mcp__plugin_base_atlassian__addCommentToJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment
 ---
 MD
+# rule k reads its write lists from base's own MCP guard
+mkdir -p "$FX/hooks/mods/guards"; cp "$ROOT/plugins/base/hooks/mods/guards/mcp.ts" "$FX/hooks/mods/guards/mcp.ts"
 # a team plugin the shared text names, and a line citing it right and wrong
 KIT="$TMP/teams/kit"; mkdir -p "$KIT/.claude-plugin" "$KIT/skills/ship" "$KIT/agents" "$KIT/references"
 printf '{ "name": "kit", "dependencies": ["base"] }\n' > "$KIT/.claude-plugin/plugin.json"
@@ -331,17 +350,19 @@ want h missing.md;                       dont h ../README.md;     dont h span.md
 want i "name: other";                    want i description;      dont i "name: reader"
 want b mcp__plugin_kore_;                dont b mcp__plugin_base_
 want k "jira-reader mcp__plugin_base_atlassian__editJiraIssue"
-want k "jira-reader mcp__atlassian__transitionJiraIssue"
 dont k "jira-reader mcp__plugin_base_atlassian__createJiraIssue"
 dont k "jira-reader mcp__plugin_base_notion-mcp__notion-update-page"
-want k "figma-reader mcp__notion";       dont k "figma-reader mcp__plugin_base_notion-mcp"
-dont k "figma-reader mcp__atlassian";    dont k "figma-reader no tools allowlist"
+want k "figma-reader mcp__plugin_base_notion-mcp"; dont k "figma-reader mcp__plugin_base_atlassian"
 want k "doc-reader mcp__plugin_base_atlassian__createIssueLink"
-dont k "doc-reader mcp__atlassian__editJiraIssue"
-dont k "doc-reader mcp__notion__notion-update-page"
-dont k "doc-reader no tools allowlist";  want k "jira-reader no tools allowlist"
+dont k "doc-reader mcp__plugin_base_notion-mcp__notion-update-page"
 dont k "doc-reader Edit";                dont k "jira-reader Edit";  want k "jira-reader NotebookEdit"
+dont k "figma-reader Task";              want k "jira-reader Task"
 want k "jira-writer missing"
+want k "jira-reader mcp__plugin_base_playwright"; want k "jira-reader mcp__plugin_base_figma-dev-mode"
+dont k "figma-reader mcp__plugin_base_playwright"; want k "figma-reader mcp__plugin_base_shopify-dev-mcp"
+dont k "doc-reader mcp__plugin_base_playwright";  dont k "doc-reader Skill"
+want k "jira-reader Skill";              want k "jira-reader WebFetch";  dont k "figma-reader WebFetch"
+dont k2 JIRA_WRITES;                     dont k2 NOTION_WRITES
 want j "jira-reader slim-mcp-*";     dont j "jira-writer slim-mcp-*"
 want t /kit:no-such-skill;               dont t /kit:ship
 want t kit:no-agent;                     dont t kit:scout;        dont t kit:ship
@@ -353,9 +374,11 @@ dont t /base:commit
 FX2="$TMP/renamed"; mkdir -p "$FX2/.claude-plugin" "$FX2/references"
 printf '{ "name": "kit", "mcpServers": { "atlassian": {} } }\n' > "$FX2/.claude-plugin/plugin.json"
 printf 'deny mcp__plugin_base_atlassian__editJiraIssue and mcp__plugin_kit_atlassian__createJiraIssue\nspawn kit:ghost, run /kit:nope and /kit-bogus\n' > "$FX2/references/x.md"
+mkdir -p "$FX2/hooks/mods/guards"; printf "export const JIRA_WRITES = ['editJiraIssue']\n" > "$FX2/hooks/mods/guards/mcp.ts"
 run_lint "$FX2" > "$TMP/fx2.out"; OUTF="$TMP/fx2.out"
 want b mcp__plugin_base_;                dont b mcp__plugin_kit_
 want d kit:ghost;                        want e /kit:nope;        want e /kit-bogus
+want k2 NOTION_WRITES;                   dont k2 JIRA_WRITES
 OUTF="$TMP/fx.out"
 # the laid dependency contract is the engine's copy, not base's text
 if ! grep -qF 'types/slim' "$TMP/fx.out"; then ok; else bad fixture-laid-types "the laid contract was linted"; fi
@@ -370,7 +393,7 @@ done | tr '\n' ' ')"
 if [ -n "$TEAM_DIRS" ]; then ok; else bad team-set "no team plugin on base found under plugins/"; fi
 if [ -d "$BASE" ]; then
   run_lint "$BASE" "$TEAM_DIRS" > "$TMP/base.out"
-  for r in a b c d e f g h i k t; do
+  for r in a b c d e f g h i k k2 t; do
     hits="$(awk -F'\t' -v r="$r" '$1 == r { printf "%s %s; ", $2, $3 }' "$TMP/base.out")"
     if [ -z "$hits" ]; then ok; else bad "base-$r" "$(printf '%s' "$hits" | head -c 600)"; fi
   done

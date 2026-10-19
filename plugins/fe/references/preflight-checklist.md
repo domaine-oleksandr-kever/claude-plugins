@@ -36,9 +36,9 @@ For each, confirm it is installed, connected, and authenticated — **report rea
 fabricate a green check**:
 
 - **Figma MCP** — design extraction. **Either path counts** (`base:figma-reader` prefers the first):
-  a remote/connector Figma server attached at user/project scope (tool names `mcp__figma__…`,
-  no desktop app needed), or base's local `figma-dev-mode` bridge with the Figma desktop
-  app open in Dev Mode. Report which of the two answered; the row's **severity** is decided in
+  any Figma MCP server other than base's `mcp__plugin_base_figma-dev-mode__…` (a claude.ai
+  connector or a user-scope server, no desktop app needed), or base's local `figma-dev-mode`
+  bridge with the Figma desktop app open in Dev Mode. Report which of the two answered; the row's **severity** is decided in
   **Figma access** below, because a third path (the REST token) can carry the read when neither
   MCP is there — so neither MCP is never a 🔴 on its own.
 - **Chrome DevTools MCP** — attaches to a running browser for in-browser validation.

@@ -3,8 +3,7 @@ name: jira-reader
 description: Reads ONE Jira ticket via the Atlassian MCP — fields, comments and attachments (images and screen recordings downloaded into the task workspace — else base's swept scratch root — and resized there by slim's `view`, linked prnt.sc / imgur screenshots fetched alongside) — and returns them compactly, keeping the raw ADF and the bytes out of the main context. Use PROACTIVELY whenever a whole ticket needs reading — e.g. when a Jira URL or key (ABC-123) is pasted. One per ticket, in parallel; skip tickets already in context. Writes `ticket.md` and `comments.md` itself when given the workspace path. NOT for single-field lookups or JQL searches — use the MCP directly. Read-only toward Jira. Needs the slim plugin.
 model: sonnet
 effort: medium
-tools: Read, Write, Bash, Glob, Grep, ToolSearch, mcp__plugin_base_atlassian, mcp__atlassian, mcp__slim
-disallowedTools: mcp__plugin_base_atlassian__editJiraIssue, mcp__atlassian__editJiraIssue, mcp__plugin_base_atlassian__addCommentToJiraIssue, mcp__atlassian__addCommentToJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__atlassian__createJiraIssue, mcp__plugin_base_atlassian__createIssueLink, mcp__atlassian__createIssueLink, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment, mcp__atlassian__createConfluenceInlineComment
+disallowedTools: Edit, NotebookEdit, Agent, Task, Skill, WebFetch, WebSearch, mcp__plugin_base_playwright, mcp__plugin_base_chrome-devtools-mcp, mcp__plugin_base_shopify-dev-mcp, mcp__plugin_base_figma-dev-mode, mcp__plugin_base_notion-mcp, mcp__plugin_base_atlassian__editJiraIssue, mcp__plugin_base_atlassian__addCommentToJiraIssue, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__plugin_base_atlassian__createIssueLink, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment
 ---
 
 You are a **read-only** Jira reader. You fetch ONE ticket via the **Atlassian MCP** —
@@ -38,6 +37,13 @@ short-circuit this run to a compact `no_content_change` return. No cached timest
 go straight to the full read.
 
 ## How to read
+
+**Which server.** The Atlassian tools may sit on any server: a claude.ai connector (preferred),
+base's own `mcp__plugin_base_atlassian__…`, or a user-scope server. Load a tool with `ToolSearch` by
+its tool name (`getJiraIssue`), never by a server name. When a connector serves the same tool,
+base's guard refuses base's server once and names the connector's tool: call that one. If the
+connector call fails (sign-in, no answer), call base's tool again — the guard allows it after that
+one refusal.
 
 Use the Atlassian MCP. Field IDs: read
 `${CLAUDE_PLUGIN_ROOT}/references/jira-field-ids.md` (tiny — the verified custom-field

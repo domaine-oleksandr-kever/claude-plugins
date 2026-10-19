@@ -1,6 +1,7 @@
 // /base-doctor and the sweeps of base-tmp and of old event-log directories (once per session id; a /clear starts
 // a new one). The doctor runs scripts/doctor.cjs for what a node process sees and adds what only a session answers:
-// slim's view tool, each MCP server of base's manifest connected; then the tail of base.events.
+// slim's view tool, each MCP server of base's manifest connected, the connectors serving the same tools; then the
+// tail of base.events.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent } from '../../types'
@@ -8,6 +9,7 @@ import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent, spareRoot } fro
 import type { Disk } from './events.ts'
 import { SLIM_MISSING, SLIM_VIEW } from './session.ts'
 import { WINDOW_DAYS, dogfoodMode, enabledNames, loginAccount, loginFile, recent, seen } from './dogfood/text.ts'
+import { SIGNATURE, twinServers } from './guards/mcp.ts'
 
 export const COMMAND = {
   name: 'base-doctor',
@@ -225,6 +227,27 @@ async function defectRows($: $): Promise<Row[]> {
   }
 }
 
+/** The connection row, naming the servers that are no plugin's and serve the same tools: they take precedence. */
+async function connectRow($: $, server: string, names: readonly string[]): Promise<Row> {
+  const row = await connect($, server)
+  const twins = twinServers(names, server).join(', ')
+  if (!twins) return row
+  return row.status === 'PASS'
+    ? { ...row, detail: `${row.detail} — ${twins} takes precedence` }
+    : { status: 'WARN', name: row.name, detail: `${row.detail} — ${twins} serves the same tools and takes precedence` }
+}
+
+/** The connectors serving what base's own Atlassian, Notion and Figma servers serve. */
+function connectorsRow(names: readonly string[] | null): Row {
+  if (names === null) return { status: 'SKIP', name: 'connectors', detail: 'the tool list did not answer' }
+  const found = Object.entries(SIGNATURE)
+    .map(([server, [, vendor]]) => [vendor, twinServers(names, server).join(', ')] as const)
+    .filter(([, twins]) => twins)
+  return found.length
+    ? { status: 'PASS', name: 'connectors', detail: found.map(([vendor, twins]) => `${vendor}: ${twins}`).join('; ') }
+    : { status: 'SKIP', name: 'connectors', detail: "none attached — base's own servers serve Jira, Notion and Figma" }
+}
+
 async function connect($: $, server: string): Promise<Row> {
   const name = `mcp:${server}`
   const timeout = $.clock.sleep(MCP_TIMEOUT_MS).then(() => null)
@@ -244,17 +267,19 @@ async function connect($: $, server: string): Promise<Row> {
   return { status: 'FAIL', name, detail: `${r.reason}: ${r.message}` }
 }
 
-/** One row per server in base's own manifest, connected in parallel. */
+/** One row per server in base's own manifest, connected in parallel, then the `connectors` row. */
 async function mcpRows($: $): Promise<Row[]> {
+  const names = await $.tool.list().then(l => l.map(t => t.name), () => null)
+  const tail = connectorsRow(names)
   let servers: string[]
   try {
     const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { mcpServers?: unknown }
     servers = manifest.mcpServers && typeof manifest.mcpServers === 'object' ? Object.keys(manifest.mcpServers) : []
   } catch {
-    return [{ status: 'FAIL', name: 'mcp', detail: "base's manifest is unreadable: no server to check" }]
+    return [{ status: 'FAIL', name: 'mcp', detail: "base's manifest is unreadable: no server to check" }, tail]
   }
-  if (!servers.length) return [{ status: 'SKIP', name: 'mcp', detail: 'no mcpServers in the manifest' }]
-  return Promise.all(servers.map(s => connect($, s)))
+  if (!servers.length) return [{ status: 'SKIP', name: 'mcp', detail: 'no mcpServers in the manifest' }, tail]
+  return [...(await Promise.all(servers.map(s => connectRow($, s, names ?? [])))), tail]
 }
 
 /**

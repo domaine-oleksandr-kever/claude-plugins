@@ -12,7 +12,7 @@ plugins/base/
 ├── skills/*/SKILL.md            commit, pre-commit-review, save-task-context, report-plugin-issue, worktree, shopify
 ├── references/*.md              what the agents and skills cite by ${CLAUDE_PLUGIN_ROOT}/references/…, and the team plugins by <base root>/references/…
 ├── hooks/hooks.json             the module (./mods/register.ts) and the SessionStart/SubagentStart/Stop command hooks
-├── hooks/conventions.cjs        the command hooks: the conventions, the subagent share, the dogfood stop block
+├── hooks/conventions.cjs        the command hooks: the conventions, the subagent share and its agents/<id>.json record, the dogfood stop block
 ├── hooks/conventions-text.json  the convention text, one source for the command hooks and the mod's cloud fallback
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── hooks/no-verify-bypass.sh    the git-hooks guard's decision, run by guards/bash.ts
@@ -41,6 +41,7 @@ the `.claude/tasks` listing of `workspace/progress.ts` for that reason).
 | `workspace/autosave.ts` | `prompt.submit {text:/(?:)/}` (the stale-workspace context line) · `classic.Stop` (the turn-end block after a turn with savable work, at most once per 3 turns) · `classic.PreCompact` (the `compact:` marker on an auto-compact) | `base.autosave`, `base.compactMarker` |
 | `title.ts` | `classic.SessionStart`, `classic.UserPromptSubmit`: their `sessionTitle` result field | `base.titled`, `base.events` |
 | `guards/bash.ts` | `tool.call {tool:/^Bash$/}`: the attribution rule (pure, `guards/attribution.ts`), then `hooks/no-verify-bypass.sh` for a command naming a git verb | `base.events` |
+| `guards/mcp.ts` | `tool.call {tool:/^mcp__(?!slim__\|base__)/}`: a subagent's Jira/Confluence/Notion write by tool name on any server, refused by its type from `<log dir>/<session>/agents/<id>.json` (no record = refused); a base reader or writer's call on a server listing none of its vendors' `SIGNATURE` tools, refused; then base's own `mcp__plugin_base_…` tool refused once per session while a server that is no plugin's lists the same tool and the `SIGNATURE` tool (`$.tool.list()`); `SIGNATURE` is shared with the doctor | `base.mcpSoft`, `base.events` |
 | `guards/scratch.ts` | `session.start {cwd:/./}` latches the launch root · `tool.describe` + `tool.call` on the browser tools that take a path → `hooks/scratch-path-guard.cjs` | `base.guardRoot`, `base.events` |
 | `conventions.ts` | `prompt.context`: the cloud fallback only — where nothing draws and the `SessionStart` command hook left no `conventions.base.json` marker, the sections from `hooks/conventions-text.json` as one block (`dogfood` under `BASE_DOGFOOD=1`, its versions read as `dogfood.ts` reads them) | `base.injected` |
 | `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit {text:/$/}`: register `/base-doctor` (every start, and a new session id), start the base-tmp and event-log sweeps unawaited, once per session id · `command.run base-doctor` (passes `--log-dir` to `doctor.cjs`; the `conventions` row from the command-hook markers, the `defects` row under `BASE_DOGFOOD=1`) · `classic.UserPromptSubmit {prompt:/^/}`: the session id the `classic` row reads | `base.swept`, `base.events`, `base.classic` |
@@ -93,6 +94,7 @@ Engine rules this layout follows:
 - **`base.pin`**, **`base.lastKey`**, **`base.sessionId`** — the resolver's inputs.
 - **`base.started`**, **`base.checked`**, **`base.titled`**, **`base.swept`** — per-session-id
   latches, so a module reload or a repeated start does each thing once.
+- **`base.mcpSoft`** — `{ sid, tools }`: base's own MCP tools refused once this session for a connector twin; the second call runs, a new session id starts empty.
 - **`base.guardRoot`** — the project root the session launched in. The MCP servers' working
   directories were fixed there, so the scratch guard measures against it even after `/cd` or a
   worktree move changes `$.session.root()`.

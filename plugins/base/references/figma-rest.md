@@ -15,7 +15,7 @@ tool's shell.
 
 | rung | source | taken when |
 |---|---|---|
-| 1 | `mcp-connector` | the remote/connector Figma server's tools (`mcp__figma__…`) are listed — URL-driven, no desktop app |
+| 1 | `mcp-connector` | the tools of any Figma MCP server other than base's `mcp__plugin_base_figma-dev-mode__…` are listed (a claude.ai connector or a user-scope server) — URL-driven, no desktop app; its `get_screenshot` answers a short-lived `image_url` the reader downloads with `curl`, else inline base64 (`enableBase64Response: true`) |
 | 2 | `mcp-desktop` | the local `figma-dev-mode` bridge is listed **and** one `get_metadata` probe on the URL's node id succeeds — it answers only for the file in the desktop app's active tab |
 | 3 | `rest` | no Figma MCP tool is available at all, or a rung-1/2 call failed the way a closed app fails: connection refused, "node not found", "page not loaded" |
 | — | `""` | nothing answered — one `hint=` / `error=` line in `needs_clarification`, nothing else |

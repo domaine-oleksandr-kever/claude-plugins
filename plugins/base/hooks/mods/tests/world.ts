@@ -37,6 +37,8 @@ export type World = {
   files: Record<string, File>
   /** the tool names $.tool.list answers */
   tools: string[]
+  /** $.tool.list rejects while set */
+  toolsFail: boolean
   /** what $.session.surfaces() answers; empty = nothing draws (a cloud session, `claude -p`) */
   surfaces: string[]
   /** `[name, plugin]` pairs $.command.list answers */
@@ -92,6 +94,7 @@ export function world(on: On, over: Partial<World> = {}) {
     root: ROOT,
     files: {},
     tools: ['Bash', 'Read', SLIM_VIEW],
+    toolsFail: false,
     surfaces: ['terminal'],
     commands: [],
     enabledPlugins: { 'slim@domaine': true, 'band@domaine': true, 'base@domaine': true },
@@ -163,7 +166,10 @@ export function world(on: On, over: Partial<World> = {}) {
   })
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000, percent: w.ctxPct ?? undefined }, rateLimits: [] } as never }))
   on('settings.read', async () => ({ value: { env: w.settingsEnv, enabledPlugins: w.enabledPlugins } as any }))
-  on('tool.list', async () => ({ value: w.tools.map(name => ({ name, description: name, mcp: name.startsWith('mcp__') })) }))
+  on('tool.list', async () => {
+    if (w.toolsFail) throw new Error('the tool list did not answer')
+    return { value: w.tools.map(name => ({ name, description: name, mcp: name.startsWith('mcp__') })) }
+  })
   on('command.list', async () => ({
     value: w.commands.map(([name, plugin]) => ({ name, description: name, source: 'plugin', plugin }) as any),
   }))
@@ -298,6 +304,7 @@ export const PEEK = {
         checked: (await $.state.get({ plugin: 'base', key: 'checked' })).value ?? null,
         titled: (await $.state.get({ plugin: 'base', key: 'titled' })).value ?? null,
         guardRoot: (await $.state.get({ plugin: 'base', key: 'guardRoot' })).value ?? null,
+        mcpSoft: (await $.state.get({ plugin: 'base', key: 'mcpSoft' })).value ?? null,
         swept: (await $.state.get({ plugin: 'base', key: 'swept' })).value ?? null,
         injected: (await $.state.get({ plugin: 'base', key: 'injected' })).value ?? null,
         classic: (await $.state.get({ plugin: 'base', key: 'classic' })).value ?? null,

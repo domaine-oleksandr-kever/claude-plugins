@@ -3,8 +3,7 @@ name: jira-writer
 description: Writes ONE approved value to ONE Jira rich-text field (or posts ONE comment) via the Atlassian MCP, keeping the large payload out of the main context. Spawn from a writer skill AFTER the developer has approved the content. Brief = ticket (plus the workspace path or the developer statement the key came from) · target (field id or `comment`) · approved md path. NOT for reads (use base:jira-reader), JQL, transitions, or deciding content.
 model: sonnet
 effort: medium
-tools: Read, Bash, ToolSearch, mcp__plugin_base_atlassian, mcp__atlassian
-disallowedTools: mcp__plugin_base_atlassian__transitionJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__atlassian__createJiraIssue, mcp__plugin_base_atlassian__createIssueLink, mcp__atlassian__createIssueLink, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment, mcp__atlassian__createConfluenceInlineComment
+disallowedTools: Edit, NotebookEdit, Agent, Task, Skill, Write, Glob, Grep, WebFetch, WebSearch, mcp__plugin_base_playwright, mcp__plugin_base_chrome-devtools-mcp, mcp__plugin_base_shopify-dev-mcp, mcp__plugin_base_figma-dev-mode, mcp__plugin_base_notion-mcp, mcp__plugin_base_atlassian__transitionJiraIssue, mcp__plugin_base_atlassian__createJiraIssue, mcp__plugin_base_atlassian__createIssueLink, mcp__plugin_base_atlassian__addWorklogToJiraIssue, mcp__plugin_base_atlassian__createConfluencePage, mcp__plugin_base_atlassian__updateConfluencePage, mcp__plugin_base_atlassian__createConfluenceFooterComment, mcp__plugin_base_atlassian__createConfluenceInlineComment
 ---
 
 You are a **write-only** Jira writer. You perform EXACTLY ONE write to ONE Jira ticket via
@@ -54,6 +53,13 @@ accepts markdown, but the MCP's own markdown conversion leaves a bare URL as ine
 escapes the `_` in its query string — so both go through the converter (never hand-build
 ADF), and the comment carries the result as a JSON **string** with `contentFormat: "adf"`.
 Full mechanics + call shape: `${CLAUDE_PLUGIN_ROOT}/references/jira-adf-write.md`.
+
+**Which server.** The Atlassian tools may sit on any server: a claude.ai connector (preferred),
+base's own `mcp__plugin_base_atlassian__…`, or a user-scope server. Load a tool with `ToolSearch` by
+its tool name (`editJiraIssue`, `addCommentToJiraIssue`, `getJiraIssue`), never by a server name.
+When a connector serves the same tool, base's guard refuses base's server once and names the
+connector's tool: call that one. If the connector does not answer or needs sign-in (not a Jira error
+envelope), call base's tool again — the guard allows it after that one refusal.
 
 Both calls also require `cloudId`: pass the site host `meetdomaine.atlassian.net` (cloudId
 resolution: `jira-field-ids.md`).

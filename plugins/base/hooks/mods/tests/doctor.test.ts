@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { MCP_TIMEOUT_MS, age, parseStatic, reconcile, render, summary } from '../doctor.ts'
 import type { Row } from '../doctor.ts'
-import { SLIM_MISSING } from '../session.ts'
+import { SLIM_MISSING, SLIM_VIEW as SLIM_VIEW_TOOL } from '../session.ts'
 import { NOW, PEEK, ROOT, eventsOf, peek, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -94,7 +94,7 @@ describe('/base-doctor', () => {
     expect(calls.connects.sort()).toEqual(['atlassian', 'playwright'])
     const out = lines(text)
     expect(out[0]).toMatch(/^base doctor — plugin root: /)
-    expect(out.slice(1, 9)).toEqual([
+    expect(out.slice(1, 10)).toEqual([
       'PASS  node            node 22.0.0 (>= 18 required)',
       'PASS  manifest        base 0.1.0, depends on slim',
       'PASS  slim            slim@domaine 0.5.0 installed and enabled',
@@ -103,8 +103,9 @@ describe('/base-doctor', () => {
       "PASS  classic         classic.UserPromptSubmit reached base's mods this session",
       'PASS  mcp:atlassian   connected as plugin:base:atlassian',
       'PASS  mcp:playwright  connected as plugin:base:playwright',
+      "SKIP  connectors      none attached — base's own servers serve Jira, Notion and Figma",
     ])
-    expect(out[9]).toBe('doctor: 8 passed, 0 failed, 0 skipped')
+    expect(out[10]).toBe('doctor: 8 passed, 0 failed, 1 skipped')
   })
 
   t('one doctor line in base.events, and the events tail in the answer', async ($, on) => {
@@ -115,7 +116,7 @@ describe('/base-doctor', () => {
     expect(text).toContain('base events (last 1 of 1, newest last):')
     expect(text).toContain('    2m  start      base 0.1.0')
     expect(text).toContain('SKIP  mcp')
-    expect(await eventsOf($, 'doctor')).toEqual([{ atMs: NOW + 125_000, kind: 'doctor', text: '4 passed, 0 failed, 3 skipped' }])
+    expect(await eventsOf($, 'doctor')).toEqual([{ atMs: NOW + 125_000, kind: 'doctor', text: '4 passed, 0 failed, 4 skipped' }])
   })
 
   t('BASE_EVENT_LOG=0 → the tail says so and no line is written', async ($, on) => {
@@ -258,7 +259,46 @@ describe('/base-doctor', () => {
     expect(text).toMatch(/WARN {2}mcp:shopify-dev-mcp +turned off: disabled in \/mcp/)
     expect(text).toMatch(/FAIL {2}mcp:playwright +failed: exited 1/)
     expect(text).toMatch(/FAIL {2}mcp:chrome-devtools-mcp +\S/)
-    expect(text).toContain('doctor: 5 passed, 3 failed, 2 skipped, 2 warned')
+    expect(text).toContain('doctor: 5 passed, 3 failed, 3 skipped, 2 warned')
+  })
+
+  t('a connector serving the same tools: a connected server names it, a failed one only warns; the connectors row lists them', async ($, on) => {
+    const { clock } = world(on, {
+      manifest: manifest(['atlassian', 'notion-mcp', 'figma-dev-mode', 'playwright']),
+      mcp: {
+        atlassian: 'hang',
+        'notion-mcp': up('notion-mcp'),
+        'figma-dev-mode': down('failed', 'connection refused'),
+        playwright: down('failed', 'exited 1'),
+      },
+      tools: [
+        'Bash', SLIM_VIEW_TOOL,
+        'mcp__plugin_base_atlassian__getJiraIssue', 'mcp__ConnB_2__getJiraIssue', `mcp__${'plugin'}_other_jira__getJiraIssue`,
+        'mcp__ConnN__notion-fetch', 'mcp__ConnF__get_design_context', 'mcp__plugin_base_figma-dev-mode__get_design_context',
+        'mcp__base__get_design_context', 'mcp__slim__get_design_context', 'mcp__Pw__browser_click', 'mcp__Meta__get_metadata',
+      ],
+      run: () => ran(0, staticOut(GREEN)),
+    })
+    await start($)
+    const pending = doctor($)
+    await clock.advance(MCP_TIMEOUT_MS)
+    const out = lines((await pending).text)
+    expect(out).toContain('WARN  mcp:atlassian       no answer in 15 s — ConnB_2 serves the same tools and takes precedence')
+    expect(out).toContain('PASS  mcp:notion-mcp      connected as plugin:base:notion-mcp — ConnN takes precedence')
+    expect(out).toContain(
+      'WARN  mcp:figma-dev-mode  connection refused — the Figma desktop app serves it (Dev Mode); base:figma-reader falls back to the REST API — ConnF serves the same tools and takes precedence',
+    )
+    expect(out).toContain('FAIL  mcp:playwright      failed: exited 1')
+    expect(out).toContain('PASS  connectors          Atlassian: ConnB_2; Notion: ConnN; Figma: ConnF')
+    expect(out.findIndex(l => l.includes('connectors'))).toBe(out.findIndex(l => l.includes('mcp:playwright')) + 1)
+  })
+
+  t('the tool list fails → the connectors row skips, the server rows stand', async ($, on) => {
+    world(on, { manifest: manifest(['atlassian']), mcp: { atlassian: up('atlassian') }, toolsFail: true, run: () => ran(0, staticOut(GREEN)) })
+    await start($)
+    const { text } = await doctor($)
+    expect(text).toMatch(/PASS {2}mcp:atlassian +connected as plugin:base:atlassian\n/)
+    expect(text).toMatch(/SKIP {2}connectors +the tool list did not answer/)
   })
 
   t(`a server that never answers fails after ${MCP_TIMEOUT_MS / 1000} s`, async ($, on) => {

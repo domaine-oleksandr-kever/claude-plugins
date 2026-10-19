@@ -94,6 +94,8 @@ declare module 'claude-code' {
       titled: string | null
       /** The project root the session launched in, latched once: the scratch-path guard measures against it. */
       guardRoot: string | null
+      /** base's own MCP tools (`mcp__plugin_base_…`) the MCP guard refused once in session `sid` because another server serves the same tools, at most 200; another sid counts as none. */
+      mcpSoft: { sid: string; tools: string[] }
       /** The session id whose base-tmp sweep ran and whose /base-doctor command is registered. */
       swept: string | null
       /** This session's savable events, oldest first, at most 200. */

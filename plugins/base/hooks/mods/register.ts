@@ -6,6 +6,7 @@ import { registerConventions } from './conventions.ts'
 import { registerDoctor } from './doctor.ts'
 import { registerDogfood } from './dogfood.ts'
 import { registerBashGuards } from './guards/bash.ts'
+import { registerMcpGuards } from './guards/mcp.ts'
 import { registerScratchGuard } from './guards/scratch.ts'
 import { registerSession } from './session.ts'
 import { registerTitle } from './title.ts'
@@ -19,6 +20,7 @@ export const register: Register = (on) => {
   registerTitle(on)
   registerBashGuards(on)
   registerScratchGuard(on)
+  registerMcpGuards(on)
   registerConventions(on)
   registerDoctor(on)
   registerDogfood(on)

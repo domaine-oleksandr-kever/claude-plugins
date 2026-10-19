@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.11.1**.
+Current release: **base v0.12.0**.
 
 ## Status
 
@@ -88,10 +88,16 @@ does not resolve.
 The three readers need slim. They read big MCP results that slim's mcp channel compacts, and they
 call `mcp__slim__view` for files on disk. If slim is not loaded, base refuses to spawn them.
 
-The Jira reader, the doc reader and the writer run on a `tools:` allowlist. The allowlist holds the
-built-ins they use, slim, and the Atlassian and Notion servers. Each server appears under both
-`mcp__plugin_base_…` and the user-scope name. Their `disallowedTools:` removes every write tool of
-those servers that they do not need. figma-reader denies the Atlassian and Notion servers whole.
+The readers and the writer reach Jira, Confluence, Notion and Figma through any server that serves
+the tool: a claude.ai connector first, then base's own server, then a token script (Figma's REST
+API, Jira's attachment downloads). They load a tool by its tool name, never by a server name, as a
+connector's server name is the host's to choose. They run without a `tools:` allowlist, for an
+allowlist can name only exact servers. Their `disallowedTools:` removes `Edit`, `NotebookEdit`,
+`Agent` and `Task`, the built-ins each role leaves out (`Skill` and `WebFetch`/`WebSearch` for
+jira-reader; `Skill` for doc-reader; `Skill`, `Write`, `Glob`, `Grep`, `WebFetch` and `WebSearch` for
+the writer; `WebFetch`/`WebSearch` for figma-reader), the base servers each does not use, whole, and
+the write tools of the base servers it does use. On any other server the MCP guard refuses those
+writes and every server out of the agent's scope (Guards).
 
 ## References and scripts
 
@@ -225,9 +231,13 @@ The main session's hook context does not reach a subagent. So a subagent gets it
 - In dogfood mode, every agent also gets the `dogfood` section.
 - A fork gets no section, because it inherits the parent's context.
 
+The same hook writes the agent type to `<log dir>/<session-id>/agents/<agent_id>.json`, one file per
+agent so parallel starts lose none (the spare folder where the log folder is missing or not
+writable), which the MCP guard reads to know a subagent's type.
+
 ## Guards
 
-A tool-call guard denies a command or a path before it runs. The reason reaches the model, and each
+A tool-call guard denies a command, a path or an MCP tool before it runs. The reason reaches the model, and each
 deny writes one `guard` line to `base.events`. The guards also check subagents' calls.
 `BASE_GUARD=0` turns all of them off.
 
@@ -235,6 +245,9 @@ deny writes one `guard` line to `base.events`. The guards also check subagents' 
 |---|---|---|
 | no AI attribution | `Bash` | a `git … commit` whose message carries a Claude or Anthropic co-author trailer or a "Generated with Claude" line; a human `Co-Authored-By` passes |
 | no git-hooks bypass | `Bash` | `--no-verify` (`-n` on a commit) on commit, push, merge, pull, am and rebase in any spelling, a `core.hooksPath` or `HUSKY=0` override, an alias that carries the flag, and a command that removes, empties or rewrites a hook file before a commit; `hooks/no-verify-bypass.sh` decides, run only for a command naming a git verb |
+| MCP precedence | the tools of base's `atlassian`, `notion-mcp` and `figma-dev-mode` servers (`mcp__plugin_base_<server>__<tool>`), in the main loop and in subagents | the first call of such a tool in a session while a server that is no plugin's (a claude.ai connector, a user-scope server) lists both the same tool and the server's signature tool (`getJiraIssue`, `notion-fetch`, `get_design_context`), so a shared generic name such as `search` or `authenticate` makes no twin: the deny names that tool to call instead, and the same call is allowed after this one refusal (`base.mcpSoft`), so a connector that needs sign-in strands nobody. A tool list that fails lets the call run |
+| reader writes | the Jira, Confluence and Notion write tools of any MCP server (slim's and base's registered tools aside), in a subagent | every write for `base:jira-reader`, `base:doc-reader` and `base:figma-reader`; every write but `editJiraIssue` and `addCommentToJiraIssue` for `base:jira-writer`; every write for a subagent with no `agents/<agent_id>.json` record (fail closed: the deny says `no agent-type marker for this subagent`); other agent types and the main loop are not limited. A probe of the file that fails lets the call run |
+| reader scope | every MCP tool but slim's and base's registered ones, in a subagent of base's reader or writer types | a call on a server that lists no signature tool of the agent's vendors: `getJiraIssue` for jira-reader and the writer, `getJiraIssue` or `notion-fetch` for doc-reader, `get_design_context` for figma-reader (base's own server of that vendor always counts), so a connector the session holds for other work (a store, a docs editor, a browser) stays out of reach of a reader fed untrusted text. A tool list that fails lets the call run |
 | scratch path | the browser tools that take a file path (`take_screenshot`, `browser_take_screenshot`, `take_snapshot`, `get_network_request`, `browser_run_code_unsafe`) of any MCP server | a path outside the project (chrome-devtools also accepts its OS temp dir), or inside it outside `.claude/` (the task workspace's `tmp/`, `.claude/tmp/`, `.claude/base-tmp/`); in a git worktree, a path into the shared task workspace. `hooks/scratch-path-guard.cjs` decides against the project root the session launched in (`base.guardRoot`), names an absolute path to use instead and creates its directory. The tools' descriptions carry the rule too. `BASE_SCRATCH_GUARD=0` turns this one off |
 
 base's playwright server writes its own files under `.claude/base-tmp/playwright`. When the guard
@@ -275,6 +288,7 @@ a Write or Edit under `.claude/tasks/` or a Bash command naming the workspace th
 | `base.events` | base's log lines for band's Log pane, oldest first, at most 200: `{ atMs, kind, text }` |
 | `base.started`, `base.checked`, `base.titled` | the session id whose start line, install checks and title are done (`<id>:user` when the person titled it) |
 | `base.guardRoot` | the project root the session launched in, which the scratch-path guard measures against |
+| `base.mcpSoft` | `{ sid, tools }`: base's own MCP tools the MCP guard refused once in session `sid` because another server serves the same tools, at most 200; a new session id starts empty |
 | `base.swept` | the session id whose base-tmp and event-log sweeps ran |
 | `base.dogfood` | dogfood mode's session: `{ sid, failMs, script, reportMs }` — the last plugin-script failure and the last `plugin_defect` report, mirrored to `dogfood-state.json` |
 | `base.classic` | the session id whose `classic.UserPromptSubmit` reached base's mods (the doctor's `classic` row) |
@@ -355,10 +369,11 @@ pane.
   never reaches the hook. The first failure in a session toasts
   `base: event log not written: <reason>`.
 - **Off:** `BASE_EVENT_LOG=0` stops base's file and its `base.events` lines alike.
-- **Hook files:** base's command hooks and its mod share three JSON files in the same folder:
+- **Hook files:** base's command hooks and its mod share these JSON files in the same folder:
   `conventions.<plugin>.json` (the marker each plugin's `SessionStart` hook writes, base's rules part
-  as `conventions.base.rules.json`; Conventions), `dogfood-state.json` (base's mod mirrors
-  `{sid, failMs, script, reportMs}` after each dogfood update) and `dogfood-stop.json`
+  as `conventions.base.rules.json`; Conventions), `agents/<agent_id>.json` (the agent type as a
+  JSON string, written by the `SubagentStart` hook, read by the MCP guard), `dogfood-state.json` (base's mod
+  mirrors `{sid, failMs, script, reportMs}` after each dogfood update) and `dogfood-stop.json`
   (`{blockedMs}`, the failure whose stop the `Stop` hook already blocked). `BASE_EVENT_LOG=0` does not
   stop them.
 - **Clean-up:** base sweeps session folders whose newest file is older than 7 days. Its
@@ -416,7 +431,8 @@ counts, and the last 10 `base.events` lines:
 | `conventions` | this session's markers (Conventions): PASS `SessionStart command hook (<source>): base core+rules, fe, qa, be, pm` for the Domaine plugins settings enable, that left a marker, or whose `<plugin>.jsonl` is in the log folder (a claude.ai sandbox's synced plugins have no settings entry); WARN names such a plugin with no marker, `(enabled)` or `(loaded)`; FAIL after the first prompt when no marker is there; PASS `prompt.context fallback` where nothing draws and base's mod served them; SKIP before the first prompt; the markers are read from the log folder and the spare folder |
 | `classic` | PASS once `classic.UserPromptSubmit` reached base's mods this session; WARN `classic.* did not reach base's mods this session (login: work, <login file>)` after a prompt without it (the login `work`, `personal`, `synced sandbox` for a claude.ai-synced base whose login file names no org type, else `unknown`): the session title, autosave and progress, band's resume handlers and slim's prompt-paste compression are off on that login; SKIP before the first prompt |
 | `defects` | only in dogfood mode: PASS `none in 7 days`, WARN `<N> in 7 days, newest <title>` — the reports of the home index and this project's `.claude/plugin-defects/` |
-| `mcp:<server>` | each MCP server of base's manifest connects; sign-in needed fails with the `/mcp` pointer; `figma-dev-mode` (the Figma desktop app's local server) only warns |
+| `mcp:<server>` | each MCP server of base's manifest connects; sign-in needed fails with the `/mcp` pointer; `figma-dev-mode` (the Figma desktop app's local server) only warns. For `atlassian`, `notion-mcp` and `figma-dev-mode`, a server that is no plugin's and lists the same signature tool (`getJiraIssue`, `notion-fetch`, `get_design_context`) is a twin: a connected row adds `— <twin> takes precedence`, a row that did not connect only warns, `<detail> — <twin> serves the same tools and takes precedence` |
+| `connectors` | PASS `Atlassian: <server>; Notion: <server>; Figma: <server>`, the twins found, spelled as the tool names show the server (`mcp__<server>__…`); SKIP `none attached — base's own servers serve Jira, Notion and Figma`; SKIP `the tool list did not answer` when `$.tool.list()` fails (the `mcp:<server>` rows then name no twin) |
 
 The rows up to `switches` come from `scripts/doctor.cjs`. You can also run it by hand:
 `node <base plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`. It exits 1 when a
@@ -527,11 +543,11 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. `hooks/conventions.cjs` writes its markers and reads the dogfood files there too (Event log on disk) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs` and `hooks/conventions.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `slim` row and the dogfood versions line read; dogfood mode reads the marketplace repo from its `plugins/`; the hook reads the login file `<dir>/.claude.json` (`~/.claude.json` when the directory is `~/.claude`) for the doctor's login label and the dogfood account |
 | `CLAUDE_CODE_ACCOUNT_UUID` | — | read, never set: the claude.ai account id of the session (set by the host in every claude.ai sandbox); dogfood mode is on when `plugins/base/dogfood.json` lists it (Dogfood mode); unset, `hooks/conventions.cjs` and base's mods take `oauthAccount.accountUuid` from the login file |
-| `TMPDIR` | `/tmp` | read, never set, by `hooks/conventions.cjs` and base's mods: `<dir>/domaine-log/<session-id>/` is the spare folder of the conventions markers where the log folder is missing or not writable (Conventions) |
+| `TMPDIR` | `/tmp` | read, never set, by `hooks/conventions.cjs` and base's mods: `<dir>/domaine-log/<session-id>/` is the spare folder of the conventions markers and the `agents/` records where the log folder is missing or not writable (Conventions) |
 | `CLAUDE_PLUGIN_ROOT` | — | read, never set, by `hooks/conventions.cjs`: the plugin root the host runs the command hooks from, named in the root line (unset, the script's own parent); never used to find the config directory, as it can be a marketplace source folder |
 | `CLAUDE_CODE_ENTRYPOINT` | — | read, never set, by `hooks/conventions.cjs`: `sdk-*` (`claude -p`, the SDK) picks the dogfood rule for a session no surface draws |
 | `CLAUDE_CODE_REMOTE` | — | read, never set, by `hooks/conventions.cjs`: `true` (a claude.ai cloud session) picks the same rule |
-| `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, and the scratch-path guard |
+| `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, the scratch-path guard, and the MCP precedence and reader-write guards |
 | `BASE_LEAN` | on | `0` drops the lean-code convention from the `SessionStart` command hook (`start rules`) and from code-writing subagents (`SubagentStart`), and from the cloud fallback |
 | `BASE_SCRATCH_GUARD` | on | `0` turns the scratch-path guard off: the browser tools write wherever their path points |
 | `BASE_STE` | on | `0` drops the writing-style convention (ASD-STE100) from the `SessionStart` command hook (`start rules`) and from the cloud fallback |
@@ -563,12 +579,12 @@ Agents never read `.env` themselves.
 |---|---|
 | `tests/base-guards-sim.sh` | `hooks/scratch-path-guard.cjs` as the mod runs it: the verdicts, the remediation paths, the launch root, worktrees, the exclude stamp of `scripts/scratch-hygiene.cjs` |
 | `tests/no-verify-bypass-matrix.sh` | `hooks/no-verify-bypass.sh`: every bypass row blocked, every legitimate command allowed |
-| `tests/base-refs-lint.sh` | no legacy-plugin, host or old-compressor name in plugins/base; every MCP server, cited path, agent, skill, command, `BASE_*` switch and markdown link resolves, and so does every team plugin's path, skill or agent the shared text names (`<fe root>/…`, `/qa:preflight`) |
+| `tests/base-refs-lint.sh` | no legacy-plugin, host or old-compressor name in plugins/base; every MCP server, cited path, agent, skill, command, `BASE_*` switch and markdown link resolves, the readers and the writer deny base's own servers' write tools, the base servers and built-ins their role leaves out, and the MCP guard holds both write lists, and so does every team plugin's path, skill or agent the shared text names (`<fe root>/…`, `/qa:preflight`) |
 | `tests/base-jira-attachments-sim.sh` | `scripts/jira-attachments.sh` against a fake curl: credentials, gates (the `.claude/base-tmp/` no-workspace dir stamped once), caps, cache, videos kept whole, the transport retry |
 | `tests/base-external-screenshots-sim.sh` | `scripts/external-screenshots.sh`: the allow-list, redirect hops, `og:image` resolution, the format from the bytes, cache, pacing, no resample |
 | `tests/base-figma-rest-sim.sh` | `scripts/figma-rest.sh`: the token, the modes, `--policy`, the cache, retries, the out-dir gate |
 | `tests/base-md-to-adf.mjs` | `scripts/md-to-adf.cjs`: the ADF it writes, the CLI contract, round trips through slim's adf engine |
-| `tests/hooks-sim.sh` (DH block) | `hooks/conventions.cjs` as the host runs each `hooks/hooks.json` command: the envelopes, the two start parts and their switches, the 9,000-character cap, the markers, the versions line, the rule variant, the login label, the subagent share, the dogfood `Stop` block, the text file |
+| `tests/hooks-sim.sh` (DH block) | `hooks/conventions.cjs` as the host runs each `hooks/hooks.json` command: the envelopes, the two start parts and their switches, the 9,000-character cap, the markers, the versions line, the rule variant, the login label, the subagent share and its `agents/<agent_id>.json` record, the dogfood `Stop` block, the text file |
 | `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts, `--json`, `--log-dir`, Windows |
 | `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list, the `settings.local.json` registration) and the `scripts/scratch-hygiene.cjs` sweep |
 | `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, the `--check` marker verdicts (fresh / stale / other-branch / none, read-only, per worktree), bash 3.2 |

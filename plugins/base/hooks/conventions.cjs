@@ -4,7 +4,8 @@
  * that reaches the model on every login. Text: conventions-text.json. Modes (argv):
  *   start core   SessionStart: root line, comment discipline, task workspace, outside content, Shopify
  *   start rules  SessionStart: lean code (BASE_LEAN), writing style (BASE_STE), dogfood section
- *   subagent     SubagentStart: the share of the agent type on stdin
+ *   subagent     SubagentStart: the share of the agent type on stdin; records the agent_type in
+ *                <log dir>/<session>/agents/<agent_id>.json for base's MCP guard
  *   stop         Stop: blocks once after a plugin-script failure the mod mirrored to dogfood-state.json
  * A start part writes the marker <log dir>/<session>/conventions.base[.rules].json, which the doctor and
  * the mod's cloud fallback read. Always exits 0; an internal error prints nothing.
@@ -62,7 +63,7 @@ function writeMarker(sid, name, data) {
   for (const dir of [logDir(sid), logDir(sid, true)]) {
     if (!dir) continue;
     try {
-      fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
       fs.writeFileSync(path.join(dir, name), JSON.stringify(data) + '\n');
       return;
     } catch (e) {
@@ -70,6 +71,12 @@ function writeMarker(sid, name, data) {
     }
   }
   if (why) process.stderr.write(P + ' conventions: marker not written (' + why + ')\n');
+}
+
+/** Writes `type` to agents/<id>.json (log dir, else spare dir): one file per agent, so parallel starts lose none. */
+function recordAgent(sid, id, type) {
+  if (typeof id !== 'string' || !/^[\w.-]+$/.test(id) || /^\.+$/.test(id) || typeof type !== 'string' || !type) return;
+  writeMarker(sid, 'agents/' + id + '.json', type);
 }
 
 let loginMemo = null;
@@ -195,6 +202,7 @@ function main(argv) {
       sections: r.sections, chars: r.text.length, login: { label, org, file }, ts: new Date().toISOString(),
     });
   } else if (mode === 'subagent') {
+    recordAgent(input.session_id, input.agent_id, input.agent_type);
     const text = subagentText(typeof input.agent_type === 'string' ? input.agent_type : '', cwd);
     if (text) process.stdout.write(envelope('SubagentStart', text));
   } else if (mode === 'stop') {
