@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.11.0**.
+Current release: **base v0.11.1**.
 
 ## Status
 
@@ -258,7 +258,7 @@ The ids from rungs 3 and 4 are only guessed (`guessed: true`): the autosave leve
 session touches that workspace.
 
 base re-reads the workspace when a file in its root changes. It checks every 30 s, and at once after
-a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
+a Write or Edit under `.claude/tasks/` or a Bash command naming the workspace that changed it. base resolves the work id again after a
 `git checkout`/`switch`/`worktree`, a directory change, a /clear, and every two minutes.
 
 | Atom | Value |
@@ -266,6 +266,7 @@ a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
 | `base.progress` | the parsed progress.md of the work id (`{ workId, branch, hasWorkspace, done, total, current, rows, notesTail, mtimeMs, lastSavableMs, agentsSince, editsSince, stale, guessed }`), or `{ workId: null, branch }` |
 | `base.savable` | this session's savable events, `{ atMs, kind: 'agent' \| 'edit' \| 'mcp', workId }`, at most 200 |
 | `base.background` | the ids of background agents the main loop launched that have not stopped yet, at most 200 |
+| `base.saved` | the ids of subagents that wrote a file in the workspace root and have not returned or stopped yet, at most 200 |
 | `base.autosave` | the turn counter, its start, the turn whose stop was last blocked, and the write the prompt line last fired for |
 | `base.compactMarker` | the last `compact:` line autosave wrote: `{ workId, notesMs, priorMs }`, so it never counts as a save |
 | `base.pin` | the work id `/base-progress` pinned, or null |
@@ -280,7 +281,9 @@ a Write or Edit under `.claude/tasks/`. base resolves the work id again after a
 
 **Autosave.** A savable event is one of these, in the main loop: an Agent call that returned its
 result, the stop of a background agent it launched, a Write / Edit outside `.claude/`, or an MCP
-result over slim's 4 KB gate. The event belongs to the
+result over slim's 4 KB gate. An agent that wrote a file in the workspace root itself (a Write,
+an Edit, or a Bash command naming the workspace that changed it) saved its own findings: its return
+or stop is not one. Another agent's or the main loop's write does not cover it. The event belongs to the
 work id that base published when it happened.
 
 The workspace is `stale` when two things are true. First, no file in its root was written for 20
@@ -410,8 +413,8 @@ counts, and the last 10 `base.events` lines:
 | `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
 | `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_TMP_TTL` that is not hours, a `BASE_SHOPIFY_VALIDATE_TIMEOUT` outside 1-600 seconds, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |
 | `slim-live` | what this session loaded: slim's `mcp__slim__view` tool registered |
-| `conventions` | this session's markers (Conventions): PASS `SessionStart command hook (<source>): base core+rules, fe, qa, be, pm` for the Domaine plugins settings enable; WARN names an enabled plugin with no marker; FAIL after the first prompt when no marker is there; PASS `prompt.context fallback` where nothing draws and base's mod served them; SKIP before the first prompt; the markers are read from the log folder and the spare folder |
-| `classic` | PASS once `classic.UserPromptSubmit` reached base's mods this session; WARN `classic.* did not reach base's mods this session (login: work, <login file>)` after a prompt without it: the session title, autosave and progress, band's resume handlers and slim's prompt-paste compression are off on that login; SKIP before the first prompt |
+| `conventions` | this session's markers (Conventions): PASS `SessionStart command hook (<source>): base core+rules, fe, qa, be, pm` for the Domaine plugins settings enable, that left a marker, or whose `<plugin>.jsonl` is in the log folder (a claude.ai sandbox's synced plugins have no settings entry); WARN names such a plugin with no marker, `(enabled)` or `(loaded)`; FAIL after the first prompt when no marker is there; PASS `prompt.context fallback` where nothing draws and base's mod served them; SKIP before the first prompt; the markers are read from the log folder and the spare folder |
+| `classic` | PASS once `classic.UserPromptSubmit` reached base's mods this session; WARN `classic.* did not reach base's mods this session (login: work, <login file>)` after a prompt without it (the login `work`, `personal`, `synced sandbox` for a claude.ai-synced base whose login file names no org type, else `unknown`): the session title, autosave and progress, band's resume handlers and slim's prompt-paste compression are off on that login; SKIP before the first prompt |
 | `defects` | only in dogfood mode: PASS `none in 7 days`, WARN `<N> in 7 days, newest <title>` — the reports of the home index and this project's `.claude/plugin-defects/` |
 | `mcp:<server>` | each MCP server of base's manifest connects; sign-in needed fails with the `/mcp` pointer; `figma-dev-mode` (the Figma desktop app's local server) only warns |
 

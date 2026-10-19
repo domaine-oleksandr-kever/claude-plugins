@@ -430,6 +430,12 @@ describe('workspace event', () => {
 describe('staleness', () => {
   const agent = ($: any) => $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose' })
   const edit = ($: any, file_path: string) => $.tool.call({ tool: 'Edit', file_path, old_string: 'a', new_string: 'b' })
+  /** A foreground Agent call that answers its completed record. */
+  const done = ($: any, agentId: string) =>
+    $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose', reply: { status: 'completed', agentId, content: [], prompt: 'p' } })
+  const launch = ($: any, agentId: string) =>
+    $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose', reply: { status: 'async_launched', agentId, description: 'd', prompt: 'p', outputFile: '/tmp/o' } })
+  const subagentStop = ($: any, agent_id: string) => $.classic.SubagentStop({ agent_id, stop_hook_active: false, agent_transcript_path: '', agent_type: 'general-purpose' })
 
   t('an agent return and an edit outside .claude/ count; 20 min without a write turns an adopted workspace stale', async ($, on) => {
     const { w, clock } = world(on)
@@ -508,6 +514,60 @@ describe('staleness', () => {
     expect((await peek($)).progress).toMatchObject({ lastSavableMs: NOW + 60_000, agentsSince: 1 })
     await subagentStop('bg1')
     expect((await peek($)).progress).toMatchObject({ agentsSince: 1 })
+  })
+
+  t('an agent that saved the workspace itself brings back nothing unsaved; a sibling\'s save does not cover it', async ($, on) => {
+    const { w, clock } = world(on, { ctxPct: 90 })
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    await edit($, `${ROOT}/sections/header.liquid`)
+    const save = (agentId: string) => $.tool.call({ tool: 'Write', file_path: `${TASKS}/ABC-1591/notes.md`, content: NOTES, agentId })
+    w.agent = () => save('a1')
+    await done($, 'a1')
+    await clock.advance(6 * 60_000)
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW + 1, guessed: false, lastSavableMs: NOW, agentsSince: 0, editsSince: 0, stale: false })
+    // two agents of one message: b2 saves while a2 still runs
+    const at = NOW + 6 * 60_000
+    w.agent = async () => {
+      w.agent = null
+      await save('b2')
+      w.files[`${TASKS}/ABC-1591/notes.md`] = { text: NOTES, mtimeMs: at + 1 }
+      await clock.advance(2)
+    }
+    await done($, 'a2')
+    await done($, 'b2')
+    await clock.advance(6 * 60_000)
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: at + 1, lastSavableMs: at + 2, agentsSince: 1, stale: true })
+  })
+
+  t('a background agent\'s own save covers its stop; a main-loop write or its own tmp/ file does not', async ($, on) => {
+    const { w, clock } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    for (const id of ['bg1', 'bg2', 'bg3']) await launch($, id)
+    await $.tool.call({ tool: 'Write', file_path: progressMd('ABC-1591'), content: MD })
+    await $.tool.call({ tool: 'Write', file_path: `${TASKS}/ABC-1591/notes.md`, content: NOTES, agentId: 'bg2' })
+    await $.tool.call({ tool: 'Write', file_path: `${TASKS}/ABC-1591/tmp/x.json`, content: '{}', agentId: 'bg3' })
+    await clock.advance(60_000)
+    await subagentStop($, 'bg2')
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: 0, agentsSince: 0 })
+    await subagentStop($, 'bg1')
+    expect((await peek($)).progress).toMatchObject({ lastSavableMs: NOW + 60_000, agentsSince: 1 })
+    await subagentStop($, 'bg3')
+    expect((await peek($)).progress).toMatchObject({ agentsSince: 2 })
+  })
+
+  t('a Bash save to the workspace reaches the atom at once; a subagent\'s is its own save', async ($, on) => {
+    const { w } = world(on)
+    addWorkspace(w, 'ABC-1591')
+    await start($)
+    w.bash = () => {
+      w.files[`${TASKS}/ABC-1591/notes.md`] = { text: NOTES, mtimeMs: NOW + 7 }
+      return { result: '' }
+    }
+    w.agent = () => $.tool.call({ tool: 'Bash', command: `cat >> ${TASKS}/ABC-1591/notes.md`, agentId: 'a1' })
+    await done($, 'a1')
+    expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW + 7, guessed: false, lastSavableMs: 0, agentsSince: 0 })
   })
 
   t('a subagent\'s own edits and MCP reads are not savable', async ($, on) => {

@@ -48,8 +48,8 @@ export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'titl
 
 /**
  * Worth saving to the workspace, in the main loop: an Agent / Task call returned its result, a background agent it
- * launched stopped, a Write / Edit outside `.claude/`, an MCP result over slim's 4 KB gate. `workId` = the work id
- * published when it happened (null = none).
+ * launched stopped (either one only when that agent wrote no workspace file itself), a Write / Edit outside
+ * `.claude/`, an MCP result over slim's 4 KB gate. `workId` = the work id published when it happened (null = none).
  */
 export type BaseSavable = { atMs: number; kind: 'agent' | 'edit' | 'mcp'; workId: string | null }
 
@@ -100,6 +100,8 @@ declare module 'claude-code' {
       savable: BaseSavable[]
       /** The ids of background agents the main loop launched that have not stopped yet, oldest first, at most 200. */
       background: string[]
+      /** The ids of subagents that wrote a file in the published workspace's root and have not returned or stopped yet, at most 200. */
+      saved: string[]
       autosave: BaseAutosave | null
       compactMarker: BaseCompactMarker | null
       /** Dogfood mode's session (BASE_DOGFOOD=1): whose /base-defects is registered, its script failure and its last report. */

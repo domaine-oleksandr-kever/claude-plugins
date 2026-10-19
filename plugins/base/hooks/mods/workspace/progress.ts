@@ -38,6 +38,7 @@ const sessionId = atom({ plugin: 'base', key: 'sessionId' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
 const savable = atom({ plugin: 'base', key: 'savable' } as const, [] as BaseSavable[])
 const background = atom({ plugin: 'base', key: 'background' } as const, [] as string[])
+const saved = atom({ plugin: 'base', key: 'saved' } as const, [] as string[])
 const marker = atom({ plugin: 'base', key: 'compactMarker' } as const, null)
 
 /** Unsaved work: no workspace write for the stale window, and something worth saving happened after the last one. */
@@ -222,6 +223,25 @@ async function noteSavable($: $, kind: BaseSavable['kind']): Promise<void> {
   await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now, staleMs) : p))
 }
 
+/** An agent that wrote the workspace itself (`saved`) brings back nothing unsaved: its return or stop is no event. */
+async function noteAgent($: $, id: string | undefined): Promise<void> {
+  let own = false
+  if (id !== undefined)
+    await update($, saved, l => {
+      own = l.includes(id)
+      return own ? l.filter(s => s !== id) : l
+    })
+  if (!own) await noteSavable($, 'agent')
+}
+
+const markSaved = ($: $, id: string) => update($, saved, l => (l.includes(id) ? l : [...l, id].slice(-SAVABLE_CAP)))
+
+/** The published workspace and its newest write, or null with no work id. */
+async function currentWrite($: $): Promise<{ id: string; ms: number } | null> {
+  const cur = await read($, progress)
+  return cur?.workId ? { id: cur.workId, ms: await workspaceMtime($, await $.session.root(), cur.workId) } : null
+}
+
 /** A tool call that reaches into the guessed workspace (`touches` its dir or id) makes it this session's work. */
 async function adopt($: $, touches: (dir: string, id: string) => boolean): Promise<void> {
   const cur = await read($, progress)
@@ -328,7 +348,12 @@ export function registerProgress(on: On): void {
     const inCurrent = !!cur?.workId && e.file_path.startsWith(`${workDir(root, cur.workId)}/`)
     await refresh($, !inCurrent)
     const path = e.file_path
-    if (r.deny === undefined && !r.isError) await adopt($, dir => path.startsWith(`${dir}/`))
+    if (r.deny !== undefined || r.isError) return r
+    await adopt($, dir => path.startsWith(`${dir}/`))
+    const after = await read($, progress)
+    const dir = after?.workId ? `${workDir(root, after.workId)}/` : null
+    // a file in the root, as newestWrite counts it
+    if (e.agentId !== undefined && dir && path.startsWith(dir) && !path.slice(dir.length).includes('/')) await markSaved($, e.agentId)
     return r
   })
 
@@ -347,10 +372,9 @@ export function registerProgress(on: On): void {
     if (r.deny !== undefined || r.isError || e.agentId !== undefined) return r
     const rec = r.result as { status?: unknown; agentId?: unknown } | null | undefined
     const status = typeof rec === 'object' ? rec?.status : undefined
-    if (status === 'async_launched' && typeof rec?.agentId === 'string') {
-      const id = rec.agentId
-      await update($, background, l => [...l, id].slice(-SAVABLE_CAP))
-    } else if (status === undefined || status === 'completed') await noteSavable($, 'agent')
+    const id = typeof rec === 'object' && typeof rec?.agentId === 'string' ? rec.agentId : undefined
+    if (status === 'async_launched' && id !== undefined) await update($, background, l => [...l, id].slice(-SAVABLE_CAP))
+    else if (status === undefined || status === 'completed') await noteAgent($, id)
     return r
   })
 
@@ -362,7 +386,7 @@ export function registerProgress(on: On): void {
       mine = l.includes(e.agent_id)
       return mine ? l.filter(id => id !== e.agent_id) : l
     })
-    if (mine) await noteSavable($, 'agent')
+    if (mine) await noteAgent($, e.agent_id)
     return r
   })
 
@@ -374,12 +398,21 @@ export function registerProgress(on: On): void {
     return r
   })
 
+  // A Bash write to the workspace reaches the atom now, not at the next tick; a subagent's is its own save.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const r = await next(e)
-    if (e.tool !== 'Bash') return r
-    if (CHECKOUT.test(e.command)) await refresh($, true)
+    if (e.tool !== 'Bash') return next(e)
     const command = e.command
-    if (command.includes('.claude/tasks/')) await adopt($, (_, id) => command.includes(`.claude/tasks/${id}/`))
+    const tasks = command.includes('.claude/tasks/')
+    const before = tasks ? await currentWrite($) : null
+    const r = await next(e)
+    if (CHECKOUT.test(command)) await refresh($, true)
+    if (!tasks) return r
+    await adopt($, (_, id) => command.includes(`.claude/tasks/${id}/`))
+    const after = before && (await currentWrite($))
+    if (before && after?.id === before.id && after.ms > before.ms) {
+      await refresh($, false)
+      if (e.agentId !== undefined) await markSaved($, e.agentId)
+    }
     return r
   })
 

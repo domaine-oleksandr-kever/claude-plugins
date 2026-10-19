@@ -60,6 +60,8 @@ export type World = {
   writeDenied: string[]
   /** paths whose $.fs.read rejects while $.fs.stat still answers: a file over the engine's 4 MiB read cap */
   readFails: string[]
+  /** paths whose $.fs.exists rejects: a directory the sandbox will not probe */
+  existsFails: string[]
   /** `$.fs.stat(path, { resolve: true })` lands here instead of on the path itself: a symbolic link */
   realPaths: Record<string, string>
   /** what $.session.usage() reports as the context window's fill, in percent; null = no reading yet */
@@ -70,6 +72,8 @@ export type World = {
   commit: string
   /** what a Bash call answers at the bottom; null = `{ result: 'ok' }` */
   bash: ((command: string) => Record<string, unknown>) | null
+  /** runs inside every Agent call before it answers: the subagent's own work */
+  agent: (() => Promise<void>) | null
 }
 
 export const progressMd = (id: string) => `${TASKS}/${id}/progress.md`
@@ -100,11 +104,13 @@ export function world(on: On, over: Partial<World> = {}) {
     writeFails: null,
     writeDenied: [],
     readFails: [],
+    existsFails: [],
     realPaths: {},
     ctxPct: null,
     remote: 'git@github.com:acme/shop.git',
     commit: 'abc1234',
     bash: null,
+    agent: null,
     ...over,
   }
   const calls = {
@@ -195,6 +201,7 @@ export function world(on: On, over: Partial<World> = {}) {
   const isDir = (path: string) => Object.keys(w.files).some(p => p.startsWith(`${path}/`))
   on('fs.exists', async (_$, e) => {
     calls.fs.push(`exists ${e.path}`)
+    if (w.existsFails.includes(e.path)) throw new Error(`EACCES: ${e.path}`)
     return { value: e.path in w.files || isDir(e.path) }
   })
   on('fs.stat', async (_$, e) => {
@@ -264,6 +271,7 @@ export function world(on: On, over: Partial<World> = {}) {
     const a = e as any
     calls.below.push(a)
     if (a.tool === 'Write') w.files[a.file_path] = { text: a.content, mtimeMs: NOW + 1 }
+    if (a.tool === 'Agent' && w.agent) await w.agent()
     if (a.tool === 'Bash' && w.bash) return w.bash(a.command) as never
     if (a.tool === 'Bash') {
       const m = /git (?:checkout|switch) (\S+)/.exec(a.command)

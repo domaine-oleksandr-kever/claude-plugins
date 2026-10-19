@@ -156,6 +156,22 @@ describe('/base-doctor', () => {
     expect((await doctor($)).text).toContain('PASS  conventions  SessionStart command hook (compact): base core+rules, fe, qa')
   })
 
+  t('conventions: a plugin settings do not enable counts once its event log or its marker is there (a synced sandbox); a probe that fails is no log', async ($, on) => {
+    const { w } = world(on, { env: { HOME }, manifest: manifest([]), run: () => ran(0, staticOut(GREEN)), existsFails: [`${LOGDIR}/be.jsonl`] })
+    await start($)
+    await submit($, 'hello')
+    mark(w, 'base')
+    mark(w, 'base.rules')
+    w.files[`${LOGDIR}/fe.jsonl`] = { text: '{}\n', mtimeMs: 0 }
+    w.enabledPlugins = { ...w.enabledPlugins, 'qa@domaine': true }
+    expect((await doctor($)).text).toContain('WARN  conventions  SessionStart command hook (startup): base core+rules; no marker from fe (loaded), qa (enabled)')
+    mark(w, 'fe')
+    mark(w, 'qa')
+    expect((await doctor($)).text).toContain('PASS  conventions  SessionStart command hook (startup): base core+rules, fe, qa')
+    mark(w, 'pm')
+    expect((await doctor($)).text).toContain('PASS  conventions  SessionStart command hook (startup): base core+rules, fe, qa, pm')
+  })
+
   t('conventions: a surfaceless session the mod fallback served passes', async ($, on) => {
     world(on, { surfaces: [], env: { HOME }, manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
     await start($)

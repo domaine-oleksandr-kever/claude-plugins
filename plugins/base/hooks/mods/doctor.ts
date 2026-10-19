@@ -151,14 +151,20 @@ async function conventionsRow($: $, sid: string, dirs: string[], found: Map<stri
       : { status: 'SKIP', name: 'conventions', detail: 'no prompt sent yet: send one, then run the doctor again' }
   }
   const enabled = new Set(['base', ...enabledNames(await $.settings.read().catch(() => null))])
-  const want = MARKED.filter(p => enabled.has(p))
-  const label = (p: string) => (p === 'base' ? `base ${[found.has('base') && 'core', found.has('base.rules') && 'rules'].filter(Boolean).join('+')}` : p)
   const has = (p: string) => found.has(p) || (p === 'base' && found.has('base.rules'))
+  // A claude.ai sandbox's synced plugins have no enabledPlugins entry: a plugin's event log shows it loaded.
+  const loaded = new Set<string>()
+  for (const p of MARKED) {
+    if (enabled.has(p) || has(p)) continue
+    if ((await Promise.all(dirs.map(d => $.fs.exists(`${d}/${p}.jsonl`).catch(() => false)))).some(Boolean)) loaded.add(p)
+  }
+  const want = MARKED.filter(p => enabled.has(p) || loaded.has(p) || has(p))
+  const label = (p: string) => (p === 'base' ? `base ${[found.has('base') && 'core', found.has('base.rules') && 'rules'].filter(Boolean).join('+')}` : p)
   const source = (found.get('base') ?? [...found.values()][0])?.source
   const head = `SessionStart command hook (${typeof source === 'string' ? source : '?'}): ${want.filter(has).map(label).join(', ')}`
   const missing = want.filter(p => !has(p))
   return missing.length
-    ? { status: 'WARN', name: 'conventions', detail: `${head}; no marker from ${missing.join(', ')} (enabled)` }
+    ? { status: 'WARN', name: 'conventions', detail: `${head}; no marker from ${missing.map(p => `${p} (${enabled.has(p) ? 'enabled' : 'loaded'})`).join(', ')}` }
     : { status: 'PASS', name: 'conventions', detail: head }
 }
 

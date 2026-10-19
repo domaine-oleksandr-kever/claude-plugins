@@ -73,7 +73,10 @@ function writeMarker(sid, name, data) {
 }
 
 let loginMemo = null;
-/** The login this process runs under (doctor evidence only): label work|personal|unknown, the org type, the file read. */
+/**
+ * The login this process runs under (doctor evidence only): label work|personal|unknown — `synced sandbox` for a
+ * claude.ai-synced copy whose login file names no org type — the org type, the file read.
+ */
 function login() {
   if (loginMemo) return loginMemo;
   const home = abs(process.env.HOME);
@@ -81,7 +84,7 @@ function login() {
   const file = cfg === home + '/.claude' ? home + '/.claude.json' : cfg + '/.claude.json';
   const a = (readJson(file) || {}).oauthAccount || {};
   const org = typeof a.organizationType === 'string' ? a.organizationType : null;
-  const label = /^claude_(team|enterprise)$/.test(org) ? 'work' : /^claude_(max|pro)$/.test(org) ? 'personal' : 'unknown';
+  const label = /^claude_(team|enterprise)$/.test(org) ? 'work' : /^claude_(max|pro)$/.test(org) ? 'personal' : !org && ROOT.includes('/plugins/synced/') ? 'synced sandbox' : 'unknown';
   loginMemo = { label, org, file, account: typeof a.accountUuid === 'string' ? a.accountUuid : '' };
   return loginMemo;
 }
