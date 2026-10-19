@@ -23,6 +23,8 @@ const CHANNELS = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'agent
 // A fetching command word at the start of a pipeline segment; `cat src/http/page.html` is not one.
 const FETCH_CMD = /(?:^|[;&|(`]|\$\()\s*(?:curl|wget|https?|xh|lynx)(?=\s|$)/;
 const LOG_CMD = /\.log\b|\.jsonl\b|\b(?:journalctl|logs?)\b/;
+// A grep anywhere in the command (`xargs grep`, `sudo grep`, `-exec grep`, `zgrep`, a bin path): its output is a hit list, kept whole, never a log.
+const FILTER_CMD = /(?:^|[\s;&|(`'"]|\$\()(?:[\w.-]*\/)*(?:z?[ef]?grep|rg)(?=[\s'"`;)]|$)/;
 // A linter, maybe through a package runner or its bin path, or a package's lint script, at the start of a pipeline segment.
 const LINT_CMD = /(?:^|[;&|(`]|\$\()\s*(?:(?:npx|pnpx|bunx|yarn|pnpm(?:\s+exec)?|npm\s+exec)\s+)?(?:[\w.-]*\/)*(?:eslint|stylelint|theme-check|tsc|prettier|shopify\s+theme\s+check|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?lint(?::[\w-]+)?)(?=\s|$)/;
 // The last command lists paths and writes the output: only sort/uniq/head/tail/grep may follow it
@@ -55,7 +57,7 @@ function admit(channel, engine, command) {
       return (require('../engines/index.cjs').REGISTRY[engine] || {}).mcp ? engine : 'json';
     case 'bash':
       if (engine === 'html' || engine === 'xml') return FETCH_CMD.test(command) ? engine : 'text';
-      if (engine === 'log') return LOG_CMD.test(command) ? 'log' : 'text';
+      if (engine === 'log') return LOG_CMD.test(command) && !FILTER_CMD.test(command) ? 'log' : 'text';
       if (engine === 'a11y') return 'text';
       if (engine === 'lint') return LINT_CMD.test(command) ? 'lint' : 'text';
       if (engine === 'listing') return LIST_CMD.test(command) ? 'listing' : 'text';
@@ -193,7 +195,7 @@ function extract(channel, rec, input) {
 }
 
 module.exports = {
-  GATES, LOG_GATE, LINT_GATE, LIST_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, LINT_CMD, LIST_CMD, OWN_CLI,
+  GATES, LOG_GATE, LINT_GATE, LIST_GATE, EGRESS, bashEgress, WINDOW, CHANNELS, FETCH_CMD, LOG_CMD, FILTER_CMD, LINT_CMD, LIST_CMD, OWN_CLI,
   READ_LOG_EXT, READ_DATA_EXT, READ_XML_EXT,
   isSourceJson, commandWords, admit, structuredGate, plainGate, bashSeen, extract, numberedBody, attachmentPath,
 };

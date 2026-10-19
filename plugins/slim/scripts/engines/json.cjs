@@ -25,7 +25,7 @@
 
 const crypto = require('crypto');
 const { adfToMarkdown } = require('./adf.cjs');
-const { detectLog, compressLog } = require('./log.cjs');
+const { detectLog, logSignal } = require('./log.cjs');
 const { detectJsx, compressJsx } = require('./figma.cjs');
 
 // Every key is a knob a caller overrides — the engine entry, a parity fixture or a unit row. Numbers
@@ -1354,13 +1354,13 @@ function slim(content, config) {
         if (j) return j;
       }
       // Log-shaped TEXT is signal-selected, not sampled. The detector must clear conf ≥ 0.5, so prose /
-      // markdown / XML fall through byte-identical; a log yielding no byte gain falls through too.
+      // markdown / XML fall through byte-identical; a log yielding no byte gain or no signal falls through too.
       if (cfg.log && detectLog(content).isLog) {
-        const r = compressLog(content, cfg);
-        if (r.budgetExceeded) return pass('budget-exceeded');
-        const bytesOut = Buffer.byteLength(r.compressed, 'utf8');
-        if (r.compressed !== content && bytesOut < bytesIn) {
-          return { output: r.compressed, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['log'] : [], logCompressed: true };
+        const r = logSignal(content, cfg);
+        if (r.reason === 'budget-exceeded') return pass('budget-exceeded');
+        if (r.text) {
+          const bytesOut = Buffer.byteLength(r.text, 'utf8');
+          return { output: r.text, wasModified: true, bytesIn, bytesOut, ratio: bytesIn ? 1 - bytesOut / bytesIn : 0, stages: cfg.trace ? ['log'] : [], logCompressed: true };
         }
       }
       // `format` is a diagnostic tag only; it never changes the passthrough.

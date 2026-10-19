@@ -203,6 +203,27 @@ function ecRows() {
     check('EC-log-dedupe', / ×\d+$/m.test(r.text), 'no ×N survivor marker');
   }
   {
+    // A log with no line worth keeping passes through whole; a cut of DEBUG lines is never silent.
+    const ts = (i) => `2026-10-19 10:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`;
+    const lines = (f) => Array.from({ length: 120 }, (_, i) => f(i)).join('\n');
+    const debug = (i) => `${ts(i)} [DEBUG] band.picker - refresh tick ${i} for session s-${i % 7}`;
+    const DEBUGLOG = lines(debug);
+    const INFOLOG = lines((i) => `${ts(i)} [INFO] sync.job - processed item ${i} of the catalogue`);
+    for (const [k, t] of [['debug', DEBUGLOG], ['info', INFOLOG]]) {
+      const r = compress({ data: t }, O);
+      eq(`EC-log-no-signal-${k}`, [r.engine, r.decision, r.reason, r.text === t], ['log', 'passthrough', 'no-signal', true]);
+    }
+    eq('EC-log-no-signal-json-route', (({ decision, reason }) => [decision, reason])(compress({ data: INFOLOG }, { ...O, engine: 'json' })), ['passthrough', 'non-json']);
+    const oneWarn = compress({ data: lines((i) => (i === 60 ? `${ts(i)} [WARN] band.picker - slow refresh ${i}ms` : debug(i))) }, O);
+    eq('EC-log-trailer-debug', [oneWarn.decision, oneWarn.text.split('\n').pop()], ['compressed', '[113 lines omitted]']);
+    const mixed = lines((i) => (i === 60 ? `${ts(i)} [ERROR] sync.job - item ${i} rejected by the remote`
+      : i % 2 ? `${ts(i)} [INFO] sync.job - processed item ${i} of the catalogue` : `${ts(i)} [DEBUG] sync.job - refresh tick ${i} for session s-${i % 7}`));
+    const partial = compress({ data: mixed }, O);
+    eq('EC-log-trailer-partial', [partial.decision, partial.text.split('\n').pop()], ['compressed', '[113 lines omitted: 56 INFO, 57 other]']);
+    const jMixed = compress({ data: mixed }, { ...O, engine: 'json' });
+    eq('EC-log-json-route-trailer', [jMixed.engine, jMixed.decision, jMixed.text.split('\n').pop()], ['log', 'compressed', '[113 lines omitted: 56 INFO, 57 other]']);
+  }
+  {
     const r = compress({ data: fx('figma-design-context.jsx') }, { ...O, spillDir });
     eq('EC-figma', [r.engine, r.decision], ['figma', 'compressed']);
     const ids = (r.parts || []).filter((p) => p.kind === 'ids');

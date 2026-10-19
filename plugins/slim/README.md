@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.13.0**.
+Current release: **slim v0.14.0**.
 
 ## Install
 
@@ -202,7 +202,11 @@ source.
 
 The log engine runs only for a log source: a command that names a `.log` or `.jsonl` file,
 `journalctl`, or `logs`. Any other text is plain text, so slim never deduplicates test runners and
-git output as a log.
+git output as a log. A command with `grep`, `egrep`, `fgrep`, `zgrep` or `rg` anywhere in it
+(also behind `xargs`, `sudo`, `find -exec` or an env assignment) is a hit list, so it stays plain
+text even over a log file (`grep ERROR app.log` keeps every hit). A log with no line to keep
+(all DEBUG or INFO) passes through whole (reason `no-signal`), and the `[N lines omitted]` trailer
+always gives the full count of dropped lines (DEBUG and level-less ones as `other`).
 
 The lint engine runs for `eslint`, `stylelint`, `theme-check`, `shopify theme check`, `tsc` and
 `prettier`. Each one counts when it runs directly, through `npx`/`pnpm exec`/`yarn`/`bunx`, or by

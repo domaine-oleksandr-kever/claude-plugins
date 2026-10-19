@@ -130,8 +130,9 @@ MCP text-block envelope and slims what is inside; the prose around a fence count
 **log** — signal selection for log and build output (a port of Headroom's LogCompressor): keeps error
 and fail lines with their context, stack traces (up to 3 traces of 20 lines; runtime frames collapse
 first), summary lines, a few warnings; repeated warnings are deduplicated with a ` ×N` count; a
-trailer counts the lines omitted per level. It selects lines, it never samples or rewrites one. Logs
-under 50 lines pass through.
+trailer counts the lines omitted per level (`M other` for DEBUG and level-less lines). It selects
+lines, it never samples or rewrites one. Logs under 50 lines pass through, and so does a log with no
+line to keep (all DEBUG or INFO), reason `no-signal`.
 
 **html** — a page reduced to what a reader takes from it: `# <title>`, one `meta:` line
 (`description`, `og:title`, `canonical`), the visible body text with h1–h6 as `#…`, list items as `- `
@@ -301,7 +302,7 @@ every handle resolve. What happens to `text`, `spill` and `parts` — a file, a 
 reply — is the caller's decision.
 
 Passthrough reasons: `empty`, `engine-not-allowed`, `plain-gate`, `no-gain`, `non-json`, `error-shape`,
-`number-precision`, `budget-exceeded`, `transform-error`, and per engine `non-log`, `non-figma`,
+`number-precision`, `budget-exceeded`, `transform-error`, and per engine `non-log`, `no-signal` (a log with no line worth keeping), `non-figma`,
 `non-figma-nodes`, `non-adf`, `non-a11y`, `non-lint`, `non-listing`, `non-csv`. Refused reasons: `bad-input`, `bad-option`, `too-large`, `binary`.
 
 ## 5. Guarantees

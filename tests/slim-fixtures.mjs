@@ -309,7 +309,7 @@ let STUB0_OUT = null;
   // Over the bound, payload text that names its own size cannot opt out of compression.
   const fixed = (build) => { let n = 0; for (let i = 0; i < 10; i++) { const v = build(String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')); if (bytes(v) === n) return v; n = bytes(v); } return null; };
   const log = [];
-  for (let i = 0; i < 1500; i++) log.push(`2026-10-07 10:00:${String(i % 60).padStart(2, '0')} INFO [w-${i % 5}] job.Step - processed item ${i} of the catalogue sync`);
+  for (let i = 0; i < 1500; i++) log.push(`2026-10-07 10:00:${String(i % 60).padStart(2, '0')} ${i % 250 === 249 ? 'ERROR' : 'INFO'} [w-${i % 5}] job.Step - processed item ${i} of the catalogue sync`);
   const lead = fixed((n) => `slim: compressed 999,999 B → ${n} B (−0.0%)\n${log.join('\n')}`);
   const T5 = newT();
   const a = call('S7b', T5, envelope(T5, [{ type: 'text', text: lead }]));
@@ -682,6 +682,20 @@ const BASH = (stdout, extra = {}) => ({ stdout, stderr: '', interrupted: false, 
   const lg = hostFile(T, 'b2.txt', APPLOG);
   const l = call('Cb7', T, chEnv(T, 'bash', 'Bash', { command: 'cat app.log' }, BASH(APPLOG.slice(0, 2048), { persistedOutputPath: lg, persistedOutputSize: bytes(APPLOG) })));
   eq('Cb7-log', [l.decision, l.record.engine], ['compressed', 'log']);
+  // A log with no line worth keeping passes whole, and a grep pipeline is a hit list, never a log.
+  const DEBUGLOG = Array.from({ length: 150 }, (_, i) => `${String(i + 1).padStart(6)}\t2026-10-19 10:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.123 [DEBUG] band.picker - refresh tick ${i} for session s-${i % 7} (model segment, account work)`).join('\n');
+  check('Cb7-debuglog-over-log-gate', bytes(DEBUGLOG) > createRequire(import.meta.url)(path.join(SCRIPTS, 'delivery/channels.cjs')).LOG_GATE, String(bytes(DEBUGLOG)));
+  const dg = call('Cb7-grep-debug', T, chEnv(T, 'bash', 'Bash', { command: 'grep -n -i "clear\\|band" engine.log | head -120' }, BASH(DEBUGLOG)));
+  eq('Cb7-grep-debug-whole', [dg.decision, dg.reason, dg.record.engine], ['passthrough', 'plain-gate', null]);
+  const dc = call('Cb7-cat-debug', T, chEnv(T, 'bash', 'Bash', { command: 'cat engine.log' }, BASH(DEBUGLOG)));
+  eq('Cb7-cat-debug-no-signal', [dc.decision, dc.reason], ['passthrough', 'no-signal']);
+  const ge = call('Cb7-grep-error', T, chEnv(T, 'bash', 'Bash', { command: 'grep ERROR app.log' }, BASH(APPLOG)), { SLIM_PLAIN_BYTES: '8192' });
+  eq('Cb7-grep-error-text', [ge.decision, ge.record.engine], ['compressed', 'text']);
+  const { admit } = createRequire(import.meta.url)(path.join(SCRIPTS, 'delivery/channels.cjs'));
+  for (const cmd of ['find . -name "*.log" | xargs grep -h WARN', 'find logs -name "*.log" -exec grep -H WARN {} +', 'sudo grep -n WARN /var/log/app.log', 'LC_ALL=C grep WARN app.log', 'zgrep WARN app.log.1.gz', '/usr/bin/grep WARN app.log']) {
+    eq(`Cb7-grep-anywhere-${cmd}`, admit('bash', 'log', cmd), 'text');
+  }
+  for (const cmd of ['cat app.log', 'git log --grep=fix > a.log; cat a.log', 'cat rg.log']) eq(`Cb7-not-grep-${cmd}`, admit('bash', 'log', cmd), 'log');
 
   const evil = path.join(T, 'evil.txt');
   writeFileSync(evil, GO_TEST);

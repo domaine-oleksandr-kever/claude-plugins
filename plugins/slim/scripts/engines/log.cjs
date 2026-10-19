@@ -656,15 +656,37 @@ function compressLog(content, config) {
   };
 }
 
+// formatLogOutput's trailer counts only ERROR/FAIL/WARN/INFO (upstream parity): the engine names every
+// omitted line, so a cut of DEBUG or level-less lines is never silent.
+const TRAILER = /^\[(\d+) lines omitted: (.+)\]$/;
+function completeTrailer(body, omitted) {
+  if (omitted <= 0) return body;
+  const lines = body.split('\n');
+  const m = TRAILER.exec(lines[lines.length - 1]);
+  if (!m || Number(m[1]) !== omitted) return `${body}\n[${omitted} lines omitted]`;
+  const listed = m[2].split(', ').reduce((n, part) => n + (parseInt(part, 10) || 0), 0);
+  if (listed >= omitted) return body;
+  lines[lines.length - 1] = `[${omitted} lines omitted: ${m[2]}, ${omitted - listed} other]`;
+  return lines.join('\n');
+}
+
+// compressLog as the engines use it → { text } on a real byte win, else { reason }: `no-signal` when
+// no line is worth keeping (all DEBUG, all INFO), so the text goes whole rather than as an empty body.
+function logSignal(content, config) {
+  const r = compressLog(content, config);
+  if (r.budgetExceeded) return { reason: 'budget-exceeded' };
+  if (r.compressed_line_count === 0) return { reason: 'no-signal' };
+  const out = r.compressed === content ? content : completeTrailer(r.compressed, r.original_line_count - r.compressed_line_count);
+  if (out === content || Buffer.byteLength(out, 'utf8') >= Buffer.byteLength(content, 'utf8')) return { reason: 'no-gain' };
+  return { text: out };
+}
+
 // The engine entry: compressed only on a real byte win, else the text comes back untouched.
 function run(text, opts, ctx) {
   if (!detectLog(text).isLog) return { decision: 'passthrough', reason: 'non-log', text };
-  const r = compressLog(text, { deadline: (ctx && ctx.deadline) ?? null });
-  if (r.budgetExceeded) return { decision: 'passthrough', reason: 'budget-exceeded', text };
-  if (r.compressed === text || Buffer.byteLength(r.compressed, 'utf8') >= Buffer.byteLength(text, 'utf8')) {
-    return { decision: 'passthrough', reason: 'no-gain', text };
-  }
-  return { decision: 'compressed', text: r.compressed, stages: ['log'] };
+  const r = logSignal(text, { deadline: (ctx && ctx.deadline) ?? null });
+  if (r.reason) return { decision: 'passthrough', reason: r.reason, text };
+  return { decision: 'compressed', text: r.text, stages: ['log'] };
 }
 
 module.exports = {
@@ -673,6 +695,7 @@ module.exports = {
   LOG_DEFAULTS,
   detectLog,
   compressLog,
+  logSignal,
   classifyLevel,
   scoreLogLine,
   parseLogLines,
