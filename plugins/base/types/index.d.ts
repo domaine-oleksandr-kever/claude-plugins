@@ -64,9 +64,9 @@ export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number;
 
 /**
  * Dogfood mode, per session id: the last plugin-script failure in the main loop (`failMs` 0 = none) and its
- * basename, the failure whose stop was blocked, and the last plugin_defect report this session (0 = none).
+ * basename, and the last plugin_defect report this session (0 = none). Mirrored to dogfood-state.json for the Stop hook.
  */
-export type BaseDogfood = { sid: string; failMs: number; script: string; blockedMs: number; reportMs: number }
+export type BaseDogfood = { sid: string; failMs: number; script: string; reportMs: number }
 
 /** atMs = $.clock.now() when written; text is one line. */
 export type BaseEvent = { atMs: number; kind: BaseEventKind; text: string }
@@ -86,12 +86,10 @@ declare module 'claude-code' {
       started: string | null
       /** The session id whose slim check ran (at its first prompt). */
       checked: string | null
-      /** System prompts the engine composed through base's `prompt.compose` hook this session; 0 = the conventions never reached the model. */
-      composed: number
-      /** The session id whose first user message carries the conventions as a prompt.context block (no surface draws: cloud, `claude -p`). */
+      /** The session id whose first user message carries the conventions as the prompt.context fallback (no surface draws, no command-hook marker). */
       injected: string | null
-      /** The prompt events seen this session (the doctor's conventions row): which ones a host fires decides how the conventions travel. */
-      delivery: BaseDelivery
+      /** The session id whose classic.UserPromptSubmit reached base's mods (the doctor's `classic` row). */
+      classic: string | null
       /** The session id whose title is settled: `<id>` titled by base, `<id>:user` set by the person. */
       titled: string | null
       /** The project root the session launched in, latched once: the scratch-path guard measures against it. */
@@ -110,5 +108,3 @@ declare module 'claude-code' {
   }
 }
 
-/** Per session id: the surfaces classic SessionStart saw (null = it never fired), prompts classic UserPromptSubmit saw, whether prompt.context fired. */
-export type BaseDelivery = { sid: string | null; startSurfaces: string[] | null; prompts: number; context: boolean }

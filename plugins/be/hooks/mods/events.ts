@@ -29,6 +29,12 @@ export function logDir(home: string | undefined, override: string | undefined, s
   return h.startsWith('/') ? `${trimSlash(h)}/.claude/domaine/log/${session}` : null
 }
 
+/** The spare root the command hook leaves its marker under without a writable log dir: `<TMPDIR or /tmp>/domaine-log`. */
+export function spareRoot(tmp: string | undefined): string {
+  const t = tmp?.trim() ?? ''
+  return `${t.startsWith('/') ? trimSlash(t) : '/tmp'}/domaine-log`
+}
+
 /** One be.jsonl line; `plugin` is be's own name, never taken from another plugin's state. */
 export function fileLine(ev: BeEvent, version: string, session: string): string {
   return JSON.stringify({ ts: new Date(ev.atMs).toISOString(), plugin: 'be', version, session, kind: ev.kind, agent: 'main', text: ev.text })

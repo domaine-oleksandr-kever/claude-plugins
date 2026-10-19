@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { BASE_MISSING, PROFILE_TIMEOUT_MS, profileText } from '../session.ts'
-import { NOW, PEEK, ROOT, compose, eventsOf, ours, peek, put, ran, start, world } from './world.ts'
+import { NOW, PEEK, ROOT, block, eventsOf, peek, put, ran, start, world as engine } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
-const profileOf = async ($: any) => ours(await compose($)).find(s => s.id === 'fe:profile')!.text
+// A session no surface draws: the mod's fallback block is the profile's one reader in the prompt.
+const world = (on: On, over: Parameters<typeof engine>[1] = {}) => engine(on, { surfaces: [], ...over })
+const profileOf = async ($: any) => (await block($))!.split('\n\n')[1]
 
 describe('start line and the base check', () => {
   t('one start line per session with the manifest version; a reloaded start writes none', async ($, on) => {
@@ -51,7 +53,7 @@ describe('start line and the base check', () => {
   t('FE_EVENT_LOG=0 keeps the list empty; the toast still shows', async ($, on) => {
     const { calls } = world(on, { env: { FE_EVENT_LOG: '0' }, commands: [] })
     await start($)
-    await compose($)
+    await block($)
     expect((await peek($)).events).toEqual([])
     expect(calls.toasts).toEqual([`fe: ${BASE_MISSING}`])
   })
@@ -107,13 +109,13 @@ describe('the project profile', () => {
   t('the store gate is decided with the profile', async ($, on) => {
     const { w } = world(on)
     put(w, 'shopify.theme.toml')
-    await compose($)
+    await block($)
     expect((await peek($)).profile).toMatchObject({ toml: true, store: true })
   })
 
-  t('a /clear (a new session id, no session.start) decides again at its first render', async ($, on) => {
+  t('a /clear (a new session id, no session.start) decides again at its first fallback block', async ($, on) => {
     const { w, calls } = world(on)
-    await compose($)
+    await block($)
     w.sid = 's2'
     w.profile = () => ran(0, 'none\n')
     expect(await profileOf($)).toBe('fe project profile: none')

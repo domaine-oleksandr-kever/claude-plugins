@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { age, parseStatic, reconcile, render, summary } from '../doctor.ts'
 import type { Row } from '../doctor.ts'
-import { HOME, LOG, NOW, PEEK, ROOT, compose, doctor, eventsOf, peek, ran, start, submit, world } from './world.ts'
+import { HOME, LOG, NOW, PEEK, ROOT, block, doctor, eventsOf, peek, ran, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
 const row = (status: Row['status'], name: string, detail = 'x'): Row => ({ status, name, detail })
@@ -32,9 +32,9 @@ describe('registration', () => {
 
 describe('/fe-doctor', () => {
   t("the static rows, then the live rows, the session's profile in place of the probe's, the summary", async ($, on) => {
-    const { calls } = world(on, { env: { HOME }, profile: () => ran(0, 'foundation\n'), doctor: () => ran(0, staticOut(GREEN)) })
+    const { calls } = world(on, { surfaces: [], env: { HOME }, profile: () => ran(0, 'foundation\n'), doctor: () => ran(0, staticOut(GREEN)) })
     await start($)
-    await compose($)
+    await block($)
     const { text } = await doctor($)
     expect(calls.doctors).toHaveLength(1)
     const argv = calls.doctors[0]!.argv
@@ -76,13 +76,23 @@ describe('/fe-doctor', () => {
   })
 
   t('base and slim missing → both live rows fail; a profile fallback warns', async ($, on) => {
-    const { calls } = world(on, { commands: [['band-log', 'band']], tools: ['Bash'], profile: () => ran(2, '', 'boom'), doctor: () => ran(0, staticOut(GREEN)) })
-    await compose($)
+    const { calls } = world(on, { surfaces: [], commands: [['band-log', 'band']], tools: ['Bash'], profile: () => ran(2, '', 'boom'), doctor: () => ran(0, staticOut(GREEN)) })
+    await block($)
     const { text } = await doctor($)
     expect(text).toContain('FAIL  base-live  fe needs the base plugin — claude plugin install base@domaine')
     expect(text).toContain('FAIL  slim-live  slim is not loaded — claude plugin install slim@domaine')
     expect(text).toContain("WARN  profile    none (fallback: project-profile.sh exited 2: boom) — this session's")
     expect(calls.toasts).toEqual([])
+  })
+
+  t("the SessionStart command hook's marker holds the profile the model got: it wins over the mod's", async ($, on) => {
+    const { w, clock } = world(on, { env: { HOME }, doctor: () => ran(0, staticOut(GREEN)) })
+    await start($)
+    await clock.settle()
+    w.files[`${LOG}/s1/conventions.fe.json`] = { text: JSON.stringify({ via: 'hook', profile: { word: 'foundation', via: 'FE_PROFILE', why: null, toml: false, store: false } }), mtimeMs: NOW }
+    expect((await doctor($)).text).toContain("PASS  profile    foundation (FE_PROFILE) — this session's")
+    w.files[`${LOG}/s1/conventions.fe.json`] = { text: '{"via":"hook"}', mtimeMs: NOW }
+    expect((await doctor($)).text).toContain("PASS  profile    theme (project-profile.sh) — this session's")
   })
 
   t("before the session decided its profile, doctor.cjs's own probe row stays", async ($, on) => {

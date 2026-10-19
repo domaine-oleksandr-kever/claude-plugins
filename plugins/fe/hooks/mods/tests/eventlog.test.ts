@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { EVENT_CAP, FILE_BYTES, FILE_LINES, capLines, logDir, nextLines, pushEvent, seedLines } from '../events.ts'
-import { HOME, LOG, NOW, PEEK, compose, doctor, peek, ran, start, world } from './world.ts'
+import { HOME, LOG, NOW, PEEK, block, doctor, peek, ran, start, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
 const FILE = `${LOG}/s1/fe.jsonl`
@@ -41,10 +41,10 @@ describe('fe.jsonl', () => {
   })
 
   t('a /clear (a new id, no session.start) opens its own file with a start line first', async ($, on) => {
-    const { w } = world(on, { env: { HOME } })
-    await compose($)
+    const { w } = world(on, { surfaces: [], env: { HOME } })
+    await block($)
     w.sid = 's2'
-    await compose($)
+    await block($)
     expect(parse(w.files[`${LOG}/s2/fe.jsonl`]?.text).map(l => [l.session, l.kind])).toEqual([
       ['s2', 'start'],
       ['s2', 'profile'],
@@ -53,9 +53,9 @@ describe('fe.jsonl', () => {
   })
 
   t("a reload goes on from this session's lines on disk; another session's lines go; no second start line", async ($, on) => {
-    const { w } = world(on, { env: { HOME } })
+    const { w } = world(on, { surfaces: [], env: { HOME } })
     w.files[FILE] = { text: `${line('s0', 'doctor', 'old')}\n${line('s1', 'start', 'fe 0.1.0')}\n${line('s1', 'install', 'x')}\n`, mtimeMs: NOW }
-    await compose($)
+    await block($)
     expect(parse(w.files[FILE]?.text).map(l => [l.session, l.kind, l.text])).toEqual([
       ['s1', 'start', 'fe 0.1.0'],
       ['s1', 'install', 'x'],
@@ -73,22 +73,22 @@ describe('fe.jsonl', () => {
   })
 
   t('no HOME and no DOMAINE_LOG_DIR → no file, no toast, the list still fills', async ($, on) => {
-    const { calls } = world(on)
-    await compose($)
+    const { calls } = world(on, { surfaces: [] })
+    await block($)
     expect(calls.writes).toEqual([])
     expect(calls.toasts).toEqual([])
     expect((await peek($)).events.map((ev: any) => ev.kind)).toEqual(['profile'])
   })
 
   t('an absolute DOMAINE_LOG_DIR replaces the home directory; a relative one is ignored', async ($, on) => {
-    const { calls } = world(on, { env: { HOME, DOMAINE_LOG_DIR: '/var/log/domaine/' } })
-    await compose($)
+    const { calls } = world(on, { surfaces: [], env: { HOME, DOMAINE_LOG_DIR: '/var/log/domaine/' } })
+    await block($)
     expect(calls.writes.map(x => x.path)).toEqual(['/var/log/domaine/s1/fe.jsonl'])
   })
 
   t('a failing write never reaches the hook: one toast per session', async ($, on) => {
-    const { w, calls } = world(on, { env: { HOME }, writeFails: 'EACCES: permission denied', doctor: () => ran(0, staticOut) })
-    await compose($)
+    const { w, calls } = world(on, { surfaces: [], env: { HOME }, writeFails: 'EACCES: permission denied', doctor: () => ran(0, staticOut) })
+    await block($)
     const r = await doctor($)
     expect(r.text).toContain('fe doctor')
     await doctor($)

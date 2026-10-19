@@ -148,7 +148,7 @@ is a log; it doesn't go stale.
 So a **clean/new session** knows where the work stands and what to offer next. The first skill to
 run on a work id creates the folder and this file with the full list unchecked; outside a team's
 series (ad-hoc flows), `/base:save-task-context` does. **The rows come from the team plugin**: its
-prompt section names the progress series — the ordered steps of its workflow — and the file lists
+convention section names the progress series — the ordered steps of its workflow — and the file lists
 them in that order. With no series named, the rows are the steps the conversation has taken and
 plans.
 

@@ -9,6 +9,13 @@ export const LOG = `${HOME}/.claude/domaine/log`
 export const SLIM_VIEW = 'mcp__slim__view'
 /** base as the command list shows it: its skills carry its name. */
 export const BASE_COMMANDS: [string, string][] = [['base:commit', 'base'], ['base-doctor', 'base']]
+/** What `<plugin root>/hooks/conventions-text.json` reads as unless a test puts its own file there (the real text is pinned in tests/hooks-sim.sh). */
+export const TEXT: Record<string, string> = {
+  root: 'qa plugin root: <root>',
+  passwords: '## qa convention — storefront passwords\n\n<base root> stays literal',
+}
+/** The marker qa's SessionStart command hook leaves for session s1. */
+export const MARKER = `${LOG}/s1/conventions.qa.json`
 
 type File = { text: string; mtimeMs: number }
 type Init = { stdin?: string; env?: Record<string, string>; timeoutMs?: number } | undefined
@@ -27,8 +34,7 @@ export type World = {
   manifest: string
   /** every $.fs.write rejects with this message while set */
   writeFails: string | null
-  /** what the prompt.compose and SubagentStart hooks beneath qa answer */
-  composeBelow: { id: string; text: string; scope: 'shared' | 'session' }[]
+  /** what the SubagentStart hooks beneath qa answer (qa adds nothing there) */
   subagentBelow: string[] | undefined
 }
 
@@ -49,7 +55,6 @@ export function world(on: On, over: Partial<World> = {}) {
     doctor: null,
     manifest: '{ "name": "qa", "version": "0.1.0", "dependencies": ["base"] }',
     writeFails: null,
-    composeBelow: [{ id: 'intro', text: 'You are Claude Code.', scope: 'shared' }],
     subagentBelow: undefined,
     ...over,
   }
@@ -94,6 +99,7 @@ export function world(on: On, over: Partial<World> = {}) {
   })
   on('fs.read', async (_$, e) => {
     if (e.path.endsWith('/.claude-plugin/plugin.json')) return { value: w.manifest }
+    if (e.path.endsWith('/hooks/conventions-text.json') && !(e.path in w.files)) return { value: JSON.stringify(TEXT) }
     const f = w.files[e.path]
     if (!f) throw enoent(e.path)
     return { value: f.text }
@@ -106,7 +112,6 @@ export function world(on: On, over: Partial<World> = {}) {
     calls.toasts.push(e.text)
     return { value: undefined }
   })
-  on('prompt.compose', async () => ({ sections: w.composeBelow }))
   on('classic.SubagentStart', async () => (w.subagentBelow ? { additionalContext: w.subagentBelow } : {}) as never)
   return { w, calls, clock }
 }
@@ -134,9 +139,9 @@ export const start = ($: any) => $.session.start({ cwd: ROOT, surface: 'terminal
 export const submit = ($: any, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
 export const doctor = ($: any) =>
   $.command.run({ command: 'qa-doctor', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
-const INPUT = { model: 'claude-test', promptModel: 'claude-test', surfaces: ['terminal'], tools: ['Bash'], outputStyle: null, traits: [] }
-export const compose = ($: any) => $.prompt.compose(INPUT)
-export const ours = (r: { sections: readonly { id: string; text: string; scope: string }[] }) => r.sections.filter(s => s.id.startsWith('qa:'))
+export const context = ($: any) => $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'rules' }] })
+/** qa's fallback block in the first user message, or undefined. */
+export const block = async ($: any): Promise<string | undefined> => (await context($)).blocks.find((b: any) => b.name === 'qaConventions')?.text
 export const subagent = ($: any, agent_type: string) => $.classic.SubagentStart({ agent_id: 'a1', agent_type })
 export const eventsOf = async ($: any, kind?: string): Promise<{ atMs: number; kind: string; text: string }[]> =>
   ((await peek($)).events as { atMs: number; kind: string; text: string }[]).filter(ev => !kind || ev.kind === kind)

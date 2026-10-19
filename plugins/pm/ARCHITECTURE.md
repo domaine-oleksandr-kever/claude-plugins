@@ -8,7 +8,9 @@ using it; this file is for whoever changes it. The code wins when the two drift.
 ```
 plugins/pm/
 ├── .claude-plugin/plugin.json   dependencies: ["base"], types; no mcpServers, no classic `hooks` key
-├── hooks/hooks.json             { "modules": ["./mods/register.ts"] } — the only hook wiring
+├── hooks/hooks.json             "modules" (the hooks module) + classic "hooks": SessionStart, SubagentStart
+├── hooks/conventions.cjs        the command hook: pm's conventions and their marker (Node built-ins)
+├── hooks/conventions-text.json  the convention texts, the one copy the hook and the module read
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── types/index.d.ts             pm's $.state contract: the `pm` key only
 ├── skills/<name>/SKILL.md       the 5 skills (`/pm:<name>`); project-estimator, estimator-review and
@@ -45,11 +47,20 @@ across an import, so `doctor.ts` repeats `diskOf` and the base lookup rather tha
 
 | File | Hooks | Writes |
 |---|---|---|
-| `session.ts` | `session.start {cwd:/^/}` start line and base check · `prompt.compose`: the one `pm:<name>` section, `root` · `classic.SubagentStart`: the root line as `additionalContext` | `pm.started`, `pm.events` |
+| `session.ts` | `session.start {cwd:/^/}` start line and base check · `prompt.context`: the cloud fallback block (nothing draws and no `conventions.pm.json` marker), text from `hooks/conventions-text.json` | `pm.started`, `pm.events` |
 | `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit`: register `/pm-doctor` (every start, and a new session id) · `command.run pm-doctor` (passes `--log-dir` to `doctor.cjs`) | `pm.armed`, `pm.events` |
 
-Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `pm.jsonl` writer), `conventions/text.ts`
-(the root line, the agents that get no context).
+Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `pm.jsonl` writer, and `logDir` for
+the marker path).
+
+The conventions travel as a classic command hook, `hooks/conventions.cjs`, because the hooks module's
+prompt events (`prompt.compose`, `prompt.context`, `classic.*`) pass over a user-installed plugin on an
+org-managed (Claude Team) login, while command hooks run on every login. `start` (SessionStart, matcher
+`startup|clear|compact`) prints the text as `additionalContext`, then writes `<log
+dir>/<session-id>/conventions.pm.json`. `subagent` (SubagentStart) prints the root line unless the agent
+type on stdin is a fork, base's readers and writer or Claude Code's helpers (`NO_PM_AGENT`). It always
+exits 0 and prints nothing on an internal error; the only stderr line is a marker write that failed. It
+requires nothing from base: the helpers (stdin, envelope, log dir, login label) are copies of base's.
 
 ## 4. The atoms
 
@@ -119,7 +130,10 @@ Changed, plumbing only:
 ## 8. The tests
 
 - `hooks/mods/tests/*.test.ts` through `claude plugin test plugins/pm`: the start line, the base
-  check, the root section and the subagent share, `/pm-doctor`'s rows and tail, the `pm.jsonl` writer.
+  check, the cloud fallback block and its marker guard, `/pm-doctor`'s rows and tail, the `pm.jsonl`
+  writer.
+- `tests/hooks-sim.sh` (`DHt*`): `hooks/conventions.cjs` run as the host runs it — the envelope, the
+  marker, bad stdin, the log dir, the login label, the subagent share per agent type, the text file.
 - `tests/pm-doctor-sim.sh`: every `doctor.cjs` row on planted plugin roots, homes, install records and
   base manifests; `--help`, the exit codes, no planted secret in the output.
 - `tests/team-refs-lint.sh`: every qualified name and cited path resolves against pm and base, no legacy

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { NUDGE, TOOL, bashText, capEvidence, crashedIn, deniedNotRun, designedRefusal, dogfoodAccounts, failureLine, pluginScript, pluginScripts, scriptLast, seen, slugOf } from '../dogfood/text.ts'
-import { NOW, PEEK, ROOT, eventsOf, ran, run, start, submit, world } from './world.ts'
+import { NOW, PEEK, ROOT, TEXT, eventsOf, peek, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
 const HOME = '/home/dev'
@@ -52,15 +52,35 @@ const DEFECT = {
 
 const report = ($: any, over: Record<string, unknown> = {}) => $.tool.call({ tool: TOOL, ...DEFECT, ...over })
 const bash = ($: any, command: string) => $.tool.call({ tool: 'Bash', command })
-const stop = ($: any) => $.classic.Stop({ stop_hook_active: false } as any)
-const INPUT = { model: 'claude-test', promptModel: 'claude-test', surfaces: ['terminal'], tools: ['Bash'], outputStyle: null, traits: [] }
-const compose = ($: any) => $.prompt.compose(INPUT)
-const dogfoodSection = async ($: any) => (await compose($)).sections.find((s: any) => s.id === 'base:dogfood')
+/** The failure the Stop command hook would block on: the mirrored base.dogfood of this session's id with an unreported failMs. */
+function armed(w: any): string | null {
+  const f = w.files[`${HOME}/.claude/domaine/log/${w.sid}/dogfood-state.json`]
+  if (!f) return null
+  const s = JSON.parse(f.text)
+  return s.sid === w.sid && s.failMs && s.reportMs < s.failMs ? s.script : null
+}
+/** The cloud fallback block (nothing draws, no command-hook marker): its dogfood section, else undefined. */
+async function dogfoodSection($: any, w: any): Promise<string | undefined> {
+  const was = w.surfaces
+  w.surfaces = []
+  const text = ((await $.prompt.context({ blocks: [] })).blocks.at(-1)?.text ?? '') as string
+  w.surfaces = was
+  const at = text.indexOf('## base convention — dogfood mode')
+  return at < 0 ? undefined : text.slice(at)
+}
+/** $.plugin.root as the fallback block's root line names it. */
+async function pluginRoot($: any, w: any): Promise<string> {
+  const was = w.surfaces
+  w.surfaces = []
+  const text = (await $.prompt.context({ blocks: [] })).blocks.at(-1).text as string
+  w.surfaces = was
+  return text.split('\n')[0]!.replace(/^base plugin root: /, '')
+}
 
 /** A world with an install record for base (at its loaded root), slim and fe, and the domaine marketplace on github. */
 async function installedWorld($: any, on: On, env: Record<string, string> = ON, over: Record<string, unknown> = {}) {
   const ctx = world(on, { env, manifest: '{ "name": "base", "version": "0.9.0" }', ...over })
-  const root = (await compose($)).sections.find((s: any) => s.id === 'base:root').text.replace(/^base plugin root: /, '')
+  const root = await pluginRoot($, ctx.w)
   ctx.w.files[INSTALLED] = {
     text: JSON.stringify({
       version: 2,
@@ -84,10 +104,10 @@ describe('dogfood off', () => {
     await submit($, 'go')
     expect(calls.tools).toEqual([])
     expect(calls.commands).not.toContain('base-defects')
-    expect(await dogfoodSection($)).toBeUndefined()
+    expect(await dogfoodSection($, w)).toBeUndefined()
     const r = await bash($, SCRIPT_CMD)
     expect(r.context ?? []).toEqual([])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
     expect(await eventsOf($, 'defect')).toEqual([])
     const doc = await run($, '', 'base-doctor')
     expect(doc.text).not.toContain('defects')
@@ -107,55 +127,70 @@ describe('dogfood by account', () => {
   /** A world whose dogfood.json lists ACCOUNT. */
   async function accountWorld($: any, on: On, env: Record<string, string>) {
     const ctx = world(on, { env })
-    const root = (await compose($)).sections.find((s: any) => s.id === 'base:root').text.replace(/^base plugin root: /, '')
+    const root = await pluginRoot($, ctx.w)
     ctx.w.files[`${root}/dogfood.json`] = { text: JSON.stringify({ accounts: { [ACCOUNT]: 'Owner' } }), mtimeMs: 0 }
     return ctx
   }
 
   t('a listed account turns the mode on without BASE_DOGFOOD: tool, section, command, doctor row', async ($, on) => {
-    const { calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT })
+    const { w, calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT })
     await start($)
     await submit($, 'go')
     expect(calls.tools.map(x => x.name)).toEqual(['plugin_defect'])
     expect(calls.commands).toContain('base-defects')
-    expect((await dogfoodSection($))?.text).toContain('dogfood mode')
+    expect((await dogfoodSection($, w))).toContain('dogfood mode')
     expect((await run($, '', 'base-doctor')).text).toContain('PASS  defects')
   })
 
   t('BASE_DOGFOOD=0 keeps a listed account off', async ($, on) => {
-    const { calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT, BASE_DOGFOOD: '0' })
+    const { w, calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT, BASE_DOGFOOD: '0' })
     await start($)
     expect(calls.tools).toEqual([])
-    expect(await dogfoodSection($)).toBeUndefined()
+    expect(await dogfoodSection($, w)).toBeUndefined()
     expect((await report($)).result).toContain('dogfood mode is off')
   })
 
   t('an unlisted account stays off; a listed one without the file stays off', async ($, on) => {
-    const { calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: 'ffffffff-0000-0000-0000-000000000000' })
+    const { w, calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: 'ffffffff-0000-0000-0000-000000000000' })
     await start($)
     expect(calls.tools).toEqual([])
-    expect(await dogfoodSection($)).toBeUndefined()
+    expect(await dogfoodSection($, w)).toBeUndefined()
+  })
+
+  t('without CLAUDE_CODE_ACCOUNT_UUID the login file decides, as in the command hook', async ($, on) => {
+    const { w, calls } = await accountWorld($, on, { HOME })
+    w.files[`${HOME}/.claude.json`] = { text: JSON.stringify({ oauthAccount: { accountUuid: ACCOUNT } }), mtimeMs: 0 }
+    await start($)
+    expect(calls.tools.map(x => x.name)).toEqual(['plugin_defect'])
+    expect(await dogfoodSection($, w)).toContain('dogfood mode')
+  })
+
+  t('CLAUDE_CONFIG_DIR moves the login file', async ($, on) => {
+    const { w } = await accountWorld($, on, { HOME, CLAUDE_CONFIG_DIR: `${HOME}/.claude-work` })
+    w.files[`${HOME}/.claude.json`] = { text: JSON.stringify({ oauthAccount: { accountUuid: ACCOUNT } }), mtimeMs: 0 }
+    expect(await dogfoodSection($, w)).toBeUndefined()
+    w.files[`${HOME}/.claude-work/.claude.json`] = { text: JSON.stringify({ oauthAccount: { accountUuid: ACCOUNT } }), mtimeMs: 0 }
+    w.sid = 's2'
+    expect(await dogfoodSection($, w)).toContain('dogfood mode')
   })
 
   t('no file: a listed-looking account stays off', async ($, on) => {
-    const { calls } = world(on, { env: { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT } })
+    const { w, calls } = world(on, { env: { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT } })
     await start($)
     expect(calls.tools).toEqual([])
-    expect(await dogfoodSection($)).toBeUndefined()
+    expect(await dogfoodSection($, w)).toBeUndefined()
   })
 })
 
 describe('the convention', () => {
-  t('names the plugins with their versions, the defect list and the strict rule', async ($, on) => {
-    await installedWorld($, on, ON, { enabledPlugins: { 'band@domaine': true, 'pm@domaine': false } })
+  t('the fallback names the plugins with their versions and the surfaceless rule', async ($, on) => {
+    const { w } = await installedWorld($, on, ON, { enabledPlugins: { 'band@domaine': true, 'pm@domaine': false } })
     await start($)
-    const s = await dogfoodSection($)
-    expect(s.scope).toBe('session')
-    expect(s.text).toContain('unstable development builds: slim 0.10.2, band (version unknown), base 0.9.0, fe 0.5.3.')
-    expect(s.text).not.toContain('pm (')
-    for (const part of ['plugin_defect', 'Plugin defect: <title> → <path>', 'never create one unasked', 'storefront passwords', 'doctor` row FAILs', '`lookup` with no answer']) {
-      expect(s.text).toContain(part)
-    }
+    const s = (await dogfoodSection($, w))!
+    expect(s).toContain('builds: slim 0.10.2, band (version unknown), base 0.9.0, fe 0.5.3.')
+    expect(s).not.toContain('pm (')
+    expect(s).toContain(TEXT['rule-surfaceless']!)
+    expect(s).not.toContain(TEXT['rule-drawn']!)
   })
 
   t('rides the context block where nothing draws', async ($, on) => {
@@ -298,7 +333,7 @@ describe('plugin_defect', () => {
     await start($)
     await bash($, SCRIPT_CMD)
     await report($)
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 })
 
@@ -376,49 +411,16 @@ describe('no surface draws', () => {
     expect(r.result).not.toContain('```')
   })
 
-  t('the convention tells the model to paste the whole report, or write it without the tool; a drawn session keeps the offer rule', async ($, on) => {
-    const { w } = world(on, { env: ON, surfaces: [] })
-    const block = (await $.prompt.context({ blocks: [] })).blocks[0].text
-    expect(block).toContain('Paste the whole report into your reply, in a fenced block\nunder the `Plugin defect:` line')
-    expect(block).toContain('No `plugin_defect` among your tools (base\'s tool server is absent in some cloud\nsessions): write the report in that block yourself')
-    expect(block).toContain('ALWAYS report a defect — with the `plugin_defect` tool where it is listed — before\nor while you work around it, never silently.')
-    expect(block).toContain('end the `Plugin defect:`\nline with `→ in this reply` instead of a path, since no file was written.')
-    expect(block).toContain('`Plugin defect: <title> → <path>`,\nthe path the tool returned.')
-    expect(block).not.toContain('never create one unasked')
-    w.surfaces = ['terminal']
-    w.sid = 's2'
-    const s = await dogfoodSection($)
-    expect(s.text).toContain('never create one unasked')
-    expect(s.text).toContain('ALWAYS report a defect — with the `plugin_defect` tool where it is listed')
-    expect(s.text).not.toContain('Paste the whole report')
-    expect(s.text).not.toContain('among your tools')
-    expect(s.text).not.toContain('→ in this reply')
+  t('a terminal session gets no dogfood block from the mod: the command hook carries the section', async ($, on) => {
+    world(on, { env: ON })
+    expect((await $.prompt.context({ blocks: [] })).blocks).toEqual([])
   })
 })
 
 describe('subagents', () => {
-  const subagent = ($: any, agent_type: string) => $.classic.SubagentStart({ agent_id: 'a1', agent_type })
-
-  t('readers and code agents get the dogfood section; a fork gets nothing', async ($, on) => {
+  t('the mod adds no subagent context: the SubagentStart command hook carries it', async ($, on) => {
     world(on, { env: ON })
-    for (const type of ['base:jira-reader', 'general-purpose']) {
-      const ctx = (await subagent($, type)).additionalContext[0] as string
-      expect(ctx).toContain('## base convention — dogfood mode')
-      expect(ctx).toContain('never create one unasked')
-    }
-    expect((await subagent($, 'fork')).additionalContext ?? []).toHaveLength(0)
-  })
-
-  t('off, no subagent gets it', async ($, on) => {
-    world(on, { env: { HOME } })
-    expect((await subagent($, 'general-purpose')).additionalContext[0]).not.toContain('dogfood mode')
-  })
-
-  t('a subagent of a surfaceless session gets the paste rule', async ($, on) => {
-    world(on, { env: ON, surfaces: [] })
-    const ctx = (await subagent($, 'base:jira-reader')).additionalContext[0]
-    expect(ctx).toContain('Paste the whole report')
-    expect(ctx).toContain('write the report in that block yourself')
+    expect((await $.classic.SubagentStart({ agent_id: 'a1', agent_type: 'general-purpose' })).additionalContext ?? []).toEqual([])
   })
 
   t('a subagent\'s failed plugin script still nudges and logs, and never arms the main stop block', async ($, on) => {
@@ -427,7 +429,7 @@ describe('subagents', () => {
     await start($)
     expect((await $.tool.call({ tool: 'Bash', command: SCRIPT_CMD, agentId: 'a1' })).context).toEqual([NUDGE])
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 })
 
@@ -440,13 +442,10 @@ describe('nudge and stop', () => {
     expect(r.context).toEqual([NUDGE])
     expect(NUDGE).toContain('(not among your tools: in your reply)')
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
-    const block = (await stop($)).block
-    expect(block).toContain('a plugin script failed (md-to-adf.cjs)')
-    expect(block).toContain('report it with plugin_defect (not among your tools: in your reply), then stop')
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBe('md-to-adf.cjs')
     await clock.advance(1000)
     await bash($, 'bash plugins/base/scripts/review-scope.sh')
-    expect((await stop($)).block).toContain('(review-scope.sh)')
+    expect(armed(w)).toBe('review-scope.sh')
   })
 
   t('Error in stderr counts as a failure', async ($, on) => {
@@ -463,7 +462,7 @@ describe('nudge and stop', () => {
     expect((await bash($, 'node plugins/base/scripts/ok.cjs')).context ?? []).toEqual([])
     expect((await bash($, 'npm test plugins/foo')).context ?? []).toEqual([])
     expect((await bash($, 'node scripts/build.cjs')).context ?? []).toEqual([])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 
   t('a failing grep or cat over a plugin script path gets no nudge and never blocks', async ($, on) => {
@@ -473,18 +472,18 @@ describe('nudge and stop', () => {
     expect((await bash($, 'grep -n nothing plugins/base/scripts/doctor.cjs')).context ?? []).toEqual([])
     expect((await bash($, 'cat plugins/slim/scripts/nope.cjs')).context ?? []).toEqual([])
     expect(await eventsOf($, 'defect')).toEqual([])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 
   t('a session without a failure is never blocked; a new session id forgets the old failure', async ($, on) => {
     const { w } = world(on, { env: ON })
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
     w.bash = () => FAILED
     await start($)
     await bash($, SCRIPT_CMD)
     w.sid = 's2'
     await submit($, 'next')
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
   t('a compound line the script does not end: an exit code without Error is not the script\'s', async ($, on) => {
     const { w } = world(on, { env: ON })
@@ -494,7 +493,7 @@ describe('nudge and stop', () => {
     const cmd = 'cat /x/review-flow.md; echo =====; /home/dev/.claude/plugins/cache/domaine/base/0.9.1/scripts/review-scope.sh --ws .claude/tasks/ELC-584; echo =====; cat marker'
     expect((await bash($, cmd)).context ?? []).toEqual([])
     expect(await eventsOf($, 'defect')).toEqual([])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 
   t('a compound line the script does not end, with a stack naming the script: nudge and event, never a blocked stop', async ($, on) => {
@@ -503,7 +502,7 @@ describe('nudge and stop', () => {
     await start($)
     expect((await bash($, 'node plugins/base/scripts/x.cjs --ws x; echo done')).context).toEqual([NUDGE])
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: x.cjs'])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 
   t('a compound line the script does not end, with a shell trace naming the script: nudge', async ($, on) => {
@@ -528,7 +527,7 @@ describe('nudge and stop', () => {
     const cmd = 'bash /home/dev/.claude/plugins/cache/domaine/base/0.9.3/scripts/review-scope.sh --check && git add -A && git commit -m x'
     expect((await bash($, cmd)).context ?? []).toEqual([])
     expect(await eventsOf($, 'defect')).toEqual([])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 
   t('a crash in the second plugin script of a compound line: nudge, event', async ($, on) => {
@@ -557,7 +556,7 @@ describe('nudge and stop', () => {
       await start($)
       expect((await bash($, 'bash plugins/base/scripts/review-scope.sh --check')).context ?? []).toEqual([])
       expect(await eventsOf($, 'defect')).toEqual([])
-      expect((await stop($)).block).toBeUndefined()
+      expect(armed(w)).toBeNull()
     })
 
   t('the script last after cd, with a trailing 2>&1: nudge, event, the stop blocked once', async ($, on) => {
@@ -566,8 +565,7 @@ describe('nudge and stop', () => {
     await start($)
     expect((await bash($, 'cd /repo && node plugins/base/scripts/md-to-adf.cjs in.md 2>&1')).context).toEqual([NUDGE])
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
-    expect((await stop($)).block).toContain('a plugin script failed (md-to-adf.cjs)')
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBe('md-to-adf.cjs')
   })
 
   t('a designed refusal (base die, fe error= line) gets no nudge, no event, no block', async ($, on) => {
@@ -579,7 +577,7 @@ describe('nudge and stop', () => {
     expect((await bash($, 'node /home/dev/.claude/plugins/cache/domaine/base/0.9.1/scripts/qa-stores.cjs get elc-us-mc-dev')).context ?? []).toEqual([])
     expect((await bash($, 'bash plugins/fe/scripts/shopify-admin-gql.sh --query q.graphql')).context ?? []).toEqual([])
     expect(await eventsOf($, 'defect')).toEqual([])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 
   for (const reason of REFUSALS)
@@ -589,7 +587,7 @@ describe('nudge and stop', () => {
       await start($)
       expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x')).context ?? []).toEqual([])
       expect(await eventsOf($, 'defect')).toEqual([])
-      expect((await stop($)).block).toBeUndefined()
+      expect(armed(w)).toBeNull()
     })
 
   for (const reason of FAILURES)
@@ -599,7 +597,7 @@ describe('nudge and stop', () => {
       await start($)
       expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x')).context).toEqual([NUDGE])
       expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: theme-json.sh'])
-      expect((await stop($)).block).toContain('a plugin script failed (theme-json.sh)')
+      expect(armed(w)).toBe('theme-json.sh')
     })
 
   t('a failure line among refusal lines is a failure', async ($, on) => {
@@ -616,7 +614,7 @@ describe('nudge and stop', () => {
     expect((await bash($, 'bash plugins/fe/scripts/shopify-admin-gql.sh --query q.graphql 2>&1 | head -20')).context).toEqual([NUDGE])
     expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x 2>&1 | tail -5')).context ?? []).toEqual([])
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: shopify-admin-gql.sh'])
-    expect((await stop($)).block).toBeUndefined()
+    expect(armed(w)).toBeNull()
   })
 
   t('a compound line the script does not end, failing with a refusal line and no Error: silent', async ($, on) => {
@@ -633,6 +631,52 @@ describe('nudge and stop', () => {
     await start($)
     expect((await bash($, 'bash plugins/fe/scripts/push-theme.sh')).context).toEqual([NUDGE])
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: push-theme.sh'])
+  })
+})
+
+describe('the dogfood-state.json mirror', () => {
+  const FILE = `${HOME}/.claude/domaine/log/s1/dogfood-state.json`
+  const mirrored = (w: any, path = FILE) => JSON.parse(w.files[path]?.text ?? 'null')
+
+  t('armed at start, the failure in the main loop, then the report: each update mirrored, one JSON line', async ($, on) => {
+    const { w, clock } = world(on, { env: ON })
+    w.bash = () => FAILED
+    await start($)
+    expect(w.files[FILE]!.text).toBe('{"sid":"s1","failMs":0,"script":"","reportMs":0}\n')
+    await clock.advance(1000)
+    await bash($, SCRIPT_CMD)
+    expect(mirrored(w)).toEqual({ sid: 's1', failMs: NOW + 1000, script: 'md-to-adf.cjs', reportMs: 0 })
+    await clock.advance(1000)
+    await report($)
+    expect(mirrored(w)).toEqual({ sid: 's1', failMs: NOW + 1000, script: 'md-to-adf.cjs', reportMs: NOW + 2000 })
+    expect((await peek($)).dogfood).toEqual(mirrored(w))
+  })
+
+  t('a new session id gets its own file; DOMAINE_LOG_DIR moves it', async ($, on) => {
+    const { w } = world(on, { env: { ...ON, DOMAINE_LOG_DIR: '/var/log/domaine' } })
+    await start($)
+    w.sid = 's2'
+    await submit($, 'after a clear')
+    expect(mirrored(w, '/var/log/domaine/s1/dogfood-state.json').sid).toBe('s1')
+    expect(mirrored(w, '/var/log/domaine/s2/dogfood-state.json')).toEqual({ sid: 's2', failMs: 0, script: '', reportMs: 0 })
+    expect(w.files[FILE]).toBeUndefined()
+  })
+
+  t('a log dir the session cannot write: the nudge and the event still come', async ($, on) => {
+    const { w } = world(on, { env: ON, writeDenied: [`${HOME}/.claude/domaine/`] })
+    w.bash = () => FAILED
+    await start($)
+    expect((await bash($, SCRIPT_CMD)).context).toEqual([NUDGE])
+    expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: md-to-adf.cjs'])
+    expect(w.files[FILE]).toBeUndefined()
+  })
+
+  t('off: no file', async ($, on) => {
+    const { w } = world(on, { env: { HOME } })
+    w.bash = () => FAILED
+    await start($)
+    await bash($, SCRIPT_CMD)
+    expect(w.files[FILE]).toBeUndefined()
   })
 })
 

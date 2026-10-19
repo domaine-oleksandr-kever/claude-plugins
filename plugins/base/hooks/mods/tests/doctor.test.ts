@@ -8,9 +8,14 @@ import { NOW, PEEK, ROOT, eventsOf, peek, ran, run, start, submit, world } from 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
 const doctor = ($: any) => run($, '', 'base-doctor')
 const NO_SLIM = ['Bash', 'Read']
-const PROMPT = { model: 'claude-test', promptModel: 'claude-test', surfaces: ['terminal'], tools: ['Bash'], outputStyle: null, traits: [] }
-/** One system prompt rendered: the engine's compose call runs base's hook. */
-const compose = ($: any) => $.prompt.compose(PROMPT)
+const HOME = '/home/dev'
+const LOGDIR = `${HOME}/.claude/domaine/log/s1`
+/** A conventions marker as hooks/conventions.cjs writes it: `base` = base's core part, `base.rules` its rules part. */
+const mark = (w: any, stem: string, source = 'startup') =>
+  (w.files[`${LOGDIR}/conventions.${stem}.json`] = {
+    text: JSON.stringify({ via: 'hook', event: 'SessionStart', source, sections: [], chars: 10, login: { label: 'work', org: 'claude_team', file: '/home/dev/.claude-work/.claude.json' } }),
+    mtimeMs: 0,
+  })
 
 const row = (status: Row['status'], name: string, detail = 'x'): Row => ({ status, name, detail })
 const staticOut = (rows: Row[]) => JSON.stringify({ root: '/plugin', rows })
@@ -69,33 +74,37 @@ describe('once per session', () => {
 
 describe('/base-doctor', () => {
   t('the static rows, the live rows, one row per manifest server, the summary', async ($, on) => {
-    const { calls } = world(on, {
+    const { w, calls } = world(on, {
+      env: { HOME },
       manifest: manifest(['atlassian', 'playwright']),
       mcp: { atlassian: up('atlassian'), playwright: up('playwright') },
       run: () => ran(0, staticOut(GREEN)),
     })
+    mark(w, 'base')
+    mark(w, 'base.rules')
     await start($)
-    await compose($)
+    await $.classic.UserPromptSubmit({ prompt: 'hi', session_id: 's1' })
     const { text } = await doctor($)
     expect(calls.runs).toHaveLength(1)
     const argv = calls.runs[0]?.argv ?? []
     expect(argv[0]).toBe('node')
     expect(argv[1]).toMatch(/\/scripts\/doctor\.cjs$/)
     expect(argv.slice(2, 4)).toEqual(['--json', '--root'])
-    expect(argv.slice(5)).toEqual(['--project', ROOT])
+    expect(argv.slice(5)).toEqual(['--project', ROOT, '--log-dir', LOGDIR])
     expect(calls.connects.sort()).toEqual(['atlassian', 'playwright'])
     const out = lines(text)
     expect(out[0]).toMatch(/^base doctor — plugin root: /)
-    expect(out.slice(1, 8)).toEqual([
+    expect(out.slice(1, 9)).toEqual([
       'PASS  node            node 22.0.0 (>= 18 required)',
       'PASS  manifest        base 0.1.0, depends on slim',
       'PASS  slim            slim@domaine 0.5.0 installed and enabled',
       'PASS  slim-live       mcp__slim__view registered',
-      'PASS  conventions     in the system prompt: 1 render through prompt.compose',
+      'PASS  conventions     SessionStart command hook (startup): base core+rules',
+      "PASS  classic         classic.UserPromptSubmit reached base's mods this session",
       'PASS  mcp:atlassian   connected as plugin:base:atlassian',
       'PASS  mcp:playwright  connected as plugin:base:playwright',
     ])
-    expect(out[8]).toBe('doctor: 7 passed, 0 failed, 0 skipped')
+    expect(out[9]).toBe('doctor: 8 passed, 0 failed, 0 skipped')
   })
 
   t('one doctor line in base.events, and the events tail in the answer', async ($, on) => {
@@ -106,7 +115,7 @@ describe('/base-doctor', () => {
     expect(text).toContain('base events (last 1 of 1, newest last):')
     expect(text).toContain('    2m  start      base 0.1.0')
     expect(text).toContain('SKIP  mcp')
-    expect(await eventsOf($, 'doctor')).toEqual([{ atMs: NOW + 125_000, kind: 'doctor', text: '4 passed, 0 failed, 2 skipped' }])
+    expect(await eventsOf($, 'doctor')).toEqual([{ atMs: NOW + 125_000, kind: 'doctor', text: '4 passed, 0 failed, 3 skipped' }])
   })
 
   t('BASE_EVENT_LOG=0 → the tail says so and no line is written', async ($, on) => {
@@ -129,32 +138,62 @@ describe('/base-doctor', () => {
     expect(calls.toasts).toEqual([])
   })
 
-  t('conventions: SKIP before any prompt, FAIL once a prompt went out with no compose, PASS counts the renders', async ($, on) => {
-    world(on, { manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
+  t('conventions: SKIP before any prompt, FAIL once a prompt went out with no marker, PASS per enabled plugin, WARN for one missing', async ($, on) => {
+    const { w } = world(on, { env: { HOME }, manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
     await start($)
     expect((await doctor($)).text).toContain('SKIP  conventions  no prompt sent yet: send one, then run the doctor again')
     await submit($, 'hello')
     expect((await doctor($)).text).toContain(
-      'FAIL  conventions  not delivered: prompt.compose never fired; SessionStart never fired; UserPromptSubmit ×0; prompt.context never fired; surfaces now [terminal]',
+      `FAIL  conventions  not delivered: no SessionStart command hook marker in ${LOGDIR} or /tmp/domaine-log/s1 (hooks/hooks.json → hooks/conventions.cjs)`,
     )
-    await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
-    await $.classic.UserPromptSubmit({ prompt: 'hi', session_id: 's1' })
-    await $.classic.UserPromptSubmit({ prompt: 'again', session_id: 's1' })
-    await $.prompt.context({ blocks: [] })
-    expect((await doctor($)).text).toContain(
-      'FAIL  conventions  not delivered: prompt.compose never fired; SessionStart saw surfaces [terminal]; UserPromptSubmit ×2; prompt.context fired; surfaces now [terminal]',
-    )
-    await compose($)
-    await compose($)
-    expect((await doctor($)).text).toContain('PASS  conventions  in the system prompt: 2 renders through prompt.compose')
+    mark(w, 'base', 'compact')
+    expect((await doctor($)).text).toContain('PASS  conventions  SessionStart command hook (compact): base core')
+    w.enabledPlugins = { ...w.enabledPlugins, 'fe@domaine': true, 'qa@domaine': true, 'pm@domaine': false }
+    mark(w, 'fe')
+    expect((await doctor($)).text).toContain('WARN  conventions  SessionStart command hook (compact): base core, fe; no marker from qa (enabled)')
+    mark(w, 'qa')
+    mark(w, 'base.rules')
+    expect((await doctor($)).text).toContain('PASS  conventions  SessionStart command hook (compact): base core+rules, fe, qa')
   })
 
-  t('conventions: a surfaceless session whose first message carries them passes without a render', async ($, on) => {
-    world(on, { surfaces: [], manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
+  t('conventions: a surfaceless session the mod fallback served passes', async ($, on) => {
+    world(on, { surfaces: [], env: { HOME }, manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
     await start($)
     await $.prompt.context({ blocks: [] })
     await submit($, 'hello')
-    expect((await doctor($)).text).toContain('PASS  conventions  in the first user message as a prompt.context block: no surface draws here, so the engine composes its prompt without the plugins')
+    expect((await doctor($)).text).toContain('PASS  conventions  prompt.context fallback: no surface draws and no SessionStart command hook marker')
+  })
+
+  t('conventions: no HOME and no DOMAINE_LOG_DIR → the marker under the spare root (TMPDIR) counts', async ($, on) => {
+    const { w } = world(on, { env: { TMPDIR: '/var/tmp/' }, manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
+    await start($)
+    w.files['/var/tmp/domaine-log/s1/conventions.base.json'] = { text: '{"source":"startup"}', mtimeMs: 0 }
+    expect((await doctor($)).text).toContain('PASS  conventions  SessionStart command hook (startup): base core')
+  })
+
+  t('conventions: DOMAINE_LOG_DIR moves the markers', async ($, on) => {
+    const { w } = world(on, { env: { HOME, DOMAINE_LOG_DIR: '/var/log/domaine' }, manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
+    await start($)
+    mark(w, 'base')
+    w.files['/var/log/domaine/s1/conventions.base.json'] = { text: '{"source":"clear"}', mtimeMs: 0 }
+    expect((await doctor($)).text).toContain('PASS  conventions  SessionStart command hook (clear): base core')
+  })
+
+  t('classic: SKIP before any prompt, WARN naming the login once a prompt went out without it, PASS once it fired', async ($, on) => {
+    const { w } = world(on, { env: { HOME }, manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
+    await start($)
+    expect((await doctor($)).text).toContain('SKIP  classic      no prompt sent yet')
+    await submit($, 'hello')
+    expect((await doctor($)).text).toContain(
+      "WARN  classic      classic.* did not reach base's mods this session (login: unknown): session title, autosave/progress, band resume handlers and slim prompt-paste compression are off here",
+    )
+    mark(w, 'base')
+    expect((await doctor($)).text).toContain("WARN  classic      classic.* did not reach base's mods this session (login: work, /home/dev/.claude-work/.claude.json):")
+    await $.classic.UserPromptSubmit({ prompt: 'hi', session_id: 's1' })
+    expect((await doctor($)).text).toContain("PASS  classic      classic.UserPromptSubmit reached base's mods this session")
+    w.sid = 's2'
+    await submit($, 'after a clear')
+    expect((await doctor($)).text).toContain('WARN  classic')
   })
 
   t('a slim the install record lacks but the session loaded → WARN, not FAIL', async ($, on) => {
@@ -203,7 +242,7 @@ describe('/base-doctor', () => {
     expect(text).toMatch(/WARN {2}mcp:shopify-dev-mcp +turned off: disabled in \/mcp/)
     expect(text).toMatch(/FAIL {2}mcp:playwright +failed: exited 1/)
     expect(text).toMatch(/FAIL {2}mcp:chrome-devtools-mcp +\S/)
-    expect(text).toContain('doctor: 5 passed, 3 failed, 1 skipped, 2 warned')
+    expect(text).toContain('doctor: 5 passed, 3 failed, 2 skipped, 2 warned')
   })
 
   t(`a server that never answers fails after ${MCP_TIMEOUT_MS / 1000} s`, async ($, on) => {

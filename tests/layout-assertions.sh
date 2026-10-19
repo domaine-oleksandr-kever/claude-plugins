@@ -657,8 +657,9 @@ for tag in $(grep -o "statsRefusal([^,]*, '[^']*')" "$PLUGIN_DIR/scripts/json-sl
 done
 
 # ------------------------------------------------ Claude Code hooks module (mods) wiring --
-# hooks/hooks.json is Claude Code's function-hooks file: anything beside `modules` there would be a
-# second, untested hook wiring, and a module path that moved fails the whole module load.
+# hooks/hooks.json is Claude Code's function-hooks file: `modules`, plus classic `hooks` whose every entry runs a
+# `${CLAUDE_PLUGIN_ROOT}/hooks/*.cjs` that exists (the command hooks hooks-sim.sh drives); anything else would be
+# an untested hook wiring, and a module path that moved fails the whole module load.
 for MODS_JSON in "$ROOT"/plugins/*/hooks/hooks.json; do
   [ -f "$MODS_JSON" ] || continue
   name="$(basename "$(dirname "$(dirname "$MODS_JSON")")")"
@@ -668,7 +669,12 @@ for MODS_JSON in "$ROOT"/plugins/*/hooks/hooks.json; do
     let m;
     try { m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { console.log("unparseable: " + e.message); process.exit(0); }
     const keys = Object.keys(m || {});
-    if (keys.length !== 1 || keys[0] !== "modules") { console.log("keys " + JSON.stringify(keys) + " != [\"modules\"]"); process.exit(0); }
+    if (keys[0] !== "modules" || keys.some((k) => k !== "modules" && k !== "hooks")) { console.log("keys " + JSON.stringify(keys) + " != [\"modules\"(,\"hooks\")]"); process.exit(0); }
+    for (const [ev, groups] of Object.entries(m.hooks || {})) for (const g of [].concat(groups)) for (const h of [].concat((g || {}).hooks)) {
+      const f = /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[\w.-]+\.cjs)"( |$)/.exec((h || {}).command || "");
+      if (!h || h.type !== "command" || !f) { console.log(ev + ": not a node ${CLAUDE_PLUGIN_ROOT}/hooks/*.cjs command: " + JSON.stringify(h)); process.exit(0); }
+      if (!fs.existsSync(path.join(path.dirname(process.argv[1]), "..", f[1]))) { console.log(ev + ": command hook script missing: " + f[1]); process.exit(0); }
+    }
     if (!Array.isArray(m.modules) || !m.modules.length) { console.log("modules is not a non-empty list"); process.exit(0); }
     for (const p of m.modules) {
       if (typeof p !== "string" || p.startsWith("/") || p.includes("..")) { console.log("module path must be relative, no ..: " + p); process.exit(0); }
@@ -875,7 +881,7 @@ for p in $TEAM_PLUGINS; do
   TP="$ROOT/plugins/$p"
   others="$(printf '%s' "$TEAM_PLUGINS" | tr ' ' '\n' | grep -vx "$p" | tr '\n' '|')"
   for f in .claude-plugin/plugin.json hooks/hooks.json hooks/mods/register.ts hooks/mods/session.ts \
-           hooks/mods/events.ts hooks/mods/doctor.ts hooks/mods/conventions/text.ts types/index.d.ts \
+           hooks/mods/events.ts hooks/mods/doctor.ts hooks/conventions.cjs hooks/conventions-text.json types/index.d.ts \
            README.md ARCHITECTURE.md .gitignore scripts/doctor.cjs; do
     if [ -f "$TP/$f" ]; then ok; else bad "$p-exists-$f" "plugins/$p/$f missing"; fi
   done

@@ -8,7 +8,9 @@ using it; this file is for whoever changes it. The code wins when the two drift.
 ```
 plugins/fe/
 ├── .claude-plugin/plugin.json   dependencies: ["base"], types; no mcpServers, no classic `hooks` key
-├── hooks/hooks.json             { "modules": ["./mods/register.ts"] } — the only hook wiring
+├── hooks/hooks.json             "modules" (the hooks module) + classic "hooks": SessionStart, SubagentStart
+├── hooks/conventions.cjs        the command hook: fe's sections, profile decision, marker (Node built-ins)
+├── hooks/conventions-text.json  the section texts, the one copy the hook and the module read
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── types/index.d.ts             fe's $.state contract: the `fe` key only
 ├── skills/<name>/SKILL.md       the 12 Shopify theme skills (`/fe:<name>`); fix-breaking-changes
@@ -35,7 +37,18 @@ loudly without it. `session.ts` looks for a command whose `plugin` is `base` in 
 way, a registered tool, does not apply, as base registers none). Absent → one toast and one `install`
 line; a listing that fails says nothing.
 
-## 3. The hooks module
+## 3. The command hook
+
+The conventions travel as a classic command hook because the hooks module's prompt events
+(`prompt.compose`, `prompt.context`, `classic.*`) pass over a user-installed plugin on an org-managed
+(Claude Team) login, while command hooks run on every login. `hooks/conventions.cjs start` (SessionStart,
+matcher `startup|clear|compact`) decides the profile, prints the sections as `additionalContext` and then
+writes `<log dir>/<session-id>/conventions.fe.json` (the profile included); `subagent` (SubagentStart)
+prints the share for the agent type on stdin, the profile from that marker. It always exits 0 and prints
+nothing on an internal error; the only stderr line is a marker write that failed. It requires nothing
+from base: the helpers (stdin, envelope, log dir, login label) are copies of base's.
+
+## 4. The hooks module
 
 `register.ts` calls one register function per file. Each file declares its own atoms and spells its
 own env names: the engine's validator follows `$` only into functions declared in the same file, never
@@ -43,24 +56,24 @@ across an import, so `doctor.ts` repeats `diskOf` and the base lookup rather tha
 
 | File | Hooks | Writes |
 |---|---|---|
-| `session.ts` | `session.start {cwd:/^/}` start line, base check, profile decision started unawaited · `prompt.compose`: the `fe:<name>` sections · `classic.SubagentStart`: the subagents' share as `additionalContext` | `fe.started`, `fe.profile`, `fe.events` |
-| `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit`: register `/fe-doctor` (every start, and a new session id) · `command.run fe-doctor` (passes `--log-dir` to `doctor.cjs`) | `fe.armed`, `fe.events` |
+| `session.ts` | `session.start {cwd:/^/}` start line, base check, profile decision started unawaited · `prompt.context`: the cloud fallback — the sections as one block when no surface draws and the command hook left no marker | `fe.started`, `fe.profile`, `fe.events` |
+| `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit`: register `/fe-doctor` (every start, and a new session id) · `command.run fe-doctor` (passes `--log-dir` to `doctor.cjs`; the profile row prefers the marker's profile) | `fe.armed`, `fe.events` |
 
-Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `fe.jsonl` writer), `conventions/text.ts`
-(the section texts, `<fe root>` filled in by `withRoot`).
+Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `fe.jsonl` writer). The fallback reads the
+section texts from `hooks/conventions-text.json` through `$.fs.read`.
 
-**The profile** lives in `session.ts` with both of its readers. It is decided once per session id —
+**The profile** is decided twice the same way: by the command hook for the text the model gets, and in
+`session.ts` for the module's readers (the fallback, the event log, the doctor). The module decides it once per session id —
 `FE_PROFILE` when it holds one of the three words, else `bash scripts/project-profile.sh <session root>`
 through `$.process.run` with a 5 s timeout — stored in `fe.profile` with how it was decided, whether
 the project root holds `shopify.theme.toml` (the worktree gate) and whether store access applies (the toml,
 or `.env` with a profile other than `none`), and logged once. The progress series needs a profile other
 than `none` or the toml. A
-module-local promise keyed by the session id keeps the start, a compose and a subagent from running the
-probe twice; a /clear's new id decides again at its first compose. The decision never changes within a
-session, so the sections repeat byte for byte (the prompt cache). The probe stays a script because
+module-local promise keyed by the session id keeps the start and the fallback from running the
+probe twice; a /clear's new id decides again at its first fallback block. The probe stays a script because
 `worktree-theme.sh`, the doctor and the skills' fallback (no profile line in the session) read the same answer outside the module.
 
-## 4. The atoms
+## 5. The atoms
 
 `types/index.d.ts` declares `fe: { … }` only. Any plugin reads a fe atom; fe alone writes it.
 
@@ -72,7 +85,7 @@ session, so the sections repeat byte for byte (the prompt cache). The probe stay
 - **`fe.started`**, **`fe.armed`** — the session id whose start line and base check ran, and whose
   `/fe-doctor` is registered: a module reload repeats neither the line nor the check.
 
-## 5. The file log
+## 6. The file log
 
 Every line pushed to `fe.events` also goes to `events.ts`'s `logLine` with a `Disk` the writing file
 builds from its own `$`: `<log dir>/<session-id>/fe.jsonl`, `plugin` the literal `fe`, `version` from fe's
@@ -82,15 +95,15 @@ or 256 KB, never a throw into a hook, one toast per session on the first failed 
 directory is `DOMAINE_LOG_DIR` when absolute, else `$HOME/.claude/domaine/log`; neither, no file. fe
 never sweeps: base owns the clean-up of old session folders.
 
-## 6. The doctor
+## 7. The doctor
 
 `scripts/doctor.cjs` answers what a node process can see (node, manifest, scripts and their `--help`,
 base installed, the Shopify CLI, the profile probe, the store files' presence, `fe.jsonl`); `/fe-doctor`
-adds `base-live` and `slim-live`, puts the session's own profile in place of the probe's row, and
+adds `base-live` and `slim-live`, puts the session's own profile (the start hook's marker, else the module's) in place of the probe's row, and
 turns a static `base` FAIL into a WARN when the session loaded base anyway (a `--plugin-dir` load has
 no install record). Never a value from `.env` or `shopify.theme.toml`.
 
-## 7. What stays a script
+## 8. What stays a script
 
 A script is what has to run outside the module: from a skill's Bash call, from a worktree's own
 session, from a terminal by hand, or under a timeout the module must not inherit.
@@ -105,7 +118,7 @@ session, from a terminal by hand, or under a timeout the module must not inherit
 - **`worktree-theme.sh`**: base's `worktree-setup.sh` knows no theme; this is the Shopify half
   (un-pin once per worktree, a stamp in the worktree's git dir; the dev-server line with the port base
   recorded). `/fe:preview-theme` and `/fe:ship` run it.
-- **`project-profile.sh`**, **`doctor.cjs`**: § 3 and § 6.
+- **`project-profile.sh`**, **`doctor.cjs`**: § 4 and § 7.
 
 No script writes `fe.events` or `fe.jsonl`; only the module does. Every `scripts/*.sh` but the sourced
 `_shopify-common.sh` answers `--help` with exit 0; the doctor's `scripts` row holds them to it

@@ -2,8 +2,8 @@
 
 - **The repo is a marketplace of several plugins** (`plugins/fnd`, `plugins/slim`, …). A new
   plugin lands with its `.claude-plugin/marketplace.json` entry in the same commit;
-  `scripts/install.sh` and `plugins/fnd/scripts/bump-version.cjs` take `--plugin <name>`
-  (default `fnd`). Every rule below applies to every plugin.
+  `scripts/install.sh` takes `--plugin <name>` (default `fnd`); the repo-root
+  `scripts/bump-version.cjs` requires it. Every rule below applies to every plugin.
 - **Node scripts are dependency-free by policy.** Everything under
   `plugins/*/scripts/*.cjs`, `plugins/*/hooks/*.cjs`, and `tests/*.mjs` uses Node
   built-ins only (`fs`, `path`, `os`, `child_process`, …). No `package.json`, no

@@ -1,0 +1,4 @@
+{
+  "root": "qa plugin root: <root>",
+  "passwords": "## qa convention — storefront passwords\n\nA dev or UAT storefront password is low-sensitivity: the registry (`node <base root>/scripts/qa-stores.cjs get <store> --field password`;\n`<base root>` is the path on base's `base plugin root:` line, a bare `get` prints JSON, never a fill value) is the\npreferred source when it knows the store, and one the developer gave in chat or a memory or workspace note holds is as\ngood. It may appear in chat, notes, browser fill code and on a Bash line, never in a Jira comment, Steps to Test, a PR\nbody or anything else the client or QA team reads, a committed theme-repo file or a screenshot attached to a ticket.\nThe registry file is never read directly, only through the script."
+}

@@ -1,4 +1,4 @@
-// Dogfood mode's pure parts: the convention text, the plugin_defect tool's schema, the report file's name and
+// Dogfood mode's pure parts: the plugin_defect tool's schema, the report file's name and
 // body, the install-record readings, the plugin-script failure test and the index parser. No `$` here.
 import { utf8Bytes } from '../events.ts'
 
@@ -368,6 +368,24 @@ export function dogfoodMode(sw: string, account: string, json: string | null): b
   return id !== '' && dogfoodAccounts(json).includes(id)
 }
 
+/** The login file the account id comes from: `$HOME/.claude.json` for the default config dir, else `<CLAUDE_CONFIG_DIR>/.claude.json`. */
+export function loginFile(home: string | undefined, configDir: string | undefined): string | null {
+  const abs = (p: string | undefined) => (p?.trim().startsWith('/') ? p.trim().replace(/\/+$/, '') : '')
+  const h = abs(home)
+  const c = abs(configDir)
+  return c && c !== `${h}/.claude` ? `${c}/.claude.json` : h ? `${h}/.claude.json` : null
+}
+
+/** A login file's `oauthAccount.accountUuid`; '' for a missing or malformed file. */
+export function loginAccount(json: string | null): string {
+  try {
+    const id = (JSON.parse(json ?? '') as { oauthAccount?: { accountUuid?: unknown } }).oauthAccount?.accountUuid
+    return typeof id === 'string' ? id : ''
+  } catch {
+    return ''
+  }
+}
+
 /** The claude.ai account ids dogfood.json lists (`accounts`: id → name); [] for a missing or malformed file. */
 export function dogfoodAccounts(json: string | null): string[] {
   try {
@@ -377,29 +395,3 @@ export function dogfoodAccounts(json: string | null): string[] {
     return []
   }
 }
-
-const RULE_DRAWN = `Offer a GitHub issue (\`github: true\`); never create one unasked.`
-const RULE_SURFACELESS = `No surface draws in this session (a cloud session, \`claude -p\`): the report file
-and \`~\` do not outlive it. Paste the whole report into your reply, in a fenced block
-under the \`Plugin defect:\` line, so the owner can copy it into a session in the plugin repo.
-\`plugin_defect\` returns that report and files the GitHub issue itself unless you pass
-\`github: false\`. No \`plugin_defect\` among your tools (base's tool server is absent in some cloud
-sessions): write the report in that block yourself — title, plugin and version, kind, observed,
-expected, reproduce, evidence, environment (the versions above) — and end the \`Plugin defect:\`
-line with \`→ in this reply\` instead of a path, since no file was written.`
-
-export const dogfoodSection = (versions: string, surfaceless = false) => `## base convention — dogfood mode
-
-The Domaine plugins in this session are unstable development builds: ${versions}. You are
-dogfooding them: a plugin defect is a finding to report, not noise to route around.
-
-**A defect:** a plugin script failed or returned odd output; a hook or mod threw or showed a
-notice; a skill contradicts the code or itself; a \`/<plugin>-doctor\` row FAILs; slim's output is
-wrong (a stub where data was expected, \`lookup\` with no answer, a window missing the part
-needed); a convention sentence is wrong for this host.
-
-**Rule:** ALWAYS report a defect — with the \`plugin_defect\` tool where it is listed — before
-or while you work around it, never silently. Your reply then carries one line \`Plugin defect: <title> → <path>\`,
-the path the tool returned.
-${surfaceless ? RULE_SURFACELESS : RULE_DRAWN} Never put secrets, tokens or storefront passwords in a
-report.`

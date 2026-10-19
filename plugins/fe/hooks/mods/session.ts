@@ -1,21 +1,10 @@
-// fe's session: the start line, the base check, the project profile (decided once per session id) and the
-// conventions that follow it — system-prompt sections for the main session, added context for subagents.
-// The profile lives here with both of its readers: the validator follows `$` only within one file.
+// fe's session: the start line, the base check and the project profile (decided once per session id). The
+// conventions travel as command hooks (hooks/conventions.cjs); this mod is the cloud fallback only: in a session
+// no surface draws and whose SessionStart hook left no marker, they ride the first user message as a block.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 import type { FeEvent, FeEventKind, FeProfile, FeProfileInfo } from '../../types'
-import {
-  FOUNDATION,
-  NO_FE_AGENT,
-  PROGRESS_SERIES,
-  READ_ONLY_AGENT,
-  STORE_ACCESS,
-  WORKTREE,
-  profileLine,
-  rootLine,
-  withRoot,
-} from './conventions/text.ts'
-import { logLine, pushEvent } from './events.ts'
+import { logDir, spareRoot, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 
 export const BASE_MISSING = 'needs the base plugin — claude plugin install base@domaine'
@@ -23,8 +12,6 @@ export const PROFILE_TIMEOUT_MS = 5_000
 
 const events = atom({ plugin: 'fe', key: 'events' } as const, [] as FeEvent[])
 const started = atom({ plugin: 'fe', key: 'started' } as const, null)
-/** The session id whose first user message carries the sections as a prompt.context block (no surface draws: cloud, `claude -p`): prompt.compose then adds nothing. */
-const injected = atom({ plugin: 'fe', key: 'injected' } as const, null as string | null)
 const profile = atom({ plugin: 'fe', key: 'profile' } as const, null)
 
 type $ = EngineInterface
@@ -105,7 +92,7 @@ async function decide($: $, session: string): Promise<FeProfileInfo> {
   return info('none', 'fallback', why)
 }
 
-// The decision in flight for one session id: compose, a subagent and the start never run the probe twice.
+// The decision in flight for one session id: the start and the fallback never run the probe twice.
 let pending: { session: string; info: Promise<FeProfileInfo> } | null = null
 
 /** This session's profile: the atom when it holds this id, else decided now, stored and logged once. */
@@ -124,32 +111,24 @@ async function profileOf($: $): Promise<FeProfileInfo> {
   return pending.info
 }
 
-/**
- * The sections in session order, each `fe:<name>`: the profile is fixed per session id, so a render repeats
- * the last one byte for byte (the prompt cache).
- */
-export async function sections($: $): Promise<PromptComposeSection[]> {
-  const root = $.plugin.root
-  const p = await profileOf($)
-  const parts: [string, string][] = [
-    ['root', rootLine(root)],
-    ['profile', profileLine(p.word)],
-  ]
-  if (p.word === 'foundation') parts.push(['comment-discipline-foundation', FOUNDATION])
-  if (p.store) parts.push(['store-access', withRoot(STORE_ACCESS, root)])
-  if (p.toml) parts.push(['worktree', WORKTREE])
-  if (p.toml || p.word !== 'none') parts.push(['progress-series', PROGRESS_SERIES])
-  return parts.map(([name, text]) => ({ id: `fe:${name}`, text, scope: 'session' }))
-}
+/** Where the SessionStart command hook leaves its marker: `<log dir>/<session>/conventions.fe.json`, else under the spare root. */
+export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string): string[] =>
+  [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.fe.json`] : []))
 
-/** null for base's readers and writer; the root, profile and Foundation rules for the rest; store access for a code writer. */
-export async function subagentContext($: $, agentType: string): Promise<string | null> {
-  if (NO_FE_AGENT.test(agentType)) return null
+/** The sections as one context block where nothing draws and no command hook delivered them; else null. */
+export async function contextBlock($: $): Promise<string | null> {
+  if ((await $.session.surfaces()).length > 0) return null
+  for (const m of markerPaths(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), await $.env.get('TMPDIR'), String(await $.session.id()))) {
+    if (await $.fs.exists(m)) return null
+  }
+  const t = JSON.parse(await $.fs.read(`${$.plugin.root}/hooks/conventions-text.json`)) as Record<string, string>
   const root = $.plugin.root
   const p = await profileOf($)
-  const parts = [rootLine(root), profileLine(p.word)]
-  if (p.word === 'foundation') parts.push(FOUNDATION)
-  if (p.store && !READ_ONLY_AGENT.test(agentType)) parts.push(withRoot(STORE_ACCESS, root))
+  const parts = [(t.root ?? '').split('<root>').join(root), (t.profile ?? '').split('<profile>').join(p.word)]
+  if (p.word === 'foundation') parts.push(t['comment-discipline-foundation'] ?? '')
+  if (p.store) parts.push((t['store-access'] ?? '').split('<fe root>').join(root))
+  if (p.toml) parts.push(t.worktree ?? '')
+  if (p.toml || p.word !== 'none') parts.push(t['progress-series'] ?? '')
   return parts.join('\n\n')
 }
 
@@ -166,39 +145,15 @@ export function registerSession(on: On): void {
           $.ui.toast(`fe: ${BASE_MISSING}`)
         }
       }
-      // Unawaited: the probe never holds the start; the first compose waits on the same decision.
+      // Unawaited: the probe never holds the start; the fallback waits on the same decision.
       void profileOf($).catch(() => undefined)
     } catch {}
     return next(e)
   })
 
-  // A session no surface draws gets its prompt composed without the plugins: the sections go in as a block of the first user message.
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
-    let text: string | null = null
-    try {
-      if ((await $.session.surfaces()).length === 0) text = (await sections($)).map(s => s.text).join('\n\n')
-    } catch {}
-    if (text === null) return r
-    const sid = String(await $.session.id())
-    await update($, injected, () => sid).catch(() => {})
-    return { ...r, blocks: [...r.blocks, { name: 'feConventions', text }] }
-  })
-
-  on('prompt.compose', async ($, e, next) => {
-    const r = await next(e)
-    if ((await read($, injected).catch(() => null)) === String(await $.session.id())) return r
-    let ours: PromptComposeSection[] = []
-    try {
-      ours = await sections($)
-    } catch {}
-    const taken = new Set(r.sections.map(s => s.id))
-    return { sections: [...r.sections, ...ours.filter(s => !taken.has(s.id))] }
-  })
-
-  on('classic.SubagentStart', async ($, e, next) => {
-    const r = await next(e)
-    const ctx = await subagentContext($, e.agent_type ?? '').catch(() => null)
-    return ctx ? { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] } : r
+    const text = await contextBlock($).catch(() => null)
+    return text ? { ...r, blocks: [...r.blocks, { name: 'feConventions', text }] } : r
   })
 }

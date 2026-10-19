@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { BASE_MISSING } from '../session.ts'
-import { NOW, PEEK, compose, eventsOf, peek, start, world } from './world.ts'
+import { NOW, PEEK, context, eventsOf, peek, start, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
 
@@ -50,14 +50,14 @@ describe('start line and the base check', () => {
   t('BE_EVENT_LOG=0 keeps the list empty; the toast still shows', async ($, on) => {
     const { calls } = world(on, { env: { BE_EVENT_LOG: '0' }, commands: [] })
     await start($)
-    await compose($)
+    await context($)
     expect((await peek($)).events).toEqual([])
     expect(calls.toasts).toEqual([`be: ${BASE_MISSING}`])
   })
 
-  t('a compose writes no line: the start line is the session start', async ($, on) => {
+  t('a prompt.context writes no line: the start line is the session start', async ($, on) => {
     world(on)
-    await compose($)
+    await context($)
     expect((await peek($)).events).toEqual([])
   })
 })

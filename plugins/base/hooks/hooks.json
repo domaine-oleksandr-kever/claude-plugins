@@ -1,1 +1,20 @@
-{ "modules": ["./mods/register.ts"] }
+{
+  "modules": ["./mods/register.ts"],
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start core", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start rules", "timeout": 10 }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" subagent", "timeout": 10 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" stop", "timeout": 5 }] }
+    ]
+  }
+}

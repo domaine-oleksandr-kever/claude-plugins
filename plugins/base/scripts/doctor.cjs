@@ -128,7 +128,7 @@ function checkManifest(pluginRoot) {
   pass('manifest', (data.name || 'plugin') + ' ' + data.version + ', depends on slim');
 }
 
-// The hooks module the engine loads: hooks/hooks.json's `modules`, each a file under hooks/.
+// The hooks module the engine loads (hooks/hooks.json's `modules`, each a file under hooks/) and its classic command hooks.
 function checkHooks(pluginRoot) {
   const file = path.join(pluginRoot, 'hooks', 'hooks.json');
   const data = readJson(file);
@@ -142,8 +142,30 @@ function checkHooks(pluginRoot) {
     return;
   }
   const missing = mods.filter((m) => typeof m !== 'string' || !fs.existsSync(path.join(pluginRoot, 'hooks', m)));
-  if (missing.length) fail('hooks', 'module(s) missing: ' + missing.map(String).join(', '));
-  else pass('hooks', mods.length + ' module(s): ' + mods.join(', '));
+  if (missing.length) {
+    fail('hooks', 'module(s) missing: ' + missing.map(String).join(', '));
+    return;
+  }
+  // Each ${CLAUDE_PLUGIN_ROOT} path of a command hook must exist under the root.
+  const events = [];
+  const scripts = new Set();
+  for (const [event, groups] of Object.entries(data.hooks && typeof data.hooks === 'object' ? data.hooks : {})) {
+    let n = 0;
+    for (const g of Array.isArray(groups) ? groups : []) {
+      for (const h of g && Array.isArray(g.hooks) ? g.hooks : []) {
+        if (!h || typeof h.command !== 'string') continue;
+        n++;
+        for (const m of h.command.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^"'\s]+)/g)) scripts.add(m[1]);
+      }
+    }
+    if (n) events.push(n > 1 ? event + ' ×' + n : event);
+  }
+  const absent = [...scripts].filter((rel) => !fs.existsSync(path.join(pluginRoot, rel)));
+  if (absent.length) {
+    fail('hooks', 'command hook script missing: ' + absent.join(', '));
+    return;
+  }
+  pass('hooks', mods.length + ' module(s): ' + mods.join(', ') + (events.length ? '; command hooks: ' + events.join(', ') : ''));
 }
 
 // The agents and skills run the fetchers by path, so each needs its exec bit; `_common.sh` is sourced.

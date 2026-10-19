@@ -1,18 +1,16 @@
-// be's session: the start line, the base check, and the plugin root line — a system-prompt section for the
-// main session, added context for subagents.
+// be's session: the start line and the base check. The conventions travel as command hooks
+// (hooks/conventions.cjs); this mod is the cloud fallback only: in a session no surface draws and whose
+// SessionStart hook left no marker, they ride the first user message as a block.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 import type { BeEvent, BeEventKind } from '../../types'
-import { NO_BE_AGENT, rootLine } from './conventions/text.ts'
-import { logLine, pushEvent } from './events.ts'
+import { logDir, spareRoot, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 
 export const BASE_MISSING = 'needs the base plugin — claude plugin install base@domaine'
 
 const events = atom({ plugin: 'be', key: 'events' } as const, [] as BeEvent[])
 const started = atom({ plugin: 'be', key: 'started' } as const, null)
-/** The session id whose first user message carries the sections as a prompt.context block (no surface draws: cloud, `claude -p`): prompt.compose then adds nothing. */
-const injected = atom({ plugin: 'be', key: 'injected' } as const, null as string | null)
 
 type $ = EngineInterface
 
@@ -56,14 +54,18 @@ async function baseLoaded($: $): Promise<boolean> {
   }
 }
 
-/** The one section, `be:root`: fixed per plugin root, so a render repeats the last one byte for byte (the prompt cache). */
-export function sections(root: string): PromptComposeSection[] {
-  return [{ id: 'be:root', text: rootLine(root), scope: 'session' }]
-}
+/** Where the SessionStart command hook leaves its marker: `<log dir>/<session>/conventions.be.json`, else under the spare root. */
+export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string): string[] =>
+  [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.be.json`] : []))
 
-/** null for base's readers and writer and Claude Code's helpers; the root line for every other agent. */
-export function subagentContext(root: string, agentType: string): string | null {
-  return NO_BE_AGENT.test(agentType) ? null : rootLine(root)
+/** The sections as one context block where nothing draws and no command hook delivered them; else null. */
+export async function contextBlock($: $): Promise<string | null> {
+  if ((await $.session.surfaces()).length > 0) return null
+  for (const m of markerPaths(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), await $.env.get('TMPDIR'), String(await $.session.id()))) {
+    if (await $.fs.exists(m)) return null
+  }
+  const t = JSON.parse(await $.fs.read(`${$.plugin.root}/hooks/conventions-text.json`)) as Record<string, string>
+  return (t.root ?? '').split('<root>').join($.plugin.root)
 }
 
 export function registerSession(on: On): void {
@@ -83,33 +85,9 @@ export function registerSession(on: On): void {
     return next(e)
   })
 
-  // A session no surface draws gets its prompt composed without the plugins: the sections go in as a block of the first user message.
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
-    let text: string | null = null
-    try {
-      if ((await $.session.surfaces()).length === 0) text = (sections($.plugin.root)).map(s => s.text).join('\n\n')
-    } catch {}
-    if (text === null) return r
-    const sid = String(await $.session.id())
-    await update($, injected, () => sid).catch(() => {})
-    return { ...r, blocks: [...r.blocks, { name: 'beConventions', text }] }
-  })
-
-  on('prompt.compose', async ($, e, next) => {
-    const r = await next(e)
-    if ((await read($, injected).catch(() => null)) === String(await $.session.id())) return r
-    let ours: PromptComposeSection[] = []
-    try {
-      ours = sections($.plugin.root)
-    } catch {}
-    const taken = new Set(r.sections.map(s => s.id))
-    return { sections: [...r.sections, ...ours.filter(s => !taken.has(s.id))] }
-  })
-
-  on('classic.SubagentStart', async ($, e, next) => {
-    const r = await next(e)
-    const ctx = subagentContext($.plugin.root, e.agent_type ?? '')
-    return ctx ? { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] } : r
+    const text = await contextBlock($).catch(() => null)
+    return text ? { ...r, blocks: [...r.blocks, { name: 'beConventions', text }] } : r
   })
 }

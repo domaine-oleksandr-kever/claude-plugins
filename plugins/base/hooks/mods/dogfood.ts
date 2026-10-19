@@ -1,7 +1,7 @@
 // Dogfood mode (BASE_DOGFOOD=1, or an account of dogfood.json): the plugin_defect tool and its report files, the nudge on a failed plugin
-// script (a designed refusal stays silent: text.ts's designedRefusal), the one blocked stop while a failure of a script that ended its
-// line is unreported, and /base-defects. Off, every hook passes.
-// The convention section is conventions.ts's; the doctor's `defects` row is doctor.ts's.
+// script (a designed refusal stays silent: text.ts's designedRefusal), and /base-defects. Off, every hook passes. The state of
+// base.dogfood is mirrored to <log dir>/<session>/dogfood-state.json, where hooks/conventions.cjs blocks the stop once while a failure
+// of a script that ended its line is unreported. The convention section is hooks/conventions.cjs's; the `defects` row is doctor.ts's.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseDogfood, BaseEvent } from '../../types'
@@ -25,6 +25,8 @@ import {
   indexLine,
   isRepo,
   isoDate,
+  loginAccount,
+  loginFile,
   marketplaceOf,
   parseDefect,
   pluginScript,
@@ -37,7 +39,7 @@ import {
   versionsOf,
 } from './dogfood/text.ts'
 import type { Defect, Plugin } from './dogfood/text.ts'
-import { logLine, pushEvent } from './events.ts'
+import { logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 
 export const COMMAND = {
@@ -76,8 +78,13 @@ async function logDefect($: $, text: string): Promise<void> {
   } catch {}
 }
 
-const dogfoodOn = async ($: $) =>
-  dogfoodMode((await $.env.get('BASE_DOGFOOD')) ?? '', (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID')) ?? '', await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
+const dogfoodOn = async ($: $) => {
+  const sw = (await $.env.get('BASE_DOGFOOD')) ?? ''
+  if (sw === '1' || sw === '0') return sw === '1'
+  const file = loginFile(await $.env.get('HOME'), await $.env.get('CLAUDE_CONFIG_DIR'))
+  const account = (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID'))?.trim() || loginAccount(file && (await $.fs.read(file).catch(() => null)))
+  return dogfoodMode(sw, account, await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
+}
 
 /** `$HOME/.claude/plugin-defects`, or null without an absolute HOME (a cloud session). */
 async function homeDir($: $): Promise<string | null> {
@@ -115,6 +122,15 @@ async function git($: $, root: string, args: string[]): Promise<string | null> {
   return out || null
 }
 
+/** base.dogfood as the file the Stop command hook reads; a failed write is ignored. */
+async function mirror($: $): Promise<void> {
+  try {
+    const s = await read($, dogfood)
+    const dir = s && logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), s.sid)
+    if (s && dir) await $.fs.write(`${dir}/dogfood-state.json`, `${JSON.stringify({ sid: s.sid, failMs: s.failMs, script: s.script, reportMs: s.reportMs })}\n`)
+  } catch {}
+}
+
 /** Registers the command on every session start and at the first prompt of a new session id; a new id starts clean. */
 async function arm($: $, start: boolean): Promise<void> {
   try {
@@ -122,7 +138,9 @@ async function arm($: $, start: boolean): Promise<void> {
     const sid = String(await $.session.id())
     const fresh = (await read($, dogfood))?.sid !== sid
     if (start || fresh) await $.command.register(COMMAND).catch(() => undefined)
-    if (fresh) await update($, dogfood, () => ({ sid, failMs: 0, script: '', blockedMs: 0, reportMs: 0 }))
+    if (!fresh) return
+    await update($, dogfood, () => ({ sid, failMs: 0, script: '', reportMs: 0 }))
+    await mirror($)
   } catch {}
 }
 
@@ -203,7 +221,8 @@ async function report($: $, d: Defect): Promise<string> {
   } catch (err) {
     return `plugin_defect: the report was not written to ${path}: ${String((err as Error)?.message ?? err).slice(0, 160)}`
   }
-  await update($, dogfood, s => (s ? { ...s, reportMs: now } : { sid, failMs: 0, script: '', blockedMs: 0, reportMs: now })).catch(() => undefined)
+  await update($, dogfood, s => (s ? { ...s, reportMs: now } : { sid, failMs: 0, script: '', reportMs: now })).catch(() => undefined)
+  await mirror($)
   await logDefect($, `${d.plugin}: ${d.title}`)
   const lines = [`Plugin defect: ${d.title} → ${path}`]
   const home = await homeDir($)
@@ -279,23 +298,10 @@ export function registerDogfood(on: On): void {
       if (own && e.agentId === undefined) {
         const now = await $.clock.now()
         await update($, dogfood, s => (s ? { ...s, failMs: now, script } : s))
+        await mirror($)
       }
     } catch {}
     return { ...r, context: [...(r.context ?? []), NUDGE] }
-  })
-
-  on('classic.Stop', { stop_hook_active: false }, async ($, e, next) => {
-    const r = await next(e)
-    if (r.block) return r
-    try {
-      if (!(await dogfoodOn($))) return r
-      const s = await read($, dogfood)
-      if (!s || s.sid !== String(await $.session.id()) || !s.failMs || s.reportMs >= s.failMs || s.blockedMs === s.failMs) return r
-      await update($, dogfood, t => (t ? { ...t, blockedMs: s.failMs } : t))
-      return { ...r, block: `base dogfood: a plugin script failed (${s.script}) and no plugin_defect report followed — report it with plugin_defect (not among your tools: in your reply), then stop` }
-    } catch {
-      return r
-    }
   })
 
   on('command.run', { command: COMMAND.name }, async $ => ({ text: await listing($) }))

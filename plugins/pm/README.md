@@ -18,7 +18,7 @@ pm builds on base and requires it. base supplies the Jira and doc readers, the J
 workspace and the shared MCP servers: Atlassian, Notion, Shopify Dev
 ([plugins/base/README.md](../base/README.md)). base requires slim, so pm runs with slim too.
 
-Current release: **pm v0.2.3**.
+Current release: **pm v0.3.0**.
 
 ## Status
 
@@ -83,18 +83,29 @@ The skills cite pm's own files by their path under pm's root (`<pm root>/…`, f
 
 ## Conventions
 
-pm adds one section to the main session's system prompt, after Claude Code's own and base's. The
-section is named `root`, and ids are `pm:<name>`. It holds `pm plugin root: <path>`, the directory
-pm's references start from. It never changes within a session, so the prompt cache holds.
+pm's one line, `pm plugin root: <path>` (the directory pm's references start from), reaches the model
+through one channel on every login: a Claude Code command hook, `node hooks/conventions.cjs start`, on
+`SessionStart` with the matcher `startup|clear|compact` (`hooks/hooks.json`, beside the hooks module). A
+resume or a fork keeps the copy the transcript already holds. The context arrives with the first user
+message, after CLAUDE.md. The text lives in one file, `hooks/conventions-text.json`; the hook fills in
+pm's root. The envelope stays well under the host's ~10,000-character inline limit (a larger one is
+spilled to a file).
 
-Some sessions draw no surface, for example a claude.ai cloud session or `claude -p`. There the engine
-composes its prompt without the plugins. The same sections then arrive once as a context block of the
-first user message instead (`prompt.context`, beside CLAUDE.md).
+The hook writes a marker, `<log dir>/<session-id>/conventions.pm.json`: `via`, `event`, `source`, the
+`sections` it sent, `chars` and the `login` (`work`, `personal` or `unknown`, read from the login file;
+doctor evidence only). `/base-doctor`'s `conventions` row reads it.
+Where the log folder is missing or not writable, the marker goes to the spare folder
+`<TMPDIR or /tmp>/domaine-log/<session-id>/`; the fallback below looks in both.
 
-**Subagents** get the same line as added context at their start, through Claude Code's
-`SubagentStart`. The engine has no event for a subagent's system prompt. Some agents get nothing from
-pm: base's readers and writer (`base:jira-reader`, `base:jira-writer`, `base:figma-reader`,
-`base:doc-reader`) and Claude Code's `claude-code-guide` and `statusline-setup`.
+**Cloud fallback.** A session that no surface draws (a claude.ai cloud session, `claude -p`) and that has
+no marker gets the same text from pm's hooks module instead: one context block of the first user
+message (`prompt.context`, beside CLAUDE.md), read from the same file.
+
+**Subagents** get the same line as added context at their start, through a second command hook,
+`node hooks/conventions.cjs subagent` on `SubagentStart`: the main session's context does not reach a
+subagent. Some agents get nothing from pm: base's readers and writer (`base:jira-reader`,
+`base:jira-writer`, `base:figma-reader`, `base:doc-reader`), Claude Code's `claude-code-guide` and
+`statusline-setup`, and a fork (it inherits the transcript).
 
 **base required:** at a session start pm looks for base's skills in the command list. If they are
 missing, pm shows one toast and writes one `install` line:
@@ -145,14 +156,19 @@ Every switch pm reads has a row here. Set it in `~/.claude/settings.json` → `e
 | Variable | Default | Effect |
 |---|---|---|
 | `PM_EVENT_LOG` | on | `0` keeps `pm.events` empty and writes no `pm.jsonl` |
-| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base`, `atlassian` and `notion-mcp` rows read |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. The `hooks/conventions.cjs` command hook writes its marker `conventions.pm.json` there too. |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base`, `atlassian` and `notion-mcp` rows read; by the `hooks/conventions.cjs` command hook: the login file it labels in its marker (`<dir>/.claude.json`, or `~/.claude.json` for the default directory) |
+| `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook and the hooks module: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |
+| `CLAUDE_PLUGIN_ROOT` | set by Claude Code | read, never set, by the `hooks/conventions.cjs` command hook: pm's root, filled into the root line (the script's own parent directory when unset) |
 
 ## Tests
 
 - `claude plugin validate --strict plugins/pm` and `claude plugin test plugins/pm` (the kit tests in
   `plugins/pm/hooks/mods/tests/`), both run by `tests/mods-sim.sh` with every other plugin (local
   only: CI has no `claude`).
+- `tests/hooks-sim.sh`, block "Domaine command hooks" (`DHt*`) — `hooks/conventions.cjs` run as the host
+  runs it: the envelope, the marker, bad stdin, an unwritable or moved log dir, the login label, the
+  subagent share per agent type, the text file.
 - `tests/pm-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
 - `tests/team-refs-lint.sh` — every qualified name and cited path resolves, and no legacy name is
   left. The same checker runs for every team plugin on base.

@@ -1,99 +1,60 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
-import { PASSWORDS } from '../conventions/text.ts'
-import { compose, ours, subagent, world } from './world.ts'
+import { HOME, MARKER, block, context, subagent, world } from './world.ts'
 
-// The lint's banned names, spelled so that neither the lint nor the release grep flags this file: qa's text never points at the legacy plugin or another team plugin.
-const OLD = 'f' + 'nd'
-const HOSTS = ['Cur' + 'sor', 'Co' + 'dex', 'Open' + 'Code']
-const BANNED = [`plugin_${OLD}_`, `${OLD.toUpperCase()}_`, `\\b${OLD}:`, `/${OLD}\\b`, `${OLD}-tmp`, '/f' + 'e:', '<f' + 'e root>', ...HOSTS.map(h => `\\b${h}\\b`)].map(p => new RegExp(p))
+const names = (r: any) => r.blocks.map((b: any) => b.name)
 
-const context = ($: any) => $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'rules' }] })
-
-describe('a session no surface draws', () => {
-  test('the first message carries every section as one prompt.context block after the engine\'s, and prompt.compose then adds none', async ($, on) => {
-    world(on, { surfaces: [] })
+describe('the cloud fallback: a prompt.context block', () => {
+  test("nothing draws and no marker: the sections as one block after the engine's, the root filled in", async ($, on) => {
+    world(on, { surfaces: [], env: { HOME } })
     const r = await context($)
-    expect(r.blocks.map((b: any) => b.name)).toEqual(['claudeMd', 'qaConventions'])
-    expect(r.blocks[1].text).toStartWith('qa plugin root: /')
-    expect(ours(await compose($))).toEqual([])
+    expect(names(r)).toEqual(['claudeMd', 'qaConventions'])
+    const text = r.blocks[1].text as string
+    const [root, passwords] = text.split('\n\n## ')
+    expect(root).toMatch(/^qa plugin root: \/\S*$/)
+    expect(`## ${passwords}`).toBe('## qa convention — storefront passwords\n\n<base root> stays literal')
   })
 
-  test('a terminal session: no context block, the system prompt carries the sections', async ($, on) => {
-    world(on)
-    const r = await context($)
-    expect(r.blocks.map((b: any) => b.name)).toEqual(['claudeMd'])
-    expect(ours(await compose($)).map(s => s.id)).toEqual(['qa:root', 'qa:passwords'])
-  })
-})
-
-describe('prompt.compose', () => {
-  test("the engine's sections first, then qa's two, every one session-scoped", async ($, on) => {
-    world(on)
-    const r = await compose($)
-    expect(r.sections[0]).toEqual({ id: 'intro', text: 'You are Claude Code.', scope: 'shared' })
-    expect(r.sections.slice(1).map((s: any) => s.id)).toEqual(['qa:root', 'qa:passwords'])
-    expect(ours(r).every(s => s.scope === 'session')).toBe(true)
+  test("the SessionStart command hook's marker for this session id: no block", async ($, on) => {
+    const { w } = world(on, { surfaces: [], env: { HOME } })
+    w.files[MARKER] = { text: '{}', mtimeMs: 0 }
+    expect(names(await context($))).toEqual(['claudeMd'])
+    w.sid = 's2'
+    expect(await block($)).toStartWith('qa plugin root: /')
   })
 
-  test('the root line is one line with an absolute path', async ($, on) => {
-    world(on)
-    const [root] = ours(await compose($))
-    expect(root!.text).toMatch(/^qa plugin root: \/\S*$/)
+  test('DOMAINE_LOG_DIR moves the marker it looks for', async ($, on) => {
+    const { w } = world(on, { surfaces: [], env: { HOME, DOMAINE_LOG_DIR: '/var/log/domaine' } })
+    w.files[MARKER] = { text: '{}', mtimeMs: 0 }
+    expect(await block($)).toBeDefined()
+    w.files['/var/log/domaine/s1/conventions.qa.json'] = { text: '{}', mtimeMs: 0 }
+    expect(await block($)).toBeUndefined()
   })
 
-  test('passwords: registry preferred, low-sensitivity, client-facing places only, one paragraph', async ($, on) => {
-    world(on)
-    const text = ours(await compose($)).find(s => s.id === 'qa:passwords')!.text
-    expect(text).toBe(PASSWORDS)
-    expect(text).toMatch(/^## qa convention — storefront passwords\n\nA dev or UAT storefront password is low-sensitivity/)
-    expect(text).toContain('`node <base root>/scripts/qa-stores.cjs get <store> --field password`')
-    expect(text).toContain('a bare `get` prints JSON, never a fill value')
-    expect(text).toContain("base's `base plugin root:` line")
-    expect(text).toContain('preferred source when it knows the store')
-    expect(text).toContain('in chat, notes, browser fill code and on a Bash line')
-    expect(text).toContain('never in a Jira comment, Steps to Test, a PR\nbody')
-    expect(text).toContain('a screenshot attached to a ticket')
-    expect(text).toContain('The registry file is never read directly')
-    expect(text.split('\n\n')).toHaveLength(2)
-    expect(text.length).toBeLessThanOrEqual(760)
+  test('a marker under the spare root (TMPDIR, else /tmp) counts: the hook wrote it there without a writable log dir', async ($, on) => {
+    const { w } = world(on, { surfaces: [], env: { TMPDIR: '/var/tmp/' } })
+    expect(await block($)).toBeDefined()
+    w.files['/var/tmp/domaine-log/s1/conventions.qa.json'] = { text: '{}', mtimeMs: 0 }
+    expect(await block($)).toBeUndefined()
   })
 
-  test('the store-access posture lives in the skill, not the prompt', async ($, on) => {
-    world(on)
-    const text = ours(await compose($)).map(s => s.text).join('\n')
-    for (const phrase of ['Admin API write', 'add to cart', 'hands-on QA']) expect(text).not.toContain(phrase)
+  test('a session a surface draws: no block, marker or not', async ($, on) => {
+    world(on, { env: { HOME } })
+    expect(names(await context($))).toEqual(['claudeMd'])
   })
 
-  test('two renders are byte-identical', async ($, on) => {
-    world(on)
-    expect(JSON.stringify(await compose($))).toBe(JSON.stringify(await compose($)))
-  })
-
-  test('no legacy, host or other team-plugin name in any section', async ($, on) => {
-    world(on)
-    const r = ours(await compose($))
-    expect(r).toHaveLength(2)
-    for (const s of r) for (const re of BANNED) expect(re.test(s.text)).toBe(false)
-  })
-
-  test('a section the engine already answered under a qa id is not added twice', async ($, on) => {
-    world(on, { composeBelow: [{ id: 'qa:root', text: 'kept', scope: 'session' }] })
-    const r = await compose($)
-    expect(r.sections.filter((s: any) => s.id === 'qa:root')).toEqual([{ id: 'qa:root', text: 'kept', scope: 'session' }])
-    expect(r.sections.map((s: any) => s.id)).toContain('qa:passwords')
+  test('an unreadable text file: no block, the prompt goes on', async ($, on) => {
+    const { w } = world(on, { surfaces: [] })
+    const root = (await block($))!.split('\n')[0]!.slice('qa plugin root: '.length)
+    w.files[`${root}/hooks/conventions-text.json`] = { text: 'not json', mtimeMs: 0 }
+    expect(names(await context($))).toEqual(['claudeMd'])
   })
 })
 
 describe('classic.SubagentStart', () => {
-  test('qa adds nothing to any subagent', async ($, on) => {
-    world(on)
-    for (const type of ['base:jira-reader', 'base:change-reviewer', 'general-purpose', 'Explore', 'Plan', 'some-plugin:implementer', '']) {
-      expect((await subagent($, type)).additionalContext ?? []).toEqual([])
-    }
-  })
-
-  test('context from the hooks beneath passes through untouched', async ($, on) => {
-    world(on, { subagentBelow: ['from below'] })
+  test('qa adds nothing in the module (the command hook has no SubagentStart entry); context from beneath passes through', async ($, on) => {
+    const { w } = world(on)
+    expect((await subagent($, 'general-purpose')).additionalContext ?? []).toEqual([])
+    w.subagentBelow = ['from below']
     expect((await subagent($, 'general-purpose')).additionalContext).toEqual(['from below'])
   })
 })

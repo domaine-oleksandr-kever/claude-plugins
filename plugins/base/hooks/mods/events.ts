@@ -45,6 +45,12 @@ export function logDir(home: string | undefined, override: string | undefined, s
   return root === null ? null : `${root}/${session}`
 }
 
+/** The spare root the command hook leaves its marker under without a writable log dir: `<TMPDIR or /tmp>/domaine-log`. */
+export function spareRoot(tmp: string | undefined): string {
+  const t = tmp?.trim() ?? ''
+  return `${t.startsWith('/') ? trimSlash(t) : '/tmp'}/domaine-log`
+}
+
 /** One base.jsonl line; `plugin` is base's own name, never taken from another plugin's state. */
 export function fileLine(ev: BaseEvent, version: string, session: string): string {
   return JSON.stringify({ ts: new Date(ev.atMs).toISOString(), plugin: 'base', version, session, kind: ev.kind, agent: 'main', text: ev.text })

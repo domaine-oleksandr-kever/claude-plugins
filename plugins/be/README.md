@@ -16,7 +16,7 @@ be builds on base and requires it. base supplies the Jira and doc readers, the J
 workspace and the shared MCP servers: Atlassian, Notion, the Shopify Dev MCP
 ([plugins/base/README.md](../base/README.md)). base requires slim, so be runs with slim too.
 
-Current release: **be v0.3.3**.
+Current release: **be v0.4.0**.
 
 ## Status
 
@@ -85,17 +85,29 @@ The skills cite be's own files by their path under be's root (`<be root>/…`, f
 
 ## Conventions
 
-be adds one section to the main session's system prompt, after Claude Code's own and base's. The
-section has the id `be:<name>`: `root`, the line `be plugin root: <path>`. The skills resolve
-`<be root>` from this line. It never changes within a session, so the prompt cache holds.
+be's one line, `be plugin root: <path>` (the skills resolve `<be root>` from it), reaches the model
+through one channel on every login: a Claude Code command hook, `node hooks/conventions.cjs start`, on
+`SessionStart` with the matcher `startup|clear|compact` (`hooks/hooks.json`, beside the hooks module). A
+resume or a fork keeps the copy the transcript already holds. The context arrives with the first user
+message, after CLAUDE.md. The text lives in one file, `hooks/conventions-text.json`; the hook fills in
+be's root. The envelope stays well under the host's ~10,000-character inline limit (a larger one is
+spilled to a file).
 
-Some sessions draw no surface, for example a claude.ai cloud session or `claude -p`. There the engine
-composes its prompt without the plugins. The same sections then arrive once as a context block of the
-first user message instead (`prompt.context`, beside CLAUDE.md).
+The hook writes a marker, `<log dir>/<session-id>/conventions.be.json`: `via`, `event`, `source`, the
+`sections` it sent, `chars` and the `login` (`work`, `personal` or `unknown`, read from the login file;
+doctor evidence only). `/base-doctor`'s `conventions` row reads it.
+Where the log folder is missing or not writable, the marker goes to the spare folder
+`<TMPDIR or /tmp>/domaine-log/<session-id>/`; the fallback below looks in both.
 
-**Subagents** get the same line as added context at their start (Claude Code's `SubagentStart`). Some
-agents get nothing from be: base's readers and writer (`base:jira-reader`, `base:jira-writer`,
-`base:figma-reader`, `base:doc-reader`) and Claude Code's `claude-code-guide` and `statusline-setup`.
+**Cloud fallback.** A session that no surface draws (a claude.ai cloud session, `claude -p`) and that has
+no marker gets the same text from be's hooks module instead: one context block of the first user
+message (`prompt.context`, beside CLAUDE.md), read from the same file.
+
+**Subagents** get the same line as added context at their start, through a second command hook,
+`node hooks/conventions.cjs subagent` on `SubagentStart`: the main session's context does not reach a
+subagent. Some agents get nothing from be: base's readers and writer (`base:jira-reader`,
+`base:jira-writer`, `base:figma-reader`, `base:doc-reader`), Claude Code's `claude-code-guide` and
+`statusline-setup`, and a fork (it inherits the transcript).
 
 **base required:** at a session start be looks for base's skills in the command list. If they are
 missing, be shows one toast and writes one `install` line:
@@ -146,15 +158,20 @@ Every switch be reads has a row here. Set it in `~/.claude/settings.json` → `e
 | Variable | Default | Effect |
 |---|---|---|
 | `BE_EVENT_LOG` | on | `0` keeps `be.events` empty and writes no `be.jsonl` |
-| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. The `hooks/conventions.cjs` command hook writes its marker `conventions.be.json` there too. |
 | `BE_SHOPIFY_DOCS_URL` | `https://shopify.dev/assistant/search` | the endpoint `scripts/shopify-docs.cjs` posts to (tests point it at a local stub) |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base` and `shopify-dev-mcp` rows read |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base` and `shopify-dev-mcp` rows read; by the `hooks/conventions.cjs` command hook: the login file it labels in its marker (`<dir>/.claude.json`, or `~/.claude.json` for the default directory) |
+| `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook and the hooks module: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |
+| `CLAUDE_PLUGIN_ROOT` | set by Claude Code | read, never set, by the `hooks/conventions.cjs` command hook: be's root, filled into the root line (the script's own parent directory when unset) |
 
 ## Tests
 
 - `claude plugin validate --strict plugins/be` and `claude plugin test plugins/be` (the kit tests in
   `plugins/be/hooks/mods/tests/`), both run by `tests/mods-sim.sh` with every other plugin (local
   only: CI has no `claude`).
+- `tests/hooks-sim.sh`, block "Domaine command hooks" (`DHt*`) — `hooks/conventions.cjs` run as the host
+  runs it: the envelope, the marker, bad stdin, an unwritable or moved log dir, the login label, the
+  subagent share per agent type, the text file.
 - `tests/be-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.
 - `tests/be-shopify-docs-sim.sh` — `scripts/shopify-docs.cjs` against a local stub: an answer, the cap,
   a timeout, soft errors, a refused connection, usage.

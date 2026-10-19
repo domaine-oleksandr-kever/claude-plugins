@@ -9,6 +9,17 @@ export const LOG = `${HOME}/.claude/domaine/log`
 export const SLIM_VIEW = 'mcp__slim__view'
 /** base as the command list shows it: its skills carry its name. */
 export const BASE_COMMANDS: [string, string][] = [['base:commit', 'base'], ['base-doctor', 'base']]
+/** What `<plugin root>/hooks/conventions-text.json` reads as unless a test puts its own file there: one stand-in per key (the real text is pinned in tests/hooks-sim.sh). */
+export const TEXT: Record<string, string> = {
+  root: 'fe plugin root: <root> — fe writes `<fe root>` and `<base root>`',
+  profile: 'fe project profile: <profile>',
+  'comment-discipline-foundation': '## fe convention — LiquidDoc and core',
+  'store-access': '## fe capability — live store access\n<fe root>/scripts/shopify-admin-gql.sh, <base root>/scripts/shopify-validate.cjs',
+  worktree: 'worktree copy list: shopify.theme.toml',
+  'progress-series': '## fe convention — the progress series',
+}
+/** The marker fe's SessionStart command hook leaves for session s1. */
+export const MARKER = `${LOG}/s1/conventions.fe.json`
 
 type File = { text: string; mtimeMs: number }
 type Init = { stdin?: string; env?: Record<string, string>; timeoutMs?: number } | undefined
@@ -29,7 +40,7 @@ export type World = {
   manifest: string
   /** every $.fs.write rejects with this message while set */
   writeFails: string | null
-  /** what the prompt.compose and SubagentStart hooks beneath fe answer */
+  /** what the prompt.compose and SubagentStart hooks beneath fe answer (fe adds nothing to either) */
   composeBelow: { id: string; text: string; scope: 'shared' | 'session' }[]
   subagentBelow: string[] | undefined
 }
@@ -105,6 +116,7 @@ export function world(on: On, over: Partial<World> = {}) {
   })
   on('fs.read', async (_$, e) => {
     if (e.path.endsWith('/.claude-plugin/plugin.json')) return { value: w.manifest }
+    if (e.path.endsWith('/hooks/conventions-text.json') && !(e.path in w.files)) return { value: JSON.stringify(TEXT) }
     const f = w.files[e.path]
     if (!f) throw enoent(e.path)
     return { value: f.text }
@@ -151,6 +163,9 @@ export const doctor = ($: any) =>
   $.command.run({ command: 'fe-doctor', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
 const INPUT = { model: 'claude-test', promptModel: 'claude-test', surfaces: ['terminal'], tools: ['Bash'], outputStyle: null, traits: [] }
 export const compose = ($: any) => $.prompt.compose(INPUT)
+export const context = ($: any) => $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'rules' }] })
+/** fe's fallback block in the first user message, or undefined. */
+export const block = async ($: any): Promise<string | undefined> => (await context($)).blocks.find((b: any) => b.name === 'feConventions')?.text
 export const ours = (r: { sections: readonly { id: string; text: string; scope: string }[] }) => r.sections.filter(s => s.id.startsWith('fe:'))
 export const subagent = ($: any, agent_type: string) => $.classic.SubagentStart({ agent_id: 'a1', agent_type })
 export const eventsOf = async ($: any, kind?: string): Promise<{ atMs: number; kind: string; text: string }[]> =>

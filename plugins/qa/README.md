@@ -19,7 +19,7 @@ store registry (`<base root>/scripts/qa-stores.cjs`), the shared references and 
 MCP server ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with slim
 too.
 
-Current release: **qa v0.3.6**.
+Current release: **qa v0.4.0**.
 
 ## Status
 
@@ -75,19 +75,30 @@ qa ships no reference of its own. The skill cites base's references by their pat
 
 ## Conventions
 
-qa adds its sections to the main session's system prompt, after Claude Code's own and base's. They
-come in the order below, and each has the id `qa:<name>` and the session scope. Some sessions draw no
-surface, for example a claude.ai cloud session or `claude -p`. There the engine composes its prompt
-without the plugins. The same sections then arrive once as a context block of the first user message
-instead (`prompt.context`, beside CLAUDE.md).
+qa's sections, in the order below, reach the model through one channel on every login: a Claude Code
+command hook, `node hooks/conventions.cjs start`, on `SessionStart` with the matcher
+`startup|clear|compact` (`hooks/hooks.json`, beside the hooks module). A resume or a fork keeps the copy
+the transcript already holds. The context arrives with the first user message, after CLAUDE.md. The text
+lives in one file, `hooks/conventions-text.json`; the hook fills in qa's root. The envelope stays well
+under the host's ~10,000-character inline limit (a larger one is spilled to a file).
+
+The hook writes a marker, `<log dir>/<session-id>/conventions.qa.json`: `via`, `event`, `source`, the
+`sections` it sent, `chars` and the `login` (`work`, `personal` or `unknown`, read from the login file;
+doctor evidence only). `/base-doctor`'s `conventions` row reads it.
+Where the log folder is missing or not writable, the marker goes to the spare folder
+`<TMPDIR or /tmp>/domaine-log/<session-id>/`; the fallback below looks in both.
+
+**Cloud fallback.** A session that no surface draws (a claude.ai cloud session, `claude -p`) and that has
+no marker gets the same text from qa's hooks module instead: one context block of the first user
+message (`prompt.context`, beside CLAUDE.md), read from the same file.
 
 | Name | Holds |
 |---|---|
 | `root` | `qa plugin root: <path>`, the directory qa's skill and doctor start from |
 | `passwords` | one paragraph: a dev/UAT storefront password is low-sensitivity — the registry (`<base root>/scripts/qa-stores.cjs get <store> --field password`; a bare `get` prints JSON, never a fill value) is the preferred source when it knows the store, a password from chat or a memory/workspace note is as good; it may appear in chat, notes, browser fill code and on a Bash line, never in a Jira comment, Steps to Test, a PR body or anything else the client or QA team reads, a committed theme-repo file or a screenshot attached to a ticket; the registry file is never read directly |
 
-`/qa:preflight` itself holds the store-access posture: storefront only, no Admin or theme write. The
-text never changes within a session, so the prompt cache holds. **Subagents** get nothing from qa.
+`/qa:preflight` itself holds the store-access posture: storefront only, no Admin or theme write.
+**Subagents** get nothing from qa: its `hooks.json` has no `SubagentStart` entry.
 
 **base required:** at a session start qa looks for base's skills in the command list. If they are
 missing, qa shows one toast and writes one `install` line:
@@ -140,14 +151,19 @@ Every switch qa reads has a row here. Set it in `~/.claude/settings.json` → `e
 | Variable | Default | Effect |
 |---|---|---|
 | `QA_EVENT_LOG` | on | `0` keeps `qa.events` empty and writes no `qa.jsonl` |
-| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base`, `registry` and `chrome-devtools` rows read |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. The `hooks/conventions.cjs` command hook writes its marker `conventions.qa.json` there too. |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base`, `registry` and `chrome-devtools` rows read; by the `hooks/conventions.cjs` command hook: the login file it labels in its marker (`<dir>/.claude.json`, or `~/.claude.json` for the default directory) |
+| `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook and the hooks module: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |
+| `CLAUDE_PLUGIN_ROOT` | set by Claude Code | read, never set, by the `hooks/conventions.cjs` command hook: qa's root, filled into the root line (the script's own parent directory when unset) |
 
 ## Tests
 
 - `claude plugin validate --strict plugins/qa` and `claude plugin test plugins/qa` (the kit tests in
   `plugins/qa/hooks/mods/tests/`), both run by `tests/mods-sim.sh` with every other plugin (local
   only: CI has no `claude`).
+- `tests/hooks-sim.sh`, block "Domaine command hooks" (`DHt*`) — `hooks/conventions.cjs` run as the host
+  runs it: the envelope and its text, the marker, bad stdin, an unwritable or moved log dir, the login
+  label, the text file.
 - `tests/qa-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs, with base's real
   registry script against a sandbox home.
 - `tests/team-refs-lint.sh` — every qualified name and cited path resolves, and no legacy name is

@@ -167,7 +167,7 @@ describe('the sweep of old session directories', () => {
     expect(calls.removed).toEqual([`${LOG}/${OLD}`])
   })
 
-  t('only session-id names holding nothing but *.jsonl files: a dotfile directory or one with other files stays', async ($, on) => {
+  t('only session-id names holding nothing but *.jsonl and *.json files: a dotfile directory or one with other files stays', async ($, on) => {
     const { w, calls, clock } = world(on, { env: { HOME } })
     put(w, `${LOG}/.ssh/id_ed25519`, old)
     put(w, `${LOG}/.ssh/base.jsonl`, old)
@@ -177,6 +177,16 @@ describe('the sweep of old session directories', () => {
     await start($)
     await clock.settle()
     expect(calls.removed).toEqual([])
+  })
+
+  t('the command hooks\' *.json markers beside the *.jsonl files go with them', async ($, on) => {
+    const { w, calls, clock } = world(on, { env: { HOME } })
+    put(w, `${LOG}/${OLD}/base.jsonl`, old)
+    put(w, `${LOG}/${OLD}/conventions.base.json`, old)
+    put(w, `${LOG}/${OLD}/dogfood-state.json`, old)
+    await start($)
+    await clock.settle()
+    expect(calls.removed).toEqual([`${LOG}/${OLD}`])
   })
 
   t('a directory that resolves anywhere but its own place under the root stays', async ($, on) => {

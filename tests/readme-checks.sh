@@ -454,17 +454,17 @@ for d in "$ROOT"/plugins/*/; do
     esac
   done
 done
-# Claude Code's own CLAUDE_CONFIG_DIR, read by base's and each team plugin's doctor (the install
-# record and settings it reads), is a row of that plugin's table like any switch it reads.
+# Claude Code's own CLAUDE_CONFIG_DIR, read by base's and each team plugin's doctor and command hooks (the install
+# record, settings and login file they read), is a row of that plugin's table like any switch it reads.
 for d in "$ROOT"/plugins/*/; do
   name="$(basename "$d")"
   team="$("$NODE_BIN" -e 'try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     console.log(j.name === "base" || JSON.stringify(j.dependencies) === "[\"base\"]" ? "yes" : "no"); } catch (e) { console.log("no"); }' \
     "$d/.claude-plugin/plugin.json")"
   [ "$team" = yes ] || continue
-  grep -rqF 'process.env.CLAUDE_CONFIG_DIR' "$d/scripts" 2>/dev/null || continue
+  grep -rqF 'process.env.CLAUDE_CONFIG_DIR' "$d/scripts" "$d"/hooks/*.cjs 2>/dev/null || continue
   if awk '/^## Environment switches/ { on = 1; next } on && /^## / { exit } on' "$d/README.md" | grep -qF '| `CLAUDE_CONFIG_DIR` |'; then ok
-  else bad "env-config-dir-$name" "plugins/$name/scripts read CLAUDE_CONFIG_DIR but plugins/$name/README.md → Environment switches has no row"; fi
+  else bad "env-config-dir-$name" "plugins/$name/scripts or hooks/*.cjs read CLAUDE_CONFIG_DIR but plugins/$name/README.md → Environment switches has no row"; fi
 done
 # Each team plugin's "Event log on disk" names the contract's writers as every Domaine plugin, as
 # base's own section does, rather than a list that goes stale with the next plugin.

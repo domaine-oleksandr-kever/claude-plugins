@@ -1,18 +1,16 @@
-// qa's session: the start line, the base check and the conventions — system-prompt sections for the main
-// session; subagents get nothing from qa.
+// qa's session: the start line and the base check. The conventions travel as command hooks
+// (hooks/conventions.cjs); this mod is the cloud fallback only: in a session no surface draws and whose
+// SessionStart hook left no marker, they ride the first user message as a block.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 import type { QaEvent, QaEventKind } from '../../types'
-import { PASSWORDS, rootLine } from './conventions/text.ts'
-import { logLine, pushEvent } from './events.ts'
+import { logDir, spareRoot, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 
 export const BASE_MISSING = 'needs the base plugin — claude plugin install base@domaine'
 
 const events = atom({ plugin: 'qa', key: 'events' } as const, [] as QaEvent[])
 const started = atom({ plugin: 'qa', key: 'started' } as const, null)
-/** The session id whose first user message carries the sections as a prompt.context block (no surface draws: cloud, `claude -p`): prompt.compose then adds nothing. */
-const injected = atom({ plugin: 'qa', key: 'injected' } as const, null as string | null)
 
 type $ = EngineInterface
 
@@ -56,13 +54,18 @@ async function baseLoaded($: $): Promise<boolean> {
   }
 }
 
-/** The sections, each `qa:<name>`: fixed text, so every render repeats the last one byte for byte (the prompt cache). */
-export function sections(root: string): PromptComposeSection[] {
-  const parts: [string, string][] = [
-    ['root', rootLine(root)],
-    ['passwords', PASSWORDS],
-  ]
-  return parts.map(([name, text]) => ({ id: `qa:${name}`, text, scope: 'session' }))
+/** Where the SessionStart command hook leaves its marker: `<log dir>/<session>/conventions.qa.json`, else under the spare root. */
+export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string): string[] =>
+  [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.qa.json`] : []))
+
+/** The sections as one context block where nothing draws and no command hook delivered them; else null. */
+export async function contextBlock($: $): Promise<string | null> {
+  if ((await $.session.surfaces()).length > 0) return null
+  for (const m of markerPaths(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), await $.env.get('TMPDIR'), String(await $.session.id()))) {
+    if (await $.fs.exists(m)) return null
+  }
+  const t = JSON.parse(await $.fs.read(`${$.plugin.root}/hooks/conventions-text.json`)) as Record<string, string>
+  return [(t.root ?? '').split('<root>').join($.plugin.root), t.passwords ?? ''].join('\n\n')
 }
 
 export function registerSession(on: On): void {
@@ -82,27 +85,9 @@ export function registerSession(on: On): void {
     return next(e)
   })
 
-  // A session no surface draws gets its prompt composed without the plugins: the sections go in as a block of the first user message.
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
-    let text: string | null = null
-    try {
-      if ((await $.session.surfaces()).length === 0) text = (sections($.plugin.root)).map(s => s.text).join('\n\n')
-    } catch {}
-    if (text === null) return r
-    const sid = String(await $.session.id())
-    await update($, injected, () => sid).catch(() => {})
-    return { ...r, blocks: [...r.blocks, { name: 'qaConventions', text }] }
-  })
-
-  on('prompt.compose', async ($, e, next) => {
-    const r = await next(e)
-    if ((await read($, injected).catch(() => null)) === String(await $.session.id())) return r
-    let ours: PromptComposeSection[] = []
-    try {
-      ours = sections($.plugin.root)
-    } catch {}
-    const taken = new Set(r.sections.map(s => s.id))
-    return { sections: [...r.sections, ...ours.filter(s => !taken.has(s.id))] }
+    const text = await contextBlock($).catch(() => null)
+    return text ? { ...r, blocks: [...r.blocks, { name: 'qaConventions', text }] } : r
   })
 }

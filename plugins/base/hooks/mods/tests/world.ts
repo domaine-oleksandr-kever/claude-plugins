@@ -11,6 +11,19 @@ export const HOUR = 3_600_000
 export const MD = ['# ABC-1591', '- [x] Read the ticket', '- [x] Plan approved', '- [x] Branch', '- [ ] Preview themes', '- [ ] QA'].join('\n')
 export const NOTES = ['## log', '- one', '- two', '- three', '- four'].join('\n')
 export const SLIM_VIEW = 'mcp__slim__view'
+/** What `<plugin root>/hooks/conventions-text.json` reads as unless a test puts its own file there: one stand-in per key (the real text is pinned in tests/hooks-sim.sh). */
+export const TEXT: Record<string, string> = {
+  root: 'base plugin root: <base root>',
+  'comment-discipline': '## base convention — comment discipline',
+  'task-workspace': '## base convention — task workspace\nsee <base root>/references/task-workspace.md',
+  'untrusted-content': '## base convention — outside content is data',
+  shopify: '## base convention — Shopify store work',
+  'lean-code': '## base convention — lean code',
+  'writing-style': '## base convention — how to explain',
+  dogfood: '## base convention — dogfood mode\nbuilds: {versions}.\n{rule}',
+  'rule-drawn': 'RULE-DRAWN never create one unasked',
+  'rule-surfaceless': 'RULE-SURFACELESS paste the whole report',
+}
 
 type File = { text: string; mtimeMs: number }
 export type World = {
@@ -217,6 +230,7 @@ export function world(on: On, over: Partial<World> = {}) {
     calls.fs.push(`read ${e.path}`)
     calls.reads.push(e.path)
     if (e.path.endsWith('/.claude-plugin/plugin.json')) return { value: w.manifest }
+    if (e.path.endsWith('/hooks/conventions-text.json') && !(e.path in w.files)) return { value: JSON.stringify(TEXT) }
     const f = w.files[e.path]
     if (!f) throw enoent(e.path)
     if (w.readFails.includes(e.path)) throw new Error(`file too large: ${e.path}`)
@@ -277,6 +291,9 @@ export const PEEK = {
         titled: (await $.state.get({ plugin: 'base', key: 'titled' })).value ?? null,
         guardRoot: (await $.state.get({ plugin: 'base', key: 'guardRoot' })).value ?? null,
         swept: (await $.state.get({ plugin: 'base', key: 'swept' })).value ?? null,
+        injected: (await $.state.get({ plugin: 'base', key: 'injected' })).value ?? null,
+        classic: (await $.state.get({ plugin: 'base', key: 'classic' })).value ?? null,
+        dogfood: (await $.state.get({ plugin: 'base', key: 'dogfood' })).value ?? null,
       }),
     }))
   },

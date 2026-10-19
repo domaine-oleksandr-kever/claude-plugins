@@ -36,7 +36,7 @@ committed, staged, unstaged and untracked work (this review runs *before* the co
 **only the files review-scope.sh lists** — the agents read them (step 2).
 
 **Profile.** The `profile` word comes from whoever invoked this skill: the argument, a team plugin's
-brief, or the team plugin's own system-prompt section naming the checkout's profile and its team
+brief, or the team plugin's own convention section naming the checkout's profile and its team
 rules. base detects none itself. With none → `profile: none` (the repo's own rule files only).
 
 ## 2. Run the five checks

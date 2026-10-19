@@ -5987,6 +5987,524 @@ assert_eq HG9-reader-inject \
   "$(ht_log "$d" | jq -r 'select(.hook=="subagent-conventions") | .decision + " " + .agent')" "inject jira-reader"
 assert_eq HG9-grep-tool \
   "$(ht_log "$d" | jq -r 'select(.hook=="spill-access") | .tool')" "Grep"
+# ═══ DH — Domaine command hooks: plugins/<p>/hooks/hooks.json's classic command entries ═══════
+# Each entry runs as the host runs it: the command string from hooks.json under bash, CLAUDE_PLUGIN_ROOT =
+# a fixture copy of the plugin, HOME = a fresh sandbox, TMPDIR = $DH/tmp (the marker's spare root), stdin = the
+# event's JSON, and nothing else of this shell's environment but PATH (the session running this suite sets
+# CLAUDE_CODE_ENTRYPOINT and more).
+DH="$TMP/dh"; mkdir -p "$DH/root" "$DH/tmp"
+DH_ERR="$DH/err"; DH_OUT=""; dh_rc=0
+# dh_root <plugin> — the fixture copy of plugins/<plugin>, made once.
+dh_root() { [ -d "$DH/root/$1" ] || cp -R "$ROOT/plugins/$1" "$DH/root/$1"; printf '%s' "$DH/root/$1"; }
+# dh_home <name> — a fresh, empty HOME for the next dh calls.
+dh_home() { DH_HOME="$DH/home-$1"; rm -rf "$DH_HOME"; mkdir -p "$DH_HOME"; }
+# dh <plugin> <event> [idx] — the idx-th (default 0) command of <event>, all matcher groups flattened. Reads
+# $DH_IN (stdin), $DH_HOME and $DH_ENV (extra VAR=value words); sets $DH_OUT, $dh_rc, stderr in $DH_ERR.
+# dh_rc=127 when hooks.json has no such entry.
+dh() {
+  local root cmd
+  root="$(dh_root "$1")"
+  cmd="$(jq -r --arg e "$2" --argjson i "${3:-0}" '[.hooks[$e][]?.hooks[]?.command][$i] // empty' "$root/hooks/hooks.json")"
+  dh_rc=0; DH_OUT=""; : > "$DH_ERR"
+  [ -n "$cmd" ] || { dh_rc=127; return; }
+  # shellcheck disable=SC2086
+  DH_OUT="$(printf '%s' "${DH_IN-}" | env -i PATH="$PATH" HOME="$DH_HOME" TMPDIR="$DH/tmp" CLAUDE_PLUGIN_ROOT="$root" ${DH_ENV-} bash -c "$cmd" 2>"$DH_ERR")" || dh_rc=$?
+}
+# dh_ctx — $DH_OUT's additionalContext ('' when it is not an envelope); dh_evt — its hookEventName.
+dh_ctx() { printf '%s' "$DH_OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).hookSpecificOutput.additionalContext)}catch{}})'; }
+dh_evt() { printf '%s' "$DH_OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).hookSpecificOutput.hookEventName)}catch{}})'; }
+# dh_json <file> <js expression over j> — one value of a JSON file.
+dh_json() { node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const v=eval(process.argv[2]);process.stdout.write(typeof v==="string"?v:JSON.stringify(v))' "$1" "$2" 2>/dev/null; }
+dh_text() { jq -r --arg k "$2" '.[$k]' "$(dh_root "$1")/hooks/conventions-text.json"; }
+dh_in() { DH_IN="{\"session_id\":\"$1\",\"cwd\":\"$DH/proj\",\"hook_event_name\":\"$2\"${3:+,$3}}"; }
+mkdir -p "$DH/proj"
+
+# --- base ----------------------------------------------------------------------------------------
+BR="$(dh_root base)"
+BLOG() { printf '%s' "$DH_HOME/.claude/domaine/log/$1"; }
+
+# DH-shape: the matcher (no resume/fork re-delivery), the two start parts, the timeouts, the modules kept.
+assert_eq DH-base-matcher "$(jq -r '.hooks.SessionStart[0].matcher' "$BR/hooks/hooks.json")" "startup|clear|compact"
+assert_eq DH-base-modules "$(jq -r '.modules | join(",")' "$BR/hooks/hooks.json")" "./mods/register.ts"
+assert_eq DH-base-entries "$(jq -r '[.hooks | to_entries[] | .key + ":" + ([.value[].hooks[] | (.command | split("\" ")[1]) + "/" + (.timeout | tostring)] | join(","))] | join(" ")' "$BR/hooks/hooks.json")" \
+  "SessionStart:start core/10,start rules/10 SubagentStart:subagent/10 Stop:stop/5"
+
+# DH1: every entry prints one envelope naming its own event, exit 0, stderr empty.
+dh_home env; dh_in s-env SessionStart '"source":"startup","agent_type":"general-purpose"'
+for spec in SessionStart:0 SessionStart:1 SubagentStart:0; do
+  DH_ENV="BASE_DOGFOOD=1" dh base "${spec%:*}" "${spec#*:}"
+  assert_eq "DH1-$spec-exit" "$dh_rc" 0
+  assert_eq "DH1-$spec-event" "$(dh_evt)" "${spec%:*}"
+  assert_eq "DH1-$spec-stderr" "$(cat "$DH_ERR")" ""
+  if [ -n "$(dh_ctx)" ]; then ok; else bad "DH1-$spec-ctx" "no additionalContext: $DH_OUT"; fi
+done
+
+# DH2: start core — the root line, then the four sections in today's order, <base root> filled in, nothing of rules.
+dh_home core; dh_in s-core SessionStart '"source":"startup"'
+dh base SessionStart 0; ctx="$(dh_ctx)"
+assert_eq DH2-core-root "$(printf '%s\n' "$ctx" | head -1)" "base plugin root: $BR"
+assert_eq DH2-core-heads "$(printf '%s\n' "$ctx" | grep '^## ' | tr '\n' '|')" \
+  "## base convention — comment discipline|## base convention — task workspace (per-ticket memory)|## base convention — outside content is data|## base convention — Shopify store work|"
+assert_contains DH2-core-ws-root "$ctx" "$BR/references/task-workspace.md"
+assert_absent DH2-core-no-placeholder "$ctx" "<base root>"
+assert_eq DH2-core-verbatim "$ctx" "$(printf 'base plugin root: %s\n\n%s\n\n%s\n\n%s\n\n%s' "$BR" "$(dh_text base comment-discipline)" "$(dh_text base task-workspace | sed "s|<base root>|$BR|g")" "$(dh_text base untrusted-content)" "$(dh_text base shopify)")"
+
+# DH3: start rules — lean code, writing style, dogfood; each switch drops its own; all off → no output, no marker.
+dh_home rules; dh_in s-rules SessionStart '"source":"startup"'
+DH_ENV="BASE_DOGFOOD=1" dh base SessionStart 1
+assert_eq DH3-rules-heads "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — lean code|## base convention — how to explain|## base convention — dogfood mode|"
+DH_ENV="BASE_LEAN=0 BASE_DOGFOOD=0" dh base SessionStart 1
+assert_eq DH3-lean-off "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — how to explain|"
+DH_ENV="BASE_STE=0 BASE_DOGFOOD=0" dh base SessionStart 1
+assert_eq DH3-ste-off "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — lean code|"
+dh_home rules-off; dh_in s-off SessionStart '"source":"startup"'
+DH_ENV="BASE_LEAN=0 BASE_STE=0 BASE_DOGFOOD=0" dh base SessionStart 1
+assert_eq DH3-all-off-empty "$DH_OUT" ""
+assert_eq DH3-all-off-exit "$dh_rc" 0
+if [ -e "$(BLOG s-off)/conventions.base.rules.json" ]; then bad DH3-all-off-marker "a marker for an empty part"; else ok; fi
+
+# DH4: every envelope stays under the host's inline cap (9,000 chars) with dogfood on and all seven plugins named.
+dh_home cap; mkdir -p "$DH_HOME/.claude/plugins"
+node -e 'const p={};for(const n of ["slim","band","base","fe","be","qa","pm"])p[n+"@domaine"]=[{installPath:n==="base"?process.argv[1]:"/c/"+n,version:"10.100.1000-dogfood.42"}];console.log(JSON.stringify({version:2,plugins:p}))' "$BR" > "$DH_HOME/.claude/plugins/installed_plugins.json"
+dh_in s-cap SessionStart '"source":"startup","agent_type":"general-purpose"'
+for spec in SessionStart:0 SessionStart:1 SubagentStart:0; do
+  DH_ENV="BASE_DOGFOOD=1 CLAUDE_CODE_ENTRYPOINT=sdk-cli" dh base "${spec%:*}" "${spec#*:}"
+  n="$(printf '%s' "$DH_OUT" | wc -c | tr -d ' ')"
+  if [ "$n" -gt 0 ] && [ "$n" -lt 9000 ]; then ok; else bad "DH4-cap-$spec" "$n bytes"; fi
+done
+assert_contains DH4-cap-seven "$(DH_ENV="BASE_DOGFOOD=1" dh base SessionStart 1; dh_ctx)" "slim 10.100.1000-dogfood.42, band 10.100.1000-dogfood.42, base $(jq -r .version "$BR/.claude-plugin/plugin.json"), fe 10.100.1000-dogfood.42, be 10.100.1000-dogfood.42, qa 10.100.1000-dogfood.42, pm 10.100.1000-dogfood.42."
+
+# DH5: the marker per part, its fields; chars = the context's length.
+dh_home marker; dh_in s-mark SessionStart '"source":"compact"'
+dh base SessionStart 0; core_len="$(dh_ctx | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(s.length)))')"
+M="$(BLOG s-mark)/conventions.base.json"
+assert_eq DH5-marker-core "$(dh_json "$M" '[j.via,j.event,j.source,j.part,j.sections.join(","),j.chars,j.login.label,j.login.org,j.login.file,typeof j.ts].join("|")')" \
+  "hook|SessionStart|compact|core|root,comment-discipline,task-workspace,untrusted-content,shopify|$core_len|unknown||$DH_HOME/.claude.json|string"
+DH_ENV="BASE_DOGFOOD=0" dh base SessionStart 1
+assert_eq DH5-marker-rules "$(dh_json "$(BLOG s-mark)/conventions.base.rules.json" '[j.part,j.sections.join(",")].join("|")')" "rules|lean-code,writing-style"
+assert_eq DH5-no-subagent-marker "$(DH_IN='{"session_id":"s-mark2","agent_type":"x"}' dh base SubagentStart; ls "$(BLOG s-mark2)" 2>/dev/null)" ""
+
+# DH6: bad stdin still delivers (no session id → no marker); a log dir it cannot write or no HOME → the marker under
+# the spare root ($TMPDIR/domaine-log), so the mods' fallback never adds a second copy; neither writable → one stderr
+# line, context kept; DOMAINE_LOG_DIR moves the marker; a session id that is no file name writes nothing; no text file → nothing.
+dh_home bad; DH_IN='not json'; dh base SessionStart 0
+assert_eq DH6-bad-stdin-exit "$dh_rc" 0
+assert_contains DH6-bad-stdin-ctx "$(dh_ctx)" "base plugin root: $BR"
+assert_eq DH6-bad-stdin-stderr "$(cat "$DH_ERR")" ""
+assert_eq DH6-bad-stdin-no-log "$(ls "$DH_HOME/.claude/domaine/log" 2>/dev/null)" ""
+DH_IN='{"session_id":"../x","source":"startup"}'; dh base SessionStart 0
+assert_eq DH6-bad-sid-no-log "$(ls "$DH_HOME/.claude/domaine/log" 2>/dev/null)" ""
+DH_IN=''; dh base SessionStart 0
+assert_contains DH6-empty-stdin-ctx "$(dh_ctx)" "## base convention — Shopify store work"
+if [ "$(id -u)" = 0 ]; then ok; ok; ok; ok; ok; ok; else   # root ignores 555 perms — skip there
+  dh_home ro; mkdir -p "$DH_HOME/.claude"; chmod 555 "$DH_HOME/.claude"; dh_in s-ro SessionStart '"source":"startup"'
+  dh base SessionStart 0
+  assert_eq DH6-ro-exit "$dh_rc" 0
+  assert_contains DH6-ro-ctx "$(dh_ctx)" "## base convention — comment discipline"
+  assert_eq DH6-ro-stderr "$(cat "$DH_ERR")" ""
+  assert_eq DH6-ro-spare "$(dh_json "$DH/tmp/domaine-log/s-ro/conventions.base.json" 'j.source')" "startup"
+  mkdir -p "$DH/tmp-ro"; chmod 555 "$DH/tmp-ro"; dh_in s-ro2 SessionStart '"source":"startup"'
+  DH_ENV="TMPDIR=$DH/tmp-ro" dh base SessionStart 0
+  assert_contains DH6-ro-both-ctx "$(dh_ctx)" "## base convention — comment discipline"
+  assert_eq DH6-ro-both-stderr "$(sed 's/(.*)/(…)/' "$DH_ERR")" "base conventions: marker not written (…)"
+  chmod 755 "$DH_HOME/.claude" "$DH/tmp-ro"
+fi
+dh_home nohome; dh_in s-nohome SessionStart '"source":"startup"'
+DH_ENV="HOME=" dh base SessionStart 0
+assert_contains DH6-no-home-ctx "$(dh_ctx)" "base plugin root: $BR"
+assert_eq DH6-no-home-spare "$(dh_json "$DH/tmp/domaine-log/s-nohome/conventions.base.json" 'j.part')" "core"
+for p in base fe qa be pm; do
+  rm -rf "$DH/notext"; cp -R "$ROOT/plugins/$p" "$DH/notext"; rm "$DH/notext/hooks/conventions-text.json"
+  out="$(printf '{"session_id":"s-notext","source":"startup"}' | env -i PATH="$PATH" HOME="$DH_HOME" TMPDIR="$DH/tmp" CLAUDE_PLUGIN_ROOT="$DH/notext" node "$DH/notext/hooks/conventions.cjs" start core 2>&1)"; rc=$?
+  assert_eq "DH6-no-text-$p" "$rc:$out" "0:"
+done
+dh_home ldir; dh_in s-ldir SessionStart '"source":"clear"'
+DH_ENV="DOMAINE_LOG_DIR=$DH/elsewhere" dh base SessionStart 0
+assert_eq DH6-log-dir "$(dh_json "$DH/elsewhere/s-ldir/conventions.base.json" 'j.source')" "clear"
+assert_eq DH6-log-dir-not-home "$(ls "$DH_HOME/.claude/domaine/log" 2>/dev/null)" ""
+
+# DH7: the dogfood versions line — base's marketplace record first, a synced copy for a record-less plugin, enabled
+# names without a version, a disabled one left out; CLAUDE_CONFIG_DIR moves every source.
+dh_home ver; C="$DH_HOME/.claude"; mkdir -p "$C/plugins/synced/acct-1/qa~g2/.claude-plugin" "$DH/proj/.claude"
+node -e 'console.log(JSON.stringify({version:2,plugins:{"base@domaine":[{installPath:process.argv[1],version:"0.0.1"}],"slim@other":[{installPath:"/o/slim",version:"9.0.0"}],"slim@domaine":[{installPath:"/c/slim",version:"0.13.0"}],"fe@domaine":[{installPath:"/c/fe",version:"0.8.0"}]}}))' "$BR" > "$C/plugins/installed_plugins.json"
+printf '{"name":"qa","version":"0.3.9"}' > "$C/plugins/synced/acct-1/qa~g2/.claude-plugin/plugin.json"
+printf '{"enabledPlugins":{"band@domaine":true,"pm@domaine":true}}' > "$C/settings.json"
+printf '{"enabledPlugins":{"pm@domaine":false}}' > "$DH/proj/.claude/settings.local.json"
+dh_in s-ver SessionStart '"source":"startup"'
+DH_ENV="BASE_DOGFOOD=1" dh base SessionStart 1
+assert_contains DH7-versions "$(dh_ctx)" "unstable development builds: slim 0.13.0, band (version unknown), base $(jq -r .version "$BR/.claude-plugin/plugin.json"), fe 0.8.0, qa 0.3.9. You are"
+rm -f "$DH/proj/.claude/settings.local.json"
+W="$DH/cfg-work"; rm -rf "$W"; mkdir -p "$W/plugins"
+printf '{"version":2,"plugins":{"be@domaine":[{"installPath":"/w/be","version":"0.3.3"}]}}' > "$W/plugins/installed_plugins.json"
+DH_ENV="BASE_DOGFOOD=1 CLAUDE_CONFIG_DIR=$W" dh base SessionStart 1
+assert_contains DH7-config-dir "$(dh_ctx)" "unstable development builds: base $(jq -r .version "$BR/.claude-plugin/plugin.json"), be 0.3.3. You are"
+
+# DH8: the rule variant — surfaceless for an SDK entrypoint or a remote session, else the drawn offer rule.
+dh_home rule; dh_in s-rule SessionStart '"source":"startup"'
+RULE_S="$(dh_text base rule-surfaceless)"; RULE_D="$(dh_text base rule-drawn)"
+DH_ENV="BASE_DOGFOOD=1" dh base SessionStart 1
+assert_contains DH8-drawn "$(dh_ctx)" "$RULE_D Never put secrets"
+assert_absent DH8-drawn-not-paste "$(dh_ctx)" "Paste the whole report"
+DH_ENV="BASE_DOGFOOD=1 CLAUDE_CODE_ENTRYPOINT=sdk-cli" dh base SessionStart 1
+assert_contains DH8-sdk "$(dh_ctx)" "$RULE_S Never put secrets"
+assert_absent DH8-sdk-not-offer "$(dh_ctx)" "never create one unasked"
+DH_ENV="BASE_DOGFOOD=1 CLAUDE_CODE_REMOTE=true" dh base SessionStart 1
+assert_contains DH8-remote "$(dh_ctx)" "$RULE_S"
+DH_ENV="BASE_DOGFOOD=1 CLAUDE_CODE_ENTRYPOINT=cli CLAUDE_CODE_REMOTE=false" dh base SessionStart 1
+assert_contains DH8-cli-drawn "$(dh_ctx)" "$RULE_D"
+# the surfaceless wording the cloud owner relies on, verbatim
+for line in 'Paste the whole report into your reply, in a fenced block
+under the `Plugin defect:` line' "No \`plugin_defect\` among your tools (base's tool server is absent in some cloud
+sessions): write the report in that block yourself" 'ALWAYS report a defect — with the `plugin_defect` tool where it is listed — before
+or while you work around it, never silently.' 'end the `Plugin defect:`
+line with `→ in this reply` instead of a path, since no file was written.' '`Plugin defect: <title> → <path>`,
+the path the tool returned.'; do
+  DH_ENV="BASE_DOGFOOD=1 CLAUDE_CODE_ENTRYPOINT=sdk-cli" dh base SessionStart 1
+  assert_contains "DH8-wording-$(printf '%s' "$line" | head -c 20 | tr -c 'a-zA-Z' '-')" "$(dh_ctx)" "$line"
+done
+
+# DH9: the login label (doctor evidence) from the login file the config dir names; dogfood by the account it holds.
+dh_home login; dh_in s-login SessionStart '"source":"startup"'
+lbl() { dh base SessionStart 0; dh_json "$(BLOG s-login)/conventions.base.json" 'j.login.label+"|"+(j.login.org??"")+"|"+j.login.file'; }
+printf '{"oauthAccount":{"organizationType":"claude_max"}}' > "$DH_HOME/.claude.json"
+assert_eq DH9-personal "$(lbl)" "personal|claude_max|$DH_HOME/.claude.json"
+assert_eq DH9-config-is-home "$(DH_ENV="CLAUDE_CONFIG_DIR=$DH_HOME/.claude" lbl)" "personal|claude_max|$DH_HOME/.claude.json"
+WK="$DH/cfg-login"; mkdir -p "$WK"; printf '{"oauthAccount":{"organizationType":"claude_team","accountUuid":"acc-team"}}' > "$WK/.claude.json"
+assert_eq DH9-work "$(DH_ENV="CLAUDE_CONFIG_DIR=$WK" lbl)" "work|claude_team|$WK/.claude.json"
+printf '{"oauthAccount":{"organizationType":"claude_enterprise"}}' > "$WK/.claude.json"
+assert_eq DH9-enterprise "$(DH_ENV="CLAUDE_CONFIG_DIR=$WK" lbl)" "work|claude_enterprise|$WK/.claude.json"
+printf '{"oauthAccount":{"organizationType":"claude_pro"}}' > "$DH_HOME/.claude.json"
+assert_eq DH9-pro "$(lbl)" "personal|claude_pro|$DH_HOME/.claude.json"
+assert_eq DH9-missing "$(DH_ENV="CLAUDE_CONFIG_DIR=$DH/nowhere" lbl)" "unknown||$DH/nowhere/.claude.json"
+DF="$(dh_root base)/dogfood.json"; cp "$DF" "$DH/dogfood.json.bak"
+printf '{"accounts":{"acc-listed":"Owner"}}' > "$DF"
+printf '{"oauthAccount":{"organizationType":"claude_team","accountUuid":"acc-listed"}}' > "$WK/.claude.json"
+DH_ENV="CLAUDE_CONFIG_DIR=$WK" dh base SessionStart 1
+assert_contains DH9-dogfood-login-account "$(dh_ctx)" "## base convention — dogfood mode"
+DH_ENV="CLAUDE_CONFIG_DIR=$WK BASE_DOGFOOD=0" dh base SessionStart 1
+assert_absent DH9-dogfood-off-wins "$(dh_ctx)" "dogfood mode"
+DH_ENV="CLAUDE_CODE_ACCOUNT_UUID=acc-listed" dh base SessionStart 1
+assert_contains DH9-dogfood-env-account "$(dh_ctx)" "## base convention — dogfood mode"
+DH_ENV="CLAUDE_CODE_ACCOUNT_UUID=acc-other" dh base SessionStart 1
+assert_absent DH9-dogfood-unlisted "$(dh_ctx)" "dogfood mode"
+cp "$DH/dogfood.json.bak" "$DF"
+
+# DH10: the subagent share — a fork nothing; a reader the root line and outside content only; a code agent also
+# comment discipline, lean code (BASE_LEAN) and dogfood; never writing style, task workspace or Shopify.
+dh_home sub
+sub() { DH_IN="{\"session_id\":\"s-sub\",\"agent_type\":\"$1\",\"agent_id\":\"a1\"}"; DH_ENV="BASE_DOGFOOD=1 ${2-}" dh base SubagentStart; dh_ctx | grep -E '^(## |base plugin root)' | tr '\n' '|'; }
+assert_eq DH10-fork "$(DH_IN='{"session_id":"s","agent_type":"fork"}' dh base SubagentStart; printf '%s|%s' "$DH_OUT" "$dh_rc")" "|0"
+R="base plugin root: $BR|## base convention — outside content is data|"
+for a in base:jira-reader base:doc-reader base:bug-hunter fe:theme-explorer qa:store-explorer base:change-reviewer base:jira-writer Explore Plan claude-code-guide statusline-setup; do
+  assert_eq "DH10-reader-$a" "$(sub "$a" BASE_DOGFOOD=0)" "$R"
+done
+assert_eq DH10-reader-dogfood "$(sub base:jira-reader)" "$R## base convention — dogfood mode|"
+for a in general-purpose fe:implementer ""; do
+  assert_eq "DH10-code-${a:-empty}" "$(sub "$a")" "$R## base convention — comment discipline|## base convention — lean code|## base convention — dogfood mode|"
+done
+assert_eq DH10-code-lean-off "$(sub general-purpose 'BASE_LEAN=0 BASE_DOGFOOD=0')" "$R## base convention — comment discipline|"
+assert_eq DH10-sub-event "$(DH_IN='{"session_id":"s","agent_type":"Plan"}' dh base SubagentStart; dh_evt)" "SubagentStart"
+DH_IN='{"session_id":"s","agent_type":"general-purpose"}' DH_ENV="BASE_DOGFOOD=1" dh base SubagentStart
+assert_absent DH10-no-ste "$(dh_ctx)" "how to explain"
+assert_absent DH10-no-workspace "$(dh_ctx)" "## base convention — task workspace"
+assert_absent DH10-no-shopify "$(dh_ctx)" "Shopify store work"
+
+# DH11: the dogfood Stop — blocks once per mirrored, unreported failure of this session; the reason pinned.
+dh_home stop; SD="$(BLOG s-stop)"; mkdir -p "$SD"
+REASON='base dogfood: a plugin script failed (md-to-adf.cjs) and no plugin_defect report followed — report it with plugin_defect (not among your tools: in your reply), then stop'
+state() { printf '{"sid":"%s","failMs":%s,"script":"md-to-adf.cjs","reportMs":%s}\n' "$1" "$2" "$3" > "$SD/dogfood-state.json"; }
+stp() { DH_IN="{\"session_id\":\"s-stop\",\"stop_hook_active\":${1:-false}}"; DH_ENV="BASE_DOGFOOD=${2:-1}" dh base Stop; printf '%s' "$DH_OUT"; }
+assert_eq DH11-no-state "$(stp)" ""
+state s-other 100 0;  assert_eq DH11-other-session "$(stp)" ""
+state s-stop 0 0;     assert_eq DH11-no-failure "$(stp)" ""
+state s-stop 100 100; assert_eq DH11-reported "$(stp)" ""
+state s-stop 100 0;   assert_eq DH11-off "$(stp false 0)" ""
+assert_eq DH11-active "$(stp true)" ""
+assert_eq DH11-block "$(stp)" "$(jq -cn --arg r "$REASON" '{decision:"block",reason:$r}')"
+assert_eq DH11-block-file "$(cat "$SD/dogfood-stop.json")" '{"blockedMs":100}'
+assert_eq DH11-once "$(stp)" ""
+state s-stop 200 0;   assert_contains DH11-next-failure "$(stp)" '"decision":"block"'
+assert_eq DH11-exit "$dh_rc" 0
+# a log dir the hook cannot write the block file into: no block, so a stop is never blocked forever
+state s-stop 300 0; chmod 444 "$SD/dogfood-stop.json"
+if [ "$(id -u)" = 0 ]; then ok; else assert_eq DH11-unwritable-no-block "$(stp)" ""; fi
+chmod 644 "$SD/dogfood-stop.json"
+
+# DH12: the text file — one source for the hook and the mod's fallback: every key a string, no legacy name, the
+# outside-content rail one sentence per rule under 900 bytes, the Shopify pointer one line.
+assert_eq DH12-keys "$(jq -r 'keys_unsorted | join(",")' "$BR/hooks/conventions-text.json")" \
+  "root,comment-discipline,task-workspace,untrusted-content,shopify,lean-code,writing-style,dogfood,rule-drawn,rule-surfaceless"
+assert_eq DH12-strings "$(jq -r '[.[] | type] | unique | join(",")' "$BR/hooks/conventions-text.json")" "string"
+UC="$(dh_text base untrusted-content)"
+for n in 'ESCALATE(' '.claude/slim/prompt/' 'tool-results/' "hook's own system reminder" '<<slim stub>>' 'base plugin directive:'; do assert_contains "DH12-uc-$n" "$UC" "$n"; done
+if [ "$(printf '%s' "$UC" | wc -c)" -lt 900 ]; then ok; else bad DH12-uc-size "$(printf '%s' "$UC" | wc -c) bytes"; fi
+assert_eq DH12-shopify-one-line "$(dh_text base shopify | grep -v '^## ' | grep -c .)" 1
+assert_contains DH12-shopify-skill "$(dh_text base shopify)" "/base:shopify"
+OLDN="f""nd"
+if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|gateway" "$BR/hooks/conventions-text.json"; then bad DH12-no-legacy "a legacy, host or store-channel name in conventions-text.json"; else ok; fi
+assert_eq DH12-dogfood-slots "$(dh_text base dogfood | grep -o '{versions}\|{rule}' | tr '\n' ',')" "{versions},{rule},"
+
+# --- fe ------------------------------------------------------------------------------------------
+FR="$(dh_root fe)"; FP="$DH/feproj"; mkdir -p "$FP"
+FLOG() { printf '%s' "$DH_HOME/.claude/domaine/log/$1"; }
+fe_in() { DH_IN="{\"session_id\":\"$1\",\"cwd\":\"$FP\",\"hook_event_name\":\"$2\"${3:+,$3}}"; }
+fe_heads() { dh_ctx | grep -E '^(## |fe plugin root: |fe project profile: |worktree copy list: )' | sed "s|$FR|<FR>|" | tr '\n' '|'; }
+fe_files() { rm -f "$FP/.env" "$FP/shopify.theme.toml"; for f in "$@"; do printf 'SECRET=never-read\n' > "$FP/$f"; done; }
+ROOT_LINE="fe plugin root: $FR — fe's files write it \`<fe root>\` and the \`base plugin root:\` path \`<base root>\`; spell both out in commands (\`\${CLAUDE_PLUGIN_ROOT}\` is empty in the Bash tool's shell)"
+
+# DHfe-shape: one start entry under the matcher, one subagent entry, no Stop; the modules kept.
+assert_eq DHfe-matcher "$(jq -r '.hooks.SessionStart[0].matcher' "$FR/hooks/hooks.json")" "startup|clear|compact"
+assert_eq DHfe-modules "$(jq -r '.modules | join(",")' "$FR/hooks/hooks.json")" "./mods/register.ts"
+assert_eq DHfe-entries "$(jq -r '[.hooks | to_entries[] | .key + ":" + ([.value[].hooks[] | (.command | split("\" ")[1]) + "/" + (.timeout | tostring)] | join(","))] | join(" ")' "$FR/hooks/hooks.json")" \
+  "SessionStart:start/10 SubagentStart:subagent/10"
+
+# DHfe1: the real probe on an empty checkout → none; every entry one envelope naming its event, exit 0, stderr empty.
+dh_home fe-env; fe_files; fe_in f-env SessionStart '"source":"startup","agent_type":"general-purpose"'
+for ev in SessionStart SubagentStart; do
+  dh fe "$ev"
+  assert_eq "DHfe1-$ev-exit" "$dh_rc" 0
+  assert_eq "DHfe1-$ev-event" "$(dh_evt)" "$ev"
+  assert_eq "DHfe1-$ev-stderr" "$(cat "$DH_ERR")" ""
+  assert_eq "DHfe1-$ev-ctx" "$(dh_ctx)" "$ROOT_LINE
+
+fe project profile: none"
+done
+assert_eq DHfe1-marker-real-probe "$(dh_json "$(FLOG f-env)/conventions.fe.json" '[j.profile.word,j.profile.via,j.profile.why].join("|")')" "none|project-profile.sh|"
+
+# From here project-profile.sh is a stub: it answers $FE_STUB_WORD / $FE_STUB_RC and logs its arguments.
+cat > "$FR/scripts/project-profile.sh" <<'STUB'
+#!/usr/bin/env bash
+[ -n "${FE_STUB_LOG-}" ] && printf '%s\n' "$*" >> "$FE_STUB_LOG"
+[ -n "${FE_STUB_SLEEP-}" ] && exec sleep "$FE_STUB_SLEEP"
+echo "${FE_STUB_WORD-theme}"; echo "${FE_STUB_ERR-}" >&2; exit "${FE_STUB_RC-0}"
+STUB
+PLOG="$DH/fe-probe.log"
+
+# DHfe2: foundation, a toml and a .env → all six sections in order, text verbatim, <fe root> filled, <base root> kept.
+dh_home fe-all; fe_files .env shopify.theme.toml; fe_in f-all SessionStart '"source":"startup"'
+rm -f "$PLOG"; DH_ENV="FE_STUB_WORD=foundation FE_STUB_LOG=$PLOG" dh fe SessionStart
+assert_eq DHfe2-probe-args "$(cat "$PLOG")" "$FP"
+assert_eq DHfe2-heads "$(fe_heads)" "fe plugin root: <FR> — fe's files write it \`<fe root>\` and the \`base plugin root:\` path \`<base root>\`; spell both out in commands (\`\${CLAUDE_PLUGIN_ROOT}\` is empty in the Bash tool's shell)|fe project profile: foundation|## fe convention — LiquidDoc and core|## fe capability — live store access|worktree copy list: shopify.theme.toml|## fe convention — the progress series|"
+assert_eq DHfe2-verbatim "$(dh_ctx)" "$(printf '%s\n\nfe project profile: foundation\n\n%s\n\n%s\n\n%s\n\n%s' "$ROOT_LINE" "$(dh_text fe comment-discipline-foundation)" "$(dh_text fe store-access | sed "s|<fe root>|$FR|g")" "$(dh_text fe worktree)" "$(dh_text fe progress-series)")"
+assert_absent DHfe2-no-fe-placeholder "$(dh_ctx | tail -n +2)" "<fe root>"
+assert_contains DHfe2-base-placeholder-kept "$(dh_ctx)" "node <base root>/scripts/shopify-validate.cjs"
+assert_contains DHfe2-store-paths "$(dh_ctx)" "$FR/scripts/shopify-admin-gql.sh --query"
+assert_absent DHfe2-no-secret "$(dh_ctx)" "never-read"
+n="$(printf '%s' "$DH_OUT" | wc -c | tr -d ' ')"
+if [ "$n" -lt 9000 ]; then ok; else bad DHfe2-cap "$n bytes"; fi
+M="$(FLOG f-all)/conventions.fe.json"
+len="$(dh_ctx | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(s.length)))')"
+assert_eq DHfe2-marker "$(dh_json "$M" '[j.via,j.event,j.source,j.sections.join(","),j.chars,j.login.label,j.login.file,JSON.stringify(j.profile),typeof j.ts,"part" in j].join("|")')" \
+  "hook|SessionStart|startup|root,profile,comment-discipline-foundation,store-access,worktree,progress-series|$len|unknown|$DH_HOME/.claude.json|{\"word\":\"foundation\",\"via\":\"project-profile.sh\",\"why\":null,\"toml\":true,\"store\":true}|string|false"
+
+# DHfe3: the gates — FE_PROFILE skips the probe; none + .env → root and profile; none + toml → store, worktree, series;
+# theme + .env → store and series; a failing or slow probe → none with the reason in the marker.
+dh_home fe-gate; fe_files; fe_in f-gate SessionStart '"source":"clear"'
+rm -f "$PLOG"; DH_ENV="FE_PROFILE=theme FE_STUB_LOG=$PLOG" dh fe SessionStart
+assert_eq DHfe3-forced "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")+"|"+j.profile.via')" "root,profile,progress-series|FE_PROFILE"
+if [ -e "$PLOG" ]; then bad DHfe3-forced-no-probe "the probe ran under FE_PROFILE"; else ok; fi
+DH_ENV="FE_PROFILE=Foundation FE_STUB_WORD=none" dh fe SessionStart
+assert_eq DHfe3-forced-bad-word "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.profile.word+"|"+j.profile.via')" "none|project-profile.sh"
+fe_files .env; DH_ENV="FE_STUB_WORD=none" dh fe SessionStart
+assert_eq DHfe3-none-env "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile"
+fe_files shopify.theme.toml; DH_ENV="FE_STUB_WORD=none" dh fe SessionStart
+assert_eq DHfe3-none-toml "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile,store-access,worktree,progress-series"
+fe_files .env; DH_ENV="FE_STUB_WORD=theme" dh fe SessionStart
+assert_eq DHfe3-theme-env "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile,store-access,progress-series"
+fe_files; DH_ENV="FE_STUB_RC=2 FE_STUB_WORD= FE_STUB_ERR=boom" dh fe SessionStart
+assert_eq DHfe3-probe-fails "$(dh_json "$(FLOG f-gate)/conventions.fe.json" '[j.profile.word,j.profile.via,j.profile.why].join("|")')" "none|fallback|project-profile.sh exited 2: boom"
+assert_eq DHfe3-probe-fails-ctx "$(fe_heads)" "$(printf '%s' "$ROOT_LINE" | sed "s|$FR|<FR>|")|fe project profile: none|"
+DH_ENV="FE_STUB_SLEEP=8" dh fe SessionStart
+assert_eq DHfe3-probe-timeout "$(dh_json "$(FLOG f-gate)/conventions.fe.json" '[j.profile.word,j.profile.via,j.profile.why.slice(0,30)].join("|")')" "none|fallback|project-profile.sh did not run"
+assert_eq DHfe3-probe-timeout-exit "$dh_rc" 0
+
+# DHfe4: bad stdin still delivers (no session id → no marker); a log dir it cannot write → the marker under the spare
+# root, context kept; DOMAINE_LOG_DIR moves the marker.
+dh_home fe-bad; DH_IN='not json'; dh fe SessionStart
+assert_eq DHfe4-bad-stdin-exit "$dh_rc" 0
+assert_contains DHfe4-bad-stdin-ctx "$(dh_ctx)" "fe project profile: theme"
+assert_eq DHfe4-bad-stdin-stderr "$(cat "$DH_ERR")" ""
+assert_eq DHfe4-bad-stdin-no-log "$(ls "$DH_HOME/.claude/domaine/log" 2>/dev/null)" ""
+if [ "$(id -u)" = 0 ]; then ok; ok; ok; ok; else
+  dh_home fe-ro; mkdir -p "$DH_HOME/.claude"; chmod 555 "$DH_HOME/.claude"; fe_in f-ro SessionStart '"source":"startup"'
+  dh fe SessionStart
+  assert_eq DHfe4-ro-exit "$dh_rc" 0
+  assert_contains DHfe4-ro-ctx "$(dh_ctx)" "fe project profile: theme"
+  assert_eq DHfe4-ro-stderr "$(cat "$DH_ERR")" ""
+  assert_eq DHfe4-ro-spare "$(dh_json "$DH/tmp/domaine-log/f-ro/conventions.fe.json" 'j.profile.word')" "theme"
+  chmod 755 "$DH_HOME/.claude"
+fi
+dh_home fe-ldir; fe_in f-ldir SessionStart '"source":"compact"'
+DH_ENV="DOMAINE_LOG_DIR=$DH/fe-elsewhere" dh fe SessionStart
+assert_eq DHfe4-log-dir "$(dh_json "$DH/fe-elsewhere/f-ldir/conventions.fe.json" 'j.source')" "compact"
+assert_eq DHfe4-log-dir-not-home "$(ls "$DH_HOME/.claude/domaine/log" 2>/dev/null)" ""
+
+# DHfe5: the login label in the marker, from the login file the config dir names.
+dh_home fe-login; fe_in f-login SessionStart '"source":"startup"'
+fe_lbl() { dh fe SessionStart; dh_json "$(FLOG f-login)/conventions.fe.json" 'j.login.label+"|"+(j.login.org??"")+"|"+j.login.file'; }
+printf '{"oauthAccount":{"organizationType":"claude_max"}}' > "$DH_HOME/.claude.json"
+assert_eq DHfe5-personal "$(fe_lbl)" "personal|claude_max|$DH_HOME/.claude.json"
+FW="$DH/fe-cfg-work"; mkdir -p "$FW"; printf '{"oauthAccount":{"organizationType":"claude_team"}}' > "$FW/.claude.json"
+assert_eq DHfe5-work "$(DH_ENV="CLAUDE_CONFIG_DIR=$FW" fe_lbl)" "work|claude_team|$FW/.claude.json"
+
+# DHfe6: the subagent share — base's readers and writer, Claude Code's helpers and a fork get nothing; a read-only
+# agent root, profile and Foundation rules; a code agent also store access; the profile comes from the start
+# marker, the probe runs only without one; no marker of its own.
+dh_home fe-sub; fe_files .env; SM="$(FLOG f-sub)"; mkdir -p "$SM"
+printf '{"via":"hook","profile":{"word":"foundation","via":"project-profile.sh","why":null,"toml":false,"store":true}}\n' > "$SM/conventions.fe.json"
+fe_sub() { DH_IN="{\"session_id\":\"${2:-f-sub}\",\"cwd\":\"$FP\",\"agent_type\":\"$1\",\"agent_id\":\"a1\"}"; DH_ENV="FE_STUB_LOG=$PLOG ${3-}" dh fe SubagentStart; fe_heads; }
+rm -f "$PLOG"
+for a in base:jira-reader base:jira-writer base:figma-reader base:doc-reader jira-reader claude-code-guide statusline-setup fork; do
+  fe_sub "$a" >/dev/null
+  assert_eq "DHfe6-none-$a" "$DH_OUT|$dh_rc" "|0"
+done
+RO="$(printf '%s' "$ROOT_LINE" | sed "s|$FR|<FR>|")|fe project profile: foundation|## fe convention — LiquidDoc and core|"
+for a in fe:theme-explorer base:change-reviewer base:bug-hunter Explore Plan; do
+  assert_eq "DHfe6-read-only-$a" "$(fe_sub "$a")" "$RO"
+done
+for a in general-purpose some-plugin:implementer ""; do
+  assert_eq "DHfe6-code-${a:-empty}" "$(fe_sub "$a")" "$RO## fe capability — live store access|"
+done
+if [ -e "$PLOG" ]; then bad DHfe6-marker-no-probe "the probe ran though the start marker holds the profile"; else ok; fi
+assert_eq DHfe6-event "$(fe_sub Plan >/dev/null; dh_evt)" "SubagentStart"
+assert_absent DHfe6-no-series "$(fe_sub general-purpose >/dev/null; dh_ctx)" "progress series"
+assert_eq DHfe6-no-marker-probes "$(fe_sub general-purpose f-sub2 FE_STUB_WORD=none)" "$(printf '%s' "$ROOT_LINE" | sed "s|$FR|<FR>|")|fe project profile: none|"
+assert_eq DHfe6-no-marker-probe-ran "$(wc -l < "$PLOG" | tr -d ' ')" 1
+assert_eq DHfe6-no-own-marker "$(ls "$(FLOG f-sub2)" 2>/dev/null)" ""
+
+# DHfe7: the text file — the mod's fallback and the hook read the same keys; the worktree line /base:worktree
+# parses exactly once; the series in order with base's two steps by base's names; no legacy or host name.
+assert_eq DHfe7-keys "$(jq -r 'keys_unsorted | join(",")' "$FR/hooks/conventions-text.json")" \
+  "root,profile,comment-discipline-foundation,store-access,worktree,progress-series"
+assert_eq DHfe7-strings "$(jq -r '[.[] | type] | unique | join(",")' "$FR/hooks/conventions-text.json")" "string"
+assert_eq DHfe7-root-one-line "$(dh_text fe root | wc -l | tr -d ' ')" 1
+assert_eq DHfe7-worktree-line "$(dh_text fe worktree | grep -c '^worktree copy list: shopify.theme.toml$')" 1
+assert_contains DHfe7-worktree-preview "$(dh_text fe worktree)" "/fe:preview-theme"
+assert_eq DHfe7-series "$(dh_text fe progress-series | sed -n 's/^[0-9]\. `\([a-z-]*\)` — `\(\/[a-z]*:[a-z-]*\)`.*/\1 \2/p' | tr '\n' '|')" \
+  "write-technical-approach /fe:write-technical-approach|develop-feature-or-fix /fe:develop-feature-or-fix|qa-feature-or-fix /fe:qa-feature-or-fix|pre-commit-review /base:pre-commit-review|commit /base:commit|create-pull-request /fe:create-pull-request|write-steps-to-test /fe:write-steps-to-test|"
+for p in scripts/shopify-admin-gql.sh scripts/theme-json.sh references/metafield-metaobject-setup.md references/theme-customizer-state.md; do
+  assert_contains "DHfe7-store-$p" "$(dh_text fe store-access)" "<fe root>/$p"
+  if [ -e "$ROOT/plugins/fe/$p" ]; then ok; else bad "DHfe7-exists-$p" "plugins/fe/$p named by store-access is missing"; fi
+done
+if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|json-slim|log-slim" "$FR/hooks/conventions-text.json"; then bad DHfe7-no-legacy "a legacy, host or old-compressor name in fe's conventions-text.json"; else ok; fi
+
+# --- qa, be, pm ----------------------------------------------------------------------------------
+TLOG() { printf '%s' "$DH_HOME/.claude/domaine/log/$1"; }
+QR="$(dh_root qa)"; ER="$(dh_root be)"; PR="$(dh_root pm)"
+
+# DHt-shape: the matcher, the modules kept; qa one start entry, be and pm a start and a subagent entry; no Stop.
+for p in qa be pm; do
+  R="$(dh_root "$p")"
+  assert_eq "DHt-$p-matcher" "$(jq -r '.hooks.SessionStart[0].matcher' "$R/hooks/hooks.json")" "startup|clear|compact"
+  assert_eq "DHt-$p-modules" "$(jq -r '.modules | join(",")' "$R/hooks/hooks.json")" "./mods/register.ts"
+done
+assert_eq DHt-qa-entries "$(jq -r '[.hooks | to_entries[] | .key + ":" + ([.value[].hooks[] | (.command | split("\" ")[1]) + "/" + (.timeout | tostring)] | join(","))] | join(" ")' "$QR/hooks/hooks.json")" "SessionStart:start/10"
+for p in be pm; do
+  assert_eq "DHt-$p-entries" "$(jq -r '[.hooks | to_entries[] | .key + ":" + ([.value[].hooks[] | (.command | split("\" ")[1]) + "/" + (.timeout | tostring)] | join(","))] | join(" ")' "$(dh_root "$p")/hooks/hooks.json")" "SessionStart:start/10 SubagentStart:subagent/10"
+done
+dh_home qa-nosub; dh_in t-nosub SubagentStart '"agent_type":"general-purpose"'; dh qa SubagentStart
+assert_eq DHt-qa-no-subagent "$dh_rc" 127
+printf '{"session_id":"t-nosub","agent_type":"general-purpose"}' | HOME="$DH_HOME" node "$QR/hooks/conventions.cjs" subagent > "$DH/qa-sub.out" 2>&1
+assert_eq DHt-qa-subagent-mode-silent "$(cat "$DH/qa-sub.out")" ""
+
+# DHt1: the start envelope — exit 0, its event, stderr empty, the text verbatim (the root filled, <base root> kept), under 9,000 chars.
+dh_home t-env
+for p in qa be pm; do
+  R="$(dh_root "$p")"; dh_in "t-env-$p" SessionStart '"source":"startup"'
+  dh "$p" SessionStart
+  assert_eq "DHt1-$p-exit" "$dh_rc" 0
+  assert_eq "DHt1-$p-event" "$(dh_evt)" SessionStart
+  assert_eq "DHt1-$p-stderr" "$(cat "$DH_ERR")" ""
+  n="$(printf '%s' "$DH_OUT" | wc -c | tr -d ' ')"
+  if [ "$n" -gt 0 ] && [ "$n" -lt 9000 ]; then ok; else bad "DHt1-$p-cap" "$n bytes"; fi
+done
+dh qa SessionStart
+assert_eq DHt1-qa-verbatim "$(dh_ctx)" "$(printf 'qa plugin root: %s\n\n%s' "$QR" "$(dh_text qa passwords)")"
+assert_contains DHt1-qa-base-placeholder-kept "$(dh_ctx)" "node <base root>/scripts/qa-stores.cjs get <store> --field password"
+dh be SessionStart; assert_eq DHt1-be-verbatim "$(dh_ctx)" "be plugin root: $ER"
+dh pm SessionStart; assert_eq DHt1-pm-verbatim "$(dh_ctx)" "pm plugin root: $PR"
+assert_eq DHt1-unknown-mode "$(printf '{"session_id":"t-x"}' | HOME="$DH_HOME" node "$PR/hooks/conventions.cjs" nope 2>&1)" ""
+
+# DHt2: the marker per plugin, its fields; chars = the context's length; no part, no profile.
+dh_home t-mark
+for p in qa be pm; do
+  dh_in t-mark SessionStart '"source":"compact"'; dh "$p" SessionStart
+  len="$(dh_ctx | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(s.length)))')"
+  secs="root"; [ "$p" = qa ] && secs="root,passwords"
+  assert_eq "DHt2-$p-marker" "$(dh_json "$(TLOG t-mark)/conventions.$p.json" '[j.via,j.event,j.source,j.sections.join(","),j.chars,j.login.label,j.login.org,j.login.file,typeof j.ts,"part" in j,"profile" in j].join("|")')" \
+    "hook|SessionStart|compact|$secs|$len|unknown||$DH_HOME/.claude.json|string|false|false"
+done
+
+# DHt3: bad stdin still delivers (no session id → no marker); an unwritable log dir → the marker under the spare root,
+# and with that unwritable too one stderr line, context kept;
+# DOMAINE_LOG_DIR moves the marker; the login label from the login file the config dir names.
+for p in qa be pm; do
+  dh_home "t-bad-$p"; DH_IN='not json'; dh "$p" SessionStart
+  assert_eq "DHt3-$p-bad-stdin-exit" "$dh_rc" 0
+  assert_contains "DHt3-$p-bad-stdin-ctx" "$(dh_ctx)" "$p plugin root: "
+  assert_eq "DHt3-$p-bad-stdin-stderr" "$(cat "$DH_ERR")" ""
+  assert_eq "DHt3-$p-bad-stdin-no-log" "$(ls "$DH_HOME/.claude/domaine/log" 2>/dev/null)" ""
+  if [ "$(id -u)" = 0 ]; then ok; ok; ok; ok; else
+    dh_home "t-ro-$p"; mkdir -p "$DH_HOME/.claude"; chmod 555 "$DH_HOME/.claude"; dh_in t-ro SessionStart '"source":"startup"'
+    dh "$p" SessionStart
+    assert_eq "DHt3-$p-ro-exit" "$dh_rc" 0
+    assert_eq "DHt3-$p-ro-spare" "$(dh_json "$DH/tmp/domaine-log/t-ro/conventions.$p.json" 'j.source')" "startup"
+    mkdir -p "$DH/tmp-ro-$p"; chmod 555 "$DH/tmp-ro-$p"
+    DH_ENV="TMPDIR=$DH/tmp-ro-$p" dh "$p" SessionStart
+    assert_contains "DHt3-$p-ro-ctx" "$(dh_ctx)" "$p plugin root: "
+    assert_eq "DHt3-$p-ro-stderr" "$(sed 's/(.*)/(…)/' "$DH_ERR")" "$p conventions: marker not written (…)"
+    chmod 755 "$DH_HOME/.claude" "$DH/tmp-ro-$p"
+  fi
+  dh_home "t-ldir-$p"; dh_in t-ldir SessionStart '"source":"clear"'
+  DH_ENV="DOMAINE_LOG_DIR=$DH/t-elsewhere" dh "$p" SessionStart
+  assert_eq "DHt3-$p-log-dir" "$(dh_json "$DH/t-elsewhere/t-ldir/conventions.$p.json" 'j.source')" "clear"
+  assert_eq "DHt3-$p-log-dir-not-home" "$(ls "$DH_HOME/.claude/domaine/log" 2>/dev/null)" ""
+  dh_home "t-login-$p"; dh_in t-login SessionStart '"source":"startup"'
+  printf '{"oauthAccount":{"organizationType":"claude_pro"}}' > "$DH_HOME/.claude.json"
+  dh "$p" SessionStart
+  assert_eq "DHt3-$p-personal" "$(dh_json "$(TLOG t-login)/conventions.$p.json" 'j.login.label+"|"+j.login.org+"|"+j.login.file')" "personal|claude_pro|$DH_HOME/.claude.json"
+  TW="$DH/t-cfg-$p"; mkdir -p "$TW"; printf '{"oauthAccount":{"organizationType":"claude_enterprise"}}' > "$TW/.claude.json"
+  DH_ENV="CLAUDE_CONFIG_DIR=$TW" dh "$p" SessionStart
+  assert_eq "DHt3-$p-work" "$(dh_json "$(TLOG t-login)/conventions.$p.json" 'j.login.label+"|"+j.login.org+"|"+j.login.file')" "work|claude_enterprise|$TW/.claude.json"
+done
+
+# DHt4: be and pm subagents — a fork, base's readers and writer and Claude Code's helpers get nothing; every other agent
+# the root line alone; no marker of its own.
+for p in be pm; do
+  R="$(dh_root "$p")"; dh_home "t-sub-$p"
+  for a in fork base:jira-reader base:jira-writer base:figma-reader base:doc-reader jira-reader claude-code-guide statusline-setup; do
+    DH_IN="{\"session_id\":\"t-sub\",\"agent_type\":\"$a\",\"agent_id\":\"a1\"}"; dh "$p" SubagentStart
+    assert_eq "DHt4-$p-none-$a" "$DH_OUT|$dh_rc" "|0"
+  done
+  for a in general-purpose base:bug-hunter base:change-reviewer Explore Plan some-plugin:implementer ""; do
+    DH_IN="{\"session_id\":\"t-sub\",\"agent_type\":\"$a\",\"agent_id\":\"a1\"}"; dh "$p" SubagentStart
+    assert_eq "DHt4-$p-root-${a:-empty}" "$(dh_evt)|$(dh_ctx)" "SubagentStart|$p plugin root: $R"
+  done
+  DH_IN='not json'; dh "$p" SubagentStart
+  assert_eq "DHt4-$p-bad-stdin" "$(dh_ctx)|$dh_rc" "$p plugin root: $R|0"
+  assert_eq "DHt4-$p-no-marker" "$(ls "$(TLOG t-sub)" 2>/dev/null)" ""
+done
+
+# DHt5: the text files — the mod's fallback and the hook read the same keys; qa's passwords paragraph pinned (moved from
+# the mod's tests); no legacy, host or other team-plugin name.
+assert_eq DHt5-qa-keys "$(jq -r 'keys_unsorted | join(",")' "$QR/hooks/conventions-text.json")" "root,passwords"
+assert_eq DHt5-be-keys "$(jq -c . "$ER/hooks/conventions-text.json")" '{"root":"be plugin root: <root>"}'
+assert_eq DHt5-pm-keys "$(jq -c . "$PR/hooks/conventions-text.json")" '{"root":"pm plugin root: <root>"}'
+assert_eq DHt5-qa-root "$(dh_text qa root)" "qa plugin root: <root>"
+PW="$(dh_text qa passwords)"
+assert_eq DHt5-qa-pw-head "$(printf '%s\n' "$PW" | head -3 | tail -1 | cut -c1-51)" "A dev or UAT storefront password is low-sensitivity"
+assert_eq DHt5-qa-pw-title "$(printf '%s\n' "$PW" | head -1)" "## qa convention — storefront passwords"
+for n in '`node <base root>/scripts/qa-stores.cjs get <store> --field password`' 'a bare `get` prints JSON, never a fill value' "base's \`base plugin root:\` line" 'preferred source when it knows the store' 'in chat, notes, browser fill code and on a Bash line' 'never in a Jira comment, Steps to Test, a PR
+body' 'a screenshot attached to a ticket' 'The registry file is never read directly'; do
+  assert_contains "DHt5-qa-pw-$(printf '%s' "$n" | head -c 20 | tr -c 'a-zA-Z' '-')" "$PW" "$n"
+done
+assert_eq DHt5-qa-pw-paragraphs "$(printf '%s' "$PW" | awk 'BEGIN{RS="";n=0}{n++}END{print n}')" 2
+if [ "$(printf '%s' "$PW" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(s.length)))')" -le 760 ]; then ok; else bad DHt5-qa-pw-size "over 760 chars"; fi
+for phrase in 'Admin API write' 'add to cart' 'hands-on QA'; do assert_absent "DHt5-qa-no-posture-$phrase" "$PW" "$phrase"; done
+for p in qa be pm; do
+  if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|/fe:|<fe root>" "$(dh_root "$p")/hooks/conventions-text.json"; then bad "DHt5-$p-no-legacy" "a legacy, host or other team-plugin name in $p's conventions-text.json"; else ok; fi
+done
+
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then
   printf '%s' "$failures"

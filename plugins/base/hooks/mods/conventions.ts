@@ -1,35 +1,21 @@
-// base's conventions: system-prompt sections for the main session, added context for every subagent.
-// The engine has no event for a subagent's system prompt, so its share rides classic SubagentStart. A session
-// no surface draws (a cloud session, `claude -p`) gets its prompt composed without the plugins and no classic
-// SessionStart: there the sections go in as a prompt.context block of the first user message, and
-// prompt.compose adds nothing.
+// base's conventions travel as command hooks (hooks/conventions.cjs, hooks/hooks.json) on every login. This
+// mod is the cloud fallback only: in a session no surface draws and whose SessionStart command hook left no
+// marker, the sections ride the first user message as a prompt.context block, text from conventions-text.json.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, On, PromptComposeSection } from 'claude-code'
-import type { BaseDelivery } from '../../types'
-import {
-  COMMENT_DISCIPLINE,
-  LEAN_CODE,
-  NO_CODE_AGENT,
-  SHOPIFY_POINTER,
-  TASK_WORKSPACE,
-  UNTRUSTED_CONTENT,
-  WRITING_STYLE,
-  rootLine,
-  withRoot,
-} from './conventions/text.ts'
-import { dogfoodMode, dogfoodSection, enabledNames, versionsLine, versionsOf } from './dogfood/text.ts'
+import type { EngineInterface, On } from 'claude-code'
+import { dogfoodMode, enabledNames, loginAccount, loginFile, versionsLine, versionsOf } from './dogfood/text.ts'
+import { logDir, spareRoot } from './events.ts'
 
 type $ = EngineInterface
 
-/** How many system prompts the engine composed through base's hook this session: 0 = the conventions never reached the model (doctor.ts reads it). */
-const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
-/** The session id whose first user message carries the conventions as a context block (doctor.ts reads it): prompt.compose then adds nothing. */
+/** The session id whose first user message carries the conventions as a context block (doctor.ts reads it). */
 const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
-/** What the prompt events did this session, for the doctor: which of them a host fires decides how the conventions travel. */
-const delivery = atom({ plugin: 'base', key: 'delivery' } as const, { sid: null, startSurfaces: null, prompts: 0, context: false } as BaseDelivery)
 const slimInfo = atom({ plugin: 'slim', key: 'info' } as const, null)
 
-/** The Domaine plugins and versions dogfood mode names; dogfood.ts reads the same sources for a report's Environment. */
+/** Where the SessionStart command hook leaves its marker: `<log dir>/<session>/conventions.base.json`, else under the spare root. */
+export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string): string[] =>
+  [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.base.json`] : []))
+
 async function pluginVersions($: $): Promise<string> {
   const home = (await $.env.get('HOME'))?.trim() ?? ''
   const cfgEnv = (await $.env.get('CLAUDE_CONFIG_DIR'))?.trim() ?? ''
@@ -45,101 +31,36 @@ async function pluginVersions($: $): Promise<string> {
   return versionsLine(versionsOf(installed, $.plugin.root, own, slim, enabled))
 }
 
-const dogfoodOn = async ($: $) =>
-  dogfoodMode((await $.env.get('BASE_DOGFOOD')) ?? '', (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID')) ?? '', await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
-
-/** The dogfood section when dogfood mode is on, worded for a session no surface draws where none does; else null. */
-async function dogfood($: $): Promise<string | null> {
-  if (!(await dogfoodOn($))) return null
-  const surfaceless = (await $.session.surfaces().catch(() => null))?.length === 0
-  return dogfoodSection(await pluginVersions($), surfaceless)
+const dogfoodOn = async ($: $) => {
+  const sw = (await $.env.get('BASE_DOGFOOD')) ?? ''
+  if (sw === '1' || sw === '0') return sw === '1'
+  const file = loginFile(await $.env.get('HOME'), await $.env.get('CLAUDE_CONFIG_DIR'))
+  const account = (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID'))?.trim() || loginAccount(file && (await $.fs.read(file).catch(() => null)))
+  return dogfoodMode(sw, account, await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
 }
 
-/**
- * The sections in session order, each `base:<name>`: the switches are read on every render, and the
- * text depends on nothing else but the plugin versions and the surfaces in the dogfood section, so a render
- * repeats the last one byte for byte (the prompt cache).
- */
-export async function sections($: $): Promise<PromptComposeSection[]> {
-  const root = $.plugin.root
-  const lean = (await $.env.get('BASE_LEAN')) !== '0'
-  const ste = (await $.env.get('BASE_STE')) !== '0'
-  const parts: [string, string][] = [
-    ['root', rootLine(root)],
-    ['comment-discipline', COMMENT_DISCIPLINE],
-    ['task-workspace', withRoot(TASK_WORKSPACE, root)],
-    ['untrusted-content', UNTRUSTED_CONTENT],
-    ['shopify', SHOPIFY_POINTER],
-  ]
-  if (lean) parts.push(['lean-code', LEAN_CODE])
-  if (ste) parts.push(['writing-style', WRITING_STYLE])
-  const df = await dogfood($)
-  if (df) parts.push(['dogfood', df])
-  return parts.map(([name, text]) => ({ id: `base:${name}`, text, scope: 'session' }))
-}
-
-/**
- * The root line and the untrusted-content rail for every agent; the code conventions for one that writes code;
- * the dogfood section in dogfood mode, since any agent may run a plugin script. Empty for a fork: it inherits the parent's system prompt, which already carries base's sections.
- */
-export async function subagentContext($: $, agentType: string): Promise<string> {
-  if (agentType === 'fork') return ''
-  const parts = [rootLine($.plugin.root), UNTRUSTED_CONTENT]
-  if (!NO_CODE_AGENT.test(agentType)) {
-    parts.push(COMMENT_DISCIPLINE)
-    if ((await $.env.get('BASE_LEAN')) !== '0') parts.push(LEAN_CODE)
+/** The sections as one context block where nothing draws and no command hook delivered them; else null. */
+export async function contextBlock($: $): Promise<string | null> {
+  if ((await $.session.surfaces()).length > 0) return null
+  for (const m of markerPaths(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), await $.env.get('TMPDIR'), String(await $.session.id()))) {
+    if (await $.fs.exists(m)) return null
   }
-  const df = await dogfood($)
-  if (df) parts.push(df)
+  const t = JSON.parse(await $.fs.read(`${$.plugin.root}/hooks/conventions-text.json`)) as Record<string, string>
+  const names = ['root', 'comment-discipline', 'task-workspace', 'untrusted-content', 'shopify']
+  if ((await $.env.get('BASE_LEAN')) !== '0') names.push('lean-code')
+  if ((await $.env.get('BASE_STE')) !== '0') names.push('writing-style')
+  const parts = names.map(n => (t[n] ?? '').split('<base root>').join($.plugin.root))
+  if (await dogfoodOn($)) parts.push((t.dogfood ?? '').split('{versions}').join(await pluginVersions($)).split('{rule}').join(t['rule-surfaceless'] ?? ''))
   return parts.join('\n\n')
 }
 
-/** The sections as one context block for a session no surface draws; null where one does (the system prompt carries them). */
-export async function contextBlock($: $): Promise<string | null> {
-  if ((await $.session.surfaces()).length > 0) return null
-  return (await sections($)).map(s => s.text).join('\n\n')
-}
-
 export function registerConventions(on: On): void {
-  // Matched apart from title.ts's hook: one unmatched hook per event per plugin.
-  on('classic.SessionStart', { source: /^/ }, async ($, e, next) => {
-    const r = await next(e)
-    const sid = String(await $.session.id())
-    const seen = await $.session.surfaces().catch(() => null)
-    await update($, delivery, d => ({ ...(d.sid === sid ? d : { sid, prompts: 0, context: false }), sid, startSurfaces: seen ? [...seen] : null })).catch(() => {})
-    return r
-  })
-
-  on('prompt.compose', async ($, e, next) => {
-    const r = await next(e)
-    await update($, composed, n => n + 1).catch(() => {})
-    if ((await read($, injected).catch(() => null)) === String(await $.session.id())) return r
-    const ours = await sections($).catch(() => [])
-    const taken = new Set(r.sections.map(s => s.id))
-    return { sections: [...r.sections, ...ours.filter(s => !taken.has(s.id))] }
-  })
-
-  // Matched apart from title.ts's hook. Counts the prompts a host hands the classic hook.
-  on('classic.UserPromptSubmit', { prompt: /^/ }, async ($, e, next) => {
-    const r = await next(e)
-    const sid = String(await $.session.id())
-    await update($, delivery, d => ({ ...(d.sid === sid ? d : { sid, startSurfaces: null, context: false }), sid, prompts: (d.sid === sid ? d.prompts : 0) + 1 })).catch(() => {})
-    return r
-  })
-
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
-    const sid = String(await $.session.id())
-    await update($, delivery, d => ({ ...(d.sid === sid ? d : { sid, startSurfaces: null, prompts: 0 }), sid, context: true })).catch(() => {})
     const text = await contextBlock($).catch(() => null)
-    if (text === null) return r
+    if (!text) return r
+    const sid = String(await $.session.id())
     await update($, injected, () => sid).catch(() => {})
     return { ...r, blocks: [...r.blocks, { name: 'baseConventions', text }] }
-  })
-
-  on('classic.SubagentStart', async ($, e, next) => {
-    const r = await next(e)
-    const ctx = await subagentContext($, e.agent_type ?? '').catch(() => null)
-    return ctx ? { ...r, additionalContext: [...(r.additionalContext ?? []), ctx] } : r
   })
 }

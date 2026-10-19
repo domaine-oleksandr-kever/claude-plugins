@@ -1,11 +1,11 @@
 // /fe-doctor: runs scripts/doctor.cjs for what a node process sees and adds what only a session answers —
-// base loaded, slim's view tool registered, the profile this session decided — then the tail of fe.events.
+// base loaded, slim's view tool registered, the profile this session delivered — then the tail of fe.events.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { FeEvent } from '../../types'
+import type { FeEvent, FeProfileInfo } from '../../types'
 import { logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
-import { BASE_MISSING, profileText } from './session.ts'
+import { BASE_MISSING, isProfile, profileText } from './session.ts'
 
 export const COMMAND = {
   name: 'fe-doctor',
@@ -164,10 +164,14 @@ async function logDoctor($: $, text: string): Promise<void> {
   } catch {}
 }
 
+/** The profile the SessionStart command hook delivered (its marker), else the one the mod decided for this session id. */
 async function sessionProfile($: $): Promise<{ word: string; text: string; fallback: boolean } | null> {
   try {
-    const p = await read($, profile)
-    if (!p || p.session !== String(await $.session.id())) return null
+    const sid = String(await $.session.id())
+    const dir = logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), sid)
+    const m = dir ? await $.fs.read(`${dir}/conventions.fe.json`).then(t => (JSON.parse(t) as { profile?: FeProfileInfo }).profile, () => null) : null
+    const p = m && isProfile(m.word) ? { ...m, session: sid } : await read($, profile)
+    if (!p || p.session !== sid) return null
     return { word: p.word, text: profileText(p), fallback: p.via === 'fallback' }
   } catch {
     return null

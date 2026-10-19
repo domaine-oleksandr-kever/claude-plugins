@@ -38,8 +38,6 @@ declare module 'claude-code' {
       profile: FeProfileInfo | null
       /** The session id whose start line was written and whose base check ran: a module reload does neither again. */
       started: string | null
-      /** The session id whose first user message carries the sections as a prompt.context block (no surface draws: cloud, `claude -p`). */
-      injected: string | null
       /** The session id whose /fe-doctor command is registered. */
       armed: string | null
     }

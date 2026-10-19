@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.8.0**.
+Current release: **fe v0.9.0**.
 
 ## Status
 
@@ -134,11 +134,22 @@ store list (`list --json`, never a password) from base's install beside fe.
 
 ## Conventions
 
-fe adds its sections to the main session's system prompt, after Claude Code's own and base's. They
-come in the order below, and each has the id `fe:<name>`. Some sessions draw no surface, for example
-a claude.ai cloud session or `claude -p`. There the engine composes its prompt without the plugins.
-The same sections then arrive once as a context block of the first user message instead
-(`prompt.context`, beside CLAUDE.md).
+fe's sections reach the model through one channel on every login: a Claude Code command hook,
+`node hooks/conventions.cjs start`, on `SessionStart` with the matcher `startup|clear|compact`
+(`hooks/hooks.json`, beside the hooks module). A resume or a fork keeps the copy the transcript already
+holds. The context arrives with the first user message, after CLAUDE.md, in the order below. The
+text lives in one file, `hooks/conventions-text.json`; the hook fills in the roots. The envelope stays
+well under the host's ~10,000-character inline limit (a larger one is spilled to a file).
+
+The hook writes a marker, `<log dir>/<session-id>/conventions.fe.json`: `via`, `event`, `source`, the
+`sections` it sent, `chars`, the `login` (`work`, `personal` or `unknown`, read from the login file; doctor
+evidence only) and the `profile` it decided. `/base-doctor`'s `conventions` row reads it.
+Where the log folder is missing or not writable, the marker goes to the spare folder
+`<TMPDIR or /tmp>/domaine-log/<session-id>/`; the fallback below looks in both.
+
+**Cloud fallback.** A session that no surface draws (a claude.ai cloud session, `claude -p`) and that has
+no marker gets the same sections from fe's hooks module instead: one context block of the first user
+message (`prompt.context`, beside CLAUDE.md), text from the same file.
 
 | Name | Holds | When |
 |---|---|---|
@@ -149,8 +160,8 @@ The same sections then arrive once as a context block of the first user message 
 | `worktree` | `worktree copy list: shopify.theme.toml` (the line `/base:worktree` reads), then `/fe:preview-theme` in the new worktree | the project root holds `shopify.theme.toml` |
 | `progress-series` | the rows of a ticket's `progress.md` in order — `write-technical-approach`, `develop-feature-or-fix`, `qa-feature-or-fix`, `pre-commit-review`, `commit`, `create-pull-request`, `write-steps-to-test` — and the skill that ticks each; a batch lists its tickets, then the same tail | a profile other than `none`, or `shopify.theme.toml` at the root |
 
-**The profile** is decided once per session id; a `/clear` decides again. fe takes the first answer
-in this order:
+**The profile** is decided by the start hook, once per session start; a `/clear` decides again. fe
+takes the first answer in this order:
 
 1. `FE_PROFILE`, when it holds one of the three words.
 2. `scripts/project-profile.sh` on the project root. The script also reads `FE_PROFILE` from
@@ -159,14 +170,18 @@ in this order:
    `blocks/core-*.liquid` or `src/entry/core/` ⇒ `foundation`; `layout/theme.liquid` ⇒ `theme`;
    else `none`.
 
-A probe that fails or times out (5 s) gives `none` and one `profile` line that says why. The sections
-never change within a session, so the prompt cache holds.
+A probe that fails or times out (5 s) gives `none` and says why in the marker. The hooks module
+decides the same way once per session id for its own readers (the fallback, `/fe-doctor`) and logs one
+`profile` line.
 
-**Subagents** get fe's share as added context at their start, through Claude Code's `SubagentStart`.
-The engine has no event for a subagent's system prompt. The share depends on the agent:
+**Subagents** get fe's share as added context at their start, through a second command hook,
+`node hooks/conventions.cjs subagent` on `SubagentStart`: the main session's context does not reach a
+subagent. The profile comes from this session's marker; without one the hook decides it. The share
+depends on the agent type:
 
 - base's readers and writer (`base:jira-reader`, `base:jira-writer`, `base:figma-reader`,
-  `base:doc-reader`) and Claude Code's `claude-code-guide` and `statusline-setup` get nothing from fe.
+  `base:doc-reader`), Claude Code's `claude-code-guide` and `statusline-setup`, and a fork (it inherits
+  the transcript) get nothing from fe.
 - The read-only agents (`fe:theme-explorer`, `base:change-reviewer`, `base:bug-hunter`, `Explore`,
   `Plan`) get the root, the profile and the Foundation section.
 - Every other agent also gets store access when it applies.
@@ -188,7 +203,7 @@ servers).
 | `scripts` | every `scripts/*.sh` but the sourced `_*.sh` keeps its exec bit and answers `--help` (`project-profile.sh` is probed by the `profile` row) |
 | `base` | base installed (user scope or this project) and enabled — else `claude plugin install base@domaine`; FAIL when that install lacks `<base root>/scripts/review-scope.sh` (the PR review gate runs it), `skills/shopify/SKILL.md` or `references/shopify-recipes.md` (fe store work points at them) — update base |
 | `shopify-cli` | `shopify version` answers; absent or failing only warns (the store scripts need it, the rest of fe does not) |
-| `profile` | the word and how it was decided: `FE_PROFILE`, `project-profile.sh`, or a fallback to `none` (warns); in a session, the session's own decision |
+| `profile` | the word and how it was decided: `FE_PROFILE`, `project-profile.sh`, or a fallback to `none` (warns); in a session, the one the start hook delivered (its marker), else the hooks module's own decision |
 | `store-config` | `shopify.theme.toml` and `.env` present at the project root — presence only, never a value; one missing warns; neither in a `none` project skips |
 | `event-log` | this session's `fe.jsonl`: its line count and newest `ts`; no file yet passes (a /clear's new session has none before its first line) |
 | `base-live`, `slim-live` | what this session loaded: base's skills, slim's `mcp__slim__view` tool |
@@ -227,10 +242,12 @@ The process environment wins.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `FE_PROFILE` | detected | `foundation`, `theme` or `none` (spaces around it trimmed) forces the project profile instead of detecting it; any other value is ignored and the profile is detected |
+| `FE_PROFILE` | detected | `foundation`, `theme` or `none` (spaces around it trimmed) forces the project profile instead of detecting it, in the `hooks/conventions.cjs` command hook and the hooks module alike; any other value is ignored and the profile is detected |
 | `FE_EVENT_LOG` | on | `0` keeps `fe.events` empty and writes no `fe.jsonl` |
-| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base` row reads |
+| `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. The `hooks/conventions.cjs` command hook writes its marker `conventions.fe.json` there too. |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base` row reads; by the `hooks/conventions.cjs` command hook: the login file it labels in its marker (`<dir>/.claude.json`, or `~/.claude.json` for the default directory) |
+| `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook and the hooks module: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |
+| `CLAUDE_PLUGIN_ROOT` | set by Claude Code | read, never set, by the `hooks/conventions.cjs` command hook: fe's root, filled into the root line and the store-access paths (the script's own parent directory when unset) |
 | `FE_GQL_PROBE_CACHE` | `21600` | seconds `shopify-admin-gql.sh` reuses its `shopify version` probe and its "`store execute` is unavailable for this store" fact; `0` re-probes on every call (right after a `shopify store auth`) |
 | `FE_CPT_THROTTLE_WAITS` | `20 60` | pauses, in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled`; one retry per value, empty turns retrying off |
 | `FE_CPT_OVERLAY_VERIFY` | `1` | `0` skips `create-preview-theme.sh`'s overlay read-back (`overlay=skipped`); with it, each overlaid `*.json` the theme silently dropped prints `warn=overlay_file_dropped` |
@@ -252,6 +269,9 @@ The process environment wins.
 - `claude plugin validate --strict plugins/fe` and `claude plugin test plugins/fe` (the kit tests in
   `plugins/fe/hooks/mods/tests/`), both run by `tests/mods-sim.sh` with every other plugin (local
   only: CI has no `claude`).
+- `tests/hooks-sim.sh`, block "Domaine command hooks" (`DHfe*`) — `hooks/conventions.cjs` run as the host
+  runs it, with `project-profile.sh` stubbed: the sections per profile and project files, the marker, the
+  subagent shares, the text file.
 - `tests/fe-scripts-sim.sh` — the store scripts, `worktree-theme.sh` and `project-profile.sh` against
   stub CLIs and synthetic configs.
 - `tests/fe-doctor-sim.sh` — `scripts/doctor.cjs`'s rows on planted installs.

@@ -132,6 +132,20 @@ printf '{ "modules": [] }' > "$K/hooks/hooks.json"
 run --root "$K" --home "$H" --project "$PRJ"; expect CD12-hooks-empty 1 "hooks/hooks.json lists no modules"
 printf '{ "modules": ["./mods/register.ts", "./mods/gone.ts"] }' > "$K/hooks/hooks.json"
 run --root "$K" --home "$H" --project "$PRJ"; expect CD13-hooks-module-missing 1 "FAIL  hooks      module(s) missing: ./mods/gone.ts"
+# A mixed hooks.json: the modules, then the classic command-hook events; a ${CLAUDE_PLUGIN_ROOT} script that is not there fails.
+cat > "$K/hooks/hooks.json" <<'JSON'
+{ "modules": ["./mods/register.ts"],
+  "hooks": {
+    "SessionStart": [{ "matcher": "startup|clear|compact", "hooks": [
+      { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start core" },
+      { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start rules" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" stop" }] }] } }
+JSON
+run --root "$K" --home "$H" --project "$PRJ"; expect CD13b-hooks-command-script-missing 1 "FAIL  hooks      command hook script missing: hooks/conventions.cjs"
+printf '' > "$K/hooks/conventions.cjs"
+run --root "$K" --home "$H" --project "$PRJ"; expect CD13c-hooks-mixed 0 "PASS  hooks      1 module(s): ./mods/register.ts; command hooks: SessionStart ×2, Stop"
+run --root "$ROOT/plugins/base" --home "$H" --project "$PRJ"
+expect CD13d-shipped-command-hooks 0 "PASS  hooks      1 module(s): ./mods/register.ts; command hooks: SessionStart ×2, SubagentStart, Stop"
 
 # --------------------------------------------------------------------------------- scripts --
 S="$TMP/s1"; mkplugin "$S"; chmod 644 "$S/scripts/fetch.sh"

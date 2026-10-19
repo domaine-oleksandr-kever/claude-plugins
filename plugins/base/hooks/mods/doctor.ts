@@ -3,11 +3,11 @@
 // slim's view tool, each MCP server of base's manifest connected; then the tail of base.events.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { BaseDelivery, BaseEvent } from '../../types'
-import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent } from './events.ts'
+import type { BaseEvent } from '../../types'
+import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent, spareRoot } from './events.ts'
 import type { Disk } from './events.ts'
 import { SLIM_MISSING, SLIM_VIEW } from './session.ts'
-import { WINDOW_DAYS, dogfoodMode, recent, seen } from './dogfood/text.ts'
+import { WINDOW_DAYS, dogfoodMode, enabledNames, loginAccount, loginFile, recent, seen } from './dogfood/text.ts'
 
 export const COMMAND = {
   name: 'base-doctor',
@@ -24,12 +24,12 @@ export type Row = { status: Status; name: string; detail: string }
 
 const swept = atom({ plugin: 'base', key: 'swept' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
-// Written in conventions.ts (renders through prompt.compose; the session whose first message carries the conventions) and
-// session.ts (the first prompt's slim check).
-const composed = atom({ plugin: 'base', key: 'composed' } as const, 0)
+// Written in conventions.ts (the session whose first message carries the fallback block) and session.ts (the first prompt's slim check).
 const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
-const delivery = atom({ plugin: 'base', key: 'delivery' } as const, { sid: null, startSurfaces: null, prompts: 0, context: false } as BaseDelivery)
 const checked = atom({ plugin: 'base', key: 'checked' } as const, null)
+const classic = atom({ plugin: 'base', key: 'classic' } as const, null as string | null)
+/** The Domaine plugins whose SessionStart command hook writes a conventions marker. */
+const MARKED = ['base', 'fe', 'qa', 'be', 'pm'] as const
 
 type $ = EngineInterface
 
@@ -51,7 +51,7 @@ const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 /**
  * Removes the session directories under `$HOME/.claude/domaine/log` whose newest file is older than 7 days:
- * never this session's, only a session-id name holding nothing but `*.jsonl` files, and never when the root
+ * never this session's, only a session-id name holding nothing but `*.jsonl` and `*.json` files, and never when the root
  * or the directory resolves anywhere but its own spelling (a linked root could point at `~`). `$.fs` has no
  * delete, hence `rm -rf`. A DOMAINE_LOG_DIR is the person's to clean.
  */
@@ -65,7 +65,7 @@ async function sweepLogs($: $, sid: string): Promise<void> {
     const dir = `${root}/${d.name}`
     try {
       const entries = await $.fs.list(dir)
-      if (entries.some(f => f.kind !== 'file' || !f.name.endsWith('.jsonl'))) continue
+      if (entries.some(f => f.kind !== 'file' || !/\.jsonl?$/.test(f.name))) continue
       const newest = entries.length ? Math.max(...entries.map(f => f.mtimeMs)) : (await $.fs.stat(dir)).mtimeMs
       if (now - newest <= LOG_TTL_MS) continue
       if ((await $.fs.stat(dir, { resolve: true })).realPath === dir) await $.process.run(['rm', '-rf', dir], { timeoutMs: 10_000 })
@@ -126,18 +126,48 @@ async function staticRows($: $): Promise<Row[]> {
   return [{ status: 'FAIL', name: 'static', detail: `scripts/doctor.cjs exited ${r.exitCode}: ${why}` }]
 }
 
-/** What the prompt events did this session, one clause each: the host's transport the conventions can take. */
-async function deliverySeen($: $): Promise<string> {
-  const sid = String(await $.session.id())
-  const d = await read($, delivery)
-  const now = await $.session.surfaces().catch(() => null)
-  const same = d.sid === sid
-  return [
-    same && d.startSurfaces ? `SessionStart saw surfaces [${d.startSurfaces.join(', ')}]` : 'SessionStart never fired',
-    `UserPromptSubmit ×${same ? d.prompts : 0}`,
-    `prompt.context ${same && d.context ? 'fired' : 'never fired'}`,
-    `surfaces now [${now ? now.join(', ') : '?'}]`,
-  ].join('; ')
+type Marker = { source?: unknown; login?: { label?: unknown; file?: unknown } }
+
+/** The conventions markers the SessionStart command hooks wrote for this session in the log dir or the spare dir, by file stem (`base`, `base.rules`, `fe`, …). */
+async function markers($: $, dirs: string[]): Promise<Map<string, Marker>> {
+  const out = new Map<string, Marker>()
+  for (const stem of [...MARKED, 'base.rules']) {
+    for (const dir of dirs) {
+      try {
+        out.set(stem, JSON.parse(await $.fs.read(`${dir}/conventions.${stem}.json`)) as Marker)
+        break
+      } catch {}
+    }
+  }
+  return out
+}
+
+async function conventionsRow($: $, sid: string, dirs: string[], found: Map<string, Marker>, prompted: boolean): Promise<Row> {
+  if ((await read($, injected)) === sid) return { status: 'PASS', name: 'conventions', detail: 'prompt.context fallback: no surface draws and no SessionStart command hook marker, so base\'s mod put them in the first user message' }
+  if (!dirs.length) return { status: 'SKIP', name: 'conventions', detail: 'no log directory for this session id: the SessionStart command hook markers cannot be read' }
+  if (!found.size) {
+    return prompted
+      ? { status: 'FAIL', name: 'conventions', detail: `not delivered: no SessionStart command hook marker in ${dirs.join(' or ')} (hooks/hooks.json → hooks/conventions.cjs)` }
+      : { status: 'SKIP', name: 'conventions', detail: 'no prompt sent yet: send one, then run the doctor again' }
+  }
+  const enabled = new Set(['base', ...enabledNames(await $.settings.read().catch(() => null))])
+  const want = MARKED.filter(p => enabled.has(p))
+  const label = (p: string) => (p === 'base' ? `base ${[found.has('base') && 'core', found.has('base.rules') && 'rules'].filter(Boolean).join('+')}` : p)
+  const has = (p: string) => found.has(p) || (p === 'base' && found.has('base.rules'))
+  const source = (found.get('base') ?? [...found.values()][0])?.source
+  const head = `SessionStart command hook (${typeof source === 'string' ? source : '?'}): ${want.filter(has).map(label).join(', ')}`
+  const missing = want.filter(p => !has(p))
+  return missing.length
+    ? { status: 'WARN', name: 'conventions', detail: `${head}; no marker from ${missing.join(', ')} (enabled)` }
+    : { status: 'PASS', name: 'conventions', detail: head }
+}
+
+function classicRow(sid: string, seen: string | null, prompted: boolean, found: Map<string, Marker>): Row {
+  if (seen === sid) return { status: 'PASS', name: 'classic', detail: 'classic.UserPromptSubmit reached base\'s mods this session' }
+  if (!prompted) return { status: 'SKIP', name: 'classic', detail: 'no prompt sent yet' }
+  const login = found.get('base')?.login
+  const who = typeof login?.label === 'string' ? `${login.label}, ${typeof login.file === 'string' ? login.file : '?'}` : 'unknown'
+  return { status: 'WARN', name: 'classic', detail: `classic.* did not reach base's mods this session (login: ${who}): session title, autosave/progress, band resume handlers and slim prompt-paste compression are off here` }
 }
 
 async function liveRows($: $): Promise<Row[]> {
@@ -150,24 +180,27 @@ async function liveRows($: $): Promise<Row[]> {
     rows.push({ status: 'SKIP', name: 'slim-live', detail: 'the tool list did not answer' })
   }
   try {
-    const renders = await read($, composed)
-    const prompted = (await read($, checked)) !== null
-    const inContext = (await read($, injected)) === String(await $.session.id())
-    rows.push(inContext
-      ? { status: 'PASS', name: 'conventions', detail: 'in the first user message as a prompt.context block: no surface draws here, so the engine composes its prompt without the plugins' }
-      : renders > 0
-        ? { status: 'PASS', name: 'conventions', detail: `in the system prompt: ${renders} render${renders === 1 ? '' : 's'} through prompt.compose` }
-        : prompted
-          ? { status: 'FAIL', name: 'conventions', detail: `not delivered: prompt.compose never fired; ${await deliverySeen($)}` }
-          : { status: 'SKIP', name: 'conventions', detail: 'no prompt sent yet: send one, then run the doctor again' })
+    const sid = String(await $.session.id())
+    const prompted = (await read($, checked)) === sid
+    const dirs = [logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), sid), logDir(undefined, spareRoot(await $.env.get('TMPDIR')), sid)]
+      .filter((d): d is string => d !== null)
+    const found = await markers($, dirs)
+    rows.push(await conventionsRow($, sid, dirs, found, prompted))
+    rows.push(classicRow(sid, await read($, classic), prompted, found))
   } catch {
     rows.push({ status: 'SKIP', name: 'conventions', detail: 'the state did not answer' })
+    rows.push({ status: 'SKIP', name: 'classic', detail: 'the state did not answer' })
   }
   return rows
 }
 
-const dogfoodOn = async ($: $) =>
-  dogfoodMode((await $.env.get('BASE_DOGFOOD')) ?? '', (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID')) ?? '', await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
+const dogfoodOn = async ($: $) => {
+  const sw = (await $.env.get('BASE_DOGFOOD')) ?? ''
+  if (sw === '1' || sw === '0') return sw === '1'
+  const file = loginFile(await $.env.get('HOME'), await $.env.get('CLAUDE_CONFIG_DIR'))
+  const account = (await $.env.get('CLAUDE_CODE_ACCOUNT_UUID'))?.trim() || loginAccount(file && (await $.fs.read(file).catch(() => null)))
+  return dogfoodMode(sw, account, await $.fs.read(`${$.plugin.root}/dogfood.json`).catch(() => null))
+}
 
 /** Dogfood mode's reports of the last 7 days, the home index and this project's folder together; no row when it is off. */
 async function defectRows($: $): Promise<Row[]> {
@@ -288,6 +321,14 @@ export function registerDoctor(on: On): void {
   on('prompt.submit', { text: /$/ }, async ($, e, next) => {
     const r = await next(e)
     await arm($, false)
+    return r
+  })
+
+  // Matched apart from title.ts's hook: one unmatched hook per event per plugin.
+  on('classic.UserPromptSubmit', { prompt: /^/ }, async ($, e, next) => {
+    const r = await next(e)
+    const sid = String(await $.session.id())
+    await update($, classic, () => sid).catch(() => {})
     return r
   })
 
