@@ -6,7 +6,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
 import type { BandEvent, BandEventKind, BandRate, BandUsage } from '../../types'
 import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events.ts'
-import { CACHE_INIT, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, keepCtx, mergeRates, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
+import { CACHE_INIT, CLEAR_RESEED_MS, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, keepCtx, mergeRates, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 import { accountDebug } from './account.ts'
 
@@ -358,8 +358,8 @@ export function registerUsage(on: On, options: PluginOptions): void {
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
     await writeUsage($, withCost(toUsage(e.context, e.rateLimits, e.cost)))
-    // No session.start follows a /clear and the seed may read null: the first measure fills the gap. A
-    // switch whose PostModelSwitch never reached the mod is caught here too.
+    // The seed may read null: the first measure fills the gap. A switch whose PostModelSwitch never
+    // reached the mod is caught here too.
     const m = await sessionModel($)
     if (m !== null) await adoptModel($, m)
     void maybeFetchLimits($)
@@ -421,6 +421,15 @@ export function registerUsage(on: On, options: PluginOptions): void {
       } catch {}
     }
     const r = await next(e)
+    // /clear starts a new session id with empty state and no session.start; the timer runs in the plugin's
+    // environment and seeds the new session.
+    if (e.reason === 'clear') {
+      try {
+        $.clock.after(CLEAR_RESEED_MS, () => {
+          void seed($, false, forcedTtl).catch(() => undefined)
+        })
+      } catch {}
+    }
     if (clearedAt !== null && next.budget.remainingMs >= END_FILE_MIN_MS) {
       await persist($, clearedAt, 'session', 'clear', e.sessionId, true).catch(() => undefined)
     }
@@ -441,13 +450,6 @@ export function registerUsage(on: On, options: PluginOptions): void {
     if (e.source !== 'resume' && (e.from_model !== e.to_model || !e.prompt_cache_warm)) {
       await update($, cache, c => ({ ...c, isCold: true }))
     }
-    return next(e)
-  })
-
-  // /clear goes on under a new session id, whose state starts empty, and no session.start follows: unseeded,
-  // the band stays hidden until the tick or the first turn fills the atoms.
-  on('classic.SessionStart', { source: 'clear' }, async ($, e, next) => {
-    await seed($, false, forcedTtl)
     return next(e)
   })
 

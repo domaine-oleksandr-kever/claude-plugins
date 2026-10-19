@@ -5,7 +5,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Timer } from 'claude-code'
 import type { BandAccount } from '../../types'
-import { accountLabel, accountMode, creditGate, loginAccount, loginPaths, profileAccount } from './lib.ts'
+import { CLEAR_RESEED_MS, accountLabel, accountMode, creditGate, loginAccount, loginPaths, profileAccount } from './lib.ts'
 import type { AccountFacts, AccountMode } from './lib.ts'
 
 const account = atom({ plugin: 'band', key: 'account' } as const, null)
@@ -13,7 +13,7 @@ const account = atom({ plugin: 'band', key: 'account' } as const, null)
 type $ = EngineInterface
 
 const PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile'
-/** How often the atom is checked: a /clear empties it, and where classic.SessionStart skips the plugin nothing else refills it. */
+/** How often the atom is checked: a /login may switch the account, and a /clear empties the atom. */
 const CHECK_MS = 30_000
 /** The login is read again this often: a /login may come later or switch the account mid-session. */
 const RETRY_MS = 5 * 60_000
@@ -158,9 +158,14 @@ export function registerAccount(on: On): void {
     return next(e)
   })
 
-  // /clear goes on under a new session id whose state starts empty, and no session.start follows.
-  on('classic.SessionStart', { source: /^clear$/ }, async ($, e, next) => {
-    await maybeRead($)
+  // /clear starts a new session id with empty state and no session.start; the timer runs in the plugin's
+  // environment and reads into the new session.
+  on('session.end', { reason: /^clear$/ }, async ($, e, next) => {
+    try {
+      $.clock.after(CLEAR_RESEED_MS, () => {
+        void maybeRead($).catch(() => undefined)
+      })
+    } catch {}
     return next(e)
   })
 }

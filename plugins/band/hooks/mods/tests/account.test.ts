@@ -1,4 +1,5 @@
 import { describe, expect } from 'claude-code/testing'
+import { CLEAR_RESEED_MS } from '../lib.ts'
 import { MIN, T0, ok, peek, start, test, world } from './world.tsx'
 
 const HOME = '/Users/dev'
@@ -261,11 +262,10 @@ describe('refresh', () => {
     expect((await account($))?.label).toBe('work')
   })
 
-  test('a /clear empties the state: classic.SessionStart refills it; where that event skips band, the 30 s check does', async ($, on) => {
+  test('a /clear empties the state: the read armed at its session.end refills it; the 30 s check backs it up', async ($, on) => {
     const { w, clock } = world(on, {}, ENV)
     w.auth = BEARER
     w.files[`${HOME}/.claude.json`] = record(TEAM)
-    on('classic.SessionStart', async () => ({}) as never)
     const mem = new Map<string, { value: unknown; version: number }>()
     on('state.get', { plugin: 'band' } as any, async (_$: any, e: any) => ({ value: mem.get(e.key) ?? { value: undefined, version: 0 } }) as any)
     on('state.set', { plugin: 'band' } as any, async (_$: any, e: any) => {
@@ -275,8 +275,10 @@ describe('refresh', () => {
     })
     await start($)
     expect((await account($))?.label).toBe('work')
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
     mem.clear()
-    await $.classic.SessionStart({ source: 'clear' } as any)
+    expect(await account($)).toBeNull()
+    await clock.advance(CLEAR_RESEED_MS)
     expect((await account($))?.label).toBe('work')
     mem.clear()
     w.files[`${HOME}/.claude.json`] = record({ organizationType: 'claude_max' })

@@ -1,5 +1,5 @@
 import { describe, expect } from 'claude-code/testing'
-import { HOUR_MS, seedsTtl } from '../lib.ts'
+import { CLEAR_RESEED_MS, HOUR_MS, seedsTtl } from '../lib.ts'
 import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, measure, modelSwitch, ok, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
@@ -31,9 +31,8 @@ describe('event log writers → band.events', () => {
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'session clear'])
   })
 
-  test('classic.SessionStart clear re-seeds the model, TTL and usage the new session id starts without; no new lines', async ($, on) => {
-    const { w } = world(on)
-    on('classic.SessionStart', async () => ({}) as never)
+  test('a /clear re-seeds the model, TTL and usage the new session id starts without, once the delay passes; no new lines', async ($, on) => {
+    const { w, clock } = world(on)
     // band's state, held here in the host's place: it keeps state per session id, so a /clear empties it.
     const mem = new Map<string, { value: unknown; version: number }>()
     on('state.get', { plugin: 'band' } as any, async (_$: any, e: any) => ({ value: mem.get(e.key) ?? { value: undefined, version: 0 } }) as any)
@@ -49,12 +48,14 @@ describe('event log writers → band.events', () => {
     expect((await peek($)).model).toBeNull()
     if (lines) mem.set('events', lines)
     w.rateLimits = [{ kind: 'five_hour', percentUsed: 12 }]
-    await $.classic.SessionStart({ source: 'clear' } as any)
+    await clock.advance(CLEAR_RESEED_MS - 1)
+    expect((await peek($)).model).toBeNull()
+    await clock.advance(1)
     const p = await peek($)
     expect(p.model).toBe('claude-fable-5-1')
     expect(p.usage.rates.map((r: any) => r.pct)).toEqual([12])
     expect(p.cache.ttlMs).toBe(HOUR_MS)
-    expect(p.tick).toBe(T0)
+    expect(p.tick).toBe(T0 + CLEAR_RESEED_MS)
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'session clear'])
   })
 
@@ -474,9 +475,8 @@ describe('the claude.ai usage endpoint', () => {
   })
 
   test('after a /clear the seed brings the cached endpoint windows into the new session without a request', async ($, on) => {
-    const { w } = world(on)
+    const { w, clock } = world(on)
     w.auth = BEARER
-    on('classic.SessionStart', async () => ({}) as never)
     const mem = new Map<string, { value: unknown; version: number }>()
     on('state.get', { plugin: 'band' } as any, async (_$: any, e: any) => ({ value: mem.get(e.key) ?? { value: undefined, version: 0 } }) as any)
     on('state.set', { plugin: 'band' } as any, async (_$: any, e: any) => {
@@ -489,7 +489,7 @@ describe('the claude.ai usage endpoint', () => {
     expect(await rates($)).toEqual(['5h 61', '7d 34', '7d·sonnet 5', '7d·fable 12'])
     await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
     mem.clear()
-    await $.classic.SessionStart({ source: 'clear' } as any)
+    await clock.advance(CLEAR_RESEED_MS)
     expect(await rates($)).toEqual(['5h 61', '7d 34', '7d·sonnet 5', '7d·fable 12'])
     expect(w.fetches).toHaveLength(1)
   })

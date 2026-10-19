@@ -18,7 +18,7 @@ and its own events. slim publishes its compression events. The team plugins on b
 publish their own start, install and doctor lines. Band reads these lines; it never writes another
 plugin's state.
 
-Current release: **band v0.13.1**.
+Current release: **band v0.13.2**.
 
 ## Status
 
@@ -62,9 +62,10 @@ cache 42m │ fable-5-1 ▾ │ ctx 47% │ 5h 61% · 7d 34% · 7d·fable 12% �
 **When the band appears.** Band draws the row as soon as it holds one figure. At launch it reads the
 model, the cache TTL and the first usage figures in its session start hook, so the row shows within a
 second. A `/clear` opens a new session id. The host keeps plugin state per session id, so every band
-figure starts empty again, and no session start hook runs. Band reads the same three things again in
-the SessionStart hook that a `/clear` fires, so the row returns at once. Without that seed, the row
-stayed hidden until the 30 s refresh or the first turn filled the figures (band 0.9.0 and earlier).
+figure starts empty again, and no session start hook runs. Band reads the same three things, and the
+account, again a second after the session end a `/clear` fires, so the row returns within a second.
+The classic SessionStart hook is not used for this: on a Claude Team login the host withholds every
+classic event from plugins. The 30 s refresh stays the fallback.
 
 At 60 columns, band also drops the rate windows (the least full one first) and then the model:
 

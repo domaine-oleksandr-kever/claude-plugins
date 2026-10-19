@@ -50,6 +50,9 @@ export function fmtRemaining(ms: number | null): string {
   return `${Math.floor(ms / MIN)}m`
 }
 
+/** How long after a /clear's session.end the new session is seeded: by then it is the current one. */
+export const CLEAR_RESEED_MS = 1000
+
 export const COMPACT_OPTIONS = ['Compact', 'Clear', 'Cancel'] as const
 export const COMPACT_WARN_MS = 5 * MIN
 export const COMPACT_COLD = 'Prompt cache is cold or ends within 5 min: compacting re-reads the whole conversation at full price. If this session is done, Clear is cheaper. Compact anyway?'
