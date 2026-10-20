@@ -87,6 +87,8 @@ Read `gate.md` first.
 Per store, one isolated browser context: unlock, open the target page at its page URL, read
 `Shopify.theme`, read the marker (gate.md → Unlock and theme gate). A failed reading spends the store's
 one replacement link or Blocks (gate.md → Replacement link).
+The unlock in either browser MCP — field selector, a fill never through `evaluate`, the wait —
+follows `<base root>/references/storefront-login.md`.
 
 ## Phase 4 — Execute
 
