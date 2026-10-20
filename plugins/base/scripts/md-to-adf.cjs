@@ -643,6 +643,10 @@ function toADF(md, quoted) {
     if (LIST_RE.test(line)) {
       const stack = []; // { indent, list, lastItem, kind: 'bullet' | 'ordered' | 'task' }
       while (i < lines.length) {
+        // a loose list: blank lines between items keep the list open when another item follows
+        let j = i;
+        while (j < lines.length && BLANK_RE.test(lines[j])) j++;
+        if (j > i && j < lines.length && LIST_RE.test(lines[j])) i = j;
         const m = LIST_RE.exec(lines[i]);
         if (!m) break;
         const indent = m[1].replace(/\t/g, '  ').length;

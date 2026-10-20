@@ -61,6 +61,8 @@ only the changed line):
   analytics). Anything one path sets and a sibling silently drops is a finding.
 - **Boundary & hostile inputs** — 0 / negative / huge quantities, empty strings, missing
   config, unescaped user content on new render paths.
+- **Shopify variant shapes** — a product with only the default variant, a single-variant product,
+  a parent vs a child card, a missing metafield: code built for the common shape drops data on these.
 - **Contract & regression** — behavior the old code guaranteed that the new code drops
   for an existing caller; fallback paths (no-JS, fail-closed) the change breaks.
 - **Missing required tests** — a new logic module in a directory whose siblings are

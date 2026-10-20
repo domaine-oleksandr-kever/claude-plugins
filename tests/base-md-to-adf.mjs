@@ -54,6 +54,22 @@ check('m2a-lists', m2a('- a\n- b\n\n1. one\n2. two'),
   doc([ul([li([p([t('a')])]), li([p([t('b')])])]), ol([li([p([t('one')])]), li([p([t('two')])])])]));
 check('m2a-nested-list', m2a('1. AC 1\n  - sub a\n2. AC 2'),
   doc([ol([li([p([t('AC 1')]), ul([li([p([t('sub a')])])])]), li([p([t('AC 2')])])])]));
+const one = li([p([t('One')])]);
+const two = li([p([t('Two')])]);
+check('m2a-loose-ordered', m2a('1. One\n\n2. Two\n\n\n3. Three'), doc([ol([one, two, li([p([t('Three')])])])]));
+check('m2a-loose-bullet', m2a('- One\n\n- Two'), doc([ul([one, two])]));
+check('m2a-loose-then-paragraph', m2a('1. One\n\n2. Two\n\nAfter the list.'), doc([ol([one, two]), p([t('After the list.')])]));
+check('m2a-loose-nested-tight', m2a('1. One\n\n   - a\n   - b\n\n2. Two'),
+  doc([ol([li([p([t('One')]), ul([li([p([t('a')])]), li([p([t('b')])])])]), two])]));
+check('m2a-loose-kind-change', m2a('- One\n\n1. Two'), doc([ul([one]), ol([two])]));
+check('m2a-loose-then-heading', m2a('- One\n\n# H'), doc([ul([one]), h(1, [t('H')])]));
+// a paragraph or a fence inside an item still ends the list, as before
+check('m2a-item-paragraph', m2a('1. One\n\n   more\n\n2. Two'),
+  doc([ol([one]), p([t('   more')]), { type: 'orderedList', attrs: { order: 2 }, content: [two] }]));
+check('m2a-item-fence', m2a('- One\n\n  ```\n  x\n  ```\n\n- Two'),
+  doc([ul([one]), { type: 'codeBlock', content: [t('x')] }, ul([two])]));
+check('m2a-loose-roundtrip', m2a(adfToMarkdown(m2a('1. One\n\n   - a\n\n2. Two'))),
+  m2a('1. One\n\n   - a\n\n2. Two'));
 check('m2a-code-block', m2a('```js\na();\n```'), doc([{ type: 'codeBlock', attrs: { language: 'js' }, content: [t('a();')] }]));
 check('m2a-rule-quote', m2a('> q\n\n---'), doc([{ type: 'blockquote', content: [p([t('q')])] }, { type: 'rule' }]));
 const green = NAME_TO_HEX.green;
@@ -154,6 +170,7 @@ const CORPUS = [
   '### Setup\n\n1. Open the page\n2. Click **Add**\n\n### Expected\n\nThe drawer opens.',
   'Unicode — “quotes”, non breaking, emoji 🙂',
   '- [ ] todo with [a link](https://x.test)\n- [x] done\n  - [ ] nested',
+  '1. Open the page\n\n2. Click **Add**\n\n   - a\n   - b\n\n3. Close\n\nDone.',
 ];
 for (const [i, md] of CORPUS.entries()) {
   for (const args of [[], ['--no-tables']]) {

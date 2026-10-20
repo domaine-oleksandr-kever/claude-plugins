@@ -145,6 +145,7 @@ tokens, over the ~25k-per-`Read` cap — so cover **all** of it without loading 
 Read the node and return only what's needed to build it — **not** the raw node tree:
 
 - **Layout:** frame/section sizes, spacing, padding, gaps, breakpoints/responsive behaviour.
+  Padding of EVERY interactive descendant — each button, link, input, close icon — not only the frame's.
 - **Tokens:** colors, typography (size / line-height / letter-spacing / weight / family),
   radii, shadows — prefer named tokens/variables when Figma exposes them.
 - **Structure:** the component/element hierarchy and how pieces nest, in build order.

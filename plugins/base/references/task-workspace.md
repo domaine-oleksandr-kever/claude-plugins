@@ -23,11 +23,16 @@ the **ticket key** (`ELC-206`) for single-ticket work; for a **batch shipping as
 | `figma-<node-id>.md` | one `base:figma-reader` build spec, **verbatim** — one file per node; a node id is unique only within its Figma file, so a second file's same node id lands as `figma-<node-id>-<file-key-prefix>.md` | `base:figma-reader` (the calling skill only on an inline fetch or a failed save) |
 | `doc-<slug>-<hash>.md` | one linked doc's **extracted** content (data models, copy, field lists — never the raw page); slug from the page title + a short URL hash (`doc-data-mapping-9f3c.md`), so same-titled docs don't collide | `base:doc-reader` (the calling skill only on the inline fallback) |
 | `notes.md` | append-only dated log: checkpoint decisions, gotchas, provisioned data ids, test page paths, `ceiling:` entries, `compact:` markers (base's hooks module, before an auto-compact of a stale workspace: `- <YYYY-MM-DD> compact: workspace stale <n> min; since then <k> reader agents, <m> edits` — a pointer to unsaved work, never findings), `build-dirtied:` lines (a team plugin's preview-theme flow, when its build rewrote tracked files: `- <YYYY-MM-DD> build-dirtied: <path> <path>`, repo-relative, space-separated, a path with whitespace left out — every line since the last bare one (no paths) counts, and review-flow §1 drops those files' working-tree rewrite from the review scope); a team plugin may name lines of its own here that it reads back as the last match; in a batch — root cause + fix summary per bug | any skill, at natural boundaries |
-| `progress.md` | work checklist — what's done, what's next (date + one-line status) | every skill of the team's series, at completion; `/base:save-task-context` outside it |
+| `progress.md` | work checklist — what's done, what's next (date + one-line status) | every skill of the team's series at completion — creating it when missing, at its step 0 where it has one; `/base:save-task-context` outside it |
 | a team plugin's own files | what its skills record — an approved plan, a QA checklist, a brief — under the names its skills give | that team plugin's skills |
 | `tmp/attachments/` | the ticket's downloaded images and videos, `<attachment-id>-<sanitised-name>`, and beside each the JPEG copy slim's `view` wrote: `<name>.1568.jpg` for an image (none for an image already within 1568 px and 150 KB — the download is its own view), a `<name>.frames/` dir of timestamped JPEG frames for a video; a screenshot the ticket **links** (prnt.sc, imgur, Gyazo, CleanShot, snipboard) lands beside them as `<host>-<slug>.<ext>`. `Read` the views and frames the task needs, never all of them by default | `base:jira-reader` (via `scripts/jira-attachments.sh`, `scripts/external-screenshots.sh` and `mcp__slim__view`) |
 | `tmp/figma/` | the REST rung's payloads for one node — `<key>-<node>.nodes.json` (raw, never `Read` directly), the compact `<key>-<node>.nodes.md` build tree slim's `view` wrote from it, `<key>.variables.json` and the `<key>-<node>@<scale>x.png` render; a **cache** keyed by those names, so a re-read is free, and safe to delete at any time. With no workspace path the script uses `.claude/tasks/_figma/tmp` instead | `base:figma-reader` (via `scripts/figma-rest.sh` + `mcp__slim__view`) |
 | `tmp/` | scratch made while working — test scripts, query drafts, JSON dumps, screenshots — instead of littering the project root | anyone; delete freely |
+
+`.claude/tasks/INDEX.md` (beside the folders, not in one) is the cross-task index: one line per work id,
+`<work-id> — <topic> — <main conclusion>`, under a one-line header; `/base:save-task-context` appends
+or refreshes its work id's line. A spike or bug analysis starts with a grep for the topic over
+`.claude/tasks/*/notes.md` and `.claude/tasks/INDEX.md` — an earlier task may already hold the answer.
 
 In a git worktree, screenshots (`tmp/`) go to `<worktree>/.claude/tmp/<work-id>/` instead: the
 screenshot servers refuse the symlinked `.claude/tasks`, and base's scratch-path guard denies it
@@ -69,6 +74,8 @@ PR ground truth, not an authorization to act.
 
 ## Read rule — context-first order
 
+Nothing is claimed about a workspace file's content without reading it first.
+
 1. **This conversation** — the fields are already in context, in full (not summarized): use them.
 2. **The workspace files** — present and fresh (below): read them; don't spawn a reader. For a
    Figma node, look at **every** `figma-<node-id>*.md` in the workspace — the plain name **and**
@@ -99,6 +106,10 @@ workspace path, if there is one; that re-fetch is the reader's, never yours.
 `attachments_note` non-empty → show it to the developer once, verbatim, and go on (never a
 blocker). Links a commenter pasted come back as `comment_links`, kept out of the field-derived
 lists — nothing is spawned from them automatically (`reading-linked-docs.md` → step 1).
+A non-empty `newer_figma_links_in_comments` (a commenter linked a Figma node none of `figma_urls`
+names — often the updated design) goes to the developer at the first checkpoint, quoted with its
+`#<n>`, asking which node is current — before a `base:figma-reader` is spawned for that design, or,
+when one already ran, before its spec is built on.
 
 ### Freshness
 
@@ -137,7 +148,11 @@ is a log; it doesn't go stale.
 - `doc-*.md` holds the **extract** (what the task needs), not the page.
 - Append to `notes.md` at natural boundaries — approved-plan decisions, provisioned data
   ids, test URLs, confirmed bugs + the hostile values that triggered them.
-  One dated `##` entry per event, newest last.
+  One dated `##` entry per event, newest last. A conclusion reached in a turn (spike result,
+  root cause, decision) is written there in that same turn, not left for a later save.
+- An existing `notes.md`, `progress.md` or team plugin file is appended to or edited in place
+  (the Edit tool, `sed`), never overwritten with `cat >` or Write — earlier entries are lost.
+  Reader files are the exception: a re-fetch overwrites them.
 - Scratch files created while working (test scripts, query drafts, dumps, screenshots) go in
   the workspace `tmp/` — never the project root.
 - **Never** store secrets (tokens, `.env` values, storefront passwords) or raw payloads (ADF, Figma node trees, full Notion/Confluence pages) —
@@ -145,9 +160,10 @@ is a log; it doesn't go stale.
 
 ## Progress tracking — `progress.md`
 
-So a **clean/new session** knows where the work stands and what to offer next. The first skill to
-run on a work id creates the folder and this file with the full list unchecked; outside a team's
-series (ad-hoc flows), `/base:save-task-context` does. **The rows come from the team plugin**: its
+So a **clean/new session** knows where the work stands and what to offer next. When it is missing,
+the first skill of a team's series to run on a work id creates the folder and this file with the
+full list unchecked — at its step 0 where the skill has one, else at completion; outside a team's series
+(ad-hoc flows), `/base:save-task-context` does. **The rows come from the team plugin**: its
 convention section names the progress series — the ordered steps of its workflow — and the file lists
 them in that order. With no series named, the rows are the steps the conversation has taken and
 plans.

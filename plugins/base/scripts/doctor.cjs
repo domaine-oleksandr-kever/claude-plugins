@@ -16,7 +16,7 @@
  *     --json     `{ root, rows: [{ status, name, detail }] }` instead of the table
  *
  * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, base-tmp, event-log,
- * switches (only when a BASE_* switch holds a value outside its README domain: WARN). Every row is one
+ * cache (only when the plugin cache holds a Domaine version no install record names: WARN), switches (only when a BASE_* switch holds a value outside its README domain: WARN). Every row is one
  * PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
  * BASE_TMP_TTL (the age the session sweep removes base-tmp files at), DOMAINE_LOG_DIR and every BASE_*
  * switch. It only reports, never repairs.
@@ -355,6 +355,54 @@ function checkEventLog(logDir, homeDir) {
   pass('event-log', dir + ': ' + parts.join('; '));
 }
 
+const versionKey = (v) => v.split(/[.+-]/).map((p) => (/^\d+$/.test(p) ? p.padStart(6, '0') : p)).join('.');
+
+const inUse = (dir) => {
+  try {
+    return fs.readdirSync(path.join(dir, '.in_use')).some((p) => {
+      if (!/^\d+$/.test(p)) return false;
+      try {
+        process.kill(Number(p), 0);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    });
+  } catch (_) {
+    return false;
+  }
+};
+
+// Every version Claude Code installed stays under cache/domaine/<name>/: a search over the cache finds a stale script there.
+function checkCache(claudeDir) {
+  const record = readJson(path.join(claudeDir, 'plugins', 'installed_plugins.json'));
+  const cache = path.join(claudeDir, 'plugins', 'cache', 'domaine');
+  const keep = new Map();
+  for (const [key, entries] of Object.entries((record && record.plugins) || {})) {
+    const at = key.lastIndexOf('@');
+    if (at < 1 || key.slice(at + 1) !== 'domaine' || !Array.isArray(entries)) continue;
+    const set = keep.get(key.slice(0, at)) || new Set();
+    for (const e of entries) {
+      if (e && typeof e.installPath === 'string' && e.installPath) set.add(path.basename(e.installPath));
+      else if (e && typeof e.version === 'string') set.add(e.version);
+    }
+    keep.set(key.slice(0, at), set);
+  }
+  const parts = [];
+  for (const [name, set] of [...keep].sort()) {
+    let dirs = [];
+    try {
+      dirs = fs.readdirSync(path.join(cache, name), { withFileTypes: true }).filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name);
+    } catch (_) {}
+    // install.sh --prune-cache's own rules: a plugin with no recorded version on disk is left alone,
+    // and so is a version a running session holds (.in_use/<live pid>).
+    if (!dirs.some((v) => set.has(v))) continue;
+    const stale = dirs.filter((v) => !set.has(v) && !inUse(path.join(cache, name, v)));
+    if (stale.length) parts.push(name + ' ' + stale.sort((a, b) => (versionKey(a) < versionKey(b) ? -1 : 1)).join(', '));
+  }
+  if (parts.length) warn('cache', 'stale versions in ' + cache + ': ' + parts.join('; ') + ' — scripts/install.sh --prune-cache in the plugins checkout removes them');
+}
+
 // Read as `=== '0'`, untrimmed: any other value is on.
 const ON_OFF = ['BASE_AUTOSAVE', 'BASE_EVENT_LOG', 'BASE_GUARD', 'BASE_LEAN', 'BASE_SCRATCH_GUARD', 'BASE_SESSION_TITLE', 'BASE_SHOPIFY_VALIDATE', 'BASE_STE'];
 
@@ -393,6 +441,7 @@ function main() {
   checkSlim(claudeDir, projectDir, enabled);
   checkCoreTmp(projectDir);
   checkEventLog(opts['log-dir'], homeDir);
+  checkCache(claudeDir);
   checkSwitches(process.env);
 
   const failed = rows.some((r) => r.status === 'FAIL');

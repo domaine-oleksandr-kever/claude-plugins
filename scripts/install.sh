@@ -17,12 +17,14 @@ REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 NAME="fnd"
 
 TARGET=""
+PLUGIN_SET=0
 MODE="symlink"
 ACTION="install"
 
 usage() {
   cat <<EOF
 usage: install.sh --target cursor|opencode|codex [--plugin <name>] [--copy] [--uninstall]
+       install.sh --prune-cache [--plugin <name>]
 
   --target <host>   cursor  -> ~/.cursor/plugins/local/<plugin>
                     opencode-> ~/.config/opencode (skills, agents, commands, plugin)
@@ -33,6 +35,11 @@ usage: install.sh --target cursor|opencode|codex [--plugin <name>] [--copy] [--u
   --copy            copy instead of symlink (no-symlink environments); a --copy
                     install does not follow \`git pull\` — re-run to refresh it
   --uninstall       remove only the entries this installer created
+  --prune-cache     Claude Code: remove the version directories of <plugin> (default: every
+                    <name>@domaine the install record lists) under
+                    \${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/domaine/ other than the
+                    recorded ones; a version a running session holds (.in_use/<pid>) stays.
+                    Prints "<plugin> pruned=<versions>"; run it after claude plugin install|update
 EOF
 }
 
@@ -40,14 +47,70 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --target) [ $# -ge 2 ] || { echo "error: --target needs a value" >&2; exit 2; }; TARGET="$2"; shift 2 ;;
     --target=*) TARGET="${1#--target=}"; shift ;;
-    --plugin) [ $# -ge 2 ] || { echo "error: --plugin needs a value" >&2; exit 2; }; NAME="$2"; shift 2 ;;
-    --plugin=*) NAME="${1#--plugin=}"; shift ;;
+    --plugin) [ $# -ge 2 ] || { echo "error: --plugin needs a value" >&2; exit 2; }; NAME="$2"; PLUGIN_SET=1; shift 2 ;;
+    --plugin=*) NAME="${1#--plugin=}"; PLUGIN_SET=1; shift ;;
     --copy) MODE="copy"; shift ;;
     --uninstall) ACTION="uninstall"; shift ;;
+    --prune-cache) ACTION="prune"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+# prune_cache — Claude Code keeps every version it ever installed under cache/<marketplace>/<name>/,
+# and a `find` over the cache then hits a stale script. The install record names the live ones.
+prune_cache() {
+  local cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" recs name v d dir pid held pruned failed live rc=0 seen=" "
+  local record="$cfg/plugins/installed_plugins.json" cache="$cfg/plugins/cache/domaine"
+  command -v node >/dev/null 2>&1 || { echo "error: --prune-cache needs node to read $record" >&2; return 1; }
+  [ -f "$record" ] || { echo "error: no install record at $record" >&2; return 1; }
+  # "<name> <version dir>" per recorded install of a <name>@domaine plugin
+  recs="$(node -e 'const path = require("path");
+const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+for (const [k, list] of Object.entries((r && r.plugins) || {})) {
+  const at = k.lastIndexOf("@"), name = k.slice(0, at);
+  if (at < 1 || k.slice(at + 1) !== "domaine" || !/^[a-z0-9-]+$/.test(name) || !Array.isArray(list)) continue;
+  for (const e of list) {
+    const v = e && (typeof e.installPath === "string" && e.installPath ? path.basename(e.installPath) : e.version);
+    if (typeof v === "string" && /^[\w.+-]+$/.test(v) && !/^\.+$/.test(v)) console.log(name + " " + v);
+  }
+}' "$record" 2>/dev/null)" || { echo "error: $record is not readable JSON" >&2; return 1; }
+  while read -r name _; do
+    [ -n "$name" ] || continue
+    case "$seen" in *" $name "*) continue ;; esac
+    seen="$seen$name "
+    [ "$PLUGIN_SET" -eq 0 ] || [ "$name" = "$NAME" ] || continue
+    [ -d "$cache/$name" ] || continue
+    live=0
+    while read -r _ v; do [ -d "$cache/$name/$v" ] && live=1; done <<EOF
+$(grep "^$name " <<<"$recs")
+EOF
+    if [ "$live" -eq 0 ]; then echo "$name pruned=none (no recorded version under $cache/$name)"; continue; fi
+    held=""; pruned=""; failed=""
+    for d in "$cache/$name"/*/; do
+      dir="${d%/}"; v="${dir##*/}"
+      [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+      grep -qxF "$name $v" <<<"$recs" && continue
+      for pid in "$dir"/.in_use/*; do
+        pid="${pid##*/}"
+        case "$pid" in ''|*[!0-9]*) continue ;; esac
+        if kill -0 "$pid" 2>/dev/null; then held="$held,$v"; continue 2; fi
+      done
+      if rm -rf "$dir"; then pruned="$pruned,$v"; else failed="$failed,$v"; rc=1; fi
+    done
+    pruned="${pruned#,}"
+    echo "$name pruned=${pruned:-none}${held:+ in_use=${held#,}}${failed:+ failed=${failed#,}}"
+  done <<EOF
+$recs
+EOF
+  case "$seen" in *" $NAME "*) ;; *) [ "$PLUGIN_SET" -eq 0 ] || echo "note: $record lists no $NAME@domaine — nothing pruned" ;; esac
+  return "$rc"
+}
+
+if [ "$ACTION" = "prune" ]; then
+  [ -z "$TARGET" ] && [ "$MODE" = "symlink" ] || { echo "error: --prune-cache takes only --plugin" >&2; exit 2; }
+  prune_cache; exit $?
+fi
 
 case "$TARGET" in
   cursor|opencode|codex) ;;

@@ -6,7 +6,7 @@
  *   start rules  SessionStart: lean code (BASE_LEAN), writing style (BASE_STE), dogfood section
  *   subagent     SubagentStart: the share of the agent type on stdin; records the agent_type in
  *                <log dir>/<session>/agents/<agent_id>.json for base's MCP guard
- *   stop         Stop: blocks once after a plugin-script failure the mod mirrored to dogfood-state.json
+ *   stop         Stop: blocks once per new plugin-script failure the mod listed in dogfood-state.json's `errors` and no report followed
  * A start part writes the marker <log dir>/<session>/conventions.base[.rules].json, which the doctor and
  * the mod's cloud fallback read. Always exits 0; an internal error prints nothing.
  */
@@ -177,15 +177,24 @@ function subagentText(agentType, cwd) {
   return parts.join('\n\n');
 }
 
-/** The Stop block reason once per mirrored failure with no report after it; null otherwise. Writes dogfood-stop.json. */
+/**
+ * The Stop block reason while the mirrored `errors` hold a failure after the last report, once per newest failure: the count and each
+ * script with its first error line. null otherwise. Writes dogfood-stop.json.
+ */
 function stopReason(input) {
   if (input.stop_hook_active === true) return null;
   const dir = logDir(input.session_id);
   const s = dir && readJson(dir + '/dogfood-state.json');
-  if (!s || s.sid !== input.session_id || !s.failMs || s.reportMs >= s.failMs) return null;
-  if ((readJson(dir + '/dogfood-stop.json') || {}).blockedMs === s.failMs || !dogfoodOn()) return null;
-  fs.writeFileSync(dir + '/dogfood-stop.json', JSON.stringify({ blockedMs: s.failMs }) + '\n');
-  return 'base dogfood: a plugin script failed (' + s.script + ') and no plugin_defect report followed — report it with plugin_defect (not among your tools: in your reply), then stop';
+  if (!s || s.sid !== input.session_id || !Array.isArray(s.errors)) return null;
+  const open = s.errors.filter((e) => e && typeof e.script === 'string' && typeof e.ms === 'number' && e.ms > (Number(s.reportMs) || 0));
+  if (!open.length) return null;
+  const newest = Math.max(...open.map((e) => e.ms));
+  if ((readJson(dir + '/dogfood-stop.json') || {}).blockedMs === newest || !dogfoodOn()) return null;
+  fs.writeFileSync(dir + '/dogfood-stop.json', JSON.stringify({ blockedMs: newest }) + '\n');
+  const first = new Map();
+  for (const e of open) if (!first.has(e.script)) first.set(e.script, typeof e.line === 'string' ? e.line : '');
+  const names = [...first].map(([script, line]) => (line ? script + ' (' + line + ')' : script)).join(', ');
+  return 'base: ' + open.length + ' plugin script error(s) this session are not reported — report each with plugin_defect or say why not: ' + names;
 }
 
 function main(argv) {

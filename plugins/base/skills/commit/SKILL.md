@@ -19,7 +19,9 @@ syntax live in `${CLAUDE_PLUGIN_ROOT}/references/commit-message-format.md`. Read
   the review gate below and step 4's ticket-scope ask may still block.
 - base's guards deny an AI co-author trailer or a "Generated with" line in the message, and any
   bypass of the project's git hooks (`--no-verify`, `-n`, a `core.hooksPath` override). Write the
-  message without them; a hook that fails is a finding to fix, not to skip.
+  message without them; a hook that fails is a finding to fix, not to skip. The host's
+  commit-attribution reminder (`Co-Authored-By`, "Generated with Claude") does not apply in Domaine
+  repos: never add that trailer.
 
 ## Review gate (before committing)
 

@@ -620,5 +620,69 @@ run "$H17" "$REPO5" --target cursor
 if [ "$RC" -eq 0 ] && grep -q "doctor reported problems (exit 1)" "$E" && [ -L "$H17/$CURSOR_LINK" ]; then ok
 else bad D2-doctor-failure-warns "rc=$RC err=$(head -c 160 "$E")"; fi
 
+# ---------------------------------------------------------------------- Claude Code cache --
+# PC: --prune-cache removes the version dirs of each <name>@domaine the install record does not name, under
+# ${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/domaine/ only — never a recorded one, one a live session holds
+# (.in_use/<pid>), another marketplace's, the synced layout, or a symlink's target.
+REPOPC="$TMP/repopc"; mkrepo "$REPOPC"
+pc_home() {
+  local h="$1" c="$1/.claude/plugins"
+  rm -rf "$h"; mkdir -p "$c"
+  printf '{"version":2,"plugins":{"base@domaine":[{"scope":"user","installPath":"%s/cache/domaine/base/0.12.0","version":"0.12.0"}],"fe@domaine":[{"scope":"user","version":"0.9.1"}],"figma@official":[{"scope":"user","version":"2.0.0"}]}}\n' "$c" > "$c/installed_plugins.json"
+  mkdir -p "$c/cache/domaine/base/0.3.2/.in_use" "$c/cache/domaine/base/0.11.1/.in_use" "$c/cache/domaine/base/0.12.0" \
+           "$c/cache/domaine/fe/0.9.0/scripts" "$c/cache/domaine/fe/0.9.1" "$c/cache/official/figma/1.0.0" \
+           "$c/synced/acct/base~g2/scripts" "$TMP/pc-target-$2"
+  : > "$c/cache/domaine/base/0.3.2/.in_use/$DEAD_PID"
+  : > "$c/cache/domaine/base/0.11.1/.in_use/$$"
+  echo keep > "$TMP/pc-target-$2/file"
+  ln -s "$TMP/pc-target-$2" "$c/cache/domaine/fe/0.1.0"
+}
+sh -c 'exit 0' & DEAD_PID=$!; wait "$DEAD_PID"
+HPC="$TMP/hpc"; CPC="$HPC/.claude/plugins"; pc_home "$HPC" 1
+run "$HPC" "$REPOPC" --prune-cache
+if [ "$RC" -eq 0 ] && grep -qx "base pruned=0.3.2 in_use=0.11.1" "$O" && grep -qx "fe pruned=0.9.0" "$O" && ! grep -q figma "$O" \
+   && [ ! -e "$CPC/cache/domaine/base/0.3.2" ] && [ ! -e "$CPC/cache/domaine/fe/0.9.0" ] \
+   && [ -d "$CPC/cache/domaine/base/0.12.0" ] && [ -d "$CPC/cache/domaine/base/0.11.1" ] && [ -d "$CPC/cache/domaine/fe/0.9.1" ] \
+   && [ -d "$CPC/cache/official/figma/1.0.0" ] && [ -d "$CPC/synced/acct/base~g2/scripts" ] \
+   && [ -L "$CPC/cache/domaine/fe/0.1.0" ] && [ -f "$TMP/pc-target-1/file" ]; then ok
+else bad PC1-prune-all "rc=$RC out=$(tr '\n' ';' < "$O") err=$(head -c 160 "$E")"; fi
+run "$HPC" "$REPOPC" --prune-cache
+if [ "$RC" -eq 0 ] && grep -qx "base pruned=none in_use=0.11.1" "$O" && grep -qx "fe pruned=none" "$O"; then ok
+else bad PC2-idempotent "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+pc_home "$HPC" 2
+run "$HPC" "$REPOPC" --prune-cache --plugin fe
+if [ "$RC" -eq 0 ] && [ "$(cat "$O")" = "fe pruned=0.9.0" ] && [ -d "$CPC/cache/domaine/base/0.3.2" ] && [ ! -e "$CPC/cache/domaine/fe/0.9.0" ]; then ok
+else bad PC3-one-plugin "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+run "$HPC" "$REPOPC" --prune-cache --plugin qa
+if [ "$RC" -eq 0 ] && grep -q "lists no qa@domaine — nothing pruned" "$O" && [ -d "$CPC/cache/domaine/base/0.3.2" ]; then ok
+else bad PC4-unrecorded-plugin "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+# CLAUDE_CONFIG_DIR is the config dir the record and the cache live under; HOME's stays as it was
+HPC2="$TMP/hpc2"; pc_home "$HPC2" 3; pc_home "$HPC" 4
+RC=0; HOME="$HPC" CLAUDE_CONFIG_DIR="$HPC2/.claude" "$BASH_BIN" "$REPOPC/scripts/install.sh" --prune-cache >"$O" 2>"$E" || RC=$?
+if [ "$RC" -eq 0 ] && [ ! -e "$HPC2/.claude/plugins/cache/domaine/base/0.3.2" ] && [ -d "$CPC/cache/domaine/base/0.3.2" ]; then ok
+else bad PC5-config-dir "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+# a record whose version dir is gone is no evidence of what is live: nothing of that plugin goes
+pc_home "$HPC" 5; rm -rf "$CPC/cache/domaine/base/0.12.0"
+run "$HPC" "$REPOPC" --prune-cache --plugin base
+if [ "$RC" -eq 0 ] && grep -q "base pruned=none (no recorded version under" "$O" && [ -d "$CPC/cache/domaine/base/0.3.2" ]; then ok
+else bad PC6-recorded-dir-missing "rc=$RC out=$(tr '\n' ';' < "$O")"; fi
+
+rm -f "$CPC/installed_plugins.json"
+run "$HPC" "$REPOPC" --prune-cache
+if [ "$RC" -eq 1 ] && grep -q "no install record at $CPC/installed_plugins.json" "$E"; then ok
+else bad PC7-no-record "rc=$RC err=$(head -c 160 "$E")"; fi
+printf '{ not json' > "$CPC/installed_plugins.json"
+run "$HPC" "$REPOPC" --prune-cache
+if [ "$RC" -eq 1 ] && grep -q "is not readable JSON" "$E" && [ -d "$CPC/cache/domaine/base/0.3.2" ]; then ok
+else bad PC8-bad-record "rc=$RC err=$(head -c 160 "$E")"; fi
+for extra in "--target cursor" "--copy"; do
+  # shellcheck disable=SC2086
+  run "$HPC" "$REPOPC" --prune-cache $extra
+  if [ "$RC" -eq 2 ] && grep -q "takes only --plugin" "$E"; then ok; else bad "PC9-refused-${extra#--}" "rc=$RC err=$(head -c 160 "$E")"; fi
+done
+
 echo "install-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

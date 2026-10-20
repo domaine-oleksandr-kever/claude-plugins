@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NUDGE, TOOL, bashText, capEvidence, crashedIn, deniedNotRun, designedRefusal, dogfoodAccounts, failureLine, pluginScript, pluginScripts, scriptLast, seen, slugOf } from '../dogfood/text.ts'
+import { NUDGE, TOOL, bashText, capEvidence, crashedIn, deniedNotRun, designedRefusal, dogfoodAccounts, errorLine, failureLine, pluginScript, pluginScripts, priorErrors, scriptLast, seen, slugOf } from '../dogfood/text.ts'
 import { NOW, PEEK, ROOT, TEXT, eventsOf, peek, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -19,7 +19,7 @@ const REFUSALS = [
   'unknown_command cmd=x', 'unknown arg: --x (--help prints usage)', 'missing_value flag=--theme', 'missing value for --name', 'create requires --name "<new theme name>"',
   'no_store (pass --store)', "invalid_store store='x'", 'ambiguous_env envs=a,b toml=t', 'env_not_found env=x toml=t', "bad_theme_id value='x'",
   'bad_file path=../x', 'file_not_writable path=x', 'theme_not_found theme=1', 'dev_theme_not_found dev_theme=1', 'file_not_found_or_not_text file=x theme=1',
-  'not_applied engine=gql theme=1 file=x', 'dev_theme_write_refused theme=1', 'live_theme_write_refused theme=1', 'from_file_refused file=.env',
+  'not_applied engine=gql theme=1 file=x', 'upload_rejected theme=1 file=x reason=y', 'dev_theme_write_refused theme=1', 'live_theme_write_refused theme=1', 'from_file_refused file=.env',
   'invalid_variables_json (--variables must be valid JSON)', 'variables_file_not_found file=v.json', 'no_such_dir dir=x', 'invalid_engine engine=x',
   'invalid_cloud_id value=x', 'settings_drift', 'overlay_store_mismatch store=x', 'theme_limit — store is at its theme cap', 'worktree_dirty path=x',
   'branch_checked_out_elsewhere branch=b', 'not_a_git_repo — run this from the project repo', 'no_jira_credentials (JIRA_EMAIL + JIRA_API_TOKEN)',
@@ -52,12 +52,16 @@ const DEFECT = {
 
 const report = ($: any, over: Record<string, unknown> = {}) => $.tool.call({ tool: TOOL, ...DEFECT, ...over })
 const bash = ($: any, command: string) => $.tool.call({ tool: 'Bash', command })
-/** The failure the Stop command hook would block on: the mirrored base.dogfood of this session's id with an unreported failMs. */
+/** The newest failure the Stop command hook would block on: the script of the mirrored `errors` of this session's id after its report. */
 function armed(w: any): string | null {
+  return unreported(w).at(-1)?.script ?? null
+}
+/** The mirrored `errors` of this session's id after its report: what the Stop command hook counts. */
+function unreported(w: any): { script: string; line: string; ms: number }[] {
   const f = w.files[`${HOME}/.claude/domaine/log/${w.sid}/dogfood-state.json`]
-  if (!f) return null
+  if (!f) return []
   const s = JSON.parse(f.text)
-  return s.sid === w.sid && s.failMs && s.reportMs < s.failMs ? s.script : null
+  return s.sid === w.sid && Array.isArray(s.errors) ? s.errors.filter((e: any) => e.ms > s.reportMs) : []
 }
 /** The cloud fallback block (nothing draws, no command-hook marker): its dogfood section, else undefined. */
 async function dogfoodSection($: any, w: any): Promise<string | undefined> {
@@ -496,13 +500,13 @@ describe('nudge and stop', () => {
     expect(armed(w)).toBeNull()
   })
 
-  t('a compound line the script does not end, with a stack naming the script: nudge and event, never a blocked stop', async ($, on) => {
+  t('a compound line the script does not end, with a stack naming the script: nudge, event, the stop blocked', async ($, on) => {
     const { w } = world(on, { env: ON })
     w.bash = () => ({ isError: true, result: 'Exit code 1\nError: boom\n    at Object.<anonymous> (/x/plugins/base/scripts/x.cjs:12:3)' })
     await start($)
     expect((await bash($, 'node plugins/base/scripts/x.cjs --ws x; echo done')).context).toEqual([NUDGE])
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: x.cjs'])
-    expect(armed(w)).toBeNull()
+    expect(unreported(w).map(e => [e.script, e.line])).toEqual([['x.cjs', 'Error: boom']])
   })
 
   t('a compound line the script does not end, with a shell trace naming the script: nudge', async ($, on) => {
@@ -607,14 +611,32 @@ describe('nudge and stop', () => {
     expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x')).context).toEqual([NUDGE])
   })
 
-  t('a compound line the script does not end: a failure line nudges even at exit 0, never blocks; a refusal line stays silent', async ($, on) => {
+  t('a compound line the script does not end: a failure line nudges and blocks even at exit 0; a refusal line stays silent', async ($, on) => {
     const { w } = world(on, { env: ON })
     w.bash = cmd => ({ result: { stdout: cmd.includes('gql') ? 'error=gql_errors log=x' : 'error=theme_not_found theme=1', stderr: '' } })
     await start($)
     expect((await bash($, 'bash plugins/fe/scripts/shopify-admin-gql.sh --query q.graphql 2>&1 | head -20')).context).toEqual([NUDGE])
     expect((await bash($, 'bash plugins/fe/scripts/theme-json.sh get --theme 1 --file x 2>&1 | tail -5')).context ?? []).toEqual([])
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['script failed: shopify-admin-gql.sh'])
-    expect(armed(w)).toBeNull()
+    expect(unreported(w).map(e => [e.script, e.line])).toEqual([['shopify-admin-gql.sh', 'error=gql_errors log=x']])
+  })
+
+  t('the script ends the line and exits 0 with a failure line: nudge and the stop blocked; a refusal line at exit 0 stays silent', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = cmd => ({ result: { stdout: cmd.includes('gql') ? 'ok=1\nerror=gql_errors log=x' : 'error=theme_not_found theme=1', stderr: '' } })
+    await start($)
+    expect((await bash($, 'bash /home/dev/.claude/plugins/cache/domaine/fe/0.9.1/scripts/shopify-admin-gql.sh --query q.graphql')).context).toEqual([NUDGE])
+    expect((await bash($, 'bash /home/dev/.claude/plugins/cache/domaine/fe/0.9.1/scripts/theme-json.sh get --theme 1 --file x')).context ?? []).toEqual([])
+    expect(unreported(w).map(e => e.script)).toEqual(['shopify-admin-gql.sh'])
+  })
+
+  t('a synced copy and a second config dir are plugin scripts too', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'Exit code 5\nerror=gql_errors log=x' })
+    await start($)
+    expect((await bash($, 'bash /root/.claude/plugins/synced/acct_user/fe~g2/scripts/theme-json.sh get')).context).toEqual([NUDGE])
+    expect((await bash($, 'node /home/dev/.claude-work/plugins/cache/domaine/base/0.12.0/scripts/md-to-adf.cjs x.md')).context).toEqual([NUDGE])
+    expect(unreported(w).map(e => e.script)).toEqual(['theme-json.sh', 'md-to-adf.cjs'])
   })
 
   t('a compound line the script does not end, failing with a refusal line and no Error: silent', async ($, on) => {
@@ -642,14 +664,22 @@ describe('the dogfood-state.json mirror', () => {
     const { w, clock } = world(on, { env: ON })
     w.bash = () => FAILED
     await start($)
-    expect(w.files[FILE]!.text).toBe('{"sid":"s1","failMs":0,"script":"","reportMs":0}\n')
+    expect(w.files[FILE]!.text).toBe('{"sid":"s1","failMs":0,"script":"","reportMs":0,"errors":[]}\n')
     await clock.advance(1000)
     await bash($, SCRIPT_CMD)
-    expect(mirrored(w)).toEqual({ sid: 's1', failMs: NOW + 1000, script: 'md-to-adf.cjs', reportMs: 0 })
+    const first = { script: 'md-to-adf.cjs', line: 'Error: bad input', ms: NOW + 1000 }
+    expect(mirrored(w)).toEqual({ sid: 's1', failMs: NOW + 1000, script: 'md-to-adf.cjs', reportMs: 0, errors: [first] })
+    await clock.advance(1000)
+    await bash($, 'bash plugins/fe/scripts/theme-json.sh get')
+    expect(mirrored(w).errors).toEqual([first, { script: 'theme-json.sh', line: 'Error: bad input', ms: NOW + 2000 }])
     await clock.advance(1000)
     await report($)
-    expect(mirrored(w)).toEqual({ sid: 's1', failMs: NOW + 1000, script: 'md-to-adf.cjs', reportMs: NOW + 2000 })
-    expect((await peek($)).dogfood).toEqual(mirrored(w))
+    expect(mirrored(w)).toEqual({ sid: 's1', failMs: NOW + 2000, script: 'theme-json.sh', reportMs: NOW + 3000, errors: [] })
+    const { errors: _, ...state } = mirrored(w)
+    expect((await peek($)).dogfood).toEqual(state)
+    await clock.advance(1000)
+    await bash($, SCRIPT_CMD)
+    expect(unreported(w).map(e => e.ms)).toEqual([NOW + 4000])
   })
 
   t('a new session id gets its own file; DOMAINE_LOG_DIR moves it', async ($, on) => {
@@ -658,7 +688,7 @@ describe('the dogfood-state.json mirror', () => {
     w.sid = 's2'
     await submit($, 'after a clear')
     expect(mirrored(w, '/var/log/domaine/s1/dogfood-state.json').sid).toBe('s1')
-    expect(mirrored(w, '/var/log/domaine/s2/dogfood-state.json')).toEqual({ sid: 's2', failMs: 0, script: '', reportMs: 0 })
+    expect(mirrored(w, '/var/log/domaine/s2/dogfood-state.json')).toEqual({ sid: 's2', failMs: 0, script: '', reportMs: 0, errors: [] })
     expect(w.files[FILE]).toBeUndefined()
   })
 
@@ -728,6 +758,29 @@ describe('pure parts', () => {
     expect(pluginScript('node plugins/qa/scripts/qa-stores.cjs>/tmp/s.txt; cat /tmp/s.txt')).toBe('qa-stores.cjs')
     expect(pluginScript('x=`plugins/be/scripts/c.sh`')).toBe('c.sh')
     expect(pluginScripts('bash plugins/base/scripts/a.sh && node ~/.claude/plugins/cache/domaine/fe/0.6.1/scripts/b.cjs | head').sort()).toEqual(['a.sh', 'b.cjs'])
+  })
+
+  test('pluginScript: the cache of any config dir and the synced copy', () => {
+    expect(pluginScript('node /u/.claude-work/plugins/cache/domaine/fe/0.9.1/scripts/a.cjs')).toBe('a.cjs')
+    expect(pluginScript('bash ~/.claude/plugins/synced/acct_user/base~g2/scripts/b.sh')).toBe('b.sh')
+    expect(pluginScript('bash ~/.claude/plugins/synced/acct_user/base/scripts/b.sh')).toBe('b.sh')
+    expect(pluginScript('bash ~/.claude/plugins/synced/acct_user/acme/scripts/b.sh')).toBeNull()
+    expect(pluginScript('cat ~/.claude/plugins/synced/acct_user/base/scripts/b.sh')).toBeNull()
+  })
+
+  test('errorLine: the first failing error= line, else the first Error line, capped', () => {
+    expect(errorLine('note=x\nerror=theme_not_found theme=1\nerror=gql_errors log=x')).toBe('error=gql_errors log=x')
+    expect(errorLine('Exit code 1\n  TypeError: boom\n    at x')).toBe('TypeError: boom')
+    expect(errorLine('Exit code 1')).toBe('')
+    expect(errorLine(`error=gql_errors ${'x'.repeat(300)}`).length).toBe(160)
+  })
+
+  test('priorErrors: this session\'s well-formed entries after the report; [] for another session or bad JSON', () => {
+    const json = JSON.stringify({ sid: 's1', errors: [{ script: 'a', line: '', ms: 5 }, { script: 'b', line: 'x', ms: 9 }, { script: 'c', ms: 10 }, null] })
+    expect(priorErrors(json, 's1', 5)).toEqual([{ script: 'b', line: 'x', ms: 9 }])
+    expect(priorErrors(json, 's2', 0)).toEqual([])
+    expect(priorErrors('{', 's1', 0)).toEqual([])
+    expect(priorErrors(null, 's1', 0)).toEqual([])
   })
 
   test('pluginScript: a path merely named is not a run', () => {

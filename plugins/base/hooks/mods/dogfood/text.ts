@@ -238,10 +238,12 @@ const NAMES = PLUGINS.join('|')
 // A path runs only in command position: a command's first word, or the script argument of an interpreter that is one.
 const RUN = `(?:^|[;&|(\`])\\s*(?:(?:\\w+=\\S*|env|exec|time)\\s+)*(?:[^\\s;&|()]*/)?(?:(?:node|bash|sh|zsh|python3?)(?:\\s+-\\S+)*\\s+)?["']?`
 const IN_REPO = new RegExp(`${RUN}(?:[^\\s"';|&()]*/)?plugins/(?:${NAMES})/scripts/[^\\s"';|&)<>\`]+`)
-const IN_CACHE = new RegExp(`${RUN}[^\\s"';|&()]*/\\.claude/plugins/cache/[^/\\s"']+/(?:${NAMES})/[^/\\s"']+/scripts/[^\\s"';|&)<>\`]+`)
+const IN_CACHE = new RegExp(
+  `${RUN}[^\\s"';|&()]*/\\.claude[^/\\s"']*/plugins/(?:cache/[^/\\s"']+/(?:${NAMES})/[^/\\s"']+|synced/[^/\\s"']+/(?:${NAMES})(?:~[^/\\s"']*)?)/scripts/[^\\s"';|&)<>\`]+`,
+)
 const base = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 
-/** The basename of the Domaine plugin script a command runs (repo `plugins/<name>/scripts/` or the plugin cache), else null; a path merely named (grep, cat, ls) is not a run. */
+/** The basename of the Domaine plugin script a command runs (repo `plugins/<name>/scripts/`, the plugin cache of any config dir or its synced copy), else null; a path merely named (grep, cat, ls) is not a run. */
 export function pluginScript(command: string): string | null {
   const p = (IN_CACHE.exec(command) ?? IN_REPO.exec(command))?.[0]
   return p ? base(p) : null
@@ -285,7 +287,7 @@ export function bashFailed(r: { isError?: true; result?: unknown }): boolean {
  */
 const REFUSAL = new RegExp(`^(?:${[
   'usage', 'unknown[_ ]', 'unexpected_', 'missing[_ ]', 'too many ', '(?:--)?[a-z][a-z-]* (?:requires|needs) ', 'conflicting_', 'ambiguous_',
-  'not_a_', 'not_applied', 'unusable_', 'unsupported_', 'no uncommented ', 'config not found',
+  'not_a_', 'not_applied', 'upload_rejected\\b', 'unusable_', 'unsupported_', 'no uncommented ', 'config not found',
   'no_(?:store|such_dir|origin|free_port|jira_credentials|(?:admin|theme|figma)_token)\\b', 'bad_(?:theme_id|file|build_script)\\b',
   'file_not_writable\\b', '(?:\\w+_)?invalid_(?!\\w*(?:token|credentials)\\b)',
   '\\w+_(?:refused|mismatch|drift|limit|missing|dirty|detached|taken|elsewhere|not_a_symlink|not_in_repo|not_ignored)\\b',
@@ -296,6 +298,29 @@ const errorReasons = (text: string) => [...text.matchAll(/^error=(.*)$/gm)].map(
 
 /** An `error=` line that is a failure, not a refusal: worth a report even when the line's exit code is another command's. */
 export const failureLine = (text: string): boolean => errorReasons(text).some(r => !REFUSAL.test(r))
+
+/** The line that names a failure: the first failing `error=` line, else the first with `Error`, else ''; at most 160 chars. */
+export function errorLine(text: string): string {
+  const reason = errorReasons(text).find(r => !REFUSAL.test(r))
+  const line = reason !== undefined ? `error=${reason}` : (text.split('\n').find(l => /Error\b/.test(l)) ?? '')
+  return line.trim().slice(0, 160)
+}
+
+/** One unreported plugin-script failure of the main loop, as dogfood-state.json's `errors` lists them. */
+export type ScriptError = { script: string; line: string; ms: number }
+
+/** The `errors` of a prior dogfood-state.json text that belong to session `sid` and came after the report at `reportMs`. */
+export function priorErrors(json: string | null, sid: string, reportMs: number): ScriptError[] {
+  try {
+    const s = JSON.parse(json ?? '') as { sid?: unknown; errors?: unknown }
+    if (s.sid !== sid || !Array.isArray(s.errors)) return []
+    return s.errors.filter(
+      (e): e is ScriptError => !!e && typeof e.script === 'string' && typeof e.line === 'string' && typeof e.ms === 'number' && e.ms > reportMs,
+    )
+  } catch {
+    return []
+  }
+}
 
 /**
  * A refusal the script printed on purpose, with no crash signature: its `error=` lines all refusals, or, with

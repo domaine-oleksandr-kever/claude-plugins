@@ -4,12 +4,14 @@ description: >
   Set up or tear down an isolated git worktree with its own checkout, branch and dev port. Use when
   the user asks to create or remove a worktree, or to work in parallel without tying up the main
   checkout.
-argument-hint: "<WORK-ID> [base-branch] | --remove <WORK-ID> [--force]"
+argument-hint: "<WORK-ID> [base-branch] [--branch <name>] | --remove <WORK-ID> [--force]"
 arguments:
   - name: work_id
-    description: Jira ticket key (ABC-206) or a kebab-case slug (header-refactor) — the same work-id the task workspace uses. Infer from the conversation when omitted; ask if ambiguous.
+    description: Jira ticket key (ABC-206), a ticket key with a kebab-case suffix (ABC-206-badge-style) or a kebab-case slug (header-refactor). The full id names the worktree directory and the default branch; the task workspace is the ticket key (or the slug). Infer from the conversation when omitted; ask if ambiguous.
   - name: base_branch
-    description: Branch the worktree's `feat/<WORK-ID>` starts from. Optional — the script's default is `develop`.
+    description: Branch the worktree's branch starts from; `origin/release/2.4.0` and `release/2.4.0` are the same. Optional — the script's default is `develop`.
+  - name: branch
+    description: --branch <name> replaces `feat/<WORK-ID>` — an existing local or origin branch is checked out, a new name is created from the base. Optional.
   - name: remove
     description: --remove tears the worktree down; --force additionally discards a dirty tree. Optional.
 allowed-tools: Read, Glob, Bash(${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh*)
@@ -35,6 +37,8 @@ own):
 
 - **`.env`, always** — base's fetchers (`jira-attachments.sh`, `figma-rest.sh`) read their
   credentials from the project's `./.env`.
+- **`shopify.theme.toml`, with or without a `--copy`** — the script copies it itself when the main checkout has
+  one git does not track (a tracked one is in the checkout already).
 - **The team plugin's list** — a team plugin whose work needs more names it in its system-prompt
   section with exactly one line:
 
@@ -51,21 +55,28 @@ Each path becomes one `--copy <path>` argument. The script refuses a path that l
 
 ## Steps
 
+0. **A worktree only when one was asked for.** The developer said "worktree" (or asked to work in
+   parallel without tying up this checkout). A request for a branch — "a branch from
+   release/2.4.0", "switch to feat/x" — is a branch, not a worktree: say so in one line and stop;
+   never create a worktree for it.
 1. **Resolve `<WORK-ID>`.** A Jira key when one is in play (argument, conversation, or the current
-   branch); otherwise a kebab-case slug for the work (`header-refactor`). State the resolved id in one
+   branch), optionally with a kebab-case suffix the developer gave (`ABC-123-badge-style`);
+   otherwise a kebab-case slug for the work (`header-refactor`). State the resolved id in one
    line when it was inferred rather than passed. Ambiguous → ask; never invent a key.
-2. **Run** `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh <WORK-ID> [<base-branch>] --copy .env [--copy <path>]…`.
+2. **Run** `${CLAUDE_PLUGIN_ROOT}/scripts/worktree-setup.sh <WORK-ID> [<base-branch>] --copy .env [--copy <path>]… [--branch <name>]`.
+   Pass `--branch` only when the developer named the branch.
    It is idempotent — re-running on an existing worktree re-prints the hand-off, and its `kept=` line
    names the copies the worktree already had.
 3. **Relay verbatim.** Print the script's output, above all the hand-off block (the `cd … && claude`
    line and the dev port) — the developer pastes it, so do not paraphrase, re-wrap, or "improve" the
-   paths. Name any `missing=` path in one line: the main checkout has no such file to copy.
+   paths. The reply always names the worktree path (`worktree=`) and its branch (`branch=`). Name
+   any `missing=` path in one line: the main checkout has no such file to copy.
 4. **Then the team plugin's steps**, when its section names any for a new worktree (a per-worktree
    config to adjust, a preview to create): they run after this one, from the team plugin's own skill.
 5. **Remove:** `worktree-setup.sh --remove <WORK-ID>`. A refusal on a dirty tree is a real answer —
    report its `dirty=` line and ask before re-running with `--force`. A copied file still identical
    to the main checkout's never counts as dirty; an edited copy, a new file under a copied directory
-   and anything under a `kept=` path do. The task workspace (`.claude/tasks/<WORK-ID>/`) lives in the main checkout and survives
+   and anything under a `kept=` path do. The task workspace (`.claude/tasks/<ticket key or slug>/`) lives in the main checkout and survives
    removal; so does the branch.
 
 ## Inside the worktree

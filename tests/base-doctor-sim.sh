@@ -273,6 +273,25 @@ rc=0; BASE_SHOPIFY_VALIDATE=no BASE_SHOPIFY_VALIDATE_TIMEOUT=900 node "$DOCTOR" 
 expect CD39h-switches-shopify-validate-invalid 0 'WARN  switches' 'BASE_SHOPIFY_VALIDATE="no" is read as on — only 0 turns it off' \
   'BASE_SHOPIFY_VALIDATE_TIMEOUT="900" is read as 90 — seconds, 1-600'
 
+# ----------------------------------------------------------------------------------- cache --
+# Claude Code keeps every installed version under cache/domaine/<name>/: the doctor lists the ones no install
+# record names, as a WARN, never a FAIL; an all-recorded cache, another marketplace's and a dot dir are silent.
+HC="$TMP/hcache"; C="$HC/.claude/plugins/cache"
+mkhome "$HC" "$(installed '"slim@domaine":[{"scope":"user","installPath":"'"$C"'/domaine/slim/0.14.1","version":"0.14.1"}],"fe@domaine":[{"scope":"user","version":"0.9.1"},{"scope":"project","projectPath":"/p","version":"0.8.0"}],"figma@official":[{"scope":"user","version":"2.0.0"}]')"
+mkdir -p "$C/domaine/slim/0.14.1" "$C/domaine/fe/0.9.1" "$C/domaine/fe/0.8.0" "$C/official/figma/1.0.0"
+run --root "$P" --home "$HC" --project "$PRJ"
+expect CD40-cache-clean 0 "!WARN  cache" "!warned"
+mkdir -p "$C/domaine/slim/0.9.0" "$C/domaine/slim/0.10.2" "$C/domaine/slim/.tmp" "$C/domaine/fe/0.9.0" "$C/domaine/band/0.1.0"
+run --root "$P" --home "$HC" --project "$PRJ"
+expect CD41-cache-stale 0 "WARN  cache" "stale versions in $C/domaine: fe 0.9.0; slim 0.9.0, 0.10.2 — scripts/install.sh --prune-cache" \
+  "!band 0.1.0" "!.tmp" "!figma" "doctor: 7 passed, 0 failed, 0 skipped, 1 warned"
+# What --prune-cache leaves is never listed: a version a live session holds, a plugin with no recorded version on disk.
+mkdir -p "$C/domaine/slim/0.10.2/.in_use/$$" "$C/domaine/slim/0.9.0/.in_use/2147483646"
+rm -rf "$C/domaine/fe/0.9.1" "$C/domaine/fe/0.8.0"
+run --root "$P" --home "$HC" --project "$PRJ"
+expect CD42-cache-prune-rules 0 "WARN  cache" "stale versions in $C/domaine: slim 0.9.0 — scripts/install.sh --prune-cache" \
+  "!0.10.2" "!fe 0.9.0"
+
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad CD-head "HEAD moved"; fi
 

@@ -45,7 +45,10 @@ known; missing data is reported as a gap, not fetched.
      its order (ticket rows plus the series' shared tail for a batch); with no series named, the steps
      the conversation has taken. band's checklist shows this file; `/base-progress <work-id>` pins
      it there when the branch does not name the work.
-4. **Report** — one compact list: files written, one line on what each holds, and the known gaps
+4. **Index** — append or refresh (in place, never a second line) this work id's one line in
+   `.claude/tasks/INDEX.md`: `<work-id> — <topic> — <main conclusion>`; a missing file is created
+   with the one-line header `# Task index` first.
+5. **Report** — one compact list: files written, one line on what each holds, and the known gaps
    (e.g. "ABC-302 AC never fetched"). Offer — don't run — a `base:jira-reader` fetch for gaps worth
    filling.
 

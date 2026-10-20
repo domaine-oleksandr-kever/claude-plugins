@@ -190,7 +190,7 @@ if [ "$rc" -eq 0 ] && [ -d "$WTR/theme-header-refactor" ] \
 else bad W7-slug-create "rc=$rc out=$(show) err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
 # W8: neither a ticket key nor a clean slug → refused BEFORE any git write
-for badid in Bad_ID ABC-12a abc--x trail- "sp ace" ../escape; do
+for badid in Bad_ID ABC-12a abc--x trail- "sp ace" ../escape ABC-12- ABC-12--x ABC-12-Badge ABC-12-a_b; do
   rc=0; wt_run "$badid" || rc=$?
   if [ "$rc" -eq 1 ] && grep -q '^error=invalid_work_id' "$O" && [ ! -e "$WTR/theme-$badid" ]; then ok
   else bad "W8-invalid-id[$badid]" "rc=$rc out=$(head -c 160 "$O" | tr '\n' ' ')"; fi
@@ -537,6 +537,93 @@ if [ "$rc" -ne 0 ] && grep -q '^error=no_free_port range=9293-9294' "$O" && [ ! 
 else bad W32b-no-free-port "rc=$rc out=$(show)"; fi
 wt_unlisten
 
+# W33: a ticket key with a kebab suffix names the directory and branch; the workspace is the key's
+mk_repo "$WTR/ks"
+WT_KS_MAIN="$(cd "$WTR/ks/theme" && pwd -P)"
+rc=0; repo_run "$WTR/ks" KS-12-badge-style || rc=$?
+wt_ks1="$(wt_key dev_port)"; wt_ks_out="$(show)"
+if [ "$rc" -eq 0 ] && [ "$(wt_branch "$WTR/ks/theme-KS-12-badge-style")" = "feat/KS-12-badge-style" ] \
+   && [ "$(wt_key workspace)" = "$WT_KS_MAIN/.claude/tasks/KS-12" ] \
+   && grep -qF 'the task workspace .claude/tasks/KS-12 is shared' "$O" \
+   && grep -qE "worktree \`$WT_KS_MAIN-KS-12-badge-style\` .*dev-port: $wt_ks1\$" "$WTR/ks/theme/.claude/tasks/KS-12/notes.md" \
+   && [ ! -e "$WTR/ks/theme/.claude/tasks/KS-12-badge-style" ]; then ok
+else bad W33-ticket-slug-id "rc=$rc out=$wt_ks_out"; fi
+
+# W33b: a second worktree of the same ticket shares the workspace but not the port; a re-entry keeps its own
+rc=0; repo_run "$WTR/ks" KS-12-other || rc=$?; wt_ks2="$(wt_key dev_port)"
+rc2=0; repo_run "$WTR/ks" KS-12-badge-style || rc2=$?; wt_ks1b="$(wt_key dev_port)"
+if [ "$rc" -eq 0 ] && [ "$rc2" -eq 0 ] && [ -n "$wt_ks2" ] && [ "$wt_ks2" != "$wt_ks1" ] && [ "$wt_ks1b" = "$wt_ks1" ] \
+   && [ "$(grep -c 'dev-port:' "$WTR/ks/theme/.claude/tasks/KS-12/notes.md")" -eq 2 ]; then ok
+else bad W33b-ticket-slug-shared-workspace "rc=$rc/$rc2 ports=$wt_ks1/$wt_ks2/$wt_ks1b"; fi
+
+# W33c: --remove takes the full id; the ticket's workspace survives
+rc=0; repo_run "$WTR/ks" --remove KS-12-badge-style || rc=$?
+if [ "$rc" -eq 0 ] && [ ! -d "$WTR/ks/theme-KS-12-badge-style" ] && [ -d "$WTR/ks/theme-KS-12-other" ] \
+   && [ "$(wt_key workspace_kept)" = "$WT_KS_MAIN/.claude/tasks/KS-12" ]; then ok
+else bad W33c-ticket-slug-remove "rc=$rc out=$(show)"; fi
+
+# W34: a base passed as origin/<branch> is the branch
+wt_git -C "$WTR/ks/theme" checkout -q -b release/2.4.0
+printf 'release\n' > "$WTR/ks/theme/release.txt"
+wt_git -C "$WTR/ks/theme" add release.txt; wt_git -C "$WTR/ks/theme" commit -qm release
+wt_git -C "$WTR/ks/theme" push -q origin release/2.4.0
+wt_git -C "$WTR/ks/theme" checkout -q develop
+wt_git -C "$WTR/ks/theme" branch -qD release/2.4.0
+rc=0; repo_run "$WTR/ks" BAS-1 origin/release/2.4.0 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^base=release/2.4.0$' "$O" && grep -q '^branch=feat/BAS-1$' "$O" \
+   && [ -f "$WTR/ks/theme-BAS-1/release.txt" ]; then ok
+else bad W34-origin-prefixed-base "rc=$rc out=$(show)"; fi
+
+# W35: --branch names a new branch, created from the base
+rc=0; repo_run "$WTR/ks" BAS-2 release/2.4.0 --branch fix/badge-style || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^branch=fix/badge-style$' "$O" && grep -q '^branch_source=created$' "$O" \
+   && [ "$(wt_branch "$WTR/ks/theme-BAS-2")" = "fix/badge-style" ] && [ -f "$WTR/ks/theme-BAS-2/release.txt" ] \
+   && ! wt_git -C "$WTR/ks/theme" show-ref --verify --quiet refs/heads/feat/BAS-2; then ok
+else bad W35-branch-created "rc=$rc out=$(show)"; fi
+
+# W35d: a re-entry without --branch on a worktree created with --branch is no branch switch
+rc=0; repo_run "$WTR/ks" BAS-2 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^reused=true$' "$O" && grep -q '^branch=fix/badge-style$' "$O" \
+   && ! grep -q '^warn=branch_switched' "$O"; then ok
+else bad W35d-branch-reentry-no-warn "rc=$rc out=$(show)"; fi
+
+# W35b: --branch naming a branch on origin (origin/ prefix dropped) tracks it instead of forking it
+rc=0; repo_run "$WTR/ks" REL-24 --branch origin/release/2.4.0 || rc=$?
+wt_ks_up="$(wt_git -C "$WTR/ks/theme-REL-24" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
+if [ "$rc" -eq 0 ] && grep -q '^branch=release/2.4.0$' "$O" && grep -q '^branch_source=remote$' "$O" \
+   && [ "$wt_ks_up" = "origin/release/2.4.0" ]; then ok
+else bad W35b-branch-remote "rc=$rc upstream=$wt_ks_up out=$(show)"; fi
+
+# W35c: --branch with no value or a name git cannot hold is refused before any git write
+rc=0; repo_run "$WTR/ks" BAS-3 --branch || rc=$?
+rc2=0; repo_run "$WTR/ks" BAS-3 --branch 'a b' || rc2=$?
+if [ "$rc" -eq 1 ] && [ "$rc2" -eq 1 ] && grep -q "^error=invalid_branch branch='a b'" "$O" \
+   && [ ! -e "$WTR/ks/theme-BAS-3" ]; then ok
+else bad W35c-branch-invalid "rc=$rc/$rc2 out=$(show)"; fi
+
+# W36: an ignored shopify.theme.toml in the main checkout is copied unasked, once, and is no dirt
+mk_repo "$WTR/tm"
+printf 'shopify.theme.toml\n' > "$WTR/tm/theme/.gitignore"
+wt_git -C "$WTR/tm/theme" add .gitignore; wt_git -C "$WTR/tm/theme" commit -qm ignore; wt_git -C "$WTR/tm/theme" push -q origin develop
+printf '[environments.development]\nstore = "acme-dev"\n' > "$WTR/tm/theme/shopify.theme.toml"
+rc=0; repo_run "$WTR/tm" TOM-1 --copy shopify.theme.toml || rc=$?
+wt_tm_out="$(show)"
+rc2=0; repo_run "$WTR/tm" --remove TOM-1 || rc2=$?
+rc3=0; repo_run "$WTR/tm" TOM-2 || rc3=$?
+if [ "$rc" -eq 0 ] && printf '%s' "$wt_tm_out" | grep -q 'copied=shopify.theme.toml;' && [ "$rc2" -eq 0 ] \
+   && [ "$rc3" -eq 0 ] && grep -q '^copied=shopify.theme.toml$' "$O" \
+   && cmp -s "$WTR/tm/theme/shopify.theme.toml" "$WTR/tm/theme-TOM-2/shopify.theme.toml"; then ok
+else bad W36-toml-copied "rc=$rc/$rc2/$rc3 first=$wt_tm_out out=$(show)"; fi
+
+# W36b: a tracked shopify.theme.toml is git's: the checkout has it, nothing is copied
+mk_repo "$WTR/tt"
+printf '[environments.development]\nstore = "tracked"\n' > "$WTR/tt/theme/shopify.theme.toml"
+wt_git -C "$WTR/tt/theme" add -A; wt_git -C "$WTR/tt/theme" commit -qm toml; wt_git -C "$WTR/tt/theme" push -q origin develop
+rc=0; repo_run "$WTR/tt" TOM-3 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^copied=none$' "$O" && grep -q '^missing=none$' "$O" \
+   && grep -q 'tracked' "$WTR/tt/theme-TOM-3/shopify.theme.toml"; then ok
+else bad W36b-toml-tracked "rc=$rc out=$(show)"; fi
+
 # ------------------------------------------------------------------- the --copy list --
 mk_repo "$WTR/cp"
 CPM="$WTR/cp/theme"
@@ -619,7 +706,7 @@ if [ "$rc" -eq 0 ] && printf '%s' "$cp8_out" | grep -q 'kept=src;' && [ "$rc2" -
    && [ "$cp_dirty" = "src/new-feature.js" ] && [ -f "$CPW8/src/new-feature.js" ]; then ok
 else bad C8-kept-dir-stays-dirty "rc=$rc/$rc2 dirty='$cp_dirty' out=$cp8_out"; fi
 
-# C6: the generic script carries no team step: no store-theme pinning, no profile probe, no fixed copies
+# C6: the generic script carries no team step: no store-theme pinning, no profile probe
 if ! grep -qE 'session-theme|project-profile|create-preview-theme|toml_unpinned|ENV_STATE' "$WTS"; then ok
 else bad C6-no-team-steps "$(grep -nE 'session-theme|project-profile|create-preview-theme|toml_unpinned|ENV_STATE' "$WTS" | head -3)"; fi
 

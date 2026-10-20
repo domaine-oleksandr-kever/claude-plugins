@@ -121,6 +121,8 @@ returned `comment_links: []` while the comments carried four links.
 Collect every URL the comments carry into `comment_links` — Figma, Notion, anything else
 alike. They stay **out** of `figma_urls` / `notion_urls` / `other_links`: the caller spawns
 readers from those, and a link a commenter pasted is the caller's decision to follow.
+A comment's Figma link whose node differs from every `figma_urls` node also goes on the
+`newer_figma_links_in_comments` line, so the caller does not spec a stale node.
 
 ## Fetch the attachments
 
@@ -228,6 +230,7 @@ notion_urls:                # list — notion.so / *.notion.site URLs, same fiel
 other_links:                # list — other external URLs worth reading (Confluence, docs, …)
 comments:                   # list — one line each, oldest first: "#<n> <author> <YYYY-MM-DD HH:MM> — <first 160 chars>"; [] when none; full text in comments.md
 comment_links:              # list — every URL found in the comments (never merged into the three lists above; minus the screenshot links, which are `attachments` rows now)
+newer_figma_links_in_comments: # list — the comments' Figma URLs whose node is none of `figma_urls`' nodes, oldest first, each with its "#<n>"; [] when none
 attachments:                # list — id · filename · kind · mime · size · created · author · path ("" if not on disk) · view ("" or the resized copy's path, "<frames dir>:<n>" for a video, the path itself for text); a linked screenshot's id is `ext` and its line ends with `source: <host> · comment #<n> | description · <url>`
 attachments_note:           # "" when every wanted file is in the workspace and resized; else one line for the developer (the no-workspace dir / the token hint / a view refusal / a linked screenshot's note= line / a Slack-only screenshot)
 field_id_mismatch:          # "" normally; "customfield_10040 → customfield_10041" when Step B resolved a different ID
@@ -243,7 +246,7 @@ five body fields are ever placeheld: `description`, `acceptance_criteria`, `assu
 caller named it**: `key`, `summary`, `status`, `issue_type`, `updated`, **all four link lists**
 (`documentation_links`, `figma_urls`, `notion_urls`, `other_links` — the caller spawns readers
 from them, and a placeheld list silently costs it a doc), **`comments`, `comment_links`,
-`attachments` and `attachments_note`** (the caller decides which discussion and which
+`newer_figma_links_in_comments`, `attachments` and `attachments_note`** (the caller decides which discussion and which
 screenshots the task needs — it cannot decide from a placeholder), `field_id_mismatch`,
 `needs_clarification`, `saved_to`. Nothing saved → return every field.
 

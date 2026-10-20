@@ -1,7 +1,7 @@
 // Dogfood mode (BASE_DOGFOOD=1, or an account of dogfood.json): the plugin_defect tool and its report files, the nudge on a failed plugin
 // script (a designed refusal stays silent: text.ts's designedRefusal), and /base-defects. Off, every hook passes. The state of
-// base.dogfood is mirrored to <log dir>/<session>/dogfood-state.json, where hooks/conventions.cjs blocks the stop once while a failure
-// of a script that ended its line is unreported. The convention section is hooks/conventions.cjs's; the `defects` row is doctor.ts's.
+// base.dogfood is mirrored to <log dir>/<session>/dogfood-state.json with the main loop's failures since the last report (`errors`),
+// where hooks/conventions.cjs blocks the stop once while one is unreported. The convention section is hooks/conventions.cjs's; the `defects` row is doctor.ts's.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseDogfood, BaseEvent } from '../../types'
@@ -19,6 +19,7 @@ import {
   designedRefusal,
   dogfoodMode,
   enabledNames,
+  errorLine,
   failureLine,
   fenced,
   fileName,
@@ -31,6 +32,7 @@ import {
   parseDefect,
   pluginScript,
   pluginScripts,
+  priorErrors,
   repoOf,
   scriptLast,
   seen,
@@ -38,7 +40,7 @@ import {
   versionsLine,
   versionsOf,
 } from './dogfood/text.ts'
-import type { Defect, Plugin } from './dogfood/text.ts'
+import type { Defect, Plugin, ScriptError } from './dogfood/text.ts'
 import { logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 
@@ -48,6 +50,7 @@ export const COMMAND = {
   immediate: true,
 } as const
 const MAX_CLASH = 99
+const MAX_ERRORS = 50
 
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
 const dogfood = atom({ plugin: 'base', key: 'dogfood' } as const, null as BaseDogfood | null)
@@ -122,12 +125,18 @@ async function git($: $, root: string, args: string[]): Promise<string | null> {
   return out || null
 }
 
-/** base.dogfood as the file the Stop command hook reads; a failed write is ignored. */
-async function mirror($: $): Promise<void> {
+/**
+ * base.dogfood as the file the Stop command hook reads, with `errors`: the prior file's failures after the last report, plus
+ * `add`. The list lives in the file alone; a failed read starts it empty, a failed write is ignored.
+ */
+async function mirror($: $, add?: ScriptError): Promise<void> {
   try {
     const s = await read($, dogfood)
     const dir = s && logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), s.sid)
-    if (s && dir) await $.fs.write(`${dir}/dogfood-state.json`, `${JSON.stringify({ sid: s.sid, failMs: s.failMs, script: s.script, reportMs: s.reportMs })}\n`)
+    if (!s || !dir) return
+    const file = `${dir}/dogfood-state.json`
+    const errors = [...priorErrors(await $.fs.read(file).catch(() => null), s.sid, s.reportMs), ...(add ? [add] : [])].slice(-MAX_ERRORS)
+    await $.fs.write(file, `${JSON.stringify({ sid: s.sid, failMs: s.failMs, script: s.script, reportMs: s.reportMs, errors })}\n`)
   } catch {}
 }
 
@@ -290,15 +299,14 @@ export function registerDogfood(on: On): void {
     const text = bashText(r)
     if (r.isError && deniedNotRun(text)) return r
     // A line the script does not end owns no exit code (`| head` hides it): only the script's own trace or `error=` line speaks for it.
-    const own = scriptLast(e.command)
-    const failed = own ? bashFailed(r) && !designedRefusal(text, script) : (bashFailed(r) && pluginScripts(e.command).some(s => crashedIn(text, s))) || failureLine(text)
+    const failed = failureLine(text) || (scriptLast(e.command) ? bashFailed(r) && !designedRefusal(text, script) : bashFailed(r) && pluginScripts(e.command).some(s => crashedIn(text, s)))
     if (!failed || !(await dogfoodOn($).catch(() => false))) return r
     try {
       await logDefect($, `script failed: ${script}`)
-      if (own && e.agentId === undefined) {
+      if (e.agentId === undefined) {
         const now = await $.clock.now()
         await update($, dogfood, s => (s ? { ...s, failMs: now, script } : s))
-        await mirror($)
+        await mirror($, { script, line: errorLine(text), ms: now })
       }
     } catch {}
     return { ...r, context: [...(r.context ?? []), NUDGE] }

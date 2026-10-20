@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.12.0**.
+Current release: **base v0.13.0**.
 
 ## Status
 
@@ -117,7 +117,7 @@ that every cited path exists.
 | `references/task-workspace.md`, `references/task-workspace-freshness.md` | the `.claude/tasks/<work-id>/` layout, its read and write rules, `progress.md`, the freshness probes |
 | `references/review-flow.md` | the branch review flow: the `.git/.base-review` marker, which agent runs which check |
 | `references/commit-message-format.md` | Conventional Commits with the house rules |
-| `references/steps-to-test-format.md` | the Steps to Test field's General and Bug templates and the theme resolution: what a team plugin's Steps to Test writer writes and `/qa:preflight` reads rows from |
+| `references/steps-to-test-format.md` | the Steps to Test field's General and Bug templates and the theme resolution: what a team plugin's Steps to Test writer writes and `/qa:preflight` reads rows from — an index; the sections are in `references/steps-to-test/` (templates, item-rules, shape-and-size, theme-resolution, self-check) |
 | `references/break-it-qa.md` | the break-it QA method: deriving and executing the hostile-value and timing rows of a team plugin's QA and of `/qa:preflight` |
 | `references/shopify-recipes.md` | `/base:shopify`'s Admin GraphQL recipes, validated on API 2026-10 with their scopes and how to read each answer; the PDP "why does X not show" checklist; the `metafieldsSet` and `productUpdate` templates |
 | `references/shopify-custom-data.md` | metafield and metaobject rules: `$app` vs merchant namespaces, definitions, `metafieldsSet` writes, metaobject `ACTIVE` status, reference metafields |
@@ -290,7 +290,7 @@ a Write or Edit under `.claude/tasks/` or a Bash command naming the workspace th
 | `base.guardRoot` | the project root the session launched in, which the scratch-path guard measures against |
 | `base.mcpSoft` | `{ sid, tools }`: base's own MCP tools the MCP guard refused once in session `sid` because another server serves the same tools, at most 200; a new session id starts empty |
 | `base.swept` | the session id whose base-tmp and event-log sweeps ran |
-| `base.dogfood` | dogfood mode's session: `{ sid, failMs, script, reportMs }` — the last plugin-script failure and the last `plugin_defect` report, mirrored to `dogfood-state.json` |
+| `base.dogfood` | dogfood mode's session: `{ sid, failMs, script, reportMs }` — the last plugin-script failure and the last `plugin_defect` report, mirrored to `dogfood-state.json` with `errors: [{script, line, ms}]`, the main loop's plugin-script failures since the last `plugin_defect` report (at most 50) |
 | `base.classic` | the session id whose `classic.UserPromptSubmit` reached base's mods (the doctor's `classic` row) |
 
 **Autosave.** A savable event is one of these, in the main loop: an Agent call that returned its
@@ -373,7 +373,7 @@ pane.
   `conventions.<plugin>.json` (the marker each plugin's `SessionStart` hook writes, base's rules part
   as `conventions.base.rules.json`; Conventions), `agents/<agent_id>.json` (the agent type as a
   JSON string, written by the `SubagentStart` hook, read by the MCP guard), `dogfood-state.json` (base's mod
-  mirrors `{sid, failMs, script, reportMs}` after each dogfood update) and `dogfood-stop.json`
+  mirrors `{sid, failMs, script, reportMs, errors}` after each dogfood update) and `dogfood-stop.json`
   (`{blockedMs}`, the failure whose stop the `Stop` hook already blocked). `BASE_EVENT_LOG=0` does not
   stop them.
 - **Clean-up:** base sweeps session folders whose newest file is older than 7 days. Its
@@ -426,6 +426,7 @@ counts, and the last 10 `base.events` lines:
 | `slim` | slim installed (user scope or this project) and enabled — else `claude plugin install slim@domaine` |
 | `base-tmp` | `.claude/base-tmp`: files, size, how many the next sweep removes, whether git ignores it |
 | `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
+| `cache` | only when `<config dir>/plugins/cache/domaine/<name>/` holds a version no install record names: WARN, the stale versions per plugin and a pointer to `scripts/install.sh --prune-cache` (a plugin with no recorded version on disk, and a version a live session holds in `.in_use/<pid>`, are left out) |
 | `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_TMP_TTL` that is not hours, a `BASE_SHOPIFY_VALIDATE_TIMEOUT` outside 1-600 seconds, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |
 | `slim-live` | what this session loaded: slim's `mcp__slim__view` tool registered |
 | `conventions` | this session's markers (Conventions): PASS `SessionStart command hook (<source>): base core+rules, fe, qa, be, pm` for the Domaine plugins settings enable, that left a marker, or whose `<plugin>.jsonl` is in the log folder (a claude.ai sandbox's synced plugins have no settings entry); WARN names such a plugin with no marker, `(enabled)` or `(loaded)`; FAIL after the first prompt when no marker is there; PASS `prompt.context fallback` where nothing draws and base's mod served them; SKIP before the first prompt; the markers are read from the log folder and the spare folder |
@@ -497,15 +498,18 @@ There are two ways to turn it on:
 - **Subagents** also get the `dogfood` section from the `SubagentStart` hook, because any agent may run a plugin
   script. A subagent's failed plugin script nudges and logs, but does not block the main loop's stop.
 - **Nudge**: a Bash command can run a plugin script and fail. A plugin script is
-  `plugins/<name>/scripts/…` of the seven, or anything of theirs under `~/.claude/plugins/cache/`.
+  `plugins/<name>/scripts/…` of the seven, or their `scripts/` under the plugin cache or the synced
+  copy (`plugins/synced/<account>/<name>/`) of any config dir named `.claude*`.
   A failure is an error result, or `Error` in the stderr. The result then gets one line for the model,
   `base dogfood: a plugin script failed — report it with plugin_defect (not among your tools: in your reply) before working around it`,
-  and a `defect` event. In the main loop, the next stop without a report since then is blocked once
-  per failure: the mod mirrors the failure to `dogfood-state.json`, and the `Stop` command hook
-  (`conventions.cjs stop`) blocks from that file and notes the failure in `dogfood-stop.json`. A designed refusal is not a failure, so it gets no nudge. A refusal is output whose
+  and a `defect` event. In the main loop, the mod appends each failure to the `errors` of
+  `dogfood-state.json` (`{script, line, ms}`, cleared by a `plugin_defect` report), and the `Stop`
+  command hook (`conventions.cjs stop`) blocks once per newest unreported failure with
+  `base: <n> plugin script error(s) this session are not reported — report each with plugin_defect or say why not: <script> (<first error line>), …`
+  and notes it in `dogfood-stop.json`. A designed refusal is not a failure, so it gets no nudge. A refusal is output whose
   `error=` lines all name a refusal, or, with no `error=` line, a `<script stem>: …` line (a base
   script's die). A refusal is the caller's input or usage (`usage`, `unknown_arg`, `missing_value`,
-  `--env requires …`, `invalid_store`, `from_file_invalid_json`, …), a guard (`*_refused`,
+  `--env requires …`, `invalid_store`, `from_file_invalid_json`, `upload_rejected`, …), a guard (`*_refused`,
   `*_mismatch`, `settings_drift`, `ambiguous_env`, `not_applied`, …), something named that is not
   there (`theme_not_found`, `variables_file_not_found`, …) or a credential not set up
   (`no_admin_token`, `no_theme_token`, `no_jira_credentials`, `no_figma_token`). Every other `error=`
@@ -515,8 +519,9 @@ There are two ways to turn it on:
   always makes it a failure. When the script is not the line's last command (`script; echo done`,
   `script | head`), the exit code is not its own: a failed result with a crash the script's own
   trace names (`Error` with a stack frame `<script>:12`, or a shell's `<script>: line 12:`), or a
-  failure `error=` line even at exit 0, nudges and logs, and the stop is never blocked; another
-  command's `Error` (tsc, a husky hook) does not. A trailing `2>&1` still counts as last. A call the
+  failure `error=` line even at exit 0, nudges, logs and arms the stop like any other failure; another
+  command's `Error` (tsc, a husky hook) does not. A failure `error=` line counts at exit 0 for a
+  script that ends the line too. A trailing `2>&1` still counts as last. A call the
   permission layer denied (the auto mode classifier, a rule, the user) never ran: no nudge.
 - **`/base-defects`** lists the index newest first, then this project's `.claude/plugin-defects/`.
   The doctor's `defects` row counts the last 7 days.

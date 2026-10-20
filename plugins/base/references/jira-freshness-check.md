@@ -53,8 +53,9 @@ before re-reading the whole ticket:
    updated:            # the new value from step 1
    status:             # current status from step 1
    changed:            # e.g. "comments 4 → 6"
-   comments:           # the four attachment/comment keys of your output contract,
-   comment_links:      # all four in full — the caller has nothing else to read them from
+   comments:           # the five attachment/comment keys of your output contract,
+   comment_links:      # all five in full — the caller has nothing else to read them from
+   newer_figma_links_in_comments:  # against the cached ticket.md's figma_urls
    attachments:
    attachments_note:
    ```

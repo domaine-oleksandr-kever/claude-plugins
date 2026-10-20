@@ -20,21 +20,28 @@
 # it, before `npm ci` — a parallel setup started during the install sees the claim.
 #
 # Usage:
-#   worktree-setup.sh <WORK-ID> [<base-branch>] [--copy <path>]…      (default base: develop)
+#   worktree-setup.sh <WORK-ID> [<base-branch>] [--copy <path>]… [--branch <name>]   (default base: develop)
 #       → worktree=… branch=… base=… branch_source=… reused=… npm=… copied=… kept=… missing=…
 #         settings=… tasks_dir_allowed=… workspace=… dev_port=…   followed by the hand-off block
 #   worktree-setup.sh --remove <WORK-ID> [--force]
 #       → removed=… branch=… branch_kept=… workspace_kept=…
 #
-# <WORK-ID> is a Jira ticket key (`ABC-123`) or a kebab-case slug (`header-refactor`) — the same
-# work-id the task workspace uses; not every worktree is ticket-shaped.
+# <WORK-ID> is a Jira ticket key (`ABC-123`), a ticket key with a kebab-case suffix
+# (`ABC-123-badge-style`) or a kebab-case slug (`header-refactor`). The full id names the worktree
+# directory (`<repo>-<WORK-ID>`) and the default branch (`feat/<WORK-ID>`); the task workspace is
+# `.claude/tasks/<ticket key>` for the first two forms, `.claude/tasks/<slug>` for the third.
+#
+# <base-branch> and --branch take a branch name; a leading `origin/` is dropped (`origin/release/2.4`
+# is `release/2.4`). --branch <name> replaces `feat/<WORK-ID>`: a local branch of that name is
+# checked out, else a branch on origin is tracked, else it is created from the base.
 #
 # --copy <path> (repeatable): a repo-relative file or directory copied from the main checkout into
 # the worktree when the worktree has none (`copied=`), left alone when it has one (`kept=`), and
 # named in `missing=` when the main checkout has none either. The files it copies are recorded in
 # the worktree's own git dir, so --remove does not count them as uncommitted work while they still
 # match the main checkout's. `.git`, `.claude`, `.claude/tasks` and `.claude/settings.local.json`
-# are refused.
+# are refused. A `shopify.theme.toml` the main checkout has and git does not track is on the list
+# without being named (a tracked one is in the checkout already).
 #
 # `.claude/settings.local.json` is the worktree's own: kept when it has one (`settings=kept`), else
 # copied from the main checkout (`settings=copied`), else created (`settings=created`; `absent` when
@@ -68,7 +75,7 @@ PORT_FIRST=9293
 PORT_LAST=9312
 COPIES_FILE="base-worktree-copies"
 
-USAGE='usage: worktree-setup.sh <WORK-ID> [<base-branch>] [--copy <path>]… | worktree-setup.sh --remove <WORK-ID> [--force]'
+USAGE='usage: worktree-setup.sh <WORK-ID> [<base-branch>] [--copy <path>]… [--branch <name>] | worktree-setup.sh --remove <WORK-ID> [--force]'
 
 fail() { printf 'error=%s\n' "$1"; exit 1; }
 warn() { printf 'warn=%s\n' "$1"; }
@@ -89,11 +96,19 @@ TMPROOT="${TMPDIR:-/tmp}"; TMPROOT="${TMPROOT%/}"
 mk_tmpf() { mktemp "$TMPROOT/base-wt.XXXXXX" 2>/dev/null || mktemp -t base-wt; }
 
 # --- args --------------------------------------------------------------------
-MODE="create"; WORK_ID=""; BASE=""; FORCE=0; POS=0; COPIES=""
+MODE="create"; WORK_ID=""; BASE=""; FORCE=0; POS=0; COPIES=""; BRANCH_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --remove) MODE="remove"; shift ;;
     --force)  FORCE=1; shift ;;
+    --branch)
+      [ $# -ge 2 ] || fail "--branch needs a name ($USAGE)"
+      BRANCH_ARG="${2#origin/}"
+      case "$BRANCH_ARG" in
+        ''|-*|*' '*|*'~'*|*'^'*|*':'*|*'?'*|*'*'*|*'['*|*'\'*)
+          fail "invalid_branch branch='$2' (expected a branch name)" ;;
+      esac
+      shift 2 ;;
     --copy)
       [ $# -ge 2 ] || fail "--copy needs a path ($USAGE)"
       cp_arg="$2"
@@ -117,28 +132,33 @@ done
 
 [ -n "$WORK_ID" ] || fail "$USAGE"
 [ -n "$BASE" ] || BASE="$DEFAULT_BASE"
+BASE="${BASE#origin/}"
 
-# Ticket key or kebab slug, decided with `case` globs: bash 3.2's `[[ =~ ]]` quoting rules differ
-# from 4.x and this script must run on stock macOS bash.
-work_id_kind() { # prints ticket | slug ; empty when the id is neither
-  local id="$1" head rest
+# Ticket key, ticket key + kebab suffix, or kebab slug, decided with `case` globs: bash 3.2's
+# `[[ =~ ]]` quoting rules differ from 4.x and this script must run on stock macOS bash.
+is_slug() { case "$1" in ''|*[!a-z0-9-]*|-*|*-|*--*) return 1 ;; esac; }
+work_id_kind() { # prints ticket | ticket-slug | slug ; empty when the id is none of them
+  local id="$1" head rest num
   [ -n "$id" ] || return 0
   case "$id" in *-*)
-    head="${id%%-*}"; rest="${id#*-}"
+    head="${id%%-*}"; rest="${id#*-}"; num="${rest%%-*}"
     case "$head" in [A-Z][A-Z0-9]*)
       case "$head" in *[!A-Z0-9]*) ;; *)
-        case "$rest" in ''|*[!0-9]*) ;; *) printf 'ticket'; return 0 ;; esac ;;
+        case "$num" in ''|*[!0-9]*) ;; *)
+          if [ "$num" = "$rest" ]; then printf 'ticket'; return 0; fi
+          if is_slug "${rest#*-}"; then printf 'ticket-slug'; return 0; fi ;;
+        esac ;;
       esac ;;
     esac ;;
   esac
-  case "$id" in
-    *[!a-z0-9-]*|-*|*-|*--*) return 0 ;;
-  esac
-  printf 'slug'
+  if is_slug "$id"; then printf 'slug'; fi
 }
 
 KIND="$(work_id_kind "$WORK_ID")"
-[ -n "$KIND" ] || fail "invalid_work_id id='$WORK_ID' (expected a ticket key like ABC-123 or a kebab-case slug like header-refactor)"
+[ -n "$KIND" ] || fail "invalid_work_id id='$WORK_ID' (expected a ticket key like ABC-123, a ticket key with a kebab-case suffix like ABC-123-badge-style, or a kebab-case slug like header-refactor)"
+# The task workspace's id: the ticket key, without the suffix that only names the directory and branch.
+TASK_ID="$WORK_ID"
+if [ "$KIND" = ticket-slug ]; then id_rest="${WORK_ID#*-}"; TASK_ID="${WORK_ID%%-*}-${id_rest%%-*}"; fi
 
 case "$BASE" in
   ''|-*|*' '*|*'~'*|*'^'*|*':'*|*'?'*|*'*'*|*'['*|*'\'*)
@@ -202,8 +222,8 @@ ensure_excluded() { # $1 = a checkout to ask check-ignore in, $2 = the repo-rela
 
 REPO="$(basename "$MAIN")"
 WT="$(dirname "$MAIN")/$REPO-$WORK_ID"
-BRANCH="feat/$WORK_ID"
-WORKSPACE="$MAIN/.claude/tasks/$WORK_ID"
+BRANCH="${BRANCH_ARG:-feat/$WORK_ID}"
+WORKSPACE="$MAIN/.claude/tasks/$TASK_ID"
 
 git_main() { git -C "$MAIN" "$@"; }
 
@@ -375,19 +395,19 @@ port_free() { # 0 = nothing is listening on 127.0.0.1:$1 — and 0 when there is
   return 0
 }
 
-# The dev-ports other work-ids hold, one per line. A workspace OUTLIVES its worktree by design
-# (--remove keeps `.claude/tasks/<WORK-ID>/`), so a recorded port counts only while the worktree
-# that took it is still registered — otherwise every finished work-id would burn a port for good.
+# The dev-ports other worktrees hold, one per line, read from the record_port lines (one workspace
+# can serve several worktrees of one ticket). A workspace OUTLIVES its worktree by design (--remove
+# keeps `.claude/tasks/<id>/`), so a recorded port counts only while the worktree that took it is
+# still registered — otherwise every finished work-id would burn a port for good.
 ports_taken() {
-  local n id live
+  local live path port
   live="$(git_main worktree list --porcelain 2>/dev/null | grep '^worktree ' || true)"
-  for n in "$MAIN"/.claude/tasks/*/notes.md; do
-    [ -f "$n" ] || continue
-    [ "$n" != "$NOTES" ] || continue
-    id="$(basename "$(dirname "$n")")"
-    printf '%s\n' "$live" | grep -Fqx "worktree $(dirname "$MAIN")/$REPO-$id" || continue
-    grep -oE 'dev-port: [0-9]+' "$n" 2>/dev/null | tr -cd '0-9\n'
-  done
+  cat "$MAIN"/.claude/tasks/*/notes.md 2>/dev/null \
+    | sed -n 's/^- [^ ]* worktree `\(.*\)` on branch `.*`, dev-port: \([0-9][0-9]*\)$/\2 \1/p' \
+    | while read -r port path; do
+        [ "$path" != "$WT" ] || continue
+        if printf '%s\n' "$live" | grep -Fqx "worktree $path"; then printf '%s\n' "$port"; fi
+      done
 }
 port_recorded() { printf '%s\n' "$PORTS_TAKEN" | grep -qx "$1"; }
 
@@ -396,7 +416,7 @@ NOTES="$WORKSPACE/notes.md"
 PORTS_TAKEN="$(ports_taken || true)"
 PORT=""
 if [ -f "$NOTES" ]; then
-  PORT="$(grep -oE 'dev-port: [0-9]+' "$NOTES" | tail -1 | tr -dc '0-9' || true)"
+  PORT="$(grep -F "worktree \`$WT\`" "$NOTES" | grep -oE 'dev-port: [0-9]+' | tail -1 | tr -dc '0-9' || true)"
 fi
 # The recorded port is sticky for the SAME worktree — a re-entry hands back the number the running
 # dev server already uses. After a --remove the stale line is still there: a fresh create keeps
@@ -430,7 +450,7 @@ pick_port() {
 # The port lives in the SHARED workspace, so the session that runs in the worktree finds it in
 # `.claude/tasks/<WORK-ID>/notes.md`.
 record_port() {
-  [ -f "$NOTES" ] || printf '# %s — notes\n\n' "$WORK_ID" > "$NOTES"
+  [ -f "$NOTES" ] || printf '# %s — notes\n\n' "$TASK_ID" > "$NOTES"
   printf -- '- %s worktree `%s` on branch `%s`, dev-port: %s\n' \
     "$(date +%Y-%m-%d)" "$WT" "$BRANCH_REPORT" "$PORT" >> "$NOTES"
 }
@@ -488,11 +508,18 @@ if [ "$REUSED" = "false" ]; then
 else
   # Re-entry: nothing here moves the worktree back onto feat/<WORK-ID>. Report what it is on.
   BRANCH_REPORT="$(wt_branch_of "$WT")"
+  # Without --branch, the branch this script created is the one its notes line for $WT names.
+  EXPECTED="$BRANCH"
+  if [ -z "$BRANCH_ARG" ] && [ -f "$NOTES" ]; then
+    EXPECTED="$(grep -F "worktree \`$WT\` on branch \`" "$NOTES" | tail -1 \
+      | sed -n 's/^.* on branch `\(.*\)`, dev-port: [0-9]*$/\1/p')"
+    [ -n "$EXPECTED" ] || EXPECTED="$BRANCH"
+  fi
   if [ -z "$BRANCH_REPORT" ]; then
     BRANCH_REPORT=detached
     warn "worktree_detached path=$WT (no branch checked out there)"
-  elif [ "$BRANCH_REPORT" != "$BRANCH" ]; then
-    warn "branch_switched expected=$BRANCH actual=$BRANCH_REPORT (the worktree was moved off the branch this script created)"
+  elif [ "$BRANCH_REPORT" != "$EXPECTED" ]; then
+    warn "branch_switched expected=$EXPECTED actual=$BRANCH_REPORT (the worktree was moved off the branch this script created)"
   fi
   [ "$PORT_FROM_NOTES" = "true" ] || record_port
 fi
@@ -513,6 +540,11 @@ fi
 
 # The copy list. Copied only when the worktree has none, so a re-entry never clobbers a file the
 # worktree's own tools have since rewritten.
+if [ -f "$MAIN/shopify.theme.toml" ] && ! git_main ls-files --error-unmatch -- shopify.theme.toml >/dev/null 2>&1 \
+   && ! printf '%s' "$COPIES" | grep -Fqx shopify.theme.toml; then
+  COPIES="${COPIES}shopify.theme.toml
+"
+fi
 COPIED=""; KEPT=""; MISSING=""; COPIED_FILES=""
 join() { if [ -n "$1" ]; then printf '%s,%s' "$1" "$2"; else printf '%s' "$2"; fi; }
 while IFS= read -r cp_path; do
@@ -618,6 +650,6 @@ printf 'dev_port=%s\n' "$PORT"
 
 printf '\nnext:\n'
 printf '  cd %s && claude\n' "$(shq "$WT")"
-printf '  # then inside that session: start the work there — the task workspace .claude/tasks/%s is shared\n' "$WORK_ID"
+printf '  # then inside that session: start the work there — the task workspace .claude/tasks/%s is shared\n' "$TASK_ID"
 printf '  # dev server: start it on port %s\n' "$PORT"
 printf '  # this checkout (%s) stays free — the worktree needs its OWN terminal and session\n' "$MAIN"

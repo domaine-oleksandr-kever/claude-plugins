@@ -380,6 +380,12 @@ these steps:
 `install.sh --plugin band`, `install.sh --plugin base` and `install.sh --plugin fe` (and `qa`, `be`,
 `pm`) exit 2 and point at `/plugin marketplace add …` + `/plugin install <name>@domaine`.
 
+`scripts/install.sh --prune-cache [--plugin <name>]` removes Claude Code's stale cached versions of
+each `<name>@domaine` (all recorded plugins by default) under
+`${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/cache/domaine/`. It keeps every version the install record
+names and any version a live session holds (`.in_use/<pid>`), and prints
+`<name> pruned=<versions>[ in_use=<versions>]`. Run it after `claude plugin install|update`.
+
 ### Claude Code — from the published Git marketplace (team use)
 
 ```text
