@@ -139,16 +139,24 @@ async function adoptModel($: $, m: string): Promise<void> {
 /** The settings model last seen, so only a change to it moves the atom. */
 let lastSettingsModel: string | null = null
 
-/**
- * Follows a `/model` through the settings it saves (the switch event never reaches a mod on a Team login): a changed
- * settings model is adopted when the atom holds another family or nothing, so an id of the same family stays.
- */
+/** Adopts `m` when the atom holds nothing or another family (a `[1m]` dropped), so an id of the same family stays. */
+export async function adoptFamily($: $, m: string): Promise<void> {
+  const current = await read($, model)
+  if (current === null || modelFamily(current.replace(/\[1m\]$/, '')) !== modelFamily(m)) await adoptModel($, m)
+}
+
+/** Follows a pick in the `/model` dialog through the settings it saves: a changed settings model goes to `adoptFamily`. */
 async function syncSettingsModel($: $): Promise<void> {
   const s = await settingsModel($)
   if (s === null || s === lastSettingsModel) return
   lastSettingsModel = s
-  const current = await read($, model)
-  if (current === null || modelFamily(current.replace(/\[1m\]$/, '')) !== modelFamily(s)) await adoptModel($, s)
+  await adoptFamily($, s)
+}
+
+/** The family a `/model` answer names: ``Set model to `Opus 5.5` (1M context) and saved …`` → `opus` (the name bare or quoted); null for any other text. */
+function answeredFamily(text: string | undefined): string | null {
+  const hit = /^Set model to\s+[`'"]?([A-Za-z]+)/i.exec(text ?? '')
+  return hit ? hit[1].toLowerCase() : null
 }
 
 const SAME_COMPACTION_MS = 30_000
@@ -473,10 +481,20 @@ export function registerUsage(on: On, options: PluginOptions): void {
     return r
   })
 
-  // A typed `/model <alias>` and the picker's run both land here; the host saves the settings during next(e).
+  // A typed `/model <alias>` and the picker's run both land here (the switch event never reaches a mod on a Team login).
+  // The settings may still answer the old model right after: the reading taken now counts as seen, so only a later
+  // change to them moves the atom.
   on('command.run', { command: 'model' }, async ($, e, next) => {
     const r = await next(e)
-    await syncSettingsModel($).catch(() => undefined)
+    try {
+      const family = answeredFamily(r.text)
+      if (family === null) {
+        await syncSettingsModel($)
+      } else {
+        lastSettingsModel = await settingsModel($)
+        await adoptFamily($, family)
+      }
+    } catch {}
     return r
   })
 

@@ -174,21 +174,21 @@ describe('the model atom before and after the first response', () => {
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5[1m]'])
   })
 
-  /** The host's `/model`: it saves `alias` to the settings as it switches. */
+  /** A `/model` whose answer names no model: it saves `alias` to the settings as it switches. */
   const modelCommand = (on: any, w: any) =>
     on('command.run', { command: 'model' }, async (_$: any, e: any) => {
       w.settings = { model: e.args }
-      return { text: `Set model to ${e.args}` }
+      return { text: `Switched to ${e.args}` }
     })
 
-  test('a /model run re-reads the settings it saved: a new family is adopted and logged once', async ($, on) => {
+  test('a /model answer that names no model → the settings it saved: a new family is adopted and logged once', async ($, on) => {
     const { w } = world(on)
     modelCommand(on, w)
     w.settings = { model: 'sonnet' }
     w.model = 'claude-sonnet-5-5'
     await start($)
     expect((await peek($)).model).toBe('sonnet')
-    expect((await $.command.run({ command: 'model', args: 'opus' })).text).toBe('Set model to opus')
+    expect((await $.command.run({ command: 'model', args: 'opus' })).text).toBe('Switched to opus')
     expect((await peek($)).model).toBe('opus')
     await $.command.run({ command: 'model', args: 'opus' })
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model opus'])
@@ -228,6 +228,60 @@ describe('the model atom before and after the first response', () => {
     await clock.advance(30_000)
     expect((await peek($)).model).toBe('claude-opus-5-5')
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5', 'model opusplan', 'model claude-opus-5-5'])
+  })
+
+  /** A host whose `/model` answers `text` and leaves the settings as they were. */
+  const answering = (on: any, text: string) => on('command.run', { command: 'model' }, async () => ({ text }))
+  const SONNET = 'Set model to `Sonnet 5.5` and saved as your default for new sessions'
+
+  test('a /model answer names the family at once; stale settings, then their catching up, change nothing; a later setting does', async ($, on) => {
+    const { w, clock } = world(on)
+    answering(on, SONNET)
+    w.settings = { model: 'opus' }
+    await start($)
+    expect((await $.command.run({ command: 'model', args: 'sonnet' })).text).toBe(SONNET)
+    expect((await peek($)).model).toBe('sonnet')
+    await clock.advance(30_000)
+    expect((await peek($)).model).toBe('sonnet')
+    w.settings = { model: 'sonnet' }
+    await clock.advance(30_000)
+    expect((await peek($)).model).toBe('sonnet')
+    w.settings = { model: 'haiku' }
+    await clock.advance(30_000)
+    expect((await peek($)).model).toBe('haiku')
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model sonnet', 'model haiku'])
+  })
+
+  for (const text of ['Set model to `Haiku 5.5` for this session only', 'Set model to `Haiku 5.5` and saved as your default for new sessions', 'Set model to Haiku 5.5']) {
+    test(`the answer "${text}" names haiku`, async ($, on) => {
+      const { w } = world(on)
+      answering(on, text)
+      w.settings = { model: 'sonnet' }
+      await start($)
+      await $.command.run({ command: 'model', args: 'haiku' })
+      expect((await peek($)).model).toBe('haiku')
+    })
+  }
+
+  test('a [1m] pick answers its family word first', async ($, on) => {
+    const { w } = world(on)
+    answering(on, 'Set model to `Opus 5.5 (1M context)` and saved as your default for new sessions')
+    w.settings = { model: 'sonnet' }
+    await start($)
+    await $.command.run({ command: 'model', args: 'opus[1m]' })
+    expect((await peek($)).model).toBe('opus')
+  })
+
+  test('a switch event that already wrote the id keeps it when the answer names the same family', async ($, on) => {
+    const { w } = world(on)
+    answering(on, SONNET)
+    on('classic.PostModelSwitch', async () => ({}) as never)
+    w.settings = { model: 'opus' }
+    await start($)
+    await $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5' }))
+    await $.command.run({ command: 'model', args: 'sonnet' })
+    expect((await peek($)).model).toBe('claude-sonnet-5-5')
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-sonnet-5-5'])
   })
 
   test('PostModelSwitch before any response adopts the switch event\'s model over the settings alias', async ($, on) => {

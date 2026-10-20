@@ -440,15 +440,29 @@ describe('band', () => {
       await ui.press({ key: 'model:opus' })
       expect(runs).toEqual(['opus'])
       expect(w.toasts).toEqual(['Set model to opus'])
-      // Folded again; the segment moves with the switch event, not the press.
+      // Folded again; the segment shows the pick's family once the run succeeds.
       expect(await modelButtons(ui)).toHaveLength(0)
-      expect(await shownModel(ui, surface)).toBe('fable-5-1')
+      expect(await shownModel(ui, surface)).toBe('opus')
       expect(await textOf(ui, /ctx/)).toBeDefined()
       // The current model only folds: no /model run.
       await ui.press({ key: 'model' })
-      await ui.press({ key: 'model:fable' })
+      await ui.press({ key: 'model:opus' })
       expect(runs).toEqual(['opus'])
-      expect(await shownModel(ui, surface)).toBe('fable-5-1')
+      expect(await shownModel(ui, surface)).toBe('opus')
+    })
+
+    test(`${surface}: a pick whose run names no model and fires no switch event still shows the pick at once`, async ($, on) => {
+      const { w } = world(on)
+      w.settings = { model: 'fable' }
+      on('command.run', { command: 'model' }, async () => ({ text: 'Model updated' }))
+      await start($, surface)
+      const ui = await mount($, surface)
+      expect(await shownModel(ui, surface)).toBe('fable')
+      if (isDesktop) return
+      await ui.press({ key: 'model' })
+      await ui.press({ key: 'model:sonnet' })
+      expect(await shownModel(ui, surface)).toBe('sonnet')
+      expect(w.toasts).toEqual(['Model updated'])
     })
 
     test(`${surface}: a pinned id the picker does not list leads its row; a refused /model toasts`, async ($, on) => {
