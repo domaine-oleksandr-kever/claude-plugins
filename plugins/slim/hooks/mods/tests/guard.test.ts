@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { SPILL_INLINE, denyText } from '../guard.ts'
+import { IMAGE_READ_MAX, SPILL_INLINE, denyText, imageDenyText, imageReadMax } from '../guard.ts'
 import { attachmentEligible, attachmentPath, bashVia, guardOf, spillAccess, spillKind } from '../channels.ts'
 
 const ORIG = '/tmp/slim-mcp-0123456789abcdef.json'
@@ -158,6 +158,85 @@ describe('G2 what passes', () => {
     expect(w.calls.filter(c => c.tool === 'Read').map(c => [c.file_path, c.limit])).toEqual([[ORIG, 1]])
     expect(w.stats).toEqual([])
     expect(w.access).toEqual([])
+  })
+})
+
+describe('G4 an image Read', () => {
+  const SHOT = '/repo/shots/home.png'
+
+  test('over the cap: denied with the view pointer on one line, the tool never runs, nothing recorded', async ($, on) => {
+    const w = world(on, { sizes: { [SHOT]: 400_000 } })
+    const r = await $.tool.call({ tool: 'Read', file_path: SHOT } as any)
+    expect(r.deny).toBe(imageDenyText(SHOT, 400_000))
+    expect(r.deny).toBe('slim: /repo/shots/home.png is a 391 KB image — call mcp__slim__view({ path }) (resized) or pass a smaller screenshot (type jpeg, quality 60, clip to the element); if view cannot resize it, Read it again')
+    expect(w.calls).toEqual([])
+    expect(w.access).toEqual([])
+  })
+
+  test('denied once per path: the next Read of it passes (view may not resize it), another path is still denied', async ($, on) => {
+    const w = world(on, { sizes: { [SHOT]: 400_000, '/repo/anim.gif': 300_000 } })
+    expect((await $.tool.call({ tool: 'Read', file_path: SHOT } as any)).deny).toBe(imageDenyText(SHOT, 400_000))
+    expect((await $.tool.call({ tool: 'Read', file_path: SHOT } as any)).deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Read', file_path: '/repo/anim.gif' } as any)).deny).toBe(imageDenyText('/repo/anim.gif', 300_000))
+    expect(w.calls.map(c => c.file_path)).toEqual([SHOT])
+  })
+
+  test('every image extension, any case, and a windowed Read: denied', async ($, on) => {
+    const paths = ['a.jpg', 'b.JPEG', 'c.gif', 'd.webp', 'h.PNG'].map(n => `/repo/${n}`)
+    const w = world(on, { sizes: Object.fromEntries([...paths, SHOT].map(p => [p, 300_000])) })
+    for (const p of paths) expect((await $.tool.call({ tool: 'Read', file_path: p } as any)).deny).toBe(imageDenyText(p, 300_000))
+    expect((await $.tool.call({ tool: 'Read', file_path: SHOT, offset: 1, limit: 5 } as any)).deny).toBe(imageDenyText(SHOT, 300_000))
+    expect(w.calls).toEqual([])
+  })
+
+  test(`at or under the cap (${IMAGE_READ_MAX} B, the size view leaves as is): passes`, async ($, on) => {
+    const w = world(on, { sizes: { [SHOT]: IMAGE_READ_MAX, '/repo/small.jpg': 80_000 } })
+    expect((await $.tool.call({ tool: 'Read', file_path: SHOT } as any)).deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Read', file_path: '/repo/small.jpg' } as any)).deny).toBeUndefined()
+    expect(w.calls.map(c => c.file_path)).toEqual([SHOT, '/repo/small.jpg'])
+  })
+
+  test('a non-image file, or an image view does not resize (tiff, bmp), of any size: passes, no stat', async ($, on) => {
+    const others = ['/repo/notes.txt', '/repo/png.json', '/repo/scan.tiff', '/repo/icon.bmp']
+    const w = world(on, { sizes: Object.fromEntries(others.map(p => [p, 900_000])) })
+    for (const p of others) expect((await $.tool.call({ tool: 'Read', file_path: p } as any)).deny).toBeUndefined()
+    expect(w.stats).toEqual([])
+  })
+
+  test('images slim\'s replies name (a .1568 copy, a video frame, an MCP image\'s saved original) of any size: pass, no stat', async ($, on) => {
+    const outs = ['/repo/shots/home.1568.jpg', '/repo/shots/home.1568.jpeg', '/repo/clips/demo.frames/001.jpg', '/tmp/slim-mcp-0123456789abcdef.png', '/tmp/slim-mcp-0123456789abcdef-89abcdef.jpg']
+    const w = world(on, { sizes: Object.fromEntries(outs.map(p => [p, 400_000])) })
+    for (const p of outs) expect((await $.tool.call({ tool: 'Read', file_path: p } as any)).deny).toBeUndefined()
+    expect(w.stats).toEqual([])
+  })
+
+  test('SLIM_IMAGE_READ_MAX=0: the big image passes, no stat', async ($, on) => {
+    const w = world(on, { env: { SLIM_IMAGE_READ_MAX: '0' }, sizes: { [SHOT]: 400_000 } })
+    expect((await $.tool.call({ tool: 'Read', file_path: SHOT } as any)).deny).toBeUndefined()
+    expect(w.stats).toEqual([])
+  })
+
+  test('SLIM_IMAGE_READ_MAX raises the cap', async ($, on) => {
+    world(on, { env: { SLIM_IMAGE_READ_MAX: '500000' }, sizes: { [SHOT]: 400_000 } })
+    expect((await $.tool.call({ tool: 'Read', file_path: SHOT } as any)).deny).toBeUndefined()
+  })
+
+  test('a missing image: passes to the host, which answers', async ($, on) => {
+    const w = world(on)
+    expect((await $.tool.call({ tool: 'Read', file_path: SHOT } as any)).deny).toBeUndefined()
+    expect(w.calls).toHaveLength(1)
+  })
+
+  test('another plugin\'s Read of a big image: passes, no stat', { plugins: [OTHER] }, async ($, on) => {
+    const w = world(on, { sizes: { [SHOT]: 400_000 } })
+    expect((await $.command.run({ command: 'other-read', args: SHOT } as any)).text).toBe('read')
+    expect(w.stats).toEqual([])
+  })
+
+  test('imageReadMax: 0 off, whole bytes floored at the cap, anything else the cap', () => {
+    expect(['0', '500000', '1000', '', 'abc', '-5', '1.5', ' 200000 '].map(imageReadMax))
+      .toEqual([0, 500000, IMAGE_READ_MAX, IMAGE_READ_MAX, IMAGE_READ_MAX, IMAGE_READ_MAX, IMAGE_READ_MAX, 200000])
+    expect(imageReadMax(undefined)).toBe(IMAGE_READ_MAX)
   })
 })
 

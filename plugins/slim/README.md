@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.14.1**.
+Current release: **slim v0.15.0**.
 
 ## Install
 
@@ -449,6 +449,19 @@ own calls (view's and lookup's probes too) pass. `SLIM_SPILL_GUARD=0` turns the 
 `entry:"access"` line per file. Its `via` is `Read`, `Grep`, or the Bash reader: `jq`, `grep`,
 `shell`, `node`, `named` for `rm`/`ls`/`echo`…, or `other`. `--report` pairs the line with the whale
 it recovered. A denied Read is marked `denied: true`; `--report` counts it apart and never pairs it.
+
+The same guard denies a model's Read of a PNG, JPEG, GIF or WebP over 153,600 B (150 KB, the size
+view leaves an image as it is), whatever its `offset`/`limit`, since a raw screenshot read whole
+fills the context. The deny fires once per file in a session (a second Read of the same file
+passes, so an image view cannot resize is never a dead end) and is one line:
+
+```
+slim: <file> is a 391 KB image — call mcp__slim__view({ path }) (resized) or pass a smaller screenshot (type jpeg, quality 60, clip to the element); if view cannot resize it, Read it again
+```
+
+The images slim's own replies name to Read pass: view's `.1568.jpg` copy, a video's frames and an
+MCP image's saved original (`slim-mcp-<hash>.<ext>`). Every plugin's own calls pass too.
+`SLIM_IMAGE_READ_MAX` raises the size or, at `0`, turns this deny off.
 
 ## Lookup
 
@@ -873,6 +886,7 @@ from the host through the module's spawn. The module reads the host's `bashOutpu
 | `SLIM_ATTACH` | `1` | `0` turns the @-mentioned file channel off: an @-mentioned data file reaches the model as the host rendered it. |
 | `SLIM_PROMPT` | `1` | `0` turns the prompt channel off: a typed or bridge prompt is never rewritten. |
 | `SLIM_SPILL_GUARD` | `1` | `0` turns the spill-read guard's deny off; access lines are still written at `SLIM_DEBUG` 1 or 2. |
+| `SLIM_IMAGE_READ_MAX` | `153600` | Size in bytes above which a model's Read of a PNG, JPEG, GIF or WebP is denied with a pointer to `mcp__slim__view`; `0` turns the deny off. A whole number, floored at 153,600 (the size view leaves an image as it is, so view's own `Read <path>` always passes); anything else → the default. |
 | `SLIM_PLAIN_BYTES` | `65536` | Size above which plain text (code, diffs, test output, prose) is windowed to head and tail; below it plain text passes byte-identical. A Bash output the host saved to a file is windowed whatever this says. A whole number, floored at 8,192; anything else → the default. |
 | `SLIM_DIR` | system temp dir | Spill root, an absolute path (a leading `~/` is expanded to the home dir; any other relative value falls back to the system temp dir): originals, rows files, id maps and the report log `slim-debug.log`. A handle is trusted only there, in the prompt dir and in this session's host `tool-results/`. |
 | `SLIM_TTL` | `24` | Hours a spill file lives before the sweep removes it; `0` stops the sweep. Only slim's names in the spill root are pruned; the prompt dir is never swept by age. |

@@ -70,6 +70,8 @@ declare module 'claude-code' {
       info: SlimInfo | null
       /** One member per @-mentioned file content slim compressed this session (keyed by its hash): the Log line is written once. */
       seen: StateFamily<true | null>
+      /** One member per big image the guard denied a Read of this session (keyed by a hash of session id and path): the next Read passes. */
+      imageDenied: StateFamily<true | null>
       /** The session id whose start line slim wrote, so a repeated session.start writes none. */
       started: string | null
     }
