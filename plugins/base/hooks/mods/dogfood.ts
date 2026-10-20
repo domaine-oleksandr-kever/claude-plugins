@@ -297,7 +297,7 @@ export function registerDogfood(on: On): void {
     const script = pluginScript(e.command)
     if (!script) return r
     const text = bashText(r)
-    if (r.isError && deniedNotRun(text)) return r
+    if (deniedNotRun(text)) return r
     // A line the script does not end owns no exit code (`| head` hides it): only the script's own trace or `error=` line speaks for it.
     const failed = failureLine(text) || (scriptLast(e.command) ? bashFailed(r) && !designedRefusal(text, script) : bashFailed(r) && pluginScripts(e.command).some(s => crashedIn(text, s)))
     if (!failed || !(await dogfoodOn($).catch(() => false))) return r

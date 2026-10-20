@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.13.0**.
+Current release: **base v0.13.1**.
 
 ## Status
 
@@ -516,13 +516,17 @@ There are two ways to turn it on:
   reason is a failure: a missing tool or plugin file (`jq_not_found`, `shopify_cli_not_found`,
   `common_lib_not_found`), a credential set but rejected (`invalid_admin_token`), a remote call (`http_*`,
   `gql_errors`), or the script's own work (`*_failed`, `*_unverifiable`). `Error` in the output
-  always makes it a failure. When the script is not the line's last command (`script; echo done`,
+  always makes it a failure, the host's own `Error: Exit code N` line aside. When the script is not the line's last command (`script; echo done`,
   `script | head`), the exit code is not its own: a failed result with a crash the script's own
   trace names (`Error` with a stack frame `<script>:12`, or a shell's `<script>: line 12:`), or a
   failure `error=` line even at exit 0, nudges, logs and arms the stop like any other failure; another
   command's `Error` (tsc, a husky hook) does not. A failure `error=` line counts at exit 0 for a
   script that ends the line too. A trailing `2>&1` still counts as last. A call the
-  permission layer denied (the auto mode classifier, a rule, the user) never ran: no nudge.
+  permission layer denied (the auto mode classifier, a rule, the user, or headless `claude -p`, cron
+  and cloud: `This command requires approval`, `Claude requested permissions to …`) never ran: no
+  nudge, whether or not the result is flagged an error. The Stop block quotes each script's first
+  failure `error=` line, else its first `Error` line, else its first output line, never the host's
+  `Exit code N` line.
 - **`/base-defects`** lists the index newest first, then this project's `.claude/plugin-defects/`.
   The doctor's `defects` row counts the last 7 days.
 

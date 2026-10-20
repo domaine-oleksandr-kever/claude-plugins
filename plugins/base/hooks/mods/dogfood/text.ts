@@ -299,11 +299,18 @@ const errorReasons = (text: string) => [...text.matchAll(/^error=(.*)$/gm)].map(
 /** An `error=` line that is a failure, not a refusal: worth a report even when the line's exit code is another command's. */
 export const failureLine = (text: string): boolean => errorReasons(text).some(r => !REFUSAL.test(r))
 
-/** The line that names a failure: the first failing `error=` line, else the first with `Error`, else ''; at most 160 chars. */
+/** The host's own `Exit code N` line (`Error: Exit code N` on an error result): never the script's words. */
+const EXIT_LINE = /^\s*(?:Error:\s*)?Exit code \d+\s*$/
+
+/**
+ * The line that names a failure: the first failing `error=` line, else the first with `Error`, else the first
+ * non-empty line; the host's `Exit code N` line never counts; at most 160 chars.
+ */
 export function errorLine(text: string): string {
   const reason = errorReasons(text).find(r => !REFUSAL.test(r))
-  const line = reason !== undefined ? `error=${reason}` : (text.split('\n').find(l => /Error\b/.test(l)) ?? '')
-  return line.trim().slice(0, 160)
+  if (reason !== undefined) return `error=${reason}`.trim().slice(0, 160)
+  const lines = text.split('\n').filter(l => l.trim() && !EXIT_LINE.test(l))
+  return (lines.find(l => /Error\b/.test(l)) ?? lines[0] ?? '').trim().slice(0, 160)
 }
 
 /** One unreported plugin-script failure of the main loop, as dogfood-state.json's `errors` lists them. */
@@ -335,8 +342,8 @@ export function designedRefusal(text: string, script: string): boolean {
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** A crash signature in the output: `Error` (an exception, a node stack); never a refusal. */
-export const crashed = (text: string): boolean => /\bError\b/.test(text)
+/** A crash signature in the output: `Error` (an exception, a node stack) outside the host's `Exit code N` line; never a refusal. */
+export const crashed = (text: string): boolean => text.split('\n').some(l => /\bError\b/.test(l) && !EXIT_LINE.test(l))
 
 /**
  * A crash the script's own trace names: `Error` (`TypeError`, …) with a stack frame `<script>:12`, or a shell's `<script>: line 12:`.
@@ -347,8 +354,12 @@ export function crashedIn(text: string, script: string): boolean {
   return (/Error\b/.test(text) && new RegExp(`(?:^|[/\\s(])${s}:\\d+`, 'm').test(text)) || new RegExp(`(?:^|/)${s}: line \\d+: `, 'm').test(text)
 }
 
-/** A result the permission layer wrote in place of the command's (its text opens with the denial): nothing ran, so no script failed. */
-export const deniedNotRun = (text: string): boolean => /^\s*(?:Permission (?:for|to) .* denied|The user doesn't want to proceed with this tool use)/.test(text)
+/**
+ * A result the permission layer wrote in place of the command's (its text opens with the denial, `Error: ` allowed):
+ * nothing ran, so no script failed. Covers the interactive denials and the headless ones (`claude -p`, cron, cloud).
+ */
+export const deniedNotRun = (text: string): boolean =>
+  /^\s*(?:Error:\s*)?(?:Permission (?:for|to) .* denied|The user doesn't want to proceed with this tool use|This command requires approval|Claude requested permissions? to .* but you haven't granted it yet)/.test(text)
 
 export type Seen = { date: string; plugin: string; title: string; path: string }
 

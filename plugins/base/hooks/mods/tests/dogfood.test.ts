@@ -553,6 +553,9 @@ describe('nudge and stop', () => {
   for (const denial of [
     'Permission for this action was denied by the Claude Code auto mode classifier. Reason: x',
     "The user doesn't want to proceed with this tool use. The tool use was rejected.",
+    'This command requires approval',
+    'Error: This command requires approval',
+    "Claude requested permissions to use Bash, but you haven't granted it yet.",
   ])
     t(`a denied call that never ran (${denial.slice(0, 24)}…): no nudge, no event, no block`, async ($, on) => {
       const { w } = world(on, { env: ON })
@@ -562,6 +565,31 @@ describe('nudge and stop', () => {
       expect(await eventsOf($, 'defect')).toEqual([])
       expect(armed(w)).toBeNull()
     })
+
+  t('a headless approval refusal not flagged as an error: no nudge, no event, no block', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ result: 'This command requires approval' })
+    await start($)
+    expect((await bash($, 'node /x/plugins/base/scripts/md-to-adf.cjs /nonexistent/x.md')).context ?? []).toEqual([])
+    expect(await eventsOf($, 'defect')).toEqual([])
+    expect(armed(w)).toBeNull()
+  })
+
+  t('a host `Error: Exit code N` line with no Error of the script: the stop names the script\'s own line', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: 'Error: Exit code 1\n\nfailed to open /nonexistent/x.md' })
+    await start($)
+    expect((await bash($, 'node plugins/base/scripts/md-to-adf.cjs /nonexistent/x.md')).context).toEqual([NUDGE])
+    expect(unreported(w).map(e => [e.script, e.line])).toEqual([['md-to-adf.cjs', 'failed to open /nonexistent/x.md']])
+  })
+
+  t('a base die behind the host\'s `Error: Exit code 1` line is a designed refusal: no nudge, no block', async ($, on) => {
+    const { w } = world(on, { env: ON })
+    w.bash = () => ({ isError: true, result: "Error: Exit code 1\nmd-to-adf: cannot read input: ENOENT: no such file or directory, open '/nonexistent/x.md'" })
+    await start($)
+    expect((await bash($, 'node plugins/base/scripts/md-to-adf.cjs /nonexistent/x.md')).context ?? []).toEqual([])
+    expect(armed(w)).toBeNull()
+  })
 
   t('the script last after cd, with a trailing 2>&1: nudge, event, the stop blocked once', async ($, on) => {
     const { w } = world(on, { env: ON })
@@ -768,10 +796,14 @@ describe('pure parts', () => {
     expect(pluginScript('cat ~/.claude/plugins/synced/acct_user/base/scripts/b.sh')).toBeNull()
   })
 
-  test('errorLine: the first failing error= line, else the first Error line, capped', () => {
+  test('errorLine: the first failing error= line, else the first Error line, else the first line, never the host exit line, capped', () => {
     expect(errorLine('note=x\nerror=theme_not_found theme=1\nerror=gql_errors log=x')).toBe('error=gql_errors log=x')
     expect(errorLine('Exit code 1\n  TypeError: boom\n    at x')).toBe('TypeError: boom')
     expect(errorLine('Exit code 1')).toBe('')
+    expect(errorLine('Error: Exit code 1')).toBe('')
+    expect(errorLine('Error: Exit code 1\n\nmd-to-adf: cannot read input: ENOENT')).toBe('md-to-adf: cannot read input: ENOENT')
+    expect(errorLine('Exit code 2\nwarn: x\nTypeError: boom')).toBe('TypeError: boom')
+    expect(errorLine(`Exit code 1\n${'y'.repeat(300)}`).length).toBe(160)
     expect(errorLine(`error=gql_errors ${'x'.repeat(300)}`).length).toBe(160)
   })
 
@@ -815,8 +847,12 @@ describe('pure parts', () => {
       'Permission for this tool use was denied. The tool use was rejected.',
       'Permission to use Bash with command rm -rf x has been denied.',
       "The user doesn't want to proceed with this tool use. The tool use was rejected.",
+      'This command requires approval',
+      'Error: This command requires approval',
+      "Claude requested permissions to use Bash, but you haven't granted it yet.",
+      "Claude requested permissions to write to /x/y.md, but you haven't granted it yet.",
     ]) expect(deniedNotRun(t)).toBe(true)
-    for (const t of ['bash: ./x.sh: Permission denied', 'out\ndenied by the Claude Code auto mode classifier', 'remote:\nPermission to o/r.git denied to u.', 'Error: EACCES: permission denied', 'marker=fresh', ''])
+    for (const t of ['out\nThis command requires approval', 'bash: ./x.sh: Permission denied', 'out\ndenied by the Claude Code auto mode classifier', 'remote:\nPermission to o/r.git denied to u.', 'Error: EACCES: permission denied', 'marker=fresh', ''])
       expect(deniedNotRun(t)).toBe(false)
   })
 
@@ -850,6 +886,7 @@ describe('pure parts', () => {
   test('designedRefusal: refusal error= lines, or a stem line without any, never with Error', () => {
     expect(designedRefusal('md-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
     expect(designedRefusal('Exit code 1\nmd-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
+    expect(designedRefusal('Error: Exit code 1\nmd-to-adf: no input file', 'md-to-adf.cjs')).toBe(true)
     expect(designedRefusal('note=x\nerror=no_store', 'shopify-admin-gql.sh')).toBe(true)
     expect(designedRefusal('Exit code 3\nnote=engine=token\nerror=no_admin_token\nhint=Set SHOPIFY_ADMIN_TOKEN or run shopify app dev', 'shopify-admin-gql.sh')).toBe(true)
     expect(designedRefusal('note=engine=token\nerror=invalid_admin_token source=env', 'shopify-admin-gql.sh')).toBe(false)
