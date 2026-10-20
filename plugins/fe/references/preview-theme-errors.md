@@ -7,7 +7,7 @@ Every HARD failure exits with one `error=` key. The one class Shopify hides from
 caught instead by `create`'s overlay read-back and surfaces as `overlay=partial` +
 `warn=overlay_file_dropped` on a run that still exits 0; act on those warn lines (below), never
 skim past them. Flow context (decision flow, drift blockquote, push-root mechanics) stays in
-`<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`.
+`<fe root>/skills/create-pull-request/reference/preview-theme.md`.
 
 **Read one entry, not the file:** every entry is a `###` heading naming its keys, so
 `awk -v k='<key>' '/^##/ { p = index($0, k) > 0 } p' <fe root>/references/preview-theme-errors.md`
@@ -48,6 +48,16 @@ path with whitespace left out): base's `review-scope.sh` drops every such line's
 last bare one from the review scope; once the developer restores them all, append a bare
 `- <YYYY-MM-DD> build-dirtied:` line so a later edit to those files is reviewed again. No
 workspace → nothing is recorded.
+
+A tracked file the build dirtied that `.gitignore` also matches is restored to HEAD on its own once
+the push tree is assembled (the theme still gets the build's copy): it is named in
+`restored=<path,…>` and not in `build_dirtied`.
+
+### `css=<basename,…>`
+
+(create & refresh, **exit 0**, only when a build ran) → the content-hashed stylesheets the build wrote
+under `assets/`: the file names the preview must now serve. A page still loading an older name is
+stale CSS (`<fe root>/references/theme-gotchas.md` → Preview themes).
 
 ### `overlay=partial` + `warn=overlay_file_dropped file=<f> [unknown_types=<t,…>]`
 
@@ -110,7 +120,7 @@ the store without the developer.
 **don't retry**. The recovery is manual and the same for both modes:
 the developer **duplicates the dev theme in the Shopify admin** (a server-side copy keeps every
 setting, drifted or not) and **renames the copy to the `[ELC-…]` name** — why: the
-drift blockquote in `<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`. Then
+drift blockquote in `<fe root>/skills/create-pull-request/reference/preview-theme.md`. Then
 `/fe:create-pull-request` re-runs with `theme_name` + `theme_url` + `theme_admin_url` (it uses that
 theme and skips auto-creation), while `/fe:preview-theme` just pushes code into it with
 `refresh --theme <the new id>`. The preview URL is `…/?preview_theme_id=<the new id>`. The

@@ -1,7 +1,7 @@
 # Theme gotchas — Shopify traps that fail silently
 
-Read by `/fe:develop-feature-or-fix` Phase 2 (implement + in-browser validation). Each entry is a
-trap that passes a build and a glance and still ships wrong.
+Read by `/fe:develop-feature-or-fix` Phase 2 (implement + in-browser validation) and by
+`/fe:preview-theme`. Each entry is a trap that passes a build and a glance and still ships wrong.
 
 ## Settings and templates
 
@@ -25,7 +25,19 @@ trap that passes a build and a glance and still ships wrong.
 
 - Tailwind v4 uses native `@layer`: an unlayered `!important` rule loses to a `!` utility.
 
+## Preview themes
+
+- `shopify theme push --only` from a folder holding only `templates/` always fails. Duplicate
+  the theme (`shopify theme duplicate -t <id> -n "<name>" --force`), then write each template
+  with `<fe root>/scripts/theme-json.sh set`.
+- After a `create-preview-theme.sh refresh` the storefront may still serve the old hashed CSS:
+  compare the stylesheet URLs the page loads (`[...document.styleSheets].map(s => s.href)`) with
+  the `css=` names the refresh printed, and cache-bust the page with `?_cb=<n>`.
+
 ## Verifying in the browser
+
+- In the Playwright MCP sandbox `require` is undefined and `file:` URLs are blocked: open local
+  HTML with `page.setContent`.
 
 - Liquid-error check: read `innerText` (an error inside an attribute ends at `&quot;`) and
   de-duplicate. An error naming files the diff never touched is pre-existing → note it, never a

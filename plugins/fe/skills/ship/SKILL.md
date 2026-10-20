@@ -146,7 +146,7 @@ task intent and `profile: <foundation|theme|none>` (the session context's
 remaining doc link, in parallel, per
 `<base root>/references/reading-linked-docs.md` (reuse-before-fetch; pass the
 workspace path; Notion mandatory — a reader naming a missing MCP → stop and tell the
-developer). Comments, attachments and `attachments_note`:
+developer). Comments, `newer_figma_links_in_comments`, attachments and `attachments_note`:
 `<base root>/references/task-workspace.md` → Read rule. Then
 **validate readiness**: Description, AC,
 approved **Technical Approach**, Figma node — any missing → **stop** and point at the gap

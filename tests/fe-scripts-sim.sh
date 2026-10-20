@@ -222,7 +222,8 @@ fi
 # only way to assert that FE_THEME_JSON_VERIFY=0 pulls nothing. With no body set the pull
 # "succeeds" and produces no file (the unreadable-read-back path). TJ_PUSH_SAVE captures the
 # pushed bytes (point TJ_PULL_BODY at it for the round-trip); TJ_PUSH_JSON overrides the
-# --json envelope the push prints. TJ_PULL_FAIL makes every pull fail the way a 503 does.
+# --json envelope the push prints, TJ_PUSH_STDERR (a file) is what it prints on stderr and
+# TJ_PUSH_RC its exit status. TJ_PULL_FAIL makes every pull fail the way a 503 does.
 # TJ_LIST_FAIL / TJ_PULL_FAIL / TJ_PUSH_FAIL make that call fail: `401` reproduces the CLI's
 # box-drawing auth rejection (a Theme Access token minted for a DIFFERENT store); for list, `reqid`
 # and `ts` are plain failures whose text merely contains the digits 401; anything else is a plain
@@ -257,7 +258,9 @@ case "$*" in
     [ "${TJ_PUSH_FAIL:-}" = json401 ] && { printf '%s\n' '{"error":{"type":"abort","message":"GraphQL Error (Code: 401): Invalid API key or access token 401 undefined"}}'; exit 1; }
     if [ -n "${TJ_PUSH_SAVE:-}" ] && [ -n "$path" ] && [ -n "$only" ]; then cp "$path/$only" "$TJ_PUSH_SAVE"; fi
     pj="${TJ_PUSH_JSON:-}"; [ -n "$pj" ] || pj='{}'
-    printf '%s\n' "$pj" ;;
+    [ -z "${TJ_PUSH_STDERR:-}" ] || cat "$TJ_PUSH_STDERR" >&2
+    printf '%s\n' "$pj"
+    [ -z "${TJ_PUSH_RC:-}" ] || exit "$TJ_PUSH_RC" ;;
   *"theme pull"*)
     [ "${TJ_PULL_FAIL:-}" = 401 ] && { printf '%s\n' '│  401 undefined  │' >&2; exit 1; }
     [ -n "${TJ_PULL_FAIL:-}" ] && { echo "Error: could not pull (503)" >&2; exit 1; }
@@ -879,6 +882,52 @@ else bad T39b-no-readback-after-errors "pulls=$(cat "$C39") out=$(head -c 120 "$
 if grep -q 'hint=.*get --theme 2 --file templates/product.json' "$E"; then ok
 else bad T39c-errors-recovery-hint "err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
 
+# T39d (bug): the CLI's own words for a Shopify validation rejection (a block nested too deep) used to
+# reach the read-back and come back as a verify verdict; the rejection is the verdict, exit 5, with
+# the CLI's line as the reason and no read-back — whether the push exited 0 or not
+cat > "$TV/rejected.txt" <<'TXT'
+╭─ error ──────────────────────────────────────────────────────────────╮
+│                                                                      │
+│  The theme 'Dev' (#2) was pushed with errors                         │
+│                                                                      │
+│  templates/product.json                                              │
+│  • Section 'main': block nesting depth exceeds the maximum of 8      │
+│                                                                      │
+╰──────────────────────────────────────────────────────────────────────╯
+TXT
+for prc in 0 1; do
+  rc=0; C39d="$TMP/tj39d-pulls-$prc"; : > "$C39d"
+  TJ_PUSH_STDERR="$TV/rejected.txt" TJ_PUSH_RC="$prc" TJ_PULL_BODY="$TV/old.json" TJ_PULL_COUNT="$C39d" \
+    tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 5 ] && grep -qx "error=upload_rejected theme=2 file=templates/product.json reason=Section 'main': block nesting depth exceeds the maximum of 8" "$E" \
+     && grep -q '^hint=.*get --theme 2 --file templates/product.json' "$E" \
+     && ! grep -q 'cli_push_failed\|verify_' "$E" && [ ! -s "$O" ] && [ ! -s "$C39d" ]; then ok
+  else bad "T39d-upload-rejected[rc=$prc]" "rc=$rc pulls=$(cat "$C39d") out=$(head -c 160 "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+done
+# T39e: the 4.x --json error envelope on stdout carries the rejection the same way
+rc=0; TJ_PUSH_JSON='{"error":{"type":"abort","message":"templates/product.json: Invalid JSON schema: unexpected token"}}' TJ_PUSH_RC=1 \
+  tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && grep -qx 'error=upload_rejected theme=2 file=templates/product.json reason=templates/product.json: Invalid JSON schema: unexpected token' "$E"; then ok
+else bad T39e-upload-rejected-json "rc=$rc err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
+# T39f: a transport error that merely says "invalid"/"exceeds" is no rejection — on exit 0 the
+# read-back decides, on exit 1 it is the push failure it always was
+printf '%s\n' 'FetchError: invalid json response body at https://acme.myshopify.com/admin/api/2026-10/graphql.json reason: Unexpected end of JSON input' \
+  'Error: Request timed out: the request exceeds the 30s limit' > "$TV/transport.txt"
+rc=0; TJ_PUSH_STDERR="$TV/transport.txt" TJ_PUSH_RC=0 TJ_PUSH_SAVE="$TV/pushed-f.json" TJ_PULL_BODY="$TV/pushed-f.json" \
+  tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+rc2=0; TJ_PUSH_STDERR="$TV/transport.txt" TJ_PUSH_RC=1 tj_set_cli "$TV/new.json" >/dev/null 2>"$E.2" || rc2=$?
+if [ "$rc" -eq 0 ] && grep -q '"verified":"true"' "$O" && ! grep -q upload_rejected "$E" \
+   && [ "$rc2" -eq 5 ] && grep -q '^error=cli_push_failed' "$E.2" && ! grep -q upload_rejected "$E.2"; then ok
+else bad T39f-transport-not-rejection "rc=$rc/$rc2 out=$(head -c 160 "$O") err=$(head -c 300 "$E" "$E.2" | tr '\n' ' ')"; fi
+
+# T35e (pin): a read-back that mismatched and then could not be read at all ends verify_read_failed —
+# and the diff of the earlier, superseded read is never printed beside that verdict
+rc=0; C35e="$TMP/tj35e-pulls"; : > "$C35e"
+TJ_PULL_BODY_1="$TV/old.json" TJ_PULL_COUNT="$C35e" tj_set_cli "$TV/new.json" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 6 ] && grep -q '^error=verify_read_failed engine=themecli' "$O" && [ "$(cat "$C35e")" = 3 ] \
+   && ! grep -q 'verify_diff' "$O" "$E" && ! grep -q 'not_applied' "$O"; then ok
+else bad T35e-read-failed-no-diff "rc=$rc pulls=$(cat "$C35e") out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+
 # T40: gql mirror of T34 — themeFilesUpsert returning no userErrors is not proof either, so the
 # same read-back runs there (the stub's FeThemeFileGet answers with FAKE_BODY_FILE)
 rc=0; FAKE_BODY_FILE="$TV/new.json" "$BASH_BIN" "$TJDIR/theme-json.sh" set --theme 2 \
@@ -1316,7 +1365,7 @@ if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'store=store-a.myshopify.com theme=11 na
 else bad T64b-locate-gid "rc=$rc out=$(head -c 200 "$O")"; fi
 # T64c: --stores replaces the registry; a miss is one stdout line with the count, exit 5
 rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 22 --stores store-a,store-a.myshopify.com >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=1' ]; then ok
+if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=1 searched=store-a' ]; then ok
 else bad T64c-locate-not-found "rc=$rc out=$(head -c 200 "$O") err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 # T64d: a store whose listing fails is skipped with a note (never the end of the search), and a
 # URL / upper-case spelling reaches the same store
@@ -1325,7 +1374,7 @@ if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'store=store-b.myshopify.com theme=22 na
    && grep -q '^note=locate_skipped store=store-x.myshopify.com rc=5 (.*stub_store_unreachable' "$E"; then ok
 else bad T64d-locate-skips-unreachable "rc=$rc out=$(head -c 200 "$O") err=$(head -c 300 "$E" | tr '\n' ' ')"; fi
 rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 99 --stores store-x,store-a >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=2 unreachable=1' ]; then ok
+if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=2 searched=store-x,store-a unreachable=1' ]; then ok
 else bad T64e-locate-not-found-unreachable "rc=$rc out=$(head -c 200 "$O")"; fi
 # T64f: the toml's store is a candidate too
 LOC_TOML="$TT/nopw.toml"; printf '[environments.dev]\nstore = "store-c"\n' > "$LOC_TOML"
@@ -1344,9 +1393,25 @@ if [ "$rc" -eq 0 ] && grep -q '^store=store-b.myshopify.com theme=22 ' "$O"; the
 else bad T64g-locate-cache-layout "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
 # T64h: no registry beside fe and no toml store — nothing to search, said on both channels
 rc=0; tj_locate "$TJDIR/theme-json.sh" 22 >"$O" 2>"$E" || rc=$?
-if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=0' ] \
+if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=0 searched=-' ] \
    && grep -q '^note=locate_no_registry' "$E" && grep -q '^hint=no store to search' "$E"; then ok
 else bad T64h-locate-no-candidates "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T64m: --store alone searches that one store — the registry (whose store-b holds 22) is not consulted
+rc=0; tj_locate "$LOC/repo/fe/scripts/theme-json.sh" 22 --store store-a >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=1 searched=store-a' ]; then ok
+else bad T64m-locate-one-store "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+# T64n: no registry — every [environments.*] block's store is searched, even in a file whose blocks
+# name different stores with none named dev (the resolver refuses to pick one; locate needs none)
+LOC_TOML="$TT/multi-locate.toml"
+printf '[environments.production]\nstore = "store-a"\n\n[environments.staging]\nstore = "store-b"\n' > "$LOC_TOML"
+rc=0; tj_locate "$TJDIR/theme-json.sh" 22 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && [ "$(cat "$O")" = 'store=store-b.myshopify.com theme=22 name=B Dev role=DEVELOPMENT' ] \
+   && grep -q '^note=locate_no_registry' "$E"; then ok
+else bad T64n-locate-toml-env-stores "rc=$rc out=$(head -c 200 "$O") err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+rc=0; tj_locate "$TJDIR/theme-json.sh" 99 >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 5 ] && [ "$(cat "$O")" = 'error=theme_not_found stores=2 searched=store-a,store-b' ]; then ok
+else bad T64n2-locate-toml-env-searched "rc=$rc out=$(head -c 200 "$O")"; fi
+unset LOC_TOML
 # T64k: an Admin token another store rejects (401) re-runs that store once on the theme CLI
 rc=0; L="$TMP/tjl64k"; : > "$L"
 FAKE_RUNNER_MODE=http401 TJ_CLI_LOG="$L" TJ_LIST_JSON='[{"id":22,"name":"B Dev","role":"development"}]' PATH="$TJSHIM:$PATH" \
@@ -1607,6 +1672,12 @@ done
 case "${FAKE_EXEC_MODE:-garbage}" in
   garbage) echo "unexpected CLI crash output" >&2; exit 1 ;;
   noauth)  echo "No stored app authentication found" >&2; exit 1 ;;
+  # a CLI run under Claude Code: a host hint tag and NDJSON progress events around the real reason
+  hintnoise) printf '%s\n' '<claude-code-hint kind="auth" text="run shopify store auth" />' \
+               '{"type":"progress","step":"connecting"}' \
+               '{"type":"error","message":"Unauthorized: the stored session expired for test-store.myshopify.com"}' >&2; exit 1 ;;
+  denied)  printf '%s\n' '{"type":"progress","step":"execute"}' 'Access denied for products field. Required access: read_products' >&2; exit 1 ;;
+  nostore) echo "Couldn't find store nope.myshopify.com" >&2; exit 1 ;;
   ok)      echo '{"ok":true}'; exit 0 ;;
   # the CLI's shape for a server-side GraphQL error: a phrase, then the {"errors":…} JSON boxed in
   # box-drawing bars; `gqlfail-noisy` is the phrase with nothing parseable behind it
@@ -1910,7 +1981,7 @@ rm -f "$(gql_state "$QT11")"/note-*
 L8="$TMP/sl8"; : > "$L8"
 rc=0; GQL_TMPDIR="$QT11" GQL_LOG="$L8" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && grep -q 'store_execute unavailable' "$E" \
-   && grep -q 'no stored store auth' "$E" && [ "$(grep -c . "$L8")" -eq 0 ]; then ok
+   && grep -q 'no_store_auth' "$E" && [ "$(grep -c . "$L8")" -eq 0 ]; then ok
 else bad G26-cached-reason-in-note "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
 
 # G27 (pin): caching must not change the unparseable-version verdict, warm or cold
@@ -1976,6 +2047,33 @@ printf '[environments.development]\nstore = "acme-root"\n' > "$TD50/shopify.them
 rc=0; FAKE_HTTP=401 gql_run_at "$TD50/.claude/tasks/ABC-1/tmp" --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 5 ] && grep -q 'url=https://acme-root.myshopify.com/admin/' "$E"; then ok
 else bad G50-toml-from-task-subdir "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+
+# G51 (bug): the fallback note embedded the CLI's raw output — a host hint tag and NDJSON progress
+# events. It now carries ONE reason code read from that output, and the raw text sits at log=
+rc=0; FAKE_EXEC_MODE=hintnoise run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+LG="$(sed -n 's/.* log=\([^ ]*\)$/\1/p' "$E" | head -1)"
+if [ "$rc" -eq 0 ] && grep -q '^note=store_execute unavailable — falling back to the admin-token engine (no_store_auth) log=' "$E" \
+   && ! grep -q 'claude-code-hint\|"type"' "$E" \
+   && [ -n "$LG" ] && grep -q 'claude-code-hint' "$LG"; then ok
+else bad G51-note-short-reason "rc=$rc err=$(head -c 300 "$E" | tr '\n' ' ') log=$LG"; fi
+for m in denied:access_denied nostore:store_not_found garbage:cli_error; do
+  rc=0; FAKE_EXEC_MODE="${m%%:*}" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+  if [ "$rc" -eq 0 ] && grep -q "^note=store_execute unavailable .*(${m#*:}) log=" "$E" \
+     && ! grep -q 'Access denied for\|Couldn.t find\|unexpected CLI crash' "$E"; then ok
+  else bad "G51b-reason[${m#*:}]" "rc=$rc err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+done
+# G51c: with no admin token either, the refusal's hint names the store engine's reason and the next step
+rc=0; FAKE_EXEC_MODE=hintnoise GQL_TOKEN="" run_gql --query query.graphql --env "$GQLDIR/none.env" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && grep -qx 'error=no_admin_token' "$E" \
+   && grep -q '^hint=store engine: no_store_auth (log=[^)]*) — next step: log the store engine in once: `shopify store auth --store test-store.myshopify.com --scopes <scopes>`.*, OR set SHOPIFY_ADMIN_TOKEN' "$E" \
+   && ! grep -q 'claude-code-hint' "$E"; then ok
+else bad G51c-no-token-hint-next-step "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+rc=0; FAKE_EXEC_MODE=denied GQL_TOKEN="" run_gql --query query.graphql --env "$GQLDIR/none.env" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && grep -q '^hint=store engine: access_denied .*--scopes <existing>,<missing>' "$E"; then ok
+else bad G51d-no-token-hint-access-denied "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
+rc=0; GQL_TOKEN="" run_gql --engine token --query query.graphql --env "$GQLDIR/none.env" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 3 ] && grep -q '^hint=store engine: not tried (--engine token) — next step: use the store engine' "$E"; then ok
+else bad G51e-no-token-hint-token-engine "rc=$rc err=$(head -c 400 "$E" | tr '\n' ' ')"; fi
 
 # G30: a store value that cannot be a myshopify handle is refused before any request
 rc=0; M="$TMP/m30"; CURL_MARKER="$M" \
@@ -3536,7 +3634,9 @@ else bad P61e-create-needs-dev-theme "rc=$rc out=$(head -c 200 "$O" | tr '\n' ' 
 # A git checkout of the fixture: the build may rewrite a tracked file, and HEAD is the pushed commit.
 CPTG="$TMP/cptgit"; cp -R "$CPTD/repo" "$CPTG"
 cat > "$CPTG/package.json" <<'EOF'
-{ "private": true, "scripts": { "build": "true", "dirty": "echo 'y{}' > assets/app.css", "dirtyu": "echo y > assets/é.js" } }
+{ "private": true, "scripts": { "build": "true", "dirty": "echo 'y{}' > assets/app.css", "dirtyu": "echo y > assets/é.js",
+  "dirtyign": "echo '{\"b\":2}' > assets/.multi-brand-copied.json && echo 'y{}' > assets/app.css",
+  "hashcss": "rm -f assets/index.*.min.css && echo 'z{}' > assets/index.b7c9e1f2.min.css && echo 'z{}' > assets/theme.min.css" } }
 EOF
 cpt_git() { git -C "$CPTG" -c user.name=sim -c user.email=sim@example.com "$@"; }
 cpt_git init -q; cpt_git add -A; cpt_git commit -q -m init
@@ -3595,6 +3695,32 @@ run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- create --name "PREVIEW-UTF8" 
 if [ "$rc" -eq 0 ] && grep -q '^warn=build_dirtied=assets/é.js — ' "$O"; then ok
 else bad P70f-build-dirtied-non-ascii "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 cpt_git checkout -q -- .
+# P70h: a tracked file the build dirtied that .gitignore ALSO matches is the repo's accident: restored
+# to HEAD after the push tree is assembled (the theme still gets the build's copy) and named in
+# restored=; a dirtied file .gitignore does not match keeps warn=build_dirtied
+printf 'assets/.multi-brand-copied.json\nassets/index.*.min.css\n' > "$CPTG/.gitignore"
+echo '{"b":1}' > "$CPTG/assets/.multi-brand-copied.json"
+cpt_git add .gitignore; cpt_git add -f assets/.multi-brand-copied.json; cpt_git commit -q -m ignored-but-tracked
+rc=0; L="$TMP/cpt70h"; : > "$L"; SAVE70h="$TMP/cpt70h-push"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 CPT_PUSH_PATH_SAVE="$SAVE70h" -- refresh --theme 555 --build-script dirtyign || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'restored=assets/.multi-brand-copied.json' "$O" \
+   && grep -q '^warn=build_dirtied=assets/app.css — ' "$O" \
+   && [ -z "$(cpt_git status --porcelain -- assets/.multi-brand-copied.json)" ] \
+   && grep -q '"b":2' "$SAVE70h/assets/.multi-brand-copied.json"; then ok
+else bad P70h-ignored-dirt-restored "rc=$rc out=$(tr '\n' ';' < "$O") status=$(cpt_git status --porcelain | tr '\n' ';')"; fi
+cpt_git checkout -q -- .
+# P70i: a refresh whose build wrote a content-hashed stylesheet names it, so a preview still serving
+# the old index.*.min.css can be told apart; an unhashed one is not named, and a clean build prints no css=
+echo 'old{}' > "$CPTG/assets/index.0aa11bb2.min.css"
+rc=0; L="$TMP/cpt70i"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 --build-script hashcss || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx 'css=index.b7c9e1f2.min.css' "$O" && ! grep -q '^restored=' "$O"; then ok
+else bad P70i-refresh-names-hashed-css "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/cpt70i2"; : > "$L"
+run_cpt_at "$CPTG" "$CPTD/shim:$PATH" "$L" NO=1 -- refresh --theme 555 || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^built=yes$' "$O" && ! grep -q '^css=' "$O"; then ok
+else bad P70i2-clean-build-no-css "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rm -f "$CPTG/assets/"index.*.min.css "$CPTG/assets/theme.min.css"; cpt_git checkout -q -- .
 
 # ------------------------------ create-preview-theme.sh shared dev theme guard --
 # P54 (bug): `refresh --theme <the toml's theme id>` overwrote the SHARED dev theme's code — the id

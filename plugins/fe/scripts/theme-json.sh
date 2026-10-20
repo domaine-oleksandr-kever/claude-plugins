@@ -78,8 +78,10 @@
 # degradation: the payload is gated as valid JSON before the upload, so a theme serving a
 # non-JSON body is not serving the payload — `note=verify_body_not_json` and the ordinary
 # not_applied verdict. On themecli the
-# push's own --json envelope is gated FIRST, so a failed upload is never reported as not_applied:
-# a non-empty `.errors` is `error=cli_push_reported_errors` + exit 5 before any read-back, while
+# push's own output is gated FIRST, so a failed upload is never reported as not_applied: a Shopify
+# validation rejection the CLI prints (block nesting depth, an invalid schema or JSON — on stderr or
+# in a 4.x {"error":…} envelope, whatever the exit status) is `error=upload_rejected theme=<id>
+# file=<path> reason=<the CLI's line>` + exit 5; a non-empty `.errors` is `error=cli_push_reported_errors` + exit 5 before any read-back, while
 # `.warnings` only print `note=cli_push_warnings` and let the read-back decide.
 # A not_applied verdict also prints `note=verify_diff only_in_payload=… only_in_theme=… changed=…
 # diff_lines=N` on stderr and, with a propagation-lag reminder appended, as the last stdout line (a
@@ -121,10 +123,11 @@
 # (raw bytes restore byte-exact); strip only the working base you'll edit.
 #
 # `locate` answers "which store holds theme X": it runs `themes` once per candidate store — --stores
-# (comma-separated handles or domains), else every store base's QA registry knows (`qa-stores.cjs
-# list --json`, found beside fe's install) plus the toml's store — and prints
+# (comma-separated handles or domains), else --store alone, else every store base's QA registry knows
+# (`qa-stores.cjs list --json`, found beside fe's install) plus every store the toml names (the
+# resolved block's, then each `[environments.*]` block's) — and prints
 # `store=<domain> theme=<id> name=<name> role=<ROLE>` for the first store listing it (exit 0), or
-# `error=theme_not_found stores=<n>` (exit 5). Under auto, a store whose Admin API answers 401/403
+# `error=theme_not_found stores=<n> searched=<handle,…|->` (exit 5). Under auto, a store whose Admin API answers 401/403
 # (an Admin token belongs to one store) is listed once more on the theme CLI. A store whose listing fails is skipped with
 # `note=locate_skipped store=<domain>` and the failure's last line on stderr, counted in
 # `unreachable=<k>` on the not-found line.
@@ -887,8 +890,24 @@ cli_push_report() { # $1 = raw --json output; $2 = theme id, for the recovery hi
   fi
 }
 
+# Shopify's validation rejecting the pushed file (block nesting depth, an invalid schema or JSON, an
+# unknown section type) as the CLI words it on stderr or in a 4.x {"error":…} envelope — exit status
+# either way. One line, box frame and bullets stripped; an auth rejection is not one (cli_auth_hint).
+# Only the CLI's validation report counts: a line inside its "pushed with errors" box, or one that
+# names the pushed file — a transport error ("invalid json response body") is not a rejection.
+cli_upload_rejection() { # $1 = the push's stdout, $2 = its stderr file → the reason line, 1 when none
+  local r
+  r="$({ cat "$2"; printf '%s' "$1" | theme_list_trim | jq -r '.error.message? // empty | strings' 2>/dev/null; } \
+    | awk -v f="$FILE" 'index($0, "╰") { box = 0 } tolower($0) ~ /pushed with errors/ { box = 1; next } box || index($0, f)' \
+    | sed -E 's/(│|╭|╮|╰|╯|─|•)+//g; s/^[[:space:]*-]+//; s/[[:space:]]+$//; s/^[Ee]rror:?[[:space:]]*//' \
+    | grep -iE 'nest(ed|ing)|depth|invalid|schema|does not refer to|not allowed|exceeds|is not a valid|unknown (block|section|setting)' \
+    | grep -viE 'api key|access token|(^|[^0-9])40[13]([^0-9]|$)' | head -1)" || r=""
+  [ -n "$r" ] || return 1
+  printf '%s' "$r" | cut -c1-300
+}
+
 cli_set() {
-  local nid role name tmp err out verified="skipped"
+  local nid role name tmp err out verified="skipped" prc=0 why
   nid="$(num_of "$THEME")"
   cli_list
   [ -n "$(theme_list_field "$CLI_LIST" "$nid" id)" ] || { echo "error=theme_not_found theme=$nid (engine=themecli)" >&2; exit 5; }
@@ -901,7 +920,13 @@ cli_set() {
   mkdir -p "$tmp/$(dirname "$FILE")"
   cp "$FROM" "$tmp/$FILE"
   out="$(shopify theme push --store "$DOMAIN" --theme "$nid" --path "$tmp" \
-      --only "$FILE" --nodelete --json --no-color 2>"$err")" \
+      --only "$FILE" --nodelete --json --no-color 2>"$err")" || prc=$?
+  if why="$(cli_upload_rejection "$out" "$err")"; then
+    echo "error=upload_rejected theme=$nid file=$FILE reason=$why" >&2
+    echo "hint=Shopify's validation refused the file, so nothing was read back and the theme's state is unconfirmed — fix the payload, and re-run \`theme-json.sh get --theme $nid --file $FILE\` before assuming either outcome" >&2
+    exit 5
+  fi
+  [ "$prc" -eq 0 ] \
     || { cli_json_error "$out" "$err"; echo "error=cli_push_failed theme=$nid store=$DOMAIN token_source=$CLI_TOKEN_SOURCE" >&2; cli_auth_hint "$err"; tail -8 "$err" >&2; exit 5; }
   cli_push_report "$out" "$nid"
   # rc 0 is the transport's opinion, not the server's — read it back (exits 6 when it did not land)
@@ -1001,11 +1026,22 @@ qa_registry_stores() {
     || echo "note=locate_registry_unreadable registry=$reg — pass --stores to name more stores" >&2
 }
 
+# Every store the toml names, one per line: the resolved block's first, then each
+# [environments.*] block's own `store =` (an ambiguous file still lists them all).
+toml_stores() {
+  { toml_env_ready && toml_value store && echo; } 2>/dev/null || true
+  local n
+  for n in $TOML_ENVS; do
+    toml_resolve_env "$n" 2>/dev/null && toml_scan store "$TOML_ENV_FROM" "$TOML_ENV_TO"
+  done
+  return 0
+}
+
 # `themes` once per candidate store, each in its own run of this script (its own engine choice and
 # auth), first listing that carries the id wins. Under auto, an Admin API auth rejection (an Admin
 # token is minted for one store) re-runs that store once on the theme CLI.
 locate_theme() {
-  local gid nid list out err cand s key seen=" " n=0 skipped=0 rc hit
+  local gid nid list out err cand s key seen=" " n=0 skipped=0 rc hit searched=""
   gid="$(gid_of "$THEME")"; nid="$(num_of "$THEME")"
   list="$(mktemp)"; out="$(mktemp)"; err="$(mktemp)"; CLEAN+=("$list" "$out" "$err")
   local args=(--engine "$ENGINE")
@@ -1013,10 +1049,12 @@ locate_theme() {
   [ -n "$APIV_ARG" ] && args+=(--api-version "$APIV_ARG")
   if [ -n "$STORES" ]; then
     printf '%s\n' "$STORES" | tr ',' '\n' > "$list"
+  elif [ -n "$STORE_ARG" ]; then
+    printf '%s\n' "$STORE_ARG" > "$list"
   else
     qa_registry_stores > "$list"
-    printf '%s\n' "${STORE_ARG:-${SHOPIFY_STORE:-}}" >> "$list"
-    printf '%s\n' "$({ toml_env_ready && toml_value store; } 2>/dev/null || true)" >> "$list"
+    printf '%s\n' "${SHOPIFY_STORE:-}" >> "$list"
+    toml_stores >> "$list"
   fi
   while IFS= read -r cand; do
     cand="$(trim_ws "$cand")"
@@ -1025,7 +1063,7 @@ locate_theme() {
       || { echo "note=locate_skipped store='$cand' (not a myshopify handle, domain or URL)" >&2; continue; }
     s="$(store_domain "$s" | tr 'A-Z' 'a-z')"
     case "$seen" in *" $s "*) continue ;; esac
-    seen="$seen$s "; n=$((n + 1))
+    seen="$seen$s "; n=$((n + 1)); searched="${searched:+$searched,}${s%.myshopify.com}"
     rc=0
     "$BASH" "$SCRIPT_DIR/theme-json.sh" themes --store "$s" "${args[@]}" >"$out" 2>"$err" </dev/null || rc=$?
     if [ "$rc" -ne 0 ] && [ "$ENGINE" = auto ] && grep -qE '^error=http_40[13]( |$)' "$err"; then
@@ -1039,7 +1077,7 @@ locate_theme() {
     hit="$(jq -r --arg g "$gid" 'select(.id == $g) | "name=\(.name) role=\(.role)"' "$out" 2>/dev/null | head -1)" || hit=""
     if [ -n "$hit" ]; then echo "store=$s theme=$nid $hit"; return 0; fi
   done < "$list"
-  echo "error=theme_not_found stores=$n$([ "$skipped" -eq 0 ] || printf ' unreachable=%s' "$skipped")"
+  echo "error=theme_not_found stores=$n searched=${searched:--}$([ "$skipped" -eq 0 ] || printf ' unreachable=%s' "$skipped")"
   [ "$n" -gt 0 ] || echo "hint=no store to search — pass --stores <a,b>, or register stores with base's qa-stores.cjs set" >&2
   exit 5
 }

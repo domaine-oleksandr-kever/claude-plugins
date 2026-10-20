@@ -87,6 +87,11 @@
 #
 # The store→token fallback note prints in full once per store; later runs print
 # `note=engine=token`. SHOPIFY_ADMIN_GQL_QUIET set to anything but 0 forces the short form always.
+# An execute that ran and failed is named by ONE reason code read from the CLI's output —
+# no_store_auth, access_denied, store_not_found, else cli_error (graphql_error_unparsed: the GraphQL
+# phrase with no JSON behind it); the raw output (progress events, host hint tags, boxes) goes to a
+# `log=<path>` mktemp on the note / error line, never into the line itself. When the token engine has
+# no token either, `error=no_admin_token`'s hint names that code and the next step.
 # That marker, the remembered store-engine verdict and the cached CLI version live in one private
 # 0700 per-user dir under $TMPDIR (never a guessable flat file in a shared /tmp).
 # FE_GQL_PROBE_CACHE = seconds the version + store-engine verdicts stay valid (default 21600);
@@ -215,6 +220,7 @@ fi
 
 # --- engine 1: shopify store execute (CLI ≥ 4.x + stored store auth) --------------------------
 SKIP_REASON=""
+STORE_LOG=""     # the failed execute's raw output (mktemp, kept for the caller to read)
 CLI_MISSING=0
 
 # Two facts about this machine are sticky and expensive to rediscover per call: the CLI version
@@ -480,6 +486,15 @@ count_ops() { # $1 = gql_defs output, $2 = wanted name ("" = any) → OPS_TOTAL 
   return 0
 }
 
+# One reason code for a failed `store execute`, read from its whole output, first match wins:
+# access_denied, store_not_found, no_store_auth, else cli_error.
+store_fail_reason() { # $1 = file holding the CLI's stderr + stdout
+  if grep -qiE 'access.?denied|forbidden|(^|[^0-9])403([^0-9]|$)|missing[a-z ]* scopes?|insufficient[a-z ]* scopes?|required access' "$1"; then echo access_denied
+  elif grep -qiE '(store|shop)[^.]* not (be )?found|(could not|couldn.?t|cannot|can.?t) find [a-z ]*(store|shop)|(^|[^0-9])404([^0-9]|$)' "$1"; then echo store_not_found
+  elif grep -qiE 'no stored|not (logged in|authenticated)|log in to|unauthori[sz]ed|(^|[^0-9])401([^0-9]|$)|authenticat[a-z]* [a-z ]*(required|expired|missing|invalid)|(token|session|auth)[a-z ]* expired' "$1"; then echo no_store_auth
+  else echo cli_error; fi
+}
+
 try_store_execute() {
   local bin; bin="$(command -v shopify 2>/dev/null || true)"
   [ -n "$bin" ] || { SKIP_REASON="shopify CLI not found"; CLI_MISSING=1; return 1; }
@@ -574,11 +589,13 @@ try_store_execute() {
     return 0
   fi
   local safe_fallback=0
-  if grep -q 'No stored app authentication found' "$err"; then
+  # the CLI's raw output (progress events, host hint tags, boxes) stays in a log, never in a note
+  STORE_LOG="$(mktemp)"; cat "$err" "$out" > "$STORE_LOG" 2>/dev/null || true
+  if grep -q 'No stored app authentication found' "$STORE_LOG"; then
     # the CLI failed before sending anything — nothing executed server-side
     safe_fallback=1
     SKIP_STICKY=1
-    SKIP_REASON="no stored store auth for $DOMAIN — one-time manual fix: shopify store auth --store $DOMAIN --scopes <comma-separated-scopes>, then FE_GQL_PROBE_CACHE=0 on the next call to re-probe immediately"
+    SKIP_REASON="no_store_auth — one-time manual fix: shopify store auth --store $DOMAIN --scopes <comma-separated-scopes>, then FE_GQL_PROBE_CACHE=0 on the next call to re-probe immediately"
   elif grep -q 'GraphQL operation failed' "$err"; then
     # a definitive GraphQL error, not an availability problem — do NOT fall back to the token
     # engine (pointless for queries, double-execution risk for mutations). The CLI boxes the
@@ -590,23 +607,23 @@ try_store_execute() {
       local envf; envf="$(mktemp)"
       printf '%s\n' "$unboxed" > "$envf"
       emit_envelope "$envf"
-      rm -f "$out" "$err" "$envf"
+      rm -f "$out" "$err" "$envf" "$STORE_LOG"; STORE_LOG=""
       return 0
     fi
-    SKIP_REASON="store execute: GraphQL operation failed, and the boxed error JSON could not be parsed: $(tr '\n' ' ' < "$err" | cut -c1-300)"
+    SKIP_REASON="graphql_error_unparsed — GraphQL operation failed, and the boxed error JSON could not be parsed"
   else
-    # an execute that ran and failed for an UNRECOGNIZED reason is NOT recorded: the bucket is
+    # an execute that ran and failed for any other reason is NOT recorded: the bucket is
     # dominated by transients (DNS drop, VPN flap, 5xx) and a sticky verdict here would pin the
     # engine off for PROBE_TTL over one bad network moment — with the wrong remediation in the
     # note. The recognized machine facts (version, stored auth) stay sticky above.
-    SKIP_REASON="store execute failed: $(tr '\n' ' ' < "$err" | sed -E 's/[[:space:]]+/ /g' | cut -c1-300)"
+    SKIP_REASON="$(store_fail_reason "$STORE_LOG")"
   fi
   rm -f "$out" "$err"
   # an execute was actually attempted and failed for an unknown reason — for a mutation
   # that could mean "applied server-side, then the CLI died": re-sending it through the
   # token engine risks double execution, so never fall back here
   if [ "$is_mutation" -eq 1 ] && [ "$safe_fallback" -ne 1 ]; then
-    echo "error=store_execute_failed_mutation ($SKIP_REASON)" >&2
+    echo "error=store_execute_failed_mutation ($SKIP_REASON)${STORE_LOG:+ log=$STORE_LOG}" >&2
     echo "hint=NOT falling back to the token engine — the mutation may already have been applied. Verify the store state first; re-run only if the change is absent." >&2
     exit 3
   fi
@@ -617,7 +634,7 @@ if [ "$ENGINE" != "token" ]; then
   if try_store_execute; then exit 0; fi
   if [ "$ENGINE" = "store" ]; then
     if [ "$CLI_MISSING" -eq 1 ]; then echo "error=shopify_cli_not_found" >&2
-    else echo "error=store_execute_failed ($SKIP_REASON)" >&2; fi
+    else echo "error=store_execute_failed ($SKIP_REASON)${STORE_LOG:+ log=$STORE_LOG}" >&2; fi
     exit 3
   fi
   # the full note is a one-time pointer to the preferred engine — after the first run per
@@ -632,7 +649,7 @@ if [ "$ENGINE" != "token" ]; then
       echo "note=engine=token" >&2
     fi
   else
-    echo "note=store_execute unavailable — falling back to the admin-token engine ($SKIP_REASON)" >&2
+    echo "note=store_execute unavailable — falling back to the admin-token engine ($SKIP_REASON)${STORE_LOG:+ log=$STORE_LOG}" >&2
     [ -n "$NOTE_MARK" ] && write_state "$NOTE_MARK" ""
   fi
   # Record ONLY a machine-level verdict (SKIP_STICKY), and only when this run actually probed:
@@ -665,7 +682,16 @@ TOKEN="$(trim_ws "$TOKEN")"
 if [ -z "$TOKEN" ]; then
   echo "error=no_admin_token" >&2
   [ "$CLI_MISSING" -eq 1 ] && echo "error=shopify_cli_not_found" >&2
-  echo "hint=Set SHOPIFY_ADMIN_TOKEN in $ENV_FILE (Admin API access token, shpat_…) — see metafield-metaobject-setup.md — OR use the store engine: Shopify CLI >= 4.x + one-time \`shopify store auth --store $DOMAIN --scopes <scopes>\`" >&2
+  why="${SKIP_REASON%% *}"
+  case "$SKIP_REASON" in
+    no_store_auth*) next="log the store engine in once: \`shopify store auth --store $DOMAIN --scopes <scopes>\` (opens a browser)" ;;
+    access_denied*) next="re-run \`shopify store auth --store $DOMAIN --scopes <existing>,<missing>\` with the scope this operation needs" ;;
+    store_not_found*) next="check the store: $DOMAIN came from --store or the toml's store=" ;;
+    cli_error*|graphql_error_unparsed*) next="read the log, or use the store engine once it runs: \`shopify store auth --store $DOMAIN --scopes <scopes>\`" ;;
+    *) why="${SKIP_REASON:-not tried (--engine token)}"
+       next="use the store engine: Shopify CLI >= 4.x + one-time \`shopify store auth --store $DOMAIN --scopes <scopes>\`" ;;
+  esac
+  echo "hint=store engine: $why${STORE_LOG:+ (log=$STORE_LOG)} — next step: $next, OR set SHOPIFY_ADMIN_TOKEN in $ENV_FILE (Admin API access token, shpat_…) — see metafield-metaobject-setup.md" >&2
   exit 3
 fi
 # The token rides a curl config file, where a stray quote breaks the header value and an embedded

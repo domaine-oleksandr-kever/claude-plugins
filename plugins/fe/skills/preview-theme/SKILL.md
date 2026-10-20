@@ -29,7 +29,7 @@ locally) + the dev theme's customizer settings. **refresh** redeploys the branch
 into an existing preview **without touching its customizer settings** — everything except
 `config/settings_data.json`, `templates/**/*.json`, and section groups `sections/*.json`
 is pushed, so the content a reviewer configured stays put. Full contract:
-`<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`. Every run's output — the
+`<fe root>/skills/create-pull-request/reference/preview-theme.md`. Every run's output — the
 workspace lines, the `warn=`/`overlay=` verdicts, each `error=` and the page deep-link formulas —
 is read per the errors reference, `<fe root>/references/preview-theme-errors.md`: its **Reading a
 create/refresh result** section after every run, one key's entry when a run warns or fails (here:
@@ -77,7 +77,13 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
 1. **Detect.** Run `create-preview-theme.sh info`. **Success** → show the detected `store`,
    `dev_theme_id`, and `dev_theme_name`. Any `error=` line → the errors reference's
    **`error=` outcomes**, and never read the toml yourself. (`create-preview-theme.sh --help`
-   prints the full call shape from the script itself.)
+   prints the full call shape from the script itself.) **The section is on that store?** For
+   each section or block type the branch changes, grep the target store's live templates for it:
+   the live id from `<fe root>/scripts/theme-json.sh themes --role main`, then
+   `theme-json.sh get --theme <id> --file templates/<name>.json` per template the checkout
+   ships (or the workspace copy of one), both with the `--store` this run uses, searching for
+   `"type": "<type>"`. No template uses it → warn the developer before step 3: the preview
+   would show nothing to review on this store.
 2. **Decide the name.**
    - If `theme_name` was given, use it verbatim.
    - Else if `jira_keys` were given, derive it by swapping the `[DEV]`/role prefix of
@@ -107,7 +113,10 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    `built`, and — when it isn't `verified` — the `overlay=` verdict with its warn lines;
    `warn=build_dirtied=` per the reading section (its `notes.md` line too). If a
    `preview_path` is known, also give the page-deep-linked preview and the editor-on-template
-   link (**Page deep-links**); path or template unknown → **ask, never guess**.
+   link (**Page deep-links**); path or template unknown → **ask, never guess**. Opening the
+   storefront yourself: `<base root>/references/storefront-login.md`; stale CSS after a refresh,
+   a templates-only push, local HTML in the Playwright sandbox:
+   `<fe root>/references/theme-gotchas.md` → Preview themes.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id
    exists, write the `session-theme:` and `session-theme-pushed:` lines per the reading
    section — otherwise the next `/fe:ship` run, qa phase or PR run finds no line and creates a

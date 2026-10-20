@@ -111,10 +111,10 @@ its brief says otherwise.
    line — that theme is the PR's preview theme, so the agent refreshes it instead of
    auto-creating another** (`<fe root>/skills/create-pull-request/SKILL.md` step 4 —
    precedence: explicit args → workspace session-theme → auto-create), and
-   `<fe root>/skills/create-pull-request/REFERENCE.md` — it owns the title
-   convention, the body structure (core skeleton Summary → Jira → theme-preview table → To check →
+   the `<fe root>/skills/create-pull-request/reference/` files it names — `title-convention.md`,
+   `body-sections.md` (core skeleton Summary → Jira → theme-preview table → To check →
    Screenshots → Changes; conditional sections only with real content; ceilings and TA divergences
-   in Dependencies) and the
+   in Dependencies) and `preview-theme.md`, the
    preview-theme decision flow (`[ELC-…]` naming, `--reuse`). Escalations, verbatim in
    the brief: `error=build_failed` → ESCALATE with
    the build output; `error=settings_drift` → the reference's manual recovery;
@@ -132,7 +132,7 @@ its brief says otherwise.
    theme id + preview/editor links, the screenshot files the body's placeholder names, ≤10-line report. The conductor verifies the tick
    and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
-   `<base root>/references/steps-to-test-format.md`: **one numbered list** in that file's
+   `<base root>/references/steps-to-test-format.md` and the section files it indexes: **one numbered list** in its
    General item order — theme · where + the click-level setup recipe · the walk-through, each
    step carrying its own expectation inline · edge cases · context / out of scope — and no
    per-AC scenarios and no regression sweep (QA already has the AC; what it lacks is how the

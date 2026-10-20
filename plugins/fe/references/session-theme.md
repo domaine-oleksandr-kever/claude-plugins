@@ -72,7 +72,7 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    it. `/fe:create-pull-request` skips its refresh only when every line naming the id carries a
    sha and no build input changed since the last; one `-` line makes it refresh, since a dev
    server handed over once may still be uploading
-   (`<fe root>/skills/create-pull-request/REFERENCE.md → Preview theme`).
+   (`<fe root>/skills/create-pull-request/reference/preview-theme.md`).
 5. **Then the dev server runs on it.** Steps 1–4 already needed this checkout's
    `shopify.theme.toml` (or `TOML_PATH`), so the store is resolved by the time the server
    starts. The start command the developer gets is the line for this checkout's profile —

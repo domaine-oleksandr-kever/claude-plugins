@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.9.1**.
+Current release: **fe v0.10.0**.
 
 ## Status
 
@@ -104,7 +104,7 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 |---|---|---|
 | `references/session-theme.md` | `/fe:ship`, `/fe:preview-theme`, `/fe:create-pull-request` | one preview theme per work stream: the gate, the pin into `shopify.theme.toml`, the worktree un-pin |
 | `references/preview-theme-errors.md` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:ship` | how to read a `create-preview-theme.sh` run (its workspace lines and warnings), one entry per `error=` key, Shopify rejections and page deep-links |
-| `references/theme-gotchas.md` | `/fe:develop-feature-or-fix` | Shopify theme traps that fail silently: dropped settings, presets, Liquid limits, cascade layers, browser checks |
+| `references/theme-gotchas.md` | `/fe:develop-feature-or-fix`, `/fe:preview-theme` | Shopify theme traps that fail silently: dropped settings, presets, Liquid limits, cascade layers, browser checks; preview-theme recipes (templates-only push, stale hashed CSS, Playwright setContent) |
 | `references/technical-approach-format.md` | `/fe:write-technical-approach` | the short TA format |
 | `references/research-pressure-test.md` | `/fe:write-technical-approach`, `/fe:develop-feature-or-fix`, `/fe:ship` | cross-checking a draft plan against fresh external sources |
 | `references/metafield-metaobject-setup.md` | `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:write-technical-approach`, `/fe:ship` | inspecting, creating, mocking and binding store metafields and metaobjects |
@@ -121,7 +121,7 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 | `scripts/create-preview-theme.sh` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:ship` | builds and pushes an unpublished preview theme (`create`), re-pushes one (`refresh`), pins the session theme (`pin`). `create --duplicate-of <theme-id\|name> --store <store>` copies a theme on that store server-side, waits until `theme list` shows the copy ready, then pushes the branch code into it; `--brand <b>` (create, refresh) exports `BRAND=<b>` to the build and does nothing else |
 | `scripts/session-theme.sh` | sourced by `create-preview-theme.sh`, run by `worktree-theme.sh` | the pin and un-pin grammar of `shopify.theme.toml` (`# fe:session-theme`, `# fe:superseded`) |
 | `scripts/worktree-theme.sh` | `/fe:preview-theme` in a worktree, `/fe:ship` | the Shopify half of a new worktree: the one-time un-pin and the dev-server line |
-| `scripts/theme-json.sh` | the skills, through the `store-access` section | reads and writes a theme's JSON files (`templates/*.json`, `config/settings_data.json`) with a read-back check; `locate <id>` finds which store holds a theme (the stores in `<base root>/scripts/qa-stores.cjs` plus the toml's, or `--stores a,b`) |
+| `scripts/theme-json.sh` | the skills, through the `store-access` section | reads and writes a theme's JSON files (`templates/*.json`, `config/settings_data.json`) with a read-back check; `locate <id>` finds which store holds a theme (the stores in `<base root>/scripts/qa-stores.cjs` plus every store the toml's `[environments.*]` blocks name, or `--stores a,b`, or `--store <one>`) |
 | `scripts/shopify-admin-gql.sh` | the skills, through the `store-access` section | one Admin GraphQL call against the project's store |
 | `scripts/project-profile.sh` | fe's hooks module, `worktree-theme.sh`, the doctor, the skills' fallback | prints `foundation`, `theme` or `none` |
 | `scripts/doctor.cjs` | `/fe-doctor`, or by hand | the static install checks (§ Doctor) |

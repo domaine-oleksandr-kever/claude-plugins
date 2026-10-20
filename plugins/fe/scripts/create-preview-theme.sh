@@ -72,7 +72,7 @@
 #         (or an existing same-named one with --reuse) → overlay dev-theme settings
 #         → read the overlay back (see verify_overlay)
 #       → theme_id=… name=… store=… env=… preview_url=… editor_url=… reused=…
-#         [pushed=<HEAD sha>] built=… [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json] overlay=…
+#         [pushed=<HEAD sha>] built=… [css=…] [restored=…] [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json] overlay=…
 #         [warn=overlay_file_dropped file=… [unknown_types=…]] [hint=…] | [warn=overlay_unverified …] | [warn=overlay_empty …]
 #       `--reuse` resolves the name through `theme list`: a listing that never answered is refused
 #       (`error=reuse_unverifiable`), and a name that resolves to the shared dev theme is refused
@@ -95,10 +95,15 @@
 #   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
-#       → theme_id=… store=… env=… preview_url=… editor_url=… [pushed=<HEAD sha>] built=… [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json]
+#       → theme_id=… store=… env=… preview_url=… editor_url=… [pushed=<HEAD sha>] built=… [css=…] [restored=…] [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json]
 #       pushed= (create too) is printed only when the theme dirs — and, on a build or under
 #       --no-build, the tracked tree — had no uncommitted change before the build, so the push
-#       carried HEAD's code.
+#       carried HEAD's code. css=<basename,…> (create too) names the content-hashed stylesheets
+#       (`index.a1b2c3.min.css`) the build wrote or rewrote under assets/ — the name the preview
+#       must now serve. A tracked file the build dirtied that .gitignore also matches
+#       (`git check-ignore --no-index`) is restored with `git checkout --` once the push tree is
+#       assembled (the theme gets the build's copy) and named in restored=<path,…>; every other
+#       dirtied file stays in warn=build_dirtied.
 #       <ID> must clear the live-theme guard; when `theme list` never answered it must also be an id
 #       some workspace under ./.claude/tasks records as `session-theme:` (`error=refresh_unverifiable`
 #       otherwise), and it must not be the shared dev theme (`error=dev_theme_write_refused`).
@@ -981,27 +986,57 @@ vet_build_script() {
     || fail "build_script_missing ($BUILD_SCRIPT) — no such script under \`scripts\` in ./package.json (run from the project root); pick one it defines or pass --no-build; nothing was built or pushed"
 }
 BUILD_DIRTIED=""
+BUILD_RESTORED=""
+BUILD_CSS=""
 PUSHED_SHA=""
 tracked_changes() { git -c core.quotePath=false status --porcelain --untracked-files=no 2>/dev/null || true; }
+asset_css_sums() { [ -d assets ] || return 0; find assets -maxdepth 1 -type f -name '*.css' -exec cksum {} + 2>/dev/null || true; }
+# basenames of the content-hashed stylesheets (`index.a1b2c3.min.css`) among the paths on stdin
+hashed_css() {
+  local p b re='[.-]([A-Za-z0-9_]{6,})\.(min\.)?css$' out=""
+  while IFS= read -r p; do
+    b="${p##*/}"
+    [[ $b =~ $re ]] && [[ ${BASH_REMATCH[1]} == *[0-9]* ]] && out="${out:+$out,}$b"
+  done
+  printf '%s' "$out"
+}
 run_build() {
-  local log pre dirty; dirty="$(git status --porcelain -- "${THEME_DIRS[@]}" 2>/dev/null || true)"
+  local log pre css_pre dirty; dirty="$(git status --porcelain -- "${THEME_DIRS[@]}" 2>/dev/null || true)"
   # --no-build pushes whatever an earlier build left, built from any tracked file
   [ "$NO_BUILD" -eq 1 ] && { BUILT="skipped"; dirty+="$(tracked_changes)"; }
   if [ "$BUILT" = "no" ]; then
-    log="$(mk_tmpf)"; pre="$(tracked_changes)"; dirty+="$pre"
+    log="$(mk_tmpf)"; pre="$(tracked_changes)"; dirty+="$pre"; css_pre="$(asset_css_sums)"
     if npm run "$BUILD_SCRIPT" >"$log" 2>&1; then
       BUILT="yes"; rm -f "$log"
       BUILD_DIRTIED="$(tracked_changes | grep -vxF -f <(printf '%s\n' "$pre") | cut -c4- | paste -sd, - || true)"
+      BUILD_CSS="$(asset_css_sums | grep -vxF -f <(printf '%s\n' "$css_pre") | cut -d' ' -f3- | hashed_css || true)"
     else
       printf 'error=build_failed (npm run %s):\n' "$BUILD_SCRIPT"; tail -n 5 "$log"; rm -f "$log"; exit 1
     fi
   fi
   [ -n "$dirty" ] || PUSHED_SHA="$(git rev-parse --verify -q HEAD 2>/dev/null || true)"
 }
+# Called once the push tree is assembled, so the theme still gets the build's copy: a tracked file the
+# build dirtied that .gitignore also matches is the repo's accident, not a change — put HEAD's back.
+restore_ignored_dirt() {
+  local p top keep=""
+  [ -n "$BUILD_DIRTIED" ] || return 0
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+  while IFS= read -r p; do
+    if git -C "$top" check-ignore -q --no-index -- "$p" 2>/dev/null && git -C "$top" checkout -q -- "$p" 2>/dev/null; then
+      BUILD_RESTORED="${BUILD_RESTORED:+$BUILD_RESTORED,}$p"
+    else
+      keep="${keep:+$keep,}$p"
+    fi
+  done < <(printf '%s\n' "$BUILD_DIRTIED" | tr ',' '\n')
+  BUILD_DIRTIED="$keep"
+}
 print_build_keys() {
   [ -z "$PUSHED_SHA" ] || printf 'pushed=%s\n' "$PUSHED_SHA"
   printf 'built=%s\n' "$BUILT"
   [ -z "$BRAND_ARG" ] || printf 'brand=%s\n' "$BRAND_ARG"
+  [ -z "$BUILD_CSS" ] || printf 'css=%s\n' "$BUILD_CSS"
+  [ -z "$BUILD_RESTORED" ] || printf 'restored=%s\n' "$BUILD_RESTORED"
   [ -z "$BUILD_DIRTIED" ] || printf 'warn=build_dirtied=%s — the build rewrote these tracked files in the working tree and the theme was pushed with them; restore a build artifact with `git checkout -- <path>` rather than committing it\n' "$BUILD_DIRTIED"
   [ "$BUILT" = "skipped_no_package_json" ] || return 0
   printf 'warn=build_skipped_no_package_json — no ./package.json in this checkout, so nothing was built and the working tree was pushed as it stands; pass --build-script <name> if this repo does need a build\n'
@@ -1034,7 +1069,7 @@ create_duplicate() {
   [ -n "$src_id" ] || fail "duplicate_source_not_found source=\"$DUP_SRC\" store=$STORE$SRC_NOTE — no theme with that id or name is listed on the store; nothing was built or duplicated; check \`shopify theme list --store $STORE\`"
 
   run_build
-  TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
+  TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE"); restore_ignored_dirt
 
   ERR="$(mk_tmpf)"
   local dup_args; dup_args=(theme duplicate --store "$STORE" --theme "$src_id" --name "$NAME" --force --json)
@@ -1196,7 +1231,7 @@ case "$MODE" in
     assert_dev_theme_listed
     start_settings_pull
     run_build
-    TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
+    TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE"); restore_ignored_dirt
 
     # 1) push the built local code (settings ignored) to a new/existing theme.
     ERR="$(mk_tmpf)"
@@ -1317,7 +1352,7 @@ case "$MODE" in
     fi
 
     run_build
-    TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE")
+    TMP_CODE="$(assemble_theme)"; CLEAN_DIRS+=("$TMP_CODE"); restore_ignored_dirt
 
     ERR="$(mk_tmpf)"
     if ! push_retry "$ERR" shopify theme push --store "$STORE" --theme "$TARGET" --path "$TMP_CODE" "${IGN[@]}" ${EXTRA_IGN[@]+"${EXTRA_IGN[@]}"} --json; then
