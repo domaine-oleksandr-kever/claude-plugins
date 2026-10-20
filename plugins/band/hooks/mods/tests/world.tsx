@@ -159,6 +159,7 @@ export const ok = (body: unknown = ENDPOINT_BODY): HttpAnswer => ({ status: 200,
  * no suite meets the usage endpoint unless it opts in); `http` answers each usage-endpoint fetch (`{ deny }`
  * rejects it), which `fetches` records; `profile` answers each OAuth profile fetch (404 by default), which
  * `profileFetches` records. `files` holds what fs.read answers besides band's manifest; any other path is missing.
+ * `settings` is what settings.read answers; null answers `{ model: w.model }`, the model the session reports configured.
  */
 export function world(on: On, store: Record<string, unknown> = {}, env: Record<string, string> = {}) {
   const w = {
@@ -178,6 +179,7 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
     profile: (async () => ({ status: 404, ok: false, headers: {}, text: '' })) as () => Promise<HttpAnswer | { deny: string }>,
     profileFetches: [] as { url: string; init?: any }[],
     files: {} as Record<string, string>,
+    settings: null as Record<string, unknown> | null,
   }
   const clock = mock.clock(on, { now: T0 })
   // A recording store: mock.store and a second store.set hook cannot both be registered.
@@ -201,6 +203,7 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
   on('session.surfaces', async () => ({ value: w.surfaces }) as never)
   on('session.usage', async () => ({ value: { startedAt: T0, context: w.context, rateLimits: w.rateLimits, cost: w.cost } }))
   on('session.model', async () => ({ value: w.model }))
+  on('settings.read', async () => ({ value: (w.settings ?? { model: w.model }) as any }))
   on('session.authorize', async () => ({ value: w.auth }))
   on('http.fetch', async (_$, e) => {
     const isProfile = e.url.endsWith('/api/oauth/profile')
@@ -241,7 +244,8 @@ export const start = ($: any, surface: Surface = 'terminal') =>
 export const measure = ($: any, context: Ctx, rateLimits: Rate[] = [], cost?: Cost) =>
   $.session.measure({ context, rateLimits, ...(cost ? { cost } : {}), changed: ['context', 'rateLimits'] })
 
-export const mainTurn = ($: any, agentId?: string) =>
+/** A finished turn with usage; `model` names the model that answered it (absent: the usage names none). */
+export const mainTurn = ($: any, agentId?: string, model?: string) =>
   $.turn.complete({
     answer: '',
     durationMs: 1,
@@ -249,7 +253,7 @@ export const mainTurn = ($: any, agentId?: string) =>
     turnId: 't',
     reason: 'answer',
     ...(agentId ? { agentId } : {}),
-    usage: { input_tokens: 1, output_tokens: 1, model: 'claude-fable-5-1' },
+    usage: { input_tokens: 1, output_tokens: 1, ...(model ? { model } : {}) },
   })
 
 export function modelSwitch(over: Record<string, unknown>) {

@@ -662,14 +662,16 @@ describe('account', () => {
     expect([...(long?.org ?? '')]).toHaveLength(120)
   })
 
-  test('creditGate: the families of additionalModelOptionsCache, hidden while extra usage is unusable; anything unknown hides nothing', () => {
+  test('creditGate: the families of additionalModelOptionsCache the lattice flag bills to credits, hidden while extra usage is unusable; anything unknown hides nothing', () => {
     const GATED = [{ value: 'claude-fable-5-1[1m]', label: 'Fable', description: 'x' }]
-    const team = { additionalModelOptionsCache: GATED, cachedExtraUsageDisabledReason: 'out_of_credits', oauthAccount: { organizationType: 'claude_team', hasExtraUsageEnabled: true }, modelAccessCache: [] }
+    const lattice = (flag: unknown) => ({ cachedGrowthBookFeatures: { tengu_saffron_lattice: flag } })
+    const BILLED = lattice({ enabled: true, planLimitsEndDate: '2026-07-20T07:00:00Z' })
+    const team = { additionalModelOptionsCache: GATED, cachedExtraUsageDisabledReason: 'out_of_credits', oauthAccount: { organizationType: 'claude_team', hasExtraUsageEnabled: true }, modelAccessCache: [], ...BILLED }
     expect(creditGate(team)).toEqual({ hiddenModels: ['fable'], hiddenReason: 'out_of_credits' })
-    expect(creditGate({ additionalModelOptionsCache: GATED, oauthAccount: { hasExtraUsageEnabled: false } })).toEqual({ hiddenModels: ['fable'], hiddenReason: 'extra_usage_off' })
+    expect(creditGate({ additionalModelOptionsCache: GATED, oauthAccount: { hasExtraUsageEnabled: false }, ...BILLED })).toEqual({ hiddenModels: ['fable'], hiddenReason: 'extra_usage_off' })
     // Ids without a [1m], aliases, several families: MODEL_ALIASES order, once each.
     expect(
-      creditGate({ additionalModelOptionsCache: [{ value: 'opus' }, { value: 'claude-fable-5-1' }, { value: 'claude-fable-5-1[1m]' }], cachedExtraUsageDisabledReason: 'out_of_credits' }),
+      creditGate({ additionalModelOptionsCache: [{ value: 'opus' }, { value: 'claude-fable-5-1' }, { value: 'claude-fable-5-1[1m]' }], cachedExtraUsageDisabledReason: 'out_of_credits', ...BILLED }),
     ).toEqual({ hiddenModels: ['fable', 'opus'], hiddenReason: 'out_of_credits' })
     const none = { hiddenModels: [], hiddenReason: null }
     // Extra usage usable or unknown: nothing hidden.
@@ -682,6 +684,17 @@ describe('account', () => {
     expect(creditGate({ ...team, additionalModelOptionsCache: [{ value: 'claude-zephyr-1-0' }] })).toEqual(none)
     expect(creditGate({ ...team, additionalModelOptionsCache: [{ value: 5 }, { label: 'Fable' }, null, 'claude-fable-5-1'] })).toEqual(none)
     expect(creditGate({ ...team, additionalModelOptionsCache: { value: 'claude-fable-5-1' } })).toEqual(none)
+    // The plan includes the model (the Max record: plan-wide off), or its perModel entry is off: nothing hidden.
+    const max = { additionalModelOptionsCache: GATED, cachedExtraUsageDisabledReason: 'org_level_disabled', oauthAccount: { organizationType: 'claude_max', hasExtraUsageEnabled: false } }
+    expect(creditGate({ ...max, ...lattice({ enabled: false }) })).toEqual(none)
+    expect(creditGate({ ...team, ...lattice({ enabled: false }) })).toEqual(none)
+    expect(creditGate({ ...team, ...lattice({ enabled: true, planLimitsEndDate: 'x', perModel: { 'claude-fable-5-1[1m]': { enabled: false } } }) })).toEqual(none)
+    // A perModel entry that bills the model beats a plan-wide off; overageConsentRequired bills it too.
+    expect(creditGate({ ...team, ...lattice({ enabled: false, perModel: { 'claude-fable-5-1': { enabled: true } } }) })).toEqual({ hiddenModels: ['fable'], hiddenReason: 'out_of_credits' })
+    expect(creditGate({ ...max, ...lattice({ overageConsentRequired: true }) })).toEqual({ hiddenModels: ['fable'], hiddenReason: 'org_level_disabled' })
+    // No flag, or a malformed one: nothing hidden.
+    for (const flags of [undefined, null, 'x', {}, { tengu_saffron_lattice: 'on' }]) expect(creditGate({ ...team, cachedGrowthBookFeatures: flags })).toEqual(none)
+    expect(creditGate({ ...team, ...lattice({ enabled: true }) })).toEqual(none)
     // The personal record carries none of these keys.
     for (const bad of [undefined, null, 'x', [], {}, RECORD({ organizationType: 'claude_max' })]) expect(creditGate(bad)).toEqual(none)
   })

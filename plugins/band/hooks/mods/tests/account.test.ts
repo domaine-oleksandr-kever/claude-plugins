@@ -85,6 +85,7 @@ describe('band.account hiddenModels from the login record', () => {
       additionalModelOptionsCache: [{ value: 'claude-fable-5-1[1m]', label: 'Fable', description: 'Credit-gated' }],
       cachedExtraUsageDisabledReason: 'out_of_credits',
       modelAccessCache: [],
+      cachedGrowthBookFeatures: { tengu_saffron_lattice: { enabled: true, planLimitsEndDate: '2026-07-20T07:00:00Z' } },
       ...extra,
     })
 

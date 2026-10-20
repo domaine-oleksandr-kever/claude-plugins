@@ -580,9 +580,29 @@ export function loginAccount(json: unknown): AccountFacts | null {
 export type CreditGate = Pick<BandAccount, 'hiddenModels' | 'hiddenReason'>
 
 /**
- * The login record's credit-gated families: those of `additionalModelOptionsCache[].value` (a trailing `[1m]` dropped),
- * hidden while extra usage is unusable: `cachedExtraUsageDisabledReason` is a non-empty string (it is the reason), or
- * `oauthAccount.hasExtraUsageEnabled` is false (`extra_usage_off`). Missing or malformed keys hide nothing.
+ * Whether the host bills `id` to usage credits, from the login record's `cachedGrowthBookFeatures.tengu_saffron_lattice`
+ * flag: its `perModel` entry for the id (a key matched by family, a trailing `[1m]` dropped) decides by `enabled`; else
+ * plan-wide `enabled: false` → no; else `overageConsentRequired: true` or a `planLimitsEndDate` → yes. No flag → no.
+ */
+function billedToCredits(json: Record<string, unknown>, id: string): boolean {
+  const flags = json.cachedGrowthBookFeatures
+  const lattice = isRecord(flags) ? flags.tengu_saffron_lattice : undefined
+  if (!isRecord(lattice)) return false
+  const family = modelFamily(id.replace(/\[1m\]$/, ''))
+  if (isRecord(lattice.perModel)) {
+    const key = Object.keys(lattice.perModel).find(k => modelFamily(k.replace(/\[1m\]$/, '')) === family)
+    const per = key === undefined ? undefined : lattice.perModel[key]
+    if (isRecord(per)) return per.enabled === true
+  }
+  if (lattice.enabled === false) return false
+  return lattice.overageConsentRequired === true || lattice.planLimitsEndDate !== undefined
+}
+
+/**
+ * The login record's credit-gated families: those of `additionalModelOptionsCache[].value` (a trailing `[1m]` dropped)
+ * that the record's lattice flag bills to usage credits (`billedToCredits`), hidden while extra usage is unusable:
+ * `cachedExtraUsageDisabledReason` is a non-empty string (it is the reason), or `oauthAccount.hasExtraUsageEnabled` is
+ * false (`extra_usage_off`). A plan that includes the model (Fable on Max) hides nothing; so do missing or malformed keys.
  */
 export function creditGate(json: unknown): CreditGate {
   const none: CreditGate = { hiddenModels: [], hiddenReason: null }
@@ -590,7 +610,9 @@ export function creditGate(json: unknown): CreditGate {
   const reason = fact(json.cachedExtraUsageDisabledReason) ?? (isRecord(json.oauthAccount) && json.oauthAccount.hasExtraUsageEnabled === false ? 'extra_usage_off' : null)
   if (reason === null || !Array.isArray(json.additionalModelOptionsCache)) return none
   const gated = new Set(
-    json.additionalModelOptionsCache.flatMap(o => (isRecord(o) && typeof o.value === 'string' ? [modelFamily(o.value.replace(/\[1m\]$/, ''))] : [])),
+    json.additionalModelOptionsCache.flatMap(o =>
+      isRecord(o) && typeof o.value === 'string' && billedToCredits(json, o.value) ? [modelFamily(o.value.replace(/\[1m\]$/, ''))] : [],
+    ),
   )
   const hiddenModels = MODEL_ALIASES.filter(a => gated.has(a))
   return hiddenModels.length ? { hiddenModels, hiddenReason: reason } : none

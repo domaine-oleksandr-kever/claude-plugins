@@ -34,6 +34,7 @@ function world(on: On, env: Record<string, string> = {}) {
   on('fs.read', async () => ({ value: JSON.stringify({ name: 'band', version: '9.9.9' }) }))
   on('session.id', async () => ({ value: 's1' }))
   on('session.model', async () => ({ value: w.model }))
+  on('settings.read', async () => ({ value: { model: w.model } as any }))
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] } }))
   on('session.surfaces', async () => ({ value: w.surfaces }))
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))

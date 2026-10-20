@@ -105,9 +105,12 @@ function withCost(u: BandUsage): BandUsage {
 
 /** The model a switch moved away from: $.session.model() still answers it for a while after the event. */
 let leftModel: string | null = null
+/** A main-thread response has arrived: until then $.session.model() answers the process default, not the configured model. */
+let bound = false
 
-/** The $.session.model() answer, or null when it is the model a switch just left: that is the lagging answer. */
+/** The $.session.model() answer, or null before a response binds the session or when it is the model a switch just left. */
 async function sessionModel($: $): Promise<string | null> {
+  if (!bound) return null
   let m: string | null = null
   try {
     m = await $.session.model()
@@ -117,6 +120,13 @@ async function sessionModel($: $): Promise<string | null> {
   if (!m || m === leftModel) return null
   leftModel = null
   return m
+}
+
+/** The settings' `model` (an alias such as `opus`, or an id) when it names one; `default`, absent or unreadable → null. */
+async function settingsModel($: $): Promise<string | null> {
+  const s = await $.settings.read().catch(() => null)
+  const m = s?.model
+  return typeof m === 'string' && m.trim() !== '' && m !== 'default' ? m : null
 }
 
 /** Writes the model atom and logs the change once; the same id again is a no-op. */
@@ -291,8 +301,9 @@ function progressLine(p: unknown): { workId: string | null; branch: string | nul
 }
 
 /**
- * Fills the atoms a fresh session starts without: the TTL (`seedsTtl` decides), the model and the first usage
- * reading. One throwing session.start hook skips every band session.start hook: each $ call fails alone.
+ * Fills the atoms a fresh session starts without: the TTL (`seedsTtl` decides), the model (the session's once a
+ * response bound it, else the settings' while the atom is empty) and the first usage reading. One throwing
+ * session.start hook skips every band session.start hook: each $ call fails alone.
  */
 async function seed($: $, reloaded: boolean, forcedTtl: number | null): Promise<void> {
   if (seedsTtl(reloaded, forcedTtl, (await read($, cache).catch(() => CACHE_INIT)).ttlSource)) {
@@ -307,7 +318,7 @@ async function seed($: $, reloaded: boolean, forcedTtl: number | null): Promise<
     const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
     await update($, cache, c => ({ ...c, ttlMs, ttlSource })).catch(() => undefined)
   }
-  const m = await sessionModel($)
+  const m = (await sessionModel($)) ?? ((await read($, model).catch(() => null)) === null ? await settingsModel($) : null)
   if (m !== null) await update($, model, () => m).catch(() => undefined)
   await refresh($).catch(() => undefined)
 }
@@ -325,6 +336,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
     billed = await isBilled($).catch(() => true)
     costShown = isOn(await $.env.get('BAND_COST').catch(() => undefined))
     endpointOn = (await $.env.get('BAND_USAGE_ENDPOINT').catch(() => undefined)) !== '0'
+    bound = false
     await seed($, reloaded, forcedTtl)
     if (!reloaded) {
       const v = (await read($, info).catch(() => null))?.version ?? '?'
@@ -358,8 +370,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
     await writeUsage($, withCost(toUsage(e.context, e.rateLimits, e.cost)))
-    // The seed may read null: the first measure fills the gap. A switch whose PostModelSwitch never
-    // reached the mod is caught here too.
+    // Once a response has bound the session, a switch whose PostModelSwitch never reached the mod is caught here.
     const m = await sessionModel($)
     if (m !== null) await adoptModel($, m)
     void maybeFetchLimits($)
@@ -382,6 +393,10 @@ export function registerUsage(on: On, options: PluginOptions): void {
       const now = await $.clock.now()
       await update($, cache, c => ({ ...c, anchorMs: now, isCold: false }))
       await update($, tick, () => now)
+      bound = true
+      // A response names its model without the `[1m]` a pinned session id carries: that id stays.
+      const answered = e.usage.model
+      if (typeof answered === 'string' && answered && (await read($, model))?.replace(/\[1m\]$/, '') !== answered) await adoptModel($, answered)
     }
     return next(e)
   })

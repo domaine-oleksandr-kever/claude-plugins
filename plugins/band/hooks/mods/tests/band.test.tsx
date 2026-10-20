@@ -396,7 +396,7 @@ describe('band', () => {
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
     })
 
-    test(`${surface}: a seed with no model → the first measure fills the model segment`, async ($, on) => {
+    test(`${surface}: a seed with no model → the first measure after a response fills the model segment`, async ($, on) => {
       const { w } = world(on)
       w.model = null
       await start($, surface)
@@ -494,7 +494,7 @@ describe('band', () => {
       w.auth = { handle: 'h1', kind: 'bearer' }
       w.model = 'claude-opus-5-5'
       const team = { oauthAccount: { organizationType: 'claude_team', hasExtraUsageEnabled: true }, modelAccessCache: [] }
-      const gated = { ...team, additionalModelOptionsCache: [{ value: 'claude-fable-5-1[1m]', label: 'Fable' }], cachedExtraUsageDisabledReason: 'out_of_credits' }
+      const gated = { ...team, additionalModelOptionsCache: [{ value: 'claude-fable-5-1[1m]', label: 'Fable' }], cachedExtraUsageDisabledReason: 'out_of_credits', cachedGrowthBookFeatures: { tengu_saffron_lattice: { enabled: true, planLimitsEndDate: '2026-07-20T07:00:00Z' } } }
       w.files[`${HOME}/.claude.json`] = JSON.stringify(gated)
       await start($, surface)
       const ui = await mount($, surface)

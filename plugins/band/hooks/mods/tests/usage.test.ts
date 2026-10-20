@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { CLEAR_RESEED_MS, HOUR_MS, seedsTtl } from '../lib.ts'
-import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, measure, modelSwitch, ok, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
+import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, mainTurn, measure, modelSwitch, ok, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -41,7 +41,10 @@ describe('event log writers → band.events', () => {
       mem.set(e.key, { value: e.value, version })
       return { value: { isSet: true, version } } as any
     })
+    w.settings = { model: 'opus' }
     await start($)
+    // A response bound the session: the re-seed takes the session's model, not the settings alias.
+    await mainTurn($)
     await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
     const lines = mem.get('events')
     mem.clear()
@@ -101,6 +104,83 @@ describe('event log writers → band.events', () => {
     await measure($, { window: 200_000, percent: 10 }, [{ kind: 'five_hour', percentUsed: 91 }])
     expect(w.toasts).toEqual(['5h window: 91% used'])
     expect(await peekEvents($)).toEqual([])
+  })
+})
+
+describe('the model atom before and after the first response', () => {
+  const ctx = { window: 200_000, percent: 10 }
+
+  test('the settings model fills it at start; the process default the session answers is never adopted; the first response replaces it', async ($, on) => {
+    const { w } = world(on)
+    w.settings = { model: 'opus' }
+    w.model = 'claude-sonnet-5-5'
+    await start($)
+    expect((await peek($)).model).toBe('opus')
+    await measure($, ctx)
+    expect((await peek($)).model).toBe('opus')
+    w.model = 'claude-opus-5-5'
+    await mainTurn($, undefined, 'claude-opus-5-5')
+    expect((await peek($)).model).toBe('claude-opus-5-5')
+    await measure($, ctx)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5'])
+    w.model = 'claude-haiku-5-5'
+    await measure($, ctx)
+    expect((await peek($)).model).toBe('claude-haiku-5-5')
+  })
+
+  test('a subagent turn binds nothing: the measure after it still ignores the session answer', async ($, on) => {
+    const { w } = world(on)
+    w.settings = { model: 'opus' }
+    w.model = 'claude-sonnet-5-5'
+    await start($)
+    await mainTurn($, 'a1', 'claude-haiku-5-5')
+    await measure($, ctx)
+    expect((await peek($)).model).toBe('opus')
+  })
+
+  for (const [name, settings] of [['default', { model: 'default' }], ['absent', {}], ['empty', { model: '' }], ['not a string', { model: 7 }]] as const) {
+    test(`settings model ${name} → null until the first response`, async ($, on) => {
+      const { w } = world(on)
+      w.settings = settings
+      w.model = 'claude-sonnet-5-5'
+      await start($)
+      await measure($, ctx)
+      expect((await peek($)).model).toBeNull()
+      await mainTurn($, undefined, 'claude-fable-5-1')
+      expect((await peek($)).model).toBe('claude-fable-5-1')
+    })
+  }
+
+  test('a response whose usage names no model binds the session: the next measure reads it', async ($, on) => {
+    const { w } = world(on)
+    w.settings = {}
+    w.model = 'claude-opus-5-5'
+    await start($)
+    await mainTurn($)
+    expect((await peek($)).model).toBeNull()
+    await measure($, ctx)
+    expect((await peek($)).model).toBe('claude-opus-5-5')
+  })
+
+  test('a pinned [1m] id stays when a response names the same model without it', async ($, on) => {
+    const { w } = world(on)
+    w.settings = {}
+    w.model = 'claude-opus-5-5[1m]'
+    await start($)
+    await mainTurn($)
+    await measure($, ctx)
+    await mainTurn($, undefined, 'claude-opus-5-5')
+    expect((await peek($)).model).toBe('claude-opus-5-5[1m]')
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5[1m]'])
+  })
+
+  test('PostModelSwitch before any response adopts the switch event\'s model over the settings alias', async ($, on) => {
+    const { w } = world(on)
+    on('classic.PostModelSwitch', async () => ({}) as never)
+    w.settings = { model: 'opus' }
+    await start($)
+    await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1' }))
+    expect((await peek($)).model).toBe('claude-fable-5-1')
   })
 })
 

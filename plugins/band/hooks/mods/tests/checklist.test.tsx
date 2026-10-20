@@ -25,6 +25,7 @@ function world(on: On, o: { progress?: unknown; panes?: Pane[] } = {}) {
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('session.id', async () => ({ value: 's1' }))
   on('session.model', async () => ({ value: 'claude-opus-5-5' }))
+  on('settings.read', async () => ({ value: { model: 'opus' } as any }))
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] } }))
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
   on('session.surfaces', async () => ({ value: w.surfaces }))
