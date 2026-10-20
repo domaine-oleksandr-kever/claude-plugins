@@ -1869,14 +1869,39 @@ rc=0; M="$TMP/m18d"; CURL_MARKER="$M" GQL_TOKEN="" \
 if [ "$rc" -eq 0 ] && hdr_is shpat_last "$M.hdr"; then ok
 else bad G18d-token-last-wins "rc=$rc hdr=$(head -c 160 "$M.hdr" 2>/dev/null)"; fi
 
+# GNU mktemp semantics on every host: a bare `mktemp` lands in $TMPDIR as tmp.XXXXXXXXXX. BSD mktemp
+# on macOS ignores TMPDIR (it uses the per-user /var/folders dir), so without this shim a flat file
+# the runner leaves behind never shows up in the case's TMPDIR there and only Linux CI catches it.
+GNUSHIM="$TMP/gnu-mktemp"; mkdir -p "$GNUSHIM"
+REAL_MKTEMP="$(command -v mktemp)"
+cat > "$GNUSHIM/mktemp" <<FAKE
+#!/usr/bin/env bash
+if [ \$# -eq 0 ]; then exec "$REAL_MKTEMP" "\${TMPDIR:-/tmp}/tmp.XXXXXXXXXX"; fi
+exec "$REAL_MKTEMP" "\$@"
+FAKE
+chmod +x "$GNUSHIM/mktemp"
+
 # G19 (bug): the marker is a guessable path in a shared /tmp — state moves into a 0700 per-user dir
 QT4="$TMP/state-tmpdir"; mkdir -p "$QT4"
-rc=0; GQL_TMPDIR="$QT4" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+rc=0; PATH="$GNUSHIM:$PATH" GQL_TMPDIR="$QT4" run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
 SD="$(gql_state "$QT4")"
 if [ "$rc" -eq 0 ] && [ -d "$SD" ] && [ "$(ls -ld "$SD" | cut -c1-10)" = "drwx------" ]; then ok
 else bad G19-state-dir-0700 "rc=$rc mode=$(ls -ld "$SD" 2>&1 | cut -c1-10)"; fi
 stray="$(find "$QT4" -maxdepth 1 -type f 2>/dev/null | head -3)"
 if [ -z "$stray" ]; then ok; else bad G19b-no-flat-marker "loose state in TMPDIR: $stray"; fi
+
+# G19c: the failed execute's kept log= lives in the 0700 state dir, holds the CLI's raw output, and
+# the run leaves no flat file (log, out/err) at depth 1 of TMPDIR
+QT4C="$TMP/state-tmpdir-log"; mkdir -p "$QT4C"
+rc=0; PATH="$GNUSHIM:$PATH" GQL_TMPDIR="$QT4C" FAKE_EXEC_MODE=garbage \
+  run_gql --query query.graphql >"$O" 2>"$E" || rc=$?
+lf="$(grep -o 'log=/[^ )]*' "$E" | head -1 | cut -d= -f2)"
+SDC="$(gql_state "$QT4C")"
+if [ "$rc" -eq 0 ] && [ -n "$lf" ] && [ -f "$lf" ] && [ "$(dirname "$lf")" = "$SDC" ] \
+   && grep -q 'unexpected CLI crash output' "$lf"; then ok
+else bad G19c-store-log-in-state-dir "rc=$rc log=$lf sd=$SDC err=$(head -c 240 "$E" | tr '\n' ' ')"; fi
+stray="$(find "$QT4C" -maxdepth 1 -type f 2>/dev/null | head -3)"
+if [ -z "$stray" ]; then ok; else bad G19d-no-flat-store-log "loose files in TMPDIR: $stray"; fi
 
 # G20: a DANGLING symlink at the state-dir path — pins the weaker half only: no write lands through
 # the link and the run still succeeds uncached rather than dying (on BSD `mkdir -p` fails on the

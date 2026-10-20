@@ -90,10 +90,11 @@
 # An execute that ran and failed is named by ONE reason code read from the CLI's output —
 # no_store_auth, access_denied, store_not_found, else cli_error (graphql_error_unparsed: the GraphQL
 # phrase with no JSON behind it); the raw output (progress events, host hint tags, boxes) goes to a
-# `log=<path>` mktemp on the note / error line, never into the line itself. When the token engine has
-# no token either, `error=no_admin_token`'s hint names that code and the next step.
-# That marker, the remembered store-engine verdict and the cached CLI version live in one private
-# 0700 per-user dir under $TMPDIR (never a guessable flat file in a shared /tmp).
+# `log=<path>` file named on the note / error line, never into the line itself. When the token engine
+# has no token either, `error=no_admin_token`'s hint names that code and the next step.
+# That marker, the remembered store-engine verdict, the cached CLI version and the kept
+# `store-log.*` files live in one private 0700 per-user dir under $TMPDIR (never a guessable flat
+# file in a shared /tmp).
 # FE_GQL_PROBE_CACHE = seconds the version + store-engine verdicts stay valid (default 21600);
 # 0 re-probes on every call.
 #
@@ -220,7 +221,7 @@ fi
 
 # --- engine 1: shopify store execute (CLI ≥ 4.x + stored store auth) --------------------------
 SKIP_REASON=""
-STORE_LOG=""     # the failed execute's raw output (mktemp, kept for the caller to read)
+STORE_LOG=""     # the failed execute's raw output (kept in STATE_DIR for the caller to read)
 CLI_MISSING=0
 
 # Two facts about this machine are sticky and expensive to rediscover per call: the CLI version
@@ -590,7 +591,8 @@ try_store_execute() {
   fi
   local safe_fallback=0
   # the CLI's raw output (progress events, host hint tags, boxes) stays in a log, never in a note
-  STORE_LOG="$(mktemp)"; cat "$err" "$out" > "$STORE_LOG" 2>/dev/null || true
+  if [ -n "$STATE_DIR" ]; then STORE_LOG="$(mktemp "$STATE_DIR/store-log.XXXXXX")"; else STORE_LOG="$(mktemp)"; fi
+  cat "$err" "$out" > "$STORE_LOG" 2>/dev/null || true
   if grep -q 'No stored app authentication found' "$STORE_LOG"; then
     # the CLI failed before sending anything — nothing executed server-side
     safe_fallback=1
