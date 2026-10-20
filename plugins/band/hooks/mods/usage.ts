@@ -6,7 +6,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
 import type { BandEvent, BandEventKind, BandRate, BandUsage } from '../../types'
 import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events.ts'
-import { CACHE_INIT, CLEAR_RESEED_MS, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, keepCtx, mergeRates, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
+import { CACHE_INIT, CLEAR_RESEED_MS, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, keepCtx, mergeRates, modelFamily, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 import { accountDebug } from './account.ts'
 
@@ -136,6 +136,21 @@ async function adoptModel($: $, m: string): Promise<void> {
   await logEvent($, 'model', m)
 }
 
+/** The settings model last seen, so only a change to it moves the atom. */
+let lastSettingsModel: string | null = null
+
+/**
+ * Follows a `/model` through the settings it saves (the switch event never reaches a mod on a Team login): a changed
+ * settings model is adopted when the atom holds another family or nothing, so an id of the same family stays.
+ */
+async function syncSettingsModel($: $): Promise<void> {
+  const s = await settingsModel($)
+  if (s === null || s === lastSettingsModel) return
+  lastSettingsModel = s
+  const current = await read($, model)
+  if (current === null || modelFamily(current.replace(/\[1m\]$/, '')) !== modelFamily(s)) await adoptModel($, s)
+}
+
 const SAME_COMPACTION_MS = 30_000
 let lastCompactMs = 0
 
@@ -256,6 +271,8 @@ async function refresh($: $): Promise<void> {
   await update($, tick, () => now)
   await writeUsage($, withCost(toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const)))))
   void maybeFetchLimits($)
+  // A pick in the dialog a bare `/model` opens is saved after the command returns.
+  await syncSettingsModel($).catch(() => undefined)
 }
 
 /**
@@ -318,7 +335,11 @@ async function seed($: $, reloaded: boolean, forcedTtl: number | null): Promise<
     const ttlSource = forcedTtl !== null ? 'option' : learned !== null ? 'store' : 'default'
     await update($, cache, c => ({ ...c, ttlMs, ttlSource })).catch(() => undefined)
   }
-  const m = (await sessionModel($)) ?? ((await read($, model).catch(() => null)) === null ? await settingsModel($) : null)
+  let m = await sessionModel($)
+  if (m === null) {
+    m = lastSettingsModel = await settingsModel($)
+    if ((await read($, model).catch(() => null)) !== null) m = null
+  }
   if (m !== null) await update($, model, () => m).catch(() => undefined)
   await refresh($).catch(() => undefined)
 }
@@ -337,6 +358,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
     costShown = isOn(await $.env.get('BAND_COST').catch(() => undefined))
     endpointOn = (await $.env.get('BAND_USAGE_ENDPOINT').catch(() => undefined)) !== '0'
     bound = false
+    lastSettingsModel = null
     await seed($, reloaded, forcedTtl)
     if (!reloaded) {
       const v = (await read($, info).catch(() => null))?.version ?? '?'
@@ -448,6 +470,13 @@ export function registerUsage(on: On, options: PluginOptions): void {
     if (clearedAt !== null && next.budget.remainingMs >= END_FILE_MIN_MS) {
       await persist($, clearedAt, 'session', 'clear', e.sessionId, true).catch(() => undefined)
     }
+    return r
+  })
+
+  // A typed `/model <alias>` and the picker's run both land here; the host saves the settings during next(e).
+  on('command.run', { command: 'model' }, async ($, e, next) => {
+    const r = await next(e)
+    await syncSettingsModel($).catch(() => undefined)
     return r
   })
 

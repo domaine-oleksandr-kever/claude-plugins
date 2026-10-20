@@ -174,6 +174,62 @@ describe('the model atom before and after the first response', () => {
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5[1m]'])
   })
 
+  /** The host's `/model`: it saves `alias` to the settings as it switches. */
+  const modelCommand = (on: any, w: any) =>
+    on('command.run', { command: 'model' }, async (_$: any, e: any) => {
+      w.settings = { model: e.args }
+      return { text: `Set model to ${e.args}` }
+    })
+
+  test('a /model run re-reads the settings it saved: a new family is adopted and logged once', async ($, on) => {
+    const { w } = world(on)
+    modelCommand(on, w)
+    w.settings = { model: 'sonnet' }
+    w.model = 'claude-sonnet-5-5'
+    await start($)
+    expect((await peek($)).model).toBe('sonnet')
+    expect((await $.command.run({ command: 'model', args: 'opus' })).text).toBe('Set model to opus')
+    expect((await peek($)).model).toBe('opus')
+    await $.command.run({ command: 'model', args: 'opus' })
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model opus'])
+  })
+
+  test('a switch event that already wrote the id keeps it: the saved alias of the same family is only recorded', async ($, on) => {
+    const { w } = world(on)
+    modelCommand(on, w)
+    on('classic.PostModelSwitch', async () => ({}) as never)
+    w.settings = { model: 'sonnet' }
+    await start($)
+    await $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-sonnet-5-5', to_model: 'claude-opus-5-5' }))
+    await $.command.run({ command: 'model', args: 'opus' })
+    expect((await peek($)).model).toBe('claude-opus-5-5')
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5'])
+  })
+
+  test('a pick in the /model dialog shows by the next 30 s refresh', async ($, on) => {
+    const { w, clock } = world(on)
+    w.settings = { model: 'sonnet' }
+    await start($)
+    w.settings = { model: 'opus' }
+    await clock.advance(30_000)
+    expect((await peek($)).model).toBe('opus')
+  })
+
+  test('another family saved over a known id is adopted once; an unchanged setting writes nothing more', async ($, on) => {
+    const { w, clock } = world(on)
+    w.settings = { model: 'opus' }
+    w.model = 'claude-opus-5-5'
+    await start($)
+    await mainTurn($, undefined, 'claude-opus-5-5')
+    w.settings = { model: 'opusplan' }
+    await clock.advance(30_000)
+    expect((await peek($)).model).toBe('opusplan')
+    await mainTurn($, undefined, 'claude-opus-5-5')
+    await clock.advance(30_000)
+    expect((await peek($)).model).toBe('claude-opus-5-5')
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5', 'model opusplan', 'model claude-opus-5-5'])
+  })
+
   test('PostModelSwitch before any response adopts the switch event\'s model over the settings alias', async ($, on) => {
     const { w } = world(on)
     on('classic.PostModelSwitch', async () => ({}) as never)
