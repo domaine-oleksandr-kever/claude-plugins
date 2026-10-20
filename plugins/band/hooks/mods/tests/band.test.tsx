@@ -451,6 +451,24 @@ describe('band', () => {
       expect(await shownModel(ui, surface)).toBe('opus')
     })
 
+    test(`${surface}: a pick whose run fires the switch event keeps the event's id`, async ($, on) => {
+      const { w } = world(on)
+      w.settings = { model: 'fable' }
+      on('classic.PostModelSwitch', async () => ({}) as never)
+      let event: Promise<unknown> = Promise.resolve()
+      on('command.run', { command: 'model' }, async () => {
+        event = $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-fable-5-1', to_model: 'claude-sonnet-5-5' }))
+        return { text: 'Set model to `Sonnet 5.5` and saved as your default for new sessions' }
+      })
+      await start($, surface)
+      const ui = await mount($, surface)
+      if (isDesktop) return
+      await ui.press({ key: 'model' })
+      await ui.press({ key: 'model:sonnet' })
+      await event
+      expect(await shownModel(ui, surface)).toBe('sonnet-5-5')
+    })
+
     test(`${surface}: a pick whose run names no model and fires no switch event still shows the pick at once`, async ($, on) => {
       const { w } = world(on)
       w.settings = { model: 'fable' }

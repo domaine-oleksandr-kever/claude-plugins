@@ -136,6 +136,14 @@ async function adoptModel($: $, m: string): Promise<void> {
   await logEvent($, 'model', m)
 }
 
+/** Switch events seen: a `/model` run during which it moved knows the event already wrote the model. */
+let switches = 0
+
+/** The switch events seen so far; compare a reading taken before a `/model` run with one after it. */
+export function switchCount(): number {
+  return switches
+}
+
 /** The settings model last seen, so only a change to it moves the atom. */
 let lastSettingsModel: string | null = null
 
@@ -482,13 +490,16 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   // A typed `/model <alias>` and the picker's run both land here (the switch event never reaches a mod on a Team login).
-  // The settings may still answer the old model right after: the reading taken now counts as seen, so only a later
-  // change to them moves the atom.
+  // A switch event during the run already wrote the model. The settings may still answer the old model right after:
+  // the reading taken now counts as seen, so only a later change to them moves the atom.
   on('command.run', { command: 'model' }, async ($, e, next) => {
+    const before = switches
     const r = await next(e)
     try {
       const family = answeredFamily(r.text)
-      if (family === null) {
+      if (switches !== before) {
+        lastSettingsModel = await settingsModel($)
+      } else if (family === null) {
         await syncSettingsModel($)
       } else {
         lastSettingsModel = await settingsModel($)
@@ -499,6 +510,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   })
 
   on('classic.PostModelSwitch', async ($, e, next) => {
+    switches++
     // The event's own field: $.session.model() may still answer the model before the switch here, and
     // the measure the host sends right after the switch would write that stale answer over this one.
     if (e.from_model !== e.to_model) leftModel = e.from_model

@@ -272,6 +272,23 @@ describe('the model atom before and after the first response', () => {
     expect((await peek($)).model).toBe('opus')
   })
 
+  test('a switch event raised during the run is the truth: its id stays, one model line', async ($, on) => {
+    const { w } = world(on)
+    on('classic.PostModelSwitch', async () => ({}) as never)
+    // The host fires the event inside the run and does not wait for its hooks: the two writers race.
+    let event: Promise<unknown> = Promise.resolve()
+    on('command.run', { command: 'model' }, async () => {
+      event = $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-sonnet-5-5', to_model: 'claude-haiku-5-5' }))
+      return { text: 'Set model to `Haiku 5.5` and saved as your default for new sessions' }
+    })
+    w.settings = { model: 'sonnet' }
+    await start($)
+    await $.command.run({ command: 'model', args: 'haiku' })
+    await event
+    expect((await peek($)).model).toBe('claude-haiku-5-5')
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-haiku-5-5'])
+  })
+
   test('a switch event that already wrote the id keeps it when the answer names the same family', async ($, on) => {
     const { w } = world(on)
     answering(on, SONNET)

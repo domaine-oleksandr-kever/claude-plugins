@@ -43,7 +43,7 @@ import {
 } from './lib.ts'
 import type { ModelOption } from './lib.ts'
 import { anyEvent, take } from './events.ts'
-import { adoptFamily } from './usage.ts'
+import { adoptFamily, switchCount } from './usage.ts'
 
 const usage = atom({ plugin: 'band', key: 'usage' } as const, USAGE_INIT)
 const model = atom({ plugin: 'band', key: 'model' } as const, null)
@@ -158,15 +158,16 @@ function pressClear($: $): void {
 }
 
 /**
- * A pick folds the picker and runs `/model <alias>` as typed; once it succeeds the segment shows the pick's family
- * (an id of that family the switch event already wrote stays). The current one only folds.
+ * A pick folds the picker and runs `/model <alias>` as typed; once it succeeds without a switch event (which wrote
+ * the model itself) the segment shows the pick's family. The current one only folds.
  */
 function pickModel($: $, o: ModelOption): void {
   void setPicker($, false)
   if (o.current) return
+  const before = switchCount()
   $.command.run({ command: 'model', args: o.value }).then(
     async r => {
-      await adoptFamily($, o.value).catch(() => undefined)
+      if (switchCount() === before) await adoptFamily($, o.value).catch(() => undefined)
       $.ui.toast(r.text || `model ${o.value}`)
     },
     err => $.ui.toast(`model refused: ${err instanceof Error ? err.message : String(err)}`),
