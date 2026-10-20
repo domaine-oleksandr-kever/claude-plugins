@@ -6,7 +6,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions, Timer } from 'claude-code'
 import type { BandEvent, BandEventKind, BandRate, BandUsage } from '../../types'
 import { DEBUG_COMMAND, capLines, fileLine, fmtK, logDir, pushEvent, seedLines } from './events.ts'
-import { CACHE_INIT, CLEAR_RESEED_MS, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, keepCtx, mergeRates, modelFamily, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
+import { CACHE_INIT, CLEAR_RESEED_MS, HOUR_MS, USAGE_INIT, alarmRate, compactedUsage, endpointRates, fillHalved, keepCtx, mergeRates, modelFamily, oneHourCacheTokens, rateCard, seedsTtl, toRates, toUsage, ttlMsOf } from './lib.ts'
 import { lastRender, turn } from './band.tsx'
 import { accountDebug } from './account.ts'
 
@@ -169,6 +169,8 @@ function answeredFamily(text: string | undefined): string | null {
 
 const SAME_COMPACTION_MS = 30_000
 let lastCompactMs = 0
+/** Set by every compaction, cleared by the next reading with a fill: until then no reading is read as another one. */
+let awaitingFill = false
 
 /**
  * Cold cache, the context from the engine's count (absent = no reading), one log line. The
@@ -176,6 +178,7 @@ let lastCompactMs = 0
  * report within 30 s of the last is the same compaction, and then only a token count refines the context.
  */
 async function applyCompaction($: $, trigger: string, tokensAfter?: number, tokensBefore?: number): Promise<void> {
+  awaitingFill = true
   const now = await $.clock.now()
   const same = now - lastCompactMs < SAME_COMPACTION_MS
   lastCompactMs = now
@@ -197,12 +200,36 @@ let endpoint: BandRate[] = []
  * atom's rates goes through here.
  */
 async function writeUsage($: $, next?: BandUsage): Promise<void> {
-  if (next) measured = next.rates
+  if (next) {
+    measured = next.rates
+    await inferCompaction($, next)
+  }
   const now = await $.clock.now()
   endpoint = endpoint.filter(r => r.resetsAt === null || !(Date.parse(r.resetsAt) <= now))
   const rates = mergeRates(measured, endpoint)
   await update($, usage, prev => (next ? keepCtx(prev, { ...next, rates }) : { ...prev, rates }))
   await adoptSubscriptionTtl($, rates)
+}
+
+/**
+ * A compaction read off a measured reading, for logins whose hooks never see the compact events (a Claude Team
+ * login). The fill gone (the engine drops it until the next response) is applied as one; a fill below half of
+ * the last one, that moment missed, is only logged, as the response that measured it wrote the cache again.
+ */
+async function inferCompaction($: $, next: BandUsage): Promise<void> {
+  const prev = await read($, usage)
+  if (next.ctxPct === null) {
+    if (prev.ctxPct !== null && !awaitingFill) await applyCompaction($, 'inferred')
+    return
+  }
+  const wasAwaiting = awaitingFill
+  awaitingFill = false
+  if (wasAwaiting || !fillHalved(prev, next)) return
+  const now = await $.clock.now()
+  if (now - lastCompactMs < SAME_COMPACTION_MS) return
+  lastCompactMs = now
+  const sizes = prev.ctxTokens !== null && next.ctxTokens !== null ? ` ${fmtK(prev.ctxTokens)} → ${fmtK(next.ctxTokens)}` : ''
+  await logEvent($, 'compact', `inferred${sizes}`)
 }
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'

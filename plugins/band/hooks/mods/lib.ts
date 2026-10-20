@@ -376,6 +376,21 @@ export function keepCtx(prev: BandUsage, next: BandUsage): BandUsage {
   return next.ctxPct === null ? { ...next, ctxPct: prev.ctxPct, ctxTokens: prev.ctxTokens } : next
 }
 
+/** The least fill a drop is read from: tokens, or percent where either reading has no count. */
+const HALVED_MIN_TOKENS = 20_000
+const HALVED_MIN_PCT = 5
+
+/**
+ * Whether the measured fill fell below half of the last one, as a compaction leaves it: by tokens when both
+ * readings count them (from at least 20k), else by percent over the same window (from at least 5 %). False
+ * when either has no fill. A rewind that drops as much reads the same.
+ */
+export function fillHalved(prev: BandUsage, next: BandUsage): boolean {
+  if (prev.ctxPct === null || next.ctxPct === null) return false
+  if (prev.ctxTokens !== null && next.ctxTokens !== null) return prev.ctxTokens >= HALVED_MIN_TOKENS && next.ctxTokens < prev.ctxTokens / 2
+  return prev.window === next.window && prev.ctxPct >= HALVED_MIN_PCT && next.ctxPct < prev.ctxPct / 2
+}
+
 export function ctxCard(u: BandUsage): string {
   if (u.ctxPct === null) return 'context: no reading yet (fresh session or just compacted)'
   const used = u.ctxTokens === null ? '' : `, ${fmtInt(u.ctxTokens)} used`

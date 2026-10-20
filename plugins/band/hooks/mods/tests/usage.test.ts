@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { CLEAR_RESEED_MS, HOUR_MS, seedsTtl } from '../lib.ts'
-import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, mainTurn, measure, modelSwitch, ok, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
+import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, mainTurn, measure, modelSwitch, ok, postCompact, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -75,6 +75,87 @@ describe('event log writers → band.events', () => {
     w.compact = async () => ({ messages: KEPT })
     await $.session.compact({ trigger: 'auto', messages: KEPT } as any)
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual 412k → 38k', 'compact auto'])
+  })
+
+  test('a measured fill below half → compact inferred with both counts, the fill stands and the cache stays warm; a small session → none', async ($, on) => {
+    world(on)
+    await start($)
+    await measure($, { window: 200_000, percent: 5, tokens: 10_000 })
+    await mainTurn($)
+    await measure($, { window: 200_000, percent: 1.5, tokens: 3_000 })
+    await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
+    await mainTurn($)
+    await measure($, { window: 200_000, percent: 15, tokens: 30_000 })
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact inferred 144k → 30k'])
+    const p = await peek($)
+    expect([p.usage.ctxPct, p.usage.ctxTokens]).toEqual([15, 30_000])
+    expect(p.cache.isCold).toBe(false)
+  })
+
+  test('the 30 s tick that reads the halved fill mid-turn infers it; the turn-end measure adds no second line', async ($, on) => {
+    const { w, clock } = world(on)
+    await start($)
+    await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
+    await mainTurn($)
+    w.context = { window: 200_000, percent: 15, tokens: 30_000 }
+    await clock.advance(30_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact inferred 144k → 30k'])
+    await measure($, { window: 200_000, percent: 16, tokens: 33_000 })
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact inferred 144k → 30k'])
+  })
+
+  test('a fill gone without /clear → compact inferred at the next tick: ctx —, cache cold; the next fill adds no line and the turn warms the cache', async ($, on) => {
+    const { w, clock } = world(on)
+    await start($)
+    await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
+    await mainTurn($)
+    w.context = { window: 200_000 }
+    await clock.advance(30_000)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact inferred'])
+    let p = await peek($)
+    expect([p.usage.ctxPct, p.usage.ctxTokens, p.cache.isCold]).toEqual([null, null, true])
+    await clock.advance(MIN)
+    await measure($, { window: 200_000, percent: 15, tokens: 30_000 })
+    await mainTurn($)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact inferred'])
+    p = await peek($)
+    expect([p.usage.ctxPct, p.cache.isCold]).toEqual([15, false])
+  })
+
+  test('a real report within 30 s of an inferred drop is the same compaction: no second line, the cache goes cold', async ($, on) => {
+    const { w } = world(on)
+    on('classic.PostCompact', async () => ({}) as never)
+    await start($)
+    await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
+    await mainTurn($)
+    await measure($, { window: 200_000, percent: 15, tokens: 30_000 })
+    w.compact = async () => ({ messages: KEPT, tokensBefore: 144_000, tokensAfter: 30_000 })
+    await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+    await $.classic.PostCompact(postCompact({}))
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact inferred 144k → 30k'])
+    expect((await peek($)).cache.isCold).toBe(true)
+  })
+
+  test('after a real compaction no reading infers another until a fill arrives, past the 30 s window too', async ($, on) => {
+    const { w, clock } = world(on)
+    on('classic.PostCompact', async () => ({}) as never)
+    await start($)
+    await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
+    await $.classic.PostCompact(postCompact({}))
+    w.context = { window: 200_000 }
+    await clock.advance(2 * MIN)
+    await measure($, { window: 200_000, percent: 15, tokens: 30_000 })
+    await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
+    w.compact = async () => ({ messages: KEPT, tokensBefore: 144_000, tokensAfter: 30_000 })
+    await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
+    w.context = { window: 200_000 }
+    await clock.advance(2 * MIN)
+    expect((await peek($)).usage.ctxPct).toBe(15)
+    await measure($, { window: 200_000, percent: 16, tokens: 32_000 })
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual', 'compact manual 144k → 30k'])
+    await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
+    await measure($, { window: 200_000, percent: 15, tokens: 30_000 })
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual', 'compact manual 144k → 30k', 'compact inferred 144k → 30k'])
   })
 
   test('PostModelSwitch logs the new model once; the same model again logs nothing', async ($, on) => {

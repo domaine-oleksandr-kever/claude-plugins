@@ -29,6 +29,7 @@ import {
   fmtInt,
   fmtUsd,
   fmtResetIn,
+  fillHalved,
   fmtResetShort,
   glyphText,
   keepCtx,
@@ -435,6 +436,20 @@ describe('usage and TTL', () => {
     const measured = toUsage({ window: 200_000, percent: 15, tokens: 30_000 }, [])
     expect(keepCtx(prev, measured)).toBe(measured)
     expect(keepCtx(USAGE_INIT, bare)).toEqual(bare)
+  })
+
+  test('fillHalved: below half from 20k tokens, or 5 % over the same window where a count is missing; else false', () => {
+    const at = (tokens: number | undefined, percent: number, window = 200_000) => toUsage({ window, percent, ...(tokens === undefined ? {} : { tokens }) }, [])
+    expect(fillHalved(at(144_000, 72), at(30_000, 15))).toBe(true)
+    expect(fillHalved(at(undefined, 40), at(undefined, 10))).toBe(true)
+    expect(fillHalved(at(144_000, 72), at(undefined, 15))).toBe(true)
+    expect(fillHalved(at(undefined, 40), at(undefined, 10, 1_000_000))).toBe(false)
+    expect(fillHalved(at(10_000, 5), at(3_000, 1.5))).toBe(false)
+    expect(fillHalved(at(undefined, 4), at(undefined, 1))).toBe(false)
+    expect(fillHalved(at(144_000, 72), at(80_000, 40))).toBe(false)
+    expect(fillHalved(at(30_000, 15), at(144_000, 72))).toBe(false)
+    expect(fillHalved(USAGE_INIT, at(30_000, 15))).toBe(false)
+    expect(fillHalved(at(144_000, 72), toUsage({ window: 200_000 }, []))).toBe(false)
   })
 
   test('toUsage: absent percent, tokens and cost stay null', () => {

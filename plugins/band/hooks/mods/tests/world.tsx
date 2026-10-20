@@ -211,7 +211,11 @@ export function world(on: On, store: Record<string, unknown> = {}, env: Record<s
     const a = await (isProfile ? w.profile() : w.http())
     return ('deny' in a ? a : { value: a }) as never
   })
-  on('session.measure', async (_$, e) => ({ changed: e.changed }))
+  // What a measurement reports is what usage() answers from then on, as in the engine.
+  on('session.measure', async (_$, e) => {
+    w.context = e.context
+    return { changed: e.changed }
+  })
   on('session.compact', async () => (await w.compact()) as never)
   on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
   on('turn.complete', async (_$, e) => ({ text: e.answer }))
