@@ -4,20 +4,24 @@
 //
 //   drafter-check.cjs file stt <path>            steps-to-test.md: structure, attribution
 //   drafter-check.cjs file pr <path> [--no-preview]  pr-body.md: core skeleton, theme preview table
-//                                                (off with --no-preview), None/N/A, Summary, attribution
+//                                                (off with --no-preview when the notes.md beside it
+//                                                records 'preview-decision: no preview'), None/N/A,
+//                                                Summary, attribution
 //   drafter-check.cjs file jira <path>           jira-comment.md: PR line, brief size, no preview link, attribution
 //   drafter-check.cjs receipt stt|pr|jira        the drafter's reply on stdin: one kind, no empty field
 //
 // First stdout line: result=ok|fail. Exit 0 ok, 1 fail, 2 usage.
 'use strict';
 const fs = require('fs');
+const nodePath = require('path');
 
 const USAGE = `usage: drafter-check.cjs file stt <path>
        drafter-check.cjs file pr <path> [--no-preview]   (--theme: accepted, no-op)
        drafter-check.cjs file jira <path>
        drafter-check.cjs receipt stt|pr|jira   (the drafter's reply on stdin)
-The pr check requires the Theme preview table; --no-preview turns that off — pass it only with
-the developer's explicit no-preview answer.
+The pr check requires the Theme preview table; --no-preview turns that off only when the notes.md
+beside the checked file holds a 'preview-decision: no preview' line (the developer's recorded
+answer) — else the table is still required. Prints no_preview=recorded|unrecorded|off.
 Prints result=ok|fail, counts and one 'fail <check>' line per defect — never the checked text.
 Exit 0 ok, 1 fail, 2 usage.`;
 
@@ -93,19 +97,30 @@ function summarySentences(lines, from, to) {
   return body.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => /\w/.test(s));
 }
 
-/** PR body: core skeleton in order, the theme table unless `table` is false, no None/N/A section, Summary sentence lengths, attribution. */
-function checkPr(path, table) {
+/** `--no-preview` state: 'off' without the flag; 'recorded' when <dir of path>/notes.md holds a `preview-decision: no preview` line, else 'unrecorded'. */
+function noPreviewState(path, flag) {
+  if (!flag) return 'off';
+  let notes = '';
+  try { notes = fs.readFileSync(nodePath.join(nodePath.dirname(path), 'notes.md'), 'utf8'); } catch (e) { return 'unrecorded'; }
+  return /preview-decision:\s*no preview/i.test(notes) ? 'recorded' : 'unrecorded';
+}
+
+/** PR body: core skeleton in order, the theme table unless `noPreview` is 'recorded', no None/N/A section, Summary sentence lengths, attribution. */
+function checkPr(path, noPreview) {
   const fails = [];
   const text = readFile(path, fails);
-  if (text === null) return report(['kind=pr'], fails);
+  const np = `no_preview=${noPreview}`;
+  if (text === null) return report(['kind=pr', np], fails);
   const lines = text.split('\n');
   const at = CORE.map(([, re]) => lines.findIndex((l) => { const s = sectionLabel(l); return s !== null && re.test(s); }));
   CORE.forEach(([name], i) => { if (at[i] < 0) fails.push(`section missing: ${name}`); });
   const found = at.filter((i) => i >= 0);
   if (found.some((v, i) => i && v < found[i - 1])) fails.push('core sections out of order');
-  if (table) {
+  if (noPreview !== 'recorded') {
     const row = lines.findIndex((l) => /^\s*\|\s*\*\*(Preview|Theme ID|Theme name)\*\*\s*\|/.test(l));
-    if (row < 0) fails.push("theme preview table missing (pass --no-preview only with the developer's explicit no-preview answer)");
+    if (row < 0) fails.push(noPreview === 'unrecorded'
+      ? `theme preview table missing (--no-preview needs a 'preview-decision: no preview' line in ${nodePath.join(nodePath.dirname(path), 'notes.md')})`
+      : "theme preview table missing (pass --no-preview only with the developer's explicit no-preview answer)");
     else if ((at[1] >= 0 && row < at[1]) || (at[2] >= 0 && row > at[2])) fails.push('theme preview table not between Jira ticket and To check');
   }
   if (lines.some((l) => /^\s*(?:[-*>]\s*)?[_*]*\(?(none|n\/a)\)?\.?[_*]*\s*$/i.test(l))) fails.push('None/N/A placeholder');
@@ -119,7 +134,7 @@ function checkPr(path, table) {
   if (long) fails.push('Summary sentence of 20 words or more');
   const hits = attributionHits(text);
   if (hits) fails.push('AI attribution');
-  return report(['kind=pr', `summary_sentences=${sentences.length}`, `long_sentences=${long}`, `attribution_hits=${hits}`], fails);
+  return report(['kind=pr', np, `summary_sentences=${sentences.length}`, `long_sentences=${long}`, `attribution_hits=${hits}`], fails);
 }
 
 // fe create-pull-request Phase 2 step 2: the PR line, then an optional brief of at most 6 lines.
@@ -256,7 +271,7 @@ function main(argv) {
     const unknown = rest.filter((a) => !(kind === 'pr' && (a === '--theme' || a === '--no-preview')));
     if (unknown.length) { process.stderr.write(USAGE + '\n'); return 2; }
     if (kind === 'jira') return checkJira(path);
-    return kind === 'stt' ? checkStt(path) : checkPr(path, !rest.includes('--no-preview'));
+    return kind === 'stt' ? checkStt(path) : checkPr(path, noPreviewState(path, rest.includes('--no-preview')));
   }
   if (cmd === 'receipt' && path === undefined) {
     let text = '';

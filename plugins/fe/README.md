@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.11.1**.
+Current release: **fe v0.11.2**.
 
 ## Status
 
@@ -128,7 +128,7 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 | `scripts/shopify-admin-gql.sh` | the skills, through the `store-access` section | one Admin GraphQL call against the project's store |
 | `scripts/project-profile.sh` | fe's hooks module, `worktree-theme.sh`, the doctor, the skills' fallback | prints `foundation`, `theme` or `none` |
 | `scripts/doctor.cjs` | `/fe-doctor`, or by hand | the static install checks (§ Doctor) |
-| `scripts/drafter-check.cjs` | `fe:stt-drafter`, `fe:pr-body-drafter`, `/fe:write-steps-to-test`, `/fe:create-pull-request` | checks a drafter's file (`file stt\|pr\|jira`: structure, the PR core skeleton, the Theme preview table by default — `--no-preview` only with the developer's recorded no-preview answer, Summary sentence lengths, the Jira comment's PR line and brief size with no preview link, theme id or editor URL, no AI attribution) and its reply (`receipt stt\|pr\|jira`: one kind, no empty field) in code, printing counts and `fail` lines only — never the draft |
+| `scripts/drafter-check.cjs` | `fe:stt-drafter`, `fe:pr-body-drafter`, `/fe:write-steps-to-test`, `/fe:create-pull-request` | checks a drafter's file (`file stt\|pr\|jira`: structure, the PR core skeleton, the Theme preview table by default — `--no-preview` honored only when the workspace `notes.md` records `preview-decision: no preview`, Summary sentence lengths, the Jira comment's PR line and brief size with no preview link, theme id or editor URL, no AI attribution) and its reply (`receipt stt\|pr\|jira`: one kind, no empty field) in code, printing counts and `fail` lines only — never the draft |
 | `scripts/_shopify-common.sh` | sourced by the store scripts | the shared Shopify CLI and config helpers |
 
 `/fe:fix-breaking-changes` copies its own `skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js`

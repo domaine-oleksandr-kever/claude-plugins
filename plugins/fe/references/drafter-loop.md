@@ -36,7 +36,7 @@ and stop.
 - `written: <path>` (+ `unconfirmed:`, `report:`, the PR fields) → run
   `node <fe root>/scripts/drafter-check.cjs file <stt|pr|jira> "<path>"` (pr: the Theme preview table check
   is the default; add `--no-preview` only when `notes.md` holds the developer's recorded
-  `preview-decision: no preview` line); `fail` lines → SendMessage
+  `preview-decision: no preview` line — the script itself checks it); `fail` lines → SendMessage
   `revise:` + those lines; ok → the checkpoint. On the pr drafter's jira turn every `revise:` and
   `ask:` also carries `file: jira-comment.md` (that agent wrote `pr-body.md` too).
 - `error: …` → show it, fix the brief once, re-send.

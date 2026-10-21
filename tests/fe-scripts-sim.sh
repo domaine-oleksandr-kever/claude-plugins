@@ -5823,7 +5823,16 @@ grep -v '^| \*\*' "$DCD/pr.md" > "$DCD/pr-notable.md"
 dc DC9b-pr-good-default 0 'result=ok' file pr "$DCD/pr.md"
 dc DC11-pr-theme-table 1 "fail theme preview table missing (pass --no-preview only with the developer's explicit no-preview answer)" file pr "$DCD/pr-notable.md"
 dc DC11a-pr-theme-flag-noop 1 'fail theme preview table missing' file pr "$DCD/pr-notable.md" --theme
-dc DC11b-pr-no-preview 0 'result=ok' file pr "$DCD/pr-notable.md" --no-preview
+mkdir -p "$DCD/np-none" "$DCD/np-other" "$DCD/np-rec"
+for d in np-none np-other np-rec; do cp "$DCD/pr-notable.md" "$DCD/$d/pr-body.md"; done
+printf -- '- 2026-10-21 preview-decision: create\n' > "$DCD/np-other/notes.md"
+printf -- '# notes\n- 2026-10-21 Preview-Decision: No Preview — skip it, docs only\n' > "$DCD/np-rec/notes.md"
+dc DC11b-pr-no-preview-no-notes 1 "fail theme preview table missing (--no-preview needs a 'preview-decision: no preview' line in $DCD/np-none/notes.md)" file pr "$DCD/np-none/pr-body.md" --no-preview
+grep -q '^no_preview=unrecorded$' "$DCD/out" && ok || bad DC11b-state "$(tr '\n' ';' < "$DCD/out")"
+dc DC11d-pr-no-preview-unrecorded 1 "fail theme preview table missing (--no-preview needs a 'preview-decision: no preview' line in $DCD/np-other/notes.md)" file pr "$DCD/np-other/pr-body.md" --no-preview
+dc DC11e-pr-no-preview-recorded 0 'no_preview=recorded' file pr "$DCD/np-rec/pr-body.md" --no-preview
+grep -q 'theme preview table' "$DCD/out" && bad DC11e-no-table-fail "$(tr '\n' ';' < "$DCD/out")" || ok
+dc DC11f-pr-no-flag-state 1 'no_preview=off' file pr "$DCD/np-rec/pr-body.md"
 dc DC11c-stt-no-preview 2 'usage:' file stt "$DCD/stt.md" --no-preview
 awk '/^## To check/ { print "## Screenshots"; print ""; print "x"; print ""; print; next } /^## Screenshots/ { skip = 1; next } skip && /^## / { skip = 0 } !skip' "$DCD/pr.md" > "$DCD/pr-order.md"
 dc DC12-pr-order 1 'fail core sections out of order' file pr "$DCD/pr-order.md"

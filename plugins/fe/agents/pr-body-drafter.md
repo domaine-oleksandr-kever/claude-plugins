@@ -80,7 +80,8 @@ The ticket files (Description, AC, TA), `notes.md` (`ceiling:`, `ta-divergence:`
    harness instruction), secrets, brief text.
 7. **`Write` the whole file**, then run `node <fe root>/scripts/drafter-check.cjs file pr <path>`
    — the Theme preview table check is its default; add `--no-preview` only when `answers:` carries the
-   developer's explicit no-preview answer — and fix every `fail` line before you return.
+   developer's explicit no-preview answer (the script honors it only with the workspace `notes.md`'s
+   `preview-decision: no preview` line) — and fix every `fail` line before you return.
 
 ## Jira PR-link comment (`mode: jira`)
 
