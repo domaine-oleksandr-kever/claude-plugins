@@ -2,7 +2,7 @@
 /*
  * conventions.cjs — fe's conventions as Claude Code command hooks (hooks/hooks.json), the one channel that
  * reaches the model on every login. Text: conventions-text.json. Modes (argv):
- *   start     SessionStart: root line, profile line, Foundation rules, store access, worktree line, preview default
+ *   start     SessionStart: root line, profile line, Foundation rules, store access, worktree line, preview default, preview links
  *             line (FE_PREVIEW_DEFAULT), progress series
  *   subagent  SubagentStart: the share of the agent type on stdin
  * start decides the project profile (FE_PROFILE, else scripts/project-profile.sh with a 5 s timeout) and writes
@@ -144,6 +144,7 @@ function startText(p) {
   if (p.store) parts.push(['store-access', storeAccess()]);
   if (p.toml) parts.push(['worktree', T.worktree]);
   if (p.toml) parts.push(previewSection());
+  if (p.toml) parts.push(['preview-links', T['preview-links'].split('<fe root>').join(ROOT)]);
   if (p.toml || p.word !== 'none') parts.push(['progress-series', T['progress-series']]);
   return { sections: parts.map(([n]) => n), text: parts.map(([, t]) => t).join('\n\n') };
 }

@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.11.2**.
+Current release: **fe v0.11.3**.
 
 ## Status
 
@@ -162,6 +162,7 @@ message (`prompt.context`, beside CLAUDE.md), text from the same file.
 | `store-access` | the two store runners, `scripts/shopify-admin-gql.sh` and `scripts/theme-json.sh`, with their paths under fe's root; never `Read` `.env` or `shopify.theme.toml` | the project root holds `shopify.theme.toml`, or `.env` with a profile other than `none` |
 | `worktree` | `worktree copy list: shopify.theme.toml` (the line `/base:worktree` reads), then `/fe:preview-theme` in the new worktree | the project root holds `shopify.theme.toml` |
 | `preview-default-on` / `preview-default-off` | `fe preview default: preview theme` — `/fe:develop-feature-or-fix` and `/fe:qa-feature-or-fix` validate on the work stream's preview theme — or `fe preview default: local dev server (FE_PREVIEW_DEFAULT=0)`; the skills key on this line and never read the switch | the project root holds `shopify.theme.toml` (no preview theme without it) |
+| `preview-links` | `## fe convention — preview link in every report`: a reply that reports a check, validation, repro or refresh on a preview theme opens with `Preview: <store>/<page path>?preview_theme_id=<id>` (one per page checked), `Editor: <editor_url>` and `Password:` when the storefront has one, the values from `create-preview-theme.sh`'s `preview_url=` / `editor_url=` or the `session-theme:` line — the id alone never counts; reaches ad-hoc fixes as well as the skills | the project root holds `shopify.theme.toml`, either preview default |
 | `progress-series` | the rows of a ticket's `progress.md` in order — `write-technical-approach`, `develop-feature-or-fix`, `qa-feature-or-fix`, `pre-commit-review`, `commit`, `create-pull-request`, `write-steps-to-test` — and the skill that ticks each; a batch lists its tickets, then the same tail | a profile other than `none`, or `shopify.theme.toml` at the root |
 
 **The profile** is decided by the start hook, once per session start; a `/clear` decides again. fe

@@ -18,6 +18,7 @@ export const TEXT: Record<string, string> = {
   worktree: 'worktree copy list: shopify.theme.toml',
   'preview-default-on': 'fe preview default: preview theme (<fe root>/references/session-theme.md)',
   'preview-default-off': 'fe preview default: local dev server (FE_PREVIEW_DEFAULT=0)',
+  'preview-links': '## fe convention — preview link in every report\n<fe root>/scripts/create-preview-theme.sh',
   'progress-series': '## fe convention — the progress series',
 }
 /** The marker fe's SessionStart command hook leaves for session s1. */

@@ -6392,12 +6392,12 @@ echo "${FE_STUB_WORD-theme}"; echo "${FE_STUB_ERR-}" >&2; exit "${FE_STUB_RC-0}"
 STUB
 PLOG="$DH/fe-probe.log"
 
-# DHfe2: foundation, a toml and a .env → all six sections in order, text verbatim, <fe root> filled, <base root> kept.
+# DHfe2: foundation, a toml and a .env → all seven sections in order, text verbatim, <fe root> filled, <base root> kept.
 dh_home fe-all; fe_files .env shopify.theme.toml; fe_in f-all SessionStart '"source":"startup"'
 rm -f "$PLOG"; DH_ENV="FE_STUB_WORD=foundation FE_STUB_LOG=$PLOG" dh fe SessionStart
 assert_eq DHfe2-probe-args "$(cat "$PLOG")" "$FP"
-assert_eq DHfe2-heads "$(fe_heads)" "fe plugin root: <FR> — fe's files write it \`<fe root>\` and the \`base plugin root:\` path \`<base root>\`; spell both out in commands (\`\${CLAUDE_PLUGIN_ROOT}\` is empty in the Bash tool's shell)|fe project profile: foundation|## fe convention — LiquidDoc and core|## fe capability — live store access|worktree copy list: shopify.theme.toml|## fe convention — the progress series|"
-assert_eq DHfe2-verbatim "$(dh_ctx)" "$(printf '%s\n\nfe project profile: foundation\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' "$ROOT_LINE" "$(dh_text fe comment-discipline-foundation)" "$(dh_text fe store-access | sed "s|<fe root>|$FR|g")" "$(dh_text fe worktree)" "$(dh_text fe preview-default-on | sed "s|<fe root>|$FR|g")" "$(dh_text fe progress-series)")"
+assert_eq DHfe2-heads "$(fe_heads)" "fe plugin root: <FR> — fe's files write it \`<fe root>\` and the \`base plugin root:\` path \`<base root>\`; spell both out in commands (\`\${CLAUDE_PLUGIN_ROOT}\` is empty in the Bash tool's shell)|fe project profile: foundation|## fe convention — LiquidDoc and core|## fe capability — live store access|worktree copy list: shopify.theme.toml|## fe convention — preview link in every report|## fe convention — the progress series|"
+assert_eq DHfe2-verbatim "$(dh_ctx)" "$(printf '%s\n\nfe project profile: foundation\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' "$ROOT_LINE" "$(dh_text fe comment-discipline-foundation)" "$(dh_text fe store-access | sed "s|<fe root>|$FR|g")" "$(dh_text fe worktree)" "$(dh_text fe preview-default-on | sed "s|<fe root>|$FR|g")" "$(dh_text fe preview-links | sed "s|<fe root>|$FR|g")" "$(dh_text fe progress-series)")"
 assert_absent DHfe2-no-fe-placeholder "$(dh_ctx | tail -n +2)" "<fe root>"
 assert_contains DHfe2-base-placeholder-kept "$(dh_ctx)" "node <base root>/scripts/shopify-validate.cjs"
 assert_contains DHfe2-store-paths "$(dh_ctx)" "$FR/scripts/shopify-admin-gql.sh --query"
@@ -6407,7 +6407,7 @@ if [ "$n" -lt 9000 ]; then ok; else bad DHfe2-cap "$n bytes"; fi
 M="$(FLOG f-all)/conventions.fe.json"
 len="$(dh_ctx | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(s.length)))')"
 assert_eq DHfe2-marker "$(dh_json "$M" '[j.via,j.event,j.source,j.sections.join(","),j.chars,j.login.label,j.login.file,JSON.stringify(j.profile),typeof j.ts,"part" in j].join("|")')" \
-  "hook|SessionStart|startup|root,profile,comment-discipline-foundation,store-access,worktree,preview-default-on,progress-series|$len|unknown|$DH_HOME/.claude.json|{\"word\":\"foundation\",\"via\":\"project-profile.sh\",\"why\":null,\"toml\":true,\"store\":true}|string|false"
+  "hook|SessionStart|startup|root,profile,comment-discipline-foundation,store-access,worktree,preview-default-on,preview-links,progress-series|$len|unknown|$DH_HOME/.claude.json|{\"word\":\"foundation\",\"via\":\"project-profile.sh\",\"why\":null,\"toml\":true,\"store\":true}|string|false"
 
 # DHfe3: the gates — FE_PROFILE skips the probe; none + .env → root and profile; none + toml → store, worktree, series;
 # theme + .env → store and series; a failing or slow probe → none with the reason in the marker.
@@ -6420,7 +6420,7 @@ assert_eq DHfe3-forced-bad-word "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 
 fe_files .env; DH_ENV="FE_STUB_WORD=none" dh fe SessionStart
 assert_eq DHfe3-none-env "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile"
 fe_files shopify.theme.toml; DH_ENV="FE_STUB_WORD=none" dh fe SessionStart
-assert_eq DHfe3-none-toml "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile,store-access,worktree,preview-default-on,progress-series"
+assert_eq DHfe3-none-toml "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile,store-access,worktree,preview-default-on,preview-links,progress-series"
 fe_files .env; DH_ENV="FE_STUB_WORD=theme" dh fe SessionStart
 assert_eq DHfe3-theme-env "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile,store-access,progress-series"
 fe_files; DH_ENV="FE_STUB_RC=2 FE_STUB_WORD= FE_STUB_ERR=boom" dh fe SessionStart
@@ -6490,7 +6490,7 @@ assert_eq DHfe6-no-own-marker "$(ls "$(FLOG f-sub2)" 2>/dev/null)" ""
 # DHfe7: the text file — the mod's fallback and the hook read the same keys; the worktree line /base:worktree
 # parses exactly once; the series in order with base's two steps by base's names; no legacy or host name.
 assert_eq DHfe7-keys "$(jq -r 'keys_unsorted | join(",")' "$FR/hooks/conventions-text.json")" \
-  "root,profile,comment-discipline-foundation,store-access,worktree,preview-default-on,preview-default-off,progress-series"
+  "root,profile,comment-discipline-foundation,store-access,worktree,preview-default-on,preview-default-off,preview-links,progress-series"
 assert_eq DHfe7-strings "$(jq -r '[.[] | type] | unique | join(",")' "$FR/hooks/conventions-text.json")" "string"
 assert_eq DHfe7-root-one-line "$(dh_text fe root | wc -l | tr -d ' ')" 1
 assert_eq DHfe7-worktree-line "$(dh_text fe worktree | grep -c '^worktree copy list: shopify.theme.toml$')" 1
@@ -6523,6 +6523,20 @@ assert_eq DHfe8-env-over-file "$(fe_prev FE_PREVIEW_DEFAULT=1)" "preview-default
 assert_eq DHfe8-xdg-moves-file "$(fe_prev XDG_CONFIG_HOME=$DH/fe-xdg-empty)" "preview-default-on"
 fe_files .env
 assert_eq DHfe8-no-toml "$(fe_prev)" ""
+# DHfe9: the preview-link rule — every toml checkout (either default), never a checkout without one; the lines it asks for
+# and their source, the script path filled in.
+DH_ENV="FE_STUB_WORD=theme" dh fe SessionStart
+assert_absent DHfe9-no-toml "$(dh_ctx)" "## fe convention — preview link in every report"
+fe_files shopify.theme.toml
+DH_ENV="FE_STUB_WORD=theme" dh fe SessionStart
+assert_contains DHfe9-toml "$(dh_ctx)" "## fe convention — preview link in every report"
+for n in 'Preview: https://<store>/<page path>?preview_theme_id=<id>' 'Editor: <editor_url>' 'Password: <storefront password>' 'The theme id' 'alone is never enough' 'never invented' "$FR/scripts/create-preview-theme.sh"; do
+  assert_contains "DHfe9-text-$n" "$(dh_ctx)" "$n"
+done
+DH_ENV="FE_STUB_WORD=theme FE_PREVIEW_DEFAULT=0" dh fe SessionStart
+assert_contains DHfe9-default-off "$(dh_ctx)" "## fe convention — preview link in every report"
+if [ -e "$ROOT/plugins/fe/scripts/create-preview-theme.sh" ] && grep -q "printf 'preview_url=%s" "$ROOT/plugins/fe/scripts/create-preview-theme.sh" && grep -q "printf 'editor_url=%s" "$ROOT/plugins/fe/scripts/create-preview-theme.sh"; then ok; else bad DHfe9-script-lines "create-preview-theme.sh no longer prints preview_url= / editor_url="; fi
+fe_files .env
 fe_files
 if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|json-slim|log-slim" "$FR/hooks/conventions-text.json"; then bad DHfe7-no-legacy "a legacy, host or old-compressor name in fe's conventions-text.json"; else ok; fi
 

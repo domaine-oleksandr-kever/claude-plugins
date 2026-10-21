@@ -17,6 +17,10 @@ prints the entries a key (`error=…`, `warn=…`, `overlay=…`) names, and not
 
 Every caller handles a run's output this one way.
 
+The `preview_url=` and `editor_url=` a run printed are quoted to the developer in the next reply
+(deep-linked to the page under work, with the storefront password when there is one), not only
+written to `notes.md` — fe's preview-link convention; the theme id alone is never the report.
+
 ### The workspace lines — `session-theme:` · `session-theme-pushed:`
 
 - A `create` that returns a theme id this work stream will reuse → record it at once:

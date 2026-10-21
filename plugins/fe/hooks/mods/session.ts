@@ -148,6 +148,7 @@ export async function contextBlock($: $): Promise<string | null> {
   if (p.store) parts.push((t['store-access'] ?? '').split('<fe root>').join(root))
   if (p.toml) parts.push(t.worktree ?? '')
   if (p.toml) parts.push((t[(await previewOff($)) ? 'preview-default-off' : 'preview-default-on'] ?? '').split('<fe root>').join(root))
+  if (p.toml) parts.push((t['preview-links'] ?? '').split('<fe root>').join(root))
   if (p.toml || p.word !== 'none') parts.push(t['progress-series'] ?? '')
   return parts.join('\n\n')
 }

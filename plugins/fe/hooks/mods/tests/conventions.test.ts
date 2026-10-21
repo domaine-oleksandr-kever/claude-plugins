@@ -44,7 +44,7 @@ describe('the cloud fallback: a prompt.context block', () => {
     expect((await context($)).blocks.map((b: any) => b.name)).toEqual(['claudeMd'])
   })
 
-  test('foundation with a toml and a .env: all six, store access with fe\'s root and base\'s placeholder kept', async ($, on) => {
+  test('foundation with a toml and a .env: all seven, store access with fe\'s root and base\'s placeholder kept', async ($, on) => {
     const { w } = world(on, { surfaces: [], profile: () => ran(0, 'foundation\n') })
     put(w, '.env')
     put(w, 'shopify.theme.toml')
@@ -56,8 +56,10 @@ describe('the cloud fallback: a prompt.context block', () => {
       '## fe capability — live store access',
       'worktree copy list: shopify.theme.toml',
       `fe preview default: preview theme (${root}/references/session-theme.md)`,
+      '## fe convention — preview link in every report',
       '## fe convention — the progress series',
     ])
+    expect(text).toContain(`${root}/scripts/create-preview-theme.sh`)
     expect(text).toContain(`${root}/scripts/shopify-admin-gql.sh, <base root>/scripts/shopify-validate.cjs`)
     expect(text).not.toContain('never-read')
   })
