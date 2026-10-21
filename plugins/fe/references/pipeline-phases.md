@@ -115,7 +115,9 @@ its brief says otherwise.
    `body-sections.md` (core skeleton Summary → Jira → theme-preview table → To check →
    Screenshots → Changes; conditional sections only with real content; ceilings and TA divergences
    in Dependencies) and `preview-theme.md`, the
-   preview-theme decision flow (`[ELC-…]` naming, `--reuse`). Escalations, verbatim in
+   preview-theme decision flow (`[ELC-…]` naming, `--reuse`). **The agent never drops the Theme
+   preview table** — Step 0's session theme is its input; no theme → the phase returns ESCALATE,
+   never a body without the table. Escalations, verbatim in
    the brief: `error=build_failed` → ESCALATE with
    the build output; `error=settings_drift` → the reference's manual recovery;
    conformance pass (`base:change-reviewer`, `conformance` emphasis, brief carrying the run's
@@ -129,7 +131,7 @@ its brief says otherwise.
    `--draft`** (the end state is aftercare's to apply). **Crash-safe, verbatim in the
    brief: the moment the PR exists, record its URL to `progress.md` + `notes.md` and
    tick the `create-pull-request` row — before any remaining work.** Return: PR URL,
-   theme id + preview/editor links, the screenshot files the body's placeholder names, ≤10-line report. The conductor verifies the tick
+   PR title (as `gh pr create` got it — jira-hand-off's `pr_title:`), theme id + preview/editor links, the screenshot files the body's placeholder names, ≤10-line report. The conductor verifies the tick
    and the recorded URL before advancing.
 5. **steps-to-test** — agent; fills the bot wait. Write per
    `<base root>/references/steps-to-test-format.md` and the section files it indexes: **one numbered list** in its
@@ -205,12 +207,18 @@ its brief says otherwise.
    `gh pr ready --undo <pr>` flips the now-reviewed PR to draft (log to `notes.md`);
    `ready` → leave as-is.
 7. **jira-hand-off** — inline in the conductor (no phase subagent, so no model to pin), but
-   delegate its one Jira write to the `base:jira-writer` subagent so the comment body
-   never lands in the conductor context. Policy allows → write the approved
-   comment (a **clickable PR link** + the distilled judgment calls from `notes.md`: accepted
-   edge cases, anything not implemented and why, open questions) to a `mktemp` file — or the
-   workspace, never a fixed name in the shared temp directory — then spawn `base:jira-writer`
-   (ticket — from the workspace `.claude/tasks/<work-id>/`, whose `ticket.md` the writer
-   checks the key against · `comment` · that file) for the one
+   the comment is drafted and posted by subagents so its text never lands in the conductor
+   context. Content per `<fe root>/skills/create-pull-request/SKILL.md` Phase 2 step 2:
+   always `PR: <url> — <title>`; the 3–6 line brief (what was done; TA deviations with reason
+   from `ta-divergence:`; known limits from `ceiling:`; open questions for QA/PM — only items
+   with real content) only when the policy's `hand-off comment` is yes. **Never the preview
+   theme link, theme id or editor URL — the preview theme is deleted after merge and the link
+   rots.** Spawn `fe:pr-body-drafter` (no `model`; `workspace:` · `ticket:` · `mode: jira` ·
+   `pr_url:` · `pr_title:` — the title create-pr returned, never a guess; none returned → `gh pr view
+   <url> --json title -q .title` · `brief: yes|no`) per `<fe root>/references/drafter-loop.md`, which
+   writes `<workspace>/jira-comment.md`; check it with `drafter-check.cjs receipt jira` and
+   `file jira`, never read it. Policy allows (`PR link` or `hand-off comment` yes) → spawn
+   `base:jira-writer` (ticket — from the workspace `.claude/tasks/<work-id>/`, whose
+   `ticket.md` the writer checks the key against · `comment` · that file) for the one
    `addCommentToJiraIssue` write (`<base root>/references/jira-adf-write.md`);
-   policy forbids → print the comment for manual paste.
+   policy forbids → report the `PR: <url> — <title>` line and the file's path for manual paste.

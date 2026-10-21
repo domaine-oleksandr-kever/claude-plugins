@@ -76,7 +76,7 @@
 #                    use for big inspection reads (target the task workspace tmp/), then
 #                    pull fields with jq. NEVER the default: theme-json.sh parses this
 #                    script's stdout and must keep receiving the full envelope.
-#   --env            path to the dotenv file holding the token (default: ./.env; token engine only)
+#   --env            path to the dotenv file holding the token (default: ./.env if present, else <git toplevel>/.env; token engine only)
 #   --store          store subdomain or full *.myshopify.com (default: from $TOML_PATH / shopify.theme.toml)
 #   --api-version    Admin API version (default: 2026-10, or $SHOPIFY_ADMIN_API_VERSION)
 #   --engine         auto (default) | store | token
@@ -133,7 +133,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 [ -f "$SCRIPT_DIR/_shopify-common.sh" ] || { echo "error=common_lib_not_found path=$SCRIPT_DIR/_shopify-common.sh" >&2; exit 2; }
 . "$SCRIPT_DIR/_shopify-common.sh"
 
-QUERY_FILE=""; OPERATION=""; VARIABLES=""; VARIABLES_FILE=""; ENV_FILE=".env"; STORE=""; ENGINE="auto"
+QUERY_FILE=""; OPERATION=""; VARIABLES=""; VARIABLES_FILE=""; ENV_FILE=""; STORE=""; ENGINE="auto"
 OUT_FILE=""
 API_VERSION="${SHOPIFY_ADMIN_API_VERSION:-2026-10}"
 
@@ -154,6 +154,9 @@ while [ $# -gt 0 ]; do
     *) echo "error=unknown_arg arg=$1 (--help prints usage)" >&2; exit 2 ;;
   esac
 done
+# the cwd's .env, else the repo toplevel's (a run from a task workspace subdir), else ./.env
+[ -n "$ENV_FILE" ] || [ ! -f .env ] || ENV_FILE=".env"
+[ -n "$ENV_FILE" ] || { _top="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$_top" ] && ENV_FILE="$_top/.env" || ENV_FILE=".env"; }
 
 case "$ENGINE" in auto|store|token) ;; *) echo "error=invalid_engine engine=$ENGINE (use auto|store|token)" >&2; exit 2 ;; esac
 [ -n "$QUERY_FILE" ] || { echo "error=missing_query (pass --query <file.graphql>)" >&2; exit 2; }

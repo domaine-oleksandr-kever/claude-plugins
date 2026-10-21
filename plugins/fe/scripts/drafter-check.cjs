@@ -3,16 +3,21 @@
 // reads the draft. Prints counts and `ok`/`fail` lines only, never the checked text.
 //
 //   drafter-check.cjs file stt <path>            steps-to-test.md: structure, attribution
-//   drafter-check.cjs file pr <path> [--theme]   pr-body.md: core skeleton, None/N/A, Summary, attribution
-//   drafter-check.cjs receipt stt|pr             the drafter's reply on stdin: one kind, no empty field
+//   drafter-check.cjs file pr <path> [--no-preview]  pr-body.md: core skeleton, theme preview table
+//                                                (off with --no-preview), None/N/A, Summary, attribution
+//   drafter-check.cjs file jira <path>           jira-comment.md: PR line, brief size, no preview link, attribution
+//   drafter-check.cjs receipt stt|pr|jira        the drafter's reply on stdin: one kind, no empty field
 //
 // First stdout line: result=ok|fail. Exit 0 ok, 1 fail, 2 usage.
 'use strict';
 const fs = require('fs');
 
 const USAGE = `usage: drafter-check.cjs file stt <path>
-       drafter-check.cjs file pr <path> [--theme]
-       drafter-check.cjs receipt stt|pr   (the drafter's reply on stdin)
+       drafter-check.cjs file pr <path> [--no-preview]   (--theme: accepted, no-op)
+       drafter-check.cjs file jira <path>
+       drafter-check.cjs receipt stt|pr|jira   (the drafter's reply on stdin)
+The pr check requires the Theme preview table; --no-preview turns that off — pass it only with
+the developer's explicit no-preview answer.
 Prints result=ok|fail, counts and one 'fail <check>' line per defect — never the checked text.
 Exit 0 ok, 1 fail, 2 usage.`;
 
@@ -88,8 +93,8 @@ function summarySentences(lines, from, to) {
   return body.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => /\w/.test(s));
 }
 
-/** PR body: core skeleton in order, the theme table when asked, no None/N/A section, Summary sentence lengths, attribution. */
-function checkPr(path, theme) {
+/** PR body: core skeleton in order, the theme table unless `table` is false, no None/N/A section, Summary sentence lengths, attribution. */
+function checkPr(path, table) {
   const fails = [];
   const text = readFile(path, fails);
   if (text === null) return report(['kind=pr'], fails);
@@ -98,9 +103,9 @@ function checkPr(path, theme) {
   CORE.forEach(([name], i) => { if (at[i] < 0) fails.push(`section missing: ${name}`); });
   const found = at.filter((i) => i >= 0);
   if (found.some((v, i) => i && v < found[i - 1])) fails.push('core sections out of order');
-  if (theme) {
+  if (table) {
     const row = lines.findIndex((l) => /^\s*\|\s*\*\*(Preview|Theme ID|Theme name)\*\*\s*\|/.test(l));
-    if (row < 0) fails.push('theme preview table missing');
+    if (row < 0) fails.push("theme preview table missing (pass --no-preview only with the developer's explicit no-preview answer)");
     else if ((at[1] >= 0 && row < at[1]) || (at[2] >= 0 && row > at[2])) fails.push('theme preview table not between Jira ticket and To check');
   }
   if (lines.some((l) => /^\s*(?:[-*>]\s*)?[_*]*\(?(none|n\/a)\)?\.?[_*]*\s*$/i.test(l))) fails.push('None/N/A placeholder');
@@ -115,6 +120,38 @@ function checkPr(path, theme) {
   const hits = attributionHits(text);
   if (hits) fails.push('AI attribution');
   return report(['kind=pr', `summary_sentences=${sentences.length}`, `long_sentences=${long}`, `attribution_hits=${hits}`], fails);
+}
+
+// fe create-pull-request Phase 2 step 2: the PR line, then an optional brief of at most 6 lines.
+// A preview theme is deleted after merge, so its link, id or editor URL rots in the ticket.
+const PR_LINE = /^PR: https:\/\/\S+\/pull\/\d+ — \S/;
+const ROT = [
+  ['preview theme link', /preview_theme_id=|shopifypreview\.com|\/themes\/\d+\/preview/i],
+  ['editor URL', /\/themes\/\d+\/editor|\/admin\/themes\/\d+|admin\.shopify\.com\/store\/[^/\s]+\/themes\/\d+/i],
+  ['theme id', /\btheme[ _-]?id\b|\btheme\s*#?\d{6,}|\b\d{11,14}\b/i],
+];
+const BRIEF_KEY = /^\s*(?:workspace|mode|answers|ticket|target|findings|related|screenshot_dir|previous|feedback|question|pr_url|pr_title|brief):\s|^\s*(?:branch|base)=/;
+
+/** Jira PR-link comment: the PR line first, brief lines ≤ 6, no bare label, no None/N/A, nothing that rots, no brief text, attribution. */
+function checkJira(path) {
+  const fails = [];
+  const text = readFile(path, fails);
+  if (text === null) return report(['kind=jira'], fails);
+  const lines = text.split('\n').filter((l) => l.trim());
+  if (!PR_LINE.test(lines[0] || '')) fails.push("line 1 is not 'PR: <url> — <title>'");
+  const brief = lines.slice(1);
+  if (brief.length > 6) fails.push('brief longer than 6 lines');
+  if (lines.some((l) => /^#{1,6} /.test(l))) fails.push('heading in the comment');
+  const label = (l) => /^\s*(?:[-*]\s+)?(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)\s*(?:\*\*)?\s*:?\s*$/.test(l);
+  const opensLabel = (l) => label(l) || /^\s*(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)/.test(l);
+  // any next line that opens no label is its content: a bullet (`- Desktop: …` too), a sentence, a numbered list
+  if (brief.some((l, i) => label(l) && (i + 1 >= brief.length || opensLabel(brief[i + 1])))) fails.push('label with no content');
+  if (lines.some((l) => /^\s*(?:[-*>]\s*)?(?:(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)\s*:?\s*)?[_*]*\(?(none|n\/a)\)?\.?[_*]*\s*$/i.test(l))) fails.push('None/N/A placeholder');
+  for (const [name, re] of ROT) if (lines.some((l) => re.test(l))) fails.push(name);
+  if (lines.some((l) => BRIEF_KEY.test(l))) fails.push('brief text in the comment');
+  const hits = attributionHits(text);
+  if (hits) fails.push('AI attribution');
+  return report(['kind=jira', `brief_lines=${brief.length}`, `attribution_hits=${hits}`], fails);
 }
 
 // `[a, b, "c, d"]` → its entries, commas inside quotes kept
@@ -194,7 +231,7 @@ function checkReceipt(kind, text) {
     list.forEach((it, i) => { for (const f of ['store', 'need']) if (!it[f]) fails.push(`item ${i + 1} ${f} empty`); });
   } else if (k === 'written') {
     const p = field(lines, 'written') || '';
-    const want = kind === 'stt' ? '/steps-to-test.md' : '/pr-body.md';
+    const want = { stt: '/steps-to-test.md', pr: '/pr-body.md', jira: '/jira-comment.md' }[kind];
     if (!p.startsWith('/') || !p.endsWith(want)) fails.push(`written is not an absolute path ending in ${want}`);
     if (field(lines, 'unconfirmed') === null) fails.push('unconfirmed missing');
     if (!field(lines, 'report')) fails.push('report empty');
@@ -214,11 +251,12 @@ function checkReceipt(kind, text) {
 function main(argv) {
   if (argv.includes('--help') || argv.includes('-h')) { process.stdout.write(USAGE + '\n'); return 0; }
   const [cmd, kind, path, ...rest] = argv;
-  if (!['stt', 'pr'].includes(kind)) { process.stderr.write(USAGE + '\n'); return 2; }
+  if (!['stt', 'pr', 'jira'].includes(kind)) { process.stderr.write(USAGE + '\n'); return 2; }
   if (cmd === 'file' && path) {
-    const unknown = rest.filter((a) => !(kind === 'pr' && a === '--theme'));
+    const unknown = rest.filter((a) => !(kind === 'pr' && (a === '--theme' || a === '--no-preview')));
     if (unknown.length) { process.stderr.write(USAGE + '\n'); return 2; }
-    return kind === 'stt' ? checkStt(path) : checkPr(path, rest.includes('--theme'));
+    if (kind === 'jira') return checkJira(path);
+    return kind === 'stt' ? checkStt(path) : checkPr(path, !rest.includes('--no-preview'));
   }
   if (cmd === 'receipt' && path === undefined) {
     let text = '';

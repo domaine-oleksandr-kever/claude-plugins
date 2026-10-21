@@ -1845,6 +1845,26 @@ rc=0; M="$TMP/m16"; CURL_MARKER="$M" GQL_TOKEN="" \
 if [ "$rc" -eq 0 ] && hdr_is shpat_clean123 "$M.hdr"; then ok
 else bad G16-token-export-prefix "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
 
+# G-env-subdir (bug): the default --env was ./.env, so a run from .claude/tasks/<id>/ missed the
+# repo's .env and asked for a token that was there all along — the git toplevel's .env is the default
+ER="$TMP/gqlenvrepo"; mkdir -p "$ER/.claude/tasks/ABC-1"; git -C "$ER" init -q
+cp "$GQLDIR/query.graphql" "$ER/.claude/tasks/ABC-1/"
+printf 'SHOPIFY_ADMIN_TOKEN=shpat_subdir123\n' > "$ER/.env"
+rc=0; M="$TMP/m-envsub"; CURL_MARKER="$M" GQL_TOKEN="" \
+  gql_run_at "$ER/.claude/tasks/ABC-1" --store test-store --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is shpat_subdir123 "$M.hdr" && ! grep -q 'set SHOPIFY_ADMIN_TOKEN' "$E"; then ok
+else bad G-env-subdir "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+rm -f "$ER/.env"
+# G-env-own-subdir: a cwd below the toplevel with its own .env (a theme in a monorepo) and none at
+# the toplevel — the cwd's .env still wins
+mkdir -p "$ER/theme"; cp "$GQLDIR/query.graphql" "$ER/theme/"
+printf 'SHOPIFY_ADMIN_TOKEN=shpat_ownsub123\n' > "$ER/theme/.env"
+rc=0; M="$TMP/m-envown"; CURL_MARKER="$M" GQL_TOKEN="" \
+  gql_run_at "$ER/theme" --store test-store --engine token --query query.graphql >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && hdr_is shpat_ownsub123 "$M.hdr"; then ok
+else bad G-env-own-subdir "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+rm -f "$ER/theme/.env"
+
 # G17: a dotenv value that is not shpat_/shpca_ fails loudly instead of buying a 401 round trip
 rc=0; M="$TMP/m17"; CURL_MARKER="$M" GQL_TOKEN="" \
   run_gql --engine token --query query.graphql --env "$ENVD/shape.env" >"$O" 2>"$E" || rc=$?
@@ -5800,8 +5820,11 @@ grep -q '^summary_sentences=3$' "$DCD/out" && grep -q '^long_sentences=0$' "$DCD
 grep -v '^## Changes' "$DCD/pr.md" > "$DCD/pr-nochanges.md"
 dc DC10-pr-missing-core 1 'fail section missing: Changes' file pr "$DCD/pr-nochanges.md"
 grep -v '^| \*\*' "$DCD/pr.md" > "$DCD/pr-notable.md"
-dc DC11-pr-theme-table 1 'fail theme preview table missing' file pr "$DCD/pr-notable.md" --theme
-dc DC11b-pr-no-theme-flag 0 'result=ok' file pr "$DCD/pr-notable.md"
+dc DC9b-pr-good-default 0 'result=ok' file pr "$DCD/pr.md"
+dc DC11-pr-theme-table 1 "fail theme preview table missing (pass --no-preview only with the developer's explicit no-preview answer)" file pr "$DCD/pr-notable.md"
+dc DC11a-pr-theme-flag-noop 1 'fail theme preview table missing' file pr "$DCD/pr-notable.md" --theme
+dc DC11b-pr-no-preview 0 'result=ok' file pr "$DCD/pr-notable.md" --no-preview
+dc DC11c-stt-no-preview 2 'usage:' file stt "$DCD/stt.md" --no-preview
 awk '/^## To check/ { print "## Screenshots"; print ""; print "x"; print ""; print; next } /^## Screenshots/ { skip = 1; next } skip && /^## / { skip = 0 } !skip' "$DCD/pr.md" > "$DCD/pr-order.md"
 dc DC12-pr-order 1 'fail core sections out of order' file pr "$DCD/pr-order.md"
 printf '\n## Dependencies\n\nNone\n' | cat "$DCD/pr.md" - > "$DCD/pr-none.md"
@@ -5945,6 +5968,58 @@ TXT
 dc DC31-help 0 'usage: drafter-check.cjs' --help
 dc DC32-usage-bad-kind 2 'usage:' file xx "$DCD/stt.md"
 dc DC33-usage-stt-theme 2 'usage:' file stt "$DCD/stt.md" --theme
+
+# file jira — the Jira PR-link comment: the PR line, a brief only with content, nothing that rots
+printf 'PR: https://github.com/o/r/pull/12 — [ELC-1] feat: add scent notes %s\n' "$SENT" > "$DCD/jira.md"
+dc DC34-jira-pr-line-only 0 'brief_lines=0' file jira "$DCD/jira.md"
+cat > "$DCD/jira-brief.md" <<MD
+PR: https://github.com/o/r/pull/12 — [ELC-1] feat: add scent notes
+
+Adds the Scent notes section to the product page. $SENT
+**TA deviations:** the block uses a metaobject, not a metafield list, to keep the order editable.
+**Open questions:**
+- empty-state copy for products with no notes?
+MD
+dc DC35-jira-brief-ok 0 'brief_lines=4' file jira "$DCD/jira-brief.md"
+printf 'See https://github.com/o/r/pull/12\n' > "$DCD/jira-noline.md"
+dc DC36-jira-no-pr-line 1 "fail line 1 is not 'PR: <url> — <title>'" file jira "$DCD/jira-noline.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\nPreview: https://s.myshopify.com/products/x?preview_theme_id=123456789012 %s\n' "$SENT" > "$DCD/jira-preview.md"
+dc DC37-jira-preview-link 1 'fail preview theme link' file jira "$DCD/jira-preview.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\nEdit it in https://admin.shopify.com/store/x/themes/987654321/editor\n' > "$DCD/jira-editor.md"
+dc DC38-jira-editor-url 1 'fail editor URL' file jira "$DCD/jira-editor.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\nPushed to theme id 155512345678.\n' > "$DCD/jira-themeid.md"
+dc DC39-jira-theme-id 1 'fail theme id' file jira "$DCD/jira-themeid.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\nAdds the section.\n**Known limits:**\n**Open questions:** none yet\n' > "$DCD/jira-emptylabel.md"
+dc DC40-jira-empty-label 1 'fail label with no content' file jira "$DCD/jira-emptylabel.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n**Known limits:** N/A\n' > "$DCD/jira-na.md"
+dc DC41-jira-none 1 'fail None/N/A placeholder' file jira "$DCD/jira-na.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n1\n2\n3\n4\n5\n6\n7\n' > "$DCD/jira-long.md"
+dc DC42-jira-brief-too-long 1 'fail brief longer than 6 lines' file jira "$DCD/jira-long.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\nmode: jira\n' > "$DCD/jira-briefkey.md"
+dc DC43-jira-brief-text 1 'fail brief text in the comment' file jira "$DCD/jira-briefkey.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\nCo-Authored-By: Claude <noreply@anthropic.com>\n' > "$DCD/jira-attr.md"
+dc DC44-jira-attribution 1 'fail AI attribution' file jira "$DCD/jira-attr.md"
+dc DC45-receipt-jira-good 0 'kind=written' receipt jira <<'TXT'
+written: /w/.claude/tasks/ELC-1/jira-comment.md
+unconfirmed: []
+report: PR line + 3-line brief
+TXT
+dc DC46-receipt-jira-wrong-path 1 'fail written is not an absolute path ending in /jira-comment.md' receipt jira <<'TXT'
+written: /w/.claude/tasks/ELC-1/pr-body.md
+unconfirmed: []
+report: r
+TXT
+dc DC47-usage-jira-theme 2 'usage:' file jira "$DCD/jira.md" --theme
+printf 'PR: https://github.com/o/r/pull/12 — t\nAdds the section.\nKnown limits: none\n' > "$DCD/jira-na-plain.md"
+dc DC48-jira-none-plain-label 1 'fail None/N/A placeholder' file jira "$DCD/jira-na-plain.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n- Open questions: N/A\n' > "$DCD/jira-na-bullet.md"
+dc DC48b-jira-none-bullet-label 1 'fail None/N/A placeholder' file jira "$DCD/jira-na-bullet.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n**Known limits:**\nThe list caps at 10 notes.\nOpen questions for QA/PM:\n1. empty-state copy?\n' > "$DCD/jira-label-para.md"
+dc DC49-jira-label-paragraph-ok 0 'brief_lines=4' file jira "$DCD/jira-label-para.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\nAdds the section.\n**Known limits:**\n' > "$DCD/jira-label-last.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n**Known limits:**\n- Desktop: the list caps at 10 notes.\n' > "$DCD/jira-label-bullet-colon.md"
+dc DC49c-jira-label-bullet-colon-ok 0 'brief_lines=2' file jira "$DCD/jira-label-bullet-colon.md"
+dc DC49b-jira-label-last 1 'fail label with no content' file jira "$DCD/jira-label-last.md"
 
 echo "fe-scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

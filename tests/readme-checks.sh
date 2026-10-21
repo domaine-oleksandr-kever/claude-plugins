@@ -821,5 +821,8 @@ done <<EOF_TYPES
 $(grep -E '^export type Slim(Engine|Channel) ' "$ROOT/plugins/slim/types/index.d.ts")
 EOF_TYPES
 
+# the PR-link Jira comment never carries the preview theme: it is deleted after merge and the link rots
+has "$ROOT/plugins/fe/skills/create-pull-request/SKILL.md" '**Never the preview theme link, theme id or editor URL in the Jira comment: the preview theme is deleted after merge and the link rots.**' fe-cpr-jira-comment-no-preview
+
 echo "readme-checks: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

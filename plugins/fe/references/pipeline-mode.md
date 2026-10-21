@@ -82,7 +82,8 @@ entries per `references/metafield-metaobject-setup.md`.
 
 Every non-escalated call goes to the workspace `notes.md` as a dated `pipeline:` entry —
 what was decided, why, and what a reviewer would need in order to undo it. The final
-report and the Jira hand-off comment are distilled from these entries.
+report is distilled from these entries; the Jira hand-off brief from the `ta-divergence:` and
+`ceiling:` lines.
 
 ## Phase-agent models
 
@@ -92,10 +93,10 @@ those agents get live in `pipeline-phases.md` — **read only at the start of St
 before the gate). Two tiers, by phase: **reasoning-heavy** — implement, qa, and the fix agents
 in the qa loop and aftercare; **mechanical** — finalize, create-pr, steps-to-test, and the
 aftercare poll/triage agent (its fix agents are reasoning-heavy). Reasoning-heavy pins `opus`,
-mechanical pins `sonnet`. The inline conductor step (jira-hand-off) delegates its
-one Jira write to the `base:jira-writer` subagent (so the comment body never enters the
-conductor context); `base:jira-writer` pins its own model via frontmatter
-(`sonnet`), so the conductor passes none.
+mechanical pins `sonnet`. The inline conductor step (jira-hand-off) has the comment drafted by
+`fe:pr-body-drafter` and its one Jira write done by the `base:jira-writer` subagent (so the
+comment body never enters the conductor context); both pin their own model via frontmatter
+(`haiku`, `sonnet`), so the conductor passes none.
 Pre-gate helpers (the Step 1 store-data audit, the Step 3 research pressure-test) are
 pinned inline where ship spawns them; the reader agents pin via frontmatter. The
 conductor itself stays on the session model — planning, decomposition, and synthesis are

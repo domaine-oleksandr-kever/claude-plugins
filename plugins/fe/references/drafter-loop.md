@@ -1,7 +1,8 @@
 # Drafter loop — `fe:stt-drafter`, `fe:pr-body-drafter`
 
 The long text is written and revised in the drafter's context. This session holds only the path,
-the drafter's `unconfirmed` list, its questions and — for a PR — the title and Summary.
+the drafter's `unconfirmed` list, its questions and — for a PR — the title and Summary. The PR
+drafter's `mode: jira` turn (create-pull-request Phase 2 step 2) writes `jira-comment.md` by this same loop.
 
 ## Spawn
 `Agent(subagent_type: "fe:<drafter>", prompt: <brief>)` — **no `model`**: the frontmatter pins it
@@ -19,7 +20,7 @@ theme with its `note:`) is the PR drafter's only; the stt drafter never gets the
 
 ## Check every return in code
 Pipe the drafter's reply, unchanged, to
-`node <fe root>/scripts/drafter-check.cjs receipt <stt|pr>` (a quoted heredoc). `result=fail` →
+`node <fe root>/scripts/drafter-check.cjs receipt <stt|pr|jira>` (a quoted heredoc). `result=fail` →
 SendMessage the `fail` lines back once (`error: receipt — <lines>`); a second fail → tell the developer
 and stop.
 
@@ -33,9 +34,11 @@ and stop.
   properties asked, one line each. Never the query output.
 - `answer:` → relay its lines to the developer as the drafter's answer.
 - `written: <path>` (+ `unconfirmed:`, `report:`, the PR fields) → run
-  `node <fe root>/scripts/drafter-check.cjs file <stt|pr> "<path>"` (pr: plus `--theme` unless the
-  developer said the PR has no preview); `fail` lines → SendMessage
-  `revise:` + those lines; ok → the checkpoint.
+  `node <fe root>/scripts/drafter-check.cjs file <stt|pr|jira> "<path>"` (pr: the Theme preview table check
+  is the default; add `--no-preview` only when `notes.md` holds the developer's recorded
+  `preview-decision: no preview` line); `fail` lines → SendMessage
+  `revise:` + those lines; ok → the checkpoint. On the pr drafter's jira turn every `revise:` and
+  `ask:` also carries `file: jira-comment.md` (that agent wrote `pr-body.md` too).
 - `error: …` → show it, fix the brief once, re-send.
 
 **Termination:** at most 2 ESCALATE rounds, 1 LOOKUP round, 1 brief fix and 1 check-fix round per
@@ -46,8 +49,9 @@ You never `Read`, `cat`, `head`, `tail`, `sed`, `grep` the text of, open, quote,
 paraphrase the draft file — not to check it, not to present it, not after an edit. The checkpoint
 shows its absolute path as a clickable link, the `unconfirmed` list and the questions. The only
 command on the file is `drafter-check.cjs`, which prints counts. base's guard refuses a main-session
-`Read` of a task workspace's `steps-to-test.md` or `pr-body.md`; that refusal is the rule, not an
-obstacle to route around.
+`Read` of a task workspace's `steps-to-test.md`, `pr-body.md` or `jira-comment.md` whenever base runs — on
+any model, `/base-edit-direct` included; only `BASE_GUARD=0` lifts it. That refusal is the rule, not
+an obstacle to route around.
 
 ## Questions and edits
 A developer question about the content ("why step 3?") → SendMessage `mode: ask` + the question

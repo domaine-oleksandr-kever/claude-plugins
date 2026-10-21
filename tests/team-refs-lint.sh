@@ -402,6 +402,12 @@ for sk in develop-feature-or-fix fix-breaking-changes fix-accessibility-issue up
   if grep -qF "base's \`edit delegation\` convention" "$ROOT/plugins/fe/skills/$sk/SKILL.md"; then ok
   else bad "fe-edit-delegation-$sk" "plugins/fe/skills/$sk/SKILL.md does not brief base's edit delegate"; fi
 done
+# create-pull-request: no session theme → a three-option ask recorded as preview-decision:, never a silent drop
+CPR="$ROOT/plugins/fe/skills/create-pull-request/SKILL.md"
+for needle in 'HARD RULE — theme or ask, never skip' '**(a)** create a preview theme now' '**(b)** use an existing theme' 'never follows them' 'The rule is met by the outcome' '**(c)** no preview for this PR' 'preview-decision:' '`--no-preview` only when `notes.md` holds a `preview-decision: no preview` line'; do
+  if grep -qF -- "$needle" "$CPR"; then ok; else bad fe-cpr-theme-or-ask "create-pull-request/SKILL.md lacks: $needle"; fi
+done
+if grep -qF 'their rows are omitted from the body' "$CPR"; then bad fe-cpr-theme-silent-drop "create-pull-request/SKILL.md still drops the theme rows silently"; else ok; fi
 if [ -f "$ROOT/plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js" ]; then ok
 else bad fe-fbc-template "plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js missing"; fi
 

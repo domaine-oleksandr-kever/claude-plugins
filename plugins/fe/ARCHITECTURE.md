@@ -17,7 +17,7 @@ plugins/fe/
 │                                carries its script template, create-pull-request its REFERENCE.md
 ├── agents/theme-explorer.md     the read-only theme scout (`fe:theme-explorer`)
 ├── agents/stt-drafter.md        drafts Steps to Test into the workspace (`fe:stt-drafter`, sonnet)
-├── agents/pr-body-drafter.md    drafts the PR title and body into the workspace (`fe:pr-body-drafter`, haiku)
+├── agents/pr-body-drafter.md    drafts the PR title, body and Jira PR-link comment into the workspace (`fe:pr-body-drafter`, haiku)
 ├── references/*.md              what fe's skills and agents read on demand (`<fe root>/references/…`);
 │                                drafter-loop.md is the one home of the drafter loop
 └── scripts/                     the store scripts, project-profile.sh, worktree-theme.sh, doctor.cjs,

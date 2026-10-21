@@ -108,8 +108,9 @@ already fell back to the token engine).
 NOT the Theme Access token (`shptka_`) in `shopify.theme.toml`** — that one only has `write_themes`
 and can't touch metaobjects. Get it from a **custom app** in the Shopify admin (Settings → Apps and
 sales channels → Develop apps → your app → API credentials → Admin API access token). It lives in
-the repo's **gitignored `.env`** as **`SHOPIFY_ADMIN_TOKEN=shpat_…`** (alongside the existing
-`BRAND` / `FIGMA_TOKEN`). **Never `Read` `.env` yourself** — that pulls the secret into context.
+the repo's **gitignored `<repo>/.env`** (the cwd's `./.env` if present, else the git toplevel's) as
+**`SHOPIFY_ADMIN_TOKEN=shpat_…`** (alongside the existing `BRAND` / `FIGMA_TOKEN`).
+**Never `Read` `.env` yourself** — that pulls the secret into context.
 
 Either way, run everything through the runner — substitute `<fe root>`'s absolute path for
 the placeholder below:
