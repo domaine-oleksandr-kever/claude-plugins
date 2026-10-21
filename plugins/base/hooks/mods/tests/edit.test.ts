@@ -237,36 +237,42 @@ describe('shell writes', () => {
 
 describe('draft read guard', () => {
   const DRAFT = `${TASKS}/ABC-1/steps-to-test.md`
-  t("a main-loop Read of a drafter's draft is refused; a subagent's, another workspace file and an escape are not", async ($, on) => {
+  t("a main-loop Read of a drafter's draft is refused on any model and after /base-edit-direct; a subagent's and another workspace file are not", async ($, on) => {
     const { w, m } = setup(on)
     marker(w, SONNET)
     w.files[DRAFT] = { text: 'draft', mtimeMs: 0 }
     await start($)
     const r = await readFile($, DRAFT)
-    expect(r.deny).toBe(draftRefusal('.claude/tasks/ABC-1/steps-to-test.md', 'sonnet'))
+    expect(r.deny).toBe(draftRefusal('.claude/tasks/ABC-1/steps-to-test.md'))
     expect((await readFile($, `${TASKS}/ABC-1/pr-body.md`)).deny).toBeDefined()
+    expect((await readFile($, `${TASKS}/ABC-1/jira-comment.md`)).deny).toBe(draftRefusal('.claude/tasks/ABC-1/jira-comment.md'))
     expect((await eventsOf($, 'guard')).map(e => e.text)).toEqual([
       "Read: main session — .claude/tasks/ABC-1/steps-to-test.md is a drafter's draft",
       "Read: main session — .claude/tasks/ABC-1/pr-body.md is a drafter's draft",
+      "Read: main session — .claude/tasks/ABC-1/jira-comment.md is a drafter's draft",
     ])
-    expect((await edits($)).refused).toBe(2)
+    expect((await edits($)).refused).toBe(3)
     expect((await readFile($, DRAFT, { agentId: 'a1' })).deny).toBeUndefined()
     expect((await readFile($, `${TASKS}/ABC-1/notes.md`)).deny).toBeUndefined()
     expect((await readFile($, '/elsewhere/.claude/tasks/ABC-1/pr-body.md')).deny).toBeDefined()
-    m.model = 'claude-sonnet-5-5'
-    expect((await readFile($, DRAFT)).deny).toBeUndefined()
+    m.model = 'claude-haiku-5-5'
+    expect((await readFile($, DRAFT)).deny).toBeDefined()
+    expect((await edit($, '/repo/src/a.ts')).deny).toBeUndefined()
     m.model = 'claude-opus-5-5'
     await direct($)
-    expect((await readFile($, DRAFT)).deny).toBeUndefined()
+    expect((await readFile($, DRAFT)).deny).toBeDefined()
+    expect((await edit($, '/repo/src/b.ts')).deny).toBeUndefined()
   })
 
   test('the shell draft-read pattern', async () => {
     const W = '/repo/.claude/tasks/ABC-1'
     for (const c of [`cat ${W}/steps-to-test.md`, `sed -n 1,20p ${W}/pr-body.md`, `grep -n Theme ${W}/steps-to-test.md`, `head .claude/tasks/ABC-1/pr-body.md`,
-      'cat "$W/steps-to-test.md"', `node drafter-check.cjs file stt ${W}/steps-to-test.md && cat ${W}/steps-to-test.md`])
+      'cat "$W/steps-to-test.md"', `cat ${W}/jira-comment.md`, `node drafter-check.cjs file stt ${W}/steps-to-test.md && cat ${W}/steps-to-test.md`])
       expect(shellReadsDraft(c)).toBe(true)
     for (const c of [`node /fe/scripts/drafter-check.cjs file stt ${W}/steps-to-test.md`, `gh pr create --title t --body-file ${W}/pr-body.md`,
-      `test -s ${W}/pr-body.md`, `ls ${W}/steps-to-test.md`, 'grep -rn steps-to-test.md plugins/fe', `cat ${W}/notes.md`])
+      `test -s ${W}/pr-body.md`, `test -s ${W}/jira-comment.md`, `ls ${W}/steps-to-test.md`, 'grep -rn steps-to-test.md plugins/fe', `cat ${W}/notes.md`,
+      `node /fe/scripts/drafter-check.cjs receipt jira <<'TXT'\nwritten: ${W}/jira-comment.md\nunconfirmed: []\nreport: PR line\nTXT`,
+      `printf 'written: ${W}/pr-body.md\\n' | node /fe/scripts/drafter-check.cjs receipt pr`])
       expect(shellReadsDraft(c)).toBe(false)
   })
 
@@ -275,7 +281,7 @@ describe('draft read guard', () => {
     marker(w, SONNET)
     await start($)
     const D = `${TASKS}/ABC-1/steps-to-test.md`
-    expect((await bash($, `cat ${D}`)).deny).toBe(draftRefusal('.claude/tasks/ABC-1/steps-to-test.md', 'sonnet'))
+    expect((await bash($, `cat ${D}`)).deny).toBe(draftRefusal('.claude/tasks/ABC-1/steps-to-test.md'))
     expect((await bash($, `sed -n 1,40p ${TASKS}/ABC-1/pr-body.md`)).deny).toBeDefined()
     expect((await bash($, `grep -n Theme ${D}`)).deny).toBeDefined()
     expect((await eventsOf($, 'guard')).map(e => e.text)[0]).toBe("Bash: main session — .claude/tasks/ABC-1/steps-to-test.md is a drafter's draft")
@@ -291,7 +297,7 @@ describe('draft read guard', () => {
     marker(w, SONNET)
     await start($)
     const D = `${TASKS}/ABC-1/pr-body.md`
-    expect((await $.tool.call({ tool: 'Grep', pattern: 'x', path: D })).deny).toBe(draftRefusal('.claude/tasks/ABC-1/pr-body.md', 'sonnet'))
+    expect((await $.tool.call({ tool: 'Grep', pattern: 'x', path: D })).deny).toBe(draftRefusal('.claude/tasks/ABC-1/pr-body.md'))
     expect((await $.tool.call({ tool: 'Grep', pattern: 'x', path: `${TASKS}/ABC-1`, glob: 'steps-to-test.md' })).deny).toBeDefined()
     expect((await $.tool.call({ tool: 'Grep', pattern: 'x', path: `${TASKS}/ABC-1`, glob: '*.json' })).deny).toBeUndefined()
     expect((await $.tool.call({ tool: 'mcp__slim__view', path: D })).deny).toBeDefined()
@@ -300,16 +306,35 @@ describe('draft read guard', () => {
     expect((await edits($)).refused).toBe(3)
   })
 
-  t('BASE_GUARD=0 or no delegation reads the draft', async ($, on) => {
+  t('BASE_GUARD=0 reads the draft', async ($, on) => {
     const { w } = setup(on, 'claude-opus-5-5', { BASE_GUARD: '0' })
     marker(w, SONNET)
     await start($)
     expect((await readFile($, `${TASKS}/ABC-1/pr-body.md`)).deny).toBeUndefined()
   })
 
-  t('no marker: the draft is read', async ($, on) => {
+  t('no marker, or a marker with delegation off: the draft is still refused, the edit is not', async ($, on) => {
     setup(on)
     await start($)
-    expect((await readFile($, `${TASKS}/ABC-1/pr-body.md`)).deny).toBeUndefined()
+    expect((await readFile($, `${TASKS}/ABC-1/pr-body.md`)).deny).toBe(draftRefusal('.claude/tasks/ABC-1/pr-body.md'))
+    expect((await edit($, '/repo/src/a.ts')).deny).toBeUndefined()
+  })
+
+  t('a marker without edit.model (BASE_EDIT_MODEL=0): the draft is still refused', async ($, on) => {
+    const { w } = setup(on, 'claude-haiku-5-5')
+    marker(w, null)
+    await start($)
+    expect((await bash($, `cat ${TASKS}/ABC-1/jira-comment.md`)).deny).toBe(draftRefusal('.claude/tasks/ABC-1/jira-comment.md'))
+    expect((await $.tool.call({ tool: 'mcp__slim__view', path: `${TASKS}/ABC-1/steps-to-test.md` })).deny).toBeDefined()
+  })
+
+  t("no marker: a drafter's receipt piped or heredoc'd into drafter-check.cjs is not refused; a read after the heredoc is", async ($, on) => {
+    setup(on)
+    await start($)
+    const R = `written: ${TASKS}/ABC-1/jira-comment.md\nunconfirmed: []\nreport: PR line`
+    expect((await bash($, `node /fe/scripts/drafter-check.cjs receipt jira <<'TXT'\n${R}\nTXT`)).deny).toBeUndefined()
+    expect((await bash($, `printf 'written: ${TASKS}/ABC-1/jira-comment.md\\nunconfirmed: []\\n' | node /fe/scripts/drafter-check.cjs receipt jira`)).deny).toBeUndefined()
+    expect((await bash($, `node /fe/scripts/drafter-check.cjs receipt jira <<TXT\n${R}\nTXT\ncat ${TASKS}/ABC-1/jira-comment.md`)).deny).toBeDefined()
+    expect((await edits($)).refused).toBe(1)
   })
 })

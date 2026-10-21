@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.14.0**.
+Current release: **base v0.14.1**.
 
 ## Status
 
@@ -183,7 +183,7 @@ base's hooks module registers these commands at each session start.
 | `/base-doctor` | checks the install (Doctor) |
 | `/base-progress` | pins or unpins the work id band's checklist shows (Workspace) |
 | `/base-defects` | only in dogfood mode: lists the plugin defects reported, newest first (Dogfood mode) |
-| `/base-edit-direct` | allows direct project-file edits (and reading a drafter's draft) for this session id, while edit delegation is on (Guards); typed at the prompt only, a run another plugin queues grants nothing |
+| `/base-edit-direct` | allows direct project-file edits for this session id (never a read of a drafter's draft), while edit delegation is on (Guards); typed at the prompt only, a run another plugin queues grants nothing |
 
 ## Conventions
 
@@ -255,7 +255,8 @@ deny writes one `guard` line to `base.events`. The guards also check subagents' 
 | MCP precedence | the tools of base's `atlassian`, `notion-mcp` and `figma-dev-mode` servers (`mcp__plugin_base_<server>__<tool>`), in the main loop and in subagents | the first call of such a tool in a session while a server that is no plugin's (a claude.ai connector, a user-scope server) lists both the same tool and the server's signature tool (`getJiraIssue`, `notion-fetch`, `get_design_context`), so a shared generic name such as `search` or `authenticate` makes no twin: the deny names that tool to call instead, and the same call is allowed after this one refusal (`base.mcpSoft`), so a connector that needs sign-in strands nobody. A tool list that fails lets the call run |
 | reader writes | the Jira, Confluence and Notion write tools of any MCP server (slim's and base's registered tools aside), in a subagent | every write for `base:jira-reader`, `base:doc-reader` and `base:figma-reader`; every write but `editJiraIssue` and `addCommentToJiraIssue` for `base:jira-writer`; every write for a subagent with no `agents/<agent_id>.json` record (fail closed: the deny says `no agent-type marker for this subagent`); other agent types and the main loop are not limited. A probe of the file that fails lets the call run |
 | reader scope | every MCP tool but slim's and base's registered ones, in a subagent of base's reader or writer types | a call on a server that lists no signature tool of the agent's vendors: `getJiraIssue` for jira-reader and the writer, `getJiraIssue` or `notion-fetch` for doc-reader, `get_design_context` for figma-reader (base's own server of that vendor always counts), so a connector the session holds for other work (a store, a docs editor, a browser) stays out of reach of a reader fed untrusted text. A tool list that fails lets the call run |
-| edit delegation | `Write`, `Edit`, `NotebookEdit` in the main loop (no `agentId`) on a file under the session root outside `.claude/`, and a main-loop read of a drafter's draft (`.claude/tasks/<id>/steps-to-test.md`, `pr-body.md`: `Read`, `Grep`, slim's `view`, or a Bash command naming one — `drafter-check.cjs`, `gh pr … --body-file`, `test -s` and `ls` stay allowed), while the rules marker names a model | refused with the `Agent(model: …)` pointer (a draft: show its path, change it through the same agent) every time, unless the session already runs on that family or a cheaper one (haiku < sonnet < opus < fable), the developer ran `/base-edit-direct` this session, or `BASE_GUARD=0`; allowed edits are counted (`base.mainEdits`, the doctor's `delegate` row, one `delegate` log line per file). A main-loop Bash write (`sed -i`, redirection, `tee`, `git apply`, `patch`) not naming `.claude/`, `/tmp/` or `/dev/` is counted, never refused. The marker is read once per session id |
+| edit delegation | `Write`, `Edit`, `NotebookEdit` in the main loop (no `agentId`) on a file under the session root outside `.claude/`, while the rules marker names a model | refused with the `Agent(model: …)` pointer every time, unless the session already runs on that family or a cheaper one (haiku < sonnet < opus < fable), the developer ran `/base-edit-direct` this session, or `BASE_GUARD=0`; allowed edits are counted (`base.mainEdits`, the doctor's `delegate` row, one `delegate` log line per file). A main-loop Bash write (`sed -i`, redirection, `tee`, `git apply`, `patch`) not naming `.claude/`, `/tmp/` or `/dev/` is counted, never refused. The marker is read once per session id |
+| drafter drafts | a main-loop read (no `agentId`) of a drafter's draft — `.claude/tasks/<id>/steps-to-test.md`, `pr-body.md`, `jira-comment.md` — by `Read`, `Grep`, slim's `view`, or a Bash command naming one (`drafter-check.cjs`, `gh pr … --body-file`, `test -s` and `ls` stay allowed), whenever base runs: on any model, with or without the rules marker | refused with the drafter-rule pointer (show its path, change it through the same agent) every time — `/base-edit-direct`, a session on the delegate's family or cheaper and `BASE_EDIT_MODEL=0` do not lift it; only `BASE_GUARD=0` does. Each refusal counts in `base.mainEdits.refused` and logs one `guard` line |
 | scratch path | the browser tools that take a file path (`take_screenshot`, `browser_take_screenshot`, `take_snapshot`, `get_network_request`, `browser_run_code_unsafe`) of any MCP server | a path outside the project (chrome-devtools also accepts its OS temp dir), or inside it outside `.claude/` (the task workspace's `tmp/`, `.claude/tmp/`, `.claude/base-tmp/`); in a git worktree, a path into the shared task workspace. `hooks/scratch-path-guard.cjs` decides against the project root the session launched in (`base.guardRoot`), names an absolute path to use instead and creates its directory. The tools' descriptions carry the rule too. `BASE_SCRATCH_GUARD=0` turns this one off |
 
 base's playwright server writes its own files under `.claude/base-tmp/playwright`. When the guard
@@ -585,7 +586,7 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 | `BASE_SHOPIFY_VALIDATE_TIMEOUT` | `90` | seconds `scripts/shopify-validate.cjs` waits in all (the first `npx` download included) before it answers `error=timeout`; 1-600, another value is read as `90`; `--timeout` outranks it |
 
 The fetchers read their credentials from the process environment first. Else they read the
-project's gitignored `./.env`; `--env <file>` names another file. The credentials are:
+project's gitignored `.env` (the cwd's when present, else the git toplevel's); `--env <file>` names another file. The credentials are:
 
 - `JIRA_EMAIL` + `JIRA_API_TOKEN`: a read-only scoped Atlassian token (`references/jira-attachments.md`).
 - `JIRA_SITE`: default `meetdomaine.atlassian.net`.

@@ -64,7 +64,10 @@ URL itself carries an `I…;…` id, go straight to rung 3 (REST accepts it).
 **3. REST** — `Read` `${CLAUDE_PLUGIN_ROOT}/references/figma-reader-rest.md` and follow it (the
 script + slim's `view`) → `source: rest`. Take it when **no** Figma MCP
 tool is available to you, or when a rung-1/2 call fails the way a closed app fails: connection refused,
-"node not found", "page not loaded" — or rejects the id ("Node ID must be in the format"). Do not narrate the MCP error — quote it in
+"node not found", "page not loaded" — or rejects the id ("Node ID must be in the format") — or hits a Figma MCP tool call or rate
+limit ("reached the Figma MCP tool call limit", HTTP 429). That limit is per seat: after it, make
+no further call to any Figma MCP tool in this read, for any node, and take rung 3 for what is
+still missing. Do not narrate the MCP error — quote it in
 `needs_clarification` only if REST also fails.
 
 **4. Nothing reachable.** `figma-rest.sh` exit 3 (no token / malformed token) → your
@@ -148,6 +151,12 @@ Read the node and return only what's needed to build it — **not** the raw node
   Padding of EVERY interactive descendant — each button, link, input, close icon — not only the frame's.
 - **Tokens:** colors, typography (size / line-height / letter-spacing / weight / family),
   radii, shadows — prefer named tokens/variables when Figma exposes them.
+  Variable names come only from this node's own read: rung 1-2 `get_variable_defs` (if it
+  answered) or the REST variables file. When the variables row is `unavailable` (403, plan limit)
+  and no MCP answered, the names are unavailable: never fetch another node, a page or the whole
+  file, and never call `get_variable_defs` on another node, to find them. Keep the
+  `$var:<short id> (<value>)` labels and write one fixed spec line:
+  `tokens: raw values — variable names unavailable (Variables REST API 403: plan limit)`.
 - **Structure:** the component/element hierarchy and how pieces nest, in build order.
 - **Assets:** images/icons that need exporting, and any text content shown.
 - **States/variants** if the node defines them. A screen shows ONE state: list the states this

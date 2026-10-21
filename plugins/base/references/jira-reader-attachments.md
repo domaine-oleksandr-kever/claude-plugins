@@ -33,9 +33,11 @@ no-workspace dir is named in `attachments_note` (`agents/jira-reader.md` → Fet
    `view <name>: <in> · <long edge> px — fits, no copy`).
    A video's reply lists `<name>.frames/001.jpg …` with their timestamps. That row's `view` is the
    path on the image's `Read` line, or `"<frames dir>:<n>"` for a video (the dir of the frame
-   paths, and their count). A one-line refusal instead — `media: no backend (install ffmpeg)`,
-   `view: not confirmed — …`, a denied path — leaves `view` empty and goes into
-   `attachments_note` verbatim, once per distinct line. Never `Read` an output yourself: the
+   paths, and their count). A refusal instead — `media: no backend (install ffmpeg)`,
+   `view: not confirmed — …`, a denied path — leaves `view` empty and its first line goes into
+   `attachments_note` verbatim, once per distinct line. Its `view could not resize <path> — Read
+   <path> to see it as is` line is never a row's `view` and never goes into the note (it names the
+   raw download). Never `Read` an output yourself: the
    `Read` line is for whoever needs to see the image later; you record its path as the `view`.
    A `text` row needs no resize: its `view` is its own `path`.
 3. **Read a text attachment like a ticket field.** `Read` each `text` row's file — it is

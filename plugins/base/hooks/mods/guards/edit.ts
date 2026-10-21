@@ -1,9 +1,10 @@
 // The edit-delegation guard: in the main loop (no agentId), a Write / Edit / NotebookEdit of a file under the session
-// root but outside `<root>/.claude/` is refused with a pointer to Agent(model: X) while the rules marker names X, and so
-// is a read of a drafter's draft (`.claude/tasks/<id>/steps-to-test.md`, `pr-body.md`: Read, Grep, slim view, or a Bash
-// command naming one outside drafter-check / gh --body-file / test / ls); a main-loop Bash command that
-// recognisably writes such a file is counted, never refused. Escapes: the session already on X or cheaper,
-// `/base-edit-direct` for this session id, BASE_GUARD=0. No marker or no `edit.model` = no guard, no count.
+// root but outside `<root>/.claude/` is refused with a pointer to Agent(model: X) while the rules marker names X; a
+// main-loop Bash command that recognisably writes such a file is counted, never refused. Escapes: the session already on
+// X or cheaper, `/base-edit-direct` for this session id, BASE_GUARD=0. No marker or no `edit.model` = no edit guard, no
+// count. Apart from that, whenever base runs: a main-loop read of a drafter's draft (`.claude/tasks/<id>/steps-to-test.md`,
+// `pr-body.md`, `jira-comment.md`: Read, Grep, slim view, or a Bash command naming one outside drafter-check /
+// gh --body-file / test / ls) is refused on any model; only BASE_GUARD=0 lifts it.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent, BaseEventKind, BaseMainEdits } from '../../../types'
@@ -25,12 +26,15 @@ const MODELS = ['opus', 'sonnet', 'haiku']
 export const SHELL_WRITE = /\bsed\b[^|;&\n]*\s-[a-zA-Z]*i|\bperl\s+-[a-zA-Z]*i|(?<![=-])>>?\s*[^\s&|>=]|\btee\s|\bgit\s+apply\b|\bpatch\s/
 const SHELL_SKIP = /\.claude\/|\/dev\/|\/tmp\/|\$TMPDIR/
 /** A drafter's draft in a task workspace: the main session shows its path and never reads it. */
-export const DRAFT = /\/\.claude\/tasks\/[^/]+\/(steps-to-test|pr-body)\.md$/
-const DRAFT_NAME = /(steps-to-test|pr-body)\.md/
+export const DRAFT = /\/\.claude\/tasks\/[^/]+\/(steps-to-test|pr-body|jira-comment)\.md$/
+const DRAFT_NAME = /(steps-to-test|pr-body|jira-comment)\.md/
 // a draft named in a shell command: a workspace path, or a variable's (`$W/pr-body.md`)
-const DRAFT_ARG = /(?:\.claude\/tasks\/[^\s'"/]+|\$\{?\w+\}?)\/(?:steps-to-test|pr-body)\.md\b/
+const DRAFT_ARG = /(?:\.claude\/tasks\/[^\s'"/]+|\$\{?\w+\}?)\/(?:steps-to-test|pr-body|jira-comment)\.md\b/
 // the sanctioned consumers of a draft path: the checker, gh's --body-file, an existence test, a listing
 const DRAFT_OK = /drafter-check\.cjs\b|\bgh\s+pr\s+(?:create|edit)\b[^\n]*--body-file|^\s*(?:test|\[)\s+-[sef]\s|^\s*ls\b/
+const CHECKER = /drafter-check\.cjs\b/
+// a heredoc start (`<<EOF`, `<<-'EOF'`), not a here-string (`<<<`)
+const HEREDOC = /(?<!<)<<-?\s*(['"]?)(\w+)\1/
 const VIEW_TOOL = 'mcp__slim__view'
 const FILES_CAP = 50
 
@@ -40,10 +44,10 @@ export const editRefusal = (model: string) =>
   `on ${model} or a cheaper family (haiku < sonnet < opus < fable) — say which model you run on and call again after ` +
   `the developer runs /base-edit-direct — or for files under .claude/. BASE_EDIT_MODEL=0 turns delegation off.`
 
-export const draftRefusal = (rel: string, model: string) =>
+export const draftRefusal = (rel: string) =>
   `base drafter rule: ${rel} is a drafter agent's draft — never read, quote or paraphrase it. Show its path; a change ` +
-  `goes to the same agent via SendMessage, and jira-writer / gh pr create --body-file take the path. Allowed directly ` +
-  `only when this session already runs on ${model} or a cheaper family, or after the developer runs /base-edit-direct.`
+  `goes to the same agent via SendMessage, and jira-writer / gh pr create --body-file take the path. Refused on ` +
+  `any model and after /base-edit-direct too; only BASE_GUARD=0 lifts it.`
 
 const mainEdits = atom({ plugin: 'base', key: 'mainEdits' } as const, null as BaseMainEdits | null)
 const delegation = atom({ plugin: 'base', key: 'delegation' } as const, null as { sid: string; model: string | null } | null)
@@ -118,7 +122,28 @@ async function modelFor($: $, sid: string): Promise<string | null> {
 
 /** True when a shell command reads a draft: some segment names one and is not a sanctioned consumer. */
 export function shellReadsDraft(command: string): boolean {
-  return command.split(/&&|\|\||[;|\n]/).some(seg => DRAFT_ARG.test(seg) && !DRAFT_OK.test(seg))
+  return withoutHeredocs(command).split(/&&|\|\||[;\n]/).some(cmd => {
+    const stages = cmd.split('|')
+    // a pipeline into the checker: it prints counts only (a drafter's receipt piped in)
+    if (CHECKER.test(stages[stages.length - 1])) return false
+    return stages.some(seg => DRAFT_ARG.test(seg) && !DRAFT_OK.test(seg))
+  })
+}
+
+/** The command without its heredoc bodies: they are stdin data, not commands. */
+function withoutHeredocs(command: string): string {
+  const out: string[] = []
+  let end: string | null = null
+  for (const line of command.split('\n')) {
+    if (end !== null) {
+      if (line.trim() === end) end = null
+      continue
+    }
+    out.push(line)
+    const m = HEREDOC.exec(line)
+    if (m) end = m[2]
+  }
+  return out.join('\n')
 }
 
 /** The session's own escapes: /base-edit-direct, BASE_GUARD=0, a model at or below the delegate's. */
@@ -130,15 +155,13 @@ async function escaped($: $, cur: BaseMainEdits, model: string): Promise<boolean
 
 const rel = (path: string, root: string) => (path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path)
 
-/** The draft deny for a main-loop read; `shown` is the path or command the refusal names. */
+/** The draft deny for a main-loop read, on any model and with or without a rules marker; `shown` names the path or command. */
 async function draftDeny($: $, tool: string, shown: string): Promise<{ deny: string } | null> {
+  if ((await $.env.get('BASE_GUARD')) === '0') return null
   const sid = String(await $.session.id())
-  const model = await modelFor($, sid)
-  if (!model) return null
-  if (await escaped($, mine(await read($, mainEdits), sid), model)) return null
   await update($, mainEdits, v => ({ ...mine(v, sid), refused: mine(v, sid).refused + 1 }))
   await logEvent($, 'guard', `${tool}: main session — ${shown} is a drafter's draft`)
-  return { deny: draftRefusal(shown, model) }
+  return { deny: draftRefusal(shown) }
 }
 
 

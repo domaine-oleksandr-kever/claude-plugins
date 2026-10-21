@@ -101,7 +101,7 @@ signature). `--location-trusted`, which would not drop them, is never passed.
 | — | 256 KB | the cap for **text** (`text/*`, `application/json`, `application/javascript`, a `.liquid` name under `application/octet-stream` or no mime); over it the row is `skipped_size` |
 | `--max-video-mb <N>` | `200` | the same cap for **videos**, whose recordings run to tens of MB |
 | `--force` | off | re-download even when the file is already there at the metadata size |
-| `--env <dotenv>` | `./.env` | where `JIRA_EMAIL` / `JIRA_API_TOKEN` / `JIRA_SITE` are read from |
+| `--env <dotenv>` | `./.env` if present, else `<repo>/.env` (git toplevel) | where `JIRA_EMAIL` / `JIRA_API_TOKEN` / `JIRA_SITE` are read from |
 | `--site <host>` / `--cloud-id <uuid>` | `$JIRA_SITE`, else `meetdomaine.atlassian.net` | the host the cloudId is looked up on / the cloud **UUID** itself, which skips that lookup — a site host passed to `--cloud-id` is `error=invalid_cloud_id` |
 | `--json` | TSV | the same rows as a JSON array — what the reader consumes |
 | `--check` | — | probe the credentials only |

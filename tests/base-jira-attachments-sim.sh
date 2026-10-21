@@ -230,6 +230,25 @@ for v in quoted bare crlf export comment; do
   else bad "J2-dotenv-$v" "rc=$rc cfg=$(head -c 200 "$CFGSAVE" 2>/dev/null | od -c | head -2 | tr '\n' ' ')"; fi
 done
 
+# the --env default is the repo toplevel's .env: a run from a task workspace subdirectory still
+# finds the credentials
+DJS="$(new_repo env-subdir '.claude/')"; mkdir -p "$DJS/.claude/tasks/ABC-101"
+printf 'JIRA_EMAIL=%s\nJIRA_API_TOKEN=%s\n' "$EMAIL" "$TOKEN" > "$DJS/.env"
+CFGSAVE="$TMP/cfg2-subdir"; : > "$CFGSAVE"
+rc=0; CURL_CFG_SAVE="$CFGSAVE" JA_EMAIL="" JA_TOKEN="" \
+  ja "$DJS/.claude/tasks/ABC-101" ABC-101 --out "$DJS/.claude/tasks/ABC-101/tmp/attachments" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx "user = \"$EMAIL:$TOKEN\"" "$CFGSAVE"; then ok
+else bad J-env-subdir "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+# a subdirectory with its own .env and none at the toplevel (a theme in a monorepo): the cwd's .env
+DJT="$(new_repo env-own-subdir '.claude/')"; mkdir -p "$DJT/theme"
+printf 'JIRA_EMAIL=%s\nJIRA_API_TOKEN=%s\n' "$EMAIL" "$TOKEN" > "$DJT/theme/.env"
+CFGSAVE="$TMP/cfg2-own-subdir"; : > "$CFGSAVE"
+rc=0; CURL_CFG_SAVE="$CFGSAVE" JA_EMAIL="" JA_TOKEN="" \
+  ja "$DJT/theme" ABC-101 --out "$DJT/theme/.claude/tasks/ABC-101/tmp/attachments" --cloud-id "$CLOUD" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx "user = \"$EMAIL:$TOKEN\"" "$CFGSAVE"; then ok
+else bad J-env-own-subdir "rc=$rc err=$(head -c 200 "$E" | tr '\n' ' ')"; fi
+rm -f "$DJS/.env"
+
 # The config file is a PRECONDITION, not a detail. A temp dir that refuses the 0600 stamp or the
 # write — a TMPDIR on a filesystem with no mode bits, a read-only mount — must take the run down
 # with a named refusal, never fall back to putting the credential on curl's argv to get through.

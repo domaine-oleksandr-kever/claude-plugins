@@ -119,6 +119,15 @@ git_common_dir() { # $1 = a dir → its repo's physical common dir on stdout, no
   printf '%s' "$res"
 }
 
+# the --env default: the cwd's .env when there is one (a theme in a repo subdirectory), else the repo
+# toplevel's (a worktree is its own toplevel; a task workspace subdir has none), else ./.env
+default_env_file() {
+  local top
+  [ -f .env ] && { printf '.env'; return; }
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -n "$top" ] && { printf '%s/.env' "$top"; return; }
+  printf '.env'
+}
+
 # the one-liner task-workspace.md prescribes, with the newline care worktree-setup.sh pays: an
 # exclude file whose last byte is not a newline is legal, and appending blind would glue the
 # pattern onto the developer's last rule — breaking theirs and never adding ours.

@@ -21,6 +21,8 @@
 #  k2. that guard holds both write lists (JIRA_WRITES, NOTION_WRITES), which rule k reads from it;
 #   j. each reader (jira-, doc-, figma-reader) names the files a real slim handle points at, the
 #      list base's shared untrusted-content section leaves out;
+#   m. figma-reader stops calling the Figma MCP after its per-seat tool call limit and writes the
+#      fixed `variable names unavailable` tokens line instead of hunting names off the node;
 #   t. the team plugins base's shared text names (every plugins/<p> whose manifest `dependencies` is
 #      exactly ["base"]): every <p root>/… path exists in plugins/<p>, every /<p>:<x> names a skill
 #      of p, every <p>:<x> in a markdown file an agent or skill of p; a /<x>:<y> or <x root>/… whose
@@ -264,6 +266,10 @@ for (const a of ['jira-reader', 'doc-reader', 'figma-reader']) {
     if (!body.includes(n)) bad('j', `agents/${a}.md`, `${a} ${n}`);
   }
 }
+if (agents.has('figma-reader')) {
+  const body = text(path.join(dir, 'agents', 'figma-reader.md'));
+  for (const n of ['tool call limit', 'variable names unavailable']) if (!body.includes(n)) bad('m', 'agents/figma-reader.md', n);
+}
 process.stdout.write(out.join('\n') + (out.length ? '\n' : ''));
 JS
 
@@ -364,6 +370,7 @@ dont k "doc-reader mcp__plugin_base_playwright";  dont k "doc-reader Skill"
 want k "jira-reader Skill";              want k "jira-reader WebFetch";  dont k "figma-reader WebFetch"
 dont k2 JIRA_WRITES;                     dont k2 NOTION_WRITES
 want j "jira-reader slim-mcp-*";     dont j "jira-writer slim-mcp-*"
+want m "tool call limit";               want m "variable names unavailable"
 want t /kit:no-such-skill;               dont t /kit:ship
 want t kit:no-agent;                     dont t kit:scout;        dont t kit:ship
 want t "<kit root>/references/no-such.md"; dont t "<kit root>/references/present.md"
@@ -393,7 +400,7 @@ done | tr '\n' ' ')"
 if [ -n "$TEAM_DIRS" ]; then ok; else bad team-set "no team plugin on base found under plugins/"; fi
 if [ -d "$BASE" ]; then
   run_lint "$BASE" "$TEAM_DIRS" > "$TMP/base.out"
-  for r in a b c d e f g h i k k2 t; do
+  for r in a b c d e f g h i k k2 m t; do
     hits="$(awk -F'\t' -v r="$r" '$1 == r { printf "%s %s; ", $2, $3 }' "$TMP/base.out")"
     if [ -z "$hits" ]; then ok; else bad "base-$r" "$(printf '%s' "$hits" | head -c 600)"; fi
   done
@@ -407,6 +414,10 @@ else bad base-edit-delegation-pre-commit-review "pre-commit-review §4 Apply doe
 # task-workspace.md's Read rule carries the drafter exception (a resumed session never reads a draft)
 if grep -qF 'drafter agent wrote' "$BASE/references/task-workspace.md"; then ok
 else bad base-task-workspace-drafts "references/task-workspace.md has no drafter exception in its Read rule"; fi
+
+# slim view's 'Read <path> to see it as is' line after a refusal names the raw download: never a row's view
+if grep -qF 'line is never a row' "$BASE/references/jira-reader-attachments.md"; then ok
+else bad base-jira-reader-view-refusal "references/jira-reader-attachments.md step 2 lets a view refusal's Read-as-is line become a row's view"; fi
 
 echo "base-refs-lint: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

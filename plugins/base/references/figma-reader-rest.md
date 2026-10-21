@@ -28,7 +28,12 @@ anywhere.
    slim's figma-nodes engine turns the node tree into a markdown build tree and picks up
    `<key>.variables.json` beside it on its own, so bound variables read by name; when that row
    came back `unavailable` (the plan has no Variables API), `failed` or `skipped`, the tree
-   carries raw values and says so in its header. The reply opens with
+   carries raw values and says so in its header. Variable names come only from this node's own read:
+   with the variables row `unavailable` (403, plan limit) and no MCP answer, never fetch another
+   node, a page or the whole file, and never call `get_variable_defs` on another node, to find
+   them — keep the `$var:<short id> (<value>)` labels and write the spec line
+   `tokens: raw values — variable names unavailable (Variables REST API 403: plan limit)`.
+   The reply opens with
    `figma-nodes: <in> B → <out> B (-NN.N%) nodes=N hidden=N folded=N` (or `cached` on a re-read),
    then `out: <path> (<n> lines)`. A refusal is one line naming why — quote it in
    `needs_clarification`.

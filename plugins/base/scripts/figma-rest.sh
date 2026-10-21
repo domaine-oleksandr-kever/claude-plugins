@@ -11,7 +11,7 @@
 # is what the reader actually reads.
 #
 # CREDENTIALS — a per-developer Figma PERSONAL ACCESS TOKEN, read-only scopes:
-#   FIGMA_TOKEN, process env first, else the --env dotenv (default ./.env, gitignored). Same
+#   FIGMA_TOKEN, process env first, else the --env dotenv (default ./.env if present, else <git toplevel>/.env, gitignored). Same
 #   discipline as jira-attachments.sh: the value is NEVER printed and NEVER on the argv — it
 #   rides a private 0600 curl config (`header = "X-Figma-Token: <token>"`) removed on exit — and
 #   a value carrying whitespace, a quote or a control character is refused before curl runs
@@ -54,7 +54,7 @@
 #   <figma-url>     a figma.com /design/, /file/, /proto/ or /board/ URL WITH a node-id
 #   --file/--node   the explicit form (`--node 123:456`); a URL and these together is a usage error
 #   --out           where the payloads land (default .claude/tasks/_figma/tmp)
-#   --env           dotenv holding FIGMA_TOKEN (default ./.env)
+#   --env           dotenv holding FIGMA_TOKEN (default ./.env if present, else <git toplevel>/.env)
 #   --scale         PNG render scale, 0 < N <= 4 (default 2)
 #   --no-variables  skip /variables/local
 #   --no-image      skip the PNG render
@@ -125,7 +125,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SCRIPT_DIR/_common.sh"
 REFERENCE="$(dirname "$SCRIPT_DIR")/references/figma-rest.md"
 
-URL=""; FILE_KEY=""; NODE_ID=""; OUT_DIR=""; ENV_FILE=".env"; SCALE=2
+URL=""; FILE_KEY=""; NODE_ID=""; OUT_DIR=""; ENV_FILE=""; SCALE=2
 DO_VARS=1; DO_IMAGE=1; FORCE=0; JSON=0; CHECK=0; POLICY=0; PROBE=0
 EXPLICIT=0   # --file/--node were used: a URL as well is two answers to one question
 
@@ -150,6 +150,8 @@ while [ $# -gt 0 ]; do
     *) [ -z "$URL" ] || { echo "error=unexpected_arg arg=$1" >&2; exit 2; }; URL="$1"; shift ;;
   esac
 done
+
+[ -n "$ENV_FILE" ] || ENV_FILE="$(default_env_file)"
 
 # --- the mode gate: one question per run, and two of them take no target -------------------------
 # Before the credential, before the target is parsed and long before anything is fetched. A mode

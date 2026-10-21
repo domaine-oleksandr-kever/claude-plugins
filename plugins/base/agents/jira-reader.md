@@ -232,7 +232,7 @@ comments:                   # list — one line each, oldest first: "#<n> <autho
 comment_links:              # list — every URL found in the comments (never merged into the three lists above; minus the screenshot links, which are `attachments` rows now)
 newer_figma_links_in_comments: # list — the comments' Figma URLs whose node is none of `figma_urls`' nodes, oldest first, each with its "#<n>"; [] when none
 attachments:                # list — id · filename · kind · mime · size · created · author · path ("" if not on disk) · view ("" or the resized copy's path, "<frames dir>:<n>" for a video, the path itself for text); a linked screenshot's id is `ext` and its line ends with `source: <host> · comment #<n> | description · <url>`
-attachments_note:           # "" when every wanted file is in the workspace and resized; else one line for the developer (the no-workspace dir / the token hint / a view refusal / a linked screenshot's note= line / a Slack-only screenshot)
+attachments_note:           # "" when every wanted file is in the workspace and resized; else one line for the developer (the no-workspace dir / the token hint / a view refusal's first line / a linked screenshot's note= line / a Slack-only screenshot)
 field_id_mismatch:          # "" normally; "customfield_10040 → customfield_10041" when Step B resolved a different ID
 needs_clarification:        # "" if none; else a one-line question for the developer
 saved_to:                   # workspace file path, or "" if not saved

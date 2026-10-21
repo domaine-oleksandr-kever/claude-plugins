@@ -66,7 +66,7 @@ FIGMA_TOKEN=<the token>
 ```
 
 Process environment wins over the file, so `FIGMA_TOKEN=… figma-rest.sh …` overrides it for one
-run, and `--env <dotenv>` names a different file (default `./.env`).
+run, and `--env <dotenv>` names a different file (default `./.env` when the cwd has one, else `<repo>/.env` at the git toplevel).
 
 **Nobody reads that file but the script.** Skills and agents call the script; they never `Read`
 `.env`, and the script never prints or echoes the value — it hands it to curl through a private
@@ -99,7 +99,7 @@ script does not.
 | `<figma-url>` | — | the design link; the file key is the segment after `/design/`, `/file/`, `/proto/` or `/board/`, the node id is the `node-id` query param with `-` read back as `:` (`node-id=123-456` ⇒ `123:456`). A URL with no `node-id` is `error=missing_node_id`: whole-file reads are out of scope |
 | `--file <key> --node <id>` | — | the explicit form, for a key/node already in hand. Passing it **together with** a URL is a usage error |
 | `--out <dir>` | `.claude/tasks/_figma/tmp` | where the payloads land; must be a path git ignores (below). The reader passes `<workspace>/tmp/figma` |
-| `--env <dotenv>` | `./.env` | where `FIGMA_TOKEN` is read from when the process env does not carry it |
+| `--env <dotenv>` | `./.env` if present, else `<repo>/.env` (git toplevel) | where `FIGMA_TOKEN` is read from when the process env does not carry it |
 | `--scale <N>` | `2` | the PNG render scale, `0 < N <= 4`; anything else is `error=invalid_scale` |
 | `--no-variables` | off | skip `/variables/local` — that row comes back `skipped` |
 | `--no-image` | off | skip the render — that row comes back `skipped` |
@@ -313,7 +313,8 @@ Exit **1** is not one of those. It means the node tree landed and an *optional* 
 there is no `error=` line to quote — only `note=variables_failed` / `note=image_failed` — so the
 reader proceeds from the tree it has, with `source: rest`, and notes the gap. The two partial
 degradations that exit 0 never reach `needs_clarification` either: a 403 on variables (no Variables
-API on this plan) is a tokens-line difference in the tree, and a `null` image URL costs the visual
+API on this plan) is a tokens-line difference in the tree — the spec carries it as the one line
+`tokens: raw values — variable names unavailable (Variables REST API 403: plan limit)` — and a `null` image URL costs the visual
 cross-check, which the spec notes rather than fails on.
 
 Under `policy=mcp` the script is never run at all, so there is no line to quote: with neither Figma

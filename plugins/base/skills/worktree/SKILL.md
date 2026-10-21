@@ -36,7 +36,7 @@ from the main checkout into the worktree, once (a copy, never a link; a re-entry
 own):
 
 - **`.env`, always** — base's fetchers (`jira-attachments.sh`, `figma-rest.sh`) read their
-  credentials from the project's `./.env`.
+  credentials from the project's `.env` at the git toplevel.
 - **`shopify.theme.toml`, with or without a `--copy`** — the script copies it itself when the main checkout has
   one git does not track (a tracked one is in the checkout already).
 - **The team plugin's list** — a team plugin whose work needs more names it in its system-prompt

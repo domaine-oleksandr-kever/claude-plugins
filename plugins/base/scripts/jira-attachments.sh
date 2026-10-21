@@ -6,7 +6,7 @@
 # the model. This fetches them with curl and leaves them on disk for slim's `view` tool to resize.
 #
 # CREDENTIALS — a per-developer, READ-ONLY SCOPED API token, never a classic one:
-#   JIRA_EMAIL + JIRA_API_TOKEN, process env first, else the --env dotenv (default ./.env,
+#   JIRA_EMAIL + JIRA_API_TOKEN, process env first, else the --env dotenv (default ./.env if present, else <git toplevel>/.env,
 #   gitignored). Same discipline as shopify-admin-gql.sh's token engine: the value is NEVER
 #   printed and NEVER on the argv — it rides a private 0600 curl config file (`user =
 #   "<email>:<token>"`) removed on exit — and a value carrying whitespace, a quote or a control
@@ -51,7 +51,7 @@
 #   --max-mb        per-file size cap for everything but videos and text (default 25)
 #   --max-video-mb  per-video size cap (default 200)
 #   --force         re-download even when the file is already on disk at the metadata size
-#   --env           dotenv holding JIRA_EMAIL / JIRA_API_TOKEN (default ./.env)
+#   --env           dotenv holding JIRA_EMAIL / JIRA_API_TOKEN (default ./.env if present, else <git toplevel>/.env)
 #   --site          site host for the cloudId lookup (default $JIRA_SITE, else meetdomaine.atlassian.net)
 #   --cloud-id      <uuid>, skips the lookup
 #   --check         probe the credentials only: `ok=1 jira_user=… cloud_id=…`
@@ -105,7 +105,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 REFERENCE="$(dirname "$SCRIPT_DIR")/references/jira-attachments.md"
 
 KEY=""; OUT_DIR=""; IDS=""; ALL=0; MAX_MB=25; MAX_VIDEO_MB=200; FORCE=0
-ENV_FILE=".env"; SITE=""; CLOUD_ID=""; CHECK=0; JSON=0
+ENV_FILE=""; SITE=""; CLOUD_ID=""; CHECK=0; JSON=0
 TEXT_MAX_BYTES=262144
 US="$(printf '\037')"   # the row separator between the metadata fields (see the jq call below)
 
@@ -129,6 +129,8 @@ while [ $# -gt 0 ]; do
     *) [ -z "$KEY" ] || { echo "error=unexpected_arg arg=$1" >&2; exit 2; }; KEY="$1"; shift ;;
   esac
 done
+
+[ -n "$ENV_FILE" ] || ENV_FILE="$(default_env_file)"
 
 case "$MAX_MB" in ''|*[!0-9]*) echo "error=invalid_max_mb value=$MAX_MB" >&2; exit 2 ;; esac
 case "$MAX_VIDEO_MB" in ''|*[!0-9]*) echo "error=invalid_max_video_mb value=$MAX_VIDEO_MB" >&2; exit 2 ;; esac

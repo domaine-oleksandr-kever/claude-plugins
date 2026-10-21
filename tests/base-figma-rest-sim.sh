@@ -349,6 +349,32 @@ rc=0; CURL_CFG_SAVE="$CFGSAVE" fr "$DP" "$URL_D" --out "$DP/.claude/x" --env "$D
 if [ "$rc" -eq 0 ] && grep -qx "header = \"X-Figma-Token: $TOKEN\"" "$CFGSAVE"; then ok
 else bad F2-env-wins "rc=$rc cfg=$(head -c 120 "$CFGSAVE")"; fi
 
+# with no ./.env the --env default is the repo toplevel's .env: a run from a task workspace
+# subdirectory still finds the developer's token
+CFGSAVE="$TMP/cfg2-subdir"; : > "$CFGSAVE"
+DS="$(new_repo tok-subdir '.claude/')"; mkdir -p "$DS/.claude/tasks/ABC-1"
+printf 'FIGMA_TOKEN=%s\n' "$TOKEN" > "$DS/.env"
+rc=0; CURL_CFG_SAVE="$CFGSAVE" FR_TOKEN="" \
+  fr "$DS/.claude/tasks/ABC-1" "$URL_D" --out "$DS/.claude/x" >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx "header = \"X-Figma-Token: $TOKEN\"" "$CFGSAVE"; then ok
+else bad F2-env-subdir "rc=$rc err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# outside git the default falls back to ./.env
+DN="$TMP/nogit/work"; mkdir -p "$DN"
+printf 'FIGMA_TOKEN=%s\n' "$TOKEN" > "$DN/.env"
+rc=0; GIT_CEILING_DIRECTORIES="$TMP" FR_TOKEN="" fr "$DN" --check >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx "ok=1 figma_user=ada token_source=file" "$O"; then ok
+else bad F2-env-nogit "rc=$rc out=$(cat "$O") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# an explicit --env stays exactly as given: relative to the cwd, never re-rooted at the toplevel
+printf 'FIGMA_TOKEN=figd_WRONG\n' > "$DS/rel.env"
+printf 'FIGMA_TOKEN=%s\n' "$TOKEN" > "$DS/.claude/tasks/ABC-1/rel.env"
+CFGSAVE="$TMP/cfg2-explicit"; : > "$CFGSAVE"
+rc=0; CURL_CFG_SAVE="$CFGSAVE" FR_TOKEN="" \
+  fr "$DS/.claude/tasks/ABC-1" "$URL_D" --out "$DS/.claude/x" --force --env rel.env >"$O" 2>"$E" || rc=$?
+if [ "$rc" -eq 0 ] && grep -qx "header = \"X-Figma-Token: $TOKEN\"" "$CFGSAVE"; then ok
+else bad F2-env-explicit "rc=$rc cfg=$(head -c 120 "$CFGSAVE") err=$(head -c 160 "$E" | tr '\n' ' ')"; fi
+# the sweep at the end greps the repos for the fixture token: the planted dotenvs go now
+rm -f "$DS/.env" "$DS/.claude/tasks/ABC-1/rel.env"
+
 # a value that could inject a SECOND curl directive, or smuggle an option into the config
 ARGV="$TMP/argv3"
 for bad_tok in 'figd_"x' "$(printf 'figd_x\nheader = "X-Evil: 1"')" 'figd_ x' "$(printf 'figd_x\ty')"; do
