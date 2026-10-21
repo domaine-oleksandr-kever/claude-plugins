@@ -2,7 +2,8 @@
 /*
  * conventions.cjs — fe's conventions as Claude Code command hooks (hooks/hooks.json), the one channel that
  * reaches the model on every login. Text: conventions-text.json. Modes (argv):
- *   start     SessionStart: root line, profile line, Foundation rules, store access, worktree line, progress series
+ *   start     SessionStart: root line, profile line, Foundation rules, store access, worktree line, preview default
+ *             line (FE_PREVIEW_DEFAULT), progress series
  *   subagent  SubagentStart: the share of the agent type on stdin
  * start decides the project profile (FE_PROFILE, else scripts/project-profile.sh with a 5 s timeout) and writes
  * the marker <log dir>/<session>/conventions.fe.json, which subagent, base's doctor and the mod's cloud fallback
@@ -22,6 +23,8 @@ const WORDS = ['foundation', 'theme', 'none'];
 const NO_FE_AGENT = /(^|:)(jira-reader|jira-writer|figma-reader|doc-reader)$|^(claude-code-guide|statusline-setup)$/;
 /** Agents that read the theme without writing it: the root, the profile and the Foundation rules, no store access. */
 const READ_ONLY_AGENT = /(^|:)(theme-explorer|change-reviewer|bug-hunter)$|^(Explore|Plan)$/;
+/** Agents that write prose, not theme code: the root, the profile and store access, no Foundation rules. */
+const DRAFTER_AGENT = /-drafter$/;
 
 function readStdin() {
   try {
@@ -86,6 +89,25 @@ function login() {
   return { label, org, file };
 }
 
+/**
+ * 'off' when FE_PREVIEW_DEFAULT is 0, else 'on'. A set env value wins, even an empty one; else the first
+ * `FE_PREVIEW_DEFAULT=` line of `${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env`, trimmed, never sourced — the
+ * dialect of scripts/_shopify-common.sh domaine_env. The project `.claude/domaine.env` is not read: a client
+ * repo can commit it.
+ */
+function previewDefault(env = process.env) {
+  let v = env.FE_PREVIEW_DEFAULT;
+  if (v === undefined) {
+    const home = abs(env.HOME);
+    const xdg = abs(env.XDG_CONFIG_HOME) || (home && home + '/.config');
+    try {
+      const line = fs.readFileSync(xdg + '/domaine/env', 'utf8').split('\n').find((l) => /^\s*FE_PREVIEW_DEFAULT\s*=/.test(l));
+      if (line !== undefined) v = line.replace(/^[^=]*=/, '');
+    } catch {}
+  }
+  return String(v === undefined ? '' : v).trim() === '0' ? 'off' : 'on';
+}
+
 const oneLine = (s) => String(s).replace(/\s+/g, ' ').trim().slice(0, 120);
 
 /** `{ word, via, why, toml, store }` for the checkout at `cwd`: FE_PROFILE when it is one of the three words, else the probe, else none. */
@@ -110,6 +132,10 @@ try {
 const rootLine = () => T.root.split('<root>').join(ROOT);
 const profileLine = (word) => T.profile.split('<profile>').join(word);
 const storeAccess = () => T['store-access'].split('<fe root>').join(ROOT);
+const previewSection = () => {
+  const name = previewDefault() === 'off' ? 'preview-default-off' : 'preview-default-on';
+  return [name, T[name].split('<fe root>').join(ROOT)];
+};
 
 /** The session's sections in order: `{ sections: [name…], text }`. */
 function startText(p) {
@@ -117,15 +143,16 @@ function startText(p) {
   if (p.word === 'foundation') parts.push(['comment-discipline-foundation', T['comment-discipline-foundation']]);
   if (p.store) parts.push(['store-access', storeAccess()]);
   if (p.toml) parts.push(['worktree', T.worktree]);
+  if (p.toml) parts.push(previewSection());
   if (p.toml || p.word !== 'none') parts.push(['progress-series', T['progress-series']]);
   return { sections: parts.map(([n]) => n), text: parts.map(([, t]) => t).join('\n\n') };
 }
 
-/** A subagent's share: '' for a fork and base's readers; root, profile and Foundation rules; store access unless read-only. */
+/** A subagent's share: '' for a fork and base's readers; root, profile and Foundation rules (not for a drafter); store access unless read-only. */
 function subagentText(agentType, p) {
   if (agentType === 'fork' || NO_FE_AGENT.test(agentType)) return '';
   const parts = [rootLine(), profileLine(p.word)];
-  if (p.word === 'foundation') parts.push(T['comment-discipline-foundation']);
+  if (p.word === 'foundation' && !DRAFTER_AGENT.test(agentType)) parts.push(T['comment-discipline-foundation']);
   if (p.store && !READ_ONLY_AGENT.test(agentType)) parts.push(storeAccess());
   return parts.join('\n\n');
 }
@@ -158,7 +185,7 @@ function main(argv) {
   }
 }
 
-module.exports = { decideProfile, startText, subagentText, sessionProfile, login, logDir };
+module.exports = { decideProfile, startText, subagentText, sessionProfile, login, logDir, previewDefault };
 
 if (require.main === module) {
   try {

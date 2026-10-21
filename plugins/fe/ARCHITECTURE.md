@@ -16,8 +16,12 @@ plugins/fe/
 ├── skills/<name>/SKILL.md       the 12 Shopify theme skills (`/fe:<name>`); fix-breaking-changes
 │                                carries its script template, create-pull-request its REFERENCE.md
 ├── agents/theme-explorer.md     the read-only theme scout (`fe:theme-explorer`)
-├── references/*.md              what fe's skills and agent read on demand (`<fe root>/references/…`)
-└── scripts/                     the store scripts, project-profile.sh, worktree-theme.sh, doctor.cjs
+├── agents/stt-drafter.md        drafts Steps to Test into the workspace (`fe:stt-drafter`, sonnet)
+├── agents/pr-body-drafter.md    drafts the PR title and body into the workspace (`fe:pr-body-drafter`, haiku)
+├── references/*.md              what fe's skills and agents read on demand (`<fe root>/references/…`);
+│                                drafter-loop.md is the one home of the drafter loop
+└── scripts/                     the store scripts, project-profile.sh, worktree-theme.sh, doctor.cjs,
+                                 drafter-check.cjs (a drafter's file and reply, checked in code)
 ```
 
 The skills hand off to base by qualified names only (`/base:commit`, `base:jira-reader`, …) and cite
@@ -44,7 +48,12 @@ The conventions travel as a classic command hook because the hooks module's prom
 (Claude Team) login, while command hooks run on every login. `hooks/conventions.cjs start` (SessionStart,
 matcher `startup|clear|compact`) decides the profile, prints the sections as `additionalContext` and then
 writes `<log dir>/<session-id>/conventions.fe.json` (the profile included); `subagent` (SubagentStart)
-prints the share for the agent type on stdin, the profile from that marker. It always exits 0 and prints
+prints the share for the agent type on stdin, the profile from that marker. On a toml checkout `start` also
+prints the `fe preview default:` line: `previewDefault()` reads `FE_PREVIEW_DEFAULT` from the environment,
+else `~/.config/domaine/env` (never the committable project `.claude/domaine.env`), and `scripts/doctor.cjs`
+asks the same function for its `preview` row. A drafter (`*-drafter`) gets the root, the profile and store
+access, never the Foundation section. The cloud fallback block (`hooks/mods/session.ts`) prints the same
+preview line by the same rule (`previewOff`). It always exits 0 and prints
 nothing on an internal error; the only stderr line is a marker write that failed. It requires nothing
 from base: the helpers (stdin, envelope, log dir, login label) are copies of base's.
 
@@ -98,7 +107,7 @@ never sweeps: base owns the clean-up of old session folders.
 ## 7. The doctor
 
 `scripts/doctor.cjs` answers what a node process can see (node, manifest, scripts and their `--help`,
-base installed, the Shopify CLI, the profile probe, the store files' presence, `fe.jsonl`); `/fe-doctor`
+base installed, the Shopify CLI, the profile probe, the store files' presence, the preview default, `fe.jsonl`); `/fe-doctor`
 adds `base-live` and `slim-live`, puts the session's own profile (the start hook's marker, else the module's) in place of the probe's row, and
 turns a static `base` FAIL into a WARN when the session loaded base anyway (a `--plugin-dir` load has
 no install record). Never a value from `.env` or `shopify.theme.toml`.

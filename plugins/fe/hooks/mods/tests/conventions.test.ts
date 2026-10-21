@@ -49,16 +49,32 @@ describe('the cloud fallback: a prompt.context block', () => {
     put(w, '.env')
     put(w, 'shopify.theme.toml')
     const text = (await block($))!
+    const root = rootOf(text)
     expect(heads(text).slice(1)).toEqual([
       'fe project profile: foundation',
       '## fe convention — LiquidDoc and core',
       '## fe capability — live store access',
       'worktree copy list: shopify.theme.toml',
+      `fe preview default: preview theme (${root}/references/session-theme.md)`,
       '## fe convention — the progress series',
     ])
-    const root = rootOf(text)
     expect(text).toContain(`${root}/scripts/shopify-admin-gql.sh, <base root>/scripts/shopify-validate.cjs`)
     expect(text).not.toContain('never-read')
+  })
+
+  test('FE_PREVIEW_DEFAULT=0, in the env or the global env file: the local dev server line, as the start hook decides', async ($, on) => {
+    const { w } = world(on, { surfaces: [], env: { HOME, FE_PREVIEW_DEFAULT: '0' } })
+    put(w, 'shopify.theme.toml')
+    expect(await block($)).toContain('fe preview default: local dev server (FE_PREVIEW_DEFAULT=0)')
+  })
+
+  test('FE_PREVIEW_DEFAULT=0 from ~/.config/domaine/env', async ($, on) => {
+    const { w } = world(on, { surfaces: [], env: { HOME } })
+    put(w, 'shopify.theme.toml')
+    w.files[`${HOME}/.config/domaine/env`] = { text: 'X=1\nFE_PREVIEW_DEFAULT= 0\n', mtimeMs: 0 }
+    const text = (await block($))!
+    expect(text).toContain('fe preview default: local dev server (FE_PREVIEW_DEFAULT=0)')
+    expect(text).not.toContain('fe preview default: preview theme')
   })
 
   test('profile none: a bare .env says nothing beyond root and profile', async ($, on) => {

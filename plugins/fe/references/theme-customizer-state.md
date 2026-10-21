@@ -130,7 +130,9 @@ against, or a preview/sandbox theme. Then:
    same discipline as metafields.
 5. **Restore** the snapshot (`set --from "$TMP/product.pristine.json"`), `get` once more to
    confirm — the raw pristine restores **byte-exact** (banner included, not duplicated) — and say
-   so in your report. The theme must end exactly as you found it.
+   so in your report. The theme must end exactly as you found it — one exception: on this work stream's
+   own preview theme (`session-theme:` in `notes.md`), a new section `/fe:develop-feature-or-fix` placed
+   for the PR reviewer and logged as `preview-placed:` stays; the AC toggles on it are still restored.
 
 Walk **every** enumerated/optional/conditional state the AC names — one default render proves
 nothing (same rule as data-driven AC in `metafield-metaobject-setup.md`).

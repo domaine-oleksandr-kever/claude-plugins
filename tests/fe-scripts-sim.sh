@@ -5716,5 +5716,235 @@ for c in 'npm run dev -- --theme <id> [--port <N>]' 'shopify theme dev --theme <
   else bad ER2-dev-command-copy "'$c' is not in both session-theme.md and ship's SKILL.md"; fi
 done
 
+# ---------------------------------------- drafter-check.cjs: the drafters' file and receipt --
+# DC*: the check prints counts and ok/fail lines, never the checked text (a sentinel sentence per
+# fixture proves it); the attribution rows mirror base hooks/mods/tests/guards.test.ts.
+DC="$ROOT/plugins/fe/scripts/drafter-check.cjs"
+DCD="$TMP/dc"; mkdir -p "$DCD"
+SENT="KIWI-SENTINEL-SENTENCE"
+dc() { # dc <label> <want-rc> <want-substr|-> <args…> (stdin passes through)
+  local label="$1" want="$2" sub="$3"; shift 3
+  local rc=0; node "$DC" "$@" > "$DCD/out" 2>&1 || rc=$?
+  if [ "$rc" -ne "$want" ]; then bad "$label" "exit $rc, want $want :: $(tr '\n' ';' < "$DCD/out" | head -c 300)"; return; fi
+  if [ "$sub" != "-" ] && ! grep -qF -- "$sub" "$DCD/out"; then bad "$label" "output missing '$sub' :: $(tr '\n' ';' < "$DCD/out" | head -c 300)"; return; fi
+  if grep -qF "$SENT" "$DCD/out"; then bad "$label-sentinel" "the checked text reached the output"; return; fi
+  ok
+}
+cat > "$DCD/stt.md" <<MD
+1. **Theme:** UAT store, theme \`[ELC-1] QA\` (id 123); open its preview. $SENT
+
+2. **Where:** page \`/products/x\` (admin: Online Store > Themes > Customize). The section is **Scent notes**.
+   - **Heading** → \`Notes\`, then **Save**.
+
+3. On \`/products/x\`, scroll to Scent notes. You should see the heading.
+
+4. **Edge cases:**
+   - blank heading → the section hides.
+
+5. **Context / out of scope:**
+   - new setting **Heading**, default empty.
+MD
+dc DC1-stt-good 0 'result=ok' file stt "$DCD/stt.md"
+grep -q '^template=general$' "$DCD/out" && grep -q '^items=5$' "$DCD/out" && ok || bad DC1-stt-counts "$(tr '\n' ';' < "$DCD/out")"
+cat > "$DCD/bug.md" <<MD
+1. **Theme:** UAT store, theme 123. $SENT
+2. **Why the bug happened:** the heading wrapped.
+3. **What was changed to fix it:** the heading keeps one line.
+4. **What to expect:** on the long-name product, e.g. \`/products/x\`.
+   - **Mobile, 375 px:** open it. You should see one line;
+   - **Regression:** the heading wraps again.
+MD
+dc DC2-stt-bug-good 0 'template=bug' file stt "$DCD/bug.md"
+sed 's/^1\. \*\*Theme:\*\*/1. Theme:/' "$DCD/stt.md" > "$DCD/stt-notheme.md"
+dc DC3-stt-no-theme 1 'fail item 1 is not the **Theme:** line' file stt "$DCD/stt-notheme.md"
+grep -v 'Edge cases' "$DCD/stt.md" | sed 's/^5\./4./' > "$DCD/stt-noedge.md"
+dc DC4-stt-missing-item 1 'fail item missing: Edge cases' file stt "$DCD/stt-noedge.md"
+{ printf '## Steps\n'; cat "$DCD/stt.md"; } > "$DCD/stt-head.md"
+dc DC5-stt-heading 1 'fail heading in the field' file stt "$DCD/stt-head.md"
+sed 's/^3\. On/7. On/' "$DCD/stt.md" > "$DCD/stt-gap.md"
+dc DC6-stt-numbering 1 'fail items not numbered through from 1' file stt "$DCD/stt-gap.md"
+: > "$DCD/empty.md"
+dc DC7-stt-empty 1 'fail file empty' file stt "$DCD/empty.md"
+dc DC8-stt-missing-file 1 'fail file missing' file stt "$DCD/nope.md"
+sed '/^5\. \*\*Context/,$d' "$DCD/stt.md" > "$DCD/stt-noctx.md"
+dc DC8b-stt-no-context 0 'result=ok' file stt "$DCD/stt-noctx.md"
+awk '/^4\. \*\*Edge cases/ { e = 1 } e && /^5\. \*\*Context/ { print "4. **Context / out of scope:**"; print "   - new setting **Heading**, default empty."; print ""; print "5. **Edge cases:**"; print "   - blank heading → the section hides."; exit } !e' "$DCD/stt.md" > "$DCD/stt-ctxfirst.md"
+dc DC8c-stt-context-not-last 1 'fail Context / out of scope is not the last item' file stt "$DCD/stt-ctxfirst.md"
+
+cat > "$DCD/pr.md" <<MD
+## Summary
+
+The scent notes heading wrapped on small phones. It now stays on one line. $SENT
+
+**Jira ticket:** [ELC-1](https://example.atlassian.net/browse/ELC-1)
+
+|                |                 |
+| -------------- | --------------- |
+| **Theme ID**   | \`123\`           |
+| **Preview**    | [PDP](https://s.myshopify.com/products/x?preview_theme_id=123) |
+
+## To check
+
+1. Open the PDP preview. The heading stays on one line.
+
+## Screenshots
+
+_Drag in: \`heading.png\` (in \`.claude/tasks/ELC-1/tmp/\`)_
+
+## Changes
+
+- \`sections/scent-notes.liquid\` — the heading no longer wraps.
+MD
+dc DC9-pr-good 0 'result=ok' file pr "$DCD/pr.md" --theme
+grep -q '^summary_sentences=3$' "$DCD/out" && grep -q '^long_sentences=0$' "$DCD/out" && ok || bad DC9-pr-counts "$(tr '\n' ';' < "$DCD/out")"
+grep -v '^## Changes' "$DCD/pr.md" > "$DCD/pr-nochanges.md"
+dc DC10-pr-missing-core 1 'fail section missing: Changes' file pr "$DCD/pr-nochanges.md"
+grep -v '^| \*\*' "$DCD/pr.md" > "$DCD/pr-notable.md"
+dc DC11-pr-theme-table 1 'fail theme preview table missing' file pr "$DCD/pr-notable.md" --theme
+dc DC11b-pr-no-theme-flag 0 'result=ok' file pr "$DCD/pr-notable.md"
+awk '/^## To check/ { print "## Screenshots"; print ""; print "x"; print ""; print; next } /^## Screenshots/ { skip = 1; next } skip && /^## / { skip = 0 } !skip' "$DCD/pr.md" > "$DCD/pr-order.md"
+dc DC12-pr-order 1 'fail core sections out of order' file pr "$DCD/pr-order.md"
+printf '\n## Dependencies\n\nNone\n' | cat "$DCD/pr.md" - > "$DCD/pr-none.md"
+dc DC13-pr-none 1 'fail None/N/A placeholder' file pr "$DCD/pr-none.md"
+sed 's/^The scent notes heading wrapped on small phones\./The scent notes heading on the product page wrapped onto two lines on small phones because the old snippet set a fixed width./' "$DCD/pr.md" > "$DCD/pr-long.md"
+dc DC14-pr-long-sentence 1 'long_sentences=1' file pr "$DCD/pr-long.md"
+dc DC15-pr-empty 1 'fail file empty' file pr "$DCD/empty.md"
+awk 'NR == 1 { next } NR == 2 { next } NR == 3 { print "**Summary:** The scent notes heading on the product page wrapped onto two lines on small phones before this small change."; next } 1' "$DCD/pr.md" > "$DCD/pr-bold.md"
+dc DC15b-pr-bold-summary-19 0 'long_sentences=0' file pr "$DCD/pr-bold.md"
+dc_attr() { # dc_attr <label> <want-rc> <line>
+  printf '%s\n' "$3" | cat "$DCD/pr.md" - > "$DCD/pr-attr.md"; dc "$1" "$2" - file pr "$DCD/pr-attr.md"
+}
+dc_attr DC16-attr-claude 1 'Co-Authored-By: Claude <noreply@anthropic.com>'
+dc_attr DC16-attr-fable 1 'Co-Authored-By: Fable 5 <noreply@anthropic.com>'
+dc_attr DC16-attr-bare 1 'noreply@anthropic.com'
+dc_attr DC16-attr-footer 1 '🤖 Generated with [Claude Code](https://claude.com/claude-code)'
+dc_attr DC16-attr-human 0 'Co-Authored-By: Ann <ann@example.com>'
+dc_attr DC16-attr-lookalike 0 'Co-Authored-By: Jane <jane@anthropic.example.com>'
+dc_attr DC16-attr-not-anthropic 0 'Co-Authored-By: Jane <jane@notanthropic.community>'
+printf 'Co-Authored-By: Claude <noreply@anthropic.com>\n' | cat "$DCD/stt.md" - > "$DCD/stt-attr.md"
+dc DC16-attr-stt 1 'fail AI attribution' file stt "$DCD/stt-attr.md"
+
+dc DC17-receipt-escalate 0 'kind=escalate' receipt stt <<TXT
+ESCALATE
+- question: Which theme does QA test on?
+  context: the ticket names none; $SENT
+  options: [the UAT theme, "ask the TL, then decide"]
+TXT
+dc DC18-receipt-empty-question 1 'fail item 1 question empty' receipt stt <<'TXT'
+ESCALATE
+- question:
+  context: x
+  options: [a, b]
+TXT
+dc DC19-receipt-one-option 1 'fail item 1 options fewer than 2' receipt stt <<'TXT'
+ESCALATE
+- question: q?
+  context: x
+  options: [a]
+TXT
+dc DC20-receipt-lookup 0 'kind=lookup' receipt stt <<'TXT'
+LOOKUP
+- store: s.myshopify.com
+  handle: -
+  need: a product with three scent notes
+TXT
+dc DC21-receipt-lookup-pr 1 "fail LOOKUP is the stt drafter's only" receipt pr <<'TXT'
+LOOKUP
+- store: s.myshopify.com
+  need: x
+TXT
+dc DC22-receipt-written-stt 0 'kind=written' receipt stt <<TXT
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+unconfirmed: []
+report: general, 3 steps, 1 edge case, s.myshopify.com $SENT
+TXT
+dc DC23-receipt-pr-no-title 1 'fail title empty' receipt pr <<'TXT'
+written: /repo/.claude/tasks/ELC-1/pr-body.md
+pr_summary: |
+  The heading wrapped. It now stays on one line.
+screenshots: [/repo/.claude/tasks/ELC-1/tmp/heading.png]
+unconfirmed: []
+report: no conditional sections, 1 file in Changes
+TXT
+dc DC24-receipt-pr-good 0 'result=ok' receipt pr <<'TXT'
+written: /repo/.claude/tasks/ELC-1/pr-body.md
+title: [ELC-1][Bug] Scent notes heading stays on one line
+pr_summary: |
+  The heading wrapped. It now stays on one line.
+screenshots: []
+capture: the PDP on a 375 px phone, scent notes in view
+unconfirmed: []
+report: no conditional sections, 1 file in Changes
+TXT
+dc DC25-receipt-pr-no-capture 1 'fail capture empty with screenshots: []' receipt pr <<'TXT'
+written: /repo/.claude/tasks/ELC-1/pr-body.md
+title: t
+pr_summary: s.
+screenshots: []
+unconfirmed: []
+report: r
+TXT
+dc DC26-receipt-wrong-path 1 'fail written is not an absolute path ending in /steps-to-test.md' receipt stt <<'TXT'
+written: /repo/.claude/tasks/ELC-1/pr-body.md
+unconfirmed: []
+report: r
+TXT
+dc DC27-receipt-two-kinds 1 'fail several kinds in one reply' receipt stt <<'TXT'
+ESCALATE
+- question: q?
+  context: c
+  options: [a, b]
+written: /repo/.claude/tasks/ELC-1/steps-to-test.md
+TXT
+dc DC28-receipt-none 1 'fail no kind' receipt stt <<'TXT'
+Here is the draft you asked for.
+TXT
+dc DC29-receipt-five-questions 1 'fail more than 4 questions' receipt stt <<'TXT'
+ESCALATE
+- question: 1?
+  context: c
+  options: [a, b]
+- question: 2?
+  context: c
+  options: [a, b]
+- question: 3?
+  context: c
+  options: [a, b]
+- question: 4?
+  context: c
+  options: [a, b]
+- question: 5?
+  context: c
+  options: [a, b]
+TXT
+dc DC30-receipt-answer 0 'kind=answer' receipt stt <<'TXT'
+answer: step 3 checks the mobile breakpoint the AC names.
+TXT
+dc DC30b-receipt-answer-next-line 0 'kind=answer' receipt stt <<'TXT'
+answer:
+Step 3 checks the mobile breakpoint the AC names.
+TXT
+dc DC30c-receipt-answer-blank 1 'fail answer empty' receipt stt <<'TXT'
+answer:
+TXT
+dc DC30d-receipt-block-options 0 'result=ok' receipt stt <<'TXT'
+ESCALATE
+- question: Which theme does QA test on?
+  context: the ticket names none
+  options:
+    - the UAT theme
+    - ask the TL
+TXT
+dc DC30e-receipt-block-one-option 1 'fail item 1 options fewer than 2' receipt stt <<'TXT'
+ESCALATE
+- question: q?
+  context: c
+  options:
+    - a
+TXT
+dc DC31-help 0 'usage: drafter-check.cjs' --help
+dc DC32-usage-bad-kind 2 'usage:' file xx "$DCD/stt.md"
+dc DC33-usage-stt-theme 2 'usage:' file stt "$DCD/stt.md" --theme
+
 echo "fe-scripts-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

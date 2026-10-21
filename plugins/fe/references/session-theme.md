@@ -2,7 +2,7 @@
 
 Single home of the session-theme flow. `/fe:ship` (Step 0) and `/fe:preview-theme` in a new
 worktree both **offer** it and must offer it identically; `/fe:preview-theme`, the pipeline's qa
-phase, `/fe:create-pull-request`, and aftercare all **consume** it. Read this file when the offer actually has to run — the
+phase, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:create-pull-request`, and aftercare all **consume** it. Read this file when the offer actually has to run — the
 silent-reuse path needs nothing from here.
 
 ## Why
@@ -73,6 +73,10 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    sha and no build input changed since the last; one `-` line makes it refresh, since a dev
    server handed over once may still be uploading
    (`<fe root>/skills/create-pull-request/reference/preview-theme.md`).
+   The developer's instructions about a theme (two themes, what to view on which) are a third line
+   kind, `- <YYYY-MM-DD> theme-note: <theme id or name> — <text>`, written by `/fe:create-pull-request`
+   step 1 and read by its step 4 into the PR drafter's `theme:` list; the `session-theme:` grep above
+   never matches it.
 5. **Then the dev server runs on it.** Steps 1–4 already needed this checkout's
    `shopify.theme.toml` (or `TOML_PATH`), so the store is resolved by the time the server
    starts. The start command the developer gets is the line for this checkout's profile —
@@ -149,6 +153,8 @@ a multi-environment toml the block written is the block read, so that holds ther
 
 | Caller | Behaviour |
 | --- | --- |
+| `/fe:develop-feature-or-fix` | Phase 2 step 3: refresh the recorded theme **when step 1's provenance rule holds** (else the plan names the id and asks), else `create --name "<derived>" --reuse` — **recorded, never pinned**; validation runs on its preview URL. The session's `fe preview default: local dev server` → the dev server. |
+| `/fe:qa-feature-or-fix` | Phase 2 step 1: the same, under the same provenance rule; the push is skipped when nothing changed since the last `session-theme-pushed:` sha. |
 | `/fe:preview-theme` | A recorded `session-theme:` is the default **refresh** target — never create a second theme for the same work stream; a theme it creates is recorded as one. |
 | pipeline **qa** | Rows marked `preview-theme` run against the session theme (`refresh --theme <id>`, settings preserved); create one only when nothing is recorded — and **record without pinning**, since phase 4 is past the ✋ and rewriting the developer's config unasked is not its call. |
 | pipeline **create-pr** | The session theme is the PR's preview theme — it outranks auto-creation (explicit `theme_name`/`theme_url`/`theme_admin_url` args still win over everything). |

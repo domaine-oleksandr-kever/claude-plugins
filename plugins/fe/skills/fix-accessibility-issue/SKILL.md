@@ -14,6 +14,8 @@ allowed-tools: Read, Glob, Grep, Edit, Write, Bash(npx playwright test*), Bash($
 
 Fix accessibility issues in theme components. Follow the standard issue-fix workflow (branch → implement → test → hand off the commit), with the a11y-specific rules below.
 
+**Edit delegation:** when the session carries base's `edit delegation` convention, the implementation goes to `Agent(model: "<the model it names>")`: brief it with the component, the issue, the existing ARIA pattern you found, the rules below that apply, the tests to run (`npx playwright test …`) and what to return (files changed, files `git add`ed, test results). You review its diff and keep the screen-reader / focus checks. The convention's skips apply (the session already runs on that model or a cheaper one, or the developer ran `/base-edit-direct`).
+
 **The commit is not pre-approved here.** Staging (`git add`) is; `git commit` is not — hand the commit to `/base:commit` (committing is that skill's job — the developer invokes it themselves).
 
 ## Component ARIA patterns

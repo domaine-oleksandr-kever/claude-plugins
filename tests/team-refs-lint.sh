@@ -17,8 +17,9 @@
 #   e. every /<p>:<x> names a skill of the plugin, every /base:<x> a base skill; /<other>:<x> of
 #      another team plugin names one of its skills and stands only in the README (a migration
 #      pointer), never in a skill, agent, reference or the module: team plugins never require each
-#      other; any other /<x>:<y> is flagged. /<p>-doctor, /base-progress and /base-doctor are the
-#      only hyphen commands of the two; /<other>-<x> stands only in the README, as /<other>-doctor;
+#      other; any other /<x>:<y> is flagged. /<p>-doctor, /base-progress, /base-doctor and
+#      /base-edit-direct are the only hyphen commands of the two; /<other>-<x> stands only in the
+#      README, as /<other>-doctor;
 #   f. no bare /<skill> of either plugin, and no unqualified agent name in a markdown file (code
 #      fences included);
 #   g. every <P>_* token is a row of plugins/<p>/README.md → Environment switches, every BASE_*
@@ -27,7 +28,8 @@
 #   i. every agents/<name>.md and skills/<name>/SKILL.md opens with frontmatter whose `name:` is
 #      <name> and carries a `description:`;
 #   j. every references/*.md is cited by a skill, an agent or another reference;
-#   k. every agent is a read-only scout: its `tools:` line lists no write tool.
+#   k. every agent is a read-only scout: its `tools:` line lists no write tool — a `*-drafter` may
+#      list `Write` (its one workspace file), never Edit/MultiEdit/NotebookEdit or an mcp__ tool.
 # The same checker runs against a planted fixture first (plugins named kit, hub and pal), so a rule
 # that stopped firing — or one that only fires for a literal team name — fails here.
 # Exit 0 = all green.
@@ -115,7 +117,7 @@ const REF_RE = new RegExp(`(^|[^\\/A-Za-z0-9_-])(${esc(NAME)}|${esc(DEP)}):([a-z
 const SLASH_RE = /(^|[^A-Za-z0-9_.:\/-])\/([a-z][a-z0-9-]*):([a-z][a-z0-9-]*)/g;
 const CMD_LEAD = '(^|[^A-Za-z0-9_.:\\/<>}-])';
 const HYPHEN_RE = new RegExp(`${CMD_LEAD}\\/((?:${esc(NAME)}|${esc(DEP)})-[A-Za-z0-9_-]+)`, 'g');
-const COMMANDS = new Set([`${NAME}-doctor`, `${DEP}-progress`, `${DEP}-doctor`]);
+const COMMANDS = new Set([`${NAME}-doctor`, `${DEP}-progress`, `${DEP}-doctor`, `${DEP}-edit-direct`]);
 const SIB = [...SIBLINGS.keys()].map(esc).join('|');
 const SIB_REF_RE = SIB ? new RegExp(`(^|[^\\/A-Za-z0-9_-])(${SIB}):([a-z][a-z0-9-]*)`, 'g') : null;
 const SIB_HYPHEN_RE = SIB ? new RegExp(`${CMD_LEAD}\\/((${SIB})-[A-Za-z0-9_-]+)`, 'g') : null;
@@ -224,7 +226,9 @@ for (const a of ownAgents) {
   const fm = checkFm(path.join(dir, 'agents', `${a}.md`), a, `agents/${a}.md`);
   const tools = (/^tools:[ \t]*(.*)$/m.exec(fm) || [])[1];
   if (tools === undefined) { bad('k', `agents/${a}.md`, 'no tools line'); continue; }
+  const drafter = /-drafter$/.test(a);
   for (const t of tools.split(',').map((x) => x.trim())) {
+    if (drafter && t === 'Write') continue;
     if (/^(Edit|Write|MultiEdit|NotebookEdit)$/.test(t) || /^mcp__/.test(t)) bad('k', `agents/${a}.md`, t);
   }
 }
@@ -266,6 +270,8 @@ printf '# kit\n\n## Environment switches\n\n| Variable | Default | Effect |\n|--
 printf -- '---\nname: ship\ndescription: x\n---\n' > "$KIT/skills/ship/SKILL.md"
 printf -- '---\nname: other\n---\n' > "$KIT/skills/misdir/SKILL.md"
 printf -- '---\nname: scout\ndescription: a fixture scout\ntools: Read, Grep, Write\n---\nUses [cited](../references/cited.md).\n' > "$KIT/agents/scout.md"
+printf -- '---\nname: note-drafter\ndescription: a fixture drafter\ntools: Read, Bash, Write\n---\n' > "$KIT/agents/note-drafter.md"
+printf -- '---\nname: edit-drafter\ndescription: a fixture drafter\ntools: Read, Edit, mcp__x__y\n---\n' > "$KIT/agents/edit-drafter.md"
 : > "$KIT/references/cited.md"; : > "$KIT/references/orphan.md"; : > "$KIT/scripts/present.sh"
 cat > "$KIT/skills/ship/SKILL.md" <<'MD'
 ---
@@ -273,7 +279,7 @@ name: ship
 description: a fixture skill
 ---
 Spawn kit:scout, kit:ghost, hub:jira-reader and hub:ghost; bare jira-reader and scout here.
-Run /kit:ship, /kit:nope, /hub:commit, /hub:nope, /pal:check, /qa:other, /kit-doctor, /kit-bogus, /hub-progress.
+Run /kit:ship, /kit:nope, /hub:commit, /hub:nope, /pal:check, /qa:other, /kit-doctor, /kit-bogus, /hub-progress, /hub-edit-direct, /kit-edit-direct.
 Bare /commit and /ship. Paths ${CLAUDE_PLUGIN_ROOT}/scripts/present.sh <kit root>/references/absent.md
 <hub root>/references/task-workspace.md <hub root>/scripts/gone.sh <plugin root>/scripts/present.sh.
 Old names: plugin_fnd_x, FND_X, fnd:jira-reader, /fnd-progress, .claude/fnd-tmp, json-slim, Codex, host-model-map.
@@ -322,6 +328,7 @@ else bad fixture-e-readme-sibling "rule e flagged /pal:check in the README"; fi
 if awk -F'\t' '$2 ~ /^README\.md:/ && ($3 == "pal:check" || $3 == "/pal-doctor") { f = 1 } END { exit f }' "$OUTF"; then ok
 else bad fixture-readme-sibling-agent "pal:check or /pal-doctor flagged in the README"; fi
 want e /kit-bogus;                       dont e /kit-doctor;      dont e /hub-progress
+dont e /hub-edit-direct;                 want e /kit-edit-direct
 dont e /hub-tmp;                         dont e /localhost
 want f /commit;                          want f /ship
 want f jira-reader;                      want f scout
@@ -337,6 +344,12 @@ else bad fixture-j "rule j did not flag references/orphan.md"; fi
 if awk -F'\t' '$1 == "j" && $2 == "references/cited.md" { f = 1 } END { exit f }' "$OUTF"; then ok
 else bad fixture-j-false "rule j flagged references/cited.md"; fi
 want k Write;                            dont k Read
+if awk -F'\t' '$1 == "k" && $2 == "agents/note-drafter.md" { f = 1 } END { exit f }' "$OUTF"; then ok
+else bad fixture-k-drafter-write "rule k flagged a drafter's Write"; fi
+if awk -F'\t' '$1 == "k" && $2 == "agents/edit-drafter.md" && $3 == "Edit" { f = 1 } END { exit !f }' "$OUTF"; then ok
+else bad fixture-k-drafter-edit "rule k let a drafter list Edit"; fi
+if awk -F'\t' '$1 == "k" && $2 == "agents/edit-drafter.md" && $3 == "mcp__x__y" { f = 1 } END { exit !f }' "$OUTF"; then ok
+else bad fixture-k-drafter-mcp "rule k let a drafter list an mcp__ tool"; fi
 # the migration line is allowed by its exact text only, and the laid contract is not linted
 if awk -F'\t' '$1 == "a" && $2 ~ /^README\.md:/ { f = 1 } END { exit f }' "$OUTF"; then ok
 else bad fixture-allow "the allow-listed README line was flagged"; fi
@@ -373,7 +386,7 @@ for p in $TEAMS; do
   # the exact skill and agent set each plugin ships, so a skill that strays into the wrong plugin shows
   case "$p" in
     fe) want_skills="create-pull-request develop-feature-or-fix fix-accessibility-issue fix-breaking-changes get-breaking-changes preflight-checks preview-theme qa-feature-or-fix ship update-translations write-steps-to-test write-technical-approach"
-        want_agents="theme-explorer.md" ;;
+        want_agents="pr-body-drafter.md stt-drafter.md theme-explorer.md" ;;
     qa) want_skills="preflight"; want_agents="" ;;
     be) want_skills="app-scope platform-limitations shopify-resources"; want_agents="" ;;
     pm) want_skills="estimator-review merchant-brief project-estimator solutions-engineering vendor-evaluation"; want_agents="" ;;
@@ -383,6 +396,11 @@ for p in $TEAMS; do
   if [ "$have_skills" = "$want_skills" ]; then ok; else bad "$p-skill-set" "skills: $have_skills"; fi
   have_agents="$(cd "$P/agents" 2>/dev/null && ls | tr '\n' ' ' | sed 's/ $//')"
   if [ "$have_agents" = "$want_agents" ]; then ok; else bad "$p-agent-set" "agents: '$have_agents', want '$want_agents'"; fi
+done
+# every fe skill that edits project files from the main loop briefs base's edit delegate
+for sk in develop-feature-or-fix fix-breaking-changes fix-accessibility-issue update-translations get-breaking-changes; do
+  if grep -qF "base's \`edit delegation\` convention" "$ROOT/plugins/fe/skills/$sk/SKILL.md"; then ok
+  else bad "fe-edit-delegation-$sk" "plugins/fe/skills/$sk/SKILL.md does not brief base's edit delegate"; fi
 done
 if [ -f "$ROOT/plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js" ]; then ok
 else bad fe-fbc-template "plugins/fe/skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js missing"; fi

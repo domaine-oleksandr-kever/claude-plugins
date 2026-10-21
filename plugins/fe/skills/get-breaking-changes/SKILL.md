@@ -17,6 +17,8 @@ allowed-tools: Read, Write, Bash(gh api repos/*), Bash(gh pr list*), Bash(gh pr 
 
 Identify confirmed breaking changes merged since the last breaking version. Focus on PRs explicitly **labeled "Breaking changes"** rather than scanning every commit.
 
+**Edit delegation:** when the session carries base's `edit delegation` convention, steps 4–7 and the Output go to one `Agent(model: "<the model it names>")` brief: the repo, the version and date from step 3, steps 4–7 and the Output section of this file verbatim (the read-only `gh api` rule included), and what to return — the count of confirmed and potential changes, the path written, whether it ran `git add`. You run steps 1–3 and relay its counts to the developer; `breaking-changes.md` is not read back into this session. The convention's skips apply (the session already runs on that model or a cheaper one, or the developer ran `/base-edit-direct`).
+
 ## Steps
 
 `gh api` is read-only here: `GET` shapes only — never `-X POST/PATCH/DELETE`, `--input`, or

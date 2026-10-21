@@ -15,9 +15,10 @@
  *                session directory under DOMAINE_LOG_DIR, else under <home>/.claude/domaine/log
  *     --json     `{ root, rows: [{ status, name, detail }] }` instead of the table
  *
- * Rows: node, manifest, scripts, base, shopify-cli, profile, store-config, event-log. Every row is one
- * PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads FE_PROFILE
- * (through scripts/project-profile.sh too), FE_EVENT_LOG and DOMAINE_LOG_DIR. It never prints a value
+ * Rows: node, manifest, scripts, base, shopify-cli, profile, store-config, preview, event-log. Every
+ * row is one PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads FE_PROFILE
+ * (through scripts/project-profile.sh too), FE_PREVIEW_DEFAULT (through hooks/conventions.cjs, the env else
+ * ~/.config/domaine/env), FE_EVENT_LOG and DOMAINE_LOG_DIR. It never prints a value
  * from `.env` or `shopify.theme.toml`, and it only reports, never repairs.
  */
 'use strict';
@@ -287,6 +288,19 @@ function checkStoreConfig(projectDir, profile) {
     (present.length ? '; ' + present.join(', ') + ' present (values not read)' : ''));
 }
 
+/** Where develop and qa validate, decided by the same function the SessionStart hook asks. */
+function checkPreviewDefault(homeDir) {
+  let decide;
+  try {
+    decide = require('../hooks/conventions.cjs').previewDefault;
+  } catch (e) {
+    fail('preview', 'hooks/conventions.cjs did not load: ' + firstLine(e.message));
+    return;
+  }
+  const env = Object.assign({}, process.env, { HOME: homeDir });
+  pass('preview', decide(env) === 'off' ? 'local dev server (FE_PREVIEW_DEFAULT=0)' : 'preview theme');
+}
+
 /** The session directory under `root` whose newest file is the newest, or null; a link is never followed. */
 function newestSessionDir(root) {
   let best = null;
@@ -363,6 +377,7 @@ function main() {
   checkShopifyCli();
   const profile = checkProfile(pluginRoot, projectDir);
   checkStoreConfig(projectDir, profile);
+  checkPreviewDefault(homeDir);
   checkEventLog(opts['log-dir'], homeDir);
 
   const failed = rows.some((r) => r.status === 'FAIL');

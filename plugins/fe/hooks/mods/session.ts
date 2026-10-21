@@ -115,6 +115,25 @@ async function profileOf($: $): Promise<FeProfileInfo> {
 export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string): string[] =>
   [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.fe.json`] : []))
 
+/**
+ * True when FE_PREVIEW_DEFAULT is 0: a set env value wins, else the first `FE_PREVIEW_DEFAULT=` line of
+ * `${XDG_CONFIG_HOME:-$HOME/.config}/domaine/env` — the rule of hooks/conventions.cjs previewDefault.
+ */
+async function previewOff($: $): Promise<boolean> {
+  let v = await $.env.get('FE_PREVIEW_DEFAULT')
+  if (v === undefined) {
+    const abs = (x: string | undefined) => ((x ?? '').trim().startsWith('/') ? (x ?? '').trim().replace(/\/+$/, '') : '')
+    const home = abs(await $.env.get('HOME'))
+    const xdg = abs(await $.env.get('XDG_CONFIG_HOME')) || (home && `${home}/.config`)
+    if (xdg) {
+      const text = await $.fs.read(`${xdg}/domaine/env`).catch(() => null)
+      const line = text?.split('\n').find(l => /^\s*FE_PREVIEW_DEFAULT\s*=/.test(l))
+      if (line !== undefined) v = line.replace(/^[^=]*=/, '')
+    }
+  }
+  return (v ?? '').trim() === '0'
+}
+
 /** The sections as one context block where nothing draws and no command hook delivered them; else null. */
 export async function contextBlock($: $): Promise<string | null> {
   if ((await $.session.surfaces()).length > 0) return null
@@ -128,6 +147,7 @@ export async function contextBlock($: $): Promise<string | null> {
   if (p.word === 'foundation') parts.push(t['comment-discipline-foundation'] ?? '')
   if (p.store) parts.push((t['store-access'] ?? '').split('<fe root>').join(root))
   if (p.toml) parts.push(t.worktree ?? '')
+  if (p.toml) parts.push((t[(await previewOff($)) ? 'preview-default-off' : 'preview-default-on'] ?? '').split('<fe root>').join(root))
   if (p.toml || p.word !== 'none') parts.push(t['progress-series'] ?? '')
   return parts.join('\n\n')
 }

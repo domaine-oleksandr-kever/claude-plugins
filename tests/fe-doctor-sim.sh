@@ -5,7 +5,7 @@
 # view tool, the session's profile) are the mod's and live in plugins/fe/hooks/mods/tests/doctor.test.ts.
 # Exit 0 = all green.
 set -u
-unset CLAUDE_CONFIG_DIR DOMAINE_LOG_DIR FE_EVENT_LOG FE_PROFILE
+unset CLAUDE_CONFIG_DIR DOMAINE_LOG_DIR FE_EVENT_LOG FE_PROFILE FE_PREVIEW_DEFAULT XDG_CONFIG_HOME
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCTOR="$ROOT/plugins/fe/scripts/doctor.cjs"
@@ -97,7 +97,8 @@ expect FD1-green 0 "fe doctor — plugin root: $P" "PASS  node" "PASS  manifest 
   "PASS  scripts       2 shell script(s) executable, each answers --help" \
   "PASS  base          base@domaine 0.2.0 installed and enabled" "PASS  shopify-cli   shopify 3.66.1" \
   "PASS  profile       theme (project-profile.sh)" "PASS  store-config  shopify.theme.toml and .env present (values not read)" \
-  "PASS  event-log     $H/.claude/domaine/log: no session directory yet" "doctor: 8 passed, 0 failed, 0 skipped" "!$SECRET" "!fixture-store"
+  "PASS  preview       preview theme" \
+  "PASS  event-log     $H/.claude/domaine/log: no session directory yet" "doctor: 9 passed, 0 failed, 0 skipped" "!$SECRET" "!fixture-store"
 
 # The shipped plugin passes its own manifest and scripts rows: every script it ships answers --help.
 run --home "$H" --project "$PRJ"
@@ -107,7 +108,7 @@ run --root "$P" --home "$H" --project "$PRJ" --json
 if "$NODE" -e '
   const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
   const names = j.rows.map((r) => r.name).join(",");
-  if (j.root !== process.argv[2] || names !== "node,manifest,scripts,base,shopify-cli,profile,store-config,event-log") process.exit(1);
+  if (j.root !== process.argv[2] || names !== "node,manifest,scripts,base,shopify-cli,profile,store-config,preview,event-log") process.exit(1);
   if (!j.rows.every((r) => ["PASS","FAIL","SKIP","WARN"].includes(r.status) && typeof r.detail === "string")) process.exit(1);
 ' "$O" "$P" 2>/dev/null && [ "$rc" -eq 0 ] && [ "$(wc -l < "$O" | tr -d ' ')" = "1" ]; then ok
 else bad FD3-json "rc=$rc out=$(head -c 300 "$O")"; fi
@@ -247,6 +248,23 @@ rc=0; DOMAINE_LOG_DIR="$TMP/logs" PATH="$WITH_SHOP" "$NODE" "$DOCTOR" --root "$P
 expect FD37-event-log-override 0 "PASS  event-log     $TMP/logs/" "!$R"
 rc=0; DOMAINE_LOG_DIR=relative/logs PATH="$WITH_SHOP" "$NODE" "$DOCTOR" --root "$P" --home "$HL" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect FD38-event-log-relative-override-ignored 0 "PASS  event-log     $R/new/fe.jsonl"
+
+# --------------------------------------------------------------------------------- preview --
+# The row asks hooks/conventions.cjs previewDefault, the function the SessionStart line comes from:
+# the env first, else <home>/.config/domaine/env, never the project's committable .claude/domaine.env.
+pv() { rc=0; env "$@" PATH="$WITH_SHOP" "$NODE" "$DOCTOR" --root "$P" --home "$HP" --project "$PRJP" >"$O" 2>"$E" || rc=$?; }
+HP="$TMP/h-preview"; mkhome "$HP" "$(installed "$BASE_USER")"
+PRJP="$TMP/project-preview"; cp -R "$PRJ" "$PRJP"
+pv FE_PREVIEW_DEFAULT=0
+expect FD39-preview-env-off 0 "PASS  preview       local dev server (FE_PREVIEW_DEFAULT=0)"
+mkdir -p "$PRJP/.claude"; printf 'FE_PREVIEW_DEFAULT=0\n' > "$PRJP/.claude/domaine.env"
+pv
+expect FD40-preview-project-file-ignored 0 "PASS  preview       preview theme"
+mkdir -p "$HP/.config/domaine"; printf '# global\nFE_PREVIEW_DEFAULT = 0 \n' > "$HP/.config/domaine/env"
+pv
+expect FD41-preview-global-file-off 0 "PASS  preview       local dev server (FE_PREVIEW_DEFAULT=0)"
+pv FE_PREVIEW_DEFAULT=1
+expect FD42-preview-env-over-file 0 "PASS  preview       preview theme"
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad FD-head "HEAD moved"; fi

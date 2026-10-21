@@ -14,6 +14,8 @@ Apply the fixes documented in `breaking-changes.md` to `templates/**/*.json` and
 
 **Prerequisite:** `breaking-changes.md` exists in the project root (produce it with `/fe:get-breaking-changes`).
 
+**Edit delegation:** when the session carries base's `edit delegation` convention, steps 2–8 go to one `Agent(model: "<the model it names>")` brief: the path of `breaking-changes.md`, the changes step 1 identified, steps 2–8 of this file verbatim (step 3's literal-renames-only rule and its STOP included), and what to return — the theme check result, any step 3 STOP pattern, step 7's out-of-scope list. You review its diff and relay a STOP or the list to the developer. The convention's skips apply (the session already runs on that model or a cheaper one, or the developer ran `/base-edit-direct`).
+
 ## Process
 
 1. **Read `breaking-changes.md`** — identify what to change: settings to remove, block types to rename, property values to update, context changes (e.g. `{{ closest.product }}` vs explicit settings).

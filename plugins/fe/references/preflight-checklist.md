@@ -62,7 +62,7 @@ On failure, report the **specific** error + remediation (auth, MCP config, serve
   checkout the repo's own dev script when its `package.json` defines one, else `shopify theme dev`.
   This row only DETECTS a server — the start command with its flags is
   `<fe root>/references/session-theme.md` step 5.
-- If not running, it must be started before any **in-browser validation** (develop / QA workflows).
+- Not running is no blocker: the develop / QA workflows validate on the preview theme by default; the dev server is needed only when the session's `fe preview default:` line says `local dev server` or the developer asks for it.
 
 ## Jira attachments
 

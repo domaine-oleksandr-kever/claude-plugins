@@ -8,7 +8,7 @@ fe also holds these parts:
 
 - the Steps to Test skill;
 - the breaking-changes and translation tools;
-- the `fe:theme-explorer` agent;
+- the `fe:theme-explorer` scout and the `fe:stt-drafter` / `fe:pr-body-drafter` drafters;
 - the project profile: Foundation, another theme, or none;
 - the store-access rules.
 
@@ -16,11 +16,11 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.10.1**.
+Current release: **fe v0.11.0**.
 
 ## Status
 
-- Claude Code only. fe is a plugin of skills, an agent, references, scripts and a hooks module (mods).
+- Claude Code only. fe is a plugin of skills, agents, references, scripts and a hooks module (mods).
   It ships no adapter for another host, and `scripts/install.sh --plugin fe` exits 2.
 - Requires base (`"dependencies": ["base"]` in its manifest), and slim through base. The engine does
   not install a dependency by itself, so install all three.
@@ -62,10 +62,10 @@ is an offer at the end of the run, never an automatic start. Only `/fe:ship` run
 |---|---|---|
 | `/fe:ship` | a ready ticket end to end: one interview, one plan and QA-checklist approval, then the series runs itself (implement, QA, review and commit, PR, Steps to Test) | `base:jira-reader`, `base:figma-reader`, `base:doc-reader`, `fe:theme-explorer`; offers `/base:worktree` before it starts; a missing TA → `/fe:write-technical-approach` |
 | `/fe:write-technical-approach` | drafts a Technical Approach from the ticket's Description and Acceptance Criteria, then writes the field after approval | `base:jira-reader`, `base:doc-reader`, `base:jira-writer` → `/fe:develop-feature-or-fix` |
-| `/fe:develop-feature-or-fix` | implements an approved Technical Approach with in-browser validation | `base:jira-reader`, `base:figma-reader`, `base:doc-reader`, `fe:theme-explorer`, `base:bug-hunter` → `/fe:qa-feature-or-fix` |
-| `/fe:qa-feature-or-fix` | structured QA of a finished change against its ticket: checklist, browser checks, pass / fail report | `base:jira-reader`, `base:figma-reader`, `base:jira-writer` → `/base:pre-commit-review` (with the profile word) once every blocking check passes |
-| `/fe:write-steps-to-test` | Steps to Test in Domaine's format, written to the field after approval; the series' last step | `base:jira-reader`, `base:doc-reader`, `base:jira-writer` → `/fe:create-pull-request` when the branch has no PR |
-| `/fe:create-pull-request` | a pull request with the Domaine description: a plain-English Summary, the theme-preview table, To check steps and screenshot placeholders | `base:jira-reader`, `base:change-reviewer`, `base:bug-hunter`, `/fe:preview-theme`'s script → `/fe:write-steps-to-test` while the field is empty |
+| `/fe:develop-feature-or-fix` | implements an approved Technical Approach with in-browser validation on the work stream's preview theme | `base:jira-reader`, `base:figma-reader`, `base:doc-reader`, `fe:theme-explorer`, `base:bug-hunter`, `scripts/create-preview-theme.sh` → `/fe:qa-feature-or-fix` |
+| `/fe:qa-feature-or-fix` | structured QA of a finished change against its ticket: checklist, browser checks, pass / fail report | `base:jira-reader`, `base:figma-reader`, `base:jira-writer`, `scripts/create-preview-theme.sh` → `/base:pre-commit-review` (with the profile word) once every blocking check passes |
+| `/fe:write-steps-to-test` | Steps to Test in Domaine's format, written to the field after approval; the series' last step | `base:jira-reader`, `base:doc-reader`, `fe:stt-drafter`, `scripts/drafter-check.cjs`, `base:jira-writer` → `/fe:create-pull-request` when the branch has no PR |
+| `/fe:create-pull-request` | a pull request with the Domaine description: a plain-English Summary, the theme-preview table, To check steps and screenshot placeholders | `base:jira-reader`, `base:change-reviewer`, `base:bug-hunter`, `/fe:preview-theme`'s script, `fe:pr-body-drafter`, `scripts/drafter-check.cjs` → `/fe:write-steps-to-test` while the field is empty |
 | `/fe:preview-theme` | creates or refreshes an unpublished preview theme from the branch; in a new worktree, un-pins the copied store config first | `scripts/create-preview-theme.sh`, `scripts/worktree-theme.sh` |
 | `/fe:preflight-checks` | checks the project, the tools and the dev server before work starts | → `/fe:write-technical-approach` or `/fe:develop-feature-or-fix` |
 | `/fe:fix-accessibility-issue` | fixes an accessibility issue in theme components | → `/base:commit` |
@@ -88,22 +88,24 @@ starts.
 On the main checkout the script answers `error=not_a_linked_worktree`, and the skill continues
 without it.
 
-## Agent
+## Agents
 
 | Agent | Does |
 |---|---|
 | `fe:theme-explorer` | read-only scout of the theme: which files, sections and snippets a change touches; the `profile` comes in its brief |
+| `fe:stt-drafter` | drafts Steps to Test into the workspace `steps-to-test.md` (sonnet); returns ESCALATE / LOOKUP, an answer, or the path + an unconfirmed list, never the text |
+| `fe:pr-body-drafter` | drafts the PR title and body into the workspace `pr-body.md` (haiku); returns ESCALATE, an answer, or the path, title, Summary and an unconfirmed list |
 
 ## References and scripts
 
-The skills and the agent cite fe's own files by their path under fe's root (`<fe root>/…`, from the
+The skills and the agents cite fe's own files by their path under fe's root (`<fe root>/…`, from the
 session's `fe plugin root:` line). They cite base's files by their path under base's root
 (`<base root>/…`). `tests/team-refs-lint.sh` checks that every cited path exists.
 
 | Reference | Read by | Holds |
 |---|---|---|
-| `references/session-theme.md` | `/fe:ship`, `/fe:preview-theme`, `/fe:create-pull-request` | one preview theme per work stream: the gate, the pin into `shopify.theme.toml`, the worktree un-pin |
-| `references/preview-theme-errors.md` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:ship` | how to read a `create-preview-theme.sh` run (its workspace lines and warnings), one entry per `error=` key, Shopify rejections and page deep-links |
+| `references/session-theme.md` | `/fe:ship`, `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix` | one preview theme per work stream: the gate, the pin into `shopify.theme.toml`, the worktree un-pin |
+| `references/preview-theme-errors.md` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:ship`, `fe:pr-body-drafter` | how to read a `create-preview-theme.sh` run (its workspace lines and warnings), one entry per `error=` key, Shopify rejections and page deep-links |
 | `references/theme-gotchas.md` | `/fe:develop-feature-or-fix`, `/fe:preview-theme` | Shopify theme traps that fail silently: dropped settings, presets, Liquid limits, cascade layers, browser checks; preview-theme recipes (templates-only push, stale hashed CSS, Playwright setContent) |
 | `references/technical-approach-format.md` | `/fe:write-technical-approach` | the short TA format |
 | `references/research-pressure-test.md` | `/fe:write-technical-approach`, `/fe:develop-feature-or-fix`, `/fe:ship` | cross-checking a draft plan against fresh external sources |
@@ -115,22 +117,23 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 | `references/pipeline-mode.md`, `references/pipeline-phases.md` | `/fe:ship` | the run contract and the phase briefs |
 | `references/eslint-no-restricted-syntax.md` | `/fe:develop-feature-or-fix`, `/fe:fix-accessibility-issue`, `/fe:ship` | Foundation only: state through `data-*` attributes, not `classList` / `style.*` |
 | `references/section-css-variables-pattern.md` | `/fe:develop-feature-or-fix`, `/fe:ship` | Foundation only: a section that drives its blocks' sizes through CSS variables |
+| `references/drafter-loop.md` | `/fe:write-steps-to-test`, `/fe:create-pull-request` | the drafter loop: spawn, receipt check, ESCALATE / LOOKUP relay, SendMessage continuation, ask / revise, caps, the never-read rule, the re-spawn fallback |
 
 | Script | Run by | Does |
 |---|---|---|
-| `scripts/create-preview-theme.sh` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:ship` | builds and pushes an unpublished preview theme (`create`), re-pushes one (`refresh`), pins the session theme (`pin`). `create --duplicate-of <theme-id\|name> --store <store>` copies a theme on that store server-side, waits until `theme list` shows the copy ready, then pushes the branch code into it; `--brand <b>` (create, refresh) exports `BRAND=<b>` to the build and does nothing else |
+| `scripts/create-preview-theme.sh` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:ship` | builds and pushes an unpublished preview theme (`create`), re-pushes one (`refresh`), pins the session theme (`pin`). `create --duplicate-of <theme-id\|name> --store <store>` copies a theme on that store server-side, waits until `theme list` shows the copy ready, then pushes the branch code into it; `--brand <b>` (create, refresh) exports `BRAND=<b>` to the build and does nothing else |
 | `scripts/session-theme.sh` | sourced by `create-preview-theme.sh`, run by `worktree-theme.sh` | the pin and un-pin grammar of `shopify.theme.toml` (`# fe:session-theme`, `# fe:superseded`) |
 | `scripts/worktree-theme.sh` | `/fe:preview-theme` in a worktree, `/fe:ship` | the Shopify half of a new worktree: the one-time un-pin and the dev-server line |
 | `scripts/theme-json.sh` | the skills, through the `store-access` section | reads and writes a theme's JSON files (`templates/*.json`, `config/settings_data.json`) with a read-back check; `locate <id>` finds which store holds a theme (the stores in `<base root>/scripts/qa-stores.cjs` plus every store the toml's `[environments.*]` blocks name, or `--stores a,b`, or `--store <one>`) |
 | `scripts/shopify-admin-gql.sh` | the skills, through the `store-access` section | one Admin GraphQL call against the project's store |
 | `scripts/project-profile.sh` | fe's hooks module, `worktree-theme.sh`, the doctor, the skills' fallback | prints `foundation`, `theme` or `none` |
 | `scripts/doctor.cjs` | `/fe-doctor`, or by hand | the static install checks (§ Doctor) |
+| `scripts/drafter-check.cjs` | `fe:stt-drafter`, `fe:pr-body-drafter`, `/fe:write-steps-to-test`, `/fe:create-pull-request` | checks a drafter's file (`file stt\|pr`: structure, the PR core skeleton, Summary sentence lengths, no AI attribution) and its reply (`receipt stt\|pr`: one kind, no empty field) in code, printing counts and `fail` lines only — never the draft |
 | `scripts/_shopify-common.sh` | sourced by the store scripts | the shared Shopify CLI and config helpers |
 
 `/fe:fix-breaking-changes` copies its own `skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js`
-into the project and removes the copy after the run. `/fe:write-steps-to-test` names the QA store registry,
-`<base root>/scripts/qa-stores.cjs`, only to say why it does not read it; `theme-json.sh locate` reads its
-store list (`list --json`, never a password) from base's install beside fe.
+into the project and removes the copy after the run. `theme-json.sh locate` reads the QA store registry's
+store list (`<base root>/scripts/qa-stores.cjs list --json`, never a password) from base's install beside fe.
 
 ## Conventions
 
@@ -158,6 +161,7 @@ message (`prompt.context`, beside CLAUDE.md), text from the same file.
 | `comment-discipline-foundation` | LiquidDoc on every snippet param; `src/entry/core/*` is protected; the Liquid core is hand-synced from the foundation repo, so prefer a copy | profile `foundation` |
 | `store-access` | the two store runners, `scripts/shopify-admin-gql.sh` and `scripts/theme-json.sh`, with their paths under fe's root; never `Read` `.env` or `shopify.theme.toml` | the project root holds `shopify.theme.toml`, or `.env` with a profile other than `none` |
 | `worktree` | `worktree copy list: shopify.theme.toml` (the line `/base:worktree` reads), then `/fe:preview-theme` in the new worktree | the project root holds `shopify.theme.toml` |
+| `preview-default-on` / `preview-default-off` | `fe preview default: preview theme` — `/fe:develop-feature-or-fix` and `/fe:qa-feature-or-fix` validate on the work stream's preview theme — or `fe preview default: local dev server (FE_PREVIEW_DEFAULT=0)`; the skills key on this line and never read the switch | the project root holds `shopify.theme.toml` (no preview theme without it) |
 | `progress-series` | the rows of a ticket's `progress.md` in order — `write-technical-approach`, `develop-feature-or-fix`, `qa-feature-or-fix`, `pre-commit-review`, `commit`, `create-pull-request`, `write-steps-to-test` — and the skill that ticks each; a batch lists its tickets, then the same tail | a profile other than `none`, or `shopify.theme.toml` at the root |
 
 **The profile** is decided by the start hook, once per session start; a `/clear` decides again. fe
@@ -184,6 +188,7 @@ depends on the agent type:
   the transcript) get nothing from fe.
 - The read-only agents (`fe:theme-explorer`, `base:change-reviewer`, `base:bug-hunter`, `Explore`,
   `Plan`) get the root, the profile and the Foundation section.
+- The drafters (`fe:stt-drafter`, `fe:pr-body-drafter`) get the root, the profile and store access — they confirm fixture handles on the store — but not the Foundation section: they write prose, not theme code.
 - Every other agent also gets store access when it applies.
 
 **base required:** at a session start fe looks for base's skills in the command list. If they are
@@ -205,10 +210,11 @@ servers).
 | `shopify-cli` | `shopify version` answers; absent or failing only warns (the store scripts need it, the rest of fe does not) |
 | `profile` | the word and how it was decided: `FE_PROFILE`, `project-profile.sh`, or a fallback to `none` (warns); in a session, the one the start hook delivered (its marker), else the hooks module's own decision |
 | `store-config` | `shopify.theme.toml` and `.env` present at the project root — presence only, never a value; one missing warns; neither in a `none` project skips |
+| `preview` | where develop and qa validate: `preview theme`, or `local dev server (FE_PREVIEW_DEFAULT=0)` — decided by the same `hooks/conventions.cjs` function as the start line |
 | `event-log` | this session's `fe.jsonl`: its line count and newest `ts`; no file yet passes (a /clear's new session has none before its first line) |
 | `base-live`, `slim-live` | what this session loaded: base's skills, slim's `mcp__slim__view` tool |
 
-The first eight rows come from `scripts/doctor.cjs`. You can also run it by hand:
+The first nine rows come from `scripts/doctor.cjs`. You can also run it by hand:
 `node <fe plugin root>/scripts/doctor.cjs [--project <dir>] [--log-dir <dir>]`. It exits 1 when a row
 fails. By hand, its `event-log` row reads the newest session folder unless `--log-dir` names one.
 Each run writes one `doctor` line to `fe.events`.
@@ -244,6 +250,7 @@ The process environment wins.
 |---|---|---|
 | `FE_PROFILE` | detected | `foundation`, `theme` or `none` (spaces around it trimmed) forces the project profile instead of detecting it, in the `hooks/conventions.cjs` command hook and the hooks module alike; any other value is ignored and the profile is detected |
 | `FE_EVENT_LOG` | on | `0` keeps `fe.events` empty and writes no `fe.jsonl` |
+| `FE_PREVIEW_DEFAULT` | on | `0` turns off the preview-theme default of `/fe:develop-feature-or-fix` and `/fe:qa-feature-or-fix`: they validate on the local dev server, which must then be running. Decided once by the `hooks/conventions.cjs` start hook (its `fe preview default:` line, toml checkouts only) and shown by the doctor's `preview` row; read from the process environment, else `~/.config/domaine/env` — never from the project `.claude/domaine.env` |
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. The `hooks/conventions.cjs` command hook writes its marker `conventions.fe.json` there too. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base` row reads; by the `hooks/conventions.cjs` command hook: the login file it labels in its marker (`<dir>/.claude.json`, or `~/.claude.json` for the default directory) |
 | `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook and the hooks module: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |

@@ -21,6 +21,8 @@ differences are the language-code glob, the `--schema` flag, and the schema name
 rule. Scope `all` = run the storefront pass, then the schema pass (each with its own
 data file).
 
+**Edit delegation:** when the session carries base's `edit delegation` convention, Steps 1–2 go to one `Agent(model: "<the model it names>")` brief: the scope, the English keys/strings, Steps 1–2 and the Notes of this file verbatim, and what to return (the language codes, the script's output, any schema name it shortened). You decide the scope (Step 0) and review its diff. The convention's skips apply (the session already runs on that model or a cheaper one, or the developer ran `/base-edit-direct`).
+
 ## Step 0 — Scope
 
 Explicit argument wins. Otherwise detect: the request names schema / settings /

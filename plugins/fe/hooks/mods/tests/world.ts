@@ -16,6 +16,8 @@ export const TEXT: Record<string, string> = {
   'comment-discipline-foundation': '## fe convention — LiquidDoc and core',
   'store-access': '## fe capability — live store access\n<fe root>/scripts/shopify-admin-gql.sh, <base root>/scripts/shopify-validate.cjs',
   worktree: 'worktree copy list: shopify.theme.toml',
+  'preview-default-on': 'fe preview default: preview theme (<fe root>/references/session-theme.md)',
+  'preview-default-off': 'fe preview default: local dev server (FE_PREVIEW_DEFAULT=0)',
   'progress-series': '## fe convention — the progress series',
 }
 /** The marker fe's SessionStart command hook leaves for session s1. */

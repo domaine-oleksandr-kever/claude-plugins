@@ -15,6 +15,11 @@ Order the rows **Theme name → Theme ID → Preview** (ID is its own row, direc
 > **Pipe escaping:** preview-theme names like `[ELC-126] Kever | Domaine` contain a `|`; inside a
 > Markdown table cell it must be written as `\|` (`[ELC-126] Kever \| Domaine`) or the row breaks.
 
+**Several preview themes:** one Theme name → Theme ID → Preview group per theme, in the order given,
+each group's rows as above. A theme's note (what to view there) → a `**What to check**` row directly
+under that theme's Preview row, one clause; a note that covers every theme → the first step of To check
+(body-sections.md: nothing goes under the table). No preview for this PR (the developer said so) → no table.
+
 Full example (all fields provided, change verified on PLP + PDP, feature renders only with
 `country=GB`):
 
