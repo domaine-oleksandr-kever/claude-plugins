@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Simulation harness for plugins/base/scripts/worktree-setup.sh (the generic worktree: branch, port,
 # shared task workspace, the caller's --copy list) and plugins/base/scripts/scratch-hygiene.cjs (the
-# base-tmp sweep CLI). Scratch git repos only: `origin` is a local bare repo, npm is a shim, nothing
+# base-tmp sweep CLI) and plugins/base/scripts/edit-delegation.cjs (the edit-delegation model). Scratch git repos only: `origin` is a local bare repo, npm is a shim, nothing
 # touches the network or the real checkout. Exit 0 = all green.
 set -u
 
@@ -779,6 +779,82 @@ hyg --help; h7c="$rc"
 if [ "$h7a" -eq 2 ] && [ "$h7b" -eq 2 ] && printf '%s' "$h7err" | grep -q 'unknown argument --bogus' \
    && [ "$h7c" -eq 0 ] && grep -q '^usage: scratch-hygiene.cjs --sweep' "$O"; then ok
 else bad H7-usage "rc=$h7a/$h7b/$h7c err=$h7err"; fi
+
+# ------------------------------------------------------------- edit-delegation.cjs --
+ED="$ROOT/plugins/base/scripts/edit-delegation.cjs"
+EDR="$TMP/ed"; mkdir -p "$EDR/h"
+ed() { node -e 'const m=require(process.argv[1]); const f=new Function("m","return ("+process.argv[2]+")"); process.stdout.write(String(f(m)))' "$ED" "$1" 2>&1; }
+ed_eq() { # ed_eq <label> <expr> <expected>
+  local got; got="$(ed "$2")"
+  if [ "$got" = "$3" ]; then ok; else bad "$1" "got '$got' want '$3'"; fi
+}
+# ed_dec <label> <record json or -> <env json> <expected model|kind|source|gated|record|why> [root]
+ed_dec() {
+  local f="$EDR/h/.claude.json"; rm -f "$f"
+  [ "$2" = "-" ] || printf '%s' "$2" > "$f"
+  ed_eq "$1" "(d=>[d.model,d.kind,d.source,d.gated,d.record,m.whyText(d)].join('|'))(m.editDelegation({env:$3,home:'$EDR/h',root:'${5:-/p/base}'}))" "$4"
+}
+
+if [ -z "$(node -e "require('$ED')" 2>&1)" ]; then ok; else bad ED0-require "loading prints output"; fi
+
+ed_eq ED1-family-opus1m "m.modelFamily('claude-opus-5-5[1m]')" opus
+ed_eq ED1-family-haiku "m.modelFamily('claude-haiku-5-5')" haiku
+ed_eq ED1-family-alias "m.modelFamily('sonnet')" sonnet
+ed_eq ED1-family-nonstring "m.modelFamily(42)" null
+
+ed_eq ED2-below-same "m.atOrBelow('sonnet','sonnet')" true
+ed_eq ED2-below-cheaper "m.atOrBelow('haiku','sonnet')" true
+ed_eq ED2-below-dearer "m.atOrBelow('opus','sonnet')" false
+ed_eq ED2-below-unknown "m.atOrBelow('x','opus')" false
+
+GATE_OPUS='"cachedExtraUsageDisabledReason":"out_of_credits","additionalModelOptionsCache":[{"value":"claude-opus-5-5"}],"cachedGrowthBookFeatures":{"tengu_saffron_lattice":{"perModel":{"claude-opus-5-5":{"enabled":true}}}}'
+gate() { ed "m.creditGate($1).hiddenModels.join(',')+'/'+m.creditGate($1).hiddenReason"; }
+[ "$(gate '{}')" = "/null" ] && ok || bad ED3-gate-none "$(gate '{}')"
+[ "$(gate "{$GATE_OPUS}")" = "opus/out_of_credits" ] && ok || bad ED3-gate-opus "$(gate "{$GATE_OPUS}")"
+G3='{"cachedExtraUsageDisabledReason":"r","additionalModelOptionsCache":[{"value":"claude-opus-5-5[1m]"}],"cachedGrowthBookFeatures":{"tengu_saffron_lattice":{"planLimitsEndDate":"2026-11-01"}}}'
+[ "$(gate "$G3")" = "opus/r" ] && ok || bad ED3-gate-enddate "$(gate "$G3")"
+G4='{"cachedExtraUsageDisabledReason":"r","additionalModelOptionsCache":[{"value":"claude-opus-5-5"}],"cachedGrowthBookFeatures":{"tengu_saffron_lattice":{"enabled":false,"planLimitsEndDate":"x"}}}'
+[ "$(gate "$G4")" = "/null" ] && ok || bad ED3-gate-lattice-off "$(gate "$G4")"
+G5='{"oauthAccount":{"hasExtraUsageEnabled":false},"additionalModelOptionsCache":[{"value":"claude-opus-5-5"}],"cachedGrowthBookFeatures":{"tengu_saffron_lattice":{"overageConsentRequired":true}}}'
+[ "$(gate "$G5")" = "opus/extra_usage_off" ] && ok || bad ED3-gate-extra-off "$(gate "$G5")"
+G6='{"cachedExtraUsageDisabledReason":5,"additionalModelOptionsCache":"x","cachedGrowthBookFeatures":[]}'
+[ "$(gate "$G6")" = "/null" ] && ok || bad ED3-gate-malformed "$(gate "$G6")"
+
+ed_eq ED4-file-home "m.loginFile('/u',undefined)" /u/.claude.json
+ed_eq ED4-file-default-dir "m.loginFile('/u','/u/.claude')" /u/.claude.json
+ed_eq ED4-file-other-dir "m.loginFile('/u','/cfg/work')" /cfg/work/.claude.json
+ed_eq ED4-file-trailing-slash "m.loginFile('/u/','/cfg/work/')" /cfg/work/.claude.json
+ed_eq ED4-file-relative "m.loginFile('/u','rel/dir')" /u/.claude.json
+ed_eq ED4-file-empty "m.loginFile('/u','')" /u/.claude.json
+ed_eq ED4-file-none "m.loginFile(undefined,undefined)" null
+
+po() { ed "(o=>o.value+'/'+o.invalid)(m.parseOverride($1))"; }
+[ "$(po "''")" = "null/false" ] && ok || bad ED5-override-empty "$(po "''")"
+[ "$(po "'0'")" = "off/false" ] && ok || bad ED5-override-zero "$(po "'0'")"
+[ "$(po "' Sonnet '")" = "sonnet/false" ] && ok || bad ED5-override-trim-case "$(po "' Sonnet '")"
+[ "$(po "'fable'")" = "null/true" ] && ok || bad ED5-override-fable "$(po "'fable'")"
+[ "$(po "'1'")" = "null/true" ] && ok || bad ED5-override-one "$(po "'1'")"
+
+TEAM='{"oauthAccount":{"organizationType":"claude_team"}}'
+ed_dec ED6-off "$TEAM" "{BASE_EDIT_MODEL:'0'}" "|off|BASE_EDIT_MODEL|false|false|BASE_EDIT_MODEL=0"
+ed_dec ED6-override "$TEAM" "{BASE_EDIT_MODEL:'haiku'}" "haiku|override|BASE_EDIT_MODEL|false|false|BASE_EDIT_MODEL"
+ed_dec ED6-invalid-falls-through "$TEAM" "{BASE_EDIT_MODEL:'fable'}" "sonnet|work|login record|false|true|work login, Claude Team"
+ed_eq ED6-invalid-raw "m.editDelegation({env:{BASE_EDIT_MODEL:'fable'},home:'/nonexistent'}).invalid" fable
+ed_dec ED6-api-key '{}' "{ANTHROPIC_API_KEY:'sk-test-SECRET'}" "sonnet|api-key|default|false|true|api-key session"
+ed_dec ED6-api-key-blank '{}' "{ANTHROPIC_API_KEY:'  '}" "opus|unknown|default|false|true|login record names no plan"
+ed_dec ED6-api-key-oauth "$TEAM" "{ANTHROPIC_API_KEY:'sk-x'}" "sonnet|work|login record|false|true|work login, Claude Team"
+ed_dec ED6-team "$TEAM" "{}" "sonnet|work|login record|false|true|work login, Claude Team"
+ed_dec ED6-enterprise '{"oauthAccount":{"organizationType":"claude_enterprise"}}' "{}" "sonnet|work|login record|false|true|work login, Claude Enterprise"
+ed_dec ED6-gated-opus "{\"oauthAccount\":{\"organizationType\":\"claude_pro\"},$GATE_OPUS}" "{}" "sonnet|personal|login record|true|true|personal login, Claude Pro, opus needs credits"
+ed_dec ED6-gated-fable-only "{\"oauthAccount\":{\"organizationType\":\"claude_max\"},$(printf '%s' "$GATE_OPUS" | sed 's/opus-5-5/fable-5-1/g')}" "{}" "opus|personal|login record|false|true|personal login, Claude Max"
+ed_dec ED6-max '{"oauthAccount":{"organizationType":"claude_max"}}' "{}" "opus|personal|login record|false|true|personal login, Claude Max"
+ed_dec ED6-pro '{"oauthAccount":{"organizationType":"claude_pro"}}' "{}" "opus|personal|login record|false|true|personal login, Claude Pro"
+ed_dec ED6-synced '{"oauthAccount":{}}' "{}" "opus|synced sandbox|default|false|true|synced sandbox, no plan in the login record" /c/plugins/synced/org_u/base
+ed_dec ED6-missing - "{}" "opus|unknown|default|false|false|no login record"
+ed_dec ED6-no-plan '{}' "{}" "opus|unknown|default|false|true|login record names no plan"
+ed_dec ED6-malformed 'not json' "{}" "opus|unknown|default|false|false|no login record"
+ed_eq ED6-no-args "m.editDelegation().model+'|'+m.editDelegation().kind" "opus|unknown"
+rm -f "$EDR/h/.claude.json"
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ] \

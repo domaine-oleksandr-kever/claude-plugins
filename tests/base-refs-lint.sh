@@ -6,8 +6,8 @@
 #      mcpServers;
 #   c. every ${CLAUDE_PLUGIN_ROOT}/…, <plugin root>/… and <base root>/… path exists in plugins/base;
 #   d. every <name>:<x> in a markdown file names a base agent or skill;
-#   e. every /<name>:<x> names a base skill, and /<name>-progress, /<name>-doctor and /<name>-defects are
-#      the only hyphen commands;
+#   e. every /<name>:<x> names a base skill, and /<name>-progress, /<name>-doctor, /<name>-defects and
+#      /<name>-edit-direct are the only hyphen commands;
 #   f. no bare /commit, /save-task-context, /report-plugin-issue, /pre-commit-review, /worktree;
 #   g. every BASE_* token is a row of plugins/base/README.md → Environment switches;
 #   h. every relative markdown link under plugins/base resolves;
@@ -84,7 +84,7 @@ const agents = new Set(fs.existsSync(path.join(dir, 'agents'))
 const skillDirs = fs.existsSync(path.join(dir, 'skills'))
   ? fs.readdirSync(path.join(dir, 'skills')).filter((n) => fs.statSync(path.join(dir, 'skills', n)).isDirectory()) : [];
 const skills = new Set([...skillSet.split(/\s+/).filter(Boolean), ...skillDirs]);
-const COMMANDS = new Set([`${NAME}-progress`, `${NAME}-doctor`, `${NAME}-defects`]);
+const COMMANDS = new Set([`${NAME}-progress`, `${NAME}-doctor`, `${NAME}-defects`, `${NAME}-edit-direct`]);
 
 const readme = text(path.join(dir, 'README.md')) || '';
 const envSection = (readme.split(/^## Environment switches[ \t]*$/m)[1] || '').split(/^## /m)[0];
@@ -400,6 +400,13 @@ if [ -d "$BASE" ]; then
 else
   bad base-present "plugins/base missing"
 fi
+
+# a base skill step that edits project files briefs the edit delegate (the main-loop guard refuses it otherwise)
+if grep -qF "base's \`edit delegation\` convention" "$BASE/skills/pre-commit-review/SKILL.md"; then ok
+else bad base-edit-delegation-pre-commit-review "pre-commit-review §4 Apply does not brief the edit delegate"; fi
+# task-workspace.md's Read rule carries the drafter exception (a resumed session never reads a draft)
+if grep -qF 'drafter agent wrote' "$BASE/references/task-workspace.md"; then ok
+else bad base-task-workspace-drafts "references/task-workspace.md has no drafter exception in its Read rule"; fi
 
 echo "base-refs-lint: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

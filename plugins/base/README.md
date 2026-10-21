@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.13.1**.
+Current release: **base v0.14.0**.
 
 ## Status
 
@@ -134,6 +134,7 @@ slim resizes and compacts.
 | `scripts/review-scope.sh` | `/base:pre-commit-review`, `/base:commit`, a team plugin's PR gate | the review scope and its `diff_hash` for the `.git/.base-review` marker: merge-base to working tree, untracked files included, build-dirtied rewrites kept out; `--check` prints one line `marker=fresh\|stale\|other-branch\|none` (the marker against this branch and scope) for `/base:commit`'s gate |
 | `scripts/worktree-setup.sh` | `/base:worktree` | creates or removes a sibling `git worktree` with its own branch and dev port, the `.claude/tasks` link back to the main checkout, and the `--copy` list |
 | `scripts/doctor.cjs` | `/base-doctor`, or by hand | the static install checks (below); `--json` for the command |
+| `scripts/edit-delegation.cjs` | `hooks/conventions.cjs`, `scripts/doctor.cjs` | the edit-delegation model from the login record and `BASE_EDIT_MODEL` (one place decides): a module, no CLI |
 | `scripts/scratch-hygiene.cjs` | base's hooks module, once per session | sweeps `.claude/base-tmp` of files older than `BASE_TMP_TTL` hours and keeps it in `.git/info/exclude` |
 | `scripts/qa-stores.cjs` | a QA engineer by hand; `/qa:preflight` reads it | the QA store registry, one file per machine (`~/.config/domaine/qa-stores.json`, dir 0700, file 0600): `list`, `get <store>` (the only command that prints a password; `--field password\|alias\|defaultTheme\|domain\|notes` prints that one value raw, nothing for a field the store lacks), `find`, `set`, `unset`, `path` |
 | `scripts/shopify-validate.cjs` | `/base:shopify` where no dev-mcp server is loaded (a cloud session) | validates one Admin GraphQL document through `npx -y @shopify/dev-mcp@latest` over stdio: `--file`, `--code` or stdin, `--version` (default `2026-10`); prints `result=valid\|invalid\|unavailable` and the server's detail text; exit 0 / 1 / 3 (unavailable: send the operation anyway), 2 = usage; a timeout before the server speaks leaves `npx` to finish its install instead of killing it, and `error=server_exited_early` names the `_npx` dir to delete |
@@ -182,6 +183,7 @@ base's hooks module registers these commands at each session start.
 | `/base-doctor` | checks the install (Doctor) |
 | `/base-progress` | pins or unpins the work id band's checklist shows (Workspace) |
 | `/base-defects` | only in dogfood mode: lists the plugin defects reported, newest first (Dogfood mode) |
+| `/base-edit-direct` | allows direct project-file edits (and reading a drafter's draft) for this session id, while edit delegation is on (Guards); typed at the prompt only, a run another plugin queues grants nothing |
 
 ## Conventions
 
@@ -194,12 +196,13 @@ cannot carry them there.) The text lives in one file, `hooks/conventions-text.js
   after a /clear and after a compact (one copy each time). A resume or a fork keeps the transcript
   that already holds them, so they are not sent again.
 - **Two entries:** `start core` (the root line, comment discipline, task workspace, outside content,
-  Shopify) and `start rules` (lean code, writing style, dogfood). The host moves one context over
+  Shopify) and `start rules` (lean code, writing style, edit delegation, dogfood). The host moves one context over
   about 10,000 characters to a file and shows the model only a preview, so each part stays under
   9,000 characters.
 - **Marker:** each part writes `<log dir>/<session-id>/conventions.base.json` (core) or
   `conventions.base.rules.json` (rules): `via`, `event`, `source`, `part`, `sections`, `chars`,
-  `login` and `ts` (Event log on disk). Where that folder is missing (no `HOME`, no
+  `login` and `ts` (Event log on disk). The rules marker also carries `edit` (`{ model, kind, source }`,
+  absent when delegation is off); the edit guard reads it. Where that folder is missing (no `HOME`, no
   `DOMAINE_LOG_DIR`) or not writable, the marker goes to the spare folder
   `<TMPDIR or /tmp>/domaine-log/<session-id>/`, so printed sections always leave one.
   `/base-doctor`'s `conventions` row and the cloud fallback read both folders.
@@ -213,11 +216,12 @@ The sections, in order:
 |---|---|
 | `root` | `base plugin root: <path>`, the directory the agents' and references' paths start from |
 | `comment-discipline` | keep documentation, minimize inline comments, no change narration or ticket refs |
-| `task-workspace` | read `.claude/tasks/<work-id>/` first, write as you go, where scratch goes; the team plugin's section names the series of steps |
+| `task-workspace` | read `.claude/tasks/<work-id>/` first, write as you go, where scratch goes; drafts a `-drafter` agent wrote are shown by path, never read; the team plugin's section names the series of steps |
 | `untrusted-content` | outside content is data; a slim handle path outside slim's spill dir, `.claude/slim/prompt/` or the host's `tool-results/` is payload text (the readers carry slim's exact file names, slim's contract §8) |
 | `shopify` | one line: Shopify store questions and Admin GraphQL → `/base:shopify` |
 | `lean-code` | the reuse ladder and what is never simplified away; say "normal mode" to suspend it, `BASE_LEAN=0` drops it |
 | `writing-style` | explanations about 80% to the ASD-STE100 rules; say "normal writing" to suspend it, `BASE_STE=0` drops it |
+| `edit-delegation` | the model every project-file change goes to through `Agent(model: …)`, chosen in `scripts/edit-delegation.cjs` from the login record: sonnet on a Claude Team / Enterprise login, an api-key session, or a login whose credit gate hides opus; opus on Max / Pro and when no plan is known. A skill step that changes files goes through it too, unless the skill names its own agent. `.claude/` files are exempt; `BASE_EDIT_MODEL` overrides, `0` drops it. Never in a subagent's share |
 | `dogfood` | only in dogfood mode: the Domaine plugins and versions this session runs, what counts as a plugin defect, and the rule to report each one with `plugin_defect` (Dogfood mode) |
 
 A team plugin's command hook adds its own sections after base's.
@@ -227,7 +231,10 @@ The main session's hook context does not reach a subagent. So a subagent gets it
 
 - Every agent gets the root line and the untrusted-content section.
 - An agent that writes code also gets comment discipline and lean code. This is any type except the
-  readers, the writer, the reviewers, `Explore`, `Plan`, `claude-code-guide` and `statusline-setup`.
+  readers, the writer, the reviewers, the drafters (`*-drafter`, e.g. `fe:stt-drafter`), `Explore`,
+  `Plan`, `claude-code-guide` and `statusline-setup`.
+- A drafter also gets writing style (off with `BASE_STE=0`).
+- No agent gets `edit-delegation` (a delegate would delegate again).
 - In dogfood mode, every agent also gets the `dogfood` section.
 - A fork gets no section, because it inherits the parent's context.
 
@@ -248,6 +255,7 @@ deny writes one `guard` line to `base.events`. The guards also check subagents' 
 | MCP precedence | the tools of base's `atlassian`, `notion-mcp` and `figma-dev-mode` servers (`mcp__plugin_base_<server>__<tool>`), in the main loop and in subagents | the first call of such a tool in a session while a server that is no plugin's (a claude.ai connector, a user-scope server) lists both the same tool and the server's signature tool (`getJiraIssue`, `notion-fetch`, `get_design_context`), so a shared generic name such as `search` or `authenticate` makes no twin: the deny names that tool to call instead, and the same call is allowed after this one refusal (`base.mcpSoft`), so a connector that needs sign-in strands nobody. A tool list that fails lets the call run |
 | reader writes | the Jira, Confluence and Notion write tools of any MCP server (slim's and base's registered tools aside), in a subagent | every write for `base:jira-reader`, `base:doc-reader` and `base:figma-reader`; every write but `editJiraIssue` and `addCommentToJiraIssue` for `base:jira-writer`; every write for a subagent with no `agents/<agent_id>.json` record (fail closed: the deny says `no agent-type marker for this subagent`); other agent types and the main loop are not limited. A probe of the file that fails lets the call run |
 | reader scope | every MCP tool but slim's and base's registered ones, in a subagent of base's reader or writer types | a call on a server that lists no signature tool of the agent's vendors: `getJiraIssue` for jira-reader and the writer, `getJiraIssue` or `notion-fetch` for doc-reader, `get_design_context` for figma-reader (base's own server of that vendor always counts), so a connector the session holds for other work (a store, a docs editor, a browser) stays out of reach of a reader fed untrusted text. A tool list that fails lets the call run |
+| edit delegation | `Write`, `Edit`, `NotebookEdit` in the main loop (no `agentId`) on a file under the session root outside `.claude/`, and a main-loop read of a drafter's draft (`.claude/tasks/<id>/steps-to-test.md`, `pr-body.md`: `Read`, `Grep`, slim's `view`, or a Bash command naming one — `drafter-check.cjs`, `gh pr … --body-file`, `test -s` and `ls` stay allowed), while the rules marker names a model | refused with the `Agent(model: …)` pointer (a draft: show its path, change it through the same agent) every time, unless the session already runs on that family or a cheaper one (haiku < sonnet < opus < fable), the developer ran `/base-edit-direct` this session, or `BASE_GUARD=0`; allowed edits are counted (`base.mainEdits`, the doctor's `delegate` row, one `delegate` log line per file). A main-loop Bash write (`sed -i`, redirection, `tee`, `git apply`, `patch`) not naming `.claude/`, `/tmp/` or `/dev/` is counted, never refused. The marker is read once per session id |
 | scratch path | the browser tools that take a file path (`take_screenshot`, `browser_take_screenshot`, `take_snapshot`, `get_network_request`, `browser_run_code_unsafe`) of any MCP server | a path outside the project (chrome-devtools also accepts its OS temp dir), or inside it outside `.claude/` (the task workspace's `tmp/`, `.claude/tmp/`, `.claude/base-tmp/`); in a git worktree, a path into the shared task workspace. `hooks/scratch-path-guard.cjs` decides against the project root the session launched in (`base.guardRoot`), names an absolute path to use instead and creates its directory. The tools' descriptions carry the rule too. `BASE_SCRATCH_GUARD=0` turns this one off |
 
 base's playwright server writes its own files under `.claude/base-tmp/playwright`. When the guard
@@ -292,6 +300,8 @@ a Write or Edit under `.claude/tasks/` or a Bash command naming the workspace th
 | `base.swept` | the session id whose base-tmp and event-log sweeps ran |
 | `base.dogfood` | dogfood mode's session: `{ sid, failMs, script, reportMs }` — the last plugin-script failure and the last `plugin_defect` report, mirrored to `dogfood-state.json` with `errors: [{script, line, ms}]`, the main loop's plugin-script failures since the last `plugin_defect` report (at most 50) |
 | `base.classic` | the session id whose `classic.UserPromptSubmit` reached base's mods (the doctor's `classic` row) |
+| `base.mainEdits` | `{ sid, n, files, shell, refused, direct }`: this session's main-loop project-file changes outside `.claude/` (tool edits over at most 50 files, recognised shell writes), the edit guard's refusals, and whether `/base-edit-direct` ran; another sid counts as none |
+| `base.delegation` | `{ sid, model }`: the delegate model the rules marker of session `sid` names, read once per session id (null = no delegation) |
 
 **Autosave.** A savable event is one of these, in the main loop: an Agent call that returned its
 result, the stop of a background agent it launched, a Write / Edit outside `.claude/`, or an MCP
@@ -336,6 +346,8 @@ and `/base-progress` alone names the pin. The checklist itself is band's `/band-
 - `doctor`: the counts of a `/base-doctor` run.
 - `defect`: in dogfood mode, a `plugin_defect` report (`<plugin>: <title>`) or a failed plugin
   script (`script failed: <basename>`).
+- `delegate`: a main-session change to a project file the edit-delegation convention asked to
+  delegate, one line per file.
 
 band and slim write their own session, model, compaction, rate and compression lines. Each line
 also goes to base's file on disk (Event log on disk).
@@ -427,7 +439,8 @@ counts, and the last 10 `base.events` lines:
 | `base-tmp` | `.claude/base-tmp`: files, size, how many the next sweep removes, whether git ignores it |
 | `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
 | `cache` | only when `<config dir>/plugins/cache/domaine/<name>/` holds a version no install record names: WARN, the stale versions per plugin and a pointer to `scripts/install.sh --prune-cache` (a plugin with no recorded version on disk, and a version a live session holds in `.in_use/<pid>`, are left out) |
-| `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_TMP_TTL` that is not hours, a `BASE_SHOPIFY_VALIDATE_TIMEOUT` outside 1-600 seconds, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |
+| `delegate` | PASS `edit delegation: sonnet (work login, Claude Team)` (or `opus (personal login, Claude Max)`, `(BASE_EDIT_MODEL)`, `(api-key session)`, `(no login record)`); SKIP `edit delegation: off (BASE_EDIT_MODEL=0)`; the command adds `; this session: <n> tool edit(s) in <m> file(s), <k> shell write(s)[, <r> refused]` |
+| `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_EDIT_MODEL` other than opus, sonnet, haiku or 0, a `BASE_TMP_TTL` that is not hours, a `BASE_SHOPIFY_VALIDATE_TIMEOUT` outside 1-600 seconds, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |
 | `slim-live` | what this session loaded: slim's `mcp__slim__view` tool registered |
 | `conventions` | this session's markers (Conventions): PASS `SessionStart command hook (<source>): base core+rules, fe, qa, be, pm` for the Domaine plugins settings enable, that left a marker, or whose `<plugin>.jsonl` is in the log folder (a claude.ai sandbox's synced plugins have no settings entry); WARN names such a plugin with no marker, `(enabled)` or `(loaded)`; FAIL after the first prompt when no marker is there; PASS `prompt.context fallback` where nothing draws and base's mod served them; SKIP before the first prompt; the markers are read from the log folder and the spare folder |
 | `classic` | PASS once `classic.UserPromptSubmit` reached base's mods this session; WARN `classic.* did not reach base's mods this session (login: work, <login file>)` after a prompt without it (the login `work`, `personal`, `synced sandbox` for a claude.ai-synced base whose login file names no org type, else `unknown`): the session title, autosave and progress, band's resume handlers and slim's prompt-paste compression are off on that login; SKIP before the first prompt |
@@ -550,16 +563,18 @@ Every switch base reads has a row here; set it in `~/.claude/settings.json` → 
 |---|---|---|
 | `BASE_EVENT_LOG` | on | `0` keeps `base.events` empty and writes no `base.jsonl`: band's Log pane shows no base line |
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. `hooks/conventions.cjs` writes its markers and reads the dogfood files there too (Event log on disk) |
-| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs` and `hooks/conventions.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `slim` row and the dogfood versions line read; dogfood mode reads the marketplace repo from its `plugins/`; the hook reads the login file `<dir>/.claude.json` (`~/.claude.json` when the directory is `~/.claude`) for the doctor's login label and the dogfood account |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs` and `hooks/conventions.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `slim` row and the dogfood versions line read; dogfood mode reads the marketplace repo from its `plugins/`; the hook reads the login file `<dir>/.claude.json` (`~/.claude.json` when the directory is `~/.claude`, empty or relative) for the doctor's login label, the dogfood account and the edit-delegation model |
 | `CLAUDE_CODE_ACCOUNT_UUID` | — | read, never set: the claude.ai account id of the session (set by the host in every claude.ai sandbox); dogfood mode is on when `plugins/base/dogfood.json` lists it (Dogfood mode); unset, `hooks/conventions.cjs` and base's mods take `oauthAccount.accountUuid` from the login file |
 | `TMPDIR` | `/tmp` | read, never set, by `hooks/conventions.cjs` and base's mods: `<dir>/domaine-log/<session-id>/` is the spare folder of the conventions markers and the `agents/` records where the log folder is missing or not writable (Conventions) |
 | `CLAUDE_PLUGIN_ROOT` | — | read, never set, by `hooks/conventions.cjs`: the plugin root the host runs the command hooks from, named in the root line (unset, the script's own parent); never used to find the config directory, as it can be a marketplace source folder |
 | `CLAUDE_CODE_ENTRYPOINT` | — | read, never set, by `hooks/conventions.cjs`: `sdk-*` (`claude -p`, the SDK) picks the dogfood rule for a session no surface draws |
 | `CLAUDE_CODE_REMOTE` | — | read, never set, by `hooks/conventions.cjs`: `true` (a claude.ai cloud session) picks the same rule |
-| `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, the scratch-path guard, and the MCP precedence and reader-write guards |
+| `BASE_GUARD` | on | `0` turns every guard off: the attribution and git-hooks guards on Bash, the scratch-path guard, the MCP precedence and reader-write guards, and the edit-delegation refusal (the count stays) |
 | `BASE_LEAN` | on | `0` drops the lean-code convention from the `SessionStart` command hook (`start rules`) and from code-writing subagents (`SubagentStart`), and from the cloud fallback |
 | `BASE_SCRATCH_GUARD` | on | `0` turns the scratch-path guard off: the browser tools write wherever their path points |
-| `BASE_STE` | on | `0` drops the writing-style convention (ASD-STE100) from the `SessionStart` command hook (`start rules`) and from the cloud fallback |
+| `BASE_STE` | on | `0` drops the writing-style convention (ASD-STE100) from the `SessionStart` command hook (`start rules`), from the drafters' subagent share and from the cloud fallback |
+| `BASE_EDIT_MODEL` | from the login | `opus`, `sonnet` or `haiku` (any case, trimmed) forces the model the edit-delegation convention and the edit guard name; `0` drops both; any other value is read as unset (the doctor's `switches` row warns) |
+| `ANTHROPIC_API_KEY` | — | read, never set or printed, by `scripts/edit-delegation.cjs`: present while the login record has no `oauthAccount`, the session counts as an api-key session and delegation picks sonnet |
 | `BASE_FIGMA_SOURCE` | `auto` | `base:figma-reader`'s source ladder: `auto` tries the Figma MCPs, then the REST API; `mcp` never uses the token; `rest` skips the MCPs. Process environment only |
 | `BASE_SESSION_TITLE` | on | `0` leaves the session title to Claude Code |
 | `BASE_TMP_TTL` | `24` | hours a file in `.claude/base-tmp` lives before the session sweep deletes it; `0` turns the sweep off |
@@ -593,9 +608,9 @@ Agents never read `.env` themselves.
 | `tests/base-external-screenshots-sim.sh` | `scripts/external-screenshots.sh`: the allow-list, redirect hops, `og:image` resolution, the format from the bytes, cache, pacing, no resample |
 | `tests/base-figma-rest-sim.sh` | `scripts/figma-rest.sh`: the token, the modes, `--policy`, the cache, retries, the out-dir gate |
 | `tests/base-md-to-adf.mjs` | `scripts/md-to-adf.cjs`: the ADF it writes, the CLI contract, round trips through slim's adf engine |
-| `tests/hooks-sim.sh` (DH block) | `hooks/conventions.cjs` as the host runs each `hooks/hooks.json` command: the envelopes, the two start parts and their switches, the 9,000-character cap, the markers, the versions line, the rule variant, the login label, the subagent share and its `agents/<agent_id>.json` record, the dogfood `Stop` block, the text file |
-| `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts, `--json`, `--log-dir`, Windows |
-| `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list, the `settings.local.json` registration) and the `scripts/scratch-hygiene.cjs` sweep |
+| `tests/hooks-sim.sh` (DH block) | `hooks/conventions.cjs` as the host runs each `hooks/hooks.json` command: the envelopes, the two start parts and their switches, the 9,000-character cap, the markers, the versions line, the rule variant, the login label, the edit-delegation section and marker field per login kind, the subagent share (drafters included) and its `agents/<agent_id>.json` record, the dogfood `Stop` block, the text file |
+| `tests/base-doctor-sim.sh` | `scripts/doctor.cjs` against sandbox plugin roots, homes, projects and log folders: every row's verdicts (the `delegate` row per login kind and override), `--json`, `--log-dir`, Windows |
+| `tests/base-scripts-sim.sh` | `scripts/worktree-setup.sh` against scratch git repos (branches, ports, removal guards, the `--copy` list, the `settings.local.json` registration) and the `scripts/scratch-hygiene.cjs` sweep, and `scripts/edit-delegation.cjs` (the model per login record, credit gate and override) |
 | `tests/base-review-flow-sim.sh` | `scripts/review-scope.sh` against scratch git repos: the base, the merge-base, the hash over tracked and untracked work, the build-dirtied exclusion, the `--check` marker verdicts (fresh / stale / other-branch / none, read-only, per worktree), bash 3.2 |
 | `tests/base-qa-stores-sim.sh` | `scripts/qa-stores.cjs`: `list`, `get` (JSON and `--field` raw values, a missing field prints nothing, an unknown field is a usage error), `find`, `set`, `unset`, `path`, file and dir modes, the password printed by `get` only |
 | `tests/base-shopify-validate-sim.sh` | `scripts/shopify-validate.cjs` against a fake `npx` on `PATH`: the handshake and the constant prompt, valid / invalid, stray frames, every unavailable shape incl. `server_exited_early` and its `_npx` dir, a plain `INVALID` status, the timeout and the kill after the server spoke, no kill while `npx` still installs, `BASE_SHOPIFY_VALIDATE=0`, usage; `SIM_LIVE=1` adds two cases against the real server |

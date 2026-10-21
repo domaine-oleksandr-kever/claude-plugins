@@ -777,7 +777,8 @@ else bad enabled-plugins-fnd-false "an enabledPlugins example enables base or a 
 # ------------------------------------------------------------- the team plugins' READMEs --
 # A team plugin is any plugins/<p> whose manifest `dependencies` is exactly ["base"]. Its README
 # carries the `<p> v<semver>` marker bump-version stamps, a Skills table row `/<p>:<name>` for every
-# skills/<name>/SKILL.md it ships, and, for a plugin whose skills were imported, the import line.
+# skills/<name>/SKILL.md it ships, an Agents (or Agent) table row `<p>:<name>` for every
+# agents/<name>.md, and, for a plugin whose skills were imported, the import line.
 TEAM_PLUGINS="$(for m in "$ROOT"/plugins/*/.claude-plugin/plugin.json; do
   "$NODE_BIN" -e '
     try { const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -799,6 +800,13 @@ for p in $TEAM_PLUGINS; do
     n="$(basename "$(dirname "$s")")"
     if printf '%s\n' "$SKILLS_SECTION" | grep -qE "^\| \`/$p:$n[\` ]"; then ok
     else bad "team-readme-skill-row-$p-$n" "plugins/$p/README.md → Skills has no row for /$p:$n"; fi
+  done
+  AGENTS_SECTION="$(awk '/^## Agents?[[:space:]]*$/ { on = 1; next } on && /^## / { exit } on' "$r" 2>/dev/null)"
+  for a in "$ROOT/plugins/$p"/agents/*.md; do
+    [ -f "$a" ] || continue
+    n="$(basename "$a" .md)"
+    if printf '%s\n' "$AGENTS_SECTION" | grep -qE "^\| \`$p:$n\` "; then ok
+    else bad "team-readme-agent-row-$p-$n" "plugins/$p/README.md → Agents has no row for $p:$n"; fi
   done
   case "$p" in
     be|pm) if grep -qxF "$IMPORT_LINE" "$r"; then ok

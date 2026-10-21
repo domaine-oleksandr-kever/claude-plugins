@@ -16,7 +16,8 @@
  *     --json     `{ root, rows: [{ status, name, detail }] }` instead of the table
  *
  * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, base-tmp, event-log,
- * cache (only when the plugin cache holds a Domaine version no install record names: WARN), switches (only when a BASE_* switch holds a value outside its README domain: WARN). Every row is one
+ * cache (only when the plugin cache holds a Domaine version no install record names: WARN), delegate (the
+ * edit-delegation model and why; SKIP when BASE_EDIT_MODEL=0), switches (only when a BASE_* switch holds a value outside its README domain: WARN). Every row is one
  * PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
  * BASE_TMP_TTL (the age the session sweep removes base-tmp files at), DOMAINE_LOG_DIR and every BASE_*
  * switch. It only reports, never repairs.
@@ -29,6 +30,7 @@ const os = require('os');
 const { spawnSync } = require('child_process');
 const { baseTmpStats, parseTtl, SCRATCH_ROOT_REL, DEFAULT_TTL_HOURS } = require('./scratch-hygiene.cjs');
 const { parseTimeout, DEFAULT_TIMEOUT_S } = require('./shopify-validate.cjs');
+const { editDelegation, whyText, parseOverride } = require('./edit-delegation.cjs');
 
 const MIN_NODE_MAJOR = 18;
 // Plugin names the engine refuses to load a hooks module for (validate still passes).
@@ -403,6 +405,13 @@ function checkCache(claudeDir) {
   if (parts.length) warn('cache', 'stale versions in ' + cache + ': ' + parts.join('; ') + ' — scripts/install.sh --prune-cache in the plugins checkout removes them');
 }
 
+// The edit-delegation model the SessionStart hook announces (hooks/conventions.cjs asks the same function).
+function checkDelegation(homeDir, configDir, pluginRoot) {
+  const d = editDelegation({ env: process.env, home: homeDir, configDir, root: pluginRoot });
+  if (!d.model) skip('delegate', 'edit delegation: off (BASE_EDIT_MODEL=0)');
+  else pass('delegate', 'edit delegation: ' + d.model + ' (' + whyText(d) + ')');
+}
+
 // Read as `=== '0'`, untrimmed: any other value is on.
 const ON_OFF = ['BASE_AUTOSAVE', 'BASE_EVENT_LOG', 'BASE_GUARD', 'BASE_LEAN', 'BASE_SCRATCH_GUARD', 'BASE_SESSION_TITLE', 'BASE_SHOPIFY_VALIDATE', 'BASE_STE'];
 
@@ -422,6 +431,7 @@ function checkSwitches(env) {
   if (env.BASE_DOGFOOD !== undefined && !['', '0', '1'].includes(env.BASE_DOGFOOD)) bad.push(shown('BASE_DOGFOOD') + ' is read as off — only 1 turns it on');
   const repo = (env.BASE_DOGFOOD_REPO || '').trim();
   if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) bad.push(shown('BASE_DOGFOOD_REPO') + ' is not <owner>/<repo> — plugin_defect files no GitHub issue');
+  if (parseOverride(env.BASE_EDIT_MODEL).invalid) bad.push(shown('BASE_EDIT_MODEL') + ' is read as unset — opus, sonnet, haiku or 0');
   if (bad.length) warn('switches', bad.join('; '));
 }
 
@@ -442,6 +452,7 @@ function main() {
   checkCoreTmp(projectDir);
   checkEventLog(opts['log-dir'], homeDir);
   checkCache(claudeDir);
+  checkDelegation(homeDir, opts.home ? undefined : process.env.CLAUDE_CONFIG_DIR, pluginRoot);
   checkSwitches(process.env);
 
   const failed = rows.some((r) => r.status === 'FAIL');

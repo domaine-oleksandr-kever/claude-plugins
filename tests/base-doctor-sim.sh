@@ -5,7 +5,7 @@
 # servers) are the mod's and live in plugins/base/hooks/mods/tests/doctor.test.ts. Exit 0 = all green.
 set -u
 unset CLAUDE_CONFIG_DIR BASE_AUTOSAVE BASE_TMP_TTL DOMAINE_LOG_DIR BASE_EVENT_LOG BASE_GUARD BASE_LEAN BASE_SCRATCH_GUARD \
-  BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE BASE_DOGFOOD BASE_DOGFOOD_REPO
+  BASE_SESSION_TITLE BASE_STE BASE_FIGMA_SOURCE BASE_DOGFOOD BASE_DOGFOOD_REPO BASE_EDIT_MODEL ANTHROPIC_API_KEY
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCTOR="$ROOT/plugins/base/scripts/doctor.cjs"
@@ -81,7 +81,8 @@ expect CD1-green 0 "base doctor — plugin root: $P" "PASS  node" "PASS  manifes
   "PASS  hooks      1 module(s): ./mods/register.ts" "PASS  scripts    1 shell script(s) executable" \
   "PASS  slim       slim@domaine 0.5.0 installed and enabled" \
   "PASS  base-tmp   .claude/base-tmp absent — nothing written there yet" \
-  "PASS  event-log  $H/.claude/domaine/log: no session directory yet" "doctor: 7 passed, 0 failed, 0 skipped" "!platform"
+  "PASS  event-log  $H/.claude/domaine/log: no session directory yet" "PASS  delegate   edit delegation: opus (no login record)" \
+  "doctor: 8 passed, 0 failed, 0 skipped" "!platform"
 
 # The shipped plugin passes its own static rows.
 run --home "$H" --project "$PRJ"
@@ -92,7 +93,7 @@ run --root "$P" --home "$H" --project "$PRJ" --json
 if node -e '
   const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
   const names = j.rows.map((r) => r.name).join(",");
-  if (j.root !== process.argv[2] || names !== "node,manifest,hooks,scripts,slim,base-tmp,event-log") process.exit(1);
+  if (j.root !== process.argv[2] || names !== "node,manifest,hooks,scripts,slim,base-tmp,event-log,delegate") process.exit(1);
   if (!j.rows.every((r) => ["PASS","FAIL","SKIP","WARN"].includes(r.status) && typeof r.detail === "string")) process.exit(1);
 ' "$O" "$P" 2>/dev/null && [ "$rc" -eq 0 ] && [ "$(wc -l < "$O" | tr -d ' ')" = "1" ]; then ok
 else bad CD3-json "rc=$rc out=$(head -c 300 "$O")"; fi
@@ -250,7 +251,7 @@ rc=0; BASE_LEAN=false BASE_GUARD=' 0' BASE_FIGMA_SOURCE=figma BASE_TMP_TTL=abc \
   node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
 expect CD39-switches-invalid 0 'WARN  switches' 'BASE_GUARD=" 0" is read as on — only 0 turns it off' \
   'BASE_LEAN="false" is read as on — only 0 turns it off' 'BASE_FIGMA_SOURCE="figma" is read as auto — auto, mcp or rest' \
-  'BASE_TMP_TTL="abc" is read as 24 — hours, 0 or more' "doctor: 7 passed, 0 failed, 0 skipped, 1 warned"
+  'BASE_TMP_TTL="abc" is read as 24 — hours, 0 or more' "doctor: 8 passed, 0 failed, 0 skipped, 1 warned"
 rc=0; BASE_TMP_TTL=-1 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" --json >"$O" 2>"$E" || rc=$?
 if [ "$rc" -eq 0 ] && node -e '
   const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -284,13 +285,46 @@ expect CD40-cache-clean 0 "!WARN  cache" "!warned"
 mkdir -p "$C/domaine/slim/0.9.0" "$C/domaine/slim/0.10.2" "$C/domaine/slim/.tmp" "$C/domaine/fe/0.9.0" "$C/domaine/band/0.1.0"
 run --root "$P" --home "$HC" --project "$PRJ"
 expect CD41-cache-stale 0 "WARN  cache" "stale versions in $C/domaine: fe 0.9.0; slim 0.9.0, 0.10.2 — scripts/install.sh --prune-cache" \
-  "!band 0.1.0" "!.tmp" "!figma" "doctor: 7 passed, 0 failed, 0 skipped, 1 warned"
+  "!band 0.1.0" "!.tmp" "!figma" "doctor: 8 passed, 0 failed, 0 skipped, 1 warned"
 # What --prune-cache leaves is never listed: a version a live session holds, a plugin with no recorded version on disk.
 mkdir -p "$C/domaine/slim/0.10.2/.in_use/$$" "$C/domaine/slim/0.9.0/.in_use/2147483646"
 rm -rf "$C/domaine/fe/0.9.1" "$C/domaine/fe/0.8.0"
 run --root "$P" --home "$HC" --project "$PRJ"
 expect CD42-cache-prune-rules 0 "WARN  cache" "stale versions in $C/domaine: slim 0.9.0 — scripts/install.sh --prune-cache" \
   "!0.10.2" "!fe 0.9.0"
+
+# -------------------------------------------------------------------------------- delegate --
+# The edit-delegation model hooks/conventions.cjs announces, from the same function: the login record under --home
+# (else CLAUDE_CONFIG_DIR's), BASE_EDIT_MODEL over it; an api-key session's key value is never printed.
+TEAM='{"oauthAccount":{"organizationType":"claude_team"}}'
+GATED='{"oauthAccount":{"organizationType":"claude_pro"},"cachedExtraUsageDisabledReason":"out_of_credits","additionalModelOptionsCache":[{"value":"claude-opus-5-5"}],"cachedGrowthBookFeatures":{"tengu_saffron_lattice":{"perModel":{"claude-opus-5-5":{"enabled":true}}}}}'
+printf '%s' "$TEAM" > "$H/.claude.json"
+run --root "$P" --home "$H" --project "$PRJ"; expect CD43-delegate-team 0 "PASS  delegate   edit delegation: sonnet (work login, Claude Team)"
+printf '{"oauthAccount":{"organizationType":"claude_max"}}' > "$H/.claude.json"
+run --root "$P" --home "$H" --project "$PRJ"; expect CD44-delegate-max 0 "edit delegation: opus (personal login, Claude Max)"
+printf '%s' "$GATED" > "$H/.claude.json"
+run --root "$P" --home "$H" --project "$PRJ"; expect CD45-delegate-gated 0 "edit delegation: sonnet (personal login, Claude Pro, opus needs credits)"
+rm -f "$H/.claude.json"
+run --root "$P" --home "$H" --project "$PRJ"; expect CD46-delegate-missing 0 "edit delegation: opus (no login record)"
+rc=0; BASE_EDIT_MODEL=haiku node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD47-delegate-override 0 "PASS  delegate   edit delegation: haiku (BASE_EDIT_MODEL)" "!WARN  switches"
+rc=0; BASE_EDIT_MODEL=0 node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD48-delegate-off 0 "SKIP  delegate   edit delegation: off (BASE_EDIT_MODEL=0)" "doctor: 7 passed, 0 failed, 1 skipped" "!switches"
+printf '%s' "$TEAM" > "$H/.claude.json"
+rc=0; BASE_EDIT_MODEL=fable node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD49-delegate-invalid 0 "WARN  switches" 'BASE_EDIT_MODEL="fable" is read as unset — opus, sonnet, haiku or 0' \
+  "edit delegation: sonnet (work login, Claude Team)"
+mkdir -p "$TMP/cfg"; printf '%s' "$TEAM" > "$TMP/cfg/.claude.json"; printf '{"oauthAccount":{"organizationType":"claude_max"}}' > "$H/.claude.json"
+rc=0; HOME="$H" CLAUDE_CONFIG_DIR="$TMP/cfg" node "$DOCTOR" --root "$P" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD50-delegate-config-dir 1 "edit delegation: sonnet (work login, Claude Team)"
+rc=0; HOME="$H" CLAUDE_CONFIG_DIR="$TMP/cfg" node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD50b-delegate-home-wins 0 "edit delegation: opus (personal login, Claude Max)"
+printf '{}' > "$H/.claude.json"
+rc=0; ANTHROPIC_API_KEY=sk-x node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" >"$O" 2>"$E" || rc=$?
+expect CD51-delegate-api-key 0 "edit delegation: sonnet (api-key session)" "!sk-x"
+rc=0; ANTHROPIC_API_KEY=sk-x node "$DOCTOR" --root "$P" --home "$H" --project "$PRJ" --json >"$O" 2>"$E" || rc=$?
+expect CD51b-delegate-api-key-json 0 '"name":"delegate"' "!sk-x"
+rm -rf "$H/.claude.json" "$TMP/cfg"
 
 # The suite never touched the real checkout.
 if [ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)" = "$HEAD_BEFORE" ]; then ok; else bad CD-head "HEAD moved"; fi

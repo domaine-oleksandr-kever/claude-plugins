@@ -338,7 +338,8 @@ describe('refresh', () => {
     await start($)
     reset(calls)
     await $.tool.call({ tool: 'Write', file_path: `${ROOT}/src/a.ts`, content: 'x' })
-    expect(calls.fs).toEqual([])
+    // the edit guard's once-per-session read of the rules marker is not progress's
+    expect(calls.fs.filter(c => !c.endsWith('/conventions.base.rules.json'))).toEqual([])
     expect(calls.git).toBe(0)
   })
 

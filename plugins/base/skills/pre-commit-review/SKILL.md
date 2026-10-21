@@ -107,6 +107,11 @@ can check, not intent) becomes a named ceiling — record it as a `ceiling:` ent
 ## 4. Apply
 
 After the developer approves (with their corrections), make exactly the agreed edits — nothing more.
+**Edit delegation:** when the session carries base's `edit delegation` convention, the approved rows go to
+one `Agent(model: "<the model it names>")` brief: each row (file:line, check, the agreed fix) verbatim,
+"nothing more", the checks to run, and what to return (files changed, the check results). You review its
+diff against the approved table; the `git add` rows and the marker stay here. The convention's skips apply
+(the session already runs on that model or a cheaper one, or the developer ran `/base-edit-direct`).
 For approved check-D rows, run the agreed `git add <path>` so the referenced files are tracked. Then
 **stop**: report what changed and hand the commit back to the developer — stage the files and suggest
 `/base:commit` (invoking it authorizes the commit — it commits directly with a Conventional-Commits

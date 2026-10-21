@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { MCP_TIMEOUT_MS, age, parseStatic, reconcile, render, summary } from '../doctor.ts'
+import { MCP_TIMEOUT_MS, age, parseStatic, reconcile, render, summary, withMainEdits } from '../doctor.ts'
 import type { Row } from '../doctor.ts'
 import { SLIM_MISSING, SLIM_VIEW as SLIM_VIEW_TOOL } from '../session.ts'
 import { NOW, PEEK, ROOT, eventsOf, peek, ran, run, start, submit, world } from './world.ts'
@@ -310,6 +310,22 @@ describe('/base-doctor', () => {
     expect(text).toMatch(/FAIL {2}mcp:atlassian +no answer in 15 s/)
   })
 
+  t("the delegate row carries this session's main-loop edits", async ($, on) => {
+    const DELEGATE = row('PASS', 'delegate', 'edit delegation: sonnet (work login, Claude Team)')
+    const { w } = world(on, { env: { HOME }, manifest: manifest([]), run: () => ran(0, staticOut([...GREEN, DELEGATE])) })
+    on('session.model', async () => ({ value: 'claude-opus-5-5' }))
+    w.files[`${LOGDIR}/conventions.base.rules.json`] = { text: JSON.stringify({ edit: { model: 'sonnet', kind: 'work', source: 'login record' } }), mtimeMs: 0 }
+    await start($)
+    expect((await doctor($)).text).toContain('PASS  delegate     edit delegation: sonnet (work login, Claude Team)\n')
+    await $.tool.call({ tool: 'Edit', file_path: `${ROOT}/src/a.ts`, old_string: 'a', new_string: 'b' })
+    await run($, '', 'base-edit-direct')
+    await $.tool.call({ tool: 'Edit', file_path: `${ROOT}/src/a.ts`, old_string: 'a', new_string: 'b' })
+    await $.tool.call({ tool: 'Bash', command: "sed -i '' 's/a/b/' src/b.ts" })
+    expect((await doctor($)).text).toContain(
+      'PASS  delegate     edit delegation: sonnet (work login, Claude Team); this session: 1 tool edit(s) in 1 file(s), 1 shell write(s), 1 refused, direct edits allowed (/base-edit-direct)',
+    )
+  })
+
   t('an unreadable manifest → one mcp row', async ($, on) => {
     world(on, { manifest: 'not json', run: () => ran(0, staticOut(GREEN)) })
     await start($)
@@ -330,6 +346,22 @@ describe('doctor helpers', () => {
     expect(reconcile(rows)).toEqual(rows)
     expect(reconcile([...rows, row('PASS', 'slim-live')])[0]?.status).toBe('WARN')
     expect(reconcile([row('FAIL', 'slim', 'slim@d 0.5.0 is installed but disabled'), row('PASS', 'slim-live')])[0]?.status).toBe('FAIL')
+  })
+
+  test('withMainEdits suffixes only a PASS delegate row of this session', () => {
+    const rows = [row('PASS', 'delegate', 'edit delegation: sonnet (work login, Claude Team)'), row('PASS', 'node', 'n')]
+    const m = { sid: 's1', n: 3, files: ['/r/a', '/r/b'], shell: 1, refused: 2, direct: false }
+    expect(withMainEdits(rows, null, 's1')).toEqual(rows)
+    expect(withMainEdits(rows, m, 's2')).toEqual(rows)
+    expect(withMainEdits(rows, m, 's1')[0]?.detail).toBe(
+      'edit delegation: sonnet (work login, Claude Team); this session: 3 tool edit(s) in 2 file(s), 1 shell write(s), 2 refused',
+    )
+    expect(withMainEdits(rows, m, 's1')[1]).toEqual(rows[1])
+    expect(withMainEdits(rows, { ...m, refused: 0, direct: true }, 's1')[0]?.detail).toBe(
+      'edit delegation: sonnet (work login, Claude Team); this session: 3 tool edit(s) in 2 file(s), 1 shell write(s), direct edits allowed (/base-edit-direct)',
+    )
+    const skipped = [row('SKIP', 'delegate', 'edit delegation: off (BASE_EDIT_MODEL=0)')]
+    expect(withMainEdits(skipped, m, 's1')).toEqual(skipped)
   })
 
   test('age, summary, render', () => {

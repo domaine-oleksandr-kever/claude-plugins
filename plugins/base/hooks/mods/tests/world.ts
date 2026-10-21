@@ -309,6 +309,8 @@ export const PEEK = {
         injected: (await $.state.get({ plugin: 'base', key: 'injected' })).value ?? null,
         classic: (await $.state.get({ plugin: 'base', key: 'classic' })).value ?? null,
         dogfood: (await $.state.get({ plugin: 'base', key: 'dogfood' })).value ?? null,
+        mainEdits: (await $.state.get({ plugin: 'base', key: 'mainEdits' })).value ?? null,
+        delegation: (await $.state.get({ plugin: 'base', key: 'delegation' })).value ?? null,
       }),
     }))
   },

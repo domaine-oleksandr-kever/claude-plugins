@@ -3,7 +3,7 @@
  * conventions.cjs — base's conventions as Claude Code command hooks (hooks/hooks.json), the one channel
  * that reaches the model on every login. Text: conventions-text.json. Modes (argv):
  *   start core   SessionStart: root line, comment discipline, task workspace, outside content, Shopify
- *   start rules  SessionStart: lean code (BASE_LEAN), writing style (BASE_STE), dogfood section
+ *   start rules  SessionStart: lean code (BASE_LEAN), writing style (BASE_STE), edit delegation (BASE_EDIT_MODEL), dogfood section
  *   subagent     SubagentStart: the share of the agent type on stdin; records the agent_type in
  *                <log dir>/<session>/agents/<agent_id>.json for base's MCP guard
  *   stop         Stop: blocks once per new plugin-script failure the mod listed in dogfood-state.json's `errors` and no report followed
@@ -19,7 +19,9 @@ const P = 'base';
 const ROOT = (process.env.CLAUDE_PLUGIN_ROOT || '').replace(/\/+$/, '') || path.resolve(__dirname, '..');
 const PLUGINS = ['slim', 'band', 'base', 'fe', 'be', 'qa', 'pm'];
 /** Agents that write no code, by role: the code conventions skip them (an unknown type gets them). */
-const NO_CODE_AGENT = /(-reader|-explorer|-reviewer|jira-writer|bug-hunter)$|^(Explore|Plan|claude-code-guide|statusline-setup)$/;
+const NO_CODE_AGENT = /(-reader|-explorer|-reviewer|-drafter|jira-writer|bug-hunter)$|^(Explore|Plan|claude-code-guide|statusline-setup)$/;
+/** Agents that write prose for people: they also get writing style (BASE_STE). */
+const DRAFTER_AGENT = /-drafter$/;
 
 function readStdin() {
   try {
@@ -86,10 +88,8 @@ let loginMemo = null;
  */
 function login() {
   if (loginMemo) return loginMemo;
-  const home = abs(process.env.HOME);
-  const cfg = abs(process.env.CLAUDE_CONFIG_DIR) || home + '/.claude';
-  const file = cfg === home + '/.claude' ? home + '/.claude.json' : cfg + '/.claude.json';
-  const a = (readJson(file) || {}).oauthAccount || {};
+  const file = ED ? ED.loginFile(process.env.HOME, process.env.CLAUDE_CONFIG_DIR) : null;
+  const a = ((file && readJson(file)) || {}).oauthAccount || {};
   const org = typeof a.organizationType === 'string' ? a.organizationType : null;
   const label = /^claude_(team|enterprise)$/.test(org) ? 'work' : /^claude_(max|pro)$/.test(org) ? 'personal' : !org && ROOT.includes('/plugins/synced/') ? 'synced sandbox' : 'unknown';
   loginMemo = { label, org, file, account: typeof a.accountUuid === 'string' ? a.accountUuid : '' };
@@ -149,6 +149,10 @@ let T = null;
 try {
   T = require('./conventions-text.json');
 } catch {}
+let ED = null;
+try {
+  ED = require('../scripts/edit-delegation.cjs');
+} catch {}
 const section = (name) => T[name].split('<base root>').join(ROOT);
 const surfaceless = () => (process.env.CLAUDE_CODE_ENTRYPOINT || '').startsWith('sdk') || process.env.CLAUDE_CODE_REMOTE === 'true';
 
@@ -156,16 +160,24 @@ function dogfoodSection(cwd) {
   return T.dogfood.split('{versions}').join(versionsLine(cwd)).split('{rule}').join(T[surfaceless() ? 'rule-surfaceless' : 'rule-drawn']);
 }
 
-/** The start part's sections in session order: `{ sections: [name…], text }`, text '' when none is on. */
+/** The edit-delegation decision (scripts/edit-delegation.cjs decides; the doctor asks the same); null without the module. */
+const editDecision = () => (ED ? ED.editDelegation({ env: process.env, home: process.env.HOME, configDir: process.env.CLAUDE_CONFIG_DIR, root: ROOT }) : null);
+const editSection = (d) => T['edit-delegation'].split('{model}').join(d.model).split('{why}').join(ED.whyText(d));
+
+/** The start part's sections in session order: `{ sections: [name…], text, edit }`, text '' when none is on; `edit` the rules part's delegation decision. */
 function startPart(part, cwd) {
+  const edit = part === 'core' ? null : editDecision();
   const names = part === 'core'
     ? ['root', 'comment-discipline', 'task-workspace', 'untrusted-content', 'shopify']
-    : [process.env.BASE_LEAN !== '0' && 'lean-code', process.env.BASE_STE !== '0' && 'writing-style', dogfoodOn() && 'dogfood'].filter(Boolean);
-  const text = names.map((n) => (n === 'dogfood' ? dogfoodSection(cwd) : section(n))).join('\n\n');
-  return { sections: names, text };
+    : [process.env.BASE_LEAN !== '0' && 'lean-code', process.env.BASE_STE !== '0' && 'writing-style', edit && edit.model && 'edit-delegation', dogfoodOn() && 'dogfood'].filter(Boolean);
+  const text = names.map((n) => (n === 'dogfood' ? dogfoodSection(cwd) : n === 'edit-delegation' ? editSection(edit) : section(n))).join('\n\n');
+  return { sections: names, text, edit };
 }
 
-/** A subagent's share: root line and outside content; comment discipline and lean code for a code agent; dogfood when on. '' for a fork. */
+/**
+ * A subagent's share: root line and outside content; comment discipline and lean code for a code agent; writing style
+ * for a drafter (BASE_STE); dogfood when on. Never edit delegation. '' for a fork.
+ */
 function subagentText(agentType, cwd) {
   if (agentType === 'fork') return '';
   const parts = [section('root'), section('untrusted-content')];
@@ -173,6 +185,7 @@ function subagentText(agentType, cwd) {
     parts.push(section('comment-discipline'));
     if (process.env.BASE_LEAN !== '0') parts.push(section('lean-code'));
   }
+  if (DRAFTER_AGENT.test(agentType) && process.env.BASE_STE !== '0') parts.push(section('writing-style'));
   if (dogfoodOn()) parts.push(dogfoodSection(cwd));
   return parts.join('\n\n');
 }
@@ -208,7 +221,9 @@ function main(argv) {
     const { label, org, file } = login();
     writeMarker(input.session_id, part === 'core' ? 'conventions.base.json' : 'conventions.base.rules.json', {
       via: 'hook', event: 'SessionStart', source: typeof input.source === 'string' ? input.source : null, part,
-      sections: r.sections, chars: r.text.length, login: { label, org, file }, ts: new Date().toISOString(),
+      sections: r.sections, chars: r.text.length, login: { label, org, file },
+      ...(r.edit && r.edit.model ? { edit: { model: r.edit.model, kind: r.edit.kind, source: r.edit.source } } : {}),
+      ts: new Date().toISOString(),
     });
   } else if (mode === 'subagent') {
     recordAgent(input.session_id, input.agent_id, input.agent_type);
@@ -220,7 +235,7 @@ function main(argv) {
   }
 }
 
-module.exports = { startPart, subagentText, stopReason, versionsLine, login, dogfoodOn, logDir };
+module.exports = { startPart, subagentText, stopReason, versionsLine, login, dogfoodOn, logDir, editDecision };
 
 if (require.main === module) {
   try {

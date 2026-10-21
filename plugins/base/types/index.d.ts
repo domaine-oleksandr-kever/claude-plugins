@@ -42,9 +42,10 @@ export type BaseProgress =
  * At most 9 characters each (band's kind cell); band and slim own session, model, compact, rate, slim and lookup.
  * `start` base's version at session start, `install` slim missing, `refuse` a reader refused,
  * `workspace` the work id base publishes, `title` the session title base set, `guard` a guard's deny,
- * `doctor` the counts of a /base-doctor run, `defect` a plugin defect reported or a plugin script failed (dogfood mode).
+ * `doctor` the counts of a /base-doctor run, `defect` a plugin defect reported or a plugin script failed (dogfood mode),
+ * `delegate` a main-session change to a project file the edit-delegation convention asked to delegate (one per file).
  */
-export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'title' | 'guard' | 'doctor' | 'defect'
+export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'title' | 'guard' | 'doctor' | 'defect' | 'delegate'
 
 /**
  * Worth saving to the workspace, in the main loop: an Agent / Task call returned its result, a background agent it
@@ -67,6 +68,12 @@ export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number;
  * basename, and the last plugin_defect report this session (0 = none). Mirrored to dogfood-state.json for the Stop hook.
  */
 export type BaseDogfood = { sid: string; failMs: number; script: string; reportMs: number }
+
+/**
+ * Main-loop changes to project files outside `.claude/` this session id: `n` tool calls over `files` (at most 50),
+ * `shell` recognised shell writes, `refused` the edit guard's denials, `direct` set by /base-edit-direct.
+ */
+export type BaseMainEdits = { sid: string; n: number; files: string[]; shell: number; refused: number; direct: boolean }
 
 /** atMs = $.clock.now() when written; text is one line. */
 export type BaseEvent = { atMs: number; kind: BaseEventKind; text: string }
@@ -108,6 +115,10 @@ declare module 'claude-code' {
       compactMarker: BaseCompactMarker | null
       /** Dogfood mode's session (BASE_DOGFOOD=1): whose /base-defects is registered, its script failure and its last report. */
       dogfood: BaseDogfood | null
+      /** The edit guard's count of this session's main-loop project-file changes (guards/edit.ts writes, doctor.ts reads). */
+      mainEdits: BaseMainEdits | null
+      /** The delegate model the rules marker of session `sid` names, read once per session id (null = no delegation). */
+      delegation: { sid: string; model: string | null } | null
     }
   }
 }

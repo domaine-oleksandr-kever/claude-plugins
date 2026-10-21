@@ -4,7 +4,7 @@
 // tail of base.events.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
-import type { BaseEvent } from '../../types'
+import type { BaseEvent, BaseMainEdits } from '../../types'
 import { LOG_TTL_MS, defaultLogRoot, logDir, logLine, pushEvent, spareRoot } from './events.ts'
 import type { Disk } from './events.ts'
 import { SLIM_MISSING, SLIM_VIEW } from './session.ts'
@@ -30,6 +30,8 @@ const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[
 const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
 const checked = atom({ plugin: 'base', key: 'checked' } as const, null)
 const classic = atom({ plugin: 'base', key: 'classic' } as const, null as string | null)
+// Written in guards/edit.ts: this session's main-loop project-file changes.
+const mainEdits = atom({ plugin: 'base', key: 'mainEdits' } as const, null as BaseMainEdits | null)
 /** The Domaine plugins whose SessionStart command hook writes a conventions marker. */
 const MARKED = ['base', 'fe', 'qa', 'be', 'pm'] as const
 
@@ -295,6 +297,15 @@ export function reconcile(rows: Row[]): Row[] {
   )
 }
 
+/** The static `delegate` row plus this session's main-loop file changes under the root (guards/edit.ts counts them). */
+export function withMainEdits(rows: Row[], m: BaseMainEdits | null, sid: string): Row[] {
+  if (!m || m.sid !== sid) return rows
+  const parts = [`${m.n} tool edit(s) in ${m.files.length} file(s)`, `${m.shell} shell write(s)`]
+  if (m.refused) parts.push(`${m.refused} refused`)
+  if (m.direct) parts.push('direct edits allowed (/base-edit-direct)')
+  return rows.map(r => (r.name === 'delegate' && r.status === 'PASS' ? { ...r, detail: `${r.detail}; this session: ${parts.join(', ')}` } : r))
+}
+
 export function age(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
   if (s < 60) return `${s}s`
@@ -365,7 +376,7 @@ export function registerDoctor(on: On): void {
 
   on('command.run', { command: COMMAND.name }, async $ => {
     const [fixed, live, defects, mcp] = await Promise.all([staticRows($), liveRows($), defectRows($), mcpRows($)])
-    const rows = reconcile([...fixed, ...live, ...defects, ...mcp])
+    const rows = withMainEdits(reconcile([...fixed, ...live, ...defects, ...mcp]), await read($, mainEdits).catch(() => null), String(await $.session.id()))
     const tail = await eventTail($)
     await logDoctor($, summary(rows))
     return { text: render($.plugin.root, rows, tail) }

@@ -6049,16 +6049,18 @@ assert_contains DH2-core-ws-root "$ctx" "$BR/references/task-workspace.md"
 assert_absent DH2-core-no-placeholder "$ctx" "<base root>"
 assert_eq DH2-core-verbatim "$ctx" "$(printf 'base plugin root: %s\n\n%s\n\n%s\n\n%s\n\n%s' "$BR" "$(dh_text base comment-discipline)" "$(dh_text base task-workspace | sed "s|<base root>|$BR|g")" "$(dh_text base untrusted-content)" "$(dh_text base shopify)")"
 
-# DH3: start rules — lean code, writing style, dogfood; each switch drops its own; all off → no output, no marker.
+# DH3: start rules — lean code, writing style, edit delegation, dogfood; each switch drops its own; all off → no output, no marker.
 dh_home rules; dh_in s-rules SessionStart '"source":"startup"'
 DH_ENV="BASE_DOGFOOD=1" dh base SessionStart 1
-assert_eq DH3-rules-heads "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — lean code|## base convention — how to explain|## base convention — dogfood mode|"
+assert_eq DH3-rules-heads "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — lean code|## base convention — how to explain|## base convention — edit delegation|## base convention — dogfood mode|"
 DH_ENV="BASE_LEAN=0 BASE_DOGFOOD=0" dh base SessionStart 1
-assert_eq DH3-lean-off "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — how to explain|"
+assert_eq DH3-lean-off "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — how to explain|## base convention — edit delegation|"
 DH_ENV="BASE_STE=0 BASE_DOGFOOD=0" dh base SessionStart 1
-assert_eq DH3-ste-off "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — lean code|"
+assert_eq DH3-ste-off "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — lean code|## base convention — edit delegation|"
+DH_ENV="BASE_EDIT_MODEL=0 BASE_DOGFOOD=0" dh base SessionStart 1
+assert_eq DH3-edit-off "$(dh_ctx | grep '^## ' | tr '\n' '|')" "## base convention — lean code|## base convention — how to explain|"
 dh_home rules-off; dh_in s-off SessionStart '"source":"startup"'
-DH_ENV="BASE_LEAN=0 BASE_STE=0 BASE_DOGFOOD=0" dh base SessionStart 1
+DH_ENV="BASE_LEAN=0 BASE_STE=0 BASE_EDIT_MODEL=0 BASE_DOGFOOD=0" dh base SessionStart 1
 assert_eq DH3-all-off-empty "$DH_OUT" ""
 assert_eq DH3-all-off-exit "$dh_rc" 0
 if [ -e "$(BLOG s-off)/conventions.base.rules.json" ]; then bad DH3-all-off-marker "a marker for an empty part"; else ok; fi
@@ -6081,7 +6083,9 @@ M="$(BLOG s-mark)/conventions.base.json"
 assert_eq DH5-marker-core "$(dh_json "$M" '[j.via,j.event,j.source,j.part,j.sections.join(","),j.chars,j.login.label,j.login.org,j.login.file,typeof j.ts].join("|")')" \
   "hook|SessionStart|compact|core|root,comment-discipline,task-workspace,untrusted-content,shopify|$core_len|unknown||$DH_HOME/.claude.json|string"
 DH_ENV="BASE_DOGFOOD=0" dh base SessionStart 1
-assert_eq DH5-marker-rules "$(dh_json "$(BLOG s-mark)/conventions.base.rules.json" '[j.part,j.sections.join(",")].join("|")')" "rules|lean-code,writing-style"
+assert_eq DH5-marker-rules "$(dh_json "$(BLOG s-mark)/conventions.base.rules.json" '[j.part,j.sections.join(",")].join("|")')" "rules|lean-code,writing-style,edit-delegation"
+assert_eq DH5-marker-edit "$(dh_json "$(BLOG s-mark)/conventions.base.rules.json" '[j.edit.model,j.edit.kind,j.edit.source].join("|")')" "opus|unknown|default"
+assert_eq DH5-core-no-edit "$(dh_json "$M" '"edit" in j')" "false"
 assert_eq DH5-no-subagent-marker "$(DH_IN='{"session_id":"s-mark2","agent_type":"x"}' dh base SubagentStart; ls "$(BLOG s-mark2)" 2>/dev/null)" ""
 
 # DH6: bad stdin still delivers (no session id → no marker); a log dir it cannot write or no HOME → the marker under
@@ -6180,6 +6184,8 @@ SY="$DH/sync/.claude/plugins/synced/org-1_acc-1/base"; mkdir -p "$(dirname "$SY"
 printf '{"oauthAccount":{"accountUuid":"acc-1"}}' > "$WK/.claude.json"
 assert_eq DH9-synced-sandbox "$(DH_ENV="CLAUDE_CONFIG_DIR=$WK CLAUDE_PLUGIN_ROOT=$SY" lbl)" "synced sandbox||$WK/.claude.json"
 assert_eq DH9-no-org-unsynced "$(DH_ENV="CLAUDE_CONFIG_DIR=$WK" lbl)" "unknown||$WK/.claude.json"
+assert_eq DH9-relative-cfg "$(DH_ENV="CLAUDE_CONFIG_DIR=rel/dir" lbl)" "personal|claude_pro|$DH_HOME/.claude.json"
+assert_eq DH9-no-home "$(DH_ENV="HOME=" dh base SessionStart 0; dh_json "$DH/tmp/domaine-log/s-login/conventions.base.json" 'String(j.login.file)')" "null"
 DF="$(dh_root base)/dogfood.json"; cp "$DF" "$DH/dogfood.json.bak"
 printf '{"accounts":{"acc-listed":"Owner"}}' > "$DF"
 printf '{"oauthAccount":{"organizationType":"claude_team","accountUuid":"acc-listed"}}' > "$WK/.claude.json"
@@ -6194,7 +6200,8 @@ assert_absent DH9-dogfood-unlisted "$(dh_ctx)" "dogfood mode"
 cp "$DH/dogfood.json.bak" "$DF"
 
 # DH10: the subagent share — a fork nothing; a reader the root line and outside content only; a code agent also
-# comment discipline, lean code (BASE_LEAN) and dogfood; never writing style, task workspace or Shopify.
+# comment discipline, lean code (BASE_LEAN) and dogfood; a drafter writing style (BASE_STE) and no code conventions;
+# never edit delegation, task workspace or Shopify, nor writing style for anyone else.
 dh_home sub
 sub() { DH_IN="{\"session_id\":\"s-sub\",\"agent_type\":\"$1\",\"agent_id\":\"a1\"}"; DH_ENV="BASE_DOGFOOD=1 ${2-}" dh base SubagentStart; dh_ctx | grep -E '^(## |base plugin root)' | tr '\n' '|'; }
 assert_eq DH10-fork "$(DH_IN='{"session_id":"s","agent_type":"fork"}' dh base SubagentStart; printf '%s|%s' "$DH_OUT" "$dh_rc")" "|0"
@@ -6203,6 +6210,12 @@ for a in base:jira-reader base:doc-reader base:bug-hunter fe:theme-explorer qa:s
   assert_eq "DH10-reader-$a" "$(sub "$a" BASE_DOGFOOD=0)" "$R"
 done
 assert_eq DH10-reader-dogfood "$(sub base:jira-reader)" "$R## base convention — dogfood mode|"
+W="$R## base convention — how to explain|"
+for a in fe:stt-drafter fe:pr-body-drafter; do
+  assert_eq "DH10-drafter-$a" "$(sub "$a" BASE_DOGFOOD=0)" "$W"
+done
+assert_eq DH10-drafter-ste-off "$(sub fe:stt-drafter 'BASE_DOGFOOD=0 BASE_STE=0')" "$R"
+assert_eq DH10-drafter-dogfood "$(sub fe:pr-body-drafter)" "$W## base convention — dogfood mode|"
 for a in general-purpose fe:implementer ""; do
   assert_eq "DH10-code-${a:-empty}" "$(sub "$a")" "$R## base convention — comment discipline|## base convention — lean code|## base convention — dogfood mode|"
 done
@@ -6265,7 +6278,7 @@ chmod 644 "$SD/dogfood-stop.json"
 # DH12: the text file — one source for the hook and the mod's fallback: every key a string, no legacy name, the
 # outside-content rail one sentence per rule under 900 bytes, the Shopify pointer one line.
 assert_eq DH12-keys "$(jq -r 'keys_unsorted | join(",")' "$BR/hooks/conventions-text.json")" \
-  "root,comment-discipline,task-workspace,untrusted-content,shopify,lean-code,writing-style,dogfood,rule-drawn,rule-surfaceless"
+  "root,comment-discipline,task-workspace,untrusted-content,shopify,lean-code,writing-style,edit-delegation,dogfood,rule-drawn,rule-surfaceless"
 assert_eq DH12-strings "$(jq -r '[.[] | type] | unique | join(",")' "$BR/hooks/conventions-text.json")" "string"
 UC="$(dh_text base untrusted-content)"
 for n in 'ESCALATE(' '.claude/slim/prompt/' 'tool-results/' "hook's own system reminder" '<<slim stub>>' 'base plugin directive:'; do assert_contains "DH12-uc-$n" "$UC" "$n"; done
@@ -6275,6 +6288,73 @@ assert_contains DH12-shopify-skill "$(dh_text base shopify)" "/base:shopify"
 OLDN="f""nd"
 if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|gateway" "$BR/hooks/conventions-text.json"; then bad DH12-no-legacy "a legacy, host or store-channel name in conventions-text.json"; else ok; fi
 assert_eq DH12-dogfood-slots "$(dh_text base dogfood | grep -o '{versions}\|{rule}' | tr '\n' ',')" "{versions},{rule},"
+EDT="$(dh_text base edit-delegation)"
+assert_eq DH12-ed-slots "$(printf '%s' "$EDT" | grep -o '{model}\|{why}' | sort -u | tr '\n' ',')" "{model},{why},"
+assert_contains DH12-ed-switch "$EDT" '`BASE_EDIT_MODEL=0`'
+assert_contains DH12-ed-direct "$EDT" "/base-edit-direct"
+assert_contains DH12-ed-order "$EDT" "haiku < sonnet < opus < fable"
+assert_contains DH12-ed-precedence "$EDT" "names its own agent for the change wins"
+if [ "$(printf '%s' "$EDT" | wc -c)" -lt 1000 ]; then ok; else bad DH12-ed-size "$(printf '%s' "$EDT" | wc -c) bytes"; fi
+assert_contains DH12-tw-drafts "$(dh_text base task-workspace)" "quote or paraphrase"
+
+# DH13: the edit-delegation section and the rules marker's `edit` field per login kind; never in a subagent's share
+# or the core part; an override, `0`, an invalid value; the api-key value never printed; a missing module costs only it.
+dh_home ed; dh_in s-ed SessionStart '"source":"startup"'
+EDK="$DH/cfg-ed"; mkdir -p "$EDK"
+edm() { dh_json "$(BLOG s-ed)/conventions.base.rules.json" '[j.edit?.model??"",j.edit?.kind??"",j.edit?.source??""].join("|")'; }
+# ed_case <label> <marker edit> <context needle or -> — runs start rules with $DH_ENV (BASE_DOGFOOD=0 added)
+ed_case() {
+  rm -f "$(BLOG s-ed)/conventions.base.rules.json"
+  DH_ENV="BASE_DOGFOOD=0 ${DH_ENV-}" dh base SessionStart 1
+  assert_eq "$1-marker" "$(edm)" "$2"
+  [ "$3" = "-" ] || assert_contains "$1-ctx" "$(dh_ctx)" "$3"
+}
+GATE='"cachedExtraUsageDisabledReason":"out_of_credits","additionalModelOptionsCache":[{"value":"claude-opus-5-5"}],"cachedGrowthBookFeatures":{"tengu_saffron_lattice":{"perModel":{"claude-opus-5-5":{"enabled":true}}}}'
+printf '{"oauthAccount":{"organizationType":"claude_team"}}' > "$EDK/.claude.json"
+DH_ENV="CLAUDE_CONFIG_DIR=$EDK" ed_case DH13-team "sonnet|work|login record" 'to `sonnet` (work login, Claude Team)'
+assert_contains DH13-team-agent "$(dh_ctx)" 'Agent(model: "sonnet")'
+DH_ENV="CLAUDE_CONFIG_DIR=$EDK BASE_EDIT_MODEL=haiku" ed_case DH13-override-haiku "haiku|override|BASE_EDIT_MODEL" "(BASE_EDIT_MODEL)"
+DH_ENV="CLAUDE_CONFIG_DIR=$EDK BASE_EDIT_MODEL=Sonnet" ed_case DH13-override-case "sonnet|override|BASE_EDIT_MODEL" -
+DH_ENV="CLAUDE_CONFIG_DIR=$EDK BASE_EDIT_MODEL=fable" ed_case DH13-override-invalid "sonnet|work|login record" -
+assert_eq DH13-override-invalid-quiet "$dh_rc:$(cat "$DH_ERR")" "0:"
+DH_ENV="CLAUDE_CONFIG_DIR=$EDK BASE_EDIT_MODEL=0" ed_case DH13-override-off "||" -
+assert_absent DH13-override-off-ctx "$(dh_ctx)" "edit delegation"
+assert_eq DH13-override-off-sections "$(dh_json "$(BLOG s-ed)/conventions.base.rules.json" 'j.sections.join(",")')" "lean-code,writing-style"
+DH_ENV="CLAUDE_CONFIG_DIR=$EDK" dh base SessionStart 0
+assert_absent DH13-core "$(dh_ctx)" "edit delegation"
+for a in general-purpose fe:implementer fe:stt-drafter; do
+  DH_IN="{\"session_id\":\"s-ed\",\"agent_type\":\"$a\",\"agent_id\":\"e1\"}" DH_ENV="CLAUDE_CONFIG_DIR=$EDK BASE_DOGFOOD=1" dh base SubagentStart
+  assert_absent "DH13-sub-$a" "$(dh_ctx)" "edit delegation"
+done
+dh_in s-ed SessionStart '"source":"startup"'
+printf '{"oauthAccount":{"organizationType":"claude_enterprise"}}' > "$EDK/.claude.json"
+DH_ENV="CLAUDE_CONFIG_DIR=$EDK" ed_case DH13-enterprise "sonnet|work|login record" "Claude Enterprise"
+printf '{"oauthAccount":{"organizationType":"claude_max"}}' > "$DH_HOME/.claude.json"
+ed_case DH13-max "opus|personal|login record" 'to `opus` (personal login, Claude Max)'
+assert_eq DH13-verbatim "$(dh_ctx | awk '/^## base convention — edit delegation/{p=1} /^## base convention — dogfood/{p=0} p')" \
+  "$(dh_text base edit-delegation | sed -e 's/{model}/opus/g' -e 's/{why}/personal login, Claude Max/g')"
+printf '{"oauthAccount":{"organizationType":"claude_pro"}}' > "$DH_HOME/.claude.json"
+ed_case DH13-pro "opus|personal|login record" "Claude Pro"
+printf '{"oauthAccount":{"organizationType":"claude_pro"},%s}' "$GATE" > "$DH_HOME/.claude.json"
+ed_case DH13-gated-opus "sonnet|personal|login record" "opus needs credits"
+printf '{"oauthAccount":{"organizationType":"claude_max"},%s}' "$(printf '%s' "$GATE" | sed 's/opus-5-5/fable-5-1/g')" > "$DH_HOME/.claude.json"
+ed_case DH13-gated-fable-only "opus|personal|login record" -
+rm -f "$DH_HOME/.claude.json"
+ed_case DH13-missing "opus|unknown|default" "(no login record)"
+printf '{}' > "$DH_HOME/.claude.json"
+ed_case DH13-no-plan "opus|unknown|default" "(login record names no plan)"
+printf 'not json' > "$DH_HOME/.claude.json"
+ed_case DH13-malformed "opus|unknown|default" "(no login record)"
+printf '{}' > "$DH_HOME/.claude.json"
+DH_ENV="ANTHROPIC_API_KEY=sk-test-SECRET" ed_case DH13-api-key "sonnet|api-key|default" "(api-key session)"
+assert_absent DH13-api-key-ctx "$(dh_ctx)" "SECRET"
+assert_absent DH13-api-key-marker "$(cat "$(BLOG s-ed)/conventions.base.rules.json")" "SECRET"
+rm -f "$DH_HOME/.claude.json"
+DH_ENV="CLAUDE_PLUGIN_ROOT=$SY" ed_case DH13-synced "opus|synced sandbox|default" -
+NM="$DH/no-ed-module"; rm -rf "$NM"; cp -R "$BR" "$NM"; rm "$NM/scripts/edit-delegation.cjs"
+DH_ENV="CLAUDE_PLUGIN_ROOT=$NM" ed_case DH13-no-module "||" "## base convention — lean code"
+assert_absent DH13-no-module-ctx "$(dh_ctx)" "edit delegation"
+assert_eq DH13-no-module-quiet "$dh_rc:$(cat "$DH_ERR")" "0:"
 
 # --- fe ------------------------------------------------------------------------------------------
 FR="$(dh_root fe)"; FP="$DH/feproj"; mkdir -p "$FP"
@@ -6317,7 +6397,7 @@ dh_home fe-all; fe_files .env shopify.theme.toml; fe_in f-all SessionStart '"sou
 rm -f "$PLOG"; DH_ENV="FE_STUB_WORD=foundation FE_STUB_LOG=$PLOG" dh fe SessionStart
 assert_eq DHfe2-probe-args "$(cat "$PLOG")" "$FP"
 assert_eq DHfe2-heads "$(fe_heads)" "fe plugin root: <FR> — fe's files write it \`<fe root>\` and the \`base plugin root:\` path \`<base root>\`; spell both out in commands (\`\${CLAUDE_PLUGIN_ROOT}\` is empty in the Bash tool's shell)|fe project profile: foundation|## fe convention — LiquidDoc and core|## fe capability — live store access|worktree copy list: shopify.theme.toml|## fe convention — the progress series|"
-assert_eq DHfe2-verbatim "$(dh_ctx)" "$(printf '%s\n\nfe project profile: foundation\n\n%s\n\n%s\n\n%s\n\n%s' "$ROOT_LINE" "$(dh_text fe comment-discipline-foundation)" "$(dh_text fe store-access | sed "s|<fe root>|$FR|g")" "$(dh_text fe worktree)" "$(dh_text fe progress-series)")"
+assert_eq DHfe2-verbatim "$(dh_ctx)" "$(printf '%s\n\nfe project profile: foundation\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' "$ROOT_LINE" "$(dh_text fe comment-discipline-foundation)" "$(dh_text fe store-access | sed "s|<fe root>|$FR|g")" "$(dh_text fe worktree)" "$(dh_text fe preview-default-on | sed "s|<fe root>|$FR|g")" "$(dh_text fe progress-series)")"
 assert_absent DHfe2-no-fe-placeholder "$(dh_ctx | tail -n +2)" "<fe root>"
 assert_contains DHfe2-base-placeholder-kept "$(dh_ctx)" "node <base root>/scripts/shopify-validate.cjs"
 assert_contains DHfe2-store-paths "$(dh_ctx)" "$FR/scripts/shopify-admin-gql.sh --query"
@@ -6327,7 +6407,7 @@ if [ "$n" -lt 9000 ]; then ok; else bad DHfe2-cap "$n bytes"; fi
 M="$(FLOG f-all)/conventions.fe.json"
 len="$(dh_ctx | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(s.length)))')"
 assert_eq DHfe2-marker "$(dh_json "$M" '[j.via,j.event,j.source,j.sections.join(","),j.chars,j.login.label,j.login.file,JSON.stringify(j.profile),typeof j.ts,"part" in j].join("|")')" \
-  "hook|SessionStart|startup|root,profile,comment-discipline-foundation,store-access,worktree,progress-series|$len|unknown|$DH_HOME/.claude.json|{\"word\":\"foundation\",\"via\":\"project-profile.sh\",\"why\":null,\"toml\":true,\"store\":true}|string|false"
+  "hook|SessionStart|startup|root,profile,comment-discipline-foundation,store-access,worktree,preview-default-on,progress-series|$len|unknown|$DH_HOME/.claude.json|{\"word\":\"foundation\",\"via\":\"project-profile.sh\",\"why\":null,\"toml\":true,\"store\":true}|string|false"
 
 # DHfe3: the gates — FE_PROFILE skips the probe; none + .env → root and profile; none + toml → store, worktree, series;
 # theme + .env → store and series; a failing or slow probe → none with the reason in the marker.
@@ -6340,7 +6420,7 @@ assert_eq DHfe3-forced-bad-word "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 
 fe_files .env; DH_ENV="FE_STUB_WORD=none" dh fe SessionStart
 assert_eq DHfe3-none-env "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile"
 fe_files shopify.theme.toml; DH_ENV="FE_STUB_WORD=none" dh fe SessionStart
-assert_eq DHfe3-none-toml "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile,store-access,worktree,progress-series"
+assert_eq DHfe3-none-toml "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile,store-access,worktree,preview-default-on,progress-series"
 fe_files .env; DH_ENV="FE_STUB_WORD=theme" dh fe SessionStart
 assert_eq DHfe3-theme-env "$(dh_json "$(FLOG f-gate)/conventions.fe.json" 'j.sections.join(",")')" "root,profile,store-access,progress-series"
 fe_files; DH_ENV="FE_STUB_RC=2 FE_STUB_WORD= FE_STUB_ERR=boom" dh fe SessionStart
@@ -6397,6 +6477,9 @@ done
 for a in general-purpose some-plugin:implementer ""; do
   assert_eq "DHfe6-code-${a:-empty}" "$(fe_sub "$a")" "$RO## fe capability — live store access|"
 done
+for a in fe:stt-drafter fe:pr-body-drafter; do
+  assert_eq "DHfe6-drafter-$a" "$(fe_sub "$a")" "$(printf '%s' "$ROOT_LINE" | sed "s|$FR|<FR>|")|fe project profile: foundation|## fe capability — live store access|"
+done
 if [ -e "$PLOG" ]; then bad DHfe6-marker-no-probe "the probe ran though the start marker holds the profile"; else ok; fi
 assert_eq DHfe6-event "$(fe_sub Plan >/dev/null; dh_evt)" "SubagentStart"
 assert_absent DHfe6-no-series "$(fe_sub general-purpose >/dev/null; dh_ctx)" "progress series"
@@ -6407,7 +6490,7 @@ assert_eq DHfe6-no-own-marker "$(ls "$(FLOG f-sub2)" 2>/dev/null)" ""
 # DHfe7: the text file — the mod's fallback and the hook read the same keys; the worktree line /base:worktree
 # parses exactly once; the series in order with base's two steps by base's names; no legacy or host name.
 assert_eq DHfe7-keys "$(jq -r 'keys_unsorted | join(",")' "$FR/hooks/conventions-text.json")" \
-  "root,profile,comment-discipline-foundation,store-access,worktree,progress-series"
+  "root,profile,comment-discipline-foundation,store-access,worktree,preview-default-on,preview-default-off,progress-series"
 assert_eq DHfe7-strings "$(jq -r '[.[] | type] | unique | join(",")' "$FR/hooks/conventions-text.json")" "string"
 assert_eq DHfe7-root-one-line "$(dh_text fe root | wc -l | tr -d ' ')" 1
 assert_eq DHfe7-worktree-line "$(dh_text fe worktree | grep -c '^worktree copy list: shopify.theme.toml$')" 1
@@ -6418,6 +6501,29 @@ for p in scripts/shopify-admin-gql.sh scripts/theme-json.sh references/metafield
   assert_contains "DHfe7-store-$p" "$(dh_text fe store-access)" "<fe root>/$p"
   if [ -e "$ROOT/plugins/fe/$p" ]; then ok; else bad "DHfe7-exists-$p" "plugins/fe/$p named by store-access is missing"; fi
 done
+
+# DHfe8: the preview default — decided once at SessionStart, toml checkouts only: a set env value wins (even over
+# the global file), else ~/.config/domaine/env; the project .claude/domaine.env is never read.
+dh_home fe-prev; fe_in f-prev SessionStart '"source":"startup"'
+fe_prev() { DH_ENV="FE_STUB_WORD=theme ${1-}" dh fe SessionStart; dh_json "$(FLOG f-prev)/conventions.fe.json" 'j.sections.filter((s) => s.startsWith("preview-default")).join(",")'; }
+fe_files shopify.theme.toml
+assert_eq DHfe8-unset "$(fe_prev)" "preview-default-on"
+DH_ENV="FE_STUB_WORD=theme" dh fe SessionStart
+assert_contains DHfe8-on-line "$(dh_ctx)" "fe preview default: preview theme — "
+assert_contains DHfe8-on-root "$(dh_ctx)" "$FR/references/session-theme.md"
+assert_eq DHfe8-env-off "$(fe_prev FE_PREVIEW_DEFAULT=0)" "preview-default-off"
+DH_ENV="FE_STUB_WORD=theme FE_PREVIEW_DEFAULT=0" dh fe SessionStart
+assert_contains DHfe8-off-line "$(dh_ctx)" "fe preview default: local dev server (FE_PREVIEW_DEFAULT=0)"
+mkdir -p "$FP/.claude"; printf 'FE_PREVIEW_DEFAULT=0\n' > "$FP/.claude/domaine.env"
+assert_eq DHfe8-project-file-ignored "$(fe_prev)" "preview-default-on"
+rm -rf "$FP/.claude"
+mkdir -p "$DH_HOME/.config/domaine"; printf '# global\nFE_PREVIEW_DEFAULT = 0 \n' > "$DH_HOME/.config/domaine/env"
+assert_eq DHfe8-global-file-off "$(fe_prev)" "preview-default-off"
+assert_eq DHfe8-env-over-file "$(fe_prev FE_PREVIEW_DEFAULT=1)" "preview-default-on"
+assert_eq DHfe8-xdg-moves-file "$(fe_prev XDG_CONFIG_HOME=$DH/fe-xdg-empty)" "preview-default-on"
+fe_files .env
+assert_eq DHfe8-no-toml "$(fe_prev)" ""
+fe_files
 if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|json-slim|log-slim" "$FR/hooks/conventions-text.json"; then bad DHfe7-no-legacy "a legacy, host or old-compressor name in fe's conventions-text.json"; else ok; fi
 
 # --- qa, be, pm ----------------------------------------------------------------------------------

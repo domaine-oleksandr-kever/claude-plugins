@@ -12,9 +12,9 @@ type $ = EngineInterface
 const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
 const slimInfo = atom({ plugin: 'slim', key: 'info' } as const, null)
 
-/** Where the SessionStart command hook leaves its marker: `<log dir>/<session>/conventions.base.json`, else under the spare root. */
-export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string): string[] =>
-  [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.base.json`] : []))
+/** Where the SessionStart command hook leaves its marker: `<log dir>/<session>/conventions.<stem>.json` (`base`, `base.rules`), else under the spare root. */
+export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string, stem = 'base'): string[] =>
+  [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.${stem}.json`] : []))
 
 async function pluginVersions($: $): Promise<string> {
   const home = (await $.env.get('HOME'))?.trim() ?? ''
