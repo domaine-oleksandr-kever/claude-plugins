@@ -1781,6 +1781,22 @@ printf 'MAGICKIMG' > "$o$r"
   eq('Cv17-reuse-stale', [u2.decision, u2.reason, readFileSync(at('again.1568.jpg')).equals(COPY)], ['refused', 'not-reused', true]);
   const u3 = viewMedia({ path: input('fresh.png', PNG), allowed_out: placed('fresh.1568.jpg'), reuse: true }, ruBin);
   eq('Cv17-reuse-placeholder-cleared', [u3.reason, existsSync(at('fresh.1568.jpg'))], ['not-reused', false]);
+
+  // scratch: no host Write ruled on the copy, so the core writes it only inside .claude/tasks/<id>/ of the root or cwd.
+  const att = path.join(tasks, 'tmp', 'attachments');
+  mkdirSync(att, { recursive: true });
+  writeFileSync(path.join(att, 'scr.png'), PNG);
+  const s1 = viewMedia({ path: path.join(att, 'scr.png'), allowed_out: path.join(att, 'scr.1568.jpg'), scratch: true }, phBin);
+  eq('Cv18-scratch-inside-tasks', [s1.decision, readFileSync(path.join(att, 'scr.1568.jpg'), 'utf8')], ['compressed', 'IMG']);
+  const s2 = phView(input('out.png', PNG), 'out.1568.jpg', phBin, { req: { scratch: true } });
+  eq('Cv18-scratch-outside-refused', [s2.reason, existsSync(at('out.1568.jpg'))], ['not-scratch', false]);
+  const esc = path.join(T, 'escape');
+  mkdirSync(esc);
+  symlinkSync(esc, path.join(proj, '.claude/tasks/LINK'));
+  writeFileSync(path.join(esc, 'lnk.png'), PNG);
+  writeFileSync(path.join(esc, 'lnk.1568.jpg'), PH);
+  const s3 = viewMedia({ path: path.join(proj, '.claude/tasks/LINK/lnk.png'), allowed_out: path.join(proj, '.claude/tasks/LINK/lnk.1568.jpg'), scratch: true }, phBin);
+  eq('Cv18-scratch-symlink-escape', [s3.reason, existsSync(path.join(esc, 'lnk.1568.jpg'))], ['not-scratch', false]);
 }
 
 // C-csv — a delimited table on every channel the csv engine serves; its re-run is already slim.

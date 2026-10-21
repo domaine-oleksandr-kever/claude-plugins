@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.15.0**.
+Current release: **slim v0.15.1**.
 
 ## Install
 
@@ -460,7 +460,12 @@ slim: <file> is a 391 KB image — call mcp__slim__view({ path }) (resized) or p
 ```
 
 The images slim's own replies name to Read pass: view's `.1568.jpg` copy, a video's frames and an
-MCP image's saved original (`slim-mcp-<hash>.<ext>`). Every plugin's own calls pass too.
+MCP image's saved original (`slim-mcp-<hash>.<ext>`). Every plugin's own calls pass too. A view of
+an image that ends refused because it could not resize (a write, backend or confirm reason; not a
+denied Read, `jq`/`out` on an image, an unfit copy name or a non-image) lets the next Read of that
+image pass (by the path as given and its absolute form). Its reply ends with
+`view could not resize <path> — Read <path> to see it as is`, and a Write the auto-mode classifier
+gave no verdict adds a line not to retry view on that file.
 `SLIM_IMAGE_READ_MAX` raises the size or, at `0`, turns this deny off.
 
 ## Lookup
@@ -653,8 +658,14 @@ the first frame). An image already named as a copy has no Write check, since not
 deny from either check is the answer. An image also takes the one-line Read, so PreToolUse guards
 rule on it.
 
-When the Write check answers `ask`, slim calls the host's Write tool on the output path with a
-placeholder text. Thus the current mode decides: the standard dialog in default mode, the
+When the Write check answers `ask` on an output inside `.claude/tasks/<id>/` of the session root or
+the working directory (the zone `out` takes with no question, such as a ticket's
+`tmp/attachments/`), slim writes it with no placeholder Write and asks nothing. The core checks where
+that path lands through links first, and refuses (`not-scratch`, nothing written) one outside the
+zone, which then takes the placeholder Write below. A Write check's deny is still the answer there.
+
+For any other output, when the Write check answers `ask`, slim calls the host's Write tool on the
+output path with a placeholder text. Thus the current mode decides: the standard dialog in default mode, the
 classifier in auto mode, an allow in acceptEdits, a deny in dontAsk. A deny writes nothing. When the
 Write is allowed, the backend replaces the placeholder with the real output. The core removes the
 placeholder whenever it runs for that output path, before it decides. When the core never starts

@@ -7,6 +7,7 @@ import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimEvent } from '../../types'
 import { agentPrefix, pushEvent, viewText } from './events.ts'
+import { passImage } from './guard.ts'
 import { buildRecordRun, buildViewRun, commandSource, parseView, utf8Bytes } from './node-hook.ts'
 import type { Viewed } from './node-hook.ts'
 
@@ -78,6 +79,24 @@ export function mediaProbe(path: string): string {
   if (stem.endsWith('.1568') && OUT_EXT.has(ext)) return path
   return `${at}/${stem}.1568.jpg`
 }
+
+/**
+ * True when `probe` (absolute) lies lexically under `<root|cwd>/.claude/tasks/<id>/`: the scratch zone a
+ * view writes to with no Write check, the core re-checking where it lands (`scratch`, view.cjs inZone()).
+ */
+export function scratchProbe(probe: string, root: string, cwd: string): boolean {
+  const segs = probe.split('/')
+  if (!probe.startsWith('/') || segs.some(s => s === '..' || s === '.')) return false
+  return [root, cwd].some(d => {
+    const base = `${d.replace(/\/+$/, '')}/.claude/tasks/`
+    if (!d.startsWith('/') || !probe.startsWith(base)) return false
+    const rest = probe.slice(base.length).split('/')
+    return rest.length >= 2 && rest.every(s => s !== '')
+  })
+}
+
+/** Added to a refusal whose reason is the host's auto-mode classifier giving the media Write no verdict. */
+export const NO_VERDICT_WRITE = 'view: the media copy needs a Write verdict here — do not retry view on this file'
 
 /** At most `maxLines` lines and `maxBytes` bytes from the top of `text`; a longer line is cut. */
 export function headOf(text: string, maxLines: number, maxBytes: number): string {
@@ -238,13 +257,14 @@ async function readTaken($: $, probe: string, video: boolean): Promise<Outcome |
 
 /**
  * An image or a video: the backend writes beside the input outside the Write tool. A Write check's
- * `ask` goes to the mode's decider through writeProbe(); an output already there that this session has
- * not read is served as is while the core finds it newer than the input (no Write to decide), else it
- * is Read through the host and the Write tried once more. An image takes the one-line Read, so its
- * guards rule too. The one Yes/No question left is a Read check's `ask` on a non-image, which the Read
- * tool cannot open; it covers the write too.
+ * `ask` on a scratch probe (scratchProbe()) goes to the core with `scratch` and no Write; elsewhere, or
+ * when the core finds it lands outside the zone, it goes to the mode's decider through writeProbe(); an
+ * output already there that this session has not read is served as is while the core finds it newer
+ * than the input (no Write to decide), else it is Read through the host and the Write tried once more.
+ * An image takes the one-line Read, so its guards rule too. The one Yes/No question left is a Read
+ * check's `ask` on a non-image, which the Read tool cannot open; it covers the write too.
  */
-async function viewMedia($: $, path: string, a: Record<string, string>): Promise<Outcome> {
+async function mediaRun($: $, path: string, a: Record<string, string>): Promise<Outcome> {
   const abs = path.startsWith('/') ? path : `${(await $.session.cwd()).replace(/\/+$/, '')}/${path}`
   const { ext } = nameParts(path)
   let askRead = false
@@ -270,6 +290,10 @@ async function viewMedia($: $, path: string, a: Record<string, string>): Promise
       return refused('path', 'not-confirmed', `view: not confirmed — reading ${abs} and writing ${what} needs a yes`)
     }
   } else if (askWrite) {
+    if (scratchProbe(probe, await $.session.root(), await $.session.cwd())) {
+      const s = await core($, 'path', { path, ...a, media: true, allowed_out: probe, scratch: true })
+      if (s.reason !== 'not-scratch') return s
+    }
     let no = await writeProbe($, probe)
     if (no === 'unread') {
       const reused = await core($, 'path', { path, ...a, media: true, allowed_out: probe, reuse: true })
@@ -280,6 +304,18 @@ async function viewMedia($: $, path: string, a: Record<string, string>): Promise
     if (no) return no
   }
   return core($, 'path', { path, ...a, media: true, allowed_out: probe })
+}
+
+// refusals that are no failed resize: a denied Read, or a call the model can fix (jq/out on an image, a copy's name, not media)
+const NOT_RESIZE = new Set(['read-denied', 'media-args', 'copy-unfit', 'not-media'])
+
+/** mediaRun(); an image it could not resize (refused for a write, backend or confirm reason) is let through the Read guard and named to Read as is. */
+async function viewMedia($: $, path: string, a: Record<string, string>): Promise<Outcome> {
+  const o = await mediaRun($, path, a)
+  if (o.decision !== 'refused' || NOT_RESIZE.has(String(o.reason)) || !IMAGE_EXT.has(nameParts(path).ext)) return o
+  await passImage($, path)
+  const hint = /no verdict for Write/i.test(o.text) ? [NO_VERDICT_WRITE] : []
+  return { ...o, text: [o.text, ...hint, `view could not resize ${path} — Read ${path} to see it as is`].join('\n') }
 }
 
 async function viewPath($: $, path: string, a: Record<string, string>): Promise<Outcome> {

@@ -181,6 +181,18 @@ describe('G4 an image Read', () => {
     expect(w.calls.map(c => c.file_path)).toEqual([SHOT])
   })
 
+  test('G-PASS-1 after passImage (a view that could not resize it): the first Read passes, by the relative and the absolute path', async ($, on) => {
+    const w = world(on, { sizes: { [SHOT]: 400_000, 'shots/home.png': 400_000 } })
+    on('session.root', async () => ({ value: '/repo' }))
+    on('tool.check', async () => ({ decision: 'allow' }) as any)
+    // view's own Read probe passes the guard; the core's answer is unreadable, so view refuses and calls passImage.
+    expect(String((await $.tool.call({ tool: 'mcp__slim__view', path: 'shots/home.png' } as any)).result)).toContain('Read shots/home.png to see it as is')
+    w.calls.length = 0
+    expect((await $.tool.call({ tool: 'Read', file_path: 'shots/home.png' } as any)).deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'Read', file_path: SHOT } as any)).deny).toBeUndefined()
+    expect(w.calls.map(c => c.file_path)).toEqual(['shots/home.png', SHOT])
+  })
+
   test('every image extension, any case, and a windowed Read: denied', async ($, on) => {
     const paths = ['a.jpg', 'b.JPEG', 'c.gif', 'd.webp', 'h.PNG'].map(n => `/repo/${n}`)
     const w = world(on, { sizes: Object.fromEntries([...paths, SHOT].map(p => [p, 300_000])) })

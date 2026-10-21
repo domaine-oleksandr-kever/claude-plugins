@@ -65,6 +65,12 @@ const inside = (root, p, minSegs) => {
 
 const tasksOf = (dir) => (typeof dir === 'string' && path.isAbsolute(dir) ? landing(path.join(dir, '.claude', 'tasks')) : null);
 
+/** True when the landed path `at` is under `<root|cwd>/.claude/tasks/<id>/` or slim's spill root: the zone a view writes to unasked. */
+function inZone(at, root, cwd) {
+  if (!at) return false;
+  return inside(tasksOf(root), at, 2) || inside(tasksOf(cwd), at, 2) || inside(landing(path.resolve(env.spillRoot())), at, 1);
+}
+
 /**
  * The `out` path a view may write → { path, exists } or { why }. Accepted only under
  * `<root>/.claude/tasks/<id>/`, `<cwd>/.claude/tasks/<id>/` (a repo below the session root) or slim's
@@ -75,8 +81,7 @@ function outTarget(out, root, cwd, input) {
   const abs = path.resolve(cwd || process.cwd(), out);
   const at = landing(abs);
   if (!at) return { why: 'out-outside-roots' };
-  const spillRoot = landing(path.resolve(env.spillRoot()));
-  if (!inside(tasksOf(root), at, 2) && !inside(tasksOf(cwd), at, 2) && !inside(spillRoot, at, 1)) return { why: 'out-outside-roots' };
+  if (!inZone(at, root, cwd)) return { why: 'out-outside-roots' };
   const st = lstat(at);
   if (st && !st.isFile()) return { why: 'out-taken' };
   if (input && at === input) return { why: 'out-is-input' };
@@ -114,10 +119,11 @@ const isSpillOrHost = (p) => { try { return spill.isSpillOrHostFile(p); } catch 
 
 /**
  * One view request → the reply the hooks module turns into the tool's text.
- * request: { v:1, path? | text? | host_path?, command?, jq?, engine?, out?, media?, allowed_out?, reuse?, root, cwd, session_id }
+ * request: { v:1, path? | text? | host_path?, command?, jq?, engine?, out?, media?, allowed_out?, reuse?, scratch?, root, cwd, session_id }
  * (`media` or `allowed_out` makes it media-only: a path whose bytes are not an image or a video is refused;
  * a media placeholder at `allowed_out` is removed first, whatever the reply; `reuse` writes no media
- * output: an earlier run's fresh one is `cached`, else the refusal `not-reused`)
+ * output: an earlier run's fresh one is `cached`, else the refusal `not-reused`; `scratch` = no host Write
+ * ruled on `allowed_out`: it must land in inZone(), else the refusal `not-scratch`, nothing written)
  * reply:   { v:1, decision: 'compressed'|'narrowed'|'passthrough'|'cached'|'refused', reason?, engine,
  *            figure, text, bytesIn, bytesOut, stages, narrowed?, out?, lines?, write?: { path, marker, exists },
  *            pointer?, original?, outputs?, frames? }
@@ -150,6 +156,9 @@ function view(input, opts) {
       if (jqSrc || hasOut) return refuse('media-args', 'view: jq and out do not apply to an image or a video — its outputs land beside the input');
       // The check ruled on the path as given; a linked folder on the way (macOS /tmp) lands in the same place.
       const allowedOut = typeof input.allowed_out === 'string' ? landing(path.resolve(input.cwd || process.cwd(), input.allowed_out)) : undefined;
+      if (input.scratch === true && !inZone(allowedOut, input.root, input.cwd)) {
+        return refuse('not-scratch', `view: ${input.allowed_out} lands outside .claude/tasks/<id>/ — not written without a Write check`, { engine: 'media' });
+      }
       const m = mediaD.normalize(file, { allowedOut, env: process.env, reuse: input.reuse === true });
       // Paths go back under the folder as given (a worktree's linked .claude/tasks), the physical one in a note.
       const given = path.dirname(path.resolve(input.cwd || process.cwd(), input.path));

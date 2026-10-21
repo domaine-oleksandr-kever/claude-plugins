@@ -4,7 +4,7 @@
 // lookup's probes among them) pass. Every spill read is recorded as an access line at debug level 1+,
 // so --report pairs the recovery with the whale it followed; a denied one is marked and never paired.
 // A model's first Read of a big image (a raw screenshot) is denied with a pointer to view, which resizes
-// it; the next Read of that path passes, so a model whose view cannot resize the file still sees it.
+// it; the next Read of that path passes, and so does the first one after a view that could not resize it.
 import type { EngineInterface, On } from 'claude-code'
 import { spillAccess, spillKind } from './channels.ts'
 import { buildAccessRun, debugLevel, textKey } from './node-hook.ts'
@@ -33,16 +33,28 @@ export function imageDenyText(path: string, size: number): string {
   return `slim: ${path} is a ${Math.round(size / 1024)} KB image — call mcp__slim__view({ path }) (resized) or pass a smaller screenshot (type jpeg, quality 60, clip to the element); if view cannot resize it, Read it again`
 }
 
+async function imageId($: $, path: string): Promise<string> {
+  return textKey(`${await $.session.id()}\n${path}`)
+}
+
 /** true the first time this session's model Reads the big image at `path`; marks it, so the next Read passes. */
 async function firstImageDeny($: $, path: string): Promise<boolean> {
   try {
-    const key = { plugin: 'slim', key: 'imageDenied', id: textKey(`${await $.session.id()}\n${path}`) } as const
-    if ((await $.state.get(key)).value === true) return false
-    await $.state.set(key, true)
+    const id = await imageId($, path)
+    if ((await $.state.get({ plugin: 'slim', key: 'imageDenied', id })).value === true) return false
+    await $.state.set({ plugin: 'slim', key: 'imageDenied', id }, true)
     return true
   } catch {
     return false
   }
+}
+
+/** Marks the image at `path`, as given and absolute, so the model's next Read of it passes: a view that could not resize it. */
+export async function passImage($: $, path: string): Promise<void> {
+  try {
+    const abs = path.startsWith('/') ? path : `${(await $.session.cwd()).replace(/\/+$/, '')}/${path}`
+    for (const p of new Set([path, abs])) await $.state.set({ plugin: 'slim', key: 'imageDenied', id: await imageId($, p) }, true)
+  } catch {}
 }
 
 /** `lookup` = the lookup tool is registered (SLIM_LOOKUP is not 0). */

@@ -1,7 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { BAD_ARGS, INLINE, PLACEHOLDER, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText } from '../view.ts'
+import { BAD_ARGS, INLINE, NO_VERDICT_WRITE, PLACEHOLDER, VIEW_DESC, noUrlText, headOf, mediaName, mediaProbe, replyText, scratchProbe } from '../view.ts'
 import { viewText } from '../events.ts'
+import { textKey } from '../node-hook.ts'
 
 type Run = { argv: readonly string[]; init?: { stdin?: string; timeoutMs?: number } }
 const VIEW = 'mcp__slim__view'
@@ -18,6 +19,16 @@ const PEEK = {
     }))
   },
 }
+/** Reads the Read guard's mark (its state id as args) from beside slim. */
+const PEEK_IMAGE = {
+  name: 'peek-image',
+  register(on: On) {
+    on('command.run', { command: 'peek-image' } as any, async ($: any, e: any) => ({
+      text: String((await $.state.get({ plugin: 'slim', key: 'imageDenied', id: e.args })).value === true),
+    }))
+  },
+}
+const NO_RESIZE = 'view could not resize /repo/shot.png — Read /repo/shot.png to see it as is'
 const events = async ($: any): Promise<any[]> => JSON.parse((await $.command.run({ command: 'peek-slim', args: '' })).text)
 
 const REPLY = {
@@ -34,6 +45,7 @@ type Opts = {
   below?: (e: any) => unknown
   agents?: any[]
   answer?: string | null
+  cwd?: string
 }
 function world(on: On, o: Opts = {}) {
   mock.clock(on, { now: 10_000 })
@@ -41,7 +53,7 @@ function world(on: On, o: Opts = {}) {
   mock.env(on, o.env ?? {})
   const w = { views: [] as any[], records: [] as any[], other: [] as Run[], calls: [] as any[], checks: [] as any[], regs: [] as any[], asked: [] as string[] }
   on('session.id', async () => ({ value: 'S' }))
-  on('session.cwd', async () => ({ value: '/repo' }))
+  on('session.cwd', async () => ({ value: o.cwd ?? '/repo' }))
   on('session.root', async () => ({ value: '/repo' }))
   on('agent.list', async () => ({ value: (o.agents ?? [{ id: 'agent-7', description: 'd', type: 'core:jira-reader', status: 'running' }]) as any }))
   on('tool.register', async (_$, e) => {
@@ -361,7 +373,7 @@ describe('V5 media', () => {
 
   test('the host denies the placeholder Write: its reason, no spawn', async ($, on) => {
     const w = world(on, { write: 'ask', below: e => (e.tool === 'Write' ? { deny: 'Permission to write /repo/shot.1568.jpg was denied' } : readOk(e)) })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('Permission to write /repo/shot.1568.jpg was denied')
+    expect(await view($, { path: '/repo/shot.png' })).toBe(`Permission to write /repo/shot.1568.jpg was denied\n${NO_RESIZE}`)
     expect(w.asked).toEqual([])
     expect(w.views).toEqual([])
     expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
@@ -369,7 +381,7 @@ describe('V5 media', () => {
 
   test('the placeholder Write fails: refused write-failed, no spawn', async ($, on) => {
     const w = world(on, { write: 'ask', below: e => (e.tool === 'Write' ? { isError: true, result: 'EACCES: permission denied', text: 'EACCES: permission denied' } : readOk(e)) })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('EACCES: permission denied')
+    expect(await view($, { path: '/repo/shot.png' })).toBe(`EACCES: permission denied\n${NO_RESIZE}`)
     expect(w.asked).toEqual([])
     expect(w.views).toEqual([])
     expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-failed' })
@@ -425,7 +437,7 @@ describe('V5 media', () => {
 
   test('the Write still unread after the Read: refused write-failed, no writing spawn, no question', async ($, on) => {
     const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, UNREAD[1]!]), reply: reuseThen(NOT_REUSED) })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('view: the Write tool still refuses /repo/shot.1568.jpg after reading it')
+    expect(await view($, { path: '/repo/shot.png' })).toBe(`view: the Write tool still refuses /repo/shot.1568.jpg after reading it\n${NO_RESIZE}`)
     expect(trail(w)).toEqual(STALE)
     expect(w.asked).toEqual([])
     expect(w.views.map(v => v.stdin.reuse)).toEqual([true])
@@ -434,7 +446,7 @@ describe('V5 media', () => {
 
   test('the host denies the second Write: refused write-denied, no writing spawn, no question', async ($, on) => {
     const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!, { deny: 'Permission to write /repo/shot.1568.jpg was denied' }]), reply: reuseThen(NOT_REUSED) })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('Permission to write /repo/shot.1568.jpg was denied')
+    expect(await view($, { path: '/repo/shot.png' })).toBe(`Permission to write /repo/shot.1568.jpg was denied\n${NO_RESIZE}`)
     expect(w.asked).toEqual([])
     expect(w.views.map(v => v.stdin.reuse)).toEqual([true])
     expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
@@ -451,7 +463,7 @@ describe('V5 media', () => {
   test('the reuse-only core refuses for another reason: that is the answer, no question', async ($, on) => {
     const noBackend = { ...NOT_REUSED, reason: 'no-backend', figure: 'media: no backend (install ffmpeg)', text: 'media: no backend (install ffmpeg)' }
     const w = world(on, { write: 'ask', answer: 'Yes', below: taken([UNREAD[0]!]), reply: reuseThen(noBackend) })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('media: no backend (install ffmpeg)')
+    expect(await view($, { path: '/repo/shot.png' })).toBe(`media: no backend (install ffmpeg)\n${NO_RESIZE}`)
     expect(w.asked).toEqual([])
     expect(w.views).toHaveLength(1)
   })
@@ -523,7 +535,7 @@ describe('V5 media', () => {
 
   test('a Write check that denies: its reason, no spawn', async ($, on) => {
     const w = world(on, { write: 'deny' })
-    expect(await view($, { path: '/repo/shot.png' })).toBe('view: writing /repo/shot.1568.jpg is denied (Write denied by rule)')
+    expect(await view($, { path: '/repo/shot.png' })).toBe(`view: writing /repo/shot.1568.jpg is denied (Write denied by rule)\n${NO_RESIZE}`)
     expect(w.views).toEqual([])
   })
 
@@ -607,5 +619,101 @@ describe('V8 pure helpers', () => {
     expect(viewText('doc-reader · ', 'a.json', 'refused', null, 0, 0, 'write-denied')).toBe('doc-reader · view a.json: refused (write-denied)')
     expect(viewText('', 'a.json', 'cached', 'log', 0, 2_000)).toBe('view a.json: cached 2 KB · log')
     expect(viewText('', `cat ${'x'.repeat(80)}`, 'passthrough', 'text', 900, 900)).toBe(`view cat ${'x'.repeat(44)}…: 900 B → 900 B (−0%) · text`)
+  })
+})
+
+describe('V9 a scratch output and a view that could not resize', () => {
+  const SCR = '/repo/.claude/tasks/T1/tmp/attachments/shot.png'
+  const SCR_OUT = '/repo/.claude/tasks/T1/tmp/attachments/shot.1568.jpg'
+  const NOT_SCRATCH = { v: 1, decision: 'refused', reason: 'not-scratch', engine: 'media', figure: 'view: not scratch', text: 'view: not scratch', bytesIn: 0, bytesOut: 0, stages: [] }
+  const trail = (w: any) => w.calls.map((c: any) => [c.tool, c.file_path, c.limit ?? c.content])
+  const NO_VERDICT = 'The server-side auto mode classifier gave no verdict for Write'
+  /** The guard's state key for the model's next Read of `path` in session S. */
+  const passed = async ($: any, path: string) => (await $.command.run({ command: 'peek-image', args: textKey(`S\n${path}`) })).text === 'true'
+
+  test('V-SCR-1 a Write check that asks on a probe under the root\'s tasks: no Write, no question, the core gets scratch', async ($, on) => {
+    const w = world(on, { write: 'ask' })
+    await view($, { path: SCR })
+    expect(trail(w)).toEqual([['Read', SCR, 1]])
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => v.stdin)).toEqual([{ v: 1, path: SCR, media: true, allowed_out: SCR_OUT, scratch: true, root: '/repo', cwd: '/repo', session_id: 'S' }])
+  })
+
+  test('V-SCR-2 under the working directory\'s tasks (a repo below the root): the same', async ($, on) => {
+    const w = world(on, { write: 'ask', cwd: '/repo/sub' })
+    await view($, { path: '.claude/tasks/T2/rec.mov' })
+    expect(w.calls).toEqual([])
+    expect(w.views.map(v => [v.stdin.allowed_out, v.stdin.scratch])).toEqual([['/repo/sub/.claude/tasks/T2/rec.frames/001.jpg', true]])
+  })
+
+  test('V-SCR-3 a Write check that denies a scratch probe: write-denied, no spawn', async ($, on) => {
+    const w = world(on, { write: 'deny' })
+    expect((await view($, { path: SCR })).split('\n')[0]).toBe(`view: writing ${SCR_OUT} is denied (Write denied by rule)`)
+    expect(w.views).toEqual([])
+    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied' })
+  })
+
+  test('V-SCR-4 the core finds the probe lands outside the zone: the placeholder Write, then the writing core', async ($, on) => {
+    const w = world(on, { write: 'ask', reply: (stdin: any) => (stdin.scratch === true ? NOT_SCRATCH : REPLY) })
+    await view($, { path: SCR })
+    expect(trail(w)).toEqual([['Read', SCR, 1], ['Write', SCR_OUT, PLACEHOLDER]])
+    expect(w.views.map(v => v.stdin.scratch)).toEqual([true, undefined])
+    expect(w.views[1].stdin).toMatchObject({ path: SCR, media: true, allowed_out: SCR_OUT })
+  })
+
+  for (const p of ['/repo/.claude/tasks/shot.png', '/repo/a/shot.png']) {
+    test(`V-SCR-5 no id segment, or outside tasks (${p}): the placeholder Write as before`, async ($, on) => {
+      const w = world(on, { write: 'ask' })
+      await view($, { path: p })
+      expect(trail(w)).toEqual([['Read', p, 1], ['Write', mediaProbe(p), PLACEHOLDER]])
+      expect(w.views[0].stdin.scratch).toBeUndefined()
+    })
+  }
+
+  test('V-SCR-6 scratchProbe from the path alone', () => {
+    expect([
+      scratchProbe('/repo/.claude/tasks/T1/a.1568.jpg', '/repo', '/x'),
+      scratchProbe('/x/.claude/tasks/T1/a.frames/001.jpg', '/repo', '/x/'),
+      scratchProbe('/repo/.claude/tasks/T1/../../../a.1568.jpg', '/repo', '/repo'),
+      scratchProbe('/repo/.claude/tasksX/T1/a.1568.jpg', '/repo', '/repo'),
+      scratchProbe('/repo/.claude/tasks//a.1568.jpg', '/repo', '/repo'),
+      scratchProbe('/repo/.claude/tasks/a.1568.jpg', '/repo', '/repo'),
+      scratchProbe('/repo/.claude/tasks/T1/./a.1568.jpg', '/repo', '/repo'),
+      scratchProbe('repo/.claude/tasks/T1/a.1568.jpg', 'repo', ''),
+    ]).toEqual([true, true, false, false, false, false, false, false])
+  })
+
+  test('V-FAIL-1 the classifier gives the placeholder Write no verdict: the hint, the Read line last, the next Read passes', { plugins: [PEEK_IMAGE] }, async ($, on) => {
+    const w = world(on, { write: 'ask', below: (e: any) => (e.tool === 'Write' ? { deny: NO_VERDICT } : { result: { type: 'image' }, text: '' }) })
+    const text = await view($, { path: 'a/shot.png' })
+    expect(text.split('\n')).toEqual([NO_VERDICT, NO_VERDICT_WRITE, 'view could not resize a/shot.png — Read a/shot.png to see it as is'])
+    expect(w.views).toEqual([])
+    expect([await passed($, 'a/shot.png'), await passed($, '/repo/a/shot.png')]).toEqual([true, true])
+  })
+
+  test('V-FAIL-1b a core refusal (no backend): the Read line, no hint', { plugins: [PEEK_IMAGE] }, async ($, on) => {
+    const noBackend = { v: 1, decision: 'refused', reason: 'no-backend', engine: 'media', figure: 'media: no backend', text: 'media: no backend', bytesIn: 0, bytesOut: 0, stages: [] }
+    world(on, { reply: noBackend })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('media: no backend\nview could not resize /repo/shot.png — Read /repo/shot.png to see it as is')
+    expect(await passed($, '/repo/shot.png')).toBe(true)
+  })
+
+  test('V-FAIL-2 a denied Read of the image: no Read line, no key set', { plugins: [PEEK_IMAGE] }, async ($, on) => {
+    world(on, { below: (e: any) => (e.tool === 'Read' ? { deny: 'guard: not that image' } : { result: {} }) })
+    expect(await view($, { path: '/repo/shot.png' })).toBe('guard: not that image')
+    expect(await passed($, '/repo/shot.png')).toBe(false)
+  })
+
+  for (const reason of ['media-args', 'copy-unfit', 'not-media'])
+    test(`V-FAIL-2b a usage refusal (${reason}): no Read line, no key set`, { plugins: [PEEK_IMAGE] }, async ($, on) => {
+      const usage = { v: 1, decision: 'refused', reason, engine: null, figure: `view: ${reason}`, text: `view: ${reason}`, bytesIn: 0, bytesOut: 0, stages: [] }
+      world(on, { reply: usage })
+      expect(await view($, { path: '/repo/shot.png', jq: '.a' })).toBe(`view: ${reason}`)
+      expect(await passed($, '/repo/shot.png')).toBe(false)
+    })
+
+  test('V-FAIL-3 a video refusal: no Read line (the Read tool cannot open one)', async ($, on) => {
+    world(on, { write: 'deny' })
+    expect(await view($, { path: '/repo/rec.mov' })).toBe('view: writing /repo/rec.frames/001.jpg is denied (Write denied by rule)')
   })
 })
