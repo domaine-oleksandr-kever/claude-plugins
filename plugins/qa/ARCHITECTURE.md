@@ -10,7 +10,7 @@ plugins/qa/
 ├── .claude-plugin/plugin.json   dependencies: ["base"], types; no mcpServers, no classic `hooks` key
 ├── hooks/hooks.json             "modules" (the hooks module) + classic "hooks": SessionStart
 ├── hooks/conventions.cjs        the command hook: qa's conventions and their marker (Node built-ins)
-├── hooks/conventions-text.json  the convention texts, the one copy the hook and the module read
+├── hooks/conventions-text.json  the convention texts, the one copy hooks/conventions.cjs reads
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── types/index.d.ts             qa's $.state contract: the `qa` key only
 ├── skills/preflight/            SKILL.md (`/qa:preflight`), gate.md, rows.md, brief.md
@@ -56,12 +56,11 @@ across an import, so `doctor.ts` repeats `diskOf` and the base lookup rather tha
 
 | File | Hooks | Writes |
 |---|---|---|
-| `session.ts` | `session.start {cwd:/^/}` start line and base check · `prompt.context`: the cloud fallback block (nothing draws and no `conventions.qa.json` marker), text from `hooks/conventions-text.json` | `qa.started`, `qa.events` |
+| `session.ts` | `session.start {cwd:/^/}` start line and base check | `qa.started`, `qa.events` |
 | `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit`: register `/qa-doctor` (every start, and a new session id) · `command.run qa-doctor` (passes `--log-dir` to `doctor.cjs`) | `qa.armed`, `qa.events` |
 
-Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `qa.jsonl` writer, and `logDir` for the
-marker path). `<base root>` stays literal in the passwords text: qa cannot see base's directory, and
-base's own session line names it.
+Pure helpers carry no `$`: `events.ts` (the 200-line cap, the `qa.jsonl` writer and `logDir`). `<base root>`
+stays literal in the passwords text: qa cannot see base's directory, and base's own session line names it.
 
 The conventions travel as a classic command hook, `hooks/conventions.cjs`, because the hooks module's
 prompt events (`prompt.compose`, `prompt.context`, `classic.*`) pass over a user-installed plugin on an
@@ -107,7 +106,7 @@ error text is not relayed, as a parse message can quote the file. `/qa-doctor` a
 ## 8. The tests
 
 - `hooks/mods/tests/*.test.ts` through `claude plugin test plugins/qa` (`tests/mods-sim.sh`): the start
-  line and base check, the cloud fallback block and its marker guard, the doctor command, `qa.jsonl`.
+  line and base check, the doctor command, `qa.jsonl`.
 - `tests/hooks-sim.sh` (`DHt*`): `hooks/conventions.cjs` run as the host runs it — the envelope, its
   text, the marker, bad stdin, the log dir, the login label, the text file.
 - `tests/qa-doctor-sim.sh`: every `doctor.cjs` row's PASS / FAIL / SKIP / WARN on a sandbox plugin

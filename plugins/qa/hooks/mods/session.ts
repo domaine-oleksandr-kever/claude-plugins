@@ -1,10 +1,8 @@
-// qa's session: the start line and the base check. The conventions travel as command hooks
-// (hooks/conventions.cjs); this mod is the cloud fallback only: in a session no surface draws and whose
-// SessionStart hook left no marker, they ride the first user message as a block.
+// qa's session: the start line and the base check. The conventions travel as a command hook (hooks/conventions.cjs).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { QaEvent, QaEventKind } from '../../types'
-import { logDir, spareRoot, logLine, pushEvent } from './events.ts'
+import { logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 
 export const BASE_MISSING = 'needs the base plugin — claude plugin install base@domaine'
@@ -54,20 +52,6 @@ async function baseLoaded($: $): Promise<boolean> {
   }
 }
 
-/** Where the SessionStart command hook leaves its marker: `<log dir>/<session>/conventions.qa.json`, else under the spare root. */
-export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string): string[] =>
-  [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.qa.json`] : []))
-
-/** The sections as one context block where nothing draws and no command hook delivered them; else null. */
-export async function contextBlock($: $): Promise<string | null> {
-  if ((await $.session.surfaces()).length > 0) return null
-  for (const m of markerPaths(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), await $.env.get('TMPDIR'), String(await $.session.id()))) {
-    if (await $.fs.exists(m)) return null
-  }
-  const t = JSON.parse(await $.fs.read(`${$.plugin.root}/hooks/conventions-text.json`)) as Record<string, string>
-  return [(t.root ?? '').split('<root>').join($.plugin.root), t.passwords ?? ''].join('\n\n')
-}
-
 export function registerSession(on: On): void {
   // The engine allows one unmatched hook per event per plugin; this matcher takes every session.
   on('session.start', { cwd: /^/ }, async ($, e, next) => {
@@ -83,11 +67,5 @@ export function registerSession(on: On): void {
       }
     } catch {}
     return next(e)
-  })
-
-  on('prompt.context', async ($, e, next) => {
-    const r = await next(e)
-    const text = await contextBlock($).catch(() => null)
-    return text ? { ...r, blocks: [...r.blocks, { name: 'qaConventions', text }] } : r
   })
 }

@@ -4,7 +4,7 @@
  * reaches the model on every login. Text: conventions-text.json. Mode (argv):
  *   start  SessionStart: the root line and the storefront-passwords section
  * qa adds nothing to subagents. start writes the marker <log dir>/<session>/conventions.qa.json, which base's
- * doctor and the mod's cloud fallback read. Always exits 0; an internal error prints nothing.
+ * doctor reads. Always exits 0; an internal error prints nothing.
  */
 'use strict';
 
@@ -50,7 +50,7 @@ function logDir(sid, spare) {
   return root ? root + '/' + sid : null;
 }
 
-/** The log dir, else the spare dir: printed context always leaves a marker the mods' fallback sees. */
+/** The log dir, else the spare dir: printed context always leaves a marker the doctor sees. */
 function writeMarker(sid, name, data) {
   let why = null;
   for (const dir of [logDir(sid), logDir(sid, true)]) {

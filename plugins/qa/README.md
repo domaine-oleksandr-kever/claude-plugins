@@ -19,7 +19,7 @@ store registry (`<base root>/scripts/qa-stores.cjs`), the shared references and 
 MCP server ([plugins/base/README.md](../base/README.md)). base requires slim, so qa runs with slim
 too.
 
-Current release: **qa v0.4.1**.
+Current release: **qa v0.4.2**.
 
 ## Status
 
@@ -86,11 +86,7 @@ The hook writes a marker, `<log dir>/<session-id>/conventions.qa.json`: `via`, `
 `sections` it sent, `chars` and the `login` (`work`, `personal` or `unknown`, read from the login file;
 doctor evidence only). `/base-doctor`'s `conventions` row reads it.
 Where the log folder is missing or not writable, the marker goes to the spare folder
-`<TMPDIR or /tmp>/domaine-log/<session-id>/`; the fallback below looks in both.
-
-**Cloud fallback.** A session that no surface draws (a claude.ai cloud session, `claude -p`) and that has
-no marker gets the same text from qa's hooks module instead: one context block of the first user
-message (`prompt.context`, beside CLAUDE.md), read from the same file.
+`<TMPDIR or /tmp>/domaine-log/<session-id>/`.
 
 | Name | Holds |
 |---|---|
