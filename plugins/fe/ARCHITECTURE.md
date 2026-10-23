@@ -10,7 +10,7 @@ plugins/fe/
 ├── .claude-plugin/plugin.json   dependencies: ["base"], types; no mcpServers, no classic `hooks` key
 ├── hooks/hooks.json             "modules" (the hooks module) + classic "hooks": SessionStart, SubagentStart
 ├── hooks/conventions.cjs        the command hook: fe's sections, profile decision, marker (Node built-ins)
-├── hooks/conventions-text.json  the section texts, the one copy the hook and the module read
+├── hooks/conventions-text.json  the section texts the command hook reads
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── types/index.d.ts             fe's $.state contract: the `fe` key only
 ├── skills/<name>/SKILL.md       the 12 Shopify theme skills (`/fe:<name>`); fix-breaking-changes
@@ -52,8 +52,7 @@ prints the share for the agent type on stdin, the profile from that marker. On a
 prints the `fe preview default:` line: `previewDefault()` reads `FE_PREVIEW_DEFAULT` from the environment,
 else `~/.config/domaine/env` (never the committable project `.claude/domaine.env`), and `scripts/doctor.cjs`
 asks the same function for its `preview` row. A drafter (`*-drafter`) gets the root, the profile and store
-access, never the Foundation section. The cloud fallback block (`hooks/mods/session.ts`) prints the same
-preview line by the same rule (`previewOff`). It always exits 0 and prints
+access, never the Foundation section. It always exits 0 and prints
 nothing on an internal error; the only stderr line is a marker write that failed. It requires nothing
 from base: the helpers (stdin, envelope, log dir, login label) are copies of base's.
 
@@ -65,21 +64,21 @@ across an import, so `doctor.ts` repeats `diskOf` and the base lookup rather tha
 
 | File | Hooks | Writes |
 |---|---|---|
-| `session.ts` | `session.start {cwd:/^/}` start line, base check, profile decision started unawaited · `prompt.context`: the cloud fallback — the sections as one block when no surface draws and the command hook left no marker | `fe.started`, `fe.profile`, `fe.events` |
+| `session.ts` | `session.start {cwd:/^/}` start line, base check, profile decision started unawaited | `fe.started`, `fe.profile`, `fe.events` |
 | `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit`: register `/fe-doctor` (every start, and a new session id) · `command.run fe-doctor` (passes `--log-dir` to `doctor.cjs`; the profile row prefers the marker's profile) | `fe.armed`, `fe.events` |
 
-Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `fe.jsonl` writer). The fallback reads the
-section texts from `hooks/conventions-text.json` through `$.fs.read`.
+Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `fe.jsonl` writer).
 
 **The profile** is decided twice the same way: by the command hook for the text the model gets, and in
-`session.ts` for the module's readers (the fallback, the event log, the doctor). The module decides it once per session id —
+`session.ts` for the module's readers (the event log, the doctor). The module decides it once per session id —
 `FE_PROFILE` when it holds one of the three words, else `bash scripts/project-profile.sh <session root>`
 through `$.process.run` with a 5 s timeout — stored in `fe.profile` with how it was decided, whether
 the project root holds `shopify.theme.toml` (the worktree gate) and whether store access applies (the toml,
 or `.env` with a profile other than `none`), and logged once. The progress series needs a profile other
 than `none` or the toml. A
-module-local promise keyed by the session id keeps the start and the fallback from running the
-probe twice; a /clear's new id decides again at its first fallback block. The probe stays a script because
+module-local promise keyed by the session id keeps a repeated start from running the probe twice;
+a /clear's new id, which no session.start announces, is not decided by the module (the doctor's
+profile row reads the marker first). The probe stays a script because
 `worktree-theme.sh`, the doctor and the skills' fallback (no profile line in the session) read the same answer outside the module.
 
 ## 5. The atoms

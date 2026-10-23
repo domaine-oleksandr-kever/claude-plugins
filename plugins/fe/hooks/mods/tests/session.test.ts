@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { BASE_MISSING, PROFILE_TIMEOUT_MS, profileText } from '../session.ts'
-import { NOW, PEEK, ROOT, block, eventsOf, peek, put, ran, start, world as engine } from './world.ts'
+import { NOW, PEEK, ROOT, eventsOf, peek, put, ran, start, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
-// A session no surface draws: the mod's fallback block is the profile's one reader in the prompt.
-const world = (on: On, over: Parameters<typeof engine>[1] = {}) => engine(on, { surfaces: [], ...over })
-const profileOf = async ($: any) => (await block($))!.split('\n\n')[1]
+/** The word session.start decided, once the unawaited probe settled. */
+const profileOf = async ($: any, clock: { settle: () => Promise<void> }) => {
+  await start($)
+  await clock.settle()
+  return (await peek($)).profile?.word
+}
 
 describe('start line and the base check', () => {
   t('one start line per session with the manifest version; a reloaded start writes none', async ($, on) => {
@@ -53,7 +56,6 @@ describe('start line and the base check', () => {
   t('FE_EVENT_LOG=0 keeps the list empty; the toast still shows', async ($, on) => {
     const { calls } = world(on, { env: { FE_EVENT_LOG: '0' }, commands: [] })
     await start($)
-    await block($)
     expect((await peek($)).events).toEqual([])
     expect(calls.toasts).toEqual([`fe: ${BASE_MISSING}`])
   })
@@ -72,20 +74,20 @@ describe('the project profile', () => {
       ['start', 'fe 0.1.0'],
       ['profile', 'foundation (project-profile.sh)'],
     ])
-    expect(await profileOf($)).toBe('fe project profile: foundation')
+    expect(await profileOf($, clock)).toBe('foundation')
     expect(calls.profiles).toHaveLength(1)
   })
 
   t('FE_PROFILE forces the word without running the probe', async ($, on) => {
-    const { calls } = world(on, { env: { FE_PROFILE: 'none' } })
-    expect(await profileOf($)).toBe('fe project profile: none')
+    const { calls, clock } = world(on, { env: { FE_PROFILE: 'none' } })
+    expect(await profileOf($, clock)).toBe('none')
     expect(calls.profiles).toEqual([])
     expect((await eventsOf($, 'profile')).map(ev => ev.text)).toEqual(['none (FE_PROFILE)'])
   })
 
   t('an FE_PROFILE that is not one of the three words goes to the probe', async ($, on) => {
-    const { calls } = world(on, { env: { FE_PROFILE: 'Foundation' } })
-    expect(await profileOf($)).toBe('fe project profile: theme')
+    const { calls, clock } = world(on, { env: { FE_PROFILE: 'Foundation' } })
+    expect(await profileOf($, clock)).toBe('theme')
     expect(calls.profiles).toHaveLength(1)
   })
 
@@ -95,8 +97,8 @@ describe('the project profile', () => {
     ['a probe that cannot start or times out', () => null, 'project-profile.sh did not run: '],
   ] as const) {
     t(`${label} → none, one profile line saying why, the session goes on`, async ($, on) => {
-      world(on, { profile: answer })
-      expect(await profileOf($)).toBe('fe project profile: none')
+      const { clock } = world(on, { profile: answer })
+      expect(await profileOf($, clock)).toBe('none')
       const p = (await peek($)).profile
       expect(p).toMatchObject({ word: 'none', via: 'fallback' })
       expect(p.why).toStartWith(why)
@@ -107,18 +109,18 @@ describe('the project profile', () => {
   }
 
   t('the store gate is decided with the profile', async ($, on) => {
-    const { w } = world(on)
+    const { w, clock } = world(on)
     put(w, 'shopify.theme.toml')
-    await block($)
+    await profileOf($, clock)
     expect((await peek($)).profile).toMatchObject({ toml: true, store: true })
   })
 
-  t('a /clear (a new session id, no session.start) decides again at its first fallback block', async ($, on) => {
-    const { w, calls } = world(on)
-    await block($)
+  t('a new session id decides again at its start', async ($, on) => {
+    const { w, calls, clock } = world(on)
+    await profileOf($, clock)
     w.sid = 's2'
     w.profile = () => ran(0, 'none\n')
-    expect(await profileOf($)).toBe('fe project profile: none')
+    expect(await profileOf($, clock)).toBe('none')
     expect(calls.profiles).toHaveLength(2)
     expect((await peek($)).profile.session).toBe('s2')
   })

@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.11.3**.
+Current release: **fe v0.11.4**.
 
 ## Status
 
@@ -148,11 +148,7 @@ The hook writes a marker, `<log dir>/<session-id>/conventions.fe.json`: `via`, `
 `sections` it sent, `chars`, the `login` (`work`, `personal` or `unknown`, read from the login file; doctor
 evidence only) and the `profile` it decided. `/base-doctor`'s `conventions` row reads it.
 Where the log folder is missing or not writable, the marker goes to the spare folder
-`<TMPDIR or /tmp>/domaine-log/<session-id>/`; the fallback below looks in both.
-
-**Cloud fallback.** A session that no surface draws (a claude.ai cloud session, `claude -p`) and that has
-no marker gets the same sections from fe's hooks module instead: one context block of the first user
-message (`prompt.context`, beside CLAUDE.md), text from the same file.
+`<TMPDIR or /tmp>/domaine-log/<session-id>/`.
 
 | Name | Holds | When |
 |---|---|---|
@@ -176,7 +172,7 @@ takes the first answer in this order:
    else `none`.
 
 A probe that fails or times out (5 s) gives `none` and says why in the marker. The hooks module
-decides the same way once per session id for its own readers (the fallback, `/fe-doctor`) and logs one
+decides the same way once per session id for its own readers (the event log, `/fe-doctor`) and logs one
 `profile` line.
 
 **Subagents** get fe's share as added context at their start, through a second command hook,
@@ -254,7 +250,7 @@ The process environment wins.
 | `FE_PREVIEW_DEFAULT` | on | `0` turns off the preview-theme default of `/fe:develop-feature-or-fix` and `/fe:qa-feature-or-fix`: they validate on the local dev server, which must then be running. Decided once by the `hooks/conventions.cjs` start hook (its `fe preview default:` line, toml checkouts only) and shown by the doctor's `preview` row; read from the process environment, else `~/.config/domaine/env` — never from the project `.claude/domaine.env` |
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. The `hooks/conventions.cjs` command hook writes its marker `conventions.fe.json` there too. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base` row reads; by the `hooks/conventions.cjs` command hook: the login file it labels in its marker (`<dir>/.claude.json`, or `~/.claude.json` for the default directory) |
-| `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook and the hooks module: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |
+| `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |
 | `CLAUDE_PLUGIN_ROOT` | set by Claude Code | read, never set, by the `hooks/conventions.cjs` command hook: fe's root, filled into the root line and the store-access paths (the script's own parent directory when unset) |
 | `FE_GQL_PROBE_CACHE` | `21600` | seconds `shopify-admin-gql.sh` reuses its `shopify version` probe and its "`store execute` is unavailable for this store" fact; `0` re-probes on every call (right after a `shopify store auth`) |
 | `FE_CPT_THROTTLE_WAITS` | `20 60` | pauses, in seconds, between `create-preview-theme.sh`'s push retries after Shopify answers `Throttled`; one retry per value, empty turns retrying off |

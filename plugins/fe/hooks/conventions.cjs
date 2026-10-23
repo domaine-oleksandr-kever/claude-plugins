@@ -6,8 +6,8 @@
  *             line (FE_PREVIEW_DEFAULT), progress series
  *   subagent  SubagentStart: the share of the agent type on stdin
  * start decides the project profile (FE_PROFILE, else scripts/project-profile.sh with a 5 s timeout) and writes
- * the marker <log dir>/<session>/conventions.fe.json, which subagent, base's doctor and the mod's cloud fallback
- * read. Always exits 0; an internal error prints nothing.
+ * the marker <log dir>/<session>/conventions.fe.json, which subagent, base's doctor and fe's doctor read.
+ * Always exits 0; an internal error prints nothing.
  */
 'use strict';
 
@@ -62,7 +62,7 @@ function logDir(sid, spare) {
   return root ? root + '/' + sid : null;
 }
 
-/** The log dir, else the spare dir: printed context always leaves a marker the mods' fallback sees. */
+/** The log dir, else the spare dir: printed context always leaves a marker the subagent hook sees. */
 function writeMarker(sid, name, data) {
   let why = null;
   for (const dir of [logDir(sid), logDir(sid, true)]) {
