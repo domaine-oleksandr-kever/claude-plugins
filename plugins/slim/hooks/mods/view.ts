@@ -81,22 +81,21 @@ export function mediaProbe(path: string): string {
 }
 
 /**
- * True when `probe` (absolute) lies lexically under `<root|cwd>/.claude/tasks/<id>/`: the scratch zone a
- * view writes to with no Write check, the core re-checking where it lands (`scratch`, view.cjs inZone()).
+ * True when `probe` (absolute) names a file under some `.claude/tasks/<id>/`: a candidate for the scratch
+ * zone a view writes to with no Write check. The core decides by where it lands (`scratch`, view.cjs
+ * inZone()), since a worktree's `.claude/tasks` links to the main checkout's and paths arrive resolved.
  */
-export function scratchProbe(probe: string, root: string, cwd: string): boolean {
+export function scratchProbe(probe: string): boolean {
   const segs = probe.split('/')
   if (!probe.startsWith('/') || segs.some(s => s === '..' || s === '.')) return false
-  return [root, cwd].some(d => {
-    const base = `${d.replace(/\/+$/, '')}/.claude/tasks/`
-    if (!d.startsWith('/') || !probe.startsWith(base)) return false
-    const rest = probe.slice(base.length).split('/')
-    return rest.length >= 2 && rest.every(s => s !== '')
-  })
+  for (let i = 1; i + 3 < segs.length; i++) {
+    if (segs[i] === '.claude' && segs[i + 1] === 'tasks') return segs.slice(i + 2).every(s => s !== '')
+  }
+  return false
 }
 
 /** Added to a refusal whose reason is the host's auto-mode classifier giving the media Write no verdict. */
-export const NO_VERDICT_WRITE = 'view: the media copy needs a Write verdict here — do not retry view on this file'
+export const NO_VERDICT_WRITE = "view: the host's retry advice does not apply to view — this mode gives the media copy's Write no verdict; do not retry view on this file"
 
 /** At most `maxLines` lines and `maxBytes` bytes from the top of `text`; a longer line is cut. */
 export function headOf(text: string, maxLines: number, maxBytes: number): string {
@@ -290,7 +289,7 @@ async function mediaRun($: $, path: string, a: Record<string, string>): Promise<
       return refused('path', 'not-confirmed', `view: not confirmed — reading ${abs} and writing ${what} needs a yes`)
     }
   } else if (askWrite) {
-    if (scratchProbe(probe, await $.session.root(), await $.session.cwd())) {
+    if (scratchProbe(probe)) {
       const s = await core($, 'path', { path, ...a, media: true, allowed_out: probe, scratch: true })
       if (s.reason !== 'not-scratch') return s
     }

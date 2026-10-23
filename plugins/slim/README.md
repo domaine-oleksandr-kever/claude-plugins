@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.15.1**.
+Current release: **slim v0.15.2**.
 
 ## Install
 
@@ -465,7 +465,8 @@ an image that ends refused because it could not resize (a write, backend or conf
 denied Read, `jq`/`out` on an image, an unfit copy name or a non-image) lets the next Read of that
 image pass (by the path as given and its absolute form). Its reply ends with
 `view could not resize <path> — Read <path> to see it as is`, and a Write the auto-mode classifier
-gave no verdict adds a line not to retry view on that file.
+gave no verdict adds a line that the host's retry advice does not apply to view: do not retry view
+on that file.
 `SLIM_IMAGE_READ_MAX` raises the size or, at `0`, turns this deny off.
 
 ## Lookup
@@ -660,9 +661,12 @@ rule on it.
 
 When the Write check answers `ask` on an output inside `.claude/tasks/<id>/` of the session root or
 the working directory (the zone `out` takes with no question, such as a ticket's
-`tmp/attachments/`), slim writes it with no placeholder Write and asks nothing. The core checks where
-that path lands through links first, and refuses (`not-scratch`, nothing written) one outside the
-zone, which then takes the placeholder Write below. A Write check's deny is still the answer there.
+`tmp/attachments/`), slim writes it with no placeholder Write and asks nothing. That includes a
+worktree whose `.claude/tasks` links to the main checkout's, where paths arrive resolved to the main
+checkout: slim hands any output under some `.claude/tasks/<id>/` to the core, which checks where
+that path and the zone land through links first, and refuses (`not-scratch`, nothing written) one
+outside the zone, which then takes the placeholder Write below. A Write check's deny is still the
+answer there.
 
 For any other output, when the Write check answers `ask`, slim calls the host's Write tool on the
 output path with a placeholder text. Thus the current mode decides: the standard dialog in default mode, the

@@ -46,6 +46,7 @@ type Opts = {
   agents?: any[]
   answer?: string | null
   cwd?: string
+  root?: string
 }
 function world(on: On, o: Opts = {}) {
   mock.clock(on, { now: 10_000 })
@@ -54,7 +55,7 @@ function world(on: On, o: Opts = {}) {
   const w = { views: [] as any[], records: [] as any[], other: [] as Run[], calls: [] as any[], checks: [] as any[], regs: [] as any[], asked: [] as string[] }
   on('session.id', async () => ({ value: 'S' }))
   on('session.cwd', async () => ({ value: o.cwd ?? '/repo' }))
-  on('session.root', async () => ({ value: '/repo' }))
+  on('session.root', async () => ({ value: o.root ?? '/repo' }))
   on('agent.list', async () => ({ value: (o.agents ?? [{ id: 'agent-7', description: 'd', type: 'core:jira-reader', status: 'running' }]) as any }))
   on('tool.register', async (_$, e) => {
     w.regs.push(e)
@@ -672,15 +673,24 @@ describe('V9 a scratch output and a view that could not resize', () => {
 
   test('V-SCR-6 scratchProbe from the path alone', () => {
     expect([
-      scratchProbe('/repo/.claude/tasks/T1/a.1568.jpg', '/repo', '/x'),
-      scratchProbe('/x/.claude/tasks/T1/a.frames/001.jpg', '/repo', '/x/'),
-      scratchProbe('/repo/.claude/tasks/T1/../../../a.1568.jpg', '/repo', '/repo'),
-      scratchProbe('/repo/.claude/tasksX/T1/a.1568.jpg', '/repo', '/repo'),
-      scratchProbe('/repo/.claude/tasks//a.1568.jpg', '/repo', '/repo'),
-      scratchProbe('/repo/.claude/tasks/a.1568.jpg', '/repo', '/repo'),
-      scratchProbe('/repo/.claude/tasks/T1/./a.1568.jpg', '/repo', '/repo'),
-      scratchProbe('repo/.claude/tasks/T1/a.1568.jpg', 'repo', ''),
-    ]).toEqual([true, true, false, false, false, false, false, false])
+      scratchProbe('/repo/.claude/tasks/T1/a.1568.jpg'),
+      scratchProbe('/x/.claude/tasks/T1/a.frames/001.jpg'),
+      scratchProbe('/repo/.claude/tasks/T1/../../../a.1568.jpg'),
+      scratchProbe('/repo/.claude/tasksX/T1/a.1568.jpg'),
+      scratchProbe('/repo/.claude/tasks//a.1568.jpg'),
+      scratchProbe('/repo/.claude/tasks/a.1568.jpg'),
+      scratchProbe('/repo/.claude/tasks/T1/./a.1568.jpg'),
+      scratchProbe('repo/.claude/tasks/T1/a.1568.jpg'),
+      scratchProbe('/repo/a/a.1568.jpg'),
+    ]).toEqual([true, true, false, false, false, false, false, false, false])
+  })
+
+  test('V-SCR-7 a worktree whose .claude/tasks links to the main checkout: the resolved path is scratch', async ($, on) => {
+    const main = '/main/.claude/tasks/T1/tmp/attachments/shot.png'
+    const w = world(on, { write: 'ask', root: '/wt', cwd: '/wt' })
+    await view($, { path: main })
+    expect(trail(w)).toEqual([['Read', main, 1]])
+    expect(w.views.map(v => v.stdin)).toEqual([{ v: 1, path: main, media: true, allowed_out: '/main/.claude/tasks/T1/tmp/attachments/shot.1568.jpg', scratch: true, root: '/wt', cwd: '/wt', session_id: 'S' }])
   })
 
   test('V-FAIL-1 the classifier gives the placeholder Write no verdict: the hint, the Read line last, the next Read passes', { plugins: [PEEK_IMAGE] }, async ($, on) => {

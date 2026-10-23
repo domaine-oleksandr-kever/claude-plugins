@@ -1797,6 +1797,14 @@ printf 'MAGICKIMG' > "$o$r"
   writeFileSync(path.join(esc, 'lnk.1568.jpg'), PH);
   const s3 = viewMedia({ path: path.join(proj, '.claude/tasks/LINK/lnk.png'), allowed_out: path.join(proj, '.claude/tasks/LINK/lnk.1568.jpg'), scratch: true }, phBin);
   eq('Cv18-scratch-symlink-escape', [s3.reason, existsSync(path.join(esc, 'lnk.1568.jpg'))], ['not-scratch', false]);
+  // A worktree whose .claude/tasks links to the main checkout's: the resolved main-checkout path is scratch.
+  const mainAtt = path.join(T, 'main', '.claude', 'tasks', 'T9', 'tmp', 'attachments');
+  mkdirSync(mainAtt, { recursive: true });
+  mkdirSync(path.join(T, 'wt', '.claude'), { recursive: true });
+  symlinkSync(path.join(T, 'main', '.claude', 'tasks'), path.join(T, 'wt', '.claude', 'tasks'));
+  writeFileSync(path.join(mainAtt, 'wt.png'), PNG);
+  const s4 = viewMedia({ path: path.join(mainAtt, 'wt.png'), allowed_out: path.join(mainAtt, 'wt.1568.jpg'), scratch: true, root: path.join(T, 'wt'), cwd: path.join(T, 'wt') }, phBin);
+  eq('Cv18-scratch-worktree-linked-tasks', [s4.decision, readFileSync(path.join(mainAtt, 'wt.1568.jpg'), 'utf8')], ['compressed', 'IMG']);
 }
 
 // C-csv — a delimited table on every channel the csv engine serves; its re-run is already slim.
