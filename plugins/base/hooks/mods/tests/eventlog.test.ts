@@ -18,12 +18,14 @@ const parse = (text: string | undefined): Line[] => (text ?? '').split('\n').fil
 const line = (session: string, kind: string, text: string, version = '0.1.0') =>
   JSON.stringify({ ts: TS, plugin: 'base', version, session, kind, agent: 'main', text })
 const bash = ($: any, command: string) => $.tool.call({ tool: 'Bash', command })
+/** The base.jsonl writes alone: progress.ts mirrors autosave-state.json beside it. */
+const jsonl = (calls: { writes: { path: string; text: string }[] }) => calls.writes.filter(x => x.path.endsWith('/base.jsonl'))
 
 describe('base.jsonl', () => {
   t('the start line is the first line: ts, plugin literal, manifest version, session, agent main', async ($, on) => {
     const { w, calls } = world(on, { env: { HOME }, manifest: '{ "name": "base", "version": "1.2.3" }' })
     await start($)
-    expect(calls.writes.map(x => x.path)).toEqual([FILE])
+    expect(jsonl(calls).map(x => x.path)).toEqual([FILE])
     expect(w.files[FILE]?.text).toBe(`${line('s1', 'start', 'base 1.2.3', '1.2.3')}\n`)
   })
 
@@ -43,15 +45,16 @@ describe('base.jsonl', () => {
       ['refuse', 'jira-reader: slim is not loaded'],
     ])
     expect(lines.every(l => l.plugin === 'base' && l.session === 's1' && l.agent === 'main' && l.ts === TS)).toBe(true)
-    expect(calls.writes).toHaveLength(5)
-    expect(calls.writes[1]?.text.split('\n').filter(Boolean)).toHaveLength(2)
+    expect(jsonl(calls)).toHaveLength(5)
+    expect(jsonl(calls)[1]?.text.split('\n').filter(Boolean)).toHaveLength(2)
   })
 
   t('the doctor and title lines reach the file too', async ($, on) => {
-    const { w } = world(on, { env: { HOME }, run: () => ran(0, JSON.stringify({ root: '/p', rows: [] })) })
+    const { w, clock } = world(on, { env: { HOME }, run: () => ran(0, JSON.stringify({ root: '/p', rows: [] })) })
     w.files[`${ROOT}/.claude/tasks/ABC-1591/ticket.md`] = { text: '# ABC-1591 — Fix the cart', mtimeMs: NOW }
-    await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
+    w.files[`${LOG}/s1/title.json`] = { text: JSON.stringify({ sid: 's1', by: 'base', title: 'ABC-1591 — Fix the cart', ts: NOW }), mtimeMs: NOW }
     await start($)
+    await clock.advance(30_000)
     await run($, '', 'base-doctor')
     expect(parse(w.files[FILE]?.text).map(l => l.kind)).toEqual(expect.arrayContaining(['start', 'title', 'workspace', 'doctor']))
     expect(parse(w.files[FILE]?.text)[0]?.kind).toBe('start')
@@ -94,7 +97,7 @@ describe('base.jsonl', () => {
     const { calls } = world(on, { env: { HOME, BASE_EVENT_LOG: '0' } })
     await start($)
     await bash($, ATTRIBUTION)
-    expect(calls.writes).toEqual([])
+    expect(jsonl(calls)).toEqual([])
   })
 
   t('no HOME and no DOMAINE_LOG_DIR → no file, no toast, the list still fills', async ($, on) => {
@@ -108,13 +111,13 @@ describe('base.jsonl', () => {
   t('an absolute DOMAINE_LOG_DIR replaces the home directory; the session directory is still made under it', async ($, on) => {
     const { calls } = world(on, { env: { HOME, DOMAINE_LOG_DIR: '/var/log/domaine/' } })
     await start($)
-    expect(calls.writes.map(x => x.path)).toEqual(['/var/log/domaine/s1/base.jsonl'])
+    expect(jsonl(calls).map(x => x.path)).toEqual(['/var/log/domaine/s1/base.jsonl'])
   })
 
   t('a relative DOMAINE_LOG_DIR is ignored: the log never lands in the project', async ($, on) => {
     const { calls } = world(on, { env: { HOME, DOMAINE_LOG_DIR: 'logs' } })
     await start($)
-    expect(calls.writes.map(x => x.path)).toEqual([FILE])
+    expect(jsonl(calls).map(x => x.path)).toEqual([FILE])
   })
 
   t('two events in flight together, no start first: both lines reach the file', async ($, on) => {
@@ -159,7 +162,7 @@ describe('the sweep of old session directories', () => {
     await clock.settle()
     expect(calls.removed).toEqual([`${LOG}/${OLD}`])
     expect(Object.keys(w.files).filter(p => p.startsWith(`${LOG}/`)).sort()).toEqual(
-      [`${LOG}/${FRESH}/base.jsonl`, `${LOG}/${FRESH}/slim.jsonl`, `${LOG}/${NESTED}/deeper/x.jsonl`, `${LOG}/s1/base.jsonl`].sort(),
+      [`${LOG}/${FRESH}/base.jsonl`, `${LOG}/${FRESH}/slim.jsonl`, `${LOG}/${NESTED}/deeper/x.jsonl`, `${LOG}/s1/autosave-state.json`, `${LOG}/s1/base.jsonl`].sort(),
     )
     put(w, `${LOG}/${OLD2}/base.jsonl`, old)
     await start($)

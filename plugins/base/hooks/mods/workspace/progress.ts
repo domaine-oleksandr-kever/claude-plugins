@@ -2,8 +2,8 @@
 // atom band draws its checklist from, with the staleness autosave.ts acts on; base draws nothing itself.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, FsEntry, On } from 'claude-code'
-import type { BaseCompactMarker, BaseEvent, BaseProgress, BaseSavable } from '../../../types'
-import { logDir, logLine, pushEvent } from '../events.ts'
+import type { BaseAutosave, BaseCompactMarker, BaseEvent, BaseProgress, BaseSavable } from '../../../types'
+import { logDir, logLine, pushEvent, spareRoot } from '../events.ts'
 import type { Disk } from '../events.ts'
 import { notesTail, parseProgress } from './progress-parse.ts'
 import { KEY, isWorkId, keyFromBranch, projectsOf, slugFromBranch, ticketKeys } from './workid.ts'
@@ -40,6 +40,7 @@ const savable = atom({ plugin: 'base', key: 'savable' } as const, [] as BaseSava
 const background = atom({ plugin: 'base', key: 'background' } as const, [] as string[])
 const saved = atom({ plugin: 'base', key: 'saved' } as const, [] as string[])
 const marker = atom({ plugin: 'base', key: 'compactMarker' } as const, null)
+const autosave = atom({ plugin: 'base', key: 'autosave' } as const, null)
 
 /** Unsaved work: no workspace write for the stale window, and something worth saving happened after the last one. */
 export const isStale = (mtimeMs: number, lastSavableMs: number, now: number, staleMs = STALE_MS): boolean =>
@@ -222,13 +223,77 @@ async function readText($: $, path: string): Promise<string> {
   }
 }
 
+/** compact-marker.json's marker when it is a new one (another `notesMs` than `cur`), else null. */
+export function newMarker(text: string | null, cur: BaseCompactMarker | null): BaseCompactMarker | null {
+  try {
+    const m = JSON.parse(text ?? '') as Partial<BaseCompactMarker>
+    if (typeof m.workId !== 'string' || typeof m.notesMs !== 'number' || typeof m.priorMs !== 'number' || m.notesMs === cur?.notesMs) return null
+    return { workId: m.workId, notesMs: m.notesMs, priorMs: m.priorMs }
+  } catch {
+    return null
+  }
+}
+
+/** autosave-state.json, what the Stop and PreCompact command hooks act on: the workspace (null without one) and the turn. */
+export function autosaveState(sid: string, root: string, p: BaseProgress | null, t: BaseAutosave | null): string {
+  const ws = p && p.workId !== null && p.hasWorkspace ? p : null
+  const state = {
+    sid,
+    workId: ws?.workId ?? null,
+    wsDir: ws ? workDir(root, ws.workId) : null,
+    stale: ws?.stale ?? false,
+    mtimeMs: ws?.mtimeMs ?? 0,
+    lastSavableMs: ws?.lastSavableMs ?? 0,
+    agentsSince: ws?.agentsSince ?? 0,
+    editsSince: ws?.editsSince ?? 0,
+    turn: t?.turn ?? 0,
+    startMs: t?.startMs ?? 0,
+  }
+  return `${JSON.stringify(state)}\n`
+}
+
+const sessionLogDir = async ($: $): Promise<string | null> =>
+  logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), String(await $.session.id()))
+
+/** A new compact-marker.json becomes base.compactMarker and re-arms the prompt line: the compacted context lost it. */
+async function adoptMarker($: $): Promise<BaseCompactMarker | null> {
+  const cur = await read($, marker)
+  const dir = await sessionLogDir($).catch(() => null)
+  const m = dir ? newMarker(await $.fs.read(`${dir}/compact-marker.json`).catch(() => null), cur) : null
+  if (!m) return cur
+  await update($, marker, () => m)
+  await update($, autosave, t => (t ? { ...t, nudgedMs: -1 } : t))
+  return m
+}
+
+let mirrors: Promise<void> = Promise.resolve()
+
+/** Runs one autosave-state.json mirror after the one before (progress.ts and autosave.ts share the queue). */
+export function queueMirror(job: () => Promise<void>): Promise<void> {
+  mirrors = mirrors.then(job, job)
+  return mirrors
+}
+
+/** Writes autosave-state.json when its text changed, built from the atoms after the previous mirror's write. */
+const mirrorAutosave = ($: $): Promise<void> => queueMirror(() => mirrorOnce($))
+
+async function mirrorOnce($: $): Promise<void> {
+  try {
+    const dir = (await $.env.get('BASE_AUTOSAVE')) === '0' ? null : await sessionLogDir($)
+    if (!dir) return
+    const text = autosaveState(String(await $.session.id()), await $.session.root(), await read($, progress), await read($, autosave))
+    const file = `${dir}/autosave-state.json`
+    if ((await $.fs.read(file).catch(() => null)) !== text) await $.fs.write(file, text)
+  } catch {}
+}
+
 /** The workspace's newest write (`newestWrite`): what the tick compares. */
 async function workspaceMtime($: $, root: string, id: string): Promise<number> {
   let entries: FsEntry[] = []
   try {
     entries = await $.fs.list(workDir(root, id))
   } catch {}
-  return newestWrite(entries, id, await read($, marker))
+  return newestWrite(entries, id, await adoptMarker($))
 }
 
 async function load($: $, root: string, workId: string, branch: string | null, guessed: boolean): Promise<BaseProgress> {
@@ -248,6 +313,7 @@ async function noteSavable($: $, kind: BaseSavable['kind']): Promise<void> {
   const list = await update($, savable, l => [...l, { atMs: now, kind, workId }].slice(-SAVABLE_CAP))
   const staleMs = await windowOf($)
   await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now, staleMs) : p))
+  await mirrorAutosave($)
 }
 
 /** An agent that wrote the workspace itself (`saved`) brings back nothing unsaved: its return or stop is no event. */
@@ -278,11 +344,16 @@ async function adopt($: $, touches: (dir: string, id: string) => boolean): Promi
   const now = await $.clock.now()
   const staleMs = await windowOf($)
   await update($, progress, p => (p && p.workId !== null && p.guessed && touches(workDir(root, p.workId), p.workId) ? withStaleness({ ...p, guessed: false }, list, now, staleMs) : p))
+  await mirrorAutosave($)
 }
+
+// The root the last refresh resolved under: a tick that finds another (a /cd, a worktree move) resolves again.
+let lastRoot = ''
 
 /** `resolve` re-runs git and the resolver; otherwise only the current workspace is re-read while it exists. */
 async function refresh($: $, resolve: boolean): Promise<void> {
   const root = await $.session.root()
+  lastRoot = root
   const cur = await read($, progress)
   const inputs = await readInputs($)
   const reload = !resolve && !!cur?.workId && (await hasWorkspace($, root, cur.workId))
@@ -303,11 +374,45 @@ async function refresh($: $, resolve: boolean): Promise<void> {
   if (now.pin !== inputs.pin || now.lastKey !== inputs.lastKey) return
   const after = await update($, progress, prev => (!reload || prev?.workId === next.workId ? next : prev))
   await logWorkspace($, after?.workId ?? 'none')
+  await mirrorAutosave($)
+}
+
+// The session id whose title.json the tick has read: one read per id once the file is there.
+let titleSid = ''
+
+/** The title hooks/title.cjs set for this session id, as one `title` event (base.events and base.jsonl). */
+async function adoptTitle($: $): Promise<void> {
+  try {
+    const sid = String(await $.session.id())
+    if (sid === titleSid) return
+    const dirs = [logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), sid), logDir(undefined, spareRoot(await $.env.get('TMPDIR')), sid)]
+    let file: { by?: unknown; title?: unknown; ts?: unknown } | null = null
+    for (const d of dirs) {
+      if (!d) continue
+      const text = await $.fs.read(`${d}/title.json`).catch(() => null)
+      if (text === null) continue
+      titleSid = sid
+      try {
+        file = JSON.parse(text) as typeof file
+      } catch {}
+      break
+    }
+    if (!file) return
+    if (file.by !== 'base' || typeof file.title !== 'string' || (await $.env.get('BASE_EVENT_LOG')) === '0') return
+    const ev: BaseEvent = { atMs: typeof file.ts === 'number' ? file.ts : await $.clock.now(), kind: 'title', text: file.title }
+    let pushed = false
+    await update($, events, l => {
+      pushed = !l.some(x => x.kind === 'title' && x.atMs === ev.atMs)
+      return pushed ? pushEvent(l, ev) : l
+    })
+    if (pushed) await logLine(diskOf($), ev)
+  } catch {}
 }
 
 async function tick($: $, resolve: boolean): Promise<void> {
+  await adoptTitle($)
   const cur = await read($, progress)
-  if (resolve || cur === null) return refresh($, true)
+  if (resolve || cur === null || (await $.session.root()) !== lastRoot) return refresh($, true)
   if (cur.workId === null) return
   const mtimeMs = await workspaceMtime($, await $.session.root(), cur.workId)
   if (mtimeMs !== cur.mtimeMs) return refresh($, false)
@@ -315,8 +420,10 @@ async function tick($: $, resolve: boolean): Promise<void> {
   const now = await $.clock.now()
   const list = await read($, savable)
   const staleMs = await windowOf($)
-  if (withStaleness(cur, list, now, staleMs).stale !== cur.stale)
+  if (withStaleness(cur, list, now, staleMs).stale !== cur.stale) {
     await update($, progress, p => (p && p.workId !== null ? withStaleness(p, list, now, staleMs) : p))
+    await mirrorAutosave($)
+  }
 }
 
 export function registerProgress(on: On): void {
@@ -411,15 +518,16 @@ export function registerProgress(on: On): void {
     return r
   })
 
-  on('classic.SubagentStop', async ($, e, next) => {
+  on('turn.complete', async ($, e, next) => {
     const r = await next(e)
-    if (r.block) return r
+    const id = e.agentId
+    if (id === undefined) return r
     let mine = false
     await update($, background, l => {
-      mine = l.includes(e.agent_id)
-      return mine ? l.filter(id => id !== e.agent_id) : l
+      mine = l.includes(id)
+      return mine ? l.filter(x => x !== id) : l
     })
-    if (mine) await noteAgent($, e.agent_id)
+    if (mine) await noteAgent($, id)
     return r
   })
 
@@ -446,12 +554,6 @@ export function registerProgress(on: On): void {
       await refresh($, false)
       if (e.agentId !== undefined) await markSaved($, e.agentId)
     }
-    return r
-  })
-
-  on('classic.CwdChanged', async ($, e, next) => {
-    const r = await next(e)
-    await refresh($, true)
     return r
   })
 

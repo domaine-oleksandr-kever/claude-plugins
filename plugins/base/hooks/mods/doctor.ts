@@ -26,10 +26,8 @@ export type Row = { status: Status; name: string; detail: string }
 
 const swept = atom({ plugin: 'base', key: 'swept' } as const, null)
 const events = atom({ plugin: 'base', key: 'events' } as const, [] as BaseEvent[])
-// Written in conventions.ts (the session whose first message carries the fallback block) and session.ts (the first prompt's slim check).
-const injected = atom({ plugin: 'base', key: 'injected' } as const, null as string | null)
+// Written in session.ts (the first prompt's slim check).
 const checked = atom({ plugin: 'base', key: 'checked' } as const, null)
-const classic = atom({ plugin: 'base', key: 'classic' } as const, null as string | null)
 // Written in guards/edit.ts: this session's main-loop project-file changes.
 const mainEdits = atom({ plugin: 'base', key: 'mainEdits' } as const, null as BaseMainEdits | null)
 /** The Domaine plugins whose SessionStart command hook writes a conventions marker. */
@@ -146,8 +144,7 @@ async function markers($: $, dirs: string[]): Promise<Map<string, Marker>> {
   return out
 }
 
-async function conventionsRow($: $, sid: string, dirs: string[], found: Map<string, Marker>, prompted: boolean): Promise<Row> {
-  if ((await read($, injected)) === sid) return { status: 'PASS', name: 'conventions', detail: 'prompt.context fallback: no surface draws and no SessionStart command hook marker, so base\'s mod put them in the first user message' }
+async function conventionsRow($: $, dirs: string[], found: Map<string, Marker>, prompted: boolean): Promise<Row> {
   if (!dirs.length) return { status: 'SKIP', name: 'conventions', detail: 'no log directory for this session id: the SessionStart command hook markers cannot be read' }
   if (!found.size) {
     return prompted
@@ -165,19 +162,13 @@ async function conventionsRow($: $, sid: string, dirs: string[], found: Map<stri
   const want = MARKED.filter(p => enabled.has(p) || loaded.has(p) || has(p))
   const label = (p: string) => (p === 'base' ? `base ${[found.has('base') && 'core', found.has('base.rules') && 'rules'].filter(Boolean).join('+')}` : p)
   const source = (found.get('base') ?? [...found.values()][0])?.source
-  const head = `SessionStart command hook (${typeof source === 'string' ? source : '?'}): ${want.filter(has).map(label).join(', ')}`
+  const login = found.get('base')?.login
+  const who = typeof login?.label === 'string' ? ` (login: ${login.label}, ${typeof login.file === 'string' ? login.file : '?'})` : ''
+  const head = `SessionStart command hook (${typeof source === 'string' ? source : '?'}): ${want.filter(has).map(label).join(', ')}${who}`
   const missing = want.filter(p => !has(p))
   return missing.length
     ? { status: 'WARN', name: 'conventions', detail: `${head}; no marker from ${missing.map(p => `${p} (${enabled.has(p) ? 'enabled' : 'loaded'})`).join(', ')}` }
     : { status: 'PASS', name: 'conventions', detail: head }
-}
-
-function classicRow(sid: string, seen: string | null, prompted: boolean, found: Map<string, Marker>): Row {
-  if (seen === sid) return { status: 'PASS', name: 'classic', detail: 'classic.UserPromptSubmit reached base\'s mods this session' }
-  if (!prompted) return { status: 'SKIP', name: 'classic', detail: 'no prompt sent yet' }
-  const login = found.get('base')?.login
-  const who = typeof login?.label === 'string' ? `${login.label}, ${typeof login.file === 'string' ? login.file : '?'}` : 'unknown'
-  return { status: 'WARN', name: 'classic', detail: `classic.* did not reach base's mods this session (login: ${who}): session title, autosave/progress, band resume handlers and slim prompt-paste compression are off here` }
 }
 
 async function liveRows($: $): Promise<Row[]> {
@@ -194,12 +185,9 @@ async function liveRows($: $): Promise<Row[]> {
     const prompted = (await read($, checked)) === sid
     const dirs = [logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), sid), logDir(undefined, spareRoot(await $.env.get('TMPDIR')), sid)]
       .filter((d): d is string => d !== null)
-    const found = await markers($, dirs)
-    rows.push(await conventionsRow($, sid, dirs, found, prompted))
-    rows.push(classicRow(sid, await read($, classic), prompted, found))
+    rows.push(await conventionsRow($, dirs, await markers($, dirs), prompted))
   } catch {
     rows.push({ status: 'SKIP', name: 'conventions', detail: 'the state did not answer' })
-    rows.push({ status: 'SKIP', name: 'classic', detail: 'the state did not answer' })
   }
   return rows
 }
@@ -363,14 +351,6 @@ export function registerDoctor(on: On): void {
   on('prompt.submit', { text: /$/ }, async ($, e, next) => {
     const r = await next(e)
     await arm($, false)
-    return r
-  })
-
-  // Matched apart from title.ts's hook: one unmatched hook per event per plugin.
-  on('classic.UserPromptSubmit', { prompt: /^/ }, async ($, e, next) => {
-    const r = await next(e)
-    const sid = String(await $.session.id())
-    await update($, classic, () => sid).catch(() => {})
     return r
   })
 

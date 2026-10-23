@@ -8,6 +8,8 @@
 #   b. checkEventLog is the same in every team plugin's doctor.cjs once the plugin's own name
 #      (`fe`, `FE_`) is read as a placeholder;
 #   c. fe's _shopify-common.sh carries base's _common.sh bodies of trim_ws and dotenv_value.
+#   d. base's hooks/title.cjs answers as the mod's workspace/workid.ts for keyFromBranch, projectOf,
+#      projectsOf and ticketKeys over one case table (a node that cannot strip TypeScript types skips it).
 # The checker runs against a planted drift first, so a rule that stopped firing fails here.
 # Exit 0 = all green.
 set -u
@@ -104,6 +106,39 @@ for r in a b c; do
   hits="$(awk -F'\t' -v r="$r" '$1 == r { printf "%s: %s; ", $2, $3 }' "$TMP/real.out")"
   if [ -z "$hits" ]; then ok; else bad "parity-$r" "$hits"; fi
 done
+
+# ------------------------------------------------- d. title.cjs vs workid.ts, by behaviour --
+PARITY="$TMP/parity.mjs"
+cat > "$PARITY" <<'JS'
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const [cjsPath, tsPath] = process.argv.slice(2);
+const cjs = createRequire(import.meta.url)(cjsPath);
+const ts = await import(pathToFileURL(tsPath).href);
+const branches = [null, '', 'main', 'HEAD', 'feature/ABC-1591-x', 'fix/UTF-8-encoding', 'abc-12', 'A-1', 'AB-12345678', 'x/ABCDEFGHIJK-1', 'feat/ABCDEFGHIJ-1', 'ABC-1/DEF-2'];
+const ids = ['ABC-1591', 'header-logo', 'abc-1', 'ABCDEFGHIJ-1234567', 'A1-1', 'ABC-', 'ABC-1x'];
+const dirs = [[], ['ABC-77', 'header-logo', 'XY-1'], ['ABC-1', 'ABC-2', 'not a key']];
+const texts = ['', 'ABC-77 is merged, now start ABC-78', 'save it as UTF-8 and SHA-256', 'https://x.atlassian.net/browse/XYZ-9 and ABC-1', 'ISO-8601 XY-1 xy-2 ABC-77ABC-78', 'browse/QQ-5'];
+const out = [];
+const same = (name, arg, a, b) => { if (JSON.stringify(a) !== JSON.stringify(b)) out.push(`d\tbase\t${name}(${JSON.stringify(arg)}) differs`); };
+for (const b of branches) same('keyFromBranch', b, cjs.keyFromBranch(b), ts.keyFromBranch(b));
+for (const i of ids) same('projectOf', i, cjs.projectOf(i), ts.projectOf(i));
+for (const d of dirs) same('projectsOf', d, [...cjs.projectsOf(d)], [...ts.projectsOf(d)]);
+for (const d of dirs) for (const t of texts) { const known = ts.projectsOf(d); same('ticketKeys', [t, [...known]], cjs.ticketKeys(t, known), ts.ticketKeys(t, known)); }
+process.stdout.write(out.join('\n') + (out.length ? '\n' : ''));
+JS
+TITLE_CJS="$ROOT/plugins/base/hooks/title.cjs"
+WORKID_TS="$ROOT/plugins/base/hooks/mods/workspace/workid.ts"
+if "$NODE_BIN" --experimental-strip-types --no-warnings -e 0 >/dev/null 2>&1; then
+  STRIP="$NODE_BIN --experimental-strip-types --no-warnings"
+  cp "$WORKID_TS" "$TMP/workid-drift.ts"
+  "$NODE_BIN" -e 'const fs=require("fs");const f=process.argv[1];const s=fs.readFileSync(f,"utf8");if(!s.includes("{1,9}"))throw 0;fs.writeFileSync(f,s.replace("{1,9}","{1,8}"))' "$TMP/workid-drift.ts"
+  if $STRIP "$PARITY" "$TITLE_CJS" "$TMP/workid-drift.ts" 2>&1 | grep -q 'keyFromBranch'; then ok; else bad fixture-d "a planted KEY drift was not flagged"; fi
+  hits="$($STRIP "$PARITY" "$TITLE_CJS" "$WORKID_TS" 2>&1 | awk -F'\t' '{ printf "%s; ", $3 }')"
+  if [ -z "$hits" ]; then ok; else bad parity-d "$hits"; fi
+else
+  echo "helper-parity-sim: SKIP d (this node cannot strip TypeScript types)"
+fi
 
 echo "helper-parity-sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then printf '%s' "$failures"; exit 1; fi

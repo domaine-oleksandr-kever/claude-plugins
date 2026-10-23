@@ -6027,7 +6027,8 @@ BLOG() { printf '%s' "$DH_HOME/.claude/domaine/log/$1"; }
 assert_eq DH-base-matcher "$(jq -r '.hooks.SessionStart[0].matcher' "$BR/hooks/hooks.json")" "startup|clear|compact"
 assert_eq DH-base-modules "$(jq -r '.modules | join(",")' "$BR/hooks/hooks.json")" "./mods/register.ts"
 assert_eq DH-base-entries "$(jq -r '[.hooks | to_entries[] | .key + ":" + ([.value[].hooks[] | (.command | split("\" ")[1]) + "/" + (.timeout | tostring)] | join(","))] | join(" ")' "$BR/hooks/hooks.json")" \
-  "SessionStart:start core/10,start rules/10 SubagentStart:subagent/10 Stop:stop/5"
+  "SessionStart:start core/10,start rules/10,start/5 UserPromptSubmit:prompt/5 SubagentStart:subagent/10 PreCompact:precompact/5 Stop:stop/5"
+assert_eq DH-base-precompact-matcher "$(jq -r '.hooks.PreCompact[0].matcher' "$BR/hooks/hooks.json")" "auto"
 
 # DH1: every entry prints one envelope naming its own event, exit 0, stderr empty.
 dh_home env; dh_in s-env SessionStart '"source":"startup","agent_type":"general-purpose"'
@@ -6089,7 +6090,7 @@ assert_eq DH5-core-no-edit "$(dh_json "$M" '"edit" in j')" "false"
 assert_eq DH5-no-subagent-marker "$(DH_IN='{"session_id":"s-mark2","agent_type":"x"}' dh base SubagentStart; ls "$(BLOG s-mark2)" 2>/dev/null)" ""
 
 # DH6: bad stdin still delivers (no session id → no marker); a log dir it cannot write or no HOME → the marker under
-# the spare root ($TMPDIR/domaine-log), so the mods' fallback never adds a second copy; neither writable → one stderr
+# the spare root ($TMPDIR/domaine-log), where base's doctor reads it too; neither writable → one stderr
 # line, context kept; DOMAINE_LOG_DIR moves the marker; a session id that is no file name writes nothing; no text file → nothing.
 dh_home bad; DH_IN='not json'; dh base SessionStart 0
 assert_eq DH6-bad-stdin-exit "$dh_rc" 0
@@ -6275,6 +6276,78 @@ state s-stop 0 400; chmod 444 "$SD/dogfood-stop.json"
 if [ "$(id -u)" = 0 ]; then ok; else assert_eq DH11-unwritable-no-block "$(stp)" ""; fi
 chmod 644 "$SD/dogfood-stop.json"
 
+# DH11c: the autosave Stop — the workspace the mod mirrors to autosave-state.json, re-listed by the hook: blocks a turn that did
+# savable work and left it stale and unwritten, at most once per 3 turns (autosave-stop.json); one block with the dogfood reason.
+dh_home astop; AD="$(BLOG s-as)"; mkdir -p "$AD"; WS="$DH/proj/.claude/tasks/ABC-1"; rm -rf "$WS"; mkdir -p "$WS"
+NOWMS="$(node -e 'process.stdout.write(String(Date.now()))')"; OLD=$((NOWMS - 3600000)); TS0=$((NOWMS - 600000))
+setmt() { node -e 'require("fs").utimesSync(process.argv[1], Number(process.argv[2]) / 1000, Number(process.argv[2]) / 1000)' "$1" "$2"; }
+printf '# ABC-1\n' > "$WS/progress.md"; setmt "$WS/progress.md" "$OLD"
+# as_state <stale> <lastSavableMs> <turn> [sid] [wsDir]: the workspace last written at $OLD, the turn begun at $TS0
+as_state() { printf '{"sid":"%s","workId":"ABC-1","wsDir":"%s","stale":%s,"mtimeMs":%s,"lastSavableMs":%s,"agentsSince":2,"editsSince":1,"turn":%s,"startMs":%s}\n' "${4:-s-as}" "${5:-$WS}" "$1" "$OLD" "$2" "$3" "$TS0" > "$AD/autosave-state.json"; }
+ast() { DH_IN="{\"session_id\":\"s-as\",\"stop_hook_active\":${1:-false}}"; DH_ENV="BASE_DOGFOOD=0 ${2-}" dh base Stop; printf '%s' "$DH_OUT"; }
+AREASON='save interim findings to the workspace (.claude/tasks/ABC-1/notes.md), then stop'
+ABLOCK="$(jq -cn --arg r "$AREASON" '{decision:"block",reason:$r}')"
+SAV=$((TS0 + 1000))
+assert_eq DH11c-no-state "$(ast)" ""
+as_state true "$SAV" 5 s-other;  assert_eq DH11c-other-session "$(ast)" ""
+as_state true "$SAV" 5 s-as /etc; assert_eq DH11c-foreign-dir "$(ast)" ""
+as_state false "$SAV" 5;         assert_eq DH11c-fresh "$(ast)" ""
+as_state true $((TS0 - 1000)) 5; assert_eq DH11c-no-savable-work "$(ast)" ""
+as_state true "$SAV" 5
+assert_eq DH11c-active "$(ast true)" ""
+assert_eq DH11c-off "$(ast false BASE_AUTOSAVE=0)" ""
+assert_eq DH11c-block "$(ast)" "$ABLOCK"
+assert_eq DH11c-block-file "$(cat "$AD/autosave-stop.json")" '{"blockedTurn":5}'
+assert_eq DH11c-same-turn "$(ast)" ""
+as_state true "$SAV" 6; assert_eq DH11c-every-3-a "$(ast)" ""
+as_state true "$SAV" 7; assert_eq DH11c-every-3-b "$(ast)" ""
+as_state true "$SAV" 8; assert_eq DH11c-every-3-c "$(ast)" "$ABLOCK"
+rm -f "$AD/autosave-stop.json"
+printf 'x\n' > "$WS/notes.md"
+assert_eq DH11c-written-in-turn "$(ast)" ""
+setmt "$WS/notes.md" "$OLD"
+assert_eq DH11c-old-write "$(ast)" "$ABLOCK"
+rm -f "$AD/autosave-stop.json"
+printf '{"sid":"s-as","failMs":100,"script":"md-to-adf.cjs","reportMs":0,"errors":[%s]}\n' "$E1" > "$AD/dogfood-state.json"
+DH_IN='{"session_id":"s-as","stop_hook_active":false}' DH_ENV="BASE_DOGFOOD=1" dh base Stop
+assert_eq DH11c-combined "$DH_OUT" "$(jq -cn --arg r "base: 1 plugin script error(s) this session are not reported — report each with plugin_defect or say why not: md-to-adf.cjs (Error: bad input)
+$AREASON" '{decision:"block",reason:$r}')"
+assert_eq DH11c-exit "$dh_rc" 0
+rm -f "$AD/autosave-stop.json" "$AD/dogfood-state.json" "$AD/dogfood-stop.json" "$WS/notes.md"
+as_state true "$SAV" 5; mkdir "$AD/autosave-stop.json"
+printf '{"sid":"s-as","failMs":100,"script":"md-to-adf.cjs","reportMs":0,"errors":[%s]}\n' "$E1" > "$AD/dogfood-state.json"
+DH_IN='{"session_id":"s-as","stop_hook_active":false}' DH_ENV="BASE_DOGFOOD=1" dh base Stop
+assert_eq DH11c-autosave-fails-dogfood-kept "$DH_OUT" "$(jq -cn --arg r "base: 1 plugin script error(s) this session are not reported — report each with plugin_defect or say why not: md-to-adf.cjs (Error: bad input)" '{decision:"block",reason:$r}')"
+rm -rf "$AD/autosave-stop.json" "$AD/dogfood-state.json" "$AD/dogfood-stop.json"
+printf '{"sid":"s-as","workId":"..","wsDir":"%s","stale":true,"mtimeMs":%s,"lastSavableMs":%s,"agentsSince":2,"editsSince":1,"turn":5,"startMs":%s}\n' "$DH/proj/.claude/tasks/.." "$OLD" "$SAV" "$TS0" > "$AD/autosave-state.json"
+assert_eq DH11c-dot-work-id "$(ast)" ""
+
+# DH11d: precompact — before an auto-compact, a stale workspace gets one `compact:` line on notes.md (made when missing, a
+# newline added when the text lacks one, an unreadable one left alone) and compact-marker.json, which keeps the Stop hook
+# counting the line as no save. Prints nothing.
+pc() { DH_IN="{\"session_id\":\"${3:-s-as}\",\"trigger\":\"${1:-auto}\"}"; DH_ENV="${2-}" dh base PreCompact; }
+DAY="$(node -e 'process.stdout.write(new Date().toISOString().slice(0, 10))')"
+CLINE="- $DAY compact: workspace stale 60 min; since then 2 reader agents, 1 edits"
+as_state true "$SAV" 5
+pc manual;            assert_eq DH11d-manual "$(ls "$WS")" "progress.md"
+pc auto BASE_AUTOSAVE=0; assert_eq DH11d-off "$(ls "$WS")" "progress.md"
+pc auto "" s-other;   assert_eq DH11d-other-session "$(ls "$WS")" "progress.md"
+pc;                   assert_eq DH11d-created "$(cat "$WS/notes.md")" "$CLINE"
+assert_eq DH11d-quiet "$DH_OUT" ""
+assert_eq DH11d-marker "$(node -e 'const fs=require("fs");const j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(JSON.stringify([j.workId,j.priorMs===Number(process.argv[3]),j.notesMs===fs.statSync(process.argv[2]).mtimeMs]))' "$AD/compact-marker.json" "$WS/notes.md" "$OLD")" '["ABC-1",true,true]'
+assert_eq DH11d-stop-after-marker "$(ast)" "$ABLOCK"
+rm -f "$AD/autosave-stop.json" "$AD/compact-marker.json"
+printf '## log\n- one' > "$WS/notes.md"; setmt "$WS/notes.md" "$OLD"
+pc;                   assert_eq DH11d-appended "$(cat "$WS/notes.md")" "## log
+- one
+$CLINE"
+as_state false "$SAV" 5; rm -f "$AD/compact-marker.json"; printf 'keep' > "$WS/notes.md"; setmt "$WS/notes.md" "$OLD"
+pc;                   assert_eq DH11d-fresh "$(cat "$WS/notes.md")$(ls "$AD")" "keepautosave-state.json"
+as_state true "$SAV" 5; chmod 000 "$WS/notes.md"
+if [ "$(id -u)" = 0 ]; then ok; else pc; chmod 644 "$WS/notes.md"; assert_eq DH11d-unreadable "$(cat "$WS/notes.md")$(ls "$AD")" "keepautosave-state.json"; fi
+chmod 644 "$WS/notes.md"
+assert_eq DH11d-exit "$dh_rc" 0
+
 # DH12: the text file — one source for the hook and the mod's fallback: every key a string, no legacy name, the
 # outside-content rail one sentence per rule under 900 bytes, the Shopify pointer one line.
 assert_eq DH12-keys "$(jq -r 'keys_unsorted | join(",")' "$BR/hooks/conventions-text.json")" \
@@ -6355,6 +6428,88 @@ NM="$DH/no-ed-module"; rm -rf "$NM"; cp -R "$BR" "$NM"; rm "$NM/scripts/edit-del
 DH_ENV="CLAUDE_PLUGIN_ROOT=$NM" ed_case DH13-no-module "||" "## base convention — lean code"
 assert_absent DH13-no-module-ctx "$(dh_ctx)" "edit delegation"
 assert_eq DH13-no-module-quiet "$dh_rc:$(cat "$DH_ERR")" "0:"
+
+# DHT: title.cjs — `start` (SessionStart, 3rd command) titles from a corroborated branch key, `prompt` (UserPromptSubmit)
+# from the most recent corroborated ticket a person's prompt names; one shot per session id through title.json.
+TP="$DH/titleproj"; rm -rf "$TP"; mkdir -p "$TP/.claude/tasks/ABC-77" "$TP/.claude/tasks/ABC-1591" "$TP/sub"
+git -C "$TP" init -q && git -C "$TP" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+printf '# ABC-1591 — Header logo\n\nbody\n' > "$TP/.claude/tasks/ABC-1591/ticket.md"
+ti_in() { DH_IN="{\"session_id\":\"$1\",\"cwd\":\"${TI_CWD:-$TP}\",\"hook_event_name\":\"$2\"${3:+,$3}}"; }
+ti_title() { printf '%s' "$DH_OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).hookSpecificOutput.sessionTitle||"")}catch{}})'; }
+ti_by() { dh_json "$(BLOG "$1")/title.json" 'j.by + "|" + (j.title || "") + "|" + j.sid + "|" + typeof j.ts'; }
+ti_start() { ti_in "$1" SessionStart "\"source\":\"startup\"${2:+,$2}"; dh base SessionStart 2; }
+ti_prompt() { ti_in "$1" UserPromptSubmit "\"prompt\":\"$2\"${3:+,$3}"; dh base UserPromptSubmit 0; }
+
+dh_home title
+git -C "$TP" checkout -q -b feature/ABC-1591-x
+TI_CWD="$TP/sub" ti_start t-start
+assert_eq DHT1-start-title "$dh_rc|$(ti_title)|$(dh_evt)|$(cat "$DH_ERR")" "0|ABC-1591 — Header logo|SessionStart|"
+assert_eq DHT1-start-file "$(ti_by t-start)" "base|ABC-1591 — Header logo|t-start|number"
+if [ ! -e "$(BLOG t-start)/base.jsonl" ]; then ok; else bad DHT1-no-jsonl "the mod owns the base.jsonl title line"; fi
+ti_start t-start
+assert_eq DHT2-one-shot "$dh_rc|$DH_OUT" "0|"
+ti_prompt t-start 'now ABC-77'
+assert_eq DHT2-one-shot-prompt "$DH_OUT" ""
+
+git -C "$TP" checkout -q -b fix/UTF-8-encoding
+ti_start t-utf
+assert_eq DHT3-uncorroborated "$dh_rc|$DH_OUT" "0|"
+if [ ! -e "$(BLOG t-utf)/title.json" ]; then ok; else bad DHT3-no-file "an untitled start spends no shot"; fi
+git -C "$TP" checkout -q -b feature/XYZ-9-y
+ti_start t-xyz
+assert_eq DHT3-unknown-project "$DH_OUT" ""
+git -C "$TP" checkout -q -b feature/ABC-1592-z
+ti_start t-proj
+assert_eq DHT3-project-corroborates "$(ti_title)" "ABC-1592"
+
+ti_start t-user '"session_title":"my refactor"'
+assert_eq DHT4-user-start "$dh_rc|$DH_OUT|$(ti_by t-user)" "0||user||t-user|number"
+ti_prompt t-user 'ABC-77 please' '"source":"user"'
+assert_eq DHT4-user-kept "$DH_OUT" ""
+
+DH_ENV="BASE_SESSION_TITLE=0" ti_start t-off
+DH_ENV="BASE_SESSION_TITLE=0" ti_prompt t-off 'ABC-77' '"source":"user"'
+assert_eq DHT5-switch-off "$dh_rc|$DH_OUT" "0|"
+if [ ! -e "$(BLOG t-off)" ]; then ok; else bad DHT5-no-dir "BASE_SESSION_TITLE=0 wrote under the log dir"; fi
+
+before="$(find "$DH_HOME" "$DH/tmp" -name title.json 2>/dev/null | wc -l)"
+ti_start '../evil'
+ti_prompt '../evil' 'ABC-77' '"source":"user"'
+assert_eq DHT6-bad-sid "$dh_rc|$DH_OUT|$(find "$DH_HOME" "$DH/tmp" -name title.json 2>/dev/null | wc -l)" "0||$before"
+
+NG="$DH/titlenogit"; rm -rf "$NG"; mkdir -p "$NG"
+TI_CWD="$NG" ti_start t-nogit
+assert_eq DHT7-no-git "$dh_rc|$DH_OUT|$(cat "$DH_ERR")" "0||"
+
+git -C "$TP" checkout -q -b main-line
+ti_start t-p
+assert_eq DHP0-no-branch-key "$DH_OUT" ""
+ti_prompt t-p 'save it as UTF-8, see XYZ-5' '"source":"user"'
+assert_eq DHP1-uncorroborated "$DH_OUT" ""
+for src in system loop_wakeup schedule_wakeup poll_event; do
+  ti_prompt t-p 'ABC-77 finished' "\"source\":\"$src\""
+  assert_eq "DHP2-$src-ignored" "$dh_rc|$DH_OUT" "0|"
+done
+ti_prompt t-p 'ABC-77 is merged, now start ABC-78' '"source":"user"'
+assert_eq DHP3-most-recent "$dh_rc|$(ti_title)|$(dh_evt)|$(cat "$DH_ERR")" "0|ABC-78|UserPromptSubmit|"
+assert_eq DHP3-file "$(ti_by t-p)" "base|ABC-78|t-p|number"
+ti_prompt t-p 'ABC-1591 now' '"source":"user"'
+assert_eq DHP4-second-prompt "$DH_OUT" ""
+ti_prompt t-abs 'ABC-1591 please'
+assert_eq DHP5-absent-source "$(ti_title)" "ABC-1591 — Header logo"
+ti_prompt t-sdk 'https://example.atlassian.net/browse/XYZ-9' '"source":"sdk"'
+assert_eq DHP6-browse-url "$(ti_title)" "XYZ-9"
+ti_prompt t-ren 'look at ABC-77' '"source":"user","session_title":"my refactor"'
+assert_eq DHP7-user-title "$DH_OUT|$(ti_by t-ren)" "|user||t-ren|number"
+
+# DHT8: titleText — any heading separator, the key alone without one, a 100-byte cut on a character boundary.
+ti_text() { node -e 'process.stdout.write(require(process.argv[1]).titleText(process.argv[2], process.argv[3]))' "$BR/hooks/title.cjs" "$1" "$2"; }
+for head in '# ABC-12 — Header logo' '# ABC-12: Header logo' '# ABC-12 - Header logo'; do
+  assert_eq "DHT8-sep-${head:9:1}" "$(ti_text ABC-12 "$head")" "ABC-12 — Header logo"
+done
+assert_eq DHT8-bare "$(ti_text ABC-12 '# ABC-12')|$(ti_text ABC-12 '# ABC-123 — Other')|$(ti_text ABC-12 '')" "ABC-12|ABC-12|ABC-12"
+cut="$(ti_text ABC-12 "# ABC-12 — $(printf 'ж%.0s' $(seq 80))")"
+assert_eq DHT8-cut "$(printf '%s' "$cut" | wc -c | tr -d ' ')|${cut%%ж*}" "99|ABC-12 — "
 
 # --- fe ------------------------------------------------------------------------------------------
 FR="$(dh_root fe)"; FP="$DH/feproj"; mkdir -p "$FP"
@@ -6487,7 +6642,7 @@ assert_eq DHfe6-no-marker-probes "$(fe_sub general-purpose f-sub2 FE_STUB_WORD=n
 assert_eq DHfe6-no-marker-probe-ran "$(wc -l < "$PLOG" | tr -d ' ')" 1
 assert_eq DHfe6-no-own-marker "$(ls "$(FLOG f-sub2)" 2>/dev/null)" ""
 
-# DHfe7: the text file — the mod's fallback and the hook read the same keys; the worktree line /base:worktree
+# DHfe7: the text file — the hook reads every key; the worktree line /base:worktree
 # parses exactly once; the series in order with base's two steps by base's names; no legacy or host name.
 assert_eq DHfe7-keys "$(jq -r 'keys_unsorted | join(",")' "$FR/hooks/conventions-text.json")" \
   "root,profile,comment-discipline-foundation,store-access,worktree,preview-default-on,preview-default-off,preview-links,progress-series"
@@ -6637,7 +6792,7 @@ for p in be pm; do
   assert_eq "DHt4-$p-no-marker" "$(ls "$(TLOG t-sub)" 2>/dev/null)" ""
 done
 
-# DHt5: the text files — the mod's fallback and the hook read the same keys; qa's passwords paragraph pinned (moved from
+# DHt5: the text files — the keys the hook reads; qa's passwords paragraph pinned (moved from
 # the mod's tests); no legacy, host or other team-plugin name.
 assert_eq DHt5-qa-keys "$(jq -r 'keys_unsorted | join(",")' "$QR/hooks/conventions-text.json")" "root,passwords"
 assert_eq DHt5-be-keys "$(jq -c . "$ER/hooks/conventions-text.json")" '{"root":"be plugin root: <root>"}'
@@ -6656,6 +6811,41 @@ for phrase in 'Admin API write' 'add to cart' 'hands-on QA'; do assert_absent "D
 for p in qa be pm; do
   if grep -qiE "plugin_${OLDN}_|${OLDN}-tmp|/${OLDN}\b|\b${OLDN}:|Cursor|Codex|OpenCode|/fe:|<fe root>" "$(dh_root "$p")/hooks/conventions-text.json"; then bad "DHt5-$p-no-legacy" "a legacy, host or other team-plugin name in $p's conventions-text.json"; else ok; fi
 done
+
+# BR: band resume.cjs — SessionStart resume|fork writes <log dir>/<sid>/band-resume.json and prints nothing.
+BRS="$ROOT/plugins/band/hooks/resume.cjs"
+BRH="$TMP/band-resume-home"; rm -rf "$BRH"; mkdir -p "$BRH"
+br_run() { # <stdin-json> [VAR=val…] — stdout+stderr of the hook, its exit code in br_rc
+  local in="$1"; shift
+  BR_OUT="$(printf '%s' "$in" | env -u DOMAINE_LOG_DIR HOME="$BRH" "$@" node "$BRS" 2>&1)"; br_rc=$?
+}
+br_file() { node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write([j.source,typeof j.atMs,j.secondsSinceLastResponse,j.promptCacheLikelyExpired].join("|"))}catch{process.stdout.write("none")}' "$1"; }
+assert_eq BR0-wired "$(jq -r '.hooks.SessionStart[0].matcher + " " + .hooks.SessionStart[0].hooks[0].command' "$ROOT/plugins/band/hooks/hooks.json")" 'resume|fork node "${CLAUDE_PLUGIN_ROOT}/hooks/resume.cjs"'
+br_run '{"session_id":"br-1","source":"resume","seconds_since_last_response":600,"prompt_cache_likely_expired":true}'
+assert_eq BR1-resume "$br_rc|$BR_OUT|$(br_file "$BRH/.claude/domaine/log/br-1/band-resume.json")" "0||resume|number|600|true"
+br_run '{"session_id":"br-2","source":"fork","seconds_since_last_response":60}'
+assert_eq BR2-fork "$br_rc|$BR_OUT|$(br_file "$BRH/.claude/domaine/log/br-2/band-resume.json")" "0||fork|number|60|false"
+br_run '{"session_id":"br-3","source":"resume"}'
+assert_eq BR3-no-gap "$(br_file "$BRH/.claude/domaine/log/br-3/band-resume.json")" "resume|number||false"
+br_run '{"session_id":"br-4","source":"startup","seconds_since_last_response":600}'
+assert_eq BR4-startup "$br_rc|$BR_OUT|$(br_file "$BRH/.claude/domaine/log/br-4/band-resume.json")" "0||none"
+for bad in '../evil' '..' 'a/b' ''; do
+  br_run "{\"session_id\":\"$bad\",\"source\":\"resume\",\"seconds_since_last_response\":1}"
+  assert_eq "BR5-bad-sid-$bad" "$br_rc|$BR_OUT" "0|"
+done
+if [ -z "$(find "$TMP" -name band-resume.json -path '*evil*' 2>/dev/null)" ] && [ ! -e "$BRH/.claude/domaine/band-resume.json" ] && [ ! -e "$BRH/.claude/domaine/log/band-resume.json" ]; then ok; else bad BR5-bad-sid-file "a bad session id wrote band-resume.json"; fi
+br_run '{"session_id":"br-6","source":"resume","seconds_since_last_response":5}' DOMAINE_LOG_DIR="$TMP/band-resume-logs/"
+assert_eq BR6-override "$(br_file "$TMP/band-resume-logs/br-6/band-resume.json")|$(br_file "$BRH/.claude/domaine/log/br-6/band-resume.json")" "resume|number|5|false|none"
+br_run '{"session_id":"br-7","source":"resume","seconds_since_last_response":5}' DOMAINE_LOG_DIR="rel/logs"
+assert_eq BR7-relative-ignored "$(br_file "$BRH/.claude/domaine/log/br-7/band-resume.json")" "resume|number|5|false"
+br_run 'not json'
+assert_eq BR8-bad-stdin "$br_rc|$BR_OUT" "0|"
+: > "$TMP/band-resume-blocker"
+br_run '{"session_id":"br-9","source":"resume","seconds_since_last_response":5}' DOMAINE_LOG_DIR="$TMP/band-resume-blocker"
+assert_eq BR9-unwritable "$br_rc|$BR_OUT" "0|"
+BRN="$TMP/band-resume-nohome"; rm -rf "$BRN"; mkdir -p "$BRN"
+BR_OUT="$(cd "$BRN" && printf '%s' '{"session_id":"br-10","source":"resume","seconds_since_last_response":5}' | env -u HOME -u DOMAINE_LOG_DIR node "$BRS" 2>&1)"; br_rc=$?
+assert_eq BR10-no-home "$br_rc|$BR_OUT|$(find "$BRN" -name band-resume.json | wc -l | tr -d ' ')" "0||0"
 
 echo "hooks sim: $pass passed, $fail failed"
 if [ "$fail" -gt 0 ]; then

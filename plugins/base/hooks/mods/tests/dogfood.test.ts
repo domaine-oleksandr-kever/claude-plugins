@@ -63,28 +63,17 @@ function unreported(w: any): { script: string; line: string; ms: number }[] {
   const s = JSON.parse(f.text)
   return s.sid === w.sid && Array.isArray(s.errors) ? s.errors.filter((e: any) => e.ms > s.reportMs) : []
 }
-/** The cloud fallback block (nothing draws, no command-hook marker): its dogfood section, else undefined. */
-async function dogfoodSection($: any, w: any): Promise<string | undefined> {
-  const was = w.surfaces
-  w.surfaces = []
-  const text = ((await $.prompt.context({ blocks: [] })).blocks.at(-1)?.text ?? '') as string
-  w.surfaces = was
-  const at = text.indexOf('## base convention — dogfood mode')
-  return at < 0 ? undefined : text.slice(at)
-}
-/** $.plugin.root as the fallback block's root line names it. */
-async function pluginRoot($: any, w: any): Promise<string> {
-  const was = w.surfaces
-  w.surfaces = []
-  const text = (await $.prompt.context({ blocks: [] })).blocks.at(-1).text as string
-  w.surfaces = was
-  return text.split('\n')[0]!.replace(/^base plugin root: /, '')
+/** $.plugin.root as the doctor's first line names it; the doctor's own spawn leaves no trace in `calls`. */
+async function pluginRoot($: any, calls: any): Promise<string> {
+  const text = (await run($, '', 'base-doctor')).text as string
+  calls.runs.length = 0
+  return text.split('\n')[0]!.replace(/^base doctor — plugin root: /, '')
 }
 
 /** A world with an install record for base (at its loaded root), slim and fe, and the domaine marketplace on github. */
 async function installedWorld($: any, on: On, env: Record<string, string> = ON, over: Record<string, unknown> = {}) {
   const ctx = world(on, { env, manifest: '{ "name": "base", "version": "0.9.0" }', ...over })
-  const root = await pluginRoot($, ctx.w)
+  const root = await pluginRoot($, ctx.calls)
   ctx.w.files[INSTALLED] = {
     text: JSON.stringify({
       version: 2,
@@ -108,7 +97,6 @@ describe('dogfood off', () => {
     await submit($, 'go')
     expect(calls.tools).toEqual([])
     expect(calls.commands).not.toContain('base-defects')
-    expect(await dogfoodSection($, w)).toBeUndefined()
     const r = await bash($, SCRIPT_CMD)
     expect(r.context ?? []).toEqual([])
     expect(armed(w)).toBeNull()
@@ -131,7 +119,7 @@ describe('dogfood by account', () => {
   /** A world whose dogfood.json lists ACCOUNT. */
   async function accountWorld($: any, on: On, env: Record<string, string>) {
     const ctx = world(on, { env })
-    const root = await pluginRoot($, ctx.w)
+    const root = await pluginRoot($, ctx.calls)
     ctx.w.files[`${root}/dogfood.json`] = { text: JSON.stringify({ accounts: { [ACCOUNT]: 'Owner' } }), mtimeMs: 0 }
     return ctx
   }
@@ -142,7 +130,6 @@ describe('dogfood by account', () => {
     await submit($, 'go')
     expect(calls.tools.map(x => x.name)).toEqual(['plugin_defect'])
     expect(calls.commands).toContain('base-defects')
-    expect((await dogfoodSection($, w))).toContain('dogfood mode')
     expect((await run($, '', 'base-doctor')).text).toContain('PASS  defects')
   })
 
@@ -150,7 +137,6 @@ describe('dogfood by account', () => {
     const { w, calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT, BASE_DOGFOOD: '0' })
     await start($)
     expect(calls.tools).toEqual([])
-    expect(await dogfoodSection($, w)).toBeUndefined()
     expect((await report($)).result).toContain('dogfood mode is off')
   })
 
@@ -158,7 +144,6 @@ describe('dogfood by account', () => {
     const { w, calls } = await accountWorld($, on, { HOME, CLAUDE_CODE_ACCOUNT_UUID: 'ffffffff-0000-0000-0000-000000000000' })
     await start($)
     expect(calls.tools).toEqual([])
-    expect(await dogfoodSection($, w)).toBeUndefined()
   })
 
   t('without CLAUDE_CODE_ACCOUNT_UUID the login file decides, as in the command hook', async ($, on) => {
@@ -166,42 +151,20 @@ describe('dogfood by account', () => {
     w.files[`${HOME}/.claude.json`] = { text: JSON.stringify({ oauthAccount: { accountUuid: ACCOUNT } }), mtimeMs: 0 }
     await start($)
     expect(calls.tools.map(x => x.name)).toEqual(['plugin_defect'])
-    expect(await dogfoodSection($, w)).toContain('dogfood mode')
   })
 
   t('CLAUDE_CONFIG_DIR moves the login file', async ($, on) => {
     const { w } = await accountWorld($, on, { HOME, CLAUDE_CONFIG_DIR: `${HOME}/.claude-work` })
     w.files[`${HOME}/.claude.json`] = { text: JSON.stringify({ oauthAccount: { accountUuid: ACCOUNT } }), mtimeMs: 0 }
-    expect(await dogfoodSection($, w)).toBeUndefined()
+    expect((await report($)).result).toContain('dogfood mode is off')
     w.files[`${HOME}/.claude-work/.claude.json`] = { text: JSON.stringify({ oauthAccount: { accountUuid: ACCOUNT } }), mtimeMs: 0 }
-    w.sid = 's2'
-    expect(await dogfoodSection($, w)).toContain('dogfood mode')
+    expect((await report($)).result).not.toContain('dogfood mode is off')
   })
 
   t('no file: a listed-looking account stays off', async ($, on) => {
     const { w, calls } = world(on, { env: { HOME, CLAUDE_CODE_ACCOUNT_UUID: ACCOUNT } })
     await start($)
     expect(calls.tools).toEqual([])
-    expect(await dogfoodSection($, w)).toBeUndefined()
-  })
-})
-
-describe('the convention', () => {
-  t('the fallback names the plugins with their versions and the surfaceless rule', async ($, on) => {
-    const { w } = await installedWorld($, on, ON, { enabledPlugins: { 'band@domaine': true, 'pm@domaine': false } })
-    await start($)
-    const s = (await dogfoodSection($, w))!
-    expect(s).toContain('builds: slim 0.10.2, band (version unknown), base 0.9.0, fe 0.5.3.')
-    expect(s).not.toContain('pm (')
-    expect(s).toContain(TEXT['rule-surfaceless']!)
-    expect(s).not.toContain(TEXT['rule-drawn']!)
-  })
-
-  t('rides the context block where nothing draws', async ($, on) => {
-    world(on, { env: ON, surfaces: [] })
-    const r = await $.prompt.context({ blocks: [] })
-    expect(r.blocks[0].text).toContain('## base convention — dogfood mode')
-    expect(r.blocks[0].text).toContain('base 0.1.0')
   })
 })
 

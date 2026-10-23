@@ -6,9 +6,13 @@
  *   start rules  SessionStart: lean code (BASE_LEAN), writing style (BASE_STE), edit delegation (BASE_EDIT_MODEL), dogfood section
  *   subagent     SubagentStart: the share of the agent type on stdin; records the agent_type in
  *                <log dir>/<session>/agents/<agent_id>.json for base's MCP guard
- *   stop         Stop: blocks once per new plugin-script failure the mod listed in dogfood-state.json's `errors` and no report followed
+ *   stop         Stop: blocks once per new plugin-script failure the mod listed in dogfood-state.json's `errors` and no report followed,
+ *                and (BASE_AUTOSAVE) at most once per 3 turns a turn that did savable work and left the workspace in
+ *                autosave-state.json stale; one block, both reasons
+ *   precompact   PreCompact (auto): appends a `compact:` pointer line to a stale workspace's notes.md and records it in
+ *                compact-marker.json, so the mod never counts it as a save
  * A start part writes the marker <log dir>/<session>/conventions.base[.rules].json, which the doctor and
- * the mod's cloud fallback read. Always exits 0; an internal error prints nothing.
+ * the edit guard read. Always exits 0; an internal error prints nothing.
  */
 'use strict';
 
@@ -59,7 +63,7 @@ function logDir(sid, spare) {
   return root ? root + '/' + sid : null;
 }
 
-/** The log dir, else the spare dir: printed context always leaves a marker the mods' fallback sees. */
+/** Writes `data` as JSON to `name` under the log dir, else the spare dir: printed context always leaves a marker. */
 function writeMarker(sid, name, data) {
   let why = null;
   for (const dir of [logDir(sid), logDir(sid, true)]) {
@@ -88,7 +92,7 @@ let loginMemo = null;
  */
 function login() {
   if (loginMemo) return loginMemo;
-  const file = ED ? ED.loginFile(process.env.HOME, process.env.CLAUDE_CONFIG_DIR) : null;
+  const file = ED_() ? ED_().loginFile(process.env.HOME, process.env.CLAUDE_CONFIG_DIR) : null;
   const a = ((file && readJson(file)) || {}).oauthAccount || {};
   const org = typeof a.organizationType === 'string' ? a.organizationType : null;
   const label = /^claude_(team|enterprise)$/.test(org) ? 'work' : /^claude_(max|pro)$/.test(org) ? 'personal' : !org && ROOT.includes('/plugins/synced/') ? 'synced sandbox' : 'unknown';
@@ -145,24 +149,28 @@ function versionsLine(cwd) {
   return out.join(', ');
 }
 
-let T = null;
-try {
-  T = require('./conventions-text.json');
-} catch {}
-let ED = null;
-try {
-  ED = require('../scripts/edit-delegation.cjs');
-} catch {}
-const section = (name) => T[name].split('<base root>').join(ROOT);
+// Loaded on first use: title.cjs requires this file on every prompt and needs neither.
+let texts;
+let edMod;
+const tryRequire = (p) => {
+  try {
+    return require(p);
+  } catch {
+    return null;
+  }
+};
+const T_ = () => (texts === undefined ? (texts = tryRequire('./conventions-text.json')) : texts);
+const ED_ = () => (edMod === undefined ? (edMod = tryRequire('../scripts/edit-delegation.cjs')) : edMod);
+const section = (name) => T_()[name].split('<base root>').join(ROOT);
 const surfaceless = () => (process.env.CLAUDE_CODE_ENTRYPOINT || '').startsWith('sdk') || process.env.CLAUDE_CODE_REMOTE === 'true';
 
 function dogfoodSection(cwd) {
-  return T.dogfood.split('{versions}').join(versionsLine(cwd)).split('{rule}').join(T[surfaceless() ? 'rule-surfaceless' : 'rule-drawn']);
+  return T_().dogfood.split('{versions}').join(versionsLine(cwd)).split('{rule}').join(T_()[surfaceless() ? 'rule-surfaceless' : 'rule-drawn']);
 }
 
 /** The edit-delegation decision (scripts/edit-delegation.cjs decides; the doctor asks the same); null without the module. */
-const editDecision = () => (ED ? ED.editDelegation({ env: process.env, home: process.env.HOME, configDir: process.env.CLAUDE_CONFIG_DIR, root: ROOT }) : null);
-const editSection = (d) => T['edit-delegation'].split('{model}').join(d.model).split('{why}').join(ED.whyText(d));
+const editDecision = () => (ED_() ? ED_().editDelegation({ env: process.env, home: process.env.HOME, configDir: process.env.CLAUDE_CONFIG_DIR, root: ROOT }) : null);
+const editSection = (d) => T_()['edit-delegation'].split('{model}').join(d.model).split('{why}').join(ED_().whyText(d));
 
 /** The start part's sections in session order: `{ sections: [name…], text, edit }`, text '' when none is on; `edit` the rules part's delegation decision. */
 function startPart(part, cwd) {
@@ -210,6 +218,66 @@ function stopReason(input) {
   return 'base: ' + open.length + ' plugin script error(s) this session are not reported — report each with plugin_defect or say why not: ' + names;
 }
 
+const AUTOSAVE_EVERY = 3;
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
+/**
+ * The workspace autosave-state.json names for this session, with its newest root-file write re-listed now (notes.md still at
+ * compact-marker.json's write keeps the time before it) and `stale` cleared by a write since the mirror. null when off or absent.
+ */
+function autosaveWorkspace(dir, sid) {
+  if (process.env.BASE_AUTOSAVE === '0' || !dir) return null;
+  const s = readJson(dir + '/autosave-state.json');
+  if (!s || s.sid !== sid || typeof s.workId !== 'string' || !/^[\w.-]+$/.test(s.workId) || /^\.+$/.test(s.workId) || typeof s.wsDir !== 'string' || !s.wsDir.startsWith('/') || !s.wsDir.endsWith('/.claude/tasks/' + s.workId)) return null;
+  const m = readJson(dir + '/compact-marker.json');
+  let newest = 0;
+  try {
+    for (const name of fs.readdirSync(s.wsDir)) {
+      let st;
+      try {
+        st = fs.statSync(path.join(s.wsDir, name));
+      } catch {
+        continue;
+      }
+      if (st.isFile()) newest = Math.max(newest, name === 'notes.md' && m && m.workId === s.workId && st.mtimeMs === m.notesMs ? num(m.priorMs) : st.mtimeMs);
+    }
+  } catch {}
+  const mtimeMs = Math.max(num(s.mtimeMs), newest);
+  return { ...s, mtimeMs, stale: s.stale === true && mtimeMs <= num(s.mtimeMs) };
+}
+
+/** The autosave Stop reason: a stale workspace not written since the turn began, savable work in the turn, once per 3 turns. Writes autosave-stop.json. */
+function autosaveReason(input) {
+  if (input.stop_hook_active === true) return null;
+  const dir = logDir(input.session_id);
+  const ws = autosaveWorkspace(dir, input.session_id);
+  if (!ws || !ws.stale || ws.mtimeMs >= num(ws.startMs) || num(ws.lastSavableMs) < num(ws.startMs)) return null;
+  const turn = num(ws.turn);
+  const blocked = num((readJson(dir + '/autosave-stop.json') || {}).blockedTurn);
+  if (blocked && turn - blocked >= 0 && turn - blocked < AUTOSAVE_EVERY) return null;
+  fs.writeFileSync(dir + '/autosave-stop.json', JSON.stringify({ blockedTurn: turn }) + '\n');
+  return 'save interim findings to the workspace (.claude/tasks/' + ws.workId + '/notes.md), then stop';
+}
+
+/** Before an auto-compact: one `compact:` line on a stale workspace's notes.md (left alone when it exists but cannot be read), then compact-marker.json. */
+function compactNote(input, now) {
+  if (input.trigger !== 'auto') return;
+  const dir = logDir(input.session_id);
+  const ws = autosaveWorkspace(dir, input.session_id);
+  if (!ws || !ws.stale) return;
+  const notes = ws.wsDir + '/notes.md';
+  let text = '';
+  try {
+    text = fs.readFileSync(notes, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') return;
+  }
+  const age = ws.mtimeMs ? ' ' + Math.floor((now - ws.mtimeMs) / 60000) + ' min' : ', nothing saved yet';
+  const line = '- ' + new Date(now).toISOString().slice(0, 10) + ' compact: workspace stale' + age + '; since then ' + num(ws.agentsSince) + ' reader agents, ' + num(ws.editsSince) + ' edits\n';
+  fs.writeFileSync(notes, text && !text.endsWith('\n') ? text + '\n' + line : text + line);
+  fs.writeFileSync(dir + '/compact-marker.json', JSON.stringify({ workId: ws.workId, notesMs: fs.statSync(notes).mtimeMs, priorMs: ws.mtimeMs }) + '\n');
+}
+
 function main(argv) {
   const [mode, part] = argv;
   const input = readStdin();
@@ -230,12 +298,18 @@ function main(argv) {
     const text = subagentText(typeof input.agent_type === 'string' ? input.agent_type : '', cwd);
     if (text) process.stdout.write(envelope('SubagentStart', text));
   } else if (mode === 'stop') {
-    const reason = stopReason(input);
-    if (reason) process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+    let saveReason = null;
+    try {
+      saveReason = autosaveReason(input);
+    } catch {}
+    const reasons = [stopReason(input), saveReason].filter(Boolean);
+    if (reasons.length) process.stdout.write(JSON.stringify({ decision: 'block', reason: reasons.join('\n') }));
+  } else if (mode === 'precompact') {
+    compactNote(input, Date.now());
   }
 }
 
-module.exports = { startPart, subagentText, stopReason, versionsLine, login, dogfoodOn, logDir, editDecision };
+module.exports = { startPart, subagentText, stopReason, versionsLine, login, dogfoodOn, logDir, writeMarker, readStdin, editDecision };
 
 if (require.main === module) {
   try {

@@ -51,6 +51,10 @@ export function spareRoot(tmp: string | undefined): string {
   return `${t.startsWith('/') ? trimSlash(t) : '/tmp'}/domaine-log`
 }
 
+/** Where the SessionStart command hook leaves its marker: `<log dir>/<session>/conventions.<stem>.json` (`base`, `base.rules`), else under the spare root. */
+export const markerPaths = (home: string | undefined, override: string | undefined, tmp: string | undefined, sid: string, stem = 'base'): string[] =>
+  [logDir(home, override, sid), logDir(undefined, spareRoot(tmp), sid)].flatMap(d => (d ? [`${d}/conventions.${stem}.json`] : []))
+
 /** One base.jsonl line; `plugin` is base's own name, never taken from another plugin's state. */
 export function fileLine(ev: BaseEvent, version: string, session: string): string {
   return JSON.stringify({ ts: new Date(ev.atMs).toISOString(), plugin: 'base', version, session, kind: ev.kind, agent: 'main', text: ev.text })

@@ -8,8 +8,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { BaseEvent, BaseEventKind, BaseMainEdits } from '../../../types'
-import { markerPaths } from '../conventions.ts'
-import { bare, logLine, pushEvent } from '../events.ts'
+import { bare, logLine, markerPaths, pushEvent } from '../events.ts'
 import type { Disk } from '../events.ts'
 
 export const COMMAND = {

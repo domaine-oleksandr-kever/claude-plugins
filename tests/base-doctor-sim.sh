@@ -139,14 +139,18 @@ cat > "$K/hooks/hooks.json" <<'JSON'
   "hooks": {
     "SessionStart": [{ "matcher": "startup|clear|compact", "hooks": [
       { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start core" },
-      { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start rules" }] }],
+      { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start rules" },
+      { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/title.cjs\" start" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/title.cjs\" prompt" }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" stop" }] }] } }
 JSON
-run --root "$K" --home "$H" --project "$PRJ"; expect CD13b-hooks-command-script-missing 1 "FAIL  hooks      command hook script missing: hooks/conventions.cjs"
+run --root "$K" --home "$H" --project "$PRJ"; expect CD13b-hooks-command-script-missing 1 "FAIL  hooks      command hook script missing: hooks/conventions.cjs, hooks/title.cjs"
 printf '' > "$K/hooks/conventions.cjs"
-run --root "$K" --home "$H" --project "$PRJ"; expect CD13c-hooks-mixed 0 "PASS  hooks      1 module(s): ./mods/register.ts; command hooks: SessionStart ×2, Stop"
+run --root "$K" --home "$H" --project "$PRJ"; expect CD13b-hooks-title-script-missing 1 "FAIL  hooks      command hook script missing: hooks/title.cjs"
+printf '' > "$K/hooks/title.cjs"
+run --root "$K" --home "$H" --project "$PRJ"; expect CD13c-hooks-mixed 0 "PASS  hooks      1 module(s): ./mods/register.ts; command hooks: SessionStart ×3, UserPromptSubmit, Stop"
 run --root "$ROOT/plugins/base" --home "$H" --project "$PRJ"
-expect CD13d-shipped-command-hooks 0 "PASS  hooks      1 module(s): ./mods/register.ts; command hooks: SessionStart ×2, SubagentStart, Stop"
+expect CD13d-shipped-command-hooks 0 "PASS  hooks      1 module(s): ./mods/register.ts; command hooks: SessionStart ×3, UserPromptSubmit, SubagentStart, PreCompact, Stop"
 
 # --------------------------------------------------------------------------------- scripts --
 S="$TMP/s1"; mkplugin "$S"; chmod 644 "$S/scripts/fetch.sh"

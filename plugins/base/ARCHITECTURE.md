@@ -11,9 +11,10 @@ plugins/base/
 ├── agents/*.md                  the readers, the writer, the review agents (spawned as base:<name>)
 ├── skills/*/SKILL.md            commit, pre-commit-review, save-task-context, report-plugin-issue, worktree, shopify
 ├── references/*.md              what the agents and skills cite by ${CLAUDE_PLUGIN_ROOT}/references/…, and the team plugins by <base root>/references/…
-├── hooks/hooks.json             the module (./mods/register.ts) and the SessionStart/SubagentStart/Stop command hooks
-├── hooks/conventions.cjs        the command hooks: the conventions, the subagent share and its agents/<id>.json record, the dogfood stop block
-├── hooks/conventions-text.json  the convention text, one source for the command hooks and the mod's cloud fallback
+├── hooks/hooks.json             the module (./mods/register.ts) and the SessionStart/UserPromptSubmit/SubagentStart/PreCompact/Stop command hooks
+├── hooks/conventions.cjs        the command hooks: the conventions, the subagent share and its agents/<id>.json record, the dogfood and autosave stop block, the precompact line
+├── hooks/title.cjs              the session-title command hooks (SessionStart, UserPromptSubmit) and title.json
+├── hooks/conventions-text.json  the convention text of the command hooks
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── hooks/no-verify-bypass.sh    the git-hooks guard's decision, run by guards/bash.ts
 ├── hooks/scratch-path-guard.cjs the scratch-path guard's decision, run by guards/scratch.ts
@@ -25,27 +26,25 @@ Mods first: a guard is a `tool.call` hook, the workspace state is a `$.state` at
 `$.command.register`. A script stays a script only where a mod cannot do the job (§5). The conventions
 are such a job: the Claude Team login skips `classic.*`, `prompt.compose` and `prompt.context` for
 user-tier mods, so they travel as `hooks/hooks.json` command hooks (`hooks/conventions.cjs`, text in
-`hooks/conventions-text.json`), and the mod keeps only a cloud fallback.
+`hooks/conventions-text.json`), and so does the session title (`hooks/title.cjs`).
 
 ## 2. The hooks module
 
 `register.ts` calls one register function per file. Each file declares its own atoms and spells its
 own env names: the engine's validator follows `$` only into functions declared in the same file, never
-across an import, so a `$` helper is never shared between files (`title.ts` repeats `branchOf` and
-the `.claude/tasks` listing of `workspace/progress.ts` for that reason).
+across an import, so a `$` helper is never shared between files (each writer file builds its own `diskOf`
+for that reason).
 
 | File | Hooks | Writes |
 |---|---|---|
 | `session.ts` | `session.start {cwd:/^/}` start line · `prompt.submit {text:/^/}` the slim check at a session's first prompt · `tool.call {tool:'Agent'}` + `agent.spawn {subagentType}` reader refusal | `base.started`, `base.checked`, `base.events` |
-| `workspace/progress.ts` | `session.start`, `prompt.submit` (both unmatched) · `session.end {reason:'clear'}` · `tool.call` Write/Edit and `{tool:'Bash'}` (a checkout) · `classic.CwdChanged` · `tool.call {tool:/^(Agent|Task)$/}` and `{tool:/^mcp__/}` (savable events) · `tool.call {tool:'Read'}` (adopts a guessed workspace) · `classic.SubagentStop` (a background agent's stop is savable) · `command.run base-progress` | `base.progress`, `base.pin`, `base.lastKey`, `base.sessionId`, `base.savable`, `base.background`, `base.events` |
-| `workspace/autosave.ts` | `prompt.submit {text:/(?:)/}` (the stale-workspace context line) · `classic.Stop` (the turn-end block after a turn with savable work, at most once per 3 turns) · `classic.PreCompact` (the `compact:` marker on an auto-compact) | `base.autosave`, `base.compactMarker` |
-| `title.ts` | `classic.SessionStart`, `classic.UserPromptSubmit`: their `sessionTitle` result field | `base.titled`, `base.events` |
+| `workspace/progress.ts` | `session.start`, `prompt.submit` (both unmatched) · `session.end {reason:'clear'}` · `tool.call` Write/Edit and `{tool:'Bash'}` (a checkout) · the 30 s tick re-resolves on a new session root · `tool.call {tool:/^(Agent|Task)$/}` and `{tool:/^mcp__/}` (savable events) · `tool.call {tool:'Read'}` (adopts a guessed workspace) · the 30 s tick also adopts `title.json` as the `title` line · `turn.complete` with an `agentId` (a background agent's stop is savable) · every progress update mirrored to `autosave-state.json` · a new `compact-marker.json` adopted as `base.compactMarker` · `command.run base-progress` | `base.progress`, `base.pin`, `base.lastKey`, `base.sessionId`, `base.savable`, `base.background`, `base.events` |
+| `workspace/autosave.ts` | `prompt.submit {text:/(?:)/}` (the stale-workspace context line, the turn counter mirrored to `autosave-state.json`); the turn-end block and the `compact:` marker are `conventions.cjs stop` / `precompact` | `base.autosave`, `base.compactMarker`, `autosave-state.json` |
 | `guards/bash.ts` | `tool.call {tool:/^Bash$/}`: the attribution rule (pure, `guards/attribution.ts`), then `hooks/no-verify-bypass.sh` for a command naming a git verb | `base.events` |
 | `guards/mcp.ts` | `tool.call {tool:/^mcp__(?!slim__\|base__)/}`: a subagent's Jira/Confluence/Notion write by tool name on any server, refused by its type from `<log dir>/<session>/agents/<id>.json` (no record = refused); a base reader or writer's call on a server listing none of its vendors' `SIGNATURE` tools, refused; then base's own `mcp__plugin_base_…` tool refused once per session while a server that is no plugin's lists the same tool and the `SIGNATURE` tool (`$.tool.list()`); `SIGNATURE` is shared with the doctor | `base.mcpSoft`, `base.events` |
 | `guards/edit.ts` | `tool.call {tool:/^(Edit\|Write\|NotebookEdit)$/}`: a main-loop (no `agentId`) change to a file under the session root outside `.claude/` refused while the rules marker's `edit.model` names a delegate (escapes: the session's family at or below it, `/base-edit-direct`, `BASE_GUARD=0`), an allowed one counted · `tool.call {tool:/^(Read\|Grep)$/}` + `{tool:'mcp__slim__view'}` + `{tool:'Bash', command:/(steps-to-test\|pr-body)\.md/}`: a main-loop read of `.claude/tasks/<id>/{steps-to-test,pr-body}.md` refused (a Bash segment through `drafter-check.cjs`, `gh pr … --body-file`, `test -s` or `ls` allowed), same escapes · `tool.call {tool:'Bash', command:SHELL_WRITE}`: a main-loop shell write counted, never refused · `session.start {cwd:/(?:)$/}` + `prompt.submit {text:/(?:)$/}`: register `/base-edit-direct` · `command.run base-edit-direct` (composer, bridge or sdk origin only) | `base.mainEdits`, `base.delegation`, `base.events` |
 | `guards/scratch.ts` | `session.start {cwd:/./}` latches the launch root · `tool.describe` + `tool.call` on the browser tools that take a path → `hooks/scratch-path-guard.cjs` | `base.guardRoot`, `base.events` |
-| `conventions.ts` | `prompt.context`: the cloud fallback only — where nothing draws and the `SessionStart` command hook left no `conventions.base.json` marker, the sections from `hooks/conventions-text.json` as one block (`dogfood` under `BASE_DOGFOOD=1`, its versions read as `dogfood.ts` reads them) | `base.injected` |
-| `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit {text:/$/}`: register `/base-doctor` (every start, and a new session id), start the base-tmp and event-log sweeps unawaited, once per session id · `command.run base-doctor` (passes `--log-dir` to `doctor.cjs`; the `conventions` row from the command-hook markers, the `defects` row under `BASE_DOGFOOD=1`, the `delegate` row's session suffix from `base.mainEdits`) · `classic.UserPromptSubmit {prompt:/^/}`: the session id the `classic` row reads | `base.swept`, `base.events`, `base.classic`, `base.mainEdits` (read) |
+| `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit {text:/$/}`: register `/base-doctor` (every start, and a new session id), start the base-tmp and event-log sweeps unawaited, once per session id · `command.run base-doctor` (passes `--log-dir` to `doctor.cjs`; the `conventions` row from the command-hook markers, the `defects` row under `BASE_DOGFOOD=1`, the `delegate` row's session suffix from `base.mainEdits`) | `base.swept`, `base.events`, `base.mainEdits` (read) |
 | `dogfood.ts` | `BASE_DOGFOOD=1` only: `session.start {cwd:/(?:)/}` registers the `plugin_defect` tool (`$.tool.register`, served by `tool.call {tool:'mcp__base__plugin_defect'}`) and `/base-defects` · `prompt.submit {text:/^(?:)/}` re-registers the command for a new session id · `tool.call {tool:'Bash', command:/plugins\//}` the nudge on a failed plugin script, and the main loop's failure appended as `{script, line, ms}` to the mirrored `errors` (a `plugin_defect` report clears them) · `command.run base-defects`; every update of `base.dogfood` is mirrored to `<log dir>/<session>/dogfood-state.json`, where the `Stop` command hook blocks once | `base.dogfood`, `base.events`, `dogfood-state.json`; the report files under `<project>/.claude/plugin-defects/` and `~/.claude/plugin-defects/index.md` |
 
 Pure helpers carry no `$`: `events.ts` (the 200-line cap, and the `base.jsonl` writer, §3), `node-hook.ts` (the argv/stdin a delegated
@@ -62,13 +61,13 @@ Engine rules this layout follows:
 - **One throwing `session.start` hook skips the plugin's others**: every `$` call there is wrapped.
 - **A /clear starts a new session id without a `session.start`**: whatever must hold per session is
   re-done at the first `prompt.submit` whose id differs (the command registrations, the sweep, the
-  install checks, the title).
+  install checks).
 - **The main session's hook context does not reach a subagent.** A subagent gets base's share from the
   `SubagentStart` command hook (the root line and the untrusted-content rail for every agent; comment
   discipline and lean code for an agent that writes code; `dogfood` in dogfood mode).
-- **No title setter on `$`.** The session title rides the `sessionTitle` result field of the classic
-  SessionStart and UserPromptSubmit events, which fire for a mod whether or not a settings hook exists —
-  on the personal login only: the Claude Team login skips them for user-tier mods (the doctor's `classic` row).
+- **No title setter on `$`.** The session title rides the `sessionTitle` field of the `SessionStart` and
+  `UserPromptSubmit` command hooks (`hooks/title.cjs`); the progress tick adopts its `title.json` into
+  `base.events`.
 
 ## 3. The atoms and how band reads them
 
@@ -93,7 +92,7 @@ Engine rules this layout follows:
   `$HOME/.claude/domaine/log/<id>/` folders of `*.jsonl` past 7 days with `rm -rf` (`$.fs` has no
   delete), never when the root resolves elsewhere.
 - **`base.pin`**, **`base.lastKey`**, **`base.sessionId`** — the resolver's inputs.
-- **`base.started`**, **`base.checked`**, **`base.titled`**, **`base.swept`** — per-session-id
+- **`base.started`**, **`base.checked`**, **`base.swept`** — per-session-id
   latches, so a module reload or a repeated start does each thing once.
 - **`base.mcpSoft`** — `{ sid, tools }`: base's own MCP tools refused once this session for a connector twin; the second call runs, a new session id starts empty.
 - **`base.guardRoot`** — the project root the session launched in. The MCP servers' working

@@ -373,7 +373,7 @@ describe('refresh', () => {
     await start($)
     reset(calls)
     await clock.advance(30_000)
-    expect(calls.reads).toEqual([])
+    expect(calls.reads).toEqual(['/tmp/domaine-log/s1/title.json'])
     w.files[progressMd('ABC-1591')] = { text: MD.replace('- [ ] Preview', '- [x] Preview'), mtimeMs: NOW + 10_000 }
     await clock.advance(30_000)
     expect(calls.reads.filter(p => p === progressMd('ABC-1591'))).toHaveLength(1)
@@ -444,12 +444,17 @@ describe('refresh', () => {
     expect((await peek($)).progress.workId).toBe('ABC-77')
   })
 
-  t('CwdChanged resolves again', async ($, on) => {
-    const { w, calls } = world(on)
+  t('a root change (a /cd, a worktree move) resolves again at the next tick', async ($, on) => {
+    const { w, calls, clock } = world(on)
     addWorkspace(w, 'ABC-1591')
     await start($)
     reset(calls)
-    await $.classic.CwdChanged({ old_cwd: ROOT, new_cwd: `${ROOT}/sub` })
+    await clock.advance(30_000)
+    expect(calls.git).toBe(0)
+    w.root = '/wt'
+    await clock.advance(30_000)
+    expect(calls.git).toBe(1)
+    await clock.advance(30_000)
     expect(calls.git).toBe(1)
   })
 })
@@ -514,7 +519,7 @@ describe('staleness', () => {
     $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose', reply: { status: 'completed', agentId, content: [], prompt: 'p' } })
   const launch = ($: any, agentId: string) =>
     $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose', reply: { status: 'async_launched', agentId, description: 'd', prompt: 'p', outputFile: '/tmp/o' } })
-  const subagentStop = ($: any, agent_id: string) => $.classic.SubagentStop({ agent_id, stop_hook_active: false, agent_transcript_path: '', agent_type: 'general-purpose' })
+  const subagentStop = ($: any, agentId: string) => $.turn.complete({ agentId, turnId: 't', answer: '', durationMs: 0, isAborted: false, reason: 'answer' })
 
   t('an agent return and an edit outside .claude/ count; 20 min without a write turns an adopted workspace stale', async ($, on) => {
     const { w, clock } = world(on)
@@ -577,16 +582,17 @@ describe('staleness', () => {
     expect((await peek($)).progress).toMatchObject({ mtimeMs: NOW + 1, lastSavableMs: NOW, stale: false })
   })
 
-  t('a background agent is savable when it stops, not when it launches; a remote or teammate launch never', async ($, on) => {
+  t('a background agent is savable at its turn.complete (the agentId its Agent record named), not when it launches; a remote or teammate launch never', async ($, on) => {
     const { w, clock } = world(on)
     addWorkspace(w, 'ABC-1591')
     await start($)
     const launch = (reply: Record<string, unknown>) => $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', subagent_type: 'general-purpose', reply })
-    const subagentStop = (agent_id: string) => $.classic.SubagentStop({ agent_id, stop_hook_active: false, agent_transcript_path: '', agent_type: 'general-purpose' })
+    const subagentStop = (id: string) => $.turn.complete({ agentId: id, turnId: 't', answer: '', durationMs: 0, isAborted: false, reason: 'answer' })
     await launch({ status: 'async_launched', agentId: 'bg1', description: 'd', prompt: 'p', outputFile: '/tmp/o' })
     await launch({ status: 'remote_launched', taskId: 't1', sessionUrl: 'https://x', description: 'd', prompt: 'p', outputFile: '/tmp/o' })
     await launch({ status: 'teammate_spawned', agent_id: 'tm1', teammate_id: 'tm@team', name: 'tm' })
     await subagentStop('fg1')
+    await $.turn.complete({ turnId: 't', answer: '', durationMs: 0, isAborted: false, reason: 'answer' })
     expect((await peek($)).progress).toMatchObject({ lastSavableMs: 0, agentsSince: 0 })
     await clock.advance(60_000)
     await subagentStop('bg1')

@@ -54,14 +54,14 @@ export type BaseEventKind = 'start' | 'install' | 'workspace' | 'refuse' | 'titl
  */
 export type BaseSavable = { atMs: number; kind: 'agent' | 'edit' | 'mcp'; workId: string | null }
 
-/** The last `compact:` line autosave appended: notes.md's mtime after it and the workspace mtime before it. */
+/** The last `compact:` line the PreCompact hook appended (compact-marker.json): notes.md's mtime after it and the workspace mtime before it. */
 export type BaseCompactMarker = { workId: string; notesMs: number; priorMs: number }
 
 /**
- * The autosave turn: a counter bumped per prompt that starts a turn, when it began, the turn the stop was last
- * blocked in (0 = never), and the workspace mtime the prompt line last fired for (-1 = none).
+ * The autosave turn: a counter bumped per prompt that starts a turn, when it began, and the workspace mtime the
+ * prompt line last fired for (-1 = none). Mirrored with base.progress to autosave-state.json for the Stop hook.
  */
-export type BaseAutosave = { turn: number; startMs: number; blockedTurn: number; nudgedMs: number }
+export type BaseAutosave = { turn: number; startMs: number; nudgedMs: number }
 
 /**
  * Dogfood mode, per session id: the last plugin-script failure in the main loop (`failMs` 0 = none) and its
@@ -93,12 +93,6 @@ declare module 'claude-code' {
       started: string | null
       /** The session id whose slim check ran (at its first prompt). */
       checked: string | null
-      /** The session id whose first user message carries the conventions as the prompt.context fallback (no surface draws, no command-hook marker). */
-      injected: string | null
-      /** The session id whose classic.UserPromptSubmit reached base's mods (the doctor's `classic` row). */
-      classic: string | null
-      /** The session id whose title is settled: `<id>` titled by base, `<id>:user` set by the person. */
-      titled: string | null
       /** The project root the session launched in, latched once: the scratch-path guard measures against it. */
       guardRoot: string | null
       /** base's own MCP tools (`mcp__plugin_base_…`) the MCP guard refused once in session `sid` because another server serves the same tools, at most 200; another sid counts as none. */

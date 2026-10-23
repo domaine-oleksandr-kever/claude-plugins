@@ -6,12 +6,19 @@
         "matcher": "startup|clear|compact",
         "hooks": [
           { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start core", "timeout": 10 },
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start rules", "timeout": 10 }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" start rules", "timeout": 10 },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/title.cjs\" start", "timeout": 5 }
         ]
       }
     ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/title.cjs\" prompt", "timeout": 5 }] }
+    ],
     "SubagentStart": [
       { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" subagent", "timeout": 10 }] }
+    ],
+    "PreCompact": [
+      { "matcher": "auto", "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" precompact", "timeout": 5 }] }
     ],
     "Stop": [
       { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/conventions.cjs\" stop", "timeout": 5 }] }

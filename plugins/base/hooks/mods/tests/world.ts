@@ -268,6 +268,7 @@ export function world(on: On, over: Partial<World> = {}) {
   on('prompt.compose', async () => ({ sections: [{ id: 'intro', text: 'You are Claude Code.', scope: 'shared' as const }] }))
   on('classic.SubagentStart', async () => ({}) as never)
   on('classic.SubagentStop', async () => ({}))
+  on('turn.complete', async (_$, e) => ({ text: e.answer }))
   on('tool.describe', async (_$, e) => ({ description: e.description }))
   on('agent.spawn', async (_$, e) => {
     calls.spawned.push(e.subagentType)
@@ -302,15 +303,13 @@ export const PEEK = {
         events: (await $.state.get({ plugin: 'base', key: 'events' })).value ?? [],
         started: (await $.state.get({ plugin: 'base', key: 'started' })).value ?? null,
         checked: (await $.state.get({ plugin: 'base', key: 'checked' })).value ?? null,
-        titled: (await $.state.get({ plugin: 'base', key: 'titled' })).value ?? null,
         guardRoot: (await $.state.get({ plugin: 'base', key: 'guardRoot' })).value ?? null,
         mcpSoft: (await $.state.get({ plugin: 'base', key: 'mcpSoft' })).value ?? null,
         swept: (await $.state.get({ plugin: 'base', key: 'swept' })).value ?? null,
-        injected: (await $.state.get({ plugin: 'base', key: 'injected' })).value ?? null,
-        classic: (await $.state.get({ plugin: 'base', key: 'classic' })).value ?? null,
         dogfood: (await $.state.get({ plugin: 'base', key: 'dogfood' })).value ?? null,
         mainEdits: (await $.state.get({ plugin: 'base', key: 'mainEdits' })).value ?? null,
         delegation: (await $.state.get({ plugin: 'base', key: 'delegation' })).value ?? null,
+        compactMarker: (await $.state.get({ plugin: 'base', key: 'compactMarker' })).value ?? null,
       }),
     }))
   },
