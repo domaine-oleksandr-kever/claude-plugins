@@ -76,30 +76,27 @@ async function mustSave($: $): Promise<boolean> {
   return p !== null && p.workId !== null && p.stale === true
 }
 
-const STILL_STALE = 'workspace still stale — save did not land; compaction cancelled'
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
-/** The /compact queued behind a save: `armed` while it runs, `vetoed` once its compaction met a still-stale workspace. */
-let afterSave: 'armed' | 'vetoed' | null = null
 /** A Compact press or a typed /compact is running its chain; a second one would queue a second save and compaction. */
 let compactInFlight = false
 
-/** Saves, then queues /compact behind the save's turn: only a queued command is sure to run after that turn. */
-function saveThenCompact($: $, args: string): Promise<{ text: string; vetoed: boolean }> {
-  const compact = () => {
-    afterSave = 'armed'
-    return $.command.run({ command: 'compact', args }).then(
-      r => {
-        const vetoed = afterSave === 'vetoed'
-        afterSave = null
-        return { text: r.text, vetoed }
-      },
-      err => {
-        afterSave = null
-        throw err
-      },
-    )
-  }
-  return $.command.run({ command: SAVE }).then(compact, compact)
+/**
+ * Saves, then queues /compact behind the save's turn: only a queued command is sure to run after that turn. A failed
+ * save or a workspace base still reports stale never cancels the compaction the person asked for: `note` says why.
+ */
+function saveThenCompact($: $, args: string): Promise<{ text: string; note: string | null }> {
+  const compact = (failed: string | null) =>
+    $.command.run({ command: 'compact', args }).then(async r => {
+      if (failed !== null) return { text: r.text, note: `save failed (${failed}) — compacted anyway` }
+      const p = await read($, baseProgress)
+      const stale = await mustSave($).catch(() => false)
+      return { text: r.text, note: stale ? `${p?.workId} still stale after the save — compacted anyway` : null }
+    })
+  return $.command.run({ command: SAVE }).then(
+    () => compact(null),
+    err => compact(errText(err)),
+  )
 }
 
 function pressCompact($: $): void {
@@ -112,7 +109,7 @@ function pressCompact($: $): void {
     return
   }
   compactInFlight = true
-  const refused = (err: unknown) => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`)
+  const refused = (err: unknown) => $.ui.toast(`compact refused: ${errText(err)}`)
   // A headless (SDK, desktop app) session refuses the op but still runs a typed /compact.
   const compact = () =>
     $.session.compact().then(
@@ -120,9 +117,7 @@ function pressCompact($: $): void {
       () => $.command.run({ command: 'compact' }).then(r => $.ui.toast(r.text || 'compacted'), refused),
     )
   const saved = () =>
-    saveThenCompact($, '').then(r => {
-      if (!r.vetoed) $.ui.toast(`saved, then ${r.text || 'compacted'}`)
-    }, refused)
+    saveThenCompact($, '').then(r => $.ui.toast(r.note ?? `saved, then ${r.text || 'compacted'}`), refused)
   const go = () => mustSave($).then(stale => (stale ? saved() : compact()), compact)
   const clear = () => $.command.run({ command: 'clear' }).then(r => $.ui.toast(r.text || 'cleared'), err => $.ui.toast(`clear refused: ${err instanceof Error ? err.message : String(err)}`))
   // A dismissed dialog rejects: that is a Cancel.
@@ -221,23 +216,14 @@ export function registerBand(on: On, options: PluginOptions): void {
     compactInFlight = true
     $.clock.after(1, () => {
       saveThenCompact($, e.args)
-        .catch(err => $.ui.toast(`compact refused: ${err instanceof Error ? err.message : String(err)}`))
+        .then(r => r.note !== null && $.ui.toast(r.note))
+        .catch(err => $.ui.toast(`compact refused: ${errText(err)}`))
         .finally(() => {
           compactInFlight = false
         })
     })
     return { text: 'workspace stale: saving it first, then compacting' }
   })
-  // The save's turn can end without a write (an error, an interrupt, a refused edit): its compaction is vetoed then.
-  // A /compact band queues reaches core as the person's own or as a plugin's: both meet the veto.
-  for (const trigger of ['manual', 'plugin'] as const) {
-    on('session.compact', { trigger }, async ($, e, next) => {
-      if (afterSave !== 'armed' || e.agentId !== undefined || !(await mustSave($).catch(() => false))) return next(e)
-      afterSave = 'vetoed'
-      $.ui.toast(STILL_STALE)
-      return { skip: STILL_STALE }
-    })
-  }
   on('session.end', { reason: 'clear' }, async ($, e, next) => {
     turn.running = false
     compactInFlight = false

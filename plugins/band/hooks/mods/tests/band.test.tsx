@@ -783,21 +783,20 @@ describe('band', () => {
     })
 
     for (const [save, trigger] of [['writes nothing', 'manual'], ['fails', 'manual'], ['writes nothing', 'plugin']] as const) {
-      test(`${surface}: a save that ${save} leaves the workspace stale → the queued ${trigger} compaction is vetoed, by press or typed`, async ($, on) => {
+      test(`${surface}: a save that ${save} → the queued ${trigger} compaction still runs once and toasts why, by press or typed`, async ($, on) => {
         const { w, clock, runs } = autosaveWorld($, on, true, {}, save, trigger)
         await start($, surface)
         const ui = await mount($, surface)
         await ui.press({ key: 'compact' })
-        const cancelled = 'workspace still stale — save did not land; compaction cancelled'
-        expect(runs).toEqual(['save', '/compact'])
-        expect(w.toasts).toEqual([cancelled])
+        const note = save === 'fails' ? /^save failed \(\S.*\) — compacted anyway$/ : /^ABC-7 still stale after the save — compacted anyway$/
+        expect(runs).toEqual(['save', '/compact', 'compact'])
+        expect(w.toasts).toHaveLength(1)
+        expect(w.toasts[0]).toMatch(note)
         expect((await typed($, 'x')).text).toBe('workspace stale: saving it first, then compacting')
         await clock.advance(1)
-        expect(runs).toEqual(['save', '/compact', 'save', '/compact x'])
-        expect(w.toasts).toEqual([cancelled, cancelled])
-        // The veto covers only the run behind a save: a compaction after it goes through.
-        await $.session.compact({ trigger: 'manual', messages: KEPT })
-        expect(runs.at(-1)).toBe('compact')
+        expect(runs).toEqual(['save', '/compact', 'compact', 'save', '/compact x', 'compact'])
+        expect(w.toasts).toHaveLength(2)
+        expect(w.toasts[1]).toMatch(note)
       })
     }
 
