@@ -10,10 +10,6 @@ export const SLIM_VIEW = 'mcp__slim__view'
 export const DEV_MCP_TOOL = 'mcp__plugin_base_shopify-dev-mcp__learn_shopify_api'
 /** base as the command list shows it: its skills carry its name. */
 export const BASE_COMMANDS: [string, string][] = [['base:commit', 'base'], ['base-doctor', 'base']]
-/** What `<plugin root>/hooks/conventions-text.json` reads as unless a test puts its own file there (the real text is pinned in tests/hooks-sim.sh). */
-export const TEXT: Record<string, string> = { root: 'be plugin root: <root>' }
-/** The marker be's SessionStart command hook leaves for session s1. */
-export const MARKER = `${LOG}/s1/conventions.be.json`
 
 type File = { text: string; mtimeMs: number }
 type Init = { stdin?: string; env?: Record<string, string>; timeoutMs?: number } | undefined
@@ -22,8 +18,6 @@ export type World = {
   root: string
   files: Record<string, File>
   tools: string[]
-  /** what $.session.surfaces() answers; empty = nothing draws (a cloud session, `claude -p`) */
-  surfaces: string[]
   /** `[name, plugin]` pairs $.command.list answers; null rejects the listing */
   commands: [string, string][] | null
   env: Record<string, string>
@@ -47,7 +41,6 @@ export function world(on: On, over: Partial<World> = {}) {
     root: ROOT,
     files: {},
     tools: ['Bash', 'Read', SLIM_VIEW, DEV_MCP_TOOL],
-    surfaces: ['terminal'],
     commands: BASE_COMMANDS,
     env: {},
     doctor: null,
@@ -71,8 +64,6 @@ export function world(on: On, over: Partial<World> = {}) {
   on('session.root', async () => ({ value: w.root }))
   on('session.cwd', async () => ({ value: w.root }))
   on('session.id', async () => ({ value: w.sid }))
-  on('session.surfaces', async () => ({ value: w.surfaces as never }))
-  on('prompt.context', async (_$, e) => ({ blocks: e.blocks }))
   on('tool.list', async () => ({ value: w.tools.map(name => ({ name, description: name, mcp: name.startsWith('mcp__') })) }))
   on('command.list', async () => {
     if (!w.commands) throw new Error('no command list')
@@ -98,7 +89,6 @@ export function world(on: On, over: Partial<World> = {}) {
   })
   on('fs.read', async (_$, e) => {
     if (e.path.endsWith('/.claude-plugin/plugin.json')) return { value: w.manifest }
-    if (e.path.endsWith('/hooks/conventions-text.json') && !(e.path in w.files)) return { value: JSON.stringify(TEXT) }
     const f = w.files[e.path]
     if (!f) throw enoent(e.path)
     return { value: f.text }
@@ -138,9 +128,6 @@ export const start = ($: any) => $.session.start({ cwd: ROOT, surface: 'terminal
 export const submit = ($: any, text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
 export const doctor = ($: any) =>
   $.command.run({ command: 'be-doctor', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
-export const context = ($: any) => $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'rules' }] })
-/** be's fallback block in the first user message, or undefined. */
-export const block = async ($: any): Promise<string | undefined> => (await context($)).blocks.find((b: any) => b.name === 'beConventions')?.text
 export const subagent = ($: any, agent_type: string) => $.classic.SubagentStart({ agent_id: 'a1', agent_type })
 export const eventsOf = async ($: any, kind?: string): Promise<{ atMs: number; kind: string; text: string }[]> =>
   ((await peek($)).events as { atMs: number; kind: string; text: string }[]).filter(ev => !kind || ev.kind === kind)

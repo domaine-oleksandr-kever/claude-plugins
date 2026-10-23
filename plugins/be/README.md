@@ -16,7 +16,7 @@ be builds on base and requires it. base supplies the Jira and doc readers, the J
 workspace and the shared MCP servers: Atlassian, Notion, the Shopify Dev MCP
 ([plugins/base/README.md](../base/README.md)). base requires slim, so be runs with slim too.
 
-Current release: **be v0.4.0**.
+Current release: **be v0.4.1**.
 
 ## Status
 
@@ -97,11 +97,7 @@ The hook writes a marker, `<log dir>/<session-id>/conventions.be.json`: `via`, `
 `sections` it sent, `chars` and the `login` (`work`, `personal` or `unknown`, read from the login file;
 doctor evidence only). `/base-doctor`'s `conventions` row reads it.
 Where the log folder is missing or not writable, the marker goes to the spare folder
-`<TMPDIR or /tmp>/domaine-log/<session-id>/`; the fallback below looks in both.
-
-**Cloud fallback.** A session that no surface draws (a claude.ai cloud session, `claude -p`) and that has
-no marker gets the same text from be's hooks module instead: one context block of the first user
-message (`prompt.context`, beside CLAUDE.md), read from the same file.
+`<TMPDIR or /tmp>/domaine-log/<session-id>/`.
 
 **Subagents** get the same line as added context at their start, through a second command hook,
 `node hooks/conventions.cjs subagent` on `SubagentStart`: the main session's context does not reach a
@@ -161,7 +157,7 @@ Every switch be reads has a row here. Set it in `~/.claude/settings.json` → `e
 | `DOMAINE_LOG_DIR` | `~/.claude/domaine/log` | Where every Domaine plugin (slim, band, base, fe, qa, be, pm) writes its event log on disk: `<dir>/<session-id>/<plugin>.jsonl`, one JSON line per event. An absolute directory; the `<session-id>/` folder is still made under it. Without it and without `HOME` (a cloud session) no file is written. The `hooks/conventions.cjs` command hook writes its marker `conventions.be.json` there too. |
 | `BE_SHOPIFY_DOCS_URL` | `https://shopify.dev/assistant/search` | the endpoint `scripts/shopify-docs.cjs` posts to (tests point it at a local stub) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | read, never set, by `scripts/doctor.cjs`: the Claude Code config directory whose `plugins/installed_plugins.json` (else the claude.ai-synced copy under `plugins/synced/`) and `settings.json` the `base` and `shopify-dev-mcp` rows read; by the `hooks/conventions.cjs` command hook: the login file it labels in its marker (`<dir>/.claude.json`, or `~/.claude.json` for the default directory) |
-| `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook and the hooks module: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |
+| `TMPDIR` | `/tmp` | read, never set, by the `hooks/conventions.cjs` command hook: `<dir>/domaine-log/<session-id>/` is the spare folder of the marker where the log folder is missing or not writable |
 | `CLAUDE_PLUGIN_ROOT` | set by Claude Code | read, never set, by the `hooks/conventions.cjs` command hook: be's root, filled into the root line (the script's own parent directory when unset) |
 
 ## Tests

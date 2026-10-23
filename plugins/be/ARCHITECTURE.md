@@ -10,7 +10,7 @@ plugins/be/
 ├── .claude-plugin/plugin.json   dependencies: ["base"], types; no mcpServers, no classic `hooks` key
 ├── hooks/hooks.json             "modules" (the hooks module) + classic "hooks": SessionStart, SubagentStart
 ├── hooks/conventions.cjs        the command hook: be's conventions and their marker (Node built-ins)
-├── hooks/conventions-text.json  the convention texts, the one copy the hook and the module read
+├── hooks/conventions-text.json  the convention texts the hook reads
 ├── hooks/mods/*.ts              the hooks module (Claude Code function hooks)
 ├── types/index.d.ts             be's $.state contract: the `be` key only
 ├── skills/<name>/SKILL.md       the 3 skills (`/be:<name>`); platform-limitations carries its tables
@@ -57,11 +57,11 @@ across an import, so `doctor.ts` repeats `diskOf` and the base lookup rather tha
 
 | File | Hooks | Writes |
 |---|---|---|
-| `session.ts` | `session.start {cwd:/^/}` start line and base check · `prompt.context`: the cloud fallback block (nothing draws and no `conventions.be.json` marker), text from `hooks/conventions-text.json` | `be.started`, `be.events` |
+| `session.ts` | `session.start {cwd:/^/}` start line and base check | `be.started`, `be.events` |
 | `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit`: register `/be-doctor` (every start, and a new session id) · `command.run be-doctor` (passes `--log-dir` to `doctor.cjs`) | `be.armed`, `be.events` |
 
 Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `be.jsonl` writer, and `logDir` for
-the marker path).
+the `be.jsonl` folder).
 
 The conventions travel as a classic command hook, `hooks/conventions.cjs`, because the hooks module's
 prompt events (`prompt.compose`, `prompt.context`, `classic.*`) pass over a user-installed plugin on an
@@ -101,7 +101,7 @@ anyway (a `--plugin-dir` load has no install record). It only reports, never rep
 ## 8. The tests
 
 - `plugins/be/hooks/mods/tests/*.test.ts` — the module under `claude plugin test`: the start line and
-  base check, the cloud fallback block and its marker guard, the doctor command, `be.jsonl`.
+  base check, the doctor command, `be.jsonl`.
 - `tests/hooks-sim.sh` (`DHt*`) — `hooks/conventions.cjs` run as the host runs it: the envelope, the
   marker, bad stdin, the log dir, the login label, the subagent share per agent type, the text file.
 - `tests/be-doctor-sim.sh` — every `doctor.cjs` row PASS / FAIL / SKIP / WARN on sandbox installs,
