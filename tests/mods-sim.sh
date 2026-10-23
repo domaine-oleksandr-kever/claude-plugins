@@ -53,6 +53,9 @@ case "$checked" in
   *" band "*) ok ;;
   *) bad discovery-band "plugins/band/hooks/hooks.json not found — no band module was validated (checked:$checked)" ;;
 esac
+# band's hooks.json carries command hooks next to its module, so the validate above covered both shapes
+if jq -e '(.modules | length) > 0 and (.hooks.SessionStart | length) > 0' "$ROOT/plugins/band/hooks/hooks.json" >/dev/null 2>&1; then ok
+else bad band-hooks-with-modules "plugins/band/hooks/hooks.json lost its modules or its SessionStart command hook"; fi
 case "$checked" in
   *" base "*) ok ;;
   *) bad discovery-base "plugins/base/hooks/hooks.json not found — no base module was validated (checked:$checked)" ;;

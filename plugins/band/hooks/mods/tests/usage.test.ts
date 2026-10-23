@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { CLEAR_RESEED_MS, HOUR_MS, seedsTtl } from '../lib.ts'
-import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, mainTurn, measure, modelSwitch, ok, postCompact, peek, peekCache, peekEvents, sibBase, start, test, world } from './world.tsx'
+import { ENDPOINT_BODY, KEPT, MIN, SNAP, T0, logged, mainTurn, measure, ok, peek, peekCache, peekEvents, resumed, sibBase, start, test, world } from './world.tsx'
 
 const debug = async ($: any): Promise<string> => (await $.command.run({ command: 'band-debug', args: '' })).text
 
@@ -13,13 +13,14 @@ describe('event log writers → band.events', () => {
     expect(await peekEvents($)).toEqual([at('session', 'start · band 9.9.9')])
   })
 
-  test('classic.SessionStart resume and fork log their source; startup logs nothing', async ($, on) => {
-    world(on)
-    on('classic.SessionStart', async () => ({}) as never)
+  test('band-resume.json logs its source once, at the next read; a later file (another atMs) logs again', async ($, on) => {
+    const { w, clock } = world(on)
+    resumed(w)
     await start($)
-    await $.classic.SessionStart({ source: 'startup', seconds_since_last_response: 600 } as any)
-    await $.classic.SessionStart({ source: 'resume' } as any)
-    await $.classic.SessionStart({ source: 'fork', seconds_since_last_response: 60 } as any)
+    await clock.advance(30_000)
+    resumed(w, { source: 'fork' }, T0 + 30_000)
+    await clock.advance(30_000)
+    await clock.advance(30_000)
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'session resume', 'session fork'])
   })
 
@@ -124,24 +125,21 @@ describe('event log writers → band.events', () => {
 
   test('a real report within 30 s of an inferred drop is the same compaction: no second line, the cache goes cold', async ($, on) => {
     const { w } = world(on)
-    on('classic.PostCompact', async () => ({}) as never)
     await start($)
     await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
     await mainTurn($)
     await measure($, { window: 200_000, percent: 15, tokens: 30_000 })
     w.compact = async () => ({ messages: KEPT, tokensBefore: 144_000, tokensAfter: 30_000 })
     await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
-    await $.classic.PostCompact(postCompact({}))
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact inferred 144k → 30k'])
     expect((await peek($)).cache.isCold).toBe(true)
   })
 
   test('after a real compaction no reading infers another until a fill arrives, past the 30 s window too', async ($, on) => {
     const { w, clock } = world(on)
-    on('classic.PostCompact', async () => ({}) as never)
     await start($)
     await measure($, { window: 200_000, percent: 72, tokens: 144_000 })
-    await $.classic.PostCompact(postCompact({}))
+    await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
     w.context = { window: 200_000 }
     await clock.advance(2 * MIN)
     await measure($, { window: 200_000, percent: 15, tokens: 30_000 })
@@ -158,14 +156,13 @@ describe('event log writers → band.events', () => {
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual', 'compact manual 144k → 30k', 'compact inferred 144k → 30k'])
   })
 
-  test('PostModelSwitch logs the new model once; the same model again logs nothing', async ($, on) => {
-    const { w } = world(on)
-    on('classic.PostModelSwitch', async () => ({}) as never)
+  test('a /model answer logs the new family once; the same answer again logs nothing', async ($, on) => {
+    world(on)
+    on('command.run', { command: 'model' }, async () => ({ text: 'Set model to `Opus 5.5` and saved as your default for new sessions' }))
     await start($)
-    w.model = 'claude-opus-5-5'
-    await $.classic.PostModelSwitch(modelSwitch({}))
-    await $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-opus-5-5' }))
-    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5'])
+    await $.command.run({ command: 'model', args: 'opus' })
+    await $.command.run({ command: 'model', args: 'opus' })
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model opus'])
   })
 
   test('the rate alarm logs its toast text once per alarm', async ($, on) => {
@@ -275,13 +272,12 @@ describe('the model atom before and after the first response', () => {
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model opus'])
   })
 
-  test('a switch event that already wrote the id keeps it: the saved alias of the same family is only recorded', async ($, on) => {
+  test('an id a response named stays when /model saves an alias of its family: the alias is only recorded', async ($, on) => {
     const { w } = world(on)
     modelCommand(on, w)
-    on('classic.PostModelSwitch', async () => ({}) as never)
     w.settings = { model: 'sonnet' }
     await start($)
-    await $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-sonnet-5-5', to_model: 'claude-opus-5-5' }))
+    await mainTurn($, undefined, 'claude-opus-5-5')
     await $.command.run({ command: 'model', args: 'opus' })
     expect((await peek($)).model).toBe('claude-opus-5-5')
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-opus-5-5'])
@@ -333,6 +329,16 @@ describe('the model atom before and after the first response', () => {
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model sonnet', 'model haiku'])
   })
 
+  test('before any response a /model compares with the shown model, not the process default the session answers', async ($, on) => {
+    const { w } = world(on)
+    answering(on, 'Set model to `Opus 5.5` and saved as your default for new sessions')
+    w.model = 'claude-sonnet-5-5'
+    w.settings = { model: 'opus' }
+    await start($)
+    await $.command.run({ command: 'model', args: 'opus' })
+    expect([(await peek($)).model, (await peekCache($)).isCold]).toEqual(['opus', false])
+  })
+
   for (const text of ['Set model to `Haiku 5.5` for this session only', 'Set model to `Haiku 5.5` and saved as your default for new sessions', 'Set model to Haiku 5.5']) {
     test(`the answer "${text}" names haiku`, async ($, on) => {
       const { w } = world(on)
@@ -353,91 +359,56 @@ describe('the model atom before and after the first response', () => {
     expect((await peek($)).model).toBe('opus')
   })
 
-  test('a switch event raised during the run is the truth: its id stays, one model line', async ($, on) => {
+  test('a /model answer naming another family: the cache goes cold and the measure after it ignores the old id the session still answers', async ($, on) => {
     const { w } = world(on)
-    on('classic.PostModelSwitch', async () => ({}) as never)
-    // The host fires the event inside the run and does not wait for its hooks: the two writers race.
-    let event: Promise<unknown> = Promise.resolve()
-    on('command.run', { command: 'model' }, async () => {
-      event = $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-sonnet-5-5', to_model: 'claude-haiku-5-5' }))
-      return { text: 'Set model to `Haiku 5.5` and saved as your default for new sessions' }
-    })
+    answering(on, 'Set model to `Haiku 5.5` and saved as your default for new sessions')
+    w.model = 'claude-sonnet-5-5'
     w.settings = { model: 'sonnet' }
     await start($)
+    await mainTurn($, undefined, 'claude-sonnet-5-5')
+    expect((await peekCache($)).isCold).toBe(false)
     await $.command.run({ command: 'model', args: 'haiku' })
-    await event
+    expect([(await peek($)).model, (await peekCache($)).isCold]).toEqual(['haiku', true])
+    await measure($, { window: 200_000, percent: 10 })
+    expect((await peek($)).model).toBe('haiku')
+    w.model = 'claude-haiku-5-5'
+    await measure($, { window: 200_000, percent: 10 })
     expect((await peek($)).model).toBe('claude-haiku-5-5')
-    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-haiku-5-5'])
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-sonnet-5-5', 'model haiku', 'model claude-haiku-5-5'])
   })
 
-  test('a switch event that already wrote the id keeps it when the answer names the same family', async ($, on) => {
+  test('a /model answer naming the session\'s own family keeps the id and the warm cache', async ($, on) => {
     const { w } = world(on)
     answering(on, SONNET)
-    on('classic.PostModelSwitch', async () => ({}) as never)
+    w.model = 'claude-sonnet-5-5'
     w.settings = { model: 'opus' }
     await start($)
-    await $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5' }))
+    await mainTurn($, undefined, 'claude-sonnet-5-5')
     await $.command.run({ command: 'model', args: 'sonnet' })
-    expect((await peek($)).model).toBe('claude-sonnet-5-5')
+    expect([(await peek($)).model, (await peekCache($)).isCold]).toEqual(['claude-sonnet-5-5', false])
     expect(await logged($)).toEqual(['session start · band 9.9.9', 'model claude-sonnet-5-5'])
-  })
-
-  test('PostModelSwitch before any response adopts the switch event\'s model over the settings alias', async ($, on) => {
-    const { w } = world(on)
-    on('classic.PostModelSwitch', async () => ({}) as never)
-    w.settings = { model: 'opus' }
-    await start($)
-    await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1' }))
-    expect((await peek($)).model).toBe('claude-fable-5-1')
   })
 })
 
 describe('TTL learning in band\'s store under billedCacheTtlMs', () => {
-  test('PostModelSwitch under auto learns 5m for the session and stores nothing', async ($, on) => {
-    const { w } = world(on)
-    on('classic.PostModelSwitch', async () => ({}) as never)
+  test('no band-resume.json, or one older than 60 s at first sight, leaves the anchor unset and logs nothing', async ($, on) => {
+    const { w, clock } = world(on)
     await start($)
-    await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '5m' }))
-    expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'model-switch', isCold: false })
-    expect(w.storeSets).toEqual([])
-  })
-
-  test('PostModelSwitch reporting 1h learns it and stores it', async ($, on) => {
-    const { w } = world(on, {}, { ANTHROPIC_API_KEY: 'k' })
-    on('classic.PostModelSwitch', async () => ({}) as never)
-    await start($)
-    expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'default' })
-    await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '1h' }))
-    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'model-switch' })
-    expect(w.storeSets).toEqual([{ key: 'billedCacheTtlMs', value: 3_600_000 }])
-  })
-
-  test('on a subscription a reported 5m is ignored: the host reports it before any 1 h write', async ($, on) => {
-    const { w } = world(on)
-    w.rateLimits = [{ kind: 'five_hour', percentUsed: 2 }]
-    on('classic.PostModelSwitch', async () => ({}) as never)
-    await start($)
-    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'subscription' })
-    await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '5m' }))
-    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'subscription' })
-    expect(w.storeSets).toEqual([])
-  })
-
-  test('PostModelSwitch with a forced TTL keeps it and stores nothing', { options: { cacheTtl: '1h' } }, async ($, on) => {
-    const { w } = world(on)
-    on('classic.PostModelSwitch', async () => ({}) as never)
-    await start($)
-    await $.classic.PostModelSwitch(modelSwitch({ cache_ttl: '5m' }))
-    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'option' })
-    expect(w.storeSets).toEqual([])
-  })
-
-  test('classic.SessionStart startup changes nothing', async ($, on) => {
-    world(on)
-    on('classic.SessionStart', async () => ({}) as never)
-    await start($)
-    await $.classic.SessionStart({ source: 'startup', seconds_since_last_response: 600 } as any)
+    resumed(w, {}, T0 - 61_000)
+    await clock.advance(30_000)
     expect((await peekCache($)).anchorMs).toBeNull()
+    expect(await logged($)).toEqual(['session start · band 9.9.9'])
+  })
+
+  test('a band-resume.json whose anchor is older than the last response keeps the turn\'s anchor and still logs', async ($, on) => {
+    const { w, clock } = world(on)
+    await start($)
+    await mainTurn($)
+    const turnAnchor = (await peekCache($)).anchorMs
+    resumed(w, {}, T0)
+    await clock.advance(30_000)
+    expect((await peekCache($)).anchorMs).toBe(turnAnchor)
+    expect(await logged($)).toEqual(['session start · band 9.9.9', 'session resume'])
   })
 
   for (const [name, env, stored] of [
@@ -548,14 +519,16 @@ describe('a reload (a /config change runs session.start again)', () => {
     expect(await peekCache($)).toMatchObject({ ttlMs: HOUR_MS, ttlSource: 'subscription' })
   })
 
-  test('a model-switch TTL survives a reload under auto, where a fresh start would re-read the store', async ($, on) => {
+  test('an Agent-learned TTL survives a reload', async ($, on) => {
     world(on, {}, { ANTHROPIC_API_KEY: 'k' })
-    on('classic.PostModelSwitch', async () => ({}) as never)
+    on('tool.call', { tool: 'Agent' }, async () => ({
+      result: { usage: { cache_creation: { ephemeral_1h_input_tokens: 1200, ephemeral_5m_input_tokens: 0 } } },
+    }) as never)
     await start($)
-    await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '5m' }))
-    expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'model-switch' })
+    await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'y' } as any)
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'agent' })
     await start($)
-    expect(await peekCache($)).toMatchObject({ ttlMs: 300_000, ttlSource: 'model-switch' })
+    expect(await peekCache($)).toMatchObject({ ttlMs: 3_600_000, ttlSource: 'agent' })
   })
 
   test('a forced TTL is applied again on a reload', { options: { cacheTtl: '1h' } }, async ($, on) => {
@@ -570,7 +543,7 @@ describe('a reload (a /config change runs session.start again)', () => {
     expect(seedsTtl(false, null, 'default')).toBe(true)
     expect(seedsTtl(true, HOUR_MS, 'subscription')).toBe(true)
     expect(seedsTtl(true, null, 'option')).toBe(true)
-    for (const source of ['store', 'model-switch', 'agent', 'subscription', 'default'] as const) {
+    for (const source of ['store', 'agent', 'subscription', 'default'] as const) {
       expect(seedsTtl(true, null, source)).toBe(false)
     }
   })

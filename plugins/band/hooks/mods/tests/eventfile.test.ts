@@ -45,7 +45,8 @@ function world(on: On, env: Record<string, string | undefined> = {}) {
   on('session.surfaces', async () => ({ value: ['terminal'] }))
   on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('classic.PostModelSwitch', async () => ({}) as never)
+  on('settings.read', async () => ({ value: { model: w.model } }))
+  on('command.run', { command: 'model' }, async () => ({ text: 'ok' }))
   on('ui.toast', async (_$, e) => {
     w.toasts.push(e.text)
     return { value: undefined }
@@ -56,7 +57,7 @@ function world(on: On, env: Record<string, string | undefined> = {}) {
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 const switchTo = ($: any, w: ReturnType<typeof world>, m: string) => {
   w.model = m
-  return $.classic.PostModelSwitch({ from_model: 'x', to_model: m, source: 'command', prompt_cache_warm: true } as any)
+  return $.command.run({ command: 'model', args: m })
 }
 const pathOf = (w: ReturnType<typeof world>, dir = `${w.home}/.claude/domaine/log`) => `${dir}/${w.sid}/band.jsonl`
 const linesOf = (text: string | undefined) => (text ?? '').split('\n').filter(Boolean).map(l => JSON.parse(l))
@@ -116,10 +117,10 @@ describe('band.jsonl', () => {
 
   test('a resume under a new session id opens its file with a start line, then `session resume`', async ($, on) => {
     const w = world(on)
-    on('classic.SessionStart', async () => ({}) as never)
     await start($)
     w.sid = `${w.sid}-resumed`
-    await $.classic.SessionStart({ source: 'resume' } as any)
+    w.files[`${w.home}/.claude/domaine/log/${w.sid}/band-resume.json`] = JSON.stringify({ source: 'resume', atMs: T0, secondsSinceLastResponse: 60 })
+    await w.clock.advance(30_000)
     expect(linesOf(w.files[pathOf(w)]).map(l => `${l.kind} ${l.text}`)).toEqual(['start band 9.9.9', 'session resume'])
   })
 

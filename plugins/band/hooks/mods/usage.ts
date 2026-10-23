@@ -103,7 +103,7 @@ function withCost(u: BandUsage): BandUsage {
   return costShown ? u : { ...u, costUsd: null }
 }
 
-/** The model a switch moved away from: $.session.model() still answers it for a while after the event. */
+/** The model a `/model` run moved away from: $.session.model() still answers it for a while after the run. */
 let leftModel: string | null = null
 /** A main-thread response has arrived: until then $.session.model() answers the process default, not the configured model. */
 let bound = false
@@ -136,19 +136,11 @@ async function adoptModel($: $, m: string): Promise<void> {
   await logEvent($, 'model', m)
 }
 
-/** Switch events seen: a `/model` run during which it moved knows the event already wrote the model. */
-let switches = 0
-
-/** The switch events seen so far; compare a reading taken before a `/model` run with one after it. */
-export function switchCount(): number {
-  return switches
-}
-
 /** The settings model last seen, so only a change to it moves the atom. */
 let lastSettingsModel: string | null = null
 
 /** Adopts `m` when the atom holds nothing or another family (a `[1m]` dropped), so an id of the same family stays. */
-export async function adoptFamily($: $, m: string): Promise<void> {
+async function adoptFamily($: $, m: string): Promise<void> {
   const current = await read($, model)
   if (current === null || modelFamily(current.replace(/\[1m\]$/, '')) !== modelFamily(m)) await adoptModel($, m)
 }
@@ -167,6 +159,26 @@ function answeredFamily(text: string | undefined): string | null {
   return hit ? hit[1].toLowerCase() : null
 }
 
+/**
+ * Applies a `/model` run: the family its answer names, else `picked` (the band picker's alias), else the settings it
+ * saved. Caches are per model, so another family than the model before the run forfeits the warm one: `prev`
+ * ($.session.model() before the run) once a response bound the session, else the model atom. A bound session keeps
+ * answering `prev` for a while, which the next measure must not write back.
+ */
+export async function modelRan($: $, prev: string | null, text: string | undefined, picked?: string): Promise<void> {
+  const answered = answeredFamily(text)
+  // The settings may still answer the old model right after: the reading taken now counts as seen.
+  if (answered !== null) lastSettingsModel = await settingsModel($)
+  const family = answered ?? picked ?? null
+  if (family === null) return syncSettingsModel($)
+  const before = bound ? prev : await read($, model)
+  if (before && modelFamily(before) !== modelFamily(family)) {
+    if (bound) leftModel = before
+    await update($, cache, c => ({ ...c, isCold: true }))
+  }
+  await adoptFamily($, family)
+}
+
 const SAME_COMPACTION_MS = 30_000
 let lastCompactMs = 0
 /** Set by every compaction, cleared by the next reading with a fill: until then no reading is read as another one. */
@@ -174,8 +186,8 @@ let awaitingFill = false
 
 /**
  * Cold cache, the context from the engine's count (absent = no reading), one log line. The
- * session.compact chain and the classic PostCompact both report one compaction, in either order: a
- * report within 30 s of the last is the same compaction, and then only a token count refines the context.
+ * session.compact chain and the readings both report one compaction, in either order: a report within
+ * 30 s of the last is the same compaction, and then only a token count refines the context.
  */
 async function applyCompaction($: $, trigger: string, tokensAfter?: number, tokensBefore?: number): Promise<void> {
   awaitingFill = true
@@ -312,10 +324,42 @@ function endpointDebug() {
 async function refresh($: $): Promise<void> {
   const now = await $.clock.now()
   await update($, tick, () => now)
+  await applyResume($, now)
   await writeUsage($, withCost(toUsage(...(await $.session.usage().then(r => [r.context, r.rateLimits, r.cost] as const)))))
   void maybeFetchLimits($)
   // A pick in the dialog a bare `/model` opens is saved after the command returns.
   await syncSettingsModel($).catch(() => undefined)
+}
+
+/** A band-resume.json older than this when first seen belongs to an earlier start of the session id. */
+const RESUME_FRESH_MS = 60_000
+/** The band-resume.json last seen, as `<session id>@<atMs>`: each file applies once. */
+let resumeSeen: string | null = null
+
+/**
+ * Applies `<log dir>/<session id>/band-resume.json`, which hooks/resume.cjs writes on a resume or fork: one
+ * `session <source>` line, and the cache anchored at the last response (`atMs` less the seconds since it), cold
+ * when the host says the cache likely expired. An anchor older than one already recorded is ignored. Never throws.
+ */
+async function applyResume($: $, now: number): Promise<void> {
+  try {
+    const sid = String(await $.session.id())
+    const dir = logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), sid)
+    if (dir === null) return
+    const r = JSON.parse(String(await $.fs.read(`${dir}/band-resume.json`))) as Record<string, unknown>
+    if (typeof r.atMs !== 'number' || (r.source !== 'resume' && r.source !== 'fork')) return
+    const key = `${sid}@${r.atMs}`
+    if (key === resumeSeen) return
+    resumeSeen = key
+    if (now - r.atMs > RESUME_FRESH_MS) return
+    await logEvent($, 'session', r.source)
+    const secs = r.secondsSinceLastResponse
+    if (typeof secs !== 'number') return
+    const anchorMs = r.atMs - secs * 1000
+    if (((await read($, cache)).anchorMs ?? -Infinity) >= anchorMs) return
+    const isCold = r.promptCacheLikelyExpired === true
+    await update($, cache, c => ({ ...c, anchorMs, isCold }))
+  } catch {}
 }
 
 /**
@@ -342,14 +386,10 @@ async function adoptSubscriptionTtl($: $, rates: readonly BandRate[]): Promise<v
   )
 }
 
-/**
- * Adopts a TTL the session reported. Only a billed session's 1 h is remembered, for the next billed session:
- * a 5 min report is the host's fallback when it has seen no 1 h cache write yet (every session start on
- * 2.1.289), and remembered it would outlive the session that made it.
- */
-async function learnTtl($: $, ttlMs: number, ttlSource: 'model-switch' | 'agent'): Promise<void> {
-  await update($, cache, c => ({ ...c, ttlMs, ttlSource }))
-  if (ttlMs === HOUR_MS && billed) await $.store.set(STORE_TTL, ttlMs)
+/** Adopts the 1 h TTL a subagent's cache writes showed; a billed session remembers it for the next billed one. */
+async function learnHourTtl($: $): Promise<void> {
+  await update($, cache, c => ({ ...c, ttlMs: HOUR_MS, ttlSource: 'agent' }))
+  if (billed) await $.store.set(STORE_TTL, HOUR_MS)
 }
 
 /** Another plugin writes the snapshot: only a string or null id and branch are shown. */
@@ -402,11 +442,11 @@ export function registerUsage(on: On, options: PluginOptions): void {
     endpointOn = (await $.env.get('BAND_USAGE_ENDPOINT').catch(() => undefined)) !== '0'
     bound = false
     lastSettingsModel = null
-    await seed($, reloaded, forcedTtl)
     if (!reloaded) {
       const v = (await read($, info).catch(() => null))?.version ?? '?'
       await logEvent($, 'session', `start · band ${v}`, { kind: 'start', text: `band ${v}` })
     }
+    await seed($, reloaded, forcedTtl)
     return next(e)
   })
 
@@ -435,7 +475,7 @@ export function registerUsage(on: On, options: PluginOptions): void {
   on('session.measure', async ($, e, next) => {
     const r = await next(e)
     await writeUsage($, withCost(toUsage(e.context, e.rateLimits, e.cost)))
-    // Once a response has bound the session, a switch whose PostModelSwitch never reached the mod is caught here.
+    // Once a response has bound the session, a switch no `/model` run reported is caught here.
     const m = await sessionModel($)
     if (m !== null) await adoptModel($, m)
     void maybeFetchLimits($)
@@ -474,13 +514,6 @@ export function registerUsage(on: On, options: PluginOptions): void {
     return r
   })
 
-  // The engine's own report of a main-thread compaction. It reaches the mod when the session.compact
-  // chain does not (a Compact press on 2.1.289 left the band warm at the old ctx).
-  on('classic.PostCompact', async ($, e, next) => {
-    if (e.agent_id === undefined) await applyCompaction($, e.trigger)
-    return next(e)
-  })
-
   // One short wall-clock bound covers the whole session.end chain, $ waits included: the atoms and the
   // pane line go first, the disk write only after the chain beneath has run and while time is left.
   on('session.end', async ($, e, next) => {
@@ -516,59 +549,17 @@ export function registerUsage(on: On, options: PluginOptions): void {
     return r
   })
 
-  // A typed `/model <alias>` and the picker's run both land here (the switch event never reaches a mod on a Team login).
-  // A switch event during the run already wrote the model. The settings may still answer the old model right after:
-  // the reading taken now counts as seen, so only a later change to them moves the atom.
+  // A typed `/model <alias>` lands here on every login; the band picker's own run applies it in band.tsx.
   on('command.run', { command: 'model' }, async ($, e, next) => {
-    const before = switches
+    const prev = await $.session.model().catch(() => null)
     const r = await next(e)
-    try {
-      const family = answeredFamily(r.text)
-      if (switches !== before) {
-        lastSettingsModel = await settingsModel($)
-      } else if (family === null) {
-        await syncSettingsModel($)
-      } else {
-        lastSettingsModel = await settingsModel($)
-        await adoptFamily($, family)
-      }
-    } catch {}
+    await modelRan($, prev, r.text).catch(() => undefined)
     return r
-  })
-
-  on('classic.PostModelSwitch', async ($, e, next) => {
-    switches++
-    // The event's own field: $.session.model() may still answer the model before the switch here, and
-    // the measure the host sends right after the switch would write that stale answer over this one.
-    if (e.from_model !== e.to_model) leftModel = e.from_model
-    await adoptModel($, e.to_model)
-    // On a subscription (rate windows seen) the cache lives 1 h; a 5 min report there is the host's
-    // fallback, not a measurement. Overage does drop it to 5 min, and the band hides the segment then.
-    const ttlMs = ttlMsOf(e.cache_ttl)
-    const subscribed = (await read($, usage)).rates.length > 0
-    if (forcedTtl === null && ttlMs !== null && !(subscribed && ttlMs !== HOUR_MS)) await learnTtl($, ttlMs, 'model-switch')
-    // Caches are per model: a real switch forfeits the warm one. On resume the SessionStart seed decides.
-    if (e.source !== 'resume' && (e.from_model !== e.to_model || !e.prompt_cache_warm)) {
-      await update($, cache, c => ({ ...c, isCold: true }))
-    }
-    return next(e)
-  })
-
-  on('classic.SessionStart', { source: /^(resume|fork)$/ }, async ($, e, next) => {
-    await logEvent($, 'session', e.source)
-    const secs = e.seconds_since_last_response
-    if (typeof secs === 'number') {
-      const now = await $.clock.now()
-      const isCold = e.prompt_cache_likely_expired === true
-      await update($, cache, c => ({ ...c, anchorMs: now - secs * 1000, isCold }))
-      await update($, tick, () => now)
-    }
-    return next(e)
   })
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const r = await next(e)
-    if (forcedTtl === null && oneHourCacheTokens(r.result) > 0) await learnTtl($, HOUR_MS, 'agent')
+    if (forcedTtl === null && oneHourCacheTokens(r.result) > 0) await learnHourTtl($)
     return r
   })
 }

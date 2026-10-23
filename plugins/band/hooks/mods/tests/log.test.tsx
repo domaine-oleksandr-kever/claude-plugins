@@ -38,7 +38,7 @@ function world(on: On, env: Record<string, string> = {}) {
   on('session.usage', async () => ({ value: { startedAt: NOW, context: { window: 200_000 }, rateLimits: [] } }))
   on('session.surfaces', async () => ({ value: w.surfaces }))
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
-  on('classic.PostModelSwitch', async () => ({}) as never)
+  on('command.run', { command: 'model' }, async () => ({ text: 'ok' }))
   on('ui.panes', async () => ({ value: w.panes }))
   on('ui.open', async (_$, e) => {
     w.opens.push(e)
@@ -59,11 +59,11 @@ const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', i
 const run = ($: any, command: string, args = '') =>
   $.command.run({ command, args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 120 } })
 
-/** One `model` event per call: each switch alternates the model the session reports. */
+/** One `model` event per call: each `/model` run saves the other model to the settings band follows. */
 async function switches($: any, w: ReturnType<typeof world>, n: number): Promise<void> {
   for (let i = 0; i < n; i++) {
     w.model = MODELS[i % 2]!
-    await $.classic.PostModelSwitch({ from_model: 'x', to_model: w.model, source: 'command', prompt_cache_warm: true } as any)
+    await $.command.run({ command: 'model', args: w.model })
   }
 }
 

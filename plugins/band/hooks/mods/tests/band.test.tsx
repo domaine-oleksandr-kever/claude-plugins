@@ -1,6 +1,6 @@
 import { describe, expect } from 'claude-code/testing'
 import { CRIT, cells, glyphText } from '../lib.ts'
-import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, modelSwitch, peek, peekCache, postCompact, sibBase, sibSlim, start, teamState, test, world } from './world.tsx'
+import { KEPT, MIN, SNAP, SURFACES, T0, TASK, baseState, logged, mainTurn, measure, peek, peekCache, resumed, sibBase, sibSlim, start, teamState, test, world } from './world.tsx'
 import type { Surface } from './world.tsx'
 
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 200, scroll: { bodyRows: 10 }, view: {} }
@@ -339,33 +339,30 @@ describe('band', () => {
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
     })
 
-    test(`${surface}: classic.PostCompact alone → cold and ctx —; with the session.compact chain in either order it is one compaction`, async ($, on) => {
+    test(`${surface}: a reading that loses its fill and the session.compact chain, in either order, are one compaction`, async ($, on) => {
       const { w, clock } = world(on)
-      on('classic.PostCompact', async () => ({}) as never)
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
       await measure($, { window: 200_000, percent: 47 })
-      await $.classic.PostCompact(postCompact({ trigger: 'auto', agent_id: 'a1' }))
       expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
-      expect(await textOf(ui, ctxRe)).toBe(L('ctx 47%'))
-      await $.classic.PostCompact(postCompact({ trigger: 'manual' }))
+      await measure($, { window: 200_000 })
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx —'))
       // The chain's report of the same compaction refines the context and logs nothing more.
       w.compact = async () => ({ messages: KEPT, tokensBefore: 94_000, tokensAfter: 26_300 })
       await $.session.compact({ trigger: 'manual', messages: KEPT } as any)
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
-      // Chain first, classic second: the count stays.
+      // Chain first, the fill-less reading second: the count stays.
       await clock.advance(MIN)
       await mainTurn($)
       await measure($, { window: 200_000, percent: 60 })
       expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
       await $.session.compact({ trigger: 'auto', messages: KEPT } as any)
-      await $.classic.PostCompact(postCompact({ trigger: 'auto' }))
+      await measure($, { window: 200_000 })
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
       expect(await textOf(ui, ctxRe)).toBe(L('ctx 13%'))
-      expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact manual', 'compact auto 94k → 26k'])
+      expect(await logged($)).toEqual(['session start · band 9.9.9', 'compact inferred', 'compact auto 94k → 26k'])
     })
 
     test(`${surface}: a window-only measure or tick after a compaction keeps its count; a measured fill replaces it`, async ($, on) => {
@@ -451,25 +448,21 @@ describe('band', () => {
       expect(await shownModel(ui, surface)).toBe('opus')
     })
 
-    test(`${surface}: a pick whose run fires the switch event keeps the event's id`, async ($, on) => {
-      const { w } = world(on)
-      w.settings = { model: 'fable' }
-      on('classic.PostModelSwitch', async () => ({}) as never)
-      let event: Promise<unknown> = Promise.resolve()
-      on('command.run', { command: 'model' }, async () => {
-        event = $.classic.PostModelSwitch(modelSwitch({ from_model: 'claude-fable-5-1', to_model: 'claude-sonnet-5-5' }))
-        return { text: 'Set model to `Sonnet 5.5` and saved as your default for new sessions' }
-      })
+    test(`${surface}: a pick of another family shows it and turns the cache cold`, async ($, on) => {
+      world(on)
+      on('command.run', { command: 'model' }, async () => ({ text: 'Set model to `Sonnet 5.5` and saved as your default for new sessions' }))
       await start($, surface)
       const ui = await mount($, surface)
+      await mainTurn($)
       if (isDesktop) return
+      expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
       await ui.press({ key: 'model' })
       await ui.press({ key: 'model:sonnet' })
-      await event
-      expect(await shownModel(ui, surface)).toBe('sonnet-5-5')
+      expect(await shownModel(ui, surface)).toBe('sonnet')
+      expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
     })
 
-    test(`${surface}: a pick whose run names no model and fires no switch event still shows the pick at once`, async ($, on) => {
+    test(`${surface}: a pick whose run names no model still shows the pick at once`, async ($, on) => {
       const { w } = world(on)
       w.settings = { model: 'fable' }
       on('command.run', { command: 'model' }, async () => ({ text: 'Model updated' }))
@@ -604,48 +597,41 @@ describe('band', () => {
       })
     }
 
-    test(`${surface}: a model switch → the model segment follows and the cache goes cold`, async ($, on) => {
-      const { w } = world(on)
-      on('classic.PostModelSwitch', async () => ({}) as never)
+    /** A host whose `/model` answers the family `name` (`Opus 5.5`) and leaves the settings as they were. */
+    const answering = (on: any, name: string) =>
+      on('command.run', { command: 'model' }, async () => ({ text: `Set model to \`${name}\` and saved as your default for new sessions` }))
+
+    test(`${surface}: a /model of another family → the model segment follows and the cache goes cold`, async ($, on) => {
+      world(on)
+      answering(on, 'Opus 5.5')
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
       expect(await shownModel(ui, surface)).toBe('fable-5-1')
-      w.model = 'claude-opus-5-5'
-      await $.classic.PostModelSwitch(modelSwitch({ prompt_cache_warm: true }))
-      expect(await shownModel(ui, surface)).toBe('opus-5-5')
+      await $.command.run({ command: 'model', args: 'opus' })
+      expect(await shownModel(ui, surface)).toBe('opus')
       expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
     })
 
-    test(`${surface}: a switch takes the event's to_model while session.model() still lags`, async ($, on) => {
-      world(on)
-      on('classic.PostModelSwitch', async () => ({}) as never)
-      await start($, surface)
-      const ui = await mount($, surface)
-      await mainTurn($)
-      await $.classic.PostModelSwitch(modelSwitch({ source: 'picker' }))
-      expect(await shownModel(ui, surface)).toBe('opus-5-5')
-    })
-
-    test(`${surface}: the measure after a switch keeps the event's model while session.model() still answers the old one`, async ($, on) => {
+    test(`${surface}: the measure after a /model keeps the answered family while session.model() still answers the old one`, async ($, on) => {
       const { w } = world(on)
-      on('classic.PostModelSwitch', async () => ({}) as never)
+      answering(on, 'Opus 5.5')
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      await $.classic.PostModelSwitch(modelSwitch({}))
+      await $.command.run({ command: 'model', args: 'opus' })
       await measure($, { window: 200_000, percent: 12 })
-      expect(await shownModel(ui, surface)).toBe('opus-5-5')
+      expect(await shownModel(ui, surface)).toBe('opus')
       w.model = 'claude-opus-5-5'
       await measure($, { window: 200_000, percent: 13 })
       expect(await shownModel(ui, surface)).toBe('opus-5-5')
-      // Caught up: a later change without an event is adopted again, even back to the model the switch left.
+      // Caught up: a later change without a /model run is adopted again, even back to the model the run left.
       w.model = 'claude-fable-5-1'
       await measure($, { window: 200_000, percent: 14 })
       expect(await shownModel(ui, surface)).toBe('fable-5-1')
     })
 
-    test(`${surface}: a measure adopts a model the session changed without a PostModelSwitch`, async ($, on) => {
+    test(`${surface}: a measure adopts a model the session changed without a /model run`, async ($, on) => {
       const { w } = world(on)
       await start($, surface)
       const ui = await mount($, surface)
@@ -656,38 +642,27 @@ describe('band', () => {
       expect(await shownModel(ui, surface)).toBe('opus-5-5')
     })
 
-    test(`${surface}: a cold switch to the same model → cache cold`, async ($, on) => {
+    test(`${surface}: a /model of the family already shown keeps the id and the countdown`, async ($, on) => {
       world(on)
-      on('classic.PostModelSwitch', async () => ({}) as never)
+      answering(on, 'Fable 5.1')
       await start($, surface)
       const ui = await mount($, surface)
       await mainTurn($)
-      await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', prompt_cache_warm: false }))
-      expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
-    })
-
-    test(`${surface}: a warm same-model switch and a resume restore keep the countdown`, async ($, on) => {
-      world(on)
-      on('classic.PostModelSwitch', async () => ({}) as never)
-      await start($, surface)
-      const ui = await mount($, surface)
-      await mainTurn($)
-      await $.classic.PostModelSwitch(modelSwitch({ to_model: 'claude-fable-5-1', cache_ttl: '5m' }))
-      expect(await textOf(ui, cacheRe)).toBe(L('cache 5m'))
-      await $.classic.PostModelSwitch(modelSwitch({ source: 'resume', cache_ttl: '5m', prompt_cache_warm: false }))
-      expect(await textOf(ui, cacheRe)).toBe(L('cache 5m'))
+      await $.command.run({ command: 'model', args: 'fable' })
+      expect(await shownModel(ui, surface)).toBe('fable-5-1')
+      expect(await textOf(ui, cacheRe)).toBe(L('cache 60m'))
     })
 
     for (const source of ['resume', 'fork'] as const) {
-      test(`${surface}: classic.SessionStart ${source} seeds the anchor`, { options: { cacheTtl: '1h' } }, async ($, on) => {
-        world(on)
-        on('classic.SessionStart', async () => ({}) as never)
+      test(`${surface}: band-resume.json (${source}) anchors the cache at the last response, cold when the host says it likely expired`, { options: { cacheTtl: '1h' } }, async ($, on) => {
+        const { w, clock } = world(on)
+        resumed(w, { source })
         await start($, surface)
         const ui = await mount($, surface)
-        await $.classic.SessionStart({ source, seconds_since_last_response: 600 } as any)
         expect((await peekCache($)).anchorMs).toBe(T0 - 10 * MIN)
         expect(await textOf(ui, cacheRe)).toBe(L('cache 50m'))
-        await $.classic.SessionStart({ source, seconds_since_last_response: 600, prompt_cache_likely_expired: true } as any)
+        resumed(w, { source, promptCacheLikelyExpired: true }, T0 + 30_000)
+        await clock.advance(30_000)
         expect(await textOf(ui, cacheRe)).toBe(L('cache cold'))
       })
     }

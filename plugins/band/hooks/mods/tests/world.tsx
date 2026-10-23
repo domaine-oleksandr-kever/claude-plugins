@@ -260,20 +260,14 @@ export const mainTurn = ($: any, agentId?: string, model?: string) =>
     usage: { input_tokens: 1, output_tokens: 1, ...(model ? { model } : {}) },
   })
 
-export function modelSwitch(over: Record<string, unknown>) {
-  return {
-    from_model: 'claude-fable-5-1',
-    to_model: 'claude-opus-5-5',
-    requested_model: 'opus',
-    source: 'command',
-    context_tokens: 0,
-    estimated_cache_write_usd: 0,
-    cache_ttl: '1h',
-    prompt_cache_warm: true,
-    ...over,
-  } as any
-}
+/** The log dir band-resume.json sits under in `resumed`'s world (DOMAINE_LOG_DIR). */
+const LOG = '/log'
 
-export function postCompact(over: Record<string, unknown>) {
-  return { session_id: 's1', transcript_path: '/t.jsonl', cwd: '/repo', trigger: 'manual', compact_summary: 'summary', ...over } as any
+/**
+ * What hooks/resume.cjs writes on a resume or fork of session s1 at `atMs`: the file goes into `w.files` and
+ * DOMAINE_LOG_DIR points at it. A refresh or seed reads it.
+ */
+export function resumed(w: any, over: Record<string, unknown> = {}, atMs = T0): void {
+  w.vars.DOMAINE_LOG_DIR = LOG
+  w.files[`${LOG}/s1/band-resume.json`] = JSON.stringify({ source: 'resume', atMs, secondsSinceLastResponse: 600, promptCacheLikelyExpired: false, ...over })
 }

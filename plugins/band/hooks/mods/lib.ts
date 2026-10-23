@@ -271,7 +271,7 @@ export function seedsTtl(reloaded: boolean, forcedTtl: number | null, source: Ba
   return !reloaded || forcedTtl !== null || source === 'option'
 }
 
-/** `5m` / `1h` (the userConfig picker and the API's `cache_ttl`) in ms; anything else (`auto`) → null. */
+/** `5m` / `1h` (the userConfig picker) in ms; anything else (`auto`) → null. */
 export function ttlMsOf(v: unknown): number | null {
   if (v === '5m') return 5 * MIN
   if (v === '1h') return HOUR

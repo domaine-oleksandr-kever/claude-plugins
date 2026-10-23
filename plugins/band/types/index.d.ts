@@ -11,7 +11,7 @@ export type BandUsage = { ctxPct: number | null; ctxTokens: number | null; windo
 export type BandCache = {
   anchorMs: number | null
   ttlMs: number
-  ttlSource: 'option' | 'store' | 'model-switch' | 'agent' | 'subscription' | 'default'
+  ttlSource: 'option' | 'store' | 'agent' | 'subscription' | 'default'
   isCold: boolean
 }
 
