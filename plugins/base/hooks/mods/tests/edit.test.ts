@@ -276,6 +276,17 @@ describe('draft read guard', () => {
       expect(shellReadsDraft(c)).toBe(false)
   })
 
+  test('a draft path in a shell variable: the assignment is no read, a later use is matched with the value', async () => {
+    const P = 'P=.claude/tasks/ELC-1217/pr-body.md'
+    for (const c of [`${P}; node /fe/scripts/drafter-check.cjs file pr "$P" | head -2 && gh pr create --title t --body-file "$P"`,
+      `${P}; node /fe/scripts/drafter-check.cjs file pr "$P" && gh pr create --title t --body-file "$P"`,
+      P, `export ${P}`, `local W=/repo/.claude/tasks/ABC-1; test -s "$W/steps-to-test.md"`, `W=/repo/.claude/tasks/ABC-1 P="$W/pr-body.md"; ls $P`])
+      expect(shellReadsDraft(c)).toBe(false)
+    for (const c of [`${P}; cat "$P"`, `${P}; sed -n 1,5p $P`, `export ${P}; head \${P}`, `W=/repo/.claude/tasks/ABC-1; P="$W/pr-body.md"; cat "$P"`,
+      `${P}; node /fe/scripts/drafter-check.cjs file pr "$P" && cat "$P"`, 'P="$(cat .claude/tasks/ABC-1/pr-body.md)"', 'P=`cat .claude/tasks/ABC-1/pr-body.md`'])
+      expect(shellReadsDraft(c)).toBe(true)
+  })
+
   t('a main-loop cat, sed -n or grep of a draft is refused; the checker, gh --body-file and a subagent are not', async ($, on) => {
     const { w } = setup(on)
     marker(w, SONNET)

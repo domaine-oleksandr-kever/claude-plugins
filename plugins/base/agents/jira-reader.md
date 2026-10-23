@@ -106,16 +106,19 @@ untrimmed), or the same line run with `-c` and ending in `.fields.comment.commen
 for a slice (keep slices small: Bash shows about 30,000 characters inline). A body that still ends in `… [+N chars]` never goes into `comments.md`.
 
 Compose the comments oldest first, one block per comment: `### <n>. <author> — <created>` (plus
-`(edited <updated>)` when `updated` differs) followed by the markdown body verbatim. The markdown
-bodies carry no inline image references — the server-side conversion drops them — so which
-screenshot goes with which comment is not known here: the attachment rows carry their own
-`author` and `created`, and the caller lines them up. When `total` is larger
+`(edited <updated>)` when `updated` differs) followed by the markdown body verbatim except for
+the conversion's markup: a `<custom data-type="mention" …>@Name</custom>` tag becomes its `@Name`
+text, any other `<custom …>…</custom>` tag (emoji, smartlink) its inner text, and an inline image
+`![](blob:https://media…)` becomes `[image]` — the blob URL names no attachment filename and is
+useless outside Jira. So which screenshot goes with which comment is not known here: the
+attachment rows carry their own `author` and `created`, and the caller lines them up. Read the
+comments from `fields.comment.comments`; the response's top-level `comments` array duplicates them. When `total` is larger
 than the number of comments returned, Jira paged the field: add a last line
 `comments: <shown>/<total>` and carry it as the last entry of `comments` so the caller knows what
 it is not seeing; there is no second-page tool. No comments → `comments: []`.
 
 Each `comments` line you return quotes the comment's **first 160 characters VERBATIM** —
-copied, never paraphrased or summarized. A live run that retold them in its own words also
+copied (after the same markup compaction), never paraphrased or summarized. A live run that retold them in its own words also
 returned `comment_links: []` while the comments carried four links.
 
 Collect every URL the comments carry into `comment_links` — Figma, Notion, anything else

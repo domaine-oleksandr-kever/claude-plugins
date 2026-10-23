@@ -31,10 +31,16 @@ expand: "names"
 ```
 
 **Comment bodies.** Under `responseContentFormat: "markdown"` the standard `description` and
-`comment` fields come back as pre-converted markdown **strings** — a comment's inline images are
-gone from them, and with them the filename that joins a comment to its attachment row. Asking for
-`responseContentFormat: "adf"` instead keeps each `media` node's `attrs.alt` (the exact attachment
-filename, measured 2026-09-10), but slim's adf engine renders every media node as
+`comment` fields come back as pre-converted markdown **strings** (measured 2026-10-23). A comment's
+inline image arrives as `![](blob:https://media.staging.atl-paas.net/?type=file&localId=…&id=<media uuid>&…&height=<px>&…&width=<px>…)`
+— the media id and the rendered size, but **no attachment filename**, so nothing in it names the
+attachment row it belongs to (matching its width/height to the attachment's image size is a
+possible future join, not made today). Mentions arrive as
+`<custom data-type="mention" data-id="…">@Name</custom>`, emoji and smart links as
+`<custom data-type="emoji">` / `<custom data-type="smartlink">` tags. The response also carries a
+duplicate top-level `comments` array beside `fields.comment.comments`; read the latter.
+Asking for `responseContentFormat: "adf"` instead keeps each `media` node's `attrs.alt` (the exact
+attachment filename, measured 2026-09-10), but slim's adf engine renders every media node as
 `_(media omitted)_` once the response is over 4 KB, so the join is lost either way.
 `base:jira-reader` therefore reads the markdown bodies and lists the attachment rows on their own,
 with their `author` and `created` — no comment-to-attachment join (its prompt → Fetch the

@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.14.1**.
+Current release: **base v0.14.2**.
 
 ## Status
 
@@ -256,7 +256,7 @@ deny writes one `guard` line to `base.events`. The guards also check subagents' 
 | reader writes | the Jira, Confluence and Notion write tools of any MCP server (slim's and base's registered tools aside), in a subagent | every write for `base:jira-reader`, `base:doc-reader` and `base:figma-reader`; every write but `editJiraIssue` and `addCommentToJiraIssue` for `base:jira-writer`; every write for a subagent with no `agents/<agent_id>.json` record (fail closed: the deny says `no agent-type marker for this subagent`); other agent types and the main loop are not limited. A probe of the file that fails lets the call run |
 | reader scope | every MCP tool but slim's and base's registered ones, in a subagent of base's reader or writer types | a call on a server that lists no signature tool of the agent's vendors: `getJiraIssue` for jira-reader and the writer, `getJiraIssue` or `notion-fetch` for doc-reader, `get_design_context` for figma-reader (base's own server of that vendor always counts), so a connector the session holds for other work (a store, a docs editor, a browser) stays out of reach of a reader fed untrusted text. A tool list that fails lets the call run |
 | edit delegation | `Write`, `Edit`, `NotebookEdit` in the main loop (no `agentId`) on a file under the session root outside `.claude/`, while the rules marker names a model | refused with the `Agent(model: …)` pointer every time, unless the session already runs on that family or a cheaper one (haiku < sonnet < opus < fable), the developer ran `/base-edit-direct` this session, or `BASE_GUARD=0`; allowed edits are counted (`base.mainEdits`, the doctor's `delegate` row, one `delegate` log line per file). A main-loop Bash write (`sed -i`, redirection, `tee`, `git apply`, `patch`) not naming `.claude/`, `/tmp/` or `/dev/` is counted, never refused. The marker is read once per session id |
-| drafter drafts | a main-loop read (no `agentId`) of a drafter's draft — `.claude/tasks/<id>/steps-to-test.md`, `pr-body.md`, `jira-comment.md` — by `Read`, `Grep`, slim's `view`, or a Bash command naming one (`drafter-check.cjs`, `gh pr … --body-file`, `test -s` and `ls` stay allowed), whenever base runs: on any model, with or without the rules marker | refused with the drafter-rule pointer (show its path, change it through the same agent) every time — `/base-edit-direct`, a session on the delegate's family or cheaper and `BASE_EDIT_MODEL=0` do not lift it; only `BASE_GUARD=0` does. Each refusal counts in `base.mainEdits.refused` and logs one `guard` line |
+| drafter drafts | a main-loop read (no `agentId`) of a drafter's draft — `.claude/tasks/<id>/steps-to-test.md`, `pr-body.md`, `jira-comment.md` — by `Read`, `Grep`, slim's `view`, or a Bash command naming one, directly or through a variable it assigns (`drafter-check.cjs`, `gh pr … --body-file`, `test -s`, `ls` and the bare assignment `P=<draft>` stay allowed), whenever base runs: on any model, with or without the rules marker | refused with the drafter-rule pointer (show its path, change it through the same agent) every time — `/base-edit-direct`, a session on the delegate's family or cheaper and `BASE_EDIT_MODEL=0` do not lift it; only `BASE_GUARD=0` does. Each refusal counts in `base.mainEdits.refused` and logs one `guard` line |
 | scratch path | the browser tools that take a file path (`take_screenshot`, `browser_take_screenshot`, `take_snapshot`, `get_network_request`, `browser_run_code_unsafe`) of any MCP server | a path outside the project (chrome-devtools also accepts its OS temp dir), or inside it outside `.claude/` (the task workspace's `tmp/`, `.claude/tmp/`, `.claude/base-tmp/`); in a git worktree, a path into the shared task workspace. `hooks/scratch-path-guard.cjs` decides against the project root the session launched in (`base.guardRoot`), names an absolute path to use instead and creates its directory. The tools' descriptions carry the rule too. `BASE_SCRATCH_GUARD=0` turns this one off |
 
 base's playwright server writes its own files under `.claude/base-tmp/playwright`. When the guard
@@ -276,6 +276,10 @@ base picks the work id in this order:
 3. The branch's ticket key, then its kebab slug, when that workspace exists.
 4. The newest `progress.md` written within 12 hours.
 
+base keeps the pin and the last named ticket in `<log dir>/<session>/workspace.json` too, so a resumed
+session (the same session id, after a restart of the app) goes on with them instead of the branch key.
+A /clear forgets the ticket there as well.
+
 The ids from rungs 3 and 4 are only guessed (`guessed: true`): the autosave levers wait until the
 session touches that workspace.
 
@@ -292,7 +296,7 @@ a Write or Edit under `.claude/tasks/` or a Bash command naming the workspace th
 | `base.autosave` | the turn counter, its start, the turn whose stop was last blocked, and the write the prompt line last fired for |
 | `base.compactMarker` | the last `compact:` line autosave wrote: `{ workId, notesMs, priorMs }`, so it never counts as a save |
 | `base.pin` | the work id `/base-progress` pinned, or null |
-| `base.lastKey` | the last ticket a person's prompt named this session |
+| `base.lastKey` | the last ticket a person's prompt named this session; restored from `workspace.json` on a resume |
 | `base.sessionId` | the session the atoms describe |
 | `base.events` | base's log lines for band's Log pane, oldest first, at most 200: `{ atMs, kind, text }` |
 | `base.started`, `base.checked`, `base.titled` | the session id whose start line, install checks and title are done (`<id>:user` when the person titled it) |

@@ -200,6 +200,84 @@ describe('resolver', () => {
   })
 })
 
+describe('resume', () => {
+  const HOME = '/home/dev'
+  const file = (sid: string) => `${HOME}/.claude/domaine/log/${sid}/workspace.json`
+
+  t('a resumed session id with empty atoms goes on from its conversation key on disk, not the branch key', async ($, on) => {
+    const { w } = world(on, { env: { HOME } })
+    addWorkspace(w, 'ABC-1591')
+    addWorkspace(w, 'ABC-77', MD, NOW - 20 * HOUR)
+    w.files[file('s1')] = { text: JSON.stringify({ pin: null, lastKey: 'ABC-77' }), mtimeMs: NOW - HOUR }
+    await submit($, 'go on')
+    const s = await peek($)
+    expect(s.lastKey).toBe('ABC-77')
+    expect(s.progress.workId).toBe('ABC-77')
+  })
+
+  t('session.start of a resumed id restores the key and the pin', async ($, on) => {
+    const { w } = world(on, { env: { HOME } })
+    addWorkspace(w, 'ABC-1591')
+    addWorkspace(w, 'OTHER-1', MD, NOW - 20 * HOUR)
+    w.files[file('s1')] = { text: JSON.stringify({ pin: 'OTHER-1', lastKey: 'ABC-77' }), mtimeMs: NOW - HOUR }
+    await start($)
+    const s = await peek($)
+    expect([s.pin, s.lastKey, s.progress.workId]).toEqual(['OTHER-1', 'ABC-77', 'OTHER-1'])
+  })
+
+  t('a named key and a pin are written under the session id', async ($, on) => {
+    const { w } = world(on, { env: { HOME } })
+    addWorkspace(w, 'ABC-1591')
+    addWorkspace(w, 'OTHER-1', MD, NOW - 20 * HOUR)
+    await start($)
+    await submit($, 'see ABC-77')
+    expect(JSON.parse(w.files[file('s1')]!.text)).toEqual({ pin: null, lastKey: 'ABC-77' })
+    await run($, 'OTHER-1')
+    expect(JSON.parse(w.files[file('s1')]!.text)).toEqual({ pin: 'OTHER-1', lastKey: 'ABC-77' })
+  })
+
+  t('/clear forgets the key on disk too; a different session id inherits nothing', async ($, on) => {
+    const { w, clock } = world(on, { env: { HOME } })
+    addWorkspace(w, 'ABC-1591')
+    addWorkspace(w, 'ABC-77', MD, NOW - 20 * HOUR)
+    await start($)
+    await submit($, 'see ABC-77')
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    expect(JSON.parse(w.files[file('s1')]!.text)).toEqual({ pin: null, lastKey: null })
+    await clock.advance(30_000)
+    expect((await peek($)).progress.workId).toBe('ABC-1591')
+    w.sid = 's2'
+    await submit($, 'next')
+    const s = await peek($)
+    expect(s.lastKey).toBeNull()
+    expect(s.progress.workId).toBe('ABC-1591')
+  })
+
+  t('a pin carried past /clear into a new session id is written under that id', async ($, on) => {
+    const { w } = world(on, { env: { HOME } })
+    addWorkspace(w, 'ABC-1591')
+    addWorkspace(w, 'OTHER-1', MD, NOW - 20 * HOUR)
+    await start($)
+    await run($, 'OTHER-1')
+    await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+    w.sid = 's2'
+    await submit($, 'next')
+    expect(JSON.parse(w.files[file('s2')]!.text)).toEqual({ pin: 'OTHER-1', lastKey: null })
+  })
+
+  t("another session's file is not this session's: a new id resolves by the branch", async ($, on) => {
+    const { w } = world(on, { env: { HOME } })
+    addWorkspace(w, 'ABC-1591')
+    addWorkspace(w, 'ABC-77', MD, NOW - 20 * HOUR)
+    w.files[file('s0')] = { text: JSON.stringify({ pin: null, lastKey: 'ABC-77' }), mtimeMs: NOW - HOUR }
+    await start($)
+    await submit($, 'go on')
+    const s = await peek($)
+    expect(s.lastKey).toBeNull()
+    expect(s.progress.workId).toBe('ABC-1591')
+  })
+})
+
 describe('refresh', () => {
   t('session.end clear → progress null, no process or fs call', async ($, on) => {
     const { w, calls } = world(on)

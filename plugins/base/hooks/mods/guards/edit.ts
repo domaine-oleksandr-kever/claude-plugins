@@ -33,6 +33,10 @@ const DRAFT_ARG = /(?:\.claude\/tasks\/[^\s'"/]+|\$\{?\w+\}?)\/(?:steps-to-test|
 // the sanctioned consumers of a draft path: the checker, gh's --body-file, an existence test, a listing
 const DRAFT_OK = /drafter-check\.cjs\b|\bgh\s+pr\s+(?:create|edit)\b[^\n]*--body-file|^\s*(?:test|\[)\s+-[sef]\s|^\s*ls\b/
 const CHECKER = /drafter-check\.cjs\b/
+// a segment that only assigns variables (`P=<draft>`, `export P="$W/pr-body.md"`); a `$(…)` or backtick value runs a command
+const VALUE = String.raw`(?:"(?:[^"\`$]|\$(?!\())*"|'[^']*'|(?:[^\s'"\`$;|&]|\$(?!\())*)`
+const ASSIGN_ONLY = new RegExp(String.raw`^\s*(?:(?:export|local|declare|readonly)\s+)?\w+=${VALUE}(?:\s+\w+=${VALUE})*\s*$`)
+const ASSIGN = new RegExp(String.raw`(\w+)=(${VALUE})`, 'g')
 // a heredoc start (`<<EOF`, `<<-'EOF'`), not a here-string (`<<<`)
 const HEREDOC = /(?<!<)<<-?\s*(['"]?)(\w+)\1/
 const VIEW_TOOL = 'mcp__slim__view'
@@ -122,7 +126,15 @@ async function modelFor($: $, sid: string): Promise<string | null> {
 
 /** True when a shell command reads a draft: some segment names one and is not a sanctioned consumer. */
 export function shellReadsDraft(command: string): boolean {
-  return withoutHeredocs(command).split(/&&|\|\||[;\n]/).some(cmd => {
+  const vars = new Map<string, string>()
+  const expand = (s: string) => s.replace(/\$\{?(\w+)\}?/g, (m, v: string) => vars.get(v) ?? m)
+  return withoutHeredocs(command).split(/&&|\|\||[;\n]/).some(raw => {
+    // a draft path parked in a variable is no read; its later use is matched with the value substituted
+    if (ASSIGN_ONLY.test(raw)) {
+      for (const [, name, value] of raw.matchAll(ASSIGN)) vars.set(name, expand(value.replace(/^(['"])(.*)\1$/, '$2')))
+      return false
+    }
+    const cmd = expand(raw)
     const stages = cmd.split('|')
     // a pipeline into the checker: it prints counts only (a drafter's receipt piped in)
     if (CHECKER.test(stages[stages.length - 1])) return false

@@ -3,7 +3,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, FsEntry, On } from 'claude-code'
 import type { BaseCompactMarker, BaseEvent, BaseProgress, BaseSavable } from '../../../types'
-import { logLine, pushEvent } from '../events.ts'
+import { logDir, logLine, pushEvent } from '../events.ts'
 import type { Disk } from '../events.ts'
 import { notesTail, parseProgress } from './progress-parse.ts'
 import { KEY, isWorkId, keyFromBranch, projectsOf, slugFromBranch, ticketKeys } from './workid.ts'
@@ -158,6 +158,33 @@ type Inputs = { pin: string | null; lastKey: string | null }
 
 const readInputs = async ($: $): Promise<Inputs> => ({ pin: await read($, pin), lastKey: await read($, lastKey) })
 
+const inputsFile = async ($: $, sid: string): Promise<string | null> => {
+  const dir = logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), sid)
+  return dir && `${dir}/workspace.json`
+}
+
+/** The inputs on disk under the session id: a resume or an engine restart brings the same id back with empty atoms. */
+async function saveInputs($: $, sid: string): Promise<void> {
+  try {
+    const file = await inputsFile($, sid)
+    if (file) await $.fs.write(file, JSON.stringify(await readInputs($)))
+  } catch {}
+}
+
+/** With both inputs null, takes them from the file `saveInputs` wrote under this very id. */
+async function restoreInputs($: $, sid: string): Promise<void> {
+  try {
+    const cur = await readInputs($)
+    if (cur.lastKey !== null || cur.pin !== null) return
+    const file = await inputsFile($, sid)
+    if (!file || !(await $.fs.exists(file))) return
+    const disk = JSON.parse(await $.fs.read(file)) as Partial<Record<keyof Inputs, unknown>>
+    const ok = (v: unknown): v is string => typeof v === 'string' && isWorkId(v)
+    if (ok(disk.lastKey)) await update($, lastKey, () => disk.lastKey as string)
+    if (ok(disk.pin)) await update($, pin, () => disk.pin as string)
+  } catch {}
+}
+
 /** The names of the `.claude/tasks` dirs. */
 async function taskDirs($: $, root: string): Promise<Set<string>> {
   try {
@@ -303,6 +330,7 @@ export function registerProgress(on: On): void {
     try {
       const id = await $.session.id()
       await update($, sessionId, () => id)
+      await restoreInputs($, id)
     } catch {}
     await $.command.register(COMMAND).catch(() => undefined)
     await refresh($, true).catch(() => undefined)
@@ -316,12 +344,16 @@ export function registerProgress(on: On): void {
     const id = await $.session.id()
     if (id !== (await read($, sessionId))) {
       await update($, sessionId, () => id)
+      await restoreInputs($, id)
+      // a pin outlives /clear in memory: the new id's file keeps it for that id's own resume
+      if ((await read($, pin)) !== null) await saveInputs($, id)
       await $.command.register(COMMAND).catch(() => undefined)
       resolve = true
     }
     const key = PERSON.has(e.origin.kind) ? await conversationKey($, e.text) : null
     if (key && key !== (await read($, lastKey))) {
       await update($, lastKey, () => key)
+      await saveInputs($, id)
       resolve = true
     }
     if (resolve) await refresh($, true)
@@ -332,6 +364,7 @@ export function registerProgress(on: On): void {
     await update($, progress, () => null)
     await update($, lastKey, () => null)
     await update($, savable, () => [])
+    await saveInputs($, e.sessionId)
     return next(e)
   })
 
@@ -427,6 +460,7 @@ export function registerProgress(on: On): void {
     if (!arg) return { text: `Pinned: ${(await read($, pin)) ?? 'none'}. The checklist is band's: ${CHECKLIST}` }
     if (arg !== '-' && !isWorkId(arg)) return { text: `Not a work id: ${arg}` }
     await update($, pin, () => (arg === '-' ? null : arg))
+    await saveInputs($, await $.session.id())
     await refresh($, true)
     if (arg === '-') return { text: `Unpinned. ${CHECKLIST} shows the checklist.` }
     const cur = await read($, progress)
