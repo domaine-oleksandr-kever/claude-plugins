@@ -47,7 +47,7 @@ across an import, so `doctor.ts` repeats `diskOf` and the base lookup rather tha
 
 | File | Hooks | Writes |
 |---|---|---|
-| `session.ts` | `session.start {cwd:/^/}` start line and base check · `prompt.context`: the cloud fallback block (nothing draws and no `conventions.pm.json` marker), text from `hooks/conventions-text.json` | `pm.started`, `pm.events` |
+| `session.ts` | `session.start {cwd:/^/}` start line and base check | `pm.started`, `pm.events` |
 | `doctor.ts` | `session.start {cwd:/$/}` + `prompt.submit`: register `/pm-doctor` (every start, and a new session id) · `command.run pm-doctor` (passes `--log-dir` to `doctor.cjs`) | `pm.armed`, `pm.events` |
 
 Pure helpers carry no `$`: `events.ts` (the 200-line cap and the `pm.jsonl` writer, and `logDir` for
@@ -130,7 +130,7 @@ Changed, plumbing only:
 ## 8. The tests
 
 - `hooks/mods/tests/*.test.ts` through `claude plugin test plugins/pm`: the start line, the base
-  check, the cloud fallback block and its marker guard, `/pm-doctor`'s rows and tail, the `pm.jsonl`
+  check, `/pm-doctor`'s rows and tail, the `pm.jsonl`
   writer.
 - `tests/hooks-sim.sh` (`DHt*`): `hooks/conventions.cjs` run as the host runs it — the envelope, the
   marker, bad stdin, the log dir, the login label, the subagent share per agent type, the text file.
