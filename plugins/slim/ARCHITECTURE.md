@@ -143,7 +143,7 @@ non-zero exit, bad JSON) leaves the original result untouched and writes an erro
 | websearch | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
 | grep (content mode) | 16,384 | 8,192 | 16,384 |
 | agent | SLIM_PLAIN_BYTES | 12,288 | 32,768 |
-| attachment (@-mentioned file) | 32,768 (the framed text); json, jsonl, log and csv only | — | 65,536 |
+| attachment (@-mentioned file) | 32,768 (the framed text); json, jsonl, log and csv only; hook registered only with the `attachments` option | — | 65,536 |
 | prompt | 10,240 the prompt, 8,192 a span | — | JSON inline under 8,192, log / HTML under 100 KB, else head + handle |
 
 A browser snapshot (a11y) is compressed on MCP only, from the same 4,096 gate, fitted to the stub

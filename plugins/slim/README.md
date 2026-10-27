@@ -1,7 +1,7 @@
 # slim
 
-slim is a Claude Code plugin that compresses large tool results, pasted data and @-mentioned data
-files before they reach the model's context. It keeps every original on disk, so nothing is lost.
+slim is a Claude Code plugin that compresses large tool results, pasted data and (opt-in) @-mentioned
+data files before they reach the model's context. It keeps every original on disk, so nothing is lost.
 To install it, add the marketplace and install `slim@domaine`: see the root README section
 [Quick install (Claude Code)](../../README.md#quick-install-claude-code).
 
@@ -9,7 +9,9 @@ To install it, add the marketplace and install `slim@domaine`: see the root READ
 
 slim is a compression proxy for Claude Code. One `tool.call` handler sees every tool result: MCP,
 Bash, Read, WebFetch, WebSearch, Grep and Agent. The handler shrinks the large results before they
-reach the context. slim treats a pasted prompt's data and an @-mentioned data file in the same way.
+reach the context. slim treats a pasted prompt's data in the same way, and an @-mentioned data file too when its
+`attachments` option is `true` (off by default: a Claude Team login skips that hook and says so on
+every prompt; see @-mentioned files).
 
 slim picks an engine by content, never by tool name. An engine is the compressor for one data
 format:
@@ -36,7 +38,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.17.0**.
+Current release: **slim v0.17.1**.
 
 ## Install
 
@@ -85,7 +87,7 @@ host's hook engine validates a hook's result against the built-in tool's output 
 | WebSearch | a result string over `SLIM_PLAIN_BYTES` | that string is windowed; the others are untouched |
 | Grep | `content` output over 16,384 B (a file listing is never touched) | window with an 8,192 B budget; `numFiles`, `numLines` and `numMatches` never change |
 | Agent | a completed subagent's text block over `SLIM_PLAIN_BYTES` | that block is windowed |
-| @-mentioned file | over 32,768 B, the host's numbered lines of a data file | JSON, JSONL, log and csv engines, as a Read; see below |
+| @-mentioned file | only with the `attachments` option `true`; over 32,768 B, the host's numbered lines of a data file | JSON, JSONL, log and csv engines, as a Read; see below |
 | Prompt (typed or bridge) | a prompt of 10,240 B or more holding a data span of 8,192 B or more | each span replaced in place; see below |
 | View (`mcp__slim__view`) | every call | the tool's own answer is already compact; slim never compresses it again (see View) |
 
