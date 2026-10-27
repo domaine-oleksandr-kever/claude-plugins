@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.15.2**.
+Current release: **slim v0.16.0**.
 
 ## Install
 
@@ -430,6 +430,18 @@ again after a compaction. slim writes the Log line
 (`@rows.jsonl: compressed 61 KB → 2 KB (−97%) · jsonl`) and the report line once per content.
 `SLIM_ATTACH=0` turns it off.
 
+This channel is off unless slim's `attachments` option is `true`. Without it, slim registers no
+`prompt.attachment` hook at all. A Claude Team login loads its security plugin
+(`cc-plugin-sec-default`) first, which skips every user-tier `prompt.attachment` hook and tells the
+model `slim: its prompt.attachment hook was skipped …` on every prompt. The hooks API cannot register
+a hook for one login only, so the option is per config dir: set it on a personal login only.
+
+```json
+"pluginConfigs": { "slim@domaine": { "options": { "attachments": true } } }
+```
+
+`slim.info.channels` lists `attachment` only while the hook is registered.
+
 ### The spill-read guard
 
 A spill is the copy of an original that slim writes to disk. When the model reads a spill back
@@ -558,8 +570,14 @@ whose result the webfetch channel compresses, or through `lookup({ url, question
   below the session root, as in a claude.ai chat sandbox. Relative paths resolve against the working
   directory. view refuses anything else, a folder or a link, before anything runs.
 
-  The module writes the file through the host's Write tool, and it Reads an existing file first, as
-  Write requires. So permission rules and guards decide; a deny is the answer and nothing is written.
+  slim asks the Write permission check about the path. A deny drops `out`: view answers as without
+  it, with the line `out: not written — writing <path> is denied (<reason>)` in place of the out
+  line. Otherwise the core writes the file itself, with no host Write or Read, as it writes media
+  outputs in the same zone: the host Write's auto-mode classifier often gives a subagent's Write
+  no verdict, and the compact text was lost with it. A worktree's `.claude/tasks` that links to the
+  main checkout's lands there, and the out line names that path. When the write fails (a folder it
+  cannot write), the reply is the one without `out`, and the out line says
+  `out: not written — writing <path> failed (<code>)`. The compact text is never dropped for `out`.
   The file's first line is a marker, `<<slim view k=<request hash> engine=<engine> v=<slim version>>>`.
 
   For a `path`, a later call with the same `jq`, `engine` and `out` answers `cached` without
@@ -573,7 +591,7 @@ The reply has these parts, in this order:
 
 1. One figure line: `slim: compressed …`, the `figma-nodes:` line with its node counts, the
    narrowing figure above, `cached`, or `slim view: <n> B, not compressed (<reason>)`.
-2. `out: <path> (<n> lines)`, when view wrote a file.
+2. `out: <path> (<n> lines)`, when view wrote a file, or `out: not written — <why>` when it could not.
 3. `--- head ---` and the compact text. The text is whole up to 16 KB. A longer text gives its first
    40 lines and `read <file> windowed (offset/limit)`.
 
@@ -585,7 +603,8 @@ is one line that names the reason.
 
 Every call writes a `slim.events` entry
 (`jira-reader · view issues.json: 118 KB → 29 KB (−75%) · json`, or `narrowed by jq`, `cached`,
-`refused (<reason>)`). It also writes a report line (channel `view`) at every debug level. A view of
+`refused (<reason>)`, with ` · out not written` added when `out` was not written; its report line
+then has the reason `out-not-written`). It also writes a report line (channel `view`) at every debug level. A view of
 a spill file or a host tool-results file also writes an `entry: "access"` line (`via: "view"`), so
 `--report` counts it as a recovery.
 
@@ -743,7 +762,7 @@ export type SlimInfo = { v: 1; version: string; channels: SlimChannel[] }
 ```
 
 - **`slim.info`** — a snapshot that slim writes at session start: slim's version (read from its
-  manifest) and the channels whose switch is on. A plugin that finds it non-null knows that slim is
+  manifest) and the channels whose switch is on (`attachment` only with the `attachments` option). A plugin that finds it non-null knows that slim is
   loaded and which channels it compresses.
 - **`slim.events`** — first the start line `slim <version>` (kind `start`, once per session). Then
   one event per compressed or stubbed result and per lookup or view call, oldest first, at most 200.
@@ -898,7 +917,7 @@ from the host through the module's spawn. The module reads the host's `bashOutpu
 | `SLIM_WEB` | `1` | `0` turns the WebFetch and WebSearch channels off. |
 | `SLIM_GREP` | `1` | `0` turns the Grep channel off (the `content` window; the counts never change either way). |
 | `SLIM_AGENT` | `1` | `0` turns the Agent channel off (the window over a completed subagent's long report). |
-| `SLIM_ATTACH` | `1` | `0` turns the @-mentioned file channel off: an @-mentioned data file reaches the model as the host rendered it. |
+| `SLIM_ATTACH` | `1` | `0` turns the @-mentioned file channel off: an @-mentioned data file reaches the model as the host rendered it. The channel runs only with the `attachments` option `true` (see @-mentioned files). |
 | `SLIM_PROMPT` | `1` | `0` turns the prompt channel off: a typed or bridge prompt is never rewritten. |
 | `SLIM_SPILL_GUARD` | `1` | `0` turns the spill-read guard's deny off; access lines are still written at `SLIM_DEBUG` 1 or 2. |
 | `SLIM_IMAGE_READ_MAX` | `153600` | Size in bytes above which a model's Read of a PNG, JPEG, GIF or WebP is denied with a pointer to `mcp__slim__view`; `0` turns the deny off. A whole number, floored at 153,600 (the size view leaves an image as it is, so view's own `Read <path>` always passes); anything else → the default. |

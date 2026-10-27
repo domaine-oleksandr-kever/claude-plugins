@@ -223,8 +223,16 @@ describe('K10 @-mentioned files', () => {
     record: { src: 'slim', channel: 'attachment', entry: 'hook', decision: 'compressed', reason: null, engine: 'jsonl', bytes_in: 55_000, bytes_seen: 61_000, bytes_out: 900, pct: 98.5, stages: [], spill: null, spills: [], ms: 7 },
   }))
   const echo = (on: On) => on('prompt.attachment', async (_$, e) => ({ text: e.text }))
+  const ON = { options: { attachments: true } }
 
-  test('a data file: one core run with the framed text and its path, the compact text back, one Log line', { plugins: [PEEK] }, async ($, on) => {
+  test('the attachments option unset (its default): no hook, so the data file passes with no env read and no spawn', async ($, on) => {
+    const w = world(on, {}, core)
+    echo(on)
+    expect((await $.prompt.attachment(attached(DATA))).text).toBe(DATA)
+    expect([w.runs.length, w.other.length, w.envReads]).toEqual([0, 0, []])
+  })
+
+  test('a data file: one core run with the framed text and its path, the compact text back, one Log line', { plugins: [PEEK], ...ON }, async ($, on) => {
     const w = world(on, {}, core)
     echo(on)
     const d = await $.prompt.attachment(attached(DATA))
@@ -240,7 +248,7 @@ describe('K10 @-mentioned files', () => {
     ])
   })
 
-  test('the same content asked again (a compaction, an invalidate): the same answer, one Log line, no second report line', { plugins: [PEEK] }, async ($, on) => {
+  test('the same content asked again (a compaction, an invalidate): the same answer, one Log line, no second report line', { plugins: [PEEK], ...ON }, async ($, on) => {
     const w = world(on, {}, core)
     echo(on)
     expect((await $.prompt.attachment(attached(DATA))).text).toBe(COMPACT)
@@ -250,7 +258,7 @@ describe('K10 @-mentioned files', () => {
     expect((await peek($)).events).toHaveLength(1)
   })
 
-  test('SLIM_EVENT_LOG=0: no Log line, and a second ask still skips the report line', { plugins: [PEEK] }, async ($, on) => {
+  test('SLIM_EVENT_LOG=0: no Log line, and a second ask still skips the report line', { plugins: [PEEK], ...ON }, async ($, on) => {
     const w = world(on, {}, core, { SLIM_EVENT_LOG: '0' })
     echo(on)
     await $.prompt.attachment(attached(DATA))
@@ -259,7 +267,7 @@ describe('K10 @-mentioned files', () => {
     expect((await peek($)).events).toEqual([])
   })
 
-  test('a subagent\'s attachment carries its type', { plugins: [PEEK] }, async ($, on) => {
+  test('a subagent\'s attachment carries its type', { plugins: [PEEK], ...ON }, async ($, on) => {
     world(on, {}, core, {}, [{ id: 'a9', description: 'd', type: 'core:jira-reader', status: 'running' }])
     echo(on)
     await $.prompt.attachment(attached(DATA, { agentId: 'a9' }))
@@ -268,7 +276,7 @@ describe('K10 @-mentioned files', () => {
   })
 
   for (const level of ['', '1', '2']) {
-    test(`a source file at SLIM_DEBUG=${level || 'unset'}: unchanged; a read-guard line only at 2`, async ($, on) => {
+    test(`a source file at SLIM_DEBUG=${level || 'unset'}: unchanged; a read-guard line only at 2`, ON, async ($, on) => {
       const w = world(on, {}, core, level ? { SLIM_DEBUG: level } : {})
       echo(on)
       expect((await $.prompt.attachment(attached(SOURCE))).text).toBe(SOURCE)
@@ -282,7 +290,7 @@ describe('K10 @-mentioned files', () => {
     })
   }
 
-  test('no framing: numbered lines go to the core, which decides by content; its passthrough keeps the text', async ($, on) => {
+  test('no framing: numbered lines go to the core, which decides by content; its passthrough keeps the text', ON, async ($, on) => {
     const bare = DATA.slice(DATA.indexOf('\n') + 1)
     const w = world(on, {}, () => ok(JSON.stringify({ decision: 'passthrough', reason: 'read-guard', record: { engine: null, bytes_in: 1, bytes_out: 1, ms: 1 } })))
     echo(on)
@@ -290,7 +298,7 @@ describe('K10 @-mentioned files', () => {
     expect(stdinOf(w.runs[0]).tool_input).toEqual({ type: 'file', origin: 'engine', shape: 'numbered' })
   })
 
-  test('raw text, SLIM_ATTACH=0, a failed core: unchanged', async ($, on) => {
+  test('raw text, SLIM_ATTACH=0, a failed core: unchanged', ON, async ($, on) => {
     const raw = rows
     const w = world(on, {}, () => ({ ...ok(''), exitCode: 1 }))
     echo(on)
@@ -300,14 +308,14 @@ describe('K10 @-mentioned files', () => {
     expect(w.runs.length).toBe(1)
   })
 
-  test('SLIM_ATTACH=0: no spawn', async ($, on) => {
+  test('SLIM_ATTACH=0: no spawn', ON, async ($, on) => {
     const w = world(on, {}, core, { SLIM_ATTACH: '0' })
     echo(on)
     expect((await $.prompt.attachment(attached(DATA))).text).toBe(DATA)
     expect(w.runs.length + w.other.length).toBe(0)
   })
 
-  test('a small attachment reads no env', async ($, on) => {
+  test('a small attachment reads no env', ON, async ($, on) => {
     const w = world(on, {})
     echo(on)
     await $.prompt.attachment({ type: 'file', text: 'tiny', origin: { kind: 'engine' } } as any)

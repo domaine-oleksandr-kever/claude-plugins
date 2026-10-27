@@ -1,8 +1,8 @@
 // The view tool's core (`slim.cjs --view`): one file, command output or host file in, its compact
 // text out — narrowed by jq first when asked, then the engine the content sniffs as (or the one the
-// caller named); an image or a video goes to the media backend instead. With `out` the compact text
-// comes back as a `write` for the hooks module to put through the host's Write tool, headed by a
-// marker line that lets the next call over the same input answer `cached`.
+// caller named); an image or a video goes to the media backend instead. With `out` the core writes
+// the compact text there itself (outTarget() admits only the zone inZone() names), headed by a marker
+// line that lets the next call over the same input answer `cached`.
 'use strict';
 
 const fs = require('fs');
@@ -125,8 +125,10 @@ const isSpillOrHost = (p) => { try { return spill.isSpillOrHostFile(p); } catch 
  * output: an earlier run's fresh one is `cached`, else the refusal `not-reused`; `scratch` = no host Write
  * ruled on `allowed_out`: it must land in inZone(), else the refusal `not-scratch`, nothing written)
  * reply:   { v:1, decision: 'compressed'|'narrowed'|'passthrough'|'cached'|'refused', reason?, engine,
- *            figure, text, bytesIn, bytesOut, stages, narrowed?, out?, lines?, write?: { path, marker, exists },
- *            pointer?, original?, outputs?, frames? }
+ *            figure, text, bytesIn, bytesOut, stages, narrowed?, out?, lines?, outFailed?, pointer?,
+ *            original?, outputs?, frames? }
+ * (`out` = the file written, marker line then text; `outFailed` = why the out file could not be
+ * written, the reply then as without out)
  * opts: { engineOptions, created } — `engineOptions` are compress()'s (spill names and dir, budget);
  * `created` collects the files this call wrote, for the caller to drop when the reply is not sent.
  */
@@ -260,8 +262,14 @@ function view(input, opts) {
     reply.original = original;
   }
   if (target) {
-    // The text travels once: the hooks module writes `marker`, a newline, then `text`.
-    return { ...reply, out: target.path, lines: final.split('\n').length + 1, write: { path: target.path, marker: markLine(key, usedEngine), exists: target.exists }, pointer: target.path };
+    try {
+      fs.mkdirSync(path.dirname(target.path), { recursive: true });
+      spill.writeAtomic(target.path, `${markLine(key, usedEngine)}\n${final}`);
+      created.push(target.path);
+      return { ...reply, out: target.path, lines: final.split('\n').length + 1, pointer: target.path };
+    } catch (e) {
+      reply.outFailed = `writing ${target.path} failed (${(e && e.code) || (e && e.name) || 'Error'})`;
+    }
   }
   if (bytesOut > VIEW_INLINE) {
     if (!compressed && !narrowed && file) return { ...reply, pointer: file };

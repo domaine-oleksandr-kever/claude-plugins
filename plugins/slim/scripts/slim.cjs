@@ -856,7 +856,7 @@ function handleView(raw) {
     reply = viewCore().view(input, { created, engineOptions: engineOptions(deadline, {}) });
     if (utf8(JSON.stringify(reply)) > OUTPUT_CAP) {
       spill.unlinkAll(created);
-      const message = reply.write
+      const message = reply.out
         ? 'view: the compact text is over 4 MiB even for out — narrow with jq, or Read the source windowed'
         : 'view: the compact text is over 4 MiB — pass out (under .claude/tasks/<id>/) or narrow with jq';
       reply = { v: 1, decision: 'refused', reason: 'output-cap', engine: reply.engine, figure: message, text: message, bytesIn: reply.bytesIn, bytesOut: 0, stages: [] };

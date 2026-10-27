@@ -1,6 +1,7 @@
 // Every tool result slim reads goes through scripts/slim.cjs here: the result replaced with the core's
 // answer, one slim.events entry, the row the ToolResult and ToolGroup lines draw, and a savings toast
-// for MCP calls on the main loop. An @-mentioned data file goes the same way, as the read channel's.
+// for MCP calls on the main loop. An @-mentioned data file goes the same way, as the read channel's,
+// when the `attachments` option registers that hook.
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 import type { SlimChannel, SlimEvent } from '../../types'
@@ -95,7 +96,8 @@ async function agentType($: $, agentId: string): Promise<string | undefined> {
   }
 }
 
-export function registerIntake(on: On): void {
+/** `attachments` = the userConfig option: registers the @-mentioned file hook. */
+export function registerIntake(on: On, attachments: boolean): void {
   on('tool.call', async ($, e, next) => {
     // Only the model's calls: a plugin's own $.tool.call (lookup's among them) gets the record it asked for.
     if (next.origin.plugin !== 'engine') return next(e)
@@ -195,6 +197,9 @@ export function registerIntake(on: On): void {
     // A fresh object: returning `r` itself would make core reuse its own messages verbatim.
     return r.context?.length ? { result: out.result, context: r.context } : { result: out.result }
   })
+
+  // A Claude Team login skips a user-tier prompt.attachment hook and tells the model so on every prompt.
+  if (!attachments) return
 
   // An @-mentioned file reaches the model as the host frames a Read of it. A data file's numbered lines
   // are compressed the way the read channel's are; source and prose pass. The host caches the answer

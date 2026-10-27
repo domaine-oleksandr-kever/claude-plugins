@@ -2,12 +2,15 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "slim",
   "displayName": "Slim",
-  "version": "0.15.2",
-  "description": "Universal result proxy for Claude Code — compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep and Agent results, pasted prompt data and @-mentioned files by content (JSON, logs, HTML, XML and SVG, Figma REST node trees, browser accessibility snapshots, linter output, path listings, CSV/TSV tables, plain-text windows), guards spill reads, and adds two tools: lookup answers one question about a page, command or file; view compacts a file or a command output (with jq narrowing, media resize and video frames) into a workspace file",
+  "version": "0.16.0",
+  "description": "Universal result proxy for Claude Code — compresses large MCP, Bash, Read, WebFetch, WebSearch, Grep and Agent results, pasted prompt data and (opt-in) @-mentioned files by content (JSON, logs, HTML, XML and SVG, Figma REST node trees, browser accessibility snapshots, linter output, path listings, CSV/TSV tables, plain-text windows), guards spill reads, and adds two tools: lookup answers one question about a page, command or file; view compacts a file or a command output (with jq narrowing, media resize and video frames) into a workspace file",
   "author": {
     "name": "Oleksandr Kever",
     "email": "oleksandr.kever@meetdomaine.com"
   },
   "license": "MIT",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "attachments": { "type": "boolean", "title": "Compress @-mentioned files", "description": "true compresses @-mentioned data files; keep false on a Claude Team login, whose host skips this hook and says so on every prompt", "default": false }
+  }
 }

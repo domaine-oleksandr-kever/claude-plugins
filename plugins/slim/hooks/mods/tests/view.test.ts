@@ -240,30 +240,47 @@ describe('V3 command', () => {
 
 describe('V4 out', () => {
   const OUT = '/repo/.claude/tasks/T1/issues.md'
-  const marker = '<<slim view k=0123456789ab engine=json v=0.5.0>>'
-  const content = `${marker}\n${REPLY.text}`
-  const written = { ...REPLY, out: OUT, lines: 2, pointer: OUT, write: { path: OUT, marker, exists: false } }
-  const writes = (w: any) => w.calls.filter((c: any) => c.file_path === OUT)
+  const written = { ...REPLY, out: OUT, lines: 2, pointer: OUT }
+  const touches = (w: any) => w.calls.filter((c: any) => c.file_path === OUT)
 
-  test('the core\'s write goes through the Write tool; the reply names the file', async ($, on) => {
-    const w = world(on, { reply: written })
+  test('a Write check on out, then the core writes it: no host Write or Read; the reply names the file', async ($, on) => {
+    const w = world(on, { write: 'ask', reply: written })
     const text = await view($, { path: '/repo/issues.json', out: OUT })
-    expect(w.views[0].stdin).toMatchObject({ out: OUT })
-    expect(writes(w).map((c: any) => [c.tool, c.file_path, c.content])).toEqual([['Write', OUT, content]])
+    expect(w.checks).toEqual([{ tool: 'Read', input: { file_path: '/repo/issues.json' } }, { tool: 'Write', input: { file_path: OUT } }])
+    expect(w.views[0].stdin).toMatchObject({ path: '/repo/issues.json', out: OUT })
+    expect(touches(w)).toEqual([])
+    expect(w.asked).toEqual([])
     expect(text).toBe(`${REPLY.figure}\nout: ${OUT} (2 lines)\n--- head ---\n${REPLY.text}`)
-    expect(w.records[0]).toMatchObject({ decision: 'compressed', spill: OUT })
+    expect(w.records[0]).toMatchObject({ decision: 'compressed', spill: OUT, reason: null })
   })
 
-  test('an existing out is Read first, as the Write tool requires', async ($, on) => {
-    const w = world(on, { reply: { ...written, write: { ...written.write, exists: true } } })
-    await view($, { path: '/repo/issues.json', out: OUT })
-    expect(writes(w).map((c: any) => [c.tool, c.file_path, c.limit])).toEqual([['Read', OUT, 1], ['Write', OUT, undefined]])
+  test('a relative out is checked as the absolute path under the session cwd; the core gets it as given', async ($, on) => {
+    const w = world(on, { reply: written })
+    await view($, { command: 'cat x.json', out: '.claude/tasks/T1/issues.md' })
+    expect(w.checks).toEqual([{ tool: 'Write', input: { file_path: OUT } }])
+    expect(w.views[0].stdin).toMatchObject({ out: '.claude/tasks/T1/issues.md', command: 'cat x.json' })
   })
 
-  test('a Write deny is the answer: nothing else, a refused row', async ($, on) => {
-    const w = world(on, { reply: written, below: e => (e.tool === 'Write' ? { deny: 'guard: not there' } : { result: { type: 'text', file: { filePath: e.file_path } } }) })
-    expect(await view($, { path: '/repo/issues.json', out: OUT })).toBe('guard: not there')
-    expect(w.records[0]).toMatchObject({ decision: 'refused', reason: 'write-denied', engine: 'json' })
+  test('a Write check that denies: the core runs without out, the compact text stays, one line says why', { plugins: [PEEK] }, async ($, on) => {
+    const w = world(on, { write: 'deny' })
+    const text = await view($, { path: '/repo/issues.json', out: OUT })
+    expect(w.views[0].stdin.out).toBeUndefined()
+    expect(touches(w)).toEqual([])
+    expect(text).toBe(`${REPLY.figure}\nout: not written — writing ${OUT} is denied (Write denied by rule)\n--- head ---\n${REPLY.text}`)
+    expect(w.records[0]).toMatchObject({ decision: 'compressed', reason: 'out-not-written' })
+    expect((await events($))[0].text).toBe('view issues.json: 118 KB → 29 KB (−75%) · json · out not written')
+  })
+
+  test('the core could not write out: its reason is the out line, the text and the pointer stay', async ($, on) => {
+    const failed = { ...REPLY, outFailed: `writing ${OUT} failed (EACCES)`, pointer: '/spill/slim-rows-1.txt' }
+    world(on, { reply: failed })
+    expect(await view($, { path: '/repo/issues.json', out: OUT })).toBe(`${REPLY.figure}\nout: not written — writing ${OUT} failed (EACCES)\n--- head ---\n${REPLY.text}`)
+  })
+
+  test('a deny with a refusal from the core: the refusal alone', async ($, on) => {
+    const msg = 'view: jq found nothing at .nope'
+    world(on, { write: 'deny', reply: { v: 1, decision: 'refused', reason: 'jq-miss', engine: null, figure: msg, text: msg, bytesIn: 0, bytesOut: 0, stages: [] } })
+    expect(await view($, { path: '/repo/issues.json', out: OUT, jq: '.nope' })).toBe(msg)
   })
 
   test('an out outside the roots is the core\'s refusal: no Write', async ($, on) => {
@@ -276,8 +293,15 @@ describe('V4 out', () => {
   test('cached: no write, the figure says so', { plugins: [PEEK] }, async ($, on) => {
     const w = world(on, { reply: { v: 1, decision: 'cached', engine: 'json', figure: 'cached', text: REPLY.text, bytesIn: 118_000, bytesOut: 28, stages: [], out: OUT, lines: 2, pointer: OUT } })
     expect(await view($, { path: '/repo/issues.json', out: OUT })).toBe(`cached\nout: ${OUT} (2 lines)\n--- head ---\n${REPLY.text}`)
-    expect(writes(w)).toEqual([])
+    expect(touches(w)).toEqual([])
     expect((await events($))[0].text).toBe('view issues.json: cached 28 B · json')
+  })
+
+  test('out on an image is the core\'s media-args refusal: the Write check on out never runs', async ($, on) => {
+    const msg = 'view: jq and out do not apply to an image or a video — its outputs land beside the input'
+    const w = world(on, { reply: { v: 1, decision: 'refused', reason: 'media-args', engine: null, figure: msg, text: msg, bytesIn: 0, bytesOut: 0, stages: [] } })
+    expect(await view($, { path: '/repo/a/shot.png', out: OUT })).toBe(msg)
+    expect(w.checks.filter((c: any) => c.input.file_path === OUT)).toEqual([])
   })
 })
 

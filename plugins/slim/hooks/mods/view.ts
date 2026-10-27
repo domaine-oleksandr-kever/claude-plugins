@@ -1,7 +1,7 @@
 // mcp__slim__view: a big local file or a command's output shown compactly, by the same engines the
 // channels use, without the whole source entering the context. A path is ruled on by a one-line Read
-// through the host, a command runs through Bash, and `out` is written through the host's Write tool,
-// so permission rules and every guard decide on each. An image or a video is resized by the core's
+// through the host and a command runs through Bash, so permission rules and every guard decide on each;
+// `out` is ruled on by a Write check and written by the core. An image or a video is resized by the core's
 // media backend beside the input, once the host's Read and Write rules, or the mode's decider, allow it.
 import { atom, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
@@ -130,6 +130,7 @@ export function replyText(v: Viewed): string {
   if (v.decision === 'refused') return v.text
   const lines = [v.figure]
   if (v.out) lines.push(`out: ${v.out} (${v.lines ?? 0} lines)`)
+  else if (v.outFailed) lines.push(`out: not written — ${v.outFailed}`)
   if (v.original) lines.push(`original: ${v.original}`)
   if (v.engine === 'media') return [...lines, v.text].join('\n')
   lines.push('--- head ---')
@@ -317,11 +318,25 @@ async function viewMedia($: $, path: string, a: Record<string, string>): Promise
   return { ...o, text: [o.text, ...hint, `view could not resize ${path} — Read ${path} to see it as is`].join('\n') }
 }
 
+/**
+ * The core's run with `out` ruled on by a Write check: the core writes an out it admits (only under
+ * .claude/tasks/<id>/ or slim's spill root) with no host Write; a deny drops `out` and the reply says so.
+ */
+async function coreOut($: $, rung: 'path' | 'command', payload: Record<string, unknown>, a: Record<string, string>): Promise<Outcome> {
+  if (a.out === undefined) return core($, rung, { ...payload, ...a })
+  const abs = a.out.startsWith('/') ? a.out : `${(await $.session.cwd()).replace(/\/+$/, '')}/${a.out}`
+  const c = await check($, 'Write', abs)
+  if (c.decision !== 'deny') return core($, rung, { ...payload, ...a })
+  const { out: _out, ...rest } = a
+  const o = await core($, rung, { ...payload, ...rest })
+  return o.decision === 'refused' ? o : { ...o, outFailed: `writing ${abs} is denied${c.reason ? ` (${c.reason})` : ''}` }
+}
+
 async function viewPath($: $, path: string, a: Record<string, string>): Promise<Outcome> {
   if (a.engine === 'media' || mediaName(path)) return viewMedia($, path, a)
   const p = await readProbe($, path)
   if ('denied' in p) return refused('path', 'read-denied', p.denied)
-  return core($, 'path', { path: p.opened, ...a })
+  return coreOut($, 'path', { path: p.opened }, a)
 }
 
 async function viewCommand($: $, command: string, a: Record<string, string>): Promise<Outcome> {
@@ -332,26 +347,7 @@ async function viewCommand($: $, command: string, a: Record<string, string>): Pr
     return refused('command', 'bash-failed', `view: Bash failed (${errText(err)})`)
   }
   if (b.deny !== undefined) return refused('command', 'command-denied', b.deny)
-  return core($, 'command', { ...commandSource(b), command, ...a })
-}
-
-/** Puts the core's `write` through the host's Write tool; an existing file is Read first, as Write requires. */
-async function writeOut($: $, o: Outcome): Promise<Outcome> {
-  const w = o.write
-  if (!w) return o
-  const fail = (reason: string, text: string): Outcome => ({ ...refused(o.rung, reason, text), engine: o.engine, bytesIn: o.bytesIn })
-  try {
-    if (w.exists) {
-      const r = await $.tool.call({ tool: 'Read', file_path: w.path, limit: 1 } as never)
-      if (r.deny !== undefined) return fail('write-denied', r.deny)
-    }
-    const res = await $.tool.call({ tool: 'Write', file_path: w.path, content: `${w.marker}\n${o.text}` } as never)
-    if (res.deny !== undefined) return fail('write-denied', res.deny)
-    if (res.isError === true) return fail('write-failed', String(res.text || `view: writing ${w.path} failed`))
-  } catch (err) {
-    return fail('write-failed', `view: Write failed (${errText(err)})`)
-  }
-  return o
+  return coreOut($, 'command', { ...commandSource(b), command }, a)
 }
 
 export function registerView(on: On): void {
@@ -371,8 +367,7 @@ export function registerView(on: On): void {
     if (engine !== undefined) a.engine = engine
     const t0 = await $.clock.now()
 
-    let o = path !== undefined ? await viewPath($, path, a) : await viewCommand($, command!, a)
-    o = await writeOut($, o)
+    const o = path !== undefined ? await viewPath($, path, a) : await viewCommand($, command!, a)
     const text = replyText(o)
     const ms = Math.max(0, (await $.clock.now()) - t0)
 
@@ -383,7 +378,7 @@ export function registerView(on: On): void {
         const shown = path !== undefined ? path.slice(path.lastIndexOf('/') + 1) : command!
         const ev: SlimEvent = {
           v: 1, atMs: await $.clock.now(), kind: 'view', channel: 'view', src: 'slim', tool: VIEW_TOOL,
-          text: viewText(agentPrefix(listed, isSub), shown, o.decision, o.engine, o.bytesIn, o.bytesOut, o.reason),
+          text: viewText(agentPrefix(listed, isSub), shown, o.decision, o.engine, o.bytesIn, o.bytesOut, o.reason) + (o.outFailed ? ' · out not written' : ''),
           ...(isSub ? { agentType: listed ?? 'agent' } : {}),
           ms, decision: o.decision, engine: o.engine, bytesIn: o.bytesIn, bytesOut: o.bytesOut,
         }
@@ -392,7 +387,7 @@ export function registerView(on: On): void {
     }
     try {
       const rec = {
-        channel: 'view', tool_use_id: e.tool_use_id, decision: o.decision, reason: o.reason ?? null, rung: o.rung,
+        channel: 'view', tool_use_id: e.tool_use_id, decision: o.decision, reason: o.reason ?? (o.outFailed ? 'out-not-written' : null), rung: o.rung,
         engine: o.engine, bytes_in: o.bytesIn, bytes_out: o.bytesOut, stages: o.stages,
         spill: o.out ?? o.pointer ?? o.original ?? null, ...(o.narrowed ? { narrowed: true } : {}),
         ...(o.frames ? { frames: o.frames } : {}), ms, cwd: await $.session.cwd(),

@@ -205,4 +205,4 @@ function trustedHandle(file, sessionId) {
 
 const unlinkAll = (paths) => { for (const p of paths) { try { fs.unlinkSync(p); } catch (_) {} } };
 
-module.exports = { NAMES, PROMPT_DIR_TAIL, writePart, writeOriginal, sweep, hostFile, readHost, readLocal, isSpillOrHostFile, trustedHandle, unlinkAll, SWEEP_MARKER };
+module.exports = { NAMES, PROMPT_DIR_TAIL, writeAtomic, writePart, writeOriginal, sweep, hostFile, readHost, readLocal, isSpillOrHostFile, trustedHandle, unlinkAll, SWEEP_MARKER };

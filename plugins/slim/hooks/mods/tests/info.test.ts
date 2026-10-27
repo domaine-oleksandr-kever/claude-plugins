@@ -2,6 +2,9 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 const ALL = ['mcp', 'bash', 'read', 'webfetch', 'websearch', 'grep', 'agent', 'attachment', 'prompt']
+/** Every channel but `attachment`, whose hook the default `attachments: false` leaves unregistered. */
+const DEFAULT = ALL.filter(c => c !== 'attachment')
+const ATTACH = { options: { attachments: true } }
 
 /** A sibling plugin reading slim.info. */
 const PEEK = {
@@ -35,7 +38,7 @@ function world(on: On, env: Record<string, string> = {}, manifest: string | null
 const start = ($: any) => $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
 describe('slim.info at session.start', () => {
-  test('I1 the version from the manifest beside the module, every channel on', { plugins: [PEEK] }, async ($, on) => {
+  test('I1 the version from the manifest beside the module, every channel on', { plugins: [PEEK], ...ATTACH }, async ($, on) => {
     const w = world(on)
     expect(await info($)).toBeNull()
     await start($)
@@ -44,7 +47,7 @@ describe('slim.info at session.start', () => {
     expect(await info($)).toEqual({ v: 1, version: w.version, channels: ALL })
   })
 
-  test('I2 a switch at 0 drops its channels', { plugins: [PEEK] }, async ($, on) => {
+  test('I2 a switch at 0 drops its channels', { plugins: [PEEK], ...ATTACH }, async ($, on) => {
     world(on, { SLIM_BASH: '0', SLIM_WEB: '0', SLIM_PROMPT: '0' })
     await start($)
     expect((await info($)).channels).toEqual(['mcp', 'read', 'grep', 'agent', 'attachment'])
@@ -53,6 +56,12 @@ describe('slim.info at session.start', () => {
   test("I3 an unreadable manifest → version 'unknown', the snapshot still written", { plugins: [PEEK] }, async ($, on) => {
     world(on, {}, '{not json')
     await start($)
-    expect(await info($)).toEqual({ v: 1, version: 'unknown', channels: ALL })
+    expect(await info($)).toEqual({ v: 1, version: 'unknown', channels: DEFAULT })
+  })
+
+  test('I3b the attachments option unset: every channel but attachment, whatever SLIM_ATTACH says', { plugins: [PEEK] }, async ($, on) => {
+    world(on, { SLIM_ATTACH: '1' })
+    await start($)
+    expect((await info($)).channels).toEqual(DEFAULT)
   })
 })

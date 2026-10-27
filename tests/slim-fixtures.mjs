@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import {
   readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync, readdirSync, realpathSync,
-  utimesSync, copyFileSync, unlinkSync, symlinkSync, statSync,
+  utimesSync, copyFileSync, unlinkSync, symlinkSync, statSync, chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -1510,7 +1510,7 @@ printf 'MAGICKIMG' > "$o$r"
 }
 
 // Cv — the view tool's core (--view): a file, a command's output or its host file → compact text, jq
-// narrowing first, `out` handed back as a write with its cache marker, media through the backend.
+// narrowing first, `out` written by the core under its cache marker, media through the backend.
 {
   const T = newT();
   const proj = path.join(T, 'proj');
@@ -1568,19 +1568,31 @@ printf 'MAGICKIMG' > "$o$r"
   const v4 = view('Cv4', { path: src, out });
   const marker = /^<<slim view k=[0-9a-f]{12} engine=json v=[\w.+-]+>>$/;
   // Uniform rows give the json engine nothing to crush, and with out the fit target is 64 KB: a 63 KB source stays whole.
-  eq('Cv4-write', [v4.decision, v4.out, v4.pointer, v4.write && v4.write.path, v4.write && v4.write.exists, existsSync(out)], ['passthrough', out, out, out, false, false]);
-  // The text travels once: the mod writes the marker line, then the text.
-  const content4 = v4.write ? `${v4.write.marker}\n${v4.text}` : '';
-  check('Cv4-content', !!v4.write && marker.test(v4.write.marker) && v4.write.content === undefined && v4.lines === content4.split('\n').length, v4.write && v4.write.marker);
+  const content4 = existsSync(out) ? readFileSync(out, 'utf8') : '';
+  eq('Cv4-written', [v4.decision, v4.out, v4.pointer, v4.write, v4.outFailed, content4.slice(content4.indexOf('\n') + 1) === v4.text], ['passthrough', out, out, undefined, undefined, true]);
+  check('Cv4-content', marker.test(content4.split('\n')[0]) && v4.lines === content4.split('\n').length, content4.split('\n')[0]);
   check('Cv4-out-not-fitted', v4.bytesOut > 16384, `${v4.bytesOut}`);
-  writeFileSync(out, content4);
+  // A worktree's .claude/tasks links to the main checkout's: the out lands, and is named, there.
+  const wt = path.join(T, 'wt-out');
+  mkdirSync(path.join(wt, '.claude'), { recursive: true });
+  symlinkSync(path.join(proj, '.claude/tasks'), path.join(wt, '.claude/tasks'));
+  const vwt = view('Cv4b', { path: src, out: '.claude/tasks/T1/new/wt.view.json', root: wt, cwd: wt });
+  eq('Cv4b-worktree-link', [vwt.out, existsSync(path.join(tasks, 'new/wt.view.json'))], [path.join(realpathSync(tasks), 'new/wt.view.json'), true]);
+  // A write that fails keeps the compact text: the reply is the one without out, plus why.
+  const ro = path.join(tasks, 'ro');
+  mkdirSync(ro);
+  chmodSync(ro, 0o500);
+  const vro = view('Cv4c', { path: src, out: path.join(ro, 'x.json') });
+  chmodSync(ro, 0o700);
+  check('Cv4c-write-failed-keeps-text', vro.decision === 'passthrough' && vro.out === undefined && /^writing \S+\/ro\/x\.json failed \(EACCES\)$/.test(String(vro.outFailed))
+    && vro.text === v4.text && typeof vro.pointer === 'string' && readFileSync(vro.pointer, 'utf8') === vro.text && !existsSync(path.join(ro, 'x.json')), JSON.stringify({ ...vro, text: undefined }));
   const v5 = view('Cv5', { path: src, out });
   eq('Cv5-cached', [v5.decision, v5.figure, v5.engine, v5.text === v4.text, v5.out, v5.write, v5.lines], ['cached', 'cached', 'json', true, out, undefined, v4.lines]);
   eq('Cv5-other-jq-recomputes', view('Cv5b', { path: src, out, jq: '.total' }).decision, 'narrowed');
   const later = new Date(Date.now() + 60_000);
   utimesSync(src, later, later);
   const v6 = view('Cv6', { path: src, out });
-  eq('Cv6-input-newer-recomputes', [v6.decision, v6.write && v6.write.exists], ['passthrough', true]);
+  eq('Cv6-input-newer-recomputes', [v6.decision, v6.out], ['passthrough', out]);
   old(src);
   writeFileSync(out, `<<slim view k=000000000000 engine=json v=0.0.0>>\n{}`);
   eq('Cv6b-foreign-marker-recomputes', view('Cv6b', { path: src, out }).decision, 'passthrough');
@@ -1593,15 +1605,15 @@ printf 'MAGICKIMG' > "$o$r"
     view('Cv7d', { path: src, out: path.join(tasks, '..', '..', '..', 'issues.view.json') }).reason,
   ], ['out-outside-roots', 'out-outside-roots', 'out-taken', 'out-outside-roots']);
   const vs = view('Cv7e', { path: src, out: path.join(spillDir, 'mine.json') });
-  eq('Cv7e-spill-root-ok', [vs.decision, vs.write && vs.write.path], ['passthrough', path.join(spillDir, 'mine.json')]);
+  eq('Cv7e-spill-root-ok', [vs.decision, vs.out, existsSync(path.join(spillDir, 'mine.json'))], ['passthrough', path.join(spillDir, 'mine.json'), true]);
   const vr = view('Cv7f', { path: src, out: 'issues.rel.json', cwd: tasks });
-  eq('Cv7f-relative-to-cwd', vr.write && vr.write.path, path.join(tasks, 'issues.rel.json'));
+  eq('Cv7f-relative-to-cwd', vr.out, path.join(tasks, 'issues.rel.json'));
   // A repo below the session root (the claude.ai sandbox): its own .claude/tasks/<id>/ takes an out too.
   const session = path.join(T, 'session');
   const repo = path.join(session, 'repo');
   mkdirSync(repo, { recursive: true });
   const sub = view('Cv7s', { path: src, out: '.claude/tasks/t/tmp/a.txt', root: session, cwd: repo });
-  eq('Cv7s-cwd-tasks-ok', sub.write && sub.write.path, path.join(repo, '.claude/tasks/t/tmp/a.txt'));
+  eq('Cv7s-cwd-tasks-ok', [sub.out, existsSync(path.join(repo, '.claude/tasks/t/tmp/a.txt'))], [path.join(repo, '.claude/tasks/t/tmp/a.txt'), true]);
   const sib = view('Cv7s2', { path: src, out: '../other/.claude/tasks/t/a.txt', root: session, cwd: repo });
   eq('Cv7s2-sibling-refused', [sib.reason, sib.text], ['out-outside-roots', `view: out must be under .claude/tasks/<id>/ of the session root or the working directory, or slim's spill root (${spillDir})`]);
   eq('Cv7s3-cwd-tasks-top-refused', view('Cv7s3', { path: src, out: '.claude/tasks/top.txt', root: session, cwd: repo }).reason, 'out-outside-roots');
@@ -1609,17 +1621,17 @@ printf 'MAGICKIMG' > "$o$r"
   const words = (n) => JSON.stringify({ ids: Array.from({ length: n }, (_, i) => `w${i.toString(36).padStart(4, '0')}${'z'.repeat(i % 50)}`).join(' ') });
   writeFileSync(path.join(proj, 'wide.json'), words(80_000));
   const vw = view('Cv7g', { path: path.join(proj, 'wide.json'), out: path.join(tasks, 'wide.view.json') });
-  check('Cv7g-out-2-to-4-MiB-fits', vw.decision === 'passthrough' && vw.bytesOut > 2_200_000 && vw.bytesOut < 4_000_000 && !!vw.write, JSON.stringify({ ...vw, text: undefined }));
+  check('Cv7g-out-2-to-4-MiB-fits', vw.decision === 'passthrough' && vw.bytesOut > 2_200_000 && vw.bytesOut < 4_000_000 && !!vw.out, JSON.stringify({ ...vw, text: undefined }));
   writeFileSync(path.join(proj, 'huge.json'), words(140_000));
   const vh = view('Cv7h', { path: path.join(proj, 'huge.json'), out: path.join(tasks, 'huge.view.json') });
-  eq('Cv7h-out-over-cap', [vh.decision, vh.reason, vh.text], ['refused', 'output-cap', 'view: the compact text is over 4 MiB even for out — narrow with jq, or Read the source windowed']);
+  eq('Cv7h-out-over-cap', [vh.decision, vh.reason, vh.text, existsSync(path.join(tasks, 'huge.view.json'))], ['refused', 'output-cap', 'view: the compact text is over 4 MiB even for out — narrow with jq, or Read the source windowed', false]);
 
   // A whale of unique rows is still fitted with out: the task file gets the compact text, never the source.
   const whale = JSON.stringify({ total: 8000, issues: Array.from({ length: 8000 }, (_, i) => ({ key: `ACME-${i}`, id: String(10000 + i), fields: { summary: `Summary number ${i} ${'x'.repeat(40)}`, status: { name: i % 3 ? 'Open' : 'Done' }, labels: ['a', 'b'] } })) });
   writeFileSync(path.join(proj, 'whale.json'), whale);
   const wo = path.join(tasks, 'whale.view.md');
   const vwh = view('Cv7w', { path: path.join(proj, 'whale.json'), out: wo });
-  check('Cv7w-out-whale-fitted', bytes(whale) > 1_000_000 && vwh.decision === 'compressed' && !!vwh.write && vwh.write.path === wo
+  check('Cv7w-out-whale-fitted', bytes(whale) > 1_000_000 && vwh.decision === 'compressed' && vwh.out === wo && existsSync(wo)
     && vwh.bytesOut <= 65536 && vwh.bytesOut === bytes(vwh.text) && /<<full=\S+ \d+_rows_offloaded>>/.test(vwh.text), JSON.stringify({ ...vwh, text: undefined }));
 
   const big = JSON.stringify(Array.from({ length: 600 }, (_, i) => ({ sku: `SKU-${i}`, qty: i % 7, note: 'y'.repeat(60) })));
@@ -1630,12 +1642,11 @@ printf 'MAGICKIMG' > "$o$r"
   const xo = path.join(tasks, 'export.view.json');
   const x1 = view('Cv7i', { path: exp, out: xo });
   const xpart = (/<<full=(\S+) \d+_rows_offloaded>>/.exec(x1.text) || [])[1];
-  check('Cv7i-out-cites-part', x1.decision === 'compressed' && !!xpart && existsSync(xpart) && !!x1.write, JSON.stringify({ ...x1, text: undefined }));
-  writeFileSync(xo, `${x1.write.marker}\n${x1.text}`);
+  check('Cv7i-out-cites-part', x1.decision === 'compressed' && !!xpart && existsSync(xpart) && x1.out === xo, JSON.stringify({ ...x1, text: undefined }));
   eq('Cv7i-cached', view('Cv7j', { path: exp, out: xo }).decision, 'cached');
   rmSync(xpart);
   const x3 = view('Cv7k', { path: exp, out: xo });
-  eq('Cv7k-part-gone-recomputes', [x3.decision, x3.write && x3.write.exists, existsSync(xpart)], ['compressed', true, true]);
+  eq('Cv7k-part-gone-recomputes', [x3.decision, x3.out, existsSync(xpart)], ['compressed', xo, true]);
   const v8 = view('Cv8', { text: big, command: 'cat export.json' });
   check('Cv8-command-original', v8.decision === 'compressed' && typeof v8.original === 'string' && readFileSync(v8.original, 'utf8') === big, JSON.stringify({ ...v8, text: undefined }));
   const host = hostFile(T, 'v1.txt', big);

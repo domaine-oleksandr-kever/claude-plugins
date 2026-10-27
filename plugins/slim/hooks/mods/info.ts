@@ -10,8 +10,8 @@ type $ = EngineInterface
 const EVENTS = atom({ plugin: 'slim', key: 'events' } as const, [] as SlimEvent[])
 const STARTED = atom({ plugin: 'slim', key: 'started' } as const, null as string | null)
 
-/** The channels whose switch is not 0, each switch read by its literal name. */
-async function channelsOn($: $): Promise<SlimChannel[]> {
+/** The channels whose switch is not 0, each switch read by its literal name; `attachment` only while its hook is registered. */
+async function channelsOn($: $, attachments: boolean): Promise<SlimChannel[]> {
   const off = async (name: Promise<string | undefined>) => (await name) === '0'
   const out: SlimChannel[] = []
   if (!(await off($.env.get('SLIM_MCP')))) out.push('mcp')
@@ -21,7 +21,7 @@ async function channelsOn($: $): Promise<SlimChannel[]> {
   if (web) out.push('webfetch', 'websearch')
   if (!(await off($.env.get('SLIM_GREP')))) out.push('grep')
   if (!(await off($.env.get('SLIM_AGENT')))) out.push('agent')
-  if (!(await off($.env.get('SLIM_ATTACH')))) out.push('attachment')
+  if (attachments && !(await off($.env.get('SLIM_ATTACH')))) out.push('attachment')
   if (!(await off($.env.get('SLIM_PROMPT')))) out.push('prompt')
   return out
 }
@@ -45,12 +45,13 @@ async function startLine($: $, v: string): Promise<void> {
   await update($, EVENTS, l => pushEvent(l, ev))
 }
 
-export function registerInfo(on: On): void {
+/** `attachments` = the userConfig option that registers the @-mentioned file hook. */
+export function registerInfo(on: On, attachments: boolean): void {
   on('session.start', async ($, e, next) => {
     // One throwing session.start hook skips every slim session.start hook (lookup's registration too).
     try {
       const v = await version($)
-      await $.state.set({ plugin: 'slim', key: 'info' }, { v: 1, version: v, channels: await channelsOn($) })
+      await $.state.set({ plugin: 'slim', key: 'info' }, { v: 1, version: v, channels: await channelsOn($, attachments) })
       await startLine($, v)
     } catch {}
     return next(e)

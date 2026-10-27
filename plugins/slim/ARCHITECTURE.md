@@ -18,14 +18,14 @@ the code on the date at the bottom; the code wins when they drift.
 │                                                                                              │
 │  register.ts ──┬── intake.ts     every tool result: gate → spawn core → replace result,       │
 │                │                 write slim.events + slim.rows, toast (MCP, main loop only);  │
-│                │                 an @-mentioned data file the same way (once-per-content line) │
+│                │                 an @-mentioned data file the same way, `attachments` option  │
 │                ├── guard.ts      unwindowed Read of a big spill → deny + pointer; access lines │
 │                ├── prompt.ts     typed / bridge prompt → --prompt → data spans rewritten in    │
 │                │                 place; toast + event                                         │
 │                ├── lookup.ts     mcp__slim__lookup: WebFetch | Read+distill | Bash+distill    │
 │                │                 → one haiku question → ≤ 1 KB answer; event + report line    │
 │                ├── view.ts       mcp__slim__view: Read check | Bash → --view → compact text;  │
-│                │                 out through the Write tool; event + report line              │
+│                │                 out: Write check, the core writes it; event + report line    │
 │                ├── describe.ts   keeps lookup's schema in the prompt (view stays deferred)    │
 │                ├── info.ts       slim.info snapshot at session.start (version, channels);      │
 │                │                 the start line `slim <version>` into slim.events             │
@@ -306,6 +306,7 @@ every request.
               │
               └─ command ─▶ $.tool.call('Bash', { command })     (a host-persisted output → host_path)
               │
+              out? ─▶ $.tool.check('Write', out)   deny → out dropped, outFailed = why; else out to the core
               ▼
           slim.cjs --view   (delivery/view.cjs)
               allowed_out ─▶ clearPlaceholder()   (removes the module's placeholder before anything else)
@@ -316,12 +317,11 @@ every request.
                    ─▶ jq.narrow() ─▶ compress()  (JSON fitted to 16 KB, 64 KB with out, a node tree never;
                                                   parts written)
                       (cached also needs every <<full=…>> part it cites still on disk)
-                   ─▶ { figure, text, write?: { path, marker }, pointer?, original? }
-              │
+                   ─▶ out? the core writes marker + '\n' + text (atomic; a failure → outFailed, the reply
+                      as without out)
+                   ─▶ { figure, text, out?, outFailed?, pointer?, original? }
               ▼
-          write? → $.tool.call('Read', limit 1) when it exists, then $.tool.call('Write', marker + '\n' + text)
-              ▼
-          figure / out: <path> (<n> lines) / --- head --- / text whole ≤ 16 KB, else 40 lines + "read <file> windowed"
+          figure / out: <path> (<n> lines) | out: not written — <why> / --- head --- / text whole ≤ 16 KB, else 40 lines + "read <file> windowed"
               ▼
           slim.events kind 'view'  +  report line (channel view) — always written;
           a view of a spill or host file also writes an entry:"access" line (via view)
@@ -335,10 +335,11 @@ Read tool cannot open one, so the permission rules and the person's yes decide o
 why the media route is media-only: the module sends `media: true`, and a file whose bytes are not an
 image or a video (a text file named `*.mp4`, a link to one) is refused, never read as text.
 
-**Why `out` goes through the Write tool.** The file lands in the user's project, so the same rules,
-hooks and guards that decide on the model's own writes decide on it. The compact text crosses the
-core's stdout once (`write` carries only the marker line), so the 4 MiB output cap measures the text,
-not two copies of it. Media outputs cannot be written that way (binary), so the module checks the
+**Why the core writes `out`.** outTarget() admits an out only in the zone inZone() names
+(`<root|cwd>/.claude/tasks/<id>/`, the spill root), the zone media outputs are written to with no
+host Write. A host Write there bought nothing but a decider that, in auto mode, often gave a
+subagent's Write no verdict and lost the compact text with it. The Write check still rules: a deny
+drops `out`, never the text. Media outputs cannot be written through the Write tool (binary), so the module checks the
 exact first output path. On an `ask`, it writes a placeholder there through the Write tool, so the
 mode's own decider rules: a `$.ui.ask` of its own would ask even where auto mode allows silently. The
 core removes the placeholder before it decides, and refuses any other path; a core that never starts

@@ -148,8 +148,8 @@ export type Viewed = {
   narrowed?: true
   out?: string
   lines?: number
-  /** The file `out` names: the hooks module writes `marker`, a newline, then `text`. */
-  write?: { path: string; marker: string; exists: boolean }
+  /** Why `out` was not written; the reply is then as without out. */
+  outFailed?: string
   pointer?: string
   original?: string
   frames?: number
@@ -169,8 +169,6 @@ export function parseView(run: ProcessRunResult): { ok: true; out: Viewed } | { 
   if (!v || typeof v !== 'object' || !VIEW_DECISIONS.includes(String(v.decision)) || typeof v.text !== 'string' || typeof v.figure !== 'string') {
     return { ok: false, reason: 'bad-output' }
   }
-  const w = v.write
-  if (w !== undefined && (!w || typeof w.path !== 'string' || typeof w.marker !== 'string')) return { ok: false, reason: 'bad-output' }
   return {
     ok: true,
     out: {
@@ -179,7 +177,7 @@ export function parseView(run: ProcessRunResult): { ok: true; out: Viewed } | { 
       bytesIn: typeof v.bytesIn === 'number' ? v.bytesIn : 0,
       bytesOut: typeof v.bytesOut === 'number' ? v.bytesOut : utf8Bytes(v.text),
       stages: Array.isArray(v.stages) ? v.stages : [],
-      ...(w ? { write: { path: w.path, marker: w.marker, exists: w.exists === true } } : {}),
+      outFailed: typeof v.outFailed === 'string' && v.outFailed ? v.outFailed : undefined,
     },
   }
 }

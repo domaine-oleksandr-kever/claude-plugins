@@ -11,14 +11,15 @@ import { registerPrompt } from './prompt.ts'
 import { registerRender } from './render.tsx'
 import { registerView } from './view.ts'
 
-export const register: Register = (on) => {
-  registerIntake(on)
+export const register: Register = (on, options) => {
+  const attachments = options.attachments === true
+  registerIntake(on, attachments)
   registerGuard(on)
   registerPrompt(on)
   registerLookup(on)
   registerView(on)
   registerDescribe(on)
-  registerInfo(on)
+  registerInfo(on, attachments)
   registerEventLog(on)
   registerRender(on)
 }
