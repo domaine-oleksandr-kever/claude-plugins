@@ -63,18 +63,22 @@ const inside = (root, p, minSegs) => {
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel) && rel.split(path.sep).length >= minSegs;
 };
 
-const tasksOf = (dir) => (typeof dir === 'string' && path.isAbsolute(dir) ? landing(path.join(dir, '.claude', 'tasks')) : null);
+const scratchOf = (dir, sub) => (typeof dir === 'string' && path.isAbsolute(dir) ? landing(path.join(dir, '.claude', sub)) : null);
 
-/** True when the landed path `at` is under `<root|cwd>/.claude/tasks/<id>/` or slim's spill root: the zone a view writes to unasked. */
+/**
+ * True when the landed path `at` is under `<root|cwd>/.claude/tasks/<id>/`, `<root|cwd>/.claude/tmp/`
+ * (base's scratch folder, `.claude/tmp/<work-id>/` in a git worktree) or slim's spill root: the zone a
+ * view writes to unasked.
+ */
 function inZone(at, root, cwd) {
   if (!at) return false;
-  return inside(tasksOf(root), at, 2) || inside(tasksOf(cwd), at, 2) || inside(landing(path.resolve(env.spillRoot())), at, 1);
+  return [root, cwd].some((d) => inside(scratchOf(d, 'tasks'), at, 2) || inside(scratchOf(d, 'tmp'), at, 1))
+    || inside(landing(path.resolve(env.spillRoot())), at, 1);
 }
 
 /**
- * The `out` path a view may write → { path, exists } or { why }. Accepted only under
- * `<root>/.claude/tasks/<id>/`, `<cwd>/.claude/tasks/<id>/` (a repo below the session root) or slim's
- * spill root, as a regular file that is not the input.
+ * The `out` path a view may write → { path, exists } or { why }. Accepted only in inZone() (the cwd's
+ * folders cover a repo below the session root), as a regular file that is not the input.
  */
 function outTarget(out, root, cwd, input) {
   if (typeof out !== 'string' || !out.trim() || /[\\/]$/.test(out)) return { why: 'out-not-file' };
@@ -159,7 +163,7 @@ function view(input, opts) {
       // The check ruled on the path as given; a linked folder on the way (macOS /tmp) lands in the same place.
       const allowedOut = typeof input.allowed_out === 'string' ? landing(path.resolve(input.cwd || process.cwd(), input.allowed_out)) : undefined;
       if (input.scratch === true && !inZone(allowedOut, input.root, input.cwd)) {
-        return refuse('not-scratch', `view: ${input.allowed_out} lands outside .claude/tasks/<id>/ — not written without a Write check`, { engine: 'media' });
+        return refuse('not-scratch', `view: ${input.allowed_out} lands outside .claude/tasks/<id>/ and .claude/tmp/ — not written without a Write check`, { engine: 'media' });
       }
       const m = mediaD.normalize(file, { allowedOut, env: process.env, reuse: input.reuse === true });
       // Paths go back under the folder as given (a worktree's linked .claude/tasks), the physical one in a note.
@@ -190,7 +194,7 @@ function view(input, opts) {
     target = outTarget(input.out, input.root, input.cwd, file);
     if (target.why) {
       const why = target.why === 'out-outside-roots'
-        ? `view: out must be under .claude/tasks/<id>/ of the session root or the working directory, or slim's spill root (${env.spillRoot()})`
+        ? `view: out must be under .claude/tasks/<id>/ or .claude/tmp/ of the session root or the working directory, or slim's spill root (${env.spillRoot()})`
         : target.why === 'out-taken' ? `view: out ${input.out} is a folder or a link, not a file`
           : target.why === 'out-is-input' ? 'view: out cannot be the input itself' : `view: out ${input.out} is not a file path`;
       return refuse(target.why, why);

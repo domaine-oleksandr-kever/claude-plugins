@@ -36,7 +36,7 @@ slim is a Claude Code hooks module (mods) and nothing else. Other hosts do not r
 runs as a classic hook. The hooks run wherever the plugin loads. The drawing (the ToolResult line,
 the ToolGroup suffix and the toast) shows in the terminal and the desktop app.
 
-Current release: **slim v0.16.0**.
+Current release: **slim v0.17.0**.
 
 ## Install
 
@@ -565,7 +565,8 @@ whose result the webfetch channel compresses, or through `lookup({ url, question
   bigger one goes through the engine. The figure then gives no saving, because jq changed what is
   measured:
   `slim view: narrowed by jq to 3,891 B of a 63,004 B source (no saving figure: jq changed the measured object)`.
-- `out`: the file to write. It must be under `.claude/tasks/<id>/` of the session root or of the
+- `out`: the file to write. It must be under `.claude/tasks/<id>/` or `.claude/tmp/` (base's
+  scratch folder, `.claude/tmp/<work-id>/` in a git worktree) of the session root or of the
   working directory, or in slim's spill root. The working directory counts for a repo checked out
   below the session root, as in a claude.ai chat sandbox. Relative paths resolve against the working
   directory. view refuses anything else, a folder or a link, before anything runs.
@@ -678,11 +679,12 @@ the first frame). An image already named as a copy has no Write check, since not
 deny from either check is the answer. An image also takes the one-line Read, so PreToolUse guards
 rule on it.
 
-When the Write check answers `ask` on an output inside `.claude/tasks/<id>/` of the session root or
-the working directory (the zone `out` takes with no question, such as a ticket's
-`tmp/attachments/`), slim writes it with no placeholder Write and asks nothing. That includes a
+When the Write check answers `ask` on an output inside `.claude/tasks/<id>/` or `.claude/tmp/` of
+the session root or the working directory (the zone `out` takes with no question, such as a ticket's
+`tmp/attachments/` or a worktree's `.claude/tmp/<work-id>/` screenshot), slim writes it with no
+placeholder Write and asks nothing. That includes a
 worktree whose `.claude/tasks` links to the main checkout's, where paths arrive resolved to the main
-checkout: slim hands any output under some `.claude/tasks/<id>/` to the core, which checks where
+checkout: slim hands any output under some `.claude/tasks/<id>/` or `.claude/tmp/` to the core, which checks where
 that path and the zone land through links first, and refuses (`not-scratch`, nothing written) one
 outside the zone, which then takes the placeholder Write below. A Write check's deny is still the
 answer there.

@@ -1615,8 +1615,12 @@ printf 'MAGICKIMG' > "$o$r"
   const sub = view('Cv7s', { path: src, out: '.claude/tasks/t/tmp/a.txt', root: session, cwd: repo });
   eq('Cv7s-cwd-tasks-ok', [sub.out, existsSync(path.join(repo, '.claude/tasks/t/tmp/a.txt'))], [path.join(repo, '.claude/tasks/t/tmp/a.txt'), true]);
   const sib = view('Cv7s2', { path: src, out: '../other/.claude/tasks/t/a.txt', root: session, cwd: repo });
-  eq('Cv7s2-sibling-refused', [sib.reason, sib.text], ['out-outside-roots', `view: out must be under .claude/tasks/<id>/ of the session root or the working directory, or slim's spill root (${spillDir})`]);
+  eq('Cv7s2-sibling-refused', [sib.reason, sib.text], ['out-outside-roots', `view: out must be under .claude/tasks/<id>/ or .claude/tmp/ of the session root or the working directory, or slim's spill root (${spillDir})`]);
   eq('Cv7s3-cwd-tasks-top-refused', view('Cv7s3', { path: src, out: '.claude/tasks/top.txt', root: session, cwd: repo }).reason, 'out-outside-roots');
+  // base's scratch folder (.claude/tmp/<work-id>/ in a git worktree) takes an out too; a sibling .claude/tmpX does not.
+  const vt = view('Cv7t', { path: src, out: '.claude/tmp/ELC-1/a.txt', root: session, cwd: repo });
+  eq('Cv7t-tmp-ok', [vt.out, existsSync(path.join(repo, '.claude/tmp/ELC-1/a.txt'))], [path.join(repo, '.claude/tmp/ELC-1/a.txt'), true]);
+  eq('Cv7t2-tmpX-refused', view('Cv7t2', { path: src, out: '.claude/tmpX/a.txt', root: session, cwd: repo }).reason, 'out-outside-roots');
   // The OUTPUT_CAP (4 MiB less headroom) measures the text once, out or not.
   const words = (n) => JSON.stringify({ ids: Array.from({ length: n }, (_, i) => `w${i.toString(36).padStart(4, '0')}${'z'.repeat(i % 50)}`).join(' ') });
   writeFileSync(path.join(proj, 'wide.json'), words(80_000));
@@ -1816,6 +1820,17 @@ printf 'MAGICKIMG' > "$o$r"
   writeFileSync(path.join(mainAtt, 'wt.png'), PNG);
   const s4 = viewMedia({ path: path.join(mainAtt, 'wt.png'), allowed_out: path.join(mainAtt, 'wt.1568.jpg'), scratch: true, root: path.join(T, 'wt'), cwd: path.join(T, 'wt') }, phBin);
   eq('Cv18-scratch-worktree-linked-tasks', [s4.decision, readFileSync(path.join(mainAtt, 'wt.1568.jpg'), 'utf8')], ['compressed', 'IMG']);
+  // A worktree screenshot under base's .claude/tmp/<work-id>/: scratch, written with no host Write.
+  const wtTmp = path.join(T, 'wt', '.claude', 'tmp', 'ELC-1754');
+  mkdirSync(wtTmp, { recursive: true });
+  writeFileSync(path.join(wtTmp, 'pdp.png'), PNG);
+  const s5 = viewMedia({ path: path.join(wtTmp, 'pdp.png'), allowed_out: path.join(wtTmp, 'pdp.1568.jpg'), scratch: true, root: path.join(T, 'wt'), cwd: path.join(T, 'wt') }, phBin);
+  eq('Cv18-scratch-worktree-claude-tmp', [s5.decision, readFileSync(path.join(wtTmp, 'pdp.1568.jpg'), 'utf8')], ['compressed', 'IMG']);
+  const tmpEsc = path.join(T, 'wt', '.claude', 'tmp', 'OUT');
+  symlinkSync(esc, tmpEsc);
+  writeFileSync(path.join(esc, 'lnk.1568.jpg'), PH);
+  const s6 = viewMedia({ path: path.join(tmpEsc, 'lnk.png'), allowed_out: path.join(tmpEsc, 'lnk.1568.jpg'), scratch: true, root: path.join(T, 'wt'), cwd: path.join(T, 'wt') }, phBin);
+  eq('Cv18-scratch-tmp-symlink-escape', [s6.reason, existsSync(path.join(esc, 'lnk.1568.jpg'))], ['not-scratch', false]);
 }
 
 // C-csv — a delimited table on every channel the csv engine serves; its re-run is already slim.

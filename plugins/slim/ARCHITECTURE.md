@@ -312,7 +312,7 @@ every request.
               allowed_out ─▶ clearPlaceholder()   (removes the module's placeholder before anything else)
               media bytes ──▶ delivery/media.cjs normalize(path, allowed_out) → outputs beside the input
               (a media request — media / allowed_out — over non-media bytes is refused, never read as text)
-              text ─▶ out target (under <root|cwd>/.claude/tasks/<id>/ or the spill root) ─▶ cached?
+              text ─▶ out target (under <root|cwd>/.claude/tasks/<id>/ or /.claude/tmp/, or the spill root) ─▶ cached?
                       (out newer than the input, line 1 = <<slim view k=<hash> engine=<e> v=<version>>>)
                    ─▶ jq.narrow() ─▶ compress()  (JSON fitted to 16 KB, 64 KB with out, a node tree never;
                                                   parts written)
@@ -336,7 +336,7 @@ why the media route is media-only: the module sends `media: true`, and a file wh
 image or a video (a text file named `*.mp4`, a link to one) is refused, never read as text.
 
 **Why the core writes `out`.** outTarget() admits an out only in the zone inZone() names
-(`<root|cwd>/.claude/tasks/<id>/`, the spill root), the zone media outputs are written to with no
+(`<root|cwd>/.claude/tasks/<id>/`, `<root|cwd>/.claude/tmp/`, the spill root), the zone media outputs are written to with no
 host Write. A host Write there bought nothing but a decider that, in auto mode, often gave a
 subagent's Write no verdict and lost the compact text with it. The Write check still rules: a deny
 drops `out`, never the text. Media outputs cannot be written through the Write tool (binary), so the module checks the

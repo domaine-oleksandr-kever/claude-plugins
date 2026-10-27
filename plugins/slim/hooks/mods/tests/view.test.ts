@@ -108,7 +108,7 @@ describe('V1 registration', () => {
 
   test('the description names both out roots: the session root and the working directory', () => {
     expect(VIEW_DESC).toContain('a JPEG copy at most 1568 px on its long edge and about 150 KB (one already within both stays as it is)')
-    expect(VIEW_DESC).toContain('out writes the compact text to a file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root)')
+    expect(VIEW_DESC).toContain('out writes the compact text to a file under .claude/tasks/<id>/ or .claude/tmp/ of the session root or the working directory (or slim\'s spill root)')
   })
 })
 
@@ -706,7 +706,21 @@ describe('V9 a scratch output and a view that could not resize', () => {
       scratchProbe('/repo/.claude/tasks/T1/./a.1568.jpg'),
       scratchProbe('repo/.claude/tasks/T1/a.1568.jpg'),
       scratchProbe('/repo/a/a.1568.jpg'),
-    ]).toEqual([true, true, false, false, false, false, false, false, false])
+      scratchProbe('/wt/.claude/tmp/ELC-1/a.1568.jpg'),
+      scratchProbe('/wt/.claude/tmp/a.1568.jpg'),
+      scratchProbe('/wt/.claude/tmp//a.1568.jpg'),
+      scratchProbe('/wt/.claude/tmpX/a.1568.jpg'),
+      scratchProbe('/wt/.claude/tmp'),
+    ]).toEqual([true, true, false, false, false, false, false, false, false, true, true, false, false, false])
+  })
+
+  test('V-SCR-8 a worktree screenshot under .claude/tmp/<work-id>/ (base\'s scratch path): no Write, the core gets scratch', async ($, on) => {
+    const shot = '/wt/.claude/tmp/ELC-1754/nc15-pdp.png'
+    const w = world(on, { write: 'ask', root: '/wt', cwd: '/wt' })
+    await view($, { path: shot })
+    expect(trail(w)).toEqual([['Read', shot, 1]])
+    expect(w.asked).toEqual([])
+    expect(w.views.map(v => v.stdin)).toEqual([{ v: 1, path: shot, media: true, allowed_out: '/wt/.claude/tmp/ELC-1754/nc15-pdp.1568.jpg', scratch: true, root: '/wt', cwd: '/wt', session_id: 'S' }])
   })
 
   test('V-SCR-7 a worktree whose .claude/tasks links to the main checkout: the resolved path is scratch', async ($, on) => {

@@ -858,7 +858,7 @@ function handleView(raw) {
       spill.unlinkAll(created);
       const message = reply.out
         ? 'view: the compact text is over 4 MiB even for out — narrow with jq, or Read the source windowed'
-        : 'view: the compact text is over 4 MiB — pass out (under .claude/tasks/<id>/) or narrow with jq';
+        : 'view: the compact text is over 4 MiB — pass out (under .claude/tasks/<id>/ or .claude/tmp/) or narrow with jq';
       reply = { v: 1, decision: 'refused', reason: 'output-cap', engine: reply.engine, figure: message, text: message, bytesIn: reply.bytesIn, bytesOut: 0, stages: [] };
     }
   } catch (e) {

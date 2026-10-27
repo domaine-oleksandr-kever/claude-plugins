@@ -21,7 +21,7 @@ export const VIEW_DESC =
   'CSV/TSV tables, plain-text windows) and returns a figure ' +
   'line and the compact text, whole up to 16 KB, else its head and a file to Read windowed. jq narrows JSON first ' +
   "(dot paths .a.b, .a[0], '[]' iteration, ',' multi-select, '| keys' / '| length'). out writes the compact text to a " +
-  'file under .claude/tasks/<id>/ of the session root or the working directory (or slim\'s spill root), reused while ' +
+  'file under .claude/tasks/<id>/ or .claude/tmp/ of the session root or the working directory (or slim\'s spill root), reused while ' +
   'it is newer than the input. An image becomes a JPEG copy at most 1568 px on its long edge and about 150 KB (one ' +
   'already within both stays as it is) and a video a folder of frames, beside the input; the reply\'s last line names the one image to Read. ' +
   'Give exactly one of path or command; for a URL use WebFetch.'
@@ -81,15 +81,18 @@ export function mediaProbe(path: string): string {
 }
 
 /**
- * True when `probe` (absolute) names a file under some `.claude/tasks/<id>/`: a candidate for the scratch
- * zone a view writes to with no Write check. The core decides by where it lands (`scratch`, view.cjs
- * inZone()), since a worktree's `.claude/tasks` links to the main checkout's and paths arrive resolved.
+ * True when `probe` (absolute) names a file under some `.claude/tasks/<id>/` or `.claude/tmp/`: a
+ * candidate for the scratch zone a view writes to with no Write check. The core decides by where it
+ * lands (`scratch`, view.cjs inZone()), since a worktree's `.claude/tasks` links to the main checkout's
+ * and paths arrive resolved.
  */
 export function scratchProbe(probe: string): boolean {
   const segs = probe.split('/')
   if (!probe.startsWith('/') || segs.some(s => s === '..' || s === '.')) return false
-  for (let i = 1; i + 3 < segs.length; i++) {
-    if (segs[i] === '.claude' && segs[i + 1] === 'tasks') return segs.slice(i + 2).every(s => s !== '')
+  for (let i = 1; i + 2 < segs.length; i++) {
+    if (segs[i] !== '.claude') continue
+    const min = segs[i + 1] === 'tasks' ? 2 : segs[i + 1] === 'tmp' ? 1 : 0
+    if (min && segs.length - (i + 2) >= min) return segs.slice(i + 2).every(s => s !== '')
   }
   return false
 }
@@ -320,7 +323,7 @@ async function viewMedia($: $, path: string, a: Record<string, string>): Promise
 
 /**
  * The core's run with `out` ruled on by a Write check: the core writes an out it admits (only under
- * .claude/tasks/<id>/ or slim's spill root) with no host Write; a deny drops `out` and the reply says so.
+ * .claude/tasks/<id>/, .claude/tmp/ or slim's spill root) with no host Write; a deny drops `out` and the reply says so.
  */
 async function coreOut($: $, rung: 'path' | 'command', payload: Record<string, unknown>, a: Record<string, string>): Promise<Outcome> {
   if (a.out === undefined) return core($, rung, { ...payload, ...a })
