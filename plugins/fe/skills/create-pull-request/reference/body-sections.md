@@ -17,7 +17,30 @@ lists) lives in the Jira ticket, the task workspace, or a PR *comment* — never
 body scales with content, not with a section count: **a section with nothing real to say is
 omitted entirely — no "None", no "N/A" placeholders.**
 
-**Core skeleton — always present, in exactly this order, before anything else:**
+**Core skeleton — always present, in exactly this order, before anything else.** Every section
+opens with a level-2 heading of exactly this text on its own line — `drafter-check.cjs file pr`
+finds a section by that line, so a bare paragraph or a `Jira: …` line counts as missing:
+
+```markdown
+## Summary
+<2–3 sentences>
+
+## Jira ticket
+[ELC-1590](https://<site>.atlassian.net/browse/ELC-1590)
+<theme preview table — no heading of its own>
+
+## To check
+1. <step>
+
+## Screenshots
+_Drag in: …_
+
+## Changes
+- <file> — <what changed>
+```
+
+A conditional section below uses the same form: `## Dependencies`, `## Accessibility`,
+`## Performance`.
 
 1. **Summary** — 2–3 sentences in plain English for a reader who does not read code (QA, PM,
    client); you propose it, the developer approves it at the checkpoint. One or two sentences
@@ -36,10 +59,10 @@ omitted entirely — no "None", no "N/A" placeholders.**
    explains the old code, the investigation, or the author's verification is cut, not
    shortened.
 2. **Jira ticket** — key + URL (list every ticket when the PR closes more than one).
-3. **Theme preview** — the conditional table (`theme-preview-table.md`), **directly under the Jira link — never at
-   the bottom**: a reviewer must hit the preview link without scrolling. Nothing goes under the
+3. **Theme preview** — the conditional table (`theme-preview-table.md`), inside the Jira ticket
+   section **directly under the Jira link — never at the bottom**: a reviewer must hit the preview link without scrolling. Nothing goes under the
    table; the hints the links need go into To check.
-4. **To check** — heading `## To check`: numbered one-line steps — what to open (a preview
+4. **To check** — numbered one-line steps — what to open (a preview
    deep-link or page), what to do, what to see. Written for QA / team-lead eyes: visible
    labels, URLs, sizes, colours, texts; no code names, no file paths, no setup prose, no edge
    cases, no Expected/Actual format. Which store to use, which setting is on in this preview,
@@ -48,7 +71,7 @@ omitted entirely — no "None", no "N/A" placeholders.**
    link the ticket's Steps to Test field instead of growing the list. The steps come from the
    workspace verification record (`notes.md` / `qa.md`); the full Steps to Test, setup and edge
    cases stay in Jira.
-5. **Screenshots** — heading `## Screenshots`, 1–3 images, never more: a bug = one of the
+5. **Screenshots** — 1–3 images, never more: a bug = one of the
    affected section; a feature = desktop + mobile of the main state. Pick them from the browser
    checks already taken (`/fe:develop-feature-or-fix` in-browser validation,
    `/fe:qa-feature-or-fix`, a QA preflight's `preflight/` frames) and copy them into the

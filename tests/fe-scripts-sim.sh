@@ -5796,7 +5796,9 @@ cat > "$DCD/pr.md" <<MD
 
 The scent notes heading wrapped on small phones. It now stays on one line. $SENT
 
-**Jira ticket:** [ELC-1](https://example.atlassian.net/browse/ELC-1)
+## Jira ticket
+
+[ELC-1](https://example.atlassian.net/browse/ELC-1)
 
 |                |                 |
 | -------------- | --------------- |
@@ -5818,7 +5820,17 @@ MD
 dc DC9-pr-good 0 'result=ok' file pr "$DCD/pr.md" --theme
 grep -q '^summary_sentences=3$' "$DCD/out" && grep -q '^long_sentences=0$' "$DCD/out" && ok || bad DC9-pr-counts "$(tr '\n' ';' < "$DCD/out")"
 grep -v '^## Changes' "$DCD/pr.md" > "$DCD/pr-nochanges.md"
-dc DC10-pr-missing-core 1 'fail section missing: Changes' file pr "$DCD/pr-nochanges.md"
+dc DC10-pr-missing-core 1 'fail section missing: Changes (a `## Changes` heading line)' file pr "$DCD/pr-nochanges.md"
+# DC10b: the drafter's failing shape — a bare Summary paragraph and a `Jira:` line — names both headings
+awk 'NR <= 2 { next } /^## Jira ticket$/ { j = 1; next } j && /^\[ELC-1\]/ { print "Jira: " $0; j = 0; next } j && /^$/ { next } 1' "$DCD/pr.md" > "$DCD/pr-bare.md"
+dc DC10b-pr-bare-summary 1 'fail section missing: Summary (a `## Summary` heading line)' file pr "$DCD/pr-bare.md"
+grep -qF 'fail section missing: Jira ticket (a `## Jira ticket` heading line)' "$DCD/out" && ok || bad DC10b-jira "$(tr '\n' ';' < "$DCD/out")"
+sed 's/^## Jira ticket$/**Jira ticket:**/' "$DCD/pr.md" > "$DCD/pr-boldjira.md"
+dc DC10c-pr-bold-label-lenient 0 'result=ok' file pr "$DCD/pr-boldjira.md"
+# DC10d: body-sections.md shows every heading the check names in its fail line
+for h in Summary 'Jira ticket' 'To check' Screenshots Changes; do
+  grep -qF "## $h" "$ROOT/plugins/fe/skills/create-pull-request/reference/body-sections.md" && ok || bad "DC10d-doc-heading-$h" "body-sections.md lacks '## $h'"
+done
 grep -v '^| \*\*' "$DCD/pr.md" > "$DCD/pr-notable.md"
 dc DC9b-pr-good-default 0 'result=ok' file pr "$DCD/pr.md"
 dc DC11-pr-theme-table 1 "fail theme preview table missing (pass --no-preview only with the developer's explicit no-preview answer)" file pr "$DCD/pr-notable.md"

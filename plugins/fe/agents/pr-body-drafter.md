@@ -63,8 +63,9 @@ The ticket files (Description, AC, TA), `notes.md` (`ceiling:`, `ta-divergence:`
    `answers:` → ESCALATE ("why does the branch differ from the TA here?"). An AC with no change behind
    it → ESCALATE.
 2. **Title** — title-convention.md.
-3. **Body** — body-sections.md: the core skeleton in order, conditional sections only with real
-   content, no "None"/"N/A". Theme preview table per theme-preview-table.md, deep-linked per Page
+3. **Body** — body-sections.md: the core skeleton in order, each section under the exact `## <Name>`
+   heading its skeleton block shows (`## Summary`, `## Jira ticket`, …), conditional sections only
+   with real content, no "None"/"N/A". Theme preview table per theme-preview-table.md, deep-linked per Page
    deep-links: one row group per `theme:` entry, its `note:` placed as that file says; left out only
    when `answers:` says the PR has no preview. Paths come from `preview_path`, `notes.md` `preview-placed:` lines or the `notes.md` /
    `qa.md` verification record; none there and the surface ambiguous → ESCALATE (never guess a URL).

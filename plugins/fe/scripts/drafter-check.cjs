@@ -74,8 +74,8 @@ function checkStt(path) {
   return report(['kind=stt', `template=${bug ? 'bug' : 'general'}`, `items=${nums.length}`, `attribution_hits=${hits}`], fails);
 }
 
-// fe create-pull-request reference/body-sections.md: the core skeleton, in order. A section opens
-// with a heading or a bold label at the start of a line.
+// fe create-pull-request reference/body-sections.md: the core skeleton, in order. The docs ask for a
+// `## <Name>` heading line; a bold label at the start of a line is accepted too.
 const CORE = [
   ['Summary', /^summary\b/i],
   ['Jira ticket', /^jira\b/i],
@@ -113,7 +113,7 @@ function checkPr(path, noPreview) {
   if (text === null) return report(['kind=pr', np], fails);
   const lines = text.split('\n');
   const at = CORE.map(([, re]) => lines.findIndex((l) => { const s = sectionLabel(l); return s !== null && re.test(s); }));
-  CORE.forEach(([name], i) => { if (at[i] < 0) fails.push(`section missing: ${name}`); });
+  CORE.forEach(([name], i) => { if (at[i] < 0) fails.push(`section missing: ${name} (a \`## ${name}\` heading line)`); });
   const found = at.filter((i) => i >= 0);
   if (found.some((v, i) => i && v < found[i - 1])) fails.push('core sections out of order');
   if (noPreview !== 'recorded') {
