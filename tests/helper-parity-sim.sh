@@ -3,8 +3,8 @@
 # path is versioned, so one plugin cannot source another's), and a fix that lands in one copy only
 # goes stale in the rest. This suite fails when the copies drift:
 #   a. every plugins/<p>/scripts/doctor.cjs (fnd aside) carries the same body of out, usage,
-#      parseArgs, readJson, checkNode, enabledPlugins, newestSessionDir and installedPlugin (the
-#      `const found = …;` record it returns may carry extra fields);
+#      parseArgs, readJson, checkNode, enabledPlugins, newestSessionDir, installedPlugin, syncedPlugin and
+#      recordedPlugin (the `const found = …;` record it returns may carry extra fields);
 #   b. checkEventLog is the same in every team plugin's doctor.cjs once the plugin's own name
 #      (`fe`, `FE_`) is read as a placeholder;
 #   c. fe's _shopify-common.sh carries base's _common.sh bodies of trim_ws and dotenv_value.
@@ -45,11 +45,11 @@ const same = (rule, name, copies) => {
   for (const c of [first, ...rest]) if (c.body === null) out.push(`${rule}\t${c.p}\t${name} missing`);
   for (const c of rest) if (c.body !== null && first.body !== null && c.body !== first.body) out.push(`${rule}\t${c.p}\t${name} differs from ${first.p}`);
 };
-for (const name of ['out', 'usage', 'parseArgs', 'readJson', 'checkNode', 'enabledPlugins', 'newestSessionDir']) {
+for (const name of ['out', 'usage', 'parseArgs', 'readJson', 'checkNode', 'enabledPlugins', 'newestSessionDir', 'installedPlugin', 'syncedPlugin']) {
   same('a', name, doctors.map(({ p, src }) => ({ p, body: jsBody(src, name) })));
 }
-same('a', 'installedPlugin', doctors.map(({ p, src }) => {
-  const b = jsBody(src, 'installedPlugin');
+same('a', 'recordedPlugin', doctors.map(({ p, src }) => {
+  const b = jsBody(src, 'recordedPlugin');
   return { p, body: b && b.replace(/const found = [^;]*;/, 'const found = …;') };
 }));
 const team = doctors.filter(({ p }) => JSON.stringify(manifest(p).dependencies) === '["base"]');
@@ -98,7 +98,7 @@ want() { # want <rule> <plugin> <what>
 want a qa "readJson differs from base"
 want b fe "checkEventLog missing"
 want c fe "dotenv_value differs from base"
-if ! grep -q 'installedPlugin' "$TMP/fx.out"; then ok; else bad fixture-a-found "an extra field in the found record was flagged"; fi
+if ! grep -qE 'installedPlugin|recordedPlugin' "$TMP/fx.out"; then ok; else bad fixture-a-found "an extra field in the found record was flagged"; fi
 
 # ------------------------------------------------------------------------------- the real plugins --
 "$NODE_BIN" "$CHECK" "$ROOT" > "$TMP/real.out"

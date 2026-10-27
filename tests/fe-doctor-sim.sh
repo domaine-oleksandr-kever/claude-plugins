@@ -159,6 +159,11 @@ printf '{"name":"base","version":"0.8.0"}\n' > "$SB/.claude-plugin/plugin.json";
 run --root "$P" --home "$HS" --project "$PRJ"; expect FD15c-base-synced 0 "PASS  base          base@synced 0.8.0 installed and enabled"
 printf '{"enabledPlugins":{"base@synced":false}}\n' > "$HS/.claude/settings.json"
 run --root "$P" --home "$HS" --project "$PRJ"; expect FD15d-base-synced-off 1 "FAIL  base          base@synced 0.8.0 is installed but disabled"
+# A re-synced copy lives at <name>~g<N>: the highest generation is the copy.
+HG="$TMP/h-synced-gen"; mkhome "$HG"; SG="$HG/.claude/plugins/synced/acc_1"
+for d in base base~g2; do mkdir -p "$SG/$d/.claude-plugin"; basefiles "$SG/$d"; done
+printf '{"name":"base","version":"0.8.0"}\n' > "$SG/base/.claude-plugin/plugin.json"; printf '{"name":"base","version":"0.9.0"}\n' > "$SG/base~g2/.claude-plugin/plugin.json"
+run --root "$P" --home "$HG" --project "$PRJ"; expect FD15e-base-synced-gen 0 "PASS  base          base@synced 0.9.0 installed and enabled" "!base@synced 0.8.0"
 H4="$TMP/h-baseoff"; mkhome "$H4" "$(installed "$BASE_USER")" '{"enabledPlugins":{"base@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect FD16-base-disabled-user 1 "FAIL  base          base@domaine 0.2.0 is installed but disabled — enable it in /plugin"

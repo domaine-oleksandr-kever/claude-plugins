@@ -155,6 +155,10 @@ HS="$TMP/h-synced"; mkhome "$HS"; mkbase "$HS/.claude/plugins/synced/acc_1/base"
 run --root "$P" --home "$HS" --project "$PRJ"; expect PD17b-base-synced 0 "PASS  base        base@synced 0.3.1 installed and enabled"
 printf '{"enabledPlugins":{"base@synced":false}}\n' > "$HS/.claude/settings.json"
 run --root "$P" --home "$HS" --project "$PRJ"; expect PD17c-base-synced-off 1 "FAIL  base        base@synced 0.3.1 is installed but disabled"
+# A re-synced copy lives at <name>~g<N>: the highest generation is the copy.
+HG="$TMP/h-synced-gen"; mkhome "$HG"; SG="$HG/.claude/plugins/synced/acc_1"; PMS='{"atlassian":{"command":"npx"},"notion-mcp":{"type":"http"},"playwright":{}}'
+mkbase "$SG/base~g1" "$PMS"; mkbase "$SG/base~g2" "$PMS"; sed -i.bak 's/"0.3.1"/"0.4.0"/' "$SG/base~g2/.claude-plugin/plugin.json"
+run --root "$P" --home "$HG" --project "$PRJ"; expect PD17d-base-synced-gen 0 "PASS  base        base@synced 0.4.0 installed and enabled" "!base@synced 0.3.1"
 H4="$TMP/h-baseoff"; mkhome "$H4" "$(installed "$(base_user "$BASEDIR")")" '{"enabledPlugins":{"base@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect PD18-base-disabled-user 1 "FAIL  base        base@domaine 0.3.1 is installed but disabled — enable it in /plugin" \

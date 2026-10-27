@@ -183,10 +183,10 @@ function enabledPlugins(claudeDir, projectDir) {
 }
 
 /**
- * The install of `<name>@<marketplace>` this project would load (user scope or this project), else its synced copy, or null.
+ * The install record of `<name>@<marketplace>` this project would load (user scope or this project), or null.
  * Enabled means its settings key is `true`: Claude Code never loads a plugin whose key is absent.
  */
-function installedPlugin(name, claudeDir, projectDir, enabled) {
+function recordedPlugin(name, claudeDir, projectDir, enabled) {
   const record = readJson(path.join(claudeDir, 'plugins', 'installed_plugins.json'));
   const plugins = record && record.plugins && typeof record.plugins === 'object' ? record.plugins : {};
   let disabled = null;
@@ -194,30 +194,47 @@ function installedPlugin(name, claudeDir, projectDir, enabled) {
     if (key.split('@')[0] !== name || !Array.isArray(entries)) continue;
     const entry = entries.find((e) => e && (e.scope === 'user' || (e.projectPath && path.resolve(e.projectPath) === projectDir)));
     if (!entry) continue;
-    const found = { key, version: String(entry.version || '?'), installPath: entry.installPath };
+    const found = { key, version: String(entry.version || '?'), installPath: typeof entry.installPath === 'string' ? entry.installPath : null };
     if (enabled[key] !== true) {
       disabled = found;
       continue;
     }
     return { ...found, disabled: false };
   }
-  return disabled ? { ...disabled, disabled: true } : syncedPlugin(name, claudeDir, enabled);
+  return disabled ? { ...disabled, disabled: true } : null;
+}
+
+/** The install this project would load, else the synced copy, or null. */
+function installedPlugin(name, claudeDir, projectDir, enabled) {
+  return recordedPlugin(name, claudeDir, projectDir, enabled) || syncedPlugin(name, claudeDir, enabled);
 }
 
 /**
- * The claude.ai-account copy of `<name>` (`<name>@synced`): `plugins/synced/<account>/<name>/` beside this plugin
- * in a cloud session or a synced terminal, with no install record; it loads unless its settings key is `false`.
+ * The claude.ai-account copy of `<name>` (`<name>@synced`): `plugins/synced/<account>/<name>[~g<N>]/` (the highest
+ * generation; the account a `.bucket-<account>` marker names first), with no install record; it loads unless its
+ * settings key is `false`.
  */
 function syncedPlugin(name, claudeDir, enabled) {
   const root = path.join(claudeDir, 'plugins', 'synced');
-  let accounts = [];
-  try { accounts = fs.readdirSync(root); } catch { return null; }
-  for (const account of accounts) {
-    const dir = path.resolve(root, account, name);
-    const manifest = readJson(path.join(dir, '.claude-plugin', 'plugin.json'));
-    if (!manifest) continue;
-    const key = name + '@synced';
-    return { key, version: String(manifest.version || '?'), installPath: dir, disabled: enabled[key] === false };
+  let entries = [];
+  try { entries = fs.readdirSync(root); } catch { return null; }
+  const accounts = entries.filter((a) => !a.startsWith('.'));
+  const marked = accounts.filter((a) => entries.includes('.bucket-' + a));
+  for (const account of [...marked, ...accounts.filter((a) => !marked.includes(a))]) {
+    let dirs = [];
+    try { dirs = fs.readdirSync(path.join(root, account)); } catch { continue; }
+    let best = null;
+    for (const d of dirs) {
+      const gen = d === name ? 0 : d.startsWith(name + '~g') && /^\d+$/.test(d.slice(name.length + 2)) ? Number(d.slice(name.length + 2)) : -1;
+      if (gen < 0 || (best && best.gen >= gen)) continue;
+      const dir = path.resolve(root, account, d);
+      const manifest = readJson(path.join(dir, '.claude-plugin', 'plugin.json'));
+      if (manifest) best = { gen, dir, version: String(manifest.version || '?') };
+    }
+    if (best) {
+      const key = name + '@synced';
+      return { key, version: best.version, installPath: best.dir, disabled: enabled[key] === false };
+    }
   }
   return null;
 }

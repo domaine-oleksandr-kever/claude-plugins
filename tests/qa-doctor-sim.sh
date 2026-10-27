@@ -180,6 +180,9 @@ HS="$TMP/h-synced"; mkhome "$HS"; mkbase "$HS/.claude/plugins/synced/acc_1/base"
 run --root "$P" --home "$HS" --project "$PRJ"; expect FD18b-base-synced 0 "PASS  base             base@synced 0.3.1 installed and enabled"
 printf '{"enabledPlugins":{"base@synced":false}}\n' > "$HS/.claude/settings.json"
 run --root "$P" --home "$HS" --project "$PRJ"; expect FD18c-base-synced-off 1 "FAIL  base             base@synced 0.3.1 is installed but disabled"
+# A re-synced copy lives at <name>~g<N>: the highest generation is the copy.
+HG="$TMP/h-synced-gen"; mkhome "$HG"; mkbase "$HG/.claude/plugins/synced/acc_1/base~g1"; mkbase "$HG/.claude/plugins/synced/acc_1/base~g2" '{"name":"base","version":"0.4.0","mcpServers":{"chrome-devtools-mcp":{}}}'
+run --root "$P" --home "$HG" --project "$PRJ"; expect FD18d-base-synced-gen 0 "PASS  base             base@synced 0.4.0 installed and enabled" "!base@synced 0.3.1"
 H4="$TMP/h-baseoff"; mkhome "$H4" "$(installed "$(base_user "$REAL_BASE")")" '{"enabledPlugins":{"base@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect FD19-base-disabled-user 1 "FAIL  base             base@domaine 0.3.1 is installed but disabled — enable it in /plugin" "SKIP  registry"
