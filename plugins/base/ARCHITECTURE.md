@@ -117,6 +117,8 @@ draws `base.progress` and its hints name `/base:save-task-context`; its Log pane
 - **Doctor**: `doctor.cjs` reads `installed_plugins.json` and the user, project and local settings for
   slim; `/base-doctor` adds what the session loaded (`slim-live`, `conventions`) and each MCP
   server's `$.mcp.connect` answer. A slim the install record lacks but the session loaded is a WARN.
+  Its `copy:<name>` rows compare each install with the claude.ai-synced copy beside it and name the one
+  this session loaded: base's root, the other plugins' `start` line in the `--log-dir` the mod passes.
 
 ## 5. What stays a script, and why
 

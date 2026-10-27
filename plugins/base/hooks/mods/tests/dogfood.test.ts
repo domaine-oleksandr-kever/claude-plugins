@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { NUDGE, TOOL, bashText, capEvidence, crashedIn, deniedNotRun, designedRefusal, dogfoodAccounts, errorLine, failureLine, pluginScript, pluginScripts, priorErrors, scriptLast, seen, slugOf } from '../dogfood/text.ts'
+import { NUDGE, TOOL, bashText, capEvidence, crashedIn, defectBody, deniedNotRun, designedRefusal, dogfoodAccounts, errorLine, failureLine, pluginScript, pluginScripts, priorErrors, scriptLast, seen, slugOf, startVersion, syncedRoot, versionsLine, versionsOf } from '../dogfood/text.ts'
 import { NOW, PEEK, ROOT, TEXT, eventsOf, peek, ran, run, start, submit, world } from './world.ts'
 
 const t = (name: string, body: ($: any, on: On) => Promise<void>) => test(name, { plugins: [PEEK] }, body)
@@ -191,12 +191,24 @@ describe('plugin_defect', () => {
     expect(body).toContain(`- project root: ${ROOT}`)
     expect(body).toContain('- git: git@github.com:acme/shop.git · feature/ABC-1591-x · abc1234')
     expect(body).toContain('- plugins: slim 0.10.2, band (version unknown), base 0.9.0, fe 0.5.3')
+    expect(body).toMatch(/\n- base root: \/\S+\n/)
+    expect(body).not.toContain('claude.ai-synced')
     expect(body).toContain('- surfaces: terminal')
     expect(body).toContain('- Claude Code: 2.1.293')
     expect(calls.writes.find(x => x.path === INDEX)!.text).toBe(`- ${DATE} base md-to-adf drops tables → ${path}\n`)
     expect((await eventsOf($, 'defect')).map(e => e.text)).toEqual(['base: md-to-adf drops tables'])
     expect(calls.runs).toEqual([])
     expect(r.result).not.toContain('## Environment')
+  })
+
+  t('a plugin that loaded another copy than its install record: the start line version, the record beside it', async ($, on) => {
+    const { w, calls } = await installedWorld($, on)
+    w.files[`${HOME}/.claude/domaine/log/s1/fe.jsonl`] = { text: '{"plugin":"fe","version":"0.4.0","kind":"start"}\n{"plugin":"fe","kind":"x"}\n', mtimeMs: 0 }
+    await start($)
+    await report($, { plugin: 'fe' })
+    const body = calls.writes.find(x => x.path.startsWith(`${DIR}/${DATE}-fe-`))!.text
+    expect(body).toContain('version: "0.4.0"')
+    expect(body).toContain('- plugins: slim 0.10.2, band (version unknown), base 0.9.0, fe 0.4.0 (installed 0.5.3)')
   })
 
   t('control characters never reach the slug, the index, the heading or the body', async ($, on) => {
@@ -736,6 +748,29 @@ describe('/base-defects and the doctor row', () => {
 })
 
 describe('pure parts', () => {
+  test('startVersion: the last start line of that plugin', () => {
+    const jsonl = ['{"plugin":"fe","version":"0.3.0","kind":"start"}', 'not json "kind":"start"', '{"plugin":"fe","version":"0.4.0","kind":"start"}', '{"plugin":"qa","version":"9","kind":"start"}', '{"plugin":"fe","kind":"tool"}'].join('\n')
+    expect(startVersion(jsonl, 'fe')).toBe('0.4.0')
+    expect(startVersion(jsonl, 'be')).toBeNull()
+    expect(startVersion(null, 'fe')).toBeNull()
+  })
+
+  test('syncedRoot and the Environment block: a synced base root is marked', () => {
+    expect(syncedRoot('/u/.claude/plugins/synced/org_user/base~g2')).toBe(true)
+    expect(syncedRoot('/u/.claude/plugins/cache/domaine/base/0.15.0')).toBe(false)
+    const env = { root: '/r', remote: null, branch: null, commit: null, versions: 'base 0.12.0 (installed 0.15.0)', surfaces: 'desktop', claudeCode: null, session: 's', workId: null }
+    const d = { plugin: 'base', kind: 'doctor', title: 't', path: '', observed: '', expected: '', reproduce: '', evidence: '', suspect: 'unsure' } as any
+    const m = { version: '0.12.0', date: '2026-10-27', session: 's', workId: null }
+    expect(defectBody(d, m, { ...env, pluginRoot: '/u/.claude/plugins/synced/org_user/base~g2' })).toContain('- base root: /u/.claude/plugins/synced/org_user/base~g2 (the claude.ai-synced copy)\n')
+    expect(defectBody(d, m, { ...env, pluginRoot: '/c/base/0.15.0' })).toContain('- base root: /c/base/0.15.0\n')
+  })
+
+  test('versionsOf: the start line beats the install record, slim\'s own info beats both', () => {
+    const installed = JSON.stringify({ plugins: { 'fe@domaine': [{ version: '0.11.4' }], 'slim@domaine': [{ version: '0.15.2' }], 'band@domaine': [{ version: '0.15.0' }] } })
+    const v = versionsOf(installed, '/s/base~g2', '0.12.0', '0.14.1', [], { fe: '0.9.1', slim: '0.1.0', band: '0.15.0' })
+    expect(versionsLine(v)).toBe('slim 0.14.1 (installed 0.15.2), band 0.15.0, base 0.12.0, fe 0.9.1 (installed 0.11.4)')
+  })
+
   test('pluginScript: repo and cache paths of the seven plugins only', () => {
     expect(pluginScript(SCRIPT_CMD)).toBe('md-to-adf.cjs')
     expect(pluginScript('bash plugins/base/scripts/review-scope.sh --x')).toBe('review-scope.sh')

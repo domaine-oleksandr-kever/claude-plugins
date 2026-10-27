@@ -7,6 +7,7 @@ import type { EngineInterface, On } from 'claude-code'
 import type { BaseDogfood, BaseEvent } from '../../types'
 import {
   NUDGE,
+  PLUGINS,
   TOOL,
   TOOL_DESC,
   TOOL_NAME,
@@ -37,10 +38,11 @@ import {
   scriptLast,
   seen,
   slugOf,
+  startVersion,
   versionsLine,
   versionsOf,
 } from './dogfood/text.ts'
-import type { Defect, Plugin, ScriptError } from './dogfood/text.ts'
+import type { Defect, Plugin, ScriptError, Versions } from './dogfood/text.ts'
 import { logDir, logLine, pushEvent } from './events.ts'
 import type { Disk } from './events.ts'
 
@@ -113,10 +115,22 @@ async function ownVersion($: $): Promise<string> {
   }
 }
 
-async function versions($: $, installed: string | null): Promise<Map<Plugin, string | null>> {
+/** What each plugin's start line in this session's log says it loaded: a synced copy's version, not the install record's. */
+async function started($: $, sid: string): Promise<Partial<Record<Plugin, string>>> {
+  const dir = logDir(await $.env.get('HOME'), await $.env.get('DOMAINE_LOG_DIR'), sid)
+  const out: Partial<Record<Plugin, string>> = {}
+  if (!dir) return out
+  for (const p of PLUGINS) {
+    const v = startVersion(await $.fs.read(`${dir}/${p}.jsonl`).catch(() => null), p)
+    if (v) out[p] = v
+  }
+  return out
+}
+
+async function versions($: $, installed: string | null, sid: string): Promise<Versions> {
   const slim = (await read($, slimInfo).catch(() => null))?.version ?? null
   const enabled = enabledNames(await $.settings.read().catch(() => null))
-  return versionsOf(installed, $.plugin.root, await ownVersion($), slim, enabled)
+  return versionsOf(installed, $.plugin.root, await ownVersion($), slim, enabled, await started($, sid))
 }
 
 async function git($: $, root: string, args: string[]): Promise<string | null> {
@@ -202,8 +216,8 @@ async function report($: $, d: Defect): Promise<string> {
   if (!path) return `plugin_defect: ${MAX_CLASH} reports named ${date}-${d.plugin}-${slug} already: give a different title`
   const config = await configDir($)
   const installed = await readOrNull($, config && `${config}/plugins/installed_plugins.json`)
-  const v = await versions($, installed)
   const sid = String(await $.session.id())
+  const v = await versions($, installed, sid)
   const p = await read($, progress).catch(() => null)
   const workId = p?.workId ?? null
   const [remote, branch, commit] = await Promise.all([
@@ -214,8 +228,9 @@ async function report($: $, d: Defect): Promise<string> {
   const surfaces = await $.session.surfaces().catch(() => null)
   const surfaceless = surfaces?.length === 0
   const claudeCode = (await $.session.version().catch(() => null))?.version ?? null
-  const body = defectBody(d, { version: v.get(d.plugin) ?? 'unknown', date, session: sid, workId }, {
+  const body = defectBody(d, { version: v.get(d.plugin)?.loaded ?? 'unknown', date, session: sid, workId }, {
     root,
+    pluginRoot: $.plugin.root,
     remote,
     branch,
     commit,

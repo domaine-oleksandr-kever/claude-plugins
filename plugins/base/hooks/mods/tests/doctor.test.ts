@@ -107,6 +107,15 @@ describe('/base-doctor', () => {
     expect(out[9]).toBe('doctor: 7 passed, 0 failed, 1 skipped')
   })
 
+  t('a stale synced copy: the static copy:<name> WARN reaches the answer and the summary as it came', async ($, on) => {
+    const stale = row('WARN', 'copy:base', 'this session loaded the synced copy 0.12.0; install base@domaine 0.15.0 (/c/base/0.15.0), synced base@synced 0.12.0 (/s/base~g2): the synced copy is older and this session runs it')
+    world(on, { env: { HOME }, manifest: manifest([]), run: () => ran(0, staticOut([...GREEN, stale])) })
+    await start($)
+    const { text } = await doctor($)
+    expect(lines(text)).toContain(`WARN  copy:base    ${stale.detail}`)
+    expect(text).toMatch(/doctor: \d+ passed, 0 failed, \d+ skipped, 1 warned/)
+  })
+
   t('one doctor line in base.events, and the events tail in the answer', async ($, on) => {
     const { clock } = world(on, { manifest: manifest([]), run: () => ran(0, staticOut(GREEN)) })
     await start($)

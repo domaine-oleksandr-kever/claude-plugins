@@ -169,6 +169,11 @@ printf '{"name":"slim","version":"0.9.0"}\n' > "$SS/.claude-plugin/plugin.json"
 run --root "$P" --home "$HS" --project "$PRJ"; expect CD15c-slim-synced 0 "PASS  slim       slim@synced 0.9.0 installed and enabled"
 printf '{"enabledPlugins":{"slim@synced":false}}\n' > "$HS/.claude/settings.json"
 run --root "$P" --home "$HS" --project "$PRJ"; expect CD15d-slim-synced-off 1 "FAIL  slim       slim@synced 0.9.0 is installed but disabled"
+# A re-synced plugin lives at <name>~g<N>: the highest generation is the copy.
+HSG="$TMP/h-synced-gen"; mkhome "$HSG"; mkdir -p "$HSG/.claude/plugins/synced/acc_1/slim~g2/.claude-plugin" "$HSG/.claude/plugins/synced/acc_1/slim~g3/.claude-plugin"
+printf '{"name":"slim","version":"0.8.0"}\n' > "$HSG/.claude/plugins/synced/acc_1/slim~g2/.claude-plugin/plugin.json"
+printf '{"name":"slim","version":"0.9.2"}\n' > "$HSG/.claude/plugins/synced/acc_1/slim~g3/.claude-plugin/plugin.json"
+run --root "$P" --home "$HSG" --project "$PRJ"; expect CD15e-slim-synced-generation 0 "PASS  slim       slim@synced 0.9.2 installed and enabled" "!0.8.0" "!copy:"
 H4="$TMP/h-slimoff"; mkhome "$H4" "$(installed "$SLIM_USER")" '{"enabledPlugins":{"slim@domaine":false}}'
 run --root "$P" --home "$H4" --project "$PRJ"
 expect CD16-slim-disabled-user 1 "FAIL  slim       slim@domaine 0.5.0 is installed but disabled — enable it in /plugin"
@@ -296,6 +301,38 @@ rm -rf "$C/domaine/fe/0.9.1" "$C/domaine/fe/0.8.0"
 run --root "$P" --home "$HC" --project "$PRJ"
 expect CD42-cache-prune-rules 0 "WARN  cache" "stale versions in $C/domaine: slim 0.9.0 — scripts/install.sh --prune-cache" \
   "!0.10.2" "!fe 0.9.0"
+
+# ---------------------------------------------------------------------------------- copies --
+# A plugin with both an install record and a claude.ai-synced copy gets a copy:<name> row: which copy this session
+# loaded (base: its own root; the others: their start line in the session log), WARN when the synced one is older.
+HY="$TMP/hcopies"; SY="$HY/.claude/plugins/synced/acc_1"; LY="$TMP/logs-copies/s1"; mkdir -p "$LY"
+mkhome "$HY" "$(installed "$SLIM_USER"',"base@domaine":[{"scope":"user","installPath":"/c/base/0.9.1","version":"0.9.1"}],"fe@domaine":[{"scope":"user","installPath":"/c/fe/0.5.0","version":"0.5.0"}]')" \
+  '{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fe@domaine":true}}'
+synced() { mkdir -p "$SY/$1/.claude-plugin"; printf '{"name":"%s","version":"%s"}\n' "${1%%~*}" "$2" > "$SY/$1/.claude-plugin/plugin.json"; }
+synced base~g2 0.8.0
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD52-copy-install-loaded-synced-older 0 "WARN  copy:base  this session loaded the install 0.9.1; install base@domaine 0.9.1 (/c/base/0.9.1), synced base@synced 0.8.0 ($SY/base~g2): the synced copy is older and a session that loads it (the desktop app, a claude.ai cloud session) runs it — re-sync base from claude.ai (upload the 0.9.1 build) or turn it off with \"base@synced\": false in settings.json enabledPlugins" \
+  "!copy:fe" "!copy:slim"
+mkplugin "$SY/base~g2"; sed -i.bak 's/0.9.1/0.8.0/' "$SY/base~g2/.claude-plugin/plugin.json"
+run --root "$SY/base~g2" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD53-copy-base-synced-root 0 "WARN  copy:base  this session loaded the synced copy 0.8.0;" "the synced copy is older and this session runs it — re-sync base"
+synced fe~g2 0.3.0; synced fe~g3 0.4.0
+printf '{"plugin":"fe","version":"0.4.0","kind":"start"}\n{"plugin":"fe","kind":"tool","text":"x"}\n' > "$LY/fe.jsonl"
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD54-copy-start-line-synced 0 "WARN  copy:fe    this session loaded the synced copy 0.4.0; install fe@domaine 0.5.0 (/c/fe/0.5.0), synced fe@synced 0.4.0 ($SY/fe~g3): the synced copy is older and this session runs it" "!0.3.0"
+rm "$LY/fe.jsonl"
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD55-copy-no-start-line 0 "WARN  copy:fe    no start line from fe in $LY: the loaded copy is unknown;" "a session that loads it"
+synced fe~g4 0.6.0; printf '{"plugin":"fe","version":"0.5.0","kind":"start"}\n' > "$LY/fe.jsonl"
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD56-copy-synced-newer 0 "PASS  copy:fe    this session loaded the install 0.5.0;" "fe@synced 0.6.0 ($SY/fe~g4): the synced copy is newer" "!re-sync fe"
+synced fe~g5 0.5.0
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD57-copy-same-version 0 "PASS  copy:fe    this session loaded fe 0.5.0; install fe@domaine 0.5.0 (/c/fe/0.5.0), synced fe@synced 0.5.0 ($SY/fe~g5): the same version"
+printf '{"enabledPlugins":{"slim@domaine":true,"base@domaine":true,"fe@domaine":true,"base@synced":false}}\n' > "$HY/.claude/settings.json"
+run --root "$P" --home "$HY" --project "$PRJ" --log-dir "$LY"
+expect CD58-copy-synced-off 0 "PASS  copy:base  install base@domaine 0.9.1 (/c/base/0.9.1), synced base@synced 0.8.0 ($SY/base~g2); the synced copy is off (\"base@synced\": false)"
+run --root "$P" --home "$H" --project "$PRJ"; expect CD59-copy-none 0 "!copy:"
 
 # -------------------------------------------------------------------------------- delegate --
 # The edit-delegation model hooks/conventions.cjs announces, from the same function: the login record under --home

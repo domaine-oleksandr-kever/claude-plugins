@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.15.0**.
+Current release: **base v0.16.0**.
 
 ## Status
 
@@ -447,9 +447,10 @@ counts, and the last 10 `base.events` lines:
 |---|---|
 | `node`, `platform` | Node 18 or newer; native Windows is refused (the scripts need bash) |
 | `manifest`, `hooks`, `scripts` | the manifest's version, a plugin name the engine loads a hooks module for (`core` and `engine` are its own), its `slim` dependency, the hooks module files, then the command-hook events (`; command hooks: SessionStart ×3, UserPromptSubmit, SubagentStart, PreCompact, Stop`; FAIL `command hook script missing: <path>` for a `${CLAUDE_PLUGIN_ROOT}` path not under the root), the scripts' exec bits |
-| `slim` | slim installed (user scope or this project) and enabled — else `claude plugin install slim@domaine` |
+| `slim` | slim installed (user scope or this project) or claude.ai-synced (`slim@synced`), and enabled — else `claude plugin install slim@domaine` |
 | `base-tmp` | `.claude/base-tmp`: files, size, how many the next sweep removes, whether git ignores it |
 | `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
+| `copy:<name>` | only for a Domaine plugin with both an install record and a claude.ai-synced copy (`<config dir>/plugins/synced/<account>/<name>[~g<N>]/`, the highest generation): which copy this session loaded (base: its own root; the others: the version on their `start` line in this session's `<plugin>.jsonl`) and both versions and paths. WARN when the synced copy is older, as a session that loads it (the Claude desktop app, a claude.ai cloud session) runs the older build: `re-sync <name> from claude.ai (upload the <version> build) or turn it off with "<name>@synced": false in settings.json enabledPlugins`; PASS for the same version, a newer synced copy or one turned off |
 | `cache` | only when `<config dir>/plugins/cache/domaine/<name>/` holds a version no install record names: WARN, the stale versions per plugin and a pointer to `scripts/install.sh --prune-cache` (a plugin with no recorded version on disk, and a version a live session holds in `.in_use/<pid>`, are left out) |
 | `delegate` | PASS `edit delegation: sonnet (work login, Claude Team)` (or `opus (personal login, Claude Max)`, `(BASE_EDIT_MODEL)`, `(api-key session)`, `(no login record)`); SKIP `edit delegation: off (BASE_EDIT_MODEL=0)`; the command adds `; this session: <n> tool edit(s) in <m> file(s), <k> shell write(s)[, <r> refused]` |
 | `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_EDIT_MODEL` other than opus, sonnet, haiku or 0, a `BASE_TMP_TTL` that is not hours, a `BASE_SHOPIFY_VALIDATE_TIMEOUT` outside 1-600 seconds, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |
@@ -510,8 +511,11 @@ There are two ways to turn it on:
 - **Report** goes to `<project>/.claude/plugin-defects/<YYYY-MM-DD>-<plugin>-<slug>.md`, with `-2`,
   `-3` on a clash. Its frontmatter is `plugin`, `version`, `kind`, `suspect`, `date`, `session`,
   `work_id`. Its sections are Observed, Expected, Reproduce, Evidence and Environment. The tool fills
-  Environment itself: the project root, the git remote, branch and commit, the plugin versions, the
-  surfaces, the Claude Code version, the session and the work id.
+  Environment itself: the project root, the git remote, branch and commit, the plugin versions, base's
+  own root, the surfaces, the Claude Code version, the session and the work id. A plugin's version is
+  the one it loaded (its `start` line in this session's log), with `(installed <version>)` beside it
+  when the install record differs; base's root carries `(the claude.ai-synced copy)` when it is one,
+  so a report against a stale synced copy is told apart at triage.
 - **Index** `~/.claude/plugin-defects/index.md` has one line per report:
   `- <date> <plugin> <title> → <absolute path>`. The tool skips it without a writable home (a cloud
   session). When the index exists but does not read, the tool leaves it whole and the result says so.

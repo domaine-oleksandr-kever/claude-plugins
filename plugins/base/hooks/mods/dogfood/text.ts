@@ -111,6 +111,8 @@ export function fenced(text: string, lang = 'text'): string {
 
 export type Environment = {
   root: string
+  /** base's own plugin root this session (`$.plugin.root`). */
+  pluginRoot: string
   remote: string | null
   branch: string | null
   commit: string | null
@@ -161,6 +163,7 @@ export function defectBody(d: Defect, m: Meta, env: Environment): string {
     `- project root: ${env.root}`,
     `- git: ${env.remote?.replace(/^([a-z][\w+.-]*:\/\/)[^@/]*@/i, '$1') ?? '(no remote)'} · ${env.branch ?? '(no branch)'} · ${env.commit ?? '(no commit)'}`,
     `- plugins: ${env.versions}`,
+    `- base root: ${env.pluginRoot}${syncedRoot(env.pluginRoot) ? ' (the claude.ai-synced copy)' : ''}`,
     `- surfaces: ${env.surfaces}`,
     `- Claude Code: ${env.claudeCode ?? 'unknown'}`,
     `- session: ${env.session}`,
@@ -191,25 +194,56 @@ export function marketplaceOf(installed: string | null, root: string): string | 
   return records(installed).find(([name, , r]) => name === 'base' && r.installPath === root)?.[1] ?? null
 }
 
+/** A root under `plugins/synced/<account>/`: the copy claude.ai synced, which has no install record. */
+export const syncedRoot = (root: string): boolean => /\/plugins\/synced\/[^/]+\/[^/]+/.test(root)
+
+/** The version on the last `start` line of a plugin's `<plugin>.jsonl` for this session; null without one. */
+export function startVersion(jsonl: string | null, plugin: string): string | null {
+  const lines = (jsonl ?? '').split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i]!.includes('"kind":"start"')) continue
+    try {
+      const l = JSON.parse(lines[i]!) as { plugin?: unknown; version?: unknown }
+      if (l.plugin === plugin && typeof l.version === 'string' && l.version) return l.version
+    } catch {}
+  }
+  return null
+}
+
+export type Versions = Map<Plugin, { loaded: string | null; installed: string | null }>
+
 /**
- * Each Domaine plugin this session can name, with its version where known: base's own manifest, slim's info
- * atom, then the install record (base's marketplace first); a plugin enabled in settings without a record
- * stands without a version.
+ * Each Domaine plugin this session can name: the version it loaded (base's own manifest, slim's info atom, the
+ * plugin's start line in this session's log, else the install record) and the install record's version (base's
+ * marketplace first); a plugin enabled in settings without either stands without a version.
  */
-export function versionsOf(installed: string | null, root: string, own: string, slim: string | null, enabled: readonly string[]): Map<Plugin, string | null> {
+export function versionsOf(
+  installed: string | null,
+  root: string,
+  own: string,
+  slim: string | null,
+  enabled: readonly string[],
+  started: Partial<Record<Plugin, string>> = {},
+): Versions {
   const mk = marketplaceOf(installed, root)
   const recs = records(installed)
-  const out = new Map<Plugin, string | null>()
+  const out: Versions = new Map()
   for (const p of PLUGINS) {
     const rec = recs.find(([n, m]) => n === p && m === mk) ?? recs.find(([n]) => n === p)
-    const v = p === 'base' ? own : p === 'slim' && slim ? slim : typeof rec?.[2].version === 'string' ? rec[2].version : null
-    if (v !== null || p === 'base' || enabled.includes(p)) out.set(p, v)
+    const recorded = typeof rec?.[2].version === 'string' ? rec[2].version : null
+    const loaded = p === 'base' ? own : (p === 'slim' && slim) || started[p] || recorded
+    if (loaded !== null || p === 'base' || enabled.includes(p)) out.set(p, { loaded, installed: recorded })
   }
   return out
 }
 
-export function versionsLine(v: Map<Plugin, string | null>): string {
-  return [...v].map(([p, ver]) => (ver ? `${p} ${ver}` : `${p} (version unknown)`)).join(', ')
+/** `fe 0.9.1 (installed 0.11.4)` where the loaded version is not the install record's: a synced or --plugin-dir copy. */
+export function versionsLine(v: Versions): string {
+  return [...v]
+    .map(([p, { loaded, installed }]) =>
+      loaded ? `${p} ${loaded}${installed && installed !== loaded ? ` (installed ${installed})` : ''}` : `${p} (version unknown)`,
+    )
+    .join(', ')
 }
 
 /** The enabledPlugins names of settings that are switched on. */

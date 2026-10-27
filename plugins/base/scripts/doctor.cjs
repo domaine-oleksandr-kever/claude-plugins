@@ -16,7 +16,8 @@
  *     --json     `{ root, rows: [{ status, name, detail }] }` instead of the table
  *
  * Rows: node, platform (Windows only), manifest, hooks, scripts, slim, base-tmp, event-log,
- * cache (only when the plugin cache holds a Domaine version no install record names: WARN), delegate (the
+ * copy:<name> (per Domaine plugin with both an install record and a claude.ai-synced copy: which one this
+ * session loaded and whether the synced one is older: WARN), cache (only when the plugin cache holds a Domaine version no install record names: WARN), delegate (the
  * edit-delegation model and why; SKIP when BASE_EDIT_MODEL=0), switches (only when a BASE_* switch holds a value outside its README domain: WARN). Every row is one
  * PASS / FAIL / SKIP / WARN line; the exit code is 1 if and only if a row FAILed. It reads
  * BASE_TMP_TTL (the age the session sweep removes base-tmp files at), DOMAINE_LOG_DIR and every BASE_*
@@ -210,10 +211,10 @@ function enabledPlugins(claudeDir, projectDir) {
 }
 
 /**
- * The install of `<name>@<marketplace>` this project would load (user scope or this project), else its synced copy, or null.
+ * The install record of `<name>@<marketplace>` this project would load (user scope or this project), or null.
  * Enabled means its settings key is `true`: Claude Code never loads a plugin whose key is absent.
  */
-function installedPlugin(name, claudeDir, projectDir, enabled) {
+function recordedPlugin(name, claudeDir, projectDir, enabled) {
   const record = readJson(path.join(claudeDir, 'plugins', 'installed_plugins.json'));
   const plugins = record && record.plugins && typeof record.plugins === 'object' ? record.plugins : {};
   let disabled = null;
@@ -221,30 +222,47 @@ function installedPlugin(name, claudeDir, projectDir, enabled) {
     if (key.split('@')[0] !== name || !Array.isArray(entries)) continue;
     const entry = entries.find((e) => e && (e.scope === 'user' || (e.projectPath && path.resolve(e.projectPath) === projectDir)));
     if (!entry) continue;
-    const found = { key, version: String(entry.version || '?') };
+    const found = { key, version: String(entry.version || '?'), installPath: typeof entry.installPath === 'string' ? entry.installPath : null };
     if (enabled[key] !== true) {
       disabled = found;
       continue;
     }
     return { ...found, disabled: false };
   }
-  return disabled ? { ...disabled, disabled: true } : syncedPlugin(name, claudeDir, enabled);
+  return disabled ? { ...disabled, disabled: true } : null;
+}
+
+/** The install this project would load, else the synced copy, or null. */
+function installedPlugin(name, claudeDir, projectDir, enabled) {
+  return recordedPlugin(name, claudeDir, projectDir, enabled) || syncedPlugin(name, claudeDir, enabled);
 }
 
 /**
- * The claude.ai-account copy of `<name>` (`<name>@synced`): `plugins/synced/<account>/<name>/` beside this plugin
- * in a cloud session or a synced terminal, with no install record; it loads unless its settings key is `false`.
+ * The claude.ai-account copy of `<name>` (`<name>@synced`): `plugins/synced/<account>/<name>[~g<N>]/` (the highest
+ * generation; the account a `.bucket-<account>` marker names first), with no install record; it loads unless its
+ * settings key is `false`.
  */
 function syncedPlugin(name, claudeDir, enabled) {
   const root = path.join(claudeDir, 'plugins', 'synced');
-  let accounts = [];
-  try { accounts = fs.readdirSync(root); } catch { return null; }
-  for (const account of accounts) {
-    const dir = path.resolve(root, account, name);
-    const manifest = readJson(path.join(dir, '.claude-plugin', 'plugin.json'));
-    if (!manifest) continue;
-    const key = name + '@synced';
-    return { key, version: String(manifest.version || '?'), installPath: dir, disabled: enabled[key] === false };
+  let entries = [];
+  try { entries = fs.readdirSync(root); } catch { return null; }
+  const accounts = entries.filter((a) => !a.startsWith('.'));
+  const marked = accounts.filter((a) => entries.includes('.bucket-' + a));
+  for (const account of [...marked, ...accounts.filter((a) => !marked.includes(a))]) {
+    let dirs = [];
+    try { dirs = fs.readdirSync(path.join(root, account)); } catch { continue; }
+    let best = null;
+    for (const d of dirs) {
+      const gen = d === name ? 0 : d.startsWith(name + '~g') && /^\d+$/.test(d.slice(name.length + 2)) ? Number(d.slice(name.length + 2)) : -1;
+      if (gen < 0 || (best && best.gen >= gen)) continue;
+      const dir = path.resolve(root, account, d);
+      const manifest = readJson(path.join(dir, '.claude-plugin', 'plugin.json'));
+      if (manifest) best = { gen, dir, version: String(manifest.version || '?') };
+    }
+    if (best) {
+      const key = name + '@synced';
+      return { key, version: best.version, installPath: best.dir, disabled: enabled[key] === false };
+    }
   }
   return null;
 }
@@ -319,16 +337,18 @@ function jsonlSummary(file) {
 }
 
 // Each plugin (base, band, slim) writes `<dir>/<plugin>.jsonl` for the session; base sweeps directories past 7 days.
-function checkEventLog(logDir, homeDir) {
-  let dir = logDir ? path.resolve(logDir) : null;
+/** `--log-dir`, else the newest session directory under DOMAINE_LOG_DIR or <home>/.claude/domaine/log (`dir` null when none). */
+function sessionLogDir(logDir, homeDir) {
+  if (logDir) return { dir: path.resolve(logDir), root: null };
+  const override = (process.env.DOMAINE_LOG_DIR || '').trim();
+  const root = path.isAbsolute(override) ? override : path.join(homeDir, '.claude', 'domaine', 'log');
+  return { dir: newestSessionDir(root), root };
+}
+
+function checkEventLog({ dir, root }) {
   if (!dir) {
-    const override = (process.env.DOMAINE_LOG_DIR || '').trim();
-    const root = path.isAbsolute(override) ? override : path.join(homeDir, '.claude', 'domaine', 'log');
-    dir = newestSessionDir(root);
-    if (!dir) {
-      pass('event-log', root + ': no session directory yet');
-      return;
-    }
+    pass('event-log', root + ': no session directory yet');
+    return;
   }
   const off = process.env.BASE_EVENT_LOG === '0' ? "; base's is off (BASE_EVENT_LOG=0)" : '';
   let names;
@@ -405,6 +425,66 @@ function checkCache(claudeDir) {
   if (parts.length) warn('cache', 'stale versions in ' + cache + ': ' + parts.join('; ') + ' — scripts/install.sh --prune-cache in the plugins checkout removes them');
 }
 
+const DOMAINE = ['slim', 'band', 'base', 'fe', 'be', 'qa', 'pm'];
+
+/** The version on the last `start` line of `<dir>/<name>.jsonl`, or null. */
+function startVersion(dir, name) {
+  let lines = [];
+  try { lines = fs.readFileSync(path.join(dir, name + '.jsonl'), 'utf8').split('\n'); } catch { return null; }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"kind":"start"')) continue;
+    try {
+      const l = JSON.parse(lines[i]);
+      if (l.plugin === name && typeof l.version === 'string' && l.version) return l.version;
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * One `copy:<name>` row per Domaine plugin with both an install record and a claude.ai-synced copy: which one this
+ * session loaded (base: its own root; the others: their start line in the session log) and how the versions compare.
+ * A synced copy older than the install WARNs, as a session that loads it (the desktop app, a cloud session) runs the
+ * older build; any other pair PASSes.
+ */
+function checkCopies(pluginRoot, claudeDir, projectDir, enabled, logDir) {
+  const ownRoot = /[\\/]plugins[\\/]synced[\\/]/.test(pluginRoot);
+  const own = (readJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json')) || {}).version;
+  for (const name of DOMAINE) {
+    const inst = recordedPlugin(name, claudeDir, projectDir, enabled);
+    const sync = syncedPlugin(name, claudeDir, enabled);
+    if (!inst || !sync) continue;
+    const at = (p) => (p ? ' (' + p + ')' : '');
+    const both = 'install ' + inst.key + ' ' + inst.version + at(inst.installPath) + ', synced ' + sync.key + ' ' + sync.version + at(sync.installPath);
+    if (sync.disabled) {
+      pass('copy:' + name, both + '; the synced copy is off ("' + sync.key + '": false)');
+      continue;
+    }
+    const v = name === 'base' ? (typeof own === 'string' ? own : null) : logDir ? startVersion(logDir, name) : null;
+    const loaded = name === 'base' && ownRoot ? 'synced'
+      : v === null ? null
+      : inst.version === sync.version ? (v === inst.version ? 'both' : 'other')
+      : name !== 'base' && v === sync.version ? 'synced' : v === inst.version ? 'install' : 'other';
+    const head = loaded === 'synced' ? 'this session loaded the synced copy ' + sync.version
+      : loaded === 'install' ? 'this session loaded the install ' + inst.version
+      : loaded === 'both' ? 'this session loaded ' + name + ' ' + v
+      : loaded === 'other' ? 'this session loaded ' + name + ' ' + v + ', neither copy (a --plugin-dir load?)'
+      : 'no start line from ' + name + ' in ' + (logDir || 'a session log') + ': the loaded copy is unknown';
+    if (inst.version === sync.version) {
+      pass('copy:' + name, head + '; ' + both + ': the same version');
+      continue;
+    }
+    const older = versionKey(sync.version) < versionKey(inst.version);
+    if (!older) {
+      pass('copy:' + name, head + '; ' + both + ': the synced copy is newer');
+      continue;
+    }
+    const who = loaded === 'synced' ? 'this session runs it' : 'a session that loads it (the desktop app, a claude.ai cloud session) runs it';
+    warn('copy:' + name, head + '; ' + both + ': the synced copy is older and ' + who + ' — re-sync ' + name +
+      ' from claude.ai (upload the ' + inst.version + ' build) or turn it off with "' + sync.key + '": false in settings.json enabledPlugins');
+  }
+}
+
 // The edit-delegation model the SessionStart hook announces (hooks/conventions.cjs asks the same function).
 function checkDelegation(homeDir, configDir, pluginRoot) {
   const d = editDelegation({ env: process.env, home: homeDir, configDir, root: pluginRoot });
@@ -450,7 +530,9 @@ function main() {
   checkScripts(pluginRoot);
   checkSlim(claudeDir, projectDir, enabled);
   checkCoreTmp(projectDir);
-  checkEventLog(opts['log-dir'], homeDir);
+  const log = sessionLogDir(opts['log-dir'], homeDir);
+  checkEventLog(log);
+  checkCopies(pluginRoot, claudeDir, projectDir, enabled, log.dir);
   checkCache(claudeDir);
   checkDelegation(homeDir, opts.home ? undefined : process.env.CLAUDE_CONFIG_DIR, pluginRoot);
   checkSwitches(process.env);
