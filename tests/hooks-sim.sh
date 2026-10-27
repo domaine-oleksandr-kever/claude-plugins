@@ -6144,6 +6144,23 @@ printf '{"version":2,"plugins":{"be@domaine":[{"installPath":"/w/be","version":"
 DH_ENV="BASE_DOGFOOD=1 CLAUDE_CONFIG_DIR=$W" dh base SessionStart 1
 assert_contains DH7-config-dir "$(dh_ctx)" "unstable development builds: base $(jq -r .version "$BR/.claude-plugin/plugin.json"), be 0.3.3. You are"
 
+# DH7b: a claude.ai-synced base older than the install record in the same config dir → one line after the root line;
+# the same version, a marketplace root, or no installed_plugins.json beside the synced copy → nothing.
+dh_home syn; C="$DH_HOME/.claude"; S="$C/plugins/synced/acct-1/base~g2"; mkdir -p "$(dirname "$S")"; cp -R "$ROOT/plugins/base" "$S"
+SV="$(jq -r .version "$S/.claude-plugin/plugin.json")"
+dh_syn() {   # dh_syn <plugin root> — start core's first two context lines
+  printf '%s' "{\"session_id\":\"s-syn\",\"cwd\":\"$DH/proj\"}" | env -i PATH="$PATH" HOME="$DH_HOME" TMPDIR="$DH/tmp" CLAUDE_PLUGIN_ROOT="$1" node "$1/hooks/conventions.cjs" start core 2>&1 \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).hookSpecificOutput.additionalContext.split("\n").slice(0,2).join("\n"))}catch{process.stdout.write("bad: "+s)}})'
+}
+assert_eq DH7b-no-record "$(dh_syn "$S")" "base plugin root: $S"
+printf '{"version":2,"plugins":{"base@domaine":[{"scope":"user","installPath":"/c/base/99.0.0","version":"99.0.0"}]}}' > "$C/plugins/installed_plugins.json"
+assert_eq DH7b-older "$(dh_syn "$S")" "base plugin root: $S
+base: this session loaded the claude.ai-synced copy $SV ($S); the marketplace install is 99.0.0 — re-sync the plugin in claude.ai or set \"base@synced\": false in enabledPlugins"
+printf '{"version":2,"plugins":{"base@domaine":[{"scope":"user","installPath":"/c/base","version":"%s"}]}}' "$SV" > "$C/plugins/installed_plugins.json"
+assert_eq DH7b-same "$(dh_syn "$S")" "base plugin root: $S"
+printf '{"version":2,"plugins":{"base@domaine":[{"scope":"user","installPath":"/c/base/99.0.0","version":"99.0.0"}]}}' > "$C/plugins/installed_plugins.json"
+assert_eq DH7b-install-root "$(dh_syn "$BR")" "base plugin root: $BR"
+
 # DH8: the rule variant — surfaceless for an SDK entrypoint or a remote session, else the drawn offer rule.
 dh_home rule; dh_in s-rule SessionStart '"source":"startup"'
 RULE_S="$(dh_text base rule-surfaceless)"; RULE_D="$(dh_text base rule-drawn)"

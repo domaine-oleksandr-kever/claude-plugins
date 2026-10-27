@@ -553,4 +553,6 @@ function main() {
   process.exitCode = failed ? 1 : 0;
 }
 
-main();
+module.exports = { recordedPlugin, versionKey };
+
+if (require.main === module) main();

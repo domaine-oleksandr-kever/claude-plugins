@@ -15,7 +15,7 @@ base contains these parts:
 base requires slim and reads large results through it. Only slim compresses, so every figure goes
 to slim's log. base's readers call slim's `view` tool for a file or a command output.
 
-Current release: **base v0.16.0**.
+Current release: **base v0.16.1**.
 
 ## Status
 
@@ -450,7 +450,7 @@ counts, and the last 10 `base.events` lines:
 | `slim` | slim installed (user scope or this project) or claude.ai-synced (`slim@synced`), and enabled — else `claude plugin install slim@domaine` |
 | `base-tmp` | `.claude/base-tmp`: files, size, how many the next sweep removes, whether git ignores it |
 | `event-log` | this session's event-log folder and, per `<plugin>.jsonl` there, its line count and newest `ts`; no folder yet passes (a /clear's new session has none before its first line); a folder with no file warns (every write failed) unless `BASE_EVENT_LOG=0` |
-| `copy:<name>` | only for a Domaine plugin with both an install record and a claude.ai-synced copy (`<config dir>/plugins/synced/<account>/<name>[~g<N>]/`, the highest generation): which copy this session loaded (base: its own root; the others: the version on their `start` line in this session's `<plugin>.jsonl`) and both versions and paths. WARN when the synced copy is older, as a session that loads it (the Claude desktop app, a claude.ai cloud session) runs the older build: `re-sync <name> from claude.ai (upload the <version> build) or turn it off with "<name>@synced": false in settings.json enabledPlugins`; PASS for the same version, a newer synced copy or one turned off |
+| `copy:<name>` | only for a Domaine plugin with both an install record and a claude.ai-synced copy (`<config dir>/plugins/synced/<account>/<name>[~g<N>]/`, the highest generation): which copy this session loaded (base: its own root; the others: the version on their `start` line in this session's `<plugin>.jsonl`) and both versions and paths. WARN when the synced copy is older, as a session that loads it (the Claude desktop app, a claude.ai cloud session) runs the older build: `re-sync <name> from claude.ai (upload the <version> build) or turn it off with "<name>@synced": false in settings.json enabledPlugins`; PASS for the same version, a newer synced copy or one turned off. When base itself runs from such an older synced copy, the SessionStart context says so too, right after the root line: `base: this session loaded the claude.ai-synced copy <v1> (<path>); the marketplace install is <v2> — …` |
 | `cache` | only when `<config dir>/plugins/cache/domaine/<name>/` holds a version no install record names: WARN, the stale versions per plugin and a pointer to `scripts/install.sh --prune-cache` (a plugin with no recorded version on disk, and a version a live session holds in `.in_use/<pid>`, are left out) |
 | `delegate` | PASS `edit delegation: sonnet (work login, Claude Team)` (or `opus (personal login, Claude Max)`, `(BASE_EDIT_MODEL)`, `(api-key session)`, `(no login record)`); SKIP `edit delegation: off (BASE_EDIT_MODEL=0)`; the command adds `; this session: <n> tool edit(s) in <m> file(s), <k> shell write(s)[, <r> refused]` |
 | `switches` | only when a `BASE_*` switch holds a value outside its domain in Environment switches (an on/off switch set to anything but `0` or `1`, an unknown `BASE_FIGMA_SOURCE`, a `BASE_EDIT_MODEL` other than opus, sonnet, haiku or 0, a `BASE_TMP_TTL` that is not hours, a `BASE_SHOPIFY_VALIDATE_TIMEOUT` outside 1-600 seconds, a `BASE_DOGFOOD_REPO` that is not `<owner>/<repo>`): warns with the value the reader falls back to |

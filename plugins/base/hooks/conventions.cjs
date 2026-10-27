@@ -2,7 +2,7 @@
 /*
  * conventions.cjs — base's conventions as Claude Code command hooks (hooks/hooks.json), the one channel
  * that reaches the model on every login. Text: conventions-text.json. Modes (argv):
- *   start core   SessionStart: root line, comment discipline, task workspace, outside content, Shopify
+ *   start core   SessionStart: root line (+ a stale synced-copy line), comment discipline, task workspace, outside content, Shopify
  *   start rules  SessionStart: lean code (BASE_LEAN), writing style (BASE_STE), edit delegation (BASE_EDIT_MODEL), dogfood section
  *   subagent     SubagentStart: the share of the agent type on stdin; records the agent_type in
  *                <log dir>/<session>/agents/<agent_id>.json for base's MCP guard
@@ -152,6 +152,7 @@ function versionsLine(cwd) {
 // Loaded on first use: title.cjs requires this file on every prompt and needs neither.
 let texts;
 let edMod;
+let doctorMod;
 const tryRequire = (p) => {
   try {
     return require(p);
@@ -161,7 +162,20 @@ const tryRequire = (p) => {
 };
 const T_ = () => (texts === undefined ? (texts = tryRequire('./conventions-text.json')) : texts);
 const ED_ = () => (edMod === undefined ? (edMod = tryRequire('../scripts/edit-delegation.cjs')) : edMod);
+const DOC_ = () => (doctorMod === undefined ? (doctorMod = tryRequire('../scripts/doctor.cjs')) : doctorMod);
 const section = (name) => T_()[name].split('<base root>').join(ROOT);
+
+/** The line after the root line when base runs from a claude.ai-synced copy older than the install record in the same config dir; '' otherwise. */
+function syncedCopyLine(cwd) {
+  const at = ROOT.indexOf('/plugins/synced/');
+  const doc = at > 0 ? DOC_() : null;
+  if (!doc) return '';
+  const own = (readJson(ROOT + '/.claude-plugin/plugin.json') || {}).version;
+  const inst = doc.recordedPlugin(P, ROOT.slice(0, at), cwd, {});
+  if (typeof own !== 'string' || !own || !inst || !(doc.versionKey(own) < doc.versionKey(inst.version))) return '';
+  return 'base: this session loaded the claude.ai-synced copy ' + own + ' (' + ROOT + '); the marketplace install is ' + inst.version +
+    ' — re-sync the plugin in claude.ai or set "base@synced": false in enabledPlugins';
+}
 const surfaceless = () => (process.env.CLAUDE_CODE_ENTRYPOINT || '').startsWith('sdk') || process.env.CLAUDE_CODE_REMOTE === 'true';
 
 function dogfoodSection(cwd) {
@@ -178,7 +192,8 @@ function startPart(part, cwd) {
   const names = part === 'core'
     ? ['root', 'comment-discipline', 'task-workspace', 'untrusted-content', 'shopify']
     : [process.env.BASE_LEAN !== '0' && 'lean-code', process.env.BASE_STE !== '0' && 'writing-style', edit && edit.model && 'edit-delegation', dogfoodOn() && 'dogfood'].filter(Boolean);
-  const text = names.map((n) => (n === 'dogfood' ? dogfoodSection(cwd) : n === 'edit-delegation' ? editSection(edit) : section(n))).join('\n\n');
+  const text = names.map((n) => (n === 'dogfood' ? dogfoodSection(cwd) : n === 'edit-delegation' ? editSection(edit)
+    : n === 'root' ? [section(n), syncedCopyLine(cwd)].filter(Boolean).join('\n') : section(n))).join('\n\n');
   return { sections: names, text, edit };
 }
 
