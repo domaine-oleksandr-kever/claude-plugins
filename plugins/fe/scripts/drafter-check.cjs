@@ -7,7 +7,7 @@
 //                                                (off with --no-preview when the notes.md beside it
 //                                                records 'preview-decision: no preview'), None/N/A,
 //                                                Summary, attribution
-//   drafter-check.cjs file jira <path>           jira-comment.md: PR line, brief size, no preview link, attribution
+//   drafter-check.cjs file jira <path>           jira-comment.md: PR line, bulleted brief, no preview link, attribution
 //   drafter-check.cjs receipt stt|pr|jira        the drafter's reply on stdin: one kind, no empty field
 //
 // First stdout line: result=ok|fail. Exit 0 ok, 1 fail, 2 usage.
@@ -156,10 +156,11 @@ function checkJira(path) {
   if (!PR_LINE.test(lines[0] || '')) fails.push("line 1 is not 'PR: <url> — <title>'");
   const brief = lines.slice(1);
   if (brief.length > 6) fails.push('brief longer than 6 lines');
+  if (brief.some((l) => !/^\s*[-*]\s+\S/.test(l))) fails.push('brief line is not a bullet');
   if (lines.some((l) => /^#{1,6} /.test(l))) fails.push('heading in the comment');
   const label = (l) => /^\s*(?:[-*]\s+)?(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)\s*(?:\*\*)?\s*:?\s*$/.test(l);
-  const opensLabel = (l) => label(l) || /^\s*(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)/.test(l);
-  // any next line that opens no label is its content: a bullet (`- Desktop: …` too), a sentence, a numbered list
+  const opensLabel = (l) => label(l) || /^\s*(?:(?:[-*]\s+)?\*\*[^*]+\*\*|[A-Z][\w /]*:)/.test(l);
+  // a next line that opens no bold label is its content (`- Desktop: …` too)
   if (brief.some((l, i) => label(l) && (i + 1 >= brief.length || opensLabel(brief[i + 1])))) fails.push('label with no content');
   if (lines.some((l) => /^\s*(?:[-*>]\s*)?(?:(?:\*\*[^*]+\*\*|[A-Z][\w /]*:)\s*:?\s*)?[_*]*\(?(none|n\/a)\)?\.?[_*]*\s*$/i.test(l))) fails.push('None/N/A placeholder');
   for (const [name, re] of ROT) if (lines.some((l) => re.test(l))) fails.push(name);

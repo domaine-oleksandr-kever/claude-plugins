@@ -25,7 +25,8 @@ written to `notes.md` — fe's preview-link convention; the theme id alone is ne
 
 - A `create` that returns a theme id this work stream will reuse → record it at once:
   `- <YYYY-MM-DD> session-theme: <id> (<name>) <preview_url>` (`<fe root>/references/session-theme.md`
-  step 4 — the parts you were handed, nothing invented).
+  step 4 — the parts you were handed, nothing invented), ending in ` brand=<b>` when the run had
+  `--brand <b>`; every later `refresh` of that id passes the same `--brand <b>`.
 - Every `create`/`refresh` onto the session theme appends `- <YYYY-MM-DD> session-theme-pushed: <sha> <id>`
   when it printed `pushed=<sha>`, and `- <YYYY-MM-DD> session-theme-pushed: - <id>` when it did not
   (uncommitted changes rode along). Handing the developer a dev-server start command for that id
@@ -248,7 +249,7 @@ stacks). On `create --duplicate-of` the copy is kept and named (`theme=<id> — 
 kept…`): it still carries the source theme's code — re-push with `refresh --theme <id> --store
 <store>` (same `--brand`) once the cause is fixed, never a second `--duplicate-of`.
 
-### A copy of another theme — `error=duplicate_source_not_found` · `error=duplicate_failed` · `error=duplicate_timeout` · `error=bad_brand` · `error=unknown_brand`
+### A copy of another theme — `error=duplicate_source_not_found` · `error=duplicate_failed` · `error=duplicate_timeout` · `error=bad_brand` · `error=unknown_brand` · `error=brand_required`
 
 `create --name <NAME> --duplicate-of <theme-id|name> [--brand <b>] --store <store>` — never run
 `shopify theme duplicate`, the build, the push or a poll by hand; the script owns all four.
@@ -271,6 +272,11 @@ kept…`): it still carries the source theme's code — re-push with `refresh --
   `<b>` is not one of its directories (a ticket's short code such as `jm` instead of `jo-malone`).
   Re-run with a name from `known=`. Nothing ran. Without that directory the value goes through
   unchecked and the run prints `note=brand_unchecked`.
+- **`error=brand_required known=<dir,…>`** (create & refresh) → the project has
+  `multi-brand/brands/`, a build was due and no `--brand` came: the build would silently take its
+  default brand onto this store. Nothing was built or pushed. Re-run with `--brand` = the
+  `brand=` on the theme's `session-theme:` line; no such value → ask the developer which brand the
+  store sells (a name from `known=`), never guess. `--no-build` needs no brand.
 
 A successful run prints `duplicate_of=<source id>` (and `brand=` with `--brand`) and no `overlay=`
 key: the settings came with the server-side copy.

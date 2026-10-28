@@ -5714,6 +5714,29 @@ else bad D7c-unknown-brand "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= 
 dup_run dup7d FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of 777 --brand jo-malone --build-script brandbuild
 if [ "$rc" -eq 0 ] && grep -q '^brand=jo-malone$' "$O" && [ "$(cat "$DB")" = jo-malone ] && ! grep -q '^note=brand_unchecked' "$O"; then ok
 else bad D7d-known-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+# D7e: with multi-brand/brands/ a build without --brand would silently take the build's default
+# brand — refused before the build and the store on create and refresh alike; --no-build needs none
+dup_run dup7e -- --duplicate-of 777 --build-script markbuild
+if [ "$rc" -eq 1 ] && grep -q '^error=brand_required known=clinique,jo-malone,mac ' "$O" && [ ! -e "$TMP/dup7e/built" ] \
+   && [ "$(cpt_calls 'theme' "$L")" -eq 0 ]; then ok
+else bad D7e-create-brand-required "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+dup_run dup7f FAKE_LIST_AT_3="$DUPL_READY" -- --duplicate-of 777 --no-build
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=333$' "$O" && ! grep -q '^brand=' "$O"; then ok
+else bad D7f-create-no-build-no-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/dup7g"; : > "$L"; rm -f "$TMP/dup7g.built"
+run_cpt "$L" NO=1 CPT_BUILD_MARK="$TMP/dup7g.built" -- refresh --theme 555 || rc=$?
+if [ "$rc" -eq 1 ] && grep -q '^error=brand_required known=clinique,jo-malone,mac ' "$O" && [ ! -e "$TMP/dup7g.built" ] \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 0 ]; then ok
+else bad D7g-refresh-brand-required "rc=$rc out=$(tr '\n' ';' < "$O") calls=$(grep argv= "$L" | tr '\n' ';')"; fi
+rc=0; L="$TMP/dup7h"; : > "$L"
+run_cpt "$L" NO=1 -- refresh --theme 555 --no-build || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^theme_id=555$' "$O" && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad D7h-refresh-no-build-no-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
+rc=0; L="$TMP/dup7i"; : > "$L"; rm -f "$TMP/dup7i.brand"
+run_cpt "$L" NO=1 CPT_BRAND_OUT="$TMP/dup7i.brand" -- refresh --theme 555 --brand jo-malone --build-script brandbuild || rc=$?
+if [ "$rc" -eq 0 ] && grep -q '^brand=jo-malone$' "$O" && [ "$(cat "$TMP/dup7i.brand")" = jo-malone ] \
+   && [ "$(cpt_calls 'theme push' "$L")" -eq 1 ]; then ok
+else bad D7i-refresh-known-brand "rc=$rc out=$(tr '\n' ';' < "$O")"; fi
 rm -rf "$CPTD/repo/multi-brand"
 
 # D8: without --duplicate-of a foreign-store create is still overlay_store_mismatch, now naming the copy route
@@ -5996,12 +6019,13 @@ dc DC34-jira-pr-line-only 0 'brief_lines=0' file jira "$DCD/jira.md"
 cat > "$DCD/jira-brief.md" <<MD
 PR: https://github.com/o/r/pull/12 — [ELC-1] feat: add scent notes
 
-Adds the Scent notes section to the product page. $SENT
-**TA deviations:** the block uses a metaobject, not a metafield list, to keep the order editable.
-**Open questions:**
-- empty-state copy for products with no notes?
+- Adds the Scent notes section to the product page. $SENT
+- **TA deviations:** the block uses a metaobject, not a metafield list, to keep the order editable.
+- **Open questions:** empty-state copy for products with no notes?
 MD
-dc DC35-jira-brief-ok 0 'brief_lines=4' file jira "$DCD/jira-brief.md"
+dc DC35-jira-brief-ok 0 'brief_lines=3' file jira "$DCD/jira-brief.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\nAdds the section. %s\nThe list caps at 10 notes.\n' "$SENT" > "$DCD/jira-plain.md"
+dc DC35b-jira-brief-not-bullets 1 'fail brief line is not a bullet' file jira "$DCD/jira-plain.md"
 printf 'See https://github.com/o/r/pull/12\n' > "$DCD/jira-noline.md"
 dc DC36-jira-no-pr-line 1 "fail line 1 is not 'PR: <url> — <title>'" file jira "$DCD/jira-noline.md"
 printf 'PR: https://github.com/o/r/pull/12 — t\nPreview: https://s.myshopify.com/products/x?preview_theme_id=123456789012 %s\n' "$SENT" > "$DCD/jira-preview.md"
@@ -6010,11 +6034,11 @@ printf 'PR: https://github.com/o/r/pull/12 — t\nEdit it in https://admin.shopi
 dc DC38-jira-editor-url 1 'fail editor URL' file jira "$DCD/jira-editor.md"
 printf 'PR: https://github.com/o/r/pull/12 — t\nPushed to theme id 155512345678.\n' > "$DCD/jira-themeid.md"
 dc DC39-jira-theme-id 1 'fail theme id' file jira "$DCD/jira-themeid.md"
-printf 'PR: https://github.com/o/r/pull/12 — t\nAdds the section.\n**Known limits:**\n**Open questions:** none yet\n' > "$DCD/jira-emptylabel.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n- Adds the section.\n- **Known limits:**\n- **Open questions:** none yet\n' > "$DCD/jira-emptylabel.md"
 dc DC40-jira-empty-label 1 'fail label with no content' file jira "$DCD/jira-emptylabel.md"
-printf 'PR: https://github.com/o/r/pull/12 — t\n**Known limits:** N/A\n' > "$DCD/jira-na.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n- **Known limits:** N/A\n' > "$DCD/jira-na.md"
 dc DC41-jira-none 1 'fail None/N/A placeholder' file jira "$DCD/jira-na.md"
-printf 'PR: https://github.com/o/r/pull/12 — t\n1\n2\n3\n4\n5\n6\n7\n' > "$DCD/jira-long.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7\n' > "$DCD/jira-long.md"
 dc DC42-jira-brief-too-long 1 'fail brief longer than 6 lines' file jira "$DCD/jira-long.md"
 printf 'PR: https://github.com/o/r/pull/12 — t\nmode: jira\n' > "$DCD/jira-briefkey.md"
 dc DC43-jira-brief-text 1 'fail brief text in the comment' file jira "$DCD/jira-briefkey.md"
@@ -6031,14 +6055,14 @@ unconfirmed: []
 report: r
 TXT
 dc DC47-usage-jira-theme 2 'usage:' file jira "$DCD/jira.md" --theme
-printf 'PR: https://github.com/o/r/pull/12 — t\nAdds the section.\nKnown limits: none\n' > "$DCD/jira-na-plain.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n- Adds the section.\n- Known limits: none\n' > "$DCD/jira-na-plain.md"
 dc DC48-jira-none-plain-label 1 'fail None/N/A placeholder' file jira "$DCD/jira-na-plain.md"
 printf 'PR: https://github.com/o/r/pull/12 — t\n- Open questions: N/A\n' > "$DCD/jira-na-bullet.md"
 dc DC48b-jira-none-bullet-label 1 'fail None/N/A placeholder' file jira "$DCD/jira-na-bullet.md"
-printf 'PR: https://github.com/o/r/pull/12 — t\n**Known limits:**\nThe list caps at 10 notes.\nOpen questions for QA/PM:\n1. empty-state copy?\n' > "$DCD/jira-label-para.md"
-dc DC49-jira-label-paragraph-ok 0 'brief_lines=4' file jira "$DCD/jira-label-para.md"
-printf 'PR: https://github.com/o/r/pull/12 — t\nAdds the section.\n**Known limits:**\n' > "$DCD/jira-label-last.md"
-printf 'PR: https://github.com/o/r/pull/12 — t\n**Known limits:**\n- Desktop: the list caps at 10 notes.\n' > "$DCD/jira-label-bullet-colon.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n- **Known limits:** the list caps at 10 notes.\n- Open questions for QA/PM: empty-state copy?\n' > "$DCD/jira-label-para.md"
+dc DC49-jira-label-inline-ok 0 'brief_lines=2' file jira "$DCD/jira-label-para.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n- Adds the section.\n- **Known limits:**\n' > "$DCD/jira-label-last.md"
+printf 'PR: https://github.com/o/r/pull/12 — t\n- **Known limits:**\n- Desktop: the list caps at 10 notes.\n' > "$DCD/jira-label-bullet-colon.md"
 dc DC49c-jira-label-bullet-colon-ok 0 'brief_lines=2' file jira "$DCD/jira-label-bullet-colon.md"
 dc DC49b-jira-label-last 1 'fail label with no content' file jira "$DCD/jira-label-last.md"
 

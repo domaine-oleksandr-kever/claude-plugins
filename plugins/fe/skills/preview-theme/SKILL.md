@@ -118,8 +118,8 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    a templates-only push, local HTML in the Playwright sandbox:
    `<fe root>/references/theme-gotchas.md` → Preview themes.
 6. **Record it as the work stream's session theme.** When a task workspace for this work-id
-   exists, write the `session-theme:` and `session-theme-pushed:` lines per the reading
-   section — otherwise the next `/fe:ship` run, qa phase or PR run finds no line and creates a
+   exists, write the `session-theme:` (with ` brand=<b>` after a `--brand <b>` run) and
+   `session-theme-pushed:` lines per the reading section — otherwise the next `/fe:ship` run, qa phase or PR run finds no line and creates a
    *second* theme for the same stream. Do **not** pass `--pin-toml` here: the pin rewrites the
    developer's `shopify.theme.toml` and is the session-theme offer's call
    (`<fe root>/references/session-theme.md`), not this skill's.
@@ -132,7 +132,7 @@ theme. A worktree fresh from `/base:worktree` runs **In a worktree** below first
    (settings are preserved). Show the target id and `[ update / cancel ]`.
 3. **Refresh.** Run `create-preview-theme.sh refresh --theme <id>` (add `--no-build` /
    `--build-script <name>` as above; with no `package.json` the build is skipped the same
-   way). Any `error=` line → report it plainly and follow its entry in the errors reference;
+   way; `--brand <b>` when the theme's `session-theme:` line ends in `brand=<b>`). Any `error=` line → report it plainly and follow its entry in the errors reference;
    don't read the toml yourself. Two refusals need a
    distinct developer consent each: `error=refresh_unverifiable` / `error=reuse_unverifiable`
    (the store listing was silent) → report; ask the developer before re-running with

@@ -92,7 +92,9 @@
 #       and printed as brand=; nothing else reads it. `[A-Za-z0-9_-]+`, else `error=bad_brand`.
 #       With ./multi-brand/brands/ present it must name one of its directories, else
 #       `error=unknown_brand brand=<b> known=<dir,…>` before the store; without it `note=brand_unchecked`.
-#   refresh --theme <ID> [--no-build] [--build-script <name>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
+#       With that dir present and no --brand, a build is refused (`error=brand_required known=<dir,…>`,
+#       the build would silently pick its default brand); --no-build needs no brand.
+#   refresh --theme <ID> [--no-build] [--build-script <name>] [--brand <b>] [--ignore-extra "<glob>"] [--pin-toml [--env <name>]] [--allow-unverified] [--allow-dev-theme]
 #       → build repo → push CODE ONLY to <ID>, leaving its customizer settings intact
 #         (reuse this when a preview theme's code broke and needs a redeploy)
 #       → theme_id=… store=… env=… preview_url=… editor_url=… [pushed=<HEAD sha>] built=… [css=…] [restored=…] [warn=build_dirtied=<path,…>] [warn=build_skipped_no_package_json]
@@ -945,13 +947,17 @@ BUILD_SCRIPT_SET=0
 BUILT="no"
 # Name-only, run as argv — the callers pre-approve this script's whole argv, so a value that
 # reached a shell would run with no permission prompt (rationale: header). Refuse before the store.
+known_brands() { (cd multi-brand/brands && ls -d -- */ 2>/dev/null | tr -d / | paste -sd, -); }
 vet_build_script() {
+  if [ -z "$BRAND_ARG" ] && [ "$NO_BUILD" -eq 0 ] && [ -d multi-brand/brands ]; then
+    fail "brand_required known=$(known_brands) — this repo builds one brand at a time (multi-brand/brands/): pass --brand <the brand of the store you push to> or --no-build; nothing was built or pushed"
+  fi
   if [ -n "$BRAND_ARG" ]; then
     case "$BRAND_ARG" in *[!A-Za-z0-9_-]*)
       fail "bad_brand ($BRAND_ARG) — --brand takes a brand code ([A-Za-z0-9_-]), passed to the build as BRAND; nothing was built or pushed" ;;
     esac
     if [ -d multi-brand/brands ]; then
-      [ -d "multi-brand/brands/$BRAND_ARG" ] || fail "unknown_brand brand=$BRAND_ARG known=$(cd multi-brand/brands && ls -d -- */ 2>/dev/null | tr -d / | paste -sd, -) — --brand takes a directory name under multi-brand/brands/; nothing was built or pushed"
+      [ -d "multi-brand/brands/$BRAND_ARG" ] || fail "unknown_brand brand=$BRAND_ARG known=$(known_brands) — --brand takes a directory name under multi-brand/brands/; nothing was built or pushed"
     else
       printf 'note=brand_unchecked (no multi-brand/brands/ dir)\n'
     fi

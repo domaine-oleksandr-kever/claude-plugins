@@ -16,7 +16,7 @@ fe builds on base and requires it. base supplies the Jira, Figma and doc readers
 review agents, the task workspace, the commit and review skills, the guards and the shared MCP servers
 ([plugins/base/README.md](../base/README.md)). base requires slim, so fe runs with slim too.
 
-Current release: **fe v0.12.1**.
+Current release: **fe v0.13.0**.
 
 ## Status
 
@@ -94,7 +94,7 @@ without it.
 |---|---|
 | `fe:theme-explorer` | read-only scout of the theme: which files, sections and snippets a change touches; the `profile` comes in its brief |
 | `fe:stt-drafter` | drafts Steps to Test into the workspace `steps-to-test.md` (sonnet); returns ESCALATE / LOOKUP, an answer, or the path + an unconfirmed list, never the text |
-| `fe:pr-body-drafter` | drafts the PR title and body into the workspace `pr-body.md`, and after the PR exists the Jira PR-link comment into `jira-comment.md` (`PR: <url> — <title>`, a short brief only on request, never a preview link) (haiku); returns ESCALATE, an answer, or the path, title, Summary and an unconfirmed list |
+| `fe:pr-body-drafter` | drafts the PR title and body into the workspace `pr-body.md`, and after the PR exists the Jira PR-link comment into `jira-comment.md` (`PR: <url> — <title>`, a short bulleted brief only on request, never a preview link) (haiku); returns ESCALATE, an answer, or the path, title, Summary and an unconfirmed list |
 
 ## References and scripts
 
@@ -121,14 +121,14 @@ session's `fe plugin root:` line). They cite base's files by their path under ba
 
 | Script | Run by | Does |
 |---|---|---|
-| `scripts/create-preview-theme.sh` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:ship` | builds and pushes an unpublished preview theme (`create`), re-pushes one (`refresh`), pins the session theme (`pin`). `create --duplicate-of <theme-id\|name> --store <store>` copies a theme on that store server-side, waits until `theme list` shows the copy ready, then pushes the branch code into it; `--brand <b>` (create, refresh) exports `BRAND=<b>` to the build and does nothing else |
+| `scripts/create-preview-theme.sh` | `/fe:preview-theme`, `/fe:create-pull-request`, `/fe:develop-feature-or-fix`, `/fe:qa-feature-or-fix`, `/fe:ship` | builds and pushes an unpublished preview theme (`create`), re-pushes one (`refresh`), pins the session theme (`pin`). `create --duplicate-of <theme-id\|name> --store <store>` copies a theme on that store server-side, waits until `theme list` shows the copy ready, then pushes the branch code into it; `--brand <b>` (create, refresh) exports `BRAND=<b>` to the build and does nothing else — with `multi-brand/brands/` in the repo it must name one of its dirs and a build without it is refused (`error=brand_required`) |
 | `scripts/session-theme.sh` | sourced by `create-preview-theme.sh`, run by `worktree-theme.sh` | the pin and un-pin grammar of `shopify.theme.toml` (`# fe:session-theme`, `# fe:superseded`) |
 | `scripts/worktree-theme.sh` | `/fe:preview-theme` in a worktree, `/fe:ship` | the Shopify half of a new worktree: the one-time un-pin and the dev-server line |
 | `scripts/theme-json.sh` | the skills, through the `store-access` section | reads and writes a theme's JSON files (`templates/*.json`, `config/settings_data.json`) with a read-back check; `locate <id>` finds which store holds a theme (the stores in `<base root>/scripts/qa-stores.cjs` plus every store the toml's `[environments.*]` blocks name, or `--stores a,b`, or `--store <one>`) |
 | `scripts/shopify-admin-gql.sh` | the skills, through the `store-access` section | one Admin GraphQL call against the project's store |
 | `scripts/project-profile.sh` | fe's hooks module, `worktree-theme.sh`, the doctor, the skills' fallback | prints `foundation`, `theme` or `none` |
 | `scripts/doctor.cjs` | `/fe-doctor`, or by hand | the static install checks (§ Doctor) |
-| `scripts/drafter-check.cjs` | `fe:stt-drafter`, `fe:pr-body-drafter`, `/fe:write-steps-to-test`, `/fe:create-pull-request` | checks a drafter's file (`file stt\|pr\|jira`: structure, the PR core skeleton, the Theme preview table by default — `--no-preview` honored only when the workspace `notes.md` records `preview-decision: no preview`, Summary sentence lengths, the Jira comment's PR line and brief size with no preview link, theme id or editor URL, no AI attribution) and its reply (`receipt stt\|pr\|jira`: one kind, no empty field) in code, printing counts and `fail` lines only — never the draft |
+| `scripts/drafter-check.cjs` | `fe:stt-drafter`, `fe:pr-body-drafter`, `/fe:write-steps-to-test`, `/fe:create-pull-request` | checks a drafter's file (`file stt\|pr\|jira`: structure, the PR core skeleton, the Theme preview table by default — `--no-preview` honored only when the workspace `notes.md` records `preview-decision: no preview`, Summary sentence lengths, the Jira comment's PR line and bulleted brief size with no preview link, theme id or editor URL, no AI attribution) and its reply (`receipt stt\|pr\|jira`: one kind, no empty field) in code, printing counts and `fail` lines only — never the draft |
 | `scripts/_shopify-common.sh` | sourced by the store scripts | the shared Shopify CLI and config helpers |
 
 `/fe:fix-breaking-changes` copies its own `skills/fix-breaking-changes/scripts/fix-breaking-changes.template.js`

@@ -87,10 +87,11 @@ The ticket files (Description, AC, TA), `notes.md` (`ceiling:`, `ta-divergence:`
 ## Jira PR-link comment (`mode: jira`)
 
 `<workspace>/jira-comment.md`, nothing else. Line 1, always: `PR: <pr_url> — <pr_title>`.
-`brief: yes` → 3–6 more lines, only the items that have real content, never an empty heading or a
-None/N/A: what was done (one sentence); deviations from the TA with their reason (`notes.md`
-`ta-divergence:` lines); known limits (`ceiling:` lines); open questions for QA/PM. `brief: no` →
-line 1 only. **Never** a preview theme link, a theme id or an editor URL — the preview theme is
+`brief: yes` → one blank line, then 3–6 bullets `- <item>`, one line each (no nested bullets, no
+headings: lines joined by a single newline merge into one paragraph in Jira), only the items that
+have real content, never an empty label or a None/N/A: what was done (one sentence); deviations
+from the TA with their reason (`notes.md` `ta-divergence:` lines); known limits (`ceiling:` lines);
+open questions for QA/PM. `brief: no` → line 1 only. **Never** a preview theme link, a theme id or an editor URL — the preview theme is
 deleted after merge and the link rots; never brief or notes text verbatim, never AI attribution.
 `Write` it, run `node <fe root>/scripts/drafter-check.cjs file jira <path>`, fix every `fail` line,
 then return `written:` + `unconfirmed:` + `report:` (no `title`/`pr_summary`). A jira brief carries

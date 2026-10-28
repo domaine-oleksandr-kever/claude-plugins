@@ -51,14 +51,15 @@ its brief says otherwise.
    pages) → run them against the **session theme** `notes.md` records as
    `session-theme: <id>`, refreshed to this branch's code
    (`<fe root>/scripts/create-preview-theme.sh refresh --theme <id>` — settings
-   preserved); no line recorded → build the `[ELC-…]` theme
+   preserved; plus `--brand <b>` when that line ends in `brand=<b>`); no line recorded → build the `[ELC-…]` theme
    (`<fe root>/scripts/create-preview-theme.sh create --name "<name>" --reuse`)
    and record it as `session-theme: <id>` + links in `notes.md`, so create
    happens at most once per work stream. Every run's output — `build_dirtied` (never restore
    unasked), an exit-0 run that is not reviewable (never book its 404s as branch defects), the
    workspace lines — per `<fe root>/references/preview-theme-errors.md` → Reading a
    create/refresh result. `error=refresh_unverifiable`, `error=reuse_unverifiable`,
-   `error=dev_theme_write_refused`, `error=theme_not_found` (the recorded theme was deleted, or lives on another store — the
+   `error=dev_theme_write_refused`, `error=brand_required` (no recorded brand — the developer
+   names the store's brand), `error=theme_not_found` (the recorded theme was deleted, or lives on another store — the
    `session-theme:` line's preview_url host names it),
    `error=dev_theme_not_found` (on a create: the toml's settings source was deleted) →
    ESCALATE; the pipeline never passes `--allow-unverified` or `--allow-dev-theme`, and never

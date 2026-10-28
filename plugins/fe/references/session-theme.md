@@ -61,6 +61,10 @@ push onto the shared dev theme (`error=dev_theme_write_refused`) unless a worksp
    crash can't orphan a real theme):
    `- <YYYY-MM-DD> session-theme: <id> (<name>) <preview_url>`
    (the derived `<name>` already starts with the `[<KEY>]` bracket — don't print it twice).
+   A `create` run with `--brand <b>` ends the bullet with ` brand=<b>`, and every later `refresh`
+   of that id passes `--brand <b>` (read it as `grep -E 'session-theme: <id>( |$)' notes.md | tail -1 | grep -oE 'brand=[A-Za-z0-9_-]+' | cut -d= -f2`); no `brand=`
+   on the line and the script answers `error=brand_required` → ask the developer which brand the
+   store sells, never guess.
    `create` returns a name plus `preview_url`/`editor_url`; `refresh` returns the URLs but no
    name; `pin` returns none of these. Write the parts you were actually handed and **drop the
    rest** — never invent a name or a URL.
